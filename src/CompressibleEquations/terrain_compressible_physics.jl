@@ -466,22 +466,33 @@ end
                                                ρu_stage, ρv_stage, ρw_stage)
 end
 
+# Promote a `substep_floattype` perturbation to the grid float type before it enters an
+# interpolation stencil, so the recovered primary prognostic is accumulated in `FT`.
+@inline promote_to_grid_precision(i, j, k, grid, ϕ) = @inbounds convert(eltype(grid), ϕ[i, j, k])
+
+# Convert the substepped contravariant momentum ρw̃ᵐ⁺ = ρw̃ᴸ + ρw̃′ back to Cartesian ρw.
+# The stage-base horizontal momenta cancel algebraically, since ℑ is linear:
+#
+#   ρw = (ρw̃ᴸ + ρw̃′) + slopeₓ ℑ(ρuᴸ + ρu′) + slopeᵧ ℑ(ρvᴸ + ρv′)
+#      = (ρwᴸ − slopeₓ ℑρuᴸ − slopeᵧ ℑρvᴸ) + ρw̃′ + slopeₓ ℑ(ρuᴸ + ρu′) + slopeᵧ ℑ(ρvᴸ + ρv′)
+#      = ρwᴸ + ρw̃′ + slopeₓ ℑρu′ + slopeᵧ ℑρv′
+#
+# with ρw̃ᴸ = `terrain_vertical_transport_momentum` of the same stage-entry momenta that
+# `_initialize_terrain_vertical_momentum_perturbation!` used as the base for ρw̃′. The base
+# ρw arrives as a value, not a field: `_recover_full_state!` aliases the stage-base momenta
+# with its own outputs, so no aliased field is in reach of a stencil here (issue #906).
 @inline function acoustic_recovered_vertical_momentum(i, j, k, grid,
                                                       dynamics::TerrainCompressibleDynamics,
-                                                      ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw̃′)
+                                                      ρwᴸ_ccf, ρu′, ρv′, ρw̃′)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
 
-    ρuᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, total_momentum, ρuᴸ, ρu′)
-    ρvᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, total_momentum, ρvᴸ, ρv′)
-    ρw̃_stage = transport_ρw(i, j, k, grid, dynamics,
-                                                           ρuᴸ, ρvᴸ, ρwᴸ)
-    @inbounds ρw̃ᵐ⁺ = ρw̃_stage + ρw̃′[i, j, k]
+    ρu′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, promote_to_grid_precision, ρu′)
+    ρv′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, promote_to_grid_precision, ρv′)
 
-    return ρw̃ᵐ⁺ + slope_x * ρuᶜᶜᶠ + slope_y * ρvᶜᶜᶠ
+    @inbounds return (ρwᴸ_ccf + ρw̃′[i, j, k] +
+                      slope_x * ρu′ᶜᶜᶠ + slope_y * ρv′ᶜᶜᶠ)
 end
-
-@inline total_momentum(i, j, k, grid, mᴸ, m′) = @inbounds mᴸ[i, j, k] + m′[i, j, k]
 
 function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubstepper,
                                                    model::TerrainCompressibleModel,

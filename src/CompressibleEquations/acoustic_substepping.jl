@@ -79,6 +79,9 @@ Fields:
   chemistry/TKE); the slow ρθ tendency uses the current RK predictor velocity instead, not this cache.
 - `slow_vertical_momentum_tendency` (Gˢρw, z-faces): advection+Coriolis+closure+forcing (PGF/buoyancy
   excluded — those are in the fast operator).
+- `vertical_momentum_rhs` (z-faces): explicit RHS of the (ρw)′ tridiagonal system. A separate field
+  rather than in-place in `momentum_perturbation.w`, because the implicit-vertical-damping term reads
+  (ρw)′ across neighbouring faces (issue \\#906).
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
 """
 struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
@@ -118,6 +121,9 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
     time_averaged_velocities :: TAV
 
     slow_vertical_momentum_tendency :: GT
+    # Explicit RHS of the (ρw)′ tridiag system. Kept out of `momentum_perturbation.w` so the
+    # implicit-damping stencil `∂z²(ρw)′` reads unwritten neighbours (issue #906).
+    vertical_momentum_rhs :: GT
     vertical_solver :: TS
 end
 
@@ -145,6 +151,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.previous_density_potential_temperature_perturbation),
                        adapt(to, a.time_averaged_velocities),
                        adapt(to, a.slow_vertical_momentum_tendency),
+                       adapt(to, a.vertical_momentum_rhs),
                        adapt(to, a.vertical_solver))
 
 #####
@@ -211,6 +218,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                                 w = ZFaceField(grid))
 
     slow_vertical_momentum_tendency = ZFaceField(grid)
+    vertical_momentum_rhs = ZFaceField(grid) # RHS stays FT, like the (ρw)′ solve target
 
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -240,6 +248,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               previous_density_potential_temperature_perturbation,
                               time_averaged_velocities,
                               slow_vertical_momentum_tendency,
+                              vertical_momentum_rhs,
                               vertical_solver)
 end
 
@@ -884,6 +893,10 @@ end
 # derivation (15). `dˢ⁻ = (1−ω) α Δz²` is the explicit half of the implicit vertical
 # damping (0 when damping off). Boundary rows: f[1] = 0 (matches b[1] = 1 ⇒ (ρw)′[1] = 0);
 # top face Nz+1 lives outside the solver (impenetrability w(top) = 0).
+#
+# `ρw′_rhs` MUST NOT alias `ρw′`: the damping term reads (ρw)′ at faces k−1, k, k+1, so writing
+# the RHS over (ρw)′ would let a thread read a neighbour another thread has already overwritten
+# (issue #906). The driver passes `substepper.vertical_momentum_rhs` for exactly that reason.
 @kernel function _build_vertical_rhs!(ρw′_rhs, ρ′★, ρθ′★, ρ′, ρθ′, ρw′,
                                       grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻, Πᴸ, γRᵐᴸ, g, dˢ⁻,
                                       fw, Gˢρw, sponge, apply_pressure_gradient)
@@ -1242,7 +1255,7 @@ end
         ρθᵐ⁺ = ρθᴸ[i, j, k] + ρθ′[i, j, k]
         ρuᵐ⁺ = ρuᴸ[i, j, k] + ρu′[i, j, k]
         ρvᵐ⁺ = ρvᴸ[i, j, k] + ρv′[i, j, k]
-        ρwᵐ⁺ = acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw′)
+        ρwᵐ⁺ = acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρwᴸ[i, j, k], ρu′, ρv′, ρw′)
 
         ρ[i, j, k]  = ρᵐ⁺
         ρθ[i, j, k] = ρθᵐ⁺
@@ -1253,8 +1266,8 @@ end
     end
 end
 
-@inline acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw′) =
-    @inbounds ρwᴸ[i, j, k] + ρw′[i, j, k]
+@inline acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρwᴸ_ccf, ρu′, ρv′, ρw′) =
+    @inbounds ρwᴸ_ccf + ρw′[i, j, k]
 
 #####
 ##### Section 12 — Substep loop driver
@@ -1455,7 +1468,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
         launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
                 _build_vertical_rhs!,
-                substepper.momentum_perturbation.w,
+                substepper.vertical_momentum_rhs,
                 substepper.density_predictor,
                 substepper.density_potential_temperature_predictor,
                 substepper.density_perturbation,
@@ -1472,7 +1485,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
         # `sponge` may add an implicit Rayleigh contribution on the
         # diagonal in a layer below the lid.
         solve!(substepper.momentum_perturbation.w, substepper.vertical_solver,
-               substepper.momentum_perturbation.w,
+               substepper.vertical_momentum_rhs,
                substepper.linearization_exner, substepper.linearization_potential_temperature,
                substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺,
                substepper.sponge)
@@ -1524,7 +1537,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # `ρᵡ`, and `model.momentum.*` are still the stage-entry Uᴸ values here
     # (the substep loop only touched substepper.* perturbation fields). The
     # recovery kernel reads them as Uᴸ AND writes the full state back to the
-    # same fields — per-thread read-before-write makes this aliasing safe
+    # same fields; per-thread read-before-write makes this aliasing safe
     # because all reads are local to the same grid point.
     ρᵡ = thermodynamic_density(model.formulation)
     launch!(arch, grid, :xyz, _recover_full_state!,
