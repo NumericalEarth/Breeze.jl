@@ -118,11 +118,23 @@ When `aerosol = nothing` (default), cloud droplet number uses the prescribed
 
 # Example
 
-```julia
+```jldoctest
 using Breeze
 
-# Tables auto-download on first use
+# Lookup tables download automatically on first use
 microphysics = PredictedParticlePropertiesMicrophysics()
+
+# output
+PredictedParticlePropertiesMicrophysics
+├── ρʷ: 1000.0 kg/m³
+├── qmin: 1.0e-14 kg/kg
+├── ice: IceProperties
+├── rain: RainProperties
+├── cloud: CloudDropletProperties
+├── process_rates: ProcessRateParameters
+├── negative_moisture_correction: SpeciesBorrowing(vertical_borrowing = nothing)
+├── aerosol: nothing (prescribed CCN)
+└── warm_rain_scheme: KhairoutdinovKogan2000
 ```
 
 # References

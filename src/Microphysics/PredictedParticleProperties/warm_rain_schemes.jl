@@ -32,3 +32,5 @@ parameterization. Cloud self-collection is zero in this scheme.
     equivalent to `SCF = SPF = 1` and `SPF_clr = 0`.
 """
 struct KhairoutdinovKogan2000 <: AbstractWarmRainScheme end
+
+Base.summary(::KhairoutdinovKogan2000) = "KhairoutdinovKogan2000"
