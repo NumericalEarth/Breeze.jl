@@ -169,13 +169,15 @@ end
 Oceananigans.Advection.update_advection_timestep!(a::FluxFormAdvection, timestepper::AcousticRungeKutta3, clock) =
     Oceananigans.Advection.update_advection_timestep!(a.z, timestepper, clock)
 
+# `ifelse` rather than branching: `clock.stage` is a traced number under Reactant, where a
+# ternary's boolean context cannot accept a `TracedRNumber{Bool}`.
 @inline advection_outer_timestep(ts, stage, Δt_increment) =
-    Δt_increment / (stage == 1 ? stage_increment(ts, Val(1)) :
-                    stage == 2 ? stage_increment(ts, Val(2)) : stage_increment(ts, Val(3)))
+    Δt_increment / ifelse(stage == 1, stage_increment(ts, Val(1)),
+                   ifelse(stage == 2, stage_increment(ts, Val(2)), stage_increment(ts, Val(3))))
 
 @inline advection_stage_timestep(ts, stage, Δt) =
-    Δt * (stage == 1 ? stage_fraction(ts, Val(1)) :
-          stage == 2 ? stage_fraction(ts, Val(2)) : stage_fraction(ts, Val(3)))
+    Δt * ifelse(stage == 1, stage_fraction(ts, Val(1)),
+         ifelse(stage == 2, stage_fraction(ts, Val(2)), stage_fraction(ts, Val(3))))
 
 #####
 ##### Per-stage substep wrapper
