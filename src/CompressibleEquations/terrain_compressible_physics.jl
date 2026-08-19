@@ -490,8 +490,7 @@ end
     ρu′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, promote_to_grid_precision, ρu′)
     ρv′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, promote_to_grid_precision, ρv′)
 
-    @inbounds return (ρwᴸ_ccf + ρw̃′[i, j, k] +
-                      slope_x * ρu′ᶜᶜᶠ + slope_y * ρv′ᶜᶜᶠ)
+    @inbounds return (ρwᴸ_ccf + ρw̃′[i, j, k] + slope_x * ρu′ᶜᶜᶠ + slope_y * ρv′ᶜᶜᶠ)
 end
 
 function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubstepper,
