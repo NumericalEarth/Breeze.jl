@@ -79,9 +79,7 @@ Fields:
   chemistry/TKE); the slow ρθ tendency uses the current RK predictor velocity instead, not this cache.
 - `slow_vertical_momentum_tendency` (Gˢρw, z-faces): advection+Coriolis+closure+forcing (PGF/buoyancy
   excluded — those are in the fast operator).
-- `vertical_momentum_rhs` (z-faces): explicit RHS of the (ρw)′ tridiagonal system. A separate field
-  rather than in-place in `momentum_perturbation.w`, because the implicit-vertical-damping term reads
-  (ρw)′ across neighbouring faces (issue \\#906).
+- `vertical_momentum_rhs` (z-faces): explicit RHS of the (ρw)′ tridiagonal system.
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
 """
 struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
