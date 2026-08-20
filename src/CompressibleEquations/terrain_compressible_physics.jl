@@ -466,10 +466,6 @@ end
                                                ρu_stage, ρv_stage, ρw_stage)
 end
 
-# Promote a `substep_floattype` perturbation to the grid float type before it enters an
-# interpolation stencil, so the recovered primary prognostic is accumulated in `FT`.
-@inline promote_to_grid_precision(i, j, k, grid, ϕ) = @inbounds convert(eltype(grid), ϕ[i, j, k])
-
 # Convert the substepped contravariant momentum ρw̃ᵐ⁺ = ρw̃ᴸ + ρw̃′ back to Cartesian ρw.
 # The stage-base horizontal momenta cancel algebraically, since ℑ is linear:
 #
@@ -478,17 +474,18 @@ end
 #      = ρwᴸ + ρw̃′ + slopeₓ ℑρu′ + slopeᵧ ℑρv′
 #
 # with ρw̃ᴸ = `terrain_vertical_transport_momentum` of the same stage-entry momenta that
-# `_initialize_terrain_vertical_momentum_perturbation!` used as the base for ρw̃′. The base
-# ρw arrives as a value, not a field: `_recover_full_state!` aliases the stage-base momenta
-# with its own outputs, so no aliased field is in reach of a stencil here (issue #906).
+# `_initialize_terrain_vertical_momentum_perturbation!` used as the base for ρw̃′. The base ρw
+# arrives as a value rather than a field because `_recover_full_state!` writes the same momentum
+# fields it reads as the stage base; keeping them out of this signature keeps them out of reach
+# of a stencil.
 @inline function acoustic_recovered_vertical_momentum(i, j, k, grid,
                                                       dynamics::TerrainCompressibleDynamics,
                                                       ρwᴸ_ccf, ρu′, ρv′, ρw̃′)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
 
-    ρu′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, promote_to_grid_precision, ρu′)
-    ρv′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, promote_to_grid_precision, ρv′)
+    ρu′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ρu′)
+    ρv′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ρv′)
 
     @inbounds return (ρwᴸ_ccf + ρw̃′[i, j, k] + slope_x * ρu′ᶜᶜᶠ + slope_y * ρv′ᶜᶜᶠ)
 end

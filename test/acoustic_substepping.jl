@@ -1053,10 +1053,10 @@ for arch in arches
         @test !any(isnan, parent(model.dynamics.dry_density))
     end
 
-    # Issue #906: `_build_vertical_rhs!` reads (ρw)′ at faces k−1, k, k+1 for the implicit
-    # vertical-damping term `∂z²(ρw)′`, so its destination must not be `momentum_perturbation.w`:
-    # a thread would otherwise read a neighbour another thread has already overwritten. The
-    # driver writes into the dedicated `vertical_momentum_rhs` field instead.
+    # `_build_vertical_rhs!` reads (ρw)′ at faces k−1, k, k+1 for the implicit vertical-damping
+    # term `∂z²(ρw)′`, so its destination must not be `momentum_perturbation.w`: a thread would
+    # otherwise read a neighbour another thread has already overwritten. The driver writes into
+    # the dedicated `vertical_solver_source_term` field instead.
     @testset "Vertical RHS build leaves (ρw)′ intact [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
@@ -1069,7 +1069,7 @@ for arch in arches
         set!(model; θ=300, u=0, ρ=model.dynamics.reference_state.density)
 
         substepper = model.timestepper.substepper
-        @test parent(substepper.vertical_momentum_rhs) !== parent(substepper.momentum_perturbation.w)
+        @test parent(substepper.vertical_solver_source_term) !== parent(substepper.momentum_perturbation.w)
 
         # `dˢ⁻ ≠ 0` is what makes the aliased stencil observable in the first place.
         ω = FT(substepper.forward_weight)
@@ -1083,7 +1083,7 @@ for arch in arches
         launch!(architecture(grid), grid,
                 KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
                 _build_vertical_rhs!,
-                substepper.vertical_momentum_rhs,
+                substepper.vertical_solver_source_term,
                 substepper.density_predictor,
                 substepper.density_potential_temperature_predictor,
                 substepper.density_perturbation,
@@ -1098,7 +1098,7 @@ for arch in arches
 
         # Building the RHS must not touch its own (ρw)′ input.
         @test interior(substepper.momentum_perturbation.w) == ρw′
-        @test !any(isnan, parent(substepper.vertical_momentum_rhs))
+        @test !any(isnan, parent(substepper.vertical_solver_source_term))
     end
 
     @testset "Direct DirectDivergenceDamping [$(arch), $(FT)]" for FT in as_test_float_types(arch)
