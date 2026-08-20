@@ -229,22 +229,19 @@ cache_advecting_state!(model) =
 
 cache_advecting_state!(::Nothing, ::Nothing, model) = nothing
 
-# One launch for both copies; the arrays differ in z extent, so loop over columns.
+# One launch for both copies, sized to the w array; ρ has one fewer z level, so its index
+# is clamped and the top ρ value is redundantly (but harmlessly) rewritten.
 @kernel function _cache_advecting_state!(w_cache, ρ_cache, w, ρ)
-    i, j = @index(Global, NTuple)
-    for k in axes(w_cache, 3)
-        @inbounds w_cache[i, j, k] = w[i, j, k]
-    end
-    for k in axes(ρ_cache, 3)
-        @inbounds ρ_cache[i, j, k] = ρ[i, j, k]
-    end
+    i, j, k = @index(Global, NTuple)
+    @inbounds w_cache[i, j, k] = w[i, j, k]
+    k′ = min(k, size(ρ_cache, 3))
+    @inbounds ρ_cache[i, j, k′] = ρ[i, j, k′]
 end
 
 function cache_advecting_state!(w_cache, ρ_cache, model)
     w = advecting_vertical_velocity(model.dynamics, model.velocities)
     ρ = dynamics_density(model.dynamics)
-    Nx, Ny, _ = size(parent(w_cache))
-    params = KernelParameters((Nx, Ny), (0, 0))
+    params = KernelParameters(size(parent(w_cache)), (0, 0, 0))
     launch!(architecture(model.grid), model.grid, params, _cache_advecting_state!,
             parent(w_cache), parent(ρ_cache), parent(w), parent(ρ))
     return nothing
