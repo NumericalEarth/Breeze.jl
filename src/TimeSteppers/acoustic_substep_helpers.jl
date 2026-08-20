@@ -243,8 +243,7 @@ advecting_state(model) =
     advecting_state(model.timestepper.substepper.advecting_vertical_velocity_cache,
                     model.timestepper.substepper.advecting_density_cache, model)
 
-advecting_state(::Nothing, ::Nothing, model) =
-    (advecting_vertical_velocity(model.dynamics, model.velocities), dynamics_density(model.dynamics))
+advecting_state(::Nothing, ::Nothing, model) = (advecting_vertical_velocity(model.dynamics, model.velocities), dynamics_density(model.dynamics))
 
 advecting_state(w_cache, ρ_cache, model) = (w_cache, ρ_cache)
 
