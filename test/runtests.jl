@@ -25,15 +25,19 @@ if filter_tests!(testsuite, args)
     end
 end
 
-if (Sys.isapple() || Sys.islinux()) && get(ENV, "GITHUB_ACTIONS", "false") == "true"
+if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     GC.gc(true); GC.gc(false); GC.gc(true)
-    # macOS and ubuntu runners have little memory (earlyoom kills workers on the ~13 GiB
-    # ubuntu machines — Malt.TerminatedWorkerException); set a more
+    # macOS runners have little memory compared to the other runners, let's set a more
     # conservative limit to memory usage before reciclying a worker, to avoid trashing
     # memory or out-of-memory errors.  We set the memory limit dynamically, based on the
     # currently available memory (with a ~20% margin), with a lower bound of 1700 MiB.
     max_rss_memory = max(1_700, round(Int, available_memory() / 2 ^ 20 / 2  * 0.8))
     ENV["JULIA_TEST_MAXRSS_MB"] = string(max_rss_memory)
+elseif Sys.islinux() && get(ENV, "GITHUB_ACTIONS", "false") == "true" && available_memory() < 20 * 2^30
+    # The small (~13 GiB) ubuntu runners run earlyoom, which SIGTERMs workers once several
+    # approach 4 GiB at once (Malt.TerminatedWorkerException). A LOW fixed cap makes workers
+    # recycle gracefully well before that; the large-memory GPU runners are excluded.
+    ENV["JULIA_TEST_MAXRSS_MB"] = "2500"
 end
 
 runtests(Breeze, args; testsuite)
