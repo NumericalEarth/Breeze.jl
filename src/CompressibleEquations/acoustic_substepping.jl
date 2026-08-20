@@ -80,6 +80,9 @@ Fields:
 - `slow_vertical_momentum_tendency` (Gˢρw, z-faces): advection+Coriolis+closure+forcing (PGF/buoyancy
   excluded — those are in the fast operator).
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
+- `advecting_vertical_velocity_cache`, `advecting_density_cache`: stage-entry advecting state
+  frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
+  adaptive-implicit advection.
 """
 struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC}
     substeps :: N
@@ -120,13 +123,8 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC}
     slow_vertical_momentum_tendency :: GT
     vertical_solver :: TS
 
-    # Stage-entry advecting state for the vertically-implicit advective remainder. The slow
-    # tendencies split fluxes of the stage-entry w and ρ, so the implicit half must size its
-    # coefficients from the same frozen state — not whatever the substep loop has since written
-    # (`_recover_full_state!` rewrites `dynamics.dry_density` before `implicit_substep!` runs).
-    # `nothing` unless an advection scheme needs the implicit solver.
-    advecting_vertical_velocity_cache :: WC
-    advecting_density_cache :: DC
+    advecting_vertical_velocity_cache :: WC  # stage-entry w for the implicit advective remainder
+    advecting_density_cache :: DC            # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =

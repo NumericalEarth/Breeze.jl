@@ -83,7 +83,7 @@ Shu, C.-W., & Osher, S. (1988). Efficient implementation of essentially non-osci
 function SSPRungeKutta3(grid, prognostic_fields;
                         dynamics = nothing,
                         implicit_solver::TI = nothing,
-                        cache_advecting_state = false,   # accepted for TimeStepper-call uniformity; no acoustic loop, nothing to cache
+                        cache_advecting_state = false,   # accepted for TimeStepper-call uniformity; unused
                         Gⁿ::TG = map(similar, prognostic_fields),
                         U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 

@@ -34,9 +34,8 @@ if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     max_rss_memory = max(1_700, round(Int, available_memory() / 2 ^ 20 / 2  * 0.8))
     ENV["JULIA_TEST_MAXRSS_MB"] = string(max_rss_memory)
 elseif Sys.islinux() && get(ENV, "GITHUB_ACTIONS", "false") == "true" && available_memory() < 20 * 2^30
-    # The small (~13 GiB) ubuntu runners run earlyoom, which SIGTERMs workers once several
-    # approach 4 GiB at once (Malt.TerminatedWorkerException). A LOW fixed cap makes workers
-    # recycle gracefully well before that; the large-memory GPU runners are excluded.
+    # The small (~13 GiB) ubuntu runners run earlyoom, which SIGTERMs workers nearing the
+    # memory cliff; a low cap recycles them gracefully first. Large GPU runners are excluded.
     ENV["JULIA_TEST_MAXRSS_MB"] = "2500"
 end
 

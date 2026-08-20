@@ -30,10 +30,9 @@ import Breeze.AtmosphereModels as AM
 
     aiva() = WENO(FT; time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
 
-    # The fraction of the vertical flux the split leaves explicit, s = min(1, cfl Δz / (|w| Δt)),
-    # evaluated from the velocity the split actually uses. `s ≡ 1` means the split is inert: an
-    # equality test in that regime pins the reduction to explicit advection and says nothing about
-    # the split. Every testset below states which regime it is in.
+    # The explicit fraction of the split, s = min(1, cfl Δz / (|w| Δt)). `s ≡ 1` means the
+    # split is inert, so equality tests in that regime say nothing about it; every testset
+    # below states which regime it is in.
     function minimum_explicit_fraction(grid, scheme, w, Δt)
         vertical = vertical_scheme(scheme)
         vertical isa AdaptiveImplicitVerticalAdvection || return one(FT)
@@ -237,11 +236,9 @@ import Breeze.AtmosphereModels as AM
         @test all(isfinite, Array(interior(flux_form_model.tracers.ρc)))
     end
 
-    # A smoke test, not a stability claim. Measured on this exact configuration, 200 steps of
-    # Δt = 10: explicit WENO5 survives to t = 2000 s with max|w| = 1.5235, momentum-AIVA with
-    # explicit ρθ survives with max|w| = 1.5408, and either variant with AIVA on ρθ throws a
-    # DomainError at t = 500–530 s (upstream AIVA on the thermodynamic variable, issue #897).
-    # The five steps below only assert that the path runs.
+    # A smoke test, not a stability claim: explicit WENO5 also survives this configuration.
+    # AIVA on ρθ throws a DomainError at t = 500–530 s (upstream, issue #897), so only
+    # momentum carries AIVA here.
     @testset "Acoustic substepper runs with AIVA on every acoustic prognostic" begin
         tall_grid = RectilinearGrid(default_arch; size=(8, 8, 32), halo=(5, 5, 5),
                                     x=(0, 4kilometers), y=(0, 4kilometers), z=(0, 2kilometers),
@@ -385,13 +382,9 @@ import Breeze.AtmosphereModels as AM
     end
 
     #####
-    ##### Vertically-implicit closure diffusion survives AIVA on the thermodynamic variable.
-    #####
-    ##### `implicit_substep!` folds the vertical-advection remainder and vertically-implicit
-    ##### closure diffusion of ρθ into one tridiagonal solve. Below the split threshold the
-    ##### advective remainder vanishes (s ≡ 1) and the solve must reduce to the diffusion the
-    ##### explicit twin gets — anything that changes the *variable* being solved for silently
-    ##### deletes it.
+    ##### Vertically-implicit closure diffusion survives AIVA on the thermodynamic variable:
+    ##### below the split threshold (s ≡ 1) the combined tridiagonal solve must reduce to the
+    ##### diffusion the explicit twin gets.
     #####
     @testset "Below threshold, AIVA does not disturb vertically-implicit diffusion" begin
         Nz, Lz = 64, 4kilometers

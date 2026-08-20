@@ -218,11 +218,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Freeze the advecting state the slow tendencies split — the advecting vertical velocity and its
-carrier density — so `implicit_substep!` sizes the withheld remainder from the same state. The
-target invariant is wᴸ = wᵉ + wⁱ with identical interpolation and stage time step: the full
-stage-entry wᴸ is cached (not the clipped wᵉ — in saturated cells |wᵉ| = cfl Δz / Δt and the
-withheld part cannot be recovered from it). A no-op when the substepper carries no cache.
+Freeze the stage-entry advecting velocity and carrier density so `implicit_substep!` sizes
+the withheld remainder from the state whose fluxes the slow tendencies split (invariant:
+wᴸ = wᵉ + wⁱ). The full wᴸ is cached, not the clipped wᵉ, which loses the remainder in
+saturated cells. A no-op when the substepper carries no cache.
 """
 cache_advecting_state!(model) =
     cache_advecting_state!(model.timestepper.substepper.advecting_vertical_velocity_cache,
@@ -236,9 +235,8 @@ function cache_advecting_state!(w_cache, ρ_cache, model)
     return nothing
 end
 
-# The advective coefficient state for the post-loop implicit solve: the frozen stage-entry
-# cache when advection needs it, the live fields otherwise (closure-only solves keep their
-# current behavior exactly).
+# Frozen stage-entry state when the cache exists; live fields otherwise (closure-only
+# solves keep their current behavior).
 advecting_state(model) =
     advecting_state(model.timestepper.substepper.advecting_vertical_velocity_cache,
                     model.timestepper.substepper.advecting_density_cache, model)
@@ -278,9 +276,7 @@ implicit_substep!(model, ::Nothing, Δt_stage) = nothing
 
 function implicit_substep!(model, implicit_solver, Δt_stage)
     # Momentum and the thermodynamic variable are coupling-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
-    # The advective coefficients use the frozen stage-entry (w, ρᵈ) — the state whose fluxes
-    # the slow tendencies split — so the two halves partition one transport (see
-    # `cache_advecting_state!`).
+    # Frozen stage-entry (w, ρᵈ), so the explicit and implicit halves partition one transport.
     w, ρᵈ = advecting_state(model)
     prognostic = prognostic_fields(model)
     momentum_advection = model.advection.momentum
