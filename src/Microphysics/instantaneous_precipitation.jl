@@ -9,6 +9,7 @@ using ..Thermodynamics:
 using ..AtmosphereModels:
     AtmosphereModels,
     dynamics_density,
+    kernel_time_step,
     total_density,
     standard_pressure
 
@@ -127,8 +128,10 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
 
     saturation_adjustment = microphysics.saturation_adjustment
 
+    Δt_FT = kernel_time_step(arch, grid, Δt)
+
     launch!(arch, grid, :xyz, _instantaneous_precipitation_update!,
-            model.dynamics, saturation_adjustment, constants, pˢᵗ, Δt, ρθˡⁱ, ρqᵛ, μ)
+            model.dynamics, saturation_adjustment, constants, pˢᵗ, Δt_FT, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior only; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
