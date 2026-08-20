@@ -8,13 +8,15 @@ using Breeze.Thermodynamics:
     ThermodynamicConstants,
     MoistureMassFractions,
     LiquidIceDensityState,
+    LiquidIcePotentialTemperatureState,
+    StaticEnergyState,
     temperature,
     with_temperature,
     mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity
 
-using Breeze.Microphysics: SaturationAdjustment, adjust_thermodynamic_state, WarmPhaseEquilibrium
+using Breeze.Microphysics: SaturationAdjustment, adjust_state, adjust_thermodynamic_state, WarmPhaseEquilibrium
 using Oceananigans.TimeSteppers: update_state!
 
 # Regression tests for the compressible θˡⁱ density-based thermodynamic state
@@ -71,6 +73,15 @@ using Oceananigans.TimeSteppers: update_state!
         𝒰dry = adjust_thermodynamic_state(
             LiquidIceDensityState(θ₀, MoistureMassFractions(FT(0.002)), pˢᵗ, ρ), sa, constants)
         @test 𝒰dry.moisture_mass_fractions.liquid == 0
+    end
+
+    # NumericalEarth/Breeze.jl#859: the reference-pressure `adjust_state` must not accept the
+    # density-closed state, which has no `reference_pressure`.
+    @testset "the reference-pressure adjustment path excludes the density state" begin
+        argument_types(𝒮) = Tuple{𝒮, FT, typeof(constants), WarmPhaseEquilibrium}
+        @test !hasmethod(adjust_state, argument_types(LiquidIceDensityState))
+        @test hasmethod(adjust_state, argument_types(LiquidIcePotentialTemperatureState))
+        @test hasmethod(adjust_state, argument_types(StaticEnergyState))
     end
 
     @testset "fixes the κ·ΔL temperature inconsistency" begin
