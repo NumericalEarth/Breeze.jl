@@ -1,7 +1,7 @@
 using Oceananigans: ReactantState, initialize!
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!
 using Breeze.AtmosphereModels: AtmosphereModels
-using Breeze.TimeSteppers: SSPRungeKutta3, AcousticRungeKutta3
+using Breeze.TimeSteppers: SSPRungeKutta3, AcousticRungeKutta3, CompressibleAcousticModel
 using Breeze.CompressibleEquations: CompressibleDynamics
 
 function OceananigansTimeSteppers.first_time_step!(model::AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}, Δt)
@@ -17,5 +17,4 @@ end
 
 # Reactant initializes through `first_time_step!`, and the eager guard branches on traced
 # clock fields; mirrors OceananigansReactantExt's no-ops for the upstream steppers.
-OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:ReactantState, <:AcousticRungeKutta3},
-                                                        Δt, callbacks) = nothing
+OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::CompressibleAcousticModel{<:ReactantState}, Δt, callbacks) = nothing

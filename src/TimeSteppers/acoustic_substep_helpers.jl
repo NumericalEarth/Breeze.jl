@@ -2,7 +2,7 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields, architecture
 using Oceananigans.Advection: needs_implicit_solver
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: launch!, KernelParameters
 
 using Oceananigans.TimeSteppers: implicit_step!
 
@@ -229,9 +229,24 @@ cache_advecting_state!(model) =
 
 cache_advecting_state!(::Nothing, ::Nothing, model) = nothing
 
+# One launch for both copies; the arrays differ in z extent, so loop over columns.
+@kernel function _cache_advecting_state!(w_cache, ρ_cache, w, ρ)
+    i, j = @index(Global, NTuple)
+    for k in axes(w_cache, 3)
+        @inbounds w_cache[i, j, k] = w[i, j, k]
+    end
+    for k in axes(ρ_cache, 3)
+        @inbounds ρ_cache[i, j, k] = ρ[i, j, k]
+    end
+end
+
 function cache_advecting_state!(w_cache, ρ_cache, model)
-    parent(w_cache) .= parent(advecting_vertical_velocity(model.dynamics, model.velocities))
-    parent(ρ_cache) .= parent(dynamics_density(model.dynamics))
+    w = advecting_vertical_velocity(model.dynamics, model.velocities)
+    ρ = dynamics_density(model.dynamics)
+    Nx, Ny, _ = size(parent(w_cache))
+    params = KernelParameters((Nx, Ny), (0, 0))
+    launch!(architecture(model.grid), model.grid, params, _cache_advecting_state!,
+            parent(w_cache), parent(ρ_cache), parent(w), parent(ρ))
     return nothing
 end
 

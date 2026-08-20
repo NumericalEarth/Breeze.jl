@@ -115,6 +115,10 @@ end
 ##### Adaptive-implicit vertical advection split time step
 #####
 
+# An `AtmosphereModel` stepped by `AcousticRungeKutta3`; the free parameter is the
+# architecture, so `BreezeReactantExt` can specialize on `{<:ReactantState}`.
+const CompressibleAcousticModel{Arc} = AtmosphereModel{<:CompressibleDynamics, <:Any, Arc, <:AcousticRungeKutta3}
+
 # Stage fractions, and the increment each stage adds to the clock. `ifelse` rather than
 # branching: `clock.stage` is traced under Reactant.
 @inline stage_fraction(ts, stage) = ifelse(stage == 1, ts.β₁, ifelse(stage == 2, ts.β₂, ts.β₃))
@@ -230,7 +234,7 @@ with the increment a completed third stage leaves, ``(1 - β₂) Δt`` — what
 `update_advection_timestep!` inverts at stage 1. `PerturbationAdvection` open boundaries read
 the same field.
 """
-function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticRungeKutta3}, Δt, callbacks)
+function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::CompressibleAcousticModel, Δt, callbacks)
     clock = model.clock
     if clock.iteration == 0 || !isfinite(clock.last_stage_Δt)
         clock.last_Δt = Δt
@@ -247,7 +251,7 @@ $(TYPEDSIGNATURES)
 Step forward `model` one time step `Δt` with Wicker–Skamarock RK3 and
 linearized acoustic substepping.
 """
-function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticRungeKutta3}, Δt; callbacks=[])
+function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, Δt; callbacks=[])
 
     maybe_prepare_first_time_step!(model, Δt, callbacks)
 
