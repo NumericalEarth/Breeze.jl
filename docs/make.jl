@@ -174,7 +174,7 @@ makedocs(
     ;
     modules,
     sitename = "Breeze",
-    plugins = [bib, CodeBlocks()],
+    plugins = [bib, CodeBlocks(; line_counter=:named)],
     format = Documenter.HTML(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB
