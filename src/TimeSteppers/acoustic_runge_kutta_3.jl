@@ -132,8 +132,7 @@ Stage 1 of step ``n`` is written before ``Δtₙ`` is known and deliberately use
 rewriting the split at stage entry would desynchronize it from tendencies frozen against the
 earlier value. The cost is confined to CFL targeting on one stage when ``Δt`` changes.
 """
-@inline function Oceananigans.Advection.update_advection_timestep!(a::AdaptiveImplicitVerticalAdvection,
-                                                                   timestepper::AcousticRungeKutta3, clock)
+@inline function Oceananigans.Advection.update_advection_timestep!(a::AdaptiveImplicitVerticalAdvection, timestepper::AcousticRungeKutta3, clock)
     td = OceananigansTimeSteppers.time_discretization(a)
 
     # `clock.stage` names the stage about to run; recover the outer Δt from the completed
