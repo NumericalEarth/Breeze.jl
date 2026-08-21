@@ -1,7 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields, architecture
-using Oceananigans.Advection: needs_implicit_solver
 using Oceananigans.Utils: launch!
 
 using Oceananigans.TimeSteppers: implicit_step!
@@ -17,6 +16,8 @@ using Breeze.AtmosphereModels:
     thermodynamic_density_name,
     transport_velocities,
     field_advection_scheme,
+    closure_scalar_index,
+    dynamics_prognostic_fields,
     implicit_step_advection,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
@@ -155,9 +156,9 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Update non-acoustic scalar fields (moisture, tracers) using the given
-kernel. Iterates over prognostic fields, skipping the first 5
-(``ρ, ρu, ρv, ρw, ρθ``) which are handled by the acoustic substep loop.
+Update non-acoustic scalar fields (moisture, microphysics, tracers) using the given kernel.
+Iterates over prognostic fields, skipping the ones the acoustic substep loop advances
+(see `acoustic_prognostic_names`).
 """
 function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     grid = model.grid
@@ -166,7 +167,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     Gⁿ = model.timestepper.Gⁿ
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
-    n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ are advanced inside the substep loop
+    acoustic_names = acoustic_prognostic_names(model)
 
     # Water species and tracers advect as mass fractions of the total density ρ = ρᵈ + Σρˣ
     # (see `scalar_tendency`), so the implicit solve is weighted with the same density. The
@@ -176,15 +177,17 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     ρ = total_density(model.dynamics)
     velocities = transport_velocities(model)
 
-    for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        i <= n_acoustic && continue
+    for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
+        name ∈ acoustic_names && continue
 
         launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
 
-        field_index = Val(i - n_acoustic)
-        advection = field_advection_scheme(model.advection, names[i])
+        field_index = closure_scalar_index(model, name)
+        advection = field_advection_scheme(model.advection, name)
 
-        if needs_implicit_solver(advection)
+        # Guarded on the solver rather than on `needs_implicit_solver(advection)`; see the note in
+        # ssp_runge_kutta_3.jl for why that predicate would drop the mass-flux weighting.
+        if !isnothing(model.timestepper.implicit_solver)
             implicit_step!(u,
                            model.timestepper.implicit_solver,
                            model.closure,
@@ -193,23 +196,25 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
                            model.clock,
                            fields(model),
                            Δt_implicit,
-                           advection,
+                           implicit_step_advection(advection, name),
                            velocities,
                            ρ)
-        else
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           Δt_implicit)
         end
     end
 
     return nothing
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+The prognostic fields the acoustic substep loop advances — the dynamics-specific prognostics
+(the compressible dry density), momentum and the thermodynamic variable — and which
+`scalar_substep!` therefore skips.
+"""
+acoustic_prognostic_names(model) = tuple(keys(dynamics_prognostic_fields(model.dynamics))...,
+                                         keys(model.momentum)...,
+                                         thermodynamic_density_name(model.formulation))
 
 #####
 ##### Implicit vertical solve for the acoustic prognostics
@@ -272,11 +277,11 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                    implicit_solver,
                    model.closure,
                    model.closure_fields,
-                   Val(1),   # the thermodynamic variable leads the closure's scalar names (see `with_tracers`)
+                   closure_scalar_index(model, θ_name),
                    model.clock,
                    fields(model),
                    Δt_stage,
-                   θ_advection,
+                   implicit_step_advection(θ_advection, θ_name),
                    slow_thermodynamic_velocities(model),
                    ρᵈ)
 

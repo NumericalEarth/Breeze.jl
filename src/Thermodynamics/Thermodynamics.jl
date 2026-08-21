@@ -19,7 +19,7 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        surface_density,
        temperature_from_potential_temperature, potential_temperature_from_temperature,
        temperature, with_temperature, with_moisture,
-       PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
+       PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface, DrySurface,
        # Phase equilibrium types
        AbstractPhaseEquilibrium, WarmPhaseEquilibrium, MixedPhaseEquilibrium,
        equilibrated_surface
