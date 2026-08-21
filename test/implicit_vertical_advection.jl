@@ -278,14 +278,14 @@ import Breeze.AtmosphereModels as AM
         # No adaptive-implicit scheme ⇒ no cache is allocated and closure-only solves read live state.
         explicit_model = AtmosphereModel(cache_grid; dynamics=cache_dynamics(), timestepper=:AcousticRungeKutta3,
                                          momentum_advection=WENO(FT), scalar_advection=(; ρθ=WENO(FT)))
-        @test explicit_model.timestepper.substepper.advecting_vertical_velocity_cache === nothing
-        @test explicit_model.timestepper.substepper.advecting_density_cache === nothing
+        @test explicit_model.timestepper.substepper.vertical_velocity_cache === nothing
+        @test explicit_model.timestepper.substepper.density_cache === nothing
 
         adaptive_model = AtmosphereModel(cache_grid; dynamics=cache_dynamics(), timestepper=:AcousticRungeKutta3,
                                          momentum_advection=aiva(), scalar_advection=(; ρθ=WENO(FT)))
         substepper = adaptive_model.timestepper.substepper
-        @test substepper.advecting_vertical_velocity_cache isa Field
-        @test substepper.advecting_density_cache isa Field
+        @test substepper.vertical_velocity_cache isa Field
+        @test substepper.density_cache isa Field
 
         p₀, θ₀, pˢᵗ = 101325.0, 300.0, 100000.0
         set!(adaptive_model; ρ=(x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants), θ=θ₀, u=10)
@@ -635,7 +635,7 @@ import Breeze.AtmosphereModels as AM
         observed = NamedTuple[]
         function record_transport(m)
             push!(observed, (live = Array(interior(AM.transport_velocities(m).w)),
-                             cache = Array(interior(pair_substepper.transport_vertical_velocity_cache)),
+                             cache = Array(interior(pair_substepper.time_averaged_vertical_velocity_cache)),
                              split_Δt = time_discretization(vertical_scheme(m.advection.ρc)).Δt[],
                              Gρc = maximum(abs, Array(interior(m.timestepper.Gⁿ.ρc)))))
             return nothing

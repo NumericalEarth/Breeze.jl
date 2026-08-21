@@ -163,7 +163,7 @@ tendency computation the stepper issues, once per stage. A no-op when the subste
 cache — without adaptive-implicit advection there is no split to pair.
 """
 cache_transport_velocity!(model) =
-    cache_transport_velocity!(model.timestepper.substepper.transport_vertical_velocity_cache, model)
+    cache_transport_velocity!(model.timestepper.substepper.time_averaged_vertical_velocity_cache, model)
 
 cache_transport_velocity!(::Nothing, model) = nothing
 
@@ -181,7 +181,7 @@ implicit vertical advection the horizontal fluxes stay fully explicit, so the im
 reads no horizontal velocity.
 """
 tendency_transport_velocities(model) =
-    tendency_transport_velocities(model.timestepper.substepper.transport_vertical_velocity_cache, model)
+    tendency_transport_velocities(model.timestepper.substepper.time_averaged_vertical_velocity_cache, model)
 
 tendency_transport_velocities(::Nothing, model) = transport_velocities(model)
 
@@ -260,8 +260,8 @@ wᴸ = wᵉ + wⁱ). The full wᴸ is cached, not the clipped wᵉ, which loses 
 saturated cells. A no-op when the substepper carries no cache.
 """
 cache_advecting_state!(model) =
-    cache_advecting_state!(model.timestepper.substepper.advecting_vertical_velocity_cache,
-                           model.timestepper.substepper.advecting_density_cache, model)
+    cache_advecting_state!(model.timestepper.substepper.vertical_velocity_cache,
+                           model.timestepper.substepper.density_cache, model)
 
 cache_advecting_state!(::Nothing, ::Nothing, model) = nothing
 
@@ -286,8 +286,8 @@ end
 # Frozen stage-entry state when the cache exists; live fields otherwise (closure-only
 # solves keep their current behavior).
 advecting_state(model) =
-    advecting_state(model.timestepper.substepper.advecting_vertical_velocity_cache,
-                    model.timestepper.substepper.advecting_density_cache, model)
+    advecting_state(model.timestepper.substepper.vertical_velocity_cache,
+                    model.timestepper.substepper.density_cache, model)
 
 advecting_state(::Nothing, ::Nothing, model) = (advecting_vertical_velocity(model.dynamics, model.velocities), dynamics_density(model.dynamics))
 

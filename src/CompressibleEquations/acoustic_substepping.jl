@@ -80,12 +80,12 @@ Fields:
 - `slow_vertical_momentum_tendency` (Gˢρw, z-faces): advection+Coriolis+closure+forcing (PGF/buoyancy
   excluded — those are in the fast operator).
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
-- `advecting_vertical_velocity_cache`, `advecting_density_cache`: stage-entry advecting state
-  frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
+- `vertical_velocity_cache`, `density_cache`: the stage-entry predictor velocity and its carrier
+  dry density, frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
   adaptive-implicit advection.
-- `transport_vertical_velocity_cache`: the transport velocity the moisture and tracer tendencies
-  were built with, frozen for `scalar_substep!` (see `cache_transport_velocity!`); `nothing`
-  without adaptive-implicit advection.
+- `time_averaged_vertical_velocity_cache`: the acoustic-mean transport velocity the moisture and
+  tracer tendencies were built with, frozen for `scalar_substep!` (see
+  `cache_transport_velocity!`); `nothing` without adaptive-implicit advection.
 """
 struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     substeps :: N
@@ -126,12 +126,9 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     slow_vertical_momentum_tendency :: GT
     vertical_solver :: TS
 
-    advecting_vertical_velocity_cache :: WC  # stage-entry w for the implicit advective remainder
-    advecting_density_cache :: DC            # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
-
-    # The time-averaged transport velocity that the moisture and tracer tendencies in `Gⁿ` were
-    # built with, frozen before the next acoustic loop overwrites `time_averaged_velocities`.
-    transport_vertical_velocity_cache :: TWC
+    vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
+    density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
+    time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w, split by moisture and tracers
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -159,9 +156,9 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.time_averaged_velocities),
                        adapt(to, a.slow_vertical_momentum_tendency),
                        adapt(to, a.vertical_solver),
-                       adapt(to, a.advecting_vertical_velocity_cache),
-                       adapt(to, a.advecting_density_cache),
-                       adapt(to, a.transport_vertical_velocity_cache))
+                       adapt(to, a.vertical_velocity_cache),
+                       adapt(to, a.density_cache),
+                       adapt(to, a.time_averaged_vertical_velocity_cache))
 
 #####
 ##### Section 2 — Constructor
@@ -239,9 +236,9 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                                                scratch,
                                                tridiagonal_direction = ZDirection())
 
-    advecting_vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
-    advecting_density_cache = cache_advecting_state ? CenterField(grid) : nothing
-    transport_vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
+    vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
+    density_cache = cache_advecting_state ? CenterField(grid) : nothing
+    time_averaged_vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
 
     return AcousticSubstepper(Ns, acoustic_cfl, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
@@ -262,9 +259,9 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               time_averaged_velocities,
                               slow_vertical_momentum_tendency,
                               vertical_solver,
-                              advecting_vertical_velocity_cache,
-                              advecting_density_cache,
-                              transport_vertical_velocity_cache)
+                              vertical_velocity_cache,
+                              density_cache,
+                              time_averaged_vertical_velocity_cache)
 end
 
 #####
