@@ -155,6 +155,41 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Freeze the time-averaged transport velocity that `update_state!` just built the moisture and
+tracer tendencies from. The next acoustic loop resets and rebuilds `time_averaged_velocities`,
+so `scalar_substep!` cannot read it live: the implicit remainder has to split the same velocity
+the explicit fraction in `Gⁿ` was scaled by (invariant: ⟨w⟩ = wᵉ + wⁱ). Called after every
+tendency computation the stepper issues, once per stage. A no-op when the substepper carries no
+cache — without adaptive-implicit advection there is no split to pair.
+"""
+cache_transport_velocity!(model) =
+    cache_transport_velocity!(model.timestepper.substepper.transport_vertical_velocity_cache, model)
+
+cache_transport_velocity!(::Nothing, model) = nothing
+
+function cache_transport_velocity!(w_cache, model)
+    copyto!(parent(w_cache), parent(transport_velocities(model).w))
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+The transport velocities the scalar tendencies in `Gⁿ` were built with: the frozen vertical
+component when the cache exists, the live field otherwise. Only `w` is frozen — under adaptive
+implicit vertical advection the horizontal fluxes stay fully explicit, so the implicit solve
+reads no horizontal velocity.
+"""
+tendency_transport_velocities(model) =
+    tendency_transport_velocities(model.timestepper.substepper.transport_vertical_velocity_cache, model)
+
+tendency_transport_velocities(::Nothing, model) = transport_velocities(model)
+
+tendency_transport_velocities(w_cache, model) = merge(transport_velocities(model), (; w = w_cache))
+
+"""
+$(TYPEDSIGNATURES)
+
 Update non-acoustic scalar fields (moisture, tracers) using the given
 kernel. Iterates over prognostic fields, skipping the first 5
 (``ρ, ρu, ρv, ρw, ρθ``) which are handled by the acoustic substep loop.
@@ -169,12 +204,13 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ are advanced inside the substep loop
 
     # Water species and tracers advect as mass fractions of the total density ρ = ρᵈ + Σρˣ
-    # (see `scalar_tendency`), so the implicit solve is weighted with the same density. The
-    # velocities are the time-averaged transport velocities that the explicit scalar tendencies
-    # (Gⁿ) were built with — adaptive implicit vertical advection must use the same `w` so the
-    # explicit/implicit velocity split is consistent.
+    # (see `scalar_tendency`), so the implicit solve is weighted with the same density; only
+    # `update_state!` refreshes `total_density`, so it still holds the value the tendencies were
+    # built with. The vertical velocity is frozen for the same reason (`cache_transport_velocity!`):
+    # the acoustic loop has already overwritten the live time-averaged field with this stage's
+    # average, while `Gⁿ` was scaled by the previous one.
     ρ = total_density(model.dynamics)
-    velocities = transport_velocities(model)
+    velocities = tendency_transport_velocities(model)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
         i <= n_acoustic && continue

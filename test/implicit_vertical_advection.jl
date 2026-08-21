@@ -594,6 +594,83 @@ import Breeze.AtmosphereModels as AM
         @test all(t -> isfinite(t[2]) && t[2] > 0, after_restart)
     end
 
+    #####
+    ##### The explicit and implicit halves of a scalar update split ONE velocity.
+    #####
+    ##### `update_state!` builds the moisture and tracer tendencies from the substepper's
+    ##### time-averaged transport velocity, and the next acoustic loop resets and rebuilds that
+    ##### field before `scalar_substep!` applies them. The implicit remainder therefore reads the
+    ##### copy `cache_transport_velocity!` froze, not the live field — otherwise the two halves
+    ##### split velocities from consecutive acoustic loops and no longer add back to one
+    ##### transport operator.
+    #####
+    @testset "Tracer split pairs one transport velocity across the acoustic loop" begin
+        pair_grid = RectilinearGrid(default_arch; size=(8, 8, 8), halo=(5, 5, 5),
+                                    x=(0, 4kilometers), y=(0, 4kilometers), z=(0, 4kilometers),
+                                    topology=(Periodic, Periodic, Bounded))
+
+        # A tiny explicit-CFL target puts the split in its active regime for a gentle, stable
+        # updraft; clipping at cfl = 0.5 would take a violent one.
+        split_aiva() = WENO(FT; time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=FT(1//100)))
+
+        pair_model = AtmosphereModel(pair_grid;
+                                     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                                                     reference_potential_temperature=300),
+                                     timestepper = :AcousticRungeKutta3,
+                                     tracers = :ρc,
+                                     momentum_advection = split_aiva(),
+                                     scalar_advection = (; ρθ=split_aiva(), ρc=split_aiva()))
+
+        # An updraft vanishing at both lids (a uniform `w` fights impenetrability and wrecks the
+        # state), and a vertically varying tracer so vertical transport has something to act on.
+        set!(pair_model; ρ=pair_model.dynamics.reference_state.density, θ=300,
+             w=(x, y, z) -> sinpi(z / 4kilometers),
+             ρc=(x, y, z) -> 1 + z / 4kilometers)
+
+        pair_substepper = pair_model.timestepper.substepper
+
+        # `TendencyCallsite` fires at the end of `compute_tendencies!`: `live` is the velocity the
+        # tendencies were just built from, and `cache` the copy frozen after the *previous*
+        # tendency computation — the one the stage in between actually split.
+        observed = NamedTuple[]
+        function record_transport(m)
+            push!(observed, (live = Array(interior(AM.transport_velocities(m).w)),
+                             cache = Array(interior(pair_substepper.transport_vertical_velocity_cache)),
+                             split_Δt = time_discretization(vertical_scheme(m.advection.ρc)).Δt[],
+                             Gρc = maximum(abs, Array(interior(m.timestepper.Gⁿ.ρc)))))
+            return nothing
+        end
+        transport_callbacks = [Callback(record_transport, IterationInterval(1); callsite=TendencyCallsite())]
+
+        for _ in 1:2
+            time_step!(pair_model, FT(30); callbacks=transport_callbacks)
+        end
+
+        # Cold start: `maybe_prepare_first_time_step!` seeds the transport velocity *before* the
+        # first tendency computation, so stage 1 of step 1 transports tracers with a physical
+        # velocity instead of the substepper's zero-initialized field.
+        @test maximum(abs, first(observed).live) > 0
+        @test first(observed).Gρc > 0
+
+        # The pairing invariant: the velocity a stage's implicit remainder splits is exactly the
+        # one the explicit fraction in its `Gⁿ` was scaled by.
+        for k in 2:length(observed)
+            @test observed[k].cache == observed[k-1].live
+        end
+
+        # Not vacuous: the live field really is rebuilt between stages, so splitting it live
+        # would have used a velocity that `Gⁿ` was never built with.
+        @test any(observed[k].live != observed[k-1].live for k in 2:length(observed))
+
+        # And the split is active, so the pairing is load-bearing: most of the vertical transport
+        # goes through the implicit remainder at the tightest stage.
+        Δz_pair = 4kilometers / 8
+        pair_cfl = time_discretization(vertical_scheme(pair_model.advection.ρc)).cfl
+        fractions = [min(one(FT), pair_cfl * Δz_pair / (maximum(abs, o.live) * o.split_Δt))
+                     for o in observed if maximum(abs, o.live) > 0]
+        @test minimum(fractions) < 1
+    end
+
     @testset "Advective timescale drops the vertical term under AIVA" begin
         Δx = 100 / 4
         Δz = 1000 / 16

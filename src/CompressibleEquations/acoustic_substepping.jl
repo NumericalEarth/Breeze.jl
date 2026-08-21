@@ -83,8 +83,11 @@ Fields:
 - `advecting_vertical_velocity_cache`, `advecting_density_cache`: stage-entry advecting state
   frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
   adaptive-implicit advection.
+- `transport_vertical_velocity_cache`: the transport velocity the moisture and tracer tendencies
+  were built with, frozen for `scalar_substep!` (see `cache_transport_velocity!`); `nothing`
+  without adaptive-implicit advection.
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
@@ -125,6 +128,10 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC}
 
     advecting_vertical_velocity_cache :: WC  # stage-entry w for the implicit advective remainder
     advecting_density_cache :: DC            # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
+
+    # The time-averaged transport velocity that the moisture and tracer tendencies in `Gⁿ` were
+    # built with, frozen before the next acoustic loop overwrites `time_averaged_velocities`.
+    transport_vertical_velocity_cache :: TWC
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -153,7 +160,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.slow_vertical_momentum_tendency),
                        adapt(to, a.vertical_solver),
                        adapt(to, a.advecting_vertical_velocity_cache),
-                       adapt(to, a.advecting_density_cache))
+                       adapt(to, a.advecting_density_cache),
+                       adapt(to, a.transport_vertical_velocity_cache))
 
 #####
 ##### Section 2 — Constructor
@@ -233,6 +241,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     advecting_vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
     advecting_density_cache = cache_advecting_state ? CenterField(grid) : nothing
+    transport_vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
 
     return AcousticSubstepper(Ns, acoustic_cfl, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
@@ -254,7 +263,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               slow_vertical_momentum_tendency,
                               vertical_solver,
                               advecting_vertical_velocity_cache,
-                              advecting_density_cache)
+                              advecting_density_cache,
+                              transport_vertical_velocity_cache)
 end
 
 #####
@@ -275,11 +285,24 @@ After this call:
 """
 function freeze_linearization_state!(substepper::AcousticSubstepper, model)
     refresh_linearization_basic_state!(substepper, model)
+    seed_time_averaged_velocities!(substepper, model)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Seed the time-averaged transport velocity with the outer-step-start velocities: stage 1 has no
+prior acoustic loop in this outer step to average over. Called at outer-step start by
+[`freeze_linearization_state!`](@ref), and by `maybe_prepare_first_time_step!` *before* the
+first tendency computation, so the first stage splits a physical velocity instead of the
+constructor's zeros.
+"""
+function seed_time_averaged_velocities!(substepper::AcousticSubstepper, model)
     velocities = outer_step_start_transport_velocities(model)
 
-    # Seed the time-averaged velocity with the outer-step-start velocities (full
-    # parent arrays, halos included). The three staggered components have
-    # different array sizes, so each is copied over its own bounds.
+    # Full parent arrays, halos included. The three staggered components have different array
+    # sizes, so each is copied over its own bounds.
     for (avg, src) in zip(substepper.time_averaged_velocities, velocities)
         copyto!(parent(avg), parent(src))
     end

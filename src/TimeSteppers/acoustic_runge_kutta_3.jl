@@ -21,7 +21,8 @@ using Breeze.CompressibleEquations:
     stage_fractions,
     acoustic_rk3_substep_loop!,
     prepare_acoustic_cache!,
-    freeze_linearization_state!
+    freeze_linearization_state!,
+    seed_time_averaged_velocities!
 
 """
 $(TYPEDEF)
@@ -232,6 +233,9 @@ Seed `clock.last_stage_Δt` before the first step (or for a clock carrying a non
 with the increment a completed third stage leaves, ``(1 - β₂) Δt`` — what
 `update_advection_timestep!` inverts at stage 1. `PerturbationAdvection` open boundaries read
 the same field.
+
+Also seed the substepper's time-averaged transport velocity before the first tendencies are
+built, then freeze the copy that the first stage's implicit remainder splits.
 """
 function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::CompressibleAcousticModel, Δt, callbacks)
     clock = model.clock
@@ -239,7 +243,14 @@ function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::Compress
         clock.last_Δt = Δt
         clock.last_stage_Δt = stage_increment(model.timestepper, 3) * Δt
         reconcile_state!(model)
+
+        # Seed the transport velocity *before* the tendencies below: `set!` has already
+        # diagnosed `model.velocities` from the initial momentum, and no acoustic loop has run
+        # to average over. Without this, stage 1 of step 1 would build its scalar tendencies
+        # from the constructor's zeros and transport no tracers vertically.
+        seed_time_averaged_velocities!(model.timestepper.substepper, model)
         update_state!(model, callbacks)
+        cache_transport_velocity!(model)
     end
     return nothing
 end
@@ -272,6 +283,9 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
 
     tick_stage!(model.clock, β₁ * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
+    # Freeze the transport velocity the scalar tendencies were just built with; the next
+    # stage's acoustic loop overwrites the live field before `scalar_substep!` reads it.
+    cache_transport_velocity!(model)
     step_lagrangian_particles!(model, β₁ * Δt)
 
     # Stage 2: U** = Uⁿ + (Δt/2) R(U*)
@@ -279,6 +293,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
+    cache_transport_velocity!(model)
     step_lagrangian_particles!(model, β₂ * Δt)
 
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**)
@@ -290,6 +305,9 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
     update_state!(model, callbacks; compute_tendencies = true)
+    # These tendencies are consumed by stage 1 of the next step, after
+    # `freeze_linearization_state!` has reseeded the live field.
+    cache_transport_velocity!(model)
 
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
@@ -309,18 +327,26 @@ end
 ##### computes Gⁿ for **moisture, tracers, chemistry, TKE** using
 ##### `transport_velocities(model)` — those tendencies are then applied by
 ##### the next stage's `scalar_rk3_substep!` (or the next outer step's stage
-##### 1). This matches WRF's `rk_scalar_tend` calls with
-##### `grid%ru_m, grid%rv_m, grid%ww_m` and MPAS's `ruAvg`-driven
-##### tracer transport.
+##### 1). Like WRF's `rk_scalar_tend` (called with `grid%ru_m, grid%rv_m,
+##### grid%ww_m`) and MPAS's `ruAvg`-driven tracer transport, scalars are
+##### advected by the acoustic-mean velocity rather than the RK predictor.
+##### The stage alignment differs, though: WRF builds these tendencies inside
+##### the stage, after its own substep loop, while Breeze builds them between
+##### stages and so advects with the *preceding* loop's average.
 #####
 ##### Theta's slow tendency does NOT consume this — `compute_slow_scalar_tendencies!`
 ##### deliberately passes `model.velocities` (matching WRF's `rk_tendency`).
 ##### Mixing the two paths creates a feedback loop that destabilizes a rest
 ##### atmosphere at production Δt.
 #####
-##### For stage 1 (no prior substep loop in this outer step),
-##### `freeze_linearization_state!` seeded the field with `model.velocities`
-##### at outer-step start.
+##### The implicit remainder of a scalar update must split the SAME velocity
+##### its explicit fraction was scaled by, so `scalar_substep!` reads a frozen
+##### copy (`cache_transport_velocity!`) instead of this live field — by then
+##### the stage's own acoustic loop has already rebuilt it. At outer-step start
+##### `freeze_linearization_state!` seeds the live field with `model.velocities`
+##### for whatever reads it before the first loop finalizes, and
+##### `maybe_prepare_first_time_step!` seeds it before the very first tendency
+##### computation so stage 1 of step 1 splits a physical velocity.
 #####
 
 function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
