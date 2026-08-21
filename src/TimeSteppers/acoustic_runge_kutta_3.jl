@@ -162,8 +162,8 @@ end
 
 function scalar_rk3_substep!(model::AtmosphereModel, Δt_stage)
     grid = model.grid
-    Δt_FT = kernel_time_step(grid.architecture, grid, Δt_stage)
-    return scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_FT)
+    kernel_Δt = kernel_time_step(grid.architecture, grid, Δt_stage)
+    return scalar_substep!(model, _rk3_substep!, Δt_stage, kernel_Δt)
 end
 
 @kernel function _rk3_substep!(u, u⁰, G, Δt_stage)
