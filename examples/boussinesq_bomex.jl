@@ -322,7 +322,7 @@ if get(ENV, "CI", "false") == "false"
 
     fig
 
-    CairoMakie.record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
+    CairoMakie.record(fig, "bomex.mp4", 1:Nt; framerate = 12, compression = 23) do nn
         @info "Drawing frame $nn of $Nt..."
         n[] = nn
     end

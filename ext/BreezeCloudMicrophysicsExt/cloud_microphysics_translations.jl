@@ -113,7 +113,7 @@ Breeze thermodynamics.
 ) where {FT}
     (; pdf, mass) = parameters.cloud.ice
     (; me, Δm) = mass
-    r_ice_snow = option.r_ice_snow
+    r_ice_snow = parameters.process_params.snow_autoconversion.r_ice_snow
     𝒮 = supersaturation(T, ρ, q, constants, PlanarIceSurface())
     G = diffusional_growth_factor_ice(parameters.air_properties, T, constants)
     n₀ = get_n0(pdf)

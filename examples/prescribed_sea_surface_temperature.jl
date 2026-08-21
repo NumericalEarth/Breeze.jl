@@ -501,7 +501,7 @@ Colorbar(fig[3, 3], hmqˡ, label="qˡ (kg/kg)")
 
 # Now we are ready to make a cool animation.
 
-CairoMakie.record(fig, "prescribed_sea_surface_temperature.mp4", 1:Nt, framerate=12) do nn
+CairoMakie.record(fig, "prescribed_sea_surface_temperature.mp4", 1:Nt; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide

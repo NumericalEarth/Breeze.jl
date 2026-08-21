@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 #####
 ##### Tests for ReferenceState, compute_reference_state!, and related functions
 #####

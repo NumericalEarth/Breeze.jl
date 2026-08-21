@@ -34,7 +34,7 @@ jobs:
       files: ${{ steps.filter.outputs.files }}
     steps:
       - name: "Check out repository"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         id: filter
         with:
@@ -101,7 +101,7 @@ jobs:
         run: |
           df -hT
       - name: "Check out repository"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: "Install Julia"
         uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         # On the self-hosted GPU runners we use a Docker image with Julia pre-installed.
@@ -143,6 +143,10 @@ jobs:
               # On the GPU runners we sometimes run out-of-memory because we have several
               # concurrent jobs, some of them reaching a large memory usage.  We reduce the
               # number of jobs to avoid memory issues.
+              TEST_ARGS+=(--jobs=$(($(nproc) - 1)))
+          elif [[ ${{ matrix.os }} == ubuntu-* ]] && [[ ${{ matrix.version }} == 'min' ]]; then
+              # With Julia v1.11 we have observed somewhat frequent OOM's in `turbulence_closures`
+              # tests, reduce number of jobs to reduce resources contention.
               TEST_ARGS+=(--jobs=$(($(nproc) - 1)))
           fi
 

@@ -33,8 +33,6 @@ using KernelAbstractions: @kernel, @index
 using RRTMGP: AllSkyRadiation, RRTMGPSolver, lookup_tables, update_lw_fluxes!, update_sw_fluxes!
 using RRTMGP.AtmosphericStates: AtmosphericState, CloudState, MaxRandomOverlap
 using RRTMGP.BCs: LwBCs, SwBCs
-using RRTMGP.Fluxes: set_flux_to_zero!
-using RRTMGP.Vmrs: init_vmr
 
 # Dispatch on AtmosphericState having CloudState (not Nothing) for all-sky radiation
 # AtmosphericState{FTA1D, FTA1DN, FTA2D, D, VMR, CLD, AER} where CLD is the 6th type parameter
@@ -63,7 +61,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `solar_position`: Specification of the solar zenith angle. See [`AbstractSolarPosition`](@ref) and its subtypes:
   - [`ApparentSolarPosition`](@ref) (default) — time-varying, computed from the model clock and grid (or explicit) longitude/latitude.
   - [`FixedCosineZenith`](@ref) — constant cos(θ_z), independent of the clock.
-- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
+- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Can be scalar or 2D field.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
@@ -97,6 +95,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     solar_position = maybe_infer_solar_position(solar_position, grid)
 
+    validate_surface_fractions(; surface_emissivity, surface_albedo,
+                                 direct_surface_albedo, diffuse_surface_albedo)
+
     # Materialize background atmosphere (converts O₃ functions to fields)
     background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
@@ -116,6 +117,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
         throw(ArgumentError(error_msg))
     end
 
+    surface_emissivity = materialize_surface_property(surface_emissivity, grid, solar_position)
+
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
     Nc = Nx * Ny
@@ -123,7 +126,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # RRTMGP grid + context
     context = rrtmgp_context(arch)
     ArrayType = ClimaComms.array_type(context.device)
-    grid_params = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
+    grid_params = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
     # AllSkyRadiation(aerosol_radiation, reset_rng_seed)
@@ -143,9 +146,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
         end
     end
 
-    Nband_lw = luts.lu_kwargs.nbnd_lw
-    Nband_sw = luts.lu_kwargs.nbnd_sw
-    Ngas = luts.lu_kwargs.ngas_sw
+    Nband_lw = luts.nbnd_lw
+    Nband_sw = luts.nbnd_sw
+    Ngas = luts.ngas_sw
 
     # Atmospheric state arrays
     rrtmgp_λ = ArrayType{FT}(undef, Nc)
@@ -158,8 +161,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     set_longitude!(rrtmgp_λ, solar_position, grid)
     set_latitude!(rrtmgp_φ, solar_position, grid)
 
-    vmr = init_vmr(Ngas, Nz, Nc, FT, ArrayType; gm=true)
-    set_global_mean_gases!(vmr, luts.lookups.idx_gases_sw, background_atmosphere)
+    vmr = initialize_global_mean_vmr(Ngas, Nz, Nc, FT, ArrayType)
+    set_global_mean_gases!(vmr, luts.idx_gases_sw, background_atmosphere)
 
     # Cloud state arrays
     cloud_liquid_radius = ArrayType{FT}(undef, Nz, Nc)
@@ -201,20 +204,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     rrtmgp_αb₀ = ArrayType{FT}(undef, Nband_sw, Nc)
     rrtmgp_αw₀ = ArrayType{FT}(undef, Nband_sw, Nc)
 
-    if surface_emissivity isa Number
-        surface_emissivity = ConstantField(convert(FT, surface_emissivity))
-        rrtmgp_ε₀ .= surface_emissivity.constant
-    end
-
-    if direct_surface_albedo isa Number
-        direct_surface_albedo = ConstantField(convert(FT, direct_surface_albedo))
-        rrtmgp_αb₀ .= direct_surface_albedo.constant
-    end
-
-    if diffuse_surface_albedo isa Number
-        diffuse_surface_albedo = ConstantField(convert(FT, diffuse_surface_albedo))
-        rrtmgp_αw₀ .= diffuse_surface_albedo.constant
-    end
+    surface_emissivity = constant_field_property(surface_emissivity, FT)
+    direct_surface_albedo = constant_field_property(direct_surface_albedo, FT)
+    diffuse_surface_albedo = constant_field_property(diffuse_surface_albedo, FT)
 
     if surface_temperature isa Number
         surface_temperature = ConstantField(convert(FT, surface_temperature))
@@ -229,6 +221,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # Oceananigans output fields
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
+    upwelling_shortwave_flux = ZFaceField(grid)
     downwelling_shortwave_flux = ZFaceField(grid)
     flux_divergence = CenterField(grid)
 
@@ -236,6 +229,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                     surface_emissivity,
                                                     direct_surface_albedo,
                                                     diffuse_surface_albedo)
+
+    update_rrtmgp_surface_boundary_conditions!(solver, surface_properties, grid)
 
     # Convert effective radius models to proper float type if they are ConstantRadiusParticles
     liquid_eff_radius = liquid_effective_radius isa ConstantRadiusParticles ?
@@ -255,6 +250,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   nothing,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
+                                  upwelling_shortwave_flux,
                                   downwelling_shortwave_flux,
                                   flux_divergence,
                                   liquid_eff_radius,
@@ -277,6 +273,9 @@ function AtmosphereModels._update_radiation!(rtm::AllSkyRadiativeTransferModel, 
     clock = model.clock
     solver = rtm.longwave_solver
 
+    # Surface emissivity and albedos (shared with clear-sky), re-read in case they evolve
+    update_rrtmgp_surface_boundary_conditions!(solver, rtm.surface_properties, grid)
+
     # Update gas state (shared with clear-sky)
     update_rrtmgp_gas_state!(solver.as, model, rtm.surface_properties.surface_temperature,
                              rtm.background_atmosphere, solver.params)
@@ -292,9 +291,8 @@ function AtmosphereModels._update_radiation!(rtm::AllSkyRadiativeTransferModel, 
     # Longwave
     update_lw_fluxes!(solver)
 
-    # Shortwave: we always call the solver; when `cos_zenith ≤ 0` the imposed
-    # boundary condition should yield (near-)zero fluxes.
-    set_flux_to_zero!(solver.sws.flux)
+    # Shortwave: we always call the solver; columns with `cos_zenith ≤ 0`
+    # get zero fluxes (RRTMGP zeroes night columns internally).
     update_sw_fluxes!(solver)
 
     copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
@@ -313,29 +311,31 @@ function update_rrtmgp_cloud_state!(cloud_state, model, liquid_effective_radius,
     grid = model.grid
     arch = architecture(grid)
 
-    ρᵣ = model.dynamics.reference_state.density
     microphysics = model.microphysics
     microphysical_fields = model.microphysical_fields
     qᵛ = specific_prognostic_moisture(model)
 
+    # Total ρ, since the cloud water paths weight total air mass. Passed straight into the launch
+    # so no local shadows the `total_density` accessor.
     launch!(arch, grid, :xyz, _update_rrtmgp_cloud_state!,
-            cloud_state, grid, ρᵣ, microphysics, microphysical_fields, qᵛ,
+            cloud_state, grid, total_density(model.dynamics),
+            microphysics, microphysical_fields, qᵛ,
             liquid_effective_radius, ice_effective_radius)
 
     return nothing
 end
 
-@kernel function _update_rrtmgp_cloud_state!(cloud_state, grid, ρᵣ, microphysics, microphysical_fields, specific_prognostic_moisture,
+@kernel function _update_rrtmgp_cloud_state!(cloud_state, grid, total_density, microphysics, microphysical_fields, specific_prognostic_moisture,
                                              liquid_effective_radius, ice_effective_radius)
     i, j, k = @index(Global, NTuple)
 
     c = rrtmgp_column_index(i, j, grid.Nx)
 
-    FT = eltype(ρᵣ)
+    FT = eltype(total_density)
     kg_to_g = convert(FT, 1000)
 
     @inbounds begin
-        ρ = ρᵣ[i, j, k]
+        ρ = total_density[i, j, k]
         Δz = Δzᶜᶜᶜ(i, j, k, grid)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
 

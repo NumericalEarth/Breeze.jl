@@ -137,7 +137,7 @@ hmw = heatmap!(axw, wn, colorrange = (-w_range, w_range), colormap = :balance)
 Colorbar(fig[1, 2], hmθ, label = "θ (K)", vertical = true)
 Colorbar(fig[2, 2], hmw, label = "w (m/s)", vertical = true)
 
-CairoMakie.record(fig, "dry_thermal_bubble.mp4", 1:length(θt), framerate = 12) do nn
+CairoMakie.record(fig, "dry_thermal_bubble.mp4", 1:length(θt); framerate = 12, compression = 23) do nn
     n[] = nn
 end
 
@@ -253,7 +253,7 @@ Colorbar(fig[1, 1], hmθ, label = "θ (K)", vertical = true)
 Colorbar(fig[1, 4], hmw, label = "w (m/s)", vertical = true)
 Colorbar(fig[2, 4], hml, label = "qˡ (kg/kg)", vertical = true)
 
-CairoMakie.record(fig, "cloudy_thermal_bubble.mp4", 1:length(θt), framerate = 24) do nn
+CairoMakie.record(fig, "cloudy_thermal_bubble.mp4", 1:length(θt); framerate = 24, compression = 23) do nn
     n[] = nn
 end
 nothing #hide
@@ -367,7 +367,7 @@ Colorbar(fig[2, 4], hmqʳ, label="qʳ (kg/kg)", vertical=true, width=15)
 colgap!(fig.layout, 10)
 rowgap!(fig.layout, 10)
 
-CairoMakie.record(fig, "precipitating_thermal_bubble.mp4", 1:Nt, framerate=12) do nn
+CairoMakie.record(fig, "precipitating_thermal_bubble.mp4", 1:Nt; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide
