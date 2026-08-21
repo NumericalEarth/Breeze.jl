@@ -19,7 +19,8 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     horizontal_damping_scale, κˣ, κʸ,
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
-using Breeze.CompressibleEquations: _explicit_horizontal_step!
+using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
+                                    implicit_damping_factors
 using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density, thermodynamic_density
@@ -31,7 +32,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: get_coefficient
 using Oceananigans.Units
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: KernelParameters, launch!
 using Statistics: mean
 using Test
 using Metal: Metal, MetalBackend
@@ -1050,6 +1051,54 @@ for arch in arches
 
         @test model.clock.iteration == 3
         @test !any(isnan, parent(model.dynamics.dry_density))
+    end
+
+    # `_build_vertical_rhs!` reads (ρw)′ at faces k−1, k, k+1 for the implicit vertical-damping
+    # term `∂z²(ρw)′`, so its destination must not be `momentum_perturbation.w`: a thread would
+    # otherwise read a neighbour another thread has already overwritten. The driver writes into
+    # the dedicated `vertical_solver_source_term` field instead.
+    @testset "Vertical RHS build leaves (ρw)′ intact [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
+
+        damping = ThermalDivergenceDamping(coefficient=FT(0.05), damp_vertical=true)
+        td = SplitExplicitTimeDiscretization(substeps=4; damping)
+        dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
+        model = AtmosphereModel(grid; dynamics)
+        set!(model; θ=300, u=0, ρ=model.dynamics.reference_state.density)
+
+        substepper = model.timestepper.substepper
+        @test parent(substepper.vertical_solver_source_term) !== parent(substepper.momentum_perturbation.w)
+
+        # `dˢ⁻ ≠ 0` is what makes the aliased stencil observable in the first place.
+        ω = FT(substepper.forward_weight)
+        dᵐ⁺, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, grid, FT)
+        @test dˢ⁻ != 0
+
+        time_step!(model, 6)
+
+        ρw′ = deepcopy(interior(substepper.momentum_perturbation.w))
+        Δτ = FT(1.5)
+        launch!(architecture(grid), grid,
+                KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
+                _build_vertical_rhs!,
+                substepper.vertical_solver_source_term,
+                substepper.density_predictor,
+                substepper.density_potential_temperature_predictor,
+                substepper.density_perturbation,
+                substepper.density_potential_temperature_perturbation,
+                substepper.momentum_perturbation.w,
+                grid, model.dynamics, Δτ, ω * Δτ, (1 - ω) * Δτ,
+                substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
+                FT(model.thermodynamic_constants.gravitational_acceleration), dˢ⁻,
+                substepper.vertical_momentum_tendency_factor,
+                substepper.slow_vertical_momentum_tendency,
+                substepper.sponge, true)
+
+        # Building the RHS must not touch its own (ρw)′ input.
+        @test interior(substepper.momentum_perturbation.w) == ρw′
+        @test !any(isnan, parent(substepper.vertical_solver_source_term))
     end
 
     @testset "Direct DirectDivergenceDamping [$(arch), $(FT)]" for FT in as_test_float_types(arch)
