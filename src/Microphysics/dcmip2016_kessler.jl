@@ -14,6 +14,7 @@ using ..Thermodynamics:
 using ..AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
+    kernel_time_step,
     standard_pressure,
     total_density
 
@@ -481,8 +482,10 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # Microphysical fields
     μ = model.microphysical_fields
 
+    kernel_Δt = kernel_time_step(arch, grid, Δt)
+
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, Δt, ρ, ρᵈ, dry_air_coupled,
+            microphysics, grid, Nz, kernel_Δt, ρ, ρᵈ, dry_air_coupled,
             p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
