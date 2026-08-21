@@ -146,7 +146,7 @@ function (d::RelativeHumidityKernelFunction)(i, j, k, grid)
     # Vapor specific humidity
     qᵛ = q.vapor
 
-    ρ = moist_air_density(i, j, k, d.dynamics, T, q, constants)
+    ρ = gas_phase_density(i, j, k, d.dynamics, T, q, constants)
 
     # Vapor pressure from ideal gas law: pᵛ = ρᵛ Rᵛ T = ρ qᵛ Rᵛ T
     Rᵛ = vapor_gas_constant(constants)

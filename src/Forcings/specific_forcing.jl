@@ -33,7 +33,7 @@ via ``ℑxᶠᵃᵃ``, to z-Face for `w` via ``ℑzᵃᵃᶠ``). Under
 density `ρᵣ(z)`. Under
 [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics), the carrier
 depends on the target conservation law: momentum and thermodynamic tendencies use the dry-air
-coupling density `ρᵈ`, while moisture, microphysical moments, and user tracers use total density
+carrier `ρᵈ`, while moisture, microphysical moments, and user tracers use total density
 `ρ`. The same wrapper handles all carriers.
 
 Users typically supply specific forcings directly through specific-named keys
@@ -81,8 +81,8 @@ end
 #####
 
 function specific_forcing_density(name, context)
-    if name ∈ context.coupling_density_names
-        return context.coupling_density
+    if name ∈ context.carrier_density_names
+        return context.carrier_density
     else
         return context.total_density
     end

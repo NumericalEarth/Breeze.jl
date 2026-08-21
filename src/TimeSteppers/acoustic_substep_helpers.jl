@@ -230,7 +230,7 @@ closure diffusion. Explicit advection schemes contribute no advection coefficien
 closures no diffusion coefficients, so each combination reduces to the right system. The solve
 runs once per RK stage after the substep loop, over the stage interval — the operator split WRF
 and CM1 use for their implicit vertical pieces. Continuity takes no implicit solve: the
-coupling-density tendency is the acoustic mass-flux divergence itself, not scalar advection.
+carrier-density tendency is the acoustic mass-flux divergence itself, not scalar advection.
 
 The advecting velocity passed to each solve must be the one its slow tendency was built with,
 so the explicit/implicit velocity split is consistent: the RK stage-entry predictor velocities
@@ -244,7 +244,7 @@ implicit_substep!(model, Δt_stage) =
 implicit_substep!(model, ::Nothing, Δt_stage) = nothing
 
 function implicit_substep!(model, implicit_solver, Δt_stage)
-    # Momentum and the thermodynamic variable are coupling-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
+    # Momentum and the thermodynamic variable are carrier-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
     ρᵈ = dynamics_density(model.dynamics)
     prognostic = prognostic_fields(model)
 

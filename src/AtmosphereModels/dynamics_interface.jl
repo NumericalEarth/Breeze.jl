@@ -151,7 +151,7 @@ end
 """
     dynamics_density(dynamics)
 
-Return the *coupling density* — the density weighting the momentum (`ρu = ρᵈ u`) and the
+Return the *carrier density* — the density weighting the momentum (`ρu = ρᵈ u`) and the
 thermodynamic flux variable (`ρθ = ρᵈ θ`), and the divisor for diagnosing velocity (`u = ρu/ρᵈ`)
 and potential temperature (`θ = ρθ/ρᵈ`). It is the prognostic mass variable advanced by continuity.
 
@@ -162,7 +162,7 @@ The *total* air density `ρ = ρᵈ + Σ ρˣ` (dry air plus every water species
 quantity — see [`total_density`](@ref) — used wherever total mass enters the physics: the
 moisture **mass-fraction** recovery (`qˣ = ρˣ/ρ`, so the thermodynamics stays in mass fractions),
 scalar and water advection, the equation of state, and buoyancy. The water densities (`ρqᵛ`, `ρqˡ`,
-…) are stored as partial densities (mass per volume), *not* coupling-weighted. On the anelastic core
+…) are stored as partial densities (mass per volume), *not* carrier-weighted. On the anelastic core
 the two densities coincide (`total_density === dynamics_density`).
 """
 function dynamics_density end
@@ -173,24 +173,25 @@ function dynamics_density end
 Return the total air density ρ = ρᵈ + Σρˣ used by the thermodynamics, scalar advection,
 equation of state, and buoyancy. Defaults to [`dynamics_density`](@ref) — correct for
 formulations with a single density (e.g. the anelastic reference density). `CompressibleDynamics`
-overrides it with a diagnosed total-density field, distinct from the coupling density ρᵈ.
+overrides it with a diagnosed total-density field, distinct from the carrier density ρᵈ.
 """
 total_density(dynamics) = dynamics_density(dynamics)
 
 """
 $(TYPEDSIGNATURES)
 
-Return the density ``ρ`` of the moist air at `(i, j, k)`, from the equation of state at the local
-temperature and composition, ``ρ = p / (Rᵐ(q) T)``. This is the density that turns a mass fraction
-into a partial pressure — the vapor pressure is ``pᵛ = ρ qᵛ Rᵛ T`` — and it is not in general the
-density that the prognostic partial densities are weighted by, which is [`total_density`](@ref).
+Return the density ``ρ`` of the gas phase — dry air plus vapor, ``ρᵈ + ρᵛ`` — at `(i, j, k)`, from
+the equation of state at the local temperature and composition, ``ρ = p / (Rᵐ(q) T)``. This is the
+density that turns a mass fraction into a partial pressure — the vapor pressure is
+``pᵛ = ρ qᵛ Rᵛ T``. It differs from [`total_density`](@ref) in omitting the condensate, and it is
+not in general the density that the prognostic partial densities are weighted by.
 
 The default returns `total_density(dynamics)`, correct wherever that field *is* the density of the
-moist air: compressible dynamics, where it is diagnosed from the prognostic state, and
+gas phase: compressible dynamics, where it is diagnosed from the prognostic state, and
 prescribed-density models. `AnelasticDynamics` overrides it, because its reference density ``ρᵣ(z)``
 is a *dry* reference state evaluated at the reference temperature and pressure.
 """
-@inline function moist_air_density(i, j, k, dynamics, T, q, constants)
+@inline function gas_phase_density(i, j, k, dynamics, T, q, constants)
     return @inbounds total_density(dynamics)[i, j, k]
 end
 

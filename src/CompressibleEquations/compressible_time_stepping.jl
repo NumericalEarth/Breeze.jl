@@ -405,7 +405,7 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ρᵈ = dry_density[i, j, k]    # coupling density (recovers θ = ρθ/ρᵈ)
+        ρᵈ = dry_density[i, j, k]    # carrier density (recovers θ = ρθ/ρᵈ)
         ρ  = total_density[i, j, k]  # total air density (mass fractions, EOS, inversion)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
     end
@@ -429,7 +429,7 @@ end
                                           formulation::LiquidIcePotentialTemperatureFormulation,
                                           dynamics, ρᵈ, ρ, Rᵐ, q, constants)
     # Note: potential_temperature_density is ρθ = ρᵈθ (prognostic, dry-coupled);
-    # θ is recovered with the coupling density ρᵈ, while the inversion and EOS below use total ρ.
+    # θ is recovered with the carrier density ρᵈ, while the inversion and EOS below use total ρ.
     ρθ = @inbounds formulation.potential_temperature_density[i, j, k]
     θ = ρθ / ρᵈ
     pˢᵗ = standard_pressure(dynamics)

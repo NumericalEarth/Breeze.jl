@@ -263,10 +263,10 @@ function AtmosphereModel(grid;
     # agree on ordering, or forcings will read the wrong field.
     model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
                          (; T=temperature), microphysical_fields)
-    coupling_density = dynamics_density(dynamics)
+    carrier_density = dynamics_density(dynamics)
     mass_density = total_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
-                                       grid, coriolis, coupling_density, mass_density,
+                                       grid, coriolis, carrier_density, mass_density,
                                        velocities, dynamics, formulation, microphysics,
                                        specific_prognostic_moisture)
 
@@ -320,6 +320,10 @@ function AtmosphereModel(grid;
     # density) are fully initialized here, so a model that is never `set!` still activates.
     # Compressible density fields are still zero, so this writes zero and the first `set!` that
     # supplies a density fills it in. Idempotent: every `set!` rewrites it.
+    #
+    # This belongs in the constructor rather than in `initialize!(model)` because it is a
+    # *default*: `initialize!` runs after `set!`, which is where a user supplies `nᵃ` or `ρnᵃ`,
+    # so re-seeding there would overwrite a user-supplied aerosol reservoir.
     set_default_aerosol_number!(model)
 
     return model
@@ -407,7 +411,7 @@ function field_names(dynamics, formulation, microphysics, tracer_names)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
-                                  grid, coriolis, coupling_density, mass_density,
+                                  grid, coriolis, carrier_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
     forcings_type = typeof(user_forcings)
@@ -417,7 +421,7 @@ function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields
 end
 
 function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
-                                  grid, coriolis, coupling_density, mass_density,
+                                  grid, coriolis, carrier_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
     names = keys(prognostic_fields)
@@ -425,7 +429,7 @@ function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
 end
 
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
-                                  grid, coriolis, coupling_density, mass_density,
+                                  grid, coriolis, carrier_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
 
@@ -462,21 +466,21 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     specific_fields = merge(velocities, formulation_fields, NamedTuple{(moist_specific,)}((specific_prognostic_moisture,)))
 
     # Momentum, the dynamics mass variable, and thermodynamic density are weighted by the
-    # coupling density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and
+    # carrier density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and
     # user tracers are total-air mass fractions and therefore use total density. The extra
     # :ρe entry is the energy-forcing alias retained by potential-temperature formulations.
-    coupling_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
-                                   prognostic_momentum_field_names(dynamics)...,
-                                   thermodynamic_density_name(formulation),
-                                   :ρe)
+    carrier_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
+                                  prognostic_momentum_field_names(dynamics)...,
+                                  thermodynamic_density_name(formulation),
+                                  :ρe)
 
-    # Keep `density` as the coupling-density compatibility entry for other forcing
+    # Keep `density` as the carrier-density compatibility entry for other forcing
     # materializers; SpecificForcing selects between the two explicit carriers by target.
     forcing_context = (; coriolis,
-                         density=coupling_density,
-                         coupling_density,
+                         density=carrier_density,
+                         carrier_density,
                          total_density=mass_density,
-                         coupling_density_names,
+                         carrier_density_names,
                          specific_fields)
 
     materialized = Tuple(

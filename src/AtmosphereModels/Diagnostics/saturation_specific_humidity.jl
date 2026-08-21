@@ -141,7 +141,7 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
         qᵛᵉ = @inbounds d.specific_prognostic_moisture[i, j, k]
         q = grid_moisture_fractions(i, j, k, grid, d.microphysics, @inbounds(d.density[i, j, k]),
                                     qᵛᵉ, d.microphysical_fields)
-        ρ = moist_air_density(i, j, k, d.dynamics, T, q, constants)
+        ρ = gas_phase_density(i, j, k, d.dynamics, T, q, constants)
         return saturation_specific_humidity(T, ρ, constants, surface)
 
     elseif d.flavor isa EquilibriumFlavor
