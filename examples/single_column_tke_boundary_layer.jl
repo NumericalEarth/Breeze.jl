@@ -79,11 +79,9 @@ function single_column_simulation(; closure = TKEBasedTurbulenceClosure(),
     ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
     cᵖ = constants.dry_air.heat_capacity
 
-    ## The drag laws below use the closure's own von Kármán constant rather than a repeated
-    ## literal, so that the surface layer they impose stays consistent with the log layer the
-    ## mixing length produces. It is read back from the height-above-surface branch, and is `nothing` for a
-    ## mixing length that has none — harmless, since those configurations prescribe `u★` directly.
-    κ = Breeze.TurbulenceClosures.von_karman_constant(closure.mixing_length)
+    ## The von Kármán constant of the drag laws below. The closure carries none: its neutral log
+    ## layer has the constant (Cᵘ³/Cᴰ)^(1/4) implied by its stability functions, 0.40 by default.
+    κ = 0.4
 
     ## The surface is configured in two ways for momentum and two for heat:
     ##
@@ -101,8 +99,7 @@ function single_column_simulation(; closure = TKEBasedTurbulenceClosure(),
     ## therefore requires either a `surface_temperature` or a zero `surface_heat_flux`.
     ##
     ## A `(Flat, Flat, Bounded)` column has no horizontal coordinates, so a bottom boundary
-    ## condition is a function of time and its field dependencies alone. The closure reads the
-    ## surface stress, however it is set, to floor the near-surface TKE.
+    ## condition is a function of time and its field dependencies alone.
     if !isnothing(surface_temperature)
         surface_temperature_field = Field{Center, Center, Nothing}(grid)
         set!(surface_temperature_field, surface_temperature)
@@ -192,11 +189,11 @@ function single_column_simulation(; closure = TKEBasedTurbulenceClosure(),
         set!(model; θ = θᵢ, ρu = reference_state.density * geostrophic_wind)
     end
 
-    ## `:ρtke` holds ρe, so a specific initial TKE profile has to be weighted by the reference
-    ## density after it is set.
+    ## The tracer `ρe` holds the TKE density, so a specific initial TKE profile has to be weighted
+    ## by the reference density after it is set.
     if !isnothing(initial_tke)
-        set!(model.tracers.ρtke, z -> max(initial_tke(z), 1e-6))
-        parent(model.tracers.ρtke) .*= parent(reference_state.density)
+        set!(model.tracers.ρe, z -> max(initial_tke(z), 1e-6))
+        parent(model.tracers.ρe) .*= parent(reference_state.density)
     end
 
     simulation = Simulation(model; Δt, stop_time)
@@ -365,8 +362,9 @@ for ((name, simulation), (_, settings), (_, depth), color) in zip(simulations, r
     θᵥ = vec(Array(view(θ, 1, 1, :)))
     lines!(ax_θ, θᵥ .- θᵥ[1], Array(znodes(θ)) ./ zᵢ; color)
     lines!(ax_U, vec(Array(view(U, 1, 1, :))), Array(znodes(U)) ./ zᵢ; color)
-    lines!(ax_e, vec(Array(view(model.closure_fields.e, 1, 1, :))),
-           Array(znodes(model.closure_fields.e)) ./ zᵢ; color)
+    ## The specific TKE is the tracer divided by the reference density
+    e = compute!(Field(model.tracers.ρe / model.dynamics.reference_state.density))
+    lines!(ax_e, vec(Array(view(e, 1, 1, :))), Array(znodes(e)) ./ zᵢ; color)
     Kᶜ = vec(Array(view(model.closure_fields.Kᶜ, 1, 1, :)))
     zᴷ = Array(znodes(model.closure_fields.Kᶜ))
     kᵐᵃˣ = argmax(Kᶜ)

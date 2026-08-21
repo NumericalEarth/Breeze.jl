@@ -162,7 +162,7 @@ function AtmosphereModel(grid;
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     user_tracer_names = validate_tracers(tracers)
 
-    # Prognostic-TKE closures carry their own prognostic scalar (eg `:ρtke`). Appending it here,
+    # Prognostic-TKE closures carry their own prognostic scalar (`:ρe`). Appending it here,
     # before `prognostic_field_names`, the boundary-condition defaults, the tracer-field allocation
     # and `scalar_names`, is what makes it a first-class tracer everywhere downstream.
     # The captured name must differ from the assigned one, or the closure boxes it.
@@ -172,6 +172,10 @@ function AtmosphereModel(grid;
 
     # Get field names from dynamics and formulation
     prognostic_names = prognostic_field_names(dynamics, formulation, microphysics, tracers)
+    allunique(prognostic_names) ||
+        throw(ArgumentError("Prognostic field names must be unique, but got $prognostic_names. " *
+                            "A closure-required tracer ($(closure_required_tracers(closure))) cannot " *
+                            "share its name with another prognostic field."))
     velocity_bc_names = velocity_boundary_condition_names(dynamics)
     default_bc_names = tuple(prognostic_names..., velocity_bc_names...)
     default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)

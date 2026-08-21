@@ -1,32 +1,19 @@
 module TurbulenceClosures
 
 export TKEBasedTurbulenceClosure,
-       BlendedMixingLength,
-       NakanishiNiinoLengthScale,
-       HeightAboveSurface,
-       SurfaceLayerLengthScale,
-       TurbulenceLengthScale,
-       BuoyancyLengthScale,
-       MinimumBlend,
-       HarmonicBlend,
-       PowerBlend,
-       diffusivity_coefficient,
-       dissipation_coefficient,
-       surface_tke_coefficient,
-       stress_coefficient
+       TKEMixingLength,
+       ConstantStabilityFunctions
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
-using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, fields
+using Oceananigans: Oceananigans
 
-using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions,
-                                       fill_halo_regions!, getbc
+using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, fill_halo_regions!
 using Oceananigans.BuoyancyFormulations: ∂z_b
-using Oceananigans.Fields: CenterField, Field, ZFaceField
-using Oceananigans.Grids: Center, Face, inactive_cell, inactive_node, peripheral_node, znode
+using Oceananigans.Fields: ZFaceField
+using Oceananigans.Grids: Center, Face
 
 using Oceananigans.Operators:
     # Face-centered difference operators with area metrics
@@ -40,9 +27,7 @@ using Oceananigans.Operators:
     Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ,
     # Interpolator functions used for ρᵣ at faces
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ,
-    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ,
-    # Vertical operators for the TKE closure
-    ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ∂zᶠᶜᶠ, ∂zᶜᶠᶠ, Δzᶜᶜᶜ
+    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
@@ -50,7 +35,6 @@ using Oceananigans.TurbulenceClosures:
     VerticalFormulation,
     VerticallyImplicitTimeDiscretization,
     getclosure,
-    z_bottom,
     _viscous_flux_ux, _viscous_flux_uy, _viscous_flux_uz,
     _viscous_flux_vx, _viscous_flux_vy, _viscous_flux_vz,
     _viscous_flux_wx, _viscous_flux_wy, _viscous_flux_wz,
@@ -134,7 +118,6 @@ end
         + δzᵃᵃᶠ(i, j, k, grid, Az_qᶜᶜᶜ, 𝒯_wz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
 end
 
-include("blended_mixing_length.jl")
 include("tke_based_turbulence_closure.jl")
 
 end # module TurbulenceClosures

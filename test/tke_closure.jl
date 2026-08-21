@@ -1,746 +1,255 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
+using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields
 using Oceananigans
+using Oceananigans.TimeSteppers: update_state!, time_discretization
+using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, ExplicitTimeDiscretization
+using Oceananigans.Units
 using Test
 
-using Breeze.TurbulenceClosures: TKE_NAME,
-                                 length_scaleᶜᶜᶠ,
-                                 length_scaleᶜᶜᶜ,
-                                 mixing_lengthᶜᶜᶠ,
-                                 mixing_lengthᶜᶜᶜ,
-                                 smooth_positive,
-                                 turbulence_length_coefficient,
-                                 von_karman_constant,
-                                 turbulent_prandtl_number,
-                                 _compute_turbulence_length_scale!
-using Oceananigans: prognostic_fields
-using Oceananigans.Architectures: architecture
-using Oceananigans.Utils: launch!
-
 #####
-##### Coefficients
-#####
-##### The neutral constant-flux-layer relations are derived in the closure coefficient note.
-##### With ℓᵍ = a z the log law constrains only Cˢ a = κ, where Cˢ = Cᴷ/(Cμ)^(1/4); choosing a = κ
-##### makes that Cˢ = 1, i.e. the locus Cμ = Cᴷ⁴. All three published Mellor–Yamada sets satisfy it,
-##### because Cμ = Cᴷ⁴ is equivalent to S_M(neutral) = B₁^(-1/3).
+##### Construction
 #####
 
-@testset "TKEBasedTurbulenceClosure coefficients [$(FT)]" for FT in test_float_types()
+@testset "TKEBasedTurbulenceClosure construction [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
-    @testset "the equilibrium TKE tracks Cμ off the locus too" begin
-        # e/u★² = (Cμ)^(-1/2) holds for any (Cᴷ, Cμ), which is the reason this pair is stored.
-        # This identity forces Cˢ Cᵋ = Cμ^(3/4), so a wrong exponent in *either* accessor breaks
-        # it — unlike a check that Cᵋ equals its own one-line body, which cannot fail on its own.
-        for Cᴷ in (0.2, 0.4903, 0.8), Cμ in (0.02, 0.0578, 0.2)
-            closure = TKEBasedTurbulenceClosure(; Cᴷ, Cμ)
-            Cˢ = stress_coefficient(closure)
-            Cᵋ = dissipation_coefficient(closure)
-            @test isapprox(surface_tke_coefficient(closure), (Cˢ * Cᵋ)^(-2//3); rtol = 1e-5)
-        end
-    end
-
-    @testset "MYNN is the default" begin
-        closure = TKEBasedTurbulenceClosure()
-        @test closure.Cᴷ ≈ FT(0.4903)
-        @test closure.Cμ ≈ FT(0.0578)
-        @test isapprox(surface_tke_coefficient(closure), 4.16; rtol = 1e-3)
-    end
-
-    @testset "isbits" begin
-        @test isbits(TKEBasedTurbulenceClosure())
-        @test isbits(BlendedMixingLength(HeightAboveSurface(), BuoyancyLengthScale()))
-        @test isbits(BlendedMixingLength(HeightAboveSurface(); blend = PowerBlend(p = 2.0)))
-    end
-
-    @testset "show" begin
-        closure = TKEBasedTurbulenceClosure()
-        @test occursin("TKEBasedTurbulenceClosure", summary(closure))
-        @test occursin("Cˢ", sprint(show, closure))
-        @test occursin("BlendedMixingLength", sprint(show, closure.mixing_length))
-        @test occursin("HeightAboveSurface", sprint(show, closure.mixing_length))
-    end
-end
-
-#####
-##### Mixing length, branch by branch
-#####
-
-@testset "Mixing-length branches [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-
-    Nz = 32
-    Lz = FT(1000)
-    # A CPU grid on purpose: these testsets call the branch functions from the host, so the
-    # `state` fields they read would be scalar-indexed if they lived on a device. The device
-    # path for these branches is covered by stepping a model, below.
-    grid = RectilinearGrid(CPU(); size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
-
-    ℓᵗ_field = Field{Center, Center, Nothing}(grid)
-    set!(ℓᵗ_field, 300)
-    u★²_field = Field{Center, Center, Nothing}(grid)
-    set!(u★²_field, 0.09)
-    Jᵇ_field = Field{Center, Center, Nothing}(grid)      # neutral surface
-    state = (; ℓᵗ = ℓᵗ_field, u★² = u★²_field, Jᵇ = Jᵇ_field)
-
-    height = HeightAboveSurface{FT}()
-    buoyancy = BuoyancyLengthScale{FT}()
-    turbulence = TurbulenceLengthScale{FT}()
-
-    @testset "smooth_positive" begin
-        δ = FT(1e-9)
-        @test smooth_positive(FT(1), δ) ≈ 1
-        @test smooth_positive(FT(-1), δ) < 1e-9
-        @test smooth_positive(FT(0), δ) ≈ δ / 2
-        # monotone and never negative
-        @test all(smooth_positive(x, δ) ≥ 0 for x in FT(-1):FT(0.1):FT(1))
-    end
-
-    @testset "ℓᵍ = κ(z + ℓʳ)" begin
-        κ, ℓʳ = height.κ, height.ℓʳ
-        Δz = Lz / Nz
-        # Face k sits at z = (k - 1) Δz
-        for k in (1, 2, 8, Nz)
-            z = (k - 1) * Δz
-            @test length_scaleᶜᶜᶠ(1, 1, k, grid, height, FT(1), FT(0), state) ≈ κ * (z + ℓʳ)
-        end
-        # Finite at the surface — this is what ℓʳ is for
-        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, height, FT(1), FT(0), state) ≈ κ * ℓʳ
-        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, height, FT(1), FT(0), state) > 0
-        # Centers sit half a cell above the face below them
-        @test length_scaleᶜᶜᶜ(1, 1, 1, grid, height, FT(1), FT(0), state) ≈ κ * (Δz / 2 + ℓʳ)
-    end
-
-    @testset "ℓᵇ = Cᵇ q / N" begin
-        Cᵇ = buoyancy.Cᵇ
-        q = FT(1)
-        ℓᵇ(q, N²) = length_scaleᶜᶜᶠ(1, 1, 1, grid, buoyancy, q, N², state)
-
-        N² = FT(1e-4)
-        @test ℓᵇ(q, N²) ≈ Cᵇ * q / sqrt(N²) rtol=1e-5
-
-        # Scales like q and like 1/N
-        @test ℓᵇ(2q, N²) ≈ 2 * ℓᵇ(q, N²) rtol=1e-5
-        @test ℓᵇ(q, 4N²) ≈ ℓᵇ(q, N²) / 2 rtol=1e-5
-
-        # Inactive in unstable and neutral air: the branch returns a length so large that it
-        # drops out of any blend that selects the smallest scale
-        @test ℓᵇ(q, FT(-1e-4)) > 1e6
-        @test ℓᵇ(q, FT(0)) > 1e3
-        @test ℓᵇ(q, FT(-1e-4)) > ℓᵇ(q, FT(0))   # smooth, monotone through N² = 0
-
-        # Deardorff's constant is the default; MYNN's realizability bound is the looser Cᵇ = 1
-        @test buoyancy.Cᵇ ≈ FT(0.53)
-
-        # Setting one coefficient to an integer must work: @kwdef alone would demand that every
-        # field share a type, so `Cᵇ = 1` beside a float default would find no method.
-        @test BuoyancyLengthScale(Cᵇ = 1).Cᵇ == 1
-        @test HeightAboveSurface(ℓʳ = 1).ℓʳ == 1
-        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, BuoyancyLengthScale{FT}(Cᵇ = 1), q, N², state) ≈
-              q / sqrt(N²) rtol=1e-5
-    end
-
-    @testset "ℓᵗ is read from the column field, at both locations" begin
-        for k in (1, 8, Nz)
-            @test length_scaleᶜᶜᶠ(1, 1, k, grid, turbulence, FT(1), FT(0), state) == 300
-            @test length_scaleᶜᶜᶜ(1, 1, k, grid, turbulence, FT(1), FT(0), state) == 300
-        end
-    end
-end
-
-@testset "SurfaceLayerLengthScale [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-
-    Nz = 32
-    Lz = FT(1000)
-    # A CPU grid on purpose: these testsets call the branch functions from the host, so the
-    # `state` fields they read would be scalar-indexed if they lived on a device. The device
-    # path for these branches is covered by stepping a model, below.
-    grid = RectilinearGrid(CPU(); size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
-    surface = SurfaceLayerLengthScale{FT}()
-    height = HeightAboveSurface{FT}(κ = surface.κ, ℓʳ = surface.ℓʳ)
-
-    ## ζ = z/L with L = -u★³/(κ Jᵇ): Jᵇ < 0 is stable, Jᵇ > 0 unstable, Jᵇ = 0 neutral.
-    function state(u★², Jᵇ)
-        u = Field{Center, Center, Nothing}(grid); set!(u, u★²)
-        J = Field{Center, Center, Nothing}(grid); set!(J, Jᵇ)
-        ℓᵗ = Field{Center, Center, Nothing}(grid); set!(ℓᵗ, 300)
-        return (; ℓᵗ, u★² = u, Jᵇ = J)
-    end
-
-    ℓˢ(k, u★², Jᵇ) = length_scaleᶜᶜᶠ(1, 1, k, grid, surface, FT(1), FT(0), state(u★², Jᵇ))
-    ℓᵍ(k) = length_scaleᶜᶜᶠ(1, 1, k, grid, height, FT(1), FT(0), state(FT(0.1), FT(0)))
-
-    @testset "neutral reproduces the plain height-above-surface branch exactly" begin
-        # This is what makes the correction safe to adopt: it cannot disturb a neutral column.
-        for k in (2, 8, Nz)
-            @test ℓˢ(k, FT(0.09), FT(0)) ≈ ℓᵍ(k)
-        end
-    end
-
-    @testset "stable shrinks the branch, unstable grows it" begin
-        for k in (4, 8, Nz)
-            @test ℓˢ(k, FT(0.09), FT(-1e-3)) < ℓᵍ(k)   # stable
-            @test ℓˢ(k, FT(0.09), FT(+1e-3)) > ℓᵍ(k)   # unstable
-        end
-    end
-
-    @testset "the strongly stable limit is ℓᵍ/Cⁿ" begin
-        # ζ ≫ 1 saturates at the first branch of MYNN Eq. 53
-        k = 8
-        @test ℓˢ(k, FT(1e-4), FT(-1)) ≈ ℓᵍ(k) / surface.Cⁿ
-    end
-
-    @testset "the branches join continuously" begin
-        k = 8
-        z = (k - 1) * Lz / Nz
-        # ζ = -κ z Jᵇ / u★³; pick Jᵇ that straddles ζ = 1 and ζ = 0
-        u★² = FT(0.09)
-        u★³ = u★² * sqrt(u★²)
-        Jᵇ_at(ζ) = -ζ * u★³ / (surface.κ * z)
-        for ζ in (FT(0), FT(1))
-            below = ℓˢ(k, u★², Jᵇ_at(ζ - FT(1e-6)))
-            above = ℓˢ(k, u★², Jᵇ_at(ζ + FT(1e-6)))
-            @test isapprox(below, above; rtol = 1e-3)
-        end
-    end
-
-    @testset "free convection is finite, not NaN" begin
-        # u★ = 0 sends ζ → -∞. The shear scale is irrelevant there, so the branch must grow rather
-        # than divide by zero.
-        for Jᵇ in (FT(0), FT(1e-2))
-            ℓ = ℓˢ(8, FT(0), Jᵇ)
-            @test !isnan(ℓ)
-            @test ℓ > 0
-        end
-        @test ℓˢ(8, FT(0), FT(1e-2)) > ℓᵍ(8)
-    end
-
-    @testset "the unstable branch is bounded by ζᵐⁱⁿ" begin
-        # Without the floor, zero mean wind sends ζ → -10¹⁴ and the branch to ~2000 κz, removing
-        # the wall constraint entirely. The ceiling is the branch evaluated at ζᵐⁱⁿ.
-        ceiling(k) = ℓᵍ(k) * (1 - surface.Cᶜ * surface.ζᵐⁱⁿ)^surface.nᶜ
-
-        for k in (2, 8, Nz)
-            # u★ = 0 is the degenerate limit and must land exactly on the ceiling
-            @test ℓˢ(k, FT(0), FT(1e-2)) ≈ ceiling(k) rtol=1e-5
-            # and nothing may exceed it, however extreme the forcing
-            for (u★², Jᵇ) in ((FT(1e-8), FT(1)), (FT(1e-4), FT(1e-1)), (FT(0), FT(1e3)))
-                @test ℓˢ(k, u★², Jᵇ) ≤ ceiling(k) + sqrt(eps(FT))
-            end
-        end
-
-        # The default floor sits just beyond Nakanishi (2001)'s data, ζ ∈ [-3.13, 0.44]
-        @test surface.ζᵐⁱⁿ ≈ FT(-4)
-        @test ceiling(8) / ℓᵍ(8) ≈ FT(401)^FT(0.2) rtol=1e-5
-    end
-
-    @testset "the floor leaves the fitted range untouched" begin
-        # ζ inside the data must be unaffected: compare against a branch with a far deeper floor.
-        deep = SurfaceLayerLengthScale{FT}(ζᵐⁱⁿ = -1000)
-        k, z = 8, 7 * Lz / Nz
-        u★² = FT(0.09)
-        u★³ = u★² * sqrt(u★²)
-        for ζ in (FT(-0.5), FT(-2), FT(-3))          # inside [-3.13, 0]
-            Jᵇ = -ζ * u★³ / (surface.κ * z)
-            @test ℓˢ(k, u★², Jᵇ) ≈
-                  length_scaleᶜᶜᶠ(1, 1, k, grid, deep, FT(1), FT(0), state(u★², Jᵇ)) rtol=1e-5
-        end
-        # and beyond it, the floor binds while the deeper one keeps growing
-        ζ = FT(-40)
-        Jᵇ = -ζ * u★³ / (surface.κ * z)
-        @test ℓˢ(k, u★², Jᵇ) <
-              length_scaleᶜᶜᶠ(1, 1, k, grid, deep, FT(1), FT(0), state(u★², Jᵇ))
-    end
-end
-
-#####
-##### Convective enhancement of ℓᵇ (MYNN Eq. 55)
-#####
-
-@testset "BuoyancyLengthScale convective enhancement [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-
-    Nz = 8
-    # A CPU grid on purpose: these testsets call the branch functions from the host, so the
-    # `state` fields they read would be scalar-indexed if they lived on a device. The device
-    # path for these branches is covered by stepping a model, below.
-    grid = RectilinearGrid(CPU(); size=Nz, z=(0, FT(1000)), topology=(Flat, Flat, Bounded))
-
-    function state(Jᵇ, ℓᵗ_value)
-        J = Field{Center, Center, Nothing}(grid); set!(J, Jᵇ)
-        ℓᵗ = Field{Center, Center, Nothing}(grid); set!(ℓᵗ, ℓᵗ_value)
-        u = Field{Center, Center, Nothing}(grid); set!(u, FT(0.09))
-        return (; ℓᵗ, u★² = u, Jᵇ = J)
-    end
-
-    q = FT(1)
-    N² = FT(1e-4)
-    plain = BuoyancyLengthScale{FT}()                  # Cᶜᵇ = 0 by default
-    enhanced = BuoyancyLengthScale{FT}(Cᶜᵇ = 5)
-
-    ℓᵇ(branch, Jᵇ, ℓᵗ) = length_scaleᶜᶜᶠ(1, 1, 2, grid, branch, q, N², state(Jᵇ, ℓᵗ))
-
-    @testset "off by default" begin
-        @test plain.Cᶜᵇ == 0
-        @test ℓᵇ(plain, FT(1e-2), FT(300)) ≈ ℓᵇ(plain, FT(0), FT(300))
-    end
-
-    @testset "lengthens ℓᵇ only under an unstable surface" begin
-        @test ℓᵇ(enhanced, FT(1e-2), FT(300)) > ℓᵇ(plain, FT(1e-2), FT(300))
-        # A stable or neutral surface leaves the branch as plain Cᵇ q / N
-        @test ℓᵇ(enhanced, FT(0), FT(300)) ≈ ℓᵇ(plain, FT(0), FT(300))
-        @test ℓᵇ(enhanced, FT(-1e-2), FT(300)) ≈ ℓᵇ(plain, FT(-1e-2), FT(300))
-    end
-
-    @testset "grows with the surface flux and is finite for an unbounded ℓᵗ" begin
-        @test ℓᵇ(enhanced, FT(4e-2), FT(300)) > ℓᵇ(enhanced, FT(1e-2), FT(300))
-        # A quiescent column has ℓᵗ = Inf; written naively the enhancement would be Inf/Inf
-        ℓ = ℓᵇ(enhanced, FT(1e-2), FT(Inf))
-        @test !isnan(ℓ)
-        @test ℓ ≈ ℓᵇ(plain, FT(1e-2), FT(Inf))
-    end
-end
-
-#####
-##### Blending rules
-#####
-
-@testset "Length-scale blends [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-
-    ℓs = (FT(3), FT(7), FT(50))
-    ℓᵐⁱⁿ = minimum(ℓs)
-
-    @testset "each rule computes what it claims" begin
-        @test MinimumBlend()(ℓs) == ℓᵐⁱⁿ
-        @test HarmonicBlend()(ℓs) ≈ inv(sum(inv, ℓs))
-        @test PowerBlend{FT}(p = 2)(ℓs) ≈ inv(sqrt(sum(ℓ -> ℓ^-2, ℓs)))
-    end
-
-    @testset "PowerBlend interpolates between harmonic and min" begin
-        # p = 1 is the harmonic blend exactly
-        @test PowerBlend{FT}(p = 1)(ℓs) ≈ HarmonicBlend()(ℓs) rtol=1e-5
-        # and large p approaches the minimum from below
-        @test PowerBlend{FT}(p = 40)(ℓs) ≈ ℓᵐⁱⁿ rtol=1e-2
-        # monotone in p
-        ps = FT[1, 2, 4, 8, 16]
-        blended = [PowerBlend{FT}(p = p)(ℓs) for p in ps]
-        @test issorted(blended)
-    end
-
-    @testset "every rule is bounded by the smallest branch" begin
-        for blend in (MinimumBlend(), HarmonicBlend(), PowerBlend{FT}(p = 2), PowerBlend{FT}(p = 5))
-            @test 0 < blend(ℓs) ≤ ℓᵐⁱⁿ + sqrt(eps(FT))
-        end
-        # An inactive branch (Inf) must not change the result
-        @test HarmonicBlend()((ℓs..., FT(Inf))) ≈ HarmonicBlend()(ℓs)
-        @test MinimumBlend()((ℓs..., FT(Inf))) == MinimumBlend()(ℓs)
-        @test PowerBlend{FT}(p = 2)((ℓs..., FT(Inf))) ≈ PowerBlend{FT}(p = 2)(ℓs)
-    end
-end
-
-#####
-##### Composition
-#####
-
-@testset "BlendedMixingLength [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-
-    Nz = 32
-    Lz = FT(1000)
-    # A CPU grid on purpose: these testsets call the branch functions from the host, so the
-    # `state` fields they read would be scalar-indexed if they lived on a device. The device
-    # path for these branches is covered by stepping a model, below.
-    grid = RectilinearGrid(CPU(); size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
-    ℓᵗ_field = Field{Center, Center, Nothing}(grid)
-    set!(ℓᵗ_field, 300)
-    u★²_field = Field{Center, Center, Nothing}(grid)
-    set!(u★²_field, 0.09)
-    Jᵇ_field = Field{Center, Center, Nothing}(grid)      # neutral surface
-    state = (; ℓᵗ = ℓᵗ_field, u★² = u★²_field, Jᵇ = Jᵇ_field)
-
-    q = FT(0.5)
-    N² = FT(1e-4)
-
-    @testset "min is the default blend, and the kwarg overrides it" begin
-        @test BlendedMixingLength(HeightAboveSurface()).blend isa MinimumBlend
-        @test BlendedMixingLength(HeightAboveSurface();
-                                  blend = HarmonicBlend()).blend isa HarmonicBlend
-        @test length(BlendedMixingLength(HeightAboveSurface(), BuoyancyLengthScale()).branches) == 2
-    end
-
-    @testset "the master length is the blend of its branches" begin
-        branches = (HeightAboveSurface{FT}(), TurbulenceLengthScale{FT}(),
-                    BuoyancyLengthScale{FT}())
-        for blend in (MinimumBlend(), HarmonicBlend(), PowerBlend{FT}(p = 2))
-            ml = BlendedMixingLength(branches...; blend)
-            for k in (1, 2, 8, Nz)
-                ℓs = map(b -> length_scaleᶜᶜᶠ(1, 1, k, grid, b, q, N², state), branches)
-                @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², state) ≈ blend(ℓs)
-                @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², state) ≤
-                      minimum(ℓs) + sqrt(eps(FT))
-            end
-        end
-    end
-
-    @testset "a single branch blends to itself" begin
-        ml = BlendedMixingLength(HeightAboveSurface{FT}())
-        for k in (1, 8, Nz)
-            @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², state) ≈
-                  length_scaleᶜᶜᶠ(1, 1, k, grid, HeightAboveSurface{FT}(), q, N², state)
-        end
-    end
-
-    @testset "Deardorff is expressible" begin
-        # ℓ = min(Δ, 0.76 √e / N); with q = √(2e) the stable branch is 0.53 q / N
-        ml = BlendedMixingLength(BuoyancyLengthScale{FT}(Cᵇ = 0.53))
-        @test mixing_lengthᶜᶜᶠ(1, 1, 4, grid, ml, q, N², state) ≈ FT(0.53) * q / sqrt(N²) rtol=1e-5
-    end
-end
-
-@testset "NakanishiNiinoLengthScale [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-
-    ml = NakanishiNiinoLengthScale()
-
-    @testset "it is MYNN's three branches under their harmonic blend" begin
-        @test ml.blend isa HarmonicBlend
-        @test length(ml.branches) == 3
-        @test ml.branches[1] isa SurfaceLayerLengthScale
-        @test ml.branches[2] isa TurbulenceLengthScale
-        @test ml.branches[3] isa BuoyancyLengthScale
-    end
-
-    @testset "it carries MYNN's coefficients, not this package's defaults" begin
-        # Cᵇ and Cᶜᵇ are exactly where MYNN differs from the branch defaults, which are Deardorff's
-        # 0.53 with no convective enhancement.
-        @test ml.branches[3].Cᵇ == 1
-        @test ml.branches[3].Cᶜᵇ == 5
-        @test BuoyancyLengthScale().Cᵇ ≈ 0.53
-        @test BuoyancyLengthScale().Cᶜᵇ == 0
-        @test ml.branches[2].Cᵗ ≈ 0.23           # MYNN Eq. 54
-    end
-
-    @testset "the roughness length propagates" begin
-        @test NakanishiNiinoLengthScale(ℓʳ = 0.03).branches[1].ℓʳ ≈ 0.03
-        @test ml.branches[1].ℓʳ ≈ 0.1
-    end
-
-    @testset "it drops into the closure, with Cq left to the caller" begin
-        closure = TKEBasedTurbulenceClosure(FT; mixing_length = NakanishiNiinoLengthScale(), Cq = 3)
-        @test isbits(closure)
-        @test closure.Cq == 3
-        @test closure.mixing_length.blend isa HarmonicBlend
-        @test all(b -> eltype(typeof(b).parameters[1]) == FT || typeof(b).parameters[1] == FT,
-                  closure.mixing_length.branches)   # convert_eltype reached every branch
-
-        # Cq is not folded into the length scale: selecting MYNN's branches leaves Cq at its
-        # default, so the mesoscale value has to be asked for explicitly.
-        @test TKEBasedTurbulenceClosure(FT; mixing_length = NakanishiNiinoLengthScale()).Cq == 2
-    end
-end
-
-#####
-##### The column integral behind ℓᵗ
-#####
-
-@testset "ℓᵗ column integral [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-
-    @testset "ℓᵗ is a q-weighted centroid, not a domain height" begin
-        # The same boundary layer on a shallow and a deep column must give the same ℓᵗ. With `q`
-        # rather than `q - qᵐⁱⁿ` in the integrand, the floored free atmosphere would contribute,
-        # and the z weighting would make the deep column's ℓᵗ much larger.
-        closure = TKEBasedTurbulenceClosure()
-        eᵐⁱⁿ = closure.eᵐⁱⁿ
-
-        turbulent(z) = z < 500 ? 1.0 : eᵐⁱⁿ
-
-        function turbulence_length_scale(Lz, Nz; closure = closure)
-            g = RectilinearGrid(default_arch; size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
-            e = CenterField(g)
-            set!(e, z -> turbulent(z))
-            ℓᵗ = Field{Center, Center, Nothing}(g)
-            launch!(architecture(g), g, :xy, _compute_turbulence_length_scale!, ℓᵗ, g, closure, e)
-            return Array(interior(ℓᵗ))[1]
-        end
-
-        ℓᵗ_shallow = turbulence_length_scale(FT(2000), 100)
-        ℓᵗ_deep    = turbulence_length_scale(FT(20000), 1000)
-
-        @test isapprox(ℓᵗ_shallow, ℓᵗ_deep; rtol = 1e-2)
-
-        # And it is the centroid of the turbulent layer times Cᵗ: uniform q over 0 ≤ z < 500 has
-        # centroid 250
-        @test isapprox(ℓᵗ_shallow, TurbulenceLengthScale{FT}().Cᵗ * 250; rtol = 5e-2)
-
-        # A mixing length carrying no TurbulenceLengthScale branch never launches the integral, and
-        # ℓᵗ keeps the Inf it was constructed with — which drops out of every blend rather than
-        # collapsing ℓ to zero.
-        without = TKEBasedTurbulenceClosure(mixing_length =
-            BlendedMixingLength(HeightAboveSurface(), BuoyancyLengthScale()))
-        @test isnothing(turbulence_length_coefficient(without.mixing_length))
-        @test !Breeze.TurbulenceClosures.has_turbulence_length_scale(without)
-
-        g = RectilinearGrid(default_arch; size=32, z=(0, 2000), topology=(Flat, Flat, Bounded))
-        model = AtmosphereModel(g; closure = without)
-        time_step!(model, 1)
-        @test all(isinf, Array(interior(model.closure_fields.ℓᵗ)))
-        @test all(isfinite, Array(interior(model.closure_fields.ℓ)))
-
-        # κ must be findable from either surface branch, since the example builds its drag law
-        # from it; a mixing length with neither reports `nothing` rather than a wrong number.
-        @test von_karman_constant(BlendedMixingLength(HeightAboveSurface())) == 0.4
-        @test von_karman_constant(BlendedMixingLength(SurfaceLayerLengthScale())) == 0.4
-        @test isnothing(von_karman_constant(BlendedMixingLength(BuoyancyLengthScale())))
-    end
-end
-
-
-#####
-##### Prandtl number
-#####
-
-@testset "Turbulent Prandtl number [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
     closure = TKEBasedTurbulenceClosure()
-    Pr₀ = closure.Pr₀
-    CRi = closure.CRi
+    @test closure isa TKEBasedTurbulenceClosure
+    @test time_discretization(closure) isa VerticallyImplicitTimeDiscretization
+    @test closure.mixing_length isa TKEMixingLength{FT}
+    @test closure.stability_functions isa ConstantStabilityFunctions{FT}
 
-    @test turbulent_prandtl_number(Pr₀, CRi, FT(0)) ≈ Pr₀
-    @test turbulent_prandtl_number(Pr₀, CRi, FT(-1)) ≈ Pr₀       # unstable: no enhancement
-    @test turbulent_prandtl_number(Pr₀, CRi, FT(1)) ≈ Pr₀ * (1 + CRi / 2)
-    @test turbulent_prandtl_number(Pr₀, CRi, FT(1e8)) ≈ Pr₀ * (1 + CRi) rtol=1e-6
+    @testset "defaults and the constants they imply" begin
+        sf = closure.stability_functions
+        @test closure.mixing_length.Cᴺ ≈ 0.76
+        @test (sf.Cᵘ, sf.Cᶜ, sf.Cᵉ, sf.Cᴰ) == FT.((0.196, 0.265, 0.392, 0.295))
+        @test closure.minimum_tke == FT(1e-6)
+        @test closure.negative_tke_damping_time_scale == FT(60)
+        @test isinf(closure.maximum_viscosity)
+        @test isinf(closure.maximum_tracer_diffusivity)
+        @test isinf(closure.maximum_tke_diffusivity)
 
-    # Monotone increasing in Ri, and bounded
-    Pr = [turbulent_prandtl_number(Pr₀, CRi, FT(Ri)) for Ri in 0:0.5:20]
-    @test issorted(Pr)
-    @test maximum(Pr) ≤ Pr₀ * (1 + CRi)
+        # The neutral log layer: von Kármán constant, surface TKE, Prandtl number
+        @test (sf.Cᵘ^3 / sf.Cᴰ)^(1/4) ≈ 0.40 atol=0.005
+        @test 1 / sqrt(sf.Cᵘ * sf.Cᴰ) ≈ 4.2 atol=0.05
+        @test sf.Cᵘ / sf.Cᶜ ≈ 0.74 atol=0.005
+    end
+
+    @testset "keyword arguments, promotion and float type" begin
+        closure = TKEBasedTurbulenceClosure(; mixing_length = TKEMixingLength(Cᴺ = 1),
+                                              stability_functions = ConstantStabilityFunctions(Cᵘ = 0.3, Cᶜ = 0.3, Cᵉ = 1, Cᴰ = 1),
+                                              maximum_viscosity = 100,
+                                              minimum_tke = 1e-8,
+                                              negative_tke_damping_time_scale = 10minutes)
+        @test closure.mixing_length.Cᴺ === FT(1)
+        @test closure.stability_functions.Cᵘ === FT(0.3)
+        @test closure.stability_functions.Cᵉ === FT(1)
+        @test closure.maximum_viscosity === FT(100)
+        @test closure.minimum_tke === FT(1e-8)
+        @test closure.negative_tke_damping_time_scale === FT(600)
+
+        explicit = TKEBasedTurbulenceClosure(ExplicitTimeDiscretization())
+        @test time_discretization(explicit) isa ExplicitTimeDiscretization
+
+        closure32 = TKEBasedTurbulenceClosure(Float32)
+        @test closure32.mixing_length isa TKEMixingLength{Float32}
+        @test closure32.stability_functions isa ConstantStabilityFunctions{Float32}
+        @test closure32.minimum_tke isa Float32
+    end
+
+    @testset "isbits and show" begin
+        @test isbits(closure)
+        @test isbits(TKEMixingLength())
+        @test isbits(ConstantStabilityFunctions())
+        @test summary(closure) == "TKEBasedTurbulenceClosure{VerticallyImplicitTimeDiscretization}"
+        str = sprint(show, closure)
+        @test occursin("Cᴺ", str)
+        @test occursin("ConstantStabilityFunctions", str)
+        @test occursin("minimum_tke", str)
+        @test occursin("Cᴰ", sprint(show, ConstantStabilityFunctions()))
+        @test occursin("Cᴺ", sprint(show, TKEMixingLength()))
+    end
 end
 
 #####
-##### Model integration
+##### In an AtmosphereModel
 #####
+
+# Set a uniform specific TKE `e₀` and refresh the closure fields
+function set_tke!(model, e₀)
+    ρ = model.dynamics.reference_state.density
+    set!(model.tracers[TKE_NAME], e₀)
+    parent(model.tracers[TKE_NAME]) .*= parent(ρ)
+    update_state!(model)
+    return nothing
+end
+
+column(field) = Array(interior(field, 1, 1, :))
 
 @testset "TKEBasedTurbulenceClosure in an AtmosphereModel [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
+    Nz = 32
+    Lz = 1000
+    grid = RectilinearGrid(default_arch; size = Nz, z = (0, Lz), topology = (Flat, Flat, Bounded))
+    zf = znodes(grid, Face())
+    closure = TKEBasedTurbulenceClosure()
 
-    grid = RectilinearGrid(default_arch; size=32, z=(0, 2000), topology=(Flat, Flat, Bounded))
+    @testset "the TKE tracer and the closure fields" begin
+        model = AtmosphereModel(grid; closure)
+        @test TKE_NAME === :ρe
+        @test :ρe ∈ keys(model.tracers)
+        @test :ρe ∈ keys(Oceananigans.prognostic_fields(model))
+        @test model.closure_fields isa TKEClosureFields
+        @test keys(model.closure_fields.tupled_tracer_diffusivities) == (:ρθ, :ρqᵛ, :ρe)
+        @test model.closure_fields.tupled_tracer_diffusivities.ρe === model.closure_fields.Kᵉ
+        @test model.closure_fields.tupled_tracer_diffusivities.ρθ === model.closure_fields.Kᶜ
 
-    @testset "tracer and closure-field wiring" begin
-        model = AtmosphereModel(grid; closure = TKEBasedTurbulenceClosure())
-
-        # `closure_required_tracers` is threaded through `AtmosphereModel`, so the user does not
-        # have to remember to ask for the TKE tracer
-        @test TKE_NAME ∈ keys(model.tracers)
-        @test TKE_NAME ∈ keys(prognostic_fields(model))
-
-        for name in (:Kᵘ, :Kᶜ, :ℓ, :e, :ℓᵗ, :u★²)
-            @test name ∈ propertynames(model.closure_fields)
-        end
-
-        # A user tracer coexists with the closure's
-        model = AtmosphereModel(grid; closure = TKEBasedTurbulenceClosure(), tracers = :ρc)
-        @test TKE_NAME ∈ keys(model.tracers)
+        # A user tracer coexists with the closure's, and naming the closure's tracer is harmless
+        model = AtmosphereModel(grid; closure, tracers = :ρc)
         @test :ρc ∈ keys(model.tracers)
+        @test :ρe ∈ keys(model.tracers)
+        model = AtmosphereModel(grid; closure, tracers = :ρe)
+        @test count(==(:ρe), keys(Oceananigans.prognostic_fields(model))) == 1
+
+        # Prognostic names must be unique: a tracer cannot take the name of another prognostic
+        @test_throws ArgumentError AtmosphereModel(grid; closure, tracers = :ρqᵛ)
     end
 
-    @testset "compressible scalar indexing and SSPRK3 stepping" begin
-        for time_discretization in (ExplicitTimeStepping(), SplitExplicitTimeDiscretization())
-            dynamics = CompressibleDynamics(time_discretization; reference_potential_temperature = 300)
-            model = AtmosphereModel(grid; dynamics, closure = TKEBasedTurbulenceClosure())
-            prognostic_names = keys(prognostic_fields(model))
-            closure_scalar_names = keys(model.closure_fields.tupled_tracer_diffusivities)
+    @testset "mixing length and diffusivities in a neutral column" begin
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        e₀ = FT(0.5)
+        set!(model; θ = 300)
+        set_tke!(model, e₀)
 
-            for (scalar_index, name) in enumerate(closure_scalar_names)
-                prognostic_index = findfirst(==(name), prognostic_names)
-                @test Breeze.TimeSteppers.closure_scalar_index(model, prognostic_index) === Val(scalar_index)
-            end
+        ℓ = column(model.closure_fields.ℓ)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        Kᵉ = column(model.closure_fields.Kᵉ)
+        sf = closure.stability_functions
+        interior_faces = 2:Nz
+
+        # Neutral air: ℓ is the height above the surface, masked on the boundary faces
+        @test ℓ[1] == 0
+        @test ℓ[Nz+1] == 0
+        @test all(ℓ[interior_faces] .≈ zf[interior_faces])
+
+        # Kᵘ = Cᵘ ℓ √e and the ratios Kᶜ/Kᵘ, Kᵉ/Kᵘ are the stability-function ratios
+        @test all(Kᵘ[interior_faces] .≈ sf.Cᵘ .* ℓ[interior_faces] .* sqrt(e₀))
+        @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᶜ / sf.Cᵘ)
+        @test all(Kᵉ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᵉ / sf.Cᵘ)
+        @test Kᵘ[1] == 0
+        @test Kᵘ[Nz+1] == 0
+    end
+
+    @testset "the stratification length" begin
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        e₀ = FT(0.5)
+        Γ = FT(0.005)
+        set!(model; θ = z -> 300 + Γ * z)
+        set_tke!(model, e₀)
+
+        ℓ = column(model.closure_fields.ℓ)
+        θ = column(model.formulation.potential_temperature)
+        g = model.thermodynamic_constants.gravitational_acceleration
+        Δz = Lz / Nz
+        Cᴺ = closure.mixing_length.Cᴺ
+
+        for k in 2:Nz
+            N² = g * (log(θ[k]) - log(θ[k-1])) / Δz
+            ℓᴺ = Cᴺ * sqrt(e₀) / sqrt(N²)
+            @test ℓ[k] ≈ min(zf[k], ℓᴺ) rtol=1e-5
         end
 
-        dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature = 300)
-        model = AtmosphereModel(grid; dynamics, closure = TKEBasedTurbulenceClosure())
-        set!(model; θ = 300, ρ = model.dynamics.reference_state.density)
-        time_step!(model, 1)
-
-        @test model.clock.iteration == 1
-        @test all(isfinite, Array(interior(model.dynamics.dry_density)))
-        @test all(isfinite, Array(interior(model.tracers[TKE_NAME])))
+        # Stratification limits the length well above the surface
+        @test ℓ[Nz] < zf[Nz] / 2
     end
 
-    @testset "positivity and finiteness over 20 steps" begin
-        model = AtmosphereModel(grid; closure = TKEBasedTurbulenceClosure(),
-                                coriolis = FPlane(latitude = 45))
+    @testset "diffusivity caps" begin
+        capped = TKEBasedTurbulenceClosure(maximum_viscosity = 1e-3, maximum_tracer_diffusivity = 2e-3,
+                                           maximum_tke_diffusivity = 3e-3)
+        model = AtmosphereModel(grid; closure = capped, advection = nothing)
+        set!(model; θ = 300)
+        set_tke!(model, FT(1))
+        @test maximum(column(model.closure_fields.Kᵘ)) ≈ 1e-3
+        @test maximum(column(model.closure_fields.Kᶜ)) ≈ 2e-3
+        @test maximum(column(model.closure_fields.Kᵉ)) ≈ 3e-3
+    end
 
-        ## A sheared profile, so shear production is actually nonzero — a uniform wind gives
-        ## S² = 0 and the column would sit at the TKE floor no matter what the closure did.
-        θ₀ = model.dynamics.reference_state.potential_temperature
-        set!(model; θ = z -> θ₀ + max(0, z - 1000) * FT(0.008), ρu = z -> FT(10) * z / 2000)
+    @testset "a sheared, capped boundary layer stays finite and positive" begin
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        θᵢ(z) = 300 + 0.01 * max(0, z - 500)
+        uᵢ(z) = 5 * min(1, z / 300)
+        set!(model; θ = θᵢ, u = uᵢ)
+        set_tke!(model, FT(0.1))
 
         for _ in 1:20
             time_step!(model, 10)
         end
 
-        e = Array(interior(model.closure_fields.e))
-        ν = Array(interior(model.closure_fields.Kᵘ))
-        κ = Array(interior(model.closure_fields.Kᶜ))
-        ℓ = Array(interior(model.closure_fields.ℓ))
-        ℓᶜ = Array(interior(model.closure_fields.ℓᶜ))
-        ρe = Array(interior(model.tracers[TKE_NAME]))
-
-        @test all(isfinite, e) && all(isfinite, ν) && all(isfinite, κ) && all(isfinite, ℓ)
-        @test all(≥(0), e)
-        @test all(≥(0), ρe)
-        @test all(≥(0), ν)
-        @test all(≥(0), κ)
-
-        # `ℓ` is masked to zero on the bottom boundary face and left at zero on the top one, where
-        # `ν` is zero anyway; the dissipation reads `ℓᶜ`, which must be strictly positive in every
-        # cell or `ε` blows up.
-        @test all(>(0), ℓ[2:end-1])
-        @test all(>(0), ℓᶜ)
-        @test all(isfinite, ℓᶜ)
-
-        # Shear drives turbulence: something must have grown past the floor
-        @test maximum(e) > 10 * TKEBasedTurbulenceClosure().eᵐⁱⁿ
-
-        # Pr ≥ Pr₀ everywhere, so K never exceeds ν/Pr₀
-        @test all(κ .≤ ν ./ TKEBasedTurbulenceClosure().Pr₀ .+ sqrt(eps(FT)))
+        ρe = column(model.tracers.ρe)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        @test all(isfinite, ρe)
+        @test all(ρe .≥ 0)
+        @test all(isfinite, Kᵘ)
+        @test maximum(Kᵘ) > 0
+        sf = closure.stability_functions
+        @test all(Kᶜ[2:Nz] .≈ Kᵘ[2:Nz] .* (sf.Cᶜ / sf.Cᵘ))
     end
 
-    @testset "surface TKE floor tracks u★²" begin
-        # A momentum flux at the bottom sets u★², and the floor holds e(z₁) ≥ Csfc u★²
-        τˣ = FT(-0.1)   # kg m⁻¹ s⁻², downward momentum flux
-        ρu_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(τˣ))
-        closure = TKEBasedTurbulenceClosure()
-        model = AtmosphereModel(grid; closure, boundary_conditions = (; ρu = ρu_bcs))
+    @testset "dissipation decays TKE without driving it negative" begin
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        set!(model; θ = 300)
+        set_tke!(model, FT(1))
+        ρ = column(model.dynamics.reference_state.density)
 
+        e_before = column(model.tracers.ρe) ./ ρ
+        for _ in 1:10
+            time_step!(model, 20)
+        end
+        e_after = column(model.tracers.ρe) ./ ρ
+
+        @test all(e_after .≥ 0)
+        @test all(e_after .< e_before)
+        # Dissipation is strongest where ℓ = z is shortest
+        @test e_after[1] < e_after[Nz]
+    end
+
+    @testset "negative TKE is damped on the damping time scale" begin
+        τ = FT(60)
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        set!(model; θ = 300)
+        set_tke!(model, FT(-0.1))
+
+        # One step of length τ halves a uniform negative e: there is no shear, no stratification and
+        # no TKE gradient, so the damping is the only term
+        time_step!(model, τ)
+        e = column(model.tracers.ρe) ./ column(model.dynamics.reference_state.density)
+        @test all(e .≈ -0.05)
+    end
+
+    @testset "explicit time discretization" begin
+        explicit = TKEBasedTurbulenceClosure(ExplicitTimeDiscretization())
+        model = AtmosphereModel(grid; closure = explicit, advection = nothing)
+        set!(model; θ = z -> 300 + 0.003z, u = z -> 5 * min(1, z / 300))
+        set_tke!(model, FT(0.1))
+        for _ in 1:5
+            time_step!(model, 1)
+        end
+        @test all(isfinite, column(model.tracers.ρe))
+        @test all(column(model.tracers.ρe) .≥ 0)
+    end
+
+    @testset "compressible dynamics" begin
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature = 300)
+        model = AtmosphereModel(grid; dynamics, closure)
+        @test keys(model.closure_fields.tupled_tracer_diffusivities) == (:ρθ, :ρqᵛ, :ρe)
+        set!(model; θ = 300, ρ = model.dynamics.reference_state.density)
         time_step!(model, 1)
-
-        ρ₁ = Array(interior(Breeze.AtmosphereModels.total_density(model.dynamics)))[1]
-        u★² = abs(τˣ) / ρ₁
-        @test Array(interior(model.closure_fields.u★²))[1] ≈ u★² rtol=1e-5
-
-        e₁ = Array(interior(model.closure_fields.e))[1]
-        @test e₁ ≥ surface_tke_coefficient(closure) * u★² * (1 - sqrt(eps(FT)))
-    end
-
-    @testset "K = ν/Pr holds pointwise" begin
-        # Nothing clips ν or K, so the Prandtl number the closure advertises is exactly the one
-        # the fields carry — in a neutral column that is Pr₀ everywhere.
-        closure = TKEBasedTurbulenceClosure()
-        model = AtmosphereModel(grid; closure, coriolis = FPlane(latitude = 45))
-        θ₀ = model.dynamics.reference_state.potential_temperature
-        set!(model; θ = z -> θ₀, ρu = z -> FT(20) * z / 2000)
-
-        for _ in 1:5
-            time_step!(model, 10)
-        end
-
-        ν = Array(interior(model.closure_fields.Kᵘ))
-        κ = Array(interior(model.closure_fields.Kᶜ))
-
-        @test maximum(ν) > 0                            # the column is actually mixing
-        @test all(isapprox.(κ, ν ./ closure.Pr₀; rtol = sqrt(eps(FT))))
-    end
-
-    @testset "Cq scales the TKE diffusivity only" begin
-        # MYNN transport TKE at S_q = 3S_M (their Eq. 67). We default to Cq = 1, and the TKE tracer
-        # carries its own field so that momentum and heat are untouched by the choice.
-        for Cq in (FT(1), FT(2), FT(3))
-            closure = TKEBasedTurbulenceClosure(FT; Cq)
-            model = AtmosphereModel(grid; closure, coriolis = FPlane(latitude = 45))
-            θ₀ = model.dynamics.reference_state.potential_temperature
-            set!(model; θ = z -> θ₀, ρu = z -> FT(20) * z / 2000)
-
-            for _ in 1:5
-                time_step!(model, 10)
-            end
-
-            ν = Array(interior(model.closure_fields.Kᵘ))
-            νᵗ = Array(interior(model.closure_fields.Kᵉ))
-            κ = Array(interior(model.closure_fields.Kᶜ))
-
-            @test maximum(ν) > 0                        # the column is actually mixing
-            @test all(isapprox.(νᵗ, Cq .* ν; rtol = sqrt(eps(FT))))
-            @test all(isapprox.(κ, ν ./ closure.Pr₀; rtol = sqrt(eps(FT))))   # heat unaffected
-
-            # and the TKE tracer is the field that reads it
-            @test model.closure_fields.tupled_tracer_diffusivities[TKE_NAME] ===
-                  model.closure_fields.Kᵉ
-        end
-
-        # The shipped default is Deardorff's subgrid value, not the k-ε convention of one that
-        # falls out of simply reusing the momentum diffusivity.
-        @test TKEBasedTurbulenceClosure().Cq == 2
-    end
-
-    @testset "alternative constant sets run" begin
-        ## Mellor-Yamada (1982) and Janjić (2001) MYJ, passed directly rather than through
-        ## constructors: what is being tested is that the closure builds and steps away from its
-        ## own defaults, not that any particular published pair was transcribed correctly.
-        for closure in (TKEBasedTurbulenceClosure(FT; Cᴷ = 0.5544, Cμ = 0.0945),
-                        TKEBasedTurbulenceClosure(FT; Cᴷ = 0.6198, Cμ = 0.1476))
-            model = AtmosphereModel(grid; closure)
-            time_step!(model, 10)
-            @test all(isfinite, Array(interior(model.closure_fields.Kᵘ)))
-        end
-    end
-end
-
-#####
-##### Every mixing-length branch, on the device
-#####
-
-## The testsets above call the branch functions from the host, so they run on the CPU wherever their
-## data lives and cannot compile anything for a GPU. Stepping a model is what puts a branch inside
-## `compute_closure_fields!` and therefore through the device compiler. The shipped default covers
-## `HeightAboveSurface`, `TurbulenceLengthScale`, `BuoyancyLengthScale` at `Cᶜᵇ = 0` and
-## `MinimumBlend`; this covers the rest, which otherwise reach the device in no test at all:
-## `SurfaceLayerLengthScale` (its `ifelse` chain and `cbrt`), `HarmonicBlend`, `PowerBlend`, and the
-## convective enhancement of `ℓᵇ` (another `cbrt`, plus the guard against Inf/Inf).
-@testset "every mixing length compiles and runs on $(summary(default_arch)) [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-
-    grid = RectilinearGrid(default_arch; size=32, z=(0, 2000), topology=(Flat, Flat, Bounded))
-
-    MYNN = (SurfaceLayerLengthScale(), TurbulenceLengthScale(),
-            BuoyancyLengthScale(Cᵇ = 1, Cᶜᵇ = 5))
-
-    configurations = ("NakanishiNiinoLengthScale" => (NakanishiNiinoLengthScale(), 3),
-                      "MYNN branches under PowerBlend" =>
-                          (BlendedMixingLength(MYNN...; blend = PowerBlend(p = 2)), 2),
-                      "MYNN branches under MinimumBlend" =>
-                          (BlendedMixingLength(MYNN...; blend = MinimumBlend()), 2))
-
-    @testset "$name" for (name, (mixing_length, Cq)) in configurations
-        closure = TKEBasedTurbulenceClosure(FT; mixing_length, Cq)
-        model = AtmosphereModel(grid; closure, coriolis = FPlane(latitude = 45))
-
-        ## Sheared and stably stratified aloft, so shear production is nonzero and ℓᵇ binds; a
-        ## uniform wind would leave the column at the TKE floor and exercise none of this.
-        θ₀ = model.dynamics.reference_state.potential_temperature
-        set!(model; θ = z -> θ₀ + max(0, z - 1000) * FT(0.008), ρu = z -> FT(10) * z / 2000)
-
-        for _ in 1:5
-            time_step!(model, 10)
-        end
-
-        Kᵘ = Array(interior(model.closure_fields.Kᵘ))
-        Kᶜ = Array(interior(model.closure_fields.Kᶜ))
-        Kᵉ = Array(interior(model.closure_fields.Kᵉ))
-        ℓ = Array(interior(model.closure_fields.ℓ))
-        ℓᶜ = Array(interior(model.closure_fields.ℓᶜ))
-        e = Array(interior(model.closure_fields.e))
-
-        @test all(isfinite, Kᵘ) && all(isfinite, Kᶜ) && all(isfinite, Kᵉ)
-        @test all(isfinite, ℓ) && all(isfinite, ℓᶜ) && all(isfinite, e)
-        @test all(≥(0), Kᵘ) && all(≥(0), e)
-        @test all(>(0), ℓᶜ)              # the dissipation divides by it
-        @test Kᵉ ≈ Cq .* Kᵘ              # the transport ratio survives the device path
-        @test maximum(Kᵘ) > 0            # the closure did something
+        @test model.clock.iteration == 1
+        @test all(isfinite, Array(interior(model.dynamics.dry_density)))
+        @test all(isfinite, Array(interior(model.tracers.ρe)))
     end
 end

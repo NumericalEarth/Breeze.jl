@@ -14,113 +14,86 @@ referred to as a planetary boundary-layer scheme.
 
 ## Prognostic-TKE eddy diffusivity
 
-[`TKEBasedTurbulenceClosure`](@ref) carries one prognostic equation, for the subgrid turbulent
-kinetic energy ``e``, and closes the vertical eddy diffusivities on it:
+[`TKEBasedTurbulenceClosure`](@ref) is a vertical eddy-diffusivity closure with one prognostic
+equation, for the subgrid turbulent kinetic energy ``e``, in the spirit of CATKE
+([Wagner et al. 2025](@cite Wagner25catke)). It is an empirical closure: the eddy diffusivities
+of momentum, scalars and turbulent kinetic energy are the products of a turbulent velocity
+``\sqrt{e}`` and a mixing length for each,
 
 ```math
-K^u = Cᴷ ℓ \sqrt{e}, \qquad K^c = K^u / \mathrm{Pr}, \qquad K^e = C^q K^u, \qquad ε = Cᵋ e^{3/2} / ℓ,
+K^u = ℓ^u \sqrt{e}, \qquad K^c = ℓ^c \sqrt{e}, \qquad K^e = ℓ^e \sqrt{e},
 ```
+
+where each mixing length is a *stability function* times one primary length ``ℓ``,
 
 ```math
-∂e/∂t = P + B - ε + \text{transport}, \qquad P = K^u S², \qquad B = -K^c N².
+ℓ^u = S^u ℓ, \qquad ℓ^c = S^c ℓ, \qquad ℓ^e = S^e ℓ,
 ```
 
-The source terms on the right-hand side include: shear production ``P``, buoyancy ``B``,
-dissipation ``ε``, and transport, which is the ordinary scalar machinery acting on a `:ρtke` tracer.
-The turbulent Prandtl number ``Pr`` grows with the gradient Richardson number, so that heat mixes
-less readily than momentum as the column stabilizes. It saturates rather than growing without
-bound — at ``Pr₀ (1 + C^{Ri}) = 2.96`` with the defaults — which is what leaves ``K^c`` finite in a
-strong inversion, and so what lets the closure entrain there at all.
+and the dissipation of turbulent kinetic energy follows the same pattern with a dissipation length
+``ℓ^D = ℓ / S^D``,
+
+```math
+ε = \frac{e^{3/2}}{ℓ^D} = S^D \frac{e^{3/2}}{ℓ}.
+```
+
+The turbulent kinetic energy obeys
+
+```math
+∂_t (ρ e) + ∇ ⋅ (ρ 𝐮 e) = ∂_z (ρ K^e ∂_z e) + ρ (P + B - ε), \qquad P = K^u S², \qquad B = -K^c N²,
+```
+
+with shear production ``P`` from the squared vertical shear ``S² = (∂_z u)² + (∂_z v)²``, the
+buoyancy flux ``B`` from the squared buoyancy frequency ``N² = g \, ∂_z \ln θᵥ``, the dissipation
+``ε``, and transport. The density ``ρ e`` is the tracer `ρe`, which the closure adds to the model's
+tracers; it is advected and vertically diffused like every other scalar, and the closure applies
+the local terms ``P + B - ε``.
 
 See the [single-column boundary layer example](literated/single_column_tke_boundary_layer.md) for
-an example of closure performance with stable, neutral and convective boundary layers.
+the closure in stable, neutral and convective boundary layers.
 
 ### The mixing length
 
-The length scale ``ℓ`` is supplied by a dispatched component, by default a
-[`BlendedMixingLength`](@ref): a tuple of independent length-scale branches reduced to one master
-length by a blending rule. The three default branches follow MYNN
-([Nakanishi and Niino 2009](@cite NakanishiNiino2009), their Eqs. 53–55), with the surface
-branch reduced to its neutral limit,
+The primary mixing length ([`TKEMixingLength`](@ref)) is the smaller of the height above the
+surface and the stratification length,
 
 ```math
-ℓᵍ = κ (z + ℓʳ), \qquad ℓᵗ = Cᵗ \frac{∫ q z \, dz}{∫ q \, dz}, \qquad ℓᵇ = Cᵇ q / N,
+ℓ = \min(z, \, Cᴺ \sqrt{e} / N),
 ```
 
-with ``q = \sqrt{2e}``: the distance to the surface offset by a roughness length, the depth over
-which the column is turbulent, and the distance a parcel would travel against stable
-stratification. ``ℓᵗ`` is the only non-local contribution, and a branch that does not apply — ``ℓᵇ``
-in neutral or unstable air — returns a very large length and drops out.
+the distance to the wall and the distance a parcel with kinetic energy ``e`` travels against a
+stable stratification of buoyancy frequency ``N``. The stratification length is infinite in neutral
+and unstable air, where ``ℓ = z``. The height above the surface carries no coefficient of its own
+— the stability functions set the scale of every diffusivity — and ``Cᴺ = 0.76`` by default, after
+[Deardorff (1980)](@cite Deardorff1980).
 
-Branches and blend are separate because the choice of rule is itself a modelling decision. The
-default [`MinimumBlend`](@ref) takes ``ℓ = \min(ℓᵍ, ℓᵗ, ℓᵇ)``, so the most restrictive scale wins
-outright. [`HarmonicBlend`](@ref) is MYNN's own ``1/ℓ = 1/ℓᵍ + 1/ℓᵗ + 1/ℓᵇ``, and
-[`PowerBlend`](@ref) interpolates between them,
+### Stability functions
 
-```math
-ℓ^{-p} = (ℓᵍ)^{-p} + (ℓᵗ)^{-p} + (ℓᵇ)^{-p},
-```
+In this first version the stability functions are constants ([`ConstantStabilityFunctions`](@ref)),
+``S^u = Cᵘ``, ``S^c = Cᶜ``, ``S^e = Cᵉ``, ``S^D = Cᴰ``. Three consequences are worth stating,
+because they are what the constants mean:
 
-recovering the harmonic blend at ``p = 1`` and the minimum as ``p → ∞``. The exponent matters near
-a wall: writing ``x`` for the ratio of the smallest branch to another one, the blend sits below
-that smallest branch by ``x^p/p``, so at ``p = 1`` an outer scale contaminates the surface layer at
-first order in height. [Mason and Thomson (1992)](@cite MasonThomson1992) match a wall scale to an
-outer scale in exactly this form and recommend ``p = 2``.
+- the turbulent Prandtl number is ``Pr = K^u / K^c = Cᵘ / Cᶜ``, and the TKE Schmidt number
+  ``K^u / K^e = Cᵘ / Cᵉ``;
+- in a neutral constant-stress layer, where ``ℓ = z``, the closure is Prandtl's mixing-length
+  model: production balances dissipation at ``e / u_\star² = 1 / \sqrt{Cᵘ Cᴰ}``, and the wind
+  profile is logarithmic with von Kármán constant ``κ = (Cᵘ³ / Cᴰ)^{1/4}``;
+- in a stably stratified layer far from the surface, where ``ℓ = Cᴺ \sqrt{e} / N``, turbulent
+  kinetic energy grows below and decays above the gradient Richardson number
+  ``Ri^\dagger = Cᵘ Cᴺ² / (Cᶜ Cᴺ² + Cᴰ)``.
 
-Two structural departures from MYNN. ``N²`` enters ``ℓᵇ`` through a smooth positive part, so
-the stable limit engages continuously rather than switching on at ``∂Θᵥ/∂z > 0`` as in their
-Eq. 55. And their separate realizability restriction ``ℓ/q ≤ 1/N`` (their Eq. 56) is dropped:
-every blending rule here is bounded by its smallest branch, so ``ℓ ≤ ℓᵇ = Cᵇ q/N`` already
-satisfies it whenever ``Cᵇ ≤ 1``, which holds for both the default 0.53 and MYNN's own 1.
+The defaults, ``Cᵘ = 0.196``, ``Cᶜ = 0.265``, ``Cᵉ = 0.392``, ``Cᴰ = 0.295``, are the
+Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009) with the von
+Kármán constant absorbed; they give ``κ = 0.40``, ``e / u_\star² = 4.2``, ``Pr = 0.74`` and
+``Ri^\dagger = 0.25``. They are placeholders for calibration. Richardson-number-dependent stability
+functions, as in CATKE, a convective length scale driven by the surface buoyancy flux, a surface
+flux of turbulent kinetic energy, and a non-local flux are natural extensions.
 
-MYNN's two remaining pieces are implemented but off by default: the stability correction on
-the surface branch (their Eq. 53) is [`SurfaceLayerLengthScale`](@ref), and the convective
-enhancement of ``ℓᵇ`` (their Eq. 55) is the ``Cᶜᵇ`` coefficient of
-[`BuoyancyLengthScale`](@ref), zero unless set. [`NakanishiNiinoLengthScale`](@ref) assembles
-both with MYNN's own coefficients under their harmonic blend.
+### Numerics
 
-### Coefficients
-
-Eliminating ``ℓ`` between the viscosity and the dissipation gives the ``k``–``ε`` eddy-viscosity
-relation, whose coefficient is the product of the other two:
-
-```math
-K^u = Cᴷ ℓ \sqrt{e} = (Cᴷ Cᵋ) \frac{e²}{ε} ≡ Cμ \frac{e²}{ε}, \qquad Cμ ≡ Cᴷ Cᵋ.
-```
-
-So the closure stores ``Cᴷ`` and ``Cμ`` rather than ``Cᴷ`` and ``Cᵋ``, and the dissipation
-coefficient ``Cᵋ = Cμ/Cᴷ``, the surface turbulence level and the stress coefficient all derive from
-the stored pair.
-
-Using ``Cμ`` has the advantage of being defined without reference to a master length scale
-(``Cμ = K^u ε / e²``) and therefore may be compared with families that carry no ``ℓ`` at all:
-0.058 here (MYNN) against 0.090 for standard ``k``–``ε``, 0.094 (MY82), 0.148 (MYJ), and 0.200
-(SHOC, which is uniquely written with a timescale rather than a length). ``Cμ`` alone fixes the
-turbulence level in the neutral surface layer: a constant-stress layer at local equilibrium
-``P = ε`` settles to ``e/u_\star² = (Cμ)^{-1/2}``, regardless of ``Cᴷ``. Higher up, ``e`` is set by
-the full budget rather than by any coefficient.
-
-The surface layer value is also imposed as a floor on ``e`` in the first cell. Since it is where the
-local budget already balances, the floor is inert in a spun-up constant-stress layer; what
-it does is get a column started, where ``e`` would otherwise begin too small for ``P = K^u S²`` to
-bootstrap any turbulence, and hold the surface consistent with the applied stress in a column that
-has run down.
-
-``Cᴷ`` alone carries consistency with the neutral logarithmic wind profile: in a constant-stress
-layer with ``ℓ = κ z`` the closure collapses onto Prandtl's mixing-length model, but with an
-effective length ``Cˢ κ z`` rather than ``κ z``, where
-
-```math
-Cˢ ≡ Cᴷ / (Cμ)^{1/4}
-```
-
-is the stress coefficient. The model's own velocity gradient is then ``u_\star / (Cˢ κ z)``, so
-regressing ``U/u_\star`` on ``\ln(z/ℓʳ)`` over the constant-stress layer returns ``Cˢ κ`` rather than
-``κ``. The log law is recovered exactly on ``Cˢ = 1`` or, equivalently, on the locus ``Cμ = (Cᴷ)⁴``.
-The defaults are MYNN's ([Nakanishi and Niino 2009](@cite NakanishiNiino2009)), ``Cᴷ = 0.4903``
-and ``Cμ = 0.0578``, which satisfy it exactly.
-
-!!! note "Note about Subgrid Coefficients"
-
-    Subgrid coefficients from large-eddy models (e.g., Smagorinsky's ``C_s``) do not apply here,
-    because there ``ℓ`` is the filter width rather than an equilibrium mixing length.
+The diffusivities are computed at the cell interfaces where the fluxes live, from ``\sqrt{e}``
+reconstructed from the cell centers and floored at `minimum_tke`. Following CATKE, the sources of
+turbulent kinetic energy — shear production and a positive buoyancy flux — are treated explicitly
+and the sinks — dissipation and a negative buoyancy flux — implicitly, so that ``e`` stays positive
+for any time step; ``e`` that advection drives negative is damped on `negative_tke_damping_time_scale`
+rather than clipped.
