@@ -395,8 +395,8 @@ end
 # multi-substep stage. The vertical ∂z(Cᴸ(ρθ)′) part is always applied — the
 # vertical acoustic mode is solved implicitly every substep.
 @inline function ∇ᶻp′(i, j, k, grid,
-                                                dynamics::TerrainCompressibleDynamics,
-                                                ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
+                      dynamics::TerrainCompressibleDynamics,
+                      ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
     ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
     correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
                                                                             dynamics, ρθ′, Πᴸ, γRᵐᴸ)
@@ -415,12 +415,12 @@ end
     return ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
-@inline function slope_x_times_∂z_linearized_pressure(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ)
+@inline function slope_x_times_∂z_linearized_pressure(i, j, k, grid::TerrainFollowingGrid, ρθ′, Πᴸ, γRᵐᴸ)
     slope = terrain_slope_x_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
-@inline function slope_y_times_∂z_linearized_pressure(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ)
+@inline function slope_y_times_∂z_linearized_pressure(i, j, k, grid::TerrainFollowingGrid, ρθ′, Πᴸ, γRᵐᴸ)
     slope = terrain_slope_y_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 end
@@ -447,7 +447,7 @@ end
     return ∂y_p′ - correction
 end
 
-@inline function terrain_vertical_transport_momentum(i, j, k, grid,
+@inline function terrain_vertical_transport_momentum(i, j, k, grid::TerrainFollowingGrid,
                                                      ρu, ρv, ρw)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
@@ -510,7 +510,7 @@ end
 @kernel function _assemble_terrain_slow_vertical_momentum_tendency!(Gˢρw̃,
                                                                     Gⁿρu, Gⁿρv, Gⁿρw,
                                                                     pᴸ, ρᴸ, pᵣ, ρᵣ,
-                                                                    grid, dynamics, g,
+                                                                    grid::TerrainFollowingGrid, dynamics, g,
                                                                     vertical_pressure_tendency_factor)
     i, j, k = @index(Global, NTuple)
 
@@ -599,12 +599,12 @@ end
 ##### `terrain_slope_{x,y}_ccf`; they differ only in whether the slope multiplies
 ##### inside or outside the interpolation stencil.
 
-@inline function slope_x_times_∂z(i, j, k, grid, p)
+@inline function slope_x_times_∂z(i, j, k, grid::TerrainFollowingGrid, p)
     slope = terrain_slope_x_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, p)
 end
 
-@inline function slope_x_times_∂z_p′(i, j, k, grid, p, pᵣ)
+@inline function slope_x_times_∂z_p′(i, j, k, grid::TerrainFollowingGrid, p, pᵣ)
     slope = terrain_slope_x_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, perturbation_pressure, p, pᵣ)
 end
@@ -640,12 +640,12 @@ end
 
 ##### Slope-inside-interpolation: ℑz(ℑy(slope * ∂z(p')))
 
-@inline function slope_y_times_∂z(i, j, k, grid, p)
+@inline function slope_y_times_∂z(i, j, k, grid::TerrainFollowingGrid, p)
     slope = terrain_slope_y_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, p)
 end
 
-@inline function slope_y_times_∂z_p′(i, j, k, grid, p, pᵣ)
+@inline function slope_y_times_∂z_p′(i, j, k, grid::TerrainFollowingGrid, p, pᵣ)
     slope = terrain_slope_y_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, perturbation_pressure, p, pᵣ)
 end
