@@ -134,8 +134,14 @@ end
         θ  = Reactant.to_rarray(Float64[_A, _σ₀, _U₀])
         dθ = Reactant.to_rarray(zeros(3))
 
-        compiled = Reactant.@compile raise_first = true raise = true sync = true grad_loss(
-            model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
+        # Compiling the gradient causes a stackoverflow error in Julia v1.11 on the CI
+        # machine, similarly to issue <https://github.com/JuliaLang/julia/issues/54998>.  We
+        # increase the task's stack size to 16 MiB to work around the issue.
+        task_compiled = Task(() -> Reactant.@compile(raise_first = true, raise = true, sync = true, grad_loss(
+            model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)), 16 << 20)
+        schedule(task_compiled)
+        wait(task_compiled)
+        compiled = fetch(task_compiled)
 
         dθ_result, J_ad = compiled(model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
         J_ad  = Float64(J_ad)
