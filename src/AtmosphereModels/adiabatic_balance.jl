@@ -197,7 +197,7 @@ $(TYPEDSIGNATURES)
 
 Build a stripped adiabatic twin of `model` that SHARES all field memory (momentum, velocities,
 densities, ρθ, moisture, tracers, temperature, pressure solver, dynamics fields) and steps it in
-place. Every prognostic scalar — momentum, ρθ/ρe, moisture, and tracers — is rewrapped with its
+place. Every prognostic scalar — momentum, ρθ/ρs, moisture, and tracers — is rewrapped with its
 surface fluxes stripped to no-flux (see [`adiabatic_scalar_bcs`](@ref)), sharing the production data
 so no memory is reallocated. The twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per
 `balancer.time_stepping`); microphysics, closure, the implicit diffusion solver, the sponge, and

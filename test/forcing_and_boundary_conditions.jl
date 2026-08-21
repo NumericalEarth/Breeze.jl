@@ -28,7 +28,7 @@ increment_tolerance(::Type{Float64}) = 1e-10
     # Test a representative subset of forcing types (reduced from 4 to 2)
     forcings = [
         Returns(one(FT)),
-        Forcing(Returns(one(FT)), field_dependencies=(:ρe, :ρqᵛ, :ρu), discrete_form=true),
+        Forcing(Returns(one(FT)), field_dependencies=(:ρs, :ρqᵛ, :ρu), discrete_form=true),
     ]
 
     Δt = convert(FT, 1e-6)
@@ -45,11 +45,11 @@ increment_tolerance(::Type{Float64}) = 1e-10
         time_step!(model, Δt)
         @test maximum(model.momentum.ρv) ≈ Δt
 
-        e_forcing = (; ρe=forcing)
-        model = setup_forcing_model(grid, e_forcing)
-        ρe_before = deepcopy(static_energy_density(model))
+        s_forcing = (; ρs=forcing)
+        model = setup_forcing_model(grid, s_forcing)
+        ρs_before = deepcopy(static_energy_density(model))
         time_step!(model, Δt)
-        @test maximum(static_energy_density(model)) ≈ maximum(ρe_before) + Δt
+        @test maximum(static_energy_density(model)) ≈ maximum(ρs_before) + Δt
     end
 
     @testset "Forcing on non-existing field errors" begin
@@ -345,22 +345,22 @@ end
     @testset "BulkSensibleHeatFlux with StaticEnergyFormulation [$FT]" begin
         bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
 
-        # Test with ρe on static energy formulation
-        ρe_bcs = FieldBoundaryConditions(bottom=bc)
+        # Test with ρs on static energy formulation
+        ρs_bcs = FieldBoundaryConditions(bottom=bc)
         model = AtmosphereModel(grid; formulation=:StaticEnergy,
-                                boundary_conditions=(; ρe=ρe_bcs))
+                                boundary_conditions=(; ρs=ρs_bcs))
         θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀, qᵗ=FT(0.01))
         time_step!(model, 1e-6)
         @test true
     end
 
-    @testset "BulkSensibleHeatFlux with ρe auto-converts for θ formulation [$FT]" begin
+    @testset "BulkSensibleHeatFlux with ρs auto-converts for θ formulation [$FT]" begin
         bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
 
-        # ρe BCs with θ formulation: should auto-convert to ρθ
-        ρe_bcs = FieldBoundaryConditions(bottom=bc)
-        model = AtmosphereModel(grid; boundary_conditions=(; ρe=ρe_bcs))
+        # ρs BCs with θ formulation: should auto-convert to ρθ
+        ρs_bcs = FieldBoundaryConditions(bottom=bc)
+        model = AtmosphereModel(grid; boundary_conditions=(; ρs=ρs_bcs))
         θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀)
         time_step!(model, 1e-6)
@@ -424,12 +424,12 @@ end
     @testset "Combined bulk boundary conditions with StaticEnergyFormulation [$FT]" begin
         ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
-        ρe_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
+        ρs_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
                                                                      coefficient=Cᴰ, gustiness=gustiness))
         ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
                                                                coefficient=Cᴰ, gustiness=gustiness))
 
-        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵛ=ρqᵛ_bcs)
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρs=ρs_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; formulation=:StaticEnergy, boundary_conditions)
 
         θ₀ = model.dynamics.reference_state.potential_temperature
@@ -493,7 +493,7 @@ end
     θ₀ = FT(290)
     qᵗ₀ = FT(0.01)
 
-    @testset "Automatic ρe → ρθ conversion [$FT]" begin
+    @testset "Automatic ρs → ρθ conversion [$FT]" begin
         𝒬 = FT(100)  # W/m²
 
         # Test bottom, top, and both together
@@ -502,7 +502,7 @@ end
             FieldBoundaryConditions(top=FluxBoundaryCondition(-𝒬)),
             FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬), top=FluxBoundaryCondition(-𝒬))
         ]
-            model = AtmosphereModel(grid; boundary_conditions=(ρe=bcs_config,))
+            model = AtmosphereModel(grid; boundary_conditions=(ρs=bcs_config,))
             set!(model; θ=θ₀, qᵗ=qᵗ₀)
         time_step!(model, FT(1e-6))
         @test true
@@ -528,8 +528,8 @@ end
         grid_1 = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
         𝒬 = FT(1000)
 
-        ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
-        model = AtmosphereModel(grid_1; boundary_conditions=(; ρe=ρe_bcs))
+        ρs_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
+        model = AtmosphereModel(grid_1; boundary_conditions=(; ρs=ρs_bcs))
 
         θ₀_ref = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
@@ -545,26 +545,26 @@ end
         @test expected_θ_flux ≈ 𝒬 / cᵖᵐ
     end
 
-    @testset "Error when specifying both ρθ and ρe boundary conditions [$FT]" begin
+    @testset "Error when specifying both ρθ and ρs boundary conditions [$FT]" begin
         grid_1 = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
         ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100)))
-        ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(200)))
+        ρs_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(200)))
 
-        @test_throws ArgumentError AtmosphereModel(grid_1; boundary_conditions=(ρθ=ρθ_bcs, ρe=ρe_bcs))
+        @test_throws ArgumentError AtmosphereModel(grid_1; boundary_conditions=(ρθ=ρθ_bcs, ρs=ρs_bcs))
     end
 
     @testset "static_energy_density returns Field with energy flux BCs [$FT]" begin
         𝒬₀ = FT(500)
 
-        ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬₀))
-        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+        ρs_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬₀))
+        model = AtmosphereModel(grid; boundary_conditions=(ρs=ρs_bcs,))
 
         θ₀_ref = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
 
-        ρe = static_energy_density(model)
-        𝒬_op = BoundaryConditionOperation(ρe, :bottom, model)
+        ρs = static_energy_density(model)
+        𝒬_op = BoundaryConditionOperation(ρs, :bottom, model)
         𝒬_field = Field(𝒬_op)
         compute!(𝒬_field)
         @test all(interior(𝒬_field) .≈ 𝒬₀)
@@ -589,11 +589,11 @@ end
 
     # Test all lateral boundaries at once (more efficient than individual tests)
     @testset "Multiple lateral boundaries [$FT]" begin
-        ρe_bcs = FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬),
+        ρs_bcs = FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬),
                                           east=FluxBoundaryCondition(-𝒬),
                                           south=FluxBoundaryCondition(𝒬/2),
                                           north=FluxBoundaryCondition(-𝒬/2))
-        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+        model = AtmosphereModel(grid; boundary_conditions=(ρs=ρs_bcs,))
         set!(model; θ=θ₀, qᵗ=qᵗ₀)
         time_step!(model, FT(1e-6))
         @test true
@@ -610,14 +610,14 @@ end
 
     @testset "static_energy_density works for lateral EnergyFluxBC [$FT]" begin
         𝒬_west = 200
-        ρe_bcs = FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬_west))
-        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+        ρs_bcs = FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬_west))
+        model = AtmosphereModel(grid; boundary_conditions=(ρs=ρs_bcs,))
 
         θ₀_ref = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
 
-        ρe = static_energy_density(model)
-        𝒬_op = BoundaryConditionOperation(ρe, :west, model)
+        ρs = static_energy_density(model)
+        𝒬_op = BoundaryConditionOperation(ρs, :west, model)
         𝒬_field = Field(𝒬_op)
         compute!(𝒬_field)
         @test all(interior(𝒬_field) .≈ 𝒬_west)
@@ -652,24 +652,24 @@ end
     end
 
     @testset "convert_energy_to_theta_bcs with Symbol formulation [$FT]" begin
-        bcs = (; ρe=FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100))))
+        bcs = (; ρs=FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100))))
         constants = ThermodynamicConstants()
 
         result = convert_energy_to_theta_bcs(bcs, :LiquidIcePotentialTemperature, constants)
         @test :ρθ ∈ keys(result)
-        @test :ρe ∉ keys(result)
+        @test :ρs ∉ keys(result)
     end
 
     @testset "theta_to_energy_bcs correctly converts BCs [$FT]" begin
         Jᶿ = FT(0.5)
         ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Jᶿ))
-        ρe_bcs = theta_to_energy_bcs(ρθ_bcs)
-        @test ρe_bcs.bottom isa ThetaFluxBCType
+        ρs_bcs = theta_to_energy_bcs(ρθ_bcs)
+        @test ρs_bcs.bottom isa ThetaFluxBCType
 
         𝒬 = FT(500)
         ρθ_bcs_with_energy = FieldBoundaryConditions(bottom=EnergyFluxBoundaryCondition(𝒬))
-        ρe_bcs_extracted = theta_to_energy_bcs(ρθ_bcs_with_energy)
-        @test ρe_bcs_extracted.bottom.condition == 𝒬
+        ρs_bcs_extracted = theta_to_energy_bcs(ρθ_bcs_with_energy)
+        @test ρs_bcs_extracted.bottom.condition == 𝒬
     end
 
     @testset "EnergyFluxBoundaryConditionFunction summary [$FT]" begin
@@ -711,11 +711,11 @@ end
     Δt = FT(1e-6)
 
     # Test a representative subset of boundaries (bottom and west are sufficient for coverage)
-    for ρe_bcs in [
+    for ρs_bcs in [
         FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬)),
         FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬)),
     ]
-        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+        model = AtmosphereModel(grid; boundary_conditions=(ρs=ρs_bcs,))
         set!(model; θ=θ₀, qᵗ=qᵗ₀)
 
         ρθ = thermodynamic_density(model.formulation)
@@ -744,8 +744,8 @@ end
     model = AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
     set!(model; θ=θ₀, qᵗ=qᵗ₀)
 
-    ρe = static_energy_density(model)
-    𝒬_op = BoundaryConditionOperation(ρe, :bottom, model)
+    ρs = static_energy_density(model)
+    𝒬_op = BoundaryConditionOperation(ρs, :bottom, model)
     𝒬_field = Field(𝒬_op)
     compute!(𝒬_field)
 

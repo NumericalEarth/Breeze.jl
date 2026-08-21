@@ -17,7 +17,7 @@ complete formulation with all required fields.
 
 Valid symbols:
 - `:LiquidIcePotentialTemperature`, `:θ`, `:ρθ`, `:PotentialTemperature` → `LiquidIcePotentialTemperatureFormulation`
-- `:StaticEnergy`, `:e`, `:ρe` → `StaticEnergyFormulation`
+- `:StaticEnergy`, `:s`, `:ρs` → `StaticEnergyFormulation`
 """
 function materialize_formulation end
 
@@ -81,7 +81,7 @@ additional_thermodynamic_field_names(formulation_name::Symbol) =
 """
     thermodynamic_density_name(formulation)
 
-Return the name of the thermodynamic density field (e.g., `:ρθ`, `:ρe`, `:ρE`).
+Return the name of the thermodynamic density field (e.g., `:ρθ`, `:ρs`, `:ρE`).
 Accepts a `Symbol`, `Val(Symbol)`, or formulation struct.
 """
 function thermodynamic_density_name end
@@ -93,7 +93,7 @@ thermodynamic_density_name(formulation::Symbol) =
     thermodynamic_density(formulation)
 
 Return the thermodynamic density field for the given formulation — the prognostic
-thermodynamic variable in coupling-density-weighted ("flux") form (`ρθ`, `ρe`, `ρE`).
+thermodynamic variable in coupling-density-weighted ("flux") form (`ρθ`, `ρs`, `ρE`).
 
 The weighting density is the dynamics' coupling density (see [`dynamics_density`](@ref)):
 the reference density `ρᵣ` on the anelastic core and the prognostic dry-air density `ρᵈ` on the
@@ -164,7 +164,7 @@ function compute_thermodynamic_tendency! end
 """
     set_thermodynamic_variable!(model, variable_name, value)
 
-Set a thermodynamic variable (e.g., `:θ`, `:T`, `:e`, `:ρθ`, `:ρe`) from the given value.
+Set a thermodynamic variable (e.g., `:θ`, `:T`, `:s`, `:ρθ`, `:ρs`) from the given value.
 Dispatches on the thermodynamic formulation type and variable name.
 """
 function set_thermodynamic_variable! end

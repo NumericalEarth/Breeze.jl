@@ -54,15 +54,15 @@ using Test
     qᵗ = FT(0.015)
     q = MoistureMassFractions(qᵗ)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    e_init = cᵖᵐ * T_init + g * z_init
+    s_init = cᵖᵐ * T_init + g * z_init
 
-    𝒰 = StaticEnergyState(e_init, q, z_init, p_init)
+    𝒰 = StaticEnergyState(s_init, q, z_init, p_init)
     μ = NothingMicrophysicalState(FT)
 
     ρ = FT(1.2)
     ρqᵗ = ρ * qᵗ
-    ρℰ = ρ * e_init
-    parcel = ParcelState(FT(0), FT(0), z_init, FT(0), ρ, qᵗ, ρqᵗ, e_init, ρℰ, 𝒰, μ)
+    ρℰ = ρ * s_init
+    parcel = ParcelState(FT(0), FT(0), z_init, FT(0), ρ, qᵗ, ρqᵗ, s_init, ρℰ, 𝒰, μ)
 
     @test parcel.x == 0
     @test parcel.y == 0
@@ -71,7 +71,7 @@ using Test
     @test parcel.ρ == ρ
     @test parcel.qᵗ == qᵗ
     @test parcel.ρqᵗ == ρqᵗ
-    @test parcel.ℰ == e_init
+    @test parcel.ℰ == s_init
     @test parcel.ρℰ == ρℰ
     @test parcel.𝒰 === 𝒰
     @test parcel.μ === μ
@@ -170,9 +170,9 @@ end
         qᵗ = FT(0.010)
         q = MoistureMassFractions(qᵗ)
         cᵖᵐ = mixture_heat_capacity(q, constants)
-        e_init = cᵖᵐ * T_init + g * z_init
+        s_init = cᵖᵐ * T_init + g * z_init
 
-        𝒰_init = StaticEnergyState(e_init, q, z_init, p_init)
+        𝒰_init = StaticEnergyState(s_init, q, z_init, p_init)
 
         # Adjust to new height
         z_new = FT(1000.0)
@@ -180,7 +180,7 @@ end
         𝒰_new = adjust_adiabatically(𝒰_init, z_new, p_new, constants)
 
         # Static energy should be conserved
-        @test 𝒰_new.static_energy ≈ e_init
+        @test 𝒰_new.static_energy ≈ s_init
         @test 𝒰_new.height == z_new
         @test 𝒰_new.reference_pressure == p_new
 
@@ -230,9 +230,9 @@ end
     # Check tendencies are computed
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
-    # With specific quantity evolution, tendencies for e and qᵗ are zero
+    # With specific quantity evolution, tendencies for s and qᵗ are zero
     # (no microphysical sources) giving exact conservation
-    @test tendencies.Ge ≈ 0.0
+    @test tendencies.Gs ≈ 0.0
     @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
@@ -260,9 +260,9 @@ end
 
     # This tests that the state-based interface exists for SaturationAdjustment
     # Microphysical sources are zero (SaturationAdjustment operates via state adjustment)
-    tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
+    tendency_s = microphysical_tendency(microphysics, Val(:ρs), ρ_val, ℳ, 𝒰, constants)
     tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵛ), ρ_val, ℳ, 𝒰, constants)
-    @test tendency_e == 0.0
+    @test tendency_s == 0.0
     @test tendency_qt == 0.0
 
     # Compute tendencies (this calls microphysical_tendency internally)
@@ -271,7 +271,7 @@ end
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
     # Tendencies are zero (SaturationAdjustment operates via state adjustment, not tendencies)
-    @test tendencies.Ge ≈ 0.0
+    @test tendencies.Gs ≈ 0.0
     @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
@@ -300,9 +300,9 @@ end
 
     # This tests that the state-based interface exists for DCMIP2016Kessler
     # Microphysical sources are zero (operates via microphysics_model_update!)
-    tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
+    tendency_s = microphysical_tendency(microphysics, Val(:ρs), ρ_val, ℳ, 𝒰, constants)
     tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵛ), ρ_val, ℳ, 𝒰, constants)
-    @test tendency_e == 0.0
+    @test tendency_s == 0.0
     @test tendency_qt == 0.0
 
     # Compute tendencies (this calls microphysical_tendency internally)
@@ -311,7 +311,7 @@ end
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
     # Tendencies are zero (DCMIP2016Kessler operates via microphysics_model_update!, not tendencies)
-    @test tendencies.Ge ≈ 0.0
+    @test tendencies.Gs ≈ 0.0
     @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
@@ -354,7 +354,7 @@ using Oceananigans: interpolate
     T_initial = temperature(model.dynamics.state.𝒰, constants)
     z_initial = model.dynamics.state.z
     qᵗ_initial = model.dynamics.state.qᵗ
-    e_initial = model.dynamics.state.ℰ
+    s_initial = model.dynamics.state.ℰ
 
     # Run simulation for 20 minutes (parcel rises 1200 m at 1 m/s)
     simulation = Simulation(model; Δt=1.0, stop_time=20minutes, verbose=false)
@@ -362,7 +362,7 @@ using Oceananigans: interpolate
 
     z_final = model.dynamics.state.z
     qᵗ_final = model.dynamics.state.qᵗ
-    e_final = model.dynamics.state.ℰ
+    s_final = model.dynamics.state.ℰ
 
     # Get parcel and environmental temperatures at final height
     T_parcel = temperature(model.dynamics.state.𝒰, constants)
@@ -373,7 +373,7 @@ using Oceananigans: interpolate
     @test abs(T_parcel - T_environment) < 1.0
 
     # Specific static energy should be EXACTLY conserved (specific quantity evolution)
-    @test e_final == e_initial
+    @test s_final == s_initial
 
     # Parcel should have risen to expected height
     @test z_final ≈ 1200.0 atol=1.0
@@ -402,18 +402,18 @@ end
          w = 1)
 
     qᵗ_initial = model.dynamics.state.qᵗ
-    e_initial = model.dynamics.state.ℰ
+    s_initial = model.dynamics.state.ℰ
 
     # Run simulation for 15 minutes
     simulation = Simulation(model; Δt=1.0, stop_time=15minutes, verbose=false)
     run!(simulation)
 
     qᵗ_final = model.dynamics.state.qᵗ
-    e_final = model.dynamics.state.ℰ
+    s_final = model.dynamics.state.ℰ
 
     # Specific quantities should be EXACTLY conserved (specific quantity evolution)
     # Static energy is exactly conserved
-    @test e_final == e_initial
+    @test s_final == s_initial
 
     # Moisture conserved to floating-point precision (minor rounding in RK3)
     @test isapprox(qᵗ_final, qᵗ_initial, rtol=1e-14)

@@ -100,7 +100,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 │   ├── momentum: Centered(order=2)
 │   ├── ρθ: Centered(order=2)
 │   └── ρqᵛ: Centered(order=2)
-├── forcing: @NamedTuple{ρu::Returns{Float64}, ρv::Returns{Float64}, ρw::Returns{Float64}, ρθ::Returns{Float64}, ρqᵛ::Returns{Float64}, ρe::Returns{Float64}}
+├── forcing: @NamedTuple{ρu::Returns{Float64}, ρv::Returns{Float64}, ρw::Returns{Float64}, ρθ::Returns{Float64}, ρqᵛ::Returns{Float64}, ρs::Returns{Float64}}
 ├── tracers: ()
 ├── coriolis: Nothing
 └── microphysics: Nothing
@@ -180,7 +180,7 @@ function AtmosphereModel(grid;
     preliminary_microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
 
     # Materialize atmosphere-specific boundary conditions (fill in VPT diagnostic,
-    # surface pressure, thermodynamic constants, convert ρe → ρθ for potential temperature formulations)
+    # surface pressure, thermodynamic constants, convert ρs → ρθ for potential temperature formulations)
     p₀ = surface_pressure(dynamics)
     # Pass preliminary microphysical fields for BC materialization; the qᵛ field within
     # provides the specific_prognostic_moisture reference needed by VirtualPotentialTemperature.
@@ -267,7 +267,7 @@ function AtmosphereModel(grid;
                                        velocities, dynamics, formulation, microphysics,
                                        specific_prognostic_moisture)
 
-    # Include thermodynamic density (ρe or ρθ), moisture, microphysical prognostic fields, plus user tracers
+    # Include thermodynamic density (ρs or ρθ), moisture, microphysical prognostic fields, plus user tracers
     closure_thermo_name = thermodynamic_density_name(formulation)
     microphysical_names = prognostic_field_names(microphysics)
     scalar_names = tuple(closure_thermo_name, moisture_name, microphysical_names..., tracer_names...)
@@ -418,10 +418,10 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     user_forcing_names = keys(user_forcings)
 
-    if :ρe ∈ keys(prognostic_fields)
+    if :ρs ∈ keys(prognostic_fields)
         forcing_fields = prognostic_fields
     else
-        forcing_fields = merge(prognostic_fields, (; ρe=prognostic_fields.ρθ))
+        forcing_fields = merge(prognostic_fields, (; ρs=prognostic_fields.ρθ))
     end
 
     forcing_names = keys(forcing_fields)
@@ -552,8 +552,8 @@ Models.boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(mo
 function total_energy(model)
     u, v, w = model.velocities
     k = @at (Center, Center, Center) (u^2 + v^2 + w^2) / 2 |> Field
-    e = static_energy(model) |> Field
-    return k + e
+    s = static_energy(model) |> Field
+    return k + s
 end
 
 # Check for NaNs in the first prognostic field
