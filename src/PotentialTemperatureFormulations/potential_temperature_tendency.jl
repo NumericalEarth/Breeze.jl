@@ -82,7 +82,7 @@ end
                                                 model_fields)
 
     potential_temperature = formulation.potential_temperature
-    ρ_field = dynamics_density(dynamics)                # carrier density ρᵈ (advection/diffusion carrier)
+    ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (advection/diffusion carrier)
     @inbounds ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
     @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
 
@@ -164,7 +164,7 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # carrier density ρᵈ (ρθ = ρᵈθ)
+        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρθ = ρᵈθ)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         e = specific_energy[i, j, k]
     end
@@ -235,7 +235,7 @@ end
 
     @inbounds begin
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # carrier density ρᵈ (ρθ = ρᵈθ)
+        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρθ = ρᵈθ)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end

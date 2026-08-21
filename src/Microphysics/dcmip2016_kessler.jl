@@ -457,7 +457,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
 
     # Total density weights water mass fractions and enters the Kessler air-density corrections.
-    # The carrier density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
+    # The coupling density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
     # dynamics, is the dry-air carrier of Kessler mixing ratios. These fields alias for anelastic
     # dynamics and are distinct (total and dry density) for compressible dynamics.
     ρ = total_density(model.dynamics)
@@ -620,7 +620,7 @@ end
 #   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
 
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
-                                        density, carrier_density, dry_air_coupled,
+                                        density, coupling_density, dry_air_coupled,
                                         pressure, pˢᵗ, constants,
                                         θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
@@ -703,7 +703,7 @@ end
         # mass-fraction flux (ρʳ = ρqʳ).
         @inbounds begin
             ρ₁ = density[i, j, 1]
-            ρᵈ₁ = carrier_density[i, j, 1]
+            ρᵈ₁ = coupling_density[i, j, 1]
             rᵛ₁ = μ.qᵛ[i, j, 1]
             rᶜˡ₁ = μ.qᶜˡ[i, j, 1]
             rʳ₁ = μ.qʳ[i, j, 1]
@@ -735,11 +735,11 @@ end
                 Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
 
                 # Rain sedimentation flux (upstream differencing)
-                ρᵏ = Cᵨ * carrier_density[i, j, k]
+                ρᵏ = Cᵨ * coupling_density[i, j, k]
                 𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
                 zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
                 Δz = zᵏ⁺¹ - zᵏ
-                ρᵏ⁺¹ = Cᵨ * carrier_density[i, j, k+1]
+                ρᵏ⁺¹ = Cᵨ * coupling_density[i, j, k+1]
                 rʳᵏ⁺¹ = μ.qʳ[i, j, k+1]
                 𝕎ʳᵏ⁺¹ = μ.𝕎ʳ[i, j, k+1]
                 Δr𝕎 = Δtₛ * (ρᵏ⁺¹ * rʳᵏ⁺¹ * 𝕎ʳᵏ⁺¹ - ρᵏ * rʳ * 𝕎ʳᵏ) / (ρᵏ * Δz)
@@ -767,7 +767,7 @@ end
                 θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
 
                 θˡⁱ[i, j, k]  = θˡⁱ_new
-                ρᵈ = carrier_density[i, j, k]
+                ρᵈ = coupling_density[i, j, k]
                 ρθˡⁱ[i, j, k] = ρᵈ * θˡⁱ_new
             end
         end
@@ -821,7 +821,7 @@ end
             θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
 
             θˡⁱ[i, j, k]  = θˡⁱ_new
-            ρᵈ = carrier_density[i, j, k]
+            ρᵈ = coupling_density[i, j, k]
             ρθˡⁱ[i, j, k] = ρᵈ * θˡⁱ_new
         end
 
@@ -840,7 +840,7 @@ end
     @inbounds begin
         rᵗ₁ = μ.qᵛ[i, j, 1] + μ.qᶜˡ[i, j, 1] + μ.qʳ[i, j, 1]
         final_surface_density = ifelse(dry_air_coupled,
-                                       carrier_density[i, j, 1] * (1 + rᵗ₁),
+                                       coupling_density[i, j, 1] * (1 + rᵗ₁),
                                        density[i, j, 1])
         precipitation_rate_field[i, j, 1] = Fˢᵘʳᶠ * inv_Ns / final_surface_density
     end
@@ -852,7 +852,7 @@ end
     for k = 1:Nz
         @inbounds begin
             ρ = density[i, j, k]
-            ρᵈ = carrier_density[i, j, k]
+            ρᵈ = coupling_density[i, j, k]
             rᵛ = μ.qᵛ[i, j, k]
             rᶜˡ = μ.qᶜˡ[i, j, k]
             rʳ = μ.qʳ[i, j, k]

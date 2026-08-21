@@ -275,7 +275,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             throw(ArgumentError("set! cannot set both $specific_name and $density_name"))
     end
 
-    # Two-phase application. The thermodynamic variable (carrier-weighted: ρθ = ρᵈθ) and the
+    # Two-phase application. The thermodynamic variable (coupling-weighted: ρθ = ρᵈθ) and the
     # kinematic fields (momentum ρu = ρᵈu) read the dry density ρᵈ AND the total density ρ, so they
     # must run *after* `establish_densities!` has made the two mutually consistent. `:ℋ` is deferred
     # with them because it derives moisture from the saturation state, which needs the thermodynamic
@@ -404,7 +404,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
     if total_moisture_was_set
         # The moisture and microphysical prognostics are total-air mass fractions.
-        # For compressible dynamics this differs from the dry carrier density ρᵈ.
+        # For compressible dynamics this differs from the dry coupling density ρᵈ.
         total_density_field = total_density(model.dynamics)
         total_moisture = model.moisture_density / total_density_field
 

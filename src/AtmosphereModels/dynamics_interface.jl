@@ -151,7 +151,7 @@ end
 """
     dynamics_density(dynamics)
 
-Return the *carrier density* — the density weighting the momentum (`ρu = ρᵈ u`) and the
+Return the *coupling density* — the density weighting the momentum (`ρu = ρᵈ u`) and the
 thermodynamic flux variable (`ρθ = ρᵈ θ`), and the divisor for diagnosing velocity (`u = ρu/ρᵈ`)
 and potential temperature (`θ = ρθ/ρᵈ`). It is the prognostic mass variable advanced by continuity.
 
@@ -162,7 +162,7 @@ The *total* air density `ρ = ρᵈ + Σ ρˣ` (dry air plus every water species
 quantity — see [`total_density`](@ref) — used wherever total mass enters the physics: the
 moisture **mass-fraction** recovery (`qˣ = ρˣ/ρ`, so the thermodynamics stays in mass fractions),
 scalar and water advection, the equation of state, and buoyancy. The water densities (`ρqᵛ`, `ρqˡ`,
-…) are stored as partial densities (mass per volume), *not* carrier-weighted. On the anelastic core
+…) are stored as partial densities (mass per volume), *not* coupling-weighted. On the anelastic core
 the two densities coincide (`total_density === dynamics_density`).
 """
 function dynamics_density end
@@ -173,7 +173,7 @@ function dynamics_density end
 Return the total air density ρ = ρᵈ + Σρˣ used by the thermodynamics, scalar advection,
 equation of state, and buoyancy. Defaults to [`dynamics_density`](@ref) — correct for
 formulations with a single density (e.g. the anelastic reference density). `CompressibleDynamics`
-overrides it with a diagnosed total-density field, distinct from the carrier density ρᵈ.
+overrides it with a diagnosed total-density field, distinct from the coupling density ρᵈ.
 """
 total_density(dynamics) = dynamics_density(dynamics)
 
