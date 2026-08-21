@@ -61,20 +61,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # version:
-        #   - "min"
-        #   - "1.12.6"
-        # os:
-        #   - ubuntu-latest
-        #   - macOS-latest
-        #   - windows-latest
-        # arch:
-        #   - "default"
-        # check-bounds:
-        #   - "yes"
-        # exclude:
-        #   - version: "min"
-        #     os: windows-latest
+        version:
+          - "min"
+          - "1.12.6"
+        os:
+          - ubuntu-latest
+          - macOS-latest
+          - windows-latest
+        arch:
+          - "default"
+        check-bounds:
+          - "yes"
+        exclude:
+          - version: "min"
+            os: windows-latest
         include:
           # `--check-bounds=auto` is necessary for testing Reactant workloads
           # until https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
@@ -132,7 +132,7 @@ jobs:
           # Run tests in verbose mode
           TEST_ARGS=(--verbose)
           # Exit immediately if there's a test failure
-          # TEST_ARGS+=(--quickfail)
+          TEST_ARGS+=(--quickfail)
 
           if [[ ${{ matrix.os }} == *linux-nvidia-gpu* ]]; then
               # When running the tests on a GPU node we always want to make sure
