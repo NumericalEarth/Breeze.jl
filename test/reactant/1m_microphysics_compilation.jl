@@ -97,10 +97,8 @@ end
             compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
                 model, dmodel, θ_init, dθ_init, Δt, Ns)
             # Running the compiled gradient causes a stackoverflow error in
-            # Julia v1.12 on the CI machine.
-            dθ, loss_val = with_stack_size() do
-                compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
-            end
+            # Julia v1.12 on the CI machine, increase stack size to avoid that.
+            dθ, loss_val = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
             ad_grad = @allowscalar Array(interior(dθ))
 
             @test loss_val > 0

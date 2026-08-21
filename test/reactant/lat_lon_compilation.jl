@@ -110,12 +110,10 @@
 #         Ns = 1
 
 #         # Compiling and running the gradient causes a stackoverflow error on the
-#         # CI machine.
-#         dθ, loss_val = with_stack_size() do
-#             compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-#                 model, dmodel, θ_init, dθ_init, Δt, Ns)
-#             compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
-#         end
+#         # CI machine, increase stack size to avoid that.
+#         compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+#             model, dmodel, θ_init, dθ_init, Δt, Ns)
+#         dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
 #         ad_grad = @allowscalar Array(interior(dθ))
 
 #         # ── Raise backward ──
