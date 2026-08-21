@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using Breeze.AtmosphereModels: adiabatic_balance_twin
 using GPUArraysCore: @allowscalar
