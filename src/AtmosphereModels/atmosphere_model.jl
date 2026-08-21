@@ -9,7 +9,8 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
 using Oceananigans.TimeSteppers: TimeStepper
-using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields, VerticallyImplicitTimeDiscretization
+using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields,
+                                       closure_required_tracers, VerticallyImplicitTimeDiscretization
 using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 
@@ -159,10 +160,22 @@ function AtmosphereModel(grid;
 
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
-    tracer_names = validate_tracers(tracers)
+    user_tracer_names = validate_tracers(tracers)
+
+    # Prognostic-TKE closures carry their own prognostic scalar (`:ρe`). Appending it here,
+    # before `prognostic_field_names`, the boundary-condition defaults, the tracer-field allocation
+    # and `scalar_names`, is what makes it a first-class tracer everywhere downstream.
+    # The captured name must differ from the assigned one, or the closure boxes it.
+    closure_tracer_names = filter(∉(user_tracer_names), closure_required_tracers(closure))
+    tracer_names = tuple(user_tracer_names..., closure_tracer_names...)
+    tracers = tracer_names
 
     # Get field names from dynamics and formulation
     prognostic_names = prognostic_field_names(dynamics, formulation, microphysics, tracers)
+    allunique(prognostic_names) ||
+        throw(ArgumentError("Prognostic field names must be unique, but got $prognostic_names. " *
+                            "A closure-required tracer ($(closure_required_tracers(closure))) cannot " *
+                            "share its name with another prognostic field."))
     velocity_bc_names = velocity_boundary_condition_names(dynamics)
     default_bc_names = tuple(prognostic_names..., velocity_bc_names...)
     default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
@@ -239,7 +252,8 @@ function AtmosphereModel(grid;
 
     # Build a vertical tridiagonal solver for adaptive implicit vertical advection even when the
     # closure is explicit. When both are present, the diffusion and advection diagonals are summed
-    # into a single system (see implicit_vertical_advection.jl).
+    # into a single system (see mass_weighted_implicit_diffusion.jl for the z-Center prognostics
+    # and implicit_vertical_advection.jl for `ρw`).
     if implicit_solver === nothing && advection_needs_solver
         implicit_solver = implicit_diffusion_solver(VerticallyImplicitTimeDiscretization(), grid)
     end

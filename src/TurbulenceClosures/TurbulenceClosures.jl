@@ -1,6 +1,19 @@
 module TurbulenceClosures
 
+export TKEBasedTurbulenceClosure,
+       TKEMixingLength,
+       ConstantStabilityFunctions
+
+using Adapt: Adapt, adapt
+using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
+using KernelAbstractions: @kernel, @index
+
 using Oceananigans: Oceananigans
+
+using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, fill_halo_regions!
+using Oceananigans.BuoyancyFormulations: ∂z_b
+using Oceananigans.Fields: ZFaceField
+using Oceananigans.Grids: Center, Face
 
 using Oceananigans.Operators:
     # Face-centered difference operators with area metrics
@@ -18,12 +31,17 @@ using Oceananigans.Operators:
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
+    AbstractScalarDiffusivity,
+    VerticalFormulation,
+    VerticallyImplicitTimeDiscretization,
+    getclosure,
     _viscous_flux_ux, _viscous_flux_uy, _viscous_flux_uz,
     _viscous_flux_vx, _viscous_flux_vy, _viscous_flux_vz,
     _viscous_flux_wx, _viscous_flux_wy, _viscous_flux_wz,
     _diffusive_flux_x, _diffusive_flux_y, _diffusive_flux_z
 
 using Oceananigans.TimeSteppers: time_discretization
+using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using ..AtmosphereModels: AtmosphereModels
 
@@ -99,5 +117,7 @@ end
         + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶠ, 𝒯_wy, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
         + δzᵃᵃᶠ(i, j, k, grid, Az_qᶜᶜᶜ, 𝒯_wz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
 end
+
+include("tke_based_turbulence_closure.jl")
 
 end # module TurbulenceClosures

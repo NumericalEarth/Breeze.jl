@@ -1,7 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields
-using Oceananigans.Advection: needs_implicit_solver
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick_stage!,
@@ -12,6 +11,7 @@ using Oceananigans.TimeSteppers:
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
                                 microphysics_model_update!, field_advection_scheme,
+                                dynamics_prognostic_fields,
                                 implicit_advection_density, implicit_advection_velocities,
                                 implicit_step_advection
 using Oceananigans.Utils: launch!, time_difference_seconds
@@ -96,6 +96,23 @@ function SSPRungeKutta3(grid, prognostic_fields;
     return SSPRungeKutta3{FT, U0, TG, TI}(α¹, α², α³, U⁰, Gⁿ, implicit_solver)
 end
 
+# Closure scalar indices exclude dynamics-specific prognostics and the momentum components.
+function closure_scalar_index(model, prognostic_index)
+    n_dynamics = length(dynamics_prognostic_fields(model.dynamics))
+    n_momentum = length(model.momentum)
+    return Val(prognostic_index - n_dynamics - n_momentum)
+end
+
+# Which prognostics sit out the implicit vertical solve. `prognostic_fields` lists the
+# dynamics-specific ones first — the compressible dry density, the kinematic driver's density —
+# and those are advanced explicitly: being neither momentum nor closure scalars, they have no
+# diffusivity to apply. Momentum and every thermodynamic and microphysical scalar come after, and
+# all of them do take the solve.
+function skip_vertical_diffusion(model, prognostic_index)
+    n_dynamics = length(dynamics_prognostic_fields(model.dynamics))
+    return prognostic_index <= n_dynamics
+end
+
 #####
 ##### Stage update kernel
 #####
@@ -123,20 +140,23 @@ function ssp_rk3_substep!(model, Δt, α)
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, kernel_Δt, α)
 
-        # Field index for implicit solver:
-        # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
-        # - indices 4+ are scalars (ρθ/ρe, ρqᵗ, microphysics, tracers)
-        # For scalars, we use Val(i - 3) to get Val(1), Val(2), etc.
-        field_index = Val(i - 3)
+        skip_vertical_diffusion(model, i) && continue
+
+        momentum = names[i] === :ρu || names[i] === :ρv || names[i] === :ρw
+        field_index = momentum ? nothing : closure_scalar_index(model, i)
         advection = field_advection_scheme(model.advection, names[i])
 
-        # Adaptive implicit vertical advection schemes add a density-weighted vertical-advection
-        # contribution to the implicit solve (combined with vertically-implicit diffusion).
-        # Scalars, ρu, and ρv use Oceananigans' z-Center coefficients directly; ρw is routed to
-        # Breeze's z-Face coefficients (see AtmosphereModels/implicit_vertical_advection.jl).
-        # All other schemes use the unchanged diffusion-only implicit step (a no-op when there
-        # is no vertically-implicit closure).
-        if needs_implicit_solver(advection)
+        # The implicit solve must carry the reference density whenever it runs at all: the
+        # diffusion half is mass-flux weighted for the z-Center prognostics, and adaptive implicit
+        # vertical advection adds a density-weighted advection contribution on top. `ρw` routes to
+        # Breeze's z-Face coefficients, scalars/`ρu`/`ρv` to the mass-flux-weighted z-Center ones
+        # (see AtmosphereModels/mass_weighted_implicit_diffusion.jl).
+        #
+        # The guard is on the *solver*, not on `needs_implicit_solver(advection)`: that predicate
+        # is false for `advection = nothing` and for ordinary WENO, so keying on it would drop the
+        # density — and hence the mass-flux weighting — for every vertically-implicit closure
+        # without adaptive-implicit advection, the single-column configuration included.
+        if !isnothing(model.timestepper.implicit_solver)
             implicit_step!(u,
                            model.timestepper.implicit_solver,
                            model.closure,
@@ -148,15 +168,6 @@ function ssp_rk3_substep!(model, Δt, α)
                            implicit_step_advection(advection, names[i]),
                            implicit_advection_velocities(model.dynamics, model.velocities, names[i]),
                            implicit_advection_density(model.dynamics, model.formulation, names[i]))
-        else
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           α * Δt)
         end
     end
 
