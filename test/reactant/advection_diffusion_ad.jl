@@ -134,8 +134,6 @@ end
         θ  = Reactant.to_rarray(Float64[_A, _σ₀, _U₀])
         dθ = Reactant.to_rarray(zeros(3))
 
-        # Compiling the gradient causes a stackoverflow error in Julia v1.11 on the CI
-        # machine, increase stack size to avoid that.
         compiled = @with_stack_size Reactant.@compile raise_first = true raise = true sync = true grad_loss(
                 model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
 
