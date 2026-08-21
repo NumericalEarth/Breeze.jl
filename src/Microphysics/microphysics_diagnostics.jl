@@ -131,7 +131,6 @@ end
 
 function (d::RelativeHumidityKernelFunction)(i, j, k, grid)
     @inbounds begin
-        ρ = d.density[i, j, k]
         T = d.temperature[i, j, k]
         # qᵛᵉ: vapor (non-equilibrium) or equilibrium moisture (saturation adjustment)
         qᵛᵉ = d.specific_prognostic_moisture[i, j, k]
@@ -141,18 +140,17 @@ function (d::RelativeHumidityKernelFunction)(i, j, k, grid)
     equil = microphysics_phase_equilibrium(d.microphysics)
 
     # Compute moisture fractions (vapor, liquid, ice)
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qᵛᵉ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, @inbounds(d.density[i, j, k]),
+                                qᵛᵉ, d.microphysical_fields)
 
     # Vapor specific humidity
     qᵛ = q.vapor
 
-    # Compressible dynamics uses its prognostic total density. Reference-density
-    # dynamics reconstructs the equation-of-state density from its pressure state.
-    ρʰ = humidity_density(i, j, k, d.dynamics, T, q, constants)
+    ρ = moist_air_density(i, j, k, d.dynamics, T, q, constants)
 
     # Vapor pressure from ideal gas law: pᵛ = ρᵛ Rᵛ T = ρ qᵛ Rᵛ T
     Rᵛ = vapor_gas_constant(constants)
-    pᵛ = ρʰ * qᵛ * Rᵛ * T
+    pᵛ = ρ * qᵛ * Rᵛ * T
 
     # Saturation vapor pressure
     surface = equilibrated_surface(equil, T)

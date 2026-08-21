@@ -47,14 +47,11 @@ Let's explore how ice particle properties vary with mean mass and riming state.
 ```@example p3_examples
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties
-using Logging: NullLogger, with_logger
 using CairoMakie
 
 # The default constructor reads the P3 ASCII lookup tables
 # (downloaded automatically on first use).
-p3 = with_logger(NullLogger()) do
-    PredictedParticlePropertiesMicrophysics()
-end
+p3 = PredictedParticlePropertiesMicrophysics()
 
 bulk = p3.ice.bulk_properties
 

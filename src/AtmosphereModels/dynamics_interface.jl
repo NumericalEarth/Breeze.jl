@@ -180,12 +180,17 @@ total_density(dynamics) = dynamics_density(dynamics)
 """
 $(TYPEDSIGNATURES)
 
-Return the gas density used to convert vapor mass fraction into vapor partial pressure.
-The default uses [`total_density`](@ref), appropriate to fully compressible and prescribed-density
-models. Reference-density dynamics may override this when their thermodynamic pressure and current
-temperature/composition imply a different equation-of-state density.
+Return the density ``ρ`` of the moist air at `(i, j, k)`, from the equation of state at the local
+temperature and composition, ``ρ = p / (Rᵐ(q) T)``. This is the density that turns a mass fraction
+into a partial pressure — the vapor pressure is ``pᵛ = ρ qᵛ Rᵛ T`` — and it is not in general the
+density that the prognostic partial densities are weighted by, which is [`total_density`](@ref).
+
+The default returns `total_density(dynamics)`, correct wherever that field *is* the density of the
+moist air: compressible dynamics, where it is diagnosed from the prognostic state, and
+prescribed-density models. `AnelasticDynamics` overrides it, because its reference density ``ρᵣ(z)``
+is a *dry* reference state evaluated at the reference temperature and pressure.
 """
-@inline function humidity_density(i, j, k, dynamics, T, q, constants)
+@inline function moist_air_density(i, j, k, dynamics, T, q, constants)
     return @inbounds total_density(dynamics)[i, j, k]
 end
 

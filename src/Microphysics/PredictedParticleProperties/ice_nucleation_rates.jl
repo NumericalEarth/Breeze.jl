@@ -274,12 +274,9 @@ All cloud droplets are transferred to ice; the number rate is
 # Example
 
 ```jldoctest
-using Logging
 using Breeze.Microphysics.PredictedParticleProperties:
     homogeneous_freezing_cloud_rate
-p3 = with_logger(NullLogger()) do
-    PredictedParticlePropertiesMicrophysics()
-end
+p3 = PredictedParticlePropertiesMicrophysics()
 Q, N = homogeneous_freezing_cloud_rate(p3, 1e-3, 100e6, 230.0, 1.2)
 round.((Q, N), sigdigits=4)
 
@@ -337,12 +334,9 @@ following
 # Example
 
 ```jldoctest
-using Logging
 using Breeze.Microphysics.PredictedParticleProperties:
     homogeneous_freezing_rain_rate
-p3 = with_logger(NullLogger()) do
-    PredictedParticlePropertiesMicrophysics()
-end
+p3 = PredictedParticlePropertiesMicrophysics()
 Q, N = homogeneous_freezing_rain_rate(p3, 1e-3, 1e4, 220.0)
 round.((Q, N), sigdigits=4)
 

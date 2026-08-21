@@ -60,9 +60,9 @@ examples = [
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
 
-# Install artifacts before running the tests, to avoid spurious failures to
-# concurrent downloads, or doctests not liking the extra messages printed to
-# screen during the download.
+# Install artifacts before building the docs, to avoid spurious failures from
+# concurrent downloads, or examples and doctests not liking the extra messages
+# printed to screen during the download.
 ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
 
 # Use a different semaphore for CPU and GPU examples, but will keep the maximum
@@ -221,7 +221,7 @@ makedocs(
         "API" => "api.md",
         "Contributors guide" => "contributing.md",
     ],
-    linkcheck = false,  # Disabled due to GitHub rate limiting (429 errors)
+    linkcheck = true,
     draft = false,
     doctest = true,
 )

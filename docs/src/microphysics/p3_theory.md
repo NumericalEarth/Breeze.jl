@@ -871,13 +871,10 @@ closure exactly as the model sees it.
 ```@example p3_psd
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties
-using Logging: NullLogger, with_logger
 using SpecialFunctions: loggamma
 using CairoMakie
 
-p3 = with_logger(NullLogger()) do
-    PredictedParticlePropertiesMicrophysics()
-end
+p3 = PredictedParticlePropertiesMicrophysics()
 
 bulk = p3.ice.bulk_properties
 
@@ -1375,13 +1372,10 @@ both held in `p3_lookupTable_1.dat-v6.9-2momI`.
 
 ```@example p3_integrals
 using Breeze
-using Logging: NullLogger, with_logger
 
 # The default constructor reads the P3 ASCII lookup tables
 # (downloaded automatically on first use).
-p3 = with_logger(NullLogger()) do
-    PredictedParticlePropertiesMicrophysics()
-end
+p3 = PredictedParticlePropertiesMicrophysics()
 
 fs = p3.ice.fall_speed
 println("Tabulated fall speed integrals from the P3 lookup tables:")
