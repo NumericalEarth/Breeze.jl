@@ -73,6 +73,41 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     @test :ρqʳ in prog_fields
 end
 
+# Precision of CloudMicrophysics parameters should match that of Breeze model fields
+@testset "Accretion options stored at another precision [$(FT)]" for FT in all_float_types()
+    other_FT = FT === Float32 ? Float64 : Float32
+
+    parameters = Microphysics1MParams(FT)
+
+    # Accretion parameter values stored at another precision than the model fields
+    process_params = merge(parameters.process_params,
+                           (cloud_liquid_rain_accretion = (; e = other_FT(0.8)),
+                            cloud_ice_rain_accretion = (; e = other_FT(1)),
+                            rain_snow_accretion = (; e = other_FT(1), coeff_disp = other_FT(0.2))))
+    cloud_liquid = parameters.cloud.liquid
+    cloud_ice = parameters.cloud.ice
+    rain = parameters.precip.rain
+    snow = parameters.precip.snow
+    rain_velocity = parameters.terminal_velocity.rain
+    snow_velocity = parameters.terminal_velocity.snow
+
+    qᶜ = FT(1e-4)
+    qᵖ = FT(1e-5)
+    ρ = FT(1)
+
+    Sᵃᶜᶜ = BreezeCloudMicrophysicsExt.cloud_precipitation_accretion(
+        process_params.cloud_liquid_rain_accretion, cloud_liquid, rain, rain_velocity, qᶜ, qᵖ, ρ)
+    @test Sᵃᶜᶜ isa FT
+
+    Sᵃᶜᶜʳⁱ = BreezeCloudMicrophysicsExt.rain_sink_accretion(
+        process_params.cloud_ice_rain_accretion, rain, cloud_ice, rain_velocity, qᶜ, qᵖ, ρ)
+    @test Sᵃᶜᶜʳⁱ isa FT
+
+    Sʳˢ = BreezeCloudMicrophysicsExt.rain_snow_accretion(
+        process_params.rain_snow_accretion, snow, rain, snow_velocity, rain_velocity, qᶜ, qᵖ, ρ)
+    @test Sʳˢ isa FT
+end
+
 @testset "OneMomentCloudMicrophysics with SaturationAdjustment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 

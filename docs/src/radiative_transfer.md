@@ -72,21 +72,40 @@ The above two expressions are identical to those in the [RRTMGP documentation](h
 
 ### Radiative Fluxes
 
-After running [`set!`](@ref), the radiative fluxes are available from the radiation model:
+After running [`set!`](@ref), the radiative fluxes are available from the radiation
+model as four `ZFaceField`s, one per stream. All three optics flavors expose the
+same four fields, and all of them follow the sign convention **positive upward**,
+so downwelling fluxes are stored as negative numbers:
 
 ```julia
-# Longwave fluxes (ZFaceFields)
-ℐ_lw_up = radiation.upwelling_longwave_flux
-ℐ_lw_dn = radiation.downwelling_longwave_flux
+# Longwave
+ℐ_lw_up = radiation.upwelling_longwave_flux     # ≥ 0
+ℐ_lw_dn = radiation.downwelling_longwave_flux   # ≤ 0
 
-# Shortwave flux (direct beam only for non-scattering solver)
-ℐ_sw = radiation.downwelling_shortwave_flux
+# Shortwave
+ℐ_sw_up = radiation.upwelling_shortwave_flux    # ≥ 0
+ℐ_sw_dn = radiation.downwelling_shortwave_flux  # ≤ 0
 ```
 
-!!! note "Shortwave Radiation"
-    The gray atmosphere uses a non-scattering shortwave approximation, so only
-    the direct beam flux is computed. There is no diffuse shortwave or upwelling
-    shortwave in this model.
+For clear-sky and all-sky optics, `downwelling_shortwave_flux` is the *total*
+downwelling shortwave (direct beam plus diffuse), and `upwelling_shortwave_flux`
+carries the sunlight scattered back upward by air and clouds together with the
+fraction reflected by the surface.
+
+!!! note "Shortwave radiation in the gray atmosphere"
+    The gray atmosphere uses RRTMGP's non-scattering shortwave solver, so
+    `downwelling_shortwave_flux` is the direct beam alone (no diffuse component)
+    and `upwelling_shortwave_flux` is identically zero. The field still exists so
+    that the four flux components, the net flux, and output writers have the same
+    shape for every optics flavor.
+
+!!! warning "Gray optics ignores the surface albedo in the shortwave"
+    Because the gray shortwave solver only propagates the direct beam downward, it
+    never reflects it: `surface_albedo` (and `direct_surface_albedo` /
+    `diffuse_surface_albedo`) has no effect on the gray shortwave fluxes, and the
+    surface absorbs all of the direct beam that reaches it. The albedo is still
+    used for the clear-sky and all-sky solvers. Use [`ClearSkyOptics`](@ref) or
+    [`AllSkyOptics`](@ref) if the shortwave albedo matters for your study.
 
 ## Solar zenith angle
 
@@ -293,13 +312,36 @@ The [`RadiativeTransferModel`](@ref) model requires surface properties:
 
 ## Integration with dynamics
 
-Radiative fluxes can be used to compute heating rates for the energy equation. The radiative heating rate is computed from flux divergence:
+Radiative fluxes provide a volumetric energy source from flux convergence,
 
 ```math
-F_{\mathscr{I}} = -\frac{1}{\rho cᵖᵐ} \frac{\partial \mathscr{I}_{net}}{\partial z}
+Q_{\mathscr{I}} = -\frac{\partial \mathscr{I}_{net}}{\partial z},
 ```
 
-where ``\mathscr{I}_{net}`` is the net radiative flux (upwelling minus downwelling), ``cᵖᵐ`` is the mixture heat capacity, and ``F_{\mathscr{I}}`` is the radiative flux divergence (heating rate).
+where ``Q_{\mathscr{I}}`` has units W/m³. For
+[`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), holding
+moisture phase composition fixed, the corresponding temperature tendency is
+
+```math
+\left. \frac{\partial T}{\partial t} \right|_{rad} = \frac{Q_{\mathscr{I}}}{ρᵣ cᵖᵐ}.
+```
+
+Here ``ρᵣ`` is the reference density, ``cᵖᵐ`` is the mixture heat capacity, and
+``\mathscr{I}_{net}`` is the net upward radiative flux. Because Breeze stores
+downwelling components as negative values, the four signed streams are added:
+
+```math
+\mathscr{I}_{net} = \mathscr{I}_{lw}^{↑} + \mathscr{I}_{lw}^{↓}
+                  + \mathscr{I}_{sw}^{↑} + \mathscr{I}_{sw}^{↓} .
+```
+
+Despite its historical name, `radiation.flux_divergence` stores ``Q_{\mathscr{I}}``:
+minus the vertical derivative of the signed flux sum, evaluated at cell centers
+from the two bounding cell faces. The static-energy formulation adds this W/m³
+source directly to its energy-density tendency. The liquid-ice potential-temperature
+formulation adds ``Q_{\mathscr{I}} / (cᵖᵐ Π)`` to its potential-temperature-density
+tendency. Omitting the upwelling shortwave would bias either tendency wherever
+shortwave radiation scatters or reflects.
 
 ## Architecture Support
 

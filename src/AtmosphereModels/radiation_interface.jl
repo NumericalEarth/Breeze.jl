@@ -54,6 +54,7 @@ struct RadiativeTransferModel{FT<:Number, SOP, SP, BA, AS, LW, SW, F, H, LER, IE
     shortwave_solver :: SW
     upwelling_longwave_flux :: F
     downwelling_longwave_flux :: F
+    upwelling_shortwave_flux :: F # Zero for non-scattering gray optics
     downwelling_shortwave_flux :: F
     flux_divergence :: H # Center field: -dF_net/dz in W/m³
     liquid_effective_radius :: LER # Model for cloud liquid effective radius (Nothing for gray/clear-sky)
@@ -405,7 +406,7 @@ materialize_background_atmosphere(::Nothing, grid) = nothing
 
 struct SurfaceRadiativeProperties{ST, SE, SA, DW}
     surface_temperature :: ST  # Scalar or 2D field
-    surface_emissivity :: SE   # Scalar
+    surface_emissivity :: SE   # Scalar or 2D field
     direct_surface_albedo :: SA  # Scalar or 2D field
     diffuse_surface_albedo :: DW  # Scalar or 2D field
 end

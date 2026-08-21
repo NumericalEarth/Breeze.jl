@@ -132,13 +132,13 @@ function ssp_rk3_substep!(model, Δt, α)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-    Δt_FT = kernel_time_step(arch, grid, Δt)
+    kernel_Δt = kernel_time_step(arch, grid, Δt)
 
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt_FT, α)
+        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, kernel_Δt, α)
 
         skip_vertical_diffusion(model, i) && continue
 

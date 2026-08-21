@@ -4,11 +4,32 @@
 
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ
 using Oceananigans.Architectures: architecture
+using Oceananigans.Fields: ConstantField
 using Oceananigans.Utils: launch!
 
+using RRTMGP: RRTMGPSolver
 using RRTMGP.AtmosphericStates: AtmosphericState
+using RRTMGP.VolumeMixingRatios: VmrGM
 
 using Breeze.AtmosphereModels: BackgroundAtmosphere, specific_humidity
+
+#####
+##### Volume mixing ratio initialization (shared by clear-sky and all-sky)
+#####
+
+# Zero-initialized global-mean volume mixing ratios: H₂O and O₃ vary per layer
+# and column, all other gases are well-mixed scalars.
+function initialize_global_mean_vmr(Ngas, Nz, Nc, FT, ArrayType)
+    vmr_h2o = ArrayType{FT}(undef, Nz, Nc)
+    vmr_o3 = ArrayType{FT}(undef, Nz, Nc)
+    global_mean_vmr = ArrayType{FT}(undef, Ngas)
+
+    fill!(vmr_h2o, zero(FT))
+    fill!(vmr_o3, zero(FT))
+    fill!(global_mean_vmr, zero(FT))
+
+    return VmrGM(vmr_h2o, vmr_o3, global_mean_vmr)
+end
 
 #####
 ##### Gas state update (shared by clear-sky and all-sky)
@@ -19,7 +40,11 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     grid = model.grid
     arch = architecture(grid)
 
-    pᵣ = model.dynamics.reference_state.pressure
+    # RRTMGP assumes level pressures are positive and monotonically decreasing with height. That
+    # holds for the anelastic hydrostatic reference exactly, and for the compressible diagnosed
+    # pressure in practice, whose hydrostatic part dominates dynamic/acoustic perturbations by
+    # orders of magnitude.
+    p = dynamics_pressure(model.dynamics)
     T = model.temperature
     qᵛ = specific_humidity(model)
 
@@ -29,11 +54,11 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     ℕᴬ = params.avogad
     O₃ = background_atmosphere.O₃  # Can be ConstantField or Field
 
-    launch!(arch, grid, :xyz, _update_rrtmgp_gas_state!, as, grid, pᵣ, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
+    launch!(arch, grid, :xyz, _update_rrtmgp_gas_state!, as, grid, p, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     return nothing
 end
 
-@kernel function _update_rrtmgp_gas_state!(as, grid, pᵣ, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
+@kernel function _update_rrtmgp_gas_state!(as, grid, p, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     i, j, k = @index(Global, NTuple)
 
     Nz = size(grid, 3)
@@ -49,12 +74,12 @@ end
 
     @inbounds begin
         # Layer (cell-centered) values
-        pᶜ = pᵣ[i, j, k]
+        pᶜ = p[i, j, k]
         qᵛₖ = max(qᵛ[i, j, k], zero(eltype(qᵛ)))
 
         # Face values at k and k+1 (needed for column dry air mass and level temperatures)
-        pᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, pᵣ)
-        pᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, pᵣ)
+        pᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, p)
+        pᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, p)
         Tᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, T)
         Tᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, T)
 
@@ -80,7 +105,7 @@ end
 
         # Topmost level (once)
         if k == 1
-            pᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, pᵣ)
+            pᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, p)
             Tᴺ⁺¹ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
             Tᶠ[Nz+1, c] = clamp(Tᴺ⁺¹, Tmin, Tmax)
             T₀[c] = clamp(surface_temperature[i, j, 1], Tmin, Tmax)
@@ -109,30 +134,134 @@ end
 end
 
 #####
+##### Surface boundary conditions (shared by gray, clear-sky and all-sky)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+The scalar behind a surface property that is constant in space and time, or `nothing` when the
+property carries no such scalar.
+
+A `ConstantField` is a scalar in a field's clothing — its value cannot change — so it reports the
+value it holds. A general `Field` reports `nothing`: it may be rewritten between radiation updates,
+so there is no single value to speak of.
+"""
+surface_fraction_scalar(x::Number) = x
+surface_fraction_scalar(x::ConstantField) = surface_fraction_scalar(x.constant)
+surface_fraction_scalar(x) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Throw an `ArgumentError` for any keyword whose value is a spatially uniform scalar outside ``[0, 1]``.
+
+Emissivity and albedo are fractions, so a scalar outside the unit interval is a user error — an albedo
+given in percent, say — worth rejecting at construction rather than carrying into the solver. A
+property with no single value (a `Field`, a dataset, `nothing`) passes through, since a check at
+construction says nothing about what it holds at the next solve.
+"""
+function validate_surface_fractions(; kw...)
+    for (name, value) in kw
+        x = surface_fraction_scalar(value)
+        isnothing(x) || 0 <= x <= 1 ||
+            throw(ArgumentError("`$name` must lie in [0, 1]; received $x."))
+    end
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Wrap a scalar surface property in a `ConstantField` of the working precision, passing anything
+already field-valued through unchanged, so that emissivity and both albedos are uniformly
+field-valued whether the user supplied a number, a field, or a dataset.
+"""
+constant_field_property(x::Number, FT) = ConstantField(convert(FT, x))
+constant_field_property(x, FT) = x
+
+"""
+$(TYPEDSIGNATURES)
+
+Copy the surface emissivity `ε` and the direct and diffuse albedos `αᵈ`, `αˢ` from
+`surface_properties` into RRTMGP's band-by-column boundary-condition arrays `ε₀`, `αᵈ₀`, `αˢ₀`.
+
+Nothing else writes those arrays, so a spatially varying emissivity or albedo would otherwise never
+reach the solver, which would read whatever the allocation happened to contain. Call once at
+construction and again before every solve, so a property that evolves is picked up rather than frozen.
+
+Breeze treats all three properties as spectrally grey: every band receives the same value.
+"""
+function update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, surface_properties, grid)
+    arch = architecture(grid)
+
+    launch!(arch, grid, :xy, _update_rrtmgp_surface_boundary_conditions!,
+            ε₀, αᵈ₀, αˢ₀,
+            surface_properties.surface_emissivity,
+            surface_properties.direct_surface_albedo,
+            surface_properties.diffuse_surface_albedo,
+            grid)
+
+    return nothing
+end
+
+# Full-spectrum (clear-sky and all-sky) models keep both RTE solvers inside one `RRTMGPSolver`,
+# reached through RRTMGP's own accessors rather than its internal field nesting.
+update_rrtmgp_surface_boundary_conditions!(solver::RRTMGPSolver, surface_properties, grid) =
+    update_rrtmgp_surface_boundary_conditions!(RRTMGP.surface_emissivity(solver),
+                                               RRTMGP.direct_sw_surface_albedo(solver),
+                                               RRTMGP.diffuse_sw_surface_albedo(solver),
+                                               surface_properties, grid)
+
+@kernel function _update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, ε, αᵈ, αˢ, grid)
+    i, j = @index(Global, NTuple)
+
+    c = rrtmgp_column_index(i, j, grid.Nx)
+
+    @inbounds begin
+        εᵢⱼ = ε[i, j, 1]
+        αᵈᵢⱼ = αᵈ[i, j, 1]
+        αˢᵢⱼ = αˢ[i, j, 1]
+
+        for b in 1:size(ε₀, 1)
+            ε₀[b, c] = εᵢⱼ
+        end
+
+        for b in 1:size(αᵈ₀, 1)
+            αᵈ₀[b, c] = αᵈᵢⱼ
+            αˢ₀[b, c] = αˢᵢⱼ
+        end
+    end
+end
+
+#####
 ##### Copy fluxes to Oceananigans fields (shared by clear-sky and all-sky)
 #####
 
 function copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
     arch = architecture(grid)
-    Nz = size(grid, 3)
 
-    lw_flux_up = solver.lws.flux.flux_up
-    lw_flux_dn = solver.lws.flux.flux_dn
-    sw_flux_dn = solver.sws.flux.flux_dn  # Total SW (direct + diffuse)
+    # (Nz+1, Nc) presentation views, refreshed by update_lw_fluxes!/update_sw_fluxes!
+    lw_flux_up = RRTMGP.lw_flux_up(solver)
+    lw_flux_dn = RRTMGP.lw_flux_dn(solver)
+    sw_flux_up = RRTMGP.sw_flux_up(solver)
+    sw_flux_dn = RRTMGP.sw_flux_dn(solver)  # Total SW (direct + diffuse)
 
     ℐ_lw_up = rtm.upwelling_longwave_flux
     ℐ_lw_dn = rtm.downwelling_longwave_flux
+    ℐ_sw_up = rtm.upwelling_shortwave_flux
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
 
     Nx, Ny, Nz = size(grid)
     launch!(arch, grid, (Nx, Ny, Nz+1), _copy_rrtmgp_fluxes!,
-            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn, grid)
+            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
+            lw_flux_up, lw_flux_dn, sw_flux_up, sw_flux_dn, grid)
 
     return nothing
 end
 
-@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
-                                      lw_flux_up, lw_flux_dn, sw_flux_dn, grid)
+@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
+                                      lw_flux_up, lw_flux_dn, sw_flux_up, sw_flux_dn, grid)
     i, j, k = @index(Global, NTuple)
 
     c = rrtmgp_column_index(i, j, grid.Nx)
@@ -140,6 +269,7 @@ end
     @inbounds begin
         ℐ_lw_up[i, j, k] = lw_flux_up[k, c]
         ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, c]
+        ℐ_sw_up[i, j, k] = sw_flux_up[k, c]
         ℐ_sw_dn[i, j, k] = -sw_flux_dn[k, c]
     end
 end
@@ -152,18 +282,20 @@ function compute_radiation_flux_divergence!(rtm, grid)
     arch = architecture(grid)
     ℐ_lw_up = rtm.upwelling_longwave_flux
     ℐ_lw_dn = rtm.downwelling_longwave_flux
+    ℐ_sw_up = rtm.upwelling_shortwave_flux
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
     flux_div = rtm.flux_divergence
-    launch!(arch, grid, :xyz, _compute_radiation_flux_divergence!, flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, grid)
+    launch!(arch, grid, :xyz, _compute_radiation_flux_divergence!,
+            flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, grid)
     return nothing
 end
 
-@kernel function _compute_radiation_flux_divergence!(flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, grid)
+@kernel function _compute_radiation_flux_divergence!(flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, grid)
     i, j, k = @index(Global, NTuple)
     # Net flux at faces k and k+1 (positive upward)
     @inbounds begin
-        F_k  = ℐ_lw_up[i, j, k]   + ℐ_lw_dn[i, j, k]   + ℐ_sw_dn[i, j, k]
-        F_k1 = ℐ_lw_up[i, j, k+1] + ℐ_lw_dn[i, j, k+1] + ℐ_sw_dn[i, j, k+1]
+        F_k  = ℐ_lw_up[i, j, k]   + ℐ_lw_dn[i, j, k]   + ℐ_sw_up[i, j, k]   + ℐ_sw_dn[i, j, k]
+        F_k1 = ℐ_lw_up[i, j, k+1] + ℐ_lw_dn[i, j, k+1] + ℐ_sw_up[i, j, k+1] + ℐ_sw_dn[i, j, k+1]
     end
     Δz = Δzᶜᶜᶜ(i, j, k, grid)
     # Flux divergence: -dF/dz (positive when flux convergence warms)

@@ -34,3 +34,20 @@ GPU-compatible kernel functions are critical for Breeze performance.
 
 - Velocities live at cell faces, tracers at cell centers (Arakawa C-grid)
 - Take care of staggered grid location when writing operators or designing diagnostics
+
+## Closure Captures
+
+- **Never reassign a variable captured by a closure that reaches a GPU kernel** (masks,
+  forcings, boundary conditions). Reassignment turns the capture into a `Core.Box`, the
+  closure stops being `isbits`, and the kernel launch fails — often only at run time on GPU.
+- Compute with single-assignment names instead: `λ₁ˡ, λ₂ˡ = x_domain(grid)` then
+  `λ₁ = all_reduce(min, λ₁ˡ, arch)` — never `λ₁ = ...` followed by `λ₁ = f(λ₁)`.
+- When in doubt, check `isbits(closure)` before launching.
+
+## Dispatch Over Branching
+
+- No value-level guards (`haskey`, `isnothing` chains) inside small GPU helper functions;
+  make the decision once outside the kernel — fetch with `get(container, key, nothing)` —
+  and provide a `::Nothing` method for the missing case.
+- A `MethodError` on an unhandled combination is the intended "not implemented" signal;
+  don't paper over it with runtime branches.
