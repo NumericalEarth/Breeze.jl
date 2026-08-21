@@ -267,10 +267,9 @@ function AtmosphereModel(grid;
                                        velocities, dynamics, formulation, microphysics,
                                        specific_prognostic_moisture)
 
-    # Include thermodynamic density (ρe or ρθ), moisture, microphysical prognostic fields, plus user tracers
-    closure_thermo_name = thermodynamic_density_name(formulation)
-    microphysical_names = prognostic_field_names(microphysics)
-    scalar_names = tuple(closure_thermo_name, moisture_name, microphysical_names..., tracer_names...)
+    # The closure's scalars — thermodynamic density, moisture, microphysical prognostic fields, user
+    # tracers — in the order the vertically-implicit solve indexes them (see `closure_scalar_index`)
+    scalar_names = closure_scalar_names(formulation, microphysics, tracer_names)
     closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
 
@@ -384,6 +383,40 @@ function prognostic_field_names(dynamics, formulation, microphysics, tracer_name
     moist_name = moisture_prognostic_name(microphysics)
     return tuple(dynamics_names..., momentum_names..., formulation_names..., moist_name, microphysical_names..., tracer_names...)
 end
+
+# The scalars a turbulence closure sees, in the order `with_tracers` and `build_closure_fields`
+# receive them: the thermodynamic density, moisture, microphysical prognostics, user tracers.
+function closure_scalar_names(formulation, microphysics, tracer_names)
+    thermodynamic_name = thermodynamic_density_name(formulation)
+    moisture_name = moisture_prognostic_name(microphysics)
+    microphysical_names = prognostic_field_names(microphysics)
+    return tuple(thermodynamic_name, moisture_name, microphysical_names..., tracer_names...)
+end
+
+closure_scalar_names(model::AtmosphereModel) =
+    closure_scalar_names(model.formulation, model.microphysics, keys(model.tracers))
+
+"""
+$(TYPEDSIGNATURES)
+
+The index under which the prognostic field `name` enters the vertically-implicit solve: `nothing`
+for momentum, which is diffused with the closure's viscosity, and `Val(i)` for the `i`th closure
+scalar, which is diffused with `diffusivity(closure, closure_fields, Val(i))`.
+"""
+function closure_scalar_index(model::AtmosphereModel, name::Symbol)
+    name ∈ keys(model.momentum) && return nothing
+    return Val(findfirst(==(name), closure_scalar_names(model)))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Whether the prognostic field `name` sits out the vertically-implicit solve. The dynamics-specific
+prognostics — the compressible dry density, the kinematic driver's density — are advanced explicitly
+and have no diffusivity to apply; momentum and every scalar take the solve.
+"""
+skip_vertical_diffusion(model::AtmosphereModel, name::Symbol) =
+    name ∈ keys(dynamics_prognostic_fields(model.dynamics))
 
 function field_names(dynamics, formulation, microphysics, tracer_names)
     prog_names = prognostic_field_names(dynamics, formulation, microphysics, tracer_names)

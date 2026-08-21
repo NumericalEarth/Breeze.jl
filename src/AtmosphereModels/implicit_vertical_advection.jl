@@ -20,7 +20,15 @@
 #####    flux with the *velocity* CFL instead, using the same interpolations as the implicit
 #####    velocities so the explicit/implicit split is consistent.
 #####
-##### 2. Vertical momentum `ρw` lives at (Center, Center, Face). Oceananigans keeps the `Ww`
+##### 2. The vertically-implicit *diffusion* half of the tridiagonal row is not mass-flux
+#####    weighted upstream. Breeze's prognostics are density weighted (`q = ρ c`) while the
+#####    explicit flux divergence `∇_dot_Jᶜ`/`∂ⱼ_𝒯ᵢⱼ` forms `∂z(ρ κ ∂z c)` on the *specific*
+#####    variable, so the implicit operator must carry the same weighting. Oceananigans solves
+#####    `∂t q = ∂z(κ ∂z q)` instead — the same operator only for constant `ρ`. The
+#####    mass-flux-weighted z-Center coefficients in `mass_weighted_implicit_diffusion.jl` fix
+#####    that; see the section header there for the row and for why `ρw` is left alone.
+#####
+##### 3. Vertical momentum `ρw` lives at (Center, Center, Face). Oceananigans keeps the `Ww`
 #####    flux fully explicit and has no implicit-advection coefficients for z-Face fields, so
 #####    AIVA alone does not remove the `w ∂z w` CFL restriction — the limiting term in a deep
 #####    convective updraft. The z-Face, density-weighted coefficients below fill that gap:
@@ -81,11 +89,13 @@ const AIVA = AdaptiveImplicitVerticalAdvection
 end
 
 # `ρw` lives at (Center, Center, Face) and needs the Breeze-owned z-Face implicit-advection
-# coefficients below; every other prognostic is at z-Centers and uses Oceananigans' coefficients.
-# Explicit schemes pass through unwrapped, so their implicit step reduces to diffusion only.
-implicit_step_advection(advection, name::Symbol) = advection
+# coefficients below; every other prognostic is at z-Centers and is routed to the mass-flux-weighted
+# z-Center coefficients, which reduce to Oceananigans' when the reference density is constant.
+# Explicit schemes are still wrapped, since the diffusion half needs the weighting either way.
+implicit_step_advection(advection, name::Symbol) =
+    name === :ρw ? advection : MassWeightedImplicitDiffusion(advection)
 implicit_step_advection(advection::AIVA, name::Symbol) =
-    name === :ρw ? VerticalMomentumImplicitAdvection(advection) : advection
+    name === :ρw ? VerticalMomentumImplicitAdvection(advection) : MassWeightedImplicitDiffusion(advection)
 
 # Density weighting the advective flux of each prognostic. Momentum and the thermodynamic
 # variable are carried by the coupling density (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`; see `dynamics_density`),
