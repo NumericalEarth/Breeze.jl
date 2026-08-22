@@ -651,7 +651,6 @@ function generate_markdown_report(filename, entries)
     end
 end
 
-
 # Run when invoked as script
 if abspath(PROGRAM_FILE) == @__FILE__
     main()
