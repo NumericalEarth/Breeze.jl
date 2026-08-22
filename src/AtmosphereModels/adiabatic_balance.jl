@@ -196,15 +196,17 @@ adiabatic_twin_dynamics(dynamics, time_stepping) = dynamics
 $(TYPEDSIGNATURES)
 
 Build a stripped adiabatic twin of `model` that SHARES all field memory (momentum, velocities,
-densities, ρθ, moisture, tracers, temperature, pressure solver, dynamics fields) and steps it in
-place. Every prognostic scalar — momentum, ρθ/ρe, moisture, and tracers — is rewrapped with its
-surface fluxes stripped to no-flux (see [`adiabatic_scalar_bcs`](@ref)), sharing the production data
-so no memory is reallocated. The twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per
+densities, ρθ, moisture, aerosol number, tracers, temperature, pressure solver, dynamics fields) and
+steps it in place. Every retained prognostic scalar is rewrapped with its surface fluxes stripped to
+no-flux (see [`adiabatic_scalar_bcs`](@ref)), sharing the production data so no memory is
+reallocated. Prognostic aerosol number is carried as a passive tracer: activation and sedimentation
+are removed, while reversible transport preserves `nᵃ = ρnᵃ / ρ` as the balance adjusts density.
+The twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per
 `balancer.time_stepping`); microphysics, closure, the implicit diffusion solver, the sponge, and
-forcing — all dissipative/irreversible — are removed; the time stepper's `Gⁿ`/`U⁰` tendency storage
-*aliases* the production stepper's same-named arrays (moisture key re-mapped from the microphysics
-name, e.g. `:ρqᵉ`, to the moistureless `:ρqᵛ`); and a fresh `Clock` is used so the balance's clock
-reset does not touch the production clock.
+forcing are removed; the time stepper's `Gⁿ`/`U⁰` tendency storage *aliases* the production stepper's
+same-named arrays (moisture key re-mapped from the microphysics name, e.g. `:ρqᵉ`, to the
+moistureless `:ρqᵛ`); and a fresh `Clock` is used so the balance's clock reset does not touch the
+production clock.
 """
 adiabatic_balance_twin(model::AtmosphereModel, balancer::AdiabaticBalancer = AdiabaticBalancer()) =
     assemble_adiabatic_twin(model, adiabatic_twin_dynamics(model.dynamics, balancer.time_stepping))
@@ -233,7 +235,14 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
 
     twin_momentum         = NamedTuple{keys(model.momentum)}(adiabatic_field(ρu) for ρu in model.momentum)
     twin_moisture_density = adiabatic_field(model.moisture_density)
-    twin_tracers          = NamedTuple{keys(model.tracers)}(adiabatic_field(c) for c in model.tracers)
+
+    # Retain prognostic aerosol as a passive density-weighted tracer. Omitting it while the twin
+    # changes density would undo P3's density-aware initialization by changing `ρnᵃ / ρ`.
+    # Activation and sedimentation remain stripped with the rest of microphysics.
+    aerosol_names = aerosol_field_names(model.microphysics)
+    twin_aerosol_tracers = NamedTuple{aerosol_names}(adiabatic_field(model.microphysical_fields[name]) for name in aerosol_names)
+    twin_user_tracers = NamedTuple{keys(model.tracers)}(adiabatic_field(c) for c in model.tracers)
+    twin_tracers = merge(twin_aerosol_tracers, twin_user_tracers)
 
     twin_microphysics  = nothing
     qᵛ                 = specific_prognostic_moisture(model)
@@ -261,11 +270,12 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
                            NamedTuple{twin_scalar_names}(model.advection[remap(n)] for n in twin_scalar_names))
 
     # Zeroed forcing, keyed exactly as the constructor would for this stripped prognostic set.
-    density = dynamics_density(twin_dynamics)
+    coupling_density = dynamics_density(twin_dynamics)
+    mass_density = total_density(twin_dynamics)
     twin_model_fields = merge(twin_prognostic, fields(formulation), model.velocities,
                               (; T = model.temperature), twin_microphysical)
     twin_forcing = atmosphere_model_forcing(NamedTuple(), twin_prognostic, twin_model_fields,
-                                            grid, model.coriolis, density,
+                                            grid, model.coriolis, coupling_density, mass_density,
                                             model.velocities, twin_dynamics, formulation,
                                             twin_microphysics, qᵛ)
 

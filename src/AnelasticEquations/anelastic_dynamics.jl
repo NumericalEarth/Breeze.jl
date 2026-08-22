@@ -118,6 +118,15 @@ reference state density ``ρᵣ(z)``.
 """
 AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
+# The anelastic reference density ρᵣ(z) is a dry reference state evaluated at the reference
+# temperature, so it is not the gas-phase density of the local air. Vapor partial pressure must
+# use the latter: ρ = pᵣ(z) / (Rᵐ(q) T) at the reference pressure.
+@inline function AtmosphereModels.gas_phase_density(i, j, k, dynamics::AnelasticDynamics,
+                                                    T, q, constants)
+    @inbounds p = dynamics.reference_state.pressure[i, j, k]
+    return density(T, p, q, constants)
+end
+
 #####
 ##### Prognostic fields
 #####

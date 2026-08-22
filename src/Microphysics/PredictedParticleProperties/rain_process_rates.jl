@@ -1,0 +1,358 @@
+#####
+##### Rain processes
+#####
+##### Autoconversion / accretion / self-collection are dispatched on
+##### `p3.warm_rain_scheme` (default and only scheme: `KhairoutdinovKogan2000`).
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute rain autoconversion rate, dispatched on `p3.warm_rain_scheme`.
+
+Cloud droplets larger than a threshold undergo collision-coalescence to form rain.
+
+Available schemes:
+- [`KhairoutdinovKogan2000`](@ref) (default): power-law in (qᶜˡ, Nᶜˡ)
+
+# Arguments
+- `p3`: P3 microphysics scheme (provides parameters and scheme selector)
+- `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
+- `Nᶜˡ`: Cloud droplet number concentration [1/m³]
+- `ρ`: Air density [kg/m³]
+- `qʳ`: Rain mass fraction [kg/kg] (unused by KK2000; retained for the
+        scheme-dispatch signature)
+
+# Returns
+- Rate of cloud → rain conversion [kg/kg/s]
+"""
+@inline rain_autoconversion_rate(p3, qᶜˡ, Nᶜˡ, ρ, qʳ = zero(qᶜˡ)) =
+    rain_autoconversion_rate(p3.warm_rain_scheme, p3, qᶜˡ, Nᶜˡ, ρ, qʳ)
+
+@inline function rain_autoconversion_rate(::KhairoutdinovKogan2000, p3, qᶜˡ, Nᶜˡ, ρ, qʳ)
+    FT = typeof(qᶜˡ)
+    parameters = p3.process_rates
+
+    # No autoconversion below the in-cloud threshold qᶜˡ < 1e-8 kg/kg.
+    qᶜˡ_eff = ifelse(qᶜˡ >= parameters.autoconversion_threshold, clamp_positive(qᶜˡ), zero(FT))
+
+    # KK2000 scales with droplet number per volume, so no reference-density
+    # normalization is needed — Nᶜˡ is already per-volume [1/m³].
+    scaled_cloud_number = Nᶜˡ / parameters.autoconversion_reference_concentration
+
+    # Khairoutdinov-Kogan (2000): ∂qʳ/∂t = k₁ × qᶜˡ^α × (Nᶜˡ/Nᶜˡ_ref)^β
+    k₁ = parameters.autoconversion_coefficient
+    α = parameters.autoconversion_exponent_cloud
+    β = parameters.autoconversion_exponent_droplet
+
+    return k₁ * qᶜˡ_eff^α * scaled_cloud_number^β
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute rain accretion rate, dispatched on `p3.warm_rain_scheme`.
+
+Falling rain drops collect cloud droplets via gravitational sweep-out. See
+[`rain_autoconversion_rate`](@ref) for the scheme menu.
+
+# Arguments
+- `p3`: P3 microphysics scheme
+- `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
+- `qʳ`: Rain mass fraction [kg/kg]
+- `ρ`: Air density [kg/m³] (unused by KK2000; defaults to 1)
+
+# Returns
+- Rate of cloud → rain conversion [kg/kg/s]
+"""
+@inline rain_accretion_rate(p3, qᶜˡ, qʳ, ρ = one(qᶜˡ)) =
+    rain_accretion_rate(p3.warm_rain_scheme, p3, qᶜˡ, qʳ, ρ)
+
+@inline function rain_accretion_rate(::KhairoutdinovKogan2000, p3, qᶜˡ, qʳ, ρ)
+    FT = typeof(qᶜˡ)
+    parameters = p3.process_rates
+    qᶜˡ_eff = clamp_positive(qᶜˡ)
+    qʳ_eff = clamp_positive(qʳ)
+    active = (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
+             (qʳ_eff >= p3.minimum_mass_mixing_ratio)
+
+    # KK2000 Eq. 5: ∂qʳ/∂t = k₂ × (qᶜˡ × qʳ)^α
+    k₂ = parameters.accretion_coefficient
+    α = parameters.accretion_exponent
+
+    rate = k₂ * (qᶜˡ_eff * qʳ_eff)^α
+    return ifelse(active, rate, zero(FT))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute rain self-collection rate (number tendency only). Dispatches on
+`p3.warm_rain_scheme`.
+
+Large rain drops collect smaller ones, reducing number but conserving mass.
+KK2000 uses the linear form `k_rr × ρ × qʳ × nʳ`, with `k_rr = 5.78`.
+
+# Arguments
+- `p3`: P3 microphysics scheme (provides parameters and scheme selector)
+- `qʳ`: Rain mass fraction [kg/kg]
+- `nʳ`: Rain number concentration [1/kg]
+- `ρ`: Air density [kg/m³]
+
+# Returns
+- Rate of rain number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
+"""
+@inline rain_self_collection_rate(p3, qʳ, nʳ, ρ) =
+    rain_self_collection_rate(p3.warm_rain_scheme, p3, qʳ, nʳ, ρ)
+
+@inline function rain_self_collection_rate(::KhairoutdinovKogan2000, p3, qʳ, nʳ, ρ)
+    FT = typeof(qʳ)
+    parameters = p3.process_rates
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, parameters)
+    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+
+    # KK2000: |∂nʳ/∂t| = k_rr × ρ × qʳ × nʳ
+    k_rr = parameters.rain_self_collection_coefficient
+    rate = k_rr * ρ * qʳ_eff * nʳ_eff
+    return ifelse(active, rate, zero(FT))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute rain breakup rate.
+
+Large rain drops spontaneously break up into smaller fragments, producing
+a number source that counterbalances self-collection. Uses a two-piece
+function of ``D^r = (q^r / (π ρ^L n^r))^{1/3} = 1/λ^r`` (no factor of 6; this
+equals the mean-mass diameter for an exponential DSD):
+
+1. ``D^r < D^{th}``: No breakup effect (modifier = 1, breakup = 0)
+2. ``D^r ≥ D^{th}``: ``\\text{modifier} = 2 - \\exp(κ_{br} (D^r - D^{th}))``, breakup > 0
+
+The breakup rate is ``(1 - \\text{modifier}) \\times`` self-collection rate.
+
+Note: ``D^r`` here is ``1/λ^r`` (no factor of 6), which is smaller than the
+physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
+
+# Arguments
+- `p3`: P3 microphysics scheme (provides parameters)
+- `qʳ`: Rain mass fraction [kg/kg]
+- `nʳ`: Rain number concentration [1/kg]
+- `self_collection`: Self-collection rate [1/kg/s] (positive magnitude)
+
+# Returns
+- Breakup rate [1/kg/s] (positive = number source)
+"""
+@inline function rain_breakup_rate(p3, qʳ, nʳ, self_collection)
+    FT = typeof(qʳ)
+    parameters = p3.process_rates
+
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, parameters)
+
+    # Dʳ = 1/λʳ, evaluated after the rain lambda limiter has been applied and the
+    # DSD-consistent number recomputed.
+    λʳ = rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
+    mean_rain_diameter = 1 / λʳ
+
+    # Two-piece breakup function
+    breakup_diameter_threshold = parameters.rain_breakup_diameter_threshold
+    breakup_coefficient = parameters.rain_breakup_coefficient
+
+    # Clamp exp argument to prevent Float32 overflow (exp(88.7) ≈ 3.4e38 = maxfloat).
+    # Without the clamp, LLVM PTX may fuse the ifelse and multiply, producing
+    # (Inf - 1) * 0 = NaN when Dʳ is large but self_collection ≈ 0.
+    exponential_argument = min(breakup_coefficient *
+                               (mean_rain_diameter - breakup_diameter_threshold), FT(80))
+    breakup_modifier = ifelse(mean_rain_diameter < breakup_diameter_threshold,
+                              FT(1),
+                              FT(2) - exp(exponential_argument))
+
+    # Breakup rate: (1 - breakup_modifier) × self_collection
+    # When Dʳ < Dᵗʰ: modifier = 1 → breakup = 0 (no effect)
+    # When Dʳ ≥ Dᵗʰ: modifier < 1 → breakup > 0 (number source)
+    # self_collection is positive magnitude (M7); breakup is positive (number source).
+    rate = (FT(1) - breakup_modifier) * self_collection
+    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+    return ifelse(active, rate, zero(FT))
+end
+
+# Mason (1971) thermodynamic resistance Φ = A + B for diffusional growth at a
+# liquid surface, shared by rain evaporation and rain condensation. `e_s` is
+# recovered by inverting qᵛ⁺ˡ = ε e_s / (P - (1 - ε) e_s), consistent with the
+# ice deposition path.
+@inline function mason_thermodynamic_factor(qᵛ⁺ˡ, T, P, constants, transport, parameters, FT)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    Rᵈ = FT(dry_air_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)  # Latent heat of vaporization [J/kg]
+    Kᵃ = transport.Kᵃ                        # Thermal conductivity of air [W/m/K]
+    Dᵛ = transport.Dᵛ                        # Diffusivity of water vapor [m²/s]
+
+    ε = Rᵈ / Rᵛ
+    qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(parameters.floors.divisor))
+    e_s = P * qᵛ⁺ˡ_safe / (ε + qᵛ⁺ˡ_safe * (1 - ε))
+
+    A = ℒˡ / (Kᵃ * T) * (ℒˡ / (Rᵛ * T) - 1)
+    B = Rᵛ * T / (e_s * Dᵛ)
+    # Φ is only ever a divisor, so the floor is the generic division guard rather than
+    # a physical threshold. It never binds: A ≈ 7×10⁶ and B ≈ 9×10⁶ near freezing at
+    # 1 atm, and the degenerate limits raise the sum rather than lower it (Kᵃ → 0 sends
+    # A → ∞, Dᵛ → 0 sends B → ∞).
+    return max(A + B, FT(parameters.floors.divisor))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute rain evaporation rate using ventilation-enhanced diffusion.
+
+Rain drops evaporate when the ambient air is subsaturated (qᵛ < qᵛ⁺ˡ).
+The evaporation rate is enhanced by ventilation (air flow around falling drops).
+
+Dispatches to either the tabulated PSD integral path or the mean-mass
+approximation path depending on `p3.rain.evaporation`:
+
+- **Tabulated** (`TabulatedFunction1D`): Computes λʳ from (qʳ, Nʳ), looks up
+  the ventilation integral `I_evap(λʳ) = ∫ D fᵛᵉ(D) exp(-λʳ D) dD`, then
+  applies `dqʳ/dt = 2π × Nʳ₀ × I_evap × (S-1) / thermo_factor`
+  (Mason 1971, capacitance C = D/2 so 4πC = 2πD).
+- **Mean-mass** (`RainEvaporation`): Uses a single representative drop of
+    diameter `D_mean = (6 m_mean / (π ρᴸ))^(1/3)` and the same piecewise
+    rain fall-speed law as the tabulated path.
+
+```math
+\\frac{dm}{dt} = \\frac{4\\pi C f_v (S - 1)}{\\frac{ℒˡ}{Kᵃ T}(\\frac{ℒˡ}{R_v T} - 1)
+               + \\frac{R_v T}{e_s Dᵛ}},\\quad C = D/2
+```
+
+# Arguments
+- `p3`: P3 microphysics scheme (provides parameters and evaporation table)
+- `qʳ`: Rain mass fraction [kg/kg]
+- `nʳ`: Rain number concentration [1/kg]
+- `qᵛ`: Vapor mass fraction [kg/kg]
+- `qᵛ⁺ˡ`: Saturation vapor mass fraction over liquid [kg/kg]
+- `T`: Temperature [K]
+- `ρ`: Air density [kg/m³]
+- `P`: Air pressure [Pa]
+- `constants`: Thermodynamic constants
+
+# Returns
+- Rate of rain evaporation [kg/kg/s] (positive magnitude; sign applied in tendency assembly)
+"""
+@inline function rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P,
+                                       constants,
+                                       transport=air_transport_properties(T, P, constants))
+    FT = typeof(qʳ)
+    parameters = p3.process_rates
+
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = clamp_positive(nʳ)
+
+    # Only evaporate in subsaturated conditions
+    S = qᵛ / max(qᵛ⁺ˡ, FT(parameters.floors.saturation_mass_fraction))
+    is_subsaturated = S < 1
+
+    # T,P-dependent transport properties (pre-computed or computed on demand)
+    Dᵛ = transport.Dᵛ       # Diffusivity of water vapor [m²/s]
+    ν  = transport.ν        # Kinematic viscosity [m²/s]
+
+    thermodynamic_factor = mason_thermodynamic_factor(qᵛ⁺ˡ, T, P, constants, transport, parameters, FT)
+
+    # Internal helpers return negative (S - 1 < 0 when subsaturated).
+    # Negate to get positive magnitude.
+    evap_rate = -rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
+                                        thermodynamic_factor, p3, parameters, ν, Dᵛ, ρ, FT)
+
+    # Cannot evaporate more than available
+    τ_evap = parameters.rain_evaporation_timescale
+    max_evap = qʳ_eff / τ_evap
+    evap_rate = min(evap_rate, max_evap)
+
+    return ifelse(is_subsaturated, evap_rate, zero(FT))
+end
+
+# Tabulated path: use PSD-integrated ventilation integral I_evap(λʳ)
+@inline function rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
+                                        thermodynamic_factor, p3, parameters, ν, Dᵛ, ρ, FT)
+    # Diagnose λʳ from (qʳ, Nʳ) for exponential DSD (μʳ = 0):
+    #   qʳ = Nʳ * <m> = Nʳ * π ρᴸ / λʳ³  ⟹  λʳ = (π ρᴸ / m̄)^(1/3)
+    λʳ = rain_slope_parameter(qʳ, nʳ, parameters)
+    nʳ_bounded = rain_number_from_slope(qʳ, λʳ, parameters)
+
+    # Intercept Nʳ₀ = Nʳ * λʳ  (for exponential DSD N'(D) = Nʳ₀ exp(-λ D))
+    Nʳ₀ = nʳ_bounded * λʳ
+
+    log_slope = log10(λʳ)
+    velocity_diameter_integral = table(log_slope)
+
+    # Combine constant + velocity-diameter terms with T,P-dependent transport.
+    # Constant term: f1r × ∫ D × exp(-λD) dD = f1r / λ² (analytical for μ_r=0)
+    constant_integral = FT(RAIN_F1R) / λʳ^2
+    # Table stores ∫ D √(V×D) exp(-λD) dD (no ν); apply 1/√ν at runtime.
+    coefficient_floor = FT(parameters.floors.transport_coefficient)
+    schmidt_factor = cbrt(ν / max(Dᵛ, coefficient_floor))
+    inverse_sqrt_viscosity = 1 / sqrt(max(ν, coefficient_floor))
+    evaporation_integral = constant_integral + FT(RAIN_F2R) * schmidt_factor *
+                           inverse_sqrt_viscosity * velocity_diameter_integral
+
+    # Evaporation rate (Mason 1971, PSD-integrated):
+    #   dm/dt per drop = 4π × C × f_v × (S-1)/Φ,  C = D/2 (spherical capacitance)
+    #   dq^r/dt = N_0 × ∫ 4π × (D/2) × f_v × exp(-λD) dD × (S-1)/Φ
+    #           = 2π × N_0 × I_evap × (S-1) / Φ,  I_evap = ∫ D × f_v × exp(-λD) dD
+    return 2 * FT(π) * Nʳ₀ * evaporation_integral * (S - 1) / thermodynamic_factor
+end
+
+#####
+##### Scheme-dependent helpers shared by autoconv/accretion/number tendencies
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Cloud-droplet self-collection rate (number loss in cloud, not rain).
+
+Dispatched on `p3.warm_rain_scheme`. Zero for KK2000, which carries no
+cloud-droplet self-collection. Returned as a positive magnitude.
+"""
+@inline cloud_self_collection_rate(p3, qᶜˡ, Nᶜˡ, ρ) =
+    cloud_self_collection_rate(p3.warm_rain_scheme, p3, qᶜˡ, Nᶜˡ, ρ)
+
+@inline cloud_self_collection_rate(::KhairoutdinovKogan2000, p3, qᶜˡ, Nᶜˡ, ρ) = zero(qᶜˡ)
+
+"""
+$(TYPEDSIGNATURES)
+
+Cloud-droplet number loss from autoconversion (mass → drop count conversion),
+dispatched on `p3.warm_rain_scheme`. Returned as a positive magnitude.
+
+For KK2000 the loss is `autoconversion × Nᶜˡ / qᶜˡ`: cloud number is lost in
+proportion to the cloud mass lost.
+"""
+@inline cloud_number_loss_from_autoconversion(p3, autoconversion, qᶜˡ, Nᶜˡ, ρ) =
+    cloud_number_loss_from_autoconversion(p3.warm_rain_scheme, p3,
+                                          autoconversion, qᶜˡ, Nᶜˡ, ρ)
+
+@inline function cloud_number_loss_from_autoconversion(::KhairoutdinovKogan2000,
+                                                       p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
+    FT = typeof(autoconversion)
+    # autoconversion × nᶜˡ / qᶜˡ with nᶜˡ = Nᶜˡ/ρ, i.e.
+    # autoconversion × Nᶜˡ / (ρ qᶜˡ); safe_divide guards qᶜˡ = 0.
+    cloud_number_per_mass = safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(FT))
+    return autoconversion * cloud_number_per_mass
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Mass per newly-formed rain drop produced by autoconversion, dispatched on
+`p3.warm_rain_scheme`. Used to convert autoconversion mass rate into a rain
+number source.
+
+For KK2000 this is the mass of a 25 μm radius drop ≈ 6.545e-11 kg, read from
+`p3.process_rates.initial_rain_drop_mass` so the radius is user-configurable.
+"""
+@inline rain_seed_drop_mass(p3) = rain_seed_drop_mass(p3.warm_rain_scheme, p3)
+
+@inline rain_seed_drop_mass(::KhairoutdinovKogan2000, p3) = p3.process_rates.initial_rain_drop_mass

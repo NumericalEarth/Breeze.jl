@@ -8,6 +8,15 @@ to the given Unicode symbol. As properties, mathematical names are usually used
 mathematical form is invoked for the elements of a `NamedTuple`.
 Mathematical symbols are shown with inline math, while the Unicode column shows the exact glyphs used in code.
 
+The table below reserves symbols for the dynamics and thermodynamics — the equations
+of motion, the thermodynamic state, and the numerics that step them — so that new
+notation in those can be introduced without colliding with what is already there.
+A parameterization dense enough to exhaust the alphabet on its own does not belong
+in it: its notation is scoped to its own pages instead, where reusing a letter
+reserved here is a local decision rather than a conflict. The
+[P3 notation](@ref p3_notation) section does that for the Predicted Particle Properties
+scheme.
+
 A few notes about the following table:
 
 * `TC` stands for [`ThermodynamicConstants`](@ref)
@@ -63,12 +72,12 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρqᶜⁱ``                            | `ρqᶜⁱ` |                                     | Cloud ice density                                                              |
 | ``ρqʳ``                             | `ρqʳ`  | `AM.microphysical_fields.ρqʳ`       | Rain density                                                                   |
 | ``ρqˢ``                             | `ρqˢ`  | `AM.microphysical_fields.ρqˢ`       | Snow density                                                                   |
-| ``n^{cl}``                          | `nᶜˡ`  | `AM.microphysical_fields.nᶜˡ`       | Cloud droplet number per unit mass (1/kg)                                      |
+| ``n^{cl}``                          | `nᶜˡ`  | `AM.microphysical_fields.nᶜˡ`       | Cloud droplet number per unit mass (1/kg); P3 allocates this diagnostic only with aerosol activation |
 | ``n^r``                             | `nʳ`   | `AM.microphysical_fields.nʳ`        | Rain drop number per unit mass (1/kg)                                          |
-| ``n^a``                             | `nᵃ`   | `AM.microphysical_fields.nᵃ`        | Aerosol number per unit mass (1/kg)                                            |
-| ``\rho n^{cl}``                     | `ρnᶜˡ` | `AM.microphysical_fields.ρnᶜˡ`      | Cloud droplet number density (1/m³), prognostic                                |
+| ``n^a``                             | `nᵃ`   | `AM.microphysical_fields.nᵃ`        | Aerosol number per unit mass (1/kg); allocated only with aerosol activation    |
+| ``\rho n^{cl}``                     | `ρnᶜˡ` | `AM.microphysical_fields.ρnᶜˡ`      | Cloud droplet number density (1/m³), prognostic (absent in P3's prescribed-Nᶜˡ path) |
 | ``\rho n^r``                        | `ρnʳ`  | `AM.microphysical_fields.ρnʳ`       | Rain drop number density (1/m³), prognostic                                    |
-| ``\rho n^a``                        | `ρnᵃ`  | `AM.microphysical_fields.ρnᵃ`       | Aerosol number density (1/m³), prognostic                                      |
+| ``\rho n^a``                        | `ρnᵃ`  | `AM.microphysical_fields.ρnᵃ`       | Aerosol number density (1/m³), prognostic (only with aerosol activation)        |
 | ``N^{cl}``                          | `Nᶜˡ`  |                                     | Volumetric cloud droplet number density, ``Nᶜˡ = ρ nᶜˡ`` (1/m³)               |
 | ``N^r``                             | `Nʳ`   |                                     | Volumetric rain drop number density, ``Nʳ = ρ nʳ`` (1/m³)                      |
 | ``N^a``                             | `Nᵃ`   |                                     | Volumetric aerosol number density, ``Nᵃ = ρ nᵃ`` (1/m³)                        |

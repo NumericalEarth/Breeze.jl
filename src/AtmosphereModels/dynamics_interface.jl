@@ -130,6 +130,20 @@ Return the total pressure (mean + anomaly) in Pa.
 """
 function total_pressure end
 
+"""
+$(TYPEDSIGNATURES)
+
+Return pressure consistent with a prescribed temperature during thermodynamic initialization.
+
+The default retains [`dynamics_pressure`](@ref) (appropriate for anelastic/reference-pressure
+models, where pressure is not a function of the state being set). Compressible dynamics overrides
+this with the equation of state `p = ρ Rᵐ T`, avoiding a fixed-point error when density or
+composition was changed immediately before setting temperature.
+"""
+@inline function pressure_from_density_temperature(i, j, k, dynamics, ρ, T, q, constants)
+    return @inbounds dynamics_pressure(dynamics)[i, j, k]
+end
+
 #####
 ##### Density and pressure access interface
 #####
@@ -162,6 +176,24 @@ formulations with a single density (e.g. the anelastic reference density). `Comp
 overrides it with a diagnosed total-density field, distinct from the coupling density ρᵈ.
 """
 total_density(dynamics) = dynamics_density(dynamics)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the density ``ρ`` of the gas phase — dry air plus vapor, ``ρᵈ + ρᵛ`` — at `(i, j, k)`, from
+the equation of state at the local temperature and composition, ``ρ = p / (Rᵐ(q) T)``. This is the
+density that turns a mass fraction into a partial pressure — the vapor pressure is
+``pᵛ = ρ qᵛ Rᵛ T``. It differs from [`total_density`](@ref) in omitting the condensate, and it is
+not in general the density that the prognostic partial densities are weighted by.
+
+The default returns `total_density(dynamics)`, correct wherever that field *is* the density of the
+gas phase: compressible dynamics, where it is diagnosed from the prognostic state, and
+prescribed-density models. `AnelasticDynamics` overrides it, because its reference density ``ρᵣ(z)``
+is a *dry* reference state evaluated at the reference temperature and pressure.
+"""
+@inline function gas_phase_density(i, j, k, dynamics, T, q, constants)
+    return @inbounds total_density(dynamics)[i, j, k]
+end
 
 """
     advecting_vertical_velocity(dynamics, velocities)
