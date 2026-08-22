@@ -3,7 +3,7 @@ name: Documentation
 on:
   push:
     branches:
-      - main
+      - "**"
     tags: "*"
   pull_request:
 
@@ -76,11 +76,7 @@ jobs:
       - name: Set BREEZE_BUILD_ALL_EXAMPLES
         shell: bash
         run: |
-          if [[ ('${{ github.event_name }}' == 'push' && ('${{ github.ref }}' == 'refs/heads/main') || '${{ github.ref }}' == refs/tags/v*) || ('${{ github.event_name }}' == 'release') || ('${{ github.event_name }}' == 'pull_request' && ${{ contains(github.event.pull_request.labels.*.name,  env.BREEZE_LABEL_BUILD_ALL_EXAMPLES) }} == true) ]]; then
-              BREEZE_BUILD_ALL_EXAMPLES=true
-          else
-              BREEZE_BUILD_ALL_EXAMPLES=false
-          fi
+          BREEZE_BUILD_ALL_EXAMPLES=true
           echo "BREEZE_BUILD_ALL_EXAMPLES=${BREEZE_BUILD_ALL_EXAMPLES}" | tee "${GITHUB_ENV}"
       - name: Instantiate docs environment
         shell: julia --color=yes --project=docs {0}
