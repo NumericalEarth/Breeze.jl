@@ -126,7 +126,7 @@ function ssp_rk3_substep!(model, Δt, α)
 
         # Field index for implicit solver:
         # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
-        # - indices 4+ are scalars (ρθ/ρe, ρqᵗ, microphysics, tracers)
+        # - indices 4+ are scalars (ρθ/ρs, ρqᵗ, microphysics, tracers)
         # For scalars, we use Val(i - 3) to get Val(1), Val(2), etc.
         field_index = Val(i - 3)
         advection = field_advection_scheme(model.advection, names[i])

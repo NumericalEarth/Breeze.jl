@@ -109,7 +109,7 @@ mutable struct ParcelTendencies{FT, GM}
     Gy :: FT
     Gz :: FT
     Gw :: FT
-    Ge :: FT
+    Gs :: FT
     Gqᵗ :: FT
     Gμ :: GM
 end
@@ -239,8 +239,8 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     cᵖᵐ = mixture_heat_capacity(q, constants)
     T_default = FT(288.15)
     z_default = zero(FT)
-    e_default = cᵖᵐ * T_default + g * z_default
-    𝒰 = StaticEnergyState(e_default, q, z_default, p₀)
+    s_default = cᵖᵐ * T_default + g * z_default
+    𝒰 = StaticEnergyState(s_default, q, z_default, p₀)
 
     # Microphysics prognostic variables based on the microphysics scheme
     μ = materialize_parcel_microphysics_prognostics(FT, microphysics)
@@ -250,7 +250,7 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     w_default = zero(FT)
     qᵗ_default = zero(FT)
     ρqᵗ_default = ρ_default * qᵗ_default
-    ℰ_default = e_default  # static energy for default formulation
+    ℰ_default = s_default  # static energy for default formulation
     ρℰ_default = ρ_default * ℰ_default
     state = ParcelState(zero(FT), zero(FT), z_default, w_default, ρ_default,
                         qᵗ_default, ρqᵗ_default, ℰ_default, ρℰ_default, 𝒰, μ)
@@ -510,10 +510,10 @@ function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     # Compute static energy and thermodynamic state
     q = MoistureMassFractions(qᵗ₀)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    e = cᵖᵐ * T₀ + g * z₀
-    state.ℰ = e
-    state.ρℰ = ρ₀ * e
-    state.𝒰 = StaticEnergyState(e, q, z₀, p₀)
+    s = cᵖᵐ * T₀ + g * z₀
+    state.ℰ = s
+    state.ρℰ = ρ₀ * s
+    state.𝒰 = StaticEnergyState(s, q, z₀, p₀)
 
     return nothing
 end
@@ -550,9 +550,9 @@ Compute tendencies for the parcel prognostic variables.
 Position tendencies are interpolated from environmental velocity fields.
 Thermodynamic and moisture tendencies come from microphysical sources/sinks.
 
-The parcel model evolves **specific quantities** (e, qᵗ) directly, not
+The parcel model evolves **specific quantities** (s, qᵗ) directly, not
 density-weighted quantities. For adiabatic ascent with no microphysics,
-specific static energy and moisture are exactly conserved (de/dt = dqᵗ/dt = 0).
+specific static energy and moisture are exactly conserved (ds/dt = dqᵗ/dt = 0).
 This is simpler and more accurate than stepping density-weighted quantities.
 """
 function compute_parcel_tendencies!(model::ParcelModel)
@@ -581,7 +581,7 @@ function compute_parcel_tendencies!(model::ParcelModel)
     # Dispatch handles the Nothing case: microphysical_tendency(::Nothing, ...) returns zero,
     # compute_microphysics_prognostic_tendencies(::Nothing, ...) returns nothing/zero NamedTuple
     ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
-    tendencies.Ge = microphysical_tendency(microphysics, Val(:e), ρ, ℳ, 𝒰, constants)
+    tendencies.Gs = microphysical_tendency(microphysics, Val(:s), ρ, ℳ, 𝒰, constants)
     tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:qᵗ), ρ, ℳ, 𝒰, constants)
     tendencies.Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
 
@@ -812,8 +812,8 @@ u^{(m)} = (1 - α) u^{(0)} + α \\left[u^{(m-1)} + Δt \\, G^{(m-1)}\\right]
 where ``u^{(0)}`` is the initial state, ``u^{(m-1)}`` is the current state,
 and ``G^{(m-1)}`` is the tendency at the current state.
 
-The parcel model steps specific quantities (e, qᵗ) directly for exact conservation.
-For adiabatic ascent with no microphysics sources, de/dt = dqᵗ/dt = 0, so these
+The parcel model steps specific quantities (s, qᵗ) directly for exact conservation.
+For adiabatic ascent with no microphysics sources, ds/dt = dqᵗ/dt = 0, so these
 quantities remain exactly constant throughout the simulation.
 """
 function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, Δt, α)
@@ -834,7 +834,7 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
 
     # Step specific quantities directly (exact conservation for adiabatic)
     state.qᵗ = (1 - α) * U⁰.qᵗ + α * (state.qᵗ + Δt * tendencies.Gqᵗ)
-    state.ℰ = (1 - α) * U⁰.ℰ + α * (state.ℰ + Δt * tendencies.Ge)
+    state.ℰ = (1 - α) * U⁰.ℰ + α * (state.ℰ + Δt * tendencies.Gs)
 
     # Get environmental conditions at new height
     z⁺ = state.z
@@ -872,8 +872,8 @@ Reconstruct a thermodynamic state with a new conserved variable value and update
 """
 function reconstruct_thermodynamic_state end
 
-@inline function reconstruct_thermodynamic_state(𝒰::StaticEnergyState{FT}, e⁺, z⁺, p⁺) where FT
-    return StaticEnergyState{FT}(e⁺, 𝒰.moisture_mass_fractions, z⁺, p⁺)
+@inline function reconstruct_thermodynamic_state(𝒰::StaticEnergyState{FT}, s⁺, z⁺, p⁺) where FT
+    return StaticEnergyState{FT}(s⁺, 𝒰.moisture_mass_fractions, z⁺, p⁺)
 end
 
 @inline function reconstruct_thermodynamic_state(𝒰::LiquidIcePotentialTemperatureState{FT}, θ⁺, z⁺, p⁺) where FT
@@ -931,7 +931,7 @@ function step_parcel_state!(model::ParcelModel, Δt)
 
     # Step specific quantities forward (exact conservation for adiabatic)
     state.qᵗ += Δt * tendencies.Gqᵗ
-    state.ℰ += Δt * tendencies.Ge
+    state.ℰ += Δt * tendencies.Gs
 
     # Get environmental conditions at new height
     z⁺ = state.z

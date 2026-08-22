@@ -6,13 +6,13 @@
 |----------|---------|
 | `T` | Temperature (K) |
 | `θ` | Potential temperature: `θ = T / Π` where `Π = (p/p₀)^κ` |
-| `ρe` | Density × total energy (J/m³) |
+| `ρs` | Density × static energy (J/m³) |
 | `ρθ` | Density × potential temperature (kg·K/m³) |
 
 Before applying forcing: (1) check what variable the paper uses, (2) check working examples,
 (3) check Breeze's prognostic variable, (4) verify units.
 
-**Common mistakes**: Applying T tendency to θ, confusing `ρe` with `ρθ`, forgetting Exner function in T↔θ conversion.
+**Common mistakes**: Applying T tendency to θ, confusing `ρs` with `ρθ`, forgetting Exner function in T↔θ conversion.
 
 ## When a Stable Simulation Becomes Unstable
 
@@ -36,7 +36,7 @@ The instability is NOT pre-existing if the code was stable before your changes.
 
 When implementing from papers using different models (SAM, WRF, MPAS):
 1. Identify the paper's prognostic variables and how forcing is applied.
-2. Identify Breeze's prognostics (`ρθ` or `ρe`).
+2. Identify Breeze's prognostics (`ρθ` or `ρs`).
 3. Derive the transformation (e.g., ∂θ/∂t = ∂T/∂t × 1/Π — can amplify 10× at high altitude!).
 4. Check if the paper's model handles this implicitly (e.g., SAM uses static energy ∝ T).
 
