@@ -11,7 +11,8 @@ using Oceananigans.TimeSteppers:
 
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, microphysics_model_update!
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, microphysics_model_update!,
+                                compute_closure_tendencies!
 
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
@@ -140,6 +141,7 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     # assembled. Adding them before this function would be overwritten by
     # compute_slow_momentum_tendencies! / compute_slow_scalar_tendencies!.
     compute_flux_bc_tendencies!(model)
+    compute_closure_tendencies!(model)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰)

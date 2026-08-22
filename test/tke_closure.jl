@@ -199,22 +199,68 @@ column(field) = Array(interior(field, 1, 1, :))
         @test all(Kᶜ[2:Nz] .≈ Kᵘ[2:Nz] .* (sf.Cᶜ / sf.Cᵘ))
     end
 
-    @testset "dissipation decays TKE without driving it negative" begin
+    @testset "the implicit linear coefficient is the dissipation rate" begin
         model = AtmosphereModel(grid; closure, advection = nothing)
+        e₀ = FT(0.5)
         set!(model; θ = 300)
-        set_tke!(model, FT(1))
+        set_tke!(model, e₀)
+
+        @test model.closure_fields.tupled_implicit_linear_coefficients.ρe === model.closure_fields.Le
+        @test model.closure_fields.tupled_implicit_linear_coefficients.ρθ isa Oceananigans.Fields.ZeroField
+
+        # Neutral air, no buoyancy flux: Le = - Sᴰ √e / ℓ with ℓ = z at the cell centers
+        Le = column(model.closure_fields.Le)
+        zc = znodes(grid, Center())
+        Cᴰ = closure.stability_functions.Cᴰ
+        @test all(Le .≈ -Cᴰ * sqrt(e₀) ./ zc)
+        @test all(Le .< 0)
+    end
+
+    @testset "the sources enter the stage tendency" begin
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        e₀ = FT(0.5)
+        S = FT(0.01)
+        set!(model; θ = 300, u = z -> S * z)
+        set_tke!(model, e₀)
+
+        Gρe = model.timestepper.Gⁿ.ρe
+        fill!(Gρe, 0)
+        Breeze.AtmosphereModels.compute_closure_tendencies!(model)
+
+        # Neutral: only shear production, P = Kᵘ S² at the faces averaged to the centers; in the
+        # first and last cells the masked boundary face is replaced by its interior neighbour
         ρ = column(model.dynamics.reference_state.density)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        P = [S^2 * (Kᵘ[k] + Kᵘ[k+1]) / 2 for k in 1:Nz]
+        P[1] = S^2 * Kᵘ[2]
+        P[Nz] = S^2 * Kᵘ[Nz]
+        @test all(column(Gρe) .≈ ρ .* P)
+        @test all(column(Gρe) .> 0)
+    end
 
-        e_before = column(model.tracers.ρe) ./ ρ
-        for _ in 1:10
-            time_step!(model, 20)
+    @testset "dissipation decays TKE at the analytic rate" begin
+        # No TKE diffusion, no wind, no stratification: each cell decays as ∂ₜe = -Cᴰ e^{3/2}/ℓ
+        # with ℓ = z, i.e. e(t) = (e₀^{-1/2} + Cᴰ t / 2ℓ)^{-2}
+        undiffused = TKEBasedTurbulenceClosure(maximum_tke_diffusivity = 0)
+        model = AtmosphereModel(grid; closure = undiffused, advection = nothing)
+        e₀ = FT(1)
+        set!(model; θ = 300)
+        set_tke!(model, e₀)
+
+        Δt = FT(1)
+        Nt = 100
+        for _ in 1:Nt
+            time_step!(model, Δt)
         end
-        e_after = column(model.tracers.ρe) ./ ρ
 
-        @test all(e_after .≥ 0)
-        @test all(e_after .< e_before)
-        # Dissipation is strongest where ℓ = z is shortest
-        @test e_after[1] < e_after[Nz]
+        e = column(model.tracers.ρe) ./ column(model.dynamics.reference_state.density)
+        zc = znodes(grid, Center())
+        Cᴰ = undiffused.stability_functions.Cᴰ
+        t = Nt * Δt
+        e_analytic = @. (e₀^(-1/2) + Cᴰ * t / (2 * zc))^(-2)
+        # The sinks are implicit per stage, so the decay is first-order accurate in Δt ω ≈ 0.02
+        @test all(e .≥ 0)
+        @test all(isapprox.(e, e_analytic; rtol = 0.05))
     end
 
     @testset "negative TKE is damped on the damping time scale" begin
@@ -223,11 +269,13 @@ column(field) = Array(interior(field, 1, 1, :))
         set!(model; θ = 300)
         set_tke!(model, FT(-0.1))
 
-        # One step of length τ halves a uniform negative e: there is no shear, no stratification and
-        # no TKE gradient, so the damping is the only term
+        # No shear, no stratification and no TKE gradient, so the damping rate 1/τ is the only
+        # term. It is applied implicitly in each of the three SSP-RK3 stages with αΔt = Δt, Δt/4,
+        # 2Δt/3, and the stage combinations make one step of length τ multiply a uniform e by
+        # [1/3 + 2/3 (3/4 + 1/4 (1/2)) / (5/4)] / (5/3) = 0.48
         time_step!(model, τ)
         e = column(model.tracers.ρe) ./ column(model.dynamics.reference_state.density)
-        @test all(e .≈ -0.05)
+        @test all(e .≈ -0.048)
     end
 
     @testset "explicit time discretization" begin

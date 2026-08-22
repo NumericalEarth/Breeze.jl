@@ -77,7 +77,6 @@ function single_column_simulation(; closure = TKEBasedTurbulenceClosure(),
 
     q₀ = zero(Breeze.Thermodynamics.MoistureMassFractions{Float64})
     ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
-    cᵖ = constants.dry_air.heat_capacity
 
     ## The von Kármán constant of the drag laws below. The closure carries none: its neutral log
     ## layer has the constant (Cᵘ³/Cᴰ)^(1/4) implied by its stability functions, 0.40 by default.
@@ -150,11 +149,11 @@ function single_column_simulation(; closure = TKEBasedTurbulenceClosure(),
 
     if isnothing(surface_temperature)
         ## A positive bottom flux warms the first cell, so a positive `surface_heat_flux` is heating.
-        ρe_bc = FluxBoundaryCondition(ρ₀ * cᵖ * surface_heat_flux)
+        ρθ_bc = FluxBoundaryCondition(ρ₀ * surface_heat_flux)
     else
         ℓʳ = roughness_length
         a₀ = 1e3 * (κ / log(10 / ℓʳ))^2
-        ρe_bc = BulkSensibleHeatFlux(coefficient = PolynomialCoefficient(Float64;
+        ρθ_bc = BulkSensibleHeatFlux(coefficient = PolynomialCoefficient(Float64;
                                                        polynomial = (a₀, 0.0, 0.0),
                                                        roughness_length = ℓʳ,
                                                        stability_function = FittedStabilityFunction(ℓʳ),
@@ -164,7 +163,7 @@ function single_column_simulation(; closure = TKEBasedTurbulenceClosure(),
 
     boundary_conditions = (ρu = FieldBoundaryConditions(bottom=ρu_bc),
                            ρv = FieldBoundaryConditions(bottom=ρv_bc),
-                           ρe = FieldBoundaryConditions(bottom=ρe_bc))
+                           ρθ = FieldBoundaryConditions(bottom=ρθ_bc))
 
     ## A geostrophic wind along x, balanced by Coriolis — dropped entirely for free convection.
     ## The intercomparison cases quote `f` itself rather than a latitude, so both are accepted.

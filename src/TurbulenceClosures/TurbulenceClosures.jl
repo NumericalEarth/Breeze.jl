@@ -12,8 +12,8 @@ using Oceananigans: Oceananigans
 
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, fill_halo_regions!
 using Oceananigans.BuoyancyFormulations: ∂z_b
-using Oceananigans.Fields: ZFaceField
-using Oceananigans.Grids: Center, Face
+using Oceananigans.Fields: CenterField, ZFaceField, ZeroField
+using Oceananigans.Grids: Center, Face, inactive_cell
 
 using Oceananigans.Operators:
     # Face-centered difference operators with area metrics
@@ -34,6 +34,7 @@ using Oceananigans.TurbulenceClosures:
     AbstractScalarDiffusivity,
     VerticalFormulation,
     VerticallyImplicitTimeDiscretization,
+    ExplicitTimeDiscretization,
     getclosure,
     _viscous_flux_ux, _viscous_flux_uy, _viscous_flux_uz,
     _viscous_flux_vx, _viscous_flux_vy, _viscous_flux_vz,

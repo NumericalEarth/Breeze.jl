@@ -10,7 +10,12 @@
 ##### a Richardson-number-dependent variant is a new type plus four methods.
 #####
 ##### The tracer `ρe` is advected and vertically diffused (with Kᵉ) by the dynamical core like every
-##### other scalar; the local sources and sinks are applied by the closure in `step_closure_prognostics!`.
+##### other scalar. Following CATKE, the sinks — dissipation, the negative part of the buoyancy flux
+##### and the damping of negative TKE — enter the same vertically implicit tridiagonal solve as the
+##### diffusion, through the linear coefficient `Le` and `implicit_linear_coefficient`, and the
+##### sources — shear production and the positive part of the buoyancy flux — enter the stage
+##### tendency through `compute_closure_tendencies!`. Under an explicit time discretization the
+##### sinks are added to the tendency as well.
 #####
 
 using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities:
@@ -242,7 +247,7 @@ Fields
 
 $(TYPEDFIELDS)
 """
-struct TKEClosureFields{K, KC}
+struct TKEClosureFields{K, L, KC, LC}
     "eddy diffusivity for momentum ``Kᵘ``, at (Center, Center, Face)"
     Kᵘ :: K
     "eddy diffusivity for scalars ``Kᶜ``, at (Center, Center, Face)"
@@ -251,8 +256,13 @@ struct TKEClosureFields{K, KC}
     Kᵉ :: K
     "the primary mixing length ``ℓ``, at (Center, Center, Face); a diagnostic"
     ℓ :: K
+    "the linear implicit coefficient of the TKE equation, ``∂_t e = Lᵉ e + ⋯``, at (Center, Center, Center):
+     the dissipation rate, the negative part of the buoyancy flux and the damping of negative TKE"
+    Le :: L
     "per-tracer diffusivity lookup, indexed by the tracer's position among the closure scalars"
     tupled_tracer_diffusivities :: KC
+    "per-tracer implicit linear coefficient lookup: `Le` for the TKE tracer, zero for every other"
+    tupled_implicit_linear_coefficients :: LC
 end
 
 Adapt.adapt_structure(to, fields::TKEClosureFields) =
@@ -260,7 +270,9 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.Kᶜ),
                      adapt(to, fields.Kᵉ),
                      adapt(to, fields.ℓ),
-                     adapt(to, fields.tupled_tracer_diffusivities))
+                     adapt(to, fields.Le),
+                     adapt(to, fields.tupled_tracer_diffusivities),
+                     adapt(to, fields.tupled_implicit_linear_coefficients))
 
 BoundaryConditions.fill_halo_regions!(fields::TKEClosureFields, args...; kw...) =
     fill_halo_regions!((fields.Kᵘ, fields.Kᶜ, fields.Kᵉ, fields.ℓ), args...; kw...)
@@ -275,12 +287,15 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     Kᶜ = ZFaceField(grid, boundary_conditions=bcs.Kᶜ)
     Kᵉ = ZFaceField(grid, boundary_conditions=bcs.Kᵉ)
     ℓ  = ZFaceField(grid, boundary_conditions=bcs.ℓ)
+    Le = CenterField(grid)
 
-    # Indexed by the `Val(id)` the model hands to `diffusivity`: TKE is transported with `Kᵉ`
-    # and every other scalar with `Kᶜ`.
+    # Indexed by the `Val(id)` the model hands to `diffusivity` and `implicit_linear_coefficient`:
+    # TKE is transported with `Kᵉ` and damped with `Le`, every other scalar is transported with
+    # `Kᶜ` and has no linear coefficient.
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
+    implicit_linear_coefficients = NamedTuple(name => name === TKE_NAME ? Le : ZeroField() for name in tracer_names)
 
-    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, ℓ, tracer_diffusivities)
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, ℓ, Le, tracer_diffusivities, implicit_linear_coefficients)
 end
 
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
@@ -290,6 +305,15 @@ end
 
 @inline Oceananigans.TurbulenceClosures.diffusivity(::FlavorOfTKEClosure, fields, ::Val{id}) where id =
     fields.tupled_tracer_diffusivities[id]
+
+# The vertically implicit tridiagonal solve of the host model carries a linear term, so that
+# `(1 - Δt Lᵉ - Δt ∂z Kᵉ ∂z) eⁿ⁺¹ = e⋆` — the sinks of the TKE equation are solved together with
+# its vertical diffusion, every stage. Momentum (`id = nothing`) and the other scalars fall back
+# to zero.
+@inline Oceananigans.TurbulenceClosures.implicit_linear_coefficient(i, j, k, grid,
+                                                                    closure::FlavorOfTKEClosure{<:VerticallyImplicitTimeDiscretization},
+                                                                    fields, ::Val{id}, args...) where id =
+    @inbounds fields.tupled_implicit_linear_coefficients[id][i, j, k]
 
 #####
 ##### Stability functions: dispatch on the stability-function type. The arguments beyond the
@@ -385,26 +409,6 @@ end
     end
 end
 
-# Called from `update_state!`, where every tracer — `ρe` included — momentarily holds its specific
-# value, so the kernel reads `e` directly from the tracer.
-function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
-                                                         closure::FlavorOfTKEClosure,
-                                                         model; parameters = :xyz)
-    grid = model.grid
-    arch = grid.architecture
-    tracers = Oceananigans.TurbulenceClosures.buoyancy_tracers(model)
-    buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
-
-    launch!(arch, grid, parameters, _compute_tke_closure_fields!,
-            closure_fields, grid, closure, model.velocities, tracers, buoyancy)
-
-    return nothing
-end
-
-#####
-##### The TKE equation
-#####
-
 """
 $(TYPEDSIGNATURES)
 
@@ -424,62 +428,114 @@ Buoyancy production ``-Kᶜ N²`` at (Center, Center, Face); negative in stable 
 """
 $(TYPEDSIGNATURES)
 
-Advance the local part of the TKE budget, ``∂_t e = P + B - ε``, over `Δt`. Transport is left to
-the ordinary scalar machinery acting on the `ρe` tracer, so this kernel is purely columnwise.
-
-Production and buoyancy flux are formed at faces, where ``Kᵘ``, ``Kᶜ``, ``S²`` and ``N²`` live,
-and reconstructed to centers. Following CATKE, the sources — shear production and a positive
-buoyancy flux — are explicit, while the sinks — dissipation and a negative buoyancy flux — are
-implicit in the rate, so that the update
-
-```math
-e⁺ = \\frac{e + Δt (P + B⁺)}{1 + Δt (ω + |B⁻| / e)}, \\qquad ω = Sᴰ \\sqrt{e} / ℓ,
-```
-
-is positive for any `Δt`. Negative ``e`` is damped on `negative_tke_damping_time_scale` instead.
+The rate at which the sinks of the TKE equation remove turbulent kinetic energy, ``-Lᵉ ≥ 0``:
+the dissipation rate ``ω = Sᴰ \\sqrt{e} / ℓ`` — or, where ``e`` is negative, the damping rate
+``1/τ`` — plus the negative part of the buoyancy flux divided by ``e``, where there is TKE to
+remove. Following CATKE, these are the terms treated implicitly in ``e``, so that ``e`` stays
+positive for any time step.
 """
-@kernel function _step_tke!(ρe, grid, closure, closure_fields, velocities, tracers, buoyancy, ρ, Δt)
+@inline function tke_sink_rate(i, j, k, grid, closure, e, B, velocities, tracers, buoyancy)
+    eᵐⁱⁿ = closure.minimum_tke
+    w★ = sqrt(max(eᵐⁱⁿ, e))
+    ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, w★, tracers, buoyancy)
+    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, tracers, buoyancy)
+
+    τ = closure.negative_tke_damping_time_scale
+    ω = ifelse(e < 0, 1 / τ, Sᴰ * w★ / ℓ)
+
+    B⁻ = min(0, B)
+    ωᴮ = -B⁻ / max(e, eᵐⁱⁿ) * (e > eᵐⁱⁿ)
+
+    return ω + ωᴮ
+end
+
+# The linear implicit coefficient Lᵉ of `∂t e = Lᵉ e + ⋯`, at cell centers, from the stored `Kᶜ`
+# and the raw specific TKE. Launched after the diffusivity kernel, since it reads `Kᶜ` at the faces
+# above and below the cell.
+@kernel function _compute_tke_implicit_linear_coefficient!(Le, grid, closure, closure_fields, velocities, tracers, buoyancy)
+    i, j, k = @index(Global, NTuple)
+
+    closure_ij = getclosure(i, j, closure)
+    e = tracers[TKE_NAME]
+    eᵢ = @inbounds e[i, j, k]
+
+    B = ℑbzᵃᵃᶜ(i, j, k, grid, buoyancy_productionᶜᶜᶠ, closure_fields.Kᶜ, buoyancy, tracers)
+    ω = tke_sink_rate(i, j, k, grid, closure_ij, eᵢ, B, velocities, tracers, buoyancy)
+    active = !inactive_cell(i, j, k, grid)
+
+    @inbounds Le[i, j, k] = - ω * active
+end
+
+# Called from `update_state!`, where every tracer — `ρe` included — momentarily holds its specific
+# value, so the kernels read `e` directly from the tracer.
+function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
+                                                         closure::FlavorOfTKEClosure,
+                                                         model; parameters = :xyz)
+    grid = model.grid
+    arch = grid.architecture
+    tracers = Oceananigans.TurbulenceClosures.buoyancy_tracers(model)
+    buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
+
+    launch!(arch, grid, parameters, _compute_tke_closure_fields!,
+            closure_fields, grid, closure, model.velocities, tracers, buoyancy)
+
+    launch!(arch, grid, parameters, _compute_tke_implicit_linear_coefficient!,
+            closure_fields.Le, grid, closure, closure_fields, model.velocities, tracers, buoyancy)
+
+    return nothing
+end
+
+#####
+##### The TKE equation: sources in the stage tendency
+#####
+
+# Under a vertically implicit time discretization the sinks live in the tridiagonal solve; under an
+# explicit one they are added to the tendency here, as CATKE's `dissipation` does.
+@inline explicit_tke_sinks(i, j, k, grid, ::TKEBasedTurbulenceClosure{<:VerticallyImplicitTimeDiscretization},
+                           e, B, velocities, tracers, buoyancy) = zero(grid)
+
+@inline function explicit_tke_sinks(i, j, k, grid, closure::TKEBasedTurbulenceClosure{<:ExplicitTimeDiscretization},
+                                    e, B, velocities, tracers, buoyancy)
+    ω = tke_sink_rate(i, j, k, grid, closure, e, B, velocities, tracers, buoyancy)
+    return - ω * e
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Add the local sources of the TKE equation, ``ρ (P + B⁺)`` — shear production and the positive part
+of the buoyancy flux, formed at faces where ``Kᵘ``, ``Kᶜ``, ``S²`` and ``N²`` live and reconstructed
+to centers — to the tendency of the `ρe` tracer. Under an explicit time discretization the sinks
+``ρ Lᵉ e`` are added too.
+"""
+@kernel function _add_tke_tendencies!(Gρe, grid, closure, closure_fields, velocities, tracers, ρe, ρ, buoyancy)
     i, j, k = @index(Global, NTuple)
 
     closure_ij = getclosure(i, j, closure)
 
-    ρᵢ = @inbounds ρ[i, j, k]
-    e = @inbounds ρe[i, j, k] / ρᵢ
-
     P = ℑbzᵃᵃᶜ(i, j, k, grid, shear_productionᶜᶜᶠ, closure_fields.Kᵘ, velocities.u, velocities.v)
     B = ℑbzᵃᵃᶜ(i, j, k, grid, buoyancy_productionᶜᶜᶠ, closure_fields.Kᶜ, buoyancy, tracers)
     B⁺ = max(0, B)
-    B⁻ = min(0, B)
 
-    eᵐⁱⁿ = closure_ij.minimum_tke
-    w★ = sqrt(max(eᵐⁱⁿ, e))
-    ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure_ij, w★, tracers, buoyancy)
-    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure_ij, velocities, tracers, buoyancy)
+    ρᵢ = @inbounds ρ[i, j, k]
+    e = @inbounds ρe[i, j, k] / ρᵢ
+    sinks = explicit_tke_sinks(i, j, k, grid, closure_ij, e, B, velocities, tracers, buoyancy)
 
-    # The dissipation rate ε/e, or the damping rate of negative TKE
-    τ = closure_ij.negative_tke_damping_time_scale
-    ω = ifelse(e < 0, 1 / τ, Sᴰ * w★ / ℓ)
-
-    # The negative buoyancy flux as a rate, where there is TKE to remove
-    ωᴮ = -B⁻ / max(e, eᵐⁱⁿ) * (e > eᵐⁱⁿ)
-
-    e⁺ = (e + Δt * (P + B⁺)) / (1 + Δt * (ω + ωᴮ))
-
-    @inbounds ρe[i, j, k] = ρᵢ * e⁺
+    @inbounds Gρe[i, j, k] += ρᵢ * (P + B⁺ + sinks)
 end
 
-function Oceananigans.TurbulenceClosures.step_closure_prognostics!(closure_fields,
-                                                           closure::FlavorOfTKEClosure,
-                                                           model, Δt)
+# Called by the time steppers at the start of every stage, after the flux boundary conditions have
+# been added to the tendencies; the tracers hold their density-weighted values here.
+function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, closure::FlavorOfTKEClosure, model)
     grid = model.grid
     arch = grid.architecture
     tracers = Oceananigans.TurbulenceClosures.buoyancy_tracers(model)
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
     ρ = AtmosphereModels.total_density(model.dynamics)
 
-    launch!(arch, grid, :xyz, _step_tke!,
-            model.tracers[TKE_NAME], grid, closure, closure_fields,
-            model.velocities, tracers, buoyancy, ρ, convert(eltype(grid), Δt))
+    launch!(arch, grid, :xyz, _add_tke_tendencies!,
+            Gⁿ[TKE_NAME], grid, closure, closure_fields,
+            model.velocities, tracers, model.tracers[TKE_NAME], ρ, buoyancy)
 
     return nothing
 end
