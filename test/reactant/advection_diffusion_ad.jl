@@ -12,7 +12,7 @@ using GPUArraysCore: @allowscalar
 using Enzyme
 using Test
 
-if @show(get(ENV, "GITHUB_ACTIONS", "false") == "true")
+if get(ENV, "GITHUB_ACTIONS", "false") == "true"
     Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
 end
 Reactant.Compiler.SROA_ATTRIBUTOR[] = true
@@ -134,8 +134,8 @@ end
         θ  = Reactant.to_rarray(Float64[_A, _σ₀, _U₀])
         dθ = Reactant.to_rarray(zeros(3))
 
-        compiled = Reactant.@compile raise_first = true raise = true sync = true grad_loss(
-            model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
+        compiled = @with_stack_size Reactant.@compile raise_first = true raise = true sync = true grad_loss(
+                model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
 
         dθ_result, J_ad = compiled(model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
         J_ad  = Float64(J_ad)
