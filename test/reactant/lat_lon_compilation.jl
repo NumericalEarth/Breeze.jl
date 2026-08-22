@@ -109,8 +109,6 @@ end
         dmodel = Enzyme.make_zero(model)
         Ns = 1
 
-        # Compiling and running the gradient causes a stackoverflow error on the
-        # CI machine, increase stack size to avoid that.
         compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_loss(
             model, dmodel, θ_init, dθ_init, Δt, Ns)
         dθ, loss_val = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
