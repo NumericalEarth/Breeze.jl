@@ -66,6 +66,40 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             @test maximum(abs, model.closure_fields.νₑ) > 0
         end
 
+        @testset "Closure-field halos are filled [$formulation, $(FT)]" begin
+            # `compute_closure_fields!` writes only the interior, so without the
+            # `fill_halo_regions!` in `compute_auxiliary_variables!` every closure-field halo
+            # stays at its initial zero. The stress in the outermost column of each direction
+            # then interpolates that zero and comes out halved (Smagorinsky/AMD included).
+            model = AtmosphereModel(grid; dynamics, formulation, closure=SmagorinskyLilly())
+            θ₀ = model.dynamics.reference_state.potential_temperature
+            # Mean shear plus a horizontal wave, so νₑ varies along the halo faces and the
+            # comparisons below cannot pass by νₑ being horizontally uniform.
+            ρuᵢ(x, y, z) = z / 100 + 0.1 * sin(2π * x / 100) * cos(2π * y / 100)
+            set!(model; θ=θ₀, ρu=ρuᵢ)
+            Breeze.AtmosphereModels.update_state!(model)
+
+            Nx, Ny, Nz = size(grid)
+            Hx, Hy, Hz = Oceananigans.Grids.halo_size(grid)
+            # One bulk copy: `parent` indices are offset by the halo, so interior (i, j, k) sits
+            # at (i + Hx, j + Hy, k + Hz) and no scalar GPU read is needed.
+            νₑ = Array(parent(model.closure_fields.νₑ))
+            ii, jj, kk = Hx+1:Hx+Nx, Hy+1:Hy+Ny, Hz+1:Hz+Nz
+
+            @test maximum(νₑ[ii, jj, kk]) > 0
+            @test maximum(νₑ[ii, jj, kk]) > minimum(νₑ[ii, jj, kk])
+
+            # x and y are Periodic: the first halo holds the opposite interior face
+            @test νₑ[Hx,      jj, kk] == νₑ[Hx+Nx, jj, kk]
+            @test νₑ[Hx+Nx+1, jj, kk] == νₑ[Hx+1,  jj, kk]
+            @test νₑ[ii, Hy,      kk] == νₑ[ii, Hy+Ny, kk]
+            @test νₑ[ii, Hy+Ny+1, kk] == νₑ[ii, Hy+1,  kk]
+
+            # z is Bounded: the default zero-flux condition mirrors the adjacent interior cell
+            @test νₑ[ii, jj, Hz]      == νₑ[ii, jj, Hz+1]
+            @test νₑ[ii, jj, Hz+Nz+1] == νₑ[ii, jj, Hz+Nz]
+        end
+
         @testset "DynamicSmagorinsky with velocity gradients [$formulation, $(FT)]" begin
             model = AtmosphereModel(grid; dynamics, formulation, closure=DynamicSmagorinsky())
             θ₀ = model.dynamics.reference_state.potential_temperature
