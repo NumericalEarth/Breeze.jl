@@ -21,7 +21,6 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 
 [sources]
 Breeze = {path = ".."}
-Reactant = {url = "https://github.com/EnzymeAD/Reactant.jl.git", rev = "mg/bump-reactant-jll"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
