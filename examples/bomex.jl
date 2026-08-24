@@ -162,38 +162,38 @@ qᵉ_drying_forcing = Forcing(drying)
 # A prescribed radiative cooling profile is applied to the thermodynamic equation
 # ([Siebesma2003](@citet); Appendix B, Eq. B3). Below the inversion, radiative cooling
 # of about 2 K/day counteracts the surface heating. We supply the cooling as a specific
-# energy tendency `e` (J/kg/s) so it is consistently applied to the potential temperature
+# energy tendency `s` (J/kg/s) so it is consistently applied to the potential temperature
 # equation (see below).
 
 radiative_cooling = Field{Nothing, Nothing, Center}(grid)
 cᵖᵈ = constants.dry_air.heat_capacity
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
 set!(radiative_cooling, z -> cᵖᵈ * dTdt_bomex(1, z))
-e_radiation_forcing = Forcing(radiative_cooling)
+s_radiation_forcing = Forcing(radiative_cooling)
 
 # ## Assembling all the forcings
 #
-# Forcings are keyed under specific prognostic names (`u`, `v`, `θ`, `qᵉ`, `e`);
+# Forcings are keyed under specific prognostic names (`u`, `v`, `θ`, `qᵉ`, `s`);
 # Breeze applies the density factor ``ρ`` automatically at kernel time. When
 # multiple forcings act on the same prognostic field — e.g. subsidence and the
 # geostrophic adjustment on the horizontal velocity — they are combined as a
 # tuple, and Breeze sums their contributions.
 #
-# Forcings on `e` and `θ` both contribute to the tendency of `ρθ` in different
+# Forcings on `s` and `θ` both contribute to the tendency of `ρθ` in different
 # ways. The tendency for `ρθ` is written
 #
 # ```math
-# ∂_t (ρ θ) = - \boldsymbol{\nabla \cdot} \, ( ρ \boldsymbol{u} θ ) + ρ F_θ + \frac{ρ F_e}{cᵖᵐ Π} + \cdots
+# ∂_t (ρ θ) = - \boldsymbol{\nabla \cdot} \, ( ρ \boldsymbol{u} θ ) + ρ F_θ + \frac{ρ F_s}{cᵖᵐ Π} + \cdots
 # ```
 #
-# where ``F_e`` denotes the specific energy forcing supplied under `e` and
+# where ``F_s`` denotes the specific energy forcing supplied under `s` and
 # ``F_θ`` denotes the specific potential-temperature forcing supplied under `θ`.
 
 forcing = (; u = (subsidence, geostrophic.u),
              v = (subsidence, geostrophic.v),
              θ = subsidence,
              qᵉ = (subsidence, qᵉ_drying_forcing),
-             e = e_radiation_forcing)
+             s = s_radiation_forcing)
 nothing #hide
 
 # ## Model setup

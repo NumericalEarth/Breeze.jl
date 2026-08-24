@@ -154,7 +154,7 @@ This function walks through all boundary conditions and calls
 `materialize_atmosphere_boundary_condition` on each one, allowing specialized handling for
 bulk flux boundary conditions and other atmosphere-specific boundary condition types.
 
-If `formulation` is `:LiquidIcePotentialTemperature` and `ρe` boundary conditions are provided,
+If `formulation` is `:LiquidIcePotentialTemperature` and `ρs` boundary conditions are provided,
 they are automatically converted to `ρθ` boundary conditions using `EnergyFluxBoundaryCondition`.
 """
 function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
@@ -162,7 +162,7 @@ function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(bound
                                                                            thermodynamic_constants,
                                                                            microphysical_fields, specific_prognostic_moisture, temperature)
 
-    # Convert ρe boundary conditions to ρθ for potential temperature formulations
+    # Convert ρs boundary conditions to ρθ for potential temperature formulations
     boundary_conditions = convert_energy_to_theta_bcs(boundary_conditions, formulation, thermodynamic_constants)
 
     materialized = Dict{Symbol, Any}()
@@ -176,11 +176,11 @@ function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(bound
 end
 
 #####
-##### Convert ρe boundary conditions to ρθ for potential temperature formulations
+##### Convert ρs boundary conditions to ρθ for potential temperature formulations
 #####
 
 const θFormulation = Union{Val{:LiquidIcePotentialTemperature}, Val{:θ}}
-const eFormulation = Union{Val{:StaticEnergy}, Val{:e}, Val{:ρe}}
+const sFormulation = Union{Val{:StaticEnergy}, Val{:s}, Val{:ρs}}
 
 # Check if FieldBoundaryConditions has any non-default values
 has_nondefault_bcs(::Nothing) = false
@@ -197,13 +197,13 @@ function has_nondefault_bcs(fbcs::FieldBoundaryConditions)
     return false
 end
 
-# Validate: error if BOTH ρθ and ρe have non-default BCs
+# Validate: error if BOTH ρθ and ρs have non-default BCs
 function validate_thermodynamic_bcs(bcs)
     has_ρθ = :ρθ ∈ keys(bcs) && has_nondefault_bcs(bcs.ρθ)
-    has_ρe = :ρe ∈ keys(bcs) && has_nondefault_bcs(bcs.ρe)
-    if has_ρθ && has_ρe
-        throw(ArgumentError("Cannot specify boundary conditions on both ρθ and ρe. " *
-                            "Use ρe for energy fluxes or ρθ for potential temperature fluxes, but not both."))
+    has_ρs = :ρs ∈ keys(bcs) && has_nondefault_bcs(bcs.ρs)
+    if has_ρθ && has_ρs
+        throw(ArgumentError("Cannot specify boundary conditions on both ρθ and ρs. " *
+                            "Use ρs for energy fluxes or ρθ for potential temperature fluxes, but not both."))
     end
     return nothing
 end
@@ -214,27 +214,27 @@ function convert_energy_to_theta_bcs(bcs, formulation, constants)
     return bcs
 end
 
-# Convert ρe → ρθ for potential temperature formulations
+# Convert ρs → ρθ for potential temperature formulations
 function convert_energy_to_theta_bcs(bcs, formulation::θFormulation, constants)
     validate_thermodynamic_bcs(bcs)
-    :ρe ∈ keys(bcs) || return bcs
-    has_nondefault_bcs(bcs.ρe) || return bcs
+    :ρs ∈ keys(bcs) || return bcs
+    has_nondefault_bcs(bcs.ρs) || return bcs
 
-    ρe_bcs = set_sensible_heat_formulation_bcs(bcs.ρe, PotentialTemperatureFlux())
-    ρθ_bcs = energy_to_theta_bcs(ρe_bcs)
-    remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρe)
+    ρs_bcs = set_sensible_heat_formulation_bcs(bcs.ρs, PotentialTemperatureFlux())
+    ρθ_bcs = energy_to_theta_bcs(ρs_bcs)
+    remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρs)
     return merge(remaining, (; ρθ=ρθ_bcs))
 end
 
 # Set formulation on BulkSensibleHeatFlux for static energy formulations
-function convert_energy_to_theta_bcs(bcs, formulation::eFormulation, constants)
+function convert_energy_to_theta_bcs(bcs, formulation::sFormulation, constants)
     validate_thermodynamic_bcs(bcs)
-    :ρe ∈ keys(bcs) || return bcs
-    has_nondefault_bcs(bcs.ρe) || return bcs
+    :ρs ∈ keys(bcs) || return bcs
+    has_nondefault_bcs(bcs.ρs) || return bcs
 
-    ρe_bcs = set_sensible_heat_formulation_bcs(bcs.ρe, StaticEnergyFlux())
-    remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρe)
-    return merge(remaining, (; ρe=ρe_bcs))
+    ρs_bcs = set_sensible_heat_formulation_bcs(bcs.ρs, StaticEnergyFlux())
+    remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρs)
+    return merge(remaining, (; ρs=ρs_bcs))
 end
 
 convert_energy_to_theta_bcs(bcs, f::Symbol, c) = convert_energy_to_theta_bcs(bcs, Val(f), c)

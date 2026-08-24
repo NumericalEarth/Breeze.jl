@@ -196,7 +196,7 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # We complete our specification by using the same polynomial coefficient for
 # sensible and latent heat fluxes. The flux type will be automatically inferred:
 
-ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
+ρs_surface_flux = BulkSensibleHeatFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
 ρqᵉ_surface_flux = BulkVaporFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
 
 # We can visualize how the neutral drag coefficient varies with wind speed,
@@ -259,7 +259,7 @@ fig
 
 ρu_bcs = FieldBoundaryConditions(bottom=ρu_surface_flux)
 ρv_bcs = FieldBoundaryConditions(bottom=ρv_surface_flux)
-ρe_bcs = FieldBoundaryConditions(bottom=ρe_surface_flux)
+ρs_bcs = FieldBoundaryConditions(bottom=ρs_surface_flux)
 ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_surface_flux)
 
 # ## Model construction
@@ -269,7 +269,7 @@ fig
 # schemes, microphysics, and boundary conditions.
 
 model = AtmosphereModel(grid; momentum_advection, scalar_advection, microphysics, dynamics,
-                        boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs))
+                        boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρs=ρs_bcs, ρqᵉ=ρqᵉ_bcs))
 
 # ## Initial conditions
 #
@@ -327,8 +327,8 @@ qᵛ = specific_humidity(model)
 τˣ = BoundaryConditionOperation(ρu, :bottom, model)
 
 ## Sensible heat flux 𝒬ᵀ
-ρe = static_energy_density(model)
-𝒬ᵀ = BoundaryConditionOperation(ρe, :bottom, model)
+ρs = static_energy_density(model)
+𝒬ᵀ = BoundaryConditionOperation(ρs, :bottom, model)
 
 ## Latent heat flux: ``𝒬ᵛ = ℒˡ Jᵛ`` (using reference ``θ₀`` for latent heat)
 ρqᵉ = model.moisture_density

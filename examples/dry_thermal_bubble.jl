@@ -49,9 +49,9 @@ end
 
 set!(model, θ = θᵢ)
 
-ρe = static_energy_density(model)
-ρE = Field(Average(ρe, dims=1))
-ρe′ = Field(ρe - ρE)
+ρs = static_energy_density(model)
+ρS = Field(Average(ρs, dims=1))
+ρs′ = Field(ρs - ρS)
 
 # ## Initial energy perturbation visualization
 #
@@ -59,9 +59,9 @@ set!(model, θ = θᵢ)
 # as expected.
 
 fig = Figure()
-ax = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Initial energy perturbation ρe′ (J / kg)")
-hm = heatmap!(ax, ρe′)
-Colorbar(fig[1, 2], hm, label = "ρe′ (J/kg)")
+ax = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Initial energy perturbation ρs′ (J / kg)")
+hm = heatmap!(ax, ρs′)
+Colorbar(fig[1, 2], hm, label = "ρs′ (J/kg)")
 fig
 
 # ## Simulation rising
@@ -71,12 +71,12 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 function progress(sim)
-    ρe = static_energy_density(sim.model)
+    ρs = static_energy_density(sim.model)
     u, v, w = sim.model.velocities
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(ρe): (%.2f, %.2f) J/kg, max|u|: %.2f m/s, max|w|: %.2f m/s",
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(ρs): (%.2f, %.2f) J/kg, max|u|: %.2f m/s, max|w|: %.2f m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   minimum(ρe), maximum(ρe),
+                   minimum(ρs), maximum(ρs),
                    maximum(abs, u), maximum(abs, w))
 
     @info msg
@@ -88,7 +88,7 @@ add_callback!(simulation, progress, TimeInterval(1minute))
 u, v, w = model.velocities
 T = model.temperature
 
-outputs = merge(model.velocities, model.tracers, (; ρe′, ρe, T))
+outputs = merge(model.velocities, model.tracers, (; ρs′, ρs, T))
 
 filename = "thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
@@ -106,31 +106,31 @@ run!(simulation)
 
 @info "Creating visualization..."
 
-ρe′t = FieldTimeSeries(filename, "ρe′")
+ρs′t = FieldTimeSeries(filename, "ρs′")
 wt = FieldTimeSeries(filename, "w")
 
-times = ρe′t.times
-Nt = length(ρe′t)
+times = ρs′t.times
+Nt = length(ρs′t)
 
 fig = Figure(size = (800, 800), fontsize = 12)
-axρ = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Energy perturbation ρe′ (J / kg)")
+axρ = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Energy perturbation ρs′ (J / kg)")
 axw = Axis(fig[2, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w (m / s)")
 
 n = Observable(Nt)
 
-ρe′n = @lift ρe′t[$n]
+ρs′n = @lift ρs′t[$n]
 wn = @lift wt[$n]
 
 title = @lift "Thermal bubble evolution — t = $(prettytime(times[$n]))"
 fig[0, :] = Label(fig, title, fontsize = 16, tellwidth = false)
 
-ρe′_range = (minimum(ρe′t), maximum(ρe′t))
+ρs′_range = (minimum(ρs′t), maximum(ρs′t))
 w_range = maximum(abs, wt)
 
-hmρ = heatmap!(axρ, ρe′n, colorrange = ρe′_range, colormap = :balance)
+hmρ = heatmap!(axρ, ρs′n, colorrange = ρs′_range, colormap = :balance)
 hmw = heatmap!(axw, wn, colorrange = (-w_range, w_range), colormap = :balance)
 
-Colorbar(fig[1, 2], hmρ, label = "ρe′ (J/kg)", vertical = true)
+Colorbar(fig[1, 2], hmρ, label = "ρs′ (J/kg)", vertical = true)
 Colorbar(fig[2, 2], hmw, label = "w (m/s)", vertical = true)
 
 CairoMakie.record(fig, "thermal_bubble.mp4", 1:Nt; framerate = 12, compression = 23) do nn

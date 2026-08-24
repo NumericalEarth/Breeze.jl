@@ -132,17 +132,17 @@ end
     set!(model, θ=300, qᵗ=0.01)
 
     # Test StaticEnergy
-    e = StaticEnergy(model)
-    @test e isa Oceananigans.AbstractOperations.KernelFunctionOperation
-    e_field = Field(e)
-    @test all(isfinite.(interior(e_field)))
-    @test all(interior(e_field) .> 0)
+    s = StaticEnergy(model)
+    @test s isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    s_field = Field(s)
+    @test all(isfinite.(interior(s_field)))
+    @test all(interior(s_field) .> 0)
 
     # Test density flavor
-    e_density = StaticEnergy(model, :density)
-    e_density_field = Field(e_density)
-    @test all(isfinite.(interior(e_density_field)))
-    @test all(interior(e_density_field) .> 0)
+    s_density = StaticEnergy(model, :density)
+    s_density_field = Field(s_density)
+    @test all(isfinite.(interior(s_density_field)))
+    @test all(interior(s_density_field) .> 0)
 end
 
 @testset "Relative humidity diagnostics [$(FT)]" for FT in test_float_types()

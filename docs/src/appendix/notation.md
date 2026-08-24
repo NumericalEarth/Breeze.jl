@@ -17,7 +17,7 @@ A few notes about the following table:
   a "reference state", which is an adiabatic, hydrostatic solution to the equations of motion. But there is also an
   "energy reference temperature" and "reference latent heat", which are thermodynamic constants required to define
   the internal energy of moist atmospheric constituents.
-* Mapping to AM fields: `ρe` corresponds to `energy_density(model)`, and the moisture density is accessed via `model.moisture_density`.
+* Mapping to AM fields: `ρs` corresponds to `static_energy_density(model)`, and the moisture density is accessed via `model.moisture_density`.
 
 The following table also uses a few conventions that suffuse the source code and which are internalized by wise developers:
 
@@ -25,7 +25,7 @@ The following table also uses a few conventions that suffuse the source code and
 * `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
 * "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
 * Phase or mixture identifiers (``d``, ``v``, ``m``, and ``t`` for *total*) appear as superscripts (e.g., ``Rᵈ``, ``cᵖᵐ``, ``qᵗ``, ``ρᵗ``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
-* Momentum and the thermodynamic variable are stored *coupling-density-weighted* (``ρu = ρᵈ u``, and the thermodynamic density ``ρᵡ = ρᵈ χ`` — i.e. ``ρθ = ρᵈ θ`` or ``ρe``). The coupling density is `dynamics_density(dynamics)`: the reference density ``ρᵣ`` for [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), and the prognostic dry-air density ``ρᵈ`` for [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics). Velocity and ``θ`` are recovered by dividing by the coupling density.
+* Momentum and the thermodynamic variable are stored *coupling-density-weighted* (``ρu = ρᵈ u``, and the thermodynamic density ``ρᵡ = ρᵈ χ`` — i.e. ``ρθ = ρᵈ θ`` or ``ρs``). The coupling density is `dynamics_density(dynamics)`: the reference density ``ρᵣ`` for [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), and the prognostic dry-air density ``ρᵈ`` for [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics). Velocity and ``θ`` are recovered by dividing by the coupling density.
 * Water/moisture is stored as *partial densities* (`ρqᵛ`, `ρqˡ`, `ρqⁱ`, …; mass per volume) and recovered as **mass fractions** by dividing by the *total* air density ``ρ = ρᵈ + ρᵗ`` (``qˣ = ρˣ/ρ``), where ``ρᵗ = ρqᵛᵉ + Σ ρqᶜ`` is the total condensate density (all phases of the condensable species). The thermodynamics works in mass fractions throughout. The total density (`total_density(dynamics)`) — diagnosed on the compressible core, the reference density on the anelastic core — is also the carrier for scalar/water advection, the equation of state, and buoyancy.
 
 | math symbol                         | code   | property name                       | description                                                                    |
@@ -39,8 +39,9 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\tilde{w}``                  | `w̃`    | `AM.dynamics.contravariant_vertical_velocity` | Contravariant vertical velocity (grid-relative, normal to ``r``-surfaces) |
 | ``\rho \tilde{w}``             | `ρw̃`   | `AM.dynamics.contravariant_vertical_momentum` | Contravariant vertical momentum                                          |
 | ``r``                          | `r`    | `rnode(i, j, k, grid, ℓz)`          | Reference (computational) vertical coordinate of a terrain-following grid; the physical height is ``z(x, y, r)`` (`znode`), matching Oceananigans' `r`/`z` convention |
-| ``ρ e``                             | `ρe`   | `AM.energy_density`                 | Energy density                                                                 |
-| ``ρᵡ``                              | `ρᵡ`   | `thermodynamic_density(formulation)` | Thermodynamic density: the generic coupling-weighted prognostic thermodynamic variable, ``ρᵡ = ρᵈ χ`` — concretely ``ρθ`` for the potential-temperature formulation or ``ρe`` for static energy. The intensive variable is recovered as ``χ = ρᵡ / ρᵈ`` |
+| ``s``                               | `s`    | `static_energy(model)`              | (Liquid-ice) moist static energy, ``s = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ``; ``e`` is reserved for turbulent kinetic energy |
+| ``ρ s``                             | `ρs`   | `static_energy_density(model)`      | Static energy density, the prognostic thermodynamic variable of `StaticEnergyFormulation` |
+| ``ρᵡ``                              | `ρᵡ`   | `thermodynamic_density(formulation)` | Thermodynamic density: the generic coupling-weighted prognostic thermodynamic variable, ``ρᵡ = ρᵈ χ`` — concretely ``ρθ`` for the potential-temperature formulation or ``ρs`` for static energy. The intensive variable is recovered as ``χ = ρᵡ / ρᵈ`` |
 | ``T``                               | `T`    | `AM.temperature`                    | Temperature                                                                    |
 | ``T⁺``                              | `T⁺`   | `DewpointTemperature(model)`        | Dewpoint temperature                                                           |
 | ``p``                               | `p`    | `AM.pressure`                       | Pressure                                                                       |
