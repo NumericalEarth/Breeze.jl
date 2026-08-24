@@ -50,12 +50,27 @@ using Oceananigans.TurbulenceClosures:
 # coefficients below. Like `VerticalMomentumImplicitAdvection`, wrapping the scheme puts a
 # Breeze-owned type in the `get_coefficient` signature, so these methods are neither type piracy
 # nor ambiguous with Oceananigans' own `AIVA` and fallback methods.
-struct MassWeightedImplicitDiffusion{A}
+#
+# `diffusion_density` weights the diffusion half of the row, leaving the density the solve is
+# called with to the advection half. The two are the same field everywhere except in
+# `implicit_substep!`, which freezes the stage-entry `(w, ρᵈ)` so that the explicit and implicit
+# halves of the *advective* flux partition one transport (see `cache_advecting_state!`). The
+# diffusion half has no such pairing to keep: it reconstructs the specific variable as `q / ρᵈ`
+# from the field it is solving for, which the acoustic loop has already advanced, so it needs the
+# live `ρᵈ`. `nothing` means "use the density the solve was called with".
+struct MassWeightedImplicitDiffusion{A, D}
     scheme :: A
+    diffusion_density :: D
 end
 
+MassWeightedImplicitDiffusion(scheme) = MassWeightedImplicitDiffusion(scheme, nothing)
+
 Adapt.adapt_structure(to, a::MassWeightedImplicitDiffusion) =
-    MassWeightedImplicitDiffusion(adapt(to, a.scheme))
+    MassWeightedImplicitDiffusion(adapt(to, a.scheme), adapt(to, a.diffusion_density))
+
+# Dispatch rather than a branch: `nothing` defers to the density the solve was called with.
+@inline mass_weighting_density(::Nothing, ρ) = ρ
+@inline mass_weighting_density(ρᵈ, ρ) = ρᵈ
 
 # The implicit-advection contribution, which is present only for adaptive-implicit schemes.
 @inline mass_weighted_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ) = zero(grid)
@@ -111,7 +126,8 @@ end
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionUpperDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
                                          advection::MassWeightedImplicitDiffusion, w, ρ)
-    du_diff = mass_weighted_ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ)
+    ρᵈ = mass_weighting_density(advection.diffusion_density, ρ)
+    du_diff = mass_weighted_ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρᵈ)
     du_adv  = mass_weighted_advection_upper_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
     return du_diff + du_adv
 end
@@ -119,7 +135,8 @@ end
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionLowerDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
                                          advection::MassWeightedImplicitDiffusion, w, ρ)
-    dl_diff = mass_weighted_ivd_lower_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ)
+    ρᵈ = mass_weighting_density(advection.diffusion_density, ρ)
+    dl_diff = mass_weighted_ivd_lower_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρᵈ)
     dl_adv  = mass_weighted_advection_lower_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
     return dl_diff + dl_adv
 end
@@ -127,7 +144,8 @@ end
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
                                          advection::MassWeightedImplicitDiffusion, w, ρ)
-    d_diff = mass_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ)
+    ρᵈ = mass_weighting_density(advection.diffusion_density, ρ)
+    d_diff = mass_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρᵈ)
     d_adv  = mass_weighted_advection_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
     return d_diff + d_adv
 end

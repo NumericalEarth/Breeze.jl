@@ -92,10 +92,14 @@ end
 # coefficients below; every other prognostic is at z-Centers and is routed to the mass-flux-weighted
 # z-Center coefficients, which reduce to Oceananigans' when the reference density is constant.
 # Explicit schemes are still wrapped, since the diffusion half needs the weighting either way.
-implicit_step_advection(advection, name::Symbol) =
-    name === :ρw ? advection : MassWeightedImplicitDiffusion(advection)
-implicit_step_advection(advection::AIVA, name::Symbol) =
-    name === :ρw ? VerticalMomentumImplicitAdvection(advection) : MassWeightedImplicitDiffusion(advection)
+#
+# `diffusion_density` weights the diffusion half when it must differ from the density the solve is
+# called with, which happens only under the acoustic substepper (see `MassWeightedImplicitDiffusion`).
+implicit_step_advection(advection, name::Symbol, diffusion_density=nothing) =
+    name === :ρw ? advection : MassWeightedImplicitDiffusion(advection, diffusion_density)
+implicit_step_advection(advection::AIVA, name::Symbol, diffusion_density=nothing) =
+    name === :ρw ? VerticalMomentumImplicitAdvection(advection) :
+                   MassWeightedImplicitDiffusion(advection, diffusion_density)
 
 # Density weighting the advective flux of each prognostic. Momentum and the thermodynamic
 # variable are carried by the coupling density (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`; see `dynamics_density`),
