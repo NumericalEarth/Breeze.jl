@@ -27,8 +27,8 @@ are most likely affected. Use this mapping:
 | `src/Advection.jl` | `dynamics`, `tracer_dynamics` |
 | `src/Forcings/` | `forcing_and_boundary_conditions`, `geostrophic_subsidence_forcings` |
 | `src/BoundaryConditions/` | `forcing_and_boundary_conditions` |
-| `src/TimeSteppers/` | `dynamics`, `acoustic_substepping` |
-| `src/CompressibleEquations/` | `acoustic_substepping`, `dynamics` |
+| `src/TimeSteppers/` | `dynamics`, `acoustic_substepping_components`, `acoustic_substepping_stability` |
+| `src/CompressibleEquations/` | `acoustic_substepping_components`, `acoustic_substepping_open_boundaries`, `acoustic_substepping_stability`, `dynamics` |
 | `src/ParcelModels/` | `parcel_dynamics` |
 | `src/KinematicDriver/` | `kinematic_driver` |
 | `src/Breeze.jl` (exports) | `quality_assurance` |

@@ -268,7 +268,8 @@ function AtmosphereModel(grid;
     # Only pass `dynamics` to time steppers that accept it (Breeze's acoustic and SSP steppers).
     # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
     if timestepper_uses_dynamics(timestepper)
-        timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver, timestepper_kwargs...)
+        timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver,
+                                  cache_advecting_state = advection_needs_solver, timestepper_kwargs...)
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
     end
