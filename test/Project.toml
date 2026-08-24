@@ -24,7 +24,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 Breeze = {path = ".."}
-Reactant = {url = "https://github.com/EnzymeAD/Reactant.jl.git", rev = "mg/bump-reactant-jll"}
+Reactant = {url = "https://github.com/EnzymeAD/Reactant.jl.git", rev = "paulberg/speculate-partial-if-option"}
 
 [compat]
 Adapt = "4.3.0"
