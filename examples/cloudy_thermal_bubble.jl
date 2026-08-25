@@ -59,7 +59,7 @@ E = total_energy(model)
 fig = Figure()
 ax = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Initial potential temperature θ (K)")
 hm = heatmap!(ax, θ)
-Colorbar(fig[1, 2], hm, label = "ρe′ (J/kg)")
+Colorbar(fig[1, 2], hm, label = "θ (K)")
 fig
 
 # ## Simulation rising

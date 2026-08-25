@@ -281,7 +281,7 @@ end
     StaticEnergyState{FT}(𝒰.static_energy, q, 𝒰.height, 𝒰.reference_pressure)
 
 @inline function temperature(𝒰::StaticEnergyState, constants::ThermodynamicConstants)
-    e = 𝒰.static_energy
+    s = 𝒰.static_energy
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
 
@@ -293,8 +293,8 @@ end
     qˡ = q.liquid
     qⁱ = q.ice
 
-    # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
-    return (e - g * z + ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
+    # s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    return (s - g * z + ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
 end
 
 @inline function with_temperature(𝒰::StaticEnergyState, T, constants)
@@ -307,7 +307,7 @@ end
     qˡ = q.liquid
     qⁱ = q.ice
 
-    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
-    return StaticEnergyState(e, q, z, 𝒰.reference_pressure)
+    return StaticEnergyState(s, q, z, 𝒰.reference_pressure)
 end

@@ -8,7 +8,7 @@
 
 #####
 ##### EnergyFluxBoundaryConditionFunction: converts energy flux → potential temperature flux
-##### Used when: user specifies ρe BCs but prognostic variable is ρθ
+##### Used when: user specifies ρs BCs but prognostic variable is ρθ
 #####
 
 """
@@ -278,14 +278,14 @@ map_field_boundary_conditions(f, fbcs::FieldBoundaryConditions, args...) =
 ##### Conversion functions: energy ↔ theta boundary conditions
 #####
 
-# Convert ρe BCs → ρθ BCs (for LiquidIcePotentialTemperatureFormulation)
+# Convert ρs BCs → ρθ BCs (for LiquidIcePotentialTemperatureFormulation)
 energy_to_theta_bc(bc) = bc
 energy_to_theta_bc(bc::BulkSensibleHeatFluxBoundaryCondition) = bc
 energy_to_theta_bc(bc::BoundaryCondition{<:Flux}) = EnergyFluxBoundaryCondition(bc.condition)
 
 energy_to_theta_bcs(fbcs::FieldBoundaryConditions) = map_field_boundary_conditions(energy_to_theta_bc, fbcs)
 
-# Convert ρθ BCs → ρe BCs (for diagnostic energy_density with PotentialTemperatureFormulation)
+# Convert ρθ BCs → ρs BCs (for diagnostic energy_density with PotentialTemperatureFormulation)
 theta_to_energy_bc(bc) = bc
 # For EnergyFluxBC, extract the original energy flux
 theta_to_energy_bc(bc::EnergyFluxBCType) = BoundaryCondition(Flux(), bc.condition.condition)

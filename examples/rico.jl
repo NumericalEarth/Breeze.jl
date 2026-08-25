@@ -80,10 +80,10 @@ T₀ = 299.8    # Sea surface temperature (K)
 # We implement the specified bulk formula with Breeze utilities whose scope
 # currently extends only to constant coefficients (but could expand in the future),
 
-ρe_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
+ρs_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
 ρqᵉ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
 
-ρe_bcs = FieldBoundaryConditions(bottom=ρe_flux)
+ρs_bcs = FieldBoundaryConditions(bottom=ρs_flux)
 ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_flux)
 
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
@@ -164,7 +164,7 @@ forcing = (; u = (subsidence, geostrophic.u),
              w = sponge,
              qᵉ = (subsidence, qᵉ_large_scale_forcing),
              θ = (subsidence, θ_large_scale_forcing))
-boundary_conditions = (ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
+boundary_conditions = (ρs=ρs_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
 # ## Model setup
