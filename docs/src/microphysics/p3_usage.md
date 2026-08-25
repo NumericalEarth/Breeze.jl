@@ -32,8 +32,10 @@ through visualization and analysis.
 Every ice-side quantity below is read from the P3 lookup tables, which is
 exactly how the model evaluates them at runtime — see
 [Integral Properties](@ref p3_integral_properties) for the table layout. The
-tables are indexed by ``(\log_{10} \bar{m}, F^f, F^l, ρ^f, μ)``, where
-``\bar{m} = q^i/n^i`` is the mean particle mass.
+ice-only block is indexed by ``(\log_{10} \bar{m}, F^f, F^l, ρ^f)``, where
+``\bar{m} = (ρq^i + ρq^{wi})/ρn^i`` is the mean particle mass; the ice–rain
+collection block adds ``\log λ^r`` as a fifth coordinate. The shape parameter
+``μ`` is a tabulated *output* of the ice-only block, not one of its coordinates.
 
 The examples illustrate key concepts from the P3 papers:
 - Mass-diameter relationships from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization)
@@ -87,10 +89,15 @@ axislegend(ax, position=:lt)
 fig
 ```
 
-Riming packs more mass into a particle of a given size, so at a fixed mean mass
-a rimed distribution has the *smaller* mean dimension. The effect grows with
-size, where the mass-diameter relation moves from the aggregate power law into
-the graupel regime.
+Riming packs more mass into a particle of a given size, so through the
+aggregate-to-graupel range — roughly ``\bar{m}`` from ``10^{-8}`` to
+``10^{-6}`` kg — a rimed distribution has the *smaller* mean dimension, and the
+separation widens with size.
+
+That ordering is not universal, and the plot shows where it breaks down. Below
+about ``10^{-10}`` kg every curve collapses onto the solid-ice sphere, where
+morphology cannot matter. At the largest tabulated masses the unrimed curve
+flattens while the rimed ones keep growing, so the ordering reverses.
 
 #### Bulk Density and the Riming Regimes
 
@@ -272,5 +279,6 @@ fig
 
 This figure summarizes the key relationships in P3:
 1. **Top left**: Mean dimension grows with mean mass, and shrinks with riming
+   through the aggregate-to-graupel range (with the caveats noted above)
 2. **Top right**: Size distribution shifts with mass content
 3. **Bottom**: Shape parameter μ increases with λ up to a maximum

@@ -197,7 +197,7 @@ single setting in Breeze.
 
 ### Prognostic Variables
 
-P3 evolves eight prognostic densities by default, and up to twelve with every option
+P3 evolves eight prognostic densities by default, and up to eleven with every option
 enabled. Each optional group is gated on a type, so a configuration that does not use one
 neither allocates nor advects it.
 
@@ -380,7 +380,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | ----------- | ---- | ------------- | ----------- |
 | ``N'(D)``   |      |               | Number concentration per unit diameter, ``N'(D) = N_0 D^μ e^{-λD}`` [m⁻⁴] |
 | ``N_0``     | `N₀` |               | Intercept of the gamma distribution [m⁻⁴⁻μ]; a scale factor, not a concentration. Species-labelled as `Nʳ₀` where the rate needs the rain PSD explicitly |
-| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `CloudDropletProperties.shape_parameter`, `RainProperties.shape_parameter` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}``, ``μ^r = 0`` at runtime |
+| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `CloudDropletProperties.shape_parameter` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}`` once at construction. ``μ^r = 0`` is structural rather than stored — it is baked into `rain_slope_parameter`, and `RainProperties.shape_parameter` is a placeholder that stays `nothing` |
 | ``μ^i``     | `μⁱ` | | On-demand ice shape diagnostic [-] read from the Table 1 closure column; not a process-table coordinate |
 | ``λ^{cl}``, ``λ^r`` | `λᶜˡ`, `λʳ` | | Slope parameter [1/m] |
 | ``λ^i``     |      | `IceLambdaLimiter` | Ice slope parameter [1/m], bounded by the mean-size limiter |
@@ -2064,8 +2064,8 @@ described under [Conservation Properties](@ref p3_prognostics).
 ### Sedimentation
 
 Sedimentation is delegated to Oceananigans transport. Each prognostic field
-falls at its tabulated, density-corrected velocity, diagnosed once per RK stage
-into z-Face fields:
+falls at its tabulated, density-corrected velocity, diagnosed by
+[`update_microphysical_auxiliaries!`](@ref Breeze.AtmosphereModels.update_microphysical_auxiliaries!) into z-Face fields:
 
 | Variable | Velocity | Reference |
 |----------|---------|-----------|
@@ -2076,7 +2076,7 @@ into z-Face fields:
 
 All ice fall speeds are corrected by the air-density factor
 ``(ρ_s/ρ)^{0.54}`` with the 600 hPa, 253.15 K reference ``ρ_s`` for ice
-and the surface ``ρ_s = p_0/(R_d\, T_0)`` for rain.
+and the 1000 hPa, 273.15 K reference ``ρ_s = p_0/(R_d\, T_0)`` for rain.
 
 Adaptive Courant substepping is *not* part of P3 in Breeze; the host transport
 scheme is responsible for stability, and no fall speed feeds back into a Courant
@@ -2198,9 +2198,9 @@ appear as gains; their negative branches contribute as losses elsewhere.
 ``ρn^{cl}`` and ``ρn^a`` are prognostic only when the optional aerosol-activation path
 (`AerosolActivation` in `aerosol_activation.jl`) is enabled, where CCN-activation source
 terms drive them. Otherwise droplet number is
-the scheme parameter `cloud.number_concentration` (typical continental ``\sim 100`` cm⁻³
-or marine ``\sim 50`` cm⁻³): every rate reads that constant, and neither field is
-allocated or advected.
+the scheme parameter `cloud.number_concentration`, which defaults to
+``200 \times 10^6`` m⁻³ (200 cm⁻³); marine air is closer to ``\sim 50`` cm⁻³.
+Every rate reads that constant, and neither field is allocated or advected.
 
 #### Rain
 
@@ -2523,7 +2523,7 @@ one aerosol removed per activated droplet; zero in the prescribed-``N^{cl}`` pat
 ### Sedimentation
 
 Each quantity sediments at its characteristic velocity. The velocities are
-diagnosed by [`update_microphysical_auxiliaries!`](@ref) into z-Face fields, because the
+diagnosed by [`update_microphysical_auxiliaries!`](@ref Breeze.AtmosphereModels.update_microphysical_auxiliaries!) into z-Face fields, because the
 scalar flux divergence consumes them as advecting velocities at
 ``(\text{Center}, \text{Center}, \text{Face})``. Diagnosing them there rather than during
 tendency assembly means they are established by `update_state!`, so they carry the same
