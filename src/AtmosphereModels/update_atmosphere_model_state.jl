@@ -201,7 +201,7 @@ Compute auxiliary model variables:
 
 - thermodynamic variables from the prognostic thermodynamic state,
     * temperature ``T``, possibly involving saturation adjustment
-    * specific thermodynamic variable (``e = ρe / ρ`` or ``θ = ρθ / ρ``)
+    * specific thermodynamic variable (``s = ρs / ρ`` or ``θ = ρθ / ρ``)
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
 """
 function compute_auxiliary_variables!(model)

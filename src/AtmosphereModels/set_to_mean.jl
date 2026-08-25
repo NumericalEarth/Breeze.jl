@@ -110,9 +110,9 @@ end
 Recompute the reference pressure and density profiles from horizontally-averaged
 temperature and moisture mass fractions of the current model state.
 
-When `rescale_densities=true`, density-weighted prognostic fields (ρe, ρqᵗ, ρu,
+When `rescale_densities=true`, density-weighted prognostic fields (ρs, ρqᵗ, ρu,
 etc.) are rescaled by `ρᵣ_new / ρᵣ_old` so that the specific quantities
-(e, qᵗ, u, etc.) are unchanged. When `false` (default), the density-weighted
+(s, qᵗ, u, etc.) are unchanged. When `false` (default), the density-weighted
 fields are left as-is and only diagnostics are recomputed.
 """
 function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)

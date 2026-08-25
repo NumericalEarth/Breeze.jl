@@ -32,7 +32,7 @@ thermodynamic variable appropriate to the formulation:
 
 - For `LiquidIcePotentialTemperatureFormulation`: ``Δϕ = θ - θ₀``, where
   ``θ₀ = T₀ / Π₀`` and ``Π₀ = (p₀ / pˢᵗ)^{Rᵈ / cᵖᵈ}`` (potential temperature flux)
-- For `StaticEnergyFormulation`: ``Δϕ = e - cᵖᵈ T₀`` (static energy flux)
+- For `StaticEnergyFormulation`: ``Δϕ = s - cᵖᵈ T₀`` (static energy flux)
 
 Here ``p₀`` is the actual surface pressure, while ``pˢᵗ`` is the fixed reference pressure
 used to define potential temperature.
@@ -104,9 +104,9 @@ end
     cᵖᵛ = constants.vapor.heat_capacity
     qᵛ = @inbounds fields.qᵛ[i, j, 1]
     cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ  # no condensate at the surface
-    e₀ = cᵖᵐ * T₀
-    e = @inbounds fields.e[i, j, 1]
-    return e - e₀
+    s₀ = cᵖᵐ * T₀
+    s = @inbounds fields.s[i, j, 1]
+    return s - s₀
 end
 
 @inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, bf, T₀, fields, fs::FilteredSurfaceScalar)
@@ -115,9 +115,9 @@ end
     cᵖᵛ = constants.vapor.heat_capacity
     qᵛ = @inbounds fields.qᵛ[i, j, 1]
     cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ  # no condensate at the surface
-    e₀ = cᵖᵐ * T₀
-    e = @inbounds fs.field[i, j, 1]
-    return e - e₀
+    s₀ = cᵖᵐ * T₀
+    s = @inbounds fs.field[i, j, 1]
+    return s - s₀
 end
 
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
@@ -249,7 +249,7 @@ The bulk formula computes
 J = -ρ₀ Cᵀ |U| Δϕ
 ```
 where ``Δϕ`` depends on the thermodynamic formulation: ``Δθ`` for potential
-temperature or ``Δe`` for static energy. The formulation is set automatically
+temperature or ``Δs`` for static energy. The formulation is set automatically
 during model construction.
 
 See [`BulkSensibleHeatFluxFunction`](@ref) for details.
@@ -261,7 +261,7 @@ using Breeze
 
 T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
 
-ρe_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
+ρs_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
                              gustiness = 0.1,
                              surface_temperature = T₀)
 

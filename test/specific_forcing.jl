@@ -260,7 +260,7 @@ end
                             tracers = :c,
                             forcing = (; u=Returns(F),
                                          θ=Returns(F),
-                                         e=Returns(zero(FT)),
+                                         s=Returns(zero(FT)),
                                          qᵛ=Returns(F),
                                          c=Returns(F)))
 
@@ -272,7 +272,7 @@ end
     # conserved variables; moisture and passive tracers carry total-air fractions.
     @test model.forcing.ρu.density === ρᵈ
     @test model.forcing.ρθ.density === ρᵈ
-    @test model.forcing.ρe.density === ρᵈ
+    @test model.forcing.ρs.density === ρᵈ
     @test model.forcing.ρqᵛ.density === ρ
     @test model.forcing.c.density === ρ
 

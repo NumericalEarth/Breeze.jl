@@ -196,9 +196,9 @@ adiabatic_twin_dynamics(dynamics, time_stepping) = dynamics
 $(TYPEDSIGNATURES)
 
 Build a stripped adiabatic twin of `model` that SHARES all field memory (momentum, velocities,
-densities, ρθ, moisture, aerosol number, tracers, temperature, pressure solver, dynamics fields) and
-steps it in place. Every retained prognostic scalar is rewrapped with its surface fluxes stripped to
-no-flux (see [`adiabatic_scalar_bcs`](@ref)), sharing the production data so no memory is
+densities, ρθ/ρs, moisture, aerosol number, tracers, temperature, pressure solver, dynamics fields)
+and steps it in place. Every retained prognostic scalar is rewrapped with its surface fluxes stripped
+to no-flux (see [`adiabatic_scalar_bcs`](@ref)), sharing the production data so no memory is
 reallocated. Prognostic aerosol number is carried as a passive tracer: activation and sedimentation
 are removed, while reversible transport preserves `nᵃ = ρnᵃ / ρ` as the balance adjusts density.
 The twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per

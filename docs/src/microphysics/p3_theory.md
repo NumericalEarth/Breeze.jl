@@ -2100,7 +2100,7 @@ T > 273.15 K:  Melting, shedding (with Fˡ active), wet growth
 Microphysical processes release or absorb latent heat via the host
 thermodynamic equation. The Anelastic and compressible formulations
 in Breeze carry latent heating implicitly through their prognostic
-``ρθ`` (or ``ρe``) variable; P3 does not assemble an explicit ``θ``
+``ρθ`` (or ``ρs``) variable; P3 does not assemble an explicit ``θ``
 tendency. The relevant latent heats at standard conditions are:
 
 - ``\mathcal{L}^l \approx 2.5 \times 10^6`` J/kg (vaporization)

@@ -24,7 +24,7 @@ function prioritize_names(names)
     return names
 end
 
-const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρe, :e, :T)
+const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρs, :s, :T)
 function set_thermodynamic_variable! end
 
 #####
@@ -171,10 +171,10 @@ Variables are set via keyword arguments. Supported variables include:
 - `T`: in-situ temperature
 - `θ`: potential temperature
 - `θˡⁱ`: liquid-ice potential temperature
-- `e`: static energy
+- `s`: static energy
 - `ρθ`: potential temperature density
 - `ρθˡⁱ`: liquid-ice potential temperature density
-- `ρe`: static energy density (for `StaticEnergyThermodynamics`)
+- `ρs`: static energy density (for `StaticEnergyThermodynamics`)
 
 **Diagnostic variables** (specific, i.e., per unit mass):
 - `u`, `v`, `w`: velocity components (sets both velocity and momentum)

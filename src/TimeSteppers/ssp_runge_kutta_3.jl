@@ -83,6 +83,7 @@ Shu, C.-W., & Osher, S. (1988). Efficient implementation of essentially non-osci
 function SSPRungeKutta3(grid, prognostic_fields;
                         dynamics = nothing,
                         implicit_solver::TI = nothing,
+                        cache_advecting_state = false,   # accepted for TimeStepper-call uniformity; unused
                         Gⁿ::TG = map(similar, prognostic_fields),
                         U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 
@@ -125,7 +126,7 @@ function ssp_rk3_substep!(model, Δt, α)
 
         # Field index for implicit solver:
         # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
-        # - indices 4+ are scalars (ρθ/ρe, ρqᵗ, microphysics, tracers)
+        # - indices 4+ are scalars (ρθ/ρs, ρqᵗ, microphysics, tracers)
         # For scalars, we use Val(i - 3) to get Val(1), Val(2), etc.
         field_index = Val(i - 3)
         advection = field_advection_scheme(model.advection, names[i])

@@ -1092,7 +1092,7 @@ end
 
     # The supersaturation is re-diagnosed as sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T) at the end of the
     # step. That final T must come from the same conserved thermodynamic variable
-    # (`ρθ` or `ρe`) that the host model advances, not from a standalone cᵖᵈ
+    # (`ρθ` or `ρs`) that the host model advances, not from a standalone cᵖᵈ
     # latent-heating estimate.
     vapor_to_liquid = cond + ccn_activation_mass + rain_cond + coat_cond - rain_evap - coat_evap
     vapor_to_ice = dep + nuc_q

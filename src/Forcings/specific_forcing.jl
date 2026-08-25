@@ -37,7 +37,7 @@ coupling density `ρᵈ`, while moisture, microphysical moments, and user tracer
 `ρ`. The same wrapper handles all carriers.
 
 Users typically supply specific forcings directly through specific-named keys
-(`u`, `v`, `w`, `θ`, `e`, `qᵉ`, `qᵛ`, …) in the `forcing` `NamedTuple` passed to
+(`u`, `v`, `w`, `θ`, `s`, `qᵉ`, `qᵛ`, …) in the `forcing` `NamedTuple` passed to
 [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel), and the dispatch wraps each entry in `SpecificForcing`
 automatically. The wrapper can also be constructed directly when finer control is needed.
 

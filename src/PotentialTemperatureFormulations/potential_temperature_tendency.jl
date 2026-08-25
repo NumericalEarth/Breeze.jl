@@ -30,16 +30,16 @@ function AtmosphereModels.static_energy_density(model::PotentialTemperatureModel
     ρθ_bcs = ρθ.boundary_conditions
 
     # Convert θ BCs to energy BCs
-    ρe_bcs = theta_to_energy_bcs(ρθ_bcs)
+    ρs_bcs = theta_to_energy_bcs(ρθ_bcs)
 
     # Regularize the converted BCs (populate microphysics, constants, side)
     loc = (Center(), Center(), Center())
-    ρe_bcs = materialize_atmosphere_field_bcs(ρe_bcs, loc, model.grid, model.dynamics, model.microphysics,
+    ρs_bcs = materialize_atmosphere_field_bcs(ρs_bcs, loc, model.grid, model.dynamics, model.microphysics,
                                               nothing, model.thermodynamic_constants, nothing, nothing, nothing)
 
     # Create the energy density operation and wrap in a Field with proper BCs
-    ρe_op = Diagnostics.StaticEnergy(model, :density)
-    return Field(ρe_op; boundary_conditions=ρe_bcs)
+    ρs_op = Diagnostics.StaticEnergy(model, :density)
+    return Field(ρs_op; boundary_conditions=ρs_bcs)
 end
 
 #####
@@ -53,7 +53,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemper
     ρθ_args = (
         Val(1),
         model.forcing.ρθ,
-        model.forcing.ρe,
+        model.forcing.ρs,
         model.advection.ρθ,
         radiation_flux_divergence(model.radiation),
         common_args...)
@@ -66,7 +66,7 @@ end
 @inline function potential_temperature_tendency(i, j, k, grid,
                                                 id,
                                                 ρθ_forcing,
-                                                ρe_forcing,
+                                                ρs_forcing,
                                                 advection,
                                                 radiation_flux_divergence_field,
                                                 dynamics,
@@ -94,14 +94,14 @@ end
     cᵖᵐ = mixture_heat_capacity(q, constants)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
-    Fρe = ρe_forcing(i, j, k, grid, clock, model_fields)
+    Fρs = ρs_forcing(i, j, k, grid, clock, model_fields)
     div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
-             + (Fρe + div_ℐ) / (cᵖᵐ * Π)
+             + (Fρs + div_ℐ) / (cᵖᵐ * Π)
     )
 end
 
@@ -121,10 +121,10 @@ function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatur
 end
 
 # Setting from static energy
-function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:e}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:s}, value)
     formulation = model.formulation
-    e = model.temperature # scratch space
-    set!(e, value)
+    s = model.temperature # scratch space
+    set!(s, value)
 
     grid = model.grid
     arch = grid.architecture
@@ -133,7 +133,7 @@ function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatur
             formulation.potential_temperature_density,
             formulation.potential_temperature,
             grid,
-            e,
+            s,
             specific_prognostic_moisture(model),
             model.dynamics,
             model.microphysics,
@@ -143,11 +143,11 @@ function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatur
     return nothing
 end
 
-function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:ρe}, value)
-    ρe = model.temperature # scratch space
-    set!(ρe, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:ρs}, value)
+    ρs = model.temperature # scratch space
+    set!(ρs, value)
     ρ = dynamics_density(model.dynamics)
-    return set_thermodynamic_variable!(model, Val(:e), ρe / ρ)
+    return set_thermodynamic_variable!(model, Val(:s), ρs / ρ)
 end
 
 @kernel function _potential_temperature_from_energy!(potential_temperature_density,
@@ -166,17 +166,17 @@ end
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
         ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρθ = ρᵈθ)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
-        e = specific_energy[i, j, k]
+        s = specific_energy[i, j, k]
     end
 
     z = znode(i, j, k, grid, c, c, c)
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
-    𝒰e₀ = StaticEnergyState(e, q, z, pᵣ)
-    𝒰e₁ = maybe_adjust_thermodynamic_state(𝒰e₀, microphysics, qᵛᵉ, constants)
-    T = temperature(𝒰e₁, constants)
+    𝒰s₀ = StaticEnergyState(s, q, z, pᵣ)
+    𝒰s₁ = maybe_adjust_thermodynamic_state(𝒰s₀, microphysics, qᵛᵉ, constants)
+    T = temperature(𝒰s₁, constants)
 
     pˢᵗ = standard_pressure(dynamics)
-    q₁ = 𝒰e₁.moisture_mass_fractions
+    q₁ = 𝒰s₁.moisture_mass_fractions
     𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, pˢᵗ, pᵣ)
     𝒰θ = with_temperature(𝒰θ, T, constants)
     θ = 𝒰θ.potential_temperature
