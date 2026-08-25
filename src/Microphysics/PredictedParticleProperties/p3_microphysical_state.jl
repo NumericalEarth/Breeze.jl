@@ -508,8 +508,11 @@ end
 @inline function AM.update_microphysical_fields!(μ, i, j, k, grid, p3::P3, ρ, 𝒰, constants)
     @inbounds begin
         # TODO: thread real velocities here once AM.update_microphysical_fields!
-        # signature carries them. ℳ.w == 0 is acceptable in this auxiliary path
-        # because downstream update_microphysical_auxiliaries! does not consume w.
+        # signature carries them. ℳ.w == 0 is acceptable in this auxiliary path because
+        # nothing downstream of it consumes w: the auxiliary writes are copies of the
+        # prognostic state, and the fall-speed path reads only the size distributions.
+        # `w` enters P3 solely through the adiabatic temperature tendency and CCN
+        # activation, both of which live in the tendency-cache kernel.
         velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
         ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
         clamp_rime_state!(μ, i, j, k, ρ, ℳ)
@@ -527,15 +530,24 @@ $(TYPEDSIGNATURES)
 
 Update diagnostic microphysical fields after state update.
 
+Writes the specific quantities `qᶜˡ`, `qʳ`, `nʳ`, `qⁱ`, `nⁱ`, `qᶠ`, `bᶠ`, `qʷⁱ`, the
+optional number and supersaturation diagnostics, and the six z-Face terminal velocities
+that sedimentation advects with.
+
 After the moisture refactor, vapor is the prognostic moisture variable.
 The diagnostic `qᵛ` field is updated from the thermodynamic state.
 """
-# Lightweight diagnostics update — called from the thermodynamic variables kernel.
-# Only writes basic specific quantities and vapor. Terminal velocities are deferred to
-# prepare_microphysical_tendencies! before sedimentation. Process-rate caches are filled
-# in compute_microphysical_tendencies! from the current state with an adiabatic-only driver,
-# avoiding GPU compilation failure from force-inlining ~1000 lines of P3 physics into
-# the thermodynamic kernel.
+# Called from the thermodynamic variables kernel, so every auxiliary field P3 owns is
+# established by `update_state!` and carries the same time level as the prognostics it was
+# built from. That matters for the terminal velocities in particular: they are diagnostics
+# a user can output, and they are also the advecting velocities sedimentation reads, so
+# computing them anywhere else would leave them one stage behind the rest of the state.
+#
+# The process-rate caches are the exception, and legitimately so — they are tendencies, not
+# state. They are filled in compute_microphysical_tendencies! from the current state with an
+# adiabatic-only driver, which also keeps ~1000 lines of P3 process physics out of this
+# kernel. The fall-speed path is small by comparison and its heavy half
+# (`p3_fall_speed_compute`) is `@noinline`, so it compiles as a separate GPU function.
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
     @inbounds μ.qᵛ[i, j, k]  = 𝒰.moisture_mass_fractions.vapor
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
@@ -548,6 +560,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
     write_cloud_number_diagnostics!(μ, i, j, k, p3.aerosol, ℳ)
     write_supersaturation_diagnostic!(μ, i, j, k, p3.process_rates, ℳ)
+    p3_compute_fall_speeds!(μ, i, j, k, p3, ρ, ℳ, 𝒰, constants)
 
     return nothing
 end
@@ -778,9 +791,10 @@ end
     return nothing
 end
 
-@inline function p3_compute_fall_speeds!(μ, i, j, k, grid, p3::P3, ρ, 𝒰,
-                                          constants, velocities)
-    ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
+# The caller supplies `ℳ` rather than a grid and velocities: `update_microphysical_auxiliaries!`
+# has already built the state for this cell, so rebuilding it here would repeat the whole
+# `grid_microphysical_state` read for nothing.
+@inline function p3_compute_fall_speeds!(μ, i, j, k, p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     properties = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
     result = p3_fall_speed_compute(p3, ρ, ℳ, properties, constants)
     return write_p3_fall_speeds!(μ, i, j, k, p3, result)
@@ -813,9 +827,10 @@ end
 ##### Microphysical velocities (sedimentation)
 #####
 #
-# Terminal velocities are pre-computed in prepare_microphysical_tendencies!
-# and stored in diagnostic fields. microphysical_velocities returns NamedTuples
-# compatible with Oceananigans' sum_of_velocities.
+# Terminal velocities are diagnosed in update_microphysical_auxiliaries! and stored in
+# diagnostic fields, so they are current whenever `update_state!` has run.
+# microphysical_velocities returns NamedTuples compatible with Oceananigans'
+# sum_of_velocities.
 
 @inline AM.microphysical_velocities(::P3, μ, name) = nothing  # Default: no sedimentation
 

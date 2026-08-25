@@ -266,4 +266,3 @@ number-weighted collection kernel (`RainCollectionNumber`).
     return rain_collection_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
                                        below_freezing, qʷⁱ)
 end
-

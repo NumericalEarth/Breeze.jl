@@ -100,12 +100,24 @@ using Oceananigans.TimeSteppers: update_state!
 
         set!(model; θ = FT(285), qᵛ = FT(0.01), qᶜˡ = FT(0.003),
              enforce_mass_conservation = false)
-        update_state!(model)
 
         # Fall speeds live at z-Faces: index k is the bottom face of cell k, and the top
         # face (k = Nz+1) is held at zero by the impenetrable top boundary condition so
         # nothing sediments in from above the model top.
         Nz = size(grid, 3)
+
+        # `set!` ends in `update_state!(model; compute_tendencies=false)`, so the fall
+        # speeds have to be established by `update_microphysical_auxiliaries!` rather than
+        # during tendency assembly. Diagnosing them at tendency time instead left them
+        # zero here, one time level behind every other microphysical auxiliary.
+        fall_speed_after_set = Array(interior(model.microphysical_fields.wᶜˡ, :, :, 1:Nz))
+        @test all(fall_speed_after_set .< 0)
+
+        update_state!(model)
+
+        # `update_state!` is idempotent, so computing tendencies must not move them.
+        @test Array(interior(model.microphysical_fields.wᶜˡ, :, :, 1:Nz)) == fall_speed_after_set
+
         first_fall_speed = Array(interior(model.microphysical_fields.wᶜˡ, :, :, 1:Nz))
         first_rain_source = Array(interior(model.microphysical_fields.cache_ρqʳ))
         @test all(first_fall_speed .< 0)

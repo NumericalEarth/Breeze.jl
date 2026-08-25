@@ -296,6 +296,11 @@ end
 # Each negative field borrows from every lighter species in order. Searching the
 # whole tail lets a deficit pass an empty immediate donor without making any donor
 # negative.
+#
+# The recursion is over a `Tuple` of fields whose length is known at compile time, so with
+# `@inline` it unrolls completely: no runtime recursion, no allocation, no dynamic dispatch.
+# The unrolled work is O(N²) pointwise reads/writes for N condensate fields (each field
+# scans the tail behind it), which is a few tens of flops for the N ≤ 10 schemes we run.
 @inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, Vararg}, ρqᵛᵉ) where {F1}
     ρq = fields[1]
     @inbounds q = ρq[i, j, k] / ρ
@@ -312,8 +317,7 @@ end
 @inline same_level_borrow!(i, j, k, ρ, ::Tuple{}, ρqᵛᵉ) = nothing
 
 # With a deficit argument, recurse through the candidate donors for one field.
-@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, Vararg},
-                                    ρqᵛᵉ, deficit) where {F1}
+@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, Vararg}, ρqᵛᵉ, deficit) where {F1}
     ρq_donor = fields[1]
     @inbounds q_donor = ρq_donor[i, j, k] / ρ
 
@@ -321,8 +325,7 @@ end
     @inbounds ρq_donor[i, j, k] -= ρ * borrowed
 
     remaining_deficit = deficit - borrowed
-    borrowed_from_tail = same_level_borrow!(
-        i, j, k, ρ, Base.tail(fields), ρqᵛᵉ, remaining_deficit)
+    borrowed_from_tail = same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ, remaining_deficit)
 
     return borrowed + borrowed_from_tail
 end

@@ -239,33 +239,18 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 ##### Fused microphysical tendency interface
 #####
 #
-# `prepare_microphysical_tendencies!` refreshes stage-local diagnostics consumed
-# while assembling tendencies, such as terminal velocities and process-rate caches.
-# It runs before the scalar kernels so sedimentation uses the current RK-stage state.
-#
 # `compute_microphysical_tendencies!` is the single entry point through which the
 # atmosphere model adds microphysical sources during tendency assembly. The model calls it
 # *after* the per-tracer dynamics kernels have written advection + diffusion + forcing
 # into `Gⁿ`; microphysics contributions are added on top via `+=`.
-
-"""
-$(TYPEDSIGNATURES)
-
-Prepare stage-local microphysical diagnostics used during tendency assembly.
-
-`compute_tendencies!` calls this once per RK stage before thermodynamic and scalar
-tendencies are evaluated. Schemes should extend the two-argument helper
-`prepare_microphysical_tendencies!(microphysics, model)` when their tendencies or
-sedimentation velocities require a fused precomputation from the current stage state.
-The default is a no-op.
-
-This hook must not advance prognostic fields. Full-step, operator-split updates belong
-in [`microphysics_model_update!`](@ref).
-"""
-prepare_microphysical_tendencies!(model) =
-    prepare_microphysical_tendencies!(model.microphysics, model)
-
-prepare_microphysical_tendencies!(microphysics, model) = nothing
+#
+# Auxiliary *state* — anything a scheme diagnoses and stores in a field, including
+# sedimentation velocities — does not belong here. It belongs in
+# [`update_microphysical_auxiliaries!`](@ref), which `update_state!` calls, so that every
+# diagnostic carries the same time level as the prognostics. Diagnosing a field during
+# tendency assembly instead would leave it one stage behind whenever it is output, and
+# unwritten entirely after a `set!` (which calls `update_state!` with
+# `compute_tendencies=false`).
 
 """
 $(TYPEDSIGNATURES)

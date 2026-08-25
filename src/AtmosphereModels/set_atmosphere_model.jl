@@ -252,6 +252,13 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     length(moisture_input_names) ≤ 1 ||
         throw(ArgumentError("set! accepts only one moisture representation, got $moisture_input_names"))
 
+    # TODO: support this. The two inputs form a fixed point rather than a contradiction:
+    # ℋ → qᵛ needs the pressure, and the hydrostatic column solve needs qᵛ. An outer
+    # iteration would resolve it — set qᵛ from ℋ at a dry-column pressure guess, run the
+    # column solve, re-diagnose qᵛ from ℋ at the new p and T, and repeat. Moisture feeds
+    # back on the column pressure weakly, so a couple of sweeps should converge. Until
+    # that iteration and its convergence test exist, reject the combination rather than
+    # silently returning a column whose humidity does not match the requested ℋ.
     relative_humidity_given = :ℋ ∈ names
     hydrostatic_balance && relative_humidity_given &&
         throw(ArgumentError("HydrostaticallyBalancedDensity cannot be combined with ℋ because " *

@@ -1,5 +1,4 @@
 using Oceananigans.AbstractOperations: KernelFunctionOperation
-using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: Center, ZeroField
 using Oceananigans.Grids: inactive_cell
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
@@ -14,67 +13,8 @@ using KernelAbstractions: @kernel, @index
 
 const P3 = PredictedParticlePropertiesMicrophysics
 
-#####
-##### Stage-local tendency preparation
-#####
-
-"""
-$(TYPEDSIGNATURES)
-
-Prepare P3 diagnostics for the current RK stage.
-
-Launches a separate GPU kernel to compute terminal velocities before scalar
-sedimentation tendencies consume them. Process-rate caches are built later by
-[`AM.compute_microphysical_tendencies!`](@ref) using the current state, an
-adiabatic temperature tendency, and zero resolved-vapor tendency. Resolved
-transport, turbulent mixing, radiation, and user forcing do not enter this
-diffusional-growth driver.
-"""
-function AM.prepare_microphysical_tendencies!(p3::P3, model)
-    grid = model.grid
-    arch = grid.architecture
-    μ = model.microphysical_fields
-    ρ_field = AM.total_density(model.dynamics)
-    constants = model.thermodynamic_constants
-    velocities = model.velocities
-
-    launch!(arch, grid, :xyz,
-            _p3_compute_fall_speeds_kernel!,
-            μ, model.formulation, model.dynamics, grid, constants, p3, ρ_field,
-            velocities)
-
-    # The scalar advection operators read terminal velocities in halo cells. The
-    # preparation kernel overwrites interiors after update_state!'s generic halo fill, so
-    # refresh these diagnostic halos before sedimentation is evaluated. These are z-Face
-    # fields with `bottom = nothing`, so the fill leaves the surface face (where
-    # `write_p3_fall_speeds!` applied the precipitation boundary condition) untouched and
-    # holds the impenetrable top face at zero.
-    sedimentation_velocities = (μ.wᶜˡ, μ.wᶜˡₙ, μ.wʳ, μ.wʳₙ, μ.wⁱ, μ.wⁱₙ)
-    fill_halo_regions!(sedimentation_velocities)
-
-    return nothing
-end
-
 # P3 evolves through RK-stage tendencies; it has no full-Δt operator-split update.
 AM.microphysics_model_update!(::P3, model) = nothing
-
-@kernel function _p3_compute_fall_speeds_kernel!(μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
-    i, j, k = @index(Global, NTuple)
-
-    @inbounds ρ = ρ_field[i, j, k]
-
-    # Reconstruct thermodynamic state (same as in the thermodynamic kernel)
-    qᵛᵉ = μ.qᵛ[i, j, k]
-    # moisture_fractions does not read ℳ.w; pass ZeroField placeholders to skip the
-    # ℑzᵃᵃᶜ interpolation here. The real velocities are forwarded to
-    # p3_compute_fall_speeds!.
-    q = AM.moisture_fractions(p3, AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ,
-            nothing, (u = ZeroField(), v = ZeroField(), w = ZeroField())), qᵛᵉ)
-    𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
-    𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
-
-    p3_compute_fall_speeds!(μ, i, j, k, grid, p3, ρ, 𝒰, constants, velocities)
-end
 
 #####
 ##### Surface air temperature

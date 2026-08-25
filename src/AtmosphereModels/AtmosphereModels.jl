@@ -49,7 +49,6 @@ export
     WarmRainState,
     microphysical_state,
     microphysical_tendency,
-    prepare_microphysical_tendencies!,
     compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,

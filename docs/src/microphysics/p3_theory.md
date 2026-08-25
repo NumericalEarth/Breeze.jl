@@ -2523,9 +2523,12 @@ one aerosol removed per activated droplet; zero in the prescribed-``N^{cl}`` pat
 ### Sedimentation
 
 Each quantity sediments at its characteristic velocity. The velocities are
-diagnosed once per RK stage by `prepare_microphysical_tendencies!` into z-Face
-fields, because the scalar flux divergence consumes them as advecting velocities
-at ``(\text{Center}, \text{Center}, \text{Face})``.
+diagnosed by [`update_microphysical_auxiliaries!`](@ref) into z-Face fields, because the
+scalar flux divergence consumes them as advecting velocities at
+``(\text{Center}, \text{Center}, \text{Face})``. Diagnosing them there rather than during
+tendency assembly means they are established by `update_state!`, so they carry the same
+time level as the prognostic fields they were built from — which is what an output of the
+fall speed needs, and what leaves them defined immediately after a `set!`.
 
 | Variable | Sedimentation Velocity | Flux |
 |----------|----------------------|------|
@@ -2600,16 +2603,17 @@ depleted reservoir survives a `set!`, since an unqualified `set!` rewrites it to
 
 Host-facing entry points:
 
-1. **`prepare_microphysical_tendencies!`**: Diagnoses the terminal velocities for the
-   current RK stage into the z-Face fall-speed fields, then refreshes their halos.
-2. **`compute_microphysical_tendencies!`**: Fills the per-field process-rate cache from
+1. **`compute_microphysical_tendencies!`**: Fills the per-field process-rate cache from
    the current state in one kernel and adds it to ``G^n`` in a second. Optional
    prognostic groups get their own kernel, launched only when that group exists.
-3. **`microphysical_tendency`**: The gridless per-field fallback used by `ParcelModels`.
-4. **`moisture_fractions`**: Converts prognostic densities to mass fractions
+2. **`microphysical_tendency`**: The gridless per-field fallback used by `ParcelModels`.
+3. **`moisture_fractions`**: Converts prognostic densities to mass fractions
    (liquid = cloud + rain + liquid-on-ice; ice = dry ice).
-5. **`update_microphysical_fields!`**: Refreshes diagnostic fields after a state update.
-6. **`negative_moisture_correction`**: The repair applied at the top of `update_state!`
+4. **`update_microphysical_fields!`**: Refreshes diagnostic fields after a state update.
+   It builds the microphysical state once per cell, clamps the rime state, and hands both
+   to `update_microphysical_auxiliaries!`, which writes the specific quantities and the
+   terminal velocities.
+5. **`negative_moisture_correction`**: The repair applied at the top of `update_state!`
    (see *Positivity* below).
 
 The tendency-only architecture is described in
