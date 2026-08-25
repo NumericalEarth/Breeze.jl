@@ -456,7 +456,7 @@ end
     ##### set_to_mean! preserves density-weighted prognostic fields
     #####
     #
-    # Density-weighted prognostic fields (ρe, ρqᵗ, ρu) are left unchanged
+    # Density-weighted prognostic fields (ρs, ρqᵗ, ρu) are left unchanged
     # by set_to_mean!. Only the reference state (ρᵣ, pᵣ, Tᵣ) is updated.
 
     @testset "set_to_mean! preserves density-weighted prognostics" begin
@@ -474,7 +474,7 @@ end
         time_step!(model, 1)  # populates diagnostic fields
 
         # Record density-weighted prognostic fields before set_to_mean!
-        ρe_before  = Array(interior(model.formulation.energy_density))
+        ρs_before  = Array(interior(model.formulation.energy_density))
         ρqᵗ_before = Array(interior(model.moisture_density))
         ρu_before  = Array(interior(model.momentum.ρu))
         ρw_before  = Array(interior(model.momentum.ρw))
@@ -491,12 +491,12 @@ end
         end
 
         # Density-weighted prognostic fields should be unchanged
-        ρe_after  = Array(interior(model.formulation.energy_density))
+        ρs_after  = Array(interior(model.formulation.energy_density))
         ρqᵗ_after = Array(interior(model.moisture_density))
         ρu_after  = Array(interior(model.momentum.ρu))
         ρw_after  = Array(interior(model.momentum.ρw))
 
-        @test ρe_after  ≈ ρe_before
+        @test ρs_after  ≈ ρs_before
         @test ρqᵗ_after ≈ ρqᵗ_before
         @test ρu_after  ≈ ρu_before
         @test ρw_after  ≈ ρw_before

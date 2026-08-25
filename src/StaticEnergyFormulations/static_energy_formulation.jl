@@ -5,20 +5,20 @@
 """
 $(TYPEDSIGNATURES)
 
-`StaticEnergyFormulation` uses moist static energy density `ρe` as the prognostic thermodynamic variable.
+`StaticEnergyFormulation` uses moist static energy density `ρs` as the prognostic thermodynamic variable.
 
 Moist static energy is a conserved quantity in adiabatic, frictionless flow that combines
 sensible heat, gravitational potential energy, and latent heat:
 
 ```math
-e = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ
+s = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ
 ```
 
 The energy density equation includes a buoyancy flux term following [Pauluis2008](@citet).
 """
 struct StaticEnergyFormulation{E, S}
-    energy_density :: E    # ρe (prognostic)
-    specific_energy :: S   # e = ρe / ρ (diagnostic)
+    energy_density :: E    # ρs (prognostic)
+    specific_energy :: S   # s = ρs / ρ (diagnostic)
 end
 
 Adapt.adapt_structure(to, formulation::StaticEnergyFormulation) =
@@ -34,27 +34,27 @@ end
 ##### Field naming interface
 #####
 
-AtmosphereModels.prognostic_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:ρe)
-AtmosphereModels.additional_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:e)
-AtmosphereModels.thermodynamic_density_name(::StaticEnergyFormulation) = :ρe
+AtmosphereModels.prognostic_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:ρs)
+AtmosphereModels.additional_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:s)
+AtmosphereModels.thermodynamic_density_name(::StaticEnergyFormulation) = :ρs
 AtmosphereModels.thermodynamic_density(formulation::StaticEnergyFormulation) = formulation.energy_density
-AtmosphereModels.with_thermodynamic_density(f::StaticEnergyFormulation, ρe) =
-    StaticEnergyFormulation(ρe, f.specific_energy)
+AtmosphereModels.with_thermodynamic_density(f::StaticEnergyFormulation, ρs) =
+    StaticEnergyFormulation(ρs, f.specific_energy)
 
-AtmosphereModels.prognostic_thermodynamic_field_names(::Val{:StaticEnergy}) = tuple(:ρe)
-AtmosphereModels.additional_thermodynamic_field_names(::Val{:StaticEnergy}) = tuple(:e)
-AtmosphereModels.thermodynamic_density_name(::Val{:StaticEnergy}) = :ρe
+AtmosphereModels.prognostic_thermodynamic_field_names(::Val{:StaticEnergy}) = tuple(:ρs)
+AtmosphereModels.additional_thermodynamic_field_names(::Val{:StaticEnergy}) = tuple(:s)
+AtmosphereModels.thermodynamic_density_name(::Val{:StaticEnergy}) = :ρs
 
-Oceananigans.fields(formulation::StaticEnergyFormulation) = (; e=formulation.specific_energy)
-Oceananigans.prognostic_fields(formulation::StaticEnergyFormulation) = (; ρe=formulation.energy_density)
+Oceananigans.fields(formulation::StaticEnergyFormulation) = (; s=formulation.specific_energy)
+Oceananigans.prognostic_fields(formulation::StaticEnergyFormulation) = (; ρs=formulation.energy_density)
 
 #####
 ##### Materialization
 #####
 
 function AtmosphereModels.materialize_formulation(::Val{:StaticEnergy}, dynamics, grid, boundary_conditions)
-    energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
-    specific_energy = CenterField(grid)  # e = ρe / ρ (diagnostic per-mass energy)
+    energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρs)
+    specific_energy = CenterField(grid)  # s = ρs / ρ (diagnostic per-mass energy)
     return StaticEnergyFormulation(energy_density, specific_energy)
 end
 
@@ -66,8 +66,8 @@ function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(formulation
     ρ = dynamics_density(dynamics)
     @inbounds begin
         ρᵢ = ρ[i, j, k]
-        ρe = formulation.energy_density[i, j, k]
-        formulation.specific_energy[i, j, k] = ρe / ρᵢ
+        ρs = formulation.energy_density[i, j, k]
+        formulation.specific_energy[i, j, k] = ρs / ρᵢ
     end
     return nothing
 end
@@ -87,11 +87,11 @@ function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid,
                                                        dynamics,
                                                        q)
 
-    e = @inbounds formulation.specific_energy[i, j, k]
+    s = @inbounds formulation.specific_energy[i, j, k]
     pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
     z = znode(i, j, k, grid, c, c, c)
 
-    return StaticEnergyState(e, q, z, pᵣ)
+    return StaticEnergyState(s, q, z, pᵣ)
 end
 
 #####
@@ -105,8 +105,8 @@ function AtmosphereModels.collect_prognostic_fields(formulation::StaticEnergyFor
                                                     moisture_name,
                                                     microphysical_fields,
                                                     tracers)
-    ρe = formulation.energy_density
-    thermodynamic_variables = merge((ρe=ρe,), NamedTuple{(moisture_name,)}((moisture_density,)))
+    ρs = formulation.energy_density
+    thermodynamic_variables = merge((ρs=ρs,), NamedTuple{(moisture_name,)}((moisture_density,)))
     dynamics_fields = dynamics_prognostic_fields(dynamics)
     return merge(dynamics_fields, momentum, thermodynamic_variables, microphysical_fields, tracers)
 end

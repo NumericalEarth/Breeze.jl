@@ -41,12 +41,12 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             # Set uniform specific energy for no diffusion
             θ₀ = model.dynamics.reference_state.potential_temperature
             cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
-            e₀ = cᵖᵈ * θ₀
-            set!(model; e=e₀)
-            ρe₀ = deepcopy(static_energy_density(model))
+            s₀ = cᵖᵈ * θ₀
+            set!(model; s=s₀)
+            ρs₀ = deepcopy(static_energy_density(model))
             time_step!(model, 1)
             # Use rtol for implicit solver which may have small numerical effects
-            @test isapprox(static_energy_density(model), ρe₀, rtol=1e-5)
+            @test isapprox(static_energy_density(model), ρs₀, rtol=1e-5)
         end
 
         @testset "Closure flux affects momentum tendency [$formulation, $(FT)]" begin
@@ -149,20 +149,20 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             set!(model; θ = θᵢ, ρqᵗ = qᵗᵢ, ρc = ρcᵢ, ρu = Ξ, ρv = Ξ, ρw = Ξ)
 
             # Store initial scalar fields (using copy of data to avoid reference issues)
-            ρe₀ = static_energy_density(model) |> Field |> interior |> Array
+            ρs₀ = static_energy_density(model) |> Field |> interior |> Array
             ρqᵛ₀ = model.moisture_density |> interior |> Array
             ρc₀ = model.tracers.ρc |> interior |> Array
 
             # Take a time step
             time_step!(model, 1)
 
-            ρe₁ = static_energy_density(model) |> Field |> interior |> Array
+            ρs₁ = static_energy_density(model) |> Field |> interior |> Array
             ρqᵛ₁ = model.moisture_density |> interior |> Array
             ρc₁ = model.tracers.ρc |> interior |> Array
 
             # Scalars should change due to diffusion (not advection since advection=nothing)
             # Use explicit maximum difference check instead of ≈ to handle Float32
-            @test maximum(abs, ρe₁ - ρe₀) > 0
+            @test maximum(abs, ρs₁ - ρs₀) > 0
             @test maximum(abs, ρqᵛ₁ - ρqᵛ₀) > 0
             @test maximum(abs, ρc₁ - ρc₀) > 0
         end
