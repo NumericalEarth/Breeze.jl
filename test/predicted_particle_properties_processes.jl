@@ -111,10 +111,10 @@ function expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ, transport, F
     nʳ_bounded = qʳ_eff * λʳ^3 / (FT(π) * parameters.liquid_water_density)
     Nʳ₀ = nʳ_bounded * λʳ
     velocity_diameter_integral = p3.rain.evaporation(log10(λʳ))
-    constant_integral = FT(PPP.RAIN_F1R) / λʳ^2
+    constant_integral = FT(PPP.RAIN_VENTILATION_CONSTANT) / λʳ^2
     schmidt_correction = cbrt(transport.ν / max(transport.Dᵛ, FT(1e-10)))
     evaporation_integral = constant_integral +
-                           FT(PPP.RAIN_F2R) * schmidt_correction /
+                           FT(PPP.RAIN_VENTILATION_REYNOLDS) * schmidt_correction /
                            sqrt(max(transport.ν, FT(1e-10))) * velocity_diameter_integral
     rain_relaxation = FT(2π) * Nʳ₀ * ρ * transport.Dᵛ * evaporation_integral
     return ifelse(qʳ_eff >= p3.minimum_mass_mixing_ratio, rain_relaxation, zero(FT))
@@ -138,7 +138,7 @@ function expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷ�
     nʳ_bounded = PPP.rain_number_from_slope(qʳ_eff, λʳ, parameters)
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
-    _, number_kernel = PPP.ice_rain_collection_lookup(PPP.rain_ice_collection_table(p3),
+    _, number_kernel = PPP.ice_rain_collection_lookup(p3.ice.ice_rain,
                                                       m_mean, λʳ, Fᶠ, Fˡ, ρᶠ)
     ρ₀ = p3.ice.fall_speed.reference_air_density
     density_correction = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
@@ -154,11 +154,11 @@ function expected_reference_ice_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, �
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
-    ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ_air)
+    ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
     C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
                                       p3.ice.deposition.ventilation_enhanced,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
-                                      transport.ν, transport.Dᵛ, ρ_correction, p3)
+                                      transport.ν, transport.Dᵛ, ρ_correction)
     ice_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
@@ -172,11 +172,11 @@ function expected_reference_coating_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, F�
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
-    ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ_air)
+    ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
     C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
                                       p3.ice.deposition.ventilation_enhanced,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
-                                      transport.ν, transport.Dᵛ, ρ_correction, p3)
+                                      transport.ν, transport.Dᵛ, ρ_correction)
     coating_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
@@ -391,11 +391,9 @@ end
         @test nʳ_bounded > nʳ
 
         raw_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, qʳ, nʳ, S,
-                                             thermodynamic_factor, p3, parameters,
-                                             ν, Dᵛ, ρ, FT)
+                                             thermodynamic_factor, parameters, ν, Dᵛ, FT)
         bounded_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, qʳ, nʳ_bounded, S,
-                                                 thermodynamic_factor, p3, parameters,
-                                                 ν, Dᵛ, ρ, FT)
+                                                 thermodynamic_factor, parameters, ν, Dᵛ, FT)
 
         @test raw_rate ≈ bounded_rate
     end
@@ -416,7 +414,7 @@ end
         rime_state = PPP.consistent_rime_state(p3, qⁱ, FT(0), FT(0), FT(0))
         Fˡ = PPP.liquid_fraction_on_ice(qⁱ, FT(0))
         log_m = log10(qⁱ / nⁱ)
-        limiter = PPP.ice_integrals_table(p3).lambda_limiter
+        limiter = p3.ice.lambda_limiter
         lower_nⁱ = limiter.large_q(log_m, rime_state.Fᶠ, Fˡ,
                                    rime_state.ρᶠ) * qⁱ
         upper_nⁱ = limiter.small_q(log_m, rime_state.Fᶠ, Fˡ,
@@ -1085,8 +1083,8 @@ end
         qᵛ = qᵛ⁺ˡ + FT(1e-4)
 
         cond = FT(4e-5)
-        ccn_act = FT(1e-5)
-        ccn_act_n = FT(2e3)
+        ccn_activation_mass = FT(1e-5)
+        ccn_activation_number = FT(2e3)
         rain_cond = FT(2e-5)
         rain_evap = FT(0)
         dep = FT(3e-5)
@@ -1095,13 +1093,14 @@ end
         nuc_q = FT(1e-5)
         nuc_n = FT(5e2)
 
-        limited = PPP.limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+        limited = PPP.limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                        rain_cond, rain_evap,
                                         dep, coat_cond, coat_evap, nuc_q, nuc_n,
                                         qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety, FT(273.15))
 
         @test limited.cond < cond
-        @test limited.ccn_act < ccn_act
-        @test limited.ccn_act_n < ccn_act_n
+        @test limited.ccn_activation_mass < ccn_activation_mass
+        @test limited.ccn_activation_number < ccn_activation_number
         @test limited.rain_cond < rain_cond
         @test limited.coat_cond < coat_cond
         @test limited.dep < dep
@@ -1112,15 +1111,15 @@ end
         ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
         ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
 
-        # Liquid satadj cap: cond + ccn_act + rain_cond + coat_cond ≤ qcon_cap/dt_safety
+        # Liquid satadj cap: cond + ccn_activation_mass + rain_cond + coat_cond ≤ qcon_cap/dt_safety
         qcon_cap = max(zero(FT), qᵛ - qᵛ⁺ˡ) / ξˡ
-        cond_sink_total = max(zero(FT), limited.cond) + limited.ccn_act +
+        cond_sink_total = max(zero(FT), limited.cond) + limited.ccn_activation_mass +
                           limited.rain_cond + limited.coat_cond
         @test cond_sink_total * dt_safety <= qcon_cap + FT(10) * eps(FT)
 
         # Ice satadj cap: dep + nuc_q ≤ qdep_cap/dt_safety, evaluated against
         # the post-liquid thermodynamic state.
-        net_liquid = max(zero(FT), limited.cond) + limited.ccn_act +
+        net_liquid = max(zero(FT), limited.cond) + limited.ccn_activation_mass +
                      limited.rain_cond + limited.coat_cond -
                      rain_evap - coat_evap - max(zero(FT), -limited.cond)
         qᵛ_after = qᵛ - net_liquid * dt_safety
@@ -1174,7 +1173,7 @@ end
         limited = PPP.limit_vapor_rates(zero(FT), ccn.mass, zero(FT), zero(FT), zero(FT),
                                         zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
                                         qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, τ, FT(273.15))
-        @test limited.ccn_act ≈ ccn.mass rtol=FT(1e-12)
+        @test limited.ccn_activation_mass ≈ ccn.mass rtol=FT(1e-12)
     end
 
     @testset "limit_vapor_rates caps evaporation when subsaturated" begin
@@ -1190,8 +1189,8 @@ end
 
         # Negative cond → cloud evaporation; rain_evap and coat_evap > 0
         cond = FT(-2e-5)
-        ccn_act = FT(0)
-        ccn_act_n = FT(0)
+        ccn_activation_mass = FT(0)
+        ccn_activation_number = FT(0)
         rain_cond = FT(0)
         rain_evap = FT(5e-5)
         dep = FT(-1e-5)  # sublimation
@@ -1200,7 +1199,8 @@ end
         nuc_q = FT(0)
         nuc_n = FT(0)
 
-        limited = PPP.limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+        limited = PPP.limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                        rain_cond, rain_evap,
                                         dep, coat_cond, coat_evap, nuc_q, nuc_n,
                                         qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety, FT(273.15))
 
@@ -1312,8 +1312,9 @@ end
         ν = 1.5e-5
         Dᵥ = 2.0e-5
 
-        base = PPP.ventilation_sc_correction(ν, Dᵥ, 1.0)
-        doubled = PPP.ventilation_sc_correction(ν, Dᵥ, 4.0)
+        floors = PPP.NumericalFloors(Float64)
+        base = PPP.ventilation_sc_correction(ν, Dᵥ, 1.0, floors)
+        doubled = PPP.ventilation_sc_correction(ν, Dᵥ, 4.0, floors)
 
         @test doubled ≈ 2 * base
     end
@@ -1342,14 +1343,14 @@ end
         qv = e_s0 / (Rᵥ * T₀ * ρ)
 
         m_mean = qi / ni
-        ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+        ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ)
         C_fv = PPP.deposition_ventilation(
             p3.ice.deposition.ventilation,
             p3.ice.deposition.ventilation_enhanced,
             m_mean, Ff, zero(FT), ρf, p3.process_rates, transport.ν, transport.Dᵛ,
-            ρ_correction, p3)
+            ρ_correction)
 
-        capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, P, qv, Ff, ρf,
+        capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
                                            ρ, constants, transport)
         expected = C_fv * transport.Kᵃ * (T₀ - T) * ni
 
@@ -1519,7 +1520,7 @@ end
         # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
         qv = ε * e_s0 / max(P - e_s0, FT(1))
 
-        refreezing = PPP.refreezing_rate(p3, qwi, qi, ni, T, P, qv, Ff, ρf,
+        refreezing = PPP.refreezing_rate(p3, qi, qwi, ni, T, qv, Ff, ρf,
                                          ρ, constants, transport)
 
         # Refreezing should remain active below freezing with liquid-coated ice.
@@ -1997,8 +1998,8 @@ end
             wet_growth_shedding = FT(1e-8),
         )
 
-        @test tendency_ρqⁱ(wet_growth_rates, ρ, process_rates) == 0
-        @test tendency_ρqᶠ(wet_growth_rates, ρ, Fᶠ, process_rates) == 0
+        @test tendency_ρqⁱ(wet_growth_rates, ρ) == 0
+        @test tendency_ρqᶠ(wet_growth_rates, ρ, Fᶠ) == 0
         @test tendency_ρbᶠ(wet_growth_rates, ρ, Fᶠ, ρᶠ, qⁱ, process_rates) == 0
         @test tendency_ρqʷⁱ(wet_growth_rates, ρ, process_rates) == 0
 
@@ -2014,8 +2015,8 @@ end
             rain_riming = retained_rain,
         )
 
-        @test tendency_ρqⁱ(retained_rates, ρ, process_rates) ≈ ρ * (retained_cloud + retained_rain)
-        @test tendency_ρqᶠ(retained_rates, ρ, Fᶠ, process_rates) ≈ ρ * (retained_cloud + retained_rain)
+        @test tendency_ρqⁱ(retained_rates, ρ) ≈ ρ * (retained_cloud + retained_rain)
+        @test tendency_ρqᶠ(retained_rates, ρ, Fᶠ) ≈ ρ * (retained_cloud + retained_rain)
         @test tendency_ρbᶠ(retained_rates, ρ, Fᶠ, ρᶠ, qⁱ, process_rates) ≈
               ρ * (retained_cloud / FT(300) + retained_rain / process_rates.maximum_rime_density)
     end

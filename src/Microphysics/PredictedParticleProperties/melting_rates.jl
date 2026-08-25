@@ -58,8 +58,8 @@ where:
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
-    qⁱ_eff = clamp_positive(qⁱ)
-    nⁱ_eff = clamp_positive(nⁱ)
+    qⁱ_eff = max(0, qⁱ)
+    nⁱ_eff = max(0, nⁱ)
 
     T₀ = parameters.freezing_temperature
 
@@ -79,15 +79,15 @@ where:
 
     # Liquid fraction for Fl-blended ventilation.
     # Fl = qʷⁱ / (qⁱ + qʷⁱ): fraction of ice-particle mass that is liquid.
-    qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(parameters.floors.mass_scale))
-    Fl = clamp_positive(qʷⁱ) / qⁱ_total
+    qⁱ_total = max(qⁱ_eff + max(0, qʷⁱ), FT(parameters.floors.mass_scale))
+    Fl = max(0, qʷⁱ) / qⁱ_total
 
     # Table lookup uses the total mass per particle, not the dry-only mass,
     # because the tables are indexed by total mass.
     # With no particles the rate below is nⁱ_eff * dm/dt = 0 regardless, so the
     # fallback mean mass only has to sit inside the table's mass axis.
     m_mean = safe_divide(qⁱ_total, nⁱ_eff, FT(parameters.floors.mean_particle_mass_fallback))
-    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+    ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
 
     # Use the dry-ice PSD ventilation tables (small + large) for melting. The total
     # Ventilation/VentilationEnhanced tables use the wet-ice PSD and are not
@@ -100,7 +100,7 @@ where:
     # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg) rather
     # than extrapolating below it.
     log_m = log10(max(m_mean, FT(parameters.floors.mass_scale)))
-    sc_corr = ventilation_sc_correction(ν, Dᵛ, ρ_correction)
+    sc_corr = ventilation_sc_correction(ν, Dᵛ, ρ_correction, parameters.floors)
     prep = prepare_interpolation(dep.small_ice_ventilation_constant, log_m, Fᶠ, Fl, ρᶠ)
     small = evaluate_at(dep.small_ice_ventilation_constant, prep) +
             sc_corr * evaluate_at(dep.small_ice_ventilation_reynolds, prep)
@@ -125,7 +125,7 @@ where:
     dm_dt_melt = 2 * FT(π) * C_fv * Q_total / ℒᶠᵘˢ
 
     # Clamp to positive (only melting, not refreezing here)
-    dm_dt_melt = clamp_positive(dm_dt_melt)
+    dm_dt_melt = max(0, dm_dt_melt)
 
     # Total rate
     melt_rate = nⁱ_eff * dm_dt_melt
@@ -220,8 +220,8 @@ Number of melted particles equals number of rain drops produced.
 @inline function ice_melting_number_rate(qⁱ, nⁱ, qⁱ_melt_rate)
     FT = typeof(qⁱ)
 
-    qⁱ_eff = clamp_positive(qⁱ)
-    nⁱ_eff = clamp_positive(nⁱ)
+    qⁱ_eff = max(0, qⁱ)
+    nⁱ_eff = max(0, nⁱ)
 
     # |∂nⁱ/∂t| = (nⁱ/qⁱ) × ∂qⁱ_melt/∂t (positive magnitude)
     # Sign convention (M7): returns positive; caller subtracts in tendency assembly.

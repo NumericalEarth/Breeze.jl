@@ -140,7 +140,7 @@ models, where pressure is not a function of the state being set). Compressible d
 this with the equation of state `p = ρ Rᵐ T`, avoiding a fixed-point error when density or
 composition was changed immediately before setting temperature.
 """
-@inline function pressure_from_density_temperature(i, j, k, dynamics, ρ, T, q, constants)
+@inline function pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
     return @inbounds dynamics_pressure(dynamics)[i, j, k]
 end
 

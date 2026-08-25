@@ -199,8 +199,7 @@ end
         coating_after = coating +
             τ * tendency_ρqʷⁱ(rates, air_density, p3.process_rates) / air_density
         rime_mass_after = rime_mass +
-            τ * tendency_ρqᶠ(
-                rates, air_density, properties.Fᶠ, p3.process_rates) / air_density
+            τ * tendency_ρqᶠ(rates, air_density, properties.Fᶠ) / air_density
         rime_volume_after = rime_volume +
             τ * tendency_ρbᶠ(
                 rates, air_density, properties.Fᶠ, properties.ρᶠ, dry_ice,
@@ -336,8 +335,18 @@ end
 
         @test properties.nⁱ != properties.nⁱ_diagnostic
         @test phase2.D_mean ≈ expected_diameter rtol=FT(1e-12)
-        @test phase2.splintering_number > 0
-        @test phase2_warm_surface.splintering_number == 0
+        @test phase2_warm_surface.D_mean ≈ expected_diameter rtol=FT(1e-12)
+
+        # Splintering is recomputed from the sink-limited riming rates, so exercise
+        # the rate function on the phase-2 diameter rather than a phase-2 field.
+        _, splintering_cold = P3Routing.rime_splintering_rate(
+            p3, phase2.cloud_riming, phase2.rain_riming, air_temperature,
+            phase2.D_mean, phase2.Fˡ, FT(280), rime_mass)
+        _, splintering_warm = P3Routing.rime_splintering_rate(
+            p3, phase2.cloud_riming, phase2.rain_riming, air_temperature,
+            phase2.D_mean, phase2.Fˡ, FT(285), rime_mass)
+        @test splintering_cold > 0
+        @test splintering_warm == 0
     end
 
     @testset "non-liquid-fraction mode uses the fast routing" begin
@@ -388,7 +397,7 @@ end
             tendency_ρqᵛ(wet_growth_rates, one(FT)) +
             tendency_ρqᶜˡ(wet_growth_rates, one(FT)) +
             tendency_ρqʳ(wet_growth_rates, one(FT), p3.process_rates) +
-            tendency_ρqⁱ(wet_growth_rates, one(FT), p3.process_rates) +
+            tendency_ρqⁱ(wet_growth_rates, one(FT)) +
             tendency_ρqʷⁱ(wet_growth_rates, one(FT), p3.process_rates)
 
         @test wet_growth_rates.cloud_riming > 0
@@ -464,7 +473,7 @@ end
         @test rates.refreezing == 0
         @test tendency_ρqʷⁱ(rates, air_density, process_rates) ≈ -coating / τ
         @test tendency_ρqʳ(rates, air_density, process_rates) +
-              tendency_ρqⁱ(rates, air_density, process_rates) +
+              tendency_ρqⁱ(rates, air_density) +
               tendency_ρqʷⁱ(rates, air_density, process_rates) ≈ 0
     end
 end

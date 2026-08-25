@@ -8,22 +8,6 @@
 ##### Notation follows docs/src/appendix/notation.md
 #####
 
-using Oceananigans: Oceananigans
-
-using Breeze.Thermodynamics: temperature,
-                             adjustment_saturation_specific_humidity,
-                             saturation_specific_humidity,
-                             saturation_vapor_pressure,
-                             PlanarLiquidSurface,
-                             PlanarIceSurface,
-                             density,
-                             liquid_latent_heat,
-                             ice_latent_heat,
-                             vapor_gas_constant,
-                             MoistureMassFractions,
-                             ThermodynamicConstants
-using DocStringExtensions: TYPEDSIGNATURES
-
 #####
 ##### CCN activation
 #####
@@ -60,7 +44,7 @@ one cell's vapor budget, so the dry-air form is used throughout.
     qᶜˡ_target = Nᶜˡ / ρ * droplet_mass
 
     # Deficit: how much mass is needed to reach the minimum
-    deficit = clamp_positive(qᶜˡ_target - clamp_positive(qᶜˡ))
+    deficit = max(0, qᶜˡ_target - max(0, qᶜˡ))
 
     # Psychrometric correction (liquid saturation)
     ℒˡ = vaporization_latent_heat(constants, T)
@@ -68,7 +52,7 @@ one cell's vapor budget, so the dry-air form is used throughout.
     ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
 
     # Limit by the available supersaturation
-    max_from_ss = clamp_positive((qᵛ - qᵛ⁺ˡ) / ξˡ)
+    max_from_ss = max(0, (qᵛ - qᵛ⁺ˡ) / ξˡ)
     rate = min(deficit, max_from_ss) / parameters.sink_limiting_timescale
 
     # Only activate when supersaturated

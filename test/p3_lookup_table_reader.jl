@@ -35,18 +35,16 @@ const _lookup_table_dir = ensure_artifact_installed("P3_lookup_tables", joinpath
 @testset "Read P3 lookup tables (2momI)" begin
     p3 = read_lookup_tables(_lookup_table_dir; FT=Float64)
 
-    tables = p3.ice.lookup_tables
-    @test tables isa P3LookupTables
-    @test tables.ice_integrals isa P3IceIntegralsTable
-    @test tables.rain_ice_collection isa P3RainIceCollectionTable
+    @test p3.ice.lambda_limiter isa IceLambdaLimiter
+    @test p3.ice.ice_rain isa IceRainCollection
     @test p3.water_density == 1000
     @test p3.process_rates.liquid_water_density == 1000
 
     @test p3.ice.fall_speed.mass_weighted isa RimeDensityIndexedTable4D
     @test p3.ice.deposition.ventilation isa RimeDensityIndexedTable4D
-    @test tables.rain_ice_collection.mass isa RimeDensityIndexedTable5D
+    @test p3.ice.ice_rain.mass isa RimeDensityIndexedTable5D
     @test size(p3.ice.fall_speed.mass_weighted.table.table) == (50, 4, 4, 5)
-    @test size(tables.rain_ice_collection.mass.table.table) == (50, 30, 4, 4, 5)
+    @test size(p3.ice.ice_rain.mass.table.table) == (50, 30, 4, 4, 5)
 
     # Spot-check first row of 2momI: i_rhor=1, i_Fr=1, i_Fl=1, i_Qnorm=1
     # uns = 0.15624E-03, ums = 0.35587E-03
@@ -75,7 +73,7 @@ end
     # Test constructor interface
     p3 = PredictedParticlePropertiesMicrophysics()
     @test p3 isa PredictedParticlePropertiesMicrophysics
-    @test p3.ice.lookup_tables isa P3LookupTables
+    @test p3.ice.ice_rain.number isa RimeDensityIndexedTable5D
 end
 
 @testset "Process rates with table-loaded ice integrals" begin

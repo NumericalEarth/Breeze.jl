@@ -2,20 +2,14 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: Center, ZeroField
 using Oceananigans.Grids: inactive_cell
+using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Utils: Utils, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
 
-using Breeze.Thermodynamics: MoistureMassFractions,
-                              LiquidIcePotentialTemperatureState,
-                              LiquidIceDensityState,
-                              StaticEnergyState,
-                              temperature
-
 using Breeze: Microphysics
 
-using DocStringExtensions: TYPEDSIGNATURES
 using KernelAbstractions: @kernel, @index
 
 const P3 = PredictedParticlePropertiesMicrophysics
@@ -64,8 +58,7 @@ end
 # P3 evolves through RK-stage tendencies; it has no full-Δt operator-split update.
 AM.microphysics_model_update!(::P3, model) = nothing
 
-@kernel function _p3_compute_fall_speeds_kernel!(μ, formulation, dynamics, grid, constants, p3,
-                                                 ρ_field, velocities)
+@kernel function _p3_compute_fall_speeds_kernel!(μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
     i, j, k = @index(Global, NTuple)
 
     @inbounds ρ = ρ_field[i, j, k]
@@ -83,8 +76,23 @@ AM.microphysics_model_update!(::P3, model) = nothing
     p3_compute_fall_speeds!(μ, i, j, k, grid, p3, ρ, 𝒰, constants, velocities)
 end
 
-@kernel function _compute_p3_surface_temperature_kernel!(surface_temperature,
-                                                         temperature_field, grid)
+#####
+##### Surface air temperature
+#####
+##### Hallett-Mossop rime splintering is switched off over a warm surface
+##### (`maximum_splintering_surface_temperature`); that shutoff is the only part of the
+##### scheme that needs a column-bottom value rather than a local one, so the bottom-most
+##### active temperature of each column is gathered once per stage into `μ.surface_temperature`.
+#####
+
+@kernel function _p3_surface_temperature_kernel!(surface_temperature, temperature_field)
+    i, j = @index(Global, NTuple)
+    @inbounds surface_temperature[i, j, 1] = temperature_field[i, j, 1]
+end
+
+# With an immersed bottom, k = 1 can sit inside the topography, so the lowest active cell
+# has to be found by scanning up the column. Branch-free, so it still compiles for the GPU.
+@kernel function _p3_immersed_surface_temperature_kernel!(surface_temperature, temperature_field, grid)
     i, j = @index(Global, NTuple)
 
     FT = eltype(grid)
@@ -95,38 +103,61 @@ end
         active_cell = !inactive_cell(i, j, k, grid)
         use_this_cell = active_cell & !found_active_cell
         @inbounds local_temperature = temperature_field[i, j, k]
-        bottom_temperature = ifelse(use_this_cell, local_temperature,
-                                    bottom_temperature)
+        bottom_temperature = ifelse(use_this_cell, local_temperature, bottom_temperature)
         found_active_cell = found_active_cell | active_cell
     end
 
     @inbounds surface_temperature[i, j, 1] = bottom_temperature
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Fill `surface_temperature` with the air temperature of the bottom-most active cell in
+each column. Without an immersed boundary every column is active down to `k = 1`, so
+this is a plain copy; `ImmersedBoundaryGrid` dispatches to a column scan.
+"""
 function compute_p3_surface_temperature!(surface_temperature, temperature_field, grid)
-    # TODO: Add a vertically distributed column reduction in Oceananigans. Its
-    # distributed top/bottom halo fills are currently no-ops, so this column scan
-    # is correct for serial and horizontally partitioned grids (including immersed
-    # bottoms), but cannot broadcast across a z partition.
-    launch!(grid.architecture, grid, :xy,
-            _compute_p3_surface_temperature_kernel!,
+    launch!(grid.architecture, grid, :xy, _p3_surface_temperature_kernel!,
+            surface_temperature, temperature_field)
+    return nothing
+end
+
+# TODO: Add a vertically distributed column reduction in Oceananigans. Its distributed
+# top/bottom halo fills are currently no-ops, so this column scan is correct for serial
+# and horizontally partitioned grids, but cannot broadcast across a z partition.
+function compute_p3_surface_temperature!(surface_temperature, temperature_field,
+                                         grid::ImmersedBoundaryGrid)
+    launch!(grid.architecture, grid, :xy, _p3_immersed_surface_temperature_kernel!,
             surface_temperature, temperature_field, grid)
     return nothing
 end
 
-@kernel function _p3_compute_tendency_cache_kernel!(
-        μ, formulation, dynamics, grid, constants, p3, ρ_field,
-        velocities)
+#####
+##### Process-rate cache
+#####
+##### "The P3 tendencies" are the tendencies of P3's own microphysical prognostics
+##### (ρqᵛ, ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ, and the optional ρnᶜˡ/ρnᵃ/ρsᵛ⁺ˡ).
+##### They are computed *jointly*: the coupled donor-budget limiters see every species at
+##### once, so one kernel evaluates all of them per cell and writes them to the `μ.cache_*`
+##### fields, and small kernels then accumulate those into `Gⁿ`.
+#####
+##### Splitting the write from the accumulation keeps the heavy rate kernel's argument list
+##### independent of which optional prognostic groups exist, so a single compiled kernel
+##### serves every configuration and only the cheap accumulation kernels vary. The cost is
+##### one extra store and load per prognostic; fusing `Gⁿ` into the rate kernel instead
+##### would save that traffic at the price of a rate kernel per configuration.
+#####
+
+@kernel function _p3_compute_tendency_cache_kernel!(μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ρ = ρ_field[i, j, k]
         qᵛᵉ = μ.qᵛ[i, j, k]
-        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, nothing,
-                                            velocities)
+        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, nothing, velocities)
         q = AM.moisture_fractions(p3, ℳ, qᵛᵉ)
-        𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation,
-                                                   dynamics, q)
+        𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
         𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
 
         # Approximate the resolved diffusional-growth driver with adiabatic
@@ -144,7 +175,6 @@ end
                                  vapor_tendency)
     write_p3_tendency_cache!(μ, i, j, k, p3, result)
 end
-
 
 #####
 ##### Fused tendency override (fast path for AtmosphereModel)
@@ -225,11 +255,11 @@ end
 ##### Number concentration diagnostic
 #####
 #
-# P3 carries prognostic number-density fields for rain and ice, and for cloud liquid
-    # when aerosol activation is enabled. The default prescribed-Nᶜˡ path has no `ρnᶜˡ`
-# prognostic, but cloud droplets are still part of the model: their total number
-# concentration is the constant `p3.cloud.number_concentration`. Represent that constant
-# as a lazy operation so `number_concentration_field` works uniformly.
+# P3 carries prognostic number-density fields for rain and ice, and for cloud liquid when
+# aerosol activation is enabled. The default prescribed-Nᶜˡ path has no `ρnᶜˡ` prognostic,
+# but cloud droplets are still part of the model: their total number concentration is the
+# constant `p3.cloud.number_concentration`. Represent that constant as a lazy operation so
+# `number_concentration_field` works uniformly.
 
 struct PrescribedCloudNumberKernelFunction{FT}
     number_concentration :: FT

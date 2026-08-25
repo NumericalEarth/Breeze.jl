@@ -8,22 +8,6 @@
 ##### Notation follows docs/src/appendix/notation.md
 #####
 
-using Oceananigans: Oceananigans
-
-using Breeze.Thermodynamics: temperature,
-                             adjustment_saturation_specific_humidity,
-                             saturation_specific_humidity,
-                             saturation_vapor_pressure,
-                             PlanarLiquidSurface,
-                             PlanarIceSurface,
-                             density,
-                             liquid_latent_heat,
-                             ice_latent_heat,
-                             vapor_gas_constant,
-                             MoistureMassFractions,
-                             ThermodynamicConstants
-using DocStringExtensions: TYPEDSIGNATURES
-
 #####
 ##### Coupled condensation/deposition saturation adjustment
 #####
@@ -72,7 +56,7 @@ state passes through unchanged.
     ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
 
     cloud_water_adjustment = (qᵛ - qᵛ⁺ˡ - sᵛ⁺ˡ) / ξˡ
-    cloud_water_adjustment = max(cloud_water_adjustment, -clamp_positive(qᶜˡ))
+    cloud_water_adjustment = max(cloud_water_adjustment, -max(0, qᶜˡ))
     cloud_water_adjustment = ifelse(sᵛ⁺ˡ < 0,
                                     min(cloud_water_adjustment, zero(FT)),
                                     cloud_water_adjustment)
@@ -100,23 +84,15 @@ end
 
 @inline function rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport)
     FT = typeof(qʳ)
-    qʳ_eff = clamp_positive(qʳ)
+    qʳ_eff = max(0, qʳ)
     parameters = p3.process_rates
-    floors = parameters.floors
-    nʳ_eff = max(clamp_positive(nʳ), FT(p3.minimum_number_mixing_ratio))
+    nʳ_eff = max(nʳ, FT(p3.minimum_number_mixing_ratio))
     active = qʳ_eff >= p3.minimum_mass_mixing_ratio
 
-    λʳ = rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
-    nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
-    Nʳ₀ = nʳ_bounded * λʳ
-    velocity_diameter_integral = p3.rain.evaporation(log10(λʳ))
-    constant_integral = FT(RAIN_F1R) / λʳ^2
-    schmidt_factor = cbrt(transport.ν /
-                          max(transport.Dᵛ, FT(floors.transport_coefficient)))
-    inverse_sqrt_viscosity = 1 / sqrt(max(transport.ν, FT(floors.transport_coefficient)))
-    ventilation_integral = constant_integral + FT(RAIN_F2R) * schmidt_factor *
-                           inverse_sqrt_viscosity * velocity_diameter_integral
-    relaxation_coefficient = 2 * FT(π) * Nʳ₀ * ρ * transport.Dᵛ * ventilation_integral
+    ventilation = rain_ventilation_integral(p3.rain.evaporation, qʳ_eff, nʳ_eff,
+                                           transport.ν, transport.Dᵛ, parameters)
+    relaxation_coefficient = 2 * FT(π) * ventilation.Nʳ₀ * ρ * transport.Dᵛ *
+                             ventilation.integral
 
     return ifelse(active, relaxation_coefficient, zero(FT))
 end
@@ -125,7 +101,7 @@ end
                                                   constants, transport, q)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
-    nⁱ_eff = max(clamp_positive(nⁱ), FT(p3.minimum_number_mixing_ratio))
+    nⁱ_eff = max(nⁱ, FT(p3.minimum_number_mixing_ratio))
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
 
     Dᵛ = transport.Dᵛ
@@ -133,11 +109,11 @@ end
 
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
     ρ_air = density(T, P, q, constants)
-    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ_air)
+    ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ_air)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                   p3.ice.deposition.ventilation_enhanced,
                                   m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ,
-                                  ρ_correction, p3)
+                                  ρ_correction)
 
     # This is the raw inverse relaxation coefficient; the psychrometric correction
     # is applied later through the coupled `ξˡ` / `ξⁱ` factor.
@@ -252,7 +228,7 @@ cloud/precipitation fraction framework is handled separately.
                               -qᶜˡ / τ, raw_cloud_growth)
     raw_rain_growth = ifelse((𝒮ˡ < subsaturated) & (qʳ < tiny_mass),
                              -qʳ / τ, raw_rain_growth)
-    # Match the cloud/rain branches above: do NOT clamp_positive the prognostic
+    # Match the cloud/rain branches above: do NOT clamp the prognostic
     # before the sign flip. When advection leaves qⁱ or qʷⁱ slightly negative,
     # the override should produce a positive deposition/coating-condensation
     # rate so the downstream cap (lines 943 / 946) can pull mass back from
@@ -265,9 +241,9 @@ cloud/precipitation fraction framework is handled separately.
                                 (Fˡ >= parameters.liquid_fraction_clipping_threshold),
                                 -qʷⁱ / τ, raw_coating_growth)
 
-    condensation = clamp(raw_cloud_growth, -clamp_positive(qᶜˡ) / τ, clamp_positive(qᵛ) / τ)
-    rain_condensation = min(max(0, raw_rain_growth), clamp_positive(qᵛ) / τ)
-    rain_evaporation = min(max(0, -raw_rain_growth), clamp_positive(qʳ) / τ)
+    condensation = clamp(raw_cloud_growth, -max(0, qᶜˡ) / τ, max(0, qᵛ) / τ)
+    rain_condensation = min(max(0, raw_rain_growth), max(0, qᵛ) / τ)
+    rain_evaporation = min(max(0, -raw_rain_growth), max(0, qʳ) / τ)
 
     is_sublimation = raw_ice_growth < 0
     calibration = ifelse(is_sublimation,
@@ -275,10 +251,10 @@ cloud/precipitation fraction framework is handled separately.
                          p3.process_rates.calibration_factor_deposition)
     deposition_raw = raw_ice_growth * calibration
     # Sublimation is limited to the dry ice mass per unit time, `qⁱ / τ`.
-    deposition = clamp(deposition_raw, -clamp_positive(qⁱ) / τ, clamp_positive(qᵛ) / τ)
+    deposition = clamp(deposition_raw, -max(0, qⁱ) / τ, max(0, qᵛ) / τ)
 
-    coating_condensation = min(max(0, raw_coating_growth), clamp_positive(qᵛ) / τ)
-    coating_evaporation = min(max(0, -raw_coating_growth), clamp_positive(qʷⁱ) / τ)
+    coating_condensation = min(max(0, raw_coating_growth), max(0, qᵛ) / τ)
+    coating_evaporation = min(max(0, -raw_coating_growth), max(0, qʷⁱ) / τ)
 
     return P3CoupledVaporRates{FT}(condensation, rain_evaporation, rain_condensation,
                                    deposition, coating_condensation, coating_evaporation)

@@ -24,23 +24,58 @@
 #####   D = (scale/λ) * (1+x) / (1-x+ε),  x ∈ [-1, 1]
 ##### with a scale of 10 (10 exponential decay lengths covers >99.99% of the integral).
 #####
-##### Parameters: ar=842, br=0.8, f1r=0.78, f2r=0.32, ν=1.5e-5 m²/s
+##### Both the tabulated and analytical rain paths use the same 4-regime
+##### Gunn-Kinzer/Beard piecewise V(D) formula (`rain_fall_speed` below).
+##### The piecewise law captures the terminal-velocity plateau above D ~5 mm and
+##### Stokes drag below D ~100 μm.
 #####
-
-##### NOTE: Both the tabulated and analytical rain paths now use the same
-##### 4-regime Gunn-Kinzer/Beard piecewise V(D) formula (rain_fall_speed in quadrature.jl).
-##### The piecewise law captures the terminal velocity plateau above D ~5mm and Stokes
-##### drag below D ~100μm. The previous analytical path used a single power law
-##### V = ar × D^br (842 × D^0.8), which has been replaced for consistency.
 
 export RainMassWeightedVelocityEvaluator,
        RainNumberWeightedVelocityEvaluator,
        RainEvaporationVentilationEvaluator
 
-# Rain ventilation constants; see `RainEvaporationVentilationEvaluator` for the
-# ventilation factor they enter and the citation.
-const RAIN_F1R = 0.78       # constant term in ventilation factor [-]
-const RAIN_F2R = 0.32       # Reynolds-dependent ventilation coefficient [-]
+# Rain ventilation factor fᵛᵉ = f₁ + f₂ Sc^(1/3) Re^(1/2), the same form the ice side
+# uses (see the `*_ventilation_constant` / `*_ventilation_reynolds` fields of
+# `IceDeposition`). The pair below is P3's `f1r`/`f2r`; the ventilation factor itself is
+# the classical one of [Pruppacher & Klett (2010)](@cite pruppacher2010microphysics).
+# `RainEvaporationVentilationEvaluator` documents where each term enters.
+const RAIN_VENTILATION_CONSTANT = 0.78  # f₁, the still-air term [-]
+const RAIN_VENTILATION_REYNOLDS = 0.32  # f₂, multiplying Sc^(1/3) Re^(1/2) [-]
+
+#####
+##### Rain fall speed (Gunn-Kinzer / Beard piecewise power law)
+#####
+
+# The fit is stated in terms of a drop mass in grams computed at the water density the
+# fit itself was derived with, so this density belongs to the formula rather than to the
+# model: substituting the configurable ρʷ would rescale the published coefficients.
+const GUNN_KINZER_WATER_DENSITY = 997     # [kg/m³], mass basis of the fit
+const GUNN_KINZER_PLATEAU_SPEED = 917     # [cm/s], terminal speed above the largest branch edge
+
+"""
+$(TYPEDSIGNATURES)
+
+Piecewise Gunn-Kinzer / Beard rain terminal velocity [m/s]. Captures the Stokes-drag
+regime below D ≈ 100 μm and the terminal-velocity plateau above D ≈ 5 mm. Used by the
+rain quadrature tabulation path.
+"""
+@inline function rain_fall_speed(D, ρ_correction)
+    FT = typeof(D)
+
+    m_kg = (FT(π)/6) * FT(GUNN_KINZER_WATER_DENSITY) * D^3
+    m_g = m_kg * 1000
+
+    # Piecewise power law: branch edges in m, coefficients in cm/s per g^exponent, and a
+    # terminal plateau above the largest edge. A published fit, so the numbers stay with
+    # the formula they belong to.
+    V_cm = ifelse(D <= FT(134.43e-6),  FT(4.5795e5) * cbrt(m_g)^2,
+           ifelse(D <  FT(1511.64e-6), FT(4.962e3)  * cbrt(m_g),
+           ifelse(D <  FT(3477.84e-6), FT(1.732e3)  * sqrt(cbrt(m_g)),
+                                       FT(GUNN_KINZER_PLATEAU_SPEED))))
+
+    # cm/s → m/s
+    return V_cm / 100 * ρ_correction
+end
 
 #####
 ##### RainMassWeightedVelocityEvaluator
@@ -79,11 +114,61 @@ $(TYPEDSIGNATURES)
 
 Construct a `RainMassWeightedVelocityEvaluator` with `n_points` quadrature points.
 """
-function RainMassWeightedVelocityEvaluator(FT::Type{<:AbstractFloat} = Float64;
+function RainMassWeightedVelocityEvaluator(FT::DataType = Oceananigans.defaults.FloatType;
                                             n_points::Int = 128)
     nodes, weights = chebyshev_gauss_nodes_weights(FT, n_points)
     return RainMassWeightedVelocityEvaluator(nodes, weights)
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Velocity moment ratio of an exponential rain PSD on the Chebyshev-Gauss nodes,
+
+```math
+\\frac{\\int_0^\\infty V(D) \\, g(D) \\, e^{-λ^r D} \\, dD}
+      {\\int_0^\\infty g(D) \\, e^{-λ^r D} \\, dD}
+```
+
+where `diameter_weight` supplies ``g(D)``: `identity_weight` for the
+number-weighted velocity, `cubed_weight` for the mass-weighted one (the constant
+spherical-water mass factor cancels between numerator and denominator).
+
+`V` is the piecewise Gunn-Kinzer/Beard fall speed at reference density; apply
+`(ρ₀/ρ)^0.54` at the call site. The floor on the denominator is a divide-by-zero
+guard on that same integral; a machine-epsilon floor would instead suppress valid
+`Float32` velocities.
+"""
+@inline function rain_velocity_moment_ratio(nodes, weights, λʳ, diameter_weight::G) where G
+    FT = eltype(nodes)
+
+    # Density correction is 1 at reference conditions (applied at call site)
+    ρ_correction = one(FT)
+
+    weighted_velocity_integral = zero(FT)
+    weighted_integral          = zero(FT)
+
+    for i in eachindex(nodes)
+        x = @inbounds nodes[i]
+        w = @inbounds weights[i]
+        D = transform_to_diameter(x, λʳ)
+        J = jacobian_diameter_transform(x, λʳ)
+
+        V = rain_fall_speed(D, ρ_correction)
+        g = diameter_weight(D)
+        psd = exp(-λʳ * D)
+
+        weighted_velocity_integral += w * V * g * psd * J
+        weighted_integral          += w * g * psd * J
+    end
+
+    denominator = max(weighted_integral, FT(DEFAULT_FLOORS.divisor))
+    result = weighted_velocity_integral / denominator
+    return ifelse(isfinite(result), result, zero(FT))
+end
+
+@inline identity_weight(D) = one(D)
+@inline cubed_weight(D) = D^3
 
 """
     (e::RainMassWeightedVelocityEvaluator)(log10_slope)
@@ -93,37 +178,9 @@ Evaluate the mass-weighted rain terminal velocity at the given `log10(λ_r)`.
 Returns the velocity in [m/s] at reference air density (no density correction).
 Apply `(ρ₀/ρ)^0.54` at the call site if needed.
 """
-@inline function (e::RainMassWeightedVelocityEvaluator)(log10_slope)
-    FT = eltype(e.nodes)
-    λʳ = exp10(FT(log10_slope))
-
-    # Density correction is 1 at reference conditions (applied at call site)
-    ρ_correction = one(FT)
-
-    velocity_diameter_cubed_integral = zero(FT)
-    diameter_cubed_integral          = zero(FT)
-    n = length(e.nodes)
-
-    for i in 1:n
-        x = @inbounds e.nodes[i]
-        w = @inbounds e.weights[i]
-        D = transform_to_diameter(x, λʳ)
-        J = jacobian_diameter_transform(x, λʳ)
-
-        V = rain_fall_speed(D, ρ_correction)
-        psd = exp(-λʳ * D)
-
-        velocity_diameter_cubed_integral += w * V * D^3 * psd * J
-        diameter_cubed_integral          += w * D^3 * psd * J
-    end
-
-    # The constant spherical-water mass factor cancels between numerator and
-    # denominator. The floor is a divide-by-zero guard on this same integral; a
-    # machine-epsilon floor would instead suppress valid Float32 velocities.
-    denominator = max(diameter_cubed_integral, FT(DEFAULT_FLOORS.divisor))
-    result = velocity_diameter_cubed_integral / denominator
-    return ifelse(isfinite(result), result, zero(FT))
-end
+@inline (e::RainMassWeightedVelocityEvaluator)(log10_slope) =
+    rain_velocity_moment_ratio(e.nodes, e.weights,
+                               exp10(eltype(e.nodes)(log10_slope)), cubed_weight)
 
 #####
 ##### RainNumberWeightedVelocityEvaluator
@@ -157,7 +214,7 @@ $(TYPEDSIGNATURES)
 
 Construct a `RainNumberWeightedVelocityEvaluator` with `n_points` quadrature points.
 """
-function RainNumberWeightedVelocityEvaluator(FT::Type{<:AbstractFloat} = Float64;
+function RainNumberWeightedVelocityEvaluator(FT::DataType = Oceananigans.defaults.FloatType;
                                               n_points::Int = 128)
     nodes, weights = chebyshev_gauss_nodes_weights(FT, n_points)
     return RainNumberWeightedVelocityEvaluator(nodes, weights)
@@ -170,33 +227,9 @@ Evaluate the number-weighted rain terminal velocity at the given `log10(λ_r)`.
 
 Returns the velocity in [m/s] at reference air density.
 """
-@inline function (e::RainNumberWeightedVelocityEvaluator)(log10_slope)
-    FT = eltype(e.nodes)
-    λʳ = exp10(FT(log10_slope))
-    ρ_correction = one(FT)
-
-    vel_integral    = zero(FT)
-    number_integral = zero(FT)
-    n = length(e.nodes)
-
-    for i in 1:n
-        x = @inbounds e.nodes[i]
-        w = @inbounds e.weights[i]
-        D = transform_to_diameter(x, λʳ)
-        J = jacobian_diameter_transform(x, λʳ)
-
-        V   = rain_fall_speed(D, ρ_correction)
-        psd = exp(-λʳ * D)
-
-        vel_integral    += w * V * psd * J
-        number_integral += w * psd * J
-    end
-
-    # Divide-by-zero guard on this integral; see the mass-weighted evaluator above.
-    denominator = max(number_integral, FT(DEFAULT_FLOORS.divisor))
-    result = vel_integral / denominator
-    return ifelse(isfinite(result), result, zero(FT))
-end
+@inline (e::RainNumberWeightedVelocityEvaluator)(log10_slope) =
+    rain_velocity_moment_ratio(e.nodes, e.weights,
+                               exp10(eltype(e.nodes)(log10_slope)), identity_weight)
 
 #####
 ##### RainEvaporationVentilationEvaluator
@@ -254,7 +287,7 @@ $(TYPEDSIGNATURES)
 
 Construct a `RainEvaporationVentilationEvaluator` with `n_points` quadrature points.
 """
-function RainEvaporationVentilationEvaluator(FT::Type{<:AbstractFloat} = Float64;
+function RainEvaporationVentilationEvaluator(FT::DataType = Oceananigans.defaults.FloatType;
                                               n_points::Int = 128)
     nodes, weights = chebyshev_gauss_nodes_weights(FT, n_points)
     return RainEvaporationVentilationEvaluator(nodes, weights)

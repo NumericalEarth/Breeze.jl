@@ -1,11 +1,8 @@
 using Oceananigans: CenterField
 using Oceananigans.Fields: ZeroField
-using DocStringExtensions: TYPEDSIGNATURES
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
-
-using Breeze.Thermodynamics: MoistureMassFractions
 
 using Breeze: Microphysics
 

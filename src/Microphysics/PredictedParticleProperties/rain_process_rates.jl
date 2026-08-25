@@ -34,7 +34,7 @@ Available schemes:
     parameters = p3.process_rates
 
     # No autoconversion below the in-cloud threshold qᶜˡ < 1e-8 kg/kg.
-    qᶜˡ_eff = ifelse(qᶜˡ >= parameters.autoconversion_threshold, clamp_positive(qᶜˡ), zero(FT))
+    qᶜˡ_eff = ifelse(qᶜˡ >= parameters.autoconversion_threshold, max(0, qᶜˡ), zero(FT))
 
     # KK2000 scales with droplet number per volume, so no reference-density
     # normalization is needed — Nᶜˡ is already per-volume [1/m³].
@@ -71,8 +71,8 @@ Falling rain drops collect cloud droplets via gravitational sweep-out. See
 @inline function rain_accretion_rate(::KhairoutdinovKogan2000, p3, qᶜˡ, qʳ, ρ)
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
-    qᶜˡ_eff = clamp_positive(qᶜˡ)
-    qʳ_eff = clamp_positive(qʳ)
+    qᶜˡ_eff = max(0, qᶜˡ)
+    qʳ_eff = max(0, qʳ)
     active = (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
              (qʳ_eff >= p3.minimum_mass_mixing_ratio)
 
@@ -108,7 +108,7 @@ KK2000 uses the linear form `k_rr × ρ × qʳ × nʳ`, with `k_rr = 5.78`.
 @inline function rain_self_collection_rate(::KhairoutdinovKogan2000, p3, qʳ, nʳ, ρ)
     FT = typeof(qʳ)
     parameters = p3.process_rates
-    qʳ_eff = clamp_positive(qʳ)
+    qʳ_eff = max(0, qʳ)
     nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, parameters)
     active = qʳ_eff >= p3.minimum_mass_mixing_ratio
 
@@ -149,7 +149,7 @@ physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
     FT = typeof(qʳ)
     parameters = p3.process_rates
 
-    qʳ_eff = clamp_positive(qʳ)
+    qʳ_eff = max(0, qʳ)
     nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, parameters)
 
     # Dʳ = 1/λʳ, evaluated after the rain lambda limiter has been applied and the
@@ -247,8 +247,8 @@ approximation path depending on `p3.rain.evaporation`:
     FT = typeof(qʳ)
     parameters = p3.process_rates
 
-    qʳ_eff = clamp_positive(qʳ)
-    nʳ_eff = clamp_positive(nʳ)
+    qʳ_eff = max(0, qʳ)
+    nʳ_eff = max(0, nʳ)
 
     # Only evaporate in subsaturated conditions
     S = qᵛ / max(qᵛ⁺ˡ, FT(parameters.floors.saturation_mass_fraction))
@@ -263,7 +263,7 @@ approximation path depending on `p3.rain.evaporation`:
     # Internal helpers return negative (S - 1 < 0 when subsaturated).
     # Negate to get positive magnitude.
     evap_rate = -rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
-                                        thermodynamic_factor, p3, parameters, ν, Dᵛ, ρ, FT)
+                                        thermodynamic_factor, parameters, ν, Dᵛ, FT)
 
     # Cannot evaporate more than available
     τ_evap = parameters.rain_evaporation_timescale
@@ -273,35 +273,55 @@ approximation path depending on `p3.rain.evaporation`:
     return ifelse(is_subsaturated, evap_rate, zero(FT))
 end
 
-# Tabulated path: use PSD-integrated ventilation integral I_evap(λʳ)
-@inline function rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
-                                        thermodynamic_factor, p3, parameters, ν, Dᵛ, ρ, FT)
+"""
+$(TYPEDSIGNATURES)
+
+Rain ventilation integral and the slope quantities that go with it:
+
+```math
+I_{evap}(λ^r) = \\frac{f_{1r}}{(λ^r)^2}
+              + f_{2r} \\, \\frac{Sc^{1/3}}{\\sqrt{ν}} \\, I_{VD}(λ^r)
+```
+
+`I_VD` comes from the tabulated `table`, which stores
+``∫ D \\sqrt{V D} e^{-λ^r D} dD`` with neither `ν` nor the Schmidt number baked
+in, so both T,P-dependent factors are applied here. Returns
+`(; λʳ, Nʳ₀, integral)`, since every caller needs the intercept
+``N^r_0 = n^r λ^r`` alongside the integral.
+
+Consumed by [`rain_evaporation_rate`](@ref) and by the coupled
+saturation-adjustment relaxation coefficient.
+"""
+@inline function rain_ventilation_integral(table, qʳ, nʳ, ν, Dᵛ, parameters)
+    FT = typeof(qʳ)
+    coefficient_floor = FT(parameters.floors.transport_coefficient)
+
     # Diagnose λʳ from (qʳ, Nʳ) for exponential DSD (μʳ = 0):
     #   qʳ = Nʳ * <m> = Nʳ * π ρᴸ / λʳ³  ⟹  λʳ = (π ρᴸ / m̄)^(1/3)
     λʳ = rain_slope_parameter(qʳ, nʳ, parameters)
-    nʳ_bounded = rain_number_from_slope(qʳ, λʳ, parameters)
-
     # Intercept Nʳ₀ = Nʳ * λʳ  (for exponential DSD N'(D) = Nʳ₀ exp(-λ D))
-    Nʳ₀ = nʳ_bounded * λʳ
+    Nʳ₀ = rain_number_from_slope(qʳ, λʳ, parameters) * λʳ
 
-    log_slope = log10(λʳ)
-    velocity_diameter_integral = table(log_slope)
-
-    # Combine constant + velocity-diameter terms with T,P-dependent transport.
-    # Constant term: f1r × ∫ D × exp(-λD) dD = f1r / λ² (analytical for μ_r=0)
-    constant_integral = FT(RAIN_F1R) / λʳ^2
-    # Table stores ∫ D √(V×D) exp(-λD) dD (no ν); apply 1/√ν at runtime.
-    coefficient_floor = FT(parameters.floors.transport_coefficient)
+    # Constant term: f1r × ∫ D × exp(-λD) dD = f1r / λ² (analytical for μʳ = 0)
+    constant_integral = FT(RAIN_VENTILATION_CONSTANT) / λʳ^2
     schmidt_factor = cbrt(ν / max(Dᵛ, coefficient_floor))
     inverse_sqrt_viscosity = 1 / sqrt(max(ν, coefficient_floor))
-    evaporation_integral = constant_integral + FT(RAIN_F2R) * schmidt_factor *
-                           inverse_sqrt_viscosity * velocity_diameter_integral
+    integral = constant_integral + FT(RAIN_VENTILATION_REYNOLDS) * schmidt_factor *
+                                   inverse_sqrt_viscosity * table(log10(λʳ))
+
+    return (; λʳ, Nʳ₀, integral)
+end
+
+# Tabulated path: use PSD-integrated ventilation integral I_evap(λʳ)
+@inline function rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
+                                        thermodynamic_factor, parameters, ν, Dᵛ, FT)
+    ventilation = rain_ventilation_integral(table, qʳ, nʳ, ν, Dᵛ, parameters)
 
     # Evaporation rate (Mason 1971, PSD-integrated):
     #   dm/dt per drop = 4π × C × f_v × (S-1)/Φ,  C = D/2 (spherical capacitance)
     #   dq^r/dt = N_0 × ∫ 4π × (D/2) × f_v × exp(-λD) dD × (S-1)/Φ
     #           = 2π × N_0 × I_evap × (S-1) / Φ,  I_evap = ∫ D × f_v × exp(-λD) dD
-    return 2 * FT(π) * Nʳ₀ * evaporation_integral * (S - 1) / thermodynamic_factor
+    return 2 * FT(π) * ventilation.Nʳ₀ * ventilation.integral * (S - 1) / thermodynamic_factor
 end
 
 #####
@@ -336,11 +356,7 @@ proportion to the cloud mass lost.
 
 @inline function cloud_number_loss_from_autoconversion(::KhairoutdinovKogan2000,
                                                        p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
-    FT = typeof(autoconversion)
-    # autoconversion × nᶜˡ / qᶜˡ with nᶜˡ = Nᶜˡ/ρ, i.e.
-    # autoconversion × Nᶜˡ / (ρ qᶜˡ); safe_divide guards qᶜˡ = 0.
-    cloud_number_per_mass = safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(FT))
-    return autoconversion * cloud_number_per_mass
+    return autoconversion * cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ)
 end
 
 """

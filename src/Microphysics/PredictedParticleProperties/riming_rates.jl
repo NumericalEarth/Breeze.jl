@@ -31,11 +31,11 @@ factor for the exponential PSD.
 # Returns
 - Rate of cloud → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-@inline cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
-                          qʷⁱ = zero(typeof(qⁱ))) =
+@inline function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ = zero(typeof(qⁱ)))
     # Riming is the below-freezing branch, T ≤ T₀
-    cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
-                               T <= p3.process_rates.freezing_temperature, qʷⁱ)
+    below_freezing = T <= p3.process_rates.freezing_temperature
+    return cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, below_freezing, qʷⁱ)
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -53,10 +53,10 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
 
     Eᶜⁱ = parameters.cloud_ice_collection_efficiency
 
-    qᶜˡ_eff = clamp_positive(qᶜˡ)
+    qᶜˡ_eff = max(0, qᶜˡ)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    nⁱ_eff = max(clamp_positive(nⁱ), p3.minimum_number_mixing_ratio)
+    nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     active = temperature_active &
              (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
@@ -68,13 +68,14 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
     # PSD-integrated cloud-water collection kernel ⟨A×V⟩ from lookup table
     # ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
     collection_kernel = collection_kernel_per_particle(p3.ice.collection.cloud_collection,
-                                                        m_mean, Fᶠ, Fˡ, ρᶠ)
+                                                        m_mean, Fᶠ, Fˡ, ρᶠ, parameters.floors)
 
-    # Air density correction for ice particle fall speed (Heymsfield et al. 2007):
-    # ρfaci = (ρ₀_ice / ρ)^0.54, where ρ₀_ice = 60000/(287.15×253.15) ≈ 0.826 kg/m³.
-    # This is the ice reference density, NOT the surface/rain reference ≈ 1.275.
+    # Air density correction for the ice fall speed. `IceFallSpeed` documents ρ₀ and the
+    # exponent: ρ₀ is the dry-air density at the conditions the P3 lookup tables were
+    # tabulated at (600 hPa, 253.15 K), so ≈0.83 kg/m³ — the ice reference density, and NOT
+    # the surface/rain reference ≈1.275 kg/m³ carried by `ProcessRateParameters`.
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    density_correction = ice_air_density_correction(ρ₀, ρ)
+    density_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
     # Collection rate = E × qc × ni × ρ × rhofaci × ⟨A×V⟩
     rate = Eᶜⁱ * qᶜˡ_eff * nⁱ_eff * ρ * density_correction * collection_kernel
@@ -99,8 +100,7 @@ is the mass of a 1 mm drop, ``π/6 ρ^L D³ ≈ 5.24 × 10⁻⁷`` kg.
                                             qʷⁱ = zero(typeof(qⁱ)))
     # Collection above freezing is the T > T₀ branch
     above_freezing = T > p3.process_rates.freezing_temperature
-    mass_rate = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
-                                           above_freezing, qʷⁱ)
+    mass_rate = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, above_freezing, qʷⁱ)
     # Collected water is shed as 1 mm drops: m = π/6 × 1000 × 0.001³ ≈ 5.2e-7 kg.
     # The gate is already applied to `mass_rate`, so the quotient carries it.
     return (mass_rate, mass_rate / p3.process_rates.shed_drop_mass)
@@ -119,15 +119,16 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 # Returns
 - Rain mass rate collected onto ice [kg/kg/s]
 """
-@inline rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
-                                  qʷⁱ = zero(typeof(qⁱ))) =
-    # Collection above freezing is the T > T₀ branch. It uses the same Table 2
-    # double-PSD kernel as the below-freezing path.
-    rain_collection_mass_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
-                              T > p3.process_rates.freezing_temperature, qʷⁱ)
+@inline function rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
+                                           qʷⁱ = zero(typeof(qⁱ)))
+    # Collection above freezing is the T > T₀ branch. It uses the same Table 2 double-PSD
+    # kernel as the below-freezing path.
+    above_freezing = T > p3.process_rates.freezing_temperature
+    return rain_collection_mass_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, above_freezing, qʷⁱ)
+end
 
 """
-    $(TYPEDSIGNATURES)    cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, riming_rate)
+$(TYPEDSIGNATURES)
 
 Compute cloud droplet number sink from riming.
 
@@ -144,12 +145,7 @@ number removal proportional to the rimed cloud mass fraction.
 - Rate of cloud number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
 @inline function cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, riming_rate)
-    FT = typeof(qᶜˡ)
-
-    # Nᶜˡ [#/m³] / (ρ [kg/m³] × qᶜˡ [kg/kg]) = nᶜˡ/qᶜˡ [#/kg].
-    ratio = safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(FT))
-
-    return ratio * riming_rate
+    return cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ) * riming_rate
 end
 
 """
@@ -217,11 +213,11 @@ PSD-integrated number-weighted kernel.
 
     Eʳⁱ = parameters.rain_ice_collection_efficiency
 
-    qʳ_eff = clamp_positive(qʳ)
-    nʳ_eff = max(clamp_positive(nʳ), p3.minimum_number_mixing_ratio)
+    qʳ_eff = max(0, qʳ)
+    nʳ_eff = max(nʳ, p3.minimum_number_mixing_ratio)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    nⁱ_eff = max(clamp_positive(nⁱ), p3.minimum_number_mixing_ratio)
+    nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     active = temperature_active &
              (qʳ_eff >= p3.minimum_mass_mixing_ratio) &
@@ -230,7 +226,7 @@ PSD-integrated number-weighted kernel.
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    density_correction = ice_air_density_correction(ρ₀, ρ)
+    density_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
     # Diagnose rain DSD slope parameter
     λʳ = rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
@@ -239,7 +235,7 @@ PSD-integrated number-weighted kernel.
     # Use Table 2 (double-PSD kernel) for ice-rain collection. The table stores the
     # double-PSD integrals with N₀ʳ factored out, so each rate is
     # kernel × N₀ʳ × nⁱ × ρ × (density correction) × E, with N₀ʳ = nʳ λʳ at μʳ = 0.
-    mass_kernel, number_kernel = ice_rain_collection_lookup(rain_ice_collection_table(p3),
+    mass_kernel, number_kernel = ice_rain_collection_lookup(p3.ice.ice_rain,
                                                             m_mean, λʳ, Fᶠ, Fˡ, ρᶠ)
 
     Nʳ₀ = nʳ_bounded * λʳ
@@ -271,15 +267,3 @@ number-weighted collection kernel (`RainCollectionNumber`).
                                        below_freezing, qʷⁱ)
 end
 
-"""
-$(TYPEDSIGNATURES)
-
-Compute above-freezing rain number loss using the tabulated number-weighted
-collection kernel (`RainCollectionNumber`).
-"""
-@inline function rain_warm_collection_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
-                                                  qʷⁱ = zero(typeof(qⁱ)))
-    above_freezing = T > p3.process_rates.freezing_temperature
-    return rain_collection_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
-                                       above_freezing, qʷⁱ)
-end

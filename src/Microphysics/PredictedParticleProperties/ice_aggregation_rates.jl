@@ -1,4 +1,4 @@
-@inline function ice_rain_collection_lookup(table::P3RainIceCollectionTable,
+@inline function ice_rain_collection_lookup(table::IceRainCollection,
                                             m̄, λr, Fᶠ, Fˡ, ρᶠ)
     log_m = log10(m̄)
     log_λ = log10(λr)
@@ -51,8 +51,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 # Returns
 - Rate of ice number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
-                              qʷⁱ = zero(typeof(qⁱ)))
+@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
@@ -62,7 +61,7 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
 
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    nⁱ_eff = max(clamp_positive(nⁱ), p3.minimum_number_mixing_ratio)
+    nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     # Aggregation is gated on bulk ice mass only, with the number floored at
     # `minimum_number_mixing_ratio` before the collection kernel is evaluated.
@@ -90,7 +89,7 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
 
     # PSD-integrated self-collection kernel (E-free) from lookup table.
     aggregation_kernel_value = aggregation_kernel(p3.ice.collection.aggregation,
-                                                  m_mean, Fᶠ, Fˡ, ρᶠ)
+                                                  m_mean, Fᶠ, Fˡ, ρᶠ, parameters.floors)
 
     # Collection kernel with temperature-dependent sticking efficiency
     mean_collection_kernel = aggregation_efficiency * aggregation_kernel_value
@@ -102,7 +101,7 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
     # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
     # Use the ice reference density (P=600 hPa, T=-20°C), not the rain reference.
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    density_correction = ice_air_density_correction(ρ₀, ρ)
+    density_correction = ice_air_density_correction(parameters, ρ₀, ρ)
     rate = ρ * mean_collection_kernel * nⁱ_eff^2 * density_correction
 
     return ifelse(aggregation_active, rate, zero(FT))

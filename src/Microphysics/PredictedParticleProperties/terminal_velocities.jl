@@ -63,9 +63,9 @@ table lookups.
     ρ₀ = parameters.reference_air_density
     ρʷ = parameters.liquid_water_density
 
-    qʳ_eff = clamp_positive(qʳ)
+    qʳ_eff = max(0, qʳ)
     nʳ_eff = max(nʳ, p3.minimum_number_mixing_ratio)
-    ρ_correction = ice_air_density_correction(ρ₀, ρ)
+    ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
     m̄  = qʳ_eff / nʳ_eff
     λʳ = cbrt(FT(π) * ρʷ / max(m̄, FT(parameters.floors.mass_scale)))
@@ -109,13 +109,13 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
     ρ₀ = fs.reference_air_density
 
-    qⁱ_eff = clamp_positive(qⁱ)
+    qⁱ_eff = max(0, qⁱ)
     nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     # Mean ice particle mass
     m̄ = qⁱ_eff / nⁱ_eff
 
-    ρ_correction = ice_air_density_correction(ρ₀, ρ)
+    ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
     # m9: no velocity clamping is applied; the table bounds are sufficient.
     velocity = tabulated_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ,
@@ -174,7 +174,7 @@ struct IceTerminalVelocities{FT}
     number_weighted :: FT
 end
 
-function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
+@inline function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     parameters = p3.process_rates
     fs = p3.ice.fall_speed
@@ -182,11 +182,11 @@ function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeo
     ρ₀ = fs.reference_air_density
 
     # --- Shared computation (done once instead of twice) ---
-    qⁱ_eff = clamp_positive(qⁱ)
+    qⁱ_eff = max(0, qⁱ)
     nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
     m̄ = qⁱ_eff / nⁱ_eff
 
-    ρ_correction = ice_air_density_correction(ρ₀, ρ)
+    ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
     velocities = fused_fall_speeds(fs.mass_weighted, fs.number_weighted,
                                     m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters)

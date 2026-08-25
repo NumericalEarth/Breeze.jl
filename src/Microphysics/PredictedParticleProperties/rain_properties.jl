@@ -4,12 +4,8 @@
 ##### Rain particle properties and integrals for the P3 scheme.
 #####
 
-"""
-    RainProperties
-
-Rain particle size distribution and fall speed parameters.
-See [`RainProperties`](@ref) constructor for details.
-"""
+# Rain particle size distribution and fall-speed parameters; see the `RainProperties`
+# constructor.
 struct RainProperties{FT, MU, VN, VM, EV}
     maximum_mean_diameter :: FT
     fall_speed_coefficient :: FT
@@ -60,7 +56,7 @@ Default coefficients give fall speeds in m/s for D in meters.
 [Milbrandt and Yau (2005)](@cite MilbrandtYau2005),
 [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
 """
-function RainProperties(FT::Type{<:AbstractFloat} = Float64;
+function RainProperties(FT::DataType = Oceananigans.defaults.FloatType;
                         maximum_mean_diameter = 2e-3,
                         fall_speed_coefficient = 841.99667,
                         fall_speed_exponent = 0.8)

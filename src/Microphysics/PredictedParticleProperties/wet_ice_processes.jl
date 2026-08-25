@@ -22,7 +22,7 @@ is used.
 # Returns
 - Rime density [kg/m³]
 """
-function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
+@inline function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
                       μᶜˡ, λᶜˡ)
     FT = typeof(T)
     parameters = p3.process_rates
@@ -105,11 +105,11 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 # Returns
 - Rate of liquid → rain shedding [kg/kg/s]
 """
-function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
+@inline function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
     FT = typeof(qʷⁱ)
 
-    qʷⁱ_eff = clamp_positive(qʷⁱ)
-    nⁱ_eff = clamp_positive(nⁱ)
+    qʷⁱ_eff = max(0, qʷⁱ)
+    nⁱ_eff = max(0, nⁱ)
 
     # Lookup ∫_{D≥9mm} m(D) N'(D) dD (normalized per particle)
     f1pr28 = shedding_integral(p3.ice.bulk_properties.shedding, m_mean, Fᶠ, Fˡ, ρᶠ,
@@ -119,7 +119,7 @@ function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
     rate = Fᶠ * f1pr28 * nⁱ_eff * Fˡ
 
     # Bound by available liquid: qlshd ≤ qwi / dt_safety
-    rate = clamp_positive(rate)
+    rate = max(0, rate)
     τ_safety = p3.process_rates.sink_limiting_timescale
     rate = min(rate, qʷⁱ_eff / τ_safety)
 
@@ -192,14 +192,13 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 # Returns
 - Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
-function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ,
-                             constants, transport)
+@inline function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+                                     constants, transport)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
-    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    nⁱ_eff = clamp_positive(nⁱ)
+    nⁱ_eff = max(0, nⁱ)
 
     T₀ = parameters.freezing_temperature
     below_freezing = T < T₀
@@ -215,13 +214,13 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
 
     # Mean ice particle mass
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
-    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+    ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
 
     # Ventilation integral (same as deposition/refreezing)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
                                     m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ,
-                                    ρ_correction, p3)
+                                    ρ_correction)
 
     # Heat balance: sensible + latent
     Q_sensible = Kᵃ * (T₀ - T)
@@ -231,7 +230,7 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
     # the capm convention directly.
     qwgrth = C_fv * (Q_sensible + 2 * FT(π) * Q_latent / ℒᶠᵘˢ) * nⁱ_eff
 
-    return ifelse(below_freezing, clamp_positive(qwgrth), zero(FT))
+    return ifelse(below_freezing, max(0, qwgrth), zero(FT))
 end
 
 """
@@ -246,17 +245,18 @@ determined by the heat flux at the particle surface:
 \\frac{dm}{dt} = C f^{ve} \\left[Kᵃ(T_0-T) + \\frac{2π}{ℒᶠᵘˢ} ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
 ```
 
-This mirrors the melting formula with reversed temperature gradient.
+That is the same particle heat balance that sets the wet-growth capacity, so this
+is [`wet_growth_capacity`](@ref) capped by the liquid available on the ice. Above
+freezing the capacity is already zero, which carries the temperature gate here.
 See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization)
 appendix C, section i (and Mason 1971 for the underlying heat-balance form).
 
 # Arguments
 - `p3`: P3 microphysics scheme
-- `qʷⁱ`: Liquid water on ice [kg/kg]
 - `qⁱ`: Ice mass fraction [kg/kg]
+- `qʷⁱ`: Liquid water on ice [kg/kg]
 - `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
-- `P`: Pressure [Pa]
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
@@ -267,58 +267,8 @@ appendix C, section i (and Mason 1971 for the underlying heat-balance form).
 # Returns
 - Rate of liquid → ice refreezing [kg/kg/s]
 """
-function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ,
-                         constants, transport)
-    FT = typeof(qʷⁱ)
-    parameters = p3.process_rates
-
-    qʷⁱ_eff = clamp_positive(qʷⁱ)
-    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    nⁱ_eff  = clamp_positive(nⁱ)
-
-    T₀ = parameters.freezing_temperature
-    below_freezing = T < T₀
-    ΔT = T₀ - T  # positive when below freezing
-
-    ℒᶠᵘˢ = fusion_latent_heat(constants, T)
-    ℒⁱ = sublimation_latent_heat(constants, T)
-
-    Kᵃ = transport.Kᵃ
-    Dᵛ = transport.Dᵛ
-    ν  = transport.ν
-
-    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
-
-    # Mean ice particle mass
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
-    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
-
-    # Ventilation integral (ice-particle capacitance; same path as deposition)
-    C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
-                                    p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ,
-                                    ρ_correction, p3)
-
-    # Heat balance for refreezing:
-    # Conductive: Kᵃ × (T₀ - T) removes heat from liquid → promotes freezing
-    Q_sensible = Kᵃ * ΔT
-
-    # Vapor: ℒⁱ × Dᵛ × ρ × (q_sat0 - qᵛ)
-    # Subsaturated (q_sat0 > qᵛ): evaporation cools particle → promotes freezing
-    # Supersaturated (q_sat0 < qᵛ): condensation warms particle → opposes freezing
-    Q_latent = ℒⁱ * Dᵛ * ρ * (q_sat0 - qᵛ)
-
-    # Only refreeze when the net heat balance favors it. As in the wet-growth path,
-    # 2π/ℒᶠᵘˢ multiplies only the latent-diffusion term.
-    dm_dt_refrz = clamp_positive(C_fv * (Q_sensible + 2 * FT(π) * Q_latent / ℒᶠᵘˢ))
-
-    refrz_rate = nⁱ_eff * dm_dt_refrz
-
-    # Limit to available liquid on ice
-    τ_safety = p3.process_rates.sink_limiting_timescale
-    max_refrz = qʷⁱ_eff / τ_safety
-    refrz_rate = min(refrz_rate, max_refrz)
-
-    return ifelse(below_freezing, refrz_rate, zero(FT))
+@inline function refreezing_rate(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+                                 constants, transport)
+    capacity = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+    return min(capacity, max(0, qʷⁱ) / p3.process_rates.sink_limiting_timescale)
 end

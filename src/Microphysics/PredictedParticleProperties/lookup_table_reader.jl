@@ -2,7 +2,7 @@
 ##### P3 lookup table reader
 #####
 ##### Reads the ASCII tables laid out in `lookup_table_format.jl` and builds the
-##### `IceProperties` and `P3LookupTables` containers the scheme evaluates. The
+##### `IceProperties` container the scheme evaluates. The
 ##### rain 1D integrals are absent from those files and are generated here with
 ##### Julia quadrature instead.
 #####
@@ -22,9 +22,11 @@ $(TYPEDSIGNATURES)
 Read the P3 lookup tables from their ASCII files and construct a complete
 `PredictedParticlePropertiesMicrophysics` with tabulated ice integrals.
 
-If the table files are not found in `directory`, they are automatically
-downloaded from the P3-microphysics GitHub repository (approximately 28 MB
-compressed). This only happens once; subsequent calls read from disk.
+Nothing is fetched here: `directory` must already hold the table file, and it is an error
+if it does not. The tables themselves are not part of the source tree — they are a lazy
+`Pkg` artifact (`P3_lookup_tables` in Breeze's `Artifacts.toml`, a tarball pinned by
+SHA-256), which `PredictedParticlePropertiesMicrophysics` resolves to a path with
+`artifact"P3_lookup_tables"` and passes here. `Pkg` downloads and caches it on first use.
 
 Rain 1D tables (velocity, evaporation) are generated from Julia quadrature
 since they are not included in the ASCII table files.
@@ -41,7 +43,7 @@ since they are not included in the ASCII table files.
 - `thermodynamic_constants`: Source of shared phase and dry-air properties.
 """
 function read_lookup_tables(directory::AbstractString;
-                            FT::Type{<:AbstractFloat} = Float64,
+                            FT::DataType = Oceananigans.defaults.FloatType,
                             arch = CPU(),
                             thermodynamic_constants = ThermodynamicConstants(FT),
                             minimum_mass_mixing_ratio = 1e-14,
@@ -63,13 +65,9 @@ function read_lookup_tables(directory::AbstractString;
     ice_tables_4d = build_table_1_functions(table1_fields, FT, arch)
     rain_ice_tables = build_table_2_functions(table2_fields, FT, arch)
 
-    # Assemble P3 lookup table structs
-    ice_integrals_tab, rain_ice_collection_tab = assemble_lookup_tables(ice_tables_4d, rain_ice_tables)
-
     # Build IceProperties with tabulated fields
-    ice = build_ice_properties_from_tables(
-        ice_tables_4d, rain_ice_tables, ice_integrals_tab, rain_ice_collection_tab, FT;
-        thermodynamic_constants)
+    ice = build_ice_properties_from_tables(ice_tables_4d, rain_ice_tables, FT;
+                                           thermodynamic_constants)
 
     # Generate rain 1D tables from Julia quadrature
     rain_base = RainProperties(FT)
@@ -129,67 +127,10 @@ function build_table_2_functions(table2_fields::Dict, FT::Type, arch)
 end
 
 #####
-##### Assemble P3 lookup table structs
-#####
-
-function assemble_lookup_tables(ice_4d, rain_ice)
-    # P3IceIntegralsTable: groups of ice integrals
-    fall_speed = (
-        number_weighted = ice_4d[:number_weighted],
-        mass_weighted = ice_4d[:mass_weighted],
-    )
-
-    deposition = (
-        ventilation = ice_4d[:ventilation],
-        ventilation_enhanced = ice_4d[:ventilation_enhanced],
-        small_ice_ventilation_constant = ice_4d[:small_ice_ventilation_constant],
-        small_ice_ventilation_reynolds = ice_4d[:small_ice_ventilation_reynolds],
-        large_ice_ventilation_constant = ice_4d[:large_ice_ventilation_constant],
-        large_ice_ventilation_reynolds = ice_4d[:large_ice_ventilation_reynolds],
-    )
-
-    bulk_properties = (
-        effective_radius = ice_4d[:effective_radius],
-        mean_diameter = ice_4d[:mean_diameter],
-        mean_density = ice_4d[:mean_density],
-        reflectivity = ice_4d[:reflectivity],
-        shedding = ice_4d[:shedding],
-    )
-
-    collection = (
-        aggregation = ice_4d[:aggregation],
-        cloud_collection = ice_4d[:cloud_collection],
-        cloud_aerosol_collection = ice_4d[:cloud_aerosol_collection],
-        ice_aerosol_collection = ice_4d[:ice_aerosol_collection],
-    )
-
-    lambda_limiter = (
-        small_q = ice_4d[:small_q],
-        large_q = ice_4d[:large_q],
-    )
-
-    ice_rain = (
-        number = rain_ice[:rain_number],
-        mass = rain_ice[:rain_mass],
-    )
-
-    ice_integrals_tab = P3IceIntegralsTable(fall_speed, deposition, bulk_properties,
-                                              collection, lambda_limiter, ice_rain)
-
-    rain_ice_collection_tab = P3RainIceCollectionTable(
-        rain_ice[:rain_mass],
-        rain_ice[:rain_number],
-    )
-
-    return ice_integrals_tab, rain_ice_collection_tab
-end
-
-#####
 ##### Build IceProperties from the tabulated ice integrals
 #####
 
-function build_ice_properties_from_tables(ice_4d, rain_ice,
-                                          ice_integrals_tab, rain_ice_collection_tab, FT;
+function build_ice_properties_from_tables(ice_4d, rain_ice, FT;
                                           thermodynamic_constants = ThermodynamicConstants(FT))
     # Start from default IceProperties for physical constants
     ice_base = IceProperties(FT; thermodynamic_constants)
@@ -239,8 +180,6 @@ function build_ice_properties_from_tables(ice_4d, rain_ice,
         rain_ice[:rain_number],
     )
 
-    lookup_tables = P3LookupTables(ice_integrals_tab, rain_ice_collection_tab)
-
     return IceProperties(
         ice_base.minimum_rime_density,
         ice_base.maximum_rime_density,
@@ -250,9 +189,7 @@ function build_ice_properties_from_tables(ice_4d, rain_ice,
         bulk_properties,
         collection,
         lambda_limiter,
-        ice_rain_coll;
-        lookup_tables
-    )
+        ice_rain_coll)
 end
 
 #####
@@ -263,7 +200,7 @@ end
 #####
 
 function tabulate_rain_from_quadrature(rain::RainProperties, arch=CPU(),
-                                       FT::Type{<:AbstractFloat} = Float64;
+                                       FT::DataType = Oceananigans.defaults.FloatType;
                                        lambda_points::Int = 200,
                                        log_lambda_range = (FT(2.5), FT(5.5)),
                                        quadrature_points::Int = 128)

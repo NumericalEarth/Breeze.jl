@@ -3,12 +3,9 @@ using Oceananigans.BoundaryConditions: BoundaryCondition, FieldBoundaryCondition
 using Oceananigans.Fields: ZeroField, ZFaceField
 using Oceananigans.Grids: Center, Face
 using Oceananigans.Operators: ℑzᵃᵃᶜ
-using DocStringExtensions: TYPEDSIGNATURES
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
-
-using Breeze.Thermodynamics: MoistureMassFractions, mixture_heat_capacity
 
 using Breeze: Microphysics
 
@@ -142,7 +139,7 @@ end
 #
 # The advection operator is not positive-definite, so any of P3's prognostic
 # densities can come back negative from a stage update. Without this repair the
-# negative values persist: the process rates `clamp_positive` what they read, but
+# negative values persist: the process rates clamp what they read at zero, but
 # `total_condensate_density` (and through it the total density, buoyancy, and the
 # diagnosed thermodynamic state) keeps seeing the raw negative mass.
 
@@ -475,7 +472,7 @@ end
     mass_scale = FT(p3.process_rates.floors.mass_scale)
     has_ice_mass = qⁱ_raw > mass_scale
     qⁱ_total = max(qⁱ_raw, mass_scale)
-    nⁱ_global = min(clamp_positive(nⁱ_raw),
+    nⁱ_global = min(max(0, nⁱ_raw),
                     p3.process_rates.maximum_ice_number_density / ρ)
     nⁱ_diagnostic = max(nⁱ_global, p3.minimum_number_mixing_ratio)
     ρ_mean = ice_mean_density(p3, qⁱ_total, nⁱ_diagnostic, Fᶠ, Fˡ, ρᶠ)
@@ -692,7 +689,6 @@ end
                                      vapor_mass_tendency, aerosol_number_tendency)
 end
 
-
 # Adiabatic temperature tendency from the grid or parcel vertical velocity, used as
 # P3's external thermodynamic forcing on both paths. The accompanying resolved-vapor
 # tendency is zero. On the Eulerian grid path this deliberately omits resolved
@@ -702,7 +698,6 @@ end
     cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
     return -constants.gravitational_acceleration * ℳ.w / cᵖᵐ
 end
-
 
 #####
 ##### Surface precipitation boundary condition
@@ -744,7 +739,6 @@ const P3ImpenetrableBoundaryCondition = BoundaryCondition{<:NormalFlow, Nothing}
     end
     return nothing
 end
-
 
 @inline function write_p3_tendency_cache!(μ, i, j, k, p3::P3, result::P3TendencyCacheResult)
     @inbounds begin
@@ -872,7 +866,7 @@ end
     bounds = p3_ice_moment_bounds(p3, ρ, qⁱ_raw, ℳ.nⁱ,
                                   rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
     T = temperature(𝒰, constants)
-    P = p3_air_pressure(𝒰, constants)
+    P = air_pressure(𝒰, constants)
     transport = air_transport_properties(T, P, constants)
     λʳ = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     return P3IceProps{FT}(rime_state.qᶠ, rime_state.bᶠ, rime_state.Fᶠ, Fˡ,

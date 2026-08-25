@@ -8,23 +8,6 @@
 ##### Notation follows docs/src/appendix/notation.md
 #####
 
-using Oceananigans: Oceananigans
-
-using Breeze.Thermodynamics: temperature,
-                             adjustment_saturation_specific_humidity,
-                             saturation_specific_humidity,
-                             saturation_vapor_pressure,
-                             PlanarLiquidSurface,
-                             PlanarIceSurface,
-                             density,
-                             liquid_latent_heat,
-                             ice_latent_heat,
-                             mixture_heat_capacity,
-                             vapor_gas_constant,
-                             MoistureMassFractions,
-                             ThermodynamicConstants
-using DocStringExtensions: TYPEDSIGNATURES
-
 #####
 ##### Ventilation Sc correction (H4)
 #####
@@ -48,11 +31,11 @@ must be applied at runtime:
 f_{Sc} = \\frac{Sc^{1/3} \\sqrt{\\rho_{fac}}}{\\sqrt{\\nu}}
 ```
 
-See `quadrature.jl` for the table storage convention.
+See `rain_quadrature.jl` for the table storage convention.
 """
-@inline function ventilation_sc_correction(ν, Dᵛ, ρ_correction = one(typeof(ν)))
+@inline function ventilation_sc_correction(ν, Dᵛ, ρ_correction, floors)
     FT = typeof(ν)
-    Sc = ν / max(Dᵛ, FT(DEFAULT_FLOORS.divisor))
+    Sc = ν / max(Dᵛ, FT(floors.divisor))
     return cbrt(Sc) * sqrt(ρ_correction) / sqrt(ν)
 end
 
@@ -68,13 +51,14 @@ using PSD-integrated lookup tables.
 """
 @inline function deposition_ventilation(vent::P3Table4D,
                                           vent_e::P3Table4D,
-                                          m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction, p3)
+                                          m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction)
     FT = typeof(m_mean)
+    floors = parameters.floors
     # m_mean = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
     # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
     # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg) rather
     # than extrapolating below it.
-    log_m = log10(max(m_mean, FT(DEFAULT_FLOORS.mass_scale)))
+    log_m = log10(max(m_mean, FT(floors.mass_scale)))
     # vent stores the constant ventilation term (0.65 × ∫ C(D) N'(D) dD)
     # vent_e stores the enhanced term (0.44 × ∫ C(D)√(V×D) N'(D) dD)  [m² s^(-1/2)]
     # Runtime correction via ventilation_sc_correction:
@@ -83,7 +67,7 @@ using PSD-integrated lookup tables.
     # Both tables share Table-1 axes, so the coordinate is bracketed once.
     prep = prepare_interpolation(vent, log_m, Fᶠ, Fˡ, ρᶠ)
     return evaluate_at(vent, prep) +
-           ventilation_sc_correction(ν, Dᵛ, ρ_correction) * evaluate_at(vent_e, prep)
+           ventilation_sc_correction(ν, Dᵛ, ρ_correction, floors) * evaluate_at(vent_e, prep)
 end
 
 """
@@ -93,8 +77,8 @@ Compute the per-particle cloud-water collection kernel ⟨A × V⟩ for riming.
 Returns the PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from the
 `IceCollection.cloud_collection` table.
 """
-@inline collection_kernel_per_particle(coll::P3Table4D, m_mean, Fᶠ, Fˡ, ρᶠ) =
-    tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ)
+@inline collection_kernel_per_particle(coll::P3Table4D, m_mean, Fᶠ, Fˡ, ρᶠ, floors) =
+    tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ, floors)
 
 """
 $(TYPEDSIGNATURES)
@@ -106,11 +90,11 @@ The table stores the half-integral,
 `(1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂`. No `E_agg` — the collection
 efficiency is applied by the caller.
 """
-@inline aggregation_kernel(coll::P3Table4D, m_mean, Fᶠ, Fˡ, ρᶠ) =
-    tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ)
+@inline aggregation_kernel(coll::P3Table4D, m_mean, Fᶠ, Fˡ, ρᶠ, floors) =
+    tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ, floors)
 
 # Evaluate a 4D ice table at a per-particle mass. The log guard is the
 # per-particle one (see `deposition_ventilation`), not the bulk qmin — the tables
 # are indexed by log₁₀ of mass per particle, and they clamp to their own mass axis.
-@inline tabulated_ice_integral(table::P3Table4D, m_mean, Fᶠ, Fˡ, ρᶠ) =
-    table(log10(max(m_mean, typeof(m_mean)(DEFAULT_FLOORS.mass_scale))), Fᶠ, Fˡ, ρᶠ)
+@inline tabulated_ice_integral(table::P3Table4D, m_mean, Fᶠ, Fˡ, ρᶠ, floors) =
+    table(log10(max(m_mean, typeof(m_mean)(floors.mass_scale))), Fᶠ, Fˡ, ρᶠ)

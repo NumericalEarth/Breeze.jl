@@ -106,7 +106,7 @@ parameter `cloud.number_concentration`.
   rime fields orphaned by a vanishing ice mass, and clamps negative number and rime
   densities. Pass `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())`
   to additionally redistribute leftover vapor deficits within each column, or `nothing`
-  to disable the repair (P3's process rates then see `clamp_positive`ed values while the
+  to disable the repair (P3's process rates then see zero-clamped values while the
   prognostic fields keep their negative mass).
 
 # Prognostic CCN Activation
@@ -121,7 +121,7 @@ When `aerosol = nothing` (default), cloud droplet number uses the prescribed
 ```jldoctest
 using Breeze
 
-# Lookup tables download automatically on first use
+# The `P3_lookup_tables` artifact is lazy: Pkg downloads it on first use
 microphysics = PredictedParticlePropertiesMicrophysics()
 
 # output
@@ -148,7 +148,7 @@ Key papers describing P3:
 
 See also the [P3 documentation](@ref p3_overview) for detailed physics.
 """
-function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Float64;
+function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                                  lookup_tables = artifact"P3_lookup_tables",
                                                  thermodynamic_constants = ThermodynamicConstants(FT),
                                                  minimum_mass_mixing_ratio = 1e-14,

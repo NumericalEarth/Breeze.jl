@@ -8,41 +8,9 @@
 ##### Notation follows docs/src/appendix/notation.md
 #####
 
-using Oceananigans: Oceananigans
-
-using Breeze.Thermodynamics: temperature,
-                             adjustment_saturation_specific_humidity,
-                             saturation_specific_humidity,
-                             saturation_vapor_pressure,
-                             PlanarLiquidSurface,
-                             PlanarIceSurface,
-                             density,
-                             liquid_latent_heat,
-                             ice_latent_heat,
-                             mixture_gas_constant,
-                              mixture_heat_capacity,
-                              vapor_gas_constant,
-                              LiquidIcePotentialTemperatureState,
-                              LiquidIceDensityState,
-                              StaticEnergyState
-using DocStringExtensions: TYPEDSIGNATURES
-
 #####
 ##### Utility functions
 #####
-
-@inline clamp_positive(x) = max(0, x)
-
-@inline p3_air_pressure(𝒰::LiquidIcePotentialTemperatureState, constants) =
-    𝒰.reference_pressure
-
-@inline p3_air_pressure(𝒰::StaticEnergyState, constants) = 𝒰.reference_pressure
-
-@inline function p3_air_pressure(𝒰::LiquidIceDensityState, constants)
-    q = 𝒰.moisture_mass_fractions
-    Rᵐ = mixture_gas_constant(q, constants)
-    return 𝒰.density * Rᵐ * temperature(𝒰, constants)
-end
 
 """
 $(TYPEDSIGNATURES)
@@ -61,26 +29,19 @@ GPU-compatible: uses `ifelse` instead of branching.
                   one(typeof(available_mass)))
 end
 
-@inline function p3_ice_saturation_specific_humidity(T, ρ, constants,
-                                                     freezing_temperature,
-                                                     qᵛ⁺ˡ)
+@inline function p3_ice_saturation_specific_humidity(T, ρ, constants, freezing_temperature, qᵛ⁺ˡ)
     qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
     return ifelse(T >= freezing_temperature, qᵛ⁺ˡ, qᵛ⁺ⁱ)
 end
 
-@inline function p3_ice_saturation_specific_humidity(T, ρ, constants,
-                                                     freezing_temperature)
+@inline function p3_ice_saturation_specific_humidity(T, ρ, constants, freezing_temperature)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    return p3_ice_saturation_specific_humidity(T, ρ, constants,
-                                               freezing_temperature, qᵛ⁺ˡ)
+    return p3_ice_saturation_specific_humidity(T, ρ, constants, freezing_temperature, qᵛ⁺ˡ)
 end
 
-@inline function p3_adjustment_ice_saturation_specific_humidity(T, P, qᵗ, constants,
-                                                                freezing_temperature)
-    qᵛ⁺ˡ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants,
-                                                               PlanarLiquidSurface())
-    qᵛ⁺ⁱ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants,
-                                                               PlanarIceSurface())
+@inline function p3_adjustment_ice_saturation_specific_humidity(T, P, qᵗ, constants, freezing_temperature)
+    qᵛ⁺ˡ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants, PlanarLiquidSurface())
+    qᵛ⁺ⁱ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants, PlanarIceSurface())
     return ifelse(T >= freezing_temperature, qᵛ⁺ˡ, qᵛ⁺ⁱ)
 end
 
@@ -90,33 +51,33 @@ $(TYPEDSIGNATURES)
 Cap vapor sinks and sources against the moist-adiabatic saturation-adjustment
 budget.
 
-Defining `qsatadj_ℓ = (qᵛ - qᵛ⁺ˡ) / ξˡ` with the moist-static feedback
-factor `ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T²)`:
+Defining the liquid saturation-adjustment increment `δqˡ = (qᵛ - qᵛ⁺ˡ) / ξˡ` with
+the moist-static feedback factor `ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T²)`:
 
-- Liquid-phase condensation sinks (`cond > 0`, `ccn_act`, `rain_cond`,
-  `coat_cond`) cannot exceed `max(0, qsatadj_ℓ)`.
+- Liquid-phase condensation sinks (`cond > 0`, `ccn_activation_mass`, `rain_cond`,
+  `coat_cond`) cannot exceed `max(0, δqˡ)`.
 - Liquid-phase evaporation sources (`cond < 0`, `rain_evap`, `coat_evap`)
-  cannot exceed `max(0, -qsatadj_ℓ)`.
+  cannot exceed `max(0, -δqˡ)`.
 
 The rescaled liquid tendencies are then carried into a post-liquid state
 `(qᵛ_after, T_after)`, and `qᵛ⁺ⁱ_after` is recomputed at `T_after` to evaluate
-`ξⁱ_after = 1 + ℒⁱ_after² qᵛ⁺ⁱ_after / (cᵖᵈ Rᵛ T_after²)`. With
-`qsatadj_ᵢ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after`:
+`ξⁱ_after = 1 + ℒⁱ_after² qᵛ⁺ⁱ_after / (cᵖᵈ Rᵛ T_after²)`. With the ice
+increment `δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after`:
 
 - Ice-phase deposition sinks (`dep > 0`, `nuc_q`) cannot exceed
-  `max(0, qsatadj_ᵢ)`.
+  `max(0, δqⁱ)`.
 - Ice-phase sublimation sources (`dep < 0`) cannot exceed
-  `max(0, -qsatadj_ᵢ)`.
+  `max(0, -δqⁱ)`.
 
-Number rates `ccn_act_n` and `nuc_n` are scaled by the same factor as their
-companion mass rates to preserve mean particle mass.
+Number rates `ccn_activation_number` and `nuc_n` are scaled by the same factor as
+their companion mass rates to preserve mean particle mass.
 
 Returns a NamedTuple of the possibly-rescaled rates.
 """
-@inline function limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
-                                   dep, coat_cond, coat_evap, nuc_q, nuc_n,
-                                   qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety,
-                                   freezing_temperature)
+@inline function limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                   rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                                   nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
+                                   dt_safety, freezing_temperature)
     FT = typeof(qᵛ)
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
@@ -124,24 +85,24 @@ Returns a NamedTuple of the possibly-rescaled rates.
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
 
     # Liquid-phase saturation-adjustment caps. In the SCF=1 limit the condensation
-    # and evaporation budgets collapse to the same signed value `qsatadj_ℓ`;
+    # and evaporation budgets collapse to the same signed increment `δqˡ`;
     # condensation sees the positive part, evaporation the negative part.
-    qsatadj_ℓ = (qᵛ - qᵛ⁺ˡ) / ξˡ
-    qcon_cap = max(0, qsatadj_ℓ)
-    qevp_cap = max(0, -qsatadj_ℓ)
+    δqˡ = (qᵛ - qᵛ⁺ˡ) / ξˡ
+    qcon_cap = max(0, δqˡ)
+    qevp_cap = max(0, -δqˡ)
 
     # Condensation cap
-    cond_sink_total = clamp_positive(cond) + ccn_act + rain_cond + coat_cond
+    cond_sink_total = max(0, cond) + ccn_activation_mass + rain_cond + coat_cond
     f_cond = sink_limiting_factor(cond_sink_total, qcon_cap, dt_safety)
 
-    ccn_act = ccn_act * f_cond
-    ccn_act_n = ccn_act_n * f_cond
+    ccn_activation_mass = ccn_activation_mass * f_cond
+    ccn_activation_number = ccn_activation_number * f_cond
     rain_cond = rain_cond * f_cond
     coat_cond = coat_cond * f_cond
 
     # Evaporation cap: zero when supersaturated, otherwise rescale the lumped
     # evaporation rates to fit within `qevp_cap`.
-    evp_total = clamp_positive(-cond) + rain_evap + coat_evap
+    evp_total = max(0, -cond) + rain_evap + coat_evap
     f_evp = sink_limiting_factor(evp_total, qevp_cap, dt_safety)
 
     cond = max(0, cond) * f_cond + min(0, cond) * f_evp
@@ -149,39 +110,34 @@ Returns a NamedTuple of the possibly-rescaled rates.
     coat_evap = coat_evap * f_evp
 
     # Ice-phase cap, after netting the rescaled liquid tendencies into qᵛ and T.
-    net_liquid = clamp_positive(cond) + ccn_act + rain_cond + coat_cond -
-                 rain_evap - coat_evap - clamp_positive(-cond)
+    net_liquid = max(0, cond) + ccn_activation_mass + rain_cond + coat_cond -
+                 rain_evap - coat_evap - max(0, -cond)
     qᵛ_after = qᵛ - net_liquid * dt_safety
     T_after = T + net_liquid * ℒˡ * dt_safety / cᵖᵈ
-    qᵛ⁺ⁱ_after = p3_adjustment_ice_saturation_specific_humidity(
-        T_after, P, qᵗ, constants, freezing_temperature)
+    qᵛ⁺ⁱ_after = p3_adjustment_ice_saturation_specific_humidity(T_after, P, qᵗ, constants, freezing_temperature)
     ℒⁱ_after = sublimation_latent_heat(constants, T_after)
     ξⁱ_after = ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, Rᵛ, T_after)
 
     # Ice-phase deposition / sublimation caps.
-    qsatadj_ᵢ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after
-    qdep_cap = max(0, qsatadj_ᵢ)
-    qsub_cap = max(0, -qsatadj_ᵢ)
+    δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after
+    qdep_cap = max(0, δqⁱ)
+    qsub_cap = max(0, -δqⁱ)
 
     # Deposition cap
-    dep_sink_total = clamp_positive(dep) + nuc_q
+    dep_sink_total = max(0, dep) + nuc_q
     f_dep = sink_limiting_factor(dep_sink_total, qdep_cap, dt_safety)
 
     nuc_q = nuc_q * f_dep
     nuc_n = nuc_n * f_dep
 
     # Sublimation cap
-    sub_total = clamp_positive(-dep)
+    sub_total = max(0, -dep)
     f_sub = sink_limiting_factor(sub_total, qsub_cap, dt_safety)
 
     dep = max(0, dep) * f_dep + min(0, dep) * f_sub
 
-    return (; cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+    return (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap,
               dep, coat_cond, coat_evap, nuc_q, nuc_n)
-end
-
-@inline function safe_divide(a, b, default)
-    return ifelse(iszero(b), default, a / b)
 end
 
 """
@@ -197,33 +153,71 @@ is diagnosed from the other.
     return 4 * FT(π) / 3 * FT(parameters.liquid_water_density) * r₀^3
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Cloud droplets per unit cloud mass, ``Nᶜˡ / (ρ qᶜˡ) = nᶜˡ / qᶜˡ`` [1/kg]. `Nᶜˡ` is
+volumetric [1/m³] and `qᶜˡ` is a mass fraction [kg/kg], so this is the factor that
+turns a cloud mass rate [kg/kg/s] into its companion number rate [1/kg/s], keeping
+the two consistent in mean droplet mass. Zero where there is no cloud water.
+"""
+@inline cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ) =
+    safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(typeof(qᶜˡ)))
+
+"""
+$(TYPEDSIGNATURES)
+
+Cloud-droplet number budget, ``∂n^{cl}/∂t`` [1/kg/s], before homogeneous freezing:
+CCN activation is the only source, and the sinks are autoconversion, accretion,
+self-collection, riming, heterogeneous freezing, and above-freezing collection by
+ice. Each number sink is the companion of a mass rate, so the two stay consistent
+in mean droplet mass.
+"""
 @inline function cloud_number_tendency_before_homogeneous_freezing(p3, ρ, qᶜˡ, Nᶜˡ,
-                                                 ccn_activation_mass, ccn_activation_number,
-                                                 autoconversion, accretion, self_collection,
-                                                 riming_number, freezing_number,
-                                                 warm_collection_number)
+                                                                  ccn_activation_mass,
+                                                                  ccn_activation_number,
+                                                                  autoconversion, accretion,
+                                                                  self_collection,
+                                                                  riming_number,
+                                                                  freezing_number,
+                                                                  warm_collection_number)
     FT = typeof(ρ)
     parameters = p3.process_rates
     seed_drop_mass = activated_droplet_mass(parameters, FT)
     activation_number = ifelse(iszero(ccn_activation_number),
                                ccn_activation_mass / seed_drop_mass,
                                ccn_activation_number)
-    autoconversion_number = cloud_number_loss_from_autoconversion(
-        p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
+    autoconversion_number = cloud_number_loss_from_autoconversion(p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
+    # Grouped as (Nᶜˡ accretion) / (ρ qᶜˡ) rather than via
+    # `cloud_number_per_cloud_mass`: the bare quotient is the larger intermediate and
+    # can overflow where this form does not.
     collection_number = safe_divide(Nᶜˡ * accretion, ρ * qᶜˡ, zero(FT))
     number_loss = autoconversion_number + collection_number + self_collection +
                   riming_number + freezing_number + warm_collection_number
     return activation_number - number_loss
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Rain-drop number budget, ``∂n^r/∂t`` [1/kg/s], before homogeneous freezing.
+Sources: autoconversion, melting ice, drop breakup, shedding, wet-growth shedding,
+and — outside liquid-fraction mode — cloud water swept up by melting ice and shed
+as drops. Sinks: evaporation, self-collection, riming, heterogeneous freezing, and
+above-freezing collection by ice.
+"""
 @inline function rain_number_tendency_before_homogeneous_freezing(p3, nⁱ, qⁱ, nʳ, qʳ,
-                                                autoconversion, melting_number,
-                                                evaporation_number, self_collection, breakup,
-                                                riming_number, freezing_number,
-                                                shedding_number, cloud_warm_collection,
-                                                warm_collection_number,
-                                                wet_growth_shedding_number)
-    FT = typeof(nⁱ + qⁱ + nʳ + qʳ)
+                                                                  autoconversion,
+                                                                  melting_number,
+                                                                  evaporation_number,
+                                                                  self_collection, breakup,
+                                                                  riming_number,
+                                                                  freezing_number,
+                                                                  shedding_number,
+                                                                  cloud_warm_collection,
+                                                                  warm_collection_number,
+                                                                  wet_growth_shedding_number)
+    FT = typeof(nⁱ)
     parameters = p3.process_rates
     number_from_autoconversion = autoconversion / rain_seed_drop_mass(p3)
     number_from_melting = melting_number
@@ -236,12 +230,15 @@ end
     return number_gain - number_loss
 end
 
-# Fall-speed correction for ambient air density. The 0.54
-# exponent is the [Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007) fit, and the
-# 0.01 kg/m³ floor only bites above ~30 km, where there is no condensate to fall.
-@inline function ice_air_density_correction(reference_air_density, air_density)
+# Fall-speed correction for ambient air density, `(ρ₀ / ρ)^α`. The default exponent α is
+# the [Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007) fit and the default density
+# floor only bites above ~30 km, where there is no condensate to fall; both are settable
+# on [`ProcessRateParameters`](@ref).
+@inline function ice_air_density_correction(parameters, reference_air_density, air_density)
     FT = typeof(reference_air_density)
-    return (reference_air_density / max(air_density, FT(0.01)))^FT(0.54)
+    ρ_floor = FT(parameters.minimum_fall_speed_air_density)
+    α = FT(parameters.fall_speed_density_correction_exponent)
+    return (reference_air_density / max(air_density, ρ_floor))^α
 end
 
 """
@@ -257,12 +254,12 @@ so that it scales with the scheme's mass floor rather than being a fixed literal
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
-    qⁱ_available = clamp_positive(qⁱ)
+    qⁱ_available = max(0, qⁱ)
     # qⁱ is already the dry ice mass, so qⁱ_dry = qⁱ_available
     # (no need to subtract qʷⁱ again).
     qⁱ_dry = qⁱ_available
-    qᶠ_raw = clamp_positive(qᶠ)
-    bᶠ_raw = clamp_positive(bᶠ)
+    qᶠ_raw = max(0, qᶠ)
+    bᶠ_raw = max(0, bᶠ)
 
     # Rime volume floor [m³/kg]: the volume a just-significant rime mass occupies at
     # the densest admissible packing. Below it, zero the pair rather than divide by a
@@ -292,39 +289,30 @@ so that it scales with the scheme's mass floor rather than being a fixed literal
     return (; qᶠ = qᶠ_consistent, bᶠ = bᶠ_consistent, Fᶠ, ρᶠ)
 end
 
-@inline ice_integrals_table(p3) = lookup_field(p3.ice.lookup_tables, Val(:ice_integrals))
-@inline rain_ice_collection_table(p3) = lookup_field(p3.ice.lookup_tables, Val(:rain_ice_collection))
-
-@inline lookup_field(tables::P3LookupTables, ::Val{:ice_integrals}) = tables.ice_integrals
-@inline lookup_field(tables::P3LookupTables, ::Val{:rain_ice_collection}) = tables.rain_ice_collection
-@inline lookup_field(::Nothing, ::Val) = nothing
-
-@inline total_ice_mass(qⁱ, qʷⁱ) = clamp_positive(qⁱ) + clamp_positive(qʷⁱ)
+@inline total_ice_mass(qⁱ, qʷⁱ) = max(0, qⁱ) + max(0, qʷⁱ)
 
 @inline function liquid_fraction_on_ice(qⁱ, qʷⁱ)
     FT = typeof(qⁱ)
     qⁱ_total = max(total_ice_mass(qⁱ, qʷⁱ), FT(DEFAULT_FLOORS.mass_scale))
-    return clamp_positive(qʷⁱ) / qⁱ_total
+    return max(0, qʷⁱ) / qⁱ_total
 end
 
-@inline active_liquid_on_ice(p3, qʷⁱ) =
-    ifelse(p3.process_rates.liquid_fraction_active, qʷⁱ, zero(qʷⁱ))
+@inline active_liquid_on_ice(p3, qʷⁱ) = ifelse(p3.process_rates.liquid_fraction_active, qʷⁱ, zero(qʷⁱ))
 
 @inline function mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
     FT = typeof(qⁱ)
     return safe_divide(max(total_ice_mass(qⁱ, qʷⁱ), FT(DEFAULT_FLOORS.mass_scale)),
-                       max(clamp_positive(nⁱ), FT(DEFAULT_FLOORS.number_scale)),
+                       max(nⁱ, FT(DEFAULT_FLOORS.number_scale)),
                        FT(DEFAULT_FLOORS.mass_scale))
 end
 
-@inline function bounded_ice_number(table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
-    FT = typeof(qⁱ_total + nⁱ)
-    qⁱ_eff = clamp_positive(qⁱ_total)
-    nⁱ_eff = clamp_positive(nⁱ)
+@inline function bounded_ice_number(limiter::IceLambdaLimiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
+    FT = typeof(qⁱ_total)
+    qⁱ_eff = max(0, qⁱ_total)
+    nⁱ_eff = max(0, nⁱ)
     log_m = log10(safe_divide(max(qⁱ_eff, FT(DEFAULT_FLOORS.mass_scale)),
                               max(nⁱ_eff, FT(DEFAULT_FLOORS.number_scale)),
                               FT(DEFAULT_FLOORS.mass_scale)))
-    limiter = table.lambda_limiter
     # Both limiter tables share Table-1 axes, so the coordinate is bracketed once.
     prep = prepare_interpolation(limiter.large_q, log_m, Fᶠ, Fˡ, ρᶠ)
     nⁱ_min = evaluate_at(limiter.large_q, prep) * qⁱ_eff
@@ -333,32 +321,34 @@ end
     return ifelse(qⁱ_eff > FT(DEFAULT_FLOORS.mass_scale), bounded, zero(FT))
 end
 
-@inline bounded_ice_number(::Nothing, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ) =
-    ifelse(qⁱ_total > zero(qⁱ_total), clamp_positive(nⁱ), zero(nⁱ))
+# Un-materialized scheme: the placeholder limiter carries no tables, so the only
+# bound available is positivity.
+@inline bounded_ice_number(::IceLambdaLimiter{Nothing, Nothing}, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ) =
+    ifelse(qⁱ_total > zero(qⁱ_total), max(0, nⁱ), zero(nⁱ))
 
 @inline function bounded_ice_number(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
-    return bounded_ice_number(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
+    return bounded_ice_number(p3.ice.lambda_limiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
 end
 
 @inline function rain_slope_parameter(qʳ, nʳ, parameters)
-    FT = typeof(qʳ + nʳ)
-    qʳ_eff = clamp_positive(qʳ)
-    nʳ_eff = clamp_positive(nʳ)
+    FT = typeof(qʳ)
+    qʳ_eff = max(0, qʳ)
+    nʳ_eff = max(0, nʳ)
     λʳ_cubed = FT(π) * parameters.liquid_water_density * nʳ_eff /
                max(qʳ_eff, FT(parameters.floors.mass_scale))
     return clamp(cbrt(λʳ_cubed), parameters.minimum_rain_slope, parameters.maximum_rain_slope)
 end
 
 @inline function rain_number_from_slope(qʳ, λʳ, parameters)
-    FT = typeof(qʳ + λʳ)
-    qʳ_eff = clamp_positive(qʳ)
+    FT = typeof(qʳ)
+    qʳ_eff = max(0, qʳ)
     return qʳ_eff * λʳ^3 / (FT(π) * parameters.liquid_water_density)
 end
 
 @inline function bounded_rain_number(nʳ, qʳ, parameters)
-    FT = typeof(qʳ + nʳ)
-    qʳ_eff = clamp_positive(qʳ)
-    nʳ_eff = clamp_positive(nʳ)
+    FT = typeof(qʳ)
+    qʳ_eff = max(0, qʳ)
+    nʳ_eff = max(0, nʳ)
     unbounded_slope = cbrt(FT(π) * parameters.liquid_water_density * nʳ_eff /
                            max(qʳ_eff, FT(parameters.floors.mass_scale)))
     λʳ = clamp(unbounded_slope, parameters.minimum_rain_slope, parameters.maximum_rain_slope)
@@ -368,16 +358,18 @@ end
     return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
 end
 
-# Bulk ice density from Table 1 (the main lookup table).
-@inline function ice_mean_density(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
+# Bulk ice density from Table 1 (the main lookup table). Table 1's first axis is
+# log₁₀ of the mean particle mass, not the mass itself — m̄ spans some fifteen decades,
+# so the table is built on evenly spaced decades and every lookup takes the log first.
+@inline function ice_mean_density(bulk_properties::IceBulkProperties, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ_total)
     m̄ = safe_divide(qⁱ_total, nⁱ, one(FT))
     log_mean_mass = log10(ifelse(m̄ > 0, m̄, one(FT)))
-    return ice_table.bulk_properties.mean_density(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
+    return bulk_properties.mean_density(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
 end
 
 @inline function ice_mean_density(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
-    return ice_mean_density(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
+    return ice_mean_density(p3.ice.bulk_properties, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
 end
 
 #####
@@ -421,22 +413,18 @@ end
 #####
 ##### Account for the latent-heat feedback that reduces the effective
 ##### supersaturation drive during condensation (ξˡ) and ice deposition (ξⁱ).
-##### Both share the form
-##### ξ = 1 + ℒ² qᵛ⁺ / (cᵖᵈ Rᵛ T²) with the appropriate latent heat.
+##### `psychrometric_correction` itself is not P3-specific and lives beside its
+##### mixture-heat-capacity counterpart `thermodynamic_adjustment_factor` in
+##### `Microphysics/bulk_microphysics.jl`; only the two phase-named wrappers below,
+##### which fix the dry-air heat capacity P3 uses, stay here.
 #####
-
-@inline function psychrometric_correction(constants, ℒ, qᵛ⁺, Rᵛ, T)
-    FT = typeof(T)
-    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
-    return 1 + ℒ^2 * qᵛ⁺ / (Rᵛ * T^2 * cᵖᵈ)
-end
 
 # Named for the phase each caller drives, so call sites still read as ξˡ / ξⁱ.
 @inline liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T) =
-    psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+    psychrometric_correction(ℒˡ, qᵛ⁺ˡ, p3_dry_air_heat_capacity(constants, typeof(T)), Rᵛ, T)
 
 @inline ice_psychrometric_correction(constants, ℒⁱ, qᵛ⁺ⁱ, Rᵛ, T) =
-    psychrometric_correction(constants, ℒⁱ, qᵛ⁺ⁱ, Rᵛ, T)
+    psychrometric_correction(ℒⁱ, qᵛ⁺ⁱ, p3_dry_air_heat_capacity(constants, typeof(T)), Rᵛ, T)
 
 #####
 ##### Saturation vapor pressure at freezing (M6)

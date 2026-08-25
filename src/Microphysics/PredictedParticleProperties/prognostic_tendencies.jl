@@ -8,23 +8,6 @@
 ##### Notation follows docs/src/appendix/notation.md
 #####
 
-using Oceananigans: Oceananigans
-
-using Breeze.Thermodynamics: temperature,
-                             adjustment_saturation_specific_humidity,
-                             saturation_specific_humidity,
-                             saturation_vapor_pressure,
-                             PlanarLiquidSurface,
-                             PlanarIceSurface,
-                             density,
-                             liquid_latent_heat,
-                             ice_latent_heat,
-                             mixture_heat_capacity,
-                             vapor_gas_constant,
-                             MoistureMassFractions,
-                             ThermodynamicConstants
-using DocStringExtensions: TYPEDSIGNATURES
-
 #####
 ##### Individual field tendencies
 #####
@@ -217,10 +200,6 @@ Ice loses from:
 - Complete melting (Phase 1) - sheds to rain
 """
 @inline function tendency_ρqⁱ(rates::P3ProcessRates, ρ)
-    return tendency_ρqⁱ(rates, ρ, nothing)
-end
-
-@inline function tendency_ρqⁱ(rates::P3ProcessRates, ρ, parameters::Union{Nothing, ProcessRateParameters})
     # Phase 1: deposition, melting (both partial and complete reduce ice mass)
     # Phase 2: riming (cloud + rain), refreezing, nucleation, and freezing.
     # Splintering mass is already part of the riming mass (splinters fragment existing rime),
@@ -286,10 +265,6 @@ Rime mass loses from:
 - Sublimation (proportional to rime fraction) (Phase 1)
 """
 @inline function tendency_ρqᶠ(rates::P3ProcessRates, ρ, Fᶠ)
-    return tendency_ρqᶠ(rates, ρ, Fᶠ, nothing)
-end
-
-@inline function tendency_ρqᶠ(rates::P3ProcessRates, ρ, Fᶠ, parameters::Union{Nothing, ProcessRateParameters})
     # Phase 2: gains from riming, refreezing, freezing, and homogeneous freezing
     # Frozen cloud/rain becomes fully rimed ice (100% rime fraction for new frozen particles)
     #
@@ -304,7 +279,7 @@ end
     # Ordinary melting and sublimation remove the beginning-of-stage rime
     # fraction. Whole-particle clipping instead drains the explicitly
     # reconstructed residual rime companion, including post-process changes.
-    sublimation = clamp_positive(-rates.deposition)
+    sublimation = max(0, -rates.deposition)
     ordinary_complete_melting =
         max(0, rates.complete_melting - rates.clipping_dry_mass)
     # Splintering fragments existing rime rather than creating or destroying it, so it
@@ -356,7 +331,7 @@ preferentially, driving the remaining rime toward the configured solid-ice densi
     # Ordinary melting and sublimation remove volume proportionally. A whole-
     # particle clip uses the reconstructed companion volume so post-process rime
     # and densification changes are removed exactly.
-    sublimation = clamp_positive(-rates.deposition)
+    sublimation = max(0, -rates.deposition)
     ordinary_complete_melting =
         max(0, rates.complete_melting - rates.clipping_dry_mass)
     ordinary_total_melting = rates.partial_melting + ordinary_complete_melting
@@ -393,9 +368,7 @@ to the cloud mass they consume.
 @inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜˡ, qᶜˡ, p3)
     FT = typeof(ρ)
     parameters = p3.process_rates
-    # Nᶜˡ is per-volume [#/m³]; dividing by ρ gives per-mass nᶜˡ [#/kg],
-    # so that nᶜˡ/qᶜˡ → [#/kg/s] when multiplied by mass rates.
-    number_per_mass = safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(FT))
+    number_per_mass = cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ)
     seed_drop_mass = activated_droplet_mass(parameters, FT)
     activation_number = ifelse(iszero(rates.ccn_activation_number),
                                rates.ccn_activation_mass / seed_drop_mass,

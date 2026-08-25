@@ -5,14 +5,9 @@
 ##### with multi-mode lognormal aerosol support.
 #####
 
-"""
-    AerosolMode
-
-One component of a multimodal aerosol size distribution used for CCN activation.
-Each mode represents a physically distinct particle population with a lognormal
-radius distribution and shared chemical properties. See the [`AerosolMode`](@ref)
-constructor for details.
-"""
+# One component of a multimodal aerosol size distribution used for CCN activation. Each
+# mode represents a physically distinct particle population with a lognormal radius
+# distribution and shared chemical properties; see the `AerosolMode` constructor.
 struct AerosolMode{FT}
     number_mixing_ratio :: FT        # Na [kg⁻¹], per unit mass of air (not per volume)
     mean_radius :: FT                # rm [m]
@@ -84,7 +79,7 @@ mode.mean_radius
 5.0e-8
 ```
 """
-function AerosolMode(FT::Type{<:AbstractFloat} = Float64;
+function AerosolMode(FT::DataType = Oceananigans.defaults.FloatType;
                      number_mixing_ratio = 3e8,
                      mean_radius = 5e-8,
                      geometric_std = 2,
@@ -113,12 +108,8 @@ function Base.show(io::IO, m::AerosolMode)
     print(io, "σg=", m.geometric_std, ")")
 end
 
-"""
-    AerosolActivation
-
-Container for multi-mode aerosol activation parameters.
-See [`AerosolActivation`](@ref) constructor for details.
-"""
+# Container for the multi-mode aerosol activation parameters; see the `AerosolActivation`
+# constructor.
 struct AerosolActivation{FT, M}
     modes :: M                       # Tuple of AerosolMode{FT}
     molecular_weight_water :: FT     # Mw [kg/mol]

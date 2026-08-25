@@ -232,6 +232,9 @@ export
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
 
+include("Utils.jl")
+using .Utils
+
 include("Solvers.jl")
 using .Solvers
 

@@ -60,7 +60,7 @@ than a grid-mean vapor state.
     equilibrium_number = min(cooper_number, maximum_concentration / ρ)
 
     # Nucleation rate: relaxation toward equilibrium
-    nucleated_number_rate = clamp_positive(equilibrium_number - nⁱ) / nucleation_timescale
+    nucleated_number_rate = max(0, equilibrium_number - nⁱ) / nucleation_timescale
 
     # Mass nucleation rate
     nucleated_mass_rate = nucleated_number_rate * nucleated_ice_mass
@@ -81,6 +81,11 @@ end
                                                       divisor_floor)
     FT = typeof(nucleation_rate_coefficient + droplet_volume +
                 temperature_exponent_coefficient + supercooling + maximum_multiplier)
+    # Evaluated in the log domain, and not as `per_drop * exp(a ΔT)`: at large
+    # supercooling `exp(a ΔT)` overflows on its own while the product with the tiny
+    # per-drop coefficient stays well in range, so forming the product directly
+    # would saturate to `Inf` and then clamp to `maximum_rate`. In `Float32` with a
+    # per-drop coefficient of 1e-25 and `a ΔT = 97.5` that is an 82x error.
     log_rate = log(max(nucleation_rate_coefficient * droplet_volume, FT(divisor_floor))) +
                temperature_exponent_coefficient * supercooling
     # Apply only a common numerical overflow guard. The species-level budget
@@ -88,6 +93,62 @@ end
     # newly condensed liquid from participating in the combined budget.
     maximum_rate = sqrt(floatmax(FT)) / max(maximum_multiplier, one(FT))
     return exp(min(log_rate, log(maximum_rate)))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+[Barklie and Gokhale (1959)](@cite BarklieGokhale1959) stochastic immersion
+freezing, shared by the cloud and rain paths.
+
+The per-drop freezing probability is `J₀` times the drop volume times
+`exp(a ΔT)`, evaluated on a monodisperse drop of mass `q / n_for_mass`. For a
+gamma PSD the mass (6th moment) rate carries the correction
+``C(μ) = Γ(μ+7)Γ(μ+1)/Γ(μ+4)²``; the number (3rd moment) rate does not.
+
+# Arguments
+- `p3`: P3 microphysics scheme (provides parameters)
+- `q`: Condensate mass fraction [kg/kg]
+- `n_for_mass`: Number per unit mass used for the monodisperse drop mass [1/kg];
+  floored, so the drop mass stays finite where the population vanishes
+- `n_for_rate`: Number per unit mass the number rate scales with [1/kg]. Cloud
+  passes the floored number here as well; rain passes the unfloored one, so a
+  vanishing rain population produces no number rate
+- `μ`: PSD shape parameter [-]
+- `T`: Temperature [K]
+
+# Returns
+- Tuple `(frozen_mass_rate, frozen_number_rate)`: mass rate [kg/kg/s] and
+  number rate [1/kg/s]
+"""
+@inline function stochastic_immersion_freezing(p3, q, n_for_mass, n_for_rate, μ, T)
+    FT = typeof(q)
+    parameters = p3.process_rates
+
+    q_eff = max(0, q)
+    psd_correction = psd_correction_spherical_volume(μ)
+
+    freezing_active = (T <= parameters.maximum_immersion_freezing_temperature) &
+                      (q_eff >= p3.minimum_mass_mixing_ratio)
+
+    supercooling = max(parameters.freezing_temperature - T, zero(FT))
+
+    # Individual drop mass and volume (monodisperse assumption)
+    droplet_volume = q_eff / n_for_mass / FT(parameters.liquid_water_density)
+
+    # The per-drop freezing coefficient (NO psd_correction) is a linear per-second
+    # rate. Any numerical cap is applied equally before the two moment products so
+    # their ratio is unchanged. The species-level budget in
+    # `compute_p3_process_rates` applies one limiting factor to the mass and number
+    # rates together, after condensation and competing sinks are included.
+    maximum_multiplier = max(q_eff * psd_correction, n_for_rate)
+    freezing_rate = immersion_freezing_rate_coefficient(
+        parameters.immersion_freezing_nucleation_coefficient, droplet_volume,
+        parameters.immersion_freezing_coefficient, supercooling,
+        maximum_multiplier, parameters.floors.divisor)
+
+    return (ifelse(freezing_active, q_eff * psd_correction * freezing_rate, zero(FT)),
+            ifelse(freezing_active, n_for_rate * freezing_rate, zero(FT)))
 end
 
 """
@@ -115,60 +176,12 @@ negligible for small droplets.
   number rate [1/kg/s]
 """
 @inline function immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ)
-    FT = typeof(qᶜˡ)
-    parameters = p3.process_rates
-
-    maximum_temperature = parameters.maximum_immersion_freezing_temperature
-    temperature_exponent_coefficient = parameters.immersion_freezing_coefficient
-    freezing_temperature = parameters.freezing_temperature
-    ρᴸ = FT(parameters.liquid_water_density)
-    nucleation_rate_coefficient = parameters.immersion_freezing_nucleation_coefficient
-    floors = parameters.floors
-
-    # Compute μᶜˡ dynamically from local Nᶜˡ (already [1/m³]) via Liu-Daum (2000),
-    # then derive the PSD correction C(μᶜˡ) = Γ(μᶜˡ+7)Γ(μᶜˡ+1)/Γ(μᶜˡ+4)².
-    # This replaces the precomputed construction-time value, allowing the correction
-    # to vary spatially with the local droplet population.
-    μᶜˡ = liu_daum_shape_parameter(Nᶜˡ)
-    psd_correction = psd_correction_spherical_volume(μᶜˡ)
-
-    qᶜˡ_eff = clamp_positive(qᶜˡ)
-
-    # Conditions for freezing
-    freezing_active = (T <= maximum_temperature) & (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio)
-
-    # Barklie-Gokhale (1959) stochastic immersion freezing.
-    # Per-drop freezing probability is J₀ times droplet volume times exp(a ΔT).
-    # For a gamma PSD, the PSD-integrated mass rate is boosted by C(μᶜˡ),
-    # but the number rate has C_N = 1 (no PSD correction).
-    supercooling = max(freezing_temperature - T, zero(FT))
-
-    # Individual droplet mass and volume (monodisperse assumption)
-    # Nᶜˡ is [1/m³]; convert to per-kg: nᶜˡ = Nᶜˡ/ρ [1/kg]
+    # μᶜˡ comes from the local Nᶜˡ (already [1/m³]) via Liu-Daum (2000) rather than
+    # from a construction-time value, so the PSD correction varies with the local
+    # droplet population. Nᶜˡ is volumetric; nᶜˡ = Nᶜˡ/ρ is per-mass.
     nᶜˡ = max(Nᶜˡ / ρ, p3.minimum_number_mixing_ratio)
-    droplet_mass = qᶜˡ_eff / nᶜˡ  # [kg]
-    droplet_volume = droplet_mass / ρᴸ   # [m³]
-
-    # The per-drop freezing coefficient (NO psd_correction) is a linear per-second
-    # rate. The log form avoids overflow at very low temperatures. Any numerical cap
-    # is applied equally before the two moment products so their ratio is unchanged.
-    # The PSD correction applies only to the mass (6th moment) rate, not to the
-    # number (3rd moment) rate.
-    maximum_multiplier = max(qᶜˡ_eff * psd_correction, nᶜˡ)
-    freezing_rate = immersion_freezing_rate_coefficient(
-        nucleation_rate_coefficient, droplet_volume, temperature_exponent_coefficient,
-        supercooling, maximum_multiplier, floors.divisor)
-
-    # Form the raw rates. The combined cloud budget in compute_p3_process_rates
-    # applies one factor to qcheti and ncheti together, after condensation and
-    # competing sinks have been included.
-    frozen_mass_rate = qᶜˡ_eff * psd_correction * freezing_rate
-    frozen_number_rate = nᶜˡ * freezing_rate
-
-    frozen_mass_rate = ifelse(freezing_active, frozen_mass_rate, zero(FT))
-    frozen_number_rate = ifelse(freezing_active, frozen_number_rate, zero(FT))
-
-    return frozen_mass_rate, frozen_number_rate
+    return stochastic_immersion_freezing(p3, qᶜˡ, nᶜˡ, nᶜˡ,
+                                         liu_daum_shape_parameter(Nᶜˡ), T)
 end
 
 """
@@ -195,57 +208,39 @@ is computed from the actual rain shape parameter ``\\mu_r``, not from a fixed va
   number rate [1/kg/s]
 """
 @inline function immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μʳ)
-    FT = typeof(qʳ)
-    parameters = p3.process_rates
-
-    maximum_temperature = parameters.maximum_immersion_freezing_temperature
-    temperature_exponent_coefficient = parameters.immersion_freezing_coefficient
-    freezing_temperature = parameters.freezing_temperature
-    ρᴸ = FT(parameters.liquid_water_density)
-    nucleation_rate_coefficient = parameters.immersion_freezing_nucleation_coefficient
-    floors = parameters.floors
-
-    # Compute the PSD correction from the diagnosed rain shape parameter.
-    psd_correction = psd_correction_spherical_volume(μʳ)
-
-    qʳ_eff = clamp_positive(qʳ)
-    nʳ_eff = clamp_positive(nʳ)
-
-    # Conditions for freezing
-    freezing_active = (T <= maximum_temperature) & (qʳ_eff >= p3.minimum_mass_mixing_ratio)
-
-    # Barklie-Gokhale (1959) stochastic volume-dependent freezing.
-    supercooling = max(freezing_temperature - T, zero(FT))
-
-    # Individual rain drop mass and volume (monodisperse assumption)
-    safe_rain_number = max(nʳ_eff, p3.minimum_number_mixing_ratio)
-    droplet_mass = qʳ_eff / safe_rain_number  # [kg]
-    droplet_volume = droplet_mass / ρᴸ       # [m³]
-
-    # The per-drop freezing coefficient (NO psd_correction) is a linear per-second
-    # rate. The log form avoids overflow at very low temperatures. Any numerical cap
-    # is applied equally before the two moment products so their ratio is unchanged.
-    # The PSD correction applies only to the mass (6th moment) rate, not to the
-    # number (3rd moment) rate.
-    maximum_multiplier = max(qʳ_eff * psd_correction, nʳ_eff)
-    freezing_rate = immersion_freezing_rate_coefficient(
-        nucleation_rate_coefficient, droplet_volume, temperature_exponent_coefficient,
-        supercooling, maximum_multiplier, floors.divisor)
-
-    # The combined rain budget later applies the same limiter to qrheti and
-    # nrheti, preserving the mean mass of preferentially frozen drops.
-    frozen_mass_rate = qʳ_eff * psd_correction * freezing_rate
-    frozen_number_rate = nʳ_eff * freezing_rate
-
-    frozen_mass_rate = ifelse(freezing_active, frozen_mass_rate, zero(FT))
-    frozen_number_rate = ifelse(freezing_active, frozen_number_rate, zero(FT))
-
-    return frozen_mass_rate, frozen_number_rate
+    # nʳ is already per-mass. The drop mass needs a floored number to stay finite,
+    # but the number rate scales with the unfloored one.
+    nʳ_eff = max(0, nʳ)
+    return stochastic_immersion_freezing(p3, qʳ, max(nʳ_eff, p3.minimum_number_mixing_ratio),
+                                         nʳ_eff, μʳ, T)
 end
 
 #####
 ##### Homogeneous freezing
 #####
+
+"""
+$(TYPEDSIGNATURES)
+
+Instantaneous homogeneous freezing, shared by the cloud and rain paths: below the
+homogeneous freezing threshold the whole population is transferred to ice over
+`homogeneous_freezing_timescale`, with no mass-number consistency cap. `n` is a
+number per unit mass [1/kg].
+"""
+@inline function homogeneous_freezing_rate(p3, q, n, T)
+    FT = typeof(q)
+    parameters = p3.process_rates
+
+    freezing_temperature = FT(parameters.homogeneous_freezing_temperature)
+    freezing_timescale = FT(parameters.homogeneous_freezing_timescale)
+
+    q_eff = max(0, q)
+    freezing_active = (T < freezing_temperature) &
+                      (q_eff >= p3.minimum_mass_mixing_ratio)
+
+    return (ifelse(freezing_active, q_eff / freezing_timescale, zero(FT)),
+            ifelse(freezing_active, n / freezing_timescale, zero(FT)))
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -284,32 +279,8 @@ round.((Q, N), sigdigits=4)
 (0.0001, 8.333e6)
 ```
 """
-@inline function homogeneous_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ)
-    FT = typeof(qᶜˡ)
-    parameters = p3.process_rates
-
-    freezing_temperature = FT(parameters.homogeneous_freezing_temperature)
-    freezing_timescale = FT(parameters.homogeneous_freezing_timescale)
-
-    qᶜˡ_eff = clamp_positive(qᶜˡ)
-
-    # Guard: temperature below threshold AND sufficient cloud liquid present
-    freezing_active = (T < freezing_temperature) &
-                      (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio)
-
-    # Instantaneous conversion: rate = mixing ratio / timescale
-    frozen_mass_rate = qᶜˡ_eff / freezing_timescale
-
-    # Number rate: Nᶜˡ is [1/m³] → divide by ρ for [1/kg]
-    frozen_number_rate = Nᶜˡ / ρ / freezing_timescale
-
-    # No mass-number consistency cap: the whole cloud population is transferred to
-    # ice below the homogeneous freezing threshold.
-    frozen_mass_rate = ifelse(freezing_active, frozen_mass_rate, zero(FT))
-    frozen_number_rate = ifelse(freezing_active, frozen_number_rate, zero(FT))
-
-    return frozen_mass_rate, frozen_number_rate
-end
+@inline homogeneous_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ) =
+    homogeneous_freezing_rate(p3, qᶜˡ, Nᶜˡ / ρ, T)  # Nᶜˡ is [1/m³]; nᶜˡ = Nᶜˡ/ρ
 
 """
 $(TYPEDSIGNATURES)
@@ -344,30 +315,8 @@ round.((Q, N), sigdigits=4)
 (0.0001, 1000.0)
 ```
 """
-@inline function homogeneous_freezing_rain_rate(p3, qʳ, nʳ, T)
-    FT = typeof(qʳ)
-    parameters = p3.process_rates
-
-    freezing_temperature = FT(parameters.homogeneous_freezing_temperature)
-    freezing_timescale = FT(parameters.homogeneous_freezing_timescale)
-
-    qʳ_eff = clamp_positive(qʳ)
-
-    # Guard: temperature below threshold AND sufficient rain present
-    freezing_active = (T < freezing_temperature) &
-                      (qʳ_eff >= p3.minimum_mass_mixing_ratio)
-
-    # Instantaneous conversion: rate = mixing ratio / timescale
-    frozen_mass_rate = qʳ_eff / freezing_timescale
-
-    # Number rate: nʳ already in [1/kg]
-    frozen_number_rate = clamp_positive(nʳ) / freezing_timescale
-
-    frozen_mass_rate = ifelse(freezing_active, frozen_mass_rate, zero(FT))
-    frozen_number_rate = ifelse(freezing_active, frozen_number_rate, zero(FT))
-
-    return frozen_mass_rate, frozen_number_rate
-end
+@inline homogeneous_freezing_rain_rate(p3, qʳ, nʳ, T) =
+    homogeneous_freezing_rate(p3, qʳ, max(0, nʳ), T)  # nʳ is already [1/kg]
 
 #####
 ##### Rime splintering (Hallett-Mossop secondary ice production)
@@ -414,8 +363,8 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
 
     # Cloud-riming splintering applies only with a single ice category; with more
     # than one, splintering_cloud_riming_scale = 0 disables it.
-    cloud_riming_eff = clamp_positive(cloud_riming) * FT(parameters.splintering_cloud_riming_scale)
-    rain_riming_eff = clamp_positive(rain_riming)
+    cloud_riming_eff = max(0, cloud_riming) * FT(parameters.splintering_cloud_riming_scale)
+    rain_riming_eff = max(0, rain_riming)
     has_rime = qᶠ >= p3.minimum_mass_mixing_ratio
     active = (D_ice ≥ parameters.splintering_diameter_threshold) &
              has_rime &

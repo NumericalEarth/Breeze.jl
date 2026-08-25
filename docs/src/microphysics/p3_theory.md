@@ -1231,7 +1231,7 @@ where:
 
 #### Ventilation Integrals
 
-`IceDeposition` (`ice_deposition.jl`) holds two wet-PSD ventilation components
+`IceDeposition` (`ice_properties.jl`) holds two wet-PSD ventilation components
 for deposition / sublimation and four dry-PSD components for liquid-fraction
 melting:
 
@@ -1347,7 +1347,7 @@ are computed once per lookup.
 ### Lambda Limiter Integrals
 
 To prevent unphysical size distributions, P3 limits the slope parameter ``λ``
-based on physical constraints. `IceLambdaLimiter` (`ice_lambda_limiter.jl`) holds
+based on physical constraints. `IceLambdaLimiter` (`ice_properties.jl`) holds
 the two tabulated bounds:
 
 | Field of `p3.ice.lambda_limiter` | Purpose | Table column |
@@ -1392,7 +1392,7 @@ ice–rain collection integrals sit in the separate 5-D block of the same file.
 At runtime each ice-side integral is read from the corresponding column of that
 ASCII lookup table; the rain 1D tables are tabulated at startup inside
 Breeze using Chebyshev–Gauss quadrature in `rain_quadrature.jl`. The
-quadrature evaluators in `quadrature.jl::chebyshev_gauss_nodes_weights`
+quadrature evaluators in `Breeze.Utils.chebyshev_gauss_nodes_weights`
 provide the nodes and weights; integrals are evaluated as compensated
 sums of the integrand on those nodes.
 
@@ -1419,9 +1419,9 @@ The bulk of the implementation lives in:
 - `ice_nucleation_rates.jl` — Cooper deposition nucleation, immersion freezing,
   homogeneous freezing, Hallett–Mossop splintering.
 - `melting_rates.jl` — heat-balance melting (with optional Fˡ split).
-- `riming_rates.jl`, `ice_collection.jl`, `ice_aggregation_rates.jl` — riming,
+- `riming_rates.jl`, `ice_properties.jl`, `ice_aggregation_rates.jl` — riming,
   above-freezing collection, and aggregation.
-- `ice_rain_collection.jl` — ice–rain collection tables.
+- `ice_properties.jl` — ice–rain collection tables.
 - `wet_ice_processes.jl` — Cober–List rime density, shedding, wet growth, refreezing.
 
 ### Process Map
@@ -2682,7 +2682,7 @@ rates see the state. The default `SpeciesBorrowing`:
 Passing `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())` additionally
 redistributes leftover vapor deficits within each column;
 `negative_moisture_correction = nothing` disables the repair, in which case the
-process rates still `clamp_positive` what they read but the prognostic fields keep
+process rates still clamp what they read at zero but the prognostic fields keep
 their negative mass.
 
 #### Consistency

@@ -65,19 +65,19 @@ $(TYPEDSIGNATURES)
 Parse the P3 ice ASCII table file, which carries both table blocks.
 
 Returns two dictionaries:
-- `table1_fields`: Dict of Symbol => Array{FT,4} for ice integrals
-  with axes (i_Qnorm, i_Fr, i_Fl, i_rhor)
-- `table2_fields`: Dict of Symbol => Array{FT,5} for rain-ice collection
-  with axes (i_Qnorm, i_Drscale_reversed, i_Fr, i_Fl, i_rhor)
+- `table1_fields`: Dict of Symbol => Array{FT,4} for ice integrals, with axes
+  (normalized mass, Fᶠ, Fˡ, rime-density index)
+- `table2_fields`: Dict of Symbol => Array{FT,5} for rain-ice collection, with axes
+  (normalized mass, λʳ reversed into ascending order, Fᶠ, Fˡ, rime-density index)
 """
 function parse_lookup_table_file(filepath::AbstractString, FT::Type)
     lines = readlines(filepath)
 
-    n_q = N_NORMALIZED_MASS
-    n_fr = N_RIME_FRACTION
-    n_fl = N_LIQUID_FRACTION
-    n_rhor = N_RIME_DENSITY
-    n_dr = N_RAIN_SLOPE
+    Nq = N_NORMALIZED_MASS
+    NFᶠ = N_RIME_FRACTION
+    NFˡ = N_LIQUID_FRACTION
+    Nρᶠ = N_RIME_DENSITY
+    Nλʳ = N_RAIN_SLOPE
 
     # Column names for ice data.
     # Column 4 (`cloud_collection`) is the ice-cloud-water sweep-out integral
@@ -99,7 +99,7 @@ function parse_lookup_table_file(filepath::AbstractString, FT::Type)
     # Allocate arrays for ice integrals: (Qnorm, Fr, Fl, rhor)
     table1_fields = Dict{Symbol, Array{FT, 4}}()
     for name in col_names
-        table1_fields[name] = zeros(FT, n_q, n_fr, n_fl, n_rhor)
+        table1_fields[name] = zeros(FT, Nq, NFᶠ, NFˡ, Nρᶠ)
     end
 
     # Allocate arrays for rain-ice collection: (Qnorm, Drscale, Fr, Fl, rhor)
@@ -107,45 +107,46 @@ function parse_lookup_table_file(filepath::AbstractString, FT::Type)
 
     table2_fields = Dict{Symbol, Array{FT, 5}}()
     for name in rain_names
-        table2_fields[name] = zeros(FT, n_q, n_dr, n_fr, n_fl, n_rhor)
+        table2_fields[name] = zeros(FT, Nq, Nλʳ, NFᶠ, NFˡ, Nρᶠ)
     end
 
     # Parse data lines (skip header line 1 and blank line 2)
     line_idx = 3  # 1-indexed; line 3 is first data line
-    n_ice_idx = 4
-    n_rain_idx = 4
 
-    # Loop nesting order:
-    # i_rhor(1..5) -> i_Fr(1..4) -> i_Fl(1..4) -> {ice, rain}
-    for i_rhor in 1:n_rhor
-        for i_fr in 1:n_fr
-            for i_fl in 1:n_fl
-                # Read 50 ice rows
-                for i_q in 1:n_q
+    # Each row starts with its own coordinate indices, which are re-derived from the loop
+    # counters instead of being read back, so they are skipped.
+    ice_index_columns = 4
+    rain_index_columns = 4
+
+    # The file is one flat sequence of rows, and the loop nest below is not a choice: it
+    # has to walk the axes in exactly the order the rows were written, outermost ρᶠ to
+    # innermost λʳ, with the 50 ice rows of a (ρᶠ, Fᶠ, Fˡ) triple followed by its 50 × 30
+    # rain-ice rows. Reordering any level silently mis-assigns every value.
+    #
+    #   ρᶠ index (1..5) → Fᶠ (1..4) → Fˡ (1..4) → { 50 ice rows; 50 × 30 rain-ice rows }
+    for i_ρᶠ in 1:Nρᶠ
+        for i_Fᶠ in 1:NFᶠ
+            for i_Fˡ in 1:NFˡ
+                for i_q in 1:Nq
                     vals = parse_table_line(lines[line_idx])
                     line_idx += 1
-                    # Skip index columns, read data columns
-                    data_offset = n_ice_idx
                     for (col_idx, name) in enumerate(col_names)
-                        v = vals[data_offset + col_idx]
-                        table1_fields[name][i_q, i_fr, i_fl, i_rhor] = FT(v)
+                        v = vals[ice_index_columns + col_idx]
+                        table1_fields[name][i_q, i_Fᶠ, i_Fˡ, i_ρᶠ] = FT(v)
                     end
                 end
 
-                # Read 50 * 30 = 1500 rain-ice rows
-                for i_q in 1:n_q
-                    for i_dr in 1:n_dr
+                for i_q in 1:Nq
+                    for i_λʳ in 1:Nλʳ
                         vals = parse_table_line(lines[line_idx])
                         line_idx += 1
-                        data_offset = n_rain_idx
-                        # CRITICAL: reverse the Drscale axis
-                        # File order runs from largest λʳ to smallest, so it is
-                        # reversed into ascending λʳ order here.
-                        j_dr = n_dr - i_dr + 1
+                        # CRITICAL: reverse the λʳ axis. File order runs from largest λʳ
+                        # to smallest, so it is reversed into ascending λʳ order here.
+                        j_λʳ = Nλʳ - i_λʳ + 1
                         for (col_idx, name) in enumerate(rain_names)
-                            v = vals[data_offset + col_idx]
-                            # Rain number and mass stored as log10 in file
-                            table2_fields[name][i_q, j_dr, i_fr, i_fl, i_rhor] = FT(v)
+                            v = vals[rain_index_columns + col_idx]
+                            # Rain number and mass are stored as log10 in the file
+                            table2_fields[name][i_q, j_λʳ, i_Fᶠ, i_Fˡ, i_ρᶠ] = FT(v)
                         end
                     end
                 end

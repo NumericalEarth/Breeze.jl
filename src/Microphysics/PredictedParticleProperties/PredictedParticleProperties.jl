@@ -60,9 +60,6 @@ export
     IceCollection,
     IceLambdaLimiter,
     IceRainCollection,
-    P3IceIntegralsTable,
-    P3RainIceCollectionTable,
-    P3LookupTables,
 
     # Rain and cloud droplet properties
     RainProperties,
@@ -91,7 +88,7 @@ export
     # Interface functions
     prognostic_field_names,
 
-    # Quadrature helpers
+    # Quadrature helpers (defined in `Breeze.Utils`, re-exported for convenience)
     chebyshev_gauss_nodes_weights,
 
     # Lookup table reader
@@ -110,22 +107,37 @@ export
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS, TYPEDEF
 using SpecialFunctions: erf
 
+using Adapt: Adapt
 using Oceananigans: Oceananigans
-using Oceananigans.Architectures: CPU
+using Oceananigans.Architectures: CPU, on_architecture
 using Breeze.AtmosphereModels: prognostic_field_names
-using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant, vapor_gas_constant
+using Breeze.Thermodynamics: MoistureMassFractions,
+                             PlanarIceSurface,
+                             PlanarLiquidSurface,
+                             ThermodynamicConstants,
+                             adjustment_saturation_specific_humidity,
+                             air_pressure,
+                             density,
+                             dry_air_gas_constant,
+                             ice_latent_heat,
+                             liquid_latent_heat,
+                             mixture_heat_capacity,
+                             psychrometric_correction,
+                             saturation_specific_humidity,
+                             saturation_vapor_pressure,
+                             temperature,
+                             vapor_gas_constant,
+                             with_moisture
+using Breeze.Utils: @adapt_architecture,
+                    chebyshev_gauss_nodes_weights,
+                    jacobian_diameter_transform,
+                    safe_divide,
+                    transform_to_diameter
 
 #####
-##### Ice concept containers
+##### Ice concept containers and the lookup tables they are read from
 #####
 
-include("ice_fall_speed.jl")
-include("ice_deposition.jl")
-include("ice_bulk_properties.jl")
-include("ice_collection.jl")
-include("ice_lambda_limiter.jl")
-include("ice_rain_collection.jl")
-include("lookup_tables.jl")
 include("ice_properties.jl")
 
 #####
@@ -173,13 +185,7 @@ include("warm_rain_schemes.jl")
 include("p3_scheme.jl")
 
 #####
-##### Quadrature (depends on types above)
-#####
-
-include("quadrature.jl")
-
-#####
-##### Tabulation (depends on quadrature)
+##### Tabulation
 #####
 
 include("tabulated_function_adapters.jl")
@@ -187,16 +193,32 @@ include("lookup_table_format.jl")
 include("lookup_table_reader.jl")
 
 #####
-##### Rain PSD quadrature evaluators (must follow quadrature.jl)
+##### Rain PSD quadrature evaluators
 #####
 
 include("rain_quadrature.jl")
 
 #####
-##### GPU/architecture adaptation methods
+##### GPU/architecture adaptation
+#####
+##### The ice integrals (4D/5D lookup tables) and rain integrals (1D tables built
+##### from quadrature) hold lookup arrays that must be transferred to the GPU.
+##### `@adapt_architecture` (from `Breeze.Utils`) generates the `Adapt.adapt_structure`
+##### and `on_architecture` methods that walk each container's fields, so the field
+##### list is not repeated twice per type. Scalar fields pass through unchanged.
 #####
 
-include("gpu_adaptation.jl")
+@adapt_architecture RimeDensityIndexedTable4D
+@adapt_architecture RimeDensityIndexedTable5D
+@adapt_architecture IceFallSpeed
+@adapt_architecture IceDeposition
+@adapt_architecture IceBulkProperties
+@adapt_architecture IceCollection
+@adapt_architecture IceLambdaLimiter
+@adapt_architecture IceRainCollection
+@adapt_architecture IceProperties
+@adapt_architecture RainProperties
+@adapt_architecture PredictedParticlePropertiesMicrophysics
 
 #####
 ##### Process-rate helpers, tabulated kernels, CCN activation,

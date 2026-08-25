@@ -7,26 +7,6 @@
 
 export ProcessRateParameters, NumericalFloors
 
-"""
-    NumericalFloors
-
-The smallest value each quantity is allowed to take before it enters a division
-or a logarithm, so that a process rate stays finite where the physics may
-legitimately reach zero. `divisor` is the last resort — the smallest strictly
-positive number substituted for anything that would otherwise send a quotient or
-a logarithm to infinity. `mean_particle_mass_fallback` is the one entry that
-replaces a quantity outright rather than bounding it, standing in for a mean
-particle mass where the number concentration is exactly zero.
-
-Each value is a field rather than a literal so that a configuration can move all
-of them together. The defaults sit far below any atmospheric value at double
-precision and remain normal numbers in `Float32`, whose smallest normal is
-``1.2 × 10^{-38}``. They do *not* survive `Float16`, whose smallest normal is
-``6.1 × 10^{-5}`` — half precision needs floors raised into that range, which is
-the reason they are settable rather than baked in.
-
-See [`NumericalFloors()`](@ref) for the defaults.
-"""
 struct NumericalFloors{FT}
     saturation_mass_fraction :: FT  # floors qᵛ⁺ˡ, qᵛ⁺ⁱ in supersaturation denominators [kg/kg]
     transport_coefficient :: FT     # floors Dᵛ and ν in Schmidt-number ratios [m²/s]
@@ -44,7 +24,21 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct the numerical floors shared by the P3 process rates.
+Construct the numerical floors shared by the P3 process rates: the smallest value each
+quantity is allowed to take before it enters a division or a logarithm, so that a
+process rate stays finite where the physics may legitimately reach zero. `divisor` is
+the last resort — the smallest strictly positive number substituted for anything that
+would otherwise send a quotient or a logarithm to infinity.
+`mean_particle_mass_fallback` is the one entry that replaces a quantity outright rather
+than bounding it, standing in for a mean particle mass where the number concentration
+is exactly zero.
+
+Each value is a field rather than a literal so that a configuration can move all of
+them together. The defaults sit far below any atmospheric value at double precision and
+remain normal numbers in `Float32`, whose smallest normal is ``1.2 × 10^{-38}``.
+They do *not* survive `Float16`, whose smallest normal is ``6.1 × 10^{-5}`` — half
+precision needs floors raised into that range, which is the reason they are settable
+rather than baked in.
 
 ```jldoctest
 using Breeze.Microphysics.PredictedParticleProperties: NumericalFloors
@@ -54,7 +48,7 @@ NumericalFloors(Float64)
 NumericalFloors(mass_scale=1.0e-20)
 ```
 """
-function NumericalFloors(FT::Type{<:AbstractFloat} = Float64;
+function NumericalFloors(FT::DataType = Oceananigans.defaults.FloatType;
                          saturation_mass_fraction = 1e-10,
                          transport_coefficient = 1e-10,
                          mass_scale = 1e-20,
@@ -83,10 +77,16 @@ function NumericalFloors{FT}(floors::NumericalFloors) where FT
                                floors.mean_particle_mass_fallback)
 end
 
-# The four pure PSD helpers (`liquid_fraction_on_ice`, `mean_total_ice_mass`,
-# `bounded_ice_number`, `ventilation_sc_correction`) are reached without a scheme
-# argument, so they read their floors from here. Everything else reads the
-# settable `floors` field of the scheme's `ProcessRateParameters`.
+# The three pure PSD helpers (`liquid_fraction_on_ice`, `mean_total_ice_mass`,
+# `bounded_ice_number`) are reached without a scheme argument, and the rain
+# quadrature and `cloud_stokes_prefactor` guards run before a scheme exists, so
+# those read their floors from here. Everything else reads the settable `floors`
+# field of the scheme's `ProcessRateParameters`.
+#
+# TODO: thread `floors` into the three PSD helpers so a raised floor (the Float16
+# case the `NumericalFloors` docstring describes) applies to them too. Every
+# caller already has `parameters` in scope; it is the 28 call sites that make it
+# a separate change.
 const DEFAULT_FLOORS = NumericalFloors(Float64)
 
 Base.summary(::NumericalFloors) = "NumericalFloors"
@@ -95,21 +95,31 @@ function Base.show(io::IO, floors::NumericalFloors)
     print(io, summary(floors), "(mass_scale=", floors.mass_scale, ")")
 end
 
-"""
-    ProcessRateParameters
-
-Parameters for P3 microphysical process rates.
-See [`ProcessRateParameters()`](@ref) constructor for usage.
-"""
 struct ProcessRateParameters{FT, PS}
-    # Physical constants
-    liquid_water_density :: FT       # ρʷ [kg/m³]
-    pure_ice_density :: FT           # ρⁱ [kg/m³]
-    reference_air_density :: FT      # ρ₀ [kg/m³] for rain fall speed correction
+    # Properties cached from `ThermodynamicConstants`. These are not independent
+    # parameters: each is copied from the constants at construction and cannot be set
+    # separately, so the two can never disagree.
+    #
+    # TODO: drop them and read `constants.liquid.density`, `constants.ice.density` at the
+    # point of use, so nothing is stored twice. That needs `constants` threaded through
+    # `rain_slope_parameter`, `rain_number_from_slope`, `bounded_rain_number`,
+    # `activated_droplet_mass`, `tendency_ρbᶠ`, and their callers, which is a wider change
+    # than this container. `ThermodynamicConstants` has no melting-point field, so
+    # `freezing_temperature` (273.15 K at 1 atm, distinct from the 273.16 K triple point)
+    # has nowhere to move until one is added there.
+    liquid_water_density :: FT       # ρʷ [kg/m³], = constants.liquid.density
+    pure_ice_density :: FT           # ρⁱ [kg/m³], = constants.ice.density
+    freezing_temperature :: FT       # T₀ [K]
+
+    # Rain fall-speed air-density correction, (ρ₀/ρ)^α
+    reference_air_density :: FT      # ρ₀ [kg/m³]
+    fall_speed_density_correction_exponent :: FT  # α [-]
+    minimum_fall_speed_air_density :: FT          # floor on ρ in the correction [kg/m³]
+
+    # Newly formed particles
     nucleated_ice_mass :: FT         # mᵢ₀ [kg], mass of newly nucleated ice crystal
     activated_droplet_radius :: FT   # r₀ [m], radius of a newly activated cloud droplet
     activation_supersaturation_threshold :: FT  # S above which CCN activation proceeds [-]
-    freezing_temperature :: FT       # T₀ [K]
 
     # Rain autoconversion (Khairoutdinov-Kogan 2000)
     autoconversion_coefficient :: FT         # k₁ = 1350 × (Nc_ref_cm)^β, see KK2000 Eq. 29
@@ -130,14 +140,12 @@ struct ProcessRateParameters{FT, PS}
 
     # Evaporation/sublimation timescales
     rain_evaporation_timescale :: FT         # τ_evap [s]
-    ice_deposition_timescale :: FT           # τ_dep [s]
 
     # Ice aggregation. The sticking efficiency ramps linearly from its minimum to maximum
     # between the two temperatures, and is then shut off between the two rime
     # fractions, above which heavily rimed particles no longer aggregate.
     maximum_aggregation_efficiency :: FT     # Eⁱⁱ_max [-]
     minimum_aggregation_efficiency :: FT     # Eⁱⁱ_min [-], the cold-ice value
-    aggregation_timescale :: FT              # τ_agg [s]
     aggregation_efficiency_ramp_start_temperature :: FT # T where Eⁱⁱ starts increasing [K]
     aggregation_efficiency_ramp_end_temperature :: FT   # T where Eⁱⁱ reaches Eⁱⁱ_max [K]
     minimum_aggregation_rime_fraction :: FT  # Fᶠ below which aggregation is unreduced [-]
@@ -207,6 +215,11 @@ struct ProcessRateParameters{FT, PS}
 
     # Rime densification
     rime_densification_timescale :: FT       # τ_densif [s]
+
+    # Cloud size distribution bounds, imposed on the number-weighted mean droplet
+    # diameter ⟨D⟩ = (μᶜˡ + 1) / λᶜˡ rather than on λᶜˡ itself; see `cloud_slope_bounds`.
+    maximum_mean_droplet_diameter :: FT     # ⟨D⟩ maximum [m]
+    minimum_mean_droplet_diameter :: FT     # ⟨D⟩ minimum [m]
 
     # Rain size distribution slope bounds
     minimum_rain_slope :: FT                # λʳ minimum [1/m]
@@ -278,8 +291,10 @@ $(TYPEDSIGNATURES)
 
 Construct process rate parameters with default values from P3 literature.
 
-The liquid-water density and the dry-air gas constant used by the reference-density
-calculation come from `thermodynamic_constants`.
+The liquid-water density, the pure-ice density, the dry-air gas constant used by the
+reference-density calculation, and every particle mass derived from a radius all come
+from `thermodynamic_constants`, so none of them can disagree with the model's own
+constants.
 
 These parameters control the rates of all microphysical processes:
 autoconversion, accretion, aggregation, riming, melting, evaporation,
@@ -320,20 +335,41 @@ All parameters are keyword arguments with physically-based defaults. The coupled
 donor-budget limiter uses four re-projection passes by default; set
 `coupled_sink_limiting_iterations` to tune that count.
 """
-function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
-        # Physical constants
+function ProcessRateParameters(FT::DataType = Oceananigans.defaults.FloatType;
+        # Shared thermodynamic properties. `liquid_water_density`, `pure_ice_density`, and
+        # every mass derived from them come from here, so they cannot fall out of step
+        # with the model's own constants.
         thermodynamic_constants = ThermodynamicConstants(FT),
-        pure_ice_density = thermodynamic_constants.ice.density,
-        # Reference density for rain fall speed correction (P=1000 hPa, T=0°C)
-        reference_air_density = 100000 / (dry_air_gas_constant(thermodynamic_constants) * 273.15),
-        nucleated_ice_mass = 4 * FT(π) / 3 * 900 * (1e-6)^3,  # sphere of radius 1 μm, ρ = 900 kg/m³ [kg]
-        activated_droplet_radius = 1e-6,               # newly activated droplets are 1 μm
-        activation_supersaturation_threshold = 1e-6,   # S above which CCN activate
+        # The melting point at 1 atm. `ThermodynamicConstants` carries the triple point
+        # (273.16 K) and the latent-heat reference temperature, but not this.
         freezing_temperature = 273.15,
 
+        # Rain fall-speed air-density correction (ρ₀/ρ)^α. ρ₀ is the dry-air density at
+        # P = 1000 hPa, T = 0 °C; α is the Heymsfield et al. (2007) exponent; and the
+        # density floor only bites above ~30 km, where there is no condensate to fall.
+        reference_pressure = 100000,
+        reference_temperature = 273.15,
+        reference_air_density = reference_pressure /
+            (dry_air_gas_constant(thermodynamic_constants) * reference_temperature),
+        fall_speed_density_correction_exponent = 0.54,
+        minimum_fall_speed_air_density = 0.01,
+
+        # Newly formed particles. The nucleated crystal is a sphere of
+        # `nucleated_ice_radius` at 900 kg/m³ — the density P3 assigns to freshly
+        # formed ice, and NOT `pure_ice_density` (917 kg/m³), which is reserved for
+        # reflectivity, effective radius and melt densification. See the deposition
+        # nucleation section of `docs/src/microphysics/p3_theory.md`, which fixes
+        # `m_{i0} = (4π/3) ρᵢ (1 μm)³` at `ρᵢ = 900`.
+        nucleated_ice_radius = 1e-6,
+        nucleated_ice_density = 900.0,
+        nucleated_ice_mass = 4 * FT(π) / 3 * nucleated_ice_density *
+                             nucleated_ice_radius^3,
+        activated_droplet_radius = 1e-6,               # newly activated droplets are 1 μm
+        activation_supersaturation_threshold = 1e-6,   # S above which CCN activate
+
         # Rain autoconversion
-    # KK2000 Eq. 29: dqʳ/dt = 1350 qᶜˡ^2.47 Nᶜˡ^(-1.79) with Nᶜˡ in cm⁻³.
-    # Rescaled for (Nᶜˡ/Nᶜˡ_ref)^β with Nᶜˡ_ref = 1e8 m⁻³ = 100 cm⁻³:
+        # KK2000 Eq. 29: dqʳ/dt = 1350 qᶜˡ^2.47 Nᶜˡ^(-1.79) with Nᶜˡ in cm⁻³.
+        # Rescaled for (Nᶜˡ/Nᶜˡ_ref)^β with Nᶜˡ_ref = 1e8 m⁻³ = 100 cm⁻³:
         # k₁ = 1350 × (100)^(-1.79) ≈ 0.355
         autoconversion_coefficient = 1350 * 100.0^(-1.79),
         autoconversion_exponent_cloud = 2.47,
@@ -352,12 +388,10 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Timescales
         rain_evaporation_timescale = 10.0,
-        ice_deposition_timescale = 10.0,
 
         # Ice aggregation (Morrison & Milbrandt 2015a)
         maximum_aggregation_efficiency = 0.3,
         minimum_aggregation_efficiency = 0.001,
-        aggregation_timescale = 600.0,
         aggregation_efficiency_ramp_start_temperature = 253.15,
         aggregation_efficiency_ramp_end_temperature = 273.15,
         minimum_aggregation_rime_fraction = 0.6,
@@ -419,8 +453,14 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         splintering_temperature_peak = 268.15,
         # Hallett-Mossop: 3.5e5 splinters/g × 1000 g/kg = 3.5e8 splinters/kg
         splintering_rate = 3.5e8,
-        # A 10 μm splinter: mass = π/6 × 900 × (10e-6)³ = 4.712e-13 kg
-        splintering_crystal_mass = FT(π) / 6 * 900 * (10e-6)^3,
+        # A 10 μm splinter at 900 kg/m³: m = π/6 ρᵢ D³ ≈ 4.712e-13 kg. Same
+        # freshly-formed-ice density as `nucleated_ice_density` above, not the
+        # 917 kg/m³ `pure_ice_density`; the Hallett-Mossop section of
+        # `docs/src/microphysics/p3_theory.md` fixes `D_init,HM = 10 μm` at `ρᵢ = 900`.
+        splintering_crystal_diameter = 10e-6,
+        splintering_crystal_density = nucleated_ice_density,
+        splintering_crystal_mass = FT(π) / 6 * splintering_crystal_density *
+                                  splintering_crystal_diameter^3,
         # 250 μm for a single ice category; 1000 μm with more than one
         splintering_diameter_threshold = 250e-6,
         # Cloud-riming splintering scale: 1.0 includes it (single ice category),
@@ -440,6 +480,11 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Rime densification
         rime_densification_timescale = 10.0,
+
+        # Cloud PSD bounds, as the largest and smallest number-weighted mean droplet
+        # diameter the distribution may take (see `cloud_slope_bounds`).
+        maximum_mean_droplet_diameter = 40e-6,
+        minimum_mean_droplet_diameter = 1e-6,
 
         # Rain PSD slope bounds, λʳ = (μʳ + 1) / D. With μʳ = 0 they correspond to the
         # largest and smallest mean drop diameters the distribution may take.
@@ -488,12 +533,14 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
     return ProcessRateParameters{FT, predict_supersaturation}(
         FT(thermodynamic_constants.liquid.density),
-        FT(pure_ice_density),
+        FT(thermodynamic_constants.ice.density),
+        FT(freezing_temperature),
         FT(reference_air_density),
+        FT(fall_speed_density_correction_exponent),
+        FT(minimum_fall_speed_air_density),
         FT(nucleated_ice_mass),
         FT(activated_droplet_radius),
         FT(activation_supersaturation_threshold),
-        FT(freezing_temperature),
         FT(autoconversion_coefficient),
         FT(autoconversion_exponent_cloud),
         FT(autoconversion_exponent_droplet),
@@ -505,10 +552,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(rain_breakup_diameter_threshold),
         FT(rain_breakup_coefficient),
         FT(rain_evaporation_timescale),
-        FT(ice_deposition_timescale),
         FT(maximum_aggregation_efficiency),
         FT(minimum_aggregation_efficiency),
-        FT(aggregation_timescale),
         FT(aggregation_efficiency_ramp_start_temperature),
         FT(aggregation_efficiency_ramp_end_temperature),
         FT(minimum_aggregation_rime_fraction),
@@ -549,6 +594,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(homogeneous_freezing_temperature),
         FT(homogeneous_freezing_timescale),
         FT(rime_densification_timescale),
+        FT(maximum_mean_droplet_diameter),
+        FT(minimum_mean_droplet_diameter),
         FT(minimum_rain_slope),
         FT(maximum_rain_slope),
         FT(sink_limiting_timescale),

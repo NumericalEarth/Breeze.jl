@@ -4,12 +4,8 @@
 ##### Cloud droplet properties for the P3 scheme.
 #####
 
-"""
-    CloudDropletProperties
-
-Prescribed cloud droplet parameters for warm microphysics.
-See [`CloudDropletProperties`](@ref) constructor for details.
-"""
+# Prescribed cloud droplet parameters for warm microphysics; see the
+# `CloudDropletProperties` constructor.
 struct CloudDropletProperties{FT}
     number_concentration :: FT
     condensation_timescale :: FT
@@ -50,11 +46,15 @@ round(liu_daum_shape_parameter(100e6), digits=1)  # continental default
 8.3
 ```
 """
-function liu_daum_shape_parameter(Nᶜˡ)
+@inline function liu_daum_shape_parameter(Nᶜˡ)
     FT = typeof(float(Nᶜˡ))
     Nᶜˡ_cm³ = Nᶜˡ * FT(1e-6)              # m⁻³ → cm⁻³
-    # Liu-Daum intermediate parameter, and the μᶜˡ bounds imposed on the result.
-    # Coefficients of a published fit, not free parameters.
+    # χ is the relative dispersion of the droplet spectrum, and the two coefficients are
+    # the Liu-Daum regression of χ on droplet concentration, fit to aircraft measurements
+    # of warm cloud droplet spectra: at fixed water content, more droplets means a
+    # narrower spectrum, hence a larger μᶜˡ. They belong to that fit rather than being
+    # tunable model parameters, and the bounds keep μᶜˡ inside the range it was measured
+    # over.
     χ = FT(0.0005714) * Nᶜˡ_cm³ + FT(0.2714)
     μᶜˡ = FT(1) / χ^2 - FT(1)
     return clamp(μᶜˡ, FT(2), FT(15))
@@ -167,10 +167,12 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Bounds `(minimum_slope, maximum_slope)` [1/m] on the cloud PSD slope:
-`λ_min = (μᶜˡ + 1) × 2.5×10⁴` and `λ_max = (μᶜˡ + 1) × 10⁶`.
+Bounds `(minimum_slope, maximum_slope)` [1/m] on the cloud PSD slope,
+`λ_min = (μᶜˡ + 1) / ⟨D⟩_max` and `λ_max = (μᶜˡ + 1) / ⟨D⟩_min`, from the mean-diameter
+bounds `parameters.maximum_mean_droplet_diameter` and
+`parameters.minimum_mean_droplet_diameter`.
 
-Both bounds carry the same `(μᶜˡ + 1)` factor, which makes them bound the mean
+Both bounds carry the same `(μᶜˡ + 1)` factor, so what they really bound is the mean
 droplet *diameter* rather than the slope itself. For the gamma PSD
 ``N(D) = N_0 D^{μ} e^{-λ D}``, the number-weighted mean diameter is
 
@@ -180,22 +182,14 @@ droplet *diameter* rather than the slope itself. For the gamma PSD
                     = \\frac{μ + 1}{λ},
 ```
 
-using ``Γ(z + 1) = z\\, Γ(z)``. Substituting each bound therefore cancels
-``μ + 1`` and leaves a shape-independent diameter:
-
-```math
-\\langle D \\rangle_{\\max} = \\frac{μ + 1}{λ_{\\min}}
-                         = \\frac{1}{2.5 \\times 10^4\\,\\text{m}^{-1}} = 40\\,μ\\text{m},
-\\qquad
-\\langle D \\rangle_{\\min} = \\frac{μ + 1}{λ_{\\max}}
-                         = \\frac{1}{10^6\\,\\text{m}^{-1}} = 1\\,μ\\text{m}.
-```
-
-So the admitted mean droplet diameters are 1–40 μm for any diagnosed ``μᶜˡ``.
+using ``Γ(z + 1) = z\\, Γ(z)``, so dividing the shared ``μ + 1`` factor back out
+recovers the bounding diameters exactly, whatever ``μᶜˡ`` was diagnosed. The
+defaults admit mean droplet diameters of 1–40 μm.
 """
-@inline function cloud_slope_bounds(μᶜˡ)
+@inline function cloud_slope_bounds(μᶜˡ, parameters)
     FT = typeof(μᶜˡ)
-    return (μᶜˡ + 1) * FT(2.5e4), (μᶜˡ + 1) * FT(1e6)
+    return ((μᶜˡ + 1) / FT(parameters.maximum_mean_droplet_diameter),
+            (μᶜˡ + 1) / FT(parameters.minimum_mean_droplet_diameter))
 end
 
 """
@@ -204,8 +198,8 @@ $(TYPEDSIGNATURES)
 Bounded cloud PSD slope λᶜˡ [1/m]: [`unbounded_cloud_slope_parameter`](@ref) clamped to
 [`cloud_slope_bounds`](@ref).
 """
-@inline function cloud_slope_parameter(Nᶜˡ, μᶜˡ, qᶜˡ_abs, ρᴸ)
-    minimum_slope, maximum_slope = cloud_slope_bounds(μᶜˡ)
+@inline function cloud_slope_parameter(Nᶜˡ, μᶜˡ, qᶜˡ_abs, ρᴸ, parameters)
+    minimum_slope, maximum_slope = cloud_slope_bounds(μᶜˡ, parameters)
     return clamp(unbounded_cloud_slope_parameter(Nᶜˡ, μᶜˡ, qᶜˡ_abs, ρᴸ),
                  minimum_slope, maximum_slope)
 end
@@ -220,12 +214,12 @@ the given `μᶜˡ`, the slope parameter hits its bounds. The number is then rec
 from the clamped slope to maintain mass-PSD consistency, so that downstream rates
 (autoconversion, immersion freezing) see a physically consistent cloud number.
 """
-@inline function bounded_cloud_number(Nᶜˡ, μᶜˡ, qᶜˡ, ρ, ρᴸ, mass_scale_floor)
+@inline function bounded_cloud_number(Nᶜˡ, μᶜˡ, qᶜˡ, ρ, ρᴸ, mass_scale_floor, parameters)
     FT = typeof(qᶜˡ)
     qᶜˡ_abs = max(qᶜˡ * ρ, FT(mass_scale_floor))  # absolute cloud content [kg/m³]
 
     unbounded_slope = unbounded_cloud_slope_parameter(Nᶜˡ, μᶜˡ, qᶜˡ_abs, ρᴸ)
-    minimum_slope, maximum_slope = cloud_slope_bounds(μᶜˡ)
+    minimum_slope, maximum_slope = cloud_slope_bounds(μᶜˡ, parameters)
     λᶜˡ = clamp(unbounded_slope, minimum_slope, maximum_slope)
 
     # If the slope was clamped, recompute N from it to maintain
@@ -260,24 +254,24 @@ cloud number together with the PSD correction used by immersion freezing.
 @inline function diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
     FT = typeof(qᶜˡ + nᶜˡ + ρ)
     qᶜˡ_eff = max(0, qᶜˡ)
-    floors = p3.process_rates.floors
+    parameters = p3.process_rates
+    floors = parameters.floors
     # The floor must be `FT`-wrapped: an untyped literal promotes `nᶜˡ_eff` and every
     # quantity derived from it to Float64 in a Float32 run, which leaves the returned
     # `nᶜˡ` inferred as `Union{Float32, Float64}` through the `ifelse` below.
     nᶜˡ_eff = max(nᶜˡ, FT(p3.minimum_number_mixing_ratio))
     Nᶜˡ = nᶜˡ_eff * ρ
-    ρᴸ = p3.process_rates.liquid_water_density
+    ρᴸ = parameters.liquid_water_density
     mass_scale = FT(floors.mass_scale)
 
     μᶜˡ = liu_daum_shape_parameter(Nᶜˡ)
-    Nᶜˡ_bounded = bounded_cloud_number(Nᶜˡ, μᶜˡ, qᶜˡ_eff, ρ, ρᴸ, mass_scale)
-    nᶜˡ_bounded = ifelse(iszero(ρ), zero(FT), Nᶜˡ_bounded / ρ)
+    Nᶜˡ_bounded = bounded_cloud_number(Nᶜˡ, μᶜˡ, qᶜˡ_eff, ρ, ρᴸ, mass_scale, parameters)
+    nᶜˡ_bounded = safe_divide(Nᶜˡ_bounded, ρ, zero(FT))
 
-    λᶜˡ = cloud_slope_parameter(Nᶜˡ_bounded, μᶜˡ, max(qᶜˡ_eff * ρ, mass_scale), ρᴸ)
+    λᶜˡ = cloud_slope_parameter(Nᶜˡ_bounded, μᶜˡ, max(qᶜˡ_eff * ρ, mass_scale), ρᴸ, parameters)
 
     return (; Nᶜˡ = Nᶜˡ_bounded,
               nᶜˡ = nᶜˡ_bounded,
               μᶜˡ,
-              λᶜˡ,
-              freezing_psd_correction = psd_correction_spherical_volume(μᶜˡ))
+              λᶜˡ)
 end
