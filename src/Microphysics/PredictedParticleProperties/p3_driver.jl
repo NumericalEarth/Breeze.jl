@@ -79,17 +79,10 @@ end
 ##### "The P3 tendencies" are the tendencies of P3's own microphysical prognostics
 ##### (ρqᵛ, ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ, and the optional ρnᶜˡ/ρnᵃ/ρsᵛ⁺ˡ).
 ##### They are computed *jointly*: the coupled donor-budget limiters see every species at
-##### once, so one kernel evaluates all of them per cell and writes them to the `μ.cache_*`
-##### fields, and small kernels then accumulate those into `Gⁿ`.
-#####
-##### Splitting the write from the accumulation keeps the heavy rate kernel's argument list
-##### independent of which optional prognostic groups exist, so a single compiled kernel
-##### serves every configuration and only the cheap accumulation kernels vary. The cost is
-##### one extra store and load per prognostic; fusing `Gⁿ` into the rate kernel instead
-##### would save that traffic at the price of a rate kernel per configuration.
+##### once, so one kernel evaluates all of them per cell and adds each straight into `Gⁿ`.
 #####
 
-@kernel function _p3_compute_tendency_cache_kernel!(μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
+@kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -113,80 +106,47 @@ end
     result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
                                  surface_temperature, temperature_tendency,
                                  vapor_tendency)
-    write_p3_tendency_cache!(μ, i, j, k, p3, result)
+    add_p3_tendencies!(G, i, j, k, p3, result)
 end
 
 #####
 ##### Fused tendency override (fast path for AtmosphereModel)
 #####
 #
-# P3 evaluates its process-rate cache from the current state with the
-# adiabatic-only diffusional-growth driver described above, then adds the cached
-# contributions to `Gⁿ`. P3 sedimentation is assembled separately by the scalar
-# transport operators using the fall speeds prepared earlier in the stage.
-# The state-based `microphysical_tendency` methods above remain the gridless
-# fallback used by ParcelModels.
+# P3 evaluates its process rates from the current state with the adiabatic-only
+# diffusional-growth driver described above, and adds them to `Gⁿ` in the same kernel.
+# P3 sedimentation is assembled separately by the scalar transport operators using the
+# fall speeds `update_microphysical_auxiliaries!` established during `update_state!`.
+# The state-based `microphysical_tendency` methods above remain the gridless fallback
+# used by ParcelModels.
 
-@kernel function _add_p3_base_tendencies_kernel!(Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnʳ,
-                                                 Gρqⁱ, Gρnⁱ, Gρqᶠ, Gρbᶠ,
-                                                 Gρqʷⁱ, μ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        Gρqᵛ[i, j, k]   += μ.cache_ρqᵛ[i, j, k]
-        Gρqᶜˡ[i, j, k]  += μ.cache_ρqᶜˡ[i, j, k]
-        Gρqʳ[i, j, k]   += μ.cache_ρqʳ[i, j, k]
-        Gρnʳ[i, j, k]   += μ.cache_ρnʳ[i, j, k]
-        Gρqⁱ[i, j, k]   += μ.cache_ρqⁱ[i, j, k]
-        Gρnⁱ[i, j, k]   += μ.cache_ρnⁱ[i, j, k]
-        Gρqᶠ[i, j, k]   += μ.cache_ρqᶠ[i, j, k]
-        Gρbᶠ[i, j, k]   += μ.cache_ρbᶠ[i, j, k]
-        Gρqʷⁱ[i, j, k]  += μ.cache_ρqʷⁱ[i, j, k]
-    end
-end
+# Just the `Gⁿ` slots P3 writes, not the model's whole tendency tuple. Dispatch is on a
+# *type*, so the reduced tuple is a compile-time constant.
+@inline p3_tendency_fields(G, p3::P3) =
+    merge((; G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnʳ, G.ρqⁱ, G.ρnⁱ, G.ρqᶠ, G.ρbᶠ, G.ρqʷⁱ),
+          p3_aerosol_tendency_fields(G, p3.aerosol),
+          p3_supersaturation_tendency_fields(G, p3.process_rates))
 
-# One kernel per optional prognostic group, launched only when that group exists.
-@kernel function _add_p3_sᵛ⁺ˡ_tendency_kernel!(Gρsᵛ⁺ˡ, cache_ρsᵛ⁺ˡ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gρsᵛ⁺ˡ[i, j, k] += cache_ρsᵛ⁺ˡ[i, j, k]
-end
+@inline p3_aerosol_tendency_fields(G, ::Nothing) = (;)
+@inline p3_aerosol_tendency_fields(G, _) = (; G.ρnᶜˡ, G.ρnᵃ)
 
-# Droplet number and unactivated aerosol are prognostic together, only in the
-# aerosol-activation path, so one kernel covers both.
-@kernel function _add_p3_aerosol_tendency_kernel!(Gρnᶜˡ, cache_ρnᶜˡ, Gρnᵃ, cache_ρnᵃ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        Gρnᶜˡ[i, j, k] += cache_ρnᶜˡ[i, j, k]
-        Gρnᵃ[i, j, k] += cache_ρnᵃ[i, j, k]
-    end
-end
+@inline p3_supersaturation_tendency_fields(G, ::ProcessRateParameters{FT, false}) where FT = (;)
+@inline p3_supersaturation_tendency_fields(G, ::ProcessRateParameters{FT, true}) where FT = (; G.ρsᵛ⁺ˡ)
 
 function AM.compute_microphysical_tendencies!(p3::P3, model)
     grid = model.grid
     arch = grid.architecture
-    G = model.timestepper.Gⁿ
     μ = model.microphysical_fields
 
     ρ_field = AM.total_density(model.dynamics)
 
     compute_p3_surface_temperature!(μ.surface_temperature, model.temperature, grid)
 
-    launch!(arch, grid, :xyz, _p3_compute_tendency_cache_kernel!,
+    launch!(arch, grid, :xyz, _p3_add_tendencies_kernel!,
+            p3_tendency_fields(model.timestepper.Gⁿ, p3),
             μ, model.formulation, model.dynamics, grid,
             model.thermodynamic_constants, p3, ρ_field,
             model.velocities)
-
-    launch!(arch, grid, :xyz, _add_p3_base_tendencies_kernel!,
-            G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnʳ,
-            G.ρqⁱ, G.ρnⁱ, G.ρqᶠ, G.ρbᶠ, G.ρqʷⁱ, μ)
-
-    if predicts_supersaturation(p3.process_rates)
-        launch!(arch, grid, :xyz, _add_p3_sᵛ⁺ˡ_tendency_kernel!, G.ρsᵛ⁺ˡ, μ.cache_ρsᵛ⁺ˡ)
-    end
-
-    if !isnothing(p3.aerosol)
-        launch!(arch, grid, :xyz, _add_p3_aerosol_tendency_kernel!,
-                G.ρnᶜˡ, μ.cache_ρnᶜˡ, G.ρnᵃ, μ.cache_ρnᵃ)
-    end
 
     return nothing
 end

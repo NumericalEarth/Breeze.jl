@@ -85,7 +85,7 @@ using Oceananigans.TimeSteppers: update_state!
         @test density_with_nonmass_moments ≈ expected_density
     end
 
-    @testset "P3 cache and fall speeds follow the current RK-stage state" begin
+    @testset "P3 tendencies and fall speeds follow the current RK-stage state" begin
         FT = Float64
         grid = RectilinearGrid(default_arch, FT; size = (2, 2, 2),
                                extent = (100, 100, 100))
@@ -118,8 +118,11 @@ using Oceananigans.TimeSteppers: update_state!
         # `update_state!` is idempotent, so computing tendencies must not move them.
         @test Array(interior(model.microphysical_fields.wᶜˡ, :, :, 1:Nz)) == fall_speed_after_set
 
+        # `ρqʳ = 0` here, so nothing sediments or advects and `Gⁿ.ρqʳ` is the
+        # microphysics source alone.
         first_fall_speed = Array(interior(model.microphysical_fields.wᶜˡ, :, :, 1:Nz))
-        first_rain_source = Array(interior(model.microphysical_fields.cache_ρqʳ))
+        first_rain_source = Array(interior(model.timestepper.Gⁿ.ρqʳ))
+        @test all(Array(interior(model.microphysical_fields.ρqʳ)) .== 0)
         @test all(first_fall_speed .< 0)
         @test all(Array(interior(model.microphysical_fields.wᶜˡ, :, :, Nz+1:Nz+1)) .== 0)
         @test any(first_rain_source .> 0)
@@ -128,7 +131,7 @@ using Oceananigans.TimeSteppers: update_state!
         update_state!(model)
 
         second_fall_speed = Array(interior(model.microphysical_fields.wᶜˡ, :, :, 1:Nz))
-        second_rain_source = Array(interior(model.microphysical_fields.cache_ρqʳ))
+        second_rain_source = Array(interior(model.timestepper.Gⁿ.ρqʳ))
         @test second_fall_speed != first_fall_speed
         @test second_rain_source != first_rain_source
     end
@@ -162,7 +165,7 @@ using Oceananigans.TimeSteppers: update_state!
 
         # No droplet-number state is allocated or advected. The public diagnostic
         # still reports the prescribed volumetric number as a lazy constant field.
-        for name in (:ρnᶜˡ, :nᶜˡ, :cache_ρnᶜˡ, :ρnᵃ, :nᵃ, :cache_ρnᵃ)
+        for name in (:ρnᶜˡ, :nᶜˡ, :ρnᵃ, :nᵃ)
             @test !haskey(μ, name)
         end
         @test !hasproperty(model.timestepper.Gⁿ, :ρnᶜˡ)
@@ -178,7 +181,7 @@ using Oceananigans.TimeSteppers: update_state!
         time_step!(model, FT(1))
 
         # The rates still see the prescribed parameter, so cloud processes are active.
-        @test any(Array(interior(μ.cache_ρqʳ)) .> 0)
+        @test any(Array(interior(μ.ρqʳ)) .> 0)
 
         # The aerosol-activation path does carry both, and there `μ.nᶜˡ` is the specific
         # counterpart that `compute_tendencies!` advects, so it must equal `ρnᶜˡ / ρ`.

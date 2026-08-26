@@ -180,16 +180,19 @@ total_density(dynamics) = dynamics_density(dynamics)
 """
 $(TYPEDSIGNATURES)
 
-Return the density ``ρ`` of the gas phase — dry air plus vapor, ``ρᵈ + ρᵛ`` — at `(i, j, k)`, from
-the equation of state at the local temperature and composition, ``ρ = p / (Rᵐ(q) T)``. This is the
-density that turns a mass fraction into a partial pressure — the vapor pressure is
-``pᵛ = ρ qᵛ Rᵛ T``. It differs from [`total_density`](@ref) in omitting the condensate, and it is
-not in general the density that the prognostic partial densities are weighted by.
+Return the density ``ρ`` at `(i, j, k)` that mass fractions are referenced to, so that ``qˣ`` and
+``ρ`` give a partial pressure — the vapor pressure is ``pᵛ = ρ qᵛ Rᵛ T``.
 
-The default returns `total_density(dynamics)`, correct wherever that field *is* the density of the
-gas phase: compressible dynamics, where it is diagnosed from the prognostic state, and
-prescribed-density models. `AnelasticDynamics` overrides it, because its reference density ``ρᵣ(z)``
-is a *dry* reference state evaluated at the reference temperature and pressure.
+This is the *total* density, condensate loading included, not the gas-phase density ``ρᵈ + ρᵛ``:
+``Rᵐ(q) = qᵈ Rᵈ + qᵛ Rᵛ`` uses ``qᵈ = 1 - qᵛ - qˡ - qⁱ``, so ``p / (Rᵐ(q) T)`` returns the total
+and the two differ by ``1 - qˡ - qⁱ``. Total is required for consistency with
+`saturation_specific_humidity(T, ρ, …) = pᵛ⁺ / (ρ Rᵛ T)`, which references ``qᵛ⁺`` to the same
+``ρ``; mixing the two would break ``qᵛ / qᵛ⁺`` as the saturation ratio. The name is inherited and
+does not describe this.
+
+The default returns `total_density(dynamics)`. `AnelasticDynamics` overrides it because its
+`dynamics_density` is the *dry* reference profile ``ρᵣ(z)``, so the override rediagnoses the local
+moist total density at the reference pressure.
 """
 @inline function gas_phase_density(i, j, k, dynamics, T, q, constants)
     return @inbounds total_density(dynamics)[i, j, k]

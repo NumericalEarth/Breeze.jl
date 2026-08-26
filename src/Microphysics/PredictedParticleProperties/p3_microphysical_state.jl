@@ -302,19 +302,6 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
     wⁱ  = ZFaceField(grid; boundary_conditions=face_bcs)  # Ice mass-weighted terminal velocity
     wⁱₙ = ZFaceField(grid; boundary_conditions=face_bcs) # Ice number-weighted terminal velocity
 
-    # Microphysical tendency cache (written once per RK-stage tendency evaluation,
-    # then added to G). Storing the microphysics-only contribution avoids one
-    # compute_p3_process_rates call per prognostic field.
-    cache_ρqᶜˡ = CenterField(grid)
-    cache_ρqʳ  = CenterField(grid)
-    cache_ρnʳ  = CenterField(grid)
-    cache_ρqⁱ  = CenterField(grid)
-    cache_ρnⁱ  = CenterField(grid)
-    cache_ρqᶠ  = CenterField(grid)
-    cache_ρbᶠ  = CenterField(grid)
-    cache_ρqʷⁱ = CenterField(grid)
-    cache_ρqᵛ  = CenterField(grid)
-
     # Hallett–Mossop uses the temperature at the lowest active atmospheric cell.
     # Store one value per column rather than assuming that local k=1 is active.
     surface_temperature = Field{Center, Center, Nothing}(grid)
@@ -322,8 +309,6 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
     fields = (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ,
                 qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, qᵛ,
                 wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ,
-                cache_ρqᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
-                cache_ρqᶠ, cache_ρbᶠ, cache_ρqʷⁱ, cache_ρqᵛ,
                 surface_temperature)
 
     return merge(fields,
@@ -345,17 +330,14 @@ end
     (; ρnᶜˡ = CenterField(grid),        # Cloud number density [1/m³]
        ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
        nᶜˡ = CenterField(grid),         # Cloud number concentration [kg⁻¹]
-       nᵃ = CenterField(grid),          # Unactivated aerosol [kg⁻¹]
-       cache_ρnᶜˡ = CenterField(grid),
-       cache_ρnᵃ = CenterField(grid))
+       nᵃ = CenterField(grid))          # Unactivated aerosol [kg⁻¹]
 
 # Predicted supersaturation, off by default. With the switch off every rate that
 # would touch `sᵛ⁺ˡ` is gated to zero, so the prognostic carries no information.
 @inline supersaturation_fields(::ProcessRateParameters{FT, false}, grid) where FT = (;)
 
 @inline supersaturation_fields(::ProcessRateParameters{FT, true}, grid) where FT =
-    (; ρsᵛ⁺ˡ = CenterField(grid), sᵛ⁺ˡ = CenterField(grid),
-       cache_ρsᵛ⁺ˡ = CenterField(grid))
+    (; ρsᵛ⁺ˡ = CenterField(grid), sᵛ⁺ˡ = CenterField(grid))
 
 #####
 ##### Gridless MicrophysicalState construction
@@ -615,7 +597,7 @@ struct P3FallSpeedResult{FT}
     wᶜˡ :: FT; wᶜˡₙ :: FT; wʳ :: FT; wʳₙ :: FT; wⁱ :: FT; wⁱₙ :: FT
 end
 
-struct P3TendencyCacheResult{FT}
+struct P3TendencyResult{FT}
     tendency_ρqᶜˡ :: FT; tendency_ρnᶜˡ :: FT
     tendency_ρqʳ :: FT; tendency_ρnʳ :: FT
     tendency_ρqⁱ :: FT; tendency_ρnⁱ :: FT
@@ -694,7 +676,7 @@ end
     aerosol_number_tendency = tendency_ρnᵃ(rates, ρ)
 
     FT = typeof(ρ)
-    return P3TendencyCacheResult{FT}(cloud_mass_tendency, cloud_number_tendency,
+    return P3TendencyResult{FT}(cloud_mass_tendency, cloud_number_tendency,
                                      rain_mass_tendency, rain_number_tendency,
                                      ice_mass_tendency, ice_number_tendency,
                                      rime_mass_tendency, rime_volume_tendency,
@@ -706,7 +688,7 @@ end
 # P3's external thermodynamic forcing on both paths. The accompanying resolved-vapor
 # tendency is zero. On the Eulerian grid path this deliberately omits resolved
 # transport, turbulent mixing, radiation, and user forcing from the diffusional-growth
-# driver; see `_p3_compute_tendency_cache_kernel!`.
+# driver; see `_p3_add_tendencies_kernel!`.
 @inline function p3_adiabatic_temperature_tendency(ℳ::P3MicrophysicalState, 𝒰, constants)
     cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
     return -constants.gravitational_acceleration * ℳ.w / cᵖᵐ
@@ -753,41 +735,42 @@ const P3ImpenetrableBoundaryCondition = BoundaryCondition{<:NormalFlow, Nothing}
     return nothing
 end
 
-@inline function write_p3_tendency_cache!(μ, i, j, k, p3::P3, result::P3TendencyCacheResult)
+# `G` is the reduced tuple from `p3_tendency_fields`. The `+=` lands on top of the
+# advection, diffusion and forcing the scalar kernels have already written.
+@inline function add_p3_tendencies!(G, i, j, k, p3::P3, result::P3TendencyResult)
     @inbounds begin
-        μ.cache_ρqᶜˡ[i, j, k] = result.tendency_ρqᶜˡ
-        μ.cache_ρqʳ[i, j, k]  = result.tendency_ρqʳ
-        μ.cache_ρnʳ[i, j, k]  = result.tendency_ρnʳ
-        μ.cache_ρqⁱ[i, j, k]  = result.tendency_ρqⁱ
-        μ.cache_ρnⁱ[i, j, k]  = result.tendency_ρnⁱ
-        μ.cache_ρqᶠ[i, j, k]  = result.tendency_ρqᶠ
-        μ.cache_ρbᶠ[i, j, k]  = result.tendency_ρbᶠ
-        μ.cache_ρqʷⁱ[i, j, k] = result.tendency_ρqʷⁱ
-        μ.cache_ρqᵛ[i, j, k]  = result.tendency_ρqᵛ
+        G.ρqᶜˡ[i, j, k] += result.tendency_ρqᶜˡ
+        G.ρqʳ[i, j, k]  += result.tendency_ρqʳ
+        G.ρnʳ[i, j, k]  += result.tendency_ρnʳ
+        G.ρqⁱ[i, j, k]  += result.tendency_ρqⁱ
+        G.ρnⁱ[i, j, k]  += result.tendency_ρnⁱ
+        G.ρqᶠ[i, j, k]  += result.tendency_ρqᶠ
+        G.ρbᶠ[i, j, k]  += result.tendency_ρbᶠ
+        G.ρqʷⁱ[i, j, k] += result.tendency_ρqʷⁱ
+        G.ρqᵛ[i, j, k]  += result.tendency_ρqᵛ
     end
-    write_p3_cloud_number_cache!(μ, i, j, k, p3.aerosol, result)
-    write_p3_supersaturation_cache!(μ, i, j, k, p3.process_rates, result)
+    add_p3_cloud_number_tendencies!(G, i, j, k, p3.aerosol, result)
+    add_p3_supersaturation_tendency!(G, i, j, k, p3.process_rates, result)
     return nothing
 end
 
-# Configurations without a prognostic have no cache to fill and no `Gⁿ` slot to add it to.
-# The corresponding `result` entries are zero there anyway.
-@inline write_p3_cloud_number_cache!(μ, i, j, k, ::Nothing, result) = nothing
+# Configurations without a prognostic have no `Gⁿ` slot to add to.
+@inline add_p3_cloud_number_tendencies!(G, i, j, k, ::Nothing, result) = nothing
 
-@inline function write_p3_cloud_number_cache!(μ, i, j, k, _, result)
-    @inbounds μ.cache_ρnᶜˡ[i, j, k] = result.tendency_ρnᶜˡ
-    @inbounds μ.cache_ρnᵃ[i, j, k] = result.tendency_ρnᵃ
+@inline function add_p3_cloud_number_tendencies!(G, i, j, k, _, result)
+    @inbounds G.ρnᶜˡ[i, j, k] += result.tendency_ρnᶜˡ
+    @inbounds G.ρnᵃ[i, j, k] += result.tendency_ρnᵃ
     return nothing
 end
 
-@inline write_p3_supersaturation_cache!(
-    μ, i, j, k, ::ProcessRateParameters{FT, false}, result
+@inline add_p3_supersaturation_tendency!(
+    G, i, j, k, ::ProcessRateParameters{FT, false}, result
 ) where FT = nothing
 
-@inline function write_p3_supersaturation_cache!(
-    μ, i, j, k, ::ProcessRateParameters{FT, true}, result
+@inline function add_p3_supersaturation_tendency!(
+    G, i, j, k, ::ProcessRateParameters{FT, true}, result
 ) where FT
-    @inbounds μ.cache_ρsᵛ⁺ˡ[i, j, k] = result.tendency_ρsᵛ⁺ˡ
+    @inbounds G.ρsᵛ⁺ˡ[i, j, k] += result.tendency_ρsᵛ⁺ˡ
     return nothing
 end
 
