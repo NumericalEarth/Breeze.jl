@@ -6,7 +6,7 @@ export cos_solar_zenith_angle,
        hour_angle,
        day_of_year
 
-using Dates: AbstractDateTime, DateTime, Dates
+using Dates: AbstractDateTime, Dates
 using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans.Grids: RectilinearGrid, Flat, Bounded, Center, xnode, ynode
 
