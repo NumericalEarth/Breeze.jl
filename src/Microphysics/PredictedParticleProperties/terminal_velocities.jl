@@ -61,16 +61,12 @@ table lookups.
     FT = typeof(qʳ)
     parameters = p3.process_rates
     ρ₀ = parameters.reference_air_density
-    ρʷ = parameters.liquid_water_density
 
     qʳ_eff = max(0, qʳ)
-    nʳ_eff = max(nʳ, p3.minimum_number_mixing_ratio)
     ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
-    m̄  = qʳ_eff / nʳ_eff
-    λʳ = cbrt(FT(π) * ρʷ / max(m̄, FT(parameters.floors.mass_scale)))
-    λʳ = clamp(λʳ, parameters.minimum_rain_slope, parameters.maximum_rain_slope)
-    log_slope = log10(λʳ)
+    # Same λʳ the process rates use.
+    log_slope = log10(rain_slope_parameter(qʳ_eff, nʳ, parameters))
 
     mass_weighted_velocity = p3.rain.velocity_mass(log_slope) * ρ_correction
     number_weighted_velocity = p3.rain.velocity_number(log_slope) * ρ_correction

@@ -72,7 +72,6 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
 function p3_with_process_rates(p3, process_rates)
     return PredictedParticlePropertiesMicrophysics(
-        p3.water_density,
         p3.minimum_mass_mixing_ratio,
         p3.minimum_number_mixing_ratio,
         p3.ice,
@@ -101,6 +100,11 @@ end
 function tendency_test_p3(FT; process_rates = ProcessRateParameters(FT),
                               warm_rain_scheme = KhairoutdinovKogan2000())
     return PredictedParticlePropertiesMicrophysics(FT; process_rates, warm_rain_scheme)
+end
+
+@inline function bundled_p3_tendencies(p3, ρ, ℳ, 𝒰, constants)
+    names = prognostic_field_names(p3)
+    return Breeze.AtmosphereModels.microphysical_tendencies(p3, names, ρ, ℳ, 𝒰, constants)
 end
 
 function expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ, transport, FT)
@@ -411,7 +415,7 @@ end
                                   qⁱ, nⁱ, FT(0), FT(0),
                                   FT(0), FT(0), FT(0), FT(0))
 
-        rime_state = PPP.consistent_rime_state(p3, qⁱ, FT(0), FT(0), FT(0))
+        rime_state = PPP.consistent_rime_state(p3, qⁱ, FT(0), FT(0))
         Fˡ = PPP.liquid_fraction_on_ice(qⁱ, FT(0))
         log_m = log10(qⁱ / nⁱ)
         limiter = p3.ice.lambda_limiter
@@ -714,6 +718,35 @@ end
         vapor_tendency_ascending = microphysical_tendency(
             p3, Val(:ρqᵛ), ρ, ℳ_with_w, 𝒰, constants)
         @test vapor_tendency_ascending < vapor_tendency_stationary
+    end
+
+    @testset "Bundled tendencies are allocation-free for optional prognostics" begin
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        ρ = one(FT)
+        ℳ = P3MicrophysicalState(FT(1e-4), FT(2e8), FT(1e-5), FT(1e4),
+                                     FT(1e-5), FT(1e5), FT(1e-6), FT(2.5e-9),
+                                     zero(FT), zero(FT), FT(1e8), one(FT))
+        q = MoistureMassFractions(FT(0.005), FT(1.1e-4), FT(1e-5))
+        𝒰 = LiquidIcePotentialTemperatureState(FT(280), q, FT(1e5), FT(9e4))
+        aerosol = AerosolActivation(AerosolMode(FT))
+
+        p3_with_aerosol = PredictedParticlePropertiesMicrophysics(FT; aerosol)
+        aerosol_tendencies = @inferred bundled_p3_tendencies(
+            p3_with_aerosol, ρ, ℳ, 𝒰, constants)
+        @test aerosol_tendencies isa NTuple{10, FT}
+        aerosol_allocations = @allocated bundled_p3_tendencies(
+            p3_with_aerosol, ρ, ℳ, 𝒰, constants)
+        @test aerosol_allocations == 0
+
+        p3_with_supersaturation = PredictedParticlePropertiesMicrophysics(
+            FT; aerosol, predict_supersaturation = true)
+        supersaturation_tendencies = @inferred bundled_p3_tendencies(
+            p3_with_supersaturation, ρ, ℳ, 𝒰, constants)
+        @test supersaturation_tendencies isa NTuple{11, FT}
+        supersaturation_allocations = @allocated bundled_p3_tendencies(
+            p3_with_supersaturation, ρ, ℳ, 𝒰, constants)
+        @test supersaturation_allocations == 0
     end
 
     @testset "Tendency functions - Float32 type stability" begin
@@ -1718,7 +1751,7 @@ end
         @test bsmall ≈ FT(1e-14) / FT(900)
 
         # Below `bsmall` no admissible density leaves significant rime: drop the pair.
-        no_volume = consistent_rime_state(p3, FT(1e-4), FT(1e-5), FT(1e-18), FT(0))
+        no_volume = consistent_rime_state(p3, FT(1e-4), FT(1e-5), FT(1e-18))
         @test no_volume.qᶠ == 0
         @test no_volume.bᶠ == 0
         @test no_volume.ρᶠ == 0
@@ -1726,35 +1759,35 @@ end
 
         # Above it, repair instead: the implied density overshoots `maximum_rime_density`,
         # so re-densify to it and recompute `bᶠ` rather than discarding the rime.
-        dense_rime = consistent_rime_state(p3, FT(1e-4), FT(1e-5), FT(1e-16), FT(0))
+        dense_rime = consistent_rime_state(p3, FT(1e-4), FT(1e-5), FT(1e-16))
         @test FT(1e-16) > bsmall
         @test dense_rime.qᶠ == FT(1e-5)
         @test dense_rime.ρᶠ == parameters.maximum_rime_density
         @test dense_rime.bᶠ ≈ dense_rime.qᶠ / parameters.maximum_rime_density
         @test dense_rime.Fᶠ ≈ FT(0.1)
 
-        tiny_rime = consistent_rime_state(p3, FT(1e-4), FT(5e-15), FT(1e-15), FT(0))
+        tiny_rime = consistent_rime_state(p3, FT(1e-4), FT(5e-15), FT(1e-15))
         @test tiny_rime.qᶠ == 0
         @test tiny_rime.bᶠ == 0
 
-        low_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-6), FT(0))
+        low_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-6))
         @test low_density.ρᶠ == parameters.minimum_rime_density
         @test low_density.bᶠ ≈ low_density.qᶠ / parameters.minimum_rime_density
 
-        high_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-8), FT(0))
+        high_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-8))
         @test high_density.ρᶠ == parameters.maximum_rime_density
         @test high_density.bᶠ ≈ high_density.qᶠ / parameters.maximum_rime_density
 
-        capped = consistent_rime_state(p3, FT(1e-5), FT(2e-5), FT(5e-8), FT(0))
+        capped = consistent_rime_state(p3, FT(1e-5), FT(2e-5), FT(5e-8))
         @test capped.qᶠ == FT(1e-5)
         @test capped.ρᶠ ≈ FT(400)
         @test capped.bᶠ ≈ capped.qᶠ / capped.ρᶠ
         @test capped.Fᶠ == 1
 
-        # D14: Julia's qⁱ is already dry ice, so qⁱ_dry = qⁱ (no qʷⁱ subtraction).
-        liquid_rime = consistent_rime_state(p3, FT(1e-4), FT(8e-5), FT(2e-7), FT(5e-5))
-        # qⁱ_dry = 1e-4 (Julia qⁱ is already dry ice)
-        # qᶠ = 8e-5 < 1e-4, so NOT capped
+        # D14: Julia's qⁱ is already dry ice, so the rime cap is qⁱ itself and there is
+        # no qʷⁱ argument to subtract.
+        liquid_rime = consistent_rime_state(p3, FT(1e-4), FT(8e-5), FT(2e-7))
+        # qᶠ = 8e-5 < qⁱ_dry = 1e-4, so NOT capped
         @test liquid_rime.qᶠ ≈ FT(8e-5)
         @test liquid_rime.Fᶠ ≈ FT(0.8)  # = qᶠ / qⁱ_dry = 8e-5 / 1e-4
 
@@ -1789,7 +1822,7 @@ end
             (FT(1e-4), FT(2e-5), FT(2e-8)),
             (FT(1e-5), FT(2e-5), FT(5e-8)),
         )
-            got = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, FT(0))
+            got = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
             ref = reference_bulk_rime_density(qⁱ, qᶠ, bᶠ)
             @test got.qᶠ == ref.qᶠ
             @test got.bᶠ ≈ ref.bᶠ
@@ -2046,7 +2079,7 @@ end
                                 qᶠ, qᶠ / FT(400), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
-        rime = consistent_rime_state(p3, qⁱ, qᶠ, qᶠ / FT(400), qʷⁱ)
+        rime = consistent_rime_state(p3, qⁱ, qᶠ, qᶠ / FT(400))
         expected_number = expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
                                                                        T, rime.Fᶠ, rime.ρᶠ, ρ)
         expected_mass = PPP.rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ,

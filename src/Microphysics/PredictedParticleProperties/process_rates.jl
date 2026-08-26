@@ -315,6 +315,8 @@ end
                              partial_melt, complete_melt, melt_n)
 end
 
+# Convenience overloads that fill in the bounded ice moments from `p3_ice_moment_bounds`.
+# `compute_p3_process_rates` always supplies them, so only tests reach these.
 @noinline function p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
                                    phase1::P3Phase1Rates)
     return p3_phase2_rates(p3, ρ, ℳ, constants, state, phase1, state.T)
@@ -322,16 +324,11 @@ end
 
 @noinline function p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
                                    phase1::P3Phase1Rates, surface_temperature)
-    nⁱ_global = min(max(0, ℳ.nⁱ),
-                    p3.process_rates.maximum_ice_number_density / ρ)
-    nⁱ_diagnostic = max(nⁱ_global, p3.minimum_number_mixing_ratio)
     qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
-    qⁱ_total = max(total_ice_mass(ℳ.qⁱ, qʷⁱ),
-                   typeof(ρ)(p3.process_rates.floors.mass_scale))
-    ρ_mean = ice_mean_density(p3, qⁱ_total, nⁱ_diagnostic,
-                              state.Fᶠ, state.Fˡ, state.ρᶠ)
+    bounds = p3_ice_moment_bounds(p3, ρ, total_ice_mass(ℳ.qⁱ, qʷⁱ), ℳ.nⁱ,
+                                  state.Fᶠ, state.Fˡ, state.ρᶠ)
     return p3_phase2_rates(p3, ρ, ℳ, constants, state, phase1,
-                            surface_temperature, nⁱ_diagnostic, ρ_mean)
+                           surface_temperature, bounds.nⁱ_diagnostic, bounds.ρ_mean)
 end
 
 @noinline function p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
@@ -586,13 +583,13 @@ end
     qʳ_pos = max(0, qʳ)
     nʳ_floored = max(nʳ, p3.minimum_number_mixing_ratio)
     # rain_slope_parameter and consistent_rime_state are pure functions of (ℳ, parameters);
-    # when properties is supplied (hot path from p3_tendency_compute / p3_rates_and_properties)
+    # when properties is supplied (hot path from p3_tendency_compute / p3_state_tendencies)
     # we reuse the values already computed in p3_ice_properties.
     λʳ = isnothing(properties) ? rain_slope_parameter(qʳ_pos, nʳ_floored, parameters) : properties.λʳ
     nʳ = ifelse(rain_active, rain_number_from_slope(qʳ_pos, λʳ, parameters), zero(FT))
 
     qᶠ, bᶠ, Fᶠ, ρᶠ = if isnothing(properties)
-        rs = consistent_rime_state(p3, qⁱ, ℳ.qᶠ, ℳ.bᶠ, qʷⁱ)
+        rs = consistent_rime_state(p3, qⁱ, ℳ.qᶠ, ℳ.bᶠ)
         rs.qᶠ, rs.bᶠ, rs.Fᶠ, rs.ρᶠ
     else
         properties.qᶠ, properties.bᶠ, properties.Fᶠ, properties.ρᶠ

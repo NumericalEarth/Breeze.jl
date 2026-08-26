@@ -7,7 +7,6 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
 function p3_with_warm_rain_scheme(p3, warm_rain_scheme)
     return PPP.PredictedParticlePropertiesMicrophysics(
-        p3.water_density,
         p3.minimum_mass_mixing_ratio,
         p3.minimum_number_mixing_ratio,
         p3.ice,

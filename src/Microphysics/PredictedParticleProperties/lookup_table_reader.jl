@@ -82,7 +82,6 @@ function read_lookup_tables(directory::AbstractString;
     end
 
     return PredictedParticlePropertiesMicrophysics(
-        FT(thermodynamic_constants.liquid.density),
         FT(minimum_mass_mixing_ratio),
         FT(minimum_number_mixing_ratio),
         ice,

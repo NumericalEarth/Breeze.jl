@@ -37,7 +37,6 @@ const _lookup_table_dir = ensure_artifact_installed("P3_lookup_tables", joinpath
 
     @test p3.ice.lambda_limiter isa IceLambdaLimiter
     @test p3.ice.ice_rain isa IceRainCollection
-    @test p3.water_density == 1000
     @test p3.process_rates.liquid_water_density == 1000
 
     @test p3.ice.fall_speed.mass_weighted isa RimeDensityIndexedTable4D

@@ -74,7 +74,7 @@ function compute_p3_surface_temperature!(surface_temperature, temperature_field,
 end
 
 #####
-##### Process-rate cache
+##### Process-rate tendencies
 #####
 ##### "The P3 tendencies" are the tendencies of P3's own microphysical prognostics
 ##### (ρqᵛ, ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ, and the optional ρnᶜˡ/ρnᵃ/ρsᵛ⁺ˡ).

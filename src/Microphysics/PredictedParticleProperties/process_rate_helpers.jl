@@ -249,15 +249,15 @@ Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density `ρᶠ`
 
 The rime-volume threshold is `minimum_mass_mixing_ratio / maximum_rime_density`,
 so that it scales with the scheme's mass floor rather than being a fixed literal.
+
+`qⁱ` is the dry ice mass, so it is already the bound on rime; there is no `qʷⁱ` argument,
+unlike the reference implementation, which passes total ice and subtracts it here.
 """
-@inline function consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, qʷⁱ)
+@inline function consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
-    qⁱ_available = max(0, qⁱ)
-    # qⁱ is already the dry ice mass, so qⁱ_dry = qⁱ_available
-    # (no need to subtract qʷⁱ again).
-    qⁱ_dry = qⁱ_available
+    qⁱ_dry = max(0, qⁱ)
     qᶠ_raw = max(0, qᶠ)
     bᶠ_raw = max(0, bᶠ)
 
@@ -330,14 +330,20 @@ end
     return bounded_ice_number(p3.ice.lambda_limiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
 end
 
-@inline function rain_slope_parameter(qʳ, nʳ, parameters)
+# Exponential rain PSD: λʳ = (π ρʷ nʳ / qʳ)^(1/3). `bounded_rain_number` needs the
+# unclamped value to tell whether the clamp fired.
+@inline function unbounded_rain_slope_parameter(qʳ, nʳ, parameters)
     FT = typeof(qʳ)
     qʳ_eff = max(0, qʳ)
     nʳ_eff = max(0, nʳ)
     λʳ_cubed = FT(π) * parameters.liquid_water_density * nʳ_eff /
                max(qʳ_eff, FT(parameters.floors.mass_scale))
-    return clamp(cbrt(λʳ_cubed), parameters.minimum_rain_slope, parameters.maximum_rain_slope)
+    return cbrt(λʳ_cubed)
 end
+
+@inline rain_slope_parameter(qʳ, nʳ, parameters) =
+    clamp(unbounded_rain_slope_parameter(qʳ, nʳ, parameters),
+          parameters.minimum_rain_slope, parameters.maximum_rain_slope)
 
 @inline function rain_number_from_slope(qʳ, λʳ, parameters)
     FT = typeof(qʳ)
@@ -346,11 +352,9 @@ end
 end
 
 @inline function bounded_rain_number(nʳ, qʳ, parameters)
-    FT = typeof(qʳ)
     qʳ_eff = max(0, qʳ)
     nʳ_eff = max(0, nʳ)
-    unbounded_slope = cbrt(FT(π) * parameters.liquid_water_density * nʳ_eff /
-                           max(qʳ_eff, FT(parameters.floors.mass_scale)))
+    unbounded_slope = unbounded_rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
     λʳ = clamp(unbounded_slope, parameters.minimum_rain_slope, parameters.maximum_rain_slope)
     nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
     needs_adjustment = (unbounded_slope < parameters.minimum_rain_slope) |

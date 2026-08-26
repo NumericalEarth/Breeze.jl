@@ -377,7 +377,7 @@ end
     nⁱ  = μ.ρnⁱ / ρ
     FT = typeof(ρ)
     qʷⁱ = μ.ρqʷⁱ / ρ
-    rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ, qʷⁱ)
+    rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ)
     qᶠ  = rime_state.qᶠ
     bᶠ  = rime_state.bᶠ
     # ρsᵛ⁺ˡ is absent unless predicted supersaturation is enabled; default to 0.
@@ -398,8 +398,7 @@ end
     qⁱ = μ.ρqⁱ / ρ
     qᶠ = μ.ρqᶠ / ρ
     bᶠ = μ.ρbᶠ / ρ
-    qʷⁱ = μ.ρqʷⁱ / ρ
-    rime_state = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, qʷⁱ)
+    rime_state = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
     return merge(μ, (; ρqᶠ = ρ * rime_state.qᶠ,
                        ρbᶠ = ρ * rime_state.bᶠ))
 end
@@ -432,7 +431,7 @@ end
         qʷⁱ = μ.ρqʷⁱ[i, j, k] / ρ
     end
     FT = typeof(ρ)
-    rime_state = consistent_rime_state(p3, qⁱ, @inbounds(μ.ρqᶠ[i, j, k]) / ρ, @inbounds(μ.ρbᶠ[i, j, k]) / ρ, qʷⁱ)
+    rime_state = consistent_rime_state(p3, qⁱ, @inbounds(μ.ρqᶠ[i, j, k]) / ρ, @inbounds(μ.ρbᶠ[i, j, k]) / ρ)
     qᶠ  = rime_state.qᶠ
     bᶠ  = rime_state.bᶠ
     sᵛ⁺ˡ = grid_supersaturation(p3.process_rates, μ, i, j, k, ρ)
@@ -494,7 +493,7 @@ end
         # nothing downstream of it consumes w: the auxiliary writes are copies of the
         # prognostic state, and the fall-speed path reads only the size distributions.
         # `w` enters P3 solely through the adiabatic temperature tendency and CCN
-        # activation, both of which live in the tendency-cache kernel.
+        # activation, both of which live in the tendency kernel.
         velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
         ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
         clamp_rime_state!(μ, i, j, k, ρ, ℳ)
@@ -525,8 +524,8 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
 # a user can output, and they are also the advecting velocities sedimentation reads, so
 # computing them anywhere else would leave them one stage behind the rest of the state.
 #
-# The process-rate caches are the exception, and legitimately so — they are tendencies, not
-# state. They are filled in compute_microphysical_tendencies! from the current state with an
+# The process rates are the exception, and legitimately so: they are tendencies, not state.
+# `compute_microphysical_tendencies!` evaluates them from the current state with an
 # adiabatic-only driver, which also keeps ~1000 lines of P3 process physics out of this
 # kernel. The fall-speed path is small by comparison and its heavy half
 # (`p3_fall_speed_compute`) is `@noinline`, so it compiles as a separate GPU function.
@@ -848,18 +847,18 @@ end
 ##### Microphysical tendencies
 #####
 #
-# Two paths:
-#   1. Grid-based (AtmosphereModel): the fused driver fills the cache once from the
-#      current state using the adiabatic-only forcing and adds every cached tendency to G.
-#   2. Gridless (ParcelModel): microphysical_tendency builds state and computes rates directly.
+# Two paths, both evaluating the process-rate bundle once per cell:
+#   1. Grid-based (AtmosphereModel): the fused driver builds the state with the
+#      adiabatic-only forcing and adds every tendency straight into Gⁿ.
+#   2. Gridless (ParcelModel): microphysical_tendencies builds state and computes rates directly.
 
-# Helper to compute P3 rates and extract ice properties from ℳ
+# Size-distribution properties shared by the fall speeds and the process rates.
 @inline function p3_ice_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     FT = typeof(ρ)
     qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
     qⁱ_raw = total_ice_mass(ℳ.qⁱ, qʷⁱ)
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
-    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, qʷⁱ)
+    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ)
     Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, qʷⁱ)
     bounds = p3_ice_moment_bounds(p3, ρ, qⁱ_raw, ℳ.nⁱ,
                                   rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
@@ -874,15 +873,32 @@ end
                           transport.ν, λʳ)
 end
 
-@inline function p3_rates_and_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+# Every P3 tendency from one process-rate evaluation, for callers with no grid. With no
+# column below, the local temperature stands in for the surface temperature.
+@inline function p3_state_tendencies(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     # Build ice properties first, then reuse them when computing rates to avoid
     # the redundant rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ
     # calls inside compute_p3_process_rates.
     properties = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
     surface_temperature = temperature(𝒰, constants)
     temperature_tendency = p3_adiabatic_temperature_tendency(ℳ, 𝒰, constants)
-    rates = compute_p3_process_rates(
-        p3, ρ, ℳ, 𝒰, constants, properties, surface_temperature,
-        temperature_tendency, zero(ρ))
-    return rates, properties
+    return p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
+                               surface_temperature, temperature_tendency, zero(ρ))
 end
+
+# Name-to-slot map for `P3TendencyResult`. Names P3 does not evolve (`:s`, `:qᵗ`, host
+# tracers) take the zero fallback. Leave the result type unparameterized in every method,
+# or the fallback becomes ambiguous with the named slots.
+@inline p3_tendency_component(result::P3TendencyResult, ::Val) = zero(result.tendency_ρqᵛ)
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqᶜˡ}) = result.tendency_ρqᶜˡ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρnᶜˡ}) = result.tendency_ρnᶜˡ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqʳ})  = result.tendency_ρqʳ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρnʳ})  = result.tendency_ρnʳ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqⁱ})  = result.tendency_ρqⁱ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρnⁱ})  = result.tendency_ρnⁱ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqᶠ})  = result.tendency_ρqᶠ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρbᶠ})  = result.tendency_ρbᶠ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqʷⁱ}) = result.tendency_ρqʷⁱ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρsᵛ⁺ˡ}) = result.tendency_ρsᵛ⁺ˡ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqᵛ})  = result.tendency_ρqᵛ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρnᵃ})  = result.tendency_ρnᵃ

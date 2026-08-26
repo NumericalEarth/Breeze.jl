@@ -16,8 +16,6 @@ The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
 struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS}
-    # Shared physical constants
-    water_density :: FT
     # Top-level thresholds
     minimum_mass_mixing_ratio :: FT
     minimum_number_mixing_ratio :: FT
@@ -179,7 +177,7 @@ Base.summary(::PredictedParticlePropertiesMicrophysics) = "PredictedParticleProp
 
 function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, summary(p3), '\n')
-    print(io, "├── ρʷ: ", p3.water_density, " kg/m³\n")
+    print(io, "├── ρʷ: ", p3.process_rates.liquid_water_density, " kg/m³\n")
     print(io, "├── qmin: ", p3.minimum_mass_mixing_ratio, " kg/kg\n")
     print(io, "├── ice: ", summary(p3.ice), "\n")
     print(io, "├── rain: ", summary(p3.rain), "\n")

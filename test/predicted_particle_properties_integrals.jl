@@ -60,7 +60,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         # Test main scheme construction
         p3 = PredictedParticlePropertiesMicrophysics()
         @test p3 isa PredictedParticlePropertiesMicrophysics
-        @test p3.water_density == 1000.0
+        @test p3.process_rates.liquid_water_density == 1000.0
         @test p3.minimum_mass_mixing_ratio == 1e-14
         @test p3.minimum_number_mixing_ratio == 1e-16
 
@@ -70,7 +70,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
         # Test with Float32
         p3_f32 = PredictedParticlePropertiesMicrophysics(Float32)
-        @test p3_f32.water_density isa Float32
+        @test p3_f32.process_rates.liquid_water_density isa Float32
         @test p3_f32.minimum_mass_mixing_ratio isa Float32
         @test p3_f32.ice.fall_speed.reference_air_density isa Float32
     end
@@ -209,10 +209,9 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Thermodynamic constants are shared" begin
-        # Water density should be at top level, shared by cloud and rain.
+        # `process_rates` holds the single water density every rate reads.
         p3 = PredictedParticlePropertiesMicrophysics()
-        @test p3.water_density ≈ 1000.0
-        @test p3.process_rates.liquid_water_density == p3.water_density
+        @test p3.process_rates.liquid_water_density ≈ 1000.0
 
         default_constants = ThermodynamicConstants()
         custom_liquid = Breeze.CondensedPhase(Float64;
@@ -230,7 +229,6 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         p3_custom = PredictedParticlePropertiesMicrophysics(Float64;
                                                             thermodynamic_constants = custom_constants)
 
-        @test p3_custom.water_density ≈ 998.0
         @test p3_custom.process_rates.liquid_water_density == 998
         @test p3_custom.process_rates.pure_ice_density == 910
         @test p3_custom.process_rates.initial_rain_drop_mass ≈ 4π / 3 * 998 * (25e-6)^3

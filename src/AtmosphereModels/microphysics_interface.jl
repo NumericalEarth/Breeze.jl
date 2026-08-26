@@ -235,6 +235,20 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
 @inline microphysical_tendency(microphysics::Nothing, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
+"""
+$(TYPEDSIGNATURES)
+
+Compute the tendencies of `names` together, as a tuple in the order given.
+
+The gridless counterpart of [`compute_microphysical_tendencies!`](@ref). The default maps
+[`microphysical_tendency`](@ref) over `names`; schemes whose process rates are coupled
+across species override it to evaluate their bundle once and distribute it.
+
+See also [`microphysical_tendency`](@ref), [`compute_microphysical_tendencies!`](@ref).
+"""
+@inline microphysical_tendencies(microphysics, names::Tuple, ρ, ℳ, 𝒰, constants) =
+    map(name -> microphysical_tendency(microphysics, Val(name), ρ, ℳ, 𝒰, constants), names)
+
 #####
 ##### Fused microphysical tendency interface
 #####

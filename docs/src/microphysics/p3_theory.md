@@ -55,13 +55,15 @@ each step, zero out small-mass species and add a compensating ``θ`` correction,
 
 Breeze's P3 returns *tendencies*, which Breeze sums with advection and
 diffusion before time-stepping. On a grid, `compute_microphysical_tendencies!`
-(`p3_driver.jl`) launches one kernel that writes a per-field tendency cache and
-a second that adds it to ``G^n``; gridless callers (`ParcelModels`) go through
-the `microphysical_tendency` methods in `p3_microphysical_tendencies.jl`. Both
-paths funnel into `p3_tendency_compute` (`p3_microphysical_state.jl`), which
-assembles the per-field tendencies from `prognostic_tendencies.jl`. P3 has no
-write access to the prognostic state and no awareness of host Δt. This produces
-several deliberate, documented consequences:
+(`p3_driver.jl`) launches one kernel that evaluates every tendency per cell and
+adds each straight into ``G^n``; gridless callers (`ParcelModels`) go through
+`microphysical_tendencies` in `p3_microphysical_tendencies.jl`, which evaluates
+the same bundle once per right-hand-side evaluation. Both paths funnel into
+`p3_tendency_compute`
+(`p3_microphysical_state.jl`), which assembles the per-field tendencies from
+`prognostic_tendencies.jl`. P3 has no write access to the prognostic state and
+no awareness of host Δt. This produces several deliberate, documented
+consequences:
 
 - **Hard prognostic clamps are replaced by tendency-form relaxations.** The global
   ice-number cap, for example, becomes a relaxation sink toward ``N^i_{\max}/ρ``
@@ -2603,10 +2605,12 @@ depleted reservoir survives a `set!`, since an unqualified `set!` rewrites it to
 
 Host-facing entry points:
 
-1. **`compute_microphysical_tendencies!`**: Fills the per-field process-rate cache from
-   the current state in one kernel and adds it to ``G^n`` in a second. Optional
-   prognostic groups get their own kernel, launched only when that group exists.
-2. **`microphysical_tendency`**: The gridless per-field fallback used by `ParcelModels`.
+1. **`compute_microphysical_tendencies!`**: Evaluates the coupled process rates and adds
+   every resulting tendency into ``G^n``, in one kernel. Optional prognostic groups are
+   added only where that group exists, selected by type.
+2. **`microphysical_tendencies`**: The gridless bundle used by `ParcelModels`, evaluating
+   the same rates once and distributing them across the prognostic names.
+   `microphysical_tendency` still returns a single name, at one bundle evaluation each.
 3. **`moisture_fractions`**: Converts prognostic densities to mass fractions
    (liquid = cloud + rain + liquid-on-ice; ice = dry ice).
 4. **`update_microphysical_fields!`**: Refreshes diagnostic fields after a state update.

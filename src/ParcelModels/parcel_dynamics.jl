@@ -726,12 +726,11 @@ compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ::Nothing, ℳ, 𝒰
 # Disambiguation for Nothing microphysics + NamedTuple
 compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ::NamedTuple, ℳ, 𝒰, constants) = μ
 
-# For NamedTuple prognostics, compute tendencies for each field via microphysical_tendency
+# For NamedTuple prognostics, every prognostic tendency in one call. Schemes with coupled
+# process rates override `microphysical_tendencies` to evaluate their bundle once.
 function compute_microphysics_prognostic_tendencies(microphysics, ρ, μ::NamedTuple, ℳ, 𝒰, constants)
     prog_names = AtmosphereModels.prognostic_field_names(microphysics)
-    tendencies = map(prog_names) do name
-        microphysical_tendency(microphysics, Val(name), ρ, ℳ, 𝒰, constants)
-    end
+    tendencies = microphysical_tendencies(microphysics, prog_names, ρ, ℳ, 𝒰, constants)
     return NamedTuple{keys(μ)}(tendencies)
 end
 
