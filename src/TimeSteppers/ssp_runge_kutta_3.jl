@@ -13,7 +13,7 @@ using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, ma
                                 microphysics_model_update!, field_advection_scheme,
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
-                                implicit_step_advection
+                                implicit_step_scheme
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -152,7 +152,7 @@ function ssp_rk3_substep!(model, Δt, α)
                            model.clock,
                            fields(model),
                            α * Δt,
-                           implicit_step_advection(advection, name),
+                           implicit_step_scheme(advection, name),
                            implicit_advection_velocities(model.dynamics, model.velocities, name),
                            implicit_advection_density(model.dynamics, model.formulation, name))
         end

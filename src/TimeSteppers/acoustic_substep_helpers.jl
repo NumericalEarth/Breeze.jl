@@ -18,7 +18,7 @@ using Breeze.AtmosphereModels:
     field_advection_scheme,
     closure_scalar_index,
     dynamics_prognostic_fields,
-    implicit_step_advection,
+    implicit_step_scheme,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
@@ -232,7 +232,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
                            model.clock,
                            fields(model),
                            Δt_implicit,
-                           implicit_step_advection(advection, name),
+                           implicit_step_scheme(advection, name),
                            velocities,
                            ρ)
         end
@@ -330,10 +330,12 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
     # Momentum and the thermodynamic variable are coupling-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
     # Frozen stage-entry (w, ρᵈ), so the explicit and implicit halves partition one transport.
     w, ρᵈ = advecting_state(model)
+
     # The diffusion half of each row is weighted with the *live* coupling density instead: it
     # reconstructs u and θ from the prognostic the acoustic loop has just advanced, and unlike the
     # advective split it has no explicit fraction to pair with the frozen state.
-    ρᵈ_diffusion = dynamics_density(model.dynamics)
+    diffusion_density = dynamics_density(model.dynamics)
+
     prognostic = prognostic_fields(model)
     momentum_advection = model.advection.momentum
     for name in (:ρu, :ρv, :ρw)
@@ -345,7 +347,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                        model.clock,
                        fields(model),
                        Δt_stage,
-                       implicit_step_advection(momentum_advection, name, ρᵈ_diffusion),
+                       implicit_step_scheme(momentum_advection, name, diffusion_density),
                        (; w),
                        ρᵈ)
     end
@@ -360,7 +362,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                    model.clock,
                    fields(model),
                    Δt_stage,
-                   implicit_step_advection(θ_advection, θ_name, ρᵈ_diffusion),
+                   implicit_step_scheme(θ_advection, θ_name, diffusion_density),
                    merge(slow_thermodynamic_velocities(model), (; w)),
                    ρᵈ)
 
