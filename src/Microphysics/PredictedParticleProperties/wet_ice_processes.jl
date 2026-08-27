@@ -40,7 +40,7 @@ is used.
 
     # The droplet impact speed is the mass-weighted Stokes velocity of the cloud
     # DSD, shared with `cloud_terminal_velocities`.
-    stokes_prefactor = cloud_stokes_prefactor(g, ρᴸ, η)
+    stokes_prefactor = cloud_stokes_prefactor(g, ρᴸ, η, parameters.floors)
     cloud_terminal_velocity = cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
     cloud_mean_diameter = (μᶜˡ + 4) / λᶜˡ
 
@@ -194,7 +194,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
     nⁱ_eff = max(0, nⁱ)
 
     T₀ = parameters.freezing_temperature
@@ -210,7 +210,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
     # Mean ice particle mass
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
 
     # Ventilation integral (same as deposition/refreezing)

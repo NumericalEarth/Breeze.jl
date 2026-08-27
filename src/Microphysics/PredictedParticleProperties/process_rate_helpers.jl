@@ -290,43 +290,44 @@ end
 
 @inline total_ice_mass(qⁱ, qʷⁱ) = max(0, qⁱ) + max(0, qʷⁱ)
 
-@inline function liquid_fraction_on_ice(qⁱ, qʷⁱ)
+@inline function liquid_fraction_on_ice(qⁱ, qʷⁱ, floors)
     FT = typeof(qⁱ)
-    qⁱ_total = max(total_ice_mass(qⁱ, qʷⁱ), FT(DEFAULT_FLOORS.mass_scale))
+    qⁱ_total = max(total_ice_mass(qⁱ, qʷⁱ), FT(floors.mass_scale))
     return max(0, qʷⁱ) / qⁱ_total
 end
 
 @inline active_liquid_on_ice(p3, qʷⁱ) = ifelse(p3.process_rates.liquid_fraction_active, qʷⁱ, zero(qʷⁱ))
 
-@inline function mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+@inline function mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, floors)
     FT = typeof(qⁱ)
-    return safe_divide(max(total_ice_mass(qⁱ, qʷⁱ), FT(DEFAULT_FLOORS.mass_scale)),
-                       max(nⁱ, FT(DEFAULT_FLOORS.number_scale)),
-                       FT(DEFAULT_FLOORS.mass_scale))
+    return safe_divide(max(total_ice_mass(qⁱ, qʷⁱ), FT(floors.mass_scale)),
+                       max(nⁱ, FT(floors.number_scale)),
+                       FT(floors.mass_scale))
 end
 
-@inline function bounded_ice_number(limiter::IceLambdaLimiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
+@inline function bounded_ice_number(limiter::IceLambdaLimiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, floors)
     FT = typeof(qⁱ_total)
     qⁱ_eff = max(0, qⁱ_total)
     nⁱ_eff = max(0, nⁱ)
-    log_m = log10(safe_divide(max(qⁱ_eff, FT(DEFAULT_FLOORS.mass_scale)),
-                              max(nⁱ_eff, FT(DEFAULT_FLOORS.number_scale)),
-                              FT(DEFAULT_FLOORS.mass_scale)))
+    log_m = log10(safe_divide(max(qⁱ_eff, FT(floors.mass_scale)),
+                              max(nⁱ_eff, FT(floors.number_scale)),
+                              FT(floors.mass_scale)))
     # Both limiter tables share Table-1 axes, so the coordinate is bracketed once.
     prep = prepare_interpolation(limiter.large_q, log_m, Fᶠ, Fˡ, ρᶠ)
     nⁱ_min = evaluate_at(limiter.large_q, prep) * qⁱ_eff
     nⁱ_max = evaluate_at(limiter.small_q, prep) * qⁱ_eff
     bounded = clamp(nⁱ_eff, nⁱ_min, nⁱ_max)
-    return ifelse(qⁱ_eff > FT(DEFAULT_FLOORS.mass_scale), bounded, zero(FT))
+    return ifelse(qⁱ_eff > FT(floors.mass_scale), bounded, zero(FT))
 end
 
 # Un-materialized scheme: the placeholder limiter carries no tables, so the only
 # bound available is positivity.
-@inline bounded_ice_number(::IceLambdaLimiter{Nothing, Nothing}, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ) =
+@inline bounded_ice_number(::IceLambdaLimiter{Nothing, Nothing}, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, floors) =
     ifelse(qⁱ_total > zero(qⁱ_total), max(0, nⁱ), zero(nⁱ))
 
 @inline function bounded_ice_number(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
-    return bounded_ice_number(p3.ice.lambda_limiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
+    return bounded_ice_number(p3.ice.lambda_limiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ,
+                              p3.process_rates.floors)
 end
 
 # Exponential rain PSD: λʳ = (π ρʷ nʳ / qʳ)^(1/3). `bounded_rain_number` needs the

@@ -60,7 +60,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     ramp_end_temperature = parameters.aggregation_efficiency_ramp_end_temperature
 
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
     nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     # Aggregation is gated on bulk ice mass only, with the number floored at
@@ -85,7 +85,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     aggregation_efficiency *= rime_fraction_factor
 
     # Mean particle properties
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
 
     # PSD-integrated self-collection kernel (E-free) from lookup table.
     aggregation_kernel_value = aggregation_kernel(p3.ice.collection.aggregation,

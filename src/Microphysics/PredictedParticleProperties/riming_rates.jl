@@ -55,7 +55,7 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
 
     qᶜˡ_eff = max(0, qᶜˡ)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
     nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     active = temperature_active &
@@ -63,7 +63,7 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 
     # Mean particle mass
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
 
     # PSD-integrated cloud-water collection kernel ⟨A×V⟩ from lookup table
     # ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
@@ -216,14 +216,14 @@ PSD-integrated number-weighted kernel.
     qʳ_eff = max(0, qʳ)
     nʳ_eff = max(nʳ, p3.minimum_number_mixing_ratio)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
     nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     active = temperature_active &
              (qʳ_eff >= p3.minimum_mass_mixing_ratio) &
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
 
     ρ₀ = p3.ice.fall_speed.reference_air_density
     density_correction = ice_air_density_correction(parameters, ρ₀, ρ)

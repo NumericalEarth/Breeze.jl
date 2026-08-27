@@ -140,8 +140,8 @@ function expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷ�
 
     λʳ = PPP.rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
     nʳ_bounded = PPP.rain_number_from_slope(qʳ_eff, λʳ, parameters)
-    Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
+    m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
     _, number_kernel = PPP.ice_rain_collection_lookup(p3.ice.ice_rain,
                                                       m_mean, λʳ, Fᶠ, Fˡ, ρᶠ)
     ρ₀ = p3.ice.fall_speed.reference_air_density
@@ -155,8 +155,8 @@ end
 function expected_reference_ice_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ,
                                                  T, P, ρ, constants, transport, q)
     FT = typeof(qⁱ)
-    Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ, p3.process_rates.floors)
+    m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, p3.process_rates.floors)
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
     ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
     C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
@@ -173,8 +173,8 @@ end
 function expected_reference_coating_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ,
                                                      T, P, ρ, constants, transport, q)
     FT = typeof(qⁱ)
-    Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ, p3.process_rates.floors)
+    m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, p3.process_rates.floors)
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
     ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
     C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
@@ -416,7 +416,7 @@ end
                                   FT(0), FT(0), FT(0), FT(0))
 
         rime_state = PPP.consistent_rime_state(p3, qⁱ, FT(0), FT(0))
-        Fˡ = PPP.liquid_fraction_on_ice(qⁱ, FT(0))
+        Fˡ = PPP.liquid_fraction_on_ice(qⁱ, FT(0), p3.process_rates.floors)
         log_m = log10(qⁱ / nⁱ)
         limiter = p3.ice.lambda_limiter
         lower_nⁱ = limiter.large_q(log_m, rime_state.Fᶠ, Fˡ,
@@ -1346,6 +1346,42 @@ end
         doubled = PPP.ventilation_sc_correction(ν, Dᵥ, 4.0, floors)
 
         @test doubled ≈ 2 * base
+    end
+
+    # Every other P3 test runs at the default floors, so nothing else would catch
+    # these three helpers reverting to a hard-coded global.
+    @testset "Configured numerical floors reach the pure PSD helpers" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        default_floors = PPP.NumericalFloors(FT)
+        raised = PPP.NumericalFloors(FT; mass_scale = 1e-6, number_scale = 1e-3)
+
+        qⁱ = FT(1e-8)
+        qʷⁱ = FT(1e-9)
+        nⁱ = FT(1e-2)
+
+        # Divides by max(qⁱ + qʷⁱ, mass_scale): a raised floor replaces the total.
+        @test PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ, default_floors) ≈ qʷⁱ / (qⁱ + qʷⁱ)
+        @test PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ, raised) ≈ qʷⁱ / FT(1e-6)
+
+        # Responds to mass_scale in the numerator, number_scale in the denominator.
+        @test PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, default_floors) ≈ (qⁱ + qʷⁱ) / nⁱ
+        @test PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, raised) ≈ FT(1e-6) / nⁱ
+        @test PPP.mean_total_ice_mass(qⁱ, qʷⁱ, FT(1e-9), raised) ≈ FT(1e-6) / FT(1e-3)
+
+        # Gates on mass_scale: raised above qⁱ, this state reads as ice-free. Both
+        # log₁₀(m̄) coordinates (-10, -8) are inside the table axis [-14.81, -0.58].
+        Fᶠ, Fˡ, ρᶠ = FT(0.3), FT(0.1), FT(500)
+        limiter = p3.ice.lambda_limiter
+        @test PPP.bounded_ice_number(limiter, qⁱ, FT(1e2), Fᶠ, Fˡ, ρᶠ, raised) == 0
+        @test PPP.bounded_ice_number(limiter, qⁱ, FT(1e2), Fᶠ, Fˡ, ρᶠ, default_floors) != 0
+
+        # The p3 wrapper must forward the scheme's own floors.
+        @test PPP.bounded_ice_number(p3, qⁱ, FT(1e2), Fᶠ, Fˡ, ρᶠ) ==
+              PPP.bounded_ice_number(limiter, qⁱ, FT(1e2), Fᶠ, Fˡ, ρᶠ,
+                                     p3.process_rates.floors)
     end
 
     @testset "wet_growth_capacity keeps sensible term outside 2π/Lf" begin

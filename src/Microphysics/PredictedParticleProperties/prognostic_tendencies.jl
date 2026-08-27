@@ -502,23 +502,3 @@ unactivated reservoir, so ``∂ρn^a/∂t = -ρ \\, n_{\\text{nuc}}`` with
 prescribed-Nᶜˡ path `rates.ccn_activation_number` is zero, so this returns 0.
 """
 @inline tendency_ρnᵃ(rates::P3ProcessRates, ρ) = -ρ * rates.ccn_activation_number
-
-#####
-##### Fallback methods for Nothing rates
-#####
-##### These are safety fallbacks that return zero tendency when rates
-##### have not been computed (e.g., during incremental development).
-#####
-
-@inline tendency_ρqᶜˡ(::Nothing, ρ) = zero(ρ)
-@inline tendency_ρqʳ(::Nothing, ρ) = zero(ρ)
-@inline tendency_ρnᶜˡ(::Nothing, ρ, Nᶜˡ, qᶜˡ, p3) = zero(ρ)
-@inline tendency_ρnʳ(::Nothing, ρ, args...) = zero(ρ)
-@inline tendency_ρqⁱ(::Nothing, ρ) = zero(ρ)
-@inline tendency_ρnⁱ(::Nothing, ρ) = zero(ρ)
-@inline tendency_ρqᶠ(::Nothing, ρ, Fᶠ) = zero(ρ)
-@inline tendency_ρbᶠ(::Nothing, ρ, Fᶠ, ρᶠ, parameters...) = zero(ρ)
-@inline tendency_ρqʷⁱ(::Nothing, ρ) = zero(ρ)
-@inline tendency_ρsᵛ⁺ˡ(::Nothing, ρ, parameters) = zero(ρ)
-@inline tendency_ρqᵛ(::Nothing, ρ) = zero(ρ)
-@inline tendency_ρnᵃ(::Nothing, ρ) = zero(ρ)

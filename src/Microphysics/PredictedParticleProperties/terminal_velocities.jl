@@ -23,8 +23,8 @@ end
 # `rime_density` needs the same mass-weighted speed to form the Cober-List rime-impact
 # parameter, so both call these helpers rather than repeating the arithmetic with their
 # own gravitational acceleration.
-@inline cloud_stokes_prefactor(g, ρᴸ, η) =
-    g * ρᴸ / (18 * max(η, oftype(η, DEFAULT_FLOORS.divisor)))
+@inline cloud_stokes_prefactor(g, ρᴸ, η, floors) =
+    g * ρᴸ / (18 * max(η, oftype(η, floors.divisor)))
 
 @inline cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ) =
     stokes_prefactor * (μᶜˡ + 5) * (μᶜˡ + 4) / λᶜˡ^2
@@ -39,7 +39,8 @@ end
     FT = typeof(qᶜˡ + ρ + ν + μᶜˡ + λᶜˡ)
     η = ν * ρ
     g = p3_gravitational_acceleration(constants, FT)
-    stokes_prefactor = cloud_stokes_prefactor(g, p3.process_rates.liquid_water_density, η)
+    stokes_prefactor = cloud_stokes_prefactor(g, p3.process_rates.liquid_water_density, η,
+                                              p3.process_rates.floors)
     active = qᶜˡ >= p3.minimum_mass_mixing_ratio
     mass_weighted = cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
     number_weighted = cloud_number_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)

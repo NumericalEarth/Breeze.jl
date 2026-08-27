@@ -123,12 +123,12 @@ end
     FT = typeof(qⁱ)
     parameters = p3.process_rates
     nⁱ_eff = max(nⁱ, FT(p3.minimum_number_mixing_ratio))
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
 
     Dᵛ = transport.Dᵛ
     ν = transport.ν
 
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
     ρ_air = density(T, P, q, constants)
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ_air)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
@@ -190,7 +190,7 @@ cloud/precipitation fraction framework is handled separately.
     # `qⁱ_total`/`Fˡ` once here and reuse them for the relaxation gates and the
     # tiny-mass overrides below.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, floors)
     # The dry-ice and wet-ice relaxation coefficients share the same
     # `ice_vapor_relaxation_coefficient` and select mutually exclusive liquid-fraction
     # regimes (dry ice below the wet-ice threshold, liquid-coated ice at or above it),

@@ -435,7 +435,7 @@ end
     # =========================================================================
     # Shedding and refreezing
     # =========================================================================
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
 
     shed = shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
     shed_n = shedding_number_rate(p3, shed)
@@ -591,7 +591,7 @@ end
     # derives from the same two helpers, so the fallback goes through them too rather
     # than restating the bounded-moment recipe.
     Fˡ, qⁱ_total, nⁱ, nⁱ_diagnostic, ρ_mean = if isnothing(properties)
-        Fˡ_diagnosed = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+        Fˡ_diagnosed = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
         bounds = p3_ice_moment_bounds(p3, ρ, total_ice_mass(qⁱ, qʷⁱ), nⁱ_raw,
                                       Fᶠ, Fˡ_diagnosed, ρᶠ)
         Fˡ_diagnosed, bounds.qⁱ_total, bounds.nⁱ, bounds.nⁱ_diagnostic, bounds.ρ_mean

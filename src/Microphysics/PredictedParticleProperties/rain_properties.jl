@@ -6,11 +6,10 @@
 
 # Rain particle size distribution and fall-speed parameters; see the `RainProperties`
 # constructor.
-struct RainProperties{FT, MU, VN, VM, EV}
+struct RainProperties{FT, VN, VM, EV}
     maximum_mean_diameter :: FT
     fall_speed_coefficient :: FT
     fall_speed_exponent :: FT
-    shape_parameter :: MU
     velocity_number :: VN
     velocity_mass :: VM
     evaporation :: EV
@@ -21,14 +20,16 @@ $(TYPEDSIGNATURES)
 
 Construct `RainProperties` with parameters and quadrature-based integrals.
 
-Rain in P3 follows a gamma size distribution similar to ice:
+Rain in P3 follows an exponential size distribution, the ``μ^r = 0`` special
+case of the gamma distribution used for ice:
 
 ```math
-N'(D) = Nʳ₀ D^{μ^r} e^{-λ^r D}
+N'(D) = Nʳ₀ e^{-λ^r D}
 ```
 
-The shape parameter ``μ^r`` is diagnosed from the rain mass and number
-concentrations following [Milbrandt and Yau (2005)](@cite MilbrandtYau2005).
+There is no rain shape parameter, prognostic or diagnosed: `rain_slope_parameter`
+inverts the mass integral directly as ``λ^r = (π ρ^w n^r / q^r)^{1/3}``, and
+`rain_quadrature.jl` integrates against the same exponential kernel.
 
 **Terminal velocity:**
 
@@ -40,7 +41,6 @@ Default coefficients give fall speeds in m/s for D in meters.
 
 **Integrals:**
 
-- `shape_parameter`: Diagnosed μʳ from qʳ, Nʳ
 - `velocity_number`, `velocity_mass`: Weighted fall speeds
 - `evaporation`: Rate integral for rain evaporation
 
@@ -64,7 +64,7 @@ function RainProperties(FT::DataType = Oceananigans.defaults.FloatType;
         FT(maximum_mean_diameter),
         FT(fall_speed_coefficient),
         FT(fall_speed_exponent),
-        nothing, nothing, nothing, nothing,
+        nothing, nothing, nothing,
     )
 end
 

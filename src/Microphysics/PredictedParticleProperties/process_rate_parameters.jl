@@ -13,9 +13,7 @@ struct NumericalFloors{FT}
     mass_scale :: FT                # floors mass and volume denominators and log₁₀
                                     # arguments [kg/kg, kg, or m³/kg]
     number_scale :: FT              # floors number denominators [1/kg]; the scheme-less
-                                    # counterpart of `minimum_number_mixing_ratio`. Inert
-                                    # until the TODO below is done: its only two readers
-                                    # take it from `DEFAULT_FLOORS`, not from here.
+                                    # counterpart of `minimum_number_mixing_ratio`
     rate_scale :: FT                # rate below which a process is treated as inactive
     divisor :: FT                   # smallest positive value admitted beneath a division or a `log`
     mean_particle_mass_fallback :: FT   # mean particle mass substituted where the number
@@ -79,18 +77,12 @@ function NumericalFloors{FT}(floors::NumericalFloors) where FT
                                floors.mean_particle_mass_fallback)
 end
 
-# The three pure PSD helpers (`liquid_fraction_on_ice`, `mean_total_ice_mass`,
-# `bounded_ice_number`) are reached without a scheme argument, and the rain
-# quadrature and `cloud_stokes_prefactor` guards run before a scheme exists, so
-# those read their floors from here. Everything else reads the settable `floors`
-# field of the scheme's `ProcessRateParameters`.
-#
-# TODO: thread `floors` into the three PSD helpers so a raised floor (the Float16
-# case the `NumericalFloors` docstring describes) applies to them too. Every
-# caller already has `parameters` in scope; it is the 28 call sites that make it
-# a separate change. `number_scale` is fully inert until then; `mass_scale` only partly,
-# since 15 of its reads already go through the settable field.
-const DEFAULT_FLOORS = NumericalFloors(Float64)
+# Helpers needing only floors take `floors` as a trailing argument
+# (`tabulated_kernels.jl`, `process_rate_helpers.jl`, `rain_quadrature.jl`); scheme-level
+# rate functions take `p3`/`parameters` and unpack it themselves. Either way the value is
+# the scheme's settable field, so a configured floor reaches every per-cell rate and the
+# rain tabulation alike. The quadrature evaluators carry it as a struct field because
+# they run before a scheme exists.
 
 Base.summary(::NumericalFloors) = "NumericalFloors"
 

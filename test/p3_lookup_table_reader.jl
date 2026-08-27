@@ -68,6 +68,35 @@ end
     @test p3.rain.velocity_mass(log_lambda) > 0
 end
 
+# The rain quadrature runs before a scheme exists, so `read_lookup_tables` hands it the
+# resolved `process_rates.floors`. Nothing else would catch that handoff being dropped:
+# at the default divisor (1e-30) the floor cannot bind, so the tables would look correct.
+@testset "Configured floors reach the rain tabulation" begin
+    FT = Float64
+
+    # The mass-weighted denominator is ∫D³exp(-λD)dD ≈ 6/λ⁴, about 6e-22 at the top of
+    # the tabulated range. A divisor above that binds; the default cannot. The resulting
+    # velocities are unphysical on purpose: this asserts plumbing, not physics.
+    raised = NumericalFloors(FT; divisor = 1e-15)
+    raised_p3 = PredictedParticlePropertiesMicrophysics(
+        FT; process_rates = ProcessRateParameters(FT; floors = raised))
+    default_p3 = PredictedParticlePropertiesMicrophysics(FT)
+
+    @test raised_p3.process_rates.floors.divisor == FT(1e-15)
+
+    # Low λ: the integral is far above either floor, so the tables must agree.
+    @test raised_p3.rain.velocity_mass(FT(2.5)) == default_p3.rain.velocity_mass(FT(2.5))
+
+    # High λ: the mass-weighted denominator (≈ 6/λ⁴ ≈ 6e-22 here) falls below the raised
+    # floor, so that velocity has to drop.
+    @test raised_p3.rain.velocity_mass(FT(5.5)) < default_p3.rain.velocity_mass(FT(5.5))
+
+    # The number-weighted denominator is ∫exp(-λD)dD ≈ 1/λ ≈ 3e-6, still far above the
+    # raised floor, so it must be untouched. Asserting the asymmetry catches a floor
+    # applied where it does not belong.
+    @test raised_p3.rain.velocity_number(FT(5.5)) == default_p3.rain.velocity_number(FT(5.5))
+end
+
 @testset "PredictedParticlePropertiesMicrophysics constructor with lookup tables" begin
     # Test constructor interface
     p3 = PredictedParticlePropertiesMicrophysics()

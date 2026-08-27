@@ -180,7 +180,6 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test rain.fall_speed_coefficient ≈ 841.99667
         @test rain.fall_speed_exponent ≈ 0.8
 
-        @test isnothing(rain.shape_parameter)
         @test isnothing(rain.velocity_number)
         @test isnothing(rain.velocity_mass)
         @test isnothing(rain.evaporation)

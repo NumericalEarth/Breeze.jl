@@ -211,16 +211,11 @@ Compute rain evaporation rate using ventilation-enhanced diffusion.
 Rain drops evaporate when the ambient air is subsaturated (qᵛ < qᵛ⁺ˡ).
 The evaporation rate is enhanced by ventilation (air flow around falling drops).
 
-Dispatches to either the tabulated PSD integral path or the mean-mass
-approximation path depending on `p3.rain.evaporation`:
-
-- **Tabulated** (`TabulatedFunction1D`): Computes λʳ from (qʳ, Nʳ), looks up
-  the ventilation integral `I_evap(λʳ) = ∫ D fᵛᵉ(D) exp(-λʳ D) dD`, then
-  applies `dqʳ/dt = 2π × Nʳ₀ × I_evap × (S-1) / thermo_factor`
-  (Mason 1971, capacitance C = D/2 so 4πC = 2πD).
-- **Mean-mass** (`RainEvaporation`): Uses a single representative drop of
-    diameter `D_mean = (6 m_mean / (π ρᴸ))^(1/3)` and the same piecewise
-    rain fall-speed law as the tabulated path.
+`p3.rain.evaporation` is the tabulated ventilation integral built by
+`tabulate_rain_from_quadrature`. The inner method computes λʳ from (qʳ, Nʳ), looks up
+`I_evap(λʳ) = ∫ D fᵛᵉ(D) exp(-λʳ D) dD`, then applies
+`dqʳ/dt = 2π × Nʳ₀ × I_evap × (S-1) / thermo_factor`
+(Mason 1971, capacitance C = D/2 so 4πC = 2πD).
 
 ```math
 \\frac{dm}{dt} = \\frac{4\\pi C f_v (S - 1)}{\\frac{ℒˡ}{Kᵃ T}(\\frac{ℒˡ}{R_v T} - 1)

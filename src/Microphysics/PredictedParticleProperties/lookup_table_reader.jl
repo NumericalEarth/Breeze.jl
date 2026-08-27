@@ -69,17 +69,18 @@ function read_lookup_tables(directory::AbstractString;
     ice = build_ice_properties_from_tables(ice_tables_4d, rain_ice_tables, FT;
                                            thermodynamic_constants)
 
-    # Generate rain 1D tables from Julia quadrature
-    rain_base = RainProperties(FT)
-    rain = tabulate_rain_from_quadrature(rain_base, arch, FT)
-
-    # Construct full scheme
+    # Resolved before the rain tabulation below, which needs its floors.
     cloud = isnothing(cloud) ? CloudDropletProperties(FT) : cloud
     input_process_rates = if isnothing(process_rates)
         ProcessRateParameters(FT; thermodynamic_constants)
     else
         process_rates
     end
+
+    # Generate rain 1D tables from Julia quadrature
+    rain_base = RainProperties(FT)
+    rain = tabulate_rain_from_quadrature(rain_base, arch, FT;
+                                         floors = input_process_rates.floors)
 
     return PredictedParticlePropertiesMicrophysics(
         FT(minimum_mass_mixing_ratio),
@@ -202,10 +203,11 @@ function tabulate_rain_from_quadrature(rain::RainProperties, arch=CPU(),
                                        FT::DataType = Oceananigans.defaults.FloatType;
                                        lambda_points::Int = 200,
                                        log_lambda_range = (FT(2.5), FT(5.5)),
-                                       quadrature_points::Int = 128)
+                                       quadrature_points::Int = 128,
+                                       floors = NumericalFloors(FT))
 
-    vel_mass_eval = RainMassWeightedVelocityEvaluator(FT; n_points=quadrature_points)
-    vel_num_eval = RainNumberWeightedVelocityEvaluator(FT; n_points=quadrature_points)
+    vel_mass_eval = RainMassWeightedVelocityEvaluator(FT; n_points=quadrature_points, floors)
+    vel_num_eval = RainNumberWeightedVelocityEvaluator(FT; n_points=quadrature_points, floors)
     evap_eval = RainEvaporationVentilationEvaluator(FT; n_points=quadrature_points)
 
     tab_vel_mass = TabulatedFunction(vel_mass_eval, arch, FT;
@@ -219,7 +221,6 @@ function tabulate_rain_from_quadrature(rain::RainProperties, arch=CPU(),
         rain.maximum_mean_diameter,
         rain.fall_speed_coefficient,
         rain.fall_speed_exponent,
-        rain.shape_parameter,
         tab_vel_num,
         tab_vel_mass,
         tab_evap

@@ -891,7 +891,7 @@ end
     qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
     qⁱ_raw = total_ice_mass(ℳ.qⁱ, qʷⁱ)
     rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ)
-    Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, qʷⁱ, p3.process_rates.floors)
     moments = p3_ice_moments(p3, ρ, qⁱ_raw, ℳ.nⁱ,
                              rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
     return P3CoreIceProps{FT}(rime_state.qᶠ, rime_state.bᶠ, rime_state.Fᶠ, Fˡ,

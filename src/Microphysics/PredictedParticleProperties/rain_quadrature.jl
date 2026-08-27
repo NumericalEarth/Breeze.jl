@@ -82,7 +82,7 @@ end
 #####
 
 """
-    RainMassWeightedVelocityEvaluator{N, W}
+    RainMassWeightedVelocityEvaluator{N, W, F}
 
 Callable evaluator for the mass-weighted rain terminal velocity:
 
@@ -102,11 +102,13 @@ via [`chebyshev_gauss_nodes_weights`](@ref).
 # Fields
 $(TYPEDFIELDS)
 """
-struct RainMassWeightedVelocityEvaluator{N, W}
+struct RainMassWeightedVelocityEvaluator{N, W, F}
     "Pre-computed Chebyshev-Gauss nodes on [-1, 1]"
     nodes :: N
     "Pre-computed Chebyshev-Gauss weights"
     weights :: W
+    "Numerical floors, carried because tabulation runs before a scheme exists"
+    floors :: F
 end
 
 """
@@ -115,9 +117,10 @@ $(TYPEDSIGNATURES)
 Construct a `RainMassWeightedVelocityEvaluator` with `n_points` quadrature points.
 """
 function RainMassWeightedVelocityEvaluator(FT::DataType = Oceananigans.defaults.FloatType;
-                                            n_points::Int = 128)
+                                            n_points::Int = 128,
+                                            floors = NumericalFloors(FT))
     nodes, weights = chebyshev_gauss_nodes_weights(FT, n_points)
-    return RainMassWeightedVelocityEvaluator(nodes, weights)
+    return RainMassWeightedVelocityEvaluator(nodes, weights, floors)
 end
 
 """
@@ -139,7 +142,7 @@ spherical-water mass factor cancels between numerator and denominator).
 guard on that same integral; a machine-epsilon floor would instead suppress valid
 `Float32` velocities.
 """
-@inline function rain_velocity_moment_ratio(nodes, weights, λʳ, diameter_weight::G) where G
+@inline function rain_velocity_moment_ratio(nodes, weights, λʳ, diameter_weight::G, floors) where G
     FT = eltype(nodes)
 
     # Density correction is 1 at reference conditions (applied at call site)
@@ -162,7 +165,7 @@ guard on that same integral; a machine-epsilon floor would instead suppress vali
         weighted_integral          += w * g * psd * J
     end
 
-    denominator = max(weighted_integral, FT(DEFAULT_FLOORS.divisor))
+    denominator = max(weighted_integral, FT(floors.divisor))
     result = weighted_velocity_integral / denominator
     return ifelse(isfinite(result), result, zero(FT))
 end
@@ -180,14 +183,15 @@ Apply `(ρ₀/ρ)^0.54` at the call site if needed.
 """
 @inline (e::RainMassWeightedVelocityEvaluator)(log10_slope) =
     rain_velocity_moment_ratio(e.nodes, e.weights,
-                               exp10(eltype(e.nodes)(log10_slope)), cubed_weight)
+                               exp10(eltype(e.nodes)(log10_slope)), cubed_weight,
+                               e.floors)
 
 #####
 ##### RainNumberWeightedVelocityEvaluator
 #####
 
 """
-    RainNumberWeightedVelocityEvaluator{N, W}
+    RainNumberWeightedVelocityEvaluator{N, W, F}
 
 Callable evaluator for the number-weighted rain terminal velocity:
 
@@ -202,11 +206,13 @@ Quadrature uses the same exponential-tail transformation as ice integrals.
 # Fields
 $(TYPEDFIELDS)
 """
-struct RainNumberWeightedVelocityEvaluator{N, W}
+struct RainNumberWeightedVelocityEvaluator{N, W, F}
     "Pre-computed Chebyshev-Gauss nodes on [-1, 1]"
     nodes :: N
     "Pre-computed Chebyshev-Gauss weights"
     weights :: W
+    "Numerical floors, carried because tabulation runs before a scheme exists"
+    floors :: F
 end
 
 """
@@ -215,9 +221,10 @@ $(TYPEDSIGNATURES)
 Construct a `RainNumberWeightedVelocityEvaluator` with `n_points` quadrature points.
 """
 function RainNumberWeightedVelocityEvaluator(FT::DataType = Oceananigans.defaults.FloatType;
-                                              n_points::Int = 128)
+                                              n_points::Int = 128,
+                                              floors = NumericalFloors(FT))
     nodes, weights = chebyshev_gauss_nodes_weights(FT, n_points)
-    return RainNumberWeightedVelocityEvaluator(nodes, weights)
+    return RainNumberWeightedVelocityEvaluator(nodes, weights, floors)
 end
 
 """
@@ -229,7 +236,8 @@ Returns the velocity in [m/s] at reference air density.
 """
 @inline (e::RainNumberWeightedVelocityEvaluator)(log10_slope) =
     rain_velocity_moment_ratio(e.nodes, e.weights,
-                               exp10(eltype(e.nodes)(log10_slope)), identity_weight)
+                               exp10(eltype(e.nodes)(log10_slope)), identity_weight,
+                               e.floors)
 
 #####
 ##### RainEvaporationVentilationEvaluator
