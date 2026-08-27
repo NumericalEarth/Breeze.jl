@@ -1,7 +1,7 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields, architecture
-using Oceananigans.Advection: needs_implicit_solver
+using Oceananigans.BoundaryConditions: needs_implicit_solver
 using Oceananigans.Utils: launch!, KernelParameters
 
 using Oceananigans.TimeSteppers: implicit_step!
