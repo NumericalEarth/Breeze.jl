@@ -6,28 +6,41 @@ using Oceananigans
 using Oceananigans.Utils: TabulatedFunction, TabulatedFunction1D
 using Breeze.Microphysics.PredictedParticleProperties
 using Breeze.Microphysics.PredictedParticleProperties:
+    evaluate_at,
     ice_terminal_velocities,
+    prepare_interpolation,
     rain_terminal_velocities
 
 @testset "Rime-density-indexed table transforms" begin
-    # Create a 4D table that returns its 4th argument (rime density index).
-    identity_4th = (x1, x2, x3, x4) -> Float64(x4)
-    table = TabulatedFunction(identity_4th, CPU(), Float64;
-                              range=((0.0, 1.0), (0.0, 1.0),
-                                     (0.0, 1.0), (1.0, 5.0)),
-                              points=(2, 2, 2, 5))
-    wrapped = RimeDensityIndexedTable4D(table)
+    # Tables that return whichever argument the rime-density index occupies: the last of
+    # four for the ice tables, the last of five for the ice-rain tables. The wrappers
+    # place the index at different slots, so both need exercising.
+    unit_axis = (0.0, 1.0)
+    index_axis = (1.0, 5.0)
+    table_4d = TabulatedFunction((x1, x2, x3, x4) -> Float64(x4), CPU(), Float64;
+                                 range=(unit_axis, unit_axis, unit_axis, index_axis),
+                                 points=(2, 2, 2, 5))
+    table_5d = TabulatedFunction((x1, x2, x3, x4, x5) -> Float64(x5), CPU(), Float64;
+                                 range=(unit_axis, unit_axis, unit_axis, unit_axis,
+                                        index_axis),
+                                 points=(2, 2, 2, 2, 5))
+    wrapped_4d = RimeDensityIndexedTable4D(table_4d)
+    wrapped_5d = RimeDensityIndexedTable5D(table_5d)
 
-    # Physical rime densities should map to table indices
-    # rho=50 -> index 1, rho=250 -> index 2, rho=450 -> index 3,
-    # rho=650 -> index 4, rho=900 -> index 5
-    @test wrapped(0.5, 0.5, 0.5, 50.0) ≈ 1.0
-    @test wrapped(0.5, 0.5, 0.5, 250.0) ≈ 2.0
-    @test wrapped(0.5, 0.5, 0.5, 450.0) ≈ 3.0
-    @test wrapped(0.5, 0.5, 0.5, 650.0) ≈ 4.0
-    @test wrapped(0.5, 0.5, 0.5, 900.0) ≈ 5.0
-    # Intermediate value
-    @test wrapped(0.5, 0.5, 0.5, 150.0) ≈ 1.5
+    # The tabulated rime densities {50, 250, 450, 650, 900} kg/m³ map onto their indices
+    # 1..5, and 150 kg/m³ lands halfway between the first two.
+    for (rime_density, index) in ((50.0, 1.0), (250.0, 2.0), (450.0, 3.0),
+                                 (650.0, 4.0), (900.0, 5.0), (150.0, 1.5))
+        @test wrapped_4d(0.5, 0.5, 0.5, rime_density) ≈ index
+        @test wrapped_5d(0.5, 0.5, 0.5, 0.5, rime_density) ≈ index
+    end
+
+    # Process code reads these tables through the prepared-index path, which applies the
+    # transform on its own rather than by way of the call operator above.
+    prepared_4d = prepare_interpolation(wrapped_4d, 0.5, 0.5, 0.5, 150.0)
+    prepared_5d = prepare_interpolation(wrapped_5d, 0.5, 0.5, 0.5, 0.5, 150.0)
+    @test evaluate_at(wrapped_4d, prepared_4d) ≈ 1.5
+    @test evaluate_at(wrapped_5d, prepared_5d) ≈ 1.5
 end
 
 const _lookup_table_dir = ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
@@ -45,12 +58,16 @@ const _lookup_table_dir = ensure_artifact_installed("P3_lookup_tables", joinpath
     @test size(p3.ice.fall_speed.mass_weighted.table.table) == (50, 4, 4, 5)
     @test size(p3.ice.ice_rain.mass.table.table) == (50, 30, 4, 4, 5)
 
-    # Spot-check first row of 2momI: i_rhor=1, i_Fr=1, i_Fl=1, i_Qnorm=1
-    # uns = 0.15624E-03, ums = 0.35587E-03
-    uns = p3.ice.fall_speed.number_weighted(-14.807, 0.0, 0.0, 50.0)
-    ums = p3.ice.fall_speed.mass_weighted(-14.807, 0.0, 0.0, 50.0)
-    @test uns ≈ 0.15624e-03 rtol=1e-3
-    @test ums ≈ 0.35587e-03 rtol=1e-3
+    # Spot-check the first row of 2momI (i_rhor=1, i_Fr=1, i_Fl=1, i_Qnorm=1), where the
+    # table gives uns = 0.15624E-03 and ums = 0.35587E-03. Every coordinate below sits on
+    # its axis origin -- ρᶠ = 50 kg/m³ is index 1 -- so the interpolation weights are 1 and
+    # 0 and the stored entry comes back unrounded. Reading the origin off the axis rather
+    # than writing a number below it keeps that true if the tabulated range moves.
+    log_m_first = p3.ice.fall_speed.number_weighted.table.range[1][1]
+    uns = p3.ice.fall_speed.number_weighted(log_m_first, 0.0, 0.0, 50.0)
+    ums = p3.ice.fall_speed.mass_weighted(log_m_first, 0.0, 0.0, 50.0)
+    @test uns == 0.15624e-03
+    @test ums == 0.35587e-03
 
     # Rain 1D tables should be populated
     @test p3.rain.velocity_mass isa TabulatedFunction

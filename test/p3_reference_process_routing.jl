@@ -5,7 +5,6 @@ import Breeze
 
 using Breeze.Microphysics.PredictedParticleProperties:
     P3MicrophysicalState,
-    P3ProcessRates,
     PredictedParticlePropertiesMicrophysics,
     ProcessRateParameters,
     compute_p3_process_rates,
@@ -33,11 +32,10 @@ using Breeze.Thermodynamics:
     temperature,
     with_temperature
 
-const P3Routing = Breeze.Microphysics.PredictedParticleProperties
+const PPP = Breeze.Microphysics.PredictedParticleProperties
 
-function routing_thermodynamic_state(air_temperature, air_density, pressure,
-                                     vapor, cloud, rain, dry_ice, coating,
-                                     constants)
+function routing_thermodynamic_state(air_temperature, pressure, vapor,
+                                     cloud, rain, dry_ice, coating, constants)
     FT = typeof(air_temperature)
     moisture = MoistureMassFractions(vapor, cloud + rain + coating, dry_ice)
     state = LiquidIcePotentialTemperatureState(zero(FT), moisture, FT(1e5), pressure)
@@ -47,7 +45,7 @@ end
 function routing_derived_state(p3, air_density, microphysical_state,
                                thermodynamic_state, constants)
     FT = typeof(air_density)
-    properties = P3Routing.p3_process_properties(
+    properties = PPP.p3_process_properties(
         p3, air_density, microphysical_state)
     air_temperature = temperature(thermodynamic_state, constants)
     pressure = thermodynamic_state.reference_pressure
@@ -57,10 +55,10 @@ function routing_derived_state(p3, air_density, microphysical_state,
         air_temperature, air_density, constants, PlanarLiquidSurface())
     vapor_saturation_ice = saturation_specific_humidity(
         air_temperature, air_density, constants, PlanarIceSurface())
-    transport = P3Routing.air_transport_properties(air_temperature, pressure, constants)
-    cloud = P3Routing.diagnose_cloud_dsd(
+    transport = PPP.air_transport_properties(air_temperature, pressure, constants)
+    cloud = PPP.diagnose_cloud_dsd(
         p3, microphysical_state.qᶜˡ, microphysical_state.nᶜˡ, air_density)
-    state = P3Routing.P3DerivedState{FT, typeof(moisture)}(
+    state = PPP.P3DerivedState{FT, typeof(moisture)}(
         properties.nⁱ,
         microphysical_state.nʳ,
         properties.qᶠ,
@@ -101,7 +99,7 @@ end
         vapor = saturation_specific_humidity(
             air_temperature, air_density, constants, PlanarLiquidSurface())
         thermodynamic_state = routing_thermodynamic_state(
-            air_temperature, air_density, pressure, vapor,
+            air_temperature, pressure, vapor,
             zero(FT), zero(FT), dry_ice, coating, constants)
         microphysical_state = P3MicrophysicalState(
             zero(FT), zero(FT), zero(FT), zero(FT),
@@ -135,7 +133,7 @@ end
             air_temperature, air_density, constants, PlanarLiquidSurface())
         vapor = vapor_saturation + FT(1e-4)
         thermodynamic_state = routing_thermodynamic_state(
-            air_temperature, air_density, pressure, vapor,
+            air_temperature, pressure, vapor,
             zero(FT), zero(FT), dry_ice, coating, constants)
         microphysical_state = P3MicrophysicalState(
             zero(FT), zero(FT), zero(FT), zero(FT),
@@ -144,7 +142,7 @@ end
         _, state = routing_derived_state(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
 
-    phase1 = P3Routing.p3_phase1_rates(
+        phase1 = PPP.p3_phase1_rates(
             p3, air_density, microphysical_state, constants, state,
             zero(FT), zero(FT))
 
@@ -174,7 +172,7 @@ end
             air_temperature, air_density, constants, PlanarLiquidSurface()) +
                 FT(0.01)
         thermodynamic_state = routing_thermodynamic_state(
-            air_temperature, air_density, pressure, vapor,
+            air_temperature, pressure, vapor,
             cloud, zero(FT), dry_ice, coating, constants)
         microphysical_state = P3MicrophysicalState(
             cloud, cloud_number, zero(FT), zero(FT),
@@ -183,7 +181,7 @@ end
 
         rates = compute_p3_process_rates(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
-        properties = P3Routing.p3_process_properties(
+        properties = PPP.p3_process_properties(
             p3, air_density, microphysical_state)
 
         @test rates.post_process_clipping == 1
@@ -220,6 +218,7 @@ end
         FT = Float64
         p3 = PredictedParticlePropertiesMicrophysics(FT)
         parameters = p3.process_rates
+        constants = ThermodynamicConstants(FT)
         τ = parameters.sink_limiting_timescale
         air_temperature = FT(136)
         air_density = one(FT)
@@ -238,19 +237,16 @@ end
 
         pressure = FT(8e4)
         cloud_vapor = saturation_specific_humidity(
-            air_temperature, air_density, ThermodynamicConstants(FT),
-            PlanarLiquidSurface())
+            air_temperature, air_density, constants, PlanarLiquidSurface())
         cloud_thermodynamic_state = routing_thermodynamic_state(
-            air_temperature, air_density, pressure, cloud_vapor,
-            cloud_mass, zero(FT), zero(FT), zero(FT),
-            ThermodynamicConstants(FT))
+            air_temperature, pressure, cloud_vapor,
+            cloud_mass, zero(FT), zero(FT), zero(FT), constants)
         cloud_state = P3MicrophysicalState(
             cloud_mass, cloud_number, zero(FT), zero(FT),
             zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
             zero(FT), zero(FT))
         cloud_rates = compute_p3_process_rates(
-            p3, air_density, cloud_state, cloud_thermodynamic_state,
-            ThermodynamicConstants(FT))
+            p3, air_density, cloud_state, cloud_thermodynamic_state, constants)
 
         @test cloud_rates.cloud_freezing_mass > 0
         @test cloud_rates.cloud_freezing_mass < cloud_mass_rate
@@ -271,19 +267,16 @@ end
         @test rain_mass_rate / rain_number_rate ≈ expected_rain_particle_mass
 
         rain_vapor = saturation_specific_humidity(
-            air_temperature, air_density, ThermodynamicConstants(FT),
-            PlanarLiquidSurface())
+            air_temperature, air_density, constants, PlanarLiquidSurface())
         rain_thermodynamic_state = routing_thermodynamic_state(
-            air_temperature, air_density, pressure, rain_vapor,
-            zero(FT), rain_mass, zero(FT), zero(FT),
-            ThermodynamicConstants(FT))
+            air_temperature, pressure, rain_vapor,
+            zero(FT), rain_mass, zero(FT), zero(FT), constants)
         rain_state = P3MicrophysicalState(
             zero(FT), zero(FT), rain_mass, rain_number,
             zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
             zero(FT), zero(FT))
         rain_rates = compute_p3_process_rates(
-            p3, air_density, rain_state, rain_thermodynamic_state,
-            ThermodynamicConstants(FT))
+            p3, air_density, rain_state, rain_thermodynamic_state, constants)
 
         @test rain_rates.rain_freezing_mass > 0
         @test rain_rates.rain_freezing_mass < rain_mass_rate
@@ -310,7 +303,7 @@ end
         vapor = saturation_specific_humidity(
             air_temperature, air_density, constants, PlanarLiquidSurface())
         thermodynamic_state = routing_thermodynamic_state(
-            air_temperature, air_density, pressure, vapor,
+            air_temperature, pressure, vapor,
             cloud, zero(FT), dry_ice, coating, constants)
         microphysical_state = P3MicrophysicalState(
             cloud, cloud_number, zero(FT), zero(FT),
@@ -318,10 +311,10 @@ end
             coating, zero(FT), zero(FT), zero(FT))
         properties, state = routing_derived_state(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
-        phase1 = P3Routing.P3Phase1Rates{FT}(
-            ntuple(_ -> zero(FT), fieldcount(P3Routing.P3Phase1Rates{FT}))...)
+        phase1 = PPP.P3Phase1Rates{FT}(
+            ntuple(_ -> zero(FT), fieldcount(PPP.P3Phase1Rates{FT}))...)
 
-        phase2 = P3Routing.p3_phase2_rates(
+        phase2 = PPP.p3_phase2_rates(
             p3, air_density, microphysical_state, constants, state, phase1)
         # D_mean is the volume-equivalent diameter built from the pre-limiter
         # number and mean density, not the mass-law diameter.
@@ -334,10 +327,10 @@ end
 
         # Splintering is recomputed from the sink-limited riming rates, so exercise
         # the rate function with the same locally diagnosed diameter.
-        _, splintering_cold = P3Routing.rime_splintering_rate(
+        _, splintering_cold = PPP.rime_splintering_rate(
             p3, phase2.cloud_riming, phase2.rain_riming, air_temperature,
             expected_diameter, properties.Fˡ, FT(280), rime_mass)
-        _, splintering_warm = P3Routing.rime_splintering_rate(
+        _, splintering_warm = PPP.rime_splintering_rate(
             p3, phase2.cloud_riming, phase2.rain_riming, air_temperature,
             expected_diameter, properties.Fˡ, FT(285), rime_mass)
         @test splintering_cold > 0
@@ -350,6 +343,7 @@ end
         p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates)
         constants = ThermodynamicConstants(FT)
         τ = process_rates.sink_limiting_timescale
+        air_density = one(FT)
 
         # tiny_ice_to_rain_threshold defaults to 1e-12 regardless of the liquid-fraction setting.
         @test p3.process_rates.tiny_ice_to_rain_threshold == FT(1e-12)
@@ -382,26 +376,24 @@ end
             wet_growth_rime, wet_growth_rime / FT(400),
             zero(FT), zero(FT), zero(FT), zero(FT))
         wet_growth_thermodynamic_state = routing_thermodynamic_state(
-            wet_growth_temperature, one(FT), FT(85000), wet_growth_vapor,
+            wet_growth_temperature, FT(85000), wet_growth_vapor,
             wet_growth_cloud, wet_growth_rain, wet_growth_ice, zero(FT),
             constants)
         wet_growth_rates = compute_p3_process_rates(
-            p3, one(FT), wet_growth_state, wet_growth_thermodynamic_state,
-            constants)
+            p3, air_density, wet_growth_state, wet_growth_thermodynamic_state, constants)
         wet_growth_total_water_tendency =
-            tendency_ρqᵛ(wet_growth_rates, one(FT)) +
-            tendency_ρqᶜˡ(wet_growth_rates, one(FT)) +
-            tendency_ρqʳ(wet_growth_rates, one(FT), p3.process_rates) +
-            tendency_ρqⁱ(wet_growth_rates, one(FT)) +
-            tendency_ρqʷⁱ(wet_growth_rates, one(FT), p3.process_rates)
+            tendency_ρqᵛ(wet_growth_rates, air_density) +
+            tendency_ρqᶜˡ(wet_growth_rates, air_density) +
+            tendency_ρqʳ(wet_growth_rates, air_density, p3.process_rates) +
+            tendency_ρqⁱ(wet_growth_rates, air_density) +
+            tendency_ρqʷⁱ(wet_growth_rates, air_density, p3.process_rates)
 
         @test wet_growth_rates.cloud_riming > 0
         @test wet_growth_rates.rain_riming > 0
         @test wet_growth_rates.wet_growth_cloud == 0
         @test wet_growth_rates.wet_growth_rain == 0
         @test wet_growth_rates.wet_growth_shedding > 0
-        @test tendency_ρqʷⁱ(
-            wet_growth_rates, one(FT), p3.process_rates) == 0
+        @test tendency_ρqʷⁱ(wet_growth_rates, air_density, p3.process_rates) == 0
         @test wet_growth_total_water_tendency ≈ 0 atol=eps(FT)
 
         # The fast branch has no liquid-on-ice reservoir. A nonzero
@@ -415,18 +407,17 @@ end
             wet_growth_rime, wet_growth_rime / FT(400),
             inactive_coating, zero(FT), zero(FT), zero(FT))
         coated_wet_growth_rates = compute_p3_process_rates(
-            p3, one(FT), coated_wet_growth_state,
+            p3, air_density, coated_wet_growth_state,
             wet_growth_thermodynamic_state, constants)
-        wet_growth_props = P3Routing.p3_fall_speed_properties(
-            p3, one(FT), wet_growth_state, wet_growth_thermodynamic_state,
-            constants)
-        coated_wet_growth_props = P3Routing.p3_fall_speed_properties(
-            p3, one(FT), coated_wet_growth_state,
+        wet_growth_props = PPP.p3_fall_speed_properties(
+            p3, air_density, wet_growth_state, wet_growth_thermodynamic_state, constants)
+        coated_wet_growth_props = PPP.p3_fall_speed_properties(
+            p3, air_density, coated_wet_growth_state,
             wet_growth_thermodynamic_state, constants)
-        wet_growth_fall_speeds = P3Routing.p3_fall_speed_compute(
-            p3, one(FT), wet_growth_state, wet_growth_props, constants)
-        coated_wet_growth_fall_speeds = P3Routing.p3_fall_speed_compute(
-            p3, one(FT), coated_wet_growth_state, coated_wet_growth_props, constants)
+        wet_growth_fall_speeds = PPP.p3_fall_speed_compute(
+            p3, air_density, wet_growth_state, wet_growth_props, constants)
+        coated_wet_growth_fall_speeds = PPP.p3_fall_speed_compute(
+            p3, air_density, coated_wet_growth_state, coated_wet_growth_props, constants)
 
         @test coated_wet_growth_props.qⁱ_total == wet_growth_props.qⁱ_total
         @test coated_wet_growth_props.Fˡ == wet_growth_props.Fˡ == 0
@@ -435,11 +426,9 @@ end
         @test coated_wet_growth_rates.cloud_riming ≈ wet_growth_rates.cloud_riming
         @test coated_wet_growth_rates.rain_riming ≈ wet_growth_rates.rain_riming
         @test coated_wet_growth_rates.shedding ≈ inactive_coating / τ
-        @test tendency_ρqʷⁱ(
-            coated_wet_growth_rates, one(FT), p3.process_rates) ≈
-            -inactive_coating / τ
+        @test tendency_ρqʷⁱ(coated_wet_growth_rates, air_density, p3.process_rates) ≈
+              -inactive_coating / τ
 
-        air_density = one(FT)
         air_temperature = FT(278.15)
         pressure = FT(8e4)
         dry_ice = FT(1e-10)
@@ -448,7 +437,7 @@ end
         vapor = saturation_specific_humidity(
             air_temperature, air_density, constants, PlanarLiquidSurface())
         thermodynamic_state = routing_thermodynamic_state(
-            air_temperature, air_density, pressure, vapor,
+            air_temperature, pressure, vapor,
             zero(FT), zero(FT), dry_ice, coating, constants)
         microphysical_state = P3MicrophysicalState(
             zero(FT), zero(FT), zero(FT), zero(FT),

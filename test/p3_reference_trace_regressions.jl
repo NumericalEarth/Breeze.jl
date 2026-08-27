@@ -5,21 +5,6 @@ import Breeze
 
 const PPP = Breeze.Microphysics.PredictedParticleProperties
 
-function p3_with_warm_rain_scheme(p3, warm_rain_scheme)
-    return PPP.PredictedParticlePropertiesMicrophysics(
-        p3.minimum_mass_mixing_ratio,
-        p3.minimum_number_mixing_ratio,
-        p3.ice,
-        p3.rain,
-        p3.cloud,
-        p3.process_rates,
-        p3.precipitation_boundary_condition,
-        p3.negative_moisture_correction,
-        p3.aerosol,
-        warm_rain_scheme,
-    )
-end
-
 @testset "P3 trace-regime behavior" begin
     @testset "Float32 rain quadrature retains the mass-weighted velocity" begin
         evaluator_32 = PPP.RainMassWeightedVelocityEvaluator(Float32)
@@ -40,18 +25,19 @@ end
     ρ = 0.8
 
     @testset "warm-rain qsmall gates" begin
-        p3_scheme = p3_with_warm_rain_scheme(p3, PPP.KhairoutdinovKogan2000())
+        # These are the KK2000 gates; the default selection is what puts them under test.
+        @test p3.warm_rain_scheme isa PPP.KhairoutdinovKogan2000
 
-        @test PPP.rain_accretion_rate(p3_scheme, qtrace, qsmall, ρ) == 0
-        @test PPP.rain_accretion_rate(p3_scheme, qsmall, qtrace, ρ) == 0
-        @test PPP.rain_accretion_rate(p3_scheme, qsmall, qsmall, ρ) > 0
+        @test PPP.rain_accretion_rate(p3, qtrace, qsmall, ρ) == 0
+        @test PPP.rain_accretion_rate(p3, qsmall, qtrace, ρ) == 0
+        @test PPP.rain_accretion_rate(p3, qsmall, qsmall, ρ) > 0
 
-        @test PPP.rain_self_collection_rate(p3_scheme, qtrace, 1e3, ρ) == 0
-        @test PPP.rain_self_collection_rate(p3_scheme, qsmall, 1e3, ρ) > 0
-        @test PPP.rain_breakup_rate(p3_scheme, qtrace, 1e3, 1.0) == 0
+        @test PPP.rain_self_collection_rate(p3, qtrace, 1e3, ρ) == 0
+        @test PPP.rain_self_collection_rate(p3, qsmall, 1e3, ρ) > 0
+        @test PPP.rain_breakup_rate(p3, qtrace, 1e3, 1.0) == 0
 
         # KK2000 carries no explicit cloud self-collection sink.
-        @test PPP.cloud_self_collection_rate(p3_scheme, qsmall, 1e8, ρ) == 0
+        @test PPP.cloud_self_collection_rate(p3, qsmall, 1e8, ρ) == 0
     end
 
     @testset "terminal-velocity qsmall gates" begin
