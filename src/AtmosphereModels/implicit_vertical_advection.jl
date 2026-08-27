@@ -267,10 +267,6 @@ end
 #####
 ##### get_coefficient seam for the ρw solve: diffusion (z-Face) + z-Face implicit advection
 #####
-##### Oceananigans' extended `implicit_step!` (≥ 0.110.20) appends the field's top, bottom, and
-##### immersed boundary conditions after `(advection, w, density)`; these signatures mirror the
-##### upstream AIVA methods, including the implicit-explicit boundary-flux diagonal.
-#####
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionUpperDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
