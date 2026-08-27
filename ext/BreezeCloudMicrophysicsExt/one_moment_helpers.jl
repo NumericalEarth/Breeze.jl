@@ -6,7 +6,7 @@ function AtmosphereModels.precipitation_rate(model, microphysics::OneMomentLiqui
     grid = model.grid
     qᶜˡ = model.microphysical_fields.qᶜˡ
     ρqʳ = model.microphysical_fields.ρqʳ
-    ρ = model.dynamics.reference_state.density
+    ρ = total_density(model.dynamics)
     kernel = OneMomentPrecipitationRateKernel(microphysics.categories, qᶜˡ, ρqʳ, ρ)
     op = KernelFunctionOperation{Center, Center, Center}(kernel, grid)
     return Field(op)
@@ -23,20 +23,20 @@ struct OneMomentPrecipitationRateKernel{C, QL, RR, RS}
     categories :: C
     cloud_liquid :: QL
     rain_density :: RR
-    reference_density :: RS
+    density :: RS
 end
 
 Adapt.adapt_structure(to, k::OneMomentPrecipitationRateKernel) =
     OneMomentPrecipitationRateKernel(adapt(to, k.categories),
                                       adapt(to, k.cloud_liquid),
                                       adapt(to, k.rain_density),
-                                      adapt(to, k.reference_density))
+                                      adapt(to, k.density))
 
 @inline function (k::OneMomentPrecipitationRateKernel)(i, j, k_idx, grid)
     categories = k.categories
     @inbounds qᶜˡ = k.cloud_liquid[i, j, k_idx]
     @inbounds ρqʳ = k.rain_density[i, j, k_idx]
-    @inbounds ρ = k.reference_density[i, j, k_idx]
+    @inbounds ρ = k.density[i, j, k_idx]
 
     qʳ = ρqʳ / ρ
     parameters = categories.parameters
@@ -68,41 +68,44 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the precipitation flux at the bottom boundary.
 
-The surface precipitation flux is ``wʳ ρqʳ`` at `k = 1` (bottom face), representing
-the rate at which rain mass leaves the domain through the bottom boundary.
+The surface precipitation flux sums every sedimenting prognostic moisture-mass tracer,
+using the same advection scheme that transports each tracer during time stepping and
+evaluating its flux at the bottom face (`k = 1`).
+For explicit advection this is the same boundary flux used by the tendency operator.
+For adaptive implicit advection it is the instantaneous split-operator flux.
 
 Units: kg/m²/s (positive = downward, out of domain)
-
-!!! note "Sign convention"
-    The returned value is positive when rain is falling out of the domain
-    (the terminal velocity ``wʳ`` is negative, and we flip the sign).
 """
 function AtmosphereModels.surface_precipitation_flux(model, microphysics::OneMomentCloudMicrophysics)
+    return sedimenting_moisture_surface_flux(model, microphysics)
+end
+
+sedimenting_moisture_surface_flux_operations(model, microphysics, ::Tuple{}) = ()
+
+function sedimenting_moisture_surface_flux_operations(model, microphysics, names::Tuple{Symbol, Vararg})
+    name = first(names)
+    rest = sedimenting_moisture_surface_flux_operations(model, microphysics, Base.tail(names))
+    is_moisture_mass_tracer(name) || return rest
+    isnothing(moisture_phase(microphysics, Val(name))) && return rest
+
+    w = sedimentation_velocity(microphysics, model.microphysical_fields, Val(name))
+    isnothing(w) && return rest
+
     grid = model.grid
-    wʳ = model.microphysical_fields.wʳ
-    ρqʳ = model.microphysical_fields.ρqʳ
-    kernel = SurfacePrecipitationFluxKernel(wʳ, ρqʳ)
-    op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid)
-    return Field(op)
+    ρ = total_density(model.dynamics)
+    wᵗ = transport_velocities(model).w
+    q = getproperty(model.microphysical_fields, specific_field_name(name))
+    advection = getproperty(model.advection, name)
+    kernel = SurfacePrecipitationFluxKernel(advection)
+    operation = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid, ρ, wᵗ, w, q)
+    return (operation, rest...)
 end
 
-struct SurfacePrecipitationFluxKernel{W, R}
-    terminal_velocity :: W
-    rain_density :: R
-end
-
-Adapt.adapt_structure(to, k::SurfacePrecipitationFluxKernel) =
-    SurfacePrecipitationFluxKernel(adapt(to, k.terminal_velocity),
-                                    adapt(to, k.rain_density))
-
-@inline function (kernel::SurfacePrecipitationFluxKernel)(i, j, k_idx, grid)
-    # Flux at bottom face (k=1), ignore k_idx since this is a 2D field
-    # wʳ < 0 (downward), so -wʳ * ρqʳ > 0 represents flux out of domain
-    @inbounds wʳ = kernel.terminal_velocity[i, j, 1]
-    @inbounds ρqʳ = kernel.rain_density[i, j, 1]
-
-    # Return positive flux for rain leaving domain (downward)
-    return -wʳ * ρqʳ
+function sedimenting_moisture_surface_flux(model, microphysics)
+    names = prognostic_field_names(microphysics)
+    operations = sedimenting_moisture_surface_flux_operations(model, microphysics, names)
+    isempty(operations) && return Field{Center, Center, Nothing}(model.grid)
+    return Field(reduce(+, operations))
 end
 
 #####
