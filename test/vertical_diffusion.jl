@@ -2,6 +2,10 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Oceananigans
+using Oceananigans.Grids: ZDirection
+using Oceananigans.TurbulenceClosures: VerticallyImplicitDiffusionLowerDiagonal,
+                                       VerticallyImplicitDiffusionDiagonal,
+                                       VerticallyImplicitDiffusionUpperDiagonal
 using Test
 
 @testset "Vertically implicit diffusion correctness [$(FT)]" for FT in test_float_types()
@@ -273,6 +277,63 @@ end
         ρuᵉ = Array(interior(explicit_model.momentum.ρu, 1, 1, :))
 
         @test maximum(abs, ρuⁱ .- ρuᵉ) / maximum(abs, ρuᵉ) < 0.02
+    end
+end
+
+#####
+##### The `get_coefficient` seam
+#####
+##### Breeze routes the mass-flux-weighted coefficients into Oceananigans' vertically-implicit solve
+##### by adding `get_coefficient` methods keyed on `MassWeightedImplicitDiffusion`. If upstream
+##### changes what `implicit_step!` forwards — as v0.110.20 did, appending the field's top, bottom
+##### and immersed boundary conditions after `(advection, w, density)` — a method that fixes the
+##### trailing argument count stops matching, and the solve silently falls through to Oceananigans'
+##### *unweighted* diffusion-only fallback. Nothing errors; the weighting just disappears.
+#####
+##### The physics tests above do catch that today, but only because this particular fallthrough
+##### happens to change the steady state. This asserts the dispatch itself: the weighted method must
+##### win for the argument list `implicit_step!` actually passes, and must return something the
+##### unweighted fallback does not.
+#####
+
+@testset "Mass-weighted get_coefficient wins dispatch [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    grid = RectilinearGrid(default_arch; size=(1, 1, 16), x=(0, 100), y=(0, 100), z=(0, 4000),
+                           topology=(Periodic, Periodic, Bounded))
+    closure = VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ = 100, ν = 100)
+    model = AtmosphereModel(grid; closure, advection=nothing, tracers=:ρc)
+    set!(model; θ = 300, ρc = (x, y, z) -> cospi(z / 4000))
+
+    ρ = Breeze.AtmosphereModels.total_density(model.dynamics)
+    scheme = Breeze.AtmosphereModels.implicit_step_scheme(nothing, :ρc)
+    w = model.velocities.w
+    clock = model.clock
+    mf = Oceananigans.fields(model)
+    c, f = Center(), Face()
+    id = Breeze.AtmosphereModels.closure_scalar_index(model, :ρc)
+
+    # The trailing arguments `implicit_step!` forwards. Boundary conditions are appended from
+    # Oceananigans v0.110.20 onward; `weighted_args` mirrors that call exactly.
+    ρc = model.tracers.ρc
+    bcs = (ρc.boundary_conditions.top, ρc.boundary_conditions.bottom, ρc.boundary_conditions.immersed)
+
+    coefficient(marker, trailing...) =
+        Oceananigans.Solvers.get_coefficient(1, 1, 8, grid, marker, nothing, ZDirection(),
+                                             model.closure, model.closure_fields, id, c, c, c,
+                                             1.0, clock, mf, trailing...)
+
+    for marker in (VerticallyImplicitDiffusionUpperDiagonal(),
+                   VerticallyImplicitDiffusionLowerDiagonal(),
+                   VerticallyImplicitDiffusionDiagonal())
+
+        weighted   = coefficient(marker, scheme, w, ρ, bcs...)   # what implicit_step! passes
+        unweighted = coefficient(marker)                          # the diffusion-only fallback
+
+        # A method must exist for the full argument list, and it must be the weighted one: over a
+        # 4 km column ρ varies ~40%, so the weighted coefficient cannot coincide with the unweighted.
+        @test isfinite(weighted)
+        @test weighted != unweighted
     end
 end
 

@@ -44,7 +44,8 @@ using Oceananigans.TurbulenceClosures:
     VerticallyImplicitDiffusionUpperDiagonal,
     _implicit_linear_coefficient,
     _ivd_lower_diagonal,
-    _ivd_upper_diagonal
+    _ivd_upper_diagonal,
+    boundary_flux_diagonal
 
 # Breeze-owned wrapper routing a z-Center prognostic's implicit solve to the mass-flux-weighted
 # coefficients below. Like `VerticalMomentumImplicitAdvection`, wrapping the scheme puts a
@@ -122,10 +123,16 @@ end
 #####
 ##### get_coefficient seam for z-Center prognostics: mass-weighted diffusion + implicit advection
 #####
+##### Oceananigans ≥ 0.110.20 appends the field's top, bottom and immersed boundary conditions after
+##### `(advection, w, density)`, and its own fallbacks absorb them with `args...`. A method that
+##### fixes the trailing count at three stops matching, and the solve silently falls through to the
+##### *unweighted* diffusion-only fallback — the weighting vanishes with no error. These signatures
+##### mirror upstream's AIVA methods, including the implicit-explicit boundary-flux diagonal.
+#####
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionUpperDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
-                                         advection::MassWeightedImplicitDiffusion, w, ρ)
+                                         advection::MassWeightedImplicitDiffusion, w, ρ, args...)
     ρᵈ = mass_weighting_density(advection.diffusion_density, ρ)
     du_diff = mass_weighted_ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρᵈ)
     du_adv  = mass_weighted_advection_upper_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
@@ -134,7 +141,7 @@ end
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionLowerDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
-                                         advection::MassWeightedImplicitDiffusion, w, ρ)
+                                         advection::MassWeightedImplicitDiffusion, w, ρ, args...)
     ρᵈ = mass_weighting_density(advection.diffusion_density, ρ)
     dl_diff = mass_weighted_ivd_lower_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρᵈ)
     dl_adv  = mass_weighted_advection_lower_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
@@ -143,9 +150,11 @@ end
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
-                                         advection::MassWeightedImplicitDiffusion, w, ρ)
+                                         advection::MassWeightedImplicitDiffusion, w, ρ,
+                                         top_bc=nothing, bottom_bc=nothing, immersed_bc=nothing)
     ρᵈ = mass_weighting_density(advection.diffusion_density, ρ)
     d_diff = mass_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρᵈ)
     d_adv  = mass_weighted_advection_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
-    return d_diff + d_adv
+    d_bc   = boundary_flux_diagonal(i, j, k, grid, ℓx, ℓy, ℓz, Δt, clk, fields, top_bc, bottom_bc, immersed_bc)
+    return d_diff + d_adv + d_bc
 end
