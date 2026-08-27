@@ -102,7 +102,7 @@ end
         surface_temperature = μ.surface_temperature[i, j, 1]
     end
 
-    properties = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    properties = p3_process_properties(p3, ρ, ℳ)
     result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
                                  surface_temperature, temperature_tendency,
                                  vapor_tendency)

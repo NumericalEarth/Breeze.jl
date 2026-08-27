@@ -44,12 +44,31 @@ sized to `sink_limiting_timescale`, so one host step with
 the host integrates with ``dt ≠ τ`` the supersaturation alignment relaxes over multiple
 steps rather than landing in one.
 
-When `predict_supersaturation = false`, ``ε`` is gated to zero so the local
-state passes through unchanged.
+When `predict_supersaturation = false`, dispatch bypasses the adjustment and the
+local state passes through unchanged.
 """
-@inline function predicted_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, constants)
+@inline predicted_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants) =
+    predicted_supersaturation_adjustment(p3.process_rates, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
+                                         sᵛ⁺ˡ, T, ρ, constants)
+
+@inline function predicted_supersaturation_adjustment(
+    ::ProcessRateParameters{FT, false}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
+) where FT
+    cloud_water_adjustment = zero(qᶜˡ)
+    return (; cloud_water_adjustment,
+              rate = zero(qᶜˡ),
+              qᶜˡ,
+              qᵛ,
+              qᵛ⁺ˡ,
+              T)
+end
+
+@inline function predicted_supersaturation_adjustment(
+    parameters::ProcessRateParameters{PFT, true}, p3,
+    qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
+) where PFT
     FT = typeof(qᶜˡ)
-    τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
+    τ = max(parameters.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
@@ -63,14 +82,16 @@ state passes through unchanged.
     cloud_water_adjustment = ifelse(abs(cloud_water_adjustment) <
                                     100 * eps(FT) * max(qᵛ⁺ˡ, qᵛ),
                                     zero(FT), cloud_water_adjustment)
-    cloud_water_adjustment = gate_predicted_supersaturation(p3.process_rates,
-                                                            cloud_water_adjustment)
+    adjusted_temperature = T + cloud_water_adjustment * ℒˡ / cᵖᵈ
+    adjusted_saturation = saturation_specific_humidity(
+        adjusted_temperature, ρ, constants, PlanarLiquidSurface())
 
     return (; cloud_water_adjustment,
               rate = cloud_water_adjustment / τ,
               qᶜˡ = qᶜˡ + cloud_water_adjustment,
               qᵛ = qᵛ - cloud_water_adjustment,
-              T = T + cloud_water_adjustment * ℒˡ / cᵖᵈ)
+              qᵛ⁺ˡ = adjusted_saturation,
+              T = adjusted_temperature)
 end
 
 @inline function cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, Dᵛ, μᶜˡ, λᶜˡ,
@@ -141,7 +162,7 @@ Compute cloud, rain, and ice diffusional growth rates using a shared
 semi-analytic saturation adjustment, in the `SCF = SPF = 1` limit; the subgrid
 cloud/precipitation fraction framework is handled separately.
 """
-@inline function coupled_saturation_adjustment_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+@inline function coupled_saturation_adjustment_rates(p3, qᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
                                                      qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                                      constants, transport, q,
                                                      μᶜˡ, λᶜˡ, nᶜˡ_bounded,

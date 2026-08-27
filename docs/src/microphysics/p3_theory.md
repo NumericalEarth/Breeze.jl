@@ -2697,9 +2697,10 @@ their negative mass.
 
 The rime fraction must satisfy ``0 \le F^f \le 1`` (so ``ρq^f \le ρq^i``) and
 the liquid fraction ``0 \le F^l \le 1``. `consistent_rime_state` caps the
-diagnosed fractions at read time, and `p3_ice_properties`
-(`p3_microphysical_state.jl`) carries the capped values into every rate so the
-whole step sees one consistent state.
+diagnosed fractions at read time. `p3_core_ice_properties`
+(`p3_microphysical_state.jl`) supplies those capped values to the specialized
+fall-speed and process-rate property payloads, so the whole step sees one
+consistent state.
 
 #### Threshold Handling
 

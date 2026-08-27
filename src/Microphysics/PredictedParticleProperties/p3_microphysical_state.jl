@@ -441,6 +441,12 @@ end
 end
 
 # Shared diagnosis of bounded ice moments and mean density.
+struct P3IceMoments{FT}
+    qⁱ_total :: FT
+    nⁱ_diagnostic :: FT
+    nⁱ :: FT
+end
+
 struct P3IceMomentBounds{FT}
     qⁱ_total :: FT
     nⁱ_diagnostic :: FT
@@ -448,7 +454,7 @@ struct P3IceMomentBounds{FT}
     ρ_mean :: FT
 end
 
-@inline function p3_ice_moment_bounds(p3::P3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
+@inline function p3_ice_moments(p3::P3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(ρ)
     mass_scale = FT(p3.process_rates.floors.mass_scale)
     has_ice_mass = qⁱ_raw > mass_scale
@@ -456,10 +462,18 @@ end
     nⁱ_global = min(max(0, nⁱ_raw),
                     p3.process_rates.maximum_ice_number_density / ρ)
     nⁱ_diagnostic = max(nⁱ_global, p3.minimum_number_mixing_ratio)
-    ρ_mean = ice_mean_density(p3, qⁱ_total, nⁱ_diagnostic, Fᶠ, Fˡ, ρᶠ)
     nⁱ_bounded = bounded_ice_number(p3, qⁱ_total, nⁱ_diagnostic, Fᶠ, Fˡ, ρᶠ)
     nⁱ = ifelse(has_ice_mass, nⁱ_bounded, FT(0))
-    return P3IceMomentBounds{FT}(qⁱ_total, nⁱ_diagnostic, nⁱ, ρ_mean)
+    return P3IceMoments{FT}(qⁱ_total, nⁱ_diagnostic, nⁱ)
+end
+
+@inline function p3_ice_moment_bounds(p3::P3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
+    FT = typeof(ρ)
+    moments = p3_ice_moments(p3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
+    ρ_mean = ice_mean_density(p3, moments.qⁱ_total, moments.nⁱ_diagnostic,
+                              Fᶠ, Fˡ, ρᶠ)
+    return P3IceMomentBounds{FT}(moments.qⁱ_total, moments.nⁱ_diagnostic,
+                                 moments.nⁱ, ρ_mean)
 end
 
 # Write the consistent rime state back to the prognostic densities. `grid_microphysical_state`
@@ -569,8 +583,8 @@ end
     return nothing
 end
 
-# GPU-safe return struct for ice properties (NamedTuples require jl_f_tuple on GPU).
-struct P3IceProps{FT}
+# GPU-safe property structs (NamedTuples require jl_f_tuple on GPU).
+struct P3CoreIceProps{FT}
     qᶠ :: FT
     bᶠ :: FT
     Fᶠ :: FT
@@ -580,14 +594,33 @@ struct P3IceProps{FT}
     # impose_max_Ni cap mirrored from compute_p3_process_rates so the tabulated
     # rate decomposition uses the same nⁱ throughout the process path.
     nⁱ :: FT
-    # Number and mean density diagnosed before the lambda limiter; these are the
-    # values the volume-equivalent diameter is built from.
+    # Number diagnosed before the lambda limiter; the process payload combines it
+    # with mean density to build the volume-equivalent diameter.
     nⁱ_diagnostic :: FT
-    ρ_mean :: FT
+end
+
+struct P3FallSpeedProps{FT}
+    Fᶠ :: FT
+    Fˡ :: FT
+    ρᶠ :: FT
+    qⁱ_total :: FT
+    nⁱ :: FT
     μᶜˡ :: FT
     λᶜˡ :: FT
-    Nᶜˡ :: FT
     ν :: FT
+end
+
+struct P3ProcessProps{FT}
+    qᶠ :: FT
+    bᶠ :: FT
+    Fᶠ :: FT
+    Fˡ :: FT
+    ρᶠ :: FT
+    qⁱ_total :: FT
+    nⁱ :: FT
+    nⁱ_diagnostic :: FT
+    ρ_mean :: FT
+    Nᶜˡ :: FT
     λʳ :: FT
 end
 
@@ -609,7 +642,7 @@ end
 # process rates need the resolved host tendencies assembled during that step.
 # Keep both computations scalar and return concrete structs for GPU compilation.
 @noinline function p3_fall_speed_compute(p3::P3, ρ, ℳ::P3MicrophysicalState,
-                                          properties::P3IceProps, constants)
+                                          properties::P3FallSpeedProps, constants)
     Fᶠ = properties.Fᶠ
     ρᶠ = properties.ρᶠ
 
@@ -644,7 +677,7 @@ end
 end
 
 @noinline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
-                                        constants, properties::P3IceProps,
+                                        constants, properties::P3ProcessProps,
                                         surface_temperature, temperature_tendency,
                                         vapor_tendency)
     Fᶠ = properties.Fᶠ
@@ -662,7 +695,7 @@ end
     cloud_number_tendency = isnothing(p3.aerosol) ? zero(typeof(ρ)) :
                             tendency_ρnᶜˡ(rates, ρ, properties.Nᶜˡ, ℳ.qᶜˡ, p3)
     rain_mass_tendency = tendency_ρqʳ(rates, ρ, p3.process_rates)
-    rain_number_tendency = tendency_ρnʳ(rates, ρ, properties.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3)
+    rain_number_tendency = tendency_ρnʳ(rates, ρ, p3)
     ice_mass_tendency = tendency_ρqⁱ(rates, ρ)
     ice_number_tendency = tendency_ρnⁱ(rates, ρ)
     rime_mass_tendency = tendency_ρqᶠ(rates, ρ, Fᶠ)
@@ -777,7 +810,7 @@ end
 # has already built the state for this cell, so rebuilding it here would repeat the whole
 # `grid_microphysical_state` read for nothing.
 @inline function p3_compute_fall_speeds!(μ, i, j, k, p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    properties = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    properties = p3_fall_speed_properties(p3, ρ, ℳ, 𝒰, constants)
     result = p3_fall_speed_compute(p3, ρ, ℳ, properties, constants)
     return write_p3_fall_speeds!(μ, i, j, k, p3, result)
 end
@@ -852,34 +885,50 @@ end
 #      adiabatic-only forcing and adds every tendency straight into Gⁿ.
 #   2. Gridless (ParcelModel): microphysical_tendencies builds state and computes rates directly.
 
-# Size-distribution properties shared by the fall speeds and the process rates.
-@inline function p3_ice_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+# Ice properties shared within each specialized consumer payload.
+@inline function p3_core_ice_properties(p3, ρ, ℳ::P3MicrophysicalState)
     FT = typeof(ρ)
     qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
     qⁱ_raw = total_ice_mass(ℳ.qⁱ, qʷⁱ)
-    cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ)
     Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, qʷⁱ)
-    bounds = p3_ice_moment_bounds(p3, ρ, qⁱ_raw, ℳ.nⁱ,
-                                  rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
+    moments = p3_ice_moments(p3, ρ, qⁱ_raw, ℳ.nⁱ,
+                             rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
+    return P3CoreIceProps{FT}(rime_state.qᶠ, rime_state.bᶠ, rime_state.Fᶠ, Fˡ,
+                              rime_state.ρᶠ, moments.qⁱ_total, moments.nⁱ,
+                              moments.nⁱ_diagnostic)
+end
+
+@inline function p3_fall_speed_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    FT = typeof(ρ)
+    ice = p3_core_ice_properties(p3, ρ, ℳ)
+    cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     T = temperature(𝒰, constants)
     P = air_pressure(𝒰, constants)
-    transport = air_transport_properties(T, P, constants)
+    ν = air_kinematic_viscosity(T, P, constants)
+    return P3FallSpeedProps{FT}(ice.Fᶠ, ice.Fˡ, ice.ρᶠ, ice.qⁱ_total, ice.nⁱ,
+                                cloud.μᶜˡ, cloud.λᶜˡ, ν)
+end
+
+@inline function p3_process_properties(p3, ρ, ℳ::P3MicrophysicalState)
+    FT = typeof(ρ)
+    ice = p3_core_ice_properties(p3, ρ, ℳ)
+    cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     λʳ = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
-    return P3IceProps{FT}(rime_state.qᶠ, rime_state.bᶠ, rime_state.Fᶠ, Fˡ,
-                          rime_state.ρᶠ, bounds.qⁱ_total, bounds.nⁱ,
-                          bounds.nⁱ_diagnostic, bounds.ρ_mean,
-                          cloud.μᶜˡ, cloud.λᶜˡ, cloud.Nᶜˡ,
-                          transport.ν, λʳ)
+    ρ_mean = ice_mean_density(p3, ice.qⁱ_total, ice.nⁱ_diagnostic,
+                              ice.Fᶠ, ice.Fˡ, ice.ρᶠ)
+    return P3ProcessProps{FT}(ice.qᶠ, ice.bᶠ, ice.Fᶠ, ice.Fˡ, ice.ρᶠ,
+                              ice.qⁱ_total, ice.nⁱ, ice.nⁱ_diagnostic, ρ_mean,
+                              cloud.Nᶜˡ, λʳ)
 end
 
 # Every P3 tendency from one process-rate evaluation, for callers with no grid. With no
 # column below, the local temperature stands in for the surface temperature.
 @inline function p3_state_tendencies(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    # Build ice properties first, then reuse them when computing rates to avoid
-    # the redundant rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ
-    # calls inside compute_p3_process_rates.
-    properties = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    # Build process properties once, then reuse them when computing rates to avoid
+    # redundant rain-slope, consistent-rime-state, total-ice-mass, and liquid-fraction
+    # diagnoses inside compute_p3_process_rates.
+    properties = p3_process_properties(p3, ρ, ℳ)
     surface_temperature = temperature(𝒰, constants)
     temperature_tendency = p3_adiabatic_temperature_tendency(ℳ, 𝒰, constants)
     return p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,

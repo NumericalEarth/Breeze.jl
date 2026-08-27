@@ -32,9 +32,7 @@ where:
 - `qⁱ`: Ice mass fraction [kg/kg]
 - `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
-- `P`: Pressure [Pa]
 - `qᵛ`: Vapor mass fraction [kg/kg]
-- `qᵛ⁺`: Saturation vapor mass fraction over liquid [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
 - `ρ`: Air density [kg/m³]
@@ -44,16 +42,16 @@ where:
 # Returns
 - Rate of ice → rain conversion [kg/kg/s]
 """
-@inline ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+@inline ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
                          constants, transport) =
-    ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+    ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
                                      constants, transport)[1]
 
 # Returns `(melt_rate, small, large)`. The small/large split of the ventilation
 # integral sets the rain-vs-coating partition in `ice_melting_rates`, and comes
 # free with the lookup the melt rate already needs — recomputing it there would
 # repeat one `prepare_interpolation` and four `evaluate_at` at the same coordinate.
-@inline function ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+@inline function ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
                                                   constants, transport)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
@@ -158,9 +156,7 @@ Requires tabulated small/large ice ventilation integrals.
 - `nⁱ`: Ice number concentration [1/kg]
 - `qʷⁱ`: Liquid water on ice [kg/kg]
 - `T`: Temperature [K]
-- `P`: Pressure [Pa]
 - `qᵛ`: Vapor mass fraction [kg/kg]
-- `qᵛ⁺`: Saturation vapor mass fraction over liquid [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
 - `ρ`: Air density [kg/m³]
@@ -170,15 +166,12 @@ Requires tabulated small/large ice ventilation integrals.
 # Returns
 - NamedTuple with `partial_melting` and `complete_melting` rates [kg/kg/s]
 """
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
                                    constants, transport)
-    FT = typeof(qⁱ)
-    parameters = p3.process_rates
-
     # Total melting rate, plus the small/large ventilation split it already had to
     # look up. Passing qʷⁱ gives the Fˡ-blended ventilation.
     total_melt, small, large =
-        ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+        ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
                                          constants, transport)
 
     rain_fraction = psd_melting_rain_fraction(small, large)

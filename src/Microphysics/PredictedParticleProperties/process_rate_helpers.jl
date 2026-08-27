@@ -206,8 +206,7 @@ and — outside liquid-fraction mode — cloud water swept up by melting ice and
 as drops. Sinks: evaporation, self-collection, riming, heterogeneous freezing, and
 above-freezing collection by ice.
 """
-@inline function rain_number_tendency_before_homogeneous_freezing(p3, nⁱ, qⁱ, nʳ, qʳ,
-                                                                  autoconversion,
+@inline function rain_number_tendency_before_homogeneous_freezing(p3, autoconversion,
                                                                   melting_number,
                                                                   evaporation_number,
                                                                   self_collection, breakup,
@@ -217,7 +216,7 @@ above-freezing collection by ice.
                                                                   cloud_warm_collection,
                                                                   warm_collection_number,
                                                                   wet_growth_shedding_number)
-    FT = typeof(nⁱ)
+    FT = typeof(autoconversion)
     parameters = p3.process_rates
     number_from_autoconversion = autoconversion / rain_seed_drop_mass(p3)
     number_from_melting = melting_number

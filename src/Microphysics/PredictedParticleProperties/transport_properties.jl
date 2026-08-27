@@ -21,6 +21,20 @@ const SUTHERLAND_TEMPERATURE = 120                       # [K]
 const AIR_HEAT_CAPACITY_PRANDTL_RATIO = 1414             # Kᵃ / η = cᵖ / Pr [J kg⁻¹ K⁻¹]
 const MINIMUM_TRANSPORT_TEMPERATURE = 1                  # [K], keeps the power laws finite
 
+@inline function sutherland_dynamic_viscosity(T_safe)
+    FT = typeof(T_safe)
+    return FT(SUTHERLAND_COEFFICIENT) * sqrt(T_safe)^3 /
+           (T_safe + FT(SUTHERLAND_TEMPERATURE))
+end
+
+@inline function air_kinematic_viscosity(T, P, constants)
+    FT = typeof(T)
+    T_safe = max(T, FT(MINIMUM_TRANSPORT_TEMPERATURE))
+    η = sutherland_dynamic_viscosity(T_safe)
+    Rᵈ = FT(dry_air_gas_constant(constants))
+    return η * Rᵈ * T_safe / P
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -71,7 +85,7 @@ map(x -> round(x, sigdigits=3), properties)
 
     # Sutherland's law. The dynamic viscosity is η, not μ, which denotes the
     # PSD shape parameter everywhere else in this module.
-    η = FT(SUTHERLAND_COEFFICIENT) * sqrt(T_safe)^3 / (T_safe + FT(SUTHERLAND_TEMPERATURE))
+    η = sutherland_dynamic_viscosity(T_safe)
 
     Kᵃ = FT(AIR_HEAT_CAPACITY_PRANDTL_RATIO) * η
     Rᵈ = FT(dry_air_gas_constant(constants))

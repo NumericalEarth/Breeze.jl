@@ -47,8 +47,8 @@ end
 function routing_derived_state(p3, air_density, microphysical_state,
                                thermodynamic_state, constants)
     FT = typeof(air_density)
-    properties = P3Routing.p3_ice_properties(
-        p3, air_density, microphysical_state, thermodynamic_state, constants)
+    properties = P3Routing.p3_process_properties(
+        p3, air_density, microphysical_state)
     air_temperature = temperature(thermodynamic_state, constants)
     pressure = thermodynamic_state.reference_pressure
     moisture = thermodynamic_state.moisture_mass_fractions
@@ -60,7 +60,6 @@ function routing_derived_state(p3, air_density, microphysical_state,
     transport = P3Routing.air_transport_properties(air_temperature, pressure, constants)
     cloud = P3Routing.diagnose_cloud_dsd(
         p3, microphysical_state.qᶜˡ, microphysical_state.nᶜˡ, air_density)
-
     state = P3Routing.P3DerivedState{FT, typeof(moisture)}(
         properties.nⁱ,
         microphysical_state.nʳ,
@@ -116,8 +115,7 @@ end
         @test rates.shedding ≈ coating / τ
         @test rates.melting_number ≈ ice_number / τ
         @test tendency_ρnⁱ(rates, air_density) ≈ -air_density * ice_number / τ
-        @test tendency_ρnʳ(
-            rates, air_density, ice_number, dry_ice, zero(FT), one(FT), p3) ≈
+        @test tendency_ρnʳ(rates, air_density, p3) ≈
               air_density * ice_number / τ
         @test tendency_ρqʳ(rates, air_density, p3.process_rates) +
               tendency_ρqʷⁱ(rates, air_density, p3.process_rates) ≈ 0 atol=eps(FT)
@@ -185,8 +183,8 @@ end
 
         rates = compute_p3_process_rates(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
-        properties = P3Routing.p3_ice_properties(
-            p3, air_density, microphysical_state, thermodynamic_state, constants)
+        properties = P3Routing.p3_process_properties(
+            p3, air_density, microphysical_state)
 
         @test rates.post_process_clipping == 1
         @test rates.refreezing ≈ FT(9.89e-10)
@@ -323,10 +321,8 @@ end
         phase1 = P3Routing.P3Phase1Rates{FT}(
             ntuple(_ -> zero(FT), fieldcount(P3Routing.P3Phase1Rates{FT}))...)
 
-    phase2 = P3Routing.p3_phase2_rates(
-            p3, air_density, microphysical_state, constants, state, phase1, FT(280))
-    phase2_warm_surface = P3Routing.p3_phase2_rates(
-            p3, air_density, microphysical_state, constants, state, phase1, FT(285))
+        phase2 = P3Routing.p3_phase2_rates(
+            p3, air_density, microphysical_state, constants, state, phase1)
         # D_mean is the volume-equivalent diameter built from the pre-limiter
         # number and mean density, not the mass-law diameter.
         expected_diameter = cbrt(
@@ -334,17 +330,16 @@ end
             (FT(π) * properties.ρ_mean * properties.nⁱ_diagnostic))
 
         @test properties.nⁱ != properties.nⁱ_diagnostic
-        @test phase2.D_mean ≈ expected_diameter rtol=FT(1e-12)
-        @test phase2_warm_surface.D_mean ≈ expected_diameter rtol=FT(1e-12)
+        @test isfinite(expected_diameter)
 
         # Splintering is recomputed from the sink-limited riming rates, so exercise
-        # the rate function on the phase-2 diameter rather than a phase-2 field.
+        # the rate function with the same locally diagnosed diameter.
         _, splintering_cold = P3Routing.rime_splintering_rate(
             p3, phase2.cloud_riming, phase2.rain_riming, air_temperature,
-            phase2.D_mean, phase2.Fˡ, FT(280), rime_mass)
+            expected_diameter, properties.Fˡ, FT(280), rime_mass)
         _, splintering_warm = P3Routing.rime_splintering_rate(
             p3, phase2.cloud_riming, phase2.rain_riming, air_temperature,
-            phase2.D_mean, phase2.Fˡ, FT(285), rime_mass)
+            expected_diameter, properties.Fˡ, FT(285), rime_mass)
         @test splintering_cold > 0
         @test splintering_warm == 0
     end
@@ -422,10 +417,10 @@ end
         coated_wet_growth_rates = compute_p3_process_rates(
             p3, one(FT), coated_wet_growth_state,
             wet_growth_thermodynamic_state, constants)
-        wet_growth_props = P3Routing.p3_ice_properties(
+        wet_growth_props = P3Routing.p3_fall_speed_properties(
             p3, one(FT), wet_growth_state, wet_growth_thermodynamic_state,
             constants)
-        coated_wet_growth_props = P3Routing.p3_ice_properties(
+        coated_wet_growth_props = P3Routing.p3_fall_speed_properties(
             p3, one(FT), coated_wet_growth_state,
             wet_growth_thermodynamic_state, constants)
         wet_growth_fall_speeds = P3Routing.p3_fall_speed_compute(

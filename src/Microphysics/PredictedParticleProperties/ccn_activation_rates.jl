@@ -33,7 +33,7 @@ one cell's vapor budget, so the dry-air form is used throughout.
 # Returns
 - Rate of vapor → cloud liquid conversion from CCN activation [kg/kg/s]
 """
-@inline function ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜˡ, constants)
+@inline function ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, ρ, Nᶜˡ, constants)
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
 
@@ -69,7 +69,7 @@ Dispatch CCN activation: prescribed (Nothing) or prognostic (AerosolActivation).
 Returns `(; mass, number)` named tuple.
 """
 @inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ,
-                                        qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜˡ, constants)
+                                        qᵛ, qᵛ⁺ˡ, T, ρ, constants)
     FT = typeof(qᶜˡ)
     # Prescribed-Nᶜˡ path: the activation target is the scheme parameter, not the
     # DSD-diagnosed `Nᶜˡ`.
@@ -77,13 +77,13 @@ Returns `(; mass, number)` named tuple.
     # returned `Nᶜˡ` toward zero — using that value would collapse `qᶜˡ_target`
     # and block any seed mass from forming in a warm-bubble parcel.
     Nᶜˡ_target = p3.cloud.number_concentration
-    mass = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ,
+    mass = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, ρ,
                                Nᶜˡ_target, constants)
     return (; mass, number = zero(FT))
 end
 
 @inline function compute_ccn_activation(aerosol::AerosolActivation, p3, qᶜˡ, nᶜˡ, nᵃ,
-                                        qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜˡ, constants)
+                                        qᵛ, qᵛ⁺ˡ, T, ρ, constants)
     result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
     return (; mass = result.qcnuc, number = result.ncnuc)
 end

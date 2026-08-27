@@ -33,7 +33,7 @@ end
     stokes_prefactor * (μᶜˡ + 2) * (μᶜˡ + 1) / λᶜˡ^2
 
 # `μᶜˡ` and `λᶜˡ` are the cloud-DSD shape/slope diagnosed by `diagnose_cloud_dsd`;
-# the caller passes the values already computed in `p3_ice_properties`
+# the caller passes the values already computed in `p3_fall_speed_properties`
 # (`properties.μᶜˡ`/`properties.λᶜˡ`) so the fall-speed kernel does not re-diagnose them.
 @inline function cloud_terminal_velocities(p3, qᶜˡ, ρ, ν, μᶜˡ, λᶜˡ, constants)
     FT = typeof(qᶜˡ + ρ + ν + μᶜˡ + λᶜˡ)
@@ -185,7 +185,7 @@ end
     ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
     velocities = fused_fall_speeds(fs.mass_weighted, fs.number_weighted,
-                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters)
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, parameters)
     active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
     return IceTerminalVelocities{FT}(
         ifelse(active, velocities.mass_weighted, zero(FT)),
@@ -196,7 +196,7 @@ end
 # Fast path: both tables are 4D (the supported P3 configuration with loaded tables).
 # Interpolation indices for (log_m, Fᶠ, Fˡ, ρᶠ) are shared across the two reads.
 @inline function fused_fall_speeds(mass_table::P3Table4D, number_table::P3Table4D,
-                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters)
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, parameters)
     FT = typeof(m̄)
     # Per-particle-mass log-guard; the table clamps its mass axis (see
     # tabulated_fall_speed), not the bulk qmin.
@@ -210,7 +210,7 @@ end
 
 # Fallback for non-4D fall speed tables (quadrature path, mixed types).
 @inline function fused_fall_speeds(mass_table, number_table,
-                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters)
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, parameters)
     FT = typeof(m̄)
     return IceTerminalVelocities{FT}(
         tabulated_fall_speed(mass_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, parameters),

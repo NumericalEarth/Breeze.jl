@@ -128,7 +128,7 @@ Rain number loses from:
 - Homogeneous freezing (Phase 2, T < -40°C)
 - Rain warm collection number (M9)
 """
-@inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, nʳ, qʳ, p3)
+@inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, p3)
     FT = typeof(ρ)
     parameters = p3.process_rates
 
@@ -513,7 +513,7 @@ prescribed-Nᶜˡ path `rates.ccn_activation_number` is zero, so this returns 0.
 @inline tendency_ρqᶜˡ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρqʳ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρnᶜˡ(::Nothing, ρ, Nᶜˡ, qᶜˡ, p3) = zero(ρ)
-@inline tendency_ρnʳ(::Nothing, ρ, nⁱ, qⁱ, args...) = zero(ρ)
+@inline tendency_ρnʳ(::Nothing, ρ, args...) = zero(ρ)
 @inline tendency_ρqⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρnⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρqᶠ(::Nothing, ρ, Fᶠ) = zero(ρ)

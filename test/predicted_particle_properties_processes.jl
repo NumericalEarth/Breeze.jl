@@ -424,7 +424,7 @@ end
         upper_nⁱ = limiter.small_q(log_m, rime_state.Fᶠ, Fˡ,
                                    rime_state.ρᶠ) * qⁱ
         expected_nⁱ = clamp(nⁱ, lower_nⁱ, upper_nⁱ)
-        properties = PPP.p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+        properties = PPP.p3_process_properties(p3, ρ, ℳ)
         shape_parameter = PPP.compute_ice_shape_parameter(
             p3, qⁱ, nⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
 
@@ -524,8 +524,8 @@ end
         # Test each tendency function returns a finite number
         @test isfinite(tendency_ρqᶜˡ(rates, ρ))
         @test isfinite(tendency_ρqʳ(rates, ρ))
-        @test isfinite(tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, zero(FT), one(FT),
-                                    tendency_test_p3(FT; process_rates = parameters)))
+        @test isfinite(tendency_ρnʳ(
+            rates, ρ, tendency_test_p3(FT; process_rates = parameters)))
         @test isfinite(tendency_ρqⁱ(rates, ρ))
         @test isfinite(tendency_ρnⁱ(rates, ρ))
         @test isfinite(tendency_ρqᶠ(rates, ρ, Fᶠ))
@@ -544,8 +544,7 @@ end
 
         @test tendency_ρqᶜˡ(zero_rates, ρ) == 0.0
         @test tendency_ρqʳ(zero_rates, ρ) == 0.0
-        @test tendency_ρnʳ(zero_rates, ρ, FT(1e5), FT(1e-4), zero(FT), one(FT),
-                           tendency_test_p3(FT)) == 0.0
+        @test tendency_ρnʳ(zero_rates, ρ, tendency_test_p3(FT)) == 0.0
         @test tendency_ρqⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρnⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρqᶠ(zero_rates, ρ, FT(0.3)) == 0.0
@@ -592,7 +591,7 @@ end
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, FT(0), FT(0), FT(0), FT(0),
                                  FT(0), FT(0), FT(0), FT(0), FT(0), FT(0))
 
-        properties = PPP.p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+        properties = PPP.p3_fall_speed_properties(p3, ρ, ℳ, 𝒰, constants)
         cache = PPP.p3_fall_speed_compute(p3, ρ, ℳ, properties, constants)
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
         transport = air_transport_properties(T, P, constants)
@@ -756,8 +755,7 @@ end
 
         @test tendency_ρqᶜˡ(rates, ρ) isa FT
         @test tendency_ρqʳ(rates, ρ) isa FT
-        @test tendency_ρnʳ(rates, ρ, FT(1e5), FT(1e-4), zero(FT), one(FT),
-                           tendency_test_p3(FT)) isa FT
+        @test tendency_ρnʳ(rates, ρ, tendency_test_p3(FT)) isa FT
         @test tendency_ρqⁱ(rates, ρ) isa FT
         @test tendency_ρnⁱ(rates, ρ) isa FT
         @test tendency_ρqᶠ(rates, ρ, FT(0.3)) isa FT
@@ -957,7 +955,7 @@ end
         # the host state directly and the G&M ε is gated to zero by
         # `compute_p3_process_rates` (not this function).
         rates = PPP.coupled_saturation_adjustment_rates(
-            p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+            p3, qᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q,
             cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
@@ -969,7 +967,7 @@ end
         # Bergeron check: with ice present, cloud condensation is smaller than
         # with no ice, because ice steals vapor through the shared budget.
         rates_noice = PPP.coupled_saturation_adjustment_rates(
-            p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
+            p3, qᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q,
             cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
@@ -989,7 +987,7 @@ end
 
         # Zero host forcing reproduces the Bergeron-only behavior bitwise.
         rates_unforced = PPP.coupled_saturation_adjustment_rates(
-            p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+            p3, qᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q,
             cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
@@ -1012,7 +1010,7 @@ end
             cᵖᵐ_ad = mixture_heat_capacity(q_ad, constants)
             temperature_tendency = -constants.gravitational_acceleration / cᵖᵐ_ad
             rates_cooling = PPP.coupled_saturation_adjustment_rates(
-                p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
+                p3, qᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
                 qᵛ_ad, qᵛ⁺ˡ_ad, qᵛ⁺ⁱ_ad, Fᶠ, ρᶠ, T_ad, P, ρ,
                 constants, transport_ad, q_ad,
                 cloud_ad.μᶜˡ, cloud_ad.λᶜˡ, cloud_ad.nᶜˡ,
@@ -1033,7 +1031,7 @@ end
             q_s = MoistureMassFractions(qᵛ_s, qᶜˡ + qʳ + qʷⁱ, zero(FT))
             transport_s = air_transport_properties(T_s, P, constants)
             cloud_s = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-            common = (p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
+            common = (p3, qᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
                       qᵛ_s, qᵛ⁺ˡ_s, qᵛ⁺ⁱ_s, Fᶠ, ρᶠ, T_s, P, ρ,
                       constants, transport_s, q_s,
                       cloud_s.μᶜˡ, cloud_s.λᶜˡ, cloud_s.nᶜˡ)
@@ -1082,7 +1080,7 @@ end
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
         rates = PPP.coupled_saturation_adjustment_rates(
-            p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+            p3, qᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q,
             cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
@@ -1184,7 +1182,7 @@ end
         Nᶜˡ = p3.cloud.number_concentration
 
         ccn = PPP.compute_ccn_activation(p3.aerosol, p3, qᶜˡ, zero(FT), zero(FT),
-                                         qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜˡ, constants)
+                                         qᵛ, qᵛ⁺ˡ, T, ρ, constants)
 
         Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
         ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
@@ -1280,25 +1278,24 @@ end
         ni = FT(1e4)
         P = FT(85000.0)
         qv = FT(0.008)
-        qv_sat = FT(0.01)
         Ff = FT(0.0)
         ρf = FT(400.0)
         ρ = FT(1.0)
         # Above freezing: positive melting
         T_warm = FT(275.15)    # +2C
-        rate_warm = ice_melting_rate(p3, qi, ni, FT(0), T_warm, P, qv, qv_sat, Ff, ρf, ρ,
+        rate_warm = ice_melting_rate(p3, qi, ni, FT(0), T_warm, qv, Ff, ρf, ρ,
                                      constants, air_transport_properties(T_warm, P, constants))
         @test rate_warm > 0
 
         # Below freezing: zero melting
         T_cold = FT(263.15)    # -10C
-        rate_cold = ice_melting_rate(p3, qi, ni, FT(0), T_cold, P, qv, qv_sat, Ff, ρf, ρ,
+        rate_cold = ice_melting_rate(p3, qi, ni, FT(0), T_cold, qv, Ff, ρf, ρ,
                                      constants, air_transport_properties(T_cold, P, constants))
         @test rate_cold == 0
 
         # Exactly at freezing: zero (no ΔT to drive melting)
         T_freeze = FT(273.15)
-        rate_freeze = ice_melting_rate(p3, qi, ni, FT(0), T_freeze, P, qv, qv_sat, Ff, ρf, ρ,
+        rate_freeze = ice_melting_rate(p3, qi, ni, FT(0), T_freeze, qv, Ff, ρf, ρ,
                                        constants, air_transport_properties(T_freeze, P, constants))
         @test rate_freeze == 0
 
@@ -1313,7 +1310,6 @@ end
         ni = FT(1e4)
         P = FT(85000.0)
         qv = FT(0.008)
-        qv_sat = FT(0.01)
         Ff = FT(0.0)
         ρf = FT(400.0)
         ρ = FT(1.0)
@@ -1321,7 +1317,7 @@ end
 
         # No liquid on ice: all melting is partial (goes to coating)
         qwi_zero = FT(0)
-        rates_dry = ice_melting_rates(p3, qi, ni, qwi_zero, T, P, qv, qv_sat, Ff, ρf, ρ,
+        rates_dry = ice_melting_rates(p3, qi, ni, qwi_zero, T, qv, Ff, ρf, ρ,
                                       constants, air_transport_properties(T, P, constants))
         total = rates_dry.partial_melting + rates_dry.complete_melting
         @test total > 0
@@ -1335,7 +1331,7 @@ end
 
         # Saturated liquid coating: more complete melting (or approximately equal)
         qwi_high = FT(0.5 * qi)   # 50% liquid fraction
-        rates_wet = ice_melting_rates(p3, qi, ni, qwi_high, T, P, qv, qv_sat, Ff, ρf, ρ,
+        rates_wet = ice_melting_rates(p3, qi, ni, qwi_high, T, qv, Ff, ρf, ρ,
                                       constants, air_transport_properties(T, P, constants))
         @test rates_wet.complete_melting >= 0
     end
@@ -1994,12 +1990,12 @@ end
         # rather than restating it, so retuning the default cannot desync the test.
         expected_shed_drop_source = ρ * manual_rates.cloud_warm_collection /
                                     p3.process_rates.shed_drop_mass
-        @test tendency_ρnʳ(manual_rates, ρ, nⁱ, qⁱ, nʳ, one(FT), p3) ≈ expected_shed_drop_source
+        @test tendency_ρnʳ(manual_rates, ρ, p3) ≈ expected_shed_drop_source
 
         heavy_shed = ProcessRateParameters(FT; liquid_fraction_active = false,
                                            shed_drop_mass = 1 / 4.0e5)
         p3_heavy = PredictedParticlePropertiesMicrophysics(FT; process_rates = heavy_shed)
-        @test tendency_ρnʳ(manual_rates, ρ, nⁱ, qⁱ, nʳ, one(FT), p3_heavy) ≈
+        @test tendency_ρnʳ(manual_rates, ρ, p3_heavy) ≈
               ρ * manual_rates.cloud_warm_collection * FT(4.0e5)
     end
 

@@ -95,7 +95,6 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 # Arguments
 - `p3`: P3 microphysics scheme (provides shedding table)
 - `qʷⁱ`: Liquid water on ice [kg/kg]
-- `qⁱ`: Ice mass fraction [kg/kg] (dry ice, excluding qʷⁱ)
 - `nⁱ`: Ice number concentration [1/kg]
 - `Fᶠ`: Rime fraction (= qᶠ/qⁱ) [-]
 - `Fˡ`: Liquid fraction (= qʷⁱ/(qⁱ+qʷⁱ)) [-]
@@ -105,9 +104,7 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 # Returns
 - Rate of liquid → rain shedding [kg/kg/s]
 """
-@inline function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
-    FT = typeof(qʷⁱ)
-
+@inline function shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
     qʷⁱ_eff = max(0, qʷⁱ)
     nⁱ_eff = max(0, nⁱ)
 
@@ -270,5 +267,8 @@ appendix C, section i (and Mason 1971 for the underlying heat-balance form).
 @inline function refreezing_rate(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
                                  constants, transport)
     capacity = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
-    return min(capacity, max(0, qʷⁱ) / p3.process_rates.sink_limiting_timescale)
+    return refreezing_rate_from_capacity(p3, qʷⁱ, capacity)
 end
+
+@inline refreezing_rate_from_capacity(p3, qʷⁱ, capacity) =
+    min(capacity, max(0, qʷⁱ) / p3.process_rates.sink_limiting_timescale)
