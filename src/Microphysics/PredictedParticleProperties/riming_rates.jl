@@ -257,7 +257,7 @@ end
 $(TYPEDSIGNATURES)
 
 Compute below-freezing rain number loss from riming using the tabulated
-number-weighted collection kernel (`RainCollectionNumber`).
+number-weighted collection kernel (`IceRainCollection.number`).
 """
 @inline function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
                                          qʷⁱ = zero(typeof(qⁱ)))

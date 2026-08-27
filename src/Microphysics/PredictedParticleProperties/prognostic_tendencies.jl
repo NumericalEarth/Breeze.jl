@@ -458,9 +458,11 @@ Vapor is produced by:
 - Sublimation (negative deposition)
 
 When `predict_supersaturation = true`, the G&M one-shot alignment is
-folded into `rates.condensation` (= M&G `cond` + `cond_GM`), so vapor and
-cloud tendencies pick it up automatically when integrated with
-`dt = sink_limiting_timescale`. See `predicted_supersaturation_adjustment`.
+folded into `rates.condensation` (the M&G condensation rate plus the G&M
+contribution, which `rates.predicted_supersaturation_adjustment` also carries
+separately so it stays inspectable), so vapor and cloud tendencies pick it up
+automatically when integrated with `dt = sink_limiting_timescale`. See
+`predicted_supersaturation_adjustment`.
 """
 @inline function tendency_ρqᵛ(rates::P3ProcessRates, ρ)
     # Condensation: positive = vapor loss (cond), negative = vapor gain (cloud evap)

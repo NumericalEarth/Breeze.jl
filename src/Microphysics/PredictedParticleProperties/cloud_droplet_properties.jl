@@ -156,7 +156,7 @@ $(TYPEDSIGNATURES)
 
 Slope parameter λᶜˡ [1/m] of the cloud gamma PSD carrying absolute mass
 `qᶜˡ_abs` [kg/m³] at number `Nᶜˡ` [1/m³] and shape `μᶜˡ`, before the
-`get_cloud_dsd2` bounds are applied.
+mean-diameter bounds of [`cloud_slope_bounds`](@ref) are applied.
 """
 @inline function unbounded_cloud_slope_parameter(Nᶜˡ, μᶜˡ, qᶜˡ_abs, ρᴸ)
     FT = typeof(qᶜˡ_abs)

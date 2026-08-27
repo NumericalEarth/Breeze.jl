@@ -78,8 +78,9 @@ consequences:
   This is a rate-budget guarantee, not an exact equivalence with an in-place
   one-shot operator.
 - **Latent heating is delegated to the thermodynamics formulation.** The Anelastic
-  and compressible formulations carry energy through their prognostic
-  thermodynamic variable ``θ_{li}``.
+  and compressible formulations carry energy through whichever prognostic
+  thermodynamic variable they were built with, ``ρθ`` or ``ρs``. P3 assembles no
+  tendency for either.
 - **Negative densities are repaired by the host, not by P3.** The advection
   operator is not positive-definite, so `update_state!` applies P3's
   `negative_moisture_correction` (a `SpeciesBorrowing` by default) before the
@@ -1123,8 +1124,8 @@ The P3 size distribution closure proceeds as:
 3. **Slope**: ``λ`` is absorbed into the tables, which the generator indexes by
    mean particle mass ``\bar{m} = L/N``; the model path interpolates on
    ``\log \bar{m}`` and never solves for ice ``λ`` itself
-4. **μ diagnosis**: a Table 1 lookup (the tabulated `mu_i_save`, i.e.
-   the piecewise closure evaluated at generation time)
+4. **μ diagnosis**: a Table 1 lookup — the piecewise μ(λ) closure evaluated at
+   table-generation time and stored as a column, not re-solved per grid point
 5. **Normalization**: the generator fixes the intercept ``N₀`` from the mass
    integral, so ``L`` is preserved even where the ``λ`` limiter binds. Work in
    ``\log N₀`` rather than ``N₀``: its m^-(4+μ) units put it beyond Float32 range
@@ -1547,7 +1548,8 @@ appendix C, section b; [Pruppacher and Klett (1997)](@cite pruppacher2010microph
 ```
 
 with ``f_{1r} = 0.78``, ``f_{2r} = 0.32``, and ``I_\text{vent}`` the
-ventilation integral computed from the rain DSD (`RainEvaporation` integral).
+ventilation integral computed from the rain DSD (tabulated as
+`RainProperties.evaporation` by `RainEvaporationVentilationEvaluator`).
 The number tendency follows the proportionality
 ``\dot{n}^r_\text{evap} = (n^r/q^r)\, \dot{q}^r_\text{evap}``, which preserves the
 mean drop mass.
@@ -2738,6 +2740,38 @@ rime; above ``1 -`` that value (or above 0.99) the particle is transferred whole
 rain, as is warm ice with total mass below `tiny_ice_to_rain_threshold`. Both are
 implemented as relaxation drains over `refreezing_timescale`, and both suppress
 every process that would need the clipped particle.
+
+#### Numerical floors
+
+The thresholds above decide when a species is *physically* negligible. A separate
+`NumericalFloors` on `ProcessRateParameters.floors` bounds the quantities that enter a
+division or a logarithm, so a rate stays finite where the physics may legitimately
+reach zero:
+
+```jldoctest thresholds
+floors = parameters.floors
+
+(floors.mass_scale, floors.number_scale, floors.divisor)
+
+# output
+(1.0e-20, 1.0e-16, 1.0e-30)
+```
+
+`saturation_mass_fraction` and `transport_coefficient` floor the supersaturation
+denominators and the Schmidt-number ratios; `mass_scale` floors mass and volume
+denominators along with the arguments of ``\log_{10}``, and `number_scale` floors number
+denominators; `rate_scale` is the rate below which a process is treated as inactive;
+`divisor` is the last resort applied beneath any remaining quotient or logarithm. `mean_particle_mass_fallback` is the one
+entry that substitutes a value outright rather than bounding one, standing in for a mean
+particle mass where the number concentration is exactly zero — it only has to land
+inside the mass axis of the ice tables.
+
+These are fields rather than literals because the defaults are double-precision
+choices. They remain normal numbers in `Float32`, whose smallest normal is
+``1.2 × 10^{-38}``, but not in `Float16`, whose smallest normal is ``6.1 × 10^{-5}``.
+A configured floor reaches both the per-cell rates and the offline rain tabulation,
+which runs before a scheme object exists and is therefore handed the resolved floors
+explicitly.
 
 ### Code Example
 

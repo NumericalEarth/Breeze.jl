@@ -1092,9 +1092,9 @@ end
         vapor_to_liquid, vapor_to_ice, liquid_to_ice)
     # `saturation_alignment_rate` is intentionally NOT rescaled by the cloud sink limiter: the
     # G&M alignment is its own one-shot saturation adjustment with a local
-    # `ε ≥ -qᶜˡ` cap, and the cloud budget at the limiter sees `qᶜˡ_adjusted`
-    # (= qᶜˡ + ε) as its starting state — so ε is absorbed into
-    # `cloud_available`, not the source/sink list.
+    # `ε ≥ -qᶜˡ` cap, and the cloud budget at the limiter starts from the already
+    # adjusted qᶜˡ + ε — so ε is absorbed into `cloud_available`, not the
+    # source/sink list.
     cond_total = cond + saturation_alignment_rate
 
     return P3ProcessRates{FT}(
