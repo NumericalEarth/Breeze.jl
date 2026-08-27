@@ -66,7 +66,8 @@ using Oceananigans.TurbulenceClosures:
     VerticallyImplicitDiffusionUpperDiagonal,
     _ivd_lower_diagonal,
     _ivd_upper_diagonal,
-    ivd_diagonal
+    ivd_diagonal,
+    boundary_flux_diagonal
 
 const AIVA = AdaptiveImplicitVerticalAdvection
 
@@ -266,10 +267,14 @@ end
 #####
 ##### get_coefficient seam for the ρw solve: diffusion (z-Face) + z-Face implicit advection
 #####
+##### Oceananigans' extended `implicit_step!` (≥ 0.110.20) appends the field's top, bottom, and
+##### immersed boundary conditions after `(advection, w, density)`; these signatures mirror the
+##### upstream AIVA methods, including the implicit-explicit boundary-flux diagonal.
+#####
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionUpperDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
-                                         advection::VerticalMomentumImplicitAdvection, w, ρ)
+                                         advection::VerticalMomentumImplicitAdvection, w, ρ, args...)
     du_diff = _ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
     du_adv  = implicit_w_advection_upper_diagonal(i, j, k, grid, advection.scheme, w, ρ, Δt)
     return du_diff + du_adv
@@ -277,7 +282,7 @@ end
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionLowerDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
-                                         advection::VerticalMomentumImplicitAdvection, w, ρ)
+                                         advection::VerticalMomentumImplicitAdvection, w, ρ, args...)
     dl_diff = _ivd_lower_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
     dl_adv  = implicit_w_advection_lower_diagonal(i, j, k, grid, advection.scheme, w, ρ, Δt)
     return dl_diff + dl_adv
@@ -285,8 +290,10 @@ end
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
-                                         advection::VerticalMomentumImplicitAdvection, w, ρ)
+                                         advection::VerticalMomentumImplicitAdvection, w, ρ,
+                                         top_bc=nothing, bottom_bc=nothing, immersed_bc=nothing)
     d_diff = ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
     d_adv  = implicit_w_advection_diagonal(i, j, k, grid, advection.scheme, w, ρ, Δt)
-    return d_diff + d_adv
+    d_bc   = boundary_flux_diagonal(i, j, k, grid, ℓx, ℓy, ℓz, Δt, clk, fields, top_bc, bottom_bc, immersed_bc)
+    return d_diff + d_adv + d_bc
 end
