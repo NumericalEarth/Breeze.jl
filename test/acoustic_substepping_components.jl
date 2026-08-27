@@ -171,6 +171,7 @@ end
 for arch in arches
 
     @testset "AcousticSubstepper construction [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
@@ -260,6 +261,7 @@ for arch in arches
             @test_throws ArgumentError SplitExplicitTimeDiscretization(
                 damping=(ThermalDivergenceDamping(), NoDivergenceDamping()))
         end
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -267,6 +269,7 @@ for arch in arches
     #####
 
     @testset "compute_acoustic_substeps [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         constants = ThermodynamicConstants()
         ν = 0.5  # default `acoustic_cfl` (ERF/WRF target)
@@ -313,9 +316,11 @@ for arch in arches
             @test N_fwd ≥ 1
             @test N_bwd == N_fwd
         end
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     @testset "acoustic_cfl plumbed to AcousticSubstepper [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         td_default = SplitExplicitTimeDiscretization()
         td_strict  = SplitExplicitTimeDiscretization(; acoustic_cfl = 0.25)
@@ -332,6 +337,7 @@ for arch in arches
                                topology=(Periodic, Periodic, Bounded))
         sub = AcousticSubstepper(grid, td_strict)
         @test sub.acoustic_cfl == FT(0.25)
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -339,6 +345,7 @@ for arch in arches
     #####
 
     @testset "AcousticRungeKutta3 construction [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
@@ -351,6 +358,7 @@ for arch in arches
         @test model.timestepper.β₁ ≈ FT(1//3)
         @test model.timestepper.β₂ ≈ FT(1//2)
         @test model.timestepper.β₃ ≈ FT(1)
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -358,6 +366,7 @@ for arch in arches
     #####
 
     @testset "Default time stepper for SplitExplicitTimeDiscretization [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
@@ -365,6 +374,7 @@ for arch in arches
         model = AtmosphereModel(grid; dynamics)
 
         @test model.timestepper isa AcousticRungeKutta3
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -372,6 +382,7 @@ for arch in arches
     #####
 
     @testset "Acoustic divergence damping [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
@@ -390,6 +401,7 @@ for arch in arches
 
         @test model.clock.iteration == 3
         @test !any(isnan, parent(model.dynamics.dry_density))
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     # `_build_vertical_rhs!` reads (ρw)′ at faces k−1, k, k+1 for the implicit vertical-damping
@@ -397,6 +409,7 @@ for arch in arches
     # otherwise read a neighbour another thread has already overwritten. The driver writes into
     # the dedicated `vertical_solver_source_term` field instead.
     @testset "Vertical RHS build leaves (ρw)′ intact [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
@@ -438,9 +451,11 @@ for arch in arches
         # Building the RHS must not touch its own (ρw)′ input.
         @test interior(substepper.momentum_perturbation.w) == ρw′
         @test !any(isnan, parent(substepper.vertical_solver_source_term))
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     @testset "Direct DirectDivergenceDamping [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
         # Construction + propagation through the split-explicit time discretization.
@@ -467,6 +482,7 @@ for arch in arches
         @test model.clock.iteration == 3
         @test !any(isnan, parent(model.momentum.ρu))
         @test !any(isnan, parent(model.dynamics.dry_density))
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -474,6 +490,7 @@ for arch in arches
     #####
 
     @testset "UpperSponge coefficients [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                x=(0, 100), y=(0, 100), z=(0, 8000))
@@ -496,6 +513,7 @@ for arch in arches
         @test lid_rhs ≈ δτˢ⁻ * damping_rate * FT(4)
         @test sponge_term_diag(1, 1, grid.Nz + 1, grid, nothing, δτᵐ⁺) == 0
         @test @allowscalar sponge_rhs(1, 1, grid.Nz + 1, grid, nothing, δτˢ⁻, old_ρw) == 0
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -503,6 +521,7 @@ for arch in arches
     #####
 
     @testset "Default time stepper for ExplicitTimeStepping [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
@@ -510,6 +529,7 @@ for arch in arches
         model = AtmosphereModel(grid; dynamics)
 
         @test model.timestepper isa SSPRungeKutta3
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -517,6 +537,7 @@ for arch in arches
     #####
 
     @testset "CompressibleDynamics show methods" begin
+        old_FT = Oceananigans.defaults.FloatType
         # Pre-materialization
         dynamics = CompressibleDynamics()
         s = sprint(show, dynamics)
@@ -529,6 +550,7 @@ for arch in arches
         dynamics2 = CompressibleDynamics(td; reference_potential_temperature=300)
         s2 = sprint(show, dynamics2)
         @test occursin("SplitExplicitTimeDiscretization", s2)
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -536,6 +558,7 @@ for arch in arches
     #####
 
     @testset "ExnerReferenceState [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 10000),
                                topology=(Periodic, Periodic, Bounded))
@@ -583,6 +606,7 @@ for arch in arches
                 @test pᵏ < pᵏ⁻¹
             end
         end
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -590,6 +614,7 @@ for arch in arches
     #####
 
     @testset "SlowTendencyMode and HorizontalSlowMode [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                x=(0, 100), y=(0, 100), z=(0, 1000))
@@ -615,6 +640,7 @@ for arch in arches
             @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, hslow) == 0
             @test dynamics_density(hslow) === model.dynamics.dry_density
         end
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -622,6 +648,7 @@ for arch in arches
     #####
 
     @testset "CompressibleDynamics without reference state [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                x=(0, 4000), y=(0, 4000), z=(0, 4000))
@@ -638,6 +665,7 @@ for arch in arches
         @test model.clock.iteration == 3
         @test !any(isnan, parent(model.dynamics.dry_density))
         @test model.dynamics.reference_state === nothing
+        Oceananigans.defaults.FloatType = old_FT
     end
 
 end
