@@ -47,3 +47,6 @@ Reactant = "0.2.268 - 0.2.274, 0.2.278"
 SpecialFunctions = "2"
 Statistics = "<0.0.1, 1"
 julia = "1.11.9"
+
+[sources]
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "mg/implicit-advection-lz-dispatch"}
