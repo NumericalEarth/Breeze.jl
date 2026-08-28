@@ -305,24 +305,28 @@ end
                        FT(floors.mass_scale))
 end
 
-@inline function bounded_ice_number(limiter::IceLambdaLimiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, floors)
+# Table-1 bracket of the *diagnostic* population (total ice mass, pre-limiter number),
+# shared by the λ-limiter and the mean-density read. `qⁱ_total` already includes the coating.
+@inline diagnostic_ice_bracket(limiter::IceLambdaLimiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, floors) =
+    ice_table_bracket(limiter.large_q, mean_total_ice_mass(qⁱ_total, zero(qⁱ_total), nⁱ, floors),
+                      Fᶠ, Fˡ, ρᶠ, floors)
+
+@inline bounded_ice_number(limiter::IceLambdaLimiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, floors) =
+    bounded_ice_number(limiter, diagnostic_ice_bracket(limiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, floors),
+                       qⁱ_total, nⁱ, floors)
+
+@inline function bounded_ice_number(limiter::IceLambdaLimiter, prep, qⁱ_total, nⁱ, floors)
     FT = typeof(qⁱ_total)
     qⁱ_eff = max(0, qⁱ_total)
     nⁱ_eff = max(0, nⁱ)
-    log_m = log10(safe_divide(max(qⁱ_eff, FT(floors.mass_scale)),
-                              max(nⁱ_eff, FT(floors.number_scale)),
-                              FT(floors.mass_scale)))
-    # Both limiter tables share Table-1 axes, so the coordinate is bracketed once.
-    prep = prepare_interpolation(limiter.large_q, log_m, Fᶠ, Fˡ, ρᶠ)
     nⁱ_min = evaluate_at(limiter.large_q, prep) * qⁱ_eff
     nⁱ_max = evaluate_at(limiter.small_q, prep) * qⁱ_eff
     bounded = clamp(nⁱ_eff, nⁱ_min, nⁱ_max)
     return ifelse(qⁱ_eff > FT(floors.mass_scale), bounded, zero(FT))
 end
 
-# Un-materialized scheme: the placeholder limiter carries no tables, so the only
-# bound available is positivity.
-@inline bounded_ice_number(::IceLambdaLimiter{Nothing, Nothing}, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, floors) =
+# Un-materialized scheme (no tables, `prep === nothing`): the only bound is positivity.
+@inline bounded_ice_number(::IceLambdaLimiter{Nothing, Nothing}, prep, qⁱ_total, nⁱ, floors) =
     ifelse(qⁱ_total > zero(qⁱ_total), max(0, nⁱ), zero(nⁱ))
 
 @inline function bounded_ice_number(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
@@ -362,19 +366,9 @@ end
     return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
 end
 
-# Bulk ice density from Table 1 (the main lookup table). Table 1's first axis is
-# log₁₀ of the mean particle mass, not the mass itself — m̄ spans some fifteen decades,
-# so the table is built on evenly spaced decades and every lookup takes the log first.
-@inline function ice_mean_density(bulk_properties::IceBulkProperties, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
-    FT = typeof(qⁱ_total)
-    m̄ = safe_divide(qⁱ_total, nⁱ, one(FT))
-    log_mean_mass = log10(ifelse(m̄ > 0, m̄, one(FT)))
-    return bulk_properties.mean_density(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
-end
-
-@inline function ice_mean_density(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
-    return ice_mean_density(p3.ice.bulk_properties, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
-end
+# Bulk ice density from Table 1 at the diagnostic-population bracket.
+@inline ice_mean_density(bulk_properties::IceBulkProperties, prep::PreparedInterpolation) =
+    evaluate_at(bulk_properties.mean_density, prep)
 
 #####
 ##### Ice shape parameter (μⁱ) from Table 1

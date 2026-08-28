@@ -1444,7 +1444,8 @@ end
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, FT(300e6), ρ)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qⁱ)
         transport = air_transport_properties(T, P, constants)
-        state = PPP.P3DerivedState{FT, typeof(q)}(
+        ice = PPP.p3_ice_lookups(p3, qⁱ, FT(0), nⁱ, Fᶠ, FT(0), ρᶠ, ρ)
+        state = PPP.P3DerivedState{FT, typeof(q), typeof(ice)}(
             nⁱ,
             nʳ,
             qᶠ,
@@ -1465,6 +1466,7 @@ end
             transport.Dᵛ,
             transport.Kᵃ,
             transport.ν,
+            ice,
         )
         ℳ = P3MicrophysicalState(
             qᶜˡ,
@@ -1514,7 +1516,8 @@ end
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, FT(300e6), ρ)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qⁱ)
         transport = air_transport_properties(T, P, constants)
-        state = PPP.P3DerivedState{FT, typeof(q)}(
+        ice = PPP.p3_ice_lookups(p3, qⁱ, FT(0), nⁱ, Fᶠ, FT(0), ρᶠ, ρ)
+        state = PPP.P3DerivedState{FT, typeof(q), typeof(ice)}(
             nⁱ,
             nʳ,
             qᶠ,
@@ -1535,6 +1538,7 @@ end
             transport.Dᵛ,
             transport.Kᵃ,
             transport.ν,
+            ice,
         )
         ℳ = P3MicrophysicalState(
             qᶜˡ,

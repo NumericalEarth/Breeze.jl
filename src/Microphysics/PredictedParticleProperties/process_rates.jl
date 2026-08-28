@@ -12,10 +12,10 @@
 ##### Combined P3 tendency calculation
 #####
 
-# Derived thermodynamic and PSD state computed during setup of `compute_p3_process_rates`.
-# Passed to the `@noinline` sub-functions to avoid recomputation.
+# Derived thermodynamic and PSD state computed during setup of `compute_p3_process_rates`
+# and passed to the phase sub-functions to avoid recomputation.
 # Internal implementation detail — not part of the public API.
-struct P3DerivedState{FT, Q}
+struct P3DerivedState{FT, Q, L}
     # Bounded prognostic state
     nⁱ :: FT        # bounded by maximum_ice_number_density / ρ
     nʳ :: FT        # DSD-bounded rain number
@@ -40,6 +40,8 @@ struct P3DerivedState{FT, Q}
     Dᵛ :: FT       # water vapor diffusivity [m²/s]
     Kᵃ :: FT       # thermal conductivity of air [W/m/K]
     ν :: FT        # kinematic viscosity [m²/s]
+    # Table-1 quantities of the bounded ice population, bracketed once per cell
+    lookups :: L   # P3IceLookups: coordinate bracket, density correction, ventilation terms
 end
 
 @inline function liquid_supersaturation_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, ρ, constants)
@@ -249,8 +251,8 @@ struct P3ProcessRates{FT}
     predicted_supersaturation_tendency :: FT
 end
 
-@noinline function p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
-                                    temperature_tendency, vapor_tendency)
+@inline function p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
+                                 temperature_tendency, vapor_tendency)
     FT = typeof(ρ)
 
     # Unpack derived state (field access on concrete struct — GPU-safe)
@@ -278,7 +280,8 @@ end
                                                       Fᶠ, ρᶠ, T, P, ρ, constants,
                                                       transport, q,
                                                       state.μᶜˡ, state.λᶜˡ, state.nᶜˡ,
-                                                      temperature_tendency, vapor_tendency)
+                                                      temperature_tendency, vapor_tendency,
+                                                      state.lookups)
     cond = vapor_rates.condensation
 
     # CCN activation (prescribed or prognostic; depletes ℳ.nᵃ when prognostic)
@@ -315,8 +318,7 @@ end
     coat_evap = ifelse(wet_ice_exchange_active,
                        vapor_rates.coating_evaporation, zero(FT))
 
-    melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, qʷⁱ, T, qᵛ,
-                                   Fᶠ, ρᶠ, ρ, constants, transport)
+    melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, constants, transport, state.lookups)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
     complete_melt = ifelse(p3.process_rates.liquid_fraction_active,
@@ -332,14 +334,14 @@ end
                              partial_melt, complete_melt, melt_n)
 end
 
-@noinline function p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
-                                    phase1::P3Phase1Rates)
+@inline function p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
+                                 phase1::P3Phase1Rates)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
 
     # Unpack derived state
-    (; T, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, qᶠ, bᶠ, Fˡ, Nᶜˡ, μᶜˡ, λᶜˡ, nⁱ, nʳ) = state
+    (; T, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, qᶠ, bᶠ, Fˡ, Nᶜˡ, μᶜˡ, λᶜˡ, nⁱ, nʳ, lookups) = state
     transport = (; Dᵛ = state.Dᵛ, Kᵃ = state.Kᵃ, ν = state.ν)
 
     qⁱ = ℳ.qⁱ
@@ -350,7 +352,7 @@ end
     # =========================================================================
     # Aggregation
     # =========================================================================
-    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ)
+    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ, lookups)
 
     # Global ice number limiter, expressed as a tendency on the *raw* prognostic
     # ℳ.nⁱ rather than on the locally pre-capped `state.nⁱ`, which is already
@@ -366,12 +368,12 @@ end
     # evaluated once with the gate open and split by temperature here, rather than
     # called twice with complementary gates.
     below_freezing = T <= T₀
-    cloud_coll = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, true, qʷⁱ)
+    cloud_coll = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, true, qʷⁱ, lookups)
     cloud_rim = ifelse(below_freezing, cloud_coll, zero(FT))
     cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_rim)
     # Mass and number share one Table 2 read.
     rain_coll_q, rain_coll_n = rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
-                                                     true, qʷⁱ)
+                                                     true, qʷⁱ, lookups)
     rain_rim = ifelse(below_freezing, rain_coll_q, zero(FT))
     rain_rim_n = ifelse(below_freezing, rain_coll_n, zero(FT))
 
@@ -379,10 +381,10 @@ end
     # The rime density formula is indexed with the locally diagnosed cloud DSD, not
     # with prescribed cloud parameters, so μᶜˡ and λᶜˡ from `diagnose_cloud_dsd` are
     # passed through to the Cober-List rime density when Nᶜˡ is prognostic.
-    # Use total ice mass for terminal velocity to match the table-axis convention.
+    # The fall speed is read at the shared Table-1 bracket, which is indexed with the
+    # total ice mass.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, nⁱ, Fᶠ, ρᶠ, ρ;
-                                             Fˡ = Fˡ)
+    vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, lookups)
     ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport, μᶜˡ, λᶜˡ)
 
     # =========================================================================
@@ -391,7 +393,7 @@ end
     has_hydrometeors = (max(0, qᶜˡ) + max(0, qʳ)) >=
                        parameters.wet_growth_hydrometeor_threshold
     qwgrth_raw = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
-                                     constants, transport)
+                                     constants, transport, lookups)
     qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
     total_collection = cloud_rim + rain_rim
@@ -435,9 +437,7 @@ end
     # =========================================================================
     # Shedding and refreezing
     # =========================================================================
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
-
-    shed = shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
+    shed = shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups)
     shed_n = shedding_number_rate(p3, shed)
     refrz = refreezing_rate_from_capacity(p3, qʷⁱ, qwgrth_raw)
     shed = ifelse(parameters.liquid_fraction_active, shed, zero(FT))
@@ -545,14 +545,13 @@ end
                                     surface_temperature, zero(ρ), zero(ρ))
 end
 
-# `@noinline` on the method that does the work: its body is far too large to inline into a
-# GPU kernel, and keeping it a separate device function holds the kernel's register
-# pressure and compile time down. The `p3_phase1_rates` / `p3_phase2_rates` sub-functions
-# are `@noinline` for the same reason.
-@noinline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
-                                            surface_temperature,
-                                            temperature_tendency,
-                                            vapor_tendency)
+# Everything from here down is `@inline`. A `@noinline` device function would receive `p3`
+# (several KB of table handles), `ℳ`, `𝒰`, and `constants` as local-memory copies, and
+# ptxas allocates registers over the whole call graph anyway.
+@inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                                          surface_temperature,
+                                          temperature_tendency,
+                                          vapor_tendency)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -624,18 +623,22 @@ end
     ℳ_adjusted = P3MicrophysicalState(qᶜˡ, ℳ.nᶜˡ, qʳ, ℳ.nʳ, qⁱ, ℳ.nⁱ,
                                       qᶠ, bᶠ, qʷⁱ, qᵛ - qᵛ⁺ˡ, ℳ.nᵃ, ℳ.w)
 
-    # Build derived state struct (explicit type parameters to avoid
-    # jl_f_throw_methoderror in @noinline GPU compilation). The rate functions that
-    # need a heat capacity all use the dry-air `cᵖᵈ` psychrometric convention
-    # (`liquid_psychrometric_correction` / `ice_psychrometric_correction`), which is a
-    # scheme constant rather than a per-cell quantity, so no cᵖᵐ is carried here.
-    state = P3DerivedState{FT, typeof(q)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
-                                          Fˡ, Nᶜˡ, cloud.nᶜˡ,
-                                          cloud.μᶜˡ, cloud.λᶜˡ,
-                                          T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q,
-                                          transport.Dᵛ, transport.Kᵃ, transport.ν)
+    # One Table-1 bracket for the bounded population, shared by every ice-side read below.
+    lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, ρ)
 
-    # === PHASE 1 & 2 RATES (delegated to @noinline sub-functions) ===
+    # Build derived state struct (explicit type parameters keep the constructor
+    # concrete for GPU compilation). The rate functions that need a heat capacity all use
+    # the dry-air `cᵖᵈ` psychrometric convention (`liquid_psychrometric_correction` /
+    # `ice_psychrometric_correction`), which is a scheme constant rather than a per-cell
+    # quantity, so no cᵖᵐ is carried here.
+    state = P3DerivedState{FT, typeof(q), typeof(lookups)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
+                                                           Fˡ, Nᶜˡ, cloud.nᶜˡ,
+                                                           cloud.μᶜˡ, cloud.λᶜˡ,
+                                                           T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q,
+                                                           transport.Dᵛ, transport.Kᵃ, transport.ν,
+                                                           lookups)
+
+    # === PHASE 1 & 2 RATES ===
     phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
                              temperature_tendency, vapor_tendency)
     phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1)

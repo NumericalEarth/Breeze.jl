@@ -5,7 +5,7 @@
 ##### Rain uses the P3 piecewise Gunn-Kinzer/Beard law with air density correction.
 #####
 
-# GPU-safe concrete struct (NamedTuple complicates the GPU compiler's NoInline boundaries).
+# Concrete return struct, so the pair stays one isbits value on the GPU.
 struct RainTerminalVelocities{FT}
     mass_weighted :: FT
     number_weighted :: FT
@@ -121,20 +121,22 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     return ifelse(active, velocity, zero(FT))
 end
 
-# Tabulated version: use the four-dimensional ice lookup table. The mass- and
-# number-weighted speeds differ only in which table is passed in.
-@inline function tabulated_fall_speed(table::P3Table4D, m̄, Fᶠ, Fˡ,
-                                      ρᶠ, ρ_correction, parameters)
-    # m̄ = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
-    # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
-    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg) rather
-    # than extrapolating below it.
-    log_mean_mass = log10(max(m̄, oftype(m̄, parameters.floors.mass_scale)))
-    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
-    return vₜ_norm * ρ_correction
+@inline function ice_terminal_velocity_mass_weighted(p3, qⁱ, lookups::P3IceLookups)
+    FT = typeof(qⁱ)
+    qⁱ_eff = max(0, qⁱ)
+    velocity = tabulated_fall_speed(p3.ice.fall_speed.mass_weighted, lookups.prep,
+                                    lookups.ρ_correction)
+    active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
+    return ifelse(active, velocity, zero(FT))
 end
 
-# Prepared-index variant: reuse precomputed interpolation indices and skip the log/clamp setup.
+# Tabulated version: use the four-dimensional ice lookup table. The mass- and
+# number-weighted speeds differ only in which table is passed in.
+@inline tabulated_fall_speed(table::P3Table4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, parameters) =
+    tabulated_fall_speed(table, ice_table_bracket(table, m̄, Fᶠ, Fˡ, ρᶠ, parameters.floors),
+                         ρ_correction)
+
+# Bracketed variant: reuse the interpolation indices and skip the log/clamp setup.
 @inline tabulated_fall_speed(table::P3Table4D, prep::PreparedInterpolation, ρ_correction) =
     evaluate_at(table, prep) * ρ_correction
 
@@ -165,7 +167,7 @@ speed framework.
 - `NamedTuple` with fields `mass_weighted`, `number_weighted` [m/s]
   (both positive downward)
 """
-# GPU-safe concrete struct (NamedTuple complicates the GPU compiler's NoInline boundaries).
+# Concrete return struct, so the pair stays one isbits value on the GPU.
 struct IceTerminalVelocities{FT}
     mass_weighted :: FT
     number_weighted :: FT
@@ -199,10 +201,7 @@ end
 @inline function fused_fall_speeds(mass_table::P3Table4D, number_table::P3Table4D,
                                     m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, parameters)
     FT = typeof(m̄)
-    # Per-particle-mass log-guard; the table clamps its mass axis (see
-    # tabulated_fall_speed), not the bulk qmin.
-    log_mean_mass = log10(max(m̄, FT(parameters.floors.mass_scale)))
-    prep = prepare_interpolation(mass_table, log_mean_mass, Fᶠ, Fˡ, ρᶠ)
+    prep = ice_table_bracket(mass_table, m̄, Fᶠ, Fˡ, ρᶠ, parameters.floors)
     return IceTerminalVelocities{FT}(
         tabulated_fall_speed(mass_table, prep, ρ_correction),
         tabulated_fall_speed(number_table, prep, ρ_correction),

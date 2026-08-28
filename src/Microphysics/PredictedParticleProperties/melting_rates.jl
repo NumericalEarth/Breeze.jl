@@ -48,11 +48,36 @@ where:
                                      constants, transport)[1]
 
 # Returns `(melt_rate, small, large)`. The small/large split of the ventilation
-# integral sets the rain-vs-coating partition in `ice_melting_rates`, and comes
-# free with the lookup the melt rate already needs — recomputing it there would
-# repeat one `prepare_interpolation` and four `evaluate_at` at the same coordinate.
+# integral sets the rain-vs-coating partition in `ice_melting_rates`, and comes free
+# with the four table reads the melt rate already makes at the bracket.
 @inline function ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
                                                   constants, transport)
+    FT = typeof(qⁱ)
+    parameters = p3.process_rates
+    floors = parameters.floors
+
+    # Liquid fraction for the Fˡ-blended ventilation tables.
+    qⁱ_total = max(total_ice_mass(qⁱ, qʷⁱ), FT(floors.mass_scale))
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, floors)
+
+    # Table lookup uses the total mass per particle, not the dry-only mass,
+    # because the tables are indexed by total mass.
+    # With no particles the rate below is nⁱ_eff * dm/dt = 0 regardless, so the
+    # fallback mean mass only has to sit inside the table's mass axis.
+    m_mean = safe_divide(qⁱ_total, max(0, nⁱ), FT(floors.mean_particle_mass_fallback))
+    ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
+    prep = ice_table_bracket(p3.ice.deposition.small_ice_ventilation_constant,
+                             m_mean, Fᶠ, Fˡ, ρᶠ, floors)
+
+    return ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+                                  ρ_correction, prep)
+end
+
+# Shared body. With `P3IceLookups` the bracket floors `nⁱ` at `floors.number_scale` where the
+# standalone form above floors it at zero; the coordinates agree for `nⁱ ≥ number_scale`, and
+# below it the melt rate `nⁱ_eff × dm/dt` is negligible.
+@inline function ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+                                        ρ_correction, prep)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
@@ -75,31 +100,13 @@ where:
 
     q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
-    # Liquid fraction for Fl-blended ventilation.
-    # Fl = qʷⁱ / (qⁱ + qʷⁱ): fraction of ice-particle mass that is liquid.
-    qⁱ_total = max(qⁱ_eff + max(0, qʷⁱ), FT(parameters.floors.mass_scale))
-    Fl = max(0, qʷⁱ) / qⁱ_total
-
-    # Table lookup uses the total mass per particle, not the dry-only mass,
-    # because the tables are indexed by total mass.
-    # With no particles the rate below is nⁱ_eff * dm/dt = 0 regardless, so the
-    # fallback mean mass only has to sit inside the table's mass axis.
-    m_mean = safe_divide(qⁱ_total, nⁱ_eff, FT(parameters.floors.mean_particle_mass_fallback))
-    ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
-
     # Use the dry-ice PSD ventilation tables (small + large) for melting. The total
     # Ventilation/VentilationEnhanced tables use the wet-ice PSD and are not
     # appropriate for melting (they are not flagged as melting integrals during
     # table generation, so they don't use the dry-ice PSD from the M5 fix).
-    # All 4 tables share Table-1 axes so the interpolation indices are computed once.
+    # All 4 tables share Table-1 axes, so they are read at the one bracket `prep`.
     dep = p3.ice.deposition
-    # m_mean = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
-    # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
-    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg) rather
-    # than extrapolating below it.
-    log_m = log10(max(m_mean, FT(parameters.floors.mass_scale)))
     sc_corr = ventilation_sc_correction(ν, Dᵛ, ρ_correction, parameters.floors)
-    prep = prepare_interpolation(dep.small_ice_ventilation_constant, log_m, Fᶠ, Fl, ρᶠ)
     small = evaluate_at(dep.small_ice_ventilation_constant, prep) +
             sc_corr * evaluate_at(dep.small_ice_ventilation_reynolds, prep)
     large = evaluate_at(dep.large_ice_ventilation_constant, prep) +
@@ -174,6 +181,19 @@ Requires tabulated small/large ice ventilation integrals.
         ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
                                          constants, transport)
 
+    return partition_melting(total_melt, small, large)
+end
+
+# Shared-lookup variant used by `p3_phase1_rates`.
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+                                   lookups::P3IceLookups)
+    total_melt, small, large =
+        ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+                               lookups.ρ_correction, lookups.prep)
+    return partition_melting(total_melt, small, large)
+end
+
+@inline function partition_melting(total_melt, small, large)
     rain_fraction = psd_melting_rain_fraction(small, large)
 
     complete = total_melt * rain_fraction

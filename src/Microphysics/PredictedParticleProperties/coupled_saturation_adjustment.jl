@@ -118,23 +118,25 @@ end
     return ifelse(active, relaxation_coefficient, zero(FT))
 end
 
-@inline function ice_vapor_relaxation_coefficient(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                                  constants, transport, q)
-    FT = typeof(qⁱ)
+@inline ice_vapor_relaxation_coefficient(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q) =
+    ice_vapor_relaxation_coefficient(p3, nⁱ, T, P, ρ, constants, transport, q,
+                                     p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
+
+# Shared-lookup variant: the ventilation table terms come from `lookups`.
+@inline function ice_vapor_relaxation_coefficient(p3, nⁱ, T, P, ρ, constants, transport, q,
+                                                  lookups::P3IceLookups)
+    FT = typeof(T)
     parameters = p3.process_rates
     nⁱ_eff = max(nⁱ, FT(p3.minimum_number_mixing_ratio))
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
 
     Dᵛ = transport.Dᵛ
     ν = transport.ν
 
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
+    # The Sc correction uses the thermodynamic air density, not the `lookups` correction.
     ρ_air = density(T, P, q, constants)
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ_air)
-    C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
-                                  p3.ice.deposition.ventilation_enhanced,
-                                  m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ,
-                                  ρ_correction)
+    C_fv = ventilation_from_terms(lookups.ventilation, lookups.ventilation_enhanced,
+                                  ν, Dᵛ, ρ_correction, parameters.floors)
 
     # This is the raw inverse relaxation coefficient; the psychrometric correction
     # is applied later through the coupled `ξˡ` / `ξⁱ` factor.
@@ -167,7 +169,8 @@ cloud/precipitation fraction framework is handled separately.
                                                      constants, transport, q,
                                                      μᶜˡ, λᶜˡ, nᶜˡ_bounded,
                                                      temperature_tendency,
-                                                     vapor_tendency)
+                                                     vapor_tendency,
+                                                     lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
     floors = parameters.floors
@@ -186,19 +189,17 @@ cloud/precipitation fraction framework is handled separately.
     cloud_relaxation = cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, transport.Dᵛ,
                                                           μᶜˡ, λᶜˡ, nᶜˡ_bounded)
     rain_relaxation = rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport)
-    # `qⁱ` is the dry ice mass, so the total ice mass is `qⁱ + qʷⁱ`. Compute
-    # `qⁱ_total`/`Fˡ` once here and reuse them for the relaxation gates and the
-    # tiny-mass overrides below.
+    # `qⁱ` is the dry ice mass; `qⁱ_total` and `Fˡ` gate the relaxation and tiny-mass overrides.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, floors)
+    Fˡ = lookups.Fˡ
     # The dry-ice and wet-ice relaxation coefficients share the same
     # `ice_vapor_relaxation_coefficient` and select mutually exclusive liquid-fraction
     # regimes (dry ice below the wet-ice threshold, liquid-coated ice at or above it),
     # so evaluate the coefficient — which carries a `density()` and a
     # ventilation-table lookup — once.
     ice_relaxation_active = qⁱ_total >= p3.minimum_mass_mixing_ratio
-    ice_relaxation = ice_vapor_relaxation_coefficient(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                                      constants, transport, q)
+    ice_relaxation = ice_vapor_relaxation_coefficient(p3, nⁱ, T, P, ρ, constants, transport, q,
+                                                      lookups)
     dry_ice_relaxation = ifelse(
         ice_relaxation_active & (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold),
         ice_relaxation, zero(FT))

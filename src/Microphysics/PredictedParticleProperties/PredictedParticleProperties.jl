@@ -221,7 +221,7 @@ include("rain_quadrature.jl")
 @adapt_architecture PredictedParticlePropertiesMicrophysics
 
 #####
-##### Process-rate helpers, tabulated kernels, CCN activation,
+##### Process-rate helpers, the shared Table-1 lookups (`P3IceLookups`), CCN activation,
 ##### and the coupled saturation-adjustment solver
 #####
 

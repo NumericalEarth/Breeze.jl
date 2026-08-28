@@ -58,7 +58,10 @@ function routing_derived_state(p3, air_density, microphysical_state,
     transport = PPP.air_transport_properties(air_temperature, pressure, constants)
     cloud = PPP.diagnose_cloud_dsd(
         p3, microphysical_state.qᶜˡ, microphysical_state.nᶜˡ, air_density)
-    state = PPP.P3DerivedState{FT, typeof(moisture)}(
+    coating = PPP.active_liquid_on_ice(p3, microphysical_state.qʷⁱ)
+    ice = PPP.p3_ice_lookups(p3, microphysical_state.qⁱ, coating, properties.nⁱ,
+                             properties.Fᶠ, properties.Fˡ, properties.ρᶠ, air_density)
+    state = PPP.P3DerivedState{FT, typeof(moisture), typeof(ice)}(
         properties.nⁱ,
         microphysical_state.nʳ,
         properties.qᶠ,
@@ -79,6 +82,7 @@ function routing_derived_state(p3, air_density, microphysical_state,
         transport.Dᵛ,
         transport.Kᵃ,
         transport.ν,
+        ice,
     )
 
     return properties, state

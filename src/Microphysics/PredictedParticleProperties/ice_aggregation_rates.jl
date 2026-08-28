@@ -51,7 +51,8 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 # Returns
 - Rate of ice number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ = zero(typeof(qⁱ)))
+@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ = zero(typeof(qⁱ)),
+                                      lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
@@ -60,7 +61,6 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     ramp_end_temperature = parameters.aggregation_efficiency_ramp_end_temperature
 
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
     nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     # Aggregation is gated on bulk ice mass only, with the number floored at
@@ -84,12 +84,8 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
                                      (maximum_rime_fraction - minimum_rime_fraction), 0, 1)
     aggregation_efficiency *= rime_fraction_factor
 
-    # Mean particle properties
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
-
     # PSD-integrated self-collection kernel (E-free) from lookup table.
-    aggregation_kernel_value = aggregation_kernel(p3.ice.collection.aggregation,
-                                                  m_mean, Fᶠ, Fˡ, ρᶠ, parameters.floors)
+    aggregation_kernel_value = evaluate_at(p3.ice.collection.aggregation, lookups.prep)
 
     # Collection kernel with temperature-dependent sticking efficiency
     mean_collection_kernel = aggregation_efficiency * aggregation_kernel_value
@@ -99,10 +95,9 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # tendency [1/kg/s]. The 1/2 self-collection factor is already included
     # in the kernel (table stores half-integral, analytical path includes 0.5 factor).
     # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
-    # Use the ice reference density (P=600 hPa, T=-20°C), not the rain reference.
-    ρ₀ = p3.ice.fall_speed.reference_air_density
-    density_correction = ice_air_density_correction(parameters, ρ₀, ρ)
-    rate = ρ * mean_collection_kernel * nⁱ_eff^2 * density_correction
+    # The density correction uses the ice reference density (P=600 hPa, T=-20°C), not
+    # the rain reference; see `p3_ice_lookups`.
+    rate = ρ * mean_collection_kernel * nⁱ_eff^2 * lookups.ρ_correction
 
     return ifelse(aggregation_active, rate, zero(FT))
 end

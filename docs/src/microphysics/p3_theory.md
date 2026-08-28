@@ -436,7 +436,7 @@ and passed to every rate that needs them.
 | ``ν``    | `ν`  | Kinematic viscosity of air [m²/s], ``ν = η/ρ`` |
 | ``\text{Sc}`` | | Schmidt number, ``ν / D^v`` |
 | ``\text{Re}`` | | Reynolds number, ``V D / ν`` |
-| ``ρ_\text{corr}`` | | Air-density fall-speed correction, ``(ρ_s/ρ)^{0.54}`` |
+| ``ρ_\text{corr}`` | | Air-density fall-speed correction, ``(ρ_s/ρ)^{0.54}``, evaluated once per cell (`p3_ice_lookups`) |
 
 Thermodynamic constants keep their appendix symbols — ``\mathcal{L}^l`` and
 ``\mathcal{L}^i`` for the latent heats of condensation and deposition, ``c^{pd}``
@@ -1252,7 +1252,11 @@ from the 100 μm Hall-Pruppacher ventilation transition: below 100 μm only the
 constant coefficient contributes, while larger particles also contribute to the
 Re-dependent component. Breeze's melting rate reads `f1pr24`–`f1pr27`; dry-ice
 deposition / sublimation reads the wet-PSD `f1pr05` / `f1pr14` pair (see
-[Size Distribution](@ref p3_size_distribution)).
+[Size Distribution](@ref p3_size_distribution)). The `f1pr05` / `f1pr14` pair is
+read once per cell and shared by the vapor relaxation coefficient and the
+wet-growth capacity, which apply their own Schmidt-number corrections
+``\text{Sc}^{1/3}\sqrt{ρ_\text{corr}}/\sqrt{ν}`` (at the thermodynamic and the
+dynamics air density, respectively).
 
 ### Bulk Property Integrals
 
@@ -1372,6 +1376,16 @@ both held in `p3_lookupTable_1.dat-v6.9-2momI`.
   ``(\log \bar{m}, F^f, F^l, ρ^f)`` axes.
 - **Table 2** — the 5-D ice–rain collection block embedded later in the same
   file, which adds ``\log λ^r`` as a coordinate.
+
+Every Table 1 column shares the axes ``(\log \bar{m}, F^f, F^l, ρ^f)``, so a cell
+brackets that coordinate once for the bounded ice population (`p3_ice_lookups`,
+carried as a `P3IceLookups` together with ``ρ_\text{corr}`` and the two
+deposition ventilation values) and every ice-side rate reads its column at that
+bracket. The λ limiter and mean density are indexed by the pre-limiter number
+and share a second bracket (`diagnostic_ice_bracket`); Table 2, with its extra
+``\log λ^r`` axis, is bracketed on its own. The mass coordinate is clamped to the
+table's axis (min ≈ 1.56 × 10⁻¹⁵ kg per particle), not to the bulk
+`minimum_mass_mixing_ratio`.
 
 ```@example p3_integrals
 using Breeze
@@ -2609,7 +2623,9 @@ Host-facing entry points:
 
 1. **`compute_microphysical_tendencies!`**: Evaluates the coupled process rates and adds
    every resulting tendency into ``G^n``, in one kernel. Optional prognostic groups are
-   added only where that group exists, selected by type.
+   added only where that group exists, selected by type. The evaluation is fully inlined:
+   `compute_p3_process_rates` diagnoses the state and brackets Table 1 once per cell
+   (`P3IceLookups`) and hands both to the phase functions in a `P3DerivedState`.
 2. **`microphysical_tendencies`**: The gridless bundle used by `ParcelModels`, evaluating
    the same rates once and distributing them across the prognostic names.
    `microphysical_tendency` still returns a single name, at one bundle evaluation each.

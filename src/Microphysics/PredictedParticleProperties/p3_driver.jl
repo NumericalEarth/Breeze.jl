@@ -80,6 +80,8 @@ end
 ##### (ρqᵛ, ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ, and the optional ρnᶜˡ/ρnᵃ/ρsᵛ⁺ˡ).
 ##### They are computed *jointly*: the coupled donor-budget limiters see every species at
 ##### once, so one kernel evaluates all of them per cell and adds each straight into `Gⁿ`.
+##### The evaluation is fully inlined; `compute_p3_process_rates` brackets Table 1 once per
+##### cell (`P3IceLookups`) and every ice integral is read at that bracket.
 #####
 
 @kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)

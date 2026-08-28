@@ -98,19 +98,17 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 - `nⁱ`: Ice number concentration [1/kg]
 - `Fᶠ`: Rime fraction (= qᶠ/qⁱ) [-]
 - `Fˡ`: Liquid fraction (= qʷⁱ/(qⁱ+qʷⁱ)) [-]
-- `ρᶠ`: Rime density [kg/m³]
-- `m_mean`: Mean ice particle mass [kg]
+- `lookups`: [`P3IceLookups`](@ref) of the population
 
 # Returns
 - Rate of liquid → rain shedding [kg/kg/s]
 """
-@inline function shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
+@inline function shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups::P3IceLookups)
     qʷⁱ_eff = max(0, qʷⁱ)
     nⁱ_eff = max(0, nⁱ)
 
     # Lookup ∫_{D≥9mm} m(D) N'(D) dD (normalized per particle)
-    f1pr28 = shedding_integral(p3.ice.bulk_properties.shedding, m_mean, Fᶠ, Fˡ, ρᶠ,
-                               p3.process_rates.floors.mass_scale)
+    f1pr28 = evaluate_at(p3.ice.bulk_properties.shedding, lookups.prep)
 
     # Fᶠ is the rime fraction of the ice-only mass, since qⁱ excludes qʷⁱ.
     rate = Fᶠ * f1pr28 * nⁱ_eff * Fˡ
@@ -121,18 +119,6 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
     rate = min(rate, qʷⁱ_eff / τ_safety)
 
     return rate
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Lookup the PSD-integrated shedding mass for D ≥ 9 mm particles
-from a tabulated four-dimensional ice integral.
-"""
-@inline function shedding_integral(table::P3Table4D, m_mean, Fᶠ, Fˡ, ρᶠ, mass_scale_floor)
-    FT = typeof(m_mean)
-    log_m = log10(max(m_mean, FT(mass_scale_floor)))
-    return table(log_m, Fᶠ, Fˡ, ρᶠ)
 end
 
 """
@@ -190,11 +176,11 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 - Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
 @inline function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
-                                     constants, transport)
+                                     constants, transport,
+                                     lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
     nⁱ_eff = max(0, nⁱ)
 
     T₀ = parameters.freezing_temperature
@@ -209,15 +195,9 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 
     q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
-    # Mean ice particle mass
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
-    ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
-
     # Ventilation integral (same as deposition/refreezing)
-    C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
-                                    p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ,
-                                    ρ_correction)
+    C_fv = ventilation_from_terms(lookups.ventilation, lookups.ventilation_enhanced,
+                                  ν, Dᵛ, lookups.ρ_correction, parameters.floors)
 
     # Heat balance: sensible + latent
     Q_sensible = Kᵃ * (T₀ - T)
