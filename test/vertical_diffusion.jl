@@ -280,22 +280,6 @@ end
     end
 end
 
-#####
-##### The `get_coefficient` seam
-#####
-##### Breeze routes the mass-flux-weighted coefficients into Oceananigans' vertically-implicit solve
-##### by adding `get_coefficient` methods keyed on `MassWeightedImplicitDiffusion`. If upstream
-##### changes what `implicit_step!` forwards — as v0.110.20 did, appending the field's top, bottom
-##### and immersed boundary conditions after `(advection, w, density)` — a method that fixes the
-##### trailing argument count stops matching, and the solve silently falls through to Oceananigans'
-##### *unweighted* diffusion-only fallback. Nothing errors; the weighting just disappears.
-#####
-##### The physics tests above do catch that today, but only because this particular fallthrough
-##### happens to change the steady state. This asserts the dispatch itself: the weighted method must
-##### win for the argument list `implicit_step!` actually passes, and must return something the
-##### unweighted fallback does not.
-#####
-
 @testset "Mass-weighted get_coefficient wins dispatch [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
@@ -313,8 +297,6 @@ end
     c, f = Center(), Face()
     id = Breeze.AtmosphereModels.closure_scalar_index(model, :ρc)
 
-    # The trailing arguments `implicit_step!` forwards. Boundary conditions are appended from
-    # Oceananigans v0.110.20 onward; `weighted_args` mirrors that call exactly.
     ρc = model.tracers.ρc
     bcs = (ρc.boundary_conditions.top, ρc.boundary_conditions.bottom, ρc.boundary_conditions.immersed)
 
