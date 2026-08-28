@@ -3,10 +3,10 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Oceananigans
 using Oceananigans: TendencyCallsite
-using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, needs_implicit_solver,
+using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization,
                               cell_advection_timescale, AdaptiveImplicitVerticalAdvection,
                               vertical_scheme, FluxFormAdvection
-using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, needs_implicit_solver
 using Oceananigans.Grids: Center, Face, znode
 using Oceananigans.Operators: volume
 using Oceananigans.Solvers: BatchedTridiagonalSolver

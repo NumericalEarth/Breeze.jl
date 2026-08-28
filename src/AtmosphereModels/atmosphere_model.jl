@@ -2,10 +2,10 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
-using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection, needs_implicit_solver
+using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.Architectures: Architectures, on_architecture
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, needs_implicit_solver
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
 using Oceananigans.TimeSteppers: TimeStepper
