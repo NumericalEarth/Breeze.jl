@@ -107,6 +107,15 @@ end
     return Breeze.AtmosphereModels.microphysical_tendencies(p3, names, ρ, ℳ, 𝒰, constants)
 end
 
+# `@allocated` measures the code generated at its own call site, so writing the bundle call
+# directly in a large `@testset` body measures the testset too: on Julia 1.11 the compiler
+# leaves the returned `P3TendencyResult` on the heap there, while the same call from an
+# ordinary caller allocates nothing (Julia 1.12 elides it in both). Measure from this
+# `@noinline` one-line function so the count always reflects `bundled_p3_tendencies`, which
+# is how the parcel model calls it.
+@noinline bundled_p3_tendency_allocations(p3, ρ, ℳ, 𝒰, constants) =
+    @allocated bundled_p3_tendencies(p3, ρ, ℳ, 𝒰, constants)
+
 function expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ, transport, FT)
     parameters = p3.process_rates
     qʳ_eff = max(0, qʳ)
@@ -734,7 +743,7 @@ end
         aerosol_tendencies = @inferred bundled_p3_tendencies(
             p3_with_aerosol, ρ, ℳ, 𝒰, constants)
         @test aerosol_tendencies isa NTuple{10, FT}
-        aerosol_allocations = @allocated bundled_p3_tendencies(
+        aerosol_allocations = bundled_p3_tendency_allocations(
             p3_with_aerosol, ρ, ℳ, 𝒰, constants)
         @test aerosol_allocations == 0
 
@@ -743,7 +752,7 @@ end
         supersaturation_tendencies = @inferred bundled_p3_tendencies(
             p3_with_supersaturation, ρ, ℳ, 𝒰, constants)
         @test supersaturation_tendencies isa NTuple{11, FT}
-        supersaturation_allocations = @allocated bundled_p3_tendencies(
+        supersaturation_allocations = bundled_p3_tendency_allocations(
             p3_with_supersaturation, ρ, ℳ, 𝒰, constants)
         @test supersaturation_allocations == 0
     end
