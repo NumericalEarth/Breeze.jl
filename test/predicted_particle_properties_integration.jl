@@ -11,6 +11,7 @@ using Breeze.ParcelModels: step_parcel_state!
 
 using Oceananigans: Bounded, CPU, Center, CenterField, Face, Field, Flat, GridFittedBottom,
                      ImmersedBoundaryGrid, RectilinearGrid, compute!, set!, time_step!
+using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Oceananigans.Fields: interior, location
 using Oceananigans.TimeSteppers: update_state!
@@ -21,7 +22,7 @@ using Oceananigans.TimeSteppers: update_state!
         underlying_grid = RectilinearGrid(default_arch, FT;
                                           size = (2, 1, 4),
                                           x = (0, 2), y = (0, 1), z = (0, 4))
-        bottom_height = reshape(FT[0, 2], 2, 1)
+        bottom_height = on_architecture(default_arch, reshape(FT[0, 2], 2, 1))
         grid = ImmersedBoundaryGrid(underlying_grid,
                                     GridFittedBottom(bottom_height))
         temperature = CenterField(grid)
@@ -237,7 +238,9 @@ using Oceananigans.TimeSteppers: update_state!
 
     @testset "P3 parcel substeps write back a consistent rime state" begin
         FT = Float64
-        grid = RectilinearGrid(default_arch, FT;
+        # The parcel state lives on the host and reads the environment through `interpolate`,
+        # so parcel models run on the CPU regardless of the test architecture.
+        grid = RectilinearGrid(CPU(), FT;
                                size = 4,
                                z = (0, 1000),
                                topology = (Flat, Flat, Bounded))
