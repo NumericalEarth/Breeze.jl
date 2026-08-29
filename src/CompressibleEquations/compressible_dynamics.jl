@@ -373,15 +373,6 @@ Return the total pressure for `CompressibleDynamics`, in Pa.
 """
 AtmosphereModels.total_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
-# Compressible pressure is diagnostic, p = ρ Rᵐ T, so when temperature is prescribed the consistent
-# pressure follows from the equation of state rather than from the stale `pressure` field. Using the
-# field instead would leave a fixed-point error whenever density or composition changed just before
-# temperature was set.
-@inline AtmosphereModels.pressure_from_density_temperature(i, j, k, grid,
-                                                            dynamics::CompressibleDynamics,
-                                                            ρ, T, q, constants) =
-    ρ * mixture_gas_constant(q, constants) * T
-
 #####
 ##### Density and pressure access interface
 #####

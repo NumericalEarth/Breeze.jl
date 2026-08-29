@@ -108,12 +108,6 @@ Base.summary(::ConstantRateCondensateFormation) = "ConstantRateCondensateFormati
 ##### Shared helpers for relaxation-to-saturation phase change (liquid + ice)
 #####
 
-# `Γ` below and `Thermodynamics.psychrometric_correction` are the same latent-heat
-# feedback factor in two conventions: `Γ` uses the mixture heat capacity and keeps the
-# ideal-gas `-1/T` term of `dqᵛ⁺/dT`, while `psychrometric_correction` takes the heat
-# capacity as an argument and drops that term. Keep any change to one in step with the
-# other.
-
 """
 $(TYPEDSIGNATURES)
 

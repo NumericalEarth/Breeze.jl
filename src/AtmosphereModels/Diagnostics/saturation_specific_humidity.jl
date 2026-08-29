@@ -1,14 +1,12 @@
 # Imports are provided by the Diagnostics module
 
-struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, P, D, TH}
+struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     flavor :: FL
     microphysics :: μ
     microphysical_fields :: M
     specific_prognostic_moisture :: MF
     temperature :: T
-    density :: R
-    pressure :: P
-    dynamics :: D
+    reference_state :: R
     thermodynamic_constants :: TH
 end
 
@@ -20,9 +18,7 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
                                              adapt(to, k.microphysical_fields),
                                              adapt(to, k.specific_prognostic_moisture),
                                              adapt(to, k.temperature),
-                                             adapt(to, k.density),
-                                             adapt(to, k.pressure),
-                                             adapt(to, k.dynamics),
+                                             adapt(to, k.reference_state),
                                              adapt(to, k.thermodynamic_constants))
 
 const C = Center
@@ -77,9 +73,7 @@ function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
                                                     model.microphysical_fields,
                                                     specific_prognostic_moisture(model),
                                                     model.temperature,
-                                                    total_density(model.dynamics),
-                                                    dynamics_pressure(model.dynamics),
-                                                    model.dynamics,
+                                                    model.dynamics.reference_state,
                                                     model.thermodynamic_constants)
 
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
@@ -99,10 +93,10 @@ $(TYPEDSIGNATURES)
 
 Compute the *saturation total specific moisture* under the assumption that all moisture is vapor at saturation,
 ``qᵗ = qᵛ⁺``. With this assumption, the equation of state for moist air can be solved in closed form, yielding an
-expression for the saturation specific humidity in terms of temperature `T` and pressure `p` alone:
+expression for the saturation specific humidity in terms of temperature `T` and reference pressure `pᵣ` alone:
 
 ```math
-qᵛ⁺ = \\frac{ϵᵈᵛ \\, pᵛ⁺(T)}{p + δᵈᵛ \\, pᵛ⁺(T)} ,
+qᵛ⁺ = \\frac{ϵᵈᵛ \\, pᵛ⁺(T)}{pᵣ + δᵈᵛ \\, pᵛ⁺(T)} ,
 ```
 
 where ``ϵᵈᵛ ≡ Rᵈ / Rᵛ ≈ 0.622`` and ``δᵈᵛ ≡ ϵᵈᵛ - 1 ≈ -0.378``.
@@ -114,13 +108,13 @@ evaluated directly.
 
 See the [Atmosphere Thermodynamics](@ref Thermodynamics-section) section of the documentation for a derivation.
 """
-@inline function saturation_total_specific_moisture(T, p, constants, surface)
+@inline function saturation_total_specific_moisture(T, pᵣ, constants, surface)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
     ϵᵈᵛ = Rᵈ / Rᵛ
     δᵈᵛ = ϵᵈᵛ - 1
-    return ϵᵈᵛ * pᵛ⁺ / (p + δᵈᵛ * pᵛ⁺)
+    return ϵᵈᵛ * pᵛ⁺ / (pᵣ + δᵈᵛ * pᵛ⁺)
 end
 
 #####
@@ -129,7 +123,8 @@ end
 
 function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
     @inbounds begin
-        p = d.pressure[i, j, k]
+        pᵣ = d.reference_state.pressure[i, j, k]
+        ρᵣ = d.reference_state.density[i, j, k]
         T = d.temperature[i, j, k]
     end
 
@@ -139,17 +134,16 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
 
     if d.flavor isa PrognosticFlavor
         qᵛᵉ = @inbounds d.specific_prognostic_moisture[i, j, k]
-        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, @inbounds(d.density[i, j, k]),
-                                    qᵛᵉ, d.microphysical_fields)
-        ρ = gas_phase_density(i, j, k, d.dynamics, T, q, constants)
+        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
+        ρ = density(T, pᵣ, q, constants)
         return saturation_specific_humidity(T, ρ, constants, surface)
 
     elseif d.flavor isa EquilibriumFlavor
         qᵛᵉ = @inbounds d.specific_prognostic_moisture[i, j, k]
-        return equilibrium_saturation_specific_humidity(T, p, qᵛᵉ, constants, surface)
+        return equilibrium_saturation_specific_humidity(T, pᵣ, qᵛᵉ, constants, surface)
 
     elseif d.flavor isa TotalMoistureFlavor
-        return saturation_total_specific_moisture(T, p, constants, surface)
+        return saturation_total_specific_moisture(T, pᵣ, constants, surface)
 
     end
 end

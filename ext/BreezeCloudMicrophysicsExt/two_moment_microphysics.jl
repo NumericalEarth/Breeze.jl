@@ -193,12 +193,6 @@ const WPNE2M = WarmPhaseNonEquilibrium2M
 ##### Initial aerosol number from aerosol distribution
 #####
 
-# CloudMicrophysics' `Mode_κ`/`Mode_B` carry `N` as a *total number concentration* [m⁻³]
-# (the default is `Nᵃ₀ = 100e6`, i.e. 100 cm⁻³), which is already the basis `ρnᵃ` holds.
-# The generic density-aware hook therefore forwards this value unchanged. The per-mass
-# `nᵃ = ρnᵃ/ρ` that `AtmosphereModels.microphysical_state` derives is converted back with
-# `Nᵃ = ρ nᵃ` before reaching the CloudMicrophysics activation routines. Contrast P3, whose
-# distribution is per unit mass and which does multiply by ρ.
 function AtmosphereModels.initial_aerosol_number(microphysics::TwoMomentCloudMicrophysics)
     aa = microphysics.categories.aerosol_activation
     aa isa Nothing && return 0

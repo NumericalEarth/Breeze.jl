@@ -17,16 +17,6 @@ using Breeze.Thermodynamics:
 using Breeze.Microphysics: SaturationAdjustment, adjust_thermodynamic_state, WarmPhaseEquilibrium
 using Oceananigans.TimeSteppers: update_state!
 
-@testset "Compressible density reconciliation modes" begin
-    CE = Breeze.CompressibleEquations
-
-    @test CE.density_reconciliation_mode(true, false, false, ()) isa Val{:total_density}
-    @test CE.density_reconciliation_mode(false, true, false, ()) isa Val{:dry_density}
-    @test CE.density_reconciliation_mode(false, false, true, ()) isa Val{:dry_density}
-    @test CE.density_reconciliation_mode(false, false, false, (:qᶜˡ,)) isa Val{:dry_density}
-    @test CE.density_reconciliation_mode(false, false, false, ()) isa Val{:diagnose_total_density}
-end
-
 # Regression tests for the compressible θˡⁱ density-based thermodynamic state
 # (NumericalEarth/Breeze.jl#765): the temperature inversion and the saturation adjustment must be
 # evaluated at the prognostic density ρ (with p = ρRᵐT), so the dynamics and the microphysics carry

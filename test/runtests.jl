@@ -1,6 +1,5 @@
 import Breeze
 using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests, available_memory
-using Pkg.Artifacts: ensure_artifact_installed
 
 # Start with autodiscovered tests
 testsuite = find_tests(@__DIR__)
@@ -25,11 +24,6 @@ if filter_tests!(testsuite, args)
         end
     end
 end
-
-# Install artifacts before running the tests, to avoid spurious failures to
-# concurrent downloads, or doctests not liking the extra messages printed to
-# screen during the download.
-ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
 
 if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     GC.gc(true); GC.gc(false); GC.gc(true)

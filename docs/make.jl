@@ -2,7 +2,6 @@ using Breeze
 using RRTMGP, CloudMicrophysics # to load Breeze extensions
 using Documenter
 using DocumenterCitations
-using Pkg.Artifacts: ensure_artifact_installed
 using DocumenterCodeBlocks: CodeBlocks
 
 using CairoMakie
@@ -59,11 +58,6 @@ examples = [
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
-
-# Install artifacts before building the docs, to avoid spurious failures from
-# concurrent downloads, or examples and doctests not liking the extra messages
-# printed to screen during the download.
-ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
 
 # Use a different semaphore for CPU and GPU examples, but will keep the maximum
 # of concurrent tasks running at all time to the number of threads.  This is
@@ -179,7 +173,6 @@ makedocs(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB
         size_threshold = 2 ^ 20, # 1 MiB
-        size_threshold_ignore = ["api.md"], # auto-generated, grows with the docstring count
         prettyurls = get(ENV, "CI", "false") == "true",
     ),
     pages=[
@@ -193,10 +186,6 @@ makedocs(
             "Overview" => "microphysics/microphysics_overview.md",
             "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
             "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
-            "Predicted Particle Properties (P3)" => Any[
-                "Theory" => "microphysics/p3_theory.md",
-                "Usage" => "microphysics/p3_usage.md",
-            ],
         ],
         "Developers" => Any[
             "Microphysics" => Any[
