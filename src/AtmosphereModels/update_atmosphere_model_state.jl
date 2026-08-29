@@ -297,6 +297,11 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     model_fields = fields(model)
 
+    # The sedimentation velocities the scalar kernels below read are established by
+    # `update_microphysical_auxiliaries!` in `compute_auxiliary_variables!`, so they are
+    # already current for this stage — and, unlike a tendency-time refresh, they stay
+    # current after an `update_state!` that skips tendency computation.
+
     #####
     ##### Momentum tendencies (skip for kinematic dynamics)
     #####

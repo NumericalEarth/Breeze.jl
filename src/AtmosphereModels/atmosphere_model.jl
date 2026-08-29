@@ -4,7 +4,7 @@ using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Fie
                     Centered, fields, prognostic_fields
 using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection
 using Oceananigans.AbstractOperations: @at
-using Oceananigans.Architectures: Architectures
+using Oceananigans.Architectures: Architectures, on_architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, needs_implicit_solver
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
@@ -216,8 +216,10 @@ function AtmosphereModel(grid;
         velocities = materialize_velocities(velocities, grid)
     end
 
+    # Microphysical fields, including a prognostic aerosol reservoir `ρnᵃ`, start at zero. `ρnᵃ`
+    # holds a ρ-weighted count, so it is filled in by `set_default_aerosol_number!` at the end of
+    # this constructor, once the dynamics has been materialized and has a density to weight by.
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
-    initialize_model_microphysical_fields!(microphysical_fields, microphysics)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
@@ -262,9 +264,10 @@ function AtmosphereModel(grid;
     # agree on ordering, or forcings will read the wrong field.
     model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
                          (; T=temperature), microphysical_fields)
-    density = dynamics_density(dynamics)
+    coupling_density = dynamics_density(dynamics)
+    mass_density = total_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
-                                       grid, coriolis, density,
+                                       grid, coriolis, coupling_density, mass_density,
                                        velocities, dynamics, formulation, microphysics,
                                        specific_prognostic_moisture)
 
@@ -283,6 +286,9 @@ function AtmosphereModel(grid;
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
+
+    # Move microphysics lookup tables to the grid architecture (CPU → GPU)
+    microphysics = on_architecture(arch, microphysics)
 
     model = AtmosphereModel(arch,
                             grid,
@@ -309,6 +315,17 @@ function AtmosphereModel(grid;
 
     # Initialize thermodynamics (dynamics-specific)
     initialize_model_thermodynamics!(model)
+
+    # Seed the prognostic aerosol reservoir from the microphysics scheme's distribution. Dynamics
+    # whose density is physical at construction (the anelastic reference state, a prescribed
+    # density) are fully initialized here, so a model that is never `set!` still activates.
+    # Compressible density fields are still zero, so this writes zero and the first `set!` that
+    # supplies a density fills it in. Idempotent: every `set!` rewrites it.
+    #
+    # This belongs in the constructor rather than in `initialize!(model)` because it is a
+    # *default*: `initialize!` runs after `set!`, which is where a user supplies `nᵃ` or `ρnᵃ`,
+    # so re-seeding there would overwrite a user-supplied aerosol reservoir.
+    set_default_aerosol_number!(model)
 
     return model
 end
@@ -395,7 +412,7 @@ function field_names(dynamics, formulation, microphysics, tracer_names)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
+                                  grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
     forcings_type = typeof(user_forcings)
@@ -405,7 +422,7 @@ function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields
 end
 
 function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
+                                  grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
     names = keys(prognostic_fields)
@@ -413,7 +430,7 @@ function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
 end
 
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
+                                  grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
 
@@ -449,8 +466,23 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     moist_specific = moisture_specific_name(microphysics)
     specific_fields = merge(velocities, formulation_fields, NamedTuple{(moist_specific,)}((specific_prognostic_moisture,)))
 
-    # Build context for special forcing types (used by extended materialize_forcing in Forcings module)
-    forcing_context = (; coriolis, density, specific_fields)
+    # Momentum, the dynamics mass variable, and thermodynamic density are weighted by the
+    # coupling density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and
+    # user tracers are total-air mass fractions and therefore use total density. The extra
+    # :ρs entry is the energy-forcing alias retained by potential-temperature formulations.
+    coupling_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
+                                   prognostic_momentum_field_names(dynamics)...,
+                                   thermodynamic_density_name(formulation),
+                                   :ρs)
+
+    # Keep `density` as the coupling-density compatibility entry for other forcing
+    # materializers; SpecificForcing selects between the two explicit carriers by target.
+    forcing_context = (; coriolis,
+                         density=coupling_density,
+                         coupling_density,
+                         total_density=mass_density,
+                         coupling_density_names,
+                         specific_fields)
 
     materialized = Tuple(
         assemble_field_forcing(n, f, user_forcings, model_names, forcing_context)
