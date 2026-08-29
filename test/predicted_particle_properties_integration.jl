@@ -238,7 +238,9 @@ using Oceananigans.TimeSteppers: update_state!
 
     @testset "P3 parcel substeps write back a consistent rime state" begin
         FT = Float64
-        grid = RectilinearGrid(default_arch, FT;
+        # The parcel state lives on the host and reads the environment through `interpolate`,
+        # so parcel models run on the CPU regardless of the test architecture.
+        grid = RectilinearGrid(CPU(), FT;
                                size = 4,
                                z = (0, 1000),
                                topology = (Flat, Flat, Bounded))
