@@ -91,7 +91,7 @@ AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, mode
 abstract type AbstractCondensateFormation end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDEF)
 
 Return a condensate formation model that applies a **constant** phase-change rate.
 

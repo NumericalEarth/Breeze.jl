@@ -11,7 +11,7 @@ module StaticEnergyFormulations
 
 export StaticEnergyFormulation
 
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
