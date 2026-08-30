@@ -25,12 +25,10 @@ features:
     details: With liquid-ice potential temperature and static energy formulations
   - icon: ☁️
     title: Cloud microphysics
-    details: Saturation adjustment, Kessler, one- and two-moment bulk schemes via CloudMicrophysics.jl
-    link: https://github.com/CliMA/CloudMicrophysics.jl
+    details: Saturation adjustment, Kessler, one- and two-moment bulk schemes via [`CloudMicrophysics.jl`](https://github.com/CliMA/CloudMicrophysics.jl)
   - icon: ☀️
     title: Radiative transfer
-    details: Gray, clear-sky, and all-sky solvers via RRTMGP.jl
-    link: https://github.com/CliMA/RRTMGP.jl
+    details: Gray, clear-sky, and all-sky solvers via [`RRTMGP.jl`](https://github.com/CliMA/RRTMGP.jl)
   - icon: 🦾
     title: High-order advection
     details: Including bounds-preserving WENO schemes
@@ -45,7 +43,7 @@ features:
     details: For rapid prototyping of microphysics and radiation schemes
   - icon: ⚡
     title: GPU-first
-    details: Use GPU() to run very fast on NVIDIA, AMD, Metal, and Intel GPUs
+    details: Use `GPU()` to run _very fast_ on NVIDIA, AMD, Metal, and Intel GPUs
 ---
 ```
 
