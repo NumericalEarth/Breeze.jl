@@ -4,7 +4,7 @@ layout: home
 
 hero:
   name: Breeze.jl
-  tagline: Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs.
+  tagline: Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs
   actions:
     - theme: brand
       text: Quick Start
