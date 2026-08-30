@@ -32,14 +32,14 @@ using Breeze.Thermodynamics:
     saturation_specific_humidity,
     saturation_vapor_pressure,
     equilibrium_saturation_specific_humidity,
-    density,
     PlanarLiquidSurface,
     DrySurface,
     # Phase equilibrium types
     WarmPhaseEquilibrium,
     equilibrated_surface
 
-using Breeze.AtmosphereModels: AtmosphereModel, grid_moisture_fractions, specific_prognostic_moisture
+using Breeze.AtmosphereModels: AtmosphereModel, dynamics_pressure, gas_phase_density, total_density,
+                               grid_moisture_fractions, specific_prognostic_moisture
 
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index

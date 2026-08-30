@@ -74,6 +74,13 @@ AtmosphereModels.thermodynamic_density(formulation::LiquidIcePotentialTemperatur
 AtmosphereModels.with_thermodynamic_density(f::LiquidIcePotentialTemperatureFormulation, ρθ) =
     LiquidIcePotentialTemperatureFormulation(ρθ, f.potential_temperature, f.temperature_solver)
 
+AtmosphereModels.set_hydrostatically_balanced_density!(
+    formulation::LiquidIcePotentialTemperatureFormulation,
+    model,
+    spec::AtmosphereModels.HydrostaticallyBalancedDensity) =
+    AtmosphereModels.set_potential_temperature_hydrostatically_balanced_density!(
+        model, spec, formulation.potential_temperature)
+
 # Val-based versions for pre-materialization (called via Symbol fallback in interface)
 AtmosphereModels.prognostic_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperature}) = tuple(:ρθ)
 AtmosphereModels.additional_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperature}) = tuple(:θ)

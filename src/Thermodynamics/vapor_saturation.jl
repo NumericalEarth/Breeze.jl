@@ -136,6 +136,31 @@ Compute the supersaturation ``𝒮 = pᵛ/pᵛ⁺ - 1`` over a given `surface`.
 end
 
 #####
+##### Psychrometric correction
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the psychrometric correction ``ξ``, the factor by which latent heating reduces
+the supersaturation available to drive a phase change,
+
+```math
+ξ = 1 + \\frac{ℒ^2 q^{v+}}{cᵖ Rᵛ T^2}
+```
+
+with `ℒ` the latent heat of the phase being formed, `qᵛ⁺` the saturation mass fraction
+against it, and `cᵖ` the heat capacity the caller's energy budget is written with. An
+effective relaxation timescale is `ξ τ`, and an effective supersaturation excess is
+`(qᵛ - qᵛ⁺) / ξ`.
+
+`Microphysics.thermodynamic_adjustment_factor` is the same correction written with the
+mixture heat capacity and with the ideal-gas ``-1/T`` term of ``dqᵛ⁺/dT`` retained; the
+form here drops that term, matching the convention of the P3 scheme.
+"""
+@inline psychrometric_correction(ℒ, qᵛ⁺, cᵖ, Rᵛ, T) = 1 + ℒ^2 * qᵛ⁺ / (cᵖ * Rᵛ * T^2)
+
+#####
 ##### Phase equilibrium types
 #####
 
