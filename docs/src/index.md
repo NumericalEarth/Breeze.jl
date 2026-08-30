@@ -31,7 +31,7 @@ features:
     title: Radiative transfer
     details: Gray, clear-sky, and all-sky solvers via RRTMGP.jl
     link: https://github.com/CliMA/RRTMGP.jl
-  - icon: 💨
+  - icon: 🦾
     title: High-order advection
     details: Including bounds-preserving WENO schemes
   - icon: 🌪️
