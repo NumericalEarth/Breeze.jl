@@ -6,6 +6,9 @@ hero:
   name: Breeze.jl
   tagline: Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs.
   actions:
+    - theme: brand
+      text: Quick Start
+      link: "#Quick-Start"
     - theme: alt
       text: View on GitHub
       link: https://github.com/NumericalEarth/Breeze.jl
