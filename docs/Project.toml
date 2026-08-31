@@ -22,7 +22,6 @@ SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 
 [sources]
 Breeze = {path = ".."}
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "mg/implicit-advection-lz-dispatch"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
@@ -38,6 +37,7 @@ InteractiveUtils = "<0.0.1, 1"
 KernelAbstractions = "0.9.41"
 Literate = "2"
 NCDatasets = "0.14"
+Oceananigans = "0.110.20"
 Pkg = "<0.0.1, 1"
 RRTMGP = "0.22, 0.23, 1"
 Random = "<0.0.1, 1"
