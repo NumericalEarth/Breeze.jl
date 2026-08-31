@@ -150,7 +150,7 @@ function ssp_rk3_substep!(model, Δt, α)
                            model.clock,
                            fields(model),
                            α * Δt,
-                           implicit_step_advection(advection, name),
+                           implicit_step_advection(advection),
                            implicit_advection_velocities(model.dynamics, model.velocities, name),
                            implicit_advection_density(model.dynamics, model.formulation, name))
         end
