@@ -48,9 +48,8 @@ using Oceananigans.TurbulenceClosures:
     boundary_flux_diagonal
 
 # Breeze-owned wrapper routing a z-Center prognostic's implicit solve to the mass-flux-weighted
-# coefficients below. Like `VerticalMomentumImplicitAdvection`, wrapping the scheme puts a
-# Breeze-owned type in the `get_coefficient` signature, so these methods are neither type piracy
-# nor ambiguous with Oceananigans' own `AIVA` and fallback methods.
+# coefficients below. Wrapping the scheme puts a Breeze-owned type in the `get_coefficient`
+# signature, so these methods are neither type piracy nor ambiguous with Oceananigans' own.
 #
 # `diffusion_density` weights the diffusion half of the row, leaving the density the solve is
 # called with to the advection half. The two are the same field everywhere except in

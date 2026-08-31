@@ -10,7 +10,7 @@ module PotentialTemperatureFormulations
 
 export LiquidIcePotentialTemperatureFormulation
 
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 

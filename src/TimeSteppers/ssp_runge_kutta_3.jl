@@ -135,9 +135,7 @@ function ssp_rk3_substep!(model, Δt, α)
 
         # The implicit solve must carry the reference density whenever it runs at all: the
         # diffusion half is mass-flux weighted for the z-Center prognostics, and adaptive implicit
-        # vertical advection adds a density-weighted advection contribution on top. `ρw` routes to
-        # Breeze's z-Face coefficients, scalars/`ρu`/`ρv` to the mass-flux-weighted z-Center ones
-        # (see AtmosphereModels/mass_weighted_implicit_diffusion.jl).
+        # vertical advection adds a density-weighted advection contribution on top.
         #
         # The guard is on the *solver*, not on `needs_implicit_solver(advection)`: that predicate
         # is false for `advection = nothing` and for ordinary WENO, so keying on it would drop the

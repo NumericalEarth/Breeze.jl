@@ -3,7 +3,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDEF)
 
 `LiquidIcePotentialTemperatureFormulation` uses liquid-ice potential temperature density `ρθ`
 as the prognostic thermodynamic variable.
