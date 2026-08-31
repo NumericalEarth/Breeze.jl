@@ -17,7 +17,6 @@ using Breeze.AtmosphereModels:
     thermodynamic_density_name,
     transport_velocities,
     field_advection_scheme,
-    implicit_step_advection,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
@@ -336,7 +335,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                        model.clock,
                        fields(model),
                        Δt_stage,
-                       implicit_step_advection(momentum_advection, name),
+                       momentum_advection,
                        (; w),
                        ρᵈ)
     end
