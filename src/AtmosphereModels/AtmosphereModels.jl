@@ -49,13 +49,16 @@ export
     WarmRainState,
     microphysical_state,
     microphysical_tendency,
+    microphysical_tendencies,
     compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
     specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
+    aerosol_field_names,
     initial_aerosol_number,
+    initial_aerosol_number_density,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     materialize_atmosphere_model_boundary_conditions,
@@ -81,6 +84,9 @@ export
 
     # Cloud effective radius
     ConstantRadiusParticles,
+
+    # Microphysics interface
+    prognostic_field_names,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
@@ -114,7 +120,7 @@ using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, fields
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
+using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers

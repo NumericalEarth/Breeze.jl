@@ -1,7 +1,12 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
+using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans.Grids: ZDirection
+using Oceananigans.TurbulenceClosures: VerticallyImplicitDiffusionLowerDiagonal,
+                                       VerticallyImplicitDiffusionDiagonal,
+                                       VerticallyImplicitDiffusionUpperDiagonal
 using Test
 
 @testset "Vertically implicit diffusion correctness [$(FT)]" for FT in test_float_types()
@@ -273,5 +278,104 @@ end
         ρuᵉ = Array(interior(explicit_model.momentum.ρu, 1, 1, :))
 
         @test maximum(abs, ρuⁱ .- ρuᵉ) / maximum(abs, ρuᵉ) < 0.02
+    end
+end
+
+@testset "Mass-weighted get_coefficient wins dispatch [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    grid = RectilinearGrid(default_arch; size=(1, 1, 16), x=(0, 100), y=(0, 100), z=(0, 4000),
+                           topology=(Periodic, Periodic, Bounded))
+    closure = VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ = 100, ν = 100)
+    model = AtmosphereModel(grid; closure, advection=nothing, tracers=:ρc)
+    set!(model; θ = 300, ρc = (x, y, z) -> cospi(z / 4000))
+
+    ρ = Breeze.AtmosphereModels.total_density(model.dynamics)
+    scheme = Breeze.AtmosphereModels.implicit_step_advection(nothing, :ρc)
+    w = model.velocities.w
+    clock = model.clock
+    mf = Oceananigans.fields(model)
+    c, f = Center(), Face()
+    id = Breeze.AtmosphereModels.closure_scalar_index(model, :ρc)
+
+    ρc = model.tracers.ρc
+    bcs = (ρc.boundary_conditions.top, ρc.boundary_conditions.bottom, ρc.boundary_conditions.immersed)
+
+    coefficient(marker, trailing...) = @allowscalar Oceananigans.Solvers.get_coefficient(
+        1, 1, 8, grid, marker, nothing, ZDirection(),
+        model.closure, model.closure_fields, id, c, c, c, 1.0, clock, mf, trailing...)
+
+    for marker in (VerticallyImplicitDiffusionUpperDiagonal(),
+                   VerticallyImplicitDiffusionLowerDiagonal(),
+                   VerticallyImplicitDiffusionDiagonal())
+
+        weighted   = coefficient(marker, scheme, w, ρ, bcs...)   # what implicit_step! passes
+        unweighted = coefficient(marker, nothing, w, ρ, bcs...)  # Oceananigans' own method
+
+        # A method must exist for the full argument list, and it must be the weighted one: over a
+        # 4 km column ρ varies ~40%, so the weighted coefficient cannot coincide with the unweighted.
+        @test isfinite(weighted)
+        @test weighted != unweighted
+    end
+end
+
+#####
+##### Routing of the implicit vertical solve by prognostic name
+#####
+##### Momentum takes the solve with the closure's viscosity, every scalar with the diffusivity of
+##### its position among the closure's scalar names, and the dynamics-specific prognostics (the
+##### compressible dry density) sit it out. Keyed on names rather than positions, so that a
+##### prognostic tuple that starts with `ρᵈ` does not shift every scalar's diffusivity by one.
+#####
+
+@testset "Implicit-solve routing by prognostic name [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(1, 1, 8), x=(0, 100), y=(0, 100), z=(0, 1000),
+                           topology=(Periodic, Periodic, Bounded))
+    closure = VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ = 1)
+
+    closure_scalar_names = Breeze.AtmosphereModels.closure_scalar_names
+    closure_scalar_index = Breeze.AtmosphereModels.closure_scalar_index
+    skip_vertical_diffusion = Breeze.AtmosphereModels.skip_vertical_diffusion
+
+    anelastic = AtmosphereModel(grid; closure, tracers = (:ρa, :ρb))
+    compressible = AtmosphereModel(grid; closure, tracers = (:ρa, :ρb),
+                                   dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature = 300))
+
+    for model in (anelastic, compressible)
+        names = keys(Oceananigans.prognostic_fields(model))
+        scalar_names = closure_scalar_names(model)
+
+        # The thermodynamic density, moisture and the user tracers, in that order
+        @test scalar_names == (:ρθ, :ρqᵛ, :ρa, :ρb)
+
+        for (i, name) in enumerate(scalar_names)
+            @test name ∈ names
+            @test closure_scalar_index(model, name) === Val(i)
+            @test !skip_vertical_diffusion(model, name)
+        end
+
+        for name in (:ρu, :ρv, :ρw)
+            @test closure_scalar_index(model, name) === nothing
+            @test !skip_vertical_diffusion(model, name)
+        end
+    end
+
+    # The compressible dry density leads the prognostic tuple and is the one prognostic that is
+    # not vertically diffused
+    names = keys(Oceananigans.prognostic_fields(compressible))
+    @test names[1] === :ρᵈ
+    @test skip_vertical_diffusion(compressible, :ρᵈ)
+    @test findfirst(==(:ρθ), names) == 5
+    @test Breeze.TimeSteppers.acoustic_prognostic_names(compressible) == (:ρᵈ, :ρu, :ρv, :ρw, :ρθ)
+
+    # Both steppers take a step through the routed implicit solve
+    set!(anelastic; θ = 300, ρa = 1, ρb = 2)
+    set!(compressible; θ = 300, ρ = compressible.dynamics.reference_state.density, ρa = 1, ρb = 2)
+    for model in (anelastic, compressible)
+        time_step!(model, 1)
+        @test model.clock.iteration == 1
+        @test all(isfinite, Array(interior(model.tracers.ρa)))
+        @test all(isfinite, Array(interior(model.tracers.ρb)))
     end
 end

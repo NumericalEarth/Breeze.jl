@@ -12,7 +12,7 @@ using Oceananigans.TimeSteppers:
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
                                 microphysics_model_update!, field_advection_scheme,
                                 compute_closure_tendencies!,
-                                dynamics_prognostic_fields,
+                                closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
                                 implicit_step_advection
 using Oceananigans.Utils: launch!, time_difference_seconds
@@ -84,6 +84,7 @@ Shu, C.-W., & Osher, S. (1988). Efficient implementation of essentially non-osci
 function SSPRungeKutta3(grid, prognostic_fields;
                         dynamics = nothing,
                         implicit_solver::TI = nothing,
+                        cache_advecting_state = false,   # accepted for TimeStepper-call uniformity; unused
                         Gⁿ::TG = map(similar, prognostic_fields),
                         U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 
@@ -95,23 +96,6 @@ function SSPRungeKutta3(grid, prognostic_fields;
     α³ = FT(2//3)
 
     return SSPRungeKutta3{FT, U0, TG, TI}(α¹, α², α³, U⁰, Gⁿ, implicit_solver)
-end
-
-# Closure scalar indices exclude dynamics-specific prognostics and the momentum components.
-function closure_scalar_index(model, prognostic_index)
-    n_dynamics = length(dynamics_prognostic_fields(model.dynamics))
-    n_momentum = length(model.momentum)
-    return Val(prognostic_index - n_dynamics - n_momentum)
-end
-
-# Which prognostics sit out the implicit vertical solve. `prognostic_fields` lists the
-# dynamics-specific ones first — the compressible dry density, the kinematic driver's density —
-# and those are advanced explicitly: being neither momentum nor closure scalars, they have no
-# diffusivity to apply. Momentum and every thermodynamic and microphysical scalar come after, and
-# all of them do take the solve.
-function skip_vertical_diffusion(model, prognostic_index)
-    n_dynamics = length(dynamics_prognostic_fields(model.dynamics))
-    return prognostic_index <= n_dynamics
 end
 
 #####
@@ -138,20 +122,21 @@ function ssp_rk3_substep!(model, Δt, α)
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
 
-    for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
+    for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, kernel_Δt, α)
 
-        skip_vertical_diffusion(model, i) && continue
+        # Dynamics-specific prognostics (the compressible dry density, the kinematic driver's
+        # density) are advanced explicitly and have no diffusivity to apply; momentum and every
+        # scalar take the solve, momentum with `field_index = nothing` (viscosity) and the
+        # scalars with their position in the closure's scalar names (see `closure_scalar_index`).
+        skip_vertical_diffusion(model, name) && continue
 
-        momentum = names[i] === :ρu || names[i] === :ρv || names[i] === :ρw
-        field_index = momentum ? nothing : closure_scalar_index(model, i)
-        advection = field_advection_scheme(model.advection, names[i])
+        field_index = closure_scalar_index(model, name)
+        advection = field_advection_scheme(model.advection, name)
 
         # The implicit solve must carry the reference density whenever it runs at all: the
         # diffusion half is mass-flux weighted for the z-Center prognostics, and adaptive implicit
-        # vertical advection adds a density-weighted advection contribution on top. `ρw` routes to
-        # Breeze's z-Face coefficients, scalars/`ρu`/`ρv` to the mass-flux-weighted z-Center ones
-        # (see AtmosphereModels/mass_weighted_implicit_diffusion.jl).
+        # vertical advection adds a density-weighted advection contribution on top.
         #
         # The guard is on the *solver*, not on `needs_implicit_solver(advection)`: that predicate
         # is false for `advection = nothing` and for ordinary WENO, so keying on it would drop the
@@ -166,9 +151,9 @@ function ssp_rk3_substep!(model, Δt, α)
                            model.clock,
                            fields(model),
                            α * Δt,
-                           implicit_step_advection(advection, names[i]),
-                           implicit_advection_velocities(model.dynamics, model.velocities, names[i]),
-                           implicit_advection_density(model.dynamics, model.formulation, names[i]))
+                           implicit_step_advection(advection, name),
+                           implicit_advection_velocities(model.dynamics, model.velocities, name),
+                           implicit_advection_density(model.dynamics, model.formulation, name))
         end
     end
 

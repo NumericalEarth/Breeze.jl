@@ -8,6 +8,23 @@ struct PlanarIceSurface end
 """
 $(TYPEDEF)
 
+A surface with no saturation humidity, for bulk surface-layer schemes over dry land.
+
+With `PlanarLiquidSurface` or `PlanarIceSurface`, a `PolynomialCoefficient` forms the surface
+virtual potential temperature from the saturation specific humidity at the surface temperature —
+right over water, but over land it is spurious virtual warming, ``0.608 \\, qᵛ⁺ T₀ ≈ 0.33`` K at
+265 K, comparable to a stable surface layer's entire temperature deficit. With
+`surface = DrySurface()` the saturation total specific moisture is zero, so the surface virtual
+temperature is the surface temperature itself.
+
+`DrySurface` is a trait of the bulk scheme, not a model of soil moisture: it carries no saturation
+vapor pressure, and the bulk vapor flux is not defined over it.
+"""
+struct DrySurface end
+
+"""
+$(TYPEDEF)
+
 Return `PlanarMixedPhaseSurface` for computing the saturation vapor pressure over
 a surface composed of a mixture of liquid and ice, with a given `liquid_fraction`.
 """
@@ -117,6 +134,31 @@ Compute the supersaturation ``𝒮 = pᵛ/pᵛ⁺ - 1`` over a given `surface`.
     pᵛ = vapor_pressure(T, ρ, q.vapor, constants)
     return pᵛ / pᵛ⁺ - 1
 end
+
+#####
+##### Psychrometric correction
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the psychrometric correction ``ξ``, the factor by which latent heating reduces
+the supersaturation available to drive a phase change,
+
+```math
+ξ = 1 + \\frac{ℒ^2 q^{v+}}{cᵖ Rᵛ T^2}
+```
+
+with `ℒ` the latent heat of the phase being formed, `qᵛ⁺` the saturation mass fraction
+against it, and `cᵖ` the heat capacity the caller's energy budget is written with. An
+effective relaxation timescale is `ξ τ`, and an effective supersaturation excess is
+`(qᵛ - qᵛ⁺) / ξ`.
+
+`Microphysics.thermodynamic_adjustment_factor` is the same correction written with the
+mixture heat capacity and with the ideal-gas ``-1/T`` term of ``dqᵛ⁺/dT`` retained; the
+form here drops that term, matching the convention of the P3 scheme.
+"""
+@inline psychrometric_correction(ℒ, qᵛ⁺, cᵖ, Rᵛ, T) = 1 + ℒ^2 * qᵛ⁺ / (cᵖ * Rᵛ * T^2)
 
 #####
 ##### Phase equilibrium types

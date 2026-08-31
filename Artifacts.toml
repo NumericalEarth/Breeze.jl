@@ -1,0 +1,7 @@
+[P3_lookup_tables]
+git-tree-sha1 = "4b8a8131a2d919e441f3ed745fe35bfee3009872"
+lazy = true
+
+    [[P3_lookup_tables.download]]
+    sha256 = "d81442098b7c250842afc795d21295f44c8ef9e5957db5a76c156516cc76c65c"
+    url = "https://github.com/NumericalEarth/Breeze.jl/releases/download/P3_lookup_tables_v1.0/P3_lookup_tables.tar.gz"

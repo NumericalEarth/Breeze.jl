@@ -3,7 +3,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDEF)
 
 `LiquidIcePotentialTemperatureFormulation` uses liquid-ice potential temperature density `ρθ`
 as the prognostic thermodynamic variable.
@@ -73,6 +73,13 @@ AtmosphereModels.thermodynamic_density_name(::LiquidIcePotentialTemperatureFormu
 AtmosphereModels.thermodynamic_density(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature_density
 AtmosphereModels.with_thermodynamic_density(f::LiquidIcePotentialTemperatureFormulation, ρθ) =
     LiquidIcePotentialTemperatureFormulation(ρθ, f.potential_temperature, f.temperature_solver)
+
+AtmosphereModels.set_hydrostatically_balanced_density!(
+    formulation::LiquidIcePotentialTemperatureFormulation,
+    model,
+    spec::AtmosphereModels.HydrostaticallyBalancedDensity) =
+    AtmosphereModels.set_potential_temperature_hydrostatically_balanced_density!(
+        model, spec, formulation.potential_temperature)
 
 # Val-based versions for pre-materialization (called via Symbol fallback in interface)
 AtmosphereModels.prognostic_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperature}) = tuple(:ρθ)
