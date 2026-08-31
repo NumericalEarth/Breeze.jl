@@ -25,7 +25,6 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 Breeze = {path = ".."}
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "mg/implicit-advection-lz-dispatch"}
 
 [compat]
 Adapt = "4.3.0"
@@ -41,6 +40,7 @@ GPUArraysCore = "0.2"
 Logging = "<0.0.1, 1"
 Metal = "1.10"
 NCDatasets = "0.14"
+Oceananigans = "0.111"
 ParallelTestRunner = "2.0.1"
 Pkg = "<0.0.1, 1"
 Printf = "<0.0.1, 1"
