@@ -69,6 +69,10 @@ MassWeightedImplicitDiffusion(scheme) = MassWeightedImplicitDiffusion(scheme, no
 Adapt.adapt_structure(to, a::MassWeightedImplicitDiffusion) =
     MassWeightedImplicitDiffusion(adapt(to, a.scheme), adapt(to, a.diffusion_density))
 
+# `implicit_step!` sees the wrapper, not the scheme, when it decides whether to solve at all.
+BoundaryConditions.needs_implicit_solver(a::MassWeightedImplicitDiffusion) =
+    BoundaryConditions.needs_implicit_solver(a.scheme)
+
 # Dispatch rather than a branch: `nothing` defers to the density the solve was called with.
 @inline mass_weighting_density(::Nothing, ρ) = ρ
 @inline mass_weighting_density(ρᵈ, ρ) = ρᵈ
