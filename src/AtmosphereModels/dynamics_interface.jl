@@ -130,6 +130,20 @@ Return the total pressure (mean + anomaly) in Pa.
 """
 function total_pressure end
 
+"""
+$(TYPEDSIGNATURES)
+
+Return pressure consistent with a prescribed temperature during thermodynamic initialization.
+
+The default retains [`dynamics_pressure`](@ref) (appropriate for anelastic/reference-pressure
+models, where pressure is not a function of the state being set). Compressible dynamics overrides
+this with the equation of state `p = ρ Rᵐ T`, avoiding a fixed-point error when density or
+composition was changed immediately before setting temperature.
+"""
+@inline function pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
+    return @inbounds dynamics_pressure(dynamics)[i, j, k]
+end
+
 #####
 ##### Density and pressure access interface
 #####
@@ -162,6 +176,27 @@ formulations with a single density (e.g. the anelastic reference density). `Comp
 overrides it with a diagnosed total-density field, distinct from the coupling density ρᵈ.
 """
 total_density(dynamics) = dynamics_density(dynamics)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the density ``ρ`` at `(i, j, k)` that mass fractions are referenced to, so that ``qˣ`` and
+``ρ`` give a partial pressure — the vapor pressure is ``pᵛ = ρ qᵛ Rᵛ T``.
+
+This is the *total* density, condensate loading included, not the gas-phase density ``ρᵈ + ρᵛ``:
+``Rᵐ(q) = qᵈ Rᵈ + qᵛ Rᵛ`` uses ``qᵈ = 1 - qᵛ - qˡ - qⁱ``, so ``p / (Rᵐ(q) T)`` returns the total
+and the two differ by ``1 - qˡ - qⁱ``. Total is required for consistency with
+`saturation_specific_humidity(T, ρ, …) = pᵛ⁺ / (ρ Rᵛ T)`, which references ``qᵛ⁺`` to the same
+``ρ``; mixing the two would break ``qᵛ / qᵛ⁺`` as the saturation ratio. The name is inherited and
+does not describe this.
+
+The default returns `total_density(dynamics)`. `AnelasticDynamics` overrides it because its
+`dynamics_density` is the *dry* reference profile ``ρᵣ(z)``, so the override rediagnoses the local
+moist total density at the reference pressure.
+"""
+@inline function gas_phase_density(i, j, k, dynamics, T, q, constants)
+    return @inbounds total_density(dynamics)[i, j, k]
+end
 
 """
     advecting_vertical_velocity(dynamics, velocities)
