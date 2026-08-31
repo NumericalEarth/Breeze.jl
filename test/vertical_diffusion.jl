@@ -1,6 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
+using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Grids: ZDirection
 using Oceananigans.TurbulenceClosures: VerticallyImplicitDiffusionLowerDiagonal,
@@ -300,10 +301,9 @@ end
     ρc = model.tracers.ρc
     bcs = (ρc.boundary_conditions.top, ρc.boundary_conditions.bottom, ρc.boundary_conditions.immersed)
 
-    coefficient(marker, trailing...) =
-        Oceananigans.Solvers.get_coefficient(1, 1, 8, grid, marker, nothing, ZDirection(),
-                                             model.closure, model.closure_fields, id, c, c, c,
-                                             1.0, clock, mf, trailing...)
+    coefficient(marker, trailing...) = @allowscalar Oceananigans.Solvers.get_coefficient(
+        1, 1, 8, grid, marker, nothing, ZDirection(),
+        model.closure, model.closure_fields, id, c, c, c, 1.0, clock, mf, trailing...)
 
     for marker in (VerticallyImplicitDiffusionUpperDiagonal(),
                    VerticallyImplicitDiffusionLowerDiagonal(),
