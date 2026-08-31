@@ -216,6 +216,7 @@ function compute_auxiliary_variables!(model)
 
     # Compute diffusivities
     compute_closure_fields!(model.closure_fields, model.closure, model)
+    fill_halo_regions!(model.closure_fields; only_local_halos=true)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 

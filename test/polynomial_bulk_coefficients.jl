@@ -13,6 +13,7 @@ using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  integrated_stability_momentum,
                                  integrated_stability_scalar,
                                  stability_correction_factor
+using Breeze.AtmosphereModels.Diagnostics: saturation_total_specific_moisture
 using Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using GPUArraysCore: @allowscalar
@@ -325,6 +326,22 @@ using GPUArraysCore: @allowscalar
         # Coefficient should have been materialized with latent heat coefficients
         @test bc.condition.coefficient.polynomial == (0.120, 0.070, 2.55)
         @test bc.condition.coefficient.transfer_type === Val(:scalar)
+    end
+
+    @testset "DrySurface" begin
+        # Over dry land there is no saturation humidity at the surface, so the bulk scheme's
+        # surface virtual potential temperature is the surface temperature itself
+        constants = ThermodynamicConstants(FT)
+        T₀ = FT(265)
+        p₀ = FT(1e5)
+        @test saturation_total_specific_moisture(T₀, p₀, constants, DrySurface()) == 0
+        @test saturation_total_specific_moisture(T₀, p₀, constants, PlanarLiquidSurface()) > 0
+
+        coef = PolynomialCoefficient(surface = DrySurface())
+        @test coef.surface isa DrySurface
+        bc = Breeze.BulkDrag(coefficient = coef, surface_temperature = T₀)
+        @test bc isa BoundaryCondition
+        @test bc.condition.coefficient.surface isa DrySurface
     end
 
     @testset "FilteredSurfaceVelocities construction" begin

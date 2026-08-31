@@ -120,7 +120,7 @@ using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, fields
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
+using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
@@ -158,6 +158,7 @@ include("solar_position.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("implicit_vertical_advection.jl")
+include("mass_weighted_implicit_diffusion.jl")
 include("cell_advection_timescale.jl")
 include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")

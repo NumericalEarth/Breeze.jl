@@ -105,6 +105,7 @@ export
     vapor_gas_constant,
     PlanarLiquidSurface,
     PlanarIceSurface,
+    DrySurface,
 
     # Microphysics
     aerosol_field_names,

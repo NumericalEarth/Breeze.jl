@@ -123,6 +123,9 @@ See the [Atmosphere Thermodynamics](@ref Thermodynamics-section) section of the 
     return ϵᵈᵛ * pᵛ⁺ / (p + δᵈᵛ * pᵛ⁺)
 end
 
+# A dry surface has no saturation humidity (see `DrySurface`).
+@inline saturation_total_specific_moisture(T, pᵣ, constants, ::DrySurface) = zero(T)
+
 #####
 ##### Kernel function implementation
 #####
