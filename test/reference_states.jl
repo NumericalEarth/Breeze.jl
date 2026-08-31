@@ -456,7 +456,7 @@ end
     ##### set_to_mean! preserves density-weighted prognostic fields
     #####
     #
-    # Density-weighted prognostic fields (ρe, ρqᵗ, ρu) are left unchanged
+    # Density-weighted prognostic fields (ρs, ρqᵗ, ρu) are left unchanged
     # by set_to_mean!. Only the reference state (ρᵣ, pᵣ, Tᵣ) is updated.
 
     @testset "set_to_mean! preserves density-weighted prognostics" begin
@@ -474,7 +474,7 @@ end
         time_step!(model, 1)  # populates diagnostic fields
 
         # Record density-weighted prognostic fields before set_to_mean!
-        ρe_before  = Array(interior(model.formulation.energy_density))
+        ρs_before  = Array(interior(model.formulation.energy_density))
         ρqᵗ_before = Array(interior(model.moisture_density))
         ρu_before  = Array(interior(model.momentum.ρu))
         ρw_before  = Array(interior(model.momentum.ρw))
@@ -491,12 +491,12 @@ end
         end
 
         # Density-weighted prognostic fields should be unchanged
-        ρe_after  = Array(interior(model.formulation.energy_density))
+        ρs_after  = Array(interior(model.formulation.energy_density))
         ρqᵗ_after = Array(interior(model.moisture_density))
         ρu_after  = Array(interior(model.momentum.ρu))
         ρw_after  = Array(interior(model.momentum.ρw))
 
-        @test ρe_after  ≈ ρe_before
+        @test ρs_after  ≈ ρs_before
         @test ρqᵗ_after ≈ ρqᵗ_before
         @test ρu_after  ≈ ρu_before
         @test ρw_after  ≈ ρw_before
@@ -735,6 +735,14 @@ end
                                         reference_potential_temperature=θ, surface_pressure=p₀)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
+        static_energy_dynamics = CompressibleDynamics(ExplicitTimeStepping(); surface_pressure=p₀)
+        static_energy_model = AtmosphereModel(grid;
+                                              thermodynamic_constants = constants,
+                                              dynamics = static_energy_dynamics,
+                                              formulation = :StaticEnergy)
+        @test_throws ArgumentError Breeze.AtmosphereModels.set_hydrostatically_balanced_density!(
+            static_energy_model, HydrostaticallyBalancedDensity(surface_pressure=p₀))
+
         set!(model; θˡⁱ=θ, qᵗ=0, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀))
 
         @test model.dynamics.pressure        ≈ ref_truth.pressure rtol=1e-6
@@ -744,5 +752,28 @@ end
              enforce_mass_conservation=false)
 
         @test all(q -> q ≈ qᵗ, Array(interior(specific_humidity(model))))
+
+        if default_arch isa CPU
+            allocation_grid = RectilinearGrid(CPU();
+                                               size = (16, 16, 16),
+                                               x = (0, 100),
+                                               y = (0, 100),
+                                               z = (0, 10000),
+                                               topology = (Periodic, Periodic, Bounded))
+            allocation_dynamics = CompressibleDynamics(ExplicitTimeStepping(); surface_pressure=p₀)
+            allocation_model = AtmosphereModel(allocation_grid;
+                                               thermodynamic_constants = constants,
+                                               dynamics = allocation_dynamics)
+            balanced_density = HydrostaticallyBalancedDensity(surface_pressure=p₀)
+            set!(allocation_model;
+                 θˡⁱ = θ,
+                 qᵗ = 0,
+                 ρ = balanced_density,
+                 enforce_mass_conservation = false)
+
+            allocated_bytes = @allocated Breeze.AtmosphereModels.set_hydrostatically_balanced_density!(
+                allocation_model, balanced_density)
+            @test allocated_bytes < sizeof(parent(allocation_model.temperature))
+        end
     end
 end

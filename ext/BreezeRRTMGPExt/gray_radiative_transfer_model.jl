@@ -15,7 +15,6 @@ using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, Rad
                                DiurnalSolarPosition, FixedCosineZenith
 
 using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
-using RRTMGP.Fluxes: set_flux_to_zero!
 using KernelAbstractions: @kernel, @index
 using Dates: AbstractDateTime, Millisecond
 
@@ -56,7 +55,7 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 - `solar_position`: Specification of the solar zenith angle. See [`AbstractSolarPosition`](@ref) and its subtypes:
   - [`ApparentSolarPosition`](@ref) (default) — time-varying, computed from the model clock and grid (or explicit) longitude/latitude.
   - [`FixedCosineZenith`](@ref) — constant cos(θ_z), independent of the clock.
-- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
+- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Can be scalar or 2D field.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
@@ -84,6 +83,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     solar_position = maybe_infer_solar_position(solar_position, grid)
 
+    validate_surface_fractions(; surface_emissivity, surface_albedo,
+                                 direct_surface_albedo, diffuse_surface_albedo)
+
     if !isnothing(surface_albedo)
         if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)
             throw(ArgumentError(error_msg))
@@ -99,6 +101,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     else
         throw(ArgumentError(error_msg))
     end
+
+    surface_emissivity = materialize_surface_property(surface_emissivity, grid, solar_position)
 
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -144,27 +148,16 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     rrtmgp_ℐ₀ .= convert(FT, solar_constant)  # Top-of-atmosphere solar flux
 
-    if surface_emissivity isa Number
-        surface_emissivity = ConstantField(convert(FT, surface_emissivity))
-        rrtmgp_ε₀ .= surface_emissivity.constant
-    end
+    surface_emissivity = constant_field_property(surface_emissivity, FT)
+    direct_surface_albedo = constant_field_property(direct_surface_albedo, FT)
+    diffuse_surface_albedo = constant_field_property(diffuse_surface_albedo, FT)
 
     if surface_temperature isa Number
         surface_temperature = ConstantField(convert(FT, surface_temperature))
         rrtmgp_T₀ .= surface_temperature.constant
     end
 
-    if direct_surface_albedo isa Number
-        direct_surface_albedo = ConstantField(convert(FT, direct_surface_albedo))
-        rrtmgp_αb₀ .= direct_surface_albedo.constant
-    end
-
-    if diffuse_surface_albedo isa Number
-        diffuse_surface_albedo = ConstantField(convert(FT, diffuse_surface_albedo))
-        rrtmgp_αw₀ .= diffuse_surface_albedo.constant
-    end
-
-    grid_parameters = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
+    grid_parameters = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
 
     longwave_solver = NoScatLWRTE(grid_parameters;
                                   params = parameters,
@@ -182,7 +175,11 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # (`flux_dn_dir`), leaving `flux_up` and `flux_dn` as allocated-but-unwritten
     # memory. Zero them once so that every shortwave array in the solver agrees
     # with the physics: no diffuse and no upwelling shortwave.
-    set_flux_to_zero!(shortwave_solver.flux)
+    shortwave_flux = shortwave_solver.flux
+    for flux_array in (shortwave_flux.flux_up, shortwave_flux.flux_dn,
+                       shortwave_flux.flux_net, shortwave_flux.flux_dn_dir)
+        fill!(flux_array, 0)
+    end
 
     # Create Oceananigans fields to store fluxes for output/plotting
     upwelling_longwave_flux = ZFaceField(grid)
@@ -195,6 +192,11 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                     surface_emissivity,
                                                     direct_surface_albedo,
                                                     diffuse_surface_albedo)
+
+    update_rrtmgp_surface_boundary_conditions!(longwave_solver.bcs.sfc_emis,
+                                               shortwave_solver.bcs.sfc_alb_direct,
+                                               shortwave_solver.bcs.sfc_alb_diffuse,
+                                               surface_properties, grid)
 
     return RadiativeTransferModel(convert(FT, solar_constant),
                                   solar_position,
@@ -311,13 +313,11 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
     # Update RRTMGP atmospheric state from model fields
     update_rrtmgp_state!(rrtmgp_state, model, surface_temperature)
 
-    rrtmgp_surface_properties = (;
-        rrtmgp_ε₀ = rtm.longwave_solver.bcs.sfc_emis,
-        rrtmgp_αb₀ = rtm.shortwave_solver.bcs.sfc_alb_direct,
-        rrtmgp_αw₀ = rtm.shortwave_solver.bcs.sfc_alb_diffuse,
-    )
-
-    update_rrtmgp_surface_properties!(rrtmgp_surface_properties, rtm.surface_properties)
+    # Gray optics keeps the two RTE solvers side by side rather than inside one `RRTMGPSolver`.
+    update_rrtmgp_surface_boundary_conditions!(rtm.longwave_solver.bcs.sfc_emis,
+                                               rtm.shortwave_solver.bcs.sfc_alb_direct,
+                                               rtm.shortwave_solver.bcs.sfc_alb_diffuse,
+                                               rtm.surface_properties, grid)
 
     # Update solar zenith angle from the solar_position specification
     update_solar_zenith_angle!(rtm.shortwave_solver, rtm.solar_position, grid, clock)
@@ -339,11 +339,6 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
     return nothing
 end
 
-# TODO: This function will launch a kernel that will update the boundary conditions of RRTMGP.
-function update_rrtmgp_surface_properties!(rrtmgp_surface_properties, surface_properties)
-    return nothing
-end
-
 #####
 ##### Update RRTMGP atmospheric state from model fields
 #####
@@ -360,10 +355,10 @@ This matches the finite-volume staggering used in Oceananigans:
 
 ```
                         ┌─────────────────────────────────────────────────┐
-    z_lev[Nz+1] ━━━━━━━ │  level Nz+1 (TOA):  p_lev, t_lev, z_lev         │ ← extrapolated
+    z_lev[Nz+1] ━━━━━━━ │  level Nz+1 (TOA):  p_lev, t_lev, z_lev         │ ← from halo
                         └─────────────────────────────────────────────────┘
                         ┌─────────────────────────────────────────────────┐
-                        │  layer Nz:  T[Nz], p_lay[Nz] = pᵣ[Nz]           │ ← from model
+                        │  layer Nz:  T[Nz], p_lay[Nz] = p[Nz]            │ ← from model
                         └─────────────────────────────────────────────────┘
     z_lev[Nz]   ━━━━━━━   level Nz:   p_lev, t_lev, z_lev                   ← interpolated
                         ┌─────────────────────────────────────────────────┐
@@ -375,9 +370,9 @@ This matches the finite-volume staggering used in Oceananigans:
                         └─────────────────────────────────────────────────┘
     z_lev[2]    ━━━━━━━   level 2:    p_lev, t_lev, z_lev                   ← interpolated
                         ┌─────────────────────────────────────────────────┐
-                        │  layer 1:   T[1], p_lay[1] = pᵣ[1]              │ ← from model
+                        │  layer 1:   T[1], p_lay[1] = p[1]               │ ← from model
                         └─────────────────────────────────────────────────┘
-    z_lev[1]    ━━━━━━━   level 1 (surface, z=0):  p_lev = p₀, t_lev      │ ← from reference state
+    z_lev[1]    ━━━━━━━   level 1 (surface, z=0):  p_lev, t_lev           │ ← from halo
                         ══════════════════════════════════════════════════
                                         GROUND (t_sfc)
 ```
@@ -387,27 +382,37 @@ This matches the finite-volume staggering used in Oceananigans:
 RRTMGP is a general-purpose radiative transfer solver that operates on columns of
 atmospheric data. It does not interpolate from layers to levels internally because:
 
-1. **Boundary conditions**: The surface (level 1) and TOA (level Nz+1) require
-   boundary values that only the atmospheric model knows. For pressure, we use
-   the reference state's `surface_pressure` at z=0. For the top, we extrapolate
-   using the adiabatic hydrostatic formula.
+1. **Boundary conditions**: The surface (level 1) and TOA (level Nz+1) require boundary values
+   that only the atmospheric model knows. Breeze applies the same interior average there, so each
+   boundary level takes whatever that field's halo carries. A `Value` bottom boundary condition
+   (carried by the anelastic and 1D-column Exner reference pressures) reproduces the prescribed
+   surface pressure exactly; a default `NoFlux` halo mirrors the interior (`p[0] = p[1]`), which
+   collapses the level value onto the adjacent layer value.
 
-2. **Physics-appropriate interpolation**: Different quantities need different
-   interpolation methods. Pressure uses geometric mean (log-linear interpolation)
-   because it varies exponentially with height. Temperature uses arithmetic mean.
+   TODO: extrapolate to the boundary faces explicitly rather than inheriting the halo. Wherever
+   the halo mirrors, `p_lev` equals `p_lay` at that end, so the layer spans only half a cell in
+   pressure while `_compute_radiation_flux_divergence!` still divides its flux difference by the
+   full `Δzᶜᶜᶜ`, roughly halving that cell's heating rate. This affects the top cell always, and
+   the bottom cell whenever `dynamics_pressure` carries no `Value` bottom boundary condition
+   (compressible dynamics, and every terrain reference state).
 
-3. **Model consistency**: The pressure profile must be consistent with the
-   atmospheric model's reference state. RRTMGP has no knowledge of the anelastic
-   approximation or the reference potential temperature θ₀.
+2. **Interpolation to levels**: Interior levels use `ℑzᵃᵃᶠ`, the arithmetic average of the two
+   adjacent cell centers, for both pressure and temperature. That is second-order on a uniform
+   column and first-order wherever `Δz` varies (stretched or terrain-following grids), since the
+   face is then not the midpoint of its neighbouring centers.
+
+3. **Model consistency**: The pressure profile must be consistent with the atmospheric model's
+   thermodynamic state. RRTMGP has no knowledge of the anelastic approximation or of which
+   dynamical pressure contributions affect thermodynamics.
 
 # Physics notes
 
 **Temperature**: We use the actual temperature field `T` from the model state.
 This is the temperature that matters for thermal emission and absorption.
 
-**Pressure**: In the anelastic approximation, pressure perturbations are negligible
-compared to the hydrostatic reference pressure. We use `reference_state.pressure`
-at cell centers, computed via `adiabatic_hydrostatic_pressure(z, p₀, θ₀)`.
+**Pressure**: We use `dynamics_pressure(model.dynamics)` at cell centers — the anelastic
+hydrostatic reference pressure (in that approximation pressure perturbations are negligible), or
+the compressible diagnosed pressure. Never the dynamics' pressure-gradient reference state.
 
 # RRTMGP array layout
 - Layer arrays `(Nz, Nc)`: values at cell centers, layer 1 at bottom
@@ -417,10 +422,7 @@ function update_rrtmgp_state!(rrtmgp_state::GrayAtmosphericState, model, surface
     grid = model.grid
     arch = architecture(grid)
 
-    # Temperature field (actual temperature from model state)
-    # Reference state provides the hydrostatic pressure profile
-    # In the anelastic approximation, pressure ≈ reference pressure
-    p = model.dynamics.reference_state.pressure
+    p = dynamics_pressure(model.dynamics)
     T = model.temperature
     T₀ = surface_temperature
 
@@ -589,15 +591,15 @@ end
                                     lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
-    # RRTMGP uses (Nz+1, Nc), we use (i, j, k) for ZFaceField
+    # RRTMGP compute buffers are indexed (Nc, Nz+1), we use (i, j, k) for ZFaceField
     # Sign convention: upwelling positive, downwelling negative
     c = rrtmgp_column_index(i, j, grid.Nx)
 
     @inbounds begin
-        ℐ_lw_up[i, j, k] = lw_flux_up[k, c]
-        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, c]  # Negate for downward
+        ℐ_lw_up[i, j, k] = lw_flux_up[c, k]
+        ℐ_lw_dn[i, j, k] = -lw_flux_dn[c, k]  # Negate for downward
         ℐ_sw_up[i, j, k] = 0                   # Non-scattering gray optics has no upward SW
-        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[k, c]  # Negate for downward
+        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[c, k]  # Negate for downward
     end
 end
 

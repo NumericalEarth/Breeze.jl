@@ -100,9 +100,19 @@ make_pressure_correction!(model, Δt) = nothing
 Return the pressure field appropriate to the dynamical formulation, in Pa — the pressure
 entering the equation of state, buoyancy, and the thermodynamic tendencies.
 
-For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``.
-For compressible dynamics, this is the prognostic pressure field. The anomaly and total-pressure
-counterparts are [`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
+For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``,
+excluding the non-hydrostatic pressure anomaly that enforces the divergence constraint but does
+not perturb the thermodynamic state. For compressible dynamics, this is the diagnosed
+equation-of-state pressure. The anomaly and total-pressure counterparts are
+[`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
+
+This is the pressure every physics parameterization should read, including radiation. Call the
+accessor rather than reaching into `dynamics.reference_state` directly: which of the two the
+reference state *is* varies by formulation. On the anelastic core it is the thermodynamic
+pressure, and `dynamics_pressure` returns it. On the compressible core (flat or terrain) it is a
+pressure-gradient device built once from a fixed profile, it does not track the thermodynamic
+state, and several dynamics types carry none at all. [`total_density`](@ref) is the density
+counterpart.
 """
 function dynamics_pressure end
 
@@ -119,6 +129,20 @@ function pressure_anomaly end
 Return the total pressure (mean + anomaly) in Pa.
 """
 function total_pressure end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return pressure consistent with a prescribed temperature during thermodynamic initialization.
+
+The default retains [`dynamics_pressure`](@ref) (appropriate for anelastic/reference-pressure
+models, where pressure is not a function of the state being set). Compressible dynamics overrides
+this with the equation of state `p = ρ Rᵐ T`, avoiding a fixed-point error when density or
+composition was changed immediately before setting temperature.
+"""
+@inline function pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
+    return @inbounds dynamics_pressure(dynamics)[i, j, k]
+end
 
 #####
 ##### Density and pressure access interface
@@ -152,6 +176,27 @@ formulations with a single density (e.g. the anelastic reference density). `Comp
 overrides it with a diagnosed total-density field, distinct from the coupling density ρᵈ.
 """
 total_density(dynamics) = dynamics_density(dynamics)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the density ``ρ`` at `(i, j, k)` that mass fractions are referenced to, so that ``qˣ`` and
+``ρ`` give a partial pressure — the vapor pressure is ``pᵛ = ρ qᵛ Rᵛ T``.
+
+This is the *total* density, condensate loading included, not the gas-phase density ``ρᵈ + ρᵛ``:
+``Rᵐ(q) = qᵈ Rᵈ + qᵛ Rᵛ`` uses ``qᵈ = 1 - qᵛ - qˡ - qⁱ``, so ``p / (Rᵐ(q) T)`` returns the total
+and the two differ by ``1 - qˡ - qⁱ``. Total is required for consistency with
+`saturation_specific_humidity(T, ρ, …) = pᵛ⁺ / (ρ Rᵛ T)`, which references ``qᵛ⁺`` to the same
+``ρ``; mixing the two would break ``qᵛ / qᵛ⁺`` as the saturation ratio. The name is inherited and
+does not describe this.
+
+The default returns `total_density(dynamics)`. `AnelasticDynamics` overrides it because its
+`dynamics_density` is the *dry* reference profile ``ρᵣ(z)``, so the override rediagnoses the local
+moist total density at the reference pressure.
+"""
+@inline function gas_phase_density(i, j, k, dynamics, T, q, constants)
+    return @inbounds total_density(dynamics)[i, j, k]
+end
 
 """
     advecting_vertical_velocity(dynamics, velocities)

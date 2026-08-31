@@ -94,7 +94,7 @@ src/
 Breeze uses "formulations" for different equation sets. Currently `AnelasticDynamics` in conservation
 form (all prognostics are densities) with two thermodynamic formulations:
   - `LiquidIcePotentialTemperatureThermodynamics` — prognostic `ρθ`
-  - `StaticEnergyThermodynamics` — prognostic `ρe`
+  - `StaticEnergyThermodynamics` — prognostic `ρs`
 
 Planned: fully compressible formulation, `EntropyThermodynamics` (prognostic `ρη`).
 

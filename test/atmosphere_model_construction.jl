@@ -40,7 +40,7 @@ end
         @test occursin("thermodynamic_constants: ThermodynamicConstants{$FT}", shown_model)
         @test occursin("forcing: @NamedTuple{", shown_model)
         @test occursin("ρu::Returns{$FT}", shown_model)
-        @test occursin("ρe::Returns{$FT}", shown_model)
+        @test occursin("ρs::Returns{$FT}", shown_model)
 
         uᵍ(z) = -10
         vᵍ(z) = 0
@@ -79,18 +79,18 @@ end
             dynamics = AnelasticDynamics(reference_state)
             model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation)
 
-            # Test round-trip consistency: set θ, get ρe; then set ρe, get back θ
+            # Test round-trip consistency: set θ, get ρs; then set ρs, get back θ
             set!(model; θ = θ₀)
 
-            ρe₁ = Field(static_energy_density(model))
-            e₁ = Field(static_energy(model))
+            ρs₁ = Field(static_energy_density(model))
+            s₁ = Field(static_energy(model))
             ρθ₁ = Field(liquid_ice_potential_temperature_density(model))
             θ₁ = Field(liquid_ice_potential_temperature(model))
 
-            set!(model; ρe = ρe₁)
-            @test static_energy(model) ≈ e₁
+            set!(model; ρs = ρs₁)
+            @test static_energy(model) ≈ s₁
             @test liquid_ice_potential_temperature(model) ≈ θ₁
-            @test static_energy_density(model) ≈ ρe₁
+            @test static_energy_density(model) ≈ ρs₁
             @test liquid_ice_potential_temperature_density(model) ≈ ρθ₁
         end
     end

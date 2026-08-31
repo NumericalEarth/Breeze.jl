@@ -128,7 +128,7 @@ end
     @test ρqᵛ_final < ρqᵛ_initial
 end
 
-@testset "θ → e conversion in StaticEnergy model [$(FT)]" for FT in test_float_types()
+@testset "θ → s conversion in StaticEnergy model [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
     reference_state = ReferenceState(grid)

@@ -395,8 +395,8 @@ end
 # multi-substep stage. The vertical ∂z(Cᴸ(ρθ)′) part is always applied — the
 # vertical acoustic mode is solved implicitly every substep.
 @inline function ∇ᶻp′(i, j, k, grid,
-                                                dynamics::TerrainCompressibleDynamics,
-                                                ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
+                      dynamics::TerrainCompressibleDynamics,
+                      ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
     ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
     correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
                                                                             dynamics, ρθ′, Πᴸ, γRᵐᴸ)
@@ -415,12 +415,12 @@ end
     return ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
-@inline function slope_x_times_∂z_linearized_pressure(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ)
+@inline function slope_x_times_∂z_linearized_pressure(i, j, k, grid::TerrainFollowingGrid, ρθ′, Πᴸ, γRᵐᴸ)
     slope = terrain_slope_x_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
-@inline function slope_y_times_∂z_linearized_pressure(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ)
+@inline function slope_y_times_∂z_linearized_pressure(i, j, k, grid::TerrainFollowingGrid, ρθ′, Πᴸ, γRᵐᴸ)
     slope = terrain_slope_y_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 end
@@ -447,7 +447,7 @@ end
     return ∂y_p′ - correction
 end
 
-@inline function terrain_vertical_transport_momentum(i, j, k, grid,
+@inline function terrain_vertical_transport_momentum(i, j, k, grid::TerrainFollowingGrid,
                                                      ρu, ρv, ρw)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
@@ -466,22 +466,29 @@ end
                                                ρu_stage, ρv_stage, ρw_stage)
 end
 
+# Convert the substepped contravariant momentum ρw̃ᵐ⁺ = ρw̃ᴸ + ρw̃′ back to Cartesian ρw.
+# The stage-base horizontal momenta cancel algebraically, since ℑ is linear:
+#
+#   ρw = (ρw̃ᴸ + ρw̃′) + slopeₓ ℑ(ρuᴸ + ρu′) + slopeᵧ ℑ(ρvᴸ + ρv′)
+#      = (ρwᴸ − slopeₓ ℑρuᴸ − slopeᵧ ℑρvᴸ) + ρw̃′ + slopeₓ ℑ(ρuᴸ + ρu′) + slopeᵧ ℑ(ρvᴸ + ρv′)
+#      = ρwᴸ + ρw̃′ + slopeₓ ℑρu′ + slopeᵧ ℑρv′
+#
+# with ρw̃ᴸ = `terrain_vertical_transport_momentum` of the same stage-entry momenta that
+# `_initialize_terrain_vertical_momentum_perturbation!` used as the base for ρw̃′. The base ρw
+# arrives as a value rather than a field because `_recover_full_state!` writes the same momentum
+# fields it reads as the stage base; keeping them out of this signature keeps them out of reach
+# of a stencil.
 @inline function acoustic_recovered_vertical_momentum(i, j, k, grid,
                                                       dynamics::TerrainCompressibleDynamics,
-                                                      ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw̃′)
+                                                      ρwᴸ_ccf, ρu′, ρv′, ρw̃′)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
 
-    ρuᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, total_momentum, ρuᴸ, ρu′)
-    ρvᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, total_momentum, ρvᴸ, ρv′)
-    ρw̃_stage = transport_ρw(i, j, k, grid, dynamics,
-                                                           ρuᴸ, ρvᴸ, ρwᴸ)
-    @inbounds ρw̃ᵐ⁺ = ρw̃_stage + ρw̃′[i, j, k]
+    ρu′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ρu′)
+    ρv′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ρv′)
 
-    return ρw̃ᵐ⁺ + slope_x * ρuᶜᶜᶠ + slope_y * ρvᶜᶜᶠ
+    @inbounds return (ρwᴸ_ccf + ρw̃′[i, j, k] + slope_x * ρu′ᶜᶜᶠ + slope_y * ρv′ᶜᶜᶠ)
 end
-
-@inline total_momentum(i, j, k, grid, mᴸ, m′) = @inbounds mᴸ[i, j, k] + m′[i, j, k]
 
 function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubstepper,
                                                    model::TerrainCompressibleModel,
@@ -510,7 +517,7 @@ end
 @kernel function _assemble_terrain_slow_vertical_momentum_tendency!(Gˢρw̃,
                                                                     Gⁿρu, Gⁿρv, Gⁿρw,
                                                                     pᴸ, ρᴸ, pᵣ, ρᵣ,
-                                                                    grid, dynamics, g,
+                                                                    grid::TerrainFollowingGrid, dynamics, g,
                                                                     vertical_pressure_tendency_factor)
     i, j, k = @index(Global, NTuple)
 
@@ -599,12 +606,12 @@ end
 ##### `terrain_slope_{x,y}_ccf`; they differ only in whether the slope multiplies
 ##### inside or outside the interpolation stencil.
 
-@inline function slope_x_times_∂z(i, j, k, grid, p)
+@inline function slope_x_times_∂z(i, j, k, grid::TerrainFollowingGrid, p)
     slope = terrain_slope_x_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, p)
 end
 
-@inline function slope_x_times_∂z_p′(i, j, k, grid, p, pᵣ)
+@inline function slope_x_times_∂z_p′(i, j, k, grid::TerrainFollowingGrid, p, pᵣ)
     slope = terrain_slope_x_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, perturbation_pressure, p, pᵣ)
 end
@@ -640,12 +647,12 @@ end
 
 ##### Slope-inside-interpolation: ℑz(ℑy(slope * ∂z(p')))
 
-@inline function slope_y_times_∂z(i, j, k, grid, p)
+@inline function slope_y_times_∂z(i, j, k, grid::TerrainFollowingGrid, p)
     slope = terrain_slope_y_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, p)
 end
 
-@inline function slope_y_times_∂z_p′(i, j, k, grid, p, pᵣ)
+@inline function slope_y_times_∂z_p′(i, j, k, grid::TerrainFollowingGrid, p, pᵣ)
     slope = terrain_slope_y_ccf(i, j, k, grid)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, perturbation_pressure, p, pᵣ)
 end

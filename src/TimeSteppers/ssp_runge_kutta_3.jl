@@ -1,7 +1,7 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields
-using Oceananigans.Advection: needs_implicit_solver
+using Oceananigans.BoundaryConditions: needs_implicit_solver
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick_stage!,
@@ -83,6 +83,7 @@ Shu, C.-W., & Osher, S. (1988). Efficient implementation of essentially non-osci
 function SSPRungeKutta3(grid, prognostic_fields;
                         dynamics = nothing,
                         implicit_solver::TI = nothing,
+                        cache_advecting_state = false,   # accepted for TimeStepper-call uniformity; unused
                         Gⁿ::TG = map(similar, prognostic_fields),
                         U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 
@@ -115,17 +116,17 @@ function ssp_rk3_substep!(model, Δt, α)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-    Δt_FT = kernel_time_step(arch, grid, Δt)
+    kernel_Δt = kernel_time_step(arch, grid, Δt)
 
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt_FT, α)
+        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, kernel_Δt, α)
 
         # Field index for implicit solver:
         # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
-        # - indices 4+ are scalars (ρθ/ρe, ρqᵗ, microphysics, tracers)
+        # - indices 4+ are scalars (ρθ/ρs, ρqᵗ, microphysics, tracers)
         # For scalars, we use Val(i - 3) to get Val(1), Val(2), etc.
         field_index = Val(i - 3)
         advection = field_advection_scheme(model.advection, names[i])

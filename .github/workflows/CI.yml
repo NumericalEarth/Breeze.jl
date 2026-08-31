@@ -144,6 +144,10 @@ jobs:
               # concurrent jobs, some of them reaching a large memory usage.  We reduce the
               # number of jobs to avoid memory issues.
               TEST_ARGS+=(--jobs=$(($(nproc) - 1)))
+          elif [[ ${{ matrix.os }} == ubuntu-* ]] && [[ ${{ matrix.version }} == 'min' ]]; then
+              # With Julia v1.11 we have observed somewhat frequent OOM's in `turbulence_closures`
+              # tests, reduce number of jobs to reduce resources contention.
+              TEST_ARGS+=(--jobs=$(($(nproc) - 1)))
           fi
 
           if [[ ${{ runner.os }} == "macOS" ]]; then

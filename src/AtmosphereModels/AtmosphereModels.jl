@@ -11,6 +11,7 @@ export
     # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,
+    total_density,
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
@@ -48,13 +49,16 @@ export
     WarmRainState,
     microphysical_state,
     microphysical_tendency,
+    microphysical_tendencies,
     compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
     specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
+    aerosol_field_names,
     initial_aerosol_number,
+    initial_aerosol_number_density,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     materialize_atmosphere_model_boundary_conditions,
@@ -80,6 +84,9 @@ export
 
     # Cloud effective radius
     ConstantRadiusParticles,
+
+    # Microphysics interface
+    prognostic_field_names,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
