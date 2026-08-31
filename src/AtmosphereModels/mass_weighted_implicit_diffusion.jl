@@ -77,16 +77,16 @@ BoundaryConditions.needs_implicit_solver(a::MassWeightedImplicitDiffusion) =
 @inline mass_weighting_density(ρᵈ, ρ) = ρᵈ
 
 # The implicit-advection contribution, which is present only for adaptive-implicit schemes.
-@inline mass_weighted_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ) = zero(grid)
-@inline mass_weighted_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ) = zero(grid)
-@inline mass_weighted_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ) = zero(grid)
+@inline mass_weighted_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ) = zero(grid)
+@inline mass_weighted_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ) = zero(grid)
+@inline mass_weighted_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ) = zero(grid)
 
-@inline mass_weighted_advection_upper_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ρ) =
-    implicit_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ)
-@inline mass_weighted_advection_lower_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ρ) =
-    implicit_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ)
-@inline mass_weighted_advection_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ρ) =
-    implicit_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ)
+@inline mass_weighted_advection_upper_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ℓz, ρ) =
+    implicit_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+@inline mass_weighted_advection_lower_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ℓz, ρ) =
+    implicit_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+@inline mass_weighted_advection_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ℓz, ρ) =
+    implicit_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
 
 # As with the advection coefficients, `ρ` is interpolated in z only, so these are exact for
 # a horizontally-uniform density (the anelastic reference state) at all three z-Center locations.
@@ -138,7 +138,7 @@ end
                                          advection::MassWeightedImplicitDiffusion, w, ρ, args...)
     ρᵈ = mass_weighting_density(advection.diffusion_density, ρ)
     du_diff = mass_weighted_ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρᵈ)
-    du_adv  = mass_weighted_advection_upper_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
+    du_adv  = mass_weighted_advection_upper_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
     return du_diff + du_adv
 end
 
@@ -147,17 +147,17 @@ end
                                          advection::MassWeightedImplicitDiffusion, w, ρ, args...)
     ρᵈ = mass_weighting_density(advection.diffusion_density, ρ)
     dl_diff = mass_weighted_ivd_lower_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρᵈ)
-    dl_adv  = mass_weighted_advection_lower_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
+    dl_adv  = mass_weighted_advection_lower_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
     return dl_diff + dl_adv
 end
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
                                          advection::MassWeightedImplicitDiffusion, w, ρ,
-                                         top_bc=nothing, bottom_bc=nothing, immersed_bc=nothing)
+                                         top_bc, bottom_bc, immersed_bc, args...)
     ρᵈ = mass_weighting_density(advection.diffusion_density, ρ)
     d_diff = mass_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρᵈ)
-    d_adv  = mass_weighted_advection_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
+    d_adv  = mass_weighted_advection_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
     d_bc   = boundary_flux_diagonal(i, j, k, grid, ℓx, ℓy, ℓz, Δt, clk, fields, top_bc, bottom_bc, immersed_bc)
     return d_diff + d_adv + d_bc
 end

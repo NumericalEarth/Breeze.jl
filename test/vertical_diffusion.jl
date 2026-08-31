@@ -310,7 +310,7 @@ end
                    VerticallyImplicitDiffusionDiagonal())
 
         weighted   = coefficient(marker, scheme, w, ρ, bcs...)   # what implicit_step! passes
-        unweighted = coefficient(marker)                          # the diffusion-only fallback
+        unweighted = coefficient(marker, nothing, w, ρ, bcs...)  # Oceananigans' own method
 
         # A method must exist for the full argument list, and it must be the weighted one: over a
         # 4 km column ρ varies ~40%, so the weighted coefficient cannot coincide with the unweighted.
