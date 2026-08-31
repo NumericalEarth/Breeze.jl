@@ -291,7 +291,7 @@ end
     set!(model; θ = 300, ρc = (x, y, z) -> cospi(z / 4000))
 
     ρ = Breeze.AtmosphereModels.total_density(model.dynamics)
-    scheme = Breeze.AtmosphereModels.implicit_step_scheme(nothing, :ρc)
+    scheme = Breeze.AtmosphereModels.implicit_step_advection(nothing, :ρc)
     w = model.velocities.w
     clock = model.clock
     mf = Oceananigans.fields(model)

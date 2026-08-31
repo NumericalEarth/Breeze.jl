@@ -100,9 +100,9 @@ end
 #
 # `diffusion_density` weights the diffusion half when it must differ from the density the solve is
 # called with, which happens only under the acoustic substepper (see `MassWeightedImplicitDiffusion`).
-implicit_step_scheme(advection, name::Symbol, diffusion_density=nothing) =
+implicit_step_advection(advection, name::Symbol, diffusion_density=nothing) =
     name === :ρw ? advection : MassWeightedImplicitDiffusion(advection, diffusion_density)
-implicit_step_scheme(advection::AIVA, name::Symbol, diffusion_density=nothing) =
+implicit_step_advection(advection::AIVA, name::Symbol, diffusion_density=nothing) =
     name === :ρw ? VerticalMomentumImplicitAdvection(advection) :
                    MassWeightedImplicitDiffusion(advection, diffusion_density)
 
