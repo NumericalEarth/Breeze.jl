@@ -10,10 +10,7 @@
 """
 $(TYPEDSIGNATURES)
 
-Return the day of year (1-365/366) for a given DateTime.
-
-Accepts any `AbstractDateTime`, not just `Dates.DateTime`, so that datetime types whose fields are
-traced numbers (for example Reactant's `ReactantDateTime`) can flow through the solar geometry.
+Return the day of year (1-365/366) for a given `AbstractDateTime`.
 """
 day_of_year(dt::AbstractDateTime) = Dates.dayofyear(dt)
 

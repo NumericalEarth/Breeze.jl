@@ -1,34 +1,11 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
-#####
-##### Tests for CelestialMechanics solar geometry
-#####
-##### Two things are checked:
-#####
-##### 1. Known-value regression for `Dates.DateTime`, so the numbers themselves are pinned.
-##### 2. That the solar geometry accepts ANY `Dates.AbstractDateTime`, not only the concrete
-#####    `Dates.DateTime`. Datetime types that carry non-`Int64` fields — Reactant's
-#####    `ReactantDateTime`, whose milliseconds are a traced number — are `AbstractDateTime`s, and
-#####    before the annotations were widened they hit a `MethodError` here rather than anything
-#####    intrinsic to tracing.
-#####
-##### The second group deliberately uses a locally defined `AbstractDateTime` rather than Reactant,
-##### so it tests the dispatch contract with no extra dependency and runs everywhere.
-#####
-
 using Breeze
 using Breeze.CelestialMechanics: cos_solar_zenith_angle, day_of_year, hour_angle,
                                  solar_declination, equation_of_time
 using Dates
 using Dates: AbstractDateTime, DateTime, UTInstant, Millisecond
 using Test
-
-#####
-##### A minimal `AbstractDateTime` that is NOT `Dates.DateTime`
-#####
-##### Mirrors the shape of Reactant's `ReactantDateTime`: a wrapper whose millisecond field is
-##### parameterized, so it cannot be a `Dates.DateTime` even though it means the same instant.
-#####
 
 struct WrappedDateTime{I} <: AbstractDateTime
     instant :: UTInstant{Millisecond}
@@ -37,11 +14,6 @@ end
 
 WrappedDateTime(dt::DateTime) = WrappedDateTime(dt.instant, nothing)
 
-# The accessors the solar geometry actually calls. `Dates` defines these on the concrete `DateTime`
-# rather than on `AbstractDateTime` — `dayofyear` routes through `Dates.days`, and `hour`/`minute`/
-# `second` are `DateTime` methods — so a new `AbstractDateTime` has to supply them. Reactant's
-# `ReactantDateTime` does the same thing in its own extension. Delegating keeps this test about
-# DISPATCH (does the widened signature accept a non-DateTime?) rather than about date arithmetic.
 _as_datetime(dt::WrappedDateTime) = DateTime(dt.instant)
 
 Dates.value(dt::WrappedDateTime) = dt.instant.periods.value
