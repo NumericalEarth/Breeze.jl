@@ -37,7 +37,7 @@ features:
     details: For subgrid-scale mixing
   - icon: 🌍
     title: Surface physics
-    details: Coriolis forces, bulk drag, heat and moisture fluxes
+    details: Bulk drag, heat and moisture fluxes
   - icon: 🎈
     title: Kinematic driver and parcel model
     details: For rapid prototyping of microphysics and radiation schemes
