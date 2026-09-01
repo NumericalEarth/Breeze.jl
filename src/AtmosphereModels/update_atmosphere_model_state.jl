@@ -240,7 +240,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.microphysical_fields)
+    fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
     fill_halo_regions!(model.formulation)
 
     return nothing
