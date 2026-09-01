@@ -146,7 +146,7 @@ using Test
 end
 
 #####
-##### Mass-flux weighting of the implicit solve
+##### Density weighting of the implicit solve
 #####
 ##### The prognostics are density weighted (`ρc`), and the explicit flux divergence forms
 ##### `∂z(ρ⁰ κ ∂z c)` on the specific variable. The implicit solve must form the same operator.
@@ -156,7 +156,7 @@ end
 ##### either way; these use a 4 km column, over which it varies ≈ 40%.
 #####
 
-@testset "Mass-flux weighting of the vertically implicit solve [$(FT)]" for FT in test_float_types()
+@testset "Density weighting of the vertically implicit solve [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 32
     Lz = FT(4000)
@@ -284,7 +284,7 @@ end
 end
 
 #####
-##### Mass-flux weighting at z-Faces (`ρw`)
+##### Density weighting at z-Faces (`ρw`)
 #####
 ##### `ρw` is the one prognostic whose specific variable `w = ρw / ρᶠ` is reconstructed at faces
 ##### while its stress `ρ ν ∂z w` lives at centers — the opposite of a tracer — so its rows carry
@@ -293,7 +293,7 @@ end
 ##### a trajectory comparison would say nothing about the operator.
 #####
 
-@testset "Mass-flux weighting of the z-Face implicit solve [$(FT)]" for FT in test_float_types()
+@testset "Density weighting of the z-Face implicit solve [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 32
     Lz = FT(4000)
@@ -450,7 +450,7 @@ end
     end
 end
 
-@testset "Mass-weighted get_coefficient wins dispatch [$(FT)]" for FT in test_float_types()
+@testset "Density-weighted get_coefficient wins dispatch [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     grid = RectilinearGrid(default_arch; size=(1, 1, 16), x=(0, 100), y=(0, 100), z=(0, 4000),
