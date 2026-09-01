@@ -51,8 +51,7 @@ end
 #
 # `diffusion_density` weights the diffusion half when it must differ from the density the solve is
 # called with, which happens only under the acoustic substepper (see `MassWeightedImplicitOperator`).
-implicit_step_scheme(advection, diffusion_density=nothing) =
-    MassWeightedImplicitOperator(advection, diffusion_density)
+implicit_step_scheme(advection, diffusion_density=nothing) = MassWeightedImplicitOperator(advection, diffusion_density)
 
 # Density weighting the advective flux of each prognostic. Momentum and the thermodynamic
 # variable are carried by the coupling density (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`; see `dynamics_density`),
