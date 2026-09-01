@@ -33,6 +33,7 @@ using Breeze.Thermodynamics:
     saturation_vapor_pressure,
     equilibrium_saturation_specific_humidity,
     PlanarLiquidSurface,
+    DrySurface,
     # Phase equilibrium types
     WarmPhaseEquilibrium,
     equilibrated_surface
