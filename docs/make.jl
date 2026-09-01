@@ -4,6 +4,7 @@ using Documenter
 using DocumenterCitations
 using Pkg.Artifacts: ensure_artifact_installed
 using DocumenterCodeBlocks: CodeBlocks
+using DocumenterLandingPage: LandingPage
 
 using CairoMakie
 CairoMakie.activate!(type = "png")
@@ -174,7 +175,11 @@ makedocs(
     ;
     modules,
     sitename = "Breeze",
-    plugins = [bib, CodeBlocks(; line_counter=:named)],
+    plugins = [
+        bib,
+        CodeBlocks(; line_counter=:named),
+        LandingPage(),
+    ],
     format = Documenter.HTML(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB

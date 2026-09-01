@@ -1,24 +1,56 @@
-# Breeze.jl
+```@raw html
+---
+layout: home
 
-Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs.
+hero:
+  name: Breeze.jl
+  tagline: Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs
+  actions:
+    - theme: brand
+      text: Quick Start
+      link: "#Quick-Start"
+    - theme: alt
+      text: View on GitHub
+      link: https://github.com/NumericalEarth/Breeze.jl
+
+features:
+  - icon: 🌀
+    title: Anelastic dynamics
+    details: With a pressure Poisson solver that filters sound waves
+  - icon: 🔊
+    title: Compressible dynamics
+    details: With split-explicit acoustic substepping (horizontally explicit, vertically implicit) using SSP-RK3 or Wicker-Skamarock RK3
+  - icon: 💧
+    title: Moist thermodynamics
+    details: With liquid-ice potential temperature and static energy formulations
+  - icon: ☁️
+    title: Cloud microphysics
+    details: Saturation adjustment, Kessler, one- and two-moment bulk schemes via [`CloudMicrophysics.jl`](https://github.com/CliMA/CloudMicrophysics.jl)
+  - icon: ☀️
+    title: Radiative transfer
+    details: Gray, clear-sky, and all-sky solvers via [`RRTMGP.jl`](https://github.com/CliMA/RRTMGP.jl)
+  - icon: 🦾
+    title: High-order advection
+    details: Including bounds-preserving WENO schemes
+  - icon: 🌪️
+    title: LES turbulence closures
+    details: For subgrid-scale mixing
+  - icon: 🌍
+    title: Surface physics
+    details: Bulk drag, heat and moisture fluxes
+  - icon: 🎈
+    title: Kinematic driver and parcel model
+    details: For rapid prototyping of microphysics and radiation schemes
+  - icon: ⚡
+    title: GPU-first
+    details: Use `GPU()` to run _very fast_ on NVIDIA, AMD, Metal, and Intel GPUs
+---
+```
 
 Breeze is a library for simulating atmospheric flows and weather phenomena, such as clouds and hurricanes, on both CPUs and GPUs.
 Built on [Oceananigans](https://github.com/CliMA/Oceananigans.jl), Breeze extends its grids, solvers, and advection schemes with atmospheric dynamics, thermodynamics, microphysics, and radiation.
 
 Learn more in the [examples](literated/dry_thermal_bubble.md) or get in touch on the [NumericalEarth Slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3pwpvky4k-XX7RkgQgHLIUt~wtwGXN~Q) or [GitHub discussions](https://github.com/NumericalEarth/Breeze.jl/discussions).
-
-## Features
-
-- **Anelastic dynamics** with a pressure Poisson solver that filters sound waves
-- **Compressible dynamics** with split-explicit acoustic substepping (horizontally explicit, vertically implicit) using SSP-RK3 or Wicker-Skamarock RK3
-- **Moist thermodynamics** with liquid-ice potential temperature and static energy formulations
-- **Cloud microphysics**: saturation adjustment, Kessler, one- and two-moment bulk schemes via [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl)
-- **Radiative transfer**: gray, clear-sky, and all-sky solvers via [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl)
-- **High-order advection** including bounds-preserving WENO schemes
-- **LES turbulence closures** for subgrid-scale mixing
-- **Surface physics**: Coriolis forces, bulk drag, heat and moisture fluxes
-- **Kinematic driver and parcel model** for rapid prototyping of microphysics and radiation schemes
-- **GPU-first**: use `GPU()` to run _very fast_ on NVIDIA GPUs
 
 ## Roadmap and a call to action
 
@@ -112,7 +144,7 @@ The two packages share a common philosophy: fast, flexible, GPU-native Julia cod
 To learn these foundational components of Breeze, please see the [Oceananigans documentation](https://clima.github.io/OceananigansDocumentation/stable/).
 
 If you're familiar with Oceananigans, you'll feel right at home with Breeze.
-If you're new to both, Breeze is a great entry point—and the skills you develop transfer directly to ocean and climate modeling with Oceananigans and [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl).
+If you're new to both, Breeze is a great entry point—and the skills you develop transfer directly to ocean and climate modeling with Oceananigans and [NumericalEarth.jl](https://github.com/NumericalEarth/NumericalEarth.jl).
 
 ## Citing
 
