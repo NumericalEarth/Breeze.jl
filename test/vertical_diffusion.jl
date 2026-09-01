@@ -360,7 +360,7 @@ end
             # ρ must vary enough over the column for the weighting to be the effect under test.
             @test ρᶜ[1] / ρᶜ[Nz] > 1.4
 
-            scheme = Breeze.AtmosphereModels.implicit_step_advection(nothing)
+            scheme = Breeze.AtmosphereModels.implicit_step_scheme(nothing)
             ρw = model.momentum.ρw
             bcs = (ρw.boundary_conditions.top, ρw.boundary_conditions.bottom, ρw.boundary_conditions.immersed)
 
@@ -435,7 +435,7 @@ end
 
         implicit_step!(q, model.timestepper.implicit_solver, model.closure, model.closure_fields,
                        nothing, model.clock, Oceananigans.fields(model), Δt,
-                       Breeze.AtmosphereModels.implicit_step_advection(nothing), nothing, ρ)
+                       Breeze.AtmosphereModels.implicit_step_scheme(nothing), nothing, ρ)
 
         after = Array(interior(q, 1, 1, :))
         @test after != before
@@ -460,7 +460,7 @@ end
     set!(model; θ = 300, ρc = (x, y, z) -> cospi(z / 4000))
 
     ρ = Breeze.AtmosphereModels.total_density(model.dynamics)
-    scheme = Breeze.AtmosphereModels.implicit_step_advection(nothing)
+    scheme = Breeze.AtmosphereModels.implicit_step_scheme(nothing)
     w = model.velocities.w
     clock = model.clock
     mf = Oceananigans.fields(model)
