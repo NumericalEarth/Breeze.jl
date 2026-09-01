@@ -35,7 +35,7 @@ function validate_tracers(tracers::Tuple)
 end
 
 mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
-                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
+                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Sed, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -54,6 +54,7 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     forcing :: Frc
     microphysics :: Mic
     microphysical_fields :: Cnd
+    sedimentation_constituents :: Sed
     timestepper :: Tst
     closure :: Cls
     closure_fields :: Cfs
@@ -216,14 +217,34 @@ function AtmosphereModel(grid;
         velocities = materialize_velocities(velocities, grid)
     end
 
+    moisture_name = moisture_prognostic_name(microphysics)
+
+    # The closure's scalars — thermodynamic density, moisture, microphysical prognostic fields, user
+    # tracers — in the order the vertically-implicit solve indexes them (see `closure_scalar_index`).
+    # Resolved here, ahead of the closure, because the advection schemes below are built from these
+    # names and the sedimentation constituents need those schemes.
+    scalar_names = closure_scalar_names(formulation, microphysics, tracer_names)
+
+    # Generate tracer advection scheme for each tracer
+    # scalar_advection is always a NamedTuple after validate_tracer_advection (either user's partial NamedTuple or empty)
+    # with_tracers fills in missing names using default_generator
+    default_generator(names, initial_tuple) = default_scalar_advection
+    scalar_advection_tuple = with_tracers(scalar_names, scalar_advection, default_generator, with_velocities=false)
+    momentum_advection_tuple = (; momentum = momentum_advection)
+    advection = merge(momentum_advection_tuple, scalar_advection_tuple)
+    materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
+
     # Microphysical fields, including a prognostic aerosol reservoir `ρnᵃ`, start at zero. `ρnᵃ`
     # holds a ρ-weighted count, so it is filled in by `set_default_aerosol_number!` at the end of
     # this constructor, once the dynamics has been materialized and has a density to weight by.
+    # Sedimentation constituents carry each tracer's materialized advection scheme, so the
+    # advection schemes must exist first.
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
+    sedimentation_constituents = materialize_sedimentation_constituents(dynamics, microphysics, microphysical_fields,
+                                                                        materialized_advection)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
-    moisture_name = moisture_prognostic_name(microphysics)
     if moisture_density isa DefaultValue
         moisture_density = CenterField(grid, boundary_conditions=regularized_boundary_conditions[moisture_name])
     end
@@ -271,20 +292,8 @@ function AtmosphereModel(grid;
                                        velocities, dynamics, formulation, microphysics,
                                        specific_prognostic_moisture)
 
-    # The closure's scalars — thermodynamic density, moisture, microphysical prognostic fields, user
-    # tracers — in the order the vertically-implicit solve indexes them (see `closure_scalar_index`)
-    scalar_names = closure_scalar_names(formulation, microphysics, tracer_names)
     closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
-
-    # Generate tracer advection scheme for each tracer
-    # scalar_advection is always a NamedTuple after validate_tracer_advection (either user's partial NamedTuple or empty)
-    # with_tracers fills in missing names using default_generator
-    default_generator(names, initial_tuple) = default_scalar_advection
-    scalar_advection_tuple = with_tracers(scalar_names, scalar_advection, default_generator, with_velocities=false)
-    momentum_advection_tuple = (; momentum = momentum_advection)
-    advection = merge(momentum_advection_tuple, scalar_advection_tuple)
-    materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
 
     # Move microphysics lookup tables to the grid architecture (CPU → GPU)
     microphysics = on_architecture(arch, microphysics)
@@ -307,6 +316,7 @@ function AtmosphereModel(grid;
                             forcing,
                             microphysics,
                             microphysical_fields,
+                            sedimentation_constituents,
                             timestepper,
                             closure,
                             closure_fields,

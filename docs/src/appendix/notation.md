@@ -64,6 +64,9 @@ The following table also uses a few conventions that suffuse the source code and
 | ``qⁱ``                              | `qⁱ`   | `AM.microphysical_fields.qⁱ`        | Ice mass fraction                                                              |
 | ``qᶜˡ``                             | `qᶜˡ`  | `AM.microphysical_fields.qᶜˡ`       | Cloud liquid mass fraction                                                     |
 | ``qᶜⁱ``                             | `qᶜⁱ`  | `AM.microphysical_fields.qᶜⁱ`       | Cloud ice mass fraction                                                        |
+| ``q^f``                             | `qᶠ`   | `AM.microphysical_fields.qᶠ`        | Rime mass fraction (P3); a portion of ``qⁱ``, not additional mass              |
+| ``b^f``                             | `bᶠ`   | `AM.microphysical_fields.bᶠ`        | Rime volume per unit mass (P3), m³/kg                                          |
+| ``q^{wi}``                          | `qʷⁱ`  | `AM.microphysical_fields.qʷⁱ`       | Liquid mass fraction carried on ice particles (P3); counted in ``qˡ``, but sediments with the ice |
 | ``qʳ``                              | `qʳ`   |                                     | Rain mass fraction                                                             |
 | ``qˢ``                              | `qˢ`   |                                     | Snow mass fraction                                                             |
 | ``ρqᵛ``                             | `ρqᵛ`  |                                     | Vapor density                                                                  |
@@ -89,6 +92,14 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathbb{W}^{ci}``                 | `𝕎ᶜⁱ`  |                                     | Terminal velocity of cloud ice (scalar, positive downward)                     |
 | ``\mathbb{W}^r``                    | `𝕎ʳ`   |                                     | Terminal velocity of rain (scalar, positive downward)                          |
 | ``\mathbb{W}^s``                    | `𝕎ˢ`   |                                     | Terminal velocity of snow (scalar, positive downward)                          |
+| ``w^{cl}``                          | `wᶜˡ`  |                                     | Cloud liquid sedimentation velocity field (vertical component; negative for downward motion) |
+| ``w^{ci}``                          | `wᶜⁱ`  |                                     | Cloud ice sedimentation velocity field (vertical component; negative for downward motion) |
+| ``w^r``                             | `wʳ`   |                                     | Rain sedimentation velocity field (vertical component; negative for downward motion) |
+| ``w^s``                             | `wˢ`   |                                     | Snow sedimentation velocity field (vertical component; negative for downward motion) |
+| ``w^i``                             | `wⁱ`   |                                     | Ice mass-weighted sedimentation velocity field (P3; negative for downward motion) |
+| ``w^{cl}_n``                        | `wᶜˡₙ` |                                     | Cloud liquid number-weighted sedimentation velocity field (negative for downward motion) |
+| ``w^r_n``                           | `wʳₙ`  |                                     | Rain number-weighted sedimentation velocity field (negative for downward motion) |
+| ``w^i_n``                           | `wⁱₙ`  |                                     | Ice number-weighted sedimentation velocity field (P3; negative for downward motion) |
 | ``qᵛ⁺``                             | `qᵛ⁺`  |                                     | Saturation specific humidity over a surface                                    |
 | ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation specific humidity over a planar liquid surface                      |
 | ``qᵛ⁺ⁱ``                            | `qᵛ⁺ⁱ` |                                     | Saturation specific humidity over a planar ice surface                         |

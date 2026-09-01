@@ -28,6 +28,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyMod
         model.forcing.ρs,
         model.advection.ρs,
         radiation_flux_divergence(model.radiation),
+        model.sedimentation_constituents,
         common_args...,
         model.temperature)
 
@@ -41,6 +42,7 @@ end
                                         ρs_forcing,
                                         advection,
                                         radiation_flux_divergence_field,
+                                        sedimenting_constituents,
                                         dynamics,
                                         formulation,
                                         constants,
@@ -66,9 +68,35 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
+             - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, velocities.w, dynamics,
+                                                   energy_condensate_content, constants, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              + ρs_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
+end
+
+#####
+##### Sedimentation transport of the condensate part of ρs
+#####
+#
+# The content per unit falling mass of phase x is χˣ = ∂s/∂qˣ at fixed T, with the dry mass
+# fraction qᵈ = 1 − qᵛ − qˡ − qⁱ taking up the departed mass: sedimentation alone must not
+# change the temperature. From s = cᵖᵐ T + g z − ℒˡᵣ qˡ − ℒⁱᵣ qⁱ,
+#
+#   χˣ = (cˣ − cᵖᵈ) T − ℒˣᵣ ,
+#
+# the latent deficit plus the sensible heat of the condensate relative to the dry air that
+# replaces it; the geopotential is independent of the composition and drops out. This is exact
+# for the anelastic core (fixed total density) and accurate to O(q) for the compressible core,
+# where the whole mixture rather than dry air takes up the departed mass. The frictional heating
+# from the fall (g wˣ qˣ) is neglected. The shared `condensate_sedimentation_divergence`
+# evaluates the content in each flux's upwind cell and owns the discretization.
+@inline function energy_condensate_content(i, j, k, grid, constants, temperature_field)
+    @inbounds T = temperature_field[i, j, k]
+    cᵖᵈ = constants.dry_air.heat_capacity
+    χˡ = (constants.liquid.heat_capacity - cᵖᵈ) * T - constants.liquid.reference_latent_heat
+    χⁱ = (constants.ice.heat_capacity - cᵖᵈ) * T - constants.ice.reference_latent_heat
+    return χˡ, χⁱ
 end
 
 #####

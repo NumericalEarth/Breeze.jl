@@ -3,17 +3,21 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Test
 
 using Breeze
-using Breeze.AtmosphereModels: AtmosphereModels
+using Breeze.AtmosphereModels: AtmosphereModels, condensate_phase, microphysical_velocities,
+                               sedimentation_velocity
+using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState
 using Breeze.Microphysics.PredictedParticleProperties: AerosolActivation,
                                                        AerosolMode,
                                                        PredictedParticlePropertiesMicrophysics
 using Breeze.ParcelModels: step_parcel_state!
+using GPUArraysCore: @allowscalar
 
 using Oceananigans: Bounded, CPU, Center, CenterField, Face, Field, Flat, GridFittedBottom,
                      ImmersedBoundaryGrid, RectilinearGrid, compute!, set!, time_step!
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Oceananigans.Fields: interior, location
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: update_state!
 
 @testset "P3 atmosphere integration" begin
@@ -699,5 +703,151 @@ using Oceananigans.TimeSteppers: update_state!
 
         @test all(isfinite, Array(interior(μ.ρqᶜˡ)))
         @test all(isfinite, Array(interior(model.moisture_density)))
+    end
+
+    @testset "P3 sedimentation velocity interface" begin
+        FT = Float64
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4), extent = (100, 100, 100))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = FT(101325),
+                                         potential_temperature = FT(250))
+        dynamics = AnelasticDynamics(reference_state)
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                microphysics = p3)
+        μ = model.microphysical_fields
+
+        # Every additive condensate mass declares the phase of the enthalpy it carries. Liquid
+        # on ice falls with the ice (below) but is liquid: no fusion enthalpy has been released
+        # for it. Rime mass `ρqᶠ` lives inside the dry ice mass `ρqⁱ` and rime volume `ρbᶠ` is
+        # an ice property, so neither is a condensate mass and neither carries a phase.
+        @test condensate_phase(p3, Val(:ρqᶜˡ)) === Val(:liquid)
+        @test condensate_phase(p3, Val(:ρqʳ)) === Val(:liquid)
+        @test condensate_phase(p3, Val(:ρqʷⁱ)) === Val(:liquid)
+        @test condensate_phase(p3, Val(:ρqⁱ)) === Val(:ice)
+        @test isnothing(condensate_phase(p3, Val(:ρqᶠ)))
+        @test isnothing(condensate_phase(p3, Val(:ρbᶠ)))
+        @test isnothing(condensate_phase(p3, Val(:ρnʳ)))
+
+        # Every sedimenting prognostic reaches the advection operator through the generic
+        # `microphysical_velocities` wrapper, which reads `sedimentation_velocity`.
+        for (name, speed) in ((:ρqᶜˡ, :wᶜˡ), (:ρqʳ, :wʳ), (:ρnʳ, :wʳₙ),
+                              (:ρqⁱ, :wⁱ), (:ρnⁱ, :wⁱₙ), (:ρqᶠ, :wⁱ),
+                              (:ρbᶠ, :wⁱ), (:ρqʷⁱ, :wⁱ))
+            @test sedimentation_velocity(p3, μ, Val(name)) === getproperty(μ, speed)
+            @test microphysical_velocities(p3, μ, Val(name)).w === getproperty(μ, speed)
+        end
+
+        # Non-sedimenting prognostics stay stationary.
+        @test isnothing(sedimentation_velocity(p3, μ, Val(:ρnᵃ)))
+        @test isnothing(microphysical_velocities(p3, μ, Val(:ρnᵃ)))
+
+        # The four condensate masses are the sedimentation constituents: rime mass, rime
+        # volume and the number moments fall too, but are not masses and carry no latent heat.
+        constituents = model.sedimentation_constituents
+        @test length(constituents) == 4
+        @test any(c -> c.w === μ.wᶜˡ && c.q === μ.qᶜˡ && c.phase === Val(:liquid), constituents)
+        @test any(c -> c.w === μ.wʳ && c.q === μ.qʳ && c.phase === Val(:liquid), constituents)
+        @test any(c -> c.w === μ.wⁱ && c.q === μ.qⁱ && c.phase === Val(:ice), constituents)
+        @test any(c -> c.w === μ.wⁱ && c.q === μ.qʷⁱ && c.phase === Val(:liquid), constituents)
+    end
+
+    @testset "Sedimentation heat transport bins liquid on ice by phase" begin
+        FT = Float64
+        Nz = 6
+        grid = RectilinearGrid(default_arch, FT; size = (1, 1, Nz), x = (0, 100), y = (0, 100), z = (0, 600))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = FT(101325),
+                                         potential_temperature = FT(250))
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                microphysics = PredictedParticlePropertiesMicrophysics(FT))
+
+        # Wet ice aloft: cloud liquid, dry ice, and liquid carried on the ice. With no
+        # winds, no closure, and no forcing, the only ρθ tendency is the sedimentation
+        # transport of the condensate content.
+        blob(x, y, z) = ifelse(200 < z < 400, FT(0.001), FT(0))
+        set!(model; θ = FT(250), qᵛ = FT(0.0005),
+             qᶜˡ = blob, qʷⁱ = blob, qⁱ = (x, y, z) -> 2 * blob(x, y, z),
+             nⁱ = (x, y, z) -> 1e5 * (blob(x, y, z) > 0),
+             enforce_mass_conservation = false)
+        update_state!(model)
+
+        μ = model.microphysical_fields
+        column(f) = Array(interior(f, 1, 1, :))
+        qᶜˡ = column(μ.qᶜˡ)
+        qʳ = column(μ.qʳ)
+        qʷⁱ = column(μ.qʷⁱ)
+        qⁱ = column(μ.qⁱ)
+        qᵛ = column(μ.qᵛ)
+        wᶜˡ = column(μ.wᶜˡ)
+        wʳ = column(μ.wʳ)
+        wⁱ = column(μ.wⁱ)
+        θ = column(model.formulation.potential_temperature)
+        G = column(model.timestepper.Gⁿ.ρθ)
+        pᵣ = column(model.dynamics.reference_state.pressure)
+        pˢᵗ = reference_state.standard_pressure
+        ρᵣ = model.dynamics.reference_state.density
+        ρᵣᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρᵣ)) for k in 1:Nz+1]
+
+        # The content per unit falling mass of each phase is ∂θˡⁱ/∂qˣ at fixed temperature
+        # (see `condensate_content` in setup.jl), at the temperature the kernel diagnoses
+        # from θ and q; the thermodynamic liquid includes the liquid on ice.
+        q = [MoistureMassFractions(qᵛ[k], qᶜˡ[k] + qʳ[k] + qʷⁱ[k], qⁱ[k]) for k in 1:Nz]
+        T = [Breeze.Thermodynamics.temperature(LiquidIcePotentialTemperatureState(θ[k], q[k], pˢᵗ, pᵣ[k]), constants)
+             for k in 1:Nz]
+        χˡ = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+        χⁱ = [condensate_content(:LiquidIcePotentialTemperature, :ice, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+
+        # Phase-resolved advective sedimentation mass fluxes: with zero resolved velocity
+        # and the default Centered(order=2) scheme, each constituent's flux at face k is
+        # its fall speed times its face-interpolated humidity. qʷⁱ contributes its
+        # ice-speed flux to Φˡ; with no transport velocity every flux is downward, so the
+        # content comes from the cell above face k.
+        face(q_field) = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, q_field)) for k in 1:Nz+1]
+        qᶜˡᶠ, qʳᶠ, qʷⁱᶠ, qⁱᶠ = face(μ.qᶜˡ), face(μ.qʳ), face(μ.qʷⁱ), face(μ.qⁱ)
+        above(k) = min(k, Nz)
+        Φˡ = @. wᶜˡ * qᶜˡᶠ + wʳ * qʳᶠ + wⁱ * qʷⁱᶠ
+        Φⁱ = @. wⁱ * qⁱᶠ
+
+        Δz = FT(100)
+        F = [ρᵣᶠ[k] * (χˡ[above(k)] * Φˡ[k] + χⁱ[above(k)] * Φⁱ[k]) for k in 1:Nz+1]
+        G_expected = [-(F[k+1] - F[k]) / Δz for k in 1:Nz]
+
+        scale = maximum(abs.(G))
+        tolerance = scale * sqrt(eps(FT))
+        @test scale > 0
+        @test all(abs.(G .- G_expected) .<= tolerance)
+        @test abs(sum(G)) <= tolerance # conservative: the blob is away from the boundaries
+
+        # Binning qʷⁱ as ice instead (the ice content at wⁱ) must not reproduce the model:
+        # the difference is the fusion enthalpy of the liquid-on-ice flux.
+        Φʷ = @. wⁱ * qʷⁱᶠ
+        F_as_ice = [F[k] + ρᵣᶠ[k] * (χⁱ[above(k)] - χˡ[above(k)]) * Φʷ[k] for k in 1:Nz+1]
+        G_as_ice = [-(F_as_ice[k+1] - F_as_ice[k]) / Δz for k in 1:Nz]
+        @test !all(abs.(G .- G_as_ice) .<= tolerance)
+    end
+
+    @testset "P3 surface precipitation flux" begin
+        FT = Float64
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4), extent = (100, 100, 100))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = FT(101325),
+                                         potential_temperature = FT(285))
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                microphysics = PredictedParticlePropertiesMicrophysics(FT))
+
+        set!(model; θ = FT(285), qᵛ = FT(0.01), qᶜˡ = FT(0.003), qʳ = FT(0.001),
+             enforce_mass_conservation = false)
+
+        flux = surface_precipitation_flux(model)
+        @test flux isa Field
+        compute!(flux)
+        @test @allowscalar(flux[1, 1]) > 0
+        @test all(isfinite, Array(interior(flux)))
     end
 end

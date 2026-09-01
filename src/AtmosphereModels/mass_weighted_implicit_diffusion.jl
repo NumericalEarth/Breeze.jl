@@ -33,11 +33,13 @@
 using Oceananigans.Advection:
     densityᶜᶜᶜ,
     densityᶜᶜᶠ,
+    implicit_vertical_velocity,
     implicit_advection_upper_diagonal,
     implicit_advection_lower_diagonal,
     implicit_advection_diagonal
 
 using Oceananigans.Grids: ZDirection
+using Oceananigans.Operators: Az, volume
 using Oceananigans.TurbulenceClosures:
     VerticallyImplicitDiffusionLowerDiagonal,
     VerticallyImplicitDiffusionDiagonal,
@@ -87,6 +89,44 @@ BoundaryConditions.needs_implicit_solver(a::MassWeightedImplicitDiffusion) =
     implicit_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
 @inline mass_weighted_advection_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ℓz, ρ) =
     implicit_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+
+# Oceananigans assumes impermeable boundaries and masks peripheral faces out of the AIVA diagonal.
+# A sedimenting tracer (its velocity arrives wrapped in `OutflowEnabledVelocity`, see
+# `implicit_advection_velocities`) instead leaves through the open bottom, so its diagonal is the
+# upstream one with the `active⁺`/`active⁻` peripheral factors dropped; keeping the outflow term
+# makes the implicit first-order flux conservative and positivity-preserving. The off-diagonals
+# need no change, since they couple interior faces only. Defining this on the Breeze-owned seam
+# rather than on `implicit_advection_diagonal` keeps it on the solve path whatever upstream's
+# signature.
+#
+# `peripheral_node` is also true at immersed faces, and the masks are dropped there too. That is
+# currently harmless — sedimentation velocities are negative, so the `max(wⁱ⁺, 0)` inflow term
+# vanishes at an immersed upper face, and the domain top holds `w = 0` — and at an immersed
+# bottom it is the intended behavior, since precipitation should leave the lowest fluid cell onto
+# the terrain. It is not covered by a test.
+#
+# TODO: upstream this to Oceananigans rather than copying the coefficient. The seam is a one-line
+# predicate on the velocity, say `active_implicit_face(w, i, j, k, grid, ℓx, ℓy)`, defaulting to
+# `!peripheral_node(...)` and returning `true` for a velocity that permits outflow. Until that
+# exists this body duplicates `Oceananigans.Advection.implicit_advection_diagonal` and must track
+# changes to it (the `ρᶠ/ρᶜ` weighting in particular).
+@inline function mass_weighted_advection_diagonal(i, j, k, grid, advection::AIVA, w::OutflowEnabledVelocity,
+                                                  Δt, ℓx, ℓy, ℓz::Center, ρ)
+    scheme = vertical_scheme(advection)
+    td = time_discretization(scheme)
+    wⁱ⁺ = implicit_vertical_velocity(ℓx, ℓy, i, j, k+1, grid, scheme, td, w)
+    wⁱ⁻ = implicit_vertical_velocity(ℓx, ℓy, i, j, k,   grid, scheme, td, w)
+
+    Az⁺ = Az(i, j, k+1, grid, ℓx, ℓy, Face())
+    Az⁻ = Az(i, j, k,   grid, ℓx, ℓy, Face())
+    ρᶠ⁺ = densityᶜᶜᶠ(i, j, k+1, grid, ρ)
+    ρᶠ⁻ = densityᶜᶜᶠ(i, j, k,   grid, ρ)
+    ρᶜ = densityᶜᶜᶜ(i, j, k, grid, ρ)
+    V⁻¹ = 1 / volume(i, j, k, grid, ℓx, ℓy, Center())
+
+    return Δt * V⁻¹ / ρᶜ * (Az⁺ * ρᶠ⁺ * max(wⁱ⁺, 0) -
+                               Az⁻ * ρᶠ⁻ * min(wⁱ⁻, 0))
+end
 
 # As with the advection coefficients, `ρ` is interpolated in z only, so these are exact for
 # a horizontally-uniform density (the anelastic reference state) at all three z-Center locations.

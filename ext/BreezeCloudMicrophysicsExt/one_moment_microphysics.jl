@@ -392,20 +392,14 @@ const OMCM = OneMomentCloudMicrophysics
 # Default fallback for OneMomentCloudMicrophysics tendencies (state-based)
 @inline AM.microphysical_tendency(bμp::OMCM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
-# Default fallback for OneMomentCloudMicrophysics velocities
-@inline AM.microphysical_velocities(bμp::OMCM, μ, name) = nothing
+# Rain sedimentation velocity: stored as a vertical velocity component
+@inline AM.sedimentation_velocity(bμp::OMCM, μ, ::Val{:ρqʳ}) = μ.wʳ
 
-# Rain sedimentation: rain falls with terminal velocity (stored in microphysical fields)
-const zf = ZeroField()
-@inline AM.microphysical_velocities(bμp::OMCM, μ, ::Val{:ρqʳ}) = (u=zf, v=zf, w=μ.wʳ)
-
-# ImpenetrableBoundaryCondition alias
-const IBC = BoundaryCondition{<:NormalFlow, Nothing}
-
-# Helper for bottom terminal velocity based on precipitation_boundary_condition
-# Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBoundaryCondition
-@inline bottom_terminal_velocity(::Nothing, wʳ) = wʳ  # no boundary condition / open: keep computed value
-@inline bottom_terminal_velocity(::IBC, wʳ) = zero(wʳ)  # impenetrable boundary condition
+# Thermodynamic phase of each condensate mass, for the latent heat its sedimentation carries
+@inline AM.condensate_phase(bμp::OMCM, ::Val{:ρqᶜˡ}) = Val(:liquid)
+@inline AM.condensate_phase(bμp::OMCM, ::Val{:ρqʳ})  = Val(:liquid)
+@inline AM.condensate_phase(bμp::OMCM, ::Val{:ρqᶜⁱ}) = Val(:ice)
+@inline AM.condensate_phase(bμp::OMCM, ::Val{:ρqˢ})  = Val(:ice)
 
 #####
 ##### Type aliases
@@ -438,14 +432,14 @@ const MixedPhase1M = Union{MP1M, MPNE1M}
 const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
-# Snow sedimentation: snow falls with terminal velocity (mixed-phase schemes only)
-@inline AM.microphysical_velocities(bμp::MixedPhase1M, μ, ::Val{:ρqˢ}) = (u=zf, v=zf, w=μ.wˢ)
+# Snow sedimentation velocity (mixed-phase only)
+@inline AM.sedimentation_velocity(bμp::MixedPhase1M, μ, ::Val{:ρqˢ}) = μ.wˢ
 
-# Cloud liquid sedimentation (non-equilibrium schemes only, where ρqᶜˡ is prognostic)
-@inline AM.microphysical_velocities(bμp::NonEquilibrium1M, μ, ::Val{:ρqᶜˡ}) = (u=zf, v=zf, w=μ.wᶜˡ)
+# Cloud liquid sedimentation velocity (non-equilibrium with cloud sedimentation)
+@inline AM.sedimentation_velocity(bμp::NonEquilibrium1M, μ, ::Val{:ρqᶜˡ}) = μ.wᶜˡ
 
-# Cloud ice sedimentation (mixed-phase non-equilibrium only, where ρqᶜⁱ is prognostic)
-@inline AM.microphysical_velocities(bμp::MPNE1M, μ, ::Val{:ρqᶜⁱ}) = (u=zf, v=zf, w=μ.wᶜⁱ)
+# Cloud ice sedimentation velocity (mixed-phase non-equilibrium)
+@inline AM.sedimentation_velocity(bμp::MPNE1M, μ, ::Val{:ρqᶜⁱ}) = μ.wᶜⁱ
 
 #####
 ##### Gridless MicrophysicalState construction
@@ -561,21 +555,19 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
 
     center_fields = center_field_tuple(grid, center_names...)
 
-    # Precipitation terminal velocities (negative = downward)
-    # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
-    face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
-    wʳ = ZFaceField(grid; boundary_conditions=face_bcs)
+    # Sedimentation velocity fields (vertical components)
+    wʳ = AM.sedimentation_velocity_field(grid)
 
     if bμp isa MPNE1M
-        wˢ = ZFaceField(grid; boundary_conditions=face_bcs)
-        wᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs)
-        wᶜⁱ = ZFaceField(grid; boundary_conditions=face_bcs)
+        wˢ = AM.sedimentation_velocity_field(grid)
+        wᶜˡ = AM.sedimentation_velocity_field(grid)
+        wᶜⁱ = AM.sedimentation_velocity_field(grid)
         return (; zip(center_names, center_fields)..., wʳ, wˢ, wᶜˡ, wᶜⁱ)
     elseif bμp isa MP1M
-        wˢ = ZFaceField(grid; boundary_conditions=face_bcs)
+        wˢ = AM.sedimentation_velocity_field(grid)
         return (; zip(center_names, center_fields)..., wʳ, wˢ)
     elseif bμp isa WPNE1M
-        wᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs)
+        wᶜˡ = AM.sedimentation_velocity_field(grid)
         return (; zip(center_names, center_fields)..., wʳ, wᶜˡ)
     end
 
@@ -603,12 +595,10 @@ end
     # Derived: total liquid
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
 
-    # Terminal velocity with bottom boundary condition
+    # Sedimentation velocity with bottom boundary condition
     parameters = bμp.categories.parameters
-    𝕎 = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
-    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
-    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
     return nothing
 end
@@ -628,21 +618,17 @@ end
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
     @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢ
 
-    # Terminal velocities with bottom boundary condition
+    # Sedimentation velocities with bottom boundary condition
     categories = bμp.categories
     parameters = categories.parameters
 
-    # Rain terminal velocity
-    𝕎 = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
-    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
-    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    # Rain sedimentation velocity
+    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
-    # Snow terminal velocity
+    # Snow sedimentation velocity
     𝕎ˢ = terminal_velocity(parameters.precip.snow, parameters.terminal_velocity.snow, ρ, ℳ.qˢ)
-    wˢ = -𝕎ˢ # negative = downward
-    wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
-    @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
+    write_sedimentation_velocity!(μ.wˢ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ˢ)
 
     return nothing
 end
@@ -662,22 +648,13 @@ end
     categories = bμp.categories
     parameters = categories.parameters
 
-    # Rain terminal velocity with bottom boundary condition
-    𝕎 = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
-    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
-    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    # Rain sedimentation velocity with bottom boundary condition
+    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
-    # Cloud liquid terminal velocity (Stokes regime)
-    𝕎ᶜˡ = CMNonEq.terminal_velocity(
-        parameters.cloud.liquid,
-        categories.hydrometeor_velocities.stokes,
-        ρ,
-        ℳ.qᶜˡ,
-    )
-    wᶜˡ = -𝕎ᶜˡ
-    wᶜˡ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜˡ)
-    @inbounds μ.wᶜˡ[i, j, k] = ifelse(k == 1, wᶜˡ₀, wᶜˡ)
+    # Cloud liquid sedimentation velocity (Stokes regime)
+    𝕎ᶜˡ = CMNonEq.terminal_velocity(parameters.cloud.liquid, categories.hydrometeor_velocities.stokes, ρ, ℳ.qᶜˡ)
+    write_sedimentation_velocity!(μ.wᶜˡ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ᶜˡ)
 
     return nothing
 end
@@ -700,39 +677,21 @@ end
     categories = bμp.categories
     parameters = categories.parameters
 
-    # Rain terminal velocity
-    𝕎 = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
-    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
-    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    # Rain sedimentation velocity
+    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
-    # Snow terminal velocity
+    # Snow sedimentation velocity
     𝕎ˢ = terminal_velocity(parameters.precip.snow, parameters.terminal_velocity.snow, ρ, ℳ.qˢ)
-    wˢ = -𝕎ˢ # negative = downward
-    wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
-    @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
+    write_sedimentation_velocity!(μ.wˢ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ˢ)
 
-    # Cloud liquid terminal velocity (Stokes regime)
-    𝕎ᶜˡ = CMNonEq.terminal_velocity(
-        parameters.cloud.liquid,
-        categories.hydrometeor_velocities.stokes,
-        ρ,
-        ℳ.qᶜˡ,
-    )
-    wᶜˡ = -𝕎ᶜˡ
-    wᶜˡ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜˡ)
-    @inbounds μ.wᶜˡ[i, j, k] = ifelse(k == 1, wᶜˡ₀, wᶜˡ)
+    # Cloud liquid sedimentation velocity (Stokes regime)
+    𝕎ᶜˡ = CMNonEq.terminal_velocity(parameters.cloud.liquid, categories.hydrometeor_velocities.stokes, ρ, ℳ.qᶜˡ)
+    write_sedimentation_velocity!(μ.wᶜˡ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ᶜˡ)
 
-    # Cloud ice terminal velocity (Chen 2022 small ice)
-    𝕎ᶜⁱ = CMNonEq.terminal_velocity(
-        parameters.cloud.ice,
-        categories.hydrometeor_velocities.chen2022.small_ice,
-        ρ,
-        ℳ.qᶜⁱ,
-    )
-    wᶜⁱ = -𝕎ᶜⁱ
-    wᶜⁱ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜⁱ)
-    @inbounds μ.wᶜⁱ[i, j, k] = ifelse(k == 1, wᶜⁱ₀, wᶜⁱ)
+    # Cloud ice sedimentation velocity (Chen 2022 small ice)
+    𝕎ᶜⁱ = CMNonEq.terminal_velocity(parameters.cloud.ice, categories.hydrometeor_velocities.chen2022.small_ice, ρ, ℳ.qᶜⁱ)
+    write_sedimentation_velocity!(μ.wᶜⁱ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ᶜⁱ)
 
     return nothing
 end

@@ -151,7 +151,8 @@ function ssp_rk3_substep!(model, Δt, α)
                            fields(model),
                            α * Δt,
                            implicit_step_advection(advection, name),
-                           implicit_advection_velocities(model.dynamics, model.velocities, name),
+                           implicit_advection_velocities(model.dynamics, model.velocities, name,
+                                                         model.microphysics, model.microphysical_fields),
                            implicit_advection_density(model.dynamics, model.formulation, name))
         end
     end

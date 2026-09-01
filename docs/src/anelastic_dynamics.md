@@ -69,6 +69,20 @@ According to [Pauluis2008](@citet), the moist static energy obeys
 with vertical velocity ``w``, buoyancy ``b`` as above, and ``S_s`` including microphysical and external energy sources/sinks.
 The ``ρᵣ w b`` term is the buoyancy flux that links the energy and momentum budgets in the anelastic limit.
 
+When hydrometeors sediment, the condensate part of ``s`` falls with them: Breeze bins each
+sedimenting species' advective sedimentation mass flux — the flux its own advection scheme
+applies at the combined resolved and terminal velocity, minus the flux at the resolved
+velocity alone, so the energy moves exactly with the mass — by thermodynamic phase, and
+transports ``∂s/∂q^x`` per unit falling mass of phase ``x``, evaluated at fixed temperature
+with the dry mass fraction ``q^d = 1 - q^v - q^l - q^i`` taking up the departed mass:
+``(c^l - c^{pd}) T - \mathscr{L}^l_r`` for liquid and ``(c^i - c^{pd}) T - \mathscr{L}^i_r``
+for ice, the latent deficit plus the sensible heat of the condensate relative to the dry air
+that replaces it. Sedimentation alone therefore leaves the temperature unchanged, while
+rain-out leaves the latent heat released by forming the rain behind and pre-cools the layer
+that later evaporates the falling rain. The liquid-ice potential temperature formulation
+analogously transports ``∂θ^{li}/∂q^x``, to leading order the deficit
+``-\mathscr{L}^x_r / (c^{pm} Π)``.
+
 Thermodynamic closures needed for ``R^m``, ``c^{pm}`` and the Exner function ``Π = (pᵣ / p_0)^{R^m / c^{pm}}`` are given in [Thermodynamics](@ref Thermodynamics-section) section.
 
 ## Time discretization and pressure correction

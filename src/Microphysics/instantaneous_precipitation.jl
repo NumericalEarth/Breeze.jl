@@ -62,7 +62,8 @@ AtmosphereModels.prognostic_field_names(::IP) = tuple()
 
 AtmosphereModels.liquid_mass_fraction(::IP, model) = nothing
 AtmosphereModels.ice_mass_fraction(::IP, model) = nothing
-@inline AtmosphereModels.microphysical_velocities(::IP, μ, name) = nothing
+# Condensate is removed instantly rather than transported, so nothing sediments and the
+# generic `microphysical_velocities`/`sedimentation_velocity` fallbacks stand.
 @inline AtmosphereModels.microphysical_tendency(::IP, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 # Diagnostic vapor + a precipitation-rate field (kg m⁻³ s⁻¹ of condensed/removed water).
