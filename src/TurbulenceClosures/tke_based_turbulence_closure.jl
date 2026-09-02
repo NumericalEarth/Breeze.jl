@@ -413,8 +413,7 @@ $(TYPEDSIGNATURES)
 
 Shear production ``Kᵘ S²`` at (Center, Center, Face).
 """
-@inline shear_productionᶜᶜᶠ(i, j, k, grid, Kᵘ, u, v) =
-    @inbounds Kᵘ[i, j, k] * shearᶜᶜᶠ(i, j, k, grid, u, v)
+@inline shear_productionᶜᶜᶠ(i, j, k, grid, Kᵘ, u, v) = @inbounds Kᵘ[i, j, k] * shearᶜᶜᶠ(i, j, k, grid, u, v)
 
 """
 $(TYPEDSIGNATURES)
