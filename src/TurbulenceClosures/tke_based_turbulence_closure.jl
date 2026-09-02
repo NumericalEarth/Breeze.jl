@@ -420,8 +420,7 @@ $(TYPEDSIGNATURES)
 
 Buoyancy production ``-Kᶜ N²`` at (Center, Center, Face); negative in stable stratification.
 """
-@inline buoyancy_productionᶜᶜᶠ(i, j, k, grid, Kᶜ, buoyancy, tracers) =
-    @inbounds -Kᶜ[i, j, k] * ∂z_b(i, j, k, grid, buoyancy, tracers)
+@inline buoyancy_productionᶜᶜᶠ(i, j, k, grid, Kᶜ, buoyancy, tracers) = @inbounds -Kᶜ[i, j, k] * ∂z_b(i, j, k, grid, buoyancy, tracers)
 
 """
 $(TYPEDSIGNATURES)
