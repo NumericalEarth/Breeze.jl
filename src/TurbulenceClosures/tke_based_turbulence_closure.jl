@@ -277,8 +277,7 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
 BoundaryConditions.fill_halo_regions!(fields::TKEClosureFields, args...; kw...) =
     fill_halo_regions!((fields.Kᵘ, fields.Kᶜ, fields.Kᵉ, fields.ℓ), args...; kw...)
 
-function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, tracer_names, bcs,
-                                                      closure::FlavorOfTKEClosure)
+function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, tracer_names, bcs, closure::FlavorOfTKEClosure)
     face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()))
     default_bcs = (Kᵘ = face_bcs, Kᶜ = face_bcs, Kᵉ = face_bcs, ℓ = face_bcs)
     bcs = merge(default_bcs, bcs)
