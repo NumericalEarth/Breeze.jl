@@ -123,24 +123,21 @@ column(field) = Array(interior(field, 1, 1, :))
         set!(model; θ = 300)
         set_tke!(model, e₀)
 
-        ℓ = column(model.closure_fields.ℓ)
         Kᵘ = column(model.closure_fields.Kᵘ)
         Kᶜ = column(model.closure_fields.Kᶜ)
         Kᵉ = column(model.closure_fields.Kᵉ)
         sf = closure.stability_functions
         interior_faces = 2:Nz
 
-        # Neutral air: ℓ is the height above the surface, masked on the boundary faces
-        @test ℓ[1] == 0
-        @test ℓ[Nz+1] == 0
-        @test all(ℓ[interior_faces] .≈ zf[interior_faces])
-
-        # Kᵘ = Cᵘ ℓ √e and the ratios Kᶜ/Kᵘ, Kᵉ/Kᵘ are the stability-function ratios
-        @test all(Kᵘ[interior_faces] .≈ sf.Cᵘ .* ℓ[interior_faces] .* sqrt(e₀))
-        @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᶜ / sf.Cᵘ)
-        @test all(Kᵉ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᵉ / sf.Cᵘ)
+        # Neutral air: the mixing length is the height above the surface. It is not stored
+        # (as in CATKE), so it is tested through Kᵘ = Cᵘ z √e, masked on the boundary faces.
         @test Kᵘ[1] == 0
         @test Kᵘ[Nz+1] == 0
+        @test all(Kᵘ[interior_faces] .≈ sf.Cᵘ .* zf[interior_faces] .* sqrt(e₀))
+
+        # The ratios Kᶜ/Kᵘ, Kᵉ/Kᵘ are the stability-function ratios
+        @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᶜ / sf.Cᵘ)
+        @test all(Kᵉ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᵉ / sf.Cᵘ)
     end
 
     @testset "the stratification length" begin
@@ -150,7 +147,9 @@ column(field) = Array(interior(field, 1, 1, :))
         set!(model; θ = z -> 300 + Γ * z)
         set_tke!(model, e₀)
 
-        ℓ = column(model.closure_fields.ℓ)
+        # The mixing length is not stored; diagnose it from Kᵘ = Cᵘ ℓ √e with the uniform √e₀
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        ℓ = Kᵘ ./ (closure.stability_functions.Cᵘ * sqrt(e₀))
         θ = column(model.formulation.potential_temperature)
         g = model.thermodynamic_constants.gravitational_acceleration
         Δz = Lz / Nz

@@ -370,8 +370,14 @@ for ((name, simulation), (_, settings), (_, depth), color) in zip(simulations, r
     push!(diffusivity_labels,
           "Kᶜ(z = $(round(zᴷ[kᵐᵃˣ] / zᵢ, digits = 2)) zᵢ) = $(round(Kᶜ[kᵐᵃˣ], digits = 1)) m² s⁻¹")
     lines!(ax_K, Kᶜ ./ Kᶜ[kᵐᵃˣ], zᴷ ./ zᵢ; color)
-    lines!(ax_ℓ, vec(Array(view(model.closure_fields.ℓ, 1, 1, :))),
-           Array(znodes(model.closure_fields.ℓ)) ./ zᵢ; color)
+    ## The mixing length is not stored (following CATKE); diagnose it from Kᵘ = Cᵘ ℓ √e,
+    ## rebuilding √e at the faces — floored at `minimum_tke` — the way the closure does
+    Cᵘ = model.closure.stability_functions.Cᵘ
+    w★ = sqrt.(max.(model.closure.minimum_tke, vec(Array(view(e, 1, 1, :)))))
+    Kᵘ = vec(Array(view(model.closure_fields.Kᵘ, 1, 1, :)))
+    ℓ = zero(Kᵘ)
+    ℓ[2:end-1] .= Kᵘ[2:end-1] ./ (Cᵘ .* (w★[1:end-1] .+ w★[2:end]) ./ 2)
+    lines!(ax_ℓ, ℓ, Array(znodes(model.closure_fields.Kᵘ)) ./ zᵢ; color)
     ## The surface flux is prescribed in the convective case but emergent in the stable one, where
     ## the bulk scheme sets it, so both are normalized by the closure's own flux at the lowest
     ## interior face rather than by a setting. The neutral case is defined as having no surface heat

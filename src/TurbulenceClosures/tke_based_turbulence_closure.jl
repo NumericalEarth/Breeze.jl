@@ -97,17 +97,11 @@ the smaller of the height above the surface ``z`` and the stratification length
 ``ℓᴺ = Cᴺ \\sqrt{e} / N``: the distance a parcel with kinetic energy ``e`` travels against a
 stable stratification of buoyancy frequency ``N``. In neutral or unstable air ``ℓᴺ`` is infinite
 and ``ℓ = z``. The height above the surface carries no coefficient; the stability functions set the
-scale of each diffusivity.
-
-Fields
-======
-
-$(TYPEDFIELDS)
+scale of each diffusivity. The default ``Cᴺ = 0.76`` is Deardorff's
+([Deardorff 1980](@cite Deardorff1980)).
 """
 Base.@kwdef struct TKEMixingLength{FT}
-    "coefficient of the stratification length ``ℓᴺ = Cᴺ \\sqrt{e} / N``; the default is
-     Deardorff's ``0.76 \\sqrt{e} / N`` ([Deardorff 1980](@cite Deardorff1980))"
-    Cᴺ :: FT = 0.76
+    Cᴺ :: FT = 0.76 # coefficient of the stratification length ℓᴺ = Cᴺ √e / N
 end
 
 Base.summary(ml::TKEMixingLength{FT}) where FT = "TKEMixingLength{$FT}"
@@ -143,27 +137,15 @@ The square root of ``e`` is floored at `minimum_tke` wherever it enters a diffus
 scale, and negative ``e`` — which advection can produce — is damped on
 `negative_tke_damping_time_scale` rather than clipped. The three `maximum_*` diffusivities clip
 the diffusivities, `Inf` by default.
-
-Fields
-======
-
-$(TYPEDFIELDS)
 """
 struct TKEBasedTurbulenceClosure{TD, ML, SF, FT} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
-    "the primary mixing length ``ℓ``"
-    mixing_length :: ML
-    "the stability functions ``Sᵘ, Sᶜ, Sᵉ, Sᴰ``"
-    stability_functions :: SF
-    "upper bound on ``Kᵘ``, m² s⁻¹"
-    maximum_viscosity :: FT
-    "upper bound on ``Kᶜ``, m² s⁻¹"
-    maximum_tracer_diffusivity :: FT
-    "upper bound on ``Kᵉ``, m² s⁻¹"
-    maximum_tke_diffusivity :: FT
-    "floor on ``e`` inside ``\\sqrt{e}``, m² s⁻²"
-    minimum_tke :: FT
-    "time scale on which negative ``e`` is damped, s"
-    negative_tke_damping_time_scale :: FT
+    mixing_length :: ML                   # the primary mixing length ℓ
+    stability_functions :: SF             # Sᵘ, Sᶜ, Sᵉ, Sᴰ
+    maximum_viscosity :: FT               # upper bound on Kᵘ, m² s⁻¹
+    maximum_tracer_diffusivity :: FT      # upper bound on Kᶜ, m² s⁻¹
+    maximum_tke_diffusivity :: FT         # upper bound on Kᵉ, m² s⁻¹
+    minimum_tke :: FT                     # floor on e inside √e, m² s⁻²
+    negative_tke_damping_time_scale :: FT # time scale on which negative e is damped, s
 end
 
 const TKEClosureArray{TD} = AbstractArray{<:TKEBasedTurbulenceClosure{TD}} where TD
@@ -196,6 +178,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    maximum_tracer_diffusivity = Inf,
                                    maximum_tke_diffusivity = Inf,
                                    minimum_tke = 1e-6,
+                                   # CATKE's value; atmospheric turbulence evolves faster than the
+                                   # ocean's, so a shorter time scale may be more appropriate here.
                                    negative_tke_damping_time_scale = 1minute) where TD
 
     mixing_length = convert_eltype(FT, mixing_length)
@@ -240,52 +224,39 @@ end
 """
 $(TYPEDEF)
 
-Precomputed fields for [`TKEBasedTurbulenceClosure`](@ref).
-
-Fields
-======
-
-$(TYPEDFIELDS)
+Precomputed fields for [`TKEBasedTurbulenceClosure`](@ref). The mixing length is not stored;
+like CATKE, the closure computes it on the fly wherever it is needed.
 """
 struct TKEClosureFields{K, L, KC, LC}
-    "eddy diffusivity for momentum ``Kᵘ``, at (Center, Center, Face)"
-    Kᵘ :: K
-    "eddy diffusivity for scalars ``Kᶜ``, at (Center, Center, Face)"
-    Kᶜ :: K
-    "eddy diffusivity for turbulent kinetic energy ``Kᵉ``, at (Center, Center, Face)"
-    Kᵉ :: K
-    "the primary mixing length ``ℓ``, at (Center, Center, Face); a diagnostic"
-    ℓ :: K
-    "the linear implicit coefficient of the TKE equation, ``∂_t e = Lᵉ e + ⋯``, at (Center, Center, Center):
-     the dissipation rate, the negative part of the buoyancy flux and the damping of negative TKE"
+    Kᵘ :: K # eddy diffusivity for momentum, at (Center, Center, Face)
+    Kᶜ :: K # eddy diffusivity for scalars, at (Center, Center, Face)
+    Kᵉ :: K # eddy diffusivity for turbulent kinetic energy, at (Center, Center, Face)
+    # The linear implicit coefficient of the TKE equation, ∂ₜe = Lᵉ e + ⋯, at (Center, Center, Center):
+    # the dissipation rate, the negative part of the buoyancy flux and the damping of negative TKE.
     Le :: L
-    "per-tracer diffusivity lookup, indexed by the tracer's position among the closure scalars"
-    tupled_tracer_diffusivities :: KC
-    "per-tracer implicit linear coefficient lookup: `Le` for the TKE tracer, zero for every other"
-    tupled_implicit_linear_coefficients :: LC
+    tupled_tracer_diffusivities :: KC         # per-tracer diffusivity lookup, by closure-scalar position
+    tupled_implicit_linear_coefficients :: LC # `Le` for the TKE tracer, zero for every other
 end
 
 Adapt.adapt_structure(to, fields::TKEClosureFields) =
     TKEClosureFields(adapt(to, fields.Kᵘ),
                      adapt(to, fields.Kᶜ),
                      adapt(to, fields.Kᵉ),
-                     adapt(to, fields.ℓ),
                      adapt(to, fields.Le),
                      adapt(to, fields.tupled_tracer_diffusivities),
                      adapt(to, fields.tupled_implicit_linear_coefficients))
 
 BoundaryConditions.fill_halo_regions!(fields::TKEClosureFields, args...; kw...) =
-    fill_halo_regions!((fields.Kᵘ, fields.Kᶜ, fields.Kᵉ, fields.ℓ), args...; kw...)
+    fill_halo_regions!((fields.Kᵘ, fields.Kᶜ, fields.Kᵉ), args...; kw...)
 
 function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, tracer_names, bcs, closure::FlavorOfTKEClosure)
     face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()))
-    default_bcs = (Kᵘ = face_bcs, Kᶜ = face_bcs, Kᵉ = face_bcs, ℓ = face_bcs)
+    default_bcs = (Kᵘ = face_bcs, Kᶜ = face_bcs, Kᵉ = face_bcs)
     bcs = merge(default_bcs, bcs)
 
     Kᵘ = ZFaceField(grid, boundary_conditions=bcs.Kᵘ)
     Kᶜ = ZFaceField(grid, boundary_conditions=bcs.Kᶜ)
     Kᵉ = ZFaceField(grid, boundary_conditions=bcs.Kᵉ)
-    ℓ  = ZFaceField(grid, boundary_conditions=bcs.ℓ)
     Le = CenterField(grid)
 
     # Indexed by the `Val(id)` the model hands to `diffusivity` and `implicit_linear_coefficient`:
@@ -294,7 +265,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
     implicit_linear_coefficients = NamedTuple(name => name === TKE_NAME ? Le : ZeroField() for name in tracer_names)
 
-    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, ℓ, Le, tracer_diffusivities, implicit_linear_coefficients)
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, Le, tracer_diffusivities, implicit_linear_coefficients)
 end
 
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
@@ -401,7 +372,6 @@ end
 
     FT = eltype(grid)
     @inbounds begin
-        closure_fields.ℓ[i, j, k]  = mask_diffusivity(i, j, k, grid, FT(ℓ))
         closure_fields.Kᵘ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵘ))
         closure_fields.Kᶜ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᶜ))
         closure_fields.Kᵉ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵉ))
