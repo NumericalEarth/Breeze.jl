@@ -440,8 +440,11 @@ positive for any time step.
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, w★, tracers, buoyancy)
     Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, tracers, buoyancy)
 
+    # `minimum_tke` floors only the turbulent velocity of the mixing length above; the dissipation
+    # rate follows √e all the way down, so that ε ∝ e^{3/2} below the floor too (as in CATKE).
+    # The `abs` keeps the unselected branch of the `ifelse` from taking √ of a negative number.
     τ = closure.negative_tke_damping_time_scale
-    ω = ifelse(e < 0, 1 / τ, Sᴰ * w★ / ℓ)
+    ω = ifelse(e < 0, 1 / τ, Sᴰ * sqrt(abs(e)) / ℓ)
 
     B⁻ = min(0, B)
     ωᴮ = -B⁻ / max(e, eᵐⁱⁿ) * (e > eᵐⁱⁿ)

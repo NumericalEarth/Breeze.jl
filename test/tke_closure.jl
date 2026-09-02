@@ -214,6 +214,14 @@ column(field) = Array(interior(field, 1, 1, :))
         Cᴰ = closure.stability_functions.Cᴰ
         @test all(Le .≈ -Cᴰ * sqrt(e₀) ./ zc)
         @test all(Le .< 0)
+
+        # Below the minimum TKE the dissipation rate keeps following √e — the floor applies to
+        # the diffusivities, not to the dissipation (as in CATKE)
+        e₋ = FT(1e-8)
+        @test e₋ < closure.minimum_tke
+        set_tke!(model, e₋)
+        Le = column(model.closure_fields.Le)
+        @test all(Le .≈ -Cᴰ * sqrt(e₋) ./ zc)
     end
 
     @testset "the sources enter the stage tendency" begin
