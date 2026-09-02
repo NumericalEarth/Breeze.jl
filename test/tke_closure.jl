@@ -1,12 +1,22 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields
+using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, mixing_lengthᶜᶜᶠ
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!, time_discretization
-using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, ExplicitTimeDiscretization
+using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, ExplicitTimeDiscretization,
+                                       buoyancy_tracers, buoyancy_force
 using Oceananigans.Units
 using Test
+
+# The mixing length is not stored (as in CATKE): diagnose it the way a script would, by evaluating
+# the closure's own `mixing_lengthᶜᶜᶠ` in a `KernelFunctionOperation` over the model state.
+function diagnosed_mixing_length(model)
+    e = model.tracers.ρe / model.dynamics.reference_state.density
+    op = KernelFunctionOperation{Center, Center, Face}(mixing_lengthᶜᶜᶠ, model.grid, model.closure,
+                                                       e, buoyancy_tracers(model), buoyancy_force(model))
+    return Field(op) # `Field(op)` computes on construction
+end
 
 #####
 ##### Construction
@@ -129,11 +139,20 @@ column(field) = Array(interior(field, 1, 1, :))
         sf = closure.stability_functions
         interior_faces = 2:Nz
 
-        # Neutral air: the mixing length is the height above the surface. It is not stored
-        # (as in CATKE), so it is tested through Kᵘ = Cᵘ z √e, masked on the boundary faces.
+        # In neutral air the mixing length is the height above the surface, with two boundary
+        # subtleties: the wall distance is floored at the thickness of the cell below (as in
+        # CATKE), so the surface face gets ℓ ~ Δz rather than zero — reduced further where the
+        # surface-face stratification stencil reaches into the halo — and the top face is unmasked.
+        ℓ = column(diagnosed_mixing_length(model))
+        Δz = Lz / Nz
+        @test 0 < ℓ[1] ≤ Δz
+        @test ℓ[Nz+1] ≈ Lz
+        @test all(ℓ[interior_faces] .≈ zf[interior_faces])
+
+        # Kᵘ = Cᵘ ℓ √e, masked on the boundary faces
         @test Kᵘ[1] == 0
         @test Kᵘ[Nz+1] == 0
-        @test all(Kᵘ[interior_faces] .≈ sf.Cᵘ .* zf[interior_faces] .* sqrt(e₀))
+        @test all(Kᵘ[interior_faces] .≈ sf.Cᵘ .* ℓ[interior_faces] .* sqrt(e₀))
 
         # The ratios Kᶜ/Kᵘ, Kᵉ/Kᵘ are the stability-function ratios
         @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᶜ / sf.Cᵘ)
@@ -147,9 +166,7 @@ column(field) = Array(interior(field, 1, 1, :))
         set!(model; θ = z -> 300 + Γ * z)
         set_tke!(model, e₀)
 
-        # The mixing length is not stored; diagnose it from Kᵘ = Cᵘ ℓ √e with the uniform √e₀
-        Kᵘ = column(model.closure_fields.Kᵘ)
-        ℓ = Kᵘ ./ (closure.stability_functions.Cᵘ * sqrt(e₀))
+        ℓ = column(diagnosed_mixing_length(model))
         θ = column(model.formulation.potential_temperature)
         g = model.thermodynamic_constants.gravitational_acceleration
         Δz = Lz / Nz

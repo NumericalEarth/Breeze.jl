@@ -20,6 +20,11 @@ using CairoMakie
 using Breeze.BoundaryConditions: BulkDrag, BulkSensibleHeatFlux, PolynomialCoefficient,
                                  FittedStabilityFunction
 
+## The mixing-length diagnostic below evaluates the closure's own kernel function in a
+## `KernelFunctionOperation`, so the function and its buoyancy arguments are imported here.
+using Breeze.TurbulenceClosures: mixing_lengthᶜᶜᶠ
+using Oceananigans.TurbulenceClosures: buoyancy_tracers, buoyancy_force
+
 # ## Surface layer definition
 #
 # Breeze's bulk surface-layer scheme forms the surface virtual potential temperature from the
@@ -251,7 +256,7 @@ end
 ## Postprocessing
 #
 # Each regime leaves a different signature, but they span very different depths — 400 m to 4 km —
-# so the profiles are plotted against ``z/zᵢ``. We diagnose the boundary-layer depth here, with each
+# so the profiles are plotted against ``z/hᵇˡ``. We diagnose the boundary-layer depth here, with each
 # regime getting the definition its own literature uses — there is no single one that works everywhere.
 # The shear-driven cases use the stress threshold of the GABLS1 and CNBL intercomparisons; the
 # convective case has no wind at all, so stress is undefined there and the inversion height is used
@@ -315,17 +320,17 @@ colors = (:dodgerblue, :black, :orangered)
 fig = Figure(size = (1100, 800))
 
 ## Top row: the prognostic state, what the model carries forward in time.
-ax_θ = Axis(fig[1, 1]; xlabel = "θ - θ(z=0) (K)", ylabel = "z / zᵢ")
+ax_θ = Axis(fig[1, 1]; xlabel = "θ - θ(z=0) (K)", ylabel = "z / hᵇˡ")
 ax_U = Axis(fig[1, 2]; xlabel = "Wind speed (m s⁻¹)")
 ax_e = Axis(fig[1, 3]; xlabel = "TKE (m² s⁻²)")
 
 ## Bottom row: what the closure makes of it, in the order it is built — the length scale, the
 ## diffusivity formed from it, and the flux they produce. `Kᶜ` spans two orders of magnitude between
 ## the stable and convective regimes, so it is scaled by its own maximum in each: the height axis
-## already normalizes by `zᵢ`, and this makes the horizontal axis a shape comparison to match. A
-## linear axis keeps the collapse at `zᵢ` looking like the cliff it is, which a logarithmic one
+## already normalizes by `hᵇˡ`, and this makes the horizontal axis a shape comparison to match. A
+## linear axis keeps the collapse at `hᵇˡ` looking like the cliff it is, which a logarithmic one
 ## would smooth into a gentle slide. The magnitudes that scaling divides out are annotated on the panel.
-ax_ℓ = Axis(fig[2, 1]; xlabel = "Mixing length ℓ (m)", ylabel = "z / zᵢ")
+ax_ℓ = Axis(fig[2, 1]; xlabel = "Mixing length ℓ (m)", ylabel = "z / hᵇˡ")
 ax_K = Axis(fig[2, 2]; xlabel = "Kᶜ / max(Kᶜ)")
 ax_J = Axis(fig[2, 3]; xlabel = "w′θ′ / (w′θ′)₀")
 
@@ -337,7 +342,7 @@ xlims!(ax_K, -0.03, 1.08)
 [hideydecorations!(ax, grid = false) for ax in (ax_U, ax_e, ax_K, ax_J)]
 
 ## Reference for the *convective* case only: the mixed-layer flux is near-linear from 1 at the
-## surface to -A at zᵢ, with the entrainment ratio A ≈ 0.17 (Soares et al. 2004) to 0.2. The stable
+## surface to -A at hᵇˡ, with the entrainment ratio A ≈ 0.17 (Soares et al. 2004) to 0.2. The stable
 ## case has no such result and is not judged against this line.
 lines!(ax_J, [1, -0.2], [0, 1]; color = :gray50, linestyle = :dash)
 vlines!(ax_J, [0]; color = :gray80, linewidth = 1)
@@ -348,36 +353,33 @@ diffusivity_labels = String[]
 for ((name, simulation), (_, settings), (_, depth), color) in zip(simulations, regimes, depths, colors)
     model = simulation.model
     u, v, w = model.velocities
-    zᵢ = depth(model)
-    push!(legend_labels, "$name (zᵢ = $(round(Int, zᵢ)) m)")
+    hᵇˡ = depth(model)
+    push!(legend_labels, "$name (hᵇˡ = $(round(Int, hᵇˡ)) m)")
 
-    ## The profiles are plotted against a rescaled coordinate, so values and heights are taken
-    ## separately rather than handing Makie the `Field`.
     θ = model.formulation.potential_temperature
     U = Field(sqrt(u^2 + v^2))
-    compute!(U)
 
-    ## Each regime starts from a different θ₀, so plot the departure from the surface value
+    ## Fields are handed to Makie directly, values against the rescaled height z/hᵇˡ. Only θ is
+    ## taken as an array, because the surface value is subtracted from it (each regime starts
+    ## from a different θ₀) and it supplies the height coordinate of the flux panel below.
     θᵥ = vec(Array(view(θ, 1, 1, :)))
-    lines!(ax_θ, θᵥ .- θᵥ[1], Array(znodes(θ)) ./ zᵢ; color)
-    lines!(ax_U, vec(Array(view(U, 1, 1, :))), Array(znodes(U)) ./ zᵢ; color)
+    lines!(ax_θ, θᵥ .- θᵥ[1], Array(znodes(θ)) ./ hᵇˡ; color)
+    lines!(ax_U, U, znodes(U) ./ hᵇˡ; color)
     ## The specific TKE is the tracer divided by the reference density
-    e = compute!(Field(model.tracers.ρe / model.dynamics.reference_state.density))
-    lines!(ax_e, vec(Array(view(e, 1, 1, :))), Array(znodes(e)) ./ zᵢ; color)
+    e = Field(model.tracers.ρe / model.dynamics.reference_state.density)
+    lines!(ax_e, e, znodes(e) ./ hᵇˡ; color)
     Kᶜ = vec(Array(view(model.closure_fields.Kᶜ, 1, 1, :)))
     zᴷ = Array(znodes(model.closure_fields.Kᶜ))
     kᵐᵃˣ = argmax(Kᶜ)
     push!(diffusivity_labels,
-          "Kᶜ(z = $(round(zᴷ[kᵐᵃˣ] / zᵢ, digits = 2)) zᵢ) = $(round(Kᶜ[kᵐᵃˣ], digits = 1)) m² s⁻¹")
-    lines!(ax_K, Kᶜ ./ Kᶜ[kᵐᵃˣ], zᴷ ./ zᵢ; color)
-    ## The mixing length is not stored (following CATKE); diagnose it from Kᵘ = Cᵘ ℓ √e,
-    ## rebuilding √e at the faces — floored at `minimum_tke` — the way the closure does
-    Cᵘ = model.closure.stability_functions.Cᵘ
-    w★ = sqrt.(max.(model.closure.minimum_tke, vec(Array(view(e, 1, 1, :)))))
-    Kᵘ = vec(Array(view(model.closure_fields.Kᵘ, 1, 1, :)))
-    ℓ = zero(Kᵘ)
-    ℓ[2:end-1] .= Kᵘ[2:end-1] ./ (Cᵘ .* (w★[1:end-1] .+ w★[2:end]) ./ 2)
-    lines!(ax_ℓ, ℓ, Array(znodes(model.closure_fields.Kᵘ)) ./ zᵢ; color)
+          "Kᶜ(z = $(round(zᴷ[kᵐᵃˣ] / hᵇˡ, digits = 2)) hᵇˡ) = $(round(Kᶜ[kᵐᵃˣ], digits = 1)) m² s⁻¹")
+    lines!(ax_K, Kᶜ ./ Kᶜ[kᵐᵃˣ], zᴷ ./ hᵇˡ; color)
+    ## The mixing length is not stored (following CATKE); it is diagnosed by evaluating the
+    ## closure's own `mixing_lengthᶜᶜᶠ` in a `KernelFunctionOperation` over the model state
+    ℓ_op = KernelFunctionOperation{Center, Center, Face}(mixing_lengthᶜᶜᶠ, model.grid, model.closure,
+                                                         e, buoyancy_tracers(model), buoyancy_force(model))
+    ℓ = Field(ℓ_op)
+    lines!(ax_ℓ, ℓ, znodes(ℓ) ./ hᵇˡ; color)
     ## The surface flux is prescribed in the convective case but emergent in the stable one, where
     ## the bulk scheme sets it, so both are normalized by the closure's own flux at the lowest
     ## interior face rather than by a setting. The neutral case is defined as having no surface heat
@@ -387,7 +389,7 @@ for ((name, simulation), (_, settings), (_, depth), color) in zip(simulations, r
     thermally_driven = get(settings, :surface_heat_flux, 0) != 0 || haskey(settings, :surface_temperature)
     if thermally_driven
         J = heat_flux(model)
-        lines!(ax_J, J ./ J[2], Array(znodes(θ)) ./ zᵢ; color)
+        lines!(ax_J, J ./ J[2], Array(znodes(θ)) ./ hᵇˡ; color)
     end
 end
 
@@ -396,7 +398,7 @@ end
 axislegend(ax_e, [LineElement(color = c) for c in colors], legend_labels;
            position = :rt, framevisible = false)
 
-## Above zᵢ every scaled diffusivity has collapsed to the axis, so the top of that panel is free for
+## Above hᵇˡ every scaled diffusivity has collapsed to the axis, so the top of that panel is free for
 ## the magnitude and the height the scaling removed. Colors match the legend above.
 for (n, (label, color)) in enumerate(zip(diffusivity_labels, colors))
     text!(ax_K, 0.10, 1.43 - 0.10 * (n - 1); text = label, color, fontsize = 12,

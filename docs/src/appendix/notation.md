@@ -161,6 +161,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``                                      |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
 | ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
+| ``h^{bl}``                          | `hᵇˡ`  |                                     | Boundary-layer depth, m; a diagnostic (the height of the capping inversion in convective conditions) |
 | ``T_0``                             | `T₀`   |                                     | Sea surface temperature                                                        |
 | ``qᵛ₀``                             | `qᵛ₀`  |                                     | Saturation specific humidity at sea surface                                    |
 | ``\mathscr{I}``                     | `ℐ`    |                                     | Radiative flux (intensity), W/m²                                               |
