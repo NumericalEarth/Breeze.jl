@@ -248,12 +248,9 @@ function tabulate_rain_from_quadrature(rain::Rain, arch=CPU(),
     # evaporation velocity-diameter table alike.
     fall_speed = convert(RainFallSpeed{FT}, rain.fall_speed)
 
-    vel_mass_eval = RainMassWeightedVelocityEvaluator(FT; n_points=quadrature_points,
-                                                      floors, fall_speed)
-    vel_num_eval = RainNumberWeightedVelocityEvaluator(FT; n_points=quadrature_points,
-                                                       floors, fall_speed)
-    evap_eval = RainEvaporationVentilationEvaluator(FT; n_points=quadrature_points,
-                                                    fall_speed)
+    vel_mass_eval = RainMassWeightedVelocityEvaluator(FT; n_points=quadrature_points, floors, fall_speed)
+    vel_num_eval = RainNumberWeightedVelocityEvaluator(FT; n_points=quadrature_points, floors, fall_speed)
+    evap_eval = RainEvaporationVentilationEvaluator(FT; n_points=quadrature_points, fall_speed)
 
     tab_vel_mass = TabulatedFunction(vel_mass_eval, arch, FT;
                                      range=log_lambda_range, points=lambda_points)
