@@ -6,10 +6,10 @@
 ##### handed — splits on `|ρw|` instead of `|w|`, inconsistently with the implicit solve. The AIVA
 ##### methods below scale the vertical momentum flux with the velocity CFL instead.
 #####
-##### The vertically-implicit *diffusion* half of the tridiagonal row is not mass-flux weighted
+##### The vertically-implicit *diffusion* half of the tridiagonal row is not density weighted
 ##### upstream: Breeze's prognostics are density weighted while the explicit flux divergence forms
-##### `∂z(ρ κ ∂z c)` on the *specific* variable. The z-Center coefficients in
-##### `mass_weighted_implicit_diffusion.jl` fix that; `ρw` is not yet weighted (see #944).
+##### `∂z(ρ κ ∂z c)` on the *specific* variable. The coefficients in
+##### `density_weighted_implicit_diffusion.jl` fix that at both z-locations.
 
 using Oceananigans.Advection:
     AdaptiveImplicitVerticalAdvection,
@@ -44,15 +44,14 @@ const AIVA = AdaptiveImplicitVerticalAdvection
 end
 
 # Assembles the scheme object that configures a prognostic's tridiagonal row. It travels in
-# `implicit_step!`'s `advection` slot and adds the mass-flux-weighted diffusion coefficients for
-# every z-Center prognostic. `ρw` passes through unwrapped: upstream owns its z-Face coefficients,
-# and its diffusion half is not yet weighted (see #944). Explicit schemes are still wrapped, since
-# the diffusion half needs the weighting either way.
+# `implicit_step!`'s `advection` slot and adds the density-weighted diffusion coefficients, which
+# dispatch on the field's z-location: `ρw` takes the z-Face row, everything else the z-Center one.
+# Explicit schemes are wrapped too, since the diffusion half needs the weighting either way; the
+# advection half passes `ℓz` through to upstream's coefficients unchanged.
 #
-# `diffusion_density` weights the diffusion half when it must differ from the density the solve is
-# called with, which happens only under the acoustic substepper (see `MassWeightedImplicitDiffusion`).
-implicit_step_advection(advection, name::Symbol, diffusion_density=nothing) =
-    name === :ρw ? advection : MassWeightedImplicitDiffusion(advection, diffusion_density)
+# `density` weights the diffusion half when it must differ from the density the solve is
+# called with, which happens only under the acoustic substepper (see `DensityWeightedImplicitOperator`).
+implicit_step_scheme(advection, density=nothing) = DensityWeightedImplicitOperator(advection, density)
 
 # Density weighting the advective flux of each prognostic. Momentum and the thermodynamic
 # variable are carried by the coupling density (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`; see `dynamics_density`),
