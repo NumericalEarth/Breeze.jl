@@ -94,9 +94,9 @@ parameter `cloud.number_concentration`.
   [kg/kg] (default 10⁻¹⁴)
 - `minimum_number_mixing_ratio`: Number below which a population is treated as
   absent [kg⁻¹] (default 10⁻¹⁶)
-- `cloud`: [`CloudDroplet`](@ref) holding the prescribed droplet number and the
+- `cloud`: [`Cloud`](@ref) holding the prescribed droplet number and the
   [`CloudShape`](@ref) every μᶜˡ diagnosis reads. `nothing` (default) uses
-  `CloudDroplet(FT)`.
+  `Cloud(FT)`.
 - `rain`: [`Rain`](@ref) skeleton holding the
   [`RainFallSpeed`](@ref) the startup quadrature integrates and the
   [`RainVentilation`](@ref) the evaporation and coupled-adjustment rates read.
@@ -120,7 +120,7 @@ parameter `cloud.number_concentration`.
 Pass `aerosol = AerosolActivation(AerosolMode())` to enable prognostic cloud
 droplet number from aerosol activation physics (Morrison & Grabowski 2007).
 When `aerosol = nothing` (default), cloud droplet number uses the prescribed
-`CloudDroplet.number_concentration`.
+`Cloud.number_concentration`.
 
 # Configuring the empirical warm-phase parameters
 
@@ -131,11 +131,11 @@ through the startup quadrature and every runtime kernel:
 ```jldoctest
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties:
-    CloudDroplet, CloudShape,
+    Cloud, CloudShape,
     Rain, RainFallSpeed, RainVentilation
 
-cloud = CloudDroplet(Float64;
-    shape_parameters = CloudShape(Float64; maximum_shape_parameter = 12))
+cloud = Cloud(Float64;
+    shape = CloudShape(Float64; maximum_shape_parameter = 12))
 
 rain = Rain(Float64;
     fall_speed = RainFallSpeed(Float64; plateau_velocity = 9.5),
@@ -162,7 +162,7 @@ PredictedParticlePropertiesMicrophysics
 ├── qmin: 1.0e-14 kg/kg
 ├── ice: Ice
 ├── rain: Rain
-├── cloud: CloudDroplet
+├── cloud: Cloud
 ├── process_rates: ProcessRate
 ├── negative_moisture_correction: SpeciesBorrowing(vertical_borrowing = nothing)
 ├── aerosol: nothing (prescribed CCN)
@@ -195,7 +195,7 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  warm_rain_scheme = KhairoutdinovKogan2000())
     if isnothing(process_rates)
         process_rates = ProcessRate(FT; thermodynamic_constants,
-                                              predict_supersaturation)
+                                    predict_supersaturation)
     end
     return read_lookup_tables(lookup_tables; FT,
                               thermodynamic_constants,
@@ -220,7 +220,7 @@ function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, "├── process_rates: ", summary(p3.process_rates), "\n")
     print(io, "├── negative_moisture_correction: ",
           isnothing(p3.negative_moisture_correction) ? "nothing (no repair)" :
-              summary(p3.negative_moisture_correction), "\n")
+          summary(p3.negative_moisture_correction), "\n")
     print(io, "├── aerosol: ", isnothing(p3.aerosol) ? "nothing (prescribed CCN)" : summary(p3.aerosol), "\n")
     print(io, "└── warm_rain_scheme: ", summary(p3.warm_rain_scheme))
 end

@@ -137,7 +137,7 @@ Returns a NamedTuple of the possibly-rescaled rates.
     dep = max(0, dep) * f_dep + min(0, dep) * f_sub
 
     return (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap,
-              dep, coat_cond, coat_evap, nuc_q, nuc_n)
+            dep, coat_cond, coat_evap, nuc_q, nuc_n)
 end
 
 """
@@ -367,8 +367,8 @@ end
 end
 
 # Bulk ice density from Table 1 at the diagnostic-population bracket.
-@inline ice_mean_density(bulk_properties::IceBulk, prep::PreparedInterpolation) =
-    evaluate_at(bulk_properties.mean_density, prep)
+@inline ice_mean_density(bulk::IceBulk, prep::PreparedInterpolation) =
+    evaluate_at(bulk.mean_density, prep)
 
 #####
 ##### Ice shape parameter (μⁱ) from Table 1
@@ -379,14 +379,14 @@ $(TYPEDSIGNATURES)
 
 Compute the ice PSD shape parameter μⁱ from the lookup tables.
 
-μⁱ is looked up directly from Table 1 (`bulk_properties.shape`), which stores the
+μⁱ is looked up directly from Table 1 (`bulk.shape`), which stores the
 shape parameter computed when the table was generated.
 """
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ)
     m̄ = safe_divide(qⁱ, nⁱ, one(FT))
     log_m = log10(ifelse(m̄ > 0, m̄, one(FT)))
-    return p3.ice.bulk_properties.shape(log_m, Fᶠ, Fˡ, ρᶠ)
+    return p3.ice.bulk.shape(log_m, Fᶠ, Fˡ, ρᶠ)
 end
 
 #####

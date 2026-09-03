@@ -36,7 +36,7 @@ means.
 
 ```@example p3_usage
 using Breeze.Microphysics.PredictedParticleProperties:
-    CloudDroplet, CloudShape,
+    Cloud, CloudShape,
     Rain, RainFallSpeed, RainVentilation
 
 # Cap the diagnosed cloud shape parameter below its default ceiling
@@ -46,7 +46,7 @@ cloud_shape = CloudShape(Float64;
     minimum_shape_parameter = 2,
     maximum_shape_parameter = 12)
 
-cloud = CloudDroplet(Float64; shape_parameters = cloud_shape)
+cloud = Cloud(Float64; shape = cloud_shape)
 
 # A slightly slower large-drop plateau and a stronger Reynolds ventilation term
 fall_speed = RainFallSpeed(Float64;
@@ -69,7 +69,7 @@ The containers survive lookup-table materialization, so the scheme the model ste
 the one that was configured:
 
 ```@example p3_usage
-(tuned.cloud.shape_parameters.maximum_shape_parameter,
+(tuned.cloud.shape.maximum_shape_parameter,
  tuned.rain.fall_speed.plateau_velocity,
  tuned.rain.ventilation.reynolds_coefficient)
 ```
@@ -109,7 +109,7 @@ using CairoMakie
 # (downloaded automatically on first use).
 p3 = PredictedParticlePropertiesMicrophysics()
 
-bulk = p3.ice.bulk_properties
+bulk = p3.ice.bulk
 
 # Mean particle mass axis, spanning most of the tabulated range.
 m̄ = 10 .^ range(-13, -3, length=200)
@@ -192,7 +192,7 @@ using SpecialFunctions: loggamma
 
 # Reconstruct N'(D) from the tabulated (λ, μ) and a prescribed N.
 function tabulated_psd(p3, q, N, Fᶠ, ρᶠ; Fˡ = 0.0)
-    bulk = p3.ice.bulk_properties
+    bulk = p3.ice.bulk
     log_m̄ = log10(q / N)
     λ = bulk.slope(log_m̄, Fᶠ, Fˡ, ρᶠ)
     μ = bulk.shape(log_m̄, Fᶠ, Fˡ, ρᶠ)

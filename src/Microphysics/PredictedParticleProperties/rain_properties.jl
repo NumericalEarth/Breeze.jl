@@ -73,25 +73,21 @@ RainFallSpeed(aᵥ=(4579.5, 49.62, 17.32) m/s, bᵥ=(0.667, 0.333, 0.167), Dᵗ=
 ```
 """
 function RainFallSpeed(FT::DataType = Oceananigans.defaults.FloatType;
-                                 branch_velocity_scales = (4579.5, 49.62, 17.32),
-                                 branch_mass_exponents = (2/3, 1/3, 1/6),
-                                 transition_diameters = (134.43e-6, 1511.64e-6, 3477.84e-6),
-                                 plateau_velocity = 9.17)
+                       branch_velocity_scales = (4579.5, 49.62, 17.32),
+                       branch_mass_exponents = (2/3, 1/3, 1/6),
+                       transition_diameters = (134.43e-6, 1511.64e-6, 3477.84e-6),
+                       plateau_velocity = 9.17)
 
     scales = NTuple{3, FT}(branch_velocity_scales)
     exponents = NTuple{3, FT}(branch_mass_exponents)
     diameters = NTuple{3, FT}(transition_diameters)
 
-    all(≥(0), scales) ||
-        throw(ArgumentError("branch_velocity_scales must be nonnegative, got $scales"))
-    all(≥(0), exponents) ||
-        throw(ArgumentError("branch_mass_exponents must be nonnegative, got $exponents"))
-    all(>(0), diameters) ||
-        throw(ArgumentError("transition_diameters must be positive, got $diameters"))
+    all(≥(0), scales) || throw(ArgumentError("branch_velocity_scales must be nonnegative, got $scales"))
+    all(≥(0), exponents) || throw(ArgumentError("branch_mass_exponents must be nonnegative, got $exponents"))
+    all(>(0), diameters) || throw(ArgumentError("transition_diameters must be positive, got $diameters"))
     diameters[1] < diameters[2] < diameters[3] ||
         throw(ArgumentError("transition_diameters must be strictly increasing, got $diameters"))
-    plateau_velocity ≥ 0 ||
-        throw(ArgumentError("plateau_velocity must be nonnegative, got $plateau_velocity"))
+    plateau_velocity ≥ 0 || throw(ArgumentError("plateau_velocity must be nonnegative, got $plateau_velocity"))
 
     return RainFallSpeed(scales, exponents, diameters, FT(plateau_velocity))
 end
@@ -101,10 +97,8 @@ end
 # configured values instead of erroring on the field types. The identity method is also the
 # tie-breaker that keeps `convert` unambiguous against `Base.convert(::Type{T}, ::T)`.
 Base.convert(::Type{RainFallSpeed{FT}}, p::RainFallSpeed) where FT =
-    RainFallSpeed(NTuple{3, FT}(p.branch_velocity_scales),
-                            NTuple{3, FT}(p.branch_mass_exponents),
-                            NTuple{3, FT}(p.transition_diameters),
-                            FT(p.plateau_velocity))
+    RainFallSpeed(NTuple{3, FT}(p.branch_velocity_scales), NTuple{3, FT}(p.branch_mass_exponents),
+                  NTuple{3, FT}(p.transition_diameters), FT(p.plateau_velocity))
 
 Base.convert(::Type{RainFallSpeed{FT}}, p::RainFallSpeed{FT}) where FT = p
 
@@ -161,15 +155,16 @@ RainVentilation(f₁ᵣ=0.78, f₂ᵣ=0.32)
 ```
 """
 function RainVentilation(FT::DataType = Oceananigans.defaults.FloatType;
-                                   constant_coefficient = 0.78,
-                                   reynolds_coefficient = 0.32)
+                         constant_coefficient = 0.78,
+                         reynolds_coefficient = 0.32)
 
-    constant_coefficient ≥ 0 ||
-        throw(ArgumentError("constant_coefficient must be nonnegative, got $constant_coefficient"))
-    reynolds_coefficient ≥ 0 ||
-        throw(ArgumentError("reynolds_coefficient must be nonnegative, got $reynolds_coefficient"))
+    f₁ᵣ = constant_coefficient
+    f₂ᵣ = reynolds_coefficient
 
-    return RainVentilation(FT(constant_coefficient), FT(reynolds_coefficient))
+    f₁ᵣ ≥ 0 || throw(ArgumentError("constant_coefficient must be nonnegative, got $f₁ᵣ"))
+    f₂ᵣ ≥ 0 || throw(ArgumentError("reynolds_coefficient must be nonnegative, got $f₂ᵣ"))
+
+    return RainVentilation(FT(f₁ᵣ), FT(f₂ᵣ))
 end
 
 # See the note on `RainFallSpeed` conversion above.
@@ -254,7 +249,7 @@ are `nothing` until [`tabulate_rain_from_quadrature`](@ref) materializes them fr
 ```jldoctest
 using Breeze.Microphysics.PredictedParticleProperties: Rain, RainVentilation
 rain = Rain(Float64; ventilation = RainVentilation(Float64;
-                                                                      constant_coefficient = 0.8))
+                                                   constant_coefficient = 0.8))
 rain.ventilation
 
 # output
@@ -262,15 +257,11 @@ RainVentilation(f₁ᵣ=0.8, f₂ᵣ=0.32)
 ```
 """
 function Rain(FT::DataType = Oceananigans.defaults.FloatType;
-                        maximum_mean_diameter = 2e-3,
-                        fall_speed = RainFallSpeed(FT),
-                        ventilation = RainVentilation(FT))
-    return Rain(
-        FT(maximum_mean_diameter),
-        convert(RainFallSpeed{FT}, fall_speed),
-        convert(RainVentilation{FT}, ventilation),
-        nothing, nothing, nothing,
-    )
+              maximum_mean_diameter = 2e-3,
+              fall_speed = RainFallSpeed(FT),
+              ventilation = RainVentilation(FT))
+    return Rain(FT(maximum_mean_diameter), convert(RainFallSpeed{FT}, fall_speed),
+                convert(RainVentilation{FT}, ventilation), nothing, nothing, nothing)
 end
 
 Base.summary(::Rain) = "Rain"

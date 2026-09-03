@@ -63,7 +63,7 @@ export
 
     # Rain and cloud droplet properties
     Rain,
-    CloudDroplet,
+    Cloud,
 
     # Empirical parameter containers for the warm-phase fits
     CloudShape,
@@ -71,9 +71,9 @@ export
     RainVentilation,
 
     # Rain PSD quadrature evaluators
-    RainMassWeightedVelocityEvaluator,
-    RainNumberWeightedVelocityEvaluator,
-    RainEvaporationVentilationEvaluator,
+    RainMassWeightedVelocity,
+    RainNumberWeightedVelocity,
+    RainVelocityDiameterIntegral,
 
     # Tabulated wrapper
     TabulatedFunction1D,

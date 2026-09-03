@@ -22,7 +22,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
                                  points=(2, 2, 2, 5))
     table_5d = TabulatedFunction((x1, x2, x3, x4, x5) -> Float64(x5), CPU(), Float64;
                                  range=(unit_axis, unit_axis, unit_axis, unit_axis,
-                                        index_axis),
+                                 index_axis),
                                  points=(2, 2, 2, 2, 5))
     wrapped_4d = RimeDensityIndexedTable4D(table_4d)
     wrapped_5d = RimeDensityIndexedTable5D(table_5d)

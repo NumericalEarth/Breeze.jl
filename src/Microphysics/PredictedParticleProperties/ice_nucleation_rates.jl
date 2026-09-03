@@ -74,11 +74,11 @@ than a grid-mean vapor state.
 end
 
 @inline function immersion_freezing_rate_coefficient(nucleation_rate_coefficient,
-                                                      droplet_volume,
-                                                      temperature_exponent_coefficient,
-                                                      supercooling,
-                                                      maximum_multiplier,
-                                                      divisor_floor)
+                                                     droplet_volume,
+                                                     temperature_exponent_coefficient,
+                                                     supercooling,
+                                                     maximum_multiplier,
+                                                     divisor_floor)
     FT = typeof(nucleation_rate_coefficient + droplet_volume +
                 temperature_exponent_coefficient + supercooling + maximum_multiplier)
     # Evaluated in the log domain, and not as `per_drop * exp(a ΔT)`: at large
@@ -178,11 +178,11 @@ negligible for small droplets.
 @inline function immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ)
     # μᶜˡ comes from the local Nᶜˡ (already [1/m³]) via Liu-Daum (2000) rather than
     # from a construction-time value, so the PSD correction varies with the local
-    # droplet population. The relation itself is read from `p3.cloud.shape_parameters`,
+    # droplet population. The relation itself is read from `p3.cloud.shape`,
     # the same container the construction-time and prognostic paths use.
     # Nᶜˡ is volumetric; nᶜˡ = Nᶜˡ/ρ is per-mass.
     nᶜˡ = max(Nᶜˡ / ρ, p3.minimum_number_mixing_ratio)
-    μᶜˡ = liu_daum_shape_parameter(Nᶜˡ, p3.cloud.shape_parameters)
+    μᶜˡ = liu_daum_shape_parameter(Nᶜˡ, p3.cloud.shape)
     return stochastic_immersion_freezing(p3, qᶜˡ, nᶜˡ, nᶜˡ, μᶜˡ, T)
 end
 

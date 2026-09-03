@@ -118,8 +118,8 @@ Compute per-particle ventilation integral C(D) × f_v(D) for deposition
 using PSD-integrated lookup tables.
 """
 @inline function deposition_ventilation(vent::P3Table4D,
-                                          vent_e::P3Table4D,
-                                          m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction)
+                                        vent_e::P3Table4D,
+                                        m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction)
     floors = parameters.floors
     # Both tables share Table-1 axes, so the coordinate is bracketed once.
     prep = ice_table_bracket(vent, m_mean, Fᶠ, Fˡ, ρᶠ, floors)

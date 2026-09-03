@@ -383,7 +383,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | ----------- | ---- | ------------- | ----------- |
 | ``N'(D)``   |      |               | Number concentration per unit diameter, ``N'(D) = N_0 D^μ e^{-λD}`` [m⁻⁴] |
 | ``N_0``     | `N₀` |               | Intercept of the gamma distribution [m⁻⁴⁻μ]; a scale factor, not a concentration. Species-labelled as `Nʳ₀` where the rate needs the rain PSD explicitly |
-| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `CloudDroplet.shape_parameter`, `shape_parameters` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}`` by the Liu-Daum relation configured in `CloudDroplet.shape_parameters` — once at construction for the prescribed number, and per cell for the prognostic one. ``μ^r = 0`` is structural rather than stored — it is baked into `rain_slope_parameter`, and `Rain.shape_parameter` is a placeholder that stays `nothing` |
+| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `Cloud.shape_parameter`, `shape` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}`` by the Liu-Daum relation configured in `Cloud.shape` — once at construction for the prescribed number, and per cell for the prognostic one. ``μ^r = 0`` is structural rather than stored — it is baked into `rain_slope_parameter`, and `Rain.shape_parameter` is a placeholder that stays `nothing` |
 | ``μ^i``     | `μⁱ` | | On-demand ice shape diagnostic [-] read from the Table 1 closure column; not a process-table coordinate |
 | ``λ^{cl}``, ``λ^r`` | `λᶜˡ`, `λʳ` | | Slope parameter [1/m] |
 | ``λ^i``     |      | `IceLambdaLimiter` | Ice slope parameter [1/m], bounded by the mean-size limiter |
@@ -443,7 +443,7 @@ reach both the startup quadrature and the runtime kernels. Sixteen scalars in to
 | ``f_{1r}``  |      | `RainVentilation.constant_coefficient` | Still-air rain ventilation term [-], default ``0.78`` |
 | ``f_{2r}``  |      | `RainVentilation.reynolds_coefficient` | Coefficient on ``\mathrm{Sc}^{1/3}\mathrm{Re}^{1/2}`` [-], default ``0.32`` |
 
-`CloudShape` is stored in `CloudDroplet.shape_parameters` and read by
+`CloudShape` is stored in `Cloud.shape` and read by
 every path that diagnoses ``μ^{cl}`` from a local droplet number: the construction-time
 diagnosis, `diagnose_cloud_dsd`, and `immersion_freezing_cloud_rate`.
 `RainFallSpeed` and `RainVentilation` are stored in
@@ -913,12 +913,12 @@ using CairoMakie
 
 p3 = PredictedParticlePropertiesMicrophysics()
 
-bulk = p3.ice.bulk_properties
+bulk = p3.ice.bulk
 
 # Table 1 is indexed by the mean particle mass m̄ = q/N and ice morphology.
 "Read (λ, μ) from Table 1 and rebuild N₀ = N λ^(μ+1) / Γ(μ+1)."
 function psd_from_table(p3, q, N, Fᶠ, ρᶠ; Fˡ = 0.0)
-    bulk = p3.ice.bulk_properties
+    bulk = p3.ice.bulk
     log_m̄ = log10(q / N)
     λ = bulk.slope(log_m̄, Fᶠ, Fˡ, ρᶠ)
     μ = bulk.shape(log_m̄, Fᶠ, Fˡ, ρᶠ)
@@ -1614,16 +1614,17 @@ appendix C, section b; [Pruppacher and Klett (1997)](@cite pruppacher2010microph
 ```math
 \dot{q}^r_\text{evap} = 2π\,\frac{n^r}{Γ(μ^r+1)}\,ρ\,D^v\,\mathscr{S}^l\,
                                    \left[\frac{f_{1r}\, Γ(μ^r+2)}{λ^r}
-                                       + f_{2r}\,\sqrt{ρ/η}\,\text{Sc}^{1/3}\,I_\text{vent}\right],
+                                       + f_{2r}\,\sqrt{ρ/η}\,\text{Sc}^{1/3}\,I_{VD}\right],
 ```
 
-with ``f_{1r}`` and ``f_{2r}`` read from `Rain.ventilation`
-(a `RainVentilation`, defaults ``0.78`` and ``0.32``), and ``I_\text{vent}`` the
-ventilation integral computed from the rain DSD (tabulated as
-`Rain.evaporation` by `RainEvaporationVentilationEvaluator`). Neither
-coefficient is baked into that table — it stores only the velocity-diameter integral
-``I_{VD}`` — so both stay configurable and are applied at runtime by
-`rain_ventilation_integral`, which serves rain evaporation and the coupled
+with ``f_{1r}`` and ``f_{2r}`` read from `Rain.ventilation` (a `RainVentilation`, defaults
+``0.78`` and ``0.32``), and ``I_{VD} = ∫ D \sqrt{V(D)\,D}\, e^{-λ^r D}\, \mathrm{d}D`` the
+velocity–diameter integral over the rain DSD, tabulated as `Rain.evaporation` by
+`RainVelocityDiameterIntegral`.
+
+Only ``I_{VD}`` is tabulated. Neither ventilation coefficient enters that table, and neither
+does ``ν``, so both stay configurable and are assembled at runtime by
+`rain_ventilation_integral` — which serves rain evaporation and the coupled
 saturation-adjustment relaxation coefficient alike.
 
 The number tendency follows the proportionality
@@ -1711,7 +1712,7 @@ applied to rain with ``μ^r = 0``, since Breeze implements no variable-``μ^r``
 closure. The cloud ``μ^{cl}``
 is diagnosed dynamically from the local ``N^{cl}`` via the Liu and Daum (2000)
 relation `liu_daum_shape_parameter` (`cloud_droplet_properties.jl`), which reads its
-coefficients and bounds from `p3.cloud.shape_parameters` — the same
+coefficients and bounds from `p3.cloud.shape` — the same
 `CloudShape` the construction-time and prognostic diagnoses use, so a configured
 fit moves all three together.
 

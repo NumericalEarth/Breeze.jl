@@ -108,7 +108,7 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
     nⁱ_eff = max(0, nⁱ)
 
     # Lookup ∫_{D≥9mm} m(D) N'(D) dD (normalized per particle)
-    f1pr28 = evaluate_at(p3.ice.bulk_properties.shedding, lookups.prep)
+    f1pr28 = evaluate_at(p3.ice.bulk.shedding, lookups.prep)
 
     # Fᶠ is the rime fraction of the ice-only mass, since qⁱ excludes qʷⁱ.
     rate = Fᶠ * f1pr28 * nⁱ_eff * Fˡ

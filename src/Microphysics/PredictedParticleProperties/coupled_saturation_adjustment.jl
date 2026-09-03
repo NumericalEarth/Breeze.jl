@@ -56,11 +56,11 @@ local state passes through unchanged.
 ) where FT
     cloud_water_adjustment = zero(qᶜˡ)
     return (; cloud_water_adjustment,
-              rate = zero(qᶜˡ),
-              qᶜˡ,
-              qᵛ,
-              qᵛ⁺ˡ,
-              T)
+            rate = zero(qᶜˡ),
+            qᶜˡ,
+            qᵛ,
+            qᵛ⁺ˡ,
+            T)
 end
 
 @inline function predicted_supersaturation_adjustment(
@@ -87,11 +87,11 @@ end
         adjusted_temperature, ρ, constants, PlanarLiquidSurface())
 
     return (; cloud_water_adjustment,
-              rate = cloud_water_adjustment / τ,
-              qᶜˡ = qᶜˡ + cloud_water_adjustment,
-              qᵛ = qᵛ - cloud_water_adjustment,
-              qᵛ⁺ˡ = adjusted_saturation,
-              T = adjusted_temperature)
+            rate = cloud_water_adjustment / τ,
+            qᶜˡ = qᶜˡ + cloud_water_adjustment,
+            qᵛ = qᵛ - cloud_water_adjustment,
+            qᵛ⁺ˡ = adjusted_saturation,
+            T = adjusted_temperature)
 end
 
 @inline function cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, Dᵛ, μᶜˡ, λᶜˡ,
@@ -110,10 +110,10 @@ end
     nʳ_eff = max(nʳ, FT(p3.minimum_number_mixing_ratio))
     active = qʳ_eff >= p3.minimum_mass_mixing_ratio
 
-    ventilation = rain_ventilation_integral(p3.rain.evaporation, p3.rain.ventilation, qʳ_eff, nʳ_eff,
-                                           transport.ν, transport.Dᵛ, parameters)
-    relaxation_coefficient = 2 * FT(π) * ventilation.Nʳ₀ * ρ * transport.Dᵛ *
-                             ventilation.integral
+    integrals = rain_ventilation_integral(p3.rain.evaporation, p3.rain.ventilation, qʳ_eff, nʳ_eff,
+                                          transport.ν, transport.Dᵛ, parameters)
+    relaxation_coefficient = 2 * FT(π) * integrals.Nʳ₀ * ρ * transport.Dᵛ *
+                             integrals.integral
 
     return ifelse(active, relaxation_coefficient, zero(FT))
 end

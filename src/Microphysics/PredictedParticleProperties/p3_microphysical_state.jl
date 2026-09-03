@@ -307,9 +307,9 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
     surface_temperature = Field{Center, Center, Nothing}(grid)
 
     fields = (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ,
-                qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, qᵛ,
-                wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ,
-                surface_temperature)
+              qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, qᵛ,
+              wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ,
+              surface_temperature)
 
     return merge(fields,
                  aerosol_activation_fields(p3.aerosol, grid),
@@ -328,9 +328,9 @@ end
 
 @inline aerosol_activation_fields(_, grid) =
     (; ρnᶜˡ = CenterField(grid),        # Cloud number density [1/m³]
-       ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
-       nᶜˡ = CenterField(grid),         # Cloud number concentration [kg⁻¹]
-       nᵃ = CenterField(grid))          # Unactivated aerosol [kg⁻¹]
+     ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
+     nᶜˡ = CenterField(grid),         # Cloud number concentration [kg⁻¹]
+     nᵃ = CenterField(grid))          # Unactivated aerosol [kg⁻¹]
 
 # Predicted supersaturation, off by default. With the switch off every rate that
 # would touch `sᵛ⁺ˡ` is gated to zero, so the prognostic carries no information.
@@ -400,7 +400,7 @@ end
     bᶠ = μ.ρbᶠ / ρ
     rime_state = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
     return merge(μ, (; ρqᶠ = ρ * rime_state.qᶠ,
-                       ρbᶠ = ρ * rime_state.bᶠ))
+                     ρbᶠ = ρ * rime_state.bᶠ))
 end
 
 # Droplet number and unactivated aerosol on the grid. Dispatch on the *type* of
@@ -475,7 +475,7 @@ end
 @inline function p3_ice_moment_bounds(p3::P3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(ρ)
     moments = p3_ice_moments(p3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
-    ρ_mean = ice_mean_density(p3.ice.bulk_properties, moments.prep)
+    ρ_mean = ice_mean_density(p3.ice.bulk, moments.prep)
     return P3IceMomentBounds{FT}(moments.qⁱ_total, moments.nⁱ_diagnostic,
                                  moments.nⁱ, ρ_mean)
 end
@@ -713,11 +713,11 @@ end
 
     FT = typeof(ρ)
     return P3TendencyResult{FT}(cloud_mass_tendency, cloud_number_tendency,
-                                     rain_mass_tendency, rain_number_tendency,
-                                     ice_mass_tendency, ice_number_tendency,
-                                     rime_mass_tendency, rime_volume_tendency,
-                                     coating_mass_tendency, supersaturation_tendency,
-                                     vapor_mass_tendency, aerosol_number_tendency)
+                                rain_mass_tendency, rain_number_tendency,
+                                ice_mass_tendency, ice_number_tendency,
+                                rime_mass_tendency, rime_volume_tendency,
+                                coating_mass_tendency, supersaturation_tendency,
+                                vapor_mass_tendency, aerosol_number_tendency)
 end
 
 # Adiabatic temperature tendency from the grid or parcel vertical velocity, used as
@@ -920,7 +920,7 @@ end
     ice = p3_core_ice_properties(p3, ρ, ℳ)
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     λʳ = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
-    ρ_mean = ice_mean_density(p3.ice.bulk_properties, ice.prep)
+    ρ_mean = ice_mean_density(p3.ice.bulk, ice.prep)
     return P3ProcessProps{FT}(ice.qᶠ, ice.bᶠ, ice.Fᶠ, ice.Fˡ, ice.ρᶠ,
                               ice.qⁱ_total, ice.nⁱ, ice.nⁱ_diagnostic, ρ_mean,
                               cloud.Nᶜˡ, λʳ)

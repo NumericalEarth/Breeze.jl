@@ -258,7 +258,7 @@ The evaporation rate is enhanced by ventilation (air flow around falling drops).
     # Internal helpers return negative (S - 1 < 0 when subsaturated).
     # Negate to get positive magnitude.
     evap_rate = -rain_evaporation_rate(p3.rain.evaporation, p3.rain.ventilation, qʳ_eff, nʳ_eff, S,
-                                        thermodynamic_factor, parameters, ν, Dᵛ, FT)
+                                       thermodynamic_factor, parameters, ν, Dᵛ, FT)
 
     # Cannot evaporate more than available
     τ_evap = parameters.rain_evaporation_timescale
@@ -281,7 +281,7 @@ I_{evap}(λ^r) = \\frac{f_{1r}}{(λ^r)^2}
 `I_VD` comes from the tabulated `table`, which stores
 ``∫ D \\sqrt{V D} e^{-λ^r D} dD`` with neither `ν` nor the Schmidt number baked
 in, so both T,P-dependent factors are applied here. ``f_{1r}`` and ``f_{2r}`` come from
-`ventilation_parameters`, a [`RainVentilation`](@ref), for the same reason:
+`ventilation`, a [`RainVentilation`](@ref), for the same reason:
 neither is baked into the table, so both remain configurable at runtime. Returns
 `(; λʳ, Nʳ₀, integral)`, since every caller needs the intercept
 ``N^r_0 = n^r λ^r`` alongside the integral.
@@ -289,7 +289,7 @@ neither is baked into the table, so both remain configurable at runtime. Returns
 Consumed by [`rain_evaporation_rate`](@ref) and by the coupled
 saturation-adjustment relaxation coefficient, both of which pass `p3.rain.ventilation`.
 """
-@inline function rain_ventilation_integral(table, ventilation_parameters, qʳ, nʳ, ν, Dᵛ, parameters)
+@inline function rain_ventilation_integral(table, ventilation, qʳ, nʳ, ν, Dᵛ, parameters)
     FT = typeof(qʳ)
     coefficient_floor = FT(parameters.floors.transport_coefficient)
 
@@ -299,8 +299,8 @@ saturation-adjustment relaxation coefficient, both of which pass `p3.rain.ventil
     # Intercept Nʳ₀ = Nʳ * λʳ  (for exponential DSD N'(D) = Nʳ₀ exp(-λ D))
     Nʳ₀ = rain_number_from_slope(qʳ, λʳ, parameters) * λʳ
 
-    f₁ᵣ = FT(ventilation_parameters.constant_coefficient)
-    f₂ᵣ = FT(ventilation_parameters.reynolds_coefficient)
+    f₁ᵣ = FT(ventilation.constant_coefficient)
+    f₂ᵣ = FT(ventilation.reynolds_coefficient)
 
     # Constant term: f1r × ∫ D × exp(-λD) dD = f1r / λ² (analytical for μʳ = 0)
     constant_integral = f₁ᵣ / λʳ^2
@@ -313,17 +313,16 @@ saturation-adjustment relaxation coefficient, both of which pass `p3.rain.ventil
 end
 
 # Tabulated path: use PSD-integrated ventilation integral I_evap(λʳ)
-@inline function rain_evaporation_rate(table::TabulatedFunction1D, ventilation_parameters,
-                                        qʳ, nʳ, S,
-                                        thermodynamic_factor, parameters, ν, Dᵛ, FT)
-    ventilation = rain_ventilation_integral(table, ventilation_parameters,
-                                            qʳ, nʳ, ν, Dᵛ, parameters)
+@inline function rain_evaporation_rate(table::TabulatedFunction1D, ventilation,
+                                       qʳ, nʳ, S,
+                                       thermodynamic_factor, parameters, ν, Dᵛ, FT)
+    integrals = rain_ventilation_integral(table, ventilation, qʳ, nʳ, ν, Dᵛ, parameters)
 
     # Evaporation rate (Mason 1971, PSD-integrated):
     #   dm/dt per drop = 4π × C × f_v × (S-1)/Φ,  C = D/2 (spherical capacitance)
     #   dq^r/dt = N_0 × ∫ 4π × (D/2) × f_v × exp(-λD) dD × (S-1)/Φ
     #           = 2π × N_0 × I_evap × (S-1) / Φ,  I_evap = ∫ D × f_v × exp(-λD) dD
-    return 2 * FT(π) * ventilation.Nʳ₀ * ventilation.integral * (S - 1) / thermodynamic_factor
+    return 2 * FT(π) * integrals.Nʳ₀ * integrals.integral * (S - 1) / thermodynamic_factor
 end
 
 #####

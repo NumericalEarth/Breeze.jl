@@ -286,7 +286,7 @@ end
 
     # CCN activation (prescribed or prognostic; depletes ℳ.nᵃ when prognostic)
     ccn = compute_ccn_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ,
-                                  qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+                                 qᵛ, qᵛ⁺ˡ, T, ρ, constants)
     ccn_activation_mass = ccn.mass
     ccn_activation_number = ccn.number
 
@@ -812,7 +812,7 @@ end
         dry_ice_sink_total = partial_melt + complete_melt + max(0, -dep)
         f_dry_ice = ifelse(iteration > 0,
                            sink_limiting_factor(dry_ice_sink_total, dry_ice_available,
-                                                dt_safety),
+                           dt_safety),
                            one(FT))
         partial_melt = partial_melt * f_dry_ice
         complete_melt = complete_melt * f_dry_ice
@@ -904,13 +904,13 @@ end
                            nuc_q + cloud_frz_q + rain_frz_q
     dry_ice_sink_total = partial_melt + complete_melt
     dry_ice_remaining = max(0, qⁱ +
-                                (dry_ice_source_total - dry_ice_sink_total) * dt_safety)
+                            (dry_ice_source_total - dry_ice_sink_total) * dt_safety)
 
     qwi_source_total = partial_melt + cloud_warm_to_ice + rain_warm_q +
                        wg_cloud + wg_rain + coat_cond
     qwi_sink_total = shed + refrz + coat_evap
     qwi_remaining = max(0, qʷⁱ_budget +
-                           (qwi_source_total - qwi_sink_total) * dt_safety)
+                        (qwi_source_total - qwi_sink_total) * dt_safety)
     total_ice_remaining = dry_ice_remaining + qwi_remaining
     liquid_fraction_remaining = safe_divide(qwi_remaining, total_ice_remaining,
                                             zero(FT))
@@ -969,8 +969,8 @@ end
     agg = min(agg, number_available_for_aggregation)
     ice_number_sink_total = melt_n + sublim_n + agg
     ice_number_remaining = max(0, number_after_correction +
-                                   (ice_number_source_total - ice_number_sink_total) *
-                                   dt_safety)
+                               (ice_number_source_total - ice_number_sink_total) *
+                               dt_safety)
 
     post_clip_dry_mass = ifelse(post_process_clipping_active,
                                 dry_ice_remaining / dt_safety, zero(FT))
@@ -1035,13 +1035,13 @@ end
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
                        cloud_warm_q + wg_cloud + wg_shed + max(0, -cond)
     cloud_remaining = max(0, max(0, qᶜˡ) +
-                             (cloud_source_total - cloud_sink_total) * dt_safety)
+                          (cloud_source_total - cloud_sink_total) * dt_safety)
 
     rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
                         cloud_warm_to_rain + rain_cond
     rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
     rain_remaining = max(0, max(0, qʳ) +
-                            (rain_source_total - rain_sink_total) * dt_safety)
+                         (rain_source_total - rain_sink_total) * dt_safety)
 
     # Diagnose the post-process number reservoirs as well, so frozen liquid carries
     # the number left by collection, breakup, melting, and activation rather than the
@@ -1051,7 +1051,7 @@ end
         p3, ρ, qᶜˡ, Nᶜˡ, ccn_activation_mass, ccn_activation_number,
         autoconv, accr, cloud_self, cloud_rim_n, cloud_frz_n, cloud_warm_n)
     prognostic_cloud_number = max(0, cloud.nᶜˡ +
-                                     cloud_number_tendency * dt_safety)
+                                  cloud_number_tendency * dt_safety)
     prescribed_cloud_number = p3.cloud.number_concentration / ρ
     cloud_number_remaining = ifelse(isnothing(p3.aerosol), prescribed_cloud_number,
                                     prognostic_cloud_number)
@@ -1060,7 +1060,7 @@ end
         p3, autoconv, melt_n, rain_evap_n, rain_self,
         rain_br, rain_rim_n, rain_frz_n, shed_n, cloud_warm_q, rain_warm_n, wg_shed_n)
     rain_number_remaining = max(0, nʳ +
-                                   rain_number_tendency * dt_safety)
+                                rain_number_tendency * dt_safety)
 
     cloud_hom_q, cloud_hom_n = homogeneous_freezing_rate(
         p3, cloud_remaining, cloud_number_remaining, T)

@@ -41,7 +41,7 @@ since they are not included in the ASCII table files.
 - `FT`: Float type (default `Float64`)
 - `arch`: Architecture for GPU transfer (default `CPU()`)
 - `thermodynamic_constants`: Source of shared phase and dry-air properties.
-- `cloud`: [`CloudDroplet`](@ref), or `nothing` for the default.
+- `cloud`: [`Cloud`](@ref), or `nothing` for the default.
 - `rain`: [`Rain`](@ref) skeleton supplying the fall-speed and ventilation
   parameters, or `nothing` for the default. Its parameter containers are preserved
   through the startup quadrature: the fall-speed law is what the three rain tables are
@@ -77,7 +77,7 @@ function read_lookup_tables(directory::AbstractString;
                                            thermodynamic_constants)
 
     # Resolved before the rain tabulation below, which needs its floors.
-    cloud = isnothing(cloud) ? CloudDroplet(FT) : cloud
+    cloud = isnothing(cloud) ? Cloud(FT) : cloud
     input_process_rates = if isnothing(process_rates)
         ProcessRate(FT; thermodynamic_constants)
     else
@@ -160,9 +160,9 @@ function build_ice_properties_from_tables(ice_4d, rain_ice, FT;
         ice_4d[:large_ice_ventilation_reynolds]
     )
 
-    bulk_properties = IceBulk(
-        ice_base.bulk_properties.maximum_mean_diameter,
-        ice_base.bulk_properties.minimum_mean_diameter,
+    bulk = IceBulk(
+        ice_base.bulk.maximum_mean_diameter,
+        ice_base.bulk.minimum_mean_diameter,
         ice_4d[:effective_radius],
         ice_4d[:mean_diameter],
         ice_4d[:mean_density],
@@ -195,7 +195,7 @@ function build_ice_properties_from_tables(ice_4d, rain_ice, FT;
         ice_base.maximum_shape_parameter,
         fall_speed,
         deposition,
-        bulk_properties,
+        bulk,
         collection,
         lambda_limiter,
         ice_rain_coll)
@@ -248,25 +248,19 @@ function tabulate_rain_from_quadrature(rain::Rain, arch=CPU(),
     # evaporation velocity-diameter table alike.
     fall_speed = convert(RainFallSpeed{FT}, rain.fall_speed)
 
-    vel_mass_eval = RainMassWeightedVelocityEvaluator(FT; n_points=quadrature_points, floors, fall_speed)
-    vel_num_eval = RainNumberWeightedVelocityEvaluator(FT; n_points=quadrature_points, floors, fall_speed)
-    evap_eval = RainEvaporationVentilationEvaluator(FT; n_points=quadrature_points, fall_speed)
+    mass_weighted_velocity = RainMassWeightedVelocity(FT; points=quadrature_points, floors, fall_speed)
+    number_weighted_velocity = RainNumberWeightedVelocity(FT; points=quadrature_points, floors, fall_speed)
+    velocity_diameter_integral = RainVelocityDiameterIntegral(FT; points=quadrature_points, fall_speed)
 
-    tab_vel_mass = TabulatedFunction(vel_mass_eval, arch, FT;
+    tab_vel_mass = TabulatedFunction(mass_weighted_velocity, arch, FT;
                                      range=log_lambda_range, points=lambda_points)
-    tab_vel_num = TabulatedFunction(vel_num_eval, arch, FT;
+    tab_vel_num = TabulatedFunction(number_weighted_velocity, arch, FT;
                                     range=log_lambda_range, points=lambda_points)
-    tab_evap = TabulatedFunction(evap_eval, arch, FT;
+    tab_evap = TabulatedFunction(velocity_diameter_integral, arch, FT;
                                  range=log_lambda_range, points=lambda_points)
 
     # Only the three lookup placeholders are replaced; every supplied physics parameter
     # is carried through unchanged.
-    return Rain(
-        FT(rain.maximum_mean_diameter),
-        fall_speed,
-        convert(RainVentilation{FT}, rain.ventilation),
-        tab_vel_num,
-        tab_vel_mass,
-        tab_evap
-    )
+    return Rain(FT(rain.maximum_mean_diameter), fall_speed,
+                convert(RainVentilation{FT}, rain.ventilation), tab_vel_num, tab_vel_mass, tab_evap)
 end

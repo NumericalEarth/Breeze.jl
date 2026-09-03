@@ -4,14 +4,14 @@ using Test
 
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties:
-    CloudDroplet,
+    Cloud,
     CloudShape,
     PredictedParticlePropertiesMicrophysics,
     ProcessRate,
-    RainEvaporationVentilationEvaluator,
+    RainVelocityDiameterIntegral,
     RainFallSpeed,
-    RainMassWeightedVelocityEvaluator,
-    RainNumberWeightedVelocityEvaluator,
+    RainMassWeightedVelocity,
+    RainNumberWeightedVelocity,
     Rain,
     RainVentilation,
     air_transport_properties,
@@ -56,7 +56,7 @@ end
     V_cm = ifelse(D <= FT(134.43e-6),  FT(4.5795e5) * cbrt(m_g)^2,
            ifelse(D <  FT(1511.64e-6), FT(4.962e3)  * cbrt(m_g),
            ifelse(D <  FT(3477.84e-6), FT(1.732e3)  * sqrt(cbrt(m_g)),
-                                       FT(917))))
+                  FT(917))))
 
     return V_cm / 100 * ρ_correction
 end
@@ -260,7 +260,7 @@ end
 
         # Construction-time diagnosis and the pre-computed freezing correction.
         for Nᶜˡ in cloud_number_concentrations(FT)
-            cloud = CloudDroplet(FT; number_concentration = Nᶜˡ)
+            cloud = Cloud(FT; number_concentration = Nᶜˡ)
             @test cloud.shape_parameter ≈ reference_liu_daum_shape_parameter(Nᶜˡ) rtol=rtol
             @test cloud.freezing_psd_correction ≈
                   PPP.psd_correction_spherical_volume(reference_liu_daum_shape_parameter(Nᶜˡ)) rtol=rtol
@@ -293,9 +293,9 @@ end
         reference = P3_REFERENCE[FT]
         rtol = integral_tolerance(FT)
 
-        velocity_mass = RainMassWeightedVelocityEvaluator(FT)
-        velocity_number = RainNumberWeightedVelocityEvaluator(FT)
-        velocity_diameter = RainEvaporationVentilationEvaluator(FT)
+        velocity_mass = RainMassWeightedVelocity(FT)
+        velocity_number = RainNumberWeightedVelocity(FT)
+        velocity_diameter = RainVelocityDiameterIntegral(FT)
 
         for (i, log_slope) in enumerate(p3_reference_log_slopes(FT))
             @test velocity_mass(log_slope) ≈ reference.velocity_mass[i] rtol=rtol
@@ -314,9 +314,9 @@ end
         Dᵛ = FT(P3_REFERENCE_VENTILATION_DIFFUSIVITY)
 
         for (i, (qʳ, nʳ)) in enumerate(p3_reference_ventilation_states(FT))
-            ventilation = rain_ventilation_integral(p3.rain.evaporation, p3.rain.ventilation,
-                                                    qʳ, nʳ, ν, Dᵛ, p3.process_rates)
-            @test ventilation.integral ≈ reference.ventilation_integral[i] rtol=rtol
+            integrals = rain_ventilation_integral(p3.rain.evaporation, p3.rain.ventilation,
+                                                  qʳ, nʳ, ν, Dᵛ, p3.process_rates)
+            @test integrals.integral ≈ reference.ventilation_integral[i] rtol=rtol
         end
     end
 
@@ -329,19 +329,19 @@ end
         # every μᶜˡ diagnosed from a local droplet number.
         custom_shape = CloudShape(FT; relative_dispersion_intercept = 0.35)
 
-        default_cloud = CloudDroplet(FT; number_concentration = 100e6)
-        custom_cloud = CloudDroplet(FT; number_concentration = 100e6,
-                                              shape_parameters = custom_shape)
+        default_cloud = Cloud(FT; number_concentration = 100e6)
+        custom_cloud = Cloud(FT; number_concentration = 100e6,
+                             shape = custom_shape)
 
         # (1) construction-time shape_parameter
-        @test custom_cloud.shape_parameters === custom_shape
+        @test custom_cloud.shape === custom_shape
         @test custom_cloud.shape_parameter != default_cloud.shape_parameter
         @test custom_cloud.shape_parameter ≈ liu_daum_shape_parameter(FT(100e6), custom_shape)
         @test custom_cloud.freezing_psd_correction != default_cloud.freezing_psd_correction
 
         default_p3 = PredictedParticlePropertiesMicrophysics(FT)
         custom_p3 = PredictedParticlePropertiesMicrophysics(FT; cloud = custom_cloud)
-        @test custom_p3.cloud.shape_parameters === custom_shape
+        @test custom_p3.cloud.shape === custom_shape
 
         ρ = FT(1.2)
         qᶜˡ = FT(5e-4)
@@ -359,8 +359,8 @@ end
         # An explicit construction-time `shape_parameter` override must NOT be what the
         # prognostic path uses: that path re-diagnoses from the local number.
         overridden_p3 = PredictedParticlePropertiesMicrophysics(FT;
-            cloud = CloudDroplet(FT; number_concentration = 100e6,
-                                           shape_parameter = 4))
+            cloud = Cloud(FT; number_concentration = 100e6,
+                          shape_parameter = 4))
         @test overridden_p3.cloud.shape_parameter == FT(4)
         @test diagnose_cloud_dsd(overridden_p3, qᶜˡ, nᶜˡ, ρ).μᶜˡ ≈ default_dsd.μᶜˡ
 
@@ -463,9 +463,9 @@ end
 
     @testset "P3Microphysics preserves a custom rain configuration [$FT]" for FT in all_float_types()
         fall_speed = RainFallSpeed(FT; plateau_velocity = 7.5,
-                                             transition_diameters = (150e-6, 1400e-6, 3200e-6))
+                                   transition_diameters = (150e-6, 1400e-6, 3200e-6))
         ventilation = RainVentilation(FT; constant_coefficient = 0.7,
-                                                reynolds_coefficient = 0.4)
+                                      reynolds_coefficient = 0.4)
         rain = Rain(FT; fall_speed, ventilation)
 
         p3 = PredictedParticlePropertiesMicrophysics(FT; rain)
@@ -615,7 +615,7 @@ end
         # No `Float64` promotion in a `Float32` scheme, including through the containers
         # and through the μᶜˡ diagnosis that a `Float64` keyword default would otherwise
         # widen.
-        @test p3.cloud.shape_parameters isa CloudShape{FT}
+        @test p3.cloud.shape isa CloudShape{FT}
         @test p3.rain.fall_speed isa RainFallSpeed{FT}
         @test p3.rain.ventilation isa RainVentilation{FT}
         @test p3.cloud.shape_parameter isa FT
@@ -626,13 +626,13 @@ end
 
         # Containers built at another precision are converted, not stored as-is.
         mixed = PredictedParticlePropertiesMicrophysics(FT;
-            cloud = CloudDroplet(FT;
-                        shape_parameters = CloudShape(Float64;
-                                                                relative_dispersion_intercept = 0.3)),
+            cloud = Cloud(FT;
+                        shape = CloudShape(Float64;
+                                           relative_dispersion_intercept = 0.3)),
             rain = Rain(FT;
                         fall_speed = RainFallSpeed(Float64; plateau_velocity = 8.5)))
-        @test mixed.cloud.shape_parameters isa CloudShape{FT}
-        @test mixed.cloud.shape_parameters.relative_dispersion_intercept == FT(0.3)
+        @test mixed.cloud.shape isa CloudShape{FT}
+        @test mixed.cloud.shape.relative_dispersion_intercept == FT(0.3)
         @test mixed.rain.fall_speed isa RainFallSpeed{FT}
         @test mixed.rain.fall_speed.plateau_velocity == FT(8.5)
     end
@@ -656,11 +656,11 @@ end
         ventilation = RainVentilation(FT; reynolds_coefficient = 0.4)
 
         p3 = PredictedParticlePropertiesMicrophysics(FT;
-            cloud = CloudDroplet(FT; shape_parameters = shape),
+            cloud = Cloud(FT; shape = shape),
             rain = Rain(FT; fall_speed, ventilation))
 
         adapted = on_architecture(default_arch, p3)
-        @test adapted.cloud.shape_parameters == shape
+        @test adapted.cloud.shape == shape
         @test adapted.rain.fall_speed == fall_speed
         @test adapted.rain.ventilation == ventilation
 

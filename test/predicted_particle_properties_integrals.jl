@@ -33,9 +33,9 @@ using Breeze.Microphysics.PredictedParticleProperties:
     rain_riming_rate,
     rime_density,
     P3MicrophysicalState,
-    RainMassWeightedVelocityEvaluator,
-    RainNumberWeightedVelocityEvaluator,
-    RainEvaporationVentilationEvaluator,
+    RainMassWeightedVelocity,
+    RainNumberWeightedVelocity,
+    RainVelocityDiameterIntegral,
     homogeneous_freezing_cloud_rate,
     homogeneous_freezing_rain_rate,
     immersion_freezing_cloud_rate,
@@ -111,7 +111,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         # Check all sub-containers exist
         @test ice.fall_speed isa IceFallSpeed
         @test ice.deposition isa IceDeposition
-        @test ice.bulk_properties isa IceBulk
+        @test ice.bulk isa IceBulk
         @test ice.collection isa IceCollection
         @test ice.lambda_limiter isa IceLambdaLimiter
         @test ice.ice_rain isa IceRainCollection
@@ -196,7 +196,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Cloud droplet properties" begin
-        cloud = CloudDroplet()
+        cloud = Cloud()
         @test cloud.number_concentration ≈ 200e6
         @test cloud.condensation_timescale ≈ 1.0
 
@@ -207,16 +207,16 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test cloud.shape_parameter ≈ liu_daum_shape_parameter(200e6)
 
         # Explicit shape_parameter overrides Liu-Daum
-        cloud_override = CloudDroplet(Float64; shape_parameter=5)
+        cloud_override = Cloud(Float64; shape_parameter=5)
         @test cloud_override.shape_parameter ≈ 5.0
 
         # The relation itself is a stored, configurable container
-        @test cloud.shape_parameters isa PPP.CloudShape{Float64}
-        @test cloud.shape_parameters.relative_dispersion_number_coefficient ≈ 5.714e-10
-        @test cloud.shape_parameters.relative_dispersion_intercept ≈ 0.2714
+        @test cloud.shape isa PPP.CloudShape{Float64}
+        @test cloud.shape.relative_dispersion_number_coefficient ≈ 5.714e-10
+        @test cloud.shape.relative_dispersion_intercept ≈ 0.2714
 
         # Test custom parameters
-        cloud_custom = CloudDroplet(Float64; number_concentration=50e6)
+        cloud_custom = Cloud(Float64; number_concentration=50e6)
         @test cloud_custom.number_concentration ≈ 50e6
         # Marine Nᶜˡ → higher μᶜˡ than continental (fewer, larger, more uniform drops)
         @test cloud_custom.shape_parameter > cloud.shape_parameter

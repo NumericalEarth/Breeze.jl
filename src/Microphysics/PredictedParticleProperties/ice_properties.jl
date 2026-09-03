@@ -60,7 +60,7 @@ function IceFallSpeed(FT::DataType = Oceananigans.defaults.FloatType;
                       reference_pressure = 60000,     # 600 hPa
                       reference_temperature = 253.15, # -20 °C
                       reference_air_density = reference_pressure /
-                          (dry_air_gas_constant(thermodynamic_constants) * reference_temperature))
+                      (dry_air_gas_constant(thermodynamic_constants) * reference_temperature))
     return IceFallSpeed(FT(reference_air_density), nothing, nothing)
 end
 
@@ -186,8 +186,8 @@ size distribution. They are used for radiation, radar, and diagnostics.
 [Field et al. (2007)](@cite FieldEtAl2007) for μⁱ-λ relationship.
 """
 function IceBulk(FT::DataType = Oceananigans.defaults.FloatType;
-                           maximum_mean_diameter = 20e-3,
-                           minimum_mean_diameter = 2e-6)
+                 maximum_mean_diameter = 20e-3,
+                 minimum_mean_diameter = 2e-6)
     return IceBulk(
         FT(maximum_mean_diameter),
         FT(minimum_mean_diameter),
@@ -353,7 +353,7 @@ struct Ice{FT, FS, DP, BP, CL, LL, IR}
     # Table 1, so `on_architecture` transfers every table to the device exactly once.
     fall_speed :: FS
     deposition :: DP
-    bulk_properties :: BP
+    bulk :: BP
     collection :: CL
     lambda_limiter :: LL
     ice_rain :: IR
@@ -392,10 +392,10 @@ The mass-diameter relationship is from
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 """
 function Ice(FT::DataType = Oceananigans.defaults.FloatType;
-                       thermodynamic_constants = ThermodynamicConstants(FT),
-                       minimum_rime_density = 50,
-                       maximum_rime_density = 900,
-                       maximum_shape_parameter = 20)
+             thermodynamic_constants = ThermodynamicConstants(FT),
+             minimum_rime_density = 50,
+             maximum_rime_density = 900,
+             maximum_shape_parameter = 20)
     return Ice(
         FT(minimum_rime_density),
         FT(maximum_rime_density),
@@ -416,7 +416,7 @@ function Base.show(io::IO, ice::Ice)
     print(io, "├── μmax: ", ice.maximum_shape_parameter, "\n")
     print(io, "├── ", ice.fall_speed, "\n")
     print(io, "├── ", ice.deposition, "\n")
-    print(io, "├── ", ice.bulk_properties, "\n")
+    print(io, "├── ", ice.bulk, "\n")
     print(io, "├── ", ice.collection, "\n")
     print(io, "├── ", ice.lambda_limiter, "\n")
     print(io, "└── ", ice.ice_rain)
