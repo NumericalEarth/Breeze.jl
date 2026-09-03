@@ -80,7 +80,7 @@ heatmap(liquid_ice_potential_temperature(model), colormap=:thermal, axis=(; aspe
 
 <img width="1186" height="633" alt="image" src="https://github.com/user-attachments/assets/97d6429a-a68b-4ba5-ad07-9a5075a28c5f" />
 
-Swap `CPU()` for `GPU()` and run `using CUDA` to run on an NVIDIA GPU.
+Add `using CUDA` and swap `CPU()` for `GPU()` to run on an NVIDIA GPU.
 
 ## Features
 
