@@ -1127,7 +1127,7 @@ end
     snow = parameters.precip.snow
     rain_velocity = parameters.terminal_velocity.rain
     snow_velocity = parameters.terminal_velocity.snow
-    air_properties = parameters.air_properties
+    air = parameters.air_properties
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     qᶜˡ = ℳ.qᶜˡ
     qᶜⁱ = ℳ.qᶜⁱ
@@ -1157,7 +1157,7 @@ end
         processes.rain_condensation_evaporation,
         rain,
         rain_velocity,
-        air_properties,
+        air,
         q,
         qʳ,
         ρ,
@@ -1171,7 +1171,7 @@ end
         processes.snow_deposition_sublimation,
         snow,
         snow_velocity,
-        air_properties,
+        air,
         q,
         qˢ,
         ρ,
@@ -1185,7 +1185,7 @@ end
         processes.snow_melt,
         snow,
         snow_velocity,
-        air_properties,
+        air,
         qˢ,
         ρ,
         T,
@@ -1198,7 +1198,7 @@ end
     Sᵐᵉˡᵗᶜⁱ = cloud_ice_melt_rate(
         processes.cloud_ice_melt,
         cloud_ice,
-        air_properties,
+        air,
         qᶜⁱ,
         ρ,
         T,

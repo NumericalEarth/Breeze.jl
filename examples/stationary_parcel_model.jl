@@ -117,7 +117,7 @@ function one_moment_parameters(τ_relax)
         process_params,
         parameters.cloud,
         parameters.precip,
-        parameters.air_properties,
+        parameters.air,
         parameters.terminal_velocity,
     )
 end

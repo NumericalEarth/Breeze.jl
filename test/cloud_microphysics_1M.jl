@@ -38,14 +38,14 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     @test converted_categories.freezing_temperature === FT(273)
 
     # Disabled formation options materialize as zero-rate Breeze models.
-    disabled_parameters = Microphysics1MParams(
+    disabled_microphysics = Microphysics1MParams(
         FT;
         cloud_liquid_formation = nothing,
         cloud_ice_formation = nothing,
     )
     disabled_categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(
         FT;
-        parameters = disabled_parameters,
+        parameters = disabled_microphysics,
     )
     μ1_disabled = OneMomentCloudMicrophysics(FT; categories = disabled_categories)
     @test iszero(μ1_disabled.cloud_formation.liquid.rate)

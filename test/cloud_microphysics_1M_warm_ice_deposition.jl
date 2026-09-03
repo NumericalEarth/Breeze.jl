@@ -118,7 +118,7 @@ end
         return tendencies, microphysics
     end
 
-    disabled_parameters = CMP.Microphysics1MParams(FT; disabled_options...)
+    disabled_microphysics = CMP.Microphysics1MParams(FT; disabled_options...)
 
     # Supersaturation-dependent ice autoconversion transfers cloud ice to snow.
     options = merge(disabled_options, (; snow_autoconversion = CMP.WithSupersaturation()))
@@ -143,7 +143,7 @@ end
 
     # Numerical repair remains active when physical cloud formation is disabled.
     tendencies, = evaluate_tendencies(
-        disabled_parameters,
+        disabled_microphysics,
         FT(250),
         FT(0.001),
         FT(-1e-4),
@@ -156,7 +156,7 @@ end
     @test sum(tendencies) ≈ zero(FT) atol=eps(FT)
 
     tendencies, = evaluate_tendencies(
-        disabled_parameters,
+        disabled_microphysics,
         FT(250),
         FT(0.001),
         FT(0),
@@ -169,7 +169,7 @@ end
     @test sum(tendencies) ≈ zero(FT) atol=eps(FT)
 
     tendencies, = evaluate_tendencies(
-        disabled_parameters,
+        disabled_microphysics,
         FT(250),
         FT(0.001),
         FT(0),

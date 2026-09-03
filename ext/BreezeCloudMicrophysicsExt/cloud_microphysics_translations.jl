@@ -77,7 +77,7 @@ for use from Breeze GPU kernels.
 """
 @inline function temperature_dependent_ice_relaxation_timescale(
     cloud_ice::CloudIce,
-    air_properties::AirProperties,
+    air::AirProperties,
     frostenberg,
     qᶜⁱ,
     T,
@@ -86,7 +86,7 @@ for use from Breeze GPU kernels.
     Tᶜ = min(T - frostenberg.T_freeze, 0)
     Nᶜⁱ = exp(9 * log(-Tᶜ / 10))
     ρᵢ = cloud_ice.ρᵢ
-    Dᵛ = air_properties.D_vapor
+    Dᵛ = air.D_vapor
     r = max(ifelse(
         Nᶜⁱ > ϵ_numerics(FT),
         cbrt(3 * qᶜⁱ / (4 * FT(π) * Nᶜⁱ * ρᵢ)),
@@ -134,7 +134,7 @@ Compute melting of cloud ice to cloud liquid using Breeze thermodynamics.
 """
 @inline function cloud_ice_melting(
     cloud_ice::CloudIce,
-    air_properties::AirProperties,
+    air::AirProperties,
     qᶜⁱ::FT,
     ρ::FT,
     T::FT,
@@ -142,7 +142,7 @@ Compute melting of cloud ice to cloud liquid using Breeze thermodynamics.
     constants,
 ) where {FT}
     (; pdf, mass) = cloud_ice
-    K = air_properties.K_therm
+    K = air.K_therm
     ℒf = ice_latent_heat(T, constants) - liquid_latent_heat(T, constants)
     n₀ = get_n0(pdf)
     λ⁻¹ = lambda_inverse(pdf, mass, qᶜⁱ, ρ)
@@ -537,7 +537,7 @@ particles when air becomes supersaturated. This struct bundles the parameters ne
 to compute the activation source term for cloud droplet number concentration.
 
 # Fields
-- `activation_parameters`: `AerosolActivationParameters` from CloudMicrophysics.jl
+- `activation`: `AerosolActivationParameters` from CloudMicrophysics.jl
 - `aerosol_distribution`: Aerosol size distribution (modes with number, size, hygroscopicity)
 - `nucleation_timescale`: Nucleation timescale [s] for converting activation deficit to rate (default: 1s)
 
@@ -546,7 +546,7 @@ to compute the activation source term for cloud droplet number concentration.
     aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 """
 struct AerosolActivation{AP, AD, FT}
-    activation_parameters :: AP
+    activation :: AP
     aerosol_distribution :: AD
     nucleation_timescale :: FT
 end
@@ -611,7 +611,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     Nˡ = ℳ.nᶜˡ * ρ  # convert from per-mass to per-volume
     Nⁱ = zero(FT)   # warm phase: no ice
 
-    ap = aerosol_activation.activation_parameters
+    ap = aerosol_activation.activation
     ad = aerosol_activation.aerosol_distribution
 
     # Thermodynamic properties from Breeze
@@ -709,7 +709,7 @@ end
 # Helper function to compute Sᵐᵃˣ
 # Dispatches on aerosol_activation type to enable different activation schemes
 @inline function compute_smax(aerosol_activation, A::FT, α::FT, γ::FT, G::FT, w::FT, ρᴸ::FT) where FT
-    ap = aerosol_activation.activation_parameters
+    ap = aerosol_activation.activation
     ad = aerosol_activation.aerosol_distribution
 
     # Use safe positive w to avoid NaN in computation; result is 0 when w ≤ 0
