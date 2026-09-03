@@ -35,6 +35,7 @@ for arch in arches
     #####
 
     @testset "WS-RK3 model runs without NaN [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
@@ -55,6 +56,7 @@ for arch in arches
         @test !any(isnan, parent(model.momentum.ρu))
         @test !any(isnan, parent(model.momentum.ρw))
         @test !any(isnan, parent(model.dynamics.dry_density))
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -69,6 +71,7 @@ for arch in arches
     #####
 
     @testset "Backward integration: one step forward and back [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
@@ -115,6 +118,7 @@ for arch in arches
         @test isapprox(ρ_final,  ρ_init;  rtol=1e-3)
         @test isapprox(ρu_final, ρu_init; atol=1e-3)
         @test isapprox(ρw_final, ρw_init; atol=1e-2)
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -160,6 +164,7 @@ for arch in arches
     end
 
     @testset "IGW stability: WS-RK3 (Δt=12, Ns=8) [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
         model = build_igw_model(arch; Ns=8, κᵈ=0.10)
@@ -178,6 +183,7 @@ for arch in arches
         # Density should remain physical
         ρ_min = @allowscalar minimum(interior(model.dynamics.dry_density))
         @test ρ_min > 0
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -267,6 +273,7 @@ for arch in arches
     end
 
     @testset "Tiny dry thermal bubble consistency [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
         # Note: anelastic models aren't currently supported by the Metal backend because
@@ -320,6 +327,7 @@ for arch in arches
             @test abs(split.zᵂ - explicit.zᵂ) ≤ Δz
             @test abs(split.zᵂ - anelastic.zᵂ) ≤ 2Δz
         end
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -327,6 +335,7 @@ for arch in arches
     #####
 
     @testset "Balanced state stays quiet [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
         Nx, Ny, Nz = 16, 8, 10
@@ -350,6 +359,7 @@ for arch in arches
         # With no perturbation and balanced reference state, w should be near zero
         w_max = @allowscalar maximum(abs, interior(model.velocities.w))
         @test w_max < sqrt(eps(FT))  # Should be at machine precision level
+        Oceananigans.defaults.FloatType = old_FT
     end
 
 end

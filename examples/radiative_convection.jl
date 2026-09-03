@@ -168,7 +168,7 @@ microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 # equilibrium: ozone absorbs shortwave radiation and the coarse upper cells
 # respond strongly. A Newtonian relaxation of temperature toward the initial
 # profile above 8 km keeps the stratosphere anchored without affecting the
-# tropospheric dynamics. We apply this as an energy forcing on `ρe`, which
+# tropospheric dynamics. We apply this as an energy forcing on `ρs`, which
 # Breeze automatically converts to a `ρθ` tendency.
 
 Tᵣ = reference_state.temperature
@@ -189,7 +189,7 @@ end
 sponge = Forcing(stratospheric_relaxation; discrete_form=true,
                  parameters=(; Tᵣ, ρᵣ, cᵖᵈ, τ=τ_sponge))
 
-forcing = (; ρe=sponge)
+forcing = (; ρs=sponge)
 
 # ## Model assembly
 

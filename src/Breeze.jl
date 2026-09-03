@@ -105,8 +105,11 @@ export
     vapor_gas_constant,
     PlanarLiquidSurface,
     PlanarIceSurface,
+    DrySurface,
 
     # Microphysics
+    aerosol_field_names,
+    prognostic_field_names,
     SaturationAdjustment,
     InstantaneousPrecipitation,
     MixedPhaseEquilibrium,
@@ -122,9 +125,12 @@ export
     number_concentration_field,
     BulkMicrophysics,
     initial_aerosol_number,
+    initial_aerosol_number_density,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
     ConstantRateCondensateFormation,
+    P3Microphysics,
+    PredictedParticlePropertiesMicrophysics,
 
     # BoundaryConditions
     BulkDrag,
@@ -226,6 +232,9 @@ export
     FieldTimeSeries, FieldDataset, InMemory, OnDisk,
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
+
+include("Utils.jl")
+using .Utils
 
 include("Solvers.jl")
 using .Solvers

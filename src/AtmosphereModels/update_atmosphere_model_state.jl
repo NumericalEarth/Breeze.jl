@@ -201,7 +201,7 @@ Compute auxiliary model variables:
 
 - thermodynamic variables from the prognostic thermodynamic state,
     * temperature ``T``, possibly involving saturation adjustment
-    * specific thermodynamic variable (``e = ρe / ρ`` or ``θ = ρθ / ρ``)
+    * specific thermodynamic variable (``s = ρs / ρ`` or ``θ = ρθ / ρ``)
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
 """
 function compute_auxiliary_variables!(model)
@@ -216,6 +216,7 @@ function compute_auxiliary_variables!(model)
 
     # Compute diffusivities
     compute_closure_fields!(model.closure_fields, model.closure, model)
+    fill_halo_regions!(model.closure_fields; only_local_halos=true)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
@@ -296,6 +297,11 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     arch = grid.architecture
 
     model_fields = fields(model)
+
+    # The sedimentation velocities the scalar kernels below read are established by
+    # `update_microphysical_auxiliaries!` in `compute_auxiliary_variables!`, so they are
+    # already current for this stage — and, unlike a tendency-time refresh, they stay
+    # current after an `update_state!` that skips tendency computation.
 
     #####
     ##### Momentum tendencies (skip for kinematic dynamics)

@@ -43,6 +43,7 @@ for arch in arches
     #####
 
     @testset "Nonzero momentum OBC: defaults on perturbation, stable step [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
@@ -84,6 +85,7 @@ for arch in arches
         @test !any(isnan, parent(model.momentum.ρu))
         @test !any(isnan, parent(model.momentum.ρw))
         @test !any(isnan, parent(model.dynamics.dry_density))
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     #####
@@ -95,6 +97,7 @@ for arch in arches
     #####
 
     @testset "open_boundary_relaxation kwarg propagation [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
@@ -114,9 +117,11 @@ for arch in arches
         @test_throws ArgumentError SplitExplicitTimeDiscretization(; open_boundary_relaxation = 0)
         @test_throws ArgumentError SplitExplicitTimeDiscretization(; open_boundary_relaxation = 1.5)
         @test_throws ArgumentError SplitExplicitTimeDiscretization(; open_boundary_relaxation = -0.1)
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     @testset "Open-boundary relaxation is a no-op without active open BCs [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
         # Doubly-periodic: no `Open` BC anywhere; `is_active_open_bc` should
@@ -142,9 +147,11 @@ for arch in arches
         run!(Simulation(model_walls; Δt=1, stop_iteration=1, verbose=false))
         @test model_walls.clock.iteration == 1
         @test !any(isnan, parent(model_walls.dynamics.dry_density))
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     @testset "Open-boundary relaxation pulls outermost cell toward prescribed ρ, ρθ [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
         # Thin column so the hydrostatic ρ_ref variation is small (<1%) compared
@@ -234,9 +241,11 @@ for arch in arches
         @test ρθ_east  ≥ ρθ_threshold
         @test ρθ_south ≥ ρθ_threshold
         @test ρθ_north ≥ ρθ_threshold
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     @testset "Asymmetric wall values: each side tracks its own prescribed ρ [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
         # Distinct ρ_wall on each side catches a kernel where east/west or
@@ -291,9 +300,12 @@ for arch in arches
         @test abs(ρ_east  - ρ_wall_east)  < abs(ρ_east  - ρ_wall_west)
         @test abs(ρ_south - ρ_wall_south) < abs(ρ_south - ρ_wall_north)
         @test abs(ρ_north - ρ_wall_north) < abs(ρ_north - ρ_wall_south)
+
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     @testset "Relaxation factor α controls pull strength [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
         # Two identical models differing only in α. With cumulative pull
@@ -332,9 +344,11 @@ for arch in arches
         ρ_west_high = @allowscalar mean(interior(model_high.dynamics.dry_density)[1, :, :])
 
         @test abs(ρ_west_high - ρ_wall) < abs(ρ_west_low - ρ_wall)
+        Oceananigans.defaults.FloatType = old_FT
     end
 
     @testset "NormalFlowBoundaryCondition(nothing) skips relaxation [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
         # `is_active_open_bc` excludes `NormalFlowBoundaryCondition(nothing)` via its
@@ -375,6 +389,7 @@ for arch in arches
         # would be pulled toward ρ_wall.
         @test abs(ρ_west - ρ_ref0) < abs(ρ_west - ρ_wall)
         @test abs(ρ_east - ρ_ref0) < abs(ρ_east - ρ_wall)
+        Oceananigans.defaults.FloatType = old_FT
     end
 
 end

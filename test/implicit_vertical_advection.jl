@@ -3,10 +3,10 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Oceananigans
 using Oceananigans: TendencyCallsite
-using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, needs_implicit_solver,
+using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization,
                               cell_advection_timescale, AdaptiveImplicitVerticalAdvection,
                               vertical_scheme, FluxFormAdvection
-using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, needs_implicit_solver
 using Oceananigans.Grids: Center, Face, znode
 using Oceananigans.Operators: volume
 using Oceananigans.Solvers: BatchedTridiagonalSolver
@@ -76,7 +76,7 @@ import Breeze.AtmosphereModels as AM
         td.Δt[] = FT(1//1000)
         before = Array(interior(q))
         implicit_step!(q, solver, nothing, nothing, nothing, clock, (;), FT(1//1000),
-                       AM.VerticalMomentumImplicitAdvection(scheme), (; w), ρ)
+                       scheme, (; w), ρ)
         @test Array(interior(q)) == before
 
         # Strong splitting: the density-weighted upwind system must stay finite, conserve the
@@ -94,7 +94,7 @@ import Breeze.AtmosphereModels as AM
                                  for k in 1:Nz) / column_momentum(q)
         height₀ = momentum_height(q)
         implicit_step!(q, solver, nothing, nothing, nothing, clock, (;), Δt,
-                       AM.VerticalMomentumImplicitAdvection(scheme), (; w), ρ)
+                       scheme, (; w), ρ)
         @test all(isfinite, Array(interior(q)))
         @test column_momentum(q) ≈ momentum₀ rtol=sqrt(eps(FT))
         @test minimum(q[1, 1, k] for k in 1:Nz) ≥ -sqrt(eps(FT))

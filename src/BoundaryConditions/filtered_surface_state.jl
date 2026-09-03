@@ -8,7 +8,7 @@
 #####
 ##### `FilteredSurfaceVelocities` holds the filtered velocity components and the
 ##### filtered virtual potential temperature `θᵥ` used by stability-dependent bulk
-##### coefficients. Per-BC scalar differences (θ, e, qᵛ) are held separately in
+##### coefficients. Per-BC scalar differences (θ, s, qᵛ) are held separately in
 ##### `FilteredSurfaceScalar`.
 #####
 

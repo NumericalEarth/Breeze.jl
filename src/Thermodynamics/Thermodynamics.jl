@@ -12,6 +12,7 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        total_mixing_ratio, total_specific_moisture,
        liquid_latent_heat, ice_latent_heat,
        saturation_vapor_pressure, saturation_specific_humidity, supersaturation,
+       air_pressure, psychrometric_correction,
        equilibrium_saturation_specific_humidity, adjustment_saturation_specific_humidity,
        dewpoint_temperature,
        vapor_pressure, relative_humidity,
@@ -19,7 +20,7 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        surface_density,
        temperature_from_potential_temperature, potential_temperature_from_temperature,
        temperature, with_temperature, with_moisture,
-       PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
+       PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface, DrySurface,
        # Phase equilibrium types
        AbstractPhaseEquilibrium, WarmPhaseEquilibrium, MixedPhaseEquilibrium,
        equilibrated_surface

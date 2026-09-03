@@ -23,22 +23,22 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyMod
     grid = model.grid
     arch = grid.architecture
 
-    ρe_args = (
+    ρs_args = (
         Val(1),
-        model.forcing.ρe,
-        model.advection.ρe,
+        model.forcing.ρs,
+        model.advection.ρs,
         radiation_flux_divergence(model.radiation),
         common_args...,
         model.temperature)
 
-    Gρe = model.timestepper.Gⁿ.ρe
-    launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρe, grid, ρe_args)
+    Gρs = model.timestepper.Gⁿ.ρs
+    launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρs, grid, ρs_args)
     return nothing
 end
 
 @inline function static_energy_tendency(i, j, k, grid,
                                         id,
-                                        ρe_forcing,
+                                        ρs_forcing,
                                         advection,
                                         radiation_flux_divergence_field,
                                         dynamics,
@@ -67,7 +67,7 @@ end
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             + ρe_forcing(i, j, k, grid, clock, model_fields)
+             + ρs_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
 end
 
@@ -75,14 +75,14 @@ end
 ##### Set thermodynamic variables
 #####
 
-AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:ρe}, value) =
+AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:ρs}, value) =
     set!(model.formulation.energy_density, value)
 
-function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:e}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:s}, value)
     set!(model.formulation.specific_energy, value)
     ρ = dynamics_density(model.dynamics)
-    e = model.formulation.specific_energy
-    set!(model.formulation.energy_density, ρ * e)
+    s = model.formulation.specific_energy
+    set!(model.formulation.energy_density, ρ * s)
     return nothing
 end
 
@@ -125,7 +125,7 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρe = ρᵈe)
+        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρs = ρᵈs)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
     end
@@ -138,12 +138,12 @@ end
 
     z = znode(i, j, k, grid, c, c, c)
     q₁ = 𝒰θ₁.moisture_mass_fractions
-    𝒰e₀ = StaticEnergyState(zero(T), q₁, z, pᵣ)
-    𝒰e₁ = with_temperature(𝒰e₀, T, constants)
-    e = 𝒰e₁.static_energy
+    𝒰s₀ = StaticEnergyState(zero(T), q₁, z, pᵣ)
+    𝒰s₁ = with_temperature(𝒰s₀, T, constants)
+    s = 𝒰s₁.static_energy
 
-    @inbounds specific_energy[i, j, k] = e
-    @inbounds energy_density[i, j, k] = ρᵈ * e
+    @inbounds specific_energy[i, j, k] = s
+    @inbounds energy_density[i, j, k] = ρᵈ * s
 end
 
 #####
@@ -155,10 +155,10 @@ end
 
 Set the thermodynamic state from temperature ``T``.
 
-The temperature is converted to static energy ``e`` using the relation:
+The temperature is converted to static energy ``s`` using the relation:
 
 ```math
-e = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ .
+s = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ .
 ```
 """
 function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:T}, value)
@@ -196,22 +196,22 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρe = ρᵈe)
+        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρs = ρᵈs)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end
 
     # Get moisture fractions (vapor only for unsaturated air)
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    pᵣ = pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
 
     # Convert temperature to static energy
     z = znode(i, j, k, grid, c, c, c)
     𝒰₀ = StaticEnergyState(zero(T), q, z, pᵣ)
     𝒰₁ = with_temperature(𝒰₀, T, constants)
 
-    e = 𝒰₁.static_energy
-    @inbounds specific_energy[i, j, k] = e
-    @inbounds energy_density[i, j, k] = ρᵈ * e
+    s = 𝒰₁.static_energy
+    @inbounds specific_energy[i, j, k] = s
+    @inbounds energy_density[i, j, k] = ρᵈ * s
 end
