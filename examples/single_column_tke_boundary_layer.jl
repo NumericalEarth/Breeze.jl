@@ -1,409 +1,145 @@
 # # Single-column boundary layers with a prognostic-TKE closure
 #
-# Three different canonical boundary layers in a single column — stable, neutral and convective
-# — differences driven by the sign of the surface heat flux. Eddys are not resolved, highlighting
-# the behavior of our [`TKEBasedTurbulenceClosure`](@ref).
+# This example simulates three canonical atmospheric boundary layers — stable, neutral and
+# convective — in a single column. A single column resolves no turbulence, so every turbulent
+# flux is carried by [`TKEBasedTurbulenceClosure`](@ref): a vertical eddy-diffusivity closure with
+# a prognostic equation for turbulent kinetic energy, described in [Turbulence closures](@ref).
+# The three columns share a grid, a geostrophic wind, a surface drag law and an initial
+# stratification. They differ only in the sign of the surface heat flux, which selects the terms
+# of the turbulent kinetic energy budget at work: shear production alone in the neutral column,
+# shear production against a stabilizing buoyancy flux in the stable column, and shear and
+# buoyancy production together in the convective one.
 #
-# The closure is described in [Turbulence closures](@ref). The three regimes below exercise
-# different terms of its turbulent kinetic energy budget: shear production ``P`` alone in the
-# neutral case, ``P`` against a stabilizing buoyancy flux ``B`` in the stable case, and ``B`` alone
-# in the convective one.
+# The example demonstrates
+#
+#   * How to set up a single-column `AtmosphereModel` on a `(Flat, Flat, Bounded)` grid.
+#   * How to drive a boundary layer with a geostrophic wind, bulk surface drag and a surface heat flux.
+#   * How to use `TKEBasedTurbulenceClosure` and inspect the diffusivities it computes.
 
 using Breeze
-using Oceananigans
 using Oceananigans.Units
-using AtmosphericProfilesLibrary
 using CairoMakie
 
-## `BulkDrag` is exported by both Oceananigans and Breeze, so the bulk surface-layer names are
-## imported explicitly rather than taken from `using Breeze`.
-using Breeze.BoundaryConditions: BulkDrag, BulkSensibleHeatFlux, PolynomialCoefficient,
-                                 FittedStabilityFunction
-
-## The mixing-length diagnostic below evaluates the closure's own kernel function in a
-## `KernelFunctionOperation`, so the function and its buoyancy arguments are imported here.
-using Breeze.TurbulenceClosures: mixing_lengthᶜᶜᶠ
-using Oceananigans.TurbulenceClosures: buoyancy_tracers, buoyancy_force
-
-# ## Surface layer definition
+# ## Grid
 #
-# Breeze's bulk surface-layer scheme forms the surface virtual potential temperature from the
-# *saturation* humidity at the surface temperature — correct over ocean, wrong over land. At the
-# 265 K of the stable case below, that is ``0.608 q⁺ T₀ = 0.33`` K of spurious virtual warming,
-# which is comparable to the entire surface-layer temperature deficit and is one-signed toward
-# instability.
+# The column spans the lowest 2 km of the atmosphere with 20 m resolution. The `Flat` topologies
+# in ``x`` and ``y`` leave a single column of cells.
+
+grid = RectilinearGrid(size=100, z=(0, 2000), topology=(Flat, Flat, Bounded))
+
+# ## Reference state
 #
-# The `surface` field of a `PolynomialCoefficient` is the trait slot for exactly this choice: it
-# selects the saturation curve, and Breeze ships `PlanarLiquidSurface` and `PlanarIceSurface`. We
-# add a third `DrySurface` member that has no saturation humidity at all.
+# The anelastic dynamics are built around a dry, adiabatic reference state with a potential
+# temperature of 300 K.
 
-struct DrySurface end
-Breeze.AtmosphereModels.Diagnostics.saturation_total_specific_moisture(T, p, constants, ::DrySurface) = zero(T)
+θ₀ = 300 # K
+p₀ = 1e5 # Pa
+constants = ThermodynamicConstants()
+reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+dynamics = AnelasticDynamics(reference_state)
 
-# ## Simulation constructor
+# ## Geostrophic wind and surface drag
 #
-# Everything that varies between runs is a keyword argument, so the same generator serves the
-# regime comparison, the coefficient comparison, and the grid-sensitivity sweep. The vertical grid
-# is built from a first spacing and a stretching ratio: `Δz` ramps linearly from `Δz₁` at the
-# surface to `stretching * Δz₁` at the model top.
+# A geostrophic wind of 10 m s⁻¹ blows along ``x``. `geostrophic_forcings` supplies the
+# pressure-gradient force that holds it in balance with the Coriolis force on an ``f``-plane,
+# here at 45°N.
+
+uᵍ = 10 # m s⁻¹
+coriolis = FPlane(latitude=45)
+forcing = geostrophic_forcings(uᵍ, 0)
+
+# The surface drags on the wind in the first cell through a bulk law, ``𝐉ᵘ = - ρ₀ Cᵈ |𝐮| 𝐮``.
+# We take the drag coefficient from the neutral logarithmic wind profile over a roughness
+# length of 10 cm, evaluated at the first cell center,
+
+κ = 0.4  # von Kármán constant
+ℓʳ = 0.1 # m, roughness length
+z₁ = first(znodes(grid, Center()))
+Cᵈ = (κ / log(z₁ / ℓʳ))^2
+
+# and apply it to both momentum components,
+
+ρu_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient=Cᵈ))
+ρv_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient=Cᵈ))
+
+# ## Surface heat flux
 #
-# `surface_heat_flux` is kinematic, in K m s⁻¹. Passing `geostrophic_wind = nothing` drops the
-# Coriolis force and the pressure-gradient forcing together for free convection.
+# The surface heat flux sets the regime: a sensible heat flux of -20 W m⁻² cools the stable
+# column from below, the neutral column exchanges no heat with the surface, and 100 W m⁻² heats
+# the convective column. Energy fluxes are specified as boundary conditions on the static energy
+# density `ρs`, and the model converts them into fluxes of its prognostic ``ρθ`` by dividing by
+# the heat capacity of the air.
 
-function single_column_simulation(; closure = TKEBasedTurbulenceClosure(),
-                                    Δz₁ = 20,
-                                    stretching = 4,
-                                    Lz = 2000,
-                                    latitude = 45,
-                                    coriolis_parameter = nothing,
-                                    geostrophic_wind = 10,
-                                    friction_velocity = 0.3,
-                                    surface_heat_flux = 0,
-                                    surface_temperature = nothing,
-                                    cooling_rate = 0,
-                                    roughness_length = nothing,
-                                    potential_temperature = 300,
-                                    lapse_rate = 0.003,
-                                    inversion_height = 0,
-                                    initial_tke = nothing,
-                                    Δt = 20,
-                                    stop_time = 8hours)
+𝒬 = (stable = -20, neutral = 0, convective = 100) # W m⁻²
 
-    z = PiecewiseStretchedDiscretization(z = [0, Lz], Δz = [Δz₁, stretching * Δz₁])
-    grid = RectilinearGrid(size = length(z) - 1; z, topology = (Flat, Flat, Bounded))
+# ## Model and simulations
+#
+# Every column starts from the same atmosphere, stably stratified at 3 K km⁻¹ from the ground up
+# and moving with the geostrophic wind, and runs for 8 hours. The closure adds the tracer `ρe`,
+# the density-weighted turbulent kinetic energy, to the model. We leave it at zero: the closure
+# floors the turbulent velocity at `sqrt(minimum_tke)`, which is enough for shear production to
+# spin the turbulence up within minutes. Vertical diffusion and the sinks of turbulent kinetic
+# energy are treated implicitly, so the columns can take one-minute time steps.
 
-    ## Reference state: a dry, neutral adiabatic atmosphere
-    θ₀ = potential_temperature
-    p₀ = 1e5
-    constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure = p₀,
-                                     potential_temperature = θ₀)
-    dynamics = AnelasticDynamics(reference_state)
+closure = TKEBasedTurbulenceClosure()
+θᵢ(z) = θ₀ + 0.003z
 
-    q₀ = zero(Breeze.Thermodynamics.MoistureMassFractions{Float64})
-    ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
-
-    ## The von Kármán constant of the drag laws below. The closure carries none: its neutral log
-    ## layer has the constant (Cᵘ³/Cᴰ)^(1/4) implied by its stability functions, 0.40 by default.
-    κ = 0.4
-
-    ## The surface is configured in two ways for momentum and two for heat:
-    ##
-    ##   * momentum — a prescribed `friction_velocity` writes the drag directly, leaving the column
-    ##     one fewer moving part; a `roughness_length` instead lets u★ emerge from a bulk drag law.
-    ##   * heat — a prescribed kinematic `surface_heat_flux`, or a `surface_temperature` for the
-    ##     near-surface air to be differenced against.
-    ##
-    ## The two are not quite separable, because the bulk drag law itself takes one of two forms.
-    ## Given a `surface_temperature` it is Breeze's Monin-Obukhov scheme, which maps a bulk
-    ## Richardson number to ``ζ = z/L`` after Li et al. (2010) and integrates the Högström (1996)
-    ## and Beljaars-Holtslag (1991) stability functions for unstable and stable conditions
-    ## respectively. Without one it falls back to the neutral log law ``Cᵈ = [κ/\ln(z₁/ℓʳ)]²``,
-    ## since the correction needs a surface value that a prescribed flux does not supply. Bulk drag
-    ## therefore requires either a `surface_temperature` or a zero `surface_heat_flux`.
-    ##
-    ## A `(Flat, Flat, Bounded)` column has no horizontal coordinates, so a bottom boundary
-    ## condition is a function of time and its field dependencies alone.
-    if !isnothing(surface_temperature)
-        surface_temperature_field = Field{Center, Center, Nothing}(grid)
-        set!(surface_temperature_field, surface_temperature)
-    else
-        surface_temperature_field = nothing
-    end
-
-    if isnothing(roughness_length)
-        @inline ρu_drag(t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / max(sqrt(ρu^2 + ρv^2), 1e-6)
-        @inline ρv_drag(t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / max(sqrt(ρu^2 + ρv^2), 1e-6)
-
-        drag_parameters = (; ρ₀, u★ = friction_velocity)
-        ρu_bc = FluxBoundaryCondition(ρu_drag, field_dependencies=(:ρu, :ρv), parameters=drag_parameters)
-        ρv_bc = FluxBoundaryCondition(ρv_drag, field_dependencies=(:ρu, :ρv), parameters=drag_parameters)
-
-    elseif isnothing(surface_temperature)
-        ## Neutral log-law drag referenced to the first cell center, as the conventional neutral
-        ## boundary layer (CNBL) intercomparisons specify it. Skipping the stability correction is
-        ## only right where the surface layer is genuinely neutral, so this path is available only
-        ## for a zero surface heat flux.
-        iszero(surface_heat_flux) || throw(ArgumentError(
-            "bulk drag without a `surface_temperature` uses the neutral log law, which does not " *
-            "apply to the non-neutral surface layer implied by `surface_heat_flux = " *
-            "$surface_heat_flux`. Either prescribe a `surface_temperature`, so that the drag " *
-            "carries a stability correction, or drop `roughness_length` and prescribe " *
-            "`friction_velocity` instead."))
-
-        z₁ = first(znodes(grid, Center()))
-        Cᵈ = (κ / log(z₁ / roughness_length))^2
-        ρu_bc = BulkDrag(coefficient = Cᵈ)
-        ρv_bc = BulkDrag(coefficient = Cᵈ)
-
-    else
-        ## `PolynomialCoefficient` parameterizes the neutral 10 m transfer coefficient as
-        ## ``(a₀ + a₁ U + a₂ / U) × 10⁻³``. Setting ``a₀ = 10³ [κ / \ln(10/ℓʳ)]²`` with the other two
-        ## coefficients zero makes it the neutral log law, and the stability function corrects it
-        ## away from neutral — which is what GABLS1 prescribes.
-        ℓʳ = roughness_length
-        a₀ = 1e3 * (κ / log(10 / ℓʳ))^2
-        coefficient() = PolynomialCoefficient(Float64; polynomial = (a₀, 0.0, 0.0),
-                                              roughness_length = ℓʳ,
-                                              stability_function = FittedStabilityFunction(ℓʳ),
-                                              surface = DrySurface())
-
-        ρu_bc = BulkDrag(coefficient = coefficient(), surface_temperature = surface_temperature_field)
-        ρv_bc = BulkDrag(coefficient = coefficient(), surface_temperature = surface_temperature_field)
-    end
-
-    if isnothing(surface_temperature)
-        ## A positive bottom flux warms the first cell, so a positive `surface_heat_flux` is heating.
-        ρθ_bc = FluxBoundaryCondition(ρ₀ * surface_heat_flux)
-    else
-        ℓʳ = roughness_length
-        a₀ = 1e3 * (κ / log(10 / ℓʳ))^2
-        ρθ_bc = BulkSensibleHeatFlux(coefficient = PolynomialCoefficient(Float64;
-                                                       polynomial = (a₀, 0.0, 0.0),
-                                                       roughness_length = ℓʳ,
-                                                       stability_function = FittedStabilityFunction(ℓʳ),
-                                                       surface = DrySurface()),
-                                     surface_temperature = surface_temperature_field)
-    end
-
-    boundary_conditions = (ρu = FieldBoundaryConditions(bottom=ρu_bc),
-                           ρv = FieldBoundaryConditions(bottom=ρv_bc),
-                           ρθ = FieldBoundaryConditions(bottom=ρθ_bc))
-
-    ## A geostrophic wind along x, balanced by Coriolis — dropped entirely for free convection.
-    ## The intercomparison cases quote `f` itself rather than a latitude, so both are accepted.
-    coriolis = if isnothing(geostrophic_wind)
-        nothing
-    elseif isnothing(coriolis_parameter)
-        FPlane(; latitude)
-    else
-        FPlane(f = coriolis_parameter)
-    end
-    forcing = isnothing(geostrophic_wind) ? NamedTuple() : geostrophic_forcings(geostrophic_wind, 0)
-
-    model = AtmosphereModel(grid; dynamics, closure, coriolis, forcing, boundary_conditions,
-                            advection = nothing)
-
-    ## A mixed layer capped by a stratified free atmosphere
-    θᵢ(z) = θ₀ + lapse_rate * max(0, z - inversion_height)
-
-    if isnothing(geostrophic_wind)
-        set!(model; θ = θᵢ)
-    else
-        set!(model; θ = θᵢ, ρu = reference_state.density * geostrophic_wind)
-    end
-
-    ## The tracer `ρe` holds the TKE density, so a specific initial TKE profile has to be weighted
-    ## by the reference density after it is set.
-    if !isnothing(initial_tke)
-        set!(model.tracers.ρe, z -> max(initial_tke(z), 1e-6))
-        parent(model.tracers.ρe) .*= parent(reference_state.density)
-    end
-
-    simulation = Simulation(model; Δt, stop_time)
-
-    ## GABLS1 cools its surface at a fixed rate rather than holding it at a fixed temperature
-    if cooling_rate != 0
-        T₀ = surface_temperature
-        cool!(sim) = (surface_temperature_field[1, 1, 1] = T₀ - cooling_rate * time(sim) / 3600; nothing)
-        add_callback!(simulation, cool!, IterationInterval(1))
-    end
-
-    return simulation
+function boundary_layer_simulation(𝒬)
+    ρs_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(𝒬))
+    boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρs=ρs_bcs)
+    model = AtmosphereModel(grid; dynamics, closure, coriolis, forcing, boundary_conditions)
+    set!(model, θ=θᵢ, u=uᵍ)
+    return Simulation(model, Δt=1minute, stop_time=8hours)
 end
 
-# ## Model evaluation in three regimes
-#
-# All three are published benchmarks, run to their own specifications. The CNBL spec averages its
-# diagnostics over the final inertial period, while the other profiles below are instantaneous.
+simulations = map(boundary_layer_simulation, 𝒬)
 
-regimes = [
-    ## Beare et al. (2006), GABLS1: a 400 m domain at f = 1.39 × 10⁻⁴ s⁻¹ under an 8 m s⁻¹
-    ## geostrophic wind, θ = 265 K below 100 m over a +0.01 K m⁻¹ capping gradient, and a surface
-    ## cooling from 265 K at 0.25 K h⁻¹ for 9 h over a dry ℓʳ = 0.1 m surface. The LES ensemble
-    ## gives a 150-200 m boundary layer under a 9-9.5 m s⁻¹ super-geostrophic jet, with
-    ## u★ ≈ 0.24-0.28 m s⁻¹ and a surface sensible heat flux of -12.5 to -19.6 W m⁻².
-    "stable"     => (; Lz = 400,  Δz₁ = 6.25, stretching = 1, coriolis_parameter = 1.39e-4,
-                       geostrophic_wind = 8, potential_temperature = 265,
-                       surface_temperature = 265, cooling_rate = 0.25, roughness_length = 0.1,
-                       lapse_rate = 0.01, inversion_height = 100,
-                       initial_tke = AtmosphericProfilesLibrary.GABLS_tke(Float64),
-                       Δt = 5, stop_time = 9hours),
-    ## The conventionally neutral boundary layer of Shin, Yang & Howland (2025), after Liu, Gadde &
-    ## Stevens (2021): a 2 km domain at f = 1.37 × 10⁻⁴ s⁻¹ (70°N) under a 12 m s⁻¹ geostrophic
-    ## wind, θ = 300 K + (3 K km⁻¹)z stratified from the ground, zero surface heat flux, and
-    ## neutral log-law drag over ℓʳ = 0.1 m. The spec spins up for 20 h and then averages over one
-    ## inertial period 2π/f ≈ 12.74 h, so the integration runs to ≈ 32.7 h.
-    "neutral"    => (; Lz = 2000, Δz₁ = 25, stretching = 4, coriolis_parameter = 1.37e-4,
-                       geostrophic_wind = 12, surface_heat_flux = 0, roughness_length = 0.1,
-                       potential_temperature = 300, lapse_rate = 0.003,
-                       Δt = 20, stop_time = 20hours + 2π / 1.37e-4),
-    ## Han & Bretherton (2019, WAF 34, 869-886) §3a: θ = 288 K + (3 K km⁻¹)z stratified from the
-    ## ground, a surface buoyancy flux of 8 × 10⁻³ m² s⁻³ — kinematically w'θ'₀ = B₀θ₀/g =
-    ## 0.235 K m s⁻¹ — no mean wind, 8 h, Δz = 50 m.
-    "convective" => (; Lz = 4000, Δz₁ = 50, stretching = 1, potential_temperature = 288,
-                       geostrophic_wind = nothing, friction_velocity = 0,
-                       surface_heat_flux = 8e-3 * 288 / 9.81,
-                       lapse_rate = 0.003, Δt = 5, stop_time = 8hours),
-]
-
-simulations = [name => single_column_simulation(; settings...) for (name, settings) in regimes]
-
-for (name, simulation) in simulations
+for simulation in simulations
     run!(simulation)
 end
 
-## Postprocessing
+# ## Visualization
 #
-# Each regime leaves a different signature, but they span very different depths — 400 m to 4 km —
-# so the profiles are plotted against ``z/hᵇˡ``. We diagnose the boundary-layer depth here, with each
-# regime getting the definition its own literature uses — there is no single one that works everywhere.
-# The shear-driven cases use the stress threshold of the GABLS1 and CNBL intercomparisons; the
-# convective case has no wind at all, so stress is undefined there and the inversion height is used
-# instead.
+# We plot the final profiles of potential temperature, wind speed, turbulent kinetic energy and
+# the tracer diffusivity ``Kᶜ``, which the closure stores in `model.closure_fields`. The turbulent
+# kinetic energy is the tracer `ρe` divided by the reference density.
 
-"""Stress-based depth: the 5% level of the peak stress, rescaled by 0.95 (GABLS1/CNBL convention)."""
-function stress_depth(model)
-    Nz = size(model.grid, 3)
-    u = vec(Array(view(model.velocities.u, 1, 1, :)))
-    v = vec(Array(view(model.velocities.v, 1, 1, :)))
-    Kᵘ = vec(Array(view(model.closure_fields.Kᵘ, 1, 1, :)))
-    zc = Array(znodes(model.formulation.potential_temperature))
+set_theme!(fontsize=14, linewidth=2.5)
 
-    ## The stress is a vector: τ = Kᵘ |∂z 𝐔| at faces, where Kᵘ lives. Using the gradient of the
-    ## wind *speed* instead would vanish at the low-level jet, where |𝐔| peaks — but the stress
-    ## does not vanish there, because the wind is still turning with height.
-    ∂zᶠ(a) = [k == 1 ? 0.0 : (a[k] - a[k-1]) / (zc[k] - zc[k-1]) for k in 1:Nz]
-    τ = sqrt.((Kᵘ[1:Nz] .* ∂zᶠ(u)) .^ 2 .+ (Kᵘ[1:Nz] .* ∂zᶠ(v)) .^ 2)
+fig = Figure(size=(1000, 800))
+ax_θ = Axis(fig[1, 1], xlabel="Potential temperature (K)", ylabel="z (m)")
+ax_U = Axis(fig[1, 2], xlabel="Wind speed (m s⁻¹)")
+ax_e = Axis(fig[2, 1], xlabel="Turbulent kinetic energy (m² s⁻²)", ylabel="z (m)")
+ax_K = Axis(fig[2, 2], xlabel="Tracer diffusivity Kᶜ (m² s⁻¹)")
 
-    ## Interpolate the crossing rather than snapping to a cell centre. At GABLS1's Δz = 6.25 m the
-    ## quantisation is ~6.6 m, comparable to the differences between closure configurations, so a
-    ## snapped depth reports them as identical. Searching down from the peak also keeps a secondary
-    ## stress maximum from ending the search early.
-    τs, kᵖ = findmax(τ)
-    threshold = 0.05τs
-    for k in kᵖ:Nz-1
-        if τ[k] ≥ threshold > τ[k+1]
-            f = (τ[k] - threshold) / (τ[k] - τ[k+1])
-            return (zc[k] + f * (zc[k+1] - zc[k])) / 0.95
-        end
-    end
-    return last(zc)
-end
+colors = (stable=:dodgerblue, neutral=:black, convective=:orangered)
 
-"""Inversion height: the level of maximum ``∂_z θ`` (convective convention)."""
-function inversion_depth(model)
-    θ = vec(Array(view(model.formulation.potential_temperature, 1, 1, :)))
-    z = Array(znodes(model.formulation.potential_temperature))
-    N = length(θ)
-    ∂zθ = [(θ[min(k+1, N)] - θ[max(k-1, 1)]) / (z[min(k+1, N)] - z[max(k-1, 1)]) for k in 1:N]
-    return z[argmax(∂zθ)]
-end
-
-depths = ("stable" => stress_depth, "neutral" => stress_depth, "convective" => inversion_depth)
-
-"""Kinematic heat flux ``-Kᶜ ∂_z θ``, at faces where ``Kᶜ`` lives."""
-function heat_flux(model)
-    θ = vec(Array(view(model.formulation.potential_temperature, 1, 1, :)))
-    Kᶜ = vec(Array(view(model.closure_fields.Kᶜ, 1, 1, :)))
-    z = Array(znodes(model.formulation.potential_temperature))
-    N = length(θ)
-    ∂zθᶠ = [k == 1 ? 0.0 : (θ[k] - θ[k-1]) / (z[k] - z[k-1]) for k in 1:N]
-    return -Kᶜ[1:N] .* ∂zθᶠ
-end
-
-## Make plots
-
-set_theme!(fontsize = 14, linewidth = 2.5)
-colors = (:dodgerblue, :black, :orangered)
-
-fig = Figure(size = (1100, 800))
-
-## Top row: the prognostic state, what the model carries forward in time.
-ax_θ = Axis(fig[1, 1]; xlabel = "θ - θ(z=0) (K)", ylabel = "z / hᵇˡ")
-ax_U = Axis(fig[1, 2]; xlabel = "Wind speed (m s⁻¹)")
-ax_e = Axis(fig[1, 3]; xlabel = "TKE (m² s⁻²)")
-
-## Bottom row: what the closure makes of it, in the order it is built — the length scale, the
-## diffusivity formed from it, and the flux they produce. `Kᶜ` spans two orders of magnitude between
-## the stable and convective regimes, so it is scaled by its own maximum in each: the height axis
-## already normalizes by `hᵇˡ`, and this makes the horizontal axis a shape comparison to match. A
-## linear axis keeps the collapse at `hᵇˡ` looking like the cliff it is, which a logarithmic one
-## would smooth into a gentle slide. The magnitudes that scaling divides out are annotated on the panel.
-ax_ℓ = Axis(fig[2, 1]; xlabel = "Mixing length ℓ (m)", ylabel = "z / hᵇˡ")
-ax_K = Axis(fig[2, 2]; xlabel = "Kᶜ / max(Kᶜ)")
-ax_J = Axis(fig[2, 3]; xlabel = "w′θ′ / (w′θ′)₀")
-
-for ax in (ax_θ, ax_U, ax_e, ax_K, ax_ℓ, ax_J)
-    ylims!(ax, 0, 1.5)
-end
-xlims!(ax_J, -0.25, 1.3)
-xlims!(ax_K, -0.03, 1.08)
-[hideydecorations!(ax, grid = false) for ax in (ax_U, ax_e, ax_K, ax_J)]
-
-## Reference for the *convective* case only: the mixed-layer flux is near-linear from 1 at the
-## surface to -A at hᵇˡ, with the entrainment ratio A ≈ 0.17 (Soares et al. 2004) to 0.2. The stable
-## case has no such result and is not judged against this line.
-lines!(ax_J, [1, -0.2], [0, 1]; color = :gray50, linestyle = :dash)
-vlines!(ax_J, [0]; color = :gray80, linewidth = 1)
-
-legend_labels = String[]
-diffusivity_labels = String[]
-
-for ((name, simulation), (_, settings), (_, depth), color) in zip(simulations, regimes, depths, colors)
+for (name, simulation) in pairs(simulations)
     model = simulation.model
     u, v, w = model.velocities
-    hᵇˡ = depth(model)
-    push!(legend_labels, "$name (hᵇˡ = $(round(Int, hᵇˡ)) m)")
-
     θ = model.formulation.potential_temperature
     U = Field(sqrt(u^2 + v^2))
+    e = Field(model.tracers.ρe / reference_state.density)
+    Kᶜ = model.closure_fields.Kᶜ
 
-    ## Fields are handed to Makie directly, values against the rescaled height z/hᵇˡ. Only θ is
-    ## taken as an array, because the surface value is subtracted from it (each regime starts
-    ## from a different θ₀) and it supplies the height coordinate of the flux panel below.
-    θᵥ = vec(Array(view(θ, 1, 1, :)))
-    lines!(ax_θ, θᵥ .- θᵥ[1], Array(znodes(θ)) ./ hᵇˡ; color)
-    lines!(ax_U, U, znodes(U) ./ hᵇˡ; color)
-    ## The specific TKE is the tracer divided by the reference density
-    e = Field(model.tracers.ρe / model.dynamics.reference_state.density)
-    lines!(ax_e, e, znodes(e) ./ hᵇˡ; color)
-    Kᶜ = vec(Array(view(model.closure_fields.Kᶜ, 1, 1, :)))
-    zᴷ = Array(znodes(model.closure_fields.Kᶜ))
-    kᵐᵃˣ = argmax(Kᶜ)
-    push!(diffusivity_labels,
-          "Kᶜ(z = $(round(zᴷ[kᵐᵃˣ] / hᵇˡ, digits = 2)) hᵇˡ) = $(round(Kᶜ[kᵐᵃˣ], digits = 1)) m² s⁻¹")
-    lines!(ax_K, Kᶜ ./ Kᶜ[kᵐᵃˣ], zᴷ ./ hᵇˡ; color)
-    ## The mixing length is not stored (following CATKE); it is diagnosed by evaluating the
-    ## closure's own `mixing_lengthᶜᶜᶠ` in a `KernelFunctionOperation` over the model state
-    ℓ_op = KernelFunctionOperation{Center, Center, Face}(mixing_lengthᶜᶜᶠ, model.grid, model.closure,
-                                                         e, buoyancy_tracers(model), buoyancy_force(model))
-    ℓ = Field(ℓ_op)
-    lines!(ax_ℓ, ℓ, znodes(ℓ) ./ hᵇˡ; color)
-    ## The surface flux is prescribed in the convective case but emergent in the stable one, where
-    ## the bulk scheme sets it, so both are normalized by the closure's own flux at the lowest
-    ## interior face rather than by a setting. The neutral case is defined as having no surface heat
-    ## flux, so it gets no curve here — the test is on the specification rather than on the
-    ## diagnosed flux, whose residual 6 × 10⁻⁵ K m s⁻¹ of entrainment would otherwise be normalized
-    ## by itself and plotted as a spurious profile of order one.
-    thermally_driven = get(settings, :surface_heat_flux, 0) != 0 || haskey(settings, :surface_temperature)
-    if thermally_driven
-        J = heat_flux(model)
-        lines!(ax_J, J ./ J[2], Array(znodes(θ)) ./ hᵇˡ; color)
-    end
+    color = colors[name]
+    lines!(ax_θ, θ; color, label=string(name))
+    lines!(ax_U, U; color)
+    lines!(ax_e, e; color)
+    lines!(ax_K, Kᶜ; color)
 end
 
-## Built explicitly from the regime list rather than from plotted labels, so that every regime is
-## listed with its diagnosed depth even though the flux panel carries only two curves.
-axislegend(ax_e, [LineElement(color = c) for c in colors], legend_labels;
-           position = :rt, framevisible = false)
-
-## Above hᵇˡ every scaled diffusivity has collapsed to the axis, so the top of that panel is free for
-## the magnitude and the height the scaling removed. Colors match the legend above.
-for (n, (label, color)) in enumerate(zip(diffusivity_labels, colors))
-    text!(ax_K, 0.10, 1.43 - 0.10 * (n - 1); text = label, color, fontsize = 12,
-          align = (:left, :center))
-end
+axislegend(ax_θ, position=:rb)
 
 save("single_column_tke_boundary_layer.png", fig) #src
 fig
+
+# The convective column is mixed through a layer 1.5 km deep, capped by the inversion it has
+# eroded into the stratification above. Its potential temperature *decreases* with height through
+# the lower part of the layer: a downgradient closure needs a gradient to carry the surface heat
+# flux upward. The shear-driven columns are shallower, and the stable one shallowest, because the
+# surface cooling stratifies the air it is mixed into and the stratification length then cuts the
+# mixing length short. In both the stable and the neutral columns the wind at the top of the mixed
+# layer overshoots its geostrophic value — a low-level jet, strongest in the stable column. The
+# diffusivities grow with height from the surface, where the mixing length is the height itself,
+# and collapse where the turbulent kinetic energy runs out.
