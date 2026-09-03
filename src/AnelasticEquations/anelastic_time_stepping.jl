@@ -76,3 +76,24 @@ function AtmosphereModels.make_pressure_correction!(model::AnelasticModel, Δt)
 
     return nothing
 end
+
+#####
+##### Single-column mode: no pressure solve, no vertical-velocity stepping (w ≡ 0)
+#####
+#
+# On a `SingleColumnGrid` the anelastic mass constraint ∂z(ρᵣ w) = 0 together with rigid top/bottom
+# boundaries (w = 0 there) forces `w ≡ 0` throughout the column — there is no elliptic problem left
+# to solve. We therefore skip the pressure correction entirely and hold the vertical-momentum
+# tendency at zero, so `ρw` (initialized to 0) never moves. Vertical transport is carried by the
+# turbulence closure and prescribed large-scale forcing (e.g. subsidence). This mirrors
+# `Oceananigans.HydrostaticFreeSurfaceModel`'s single-column mode.
+
+AtmosphereModels.compute_pressure_correction!(::AnelasticSingleColumnModel, Δt) = nothing
+AtmosphereModels.make_pressure_correction!(::AnelasticSingleColumnModel, Δt) = nothing
+
+# Hold Gρw ≡ 0 so `ρw` stays at its initial value of zero (`w ≡ 0`). `compute_z_momentum_tendency!`
+# overwrites Gρw, so zeroing here — rather than launching it — is what omits vertical stepping.
+function AtmosphereModels.compute_vertical_momentum_tendency!(::AnelasticSingleColumnModel, Gρw, w_args)
+    fill!(parent(Gρw), 0)
+    return nothing
+end
