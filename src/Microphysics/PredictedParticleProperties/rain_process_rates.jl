@@ -257,8 +257,7 @@ The evaporation rate is enhanced by ventilation (air flow around falling drops).
 
     # Internal helpers return negative (S - 1 < 0 when subsaturated).
     # Negate to get positive magnitude.
-    evap_rate = -rain_evaporation_rate(p3.rain.evaporation, p3.rain.ventilation,
-                                        qʳ_eff, nʳ_eff, S,
+    evap_rate = -rain_evaporation_rate(p3.rain.evaporation, p3.rain.ventilation, qʳ_eff, nʳ_eff, S,
                                         thermodynamic_factor, parameters, ν, Dᵛ, FT)
 
     # Cannot evaporate more than available
@@ -290,8 +289,7 @@ neither is baked into the table, so both remain configurable at runtime. Returns
 Consumed by [`rain_evaporation_rate`](@ref) and by the coupled
 saturation-adjustment relaxation coefficient, both of which pass `p3.rain.ventilation`.
 """
-@inline function rain_ventilation_integral(table, ventilation_parameters,
-                                           qʳ, nʳ, ν, Dᵛ, parameters)
+@inline function rain_ventilation_integral(table, ventilation_parameters, qʳ, nʳ, ν, Dᵛ, parameters)
     FT = typeof(qʳ)
     coefficient_floor = FT(parameters.floors.transport_coefficient)
 
