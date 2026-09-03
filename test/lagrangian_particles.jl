@@ -51,6 +51,7 @@ function terrain_grid(FT, formulation; grid_size, x_extent, y_extent = nothing, 
 end
 
 @testset "Lagrangian particles in AtmosphereModel [$(FT)]" for FT in test_float_types()
+    old_FT = Oceananigans.defaults.FloatType
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 4000), y=(0, 4000), z=(0, 4000))
 
@@ -244,7 +245,10 @@ end
         Lx, Lz = FT(4000), FT(2000)
         tf_grid = terrain_grid(FT, LinearDecay(); grid_size=(Nx, Nz), x_extent=(-Lx/2, Lx/2),
                                z_top=Lz, topography = x -> FT(100))
-        immersed = ImmersedBoundaryGrid(tf_grid, GridFittedBottom((x) -> FT(400)))
+        # A number rather than a closure: `GridFittedBottom` is passed to the kernel
+        # that computes the numerical bottom height, and a closure capturing the
+        # type `FT` is not isbits on the GPU.
+        immersed = ImmersedBoundaryGrid(tf_grid, GridFittedBottom(FT(400)))
         particles = particles_at(FT, FT(0), 0, FT(1000))
         @test_throws ArgumentError AtmosphereModel(immersed; dynamics=terrain_dynamics(FT), particles)
     end
@@ -286,4 +290,6 @@ end
         @test y == 200
         @test isapprox(z, 1000, atol=100 * eps(FT(1000)))
     end
+
+    Oceananigans.defaults.FloatType = old_FT
 end
