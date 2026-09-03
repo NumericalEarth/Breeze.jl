@@ -65,6 +65,11 @@ export
     RainProperties,
     CloudDropletProperties,
 
+    # Empirical parameter containers for the warm-phase fits
+    CloudShapeParameters,
+    RainFallSpeedParameters,
+    RainVentilationParameters,
+
     # Rain PSD quadrature evaluators
     RainMassWeightedVelocityEvaluator,
     RainNumberWeightedVelocityEvaluator,

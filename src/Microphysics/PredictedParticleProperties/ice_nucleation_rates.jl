@@ -178,10 +178,12 @@ negligible for small droplets.
 @inline function immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ)
     # μᶜˡ comes from the local Nᶜˡ (already [1/m³]) via Liu-Daum (2000) rather than
     # from a construction-time value, so the PSD correction varies with the local
-    # droplet population. Nᶜˡ is volumetric; nᶜˡ = Nᶜˡ/ρ is per-mass.
+    # droplet population. The relation itself is read from `p3.cloud.shape_parameters`,
+    # the same container the construction-time and prognostic paths use.
+    # Nᶜˡ is volumetric; nᶜˡ = Nᶜˡ/ρ is per-mass.
     nᶜˡ = max(Nᶜˡ / ρ, p3.minimum_number_mixing_ratio)
-    return stochastic_immersion_freezing(p3, qᶜˡ, nᶜˡ, nᶜˡ,
-                                         liu_daum_shape_parameter(Nᶜˡ), T)
+    μᶜˡ = liu_daum_shape_parameter(Nᶜˡ, p3.cloud.shape_parameters)
+    return stochastic_immersion_freezing(p3, qᶜˡ, nᶜˡ, nᶜˡ, μᶜˡ, T)
 end
 
 """

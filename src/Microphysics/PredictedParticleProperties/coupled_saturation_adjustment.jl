@@ -110,7 +110,8 @@ end
     nʳ_eff = max(nʳ, FT(p3.minimum_number_mixing_ratio))
     active = qʳ_eff >= p3.minimum_mass_mixing_ratio
 
-    ventilation = rain_ventilation_integral(p3.rain.evaporation, qʳ_eff, nʳ_eff,
+    ventilation = rain_ventilation_integral(p3.rain.evaporation, p3.rain.ventilation,
+                                           qʳ_eff, nʳ_eff,
                                            transport.ν, transport.Dᵛ, parameters)
     relaxation_coefficient = 2 * FT(π) * ventilation.Nʳ₀ * ρ * transport.Dᵛ *
                              ventilation.integral

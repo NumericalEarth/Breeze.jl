@@ -41,6 +41,12 @@ since they are not included in the ASCII table files.
 - `FT`: Float type (default `Float64`)
 - `arch`: Architecture for GPU transfer (default `CPU()`)
 - `thermodynamic_constants`: Source of shared phase and dry-air properties.
+- `cloud`: [`CloudDropletProperties`](@ref), or `nothing` for the default.
+- `rain`: [`RainProperties`](@ref) skeleton supplying the fall-speed and ventilation
+  parameters, or `nothing` for the default. Its parameter containers are preserved
+  through the startup quadrature: the fall-speed law is what the three rain tables are
+  built from, and the ventilation coefficients survive into the materialized
+  `RainProperties` for the runtime rates that assemble them.
 """
 function read_lookup_tables(directory::AbstractString;
                             FT::DataType = Oceananigans.defaults.FloatType,
@@ -52,6 +58,7 @@ function read_lookup_tables(directory::AbstractString;
                             negative_moisture_correction = SpeciesBorrowing(),
                             aerosol = nothing,
                             cloud = nothing,
+                            rain = nothing,
                             process_rates = nothing,
                             warm_rain_scheme = KhairoutdinovKogan2000())
 
@@ -77,16 +84,18 @@ function read_lookup_tables(directory::AbstractString;
         process_rates
     end
 
-    # Generate rain 1D tables from Julia quadrature
-    rain_base = RainProperties(FT)
-    rain = tabulate_rain_from_quadrature(rain_base, arch, FT;
-                                         floors = input_process_rates.floors)
+    # Generate rain 1D tables from Julia quadrature. The supplied skeleton (or the
+    # default) carries the empirical fall-speed and ventilation parameters that the
+    # tabulation integrates and that the materialized container must keep.
+    rain_base = isnothing(rain) ? RainProperties(FT) : rain
+    materialized_rain = tabulate_rain_from_quadrature(rain_base, arch, FT;
+                                                      floors = input_process_rates.floors)
 
     return PredictedParticlePropertiesMicrophysics(
         FT(minimum_mass_mixing_ratio),
         FT(minimum_number_mixing_ratio),
         ice,
-        rain,
+        materialized_rain,
         cloud,
         input_process_rates,
         precipitation_boundary_condition,
@@ -206,9 +215,17 @@ function tabulate_rain_from_quadrature(rain::RainProperties, arch=CPU(),
                                        quadrature_points::Int = 128,
                                        floors = NumericalFloors(FT))
 
-    vel_mass_eval = RainMassWeightedVelocityEvaluator(FT; n_points=quadrature_points, floors)
-    vel_num_eval = RainNumberWeightedVelocityEvaluator(FT; n_points=quadrature_points, floors)
-    evap_eval = RainEvaporationVentilationEvaluator(FT; n_points=quadrature_points)
+    # All three evaluators integrate the *same* configured V(D), so a custom fall-speed
+    # law reaches the mass-weighted velocity, the number-weighted velocity, and the
+    # evaporation velocity-diameter table alike.
+    fall_speed = convert(RainFallSpeedParameters{FT}, rain.fall_speed)
+
+    vel_mass_eval = RainMassWeightedVelocityEvaluator(FT; n_points=quadrature_points,
+                                                      floors, fall_speed)
+    vel_num_eval = RainNumberWeightedVelocityEvaluator(FT; n_points=quadrature_points,
+                                                       floors, fall_speed)
+    evap_eval = RainEvaporationVentilationEvaluator(FT; n_points=quadrature_points,
+                                                    fall_speed)
 
     tab_vel_mass = TabulatedFunction(vel_mass_eval, arch, FT;
                                      range=log_lambda_range, points=lambda_points)
@@ -217,10 +234,12 @@ function tabulate_rain_from_quadrature(rain::RainProperties, arch=CPU(),
     tab_evap = TabulatedFunction(evap_eval, arch, FT;
                                  range=log_lambda_range, points=lambda_points)
 
+    # Only the three lookup placeholders are replaced; every supplied physics parameter
+    # is carried through unchanged.
     return RainProperties(
-        rain.maximum_mean_diameter,
-        rain.fall_speed_coefficient,
-        rain.fall_speed_exponent,
+        FT(rain.maximum_mean_diameter),
+        fall_speed,
+        convert(RainVentilationParameters{FT}, rain.ventilation),
         tab_vel_num,
         tab_vel_mass,
         tab_evap

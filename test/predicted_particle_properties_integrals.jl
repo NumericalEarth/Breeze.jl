@@ -177,8 +177,18 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     @testset "Rain properties" begin
         rain = RainProperties()
         @test rain.maximum_mean_diameter ≈ 2e-3
-        @test rain.fall_speed_coefficient ≈ 841.99667
-        @test rain.fall_speed_exponent ≈ 0.8
+
+        # The active fall-speed law is the piecewise Gunn-Kinzer/Beard fit, not a single
+        # power law: `RainProperties` carries its coefficients, and the ventilation pair
+        # the runtime rates read.
+        @test rain.fall_speed isa PPP.RainFallSpeedParameters{Float64}
+        @test rain.fall_speed.branch_velocity_scales == (4579.5, 49.62, 17.32)
+        @test rain.fall_speed.branch_mass_exponents == (2/3, 1/3, 1/6)
+        @test rain.fall_speed.transition_diameters == (134.43e-6, 1511.64e-6, 3477.84e-6)
+        @test rain.fall_speed.plateau_velocity ≈ 9.17
+        @test rain.ventilation isa PPP.RainVentilationParameters{Float64}
+        @test rain.ventilation.constant_coefficient ≈ 0.78
+        @test rain.ventilation.reynolds_coefficient ≈ 0.32
 
         @test isnothing(rain.velocity_number)
         @test isnothing(rain.velocity_mass)
@@ -199,6 +209,11 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         # Explicit shape_parameter overrides Liu-Daum
         cloud_override = CloudDropletProperties(Float64; shape_parameter=5)
         @test cloud_override.shape_parameter ≈ 5.0
+
+        # The relation itself is a stored, configurable container
+        @test cloud.shape_parameters isa PPP.CloudShapeParameters{Float64}
+        @test cloud.shape_parameters.relative_dispersion_number_coefficient ≈ 5.714e-10
+        @test cloud.shape_parameters.relative_dispersion_intercept ≈ 0.2714
 
         # Test custom parameters
         cloud_custom = CloudDropletProperties(Float64; number_concentration=50e6)

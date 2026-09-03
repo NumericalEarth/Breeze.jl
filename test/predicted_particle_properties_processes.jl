@@ -124,10 +124,12 @@ function expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ, transport, F
     nʳ_bounded = qʳ_eff * λʳ^3 / (FT(π) * parameters.liquid_water_density)
     Nʳ₀ = nʳ_bounded * λʳ
     velocity_diameter_integral = p3.rain.evaporation(log10(λʳ))
-    constant_integral = FT(PPP.RAIN_VENTILATION_CONSTANT) / λʳ^2
+    f₁ᵣ = FT(p3.rain.ventilation.constant_coefficient)
+    f₂ᵣ = FT(p3.rain.ventilation.reynolds_coefficient)
+    constant_integral = f₁ᵣ / λʳ^2
     schmidt_correction = cbrt(transport.ν / max(transport.Dᵛ, FT(1e-10)))
     evaporation_integral = constant_integral +
-                           FT(PPP.RAIN_VENTILATION_REYNOLDS) * schmidt_correction /
+                           f₂ᵣ * schmidt_correction /
                            sqrt(max(transport.ν, FT(1e-10))) * velocity_diameter_integral
     rain_relaxation = FT(2π) * Nʳ₀ * ρ * transport.Dᵛ * evaporation_integral
     return ifelse(qʳ_eff >= p3.minimum_mass_mixing_ratio, rain_relaxation, zero(FT))
@@ -403,9 +405,11 @@ end
         @test λ_r == parameters.minimum_rain_slope
         @test nʳ_bounded > nʳ
 
-        raw_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, qʳ, nʳ, S,
+        raw_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, p3.rain.ventilation,
+                                             qʳ, nʳ, S,
                                              thermodynamic_factor, parameters, ν, Dᵛ, FT)
-        bounded_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, qʳ, nʳ_bounded, S,
+        bounded_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, p3.rain.ventilation,
+                                                 qʳ, nʳ_bounded, S,
                                                  thermodynamic_factor, parameters, ν, Dᵛ, FT)
 
         @test raw_rate ≈ bounded_rate
