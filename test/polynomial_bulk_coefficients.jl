@@ -12,7 +12,8 @@ using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  bulk_to_flux_richardson_number,
                                  integrated_stability_momentum,
                                  integrated_stability_scalar,
-                                 stability_correction_factor
+                                 stability_correction_factor,
+                                 surface_virtual_potential_temperature
 using Breeze.AtmosphereModels.Diagnostics: saturation_total_specific_moisture
 using Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
@@ -333,8 +334,6 @@ using GPUArraysCore: @allowscalar
     end
 
     @testset "moisture_availability" begin
-        using Breeze.BoundaryConditions: surface_virtual_potential_temperature
-
         # The surface humidity entering the stability correction is q₀ = β qᵛ⁺ + (1 - β) qᵛ: a
         # saturated surface (β = 1) carries its saturation humidity and a dry one (β = 0) the
         # humidity of the air above it, so that its virtual potential temperature has no moisture
@@ -375,9 +374,9 @@ using GPUArraysCore: @allowscalar
         @test fv.filter_timescale == Inf
         @test size(fv.u) == (4, 4, 1)
         @test size(fv.v) == (4, 4, 1)
-        @test size(fv.θᵥ) == (4, 4, 1)
+        @test size(fv.Δθᵥ) == (4, 4, 1)
         @test fv.last_update[] == (0, 0)
-        @test fv.last_θᵥ_update[] == (0, 0)
+        @test fv.last_Δθᵥ_update[] == (0, 0)
 
         # With explicit height and timescale
         fv2 = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
@@ -440,23 +439,33 @@ using GPUArraysCore: @allowscalar
         @test fs.field[1, 1, 1] ≈ expected atol=1e-10
     end
 
-    @testset "FilteredSurfaceVelocities θᵥ update!" begin
+    @testset "FilteredSurfaceVelocities Δθᵥ update!" begin
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
         fv = FilteredSurfaceVelocities(grid; filter_timescale=20.0)
 
-        # θᵥ source is a 3D field-like; here just use a CenterField at constant value.
-        θᵢ = 305
-        θᵥ_source = CenterField(grid)
-        set!(θᵥ_source, θᵢ)
+        # The filter stores the surface-layer difference θᵥ(z₁) - θᵥ₀, formed from the
+        # instantaneous state by a materialized coefficient and the surface temperature
+        θᵥ_field = CenterField(grid)
+        set!(θᵥ_field, 305.0)
+        qᵛ_field = CenterField(grid)
+        set!(qᵛ_field, 1e-3)
+        constants = Breeze.Thermodynamics.ThermodynamicConstants()
+        surface = Breeze.PlanarLiquidSurface()
+        coef = PolynomialCoefficient((0.142, 0.076, 2.7), 1.5e-4, 0.1, FittedStabilityFunction(1.5e-4 / 7.3),
+                                     surface, 0.5, θᵥ_field, qᵛ_field, 1e5, constants, Val(:momentum))
+        T₀ = 300.0
+        θᵥ₀ = surface_virtual_potential_temperature(T₀, 1e5, constants, surface, 0.5, 1e-3)
+        Δθᵥ = 305.0 - θᵥ₀
+        @test Breeze.BoundaryConditions.surface_layer_Δθᵥ(1, 1, coef, T₀) ≈ Δθᵥ
 
-        Breeze.BoundaryConditions.update_θᵥ!(fv, θᵥ_source, grid, 2.0)
+        Breeze.BoundaryConditions.update_Δθᵥ!(fv, coef, T₀, grid, 2.0)
         ε = 2.0 / 20.0
-        expected = (0.0 + ε * θᵢ) / (1 + ε)
-        @test fv.θᵥ[1, 1, 1] ≈ expected atol=1e-10
+        expected = (0.0 + ε * Δθᵥ) / (1 + ε)
+        @test fv.Δθᵥ[1, 1, 1] ≈ expected atol=1e-10
 
-        # Initialize sets the field directly from the source (no time integration)
-        Breeze.BoundaryConditions.initialize_θᵥ!(fv, θᵥ_source, grid)
-        @test fv.θᵥ[1, 1, 1] ≈ θᵢ atol=1e-10
+        # Initialize sets the field directly from the current difference (no time integration)
+        Breeze.BoundaryConditions.initialize_Δθᵥ!(fv, coef, T₀, grid)
+        @test fv.Δθᵥ[1, 1, 1] ≈ Δθᵥ atol=1e-10
     end
 
     @testset "BulkDrag with filtered_velocities" begin

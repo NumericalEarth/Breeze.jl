@@ -638,13 +638,13 @@ Returns the transfer coefficient (dimensionless).
 end
 
 # Explicit height: used for filtered velocity with a fixed reference height.
-# Optional `θᵥ_source` selects a filtered θᵥ field over the instantaneous diagnostic
-# stored in `coef.virtual_potential_temperature`.
+# Optional `Δθᵥ_source` selects a filtered surface-layer virtual potential temperature
+# difference over the one formed from the instantaneous state.
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h)
     return coef(i, j, grid, U, T₀, h, nothing)
 end
 
-@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h, θᵥ_source)
+@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h, Δθᵥ_source)
     C¹⁰ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height using logarithmic profile:
@@ -653,41 +653,64 @@ end
     α = log(h / ℓʳ)
     Cʰ = C¹⁰ * (log(10 / ℓʳ) / α)^2
 
-    # Apply stability correction (reads filtered θᵥ when `θᵥ_source` is provided)
-    return stability_corrected_coefficient(i, j, grid, coef, Cʰ, h, α, U, T₀, θᵥ_source)
+    # Apply stability correction (reads the filtered Δθᵥ when `Δθᵥ_source` is provided)
+    return stability_corrected_coefficient(i, j, grid, coef, Cʰ, h, α, U, T₀, Δθᵥ_source)
 end
 
-# No stability correction (stability_function = nothing) — `θᵥ_source` is ignored
+# No stability correction (stability_function = nothing) — `Δθᵥ_source` is ignored
 @inline stability_corrected_coefficient(i, j, grid,
-    ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cʰ, h, α, U, T₀, θᵥ_source) = Cʰ
+    ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cʰ, h, α, U, T₀, Δθᵥ_source) = Cʰ
 
 # FittedStabilityFunction correction (Li et al. 2010 mapping + MOST Ψ functions).
-# The `θᵥ_source` argument selects which θᵥ field to read:
-#   - `nothing` → read instantaneous `coef.virtual_potential_temperature[i, j, 1]`
-#   - any field-like (Field, 2D filtered field) → read `θᵥ_source[i, j, 1]`
+# The `Δθᵥ_source` argument selects the surface-layer virtual potential temperature difference:
+#   - `nothing` → formed from the instantaneous first-cell state and `T₀`
+#   - a filtered 2D field → read `Δθᵥ_source[i, j, 1]`
+# The surface value θᵥ₀ is formed from the instantaneous state either way: it only sets the
+# mean temperature in the Richardson number, where its fluctuations are negligible.
 @inline function stability_corrected_coefficient(i, j, grid,
-    coef::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀, θᵥ_source)
+    coef::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀, Δθᵥ_source)
 
     sf = coef.stability_function
     ℓʳ = coef.roughness_length
     ℓʳʰ = sf.scalar_roughness_length
     β = log(ℓʳ / ℓʳʰ)
 
-    θᵥ = surface_layer_θᵥ(i, j, coef.virtual_potential_temperature, θᵥ_source)
-
-    # The air's specific humidity is read unfiltered even when θᵥ is filtered: its (1 - β) share
-    # of the surface humidity is a small correction to θᵥ₀.
-    qᵛ = @inbounds coef.specific_humidity[i, j, 1]
-    θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants,
-                                                coef.surface, coef.moisture_availability, qᵛ)
-    Riᴮ = bulk_richardson_number(h, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
+    Δθᵥ = surface_layer_Δθᵥ(i, j, coef, T₀, Δθᵥ_source)
+    θᵥ₀ = surface_virtual_potential_temperature(i, j, coef, T₀)
+    Riᴮ = bulk_richardson_number(h, θᵥ₀ + Δθᵥ, θᵥ₀, U, coef.minimum_wind_speed)
 
     return Cʰ * sf(Riᴮ, α, β, coef.transfer_type)
 end
 
-# Read θᵥ at the first cell, dispatching on whether a filtered source is supplied
-@inline surface_layer_θᵥ(i, j, θᵥ_3d, ::Nothing) = @inbounds θᵥ_3d[i, j, 1]
-@inline surface_layer_θᵥ(i, j, θᵥ_3d, θᵥ_filtered) = @inbounds θᵥ_filtered[i, j, 1]
+"""
+$(TYPEDSIGNATURES)
+
+The virtual potential temperature of the surface at `(i, j)`, from the surface temperature `T₀`
+(a number or a surface field) and the coefficient's surface pressure, constants, surface phase,
+moisture availability and the specific humidity of the air in the first cell.
+"""
+@inline function surface_virtual_potential_temperature(i, j, coef::PolynomialCoefficient, T₀)
+    qᵛ = @inbounds coef.specific_humidity[i, j, 1]
+    return surface_virtual_potential_temperature(surface_value(i, j, T₀), coef.surface_pressure,
+                                                 coef.thermodynamic_constants, coef.surface,
+                                                 coef.moisture_availability, qᵛ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+The surface-layer virtual potential temperature difference ``Δθᵥ = θᵥ(z₁) - θᵥ₀`` at `(i, j)`
+from the instantaneous state: the stability input of the bulk coefficient, and the result that
+[`FilteredSurfaceVelocities`](@ref) filters.
+"""
+@inline function surface_layer_Δθᵥ(i, j, coef::PolynomialCoefficient, T₀)
+    θᵥ = @inbounds coef.virtual_potential_temperature[i, j, 1]
+    return θᵥ - surface_virtual_potential_temperature(i, j, coef, T₀)
+end
+
+# Dispatch on whether a filtered difference is supplied
+@inline surface_layer_Δθᵥ(i, j, coef, T₀, ::Nothing) = surface_layer_Δθᵥ(i, j, coef, T₀)
+@inline surface_layer_Δθᵥ(i, j, coef, T₀, Δθᵥ_filtered) = @inbounds Δθᵥ_filtered[i, j, 1]
 
 #####
 ##### Bulk coefficient evaluation
@@ -721,7 +744,7 @@ end
 ##### Bulk coefficient evaluation — with filtered velocities
 #####
 ##### When a `FilteredSurfaceVelocities` is provided, both the wind speed and
-##### the stability input `θᵥ` are read from the filtered fields. This keeps the
+##### the stability input `Δθᵥ` are read from the filtered fields. This keeps the
 ##### bulk coefficient consistent with the rest of the bulk formula in which
 ##### every term is computed from filtered state.
 #####
@@ -730,7 +753,7 @@ end
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv)
     U = sqrt(U²)
     h = evaluation_height(i, j, grid, fv.height)
-    return C(i, j, grid, U, T₀, h, fv.θᵥ)
+    return C(i, j, grid, U, T₀, h, fv.Δθᵥ)
 end
 
 #####

@@ -32,7 +32,7 @@ theory underlying `Cᴰ`.
 
 When a [`FilteredSurfaceVelocities`](@ref) is supplied via `filtered_velocities`,
 *every* field entering the formula — the wind speed `|U|`, the velocity `u`, and the
-virtual potential temperature `θᵥ` used in stability — is read from the filtered
+surface-layer virtual potential temperature difference `Δθᵥ` used in stability — is read from the filtered
 state. The surface density `ρ₀` is computed from the (slowly varying) surface
 temperature and pressure and is not filtered. Temporal filtering of the matching
 velocity is used to mitigate log-layer mismatch in wall-modeled large-eddy
