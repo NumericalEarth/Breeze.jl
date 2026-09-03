@@ -60,6 +60,7 @@ using Oceananigans.Grids: rnode, znode
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
                                 ∂zᶜᶜᶜ, ∂zᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.Models: boundary_condition_args
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
