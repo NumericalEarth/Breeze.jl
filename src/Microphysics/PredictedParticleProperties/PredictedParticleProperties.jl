@@ -49,26 +49,26 @@ export
     PredictedParticlePropertiesMicrophysics,
     P3Microphysics,
     P3MicrophysicalState,
-    ProcessRateParameters,
+    ProcessRate,
     NumericalFloors,
 
     # Ice properties
-    IceProperties,
+    Ice,
     IceFallSpeed,
     IceDeposition,
-    IceBulkProperties,
+    IceBulk,
     IceCollection,
     IceLambdaLimiter,
     IceRainCollection,
 
     # Rain and cloud droplet properties
-    RainProperties,
-    CloudDropletProperties,
+    Rain,
+    CloudDroplet,
 
     # Empirical parameter containers for the warm-phase fits
-    CloudShapeParameters,
-    RainFallSpeedParameters,
-    RainVentilationParameters,
+    CloudShape,
+    RainFallSpeed,
+    RainVentilation,
 
     # Rain PSD quadrature evaluators
     RainMassWeightedVelocityEvaluator,
@@ -217,12 +217,12 @@ include("rain_quadrature.jl")
 @adapt_architecture RimeDensityIndexedTable5D
 @adapt_architecture IceFallSpeed
 @adapt_architecture IceDeposition
-@adapt_architecture IceBulkProperties
+@adapt_architecture IceBulk
 @adapt_architecture IceCollection
 @adapt_architecture IceLambdaLimiter
 @adapt_architecture IceRainCollection
-@adapt_architecture IceProperties
-@adapt_architecture RainProperties
+@adapt_architecture Ice
+@adapt_architecture Rain
 @adapt_architecture PredictedParticlePropertiesMicrophysics
 
 #####

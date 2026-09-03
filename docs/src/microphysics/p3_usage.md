@@ -36,30 +36,30 @@ means.
 
 ```@example p3_usage
 using Breeze.Microphysics.PredictedParticleProperties:
-    CloudDropletProperties, CloudShapeParameters,
-    RainProperties, RainFallSpeedParameters, RainVentilationParameters
+    CloudDroplet, CloudShape,
+    Rain, RainFallSpeed, RainVentilation
 
 # Cap the diagnosed cloud shape parameter below its default ceiling
-cloud_shape = CloudShapeParameters(Float64;
+cloud_shape = CloudShape(Float64;
     relative_dispersion_number_coefficient = 5.714e-10,
     relative_dispersion_intercept = 0.2714,
     minimum_shape_parameter = 2,
     maximum_shape_parameter = 12)
 
-cloud = CloudDropletProperties(Float64; shape_parameters = cloud_shape)
+cloud = CloudDroplet(Float64; shape_parameters = cloud_shape)
 
 # A slightly slower large-drop plateau and a stronger Reynolds ventilation term
-fall_speed = RainFallSpeedParameters(Float64;
+fall_speed = RainFallSpeed(Float64;
     branch_velocity_scales = (4579.5, 49.62, 17.32),
     branch_mass_exponents = (2 / 3, 1 / 3, 1 / 6),
     transition_diameters = (134.43e-6, 1511.64e-6, 3477.84e-6),
     plateau_velocity = 8.8)
 
-ventilation = RainVentilationParameters(Float64;
+ventilation = RainVentilation(Float64;
     constant_coefficient = 0.78,
     reynolds_coefficient = 0.35)
 
-rain = RainProperties(Float64; fall_speed, ventilation)
+rain = Rain(Float64; fall_speed, ventilation)
 
 tuned = P3Microphysics(Float64; cloud, rain)
 tuned.rain

@@ -94,13 +94,13 @@ parameter `cloud.number_concentration`.
   [kg/kg] (default 10⁻¹⁴)
 - `minimum_number_mixing_ratio`: Number below which a population is treated as
   absent [kg⁻¹] (default 10⁻¹⁶)
-- `cloud`: [`CloudDropletProperties`](@ref) holding the prescribed droplet number and the
-  [`CloudShapeParameters`](@ref) every μᶜˡ diagnosis reads. `nothing` (default) uses
-  `CloudDropletProperties(FT)`.
-- `rain`: [`RainProperties`](@ref) skeleton holding the
-  [`RainFallSpeedParameters`](@ref) the startup quadrature integrates and the
-  [`RainVentilationParameters`](@ref) the evaporation and coupled-adjustment rates read.
-  `nothing` (default) uses `RainProperties(FT)`. Its lookup fields are materialized by
+- `cloud`: [`CloudDroplet`](@ref) holding the prescribed droplet number and the
+  [`CloudShape`](@ref) every μᶜˡ diagnosis reads. `nothing` (default) uses
+  `CloudDroplet(FT)`.
+- `rain`: [`Rain`](@ref) skeleton holding the
+  [`RainFallSpeed`](@ref) the startup quadrature integrates and the
+  [`RainVentilation`](@ref) the evaporation and coupled-adjustment rates read.
+  `nothing` (default) uses `Rain(FT)`. Its lookup fields are materialized by
   `read_lookup_tables`; every supplied parameter is preserved.
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation.
   `nothing` (default) is an open surface: the diagnosed fall speed is retained at the
@@ -120,7 +120,7 @@ parameter `cloud.number_concentration`.
 Pass `aerosol = AerosolActivation(AerosolMode())` to enable prognostic cloud
 droplet number from aerosol activation physics (Morrison & Grabowski 2007).
 When `aerosol = nothing` (default), cloud droplet number uses the prescribed
-`CloudDropletProperties.number_concentration`.
+`CloudDroplet.number_concentration`.
 
 # Configuring the empirical warm-phase parameters
 
@@ -131,21 +131,21 @@ through the startup quadrature and every runtime kernel:
 ```jldoctest
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties:
-    CloudDropletProperties, CloudShapeParameters,
-    RainProperties, RainFallSpeedParameters, RainVentilationParameters
+    CloudDroplet, CloudShape,
+    Rain, RainFallSpeed, RainVentilation
 
-cloud = CloudDropletProperties(Float64;
-    shape_parameters = CloudShapeParameters(Float64; maximum_shape_parameter = 12))
+cloud = CloudDroplet(Float64;
+    shape_parameters = CloudShape(Float64; maximum_shape_parameter = 12))
 
-rain = RainProperties(Float64;
-    fall_speed = RainFallSpeedParameters(Float64; plateau_velocity = 9.5),
-    ventilation = RainVentilationParameters(Float64; reynolds_coefficient = 0.35))
+rain = Rain(Float64;
+    fall_speed = RainFallSpeed(Float64; plateau_velocity = 9.5),
+    ventilation = RainVentilation(Float64; reynolds_coefficient = 0.35))
 
 p3 = P3Microphysics(Float64; cloud, rain)
 p3.rain.ventilation
 
 # output
-RainVentilationParameters(f₁ᵣ=0.78, f₂ᵣ=0.35)
+RainVentilation(f₁ᵣ=0.78, f₂ᵣ=0.35)
 ```
 
 # Example
@@ -160,10 +160,10 @@ microphysics = PredictedParticlePropertiesMicrophysics()
 PredictedParticlePropertiesMicrophysics
 ├── ρʷ: 1000.0 kg/m³
 ├── qmin: 1.0e-14 kg/kg
-├── ice: IceProperties
-├── rain: RainProperties
-├── cloud: CloudDropletProperties
-├── process_rates: ProcessRateParameters
+├── ice: Ice
+├── rain: Rain
+├── cloud: CloudDroplet
+├── process_rates: ProcessRate
 ├── negative_moisture_correction: SpeciesBorrowing(vertical_borrowing = nothing)
 ├── aerosol: nothing (prescribed CCN)
 └── warm_rain_scheme: KhairoutdinovKogan2000
@@ -194,7 +194,7 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  predict_supersaturation = false,
                                                  warm_rain_scheme = KhairoutdinovKogan2000())
     if isnothing(process_rates)
-        process_rates = ProcessRateParameters(FT; thermodynamic_constants,
+        process_rates = ProcessRate(FT; thermodynamic_constants,
                                               predict_supersaturation)
     end
     return read_lookup_tables(lookup_tables; FT,

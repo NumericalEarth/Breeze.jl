@@ -102,8 +102,8 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Ice properties construction" begin
-        ice = IceProperties()
-        @test ice isa IceProperties
+        ice = Ice()
+        @test ice isa Ice
         @test ice.minimum_rime_density == 50.0
         @test ice.maximum_rime_density == 900.0
         @test ice.maximum_shape_parameter == 20.0
@@ -111,7 +111,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         # Check all sub-containers exist
         @test ice.fall_speed isa IceFallSpeed
         @test ice.deposition isa IceDeposition
-        @test ice.bulk_properties isa IceBulkProperties
+        @test ice.bulk_properties isa IceBulk
         @test ice.collection isa IceCollection
         @test ice.lambda_limiter isa IceLambdaLimiter
         @test ice.ice_rain isa IceRainCollection
@@ -140,7 +140,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Ice bulk properties" begin
-        bp = IceBulkProperties()
+        bp = IceBulk()
         @test bp.maximum_mean_diameter ≈ 2.0e-2
         @test bp.minimum_mean_diameter ≈ 2.0e-6
 
@@ -175,18 +175,18 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Rain properties" begin
-        rain = RainProperties()
+        rain = Rain()
         @test rain.maximum_mean_diameter ≈ 2e-3
 
         # The active fall-speed law is the piecewise Gunn-Kinzer/Beard fit, not a single
-        # power law: `RainProperties` carries its coefficients, and the ventilation pair
+        # power law: `Rain` carries its coefficients, and the ventilation pair
         # the runtime rates read.
-        @test rain.fall_speed isa PPP.RainFallSpeedParameters{Float64}
+        @test rain.fall_speed isa PPP.RainFallSpeed{Float64}
         @test rain.fall_speed.branch_velocity_scales == (4579.5, 49.62, 17.32)
         @test rain.fall_speed.branch_mass_exponents == (2/3, 1/3, 1/6)
         @test rain.fall_speed.transition_diameters == (134.43e-6, 1511.64e-6, 3477.84e-6)
         @test rain.fall_speed.plateau_velocity ≈ 9.17
-        @test rain.ventilation isa PPP.RainVentilationParameters{Float64}
+        @test rain.ventilation isa PPP.RainVentilation{Float64}
         @test rain.ventilation.constant_coefficient ≈ 0.78
         @test rain.ventilation.reynolds_coefficient ≈ 0.32
 
@@ -196,7 +196,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Cloud droplet properties" begin
-        cloud = CloudDropletProperties()
+        cloud = CloudDroplet()
         @test cloud.number_concentration ≈ 200e6
         @test cloud.condensation_timescale ≈ 1.0
 
@@ -207,16 +207,16 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test cloud.shape_parameter ≈ liu_daum_shape_parameter(200e6)
 
         # Explicit shape_parameter overrides Liu-Daum
-        cloud_override = CloudDropletProperties(Float64; shape_parameter=5)
+        cloud_override = CloudDroplet(Float64; shape_parameter=5)
         @test cloud_override.shape_parameter ≈ 5.0
 
         # The relation itself is a stored, configurable container
-        @test cloud.shape_parameters isa PPP.CloudShapeParameters{Float64}
+        @test cloud.shape_parameters isa PPP.CloudShape{Float64}
         @test cloud.shape_parameters.relative_dispersion_number_coefficient ≈ 5.714e-10
         @test cloud.shape_parameters.relative_dispersion_intercept ≈ 0.2714
 
         # Test custom parameters
-        cloud_custom = CloudDropletProperties(Float64; number_concentration=50e6)
+        cloud_custom = CloudDroplet(Float64; number_concentration=50e6)
         @test cloud_custom.number_concentration ≈ 50e6
         # Marine Nᶜˡ → higher μᶜˡ than continental (fewer, larger, more uniform drops)
         @test cloud_custom.shape_parameter > cloud.shape_parameter
@@ -259,7 +259,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         names = prognostic_field_names(p3)
 
         @test p3.process_rates.predict_supersaturation === false
-        @test p3.process_rates isa ProcessRateParameters{Float64, false}
+        @test p3.process_rates isa ProcessRate{Float64, false}
         @test :ρqᶜˡ ∈ names
         @test :ρnᶜˡ ∉ names
         @test :ρnᵃ ∉ names
@@ -275,7 +275,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         p3_supersaturation =
             PredictedParticlePropertiesMicrophysics(; predict_supersaturation = true)
         @test p3_supersaturation.process_rates.predict_supersaturation === true
-        @test p3_supersaturation.process_rates isa ProcessRateParameters{Float64, true}
+        @test p3_supersaturation.process_rates isa ProcessRate{Float64, true}
         @test :ρsᵛ⁺ˡ ∈ prognostic_field_names(p3_supersaturation)
 
         # Aerosol activation adds the droplet-number and aerosol prognostics together.

@@ -232,7 +232,7 @@ end
 # Fall-speed correction for ambient air density, `(ρ₀ / ρ)^α`. The default exponent α is
 # the [Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007) fit and the default density
 # floor only bites above ~30 km, where there is no condensate to fall; both are settable
-# on [`ProcessRateParameters`](@ref).
+# on [`ProcessRate`](@ref).
 @inline function ice_air_density_correction(parameters, reference_air_density, air_density)
     FT = typeof(reference_air_density)
     ρ_floor = FT(parameters.minimum_fall_speed_air_density)
@@ -367,7 +367,7 @@ end
 end
 
 # Bulk ice density from Table 1 at the diagnostic-population bracket.
-@inline ice_mean_density(bulk_properties::IceBulkProperties, prep::PreparedInterpolation) =
+@inline ice_mean_density(bulk_properties::IceBulk, prep::PreparedInterpolation) =
     evaluate_at(bulk_properties.mean_density, prep)
 
 #####

@@ -96,7 +96,7 @@ end
     # velocities are unphysical on purpose: this asserts plumbing, not physics.
     raised = NumericalFloors(FT; divisor = 1e-15)
     raised_p3 = PredictedParticlePropertiesMicrophysics(
-        FT; process_rates = ProcessRateParameters(FT; floors = raised))
+        FT; process_rates = ProcessRate(FT; floors = raised))
     default_p3 = PredictedParticlePropertiesMicrophysics(FT)
 
     @test raised_p3.process_rates.floors.divisor == FT(1e-15)

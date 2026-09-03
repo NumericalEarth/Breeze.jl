@@ -508,18 +508,18 @@ using Oceananigans.Fields: interior
     end
 
     #####
-    ##### ProcessRateParameters defaults
+    ##### ProcessRate defaults
     #####
     ##### The immersion-freezing PSD correction is not stored in
-    ##### `ProcessRateParameters`. `immersion_freezing_cloud_rate` evaluates
+    ##### `ProcessRate`. `immersion_freezing_cloud_rate` evaluates
 ##### `psd_correction_spherical_volume` from the locally diagnosed Liu-Daum μᶜˡ,
     ##### so its correction varies with cloud droplet number.
     ##### `immersion_freezing_rain_rate` evaluates the same function at fixed μ_r = 0,
     ##### so the rain correction is constant.
     #####
 
-    @testset "ProcessRateParameters defaults" begin
-        parameters = ProcessRateParameters(Float64)
+    @testset "ProcessRate defaults" begin
+        parameters = ProcessRate(Float64)
 
         @test parameters.reference_air_density ≈ 100000 / (dry_air_gas_constant(ThermodynamicConstants(Float64)) * 273.15) rtol=1e-12
         @test parameters.ice_nucleation_supersaturation_threshold == 0.05

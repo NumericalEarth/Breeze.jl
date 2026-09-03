@@ -4,7 +4,7 @@
 ##### The concept containers that hold the ice-side integrals of the P3 scheme —
 ##### fall speed, deposition, bulk properties, collection, the λ limiter, and
 ##### ice-rain collection — the lookup-table containers they are read from, and
-##### the `IceProperties` container that gathers them.
+##### the `Ice` container that gathers them.
 #####
 ##### Every container follows the materialization pattern: the user-facing
 ##### constructor builds a skeleton whose integral fields are `nothing`, and
@@ -139,7 +139,7 @@ Base.show(io::IO, d::IceDeposition) = print(io, summary(d), "()")
 ##### particle size distribution.
 #####
 
-struct IceBulkProperties{FT, EF, DM, RH, RF, LA, MU, SH}
+struct IceBulk{FT, EF, DM, RH, RF, LA, MU, SH}
     maximum_mean_diameter :: FT
     minimum_mean_diameter :: FT
     effective_radius :: EF
@@ -154,7 +154,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct `IceBulkProperties` with parameters and quadrature-based integrals.
+Construct `IceBulk` with parameters and quadrature-based integrals.
 
 These integrals compute bulk properties by averaging over the particle
 size distribution. They are used for radiation, radar, and diagnostics.
@@ -185,18 +185,18 @@ size distribution. They are used for radiation, radar, and diagnostics.
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
 [Field et al. (2007)](@cite FieldEtAl2007) for μⁱ-λ relationship.
 """
-function IceBulkProperties(FT::DataType = Oceananigans.defaults.FloatType;
+function IceBulk(FT::DataType = Oceananigans.defaults.FloatType;
                            maximum_mean_diameter = 20e-3,
                            minimum_mean_diameter = 2e-6)
-    return IceBulkProperties(
+    return IceBulk(
         FT(maximum_mean_diameter),
         FT(minimum_mean_diameter),
         nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
-Base.summary(::IceBulkProperties) = "IceBulkProperties"
+Base.summary(::IceBulk) = "IceBulk"
 
-function Base.show(io::IO, bp::IceBulkProperties)
+function Base.show(io::IO, bp::IceBulk)
     print(io, summary(bp), "(")
     print(io, "Dmax=", bp.maximum_mean_diameter, ", ")
     print(io, "Dmin=", bp.minimum_mean_diameter, ")")
@@ -249,7 +249,7 @@ Ice-rain collection is handled separately, by [`IceRainCollection`](@ref) and th
 rain slope parameter ``λ_r`` in addition to the ice PSD.
 
 Collection efficiencies are not stored here. They live in
-[`ProcessRateParameters`](@ref) alongside the other rate parameters, as
+[`ProcessRate`](@ref) alongside the other rate parameters, as
 `cloud_ice_collection_efficiency` (``E^{ci}``) and
 `rain_ice_collection_efficiency` (``E^{ri}``).
 
@@ -341,10 +341,10 @@ Base.summary(::IceRainCollection) = "IceRainCollection"
 Base.show(io::IO, ::IceRainCollection) = print(io, "IceRainCollection(2 integrals)")
 
 #####
-##### IceProperties: the container combining all ice particle property concepts
+##### Ice: the container combining all ice particle property concepts
 #####
 
-struct IceProperties{FT, FS, DP, BP, CL, LL, IR}
+struct Ice{FT, FS, DP, BP, CL, LL, IR}
     # Top-level parameters
     minimum_rime_density :: FT
     maximum_rime_density :: FT
@@ -391,26 +391,26 @@ This container organizes all ice-related computations:
 The mass-diameter relationship is from
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 """
-function IceProperties(FT::DataType = Oceananigans.defaults.FloatType;
+function Ice(FT::DataType = Oceananigans.defaults.FloatType;
                        thermodynamic_constants = ThermodynamicConstants(FT),
                        minimum_rime_density = 50,
                        maximum_rime_density = 900,
                        maximum_shape_parameter = 20)
-    return IceProperties(
+    return Ice(
         FT(minimum_rime_density),
         FT(maximum_rime_density),
         FT(maximum_shape_parameter),
         IceFallSpeed(FT; thermodynamic_constants),
         IceDeposition(FT),
-        IceBulkProperties(FT),
+        IceBulk(FT),
         IceCollection(),
         IceLambdaLimiter(),
         IceRainCollection())
 end
 
-Base.summary(::IceProperties) = "IceProperties"
+Base.summary(::Ice) = "Ice"
 
-function Base.show(io::IO, ice::IceProperties)
+function Base.show(io::IO, ice::Ice)
     print(io, summary(ice), '\n')
     print(io, "├── ρᶠ: [", ice.minimum_rime_density, ", ", ice.maximum_rime_density, "] kg/m³\n")
     print(io, "├── μmax: ", ice.maximum_shape_parameter, "\n")

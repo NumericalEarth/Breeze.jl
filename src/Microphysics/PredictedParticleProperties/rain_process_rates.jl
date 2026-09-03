@@ -282,7 +282,7 @@ I_{evap}(λ^r) = \\frac{f_{1r}}{(λ^r)^2}
 `I_VD` comes from the tabulated `table`, which stores
 ``∫ D \\sqrt{V D} e^{-λ^r D} dD`` with neither `ν` nor the Schmidt number baked
 in, so both T,P-dependent factors are applied here. ``f_{1r}`` and ``f_{2r}`` come from
-`ventilation_parameters`, a [`RainVentilationParameters`](@ref), for the same reason:
+`ventilation_parameters`, a [`RainVentilation`](@ref), for the same reason:
 neither is baked into the table, so both remain configurable at runtime. Returns
 `(; λʳ, Nʳ₀, integral)`, since every caller needs the intercept
 ``N^r_0 = n^r λ^r`` alongside the integral.

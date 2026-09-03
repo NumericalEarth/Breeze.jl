@@ -5,7 +5,7 @@
 ##### These parameters control timescales, efficiencies, and thresholds.
 #####
 
-export ProcessRateParameters, NumericalFloors
+export ProcessRate, NumericalFloors
 
 struct NumericalFloors{FT}
     saturation_mass_fraction :: FT  # floors qᵛ⁺ˡ, qᵛ⁺ⁱ in supersaturation denominators [kg/kg]
@@ -65,7 +65,7 @@ function NumericalFloors(FT::DataType = Oceananigans.defaults.FloatType;
                                FT(mean_particle_mass_fallback))
 end
 
-# Re-typing conversion, used when `ProcessRateParameters(FT)` is handed floors
+# Re-typing conversion, used when `ProcessRate(FT)` is handed floors
 # that were built at a different precision.
 function NumericalFloors{FT}(floors::NumericalFloors) where FT
     return NumericalFloors{FT}(floors.saturation_mass_fraction,
@@ -90,7 +90,7 @@ function Base.show(io::IO, floors::NumericalFloors)
     print(io, summary(floors), "(mass_scale=", floors.mass_scale, ")")
 end
 
-struct ProcessRateParameters{FT, PS}
+struct ProcessRate{FT, PS}
     # Properties cached from `ThermodynamicConstants`. These are not independent
     # parameters: each is copied from the constants at construction and cannot be set
     # separately, so the two can never disagree.
@@ -318,19 +318,19 @@ prognostic set entirely while `params.predict_supersaturation` remains usable in
 ordinary Boolean expressions.
 
 ```jldoctest
-using Breeze.Microphysics.PredictedParticleProperties: ProcessRateParameters
-params = ProcessRateParameters(Float64)
+using Breeze.Microphysics.PredictedParticleProperties: ProcessRate
+params = ProcessRate(Float64)
 typeof(params)
 
 # output
-ProcessRateParameters{Float64, false}
+ProcessRate{Float64, false}
 ```
 
 All parameters are keyword arguments with physically-based defaults. The coupled
 donor-budget limiter uses four re-projection passes by default; set
 `coupled_sink_limiting_iterations` to tune that count.
 """
-function ProcessRateParameters(FT::DataType = Oceananigans.defaults.FloatType;
+function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         # Shared thermodynamic properties. `liquid_water_density`, `pure_ice_density`, and
         # every mass derived from them come from here, so they cannot fall out of step
         # with the model's own constants.
@@ -526,7 +526,7 @@ function ProcessRateParameters(FT::DataType = Oceananigans.defaults.FloatType;
 
     predict_supersaturation = Bool(predict_supersaturation)
 
-    return ProcessRateParameters{FT, predict_supersaturation}(
+    return ProcessRate{FT, predict_supersaturation}(
         FT(thermodynamic_constants.liquid.density),
         FT(thermodynamic_constants.ice.density),
         FT(freezing_temperature),
@@ -611,14 +611,14 @@ end
 
 # Gate a rate on the predicted-supersaturation switch. Dispatching on the type value
 # folds the branch at compile time while preserving a user-facing `Bool` field.
-@inline gate_predicted_supersaturation(::ProcessRateParameters{FT, false}, x) where FT = 0 * x
-@inline gate_predicted_supersaturation(::ProcessRateParameters{FT, true}, x) where FT = x
+@inline gate_predicted_supersaturation(::ProcessRate{FT, false}, x) where FT = 0 * x
+@inline gate_predicted_supersaturation(::ProcessRate{FT, true}, x) where FT = x
 
-@inline predicts_supersaturation(::ProcessRateParameters{FT, PS}) where {FT, PS} = PS
+@inline predicts_supersaturation(::ProcessRate{FT, PS}) where {FT, PS} = PS
 
-Base.summary(::ProcessRateParameters) = "ProcessRateParameters"
+Base.summary(::ProcessRate) = "ProcessRate"
 
-function Base.show(io::IO, p::ProcessRateParameters)
+function Base.show(io::IO, p::ProcessRate)
     print(io, summary(p), "(")
     print(io, "T₀=", p.freezing_temperature, "K, ")
     print(io, "ρʷ=", p.liquid_water_density, "kg/m³, ")

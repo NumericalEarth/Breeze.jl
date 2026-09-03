@@ -53,14 +53,14 @@ end
 end
 
 @inline function final_predicted_supersaturation_tendency(
-    ::ProcessRateParameters{FT, false}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
+    ::ProcessRate{FT, false}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
     initial_supersaturation, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice
 ) where FT
     return zero(qᵛ)
 end
 
 @inline function final_predicted_supersaturation_tendency(
-    ::ProcessRateParameters{FT, true}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
+    ::ProcessRate{FT, true}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
     initial_supersaturation, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice
 ) where FT
     qᵛ_final = qᵛ - (vapor_to_liquid + vapor_to_ice) * dt

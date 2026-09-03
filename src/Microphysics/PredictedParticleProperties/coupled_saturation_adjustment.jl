@@ -52,7 +52,7 @@ local state passes through unchanged.
                                          sᵛ⁺ˡ, T, ρ, constants)
 
 @inline function predicted_supersaturation_adjustment(
-    ::ProcessRateParameters{FT, false}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
+    ::ProcessRate{FT, false}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
 ) where FT
     cloud_water_adjustment = zero(qᶜˡ)
     return (; cloud_water_adjustment,
@@ -64,7 +64,7 @@ local state passes through unchanged.
 end
 
 @inline function predicted_supersaturation_adjustment(
-    parameters::ProcessRateParameters{PFT, true}, p3,
+    parameters::ProcessRate{PFT, true}, p3,
     qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
 ) where PFT
     FT = typeof(qᶜˡ)

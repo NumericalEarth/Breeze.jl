@@ -42,7 +42,7 @@ export RainMassWeightedVelocityEvaluator,
 # fit itself was derived with, so this density belongs to the formula rather than to the
 # model: substituting the configurable ρʷ would rescale the published coefficients. The
 # branch coefficients, exponents, edges and plateau speed *are* configurable, and live in
-# `RainFallSpeedParameters` (`rain_properties.jl`).
+# `RainFallSpeed` (`rain_properties.jl`).
 const GUNN_KINZER_WATER_DENSITY = 997     # [kg/m³], mass basis of the fit
 
 """
@@ -53,7 +53,7 @@ Piecewise Gunn-Kinzer / Beard rain terminal velocity [m/s] at diameter `D` [m], 
 terminal-velocity plateau above D ≈ 5 mm.
 
 The branch velocity scales, mass exponents, boundary diameters and plateau speed come
-from `fall_speed_parameters`, a [`RainFallSpeedParameters`](@ref). The published fit is
+from `fall_speed_parameters`, a [`RainFallSpeed`](@ref). The published fit is
 stated in centimetres per second per gram^exponent; the scales stored in the container
 are already converted to m/s, and the mass argument is the dimensionless ratio
 `m(D) / (1 g)`, which is numerically the drop mass in grams.
@@ -112,19 +112,12 @@ reference density (no density correction applied here; apply at call site).
 
 Quadrature uses the same exponential-tail transformation as the ice integrals,
 via [`chebyshev_gauss_nodes_weights`](@ref).
-
-# Fields
-$(TYPEDFIELDS)
 """
 struct RainMassWeightedVelocityEvaluator{N, W, F, FS}
-    "Pre-computed Chebyshev-Gauss nodes on [-1, 1]"
-    nodes :: N
-    "Pre-computed Chebyshev-Gauss weights"
-    weights :: W
-    "Numerical floors, carried because tabulation runs before a scheme exists"
-    floors :: F
-    "`RainFallSpeedParameters` defining the V(D) that is integrated"
-    fall_speed :: FS
+    nodes :: N       # pre-computed Chebyshev-Gauss nodes on [-1, 1]
+    weights :: W     # pre-computed Chebyshev-Gauss weights
+    floors :: F      # numerical floors, carried because tabulation precedes the scheme
+    fall_speed :: FS # RainFallSpeed defining the V(D) that is integrated
 end
 
 """
@@ -136,7 +129,7 @@ integrating the fall-speed law defined by `fall_speed`.
 function RainMassWeightedVelocityEvaluator(FT::DataType = Oceananigans.defaults.FloatType;
                                             n_points::Int = 128,
                                             floors = NumericalFloors(FT),
-                                            fall_speed = RainFallSpeedParameters(FT))
+                                            fall_speed = RainFallSpeed(FT))
     nodes, weights = chebyshev_gauss_nodes_weights(FT, n_points)
     return RainMassWeightedVelocityEvaluator(nodes, weights, floors, fall_speed)
 end
@@ -221,19 +214,12 @@ V_{\\mathrm{num}}(\\lambda_r) =
 ```
 
 Quadrature uses the same exponential-tail transformation as ice integrals.
-
-# Fields
-$(TYPEDFIELDS)
 """
 struct RainNumberWeightedVelocityEvaluator{N, W, F, FS}
-    "Pre-computed Chebyshev-Gauss nodes on [-1, 1]"
-    nodes :: N
-    "Pre-computed Chebyshev-Gauss weights"
-    weights :: W
-    "Numerical floors, carried because tabulation runs before a scheme exists"
-    floors :: F
-    "`RainFallSpeedParameters` defining the V(D) that is integrated"
-    fall_speed :: FS
+    nodes :: N       # pre-computed Chebyshev-Gauss nodes on [-1, 1]
+    weights :: W     # pre-computed Chebyshev-Gauss weights
+    floors :: F      # numerical floors, carried because tabulation precedes the scheme
+    fall_speed :: FS # RainFallSpeed defining the V(D) that is integrated
 end
 
 """
@@ -245,7 +231,7 @@ integrating the fall-speed law defined by `fall_speed`.
 function RainNumberWeightedVelocityEvaluator(FT::DataType = Oceananigans.defaults.FloatType;
                                               n_points::Int = 128,
                                               floors = NumericalFloors(FT),
-                                              fall_speed = RainFallSpeedParameters(FT))
+                                              fall_speed = RainFallSpeed(FT))
     nodes, weights = chebyshev_gauss_nodes_weights(FT, n_points)
     return RainNumberWeightedVelocityEvaluator(nodes, weights, floors, fall_speed)
 end
@@ -290,7 +276,7 @@ I_{\\mathrm{evap}} = \\frac{f_{1r}}{\\lambda_r^2}
 
 where `Sc = ν / Dᵛ` is the Schmidt number and `ν` is the T,P-dependent kinematic
 viscosity. The ventilation coefficients `f1r` and `f2r` come from
-[`RainVentilationParameters`](@ref) — the defaults are the standard values for falling
+[`RainVentilation`](@ref) — the defaults are the standard values for falling
 drops tabulated by
 [Pruppacher and Klett (2010)](@cite pruppacher2010microphysics). They deliberately do
 **not** enter this table, which stores only `I_VD`; both are applied at runtime by
@@ -305,17 +291,11 @@ capacitance `C = D/2` for a sphere, so `4πC = 2πD`):
 ```
 
 where A+B is the thermodynamic resistance factor.
-
-# Fields
-$(TYPEDFIELDS)
 """
 struct RainEvaporationVentilationEvaluator{N, W, FS}
-    "Pre-computed Chebyshev-Gauss nodes on [-1, 1]"
-    nodes :: N
-    "Pre-computed Chebyshev-Gauss weights"
-    weights :: W
-    "`RainFallSpeedParameters` defining the V(D) that is integrated"
-    fall_speed :: FS
+    nodes :: N       # pre-computed Chebyshev-Gauss nodes on [-1, 1]
+    weights :: W     # pre-computed Chebyshev-Gauss weights
+    fall_speed :: FS # RainFallSpeed defining the V(D) that is integrated
 end
 
 """
@@ -326,7 +306,7 @@ integrating the fall-speed law defined by `fall_speed`.
 """
 function RainEvaporationVentilationEvaluator(FT::DataType = Oceananigans.defaults.FloatType;
                                               n_points::Int = 128,
-                                              fall_speed = RainFallSpeedParameters(FT))
+                                              fall_speed = RainFallSpeed(FT))
     nodes, weights = chebyshev_gauss_nodes_weights(FT, n_points)
     return RainEvaporationVentilationEvaluator(nodes, weights, fall_speed)
 end

@@ -81,15 +81,15 @@ end
 #
 # We therefore dispatch on the *type* of the optional container, so the compiler folds
 # the helper down to a static tuple per concrete P3 type. The value of
-# `predict_supersaturation` is carried by `ProcessRateParameters`' second type parameter
+# `predict_supersaturation` is carried by `ProcessRate`' second type parameter
 # for the same reason.
 #
 # Every switch here gates allocation as well as transport: the fields a configuration
 # does not use are never created (see `materialize_microphysical_fields`), so an
 # unguarded read would be a missing-property error rather than a silent zero.
 
-@inline supersaturation_prognostic_names(::ProcessRateParameters{FT, false}) where FT = ()
-@inline supersaturation_prognostic_names(::ProcessRateParameters{FT, true}) where FT = (:ρsᵛ⁺ˡ,)
+@inline supersaturation_prognostic_names(::ProcessRate{FT, false}) where FT = ()
+@inline supersaturation_prognostic_names(::ProcessRate{FT, true}) where FT = (:ρsᵛ⁺ˡ,)
 
 # Droplet number and aerosol depletion are prognostic iff `p3.aerosol` is a concrete
 # `AerosolActivation`. In the prescribed-Nᶜˡ path, `nᶜˡ`
@@ -318,7 +318,7 @@ end
 
 # Optional field groups. Each switch gates allocation, not just transport, so a
 # configuration never carries memory for state it does not use. Both dispatch on a
-# *type* (`Nothing` / `ProcessRateParameters{FT, PS}`) so the merged NamedTuple is a
+# *type* (`Nothing` / `ProcessRate{FT, PS}`) so the merged NamedTuple is a
 # compile-time constant, which lets the read sites fold their guards away.
 
 # Droplet number and unactivated aerosol. The prescribed-Nᶜˡ path takes the droplet
@@ -334,9 +334,9 @@ end
 
 # Predicted supersaturation, off by default. With the switch off every rate that
 # would touch `sᵛ⁺ˡ` is gated to zero, so the prognostic carries no information.
-@inline supersaturation_fields(::ProcessRateParameters{FT, false}, grid) where FT = (;)
+@inline supersaturation_fields(::ProcessRate{FT, false}, grid) where FT = (;)
 
-@inline supersaturation_fields(::ProcessRateParameters{FT, true}, grid) where FT =
+@inline supersaturation_fields(::ProcessRate{FT, true}, grid) where FT =
     (; ρsᵛ⁺ˡ = CenterField(grid), sᵛ⁺ˡ = CenterField(grid))
 
 #####
@@ -416,8 +416,8 @@ end
 
 # Same for the optional supersaturation prognostic: absent with prediction
 # disabled, where it collapses to zero anyway.
-@inline grid_supersaturation(::ProcessRateParameters{FT, false}, μ, i, j, k, ρ) where FT = 0 * ρ
-@inline grid_supersaturation(::ProcessRateParameters{FT, true}, μ, i, j, k, ρ) where FT =
+@inline grid_supersaturation(::ProcessRate{FT, false}, μ, i, j, k, ρ) where FT = 0 * ρ
+@inline grid_supersaturation(::ProcessRate{FT, true}, μ, i, j, k, ρ) where FT =
     @inbounds μ.ρsᵛ⁺ˡ[i, j, k] / ρ
 
 @inline function AM.grid_microphysical_state(i, j, k, grid, p3::P3, μ, ρ, 𝒰, velocities)
@@ -576,11 +576,11 @@ end
 end
 
 @inline write_supersaturation_diagnostic!(
-    μ, i, j, k, ::ProcessRateParameters{FT, false}, ℳ
+    μ, i, j, k, ::ProcessRate{FT, false}, ℳ
 ) where FT = nothing
 
 @inline function write_supersaturation_diagnostic!(
-    μ, i, j, k, ::ProcessRateParameters{FT, true}, ℳ
+    μ, i, j, k, ::ProcessRate{FT, true}, ℳ
 ) where FT
     @inbounds μ.sᵛ⁺ˡ[i, j, k] = ℳ.sᵛ⁺ˡ
     return nothing
@@ -800,11 +800,11 @@ end
 end
 
 @inline add_p3_supersaturation_tendency!(
-    G, i, j, k, ::ProcessRateParameters{FT, false}, result
+    G, i, j, k, ::ProcessRate{FT, false}, result
 ) where FT = nothing
 
 @inline function add_p3_supersaturation_tendency!(
-    G, i, j, k, ::ProcessRateParameters{FT, true}, result
+    G, i, j, k, ::ProcessRate{FT, true}, result
 ) where FT
     @inbounds G.ρsᵛ⁺ˡ[i, j, k] += result.tendency_ρsᵛ⁺ˡ
     return nothing

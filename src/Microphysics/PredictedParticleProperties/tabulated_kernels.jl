@@ -94,7 +94,7 @@ Build the [`P3IceLookups`](@ref) of the ice population `(qⁱ, qʷⁱ, nⁱ, F�
     FT = typeof(m_mean)
     prep = ice_table_bracket(deposition.ventilation, m_mean, Fᶠ, Fˡ, ρᶠ, floors)
     # The ice reference density (≈0.83 kg/m³ at 600 hPa, 253.15 K; see `IceFallSpeed`),
-    # not the rain reference ≈1.275 kg/m³ of `ProcessRateParameters`.
+    # not the rain reference ≈1.275 kg/m³ of `ProcessRate`.
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
     return P3IceLookups{FT, typeof(prep)}(m_mean, Fˡ, prep, ρ_correction,
                                           evaluate_at(deposition.ventilation, prep),

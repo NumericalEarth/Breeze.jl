@@ -4,16 +4,16 @@ using Test
 
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties:
-    CloudDropletProperties,
-    CloudShapeParameters,
+    CloudDroplet,
+    CloudShape,
     PredictedParticlePropertiesMicrophysics,
-    ProcessRateParameters,
+    ProcessRate,
     RainEvaporationVentilationEvaluator,
-    RainFallSpeedParameters,
+    RainFallSpeed,
     RainMassWeightedVelocityEvaluator,
     RainNumberWeightedVelocityEvaluator,
-    RainProperties,
-    RainVentilationParameters,
+    Rain,
+    RainVentilation,
     air_transport_properties,
     diagnose_cloud_dsd,
     immersion_freezing_cloud_rate,
@@ -64,7 +64,7 @@ end
 #####
 ##### Reference outputs recorded from the P3 implementation *before* the empirical
 ##### cloud-width / rain-ventilation / rain-fall-speed coefficients were promoted into
-##### `CloudShapeParameters`, `RainVentilationParameters` and `RainFallSpeedParameters`.
+##### `CloudShape`, `RainVentilation` and `RainFallSpeed`.
 #####
 ##### Recorded at Breeze bfd4edddccb655fe66eef57571e34ad1d82e5efc with the coefficients still hard-coded in
 ##### `rain_quadrature.jl` and `cloud_droplet_properties.jl`. They exist so the default
@@ -181,9 +181,9 @@ end
     #####
 
     @testset "Container typing and validation [$FT]" for FT in all_float_types()
-        shape = CloudShapeParameters(FT)
-        fall_speed = RainFallSpeedParameters(FT)
-        ventilation = RainVentilationParameters(FT)
+        shape = CloudShape(FT)
+        fall_speed = RainFallSpeed(FT)
+        ventilation = RainVentilation(FT)
 
         for parameters in (shape, fall_speed, ventilation)
             @test isbits(parameters)
@@ -191,9 +191,9 @@ end
             @test all(isconcretetype, fieldtypes(typeof(parameters)))
         end
 
-        @test shape isa CloudShapeParameters{FT}
-        @test fall_speed isa RainFallSpeedParameters{FT}
-        @test ventilation isa RainVentilationParameters{FT}
+        @test shape isa CloudShape{FT}
+        @test fall_speed isa RainFallSpeed{FT}
+        @test ventilation isa RainVentilation{FT}
 
         @test fall_speed.branch_velocity_scales isa NTuple{3, FT}
         @test fall_speed.branch_mass_exponents isa NTuple{3, FT}
@@ -214,28 +214,28 @@ end
         @test ventilation.reynolds_coefficient == FT(0.32)
 
         # Keywords are converted, never stored at the keyword's own precision.
-        widened = CloudShapeParameters(FT; relative_dispersion_intercept = 0.3)
+        widened = CloudShape(FT; relative_dispersion_intercept = 0.3)
         @test widened.relative_dispersion_intercept === FT(0.3)
 
         # Validation happens on the host, in the constructor.
-        @test_throws ArgumentError CloudShapeParameters(FT;
+        @test_throws ArgumentError CloudShape(FT;
             relative_dispersion_number_coefficient = -1e-10)
-        @test_throws ArgumentError CloudShapeParameters(FT; relative_dispersion_intercept = 0)
-        @test_throws ArgumentError CloudShapeParameters(FT; relative_dispersion_intercept = -0.1)
-        @test_throws ArgumentError CloudShapeParameters(FT; minimum_shape_parameter = 20)
-        @test_throws ArgumentError RainFallSpeedParameters(FT;
+        @test_throws ArgumentError CloudShape(FT; relative_dispersion_intercept = 0)
+        @test_throws ArgumentError CloudShape(FT; relative_dispersion_intercept = -0.1)
+        @test_throws ArgumentError CloudShape(FT; minimum_shape_parameter = 20)
+        @test_throws ArgumentError RainFallSpeed(FT;
             branch_velocity_scales = (-1, 49.62, 17.32))
-        @test_throws ArgumentError RainFallSpeedParameters(FT;
+        @test_throws ArgumentError RainFallSpeed(FT;
             branch_mass_exponents = (2/3, -1/3, 1/6))
-        @test_throws ArgumentError RainFallSpeedParameters(FT;
+        @test_throws ArgumentError RainFallSpeed(FT;
             transition_diameters = (0, 1511.64e-6, 3477.84e-6))
-        @test_throws ArgumentError RainFallSpeedParameters(FT;
+        @test_throws ArgumentError RainFallSpeed(FT;
             transition_diameters = (1511.64e-6, 134.43e-6, 3477.84e-6))
-        @test_throws ArgumentError RainFallSpeedParameters(FT;
+        @test_throws ArgumentError RainFallSpeed(FT;
             transition_diameters = (134.43e-6, 134.43e-6, 3477.84e-6))
-        @test_throws ArgumentError RainFallSpeedParameters(FT; plateau_velocity = -1)
-        @test_throws ArgumentError RainVentilationParameters(FT; constant_coefficient = -0.1)
-        @test_throws ArgumentError RainVentilationParameters(FT; reynolds_coefficient = -0.1)
+        @test_throws ArgumentError RainFallSpeed(FT; plateau_velocity = -1)
+        @test_throws ArgumentError RainVentilation(FT; constant_coefficient = -0.1)
+        @test_throws ArgumentError RainVentilation(FT; reynolds_coefficient = -0.1)
     end
 
     #####
@@ -243,7 +243,7 @@ end
     #####
 
     @testset "Default parity: liu_daum_shape_parameter [$FT]" for FT in all_float_types()
-        shape = CloudShapeParameters(FT)
+        shape = CloudShape(FT)
         rtol = pointwise_tolerance(FT)
 
         for Nᶜˡ in cloud_number_concentrations(FT)
@@ -260,7 +260,7 @@ end
 
         # Construction-time diagnosis and the pre-computed freezing correction.
         for Nᶜˡ in cloud_number_concentrations(FT)
-            cloud = CloudDropletProperties(FT; number_concentration = Nᶜˡ)
+            cloud = CloudDroplet(FT; number_concentration = Nᶜˡ)
             @test cloud.shape_parameter ≈ reference_liu_daum_shape_parameter(Nᶜˡ) rtol=rtol
             @test cloud.freezing_psd_correction ≈
                   PPP.psd_correction_spherical_volume(reference_liu_daum_shape_parameter(Nᶜˡ)) rtol=rtol
@@ -268,7 +268,7 @@ end
     end
 
     @testset "Default parity: rain_fall_speed [$FT]" for FT in all_float_types()
-        fall_speed = RainFallSpeedParameters(FT)
+        fall_speed = RainFallSpeed(FT)
         rtol = pointwise_tolerance(FT)
 
         for D in fall_speed_test_diameters(FT), ρ_correction in (one(FT), FT(1.3))
@@ -327,10 +327,10 @@ end
     @testset "Cloud shape parameters reach every μᶜˡ path [$FT]" for FT in all_float_types()
         # A wider intercept narrows nothing physically; it simply moves χ, and with it
         # every μᶜˡ diagnosed from a local droplet number.
-        custom_shape = CloudShapeParameters(FT; relative_dispersion_intercept = 0.35)
+        custom_shape = CloudShape(FT; relative_dispersion_intercept = 0.35)
 
-        default_cloud = CloudDropletProperties(FT; number_concentration = 100e6)
-        custom_cloud = CloudDropletProperties(FT; number_concentration = 100e6,
+        default_cloud = CloudDroplet(FT; number_concentration = 100e6)
+        custom_cloud = CloudDroplet(FT; number_concentration = 100e6,
                                               shape_parameters = custom_shape)
 
         # (1) construction-time shape_parameter
@@ -350,7 +350,7 @@ end
         # (2) prognostic diagnosis
         default_dsd = diagnose_cloud_dsd(default_p3, qᶜˡ, nᶜˡ, ρ)
         custom_dsd = diagnose_cloud_dsd(custom_p3, qᶜˡ, nᶜˡ, ρ)
-        @test default_dsd.μᶜˡ ≈ liu_daum_shape_parameter(FT(100e6), CloudShapeParameters(FT))
+        @test default_dsd.μᶜˡ ≈ liu_daum_shape_parameter(FT(100e6), CloudShape(FT))
         @test custom_dsd.μᶜˡ ≈ liu_daum_shape_parameter(FT(100e6), custom_shape)
         @test custom_dsd.μᶜˡ != default_dsd.μᶜˡ
         # The slope depends on μᶜˡ, so the whole diagnosed DSD moves with the fit.
@@ -359,7 +359,7 @@ end
         # An explicit construction-time `shape_parameter` override must NOT be what the
         # prognostic path uses: that path re-diagnoses from the local number.
         overridden_p3 = PredictedParticlePropertiesMicrophysics(FT;
-            cloud = CloudDropletProperties(FT; number_concentration = 100e6,
+            cloud = CloudDroplet(FT; number_concentration = 100e6,
                                            shape_parameter = 4))
         @test overridden_p3.cloud.shape_parameter == FT(4)
         @test diagnose_cloud_dsd(overridden_p3, qᶜˡ, nᶜˡ, ρ).μᶜˡ ≈ default_dsd.μᶜˡ
@@ -376,16 +376,16 @@ end
     end
 
     @testset "Fall-speed parameters reach all three startup tables [$FT]" for FT in all_float_types()
-        default_rain = RainProperties(FT)
+        default_rain = Rain(FT)
         default_tables = tabulate_rain_from_quadrature(default_rain, CPU(), FT)
 
         # Doubling every velocity scale and the plateau doubles V(D) everywhere, so the
         # two velocity moment ratios double exactly and the √(V D) integral grows by √2.
         # A table built from a stale fall-speed law would not move at all.
-        doubled = RainFallSpeedParameters(FT;
+        doubled = RainFallSpeed(FT;
             branch_velocity_scales = 2 .* (4579.5, 49.62, 17.32),
             plateau_velocity = 2 * 9.17)
-        doubled_tables = tabulate_rain_from_quadrature(RainProperties(FT; fall_speed = doubled),
+        doubled_tables = tabulate_rain_from_quadrature(Rain(FT; fall_speed = doubled),
                                                        CPU(), FT)
 
         rtol = integral_tolerance(FT)
@@ -401,7 +401,7 @@ end
         # The materialized container keeps the physics parameters and replaces only the
         # lookup placeholders.
         @test doubled_tables.fall_speed == doubled
-        @test doubled_tables.ventilation == RainVentilationParameters(FT)
+        @test doubled_tables.ventilation == RainVentilation(FT)
         @test doubled_tables.maximum_mean_diameter == default_rain.maximum_mean_diameter
         @test isnothing(default_rain.velocity_mass)
         @test !isnothing(doubled_tables.velocity_mass)
@@ -417,9 +417,9 @@ end
         ν = FT(1.5e-5)
         Dᵛ = FT(2.2e-5)
 
-        default_ventilation = RainVentilationParameters(FT)
-        no_constant = RainVentilationParameters(FT; constant_coefficient = 0)
-        no_reynolds = RainVentilationParameters(FT; reynolds_coefficient = 0)
+        default_ventilation = RainVentilation(FT)
+        no_constant = RainVentilation(FT; constant_coefficient = 0)
+        no_reynolds = RainVentilation(FT; reynolds_coefficient = 0)
 
         full = rain_ventilation_integral(table, default_ventilation, qʳ, nʳ, ν, Dᵛ, parameters)
         reynolds_only = rain_ventilation_integral(table, no_constant, qʳ, nʳ, ν, Dᵛ, parameters)
@@ -435,7 +435,7 @@ end
         @test reynolds_only.Nʳ₀ == full.Nʳ₀
 
         # Both coefficients are linear, so doubling one doubles its term.
-        doubled_constant = RainVentilationParameters(FT; constant_coefficient = 1.56)
+        doubled_constant = RainVentilation(FT; constant_coefficient = 1.56)
         @test rain_ventilation_integral(table, doubled_constant, qʳ, nʳ, ν, Dᵛ, parameters).integral ≈
               full.integral + constant_only.integral
 
@@ -451,7 +451,7 @@ end
 
         # ... and so does the coupled saturation-adjustment relaxation coefficient.
         custom_p3 = PredictedParticlePropertiesMicrophysics(FT;
-            rain = RainProperties(FT; ventilation = no_reynolds))
+            rain = Rain(FT; ventilation = no_reynolds))
         constants = ThermodynamicConstants(FT)
         transport = air_transport_properties(FT(290), FT(90000), constants)
         ρ = FT(1.1)
@@ -462,11 +462,11 @@ end
     end
 
     @testset "P3Microphysics preserves a custom rain configuration [$FT]" for FT in all_float_types()
-        fall_speed = RainFallSpeedParameters(FT; plateau_velocity = 7.5,
+        fall_speed = RainFallSpeed(FT; plateau_velocity = 7.5,
                                              transition_diameters = (150e-6, 1400e-6, 3200e-6))
-        ventilation = RainVentilationParameters(FT; constant_coefficient = 0.7,
+        ventilation = RainVentilation(FT; constant_coefficient = 0.7,
                                                 reynolds_coefficient = 0.4)
-        rain = RainProperties(FT; fall_speed, ventilation)
+        rain = Rain(FT; fall_speed, ventilation)
 
         p3 = PredictedParticlePropertiesMicrophysics(FT; rain)
 
@@ -497,21 +497,21 @@ end
         # the regime where they bind rather than where they are inert.
         cloud_probe(shape) = map(N -> liu_daum_shape_parameter(N, shape),
                                  cloud_number_concentrations(FT))
-        default_cloud_probe = cloud_probe(CloudShapeParameters(FT))
+        default_cloud_probe = cloud_probe(CloudShape(FT))
 
         cloud_perturbations = (
             ("relative_dispersion_number_coefficient",
-             CloudShapeParameters(FT; relative_dispersion_number_coefficient = 6.5e-10)),
+             CloudShape(FT; relative_dispersion_number_coefficient = 6.5e-10)),
             ("relative_dispersion_intercept",
-             CloudShapeParameters(FT; relative_dispersion_intercept = 0.3)),
+             CloudShape(FT; relative_dispersion_intercept = 0.3)),
             # The lower bound binds at Nᶜˡ = 10⁹ m⁻³, where the regression returns μᶜˡ < 2.
             ("minimum_shape_parameter",
-             CloudShapeParameters(FT; minimum_shape_parameter = 3)),
+             CloudShape(FT; minimum_shape_parameter = 3)),
             # The default upper bound never binds: with b = 0.2714 the regression caps
             # μᶜˡ at 1/b² - 1 ≈ 12.58 < 15. Lowering it into that range is the regime
             # where the parameter is active at all.
             ("maximum_shape_parameter",
-             CloudShapeParameters(FT; maximum_shape_parameter = 8)),
+             CloudShape(FT; maximum_shape_parameter = 8)),
         )
 
         @testset "cloud $name" for (name, shape) in cloud_perturbations
@@ -523,38 +523,38 @@ end
                                           fall_speed_test_diameters(FT))
 
         function table_probe(fall_speed)
-            tables = tabulate_rain_from_quadrature(RainProperties(FT; fall_speed), CPU(), FT)
+            tables = tabulate_rain_from_quadrature(Rain(FT; fall_speed), CPU(), FT)
             slopes = p3_reference_log_slopes(FT)
             return (map(tables.velocity_mass, slopes),
                     map(tables.velocity_number, slopes),
                     map(tables.evaporation, slopes))
         end
 
-        default_fall_speed = RainFallSpeedParameters(FT)
+        default_fall_speed = RainFallSpeed(FT)
         default_pointwise_probe = pointwise_probe(default_fall_speed)
         default_table_probe = table_probe(default_fall_speed)
 
         fall_speed_perturbations = (
             ("branch_velocity_scales[1]",
-             RainFallSpeedParameters(FT; branch_velocity_scales = (4700.0, 49.62, 17.32))),
+             RainFallSpeed(FT; branch_velocity_scales = (4700.0, 49.62, 17.32))),
             ("branch_velocity_scales[2]",
-             RainFallSpeedParameters(FT; branch_velocity_scales = (4579.5, 55.0, 17.32))),
+             RainFallSpeed(FT; branch_velocity_scales = (4579.5, 55.0, 17.32))),
             ("branch_velocity_scales[3]",
-             RainFallSpeedParameters(FT; branch_velocity_scales = (4579.5, 49.62, 20.0))),
+             RainFallSpeed(FT; branch_velocity_scales = (4579.5, 49.62, 20.0))),
             ("branch_mass_exponents[1]",
-             RainFallSpeedParameters(FT; branch_mass_exponents = (0.7, 1/3, 1/6))),
+             RainFallSpeed(FT; branch_mass_exponents = (0.7, 1/3, 1/6))),
             ("branch_mass_exponents[2]",
-             RainFallSpeedParameters(FT; branch_mass_exponents = (2/3, 0.4, 1/6))),
+             RainFallSpeed(FT; branch_mass_exponents = (2/3, 0.4, 1/6))),
             ("branch_mass_exponents[3]",
-             RainFallSpeedParameters(FT; branch_mass_exponents = (2/3, 1/3, 0.2))),
+             RainFallSpeed(FT; branch_mass_exponents = (2/3, 1/3, 0.2))),
             ("transition_diameters[1]",
-             RainFallSpeedParameters(FT; transition_diameters = (300e-6, 1511.64e-6, 3477.84e-6))),
+             RainFallSpeed(FT; transition_diameters = (300e-6, 1511.64e-6, 3477.84e-6))),
             ("transition_diameters[2]",
-             RainFallSpeedParameters(FT; transition_diameters = (134.43e-6, 1200e-6, 3477.84e-6))),
+             RainFallSpeed(FT; transition_diameters = (134.43e-6, 1200e-6, 3477.84e-6))),
             ("transition_diameters[3]",
-             RainFallSpeedParameters(FT; transition_diameters = (134.43e-6, 1511.64e-6, 3000e-6))),
+             RainFallSpeed(FT; transition_diameters = (134.43e-6, 1511.64e-6, 3000e-6))),
             ("plateau_velocity",
-             RainFallSpeedParameters(FT; plateau_velocity = 12)),
+             RainFallSpeed(FT; plateau_velocity = 12)),
         )
 
         @testset "fall speed $name" for (name, fall_speed) in fall_speed_perturbations
@@ -564,18 +564,18 @@ end
         end
 
         # --- rain ventilation (2 scalars) ---------------------------------------------
-        evaporation_table = tabulate_rain_from_quadrature(RainProperties(FT), CPU(), FT).evaporation
-        process_rates = ProcessRateParameters(FT)
+        evaporation_table = tabulate_rain_from_quadrature(Rain(FT), CPU(), FT).evaporation
+        process_rates = ProcessRate(FT)
         ventilation_probe(ventilation) =
             rain_ventilation_integral(evaporation_table, ventilation, FT(1e-4), FT(1e3),
                                       FT(1.5e-5), FT(2.2e-5), process_rates).integral
-        default_ventilation_probe = ventilation_probe(RainVentilationParameters(FT))
+        default_ventilation_probe = ventilation_probe(RainVentilation(FT))
 
         ventilation_perturbations = (
             ("constant_coefficient",
-             RainVentilationParameters(FT; constant_coefficient = 0.9)),
+             RainVentilation(FT; constant_coefficient = 0.9)),
             ("reynolds_coefficient",
-             RainVentilationParameters(FT; reynolds_coefficient = 0.4)),
+             RainVentilation(FT; reynolds_coefficient = 0.4)),
         )
 
         @testset "ventilation $name" for (name, ventilation) in ventilation_perturbations
@@ -592,13 +592,13 @@ end
     #####
 
     @testset "Type stability and precision [$FT]" for FT in all_float_types()
-        shape = CloudShapeParameters(FT)
-        fall_speed = RainFallSpeedParameters(FT)
-        ventilation = RainVentilationParameters(FT)
+        shape = CloudShape(FT)
+        fall_speed = RainFallSpeed(FT)
+        ventilation = RainVentilation(FT)
 
-        @test fieldtypes(CloudShapeParameters{FT}) == (FT, FT, FT, FT)
-        @test fieldtypes(RainVentilationParameters{FT}) == (FT, FT)
-        @test fieldtypes(RainFallSpeedParameters{FT}) ==
+        @test fieldtypes(CloudShape{FT}) == (FT, FT, FT, FT)
+        @test fieldtypes(RainVentilation{FT}) == (FT, FT)
+        @test fieldtypes(RainFallSpeed{FT}) ==
               (NTuple{3, FT}, NTuple{3, FT}, NTuple{3, FT}, FT)
 
         @test @inferred(liu_daum_shape_parameter(FT(1e8), shape)) isa FT
@@ -615,9 +615,9 @@ end
         # No `Float64` promotion in a `Float32` scheme, including through the containers
         # and through the μᶜˡ diagnosis that a `Float64` keyword default would otherwise
         # widen.
-        @test p3.cloud.shape_parameters isa CloudShapeParameters{FT}
-        @test p3.rain.fall_speed isa RainFallSpeedParameters{FT}
-        @test p3.rain.ventilation isa RainVentilationParameters{FT}
+        @test p3.cloud.shape_parameters isa CloudShape{FT}
+        @test p3.rain.fall_speed isa RainFallSpeed{FT}
+        @test p3.rain.ventilation isa RainVentilation{FT}
         @test p3.cloud.shape_parameter isa FT
 
         dsd = @inferred diagnose_cloud_dsd(p3, FT(5e-4), FT(1e8), FT(1.2))
@@ -626,20 +626,20 @@ end
 
         # Containers built at another precision are converted, not stored as-is.
         mixed = PredictedParticlePropertiesMicrophysics(FT;
-            cloud = CloudDropletProperties(FT;
-                        shape_parameters = CloudShapeParameters(Float64;
+            cloud = CloudDroplet(FT;
+                        shape_parameters = CloudShape(Float64;
                                                                 relative_dispersion_intercept = 0.3)),
-            rain = RainProperties(FT;
-                        fall_speed = RainFallSpeedParameters(Float64; plateau_velocity = 8.5)))
-        @test mixed.cloud.shape_parameters isa CloudShapeParameters{FT}
+            rain = Rain(FT;
+                        fall_speed = RainFallSpeed(Float64; plateau_velocity = 8.5)))
+        @test mixed.cloud.shape_parameters isa CloudShape{FT}
         @test mixed.cloud.shape_parameters.relative_dispersion_intercept == FT(0.3)
-        @test mixed.rain.fall_speed isa RainFallSpeedParameters{FT}
+        @test mixed.rain.fall_speed isa RainFallSpeed{FT}
         @test mixed.rain.fall_speed.plateau_velocity == FT(8.5)
     end
 
     @testset "Kernel helpers are allocation-free [$FT]" for FT in all_float_types()
-        shape = CloudShapeParameters(FT)
-        fall_speed = RainFallSpeedParameters(FT)
+        shape = CloudShape(FT)
+        fall_speed = RainFallSpeed(FT)
 
         # Warm up first: `@allocated` counts compilation on the very first call.
         allocated_liu_daum(FT(1e8), shape)
@@ -651,13 +651,13 @@ end
 
     @testset "Architecture adaptation preserves custom parameters" begin
         FT = Float64
-        shape = CloudShapeParameters(FT; relative_dispersion_intercept = 0.3)
-        fall_speed = RainFallSpeedParameters(FT; plateau_velocity = 8.5)
-        ventilation = RainVentilationParameters(FT; reynolds_coefficient = 0.4)
+        shape = CloudShape(FT; relative_dispersion_intercept = 0.3)
+        fall_speed = RainFallSpeed(FT; plateau_velocity = 8.5)
+        ventilation = RainVentilation(FT; reynolds_coefficient = 0.4)
 
         p3 = PredictedParticlePropertiesMicrophysics(FT;
-            cloud = CloudDropletProperties(FT; shape_parameters = shape),
-            rain = RainProperties(FT; fall_speed, ventilation))
+            cloud = CloudDroplet(FT; shape_parameters = shape),
+            rain = Rain(FT; fall_speed, ventilation))
 
         adapted = on_architecture(default_arch, p3)
         @test adapted.cloud.shape_parameters == shape
