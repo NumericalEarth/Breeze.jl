@@ -8,6 +8,10 @@ end
 
 Solvers.tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
 
+# Single-column mode omits the pressure solve entirely (`w ≡ 0`), so no solver is built. This keeps
+# a column-ensemble cheap: no per-column FFT/tridiagonal solver is allocated.
+AtmosphereModels.dynamics_pressure_solver(::AnelasticDynamics, ::SingleColumnGrid) = nothing
+
 function AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, grid)
     reference_density = dynamics.reference_state.density
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)

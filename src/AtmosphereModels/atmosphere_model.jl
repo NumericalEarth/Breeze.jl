@@ -266,6 +266,10 @@ function AtmosphereModel(grid;
                          (; T=temperature), microphysical_fields)
     coupling_density = dynamics_density(dynamics)
     mass_density = total_density(dynamics)
+
+    # A per-column `coriolis` (an array of rotations, one per column of a single-column ensemble)
+    # must live on the grid architecture so it can be indexed inside GPU kernels. Scalars pass through.
+    coriolis = coriolis isa AbstractArray ? on_architecture(arch, coriolis) : coriolis
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, coupling_density, mass_density,
                                        velocities, dynamics, formulation, microphysics,
@@ -274,7 +278,14 @@ function AtmosphereModel(grid;
     # The closure's scalars — thermodynamic density, moisture, microphysical prognostic fields, user
     # tracers — in the order the vertically-implicit solve indexes them (see `closure_scalar_index`)
     scalar_names = closure_scalar_names(formulation, microphysics, tracer_names)
-    closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
+    # `with_tracers` has no method for a per-column *array* of closures, so map it over the array here
+    # (in Breeze's own code — extending Oceananigans' `with_tracers` on `AbstractArray` would be piracy).
+    closure = closure isa AbstractArray ?
+        map(c -> Oceananigans.Utils.with_tracers(scalar_names, c), closure) :
+        Oceananigans.Utils.with_tracers(scalar_names, closure)
+    # A per-column `closure` (an array of closures, one per column of a single-column ensemble) must
+    # live on the grid architecture so it can be indexed inside GPU kernels. Scalars pass through.
+    closure = closure isa AbstractArray ? on_architecture(arch, closure) : closure
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
 
     # Generate tracer advection scheme for each tracer
