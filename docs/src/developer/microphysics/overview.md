@@ -134,10 +134,11 @@ signed velocity at the cell's bottom face and applies the precipitation boundary
 
 #### Sedimentation constituents
 
-At construction the model resolves, once, a tuple of `(; w, q, phase, advection)` constituents,
-one for every name in `condensate_field_names` with a `sedimentation_velocity`: the velocity
-field, the specific-humidity field, the phase tag, and the advection scheme that transports the
-tracer (`model.sedimentation_constituents`, `()` when nothing sediments). Number tracers (e.g.
+At construction the model resolves, once, a tuple of `(; w, q, ρq, phase, advection)`
+constituents, one for every name in `condensate_field_names` with a `sedimentation_velocity`: the
+velocity field, the specific-humidity field and the prognostic density behind it, the phase tag,
+and the advection scheme that transports the tracer (`model.sedimentation_constituents`, `()`
+when nothing sediments). Number tracers (e.g.
 `:ρnᶜˡ`) and non-additive particle properties (P3's rime mass `ρqᶠ`, a portion of `ρqⁱ`, and
 rime volume `ρbᶠ`) are not condensate masses and are never consulted. Condensate that does not
 sediment, such as cloud condensate diagnosed by saturation adjustment, moves no mass and needs
@@ -173,9 +174,13 @@ against dry air, ``hˣ - (s - g z)`` against the mixture), and ``∂θˡⁱ/∂q
 composition change (to leading order ``-ℒˣᵣ / (cᵖᵐ Π)``) for `ρθ`. The content fluxes ride the
 total-density-weighted mass flux the tracer tendency applies, and the cell's coupling-to-total
 density ratio (one on the anelastic core, ``qᵈ = ρᵈ / ρ`` on the compressible core) converts the
-change of the specific variable into that of the coupling-weighted prognostic. Rain-out thus
-leaves latent warming aloft and pre-cools the layer that later evaporates the arriving rain, the
-mechanism that builds cold pools.
+change of the specific variable into that of the coupling-weighted prognostic. Under adaptive
+implicit vertical advection the tendency carries the content of the explicit fraction of each
+mass flux only; after the tracers' implicit solves of every stage the time steppers call
+`implicit_sedimentation_step!`, which moves the content of the remainder from the first-order
+fluxes the solves actually applied, at the solved state, so the heat follows the mass at any
+fall Courant number. Rain-out thus leaves latent warming aloft and pre-cools the layer that later
+evaporates the arriving rain, the mechanism that builds cold pools.
 
 ### Surface Precipitation Flux
 

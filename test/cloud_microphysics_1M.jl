@@ -3,7 +3,9 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, condensate_phase,
                                total_density, dynamics_density, standard_pressure,
-                               implicit_advection_velocities, mass_weighted_advection_diagonal
+                               implicit_advection_velocities, mass_weighted_advection_diagonal,
+                               implicit_advection_density, implicit_step_advection, closure_scalar_index,
+                               ExplicitSedimentationFluxes
 using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState,
                              LiquidIceDensityState, mixture_gas_constant
 using CloudMicrophysics
@@ -18,7 +20,8 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 using Breeze.Microphysics: ConstantRateCondensateFormation
 
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
-using Oceananigans.TimeSteppers: update_state!
+using Oceananigans.TimeSteppers: update_state!, implicit_step!
+using Oceananigans: fields
 using Oceananigans.Fields: ZeroField, ZFaceField
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Advection: materialize_advection, adapt_advection_order
@@ -396,6 +399,85 @@ end
     qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
     ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, ρ)
     @test @allowscalar flux[1, 1] ≈ -ρ_face * wʳ * qʳ
+end
+
+@testset "Adaptive implicit sedimentation heat follows the solved mass [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(20)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics()
+    adaptive_discretization = AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5)
+    scalar_advection = (; ρqʳ = WENO(FT; order=5, time_discretization=adaptive_discretization))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection)
+    μ = model.microphysical_fields
+
+    # A rain shaft above a dry lower half, falling at 8 m/s through 20 m cells over 10 s: a fall
+    # Courant number of 4, of which the explicit fraction carries 1/8 and the solve the rest.
+    Δt = FT(10)
+    w₀ = FT(-8)
+    set!(model; θ=300, qᵗ=0.005, qᶜˡ=0, qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
+    set!(μ.wʳ, (x, y, z) -> ifelse(z < Nz * Δz, w₀, FT(0)))
+    set!(μ.wᶜˡ, 0)
+    td = Oceananigans.TimeSteppers.time_discretization(model.advection.ρqʳ)
+    td.Δt[] = Δt
+
+    # The rain's implicit solve, exactly as the time steppers issue it
+    ρqʳ = μ.ρqʳ
+    ρqʳ⁰ = Array(interior(ρqʳ, 1, 1, :))
+    implicit_step!(ρqʳ, model.timestepper.implicit_solver, model.closure, model.closure_fields,
+                   closure_scalar_index(model, :ρqʳ), model.clock, fields(model), Δt,
+                   implicit_step_advection(model.advection.ρqʳ, :ρqʳ),
+                   implicit_advection_velocities(model.dynamics, model.velocities, :ρqʳ, model.microphysics, μ),
+                   implicit_advection_density(model.dynamics, model.formulation, :ρqʳ))
+    Δρqʳ = Array(interior(ρqʳ, 1, 1, :)) .- ρqʳ⁰
+
+    # Nothing enters through the top, so the top cell only drains: backward Euler leaves it
+    # 1 / (1 + C) of its rain at the face-weighted implicit Courant number C, where an estimate at
+    # the pre-solve state, C q, overstates the loss by the factor 1 + C.
+    ρ = total_density(model.dynamics)
+    ρᶠ = @allowscalar ℑzᵃᵃᶠ(1, 1, Nz, grid, ρ)
+    ρᶜ = @allowscalar ρ[1, 1, Nz]
+    α = -w₀ * Δt / Δz
+    C = α * (1 - FT(0.5) / α) * ρᶠ / ρᶜ
+    @test C > 3
+    @test Δρqʳ[Nz] ≈ -C / (1 + C) * ρqʳ⁰[Nz]
+
+    # With a uniform synthetic content, the heat the post-solve step moves is χ times the mass
+    # the solve moved, cell by cell (the anelastic coupling ratio is one), outflow through the
+    # bottom included, so the column loses deficit with the rain that leaves.
+    χ = FT(-2500)
+    uniform_content(i, j, k, grid) = (χ, zero(χ))
+    ρθ = model.formulation.potential_temperature_density
+    ρθ⁰ = Array(interior(ρθ, 1, 1, :))
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(model, Δt, model.velocities, uniform_content)
+    Δρθ = Array(interior(ρθ, 1, 1, :)) .- ρθ⁰
+    tolerance = sqrt(eps(FT)) * maximum(abs.(χ .* Δρqʳ))
+    @test all(abs.(Δρθ .- χ .* Δρqʳ) .<= tolerance)
+    @test sum(Δρqʳ) < 0
+    @test sum(Δρθ) > 0
+
+    # The step is wired into both time steppers: one step with the fall speed above the
+    # explicit CFL leaves finite fields on the anelastic SSP path ...
+    time_step!(model, Δt)
+    @test all(isfinite, interior(ρθ))
+    @test all(isfinite, interior(ρqʳ))
+
+    # ... and on the compressible acoustic path.
+    acoustic_grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, 800))
+    acoustic_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+    acoustic_advection = (; ρqʳ = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.05)))
+    acoustic_model = AtmosphereModel(acoustic_grid; dynamics=acoustic_dynamics, microphysics=OneMomentCloudMicrophysics(),
+                                     scalar_advection=acoustic_advection)
+    set!(acoustic_model; ρ=acoustic_model.dynamics.reference_state.density, θ=300, qᵗ=0.005, qᶜˡ=0,
+         qʳ=(x, y, z) -> ifelse(z > 400, FT(1e-3), FT(0)))
+    time_step!(acoustic_model, 1)
+    @test all(isfinite, interior(acoustic_model.formulation.potential_temperature_density))
+    @test all(isfinite, interior(acoustic_model.microphysical_fields.ρqʳ))
 end
 
 @testset "Surface precipitation flux uses transport velocities [$(FT)]" for FT in test_float_types()
@@ -817,7 +899,8 @@ end
         for k in 2:Nz-1
             expected = (F(k + 1) - F(k)) / (Az * Δz)
             computed = @allowscalar Breeze.AtmosphereModels.condensate_sedimentation_divergence(
-                1, 1, k, grid, model.sedimentation_constituents, wᵗ, model.dynamics, synthetic_content)
+                1, 1, k, grid, model.sedimentation_constituents, wᵗ, model.dynamics,
+                ExplicitSedimentationFluxes(), synthetic_content)
             @test computed ≈ expected
         end
     end
@@ -859,10 +942,10 @@ end
     @test rain.advection isa WENO
     @test rain.advection.bounds == (0, 1)
     unlimited_scheme = adapt_advection_order(materialize_advection(WENO(FT; order=5), grid), grid)
-    unlimited = ((; rain.w, rain.q, rain.phase, advection = unlimited_scheme),)
+    unlimited = ((; rain.w, rain.q, rain.ρq, rain.phase, advection = unlimited_scheme),)
 
     heat(constituents, k) = @allowscalar Breeze.AtmosphereModels.condensate_sedimentation_divergence(
-        1, 1, k, grid, constituents, wᵗ, model.dynamics, uniform_content)
+        1, 1, k, grid, constituents, wᵗ, model.dynamics, ExplicitSedimentationFluxes(), uniform_content)
     mass(advection, k) = @allowscalar Breeze.AtmosphereModels.div_ρUc(1, 1, k, grid, advection, ρᵣ, U, μ.qʳ)
     atol = sqrt(eps(FT)) * abs(χ) * FT(1e-3) * 2 / Δz
 

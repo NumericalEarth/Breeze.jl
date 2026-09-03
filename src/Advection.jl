@@ -106,10 +106,10 @@ end
 # applies to the cell through `div_ρUc`. For `advection === nothing` every flux vanishes
 # (Oceananigans returns zero), so no mass and no latent heat move, consistently.
 #
-# For adaptive implicit vertical advection each CFL-scaled explicit flux is complemented by the
-# first-order flux of the implicit velocity remainder, evaluated explicitly at the current
-# tracer state; the implicit solve integrates that flux at the post-solve state instead, so a
-# time-discretization mismatch remains (see the TODO in microphysics_interface.jl).
+# Under adaptive implicit vertical advection these are the CFL-scaled explicit fluxes only,
+# the part of the transport the tendency applies; the first-order remainder the implicit solve
+# applies is moved with its content after the solve, from the solved state
+# (`AtmosphereModels.implicit_sedimentation_mass_fluxes`).
 
 @inline function AtmosphereModels.sedimentation_mass_fluxes(i, j, k, grid, advection, wᵗ, wˢ, q)
     w = SumOfArrays{2}(wᵗ, wˢ)
@@ -121,19 +121,7 @@ end
 end
 
 @inline sedimentation_mass_flux(i, j, k, grid, advection, w, q) =
-    _advective_tracer_flux_z(i, j, k, grid, advection, w, q) +
-    implicit_sedimentation_mass_flux(i, j, k, grid, advection, w, q)
-
-@inline implicit_sedimentation_mass_flux(i, j, k, grid, advection, w, q) = zero(grid)
-
-@inline function implicit_sedimentation_mass_flux(i, j, k, grid, advection::AIVA, w, q)
-    scheme = vertical_scheme(advection)
-    td = time_discretization(scheme)
-    wⁱ = implicit_vertical_velocityᶜᶜᶠ(i, j, k, grid, scheme, td, w)
-    @inbounds q⁻ = q[i, j, k-1]
-    @inbounds q⁺ = q[i, j, k]
-    return Azᶜᶜᶠ(i, j, k, grid) * upwind_biased_product(wⁱ, q⁻, q⁺)
-end
+    _advective_tracer_flux_z(i, j, k, grid, advection, w, q)
 
 # Bounds-preserving WENO limits, cell by cell, the two face reconstructions that draw on the
 # cell itself, so the flux through a face depends on which cell's tendency is being formed:
@@ -154,13 +142,11 @@ end
 end
 
 # Face flux from the limited reconstructions `cᴸ`, `cᴿ`, with the explicit CFL scaling that
-# `div_ρUc` applies under adaptive implicit vertical advection and the implicit remainder it
-# leaves to the solve.
+# `div_ρUc` applies under adaptive implicit vertical advection.
 @inline function bounded_sedimentation_mass_flux(i, j, k, grid, advection, w, q, cᴸ, cᴿ)
     explicit_w = explicit_vertical_velocity(advection, grid, w)
     @inbounds wₑ = explicit_w[i, j, k]
-    return Azᶜᶜᶠ(i, j, k, grid) * upwind_biased_product(wₑ, cᴸ, cᴿ) +
-           implicit_sedimentation_mass_flux(i, j, k, grid, advection, w, q)
+    return Azᶜᶜᶠ(i, j, k, grid) * upwind_biased_product(wₑ, cᴸ, cᴿ)
 end
 
 # TODO: move `bounded_face_reconstructions` upstream. It reproduces the reconstruction and
@@ -259,7 +245,7 @@ end
 # bottom-face flux of every sedimentation constituent, summed inside one kernel function. It
 # lives here rather than in `AtmosphereModels` because it builds on
 # `surface_advective_tracer_flux`, and `AtmosphereModels` is loaded before this module.
-# Reusing the `(; w, q, phase, advection)` constituents the model resolved once means the
+# Reusing the `(; w, q, ρq, phase, advection)` constituents the model resolved once means the
 # diagnostic can never disagree with the thermodynamic tendencies about which masses fall, with
 # which humidity field and advection scheme. The tuple recursion keeps the kernel type-stable
 # across constituents that carry different advection schemes.

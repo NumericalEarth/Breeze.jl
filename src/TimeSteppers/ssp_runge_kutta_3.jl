@@ -13,7 +13,7 @@ using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, ma
                                 microphysics_model_update!, field_advection_scheme,
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
-                                implicit_step_advection
+                                implicit_step_advection, implicit_sedimentation_step!
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -156,6 +156,10 @@ function ssp_rk3_substep!(model, Δt, α)
                            implicit_advection_density(model.dynamics, model.formulation, name))
         end
     end
+
+    # The tracers' solves have just moved sedimenting condensate implicitly; move its latent
+    # content with it, from the state the solves produced (see `implicit_sedimentation_step!`).
+    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, α * Δt, model.velocities)
 
     return nothing
 end

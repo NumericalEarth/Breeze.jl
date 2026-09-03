@@ -26,6 +26,7 @@ using Breeze.AtmosphereModels: AtmosphereModels,
     grid_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
     c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ,
     condensate_sedimentation_divergence, sedimentation_replacement,
+    ExplicitSedimentationFluxes, implicit_sedimentation_step!,
     AtmosphereModelBuoyancy,
     radiation_flux_divergence
 

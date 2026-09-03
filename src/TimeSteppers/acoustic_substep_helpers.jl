@@ -20,6 +20,7 @@ using Breeze.AtmosphereModels:
     dynamics_prognostic_fields,
     implicit_advection_velocities,
     implicit_step_advection,
+    implicit_sedimentation_step!,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
@@ -239,6 +240,11 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
                            ρ)
         end
     end
+
+    # The tracers' solves have just moved sedimenting condensate implicitly; move its latent
+    # content with it, from the state the solves produced and with the same frozen velocity
+    # (see `implicit_sedimentation_step!`).
+    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, Δt_implicit, velocities)
 
     return nothing
 end

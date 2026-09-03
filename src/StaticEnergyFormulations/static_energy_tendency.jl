@@ -69,12 +69,20 @@ end
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, velocities.w, dynamics,
-                                                   energy_condensate_content, dynamics, constants, microphysics,
-                                                   microphysical_fields, specific_prognostic_moisture, temperature_field)
+                                                   ExplicitSedimentationFluxes(), energy_condensate_content,
+                                                   dynamics, constants, microphysics, microphysical_fields,
+                                                   specific_prognostic_moisture, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              + ρs_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
 end
+
+# The remainder of the sedimentation transport that the adaptive implicit solve applies to the
+# tracers, moved with its content after their solves.
+AtmosphereModels.implicit_sedimentation_step!(model::StaticEnergyModel, Δt, velocities) =
+    implicit_sedimentation_step!(model, Δt, velocities, energy_condensate_content,
+                                 model.dynamics, model.thermodynamic_constants, model.microphysics,
+                                 model.microphysical_fields, specific_prognostic_moisture(model), model.temperature)
 
 #####
 ##### Sedimentation transport of the condensate part of ρs

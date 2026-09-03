@@ -34,12 +34,14 @@ using Oceananigans.Advection:
     densityᶜᶜᶜ,
     densityᶜᶜᶠ,
     implicit_vertical_velocity,
+    implicit_vertical_velocityᶜᶜᶠ,
     implicit_advection_upper_diagonal,
     implicit_advection_lower_diagonal,
     implicit_advection_diagonal
 
 using Oceananigans.Grids: ZDirection
-using Oceananigans.Operators: Az, volume
+using Oceananigans.Operators: Az, Azᶜᶜᶠ, volume
+using Oceananigans.Utils: SumOfArrays
 using Oceananigans.TurbulenceClosures:
     VerticallyImplicitDiffusionLowerDiagonal,
     VerticallyImplicitDiffusionDiagonal,
@@ -200,4 +202,80 @@ end
     d_adv  = mass_weighted_advection_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
     d_bc   = boundary_flux_diagonal(i, j, k, grid, ℓx, ℓy, ℓz, Δt, clk, fields, top_bc, bottom_bc, immersed_bc)
     return d_diff + d_adv + d_bc
+end
+
+#####
+##### Sedimentation of condensate content by the implicit remainder
+#####
+##### The thermodynamic tendencies move the condensate part of ρθ / ρs with the explicit fraction
+##### of each constituent's sedimentation mass flux. The remainder the tridiagonal solve applies to
+##### the tracer depends on the solved state, so its content is moved here, after the scalar
+##### solves of a stage, from the fluxes the solve actually applied: the first-order upwind fluxes
+##### of the implicit velocity at the solved humidity ρq / ρ, mirroring
+##### `mass_weighted_advection_diagonal` above (outflow through the bottom face kept, no inflow
+##### through the top or bottom face). Estimating the remainder at the pre-solve state instead
+##### overstates a one-cell loss by the factor 1 + C at implicit Courant number C, the regime the
+##### solve exists for.
+#####
+
+@inline function implicit_sedimentation_mass_fluxes(i, j, k, grid, advection::AIVA, wᵗ, wˢ, ρq, ρ)
+    w = SumOfArrays{2}(wᵗ, wˢ)
+    F⁻ = (implicit_sedimentation_mass_flux(i, j, k,   grid, advection, w,  ρq, ρ),
+          implicit_sedimentation_mass_flux(i, j, k,   grid, advection, wᵗ, ρq, ρ))
+    F⁺ = (implicit_sedimentation_mass_flux(i, j, k+1, grid, advection, w,  ρq, ρ),
+          implicit_sedimentation_mass_flux(i, j, k+1, grid, advection, wᵗ, ρq, ρ))
+    return F⁻, F⁺
+end
+
+# The solve's flux through face k per unit face density, `Az [max(wⁱ, 0) qₖ₋₁ + min(wⁱ, 0) qₖ]`
+# with q = ρq / ρ: the row of cell k couples the cell below only when there is one (k > 1) and
+# the row of cell k − 1 couples the cell above only when there is one (k ≤ Nz), while outflow
+# through either boundary face is kept (see `mass_weighted_advection_diagonal`). The clamped
+# indices keep the boundary faces from reading halos; the clamped value is multiplied by zero.
+@inline function implicit_sedimentation_mass_flux(i, j, k, grid, advection, w, ρq, ρ)
+    scheme = vertical_scheme(advection)
+    td = time_discretization(scheme)
+    wⁱ = implicit_vertical_velocityᶜᶜᶠ(i, j, k, grid, scheme, td, w)
+    k⁻ = max(k - 1, 1)
+    k⁺ = min(k, grid.Nz)
+    @inbounds q⁻ = ρq[i, j, k⁻] / densityᶜᶜᶜ(i, j, k⁻, grid, ρ)
+    @inbounds q⁺ = ρq[i, j, k⁺] / densityᶜᶜᶜ(i, j, k⁺, grid, ρ)
+    upward   = max(wⁱ, 0) * q⁻ * (k > 1)
+    downward = min(wⁱ, 0) * q⁺ * (k <= grid.Nz)
+    return Azᶜᶜᶠ(i, j, k, grid) * (upward + downward)
+end
+
+# Whether the implicit solve advances any constituent's mass at all.
+implicit_sedimentation(constituents) = any(c -> c.advection isa AIVA, constituents)
+
+"""
+$(TYPEDSIGNATURES)
+
+Move the condensate content of the thermodynamic variable with the sedimentation mass that the
+adaptive implicit vertical solve has just applied to the tracers: subtract `Δt` times the
+[`condensate_sedimentation_divergence`](@ref) of the [`ImplicitSedimentationFluxes`](@ref) from
+the [`thermodynamic_density`](@ref). `velocities` are the transport velocities whose vertical
+component the tracers' solves split, `Δt` the interval they solved over, and
+`condensate_content(i, j, k, grid, args...)` the formulation's content per unit falling mass.
+The time steppers call the three-argument method after the scalar solves of every stage; each
+thermodynamic formulation implements it by supplying its content function and arguments to this
+one. A no-op when no constituent is advected adaptively implicitly.
+"""
+function implicit_sedimentation_step!(model, Δt, velocities, condensate_content, args...)
+    constituents = model.sedimentation_constituents
+    implicit_sedimentation(constituents) || return nothing
+    grid = model.grid
+    arch = grid.architecture
+    φ = thermodynamic_density(model.formulation)
+    launch!(arch, grid, :xyz, _implicit_sedimentation_step!,
+            φ, grid, kernel_time_step(arch, grid, Δt), constituents, velocities.w, model.dynamics,
+            condensate_content, args)
+    return nothing
+end
+
+@kernel function _implicit_sedimentation_step!(φ, grid, Δt, constituents, wᵗ, dynamics, condensate_content, args)
+    i, j, k = @index(Global, NTuple)
+    divergence = condensate_sedimentation_divergence(i, j, k, grid, constituents, wᵗ, dynamics,
+                                                     ImplicitSedimentationFluxes(), condensate_content, args...)
+    @inbounds φ[i, j, k] -= Δt * divergence
 end

@@ -24,6 +24,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
     dynamics_prognostic_fields, grid_moisture_fractions, maybe_adjust_thermodynamic_state,
     div_ρUc, c_div_ρU, ∇_dot_Jᶜ, AtmosphereModelBuoyancy,
     condensate_sedimentation_divergence, sedimentation_replacement,
+    ExplicitSedimentationFluxes, implicit_sedimentation_step!,
     radiation_flux_divergence, materialize_formulation,
     DefaultTemperatureSolver, default_temperature_solver
 using Breeze.Solvers: materialize_solver
