@@ -3,8 +3,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, condensate_phase,
                                total_density, dynamics_density, standard_pressure,
-                               implicit_advection_velocities, mass_weighted_advection_diagonal,
-                               implicit_advection_density, implicit_step_advection, closure_scalar_index,
+                               implicit_advection_velocities, density_weighted_advection_diagonal,
+                               implicit_advection_density, implicit_step_scheme, closure_scalar_index,
                                ExplicitSedimentationFluxes
 using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState,
                              LiquidIceDensityState, mixture_gas_constant
@@ -387,10 +387,10 @@ end
     ρ = total_density(model.dynamics)
 
     # The Breeze-owned seam every scalar's implicit solve passes through (see
-    # `MassWeightedImplicitDiffusion`): with the bottom face unmasked, the outflow term makes
+    # `DensityWeightedImplicitOperator`): with the bottom face unmasked, the outflow term makes
     # the bottom-cell diagonal positive, where the impermeable upstream coefficient vanishes.
-    diagonal = @allowscalar mass_weighted_advection_diagonal(1, 1, 1, grid, advection, velocities.w,
-                                                             Δt, Center(), Center(), Center(), ρ)
+    diagonal = @allowscalar density_weighted_advection_diagonal(1, 1, 1, grid, advection, velocities.w,
+                                                                Δt, Center(), Center(), Center(), ρ)
     @test diagonal > 0
 
     flux = surface_precipitation_flux(model)
@@ -431,7 +431,7 @@ end
     ρqʳ⁰ = Array(interior(ρqʳ, 1, 1, :))
     implicit_step!(ρqʳ, model.timestepper.implicit_solver, model.closure, model.closure_fields,
                    closure_scalar_index(model, :ρqʳ), model.clock, fields(model), Δt,
-                   implicit_step_advection(model.advection.ρqʳ, :ρqʳ),
+                   implicit_step_scheme(model.advection.ρqʳ),
                    implicit_advection_velocities(model.dynamics, model.velocities, :ρqʳ, model.microphysics, μ),
                    implicit_advection_density(model.dynamics, model.formulation, :ρqʳ))
     Δρqʳ = Array(interior(ρqʳ, 1, 1, :)) .- ρqʳ⁰

@@ -1065,7 +1065,7 @@ Like [`sedimentation_mass_fluxes`](@ref), but the first-order upwind remainder t
 implicit vertical solve applies to the tracer, evaluated at the solved state `ρq / ρ` with the
 prognostic density `ρq` and the density `ρ` the solve reconstructs the humidity from. Zero for
 a scheme without an adaptive-implicit vertical discretization; the adaptive-implicit method
-mirrors the solve's coefficients (see `mass_weighted_implicit_diffusion.jl`).
+mirrors the solve's coefficients (see `density_weighted_implicit_diffusion.jl`).
 """
 @inline implicit_sedimentation_mass_fluxes(i, j, k, grid, advection, wᵗ, wˢ, ρq, ρ) =
     ((zero(grid), zero(grid)), (zero(grid), zero(grid)))

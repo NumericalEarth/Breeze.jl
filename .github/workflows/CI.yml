@@ -35,7 +35,7 @@ jobs:
     steps:
       - name: "Check out repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
           filters: |
@@ -114,7 +114,7 @@ jobs:
         run: |
           julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
       - name: "Cache Julia depot"
-        uses: julia-actions/cache@a45e8fa8be21c18a06b7177052533149e61e9b38 # v3.1.0
+        uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
         with:
           # On self-hosted runners we use the prebuilt Docker container, which already
           # caches pkgimages and such, so we don't need to cache here most things.  Only

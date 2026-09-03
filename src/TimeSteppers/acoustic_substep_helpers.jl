@@ -19,7 +19,7 @@ using Breeze.AtmosphereModels:
     closure_scalar_index,
     dynamics_prognostic_fields,
     implicit_advection_velocities,
-    implicit_step_advection,
+    implicit_step_scheme,
     implicit_sedimentation_step!,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
@@ -234,7 +234,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
                            model.clock,
                            fields(model),
                            Δt_implicit,
-                           implicit_step_advection(advection, name),
+                           implicit_step_scheme(advection),
                            implicit_advection_velocities(model.dynamics, velocities, name,
                                                          model.microphysics, model.microphysical_fields),
                            ρ)
@@ -355,7 +355,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                        model.clock,
                        fields(model),
                        Δt_stage,
-                       implicit_step_advection(momentum_advection, name, diffusion_density),
+                       implicit_step_scheme(momentum_advection, diffusion_density),
                        (; w),
                        ρᵈ)
     end
@@ -370,7 +370,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                    model.clock,
                    fields(model),
                    Δt_stage,
-                   implicit_step_advection(θ_advection, θ_name, diffusion_density),
+                   implicit_step_scheme(θ_advection, diffusion_density),
                    merge(slow_thermodynamic_velocities(model), (; w)),
                    ρᵈ)
 
