@@ -358,13 +358,15 @@ end
 ##### PolynomialCoefficient struct
 #####
 
-struct PolynomialCoefficient{FT, C, SF, S, θᵛ, P, TC, TT}
+struct PolynomialCoefficient{FT, C, SF, S, θᵛ, Q, P, TC, TT}
     polynomial :: C
     roughness_length :: FT
     minimum_wind_speed :: FT
     stability_function :: SF
     surface :: S
+    moisture_availability :: FT      # the fraction β of the surface that is saturated
     virtual_potential_temperature :: θᵛ
+    specific_humidity :: Q           # the specific humidity of the air, read in the first cell
     surface_pressure :: P
     thermodynamic_constants :: TC
     transfer_type :: TT
@@ -401,8 +403,14 @@ will be automatically selected based on the boundary condition type:
   with [Hogström (1996)](@cite hogstrom1996review) / [Beljaars & Holtslag (1991)](@cite beljaars1991flux)
   MOST stability functions. The scalar roughness length defaults to `roughness_length / 7.3`
   (typical ocean value). Use `nothing` to disable stability correction.
-- `surface`: Surface type for computing saturation specific humidity in the stability correction.
-  Default is `PlanarLiquidSurface()`. Use `PlanarIceSurface()` for ice surfaces.
+- `surface`: The phase of the surface water, which selects the saturation specific humidity at the
+  surface in the stability correction: `PlanarLiquidSurface()` (default), `PlanarIceSurface()` or
+  `PlanarMixedPhaseSurface(liquid_fraction)`.
+- `moisture_availability`: The fraction ``β ∈ [0, 1]`` of the surface that is saturated (default: 1,
+  an ocean). The surface specific humidity entering the stability correction is
+  ``q₀ = β qᵛ⁺(T₀) + (1 - β) qᵛ``, with ``qᵛ`` the specific humidity of the air in the first cell,
+  so that ``β = 0`` describes a dry surface whose virtual potential temperature carries no moisture
+  contribution of its own. See [`surface_virtual_potential_temperature`](@ref).
 
 The measurement height is automatically determined from the grid as the height of the first
 cell center above the surface.
@@ -421,6 +429,7 @@ PolynomialCoefficient{Float64}
 ├── roughness_length: 0.00015 m
 ├── minimum_wind_speed: 0.1 m/s
 ├── surface: PlanarLiquidSurface
+├── moisture_availability: 1.0
 └── stability_function: FittedStabilityFunction (Li et al. 2010)
 ```
 
@@ -436,6 +445,7 @@ PolynomialCoefficient{Float64}
 ├── roughness_length: 0.00015 m
 ├── minimum_wind_speed: 0.1 m/s
 ├── surface: PlanarLiquidSurface
+├── moisture_availability: 1.0
 └── stability_function: FittedStabilityFunction (Li et al. 2010)
 ```
 
@@ -451,6 +461,7 @@ PolynomialCoefficient{Float64}
 ├── roughness_length: 0.00015 m
 ├── minimum_wind_speed: 0.1 m/s
 ├── surface: PlanarLiquidSurface
+├── moisture_availability: 1.0
 └── stability_function: Nothing
 ```
 
@@ -469,14 +480,19 @@ function PolynomialCoefficient(FT = Oceananigans.defaults.FloatType;
                                minimum_wind_speed = 0.1,
                                stability_function = FittedStabilityFunction(FT(roughness_length / 7.3)),
                                surface = PlanarLiquidSurface(),
+                               moisture_availability = 1,
                                transfer_type = nothing)
+
+    0 ≤ moisture_availability ≤ 1 ||
+        throw(ArgumentError("moisture_availability must lie between 0 and 1, got $moisture_availability"))
 
     return PolynomialCoefficient(polynomial,
                                  FT(roughness_length),
                                  FT(minimum_wind_speed),
                                  stability_function,
                                  surface,
-                                 nothing, nothing, nothing,
+                                 FT(moisture_availability),
+                                 nothing, nothing, nothing, nothing,
                                  transfer_type)
 end
 
@@ -486,7 +502,9 @@ Adapt.adapt_structure(to, coef::PolynomialCoefficient) =
                           Adapt.adapt(to, coef.minimum_wind_speed),
                           coef.stability_function,
                           coef.surface,
+                          coef.moisture_availability,
                           Adapt.adapt(to, coef.virtual_potential_temperature),
+                          Adapt.adapt(to, coef.specific_humidity),
                           Adapt.adapt(to, coef.surface_pressure),
                           Adapt.adapt(to, coef.thermodynamic_constants),
                           coef.transfer_type)
@@ -497,6 +515,7 @@ function Base.show(io::IO, coef::PolynomialCoefficient{FT}) where FT
     println(io, "├── roughness_length: ", coef.roughness_length, " m")
     println(io, "├── minimum_wind_speed: ", coef.minimum_wind_speed, " m/s")
     println(io, "├── surface: ", summary(coef.surface))
+    println(io, "├── moisture_availability: ", coef.moisture_availability)
     print(io,   "└── stability_function: ", summary(coef.stability_function))
 end
 
@@ -567,25 +586,28 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute virtual potential temperature over a planar `surface`
-with surface temperature `T₀` and surface pressure `p₀`,
+Compute the virtual potential temperature of a planar `surface` with surface temperature `T₀`,
+surface pressure `p₀`, moisture availability `β` and first-cell specific humidity `qᵛ`,
 
 ```math
-θᵥ₀ = T₀ (1 + δᵛᵈ qᵛ⁺)
+θᵥ₀ = T₀ (1 + δᵛᵈ q₀), \\qquad q₀ = β qᵛ⁺ + (1 - β) qᵛ,
 ```
 
-where ``qᵛ⁺`` is the saturation specific humidity at the surface
-and ``δᵛᵈ = Rᵛ/Rᵈ - 1`` (≈ 0.608 for water vapor in Earth's atmosphere;
-the actual value depends on the gas constants in `constants`).
+where ``qᵛ⁺`` is the saturation specific humidity at the surface and ``δᵛᵈ = Rᵛ/Rᵈ - 1``
+(≈ 0.608 for water vapor in Earth's atmosphere; the actual value depends on the gas constants in
+`constants`). A saturated surface (``β = 1``, the default) carries its saturation humidity; a dry
+surface (``β = 0``) carries the humidity of the air above it, and so contributes no moisture of its
+own to the surface buoyancy.
 """
-@inline function surface_virtual_potential_temperature(T₀, p₀, constants, surface)
+@inline function surface_virtual_potential_temperature(T₀, p₀, constants, surface, β = 1, qᵛ = 0)
     qᵛ⁺ = saturation_total_specific_moisture(T₀, p₀, constants, surface)
+    q₀ = β * qᵛ⁺ + (1 - β) * qᵛ
 
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
     δᵛᵈ = Rᵛ / Rᵈ - 1
 
-    return T₀ * (1 + δᵛᵈ * qᵛ⁺)
+    return T₀ * (1 + δᵛᵈ * q₀)
 end
 
 #####
@@ -652,7 +674,12 @@ end
     β = log(ℓʳ / ℓʳʰ)
 
     θᵥ = surface_layer_θᵥ(i, j, coef.virtual_potential_temperature, θᵥ_source)
-    θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, coef.surface)
+
+    # The air's specific humidity is read unfiltered even when θᵥ is filtered: its (1 - β) share
+    # of the surface humidity is a small correction to θᵥ₀.
+    qᵛ = @inbounds coef.specific_humidity[i, j, 1]
+    θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants,
+                                                coef.surface, coef.moisture_availability, qᵛ)
     Riᴮ = bulk_richardson_number(h, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
 
     return Cʰ * sf(Riᴮ, α, β, coef.transfer_type)
@@ -717,7 +744,8 @@ fill_polynomial(coef::PolynomialCoefficient, polynomial, transfer_type) =
                           coef.minimum_wind_speed,
                           coef.stability_function,
                           coef.surface,
-                          nothing, nothing, nothing,
+                          coef.moisture_availability,
+                          nothing, nothing, nothing, nothing,
                           transfer_type)
 
 # Type alias for PolynomialCoefficient with no polynomial set

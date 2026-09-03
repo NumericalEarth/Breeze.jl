@@ -74,10 +74,11 @@ cases = (
 # stable case prescribes Monin–Obukhov similarity instead, which Breeze supplies through a
 # `PolynomialCoefficient`: its polynomial ``(a₀ + a₁ U + a₂ / U) × 10⁻³`` is the neutral 10 m
 # transfer coefficient, so ``a₀ = 10³ [κ / \ln(10 / ℓʳ)]²`` with the other two zero is the neutral
-# log law, and a `FittedStabilityFunction` corrects it away from neutral. The `DrySurface` trait
-# declares that the surface has no saturation humidity, so that its virtual potential temperature
-# is its potential temperature. Over a saturated surface at 265 K the moisture would add 0.3 K of
-# spurious virtual warming, comparable to the whole surface-layer temperature deficit.
+# log law, and a `FittedStabilityFunction` corrects it away from neutral. A `moisture_availability`
+# of zero declares a dry surface, whose humidity is that of the air above it rather than the
+# saturation humidity at the surface temperature. Over a saturated surface at 265 K that humidity
+# would add 0.3 K of spurious virtual warming, comparable to the whole surface-layer temperature
+# deficit.
 
 κ = 0.4  # von Kármán constant
 ℓʳ = 0.1 # m, roughness length
@@ -85,7 +86,7 @@ cases = (
 monin_obukhov_coefficient = PolynomialCoefficient(polynomial = 1e3 * (κ / log(10 / ℓʳ))^2 .* (1, 0, 0),
                                                   roughness_length = ℓʳ,
                                                   stability_function = FittedStabilityFunction(ℓʳ),
-                                                  surface = DrySurface())
+                                                  moisture_availability = 0)
 
 # ## Building a column
 #

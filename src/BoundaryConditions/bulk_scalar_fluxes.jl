@@ -143,29 +143,33 @@ const BulkSensibleHeatFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkSe
 ##### BulkVaporFluxFunction for moisture fluxes
 #####
 
-struct BulkVaporFluxFunction{C, G, T, F, TC, S, FV, FS}
+struct BulkVaporFluxFunction{C, G, T, F, TC, S, M, FV, FS}
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
     surface_pressure :: F
     thermodynamic_constants :: TC
     surface :: S
+    moisture_availability :: M # the fraction β of the surface that is saturated; resolved at materialization
     filtered_velocities :: FV  # Nothing or FilteredSurfaceVelocities
     filtered_scalar :: FS      # Nothing or FilteredSurfaceScalar
 end
 
 """
-    BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
+    BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature,
+                            moisture_availability=nothing, filtered_velocities=nothing)
 
 Create a bulk vapor flux function for computing surface moisture fluxes.
 The flux is computed as:
 
 ```math
-Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀)
+Jᵛ = - ρ₀ Cᵛ |U| (qᵛ - q₀), \\qquad q₀ = β qᵛ⁺ + (1 - β) qᵛ,
 ```
 
-where ``Cᵛ`` is the transfer coefficient, ``|U|`` is the wind speed, ``qᵗ`` is the atmospheric
-specific humidity, and ``qᵛ₀`` is the saturation specific humidity at the surface.
+where ``Cᵛ`` is the transfer coefficient, ``|U|`` the wind speed, ``qᵛ`` the specific humidity of
+the air in the first cell, ``qᵛ⁺`` the saturation specific humidity at the surface temperature and
+``β`` the `moisture_availability`, the fraction of the surface that is saturated. Where the surface
+is dry its humidity is that of the air, so the flux is ``β`` times the flux over a saturated surface.
 
 # Keyword Arguments
 
@@ -173,14 +177,24 @@ specific humidity, and ``qᵛ₀`` is the saturation specific humidity at the su
 - `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
 - `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Used to compute saturation specific humidity at the surface.
+- `moisture_availability`: The fraction ``β ∈ [0, 1]`` of the surface that is saturated. `nothing`
+                           (default) takes the value carried by a [`PolynomialCoefficient`](@ref)
+                           `coefficient`, whose stability correction uses the same surface humidity,
+                           and 1 (a saturated surface, an ocean) for a constant coefficient. A value
+                           that disagrees with a `PolynomialCoefficient` is an error. The phase of
+                           the surface water follows the coefficient in the same way, and is liquid
+                           for a constant coefficient.
 - `filtered_velocities`: Either `nothing` (default) or [`FilteredSurfaceVelocities`](@ref). Note
                          that when `filtered_velocities` is not `nothing`, then automatically
                          there is filtering in the scalar fields via [`FilteredSurfaceScalar`](@ref)
                          with the same parameters (e.g., `height`, `timescale`) as `filtered_velocities`.
 """
-function BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
+function BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature,
+                                 moisture_availability=nothing, filtered_velocities=nothing)
+    isnothing(moisture_availability) || 0 ≤ moisture_availability ≤ 1 ||
+        throw(ArgumentError("moisture_availability must lie between 0 and 1, got $moisture_availability"))
     return BulkVaporFluxFunction(coefficient, gustiness, surface_temperature,
-                                  nothing, nothing, nothing, filtered_velocities, nothing)
+                                 nothing, nothing, nothing, moisture_availability, filtered_velocities, nothing)
 end
 
 Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
@@ -190,6 +204,7 @@ Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
                           Adapt.adapt(to, bf.surface_pressure),
                           Adapt.adapt(to, bf.thermodynamic_constants),
                           Adapt.adapt(to, bf.surface),
+                          Adapt.adapt(to, bf.moisture_availability),
                           Adapt.adapt(to, bf.filtered_velocities),
                           Adapt.adapt(to, bf.filtered_scalar))
 
@@ -219,7 +234,10 @@ end
 
     Cᵛ = bulk_coefficient(i, j, grid, bf.coefficient, fields, T₀, bf.filtered_velocities)
 
-    return - ρ₀ * Cᵛ * Ũ * Δq
+    # Over a surface with moisture availability β the surface humidity is q₀ = β qᵛ⁺ + (1 - β) qᵛ,
+    # so that qᵛ - q₀ = β (qᵛ - qᵛ⁺)
+    β = bf.moisture_availability
+    return - ρ₀ * Cᵛ * Ũ * β * Δq
 end
 
 # Vapor difference dispatch on filtered_scalar
@@ -275,12 +293,13 @@ function BulkSensibleHeatFlux(; kwargs...)
 end
 
 """
-    BulkVaporFlux(; coefficient, surface_temperature, gustiness=0)
+    BulkVaporFlux(; coefficient, surface_temperature, gustiness=0, moisture_availability=nothing)
 
 Create a `FluxBoundaryCondition` for surface moisture flux.
 
 The saturation specific humidity at the surface is automatically computed from
-`surface_temperature`.
+`surface_temperature`; `moisture_availability` is the fraction of the surface that is saturated,
+1 by default.
 
 See [`BulkVaporFluxFunction`](@ref) for details.
 

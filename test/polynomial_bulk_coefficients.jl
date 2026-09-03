@@ -275,13 +275,17 @@ using GPUArraysCore: @allowscalar
         θᵥ_field = CenterField(grid)
         set!(θᵥ_field, 288.0)  # cooler than surface → unstable
 
+        qᵛ_field = CenterField(grid)  # dry air in the first cell
+
         coef_fitted = PolynomialCoefficient(
             (0.142, 0.076, 2.7),     # polynomial
             1.5e-4,                   # roughness_length
             0.1,                      # minimum_wind_speed
             FittedStabilityFunction(1.5e-4 / 7.3),
             Breeze.PlanarLiquidSurface(),
+            1.0,                      # moisture_availability
             θᵥ_field,
+            qᵛ_field,
             1e5,
             Breeze.Thermodynamics.ThermodynamicConstants(),
             Val(:momentum)
@@ -328,20 +332,38 @@ using GPUArraysCore: @allowscalar
         @test bc.condition.coefficient.transfer_type === Val(:scalar)
     end
 
-    @testset "DrySurface" begin
-        # Over dry land there is no saturation humidity at the surface, so the bulk scheme's
-        # surface virtual potential temperature is the surface temperature itself
+    @testset "moisture_availability" begin
+        using Breeze.BoundaryConditions: surface_virtual_potential_temperature
+
+        # The surface humidity entering the stability correction is q₀ = β qᵛ⁺ + (1 - β) qᵛ: a
+        # saturated surface (β = 1) carries its saturation humidity and a dry one (β = 0) the
+        # humidity of the air above it, so that its virtual potential temperature has no moisture
+        # contribution of its own.
         constants = ThermodynamicConstants(FT)
         T₀ = FT(265)
         p₀ = FT(1e5)
-        @test saturation_total_specific_moisture(T₀, p₀, constants, DrySurface()) == 0
-        @test saturation_total_specific_moisture(T₀, p₀, constants, PlanarLiquidSurface()) > 0
+        qᵛ = FT(1e-3)
+        surface = PlanarLiquidSurface()
+        δᵛᵈ = vapor_gas_constant(constants) / dry_air_gas_constant(constants) - 1
 
-        coef = PolynomialCoefficient(surface = DrySurface())
-        @test coef.surface isa DrySurface
+        θᵥ₀_saturated = surface_virtual_potential_temperature(T₀, p₀, constants, surface, 1, qᵛ)
+        θᵥ₀_dry = surface_virtual_potential_temperature(T₀, p₀, constants, surface, 0, qᵛ)
+        θᵥ₀_half = surface_virtual_potential_temperature(T₀, p₀, constants, surface, FT(0.5), qᵛ)
+
+        @test θᵥ₀_saturated == surface_virtual_potential_temperature(T₀, p₀, constants, surface)
+        @test θᵥ₀_saturated > θᵥ₀_dry > T₀
+        @test θᵥ₀_dry ≈ T₀ * (1 + δᵛᵈ * qᵛ)
+        @test θᵥ₀_half ≈ (θᵥ₀_saturated + θᵥ₀_dry) / 2
+
+        @test PolynomialCoefficient().moisture_availability == 1
+        coef = PolynomialCoefficient(moisture_availability = 0)
+        @test coef.moisture_availability == 0
+        @test_throws ArgumentError PolynomialCoefficient(moisture_availability = 2)
+
+        # The value survives materialization, which also captures the air's specific humidity
         bc = Breeze.BulkDrag(coefficient = coef, surface_temperature = T₀)
-        @test bc isa BoundaryCondition
-        @test bc.condition.coefficient.surface isa DrySurface
+        @test bc.condition.coefficient.moisture_availability == 0
+        @test isnothing(bc.condition.coefficient.specific_humidity)
     end
 
     @testset "FilteredSurfaceVelocities construction" begin
