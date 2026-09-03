@@ -914,13 +914,17 @@ end
 # and pre-cools the layer that later evaporates it, the mechanism that drives cold pools.
 #
 # Each formulation supplies only its per-phase content per unit falling mass, (χˡ, χⁱ), at a
-# cell; the discretization below is shared. The mass fluxes are the ones the tracer tendency
-# actually applies to the cell (`sedimentation_mass_fluxes`, formed per cell because
-# bounds-preserving WENO limits its reconstructions per cell), each carries the content of the
-# cell it drains (`condensate_content_fluxes`) — the cell above the face when the condensate
-# falls, the cell below when an updraft outruns its fall speed — and the flux is weighted by the
-# density that carries the thermodynamic variable. Like the sedimentation of the tracers
-# themselves, the flux is explicit in time.
+# cell: the derivative of its specific variable with respect to the condensate mass fraction at
+# fixed temperature, with what the dynamics put in place of the departed mass taking it up
+# (`sedimentation_replacement`: dry air where the total density is fixed, the local mixture where
+# it falls with the condensate). The discretization below is shared. The mass fluxes are the ones
+# the tracer tendency actually applies to the cell (`sedimentation_mass_fluxes`, formed per cell
+# because bounds-preserving WENO limits its reconstructions per cell), weighted like it by the
+# total density; each carries the content of the cell it drains (`condensate_content_fluxes`),
+# the cell above the face when the condensate falls, the cell below when an updraft outruns its
+# fall speed; and the cell's coupling-to-total density ratio turns the resulting change of the
+# specific variable into that of the coupling-weighted prognostic. Like the sedimentation of the
+# tracers themselves, the flux is explicit in time.
 #
 # TODO: under adaptive implicit vertical advection the tracer's sedimentation is partly
 # implicit; `sedimentation_mass_fluxes` estimates the implicit remainder explicitly at the
@@ -933,19 +937,27 @@ $(TYPEDSIGNATURES)
 Return the divergence at cell `(i, j, k)` of the sedimentation flux of the condensate part of
 a thermodynamic variable,
 
-    ∂z [ρᵈ Σᵢ (χᵢ(Wᵢ) Fᵢ(Wᵢ) − χᵢ(wᵗ) Fᵢ(wᵗ))] ,
+    (ρᵈ / ρ) ∂z [ρ Σᵢ (χᵢ(Wᵢ) Fᵢ(Wᵢ) − χᵢ(wᵗ) Fᵢ(wᵗ))] ,
 
 where, for each of the `constituents`, `Fᵢ(w)` is the vertical advective flux of its humidity
 at velocity `w` through the faces of the cell, with the scheme that transports the tracer (see
 [`sedimentation_mass_fluxes`](@ref)), `Wᵢ = wᵗ + wᵢ` is its total velocity and `wᵗ` the
-resolved transport velocity, `ρᵈ` is the [`dynamics_density`](@ref) that carries the
-thermodynamic variable (`ρθ = ρᵈ θ`, `ρs = ρᵈ s`), and `condensate_content(i, j, k, grid,
-args...)` returns the formulation's content per unit falling mass of each phase, `(χˡ, χⁱ)`,
-at cell `k` (`−ℒˣᵣ / (cᵖᵐ Π)` to leading order for `ρθ`, `(cˣ − cᵖᵈ) T − ℒˣᵣ` for `ρs`). The
-tracer tendency advects each humidity at `Wᵢ` in place of `wᵗ`, so the bracket is the
+resolved transport velocity, `ρ` is the [`total_density`](@ref) that weights the tracer's mass
+flux, `ρᵈ` the [`dynamics_density`](@ref) that carries the thermodynamic variable (`ρθ = ρᵈ θ`,
+`ρs = ρᵈ s`), and `condensate_content(i, j, k, grid, args...)` returns the formulation's content
+per unit falling mass of each phase, `(χˡ, χⁱ)`, at cell `k`: the derivative of the specific
+variable with respect to that condensate mass fraction at fixed temperature, with what the
+dynamics put in place of the departed mass taking it up ([`sedimentation_replacement`](@ref));
+`−ℒˣᵣ / (cᵖᵐ Π)` to leading order for `ρθ`, and for `ρs` the enthalpy of the condensate relative
+to that of its replacement, `(cˣ − cʳ) T − (ℒˣᵣ − ℒʳ)`.
+
+The tracer tendency advects each humidity at `Wᵢ` in place of `wᵗ`, so the bracket is the
 sedimentation part of the mass flux advection actually applies to the cell, and each of its two
 fluxes carries the content of its own upwind cell (see [`condensate_content_fluxes`](@ref)).
-Returns zero when no constituent sediments.
+Continuity advances `ρᵈ` without a sedimentation source on every core, so the divergence of the
+content flux per unit total mass is the change of the specific variable, and the cell's ratio
+`ρᵈ / ρ` (one on the anelastic core, the dry mass fraction on the compressible core) turns it
+into the change of the coupling-weighted prognostic. Returns zero when no constituent sediments.
 """
 @inline condensate_sedimentation_divergence(i, j, k, grid, ::Tuple{}, args...) = zero(grid)
 
@@ -957,10 +969,12 @@ Returns zero when no constituent sediments.
     χ⁰ = condensate_content(i, j, k, grid, args...)
     χ⁺ = condensate_content(i, j, min(k + 1, grid.Nz), grid, args...)
     Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, constituents, wᵗ, χ⁻, χ⁰, χ⁺)
+    ρ = total_density(dynamics)
     ρᵈ = dynamics_density(dynamics)
-    ρᵈᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρᵈ)
-    ρᵈᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρᵈ)
-    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᵈᶠ⁺ * Φ⁺ - ρᵈᶠ⁻ * Φ⁻)
+    ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
+    ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
+    @inbounds coupling_fraction = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
+    return coupling_fraction * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻)
 end
 
 """

@@ -2,9 +2,10 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, condensate_phase,
-                               total_density, implicit_advection_velocities,
-                               mass_weighted_advection_diagonal
-using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState
+                               total_density, dynamics_density, standard_pressure,
+                               implicit_advection_velocities, mass_weighted_advection_diagonal
+using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState,
+                             LiquidIceDensityState, mixture_gas_constant
 using CloudMicrophysics
 using CloudMicrophysics.Microphysics1M: conv_q_lcl_to_q_rai, accretion
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce, Microphysics1MParams
@@ -679,6 +680,100 @@ end
         time_step!(model, 1)
     end
     @test sum(interior(ρθ)) > Σρθ
+end
+
+# Dynamics whose total density falls with the sedimenting condensate, so that the local mixture
+# takes up the departed mass, wrapped around an anelastic model for the static-energy check below
+struct MixtureReplacementDynamics{D}
+    dynamics :: D
+end
+Breeze.AtmosphereModels.total_density(d::MixtureReplacementDynamics) = total_density(d.dynamics)
+Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, q) = q
+
+@testset "Compressible sedimentation lets the mixture take up the departed mass [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(100)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+
+    constants = ThermodynamicConstants()
+    cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
+    rain_blob(x, y, z) = ifelse(300 < z < 500, FT(2e-3), FT(0))
+
+    # On the compressible core the prognostic dry density has no sedimentation source, so rain
+    # leaving a cell lowers its total density and every mass fraction renormalizes: the content
+    # is the derivative along q → q + ε (eˣ − q), the mixture rather than dry air taking up the
+    # departed mass, and the divergence of the total-density-weighted content flux converts to
+    # the prognostic ρᵈ φ through the cell's qᵈ = ρᵈ / ρ. Moist enough (unsaturated throughout)
+    # that the dry-air derivative the anelastic core uses fails the check the kernel meets.
+    # Only the θ formulation runs on the compressible core so far.
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=300)
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; dynamics, microphysics)
+    set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.012, qʳ=rain_blob)
+    update_state!(model)
+
+    μ = model.microphysical_fields
+    column(f) = Array(interior(f, 1, 1, :))
+    qˡ = column(μ.qˡ)
+    qᵛ = column(μ.qᵛ)
+    ρ = total_density(model.dynamics)
+    ρᶜ = column(ρ)
+    qᵈ = column(dynamics_density(model.dynamics)) ./ ρᶜ
+    ρᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρ)) for k in 1:Nz+1]
+    wʳ = [(@allowscalar μ.wʳ[1, 1, k]) for k in 1:Nz+1]
+    qʳᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ)) for k in 1:Nz+1]
+    Φ = wʳ .* qʳᶠ
+
+    # The temperature the kernel works with is the inversion of θ and q at the total density.
+    # The pressure p = ρ Rᵐ T is the gas-phase pressure (ρᵈ Rᵈ + ρᵛ Rᵛ) T, which condensate
+    # leaving at fixed T does not change.
+    q = [MoistureMassFractions(qᵛ[k], qˡ[k], zero(FT)) for k in 1:Nz]
+    pˢᵗ = standard_pressure(model.dynamics)
+    θ = column(model.formulation.potential_temperature)
+    solver = model.formulation.temperature_solver
+    T = [Breeze.Thermodynamics.temperature(LiquidIceDensityState(θ[k], q[k], pˢᵗ, ρᶜ[k], solver), constants)
+         for k in 1:Nz]
+    p = [ρᶜ[k] * mixture_gas_constant(q[k], constants) * T[k] for k in 1:Nz]
+    G = column(model.timestepper.Gⁿ.ρθ)
+
+    # Every flux is downward, so each face carries the content of the cell above it
+    expected(χ) = [-qᵈ[k] * (ρᶠ[k+1] * Φ[k+1] * χ[min(k+1, Nz)] - ρᶠ[k] * Φ[k] * χ[k]) / Δz for k in 1:Nz]
+    χ = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ; replacement=:mixture) for k in 1:Nz]
+    χ_dry = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ) for k in 1:Nz]
+
+    scale = maximum(abs.(G))
+    tolerance = scale * sqrt(eps(FT))
+    @test scale > 0
+    @test all(abs.(G .- expected(χ)) .<= tolerance)
+    @test any(abs.(G .- expected(χ_dry)) .> tolerance)
+    @test G[3] < 0 # rain arriving below the blob pre-cools
+    @test G[5] > 0 # rain leaving the blob top leaves latent warming behind
+
+    # The static-energy content along the same composition change, hˣ − h_mixture, checked
+    # against the central difference through dynamics that declare the mixture replacement
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    energy_model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
+                                   microphysics = OneMomentCloudMicrophysics(FT; cloud_formation),
+                                   formulation = :StaticEnergy)
+    set!(energy_model; θ=300, qᵗ=0.012, qʳ=rain_blob)
+    update_state!(energy_model)
+    mixture_dynamics = MixtureReplacementDynamics(energy_model.dynamics)
+    μₛ = energy_model.microphysical_fields
+    qᵛₛ = column(μₛ.qᵛ)
+    qˡₛ = column(μₛ.qˡ)
+    Tₛ = column(energy_model.temperature)
+    pᵣ = column(energy_model.dynamics.reference_state.pressure)
+    for k in 1:Nz
+        χˡ, _ = @allowscalar Breeze.StaticEnergyFormulations.energy_condensate_content(
+            1, 1, k, grid, mixture_dynamics, constants, energy_model.microphysics, μₛ,
+            Breeze.AtmosphereModels.specific_prognostic_moisture(energy_model), energy_model.temperature)
+        qₖ = MoistureMassFractions(qᵛₛ[k], qˡₛ[k], zero(FT))
+        χ_expected = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ; replacement=:mixture)
+        χ_dry = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ)
+        @test isapprox(χˡ, χ_expected; rtol=sqrt(eps(FT)))
+        @test !isapprox(χˡ, χ_dry; rtol=sqrt(eps(FT)))
+    end
 end
 
 @testset "Sedimentation content follows each flux's upwind cell [$(FT)]" for FT in test_float_types()

@@ -69,7 +69,8 @@ end
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, velocities.w, dynamics,
-                                                   energy_condensate_content, constants, temperature_field)
+                                                   energy_condensate_content, dynamics, constants, microphysics,
+                                                   microphysical_fields, specific_prognostic_moisture, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              + ρs_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
@@ -79,23 +80,36 @@ end
 ##### Sedimentation transport of the condensate part of ρs
 #####
 #
-# The content per unit falling mass of phase x is χˣ = ∂s/∂qˣ at fixed T, with the dry mass
-# fraction qᵈ = 1 − qᵛ − qˡ − qⁱ taking up the departed mass: sedimentation alone must not
-# change the temperature. From s = cᵖᵐ T + g z − ℒˡᵣ qˡ − ℒⁱᵣ qⁱ,
+# The content per unit falling mass of phase x is χˣ = ∂s/∂qˣ at fixed T along q → q + ε (eˣ − r),
+# where r is the composition that takes up the departed mass (`sedimentation_replacement`): dry
+# air on the anelastic core, whose total density is fixed, the local mixture on the compressible
+# core, whose total density falls with the condensate. Sedimentation alone then leaves the
+# temperature unchanged on either core. From s = cᵖᵐ T + g z − ℒˡᵣ qˡ − ℒⁱᵣ qⁱ,
 #
-#   χˣ = (cˣ − cᵖᵈ) T − ℒˣᵣ ,
+#   χˣ = (cˣ − cʳ) T − (ℒˣᵣ − ℒʳ) = hˣ − hʳ ,
 #
-# the latent deficit plus the sensible heat of the condensate relative to the dry air that
-# replaces it; the geopotential is independent of the composition and drops out. This is exact
-# for the anelastic core (fixed total density) and accurate to O(q) for the compressible core,
-# where the whole mixture rather than dry air takes up the departed mass. The frictional heating
-# from the fall (g wˣ qˣ) is neglected. The shared `condensate_sedimentation_divergence`
+# the enthalpy hˣ = cˣ T − ℒˣᵣ of the condensate relative to the enthalpy hʳ = cʳ T − ℒʳ of what
+# replaces it, with cʳ the replacement's heat capacity and ℒʳ = ℒˡᵣ rˡ + ℒⁱᵣ rⁱ its latent
+# deficit: cᵖᵈ and 0 for dry air, cᵖᵐ and ℒˡᵣ qˡ + ℒⁱᵣ qⁱ for the mixture, whose enthalpy is
+# s − g z. The geopotential is independent of the composition and drops out. The frictional
+# heating from the fall (g wˣ qˣ) is neglected. The shared `condensate_sedimentation_divergence`
 # evaluates the content in each flux's upwind cell and owns the discretization.
-@inline function energy_condensate_content(i, j, k, grid, constants, temperature_field)
+@inline function energy_condensate_content(i, j, k, grid, dynamics, constants,
+                                           microphysics, microphysical_fields, specific_prognostic_moisture,
+                                           temperature_field)
     @inbounds T = temperature_field[i, j, k]
-    cᵖᵈ = constants.dry_air.heat_capacity
-    χˡ = (constants.liquid.heat_capacity - cᵖᵈ) * T - constants.liquid.reference_latent_heat
-    χⁱ = (constants.ice.heat_capacity - cᵖᵈ) * T - constants.ice.reference_latent_heat
+    @inbounds ρ = total_density(dynamics)[i, j, k]
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    r = sedimentation_replacement(dynamics, q)
+
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    cʳ = mixture_heat_capacity(r, constants)
+    ℒʳ = ℒˡᵣ * r.liquid + ℒⁱᵣ * r.ice
+
+    χˡ = (constants.liquid.heat_capacity - cʳ) * T - (ℒˡᵣ - ℒʳ)
+    χⁱ = (constants.ice.heat_capacity - cʳ) * T - (ℒⁱᵣ - ℒʳ)
     return χˡ, χⁱ
 end
 

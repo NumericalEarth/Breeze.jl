@@ -455,6 +455,11 @@ AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_st
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
 AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
 
+# Sedimentation drains the diagnosed total density but not the prognostic dry density (its
+# continuity has no sedimentation source), so every mass fraction renormalizes: the local mixture
+# takes up the mass the falling condensate leaves behind (see `sedimentation_replacement`).
+AtmosphereModels.sedimentation_replacement(::CompressibleDynamics, q) = q
+
 #####
 ##### Prognostic fields
 #####

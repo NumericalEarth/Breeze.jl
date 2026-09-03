@@ -163,9 +163,19 @@ latent heat lands exactly where the mass does — is binned by its phase into ``
 These transport the condensate part of the prognostic, with
 the content per unit falling mass taken as the partial derivative of the specific variable with
 respect to that condensate mass fraction at fixed temperature, so that sedimentation alone leaves
-the temperature unchanged: ``(cˣ - cᵖᵈ) T - ℒˣᵣ`` for `ρs`, and ``∂θˡⁱ/∂qˣ`` (to leading order
-``-ℒˣᵣ / (cᵖᵐ Π)``) for `ρθ`. Rain-out thus leaves latent warming aloft and pre-cools the layer
-that later evaporates the arriving rain, the mechanism that builds cold pools.
+the temperature unchanged. What takes up the departed mass is the dynamics' call
+(`sedimentation_replacement`): dry air on the anelastic core, whose total density is fixed so
+that ``qᵈ`` absorbs the change; the local mixture on the compressible core, whose prognostic dry
+density has no sedimentation source, so that the diagnosed total density falls with the
+condensate and every mass fraction renormalizes. The content is then ``(cˣ - cʳ) T - (ℒˣᵣ - ℒʳ)``
+for `ρs`, the enthalpy of the condensate relative to that of its replacement (``(cˣ - cᵖᵈ) T - ℒˣᵣ``
+against dry air, ``hˣ - (s - g z)`` against the mixture), and ``∂θˡⁱ/∂qˣ`` along the same
+composition change (to leading order ``-ℒˣᵣ / (cᵖᵐ Π)``) for `ρθ`. The content fluxes ride the
+total-density-weighted mass flux the tracer tendency applies, and the cell's coupling-to-total
+density ratio (one on the anelastic core, ``qᵈ = ρᵈ / ρ`` on the compressible core) converts the
+change of the specific variable into that of the coupling-weighted prognostic. Rain-out thus
+leaves latent warming aloft and pre-cools the layer that later evaporates the arriving rain, the
+mechanism that builds cold pools.
 
 ### Surface Precipitation Flux
 

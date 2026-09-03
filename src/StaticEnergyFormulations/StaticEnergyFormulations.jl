@@ -25,11 +25,12 @@ using Breeze.AtmosphereModels: AtmosphereModels,
     pressure_from_density_temperature,
     grid_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
     c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ,
-    condensate_sedimentation_divergence,
+    condensate_sedimentation_divergence, sedimentation_replacement,
     AtmosphereModelBuoyancy,
     radiation_flux_divergence
 
-using Breeze.Thermodynamics: StaticEnergyState, LiquidIcePotentialTemperatureState, with_temperature
+using Breeze.Thermodynamics: StaticEnergyState, LiquidIcePotentialTemperatureState, with_temperature,
+    mixture_heat_capacity
 
 # The lowercase c is a singleton instance of Center
 const c = Center()

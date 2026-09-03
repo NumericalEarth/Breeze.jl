@@ -119,20 +119,24 @@ end
 ##### Sedimentation transport of the condensate part of ρθ
 #####
 #
-# The content per unit falling mass of phase x is χˣ = ∂θˡⁱ/∂qˣ at fixed T and p, with the dry
-# mass fraction qᵈ = 1 − qᵛ − qˡ − qⁱ taking up the departed mass: sedimentation alone must not
-# change the temperature. From T = Π θ + (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ with Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ),
+# The content per unit falling mass of phase x is χˣ = ∂θˡⁱ/∂qˣ at fixed T and p along
+# q → q + ε (eˣ − r), where r is the composition that takes up the departed mass
+# (`sedimentation_replacement`): dry air on the anelastic core, whose total density is fixed,
+# the local mixture on the compressible core, whose total density falls with the condensate
+# while the pressure p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T does not. Sedimentation alone then leaves the
+# temperature unchanged on either core. From T = Π θ + (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ with
+# Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ),
 #
-#   χˣ = −(ℒˣᵣ − Δcˣ D) / (cᵖᵐ Π) + θ lnΠ (Rᵈ / Rᵐ + Δcˣ / cᵖᵐ) ,
+#   χˣ = −(ℒˣᵣ − ℒʳ − Δcˣ D) / (cᵖᵐ Π) + θ lnΠ (Rʳ / Rᵐ + Δcˣ / cᵖᵐ) ,
 #
-# with D = T − Π θ the latent deficit and Δcˣ = cˣ − cᵖᵈ. The first term is the deficit the
-# falling condensate carries, −ℒˣᵣ / (cᵖᵐ Π) to leading order; the rest accounts for the heat
-# capacity and gas constant of the mixture changing as condensate is replaced by dry air
-# (lnΠ = (Rᵐ / cᵖᵐ) ln(p / pˢᵗ) is written through Π so that every state type that defines an
-# Exner function serves). This is exact for the anelastic core (fixed total density) and
-# accurate to O(q) for the compressible core, where the whole mixture rather than dry air takes
-# up the departed mass. The shared `condensate_sedimentation_divergence` evaluates the content
-# in each flux's upwind cell and owns the discretization.
+# with D = T − Π θ the latent deficit, Δcˣ = cˣ − cʳ, and cʳ, Rʳ, ℒʳ = ℒˡᵣ rˡ + ℒⁱᵣ rⁱ the heat
+# capacity, gas constant and latent deficit of the replacement (cᵖᵈ, Rᵈ, 0 for dry air; cᵖᵐ, Rᵐ,
+# cᵖᵐ D for the mixture). The first term is the deficit the falling condensate carries,
+# −ℒˣᵣ / (cᵖᵐ Π) to leading order; the rest accounts for the heat capacity and gas constant of
+# the mixture changing as condensate gives way to its replacement (lnΠ = (Rᵐ / cᵖᵐ) ln(p / pˢᵗ)
+# is written through Π so that every state type that defines an Exner function serves). The
+# shared `condensate_sedimentation_divergence` evaluates the content in each flux's upwind cell
+# and owns the discretization.
 @inline function theta_condensate_content(i, j, k, grid, formulation, dynamics, constants,
                                           microphysics, microphysical_fields, specific_prognostic_moisture)
     𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
@@ -142,18 +146,22 @@ end
     Π = exner_function(𝒰, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
 
+    # What takes up the departed mass, and its heat capacity, gas constant and latent deficit
+    r = sedimentation_replacement(dynamics, q)
+    cʳ = mixture_heat_capacity(r, constants)
+    Rʳ = mixture_gas_constant(r, constants)
     ℒˡᵣ = constants.liquid.reference_latent_heat
     ℒⁱᵣ = constants.ice.reference_latent_heat
-    Δcˡ = constants.liquid.heat_capacity - cᵖᵈ
-    Δcⁱ = constants.ice.heat_capacity - cᵖᵈ
+    ℒʳ = ℒˡᵣ * r.liquid + ℒⁱᵣ * r.ice
+
+    Δcˡ = constants.liquid.heat_capacity - cʳ
+    Δcⁱ = constants.ice.heat_capacity - cʳ
     D = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
     θlnΠ = θ * log(Π)
 
-    χˡ = -(ℒˡᵣ - Δcˡ * D) / (cᵖᵐ * Π) + θlnΠ * (Rᵈ / Rᵐ + Δcˡ / cᵖᵐ)
-    χⁱ = -(ℒⁱᵣ - Δcⁱ * D) / (cᵖᵐ * Π) + θlnΠ * (Rᵈ / Rᵐ + Δcⁱ / cᵖᵐ)
+    χˡ = -(ℒˡᵣ - ℒʳ - Δcˡ * D) / (cᵖᵐ * Π) + θlnΠ * (Rʳ / Rᵐ + Δcˡ / cᵖᵐ)
+    χⁱ = -(ℒⁱᵣ - ℒʳ - Δcⁱ * D) / (cᵖᵐ * Π) + θlnΠ * (Rʳ / Rᵐ + Δcⁱ / cᵖᵐ)
     return χˡ, χⁱ
 end
 

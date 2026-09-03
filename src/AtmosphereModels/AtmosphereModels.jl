@@ -12,6 +12,7 @@ export
     dynamics_density,
     dynamics_pressure,
     total_density,
+    sedimentation_replacement,
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
