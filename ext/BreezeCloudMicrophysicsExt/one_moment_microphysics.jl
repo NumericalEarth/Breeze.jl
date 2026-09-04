@@ -668,12 +668,13 @@ end
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
 
-    # Cloud liquid terminal velocity (Stokes regime)
+    # Cloud liquid terminal velocity (Stokes regime). Advection can undershoot to slightly
+    # negative cloud liquid, which has no fall speed (the power law would throw on GPU).
     𝕎ᶜˡ = CMNonEq.terminal_velocity(
         parameters.cloud.liquid,
         categories.hydrometeor_velocities.stokes,
         ρ,
-        ℳ.qᶜˡ,
+        max(0, ℳ.qᶜˡ),
     )
     wᶜˡ = -𝕎ᶜˡ
     wᶜˡ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜˡ)
@@ -712,12 +713,13 @@ end
     wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
     @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
 
-    # Cloud liquid terminal velocity (Stokes regime)
+    # Cloud liquid terminal velocity (Stokes regime). Advection can undershoot to slightly
+    # negative cloud liquid, which has no fall speed (the power law would throw on GPU).
     𝕎ᶜˡ = CMNonEq.terminal_velocity(
         parameters.cloud.liquid,
         categories.hydrometeor_velocities.stokes,
         ρ,
-        ℳ.qᶜˡ,
+        max(0, ℳ.qᶜˡ),
     )
     wᶜˡ = -𝕎ᶜˡ
     wᶜˡ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜˡ)
