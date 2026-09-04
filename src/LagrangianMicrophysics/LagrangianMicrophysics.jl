@@ -22,7 +22,7 @@ using Breeze.AtmosphereModels: specific_prognostic_moisture, dynamics_pressure
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: architecture
 using Oceananigans.Fields: interpolate, location
-using Oceananigans.Grids: Center, Bounded, XFlatGrid, YFlatGrid, topology, xnode, ynode, rnode
+using Oceananigans.Grids: Center, Bounded, XFlatGrid, YFlatGrid, XYFlatGrid, topology, xnode, ynode, rnode
 using Oceananigans.Models.LagrangianParticleTracking: flattened_node
 using Oceananigans.Utils: launch!, KernelParameters, instantiate
 

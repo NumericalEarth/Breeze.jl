@@ -103,6 +103,16 @@ end
     return (x′, r′)
 end
 
+# A single column: only the vertical coordinate remains
+@inline function clamped_node((x, y, z), grid::XYFlatGrid)
+    _, _, TZ = topology(grid)
+    _, _, Nz = size(grid)
+    c = Center()
+    r′, = flattened_node((x, y, z), grid)
+    r′ = clamp_to_centers(r′, TZ(), rnode(1, 1, 1, grid, c, c, c), rnode(1, 1, Nz, grid, c, c, c))
+    return (r′,)
+end
+
 @kernel function _interpolate_to_droplets!(droplets, grid, T, ℓT, qᵛ, ℓq, p, ℓp)
     n = @index(Global)
     @inbounds begin
