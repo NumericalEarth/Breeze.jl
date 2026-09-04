@@ -867,10 +867,10 @@ end
 # Everything the model needs to know about each sedimenting condensate mass, resolved once at
 # construction: the velocity field it falls with, its specific-humidity field and the prognostic
 # partial density behind it, its thermodynamic phase, and the advection scheme that transports
-# it. The thermodynamic tendencies and the post-solve `implicit_sedimentation_step!` read these
-# to transport the condensate part of ρθ / ρs with the falling mass, and the surface
-# precipitation flux diagnostic sums their bottom-face fluxes, so all are built from the same
-# declarations as the tracer transport itself.
+# it. The thermodynamic tendencies and `implicit_sedimentation_step!` read these to transport
+# the condensate part of ρθ / ρs with the falling mass, and the surface precipitation flux
+# diagnostic sums their bottom-face fluxes, so all are built from the same declarations as the
+# tracer transport itself.
 
 """
 $(TYPEDSIGNATURES)
@@ -947,11 +947,12 @@ end
 # The content moves in the same two parts as the mass. The tendency carries the part of the mass
 # flux the tendency applies (`ExplicitSedimentationFluxes`: the whole flux of an explicit scheme,
 # the CFL-limited fraction under adaptive implicit vertical advection). The remainder that the
-# tridiagonal solve applies depends on the solved tracer state, so its content is moved after
-# the scalar solves by `implicit_sedimentation_step!`, from the fluxes the solve actually applied
-# (`ImplicitSedimentationFluxes`). An estimate of that remainder at the pre-solve state would
-# overstate a one-cell loss by the factor 1 + C at implicit Courant number C, precisely in the
-# regime the solve exists for.
+# tridiagonal solve applies depends on the solved tracer state, so its content is moved by
+# `implicit_sedimentation_step!` between the tracers' solves and the thermodynamic variable's
+# own, from the fluxes the solves actually applied (`ImplicitSedimentationFluxes`), and then
+# takes the same implicit transport and diffusion as the rest of the field. An estimate of that
+# remainder at the pre-solve state would overstate a one-cell loss by the factor 1 + C at
+# implicit Courant number C, precisely in the regime the solve exists for.
 
 """
 $(TYPEDSIGNATURES)

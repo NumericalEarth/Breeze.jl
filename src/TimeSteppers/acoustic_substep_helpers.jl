@@ -243,7 +243,9 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
 
     # The tracers' solves have just moved sedimenting condensate implicitly; move its latent
     # content with it, from the state the solves produced and with the same frozen velocity
-    # (see `implicit_sedimentation_step!`).
+    # (see `implicit_sedimentation_step!`). The thermodynamic variable's own solve follows in
+    # `implicit_substep!`, so the moved content takes the same transport and diffusion as the
+    # rest of the field.
     isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, Δt_implicit, velocities)
 
     return nothing
@@ -319,9 +321,11 @@ the first-order-upwind remainder of adaptive implicit vertical advection (whose 
 explicit flux the slow tendencies carry through the advection dispatch), plus vertically-implicit
 closure diffusion. Explicit advection schemes contribute no advection coefficients and explicit
 closures no diffusion coefficients, so each combination reduces to the right system. The solve
-runs once per RK stage after the substep loop, over the stage interval — the operator split WRF
-and CM1 use for their implicit vertical pieces. Continuity takes no implicit solve: the
-coupling-density tendency is the acoustic mass-flux divergence itself, not scalar advection.
+runs once per RK stage after the substep loop and after the scalar update, whose
+`implicit_sedimentation_step!` adds to the thermodynamic variable content that must take this
+solve too, over the stage interval — the operator split WRF and CM1 use for their implicit
+vertical pieces. Continuity takes no implicit solve: the coupling-density tendency is the
+acoustic mass-flux divergence itself, not scalar advection.
 
 The advecting velocity passed to each solve must be the one its slow tendency was built with,
 so the explicit/implicit velocity split is consistent: the RK stage-entry predictor velocities

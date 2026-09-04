@@ -199,11 +199,12 @@ applies, and the cell's coupling-to-total density ratio (one on the anelastic co
 ``qᵈ = ρᵈ / ρ`` on the compressible core) converts the change of the specific variable into that
 of the coupling-weighted prognostic. Under adaptive
 implicit vertical advection the tendency carries the content of the explicit fraction of each
-mass flux only; after the tracers' implicit solves of every stage the time steppers call
-`implicit_sedimentation_step!`, which moves the content of the remainder from the first-order
-fluxes the solves actually applied, at the solved state, so the heat follows the mass at any
-fall Courant number. Rain-out thus leaves latent warming aloft and pre-cools the layer that later
-evaporates the arriving rain, the mechanism that builds cold pools.
+mass flux only; between the tracers' implicit solves of a stage and the thermodynamic variable's
+own, the time steppers call `implicit_sedimentation_step!`, which moves the content of the
+remainder from the first-order fluxes the solves actually applied, at the solved state, so the
+heat follows the mass at any fall Courant number and takes the same implicit transport and
+diffusion as the rest of the field. Rain-out thus leaves latent warming aloft and pre-cools the
+layer that later evaporates the arriving rain, the mechanism that builds cold pools.
 
 ### Bottom Precipitation Flux
 

@@ -250,13 +250,25 @@ end
 #####
 ##### The thermodynamic tendencies move the condensate part of ρθ / ρs with the explicit fraction
 ##### of each constituent's sedimentation mass flux. The remainder the tridiagonal solve applies to
-##### the tracer depends on the solved state, so its content is moved here, after the scalar
+##### the tracer depends on the solved state, so its content is moved here, after the tracers'
 ##### solves of a stage, from the fluxes the solve actually applied: the first-order upwind fluxes
 ##### of the implicit velocity at the solved humidity ρq / ρ, mirroring
 ##### `density_weighted_advection_diagonal` above (outflow through the bottom face kept, no inflow
 ##### through the top or bottom face). Estimating the remainder at the pre-solve state instead
 ##### overstates a one-cell loss by the factor 1 + C at implicit Courant number C, the regime the
 ##### solve exists for.
+#####
+##### The content is added before the thermodynamic variable's own solve. With Lᵠ its implicit
+##### operator (upwind remainder at the transport velocity plus implicit diffusion) and Lq the
+##### tracer's (the same at the transport-plus-fall velocity), the tracer's solve reads
+#####
+#####   (I + Δt Lᵠ) q = q* − Δt (Lq − Lᵠ) q ,
+#####
+##### whose last term is the implicit sedimentation divergence at the solved state. Adding its
+##### content to φ* and solving (I + Δt Lᵠ) φ = φ* keeps φ = χ q exactly for a uniform content χ;
+##### adding it after the solve would exempt it from the transport and diffusion that acted on the
+##### rest of φ. Both time steppers therefore order a stage: the tracers' solves, this step, the
+##### thermodynamic variable's solve.
 #####
 
 @inline function implicit_sedimentation_mass_fluxes(i, j, k, grid, advection::AIVA, wᵗ, wˢ, ρq, ρ)
@@ -299,9 +311,11 @@ the [`thermodynamic_density`](@ref). `velocities` are the transport velocities w
 component the tracers' solves split, `Δt` the interval they solved over, and
 `condensate_content(i, j, k, grid, args...)` the formulation's `(; χ, h, ∂φ∂h)` at a cell (see
 [`condensate_sedimentation_divergence`](@ref)).
-The time steppers call the three-argument method after the scalar solves of every stage; each
-thermodynamic formulation implements it by supplying its content function and arguments to this
-one. A no-op when no constituent is advected adaptively implicitly.
+The time steppers call the three-argument method between the tracers' solves of a stage and the
+thermodynamic variable's own, so the moved content takes the same implicit transport and
+diffusion as the rest of the field (see the note above); each thermodynamic formulation
+implements it by supplying its content function and arguments to this one. A no-op when no
+constituent is advected adaptively implicitly.
 """
 function implicit_sedimentation_step!(model, Δt, velocities, condensate_content, args...)
     constituents = model.sedimentation_constituents

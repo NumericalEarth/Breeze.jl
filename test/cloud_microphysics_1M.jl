@@ -462,6 +462,54 @@ end
     @test sum(Δρqʳ) < 0
     @test sum(Δρθ) > 0
 
+    # With resolved transport and diffusion in the solves as well, the order matters: adding the
+    # content to ρθ* before ρθ's solve keeps ρθ = χ ρqʳ exactly for a uniform content, adding it
+    # after exempts it from the transport and diffusion that acted on the rest of ρθ (see
+    # `implicit_sedimentation_step!`). Here the resolved Courant number is one (half of it
+    # implicit), the fall Courant number 1.5 (four fifths of it implicit), and κ Δt / Δz² = 1/4.
+    adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+    transport_model = AtmosphereModel(grid; dynamics, microphysics,
+                                      closure = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ=10),
+                                      scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
+    μₜ = transport_model.microphysical_fields
+    set!(transport_model; θ=300, qᵗ=0.005, qᶜˡ=0, qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
+    set!(μₜ.wʳ, (x, y, z) -> ifelse(z < Nz * Δz, FT(-3), FT(0)))
+    set!(μₜ.wᶜˡ, 0)
+    set!(transport_model.velocities.w, (x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)))
+    for name in (:ρθ, :ρqʳ)
+        Oceananigans.TimeSteppers.time_discretization(transport_model.advection[name]).Δt[] = Δt
+    end
+
+    ρqʳₜ = μₜ.ρqʳ
+    ρθₜ = transport_model.formulation.potential_temperature_density
+    ρqʳₜ⁰ = CenterField(grid)
+    set!(ρqʳₜ⁰, ρqʳₜ)
+    interior(ρθₜ) .= χ .* interior(ρqʳₜ)
+
+    solve!(name, u) = implicit_step!(u, transport_model.timestepper.implicit_solver, transport_model.closure,
+                                     transport_model.closure_fields, closure_scalar_index(transport_model, name),
+                                     transport_model.clock, fields(transport_model), Δt,
+                                     implicit_step_scheme(transport_model.advection[name]),
+                                     implicit_advection_velocities(transport_model.dynamics, transport_model.velocities,
+                                                                   name, transport_model.microphysics, μₜ),
+                                     implicit_advection_density(transport_model.dynamics, transport_model.formulation, name))
+
+    # The order the time steppers issue: the tracer's solve, the content of the mass it moved,
+    # the thermodynamic variable's solve.
+    solve!(:ρqʳ, ρqʳₜ)
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(transport_model, Δt, transport_model.velocities, uniform_content)
+    solve!(:ρθ, ρθₜ)
+    ρqʳ¹ = Array(interior(ρqʳₜ, 1, 1, :))
+    moved = maximum(abs.(χ .* (ρqʳ¹ .- Array(interior(ρqʳₜ⁰, 1, 1, :)))))
+    @test moved > 0
+    @test all(abs.(Array(interior(ρθₜ, 1, 1, :)) .- χ .* ρqʳ¹) .<= sqrt(eps(FT)) * maximum(abs.(χ .* ρqʳ¹)))
+
+    # The reverse order leaves the moved content out of the transport that acted on the rest of ρθ.
+    interior(ρθₜ) .= χ .* interior(ρqʳₜ⁰)
+    solve!(:ρθ, ρθₜ)
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(transport_model, Δt, transport_model.velocities, uniform_content)
+    @test maximum(abs.(Array(interior(ρθₜ, 1, 1, :)) .- χ .* ρqʳ¹)) > moved / 10
+
     # The step is wired into both time steppers: one step with the fall speed above the
     # explicit CFL leaves finite fields on the anelastic SSP path ...
     time_step!(model, Δt)
@@ -479,6 +527,61 @@ end
     time_step!(acoustic_model, 1)
     @test all(isfinite, interior(acoustic_model.formulation.potential_temperature_density))
     @test all(isfinite, interior(acoustic_model.microphysical_fields.ρqʳ))
+end
+
+@testset "The SSP RK3 stage solves ρθ after moving the implicitly sedimented content [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(20)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics(FT)
+    adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
+
+    # A rain shaft falling through a resolved downdraft at Courant number one, so half of ρθ's
+    # transport is implicit and most of the rain's motion is. The pressure projection would
+    # remove the downdraft from a column, so one stage is run on its own, as the time stepper
+    # runs it, from the tendencies built for it.
+    Δt = FT(10)
+    set!(model; θ=300, qᵛ=0.005, qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)),
+         w=(x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)), enforce_mass_conservation=false)
+    model.clock.last_Δt = Δt # what `update_advection_timestep!` hands the adaptive schemes
+    update_state!(model; compute_tendencies=true)
+    μ = model.microphysical_fields
+    @test @allowscalar model.velocities.w[1, 1, 4] ≈ -2
+    @test @allowscalar μ.wʳ[1, 1, Nz] < -Δz / Δt # the fall alone exceeds the explicit CFL
+
+    ρθ = model.formulation.potential_temperature_density
+    ρθ⁰ = CenterField(grid)
+    set!(ρθ⁰, ρθ)
+    Gρθ = model.timestepper.Gⁿ.ρθ
+    Breeze.TimeSteppers.ssp_rk3_substep!(model, Δt, one(FT))
+    ρθ¹ = Array(interior(ρθ, 1, 1, :))
+
+    # Replay the stage's operations on ρθ, reading the rain the stage solved: the explicit
+    # update, the content of the implicitly sedimented mass, then ρθ's own solve ...
+    solve_ρθ!() = implicit_step!(ρθ, model.timestepper.implicit_solver, model.closure, model.closure_fields,
+                                 closure_scalar_index(model, :ρθ), model.clock, fields(model), Δt,
+                                 implicit_step_scheme(model.advection.ρθ),
+                                 implicit_advection_velocities(model.dynamics, model.velocities, :ρθ, model.microphysics, μ),
+                                 implicit_advection_density(model.dynamics, model.formulation, :ρθ))
+    interior(ρθ) .= interior(ρθ⁰) .+ Δt .* interior(Gρθ)
+    ρθ_explicit = Array(interior(ρθ, 1, 1, :))
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(model, Δt, model.velocities)
+    content_moved = maximum(abs.(Array(interior(ρθ, 1, 1, :)) .- ρθ_explicit))
+    @test content_moved > 0
+    solve_ρθ!()
+    @test all(abs.(Array(interior(ρθ, 1, 1, :)) .- ρθ¹) .<= sqrt(eps(FT)) * maximum(abs.(ρθ¹)))
+
+    # ... whereas solving first leaves the moved content out of the transport the solve applied.
+    interior(ρθ) .= interior(ρθ⁰) .+ Δt .* interior(Gρθ)
+    solve_ρθ!()
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(model, Δt, model.velocities)
+    @test maximum(abs.(Array(interior(ρθ, 1, 1, :)) .- ρθ¹)) > content_moved / 10
 end
 
 @testset "Bottom precipitation flux uses transport velocities [$(FT)]" for FT in test_float_types()
