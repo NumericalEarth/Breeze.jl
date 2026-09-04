@@ -82,8 +82,10 @@ cases = (
 
 κ = 0.4  # von Kármán constant
 ℓʳ = 0.1 # m, roughness length
+Cᵈ = (κ / log(10 / ℓʳ))^2 # the neutral log-law drag coefficient, referenced to 10 m
 
-monin_obukhov_coefficient = PolynomialCoefficient(polynomial = 1e3 * (κ / log(10 / ℓʳ))^2 .* (1, 0, 0),
+## The polynomial is evaluated in Large and Yeager's units of 10⁻³, so its constant term is 10³ Cᵈ
+monin_obukhov_coefficient = PolynomialCoefficient(polynomial = 1e3 * Cᵈ .* (1, 0, 0),
                                                   roughness_length = ℓʳ,
                                                   stability_function = FittedStabilityFunction(ℓʳ),
                                                   moisture_availability = 0)
@@ -110,8 +112,7 @@ function boundary_layer_simulation(; Lz, Δz₁, θ₀, Γ, stop_time, stretchin
     z = PiecewiseStretchedDiscretization(z = [0, Lz], Δz = [Δz₁, stretching * Δz₁])
     grid = RectilinearGrid(size = length(z) - 1; z, topology = (Flat, Flat, Bounded))
 
-    constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure = 1e5, potential_temperature = θ₀)
+    reference_state = ReferenceState(grid, surface_pressure = 1e5, potential_temperature = θ₀)
     dynamics = AnelasticDynamics(reference_state)
 
     if isnothing(surface_temperature)
