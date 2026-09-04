@@ -41,7 +41,7 @@ using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        Flux,
                                        FieldBoundaryConditions,
                                        Bottom, Top, West, East, South, North
-using Oceananigans.Fields: Field, set!
+using Oceananigans.Fields: Field
 using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, xnode, ynode, znode
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑyzᵃᶠᶜ, ℑyzᵃᶜᶠ, ℑxzᶠᵃᶜ, ℑxzᶜᵃᶠ,
                               Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
