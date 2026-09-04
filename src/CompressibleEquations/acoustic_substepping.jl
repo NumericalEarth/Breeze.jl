@@ -1492,6 +1492,11 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 substepper.linearization_potential_temperature)
         fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
+        # Residual (CFL-withheld) transport of the thermodynamic perturbation, applied
+        # implicitly to the predictor between Step B and Step C so the pressure solve and
+        # recovery substitution see a transport-consistent ρθ′★ (issue #897).
+        implicit_advection! === nothing || implicit_advection!(Δτ)
+
         launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
                 _build_vertical_rhs!,
                 substepper.vertical_solver_source_term,
@@ -1549,10 +1554,6 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
         # transport velocity see a closed wall (mass conservation).
         enforce_wall_impenetrability!(substepper, model, grid, arch)
         # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
-
-        # Adaptive-implicit vertical advection, applied per substep so the acoustic pressure
-        # adjusts to the residual transport within the same loop (issue #897).
-        implicit_advection! === nothing || implicit_advection!(Δτ)
     end
 
     # Stage-end: convert the accumulated momentum perturbations into a

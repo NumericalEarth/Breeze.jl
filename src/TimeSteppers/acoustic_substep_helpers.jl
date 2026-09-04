@@ -1,10 +1,9 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields, architecture
-using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection, vertical_scheme,
-                              explicit_velocity_scaleᶜᶜᶠ
-using Oceananigans.BoundaryConditions: fill_halo_regions!, needs_implicit_solver
-using Oceananigans.Operators: Azᶜᶜᶠ, δzᵃᵃᶜ, V⁻¹ᶜᶜᶜ
+using Oceananigans.Advection: vertical_scheme, implicit_vertical_velocityᶜᶜᶠ
+using Oceananigans.BoundaryConditions: needs_implicit_solver
+using Oceananigans.Operators: Azᶜᶜᶠ, δzᵃᵃᶜ, V⁻¹ᶜᶜᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: launch!, KernelParameters
 
 using Oceananigans.TimeSteppers: implicit_step!
@@ -324,141 +323,90 @@ so the explicit/implicit velocity split is consistent: the RK stage-entry predic
 (see `compute_slow_momentum_tendencies!` and `compute_slow_scalar_tendencies!`), not the
 substepper's time-averaged transport velocities that moisture and tracers use.
 """
-# The vertical momentum whose divergence drives continuity: prognostic ρw on height
-# grids, contravariant ρw̃ on terrain-following grids (matching the density kernels).
-continuity_vertical_momentum(model) = model.momentum.ρw
-continuity_vertical_momentum(model::TerrainCompressibleAcousticModel) =
-    model.dynamics.contravariant_vertical_momentum
-
-@inline function residual_vertical_mass_flux(i, j, k, grid, scheme, td, W, ρw)
-    s = explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, scheme, td, W)
-    return @inbounds Azᶜᶜᶠ(i, j, k, grid) * (1 - s) * ρw[i, j, k]
+# First-order upwind flux of the stage-entry thermodynamic state carried by the
+# CFL-withheld velocity wⁱ = (1 - s) w, density-weighted like the implicit Center-field
+# coefficients so base + perturbation sum to the full-field operator.
+@inline function residual_base_flux(i, j, k, grid, scheme, td, W, ρθ, ρᵈ)
+    wⁱ = implicit_vertical_velocityᶜᶜᶠ(i, j, k, grid, scheme, td, W)
+    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρᵈ)
+    θ⁻ = @inbounds ρθ[i, j, k-1] / ρᵈ[i, j, k-1]
+    θ⁺ = @inbounds ρθ[i, j, k]   / ρᵈ[i, j, k]
+    return Azᶜᶜᶠ(i, j, k, grid) * ρᶠ * (max(wⁱ, zero(wⁱ)) * θ⁻ + min(wⁱ, zero(wⁱ)) * θ⁺)
 end
 
-@kernel function _remove_residual_vertical_mass_flux!(Gρ, grid, scheme, td, W, ρw)
+@kernel function _residual_base_tendency!(Gρθ, grid, scheme, td, W, ρθ, ρᵈ)
     i, j, k = @index(Global, NTuple)
-    @inbounds Gρ[i, j, k] += V⁻¹ᶜᶜᶜ(i, j, k, grid) *
-        δzᵃᵃᶜ(i, j, k, grid, residual_vertical_mass_flux, scheme, td, W, ρw)
+    @inbounds Gρθ[i, j, k] -= V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+        δzᵃᵃᶜ(i, j, k, grid, residual_base_flux, scheme, td, W, ρθ, ρᵈ)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Partition continuity like the thermodynamic variable: remove the CFL-withheld residual of
-the vertical mass-flux divergence from the slow density tendency; the in-loop solve applies
-it per acoustic substep instead. A no-op unless the thermodynamic scheme is adaptive-implicit.
+Fold the CFL-withheld transport of the stage-entry thermodynamic state into the slow
+tendency: `Gˢρθ` gains the first-order upwind flux divergence of the frozen (ρθ, ρᵈ)
+carried by wⁱ = (1 - s) w. The predictors then apply it per substep with the same
+Crank-Nicolson factors as the rest of the slow tendency, so the acoustic pressure adjusts
+to the residual transport inside the loop (issue #897). The perturbation part is handled by
+[`in_loop_implicit_advection`](@ref). A no-op unless the thermodynamic scheme is
+adaptive-implicit.
 """
-split_slow_continuity_tendency!(model) =
-    split_slow_continuity_tendency!(model,
-        vertical_scheme(field_advection_scheme(model.advection,
-                                               thermodynamic_density_name(model.formulation))))
+add_residual_base_tendency!(model) =
+    add_residual_base_tendency!(model,
+        field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation)))
 
-split_slow_continuity_tendency!(model, scheme) = nothing
+add_residual_base_tendency!(model, advection) =
+    needs_implicit_solver(advection) ? residual_base_tendency!(model, advection) : nothing
 
-function split_slow_continuity_tendency!(model, scheme::AdaptiveImplicitVerticalAdvection)
-    IN_LOOP_DENSITY[] || return nothing
+function residual_base_tendency!(model, advection)
     grid = model.grid
+    scheme = vertical_scheme(advection)
     td = OceananigansTimeSteppers.time_discretization(scheme)
-    W = advecting_state(model)[1]
-    ρw = continuity_vertical_momentum(model)
-    launch!(architecture(grid), grid, :xyz, _remove_residual_vertical_mass_flux!,
-            model.timestepper.Gⁿ.ρᵈ, grid, scheme, td, W, ρw)
+    w, ρᵈ = advecting_state(model)
+    θ_name = thermodynamic_density_name(model.formulation)
+    ρθ = prognostic_fields(model)[θ_name]
+    launch!(architecture(grid), grid, :xyz, _residual_base_tendency!,
+            model.timestepper.Gⁿ[θ_name], grid, scheme, td, w, ρθ, ρᵈ)
     return nothing
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Build the per-substep applicator of the CFL-withheld vertical-advection remainder for the
-acoustic substep loop, or `nothing` when no scheme is adaptive-implicit. Each call solves
-backward-Euler over one substep Δτ on the reconstructed full field (stage base `U⁰` plus
-perturbation), so the acoustic pressure adjusts to the residual transport within the loop —
-the once-per-stage post-loop placement destabilizes the loop's ρθ′/pressure coupling when
-the split engages (issue #897). Coefficients read the frozen stage-entry advecting state.
+Build the per-substep residual-transport solve for the acoustic loop's thermodynamic
+predictor, or `nothing` when the thermodynamic scheme is not adaptive-implicit. Called
+between Step B and Step C: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★` advances the perturbation part of
+the CFL-withheld transport implicitly *inside* the predictor-substitution chain, so Step C's
+pressure gradient and Step D's recovery act on a transport-consistent predictor. Together
+with [`add_residual_base_tendency!`](@ref) this folds the full withheld transport into the
+loop; post-loop, the thermodynamic variable keeps closure diffusion only.
 """
-const IN_LOOP_MOMENTUM = Ref(true)
-const IN_LOOP_DENSITY = Ref(true)
-
 function in_loop_implicit_advection(model)
     solver = model.timestepper.implicit_solver
     solver === nothing && return nothing
-
-    momentum_advection = model.advection.momentum
     θ_name = thermodynamic_density_name(model.formulation)
     θ_advection = field_advection_scheme(model.advection, θ_name)
-    needs_implicit_solver(momentum_advection) || needs_implicit_solver(θ_advection) || return nothing
+    needs_implicit_solver(θ_advection) || return nothing
 
-    substepper = model.timestepper.substepper
-    U⁰ = model.timestepper.U⁰
+    predictor = model.timestepper.substepper.density_potential_temperature_predictor
     w, ρᵈ = advecting_state(model)
     θ_velocities = merge(slow_thermodynamic_velocities(model), (; w))
-    perturbations = (; ρu = substepper.momentum_perturbation.u,
-                       ρv = substepper.momentum_perturbation.v,
-                       ρw = substepper.momentum_perturbation.w,
-                       NamedTuple{(θ_name,)}((substepper.density_potential_temperature_perturbation,))...)
 
-    function implicit_advection!(Δτ)
-        if needs_implicit_solver(momentum_advection) && IN_LOOP_MOMENTUM[]
-            for name in (:ρu, :ρv, :ρw)
-                implicit_advection_substep!(perturbations[name], U⁰[name], solver, model, Δτ,
-                                            momentum_advection, (; w), ρᵈ)
-            end
-        end
-        if needs_implicit_solver(θ_advection)
-            implicit_advection_substep!(perturbations[θ_name], U⁰[θ_name], solver, model, Δτ,
-                                        θ_advection, θ_velocities, ρᵈ)
-            if IN_LOOP_DENSITY[]
-                # Continuity carries the matching residual (see `split_slow_continuity_tendency!`);
-                # `density = nothing` advects the density field itself.
-                implicit_advection_substep!(substepper.density_perturbation, U⁰.ρᵈ, solver, model, Δτ,
-                                            θ_advection, θ_velocities, nothing)
-            end
-        end
+    function residual_predictor_solve!(Δτ)
+        implicit_step!(predictor, solver, nothing, nothing, nothing,
+                       model.clock, fields(model), Δτ, θ_advection, θ_velocities, ρᵈ)
         return nothing
     end
-
-    return implicit_advection!
+    return residual_predictor_solve!
 end
 
-# One field's per-substep residual solve: reconstruct the full field from the stage base
-# and the perturbation, solve (I - Δτ Lⁱ) in place, restore the perturbation.
-function implicit_advection_substep!(perturbation, base, solver, model, Δτ, advection, velocities, ρ)
-    parent(perturbation) .+= parent(base)
-    implicit_step!(perturbation, solver, nothing, nothing, nothing,
-                   model.clock, fields(model), Δτ, advection, velocities, ρ)
-    parent(perturbation) .-= parent(base)
-    fill_halo_regions!(perturbation)
-    return nothing
-end
-
-implicit_substep!(model, Δt_stage; advective = true) =
-    implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage; advective)
+implicit_substep!(model, Δt_stage) =
+    implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage)
 
 # No implicit solver ⇒ nothing in the model is vertically implicit.
-implicit_substep!(model, ::Nothing, Δt_stage; advective = true) = nothing
+implicit_substep!(model, ::Nothing, Δt_stage) = nothing
 
-function implicit_substep!(model, implicit_solver, Δt_stage; advective = true)
-    # With the in-loop applicator active the advective remainder has already been applied
-    # per substep; the post-loop solves keep only vertically-implicit closure diffusion.
-    if !advective
-        prognostic = prognostic_fields(model)
-        w, ρᵈ = advecting_state(model)
-        momentum_advection = model.advection.momentum
-        for name in (:ρu, :ρv, :ρw)
-            if IN_LOOP_MOMENTUM[] || !needs_implicit_solver(momentum_advection)
-                implicit_step!(prognostic[name], implicit_solver, model.closure,
-                               model.closure_fields, nothing, model.clock, fields(model), Δt_stage)
-            else
-                implicit_step!(prognostic[name], implicit_solver, model.closure,
-                               model.closure_fields, nothing, model.clock, fields(model), Δt_stage,
-                               momentum_advection, (; w), ρᵈ)
-            end
-        end
-        θ_name = thermodynamic_density_name(model.formulation)
-        implicit_step!(prognostic[θ_name], implicit_solver, model.closure,
-                       model.closure_fields, Val(1), model.clock, fields(model), Δt_stage)
-        return nothing
-    end
+function implicit_substep!(model, implicit_solver, Δt_stage)
     # Momentum and the thermodynamic variable are coupling-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
     # Frozen stage-entry (w, ρᵈ), so the explicit and implicit halves partition one transport.
     w, ρᵈ = advecting_state(model)
@@ -486,6 +434,10 @@ function implicit_substep!(model, implicit_solver, Δt_stage; advective = true)
 
     θ_name = thermodynamic_density_name(model.formulation)
     θ_advection = field_advection_scheme(model.advection, θ_name)
+    # Under an adaptive-implicit scheme the thermodynamic remainder is folded into the
+    # acoustic loop (`in_loop_implicit_advection`), so the post-loop solve keeps only the
+    # density-weighted closure diffusion.
+    θ_step_advection = needs_implicit_solver(θ_advection) ? nothing : θ_advection
     implicit_step!(prognostic[θ_name],
                    implicit_solver,
                    model.closure,
@@ -494,7 +446,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage; advective = true)
                    model.clock,
                    fields(model),
                    Δt_stage,
-                   implicit_step_scheme(θ_advection, diffusion_density),
+                   implicit_step_scheme(θ_step_advection, diffusion_density),
                    merge(slow_thermodynamic_velocities(model), (; w)),
                    ρᵈ)
 
