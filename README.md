@@ -86,8 +86,9 @@ Add `using CUDA` and swap `CPU()` for `GPU()` to run on an NVIDIA GPU.
 
 - **Anelastic dynamics** with a pressure Poisson solver that filters sound waves
 - **Compressible dynamics** with split-explicit acoustic substepping (horizontally explicit, vertically implicit) using SSP-RK3 or Wicker-Skamarock RK3
+- **Terrain-following coordinates** for compressible dynamics: smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system) for flow over complex topography
 - **Moist thermodynamics** with liquid-ice potential temperature and static energy formulations
-- **Cloud microphysics**: saturation adjustment, Kessler, one- and two-moment bulk schemes via [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl)
+- **Cloud microphysics**: saturation adjustment, Kessler, one- and two-moment bulk schemes via [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl), and Predicted Particle Properties (P3) mixed-phase microphysics
 - **Radiative transfer**: gray, clear-sky, and all-sky solvers via [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl)
 - **High-order advection** including bounds-preserving WENO schemes
 - **LES turbulence closures** for subgrid-scale mixing
@@ -166,8 +167,7 @@ Model development is hard but rewarding, and builds useful skills for a myriad o
 
 The goals of the current group of model developers include developing
 
-- **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling.
-- **Terrain-following coordinates**: Smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system) for flow over complex topography
+- **Advanced microphysics**: spectral bin schemes and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling.
 - **Open boundaries and nesting**: Open boundary conditions are useful for both idealized simulations and realistic one- and two-way nested simulations for high-resolution downscaling.
 - **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [NumericalEarth.jl](https://github.com/NumericalEarth/NumericalEarth.jl).
 
