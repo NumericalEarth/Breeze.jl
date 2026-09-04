@@ -7,8 +7,8 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
 @testset "P3 trace-regime behavior" begin
     @testset "Float32 rain quadrature retains the mass-weighted velocity" begin
-        evaluator_32 = PPP.RainMassWeightedVelocityEvaluator(Float32)
-        evaluator_64 = PPP.RainMassWeightedVelocityEvaluator(Float64)
+        evaluator_32 = PPP.RainMassWeightedVelocity(Float32)
+        evaluator_64 = PPP.RainMassWeightedVelocity(Float64)
 
         for λ_r in (500, 1_000, 10_000, 100_000)
             velocity_32 = evaluator_32(log10(Float32(λ_r)))

@@ -132,8 +132,8 @@ end
 @inline p3_aerosol_tendency_fields(G, ::Nothing) = (;)
 @inline p3_aerosol_tendency_fields(G, _) = (; G.ρnᶜˡ, G.ρnᵃ)
 
-@inline p3_supersaturation_tendency_fields(G, ::ProcessRateParameters{FT, false}) where FT = (;)
-@inline p3_supersaturation_tendency_fields(G, ::ProcessRateParameters{FT, true}) where FT = (; G.ρsᵛ⁺ˡ)
+@inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, false}) where FT = (;)
+@inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, true}) where FT = (; G.ρsᵛ⁺ˡ)
 
 function AM.compute_microphysical_tendencies!(p3::P3, model)
     grid = model.grid
