@@ -102,8 +102,8 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Ice properties construction" begin
-        ice = Ice()
-        @test ice isa Ice
+        ice = IceParticles()
+        @test ice isa IceParticles
         @test ice.minimum_rime_density == 50.0
         @test ice.maximum_rime_density == 900.0
         @test ice.maximum_shape_parameter == 20.0
@@ -175,11 +175,11 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Rain properties" begin
-        rain = Rain()
+        rain = RainDrops()
         @test rain.maximum_mean_diameter ≈ 2e-3
 
         # The active fall-speed law is the piecewise Gunn-Kinzer/Beard fit, not a single
-        # power law: `Rain` carries its coefficients, and the ventilation pair
+        # power law: `RainDrops` carries its coefficients, and the ventilation pair
         # the runtime rates read.
         @test rain.fall_speed isa PPP.RainFallSpeed{Float64}
         @test rain.fall_speed.branch_velocity_scales == (4579.5, 49.62, 17.32)
@@ -196,7 +196,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Cloud droplet properties" begin
-        cloud = Cloud()
+        cloud = CloudDroplets()
         @test cloud.number_concentration ≈ 200e6
         @test cloud.condensation_timescale ≈ 1.0
 
@@ -207,7 +207,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test cloud.shape_parameter ≈ liu_daum_shape_parameter(200e6)
 
         # Explicit shape_parameter overrides Liu-Daum
-        cloud_override = Cloud(Float64; shape_parameter=5)
+        cloud_override = CloudDroplets(Float64; shape_parameter=5)
         @test cloud_override.shape_parameter ≈ 5.0
 
         # The relation itself is a stored, configurable container
@@ -216,7 +216,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test cloud.shape.relative_dispersion_intercept ≈ 0.2714
 
         # Test custom parameters
-        cloud_custom = Cloud(Float64; number_concentration=50e6)
+        cloud_custom = CloudDroplets(Float64; number_concentration=50e6)
         @test cloud_custom.number_concentration ≈ 50e6
         # Marine Nᶜˡ → higher μᶜˡ than continental (fewer, larger, more uniform drops)
         @test cloud_custom.shape_parameter > cloud.shape_parameter

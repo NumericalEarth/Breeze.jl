@@ -77,7 +77,7 @@ function CloudShape(FT::DataType = Oceananigans.defaults.FloatType;
 end
 
 # Allow a container built at one precision to be reused at another, so that
-# `Cloud(Float32; shape = CloudShape(Float64; ...))`
+# `CloudDroplets(Float32; shape = CloudShape(Float64; ...))`
 # keeps the configured values instead of erroring on the field types. The identity method is
 # also the tie-breaker that keeps `convert` unambiguous against `Base.convert(::Type{T}, ::T)`.
 Base.convert(::Type{CloudShape{FT}}, p::CloudShape) where FT =
@@ -96,8 +96,8 @@ function Base.show(io::IO, p::CloudShape)
 end
 
 # Prescribed cloud droplet parameters for warm microphysics; see the
-# `Cloud` constructor.
-struct Cloud{FT}
+# `CloudDroplets` constructor.
+struct CloudDroplets{FT}
     number_concentration :: FT
     condensation_timescale :: FT
     # Coefficients and bounds of the Liu-Daum relative-dispersion relation. Read by every
@@ -172,7 +172,7 @@ those must read `p3.cloud.shape` so that a configured fit is actually used.
 """
 $(TYPEDSIGNATURES)
 
-Construct `Cloud` with prescribed parameters.
+Construct `CloudDroplets` with prescribed parameters.
 
 Cloud droplets in P3 are treated simply: their number concentration is
 *prescribed* rather than predicted. This is a common simplification
@@ -241,15 +241,15 @@ Cloud droplets are converted to rain via collision-coalescence following
 
 ```jldoctest
 using Oceananigans, Breeze
-using Breeze.Microphysics.PredictedParticleProperties: Cloud
-cloud = Cloud()
+using Breeze.Microphysics.PredictedParticleProperties: CloudDroplets
+cloud = CloudDroplets()
 round(cloud.shape_parameter, digits=1)  # μᶜˡ diagnosed from Nᶜˡ = 200×10⁶ m⁻³
 
 # output
 5.7
 ```
 """
-function Cloud(FT = Oceananigans.defaults.FloatType;
+function CloudDroplets(FT = Oceananigans.defaults.FloatType;
                number_concentration = 200e6,
                condensation_timescale = 1,
                shape = CloudShape(FT),
@@ -266,7 +266,7 @@ function Cloud(FT = Oceananigans.defaults.FloatType;
     # C(μᶜˡ) = Γ(μᶜˡ+7)Γ(μᶜˡ+1)/Γ(μᶜˡ+4)² accounts for the broader-than-mean
     # volume distribution of a gamma PSD in the immersion freezing rate.
     freezing_psd_correction = psd_correction_spherical_volume(μᶜˡ)
-    return Cloud(Nᶜˡ, FT(condensation_timescale), shape, μᶜˡ, FT(freezing_psd_correction))
+    return CloudDroplets(Nᶜˡ, FT(condensation_timescale), shape, μᶜˡ, FT(freezing_psd_correction))
 end
 
 """
@@ -351,9 +351,9 @@ from the clamped slope to maintain mass-PSD consistency, so that downstream rate
     return ifelse(needs_adjustment, Nᶜˡ_bounded, Nᶜˡ)
 end
 
-Base.summary(::Cloud) = "Cloud"
+Base.summary(::CloudDroplets) = "CloudDroplets"
 
-function Base.show(io::IO, c::Cloud)
+function Base.show(io::IO, c::CloudDroplets)
     print(io, summary(c), "(")
     print(io, "nᶜˡ=", c.number_concentration, " m⁻³, ")
     print(io, "μᶜˡ=", round(c.shape_parameter, digits=2), ")")

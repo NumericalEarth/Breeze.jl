@@ -53,7 +53,7 @@ export
     NumericalFloors,
 
     # Ice properties
-    Ice,
+    IceParticles,
     IceFallSpeed,
     IceDeposition,
     IceBulk,
@@ -62,8 +62,8 @@ export
     IceRainCollection,
 
     # Rain and cloud droplet properties
-    Rain,
-    Cloud,
+    RainDrops,
+    CloudDroplets,
 
     # Empirical parameter containers for the warm-phase fits
     CloudShape,
@@ -221,8 +221,8 @@ include("rain_quadrature.jl")
 @adapt_architecture IceCollection
 @adapt_architecture IceLambdaLimiter
 @adapt_architecture IceRainCollection
-@adapt_architecture Ice
-@adapt_architecture Rain
+@adapt_architecture IceParticles
+@adapt_architecture RainDrops
 @adapt_architecture PredictedParticlePropertiesMicrophysics
 
 #####

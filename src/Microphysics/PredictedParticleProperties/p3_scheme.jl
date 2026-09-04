@@ -94,13 +94,13 @@ parameter `cloud.number_concentration`.
   [kg/kg] (default 10⁻¹⁴)
 - `minimum_number_mixing_ratio`: Number below which a population is treated as
   absent [kg⁻¹] (default 10⁻¹⁶)
-- `cloud`: [`Cloud`](@ref) holding the prescribed droplet number and the
+- `cloud`: [`CloudDroplets`](@ref) holding the prescribed droplet number and the
   [`CloudShape`](@ref) every μᶜˡ diagnosis reads. `nothing` (default) uses
-  `Cloud(FT)`.
-- `rain`: [`Rain`](@ref) skeleton holding the
+  `CloudDroplets(FT)`.
+- `rain`: [`RainDrops`](@ref) skeleton holding the
   [`RainFallSpeed`](@ref) the startup quadrature integrates and the
   [`RainVentilation`](@ref) the evaporation and coupled-adjustment rates read.
-  `nothing` (default) uses `Rain(FT)`. Its lookup fields are materialized by
+  `nothing` (default) uses `RainDrops(FT)`. Its lookup fields are materialized by
   `read_lookup_tables`; every supplied parameter is preserved.
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation.
   `nothing` (default) is an open surface: the diagnosed fall speed is retained at the
@@ -120,7 +120,7 @@ parameter `cloud.number_concentration`.
 Pass `aerosol = AerosolActivation(AerosolMode())` to enable prognostic cloud
 droplet number from aerosol activation physics (Morrison & Grabowski 2007).
 When `aerosol = nothing` (default), cloud droplet number uses the prescribed
-`Cloud.number_concentration`.
+`CloudDroplets.number_concentration`.
 
 # Configuring the empirical warm-phase parameters
 
@@ -131,13 +131,13 @@ through the startup quadrature and every runtime kernel:
 ```jldoctest
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties:
-    Cloud, CloudShape,
-    Rain, RainFallSpeed, RainVentilation
+    CloudDroplets, CloudShape,
+    RainDrops, RainFallSpeed, RainVentilation
 
-cloud = Cloud(Float64;
+cloud = CloudDroplets(Float64;
     shape = CloudShape(Float64; maximum_shape_parameter = 12))
 
-rain = Rain(Float64;
+rain = RainDrops(Float64;
     fall_speed = RainFallSpeed(Float64; plateau_velocity = 9.5),
     ventilation = RainVentilation(Float64; reynolds_coefficient = 0.35))
 
@@ -160,9 +160,9 @@ microphysics = PredictedParticlePropertiesMicrophysics()
 PredictedParticlePropertiesMicrophysics
 ├── ρʷ: 1000.0 kg/m³
 ├── qmin: 1.0e-14 kg/kg
-├── ice: Ice
-├── rain: Rain
-├── cloud: Cloud
+├── ice: IceParticles
+├── rain: RainDrops
+├── cloud: CloudDroplets
 ├── process_rates: ProcessRate
 ├── negative_moisture_correction: SpeciesBorrowing(vertical_borrowing = nothing)
 ├── aerosol: nothing (prescribed CCN)

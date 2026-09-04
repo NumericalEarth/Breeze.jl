@@ -383,7 +383,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | ----------- | ---- | ------------- | ----------- |
 | ``N'(D)``   |      |               | Number concentration per unit diameter, ``N'(D) = N_0 D^μ e^{-λD}`` [m⁻⁴] |
 | ``N_0``     | `N₀` |               | Intercept of the gamma distribution [m⁻⁴⁻μ]; a scale factor, not a concentration. Species-labelled as `Nʳ₀` where the rate needs the rain PSD explicitly |
-| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `Cloud.shape_parameter`, `shape` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}`` by the Liu-Daum relation configured in `Cloud.shape` — once at construction for the prescribed number, and per cell for the prognostic one. ``μ^r = 0`` is structural rather than stored — it is baked into `rain_slope_parameter`, and `Rain.shape_parameter` is a placeholder that stays `nothing` |
+| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `CloudDroplets.shape_parameter`, `shape` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}`` by the Liu-Daum relation configured in `CloudDroplets.shape` — once at construction for the prescribed number, and per cell for the prognostic one. ``μ^r = 0`` is structural rather than stored — it is baked into `rain_slope_parameter`, and `RainDrops.shape_parameter` is a placeholder that stays `nothing` |
 | ``μ^i``     | `μⁱ` | | On-demand ice shape diagnostic [-] read from the Table 1 closure column; not a process-table coordinate |
 | ``λ^{cl}``, ``λ^r`` | `λᶜˡ`, `λʳ` | | Slope parameter [1/m] |
 | ``λ^i``     |      | `IceLambdaLimiter` | Ice slope parameter [1/m], bounded by the mean-size limiter |
@@ -397,7 +397,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | ----------- | ---- | ------------- | ----------- |
 | ``F^f``     | `Fᶠ` | | Rime mass fraction of dry ice [-], ``F^f = ρq^f / ρq^i`` |
 | ``F^l``     | `Fˡ` | | Liquid fraction of total ice mass [-], ``F^l = ρq^{wi}/(ρq^i + ρq^{wi})`` |
-| ``ρ^f``     | `ρᶠ` | `Ice.minimum_rime_density`, `maximum_rime_density` | Rime density [kg/m³], ``ρ^f = ρq^f / ρb^f``, bounded to [50, 900] |
+| ``ρ^f``     | `ρᶠ` | `IceParticles.minimum_rime_density`, `maximum_rime_density` | Rime density [kg/m³], ``ρ^f = ρq^f / ρb^f``, bounded to [50, 900] |
 | ``ρ^{gr}``  |      | | Graupel density [kg/m³], ``ρ^{gr} = F^f ρ^f + (1-F^f) ρ^d`` |
 | ``ρ^i``     |      | | Bulk ice density [kg/m³], 900, used by the mass–diameter relations |
 | ``ρ^i_\text{pure}`` | | `ProcessRate.pure_ice_density` | Density of solid ice [kg/m³], 917, used for reflectivity and melt densification |
@@ -405,7 +405,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | ``α``, ``β``|      | | Mass–diameter coefficient [kg/m^β] and exponent [-] of the active regime |
 | ``A(D)``    |      | | Particle projected area [m²], ``A(D) = \mathbb{C}^A_1 D^{\mathbb{C}^A_2}`` for aggregates |
 | ``C(D)``    |      | | Particle capacitance for vapor diffusion [m] |
-| ``V(D)``    |      | `Rain.fall_speed` | Terminal velocity [m/s]; for rain the four-regime Gunn-Kinzer/Beard law of `rain_fall_speed`, whose coefficients live in `RainFallSpeed`, and a Best-number formulation for ice |
+| ``V(D)``    |      | `RainDrops.fall_speed` | Terminal velocity [m/s]; for rain the four-regime Gunn-Kinzer/Beard law of `rain_fall_speed`, whose coefficients live in `RainFallSpeed`, and a Best-number formulation for ice |
 | ``D^{th}``  |      | | Threshold between small spherical ice and vapor-grown aggregates [m] |
 | ``D^{gr}``  |      | | Threshold between aggregates and graupel [m] |
 | ``D^{cr}``  |      | | Threshold between graupel and partially rimed ice [m] |
@@ -443,11 +443,11 @@ reach both the startup quadrature and the runtime kernels. Sixteen scalars in to
 | ``f_{1r}``  |      | `RainVentilation.constant_coefficient` | Still-air rain ventilation term [-], default ``0.78`` |
 | ``f_{2r}``  |      | `RainVentilation.reynolds_coefficient` | Coefficient on ``\mathrm{Sc}^{1/3}\mathrm{Re}^{1/2}`` [-], default ``0.32`` |
 
-`CloudShape` is stored in `Cloud.shape` and read by
+`CloudShape` is stored in `CloudDroplets.shape` and read by
 every path that diagnoses ``μ^{cl}`` from a local droplet number: the construction-time
 diagnosis, `diagnose_cloud_dsd`, and `immersion_freezing_cloud_rate`.
 `RainFallSpeed` and `RainVentilation` are stored in
-`Rain.fall_speed` and `Rain.ventilation`, and survive the lookup-table
+`RainDrops.fall_speed` and `RainDrops.ventilation`, and survive the lookup-table
 materialization that fills in the tabulated integrals.
 
 Deliberately *not* exposed as empirical free parameters: the ``997`` kg m⁻³ water density
@@ -1617,9 +1617,9 @@ appendix C, section b; [Pruppacher and Klett (1997)](@cite pruppacher2010microph
                                        + f_{2r}\,\sqrt{ρ/η}\,\text{Sc}^{1/3}\,I_{VD}\right],
 ```
 
-with ``f_{1r}`` and ``f_{2r}`` read from `Rain.ventilation` (a `RainVentilation`, defaults
+with ``f_{1r}`` and ``f_{2r}`` read from `RainDrops.ventilation` (a `RainVentilation`, defaults
 ``0.78`` and ``0.32``), and ``I_{VD} = ∫ D \sqrt{V(D)\,D}\, e^{-λ^r D}\, \mathrm{d}D`` the
-velocity–diameter integral over the rain DSD, tabulated as `Rain.evaporation` by
+velocity–diameter integral over the rain DSD, tabulated as `RainDrops.evaporation` by
 `RainVelocityDiameterIntegral`.
 
 Only ``I_{VD}`` is tabulated. Neither ventilation coefficient enters that table, and neither

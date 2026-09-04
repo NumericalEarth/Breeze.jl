@@ -93,7 +93,7 @@ function RainFallSpeed(FT::DataType = Oceananigans.defaults.FloatType;
 end
 
 # Allow a container built at one precision to be reused at another, so that
-# `Rain(Float32; fall_speed = RainFallSpeed(Float64; ...))` keeps the
+# `RainDrops(Float32; fall_speed = RainFallSpeed(Float64; ...))` keeps the
 # configured values instead of erroring on the field types. The identity method is also the
 # tie-breaker that keeps `convert` unambiguous against `Base.convert(::Type{T}, ::T)`.
 Base.convert(::Type{RainFallSpeed{FT}}, p::RainFallSpeed) where FT =
@@ -186,8 +186,8 @@ end
 #####
 
 # Rain particle size distribution, fall-speed and ventilation parameters, and the
-# quadrature integrals tabulated from them; see the `Rain` constructor.
-struct Rain{FT, VN, VM, EV}
+# quadrature integrals tabulated from them; see the `RainDrops` constructor.
+struct RainDrops{FT, VN, VM, EV}
     maximum_mean_diameter :: FT
     fall_speed :: RainFallSpeed{FT}
     ventilation :: RainVentilation{FT}
@@ -199,7 +199,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct `Rain` with empirical parameters and quadrature-based integrals.
+Construct `RainDrops` with empirical parameters and quadrature-based integrals.
 
 Rain in P3 follows an exponential size distribution, the ``μ^r = 0`` special
 case of the gamma distribution used for ice:
@@ -247,8 +247,8 @@ are `nothing` until [`tabulate_rain_from_quadrature`](@ref) materializes them fr
 # Examples
 
 ```jldoctest
-using Breeze.Microphysics.PredictedParticleProperties: Rain, RainVentilation
-rain = Rain(Float64; ventilation = RainVentilation(Float64;
+using Breeze.Microphysics.PredictedParticleProperties: RainDrops, RainVentilation
+rain = RainDrops(Float64; ventilation = RainVentilation(Float64;
                                                    constant_coefficient = 0.8))
 rain.ventilation
 
@@ -256,17 +256,17 @@ rain.ventilation
 RainVentilation(f₁ᵣ=0.8, f₂ᵣ=0.32)
 ```
 """
-function Rain(FT::DataType = Oceananigans.defaults.FloatType;
+function RainDrops(FT::DataType = Oceananigans.defaults.FloatType;
               maximum_mean_diameter = 2e-3,
               fall_speed = RainFallSpeed(FT),
               ventilation = RainVentilation(FT))
-    return Rain(FT(maximum_mean_diameter), convert(RainFallSpeed{FT}, fall_speed),
+    return RainDrops(FT(maximum_mean_diameter), convert(RainFallSpeed{FT}, fall_speed),
                 convert(RainVentilation{FT}, ventilation), nothing, nothing, nothing)
 end
 
-Base.summary(::Rain) = "Rain"
+Base.summary(::RainDrops) = "RainDrops"
 
-function Base.show(io::IO, r::Rain)
+function Base.show(io::IO, r::RainDrops)
     print(io, summary(r), "(")
     print(io, "fall_speed=", r.fall_speed, ", ")
     print(io, "ventilation=", r.ventilation, ")")

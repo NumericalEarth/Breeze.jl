@@ -2,7 +2,7 @@
 ##### P3 lookup table reader
 #####
 ##### Reads the ASCII tables laid out in `lookup_table_format.jl` and builds the
-##### `Ice` container the scheme evaluates. The
+##### `IceParticles` container the scheme evaluates. The
 ##### rain 1D integrals are absent from those files and are generated here with
 ##### Julia quadrature instead.
 #####
@@ -41,12 +41,12 @@ since they are not included in the ASCII table files.
 - `FT`: Float type (default `Float64`)
 - `arch`: Architecture for GPU transfer (default `CPU()`)
 - `thermodynamic_constants`: Source of shared phase and dry-air properties.
-- `cloud`: [`Cloud`](@ref), or `nothing` for the default.
-- `rain`: [`Rain`](@ref) skeleton supplying the fall-speed and ventilation
+- `cloud`: [`CloudDroplets`](@ref), or `nothing` for the default.
+- `rain`: [`RainDrops`](@ref) skeleton supplying the fall-speed and ventilation
   parameters, or `nothing` for the default. Its parameter containers are preserved
   through the startup quadrature: the fall-speed law is what the three rain tables are
   built from, and the ventilation coefficients survive into the materialized
-  `Rain` for the runtime rates that assemble them.
+  `RainDrops` for the runtime rates that assemble them.
 """
 function read_lookup_tables(directory::AbstractString;
                             FT::DataType = Oceananigans.defaults.FloatType,
@@ -77,7 +77,7 @@ function read_lookup_tables(directory::AbstractString;
                                            thermodynamic_constants)
 
     # Resolved before the rain tabulation below, which needs its floors.
-    cloud = isnothing(cloud) ? Cloud(FT) : cloud
+    cloud = isnothing(cloud) ? CloudDroplets(FT) : cloud
     input_process_rates = if isnothing(process_rates)
         ProcessRate(FT; thermodynamic_constants)
     else
@@ -87,7 +87,7 @@ function read_lookup_tables(directory::AbstractString;
     # Generate rain 1D tables from Julia quadrature. The supplied skeleton (or the
     # default) carries the empirical fall-speed and ventilation parameters that the
     # tabulation integrates and that the materialized container must keep.
-    rain_base = isnothing(rain) ? Rain(FT) : rain
+    rain_base = isnothing(rain) ? RainDrops(FT) : rain
     materialized_rain = tabulate_rain_from_quadrature(rain_base, arch, FT;
                                                       floors = input_process_rates.floors)
 
@@ -142,7 +142,7 @@ end
 function build_ice_properties_from_tables(ice_4d, rain_ice, FT;
                                           thermodynamic_constants = ThermodynamicConstants(FT))
     # Start from default Ice for physical constants
-    ice_base = Ice(FT; thermodynamic_constants)
+    ice_base = IceParticles(FT; thermodynamic_constants)
 
     # Build sub-structs with tabulated fields replacing integral placeholders
     fall_speed = IceFallSpeed(
@@ -189,7 +189,7 @@ function build_ice_properties_from_tables(ice_4d, rain_ice, FT;
         rain_ice[:rain_number],
     )
 
-    return Ice(
+    return IceParticles(
         ice_base.minimum_rime_density,
         ice_base.maximum_rime_density,
         ice_base.maximum_shape_parameter,
@@ -211,7 +211,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Materialize the three rain lookup tables of a [`Rain`](@ref) skeleton by integrating its
+Materialize the three rain lookup tables of a [`RainDrops`](@ref) skeleton by integrating its
 [`RainFallSpeed`](@ref) law with Chebyshev-Gauss quadrature.
 
 Rain 1D tables are not present in the published P3 ASCII files, so they are generated here
@@ -225,7 +225,7 @@ values alive from the constructor into the runtime rates.
 
 # Arguments
 
-- `rain`: the [`Rain`](@ref) skeleton whose lookup fields are still `nothing`
+- `rain`: the [`RainDrops`](@ref) skeleton whose lookup fields are still `nothing`
 - `arch`: architecture the tabulated arrays are placed on (default `CPU()`)
 - `FT`: float type of the tables
 
@@ -236,7 +236,7 @@ values alive from the constructor into the runtime rates.
 - `quadrature_points`: Chebyshev-Gauss points per integral (default 128)
 - `floors`: [`NumericalFloors`](@ref), carried because tabulation runs before a scheme exists
 """
-function tabulate_rain_from_quadrature(rain::Rain, arch=CPU(),
+function tabulate_rain_from_quadrature(rain::RainDrops, arch=CPU(),
                                        FT::DataType = Oceananigans.defaults.FloatType;
                                        lambda_points::Int = 200,
                                        log_lambda_range = (FT(2.5), FT(5.5)),
@@ -261,6 +261,6 @@ function tabulate_rain_from_quadrature(rain::Rain, arch=CPU(),
 
     # Only the three lookup placeholders are replaced; every supplied physics parameter
     # is carried through unchanged.
-    return Rain(FT(rain.maximum_mean_diameter), fall_speed,
+    return RainDrops(FT(rain.maximum_mean_diameter), fall_speed,
                 convert(RainVentilation{FT}, rain.ventilation), tab_vel_num, tab_vel_mass, tab_evap)
 end

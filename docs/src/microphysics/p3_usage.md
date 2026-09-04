@@ -46,7 +46,7 @@ cloud_shape = CloudShape(Float64;
     minimum_shape_parameter = 2,
     maximum_shape_parameter = 12)
 
-cloud = Cloud(Float64; shape = cloud_shape)
+cloud = CloudDroplets(Float64; shape = cloud_shape)
 
 # A slightly slower large-drop plateau and a stronger Reynolds ventilation term
 fall_speed = RainFallSpeed(Float64;
@@ -59,7 +59,7 @@ ventilation = RainVentilation(Float64;
     constant_coefficient = 0.78,
     reynolds_coefficient = 0.35)
 
-rain = Rain(Float64; fall_speed, ventilation)
+rain = RainDrops(Float64; fall_speed, ventilation)
 
 tuned = P3Microphysics(Float64; cloud, rain)
 tuned.rain

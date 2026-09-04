@@ -4,7 +4,7 @@
 ##### The concept containers that hold the ice-side integrals of the P3 scheme —
 ##### fall speed, deposition, bulk properties, collection, the λ limiter, and
 ##### ice-rain collection — the lookup-table containers they are read from, and
-##### the `Ice` container that gathers them.
+##### the `IceParticles` container that gathers them.
 #####
 ##### Every container follows the materialization pattern: the user-facing
 ##### constructor builds a skeleton whose integral fields are `nothing`, and
@@ -344,7 +344,7 @@ Base.show(io::IO, ::IceRainCollection) = print(io, "IceRainCollection(2 integral
 ##### Ice: the container combining all ice particle property concepts
 #####
 
-struct Ice{FT, FS, DP, BP, CL, LL, IR}
+struct IceParticles{FT, FS, DP, BP, CL, LL, IR}
     # Top-level parameters
     minimum_rime_density :: FT
     maximum_rime_density :: FT
@@ -391,12 +391,12 @@ This container organizes all ice-related computations:
 The mass-diameter relationship is from
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 """
-function Ice(FT::DataType = Oceananigans.defaults.FloatType;
+function IceParticles(FT::DataType = Oceananigans.defaults.FloatType;
              thermodynamic_constants = ThermodynamicConstants(FT),
              minimum_rime_density = 50,
              maximum_rime_density = 900,
              maximum_shape_parameter = 20)
-    return Ice(
+    return IceParticles(
         FT(minimum_rime_density),
         FT(maximum_rime_density),
         FT(maximum_shape_parameter),
@@ -408,9 +408,9 @@ function Ice(FT::DataType = Oceananigans.defaults.FloatType;
         IceRainCollection())
 end
 
-Base.summary(::Ice) = "Ice"
+Base.summary(::IceParticles) = "IceParticles"
 
-function Base.show(io::IO, ice::Ice)
+function Base.show(io::IO, ice::IceParticles)
     print(io, summary(ice), '\n')
     print(io, "├── ρᶠ: [", ice.minimum_rime_density, ", ", ice.maximum_rime_density, "] kg/m³\n")
     print(io, "├── μmax: ", ice.maximum_shape_parameter, "\n")
