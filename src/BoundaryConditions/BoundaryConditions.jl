@@ -42,7 +42,7 @@ using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        FieldBoundaryConditions,
                                        Bottom, Top, West, East, South, North
 using Oceananigans.Fields: Field
-using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, xnode, ynode, znode
+using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, node, znode
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑyzᵃᶠᶜ, ℑyzᵃᶜᶠ, ℑxzᶠᵃᶜ, ℑxzᶜᵃᶠ,
                               Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
 
@@ -372,8 +372,8 @@ end
 @inline wind_speed²ᶜᶠᶜ(i, j, grid, fields, ::Nothing) = tangential_speed²(i, j, 1, grid, Bottom(), YDirection(), fields)
 @inline wind_speed²ᶜᶜᶜ(i, j, grid, fields, ::Nothing) = tangential_speed²(i, j, 1, grid, Bottom(), nothing,      fields)
 
-# The wall state may be a number, a field on the wall, or a function of the two wall
-# coordinates and time, which is evaluated at every call (see `wall_value`)
+# The wall state may be a number, a field on the wall, or a function of the non-`Flat` wall
+# coordinates and the time, evaluated at every call (see `wall_value`)
 materialize_surface_field(f, grid) = materialize_surface_field(f, grid, Bottom())
 materialize_surface_field(::Nothing, grid, side) = nothing
 materialize_surface_field(f::Field, grid, side) = f

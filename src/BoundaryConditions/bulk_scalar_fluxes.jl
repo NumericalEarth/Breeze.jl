@@ -51,9 +51,11 @@ thermodynamic formulation.
 - `coefficient`: The sensible heat transfer coefficient.
 - `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
 - `surface_temperature`: The wall temperature. Can be a `Field`, a `Function`, or a `Number`.
-                         Functions are evaluated at the wall at every time step with the two
-                         coordinates of the wall and the time: `(x, y, t)` on the bottom and
-                         top, `(y, z, t)` on the west and east, `(x, z, t)` on the south and north.
+                         Functions are evaluated at the wall at every time step with the
+                         non-`Flat` coordinates of the wall followed by the time, as for
+                         Oceananigans boundary conditions: `(x, y, t)` on the bottom and top,
+                         `(y, z, t)` on the west and east, `(x, z, t)` on the south and north,
+                         and for example `(x, t)` on the bottom of a grid that is `Flat` in `y`.
 - `filtered_velocities`: Either `nothing` (default) or [`FilteredSurfaceVelocities`](@ref). Note
                          that when `filtered_velocities` is not `nothing`, then automatically
                          there is filtering in the scalar fields via [`FilteredSurfaceScalar`](@ref)
@@ -192,7 +194,8 @@ moister than the adjacent air.
 - `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
 - `surface_temperature`: The wall temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Used to compute the saturation specific humidity at the wall.
-                         Functions take the two coordinates of the wall.
+                         Functions take the non-`Flat` coordinates of the wall followed by
+                         the time, as for Oceananigans boundary conditions.
 - `surface_relative_humidity`: The relative humidity of the air in contact with the wall,
                                between 0 and 1 (default: `1`, a saturated wall). Can be a
                                `Field`, a `Function`, or a `Number`.

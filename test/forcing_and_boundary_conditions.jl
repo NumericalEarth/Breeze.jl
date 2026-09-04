@@ -393,7 +393,8 @@ end
         result = materialize_surface_field(T_field, grid)
         @test result === T_field
 
-        # Functions are kept as functions and evaluated at the wall with the wall coordinates and time
+        # Functions are kept as functions and evaluated at the wall at every call, with the
+        # non-Flat wall coordinates followed by the time
         T_func(x, y, t) = FT(290) + FT(5) * sin(2π * x / 100)
         result = materialize_surface_field(T_func, grid)
         @test result === T_func

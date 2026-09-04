@@ -42,23 +42,13 @@ wall_normal_direction(::HorizontalWall) = ZDirection()
 @inline wall_value(ℓ, m, grid, ::XNormalWall,    field::AbstractArray, clock) = @inbounds field[1, ℓ, m]
 @inline wall_value(ℓ, m, grid, ::YNormalWall,    field::AbstractArray, clock) = @inbounds field[ℓ, 1, m]
 
-# A function is evaluated at the centre of the wall face with the two wall coordinates and the
-# time: `f(x, y, t)` on the bottom and top, `f(y, z, t)` on the west and east, `f(x, z, t)` on
-# the south and north
-@inline function wall_value(ℓ, m, grid, ::HorizontalWall, f::Function, clock)
-    c = Center()
-    return f(xnode(ℓ, m, 1, grid, c, c, c), ynode(ℓ, m, 1, grid, c, c, c), clock.time)
-end
-
-@inline function wall_value(ℓ, m, grid, ::XNormalWall, f::Function, clock)
-    c = Center()
-    return f(ynode(1, ℓ, m, grid, c, c, c), znode(1, ℓ, m, grid, c, c, c), clock.time)
-end
-
-@inline function wall_value(ℓ, m, grid, ::YNormalWall, f::Function, clock)
-    c = Center()
-    return f(xnode(ℓ, 1, m, grid, c, c, c), znode(ℓ, 1, m, grid, c, c, c), clock.time)
-end
+# A function is evaluated at the centre of the wall face with the non-`Flat` coordinates of the
+# wall followed by the time, as Oceananigans evaluates boundary-condition and forcing functions:
+# `f(x, y, t)` on the bottom and top, `f(y, z, t)` on the west and east, `f(x, z, t)` on the
+# south and north, with the coordinate of a `Flat` direction dropped (`node` does that)
+@inline wall_value(ℓ, m, grid, ::HorizontalWall, f::Function, clock) = f(node(ℓ, m, 1, grid, Center(), Center(), nothing)..., clock.time)
+@inline wall_value(ℓ, m, grid, ::XNormalWall,    f::Function, clock) = f(node(1, ℓ, m, grid, nothing, Center(), Center())..., clock.time)
+@inline wall_value(ℓ, m, grid, ::YNormalWall,    f::Function, clock) = f(node(ℓ, 1, m, grid, Center(), nothing, Center())..., clock.time)
 
 # Wall-normal distance from the wall to the near-wall cell centre: the height of the
 # first cell centre for the bottom wall, and half the cell width otherwise

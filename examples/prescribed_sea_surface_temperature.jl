@@ -174,7 +174,7 @@ filtered_velocities = FilteredSurfaceVelocities(grid; filter_timescale=1hour)
 # difference of 4 degrees K,
 
 ΔT = 4 # K
-T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
+T₀(x, t) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 
 # ## Momentum drag
 #

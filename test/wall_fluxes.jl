@@ -210,8 +210,10 @@ end
                                topology=(Bounded, Bounded, Bounded))
         T_west(y, z, t) = 290 + 4y + 2z + t / 10
         T_bottom(x, y, t) = 290 + 3x + y - t / 10
+        T_north(x, z, t) = 291 + x - 2z + t / 20
         ρθ_bcs = FieldBoundaryConditions(west=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_west),
-                                         bottom=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_bottom))
+                                         bottom=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_bottom),
+                                         north=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_north))
         model = AtmosphereModel(grid; boundary_conditions=(; ρθ=ρθ_bcs), advection=WENO(order=3))
         set!(model; θ=θᵢ, ℋ=ℋᵢ)
         constants = model.thermodynamic_constants
@@ -219,12 +221,12 @@ end
         for t in (FT(0), FT(30))
             model.clock.time = t
             clock, fields = boundary_condition_args(model)
-            for (side, T_wall, i, j, k) in ((:west, T_west, 1, 3, 2), (:bottom, T_bottom, 2, 3, 1))
+            for (side, T_wall, i, j, k) in ((:west, T_west, 1, 3, 2), (:bottom, T_bottom, 2, 3, 1), (:north, T_north, 2, 4, 3))
                 bc = wall_bc(prognostic_fields(model).ρθ, side)
                 x, y, z = @allowscalar (xnode(i, j, k, grid, Center(), Center(), Center()),
                                         ynode(i, j, k, grid, Center(), Center(), Center()),
                                         znode(i, j, k, grid, Center(), Center(), Center()))
-                T₀ⁱʲᵏ = side === :west ? T_wall(y, z, t) : T_wall(x, y, t)
+                T₀ⁱʲᵏ = side === :west ? T_wall(y, z, t) : side === :bottom ? T_wall(x, y, t) : T_wall(x, z, t)
                 p₀ = bc.condition.surface_pressure
                 ρ₀ = surface_density(p₀, T₀ⁱʲᵏ, constants)
                 θ₀ = potential_temperature_from_temperature(T₀ⁱʲᵏ, p₀, bc.condition.standard_pressure, constants)
@@ -232,6 +234,30 @@ end
                 expected = outward_sign(side) * ρ₀ * C * FT(1) * (θ - θ₀)   # at rest: Ũ = gustiness
                 @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, j, k) ≈ expected rtol=100 * eps(FT)
             end
+        end
+    end
+
+    @testset "Wall state function on a grid with a Flat direction" begin
+        grid = RectilinearGrid(default_arch, FT; size=(4, 4), x=(0, 1), z=(0, 1), topology=(Periodic, Flat, Bounded))
+        T_bottom(x, t) = 295 + 3x - t / 20     # the Flat y coordinate is dropped
+        T_top(x, t) = 280 + x + t / 10
+        ρθ_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_bottom),
+                                         top=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_top))
+        model = AtmosphereModel(grid; boundary_conditions=(; ρθ=ρθ_bcs), advection=WENO(order=3))
+        set!(model; θ=θᵢ, ℋ=ℋᵢ)
+        model.clock.time = FT(20)
+        clock, fields = boundary_condition_args(model)
+        constants = model.thermodynamic_constants
+        for (side, T_wall, i, k) in ((:bottom, x -> T_bottom(x, FT(20)), 2, 1), (:top, x -> T_top(x, FT(20)), 3, 4))
+            bc = wall_bc(prognostic_fields(model).ρθ, side)
+            x = @allowscalar xnode(i, 1, k, grid, Center(), Center(), Center())
+            T₀ⁱᵏ = T_wall(x)
+            p₀ = bc.condition.surface_pressure
+            ρ₀ = surface_density(p₀, T₀ⁱᵏ, constants)
+            θ₀ = potential_temperature_from_temperature(T₀ⁱᵏ, p₀, bc.condition.standard_pressure, constants)
+            θ = @allowscalar fields.θ[i, 1, k]
+            expected = outward_sign(side) * ρ₀ * C * FT(1) * (θ - θ₀)
+            @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, 1, k) ≈ expected rtol=100 * eps(FT)
         end
     end
 

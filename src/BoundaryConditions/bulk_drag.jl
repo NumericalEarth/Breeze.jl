@@ -75,8 +75,9 @@ for `CompressibleDynamics`, which has no equivalent reference profile — pass
 - `gustiness`: Minimum wind speed to prevent singularities when winds are calm (default: `0`)
 - `surface_temperature`: Surface temperature, used to compute `ρ₀` and required when
   using `PolynomialCoefficient` with stability correction. Can be a `Field`,
-  `Function`, or `Number`. A function takes the two coordinates of the wall: `(x, y)` on the
-  bottom and top, `(y, z)` on the west and east, `(x, z)` on the south and north.
+  `Function`, or `Number`. A function takes the non-`Flat` coordinates of the wall followed
+  by the time, as for Oceananigans boundary conditions: `(x, y, t)` on the bottom and top,
+  `(y, z, t)` on the west and east, `(x, z, t)` on the south and north.
   (default: `nothing`)
 - `filtered_velocities`: A [`FilteredSurfaceVelocities`](@ref) for temporally filtered
   wind speed, near-surface velocity, and `θᵥ` in the bulk formula. If `nothing`
