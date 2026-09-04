@@ -60,7 +60,8 @@ examples = [
 
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
-example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
+example_pages = ["Overview" => joinpath("literated", "index.md");
+                 [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]]
 
 # Install artifacts before building the docs, to avoid spurious failures from
 # concurrent downloads, or examples and doctests not liking the extra messages
@@ -194,6 +195,7 @@ makedocs(
         "Thermodynamics" => "thermodynamics.md",
         "AtmosphereModel" => Any[
             "Diagnostics" => "atmosphere_model/diagnostics.md",
+            "Lagrangian particles" => "atmosphere_model/lagrangian_particles.md",
         ],
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
@@ -222,7 +224,7 @@ makedocs(
         ],
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
-            "Reproducibility of Breeze.jl models" => "reproducibility.md",
+            "Reproducibility of Breeze.jl models" => "appendix/reproducibility.md",
         ],
         "References" => "references.md",
         "API" => "api.md",
