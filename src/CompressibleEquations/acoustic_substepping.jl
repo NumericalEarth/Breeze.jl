@@ -30,6 +30,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
+using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: implicit_step!
 using Oceananigans.Grids: ZDirection, rnode, znode
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
@@ -1399,16 +1400,17 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Advance the perturbation part of the CFL-withheld thermodynamic transport implicitly over
-one substep: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★`, solved on the θ predictor between Step B and
-Step C so Step C's pressure gradient and Step D's recovery act on a transport-consistent
-predictor. Coefficients read the substepper's frozen stage-entry advecting state; the base
-part of the withheld transport rides `Gˢρθ` (see `add_residual_base_tendency!`). A no-op
-when `advection` is `nothing` (thermodynamic scheme not adaptive-implicit).
+Advance the implicit half of the IMEX vertical-advection split for the thermodynamic
+perturbation over one substep: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★`, solved on the θ predictor
+between Step B and Step C so Step C's pressure gradient and Step D's recovery act on a
+transport-consistent predictor. Coefficients read the substepper's frozen stage-entry
+advecting state; the base-state part of the implicit half rides `Gˢρθ`
+(see `add_implicit_advection_tendency!`). A no-op unless the scheme's vertical
+discretization is adaptive-implicit (dispatch below).
 """
-residual_predictor_substep!(model, substepper, ::Nothing, Δτ) = nothing
+implicit_advection_substep!(model, substepper, advection, Δτ) = nothing
 
-function residual_predictor_substep!(model, substepper, advection, Δτ)
+function implicit_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ)
     w = substepper.vertical_velocity_cache
     ρᵈ = substepper.density_cache
     implicit_step!(substepper.density_potential_temperature_predictor,
@@ -1515,10 +1517,10 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 substepper.linearization_potential_temperature)
         fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
-        # Residual (CFL-withheld) transport of the thermodynamic perturbation, applied
-        # implicitly to the predictor between Step B and Step C so the pressure solve and
-        # recovery substitution see a transport-consistent ρθ′★ (issue #897).
-        residual_predictor_substep!(model, substepper, advection, Δτ)
+        # Implicit half of the IMEX vertical-advection split for the thermodynamic
+        # perturbation, applied to the predictor between Step B and Step C so the pressure
+        # solve and recovery substitution see a transport-consistent ρθ′★ (issue #897).
+        implicit_advection_substep!(model, substepper, advection, Δτ)
 
         launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
                 _build_vertical_rhs!,
