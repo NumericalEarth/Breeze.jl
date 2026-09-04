@@ -3,7 +3,9 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: ZDirection
+using Oceananigans.TimeSteppers: implicit_step!
 using Oceananigans.TurbulenceClosures: VerticallyImplicitDiffusionLowerDiagonal,
                                        VerticallyImplicitDiffusionDiagonal,
                                        VerticallyImplicitDiffusionUpperDiagonal
@@ -144,7 +146,7 @@ using Test
 end
 
 #####
-##### Mass-flux weighting of the implicit solve
+##### Density weighting of the implicit solve
 #####
 ##### The prognostics are density weighted (`ρc`), and the explicit flux divergence forms
 ##### `∂z(ρ⁰ κ ∂z c)` on the specific variable. The implicit solve must form the same operator.
@@ -154,7 +156,7 @@ end
 ##### either way; these use a 4 km column, over which it varies ≈ 40%.
 #####
 
-@testset "Mass-flux weighting of the vertically implicit solve [$(FT)]" for FT in test_float_types()
+@testset "Density weighting of the vertically implicit solve [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 32
     Lz = FT(4000)
@@ -281,7 +283,174 @@ end
     end
 end
 
-@testset "Mass-weighted get_coefficient wins dispatch [$(FT)]" for FT in test_float_types()
+#####
+##### Density weighting at z-Faces (`ρw`)
+#####
+##### `ρw` is the one prognostic whose specific variable `w = ρw / ρᶠ` is reconstructed at faces
+##### while its stress `ρ ν ∂z w` lives at centers — the opposite of a tracer — so its rows carry
+##### `ρᶜ / ρᶠ` where the z-Center rows carry `ρᶠ / ρᶜ`. These exercise the coefficients directly
+##### rather than through a time step: a single-column anelastic model projects `ρw` to zero, so
+##### a trajectory comparison would say nothing about the operator.
+#####
+
+@testset "Density weighting of the z-Face implicit solve [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 32
+    Lz = FT(4000)
+
+    uniform_grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Lz),
+                                   topology=(Periodic, Periodic, Bounded))
+
+    stretched_grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100),
+                                     z = [Lz * (FT(k - 1) / Nz)^FT(1.3) for k = 1:Nz+1],
+                                     topology=(Periodic, Periodic, Bounded))
+
+    vitd = VerticallyImplicitTimeDiscretization()
+    Δt = FT(25)
+
+    # Constant, and decreasing by a factor of 5 over the column: the two profiles the operator
+    # error was measured on. `ν` is passed to the closure as a function of position and read back
+    # at cell centers by the reference below, so both see the same numbers.
+    #
+    # `ν₀` is converted here rather than inside the profiles: a closure that calls `FT(200)`
+    # captures `FT` itself, and `Type{Float64}` is not `isbits`, so the whole closure — and with
+    # it the `VerticalScalarDiffusivity` holding it — fails to upload to a GPU.
+    ν₀ = FT(200)
+    ν_profiles = ("constant ν"          => z -> ν₀,
+                  "ν decreasing with z" => z -> ν₀ * (1 - 4 * z / (5 * Lz)))
+
+    # The tridiagonal row of `1 - Δt ∂z(ρ ν ∂z (q/ρᶠ))` at an interior face k, written out from the
+    # physics: the stress ρᶜₖ νₖ (wₖ₊₁ - wₖ)/Δzᶜₖ sits at center k, and its divergence over Δzᶠₖ
+    # drives face k. `ℑzᵃᵃᶠ` is the plain two-point mean, on stretched grids too.
+    #
+    # Returns du(k), dl(k-1) and d(k). Note dl(k-1) divides by ρᶠₖ₋₁ — where qₖ₋₁ is reconstructed
+    # as wₖ₋₁ — while both terms of d(k) divide by this row's ρᶠₖ. That mismatch is why the
+    # diagonal cannot be formed as `1 - du - dl`.
+    function reference_row(k, zᶠ, zᶜ, ρᶜ, ν)
+        Δzᶜᵏ   = zᶠ[k+1] - zᶠ[k]
+        Δzᶜᵏ⁻¹ = zᶠ[k]   - zᶠ[k-1]
+        Δzᶠᵏ   = zᶜ[k]   - zᶜ[k-1]
+
+        ρᶠᵏ⁻¹ = (ρᶜ[k-1] + ρᶜ[k-2]) / 2
+        ρᶠᵏ   = (ρᶜ[k]   + ρᶜ[k-1]) / 2
+        ρᶠᵏ⁺¹ = (ρᶜ[k+1] + ρᶜ[k])   / 2
+
+        νᵏ   = ν(zᶜ[k])
+        νᵏ⁻¹ = ν(zᶜ[k-1])
+
+        du = -Δt * νᵏ   * ρᶜ[k]   / (Δzᶜᵏ   * Δzᶠᵏ * ρᶠᵏ⁺¹)
+        dl = -Δt * νᵏ⁻¹ * ρᶜ[k-1] / (Δzᶜᵏ⁻¹ * Δzᶠᵏ * ρᶠᵏ⁻¹)
+        d  = 1 + Δt * (νᵏ * ρᶜ[k] / Δzᶜᵏ + νᵏ⁻¹ * ρᶜ[k-1] / Δzᶜᵏ⁻¹) / (Δzᶠᵏ * ρᶠᵏ)
+
+        return du, dl, d
+    end
+
+    for (grid_name, grid) in ("uniform grid" => uniform_grid, "stretched grid" => stretched_grid),
+        (ν_name, ν) in ν_profiles
+
+        @testset "z-Face coefficients match the hand-derived operator [$(grid_name), $(ν_name)]" begin
+            closure = VerticalScalarDiffusivity(vitd; ν = (x, y, z, t) -> ν(z))
+            model = AtmosphereModel(grid; closure, advection = nothing)
+            ρ = Breeze.AtmosphereModels.total_density(model.dynamics)
+
+            zᶠ = Array(znodes(grid, Face()))
+            zᶜ = Array(znodes(grid, Center()))
+            ρᶜ = Array(interior(ρ, 1, 1, :))
+
+            # ρ must vary enough over the column for the weighting to be the effect under test.
+            @test ρᶜ[1] / ρᶜ[Nz] > 1.4
+
+            scheme = Breeze.AtmosphereModels.implicit_step_scheme(nothing)
+            ρw = model.momentum.ρw
+            bcs = (ρw.boundary_conditions.top, ρw.boundary_conditions.bottom, ρw.boundary_conditions.immersed)
+
+            coefficient(marker, k, advection) = @allowscalar Oceananigans.Solvers.get_coefficient(
+                1, 1, k, grid, marker, nothing, ZDirection(),
+                model.closure, model.closure_fields, nothing, Center(), Center(), Face(),
+                Δt, model.clock, Oceananigans.fields(model), advection, nothing, ρ, bcs...)
+
+            du(k, advection=scheme) = coefficient(VerticallyImplicitDiffusionUpperDiagonal(), k, advection)
+            dl(k, advection=scheme) = coefficient(VerticallyImplicitDiffusionLowerDiagonal(), k, advection)
+            d(k,  advection=scheme) = coefficient(VerticallyImplicitDiffusionDiagonal(),      k, advection)
+
+            # Interior rows only: k = 3 … Nz-1 keeps the reference off every halo value.
+            for k = 3:Nz-1
+                du_ref, dl_ref, d_ref = reference_row(k, zᶠ, zᶜ, ρᶜ, ν)
+                @test du(k)   ≈ du_ref atol = 64 * eps(FT) * abs(du_ref)
+                @test dl(k-1) ≈ dl_ref atol = 64 * eps(FT) * abs(dl_ref)
+                @test d(k)    ≈ d_ref  atol = 64 * eps(FT) * abs(d_ref)
+            end
+
+            # And the weighting is what makes them agree. What the unweighted coefficients drop is
+            # a ratio across a *half* cell — the density where the stress lives over the density
+            # where `w` is reconstructed — not the ≈ 40% ρ varies by over the whole column, so the
+            # gap per row is only the departure of ρᶜ/ρᶠ from 1, ≈ Δz/2H, or 0.6–0.8% here. The
+            # operator those rows build is a second difference in which they very nearly cancel,
+            # and the dropped ratio survives that cancellation an order of magnitude larger:
+            # applying it to a smooth profile leaves 5.4–6.4% across the four cases. That is the
+            # error under test, so measure it there rather than row by row. `nothing` in the
+            # advection slot is Oceananigans' own, unweighted method.
+            q = [sinpi(zᶠ[k] / Lz)^2 for k = 1:Nz+1]
+            Lq(advection) = [dl(k-1, advection) * q[k-1] +
+                             (d(k, advection) - 1) * q[k] +
+                             du(k, advection) * q[k+1] for k = 3:Nz-1]
+
+            weighted = Lq(scheme)
+            @test maximum(abs, Lq(nothing) .- weighted) / maximum(abs, weighted) > 0.02
+
+            # Momentum conservation. `Σ Δzᶠ q` is unchanged by the solve when every Δzᶠ-weighted
+            # column sum equals Δzᶠₖ, which holds only because the diagonal is written out: the
+            # two off-diagonals reconstruct qₖ at ρᶠₖ, but the diagonal's copies of them divide by
+            # this row's ρᶠ, and forming it as `1 - du - dl` would leave a residual ∝ 1/ρᶠₖ₊₁ - 1/ρᶠₖ.
+            for k = 3:Nz-1
+                Δzᶠᵏ⁻¹ = zᶜ[k-1] - zᶜ[k-2]
+                Δzᶠᵏ   = zᶜ[k]   - zᶜ[k-1]
+                Δzᶠᵏ⁺¹ = zᶜ[k+1] - zᶜ[k]
+                column_sum = Δzᶠᵏ * d(k) + Δzᶠᵏ⁻¹ * du(k-1) + Δzᶠᵏ⁺¹ * dl(k)
+                @test column_sum ≈ Δzᶠᵏ atol = 64 * eps(FT) * Δzᶠᵏ
+            end
+
+            # Every row is finite, boundary rows included. Row 1 divides by ρᶠ₁, which reads ρ's
+            # bottom halo — a value no mask zeroes.
+            @test all(isfinite, [du(k) for k = 1:Nz-1])
+            @test all(isfinite, [dl(k) for k = 1:Nz-1])
+            @test all(isfinite, [d(k)  for k = 1:Nz])
+        end
+    end
+
+    @testset "The z-Face solve inverts the hand-derived operator" begin
+        ν = last(first(ν_profiles))
+        closure = VerticalScalarDiffusivity(vitd; ν = (x, y, z, t) -> ν(z))
+        model = AtmosphereModel(stretched_grid; closure, advection = nothing)
+        ρ = Breeze.AtmosphereModels.total_density(model.dynamics)
+
+        zᶠ = Array(znodes(stretched_grid, Face()))
+        zᶜ = Array(znodes(stretched_grid, Center()))
+        ρᶜ = Array(interior(ρ, 1, 1, :))
+
+        q = Field{Center, Center, Face}(stretched_grid)
+        set!(q, (x, y, z) -> sinpi(z / Lz)^2)
+        fill_halo_regions!(q)
+        before = Array(interior(q, 1, 1, :))
+
+        implicit_step!(q, model.timestepper.implicit_solver, model.closure, model.closure_fields,
+                       nothing, model.clock, Oceananigans.fields(model), Δt,
+                       Breeze.AtmosphereModels.implicit_step_scheme(nothing), nothing, ρ)
+
+        after = Array(interior(q, 1, 1, :))
+        @test after != before
+        @test all(isfinite, after)
+
+        # Backward Euler: the solve returns the qⁿ⁺¹ satisfying (I - Δt L) qⁿ⁺¹ = qⁿ row by row.
+        for k = 3:Nz-1
+            du_ref, dl_ref, d_ref = reference_row(k, zᶠ, zᶜ, ρᶜ, ν)
+            residual = dl_ref * after[k-1] + d_ref * after[k] + du_ref * after[k+1]
+            @test residual ≈ before[k] atol = 1e3 * eps(FT) * abs(before[k])
+        end
+    end
+end
+
+@testset "Density-weighted get_coefficient wins dispatch [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     grid = RectilinearGrid(default_arch; size=(1, 1, 16), x=(0, 100), y=(0, 100), z=(0, 4000),
@@ -291,31 +460,41 @@ end
     set!(model; θ = 300, ρc = (x, y, z) -> cospi(z / 4000))
 
     ρ = Breeze.AtmosphereModels.total_density(model.dynamics)
-    scheme = Breeze.AtmosphereModels.implicit_step_advection(nothing, :ρc)
+    scheme = Breeze.AtmosphereModels.implicit_step_scheme(nothing)
     w = model.velocities.w
     clock = model.clock
     mf = Oceananigans.fields(model)
     c, f = Center(), Face()
-    id = Breeze.AtmosphereModels.closure_scalar_index(model, :ρc)
 
-    ρc = model.tracers.ρc
-    bcs = (ρc.boundary_conditions.top, ρc.boundary_conditions.bottom, ρc.boundary_conditions.immersed)
+    ρc, ρw = model.tracers.ρc, model.momentum.ρw
+    field_bcs(q) = (q.boundary_conditions.top, q.boundary_conditions.bottom, q.boundary_conditions.immersed)
 
-    coefficient(marker, trailing...) = @allowscalar Oceananigans.Solvers.get_coefficient(
-        1, 1, 8, grid, marker, nothing, ZDirection(),
-        model.closure, model.closure_fields, id, c, c, c, 1.0, clock, mf, trailing...)
+    # The argument list `implicit_step!` calls the solver with, `(advection, w, density)` and the
+    # field's three boundary conditions last.
+    coefficient_arguments(marker, ℓz, id, bcs) =
+        (1, 1, 8, grid, marker, nothing, ZDirection(),
+         model.closure, model.closure_fields, id, c, c, ℓz, 1.0, clock, mf, scheme, w, ρ, bcs...)
 
-    for marker in (VerticallyImplicitDiffusionUpperDiagonal(),
+    # `ρc` at z-Centers and `ρw` at z-Faces take the same seam and differ only in `ℓz`, which
+    # selects the mirrored coefficients.
+    cases = ((c, Breeze.AtmosphereModels.closure_scalar_index(model, :ρc), field_bcs(ρc)),
+             (f, nothing,                                                  field_bcs(ρw)))
+
+    for (ℓz, id, bcs) in cases,
+        marker in (VerticallyImplicitDiffusionUpperDiagonal(),
                    VerticallyImplicitDiffusionLowerDiagonal(),
                    VerticallyImplicitDiffusionDiagonal())
 
-        weighted   = coefficient(marker, scheme, w, ρ, bcs...)   # what implicit_step! passes
-        unweighted = coefficient(marker, nothing, w, ρ, bcs...)  # Oceananigans' own method
+        call = coefficient_arguments(marker, ℓz, id, bcs)
+        coefficient = @allowscalar Oceananigans.Solvers.get_coefficient(call...)
 
-        # A method must exist for the full argument list, and it must be the weighted one: over a
-        # 4 km column ρ varies ~40%, so the weighted coefficient cannot coincide with the unweighted.
-        @test isfinite(weighted)
-        @test weighted != unweighted
+        # A method must exist for the full argument list — `which` throws otherwise — and it must
+        # be the weighted one rather than Oceananigans' fallback. Asserted on the method rather
+        # than on the value the two return: under uniform ν and Δz the z-Face diagonal's two
+        # half-cell ratios cancel exactly, `(du ρᶜₖ + dl ρᶜₖ₋₁) / ρᶠₖ = du + dl`, so there the
+        # weighted coefficient is bit-identical to the unweighted one that must not win.
+        @test which(Oceananigans.Solvers.get_coefficient, typeof.(call)).module === Breeze.AtmosphereModels
+        @test isfinite(coefficient)
     end
 end
 
