@@ -402,7 +402,6 @@ end
         # lookup placeholders.
         @test doubled_tables.fall_speed == doubled
         @test doubled_tables.ventilation == RainVentilation(FT)
-        @test doubled_tables.maximum_mean_diameter == default_rain.maximum_mean_diameter
         @test isnothing(default_rain.velocity_mass)
         @test !isnothing(doubled_tables.velocity_mass)
     end

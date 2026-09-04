@@ -219,9 +219,9 @@ at startup: the mass- and number-weighted terminal velocities and the velocity-d
 integral used by evaporation, each tabulated against `log10(λʳ)` over `log_lambda_range`.
 
 All three evaluators receive the same `rain.fall_speed`, so a configured fall-speed law
-reaches every table. Only the three lookup placeholders are replaced; `maximum_mean_diameter`,
-`fall_speed` and `ventilation` are carried through unchanged, which is what keeps custom
-values alive from the constructor into the runtime rates.
+reaches every table. Only the three lookup placeholders are replaced; `fall_speed` and
+`ventilation` are carried through unchanged, which is what keeps custom values alive from
+the constructor into the runtime rates.
 
 # Arguments
 
@@ -261,6 +261,6 @@ function tabulate_rain_from_quadrature(rain::RainDrops, arch=CPU(),
 
     # Only the three lookup placeholders are replaced; every supplied physics parameter
     # is carried through unchanged.
-    return RainDrops(FT(rain.maximum_mean_diameter), fall_speed,
-                convert(RainVentilation{FT}, rain.ventilation), tab_vel_num, tab_vel_mass, tab_evap)
+    return RainDrops(fall_speed, convert(RainVentilation{FT}, rain.ventilation),
+                     tab_vel_num, tab_vel_mass, tab_evap)
 end

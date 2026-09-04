@@ -176,7 +176,6 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
     @testset "Rain properties" begin
         rain = RainDrops()
-        @test rain.maximum_mean_diameter ≈ 2e-3
 
         # The active fall-speed law is the piecewise Gunn-Kinzer/Beard fit, not a single
         # power law: `RainDrops` carries its coefficients, and the ventilation pair

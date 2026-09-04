@@ -216,7 +216,11 @@ struct ProcessRate{FT, PS}
     maximum_mean_droplet_diameter :: FT     # ⟨D⟩ maximum [m]
     minimum_mean_droplet_diameter :: FT     # ⟨D⟩ minimum [m]
 
-    # Rain size distribution slope bounds
+    # Rain size distribution slope bounds. These are the P3 rain lambda limiter: λʳ is
+    # clamped to [minimum_rain_slope, maximum_rain_slope] and the DSD-consistent number
+    # is recomputed from the clamped slope, so they bound the mean drop diameter as
+    # ⟨D⟩ = (μʳ + 1) / λʳ. `minimum_rain_slope` is the reciprocal of the reference
+    # `inv_Drmax = 1/0.002`, the maximum allowed number-weighted mean drop diameter.
     minimum_rain_slope :: FT                # λʳ minimum [1/m]
     maximum_rain_slope :: FT                # λʳ maximum [1/m]
 

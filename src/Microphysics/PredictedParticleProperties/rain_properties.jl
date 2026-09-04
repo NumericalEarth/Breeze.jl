@@ -188,7 +188,6 @@ end
 # Rain particle size distribution, fall-speed and ventilation parameters, and the
 # quadrature integrals tabulated from them; see the `RainDrops` constructor.
 struct RainDrops{FT, VN, VM, EV}
-    maximum_mean_diameter :: FT
     fall_speed :: RainFallSpeed{FT}
     ventilation :: RainVentilation{FT}
     velocity_number :: VN
@@ -225,18 +224,14 @@ saturation-adjustment relaxation coefficient.
 are `nothing` until [`tabulate_rain_from_quadrature`](@ref) materializes them from
 `fall_speed`. Both parameter containers are preserved verbatim across materialization.
 
+**Spectrum bounds:** the largest and smallest mean drop diameters the distribution may
+take are set by `ProcessRate.minimum_rain_slope` and `maximum_rain_slope`, applied through
+[`rain_slope_parameter`](@ref), not by this container.
+
 # Keyword Arguments
 
-- `maximum_mean_diameter`: Upper Dm limit [m], default 2×10⁻³ (2 mm). **Inactive**: no
-  rate in the current source reads it, and it does not bound the rain spectrum. It is
-  retained only so the field list stays stable; see the note below.
 - `fall_speed`: [`RainFallSpeed`](@ref), default `RainFallSpeed(FT)`
 - `ventilation`: [`RainVentilation`](@ref), default `RainVentilation(FT)`
-
-!!! note "`maximum_mean_diameter` is inactive"
-    The rain spectrum is bounded by `ProcessRate.minimum_rain_slope` and
-    `maximum_rain_slope` through `rain_slope_parameter`, not by this field. It is kept
-    pending a decision on removing it.
 
 # References
 
@@ -257,11 +252,10 @@ RainVentilation(f₁ᵣ=0.8, f₂ᵣ=0.32)
 ```
 """
 function RainDrops(FT::DataType = Oceananigans.defaults.FloatType;
-              maximum_mean_diameter = 2e-3,
-              fall_speed = RainFallSpeed(FT),
-              ventilation = RainVentilation(FT))
-    return RainDrops(FT(maximum_mean_diameter), convert(RainFallSpeed{FT}, fall_speed),
-                convert(RainVentilation{FT}, ventilation), nothing, nothing, nothing)
+                   fall_speed = RainFallSpeed(FT),
+                   ventilation = RainVentilation(FT))
+    return RainDrops(convert(RainFallSpeed{FT}, fall_speed),
+                     convert(RainVentilation{FT}, ventilation), nothing, nothing, nothing)
 end
 
 Base.summary(::RainDrops) = "RainDrops"
