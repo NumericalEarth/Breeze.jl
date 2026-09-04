@@ -299,29 +299,32 @@ const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:Const
 @inline dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.Cᴰ
 
 #####
-##### Mixing length: ℓ = min(z, Cᴺ √e / N), evaluated where the caller supplies √e
+##### Mixing length: ℓ = min(z, Cᴺ √e / N)
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-The stratification length ``ℓᴺ = Cᴺ \\sqrt{e} / N`` at (Center, Center, Face), given the
-turbulent velocity ``w★ = \\sqrt{e}`` there; infinite where ``N² ≤ 0``.
+The stratification length ``ℓᴺ = Cᴺ \\sqrt{e} / N`` at (Center, Center, Face), given the specific
+turbulent kinetic energy field `e` at the centers, whose square root — floored at `minimum_tke` —
+is reconstructed at the face; infinite where ``N² ≤ 0``.
 """
-@inline function stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, w★, tracers, buoyancy)
+@inline function stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, tracers, buoyancy)
     FT = eltype(grid)
     N² = ∂z_b(i, j, k, grid, buoyancy, tracers)
     N²⁺ = clip(N²)
     Cᴺ = closure.mixing_length.Cᴺ
-    return ifelse(N²⁺ == 0, FT(Inf), Cᴺ * w★ / sqrt(N²⁺))
+    ℓᴺ = Cᴺ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e) / sqrt(N²⁺)
+    return ifelse(N²⁺ == 0, FT(Inf), ℓᴺ)
 end
 
-@inline function stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, w★, tracers, buoyancy)
+@inline function stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy)
     FT = eltype(grid)
     N² = ℑbzᵃᵃᶜ(i, j, k, grid, ∂z_b, buoyancy, tracers)
     N²⁺ = clip(N²)
     Cᴺ = closure.mixing_length.Cᴺ
-    return ifelse(N²⁺ == 0, FT(Inf), Cᴺ * w★ / sqrt(N²⁺))
+    ℓᴺ = Cᴺ * turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
+    return ifelse(N²⁺ == 0, FT(Inf), ℓᴺ)
 end
 
 """
@@ -333,9 +336,8 @@ is reconstructed at the face. The same function computes the closure's diffusivi
 in a `KernelFunctionOperation` at (Center, Center, Face), diagnoses ``ℓ`` from the model state.
 """
 @inline function mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, tracers, buoyancy)
-    w★ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
     d = height_above_bottomᶜᶜᶠ(i, j, k, grid)
-    ℓᴺ = stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, w★, tracers, buoyancy)
+    ℓᴺ = stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, tracers, buoyancy)
     ℓ = min(d, ℓᴺ)
     return ifelse(isnan(ℓ), d, ℓ)
 end
@@ -346,9 +348,8 @@ $(TYPEDSIGNATURES)
 `mixing_lengthᶜᶜᶠ` at cell centers, where the dissipation lives with ``e``.
 """
 @inline function mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy)
-    w★ = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
     d = height_above_bottomᶜᶜᶜ(i, j, k, grid)
-    ℓᴺ = stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, w★, tracers, buoyancy)
+    ℓᴺ = stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy)
     ℓ = min(d, ℓᴺ)
     return ifelse(isnan(ℓ), d, ℓ)
 end
@@ -363,17 +364,19 @@ end
     closure_ij = getclosure(i, j, closure)
     e = tracers[TKE_NAME]
 
-    # √e, floored at the minimum TKE, reconstructed from the centers to the face
-    w★ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
+    # The one diffusivity the closure forms, ℓ √e — with √e floored at the minimum TKE and
+    # reconstructed from the centers to the face — which the stability functions scale into
+    # Kᵘ, Kᶜ and Kᵉ.
     ℓ = mixing_lengthᶜᶜᶠ(i, j, k, grid, closure_ij, e, tracers, buoyancy)
+    K = ℓ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
 
     Sᵘ = momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, tracers, buoyancy)
     Sᶜ = tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, tracers, buoyancy)
     Sᵉ = tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, tracers, buoyancy)
 
-    Kᵘ = min(Sᵘ * ℓ * w★, closure_ij.maximum_viscosity)
-    Kᶜ = min(Sᶜ * ℓ * w★, closure_ij.maximum_tracer_diffusivity)
-    Kᵉ = min(Sᵉ * ℓ * w★, closure_ij.maximum_tke_diffusivity)
+    Kᵘ = min(Sᵘ * K, closure_ij.maximum_viscosity)
+    Kᶜ = min(Sᶜ * K, closure_ij.maximum_tracer_diffusivity)
+    Kᵉ = min(Sᵉ * K, closure_ij.maximum_tke_diffusivity)
 
     FT = eltype(grid)
     @inbounds begin
