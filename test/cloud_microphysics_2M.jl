@@ -125,7 +125,7 @@ end
     @test model.clock.iteration == 1
 end
 
-@testset "TwoMomentCloudMicrophysics precipitation rate and surface flux [$FT]" for FT in test_float_types()
+@testset "TwoMomentCloudMicrophysics precipitation rate and bottom flux [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -147,12 +147,12 @@ end
     P_ice = precipitation_rate(model, :ice)
     @test P_ice === nothing
 
-    # Surface precipitation flux
-    spf = surface_precipitation_flux(model)
+    # Bottom precipitation flux
+    spf = bottom_precipitation_flux(model)
     @test spf isa Field
     compute!(spf)
 
-    # The surface precipitation flux sums the cloud-liquid and rain reconstructions.
+    # The bottom precipitation flux sums the cloud-liquid and rain reconstructions.
     # The density is face-interpolated (ℑz) to match the advection operator.
     wᶜˡ = @allowscalar model.microphysical_fields.wᶜˡ[1, 1, 1]
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
@@ -165,7 +165,7 @@ end
     @test @allowscalar spf[1, 1] ≥ 0
 end
 
-@testset "TwoMomentCloudMicrophysics compressible surface flux [$FT]" for FT in test_float_types()
+@testset "TwoMomentCloudMicrophysics compressible bottom flux [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -190,7 +190,7 @@ end
     expected_production = autoconversion_rate.dq_rai_dt + accretion_rate.dq_rai_dt
     @test @allowscalar production[1, 1, 1] ≈ expected_production
 
-    spf = surface_precipitation_flux(model)
+    spf = bottom_precipitation_flux(model)
     compute!(spf)
 
     wᶜˡ = @allowscalar model.microphysical_fields.wᶜˡ[1, 1, 1]
@@ -229,13 +229,13 @@ end
     @test w_rain_mass === μ.wʳ
 
     w_rain_number = sedimentation_velocity(microphysics, μ, Val(:ρnʳ))
-    @test w_rain_number === μ.wʳₙ
+    @test w_rain_number === μ.wⁿʳ
 
     w_cloud_mass = sedimentation_velocity(microphysics, μ, Val(:ρqᶜˡ))
     @test w_cloud_mass === μ.wᶜˡ
 
     w_cloud_number = sedimentation_velocity(microphysics, μ, Val(:ρnᶜˡ))
-    @test w_cloud_number === μ.wᶜˡₙ
+    @test w_cloud_number === μ.wⁿᶜˡ
 
     # Thermodynamic phase of each condensate mass; number tracers are not masses
     @test condensate_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
@@ -275,7 +275,7 @@ end
     @test all(c -> c.phase === Val(:liquid), constituents)
     @test any(c -> c.w === μ.wʳ && c.q === μ.qʳ, constituents)
     @test any(c -> c.w === μ.wᶜˡ && c.q === μ.qᶜˡ, constituents)
-    @test !any(c -> c.w === μ.wʳₙ || c.w === μ.wᶜˡₙ, constituents)
+    @test !any(c -> c.w === μ.wⁿʳ || c.w === μ.wⁿᶜˡ, constituents)
 end
 
 @testset "TwoMomentCloudMicrophysics ImpenetrableBoundaryCondition [$FT]" for FT in test_float_types()
@@ -293,14 +293,14 @@ end
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, nᶜˡ=0, qʳ=0.001, nʳ=1e5)
 
     wʳ_bottom = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
-    wʳₙ_bottom = @allowscalar model.microphysical_fields.wʳₙ[1, 1, 1]
+    wⁿʳ_bottom = @allowscalar model.microphysical_fields.wⁿʳ[1, 1, 1]
     wᶜˡ_bottom = @allowscalar model.microphysical_fields.wᶜˡ[1, 1, 1]
-    wᶜˡₙ_bottom = @allowscalar model.microphysical_fields.wᶜˡₙ[1, 1, 1]
+    wⁿᶜˡ_bottom = @allowscalar model.microphysical_fields.wⁿᶜˡ[1, 1, 1]
 
     @test wʳ_bottom == 0
-    @test wʳₙ_bottom == 0
+    @test wⁿʳ_bottom == 0
     @test wᶜˡ_bottom == 0
-    @test wᶜˡₙ_bottom == 0
+    @test wⁿᶜˡ_bottom == 0
 end
 
 @testset "TwoMomentCloudMicrophysics show methods [$FT]" for FT in test_float_types()

@@ -289,7 +289,7 @@ using Oceananigans.TimeSteppers: update_state!
 
         # `div_ρUc` reads these as advecting velocities via `Az_qᶜᶜᶠ`, so they must be
         # located at (Center, Center, Face) like the resolved `w`.
-        velocity_names = (:wᶜˡ, :wᶜˡₙ, :wʳ, :wʳₙ, :wⁱ, :wⁱₙ)
+        velocity_names = (:wᶜˡ, :wⁿᶜˡ, :wʳ, :wⁿʳ, :wⁱ, :wⁿⁱ)
         for name in velocity_names
             @test location(μ[name]) === (Center, Center, Face)
             @test location(μ[name]) === location(model.velocities.w)
@@ -732,8 +732,8 @@ using Oceananigans.TimeSteppers: update_state!
 
         # Every sedimenting prognostic reaches the advection operator through the generic
         # `microphysical_velocities` wrapper, which reads `sedimentation_velocity`.
-        for (name, speed) in ((:ρqᶜˡ, :wᶜˡ), (:ρqʳ, :wʳ), (:ρnʳ, :wʳₙ),
-                              (:ρqⁱ, :wⁱ), (:ρnⁱ, :wⁱₙ), (:ρqᶠ, :wⁱ),
+        for (name, speed) in ((:ρqᶜˡ, :wᶜˡ), (:ρqʳ, :wʳ), (:ρnʳ, :wⁿʳ),
+                              (:ρqⁱ, :wⁱ), (:ρnⁱ, :wⁿⁱ), (:ρqᶠ, :wⁱ),
                               (:ρbᶠ, :wⁱ), (:ρqʷⁱ, :wⁱ))
             @test sedimentation_velocity(p3, μ, Val(name)) === getproperty(μ, speed)
             @test microphysical_velocities(p3, μ, Val(name)).w === getproperty(μ, speed)
@@ -830,7 +830,7 @@ using Oceananigans.TimeSteppers: update_state!
         @test !all(abs.(G .- G_as_ice) .<= tolerance)
     end
 
-    @testset "P3 surface precipitation flux" begin
+    @testset "P3 bottom precipitation flux" begin
         FT = Float64
         grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4), extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
@@ -844,7 +844,7 @@ using Oceananigans.TimeSteppers: update_state!
         set!(model; θ = FT(285), qᵛ = FT(0.01), qᶜˡ = FT(0.003), qʳ = FT(0.001),
              enforce_mass_conservation = false)
 
-        flux = surface_precipitation_flux(model)
+        flux = bottom_precipitation_flux(model)
         @test flux isa Field
         compute!(flux)
         @test @allowscalar(flux[1, 1]) > 0

@@ -1,7 +1,7 @@
 module Advection
 
 export div_ρUc,
-       surface_advective_tracer_flux
+       bottom_advective_tracer_flux
 
 using Oceananigans.Advection:
     _advective_tracer_flux_x,
@@ -152,7 +152,7 @@ end
 # TODO: move `bounded_face_reconstructions` upstream. It reproduces the reconstruction and
 # limiting half of `Oceananigans.Advection.bounded_tracer_flux_divergence_z`, reaching into the
 # private `_ω̂₁`, `_ω̂ₙ`, `_ε₂` constants to do it, so that `sedimentation_mass_fluxes` and
-# `surface_advective_tracer_flux` form the same face fluxes the tracer tendency applies. The
+# `bottom_advective_tracer_flux` form the same face fluxes the tracer tendency applies. The
 # clean fix is for Oceananigans to factor this helper out of its divergence and export it;
 # until then this copy has to be kept in sync by hand.
 
@@ -209,16 +209,16 @@ high-order explicit flux and its first-order implicit remainder, evaluated at `c
 
 Returns a positive value for downward (out-of-domain) flux.
 """
-@inline function surface_advective_tracer_flux(i, j, grid, advection, ρ, w, c)
+@inline function bottom_advective_tracer_flux(i, j, grid, advection, ρ, w, c)
     flux_Az = _advective_tracer_flux_z(i, j, 1, grid, advection, w, c)
     ρ_face = ℑzᵃᵃᶠ(i, j, 1, grid, ρ)
     explicit_flux = -ρ_face * flux_Az / Azᶜᶜᶠ(i, j, 1, grid)
-    return explicit_flux + implicit_surface_advective_tracer_flux(i, j, grid, advection, ρ_face, w, c)
+    return explicit_flux + implicit_bottom_advective_tracer_flux(i, j, grid, advection, ρ_face, w, c)
 end
 
-@inline implicit_surface_advective_tracer_flux(i, j, grid, advection, ρ_face, w, c) = 0
+@inline implicit_bottom_advective_tracer_flux(i, j, grid, advection, ρ_face, w, c) = 0
 
-@inline function implicit_surface_advective_tracer_flux(i, j, grid, advection::AIVA, ρ_face, w, c)
+@inline function implicit_bottom_advective_tracer_flux(i, j, grid, advection::AIVA, ρ_face, w, c)
     scheme = vertical_scheme(advection)
     td = time_discretization(scheme)
     wⁱ = implicit_vertical_velocityᶜᶜᶠ(i, j, 1, grid, scheme, td, w)
@@ -228,44 +228,44 @@ end
 
 # Bounds-preserving WENO: the bottom face flux of cell 1 as `bounded_tracer_flux_divergence_z`
 # forms it, from the reconstructions limited by that cell.
-@inline function surface_advective_tracer_flux(i, j, grid, advection::BoundsPreservingWENO, ρ, w, c)
+@inline function bottom_advective_tracer_flux(i, j, grid, advection::BoundsPreservingWENO, ρ, w, c)
     c₋ᴸ, c₋ᴿ, _, _ = bounded_face_reconstructions(i, j, 1, grid, advection, c)
     explicit_w = explicit_vertical_velocity(advection, grid, w)
     @inbounds w⁻ = explicit_w[i, j, 1]
     ρ_face = ℑzᵃᵃᶠ(i, j, 1, grid, ρ)
     explicit_flux = -ρ_face * upwind_biased_product(w⁻, c₋ᴸ, c₋ᴿ)
-    return explicit_flux + implicit_surface_advective_tracer_flux(i, j, grid, advection, ρ_face, w, c)
+    return explicit_flux + implicit_bottom_advective_tracer_flux(i, j, grid, advection, ρ_face, w, c)
 end
 
 #####
-##### Surface precipitation flux (flux out of the bottom boundary)
+##### Precipitation flux through the bottom boundary
 #####
 #
-# Scheme-independent implementation of `AtmosphereModels.surface_precipitation_flux`: the
+# Scheme-independent implementation of `AtmosphereModels.bottom_precipitation_flux`: the
 # bottom-face flux of every sedimentation constituent, summed inside one kernel function. It
 # lives here rather than in `AtmosphereModels` because it builds on
-# `surface_advective_tracer_flux`, and `AtmosphereModels` is loaded before this module.
+# `bottom_advective_tracer_flux`, and `AtmosphereModels` is loaded before this module.
 # Reusing the `(; w, q, ρq, phase, advection)` constituents the model resolved once means the
 # diagnostic can never disagree with the thermodynamic tendencies about which masses fall, with
 # which humidity field and advection scheme. The tuple recursion keeps the kernel type-stable
 # across constituents that carry different advection schemes.
-@inline surface_precipitation_flux_kernel(i, j, k, grid, constituents, ρ, wᵗ) =
-    sedimenting_surface_flux(i, j, grid, constituents, ρ, wᵗ)
+@inline bottom_precipitation_flux_kernel(i, j, k, grid, constituents, ρ, wᵗ) =
+    sedimenting_bottom_flux(i, j, grid, constituents, ρ, wᵗ)
 
-@inline sedimenting_surface_flux(i, j, grid, ::Tuple{}, ρ, wᵗ) = zero(grid)
+@inline sedimenting_bottom_flux(i, j, grid, ::Tuple{}, ρ, wᵗ) = zero(grid)
 
-@inline function sedimenting_surface_flux(i, j, grid, constituents, ρ, wᵗ)
+@inline function sedimenting_bottom_flux(i, j, grid, constituents, ρ, wᵗ)
     (; w, q, advection) = first(constituents)
-    flux = surface_advective_tracer_flux(i, j, grid, advection, ρ, SumOfArrays{2}(wᵗ, w), q)
-    return flux + sedimenting_surface_flux(i, j, grid, Base.tail(constituents), ρ, wᵗ)
+    flux = bottom_advective_tracer_flux(i, j, grid, advection, ρ, SumOfArrays{2}(wᵗ, w), q)
+    return flux + sedimenting_bottom_flux(i, j, grid, Base.tail(constituents), ρ, wᵗ)
 end
 
 # Any scheme that declares its sedimenting condensate through `sedimentation_velocity` and
 # `condensate_phase` gets the advection-consistent diagnostic for free; with nothing sedimenting
 # (including `Nothing` microphysics) the sum is empty and the flux is zero. Schemes that move
 # precipitation by internal means (such as `DCMIP2016KM`) override this method instead.
-function AtmosphereModels.surface_precipitation_flux(model, microphysics)
-    operation = KernelFunctionOperation{Center, Center, Nothing}(surface_precipitation_flux_kernel, model.grid,
+function AtmosphereModels.bottom_precipitation_flux(model, microphysics)
+    operation = KernelFunctionOperation{Center, Center, Nothing}(bottom_precipitation_flux_kernel, model.grid,
                                                                  model.sedimentation_constituents,
                                                                  total_density(model.dynamics),
                                                                  transport_velocities(model).w)

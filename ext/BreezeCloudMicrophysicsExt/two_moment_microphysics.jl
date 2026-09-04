@@ -372,11 +372,11 @@ function AtmosphereModels.materialize_microphysical_fields(bμp::WPNE2M, grid, b
     # Sedimentation velocity fields (vertical components): mass- and number-weighted
     # velocities for cloud liquid and rain
     wᶜˡ = AtmosphereModels.sedimentation_velocity_field(grid)
-    wᶜˡₙ = AtmosphereModels.sedimentation_velocity_field(grid)
+    wⁿᶜˡ = AtmosphereModels.sedimentation_velocity_field(grid)
     wʳ = AtmosphereModels.sedimentation_velocity_field(grid)
-    wʳₙ = AtmosphereModels.sedimentation_velocity_field(grid)
+    wⁿʳ = AtmosphereModels.sedimentation_velocity_field(grid)
 
-    return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wᶜˡₙ, wʳ, wʳₙ)
+    return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ)
 end
 
 #####
@@ -459,9 +459,9 @@ end
 
     # Store signed velocities (negative = downward) with the bottom boundary condition applied
     bc = bμp.precipitation_boundary_condition
-    write_sedimentation_velocity!(μ.wᶜˡₙ, i, j, k, bc, 𝕎ᶜˡ[1]) # number-weighted
+    write_sedimentation_velocity!(μ.wⁿᶜˡ, i, j, k, bc, 𝕎ᶜˡ[1]) # number-weighted
     write_sedimentation_velocity!(μ.wᶜˡ, i, j, k, bc, 𝕎ᶜˡ[2])  # mass-weighted
-    write_sedimentation_velocity!(μ.wʳₙ, i, j, k, bc, 𝕎ʳ[1])   # number-weighted
+    write_sedimentation_velocity!(μ.wⁿʳ, i, j, k, bc, 𝕎ʳ[1])   # number-weighted
     write_sedimentation_velocity!(μ.wʳ, i, j, k, bc, 𝕎ʳ[2])    # mass-weighted
 
     return nothing
@@ -507,13 +507,13 @@ end
 @inline AtmosphereModels.sedimentation_velocity(bμp::WPNE2M, μ, ::Val{:ρqᶜˡ}) = μ.wᶜˡ
 
 # Cloud liquid number: use number-weighted sedimentation velocity
-@inline AtmosphereModels.sedimentation_velocity(bμp::WPNE2M, μ, ::Val{:ρnᶜˡ}) = μ.wᶜˡₙ
+@inline AtmosphereModels.sedimentation_velocity(bμp::WPNE2M, μ, ::Val{:ρnᶜˡ}) = μ.wⁿᶜˡ
 
 # Rain mass: use mass-weighted sedimentation velocity
 @inline AtmosphereModels.sedimentation_velocity(bμp::WPNE2M, μ, ::Val{:ρqʳ}) = μ.wʳ
 
 # Rain number: use number-weighted sedimentation velocity
-@inline AtmosphereModels.sedimentation_velocity(bμp::WPNE2M, μ, ::Val{:ρnʳ}) = μ.wʳₙ
+@inline AtmosphereModels.sedimentation_velocity(bμp::WPNE2M, μ, ::Val{:ρnʳ}) = μ.wⁿʳ
 
 #####
 ##### Microphysical tendencies

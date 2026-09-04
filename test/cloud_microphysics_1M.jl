@@ -5,7 +5,7 @@ using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity,
                                total_density, dynamics_density, standard_pressure,
                                implicit_advection_velocities, density_weighted_advection_diagonal,
                                implicit_advection_density, implicit_step_scheme, closure_scalar_index,
-                               ExplicitSedimentationFluxes
+                               ExplicitSedimentationFluxes, phase_content
 using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState,
                              LiquidIceDensityState, mixture_gas_constant
 using CloudMicrophysics
@@ -292,7 +292,7 @@ end
     @test model.clock.iteration == 1
 end
 
-@testset "Surface precipitation flux diagnostic [$(FT)]" for FT in test_float_types()
+@testset "Bottom precipitation flux diagnostic [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -318,11 +318,11 @@ end
                   accretion_params.e, qᶜˡ, qʳ, ρ)
     @test @allowscalar production[1, 1, 1] ≈ expected_production
 
-    spf = surface_precipitation_flux(model)
+    spf = bottom_precipitation_flux(model)
     @test spf isa Field
     compute!(spf)
 
-    # The surface precipitation flux uses the advection scheme's face reconstruction.
+    # The bottom precipitation flux uses the advection scheme's face reconstruction.
     # For uniform condensate fields with Centered(order=2) advection, each
     # face-reconstructed tracer equals its cell-center value. The density is
     # face-interpolated (ℑz) to match the advection operator.
@@ -343,7 +343,7 @@ end
     @test @allowscalar spf[1, 1] > 0
 end
 
-@testset "Bounds-preserving WENO surface precipitation flux [$(FT)]" for FT in test_float_types()
+@testset "Bounds-preserving WENO bottom precipitation flux [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(6, 6, 6), extent=(100, 100, 100))
 
@@ -355,7 +355,7 @@ end
     model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection)
 
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
-    flux = surface_precipitation_flux(model)
+    flux = bottom_precipitation_flux(model)
     compute!(flux)
 
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
@@ -393,7 +393,7 @@ end
                                                                 Δt, Center(), Center(), Center(), ρ)
     @test diagonal > 0
 
-    flux = surface_precipitation_flux(model)
+    flux = bottom_precipitation_flux(model)
     compute!(flux)
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
@@ -480,7 +480,7 @@ end
     @test all(isfinite, interior(acoustic_model.microphysical_fields.ρqʳ))
 end
 
-@testset "Surface precipitation flux uses transport velocities [$(FT)]" for FT in test_float_types()
+@testset "Bottom precipitation flux uses transport velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -502,7 +502,7 @@ end
                                                model.sedimentation_constituents,
                                                transport_w)
 
-    spf = surface_precipitation_flux(mock_model, microphysics)
+    spf = bottom_precipitation_flux(mock_model, microphysics)
     compute!(spf)
 
     wᵗ = @allowscalar transport_w[1, 1, 1]
@@ -847,7 +847,7 @@ Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, 
     Tₛ = column(energy_model.temperature)
     pᵣ = column(energy_model.dynamics.reference_state.pressure)
     for k in 1:Nz
-        χˡ, _ = @allowscalar Breeze.StaticEnergyFormulations.energy_condensate_content(
+        χˡ, _ = @allowscalar Breeze.StaticEnergyFormulations.static_energy_condensate_content(
             1, 1, k, grid, mixture_dynamics, constants, energy_model.microphysics, μₛ,
             Breeze.AtmosphereModels.specific_prognostic_moisture(energy_model), energy_model.temperature)
         qₖ = MoistureMassFractions(qᵛₛ[k], qˡₛ[k], zero(FT))
@@ -856,6 +856,29 @@ Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, 
         @test isapprox(χˡ, χ_expected; rtol=sqrt(eps(FT)))
         @test !isapprox(χˡ, χ_dry; rtol=sqrt(eps(FT)))
     end
+end
+
+@testset "A mixed-phase condensate mass carries the blended content [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    # `phase_content` picks a constituent's content out of the formulation's (χˡ, χⁱ) pair. The
+    # content is linear in composition, so a mass leaving along f eˡ + (1 − f) eⁱ carries
+    # f χˡ + (1 − f) χⁱ exactly, with the pure phases as endpoints.
+    χ = (FT(-2500), FT(-2830))  # representative ∂s/∂qˡ and ∂s/∂qⁱ magnitudes [J/kg]
+
+    @test phase_content(Val(:liquid), χ) === χ[1]
+    @test phase_content(Val(:ice), χ) === χ[2]
+
+    # Endpoints agree with the pure-phase methods; the interior is linear in f
+    @test phase_content(one(FT), χ) ≈ χ[1] rtol=eps(FT)
+    @test phase_content(zero(FT), χ) ≈ χ[2] rtol=eps(FT)
+    for f in (FT(0.25), FT(0.5), FT(0.7))
+        @test phase_content(f, χ) ≈ f * χ[1] + (1 - f) * χ[2] rtol=eps(FT)
+    end
+
+    # Linearity is what makes a fraction exact: half-and-half is the midpoint of the two.
+    @test phase_content(FT(0.5), χ) ≈ (χ[1] + χ[2]) / 2 rtol=eps(FT)
+    @test phase_content(FT(0.5), χ) ≈ (phase_content(Val(:liquid), χ) + phase_content(Val(:ice), χ)) / 2 rtol=eps(FT)
 end
 
 @testset "Sedimentation content follows each flux's upwind cell [$(FT)]" for FT in test_float_types()
@@ -960,7 +983,7 @@ end
     @test any(k -> !isapprox(heat(limited, k), heat(unlimited, k); atol), 1:Nz)
 end
 
-@testset "Mixed-phase constituents and snow surface flux [$(FT)]" for FT in test_float_types()
+@testset "Mixed-phase constituents and snow bottom flux [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -988,7 +1011,7 @@ end
     @test qᶜⁱ > 0
     @test wˢ < 0
 
-    flux = surface_precipitation_flux(model)
+    flux = bottom_precipitation_flux(model)
     compute!(flux)
     ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
     @test @allowscalar flux[1, 1] ≈ -ρ_face * (wʳ * qʳ + wˢ * qˢ)

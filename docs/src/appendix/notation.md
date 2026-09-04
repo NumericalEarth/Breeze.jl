@@ -97,9 +97,9 @@ The following table also uses a few conventions that suffuse the source code and
 | ``w^r``                             | `wʳ`   |                                     | Rain sedimentation velocity field (vertical component; negative for downward motion) |
 | ``w^s``                             | `wˢ`   |                                     | Snow sedimentation velocity field (vertical component; negative for downward motion) |
 | ``w^i``                             | `wⁱ`   |                                     | Ice mass-weighted sedimentation velocity field (P3; negative for downward motion) |
-| ``w^{cl}_n``                        | `wᶜˡₙ` |                                     | Cloud liquid number-weighted sedimentation velocity field (negative for downward motion) |
-| ``w^r_n``                           | `wʳₙ`  |                                     | Rain number-weighted sedimentation velocity field (negative for downward motion) |
-| ``w^i_n``                           | `wⁱₙ`  |                                     | Ice number-weighted sedimentation velocity field (P3; negative for downward motion) |
+| ``w^{ncl}``                         | `wⁿᶜˡ` |                                     | Cloud liquid number-weighted sedimentation velocity field (negative for downward motion) |
+| ``w^{nr}``                          | `wⁿʳ`  |                                     | Rain number-weighted sedimentation velocity field (negative for downward motion) |
+| ``w^{ni}``                          | `wⁿⁱ`  |                                     | Ice number-weighted sedimentation velocity field (P3; negative for downward motion) |
 | ``qᵛ⁺``                             | `qᵛ⁺`  |                                     | Saturation specific humidity over a surface                                    |
 | ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation specific humidity over a planar liquid surface                      |
 | ``qᵛ⁺ⁱ``                            | `qᵛ⁺ⁱ` |                                     | Saturation specific humidity over a planar ice surface                         |

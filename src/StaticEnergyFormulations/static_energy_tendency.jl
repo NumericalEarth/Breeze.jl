@@ -69,7 +69,7 @@ end
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, velocities.w, dynamics,
-                                                   ExplicitSedimentationFluxes(), energy_condensate_content,
+                                                   ExplicitSedimentationFluxes(), static_energy_condensate_content,
                                                    dynamics, constants, microphysics, microphysical_fields,
                                                    specific_prognostic_moisture, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
@@ -80,7 +80,7 @@ end
 # The remainder of the sedimentation transport that the adaptive implicit solve applies to the
 # tracers, moved with its content after their solves.
 AtmosphereModels.implicit_sedimentation_step!(model::StaticEnergyModel, Δt, velocities) =
-    implicit_sedimentation_step!(model, Δt, velocities, energy_condensate_content,
+    implicit_sedimentation_step!(model, Δt, velocities, static_energy_condensate_content,
                                  model.dynamics, model.thermodynamic_constants, model.microphysics,
                                  model.microphysical_fields, specific_prognostic_moisture(model), model.temperature)
 
@@ -102,9 +102,9 @@ AtmosphereModels.implicit_sedimentation_step!(model::StaticEnergyModel, Δt, vel
 # s − g z. The geopotential is independent of the composition and drops out. The frictional
 # heating from the fall (g wˣ qˣ) is neglected. The shared `condensate_sedimentation_divergence`
 # evaluates the content in each flux's upwind cell and owns the discretization.
-@inline function energy_condensate_content(i, j, k, grid, dynamics, constants,
-                                           microphysics, microphysical_fields, specific_prognostic_moisture,
-                                           temperature_field)
+@inline function static_energy_condensate_content(i, j, k, grid, dynamics, constants,
+                                                  microphysics, microphysical_fields, specific_prognostic_moisture,
+                                                  temperature_field)
     @inbounds T = temperature_field[i, j, k]
     @inbounds ρ = total_density(dynamics)[i, j, k]
     @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]

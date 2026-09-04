@@ -92,12 +92,12 @@ AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:ice}) = nothing
 """
 $(TYPEDSIGNATURES)
 
-Return the surface precipitation flux for the instantaneous-precipitation scheme.
+Return the bottom precipitation flux for the instantaneous-precipitation scheme.
 
-The scheme removes condensed water immediately, so the surface flux is the column integral
+The scheme removes condensed water immediately, so the flux is the column integral
 of the volumetric precipitation rate. Units are kg/m²/s.
 """
-function AtmosphereModels.surface_precipitation_flux(model, ::IP)
+function AtmosphereModels.bottom_precipitation_flux(model, ::IP)
     P = model.microphysical_fields.precipitation_rate
     return Field(Integral(P, dims=3))
 end

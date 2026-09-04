@@ -32,7 +32,7 @@ export
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
-    surface_precipitation_flux,
+    bottom_precipitation_flux,
     specific_humidity,
     moisture_prognostic_name,
     moisture_specific_name,

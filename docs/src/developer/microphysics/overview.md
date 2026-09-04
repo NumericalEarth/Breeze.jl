@@ -111,14 +111,14 @@ iterative adjustment to partition moisture between vapor and condensate.
 |----------|---------------|---------------------|----------|
 | Prognostic | `CenterField` | User-provided via `bcs` | `ρqᶜˡ`, `ρqʳ`, `ρnᶜˡ` |
 | Auxiliary/Diagnostic | `CenterField` | None needed | `qᵛ`, `qˡ`, `qᶜˡ`, `qʳ` |
-| Velocities | `ZFaceField` | `bottom=nothing` | `wʳ`, `wᶜˡ`, `wʳₙ` |
+| Velocities | `ZFaceField` | `bottom=nothing` | `wʳ`, `wᶜˡ`, `wⁿʳ` |
 
 ### Sedimentation
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
 | `sedimentation_velocity` | `(microphysics, microphysical_fields, name)` | **Primary interface**: return the vertical sedimentation velocity field for tracer `name`, or `nothing` |
-| `condensate_phase` | `(microphysics, name)` | Return `Val(:liquid)` or `Val(:ice)`, the thermodynamic phase of condensate mass `name`; required for every sedimenting mass |
+| `condensate_phase` | `(microphysics, name)` | Return `Val(:liquid)`, `Val(:ice)`, or a liquid fraction, the thermodynamic phase of condensate mass `name`; required for every sedimenting mass |
 | `microphysical_velocities` | `(microphysics, microphysical_fields, name)` | **Generic wrapper** (don't override): wraps the sedimentation velocity in a velocity tuple |
 
 **Design principle**: Schemes implement `sedimentation_velocity` (how fast a tracer falls) and
@@ -152,7 +152,25 @@ since its latent heat would otherwise be left behind.
     `sedimentation_velocity(…, Val(:ρqʷⁱ)) = μ.wⁱ` and `condensate_phase(…, Val(:ρqʷⁱ)) = Val(:liquid)`:
     one tracer with two independent properties.
 
+!!! note "Mixed-phase particles"
+    A part-ice, part-liquid particle is two condensate masses sharing a fall speed, which is what
+    the independence above buys: P3 carries ice `ρqⁱ` and the liquid on it `ρqʷⁱ`, both falling at
+    `wⁱ`, each declaring the phase whose enthalpy it holds. Splitting the mass beats blending the
+    enthalpy, since freezing that liquid is a process with its own rate that must move mass
+    between them.
+
+    A single mass of mixed composition may instead declare a liquid fraction,
+    `condensate_phase(…, ::Val{:ρqˣ}) = 0.3`. That is exact, not an interpolation: the content is
+    a directional derivative in composition space, so a mass leaving along `f eˡ + (1 - f) eⁱ`
+    carries `f χˡ + (1 - f) χⁱ`. No scheme needs this yet.
+
 #### Sedimentation of the thermodynamic variables
+
+The *mass* sediments by ordinary tracer advection, untouched by any of this: `scalar_tendency`
+adds the fall velocity to the transport velocity and hands the sum to `div_ρUc` with the tracer's
+own scheme, so bounds- and positivity-preserving schemes limit the falling humidity exactly as
+they would without sedimentation. What follows weights those same fluxes to carry the
+*thermodynamic variable's* share; it forms no flux of its own.
 
 The thermodynamic-variable tendencies consume the constituents: each constituent's
 sedimentation mass flux — the advective flux of its humidity at the combined resolved and fall
@@ -182,15 +200,15 @@ fluxes the solves actually applied, at the solved state, so the heat follows the
 fall Courant number. Rain-out thus leaves latent warming aloft and pre-cools the layer that later
 evaporates the arriving rain, the mechanism that builds cold pools.
 
-### Surface Precipitation Flux
+### Bottom Precipitation Flux
 
-`surface_precipitation_flux(model)` returns the flux of precipitating moisture through the
+`bottom_precipitation_flux(model)` returns the flux of precipitating moisture through the
 bottom boundary [kg m⁻² s⁻¹, positive downward]. A scheme that implements
 `sedimentation_velocity` and `condensate_phase` gets it for free: the default method sums the
 bottom-face flux of every sedimentation constituent, evaluating each with the advection scheme
 that transports that tracer, so the diagnostic agrees with the boundary flux the tendency
 operator applies. Schemes that move precipitation by their own internal means (such as
-`DCMIP2016KM`) override `surface_precipitation_flux` directly instead.
+`DCMIP2016KM`) override `bottom_precipitation_flux` directly instead.
 
 ### Specific Humidity
 

@@ -255,7 +255,7 @@ when `p3.aerosol isa AerosolActivation`. The prescribed-Nᶜˡ path takes drople
 **Diagnostic:**
 - `qᵛ`: Vapor specific humidity (mirrors the prognostic vapor field)
 
-**Sedimentation velocities** (`wᶜˡ`, `wᶜˡₙ`, `wʳ`, `wʳₙ`, `wⁱ`, `wⁱₙ`):
+**Sedimentation velocities** (`wᶜˡ`, `wⁿᶜˡ`, `wʳ`, `wⁿʳ`, `wⁱ`, `wⁿⁱ`):
 z-Face fields, because the scalar flux divergence consumes them as advecting velocities at
 (Center, Center, Face). The surface face carries the precipitation flux out of the domain
 unless `precipitation_boundary_condition = ImpenetrableBoundaryCondition()`; the top face
@@ -286,19 +286,16 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
 
-    # Sedimentation velocity fields (pre-computed once per RK-stage tendency evaluation).
-    # These are *advecting* velocities: the scalar flux divergence reads them at
-    # (Center, Center, Face) via `Az_qᶜᶜᶠ(i, j, k, grid, w) = Azᶜᶜᶠ(i, j, k, grid) * w[i, j, k]`,
-    # so they live at z-Faces with the `AM.sedimentation_velocity_field` boundary conditions
-    # (the surface value is applied in `write_p3_fall_speeds!` rather than by halo filling,
-    # and the default impenetrable top holds `w[i, j, Nz+1] = 0` so no precipitation falls
-    # in through the model top).
+    # Sedimentation velocity fields, diagnosed once per RK-stage tendency evaluation. The
+    # scalar flux divergence reads them at the cell's z-Face, so they live at (Center, Center,
+    # Face), with the bottom face written by the diagnosing kernel rather than by halo filling
+    # and an impenetrable top holding w = 0 so nothing falls in through the model top.
     wᶜˡ = AM.sedimentation_velocity_field(grid)  # Cloud mass-weighted terminal velocity
-    wᶜˡₙ = AM.sedimentation_velocity_field(grid) # Cloud number-weighted terminal velocity
+    wⁿᶜˡ = AM.sedimentation_velocity_field(grid) # Cloud number-weighted terminal velocity
     wʳ = AM.sedimentation_velocity_field(grid)   # Rain mass-weighted terminal velocity
-    wʳₙ = AM.sedimentation_velocity_field(grid)  # Rain number-weighted terminal velocity
+    wⁿʳ = AM.sedimentation_velocity_field(grid)  # Rain number-weighted terminal velocity
     wⁱ = AM.sedimentation_velocity_field(grid)   # Ice mass-weighted terminal velocity
-    wⁱₙ = AM.sedimentation_velocity_field(grid)  # Ice number-weighted terminal velocity
+    wⁿⁱ = AM.sedimentation_velocity_field(grid)  # Ice number-weighted terminal velocity
 
     # Hallett–Mossop uses the temperature at the lowest active atmospheric cell.
     # Store one value per column rather than assuming that local k=1 is active.
@@ -306,7 +303,7 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
 
     fields = (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ,
                 qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, qᵛ,
-                wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ,
+                wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ, wⁱ, wⁿⁱ,
                 surface_temperature)
 
     return merge(fields,
@@ -629,7 +626,7 @@ end
 
 # GPU-safe return structs (NamedTuples require jl_f_tuple on GPU).
 struct P3FallSpeedResult{FT}
-    wᶜˡ :: FT; wᶜˡₙ :: FT; wʳ :: FT; wʳₙ :: FT; wⁱ :: FT; wⁱₙ :: FT
+    wᶜˡ :: FT; wⁿᶜˡ :: FT; wʳ :: FT; wⁿʳ :: FT; wⁱ :: FT; wⁿⁱ :: FT
 end
 
 struct P3TendencyResult{FT}
@@ -654,13 +651,13 @@ end
     vᶜ = cloud_terminal_velocities(p3, ℳ.qᶜˡ, ρ, properties.ν, properties.μᶜˡ, properties.λᶜˡ,
                                    constants)
     wᶜˡ = vᶜ.mass_weighted
-    wᶜˡₙ = vᶜ.number_weighted
+    wⁿᶜˡ = vᶜ.number_weighted
 
     # Rain terminal velocities — fused call shares λ_r, ρ_correction, log10(λ_r)
     # across the two 1D table lookups (mass- and number-weighted).
     vᵣ = rain_terminal_velocities(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     wʳ   = vᵣ.mass_weighted
-    wʳₙ  = vᵣ.number_weighted
+    wⁿʳ  = vᵣ.number_weighted
     # The global ice-number cap must be seen consistently by all downstream math —
     # process rates and terminal velocities alike — so use
     # properties.nⁱ (= min(ℳ.nⁱ, Nⁱ_max/ρ)) rather than the raw prognostic here.
@@ -673,10 +670,10 @@ end
     # across mass- and number-weighted fall speeds.
     vᵢ = ice_terminal_velocities(p3, qⁱ_total, properties.nⁱ, Fᶠ, ρᶠ, ρ;
                                  Fˡ = properties.Fˡ)
-    wⁱ, wⁱₙ = vᵢ.mass_weighted, vᵢ.number_weighted
+    wⁱ, wⁿⁱ = vᵢ.mass_weighted, vᵢ.number_weighted
 
     FT = typeof(ρ)
-    return P3FallSpeedResult{FT}(wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ)
+    return P3FallSpeedResult{FT}(wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ, wⁱ, wⁿⁱ)
 end
 
 @inline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
@@ -738,11 +735,11 @@ end
 @inline function write_p3_fall_speeds!(μ, i, j, k, p3::P3, result::P3FallSpeedResult)
     bc = p3.precipitation_boundary_condition
     AM.write_sedimentation_velocity!(μ.wᶜˡ, i, j, k, bc, result.wᶜˡ)
-    AM.write_sedimentation_velocity!(μ.wᶜˡₙ, i, j, k, bc, result.wᶜˡₙ)
+    AM.write_sedimentation_velocity!(μ.wⁿᶜˡ, i, j, k, bc, result.wⁿᶜˡ)
     AM.write_sedimentation_velocity!(μ.wʳ, i, j, k, bc, result.wʳ)
-    AM.write_sedimentation_velocity!(μ.wʳₙ, i, j, k, bc, result.wʳₙ)
+    AM.write_sedimentation_velocity!(μ.wⁿʳ, i, j, k, bc, result.wⁿʳ)
     AM.write_sedimentation_velocity!(μ.wⁱ, i, j, k, bc, result.wⁱ)
-    AM.write_sedimentation_velocity!(μ.wⁱₙ, i, j, k, bc, result.wⁱₙ)
+    AM.write_sedimentation_velocity!(μ.wⁿⁱ, i, j, k, bc, result.wⁿⁱ)
     return nothing
 end
 
@@ -828,15 +825,15 @@ end
 
 # Cloud mass and number: mass- and number-weighted Stokes fall speeds
 @inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqᶜˡ}) = μ.wᶜˡ
-@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnᶜˡ}) = μ.wᶜˡₙ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnᶜˡ}) = μ.wⁿᶜˡ
 
 # Rain mass and number
 @inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqʳ}) = μ.wʳ
-@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnʳ}) = μ.wʳₙ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnʳ}) = μ.wⁿʳ
 
 # Ice mass and number
 @inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqⁱ}) = μ.wⁱ
-@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnⁱ}) = μ.wⁱₙ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnⁱ}) = μ.wⁿⁱ
 
 # Rime mass, rime volume, and liquid on ice all ride on the ice particle, so they fall
 # at the ice mass-weighted speed.

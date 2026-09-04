@@ -342,19 +342,19 @@ AtmosphereModels.precipitation_rate(model, ::DCMIP2016KM, ::Val{:ice}) = nothing
 """
 $(TYPEDSIGNATURES)
 
-Return the surface precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
+Return the bottom precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
 
-The surface precipitation flux is the substep-mean ``ρ^r v^t_{rain}`` at the surface.
+The bottom precipitation flux is the substep-mean ``ρ^r v^t_{rain}`` at the lowest face.
 The stored precipitation rate is normalized so multiplying it by the final total density
 recovers this mass flux exactly. Units are kg/m²/s.
 
-This implements the Breeze `surface_precipitation_flux(model)` interface.
+This implements the Breeze `bottom_precipitation_flux(model)` interface.
 """
-function AtmosphereModels.surface_precipitation_flux(model, ::DCMIP2016KM)
+function AtmosphereModels.bottom_precipitation_flux(model, ::DCMIP2016KM)
     grid = model.grid
     μ = model.microphysical_fields
     ρ = total_density(model.dynamics)
-    # surface_precipitation_flux = ρ × precipitation_rate (kg/m²/s)
+    # bottom_precipitation_flux = ρ × precipitation_rate (kg/m²/s)
     kernel = DCMIP2016KesslerSurfaceFluxKernel(μ.precipitation_rate, ρ)
     op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid)
     return Field(op)
@@ -370,7 +370,7 @@ Adapt.adapt_structure(to, k::DCMIP2016KesslerSurfaceFluxKernel) =
                                       adapt(to, k.density))
 
 @inline function (kernel::DCMIP2016KesslerSurfaceFluxKernel)(i, j, k_idx, grid)
-    # surface_precipitation_flux = ρ × precipitation_rate
+    # bottom_precipitation_flux = ρ × precipitation_rate
     @inbounds P = kernel.precipitation_rate[i, j]
     @inbounds ρ = kernel.density[i, j, 1]
     return ρ * P

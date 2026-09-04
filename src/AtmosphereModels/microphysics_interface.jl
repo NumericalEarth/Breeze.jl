@@ -769,8 +769,8 @@ Microphysics schemes extend this function for each sedimenting tracer, dispatchi
 """
 $(TYPEDSIGNATURES)
 
-Return the thermodynamic phase, `Val(:liquid)` or `Val(:ice)`, of the condensate mass `name`,
-or `nothing` (the default) for a mass that does not sediment.
+Return the thermodynamic phase of the condensate mass `name` as `Val(:liquid)` or `Val(:ice)`,
+or `nothing` (the default) for anything that is not a sedimenting condensate mass.
 
 Every name in [`condensate_field_names`](@ref) with a [`sedimentation_velocity`](@ref) must
 declare its phase; [`materialize_sedimentation_constituents`](@ref) checks this at model
@@ -779,8 +779,15 @@ phase is the enthalpy the mass carries, not what it falls with: P3's liquid on i
 falls at the ice speed yet is liquid, because no fusion enthalpy has been released for it and
 [`moisture_fractions`](@ref) counts it in the liquid mass fraction.
 
-Number moments and non-additive particle properties (P3's rime mass `ρqᶠ` and rime volume
-`ρbᶠ`) are not condensate masses and need no method.
+The default `nothing` covers three cases, none needing a method: condensate that does not
+sediment (saturation-adjusted cloud), a sedimenting tracer that is not a condensate mass (a
+number moment such as `ρnᶜˡ`, or a non-additive property such as P3's `ρqᶠ` and `ρbᶠ`), and a
+scheme that precipitates by its own means. Only a sedimenting condensate mass with no phase is
+an error.
+
+A mixed-phase particle is normally two condensate masses sharing a fall speed, as P3 carries ice
+`ρqⁱ` and the liquid on it `ρqʷⁱ`. One mass of mixed composition may return its liquid fraction
+instead, which `phase_content` resolves exactly, the content being linear in composition.
 """
 @inline condensate_phase(microphysics, ::Val) = nothing
 
@@ -821,9 +828,9 @@ function sedimentation_velocity_field(grid)
 end
 
 # Bottom boundary treatment of a diagnosed fall speed. Index `k = 1` is the bottom face of
-# the domain and carries the surface precipitation flux: `nothing` (the default
+# the domain and carries the bottom precipitation flux: `nothing` (the default
 # precipitation boundary condition) keeps the diagnosed fall speed there, so precipitation
-# leaves through an open surface, while an impenetrable boundary condition zeroes it, so
+# leaves through an open bottom, while an impenetrable boundary condition zeroes it, so
 # precipitation accumulates in the lowest cell instead. Dispatch is on the
 # boundary-condition *type*, so the choice folds to a constant per concrete scheme and
 # stays GPU-safe.
@@ -1038,6 +1045,11 @@ end
 @inline phase_content(::Val{:liquid}, χ) = χ[1]
 @inline phase_content(::Val{:ice}, χ) = χ[2]
 
+# A single mass of mixed composition, declared as its liquid fraction. The content is a
+# directional derivative in composition space, hence linear in the composition: a mass leaving
+# along f eˡ + (1 − f) eⁱ carries f χˡ + (1 − f) χⁱ exactly. The pure phases above are f = 1, 0.
+@inline phase_content(liquid_fraction::Number, χ) = liquid_fraction * χ[1] + (1 - liquid_fraction) * χ[2]
+
 @inline upwind_content(w, χ_below, χ_above) = ifelse(w > 0, χ_below, χ_above)
 
 """
@@ -1163,7 +1175,7 @@ precipitation_rate(model, phase::Symbol=:liquid) = precipitation_rate(model, mod
 precipitation_rate(model, microphysics, phase) = CenterField(model.grid)
 
 #####
-##### Surface precipitation flux diagnostic
+##### Bottom precipitation flux diagnostic
 #####
 
 """
@@ -1180,7 +1192,7 @@ non-equilibrium 1M and 2M schemes, and P3) this includes cloud droplet and cloud
 not only rain and snow. For adaptive implicit vertical advection, this is the split-operator
 flux evaluated at the current state rather than a time-integrated mass-loss diagnostic.
 Schemes that move precipitation by internal means (such as `DCMIP2016KM`) extend
-`surface_precipitation_flux(model, microphysics)` instead.
+`bottom_precipitation_flux(model, microphysics)` instead.
 
 Building the returned `Field` assembles a kernel operation, so construct it once and
 `compute!` it repeatedly rather than calling this inside a callback.
@@ -1191,7 +1203,7 @@ Arguments:
 The generic method is implemented in `Breeze.Advection`, which owns the flux kernel and is
 loaded after this module.
 """
-surface_precipitation_flux(model) = surface_precipitation_flux(model, model.microphysics)
+bottom_precipitation_flux(model) = bottom_precipitation_flux(model, model.microphysics)
 
 #####
 ##### Cloud effective radius interface

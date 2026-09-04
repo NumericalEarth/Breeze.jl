@@ -97,7 +97,7 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
              - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, velocities.w, dynamics,
-                                                   ExplicitSedimentationFluxes(), theta_condensate_content,
+                                                   ExplicitSedimentationFluxes(), potential_temperature_condensate_content,
                                                    formulation, dynamics, constants, microphysics,
                                                    microphysical_fields, specific_prognostic_moisture)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
@@ -119,7 +119,7 @@ end
 # The remainder of the sedimentation transport that the adaptive implicit solve applies to the
 # tracers, moved with its content after their solves.
 AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, Δt, velocities) =
-    implicit_sedimentation_step!(model, Δt, velocities, theta_condensate_content,
+    implicit_sedimentation_step!(model, Δt, velocities, potential_temperature_condensate_content,
                                  model.formulation, model.dynamics, model.thermodynamic_constants,
                                  model.microphysics, model.microphysical_fields, specific_prognostic_moisture(model))
 
@@ -145,8 +145,8 @@ AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, 
 # is written through Π so that every state type that defines an Exner function serves). The
 # shared `condensate_sedimentation_divergence` evaluates the content in each flux's upwind cell
 # and owns the discretization.
-@inline function theta_condensate_content(i, j, k, grid, formulation, dynamics, constants,
-                                          microphysics, microphysical_fields, specific_prognostic_moisture)
+@inline function potential_temperature_condensate_content(i, j, k, grid, formulation, dynamics, constants,
+                                                          microphysics, microphysical_fields, specific_prognostic_moisture)
     𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
                                  microphysics, microphysical_fields, specific_prognostic_moisture)
     q = 𝒰.moisture_mass_fractions
