@@ -7,7 +7,7 @@ using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity,
                                implicit_advection_density, implicit_step_scheme, closure_scalar_index,
                                ExplicitSedimentationFluxes, phase_content
 using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState,
-                             LiquidIceDensityState, mixture_gas_constant
+                             LiquidIceDensityState, StaticEnergyState, mixture_gas_constant
 using CloudMicrophysics
 using CloudMicrophysics.Microphysics1M: conv_q_lcl_to_q_rai, accretion
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce, Microphysics1MParams
@@ -447,11 +447,12 @@ end
     @test C > 3
     @test Δρqʳ[Nz] ≈ -C / (1 + C) * ρqʳ⁰[Nz]
 
-    # With a uniform synthetic content, the heat the post-solve step moves is χ times the mass
-    # the solve moved, cell by cell (the anelastic coupling ratio is one), outflow through the
-    # bottom included, so the column loses deficit with the rain that leaves.
+    # With a uniform synthetic content and enthalpy (no sensible heat moves between cells), the
+    # heat the post-solve step moves is χ times the mass the solve moved, cell by cell (the
+    # anelastic coupling ratio is one), outflow through the bottom included, so the column loses
+    # deficit with the rain that leaves.
     χ = FT(-2500)
-    uniform_content(i, j, k, grid) = (χ, zero(χ))
+    uniform_content(i, j, k, grid) = (; χ = (χ, zero(χ)), h = (zero(χ), zero(χ)), ∂φ∂h = one(χ))
     ρθ = model.formulation.potential_temperature_density
     ρθ⁰ = Array(interior(ρθ, 1, 1, :))
     Breeze.AtmosphereModels.implicit_sedimentation_step!(model, Δt, model.velocities, uniform_content)
@@ -720,9 +721,11 @@ end
         qʳᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ)) for k in 1:Nz+1]
         Φ = wʳ .* qʳᶠ
 
-        # The content per unit falling liquid is ∂φ/∂qˡ at fixed temperature (see
-        # `condensate_content` in setup.jl), with the temperature the tendency kernel works
-        # with: the θ kernel diagnoses it from θ and q, the s kernel reads `model.temperature`.
+        # The content per unit falling liquid is ∂φ/∂qˡ at fixed temperature, the enthalpy it
+        # carries is the static-energy content hˡ − hᵈ, and the heating response is ∂φ/∂h (see
+        # `condensate_content` and `heating_response` in setup.jl), all at the temperature the
+        # tendency kernel works with: the θ kernel diagnoses it from θ and q, the s kernel reads
+        # `model.temperature`.
         q = [MoistureMassFractions(qᵛ[k], qˡ[k], zero(FT)) for k in 1:Nz]
         if formulation == :LiquidIcePotentialTemperature
             θ = column(model.formulation.potential_temperature)
@@ -734,19 +737,25 @@ end
             G = column(model.timestepper.Gⁿ.ρs)
         end
         χ = [condensate_content(formulation, :liquid, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+        h = [condensate_content(:StaticEnergy, :liquid, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+        β = [heating_response(formulation, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
 
-        # With no transport velocity every flux is downward, so each face carries the content
-        # of the cell above it (clamped at the top, where the flux vanishes)
-        F = [ρᵣᶠ[k] * Φ[k] * χ[min(k, Nz)] for k in 1:Nz+1]
-        G_expected = [-(F[k+1] - F[k]) / Δz for k in 1:Nz]
+        # With no transport velocity every flux is downward: through a cell's upper face it
+        # drains the cell above and delivers χ plus β times the enthalpy brought in excess of the
+        # cell's own; through its lower face it drains the cell itself and delivers χ alone.
+        G_expected = expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φ, χ, h, β)
 
         scale = maximum(abs.(G))
         tolerance = scale * sqrt(eps(FT))
         @test scale > 0
         @test all(abs.(G .- G_expected) .<= tolerance)
-        @test abs(sum(G)) <= tolerance # conservative: the blob is away from the boundaries
         @test G[3] < 0                 # rain arriving below the blob pre-cools
         @test G[5] > 0                 # rain leaving the blob top leaves latent warming behind
+
+        # The enthalpy is the content of s and ∂s/∂h = 1, so for s the sum is a flux form,
+        # conservative with the blob away from the boundaries. ∫ρθ is not: the Jacobian ∂θˡⁱ/∂qˡ
+        # differs between cells and is converted locally rather than transported.
+        formulation == :StaticEnergy && @test abs(sum(G)) <= tolerance
     end
 
     # Rain sedimenting out of the open bottom removes its deficit, so ∫ρθ rises: the latent
@@ -819,16 +828,22 @@ Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, 
     p = [ρᶜ[k] * mixture_gas_constant(q[k], constants) * T[k] for k in 1:Nz]
     G = column(model.timestepper.Gⁿ.ρθ)
 
-    # Every flux is downward, so each face carries the content of the cell above it
-    expected(χ) = [-qᵈ[k] * (ρᶠ[k+1] * Φ[k+1] * χ[min(k+1, Nz)] - ρᶠ[k] * Φ[k] * χ[k]) / Δz for k in 1:Nz]
-    χ = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ; replacement=:mixture) for k in 1:Nz]
-    χ_dry = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ) for k in 1:Nz]
+    # Every flux is downward: through a cell's upper face it drains the cell above and delivers
+    # the cell's content plus its heating response times the enthalpy brought in excess of the
+    # cell's own, through its lower face it delivers the content alone, and the cell's qᵈ converts
+    # the change of θ into that of ρᵈ θ. The enthalpy is taken relative to the mixture, like the
+    # content.
+    content(; replacement) = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ; replacement) for k in 1:Nz]
+    enthalpy(; replacement) = [condensate_content(:StaticEnergy, :liquid, T[k], q[k], p[k], pˢᵗ; replacement) for k in 1:Nz]
+    β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], p[k], pˢᵗ) for k in 1:Nz]
+    expected(replacement) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; replacement), enthalpy(; replacement), β;
+                                                            coupling = qᵈ)
 
     scale = maximum(abs.(G))
     tolerance = scale * sqrt(eps(FT))
     @test scale > 0
-    @test all(abs.(G .- expected(χ)) .<= tolerance)
-    @test any(abs.(G .- expected(χ_dry)) .> tolerance)
+    @test all(abs.(G .- expected(:mixture)) .<= tolerance)
+    @test any(abs.(G .- expected(:dry_air)) .> tolerance)
     @test G[3] < 0 # rain arriving below the blob pre-cools
     @test G[5] > 0 # rain leaving the blob top leaves latent warming behind
 
@@ -847,14 +862,16 @@ Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, 
     Tₛ = column(energy_model.temperature)
     pᵣ = column(energy_model.dynamics.reference_state.pressure)
     for k in 1:Nz
-        χˡ, _ = @allowscalar Breeze.StaticEnergyFormulations.static_energy_condensate_content(
+        c = @allowscalar Breeze.StaticEnergyFormulations.static_energy_condensate_content(
             1, 1, k, grid, mixture_dynamics, constants, energy_model.microphysics, μₛ,
             Breeze.AtmosphereModels.specific_prognostic_moisture(energy_model), energy_model.temperature)
         qₖ = MoistureMassFractions(qᵛₛ[k], qˡₛ[k], zero(FT))
         χ_expected = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ; replacement=:mixture)
         χ_dry = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ)
-        @test isapprox(χˡ, χ_expected; rtol=sqrt(eps(FT)))
-        @test !isapprox(χˡ, χ_dry; rtol=sqrt(eps(FT)))
+        @test isapprox(c.χ[1], χ_expected; rtol=sqrt(eps(FT)))
+        @test !isapprox(c.χ[1], χ_dry; rtol=sqrt(eps(FT)))
+        @test c.h === c.χ # the content of s is the enthalpy the falling mass carries
+        @test c.∂φ∂h == 1
     end
 end
 
@@ -881,7 +898,7 @@ end
     @test phase_content(FT(0.5), χ) ≈ (phase_content(Val(:liquid), χ) + phase_content(Val(:ice), χ)) / 2 rtol=eps(FT)
 end
 
-@testset "Sedimentation content follows each flux's upwind cell [$(FT)]" for FT in test_float_types()
+@testset "Sedimentation delivers the local content plus the converted upwind enthalpy [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 4
     Δz = FT(100)
@@ -895,38 +912,137 @@ end
     μ = model.microphysical_fields
 
     # Rain with a uniform fall speed and a height-dependent humidity; the cloud constituent is
-    # emptied so only rain contributes. A synthetic content χ = k for cell k identifies the
-    # cell each flux draws its content from.
+    # emptied so only rain contributes. Synthetic contents indexed by the cell identify the cell
+    # each flux draws its enthalpy from and the cell that converts it.
     wʳ = FT(-2)
     set!(μ.wʳ, wʳ)
     set!(μ.qʳ, (x, y, z) -> FT(1e-3) * (1 + z / (Nz * Δz)))
     set!(μ.wᶜˡ, 0)
     set!(μ.qᶜˡ, 0)
-    synthetic_content(i, j, k, grid) = (FT(k), FT(10k))
 
     ρᵣ = model.dynamics.reference_state.density
     ρᵣᶠ(k) = @allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρᵣ)
     q̄(k) = @allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ) # Centered(order=2) face reconstruction
     Az = FT(100 * 100)
+    divergence(content, wᵗ, k) = @allowscalar Breeze.AtmosphereModels.condensate_sedimentation_divergence(
+        1, 1, k, grid, model.sedimentation_constituents, wᵗ, model.dynamics,
+        ExplicitSedimentationFluxes(), content)
+    transport_velocities = (FT(0), FT(1), FT(5))
 
-    # Each flux carries the content of the cell it drains: the cell above face k (content k)
-    # for a downward velocity, the cell below (content k − 1) for an upward one. With no
+    # Each flux brings the enthalpy of the cell it drains: the cell above face k (enthalpy k)
+    # for a downward velocity, the cell below (enthalpy k − 1) for an upward one. With no
     # transport both fluxes are downward; a transport velocity below the fall speed leaves the
     # total velocity downward while the transport flux it replaces drained the cell below; a
-    # transport velocity above the fall speed makes both fluxes draw from the cell below.
-    for wᵗ_value in (FT(0), FT(1), FT(5))
+    # transport velocity above the fall speed makes both fluxes draw from the cell below. With
+    # the content equal to the enthalpy and a unit heating response, as for static energy, the
+    # delivered content is the upwind enthalpy itself and the divergence takes the flux form.
+    enthalpy_content(i, j, k, grid) = (; χ = (FT(k), FT(10k)), h = (FT(k), FT(10k)), ∂φ∂h = one(FT))
+    for wᵗ_value in transport_velocities
         wᵗ = set!(ZFaceField(grid), wᵗ_value)
         W = wᵗ_value + wʳ
-        χ(w, k) = w > 0 ? FT(k - 1) : FT(k)
-        F(k) = ρᵣᶠ(k) * Az * q̄(k) * (χ(W, k) * W - χ(wᵗ_value, k) * wᵗ_value)
+        h(w, k) = w > 0 ? FT(k - 1) : FT(k)
+        F(k) = ρᵣᶠ(k) * Az * q̄(k) * (h(W, k) * W - h(wᵗ_value, k) * wᵗ_value)
         for k in 2:Nz-1
             expected = (F(k + 1) - F(k)) / (Az * Δz)
-            computed = @allowscalar Breeze.AtmosphereModels.condensate_sedimentation_divergence(
-                1, 1, k, grid, model.sedimentation_constituents, wᵗ, model.dynamics,
-                ExplicitSedimentationFluxes(), synthetic_content)
-            @test computed ≈ expected
+            @test divergence(enthalpy_content, wᵗ, k) ≈ expected
         end
     end
+
+    # With a uniform enthalpy no sensible heat moves between cells, and every flux, in or out,
+    # delivers the cell's own content: the divergence is the content of cell k times the
+    # sedimentation part of the mass divergence the tracer tendency applies.
+    local_content(i, j, k, grid) = (; χ = (FT(k), FT(10k)), h = (zero(FT), zero(FT)), ∂φ∂h = one(FT))
+    for wᵗ_value in transport_velocities
+        wᵗ = set!(ZFaceField(grid), wᵗ_value)
+        W = wᵗ_value + wʳ
+        M(k) = ρᵣᶠ(k) * Az * q̄(k) * (W - wᵗ_value)
+        for k in 2:Nz-1
+            expected = FT(k) * (M(k + 1) - M(k)) / (Az * Δz)
+            @test divergence(local_content, wᵗ, k) ≈ expected
+        end
+    end
+
+    # In general each flux delivers the cell's content plus its heating response times the
+    # enthalpy of the cell the flux drains in excess of the cell's own.
+    general_content(i, j, k, grid) = (; χ = (FT(k), FT(10k)), h = (FT(k^2), FT(-k)), ∂φ∂h = FT(1) / 2)
+    for wᵗ_value in transport_velocities
+        wᵗ = set!(ZFaceField(grid), wᵗ_value)
+        W = wᵗ_value + wʳ
+        h(w, face) = w > 0 ? FT((face - 1)^2) : FT(face^2) # enthalpy of the cell the flux through `face` drains
+        for k in 2:Nz-1
+            delivered(w, face) = FT(k) + (h(w, face) - FT(k^2)) / 2
+            F(face) = ρᵣᶠ(face) * Az * q̄(face) * (delivered(W, face) * W - delivered(wᵗ_value, face) * wᵗ_value)
+            expected = (F(k + 1) - F(k)) / (Az * Δz)
+            @test divergence(general_content, wᵗ, k) ≈ expected
+        end
+    end
+end
+
+@testset "Both formulations agree on the temperature change sedimentation causes [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(100)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+
+    # A mid-column rain blob in an unsaturated column with non-equilibrium cloud formation, so
+    # that both kernels work with the model's temperature (the saturation-adjusted temperature
+    # leaves rain out of the liquid). Rain evaporation is part of the rain tendency but changes
+    # neither θˡⁱ nor s, so the temperature change each formulation implies is diagnosed from its
+    # thermodynamic tendency and the sedimentation part of the mass tendency alone, over a short
+    # interval and in Float64, which keeps the nonlinear remainder and the roundoff well below
+    # the tolerance. The flux form of the Jacobian ∂θˡⁱ/∂qˡ disagreed here with static energy by
+    # a factor of two, and in sign in two cells.
+    rain_blob(x, y, z) = ifelse(300 < z < 500, FT(1e-3), FT(0))
+    Δt = 1e-3
+    ΔT = Dict{Symbol, Vector{Float64}}()
+    for formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
+        dynamics = AnelasticDynamics(reference_state)
+        microphysics = OneMomentCloudMicrophysics(FT)
+        model = AtmosphereModel(grid; dynamics, microphysics, formulation)
+        set!(model; θ=300, qᵛ=0.005, qʳ=rain_blob)
+        update_state!(model)
+
+        μ = model.microphysical_fields
+        column(f) = Float64.(Array(interior(f, 1, 1, :)))
+        ρᵣ = column(model.dynamics.reference_state.density)
+        pᵣ = column(model.dynamics.reference_state.pressure)
+        pˢᵗ = Float64(reference_state.standard_pressure)
+        z = [Float64(znode(1, 1, k, grid, Center(), Center(), Center())) for k in 1:Nz]
+        constants₆₄ = ThermodynamicConstants(Float64)
+
+        # The sedimentation part of the rain mass tendency: the Centered(order=2) flux at the fall speed
+        ρᵣᶠ = [Float64(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, model.dynamics.reference_state.density)) for k in 1:Nz+1]
+        Fʳ = [ρᵣᶠ[k] * Float64(@allowscalar μ.wʳ[1, 1, k]) * Float64(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ)) for k in 1:Nz+1]
+        Δqˡ = [-Δt * (Fʳ[k+1] - Fʳ[k]) / (Float64(Δz) * ρᵣ[k]) for k in 1:Nz]
+
+        qᵛ = column(μ.qᵛ)
+        qˡ = column(μ.qˡ)
+        q₀ = [MoistureMassFractions(qᵛ[k], qˡ[k], 0.0) for k in 1:Nz]
+        q₁ = [MoistureMassFractions(qᵛ[k], qˡ[k] + Δqˡ[k], 0.0) for k in 1:Nz]
+        if formulation == :LiquidIcePotentialTemperature
+            θ = column(model.formulation.potential_temperature)
+            Δθ = Δt .* column(model.timestepper.Gⁿ.ρθ) ./ ρᵣ
+            T₀ = [Breeze.Thermodynamics.temperature(LiquidIcePotentialTemperatureState(θ[k], q₀[k], pˢᵗ, pᵣ[k]), constants₆₄) for k in 1:Nz]
+            T₁ = [Breeze.Thermodynamics.temperature(LiquidIcePotentialTemperatureState(θ[k] + Δθ[k], q₁[k], pˢᵗ, pᵣ[k]), constants₆₄) for k in 1:Nz]
+        else
+            s = column(model.formulation.specific_energy)
+            Δs = Δt .* column(model.timestepper.Gⁿ.ρs) ./ ρᵣ
+            T₀ = [Breeze.Thermodynamics.temperature(StaticEnergyState(s[k], q₀[k], z[k], pᵣ[k]), constants₆₄) for k in 1:Nz]
+            T₁ = [Breeze.Thermodynamics.temperature(StaticEnergyState(s[k] + Δs[k], q₁[k], z[k], pᵣ[k]), constants₆₄) for k in 1:Nz]
+        end
+        @test all(isapprox.(T₀, column(model.temperature); rtol=sqrt(eps(FT)))) # both kernels see this temperature
+        ΔT[formulation] = T₁ .- T₀
+    end
+
+    ΔTθ = ΔT[:LiquidIcePotentialTemperature]
+    ΔTs = ΔT[:StaticEnergy]
+    scale = maximum(abs.(ΔTs))
+    @test scale > 0
+    @test all(abs.(ΔTθ .- ΔTs) .<= 1e-3 * scale)
+    @test ΔTs[4] < 0 # rain from the colder cell above cools the blob's lower cell
 end
 
 @testset "Bounds-preserving WENO sedimentation heat follows the limited mass flux [$(FT)]" for FT in test_float_types()
@@ -952,7 +1068,7 @@ end
     set!(μ.wᶜˡ, 0)
     set!(μ.qᶜˡ, 0)
     χ = FT(-2.5e6)
-    uniform_content(i, j, k, grid) = (χ, zero(χ))
+    uniform_content(i, j, k, grid) = (; χ = (χ, zero(χ)), h = (zero(χ), zero(χ)), ∂φ∂h = one(χ))
 
     wᵗ = ZFaceField(grid)
     ρᵣ = model.dynamics.reference_state.density

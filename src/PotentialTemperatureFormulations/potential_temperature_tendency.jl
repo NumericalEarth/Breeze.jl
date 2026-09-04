@@ -131,8 +131,8 @@ AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, 
 # q → q + ε (eˣ − r), where r is the composition that takes up the departed mass
 # (`sedimentation_replacement`): dry air on the anelastic core, whose total density is fixed,
 # the local mixture on the compressible core, whose total density falls with the condensate
-# while the pressure p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T does not. Sedimentation alone then leaves the
-# temperature unchanged on either core. From T = Π θ + (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ with
+# while the pressure p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T does not. Losing condensate at this content leaves
+# the temperature unchanged on either core. From T = Π θ + (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ with
 # Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ),
 #
 #   χˣ = −(ℒˣᵣ − ℒʳ − Δcˣ D) / (cᵖᵐ Π) + θ lnΠ (Rʳ / Rᵐ + Δcˣ / cᵖᵐ) ,
@@ -142,9 +142,14 @@ AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, 
 # cᵖᵐ D for the mixture). The first term is the deficit the falling condensate carries,
 # −ℒˣᵣ / (cᵖᵐ Π) to leading order; the rest accounts for the heat capacity and gas constant of
 # the mixture changing as condensate gives way to its replacement (lnΠ = (Rᵐ / cᵖᵐ) ln(p / pˢᵗ)
-# is written through Π so that every state type that defines an Exner function serves). The
-# shared `condensate_sedimentation_divergence` evaluates the content in each flux's upwind cell
-# and owns the discretization.
+# is written through Π so that every state type that defines an Exner function serves).
+#
+# What the falling mass carries between cells is its enthalpy relative to its replacement,
+# hˣ − hʳ = Δcˣ T − (ℒˣᵣ − ℒʳ), the content of the static energy. A cell receiving it converts
+# that sensible heat through ∂θˡⁱ/∂h = 1 / (cᵖᵐ Π), the factor that turns heating rates into ρθ
+# tendencies. χ itself is not transported: it varies with Π, so moving it between pressure levels
+# would conserve ∫ρθ, which precipitation does not. The shared
+# `condensate_sedimentation_divergence` owns the discretization.
 @inline function potential_temperature_condensate_content(i, j, k, grid, formulation, dynamics, constants,
                                                           microphysics, microphysical_fields, specific_prognostic_moisture)
     𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
@@ -170,7 +175,14 @@ AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, 
 
     χˡ = -(ℒˡᵣ - ℒʳ - Δcˡ * D) / (cᵖᵐ * Π) + θlnΠ * (Rʳ / Rᵐ + Δcˡ / cᵖᵐ)
     χⁱ = -(ℒⁱᵣ - ℒʳ - Δcⁱ * D) / (cᵖᵐ * Π) + θlnΠ * (Rʳ / Rᵐ + Δcⁱ / cᵖᵐ)
-    return χˡ, χⁱ
+
+    # Enthalpy of each phase relative to its replacement, and the response of θ to heating
+    T = Π * θ + D
+    hˡ = Δcˡ * T - (ℒˡᵣ - ℒʳ)
+    hⁱ = Δcⁱ * T - (ℒⁱᵣ - ℒʳ)
+    ∂θ∂h = 1 / (cᵖᵐ * Π)
+
+    return (; χ = (χˡ, χⁱ), h = (hˡ, hⁱ), ∂φ∂h = ∂θ∂h)
 end
 
 #####

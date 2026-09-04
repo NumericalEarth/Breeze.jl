@@ -177,22 +177,27 @@ sedimentation mass flux — the advective flux of its humidity at the combined r
 velocity minus the flux at the resolved velocity alone, computed with the same advection scheme
 that transports the tracer's mass (for bounds-preserving WENO, from the same per-cell limited
 reconstructions the tracer operator uses, so the limiter never separates heat from water at
-cloud and precipitation edges), each flux carrying the content of the cell it drains, so
-latent heat lands exactly where the mass does — is binned by its phase into ``Φˡ`` and ``Φⁱ``.
-These transport the condensate part of the prognostic, with
-the content per unit falling mass taken as the partial derivative of the specific variable with
-respect to that condensate mass fraction at fixed temperature, so that sedimentation alone leaves
-the temperature unchanged. What takes up the departed mass is the dynamics' call
-(`sedimentation_replacement`): dry air on the anelastic core, whose total density is fixed so
-that ``qᵈ`` absorbs the change; the local mixture on the compressible core, whose prognostic dry
-density has no sedimentation source, so that the diagnosed total density falls with the
-condensate and every mass fraction renormalizes. The content is then ``(cˣ - cʳ) T - (ℒˣᵣ - ℒʳ)``
-for `ρs`, the enthalpy of the condensate relative to that of its replacement (``(cˣ - cᵖᵈ) T - ℒˣᵣ``
-against dry air, ``hˣ - (s - g z)`` against the mixture), and ``∂θˡⁱ/∂qˣ`` along the same
-composition change (to leading order ``-ℒˣᵣ / (cᵖᵐ Π)``) for `ρθ`. The content fluxes ride the
-total-density-weighted mass flux the tracer tendency applies, and the cell's coupling-to-total
-density ratio (one on the anelastic core, ``qᵈ = ρᵈ / ρ`` on the compressible core) converts the
-change of the specific variable into that of the coupling-weighted prognostic. Under adaptive
+cloud and precipitation edges) — is binned by its phase and weighted by the content it delivers
+to the cell. The falling mass carries its enthalpy and each cell converts what it gains or loses
+locally: a flux out of a cell removes the cell's own ``χˣ``, the partial derivative of the
+specific variable with respect to that condensate mass fraction at fixed temperature, so the
+cell the condensate leaves keeps its temperature; a flux in delivers ``χˣ`` plus ``∂φ/∂h`` times
+the enthalpy ``hˣ - hʳ`` the arriving mass brings in excess of the receiving cell's. What takes
+up the departed mass is the dynamics' call (`sedimentation_replacement`): dry air on the
+anelastic core, whose total density is fixed so that ``qᵈ`` absorbs the change; the local
+mixture on the compressible core, whose prognostic dry density has no sedimentation source, so
+that the diagnosed total density falls with the condensate and every mass fraction
+renormalizes. The enthalpy is then ``(cˣ - cʳ) T - (ℒˣᵣ - ℒʳ)`` (``(cˣ - cᵖᵈ) T - ℒˣᵣ`` against
+dry air, ``hˣ - (s - g z)`` against the mixture), which is also the content of `ρs`; with
+``∂s/∂h = 1`` the sum collapses to the flux form and ``∫ρs`` is conserved. For `ρθ` the content
+is ``∂θˡⁱ/∂qˣ`` along the same composition change (to leading order ``-ℒˣᵣ / (cᵖᵐ Π)``) with
+``∂θˡⁱ/∂h = 1 / (cᵖᵐ Π)``, and must not collapse: that Jacobian varies with the Exner function,
+so moving it between pressure levels would conserve ``∫ρθ``, which precipitation does not (heat
+released at one pressure and absorbed at another). Both formulations respond in temperature
+identically. The content fluxes ride the total-density-weighted mass flux the tracer tendency
+applies, and the cell's coupling-to-total density ratio (one on the anelastic core,
+``qᵈ = ρᵈ / ρ`` on the compressible core) converts the change of the specific variable into that
+of the coupling-weighted prognostic. Under adaptive
 implicit vertical advection the tendency carries the content of the explicit fraction of each
 mass flux only; after the tracers' implicit solves of every stage the time steppers call
 `implicit_sedimentation_step!`, which moves the content of the remainder from the first-order

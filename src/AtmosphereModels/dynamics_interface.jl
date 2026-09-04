@@ -194,8 +194,9 @@ responds depends on what the departed mass gives way to:
   itself takes up the departed mass.
 
 The thermodynamic formulations differentiate their variable along `q → q + ε (eˣ − r)`, with
-`r` this replacement, for the content per unit falling mass that leaves the temperature unchanged
-(see [`condensate_sedimentation_divergence`](@ref)).
+`r` this replacement, for the content per unit falling mass — at which the cell the condensate
+leaves keeps its temperature — and take the enthalpy the mass carries relative to `r` (see
+[`condensate_sedimentation_divergence`](@ref)).
 """
 @inline sedimentation_replacement(dynamics, q) = zero(typeof(q))
 

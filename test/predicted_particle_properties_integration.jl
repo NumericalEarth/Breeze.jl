@@ -792,41 +792,41 @@ using Oceananigans.TimeSteppers: update_state!
         ρᵣ = model.dynamics.reference_state.density
         ρᵣᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρᵣ)) for k in 1:Nz+1]
 
-        # The content per unit falling mass of each phase is ∂θˡⁱ/∂qˣ at fixed temperature
-        # (see `condensate_content` in setup.jl), at the temperature the kernel diagnoses
-        # from θ and q; the thermodynamic liquid includes the liquid on ice.
+        # The content per unit falling mass of each phase is ∂θˡⁱ/∂qˣ at fixed temperature, the
+        # enthalpy it carries the static-energy content hˣ − hᵈ, and the heating response ∂θˡⁱ/∂h
+        # (see `condensate_content` and `heating_response` in setup.jl), at the temperature the
+        # kernel diagnoses from θ and q; the thermodynamic liquid includes the liquid on ice.
         q = [MoistureMassFractions(qᵛ[k], qᶜˡ[k] + qʳ[k] + qʷⁱ[k], qⁱ[k]) for k in 1:Nz]
         T = [Breeze.Thermodynamics.temperature(LiquidIcePotentialTemperatureState(θ[k], q[k], pˢᵗ, pᵣ[k]), constants)
              for k in 1:Nz]
-        χˡ = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
-        χⁱ = [condensate_content(:LiquidIcePotentialTemperature, :ice, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+        content(phase) = [condensate_content(:LiquidIcePotentialTemperature, phase, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+        enthalpy(phase) = [condensate_content(:StaticEnergy, phase, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+        χˡ, χⁱ, hˡ, hⁱ = content(:liquid), content(:ice), enthalpy(:liquid), enthalpy(:ice)
+        β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
 
         # Phase-resolved advective sedimentation mass fluxes: with zero resolved velocity
         # and the default Centered(order=2) scheme, each constituent's flux at face k is
         # its fall speed times its face-interpolated humidity. qʷⁱ contributes its
         # ice-speed flux to Φˡ; with no transport velocity every flux is downward, so the
-        # content comes from the cell above face k.
+        # flux through a cell's upper face brings the enthalpy of the cell above.
         face(q_field) = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, q_field)) for k in 1:Nz+1]
         qᶜˡᶠ, qʳᶠ, qʷⁱᶠ, qⁱᶠ = face(μ.qᶜˡ), face(μ.qʳ), face(μ.qʷⁱ), face(μ.qⁱ)
-        above(k) = min(k, Nz)
         Φˡ = @. wᶜˡ * qᶜˡᶠ + wʳ * qʳᶠ + wⁱ * qʷⁱᶠ
         Φⁱ = @. wⁱ * qⁱᶠ
 
         Δz = FT(100)
-        F = [ρᵣᶠ[k] * (χˡ[above(k)] * Φˡ[k] + χⁱ[above(k)] * Φⁱ[k]) for k in 1:Nz+1]
-        G_expected = [-(F[k+1] - F[k]) / Δz for k in 1:Nz]
+        G_expected = expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φˡ, χˡ, hˡ, β) .+
+                     expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φⁱ, χⁱ, hⁱ, β)
 
         scale = maximum(abs.(G))
         tolerance = scale * sqrt(eps(FT))
         @test scale > 0
         @test all(abs.(G .- G_expected) .<= tolerance)
-        @test abs(sum(G)) <= tolerance # conservative: the blob is away from the boundaries
 
         # Binning qʷⁱ as ice instead (the ice content at wⁱ) must not reproduce the model:
         # the difference is the fusion enthalpy of the liquid-on-ice flux.
         Φʷ = @. wⁱ * qʷⁱᶠ
-        F_as_ice = [F[k] + ρᵣᶠ[k] * (χⁱ[above(k)] - χˡ[above(k)]) * Φʷ[k] for k in 1:Nz+1]
-        G_as_ice = [-(F_as_ice[k+1] - F_as_ice[k]) / Δz for k in 1:Nz]
+        G_as_ice = G_expected .+ expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φʷ, χⁱ .- χˡ, hⁱ .- hˡ, β)
         @test !all(abs.(G .- G_as_ice) .<= tolerance)
     end
 

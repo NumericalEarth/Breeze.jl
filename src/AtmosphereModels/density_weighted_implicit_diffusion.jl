@@ -297,7 +297,8 @@ adaptive implicit vertical solve has just applied to the tracers: subtract `Δt`
 [`condensate_sedimentation_divergence`](@ref) of the [`ImplicitSedimentationFluxes`](@ref) from
 the [`thermodynamic_density`](@ref). `velocities` are the transport velocities whose vertical
 component the tracers' solves split, `Δt` the interval they solved over, and
-`condensate_content(i, j, k, grid, args...)` the formulation's content per unit falling mass.
+`condensate_content(i, j, k, grid, args...)` the formulation's `(; χ, h, ∂φ∂h)` at a cell (see
+[`condensate_sedimentation_divergence`](@ref)).
 The time steppers call the three-argument method after the scalar solves of every stage; each
 thermodynamic formulation implements it by supplying its content function and arguments to this
 one. A no-op when no constituent is advected adaptively implicitly.

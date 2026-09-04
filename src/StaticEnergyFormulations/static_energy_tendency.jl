@@ -91,8 +91,8 @@ AtmosphereModels.implicit_sedimentation_step!(model::StaticEnergyModel, Δt, vel
 # The content per unit falling mass of phase x is χˣ = ∂s/∂qˣ at fixed T along q → q + ε (eˣ − r),
 # where r is the composition that takes up the departed mass (`sedimentation_replacement`): dry
 # air on the anelastic core, whose total density is fixed, the local mixture on the compressible
-# core, whose total density falls with the condensate. Sedimentation alone then leaves the
-# temperature unchanged on either core. From s = cᵖᵐ T + g z − ℒˡᵣ qˡ − ℒⁱᵣ qⁱ,
+# core, whose total density falls with the condensate. Losing condensate at this content leaves
+# the temperature unchanged on either core. From s = cᵖᵐ T + g z − ℒˡᵣ qˡ − ℒⁱᵣ qⁱ,
 #
 #   χˣ = (cˣ − cʳ) T − (ℒˣᵣ − ℒʳ) = hˣ − hʳ ,
 #
@@ -100,8 +100,9 @@ AtmosphereModels.implicit_sedimentation_step!(model::StaticEnergyModel, Δt, vel
 # replaces it, with cʳ the replacement's heat capacity and ℒʳ = ℒˡᵣ rˡ + ℒⁱᵣ rⁱ its latent
 # deficit: cᵖᵈ and 0 for dry air, cᵖᵐ and ℒˡᵣ qˡ + ℒⁱᵣ qⁱ for the mixture, whose enthalpy is
 # s − g z. The geopotential is independent of the composition and drops out. The frictional
-# heating from the fall (g wˣ qˣ) is neglected. The shared `condensate_sedimentation_divergence`
-# evaluates the content in each flux's upwind cell and owns the discretization.
+# heating from the fall (g wˣ qˣ) is neglected. The content is the enthalpy the falling mass
+# carries and ∂s/∂h = 1, so the shared `condensate_sedimentation_divergence` reduces here to the
+# flux form: each flux carries the enthalpy of the cell it drains, and ∫ρs is conserved.
 @inline function static_energy_condensate_content(i, j, k, grid, dynamics, constants,
                                                   microphysics, microphysical_fields, specific_prognostic_moisture,
                                                   temperature_field)
@@ -118,7 +119,7 @@ AtmosphereModels.implicit_sedimentation_step!(model::StaticEnergyModel, Δt, vel
 
     χˡ = (constants.liquid.heat_capacity - cʳ) * T - (ℒˡᵣ - ℒʳ)
     χⁱ = (constants.ice.heat_capacity - cʳ) * T - (ℒⁱᵣ - ℒʳ)
-    return χˡ, χⁱ
+    return (; χ = (χˡ, χⁱ), h = (χˡ, χⁱ), ∂φ∂h = one(T))
 end
 
 #####
