@@ -192,14 +192,20 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     # compute_slow_momentum_tendencies! / compute_slow_scalar_tendencies!.
     compute_flux_bc_tendencies!(model)
 
-    # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
-    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰)
+    # Partition the slow continuity tendency to match the thermodynamic split (a no-op
+    # unless the thermodynamic scheme is adaptive-implicit).
+    split_slow_continuity_tendency!(model)
+
+    # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N. When a scheme is
+    # adaptive-implicit, the CFL-withheld remainder is applied inside the loop, per substep.
+    implicit_advection! = in_loop_implicit_advection(model)
+    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰; implicit_advection!)
 
     # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
     # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
     # vertical advection combined with vertically-implicit closure diffusion. A no-op when
     # the timestepper has no implicit solver.
-    implicit_substep!(model, β * Δt)
+    implicit_substep!(model, β * Δt; advective = implicit_advection! === nothing)
 
     # Update remaining scalars (tracers) using WS-RK3.
     scalar_rk3_substep!(model, β * Δt)

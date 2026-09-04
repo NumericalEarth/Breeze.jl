@@ -1401,7 +1401,7 @@ Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on
 `substepper.substep_distribution`.
 """
-function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ)
+function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ; implicit_advection! = nothing)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -1549,6 +1549,10 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
         # transport velocity see a closed wall (mass conservation).
         enforce_wall_impenetrability!(substepper, model, grid, arch)
         # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
+
+        # Adaptive-implicit vertical advection, applied per substep so the acoustic pressure
+        # adjusts to the residual transport within the same loop (issue #897).
+        implicit_advection! === nothing || implicit_advection!(Δτ)
     end
 
     # Stage-end: convert the accumulated momentum perturbations into a
