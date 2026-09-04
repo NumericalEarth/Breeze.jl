@@ -1,7 +1,6 @@
 using Oceananigans: CenterField, Field
-using Oceananigans.BoundaryConditions: BoundaryCondition, FieldBoundaryConditions, NormalFlow
-using Oceananigans.Fields: ZeroField, ZFaceField
-using Oceananigans.Grids: Center, Face
+using Oceananigans.Fields: ZeroField
+using Oceananigans.Grids: Center
 using Oceananigans.Operators: ℑzᵃᵃᶜ
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
@@ -256,7 +255,7 @@ when `p3.aerosol isa AerosolActivation`. The prescribed-Nᶜˡ path takes drople
 **Diagnostic:**
 - `qᵛ`: Vapor specific humidity (mirrors the prognostic vapor field)
 
-**Sedimentation velocities** (`wᶜˡ`, `wᶜˡₙ`, `wʳ`, `wʳₙ`, `wⁱ`, `wⁱₙ`):
+**Sedimentation velocities** (`wᶜˡ`, `wⁿᶜˡ`, `wʳ`, `wⁿʳ`, `wⁱ`, `wⁿⁱ`):
 z-Face fields, because the scalar flux divergence consumes them as advecting velocities at
 (Center, Center, Face). The surface face carries the precipitation flux out of the domain
 unless `precipitation_boundary_condition = ImpenetrableBoundaryCondition()`; the top face
@@ -287,20 +286,16 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
 
-    # Sedimentation velocity fields (pre-computed once per RK-stage tendency evaluation).
-    # These are *advecting* velocities: the scalar flux divergence reads them at
-    # (Center, Center, Face) via `Az_qᶜᶜᶠ(i, j, k, grid, w) = Azᶜᶜᶠ(i, j, k, grid) * w[i, j, k]`,
-    # so they must live at z-Faces. `bottom = nothing` leaves the kernel-written surface
-    # value untouched by `fill_halo_regions!` (the surface boundary condition is applied in
-    # `write_p3_fall_speeds!` instead), while the default impenetrable top boundary holds
-    # `w[i, j, Nz+1] = 0` so no precipitation falls in through the model top.
-    face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
-    wᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs) # Cloud mass-weighted terminal velocity
-    wᶜˡₙ = ZFaceField(grid; boundary_conditions=face_bcs) # Cloud number-weighted terminal velocity
-    wʳ  = ZFaceField(grid; boundary_conditions=face_bcs)  # Rain mass-weighted terminal velocity
-    wʳₙ = ZFaceField(grid; boundary_conditions=face_bcs) # Rain number-weighted terminal velocity
-    wⁱ  = ZFaceField(grid; boundary_conditions=face_bcs)  # Ice mass-weighted terminal velocity
-    wⁱₙ = ZFaceField(grid; boundary_conditions=face_bcs) # Ice number-weighted terminal velocity
+    # Sedimentation velocity fields, diagnosed once per RK-stage tendency evaluation. The
+    # scalar flux divergence reads them at the cell's z-Face, so they live at (Center, Center,
+    # Face), with the bottom face written by the diagnosing kernel rather than by halo filling
+    # and an impenetrable top holding w = 0 so nothing falls in through the model top.
+    wᶜˡ = AM.sedimentation_velocity_field(grid)  # Cloud mass-weighted terminal velocity
+    wⁿᶜˡ = AM.sedimentation_velocity_field(grid) # Cloud number-weighted terminal velocity
+    wʳ = AM.sedimentation_velocity_field(grid)   # Rain mass-weighted terminal velocity
+    wⁿʳ = AM.sedimentation_velocity_field(grid)  # Rain number-weighted terminal velocity
+    wⁱ = AM.sedimentation_velocity_field(grid)   # Ice mass-weighted terminal velocity
+    wⁿⁱ = AM.sedimentation_velocity_field(grid)  # Ice number-weighted terminal velocity
 
     # Hallett–Mossop uses the temperature at the lowest active atmospheric cell.
     # Store one value per column rather than assuming that local k=1 is active.
@@ -308,7 +303,7 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
 
     fields = (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ,
                 qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, qᵛ,
-                wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ,
+                wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ, wⁱ, wⁿⁱ,
                 surface_temperature)
 
     return merge(fields,
@@ -631,7 +626,7 @@ end
 
 # GPU-safe return structs (NamedTuples require jl_f_tuple on GPU).
 struct P3FallSpeedResult{FT}
-    wᶜˡ :: FT; wᶜˡₙ :: FT; wʳ :: FT; wʳₙ :: FT; wⁱ :: FT; wⁱₙ :: FT
+    wᶜˡ :: FT; wⁿᶜˡ :: FT; wʳ :: FT; wⁿʳ :: FT; wⁱ :: FT; wⁿⁱ :: FT
 end
 
 struct P3TendencyResult{FT}
@@ -656,13 +651,13 @@ end
     vᶜ = cloud_terminal_velocities(p3, ℳ.qᶜˡ, ρ, properties.ν, properties.μᶜˡ, properties.λᶜˡ,
                                    constants)
     wᶜˡ = vᶜ.mass_weighted
-    wᶜˡₙ = vᶜ.number_weighted
+    wⁿᶜˡ = vᶜ.number_weighted
 
     # Rain terminal velocities — fused call shares λ_r, ρ_correction, log10(λ_r)
     # across the two 1D table lookups (mass- and number-weighted).
     vᵣ = rain_terminal_velocities(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     wʳ   = vᵣ.mass_weighted
-    wʳₙ  = vᵣ.number_weighted
+    wⁿʳ  = vᵣ.number_weighted
     # The global ice-number cap must be seen consistently by all downstream math —
     # process rates and terminal velocities alike — so use
     # properties.nⁱ (= min(ℳ.nⁱ, Nⁱ_max/ρ)) rather than the raw prognostic here.
@@ -675,10 +670,10 @@ end
     # across mass- and number-weighted fall speeds.
     vᵢ = ice_terminal_velocities(p3, qⁱ_total, properties.nⁱ, Fᶠ, ρᶠ, ρ;
                                  Fˡ = properties.Fˡ)
-    wⁱ, wⁱₙ = vᵢ.mass_weighted, vᵢ.number_weighted
+    wⁱ, wⁿⁱ = vᵢ.mass_weighted, vᵢ.number_weighted
 
     FT = typeof(ρ)
-    return P3FallSpeedResult{FT}(wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ)
+    return P3FallSpeedResult{FT}(wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ, wⁱ, wⁿⁱ)
 end
 
 @inline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
@@ -734,40 +729,17 @@ end
 ##### Surface precipitation boundary condition
 #####
 #
-# The fall-speed fields are at (Center, Center, Face), so index `k = 1` is the bottom
-# face of the domain and carries the surface precipitation flux. `nothing` (the default)
-# keeps the diagnosed fall speed there, so precipitation leaves the domain through an open
-# surface. An `ImpenetrableBoundaryCondition` zeroes it, so precipitation instead
-# accumulates in the lowest cell. Mirrors `bottom_terminal_velocity` in the one-moment
-# scheme; dispatch is on the boundary-condition *type*, so it folds to a constant per
-# concrete P3 type and stays GPU-safe.
-#
-# TODO: Use the lowest *active* face of each column rather than `k = 1` so the condition
-# also applies over an immersed bottom. `compute_p3_surface_temperature!` already performs
-# that column scan for Hallett-Mossop; the one-moment scheme has the same limitation.
+# The bottom-face and sign conventions live in `AM.write_sedimentation_velocity!`, shared
+# with the CloudMicrophysics-based schemes.
 
-const P3ImpenetrableBoundaryCondition = BoundaryCondition{<:NormalFlow, Nothing}
-
-@inline bottom_fall_speed_factor(::Nothing, FT) = one(FT)
-@inline bottom_fall_speed_factor(::P3ImpenetrableBoundaryCondition, FT) = zero(FT)
-
-@inline function write_p3_fall_speeds!(μ, i, j, k, p3::P3,
-                                       result::P3FallSpeedResult{FT}) where FT
-    # `k` indexes the bottom face of cell `k`. Sedimentation is always downward, so the
-    # donor cell for that face is cell `k` itself and the fall speed diagnosed at centre
-    # `k` is the upwind velocity there. The top face (`k = Nz+1`) is outside the `:xyz`
-    # launch region and is held at zero by the impenetrable top boundary condition.
-    surface = ifelse(k == 1,
-                     bottom_fall_speed_factor(p3.precipitation_boundary_condition, FT),
-                     one(FT))
-    @inbounds begin
-        μ.wᶜˡ[i, j, k]  = -surface * result.wᶜˡ
-        μ.wᶜˡₙ[i, j, k] = -surface * result.wᶜˡₙ
-        μ.wʳ[i, j, k]   = -surface * result.wʳ
-        μ.wʳₙ[i, j, k]  = -surface * result.wʳₙ
-        μ.wⁱ[i, j, k]   = -surface * result.wⁱ
-        μ.wⁱₙ[i, j, k]  = -surface * result.wⁱₙ
-    end
+@inline function write_p3_fall_speeds!(μ, i, j, k, p3::P3, result::P3FallSpeedResult)
+    bc = p3.precipitation_boundary_condition
+    AM.write_sedimentation_velocity!(μ.wᶜˡ, i, j, k, bc, result.wᶜˡ)
+    AM.write_sedimentation_velocity!(μ.wⁿᶜˡ, i, j, k, bc, result.wⁿᶜˡ)
+    AM.write_sedimentation_velocity!(μ.wʳ, i, j, k, bc, result.wʳ)
+    AM.write_sedimentation_velocity!(μ.wⁿʳ, i, j, k, bc, result.wⁿʳ)
+    AM.write_sedimentation_velocity!(μ.wⁱ, i, j, k, bc, result.wⁱ)
+    AM.write_sedimentation_velocity!(μ.wⁿⁱ, i, j, k, bc, result.wⁿⁱ)
     return nothing
 end
 
@@ -843,42 +815,45 @@ with vapor, liquid (cloud + rain + liquid on ice), and ice components.
 end
 
 #####
-##### Microphysical velocities (sedimentation)
+##### Sedimentation velocities
 #####
 #
 # Terminal velocities are diagnosed in update_microphysical_auxiliaries! and stored in
-# diagnostic fields, so they are current whenever `update_state!` has run.
-# microphysical_velocities returns NamedTuples compatible with Oceananigans'
-# sum_of_velocities.
+# diagnostic fields, so they are current whenever `update_state!` has run. The generic
+# `microphysical_velocities` wrapper turns each of these into the `(u, v, w)` NamedTuple
+# that the advection operator adds to the transport velocity.
 
-@inline AM.microphysical_velocities(::P3, μ, name) = nothing  # Default: no sedimentation
+# Cloud mass and number: mass- and number-weighted Stokes fall speeds
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqᶜˡ}) = μ.wᶜˡ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnᶜˡ}) = μ.wⁿᶜˡ
 
-# Cloud mass: mass-weighted Stokes fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqᶜˡ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wᶜˡ)
+# Rain mass and number
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqʳ}) = μ.wʳ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnʳ}) = μ.wⁿʳ
 
-# Cloud number: number-weighted Stokes fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnᶜˡ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wᶜˡₙ)
+# Ice mass and number
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqⁱ}) = μ.wⁱ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnⁱ}) = μ.wⁿⁱ
 
-# Rain mass: mass-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqʳ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wʳ)
+# Rime mass, rime volume, and liquid on ice all ride on the ice particle, so they fall
+# at the ice mass-weighted speed.
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqᶠ}) = μ.wⁱ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρbᶠ}) = μ.wⁱ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqʷⁱ}) = μ.wⁱ
 
-# Rain number: number-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnʳ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wʳₙ)
-
-# Ice mass: mass-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
-
-# Ice number: number-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱₙ)
-
-# Rime mass: same as ice mass (rime falls with ice)
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqᶠ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
-
-# Rime volume: same as ice mass
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρbᶠ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
-
-# Liquid on ice: same as ice mass
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqʷⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
+# Thermodynamic phase of each sedimenting condensate mass, which routes its mass flux to the
+# right latent heat in the sedimentation transport of ρθ and ρs.
+#
+# Liquid on ice `ρqʷⁱ` rides on an ice particle and falls at `wⁱ`, but its enthalpy is liquid:
+# no fusion enthalpy has been released for it, and `moisture_fractions` counts it in qˡ. The
+# velocity and the phase are independent declarations, so this is one tracer with two
+# properties, not a contradiction. Rime mass `ρqᶠ` and rime volume `ρbᶠ` need no phase: the
+# interface consults only `condensate_field_names`, which excludes them (`ρqᶠ` is a portion of
+# `ρqⁱ`, Fᶠ = qᶠ / qⁱ, and `ρbᶠ` is not a mass), so neither can double-count the ice.
+@inline AM.condensate_phase(::P3, ::Val{:ρqᶜˡ}) = Val(:liquid)
+@inline AM.condensate_phase(::P3, ::Val{:ρqʳ})  = Val(:liquid)
+@inline AM.condensate_phase(::P3, ::Val{:ρqʷⁱ}) = Val(:liquid)
+@inline AM.condensate_phase(::P3, ::Val{:ρqⁱ})  = Val(:ice)
 
 #####
 ##### Microphysical tendencies

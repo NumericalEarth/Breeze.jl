@@ -23,8 +23,9 @@
 # sources to `Gⁿ`.
 #####
 
-using Oceananigans.Fields: set!
-using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ
+using Oceananigans.BoundaryConditions: BoundaryCondition, NormalFlow
+using Oceananigans.Fields: set!, ZeroField, ZFaceField
+using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ, V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ
 
 using ..Thermodynamics: MoistureMassFractions
 
@@ -736,6 +737,60 @@ where total mass enters the physics — the gravitational/buoyancy term and the 
     return ρᵈ + total_condensate_density(i, j, k, microphysics, moisture_density, microphysical_fields)
 end
 
+#####
+##### Sedimentation interface
+#####
+#
+# Microphysics schemes describe how their condensate falls through two functions:
+#
+#   sedimentation_velocity(microphysics, microphysical_fields, ::Val{name}) → field or nothing
+#       the signed vertical velocity [m/s] the prognostic `name` falls with (negative = downward)
+#   condensate_phase(microphysics, ::Val{name}) → Val(:liquid) or Val(:ice)
+#       the thermodynamic phase of the condensate mass `name`; required for every name in
+#       condensate_field_names(microphysics) that sediments
+#
+# The velocity moves the tracer: `microphysical_velocities` adds it to the transport velocity
+# in `scalar_tendency`. The phase says which latent heat rides along with the falling mass
+# when the thermodynamic variables are transported by sedimentation
+# (`condensate_sedimentation_divergence`). The two are independent: P3's liquid on ice falls
+# at the ice speed but carries liquid enthalpy.
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the sedimentation velocity field (vertical component, [m/s], negative = downward) for
+the prognostic tracer `name`, or `nothing` (the default) if the tracer does not sediment.
+
+Microphysics schemes extend this function for each sedimenting tracer, dispatching on
+`::Val{name}`.
+"""
+@inline sedimentation_velocity(microphysics, microphysical_fields, ::Val) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the thermodynamic phase of the condensate mass `name` as `Val(:liquid)` or `Val(:ice)`,
+or `nothing` (the default) for anything that is not a sedimenting condensate mass.
+
+Every name in [`condensate_field_names`](@ref) with a [`sedimentation_velocity`](@ref) must
+declare its phase; [`materialize_sedimentation_constituents`](@ref) checks this at model
+construction, since a falling mass without a phase would leave its latent heat behind. The
+phase is the enthalpy the mass carries, not what it falls with: P3's liquid on ice `ρqʷⁱ`
+falls at the ice speed yet is liquid, because no fusion enthalpy has been released for it and
+[`moisture_fractions`](@ref) counts it in the liquid mass fraction.
+
+The default `nothing` covers three cases, none needing a method: condensate that does not
+sediment (saturation-adjusted cloud), a sedimenting tracer that is not a condensate mass (a
+number moment such as `ρnᶜˡ`, or a non-additive property such as P3's `ρqᶠ` and `ρbᶠ`), and a
+scheme that precipitates by its own means. Only a sedimenting condensate mass with no phase is
+an error.
+
+A mixed-phase particle is normally two condensate masses sharing a fall speed, as P3 carries ice
+`ρqⁱ` and the liquid on it `ρqʷⁱ`. One mass of mixed composition may return its liquid fraction
+instead, which `phase_content` resolves exactly, the content being linear in composition.
+"""
+@inline condensate_phase(microphysics, ::Val) = nothing
+
 """
 $(TYPEDSIGNATURES)
 
@@ -744,11 +799,343 @@ Return the microphysical velocities associated with `microphysics`, `microphysic
 Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
 The velocities are added to the bulk flow velocities for advecting the tracer.
 For example, the terminal velocity of falling rain.
-"""
-@inline microphysical_velocities(microphysics::Nothing, microphysical_fields, name) = nothing
 
-# NOTE: The grid-indexed fallback for Nothing microphysics is defined above (line 159)
-# via the generic fallback mechanism which calls the state-based method.
+The generic implementation calls [`sedimentation_velocity`](@ref) and uses
+the result as the vertical velocity component.
+"""
+@inline function microphysical_velocities(microphysics, microphysical_fields, name)
+    w = sedimentation_velocity(microphysics, microphysical_fields, name)
+    return sedimentation_velocity_tuple(w)
+end
+
+@inline sedimentation_velocity_tuple(::Nothing) = nothing
+@inline sedimentation_velocity_tuple(w) = (; u = ZeroField(), v = ZeroField(), w)
+
+#####
+##### Sedimentation velocity fields
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Build a `ZFaceField` suitable for storing a sedimentation velocity: `bottom = nothing`
+ensures a kernel-set bottom-face value is preserved during `fill_halo_regions!`, while the
+default impenetrable top holds `w = 0` so nothing falls in through the model top.
+"""
+function sedimentation_velocity_field(grid)
+    boundary_conditions = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    return ZFaceField(grid; boundary_conditions)
+end
+
+# Bottom boundary treatment of a diagnosed fall speed. Index `k = 1` is the bottom face of
+# the domain and carries the bottom precipitation flux: `nothing` (the default
+# precipitation boundary condition) keeps the diagnosed fall speed there, so precipitation
+# leaves through an open bottom, while an impenetrable boundary condition zeroes it, so
+# precipitation accumulates in the lowest cell instead. Dispatch is on the
+# boundary-condition *type*, so the choice folds to a constant per concrete scheme and
+# stays GPU-safe.
+#
+# TODO: Use the lowest *active* face of each column rather than `k = 1` so the condition
+# also applies over an immersed bottom.
+const ImpenetrableSedimentationBC = BoundaryCondition{<:NormalFlow, Nothing}
+
+@inline bottom_sedimentation_velocity(::Nothing, w) = w
+@inline bottom_sedimentation_velocity(::ImpenetrableSedimentationBC, w) = zero(w)
+
+"""
+$(TYPEDSIGNATURES)
+
+Store the fall-speed magnitude `𝕎` diagnosed at cell center `(i, j, k)` in the
+sedimentation velocity field `w_field` at the cell's bottom face: microphysics libraries
+return positive magnitudes while Breeze stores signed vertical velocities (negative =
+downward), and sedimentation is always downward, so the donor cell for face `k` is cell
+`k` itself. At `k = 1` the precipitation boundary condition `bc` is applied (see
+`bottom_sedimentation_velocity`); the top face (`k = Nz + 1`) lies outside the `:xyz`
+launch region and is held at zero by the impenetrable top boundary condition.
+"""
+@inline function write_sedimentation_velocity!(w_field, i, j, k, bc, 𝕎)
+    w = -𝕎
+    w₀ = bottom_sedimentation_velocity(bc, w)
+    @inbounds w_field[i, j, k] = ifelse(k == 1, w₀, w)
+    return nothing
+end
+
+#####
+##### Sedimentation constituents
+#####
+#
+# Everything the model needs to know about each sedimenting condensate mass, resolved once at
+# construction: the velocity field it falls with, its specific-humidity field and the prognostic
+# partial density behind it, its thermodynamic phase, and the advection scheme that transports
+# it. The thermodynamic tendencies and `implicit_sedimentation_step!` read these to transport
+# the condensate part of ρθ / ρs with the falling mass, and the surface precipitation flux
+# diagnostic sums their bottom-face fluxes, so all are built from the same declarations as the
+# tracer transport itself.
+
+"""
+$(TYPEDSIGNATURES)
+
+Materialize the sedimentation constituents for the selected dynamics. Eulerian dynamics use
+the microphysics-only materializer by default.
+"""
+materialize_sedimentation_constituents(dynamics, microphysics, microphysical_fields, advection) =
+    materialize_sedimentation_constituents(microphysics, microphysical_fields, advection)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the tuple of `(; w, q, ρq, phase, advection)` sedimentation constituents of
+`microphysics`: one NamedTuple for every name in [`condensate_field_names`](@ref) with a
+[`sedimentation_velocity`](@ref) `w`, holding its specific-humidity field `q`, the prognostic
+partial density `ρq` it is diagnosed from, its [`condensate_phase`](@ref) tag, and the
+`advection` scheme that transports the tracer's mass.
+Condensate that does not sediment (for example, cloud condensate diagnosed by saturation
+adjustment) is absent: it moves no mass and therefore no latent heat. The result is `()` when
+nothing sediments, including for `Nothing` microphysics.
+
+Throws an `ArgumentError` if a sedimenting condensate mass declares no phase.
+"""
+function materialize_sedimentation_constituents(microphysics, microphysical_fields, advection)
+    constituents = map(condensate_field_names(microphysics)) do name
+        sedimentation_constituent(microphysics, microphysical_fields, advection, Val(name))
+    end
+    return filter(!isnothing, constituents)
+end
+
+function sedimentation_constituent(microphysics, μ, advection, ::Val{name}) where name
+    w = sedimentation_velocity(microphysics, μ, Val(name))
+    isnothing(w) && return nothing
+    phase = condensate_phase(microphysics, Val(name))
+    isnothing(phase) &&
+        throw(ArgumentError("Condensate mass $name sediments but declares no condensate_phase, " *
+                            "so its latent heat could not follow the falling mass."))
+    q = getproperty(μ, specific_field_name(name))
+    ρq = getproperty(μ, name)
+    return (; w, q, ρq, phase, advection = getproperty(advection, name))
+end
+
+#####
+##### Sedimentation transport of the condensate part of the thermodynamic variables
+#####
+#
+# The thermodynamic variables carry a condensate part — the deficit −(ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / (cᵖᵐ Π)
+# of θˡⁱ, the content qˡ (cˡ T − ℒˡᵣ) + qⁱ (cⁱ T − ℒⁱᵣ) of s — and when condensate falls, that
+# part must fall with it. Rain-out then leaves the latent warming from forming the rain aloft
+# and pre-cools the layer that later evaporates it, the mechanism that drives cold pools.
+#
+# The falling mass carries its enthalpy, and each cell converts what it gains or loses locally.
+# Each formulation supplies three things at a cell (`condensate_content`): per phase, the content
+# χˣ = ∂φ/∂qˣ|_T, with what the dynamics put in place of the departed mass taking it up
+# (`sedimentation_replacement`: dry air where the total density is fixed, the local mixture where
+# it falls with the condensate); per phase, the enthalpy hˣ − hʳ of that condensate relative to
+# its replacement; and ∂φ/∂h, the change of the specific variable per unit heating. A flux out of
+# a cell removes χ per unit mass, so the cell the condensate leaves keeps its temperature; a flux
+# in delivers χ plus ∂φ/∂h (h_upwind − h), the sensible heat the mass brings. For s the content is
+# h and ∂s/∂h = 1, so the sum collapses to the flux form ∂z(h_up F) and ∫ρs is conserved. For θˡⁱ
+# it must not: χ is a Jacobian that varies with the Exner function, so moving it between pressure
+# levels would conserve ∫ρθ, which precipitation does not (heat released at one pressure and
+# absorbed at another). Both formulations respond in temperature identically by construction.
+#
+# The discretization below is shared. The mass fluxes are the ones the tracer tendency actually
+# applies to the cell (`sedimentation_mass_fluxes`, formed per cell because bounds-preserving
+# WENO limits its reconstructions per cell), weighted like it by the total density; the enthalpy
+# each brings is that of the cell it drains (`condensate_content_fluxes`), the cell above the face
+# when the condensate falls, the cell below when an updraft outruns its fall speed; and the cell's
+# coupling-to-total density ratio turns the resulting change of the specific variable into that
+# of the coupling-weighted prognostic.
+#
+# The content moves in the same two parts as the mass. The tendency carries the part of the mass
+# flux the tendency applies (`ExplicitSedimentationFluxes`: the whole flux of an explicit scheme,
+# the CFL-limited fraction under adaptive implicit vertical advection). The remainder that the
+# tridiagonal solve applies depends on the solved tracer state, so its content is moved by
+# `implicit_sedimentation_step!` between the tracers' solves and the thermodynamic variable's
+# own, from the fluxes the solves actually applied (`ImplicitSedimentationFluxes`), and then
+# takes the same implicit transport and diffusion as the rest of the field. An estimate of that
+# remainder at the pre-solve state would overstate a one-cell loss by the factor 1 + C at
+# implicit Courant number C, precisely in the regime the solve exists for.
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the divergence at cell `(i, j, k)` of the sedimentation transport of the condensate part
+of a thermodynamic variable: with `V` the cell volume, `ρᶠ` the total density at each face and
+`±` the face's outward sign,
+
+    (ρᵈ / ρ) V⁻¹ Σ_faces ± ρᶠ Σᵢ [cᵢ(Wᵢ) Fᵢ(Wᵢ) − cᵢ(wᵗ) Fᵢ(wᵗ)] ,
+
+where, for each of the `constituents`, `Fᵢ(w)` is the vertical advective flux of its humidity
+at velocity `w` through the face, with the scheme that transports the tracer and the part of it
+`fluxes` selects ([`ExplicitSedimentationFluxes`](@ref) for the part the tendency applies,
+[`ImplicitSedimentationFluxes`](@ref) for the remainder the adaptive implicit solve applies),
+`Wᵢ = wᵗ + wᵢ` is its total velocity and `wᵗ` the resolved transport velocity, `ρ` is the
+[`total_density`](@ref) that weights the tracer's mass flux, `ρᵈ` the [`dynamics_density`](@ref)
+that carries the thermodynamic variable (`ρθ = ρᵈ θ`, `ρs = ρᵈ s`), and `cᵢ(w)` is the content
+the flux delivers to the cell,
+
+    cᵢ(w) = χᵢ + (∂φ/∂h) (hᵢ(w) − hᵢ) .
+
+`condensate_content(i, j, k, grid, args...)` returns the formulation's
+`(; χ = (χˡ, χⁱ), h = (hˡ, hⁱ), ∂φ∂h)` at a cell: per phase the content `χˣ = ∂φ/∂qˣ` at fixed
+temperature, with what the dynamics put in place of the departed mass taking it up
+([`sedimentation_replacement`](@ref)), `−ℒˣᵣ / (cᵖᵐ Π)` to leading order for `θˡⁱ` and
+`(cˣ − cʳ) T − (ℒˣᵣ − ℒʳ)` for `s`; per phase the enthalpy `hˣ − hʳ` the falling mass carries,
+which is also the content of `s`; and `∂φ/∂h`, the change of the specific variable per unit
+heating, `1 / (cᵖᵐ Π)` for `θˡⁱ` and one for `s`. In `cᵢ(w)`, `hᵢ(w)` is the enthalpy in the
+upwind cell of `w` and `χᵢ`, `hᵢ`, `∂φ/∂h` are the cell's own.
+
+The tracer tendency advects each humidity at `Wᵢ` in place of `wᵗ`, so the bracket is the
+sedimentation part of the mass flux advection actually applies to the cell. A flux out drains
+the cell itself and delivers `χ` alone, changing the composition at fixed temperature; a flux in
+adds the cell's conversion of the sensible heat the arriving mass brings from another level. For
+`s` the delivered content is the upwind cell's `h`, so the sum is a flux form conserving `∫ρs`;
+for `θˡⁱ` it is not, since `∂θˡⁱ/∂qˣ` varies with the Exner function and transporting it between
+pressure levels would conserve `∫ρθ`, which precipitation does not (see
+[`condensate_content_fluxes`](@ref)).
+Continuity advances `ρᵈ` without a sedimentation source on every core, so the divergence of the
+content flux per unit total mass is the change of the specific variable, and the cell's ratio
+`ρᵈ / ρ` (one on the anelastic core, the dry mass fraction on the compressible core) turns it
+into the change of the coupling-weighted prognostic. Returns zero when no constituent sediments.
+"""
+@inline condensate_sedimentation_divergence(i, j, k, grid, ::Tuple{}, args...) = zero(grid)
+
+@inline function condensate_sedimentation_divergence(i, j, k, grid, constituents, wᵗ, dynamics, fluxes, condensate_content, args...)
+    # Content of the cells below, at, and above k; each face draws on the two cells flanking it.
+    # The clamps keep the bottom face (nothing enters through an impenetrable bottom) and the
+    # top face (the fall speeds vanish there) from reading unfilled halos.
+    c⁻ = condensate_content(i, j, max(k - 1, 1), grid, args...)
+    c⁰ = condensate_content(i, j, k, grid, args...)
+    c⁺ = condensate_content(i, j, min(k + 1, grid.Nz), grid, args...)
+    ρ = total_density(dynamics)
+    ρᵈ = dynamics_density(dynamics)
+    Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, constituents, wᵗ, fluxes, ρ, c⁻, c⁰, c⁺)
+    ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
+    ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
+    @inbounds coupling_fraction = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
+    return coupling_fraction * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `Σᵢ [cᵢ(Wᵢ) Fᵢ(Wᵢ) − cᵢ(wᵗ) Fᵢ(wᵗ)]` through the lower and upper faces of cell
+`(i, j, k)`: the sedimentation part of the advective flux of condensate content the cell
+receives through each face, per unit density and integrated over the face area, summed over the
+`constituents`. `Fᵢ(w)` is the advective flux of constituent `i`'s humidity at velocity `w`, the
+part of it that `fluxes` selects (see [`sedimentation_mass_fluxes`](@ref) and
+[`implicit_sedimentation_mass_fluxes`](@ref), the latter reconstructing the humidity from the
+prognostic density and `ρ`), `Wᵢ = wᵗ + wᵢ` its total velocity, and `cᵢ(w)` the content the flux
+delivers to the cell: its own content `χ` of the constituent's phase, plus its `∂φ/∂h` times the
+enthalpy of that phase in the upwind cell of `w` (the cell above the face for a downward
+velocity, the cell below for an upward one) in excess of its own, so a flux that drains the cell
+itself delivers `χ` alone. `c⁻`, `c⁰` and `c⁺` are the `(; χ, h, ∂φ∂h)` of the cells below, at
+and above `k`.
+
+An upwind flux at `Wᵢ` does not decompose into `scheme(wᵗ) + first-order(wᵢ)`, so the
+difference of the two fluxes is the only form consistent with the mass the tracer tendency
+moves. Taking the enthalpy from the cell each flux drains keeps the heat with that mass whether
+the condensate falls (both fluxes downward, both drain the cell above), rides an updraft that
+outruns its fall speed (both upward, both drain the cell below), or falls against an updraft
+(the flux at `Wᵢ` drains the cell above while the transport flux it replaces drained the cell
+below). Constituents are binned by their thermodynamic phase, so P3's liquid on ice contributes
+its ice-speed flux to the liquid content; a liquid fraction blends the two (`phase_content`).
+"""
+@inline condensate_content_fluxes(i, j, k, grid, ::Tuple{}, wᵗ, fluxes, ρ, c⁻, c⁰, c⁺) = (zero(grid), zero(grid))
+
+@inline function condensate_content_fluxes(i, j, k, grid, constituents::Tuple, wᵗ, fluxes, ρ, c⁻, c⁰, c⁺)
+    constituent = first(constituents)
+    (; w, phase) = constituent
+    F⁻, F⁺ = constituent_mass_fluxes(fluxes, i, j, k, grid, constituent, wᵗ, ρ)
+    χ = phase_content(phase, c⁰.χ)
+    h⁻ = phase_content(phase, c⁻.h)
+    h⁰ = phase_content(phase, c⁰.h)
+    h⁺ = phase_content(phase, c⁺.h)
+    Φ⁻ = condensate_content_flux(i, j, k,     wᵗ, w, F⁻, χ, c⁰.∂φ∂h, h⁰, h⁻, h⁰)
+    Φ⁺ = condensate_content_flux(i, j, k + 1, wᵗ, w, F⁺, χ, c⁰.∂φ∂h, h⁰, h⁰, h⁺)
+    rest⁻, rest⁺ = condensate_content_fluxes(i, j, k, grid, Base.tail(constituents), wᵗ, fluxes, ρ, c⁻, c⁰, c⁺)
+    return Φ⁻ + rest⁻, Φ⁺ + rest⁺
+end
+
+# Content flux of one constituent through face k from its mass fluxes `F = (F(W), F(wᵗ))`, each
+# delivering the cell's content χ plus its conversion ∂φ/∂h of the enthalpy brought from the cell
+# it drains — above the face for a downward velocity, below for an upward one — in excess of h.
+@inline function condensate_content_flux(i, j, k, wᵗ, w, F, χ, ∂φ∂h, h, h_below, h_above)
+    Fᵂ, Fᵗ = F
+    @inbounds wᵗₖ = wᵗ[i, j, k]
+    @inbounds Wₖ = wᵗₖ + w[i, j, k]
+    cᵂ = delivered_content(Wₖ, χ, ∂φ∂h, h, h_below, h_above)
+    cᵗ = delivered_content(wᵗₖ, χ, ∂φ∂h, h, h_below, h_above)
+    return cᵂ * Fᵂ - cᵗ * Fᵗ
+end
+
+@inline function delivered_content(w, χ, ∂φ∂h, h, h_below, h_above)
+    h_upwind = ifelse(w > 0, h_below, h_above)
+    return χ + ∂φ∂h * (h_upwind - h)
+end
+
+@inline phase_content(::Val{:liquid}, χ) = χ[1]
+@inline phase_content(::Val{:ice}, χ) = χ[2]
+
+# A single mass of mixed composition, declared as its liquid fraction. The content is a
+# directional derivative in composition space and the enthalpy is extensive, so both are linear
+# in it: a mass leaving along f eˡ + (1 − f) eⁱ carries f χˡ + (1 − f) χⁱ and f hˡ + (1 − f) hⁱ
+# exactly. The pure phases above are f = 1, 0.
+@inline phase_content(liquid_fraction::Number, χ) = liquid_fraction * χ[1] + (1 - liquid_fraction) * χ[2]
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the vertical advective mass fluxes of humidity `q` through the lower and upper faces of
+cell `(i, j, k)`, as `((F⁻(wᵗ + wˢ), F⁻(wᵗ)), (F⁺(wᵗ + wˢ), F⁺(wᵗ)))`: at each face, the flux at
+the combined velocity and at the resolved transport velocity `wᵗ` alone, both with the tracer's
+own `advection` scheme, integrated over the face area and per unit density [m³ s⁻¹]. Their
+difference is the sedimentation part of the mass flux the tracer tendency applies to the cell;
+[`condensate_content_fluxes`](@ref) weights each with the content it delivers to the cell. The
+fluxes belong to the cell rather than to a face because bounds-preserving WENO limits its
+reconstructions cell by cell, so the flux through a face differs between the two cells that
+share it. Under adaptive implicit vertical advection each flux includes the first-order flux of
+its implicit velocity remainder, evaluated at the current tracer state.
+
+Implemented in `Breeze.Advection`, which owns the flux operators.
+"""
+function sedimentation_mass_fluxes end
+
+"""
+$(TYPEDSIGNATURES)
+
+Like [`sedimentation_mass_fluxes`](@ref), but the first-order upwind remainder that the adaptive
+implicit vertical solve applies to the tracer, evaluated at the solved state `ρq / ρ` with the
+prognostic density `ρq` and the density `ρ` the solve reconstructs the humidity from. Zero for
+a scheme without an adaptive-implicit vertical discretization; the adaptive-implicit method
+mirrors the solve's coefficients (see `density_weighted_implicit_diffusion.jl`).
+"""
+@inline implicit_sedimentation_mass_fluxes(i, j, k, grid, advection, wᵗ, wˢ, ρq, ρ) =
+    ((zero(grid), zero(grid)), (zero(grid), zero(grid)))
+
+"""
+$(TYPEDEF)
+
+Selects, for [`condensate_sedimentation_divergence`](@ref), the part of each constituent's
+sedimentation mass flux that the tracer tendency applies: the whole flux of an explicit scheme,
+and the CFL-limited explicit fraction under adaptive implicit vertical advection
+([`sedimentation_mass_fluxes`](@ref)).
+"""
+struct ExplicitSedimentationFluxes end
+
+"""
+$(TYPEDEF)
+
+Selects, for [`condensate_sedimentation_divergence`](@ref), the first-order upwind remainder
+that the adaptive implicit vertical solve applies to each constituent's mass, at the solved
+state ([`implicit_sedimentation_mass_fluxes`](@ref)); zero for explicit schemes.
+"""
+struct ImplicitSedimentationFluxes end
+
+# The selected part of a constituent's mass fluxes through the faces of cell (i, j, k)
+@inline constituent_mass_fluxes(::ExplicitSedimentationFluxes, i, j, k, grid, constituent, wᵗ, ρ) =
+    sedimentation_mass_fluxes(i, j, k, grid, constituent.advection, wᵗ, constituent.w, constituent.q)
+
+@inline constituent_mass_fluxes(::ImplicitSedimentationFluxes, i, j, k, grid, constituent, wᵗ, ρ) =
+    implicit_sedimentation_mass_fluxes(i, j, k, grid, constituent.advection, wᵗ, constituent.w, constituent.ρq, ρ)
 
 """
 $(TYPEDSIGNATURES)
@@ -817,29 +1204,35 @@ precipitation_rate(model, phase::Symbol=:liquid) = precipitation_rate(model, mod
 precipitation_rate(model, microphysics, phase) = CenterField(model.grid)
 
 #####
-##### Surface precipitation flux diagnostic
+##### Bottom precipitation flux diagnostic
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
+Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary,
+in kg/m²/s (positive = downward flux out of domain).
 
-The surface precipitation flux is ``wʳ ρqʳ`` at the bottom face (`k = 1`), representing
-the rate at which rain mass leaves the domain through the bottom boundary.
+The default sums the bottom-face advective flux of every sedimentation constituent of the
+model (see [`materialize_sedimentation_constituents`](@ref)), each evaluated with the same
+advection scheme that transports that tracer, so the diagnostic matches the boundary flux the
+tendency operator applies. For a scheme whose cloud condensate also sediments (the
+non-equilibrium 1M and 2M schemes, and P3) this includes cloud droplet and cloud ice fallout,
+not only rain and snow. For adaptive implicit vertical advection, this is the split-operator
+flux evaluated at the current state rather than a time-integrated mass-loss diagnostic.
+Schemes that move precipitation by internal means (such as `DCMIP2016KM`) extend
+`bottom_precipitation_flux(model, microphysics)` instead.
 
-Units: kg/m²/s (positive = downward flux out of domain)
+Building the returned `Field` assembles a kernel operation, so construct it once and
+`compute!` it repeatedly rather than calling this inside a callback.
 
 Arguments:
 - `model`: An [`AtmosphereModel`](@ref) with a microphysics scheme
 
-Returns a 2D `Field` that can be computed and visualized.
-Specific microphysics schemes must extend this function.
+The generic method is implemented in `Breeze.Advection`, which owns the flux kernel and is
+loaded after this module.
 """
-surface_precipitation_flux(model) = surface_precipitation_flux(model, model.microphysics)
-
-# Default: zero flux for Nothing microphysics
-surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(model.grid)
+bottom_precipitation_flux(model) = bottom_precipitation_flux(model, model.microphysics)
 
 #####
 ##### Cloud effective radius interface

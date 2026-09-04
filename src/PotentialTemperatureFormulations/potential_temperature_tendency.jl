@@ -56,6 +56,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemper
         model.forcing.ρs,
         model.advection.ρθ,
         radiation_flux_divergence(model.radiation),
+        model.sedimentation_constituents,
         common_args...)
 
     Gρθ = model.timestepper.Gⁿ.ρθ
@@ -69,6 +70,7 @@ end
                                                 ρs_forcing,
                                                 advection,
                                                 radiation_flux_divergence_field,
+                                                sedimenting_constituents,
                                                 dynamics,
                                                 formulation::LiquidIcePotentialTemperatureFormulation,
                                                 constants,
@@ -83,15 +85,10 @@ end
 
     potential_temperature = formulation.potential_temperature
     ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (advection/diffusion carrier)
-    @inbounds ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
-    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
-
-    # Compute moisture fractions first
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
-    𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
-
+    𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
+                                 microphysics, microphysical_fields, specific_prognostic_moisture)
     Π = exner_function(𝒰, constants)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
+    cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
     Fρs = ρs_forcing(i, j, k, grid, clock, model_fields)
@@ -99,10 +96,93 @@ end
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
+             - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, velocities.w, dynamics,
+                                                   ExplicitSedimentationFluxes(), potential_temperature_condensate_content,
+                                                   formulation, dynamics, constants, microphysics,
+                                                   microphysical_fields, specific_prognostic_moisture)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
              + (Fρs + div_ℐ) / (cᵖᵐ * Π)
     )
+end
+
+# Thermodynamic state at cell (i, j, k) from the prognostic fields: the total density (mass
+# fractions), the prognostic moisture, and the microphysical state.
+@inline function grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
+                                          microphysics, microphysical_fields, specific_prognostic_moisture)
+    @inbounds ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    return diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
+end
+
+# The remainder of the sedimentation transport that the adaptive implicit solve applies to the
+# tracers, moved with its content after their solves.
+AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, Δt, velocities) =
+    implicit_sedimentation_step!(model, Δt, velocities, potential_temperature_condensate_content,
+                                 model.formulation, model.dynamics, model.thermodynamic_constants,
+                                 model.microphysics, model.microphysical_fields, specific_prognostic_moisture(model))
+
+#####
+##### Sedimentation transport of the condensate part of ρθ
+#####
+#
+# The content per unit falling mass of phase x is χˣ = ∂θˡⁱ/∂qˣ at fixed T and p along
+# q → q + ε (eˣ − r), where r is the composition that takes up the departed mass
+# (`sedimentation_replacement`): dry air on the anelastic core, whose total density is fixed,
+# the local mixture on the compressible core, whose total density falls with the condensate
+# while the pressure p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T does not. Losing condensate at this content leaves
+# the temperature unchanged on either core. From T = Π θ + (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ with
+# Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ),
+#
+#   χˣ = −(ℒˣᵣ − ℒʳ − Δcˣ D) / (cᵖᵐ Π) + θ lnΠ (Rʳ / Rᵐ + Δcˣ / cᵖᵐ) ,
+#
+# with D = T − Π θ the latent deficit, Δcˣ = cˣ − cʳ, and cʳ, Rʳ, ℒʳ = ℒˡᵣ rˡ + ℒⁱᵣ rⁱ the heat
+# capacity, gas constant and latent deficit of the replacement (cᵖᵈ, Rᵈ, 0 for dry air; cᵖᵐ, Rᵐ,
+# cᵖᵐ D for the mixture). The first term is the deficit the falling condensate carries,
+# −ℒˣᵣ / (cᵖᵐ Π) to leading order; the rest accounts for the heat capacity and gas constant of
+# the mixture changing as condensate gives way to its replacement (lnΠ = (Rᵐ / cᵖᵐ) ln(p / pˢᵗ)
+# is written through Π so that every state type that defines an Exner function serves).
+#
+# What the falling mass carries between cells is its enthalpy relative to its replacement,
+# hˣ − hʳ = Δcˣ T − (ℒˣᵣ − ℒʳ), the content of the static energy. A cell receiving it converts
+# that sensible heat through ∂θˡⁱ/∂h = 1 / (cᵖᵐ Π), the factor that turns heating rates into ρθ
+# tendencies. χ itself is not transported: it varies with Π, so moving it between pressure levels
+# would conserve ∫ρθ, which precipitation does not. The shared
+# `condensate_sedimentation_divergence` owns the discretization.
+@inline function potential_temperature_condensate_content(i, j, k, grid, formulation, dynamics, constants,
+                                                          microphysics, microphysical_fields, specific_prognostic_moisture)
+    𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
+                                 microphysics, microphysical_fields, specific_prognostic_moisture)
+    q = 𝒰.moisture_mass_fractions
+    θ = 𝒰.potential_temperature
+    Π = exner_function(𝒰, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+
+    # What takes up the departed mass, and its heat capacity, gas constant and latent deficit
+    r = sedimentation_replacement(dynamics, q)
+    cʳ = mixture_heat_capacity(r, constants)
+    Rʳ = mixture_gas_constant(r, constants)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    ℒʳ = ℒˡᵣ * r.liquid + ℒⁱᵣ * r.ice
+
+    Δcˡ = constants.liquid.heat_capacity - cʳ
+    Δcⁱ = constants.ice.heat_capacity - cʳ
+    D = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
+    θlnΠ = θ * log(Π)
+
+    χˡ = -(ℒˡᵣ - ℒʳ - Δcˡ * D) / (cᵖᵐ * Π) + θlnΠ * (Rʳ / Rᵐ + Δcˡ / cᵖᵐ)
+    χⁱ = -(ℒⁱᵣ - ℒʳ - Δcⁱ * D) / (cᵖᵐ * Π) + θlnΠ * (Rʳ / Rᵐ + Δcⁱ / cᵖᵐ)
+
+    # Enthalpy of each phase relative to its replacement, and the response of θ to heating
+    T = Π * θ + D
+    hˡ = Δcˡ * T - (ℒˡᵣ - ℒʳ)
+    hⁱ = Δcⁱ * T - (ℒⁱᵣ - ℒʳ)
+    ∂θ∂h = 1 / (cᵖᵐ * Π)
+
+    return (; χ = (χˡ, χⁱ), h = (hˡ, hⁱ), ∂φ∂h = ∂θ∂h)
 end
 
 #####

@@ -13,7 +13,8 @@ using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, ma
                                 microphysics_model_update!, field_advection_scheme,
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
-                                implicit_step_scheme
+                                implicit_step_scheme, implicit_sedimentation_step!,
+                                thermodynamic_density_name
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -120,6 +121,7 @@ function ssp_rk3_substep!(model, Δt, α)
 
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
+    thermodynamic_name = thermodynamic_density_name(model.formulation)
 
     for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, kernel_Δt, α)
@@ -130,31 +132,55 @@ function ssp_rk3_substep!(model, Δt, α)
         # scalars with their position in the closure's scalar names (see `closure_scalar_index`).
         skip_vertical_diffusion(model, name) && continue
 
-        field_index = closure_scalar_index(model, name)
-        advection = field_advection_scheme(model.advection, name)
+        # The thermodynamic variable's solve waits for the tracers' solves (see below).
+        name === thermodynamic_name && continue
 
-        # The implicit solve must carry the reference density whenever it runs at all: the
-        # diffusion half is mass-flux weighted for the z-Center prognostics, and adaptive implicit
-        # vertical advection adds a density-weighted advection contribution on top.
-        #
-        # The guard is on the *solver*, not on `needs_implicit_solver(advection)`: that predicate
-        # is false for `advection = nothing` and for ordinary WENO, so keying on it would drop the
-        # density — and hence the mass-flux weighting — for every vertically-implicit closure
-        # without adaptive-implicit advection, the single-column configuration included.
-        if !isnothing(model.timestepper.implicit_solver)
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           α * Δt,
-                           implicit_step_scheme(advection),
-                           implicit_advection_velocities(model.dynamics, model.velocities, name),
-                           implicit_advection_density(model.dynamics, model.formulation, name))
-        end
+        implicit_stage_step!(model, name, u, α * Δt)
     end
+
+    # The tracers' solves have just moved sedimenting condensate implicitly. Move its content
+    # with it, from the state the solves produced, and only then solve the thermodynamic
+    # variable, so the moved content takes the same transport and diffusion as the rest of the
+    # field (see `implicit_sedimentation_step!`).
+    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, α * Δt, model.velocities)
+    implicit_stage_step!(model, thermodynamic_name, prognostic[thermodynamic_name], α * Δt)
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply the vertically-implicit solve of the prognostic `u` named `name` over `Δt`: the
+first-order upwind remainder of adaptive implicit vertical advection and the vertically-implicit
+closure diffusion, in one tridiagonal system. A no-op when the time stepper has no implicit solver.
+"""
+function implicit_stage_step!(model, name, u, Δt)
+    # The implicit solve must carry the reference density whenever it runs at all: the
+    # diffusion half is mass-flux weighted for the z-Center prognostics, and adaptive implicit
+    # vertical advection adds a density-weighted advection contribution on top.
+    #
+    # The guard is on the *solver*, not on `needs_implicit_solver(advection)`: that predicate
+    # is false for `advection = nothing` and for ordinary WENO, so keying on it would drop the
+    # density, and hence the mass-flux weighting, for every vertically-implicit closure
+    # without adaptive-implicit advection, the single-column configuration included.
+    isnothing(model.timestepper.implicit_solver) && return nothing
+
+    field_index = closure_scalar_index(model, name)
+    advection = field_advection_scheme(model.advection, name)
+
+    implicit_step!(u,
+                   model.timestepper.implicit_solver,
+                   model.closure,
+                   model.closure_fields,
+                   field_index,
+                   model.clock,
+                   fields(model),
+                   Δt,
+                   implicit_step_scheme(advection),
+                   implicit_advection_velocities(model.dynamics, model.velocities, name,
+                                                 model.microphysics, model.microphysical_fields),
+                   implicit_advection_density(model.dynamics, model.formulation, name))
 
     return nothing
 end

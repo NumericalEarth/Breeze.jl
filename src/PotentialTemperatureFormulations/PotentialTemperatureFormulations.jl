@@ -23,10 +23,13 @@ using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
     pressure_from_density_temperature,
     dynamics_prognostic_fields, grid_moisture_fractions, maybe_adjust_thermodynamic_state,
     div_ρUc, c_div_ρU, ∇_dot_Jᶜ, AtmosphereModelBuoyancy,
+    condensate_sedimentation_divergence, sedimentation_replacement,
+    ExplicitSedimentationFluxes, implicit_sedimentation_step!,
     radiation_flux_divergence, materialize_formulation,
     DefaultTemperatureSolver, default_temperature_solver
 using Breeze.Solvers: materialize_solver
-using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, StaticEnergyState, with_temperature, exner_function, mixture_heat_capacity
+using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, StaticEnergyState, with_temperature,
+    exner_function, mixture_heat_capacity, mixture_gas_constant
 
 # The lowercase c is a singleton instance of Center
 const c = Center()

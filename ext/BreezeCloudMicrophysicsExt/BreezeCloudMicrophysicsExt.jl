@@ -39,7 +39,8 @@ using CloudMicrophysics: MicrophysicsNonEq as CMNonEq
 
 using Breeze.AtmosphereModels: AtmosphereModels,
     AbstractNumberConcentrationCategories,
-    total_density
+    total_density,
+    write_sedimentation_velocity!
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -74,10 +75,8 @@ using Breeze.Microphysics:
 using Oceananigans: Oceananigans
 using DocStringExtensions: TYPEDSIGNATURES
 
-using Oceananigans: Center, Face, Field
+using Oceananigans: Center, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
-using Oceananigans.Fields: ZeroField, ZFaceField
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, NormalFlow
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt

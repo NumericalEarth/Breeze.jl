@@ -180,6 +180,29 @@ total_density(dynamics) = dynamics_density(dynamics)
 """
 $(TYPEDSIGNATURES)
 
+Return the composition, as `MoistureMassFractions`, of what takes up the mass that sedimentation
+removes from a cell whose moisture mass fractions are `q`. Continuity advances the coupling
+density ([`dynamics_density`](@ref)) without a sedimentation source on every core, so falling
+condensate changes the prognostic `ρᵈ φ` only through the specific variable `φ`, and how `φ`
+responds depends on what the departed mass gives way to:
+
+- a single, fixed density (the default; `AnelasticDynamics`): the total density the mass
+  fractions are referenced to does not respond, so the dry mass fraction `qᵈ = 1 − qᵛ − qˡ − qⁱ`
+  absorbs the change and dry air (zero moisture fractions) takes up the departed mass;
+- a diagnosed total density that follows the condensate (`CompressibleDynamics`: prognostic dry
+  density `ρᵈ`, `ρ = ρᵈ + Σρˣ`): every mass fraction renormalizes, so the local mixture `q`
+  itself takes up the departed mass.
+
+The thermodynamic formulations differentiate their variable along `q → q + ε (eˣ − r)`, with
+`r` this replacement, for the content per unit falling mass — at which the cell the condensate
+leaves keeps its temperature — and take the enthalpy the mass carries relative to `r` (see
+[`condensate_sedimentation_divergence`](@ref)).
+"""
+@inline sedimentation_replacement(dynamics, q) = zero(typeof(q))
+
+"""
+$(TYPEDSIGNATURES)
+
 Return the density ``ρ`` at `(i, j, k)` that mass fractions are referenced to, so that ``qˣ`` and
 ``ρ`` give a partial pressure — the vapor pressure is ``pᵛ = ρ qᵛ Rᵛ T``.
 
