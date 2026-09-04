@@ -24,6 +24,60 @@ microphysics.ice
 prognostic_field_names(microphysics)
 ```
 
+## Configuring the empirical warm-phase parameters
+
+The cloud-width, rain fall-speed, and rain-ventilation relations are empirical fits.
+Their coefficients live in three small containers that the scheme constructor accepts, so
+they can be varied for calibration or sensitivity work. Custom values are threaded through
+the startup quadrature *and* through every runtime kernel — there is no second copy of the
+defaults anywhere in the rate calculations. See
+[Empirical Warm-Phase Coefficients](@ref p3_warm_phase_coefficients) for what each scalar
+means.
+
+```@example p3_usage
+using Breeze.Microphysics.PredictedParticleProperties:
+    CloudDroplets, CloudShape,
+    RainDrops, RainFallSpeed, RainVentilation
+
+# Cap the diagnosed cloud shape parameter below its default ceiling
+cloud_shape = CloudShape(Float64;
+    relative_dispersion_number_coefficient = 5.714e-10,
+    relative_dispersion_intercept = 0.2714,
+    minimum_shape_parameter = 2,
+    maximum_shape_parameter = 12)
+
+cloud = CloudDroplets(Float64; shape = cloud_shape)
+
+# A slightly slower large-drop plateau and a stronger Reynolds ventilation term
+fall_speed = RainFallSpeed(Float64;
+    branch_velocity_scales = (4579.5, 49.62, 17.32),
+    branch_mass_exponents = (2 / 3, 1 / 3, 1 / 6),
+    transition_diameters = (134.43e-6, 1511.64e-6, 3477.84e-6),
+    plateau_velocity = 8.8)
+
+ventilation = RainVentilation(Float64;
+    constant_coefficient = 0.78,
+    reynolds_coefficient = 0.35)
+
+rain = RainDrops(Float64; fall_speed, ventilation)
+
+tuned = P3Microphysics(Float64; cloud, rain)
+tuned.rain
+```
+
+The containers survive lookup-table materialization, so the scheme the model steps with is
+the one that was configured:
+
+```@example p3_usage
+(tuned.cloud.shape.maximum_shape_parameter,
+ tuned.rain.fall_speed.plateau_velocity,
+ tuned.rain.ventilation.reynolds_coefficient)
+```
+
+All values are SI or dimensionless. The velocity scales are in m s⁻¹ (the published fit
+is stated in cm s⁻¹), and the mass argument of the fall-speed law is the dimensionless
+ratio `drop_mass / one_gram`, numerically the drop mass in grams.
+
 ## [P3 Examples and Visualization](@id p3_examples)
 
 This section provides worked examples demonstrating P3 microphysics concepts
@@ -55,7 +109,7 @@ using CairoMakie
 # (downloaded automatically on first use).
 p3 = PredictedParticlePropertiesMicrophysics()
 
-bulk = p3.ice.bulk_properties
+bulk = p3.ice.bulk
 
 # Mean particle mass axis, spanning most of the tabulated range.
 m̄ = 10 .^ range(-13, -3, length=200)
@@ -138,7 +192,7 @@ using SpecialFunctions: loggamma
 
 # Reconstruct N'(D) from the tabulated (λ, μ) and a prescribed N.
 function tabulated_psd(p3, q, N, Fᶠ, ρᶠ; Fˡ = 0.0)
-    bulk = p3.ice.bulk_properties
+    bulk = p3.ice.bulk
     log_m̄ = log10(q / N)
     λ = bulk.slope(log_m̄, Fᶠ, Fˡ, ρᶠ)
     μ = bulk.shape(log_m̄, Fᶠ, Fˡ, ρᶠ)

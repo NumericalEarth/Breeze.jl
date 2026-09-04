@@ -36,11 +36,11 @@ using Breeze.Microphysics.PredictedParticleProperties:
     rain_riming_rate,
     rime_density,
     P3MicrophysicalState,
-    RainMassWeightedVelocityEvaluator,
-    RainNumberWeightedVelocityEvaluator,
-    RainEvaporationVentilationEvaluator,
+    RainMassWeightedVelocity,
+    RainNumberWeightedVelocity,
+    RainVelocityDiameterIntegral,
     air_transport_properties,
-    ProcessRateParameters,
+    ProcessRate,
     homogeneous_freezing_cloud_rate,
     homogeneous_freezing_rain_rate,
     immersion_freezing_cloud_rate,
@@ -97,8 +97,8 @@ end
 # both fields). Prefer this over a NamedTuple shim so future field additions to
 # `PredictedParticlePropertiesMicrophysics` surface as compile errors, not silent
 # missing-field bugs.
-function tendency_test_p3(FT; process_rates = ProcessRateParameters(FT),
-                              warm_rain_scheme = KhairoutdinovKogan2000())
+function tendency_test_p3(FT; process_rates = ProcessRate(FT),
+                          warm_rain_scheme = KhairoutdinovKogan2000())
     return PredictedParticlePropertiesMicrophysics(FT; process_rates, warm_rain_scheme)
 end
 
@@ -124,10 +124,12 @@ function expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ, transport, F
     nʳ_bounded = qʳ_eff * λʳ^3 / (FT(π) * parameters.liquid_water_density)
     Nʳ₀ = nʳ_bounded * λʳ
     velocity_diameter_integral = p3.rain.evaporation(log10(λʳ))
-    constant_integral = FT(PPP.RAIN_VENTILATION_CONSTANT) / λʳ^2
+    f₁ᵣ = FT(p3.rain.ventilation.constant_coefficient)
+    f₂ᵣ = FT(p3.rain.ventilation.reynolds_coefficient)
+    constant_integral = f₁ᵣ / λʳ^2
     schmidt_correction = cbrt(transport.ν / max(transport.Dᵛ, FT(1e-10)))
     evaporation_integral = constant_integral +
-                           FT(PPP.RAIN_VENTILATION_REYNOLDS) * schmidt_correction /
+                           f₂ᵣ * schmidt_correction /
                            sqrt(max(transport.ν, FT(1e-10))) * velocity_diameter_integral
     rain_relaxation = FT(2π) * Nʳ₀ * ρ * transport.Dᵛ * evaporation_integral
     return ifelse(qʳ_eff >= p3.minimum_mass_mixing_ratio, rain_relaxation, zero(FT))
@@ -257,9 +259,9 @@ function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, q�
     is_sublimation = raw_ice_growth < 0
     deposition = ifelse(is_sublimation,
                         -min(-raw_ice_growth * p3.process_rates.calibration_factor_sublimation,
-                             max(0, qⁱ) / τ),
+                        max(0, qⁱ) / τ),
                         min(raw_ice_growth * p3.process_rates.calibration_factor_deposition,
-                            qᵛ / τ))
+                        qᵛ / τ))
 
     coating_condensation = ifelse(raw_coating_growth < 0, zero(FT),
                                   min(raw_coating_growth, qᵛ / τ))
@@ -267,7 +269,7 @@ function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, q�
                                  min(-raw_coating_growth, max(0, qʷⁱ) / τ), zero(FT))
 
     return (; condensation, rain_evaporation, rain_condensation, deposition,
-              coating_condensation, coating_evaporation)
+            coating_condensation, coating_evaporation)
 end
 
 function expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, constants)
@@ -403,9 +405,11 @@ end
         @test λ_r == parameters.minimum_rain_slope
         @test nʳ_bounded > nʳ
 
-        raw_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, qʳ, nʳ, S,
+        raw_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, p3.rain.ventilation,
+                                             qʳ, nʳ, S,
                                              thermodynamic_factor, parameters, ν, Dᵛ, FT)
-        bounded_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, qʳ, nʳ_bounded, S,
+        bounded_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, p3.rain.ventilation,
+                                                 qʳ, nʳ_bounded, S,
                                                  thermodynamic_factor, parameters, ν, Dᵛ, FT)
 
         @test raw_rate ≈ bounded_rate
@@ -421,8 +425,8 @@ end
         qⁱ = FT(1e-4)
         nⁱ = FT(1e-2)
         ℳ = P3MicrophysicalState(FT(0), FT(0), FT(0), FT(0),
-                                  qⁱ, nⁱ, FT(0), FT(0),
-                                  FT(0), FT(0), FT(0), FT(0))
+                                 qⁱ, nⁱ, FT(0), FT(0),
+                                 FT(0), FT(0), FT(0), FT(0))
 
         rime_state = PPP.consistent_rime_state(p3, qⁱ, FT(0), FT(0))
         Fˡ = PPP.liquid_fraction_on_ice(qⁱ, FT(0), p3.process_rates.floors)
@@ -454,7 +458,7 @@ end
         nⁱ = FT(1e5)   # Ice number [1/kg]
         Fᶠ = FT(0.3)   # Rime fraction
         ρᶠ = FT(400.0)  # Rime density [kg/m³]
-        parameters = ProcessRateParameters(FT)
+        parameters = ProcessRate(FT)
 
         # Create rates with typical warm-rain and ice process activity
         # Sign convention (M7): all one-directional rates are positive magnitudes
@@ -538,7 +542,7 @@ end
         @test isfinite(tendency_ρqⁱ(rates, ρ))
         @test isfinite(tendency_ρnⁱ(rates, ρ))
         @test isfinite(tendency_ρqᶠ(rates, ρ, Fᶠ))
-        @test isfinite(tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, one(FT), ProcessRateParameters(FT)))
+        @test isfinite(tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, one(FT), ProcessRate(FT)))
         @test isfinite(tendency_ρqʷⁱ(rates, ρ))
         @test isfinite(tendency_ρqᵛ(rates, ρ))
 
@@ -557,18 +561,18 @@ end
         @test tendency_ρqⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρnⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρqᶠ(zero_rates, ρ, FT(0.3)) == 0.0
-        @test tendency_ρbᶠ(zero_rates, ρ, FT(0.3), FT(400.0), one(FT), ProcessRateParameters(FT)) == 0.0
+        @test tendency_ρbᶠ(zero_rates, ρ, FT(0.3), FT(400.0), one(FT), ProcessRate(FT)) == 0.0
         @test tendency_ρqʷⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρqᵛ(zero_rates, ρ) == 0.0
     end
 
     @testset "coupled sink limiter iterations are configurable" begin
         FT = Float32
-        @test ProcessRateParameters(FT).coupled_sink_limiting_iterations == 4
-        configured = ProcessRateParameters(FT; coupled_sink_limiting_iterations = 3)
+        @test ProcessRate(FT).coupled_sink_limiting_iterations == 4
+        configured = ProcessRate(FT; coupled_sink_limiting_iterations = 3)
         @test configured.coupled_sink_limiting_iterations == 3
-        @test_throws ArgumentError ProcessRateParameters(FT;
-                                                         coupled_sink_limiting_iterations = 0)
+        @test_throws ArgumentError ProcessRate(FT;
+                                               coupled_sink_limiting_iterations = 0)
     end
 
     @testset "P3 sediments cloud mass and number with Stokes velocities" begin
@@ -673,11 +677,11 @@ end
         p3 = PredictedParticlePropertiesMicrophysics()
 
         μ = (; ρqᶜˡ = CenterField(grid), ρnᶜˡ = CenterField(grid),
-               ρqʳ  = CenterField(grid), ρnʳ  = CenterField(grid),
-               ρqⁱ  = CenterField(grid), ρnⁱ  = CenterField(grid),
-               ρqᶠ  = CenterField(grid), ρbᶠ  = CenterField(grid),
-               ρqʷⁱ = CenterField(grid),
-               ρsᵛ⁺ˡ = CenterField(grid), ρnᵃ = CenterField(grid))
+             ρqʳ  = CenterField(grid), ρnʳ  = CenterField(grid),
+             ρqⁱ  = CenterField(grid), ρnⁱ  = CenterField(grid),
+             ρqᶠ  = CenterField(grid), ρbᶠ  = CenterField(grid),
+             ρqʷⁱ = CenterField(grid),
+             ρsᵛ⁺ˡ = CenterField(grid), ρnᵃ = CenterField(grid))
 
         w_face = ZFaceField(grid)
         set!(w_face, (x, y, z) -> 2.0)
@@ -733,8 +737,8 @@ end
         constants = ThermodynamicConstants(FT)
         ρ = one(FT)
         ℳ = P3MicrophysicalState(FT(1e-4), FT(2e8), FT(1e-5), FT(1e4),
-                                     FT(1e-5), FT(1e5), FT(1e-6), FT(2.5e-9),
-                                     zero(FT), zero(FT), FT(1e8), one(FT))
+                                 FT(1e-5), FT(1e5), FT(1e-6), FT(2.5e-9),
+                                 zero(FT), zero(FT), FT(1e8), one(FT))
         q = MoistureMassFractions(FT(0.005), FT(1.1e-4), FT(1e-5))
         𝒰 = LiquidIcePotentialTemperatureState(FT(280), q, FT(1e5), FT(9e4))
         aerosol = AerosolActivation(AerosolMode(FT))
@@ -768,7 +772,7 @@ end
         @test tendency_ρqⁱ(rates, ρ) isa FT
         @test tendency_ρnⁱ(rates, ρ) isa FT
         @test tendency_ρqᶠ(rates, ρ, FT(0.3)) isa FT
-        @test tendency_ρbᶠ(rates, ρ, FT(0.3), FT(400.0), one(FT), ProcessRateParameters(FT)) isa FT
+        @test tendency_ρbᶠ(rates, ρ, FT(0.3), FT(400.0), one(FT), ProcessRate(FT)) isa FT
         @test tendency_ρqʷⁱ(rates, ρ) isa FT
         @test tendency_ρqᵛ(rates, ρ) isa FT
     end
@@ -927,7 +931,7 @@ end
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
-        process_rates = ProcessRateParameters(FT; sink_limiting_timescale=FT(10))
+        process_rates = ProcessRate(FT; sink_limiting_timescale=FT(10))
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -1059,7 +1063,7 @@ end
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
-        process_rates = ProcessRateParameters(FT; sink_limiting_timescale=FT(10))
+        process_rates = ProcessRate(FT; sink_limiting_timescale=FT(10))
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -1997,7 +2001,7 @@ end
     @testset "above-freezing cloud collection separates cloud sink from shed rain source" begin
         FT = Float64
         constants = ThermodynamicConstants(FT)
-        process_rates = ProcessRateParameters(FT; liquid_fraction_active = false)
+        process_rates = ProcessRate(FT; liquid_fraction_active = false)
         p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates)
 
         ρ = FT(1.0)
@@ -2041,8 +2045,8 @@ end
                                     p3.process_rates.shed_drop_mass
         @test tendency_ρnʳ(manual_rates, ρ, p3) ≈ expected_shed_drop_source
 
-        heavy_shed = ProcessRateParameters(FT; liquid_fraction_active = false,
-                                           shed_drop_mass = 1 / 4.0e5)
+        heavy_shed = ProcessRate(FT; liquid_fraction_active = false,
+                                 shed_drop_mass = 1 / 4.0e5)
         p3_heavy = PredictedParticlePropertiesMicrophysics(FT; process_rates = heavy_shed)
         @test tendency_ρnʳ(manual_rates, ρ, p3_heavy) ≈
               ρ * manual_rates.cloud_warm_collection * FT(4.0e5)
@@ -2054,7 +2058,7 @@ end
         Fᶠ = FT(0)
         ρᶠ = FT(400)
         qⁱ = FT(1e-4)
-        process_rates = ProcessRateParameters(FT; liquid_fraction_active = false)
+        process_rates = ProcessRate(FT; liquid_fraction_active = false)
 
         warm_rates = p3_process_rates_with(FT;
             cloud_warm_collection = FT(1e-8),
@@ -2185,9 +2189,9 @@ end
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
-        process_rates = ProcessRateParameters(FT;
-                                              sink_limiting_timescale = FT(10),
-                                              predict_supersaturation = true)
+        process_rates = ProcessRate(FT;
+                                    sink_limiting_timescale = FT(10),
+                                    predict_supersaturation = true)
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -2213,7 +2217,7 @@ end
                                 qᶠ, FT(0), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
 
         gm = expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
-                                                               sᵛ⁺ˡ, T, constants)
+                                                           sᵛ⁺ˡ, T, constants)
         Tᴳᴹ = T + gm.ε * PPP.vaporization_latent_heat(constants, T) / constants.dry_air.heat_capacity
         qᵛᴳᴹ = qᵛ - gm.ε
         qᶜˡᴳᴹ = qᶜˡ + gm.ε
@@ -2236,9 +2240,9 @@ end
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
-        process_rates = ProcessRateParameters(FT;
-                                              sink_limiting_timescale = FT(10),
-                                              predict_supersaturation = true)
+        process_rates = ProcessRate(FT;
+                                    sink_limiting_timescale = FT(10),
+                                    predict_supersaturation = true)
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -2270,9 +2274,9 @@ end
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
-        process_rates = ProcessRateParameters(FT;
-                                              sink_limiting_timescale = FT(10),
-                                              predict_supersaturation = true)
+        process_rates = ProcessRate(FT;
+                                    sink_limiting_timescale = FT(10),
+                                    predict_supersaturation = true)
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -2307,9 +2311,9 @@ end
         FT = Float64
         constants = ThermodynamicConstants(FT)
         τ = FT(10)
-        process_rates = ProcessRateParameters(FT;
-                                              sink_limiting_timescale = τ,
-                                              predict_supersaturation = true)
+        process_rates = ProcessRate(FT;
+                                    sink_limiting_timescale = τ,
+                                    predict_supersaturation = true)
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -2340,9 +2344,9 @@ end
         FT = Float64
         constants = ThermodynamicConstants(FT)
         τ = FT(10)
-        process_rates = ProcessRateParameters(FT;
-                                              sink_limiting_timescale = τ,
-                                              predict_supersaturation = true)
+        process_rates = ProcessRate(FT;
+                                    sink_limiting_timescale = τ,
+                                    predict_supersaturation = true)
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
