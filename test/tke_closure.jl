@@ -221,23 +221,23 @@ column(field) = Array(interior(field, 1, 1, :))
         set!(model; θ = 300)
         set_tke!(model, e₀)
 
-        @test model.closure_fields.tupled_implicit_linear_coefficients.ρe === model.closure_fields.Le
+        @test model.closure_fields.tupled_implicit_linear_coefficients.ρe === model.closure_fields.Lᵉ
         @test model.closure_fields.tupled_implicit_linear_coefficients.ρθ isa Oceananigans.Fields.ZeroField
 
-        # Neutral air, no buoyancy flux: Le = - Sᴰ √e / ℓ with ℓ = z at the cell centers
-        Le = column(model.closure_fields.Le)
+        # Neutral air, no buoyancy flux: Lᵉ = - Sᴰ √e / ℓ with ℓ = z at the cell centers
+        Lᵉ = column(model.closure_fields.Lᵉ)
         zc = znodes(grid, Center())
         Cᴰ = closure.stability_functions.Cᴰ
-        @test all(Le .≈ -Cᴰ * sqrt(e₀) ./ zc)
-        @test all(Le .< 0)
+        @test all(Lᵉ .≈ -Cᴰ * sqrt(e₀) ./ zc)
+        @test all(Lᵉ .< 0)
 
         # Below the minimum TKE the dissipation rate keeps following √e — the floor applies to
         # the diffusivities, not to the dissipation (as in CATKE)
         e₋ = FT(1e-8)
         @test e₋ < closure.minimum_tke
         set_tke!(model, e₋)
-        Le = column(model.closure_fields.Le)
-        @test all(Le .≈ -Cᴰ * sqrt(e₋) ./ zc)
+        Lᵉ = column(model.closure_fields.Lᵉ)
+        @test all(Lᵉ .≈ -Cᴰ * sqrt(e₋) ./ zc)
     end
 
     @testset "the sources enter the stage tendency" begin
