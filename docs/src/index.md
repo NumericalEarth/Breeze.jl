@@ -12,6 +12,9 @@ hero:
     - theme: alt
       text: View on GitHub
       link: https://github.com/NumericalEarth/Breeze.jl
+    - theme: brand
+      text: Examples
+      link: "/literated/"
 
 features:
   - icon: 🌀
