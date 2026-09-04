@@ -347,9 +347,9 @@ Fold the CFL-withheld transport of the stage-entry thermodynamic state into the 
 tendency: `Gˢρθ` gains the first-order upwind flux divergence of the frozen (ρθ, ρᵈ)
 carried by wⁱ = (1 - s) w. The predictors then apply it per substep with the same
 Crank-Nicolson factors as the rest of the slow tendency, so the acoustic pressure adjusts
-to the residual transport inside the loop (issue #897). The perturbation part is handled by
-[`in_loop_implicit_advection`](@ref). A no-op unless the thermodynamic scheme is
-adaptive-implicit.
+to the residual transport inside the loop (issue #897). The perturbation part is handled
+per substep by `residual_predictor_substep!` inside the loop. A no-op unless the
+thermodynamic scheme is adaptive-implicit.
 """
 add_residual_base_tendency!(model) =
     add_residual_base_tendency!(model,
@@ -368,36 +368,6 @@ function residual_base_tendency!(model, advection)
     launch!(architecture(grid), grid, :xyz, _residual_base_tendency!,
             model.timestepper.Gⁿ[θ_name], grid, scheme, td, w, ρθ, ρᵈ)
     return nothing
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Build the per-substep residual-transport solve for the acoustic loop's thermodynamic
-predictor, or `nothing` when the thermodynamic scheme is not adaptive-implicit. Called
-between Step B and Step C: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★` advances the perturbation part of
-the CFL-withheld transport implicitly *inside* the predictor-substitution chain, so Step C's
-pressure gradient and Step D's recovery act on a transport-consistent predictor. Together
-with [`add_residual_base_tendency!`](@ref) this folds the full withheld transport into the
-loop; post-loop, the thermodynamic variable keeps closure diffusion only.
-"""
-function in_loop_implicit_advection(model)
-    solver = model.timestepper.implicit_solver
-    solver === nothing && return nothing
-    θ_name = thermodynamic_density_name(model.formulation)
-    θ_advection = field_advection_scheme(model.advection, θ_name)
-    needs_implicit_solver(θ_advection) || return nothing
-
-    predictor = model.timestepper.substepper.density_potential_temperature_predictor
-    w, ρᵈ = advecting_state(model)
-    θ_velocities = merge(slow_thermodynamic_velocities(model), (; w))
-
-    function residual_predictor_solve!(Δτ)
-        implicit_step!(predictor, solver, nothing, nothing, nothing,
-                       model.clock, fields(model), Δτ, θ_advection, θ_velocities, ρᵈ)
-        return nothing
-    end
-    return residual_predictor_solve!
 end
 
 implicit_substep!(model, Δt_stage) =
@@ -435,7 +405,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
     θ_name = thermodynamic_density_name(model.formulation)
     θ_advection = field_advection_scheme(model.advection, θ_name)
     # Under an adaptive-implicit scheme the thermodynamic remainder is folded into the
-    # acoustic loop (`in_loop_implicit_advection`), so the post-loop solve keeps only the
+    # acoustic loop (`residual_predictor_substep!`), so the post-loop solve keeps only the
     # density-weighted closure diffusion.
     θ_step_advection = needs_implicit_solver(θ_advection) ? nothing : θ_advection
     implicit_step!(prognostic[θ_name],

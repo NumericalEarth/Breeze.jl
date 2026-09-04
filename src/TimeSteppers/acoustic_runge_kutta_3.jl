@@ -197,9 +197,12 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     # perturbation part is solved per substep inside the loop.
     add_residual_base_tendency!(model)
 
-    # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
-    implicit_advection! = in_loop_implicit_advection(model)
-    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰; implicit_advection!)
+    # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N. An adaptive-implicit
+    # thermodynamic scheme is passed through so the loop applies the withheld perturbation
+    # transport per substep (`residual_predictor_substep!`).
+    θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
+    loop_advection = needs_implicit_solver(θ_advection) ? θ_advection : nothing
+    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, loop_advection)
 
     # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
     # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
