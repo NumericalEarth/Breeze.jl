@@ -221,7 +221,7 @@ makedocs(
         ],
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
-            "Reproducibility of Breeze.jl models" => "reproducibility.md",
+            "Reproducibility of Breeze.jl models" => "appendix/reproducibility.md",
         ],
         "References" => "references.md",
         "API" => "api.md",
