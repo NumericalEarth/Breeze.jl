@@ -20,12 +20,15 @@ features:
   - icon: 🔊
     title: Compressible dynamics
     details: With split-explicit acoustic substepping (horizontally explicit, vertically implicit) using SSP-RK3 or Wicker-Skamarock RK3
+  - icon: 🏔️
+    title: Terrain-following coordinates
+    details: Smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system) for compressible flow over complex topography
   - icon: 💧
     title: Moist thermodynamics
     details: With liquid-ice potential temperature and static energy formulations
   - icon: ☁️
     title: Cloud microphysics
-    details: Saturation adjustment, Kessler, one- and two-moment bulk schemes via [`CloudMicrophysics.jl`](https://github.com/CliMA/CloudMicrophysics.jl)
+    details: Saturation adjustment, Kessler, one- and two-moment bulk schemes via [`CloudMicrophysics.jl`](https://github.com/CliMA/CloudMicrophysics.jl), and Predicted Particle Properties (P3) mixed-phase microphysics
   - icon: ☀️
     title: Radiative transfer
     details: Gray, clear-sky, and all-sky solvers via [`RRTMGP.jl`](https://github.com/CliMA/RRTMGP.jl)
@@ -62,8 +65,7 @@ Model development is hard but rewarding, and builds useful skills for a myriad o
 
 The goals of the current group of model developers include developing
 
-- **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling.
-- **Terrain-following coordinates**: Smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system) for flow over complex topography
+- **Advanced microphysics**: spectral bin schemes and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling.
 - **Open boundaries and nesting**: Open boundary conditions are useful for both idealized simulations and realistic one- and two-way nested simulations for high-resolution downscaling.
 - **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [NumericalEarth.jl](https://github.com/NumericalEarth/NumericalEarth.jl).
 
