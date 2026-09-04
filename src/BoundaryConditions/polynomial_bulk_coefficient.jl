@@ -5,9 +5,13 @@
 # Default neutral polynomials (a₀, a₁, a₂) from Large & Yeager (2009),
 # "The global climatology of an interannually varying air–sea flux data set",
 # Climate Dynamics 33(2), 341–364.
-const default_neutral_drag_polynomial            = (0.142, 0.076, 2.7)
-const default_neutral_sensible_heat_polynomial   = (0.128, 0.068, 2.43)
-const default_neutral_latent_heat_polynomial     = (0.120, 0.070, 2.55)
+# The polynomial evaluates to the transfer coefficient itself; Large and Yeager (2009) publish
+# their coefficients in units of 10⁻³ — (0.142, 0.076, 2.7) for drag and so on — so the defaults
+# carry the scaling explicitly. Exact decimal literals, rather than `.* 1e-3`, keep the stored
+# values round-tripping cleanly through `show`.
+const default_neutral_drag_polynomial            = (1.42e-4, 7.6e-5, 2.7e-3)
+const default_neutral_sensible_heat_polynomial   = (1.28e-4, 6.8e-5, 2.43e-3)
+const default_neutral_latent_heat_polynomial     = (1.2e-4,  7.0e-5, 2.55e-3)
 
 #####
 ##### StabilityFunctionParameters: Ψ function constants
@@ -380,18 +384,20 @@ following [Large and Yeager (2009)](@cite LargeYeager2009).
 
 The neutral transfer coefficient at 10 m follows the Large and Yeager (2009) form:
 ```math
-C^N_{10}(U_h) = (a_0 + a_1 U_h + a_2 / U_h) × 10^{-3}
+C^N_{10}(U_h) = a_0 + a_1 U_h + a_2 / U_h
 ```
-where ``U_h`` is the wind speed at measurement height ``h``.
+where ``U_h`` is the wind speed at measurement height ``h``. The polynomial evaluates to the
+coefficient itself; Large and Yeager publish their coefficients in units of ``10^{-3}``, a
+scaling the default polynomials carry explicitly.
 
 The coefficient is adjusted for measurement height using logarithmic profile theory,
 and stability correction is applied based on the bulk Richardson number.
 
 When `polynomial` is `nothing`, the appropriate [Large and Yeager (2009)](@cite LargeYeager2009) polynomial
 will be automatically selected based on the boundary condition type:
-- `BulkDrag`: `default_neutral_drag_polynomial` = `(0.142, 0.076, 2.7)` for momentum
-- `BulkSensibleHeatFlux`: `default_neutral_sensible_heat_polynomial` = `(0.128, 0.068, 2.43)` for sensible heat
-- `BulkVaporFlux`: `default_neutral_latent_heat_polynomial` = `(0.120, 0.070, 2.55)` for latent heat
+- `BulkDrag`: `default_neutral_drag_polynomial` = `(0.142, 0.076, 2.7) .* 1e-3` for momentum
+- `BulkSensibleHeatFlux`: `default_neutral_sensible_heat_polynomial` = `(0.128, 0.068, 2.43) .* 1e-3` for sensible heat
+- `BulkVaporFlux`: `default_neutral_latent_heat_polynomial` = `(0.120, 0.070, 2.55) .* 1e-3` for latent heat
 
 # Keyword Arguments
 - `polynomial`: Tuple `(a₀, a₁, a₂)` for the polynomial. If `nothing`, the polynomial
@@ -437,11 +443,11 @@ PolynomialCoefficient{Float64}
 using Breeze.BoundaryConditions: PolynomialCoefficient
 
 # With explicit polynomial
-coef = PolynomialCoefficient(polynomial = (0.142, 0.076, 2.7))
+coef = PolynomialCoefficient(polynomial = (0.000142, 7.6e-5, 0.0027))
 
 # output
 PolynomialCoefficient{Float64}
-├── polynomial: (0.142, 0.076, 2.7)
+├── polynomial: (0.000142, 7.6e-5, 0.0027)
 ├── roughness_length: 0.00015 m
 ├── minimum_wind_speed: 0.1 m/s
 ├── surface: PlanarLiquidSurface
@@ -532,7 +538,7 @@ $(TYPEDSIGNATURES)
 Compute neutral transfer coefficient at 10 m using the
 [Large and Yeager (2009)](@cite LargeYeager2009) form:
 ```math
-C^N_{10}(U) = (a_0 + a_1 U + a_2 / U) × 10^{-3}
+C^N_{10}(U) = a_0 + a_1 U + a_2 / U
 ```
 
 Wind speed is clamped to `U_min` to avoid singularity in the ``a_2/U`` term.
@@ -544,10 +550,9 @@ Wind speed is clamped to `U_min` to avoid singularity in the ``a_2/U`` term.
 """
 @inline function neutral_coefficient_10m(polynomial, U₁₀, U_min)
     a₀, a₁, a₂ = polynomial
-    FT = typeof(U₁₀)
     # Avoid division by zero
     U_safe = max(U₁₀, U_min)
-    return (a₀ + a₁ * U_safe + a₂ / U_safe) * FT(1e-3)
+    return a₀ + a₁ * U_safe + a₂ / U_safe
 end
 
 #####

@@ -91,7 +91,7 @@ using GPUArraysCore: @allowscalar
 
     @testset "Neutral coefficient computation" begin
         # Test Large & Yeager form at U = 10 m/s
-        coeffs = (0.142, 0.076, 2.7)  # Large & Yeager (2009) drag coefficients
+        coeffs = (0.142, 0.076, 2.7) .* 1e-3 # Large & Yeager (2009) drag coefficients
         U = 10.0
         U_min = 0.1
         C = neutral_coefficient_10m(coeffs, U, U_min)
@@ -263,7 +263,7 @@ using GPUArraysCore: @allowscalar
 
         # Test evaluation with no stability correction
         coef = PolynomialCoefficient(
-            polynomial = (0.142, 0.076, 2.7),
+            polynomial = (0.142, 0.076, 2.7) .* 1e-3,
             stability_function = nothing
         )
         U = 10.0
@@ -279,7 +279,7 @@ using GPUArraysCore: @allowscalar
         qᵛ_field = CenterField(grid)  # dry air in the first cell
 
         coef_fitted = PolynomialCoefficient(
-            (0.142, 0.076, 2.7),     # polynomial
+            (0.142, 0.076, 2.7) .* 1e-3, # polynomial
             1.5e-4,                   # roughness_length
             0.1,                      # minimum_wind_speed
             FittedStabilityFunction(1.5e-4 / 7.3),
@@ -305,7 +305,7 @@ using GPUArraysCore: @allowscalar
         bc = Breeze.BulkDrag(coefficient = coef, gustiness = 0.5, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with momentum coefficients
-        @test bc.condition.coefficient.polynomial == (0.142, 0.076, 2.7)
+        @test bc.condition.coefficient.polynomial == default_neutral_drag_polynomial
         @test bc.condition.gustiness == 0.5
         @test bc.condition.surface_temperature === SST
         @test bc.condition.coefficient.transfer_type === Val(:momentum)
@@ -318,7 +318,7 @@ using GPUArraysCore: @allowscalar
         bc = Breeze.BulkSensibleHeatFlux(coefficient = coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with sensible heat coefficients
-        @test bc.condition.coefficient.polynomial == (0.128, 0.068, 2.43)
+        @test bc.condition.coefficient.polynomial == default_neutral_sensible_heat_polynomial
         @test bc.condition.coefficient.transfer_type === Val(:scalar)
     end
 
@@ -329,7 +329,7 @@ using GPUArraysCore: @allowscalar
         bc = Breeze.BulkVaporFlux(coefficient = coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with latent heat coefficients
-        @test bc.condition.coefficient.polynomial == (0.120, 0.070, 2.55)
+        @test bc.condition.coefficient.polynomial == default_neutral_latent_heat_polynomial
         @test bc.condition.coefficient.transfer_type === Val(:scalar)
     end
 
@@ -451,7 +451,7 @@ using GPUArraysCore: @allowscalar
         set!(qᵛ_field, 1e-3)
         constants = Breeze.Thermodynamics.ThermodynamicConstants()
         surface = Breeze.PlanarLiquidSurface()
-        coef = PolynomialCoefficient((0.142, 0.076, 2.7), 1.5e-4, 0.1, FittedStabilityFunction(1.5e-4 / 7.3),
+        coef = PolynomialCoefficient((0.142, 0.076, 2.7) .* 1e-3, 1.5e-4, 0.1, FittedStabilityFunction(1.5e-4 / 7.3),
                                      surface, 0.5, θᵥ_field, qᵛ_field, 1e5, constants, Val(:momentum))
         T₀ = 300.0
         θᵥ₀ = surface_virtual_potential_temperature(T₀, 1e5, constants, surface, 0.5, 1e-3)
@@ -483,7 +483,7 @@ using GPUArraysCore: @allowscalar
         SST(x, y) = 300.0
         bc2 = Breeze.BulkDrag(coefficient=coef, surface_temperature=SST, filtered_velocities=fv)
         @test bc2.condition.filtered_velocities === fv
-        @test bc2.condition.coefficient.polynomial == (0.142, 0.076, 2.7)
+        @test bc2.condition.coefficient.polynomial == default_neutral_drag_polynomial
     end
 
     @testset "BulkSensibleHeatFlux with filtered_velocities" begin
@@ -532,7 +532,7 @@ using GPUArraysCore: @allowscalar
         grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
 
         coef = PolynomialCoefficient(
-            polynomial = (0.142, 0.076, 2.7),
+            polynomial = (0.142, 0.076, 2.7) .* 1e-3,
             stability_function = nothing
         )
         U = 10.0

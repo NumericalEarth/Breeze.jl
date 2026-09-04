@@ -72,8 +72,8 @@ cases = (
 # The neutral case prescribes the neutral log-law drag coefficient referenced to the first cell
 # center, ``Cᵈ = [κ / \ln(z₁ / ℓʳ)]²``, which the column builder below computes from its grid. The
 # stable case prescribes Monin–Obukhov similarity instead, which Breeze supplies through a
-# `PolynomialCoefficient`: its polynomial ``(a₀ + a₁ U + a₂ / U) × 10⁻³`` is the neutral 10 m
-# transfer coefficient, so ``a₀ = 10³ [κ / \ln(10 / ℓʳ)]²`` with the other two zero is the neutral
+# `PolynomialCoefficient`: its polynomial ``a₀ + a₁ U + a₂ / U`` is the neutral 10 m transfer
+# coefficient, so ``a₀ = Cᵈ = [κ / \ln(10 / ℓʳ)]²`` with the other two zero is the neutral
 # log law, and a `FittedStabilityFunction` corrects it away from neutral. A `moisture_availability`
 # of zero declares a dry surface, whose humidity is that of the air above it rather than the
 # saturation humidity at the surface temperature. Over a saturated surface at 265 K that humidity
@@ -84,8 +84,7 @@ cases = (
 ℓʳ = 0.1 # m, roughness length
 Cᵈ = (κ / log(10 / ℓʳ))^2 # the neutral log-law drag coefficient, referenced to 10 m
 
-## The polynomial is evaluated in Large and Yeager's units of 10⁻³, so its constant term is 10³ Cᵈ
-monin_obukhov_coefficient = PolynomialCoefficient(polynomial = 1e3 * Cᵈ .* (1, 0, 0),
+monin_obukhov_coefficient = PolynomialCoefficient(polynomial = Cᵈ .* (1, 0, 0),
                                                   roughness_length = ℓʳ,
                                                   stability_function = FittedStabilityFunction(ℓʳ),
                                                   moisture_availability = 0)
