@@ -42,7 +42,7 @@ using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        FieldBoundaryConditions,
                                        Bottom, Top, West, East, South, North
 using Oceananigans.Fields: Field, set!
-using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, znode
+using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, xnode, ynode, znode
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑyzᵃᶠᶜ, ℑyzᵃᶜᶠ, ℑxzᶠᵃᶜ, ℑxzᶜᵃᶠ,
                               Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
 
@@ -63,14 +63,6 @@ include("update_boundary_conditions.jl")
 
 #####
 ##### Wind speed at the bottom wall
-#####
-##### The unfiltered tangential wind on every wall is `tangential_speed²` in `wall_faces.jl`;
-##### these bottom-wall forms are kept for the temporally filtered surface state.
-#####
-
-@inline wind_speed²ᶠᶜᶜ(i, j, grid, fields, ::Nothing) = tangential_speed²(Bottom(), XDirection(), i, j, 1, grid, fields)
-@inline wind_speed²ᶜᶠᶜ(i, j, grid, fields, ::Nothing) = tangential_speed²(Bottom(), YDirection(), i, j, 1, grid, fields)
-@inline wind_speed²ᶜᶜᶜ(i, j, grid, fields, ::Nothing) = tangential_speed²(Bottom(), nothing,      i, j, 1, grid, fields)
 
 @inline function wind_speed²ᶠᶜᶜ(i, j, grid, fields, fv::FilteredSurfaceVelocities)
     u² = @inbounds fv.u[i, j, 1]^2
@@ -372,17 +364,21 @@ end
 ##### Utilities
 #####
 
-# Helper to convert functions of the wall coordinates to two-dimensional fields on the wall
+#####
+##### Bottom-wall wind speeds at the three staggers, for the temporally filtered surface state
+#####
+
+@inline wind_speed²ᶠᶜᶜ(i, j, grid, fields, ::Nothing) = tangential_speed²(i, j, 1, grid, Bottom(), XDirection(), fields)
+@inline wind_speed²ᶜᶠᶜ(i, j, grid, fields, ::Nothing) = tangential_speed²(i, j, 1, grid, Bottom(), YDirection(), fields)
+@inline wind_speed²ᶜᶜᶜ(i, j, grid, fields, ::Nothing) = tangential_speed²(i, j, 1, grid, Bottom(), nothing,      fields)
+
+# The wall state may be a number, a field on the wall, or a function of the two wall
+# coordinates and time, which is evaluated at every call (see `wall_value`)
 materialize_surface_field(f, grid) = materialize_surface_field(f, grid, Bottom())
 materialize_surface_field(::Nothing, grid, side) = nothing
 materialize_surface_field(f::Field, grid, side) = f
 materialize_surface_field(f::Number, grid, side) = f
-
-function materialize_surface_field(f::Function, grid, side)
-    field = wall_field(grid, side)
-    set!(field, f)
-    return field
-end
+materialize_surface_field(f::Function, grid, side) = f
 
 #####
 ##### Default polynomial filling for Function constructors

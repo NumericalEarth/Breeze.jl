@@ -35,8 +35,9 @@ FluxBoundaryCondition: BulkVaporFluxFunction(coefficient=0.006, gustiness=0)
 
 On every wall the fluxes carry heat and vapor into the domain when the wall is warmer or
 moister than the adjacent air, and remove the tangential momentum. The wall state may be a
-number, a field, or a function of the two coordinates of the wall (`(x, y)` on the floor and
-ceiling, `(y, z)` on the west and east walls, `(x, z)` on the south and north walls). The
+number, a field, or a function of the two coordinates of the wall and time (`(x, y, t)` on
+the floor and ceiling, `(y, z, t)` on the west and east walls, `(x, z, t)` on the south and
+north walls), evaluated at the wall at every time step. The
 transfer coefficient may be a constant or a [`PolynomialCoefficient`](@ref Breeze.BoundaryConditions.PolynomialCoefficient);
 its stability correction applies on the floor and ceiling (with the sign of the bulk
 Richardson number reversed under the ceiling) and is neutral on the vertical walls, along

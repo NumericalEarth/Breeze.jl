@@ -16,13 +16,13 @@ const VerticalWall = Union{XNormalWall, YNormalWall}
 const LeftWall = Union{West, South, Bottom}
 const RightWall = Union{East, North, Top}
 
-# Indices (i, j, k) of the near-wall cell from the boundary-tangential indices (a, b)
-@inline near_wall_indices(::Bottom, a, b, grid) = (a, b, 1)
-@inline near_wall_indices(::Top,    a, b, grid) = (a, b, grid.Nz)
-@inline near_wall_indices(::West,   a, b, grid) = (1, a, b)
-@inline near_wall_indices(::East,   a, b, grid) = (grid.Nx, a, b)
-@inline near_wall_indices(::South,  a, b, grid) = (a, 1, b)
-@inline near_wall_indices(::North,  a, b, grid) = (a, grid.Ny, b)
+# Indices (i, j, k) of the near-wall cell from the boundary-tangential indices (ℓ, m)
+@inline near_wall_indices(ℓ, m, grid, ::Bottom) = (ℓ, m, 1)
+@inline near_wall_indices(ℓ, m, grid, ::Top) = (ℓ, m, grid.Nz)
+@inline near_wall_indices(ℓ, m, grid, ::West) = (1, ℓ, m)
+@inline near_wall_indices(ℓ, m, grid, ::East) = (grid.Nx, ℓ, m)
+@inline near_wall_indices(ℓ, m, grid, ::South) = (ℓ, 1, m)
+@inline near_wall_indices(ℓ, m, grid, ::North) = (ℓ, grid.Ny, m)
 
 # Fluxes point along the positive coordinate direction, so a positive flux enters the
 # domain through a left wall and leaves it through a right wall. A flux of magnitude F
@@ -35,31 +35,42 @@ wall_normal_direction(::XNormalWall) = XDirection()
 wall_normal_direction(::YNormalWall) = YDirection()
 wall_normal_direction(::HorizontalWall) = ZDirection()
 
-# Wall state (temperature, humidity) at the boundary-tangential indices (a, b), from a
+# Wall state (temperature, humidity) at the boundary-tangential indices (ℓ, m), from a
 # number or from a two-dimensional field living on the wall
-@inline wall_value(side, a, b, x::Number) = x
-@inline wall_value(::HorizontalWall, a, b, field::AbstractArray) = @inbounds field[a, b, 1]
-@inline wall_value(::XNormalWall,    a, b, field::AbstractArray) = @inbounds field[1, a, b]
-@inline wall_value(::YNormalWall,    a, b, field::AbstractArray) = @inbounds field[a, 1, b]
+@inline wall_value(ℓ, m, grid, side, x::Number, clock) = x
+@inline wall_value(ℓ, m, grid, ::HorizontalWall, field::AbstractArray, clock) = @inbounds field[ℓ, m, 1]
+@inline wall_value(ℓ, m, grid, ::XNormalWall,    field::AbstractArray, clock) = @inbounds field[1, ℓ, m]
+@inline wall_value(ℓ, m, grid, ::YNormalWall,    field::AbstractArray, clock) = @inbounds field[ℓ, 1, m]
 
-# A two-dimensional field on the wall, for wall states given as functions of the two
-# wall coordinates: (x, y) on the bottom and top, (y, z) on the west and east, (x, z) on
+# A function is evaluated at the centre of the wall face with the two wall coordinates and the
+# time: `f(x, y, t)` on the bottom and top, `f(y, z, t)` on the west and east, `f(x, z, t)` on
 # the south and north
-wall_field(grid, ::HorizontalWall) = Field{Center, Center, Nothing}(grid)
-wall_field(grid, ::XNormalWall)    = Field{Nothing, Center, Center}(grid)
-wall_field(grid, ::YNormalWall)    = Field{Center, Nothing, Center}(grid)
+@inline function wall_value(ℓ, m, grid, ::HorizontalWall, f::Function, clock)
+    c = Center()
+    return f(xnode(ℓ, m, 1, grid, c, c, c), ynode(ℓ, m, 1, grid, c, c, c), clock.time)
+end
+
+@inline function wall_value(ℓ, m, grid, ::XNormalWall, f::Function, clock)
+    c = Center()
+    return f(ynode(1, ℓ, m, grid, c, c, c), znode(1, ℓ, m, grid, c, c, c), clock.time)
+end
+
+@inline function wall_value(ℓ, m, grid, ::YNormalWall, f::Function, clock)
+    c = Center()
+    return f(xnode(ℓ, 1, m, grid, c, c, c), znode(ℓ, 1, m, grid, c, c, c), clock.time)
+end
 
 # Wall-normal distance from the wall to the near-wall cell centre: the height of the
 # first cell centre for the bottom wall, and half the cell width otherwise
-@inline wall_distance(::Bottom,       i, j, k, grid) = znode(i, j, k, grid, Center(), Center(), Center())
-@inline wall_distance(::Top,          i, j, k, grid) = Δzᶜᶜᶜ(i, j, k, grid) / 2
-@inline wall_distance(::XNormalWall,  i, j, k, grid) = Δxᶜᶜᶜ(i, j, k, grid) / 2
-@inline wall_distance(::YNormalWall,  i, j, k, grid) = Δyᶜᶜᶜ(i, j, k, grid) / 2
+@inline wall_distance(i, j, k, grid, ::Bottom) = znode(i, j, k, grid, Center(), Center(), Center())
+@inline wall_distance(i, j, k, grid, ::Top) = Δzᶜᶜᶜ(i, j, k, grid) / 2
+@inline wall_distance(i, j, k, grid, ::XNormalWall) = Δxᶜᶜᶜ(i, j, k, grid) / 2
+@inline wall_distance(i, j, k, grid, ::YNormalWall) = Δyᶜᶜᶜ(i, j, k, grid) / 2
 
 # Height of the wall next to the near-wall cell, for the potential energy in the static energy
-@inline wall_height(::Bottom,       i, j, k, grid) = znode(i, j, k,     grid, Center(), Center(), Face())
-@inline wall_height(::Top,          i, j, k, grid) = znode(i, j, k + 1, grid, Center(), Center(), Face())
-@inline wall_height(::VerticalWall, i, j, k, grid) = znode(i, j, k,     grid, Center(), Center(), Center())
+@inline wall_height(i, j, k, grid, ::Bottom) = znode(i, j, k,     grid, Center(), Center(), Face())
+@inline wall_height(i, j, k, grid, ::Top) = znode(i, j, k + 1, grid, Center(), Center(), Face())
+@inline wall_height(i, j, k, grid, ::VerticalWall) = znode(i, j, k,     grid, Center(), Center(), Center())
 
 # Buoyancy stabilizes or destabilizes a surface layer on a horizontal wall only, and the
 # bulk Richardson number changes sign under the top wall (cold above warm is unstable)
@@ -76,38 +87,38 @@ wall_field(grid, ::YNormalWall)    = Field{Center, Nothing, Center}(grid)
 
 @inline ϕ²(i, j, k, grid, ϕ) = @inbounds ϕ[i, j, k]^2
 
-@inline near_wall_velocity(::XDirection, i, j, k, fields) = @inbounds fields.u[i, j, k]
-@inline near_wall_velocity(::YDirection, i, j, k, fields) = @inbounds fields.v[i, j, k]
-@inline near_wall_velocity(::ZDirection, i, j, k, fields) = @inbounds fields.w[i, j, k]
+@inline near_wall_velocity(i, j, k, grid, ::XDirection, fields) = @inbounds fields.u[i, j, k]
+@inline near_wall_velocity(i, j, k, grid, ::YDirection, fields) = @inbounds fields.v[i, j, k]
+@inline near_wall_velocity(i, j, k, grid, ::ZDirection, fields) = @inbounds fields.w[i, j, k]
 
 # Horizontal walls: the tangential wind is (u, v)
-@inline tangential_speed²(::HorizontalWall, ::Nothing, i, j, k, grid, fields) =
+@inline tangential_speed²(i, j, k, grid, ::HorizontalWall, ::Nothing, fields) =
     ℑxᶜᵃᵃ(i, j, k, grid, ϕ², fields.u) + ℑyᵃᶜᵃ(i, j, k, grid, ϕ², fields.v)
 
-@inline tangential_speed²(::HorizontalWall, ::XDirection, i, j, k, grid, fields) =
+@inline tangential_speed²(i, j, k, grid, ::HorizontalWall, ::XDirection, fields) =
     ϕ²(i, j, k, grid, fields.u) + ℑxyᶠᶜᵃ(i, j, k, grid, ϕ², fields.v)
 
-@inline tangential_speed²(::HorizontalWall, ::YDirection, i, j, k, grid, fields) =
+@inline tangential_speed²(i, j, k, grid, ::HorizontalWall, ::YDirection, fields) =
     ℑxyᶜᶠᵃ(i, j, k, grid, ϕ², fields.u) + ϕ²(i, j, k, grid, fields.v)
 
 # Walls normal to x: the tangential wind is (v, w)
-@inline tangential_speed²(::XNormalWall, ::Nothing, i, j, k, grid, fields) =
+@inline tangential_speed²(i, j, k, grid, ::XNormalWall, ::Nothing, fields) =
     ℑyᵃᶜᵃ(i, j, k, grid, ϕ², fields.v) + ℑzᵃᵃᶜ(i, j, k, grid, ϕ², fields.w)
 
-@inline tangential_speed²(::XNormalWall, ::YDirection, i, j, k, grid, fields) =
+@inline tangential_speed²(i, j, k, grid, ::XNormalWall, ::YDirection, fields) =
     ϕ²(i, j, k, grid, fields.v) + ℑyzᵃᶠᶜ(i, j, k, grid, ϕ², fields.w)
 
-@inline tangential_speed²(::XNormalWall, ::ZDirection, i, j, k, grid, fields) =
+@inline tangential_speed²(i, j, k, grid, ::XNormalWall, ::ZDirection, fields) =
     ℑyzᵃᶜᶠ(i, j, k, grid, ϕ², fields.v) + ϕ²(i, j, k, grid, fields.w)
 
 # Walls normal to y: the tangential wind is (u, w)
-@inline tangential_speed²(::YNormalWall, ::Nothing, i, j, k, grid, fields) =
+@inline tangential_speed²(i, j, k, grid, ::YNormalWall, ::Nothing, fields) =
     ℑxᶜᵃᵃ(i, j, k, grid, ϕ², fields.u) + ℑzᵃᵃᶜ(i, j, k, grid, ϕ², fields.w)
 
-@inline tangential_speed²(::YNormalWall, ::XDirection, i, j, k, grid, fields) =
+@inline tangential_speed²(i, j, k, grid, ::YNormalWall, ::XDirection, fields) =
     ϕ²(i, j, k, grid, fields.u) + ℑxzᶠᵃᶜ(i, j, k, grid, ϕ², fields.w)
 
-@inline tangential_speed²(::YNormalWall, ::ZDirection, i, j, k, grid, fields) =
+@inline tangential_speed²(i, j, k, grid, ::YNormalWall, ::ZDirection, fields) =
     ℑxzᶜᵃᶠ(i, j, k, grid, ϕ², fields.u) + ϕ²(i, j, k, grid, fields.w)
 
 #####
@@ -117,18 +128,18 @@ wall_field(grid, ::YNormalWall)    = Field{Center, Nothing, Center}(grid)
 ##### the bottom wall only; materialization rejects it elsewhere.
 #####
 
-@inline near_wall_velocity(side, direction, i, j, k, fields, ::Nothing) =
-    near_wall_velocity(direction, i, j, k, fields)
+@inline near_wall_velocity(i, j, k, grid, side, direction, fields, ::Nothing) =
+    near_wall_velocity(i, j, k, grid, direction, fields)
 
-@inline wall_wind_speed²(side, direction, i, j, k, grid, fields, ::Nothing) =
-    tangential_speed²(side, direction, i, j, k, grid, fields)
+@inline wall_wind_speed²(i, j, k, grid, side, direction, fields, ::Nothing) =
+    tangential_speed²(i, j, k, grid, side, direction, fields)
 
-@inline near_wall_velocity(::Bottom, ::XDirection, i, j, k, fields, fv::FilteredSurfaceVelocities) = @inbounds fv.u[i, j, 1]
-@inline near_wall_velocity(::Bottom, ::YDirection, i, j, k, fields, fv::FilteredSurfaceVelocities) = @inbounds fv.v[i, j, 1]
+@inline near_wall_velocity(i, j, k, grid, ::Bottom, ::XDirection, fields, fv::FilteredSurfaceVelocities) = @inbounds fv.u[i, j, 1]
+@inline near_wall_velocity(i, j, k, grid, ::Bottom, ::YDirection, fields, fv::FilteredSurfaceVelocities) = @inbounds fv.v[i, j, 1]
 
-@inline wall_wind_speed²(::Bottom, ::XDirection, i, j, k, grid, fields, fv::FilteredSurfaceVelocities) = wind_speed²ᶠᶜᶜ(i, j, grid, fields, fv)
-@inline wall_wind_speed²(::Bottom, ::YDirection, i, j, k, grid, fields, fv::FilteredSurfaceVelocities) = wind_speed²ᶜᶠᶜ(i, j, grid, fields, fv)
-@inline wall_wind_speed²(::Bottom, ::Nothing,    i, j, k, grid, fields, fv::FilteredSurfaceVelocities) = wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv)
+@inline wall_wind_speed²(i, j, k, grid, ::Bottom, ::XDirection, fields, fv::FilteredSurfaceVelocities) = wind_speed²ᶠᶜᶜ(i, j, grid, fields, fv)
+@inline wall_wind_speed²(i, j, k, grid, ::Bottom, ::YDirection, fields, fv::FilteredSurfaceVelocities) = wind_speed²ᶜᶠᶜ(i, j, grid, fields, fv)
+@inline wall_wind_speed²(i, j, k, grid, ::Bottom, ::Nothing,    fields, fv::FilteredSurfaceVelocities) = wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv)
 
 validate_wall_filtering(side, ::Nothing) = nothing
 validate_wall_filtering(::Bottom, ::FilteredSurfaceVelocities) = nothing

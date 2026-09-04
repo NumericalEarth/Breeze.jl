@@ -611,23 +611,23 @@ Returns the transfer coefficient (dimensionless).
 """
 # Default: evaluate at the bottom wall, at the first cell centre height
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀)
-    h = wall_distance(Bottom(), i, j, 1, grid)
-    return coef(Bottom(), i, j, 1, grid, U, T₀, h, nothing)
+    h = wall_distance(i, j, 1, grid, Bottom())
+    return coef(i, j, 1, grid, Bottom(), U, T₀, h, nothing)
 end
 
 # Explicit height: used for filtered velocity with a fixed reference height.
 # Optional `θᵥ_source` selects a filtered θᵥ field over the instantaneous diagnostic
 # stored in `coef.virtual_potential_temperature`.
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h)
-    return coef(Bottom(), i, j, 1, grid, U, T₀, h, nothing)
+    return coef(i, j, 1, grid, Bottom(), U, T₀, h, nothing)
 end
 
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h, θᵥ_source)
-    return coef(Bottom(), i, j, 1, grid, U, T₀, h, θᵥ_source)
+    return coef(i, j, 1, grid, Bottom(), U, T₀, h, θᵥ_source)
 end
 
 # General form: on the wall `side`, next to the near-wall cell (i, j, k), at wall distance h
-@inline function (coef::PolynomialCoefficient)(side, i, j, k, grid, U, T₀, h, θᵥ_source)
+@inline function (coef::PolynomialCoefficient)(i, j, k, grid, side, U, T₀, h, θᵥ_source)
     C¹⁰ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height using logarithmic profile:
@@ -637,23 +637,23 @@ end
     Cʰ = C¹⁰ * (log(10 / ℓ) / α)^2
 
     # Apply stability correction (reads filtered θᵥ when `θᵥ_source` is provided)
-    return stability_corrected_coefficient(side, i, j, k, grid, coef, Cʰ, h, α, U, T₀, θᵥ_source)
+    return stability_corrected_coefficient(i, j, k, grid, side, coef, Cʰ, h, α, U, T₀, θᵥ_source)
 end
 
 # No stability correction (stability_function = nothing) — `θᵥ_source` is ignored
-@inline stability_corrected_coefficient(side, i, j, k, grid,
+@inline stability_corrected_coefficient(i, j, k, grid, side,
     ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cʰ, h, α, U, T₀, θᵥ_source) = Cʰ
 
 # Vertical walls: buoyancy acts along the wall, so the surface layer has no
 # Monin–Obukhov stability correction
-@inline stability_corrected_coefficient(::VerticalWall, i, j, k, grid,
+@inline stability_corrected_coefficient(i, j, k, grid, ::VerticalWall,
     ::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀, θᵥ_source) = Cʰ
 
 # FittedStabilityFunction correction (Li et al. 2010 mapping + MOST Ψ functions) on
 # horizontal walls. The `θᵥ_source` argument selects which θᵥ field to read:
 #   - `nothing` → read instantaneous `coef.virtual_potential_temperature[i, j, k]`
 #   - any field-like (Field, 2D filtered field) → read `θᵥ_source[i, j, 1]`
-@inline function stability_corrected_coefficient(side::HorizontalWall, i, j, k, grid,
+@inline function stability_corrected_coefficient(i, j, k, grid, side::HorizontalWall,
     coef::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀, θᵥ_source)
 
     sf = coef.stability_function
@@ -696,13 +696,13 @@ end
 ##### cell centre.
 #####
 
-@inline bulk_coefficient(side, i, j, k, grid, C::Number, fields, T₀, fv) = C
+@inline bulk_coefficient(i, j, k, grid, side, C::Number, fields, T₀, fv) = C
 
-@inline function bulk_coefficient(side, i, j, k, grid, C::PolynomialCoefficient, fields, T₀, ::Nothing)
-    U² = tangential_speed²(side, nothing, i, j, k, grid, fields)
+@inline function bulk_coefficient(i, j, k, grid, side, C::PolynomialCoefficient, fields, T₀, ::Nothing)
+    U² = tangential_speed²(i, j, k, grid, side, nothing, fields)
     U = sqrt(U²)
-    h = wall_distance(side, i, j, k, grid)
-    return C(side, i, j, k, grid, U, T₀, h, nothing)
+    h = wall_distance(i, j, k, grid, side)
+    return C(i, j, k, grid, side, U, T₀, h, nothing)
 end
 
 #####
@@ -714,11 +714,11 @@ end
 ##### every term is computed from filtered state.
 #####
 
-@inline function bulk_coefficient(side::Bottom, i, j, k, grid, C::PolynomialCoefficient, fields, T₀, fv::FilteredSurfaceVelocities)
+@inline function bulk_coefficient(i, j, k, grid, side::Bottom, C::PolynomialCoefficient, fields, T₀, fv::FilteredSurfaceVelocities)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv)
     U = sqrt(U²)
     h = evaluation_height(i, j, grid, fv.height)
-    return C(side, i, j, k, grid, U, T₀, h, fv.θᵥ)
+    return C(i, j, k, grid, side, U, T₀, h, fv.θᵥ)
 end
 
 #####
