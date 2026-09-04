@@ -345,6 +345,14 @@ end
     return cbrt(λʳ_cubed)
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the exponential rain particle size distribution slope parameter ``λʳ``
+diagnosed from the rain mass concentration `qʳ` and number concentration `nʳ`.
+The result is clamped between `parameters.minimum_rain_slope` and
+`parameters.maximum_rain_slope`.
+"""
 @inline rain_slope_parameter(qʳ, nʳ, parameters) =
     clamp(unbounded_rain_slope_parameter(qʳ, nʳ, parameters),
           parameters.minimum_rain_slope, parameters.maximum_rain_slope)
