@@ -5,7 +5,7 @@ using Breeze
 using Breeze.BoundaryConditions
 using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  FittedStabilityFunction,
-                                 StabilityFunctionParameters,
+                                 StabilityFunction,
                                  RichardsonNumberMapping,
                                  neutral_coefficient_10m,
                                  bulk_richardson_number,
@@ -37,7 +37,7 @@ using GPUArraysCore: @allowscalar
         # FittedStabilityFunction embeds parameter structs
         sf = coef.stability_function
         @test sf.richardson_number_mapping isa RichardsonNumberMapping
-        @test sf.stability_function_parameters isa StabilityFunctionParameters
+        @test sf.stability_function isa StabilityFunction
         @test sf.richardson_number_mapping.strongly_stable_transition ≈ 0.2
 
         # Test explicit coefficients
@@ -73,8 +73,8 @@ using GPUArraysCore: @allowscalar
         mapping_custom = RichardsonNumberMapping(strongly_stable_transition = 0.3)
         @test mapping_custom.strongly_stable_transition ≈ 0.3
 
-        # Default StabilityFunctionParameters
-        params = StabilityFunctionParameters()
+        # Default StabilityFunction
+        params = StabilityFunction()
         @test params.γᴰ ≈ 19.3
         @test params.γᵀ ≈ 11.6
         @test params.a ≈ 1.0
@@ -83,7 +83,7 @@ using GPUArraysCore: @allowscalar
         @test params.d ≈ 0.35
 
         # Custom parameters
-        params_custom = StabilityFunctionParameters(γᴰ = 16.0, γᵀ = 12.0)
+        params_custom = StabilityFunction(γᴰ = 16.0, γᵀ = 12.0)
         @test params_custom.γᴰ ≈ 16.0
         @test params_custom.γᵀ ≈ 12.0
     end
@@ -171,7 +171,7 @@ using GPUArraysCore: @allowscalar
     end
 
     @testset "Integrated stability functions Ψᴰ and Ψᵀ" begin
-        params = StabilityFunctionParameters()
+        params = StabilityFunction()
 
         # At ζ = 0, both Ψᴰ and Ψᵀ should be 0 (continuity)
         @test integrated_stability_momentum(0.0, params) ≈ 0.0 atol=1e-10

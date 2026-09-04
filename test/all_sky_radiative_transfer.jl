@@ -45,7 +45,7 @@ using RRTMGP
 
         # Legal to construct without one (a coupled model binds it later)...
         radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants; surface_albedo = 0.1)
-        @test isnothing(radiation.surface_properties.surface_temperature)
+        @test isnothing(radiation.surface_radiation.surface_temperature)
 
         # ...but solving before anything is bound fails loudly.
         @test_throws ArgumentError Breeze.AtmosphereModels._update_radiation!(radiation, nothing)

@@ -47,7 +47,7 @@ radiation_flux_divergence(radiation) = radiation.flux_divergence
 struct RadiativeTransferModel{FT<:Number, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, S}
     solar_constant :: FT # Scalar
     solar_position :: SOP # AbstractSolarPosition: how to obtain cos(θ_z) on each update
-    surface_properties :: SP
+    surface_radiation :: SP
     background_atmosphere :: BA # BackgroundAtmosphere or Nothing (for gray)
     atmospheric_state :: AS
     longwave_solver :: LW
@@ -404,7 +404,7 @@ end
 # Materialization is idempotent for already-materialized atmospheres
 materialize_background_atmosphere(::Nothing, grid) = nothing
 
-struct SurfaceRadiativeProperties{ST, SE, SA, DW}
+struct SurfaceRadiation{ST, SE, SA, DW}
     surface_temperature :: ST  # Scalar or 2D field
     surface_emissivity :: SE   # Scalar or 2D field
     direct_surface_albedo :: SA  # Scalar or 2D field
@@ -418,14 +418,14 @@ function Base.show(io::IO, radiation::RadiativeTransferModel)
           "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n",
           "├── solar_position: ", radiation.solar_position, "\n")
 
-    if radiation.surface_properties.surface_temperature isa ConstantField
-        print(io, "├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",)
+    if radiation.surface_radiation.surface_temperature isa ConstantField
+        print(io, "├── surface_temperature: ", radiation.surface_radiation.surface_temperature, " K\n",)
     else
-        print(io, "├── surface_temperature: ", summary(radiation.surface_properties.surface_temperature), "\n")
+        print(io, "├── surface_temperature: ", summary(radiation.surface_radiation.surface_temperature), "\n")
     end
 
-    print(io, "├── surface_emissivity: ", radiation.surface_properties.surface_emissivity, "\n",
-              "├── direct_surface_albedo: ", radiation.surface_properties.direct_surface_albedo, "\n")
+    print(io, "├── surface_emissivity: ", radiation.surface_radiation.surface_emissivity, "\n",
+              "├── direct_surface_albedo: ", radiation.surface_radiation.direct_surface_albedo, "\n")
 
     # Show effective radius models if present (for all-sky optics)
     if !isnothing(radiation.liquid_effective_radius)
@@ -433,5 +433,5 @@ function Base.show(io::IO, radiation::RadiativeTransferModel)
                   "├── ice_effective_radius: ", radiation.ice_effective_radius, "\n")
     end
 
-    print(io, "└── diffuse_surface_albedo: ", radiation.surface_properties.diffuse_surface_albedo)
+    print(io, "└── diffuse_surface_albedo: ", radiation.surface_radiation.diffuse_surface_albedo)
 end

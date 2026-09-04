@@ -53,7 +53,7 @@ end
     categories = two_moment_cloud_microphysics_categories(FT)
     @test categories isa TwoMomentCategories
     @test categories.warm_processes isa CloudMicrophysics.Parameters.SB2006
-    @test categories.air_properties isa CloudMicrophysics.Parameters.AirProperties
+    @test categories.air isa CloudMicrophysics.Parameters.AirProperties
     @test categories.cloud_liquid_fall_velocity isa CloudMicrophysics.Parameters.StokesRegimeVelType
     @test categories.rain_fall_velocity isa CloudMicrophysics.Parameters.SB2006VelType
 end
@@ -268,7 +268,7 @@ end
     # Check default aerosol activation is created
     aa = default_aerosol_activation(FT)
     @test aa isa AerosolActivation
-    @test aa.activation_parameters isa CloudMicrophysics.Parameters.AerosolActivationParameters
+    @test aa.activation isa CloudMicrophysics.Parameters.AerosolActivationParameters
     @test aa.aerosol_distribution isa CloudMicrophysics.AerosolModel.AerosolDistribution
 
     # Check aerosol activation is included in TwoMomentCategories
