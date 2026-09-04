@@ -671,6 +671,46 @@ import Breeze.AtmosphereModels as AM
         @test minimum(fractions) < 1
     end
 
+    #####
+    ##### The engaged thermodynamic split survives under acoustic substepping: the withheld
+    ##### transport is folded into the loop (base through the CN predictors, perturbation via
+    ##### the predictor solve), so the pressure never differences an inconsistent ρθ. The
+    ##### post-loop placement died within ~5 steps on both of these cases (issue #897).
+    #####
+    @testset "Engaged ρθ-AIVA under AcousticRungeKutta3 (fold-in, #897)" begin
+        engaged_aiva() = WENO(FT; time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=FT(1//100)))
+        z16 = TerrainFollowingVerticalDiscretization(collect(range(0, 4000, length=17)); formulation=LinearDecay())
+
+        for (hillheight, θᵢ, name) in ((0,   (x, z) -> 300 + 5 * exp(-(x^2 + (z - 1000)^2) / (2 * 600^2)), "flat bubble"),
+                                       (600, (x, z) -> 300.0, "hill uniform θ"))
+            fold_grid = RectilinearGrid(default_arch; size=(32, 16), halo=(5, 5),
+                                        x=(-10kilometers, 10kilometers), z=z16,
+                                        topology=(Periodic, Flat, Bounded))
+            materialize_terrain!(fold_grid, x -> hillheight * exp(-x^2 / 2000^2))
+            fold_model = AtmosphereModel(fold_grid;
+                                         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                                                         reference_potential_temperature=300),
+                                         timestepper = :AcousticRungeKutta3,
+                                         momentum_advection = engaged_aiva(),
+                                         scalar_advection = (; ρθ=engaged_aiva()))
+            ρ₃₀₀(x, z) = adiabatic_hydrostatic_density(z, 101325.0, 300.0, 100000.0, constants)
+            set!(fold_model; ρ=ρ₃₀₀, θ=θᵢ, u=10)
+            for _ in 1:60
+                time_step!(fold_model, 5)
+            end
+            ρᵈ = fold_model.dynamics.dry_density
+            ρθ = fold_model.formulation.potential_temperature_density
+            @test all(isfinite, Array(interior(ρᵈ)))
+            @test minimum(interior(ρᵈ)) > 0
+            @test all(isfinite, Array(interior(ρθ)))
+            if name == "hill uniform θ"
+                # Split-consistency invariant: uniform θ stays uniform to millikelvin.
+                θdev = maximum(abs, Array(interior(ρθ)) ./ Array(interior(ρᵈ)) .- 300)
+                @test θdev < 0.01
+            end
+        end
+    end
+
     @testset "Advective timescale drops the vertical term under AIVA" begin
         Δx = 100 / 4
         Δz = 1000 / 16
