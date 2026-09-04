@@ -81,15 +81,15 @@ end
 #
 # We therefore dispatch on the *type* of the optional container, so the compiler folds
 # the helper down to a static tuple per concrete P3 type. The value of
-# `predict_supersaturation` is carried by `ProcessRateParameters`' second type parameter
+# `predict_supersaturation` is carried by `ProcessRate`' second type parameter
 # for the same reason.
 #
 # Every switch here gates allocation as well as transport: the fields a configuration
 # does not use are never created (see `materialize_microphysical_fields`), so an
 # unguarded read would be a missing-property error rather than a silent zero.
 
-@inline supersaturation_prognostic_names(::ProcessRateParameters{FT, false}) where FT = ()
-@inline supersaturation_prognostic_names(::ProcessRateParameters{FT, true}) where FT = (:ρsᵛ⁺ˡ,)
+@inline supersaturation_prognostic_names(::ProcessRate{FT, false}) where FT = ()
+@inline supersaturation_prognostic_names(::ProcessRate{FT, true}) where FT = (:ρsᵛ⁺ˡ,)
 
 # Droplet number and aerosol depletion are prognostic iff `p3.aerosol` is a concrete
 # `AerosolActivation`. In the prescribed-Nᶜˡ path, `nᶜˡ`
@@ -307,9 +307,9 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
     surface_temperature = Field{Center, Center, Nothing}(grid)
 
     fields = (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ,
-                qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, qᵛ,
-                wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ,
-                surface_temperature)
+              qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, qᵛ,
+              wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ,
+              surface_temperature)
 
     return merge(fields,
                  aerosol_activation_fields(p3.aerosol, grid),
@@ -318,7 +318,7 @@ end
 
 # Optional field groups. Each switch gates allocation, not just transport, so a
 # configuration never carries memory for state it does not use. Both dispatch on a
-# *type* (`Nothing` / `ProcessRateParameters{FT, PS}`) so the merged NamedTuple is a
+# *type* (`Nothing` / `ProcessRate{FT, PS}`) so the merged NamedTuple is a
 # compile-time constant, which lets the read sites fold their guards away.
 
 # Droplet number and unactivated aerosol. The prescribed-Nᶜˡ path takes the droplet
@@ -328,15 +328,15 @@ end
 
 @inline aerosol_activation_fields(_, grid) =
     (; ρnᶜˡ = CenterField(grid),        # Cloud number density [1/m³]
-       ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
-       nᶜˡ = CenterField(grid),         # Cloud number concentration [kg⁻¹]
-       nᵃ = CenterField(grid))          # Unactivated aerosol [kg⁻¹]
+     ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
+     nᶜˡ = CenterField(grid),         # Cloud number concentration [kg⁻¹]
+     nᵃ = CenterField(grid))          # Unactivated aerosol [kg⁻¹]
 
 # Predicted supersaturation, off by default. With the switch off every rate that
 # would touch `sᵛ⁺ˡ` is gated to zero, so the prognostic carries no information.
-@inline supersaturation_fields(::ProcessRateParameters{FT, false}, grid) where FT = (;)
+@inline supersaturation_fields(::ProcessRate{FT, false}, grid) where FT = (;)
 
-@inline supersaturation_fields(::ProcessRateParameters{FT, true}, grid) where FT =
+@inline supersaturation_fields(::ProcessRate{FT, true}, grid) where FT =
     (; ρsᵛ⁺ˡ = CenterField(grid), sᵛ⁺ˡ = CenterField(grid))
 
 #####
@@ -400,7 +400,7 @@ end
     bᶠ = μ.ρbᶠ / ρ
     rime_state = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
     return merge(μ, (; ρqᶠ = ρ * rime_state.qᶠ,
-                       ρbᶠ = ρ * rime_state.bᶠ))
+                     ρbᶠ = ρ * rime_state.bᶠ))
 end
 
 # Droplet number and unactivated aerosol on the grid. Dispatch on the *type* of
@@ -416,8 +416,8 @@ end
 
 # Same for the optional supersaturation prognostic: absent with prediction
 # disabled, where it collapses to zero anyway.
-@inline grid_supersaturation(::ProcessRateParameters{FT, false}, μ, i, j, k, ρ) where FT = 0 * ρ
-@inline grid_supersaturation(::ProcessRateParameters{FT, true}, μ, i, j, k, ρ) where FT =
+@inline grid_supersaturation(::ProcessRate{FT, false}, μ, i, j, k, ρ) where FT = 0 * ρ
+@inline grid_supersaturation(::ProcessRate{FT, true}, μ, i, j, k, ρ) where FT =
     @inbounds μ.ρsᵛ⁺ˡ[i, j, k] / ρ
 
 @inline function AM.grid_microphysical_state(i, j, k, grid, p3::P3, μ, ρ, 𝒰, velocities)
@@ -475,7 +475,7 @@ end
 @inline function p3_ice_moment_bounds(p3::P3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(ρ)
     moments = p3_ice_moments(p3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
-    ρ_mean = ice_mean_density(p3.ice.bulk_properties, moments.prep)
+    ρ_mean = ice_mean_density(p3.ice.bulk, moments.prep)
     return P3IceMomentBounds{FT}(moments.qⁱ_total, moments.nⁱ_diagnostic,
                                  moments.nⁱ, ρ_mean)
 end
@@ -576,11 +576,11 @@ end
 end
 
 @inline write_supersaturation_diagnostic!(
-    μ, i, j, k, ::ProcessRateParameters{FT, false}, ℳ
+    μ, i, j, k, ::ProcessRate{FT, false}, ℳ
 ) where FT = nothing
 
 @inline function write_supersaturation_diagnostic!(
-    μ, i, j, k, ::ProcessRateParameters{FT, true}, ℳ
+    μ, i, j, k, ::ProcessRate{FT, true}, ℳ
 ) where FT
     @inbounds μ.sᵛ⁺ˡ[i, j, k] = ℳ.sᵛ⁺ˡ
     return nothing
@@ -713,11 +713,11 @@ end
 
     FT = typeof(ρ)
     return P3TendencyResult{FT}(cloud_mass_tendency, cloud_number_tendency,
-                                     rain_mass_tendency, rain_number_tendency,
-                                     ice_mass_tendency, ice_number_tendency,
-                                     rime_mass_tendency, rime_volume_tendency,
-                                     coating_mass_tendency, supersaturation_tendency,
-                                     vapor_mass_tendency, aerosol_number_tendency)
+                                rain_mass_tendency, rain_number_tendency,
+                                ice_mass_tendency, ice_number_tendency,
+                                rime_mass_tendency, rime_volume_tendency,
+                                coating_mass_tendency, supersaturation_tendency,
+                                vapor_mass_tendency, aerosol_number_tendency)
 end
 
 # Adiabatic temperature tendency from the grid or parcel vertical velocity, used as
@@ -800,11 +800,11 @@ end
 end
 
 @inline add_p3_supersaturation_tendency!(
-    G, i, j, k, ::ProcessRateParameters{FT, false}, result
+    G, i, j, k, ::ProcessRate{FT, false}, result
 ) where FT = nothing
 
 @inline function add_p3_supersaturation_tendency!(
-    G, i, j, k, ::ProcessRateParameters{FT, true}, result
+    G, i, j, k, ::ProcessRate{FT, true}, result
 ) where FT
     @inbounds G.ρsᵛ⁺ˡ[i, j, k] += result.tendency_ρsᵛ⁺ˡ
     return nothing
@@ -920,7 +920,7 @@ end
     ice = p3_core_ice_properties(p3, ρ, ℳ)
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     λʳ = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
-    ρ_mean = ice_mean_density(p3.ice.bulk_properties, ice.prep)
+    ρ_mean = ice_mean_density(p3.ice.bulk, ice.prep)
     return P3ProcessProps{FT}(ice.qᶠ, ice.bᶠ, ice.Fᶠ, ice.Fˡ, ice.ρᶠ,
                               ice.qⁱ_total, ice.nⁱ, ice.nⁱ_diagnostic, ρ_mean,
                               cloud.Nᶜˡ, λʳ)
