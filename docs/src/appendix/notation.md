@@ -169,3 +169,11 @@ The following table also uses a few conventions that suffuse the source code and
 | ``(ρu)', (ρv)', (ρw)'``             | `ρu′, ρv′, ρw′` | `AcousticSubstepper.momentum_perturbation` | Momentum perturbations about the stage-entry state              |
 | ``D_τ``                             | `Dτ`   |                                     | Klemp-Skamarock-Ha divergence-damping proxy, ``D_τ = ((ρθ)'_τ - (ρθ)'_{τ-\Delta τ}) / θ^L`` |
 | ``\bar{u}, \bar{v}, \bar{w}``       | `ū, v̄, w̄` | `AcousticSubstepper.time_averaged_velocities` | Time-averaged velocities for non-acoustic scalar advection |
+| ``D``                               | `D`    |                                     | Wet diameter of a Lagrangian droplet; `D²` is the prognostic droplet property           |
+| ``D^d``                             | `Dᵈ`   | `Droplet.Dᵈ`                        | Dry (aerosol) diameter of a droplet                                                     |
+| ``D^c``                             | `Dᶜ`   | `critical_diameter(Dᵈ, κ, T, c)`    | Critical diameter, the maximum of the κ-Köhler curve; the droplet is activated for ``D ≥ D^c`` |
+| ``κ``                               | `κ`    | `Droplet.κ`                         | Hygroscopicity parameter of the droplet's dry aerosol (Petters & Kreidenweis 2007)     |
+| ``A``                               | `A`    | `kelvin_length(T, c)`               | Kelvin length, ``A = 4 σ M^w / (R T ρ^w)``; the curvature factor is ``\exp(A / D)``    |
+| ``\mathscr{S}^e``                   | `𝒮ᵉ`   | `equilibrium_supersaturation(D, Dᵈ, κ, T, c)` | κ-Köhler equilibrium supersaturation of a wet particle                       |
+| ``\mathscr{S}^c``                   | `𝒮ᶜ`   | `critical_supersaturation(Dᵈ, κ, T, c)` | Critical supersaturation, ``\mathscr{S}^e(D^c)``                                   |
+| ``G``                               | `G`    | `growth_coefficient(T, p, D, params, c)` | Maxwell–Mason growth coefficient, ``d(D^2)/dt = 8 G (\mathscr{S} - \mathscr{S}^e)`` |

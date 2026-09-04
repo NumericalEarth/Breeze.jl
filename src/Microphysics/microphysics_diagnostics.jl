@@ -163,6 +163,23 @@ end
 const RelativeHumidityField = Field{C, C, C, <:RelativeHumidityOp}
 RelativeHumidityField(model) = Field(RelativeHumidity(model))
 
+"""
+$(TYPEDSIGNATURES)
+
+Return an `AbstractOperation` for the supersaturation with respect to liquid water,
+``𝒮 = ℋ - 1 = pᵛ / pᵛ⁺ - 1``, computed like [`RelativeHumidity`](@ref) from the model's
+temperature, moisture, and gas-phase density. Positive in air that can activate and grow
+droplets by condensation.
+"""
+Supersaturation(model) = RelativeHumidity(model) - 1
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a `Field` for the supersaturation ``𝒮 = ℋ - 1``. See [`Supersaturation`](@ref).
+"""
+SupersaturationField(model) = Field(Supersaturation(model))
+
 #####
 ##### Number Concentration
 #####

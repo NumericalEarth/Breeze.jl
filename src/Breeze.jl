@@ -99,6 +99,9 @@ export
     # Thermodynamics
     temperature,
     supersaturation,
+    Droplet, DropletDynamics, droplet_tracked_fields, interpolate_to_droplets!,
+    equilibrium_supersaturation, critical_diameter, critical_supersaturation, equilibrium_diameter,
+    growth_coefficient, implicit_growth_step, ambient_supersaturation, activated, activated_fraction,
     saturation_specific_humidity,
     adiabatic_hydrostatic_density,
     dry_air_gas_constant,
@@ -121,6 +124,8 @@ export
     equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
+    Supersaturation,
+    SupersaturationField,
     number_concentration,
     number_concentration_field,
     BulkMicrophysics,
@@ -288,6 +293,10 @@ using .ParcelModels
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics
+
+# Lagrangian droplets: κ-Köhler growth of particles advected with the flow
+include("LagrangianMicrophysics/LagrangianMicrophysics.jl")
+using .LagrangianMicrophysics
 
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures

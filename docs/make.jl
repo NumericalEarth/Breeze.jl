@@ -194,6 +194,8 @@ makedocs(
         "AtmosphereModel" => Any[
             "Diagnostics" => "atmosphere_model/diagnostics.md",
             "Lagrangian particles" => "atmosphere_model/lagrangian_particles.md",
+            "Lagrangian droplets" => "atmosphere_model/lagrangian_droplets.md",
+            "Wall fluxes" => "atmosphere_model/wall_fluxes.md",
         ],
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
