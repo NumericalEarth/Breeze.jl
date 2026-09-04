@@ -341,7 +341,7 @@ Base.summary(::IceRainCollection) = "IceRainCollection"
 Base.show(io::IO, ::IceRainCollection) = print(io, "IceRainCollection(2 integrals)")
 
 #####
-##### Ice: the container combining all ice particle property concepts
+##### IceParticles: the container combining all ice particle property concepts
 #####
 
 struct IceParticles{FT, FS, DP, BP, CL, LL, IR}
@@ -378,6 +378,7 @@ This container organizes all ice-related computations:
 - **Bulk properties**: Population-averaged diameter, density, reflectivity
 - **Collection**: Integrals for aggregation and riming rates
 - **Lambda limiter**: Constraints on size distribution slope
+- **Ice-rain collection**: Double-PSD integrals for ice-rain interaction
 
 # Keyword Arguments
 
@@ -392,10 +393,10 @@ The mass-diameter relationship is from
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 """
 function IceParticles(FT::DataType = Oceananigans.defaults.FloatType;
-             thermodynamic_constants = ThermodynamicConstants(FT),
-             minimum_rime_density = 50,
-             maximum_rime_density = 900,
-             maximum_shape_parameter = 20)
+                      thermodynamic_constants = ThermodynamicConstants(FT),
+                      minimum_rime_density = 50,
+                      maximum_rime_density = 900,
+                      maximum_shape_parameter = 20)
     return IceParticles(
         FT(minimum_rime_density),
         FT(maximum_rime_density),

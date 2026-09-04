@@ -1,9 +1,9 @@
 #####
-##### P3 Process Rates
+##### P3 Tabulated Kernels
 #####
-##### Microphysical process rate calculations for the P3 scheme.
-##### All rate functions take the P3 scheme as first positional argument
-##### to access parameters. No keyword arguments (GPU compatibility).
+##### What sits between the lookup tables and the process rates: the Schmidt-number
+##### correction for the ventilation-enhanced table, and `P3IceLookups`, the Table-1
+##### coordinate and integrals every ice-side rate reads.
 #####
 ##### Notation follows docs/src/appendix/notation.md
 #####

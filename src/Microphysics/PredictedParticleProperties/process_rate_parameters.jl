@@ -180,7 +180,7 @@ struct ProcessRate{FT, PS}
     # Deposition nucleation (Cooper 1986)
     ice_nucleation_temperature_threshold :: FT   # T below which nucleation occurs [K]
     ice_nucleation_supersaturation_threshold :: FT  # Sⁱ threshold [-]
-    maximum_ice_nucleation_concentration :: FT   # Nⁱ_max [1/m³]
+    maximum_ice_nucleation_concentration :: FT   # cap on the Cooper equilibrium number [1/m³]
     ice_nucleation_timescale :: FT               # τ_nuc [s]
     ice_nucleation_coefficient :: FT             # Cooper (1986) prefactor [1/m³] (default 5.0)
     ice_nucleation_temperature_coefficient :: FT # Cooper (1986) supercooling rate [1/K] (default 0.304)
@@ -216,11 +216,9 @@ struct ProcessRate{FT, PS}
     maximum_mean_droplet_diameter :: FT     # ⟨D⟩ maximum [m]
     minimum_mean_droplet_diameter :: FT     # ⟨D⟩ minimum [m]
 
-    # Rain size distribution slope bounds. These are the P3 rain lambda limiter: λʳ is
-    # clamped to [minimum_rain_slope, maximum_rain_slope] and the DSD-consistent number
-    # is recomputed from the clamped slope, so they bound the mean drop diameter as
-    # ⟨D⟩ = (μʳ + 1) / λʳ. `minimum_rain_slope` is the reciprocal of the reference
-    # `inv_Drmax = 1/0.002`, the maximum allowed number-weighted mean drop diameter.
+    # Rain PSD slope bounds: the P3 rain lambda limiter. λʳ is clamped here and the
+    # DSD-consistent number recomputed, so these bound ⟨D⟩ = (μʳ + 1) / λʳ.
+    # `minimum_rain_slope` is the reciprocal of the reference `inv_Drmax = 1/0.002`.
     minimum_rain_slope :: FT                # λʳ minimum [1/m]
     maximum_rain_slope :: FT                # λʳ maximum [1/m]
 
@@ -236,7 +234,7 @@ struct ProcessRate{FT, PS}
 
     # Global ice number limiter.
     # Applied as a relaxation sink whenever nⁱ × ρ exceeds the maximum.
-    maximum_ice_number_density :: FT         # Nⁱ_max [1/m³]
+    maximum_ice_number_density :: FT         # global nⁱ ceiling, not the Cooper cap [1/m³]
 
     # Liquid fraction clipping threshold (Milbrandt et al. 2025)
     # Fl < this: instantly freeze all qwi to rime; Fl > (1 - this): fully melt to rain.

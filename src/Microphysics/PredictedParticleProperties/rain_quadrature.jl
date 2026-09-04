@@ -26,8 +26,9 @@
 #####
 ##### Both the tabulated and analytical rain paths use the same 4-regime
 ##### Gunn-Kinzer/Beard piecewise V(D) formula (`rain_fall_speed` below).
-##### The piecewise law captures the terminal-velocity plateau above D ~5 mm and
-##### Stokes drag below D ~100 μm.
+##### It captures Stokes drag below the first transition diameter (D ≈ 134 μm by
+##### default) and the plateau above the third (D ≈ 3.5 mm); both are `RainFallSpeed`
+##### keywords.
 #####
 
 export RainMassWeightedVelocity,
@@ -49,8 +50,8 @@ const GUNN_KINZER_WATER_DENSITY = 997     # [kg/m³], mass basis of the fit
 $(TYPEDSIGNATURES)
 
 Piecewise Gunn-Kinzer / Beard rain terminal velocity [m/s] at diameter `D` [m], scaled by
-`ρ_correction`. Captures the Stokes-drag regime below D ≈ 100 μm and the
-terminal-velocity plateau above D ≈ 5 mm.
+`ρ_correction`. Captures Stokes drag below the first transition diameter (D ≈ 134 μm by
+default) and the terminal-velocity plateau above the third (D ≈ 3.5 mm).
 
 The branch velocity scales, mass exponents, boundary diameters and plateau speed come
 from `fall_speed`, a [`RainFallSpeed`](@ref). The published fit is
@@ -94,7 +95,7 @@ end
 #####
 
 """
-    RainMassWeightedVelocity{N, W, F}
+    RainMassWeightedVelocity{N, W, F, FS}
 
 Callable evaluator for the mass-weighted rain terminal velocity:
 
@@ -201,7 +202,7 @@ Apply `(ρ₀/ρ)^0.54` at the call site if needed.
 #####
 
 """
-    RainNumberWeightedVelocity{N, W, F}
+    RainNumberWeightedVelocity{N, W, F, FS}
 
 Callable evaluator for the number-weighted rain terminal velocity:
 
@@ -251,7 +252,7 @@ Returns the velocity in [m/s] at reference air density.
 #####
 
 """
-    RainVelocityDiameterIntegral{N, W}
+    RainVelocityDiameterIntegral{N, W, FS}
 
 Callable evaluator for the velocity-diameter part of the rain evaporation
 ventilation integral:

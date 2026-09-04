@@ -118,9 +118,13 @@ end
 
 Coefficients of the rain ventilation factor ``f^{ve} = f_{1r} + f_{2r}\\,
 \\mathrm{Sc}^{1/3}\\,\\mathrm{Re}^{1/2}``, the classical form of
-[Pruppacher and Klett (2010)](@cite pruppacher2010microphysics). The ice side carries the
-same pair in the `*_ventilation_constant` / `*_ventilation_reynolds` fields of
-[`IceDeposition`](@ref); these are P3's `f1r`/`f2r`.
+[Pruppacher and Klett (2010)](@cite pruppacher2010microphysics). These are P3's
+`f1r`/`f2r`.
+
+The ice side uses the same form with its own pair (0.65, 0.44), folded into the lookup
+tables at generation: the `*_ventilation_constant` / `*_ventilation_reynolds` fields of
+[`IceDeposition`](@ref) hold the scaled integrals, not the coefficients, so the ice pair
+is not configurable.
 
 Consumed at runtime by [`rain_ventilation_integral`](@ref), which assembles the
 analytical ``f_{1r}/(λ^r)^2`` term and the Reynolds-weighted term around the tabulated
@@ -213,8 +217,8 @@ inverts the mass integral directly as ``λ^r = (π ρ^w n^r / q^r)^{1/3}``, and
 
 **Terminal velocity:** the piecewise Gunn-Kinzer / Beard law of
 [`rain_fall_speed`](@ref), configured by `fall_speed`. It is *not* a single power law;
-the four regimes capture Stokes drag below ``D ≈ 100`` μm and the terminal-velocity
-plateau above ``D ≈ 5`` mm.
+the four regimes capture Stokes drag below the first transition diameter (``D ≈ 134``
+μm by default) and the terminal-velocity plateau above the third (``D ≈ 3.5`` mm).
 
 **Ventilation:** ``f^{ve} = f_{1r} + f_{2r}\\,\\mathrm{Sc}^{1/3}\\,\\mathrm{Re}^{1/2}``,
 configured by `ventilation` and consumed by rain evaporation and by the coupled
@@ -224,9 +228,8 @@ saturation-adjustment relaxation coefficient.
 are `nothing` until [`tabulate_rain_from_quadrature`](@ref) materializes them from
 `fall_speed`. Both parameter containers are preserved verbatim across materialization.
 
-**Spectrum bounds:** the largest and smallest mean drop diameters the distribution may
-take are set by `ProcessRate.minimum_rain_slope` and `maximum_rain_slope`, applied through
-[`rain_slope_parameter`](@ref), not by this container.
+**Spectrum bounds:** set by `ProcessRate.minimum_rain_slope` and `maximum_rain_slope`
+through [`rain_slope_parameter`](@ref), not by this container.
 
 # Keyword Arguments
 

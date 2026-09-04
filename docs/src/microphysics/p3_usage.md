@@ -36,8 +36,8 @@ means.
 
 ```@example p3_usage
 using Breeze.Microphysics.PredictedParticleProperties:
-    Cloud, CloudShape,
-    Rain, RainFallSpeed, RainVentilation
+    CloudDroplets, CloudShape,
+    RainDrops, RainFallSpeed, RainVentilation
 
 # Cap the diagnosed cloud shape parameter below its default ceiling
 cloud_shape = CloudShape(Float64;

@@ -383,7 +383,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | ----------- | ---- | ------------- | ----------- |
 | ``N'(D)``   |      |               | Number concentration per unit diameter, ``N'(D) = N_0 D^μ e^{-λD}`` [m⁻⁴] |
 | ``N_0``     | `N₀` |               | Intercept of the gamma distribution [m⁻⁴⁻μ]; a scale factor, not a concentration. Species-labelled as `Nʳ₀` where the rate needs the rain PSD explicitly |
-| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `CloudDroplets.shape_parameter`, `shape` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}`` by the Liu-Daum relation configured in `CloudDroplets.shape` — once at construction for the prescribed number, and per cell for the prognostic one. ``μ^r = 0`` is structural rather than stored — it is baked into `rain_slope_parameter`, and `RainDrops.shape_parameter` is a placeholder that stays `nothing` |
+| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `CloudDroplets.shape_parameter`, `shape` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}`` by the Liu-Daum relation configured in `CloudDroplets.shape` — once at construction for the prescribed number, and per cell for the prognostic one. ``μ^r = 0`` is structural rather than stored: it is baked into `rain_slope_parameter` and the exponential quadrature kernel, and `RainDrops` has no shape field |
 | ``μ^i``     | `μⁱ` | | On-demand ice shape diagnostic [-] read from the Table 1 closure column; not a process-table coordinate |
 | ``λ^{cl}``, ``λ^r`` | `λᶜˡ`, `λʳ` | | Slope parameter [1/m] |
 | ``λ^i``     |      | `IceLambdaLimiter` | Ice slope parameter [1/m], bounded by the mean-size limiter |
@@ -452,10 +452,14 @@ materialization that fills in the tabulated integrals.
 
 Deliberately *not* exposed as empirical free parameters: the ``997`` kg m⁻³ water density
 that is the mass basis of the published fall-speed fit; ``\pi/6``, one gram, and unit
-conversions; quadrature nodes and counts, lookup-axis ranges, and interpolation
-resolution; numerical floors and sink-limiter settings; and the coefficients baked into
-the external ice lookup-table artifact, which belong to a separate versioned
-table-generator effort.
+conversions; and the coefficients baked into the external ice lookup-table artifact
+(including the ``0.65`` and ``0.44`` ice ventilation pair), which belong to a separate
+versioned table-generator effort.
+
+Configurable but numerical rather than empirical: `NumericalFloors` and the sink-limiter
+settings, both `ProcessRate` keywords, the floors reaching the startup quadrature through
+`read_lookup_tables`. Quadrature point counts, lookup-axis range and interpolation
+resolution are `tabulate_rain_from_quadrature` keywords only.
 
 ### Air Properties
 
@@ -1612,15 +1616,18 @@ ventilation-enhanced vapor diffusion equation
 appendix C, section b; [Pruppacher and Klett (1997)](@cite pruppacher2010microphysics)):
 
 ```math
-\dot{q}^r_\text{evap} = 2π\,\frac{n^r}{Γ(μ^r+1)}\,ρ\,D^v\,\mathscr{S}^l\,
-                                   \left[\frac{f_{1r}\, Γ(μ^r+2)}{λ^r}
+\dot{q}^r_\text{evap} = 2π\,N^r_0\,ρ\,D^v\,\mathscr{S}^l\,
+                                   \left[\frac{f_{1r}\, Γ(μ^r+2)}{(λ^r)^{μ^r+2}}
                                        + f_{2r}\,\sqrt{ρ/η}\,\text{Sc}^{1/3}\,I_{VD}\right],
+\qquad N^r_0 = \frac{n^r (λ^r)^{μ^r+1}}{Γ(μ^r+1)},
 ```
 
 with ``f_{1r}`` and ``f_{2r}`` read from `RainDrops.ventilation` (a `RainVentilation`, defaults
 ``0.78`` and ``0.32``), and ``I_{VD} = ∫ D \sqrt{V(D)\,D}\, e^{-λ^r D}\, \mathrm{d}D`` the
 velocity–diameter integral over the rain DSD, tabulated as `RainDrops.evaporation` by
-`RainVelocityDiameterIntegral`.
+`RainVelocityDiameterIntegral`. At ``μ^r = 0`` this is what `rain_ventilation_integral`
+assembles: ``N^r_0 = n^r λ^r`` and a bracket of ``f_{1r}/(λ^r)^2 + f_{2r}\sqrt{ρ/η}\,
+\text{Sc}^{1/3} I_{VD}``.
 
 Only ``I_{VD}`` is tabulated. Neither ventilation coefficient enters that table, and neither
 does ``ν``, so both stay configurable and are assembled at runtime by

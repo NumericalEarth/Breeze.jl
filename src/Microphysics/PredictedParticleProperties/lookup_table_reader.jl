@@ -204,8 +204,8 @@ end
 #####
 ##### Rain tabulation from Julia quadrature
 #####
-##### Rain 1D tables are NOT in the ASCII files. We generate them
-##### from Julia quadrature (extracted from tabulation.jl).
+##### Rain 1D tables are NOT in the ASCII files. We generate them at startup
+##### from Julia quadrature; see `rain_quadrature.jl` for the three evaluators.
 #####
 
 """
@@ -220,8 +220,8 @@ integral used by evaporation, each tabulated against `log10(λʳ)` over `log_lam
 
 All three evaluators receive the same `rain.fall_speed`, so a configured fall-speed law
 reaches every table. Only the three lookup placeholders are replaced; `fall_speed` and
-`ventilation` are carried through unchanged, which is what keeps custom values alive from
-the constructor into the runtime rates.
+`ventilation` are carried through unchanged, keeping custom values alive from the
+constructor into the runtime rates.
 
 # Arguments
 
