@@ -11,6 +11,7 @@ using Oceananigans.TimeSteppers:
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
                                 microphysics_model_update!, field_advection_scheme,
+                                compute_closure_tendencies!,
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
                                 implicit_step_scheme
@@ -222,6 +223,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     #
 
     compute_flux_bc_tendencies!(model)
+    compute_closure_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α¹)
 
     compute_pressure_correction!(model, Δt)
@@ -235,6 +237,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     #
 
     compute_flux_bc_tendencies!(model)
+    compute_closure_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α²)
 
     compute_pressure_correction!(model, α² * Δt)
@@ -248,6 +251,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     #
 
     compute_flux_bc_tendencies!(model)
+    compute_closure_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α³)
 
     compute_pressure_correction!(model, α³ * Δt)
