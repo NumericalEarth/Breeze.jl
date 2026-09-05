@@ -42,6 +42,9 @@ using Breeze.Microphysics.PredictedParticleProperties:
         for name in propertynames(result)
             @test isfinite(getproperty(result, name))
         end
-        @test result.tendency_ρnᶜˡ == 0
+        # The mass-companion number sinks vanish; only the DSD number correction
+        # (relaxation toward the bounded, near-zero droplet number) may remain.
+        @test result.tendency_ρqᶜˡ ≤ 0
+        @test result.tendency_ρnᶜˡ ≤ ρ * FT(1e-6)
     end
 end
