@@ -1,7 +1,7 @@
 using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
-using Oceananigans.Advection: update_advection_timestep!
+using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
 using Oceananigans.Fields: flattened_unique_values
@@ -55,16 +55,59 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
         callback.callsite isa UpdateStateCallsite && callback(model)
     end
 
-    # Refresh the adaptive-implicit-vertical-advection time step before computing tendencies, so the
-    # explicit (CFL-scaled) velocity baked into Gⁿ matches the implicit velocity used by the
-    # following solve. A no-op unless some advection scheme uses an adaptive-implicit discretization.
-    update_advection_timestep!(model.advection, model.timestepper, model.clock)
+    # Refresh the state each advection scheme carries between stages before the tendencies are
+    # computed: the adaptive-implicit vertical-advection time step (so the explicit, CFL-scaled
+    # velocity baked into Gⁿ matches the implicit velocity of the following solve) and the
+    # bounds-preserving WENO limiter of every advected scalar.
+    update_advection!(model.advection, model)
 
     compute_tendencies && compute_tendencies!(model, callbacks)
 
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
 
     return nothing
+end
+
+#####
+##### Per-stage advection state
+#####
+
+# Breeze advects *specific* (per-mass) scalars — `div_ρUc` forms ∇·(ρ₀ u c) from c = ρc / ρ₀ —
+# so a bounds-preserving limiter has to be evaluated on the specific field its tendency kernel
+# sees, not on `model.tracers` as Oceananigans' `NamedTuple` method assumes. `model.advection`
+# is `(momentum, thermodynamic..., moisture, microphysical..., tracers...)`.
+function Oceananigans.Advection.update_advection!(advection::NamedTuple, model::AtmosphereModel)
+    update_advection!(advection.momentum, model, nothing)
+    scalar_names = Base.tail(keys(advection))
+    scalar_schemes = Base.tail(values(advection))
+    return update_scalar_advection!(scalar_names, scalar_schemes, model)
+end
+
+@inline update_scalar_advection!(::Tuple{}, ::Tuple{}, model) = nothing
+
+@inline function update_scalar_advection!(names::Tuple, schemes::Tuple, model)
+    update_advection!(first(schemes), model, advected_scalar(model, Val(first(names))))
+    return update_scalar_advection!(Base.tail(names), Base.tail(schemes), model)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+The specific (per-mass) field that the scalar advection scheme registered under `name`
+transports: the formulation's thermodynamic variable, the specific prognostic moisture, a
+specific microphysical field, or a user tracer (already converted to its specific value inside
+`update_state!`).
+"""
+@inline function advected_scalar(model::AtmosphereModel, ::Val{name}) where name
+    if name ∈ prognostic_thermodynamic_field_names(model.formulation)
+        return advected_thermodynamic_field(model.formulation)
+    elseif name === moisture_prognostic_name(model.microphysics)
+        return specific_prognostic_moisture(model)
+    elseif name ∈ prognostic_field_names(model.microphysics)
+        return model.microphysical_fields[specific_field_name(name)]
+    else
+        return model.tracers[name]
+    end
 end
 
 #####

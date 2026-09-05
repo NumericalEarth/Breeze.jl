@@ -71,6 +71,7 @@ AtmosphereModels.prognostic_thermodynamic_field_names(::LiquidIcePotentialTemper
 AtmosphereModels.additional_thermodynamic_field_names(::LiquidIcePotentialTemperatureFormulation) = tuple(:θ)
 AtmosphereModels.thermodynamic_density_name(::LiquidIcePotentialTemperatureFormulation) = :ρθ
 AtmosphereModels.thermodynamic_density(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature_density
+AtmosphereModels.advected_thermodynamic_field(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature
 AtmosphereModels.with_thermodynamic_density(f::LiquidIcePotentialTemperatureFormulation, ρθ) =
     LiquidIcePotentialTemperatureFormulation(ρθ, f.potential_temperature, f.temperature_solver)
 

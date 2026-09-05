@@ -38,6 +38,7 @@ AtmosphereModels.prognostic_thermodynamic_field_names(::StaticEnergyFormulation)
 AtmosphereModels.additional_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:s)
 AtmosphereModels.thermodynamic_density_name(::StaticEnergyFormulation) = :ρs
 AtmosphereModels.thermodynamic_density(formulation::StaticEnergyFormulation) = formulation.energy_density
+AtmosphereModels.advected_thermodynamic_field(formulation::StaticEnergyFormulation) = formulation.specific_energy
 AtmosphereModels.with_thermodynamic_density(f::StaticEnergyFormulation, ρs) =
     StaticEnergyFormulation(ρs, f.specific_energy)
 

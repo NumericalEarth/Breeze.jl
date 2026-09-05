@@ -68,6 +68,15 @@ prognostic_thermodynamic_field_names(formulation_name::Symbol) =
     prognostic_thermodynamic_field_names(Val(formulation_name))
 
 """
+    advected_thermodynamic_field(formulation)
+
+Return the specific (per-mass) thermodynamic field that the formulation's tendency advects
+with the scheme registered under its prognostic name (`s` for static energy, `θ` for the
+liquid-ice potential temperature).
+"""
+function advected_thermodynamic_field end
+
+"""
     additional_thermodynamic_field_names(formulation)
 
 Return a tuple of additional (diagnostic) field names for the given thermodynamic formulation.
