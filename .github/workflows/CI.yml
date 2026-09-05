@@ -115,7 +115,7 @@ jobs:
         run: |
           # Pool of GitHub-hosted runners can have several different ISAs, try to
           # target all of them, with safe fallbacks.
-          echo "JULIA_CPU_TARGET=generic;haswell,-xsaveopt,clone_all;znver3,-rdrnd,base(1);x86-64-v4,-rdrnd,base(1)" | tee -a "${GITHUB_ENV}"
+          echo "JULIA_CPU_TARGET=generic;haswell,-xsaveopt,clone_all;x86-64-v4,-rdrnd,base(1)" | tee -a "${GITHUB_ENV}"
       - name: Show versioninfo
         run: |
           julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
