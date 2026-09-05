@@ -52,7 +52,7 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
 
-    Eᶜⁱ = parameters.cloud_ice_collection_efficiency
+    ℂʳⁱᵐᵉ₁ = parameters.cloud_ice_collection_efficiency
 
     qᶜˡ_eff = max(0, qᶜˡ)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
@@ -67,7 +67,7 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
     collection_kernel = evaluate_at(p3.ice.collection.cloud_collection, lookups.prep)
 
     # Collection rate = E × qc × ni × ρ × rhofaci × ⟨A×V⟩
-    rate = Eᶜⁱ * qᶜˡ_eff * nⁱ_eff * ρ * lookups.ρ_correction * collection_kernel
+    rate = ℂʳⁱᵐᵉ₁ * qᶜˡ_eff * nⁱ_eff * ρ * lookups.ρ_correction * collection_kernel
 
     return ifelse(active, rate, zero(FT))
 end
@@ -202,7 +202,7 @@ PSD-integrated number-weighted kernel.
     FT = typeof(qʳ)
     parameters = p3.process_rates
 
-    Eʳⁱ = parameters.rain_ice_collection_efficiency
+    ℂʳⁱᵐᵉ₂ = parameters.rain_ice_collection_efficiency
 
     qʳ_eff = max(0, qʳ)
     nʳ_eff = max(nʳ, p3.minimum_number_mixing_ratio)
@@ -228,7 +228,7 @@ PSD-integrated number-weighted kernel.
                                                             m_mean, λʳ, Fᶠ, Fˡ, ρᶠ)
 
     Nʳ₀ = nʳ_bounded * λʳ
-    prefactor = Eʳⁱ * Nʳ₀ * nⁱ_eff * ρ * density_correction
+    prefactor = ℂʳⁱᵐᵉ₂ * Nʳ₀ * nⁱ_eff * ρ * density_correction
 
     return (ifelse(active, prefactor * mass_kernel, zero(FT)),
             ifelse(active, prefactor * number_kernel, zero(FT)))

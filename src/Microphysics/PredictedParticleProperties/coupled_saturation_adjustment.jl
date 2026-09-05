@@ -268,9 +268,9 @@ cloud/precipitation fraction framework is handled separately.
     rain_evaporation = min(max(0, -raw_rain_growth), max(0, qʳ) / τ)
 
     is_sublimation = raw_ice_growth < 0
-    calibration = ifelse(is_sublimation,
-                         p3.process_rates.calibration_factor_sublimation,
-                         p3.process_rates.calibration_factor_deposition)
+    ℂᵈⁱᶠᶠ₁ = p3.process_rates.calibration_factor_deposition
+    ℂᵈⁱᶠᶠ₂ = p3.process_rates.calibration_factor_sublimation
+    calibration = ifelse(is_sublimation, ℂᵈⁱᶠᶠ₂, ℂᵈⁱᶠᶠ₁)
     deposition_raw = raw_ice_growth * calibration
     # Sublimation is limited to the dry ice mass per unit time, `qⁱ / τ`.
     deposition = clamp(deposition_raw, -max(0, qⁱ) / τ, max(0, qᵛ) / τ)

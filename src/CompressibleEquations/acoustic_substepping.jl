@@ -440,10 +440,10 @@ acoustic CFL:
 
 ```math
 N \\approx
-\\left\\lceil \\frac{|\\Delta t| \\, \\mathbb{C}^{ac}}{\\nu \\, \\Delta x_\\min} \\right\\rceil ,
+\\left\\lceil \\frac{|\\Delta t| \\, c^{ac}}{\\nu \\, \\Delta x_\\min} \\right\\rceil ,
 ```
 
-with ``\\mathbb{C}^{ac} = \\sqrt{γ^d R^d T_r}`` for a nominal reference
+with ``c^{ac} = \\sqrt{γ^d R^d T_r}`` for a nominal reference
 temperature ``T_r = 300\\,\\mathrm{K}`` and ``ν`` the target acoustic
 Courant number `acoustic_cfl` (default `0.5`, the conventional ERF/WRF
 target — equivalent to a safety factor of `2`).
@@ -453,7 +453,7 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_
     Rᵈ   = dry_air_gas_constant(thermodynamic_constants)
     cᵖᵈ  = thermodynamic_constants.dry_air.heat_capacity
     γᵈ   = cᵖᵈ / (cᵖᵈ - Rᵈ)
-    ℂᵃᶜ  = sqrt(γᵈ * Rᵈ * FT(300))
+    cᵃᶜ  = sqrt(γᵈ * Rᵈ * FT(300))
 
     Δx_min = let
         TX, TY, _ = topology(grid)
@@ -462,7 +462,7 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_
         min(Δx, Δy)
     end
 
-    return max(1, ceil(Int, abs(FT(Δt)) * ℂᵃᶜ / (acoustic_cfl * Δx_min)))
+    return max(1, ceil(Int, abs(FT(Δt)) * cᵃᶜ / (acoustic_cfl * Δx_min)))
 end
 
 @inline acoustic_substeps(N::Int, grid, Δt, constants, acoustic_cfl) = N

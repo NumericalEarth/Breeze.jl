@@ -12,28 +12,30 @@ shape parameter ``μ^{cl}`` from the droplet number density, together with the b
 diagnosis is clamped to. Evaluated by [`liu_daum_shape_parameter`](@ref):
 
 ```math
-\\chi = a \\, N^{cl} + b, \\qquad
+\\chi = \\mathbb{C}^{cl}_1 \\, N^{cl} + \\mathbb{C}^{cl}_2, \\qquad
 \\mu^{cl} = \\mathrm{clamp}\\!\\left(\\frac{1}{\\chi^2} - 1,\\;
-                                    \\mu^{cl}_{\\min},\\; \\mu^{cl}_{\\max}\\right)
+                                    \\mathbb{C}^{cl}_3,\\; \\mathbb{C}^{cl}_4\\right)
 ```
 
-``\\chi`` is the relative dispersion of the droplet spectrum, and ``(a, b)`` are the
+``\\chi`` is the relative dispersion of the droplet spectrum, and
+``(\\mathbb{C}^{cl}_1, \\mathbb{C}^{cl}_2)`` are the
 Liu-Daum regression of ``\\chi`` on droplet concentration, fit to aircraft measurements of
 warm cloud droplet spectra: at fixed water content, more droplets means a narrower
-spectrum, hence a larger ``μ^{cl}``. The bounds keep ``μ^{cl}`` inside the range the fit
-was measured over.
+spectrum, hence a larger ``μ^{cl}``. The free parameters
+``(\\mathbb{C}^{cl}_3, \\mathbb{C}^{cl}_4)`` bound ``μ^{cl}`` to the range over which
+the fit was measured.
 
 The coefficient is stated here for the absolute number density in SI units [m⁻³], so
-``a`` carries units of m³. The published form uses cm⁻³, hence the 10⁻⁶ difference from
+``\\mathbb{C}^{cl}_1`` carries units of m³. The published form uses cm⁻³, hence the 10⁻⁶ difference from
 the printed 5.714 × 10⁻⁴.
 
 See the constructor for the meaning, units and defaults of each coefficient.
 """
 struct CloudShape{FT}
-    relative_dispersion_number_coefficient :: FT # a, multiplying Nᶜˡ [m³]
-    relative_dispersion_intercept :: FT          # b, the intercept [-]
-    minimum_shape_parameter :: FT                # lower bound on the diagnosed μᶜˡ [-]
-    maximum_shape_parameter :: FT                # upper bound on the diagnosed μᶜˡ [-]
+    relative_dispersion_number_coefficient :: FT # ℂᶜˡ₁, multiplying Nᶜˡ [m³]
+    relative_dispersion_intercept :: FT          # ℂᶜˡ₂, the intercept [-]
+    minimum_shape_parameter :: FT                # ℂᶜˡ₃, lower bound on diagnosed μᶜˡ [-]
+    maximum_shape_parameter :: FT                # ℂᶜˡ₄, upper bound on diagnosed μᶜˡ [-]
 end
 
 """
@@ -43,10 +45,10 @@ Construct `CloudShape`.
 
 # Keyword Arguments
 
-- `relative_dispersion_number_coefficient`: ``a`` [m³], default `5.714e-10`
-- `relative_dispersion_intercept`: ``b`` [-], default `0.2714`
-- `minimum_shape_parameter`: ``μ^{cl}_{\\min}`` [-], default `2`
-- `maximum_shape_parameter`: ``μ^{cl}_{\\max}`` [-], default `15`
+- `relative_dispersion_number_coefficient`: ``\\mathbb{C}^{cl}_1`` [m³], default `5.714e-10`
+- `relative_dispersion_intercept`: ``\\mathbb{C}^{cl}_2`` [-], default `0.2714`
+- `minimum_shape_parameter`: ``\\mathbb{C}^{cl}_3`` [-], default `2`
+- `maximum_shape_parameter`: ``\\mathbb{C}^{cl}_4`` [-], default `15`
 
 # Examples
 
@@ -55,7 +57,7 @@ using Breeze.Microphysics.PredictedParticleProperties: CloudShape
 CloudShape(Float64)
 
 # output
-CloudShape(a=5.714e-10 m³, b=0.2714, μᶜˡ ∈ [2.0, 15.0])
+CloudShape(ℂᶜˡ₁=5.714e-10 m³, ℂᶜˡ₂=0.2714, ℂᶜˡ₃=2.0, ℂᶜˡ₄=15.0)
 ```
 """
 function CloudShape(FT::DataType = Oceananigans.defaults.FloatType;
@@ -64,16 +66,18 @@ function CloudShape(FT::DataType = Oceananigans.defaults.FloatType;
                     minimum_shape_parameter = 2,
                     maximum_shape_parameter = 15)
 
-    a = relative_dispersion_number_coefficient
-    b = relative_dispersion_intercept
-    μ_min = minimum_shape_parameter
-    μ_max = maximum_shape_parameter
+    ℂᶜˡ₁ = relative_dispersion_number_coefficient
+    ℂᶜˡ₂ = relative_dispersion_intercept
+    ℂᶜˡ₃ = minimum_shape_parameter
+    ℂᶜˡ₄ = maximum_shape_parameter
 
-    a ≥ 0 || throw(ArgumentError("relative_dispersion_number_coefficient must be nonnegative, got $a"))
-    b > 0 || throw(ArgumentError("relative_dispersion_intercept must be positive, got $b"))
-    μ_min ≤ μ_max || throw(ArgumentError("minimum_shape_parameter $μ_min exceeds maximum_shape_parameter $μ_max"))
+    ℂᶜˡ₁ ≥ 0 ||
+        throw(ArgumentError("relative_dispersion_number_coefficient must be nonnegative, got $ℂᶜˡ₁"))
+    ℂᶜˡ₂ > 0 || throw(ArgumentError("relative_dispersion_intercept must be positive, got $ℂᶜˡ₂"))
+    ℂᶜˡ₃ ≤ ℂᶜˡ₄ ||
+        throw(ArgumentError("minimum_shape_parameter $ℂᶜˡ₃ exceeds maximum_shape_parameter $ℂᶜˡ₄"))
 
-    return CloudShape(FT(a), FT(b), FT(μ_min), FT(μ_max))
+    return CloudShape(FT(ℂᶜˡ₁), FT(ℂᶜˡ₂), FT(ℂᶜˡ₃), FT(ℂᶜˡ₄))
 end
 
 # Allow a container built at one precision to be reused at another, so that
@@ -90,9 +94,10 @@ Base.summary(::CloudShape) = "CloudShape"
 
 function Base.show(io::IO, p::CloudShape)
     print(io, summary(p), "(")
-    print(io, "a=", p.relative_dispersion_number_coefficient, " m³, ")
-    print(io, "b=", p.relative_dispersion_intercept, ", ")
-    print(io, "μᶜˡ ∈ [", p.minimum_shape_parameter, ", ", p.maximum_shape_parameter, "])")
+    print(io, "ℂᶜˡ₁=", p.relative_dispersion_number_coefficient, " m³, ")
+    print(io, "ℂᶜˡ₂=", p.relative_dispersion_intercept, ", ")
+    print(io, "ℂᶜˡ₃=", p.minimum_shape_parameter, ", ")
+    print(io, "ℂᶜˡ₄=", p.maximum_shape_parameter, ")")
 end
 
 # Prescribed cloud droplet parameters for warm microphysics; see the
@@ -120,9 +125,9 @@ Diagnose the cloud droplet gamma PSD shape parameter μᶜˡ from the absolute n
 concentration `Nᶜˡ` [m⁻³] and the [`CloudShape`](@ref) `shape`:
 
 ```math
-\\chi = a \\, N^{cl} + b, \\qquad
+\\chi = \\mathbb{C}^{cl}_1 \\, N^{cl} + \\mathbb{C}^{cl}_2, \\qquad
 \\mu^{cl} = \\mathrm{clamp}\\!\\left(\\frac{1}{\\chi^2} - 1,\\;
-                                    \\mu^{cl}_{\\min},\\; \\mu^{cl}_{\\max}\\right)
+                                    \\mathbb{C}^{cl}_3,\\; \\mathbb{C}^{cl}_4\\right)
 ```
 
 The relation is written for the absolute number density, so a specific droplet
@@ -147,15 +152,15 @@ round(liu_daum_shape_parameter(100e6, shape), digits=1)  # continental default
 """
 @inline function liu_daum_shape_parameter(Nᶜˡ, shape)
     FT = typeof(float(Nᶜˡ))
-    a = FT(shape.relative_dispersion_number_coefficient)
-    b = FT(shape.relative_dispersion_intercept)
+    ℂᶜˡ₁ = FT(shape.relative_dispersion_number_coefficient)
+    ℂᶜˡ₂ = FT(shape.relative_dispersion_intercept)
     # χ is the relative dispersion of the droplet spectrum; see `CloudShape`
     # for what the regression means and why the bounds are there.
-    χ = a * Nᶜˡ + b
+    χ = ℂᶜˡ₁ * Nᶜˡ + ℂᶜˡ₂
     μᶜˡ = FT(1) / χ^2 - FT(1)
-    return clamp(μᶜˡ,
-                 FT(shape.minimum_shape_parameter),
-                 FT(shape.maximum_shape_parameter))
+    ℂᶜˡ₃ = FT(shape.minimum_shape_parameter)
+    ℂᶜˡ₄ = FT(shape.maximum_shape_parameter)
+    return clamp(μᶜˡ, ℂᶜˡ₃, ℂᶜˡ₄)
 end
 
 """
@@ -306,8 +311,9 @@ defaults admit mean droplet diameters of 1–40 μm.
 """
 @inline function cloud_slope_bounds(μᶜˡ, parameters)
     FT = typeof(μᶜˡ)
-    return ((μᶜˡ + 1) / FT(parameters.maximum_mean_droplet_diameter),
-            (μᶜˡ + 1) / FT(parameters.minimum_mean_droplet_diameter))
+    ℂᶜˡ₅ = FT(parameters.maximum_mean_droplet_diameter)
+    ℂᶜˡ₆ = FT(parameters.minimum_mean_droplet_diameter)
+    return ((μᶜˡ + 1) / ℂᶜˡ₅, (μᶜˡ + 1) / ℂᶜˡ₆)
 end
 
 """

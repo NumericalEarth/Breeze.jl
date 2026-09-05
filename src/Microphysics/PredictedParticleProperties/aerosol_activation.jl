@@ -114,7 +114,7 @@ struct AerosolActivation{FT, M}
     modes :: M                       # Tuple of AerosolMode{FT}
     molecular_weight_water :: FT     # Mw [kg/mol]
     universal_gas_constant :: FT     # R [J/(mol·K)]
-    activation_timescale :: FT       # τ_act [s]
+    activation_timescale :: FT       # ℂᶠᵒʳᵐ₄ [s]
     liquid_water_density :: FT       # ρᴸ [kg/m³]
 
     # Surface tension of the condensate, linear in temperature:
@@ -124,8 +124,8 @@ struct AerosolActivation{FT, M}
     surface_tension_reference_temperature :: FT  # T_ref [K]
 
     lognormal_activation_factor :: FT            # denominator factor in the erf argument [-]
-    activated_droplet_radius :: FT               # radius of a newly activated droplet [m]
-    activation_supersaturation_threshold :: FT   # S above which activation proceeds [-]
+    activated_droplet_radius :: FT               # ℂᶠᵒʳᵐ₂ [m]
+    activation_supersaturation_threshold :: FT   # ℂᶠᵒʳᵐ₃ [-]
     minimum_supersaturation :: FT                # floor on S beneath the logarithm [-]
     minimum_saturation_mass_fraction :: FT       # floor on qᵛ⁺ˡ in the supersaturation denominator [kg/kg]
 end
@@ -324,6 +324,9 @@ where ``m_{\\text{seed}} = (4\\pi/3) \\rho_w (10^{-6})^3`` is a 1 μm radius dro
 """
 @inline function prognostic_ccn_activation_rate(aerosol::AerosolActivation, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
     FT = typeof(T)
+    ℂᶠᵒʳᵐ₂ = aerosol.activated_droplet_radius
+    ℂᶠᵒʳᵐ₃ = aerosol.activation_supersaturation_threshold
+    ℂᶠᵒʳᵐ₄ = aerosol.activation_timescale
 
     # Environmental supersaturation
     S = (qᵛ - qᵛ⁺ˡ) / max(qᵛ⁺ˡ, aerosol.minimum_saturation_mass_fraction)
@@ -336,15 +339,14 @@ where ``m_{\\text{seed}} = (4\\pi/3) \\rho_w (10^{-6})^3`` is a 1 μm radius dro
     N_target = min(N_activated, nᶜˡ + nᵃ_available)
 
     # Relaxation toward the (capped) equilibrium
-    ncnuc = max(0, N_target - nᶜˡ) / aerosol.activation_timescale
+    ncnuc = max(0, N_target - nᶜˡ) / ℂᶠᵒʳᵐ₄
 
     # Seed droplet mass, from the activated-droplet radius (1 μm by default)
-    r_seed = aerosol.activated_droplet_radius
-    seed_mass = 4 * FT(π) / 3 * aerosol.liquid_water_density * r_seed^3
+    seed_mass = 4 * FT(π) / 3 * aerosol.liquid_water_density * ℂᶠᵒʳᵐ₂^3
     qcnuc = ncnuc * seed_mass
 
     # Only activate when supersaturated
-    is_supersaturated = S > aerosol.activation_supersaturation_threshold
+    is_supersaturated = S > ℂᶠᵒʳᵐ₃
     ncnuc = ifelse(is_supersaturated, ncnuc, zero(FT))
     qcnuc = ifelse(is_supersaturated, qcnuc, zero(FT))
 

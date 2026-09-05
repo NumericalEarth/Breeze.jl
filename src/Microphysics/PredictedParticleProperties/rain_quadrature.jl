@@ -18,7 +18,7 @@
 #####       where V(D) is the piecewise Gunn-Kinzer/Beard fall speed.
 #####       ν is NOT baked in; 1/√ν is applied at runtime.
 #####       Full evaporation integral assembled at runtime:
-#####       I_evap = f1r/λ² + f2r × Sc^(1/3) / √ν × I_VD
+#####       I_evap = ℂᵛᵉⁿᵗ₁/λ² + ℂᵛᵉⁿᵗ₂ × Sc^(1/3) / √ν × I_VD
 #####
 ##### The integration uses the same domain transformation as ice quadrature:
 #####   D = (scale/λ) * (1+x) / (1-x+ε),  x ∈ [-1, 1]
@@ -66,9 +66,10 @@ tables alike.
 @inline function rain_fall_speed(D, ρ_correction, fall_speed)
     FT = typeof(D)
 
-    scales = fall_speed.branch_velocity_scales
-    exponents = fall_speed.branch_mass_exponents
-    edges = fall_speed.transition_diameters
+    ℂⱽ₁ = fall_speed.branch_velocity_scales
+    ℂⱽ₂ = fall_speed.branch_mass_exponents
+    ℂⱽ₃ = fall_speed.transition_diameters
+    ℂⱽ₄ = fall_speed.plateau_velocity
 
     mass = (FT(π)/6) * FT(GUNN_KINZER_WATER_DENSITY) * D^3   # [kg]
     mass_ratio = mass * 1000                                 # m(D) / (1 g) [-]
@@ -77,15 +78,15 @@ tables alike.
     # parameterized law costs one generic `^` instead of one per branch — the specialized
     # `cbrt` expressions it replaces are not available once the exponents are configurable.
     # Nested `ifelse` keeps the selection branch-free.
-    is_small = D <= FT(edges[1])
-    is_medium = D < FT(edges[2])
-    branch_scale = ifelse(is_small, FT(scales[1]), ifelse(is_medium, FT(scales[2]), FT(scales[3])))
-    branch_exponent = ifelse(is_small, FT(exponents[1]), ifelse(is_medium, FT(exponents[2]), FT(exponents[3])))
+    is_small = D <= FT(ℂⱽ₃[1])
+    is_medium = D < FT(ℂⱽ₃[2])
+    branch_scale = ifelse(is_small, FT(ℂⱽ₁[1]), ifelse(is_medium, FT(ℂⱽ₁[2]), FT(ℂⱽ₁[3])))
+    branch_exponent = ifelse(is_small, FT(ℂⱽ₂[1]), ifelse(is_medium, FT(ℂⱽ₂[2]), FT(ℂⱽ₂[3])))
 
     V = branch_scale * mass_ratio^branch_exponent
 
     # Above the largest boundary the power law is replaced by the terminal-speed plateau.
-    V = ifelse(D < FT(edges[3]), V, FT(fall_speed.plateau_velocity))
+    V = ifelse(D < FT(ℂⱽ₃[3]), V, FT(ℂⱽ₄))
 
     return V * ρ_correction
 end
@@ -269,18 +270,20 @@ table; `1/√ν` is applied at runtime from T,P-dependent transport properties.
 The full evaporation ventilation integral is assembled at runtime:
 
 ```math
-I_{\\mathrm{evap}} = \\frac{f_{1r}}{\\lambda_r^2}
-    + f_{2r}\\, \\frac{\\mathrm{Sc}^{1/3}}{\\sqrt{\\nu}}\\, I_{\\mathrm{VD}}
+I_{\\mathrm{evap}} = \\frac{\\mathbb{C}^{\\mathrm{vent}}_1}{\\lambda_r^2}
+    + \\mathbb{C}^{\\mathrm{vent}}_2\\, \\frac{\\mathrm{Sc}^{1/3}}{\\sqrt{\\nu}}\\, I_{\\mathrm{VD}}
 ```
 
 where `Sc = ν / Dᵛ` is the Schmidt number and `ν` is the T,P-dependent kinematic
-viscosity. The ventilation coefficients `f1r` and `f2r` come from
+viscosity. The ventilation coefficients ``\\mathbb{C}^{\\mathrm{vent}}_1`` and
+``\\mathbb{C}^{\\mathrm{vent}}_2`` come from
 [`RainVentilation`](@ref) — the defaults are the standard values for falling
 drops tabulated by
 [Pruppacher and Klett (2010)](@cite pruppacher2010microphysics). They deliberately do
 **not** enter this table, which stores only `I_VD`; both are applied at runtime by
-[`rain_ventilation_integral`](@ref). The constant term `f1r / λ_r²` is the analytical
-result of `f1r × ∫ D exp(-λD) dD`.
+[`rain_ventilation_integral`](@ref). The constant term
+``\\mathbb{C}^{\\mathrm{vent}}_1 / λ_r²`` is the analytical result of
+``\\mathbb{C}^{\\mathrm{vent}}_1 ∫ D \\exp(-λD) \\, \\mathrm{d}D``.
 
 This integral appears in the PSD-integrated rain evaporation rate (Mason 1971,
 capacitance `C = D/2` for a sphere, so `4πC = 2πD`):
@@ -315,7 +318,8 @@ end
 
 Evaluate `I_VD(λ_r)` = ∫ D √(V(D)×D) exp(-λ_r D) dD at the given `log10(λ_r)`.
 
-Returns the velocity-diameter integral in [m^(5/2)]. The `1/√ν`, constant (f1r),
+Returns the velocity-diameter integral in [m^(5/2)]. The `1/√ν`, constant
+(``\\mathbb{C}^{\\mathrm{vent}}_1``),
 and Schmidt number (Sc^(1/3)) contributions are applied at runtime.
 """
 @inline function (e::RainVelocityDiameterIntegral)(log10_slope)

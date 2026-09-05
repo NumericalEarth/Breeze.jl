@@ -58,7 +58,8 @@ one cell's vapor budget, so the dry-air form is used throughout.
     # Only activate when supersaturated
     floors = parameters.floors
     S = (qᵛ - qᵛ⁺ˡ) / max(qᵛ⁺ˡ, floors.saturation_mass_fraction)
-    is_supersaturated = S > parameters.activation_supersaturation_threshold
+    ℂᶠᵒʳᵐ₃ = parameters.activation_supersaturation_threshold
+    is_supersaturated = S > ℂᶠᵒʳᵐ₃
     return ifelse(is_supersaturated, rate, zero(FT))
 end
 

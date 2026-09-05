@@ -149,8 +149,8 @@ CCN activation *number* rate into the matching *mass* rate wherever one of the t
 is diagnosed from the other.
 """
 @inline function activated_droplet_mass(parameters, FT)
-    r₀ = FT(parameters.activated_droplet_radius)
-    return 4 * FT(π) / 3 * FT(parameters.liquid_water_density) * r₀^3
+    ℂᶠᵒʳᵐ₂ = FT(parameters.activated_droplet_radius)
+    return 4 * FT(π) / 3 * FT(parameters.liquid_water_density) * ℂᶠᵒʳᵐ₂^3
 end
 
 """
@@ -236,8 +236,8 @@ end
 @inline function ice_air_density_correction(parameters, reference_air_density, air_density)
     FT = typeof(reference_air_density)
     ρ_floor = FT(parameters.minimum_fall_speed_air_density)
-    α = FT(parameters.fall_speed_density_correction_exponent)
-    return (reference_air_density / max(air_density, ρ_floor))^α
+    ℂᵈᵉⁿˢ₁ = FT(parameters.fall_speed_density_correction_exponent)
+    return (reference_air_density / max(air_density, ρ_floor))^ℂᵈᵉⁿˢ₁
 end
 
 """
@@ -353,9 +353,11 @@ diagnosed from the rain mass concentration `qʳ` and number concentration `nʳ`.
 The result is clamped between `parameters.minimum_rain_slope` and
 `parameters.maximum_rain_slope`.
 """
-@inline rain_slope_parameter(qʳ, nʳ, parameters) =
-    clamp(unbounded_rain_slope_parameter(qʳ, nʳ, parameters),
-          parameters.minimum_rain_slope, parameters.maximum_rain_slope)
+@inline function rain_slope_parameter(qʳ, nʳ, parameters)
+    ℂʳⁿ₁ = parameters.minimum_rain_slope
+    ℂʳⁿ₂ = parameters.maximum_rain_slope
+    return clamp(unbounded_rain_slope_parameter(qʳ, nʳ, parameters), ℂʳⁿ₁, ℂʳⁿ₂)
+end
 
 @inline function rain_number_from_slope(qʳ, λʳ, parameters)
     FT = typeof(qʳ)
@@ -367,10 +369,11 @@ end
     qʳ_eff = max(0, qʳ)
     nʳ_eff = max(0, nʳ)
     unbounded_slope = unbounded_rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
-    λʳ = clamp(unbounded_slope, parameters.minimum_rain_slope, parameters.maximum_rain_slope)
+    ℂʳⁿ₁ = parameters.minimum_rain_slope
+    ℂʳⁿ₂ = parameters.maximum_rain_slope
+    λʳ = clamp(unbounded_slope, ℂʳⁿ₁, ℂʳⁿ₂)
     nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
-    needs_adjustment = (unbounded_slope < parameters.minimum_rain_slope) |
-                       (unbounded_slope > parameters.maximum_rain_slope)
+    needs_adjustment = (unbounded_slope < ℂʳⁿ₁) | (unbounded_slope > ℂʳⁿ₂)
     return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
 end
 
