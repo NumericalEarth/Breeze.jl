@@ -425,8 +425,8 @@ end
 
         @test coated_wet_growth_props.qⁱ_total == wet_growth_props.qⁱ_total
         @test coated_wet_growth_props.Fˡ == wet_growth_props.Fˡ == 0
-        @test coated_wet_growth_fall_speeds.wⁱ == wet_growth_fall_speeds.wⁱ
-        @test coated_wet_growth_fall_speeds.wⁱₙ == wet_growth_fall_speeds.wⁱₙ
+        @test coated_wet_growth_fall_speeds.𝕎ⁱ == wet_growth_fall_speeds.𝕎ⁱ
+        @test coated_wet_growth_fall_speeds.𝕎ⁱₙ == wet_growth_fall_speeds.𝕎ⁱₙ
         @test coated_wet_growth_rates.cloud_riming ≈ wet_growth_rates.cloud_riming
         @test coated_wet_growth_rates.rain_riming ≈ wet_growth_rates.rain_riming
         @test coated_wet_growth_rates.shedding ≈ inactive_coating / τ

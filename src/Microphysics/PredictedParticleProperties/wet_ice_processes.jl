@@ -14,7 +14,7 @@ is used.
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
 - `cloud_rim`: Cloud-riming mass tendency [kg/kg/s]
 - `T`: Temperature [K]
-- `vᵢ`: Ice particle fall speed [m/s]
+- `𝕎ⁱ`: Ice particle fall speed [m/s]
 - `ρ`: Air density [kg/m³]
 - `constants`: Thermodynamic constants
 - `transport`: Air transport properties at `(T, P)`
@@ -22,14 +22,18 @@ is used.
 # Returns
 - Rime density [kg/m³]
 """
-@inline function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
+@inline function rime_density(p3, qᶜˡ, cloud_rim, T, 𝕎ⁱ, ρ, constants, transport,
                       μᶜˡ, λᶜˡ)
     FT = typeof(T)
     parameters = p3.process_rates
     qsmall = p3.minimum_mass_mixing_ratio
 
-    minimum_rime_density = parameters.minimum_rime_density
-    maximum_rime_density = parameters.maximum_rime_density
+    ℂʳⁱᵐᵉ₃ = parameters.minimum_rime_density
+    ℂʳⁱᵐᵉ₄ = parameters.maximum_rime_density
+    ℂʳⁱᵐᵉ₅ = parameters.rime_impact_coefficient
+    ℂʳⁱᵐᵉ₆ = parameters.minimum_rime_impact
+    ℂʳⁱᵐᵉ₇ = parameters.maximum_rime_impact
+    ℂʳⁱᵐᵉ₈ = parameters.unrimed_rime_density
     T₀ = parameters.freezing_temperature
     ρᴸ = parameters.liquid_water_density
 
@@ -41,16 +45,16 @@ is used.
     # The droplet impact speed is the mass-weighted Stokes velocity of the cloud
     # DSD, shared with `cloud_terminal_velocities`.
     stokes_prefactor = cloud_stokes_prefactor(g, ρᴸ, η, parameters.floors)
-    cloud_terminal_velocity = cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
+    𝕎ᶜˡ = cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
     cloud_mean_diameter = (μᶜˡ + 4) / λᶜˡ
 
-    # Riming impact parameter Ri = c Dᶜ |vᵢ - Vt_qc| / (T₀ - T): large drops striking
+    # Riming impact parameter Ri = c Dᶜ |𝕎ⁱ - 𝕎ᶜˡ| / (T₀ - T): large drops striking
     # fast at weak supercooling pack dense rime. The supercooling floor keeps Ri
     # finite as T → T₀, and the clamp holds Ri inside the range the fit below covers.
     inverse_supercooling = inv(min(-parameters.minimum_riming_supercooling, T - T₀))
-    Ri = clamp(-(parameters.rime_impact_coefficient * cloud_mean_diameter) *
-               abs(vᵢ - cloud_terminal_velocity) * inverse_supercooling,
-               parameters.minimum_rime_impact, parameters.maximum_rime_impact)
+    Ri = clamp(-(ℂʳⁱᵐᵉ₅ * cloud_mean_diameter) *
+               abs(𝕎ⁱ - 𝕎ᶜˡ) * inverse_supercooling,
+               ℂʳⁱᵐᵉ₆, ℂʳⁱᵐᵉ₇)
 
     # Cober-List rime-density fit (see the docstring for the citation): a quadratic
     # in g/cm³ (hence the ×10³) below Ri = 8, a linear extension above it.
@@ -66,9 +70,9 @@ is used.
     )
 
     active_cloud_riming = (cloud_rim >= qsmall) & (qᶜˡ >= qsmall) & (T < T₀)
-    ρᶠ = ifelse(active_cloud_riming, ρ_rime_Ri, parameters.unrimed_rime_density)
+    ρᶠ = ifelse(active_cloud_riming, ρ_rime_Ri, ℂʳⁱᵐᵉ₈)
 
-    return clamp(ρᶠ, minimum_rime_density, maximum_rime_density)
+    return clamp(ρᶠ, ℂʳⁱᵐᵉ₃, ℂʳⁱᵐᵉ₄)
 end
 
 #####
@@ -138,9 +142,9 @@ Shed liquid forms rain drops of approximately 1 mm diameter.
 @inline function shedding_number_rate(p3, shed_rate)
     # Liquid-fraction shedding carries its own drop mass so it can be tuned
     # separately; by default it equals `shed_drop_mass`, the mass of a 1 mm drop.
-    m_shed = p3.process_rates.shed_drop_mass_liqfrac
+    ℂˢʰᵉᵈ₂ = p3.process_rates.shed_drop_mass_liqfrac
 
-    return shed_rate / m_shed
+    return shed_rate / ℂˢʰᵉᵈ₂
 end
 
 """

@@ -9,9 +9,9 @@
 # **against** the wind bend **upward**.  The effective propagation speed for
 # a wave in direction ``\hat{\boldsymbol{n}}`` is
 # ```math
-# \mathbb{C}^{ac} + \boldsymbol{u} \cdot \hat{\boldsymbol{n}}
+# c^{ac} + \boldsymbol{u} \cdot \hat{\boldsymbol{n}}
 # ```
-# where ``ℂᵃᶜ`` is the acoustic sound speed and ``\boldsymbol{u}`` is the wind
+# where ``cᵃᶜ`` is the acoustic sound speed and ``\boldsymbol{u}`` is the wind
 # velocity.  Wavefronts tilt toward regions of lower effective propagation
 # speed, "ducting" sound energy along the surface — which is why distant
 # sounds are often heard more clearly downwind. For more on this topic, see
@@ -81,7 +81,7 @@ reference = ReferenceState(grid, constants; surface_pressure=p₀, potential_tem
 Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
 cᵖᵈ = constants.dry_air.heat_capacity
 γ = cᵖᵈ / (cᵖᵈ - Rᵈ)
-ℂᵃᶜ = sqrt(γ * Rᵈ * θ₀)
+cᵃᶜ = sqrt(γ * Rᵈ * θ₀)
 
 # The wind profile follows the classic log-law of the atmospheric surface layer.
 
@@ -94,7 +94,7 @@ Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 #
 # We initialize a localized Gaussian density pulse representing an acoustic disturbance.
 # For a rightward-propagating acoustic wave, the velocity perturbation is in phase with
-# the density perturbation: ``u' = (ℂᵃᶜ / ρ₀) ρ'``.
+# the density perturbation: ``u' = (cᵃᶜ / ρ₀) ρ'``.
 
 δρ = 0.01    # Density perturbation amplitude (kg/m³)
 σ = 20       # Pulse width (m)
@@ -103,18 +103,18 @@ gaussian(x, z) = exp(-(x^2 + z^2) / 2σ^2)
 ρ₀ = interior(reference.density, 1, 1, 1)[]
 
 ρᵢ_func(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
-uᵢ_func(x, z) = Uᵢ(z) # + (ℂᵃᶜ / ρ₀) * δρ * gaussian(x, z)
+uᵢ_func(x, z) = Uᵢ(z) # + (cᵃᶜ / ρ₀) * δρ * gaussian(x, z)
 
 set!(model, ρ=ρᵢ_func, θ=θ₀, u=uᵢ_func)
 
 
 # ## Simulation setup
 #
-# Acoustic waves travel fast (``ℂᵃᶜ ≈ 347`` m/s), so we need a small time step.
-# The [Courant–Friedrichs–Lewy (CFL) condition](https://en.wikipedia.org/wiki/Courant%E2%80%93Friedrichs%E2%80%93Lewy_condition) is based on the effective propagation speed ``ℂᵃᶜ + \mathrm{max}(U)``.
+# Acoustic waves travel fast (``cᵃᶜ ≈ 347`` m/s), so we need a small time step.
+# The [Courant–Friedrichs–Lewy (CFL) condition](https://en.wikipedia.org/wiki/Courant%E2%80%93Friedrichs%E2%80%93Lewy_condition) is based on the effective propagation speed ``cᵃᶜ + \mathrm{max}(U)``.
 
 Δx, Δz = Lx / Nx, Lz / Nz
-Δt = 0.5 * min(Δx, Δz) / (ℂᵃᶜ + Uᵢ(Lz))
+Δt = 0.5 * min(Δx, Δz) / (cᵃᶜ + Uᵢ(Lz))
 stop_time = 0.5 # (s) — long enough for the wave to traverse the domain and for refraction to bend rays visibly
 
 simulation = Simulation(model; Δt, stop_time)

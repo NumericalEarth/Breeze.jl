@@ -11,7 +11,7 @@
 #####
 ##### Ventilation Sc correction (H4)
 #####
-##### The ventilation-enhanced table stores 0.44 × ∫ C(D)√(V×D) N'(D) dD
+##### The ventilation-enhanced table stores 0.44 × ∫ C(D)√(𝕎×D) N'(D) dD
 ##### with dimensions [m² s^(-1/2)]. At runtime, multiplying by
 ##### Sc^(1/3) × √ρ_fac / √ν restores the correct dimensions [m].
 ##### This helper centralizes the correction so that all call sites (the vapor
@@ -76,7 +76,7 @@ struct P3IceLookups{FT, P}
     ρ_correction :: FT
     "Constant ventilation term 0.65 ∫ C(D) N'(D) dD [m]"
     ventilation :: FT
-    "Enhanced ventilation term 0.44 ∫ C(D) √(V D) N'(D) dD [m² s^(-1/2)], before the Sc correction"
+    "Enhanced ventilation term 0.44 ∫ C(D) √(𝕎 D) N'(D) dD [m² s^(-1/2)], before the Sc correction"
     ventilation_enhanced :: FT
 end
 

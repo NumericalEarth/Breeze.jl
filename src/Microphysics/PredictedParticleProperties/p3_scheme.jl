@@ -145,7 +145,7 @@ p3 = P3Microphysics(Float64; cloud, rain)
 p3.rain.ventilation
 
 # output
-RainVentilation(f₁ᵣ=0.78, f₂ᵣ=0.35)
+RainVentilation(ℂᵛᵉⁿᵗ₁=0.78, ℂᵛᵉⁿᵗ₂=0.35)
 ```
 
 # Example
