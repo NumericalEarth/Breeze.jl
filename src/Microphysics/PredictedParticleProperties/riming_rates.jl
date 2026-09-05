@@ -125,6 +125,7 @@ Returns `(Nᶜˡ / (ρ * qᶜˡ)) * riming_rate` [1/kg/s]: the per-mass cloud
 number removal proportional to the rimed cloud mass fraction.
 
 # Arguments
+- `p3`: the scheme, for `minimum_mass_mixing_ratio` (cloud below it is absent)
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
 - `Nᶜˡ`: Cloud droplet number concentration [1/m³]
 - `ρ`: Air density [kg/m³]
@@ -133,8 +134,8 @@ number removal proportional to the rimed cloud mass fraction.
 # Returns
 - Rate of cloud number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, riming_rate)
-    return cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ) * riming_rate
+@inline function cloud_riming_number_rate(p3, qᶜˡ, Nᶜˡ, ρ, riming_rate)
+    return cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, p3.minimum_mass_mixing_ratio) * riming_rate
 end
 
 """

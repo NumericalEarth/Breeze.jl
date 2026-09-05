@@ -357,7 +357,7 @@ proportion to the cloud mass lost.
 
 @inline function cloud_number_loss_from_autoconversion(::KhairoutdinovKogan2000,
                                                        p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
-    return autoconversion * cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ)
+    return autoconversion * cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, p3.minimum_mass_mixing_ratio)
 end
 
 """

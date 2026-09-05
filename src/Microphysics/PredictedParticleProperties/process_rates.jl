@@ -370,7 +370,7 @@ end
     below_freezing = T <= T₀
     cloud_coll = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, true, qʷⁱ, lookups)
     cloud_rim = ifelse(below_freezing, cloud_coll, zero(FT))
-    cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_rim)
+    cloud_rim_n = cloud_riming_number_rate(p3, qᶜˡ, Nᶜˡ, ρ, cloud_rim)
     # Mass and number share one Table 2 read.
     rain_coll_q, rain_coll_n = rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
                                                      true, qʷⁱ, lookups)
@@ -490,7 +490,7 @@ end
     # Above-freezing collection: the complementary halves of the two kernels
     # already evaluated above.
     cloud_warm_q = ifelse(below_freezing, zero(FT), cloud_coll)
-    cloud_warm_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_warm_q)
+    cloud_warm_n = cloud_riming_number_rate(p3, qᶜˡ, Nᶜˡ, ρ, cloud_warm_q)
     # Number sink from above-freezing rain collection fires in both branches.
     rain_warm_q_full = ifelse(below_freezing, zero(FT), rain_coll_q)
     rain_warm_n = ifelse(below_freezing, zero(FT), rain_coll_n)
