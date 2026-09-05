@@ -117,7 +117,6 @@ jobs:
           # target all of them, with safe fallbacks.
           echo "JULIA_CPU_TARGET=generic;haswell,-xsaveopt,clone_all;znver3,-rdrnd,base(1);znver4,-rdrnd,base(1);sapphirerapids,-rdrnd,base(1)" | tee -a "${GITHUB_ENV}"
       - name: Show versioninfo
-        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         run: |
           julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
       - name: "Cache Julia depot"
