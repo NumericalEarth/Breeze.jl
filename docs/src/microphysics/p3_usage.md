@@ -34,8 +34,9 @@ defaults anywhere in the rate calculations. See
 [Empirical Warm-Phase Coefficients](@ref p3_warm_phase_coefficients) for what each scalar
 means.
 
-The equations and formula-local Julia variables denote free parameters by ``\mathbb{C}``
-and `ℂ` (entered as `\bbC<TAB>`), for example ``\mathbb{C}^{\mathrm{vent}}_2`` / `ℂᵛᵉⁿᵗ₂`.
+The equations denote free parameters with readable subscripts, such as
+``\mathbb{C}_{\mathrm{vent},2}``. Julia lacks the corresponding Unicode subscript letters,
+so formula-local source identifiers use `ℂᵛᵉⁿᵗ₂` instead (`ℂ` is entered as `\bbC<TAB>`).
 Configuration uses descriptive public keywords such as `reynolds_coefficient`; the theory
 table gives the one-to-one mapping. This keeps model configuration readable without hiding
 which quantities are intended for calibration.

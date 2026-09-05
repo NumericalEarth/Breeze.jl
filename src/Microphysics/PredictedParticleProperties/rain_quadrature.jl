@@ -270,20 +270,20 @@ table; `1/√ν` is applied at runtime from T,P-dependent transport properties.
 The full evaporation ventilation integral is assembled at runtime:
 
 ```math
-I_{\\mathrm{evap}} = \\frac{\\mathbb{C}^{\\mathrm{vent}}_1}{\\lambda_r^2}
-    + \\mathbb{C}^{\\mathrm{vent}}_2\\, \\frac{\\mathrm{Sc}^{1/3}}{\\sqrt{\\nu}}\\, I_{\\mathrm{VD}}
+I_{\\mathrm{evap}} = \\frac{\\mathbb{C}_{\\mathrm{vent},1}}{\\lambda_r^2}
+    + \\mathbb{C}_{\\mathrm{vent},2}\\, \\frac{\\mathrm{Sc}^{1/3}}{\\sqrt{\\nu}}\\, I_{\\mathrm{VD}}
 ```
 
 where `Sc = ν / Dᵛ` is the Schmidt number and `ν` is the T,P-dependent kinematic
-viscosity. The ventilation coefficients ``\\mathbb{C}^{\\mathrm{vent}}_1`` and
-``\\mathbb{C}^{\\mathrm{vent}}_2`` come from
+viscosity. The ventilation coefficients ``\\mathbb{C}_{\\mathrm{vent},1}`` and
+``\\mathbb{C}_{\\mathrm{vent},2}`` come from
 [`RainVentilation`](@ref) — the defaults are the standard values for falling
 drops tabulated by
 [Pruppacher and Klett (2010)](@cite pruppacher2010microphysics). They deliberately do
 **not** enter this table, which stores only `I_VD`; both are applied at runtime by
 [`rain_ventilation_integral`](@ref). The constant term
-``\\mathbb{C}^{\\mathrm{vent}}_1 / λ_r²`` is the analytical result of
-``\\mathbb{C}^{\\mathrm{vent}}_1 ∫ D \\exp(-λD) \\, \\mathrm{d}D``.
+``\\mathbb{C}_{\\mathrm{vent},1} / λ_r²`` is the analytical result of
+``\\mathbb{C}_{\\mathrm{vent},1} ∫ D \\exp(-λD) \\, \\mathrm{d}D``.
 
 This integral appears in the PSD-integrated rain evaporation rate (Mason 1971,
 capacitance `C = D/2` for a sphere, so `4πC = 2πD`):
@@ -319,7 +319,7 @@ end
 Evaluate `I_VD(λ_r)` = ∫ D √(V(D)×D) exp(-λ_r D) dD at the given `log10(λ_r)`.
 
 Returns the velocity-diameter integral in [m^(5/2)]. The `1/√ν`, constant
-(``\\mathbb{C}^{\\mathrm{vent}}_1``),
+(``\\mathbb{C}_{\\mathrm{vent},1}``),
 and Schmidt number (Sc^(1/3)) contributions are applied at runtime.
 """
 @inline function (e::RainVelocityDiameterIntegral)(log10_slope)

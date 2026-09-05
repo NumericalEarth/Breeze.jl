@@ -12,21 +12,21 @@ shape parameter ``μ^{cl}`` from the droplet number density, together with the b
 diagnosis is clamped to. Evaluated by [`liu_daum_shape_parameter`](@ref):
 
 ```math
-\\chi = \\mathbb{C}^{cl}_1 \\, N^{cl} + \\mathbb{C}^{cl}_2, \\qquad
+\\chi = \\mathbb{C}_{cl,1} \\, N^{cl} + \\mathbb{C}_{cl,2}, \\qquad
 \\mu^{cl} = \\mathrm{clamp}\\!\\left(\\frac{1}{\\chi^2} - 1,\\;
-                                    \\mathbb{C}^{cl}_3,\\; \\mathbb{C}^{cl}_4\\right)
+                                    \\mathbb{C}_{cl,3},\\; \\mathbb{C}_{cl,4}\\right)
 ```
 
 ``\\chi`` is the relative dispersion of the droplet spectrum, and
-``(\\mathbb{C}^{cl}_1, \\mathbb{C}^{cl}_2)`` are the
+``(\\mathbb{C}_{cl,1}, \\mathbb{C}_{cl,2})`` are the
 Liu-Daum regression of ``\\chi`` on droplet concentration, fit to aircraft measurements of
 warm cloud droplet spectra: at fixed water content, more droplets means a narrower
 spectrum, hence a larger ``μ^{cl}``. The free parameters
-``(\\mathbb{C}^{cl}_3, \\mathbb{C}^{cl}_4)`` bound ``μ^{cl}`` to the range over which
+``(\\mathbb{C}_{cl,3}, \\mathbb{C}_{cl,4})`` bound ``μ^{cl}`` to the range over which
 the fit was measured.
 
 The coefficient is stated here for the absolute number density in SI units [m⁻³], so
-``\\mathbb{C}^{cl}_1`` carries units of m³. The published form uses cm⁻³, hence the 10⁻⁶ difference from
+``\\mathbb{C}_{cl,1}`` carries units of m³. The published form uses cm⁻³, hence the 10⁻⁶ difference from
 the printed 5.714 × 10⁻⁴.
 
 See the constructor for the meaning, units and defaults of each coefficient.
@@ -45,10 +45,10 @@ Construct `CloudShape`.
 
 # Keyword Arguments
 
-- `relative_dispersion_number_coefficient`: ``\\mathbb{C}^{cl}_1`` [m³], default `5.714e-10`
-- `relative_dispersion_intercept`: ``\\mathbb{C}^{cl}_2`` [-], default `0.2714`
-- `minimum_shape_parameter`: ``\\mathbb{C}^{cl}_3`` [-], default `2`
-- `maximum_shape_parameter`: ``\\mathbb{C}^{cl}_4`` [-], default `15`
+- `relative_dispersion_number_coefficient`: ``\\mathbb{C}_{cl,1}`` [m³], default `5.714e-10`
+- `relative_dispersion_intercept`: ``\\mathbb{C}_{cl,2}`` [-], default `0.2714`
+- `minimum_shape_parameter`: ``\\mathbb{C}_{cl,3}`` [-], default `2`
+- `maximum_shape_parameter`: ``\\mathbb{C}_{cl,4}`` [-], default `15`
 
 # Examples
 
@@ -125,9 +125,9 @@ Diagnose the cloud droplet gamma PSD shape parameter μᶜˡ from the absolute n
 concentration `Nᶜˡ` [m⁻³] and the [`CloudShape`](@ref) `shape`:
 
 ```math
-\\chi = \\mathbb{C}^{cl}_1 \\, N^{cl} + \\mathbb{C}^{cl}_2, \\qquad
+\\chi = \\mathbb{C}_{cl,1} \\, N^{cl} + \\mathbb{C}_{cl,2}, \\qquad
 \\mu^{cl} = \\mathrm{clamp}\\!\\left(\\frac{1}{\\chi^2} - 1,\\;
-                                    \\mathbb{C}^{cl}_3,\\; \\mathbb{C}^{cl}_4\\right)
+                                    \\mathbb{C}_{cl,3},\\; \\mathbb{C}_{cl,4}\\right)
 ```
 
 The relation is written for the absolute number density, so a specific droplet

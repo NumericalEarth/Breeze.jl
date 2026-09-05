@@ -14,12 +14,12 @@ Cloud droplets larger than a threshold undergo collision-coalescence to form rai
 For the KK2000 branch,
 
 ```math
-\\dot q^{r}_{\\mathrm{auto}} = \\mathbb{C}^{\\mathrm{auto}}_1
-    (q^{cl})^{\\mathbb{C}^{\\mathrm{auto}}_2}
-    \\left(\\frac{N^{cl}}{N^{cl}_r}\\right)^{\\mathbb{C}^{\\mathrm{auto}}_3},
+\\dot q^{r}_{\\mathrm{auto}} = \\mathbb{C}_{\\mathrm{auto},1}
+    (q^{cl})^{\\mathbb{C}_{\\mathrm{auto},2}}
+    \\left(\\frac{N^{cl}}{N^{cl}_r}\\right)^{\\mathbb{C}_{\\mathrm{auto},3}},
 ```
 
-gated to zero below ``q^{cl} = \\mathbb{C}^{\\mathrm{auto}}_4``. The reference
+gated to zero below ``q^{cl} = \\mathbb{C}_{\\mathrm{auto},4}``. The reference
 concentration ``N^{cl}_r`` fixes units and is not an independently identifiable
 free parameter.
 
@@ -67,8 +67,8 @@ Falling rain drops collect cloud droplets via gravitational sweep-out. See
 [`rain_autoconversion_rate`](@ref) for the scheme menu.
 
 ```math
-\\dot q^{r}_{\\mathrm{accr}} = \\mathbb{C}^{\\mathrm{accr}}_1
-    (q^{cl} q^r)^{\\mathbb{C}^{\\mathrm{accr}}_2}.
+\\dot q^{r}_{\\mathrm{accr}} = \\mathbb{C}_{\\mathrm{accr},1}
+    (q^{cl} q^r)^{\\mathbb{C}_{\\mathrm{accr},2}}.
 ```
 
 # Arguments
@@ -105,8 +105,8 @@ Compute rain self-collection rate (number tendency only). Dispatches on
 `p3.warm_rain_scheme`.
 
 Large rain drops collect smaller ones, reducing number but conserving mass.
-KK2000 uses ``\\dot n^r_{\\mathrm{self}} = \\mathbb{C}^{\\mathrm{self}}_1 ρ q^r n^r``,
-with ``\\mathbb{C}^{\\mathrm{self}}_1 = 5.78`` m³ kg⁻¹ s⁻¹ by default.
+KK2000 uses ``\\dot n^r_{\\mathrm{self}} = \\mathbb{C}_{\\mathrm{self},1} ρ q^r n^r``,
+with ``\\mathbb{C}_{\\mathrm{self},1} = 5.78`` m³ kg⁻¹ s⁻¹ by default.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters and scheme selector)
@@ -143,14 +143,14 @@ function of ``\\bar D^r = (q^r / (π ρ^L n^r))^{1/3} = 1/λ^r``. For the
 exponential rain DSD this is the number-mean diameter; the diameter of the mean
 particle mass is ``6^{1/3} \\bar D^r``.
 
-1. ``\\bar D^r < \\mathbb{C}^{\\mathrm{brkp}}_1``: no breakup effect.
-2. ``\\bar D^r ≥ \\mathbb{C}^{\\mathrm{brkp}}_1``:
-   ``f_{brkp} = 2 - \\exp[\\mathbb{C}^{\\mathrm{brkp}}_2
-   (\\bar D^r - \\mathbb{C}^{\\mathrm{brkp}}_1)]``.
+1. ``\\bar D^r < \\mathbb{C}_{\\mathrm{brkp},1}``: no breakup effect.
+2. ``\\bar D^r ≥ \\mathbb{C}_{\\mathrm{brkp},1}``:
+   ``f_{brkp} = 2 - \\exp[\\mathbb{C}_{\\mathrm{brkp},2}
+   (\\bar D^r - \\mathbb{C}_{\\mathrm{brkp},1})]``.
 
 The breakup source is ``(1 - f_{brkp})`` times the self-collection sink. The
 net rain-number tendency changes sign only when ``f_{brkp} = 0``, at
-``\\bar D^r = \\mathbb{C}^{\\mathrm{brkp}}_1 + \\log(2) / \\mathbb{C}^{\\mathrm{brkp}}_2``.
+``\\bar D^r = \\mathbb{C}_{\\mathrm{brkp},1} + \\log(2) / \\mathbb{C}_{\\mathrm{brkp},2}``.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -288,14 +288,14 @@ $(TYPEDSIGNATURES)
 Rain ventilation integral and the slope quantities that go with it:
 
 ```math
-I_{evap}(λ^r) = \\frac{\\mathbb{C}^{\\mathrm{vent}}_1}{(λ^r)^2}
-              + \\mathbb{C}^{\\mathrm{vent}}_2 \\, \\frac{Sc^{1/3}}{\\sqrt{ν}} \\, I_{VD}(λ^r)
+I_{evap}(λ^r) = \\frac{\\mathbb{C}_{\\mathrm{vent},1}}{(λ^r)^2}
+              + \\mathbb{C}_{\\mathrm{vent},2} \\, \\frac{Sc^{1/3}}{\\sqrt{ν}} \\, I_{VD}(λ^r)
 ```
 
 `I_VD` comes from the tabulated `table`, which stores
 ``∫ D \\sqrt{V D} e^{-λ^r D} dD`` with neither `ν` nor the Schmidt number baked
-in, so both T,P-dependent factors are applied here. ``\\mathbb{C}^{\\mathrm{vent}}_1`` and
-``\\mathbb{C}^{\\mathrm{vent}}_2`` come from `ventilation`, a [`RainVentilation`](@ref), for the same reason:
+in, so both T,P-dependent factors are applied here. ``\\mathbb{C}_{\\mathrm{vent},1}`` and
+``\\mathbb{C}_{\\mathrm{vent},2}`` come from `ventilation`, a [`RainVentilation`](@ref), for the same reason:
 neither is baked into the table, so both remain configurable at runtime. Returns
 `(; λʳ, Nʳ₀, integral)`, since every caller needs the intercept
 ``N^r_0 = n^r λ^r`` alongside the integral.

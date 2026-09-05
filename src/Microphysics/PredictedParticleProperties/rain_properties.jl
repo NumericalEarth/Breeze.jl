@@ -21,10 +21,10 @@ evaluated by [`rain_fall_speed`](@ref),
 
 ```math
 V(D) = \\begin{cases}
-    \\mathbb{C}^V_{1,1} \\, \\hat{m}^{\\mathbb{C}^V_{2,1}} & D \\le \\mathbb{C}^V_{3,1} \\\\
-    \\mathbb{C}^V_{1,2} \\, \\hat{m}^{\\mathbb{C}^V_{2,2}} & \\mathbb{C}^V_{3,1} < D < \\mathbb{C}^V_{3,2} \\\\
-    \\mathbb{C}^V_{1,3} \\, \\hat{m}^{\\mathbb{C}^V_{2,3}} & \\mathbb{C}^V_{3,2} \\le D < \\mathbb{C}^V_{3,3} \\\\
-    \\mathbb{C}^V_4              & D \\ge \\mathbb{C}^V_{3,3}
+    \\mathbb{C}_{V,1,1} \\, \\hat{m}^{\\mathbb{C}_{V,2,1}} & D \\le \\mathbb{C}_{V,3,1} \\\\
+    \\mathbb{C}_{V,1,2} \\, \\hat{m}^{\\mathbb{C}_{V,2,2}} & \\mathbb{C}_{V,3,1} < D < \\mathbb{C}_{V,3,2} \\\\
+    \\mathbb{C}_{V,1,3} \\, \\hat{m}^{\\mathbb{C}_{V,2,3}} & \\mathbb{C}_{V,3,2} \\le D < \\mathbb{C}_{V,3,3} \\\\
+    \\mathbb{C}_{V,4}              & D \\ge \\mathbb{C}_{V,3,3}
 \\end{cases}
 ```
 
@@ -56,11 +56,11 @@ to SI.
 
 # Keyword Arguments
 
-- `branch_velocity_scales`: ``\\mathbb{C}^V_1`` [m/s], default `(4579.5, 49.62, 17.32)`
-- `branch_mass_exponents`: ``\\mathbb{C}^V_2`` [-], default `(2/3, 1/3, 1/6)`
-- `transition_diameters`: ``\\mathbb{C}^V_3`` [m], strictly increasing,
+- `branch_velocity_scales`: ``\\mathbb{C}_{V,1}`` [m/s], default `(4579.5, 49.62, 17.32)`
+- `branch_mass_exponents`: ``\\mathbb{C}_{V,2}`` [-], default `(2/3, 1/3, 1/6)`
+- `transition_diameters`: ``\\mathbb{C}_{V,3}`` [m], strictly increasing,
   default `(134.43e-6, 1511.64e-6, 3477.84e-6)`
-- `plateau_velocity`: ``\\mathbb{C}^V_4`` [m/s], default `9.17`
+- `plateau_velocity`: ``\\mathbb{C}_{V,4}`` [m/s], default `9.17`
 
 # Examples
 
@@ -117,7 +117,7 @@ end
 """
     RainVentilation{FT}
 
-Coefficients of the rain ventilation factor ``f^{ve} = \\mathbb{C}^{\\mathrm{vent}}_1 + \\mathbb{C}^{\\mathrm{vent}}_2\\,
+Coefficients of the rain ventilation factor ``f^{ve} = \\mathbb{C}_{\\mathrm{vent},1} + \\mathbb{C}_{\\mathrm{vent},2}\\,
 \\mathrm{Sc}^{1/3}\\,\\mathrm{Re}^{1/2}``, the classical form of
 [Pruppacher and Klett (2010)](@cite pruppacher2010microphysics). These are P3's
 traditional `f1r`/`f2r` coefficients.
@@ -128,7 +128,7 @@ tables at generation: the `*_ventilation_constant` / `*_ventilation_reynolds` fi
 is not configurable.
 
 Consumed at runtime by [`rain_ventilation_integral`](@ref), which assembles the
-analytical ``\\mathbb{C}^{\\mathrm{vent}}_1/(λ^r)^2`` term and the Reynolds-weighted term around the tabulated
+analytical ``\\mathbb{C}_{\\mathrm{vent},1}/(λ^r)^2`` term and the Reynolds-weighted term around the tabulated
 velocity-diameter integral. They deliberately do not enter that table, which stores only
 ``I_{VD}``.
 
@@ -146,8 +146,8 @@ Construct `RainVentilation`.
 
 # Keyword Arguments
 
-- `constant_coefficient`: ``\\mathbb{C}^{\\mathrm{vent}}_1`` [-], default `0.78`
-- `reynolds_coefficient`: ``\\mathbb{C}^{\\mathrm{vent}}_2`` [-], default `0.32`
+- `constant_coefficient`: ``\\mathbb{C}_{\\mathrm{vent},1}`` [-], default `0.78`
+- `reynolds_coefficient`: ``\\mathbb{C}_{\\mathrm{vent},2}`` [-], default `0.32`
 
 # Examples
 
@@ -223,7 +223,7 @@ inverts the mass integral directly as ``λ^r = (π ρ^w n^r / q^r)^{1/3}``, and
 the four regimes capture Stokes drag below the first transition diameter (``D ≈ 134``
 μm by default) and the terminal-velocity plateau above the third (``D ≈ 3.5`` mm).
 
-**Ventilation:** ``f^{ve} = \\mathbb{C}^{\\mathrm{vent}}_1 + \\mathbb{C}^{\\mathrm{vent}}_2\\,\\mathrm{Sc}^{1/3}\\,\\mathrm{Re}^{1/2}``,
+**Ventilation:** ``f^{ve} = \\mathbb{C}_{\\mathrm{vent},1} + \\mathbb{C}_{\\mathrm{vent},2}\\,\\mathrm{Sc}^{1/3}\\,\\mathrm{Re}^{1/2}``,
 configured by `ventilation` and consumed by rain evaporation and by the coupled
 saturation-adjustment relaxation coefficient.
 
