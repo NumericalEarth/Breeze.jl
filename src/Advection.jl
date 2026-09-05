@@ -11,9 +11,9 @@ using Oceananigans.Advection:
     bounded_tracer_flux_divergence_y,
     bounded_tracer_flux_divergence_z
 
-using Adapt
-using Oceananigans.Advection: WENO, AdaptiveVerticallyImplicitDiscretization,
-                              explicit_velocity_scaleᶜᶜᶠ
+using Adapt: Adapt
+using Oceananigans.Advection: WENO, explicit_velocity_scaleᶜᶜᶠ
+using Oceananigans.Utils: AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: time_discretization
@@ -69,6 +69,10 @@ Adapt.adapt_structure(to, v::ExplicitVerticalVelocity) =
 
 @inline Base.getindex(v::ExplicitVerticalVelocity, i, j, k) =
     @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, v.grid, v.scheme, v.td, v.w) * v.w[i, j, k]
+
+# Disambiguates against the `ZeroField` shortcut above: a zero tracer advects to zero
+# regardless of the vertical time discretization.
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, ::BoundsPreservingAVIDWENO, ρ, U, ::ZeroField) = zero(grid)
 
 # The bounded path never routed through the AVID flux scaling, so it transported the full
 # explicit flux AND received the (1 - s) implicit remainder — 1 + (1 - s) total (issue #913).
