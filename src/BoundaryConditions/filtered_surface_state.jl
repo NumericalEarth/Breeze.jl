@@ -201,10 +201,12 @@ end
 
 # The surface-layer difference θᵥ(z₁) - θᵥ₀ is formed at the first cell (the height at
 # which the bulk coefficient evaluates stability) from the instantaneous state and the
-# surface temperature `T₀`, and the result is filtered.
-@kernel function _update_filtered_Δθᵥ!(Δθ̂ᵥ, coef, T₀, ϵ)
+# surface temperature `T₀` (a number, a field on the bottom, or a function of the wall
+# coordinates and time, evaluated by `wall_value`), and the result is filtered.
+@kernel function _update_filtered_Δθᵥ!(Δθ̂ᵥ, coef, T₀, grid, clock, ϵ)
     i, j = @index(Global, NTuple)
-    Δθᵥⁿ = surface_layer_Δθᵥ(i, j, coef, T₀)
+    T₀ᵢⱼ = wall_value(i, j, grid, Bottom(), T₀, clock)
+    Δθᵥⁿ = surface_layer_Δθᵥ(i, j, coef, T₀ᵢⱼ)
     @inbounds Δθ̂ᵥ[i, j, 1] = (Δθ̂ᵥ[i, j, 1] + ϵ * Δθᵥⁿ) / (1 + ϵ)
 end
 
@@ -223,9 +225,10 @@ end
     @inbounds f̂[i, j, 1] = interpolate_or_surface(i, j, grid, field_3d, Center(), Center(), height)
 end
 
-@kernel function _initialize_filtered_Δθᵥ!(Δθ̂ᵥ, coef, T₀)
+@kernel function _initialize_filtered_Δθᵥ!(Δθ̂ᵥ, coef, T₀, grid, clock)
     i, j = @index(Global, NTuple)
-    @inbounds Δθ̂ᵥ[i, j, 1] = surface_layer_Δθᵥ(i, j, coef, T₀)
+    T₀ᵢⱼ = wall_value(i, j, grid, Bottom(), T₀, clock)
+    @inbounds Δθ̂ᵥ[i, j, 1] = surface_layer_Δθᵥ(i, j, coef, T₀ᵢⱼ)
 end
 
 #####
@@ -290,29 +293,31 @@ function update!(fs::FilteredSurfaceScalar, field_3d, grid, Δt)
 end
 
 """
-    initialize_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid)
+    initialize_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, clock)
 
 Set the filtered surface-layer virtual potential temperature difference to its current
 value, formed by the bulk coefficient `coef` from the first-cell state and the surface
-temperature `T₀`.
+temperature `T₀` (a number, a field on the bottom, or a function of the wall coordinates
+and time, evaluated at `clock.time`).
 """
-function initialize_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid)
+function initialize_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, clock)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
-    launch!(arch, grid, kp, _initialize_filtered_Δθᵥ!, fv.Δθᵥ, coef, T₀)
+    launch!(arch, grid, kp, _initialize_filtered_Δθᵥ!, fv.Δθᵥ, coef, T₀, grid, clock)
     return nothing
 end
 
 """
-    update_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, Δt)
+    update_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, clock, Δt)
 
-Apply the exponential filter to the surface-layer virtual potential temperature difference.
+Apply the exponential filter to the surface-layer virtual potential temperature difference,
+with the surface temperature `T₀` evaluated at `clock.time`.
 """
-function update_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, Δt)
+function update_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, clock, Δt)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     ϵ = Δt / fv.filter_timescale
-    launch!(arch, grid, kp, _update_filtered_Δθᵥ!, fv.Δθᵥ, coef, T₀, ϵ)
+    launch!(arch, grid, kp, _update_filtered_Δθᵥ!, fv.Δθᵥ, coef, T₀, grid, clock, ϵ)
     return nothing
 end
 

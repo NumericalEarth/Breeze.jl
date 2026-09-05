@@ -2,8 +2,9 @@
 ##### BulkDragFunction for momentum fluxes
 #####
 
-struct BulkDragFunction{D, C, G, T, FV, P, TC}
+struct BulkDragFunction{D, S, C, G, T, FV, P, TC}
     direction :: D
+    side :: S                  # Set during materialization (nothing pre-materialize)
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
@@ -16,7 +17,7 @@ end
     BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0,
                        surface_temperature=nothing, filtered_velocities=nothing)
 
-Create a bulk drag function for computing surface momentum fluxes using bulk aerodynamic
+Create a bulk drag function for computing wall momentum fluxes using bulk aerodynamic
 formulas. The momentum flux is computed in the same form as the scalar bulk fluxes,
 
 ```math
@@ -24,11 +25,16 @@ Jᵘ = - ρ₀ Cᴰ |U| u
 ```
 
 where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is the wind speed
-(with gustiness to prevent singularities at low wind), `u` is the velocity component
-at the first cell face, and `ρ₀` is the surface density computed from the surface
-pressure and surface temperature. Monin–Obukhov similarity is a profile law for `u`
-(not `ρu`), so using `u` here keeps the formulation consistent with the similarity
+tangential to the wall (with gustiness to prevent singularities at low wind), `u` is the
+velocity component at the first cell face, and `ρ₀` is the surface density computed from
+the surface pressure and surface temperature. Monin–Obukhov similarity is a profile law
+for `u` (not `ρu`), so using `u` here keeps the formulation consistent with the similarity
 theory underlying `Cᴰ`.
+
+The drag may be placed on any of the six boundaries of a bounded domain, on either of the
+two momentum components tangential to that wall: `ρu` and `ρv` on the bottom and top,
+`ρv` and `ρw` on the west and east, `ρu` and `ρw` on the south and north. The sign above
+is for the bottom; on every wall the drag removes tangential momentum from the domain.
 
 When a [`FilteredSurfaceVelocities`](@ref) is supplied via `filtered_velocities`,
 *every* field entering the formula — the wind speed `|U|`, the velocity `u`, and the
@@ -39,7 +45,8 @@ velocity is used to mitigate log-layer mismatch in wall-modeled large-eddy
 simulations, where the spurious correlation between the instantaneous friction
 velocity and matching-velocity fluctuations otherwise biases the surface stress
 ([Nishizawa & Kitamura (2018)](@cite NishizawaKitamura2018);
-[Shin, Yang & Howland (2025)](@cite ShinYangHowland2025)).
+[Shin, Yang & Howland (2025)](@cite ShinYangHowland2025)). Filtering is supported
+on the bottom boundary only.
 
 # Monin–Obukhov consistency
 
@@ -60,15 +67,18 @@ for `CompressibleDynamics`, which has no equivalent reference profile — pass
 
 # Keyword Arguments
 
-- `direction`: The direction of the momentum component (`XDirection()` or `YDirection()`).
-               If `nothing`, the direction is inferred from the field location during
-               boundary condition regularization.
+- `direction`: The direction of the momentum component (`XDirection()`, `YDirection()`,
+               or `ZDirection()`). If `nothing`, the direction is inferred from the field
+               location during boundary condition regularization.
 - `coefficient`: The drag coefficient (default: `1e-3`). Can be a constant or a
   [`PolynomialCoefficient`](@ref) for wind and stability-dependent transfer coefficients.
 - `gustiness`: Minimum wind speed to prevent singularities when winds are calm (default: `0`)
 - `surface_temperature`: Surface temperature, used to compute `ρ₀` and required when
   using `PolynomialCoefficient` with stability correction. Can be a `Field`,
-  `Function`, or `Number`. (default: `nothing`)
+  `Function`, or `Number`. A function takes the non-`Flat` coordinates of the wall followed
+  by the time, as for Oceananigans boundary conditions: `(x, y, t)` on the bottom and top,
+  `(y, z, t)` on the west and east, `(x, z, t)` on the south and north.
+  (default: `nothing`)
 - `filtered_velocities`: A [`FilteredSurfaceVelocities`](@ref) for temporally filtered
   wind speed, near-surface velocity, and `θᵥ` in the bulk formula. If `nothing`
   (default), instantaneous fields are used.
@@ -78,15 +88,18 @@ function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0,
     if coefficient isa PolynomialCoefficient && isnothing(surface_temperature)
         throw(ArgumentError("surface_temperature keyword argument must be provided when configuring BulkDrag with a PolynomialCoefficient"))
     end
-    return BulkDragFunction(direction, coefficient, gustiness, surface_temperature,
+    return BulkDragFunction(direction, nothing, coefficient, gustiness, surface_temperature,
                             filtered_velocities, nothing, nothing)
 end
 
 const XDirectionBulkDragFunction = BulkDragFunction{<:XDirection}
 const YDirectionBulkDragFunction = BulkDragFunction{<:YDirection}
+const ZDirectionBulkDragFunction = BulkDragFunction{<:ZDirection}
+const DirectedBulkDragFunction = Union{XDirectionBulkDragFunction, YDirectionBulkDragFunction, ZDirectionBulkDragFunction}
 
 Adapt.adapt_structure(to, df::BulkDragFunction) =
     BulkDragFunction(Adapt.adapt(to, df.direction),
+                     Adapt.adapt(to, df.side),
                      Adapt.adapt(to, df.coefficient),
                      Adapt.adapt(to, df.gustiness),
                      Adapt.adapt(to, df.surface_temperature),
@@ -107,30 +120,22 @@ end
 #####
 ##### getbc for BulkDragFunction
 #####
-##### Jᵘ = -ρ₀ Cᴰ Ũ u, mirroring the scalar bulk flux form. `u` is read from the
+##### Jᵘ = ∓ ρ₀ Cᴰ Ũ u, mirroring the scalar bulk flux form, with the sign that removes
+##### tangential momentum through the wall (see `outward_flux_sign`). `u` is read from the
 ##### filtered field at the appropriate face location when filtering is enabled.
 #####
 
-@inline function OceananigansBC.getbc(df::XDirectionBulkDragFunction, i::Integer, j::Integer,
+@inline function OceananigansBC.getbc(df::BulkDragFunction, ℓ::Integer, m::Integer,
                                       grid::AbstractGrid, clock, fields)
-    T₀ = surface_value(i, j, df.surface_temperature)
-    u  = near_surface_velocity(i, j, fields, df.filtered_velocities, XDirection())
-    U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields, df.filtered_velocities)
+    side = df.side
+    i, j, k = near_wall_indices(ℓ, m, grid, side)
+    T₀ = wall_value(ℓ, m, grid, side, df.surface_temperature, clock)
+    u  = near_wall_velocity(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
+    U² = wall_wind_speed²(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
     Ũ  = sqrt(U² + df.gustiness^2)
     ρ₀ = surface_density(df.surface_pressure, T₀, df.thermodynamic_constants)
-    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀, df.filtered_velocities)
-    return - ρ₀ * Cᴰ * Ũ * u
-end
-
-@inline function OceananigansBC.getbc(df::YDirectionBulkDragFunction, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    T₀ = surface_value(i, j, df.surface_temperature)
-    v  = near_surface_velocity(i, j, fields, df.filtered_velocities, YDirection())
-    U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields, df.filtered_velocities)
-    Ũ  = sqrt(U² + df.gustiness^2)
-    ρ₀ = surface_density(df.surface_pressure, T₀, df.thermodynamic_constants)
-    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀, df.filtered_velocities)
-    return - ρ₀ * Cᴰ * Ũ * v
+    Cᴰ = bulk_coefficient(i, j, k, grid, side, df.coefficient, fields, T₀, df.filtered_velocities)
+    return outward_flux_sign(side) * ρ₀ * Cᴰ * Ũ * u
 end
 
 const BulkDragBoundaryCondition = BoundaryCondition{<:Flux, <:BulkDragFunction}
@@ -142,7 +147,7 @@ const BulkDragBoundaryCondition = BoundaryCondition{<:Flux, <:BulkDragFunction}
 """
     BulkDrag(; direction=nothing, coefficient=1e-3, gustiness=0, surface_temperature=nothing)
 
-Create a `FluxBoundaryCondition` for surface momentum drag.
+Create a `FluxBoundaryCondition` for wall momentum drag, on any of the six boundaries.
 
 See [`BulkDragFunction`](@ref) for details.
 
@@ -176,7 +181,23 @@ Oceananigans.FieldBoundaryConditions, with boundary conditions
 └── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
 ```
 
-and similarly for `YDirection` for v.
+and similarly for `YDirection` for v. The same condition may be placed on the walls of a
+closed box; the direction is inferred from the momentum component it is attached to:
+
+```jldoctest bulkdrag
+drag = BulkDrag(coefficient=1e-3)
+ρv_bcs = FieldBoundaryConditions(west=drag, east=drag, bottom=drag, top=drag)
+
+# output
+Oceananigans.FieldBoundaryConditions, with boundary conditions
+├── west: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
+├── east: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
+├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
+├── top: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
+└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+```
 """
 function BulkDrag(; kwargs...)
     df = BulkDragFunction(; kwargs...)

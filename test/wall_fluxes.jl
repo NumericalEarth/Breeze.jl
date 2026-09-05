@@ -1,0 +1,393 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
+using Breeze
+using Adapt: Adapt
+using Breeze.BoundaryConditions: BulkDrag, BulkSensibleHeatFlux, BulkVaporFlux, FilteredSurfaceVelocities, PolynomialCoefficient,
+                                 BulkDragFunction, BulkSensibleHeatFluxFunction, BulkVaporFluxFunction,
+                                 near_wall_indices, outward_flux_sign, wall_distance, wall_height,
+                                 tangential_speed², bulk_coefficient, neutral_coefficient_10m
+using Breeze.Thermodynamics: surface_density, saturation_specific_humidity, PlanarLiquidSurface,
+                             potential_temperature_from_temperature
+using GPUArraysCore: @allowscalar
+using Oceananigans
+using Oceananigans: prognostic_fields
+using Oceananigans.BoundaryConditions: getbc, West, East, South, North, Bottom, Top
+using Oceananigans.Grids: xnode, ynode, znode
+using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
+using Oceananigans.Models: boundary_condition_args
+using Test
+
+#####
+##### Bulk fluxes on the six walls of a closed box
+#####
+##### Every wall carries drag on its two tangential momentum components, a sensible heat
+##### flux, and a vapor flux. The wall temperatures and humidities differ from wall to
+##### wall so that the sign and the near-wall state of each flux are unambiguous.
+#####
+
+const sides = (:west, :east, :south, :north, :bottom, :top)
+
+# Fluxes point along the positive coordinate direction: a flux out of the domain is
+# negative on a left wall and positive on a right wall.
+outward_sign(side) = side ∈ (:west, :south, :bottom) ? -1 : 1
+
+# Oceananigans evaluates a boundary condition with the two indices tangential to it.
+# Return those indices and the near-wall cell for a probe at (i, j, k).
+tangential_indices(side, i, j, k) = side ∈ (:bottom, :top) ? (i, j) : side ∈ (:west, :east) ? (j, k) : (i, k)
+near_wall_cell(side, i, j, k, Nx, Ny, Nz) = (side === :west   ? (1, j, k) :
+                                             side === :east   ? (Nx, j, k) :
+                                             side === :south  ? (i, 1, k) :
+                                             side === :north  ? (i, Ny, k) :
+                                             side === :bottom ? (i, j, 1) : (i, j, Nz))
+
+wall_temperatures(FT) = (west=FT(295), east=FT(285), south=FT(287), north=FT(288), bottom=FT(299), top=FT(280))
+wall_humidities(FT)   = (west=FT(0.78), east=FT(0.78), south=FT(0.78), north=FT(0.78), bottom=FT(1), top=FT(1))
+
+function closed_box_model(FT; formulation=:LiquidIcePotentialTemperature, coefficient=FT(2e-3), Nx=4, Ny=4, Nz=4)
+    grid = RectilinearGrid(default_arch, FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z=(0, 1),
+                           topology=(Bounded, Bounded, Bounded))
+
+    T₀ = wall_temperatures(FT)
+    ℋ₀ = wall_humidities(FT)
+    drag(side) = BulkDrag(; coefficient, surface_temperature=T₀[side])
+    heat(side) = BulkSensibleHeatFlux(; coefficient, surface_temperature=T₀[side])
+    vapor(side) = BulkVaporFlux(; coefficient, surface_temperature=T₀[side], surface_relative_humidity=ℋ₀[side])
+
+    # Drag acts on the two momentum components tangential to each wall
+    ρu_bcs = FieldBoundaryConditions(south=drag(:south), north=drag(:north), bottom=drag(:bottom), top=drag(:top))
+    ρv_bcs = FieldBoundaryConditions(west=drag(:west), east=drag(:east), bottom=drag(:bottom), top=drag(:top))
+    ρw_bcs = FieldBoundaryConditions(west=drag(:west), east=drag(:east), south=drag(:south), north=drag(:north))
+    heat_bcs = FieldBoundaryConditions(; (side => heat(side) for side in sides)...)
+    ρqᵛ_bcs = FieldBoundaryConditions(; (side => vapor(side) for side in sides)...)
+
+    thermodynamic_name = formulation === :StaticEnergy ? :ρs : :ρθ
+    names = (:ρu, :ρv, :ρw, thermodynamic_name, :ρqᵛ)
+    boundary_conditions = NamedTuple{names}((ρu_bcs, ρv_bcs, ρw_bcs, heat_bcs, ρqᵛ_bcs))
+
+    return AtmosphereModel(grid; formulation, boundary_conditions, advection=WENO(order=3))
+end
+
+momentum_field(model, side, name) = getproperty(model.momentum, name)
+wall_bc(field, side) = getproperty(field.boundary_conditions, side)
+
+# Evaluate a materialized boundary condition the way Oceananigans does, at the probe (i, j, k)
+function evaluate_bc(model, field, side, i, j, k)
+    bc = wall_bc(field, side)
+    a, b = tangential_indices(side, i, j, k)
+    clock, fields = boundary_condition_args(model)
+    return @allowscalar getbc(bc, a, b, model.grid, clock, fields)
+end
+
+@testset "Bulk fluxes on the six walls [$(FT)]" for FT in test_float_types()
+    old_FT = Oceananigans.defaults.FloatType
+    Oceananigans.defaults.FloatType = FT
+
+    T₀ = wall_temperatures(FT)
+    ℋ₀ = wall_humidities(FT)
+    C = FT(2e-3)
+    θᵢ, ℋᵢ = FT(290), FT(0.5)
+    u, v, w = FT(1), FT(2), FT(3)
+
+    # Tangential wind speed of a uniform flow on each wall
+    tangential_speed = (west=√(v^2 + w^2), east=√(v^2 + w^2), south=√(u^2 + w^2), north=√(u^2 + w^2),
+                        bottom=√(u^2 + v^2), top=√(u^2 + v^2))
+
+    @testset "Drag, heat, and vapor fluxes match the bulk formulas on every wall" begin
+        model = closed_box_model(FT; coefficient=C)
+        grid = model.grid
+        Nx, Ny, Nz = size(grid)
+        constants = model.thermodynamic_constants
+        set!(model; θ=θᵢ, ℋ=ℋᵢ, u, v, w, enforce_mass_conservation=false)
+
+        probe = (2, 3, 2)
+        clock, fields = boundary_condition_args(model)
+
+        for side in sides
+            i, j, k = near_wall_cell(side, probe..., Nx, Ny, Nz)
+            Ũ = tangential_speed[side]
+            sign = outward_sign(side)
+
+            # Momentum: drag on the two tangential components, with the sign that removes momentum
+            tangential_momentum = side ∈ (:bottom, :top) ? ((:ρu, u), (:ρv, v)) :
+                                  side ∈ (:west, :east)  ? ((:ρv, v), (:ρw, w)) : ((:ρu, u), (:ρw, w))
+            for (name, uₜ) in tangential_momentum
+                field = getproperty(model.momentum, name)
+                bc = wall_bc(field, side)
+                ρ₀ = surface_density(bc.condition.surface_pressure, T₀[side], constants)
+                expected = sign * ρ₀ * C * Ũ * uₜ
+                @test evaluate_bc(model, field, side, probe...) ≈ expected rtol=10 * eps(FT)
+            end
+
+            # Sensible heat: into the domain when the wall is warmer than the air
+            bc = wall_bc(prognostic_fields(model).ρθ, side)
+            p₀ = bc.condition.surface_pressure
+            pˢᵗ = bc.condition.standard_pressure
+            ρ₀ = surface_density(p₀, T₀[side], constants)
+            θ₀ = potential_temperature_from_temperature(T₀[side], p₀, pˢᵗ, constants)
+            θ = @allowscalar fields.θ[i, j, k]
+            expected = sign * ρ₀ * C * Ũ * (θ - θ₀)
+            @test evaluate_bc(model, prognostic_fields(model).ρθ, side, probe...) ≈ expected rtol=100 * eps(FT)
+
+            # Vapor: into the domain when the wall is moister than the air
+            bc = wall_bc(prognostic_fields(model).ρqᵛ, side)
+            ρ₀ = surface_density(bc.condition.surface_pressure, T₀[side], constants)
+            qᵛ₀ = ℋ₀[side] * saturation_specific_humidity(T₀[side], ρ₀, constants, PlanarLiquidSurface())
+            qᵛ = @allowscalar fields.qᵛ[i, j, k]
+            expected = sign * ρ₀ * C * Ũ * (qᵛ - qᵛ₀)
+            @test evaluate_bc(model, prognostic_fields(model).ρqᵛ, side, probe...) ≈ expected rtol=100 * eps(FT)
+        end
+    end
+
+    @testset "Static energy flux includes the potential energy of the wall" begin
+        model = closed_box_model(FT; formulation=:StaticEnergy, coefficient=C)
+        grid = model.grid
+        Nx, Ny, Nz = size(grid)
+        constants = model.thermodynamic_constants
+        set!(model; θ=θᵢ, ℋ=ℋᵢ, u, v, w, enforce_mass_conservation=false)
+        clock, fields = boundary_condition_args(model)
+        g = constants.gravitational_acceleration
+        cᵖᵈ = constants.dry_air.heat_capacity
+        cᵖᵛ = constants.vapor.heat_capacity
+
+        probe = (2, 3, 2)
+        wall_height = (west=nothing, east=nothing, south=nothing, north=nothing, bottom=FT(0), top=FT(1))
+        for side in sides
+            i, j, k = near_wall_cell(side, probe..., Nx, Ny, Nz)
+            z₀ = isnothing(wall_height[side]) ? (@allowscalar znode(i, j, k, grid, Center(), Center(), Center())) : wall_height[side]
+            bc = wall_bc(prognostic_fields(model).ρs, side)
+            ρ₀ = surface_density(bc.condition.surface_pressure, T₀[side], constants)
+            qᵛ = @allowscalar fields.qᵛ[i, j, k]
+            cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ
+            s₀ = cᵖᵐ * T₀[side] + g * z₀
+            s = @allowscalar fields.s[i, j, k]
+            expected = outward_sign(side) * ρ₀ * C * tangential_speed[side] * (s - s₀)
+            @test evaluate_bc(model, prognostic_fields(model).ρs, side, probe...) ≈ expected rtol=100 * eps(FT)
+        end
+    end
+
+    @testset "Wall fluxes heat and moisten the near-wall cells with the right sign" begin
+        model = closed_box_model(FT; coefficient=C)
+        Nx, Ny, Nz = size(model.grid)
+        # At rest the drag vanishes, so give the walls a gust to move heat and vapor. The gust
+        # and the time step are large enough that the change in a near-wall cell is well above
+        # the roundoff of the cell's ρθ in single precision.
+        gusty(side) = BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T₀[side])
+        gusty_vapor(side) = BulkVaporFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T₀[side],
+                                          surface_relative_humidity=ℋ₀[side])
+        boundary_conditions = (; ρθ = FieldBoundaryConditions(; (side => gusty(side) for side in sides)...),
+                                 ρqᵛ = FieldBoundaryConditions(; (side => gusty_vapor(side) for side in sides)...))
+        model = AtmosphereModel(model.grid; boundary_conditions, advection=WENO(order=3))
+        set!(model; θ=θᵢ, ℋ=FT(0.3))
+        ρθ⁰ = Array(interior(prognostic_fields(model).ρθ))
+        ρqᵛ⁰ = Array(interior(prognostic_fields(model).ρqᵛ))
+        time_step!(model, FT(0.05))
+        Δρθ = Array(interior(prognostic_fields(model).ρθ)) .- ρθ⁰
+        Δρqᵛ = Array(interior(prognostic_fields(model).ρqᵛ)) .- ρqᵛ⁰
+
+        # The air is at 290 K; walls warmer than that heat the near-wall cell, colder ones cool it
+        warmer(side) = T₀[side] > θᵢ
+        near(A, side) = (side === :west  ? A[1, 2:Ny-1, 2:Nz-1] : side === :east  ? A[Nx, 2:Ny-1, 2:Nz-1] :
+                         side === :south ? A[2:Nx-1, 1, 2:Nz-1] : side === :north ? A[2:Nx-1, Ny, 2:Nz-1] :
+                         side === :bottom ? A[2:Nx-1, 2:Ny-1, 1] : A[2:Nx-1, 2:Ny-1, Nz])
+        for side in sides
+            @test all(warmer(side) ? near(Δρθ, side) .> 0 : near(Δρθ, side) .< 0)
+        end
+        # Cells away from every wall change far less than the near-wall cells: only the pressure
+        # projection of the near-wall buoyancy reaches them within one step
+        interior_change = maximum(abs, Δρθ[2:Nx-1, 2:Ny-1, 2:Nz-1])
+        wall_change = minimum(abs, Δρθ[2:Nx-1, 2:Ny-1, 1])
+        @test interior_change < 1e-3 * wall_change
+
+        # Air at 30 % relative humidity and 290 K holds less vapor than the air in contact with any of
+        # the walls (saturated at 280 and 299 K, 78 % at 285–295 K), so every wall moistens it
+        for side in sides
+            @test all(near(Δρqᵛ, side) .> 0)
+        end
+    end
+
+    @testset "Wall state given as a function of the wall coordinates and time" begin
+        grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 1), y=(0, 1), z=(0, 1),
+                               topology=(Bounded, Bounded, Bounded))
+        T_west(y, z, t) = 290 + 4y + 2z + t / 10
+        T_bottom(x, y, t) = 290 + 3x + y - t / 10
+        T_north(x, z, t) = 291 + x - 2z + t / 20
+        ρθ_bcs = FieldBoundaryConditions(west=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_west),
+                                         bottom=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_bottom),
+                                         north=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_north))
+        model = AtmosphereModel(grid; boundary_conditions=(; ρθ=ρθ_bcs), advection=WENO(order=3))
+        set!(model; θ=θᵢ, ℋ=ℋᵢ)
+        constants = model.thermodynamic_constants
+
+        for t in (FT(0), FT(30))
+            model.clock.time = t
+            clock, fields = boundary_condition_args(model)
+            for (side, T_wall, i, j, k) in ((:west, T_west, 1, 3, 2), (:bottom, T_bottom, 2, 3, 1), (:north, T_north, 2, 4, 3))
+                bc = wall_bc(prognostic_fields(model).ρθ, side)
+                x, y, z = @allowscalar (xnode(i, j, k, grid, Center(), Center(), Center()),
+                                        ynode(i, j, k, grid, Center(), Center(), Center()),
+                                        znode(i, j, k, grid, Center(), Center(), Center()))
+                T₀ⁱʲᵏ = side === :west ? T_wall(y, z, t) : side === :bottom ? T_wall(x, y, t) : T_wall(x, z, t)
+                p₀ = bc.condition.surface_pressure
+                ρ₀ = surface_density(p₀, T₀ⁱʲᵏ, constants)
+                θ₀ = potential_temperature_from_temperature(T₀ⁱʲᵏ, p₀, bc.condition.standard_pressure, constants)
+                θ = @allowscalar fields.θ[i, j, k]
+                expected = outward_sign(side) * ρ₀ * C * FT(1) * (θ - θ₀)   # at rest: Ũ = gustiness
+                @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, j, k) ≈ expected rtol=100 * eps(FT)
+            end
+        end
+    end
+
+    @testset "Wall state function on a grid with a Flat direction" begin
+        grid = RectilinearGrid(default_arch, FT; size=(4, 4), x=(0, 1), z=(0, 1), topology=(Periodic, Flat, Bounded))
+        T_bottom(x, t) = 295 + 3x - t / 20     # the Flat y coordinate is dropped
+        T_top(x, t) = 280 + x + t / 10
+        ρθ_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_bottom),
+                                         top=BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_top))
+        model = AtmosphereModel(grid; boundary_conditions=(; ρθ=ρθ_bcs), advection=WENO(order=3))
+        set!(model; θ=θᵢ, ℋ=ℋᵢ)
+        model.clock.time = FT(20)
+        clock, fields = boundary_condition_args(model)
+        constants = model.thermodynamic_constants
+        for (side, T_wall, i, k) in ((:bottom, x -> T_bottom(x, FT(20)), 2, 1), (:top, x -> T_top(x, FT(20)), 3, 4))
+            bc = wall_bc(prognostic_fields(model).ρθ, side)
+            x = @allowscalar xnode(i, 1, k, grid, Center(), Center(), Center())
+            T₀ⁱᵏ = T_wall(x)
+            p₀ = bc.condition.surface_pressure
+            ρ₀ = surface_density(p₀, T₀ⁱᵏ, constants)
+            θ₀ = potential_temperature_from_temperature(T₀ⁱᵏ, p₀, bc.condition.standard_pressure, constants)
+            θ = @allowscalar fields.θ[i, 1, k]
+            expected = outward_sign(side) * ρ₀ * C * FT(1) * (θ - θ₀)
+            @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, 1, k) ≈ expected rtol=100 * eps(FT)
+        end
+    end
+
+    @testset "Wall state given as a field on the wall" begin
+        grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 1), y=(0, 1), z=(0, 1),
+                               topology=(Bounded, Bounded, Bounded))
+        T_fields = (west = Field{Nothing, Center, Center}(grid),
+                    south = Field{Center, Nothing, Center}(grid),
+                    top = Field{Center, Center, Nothing}(grid))
+        set!(T_fields.west, (y, z) -> 290 + 2y + z)
+        set!(T_fields.south, (x, z) -> 291 + x - z)
+        set!(T_fields.top, (x, y) -> 280 + x + y)
+        ρθ_bcs = FieldBoundaryConditions(; (side => BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T_fields[side])
+                                             for side in keys(T_fields))...)
+        model = AtmosphereModel(grid; boundary_conditions=(; ρθ=ρθ_bcs), advection=WENO(order=3))
+        set!(model; θ=θᵢ, ℋ=ℋᵢ)
+        clock, fields = boundary_condition_args(model)
+        constants = model.thermodynamic_constants
+
+        for (side, i, j, k) in ((:west, 1, 2, 3), (:south, 3, 1, 2), (:top, 2, 3, 4))
+            bc = wall_bc(prognostic_fields(model).ρθ, side)
+            T₀ⁱʲᵏ = @allowscalar (side === :west ? T_fields.west[1, j, k] :
+                                  side === :south ? T_fields.south[i, 1, k] : T_fields.top[i, j, 1])
+            p₀ = bc.condition.surface_pressure
+            ρ₀ = surface_density(p₀, T₀ⁱʲᵏ, constants)
+            θ₀ = potential_temperature_from_temperature(T₀ⁱʲᵏ, p₀, bc.condition.standard_pressure, constants)
+            θ = @allowscalar fields.θ[i, j, k]
+            expected = outward_sign(side) * ρ₀ * C * FT(1) * (θ - θ₀)
+            @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, j, k) ≈ expected rtol=100 * eps(FT)
+        end
+    end
+
+    @testset "Stability-dependent coefficient on every wall" begin
+        # Monin–Obukhov enhancement where the wall layer is unstable (a floor warmer than the air,
+        # a ceiling colder than the air), and the neutral value on the vertical walls
+        coefficient = PolynomialCoefficient(FT; roughness_length=FT(1e-3))
+        model = closed_box_model(FT; coefficient)
+        set!(model; θ=θᵢ, ℋ=ℋᵢ)
+        grid = model.grid
+        clock, fields = boundary_condition_args(model)
+        T₀ = wall_temperatures(FT)
+        walls = (west=West(), east=East(), south=South(), north=North(), bottom=Bottom(), top=Top())
+        Nx, Ny, Nz = size(grid)
+        for side in sides
+            bc = wall_bc(prognostic_fields(model).ρθ, side)
+            coef = bc.condition.coefficient
+            i, j, k = near_wall_cell(side, 2, 2, 2, Nx, Ny, Nz)
+            wall = walls[side]
+            Cᵂ = @allowscalar bulk_coefficient(i, j, k, grid, wall, coef, fields, T₀[side], nothing)
+            # the neutral log-law value at the wall distance of the near-wall cell
+            U = @allowscalar sqrt(tangential_speed²(i, j, k, grid, wall, nothing, fields))
+            h = @allowscalar wall_distance(i, j, k, grid, wall)
+            ℓ = coef.roughness_length
+            Cⁿ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed) * (log(10 / ℓ) / log(h / ℓ))^2
+            @test isfinite(Cᵂ) && Cᵂ > 0
+            if side ∈ (:bottom, :top)
+                @test Cᵂ > Cⁿ          # unstable on both plates
+            else
+                @test Cᵂ ≈ Cⁿ          # neutral on the vertical walls
+            end
+        end
+    end
+
+    @testset "Face helpers" begin
+        grid = RectilinearGrid(default_arch, FT; size=(4, 5, 6), x=(0, 1), y=(0, 1), z=(0, 1),
+                               topology=(Bounded, Bounded, Bounded))
+        @test near_wall_indices(2, 3, grid, West())   == (1, 2, 3)
+        @test near_wall_indices(2, 3, grid, East())   == (4, 2, 3)
+        @test near_wall_indices(2, 3, grid, South())  == (2, 1, 3)
+        @test near_wall_indices(2, 3, grid, North())  == (2, 5, 3)
+        @test near_wall_indices(2, 3, grid, Bottom()) == (2, 3, 1)
+        @test near_wall_indices(2, 3, grid, Top())    == (2, 3, 6)
+        @test outward_flux_sign(West()) == outward_flux_sign(South()) == outward_flux_sign(Bottom()) == -1
+        @test outward_flux_sign(East()) == outward_flux_sign(North()) == outward_flux_sign(Top()) == 1
+        Δx, Δy, Δz = FT(1/4), FT(1/5), FT(1/6)
+        @test wall_distance(1, 1, 1, grid, Bottom()) ≈ Δz / 2
+        @test wall_distance(1, 1, 6, grid, Top())    ≈ Δz / 2
+        @test wall_distance(1, 1, 1, grid, West())   ≈ Δx / 2
+        @test wall_distance(4, 1, 1, grid, East())   ≈ Δx / 2
+        @test wall_distance(1, 1, 1, grid, South())  ≈ Δy / 2
+        @test wall_distance(1, 5, 1, grid, North())  ≈ Δy / 2
+        @test wall_height(1, 1, 1, grid, Bottom()) ≈ 0
+        @test wall_height(1, 1, 6, grid, Top())    ≈ 1
+        @test wall_height(1, 1, 3, grid, West())   ≈ FT(2.5) * Δz
+    end
+
+    @testset "Summaries, adaptation, and immersed boundaries" begin
+        model = closed_box_model(FT)
+        for (field, name, T) in ((prognostic_fields(model).ρθ, "BulkSensibleHeatFluxFunction", BulkSensibleHeatFluxFunction),
+                                 (prognostic_fields(model).ρqᵛ, "BulkVaporFluxFunction", BulkVaporFluxFunction),
+                                 (model.momentum.ρu, "BulkDragFunction", BulkDragFunction))
+            bc = wall_bc(field, :bottom)
+            @test occursin(name, summary(bc.condition))
+            @test Adapt.adapt(Array, bc.condition) isa T
+        end
+        # Bulk fluxes are not supported on immersed boundaries
+        grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 1), y=(0, 1), z=(0, 1),
+                               topology=(Bounded, Bounded, Bounded))
+        immersed_grid = ImmersedBoundaryGrid(grid, GridFittedBottom(FT(0.1)))
+        ρθ_bcs = FieldBoundaryConditions(immersed=BulkSensibleHeatFlux(; coefficient=C, surface_temperature=FT(300)))
+        @test_throws ArgumentError AtmosphereModel(immersed_grid; boundary_conditions=(; ρθ=ρθ_bcs))
+    end
+
+    @testset "Static energy with a filtered surface state" begin
+        grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 1), y=(0, 1), z=(0, 1),
+                               topology=(Bounded, Bounded, Bounded))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=FT(10))
+        coefficient = PolynomialCoefficient(FT; roughness_length=FT(1e-3))
+        ρs_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(; coefficient, gustiness=FT(1), surface_temperature=FT(299),
+                                                                       filtered_velocities=fv))
+        model = AtmosphereModel(grid; formulation=:StaticEnergy, boundary_conditions=(; ρs=ρs_bcs), advection=WENO(order=3))
+        set!(model; θ=θᵢ, ℋ=ℋᵢ)
+        @test isfinite(evaluate_bc(model, prognostic_fields(model).ρs, :bottom, 2, 2, 1))
+        time_step!(model, FT(0.1))    # updates the filtered surface state
+        @test isfinite(evaluate_bc(model, prognostic_fields(model).ρs, :bottom, 2, 2, 1))
+    end
+
+    @testset "Invalid wall configurations are rejected" begin
+        grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 1), y=(0, 1), z=(0, 1),
+                               topology=(Bounded, Bounded, Bounded))
+        # Drag on the momentum component normal to the wall
+        ρu_bcs = FieldBoundaryConditions(west=BulkDrag(; coefficient=C))
+        @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(; ρu=ρu_bcs))
+        ρw_bcs = FieldBoundaryConditions(top=BulkDrag(; coefficient=C))
+        @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(; ρw=ρw_bcs))
+        # Temporal filtering of the surface state is a bottom-wall feature
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=FT(10))
+        ρv_bcs = FieldBoundaryConditions(top=BulkDrag(; coefficient=C, filtered_velocities=fv))
+        @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(; ρv=ρv_bcs))
+    end
+
+    Oceananigans.defaults.FloatType = old_FT
+end
