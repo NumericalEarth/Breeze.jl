@@ -36,7 +36,7 @@ using Oceananigans.Utils: prettysummary, launch!
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant,
                              dry_air_gas_constant, density
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_pressure, pressure_anomaly,
-                                kernel_time_step
+                                kernel_time_step, SingleColumnGrid
 
 # Import microphysics interface for buoyancy computation
 using Breeze.AtmosphereModels: grid_moisture_fractions
@@ -47,6 +47,12 @@ include("anelastic_buoyancy.jl")
 
 # Define type alias after AnelasticDynamics is defined
 const AnelasticModel = AtmosphereModel{<:AnelasticDynamics}
+
+# Anelastic dynamics on a single-column grid (`topology = (Flat, Flat, Bounded)`), possibly an
+# ensemble of independent columns (`ColumnEnsembleSize`). The grid is the 5th `AtmosphereModel`
+# type parameter (`Dyn, Frm, Arc, Tst, Grd, …`). In this mode the pressure solve and the
+# vertical-velocity stepping are both omitted (`w ≡ 0`); see `anelastic_time_stepping.jl`.
+const AnelasticSingleColumnModel = AtmosphereModel{<:AnelasticDynamics, <:Any, <:Any, <:Any, <:SingleColumnGrid}
 
 include("anelastic_time_stepping.jl")
 

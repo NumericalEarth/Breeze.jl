@@ -187,8 +187,17 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
-    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
+    compute_vertical_momentum_tendency!(model, Gρw, w_args)
 
+    return nothing
+end
+
+# Compute the vertical-momentum tendency `Gρw`. Extendable so that dynamics can omit vertical-velocity
+# stepping — the anelastic single-column mode overrides this to hold `Gρw ≡ 0` (`w ≡ 0`), since the
+# anelastic mass constraint with rigid boundaries forces no resolved vertical velocity in a column.
+function compute_vertical_momentum_tendency!(model::AtmosphereModel, Gρw, w_args)
+    grid = model.grid
+    launch!(grid.architecture, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
     return nothing
 end
 
@@ -214,9 +223,14 @@ function compute_auxiliary_variables!(model)
     # Dispatch on dynamics type (computes pressure for compressible dynamics)
     compute_auxiliary_dynamics_variables!(model)
 
-    # Compute diffusivities
-    compute_closure_fields!(model.closure_fields, model.closure, model)
-    fill_halo_regions!(model.closure_fields; only_local_halos=true)
+    # Compute diffusivities. Oceananigans has no `compute_closure_fields!` for a bare array of
+    # field-less closures (a per-column ensemble of e.g. `VerticalScalarDiffusivity`, for which
+    # `closure_fields === nothing`); there is nothing to compute or fill, so skip it. Field-carrying
+    # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
+    if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
+        compute_closure_fields!(model.closure_fields, model.closure, model)
+        fill_halo_regions!(model.closure_fields; only_local_halos=true)
+    end
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 

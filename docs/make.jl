@@ -45,6 +45,7 @@ examples = [
     Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave"; build_always=true, gpu=false),
     Example("Neutral atmospheric boundary layer", "neutral_atmospheric_boundary_layer"; build_always=false, gpu=true),
     Example("Single column radiation", "single_column_radiation"; build_always=true, gpu=false),
+    Example("Single-column ensemble", "single_column_ensemble"; build_always=true, gpu=false),
     Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
     Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
     Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
@@ -218,6 +219,7 @@ makedocs(
             "Governing equations" => "dycore_equations_algorithms.md",
             "Anelastic dynamics" => "anelastic_dynamics.md",
             "Compressible dynamics" => "compressible_dynamics.md",
+            "Single column mode" => "single_column_mode.md",
             "Terrain-following coordinates" => "terrain_following_coordinates.md",
         ],
         "Appendix" => Any[

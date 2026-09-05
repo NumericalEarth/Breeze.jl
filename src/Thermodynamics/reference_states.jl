@@ -1,8 +1,8 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
-using Oceananigans.Architectures: architecture
+using Oceananigans.Architectures: architecture, on_architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 using Oceananigans.Fields: CenterField, ZeroField
-using Oceananigans.Grids: znode
+using Oceananigans.Grids: znode, topology, Flat
 using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ
 using Oceananigans.Utils: launch!
@@ -358,6 +358,21 @@ If `profile` is a `Function`, calls `profile(z)`.
 @inline surface_value(θ::Number) = θ
 surface_value(f::Function) = _nargs(f) == 1 ? f(0) : f(0, 0, 0)
 
+# A "column ensemble" grid holds many independent columns in Flat horizontal dimensions of size > 1
+# (e.g. built with `Oceananigans.Grids.ColumnEnsembleSize`). Reduced `(Nothing, Nothing, Center)`
+# fields — the memory-efficient reference profile broadcast across the horizontal — cannot be
+# constructed on such grids (Oceananigans sizes the data by topology but indexes it by the reduced
+# location). On an ordinary 3D grid or a 1×1 single column, reduced fields work as before.
+function is_column_ensemble(grid)
+    TX, TY, TZ = topology(grid)
+    Nx, Ny, Nz = size(grid)
+    return (TX === Flat && Nx > 1) || (TY === Flat && Ny > 1)
+end
+
+# Horizontal location of the reference-profile fields: reduced (`Nothing`) on ordinary grids, full
+# (`Center`) on a column-ensemble grid where reduced fields cannot be built. Returns location *types*.
+reference_horizontal_location(grid) = is_column_ensemble(grid) ? (Center, Center) : (Nothing, Nothing)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -409,9 +424,23 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
                         ice_mass_fraction = nothing)
 
     FT = eltype(grid)
-    p₀ = convert(FT, surface_pressure)
     pˢᵗ = convert(FT, standard_pressure)
-    loc = (nothing, nothing, Center())
+
+    # Heterogeneous per-column reference state: array-valued `surface_pressure` and/or
+    # `potential_temperature` give each column of a column ensemble its own adiabatic profile.
+    if surface_pressure isa AbstractArray || potential_temperature isa AbstractArray
+        return column_reference_state(grid, constants, surface_pressure, potential_temperature, pˢᵗ,
+                                      discrete_hydrostatic_balance,
+                                      vapor_mass_fraction, liquid_mass_fraction, ice_mass_fraction)
+    end
+
+    p₀ = convert(FT, surface_pressure)
+
+    # Reference profiles depend only on height. On ordinary grids they are stored as reduced
+    # (Nothing, Nothing, Center) column profiles; on a column-ensemble grid they become full
+    # CenterFields (one identical profile per column). See `is_column_ensemble`.
+    LX, LY = reference_horizontal_location(grid)
+    loc = (LX(), LY(), Center())
 
     # Moisture mass fractions: ZeroField by default, actual Field when specified
     qᵛᵣ = reference_moisture_field(vapor_mass_fraction, grid)
@@ -423,12 +452,12 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
 
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
-    ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+    ρᵣ = Field{LX, LY, Center}(grid, boundary_conditions=ρ_bcs)
     set!(ρᵣ, z -> hydrostatic_density(z, p₀, θᵣ, pˢᵗ, constants))
     fill_halo_regions!(ρᵣ)
 
     p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
-    pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
+    pᵣ = Field{LX, LY, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants))
     fill_halo_regions!(pᵣ)
 
@@ -437,11 +466,92 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
         enforce_discrete_hydrostatic_balance!(pᵣ, ρᵣ, grid, g)
     end
 
-    Tᵣ = Field{Nothing, Nothing, Center}(grid)
+    Tᵣ = Field{LX, LY, Center}(grid)
     set!(Tᵣ, z -> hydrostatic_temperature(z, p₀, θᵣ, pˢᵗ, constants))
     fill_halo_regions!(Tᵣ)
 
     return ReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
+end
+
+#####
+##### Heterogeneous (per-column) reference state
+#####
+
+# Select a column's value from a per-column parameter: a scalar is shared by all columns; a matrix
+# supplies one value per column. Kernel-safe (`@inline`, allocation-free).
+@inline column_value(x::Number, i, j) = x
+@inline column_value(x::AbstractArray, i, j) = @inbounds x[i, j]
+
+validate_column_parameter(::Number, Nx, Ny, name) = nothing
+function validate_column_parameter(x::AbstractArray, Nx, Ny, name)
+    size(x) == (Nx, Ny) ||
+        throw(ArgumentError("`$name` array must have size ($Nx, $Ny) to match the column ensemble, got $(size(x))."))
+    return nothing
+end
+
+# Bring a per-column parameter to `grid`'s architecture with element type `FT`. Scalars pass through.
+column_parameter(x::Number, FT, arch) = convert(FT, x)
+column_parameter(x::AbstractArray, FT, arch) = on_architecture(arch, FT.(x))
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct a per-column `ReferenceState` on a column-ensemble grid, where `surface_pressure` and/or
+`potential_temperature` are `(Nx, Ny)` arrays supplying one adiabatic profile per column. Scalars are
+shared across all columns. The reference *fields* (`ρᵣ`, `pᵣ`, `Tᵣ`) then vary column-by-column; the
+scalar `surface_pressure`/`potential_temperature` metadata store the first column's surface values.
+"""
+function column_reference_state(grid, constants, surface_pressure, potential_temperature, pˢᵗ,
+                                discrete_hydrostatic_balance,
+                                vapor_mass_fraction, liquid_mass_fraction, ice_mass_fraction)
+
+    FT = eltype(grid)
+    arch = architecture(grid)
+    Nx, Ny, Nz = size(grid)
+
+    is_column_ensemble(grid) ||
+        throw(ArgumentError("Array-valued `surface_pressure`/`potential_temperature` require a " *
+                            "column-ensemble grid (Flat horizontal topology with size > 1)."))
+
+    validate_column_parameter(surface_pressure, Nx, Ny, "surface_pressure")
+    validate_column_parameter(potential_temperature, Nx, Ny, "potential_temperature")
+
+    (vapor_mass_fraction === nothing && liquid_mass_fraction === nothing && ice_mass_fraction === nothing) ||
+        throw(ArgumentError("Moisture profiles are not yet supported with per-column reference states."))
+
+    discrete_hydrostatic_balance &&
+        throw(ArgumentError("`discrete_hydrostatic_balance` is not yet supported with per-column reference states."))
+
+    p₀ = column_parameter(surface_pressure, FT, arch)
+    θ₀ = column_parameter(potential_temperature, FT, arch)
+
+    ρᵣ = CenterField(grid)
+    pᵣ = CenterField(grid)
+    Tᵣ = CenterField(grid)
+
+    launch!(arch, grid, :xy, _compute_adiabatic_reference_columns!, ρᵣ, pᵣ, Tᵣ, grid, Nz, p₀, θ₀, pˢᵗ, constants)
+    fill_halo_regions!(ρᵣ)
+    fill_halo_regions!(pᵣ)
+    fill_halo_regions!(Tᵣ)
+
+    # Representative scalar surface metadata (first column); the per-column detail lives in the fields.
+    p₀₁₁ = @allowscalar convert(FT, column_value(p₀, 1, 1))
+    θ₀₁₁ = @allowscalar convert(FT, column_value(θ₀, 1, 1))
+    Z = reference_moisture_field(nothing, grid)
+
+    return ReferenceState(p₀₁₁, θ₀₁₁, pˢᵗ, pᵣ, ρᵣ, Tᵣ, Z, Z, Z)
+end
+
+@kernel function _compute_adiabatic_reference_columns!(ρᵣ, pᵣ, Tᵣ, grid, Nz, p₀, θ₀, pˢᵗ, constants)
+    i, j = @index(Global, NTuple)
+    p₀ᵢⱼ = column_value(p₀, i, j)
+    θ₀ᵢⱼ = column_value(θ₀, i, j)
+    @inbounds for k in 1:Nz
+        z = znode(i, j, k, grid, Center(), Center(), Center())
+        ρᵣ[i, j, k] = adiabatic_hydrostatic_density(z, p₀ᵢⱼ, θ₀ᵢⱼ, pˢᵗ, constants)
+        pᵣ[i, j, k] = adiabatic_hydrostatic_pressure(z, p₀ᵢⱼ, θ₀ᵢⱼ, pˢᵗ, constants)
+        Tᵣ[i, j, k] = hydrostatic_temperature(z, p₀ᵢⱼ, θ₀ᵢⱼ, pˢᵗ, constants)
+    end
 end
 
 #####

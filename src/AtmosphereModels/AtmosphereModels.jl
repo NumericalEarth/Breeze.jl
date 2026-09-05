@@ -107,6 +107,9 @@ export
     # Advective timescale for the time-step wizard
     CellAdvectionTimescale,
 
+    # Single column / column-ensemble mode
+    SingleColumnGrid,
+
     # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
@@ -142,6 +145,9 @@ include("forcing_interface.jl")
 include("microphysics_interface.jl")
 include("dynamics_interface.jl")
 include("formulation_interface.jl")
+
+# Grid alias for single-column / column-ensemble mode (used for dispatch below).
+include("single_column.jl")
 
 #####
 ##### AtmosphereModel core

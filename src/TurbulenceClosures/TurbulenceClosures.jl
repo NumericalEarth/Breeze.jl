@@ -18,6 +18,7 @@ using Oceananigans.Operators:
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
+    getclosure,
     _viscous_flux_ux, _viscous_flux_uy, _viscous_flux_uz,
     _viscous_flux_vx, _viscous_flux_vy, _viscous_flux_vz,
     _viscous_flux_wx, _viscous_flux_wy, _viscous_flux_wz,
@@ -25,7 +26,7 @@ using Oceananigans.TurbulenceClosures:
 
 using Oceananigans.TimeSteppers: time_discretization
 
-using ..AtmosphereModels: AtmosphereModels
+using ..AtmosphereModels: AtmosphereModels, SingleColumnGrid
 
 #####
 ##### Fallbacks for closure = nothing
@@ -99,5 +100,37 @@ end
         + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶠ, 𝒯_wy, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
         + δzᵃᵃᶠ(i, j, k, grid, Az_qᶜᶜᶜ, 𝒯_wz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
 end
+
+#####
+##### Per-column closures for single-column / column-ensemble mode
+#####
+#
+# On a `SingleColumnGrid` the turbulence closure may be an *array* of closures — one per column — so
+# that an ensemble of independent columns can each use different mixing parameters (e.g. for closure
+# calibration). Each flux-divergence kernel selects its column's closure with `getclosure` (a matrix
+# is indexed `[i, j]`, a vector `[i]`) and forwards to the single-closure method, mirroring
+# `Oceananigans.HydrostaticFreeSurfaceModel`'s single-column mode. Note that Breeze's flux signatures
+# carry the reference density `ρ` between `grid` and `closure`, so the array sits at that same slot.
+
+const ClosureArray = AbstractArray{<:AbstractTurbulenceClosure}
+
+@inline AtmosphereModels.∂ⱼ_𝒯₁ⱼ(i, j, k, grid::SingleColumnGrid, ρ, closures::ClosureArray, args...) =
+    AtmosphereModels.∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρ, getclosure(i, j, closures), args...)
+
+@inline AtmosphereModels.∂ⱼ_𝒯₂ⱼ(i, j, k, grid::SingleColumnGrid, ρ, closures::ClosureArray, args...) =
+    AtmosphereModels.∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρ, getclosure(i, j, closures), args...)
+
+# Included for completeness/symmetry; the anelastic single-column mode never launches the
+# z-momentum tendency (`w ≡ 0`), so this is dormant there.
+@inline AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid::SingleColumnGrid, ρ, closures::ClosureArray, args...) =
+    AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρ, getclosure(i, j, closures), args...)
+
+@inline AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid::SingleColumnGrid, ρ, closures::ClosureArray, args...) =
+    AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρ, getclosure(i, j, closures), args...)
+
+# The constructor's `with_tracers` and each stage's `compute_closure_fields!` (both Oceananigans
+# functions) have no method for a bare array of closures. Rather than pirate them, Breeze handles the
+# array case in its own code: the constructor maps `with_tracers` over the array, and the
+# `compute_closure_fields!` call site skips field-less closure arrays (see AtmosphereModels).
 
 end # module TurbulenceClosures
