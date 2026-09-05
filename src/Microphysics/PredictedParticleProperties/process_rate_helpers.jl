@@ -159,10 +159,21 @@ $(TYPEDSIGNATURES)
 Cloud droplets per unit cloud mass, ``Nᶜˡ / (ρ qᶜˡ) = nᶜˡ / qᶜˡ`` [1/kg]. `Nᶜˡ` is
 volumetric [1/m³] and `qᶜˡ` is a mass fraction [kg/kg], so this is the factor that
 turns a cloud mass rate [kg/kg/s] into its companion number rate [1/kg/s], keeping
-the two consistent in mean droplet mass. Zero where there is no cloud water.
+the two consistent in mean droplet mass.
+
+Zero where the cloud mass is below `minimum_mass_mixing_ratio`, the threshold under
+which the scheme treats cloud water as absent. The threshold matters: advection and
+sedimentation leave positive but negligible `qᶜˡ` (down to subnormal values) in
+cloud-free cells while the DSD diagnosis floors `Nᶜˡ` above zero, so the unguarded
+quotient overflows to `Inf` and any companion rate of zero then yields `Inf × 0 = NaN`.
+The guard also avoids evaluating the division at all for absent cloud.
 """
-@inline cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ) =
-    safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(typeof(qᶜˡ)))
+@inline function cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, minimum_mass_mixing_ratio)
+    FT = typeof(qᶜˡ)
+    absent = qᶜˡ < minimum_mass_mixing_ratio
+    qᶜˡ_safe = ifelse(absent, one(FT), qᶜˡ)
+    return ifelse(absent, zero(FT), Nᶜˡ / (ρ * qᶜˡ_safe))
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -188,10 +199,8 @@ in mean droplet mass.
                                ccn_activation_mass / seed_drop_mass,
                                ccn_activation_number)
     autoconversion_number = cloud_number_loss_from_autoconversion(p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
-    # Grouped as (Nᶜˡ accretion) / (ρ qᶜˡ) rather than via
-    # `cloud_number_per_cloud_mass`: the bare quotient is the larger intermediate and
-    # can overflow where this form does not.
-    collection_number = safe_divide(Nᶜˡ * accretion, ρ * qᶜˡ, zero(FT))
+    # The mass threshold keeps the quotient bounded by Nᶜˡ / (ρ qmin) and zero for absent cloud.
+    collection_number = accretion * cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, p3.minimum_mass_mixing_ratio)
     number_loss = autoconversion_number + collection_number + self_collection +
                   riming_number + freezing_number + warm_collection_number
     return activation_number - number_loss
