@@ -4,7 +4,7 @@ using Oceananigans: prognostic_fields, fields, architecture
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection, vertical_scheme,
                               implicit_vertical_velocityᶜᶜᶠ
 using Oceananigans.Operators: Azᶜᶜᶠ, δzᵃᵃᶜ, V⁻¹ᶜᶜᶜ, ℑzᵃᵃᶠ
-using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.Utils: launch!, KernelParameters, sum_of_velocities
 
 using Oceananigans.TimeSteppers: implicit_step!
 
@@ -26,6 +26,7 @@ using Breeze.AtmosphereModels:
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
     compute_dynamics_tendency!,
+    microphysical_velocities,
     specific_prognostic_moisture
 
 using Breeze.CompressibleEquations: CompressibleDynamics
@@ -227,6 +228,12 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
         # Guarded on the solver rather than on `needs_implicit_solver(advection)`; see the note in
         # ssp_runge_kutta_3.jl for why that predicate would drop the mass-flux weighting.
         if !isnothing(model.timestepper.implicit_solver)
+            # The explicit tendency advected this species with the full transport velocity —
+            # dynamical plus microphysical (terminal) — so the implicit half must split the
+            # same combined velocity, or precipitating species lose the withheld fraction of
+            # their sedimentation flux wherever the split engages (issue #914).
+            Uᵖ = microphysical_velocities(model.microphysics, model.microphysical_fields, Val(name))
+            Uᵗ = sum_of_velocities(velocities, Uᵖ)
             implicit_step!(u,
                            model.timestepper.implicit_solver,
                            model.closure,
@@ -236,7 +243,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
                            fields(model),
                            Δt_implicit,
                            implicit_step_scheme(advection),
-                           velocities,
+                           Uᵗ,
                            ρ)
         end
     end

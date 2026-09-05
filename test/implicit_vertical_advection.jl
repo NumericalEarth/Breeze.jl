@@ -711,6 +711,42 @@ import Breeze.AtmosphereModels as AM
         end
     end
 
+    #####
+    ##### Bounds-preserving WENO under AVID splits the vertical flux exactly once: the bounded
+    ##### path routes through the s-scaled explicit velocity (issue #913), so a bounded tracer
+    ##### tracks its unbounded twin wherever the limiter is inactive. Pre-fix it transported
+    ##### 1 + (1 - s) times and ran away from the twin.
+    #####
+    @testset "Bounded WENO + AVID transports once (#913)" begin
+        b_grid = RectilinearGrid(default_arch; size=(32, 16), halo=(5, 5),
+                                 x=(-10kilometers, 10kilometers), z=(0, 4kilometers),
+                                 topology=(Periodic, Flat, Bounded))
+        b_aiva(; bounds=nothing) = isnothing(bounds) ?
+            WENO(FT; time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=FT(1//100))) :
+            WENO(FT; bounds, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=FT(1//100)))
+        b_model = AtmosphereModel(b_grid;
+                                  dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                                                  reference_potential_temperature=300),
+                                  timestepper = :AcousticRungeKutta3,
+                                  tracers = (:ρa, :ρb),
+                                  momentum_advection = b_aiva(),
+                                  scalar_advection = (; ρθ=b_aiva(), ρa=b_aiva(), ρb=b_aiva(bounds=(0, 1))))
+        ρ₀(x, z) = adiabatic_hydrostatic_density(z, 101325.0, 300.0, 100000.0, constants)
+        θᵇ(x, z) = 300 + 5 * exp(-(x^2 + (z - 1000)^2) / (2 * 600^2))
+        cᵇ(x, z) = exp(-(x^2 + (z - 1500)^2) / (2 * 400^2)) / 2
+        set!(b_model; ρ=ρ₀, θ=θᵇ, u=10, ρa=cᵇ, ρb=cᵇ)
+        for _ in 1:30
+            time_step!(b_model, 5)
+        end
+        zb_c = znodes(b_grid, Center())
+        rise(q) = sum(sum(Array(interior(q)), dims=1)[1, 1, :] .* zb_c) / sum(interior(q))
+        za, zb = rise(b_model.tracers.ρa), rise(b_model.tracers.ρb)
+        # The twins agree to a few percent of the displacement (limiter-inactive interior);
+        # the pre-fix double transport gave ~2x separation.
+        @test abs(zb - za) < 0.05 * max(abs(za - 1500), 50)
+        @test minimum(interior(b_model.tracers.ρb)) > -1e-3
+    end
+
     @testset "Advective timescale drops the vertical term under AIVA" begin
         Δx = 100 / 4
         Δz = 1000 / 16
