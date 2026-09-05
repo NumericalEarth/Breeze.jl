@@ -194,8 +194,14 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     compute_flux_bc_tendencies!(model)
     compute_closure_tendencies!(model)
 
+    # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless
+    # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
+    # substep inside the loop, dispatched on the scheme type.
+    add_implicit_advection_tendency!(model)
+
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
-    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰)
+    θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
+    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection)
 
     # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
     # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit

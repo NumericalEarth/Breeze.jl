@@ -29,6 +29,9 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture
 using Oceananigans.Models: boundary_condition_args
+using Oceananigans: fields
+using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
+using Oceananigans.TimeSteppers: implicit_step!
 using Oceananigans.Grids: ZDirection, rnode, znode
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
 using Oceananigans.Operators:
@@ -1397,11 +1400,33 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Advance the implicit half of the IMEX vertical-advection split for the thermodynamic
+perturbation over one substep: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★`, solved on the θ predictor
+between Step B and Step C so Step C's pressure gradient and Step D's recovery act on a
+transport-consistent predictor. Coefficients read the substepper's frozen stage-entry
+advecting state; the base-state part of the implicit half rides `Gˢρθ`
+(see `add_implicit_advection_tendency!`). A no-op unless the scheme's vertical
+discretization is adaptive-implicit (dispatch below).
+"""
+implicit_advection_substep!(model, substepper, advection, Δτ) = nothing
+
+function implicit_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ)
+    w = substepper.vertical_velocity_cache
+    ρᵈ = substepper.density_cache
+    implicit_step!(substepper.density_potential_temperature_predictor,
+                   model.timestepper.implicit_solver, nothing, nothing, nothing,
+                   model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
 Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on
 `substepper.substep_distribution`.
 """
-function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ)
+function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection = nothing)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -1491,6 +1516,11 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
                 substepper.linearization_potential_temperature)
         fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
+
+        # Implicit half of the IMEX vertical-advection split for the thermodynamic
+        # perturbation, applied to the predictor between Step B and Step C so the pressure
+        # solve and recovery substitution see a transport-consistent ρθ′★ (issue #897).
+        implicit_advection_substep!(model, substepper, advection, Δτ)
 
         launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
                 _build_vertical_rhs!,
