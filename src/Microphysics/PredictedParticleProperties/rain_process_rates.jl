@@ -289,11 +289,11 @@ Rain ventilation integral and the slope quantities that go with it:
 
 ```math
 I_{evap}(λ^r) = \\frac{\\mathbb{C}_{\\mathrm{vent},1}}{(λ^r)^2}
-              + \\mathbb{C}_{\\mathrm{vent},2} \\, \\frac{Sc^{1/3}}{\\sqrt{ν}} \\, I_{VD}(λ^r)
+              + \\mathbb{C}_{\\mathrm{vent},2} \\, \\frac{Sc^{1/3}}{\\sqrt{ν}} \\, I_{\\mathbb{W}D}(λ^r)
 ```
 
-`I_VD` comes from the tabulated `table`, which stores
-``∫ D \\sqrt{V D} e^{-λ^r D} dD`` with neither `ν` nor the Schmidt number baked
+``I_{\\mathbb{W}D}`` comes from the tabulated `table`, which stores
+``∫ D \\sqrt{\\mathbb{W} D} e^{-λ^r D} dD`` with neither `ν` nor the Schmidt number baked
 in, so both T,P-dependent factors are applied here. ``\\mathbb{C}_{\\mathrm{vent},1}`` and
 ``\\mathbb{C}_{\\mathrm{vent},2}`` come from `ventilation`, a [`RainVentilation`](@ref), for the same reason:
 neither is baked into the table, so both remain configurable at runtime. Returns

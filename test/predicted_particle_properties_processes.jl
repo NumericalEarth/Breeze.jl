@@ -614,22 +614,24 @@ end
         expected_mass_velocity = a_cn * (cloud.μᶜˡ + 5) * (cloud.μᶜˡ + 4) / cloud.λᶜˡ^2
         expected_number_velocity = a_cn * (cloud.μᶜˡ + 2) * (cloud.μᶜˡ + 1) / cloud.λᶜˡ^2
 
-        @test cache.wᶜˡ ≈ expected_mass_velocity rtol=FT(1e-12)
-        @test cache.wᶜˡₙ ≈ expected_number_velocity rtol=FT(1e-12)
-        @test cache.wᶜˡ > cache.wᶜˡₙ
+        @test cache.𝕎ᶜˡ ≈ expected_mass_velocity rtol=FT(1e-12)
+        @test cache.𝕎ᶜˡₙ ≈ expected_number_velocity rtol=FT(1e-12)
+        @test cache.𝕎ᶜˡ > cache.𝕎ᶜˡₙ
 
         # The Stokes prefactor scales with the *model's* gravitational acceleration
         # rather than a hardcoded 9.81, so doubling g doubles both fall speeds.
         heavy = ThermodynamicConstants(FT; gravitational_acceleration = 2 * constants.gravitational_acceleration)
-        vᶜ = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν, cloud.μᶜˡ, cloud.λᶜˡ, constants)
-        vᶜ_heavy = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν, cloud.μᶜˡ, cloud.λᶜˡ, heavy)
-        @test vᶜ.mass_weighted ≈ expected_mass_velocity rtol=FT(1e-12)
-        @test vᶜ_heavy.mass_weighted ≈ 2 * vᶜ.mass_weighted rtol=FT(1e-12)
-        @test vᶜ_heavy.number_weighted ≈ 2 * vᶜ.number_weighted rtol=FT(1e-12)
+        cloud_speeds = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν,
+                                                     cloud.μᶜˡ, cloud.λᶜˡ, constants)
+        heavy_cloud_speeds = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν,
+                                                           cloud.μᶜˡ, cloud.λᶜˡ, heavy)
+        @test cloud_speeds.mass_weighted ≈ expected_mass_velocity rtol=FT(1e-12)
+        @test heavy_cloud_speeds.mass_weighted ≈ 2 * cloud_speeds.mass_weighted rtol=FT(1e-12)
+        @test heavy_cloud_speeds.number_weighted ≈ 2 * cloud_speeds.number_weighted rtol=FT(1e-12)
 
         # `rime_density` forms the Cober-List impact parameter from the same
         # mass-weighted Stokes velocity, so its rime density depends on the ice fall
-        # speed only through |vᵢ - vᶜ.mass_weighted| and is symmetric about it. A
+        # speed only through |𝕎ⁱ - 𝕎ᶜˡ| and is symmetric about it. A
         # second gravitational acceleration in either function would shift that centre.
         T_rime = p3.process_rates.freezing_temperature - FT(5)
         transport_rime = air_transport_properties(T_rime, P, constants)
@@ -1713,7 +1715,7 @@ end
         qcl = FT(1e-3)
         cloud_rim = FT(2e-7)
         T = FT(263.15)
-        vᵢ = FT(1.0)
+        𝕎ⁱ = FT(1.0)
         ρ = FT(1.0)
         P = FT(90000.0)
         transport = air_transport_properties(T, P, constants)
@@ -1731,13 +1733,13 @@ end
         )
         λᶜˡ = clamp(unbounded_cloud_slope, (μᶜˡ + 1) * FT(2.5e4),
                     (μᶜˡ + 1) * FT(1e6))
-        ρ_rime = rime_density(p3, qcl, cloud_rim, T, vᵢ, ρ, constants,
+        ρ_rime = rime_density(p3, qcl, cloud_rim, T, 𝕎ⁱ, ρ, constants,
                               transport, μᶜˡ, λᶜˡ)
         a_cn = constants.gravitational_acceleration * ρ_water / (FT(18) * η)
-        Vt_qc = a_cn * (μᶜˡ + 5) * (μᶜˡ + 4) / λᶜˡ^2
+        𝕎ᶜˡ = a_cn * (μᶜˡ + 5) * (μᶜˡ + 4) / λᶜˡ^2
         Dᶜˡ = (μᶜˡ + 4) / λᶜˡ
         inverse_supercooling = inv(min(FT(-0.001), T - parameters.freezing_temperature))
-        Ri = clamp(-(FT(0.5e6) * Dᶜˡ) * abs(vᵢ - Vt_qc) * inverse_supercooling, FT(1), FT(12))
+        Ri = clamp(-(FT(0.5e6) * Dᶜˡ) * abs(𝕎ⁱ - 𝕎ᶜˡ) * inverse_supercooling, FT(1), FT(12))
         expected = ifelse(
             Ri <= FT(8),
             (FT(0.051) + FT(0.114) * Ri - FT(0.0055) * Ri^2) * FT(1000),
@@ -1749,11 +1751,11 @@ end
 
         T_warm = FT(278.15)
         transport_warm = air_transport_properties(T_warm, P, constants)
-        ρ_warm = rime_density(p3, qcl, cloud_rim, T_warm, vᵢ, ρ, constants,
+        ρ_warm = rime_density(p3, qcl, cloud_rim, T_warm, 𝕎ⁱ, ρ, constants,
                               transport_warm, μᶜˡ, λᶜˡ)
         @test ρ_warm == 400
 
-        ρ_no_cloud = rime_density(p3, qcl, FT(0), T, vᵢ, ρ, constants,
+        ρ_no_cloud = rime_density(p3, qcl, FT(0), T, 𝕎ⁱ, ρ, constants,
                                   transport, μᶜˡ, λᶜˡ)
         @test ρ_no_cloud == 400
     end

@@ -14,7 +14,7 @@ is used.
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
 - `cloud_rim`: Cloud-riming mass tendency [kg/kg/s]
 - `T`: Temperature [K]
-- `vᵢ`: Ice particle fall speed [m/s]
+- `𝕎ⁱ`: Ice particle fall speed [m/s]
 - `ρ`: Air density [kg/m³]
 - `constants`: Thermodynamic constants
 - `transport`: Air transport properties at `(T, P)`
@@ -22,7 +22,7 @@ is used.
 # Returns
 - Rime density [kg/m³]
 """
-@inline function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
+@inline function rime_density(p3, qᶜˡ, cloud_rim, T, 𝕎ⁱ, ρ, constants, transport,
                       μᶜˡ, λᶜˡ)
     FT = typeof(T)
     parameters = p3.process_rates
@@ -45,15 +45,15 @@ is used.
     # The droplet impact speed is the mass-weighted Stokes velocity of the cloud
     # DSD, shared with `cloud_terminal_velocities`.
     stokes_prefactor = cloud_stokes_prefactor(g, ρᴸ, η, parameters.floors)
-    cloud_terminal_velocity = cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
+    𝕎ᶜˡ = cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
     cloud_mean_diameter = (μᶜˡ + 4) / λᶜˡ
 
-    # Riming impact parameter Ri = c Dᶜ |vᵢ - Vt_qc| / (T₀ - T): large drops striking
+    # Riming impact parameter Ri = c Dᶜ |𝕎ⁱ - 𝕎ᶜˡ| / (T₀ - T): large drops striking
     # fast at weak supercooling pack dense rime. The supercooling floor keeps Ri
     # finite as T → T₀, and the clamp holds Ri inside the range the fit below covers.
     inverse_supercooling = inv(min(-parameters.minimum_riming_supercooling, T - T₀))
     Ri = clamp(-(ℂʳⁱᵐᵉ₅ * cloud_mean_diameter) *
-               abs(vᵢ - cloud_terminal_velocity) * inverse_supercooling,
+               abs(𝕎ⁱ - 𝕎ᶜˡ) * inverse_supercooling,
                ℂʳⁱᵐᵉ₆, ℂʳⁱᵐᵉ₇)
 
     # Cober-List rime-density fit (see the docstring for the citation): a quadratic

@@ -8,24 +8,24 @@
 ##### Three integrals are tabulated as functions of log10(λ_r):
 #####
 #####  1. Mass-weighted terminal velocity:
-#####       V_mass = ∫ V(D) m(D) exp(-λ_r D) dD / ∫ m(D) exp(-λ_r D) dD  [m/s]
+#####       𝕎_mass = ∫ 𝕎(D) m(D) exp(-λ_r D) dD / ∫ m(D) exp(-λ_r D) dD  [m/s]
 #####
 #####  2. Number-weighted terminal velocity:
-#####       V_num = ∫ V(D) exp(-λ_r D) dD / ∫ exp(-λ_r D) dD              [m/s]
+#####       𝕎_num = ∫ 𝕎(D) exp(-λ_r D) dD / ∫ exp(-λ_r D) dD              [m/s]
 #####
 #####  3. Evaporation velocity-diameter integral:
-#####       I_VD = ∫ D √(V(D)×D) exp(-λ_r D) dD                           [m^(5/2)]
-#####       where V(D) is the piecewise Gunn-Kinzer/Beard fall speed.
+#####       I_𝕎D = ∫ D √(𝕎(D)×D) exp(-λ_r D) dD                           [m^(5/2)]
+#####       where 𝕎(D) is the piecewise Gunn-Kinzer/Beard fall speed.
 #####       ν is NOT baked in; 1/√ν is applied at runtime.
 #####       Full evaporation integral assembled at runtime:
-#####       I_evap = ℂᵛᵉⁿᵗ₁/λ² + ℂᵛᵉⁿᵗ₂ × Sc^(1/3) / √ν × I_VD
+#####       I_evap = ℂᵛᵉⁿᵗ₁/λ² + ℂᵛᵉⁿᵗ₂ × Sc^(1/3) / √ν × I_𝕎D
 #####
 ##### The integration uses the same domain transformation as ice quadrature:
 #####   D = (scale/λ) * (1+x) / (1-x+ε),  x ∈ [-1, 1]
 ##### with a scale of 10 (10 exponential decay lengths covers >99.99% of the integral).
 #####
 ##### Both the tabulated and analytical rain paths use the same 4-regime
-##### Gunn-Kinzer/Beard piecewise V(D) formula (`rain_fall_speed` below).
+##### Gunn-Kinzer/Beard piecewise 𝕎(D) formula (`rain_fall_speed` below).
 ##### It captures Stokes drag below the first transition diameter (D ≈ 134 μm by
 ##### default) and the plateau above the third (D ≈ 3.5 mm); both are `RainFallSpeed`
 ##### keywords.
@@ -66,10 +66,10 @@ tables alike.
 @inline function rain_fall_speed(D, ρ_correction, fall_speed)
     FT = typeof(D)
 
-    ℂⱽ₁ = fall_speed.branch_velocity_scales
-    ℂⱽ₂ = fall_speed.branch_mass_exponents
-    ℂⱽ₃ = fall_speed.transition_diameters
-    ℂⱽ₄ = fall_speed.plateau_velocity
+    ℂᶠᵃˡˡ₁ = fall_speed.branch_velocity_scales
+    ℂᶠᵃˡˡ₂ = fall_speed.branch_mass_exponents
+    ℂᶠᵃˡˡ₃ = fall_speed.transition_diameters
+    ℂᶠᵃˡˡ₄ = fall_speed.plateau_velocity
 
     mass = (FT(π)/6) * FT(GUNN_KINZER_WATER_DENSITY) * D^3   # [kg]
     mass_ratio = mass * 1000                                 # m(D) / (1 g) [-]
@@ -78,17 +78,17 @@ tables alike.
     # parameterized law costs one generic `^` instead of one per branch — the specialized
     # `cbrt` expressions it replaces are not available once the exponents are configurable.
     # Nested `ifelse` keeps the selection branch-free.
-    is_small = D <= FT(ℂⱽ₃[1])
-    is_medium = D < FT(ℂⱽ₃[2])
-    branch_scale = ifelse(is_small, FT(ℂⱽ₁[1]), ifelse(is_medium, FT(ℂⱽ₁[2]), FT(ℂⱽ₁[3])))
-    branch_exponent = ifelse(is_small, FT(ℂⱽ₂[1]), ifelse(is_medium, FT(ℂⱽ₂[2]), FT(ℂⱽ₂[3])))
+    is_small = D <= FT(ℂᶠᵃˡˡ₃[1])
+    is_medium = D < FT(ℂᶠᵃˡˡ₃[2])
+    branch_scale = ifelse(is_small, FT(ℂᶠᵃˡˡ₁[1]), ifelse(is_medium, FT(ℂᶠᵃˡˡ₁[2]), FT(ℂᶠᵃˡˡ₁[3])))
+    branch_exponent = ifelse(is_small, FT(ℂᶠᵃˡˡ₂[1]), ifelse(is_medium, FT(ℂᶠᵃˡˡ₂[2]), FT(ℂᶠᵃˡˡ₂[3])))
 
-    V = branch_scale * mass_ratio^branch_exponent
+    𝕎 = branch_scale * mass_ratio^branch_exponent
 
     # Above the largest boundary the power law is replaced by the terminal-speed plateau.
-    V = ifelse(D < FT(ℂⱽ₃[3]), V, FT(ℂⱽ₄))
+    𝕎 = ifelse(D < FT(ℂᶠᵃˡˡ₃[3]), 𝕎, FT(ℂᶠᵃˡˡ₄))
 
-    return V * ρ_correction
+    return 𝕎 * ρ_correction
 end
 
 #####
@@ -101,12 +101,12 @@ end
 Callable evaluator for the mass-weighted rain terminal velocity:
 
 ```math
-V_{\\mathrm{mass}}(\\lambda_r) =
-    \\frac{\\int_0^\\infty V(D)\\, m(D)\\, e^{-\\lambda_r D}\\, dD}
+\\mathbb{W}_{\\mathrm{mass}}(\\lambda_r) =
+    \\frac{\\int_0^\\infty \\mathbb{W}(D)\\, m(D)\\, e^{-\\lambda_r D}\\, dD}
          {\\int_0^\\infty m(D)\\, e^{-\\lambda_r D}\\, dD}
 ```
 
-where `m(D) = (π/6) ρ_w D³` (liquid sphere, ρ_w = 997 kg/m³) and `V(D)` is the
+where `m(D) = (π/6) ρ_w D³` (liquid sphere, ρ_w = 997 kg/m³) and ``\\mathbb{W}(D)`` is the
 piecewise Gunn-Kinzer/Beard rain fall speed from [`rain_fall_speed`](@ref) at
 reference density (no density correction applied here; apply at call site).
 
@@ -117,7 +117,7 @@ struct RainMassWeightedVelocity{N, W, F, FS}
     nodes :: N       # pre-computed Chebyshev-Gauss nodes on [-1, 1]
     weights :: W     # pre-computed Chebyshev-Gauss weights
     floors :: F      # numerical floors, carried because tabulation precedes the scheme
-    fall_speed :: FS # RainFallSpeed defining the V(D) that is integrated
+    fall_speed :: FS # RainFallSpeed defining the 𝕎(D) that is integrated
 end
 
 """
@@ -140,7 +140,7 @@ $(TYPEDSIGNATURES)
 Velocity moment ratio of an exponential rain PSD on the Chebyshev-Gauss nodes,
 
 ```math
-\\frac{\\int_0^\\infty V(D) \\, g(D) \\, e^{-λ^r D} \\, dD}
+\\frac{\\int_0^\\infty \\mathbb{W}(D) \\, g(D) \\, e^{-λ^r D} \\, dD}
       {\\int_0^\\infty g(D) \\, e^{-λ^r D} \\, dD}
 ```
 
@@ -148,7 +148,7 @@ where `diameter_weight` supplies ``g(D)``: `identity_weight` for the
 number-weighted velocity, `cubed_weight` for the mass-weighted one (the constant
 spherical-water mass factor cancels between numerator and denominator).
 
-`V` is the piecewise Gunn-Kinzer/Beard fall speed configured by `fall_speed` at
+``\\mathbb{W}`` is the piecewise Gunn-Kinzer/Beard fall speed configured by `fall_speed` at
 reference density; apply `(ρ₀/ρ)^0.54` at the call site. The floor on the denominator is
 a divide-by-zero guard on that same integral; a machine-epsilon floor would instead
 suppress valid `Float32` velocities.
@@ -169,11 +169,11 @@ suppress valid `Float32` velocities.
         D = transform_to_diameter(x, λʳ)
         J = jacobian_diameter_transform(x, λʳ)
 
-        V = rain_fall_speed(D, ρ_correction, fall_speed)
+        𝕎 = rain_fall_speed(D, ρ_correction, fall_speed)
         g = diameter_weight(D)
         psd = exp(-λʳ * D)
 
-        weighted_velocity_integral += w * V * g * psd * J
+        weighted_velocity_integral += w * 𝕎 * g * psd * J
         weighted_integral          += w * g * psd * J
     end
 
@@ -208,8 +208,8 @@ Apply `(ρ₀/ρ)^0.54` at the call site if needed.
 Callable evaluator for the number-weighted rain terminal velocity:
 
 ```math
-V_{\\mathrm{num}}(\\lambda_r) =
-    \\frac{\\int_0^\\infty V(D)\\, e^{-\\lambda_r D}\\, dD}
+\\mathbb{W}_{\\mathrm{num}}(\\lambda_r) =
+    \\frac{\\int_0^\\infty \\mathbb{W}(D)\\, e^{-\\lambda_r D}\\, dD}
          {\\int_0^\\infty e^{-\\lambda_r D}\\, dD}
 ```
 
@@ -219,7 +219,7 @@ struct RainNumberWeightedVelocity{N, W, F, FS}
     nodes :: N       # pre-computed Chebyshev-Gauss nodes on [-1, 1]
     weights :: W     # pre-computed Chebyshev-Gauss weights
     floors :: F      # numerical floors, carried because tabulation precedes the scheme
-    fall_speed :: FS # RainFallSpeed defining the V(D) that is integrated
+    fall_speed :: FS # RainFallSpeed defining the 𝕎(D) that is integrated
 end
 
 """
@@ -259,11 +259,11 @@ Callable evaluator for the velocity-diameter part of the rain evaporation
 ventilation integral:
 
 ```math
-I_{\\mathrm{VD}}(\\lambda_r) =
-    \\int_0^\\infty D\\, \\sqrt{V(D) \\times D}\\, e^{-\\lambda_r D}\\, dD
+I_{\\mathbb{W}D}(\\lambda_r) =
+    \\int_0^\\infty D\\, \\sqrt{\\mathbb{W}(D) \\times D}\\, e^{-\\lambda_r D}\\, dD
 ```
 
-where `V(D)` is the piecewise Gunn-Kinzer/Beard rain fall speed, configured by
+where ``\\mathbb{W}(D)`` is the piecewise Gunn-Kinzer/Beard rain fall speed, configured by
 `fall_speed`, at reference density. The kinematic viscosity `ν` is **not** baked into the
 table; `1/√ν` is applied at runtime from T,P-dependent transport properties.
 
@@ -271,7 +271,7 @@ The full evaporation ventilation integral is assembled at runtime:
 
 ```math
 I_{\\mathrm{evap}} = \\frac{\\mathbb{C}_{\\mathrm{vent},1}}{\\lambda_r^2}
-    + \\mathbb{C}_{\\mathrm{vent},2}\\, \\frac{\\mathrm{Sc}^{1/3}}{\\sqrt{\\nu}}\\, I_{\\mathrm{VD}}
+    + \\mathbb{C}_{\\mathrm{vent},2}\\, \\frac{\\mathrm{Sc}^{1/3}}{\\sqrt{\\nu}}\\, I_{\\mathbb{W}D}
 ```
 
 where `Sc = ν / Dᵛ` is the Schmidt number and `ν` is the T,P-dependent kinematic
@@ -280,7 +280,7 @@ viscosity. The ventilation coefficients ``\\mathbb{C}_{\\mathrm{vent},1}`` and
 [`RainVentilation`](@ref) — the defaults are the standard values for falling
 drops tabulated by
 [Pruppacher and Klett (2010)](@cite pruppacher2010microphysics). They deliberately do
-**not** enter this table, which stores only `I_VD`; both are applied at runtime by
+**not** enter this table, which stores only ``I_{\\mathbb{W}D}``; both are applied at runtime by
 [`rain_ventilation_integral`](@ref). The constant term
 ``\\mathbb{C}_{\\mathrm{vent},1} / λ_r²`` is the analytical result of
 ``\\mathbb{C}_{\\mathrm{vent},1} ∫ D \\exp(-λD) \\, \\mathrm{d}D``.
@@ -297,7 +297,7 @@ where A+B is the thermodynamic resistance factor.
 struct RainVelocityDiameterIntegral{N, W, FS}
     nodes :: N       # pre-computed Chebyshev-Gauss nodes on [-1, 1]
     weights :: W     # pre-computed Chebyshev-Gauss weights
-    fall_speed :: FS # RainFallSpeed defining the V(D) that is integrated
+    fall_speed :: FS # RainFallSpeed defining the 𝕎(D) that is integrated
 end
 
 """
@@ -316,7 +316,8 @@ end
 """
     (e::RainVelocityDiameterIntegral)(log10_slope)
 
-Evaluate `I_VD(λ_r)` = ∫ D √(V(D)×D) exp(-λ_r D) dD at the given `log10(λ_r)`.
+Evaluate ``I_{\\mathbb{W}D}(λ_r) = ∫ D √{\\mathbb{W}(D)D} \\exp(-λ_r D) \\, \\mathrm{d}D``
+at the given `log10(λ_r)`.
 
 Returns the velocity-diameter integral in [m^(5/2)]. The `1/√ν`, constant
 (``\\mathbb{C}_{\\mathrm{vent},1}``),
@@ -337,11 +338,11 @@ and Schmidt number (Sc^(1/3)) contributions are applied at runtime.
 
         # Use the piecewise Gunn-Kinzer/Beard fall speed.
         # ν is NOT baked in; 1/√ν applied at runtime from T,P-dependent transport.
-        V = rain_fall_speed(D, one(FT), e.fall_speed)
-        VD_sqrt = sqrt(max(V * D, zero(FT)))
+        𝕎 = rain_fall_speed(D, one(FT), e.fall_speed)
+        𝕎D_sqrt = sqrt(max(𝕎 * D, zero(FT)))
         psd = exp(-λʳ * D)
 
-        result += w * D * VD_sqrt * psd * J
+        result += w * D * 𝕎D_sqrt * psd * J
     end
 
     return ifelse(isfinite(result), result, zero(FT))

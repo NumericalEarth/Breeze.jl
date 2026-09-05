@@ -20,7 +20,8 @@ rather than multiple discrete ice categories.
 
 This implementation is based on the following P3 papers:
 
-1. **Morrison & Milbrandt (2015a)** - Original P3: m(D), A(D), V(D), process rates
+1. **Morrison & Milbrandt (2015a)** - Original P3: ``m(D)``, ``A(D)``,
+   ``\\mathbb{W}(D)``, process rates
    [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization)
 
 2. **Morrison et al. (2015b)** - Part II: Case study validation

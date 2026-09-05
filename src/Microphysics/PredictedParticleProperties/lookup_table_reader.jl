@@ -243,7 +243,7 @@ function tabulate_rain_from_quadrature(rain::RainDrops, arch=CPU(),
                                        quadrature_points::Int = 128,
                                        floors = NumericalFloors(FT))
 
-    # All three evaluators integrate the *same* configured V(D), so a custom fall-speed
+    # All three evaluators integrate the *same* configured 𝕎(D), so a custom fall-speed
     # law reaches the mass-weighted velocity, the number-weighted velocity, and the
     # evaporation velocity-diameter table alike.
     fall_speed = convert(RainFallSpeed{FT}, rain.fall_speed)

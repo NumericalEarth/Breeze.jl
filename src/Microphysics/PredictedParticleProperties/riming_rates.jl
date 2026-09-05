@@ -12,9 +12,9 @@ over the ice particle size distribution.
 
 The collection rate is:
 ```math
-\\frac{dq^{cl}}{dt} = -E^{ci} q^{cl} ρ n^i ⟨A V⟩
+\\frac{dq^{cl}}{dt} = -E^{ci} q^{cl} ρ n^i ⟨A \\mathbb{W}⟩
 ```
-where ⟨A V⟩ is the PSD-averaged product of projected area and terminal
+where ``⟨A \\mathbb{W}⟩`` is the PSD-averaged product of projected area and terminal
 velocity, approximated using the mean-mass diameter with a correction
 factor for the exponential PSD.
 
@@ -62,11 +62,11 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
              (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 
-    # PSD-integrated cloud-water collection kernel ⟨A×V⟩ from lookup table
-    # ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
+    # PSD-integrated cloud-water collection kernel ⟨A×𝕎⟩ from lookup table
+    # ∫ 𝕎(D) A(D) N'(D) dD with E=1 (geometric kernel).
     collection_kernel = evaluate_at(p3.ice.collection.cloud_collection, lookups.prep)
 
-    # Collection rate = E × qc × ni × ρ × rhofaci × ⟨A×V⟩
+    # Collection rate = E × qc × ni × ρ × rhofaci × ⟨A×𝕎⟩
     rate = ℂʳⁱᵐᵉ₁ * qᶜˡ_eff * nⁱ_eff * ρ * lookups.ρ_correction * collection_kernel
 
     return ifelse(active, rate, zero(FT))

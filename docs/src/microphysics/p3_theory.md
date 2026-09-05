@@ -295,8 +295,8 @@ collisions, so its notation is *scoped*: the symbols defined here hold throughou
 the microphysics pages and the `PredictedParticleProperties` module, and the
 appendix table holds everywhere else.
 
-The symbols this scope claims, and what each already means outside it — a dash
-where the appendix reserves nothing and the letter is P3's alone:
+The symbols this scope uses, and what each already means outside it — a dash
+marks a symbol that P3 introduces locally:
 
 | symbol | here | elsewhere in Breeze |
 | ------ | ---- | ------------------- |
@@ -306,7 +306,7 @@ where the appendix reserves nothing and the letter is P3's alone:
 | ``D``  | particle diameter [m] | — |
 | ``A``  | particle projected area [m²] | — |
 | ``C``  | particle capacitance [m] | surface transfer coefficients ``Cᴰ``, ``Cᵀ``, ``Cᵛ`` |
-| ``V``  | terminal velocity of a single particle [m/s] | — |
+| ``\mathbb{W}`` | terminal speed of a single particle, positive downward [m/s] | the same Breeze-wide sedimentation symbol |
 | ``μ``  | gamma-PSD shape parameter, never written without a species label (``μ^{cl}``, `μᶜˡ`) | a bare `μ` in kernel code is the microphysical-field tuple, and ``μ`` is *not* the dynamic viscosity here — that is ``η`` |
 
 ### Conventions
@@ -409,7 +409,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | ``α``, ``β``|      | | Mass–diameter coefficient [kg/m^β] and exponent [-] of the active regime |
 | ``A(D)``    |      | | Particle projected area [m²], ``A(D) = \mathbb{C}_{A,1} D^{\mathbb{C}_{A,2}}`` for aggregates |
 | ``C(D)``    |      | | Particle capacitance for vapor diffusion [m] |
-| ``V(D)``    |      | `RainDrops.fall_speed` | Terminal velocity [m/s]; for rain the four-regime Gunn-Kinzer/Beard law of `rain_fall_speed`, whose coefficients live in `RainFallSpeed`, and a Best-number formulation for ice |
+| ``\mathbb{W}(D)`` | `𝕎` | `RainDrops.fall_speed` | Terminal speed, positive downward [m/s]; for rain the four-regime Gunn-Kinzer/Beard law of `rain_fall_speed`, whose coefficients live in `RainFallSpeed`, and a Best-number formulation for ice |
 | ``D^{th}``  |      | | Threshold between small spherical ice and vapor-grown aggregates [m] |
 | ``D^{gr}``  |      | | Threshold between aggregates and graupel [m] |
 | ``D^{cr}``  |      | | Threshold between graupel and partially rimed ice [m] |
@@ -418,8 +418,8 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 
 | math symbol | code | property name | description |
 | ----------- | ---- | ------------- | ----------- |
-| ``V_n``, ``V_m`` | | | Number- and mass-weighted mean fall speeds [m/s] |
-| ``\mathcal{K}`` | | | A PSD-integrated collection kernel, ``\int A(D) V(D) N'(D)\,dD`` |
+| ``\mathbb{W}_n``, ``\mathbb{W}_m`` | | | Number- and mass-weighted mean fall speeds, positive downward [m/s] |
+| ``\mathcal{K}`` | | | A PSD-integrated collection kernel, ``\int A(D) \mathbb{W}(D) N'(D)\,dD`` |
 | ``E^{ci}`` | `Eᶜⁱ` | `cloud_ice_collection_efficiency` | Ice–cloud droplet collection efficiency [-] |
 | ``E^{ri}`` | `Eʳⁱ` | `rain_ice_collection_efficiency` | Ice–rain collection efficiency [-] |
 | ``E^{ii}(T)`` | | | Ice–ice aggregation efficiency [-], a function of temperature and ``F^f`` |
@@ -440,10 +440,10 @@ reach both the startup quadrature and the runtime kernels. Sixteen scalars in to
 | ``\mathbb{C}_{cl,2}`` | `ℂᶜˡ₂` | `CloudShape.relative_dispersion_intercept` | Intercept of the relative-dispersion relation [-], default ``0.2714`` |
 | ``\mathbb{C}_{cl,3}`` | `ℂᶜˡ₃` | `CloudShape.minimum_shape_parameter` | Lower bound on the diagnosed ``μ^{cl}`` [-], default ``2`` |
 | ``\mathbb{C}_{cl,4}`` | `ℂᶜˡ₄` | `CloudShape.maximum_shape_parameter` | Upper bound on the diagnosed ``μ^{cl}`` [-], default ``15`` |
-| ``\mathbb{C}_{V,1,i}`` | `ℂⱽ₁` | `RainFallSpeed.branch_velocity_scales` | Three power-law velocity scales [m/s], default ``(4579.5,\, 49.62,\, 17.32)`` |
-| ``\mathbb{C}_{V,2,i}`` | `ℂⱽ₂` | `RainFallSpeed.branch_mass_exponents` | Three mass exponents [-], default ``(2/3,\, 1/3,\, 1/6)`` |
-| ``\mathbb{C}_{V,3,i}`` | `ℂⱽ₃` | `RainFallSpeed.transition_diameters` | Ordered branch boundaries [m], default ``(134.43,\, 1511.64,\, 3477.84)`` μm |
-| ``\mathbb{C}_{V,4}`` | `ℂⱽ₄` | `RainFallSpeed.plateau_velocity` | Large-drop terminal-speed plateau [m/s], default ``9.17`` |
+| ``\mathbb{C}_{\mathrm{fall},1,i}`` | `ℂᶠᵃˡˡ₁` | `RainFallSpeed.branch_velocity_scales` | Three power-law velocity scales [m/s], default ``(4579.5,\, 49.62,\, 17.32)`` |
+| ``\mathbb{C}_{\mathrm{fall},2,i}`` | `ℂᶠᵃˡˡ₂` | `RainFallSpeed.branch_mass_exponents` | Three mass exponents [-], default ``(2/3,\, 1/3,\, 1/6)`` |
+| ``\mathbb{C}_{\mathrm{fall},3,i}`` | `ℂᶠᵃˡˡ₃` | `RainFallSpeed.transition_diameters` | Ordered branch boundaries [m], default ``(134.43,\, 1511.64,\, 3477.84)`` μm |
+| ``\mathbb{C}_{\mathrm{fall},4}`` | `ℂᶠᵃˡˡ₄` | `RainFallSpeed.plateau_velocity` | Large-drop terminal-speed plateau [m/s], default ``9.17`` |
 | ``\mathbb{C}_{\mathrm{vent},1}`` | `ℂᵛᵉⁿᵗ₁` | `RainVentilation.constant_coefficient` | Still-air rain ventilation term [-], default ``0.78`` |
 | ``\mathbb{C}_{\mathrm{vent},2}`` | `ℂᵛᵉⁿᵗ₂` | `RainVentilation.reynolds_coefficient` | Coefficient on ``\mathrm{Sc}^{1/3}\mathrm{Re}^{1/2}`` [-], default ``0.32`` |
 
@@ -476,7 +476,7 @@ equivalent seed radius, but those are not two independent parameters.
 | block | count | free parameters and descriptive source properties |
 | ----- | ----: | ------------------------------------------------- |
 | Cloud shape | 4 | ``\mathbb{C}_{cl,1:4}``: the four `CloudShape` properties in the table above |
-| Rain fall speed | 10 | ``\mathbb{C}_{V,1,1:3}``, ``\mathbb{C}_{V,2,1:3}``, ``\mathbb{C}_{V,3,1:3}``, ``\mathbb{C}_{V,4}``: the four `RainFallSpeed` properties above |
+| Rain fall speed | 10 | ``\mathbb{C}_{\mathrm{fall},1,1:3}``, ``\mathbb{C}_{\mathrm{fall},2,1:3}``, ``\mathbb{C}_{\mathrm{fall},3,1:3}``, ``\mathbb{C}_{\mathrm{fall},4}``: the four `RainFallSpeed` properties above |
 | Rain ventilation | 2 | ``\mathbb{C}_{\mathrm{vent},1:2}``: the two `RainVentilation` properties above |
 | Particle formation | 4 | ``\mathbb{C}_{\mathrm{form},1}`` = `ProcessRate.nucleated_ice_mass`; ``\mathbb{C}_{\mathrm{form},2:3}`` = activated-drop radius and activation threshold in `ProcessRate` or `AerosolActivation`, according to the active pathway; ``\mathbb{C}_{\mathrm{form},4}`` = `AerosolActivation.activation_timescale` |
 | Fall-speed density correction | 1 | ``\mathbb{C}_{\mathrm{dens},1}`` = `ProcessRate.fall_speed_density_correction_exponent` |
@@ -515,7 +515,7 @@ and passed to every rate that needs them.
 | ``η``    | `η`  | Dynamic viscosity of air [Pa s], from Sutherland's law |
 | ``ν``    | `ν`  | Kinematic viscosity of air [m²/s], ``ν = η/ρ`` |
 | ``\text{Sc}`` | | Schmidt number, ``ν / D^v`` |
-| ``\text{Re}`` | | Reynolds number, ``V D / ν`` |
+| ``\text{Re}`` | | Reynolds number, ``\mathbb{W} D / ν`` |
 | ``ρ_\text{corr}`` | | Air-density fall-speed correction, ``(ρ_s/ρ)^{0.54}``, evaluated once per cell (`p3_ice_lookups`) |
 
 Thermodynamic constants keep their appendix symbols — ``\mathcal{L}^l`` and
@@ -824,7 +824,7 @@ predicted rime fraction and rime density—no arbitrary conversion terms require
 
 ### References for This Section
 
-- [Morrison2015parameterization](@cite): Primary source for m(D), A(D), V(D) relationships
+- [Morrison2015parameterization](@cite): Primary source for ``m(D)``, ``A(D)``, and ``\mathbb{W}(D)`` relationships
 - [Morrison2015part2](@cite): Validation of particle property parameterizations
 - [pruppacher2010microphysics](@cite): Background on ice particle physics
 
@@ -1250,7 +1250,7 @@ where ``X(D)`` is the quantity of interest and ``W(D)`` is a weighting function
 Terminal velocity determines sedimentation rates. P3 computes two weighted fall
 speeds, the number- and mass-weighted forms
 (see [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2b for
-the underlying ``V(D)`` formulation; the integrated fall speeds are stored in
+the underlying ``\mathbb{W}(D)`` formulation; the integrated fall speeds are stored in
 `p3_lookupTable_1.dat-v*`).
 
 #### Terminal Velocity Formulation
@@ -1265,7 +1265,7 @@ For mixed-phase particles (with liquid fraction ``F^l``), the fall speed is line
 between the ice fall speed and the rain fall speed:
 
 ```math
-V(D) = F^l V^r(D) + (1 - F^l) V^i(D)
+\mathbb{W}(D) = F^l \mathbb{W}^r(D) + (1 - F^l) \mathbb{W}^i(D)
 ```
 
 The fall speed depends on the mass-diameter and area-diameter relationships, which vary
@@ -1277,14 +1277,14 @@ Rain does not use the Best-number formulation. `rain_fall_speed` evaluates the
 four-regime Gunn-Kinzer/Beard fit,
 
 ```math
-V^r(D) = \begin{cases}
-\mathbb{C}_{V,1,1}\, \hat{m}^{\mathbb{C}_{V,2,1}}
-    & D \le \mathbb{C}_{V,3,1} \\
-\mathbb{C}_{V,1,2}\, \hat{m}^{\mathbb{C}_{V,2,2}}
-    & \mathbb{C}_{V,3,1} < D < \mathbb{C}_{V,3,2} \\
-\mathbb{C}_{V,1,3}\, \hat{m}^{\mathbb{C}_{V,2,3}}
-    & \mathbb{C}_{V,3,2} \le D < \mathbb{C}_{V,3,3} \\
-\mathbb{C}_{V,4} & D \ge \mathbb{C}_{V,3,3}
+\mathbb{W}^r(D) = \begin{cases}
+\mathbb{C}_{\mathrm{fall},1,1}\, \hat{m}^{\mathbb{C}_{\mathrm{fall},2,1}}
+    & D \le \mathbb{C}_{\mathrm{fall},3,1} \\
+\mathbb{C}_{\mathrm{fall},1,2}\, \hat{m}^{\mathbb{C}_{\mathrm{fall},2,2}}
+    & \mathbb{C}_{\mathrm{fall},3,1} < D < \mathbb{C}_{\mathrm{fall},3,2} \\
+\mathbb{C}_{\mathrm{fall},1,3}\, \hat{m}^{\mathbb{C}_{\mathrm{fall},2,3}}
+    & \mathbb{C}_{\mathrm{fall},3,2} \le D < \mathbb{C}_{\mathrm{fall},3,3} \\
+\mathbb{C}_{\mathrm{fall},4} & D \ge \mathbb{C}_{\mathrm{fall},3,3}
 \end{cases}
 ```
 
@@ -1299,25 +1299,25 @@ number-weighted velocity, and the velocity-diameter integral used by evaporation
 #### Number-Weighted Fall Speed
 
 ```math
-V_n = \frac{\int_0^∞ V(D) N'(D)\, dD}{\int_0^∞ N'(D)\, dD}
+\mathbb{W}_n = \frac{\int_0^∞ \mathbb{W}(D) N'(D)\, dD}{\int_0^∞ N'(D)\, dD}
 ```
 
 This represents the average fall speed of particles and governs number flux:
 
 ```math
-\mathcal{F}_{ρn^i} = -V_n\, ρn^i
+\mathcal{F}_{ρn^i} = -\mathbb{W}_n\, ρn^i
 ```
 
 #### Mass-Weighted Fall Speed
 
 ```math
-V_m = \frac{\int_0^∞ V(D) m(D) N'(D)\, dD}{\int_0^∞ m(D) N'(D)\, dD}
+\mathbb{W}_m = \frac{\int_0^∞ \mathbb{W}(D) m(D) N'(D)\, dD}{\int_0^∞ m(D) N'(D)\, dD}
 ```
 
 This governs mass flux:
 
 ```math
-\mathcal{F}_{ρq^i} = -V_m\, ρq^i
+\mathcal{F}_{ρq^i} = -\mathbb{W}_m\, ρq^i
 ```
 
 ### Deposition/Sublimation Integrals
@@ -1334,7 +1334,7 @@ f_v = \mathbb{C}_{\mathrm{vent},1} + \mathbb{C}_{\mathrm{vent},2} \text{Re}^{1/2
 
 where:
 
-- ``\text{Re} = V D / ν`` is the Reynolds number
+- ``\text{Re} = \mathbb{W} D / ν`` is the Reynolds number
 - ``\text{Sc} = ν / D^v`` is the Schmidt number
 - ``\mathbb{C}_{\mathrm{vent}}`` are the empirical ventilation coefficients from [HallPruppacher1976](@cite)
 
@@ -1424,7 +1424,7 @@ Collection processes (aggregation, riming) require integrals over collision kern
 The collection kernel for ice-ice aggregation is:
 
 ```math
-\mathcal{K}(D_1, D_2) = E^{ii} \frac{π}{4} (D_1 + D_2)^2 |V(D_1) - V(D_2)|
+\mathcal{K}(D_1, D_2) = E^{ii} \frac{π}{4} (D_1 + D_2)^2 |\mathbb{W}(D_1) - \mathbb{W}(D_2)|
 ```
 
 The aggregation rate integral:
@@ -1436,7 +1436,7 @@ The aggregation rate integral:
 #### Ice-Cloud Collection (Riming)
 
 ```math
-\dot{q}^{cl}_\text{rim} = E^{ci} q^{cl} \int_0^∞ A(D) V(D) N'(D)\, dD
+\dot{q}^{cl}_\text{rim} = E^{ci} q^{cl} \int_0^∞ A(D) \mathbb{W}(D) N'(D)\, dD
 ```
 
 #### Ice-Rain Collection
@@ -1446,7 +1446,7 @@ integral over both distributions and needs the rain slope parameter as an extra
 table coordinate:
 
 ```math
-\mathcal{K}^{ri} = \int_0^∞ \!\! \int_0^∞ \frac{π}{4} (D^i + D^r)^2\, |V(D^i) - V(D^r)|\,
+\mathcal{K}^{ri} = \int_0^∞ \!\! \int_0^∞ \frac{π}{4} (D^i + D^r)^2\, |\mathbb{W}(D^i) - \mathbb{W}(D^r)|\,
                    N^{i\prime}(D^i)\, N^{r\prime}(D^r)\, dD^r\, dD^i .
 ```
 
@@ -1682,20 +1682,20 @@ appendix C, section b; [Pruppacher and Klett (1997)](@cite pruppacher2010microph
     \left[\frac{\mathbb{C}_{\mathrm{vent},1} Γ(μ^{rn}+2)}
                   {(λ^{rn})^{μ^{rn}+2}}
         + \mathbb{C}_{\mathrm{vent},2}\sqrt{ρ/η}\,
-          \mathrm{Sc}^{1/3}\,I_{VD}\right],
+          \mathrm{Sc}^{1/3}\,I_{\mathbb{W}D}\right],
 \qquad N^{rn}_0 = \frac{n^{rn} (λ^{rn})^{μ^{rn}+1}}{Γ(μ^{rn}+1)},
 ```
 
 with ``\mathbb{C}_{\mathrm{vent},1}`` and ``\mathbb{C}_{\mathrm{vent},2}`` read
 from `RainDrops.ventilation` (a `RainVentilation`, defaults ``0.78`` and ``0.32``),
-and ``I_{VD} = ∫ D \sqrt{V(D)\,D}\, e^{-λ^{rn} D}\, \mathrm{d}D`` the
+and ``I_{\mathbb{W}D} = ∫ D \sqrt{\mathbb{W}(D)\,D}\, e^{-λ^{rn} D}\, \mathrm{d}D`` the
 velocity–diameter integral over the rain DSD, tabulated as `RainDrops.evaporation` by
 `RainVelocityDiameterIntegral`. At ``μ^{rn} = 0`` this is what `rain_ventilation_integral`
 assembles: ``N^{rn}_0 = n^{rn} λ^{rn}`` and a bracket of
 ``\mathbb{C}_{\mathrm{vent},1}/(λ^{rn})^2 +
-\mathbb{C}_{\mathrm{vent},2}\sqrt{ρ/η}\,\mathrm{Sc}^{1/3} I_{VD}``.
+\mathbb{C}_{\mathrm{vent},2}\sqrt{ρ/η}\,\mathrm{Sc}^{1/3} I_{\mathbb{W}D}``.
 
-Only ``I_{VD}`` is tabulated. Neither ventilation coefficient enters that table, and neither
+Only ``I_{\mathbb{W}D}`` is tabulated. Neither ventilation coefficient enters that table, and neither
 does ``ν``, so both stay configurable and are assembled at runtime by
 `rain_ventilation_integral` — which serves rain evaporation and the coupled
 saturation-adjustment relaxation coefficient alike.
@@ -1922,7 +1922,7 @@ Ice particles collect cloud droplets at ``T \le T_0``:
 ```
 
 where ``\mathcal{K}^{ci}`` is the PSD-integrated cloud-collection kernel
-``\int A(D)\, V(D)\, N'(D)\, dD``, read from the ice lookup table. ``E^{ci} = 0.5``,
+``\int A(D)\, \mathbb{W}(D)\, N'(D)\, dD``, read from the ice lookup table. ``E^{ci} = 0.5``,
 ``ρ_\text{corr} = (ρ_s/ρ)^{0.54}`` is the air-density fall-speed correction.
 Cloud number is collected proportionally:
 ``\dot{n}^{cl}_\text{rim} = ρ\, E^{ci}\, ρ_\text{corr}\, \mathcal{K}^{ci}\, N^{cl}\, n^i``.
@@ -2245,10 +2245,10 @@ falls at its tabulated, density-corrected velocity, diagnosed by
 
 | Variable | Velocity | Reference |
 |----------|---------|-----------|
-| Cloud mass / number | mass-weighted ``V_m^{cl}``, number-weighted ``V_n^{cl}`` | DSD-integrated Stokes velocities |
-| Rain mass / number | mass-weighted ``V_m^r``, number-weighted ``V_n^r`` | Gunn–Kinzer 1949 lookup tables |
-| Ice mass / rime mass / rime volume / liquid coating | mass-weighted ``V_m^i`` | Mitchell–Heymsfield 2005 |
-| Ice number | number-weighted ``V_n^i`` | Mitchell–Heymsfield 2005 |
+| Cloud mass / number | mass-weighted ``\mathbb{W}_m^{cl}``, number-weighted ``\mathbb{W}_n^{cl}`` | DSD-integrated Stokes velocities |
+| Rain mass / number | mass-weighted ``\mathbb{W}_m^r``, number-weighted ``\mathbb{W}_n^r`` | Gunn–Kinzer 1949 lookup tables |
+| Ice mass / rime mass / rime volume / liquid coating | mass-weighted ``\mathbb{W}_m^i`` | Mitchell–Heymsfield 2005 |
+| Ice number | number-weighted ``\mathbb{W}_n^i`` | Mitchell–Heymsfield 2005 |
 
 All ice fall speeds are corrected by the air-density factor
 ``(ρ_s/ρ)^{0.54}`` with the 600 hPa, 253.15 K reference ``ρ_s`` for ice
@@ -2708,18 +2708,20 @@ fall speed needs, and what leaves them defined immediately after a `set!`.
 
 | Variable | Sedimentation Velocity | Flux |
 |----------|----------------------|------|
-| ``ρq^{cl}`` | ``V_m^{cl}`` (mass-weighted Stokes) | ``\mathcal{F}_{ρq^{cl}} = -V_m^{cl} ρq^{cl}`` |
-| ``ρn^{cl}`` | ``V_n^{cl}`` (number-weighted Stokes) | ``\mathcal{F}_{ρn^{cl}} = -V_n^{cl} ρn^{cl}`` |
-| ``ρq^r`` | ``V_m^r`` | ``\mathcal{F}_{ρq^r} = -V_m^r ρq^r`` |
-| ``ρn^r`` | ``V_n^r`` | ``\mathcal{F}_{ρn^r} = -V_n^r ρn^r`` |
-| ``ρq^i`` | ``V_m^i`` | ``\mathcal{F}_{ρq^i} = -V_m^i ρq^i`` |
-| ``ρn^i`` | ``V_n^i`` | ``\mathcal{F}_{ρn^i} = -V_n^i ρn^i`` |
-| ``ρq^f`` | ``V_m^i`` | ``\mathcal{F}_{ρq^f} = -V_m^i ρq^f`` |
-| ``ρb^f`` | ``V_m^i`` | ``\mathcal{F}_{ρb^f} = -V_m^i ρb^f`` |
-| ``ρq^{wi}`` | ``V_m^i`` | ``\mathcal{F}_{ρq^{wi}} = -V_m^i ρq^{wi}`` |
+| ``ρq^{cl}`` | ``\mathbb{W}_m^{cl}`` (mass-weighted Stokes) | ``\mathcal{F}_{ρq^{cl}} = -\mathbb{W}_m^{cl} ρq^{cl}`` |
+| ``ρn^{cl}`` | ``\mathbb{W}_n^{cl}`` (number-weighted Stokes) | ``\mathcal{F}_{ρn^{cl}} = -\mathbb{W}_n^{cl} ρn^{cl}`` |
+| ``ρq^r`` | ``\mathbb{W}_m^r`` | ``\mathcal{F}_{ρq^r} = -\mathbb{W}_m^r ρq^r`` |
+| ``ρn^r`` | ``\mathbb{W}_n^r`` | ``\mathcal{F}_{ρn^r} = -\mathbb{W}_n^r ρn^r`` |
+| ``ρq^i`` | ``\mathbb{W}_m^i`` | ``\mathcal{F}_{ρq^i} = -\mathbb{W}_m^i ρq^i`` |
+| ``ρn^i`` | ``\mathbb{W}_n^i`` | ``\mathcal{F}_{ρn^i} = -\mathbb{W}_n^i ρn^i`` |
+| ``ρq^f`` | ``\mathbb{W}_m^i`` | ``\mathcal{F}_{ρq^f} = -\mathbb{W}_m^i ρq^f`` |
+| ``ρb^f`` | ``\mathbb{W}_m^i`` | ``\mathcal{F}_{ρb^f} = -\mathbb{W}_m^i ρb^f`` |
+| ``ρq^{wi}`` | ``\mathbb{W}_m^i`` | ``\mathcal{F}_{ρq^{wi}} = -\mathbb{W}_m^i ρq^{wi}`` |
 
 ``ρs^{v+l}`` and ``ρn^a`` do not sediment. Cloud droplets do: cloud mass and
-number settle with DSD-integrated Stokes velocities.
+number settle with DSD-integrated Stokes velocities. Here ``\mathbb{W}`` is the
+positive-downward speed; the z-face source fields are signed vertical advecting
+velocities ``w=-\mathbb{W}``.
 
 The sedimentation tendency is
 

@@ -16,7 +16,7 @@ struct CloudTerminalVelocities{FT}
     number_weighted :: FT
 end
 
-# Stokes-regime cloud-droplet fall speed, `v(D) = a_cn D²`, with
+# Stokes-regime cloud-droplet fall speed, `𝕎(D) = a_cn D²`, with
 # `a_cn = g ρʷ / (18 η)` and exponent 2, so the PSD-weighted moments follow from
 # Γ(μᶜˡ+b+4)/Γ(μᶜˡ+4) = (μᶜˡ+5)(μᶜˡ+4) for mass and
 # Γ(μᶜˡ+b+1)/Γ(μᶜˡ+1) = (μᶜˡ+2)(μᶜˡ+1) for number.

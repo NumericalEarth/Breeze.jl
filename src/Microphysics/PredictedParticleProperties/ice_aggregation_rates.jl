@@ -24,7 +24,7 @@ Ice particles collide and stick together, reducing number concentration
 without changing total mass. The collision kernel is:
 
 ```math
-K(D_1, D_2) = E^{ii} × \\frac{π}{4}(D_1 + D_2)^2 × |V_1 - V_2|
+K(D_1, D_2) = E^{ii} × \\frac{π}{4}(D_1 + D_2)^2 × |\\mathbb{W}_1 - \\mathbb{W}_2|
 ```
 
 The number tendency is:

@@ -20,11 +20,11 @@ Empirical coefficients of the piecewise Gunn-Kinzer / Beard rain terminal-veloci
 evaluated by [`rain_fall_speed`](@ref),
 
 ```math
-V(D) = \\begin{cases}
-    \\mathbb{C}_{V,1,1} \\, \\hat{m}^{\\mathbb{C}_{V,2,1}} & D \\le \\mathbb{C}_{V,3,1} \\\\
-    \\mathbb{C}_{V,1,2} \\, \\hat{m}^{\\mathbb{C}_{V,2,2}} & \\mathbb{C}_{V,3,1} < D < \\mathbb{C}_{V,3,2} \\\\
-    \\mathbb{C}_{V,1,3} \\, \\hat{m}^{\\mathbb{C}_{V,2,3}} & \\mathbb{C}_{V,3,2} \\le D < \\mathbb{C}_{V,3,3} \\\\
-    \\mathbb{C}_{V,4}              & D \\ge \\mathbb{C}_{V,3,3}
+\\mathbb{W}(D) = \\begin{cases}
+    \\mathbb{C}_{\\mathrm{fall},1,1} \\, \\hat{m}^{\\mathbb{C}_{\\mathrm{fall},2,1}} & D \\le \\mathbb{C}_{\\mathrm{fall},3,1} \\\\
+    \\mathbb{C}_{\\mathrm{fall},1,2} \\, \\hat{m}^{\\mathbb{C}_{\\mathrm{fall},2,2}} & \\mathbb{C}_{\\mathrm{fall},3,1} < D < \\mathbb{C}_{\\mathrm{fall},3,2} \\\\
+    \\mathbb{C}_{\\mathrm{fall},1,3} \\, \\hat{m}^{\\mathbb{C}_{\\mathrm{fall},2,3}} & \\mathbb{C}_{\\mathrm{fall},3,2} \\le D < \\mathbb{C}_{\\mathrm{fall},3,3} \\\\
+    \\mathbb{C}_{\\mathrm{fall},4}              & D \\ge \\mathbb{C}_{\\mathrm{fall},3,3}
 \\end{cases}
 ```
 
@@ -41,10 +41,10 @@ The Gunn-Kinzer / Beard fit as used by P3; see
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 """
 struct RainFallSpeed{FT}
-    branch_velocity_scales :: NTuple{3, FT} # ℂⱽ₁, three branch scales [m/s]
-    branch_mass_exponents :: NTuple{3, FT}  # ℂⱽ₂, three mass exponents [-]
-    transition_diameters :: NTuple{3, FT}   # ℂⱽ₃, strictly increasing edges [m]
-    plateau_velocity :: FT                  # ℂⱽ₄, large-drop plateau [m/s]
+    branch_velocity_scales :: NTuple{3, FT} # ℂᶠᵃˡˡ₁, three branch scales [m/s]
+    branch_mass_exponents :: NTuple{3, FT}  # ℂᶠᵃˡˡ₂, three mass exponents [-]
+    transition_diameters :: NTuple{3, FT}   # ℂᶠᵃˡˡ₃, strictly increasing edges [m]
+    plateau_velocity :: FT                  # ℂᶠᵃˡˡ₄, large-drop plateau [m/s]
 end
 
 """
@@ -56,11 +56,11 @@ to SI.
 
 # Keyword Arguments
 
-- `branch_velocity_scales`: ``\\mathbb{C}_{V,1}`` [m/s], default `(4579.5, 49.62, 17.32)`
-- `branch_mass_exponents`: ``\\mathbb{C}_{V,2}`` [-], default `(2/3, 1/3, 1/6)`
-- `transition_diameters`: ``\\mathbb{C}_{V,3}`` [m], strictly increasing,
+- `branch_velocity_scales`: ``\\mathbb{C}_{\\mathrm{fall},1}`` [m/s], default `(4579.5, 49.62, 17.32)`
+- `branch_mass_exponents`: ``\\mathbb{C}_{\\mathrm{fall},2}`` [-], default `(2/3, 1/3, 1/6)`
+- `transition_diameters`: ``\\mathbb{C}_{\\mathrm{fall},3}`` [m], strictly increasing,
   default `(134.43e-6, 1511.64e-6, 3477.84e-6)`
-- `plateau_velocity`: ``\\mathbb{C}_{V,4}`` [m/s], default `9.17`
+- `plateau_velocity`: ``\\mathbb{C}_{\\mathrm{fall},4}`` [m/s], default `9.17`
 
 # Examples
 
@@ -69,7 +69,7 @@ using Breeze.Microphysics.PredictedParticleProperties: RainFallSpeed
 RainFallSpeed(Float64)
 
 # output
-RainFallSpeed(ℂⱽ₁=(4579.5, 49.62, 17.32) m/s, ℂⱽ₂=(0.667, 0.333, 0.167), ℂⱽ₃=(134.43, 1511.64, 3477.84) μm, ℂⱽ₄=9.17 m/s)
+RainFallSpeed(ℂᶠᵃˡˡ₁=(4579.5, 49.62, 17.32) m/s, ℂᶠᵃˡˡ₂=(0.667, 0.333, 0.167), ℂᶠᵃˡˡ₃=(134.43, 1511.64, 3477.84) μm, ℂᶠᵃˡˡ₄=9.17 m/s)
 ```
 """
 function RainFallSpeed(FT::DataType = Oceananigans.defaults.FloatType;
@@ -78,19 +78,19 @@ function RainFallSpeed(FT::DataType = Oceananigans.defaults.FloatType;
                        transition_diameters = (134.43e-6, 1511.64e-6, 3477.84e-6),
                        plateau_velocity = 9.17)
 
-    ℂⱽ₁ = NTuple{3, FT}(branch_velocity_scales)
-    ℂⱽ₂ = NTuple{3, FT}(branch_mass_exponents)
-    ℂⱽ₃ = NTuple{3, FT}(transition_diameters)
-    ℂⱽ₄ = FT(plateau_velocity)
+    ℂᶠᵃˡˡ₁ = NTuple{3, FT}(branch_velocity_scales)
+    ℂᶠᵃˡˡ₂ = NTuple{3, FT}(branch_mass_exponents)
+    ℂᶠᵃˡˡ₃ = NTuple{3, FT}(transition_diameters)
+    ℂᶠᵃˡˡ₄ = FT(plateau_velocity)
 
-    all(≥(0), ℂⱽ₁) || throw(ArgumentError("branch_velocity_scales must be nonnegative, got $ℂⱽ₁"))
-    all(≥(0), ℂⱽ₂) || throw(ArgumentError("branch_mass_exponents must be nonnegative, got $ℂⱽ₂"))
-    all(>(0), ℂⱽ₃) || throw(ArgumentError("transition_diameters must be positive, got $ℂⱽ₃"))
-    ℂⱽ₃[1] < ℂⱽ₃[2] < ℂⱽ₃[3] ||
-        throw(ArgumentError("transition_diameters must be strictly increasing, got $ℂⱽ₃"))
-    ℂⱽ₄ ≥ 0 || throw(ArgumentError("plateau_velocity must be nonnegative, got $ℂⱽ₄"))
+    all(≥(0), ℂᶠᵃˡˡ₁) || throw(ArgumentError("branch_velocity_scales must be nonnegative, got $ℂᶠᵃˡˡ₁"))
+    all(≥(0), ℂᶠᵃˡˡ₂) || throw(ArgumentError("branch_mass_exponents must be nonnegative, got $ℂᶠᵃˡˡ₂"))
+    all(>(0), ℂᶠᵃˡˡ₃) || throw(ArgumentError("transition_diameters must be positive, got $ℂᶠᵃˡˡ₃"))
+    ℂᶠᵃˡˡ₃[1] < ℂᶠᵃˡˡ₃[2] < ℂᶠᵃˡˡ₃[3] ||
+        throw(ArgumentError("transition_diameters must be strictly increasing, got $ℂᶠᵃˡˡ₃"))
+    ℂᶠᵃˡˡ₄ ≥ 0 || throw(ArgumentError("plateau_velocity must be nonnegative, got $ℂᶠᵃˡˡ₄"))
 
-    return RainFallSpeed(ℂⱽ₁, ℂⱽ₂, ℂⱽ₃, ℂⱽ₄)
+    return RainFallSpeed(ℂᶠᵃˡˡ₁, ℂᶠᵃˡˡ₂, ℂᶠᵃˡˡ₃, ℂᶠᵃˡˡ₄)
 end
 
 # Allow a container built at one precision to be reused at another, so that
@@ -108,10 +108,10 @@ Base.summary(::RainFallSpeed) = "RainFallSpeed"
 function Base.show(io::IO, p::RainFallSpeed)
     micrometres = map(D -> round(D * 10^6, digits=2), p.transition_diameters)
     print(io, summary(p), "(")
-    print(io, "ℂⱽ₁=", p.branch_velocity_scales, " m/s, ")
-    print(io, "ℂⱽ₂=", map(b -> round(b, digits=3), p.branch_mass_exponents), ", ")
-    print(io, "ℂⱽ₃=", micrometres, " μm, ")
-    print(io, "ℂⱽ₄=", p.plateau_velocity, " m/s)")
+    print(io, "ℂᶠᵃˡˡ₁=", p.branch_velocity_scales, " m/s, ")
+    print(io, "ℂᶠᵃˡˡ₂=", map(b -> round(b, digits=3), p.branch_mass_exponents), ", ")
+    print(io, "ℂᶠᵃˡˡ₃=", micrometres, " μm, ")
+    print(io, "ℂᶠᵃˡˡ₄=", p.plateau_velocity, " m/s)")
 end
 
 """
@@ -130,7 +130,7 @@ is not configurable.
 Consumed at runtime by [`rain_ventilation_integral`](@ref), which assembles the
 analytical ``\\mathbb{C}_{\\mathrm{vent},1}/(λ^r)^2`` term and the Reynolds-weighted term around the tabulated
 velocity-diameter integral. They deliberately do not enter that table, which stores only
-``I_{VD}``.
+``I_{\\mathbb{W}D}``.
 
 See the constructor for the meaning and defaults of each coefficient.
 """
