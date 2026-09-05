@@ -227,8 +227,30 @@ function materialize_coefficient(coef::PolynomialCoefficient, grid, dynamics, mi
                                  coef.minimum_wind_speed,
                                  coef.stability_function,
                                  coef.surface,
-                                 θᵥ, surface_pressure, constants,
+                                 coef.moisture_availability,
+                                 θᵥ, microphysical_fields.qᵛ, surface_pressure, constants,
                                  transfer_type)
+end
+
+# The surface phase and moisture availability of a bulk vapor flux follow its coefficient when
+# that is a `PolynomialCoefficient`, so that evaporation and the stability correction see the
+# same surface humidity. A constant coefficient implies a saturated liquid surface unless a
+# `moisture_availability` is given.
+coefficient_surface(::Number) = PlanarLiquidSurface()
+coefficient_surface(coef::PolynomialCoefficient) = coef.surface
+
+coefficient_moisture_availability(::Number) = 1
+coefficient_moisture_availability(coef::PolynomialCoefficient) = coef.moisture_availability
+
+resolve_moisture_availability(::Nothing, coefficient) = coefficient_moisture_availability(coefficient)
+resolve_moisture_availability(β::Number, ::Number) = β
+
+function resolve_moisture_availability(β::Number, coef::PolynomialCoefficient)
+    βᶜ = coef.moisture_availability
+    convert(typeof(βᶜ), β) == βᶜ ||
+        throw(ArgumentError("BulkVaporFlux was given moisture_availability = $β, but its " *
+                            "PolynomialCoefficient has moisture_availability = $βᶜ"))
+    return β
 end
 
 #####
@@ -340,7 +362,8 @@ function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCond
     validate_wall_filtering(side, bf.filtered_velocities)
     T₀ = materialize_surface_field(bf.surface_temperature, grid, side)
     ℋ₀ = materialize_surface_field(bf.surface_relative_humidity, grid, side)
-    surface = PlanarLiquidSurface()
+    surface = coefficient_surface(bf.coefficient)
+    β = convert(eltype(grid), resolve_moisture_availability(bf.moisture_availability, bf.coefficient))
     coef = materialize_coefficient(bf.coefficient, grid, dynamics, microphysics,
                                    surface_pressure, constants,
                                    microphysical_fields, specific_prognostic_moisture, temperature,
@@ -354,7 +377,7 @@ function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCond
                               filter_timescale=bf.filtered_velocities.filter_timescale)
     end
 
-    new_bf = BulkVaporFluxFunction(side, coef, bf.gustiness, T₀, ℋ₀, surface_pressure, constants, surface,
+    new_bf = BulkVaporFluxFunction(side, coef, bf.gustiness, T₀, ℋ₀, surface_pressure, constants, surface, β,
                                    bf.filtered_velocities, fs)
 
     return BoundaryCondition(Flux(), new_bf)
@@ -399,7 +422,7 @@ BulkSensibleHeatFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, p, 
     BulkSensibleHeatFluxFunction(side, fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)),
                                  g, t, p, s, c, f, fv, fs)
 
-BulkVaporFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, h, p, c, s, fv, fs) =
-    BulkVaporFluxFunction(side, fill_polynomial(coef, default_neutral_latent_heat_polynomial, Val(:scalar)), g, t, h, p, c, s, fv, fs)
+BulkVaporFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, h, p, c, s, β, fv, fs) =
+    BulkVaporFluxFunction(side, fill_polynomial(coef, default_neutral_latent_heat_polynomial, Val(:scalar)), g, t, h, p, c, s, β, fv, fs)
 
 end # module BoundaryConditions

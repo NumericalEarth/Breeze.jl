@@ -155,7 +155,7 @@ const BulkSensibleHeatFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkSe
 ##### BulkVaporFluxFunction for moisture fluxes
 #####
 
-struct BulkVaporFluxFunction{S, C, G, T, H, F, TC, SF, FV, FS}
+struct BulkVaporFluxFunction{S, C, G, T, H, F, TC, SF, M, FV, FS}
     side :: S                  # Set during materialization (nothing pre-materialize)
     coefficient :: C
     gustiness :: G
@@ -164,25 +164,30 @@ struct BulkVaporFluxFunction{S, C, G, T, H, F, TC, SF, FV, FS}
     surface_pressure :: F
     thermodynamic_constants :: TC
     surface :: SF
+    moisture_availability :: M # the fraction β of the wall that is wet; resolved at materialization
     filtered_velocities :: FV  # Nothing or FilteredSurfaceVelocities
     filtered_scalar :: FS      # Nothing or FilteredSurfaceScalar
 end
 
 """
     BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature,
-                            surface_relative_humidity=1, filtered_velocities=nothing)
+                            surface_relative_humidity=1, moisture_availability=nothing,
+                            filtered_velocities=nothing)
 
 Create a bulk vapor flux function for computing wall moisture fluxes.
 The flux is computed as:
 
 ```math
-Jᵛ = - ρ₀ Cᵛ |U| (qᵛ - qᵛ₀)
+Jᵛ = - ρ₀ Cᵛ |U| (qᵛ - q₀), \\qquad q₀ = β ℋ₀ qᵛ⁺(T₀) + (1 - β) qᵛ,
 ```
 
 where ``Cᵛ`` is the transfer coefficient, ``|U|`` is the wind speed tangential to the wall,
-``qᵛ`` is the near-wall specific humidity, and ``qᵛ₀ = ℋ₀ qᵛ⁺(T₀)`` is the specific humidity
-of the air in contact with the wall: the saturation specific humidity at the wall
-temperature ``T₀`` times the wall relative humidity ``ℋ₀`` (unity for a wet wall).
+``qᵛ`` is the near-wall specific humidity, and ``q₀`` is the specific humidity of the air in
+contact with the wall. Over the wet fraction ``β`` of the wall (the `moisture_availability`)
+that is the saturation specific humidity ``qᵛ⁺`` at the wall temperature ``T₀`` times the
+wall relative humidity ``ℋ₀`` (unity for a wet wall); over the dry fraction it is the
+humidity of the air itself, so that ``qᵛ - q₀ = β (qᵛ - ℋ₀ qᵛ⁺)`` and the flux is ``β``
+times the flux over a wet wall.
 
 The flux may be placed on any of the six boundaries of a bounded domain. The sign above is
 for the bottom; on every wall the flux carries vapor *into* the domain when the wall is
@@ -199,6 +204,13 @@ moister than the adjacent air.
 - `surface_relative_humidity`: The relative humidity of the air in contact with the wall,
                                between 0 and 1 (default: `1`, a saturated wall). Can be a
                                `Field`, a `Function`, or a `Number`.
+- `moisture_availability`: The fraction ``β ∈ [0, 1]`` of the wall that is wet. `nothing`
+                           (default) takes the value carried by a [`PolynomialCoefficient`](@ref)
+                           `coefficient`, whose stability correction uses the same surface humidity,
+                           and 1 (a wet wall, an ocean) for a constant coefficient. A value
+                           that disagrees with a `PolynomialCoefficient` is an error. The phase of
+                           the surface water follows the coefficient in the same way, and is liquid
+                           for a constant coefficient.
 - `filtered_velocities`: Either `nothing` (default) or [`FilteredSurfaceVelocities`](@ref). Note
                          that when `filtered_velocities` is not `nothing`, then automatically
                          there is filtering in the scalar fields via [`FilteredSurfaceScalar`](@ref)
@@ -206,9 +218,12 @@ moister than the adjacent air.
                          Filtering is supported on the bottom boundary only.
 """
 function BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature,
-                                 surface_relative_humidity=1, filtered_velocities=nothing)
+                                 surface_relative_humidity=1, moisture_availability=nothing,
+                                 filtered_velocities=nothing)
+    isnothing(moisture_availability) || 0 ≤ moisture_availability ≤ 1 ||
+        throw(ArgumentError("moisture_availability must lie between 0 and 1, got $moisture_availability"))
     return BulkVaporFluxFunction(nothing, coefficient, gustiness, surface_temperature, surface_relative_humidity,
-                                 nothing, nothing, nothing, filtered_velocities, nothing)
+                                 nothing, nothing, nothing, moisture_availability, filtered_velocities, nothing)
 end
 
 Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
@@ -220,6 +235,7 @@ Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
                           Adapt.adapt(to, bf.surface_pressure),
                           Adapt.adapt(to, bf.thermodynamic_constants),
                           Adapt.adapt(to, bf.surface),
+                          Adapt.adapt(to, bf.moisture_availability),
                           Adapt.adapt(to, bf.filtered_velocities),
                           Adapt.adapt(to, bf.filtered_scalar))
 
@@ -252,7 +268,10 @@ end
 
     Cᵛ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, T₀, bf.filtered_velocities)
 
-    return outward_flux_sign(side) * ρ₀ * Cᵛ * Ũ * Δq
+    # Over the wet fraction β of the wall the air in contact with it holds qᵛ₀ = ℋ₀ qᵛ⁺(T₀), and
+    # over the dry fraction the humidity of the air itself, so that qᵛ - q₀ = β (qᵛ - qᵛ₀)
+    β = bf.moisture_availability
+    return outward_flux_sign(side) * ρ₀ * Cᵛ * Ũ * β * Δq
 end
 
 # Vapor difference dispatch on filtered_scalar
@@ -292,7 +311,7 @@ See [`BulkSensibleHeatFluxFunction`](@ref) for details.
 ```jldoctest
 using Breeze
 
-T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
+T₀(x, y, t) = 290 + 2 * sign(cos(2π * x / 20e3))
 
 ρs_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
                              gustiness = 0.1,
@@ -308,12 +327,14 @@ function BulkSensibleHeatFlux(; kwargs...)
 end
 
 """
-    BulkVaporFlux(; coefficient, surface_temperature, surface_relative_humidity=1, gustiness=0)
+    BulkVaporFlux(; coefficient, surface_temperature, surface_relative_humidity=1,
+                    moisture_availability=nothing, gustiness=0)
 
 Create a `FluxBoundaryCondition` for wall moisture flux, on any of the six boundaries.
 
 The specific humidity of the air in contact with the wall is computed from
-`surface_temperature` and `surface_relative_humidity` (unity by default, a wet wall).
+`surface_temperature` and `surface_relative_humidity` (unity by default, a wet wall);
+`moisture_availability` is the fraction of the wall that is wet, 1 by default.
 
 See [`BulkVaporFluxFunction`](@ref) for details.
 
@@ -322,7 +343,7 @@ See [`BulkVaporFluxFunction`](@ref) for details.
 ```jldoctest
 using Breeze
 
-T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
+T₀(x, y, t) = 290 + 2 * sign(cos(2π * x / 20e3))
 
 moisture_bc = BulkVaporFlux(coefficient = 1e-3,
                             gustiness = 0.1,
