@@ -1045,15 +1045,19 @@ end
 
     # Diagnose the post-process number reservoirs as well, so frozen liquid carries
     # the number left by collection, breakup, melting, and activation rather than the
-    # beginning-of-stage number. In the prescribed-Nᶜˡ path, cloud number is reset
-    # to its prescribed value immediately before homogeneous freezing.
+    # beginning-of-stage number. In the prescribed-Nᶜˡ path, re-diagnose the
+    # prescribed number against the residual cloud mass before homogeneous freezing.
+    # This retains the cloud DSD slope bounds when only trace liquid remains and avoids
+    # transferring a mass-inconsistent number of droplets to ice.
     cloud_number_tendency = cloud_number_tendency_before_homogeneous_freezing(
         p3, ρ, qᶜˡ, Nᶜˡ, ccn_activation_mass, ccn_activation_number,
         autoconv, accr, cloud_self, cloud_rim_n, cloud_frz_n, cloud_warm_n)
     prognostic_cloud_number = max(0, cloud.nᶜˡ +
                                   cloud_number_tendency * dt_safety)
     prescribed_cloud_number = p3.cloud.number_concentration / ρ
-    cloud_number_remaining = ifelse(isnothing(p3.aerosol), prescribed_cloud_number,
+    prescribed_cloud = diagnose_cloud_dsd(
+        p3, cloud_remaining, prescribed_cloud_number, ρ)
+    cloud_number_remaining = ifelse(isnothing(p3.aerosol), prescribed_cloud.nᶜˡ,
                                     prognostic_cloud_number)
 
     rain_number_tendency = rain_number_tendency_before_homogeneous_freezing(

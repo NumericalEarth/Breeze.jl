@@ -1945,6 +1945,37 @@ end
         @test rates.rime_density_new <= 900
     end
 
+    @testset "Prescribed cloud number remains DSD-bounded during homogeneous freezing" begin
+        FT = Float32
+        cloud = CloudDroplets(FT; number_concentration = FT(75e6))
+        p3 = PredictedParticlePropertiesMicrophysics(FT; cloud)
+        constants = ThermodynamicConstants(FT)
+
+        ρ = FT(0.9)
+        T = FT(230)
+        P = FT(70000)
+        qᶜˡ = FT(1e-13)
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        q = MoistureMassFractions(qᵛ, qᶜˡ, zero(FT))
+        𝒰 = with_temperature(StaticEnergyState(zero(FT), q, zero(FT), P), T, constants)
+        prescribed_nᶜˡ = cloud.number_concentration / ρ
+        ℳ = P3MicrophysicalState(qᶜˡ, prescribed_nᶜˡ,
+                                zero(FT), zero(FT), zero(FT), zero(FT),
+                                zero(FT), zero(FT), zero(FT), zero(FT),
+                                zero(FT), zero(FT))
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        τ = FT(p3.process_rates.homogeneous_freezing_timescale)
+        cloud_remaining = rates.cloud_homogeneous_mass * τ
+        bounded_cloud = PPP.diagnose_cloud_dsd(p3, cloud_remaining, prescribed_nᶜˡ, ρ)
+
+        @test cloud_remaining > p3.minimum_mass_mixing_ratio
+        @test bounded_cloud.nᶜˡ < prescribed_nᶜˡ
+        @test rates.cloud_homogeneous_number ≈ bounded_cloud.nᶜˡ / τ
+        @test rates.cloud_homogeneous_number / rates.cloud_homogeneous_mass ≈
+              bounded_cloud.nᶜˡ / cloud_remaining
+    end
+
     @testset "rain self-collection and breakup net into a single signed term" begin
         FT = Float64
         constants = ThermodynamicConstants(FT)
