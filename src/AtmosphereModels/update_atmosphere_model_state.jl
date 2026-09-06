@@ -1,7 +1,7 @@
 using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
-using Oceananigans.Advection: update_advection_timestep!
+using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
 using Oceananigans.Fields: flattened_unique_values
@@ -55,10 +55,10 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
         callback.callsite isa UpdateStateCallsite && callback(model)
     end
 
-    # Refresh the adaptive-implicit-vertical-advection time step before computing tendencies, so the
-    # explicit (CFL-scaled) velocity baked into Gⁿ matches the implicit velocity used by the
-    # following solve. A no-op unless some advection scheme uses an adaptive-implicit discretization.
-    update_advection_timestep!(model.advection, model.timestepper, model.clock)
+    # Refresh per-scheme advection state before computing tendencies: the adaptive-implicit
+    # split time step (so the explicit velocity baked into Gⁿ matches the implicit half of the
+    # following solve) and any bounds-preserving limiters.
+    update_advection!(model.advection, model)
 
     compute_tendencies && compute_tendencies!(model, callbacks)
 
@@ -93,6 +93,29 @@ tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, 
 # Diagnose the total air density ρ = ρᵈ + Σρˣ. No-op unless the dynamics carries a distinct
 # total-density field (CompressibleDynamics overrides this); anelastic aliases dynamics_density.
 compute_total_density!(model) = nothing
+
+# Breeze's advection container is keyed by prognostic name rather than Oceananigans'
+# `(momentum, tracers...)` convention, so each scheme is refreshed here with the specific
+# field its reconstruction acts on (bounds-preserving limiters rescale that field).
+function Oceananigans.Advection.update_advection!(advection::NamedTuple, model::AtmosphereModel)
+    θ_name = thermodynamic_density_name(model.formulation)
+    moist_name = moisture_prognostic_name(model.microphysics)
+    for name in keys(advection)
+        tracer = if name === :momentum
+            nothing
+        elseif name === θ_name
+            model.formulation.potential_temperature
+        elseif name === moist_name
+            specific_prognostic_moisture(model)
+        elseif haskey(model.tracers, name)
+            model.tracers[name]
+        else
+            model.microphysical_fields[specific_field_name(name)]
+        end
+        update_advection!(advection[name], model, tracer)
+    end
+    return nothing
+end
 
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel

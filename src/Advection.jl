@@ -6,6 +6,7 @@ using Oceananigans.Advection:
     _advective_tracer_flux_x,
     _advective_tracer_flux_y,
     _advective_tracer_flux_z,
+    BoundsPreservation,
     BoundsPreservingWENO,
     bounded_tracer_flux_divergence_x,
     bounded_tracer_flux_divergence_y,
@@ -51,7 +52,8 @@ end
 end
 
 # A bounds-preserving WENO whose vertical time discretization is adaptive-implicit.
-const BoundsPreservingAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:Tuple}
+# (`bounds` materializes to `BoundsPreservation`, which carries the precomputed limiter.)
+const BoundsPreservingAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:BoundsPreservation}
 
 # Lazily s-scaled face velocity: indexing yields wᵉ = s·w, the explicit fraction of the IMEX
 # vertical-advection split, so the bounds-preserving flux functions consume the explicit
