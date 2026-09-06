@@ -95,13 +95,13 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - name: Set JULIA_CPU_TARGET
-        if: ${{ runner.environment == 'github-hosted' && runner.arch == 'X64' }}
-        shell: bash
-        run: |
-          # Pool of GitHub-hosted runners can have several different ISAs, try to
-          # target all of them, with safe fallbacks.
-          echo "JULIA_CPU_TARGET=generic;haswell,-xsaveopt,clone_all;x86-64-v4,-rdrnd,base(1)" | tee -a "${GITHUB_ENV}"
+      # - name: Set JULIA_CPU_TARGET
+      #   if: ${{ runner.environment == 'github-hosted' && runner.arch == 'X64' }}
+      #   shell: bash
+      #   run: |
+      #     # Pool of GitHub-hosted runners can have several different ISAs, try to
+      #     # target all of them, with safe fallbacks.
+      #     echo "JULIA_CPU_TARGET=generic;haswell,-xsaveopt,clone_all;x86-64-v4,-rdrnd,base(1)" | tee -a "${GITHUB_ENV}"
       - name: Show versioninfo
         run: |
           julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
