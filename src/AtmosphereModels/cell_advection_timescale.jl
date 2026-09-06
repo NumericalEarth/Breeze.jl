@@ -23,16 +23,19 @@ using Oceananigans.Advection: Advection, cell_advection_timescale
 using Oceananigans.BoundaryConditions: needs_implicit_solver
 using Oceananigans.Fields: ZeroField
 using Oceananigans.TurbulenceClosures: HorizontalFormulation, ThreeDimensionalFormulation
+using Oceananigans.Utils: sum_of_velocities
 
 """
 $(TYPEDSIGNATURES)
 
-A callable that returns the advective timescale of a `model` restricted to the directions of
-`formulation`: `HorizontalFormulation()` counts only the horizontal advective CFL (dropping the
-vertical term), `ThreeDimensionalFormulation()` counts all three directions. Pass it to the
-`cell_advection_timescale` keyword of `TimeStepWizard` / `conjure_time_step_wizard!`, or as the
+A callable that returns the resolved-flow advective timescale of a `model` restricted to the
+directions of `formulation`: `HorizontalFormulation()` counts only the horizontal advective CFL
+(dropping the vertical term), while `ThreeDimensionalFormulation()` counts all three directions.
+Pass it to the `cell_advection_timescale` keyword of `TimeStepWizard` /
+`conjure_time_step_wizard!`, or as the
 `timescale` argument of `CFL` (`CFL(Δt, CellAdvectionTimescale(...))`), to control or monitor
-which directions bind the time step.
+which resolved-flow directions bind the time step. The automatic `cell_advection_timescale(model)`
+also includes field-specific microphysical velocities.
 """
 struct CellAdvectionTimescale{F}
     formulation :: F
@@ -58,11 +61,36 @@ end
 # Automatic default: drop the vertical term exactly when every vertically-advected prognostic uses
 # AIVA (they share the advecting `w`, so a single explicit prognostic re-imposes the vertical CFL).
 function Advection.cell_advection_timescale(model::AtmosphereModel)
-    if all_vertical_advection_is_implicit(model.advection)
-        return cell_advection_timescale(model, HorizontalFormulation())
+    resolved_timescale = if all_vertical_advection_is_implicit(model.advection)
+        cell_advection_timescale(model, HorizontalFormulation())
     else
-        return cell_advection_timescale(model, ThreeDimensionalFormulation())
+        cell_advection_timescale(model, ThreeDimensionalFormulation())
     end
+
+    names = prognostic_field_names(model.microphysics)
+    return minimum_microphysical_advection_timescale(model, names, resolved_timescale)
+end
+
+# Microphysical terminal velocities are field-specific, so they do not appear in
+# `transport_velocities(model)`. Include each prognostic's full transport velocity in the
+# default timescale; otherwise fast sedimentation can violate an explicit scalar scheme's CFL
+# while the time-step wizard sees only the resolved flow.
+@inline minimum_microphysical_advection_timescale(model, ::Tuple{}, timescale) = timescale
+
+@inline function minimum_microphysical_advection_timescale(model, names::Tuple{Symbol, Vararg}, timescale)
+    name = first(names)
+    microphysical_velocity = microphysical_velocities(model.microphysics,
+                                                      model.microphysical_fields,
+                                                      Val(name))
+    field_timescale = microphysical_advection_timescale(model, microphysical_velocity, timescale)
+    return minimum_microphysical_advection_timescale(model, Base.tail(names), field_timescale)
+end
+
+@inline microphysical_advection_timescale(model, ::Nothing, timescale) = timescale
+
+@inline function microphysical_advection_timescale(model, microphysical_velocity, timescale)
+    transport_velocity = sum_of_velocities(transport_velocities(model), microphysical_velocity)
+    return min(timescale, cell_advection_timescale(model.grid, transport_velocity))
 end
 
 # `nothing` schemes advect nothing (no vertical CFL); every other scheme must be AIVA.

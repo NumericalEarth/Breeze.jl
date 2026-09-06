@@ -11,8 +11,9 @@ using Breeze.ParcelModels: step_parcel_state!
 
 using Oceananigans: Bounded, CPU, Center, CenterField, Face, Field, Flat, GridFittedBottom,
                      ImmersedBoundaryGrid, RectilinearGrid, compute!, set!, time_step!
+using Oceananigans.Advection: WENO, cell_advection_timescale
 using Oceananigans.Architectures: on_architecture
-using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.BoundaryConditions: fill_halo_regions!, ImpenetrableBoundaryCondition
 using Oceananigans.Fields: interior, location
 using Oceananigans.TimeSteppers: update_state!
 
@@ -84,6 +85,35 @@ using Oceananigans.TimeSteppers: update_state!
             AtmosphereModels.total_density(1, 1, 1, dry_density, p3,
                                            vapor_density, μ)
         @test density_with_nonmass_moments ≈ expected_density
+    end
+
+    @testset "P3 terminal velocities constrain the advective timescale [$(FT)]" for FT in all_float_types()
+        grid = RectilinearGrid(default_arch, FT;
+                               size = (4, 4, 4), halo = (3, 3, 3),
+                               extent = (100, 100, 250))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants)
+        dynamics = AnelasticDynamics(reference_state)
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        model = AtmosphereModel(grid; dynamics,
+                                formulation = :LiquidIcePotentialTemperature,
+                                microphysics = p3,
+                                momentum_advection = WENO(FT))
+
+        set!(model.velocities.u, 2)
+        set!(model.microphysical_fields.wʳ, 20)
+        set!(model.microphysical_fields.wʳₙ, 30)
+        fill_halo_regions!(model.velocities.u)
+        fill_halo_regions!(model.microphysical_fields.wʳ)
+        fill_halo_regions!(model.microphysical_fields.wʳₙ)
+
+        Δx = FT(25)
+        Δz = FT(62.5)
+        τ_rain_number = 1 / (2 / Δx + 30 / Δz)
+        τ = @inferred cell_advection_timescale(model)
+        @test τ ≈ τ_rain_number rtol = 1e-6
+        @test τ <
+              cell_advection_timescale(grid, model.velocities)
     end
 
     @testset "P3 tendencies and fall speeds follow the current RK-stage state" begin
