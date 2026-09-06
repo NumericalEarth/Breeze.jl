@@ -105,19 +105,19 @@ jobs:
       - name: Show versioninfo
         run: |
           julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
-      - name: "Cache Julia depot"
-        uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
-        with:
-          # On self-hosted runners we use the prebuilt Docker container, which already
-          # caches pkgimages and such, so we don't need to cache here most things.  Only
-          # useful thing is the scratchspaces, in particular ParallelTestRunner's to make
-          # scheduling of test jobs more efficients.
-          cache-artifacts: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
-          cache-packages: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
-          cache-registries: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
-          cache-compiled: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
-          cache-scratchspaces: true
-          cache-logs: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+      # - name: "Cache Julia depot"
+      #   uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
+      #   with:
+      #     # On self-hosted runners we use the prebuilt Docker container, which already
+      #     # caches pkgimages and such, so we don't need to cache here most things.  Only
+      #     # useful thing is the scratchspaces, in particular ParallelTestRunner's to make
+      #     # scheduling of test jobs more efficients.
+      #     cache-artifacts: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+      #     cache-packages: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+      #     cache-registries: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+      #     cache-compiled: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+      #     cache-scratchspaces: true
+      #     cache-logs: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
       - name: "Set test arguments and other environment variables"
         shell: bash
         run: |
