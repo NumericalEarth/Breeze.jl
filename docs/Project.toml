@@ -25,7 +25,7 @@ SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 Breeze = {path = ".."}
 
 [compat]
-AtmosphericProfilesLibrary = "0.1.7"
+AtmosphericProfilesLibrary = "0.1.7 - 0.1.8"
 CUDA = "5, 6.0"
 CairoMakie = "0.15"
 Documenter = "1 - 1.17, 1.19"
