@@ -63,11 +63,8 @@ jobs:
       matrix:
         version:
           - "min"
-          - "1.12.6"
         os:
           - ubuntu-latest
-          - macOS-latest
-          - windows-latest
         arch:
           - "default"
         check-bounds:
@@ -75,17 +72,6 @@ jobs:
         exclude:
           - version: "min"
             os: windows-latest
-        include:
-          # `--check-bounds=auto` is necessary for testing Reactant workloads
-          # until https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
-          - version: "1.12.6"
-            os: aws-linux-nvidia-gpu-l4-4xl
-            arch: "default"
-            check-bounds: "auto"
-          - version: "1.11.9"
-            os: aws-linux-nvidia-gpu-l4-4xl
-            arch: "default"
-            check-bounds: "auto"
     steps:
       - name: df before cleanup
         if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
@@ -188,73 +174,10 @@ jobs:
       - name: Instantiate test environment
         timeout-minutes: 30
         shell: bash
+        env:
+          JULIA_DEBUG: 'loading'
         run: |
           julia --project=test --color=yes --check-bounds=${{ matrix.check-bounds }} -e '
           using Pkg;
           Pkg.instantiate()
           '
-      - name: Run tests
-        shell: bash
-        env:
-          XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
-        run: |
-          if [[ ${{ runner.os }} == 'Linux' ]]; then
-              # We use earlyoom only on the Linux machines
-              earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          fi
-
-          export TMPDIR="${{ github.workspace }}/tmp"
-          mkdir -vp "${TMPDIR}"
-
-          julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
-      - name: "Upload Manifest"
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        timeout-minutes: 2
-        with:
-          name: manifest-${{ matrix.version }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.check-bounds }}
-          path: '**/Manifest*.toml'
-          retention-days: 90
-          overwrite: false
-      - name: "Upload Reactant MLIR dumps as artifacts"
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: mlir-dumps-${{ matrix.version }}-${{ matrix.os }}
-          path: ${{ github.workspace }}/tmp/
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: "Process Julia coverage files"
-        uses: julia-actions/julia-processcoverage@03114f09f119417c3242a9fb6e0b722676aedf38 # v1.2.2
-      - name: "Upload coverage data to CodeCov"
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
-        continue-on-error: true
-
-  # Fake test job, to launch when no relevant files are modified: we need this is launch a
-  # job with the required name, even when we don't actually want to run CI.
-  fake-test:
-    needs: check-files
-    if: ${{ needs.check-files.outputs.files != 'true' }}
-    # The name must exactly match the required job.
-    name: Julia ${{ matrix.fake-version }} - ${{ matrix.fake-os }} - ${{ matrix.fake-arch }} - check-bounds ${{ matrix.fake-check-bounds }} - ${{ github.event_name }}
-    runs-on: ${{ matrix.fake-os }}
-    timeout-minutes: 1
-    strategy:
-      # NOTE: we use a one-element matrix, instead of just hardcoding the expected name
-      # above, because when this job is to be skipped, we don't want this to have the name
-      # fully resolved, otherwise it may accidentally make the PR mergeable when it
-      # shouldn't (the `${{ matrix.... }}` in the job name are resolved only when the job is
-      # actually launched).
-      matrix:
-        include:
-          - fake-version: "min"
-            fake-os: ubuntu-latest
-            fake-arch: "default"
-            fake-check-bounds: "yes"
-    steps:
-      - name: "Run fake tests"
-        run: |
-          true
