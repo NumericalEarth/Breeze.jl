@@ -338,7 +338,7 @@ substepper's time-averaged transport velocities that moisture and tracers use.
     ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρᵈ)
     θ⁻ = @inbounds ρθ[i, j, k-1] / ρᵈ[i, j, k-1]
     θ⁺ = @inbounds ρθ[i, j, k]   / ρᵈ[i, j, k]
-    return Azᶜᶜᶠ(i, j, k, grid) * ρᶠ * (max(wⁱ, zero(wⁱ)) * θ⁻ + min(wⁱ, zero(wⁱ)) * θ⁺)
+    return Azᶜᶜᶠ(i, j, k, grid) * ρᶠ * (max(wⁱ, 0) * θ⁻ + min(wⁱ, 0) * θ⁺)
 end
 
 @kernel function _implicit_advection_base_tendency!(Gρθ, grid, scheme, td, W, ρθ, ρᵈ)

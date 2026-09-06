@@ -58,17 +58,18 @@ const BoundsPreservingAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyI
 # velocity without duplicating their reconstruction (issue #913).
 struct ExplicitVerticalVelocity{G, S, T, W}
     grid :: G
-    scheme :: S
-    td :: T
-    w :: W
+    advection_scheme :: S
+    time_discretization :: T
+    vertical_velocity :: W
 end
 
 Adapt.adapt_structure(to, v::ExplicitVerticalVelocity) =
-    ExplicitVerticalVelocity(Adapt.adapt(to, v.grid), Adapt.adapt(to, v.scheme),
-                             Adapt.adapt(to, v.td), Adapt.adapt(to, v.w))
+    ExplicitVerticalVelocity(Adapt.adapt(to, v.grid), Adapt.adapt(to, v.advection_scheme),
+                             Adapt.adapt(to, v.time_discretization), Adapt.adapt(to, v.vertical_velocity))
 
 @inline Base.getindex(v::ExplicitVerticalVelocity, i, j, k) =
-    @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, v.grid, v.scheme, v.td, v.w) * v.w[i, j, k]
+    @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, v.grid, v.advection_scheme, v.time_discretization,
+                                         v.vertical_velocity) * v.vertical_velocity[i, j, k]
 
 # Disambiguates against the `ZeroField` shortcut above: a zero tracer advects to zero
 # regardless of the vertical time discretization.
