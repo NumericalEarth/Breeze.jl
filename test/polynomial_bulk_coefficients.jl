@@ -458,13 +458,14 @@ using GPUArraysCore: @allowscalar
         Δθᵥ = 305.0 - θᵥ₀
         @test Breeze.BoundaryConditions.surface_layer_Δθᵥ(1, 1, coef, T₀) ≈ Δθᵥ
 
-        Breeze.BoundaryConditions.update_Δθᵥ!(fv, coef, T₀, grid, 2.0)
+        clock = Oceananigans.TimeSteppers.Clock(time=0.0)
+        Breeze.BoundaryConditions.update_Δθᵥ!(fv, coef, T₀, grid, clock, 2.0)
         ε = 2.0 / 20.0
         expected = (0.0 + ε * Δθᵥ) / (1 + ε)
         @test fv.Δθᵥ[1, 1, 1] ≈ expected atol=1e-10
 
         # Initialize sets the field directly from the current difference (no time integration)
-        Breeze.BoundaryConditions.initialize_Δθᵥ!(fv, coef, T₀, grid)
+        Breeze.BoundaryConditions.initialize_Δθᵥ!(fv, coef, T₀, grid, clock)
         @test fv.Δθᵥ[1, 1, 1] ≈ Δθᵥ atol=1e-10
     end
 
