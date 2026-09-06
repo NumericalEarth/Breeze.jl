@@ -174,8 +174,8 @@ jobs:
       - name: Instantiate test environment
         timeout-minutes: 30
         shell: bash
-        env:
-          JULIA_DEBUG: 'loading'
+        # env:
+        #   JULIA_DEBUG: 'loading'
         run: |
           julia --project=test --color=yes --check-bounds=${{ matrix.check-bounds }} -e '
           using Pkg;
