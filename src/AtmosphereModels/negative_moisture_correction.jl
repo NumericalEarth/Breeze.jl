@@ -73,6 +73,13 @@ end
 
 SpeciesBorrowing(; vertical_borrowing=nothing) = SpeciesBorrowing(vertical_borrowing)
 
+Base.summary(::VerticalBorrowing) = "VerticalBorrowing"
+
+Base.summary(correction::SpeciesBorrowing) =
+    string("SpeciesBorrowing(vertical_borrowing = ",
+           isnothing(correction.vertical_borrowing) ? "nothing" :
+               summary(correction.vertical_borrowing), ")")
+
 """
 $(TYPEDEF)
 
@@ -286,39 +293,49 @@ end
 ##### Recursive same-level borrowing helpers
 #####
 
-# Two or more fields: heaviest borrows from next lighter, then recurse
-@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, F2, Vararg}, ρqᵛᵉ) where {F1, F2}
-    ρq_heavy = fields[1]
-    ρq_light = fields[2]
-
-    @inbounds q_heavy = ρq_heavy[i, j, k] / ρ
-    @inbounds q_light = ρq_light[i, j, k] / ρ
-
-    # Borrow from lighter species to fix negative heavier species
-    sink = ifelse(q_heavy < 0, min(-q_heavy, max(0, q_light)), zero(q_heavy))
-    @inbounds ρq_heavy[i, j, k] += ρ * sink
-    @inbounds ρq_light[i, j, k] -= ρ * sink
-
-    # Continue down the chain
-    same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ)
-end
-
-# Last field: borrows from moisture prognostic (vapor / equilibrium moisture)
-@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1}, ρqᵛᵉ) where {F1}
+# Each negative field borrows from every lighter species in order. Searching the
+# whole tail lets a deficit pass an empty immediate donor without making any donor
+# negative.
+#
+# The recursion is over a `Tuple` of fields whose length is known at compile time, so with
+# `@inline` it unrolls completely: no runtime recursion, no allocation, no dynamic dispatch.
+# The unrolled work is O(N²) pointwise reads/writes for N condensate fields (each field
+# scans the tail behind it), which is a few tens of flops for the N ≤ 10 schemes we run.
+@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, Vararg}, ρqᵛᵉ) where {F1}
     ρq = fields[1]
-
     @inbounds q = ρq[i, j, k] / ρ
-    @inbounds qᵛ = ρqᵛᵉ[i, j, k] / ρ
 
-    # Borrow from vapor to fix negative lightest hydrometeor
-    sink = ifelse(q < 0, min(-q, max(0, qᵛ)), zero(q))
-    @inbounds ρq[i, j, k] += ρ * sink
-    @inbounds ρqᵛᵉ[i, j, k] -= ρ * sink
+    deficit = max(0, -q)
+    borrowed = same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ, deficit)
+    @inbounds ρq[i, j, k] += ρ * borrowed
+
+    same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ)
     return nothing
 end
 
 # Empty tuple: nothing to do
 @inline same_level_borrow!(i, j, k, ρ, ::Tuple{}, ρqᵛᵉ) = nothing
+
+# With a deficit argument, recurse through the candidate donors for one field.
+@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, Vararg}, ρqᵛᵉ, deficit) where {F1}
+    ρq_donor = fields[1]
+    @inbounds q_donor = ρq_donor[i, j, k] / ρ
+
+    borrowed = min(deficit, max(0, q_donor))
+    @inbounds ρq_donor[i, j, k] -= ρ * borrowed
+
+    remaining_deficit = deficit - borrowed
+    borrowed_from_tail = same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ, remaining_deficit)
+
+    return borrowed + borrowed_from_tail
+end
+
+@inline function same_level_borrow!(i, j, k, ρ, ::Tuple{}, ρqᵛᵉ, deficit)
+    @inbounds qᵛ = ρqᵛᵉ[i, j, k] / ρ
+    borrowed = min(deficit, max(0, qᵛ))
+    @inbounds ρqᵛᵉ[i, j, k] -= ρ * borrowed
+    return borrowed
+end
 
 #####
 ##### Number concentration consistency helpers

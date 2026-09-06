@@ -10,6 +10,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Oceananigans
 using Test
+using Adapt: adapt
 
 #####
 ##### AnelasticDynamics
@@ -300,6 +301,13 @@ using Breeze.Thermodynamics:
 
 @testset "Thermodynamics" begin
     thermo = ThermodynamicConstants()
+    @test thermo.liquid.density == 1000
+    @test thermo.ice.density == 917
+    @test occursin("density=1000.0", sprint(show, thermo.liquid))
+
+    adapted_thermo = adapt(CPU(), ThermodynamicConstants(Float32))
+    @test adapted_thermo.liquid.density === Float32(1000)
+    @test adapted_thermo.ice.density === Float32(917)
 
     # Test Saturation specific humidity calculation
     T = 293.15  # 20°C

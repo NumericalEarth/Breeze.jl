@@ -3,7 +3,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDEF)
 
 `StaticEnergyFormulation` uses moist static energy density `ρs` as the prognostic thermodynamic variable.
 

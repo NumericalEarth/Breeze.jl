@@ -2,7 +2,9 @@ using Breeze
 using RRTMGP, CloudMicrophysics # to load Breeze extensions
 using Documenter
 using DocumenterCitations
+using Pkg.Artifacts: ensure_artifact_installed
 using DocumenterCodeBlocks: CodeBlocks
+using DocumenterLandingPage: LandingPage
 
 using CairoMakie
 CairoMakie.activate!(type = "png")
@@ -43,6 +45,7 @@ examples = [
     Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave"; build_always=true, gpu=false),
     Example("Neutral atmospheric boundary layer", "neutral_atmospheric_boundary_layer"; build_always=false, gpu=true),
     Example("Single column radiation", "single_column_radiation"; build_always=true, gpu=false),
+    Example("Single-column boundary layer with a prognostic-TKE closure", "single_column_tke_boundary_layer"; build_always=true, gpu=false),
     Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
     Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
     Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
@@ -57,7 +60,13 @@ examples = [
 
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
-example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
+example_pages = ["Overview" => joinpath("literated", "index.md");
+                 [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]]
+
+# Install artifacts before building the docs, to avoid spurious failures from
+# concurrent downloads, or examples and doctests not liking the extra messages
+# printed to screen during the download.
+ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
 
 # Use a different semaphore for CPU and GPU examples, but will keep the maximum
 # of concurrent tasks running at all time to the number of threads.  This is
@@ -168,11 +177,16 @@ makedocs(
     ;
     modules,
     sitename = "Breeze",
-    plugins = [bib, CodeBlocks(; line_counter=:named)],
+    plugins = [
+        bib,
+        CodeBlocks(; line_counter=:named),
+        LandingPage(),
+    ],
     format = Documenter.HTML(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB
         size_threshold = 2 ^ 20, # 1 MiB
+        size_threshold_ignore = ["api.md"], # auto-generated, grows with the docstring count
         prettyurls = get(ENV, "CI", "false") == "true",
     ),
     pages=[
@@ -181,11 +195,17 @@ makedocs(
         "Thermodynamics" => "thermodynamics.md",
         "AtmosphereModel" => Any[
             "Diagnostics" => "atmosphere_model/diagnostics.md",
+            "Lagrangian particles" => "atmosphere_model/lagrangian_particles.md",
+            "Wall fluxes" => "atmosphere_model/wall_fluxes.md",
         ],
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
             "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
             "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
+            "Predicted Particle Properties (P3)" => Any[
+                "Theory" => "microphysics/p3_theory.md",
+                "Usage" => "microphysics/p3_usage.md",
+            ],
         ],
         "Developers" => Any[
             "Microphysics" => Any[
@@ -196,6 +216,7 @@ makedocs(
             ],
         ],
         "Radiative Transfer" => "radiative_transfer.md",
+        "Turbulence closures" => "turbulence_closures.md",
         "Dynamics" => Any[
             "Governing equations" => "dycore_equations_algorithms.md",
             "Anelastic dynamics" => "anelastic_dynamics.md",
@@ -204,7 +225,7 @@ makedocs(
         ],
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
-            "Reproducibility of Breeze.jl models" => "reproducibility.md",
+            "Reproducibility of Breeze.jl models" => "appendix/reproducibility.md",
         ],
         "References" => "references.md",
         "API" => "api.md",

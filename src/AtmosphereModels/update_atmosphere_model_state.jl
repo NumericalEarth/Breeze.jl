@@ -216,6 +216,7 @@ function compute_auxiliary_variables!(model)
 
     # Compute diffusivities
     compute_closure_fields!(model.closure_fields, model.closure, model)
+    fill_halo_regions!(model.closure_fields; only_local_halos=true)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
@@ -296,6 +297,11 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     arch = grid.architecture
 
     model_fields = fields(model)
+
+    # The sedimentation velocities the scalar kernels below read are established by
+    # `update_microphysical_auxiliaries!` in `compute_auxiliary_variables!`, so they are
+    # already current for this stage — and, unlike a tendency-time refresh, they stay
+    # current after an `update_state!` that skips tendency computation.
 
     #####
     ##### Momentum tendencies (skip for kinematic dynamics)
@@ -432,3 +438,20 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
 
     return nothing
 end
+
+#####
+##### Closure tendencies
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Add a turbulence closure's own tendencies — the local sources of a prognostic the closure carries,
+such as the shear and buoyancy production of turbulent kinetic energy — to the model's tendencies
+`Gⁿ`. The time steppers call this at the start of every stage, after `compute_flux_bc_tendencies!`.
+A no-op for closures that carry no prognostic.
+"""
+compute_closure_tendencies!(model) =
+    compute_closure_tendencies!(model.timestepper.Gⁿ, model.closure_fields, model.closure, model)
+
+compute_closure_tendencies!(Gⁿ, closure_fields, closure, model) = nothing

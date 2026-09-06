@@ -8,6 +8,15 @@ to the given Unicode symbol. As properties, mathematical names are usually used
 mathematical form is invoked for the elements of a `NamedTuple`.
 Mathematical symbols are shown with inline math, while the Unicode column shows the exact glyphs used in code.
 
+The table below reserves symbols for the dynamics and thermodynamics — the equations
+of motion, the thermodynamic state, and the numerics that step them — so that new
+notation in those can be introduced without colliding with what is already there.
+A parameterization dense enough to exhaust the alphabet on its own does not belong
+in it: its notation is scoped to its own pages instead, where reusing a letter
+reserved here is a local decision rather than a conflict. The
+[P3 notation](@ref p3_notation) section does that for the Predicted Particle Properties
+scheme.
+
 A few notes about the following table:
 
 * `TC` stands for [`ThermodynamicConstants`](@ref)
@@ -64,15 +73,18 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρqᶜⁱ``                            | `ρqᶜⁱ` |                                     | Cloud ice density                                                              |
 | ``ρqʳ``                             | `ρqʳ`  | `AM.microphysical_fields.ρqʳ`       | Rain density                                                                   |
 | ``ρqˢ``                             | `ρqˢ`  | `AM.microphysical_fields.ρqˢ`       | Snow density                                                                   |
-| ``n^{cl}``                          | `nᶜˡ`  | `AM.microphysical_fields.nᶜˡ`       | Cloud droplet number per unit mass (1/kg)                                      |
+| ``n^{cl}``                          | `nᶜˡ`  | `AM.microphysical_fields.nᶜˡ`       | Cloud droplet number per unit mass (1/kg); P3 allocates this diagnostic only with aerosol activation |
 | ``n^r``                             | `nʳ`   | `AM.microphysical_fields.nʳ`        | Rain drop number per unit mass (1/kg)                                          |
-| ``n^a``                             | `nᵃ`   | `AM.microphysical_fields.nᵃ`        | Aerosol number per unit mass (1/kg)                                            |
-| ``\rho n^{cl}``                     | `ρnᶜˡ` | `AM.microphysical_fields.ρnᶜˡ`      | Cloud droplet number density (1/m³), prognostic                                |
+| ``n^a``                             | `nᵃ`   | `AM.microphysical_fields.nᵃ`        | Aerosol number per unit mass (1/kg); allocated only with aerosol activation    |
+| ``\rho n^{cl}``                     | `ρnᶜˡ` | `AM.microphysical_fields.ρnᶜˡ`      | Cloud droplet number density (1/m³), prognostic (absent in P3's prescribed-Nᶜˡ path) |
 | ``\rho n^r``                        | `ρnʳ`  | `AM.microphysical_fields.ρnʳ`       | Rain drop number density (1/m³), prognostic                                    |
-| ``\rho n^a``                        | `ρnᵃ`  | `AM.microphysical_fields.ρnᵃ`       | Aerosol number density (1/m³), prognostic                                      |
+| ``\rho n^a``                        | `ρnᵃ`  | `AM.microphysical_fields.ρnᵃ`       | Aerosol number density (1/m³), prognostic (only with aerosol activation)        |
 | ``N^{cl}``                          | `Nᶜˡ`  |                                     | Volumetric cloud droplet number density, ``Nᶜˡ = ρ nᶜˡ`` (1/m³)               |
 | ``N^r``                             | `Nʳ`   |                                     | Volumetric rain drop number density, ``Nʳ = ρ nʳ`` (1/m³)                      |
 | ``N^a``                             | `Nᵃ`   |                                     | Volumetric aerosol number density, ``Nᵃ = ρ nᵃ`` (1/m³)                        |
+| ``n^{ccn}``                         | `nᶜᶜⁿ` |                                     | Cloud condensation nuclei activated per unit mass (1/kg); the activation rate ``∂nᶜᶜⁿ/∂t`` is a source of ``nᶜˡ`` |
+| ``N^{ccn}``                         | `Nᶜᶜⁿ` |                                     | Volumetric CCN number density, ``Nᶜᶜⁿ = ρ nᶜᶜⁿ`` (1/m³)                        |
+| ``q^{ccn}``                         | `qᶜᶜⁿ` |                                     | Mass fraction condensed onto newly activated CCN (kg/kg)                       |
 | ``\mathbb{W}^{cl}``                 | `𝕎ᶜˡ`  |                                     | Terminal velocity of cloud liquid (scalar, positive downward)                  |
 | ``\mathbb{W}^{ci}``                 | `𝕎ᶜⁱ`  |                                     | Terminal velocity of cloud ice (scalar, positive downward)                     |
 | ``\mathbb{W}^r``                    | `𝕎ʳ`   |                                     | Terminal velocity of rain (scalar, positive downward)                          |
@@ -84,6 +96,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``pᵛ⁺``                             | `pᵛ⁺`  |                                     | Saturation vapor pressure                                                      |
 | ``\mathscr{H}``                     | `ℋ`    | `RelativeHumidity(model)`           | Relative humidity, ``ℋ = pᵛ / pᵛ⁺``                                            |
 | ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``                                          |
+| ``ξ``                               | `ξ`    | `psychrometric_correction`           | Psychrometric correction, ``ξ = 1 + ℒ² qᵛ⁺ / (cᵖ Rᵛ T²)``; ``ξˡ`` and ``ξⁱ`` name the liquid and ice phase |
+| ``δqˡ``, ``δqⁱ``                    | `δqˡ`, `δqⁱ` |                               | Saturation-adjustment increments, ``δq = (qᵛ - qᵛ⁺) / ξ`` for the liquid and ice phase |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
 | ``\mathbb{C}^{ac}``                 | `ℂᵃᶜ`  |                                     | Acoustic sound speed, ``ℂᵃᶜ = \sqrt{γ Rᵈ T}``                                  |
 | ``\mathcal{R}``                     | `ℛ`    | `TC.molar_gas_constant`             | Universal (molar) gas constant                                                 |
@@ -131,7 +145,23 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
-| ``\ell``                            | `ℓ`    |                                     | Surface roughness length, m                                                    |
+| ``\ell``                            | `ℓ`    |                                     | A **length scale**, m; the superscript says which one. Bare ``ℓ`` is used locally where only one length scale is in play (the primary mixing length in `TKEBasedTurbulenceClosure`, the divergence-damping scale in `CompressibleEquations`) |
+| ``\ell^N``                          | `ℓᴺ`   |                                     | Stratification length of the mixing length, ``ℓᴺ = Cᴺ \sqrt{e} / N``; the primary length is ``ℓ = \min(z, ℓᴺ)`` |
+| ``\ell^u, \ell^c, \ell^e, \ell^D``  | `ℓᵘ`, `ℓᶜ`, `ℓᵉ`, `ℓᴰ` |                    | Mixing lengths for momentum, scalars, TKE and dissipation: ``ℓᵘ = Sᵘ ℓ``, ``ℓᶜ = Sᶜ ℓ``, ``ℓᵉ = Sᵉ ℓ``, ``ℓᴰ = ℓ / Sᴰ`` |
+| ``S^u, S^c, S^e, S^D``              | `Sᵘ`, `Sᶜ`, `Sᵉ`, `Sᴰ` |                    | Stability functions of `TKEBasedTurbulenceClosure`; constants ``Cᵘ, Cᶜ, Cᵉ, Cᴰ`` in `ConstantStabilityFunctions` |
+| ``\ell^r``                          | `ℓʳ`   | `roughness_length`                  | Surface roughness length for momentum, m. Superscript ``r`` elsewhere denotes *rain* (``qʳ``); the two never appear together |
+| ``\ell^{rh}``                       | `ℓʳʰ`  | `scalar_roughness_length`           | Surface roughness length for heat and moisture; defaults to ``ℓʳ/7.3`` |
+| ``\kappa``                          | `κ`    |                                     | von Kármán constant. Never used for a diffusivity in Breeze's own code — the Oceananigans accessors literally named `κᶠᶜᶜ`, `κᶜᶠᶜ`, `κᶜᶜᶠ` are the one exception, and they are thin one-liners |
+| ``K^u``                             | `Kᵘ`   |                                     | Eddy diffusivity for momentum, ``K^u = ℓ^u \sqrt{e}``, m² s⁻¹. Oceananigans' scalar-diffusivity closures spell their own field `νₑ`, which Breeze reads but does not define |
+| ``K^c``                             | `Kᶜ`   |                                     | Eddy diffusivity for scalars, ``K^c = ℓ^c \sqrt{e}``, m² s⁻¹                    |
+| ``K^e``                             | `Kᵉ`   |                                     | Eddy diffusivity for TKE, ``K^e = ℓ^e \sqrt{e}``, m² s⁻¹                        |
+| ``e``                               | `e`    |                                     | Subgrid turbulent kinetic energy, m² s⁻²                                       |
+| ``\rho e``                          | `ρe`   |                                     | Prognostic TKE density, the tracer `TKEBasedTurbulenceClosure` adds to the model |
+| ``\mathrm{Pr}``                     | `Pr`   |                                     | Turbulent Prandtl number, ``\mathrm{Pr} = K^u/K^c = S^u/S^c``                 |
+| ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``                                      |
+| ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
+| ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
+| ``h^{bl}``                          | `hᵇˡ`  |                                     | Boundary-layer depth, m; a diagnostic (the height of the capping inversion in convective conditions) |
 | ``T_0``                             | `T₀`   |                                     | Sea surface temperature                                                        |
 | ``qᵛ₀``                             | `qᵛ₀`  |                                     | Saturation specific humidity at sea surface                                    |
 | ``\mathscr{I}``                     | `ℐ`    |                                     | Radiative flux (intensity), W/m²                                               |

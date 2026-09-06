@@ -1,7 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields
-using Oceananigans.BoundaryConditions: needs_implicit_solver
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick_stage!,
@@ -12,8 +11,10 @@ using Oceananigans.TimeSteppers:
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
                                 microphysics_model_update!, field_advection_scheme,
+                                compute_closure_tendencies!,
+                                closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
-                                implicit_step_advection
+                                implicit_step_scheme
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -121,23 +122,27 @@ function ssp_rk3_substep!(model, Δt, α)
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
 
-    for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
+    for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, kernel_Δt, α)
 
-        # Field index for implicit solver:
-        # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
-        # - indices 4+ are scalars (ρθ/ρs, ρqᵗ, microphysics, tracers)
-        # For scalars, we use Val(i - 3) to get Val(1), Val(2), etc.
-        field_index = Val(i - 3)
-        advection = field_advection_scheme(model.advection, names[i])
+        # Dynamics-specific prognostics (the compressible dry density, the kinematic driver's
+        # density) are advanced explicitly and have no diffusivity to apply; momentum and every
+        # scalar take the solve, momentum with `field_index = nothing` (viscosity) and the
+        # scalars with their position in the closure's scalar names (see `closure_scalar_index`).
+        skip_vertical_diffusion(model, name) && continue
 
-        # Adaptive implicit vertical advection schemes add a density-weighted vertical-advection
-        # contribution to the implicit solve (combined with vertically-implicit diffusion).
-        # Scalars, ρu, and ρv use Oceananigans' z-Center coefficients directly; ρw is routed to
-        # Breeze's z-Face coefficients (see AtmosphereModels/implicit_vertical_advection.jl).
-        # All other schemes use the unchanged diffusion-only implicit step (a no-op when there
-        # is no vertically-implicit closure).
-        if needs_implicit_solver(advection)
+        field_index = closure_scalar_index(model, name)
+        advection = field_advection_scheme(model.advection, name)
+
+        # The implicit solve must carry the reference density whenever it runs at all: the
+        # diffusion half is mass-flux weighted for the z-Center prognostics, and adaptive implicit
+        # vertical advection adds a density-weighted advection contribution on top.
+        #
+        # The guard is on the *solver*, not on `needs_implicit_solver(advection)`: that predicate
+        # is false for `advection = nothing` and for ordinary WENO, so keying on it would drop the
+        # density — and hence the mass-flux weighting — for every vertically-implicit closure
+        # without adaptive-implicit advection, the single-column configuration included.
+        if !isnothing(model.timestepper.implicit_solver)
             implicit_step!(u,
                            model.timestepper.implicit_solver,
                            model.closure,
@@ -146,18 +151,9 @@ function ssp_rk3_substep!(model, Δt, α)
                            model.clock,
                            fields(model),
                            α * Δt,
-                           implicit_step_advection(advection, names[i]),
-                           implicit_advection_velocities(model.dynamics, model.velocities, names[i]),
-                           implicit_advection_density(model.dynamics, model.formulation, names[i]))
-        else
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           α * Δt)
+                           implicit_step_scheme(advection),
+                           implicit_advection_velocities(model.dynamics, model.velocities, name),
+                           implicit_advection_density(model.dynamics, model.formulation, name))
         end
     end
 
@@ -227,6 +223,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     #
 
     compute_flux_bc_tendencies!(model)
+    compute_closure_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α¹)
 
     compute_pressure_correction!(model, Δt)
@@ -234,13 +231,13 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     tick_stage!(model.clock, Δt)
     update_state!(model, callbacks; compute_tendencies = true)
-    step_lagrangian_particles!(model, Δt)
 
     #
     # Second stage: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * G(u^(1)))
     #
 
     compute_flux_bc_tendencies!(model)
+    compute_closure_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α²)
 
     compute_pressure_correction!(model, α² * Δt)
@@ -248,13 +245,13 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     # Don't tick - still at t + Δt for time-dependent forcing
     update_state!(model, callbacks; compute_tendencies = true)
-    step_lagrangian_particles!(model, α² * Δt)
 
     #
     # Third stage: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
     #
 
     compute_flux_bc_tendencies!(model)
+    compute_closure_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α³)
 
     compute_pressure_correction!(model, α³ * Δt)
@@ -272,7 +269,15 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    step_lagrangian_particles!(model, α³ * Δt)
+    # Advect particles once per step, over the full Δt, with the velocity of the state
+    # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,
+    # and so lower order than the dycore. A stage-wise update is possible in principle
+    # (X obeys dX/dt = u like any prognostic, so the SSP combination applies to it too),
+    # but would need Xⁿ stored alongside the current position, since every SSP stage
+    # recombines with u⁰. Oceananigans' low-storage RK3 needs no such storage only
+    # because its per-stage increments sum to Δt; the SSP stage coefficients do not
+    # (α¹ + α² + α³ = 23/12), so pushing with them stage by stage would be wrong.
+    step_lagrangian_particles!(model, Δt)
 
     return nothing
 end

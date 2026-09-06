@@ -460,18 +460,18 @@ Consider parameters for liquid water,
 
 ```@example thermo
 using Breeze.Thermodynamics: CondensedPhase
-liquid_water = CondensedPhase(reference_latent_heat=2500800, heat_capacity=4181)
+liquid_water = CondensedPhase(reference_latent_heat=2500800, heat_capacity=4181, density=1000)
 ```
 
 and water ice,
 
 ```@example thermo
-water_ice = CondensedPhase(reference_latent_heat=2834000, heat_capacity=2108)
+water_ice = CondensedPhase(reference_latent_heat=2834000, heat_capacity=2108, density=917)
 ```
 
-These represent the latent heat of vaporization at the reference temperature and
-the specific heat capacity of each condensed phase. We can compute the specific heat
-difference ``\Delta c^β`` for liquid water:
+These represent the latent heat of vaporization at the reference temperature, specific
+heat capacity, and reference density of each condensed phase. We can compute the specific
+heat difference ``\Delta c^β`` for liquid water:
 
 ```@example thermo
 using Breeze.Thermodynamics: vapor_gas_constant
