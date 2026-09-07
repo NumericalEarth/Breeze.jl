@@ -71,10 +71,9 @@ function Advection.cell_advection_timescale(model::AtmosphereModel)
     return minimum_microphysical_advection_timescale(model, names, resolved_timescale)
 end
 
-# Microphysical terminal velocities are field-specific, so they do not appear in
-# `transport_velocities(model)`. Include each prognostic's full transport velocity in the
-# default timescale; otherwise fast sedimentation can violate an explicit scalar scheme's CFL
-# while the time-step wizard sees only the resolved flow.
+# Terminal velocities are field-specific, so they are not in `transport_velocities(model)`; take
+# the minimum over each prognostic's full transport velocity, the resolved flow plus its own
+# terminal velocity. The recursion keeps the heterogeneous `Val(name)` dispatch inferrable.
 @inline minimum_microphysical_advection_timescale(model, ::Tuple{}, timescale) = timescale
 
 @inline function minimum_microphysical_advection_timescale(model, names::Tuple{Symbol, Vararg}, timescale)
