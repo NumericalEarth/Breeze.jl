@@ -327,3 +327,44 @@ end
         @test ρϕ₁[1, 1, 4] - ρϕ₀[1, 1, 4] ≈ ρᵣ[1, 1, 4] * Δϕ rtol=1e-3
     end
 end
+
+@testset "SubsidenceForcing is neutral at the boundaries [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 20
+    Lz = 1000
+    grid = RectilinearGrid(default_arch; size = Nz, z = (0, Lz), topology = (Flat, Flat, Bounded))
+    Δz = Lz / Nz
+    Γ = FT(0.005)
+    column(field) = Array(interior(field, 1, 1, :))
+
+    # Descent through the lid and ascent through the floor, each with a linear profile plus a
+    # perturbation of the boundary cell: the boundary cell must be carried at the same rate as its
+    # neighbour, so that the boundary gradient has no tendency of its own. Using the adjacent
+    # interior face alone would be a downwind difference there, and the gradient would grow at
+    # the rate |wˢ| / 2Δz.
+    for (wˢ, boundary, neighbour) in ((-0.01, Nz, Nz - 1), (0.01, 1, 2))
+        model = AtmosphereModel(grid; forcing = (; θ = SubsidenceForcing(z -> wˢ)), closure = nothing, advection = nothing)
+        ρ = column(model.dynamics.reference_state.density)
+
+        set!(model; θ = z -> 300 + Γ * z)
+        Breeze.AtmosphereModels.compute_tendencies!(model)
+        G = column(model.timestepper.Gⁿ.ρθ) ./ ρ
+        @test all(isapprox.(G, -wˢ * Γ; rtol = 1e-6))
+
+        zᵇ = znodes(grid, Center())[boundary]
+        δ = FT(1)
+        set!(model; θ = z -> 300 + Γ * z + δ * (abs(z - zᵇ) < Δz / 2))
+        Breeze.AtmosphereModels.compute_tendencies!(model)
+        G = column(model.timestepper.Gⁿ.ρθ) ./ ρ
+        @test G[boundary] ≈ G[neighbour]
+
+        # And the perturbed gradient at the boundary is preserved through a time integration
+        θ = column(model.formulation.potential_temperature)
+        gradient₀ = θ[boundary] - θ[neighbour]
+        for _ in 1:120
+            time_step!(model, 60)
+        end
+        θ = column(model.formulation.potential_temperature)
+        @test θ[boundary] - θ[neighbour] ≈ gradient₀ rtol = 1e-3
+    end
+end

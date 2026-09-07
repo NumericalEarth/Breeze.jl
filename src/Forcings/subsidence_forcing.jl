@@ -83,13 +83,25 @@ end
 
 @inline w_dz_ϕᵃᵃᶠ(i, j, k, grid, w, ϕ) = @inbounds w[1, 1, k] * ∂zᶜᶜᶠ(1, 1, k, grid, ϕ)
 
+# The face values of wˢ ∂z ϕ̄ reconstructed to the cell centers. Interior cells average the faces
+# above and below. The boundary cells cannot use the boundary face, whose gradient would reach into
+# the halo, and must not use the adjacent interior face alone: with subsidence into the lid that is
+# a downwind difference, ∂ₜ(ϕ̄ₙ - ϕ̄ₙ₋₁) ∝ +|wˢ| (ϕ̄ₙ - ϕ̄ₙ₋₁), which doubles the gradient at the
+# lid every 2Δz/|wˢ| — an hour for 1 cm s⁻¹ and 20 m — and drives the top cell away from the
+# column. Averaging the two interior faces nearest the boundary gives the boundary cell the same
+# combination of gradients its neighbour sees, so the boundary gradient has no tendency of its own
+# and is carried neutrally, as an upwind scheme with a linearly extrapolated ghost value would.
 @inline function ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
+    w_dz_ϕ⁺⁺ = w_dz_ϕᵃᵃᶠ(i, j, k+2, grid, wˢ, ϕ_avg)
     w_dz_ϕ⁺ = w_dz_ϕᵃᵃᶠ(i, j, k+1, grid, wˢ, ϕ_avg)
     w_dz_ϕᵏ = w_dz_ϕᵃᵃᶠ(i, j, k, grid, wˢ, ϕ_avg)
-    ℑz_w_dz_ϕ = (w_dz_ϕ⁺ + w_dz_ϕᵏ) / 2
+    w_dz_ϕ⁻ = w_dz_ϕᵃᵃᶠ(i, j, k-1, grid, wˢ, ϕ_avg)
+    interior = (w_dz_ϕ⁺ + w_dz_ϕᵏ) / 2
+    at_top = (w_dz_ϕᵏ + w_dz_ϕ⁻) / 2
+    at_bottom = (w_dz_ϕ⁺ + w_dz_ϕ⁺⁺) / 2
     top = k == grid.Nz
     bottom = k == 1
-    return ifelse(top, w_dz_ϕᵏ, ifelse(bottom, w_dz_ϕ⁺, ℑz_w_dz_ϕ))
+    return ifelse(top, at_top, ifelse(bottom, at_bottom, interior))
 end
 
 @inline function (forcing::SubsidenceForcing)(i, j, k, grid, clock, fields)

@@ -328,9 +328,7 @@ member(site, month) = joinpath(library, "cfsite$(lpad(site, 2, '0'))_CNRM-CM6-1_
 # * the LES's radiative heating, with its diurnal cycle, as an hourly time series;
 # * the LES's surface sensible and latent heat fluxes and momentum fluxes, prescribed;
 # * relaxation of the winds toward the LES mean on 6 hours everywhere, and of temperature and
-#   moisture on 24 hours above the boundary layer, ramping in between 3.0 and 3.5 km — as in the
-#   LES — plus a 10-minute sponge in the top 200 m, the inflow boundary of a subsiding column,
-#   without which the top cell is unstable to the centered subsidence term.
+#   moisture on 24 hours above the boundary layer, ramping in between 3.0 and 3.5 km, as in the LES.
 #
 # Temperature tendencies are supplied as static-energy forcings (`s`), which the model converts to
 # its potential temperature. Microphysics is warm-phase saturation adjustment; the LES also had
@@ -414,18 +412,13 @@ function les_driven_column(path; closure, Δt = 1minute)
         set!(dTdt_rad[n], reshape(cᵖᵈ .* heating[:, min(n, length(t))], 1, 1, Nz))
     end
 
-    ## Relaxation toward the LES means: winds on 6 h, thermodynamics on 24 h above 3 km, and the
-    ## 10-minute sponge in the top 200 m
+    ## Relaxation toward the LES means: winds on 6 h everywhere, thermodynamics on 24 h above 3 km
     uₙ, vₙ, θₙ, qₙ = profile("u_mean_nudge"), profile("v_mean_nudge"), profile("thetali_mean_nudge"), profile("qt_mean_nudge")
-    τˢ = 10minutes
     ramp(z) = z < 3000 ? 0.0 : z > 3500 ? 1.0 : (1 - cos(π * (z - 3000) / 500)) / 2
-    sponge(z) = max(0, (z - (Lz - 200)) / 200)
-    wind_mask(z) = τˢ / 6hours + sponge(z)
-    thermodynamic_mask(z) = ramp(z) * τˢ / 24hours + sponge(z)
-    relax_u = Relaxation(rate = 1 / τˢ, mask = wind_mask, target = (z, t) -> uₙ(z))
-    relax_v = Relaxation(rate = 1 / τˢ, mask = wind_mask, target = (z, t) -> vₙ(z))
-    relax_θ = Relaxation(rate = 1 / τˢ, mask = thermodynamic_mask, target = (z, t) -> θₙ(z))
-    relax_q = Relaxation(rate = 1 / τˢ, mask = thermodynamic_mask, target = (z, t) -> qₙ(z))
+    relax_u = Relaxation(rate = 1 / 6hours, target = (z, t) -> uₙ(z))
+    relax_v = Relaxation(rate = 1 / 6hours, target = (z, t) -> vₙ(z))
+    relax_θ = Relaxation(rate = 1 / 24hours, mask = ramp, target = (z, t) -> θₙ(z))
+    relax_q = Relaxation(rate = 1 / 24hours, mask = ramp, target = (z, t) -> qₙ(z))
 
     forcing = (u = (subsidence, relax_u),
                v = (subsidence, relax_v),
