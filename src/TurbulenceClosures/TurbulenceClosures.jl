@@ -3,7 +3,8 @@ module TurbulenceClosures
 export TKEBasedTurbulenceClosure,
        TKEMixingLength,
        ConstantStabilityFunctions,
-       DryStaticStability
+       DryStaticStability,
+       MoistStaticStability
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
@@ -28,7 +29,9 @@ using Oceananigans.Operators:
     Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ,
     # Interpolator functions used for ρᵣ at faces
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ,
-    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ
+    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ,
+    # Vertical derivative at faces, for the static stability
+    ∂zᶜᶜᶠ
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
@@ -46,6 +49,11 @@ using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using ..AtmosphereModels: AtmosphereModels
+
+using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, standard_pressure, total_density
+using Breeze.AtmosphereModels.Diagnostics: microphysics_phase_equilibrium
+using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant, saturation_specific_humidity,
+                             equilibrated_surface, absolute_zero_latent_heat, specific_heat_difference
 
 #####
 ##### Fallbacks for closure = nothing
@@ -120,6 +128,7 @@ end
         + δzᵃᵃᶠ(i, j, k, grid, Az_qᶜᶜᶜ, 𝒯_wz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
 end
 
+include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
 
 end # module TurbulenceClosures

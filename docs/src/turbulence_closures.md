@@ -79,6 +79,25 @@ diagnosed is the closure's `static_stability`: by default [`DryStaticStability`]
 ``∂_z b = g \, ∂_z \ln θᵨ`` of the buoyancy the dynamics uses, where ``θᵨ`` is the density
 potential temperature, so that liquid and ice water load the air by their mass.
 
+[`MoistStaticStability`](@ref) accounts for saturation. Where the air is subsaturated it is the dry
+gradient; where it is saturated — the nonprecipitating water exceeds the saturation specific
+humidity at the interface — it is the buoyancy frequency of a saturated displacement of
+[Durran and Klemp (1982)](@cite DurranKlemp1982),
+
+```math
+N²_s = g \left[ \frac{1 + ℒ rˢ / (Rᵈ T)}{1 + ϵ ℒ² rˢ / (cᵖᵈ Rᵈ T²)}
+               \left( ∂_z \ln θ + \frac{ℒ}{cᵖᵈ T} ∂_z rˢ \right) - ∂_z rʷ \right],
+```
+
+in which a rising parcel condenses and its latent heating offsets part of the stratification of
+the dry potential temperature ``θ``; ``rˢ`` and ``rʷ`` are the saturation and nonprecipitating-water
+mixing ratios, ``ϵ = Rᵈ / Rᵛ`` and ``ℒ`` the latent heat. The phase equilibrium of the microphysics
+supplies the saturation test and the latent heating, so over a mixed-phase surface the liquid and
+ice branches interpolate with its liquid fraction. On a saturated adiabat — uniform liquid-water
+potential temperature and total water — ``N²_s`` vanishes to within the approximations of the
+expression, while the dry ``N²`` is strongly positive; inside stratocumulus this is the difference
+between a stratification length that shuts the mixing off and one that lets it through.
+
 ### Stability functions
 
 In this first version the stability functions are constants ([`ConstantStabilityFunctions`](@ref)),

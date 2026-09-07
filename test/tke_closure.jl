@@ -388,3 +388,84 @@ column(field) = Array(interior(field, 1, 1, :))
         @test all(isfinite, Array(interior(model.tracers.ρe)))
     end
 end
+
+#####
+##### Moist static stability
+#####
+
+using Breeze.TurbulenceClosures: static_stabilityᶜᶜᶠ
+
+@testset "MoistStaticStability [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 40
+    Lz = 1000
+    grid = RectilinearGrid(default_arch; size = Nz, z = (0, Lz), topology = (Flat, Flat, Bounded))
+    interior_faces = 2:Nz
+
+    @test isbits(MoistStaticStability())
+    moist = TKEBasedTurbulenceClosure(static_stability = MoistStaticStability())
+    @test moist.static_stability isa MoistStaticStability
+    @test occursin("MoistStaticStability", sprint(show, moist))
+
+    # A model with saturation adjustment and its stored N² for a given static stability
+    function stored_N²(static_stability, equilibrium; θ, qᵗ)
+        microphysics = SaturationAdjustment(; equilibrium)
+        closure = TKEBasedTurbulenceClosure(; static_stability)
+        model = AtmosphereModel(grid; closure, microphysics, advection = nothing)
+        set!(model; θ, qᵗ)
+        set_tke!(model, FT(0.1))
+        return column(model.closure_fields.N²), model
+    end
+
+    @testset "a saturated adiabat is neutral to a saturated displacement" begin
+        # Uniform liquid-water potential temperature and total water, saturated throughout: the
+        # model's own saturated adiabat. It is stable to a dry displacement — θᵨ increases with
+        # height as condensation warms the air — and neutral to a saturated one, up to the
+        # approximations of the Durran–Klemp expression (a few percent of the dry value).
+        θ₀ = 288
+        qᵗ₀ = 13e-3
+        N²ᵈ, dry_model = stored_N²(DryStaticStability(), WarmPhaseEquilibrium(); θ = θ₀, qᵗ = qᵗ₀)
+        N²ˢ, moist_model = stored_N²(MoistStaticStability(), WarmPhaseEquilibrium(); θ = θ₀, qᵗ = qᵗ₀)
+
+        qˡ = column(moist_model.microphysical_fields.qˡ)
+        @test all(qˡ .> 1e-4)
+        @test all(N²ᵈ[interior_faces] .> 5e-5)
+        @test maximum(abs, N²ˢ[interior_faces]) < 0.1 * maximum(N²ᵈ[interior_faces])
+    end
+
+    @testset "the dry branch is selected where the air is subsaturated" begin
+        # Subsaturated below mid-depth, saturated above; the face at the step sees the
+        # interpolated state
+        qᵗ(z) = ifelse(z < Lz / 2, 4e-3, 13e-3)
+        N²ᵈ, _ = stored_N²(DryStaticStability(), WarmPhaseEquilibrium(); θ = 288, qᵗ)
+        N²ˢ, model = stored_N²(MoistStaticStability(), WarmPhaseEquilibrium(); θ = 288, qᵗ)
+        qˡ = column(model.microphysical_fields.qˡ)
+        k★ = Nz ÷ 2 + 1 # the first cloudy cell
+        @test qˡ[k★-1] == 0
+        @test qˡ[k★] > 0
+
+        # Both centers subsaturated: exactly the dry value; both saturated: reduced stability
+        @test all(N²ˢ[2:k★-1] .== N²ᵈ[2:k★-1])
+        @test all(N²ˢ[k★+1:Nz] .< N²ᵈ[k★+1:Nz])
+        @test all(isfinite, N²ˢ)
+
+        # The KernelFunctionOperation form of the same diagnostic agrees with the stored field
+        op = KernelFunctionOperation{Center, Center, Face}(static_stabilityᶜᶜᶠ, grid, MoistStaticStability(),
+                                                           buoyancy_force(model), buoyancy_tracers(model))
+        @test column(Field(op)) == N²ˢ
+    end
+
+    @testset "mixed phase" begin
+        # Cold and saturated: the equilibrium's liquid fraction interpolates the saturation vapor
+        # pressure and the latent heat between liquid and ice; the result is finite and, on a
+        # saturated adiabat, much less stable than the dry value
+        equilibrium = MixedPhaseEquilibrium()
+        N²ᵈ, _ = stored_N²(DryStaticStability(), equilibrium; θ = 250, qᵗ = 1.5e-3)
+        N²ˢ, model = stored_N²(MoistStaticStability(), equilibrium; θ = 250, qᵗ = 1.5e-3)
+        qⁱ = column(model.microphysical_fields.qⁱ)
+        @test all(qⁱ .> 0)
+        @test all(isfinite, N²ˢ)
+        @test all(N²ᵈ[interior_faces] .> 0)
+        @test maximum(abs, N²ˢ[interior_faces]) < 0.2 * maximum(N²ᵈ[interior_faces])
+    end
+end

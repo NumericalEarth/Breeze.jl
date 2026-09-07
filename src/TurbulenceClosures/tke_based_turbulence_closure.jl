@@ -9,8 +9,8 @@
 ##### The static stability N² is diagnosed once per stage at the cell interfaces and stored with the
 ##### closure fields, so that the mixing length, the buoyancy flux and the stability functions all
 ##### see one value. `DryStaticStability` takes N² = ∂z_b, the gradient of the buoyancy of the
-##### dynamics (condensate loading included); a saturation-aware variant is a new type plus one
-##### method, `static_stabilityᶜᶜᶠ`.
+##### dynamics (condensate loading included); `MoistStaticStability` switches to the buoyancy
+##### frequency of a saturated displacement where the air is saturated (static_stability.jl).
 #####
 ##### The stability functions Sᵘ, Sᶜ, Sᵉ, Sᴰ are constants for now (`ConstantStabilityFunctions`);
 ##### a Richardson-number-dependent variant is a new type plus four methods.
@@ -118,32 +118,6 @@ Base.summary(ml::TKEMixingLength{FT}) where FT = "TKEMixingLength{$FT}"
 Base.show(io::IO, ml::TKEMixingLength) = print(io, summary(ml), " (Cˢ = ", prettysummary(ml.Cˢ), ")")
 
 #####
-##### Static stability
-#####
-
-"""
-$(TYPEDEF)
-
-The static stability of [`TKEBasedTurbulenceClosure`](@ref) as the vertical gradient of the
-buoyancy of the dynamics, ``N² = ∂_z b = g ∂_z \\ln θᵨ`` with ``θᵨ`` the density potential
-temperature: the stratification a parcel feels when displaced without phase change. Condensate
-loading is included; the latent heating of a saturated displacement is not.
-"""
-struct DryStaticStability end
-
-Base.summary(::DryStaticStability) = "DryStaticStability"
-Base.show(io::IO, ss::DryStaticStability) = print(io, summary(ss))
-
-"""
-$(TYPEDSIGNATURES)
-
-The static stability ``N²`` at (Center, Center, Face) for `DryStaticStability`: the buoyancy
-gradient `∂z_b` of the model.
-"""
-@inline static_stabilityᶜᶜᶠ(i, j, k, grid, ::DryStaticStability, buoyancy, tracers) =
-    ∂z_b(i, j, k, grid, buoyancy, tracers)
-
-#####
 ##### The closure
 #####
 
@@ -166,8 +140,9 @@ where ``Kᵘ``, ``Kᶜ`` and ``Kᵉ`` are the eddy diffusivities of momentum, sc
 kinetic energy, ``S²`` the squared vertical shear, ``N²`` the squared buoyancy frequency, ``ℓ`` the
 primary mixing length ([`TKEMixingLength`](@ref)), and ``Sᵘ, Sᶜ, Sᵉ, Sᴰ`` stability functions
 ([`ConstantStabilityFunctions`](@ref)). ``N²`` is diagnosed once per time-step stage at the cell
-interfaces by the `static_stability` component ([`DryStaticStability`](@ref) by default) and stored
-with the closure fields. The prognostic TKE density is the tracer `ρe`, which the
+interfaces by the `static_stability` component ([`DryStaticStability`](@ref) by default, or
+[`MoistStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
+the tracer `ρe`, which the
 closure adds to the model; it is advected and vertically diffused like every other scalar, and the
 closure applies the local production, buoyancy flux and dissipation.
 
@@ -243,6 +218,7 @@ TKEBasedTurbulenceClosure(FT::DataType; kw...) =
 @inline convert_eltype(::Type{FT}, sf::ConstantStabilityFunctions) where FT =
     ConstantStabilityFunctions{FT}(convert(FT, sf.Cᵘ), convert(FT, sf.Cᶜ), convert(FT, sf.Cᵉ), convert(FT, sf.Cᴰ))
 @inline convert_eltype(::Type{FT}, ss::DryStaticStability) where FT = ss
+@inline convert_eltype(::Type{FT}, ss::MoistStaticStability) where FT = ss
 
 """
 $(TYPEDSIGNATURES)
