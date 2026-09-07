@@ -3,6 +3,8 @@ module TurbulenceClosures
 export TKEBasedTurbulenceClosure,
        TKEMixingLength,
        ConstantStabilityFunctions,
+       RiDependentStabilityFunctions,
+       catke_parameters,
        DryStaticStability,
        MoistStaticStability
 
@@ -130,5 +132,6 @@ end
 
 include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
+include("richardson_number_stability_functions.jl")
 
 end # module TurbulenceClosures

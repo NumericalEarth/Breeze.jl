@@ -12,8 +12,9 @@
 ##### dynamics (condensate loading included); `MoistStaticStability` switches to the buoyancy
 ##### frequency of a saturated displacement where the air is saturated (static_stability.jl).
 #####
-##### The stability functions Sᵘ, Sᶜ, Sᵉ, Sᴰ are constants for now (`ConstantStabilityFunctions`);
-##### a Richardson-number-dependent variant is a new type plus four methods.
+##### The stability functions Sᵘ, Sᶜ, Sᵉ, Sᴰ are either constants (`ConstantStabilityFunctions`)
+##### or piecewise-linear functions of the Richardson number in the form of CATKE
+##### (`RiDependentStabilityFunctions`, richardson_number_stability_functions.jl).
 #####
 ##### The tracer `ρe` is advected and vertically diffused (with Kᵉ) by the dynamical core like every
 ##### other scalar. Following CATKE, the sinks — dissipation, the negative part of the buoyancy flux
@@ -80,12 +81,19 @@ ConstantStabilityFunctions(Cᵘ, Cᶜ, Cᵉ, Cᴰ) = ConstantStabilityFunctions(
 
 Base.summary(sf::ConstantStabilityFunctions{FT}) where FT = "ConstantStabilityFunctions{$FT}"
 
-Base.show(io::IO, sf::ConstantStabilityFunctions) =
-    print(io, summary(sf), '\n',
-              "├── Cᵘ: ", prettysummary(sf.Cᵘ), '\n',
-              "├── Cᶜ: ", prettysummary(sf.Cᶜ), '\n',
-              "├── Cᵉ: ", prettysummary(sf.Cᵉ), '\n',
-              "└── Cᴰ: ", prettysummary(sf.Cᴰ))
+# The lines under the stability functions' summary, with `prefix` for nesting in the closure's show
+function show_stability_function_lines(io::IO, sf::ConstantStabilityFunctions, prefix)
+    print(io, prefix, "├── Cᵘ: ", prettysummary(sf.Cᵘ), '\n',
+              prefix, "├── Cᶜ: ", prettysummary(sf.Cᶜ), '\n',
+              prefix, "├── Cᵉ: ", prettysummary(sf.Cᵉ), '\n',
+              prefix, "└── Cᴰ: ", prettysummary(sf.Cᴰ))
+    return nothing
+end
+
+function Base.show(io::IO, sf::ConstantStabilityFunctions)
+    print(io, summary(sf), '\n')
+    show_stability_function_lines(io, sf, "")
+end
 
 #####
 ##### Mixing length
@@ -139,7 +147,8 @@ Kᵘ = Sᵘ ℓ \\sqrt{e}, \\qquad Kᶜ = Sᶜ ℓ \\sqrt{e}, \\qquad Kᵉ = S�
 where ``Kᵘ``, ``Kᶜ`` and ``Kᵉ`` are the eddy diffusivities of momentum, scalars and turbulent
 kinetic energy, ``S²`` the squared vertical shear, ``N²`` the squared buoyancy frequency, ``ℓ`` the
 primary mixing length ([`TKEMixingLength`](@ref)), and ``Sᵘ, Sᶜ, Sᵉ, Sᴰ`` stability functions
-([`ConstantStabilityFunctions`](@ref)). ``N²`` is diagnosed once per time-step stage at the cell
+([`ConstantStabilityFunctions`](@ref) or [`RiDependentStabilityFunctions`](@ref)). ``N²`` is
+diagnosed once per time-step stage at the cell
 interfaces by the `static_stability` component ([`DryStaticStability`](@ref) by default, or
 [`MoistStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
 the tracer `ρe`, which the
@@ -594,11 +603,9 @@ end
 function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
     print(io, summary(closure), '\n',
               "├── mixing_length: ", summary(closure.mixing_length), " (Cˢ = ", prettysummary(closure.mixing_length.Cˢ), ")", '\n',
-              "├── stability_functions: ", summary(closure.stability_functions), '\n',
-              "│   ├── Cᵘ: ", prettysummary(closure.stability_functions.Cᵘ), '\n',
-              "│   ├── Cᶜ: ", prettysummary(closure.stability_functions.Cᶜ), '\n',
-              "│   ├── Cᵉ: ", prettysummary(closure.stability_functions.Cᵉ), '\n',
-              "│   └── Cᴰ: ", prettysummary(closure.stability_functions.Cᴰ), '\n',
+              "├── stability_functions: ", summary(closure.stability_functions), '\n')
+    show_stability_function_lines(io, closure.stability_functions, "│   ")
+    print(io, '\n',
               "├── static_stability: ", summary(closure.static_stability), '\n',
               "├── maximum_viscosity: ", prettysummary(closure.maximum_viscosity), '\n',
               "├── maximum_tracer_diffusivity: ", prettysummary(closure.maximum_tracer_diffusivity), '\n',

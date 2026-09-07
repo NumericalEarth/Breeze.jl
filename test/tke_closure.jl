@@ -469,3 +469,158 @@ using Breeze.TurbulenceClosures: static_stabilityᶜᶜᶠ
         @test maximum(abs, N²ˢ[interior_faces]) < 0.2 * maximum(N²ᵈ[interior_faces])
     end
 end
+
+#####
+##### Richardson-number-dependent stability functions
+#####
+
+using Breeze.TurbulenceClosures: stability_ramp, Riᶜᶜᶠ
+
+@testset "RiDependentStabilityFunctions [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 32
+    Lz = 1000
+    grid = RectilinearGrid(default_arch; size = Nz, z = (0, Lz), topology = (Flat, Flat, Bounded))
+    zf = znodes(grid, Face())
+    zc = znodes(grid, Center())
+    interior_faces = 2:Nz
+
+    @testset "CATKE's values and the constants they imply" begin
+        sf = RiDependentStabilityFunctions()
+        @test isbits(sf)
+        @test sf isa RiDependentStabilityFunctions{FT}
+        @test (sf.Cᵘ⁻, sf.Cᵘ⁰, sf.Cᵘ⁺) == FT.((0.370, 0.361, 0.242))
+        @test (sf.Cᶜ⁻, sf.Cᶜ⁰, sf.Cᶜ⁺) == FT.((0.572, 0.369, 0.098))
+        @test (sf.Cᵉ⁻, sf.Cᵉ⁰, sf.Cᵉ⁺) == FT.((1.447, 7.863, 0.548))
+        @test (sf.Cᴰ⁻, sf.Cᴰ⁰, sf.Cᴰ⁺) == FT.((0.923, 1.604, 0.579))
+        @test (sf.Ri⁰, sf.Riᵟ) == FT.((0.254, 1.02))
+
+        parameters = catke_parameters()
+        @test parameters.mixing_length.Cˢ == 1.131
+        @test parameters.stability_functions isa RiDependentStabilityFunctions
+        closure = TKEBasedTurbulenceClosure(; parameters...)
+        @test closure.mixing_length.Cˢ === FT(1.131)
+        @test closure.stability_functions isa RiDependentStabilityFunctions{FT}
+        @test isbits(closure)
+
+        # What CATKE's neutral values mean in the atmospheric surface layer: a von Kármán constant
+        # 17% above 0.40, a surface TKE a factor three below e/u★² ≈ 4, a Prandtl number near one,
+        # a TKE diffusivity 22 times the viscosity, and a critical Richardson number of 0.18
+        Cˢ = closure.mixing_length.Cˢ
+        @test Cˢ * (sf.Cᵘ⁰^3 / sf.Cᴰ⁰)^(1/4) ≈ 0.468 atol=0.002
+        @test 1 / sqrt(sf.Cᵘ⁰ * sf.Cᴰ⁰) ≈ 1.31 atol=0.01
+        @test sf.Cᵘ⁰ / sf.Cᶜ⁰ ≈ 0.98 atol=0.01
+        @test sf.Cᵉ⁰ / sf.Cᵘ⁰ ≈ 21.8 atol=0.1
+        @test sf.Cᵘ⁰ / (sf.Cᶜ⁰ + sf.Cᴰ⁰) ≈ 0.183 atol=0.002
+        # and in stable stratification the Prandtl number rises to 2.5
+        @test sf.Cᵘ⁺ / sf.Cᶜ⁺ ≈ 2.47 atol=0.01
+
+        # Keyword promotion and float type
+        mixed = RiDependentStabilityFunctions(Cᵘ⁻ = 1, Riᵟ = 2)
+        @test mixed.Cᵘ⁻ === FT(1)
+        @test mixed.Riᵟ === FT(2)
+        @test mixed.Cᵘ⁰ === FT(0.361)
+        closure32 = TKEBasedTurbulenceClosure(Float32; stability_functions = RiDependentStabilityFunctions())
+        @test closure32.stability_functions isa RiDependentStabilityFunctions{Float32}
+
+        str = sprint(show, closure)
+        @test occursin("RiDependentStabilityFunctions", str)
+        @test occursin("Ri⁰", str)
+        @test occursin("Ri → ∞", sprint(show, sf))
+    end
+
+    @testset "the piecewise-linear ramp and its limits" begin
+        C⁻, C⁰, C⁺, Ri⁰, Riᵟ = FT.((1, 2, 3, 0.25, 1))
+        S(Ri) = stability_ramp(FT(Ri), C⁻, C⁰, C⁺, Ri⁰, Riᵟ)
+        @test S(-1) == C⁻
+        @test S(-Inf) == C⁻
+        @test S(0) == C⁰
+        @test S(0.25) == C⁰
+        @test S(0.75) ≈ (C⁰ + C⁺) / 2
+        @test S(1.25) == C⁺
+        @test S(10) == C⁺
+        @test S(1000) == C⁺
+        @test S(Inf) == C⁺
+        @test S(0) isa FT
+    end
+
+    @testset "in a model: neutral, stable and unstable columns" begin
+        closure = TKEBasedTurbulenceClosure(; catke_parameters()...)
+        sf = closure.stability_functions
+        Cˢ = closure.mixing_length.Cˢ
+        e₀ = FT(0.5)
+
+        # Neutral shear: Ri = 0, the neutral endpoints, and dissipation Cᴰ⁰ √e / (Cˢ z)
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        set!(model; θ = 300, u = z -> 0.01 * z)
+        set_tke!(model, e₀)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        Kᵉ = column(model.closure_fields.Kᵉ)
+        Lᵉ = column(model.closure_fields.Lᵉ)
+        @test all(Kᵘ[interior_faces] .≈ sf.Cᵘ⁰ .* Cˢ .* zf[interior_faces] .* sqrt(e₀))
+        @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᶜ⁰ / sf.Cᵘ⁰)
+        @test all(Kᵉ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᵉ⁰ / sf.Cᵘ⁰)
+        @test all(Lᵉ .≈ -sf.Cᴰ⁰ * sqrt(e₀) ./ (Cˢ .* zc))
+
+        # Strong stratification and weak shear: Ri far beyond the ramp, the stable asymptotes
+        set!(model; θ = z -> 300 + 0.03 * z, u = z -> 1e-3 * z)
+        set_tke!(model, e₀)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        Ri = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.velocities, model.closure_fields.N²)))
+        @test all(Ri[interior_faces] .> sf.Ri⁰ + sf.Riᵟ)
+        @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᶜ⁺ / sf.Cᵘ⁺)
+
+        # Unstable stratification with shear: Ri < 0, the unstable endpoints
+        set!(model; θ = z -> 300 - 0.01 * z, u = z -> 0.01 * z)
+        set_tke!(model, e₀)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        Ri = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.velocities, model.closure_fields.N²)))
+        @test all(Ri[interior_faces] .< 0)
+        @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᶜ⁻ / sf.Cᵘ⁻)
+    end
+
+    @testset "a windless column with stable and unstable layers stays finite" begin
+        # No shear, so Ri = ±1000 at every interface and the sign changes at mid-depth. The
+        # reconstruction to the cell center there averages to zero — the neutral values — where
+        # ±Inf would have given NaN and switched the dissipation off.
+        closure = TKEBasedTurbulenceClosure(; catke_parameters()...)
+        sf = closure.stability_functions
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        θᵢ(z) = 300 - 0.005 * min(z, Lz / 2) + 0.01 * max(0, z - Lz / 2)
+        set!(model; θ = θᵢ)
+        set_tke!(model, FT(0.5))
+
+        Ri = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.velocities, model.closure_fields.N²)))
+        @test all(abs.(Ri[interior_faces]) .== 1000)
+        @test any(Ri[interior_faces] .< 0) && any(Ri[interior_faces] .> 0)
+
+        Lᵉ = column(model.closure_fields.Lᵉ)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        @test all(isfinite, Lᵉ)
+        @test all(Lᵉ .< 0)
+        @test all(isfinite, Kᵘ)
+
+        for _ in 1:10
+            time_step!(model, 10)
+        end
+        ρe = column(model.tracers.ρe)
+        @test all(isfinite, ρe)
+        @test all(ρe .≥ 0)
+    end
+
+    @testset "with the moist static stability" begin
+        closure = TKEBasedTurbulenceClosure(; catke_parameters()..., static_stability = MoistStaticStability())
+        microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+        model = AtmosphereModel(grid; closure, microphysics, advection = nothing)
+        set!(model; θ = 288, qᵗ = z -> ifelse(z < Lz / 2, 4e-3, 13e-3), u = z -> 0.005 * z)
+        set_tke!(model, FT(0.1))
+        for _ in 1:5
+            time_step!(model, 10)
+        end
+        @test all(isfinite, column(model.tracers.ρe))
+        @test all(isfinite, column(model.closure_fields.Kᶜ))
+    end
+end
