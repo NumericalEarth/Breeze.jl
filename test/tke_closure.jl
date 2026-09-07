@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, mixing_lengthᶜᶜᶠ
+using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, mixing_lengthᶜᶜᶠ, absorb_stratification_coefficient
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!, time_discretization
 using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, ExplicitTimeDiscretization,
@@ -33,27 +33,30 @@ end
 
     @testset "defaults and the constants they imply" begin
         sf = closure.stability_functions
-        @test closure.mixing_length.Cᴺ ≈ 0.76
-        @test (sf.Cᵘ, sf.Cᶜ, sf.Cᵉ, sf.Cᴰ) == FT.((0.196, 0.265, 0.392, 0.295))
+        Cˢ = closure.mixing_length.Cˢ
+        @test Cˢ ≈ 1.316
+        @test (sf.Cᵘ, sf.Cᶜ, sf.Cᵉ, sf.Cᴰ) == FT.((0.149, 0.201, 0.298, 0.388))
         @test closure.minimum_tke == FT(1e-6)
         @test closure.negative_tke_damping_time_scale == FT(60)
         @test isinf(closure.maximum_viscosity)
         @test isinf(closure.maximum_tracer_diffusivity)
         @test isinf(closure.maximum_tke_diffusivity)
 
-        # The neutral log layer: von Kármán constant, surface TKE, Prandtl number
-        @test (sf.Cᵘ^3 / sf.Cᴰ)^(1/4) ≈ 0.40 atol=0.005
+        # The neutral log layer: von Kármán constant, surface TKE, Prandtl number; and the
+        # stratified steady state: the critical Richardson number
+        @test Cˢ * (sf.Cᵘ^3 / sf.Cᴰ)^(1/4) ≈ 0.40 atol=0.005
         @test 1 / sqrt(sf.Cᵘ * sf.Cᴰ) ≈ 4.2 atol=0.05
         @test sf.Cᵘ / sf.Cᶜ ≈ 0.74 atol=0.005
+        @test sf.Cᵘ / (sf.Cᶜ + sf.Cᴰ) ≈ 0.25 atol=0.005
     end
 
     @testset "keyword arguments, promotion and float type" begin
-        closure = TKEBasedTurbulenceClosure(; mixing_length = TKEMixingLength(Cᴺ = 1),
+        closure = TKEBasedTurbulenceClosure(; mixing_length = TKEMixingLength(Cˢ = 1),
                                               stability_functions = ConstantStabilityFunctions(Cᵘ = 0.3, Cᶜ = 0.3, Cᵉ = 1, Cᴰ = 1),
                                               maximum_viscosity = 100,
                                               minimum_tke = 1e-8,
                                               negative_tke_damping_time_scale = 10minutes)
-        @test closure.mixing_length.Cᴺ === FT(1)
+        @test closure.mixing_length.Cˢ === FT(1)
         @test closure.stability_functions.Cᵘ === FT(0.3)
         @test closure.stability_functions.Cᵉ === FT(1)
         @test closure.maximum_viscosity === FT(100)
@@ -75,11 +78,11 @@ end
         @test isbits(ConstantStabilityFunctions())
         @test summary(closure) == "TKEBasedTurbulenceClosure{VerticallyImplicitTimeDiscretization}"
         str = sprint(show, closure)
-        @test occursin("Cᴺ", str)
+        @test occursin("Cˢ", str)
         @test occursin("ConstantStabilityFunctions", str)
         @test occursin("minimum_tke", str)
         @test occursin("Cᴰ", sprint(show, ConstantStabilityFunctions()))
-        @test occursin("Cᴺ", sprint(show, TKEMixingLength()))
+        @test occursin("Cˢ", sprint(show, TKEMixingLength()))
     end
 end
 
@@ -137,17 +140,19 @@ column(field) = Array(interior(field, 1, 1, :))
         Kᶜ = column(model.closure_fields.Kᶜ)
         Kᵉ = column(model.closure_fields.Kᵉ)
         sf = closure.stability_functions
+        Cˢ = closure.mixing_length.Cˢ
         interior_faces = 2:Nz
 
-        # In neutral air the mixing length is the height above the surface, with two boundary
-        # subtleties: the wall distance is floored at the thickness of the cell below (as in
-        # CATKE), so the surface face gets ℓ ~ Δz rather than zero — reduced further where the
-        # surface-face stratification stencil reaches into the halo — and the top face is unmasked.
+        # In neutral air the mixing length is Cˢ times the height above the surface, with two
+        # boundary subtleties: the wall distance is floored at the thickness of the cell below (as
+        # in CATKE), so the surface face gets ℓ ~ Cˢ Δz rather than zero — reduced further where
+        # the surface-face stratification stencil reaches into the halo — and the top face is
+        # unmasked.
         ℓ = column(diagnosed_mixing_length(model))
         Δz = Lz / Nz
-        @test 0 < ℓ[1] ≤ Δz
-        @test ℓ[Nz+1] ≈ Lz
-        @test all(ℓ[interior_faces] .≈ zf[interior_faces])
+        @test 0 < ℓ[1] ≤ Cˢ * Δz
+        @test ℓ[Nz+1] ≈ Cˢ * Lz
+        @test all(ℓ[interior_faces] .≈ Cˢ .* zf[interior_faces])
 
         # Kᵘ = Cᵘ ℓ √e, masked on the boundary faces
         @test Kᵘ[1] == 0
@@ -170,16 +175,60 @@ column(field) = Array(interior(field, 1, 1, :))
         θ = column(model.formulation.potential_temperature)
         g = model.thermodynamic_constants.gravitational_acceleration
         Δz = Lz / Nz
-        Cᴺ = closure.mixing_length.Cᴺ
+        Cˢ = closure.mixing_length.Cˢ
 
         for k in 2:Nz
             N² = g * (log(θ[k]) - log(θ[k-1])) / Δz
-            ℓᴺ = Cᴺ * sqrt(e₀) / sqrt(N²)
-            @test ℓ[k] ≈ min(zf[k], ℓᴺ) rtol=1e-5
+            ℓᴺ = sqrt(e₀) / sqrt(N²)
+            @test ℓ[k] ≈ min(Cˢ * zf[k], ℓᴺ) rtol=1e-5
         end
 
         # Stratification limits the length well above the surface
-        @test ℓ[Nz] < zf[Nz] / 2
+        @test ℓ[Nz] < Cˢ * zf[Nz] / 2
+    end
+
+    @testset "equivalence with the ℓ = min(z, Cᴺ √e / N) normalization" begin
+        # The parameters of the earlier normalization — Nakanishi & Niino's coefficients with
+        # Deardorff's Cᴺ on the stratification length — mapped through the one named conversion
+        # must reproduce that closure exactly: Kᵘ = Cᵘ ℓ √e and ω = Cᴰ √e / ℓ with
+        # ℓ = min(z, Cᴺ √e / N), here written out at the faces and centers.
+        Cᴺ = FT(0.76)
+        legacy = ConstantStabilityFunctions(Cᵘ = 0.196, Cᶜ = 0.265, Cᵉ = 0.392, Cᴰ = 0.295)
+        mixing_length, stability_functions = absorb_stratification_coefficient(Cᴺ, legacy)
+        mapped = TKEBasedTurbulenceClosure(; mixing_length, stability_functions)
+        @test mapped.mixing_length.Cˢ ≈ 1 / Cᴺ
+        @test mapped.stability_functions.Cᵘ * mapped.mixing_length.Cˢ ≈ legacy.Cᵘ
+        @test mapped.stability_functions.Cᴰ / mapped.mixing_length.Cˢ ≈ legacy.Cᴰ
+
+        model = AtmosphereModel(grid; closure = mapped, advection = nothing)
+        e₀ = FT(0.5)
+        Γ = FT(0.005)
+        set!(model; θ = z -> 300 + Γ * z)
+        set_tke!(model, e₀)
+
+        θ = column(model.formulation.potential_temperature)
+        g = model.thermodynamic_constants.gravitational_acceleration
+        Δz = Lz / Nz
+        N² = [g * (log(θ[k]) - log(θ[k-1])) / Δz for k in 2:Nz]
+        ℓᶠ = [min(zf[k], Cᴺ * sqrt(e₀) / sqrt(N²[k-1])) for k in 2:Nz]
+
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        Kᵉ = column(model.closure_fields.Kᵉ)
+        @test all(isapprox.(Kᵘ[2:Nz], legacy.Cᵘ .* ℓᶠ .* sqrt(e₀); rtol = 1e-5))
+        @test all(isapprox.(Kᶜ[2:Nz], legacy.Cᶜ .* ℓᶠ .* sqrt(e₀); rtol = 1e-5))
+        @test all(isapprox.(Kᵉ[2:Nz], legacy.Cᵉ .* ℓᶠ .* sqrt(e₀); rtol = 1e-5))
+
+        # The sink rate at the interior centers: dissipation with N² and B = -Kᶜ N² reconstructed
+        # from the two adjacent faces, plus the negative buoyancy flux divided by e
+        Lᵉ = column(model.closure_fields.Lᵉ)
+        zc = znodes(grid, Center())
+        for k in 2:Nz-1
+            N²ᶜ = (N²[k-1] + N²[k]) / 2
+            ℓᶜ = min(zc[k], Cᴺ * sqrt(e₀) / sqrt(N²ᶜ))
+            B = -(Kᶜ[k] * N²[k-1] + Kᶜ[k+1] * N²[k]) / 2
+            @test Lᵉ[k] ≈ -(legacy.Cᴰ * sqrt(e₀) / ℓᶜ - B / e₀) rtol=1e-5
+        end
     end
 
     @testset "diffusivity caps" begin
@@ -224,11 +273,12 @@ column(field) = Array(interior(field, 1, 1, :))
         @test model.closure_fields.tupled_implicit_linear_coefficients.ρe === model.closure_fields.Lᵉ
         @test model.closure_fields.tupled_implicit_linear_coefficients.ρθ isa Oceananigans.Fields.ZeroField
 
-        # Neutral air, no buoyancy flux: Lᵉ = - Sᴰ √e / ℓ with ℓ = z at the cell centers
+        # Neutral air, no buoyancy flux: Lᵉ = - Sᴰ √e / ℓ with ℓ = Cˢ z at the cell centers
         Lᵉ = column(model.closure_fields.Lᵉ)
         zc = znodes(grid, Center())
         Cᴰ = closure.stability_functions.Cᴰ
-        @test all(Lᵉ .≈ -Cᴰ * sqrt(e₀) ./ zc)
+        Cˢ = closure.mixing_length.Cˢ
+        @test all(Lᵉ .≈ -Cᴰ * sqrt(e₀) ./ (Cˢ .* zc))
         @test all(Lᵉ .< 0)
 
         # Below the minimum TKE the dissipation rate keeps following √e — the floor applies to
@@ -237,7 +287,7 @@ column(field) = Array(interior(field, 1, 1, :))
         @test e₋ < closure.minimum_tke
         set_tke!(model, e₋)
         Lᵉ = column(model.closure_fields.Lᵉ)
-        @test all(Lᵉ .≈ -Cᴰ * sqrt(e₋) ./ zc)
+        @test all(Lᵉ .≈ -Cᴰ * sqrt(e₋) ./ (Cˢ .* zc))
     end
 
     @testset "the sources enter the stage tendency" begin
@@ -264,7 +314,7 @@ column(field) = Array(interior(field, 1, 1, :))
 
     @testset "dissipation decays TKE at the analytic rate" begin
         # No TKE diffusion, no wind, no stratification: each cell decays as ∂ₜe = -Cᴰ e^{3/2}/ℓ
-        # with ℓ = z, i.e. e(t) = (e₀^{-1/2} + Cᴰ t / 2ℓ)^{-2}
+        # with ℓ = Cˢ z, i.e. e(t) = (e₀^{-1/2} + Cᴰ t / 2ℓ)^{-2}
         undiffused = TKEBasedTurbulenceClosure(maximum_tke_diffusivity = 0)
         model = AtmosphereModel(grid; closure = undiffused, advection = nothing)
         e₀ = FT(1)
@@ -280,8 +330,9 @@ column(field) = Array(interior(field, 1, 1, :))
         e = column(model.tracers.ρe) ./ column(model.dynamics.reference_state.density)
         zc = znodes(grid, Center())
         Cᴰ = undiffused.stability_functions.Cᴰ
+        Cˢ = undiffused.mixing_length.Cˢ
         t = Nt * Δt
-        e_analytic = @. (e₀^(-1/2) + Cᴰ * t / (2 * zc))^(-2)
+        e_analytic = @. (e₀^(-1/2) + Cᴰ * t / (2 * Cˢ * zc))^(-2)
         # The sinks are implicit per stage, so the decay is first-order accurate in Δt ω ≈ 0.02
         @test all(e .≥ 0)
         @test all(isapprox.(e, e_analytic; rtol = 0.05))

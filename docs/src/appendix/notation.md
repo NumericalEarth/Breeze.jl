@@ -146,7 +146,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
 | ``\ell``                            | `ℓ`    |                                     | A **length scale**, m; the superscript says which one. Bare ``ℓ`` is used locally where only one length scale is in play (the primary mixing length in `TKEBasedTurbulenceClosure`, the divergence-damping scale in `CompressibleEquations`) |
-| ``\ell^N``                          | `ℓᴺ`   |                                     | Stratification length of the mixing length, ``ℓᴺ = Cᴺ \sqrt{e} / N``; the primary length is ``ℓ = \min(z, ℓᴺ)`` |
+| ``\ell^N``                          | `ℓᴺ`   |                                     | Stratification length of the mixing length, ``ℓᴺ = \sqrt{e} / N``; the primary length is ``ℓ = \min(Cˢ z, ℓᴺ)`` |
 | ``\ell^u, \ell^c, \ell^e, \ell^D``  | `ℓᵘ`, `ℓᶜ`, `ℓᵉ`, `ℓᴰ` |                    | Mixing lengths for momentum, scalars, TKE and dissipation: ``ℓᵘ = Sᵘ ℓ``, ``ℓᶜ = Sᶜ ℓ``, ``ℓᵉ = Sᵉ ℓ``, ``ℓᴰ = ℓ / Sᴰ`` |
 | ``S^u, S^c, S^e, S^D``              | `Sᵘ`, `Sᶜ`, `Sᵉ`, `Sᴰ` |                    | Stability functions of `TKEBasedTurbulenceClosure`; constants ``Cᵘ, Cᶜ, Cᵉ, Cᴰ`` in `ConstantStabilityFunctions` |
 | ``\ell^r``                          | `ℓʳ`   | `roughness_length`                  | Surface roughness length for momentum, m. Superscript ``r`` elsewhere denotes *rain* (``qʳ``); the two never appear together |

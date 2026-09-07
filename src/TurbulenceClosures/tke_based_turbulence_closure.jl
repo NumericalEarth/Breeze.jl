@@ -3,7 +3,7 @@
 ##### kinetic energy, in the spirit of CATKE (Wagner et al. 2025)
 #####
 #####   Kᵘ = Sᵘ ℓ √e,   Kᶜ = Sᶜ ℓ √e,   Kᵉ = Sᵉ ℓ √e,   ε = Sᴰ e^{3/2} / ℓ
-#####   ℓ  = min(z, Cᴺ √e / N)
+#####   ℓ  = min(Cˢ z, √e / N)
 #####   ∂ₜ(ρe) + ∇·(ρ u e) = ∂z(ρ Kᵉ ∂z e) + ρ (P + B − ε),   P = Kᵘ S²,  B = −Kᶜ N²
 #####
 ##### The stability functions Sᵘ, Sᶜ, Sᵉ, Sᴰ are constants for now (`ConstantStabilityFunctions`);
@@ -41,15 +41,16 @@ momentum, tracers and turbulent kinetic energy are constant multiples of the pri
 and the dissipation length is ``ℓᴰ = ℓ / Cᴰ``, so that ``ε = Cᴰ e^{3/2} / ℓ``.
 
 The turbulent Prandtl number is ``Pr = Cᵘ / Cᶜ`` and the TKE Schmidt number ``Cᵘ / Cᵉ``. In a
-neutral constant-stress layer, where ``ℓ = z``, production balances dissipation at
-``e / u_\\star² = 1 / \\sqrt{Cᵘ Cᴰ}`` with a logarithmic wind profile of von Kármán constant
-``κ = (Cᵘ³ / Cᴰ)^{1/4}``; in stratified steady state the gradient Richardson number is
-``Ri^\\dagger = Cᵘ Cᴺ² / (Cᶜ Cᴺ² + Cᴰ)``, with ``Cᴺ`` the coefficient of the stratification
-length.
+neutral constant-stress layer, where ``ℓ = Cˢ z`` with ``Cˢ`` the wall coefficient of
+[`TKEMixingLength`](@ref), production balances dissipation at ``e / u_\\star² = 1 / \\sqrt{Cᵘ Cᴰ}``
+with a logarithmic wind profile of von Kármán constant ``κ = Cˢ (Cᵘ³ / Cᴰ)^{1/4}``; in stratified
+steady state, where ``ℓ = \\sqrt{e} / N``, the gradient Richardson number is
+``Ri^\\dagger = Cᵘ / (Cᶜ + Cᴰ)``.
 
 The defaults are the Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009)
-re-expressed with the von Kármán constant absorbed (``κ = 0.4``, ``e/u_\\star² = 4.2``,
-``Pr = 0.74``); they are placeholders for calibration.
+re-expressed for this normalization of the mixing length (``κ = 0.4``, ``e/u_\\star² = 4.2``,
+``Pr = 0.74``, ``Ri^\\dagger = 0.25``); they are placeholders for calibration. The conversion from
+the normalization ``ℓ = \\min(z, Cᴺ \\sqrt{e} / N)`` is [`absorb_stratification_coefficient`](@ref).
 
 Fields
 ======
@@ -58,13 +59,13 @@ $(TYPEDFIELDS)
 """
 Base.@kwdef struct ConstantStabilityFunctions{FT}
     "momentum stability function, ``ℓᵘ = Cᵘ ℓ``"
-    Cᵘ :: FT = 0.196
+    Cᵘ :: FT = 0.149
     "tracer stability function, ``ℓᶜ = Cᶜ ℓ``"
-    Cᶜ :: FT = 0.265
+    Cᶜ :: FT = 0.201
     "turbulent kinetic energy stability function, ``ℓᵉ = Cᵉ ℓ``"
-    Cᵉ :: FT = 0.392
+    Cᵉ :: FT = 0.298
     "dissipation stability function, ``ℓᴰ = ℓ / Cᴰ``"
-    Cᴰ :: FT = 0.295
+    Cᴰ :: FT = 0.388
 end
 
 ## `Base.@kwdef` on a `{FT}` struct requires every field to share one type, so mixed
@@ -90,22 +91,25 @@ $(TYPEDEF)
 The primary mixing length of [`TKEBasedTurbulenceClosure`](@ref),
 
 ```math
-ℓ = \\min(z, \\, Cᴺ \\sqrt{e} / N),
+ℓ = \\min(Cˢ z, \\, \\sqrt{e} / N),
 ```
 
-the smaller of the height above the surface ``z`` and the stratification length
-``ℓᴺ = Cᴺ \\sqrt{e} / N``: the distance a parcel with kinetic energy ``e`` travels against a
-stable stratification of buoyancy frequency ``N``. In neutral or unstable air ``ℓᴺ`` is infinite
-and ``ℓ = z``. The height above the surface carries no coefficient; the stability functions set the
-scale of each diffusivity. The default ``Cᴺ = 0.76`` is Deardorff's
-([Deardorff 1980](@cite Deardorff1980)).
+the smaller of the wall length ``Cˢ z``, proportional to the height above the surface ``z``, and
+the stratification length ``ℓᴺ = \\sqrt{e} / N``: the distance a parcel with kinetic energy ``e``
+travels against a stable stratification of buoyancy frequency ``N``. In neutral or unstable air
+``ℓᴺ`` is infinite and ``ℓ = Cˢ z``. The stratification length carries no coefficient — the
+stability functions set the scale of each diffusivity — so ``Cˢ`` alone fixes the ratio of the two
+lengths. The default ``Cˢ = 1.316`` is the reciprocal of Deardorff's coefficient ``0.76`` of the
+stratification length ([Deardorff 1980](@cite Deardorff1980)), which the equivalent normalization
+``ℓ = \\min(z, 0.76 \\sqrt{e} / N)`` carries on ``ℓᴺ`` instead; see
+[`absorb_stratification_coefficient`](@ref).
 """
 Base.@kwdef struct TKEMixingLength{FT}
-    Cᴺ :: FT = 0.76 # coefficient of the stratification length ℓᴺ = Cᴺ √e / N
+    Cˢ :: FT = 1.316 # coefficient of the wall length ℓ = Cˢ z
 end
 
 Base.summary(ml::TKEMixingLength{FT}) where FT = "TKEMixingLength{$FT}"
-Base.show(io::IO, ml::TKEMixingLength) = print(io, summary(ml), " (Cᴺ = ", prettysummary(ml.Cᴺ), ")")
+Base.show(io::IO, ml::TKEMixingLength) = print(io, summary(ml), " (Cˢ = ", prettysummary(ml.Cˢ), ")")
 
 #####
 ##### The closure
@@ -197,9 +201,38 @@ end
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
     TKEBasedTurbulenceClosure(VerticallyImplicitTimeDiscretization(), FT; kw...)
 
-@inline convert_eltype(::Type{FT}, ml::TKEMixingLength) where FT = TKEMixingLength{FT}(convert(FT, ml.Cᴺ))
+@inline convert_eltype(::Type{FT}, ml::TKEMixingLength) where FT = TKEMixingLength{FT}(convert(FT, ml.Cˢ))
 @inline convert_eltype(::Type{FT}, sf::ConstantStabilityFunctions) where FT =
     ConstantStabilityFunctions{FT}(convert(FT, sf.Cᵘ), convert(FT, sf.Cᶜ), convert(FT, sf.Cᵉ), convert(FT, sf.Cᴰ))
+
+"""
+$(TYPEDSIGNATURES)
+
+Convert the parameters of the normalization ``ℓ = \\min(z, Cᴺ \\sqrt{e} / N)`` — a coefficient
+``Cᴺ`` on the stratification length and none on the wall distance — to the present
+``ℓ = \\min(Cˢ z, \\sqrt{e} / N)``, returning the equivalent [`TKEMixingLength`](@ref) and
+[`ConstantStabilityFunctions`](@ref). The two lengths differ by the factor ``Cᴺ`` everywhere, so
+the diffusivities and the dissipation rate are unchanged when ``Cˢ = 1 / Cᴺ``, the diffusivity
+coefficients are multiplied by ``Cᴺ`` and the dissipation coefficient is divided by it.
+
+```jldoctest
+using Breeze
+using Breeze.TurbulenceClosures: absorb_stratification_coefficient
+
+mixing_length, stability_functions =
+    absorb_stratification_coefficient(0.76, ConstantStabilityFunctions(Cᵘ=0.196, Cᶜ=0.265, Cᵉ=0.392, Cᴰ=0.295))
+
+mixing_length
+
+# output
+TKEMixingLength{Float64} (Cˢ = 1.31579)
+```
+"""
+function absorb_stratification_coefficient(Cᴺ, sf::ConstantStabilityFunctions)
+    mixing_length = TKEMixingLength(Cˢ = 1 / Cᴺ)
+    stability_functions = ConstantStabilityFunctions(Cᵘ = Cᴺ * sf.Cᵘ, Cᶜ = Cᴺ * sf.Cᶜ, Cᵉ = Cᴺ * sf.Cᵉ, Cᴰ = sf.Cᴰ / Cᴺ)
+    return mixing_length, stability_functions
+end
 
 #####
 ##### Tracer wiring
@@ -299,13 +332,13 @@ const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:Const
 @inline dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.Cᴰ
 
 #####
-##### Mixing length: ℓ = min(z, Cᴺ √e / N)
+##### Mixing length: ℓ = min(Cˢ z, √e / N)
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-The stratification length ``ℓᴺ = Cᴺ \\sqrt{e} / N`` at (Center, Center, Face), given the specific
+The stratification length ``ℓᴺ = \\sqrt{e} / N`` at (Center, Center, Face), given the specific
 turbulent kinetic energy field `e` at the centers, whose square root — floored at `minimum_tke` —
 is reconstructed at the face; infinite where ``N² ≤ 0``.
 """
@@ -313,8 +346,7 @@ is reconstructed at the face; infinite where ``N² ≤ 0``.
     FT = eltype(grid)
     N² = ∂z_b(i, j, k, grid, buoyancy, tracers)
     N²⁺ = clip(N²)
-    Cᴺ = closure.mixing_length.Cᴺ
-    ℓᴺ = Cᴺ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e) / sqrt(N²⁺)
+    ℓᴺ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e) / sqrt(N²⁺)
     return ifelse(N²⁺ == 0, FT(Inf), ℓᴺ)
 end
 
@@ -322,21 +354,20 @@ end
     FT = eltype(grid)
     N² = ℑbzᵃᵃᶜ(i, j, k, grid, ∂z_b, buoyancy, tracers)
     N²⁺ = clip(N²)
-    Cᴺ = closure.mixing_length.Cᴺ
-    ℓᴺ = Cᴺ * turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
+    ℓᴺ = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
     return ifelse(N²⁺ == 0, FT(Inf), ℓᴺ)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-The primary mixing length ``ℓ = \\min(z, ℓᴺ)`` at (Center, Center, Face), given the specific
+The primary mixing length ``ℓ = \\min(Cˢ z, ℓᴺ)`` at (Center, Center, Face), given the specific
 turbulent kinetic energy field `e` at the centers, whose square root — floored at `minimum_tke` —
 is reconstructed at the face. The same function computes the closure's diffusivities and, evaluated
 in a `KernelFunctionOperation` at (Center, Center, Face), diagnoses ``ℓ`` from the model state.
 """
 @inline function mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, tracers, buoyancy)
-    d = height_above_bottomᶜᶜᶠ(i, j, k, grid)
+    d = closure.mixing_length.Cˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
     ℓᴺ = stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, tracers, buoyancy)
     ℓ = min(d, ℓᴺ)
     return ifelse(isnan(ℓ), d, ℓ)
@@ -348,7 +379,7 @@ $(TYPEDSIGNATURES)
 `mixing_lengthᶜᶜᶠ` at cell centers, where the dissipation lives with ``e``.
 """
 @inline function mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy)
-    d = height_above_bottomᶜᶜᶜ(i, j, k, grid)
+    d = closure.mixing_length.Cˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
     ℓᴺ = stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy)
     ℓ = min(d, ℓᴺ)
     return ifelse(isnan(ℓ), d, ℓ)
@@ -526,7 +557,7 @@ end
 
 function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
     print(io, summary(closure), '\n',
-              "├── mixing_length: ", summary(closure.mixing_length), " (Cᴺ = ", prettysummary(closure.mixing_length.Cᴺ), ")", '\n',
+              "├── mixing_length: ", summary(closure.mixing_length), " (Cˢ = ", prettysummary(closure.mixing_length.Cˢ), ")", '\n',
               "├── stability_functions: ", summary(closure.stability_functions), '\n',
               "│   ├── Cᵘ: ", prettysummary(closure.stability_functions.Cᵘ), '\n',
               "│   ├── Cᶜ: ", prettysummary(closure.stability_functions.Cᶜ), '\n',

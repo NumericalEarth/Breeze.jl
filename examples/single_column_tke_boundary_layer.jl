@@ -67,7 +67,7 @@ cases = (
 # The surface exchanges momentum and heat with the first cell through bulk formulae whose transfer
 # coefficients are built from a roughness length ``ℓʳ`` and the von Kármán constant ``κ``. The
 # closure itself carries no von Kármán constant: its neutral logarithmic layer has the value
-# ``(Cᵘ³ / Cᴰ)^{1/4}`` implied by its stability functions, 0.40 by default.
+# ``Cˢ (Cᵘ³ / Cᴰ)^{1/4}`` implied by its mixing length and stability functions, 0.40 by default.
 #
 # The neutral case prescribes the neutral log-law drag coefficient referenced to the first cell
 # center, ``Cᵈ = [κ / \ln(z₁ / ℓʳ)]²``, which the column builder below computes from its grid. The

@@ -54,18 +54,20 @@ the closure in stable, neutral and convective boundary layers.
 
 ### The mixing length
 
-The primary mixing length ([`TKEMixingLength`](@ref)) is the smaller of the height above the
-surface and the stratification length,
+The primary mixing length ([`TKEMixingLength`](@ref)) is the smaller of a wall length and the
+stratification length,
 
 ```math
-ℓ = \min(z, \, Cᴺ \sqrt{e} / N),
+ℓ = \min(Cˢ z, \, \sqrt{e} / N),
 ```
 
-the distance to the wall and the distance a parcel with kinetic energy ``e`` travels against a
-stable stratification of buoyancy frequency ``N``. The stratification length is infinite in neutral
-and unstable air, where ``ℓ = z``. The height above the surface carries no coefficient of its own
-— the stability functions set the scale of every diffusivity — and ``Cᴺ = 0.76`` by default, after
-[Deardorff (1980)](@cite Deardorff1980).
+``Cˢ`` times the distance to the wall, and the distance a parcel with kinetic energy ``e`` travels
+against a stable stratification of buoyancy frequency ``N``. The stratification length is infinite
+in neutral and unstable air, where ``ℓ = Cˢ z``. It carries no coefficient of its own — the
+stability functions set the scale of every diffusivity — so ``Cˢ`` alone sets the ratio of the two
+lengths. The default ``Cˢ = 1.316`` is the reciprocal of Deardorff's coefficient ``0.76`` of the
+stratification length ([Deardorff (1980)](@cite Deardorff1980)), which the equivalent normalization
+``ℓ = \min(z, 0.76 \sqrt{e} / N)`` carries on the stratification length instead.
 
 ### Stability functions
 
@@ -75,17 +77,17 @@ because they are what the constants mean:
 
 - the turbulent Prandtl number is ``Pr = K^u / K^c = Cᵘ / Cᶜ``, and the TKE Schmidt number
   ``K^u / K^e = Cᵘ / Cᵉ``;
-- in a neutral constant-stress layer, where ``ℓ = z``, the closure is Prandtl's mixing-length
+- in a neutral constant-stress layer, where ``ℓ = Cˢ z``, the closure is Prandtl's mixing-length
   model: production balances dissipation at ``e / u_\star² = 1 / \sqrt{Cᵘ Cᴰ}``, and the wind
-  profile is logarithmic with von Kármán constant ``κ = (Cᵘ³ / Cᴰ)^{1/4}``;
-- in a stably stratified layer far from the surface, where ``ℓ = Cᴺ \sqrt{e} / N``, turbulent
+  profile is logarithmic with von Kármán constant ``κ = Cˢ (Cᵘ³ / Cᴰ)^{1/4}``;
+- in a stably stratified layer far from the surface, where ``ℓ = \sqrt{e} / N``, turbulent
   kinetic energy grows below and decays above the gradient Richardson number
-  ``Ri^\dagger = Cᵘ Cᴺ² / (Cᶜ Cᴺ² + Cᴰ)``.
+  ``Ri^\dagger = Cᵘ / (Cᶜ + Cᴰ)``.
 
-The defaults, ``Cᵘ = 0.196``, ``Cᶜ = 0.265``, ``Cᵉ = 0.392``, ``Cᴰ = 0.295``, are the
-Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009) with the von
-Kármán constant absorbed; they give ``κ = 0.40``, ``e / u_\star² = 4.2``, ``Pr = 0.74`` and
-``Ri^\dagger = 0.25``. They are placeholders for calibration. Richardson-number-dependent stability
+The defaults, ``Cᵘ = 0.149``, ``Cᶜ = 0.201``, ``Cᵉ = 0.298``, ``Cᴰ = 0.388``, are the
+Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009) re-expressed
+for this normalization of the mixing length; they give ``κ = 0.40``, ``e / u_\star² = 4.2``,
+``Pr = 0.74`` and ``Ri^\dagger = 0.25``. They are placeholders for calibration. Richardson-number-dependent stability
 functions, as in CATKE, a convective length scale driven by the surface buoyancy flux, a surface
 flux of turbulent kinetic energy, and a non-local flux are natural extensions.
 
