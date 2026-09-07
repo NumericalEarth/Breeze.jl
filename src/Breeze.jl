@@ -223,7 +223,7 @@ export
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
-    TKEBasedTurbulenceClosure, TKEMixingLength, ConstantStabilityFunctions,
+    TKEBasedTurbulenceClosure, TKEMixingLength, ConstantStabilityFunctions, DryStaticStability,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,

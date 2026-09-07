@@ -20,10 +20,9 @@ using Oceananigans.Units
 using CairoMakie
 
 # The mixing length is not stored by the closure, so we diagnose it below by evaluating the
-# closure's own kernel function, which takes the buoyancy and its tracers as arguments.
+# closure's own kernel function, which takes the specific TKE and the stored static stability.
 
 using Breeze.TurbulenceClosures: mixing_lengthᶜᶜᶠ
-using Oceananigans.TurbulenceClosures: buoyancy_tracers, buoyancy_force
 
 # ## Three published cases
 #
@@ -223,7 +222,7 @@ for (name, simulation) in pairs(simulations)
     U = Field(sqrt(u^2 + v^2))
     e = Field(model.tracers.ρe / model.dynamics.reference_state.density)
     ℓ = Field(KernelFunctionOperation{Center, Center, Face}(mixing_lengthᶜᶜᶠ, model.grid, model.closure,
-                                                              e, buoyancy_tracers(model), buoyancy_force(model)))
+                                                              e, model.closure_fields.N²))
     Jᶿ = Field(- Kᶜ * ∂z(θ))
 
     label = "$name: hᵇˡ = $(round(Int, hᵇˡ)) m, max Kᶜ = $(round(Int, maximum(Kᶜ))) m² s⁻¹"

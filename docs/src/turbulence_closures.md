@@ -69,6 +69,16 @@ lengths. The default ``Cˢ = 1.316`` is the reciprocal of Deardorff's coefficien
 stratification length ([Deardorff (1980)](@cite Deardorff1980)), which the equivalent normalization
 ``ℓ = \min(z, 0.76 \sqrt{e} / N)`` carries on the stratification length instead.
 
+### Static stability
+
+The squared buoyancy frequency ``N²`` enters the closure three times — in the stratification length,
+in the buoyancy flux ``B = -K^c N²``, and (for Richardson-number-dependent stability functions)
+in ``Ri``. It is diagnosed once per time-step stage at the cell interfaces and stored with the
+closure fields as `closure_fields.N²`, so that every term sees the same value. Which ``N²`` is
+diagnosed is the closure's `static_stability`: by default [`DryStaticStability`](@ref), the gradient
+``∂_z b = g \, ∂_z \ln θᵨ`` of the buoyancy the dynamics uses, where ``θᵨ`` is the density
+potential temperature, so that liquid and ice water load the air by their mass.
+
 ### Stability functions
 
 In this first version the stability functions are constants ([`ConstantStabilityFunctions`](@ref)),

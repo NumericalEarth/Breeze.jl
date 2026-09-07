@@ -6,15 +6,17 @@ using Oceananigans
 using Oceananigans.TimeSteppers: update_state!, time_discretization
 using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, ExplicitTimeDiscretization,
                                        buoyancy_tracers, buoyancy_force
+using Oceananigans.BuoyancyFormulations: ∂z_b
 using Oceananigans.Units
 using Test
 
 # The mixing length is not stored (as in CATKE): diagnose it the way a script would, by evaluating
-# the closure's own `mixing_lengthᶜᶜᶠ` in a `KernelFunctionOperation` over the model state.
+# the closure's own `mixing_lengthᶜᶜᶠ` in a `KernelFunctionOperation` over the model state and the
+# stored static stability.
 function diagnosed_mixing_length(model)
     e = model.tracers.ρe / model.dynamics.reference_state.density
     op = KernelFunctionOperation{Center, Center, Face}(mixing_lengthᶜᶜᶠ, model.grid, model.closure,
-                                                       e, buoyancy_tracers(model), buoyancy_force(model))
+                                                       e, model.closure_fields.N²)
     return Field(op) # `Field(op)` computes on construction
 end
 
@@ -30,6 +32,7 @@ end
     @test time_discretization(closure) isa VerticallyImplicitTimeDiscretization
     @test closure.mixing_length isa TKEMixingLength{FT}
     @test closure.stability_functions isa ConstantStabilityFunctions{FT}
+    @test closure.static_stability isa DryStaticStability
 
     @testset "defaults and the constants they imply" begin
         sf = closure.stability_functions
@@ -76,10 +79,12 @@ end
         @test isbits(closure)
         @test isbits(TKEMixingLength())
         @test isbits(ConstantStabilityFunctions())
+        @test isbits(DryStaticStability())
         @test summary(closure) == "TKEBasedTurbulenceClosure{VerticallyImplicitTimeDiscretization}"
         str = sprint(show, closure)
         @test occursin("Cˢ", str)
         @test occursin("ConstantStabilityFunctions", str)
+        @test occursin("DryStaticStability", str)
         @test occursin("minimum_tke", str)
         @test occursin("Cᴰ", sprint(show, ConstantStabilityFunctions()))
         @test occursin("Cˢ", sprint(show, TKEMixingLength()))
@@ -118,6 +123,7 @@ column(field) = Array(interior(field, 1, 1, :))
         @test keys(model.closure_fields.tupled_tracer_diffusivities) == (:ρθ, :ρqᵛ, :ρe)
         @test model.closure_fields.tupled_tracer_diffusivities.ρe === model.closure_fields.Kᵉ
         @test model.closure_fields.tupled_tracer_diffusivities.ρθ === model.closure_fields.Kᶜ
+        @test model.closure_fields.N² isa Field{Center, Center, Face}
 
         # A user tracer coexists with the closure's, and naming the closure's tracer is harmless
         model = AtmosphereModel(grid; closure, tracers = :ρc)
@@ -185,6 +191,12 @@ column(field) = Array(interior(field, 1, 1, :))
 
         # Stratification limits the length well above the surface
         @test ℓ[Nz] < Cˢ * zf[Nz] / 2
+
+        # The stored static stability is the dry buoyancy gradient, ∂z_b, computed once per stage
+        N²_stored = column(model.closure_fields.N²)
+        N²_direct = column(Field(KernelFunctionOperation{Center, Center, Face}(∂z_b, grid, buoyancy_force(model), buoyancy_tracers(model))))
+        @test all(N²_stored[2:Nz] .== N²_direct[2:Nz])
+        @test all(N²_stored[2:Nz] .> 0)
     end
 
     @testset "equivalence with the ℓ = min(z, Cᴺ √e / N) normalization" begin

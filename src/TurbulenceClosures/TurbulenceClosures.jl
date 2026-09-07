@@ -2,7 +2,8 @@ module TurbulenceClosures
 
 export TKEBasedTurbulenceClosure,
        TKEMixingLength,
-       ConstantStabilityFunctions
+       ConstantStabilityFunctions,
+       DryStaticStability
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
