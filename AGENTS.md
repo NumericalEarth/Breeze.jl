@@ -98,6 +98,11 @@ form (all prognostics are densities) with two thermodynamic formulations:
 
 Planned: fully compressible formulation, `EntropyThermodynamics` (prognostic `ρη`).
 
+Energy inputs are keyed formulation-agnostically: a `boundary_conditions` or `forcing` entry
+under `ρE` (total energy density; specific alias `E` for forcings) is routed onto whichever
+thermodynamic variable the formulation evolves, converted as that variable requires. `ρs` is a
+key only when static energy is the prognostic, and unrecognized keys raise an `ArgumentError`.
+
 ## Common Pitfalls
 
 1. **Type instability** in kernels — ruins GPU performance

@@ -149,10 +149,10 @@ Cᵛ = 1.2e-3
 Uᵍ = 1  # Gustiness [m/s]
 
 ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, gustiness=Uᵍ, surface_temperature=Tₛ)
-ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, gustiness=Uᵍ, surface_temperature=Tₛ)
+ρqᵉ_flux = BulkVaporFlux(coefficient=Cᵛ, gustiness=Uᵍ, surface_temperature=Tₛ)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
+ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_flux)
 ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=Uᵍ))
 
 # ## Microphysics
@@ -168,7 +168,7 @@ microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 # equilibrium: ozone absorbs shortwave radiation and the coarse upper cells
 # respond strongly. A Newtonian relaxation of temperature toward the initial
 # profile above 8 km keeps the stratosphere anchored without affecting the
-# tropospheric dynamics. We apply this as an energy forcing on `ρs`, which
+# tropospheric dynamics. We apply this as an energy forcing on `ρE`, which
 # Breeze automatically converts to a `ρθ` tendency.
 
 Tᵣ = reference_state.temperature
@@ -189,18 +189,18 @@ end
 sponge = Forcing(stratospheric_relaxation; discrete_form=true,
                  parameters=(; Tᵣ, ρᵣ, cᵖᵈ, τ=τ_sponge))
 
-forcing = (; ρs=sponge)
+forcing = (; ρE=sponge)
 
 # ## Model assembly
 
 coriolis = FPlane(; latitude)
-boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs)
+boundary_conditions = (ρθ=ρθ_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs)
 
 weno_order = 5
 momentum_advection = WENO(order=weno_order)
 
 scalar_advection = (ρθ  = WENO(order=weno_order),
-                    ρqᵗ = WENO(order=weno_order, bounds=(0, 1)))
+                    ρqᵉ = WENO(order=weno_order, bounds=(0, 1)))
 
 model = AtmosphereModel(grid; dynamics, microphysics, radiation, forcing,
                         momentum_advection, scalar_advection,

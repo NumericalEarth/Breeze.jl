@@ -22,6 +22,7 @@ export
     # Thermodynamic formulation interface (formulation types exported by their respective modules)
     thermodynamic_density_name,
     thermodynamic_density,
+    total_energy_density_name,
     DefaultTemperatureSolver,
     default_temperature_solver,
     # Helpers

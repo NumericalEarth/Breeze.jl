@@ -27,7 +27,8 @@ export BulkDragFunction,
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density,
                           standard_pressure, boundary_conditions_reference_state,
-                          default_drag_surface_temperature
+                          default_drag_surface_temperature, thermodynamic_density_name,
+                          total_energy_density_name
 using ..AtmosphereModels.Diagnostics: VirtualPotentialTemperature, saturation_total_specific_moisture
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity, dry_air_gas_constant, vapor_gas_constant,
@@ -154,16 +155,16 @@ This function walks through all boundary conditions and calls
 `materialize_atmosphere_boundary_condition` on each one, allowing specialized handling for
 bulk flux boundary conditions and other atmosphere-specific boundary condition types.
 
-If `formulation` is `:LiquidIcePotentialTemperature` and `ρs` boundary conditions are provided,
-they are automatically converted to `ρθ` boundary conditions using `EnergyFluxBoundaryCondition`.
+Boundary conditions supplied under the energy key `ρE` are first routed onto the prognostic
+thermodynamic variable of `formulation` by [`convert_energy_bcs`](@ref).
 """
 function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
                                                                            dynamics, microphysics, surface_pressure,
                                                                            thermodynamic_constants,
                                                                            microphysical_fields, specific_prognostic_moisture, temperature)
 
-    # Convert ρs boundary conditions to ρθ for potential temperature formulations
-    boundary_conditions = convert_energy_to_theta_bcs(boundary_conditions, formulation, thermodynamic_constants)
+    # Route energy (ρE) boundary conditions onto the prognostic thermodynamic variable
+    boundary_conditions = convert_energy_bcs(boundary_conditions, formulation)
 
     materialized = Dict{Symbol, Any}()
     for (name, fbcs) in pairs(boundary_conditions)
@@ -176,11 +177,8 @@ function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(bound
 end
 
 #####
-##### Convert ρs boundary conditions to ρθ for potential temperature formulations
+##### Route energy (ρE) boundary conditions onto the thermodynamic variable
 #####
-
-const θFormulation = Union{Val{:LiquidIcePotentialTemperature}, Val{:θ}}
-const sFormulation = Union{Val{:StaticEnergy}, Val{:s}, Val{:ρs}}
 
 # Check if FieldBoundaryConditions has any non-default values
 has_nondefault_bcs(::Nothing) = false
@@ -197,47 +195,67 @@ function has_nondefault_bcs(fbcs::FieldBoundaryConditions)
     return false
 end
 
-# Validate: error if BOTH ρθ and ρs have non-default BCs
-function validate_thermodynamic_bcs(bcs)
-    has_ρθ = :ρθ ∈ keys(bcs) && has_nondefault_bcs(bcs.ρθ)
-    has_ρs = :ρs ∈ keys(bcs) && has_nondefault_bcs(bcs.ρs)
-    if has_ρθ && has_ρs
-        throw(ArgumentError("Cannot specify boundary conditions on both ρθ and ρs. " *
-                            "Use ρs for energy fluxes or ρθ for potential temperature fluxes, but not both."))
+# Error if both the thermodynamic density and ρE carry non-default boundary conditions: the
+# two would be summed into one flux on the same field, which is never what a caller means.
+function validate_energy_bcs(bcs, ρᵡ_name)
+    has_ρᵡ = ρᵡ_name ∈ keys(bcs) && has_nondefault_bcs(bcs[ρᵡ_name])
+    has_ρE = total_energy_density_name ∈ keys(bcs) && has_nondefault_bcs(bcs[total_energy_density_name])
+
+    if has_ρᵡ && has_ρE
+        throw(ArgumentError("Cannot specify boundary conditions on both $ρᵡ_name and ρE. " *
+                            "Use ρE for energy fluxes, or $ρᵡ_name for fluxes of the prognostic " *
+                            "thermodynamic variable itself, but not both."))
     end
+
     return nothing
 end
 
-# Fallback: no conversion (but validate)
-function convert_energy_to_theta_bcs(bcs, formulation, constants)
-    validate_thermodynamic_bcs(bcs)
-    return bcs
+"""
+$(TYPEDSIGNATURES)
+
+Assemble the boundary conditions of the prognostic thermodynamic density of `formulation`:
+move any conditions supplied under the energy key `ρE` (see
+[`total_energy_density_name`](@ref AtmosphereModels.total_energy_density_name)) onto it,
+converting the energy flux as that variable requires, and tell any bulk sensible-heat flux
+which surface difference to form. The `ρE` entry is dropped — it names an interface, not a
+field.
+"""
+function convert_energy_bcs(bcs, formulation)
+    ρᵡ_name = thermodynamic_density_name(formulation)
+    validate_energy_bcs(bcs, ρᵡ_name)
+    ρᵡ = Val(ρᵡ_name)
+
+    ρE_bcs = get(bcs, total_energy_density_name, nothing)
+    bcs = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== total_energy_density_name)
+
+    ρᵡ_bcs = if has_nondefault_bcs(ρE_bcs)
+        energy_bcs_to_thermodynamic_bcs(ρE_bcs, ρᵡ)
+    else
+        get(bcs, ρᵡ_name, FieldBoundaryConditions())
+    end
+
+    # `BulkSensibleHeatFlux` forms its surface difference in the prognostic variable itself,
+    # whether it arrived under `ρE` or under that variable's own key.
+    ρᵡ_bcs = set_sensible_heat_formulation_bcs(ρᵡ_bcs, sensible_heat_flux_formulation(ρᵡ))
+
+    return merge(bcs, NamedTuple{(ρᵡ_name,)}((ρᵡ_bcs,)))
 end
 
-# Convert ρs → ρθ for potential temperature formulations
-function convert_energy_to_theta_bcs(bcs, formulation::θFormulation, constants)
-    validate_thermodynamic_bcs(bcs)
-    :ρs ∈ keys(bcs) || return bcs
-    has_nondefault_bcs(bcs.ρs) || return bcs
+# ρθ: an energy flux 𝒬 enters as the potential temperature flux Jᶿ = 𝒬 / cᵖᵐ, applied by
+# `EnergyFluxBoundaryCondition`.
+energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρθ}) = energy_to_theta_bcs(ρE_bcs)
 
-    ρs_bcs = set_sensible_heat_formulation_bcs(bcs.ρs, PotentialTemperatureFlux())
-    ρθ_bcs = energy_to_theta_bcs(ρs_bcs)
-    remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρs)
-    return merge(remaining, (; ρθ=ρθ_bcs))
-end
+# ρs: static energy is an energy per unit mass, so an energy flux needs no conversion.
+energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρs}) = ρE_bcs
 
-# Set formulation on BulkSensibleHeatFlux for static energy formulations
-function convert_energy_to_theta_bcs(bcs, formulation::sFormulation, constants)
-    validate_thermodynamic_bcs(bcs)
-    :ρs ∈ keys(bcs) || return bcs
-    has_nondefault_bcs(bcs.ρs) || return bcs
+# A new thermodynamic formulation must say how an energy flux enters its prognostic variable.
+energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{ρᵡ_name}) where ρᵡ_name =
+    throw(ArgumentError("Energy boundary conditions (ρE) are not implemented for the prognostic " *
+                        "thermodynamic variable $ρᵡ_name. Set boundary conditions on $ρᵡ_name directly."))
 
-    ρs_bcs = set_sensible_heat_formulation_bcs(bcs.ρs, StaticEnergyFlux())
-    remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρs)
-    return merge(remaining, (; ρs=ρs_bcs))
-end
-
-convert_energy_to_theta_bcs(bcs, f::Symbol, c) = convert_energy_to_theta_bcs(bcs, Val(f), c)
+# The surface difference Δϕ that a bulk sensible-heat flux forms, per prognostic variable.
+sensible_heat_flux_formulation(::Val{:ρθ}) = PotentialTemperatureFlux()
+sensible_heat_flux_formulation(::Val{:ρs}) = StaticEnergyFlux()
 
 # Materialize FieldBoundaryConditions by walking through each boundary
 function materialize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, dynam, micro, p₀, consts,

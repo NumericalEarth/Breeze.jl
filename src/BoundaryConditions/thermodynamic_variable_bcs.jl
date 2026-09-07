@@ -8,7 +8,7 @@
 
 #####
 ##### EnergyFluxBoundaryConditionFunction: converts energy flux → potential temperature flux
-##### Used when: user specifies ρs BCs but prognostic variable is ρθ
+##### Used when: user specifies ρE BCs but prognostic variable is ρθ
 #####
 
 """
@@ -278,14 +278,15 @@ map_field_boundary_conditions(f, fbcs::FieldBoundaryConditions, args...) =
 ##### Conversion functions: energy ↔ theta boundary conditions
 #####
 
-# Convert ρs BCs → ρθ BCs (for LiquidIcePotentialTemperatureFormulation)
+# Convert ρE BCs → ρθ BCs (for LiquidIcePotentialTemperatureFormulation)
 energy_to_theta_bc(bc) = bc
 energy_to_theta_bc(bc::BulkSensibleHeatFluxBoundaryCondition) = bc
 energy_to_theta_bc(bc::BoundaryCondition{<:Flux}) = EnergyFluxBoundaryCondition(bc.condition)
 
 energy_to_theta_bcs(fbcs::FieldBoundaryConditions) = map_field_boundary_conditions(energy_to_theta_bc, fbcs)
 
-# Convert ρθ BCs → ρs BCs (for diagnostic energy_density with PotentialTemperatureFormulation)
+# Convert ρθ BCs → energy-flux BCs (for the diagnostic `static_energy_density` of a
+# PotentialTemperatureFormulation)
 theta_to_energy_bc(bc) = bc
 # For EnergyFluxBC, extract the original energy flux
 theta_to_energy_bc(bc::EnergyFluxBCType) = BoundaryCondition(Flux(), bc.condition.condition)
@@ -353,3 +354,7 @@ end
 
 set_sensible_heat_formulation_bcs(fbcs::FieldBoundaryConditions, formulation) =
     map_field_boundary_conditions(set_sensible_heat_formulation, fbcs, formulation)
+
+# Anything that is not a `FieldBoundaryConditions` — a nested group of diffusivity BCs,
+# `missing` — carries no bulk sensible-heat flux to configure.
+set_sensible_heat_formulation_bcs(bcs, formulation) = bcs

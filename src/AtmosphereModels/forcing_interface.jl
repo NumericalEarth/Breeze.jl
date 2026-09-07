@@ -12,9 +12,11 @@
 Regularize boundary conditions for an `AtmosphereModel`. This function is extended
 by the `BoundaryConditions` module to provide atmosphere-specific boundary condition handling.
 
-If `formulation` is `:LiquidIcePotentialTemperature` and `ρs` boundary conditions are provided,
-they are automatically converted to `ρθ` boundary conditions by wrapping flux BCs in
-`EnergyFluxBoundaryCondition`, which divides by the local mixture heat capacity.
+Boundary conditions supplied under the energy key `ρE` (see
+[`total_energy_density_name`](@ref)) are routed onto the prognostic thermodynamic variable of
+`formulation`: for `:LiquidIcePotentialTemperature` they become `ρθ` boundary conditions,
+with flux BCs wrapped in `EnergyFluxBoundaryCondition` to divide by the local mixture heat
+capacity; for `:StaticEnergy` they pass through onto `ρs` unconverted.
 
 The `dynamics` argument provides access to the reference state for boundary conditions
 that require it, such as `VirtualPotentialTemperature` diagnostics.

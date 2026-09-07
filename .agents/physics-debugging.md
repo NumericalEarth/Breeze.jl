@@ -6,11 +6,18 @@
 |----------|---------|
 | `T` | Temperature (K) |
 | `θ` | Potential temperature: `θ = T / Π` where `Π = (p/p₀)^κ` |
-| `ρs` | Density × static energy (J/m³) |
+| `ρs` | Density × static energy (J/m³) — prognostic only under `StaticEnergyThermodynamics` |
 | `ρθ` | Density × potential temperature (kg·K/m³) |
+| `ρE` | Density × total energy (J/m³) — the *interface* key for an energy flux or forcing, applied to whichever thermodynamic variable the model evolves |
 
 Before applying forcing: (1) check what variable the paper uses, (2) check working examples,
 (3) check Breeze's prognostic variable, (4) verify units.
+
+An energy input (W/m² at a boundary, W/m³ in the interior) goes under `ρE` — or the specific
+key `E` for forcings — and Breeze converts it for the prognostic variable: divided by `cᵖᵐ`
+(fluxes) or `cᵖᵐ Π` (forcings) for `ρθ`, unconverted for `ρs`. `ρs`/`s` are keys only when
+static energy is the prognostic; both `boundary_conditions` and `forcing` reject any other key
+with an `ArgumentError`.
 
 **Common mistakes**: Applying T tendency to θ, confusing `ρs` with `ρθ`, forgetting Exner function in T↔θ conversion.
 
