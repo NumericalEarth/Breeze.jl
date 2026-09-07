@@ -476,6 +476,21 @@ stability; negative in stable stratification.
 """
 $(TYPEDSIGNATURES)
 
+The dissipation rate ``ε = Sᴰ e^{3/2} / ℓ`` at cell centers, from the specific turbulent kinetic
+energy field `e`, the velocities and the stored static stability `N²`; a diagnostic, evaluated in
+a `KernelFunctionOperation` at (Center, Center, Center) to compare the closure's TKE budget with
+a large-eddy simulation's. Negative ``e`` dissipates nothing.
+"""
+@inline function dissipationᶜᶜᶜ(i, j, k, grid, closure, e, velocities, N²)
+    eᵢ = max(0, @inbounds e[i, j, k])
+    ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, N²)
+    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, N²)
+    return Sᴰ * eᵢ * sqrt(eᵢ) / ℓ
+end
+
+"""
+$(TYPEDSIGNATURES)
+
 The rate at which the sinks of the TKE equation remove turbulent kinetic energy, ``-Lᵉ ≥ 0``:
 the dissipation rate ``ω = Sᴰ \\sqrt{e} / ℓ`` — or, where ``e`` is negative, the damping rate
 ``1/τ`` — plus the negative part of the buoyancy flux divided by ``e``, where there is TKE to

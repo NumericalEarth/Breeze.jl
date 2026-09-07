@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, mixing_lengthᶜᶜᶠ, absorb_stratification_coefficient
+using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, mixing_lengthᶜᶜᶠ, absorb_stratification_coefficient, dissipationᶜᶜᶜ
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!, time_discretization
 using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, ExplicitTimeDiscretization,
@@ -291,6 +291,12 @@ column(field) = Array(interior(field, 1, 1, :))
         Cᴰ = closure.stability_functions.Cᴰ
         Cˢ = closure.mixing_length.Cˢ
         @test all(Lᵉ .≈ -Cᴰ * sqrt(e₀) ./ (Cˢ .* zc))
+
+        # The dissipation diagnostic is the same rate times e
+        e = model.tracers.ρe / model.dynamics.reference_state.density
+        ε = column(Field(KernelFunctionOperation{Center, Center, Center}(dissipationᶜᶜᶜ, grid, closure, e,
+                                                                        model.velocities, model.closure_fields.N²)))
+        @test all(ε .≈ -Lᵉ .* e₀)
         @test all(Lᵉ .< 0)
 
         # Below the minimum TKE the dissipation rate keeps following √e — the floor applies to
