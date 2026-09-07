@@ -219,6 +219,11 @@ function AtmosphereModel(grid;
     all_names = field_names(dynamics, formulation, microphysics, tracers)
     field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
+    # Move microphysics lookup tables to the grid architecture (CPU → GPU) before anything
+    # captures the object: the energy-flux boundary conditions of the potential-temperature
+    # formulation carry it into their halo-filling kernels.
+    microphysics = on_architecture(arch, microphysics)
+
     # Materialize atmosphere-specific boundary conditions (fill in the surface-layer θᵥ
     # diagnostic, thermodynamic constants, route the ρE and ρqᵗ interface keys onto the
     # prognostic fields that carry them). Wall fluxes diagnose their pressure, density and θᵥ
@@ -339,9 +344,6 @@ function AtmosphereModel(grid;
     # grid architecture; a scalar closure just gets `with_tracers`.
     closure = materialize_closure(closure, scalar_names, arch)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
-
-    # Move microphysics lookup tables to the grid architecture (CPU → GPU)
-    microphysics = on_architecture(arch, microphysics)
 
     model = AtmosphereModel(arch,
                             grid,
