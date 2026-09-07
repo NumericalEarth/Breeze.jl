@@ -37,9 +37,9 @@ using Breeze.Microphysics.PredictedParticleProperties:
     rain_riming_rate,
     rime_density,
     P3MicrophysicalState,
-    RainMassWeightedVelocityEvaluator,
-    RainNumberWeightedVelocityEvaluator,
-    RainEvaporationVentilationEvaluator,
+    RainMassWeightedVelocity,
+    RainNumberWeightedVelocity,
+    RainVelocityDiameterIntegral,
     homogeneous_freezing_cloud_rate,
     homogeneous_freezing_rain_rate,
     immersion_freezing_cloud_rate,
@@ -82,7 +82,7 @@ using Oceananigans.Fields: interior
         exact(x) = sum(c * xi for (c, xi) in zip(coefficients, x))
 
         data = [exact(ntuple(d -> ranges[d][1] +
-                                  (i[d] - 1) * (ranges[d][2] - ranges[d][1]) / (points[d] - 1), 5))
+                             (i[d] - 1) * (ranges[d][2] - ranges[d][1]) / (points[d] - 1), 5))
                 for i in CartesianIndices(points)]
         table = make_lookup_table(data, ranges, CPU())
 
@@ -109,8 +109,8 @@ using Oceananigans.Fields: interior
         @test evaluate_at(other, prep) ≈ 2 * evaluate_at(table, prep)
     end
 
-    @testset "RainMassWeightedVelocityEvaluator - monotonicity" begin
-        evaluator = RainMassWeightedVelocityEvaluator()
+    @testset "RainMassWeightedVelocity - monotonicity" begin
+        evaluator = RainMassWeightedVelocity()
 
         # λ_r = 1000 m⁻¹ → D_mean = 1mm (large drops, fast)
         # λ_r = 10000 m⁻¹ → D_mean = 100μm (small drops, slow)
@@ -122,7 +122,7 @@ using Oceananigans.Fields: interior
         @test V_large > V_small  # Larger drops (small λ_r) fall faster
     end
 
-    @testset "RainMassWeightedVelocityEvaluator - analytical comparison" begin
+    @testset "RainMassWeightedVelocity - analytical comparison" begin
         # For simple power law V(D) = ar * D^br (valid ~134μm to 1.5mm):
         # V_mass = ar * Γ(4 + br) / (Γ(4) * λ_r^br)
         # At λ_r = 5000 m⁻¹ (D_mean = 200μm, intermediate drops):
@@ -135,15 +135,15 @@ using Oceananigans.Fields: interior
         # Analytical: V_mass = ar * Γ(4+br) / (Γ(4) * λ^br)
         V_analytical = ar * gamma(4 + br) / (gamma(4) * λ_r^br)
 
-        evaluator = RainMassWeightedVelocityEvaluator()
+        evaluator = RainMassWeightedVelocity()
         V_numerical = evaluator(log10(λ_r))
 
         # Should agree within 30% (power law is approximate; piecewise formula differs)
         @test abs(V_numerical - V_analytical) / V_analytical < 0.30
     end
 
-    @testset "RainNumberWeightedVelocityEvaluator - positive and monotone" begin
-        evaluator = RainNumberWeightedVelocityEvaluator()
+    @testset "RainNumberWeightedVelocity - positive and monotone" begin
+        evaluator = RainNumberWeightedVelocity()
 
         V_large = evaluator(log10(1000.0))
         V_small = evaluator(log10(10000.0))
@@ -153,12 +153,12 @@ using Oceananigans.Fields: interior
         @test V_large > V_small
     end
 
-    @testset "RainEvaporationVentilationEvaluator - large λ_r limit" begin
-        # M3: Evaluator now returns Reynolds integral only: I_Re = ∫ D √Re exp(-λD) dD
+    @testset "RainVelocityDiameterIntegral - large λ_r limit" begin
+        # M3: the quadrature now returns the Reynolds integral only: I_Re = ∫ D √Re exp(-λD) dD
         # At λ_r → ∞ (tiny drops), √Re → 0, so I_Re → 0 (but stays positive).
         # The full evaporation integral is assembled at runtime:
         #   I_evap = f1r/λ² + f2r × Sc^(1/3) × I_Re
-        evaluator = RainEvaporationVentilationEvaluator()
+        evaluator = RainVelocityDiameterIntegral()
 
         λ_r = 1e5   # Large (very tiny drops)
         I_Re = evaluator(log10(λ_r))
@@ -168,8 +168,8 @@ using Oceananigans.Fields: interior
         @test I_Re < 1.0 / λ_r^2   # upper bound: √Re contribution is small for tiny drops
     end
 
-    @testset "RainEvaporationVentilationEvaluator - positive" begin
-        evaluator = RainEvaporationVentilationEvaluator()
+    @testset "RainVelocityDiameterIntegral - positive" begin
+        evaluator = RainVelocityDiameterIntegral()
 
         for log_λ in [2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
             I = evaluator(log_λ)
@@ -508,18 +508,18 @@ using Oceananigans.Fields: interior
     end
 
     #####
-    ##### ProcessRateParameters defaults
+    ##### ProcessRate defaults
     #####
     ##### The immersion-freezing PSD correction is not stored in
-    ##### `ProcessRateParameters`. `immersion_freezing_cloud_rate` evaluates
+    ##### `ProcessRate`. `immersion_freezing_cloud_rate` evaluates
 ##### `psd_correction_spherical_volume` from the locally diagnosed Liu-Daum μᶜˡ,
     ##### so its correction varies with cloud droplet number.
     ##### `immersion_freezing_rain_rate` evaluates the same function at fixed μ_r = 0,
     ##### so the rain correction is constant.
     #####
 
-    @testset "ProcessRateParameters defaults" begin
-        parameters = ProcessRateParameters(Float64)
+    @testset "ProcessRate defaults" begin
+        parameters = ProcessRate(Float64)
 
         @test parameters.reference_air_density ≈ 100000 / (dry_air_gas_constant(ThermodynamicConstants(Float64)) * 273.15) rtol=1e-12
         @test parameters.ice_nucleation_supersaturation_threshold == 0.05

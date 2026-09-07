@@ -38,7 +38,7 @@ is for the bottom; on every wall the drag removes tangential momentum from the d
 
 When a [`FilteredSurfaceVelocities`](@ref) is supplied via `filtered_velocities`,
 *every* field entering the formula — the wind speed `|U|`, the velocity `u`, and the
-virtual potential temperature `θᵥ` used in stability — is read from the filtered
+surface-layer virtual potential temperature difference `Δθᵥ` used in stability — is read from the filtered
 state. The surface density `ρ₀` is computed from the (slowly varying) surface
 temperature and pressure and is not filtered. Temporal filtering of the matching
 velocity is used to mitigate log-layer mismatch in wall-modeled large-eddy
@@ -75,8 +75,9 @@ for `CompressibleDynamics`, which has no equivalent reference profile — pass
 - `gustiness`: Minimum wind speed to prevent singularities when winds are calm (default: `0`)
 - `surface_temperature`: Surface temperature, used to compute `ρ₀` and required when
   using `PolynomialCoefficient` with stability correction. Can be a `Field`,
-  `Function`, or `Number`. A function takes the two coordinates of the wall: `(x, y)` on the
-  bottom and top, `(y, z)` on the west and east, `(x, z)` on the south and north.
+  `Function`, or `Number`. A function takes the non-`Flat` coordinates of the wall followed
+  by the time, as for Oceananigans boundary conditions: `(x, y, t)` on the bottom and top,
+  `(y, z, t)` on the west and east, `(x, z, t)` on the south and north.
   (default: `nothing`)
 - `filtered_velocities`: A [`FilteredSurfaceVelocities`](@ref) for temporally filtered
   wind speed, near-surface velocity, and `θᵥ` in the bulk formula. If `nothing`
@@ -124,16 +125,16 @@ end
 ##### filtered field at the appropriate face location when filtering is enabled.
 #####
 
-@inline function OceananigansBC.getbc(df::BulkDragFunction, a::Integer, b::Integer,
+@inline function OceananigansBC.getbc(df::BulkDragFunction, ℓ::Integer, m::Integer,
                                       grid::AbstractGrid, clock, fields)
     side = df.side
-    i, j, k = near_wall_indices(side, a, b, grid)
-    T₀ = wall_value(side, a, b, df.surface_temperature)
-    u  = near_wall_velocity(side, df.direction, i, j, k, fields, df.filtered_velocities)
-    U² = wall_wind_speed²(side, df.direction, i, j, k, grid, fields, df.filtered_velocities)
+    i, j, k = near_wall_indices(ℓ, m, grid, side)
+    T₀ = wall_value(ℓ, m, grid, side, df.surface_temperature, clock)
+    u  = near_wall_velocity(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
+    U² = wall_wind_speed²(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
     Ũ  = sqrt(U² + df.gustiness^2)
     ρ₀ = surface_density(df.surface_pressure, T₀, df.thermodynamic_constants)
-    Cᴰ = bulk_coefficient(side, i, j, k, grid, df.coefficient, fields, T₀, df.filtered_velocities)
+    Cᴰ = bulk_coefficient(i, j, k, grid, side, df.coefficient, fields, T₀, df.filtered_velocities)
     return outward_flux_sign(side) * ρ₀ * Cᴰ * Ũ * u
 end
 

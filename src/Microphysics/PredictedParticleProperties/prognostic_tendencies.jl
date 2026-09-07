@@ -31,7 +31,7 @@
 #####
 
 @inline liquid_fraction_routing_active(::Nothing) = true
-@inline liquid_fraction_routing_active(parameters::ProcessRateParameters) = parameters.liquid_fraction_active
+@inline liquid_fraction_routing_active(parameters::ProcessRate) = parameters.liquid_fraction_active
 
 """
 $(TYPEDSIGNATURES)
@@ -88,7 +88,7 @@ Rain loses from:
     return tendency_ρqʳ(rates, ρ, nothing)
 end
 
-@inline function tendency_ρqʳ(rates::P3ProcessRates, ρ, parameters::Union{Nothing, ProcessRateParameters})
+@inline function tendency_ρqʳ(rates::P3ProcessRates, ρ, parameters::Union{Nothing, ProcessRate})
     # Phase 1: gains from autoconv, accr, complete_melt; loses from evap
     # Phase 2: gains from shedding; loses from riming, freezing, homogeneous freezing
     # Milbrandt et al. (2025): above-freezing collection and wet growth go to qʷⁱ, NOT rain.
@@ -419,7 +419,7 @@ Loses from:
     return tendency_ρqʷⁱ(rates, ρ, nothing)
 end
 
-@inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ, parameters::Union{Nothing, ProcessRateParameters})
+@inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ, parameters::Union{Nothing, ProcessRate})
     # Include condensation onto and evaporation from the liquid coating.
     # wet_growth_shedding diverts excess wet growth mass from qʷⁱ to rain.
     # Note: rain_warm_collection is zeroed at rate-assembly time in the non-liquid-
