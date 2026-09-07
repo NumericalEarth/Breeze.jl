@@ -61,6 +61,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρ q^{ve}``                         | `ρqᵛᵉ` | `AM.moisture_density`               | Scheme-dependent moisture density: ``ρqᵛ`` or ``ρqᵉ``                          |
 | ``ρ qᵉ``                            | `ρqᵉ`  | `AM.moisture_density`               | Equilibrium moisture density (saturation adjustment schemes)                   |
 | ``ρ qᵛ``                            | `ρqᵛ`  | `AM.moisture_density`               | Vapor density (non-equilibrium schemes)                                        |
+| ``ρ qᵗ``                            | `ρqᵗ`  |                                     | Total moisture density; the `boundary_conditions` and `forcing` key for a water input (specific alias `qᵗ` for forcings), routed onto ``ρqᵛᵉ`` whatever the microphysics calls it |
 | ``qᵛ``                              | `qᵛ`   | `AM.microphysical_fields.qᵛ`        | Vapor mass fraction, a.k.a "specific humidity"                                 |
 | ``qˡ``                              | `qˡ`   | `AM.microphysical_fields.qˡ`        | Liquid mass fraction                                                           |
 | ``qⁱ``                              | `qⁱ`   | `AM.microphysical_fields.qⁱ`        | Ice mass fraction                                                              |

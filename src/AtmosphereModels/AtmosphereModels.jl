@@ -35,6 +35,7 @@ export
     surface_precipitation_flux,
     specific_humidity,
     moisture_prognostic_name,
+    total_moisture_density_name,
     moisture_specific_name,
     specific_prognostic_moisture,
 

@@ -18,6 +18,11 @@ Boundary conditions supplied under the energy key `ρE` (see
 with flux BCs wrapped in `EnergyFluxBoundaryCondition` to divide by the local mixture heat
 capacity; for `:StaticEnergy` they pass through onto `ρs` unconverted.
 
+Conditions supplied under the moisture key `ρqᵗ` (see [`total_moisture_density_name`](@ref))
+are likewise routed onto the moisture density that `microphysics` evolves — `ρqᵛ` or `ρqᵉ`,
+depending on the scheme — without conversion, since water entering the prognostic moisture is
+water entering ``qᵗ`` under any of them.
+
 The `dynamics` argument provides access to the reference state for boundary conditions
 that require it, such as `VirtualPotentialTemperature` diagnostics.
 

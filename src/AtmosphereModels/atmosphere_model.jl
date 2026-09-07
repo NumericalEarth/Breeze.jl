@@ -449,13 +449,22 @@ end
 ##### Boundary condition and forcing name validation
 #####
 
-# `ρs`/`s` name static energy, so they are keys only when static energy is the prognostic
-# thermodynamic variable. An energy input meant for any formulation goes under `ρE`.
-function energy_key_hint(name)
-    name ∈ (:ρs, :s) || return ""
-    return string('\n', "An energy flux or forcing is supplied under ", total_energy_density_name,
-                  " (or E) and applied to the prognostic thermodynamic variable; ", name,
-                  " is a key only when static energy is prognostic (formulation = :StaticEnergy).")
+# `ρs`/`s` name static energy and `ρqᵛ`/`ρqᵉ` name particular moisture variables, so each is a
+# key only under the formulation or microphysics that makes it prognostic. An input meant for
+# any of them goes under the interface key — `ρE` for energy, `ρqᵗ` for water.
+function invalid_key_hint(name)
+    if name ∈ (:ρs, :s)
+        return string('\n', "An energy flux or forcing is supplied under ", total_energy_density_name,
+                      " (or E) and applied to the prognostic thermodynamic variable; ", name,
+                      " is a key only when static energy is prognostic (formulation = :StaticEnergy).")
+    elseif name ∈ (:ρqᵛ, :qᵛ, :ρqᵉ, :qᵉ)
+        return string('\n', "A water flux or forcing is supplied under ", total_moisture_density_name,
+                      " (or qᵗ) and applied to the prognostic moisture variable; ", name,
+                      " is a key only under the microphysics that makes it prognostic, which for ",
+                      "BulkMicrophysics is set by `cloud_formation`.")
+    end
+
+    return ""
 end
 
 """
@@ -463,23 +472,63 @@ $(TYPEDSIGNATURES)
 
 Check that every key of the user-supplied `boundary_conditions` names something that can
 carry them: a prognostic field, a velocity component of dynamics whose velocities are
-prognostic, or the energy key [`total_energy_density_name`](@ref).
+prognostic, or one of the interface keys [`total_energy_density_name`](@ref) and
+[`total_moisture_density_name`](@ref).
 
 An unrecognized key would otherwise be merged in and then never looked up, so a stale one —
 `ρe` after the `e → s` rename, say — would silently materialize default no-flux conditions in
 place of the fluxes the caller asked for.
 """
 function validate_boundary_condition_names(boundary_conditions, field_bc_names)
-    valid_names = tuple(field_bc_names..., total_energy_density_name)
+    valid_names = tuple(field_bc_names..., total_energy_density_name, total_moisture_density_name)
     invalid_names = Tuple(name for name in keys(boundary_conditions) if name ∉ valid_names)
     isempty(invalid_names) && return nothing
 
     msg = string("Invalid boundary_conditions: ", invalid_names, " do not name anything that ",
                  "carries boundary conditions!", '\n',
                  "Boundary conditions may be set on ", valid_names, '.',
-                 mapreduce(energy_key_hint, *, invalid_names))
+                 mapreduce(invalid_key_hint, *, invalid_names))
 
     throw(ArgumentError(msg))
+end
+
+# Every moisture key ends up forcing the same field, so more than one would be summed into a
+# single source — which is never what a caller means, and is ambiguous besides.
+function validate_moisture_forcing(user_forcings, ρq_name, q_name)
+    ρqᵗ = total_moisture_density_name
+    qᵗ = specific_field_name(ρqᵗ)
+    moisture_names = Tuple(name for name in keys(user_forcings) if name ∈ (ρqᵗ, qᵗ, ρq_name, q_name))
+
+    if length(moisture_names) > 1
+        msg = string("Invalid forcing: ", moisture_names, " are all moisture keys, so they would be ",
+                     "summed into a single source for ", ρq_name, '.', '\n',
+                     "Supply exactly one — ", ρqᵗ, " (or ", qᵗ, ") is valid whatever the microphysics.")
+        throw(ArgumentError(msg))
+    end
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Re-key a forcing supplied under the moisture key `ρqᵗ` (see
+[`total_moisture_density_name`](@ref)), or its specific alias `qᵗ`, onto the moisture density
+that `microphysics` actually evolves, so that a setup does not name a variable whose spelling
+depends on the scheme.
+"""
+function route_moisture_forcing(user_forcings, microphysics)
+    ρqᵗ = total_moisture_density_name
+    qᵗ = specific_field_name(ρqᵗ)
+    ρq_name = moisture_prognostic_name(microphysics)
+    q_name = moisture_specific_name(microphysics)
+
+    validate_moisture_forcing(user_forcings, ρq_name, q_name)
+
+    rekey(name) = name === ρqᵗ ? ρq_name :
+                  name === qᵗ  ? q_name  : name
+
+    return NamedTuple{map(rekey, keys(user_forcings))}(values(user_forcings))
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
@@ -505,6 +554,11 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
 
+    # `ρqᵗ` (total moisture) is the scheme-agnostic water key. A water source enters the
+    # prognostic moisture density unconverted whatever the scheme calls it, so — unlike `ρE`,
+    # which the tendency kernels read separately in order to convert it — routing it is a pure
+    # re-key onto that name, done before anything else looks at the forcing keys.
+    user_forcings = route_moisture_forcing(user_forcings, microphysics)
     user_forcing_names = keys(user_forcings)
 
     # `ρE` (total energy) is the formulation-agnostic energy key: a forcing supplied under it
@@ -527,7 +581,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
             msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
                          "The forcing fields are ", forcing_names,
                          "; specific-key aliases are ", valid_specific_names, '.',
-                         energy_key_hint(name))
+                         invalid_key_hint(name))
             throw(ArgumentError(msg))
         end
     end

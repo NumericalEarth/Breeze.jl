@@ -121,11 +121,11 @@ Uᵍ = 1
                                                                gustiness = Uᵍ,
                                                                surface_temperature = T₀))
 
-ρqᵉ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = β*Cᵀ,
+ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = β*Cᵀ,
                                                         gustiness = Uᵍ,
                                                         surface_temperature = T₀))
 
-boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρE=ρE_bcs, ρqᵉ=ρqᵉ_bcs)
+boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρE=ρE_bcs, ρqᵗ=ρqᵗ_bcs)
 nothing #hide
 
 # ## Radiative forcing

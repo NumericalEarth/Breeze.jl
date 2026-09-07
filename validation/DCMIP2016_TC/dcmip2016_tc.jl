@@ -304,9 +304,9 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
     ρv_bcs  = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ, surface_temperature = Ts))
     ρE_bcs  = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient = Cᵀ, gustiness = Uᵍ,
                                                                     surface_temperature = Ts))
-    ρqᵛ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = Cᵀ, gustiness = Uᵍ,
+    ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = Cᵀ, gustiness = Uᵍ,
                                                              surface_temperature = Ts))
-    boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρE = ρE_bcs, ρqᵛ = ρqᵛ_bcs)
+    boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρE = ρE_bcs, ρqᵗ = ρqᵗ_bcs)
 
     model = AtmosphereModel(grid; dynamics, coriolis, microphysics, closure, boundary_conditions,
                             thermodynamic_constants = constants,

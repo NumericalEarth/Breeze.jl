@@ -81,6 +81,7 @@ export
     static_energy_density,
     static_energy,
     total_energy,
+    total_energy_density_name,
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
@@ -88,6 +89,7 @@ export
     total_pressure,
     specific_humidity,
     moisture_prognostic_name,
+    total_moisture_density_name,
     moisture_specific_name,
     specific_prognostic_moisture,
 

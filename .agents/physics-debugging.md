@@ -9,15 +9,24 @@
 | `ρs` | Density × static energy (J/m³) — prognostic only under `StaticEnergyThermodynamics` |
 | `ρθ` | Density × potential temperature (kg·K/m³) |
 | `ρE` | Density × total energy (J/m³) — the *interface* key for an energy flux or forcing, applied to whichever thermodynamic variable the model evolves |
+| `ρqᵛ`, `ρqᵉ` | Prognostic moisture density (kg/m³) — vapor under non-equilibrium cloud formation, equilibrium moisture under saturation adjustment |
+| `ρqᵗ` | Total moisture density (kg/m³) — the *interface* key for a water flux or forcing, applied to whichever moisture variable the scheme evolves |
 
 Before applying forcing: (1) check what variable the paper uses, (2) check working examples,
 (3) check Breeze's prognostic variable, (4) verify units.
 
 An energy input (W/m² at a boundary, W/m³ in the interior) goes under `ρE` — or the specific
 key `E` for forcings — and Breeze converts it for the prognostic variable: divided by `cᵖᵐ`
-(fluxes) or `cᵖᵐ Π` (forcings) for `ρθ`, unconverted for `ρs`. `ρs`/`s` are keys only when
-static energy is the prognostic; both `boundary_conditions` and `forcing` reject any other key
-with an `ArgumentError`.
+(fluxes) or `cᵖᵐ Π` (forcings) for `ρθ`, unconverted for `ρs`.
+
+A water input (kg/m²/s at a boundary, kg/m³/s in the interior) goes under `ρqᵗ` — or the
+specific key `qᵗ` — and is applied to the prognostic moisture unconverted, since water added
+there is water added to `qᵗ` under every scheme.
+
+The specific names are keys only where they are actually prognostic: `ρs`/`s` when static
+energy is the thermodynamic variable, `ρqᵛ` or `ρqᵉ` depending on the microphysics. Supplying
+both an interface key and its target is an error, and both `boundary_conditions` and `forcing`
+reject any unrecognized key with an `ArgumentError` rather than dropping it.
 
 **Common mistakes**: Applying T tendency to θ, confusing `ρs` with `ρθ`, forgetting Exner function in T↔θ conversion.
 

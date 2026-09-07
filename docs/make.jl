@@ -191,7 +191,8 @@ makedocs(
         "Home" => "index.md",
         "Examples" => example_pages,
         "Thermodynamics" => "thermodynamics.md",
-        "AtmosphereModel" => Any[
+        "AtmosphereModel documentation" => Any[
+            "Boundary conditions and forcing" => "atmosphere_model/boundary_conditions_and_forcing.md",
             "Diagnostics" => "atmosphere_model/diagnostics.md",
         ],
         "Microphysics" => Any[

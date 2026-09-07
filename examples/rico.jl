@@ -81,10 +81,10 @@ T₀ = 299.8    # Sea surface temperature (K)
 # currently extends only to constant coefficients (but could expand in the future),
 
 ρE_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
-ρqᵉ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
+ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
 
 ρE_bcs = FieldBoundaryConditions(bottom=ρE_flux)
-ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_flux)
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
@@ -164,7 +164,7 @@ forcing = (; u = (subsidence, geostrophic.u),
              w = sponge,
              qᵉ = (subsidence, qᵉ_large_scale_forcing),
              θ = (subsidence, θ_large_scale_forcing))
-boundary_conditions = (ρE=ρE_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
+boundary_conditions = (ρE=ρE_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
 # ## Model setup

@@ -90,6 +90,75 @@ end
     @test equilibrium_model.moisture_density.boundary_conditions.bottom.condition == FT(100)
 end
 
+@testset "Water boundary conditions under ρqᵗ reach the moisture variable [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100)))
+
+    # `ρqᵗ` names the water input, so the same key works whatever the scheme calls its
+    # prognostic moisture: `ρqᵛ` without microphysics, `ρqᵉ` under saturation adjustment.
+    for microphysics in (nothing, SaturationAdjustment())
+        model = AtmosphereModel(grid; microphysics, boundary_conditions=(; ρqᵗ=bcs))
+        @test model.moisture_density.boundary_conditions.bottom.condition == FT(100)
+
+        # `ρqᵗ` names an interface, not a field: it must not survive into the model
+        @test !(:ρqᵗ ∈ keys(model.timestepper.Gⁿ))
+    end
+
+    # Water enters the prognostic moisture unconverted, so a `ρqᵗ` boundary condition and one
+    # supplied under the scheme's own name give the same thing
+    ρqᵛ_model = AtmosphereModel(grid; boundary_conditions=(; ρqᵛ=bcs))
+    ρqᵗ_model = AtmosphereModel(grid; boundary_conditions=(; ρqᵗ=bcs))
+    @test ρqᵗ_model.moisture_density.boundary_conditions.bottom.condition ==
+          ρqᵛ_model.moisture_density.boundary_conditions.bottom.condition
+
+    # Supplying both would sum them into one flux
+    @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(; ρqᵗ=bcs, ρqᵛ=bcs))
+    @test_throws ArgumentError AtmosphereModel(grid; microphysics=SaturationAdjustment(),
+                                                     boundary_conditions=(; ρqᵗ=bcs, ρqᵉ=bcs))
+end
+
+@testset "Water forcing under ρqᵗ reaches the moisture variable [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    F = FT(1e-4)  # water tendency, kg / m³ / s
+    Δt = FT(1e-3)
+
+    for microphysics in (nothing, SaturationAdjustment())
+        moisture_name = moisture_prognostic_name(microphysics)
+        model = AtmosphereModel(grid; microphysics, forcing=(; ρqᵗ=Returns(F)))
+
+        # The interface key is re-keyed onto the prognostic moisture, and does not linger
+        @test moisture_name ∈ keys(model.forcing)
+        @test !(:ρqᵗ ∈ keys(model.forcing))
+
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀, qᵗ=FT(0.01))
+        ρq = model.moisture_density
+        ρq_before = @allowscalar ρq[2, 2, 2]
+        time_step!(model, Δt)
+
+        # A water source enters unconverted: Δρqᵛᵉ = F Δt
+        @test @allowscalar(ρq[2, 2, 2]) ≈ ρq_before + F * Δt
+    end
+
+    # The specific alias `qᵗ` picks up the reference density, as `E` does for energy
+    model = AtmosphereModel(grid; forcing=(; qᵗ=Returns(F)))
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    set!(model; θ=θ₀, qᵗ=FT(0.01))
+    ρᵣ = @allowscalar model.dynamics.reference_state.density[2, 2, 2]
+    ρq = model.moisture_density
+    ρq_before = @allowscalar ρq[2, 2, 2]
+    time_step!(model, Δt)
+    @test @allowscalar(ρq[2, 2, 2]) ≈ ρq_before + ρᵣ * F * Δt
+
+    # Every moisture key forces the same field, so more than one is ambiguous
+    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; ρqᵗ=Returns(F), ρqᵛ=Returns(F)))
+    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; ρqᵗ=Returns(F), qᵛ=Returns(F)))
+    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; qᵗ=Returns(F), ρqᵛ=Returns(F)))
+end
+
 @testset "Energy forcing under ρE reaches the thermodynamic variable [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
