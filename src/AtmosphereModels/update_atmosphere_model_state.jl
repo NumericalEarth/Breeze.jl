@@ -104,7 +104,7 @@ function Oceananigans.Advection.update_advection!(advection::NamedTuple, model::
         tracer = if name === :momentum
             nothing
         elseif name === θ_name
-            model.formulation.potential_temperature
+            specific_thermodynamic_field(model.formulation)
         elseif name === moist_name
             specific_prognostic_moisture(model)
         elseif haskey(model.tracers, name)
