@@ -7,23 +7,32 @@ $(TYPEDEF)
 
 Wrapper struct for computing buoyancy for [`AtmosphereModel`](@ref)
 in the context of a turbulence closure. Used to interface with Oceananigans
-turbulence closures that require buoyancy gradients.
+turbulence closures that require buoyancy gradients. The microphysics and its fields
+are carried so that the moisture mass fractions — condensate included — can be
+recovered at any grid point through `grid_moisture_fractions`.
 """
-struct AtmosphereModelBuoyancy{D, F, T}
+struct AtmosphereModelBuoyancy{D, F, T, M, MF}
     dynamics :: D
     formulation :: F
     thermodynamic_constants :: T
+    microphysics :: M
+    microphysical_fields :: MF
 end
 
 Adapt.adapt_structure(to, b::AtmosphereModelBuoyancy) =
-    AtmosphereModelBuoyancy(adapt(to, b.dynamics), adapt(to, b.formulation), adapt(to, b.thermodynamic_constants))
+    AtmosphereModelBuoyancy(adapt(to, b.dynamics),
+                            adapt(to, b.formulation),
+                            adapt(to, b.thermodynamic_constants),
+                            adapt(to, b.microphysics),
+                            adapt(to, b.microphysical_fields))
 
 #####
 ##### Buoyancy interface for AtmosphereModel
 #####
 
 OceanTurbulenceClosures.buoyancy_force(model::AtmosphereModel) =
-    AtmosphereModelBuoyancy(model.dynamics, model.formulation, model.thermodynamic_constants)
+    AtmosphereModelBuoyancy(model.dynamics, model.formulation, model.thermodynamic_constants,
+                            model.microphysics, model.microphysical_fields)
 
 # buoyancy_tracers returns tracers needed for:
 # 1. Buoyancy computation (T, qᵗ) used in ∂z_b and AMD viscosity

@@ -62,7 +62,7 @@ end
                           velocities.w, dynamics, temperature_field, specific_prognostic_moisture,
                           microphysics, microphysical_fields, constants)
 
-    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
