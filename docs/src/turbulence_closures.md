@@ -75,13 +75,13 @@ The squared buoyancy frequency ``N²`` enters the closure three times — in the
 in the buoyancy flux ``B = -K^c N²``, and (for Richardson-number-dependent stability functions)
 in ``Ri``. It is diagnosed once per time-step stage at the cell interfaces and stored with the
 closure fields as `closure_fields.N²`, so that every term sees the same value. Which ``N²`` is
-diagnosed is the closure's `static_stability`: by default [`DryStaticStability`](@ref), the gradient
+diagnosed is the closure's `static_stability`. [`DryStaticStability`](@ref) is the gradient
 ``∂_z b = g \, ∂_z \ln θᵨ`` of the buoyancy the dynamics uses, where ``θᵨ`` is the density
 potential temperature, so that liquid and ice water load the air by their mass.
 
-[`MoistStaticStability`](@ref) accounts for saturation. Where the air is subsaturated it is the dry
-gradient; where it is saturated — the nonprecipitating water exceeds the saturation specific
-humidity at the interface — it is the buoyancy frequency of a saturated displacement of
+[`MoistStaticStability`](@ref), the default, accounts for saturation. Where the air is subsaturated
+it is the dry gradient; where it is saturated — the nonprecipitating water exceeds the saturation
+specific humidity at the interface — it is the buoyancy frequency of a saturated displacement of
 [Durran and Klemp (1982)](@cite DurranKlemp1982),
 
 ```math

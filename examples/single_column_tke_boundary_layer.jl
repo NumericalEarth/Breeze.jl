@@ -507,14 +507,14 @@ end
 #
 # Two coefficient sets, and two static stabilities: the dry buoyancy gradient
 # ([`DryStaticStability`](@ref)), which treats a saturated parcel like a dry one, and the saturated
-# buoyancy frequency ([`MoistStaticStability`](@ref)), in which a rising parcel condenses and its
-# latent heating offsets part of the stratification.
+# buoyancy frequency ([`MoistStaticStability`](@ref), the default), in which a rising parcel
+# condenses and its latent heating offsets part of the stratification.
 
 configurations = (
-    NN09 = TKEBasedTurbulenceClosure(),
-    CATKE = TKEBasedTurbulenceClosure(; catke_parameters()...),
-    NN09_moist = TKEBasedTurbulenceClosure(static_stability = MoistStaticStability()),
-    CATKE_moist = TKEBasedTurbulenceClosure(; catke_parameters()..., static_stability = MoistStaticStability()),
+    NN09 = TKEBasedTurbulenceClosure(static_stability = DryStaticStability()),
+    CATKE = TKEBasedTurbulenceClosure(; catke_parameters()..., static_stability = DryStaticStability()),
+    NN09_moist = TKEBasedTurbulenceClosure(),
+    CATKE_moist = TKEBasedTurbulenceClosure(; catke_parameters()...),
 )
 
 configuration_colors = (NN09 = :dodgerblue, CATKE = :orangered, NN09_moist = :dodgerblue, CATKE_moist = :orangered)

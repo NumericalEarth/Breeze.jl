@@ -14,7 +14,8 @@ $(TYPEDEF)
 The static stability of [`TKEBasedTurbulenceClosure`](@ref) as the vertical gradient of the
 buoyancy of the dynamics, ``N² = ∂_z b = g ∂_z \\ln θᵨ`` with ``θᵨ`` the density potential
 temperature: the stratification a parcel feels when displaced without phase change. Condensate
-loading is included; the latent heating of a saturated displacement is not.
+loading is included; the latent heating of a saturated displacement is not. The default is
+[`MoistStaticStability`](@ref), which reduces to this where the air is subsaturated.
 """
 struct DryStaticStability end
 
@@ -33,9 +34,9 @@ gradient `∂z_b` of the model.
 """
 $(TYPEDEF)
 
-The static stability of [`TKEBasedTurbulenceClosure`](@ref) with saturation taken into account: the
-dry buoyancy gradient ``∂_z b`` ([`DryStaticStability`](@ref)) where the air is subsaturated, and
-where it is saturated the buoyancy frequency of a saturated displacement of
+The static stability of [`TKEBasedTurbulenceClosure`](@ref), and its default, with saturation taken
+into account: the dry buoyancy gradient ``∂_z b`` ([`DryStaticStability`](@ref)) where the air is
+subsaturated, and where it is saturated the buoyancy frequency of a saturated displacement of
 [Durran and Klemp (1982)](@cite DurranKlemp1982),
 
 ```math

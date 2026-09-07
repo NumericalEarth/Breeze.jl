@@ -32,7 +32,7 @@ end
     @test time_discretization(closure) isa VerticallyImplicitTimeDiscretization
     @test closure.mixing_length isa TKEMixingLength{FT}
     @test closure.stability_functions isa ConstantStabilityFunctions{FT}
-    @test closure.static_stability isa DryStaticStability
+    @test closure.static_stability isa MoistStaticStability
 
     @testset "defaults and the constants they imply" begin
         sf = closure.stability_functions
@@ -84,7 +84,8 @@ end
         str = sprint(show, closure)
         @test occursin("Cˢ", str)
         @test occursin("ConstantStabilityFunctions", str)
-        @test occursin("DryStaticStability", str)
+        @test occursin("MoistStaticStability", str)
+        @test occursin("DryStaticStability", sprint(show, TKEBasedTurbulenceClosure(static_stability = DryStaticStability())))
         @test occursin("minimum_tke", str)
         @test occursin("Cᴰ", sprint(show, ConstantStabilityFunctions()))
         @test occursin("Cˢ", sprint(show, TKEMixingLength()))
@@ -192,7 +193,8 @@ column(field) = Array(interior(field, 1, 1, :))
         # Stratification limits the length well above the surface
         @test ℓ[Nz] < Cˢ * zf[Nz] / 2
 
-        # The stored static stability is the dry buoyancy gradient, ∂z_b, computed once per stage
+        # The stored static stability of this dry column is the buoyancy gradient ∂z_b, computed
+        # once per stage: the default moist static stability reduces to it in subsaturated air
         N²_stored = column(model.closure_fields.N²)
         N²_direct = column(Field(KernelFunctionOperation{Center, Center, Face}(∂z_b, grid, buoyancy_force(model), buoyancy_tracers(model))))
         @test all(N²_stored[2:Nz] .== N²_direct[2:Nz])

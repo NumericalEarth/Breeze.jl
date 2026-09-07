@@ -8,9 +8,9 @@
 #####
 ##### The static stability N² is diagnosed once per stage at the cell interfaces and stored with the
 ##### closure fields, so that the mixing length, the buoyancy flux and the stability functions all
-##### see one value. `DryStaticStability` takes N² = ∂z_b, the gradient of the buoyancy of the
-##### dynamics (condensate loading included); `MoistStaticStability` switches to the buoyancy
-##### frequency of a saturated displacement where the air is saturated (static_stability.jl).
+##### see one value. `MoistStaticStability` (the default) is the gradient of the buoyancy of the
+##### dynamics, ∂z_b, where the air is subsaturated, and the buoyancy frequency of a saturated
+##### displacement where it is saturated; `DryStaticStability` is ∂z_b everywhere (static_stability.jl).
 #####
 ##### The stability functions Sᵘ, Sᶜ, Sᵉ, Sᴰ are either constants (`ConstantStabilityFunctions`)
 ##### or piecewise-linear functions of the Richardson number in the form of CATKE
@@ -149,8 +149,8 @@ kinetic energy, ``S²`` the squared vertical shear, ``N²`` the squared buoyancy
 primary mixing length ([`TKEMixingLength`](@ref)), and ``Sᵘ, Sᶜ, Sᵉ, Sᴰ`` stability functions
 ([`ConstantStabilityFunctions`](@ref) or [`RiDependentStabilityFunctions`](@ref)). ``N²`` is
 diagnosed once per time-step stage at the cell
-interfaces by the `static_stability` component ([`DryStaticStability`](@ref) by default, or
-[`MoistStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
+interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default, or
+[`DryStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
 the tracer `ρe`, which the
 closure adds to the model; it is advected and vertically diffused like every other scalar, and the
 closure applies the local production, buoyancy flux and dissipation.
@@ -197,7 +197,7 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    FT = Oceananigans.defaults.FloatType;
                                    mixing_length = TKEMixingLength(),
                                    stability_functions = ConstantStabilityFunctions(),
-                                   static_stability = DryStaticStability(),
+                                   static_stability = MoistStaticStability(),
                                    maximum_viscosity = Inf,
                                    maximum_tracer_diffusivity = Inf,
                                    maximum_tke_diffusivity = Inf,
