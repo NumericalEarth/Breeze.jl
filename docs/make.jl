@@ -45,6 +45,7 @@ examples = [
     Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave"; build_always=true, gpu=false),
     Example("Neutral atmospheric boundary layer", "neutral_atmospheric_boundary_layer"; build_always=false, gpu=true),
     Example("Single column radiation", "single_column_radiation"; build_always=true, gpu=false),
+    Example("Single-column boundary layer with a prognostic-TKE closure", "single_column_tke_boundary_layer"; build_always=true, gpu=false),
     Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
     Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
     Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
@@ -195,6 +196,7 @@ makedocs(
         "AtmosphereModel" => Any[
             "Diagnostics" => "atmosphere_model/diagnostics.md",
             "Lagrangian particles" => "atmosphere_model/lagrangian_particles.md",
+            "Wall fluxes" => "atmosphere_model/wall_fluxes.md",
         ],
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
@@ -214,6 +216,7 @@ makedocs(
             ],
         ],
         "Radiative Transfer" => "radiative_transfer.md",
+        "Turbulence closures" => "turbulence_closures.md",
         "Dynamics" => Any[
             "Governing equations" => "dycore_equations_algorithms.md",
             "Anelastic dynamics" => "anelastic_dynamics.md",
