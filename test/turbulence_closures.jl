@@ -168,3 +168,65 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         end
     end
 end
+
+#####
+##### The buoyancy gradient seen by the closures
+#####
+
+using Oceananigans.TurbulenceClosures: buoyancy_force, buoyancy_tracers
+using Oceananigans.BuoyancyFormulations: ∂z_b
+using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
+
+@testset "∂z_b is the gradient of the condensate-loaded buoyancy [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 16
+    Lz = 800
+    grid = RectilinearGrid(default_arch; size = Nz, z = (0, Lz), topology = (Flat, Flat, Bounded))
+    microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+    model = AtmosphereModel(grid; microphysics)
+    column(field) = Array(interior(field, 1, 1, :))
+
+    @test buoyancy_force(model).microphysics === model.microphysics
+    @test buoyancy_force(model).microphysical_fields === model.microphysical_fields
+
+    # Uniform potential temperature, and a step in total water at mid-depth that saturates the
+    # upper half of the column, so that there is liquid to load the air above the step
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    qᵗ(z) = ifelse(z < Lz / 2, 4e-3, 20e-3)
+    set!(model; θ = θ₀, qᵗ)
+
+    qˡ = column(model.microphysical_fields.qˡ)
+    qᵛ = column(model.microphysical_fields.qᵛ)
+    T = column(model.temperature)
+    @test qˡ[1] == 0
+    @test qˡ[Nz] > 1e-3
+
+    N² = Field(KernelFunctionOperation{Center, Center, Face}(∂z_b, grid, buoyancy_force(model), buoyancy_tracers(model)))
+    N² = column(N²)
+
+    # θᵨ = (Rᵐ / Rᵈ) T (pˢᵗ / p)^{Rᵈ / cᵖᵈ} with Rᵐ = (1 - qᵛ - qˡ) Rᵈ + qᵛ Rᵛ, from the model's own
+    # temperature and moisture; and the same without the liquid, for the size of the loading
+    constants = model.thermodynamic_constants
+    g = constants.gravitational_acceleration
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    pˢᵗ = model.dynamics.reference_state.standard_pressure
+    p = column(model.dynamics.reference_state.pressure)
+    θᵨ = @. ((1 - qᵛ - qˡ) * Rᵈ + qᵛ * Rᵛ) / Rᵈ * T * (pˢᵗ / p)^(Rᵈ / cᵖᵈ)
+    θᵛ = @. ((1 - qᵛ) * Rᵈ + qᵛ * Rᵛ) / Rᵈ * T * (pˢᵗ / p)^(Rᵈ / cᵖᵈ)
+    Δz = Lz / Nz
+
+    for k in 2:Nz
+        @test isapprox(N²[k], g * (log(θᵨ[k]) - log(θᵨ[k-1])) / Δz; atol = 1e-6, rtol = 1e-4)
+    end
+
+    # Across the step the liquid loads the air above by ≈ g Δqˡ / Δz relative to the vapor-only
+    # (virtual potential temperature) gradient
+    k★ = Nz ÷ 2 + 1
+    @test qˡ[k★] > 0
+    @test qˡ[k★-1] == 0
+    N²ᵛ = g * (log(θᵛ[k★]) - log(θᵛ[k★-1])) / Δz
+    @test N²[k★] < N²ᵛ
+    @test isapprox(N²[k★] - N²ᵛ, -g * (qˡ[k★] - qˡ[k★-1]) / Δz; rtol = 0.02)
+end
