@@ -1,9 +1,9 @@
 #####
-##### P3 Process Rates
+##### P3 Tabulated Kernels
 #####
-##### Microphysical process rate calculations for the P3 scheme.
-##### All rate functions take the P3 scheme as first positional argument
-##### to access parameters. No keyword arguments (GPU compatibility).
+##### What sits between the lookup tables and the process rates: the Schmidt-number
+##### correction for the ventilation-enhanced table, and `P3IceLookups`, the Table-1
+##### coordinate and integrals every ice-side rate reads.
 #####
 ##### Notation follows docs/src/appendix/notation.md
 #####
@@ -94,7 +94,7 @@ Build the [`P3IceLookups`](@ref) of the ice population `(qⁱ, qʷⁱ, nⁱ, F�
     FT = typeof(m_mean)
     prep = ice_table_bracket(deposition.ventilation, m_mean, Fᶠ, Fˡ, ρᶠ, floors)
     # The ice reference density (≈0.83 kg/m³ at 600 hPa, 253.15 K; see `IceFallSpeed`),
-    # not the rain reference ≈1.275 kg/m³ of `ProcessRateParameters`.
+    # not the rain reference ≈1.275 kg/m³ of `ProcessRate`.
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
     return P3IceLookups{FT, typeof(prep)}(m_mean, Fˡ, prep, ρ_correction,
                                           evaluate_at(deposition.ventilation, prep),
@@ -118,8 +118,8 @@ Compute per-particle ventilation integral C(D) × f_v(D) for deposition
 using PSD-integrated lookup tables.
 """
 @inline function deposition_ventilation(vent::P3Table4D,
-                                          vent_e::P3Table4D,
-                                          m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction)
+                                        vent_e::P3Table4D,
+                                        m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction)
     floors = parameters.floors
     # Both tables share Table-1 axes, so the coordinate is bracketed once.
     prep = ice_table_bracket(vent, m_mean, Fᶠ, Fˡ, ρᶠ, floors)

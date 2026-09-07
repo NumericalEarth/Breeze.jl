@@ -11,6 +11,7 @@ using Oceananigans.TimeSteppers:
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
                                 microphysics_model_update!, field_advection_scheme,
+                                compute_closure_tendencies!,
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
                                 implicit_step_scheme
@@ -222,6 +223,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     #
 
     compute_flux_bc_tendencies!(model)
+    compute_closure_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α¹)
 
     compute_pressure_correction!(model, Δt)
@@ -229,13 +231,13 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     tick_stage!(model.clock, Δt)
     update_state!(model, callbacks; compute_tendencies = true)
-    step_lagrangian_particles!(model, Δt)
 
     #
     # Second stage: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * G(u^(1)))
     #
 
     compute_flux_bc_tendencies!(model)
+    compute_closure_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α²)
 
     compute_pressure_correction!(model, α² * Δt)
@@ -243,13 +245,13 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     # Don't tick - still at t + Δt for time-dependent forcing
     update_state!(model, callbacks; compute_tendencies = true)
-    step_lagrangian_particles!(model, α² * Δt)
 
     #
     # Third stage: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
     #
 
     compute_flux_bc_tendencies!(model)
+    compute_closure_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α³)
 
     compute_pressure_correction!(model, α³ * Δt)
@@ -267,7 +269,15 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    step_lagrangian_particles!(model, α³ * Δt)
+    # Advect particles once per step, over the full Δt, with the velocity of the state
+    # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,
+    # and so lower order than the dycore. A stage-wise update is possible in principle
+    # (X obeys dX/dt = u like any prognostic, so the SSP combination applies to it too),
+    # but would need Xⁿ stored alongside the current position, since every SSP stage
+    # recombines with u⁰. Oceananigans' low-storage RK3 needs no such storage only
+    # because its per-stage increments sum to Δt; the SSP stage coefficients do not
+    # (α¹ + α² + α³ = 23/12), so pushing with them stage by stage would be wrong.
+    step_lagrangian_particles!(model, Δt)
 
     return nothing
 end

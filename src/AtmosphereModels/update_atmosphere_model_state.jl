@@ -438,3 +438,20 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
 
     return nothing
 end
+
+#####
+##### Closure tendencies
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Add a turbulence closure's own tendencies — the local sources of a prognostic the closure carries,
+such as the shear and buoyancy production of turbulent kinetic energy — to the model's tendencies
+`Gⁿ`. The time steppers call this at the start of every stage, after `compute_flux_bc_tendencies!`.
+A no-op for closures that carry no prognostic.
+"""
+compute_closure_tendencies!(model) =
+    compute_closure_tendencies!(model.timestepper.Gⁿ, model.closure_fields, model.closure, model)
+
+compute_closure_tendencies!(Gⁿ, closure_fields, closure, model) = nothing

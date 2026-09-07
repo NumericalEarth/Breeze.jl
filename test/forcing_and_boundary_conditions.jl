@@ -517,6 +517,45 @@ end
         @test true
     end
 
+    @testset "BulkVaporFlux moisture_availability [$FT]" begin
+        using Oceananigans.BoundaryConditions: getbc
+        using Oceananigans.TimeSteppers: update_state!
+
+        # The surface humidity is q₀ = β qᵛ⁺ + (1 - β) qᵛ, so the vapor flux over a surface with
+        # moisture availability β is β times the flux over a saturated surface
+        function surface_vapor_flux(; coefficient=Cᴰ, kw...)
+            bc = BulkVaporFlux(; surface_temperature=T₀, coefficient, gustiness, kw...)
+            model = AtmosphereModel(grid; boundary_conditions=(; ρqᵛ=FieldBoundaryConditions(bottom=bc)))
+            set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5), qᵗ=FT(0.005))
+            update_state!(model)
+            bf = model.moisture_density.boundary_conditions.bottom.condition
+            Jᵛ = @allowscalar getbc(bf, 1, 1, grid, model.clock, Oceananigans.fields(model))
+            return bf, Jᵛ
+        end
+
+        bf₁, Jᵛ₁ = surface_vapor_flux()
+        bf₀, Jᵛ₀ = surface_vapor_flux(moisture_availability=0)
+        bfₕ, Jᵛₕ = surface_vapor_flux(moisture_availability=0.5)
+
+        @test bf₁.moisture_availability == 1
+        @test bf₀.moisture_availability == 0
+        @test Jᵛ₁ != 0
+        @test Jᵛ₀ == 0
+        @test Jᵛₕ ≈ Jᵛ₁ / 2
+
+        # A PolynomialCoefficient carries its own surface phase and moisture availability, which
+        # the vapor flux inherits so that evaporation and the stability correction agree
+        coef = PolynomialCoefficient(surface=PlanarIceSurface(), moisture_availability=0.25)
+        bf, Jᵛ = surface_vapor_flux(coefficient=coef)
+        @test bf.moisture_availability == FT(0.25)
+        @test bf.surface isa PlanarIceSurface
+        @test bf.coefficient.moisture_availability == FT(0.25)
+        @test Jᵛ != 0
+
+        @test_throws ArgumentError surface_vapor_flux(coefficient=coef, moisture_availability=0.5)
+        @test_throws ArgumentError BulkVaporFlux(surface_temperature=T₀, coefficient=Cᴰ, moisture_availability=1.5)
+    end
+
     @testset "materialize_surface_field [$FT]" begin
         using Breeze.BoundaryConditions: materialize_surface_field
 
@@ -531,15 +570,11 @@ end
         result = materialize_surface_field(T_field, grid)
         @test result === T_field
 
-        # Test Function → Field conversion
-        # Note: With 4 cells in x ∈ [0, 100], centers are at x = 12.5, 37.5, 62.5, 87.5
-        # sin(2π * 12.5 / 100) = sin(π/4) ≈ 0.707, so max ≈ 290 + 5 * 0.707 ≈ 293.5
-        T_func(x, y) = FT(290) + FT(5) * sin(2π * x / 100)
+        # Functions are kept as functions and evaluated at the wall at every call, with the
+        # non-Flat wall coordinates followed by the time
+        T_func(x, y, t) = FT(290) + FT(5) * sin(2π * x / 100)
         result = materialize_surface_field(T_func, grid)
-        @test result isa Field
-        @test location(result) == (Center, Center, Nothing)
-        @test maximum(result) ≈ FT(290) + FT(5) * sin(π / 4)  # ≈ 293.54
-        @test minimum(result) ≈ FT(290) - FT(5) * sin(π / 4)  # ≈ 286.46
+        @test result === T_func
     end
 
     @testset "Combined bulk boundary conditions [$FT]" begin

@@ -107,7 +107,6 @@ export
     vapor_gas_constant,
     PlanarLiquidSurface,
     PlanarIceSurface,
-    DrySurface,
 
     # Microphysics
     aerosol_field_names,
@@ -226,6 +225,7 @@ export
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
+    TKEBasedTurbulenceClosure, TKEMixingLength, ConstantStabilityFunctions,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,

@@ -8,23 +8,6 @@ struct PlanarIceSurface end
 """
 $(TYPEDEF)
 
-A surface with no saturation humidity, for bulk surface-layer schemes over dry land.
-
-With `PlanarLiquidSurface` or `PlanarIceSurface`, a `PolynomialCoefficient` forms the surface
-virtual potential temperature from the saturation specific humidity at the surface temperature —
-right over water, but over land it is spurious virtual warming, ``0.608 \\, qᵛ⁺ T₀ ≈ 0.33`` K at
-265 K, comparable to a stable surface layer's entire temperature deficit. With
-`surface = DrySurface()` the saturation total specific moisture is zero, so the surface virtual
-temperature is the surface temperature itself.
-
-`DrySurface` is a trait of the bulk scheme, not a model of soil moisture: it carries no saturation
-vapor pressure, and the bulk vapor flux is not defined over it.
-"""
-struct DrySurface end
-
-"""
-$(TYPEDEF)
-
 Return `PlanarMixedPhaseSurface` for computing the saturation vapor pressure over
 a surface composed of a mixture of liquid and ice, with a given `liquid_fraction`.
 """
