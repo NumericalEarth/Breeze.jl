@@ -198,6 +198,11 @@ function AtmosphereModel(grid;
     field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Create temporary microphysical fields for BC materialization (using pre-regularized BCs)
+    # Move microphysics lookup tables to the grid architecture (CPU → GPU) before anything
+    # captures the object: the energy-flux boundary conditions of the potential-temperature
+    # formulation carry it into their halo-filling kernels.
+    microphysics = on_architecture(arch, microphysics)
+
     preliminary_microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
 
     # Materialize atmosphere-specific boundary conditions (fill in VPT diagnostic,
@@ -306,9 +311,6 @@ function AtmosphereModel(grid;
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
-
-    # Move microphysics lookup tables to the grid architecture (CPU → GPU)
-    microphysics = on_architecture(arch, microphysics)
 
     model = AtmosphereModel(arch,
                             grid,
