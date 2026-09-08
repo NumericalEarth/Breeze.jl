@@ -22,7 +22,6 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 
 [sources]
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "main"}
 Breeze = {path = ".."}
 
 [compat]
