@@ -131,7 +131,7 @@ thermodynamic_name(model) = :ρθ ∈ keys(prognostic_fields(model)) ? :ρθ : :
             @test ensemble_column == standalone_column
         end
 
-        @test maximum(abs, interior(ensemble.velocities.w)) == 0
+        @test all(iszero, interior(ensemble.velocities.w))
     end
 
     @testset "Per-column closure array" begin
