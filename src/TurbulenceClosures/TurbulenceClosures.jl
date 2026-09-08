@@ -1,7 +1,10 @@
 module TurbulenceClosures
 
 export TKEBasedTurbulenceClosure,
-       TKEMixingLength,
+       AbstractMixingLength,
+       LocalMinimumMixingLength,
+       IntegralMixingLength,
+       GradientLimitedMixingLength,
        ConstantStabilityFunctions,
        RiDependentStabilityFunctions,
        catke_parameters,

@@ -54,53 +54,52 @@ the closure in stable, neutral and convective boundary layers.
 
 ### The mixing length
 
-The primary mixing length ([`TKEMixingLength`](@ref)) is built from one local quantity, the
-*buoyancy penetration depth*
+Every formulation of the primary mixing length ([`AbstractMixingLength`](@ref)) is built from two
+lengths: the wall length ``Cˢ z``, ``Cˢ`` times the height above the surface, and the *buoyancy
+penetration depth*
 
 ```math
-ℓᵇ = \frac{\sqrt{e}}{N},
+ℓᵇ = \\frac{\\sqrt{e}}{N},
 ```
 
 how far an eddy with kinetic energy ``e`` penetrates air of buoyancy frequency ``N`` before its
-kinetic energy is spent against buoyancy; ``ℓᵇ`` is infinite where ``N² ≤ 0`` and zero at the
-ground. An eddy centered at height ``z`` reaches past a level ``z′`` only by the penetration depth
-there, so every level of the column bounds the mixing length at every other level, and the mixing
-length is the lower envelope of all these bounds,
+kinetic energy is spent against buoyancy; ``ℓᵇ`` is infinite where ``N² ≤ 0``. In a neutral surface
+layer every formulation gives ``ℓ = Cˢ z`` and in uniformly stratified air every formulation gives
+``ℓ = ℓᵇ``; they differ in what else bounds ``ℓ``:
 
-```math
-ℓ(z) = \min_{z′} \left[ ℓᵇ(z′) + Cˢ |z - z′| \right],
-```
+- [`LocalMinimumMixingLength`](@ref) is the smaller of the two at the eddy's own level,
+  ``ℓ = \\min(Cˢ z, ℓᵇ)``, the form of Deardorff (1980) and of Nakanishi and Niino's closure without
+  its turbulent-layer depth scale. It knows two obstacles, the ground and the stratification at the
+  level itself, so in an elevated layer whose static stability is not positive — a saturated cloud
+  layer under [`MoistStaticStability`](@ref), a neutral layer — nothing bounds ``ℓ`` but the distance to
+  the ground, kilometers. The diffusivity ``Cᵘ ℓ \\sqrt{e}`` then jumps by two to five orders of
+  magnitude whenever such a layer forms, mixes it away within a time step and collapses, or, when the
+  layer persists, mixes the whole column.
+- [`GradientLimitedMixingLength`](@ref), the default, is the local minimum limited so that ``ℓ``
+  changes by no more than ``Cˢ`` per unit height, ``|∂_z ℓ| ≤ Cˢ``. Equivalently it is the lower
+  envelope of the penetration depths of every level and of the ground,
+  ``ℓ(z) = \\min_{z′} [ℓᵇ(z′) + Cˢ |z - z′|]``: an eddy reaches past a level only by the penetration
+  depth there. It coincides with the local minimum where only the ground and the level itself bind,
+  falls off toward the capping inversion in a mixed layer instead of growing as ``Cˢ z``, and is
+  bounded by the stratified air above and below an elevated layer. Two sweeps per column compute it
+  exactly, once per stage, with fixed loop lengths; it is the gradient-limited length of NEMO's TKE
+  scheme ([Gaspar et al. (1990)](@cite Gaspar1990)).
+- [`IntegralMixingLength`](@ref) is the parcel formulation of
+  [Bougeault and Lacarrère (1989)](@cite BougeaultLacarrere1989): a parcel released at ``z`` with
+  kinetic energy ``e★ = e / (2 Cˢ²)`` rises and sinks until the buoyancy deficit it accumulates,
+  ``∫ [b(z) - b(z ± s)] \\, ds``, has consumed its energy, and ``ℓ = Cˢ \\min(ℓ↑, ℓ↓)``. The energy
+  ``e / (2 Cˢ²)`` makes it ``Cˢ z`` against the ground and ``ℓᵇ`` in uniform stratification like the
+  others. It carries the parcel's own energy into the air it penetrates and credits the energy gained
+  crossing unstable air, so it penetrates inversions and mixes convective layers more than the
+  gradient-limited length, whose penetration depth is that of the obstacle; its cost is a walk per
+  face whose length depends on the state.
 
-with ``Cˢ`` the slope of ``ℓ`` away from any obstacle. Where only the ground and the level itself
-bind, the envelope is the familiar
-
-```math
-ℓ = \min(Cˢ z, \, \sqrt{e} / N),
-```
-
-the wall length ``Cˢ z`` in neutral and unstable air attached to the surface and the stratification
-length ``\sqrt{e} / N`` in stably stratified air. The envelope differs where that formula fails:
-in a mixed layer ``ℓ`` falls off toward the capping inversion instead of growing as ``Cˢ z``, and in
-an elevated neutral or unstable layer — a cloud layer whose saturated static stability is not
-positive — it is bounded by ``Cˢ`` times the distance to the stratified air above and below rather
-than by the distance to the ground, which ``\min(Cˢ z, \sqrt{e} / N)`` lets grow to kilometers.
-Left unbounded there, the diffusivity ``Cᵘ ℓ \sqrt{e}`` jumps by two to five orders of magnitude
-whenever such a layer forms, mixes it away within a time step, and collapses; the envelope removes
-the jump. It is the local-penetration form of the parcel lengths of
-[Bougeault and Lacarrère (1989)](@cite BougeaultLacarrere1989): where the stratification beyond an
-obstacle is uniform, a parcel with energy ``e`` stops after ``\sqrt{2e} / N``, the penetration
-depth up to a constant, but the envelope uses the energy at the obstacle rather than at the parcel's
-origin and does not credit energy gained crossing unstable air, so it penetrates inversions less.
-
-Because a bound propagates from a level only to its neighbors, two sweeps per column compute the
-envelope exactly — upward from the ground, ``ℓₖ = \min(ℓₖ, ℓₖ₋₁ + Cˢ Δz)``, then downward,
-``ℓₖ = \min(ℓₖ, ℓₖ₊₁ + Cˢ Δz)`` — once per time-step stage, into the closure field
-`closure_fields.ℓ`. The penetration depth carries no coefficient of its own — the stability
-functions set the scale of every diffusivity — so ``Cˢ`` alone sets the ratio of the wall length to
-the penetration depth. The default ``Cˢ = 1.316`` is the reciprocal of Deardorff's coefficient
-``0.76`` of the stratification length ([Deardorff (1980)](@cite Deardorff1980)), which the
-equivalent normalization ``ℓ = \min(z, 0.76 \sqrt{e} / N)`` carries on the penetration depth
-instead.
+The penetration depth carries no coefficient of its own — the stability functions set the scale of
+every diffusivity — so ``Cˢ`` alone sets the ratio of the wall length to the penetration depth. The
+default ``Cˢ = 1.316`` is the reciprocal of Deardorff's coefficient ``0.76`` of the stratification
+length ([Deardorff (1980)](@cite Deardorff1980)), which the equivalent normalization
+``ℓ = \\min(z, 0.76 \\sqrt{e} / N)`` carries on the penetration depth instead. The mixing length is
+computed column by column, once per stage, into the closure field `closure_fields.ℓ`.
 
 ### Static stability
 

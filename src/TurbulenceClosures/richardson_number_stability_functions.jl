@@ -111,7 +111,8 @@ end
 $(TYPEDSIGNATURES)
 
 The mixing length and stability functions of CATKE ([Wagner et al. 2025](@cite Wagner25catke)) as
-keyword arguments for [`TKEBasedTurbulenceClosure`](@ref): the wall coefficient ``Cˢ = 1.131`` and
+keyword arguments for [`TKEBasedTurbulenceClosure`](@ref): CATKE's wall coefficient ``Cˢ = 1.131`` in
+the mixing-length formulation `MixingLength` ([`GradientLimitedMixingLength`](@ref) by default), and
 [`RiDependentStabilityFunctions`](@ref) with CATKE's values.
 
 ```jldoctest
@@ -121,14 +122,14 @@ closure = TKEBasedTurbulenceClosure(; catke_parameters()...)
 closure.mixing_length
 
 # output
-TKEMixingLength{Float64} (Cˢ = 1.131)
+GradientLimitedMixingLength{Float64} (Cˢ = 1.131)
 ```
 
 CATKE's convective length scales and surface flux of turbulent kinetic energy are not part of the
 closure; see [`RiDependentStabilityFunctions`](@ref).
 """
-catke_parameters() = (mixing_length = TKEMixingLength(Cˢ = 1.131),
-                      stability_functions = RiDependentStabilityFunctions())
+catke_parameters(MixingLength = GradientLimitedMixingLength) = (mixing_length = MixingLength(Cˢ = 1.131),
+                                                                  stability_functions = RiDependentStabilityFunctions())
 
 #####
 ##### Evaluation

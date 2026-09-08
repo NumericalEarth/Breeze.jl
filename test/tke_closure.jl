@@ -35,7 +35,7 @@ end
     closure = TKEBasedTurbulenceClosure()
     @test closure isa TKEBasedTurbulenceClosure
     @test time_discretization(closure) isa VerticallyImplicitTimeDiscretization
-    @test closure.mixing_length isa TKEMixingLength{FT}
+    @test closure.mixing_length isa GradientLimitedMixingLength{FT}
     @test closure.stability_functions isa ConstantStabilityFunctions{FT}
     @test closure.static_stability isa MoistStaticStability
 
@@ -59,7 +59,7 @@ end
     end
 
     @testset "keyword arguments, promotion and float type" begin
-        closure = TKEBasedTurbulenceClosure(; mixing_length = TKEMixingLength(Cˢ = 1),
+        closure = TKEBasedTurbulenceClosure(; mixing_length = GradientLimitedMixingLength(Cˢ = 1),
                                               stability_functions = ConstantStabilityFunctions(Cᵘ = 0.3, Cᶜ = 0.3, Cᵉ = 1, Cᴰ = 1),
                                               maximum_viscosity = 100,
                                               minimum_tke = 1e-8,
@@ -75,14 +75,16 @@ end
         @test time_discretization(explicit) isa ExplicitTimeDiscretization
 
         closure32 = TKEBasedTurbulenceClosure(Float32)
-        @test closure32.mixing_length isa TKEMixingLength{Float32}
+        @test closure32.mixing_length isa GradientLimitedMixingLength{Float32}
         @test closure32.stability_functions isa ConstantStabilityFunctions{Float32}
         @test closure32.minimum_tke isa Float32
     end
 
     @testset "isbits and show" begin
         @test isbits(closure)
-        @test isbits(TKEMixingLength())
+        @test isbits(GradientLimitedMixingLength())
+        @test isbits(LocalMinimumMixingLength())
+        @test isbits(IntegralMixingLength())
         @test isbits(ConstantStabilityFunctions())
         @test isbits(DryStaticStability())
         @test summary(closure) == "TKEBasedTurbulenceClosure{VerticallyImplicitTimeDiscretization}"
@@ -93,7 +95,9 @@ end
         @test occursin("DryStaticStability", sprint(show, TKEBasedTurbulenceClosure(static_stability = DryStaticStability())))
         @test occursin("minimum_tke", str)
         @test occursin("Cᴰ", sprint(show, ConstantStabilityFunctions()))
-        @test occursin("Cˢ", sprint(show, TKEMixingLength()))
+        @test occursin("Cˢ", sprint(show, GradientLimitedMixingLength()))
+        @test occursin("LocalMinimum", sprint(show, LocalMinimumMixingLength()))
+        @test occursin("Integral", sprint(show, IntegralMixingLength()))
     end
 end
 
@@ -236,14 +240,15 @@ column(field) = Array(interior(field, 1, 1, :))
         @test all(isapprox.(Kᶜ[2:Nz], legacy.Cᶜ .* ℓᶠ .* sqrt(e₀); rtol = 1e-5))
         @test all(isapprox.(Kᵉ[2:Nz], legacy.Cᵉ .* ℓᶠ .* sqrt(e₀); rtol = 1e-5))
 
-        # The sink rate at the interior centers: dissipation with the mixing length evaluated at
-        # the center from the two adjacent faces — in the legacy normalization
-        # min(ℓᶠₖ, ℓᶠₖ₊₁) + Δz / 2, no more than the height of the center — and B = -Kᶜ N²
-        # reconstructed from the two adjacent faces, plus the negative buoyancy flux divided by e
+        # The mapped closure is the local minimum, so its sink rate at the interior centers is the
+        # legacy formula with N² and B = -Kᶜ N² reconstructed from the two adjacent faces, plus the
+        # negative buoyancy flux divided by e
+        @test mapped.mixing_length isa LocalMinimumMixingLength
         Lᵉ = column(model.closure_fields.Lᵉ)
         zc = znodes(grid, Center())
         for k in 2:Nz-1
-            ℓᶜ = min(min(ℓᶠ[k-1], ℓᶠ[k]) + Δz / 2, zc[k])
+            N²ᶜ = (N²[k-1] + N²[k]) / 2
+            ℓᶜ = min(zc[k], Cᴺ * sqrt(e₀) / sqrt(N²ᶜ))
             B = -(Kᶜ[k] * N²[k-1] + Kᶜ[k+1] * N²[k]) / 2
             @test Lᵉ[k] ≈ -(legacy.Cᴰ * sqrt(e₀) / ℓᶜ - B / e₀) rtol=1e-5
         end
@@ -285,12 +290,61 @@ column(field) = Array(interior(field, 1, 1, :))
         stratified = findall(z -> 100 < z < 250, zf)
         @test all(isapprox.(ℓ[stratified], min.(Cˢ .* zf[stratified], ℓᵇ[stratified]); rtol = 1e-5))
 
-        # The dissipation reads the envelope at the centers, halfway between the faces
+        # The dissipation reads the envelope at the centers, halfway between the faces, bounded by
+        # the center's own local minimum (its wall length and penetration depth)
         e = model.tracers.ρe / model.dynamics.reference_state.density
         ε = column(Field(KernelFunctionOperation{Center, Center, Center}(dissipationᶜᶜᶜ, grid, closure, e,
                                                                         model.velocities, model.closure_fields)))
-        ℓᶜ = [min(ℓ[k], ℓ[k+1]) + Cˢ * Δz / 2 for k in 1:Nz]
-        @test all(isapprox.(ε, closure.stability_functions.Cᴰ .* e₀^(3/2) ./ ℓᶜ; rtol = 1e-6))
+        zc = znodes(grid, Center())
+        ℓᵇᶜ = [(N²[k] + N²[k+1]) / 2 > 0 ? sqrt(e₀) / sqrt((N²[k] + N²[k+1]) / 2) : Inf for k in 1:Nz]
+        ℓᶜ = [min(min(ℓ[k], ℓ[k+1]) + Cˢ * Δz / 2, Cˢ * zc[k], ℓᵇᶜ[k]) for k in 1:Nz]
+        @test all(isapprox.(ε[2:Nz-1], closure.stability_functions.Cᴰ .* e₀^(3/2) ./ ℓᶜ[2:Nz-1]; rtol = 1e-6))
+    end
+
+    @testset "the three formulations on the elevated neutral layer" begin
+        e₀ = FT(0.5)
+        Γ = FT(0.005)
+        θᵢ(z) = z < 300 ? 300 + Γ * z : z < 700 ? 300 + Γ * 300 : 300 + Γ * (z - 400)
+        Cˢ = FT(1.316)
+        Δz = Lz / Nz
+        lengths = Dict()
+        N² = nothing
+        for (name, mixing_length) in (:local => LocalMinimumMixingLength(Cˢ = Cˢ), :integral => IntegralMixingLength(Cˢ = Cˢ), :envelope => GradientLimitedMixingLength(Cˢ = Cˢ))
+            model = AtmosphereModel(grid; closure = TKEBasedTurbulenceClosure(; mixing_length), advection = nothing)
+            set!(model; θ = θᵢ)
+            set_tke!(model, e₀)
+            lengths[name] = column(diagnosed_mixing_length(model))
+            N² = column(model.closure_fields.N²)
+        end
+        ℓᵇ = [N²[k] > 0 ? sqrt(e₀) / sqrt(N²[k]) : Inf for k in eachindex(zf)]
+        wall = Cˢ .* zf
+        neutral = findall(z -> 350 < z < 650, zf)
+        stratified = findall(z -> 100 < z < 250, zf)
+
+        # The local minimum is the wall length through the neutral layer, where nothing else binds it
+        @test all(isapprox.(lengths[:local][2:end], min.(wall, ℓᵇ)[2:end]; rtol = 1e-6))
+        @test all(isapprox.(lengths[:local][neutral], wall[neutral]; rtol = 1e-6))
+
+        # Both nonlocal formulations bound it by the stratified air around the layer, and agree with
+        # the local minimum where only the ground and the level itself bind
+        for name in (:integral, :envelope)
+            ℓ = lengths[name]
+            @test all(ℓ[neutral] .< 0.75 .* wall[neutral])
+            @test all(ℓ[2:end] .≤ wall[2:end] .* (1 + 1e-6))
+            @test all(isapprox.(ℓ[stratified], min.(wall, ℓᵇ)[stratified]; rtol = 1e-3))
+        end
+
+        # The parcel lengths: in uniform stratification the deficit is N² s² / 2 and the parcel stops
+        # at √e / N, so the integral reproduces the penetration depth; a parcel released in the neutral
+        # layer stops where it has penetrated the stratified air by about that much, never farther
+        # from the nearest stratified face than the penetration depth there
+        ℓ = lengths[:integral]
+        below = maximum(filter(k -> N²[k] > 0 && zf[k] < 400, eachindex(zf)))
+        above = minimum(filter(k -> N²[k] > 0 && zf[k] > 600, eachindex(zf)))
+        for k in neutral
+            geometric = Cˢ * min(zf[k] - zf[below], zf[above] - zf[k])
+            @test geometric ≤ ℓ[k] ≤ geometric + Cˢ * max(ℓᵇ[below], ℓᵇ[above]) + Cˢ * Δz
+        end
     end
 
     @testset "the envelope on a stretched grid" begin
