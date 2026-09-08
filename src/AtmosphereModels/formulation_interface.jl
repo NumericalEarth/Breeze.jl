@@ -95,8 +95,7 @@ advection operator reconstructs, as opposed to the density-weighted prognostic n
 """
 function specific_thermodynamic_field end
 
-thermodynamic_density_name(formulation::Symbol) =
-    thermodynamic_density_name(Val(formulation))
+thermodynamic_density_name(formulation::Symbol) = thermodynamic_density_name(Val(formulation))
 
 """
     thermodynamic_density(formulation)

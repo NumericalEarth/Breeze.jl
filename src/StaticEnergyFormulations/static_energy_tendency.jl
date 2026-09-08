@@ -14,8 +14,7 @@ AtmosphereModels.liquid_ice_potential_temperature(model::StaticEnergyModel) = Di
 AtmosphereModels.liquid_ice_potential_temperature_density(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :density)
 AtmosphereModels.static_energy(model::StaticEnergyModel) = model.formulation.specific_energy
 
-AtmosphereModels.specific_thermodynamic_field(formulation::StaticEnergyFormulation) =
-    formulation.specific_energy
+AtmosphereModels.specific_thermodynamic_field(formulation::StaticEnergyFormulation) = formulation.specific_energy
 AtmosphereModels.static_energy_density(model::StaticEnergyModel) = model.formulation.energy_density
 
 #####
