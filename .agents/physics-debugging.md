@@ -23,7 +23,7 @@ A water input (kg/m²/s at a boundary, kg/m³/s in the interior) goes under `ρq
 specific key `qᵗ` — and is applied to the prognostic moisture unconverted, since water added
 there is water added to `qᵗ` under every scheme.
 
-The specific names are keys only where they are actually prognostic: `ρs`/`s` when static
+Each variable's own name is a key only where that variable is prognostic: `ρs`/`s` when static
 energy is the thermodynamic variable, `ρqᵛ` or `ρqᵉ` depending on the microphysics. Supplying
 both an interface key and its target is an error, and both `boundary_conditions` and `forcing`
 reject any unrecognized key with an `ArgumentError` rather than dropping it.
