@@ -432,15 +432,11 @@ end
         result = materialize_surface_field(T_field, grid)
         @test result === T_field
 
-        # Test Function → Field conversion
-        # Note: With 4 cells in x ∈ [0, 100], centers are at x = 12.5, 37.5, 62.5, 87.5
-        # sin(2π * 12.5 / 100) = sin(π/4) ≈ 0.707, so max ≈ 290 + 5 * 0.707 ≈ 293.5
-        T_func(x, y) = FT(290) + FT(5) * sin(2π * x / 100)
+        # Functions are kept as functions and evaluated at the wall at every call, with the
+        # non-Flat wall coordinates followed by the time
+        T_func(x, y, t) = FT(290) + FT(5) * sin(2π * x / 100)
         result = materialize_surface_field(T_func, grid)
-        @test result isa Field
-        @test location(result) == (Center, Center, Nothing)
-        @test maximum(result) ≈ FT(290) + FT(5) * sin(π / 4)  # ≈ 293.54
-        @test minimum(result) ≈ FT(290) - FT(5) * sin(π / 4)  # ≈ 286.46
+        @test result === T_func
     end
 
     @testset "Combined bulk boundary conditions [$FT]" begin

@@ -56,7 +56,7 @@ initialize_filtered_Δθᵥ!(::Nothing, coef, T₀, model) = nothing
 initialize_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, model) = nothing
 
 function initialize_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef::StabilityCorrectedCoefficient, T₀, model)
-    initialize_Δθᵥ!(fv, coef, T₀, model.grid)
+    initialize_Δθᵥ!(fv, coef, T₀, model.grid, model.clock)
     return nothing
 end
 
@@ -68,7 +68,7 @@ function update_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef::Stability
     fv.last_Δθᵥ_update[] == key && return nothing
     Δt = model.clock.last_Δt
     isinf(Δt) && return nothing # no valid Δt yet (before first time step)
-    update_Δθᵥ!(fv, coef, T₀, model.grid, Δt)
+    update_Δθᵥ!(fv, coef, T₀, model.grid, model.clock, Δt)
     fv.last_Δθᵥ_update[] = key
     return nothing
 end
