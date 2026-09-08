@@ -305,7 +305,7 @@ fig
 # model's large-scale state for four months of the year and two climates, and published the
 # library (CC0, [doi:10.22002/D1.20052](https://doi.org/10.22002/D1.20052)). The CNRM-CM6-1 slice of
 # it, reduced to what a single column needs (see `validation/cloud_les_library`), is the
-# `cloud_les_library` artifact: for each member the large-scale forcing the LES saw, its radiative
+# `shen_et_al_2022_les_profiles` artifact: for each member the large-scale forcing the LES saw, its radiative
 # heating, its surface fluxes, its initial and time-mean profiles, and the fluxes and TKE budget it
 # produced.
 
@@ -313,8 +313,8 @@ using NCDatasets
 using Pkg.Artifacts: ensure_artifact_installed, artifact_hash, artifact_path
 
 artifacts_toml = joinpath(pkgdir(Breeze), "Artifacts.toml")
-ensure_artifact_installed("cloud_les_library", artifacts_toml)
-library = artifact_path(artifact_hash("cloud_les_library", artifacts_toml))
+ensure_artifact_installed("shen_et_al_2022_les_profiles", artifacts_toml)
+library = artifact_path(artifact_hash("shen_et_al_2022_les_profiles", artifacts_toml))
 
 member(site, month) = joinpath(library, "cfsite$(lpad(site, 2, '0'))_CNRM-CM6-1_amip_$(month).nc")
 

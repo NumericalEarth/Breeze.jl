@@ -2,7 +2,7 @@
 
 Scripts that turn the [library of GCM-forced large-eddy simulations](https://doi.org/10.22002/D1.20052)
 of Shen, Sridhar, Tan, Jaruga & Schneider (2022, *J. Adv. Model. Earth Syst.* 14, e2021MS002631;
-CC0) into the `cloud_les_library` artifact that
+CC0) into the `shen_et_al_2022_les_profiles` artifact that
 [`examples/single_column_tke_boundary_layer.jl`](../../examples/single_column_tke_boundary_layer.jl)
 evaluates `TKEBasedTurbulenceClosure` against.
 
@@ -27,7 +27,10 @@ Each member reduces to ~0.25 MB of NetCDF:
 | Reference | `p0`, `rho0`, `temperature0`, `qv0` | PyCLES reference state |
 | Targets | `*_mean` | Time means over the final two days: state, cloud, fluxes, TKE and its budget |
 
-Every file records its source URL, size and SHA-256, the averaging window, and the DOI.
+Every file records its source URL, size and SHA-256, the averaging window, and the DOI. Nothing
+time-dependent is written, so a rebuild from the same sources with the same library versions
+reproduces the files; the deflate output can differ across zlib versions, so the tree hash is
+not guaranteed to.
 
 ## Protocol of the LES (Shen et al. 2022, §2)
 
@@ -52,11 +55,13 @@ julia --project reduce_shen_les_library.jl --gcm CNRM-CM6-1 --output reduced
 julia --project reduce_shen_les_library.jl --sites 17,22 --months 07 --output reduced --download downloads --keep
 
 # Package the reduced directory as the artifact and print the Artifacts.toml entry
-julia --project build_artifact.jl reduced cloud_les_library.tar.gz
+julia --project build_artifact.jl reduced shen_et_al_2022_les_profiles.tar.gz v1.0
 ```
 
-The tarball is uploaded by hand to the Breeze.jl GitHub release named in the printed entry, as
-`P3_lookup_tables` was; `Artifacts.toml` at the repository root carries the entry. To use a local
-reduction before the release exists, point an
+The tarball is uploaded as an asset of the Breeze.jl GitHub release named in the printed entry —
+a prerelease tagged `shen_et_al_2022_les_profiles_<version>`, as `P3_lookup_tables` is — and
+`Artifacts.toml` at the repository root carries the entry. Updating the data means a new version
+tag, a new tarball and a new entry; an asset is never replaced in place, since the artifact is
+pinned by its hashes. To use a local reduction before a release exists, point an
 [`Overrides.toml`](https://pkgdocs.julialang.org/v1/artifacts/#Overriding-artifact-locations) at
 the directory.

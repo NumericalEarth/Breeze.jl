@@ -6,10 +6,10 @@ lazy = true
     sha256 = "d81442098b7c250842afc795d21295f44c8ef9e5957db5a76c156516cc76c65c"
     url = "https://github.com/NumericalEarth/Breeze.jl/releases/download/P3_lookup_tables_v1.0/P3_lookup_tables.tar.gz"
 
-[cloud_les_library]
-git-tree-sha1 = "c01b914c0bf561292bac0b5b55cd02a3ba57e9c2"
+[shen_et_al_2022_les_profiles]
+git-tree-sha1 = "ee49d42fe593873d4bc5570a97309d421e2b6963"
 lazy = true
 
-    [[cloud_les_library.download]]
-    sha256 = "899d68c04a634b5fe82a857b5a3eaeb04ed3befa252a70d978fe6462fbaa99d0"
-    url = "https://github.com/NumericalEarth/Breeze.jl/releases/download/cloud_les_library_v1.0/cloud_les_library.tar.gz"
+    [[shen_et_al_2022_les_profiles.download]]
+    sha256 = "135cbec0f82a42126af9716d202ea575d1d6ee83a69f3ca44873cb94fcd294cc"
+    url = "https://github.com/NumericalEarth/Breeze.jl/releases/download/shen_et_al_2022_les_profiles_v1.0/shen_et_al_2022_les_profiles.tar.gz"

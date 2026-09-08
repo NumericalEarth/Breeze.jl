@@ -13,7 +13,7 @@
 # model needs: the forcing, the initial and reference profiles, the surface time series, hourly
 # radiative heating, and time-mean target profiles over the final two days. The reduced files
 # are what `examples/single_column_tke_boundary_layer.jl` reads, packaged as the lazy artifact
-# `cloud_les_library` (see `build_artifact.jl`). Run from this directory with
+# `shen_et_al_2022_les_profiles` (see `build_artifact.jl`). Run from this directory with
 #
 #     julia --project reduce_shen_les_library.jl --gcm CNRM-CM6-1 --output reduced
 #
@@ -24,7 +24,6 @@ using NCDatasets
 using Downloads
 using SHA
 using Statistics
-using Dates
 using Printf
 
 const RECORD = "j8mw7-fm491"
@@ -158,7 +157,6 @@ function reduce_member!(output_path, source_path, source_name; site, gcm, experi
         out.attrib["month"] = month
         out.attrib["target_window_start"] = t[end] - TARGET_WINDOW
         out.attrib["target_window_end"] = t[end]
-        out.attrib["created"] = string(now(UTC))
         out.attrib["description"] = "Profiles are horizontal means at cell centers z. *_mean profiles are " *
                                     "time means over [target_window_start, target_window_end]; *_initial are the " *
                                     "initial profiles; *_nudge are whole-run time means; subsidence and the " *
