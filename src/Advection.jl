@@ -52,12 +52,10 @@ end
 end
 
 # A bounds-preserving WENO whose vertical time discretization is adaptive-implicit.
-# (`bounds` materializes to `BoundsPreservation`, which carries the precomputed limiter.)
 const BoundsPreservingAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:BoundsPreservation}
 
-# Lazily s-scaled face velocity: indexing yields wᵉ = s·w, the explicit fraction of the IMEX
-# vertical-advection split, so the bounds-preserving flux functions consume the explicit
-# velocity without duplicating their reconstruction (issue #913).
+# Indexing yields wᵉ = s·w, the explicit fraction of the IMEX split, so the bounded flux
+# functions consume it without duplicating their reconstruction (issue #913).
 struct ExplicitVerticalVelocity{G, S, T, W}
     grid :: G
     advection_scheme :: S
@@ -73,13 +71,11 @@ Adapt.adapt_structure(to, v::ExplicitVerticalVelocity) =
     @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, v.grid, v.advection_scheme, v.time_discretization,
                                          v.vertical_velocity) * v.vertical_velocity[i, j, k]
 
-# Disambiguates against the `ZeroField` shortcut above: a zero tracer advects to zero
-# regardless of the vertical time discretization.
+# Disambiguates against the `ZeroField` shortcut above.
 @inline AtmosphereModels.div_ρUc(i, j, k, grid, ::BoundsPreservingAVIDWENO, ρ, U, ::ZeroField) = zero(grid)
 
-# The bounded path never routed through the AVID flux scaling, so it transported the full
-# explicit flux AND received the (1 - s) implicit remainder — 1 + (1 - s) total (issue #913).
-# The horizontal fluxes stay fully explicit under AVID, matching the plain-WENO path.
+# Without the s-scaled velocity the bounded path transported 1 + (1 - s) times: a full
+# explicit flux plus the implicit remainder (issue #913). Horizontal fluxes stay explicit.
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingAVIDWENO, ρ, U, c)
     wᵉ = ExplicitVerticalVelocity(grid, advection, time_discretization(advection), U.w)
     div_x = bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c)

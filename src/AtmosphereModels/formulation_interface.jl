@@ -89,10 +89,9 @@ function thermodynamic_density_name end
 """
     specific_thermodynamic_field(formulation)
 
-Return the *specific* (per unit mass) thermodynamic field the `formulation` evolves — the
-quantity its advection operator reconstructs, as opposed to the density-weighted prognostic
-named by [`thermodynamic_density_name`](@ref). A bounds-preserving scheme limits the
-reconstruction of this field.
+Return the specific (per unit mass) thermodynamic field the `formulation` evolves — what its
+advection operator reconstructs, as opposed to the density-weighted prognostic named by
+[`thermodynamic_density_name`](@ref).
 """
 function specific_thermodynamic_field end
 

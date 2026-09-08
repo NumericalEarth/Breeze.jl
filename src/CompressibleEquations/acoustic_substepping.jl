@@ -1400,13 +1400,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Advance the implicit half of the IMEX vertical-advection split for the thermodynamic
-perturbation over one substep: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★`, solved on the θ predictor
-between Step B and Step C so Step C's pressure gradient and Step D's recovery act on a
-transport-consistent predictor. Coefficients read the substepper's frozen stage-entry
-advecting state; the base-state part of the implicit half rides `Gˢρθ`
-(see `add_implicit_advection_tendency!`). A no-op unless the scheme's vertical
-discretization is adaptive-implicit (dispatch below).
+Advance the implicit half of the IMEX split for the thermodynamic perturbation over one
+substep: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★`, solved on the θ predictor between Step B and Step C so
+the pressure solve and recovery act on a transport-consistent predictor. Coefficients read the
+frozen stage-entry state; the base-state part rides `Gˢρθ`
+(see `add_implicit_advection_tendency!`).
 """
 implicit_advection_substep!(model, substepper, advection, Δτ) = nothing
 
