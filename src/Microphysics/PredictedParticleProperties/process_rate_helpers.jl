@@ -137,7 +137,7 @@ Returns a NamedTuple of the possibly-rescaled rates.
     dep = max(0, dep) * f_dep + min(0, dep) * f_sub
 
     return (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap,
-              dep, coat_cond, coat_evap, nuc_q, nuc_n)
+            dep, coat_cond, coat_evap, nuc_q, nuc_n)
 end
 
 """
@@ -232,7 +232,7 @@ end
 # Fall-speed correction for ambient air density, `(ρ₀ / ρ)^α`. The default exponent α is
 # the [Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007) fit and the default density
 # floor only bites above ~30 km, where there is no condensate to fall; both are settable
-# on [`ProcessRateParameters`](@ref).
+# on [`ProcessRate`](@ref).
 @inline function ice_air_density_correction(parameters, reference_air_density, air_density)
     FT = typeof(reference_air_density)
     ρ_floor = FT(parameters.minimum_fall_speed_air_density)
@@ -345,6 +345,14 @@ end
     return cbrt(λʳ_cubed)
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the exponential rain particle size distribution slope parameter ``λʳ``
+diagnosed from the rain mass concentration `qʳ` and number concentration `nʳ`.
+The result is clamped between `parameters.minimum_rain_slope` and
+`parameters.maximum_rain_slope`.
+"""
 @inline rain_slope_parameter(qʳ, nʳ, parameters) =
     clamp(unbounded_rain_slope_parameter(qʳ, nʳ, parameters),
           parameters.minimum_rain_slope, parameters.maximum_rain_slope)
@@ -367,8 +375,8 @@ end
 end
 
 # Bulk ice density from Table 1 at the diagnostic-population bracket.
-@inline ice_mean_density(bulk_properties::IceBulkProperties, prep::PreparedInterpolation) =
-    evaluate_at(bulk_properties.mean_density, prep)
+@inline ice_mean_density(bulk::IceBulk, prep::PreparedInterpolation) =
+    evaluate_at(bulk.mean_density, prep)
 
 #####
 ##### Ice shape parameter (μⁱ) from Table 1
@@ -379,14 +387,14 @@ $(TYPEDSIGNATURES)
 
 Compute the ice PSD shape parameter μⁱ from the lookup tables.
 
-μⁱ is looked up directly from Table 1 (`bulk_properties.shape`), which stores the
+μⁱ is looked up directly from Table 1 (`bulk.shape`), which stores the
 shape parameter computed when the table was generated.
 """
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ)
     m̄ = safe_divide(qⁱ, nⁱ, one(FT))
     log_m = log10(ifelse(m̄ > 0, m̄, one(FT)))
-    return p3.ice.bulk_properties.shape(log_m, Fᶠ, Fˡ, ρᶠ)
+    return p3.ice.bulk.shape(log_m, Fᶠ, Fˡ, ρᶠ)
 end
 
 #####
