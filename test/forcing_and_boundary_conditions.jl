@@ -153,10 +153,25 @@ end
     time_step!(model, Δt)
     @test @allowscalar(ρq[2, 2, 2]) ≈ ρq_before + ρᵣ * F * Δt
 
-    # Every moisture key forces the same field, so more than one is ambiguous
+    # The interface key and the prognostic's own name at one weighting are one source
     @test_throws ArgumentError AtmosphereModel(grid; forcing=(; ρqᵗ=Returns(F), ρqᵛ=Returns(F)))
-    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; ρqᵗ=Returns(F), qᵛ=Returns(F)))
-    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; qᵗ=Returns(F), ρqᵛ=Returns(F)))
+    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; qᵗ=Returns(F), qᵛ=Returns(F)))
+
+    # At different weightings they are two sources: Δρqᵛ = (1 + ρᵣ) F Δt
+    mixed = AtmosphereModel(grid; forcing=(; ρqᵗ=Returns(F), qᵛ=Returns(F)))
+    set!(mixed; θ=mixed.dynamics.reference_state.potential_temperature, qᵗ=FT(0.01))
+    ρᵣ_mixed = @allowscalar mixed.dynamics.reference_state.density[2, 2, 2]
+    ρq_mixed = mixed.moisture_density
+    ρq_mixed_before = @allowscalar ρq_mixed[2, 2, 2]
+    time_step!(mixed, Δt)
+    @test @allowscalar(ρq_mixed[2, 2, 2]) ≈ ρq_mixed_before + (1 + ρᵣ_mixed) * F * Δt
+
+    @test AtmosphereModel(grid; forcing=(; qᵗ=Returns(F), ρqᵛ=Returns(F))) isa AtmosphereModel
+
+    # The same combination under the scheme's own names, which a nested child produces when a
+    # density-weighted relaxation merges with a caller's specific forcing
+    @test AtmosphereModel(grid; microphysics=SaturationAdjustment(),
+                                forcing=(; ρqᵉ=Returns(F), qᵉ=Returns(F))) isa AtmosphereModel
 end
 
 @testset "Energy forcing under ρE reaches the thermodynamic variable [$(FT)]" for FT in test_float_types()
@@ -196,6 +211,37 @@ end
     # `ρs`/`s` are forcing keys only when static energy is prognostic
     @test_throws ArgumentError AtmosphereModel(grid; forcing=(; ρs=Returns(F)))
     @test_throws ArgumentError AtmosphereModel(grid; forcing=(; s=Returns(F)))
+
+    # Under `:StaticEnergy` the energy key and the thermodynamic density are the same quantity in
+    # the same units, so the two names at one weighting are a single source supplied twice
+    for forcing in ((; ρs=Returns(F), ρE=Returns(F)), (; s=Returns(F), E=Returns(F)))
+        @test_throws ArgumentError AtmosphereModel(grid; formulation=:StaticEnergy, forcing)
+    end
+
+    # At different weightings they are two sources, which no single key can express
+    mixed = AtmosphereModel(grid; formulation=:StaticEnergy, forcing=(; ρs=Returns(F), E=Returns(F)))
+    set!(mixed; θ=mixed.dynamics.reference_state.potential_temperature, qᵗ=FT(0.01))
+    ρᵣ_mixed = @allowscalar mixed.dynamics.reference_state.density[2, 2, 2]
+    ρs_mixed = static_energy_density(mixed)
+    ρs_mixed_before = @allowscalar ρs_mixed[2, 2, 2]
+    time_step!(mixed, Δt)
+    @test @allowscalar(ρs_mixed[2, 2, 2]) ≈ ρs_mixed_before + (1 + ρᵣ_mixed) * F * Δt
+
+    @test AtmosphereModel(grid; formulation=:StaticEnergy,
+                                forcing=(; s=Returns(F), ρE=Returns(F))) isa AtmosphereModel
+
+    # A density-keyed and specific-keyed forcing of the same input still combine
+    both = AtmosphereModel(grid; formulation=:StaticEnergy, forcing=(; ρE=Returns(F), E=Returns(F)))
+    θ₀ = both.dynamics.reference_state.potential_temperature
+    set!(both; θ=θ₀, qᵗ=FT(0.01))
+    ρᵣ = @allowscalar both.dynamics.reference_state.density[2, 2, 2]
+    ρs = static_energy_density(both)
+    ρs_before = @allowscalar ρs[2, 2, 2]
+    time_step!(both, Δt)
+    @test @allowscalar(ρs[2, 2, 2]) ≈ ρs_before + (1 + ρᵣ) * F * Δt
+
+    # For `ρθ` the two are different quantities, so both may be supplied
+    @test AtmosphereModel(grid; forcing=(; ρθ=Returns(F), ρE=Returns(F))) isa AtmosphereModel
 end
 
 @testset "Forcing field_dependencies resolve consistently at materialize and runtime [$FT]" for FT in test_float_types()

@@ -538,18 +538,24 @@ function validate_boundary_condition_names(boundary_conditions, field_bc_names)
     throw(ArgumentError(msg))
 end
 
-# Every moisture key ends up forcing the same field, so more than one would be summed into a
-# single source — which is never what a caller means, and is ambiguous besides.
-function validate_moisture_forcing(user_forcings, ρq_name, q_name)
-    ρqᵗ = total_moisture_density_name
-    qᵗ = specific_field_name(ρqᵗ)
-    moisture_names = Tuple(name for name in keys(user_forcings) if name ∈ (ρqᵗ, qᵗ, ρq_name, q_name))
+energy_key_aliases_thermodynamic_density(::Val{:ρs}) = true
+energy_key_aliases_thermodynamic_density(::Val) = false
 
-    if length(moisture_names) > 1
-        msg = string("Invalid forcing: ", moisture_names, " are all moisture keys, so they would be ",
-                     "summed into a single source for ", ρq_name, '.', '\n',
-                     "Supply exactly one — ", ρqᵗ, " (or ", qᵗ, ") is valid whatever the microphysics.")
-        throw(ArgumentError(msg))
+# An interface key and the variable's own name at the same density weighting are one source named
+# twice; at different weightings they are two sources, which no single key can express.
+function validate_interface_forcing(user_forcings, interface_name, target_name)
+    supplied = keys(user_forcings)
+    same_weighting = ((interface_name, target_name),
+                      (specific_field_name(interface_name), specific_field_name(target_name)))
+
+    for (interface_key, target_key) in same_weighting
+        if interface_key ∈ supplied && target_key ∈ supplied
+            msg = string("Invalid forcing: ", interface_key, " and ", target_key,
+                         " name one source, so supplying both would sum it twice.", '\n',
+                         "Supply exactly one — ", interface_key,
+                         " is valid whatever the formulation and microphysics.")
+            throw(ArgumentError(msg))
+        end
     end
 
     return nothing
@@ -569,7 +575,7 @@ function route_moisture_forcing(user_forcings, microphysics)
     ρq_name = moisture_prognostic_name(microphysics)
     q_name = moisture_specific_name(microphysics)
 
-    validate_moisture_forcing(user_forcings, ρq_name, q_name)
+    validate_interface_forcing(user_forcings, ρqᵗ, ρq_name)
 
     rekey(name) = name === ρqᵗ ? ρq_name :
                   name === qᵗ  ? q_name  : name
@@ -611,6 +617,8 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # targets the prognostic thermodynamic density, and the tendency that reads it applies
     # whatever conversion that variable needs (a division by cᵖᵐ Π for `ρθ`; none for `ρs`).
     ρᵡ_name = thermodynamic_density_name(formulation)
+    energy_key_aliases_thermodynamic_density(Val(ρᵡ_name)) &&
+        validate_interface_forcing(user_forcings, total_energy_density_name, ρᵡ_name)
     ρE_field = prognostic_fields[ρᵡ_name]
     forcing_fields = merge(prognostic_fields, NamedTuple{(total_energy_density_name,)}((ρE_field,)))
 
