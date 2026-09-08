@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, mixing_lengthᶜᶜᶠ, absorb_stratification_coefficient, dissipationᶜᶜᶜ
+using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, absorb_stratification_coefficient, dissipationᶜᶜᶜ
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!, time_discretization
 using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, ExplicitTimeDiscretization,
@@ -10,14 +10,19 @@ using Oceananigans.BuoyancyFormulations: ∂z_b
 using Oceananigans.Units
 using Test
 
-# The mixing length is not stored (as in CATKE): diagnose it the way a script would, by evaluating
-# the closure's own `mixing_lengthᶜᶜᶠ` in a `KernelFunctionOperation` over the model state and the
-# stored static stability.
-function diagnosed_mixing_length(model)
-    e = model.tracers.ρe / model.dynamics.reference_state.density
-    op = KernelFunctionOperation{Center, Center, Face}(mixing_lengthᶜᶜᶠ, model.grid, model.closure,
-                                                       e, model.closure_fields.N²)
-    return Field(op) # `Field(op)` computes on construction
+# The mixing length is stored with the closure fields: its envelope over the column is computed by
+# two sweeps, once per stage, so a script reads it as `model.closure_fields.ℓ`.
+diagnosed_mixing_length(model) = model.closure_fields.ℓ
+
+# The envelope written out in full, as the test's reference: at every face the minimum over every
+# face z′ of the bound there — the wall length or the buoyancy penetration depth, whichever is
+# smaller — plus Cˢ times the distance. The ground, the bottom face, is a zero; above it the wall
+# length is Cˢ times the height.
+function brute_force_envelope(grid, ℓᵇ, Cˢ)
+    zf = znodes(grid, Face())
+    obstacles = min.(Cˢ .* zf, ℓᵇ)
+    obstacles[1] = 0
+    return [minimum(obstacles[m] + Cˢ * abs(zf[k] - zf[m]) for m in eachindex(zf)) for k in eachindex(zf)]
 end
 
 #####
@@ -150,14 +155,12 @@ column(field) = Array(interior(field, 1, 1, :))
         Cˢ = closure.mixing_length.Cˢ
         interior_faces = 2:Nz
 
-        # In neutral air the mixing length is Cˢ times the height above the surface, with two
-        # boundary subtleties: the wall distance is floored at the thickness of the cell below (as
-        # in CATKE), so the surface face gets ℓ ~ Cˢ Δz rather than zero — reduced further where
-        # the surface-face stratification stencil reaches into the halo — and the top face is
-        # unmasked.
+        # In neutral air the mixing length is Cˢ times the height above the surface: the ground is
+        # the only obstacle, the surface face is a zero — the diffusivities there are masked
+        # regardless — and the top face is unmasked.
         ℓ = column(diagnosed_mixing_length(model))
         Δz = Lz / Nz
-        @test 0 < ℓ[1] ≤ Cˢ * Δz
+        @test ℓ[1] == 0
         @test ℓ[Nz+1] ≈ Cˢ * Lz
         @test all(ℓ[interior_faces] .≈ Cˢ .* zf[interior_faces])
 
@@ -171,7 +174,7 @@ column(field) = Array(interior(field, 1, 1, :))
         @test all(Kᵉ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᵉ / sf.Cᵘ)
     end
 
-    @testset "the stratification length" begin
+    @testset "the buoyancy penetration depth" begin
         model = AtmosphereModel(grid; closure, advection = nothing)
         e₀ = FT(0.5)
         Γ = FT(0.005)
@@ -186,8 +189,8 @@ column(field) = Array(interior(field, 1, 1, :))
 
         for k in 2:Nz
             N² = g * (log(θ[k]) - log(θ[k-1])) / Δz
-            ℓᴺ = sqrt(e₀) / sqrt(N²)
-            @test ℓ[k] ≈ min(Cˢ * zf[k], ℓᴺ) rtol=1e-5
+            ℓᵇ = sqrt(e₀) / sqrt(N²)
+            @test ℓ[k] ≈ min(Cˢ * zf[k], ℓᵇ) rtol=1e-5
         end
 
         # Stratification limits the length well above the surface
@@ -233,18 +236,81 @@ column(field) = Array(interior(field, 1, 1, :))
         @test all(isapprox.(Kᶜ[2:Nz], legacy.Cᶜ .* ℓᶠ .* sqrt(e₀); rtol = 1e-5))
         @test all(isapprox.(Kᵉ[2:Nz], legacy.Cᵉ .* ℓᶠ .* sqrt(e₀); rtol = 1e-5))
 
-        # The sink rate at the interior centers: dissipation with N² and B = -Kᶜ N² reconstructed
-        # from the two adjacent faces, plus the negative buoyancy flux divided by e
+        # The sink rate at the interior centers: dissipation with the mixing length evaluated at
+        # the center from the two adjacent faces — in the legacy normalization
+        # min(ℓᶠₖ, ℓᶠₖ₊₁) + Δz / 2, no more than the height of the center — and B = -Kᶜ N²
+        # reconstructed from the two adjacent faces, plus the negative buoyancy flux divided by e
         Lᵉ = column(model.closure_fields.Lᵉ)
         zc = znodes(grid, Center())
         for k in 2:Nz-1
-            N²ᶜ = (N²[k-1] + N²[k]) / 2
-            ℓᶜ = min(zc[k], Cᴺ * sqrt(e₀) / sqrt(N²ᶜ))
+            ℓᶜ = min(min(ℓᶠ[k-1], ℓᶠ[k]) + Δz / 2, zc[k])
             B = -(Kᶜ[k] * N²[k-1] + Kᶜ[k+1] * N²[k]) / 2
             @test Lᵉ[k] ≈ -(legacy.Cᴰ * sqrt(e₀) / ℓᶜ - B / e₀) rtol=1e-5
         end
     end
 
+
+    @testset "the envelope: an elevated neutral layer is bounded by the stratified air around it" begin
+        # Stable below 300 m, neutral between 300 and 700 m, stable above: min(Cˢ z, ℓᵇ) gives the
+        # wall length Cˢ z ≈ 400–900 m inside the neutral layer, where nothing is stratified; the
+        # envelope is bounded by the stratified faces just below and above the layer.
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        e₀ = FT(0.5)
+        Γ = FT(0.005)
+        θᵢ(z) = z < 300 ? 300 + Γ * z : z < 700 ? 300 + Γ * 300 : 300 + Γ * (z - 400)
+        set!(model; θ = θᵢ)
+        set_tke!(model, e₀)
+        Cˢ = closure.mixing_length.Cˢ
+        Δz = Lz / Nz
+
+        ℓ = column(diagnosed_mixing_length(model))
+        N² = column(model.closure_fields.N²)
+        ℓᵇ = [N²[k] > 0 ? sqrt(e₀) / sqrt(N²[k]) : Inf for k in eachindex(zf)]
+
+        # Exactly the envelope, at every face
+        @test all(isapprox.(ℓ, brute_force_envelope(grid, ℓᵇ, Cˢ); rtol = 1e-6))
+
+        # Bounded by every obstacle, and by its neighbors through the slope Cˢ
+        @test all(ℓ[2:end] .≤ Cˢ .* zf[2:end] .+ 1e-6)
+        @test all(ℓ .≤ ℓᵇ .+ 1e-6)
+        @test all(abs.(diff(ℓ)) .≤ Cˢ * Δz * (1 + 1e-6))
+
+        # In the neutral layer the mixing length is well below the wall length: the stratified
+        # faces above and below bind it through Cˢ times the distance to them
+        neutral = findall(z -> 350 < z < 650, zf)
+        @test all(ℓ[neutral] .< 0.75 .* Cˢ .* zf[neutral])
+        @test all(abs.(N²[neutral]) .< 1e-10)
+
+        # In the stratified layer below, the point itself binds: the familiar min(Cˢ z, ℓᵇ)
+        stratified = findall(z -> 100 < z < 250, zf)
+        @test all(isapprox.(ℓ[stratified], min.(Cˢ .* zf[stratified], ℓᵇ[stratified]); rtol = 1e-5))
+
+        # The dissipation reads the envelope at the centers, halfway between the faces
+        e = model.tracers.ρe / model.dynamics.reference_state.density
+        ε = column(Field(KernelFunctionOperation{Center, Center, Center}(dissipationᶜᶜᶜ, grid, closure, e,
+                                                                        model.velocities, model.closure_fields)))
+        ℓᶜ = [min(ℓ[k], ℓ[k+1]) + Cˢ * Δz / 2 for k in 1:Nz]
+        @test all(isapprox.(ε, closure.stability_functions.Cᴰ .* e₀^(3/2) ./ ℓᶜ; rtol = 1e-6))
+    end
+
+    @testset "the envelope on a stretched grid" begin
+        # Cell heights vary, so the sweeps must add the height of the cell between the faces
+        z_stretched = PiecewiseStretchedDiscretization(z = [0, Lz], Δz = [Lz / (2Nz), 2Lz / Nz])
+        stretched = RectilinearGrid(default_arch; size = length(z_stretched) - 1, z = z_stretched, topology = (Flat, Flat, Bounded))
+        model = AtmosphereModel(stretched; closure, advection = nothing)
+        e₀ = FT(0.5)
+        Γ = FT(0.005)
+        θᵢ(z) = z < 300 ? 300 + Γ * z : z < 700 ? 300 + Γ * 300 : 300 + Γ * (z - 400)
+        set!(model; θ = θᵢ)
+        set_tke!(model, e₀)
+        Cˢ = closure.mixing_length.Cˢ
+        zf_stretched = znodes(stretched, Face())
+
+        ℓ = column(diagnosed_mixing_length(model))
+        N² = column(model.closure_fields.N²)
+        ℓᵇ = [N²[k] > 0 ? sqrt(e₀) / sqrt(N²[k]) : Inf for k in eachindex(zf_stretched)]
+        @test all(isapprox.(ℓ, brute_force_envelope(stretched, ℓᵇ, Cˢ); rtol = 1e-6))
+    end
     @testset "diffusivity caps" begin
         capped = TKEBasedTurbulenceClosure(maximum_viscosity = 1e-3, maximum_tracer_diffusivity = 2e-3,
                                            maximum_tke_diffusivity = 3e-3)
@@ -297,7 +363,7 @@ column(field) = Array(interior(field, 1, 1, :))
         # The dissipation diagnostic is the same rate times e
         e = model.tracers.ρe / model.dynamics.reference_state.density
         ε = column(Field(KernelFunctionOperation{Center, Center, Center}(dissipationᶜᶜᶜ, grid, closure, e,
-                                                                        model.velocities, model.closure_fields.N²)))
+                                                                        model.velocities, model.closure_fields)))
         @test all(ε .≈ -Lᵉ .* e₀)
         @test all(Lᵉ .< 0)
 

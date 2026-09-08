@@ -33,7 +33,9 @@ using Oceananigans.Operators:
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ,
     ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ,
     # Vertical derivative at faces, for the static stability
-    ∂zᶜᶜᶠ
+    ∂zᶜᶜᶠ,
+    # Cell height, for the mixing-length sweeps
+    Δzᶜᶜᶜ
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,

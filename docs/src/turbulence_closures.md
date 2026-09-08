@@ -54,20 +54,53 @@ the closure in stable, neutral and convective boundary layers.
 
 ### The mixing length
 
-The primary mixing length ([`TKEMixingLength`](@ref)) is the smaller of a wall length and the
-stratification length,
+The primary mixing length ([`TKEMixingLength`](@ref)) is built from one local quantity, the
+*buoyancy penetration depth*
+
+```math
+ℓᵇ = \frac{\sqrt{e}}{N},
+```
+
+how far an eddy with kinetic energy ``e`` penetrates air of buoyancy frequency ``N`` before its
+kinetic energy is spent against buoyancy; ``ℓᵇ`` is infinite where ``N² ≤ 0`` and zero at the
+ground. An eddy centered at height ``z`` reaches past a level ``z′`` only by the penetration depth
+there, so every level of the column bounds the mixing length at every other level, and the mixing
+length is the lower envelope of all these bounds,
+
+```math
+ℓ(z) = \min_{z′} \left[ ℓᵇ(z′) + Cˢ |z - z′| \right],
+```
+
+with ``Cˢ`` the slope of ``ℓ`` away from any obstacle. Where only the ground and the level itself
+bind, the envelope is the familiar
 
 ```math
 ℓ = \min(Cˢ z, \, \sqrt{e} / N),
 ```
 
-``Cˢ`` times the distance to the wall, and the distance a parcel with kinetic energy ``e`` travels
-against a stable stratification of buoyancy frequency ``N``. The stratification length is infinite
-in neutral and unstable air, where ``ℓ = Cˢ z``. It carries no coefficient of its own — the
-stability functions set the scale of every diffusivity — so ``Cˢ`` alone sets the ratio of the two
-lengths. The default ``Cˢ = 1.316`` is the reciprocal of Deardorff's coefficient ``0.76`` of the
-stratification length ([Deardorff (1980)](@cite Deardorff1980)), which the equivalent normalization
-``ℓ = \min(z, 0.76 \sqrt{e} / N)`` carries on the stratification length instead.
+the wall length ``Cˢ z`` in neutral and unstable air attached to the surface and the stratification
+length ``\sqrt{e} / N`` in stably stratified air. The envelope differs where that formula fails:
+in a mixed layer ``ℓ`` falls off toward the capping inversion instead of growing as ``Cˢ z``, and in
+an elevated neutral or unstable layer — a cloud layer whose saturated static stability is not
+positive — it is bounded by ``Cˢ`` times the distance to the stratified air above and below rather
+than by the distance to the ground, which ``\min(Cˢ z, \sqrt{e} / N)`` lets grow to kilometers.
+Left unbounded there, the diffusivity ``Cᵘ ℓ \sqrt{e}`` jumps by two to five orders of magnitude
+whenever such a layer forms, mixes it away within a time step, and collapses; the envelope removes
+the jump. It is the local-penetration form of the parcel lengths of
+[Bougeault and Lacarrère (1989)](@cite BougeaultLacarrere1989): where the stratification beyond an
+obstacle is uniform, a parcel with energy ``e`` stops after ``\sqrt{2e} / N``, the penetration
+depth up to a constant, but the envelope uses the energy at the obstacle rather than at the parcel's
+origin and does not credit energy gained crossing unstable air, so it penetrates inversions less.
+
+Because a bound propagates from a level only to its neighbors, two sweeps per column compute the
+envelope exactly — upward from the ground, ``ℓₖ = \min(ℓₖ, ℓₖ₋₁ + Cˢ Δz)``, then downward,
+``ℓₖ = \min(ℓₖ, ℓₖ₊₁ + Cˢ Δz)`` — once per time-step stage, into the closure field
+`closure_fields.ℓ`. The penetration depth carries no coefficient of its own — the stability
+functions set the scale of every diffusivity — so ``Cˢ`` alone sets the ratio of the wall length to
+the penetration depth. The default ``Cˢ = 1.316`` is the reciprocal of Deardorff's coefficient
+``0.76`` of the stratification length ([Deardorff (1980)](@cite Deardorff1980)), which the
+equivalent normalization ``ℓ = \min(z, 0.76 \sqrt{e} / N)`` carries on the penetration depth
+instead.
 
 ### Static stability
 
@@ -172,8 +205,10 @@ scale, a surface flux of turbulent kinetic energy and a non-local flux are natur
 
 ### Numerics
 
-The diffusivities are computed at the cell interfaces where the fluxes live, from ``\sqrt{e}``
-reconstructed from the cell centers and floored at `minimum_tke`. The numerics of the TKE equation
+The diffusivities are computed at the cell interfaces where the fluxes live, from the stored mixing
+length and ``\sqrt{e}`` reconstructed from the cell centers and floored at `minimum_tke`; the
+dissipation reads the mixing length halfway between the two faces of its cell,
+``\min(ℓₖ, ℓₖ₊₁) + Cˢ Δz / 2``. The numerics of the TKE equation
 follow CATKE. The sinks — dissipation and the negative part of the buoyancy flux, as the rate
 ``-Lᵉ = Sᴰ \sqrt{e} / ℓ + |B⁻| / e``, and the damping of ``e`` that advection drives negative, at
 the rate ``1/τ`` — enter the vertically implicit tridiagonal solve of every time-step stage together

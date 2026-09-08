@@ -30,16 +30,14 @@ using Oceananigans.Units
 using CairoMakie
 using Statistics
 
-# The mixing length is not stored by the closure, so we diagnose it below by evaluating the
-# closure's own kernel function, which takes the specific TKE and the stored static stability.
-
-using Breeze.TurbulenceClosures: mixing_lengthᶜᶜᶠ
-
 # ## Two coefficient sets
 #
-# The closure's diffusivities are ``K = S ℓ \sqrt{e}`` with one primary mixing length
-# ``ℓ = \min(Cˢ z, \sqrt{e} / N)`` and a stability function ``S`` for each of momentum, scalars and
-# TKE, plus one for the dissipation. The default [`ConstantStabilityFunctions`](@ref) are the
+# The closure's diffusivities are ``K = S ℓ \sqrt{e}`` with one primary mixing length ``ℓ`` and a
+# stability function ``S`` for each of momentum, scalars and TKE, plus one for the dissipation. The
+# mixing length is the envelope of the buoyancy penetration depths ``ℓᵇ = \sqrt{e} / N`` of every
+# level and of the ground, ``ℓ(z) = \min_{z′} [ℓᵇ(z′) + Cˢ |z - z′|]``, which is the wall length
+# ``Cˢ z`` in neutral air attached to the surface, the stratification length ``\sqrt{e} / N`` in
+# stably stratified air, and bounded by the stratified air around any layer that is neither. The default [`ConstantStabilityFunctions`](@ref) are the
 # Mellor–Yamada constants of Nakanishi and Niino, which put the neutral log layer at ``κ = 0.40``
 # with ``e / u_\star² = 4.2``. [`RiDependentStabilityFunctions`](@ref) are CATKE's: each function
 # takes one value in unstable air, another at neutral, and ramps to a third as the Richardson
@@ -222,7 +220,7 @@ depths = (stable = stress_depth, neutral = stress_depth, convective = inversion_
 # rises with the Richardson number, and they carry less turbulent kinetic energy everywhere:
 # ``e / u_\star²`` is a third of the constants' in the neutral surface layer, and the mixing length
 # is shorter by the ratio of the wall coefficients. Without CATKE's convective length scale, the
-# convective layer is mixed by ``Cˢ z`` alone.
+# convective layer is mixed by the envelope of ``Cˢ z`` from below and the inversion from above.
 
 set_theme!(fontsize = 14, linewidth = 2.5)
 colors = (stable = :dodgerblue, neutral = :black, convective = :orangered)
@@ -232,11 +230,7 @@ function specific_tke(model)
     return Field(model.tracers.ρe / model.dynamics.reference_state.density)
 end
 
-function mixing_length(model)
-    e = specific_tke(model)
-    return Field(KernelFunctionOperation{Center, Center, Face}(mixing_lengthᶜᶜᶠ, model.grid, model.closure,
-                                                                 e, model.closure_fields.N²))
-end
+mixing_length(model) = model.closure_fields.ℓ
 
 fig = Figure(size = (1100, 800))
 ax_θ = Axis(fig[1, 1]; xlabel = "θ - θ(z=0) (K)", ylabel = "z / hᵇˡ")
@@ -458,7 +452,7 @@ function les_driven_column(path; closure, Δt = 1minute)
                    w′qᵗ′ = Field(- Kᶜ * ∂z(qᵗ)),
                    P = Field(KernelFunctionOperation{Center, Center, Face}(shear_productionᶜᶜᶠ, grid, Kᵘ, u, v)),
                    B = Field(KernelFunctionOperation{Center, Center, Face}(buoyancy_productionᶜᶜᶠ, grid, Kᶜ, N²)),
-                   ε = Field(KernelFunctionOperation{Center, Center, Center}(dissipationᶜᶜᶜ, grid, closure, e, model.velocities, N²)))
+                   ε = Field(KernelFunctionOperation{Center, Center, Center}(dissipationᶜᶜᶜ, grid, closure, e, model.velocities, model.closure_fields)))
 
     averages = TimeAverages(diagnostics, ds.attrib["target_window_start"])
     add_callback!(simulation, averages, IterationInterval(10))
@@ -606,38 +600,41 @@ fig = detail_figure(:stratocumulus, detail_columns.stratocumulus, detail_les.str
 save("single_column_tke_stratocumulus.png", fig) #src
 fig
 
-# With the dry static stability, both coefficient sets stop the boundary layer about a hundred meters
+# With the dry static stability, both coefficient sets stop the boundary layer four hundred meters
 # short of the LES inversion. The cloud layer of a stratocumulus deck is stably stratified in ``θᵨ`` —
-# condensation warms it toward the moist adiabat — so the stratification length shuts the mixing off
-# just where the LES's turbulence is strongest, at cloud top, where radiative cooling drives it. The
+# condensation warms it toward the moist adiabat — so the penetration depth shuts the mixing off just
+# where the LES's turbulence is strongest, at cloud top, where radiative cooling drives it. The
 # closure carries no turbulent kinetic energy there, the layer never reaches the inversion, and the
-# cloud is a trace. With the moist static stability the saturated layer is nearly neutral to the
-# displacements the closure represents: the layer deepens to the LES inversion and turbulent kinetic
-# energy peaks at cloud top as it does in the LES — CATKE's functions overshoot the peak by a factor
-# of two — but the layer now entrains too much dry air across the inversion, its upper half ends up
-# half a gram per kilogram drier than the LES, subsaturated, and the cloud is gone. The LES also
-# drizzles, which removes water from its cloud and cannot be why the column is drier still. The
-# total-water flux tells the same story from the other side: the dry configurations' flux is several
-# times the LES's and flickers between adjacent levels in the upper half of the layer — a grid-scale
-# staircase that a stability-function closure builds wherever ``N²`` is set by small differences in
-# condensation — while the moist configurations' flux is smooth through the layer and of the LES's
-# size, and flickers only in the entrainment zone at its top.
+# moisture it cannot lift condenses into a fog through the lower layer that the LES does not have.
+# The total-water flux shows the mechanism: through that fog it alternates between adjacent levels,
+# a grid-scale staircase that a closure builds wherever it diffuses ``θˡ`` and ``qᵗ`` down their
+# gradients but reads a dry ``N²`` that the diffusion itself makes stable. With the moist static
+# stability the saturated layer is nearly neutral to the displacements the closure represents, and
+# the fluxes are smooth. With the Nakanishi–Niino constants the layer deepens to the LES inversion
+# and keeps a cloud at its top — twice the LES's liquid water, with the turbulent kinetic energy
+# peaking in the middle of the layer rather than at cloud top, where the LES's radiative cooling
+# puts it. CATKE's functions, whose Prandtl number rises with the Richardson number, stop the layer
+# a hundred meters short and leave a trace of cloud.
 
 fig = detail_figure(:cumulus, detail_columns.cumulus, detail_les.cumulus)
 save("single_column_tke_cumulus.png", fig) #src
 fig
 
-# The trade-cumulus column separates the two static stabilities completely. With the dry one the layer
-# is capped at 1.6–1.7 km, half a kilometer below the LES's cloud tops; moisture piles up beneath the
-# cap until the whole layer saturates into a stratocumulus with a gram per kilogram of liquid that the
-# LES does not have, and the fluxes in it flicker at the grid scale. With the moist one the saturated
-# layer is near-neutral and ``θˡ`` and ``qᵗ`` follow the LES up through the cloud layer to the trade
-# inversion — overshooting it by two or three hundred meters, and with two to three times the LES's
-# turbulent kinetic energy in the cloud layer, since a local closure can only represent the cumulus
-# layer's transport as diffusion down the mean gradients. Its fluxes and buoyancy production still
-# flicker from one interface to the next through the cloud layer: a layer that hovers at saturation
-# switches between the two branches of ``N²`` from level to level, and only the mean state is smooth.
-# The coefficient sets are a second-order distinction in both columns.
+# The trade-cumulus column shows what a local closure with all-or-nothing condensation does to a
+# cumulus layer. With the dry static stability the layer is capped at 1.2–1.3 km, a kilometer below
+# the LES's cloud tops; moisture piles up beneath the cap until the whole layer saturates into a
+# stratocumulus with three grams per kilogram of liquid that the LES does not have, and the fluxes
+# in it carry the grid-scale staircase. With the moist static stability the saturated layer is
+# near-neutral and the closure mixes it to the trade inversion, where the LES's cloud tops are — but
+# it mixes it as a stratocumulus should be mixed: ``θˡ`` and ``qᵗ`` are uniform where the LES keeps a
+# stratified, conditionally unstable cumulus layer, a cloud deck with a gram per kilogram of liquid
+# sits under the inversion where the LES has a few hundredths from scattered cumulus, and the
+# turbulent kinetic energy is two to three times the LES's. The mean state is smooth and the fluxes
+# are steady; the error is that once the grid mean saturates, a layer that is 7 % cloudy in the LES
+# is 100 % cloudy in the column, and every subsequent step follows from that. A subgrid condensation
+# scheme — a cloud fraction from the variance of the saturation deficit — is what the closures that
+# do well in cumulus pair with a TKE equation, and it is not part of this closure. The coefficient
+# sets are a second-order distinction in both columns.
 
 # ## The ensemble
 #
@@ -701,12 +698,15 @@ fig
 
 # The pattern of the two columns holds along the whole transect. With the dry static stability the
 # error grows from the coasts into the tropics and the trades, where the boundary layer is deep and
-# cumulus-topped, and CATKE's functions reduce it a little. With the moist static stability the error
-# drops by half across the ensemble with either coefficient set, and most of its dependence on regime
-# disappears — except in the deepest tropical columns in April (sites 14 and 15), where the LES cloud
-# layer reaches 3 km and a local closure that treats a saturated layer as neutral mixes the whole
-# column; there the dry static stability, whatever its faults, errs less. Summarized across the
-# ensemble, the median errors of the four configurations are
+# cumulus-topped and every column caps too low and fogs beneath the cap. With the moist static
+# stability the error halves across the ensemble with either coefficient set and most of its
+# dependence on regime disappears: the stratocumulus coasts, the trades and the tropics score alike,
+# and only the deepest tropical columns in April (site 15), where the LES cloud layer reaches 3 km,
+# stand out. The Nakanishi–Niino constants beat CATKE's by a third with the moist static stability;
+# CATKE's carry less turbulent kinetic energy and stop the layers short. What remains is the bias of
+# the cumulus column — a well-mixed, fully cloudy layer where the LES has a stratified, sparsely
+# cloudy one — spread over every cumulus-topped member. Summarized across the ensemble, the median
+# errors of the four configurations are
 
 for (name, closure) in pairs(configurations)
     θ_error = median(filter(isfinite, errors[name].θˡ))
