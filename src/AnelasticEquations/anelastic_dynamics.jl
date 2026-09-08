@@ -179,15 +179,58 @@ function AtmosphereModels.materialize_momentum_and_velocities(dynamics::Anelasti
     ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)
     momentum = (; ρu, ρv, ρw)
 
-    # Velocity is diagnostic (u = ρu/ρ via compute_velocities!). Use the auxiliary-field
-    # default BCs (`nothing` on Bounded-Face sides, Periodic on Periodic sides), which
-    # is what XFaceField gives us when constructed with no `boundary_conditions=` kwarg.
-    # `nothing` on Bounded-Face prevents `fill_halo_regions!(velocities)` from clobbering
-    # the kernel-computed boundary face — momentum carries the wall BC.
-    u = XFaceField(grid)
-    v = YFaceField(grid)
-    w = ZFaceField(grid)
+    # Velocity is diagnostic (u = ρu/ρ via compute_velocities!). Its own normal-direction
+    # faces are computed by that kernel, so those sides carry `nothing` and are never
+    # clobbered by `fill_halo_regions!(velocities)` — momentum carries the wall BC there.
+    # The tangential sides carry the velocity's own boundary conditions, which default to
+    # the mirror fill (free slip) and accept `ValueBoundaryCondition(0)` for no slip: the
+    # closure's viscous stress differentiates the diagnostic velocity, so a no-slip wall in
+    # a wall-resolving simulation is set here rather than on the momentum.
+    u = velocity_field(XFaceField, grid, get(boundary_conditions, :u, nothing), Val(:x))
+    v = velocity_field(YFaceField, grid, get(boundary_conditions, :v, nothing), Val(:y))
+    w = velocity_field(ZFaceField, grid, get(boundary_conditions, :w, nothing), Val(:z))
     velocities = (; u, v, w)
 
     return momentum, velocities
 end
+
+# The anelastic velocity is diagnostic, but the closure's viscous stress differentiates it, so its
+# tangential wall values are the no-slip / free-slip condition of a wall-resolving simulation and
+# are honoured (see `materialize_momentum_and_velocities`). The sides normal to a velocity are
+# computed from the momentum and any condition there would be ignored, so those are rejected.
+function AtmosphereModels.validate_velocity_boundary_conditions(::AnelasticDynamics, user_boundary_conditions)
+    normal_sides = (u = (:west, :east), v = (:south, :north), w = (:bottom, :top))
+    for name in (:u, :v, :w)
+        haskey(user_boundary_conditions, name) || continue
+        bcs = getproperty(user_boundary_conditions, name)
+        for side in normal_sides[name]
+            hasproperty(bcs, side) || continue
+            isnothing(getproperty(bcs, side)) && continue
+            getproperty(bcs, side) isa DefaultBoundaryCondition && continue
+            throw(ArgumentError(string("A boundary condition was given for the velocity ", name, " on the ", side,
+                                       " boundary, which is normal to it. The normal velocity at a wall is computed ",
+                                       "from the momentum, so set that condition on ρ", name, " instead; conditions on ",
+                                       "the sides tangential to a velocity set the wall stress seen by the closure.")))
+        end
+    end
+    return nothing
+end
+
+# Without boundary conditions of its own the velocity keeps the auxiliary-field defaults, which
+# mirror across a wall: free slip
+velocity_field(FieldType, grid, ::Nothing, direction) = FieldType(grid)
+velocity_field(FieldType, grid, bcs, direction) =
+    FieldType(grid, boundary_conditions=tangential_velocity_boundary_conditions(bcs, direction))
+
+# The velocity's boundary conditions with the two sides normal to it removed
+tangential_velocity_boundary_conditions(bcs, ::Val{:x}) =
+    FieldBoundaryConditions(; west=nothing, east=nothing, south=bcs.south, north=bcs.north,
+                              bottom=bcs.bottom, top=bcs.top, immersed=bcs.immersed)
+
+tangential_velocity_boundary_conditions(bcs, ::Val{:y}) =
+    FieldBoundaryConditions(; west=bcs.west, east=bcs.east, south=nothing, north=nothing,
+                              bottom=bcs.bottom, top=bcs.top, immersed=bcs.immersed)
+
+tangential_velocity_boundary_conditions(bcs, ::Val{:z}) =
+    FieldBoundaryConditions(; west=bcs.west, east=bcs.east, south=bcs.south, north=bcs.north,
+                              bottom=nothing, top=nothing, immersed=bcs.immersed)
