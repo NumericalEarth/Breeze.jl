@@ -771,6 +771,24 @@ end
         ρE_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(200)))
 
         @test_throws ArgumentError AtmosphereModel(grid_1; boundary_conditions=(ρθ=ρθ_bcs, ρE=ρE_bcs))
+
+        # On different sides they are two halves of one specification: a lateral Dirichlet value of
+        # the prognostic variable together with a surface energy flux
+        bounded = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100),
+                                  topology=(Bounded, Bounded, Bounded))
+        both_sides = AtmosphereModel(bounded; boundary_conditions =
+                         (ρθ = FieldBoundaryConditions(west=ValueBoundaryCondition(FT(360))),
+                          ρE = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100)))))
+        ρθ_bcs_split = thermodynamic_density(both_sides.formulation).boundary_conditions
+        @test ρθ_bcs_split.west.condition == FT(360)
+        @test ρθ_bcs_split.bottom.condition.condition == FT(100)
+
+        # A side the caller wrote under both keys is in contention even when one of them is an
+        # explicit no-flux, which says something about that side rather than nothing
+        @test_throws ArgumentError AtmosphereModel(bounded; boundary_conditions =
+            (ρθ = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(7))),
+             ρE = FieldBoundaryConditions(west=ValueBoundaryCondition(FT(360)),
+                                          bottom=FluxBoundaryCondition(nothing))))
     end
 
     @testset "static_energy_density returns Field with energy flux BCs [$FT]" begin

@@ -130,54 +130,71 @@ end
 ##### Route interface keys (ρE, ρqᵗ) onto the prognostic fields that carry them
 #####
 
+const boundary_sides = (:west, :east, :south, :north, :bottom, :top, :immersed)
+
+# Whether the caller wrote a condition on a side, as opposed to the constructor filling it in.
+# Distinct from `nondefault_bc`, which asks whether an entry carries anything worth converting and
+# so treats an explicit no-flux as nothing at all.
+specified_bc(bc) = !(bc isa DefaultBoundaryCondition)
+
+nondefault_bc(::Nothing) = false
+nondefault_bc(::BoundaryCondition{<:Flux, Nothing}) = false
+nondefault_bc(::DefaultBoundaryCondition) = false
+nondefault_bc(bc) = true
+
 # Check if FieldBoundaryConditions has any non-default values
 has_nondefault_bcs(::Nothing) = false
 has_nondefault_bcs(fbcs) = false
+has_nondefault_bcs(fbcs::FieldBoundaryConditions) =
+    any(side -> nondefault_bc(getproperty(fbcs, side)), boundary_sides)
 
-function has_nondefault_bcs(fbcs::FieldBoundaryConditions)
-    for side in (:west, :east, :south, :north, :bottom, :top, :immersed)
-        bc = getproperty(fbcs, side)
-        bc isa Nothing && continue
-        bc isa BoundaryCondition{<:Flux, Nothing} && continue
-        bc isa DefaultBoundaryCondition && continue
-        return true
-    end
-    return false
-end
-
-# Error if both an interface key and the prognostic field it routes onto carry non-default
-# boundary conditions: the two would be summed into one flux on the same field, which is never
-# what a caller means.
+# Error if an interface key and the prognostic field it routes onto both carry a non-default
+# condition on the same side: the two would be summed into one flux there, which is never what a
+# caller means. Different sides are two halves of one specification and are merged.
 function validate_interface_bcs(bcs, interface_name, target_name)
-    has_target = target_name ∈ keys(bcs) && has_nondefault_bcs(bcs[target_name])
-    has_interface = interface_name ∈ keys(bcs) && has_nondefault_bcs(bcs[interface_name])
+    interface_bcs = get(bcs, interface_name, nothing)
+    target_bcs = get(bcs, target_name, nothing)
 
-    if has_target && has_interface
-        throw(ArgumentError("Cannot specify boundary conditions on both $target_name and $interface_name. " *
-                            "Both are applied to $target_name, so supplying both would sum them into a " *
-                            "single flux. Use $interface_name, which is valid whatever the formulation " *
-                            "and microphysics, or $target_name, but not both."))
+    interface_bcs isa FieldBoundaryConditions && target_bcs isa FieldBoundaryConditions || return nothing
+
+    contested = Tuple(side for side in boundary_sides
+                      if specified_bc(getproperty(interface_bcs, side)) &&
+                         specified_bc(getproperty(target_bcs, side)))
+
+    if !isempty(contested)
+        throw(ArgumentError("Cannot specify boundary conditions on both $target_name and $interface_name " *
+                            "on the same side, but both carry one on $contested. Both are applied to " *
+                            "$target_name, so supplying both would sum them into a single flux there. " *
+                            "Use $interface_name, which is valid whatever the formulation and " *
+                            "microphysics, or $target_name, but not both on one side."))
     end
 
     return nothing
 end
 
-# Strip `interface_name` from `bcs`, returning the remainder together with the conditions bound
-# for `target_name`: the interface entry, put by `adapt` into the units `target_name` requires,
-# or else whatever was supplied under `target_name` itself.
+# Take each side the caller wrote under the interface key, and the target's own condition on every
+# other side. `validate_interface_bcs` has already rejected any side written under both.
+merge_interface_sides(interface_bcs, target_bcs) = interface_bcs
+
+merge_interface_sides(interface_bcs, target_bcs::FieldBoundaryConditions) =
+    FieldBoundaryConditions(; (side => (specified_bc(getproperty(interface_bcs, side)) ?
+                                        getproperty(interface_bcs, side) :
+                                        getproperty(target_bcs, side))
+                               for side in boundary_sides)...)
+
+# Strip `interface_name` from `bcs`, returning the remainder together with the conditions bound for
+# `target_name`: each side taken from the interface entry, put by `adapt` into the units
+# `target_name` requires, or from what was supplied under `target_name` itself.
 function route_interface_bcs(bcs, interface_name, target_name, adapt)
     validate_interface_bcs(bcs, interface_name, target_name)
 
     interface_bcs = get(bcs, interface_name, nothing)
     bcs = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== interface_name)
 
-    target_bcs = if has_nondefault_bcs(interface_bcs)
-        adapt(interface_bcs)
-    else
-        get(bcs, target_name, FieldBoundaryConditions())
-    end
+    target_bcs = get(bcs, target_name, FieldBoundaryConditions())
+    has_nondefault_bcs(interface_bcs) || return bcs, target_bcs
 
-    return bcs, target_bcs
+    return bcs, merge_interface_sides(adapt(interface_bcs), target_bcs)
 end
 
 """
