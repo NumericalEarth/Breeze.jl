@@ -88,7 +88,7 @@ function parse_lookup_table_file(filepath::AbstractString, FT::Type)
     col_names = [
         :number_weighted, :mass_weighted, :aggregation, :cloud_collection,
         :ventilation, :effective_radius, :small_q, :large_q,
-        :reflectivity, :ventilation_enhanced, :mean_diameter, :mean_density,
+        :reflectivity, :enhanced_ventilation, :mean_diameter, :mean_density,
         :slope_parameter, :shape_parameter,
         :small_ice_ventilation_constant, :small_ice_ventilation_reynolds,
         :large_ice_ventilation_constant, :large_ice_ventilation_reynolds,

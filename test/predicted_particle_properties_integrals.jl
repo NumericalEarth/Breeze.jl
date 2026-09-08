@@ -132,7 +132,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         dep = IceDeposition()
 
         @test isnothing(dep.ventilation)
-        @test isnothing(dep.ventilation_enhanced)
+        @test isnothing(dep.enhanced_ventilation)
         @test isnothing(dep.small_ice_ventilation_constant)
         @test isnothing(dep.small_ice_ventilation_reynolds)
         @test isnothing(dep.large_ice_ventilation_constant)

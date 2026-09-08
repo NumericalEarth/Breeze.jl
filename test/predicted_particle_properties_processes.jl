@@ -171,7 +171,7 @@ function expected_reference_ice_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, �
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
     ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
     C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
-                                      p3.ice.deposition.ventilation_enhanced,
+                                      p3.ice.deposition.enhanced_ventilation,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.ν, transport.Dᵛ, ρ_correction)
     ice_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
@@ -189,7 +189,7 @@ function expected_reference_coating_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, F�
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
     ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
     C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
-                                      p3.ice.deposition.ventilation_enhanced,
+                                      p3.ice.deposition.enhanced_ventilation,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.ν, transport.Dᵛ, ρ_correction)
     coating_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
@@ -615,8 +615,8 @@ end
         expected_number_velocity = a_cn * (cloud.μᶜˡ + 2) * (cloud.μᶜˡ + 1) / cloud.λᶜˡ^2
 
         @test cache.𝕎ᶜˡ ≈ expected_mass_velocity rtol=FT(1e-12)
-        @test cache.𝕎ᶜˡₙ ≈ expected_number_velocity rtol=FT(1e-12)
-        @test cache.𝕎ᶜˡ > cache.𝕎ᶜˡₙ
+        @test cache.𝕎ⁿᶜˡ ≈ expected_number_velocity rtol=FT(1e-12)
+        @test cache.𝕎ᶜˡ > cache.𝕎ⁿᶜˡ
 
         # The Stokes prefactor scales with the *model's* gravitational acceleration
         # rather than a hardcoded 9.81, so doubling g doubles both fall speeds.
@@ -1426,7 +1426,7 @@ end
         ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ)
         C_fv = PPP.deposition_ventilation(
             p3.ice.deposition.ventilation,
-            p3.ice.deposition.ventilation_enhanced,
+            p3.ice.deposition.enhanced_ventilation,
             m_mean, Ff, zero(FT), ρf, p3.process_rates, transport.ν, transport.Dᵛ,
             ρ_correction)
 

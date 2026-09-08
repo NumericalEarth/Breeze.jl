@@ -72,16 +72,11 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
     # Temperature-dependent sticking efficiency (linear ramp)
     # Cold ice is less sticky, near-melting ice is very sticky
-    aggregation_efficiency = clamp(ℂᵃᵍᵍʳ₂ +
-                                   (T - ℂᵃᵍᵍʳ₃) /
-                                   (ℂᵃᵍᵍʳ₄ - ℂᵃᵍᵍʳ₃) *
-                                   (ℂᵃᵍᵍʳ₁ - ℂᵃᵍᵍʳ₂),
-                                   ℂᵃᵍᵍʳ₂, ℂᵃᵍᵍʳ₁)
+    aggregation_efficiency = clamp(ℂᵃᵍᵍʳ₂ + (T - ℂᵃᵍᵍʳ₃) / (ℂᵃᵍᵍʳ₄ - ℂᵃᵍᵍʳ₃) * (ℂᵃᵍᵍʳ₁ - ℂᵃᵍᵍʳ₂), ℂᵃᵍᵍʳ₂, ℂᵃᵍᵍʳ₁)
 
     # Rime-fraction limiter (Eii_fact): shut off aggregation for heavily rimed ice
     # Eii_fact = 1 for Fᶠ<0.6, a linear ramp to 0 for 0.6≤Fᶠ<0.9, and 0 for Fᶠ≥0.9
-    rime_fraction_factor = clamp(1 - (Fᶠ - ℂᵃᵍᵍʳ₅) /
-                                     (ℂᵃᵍᵍʳ₆ - ℂᵃᵍᵍʳ₅), 0, 1)
+    rime_fraction_factor = clamp(1 - (Fᶠ - ℂᵃᵍᵍʳ₅) / (ℂᵃᵍᵍʳ₆ - ℂᵃᵍᵍʳ₅), 0, 1)
     aggregation_efficiency *= rime_fraction_factor
 
     # PSD-integrated self-collection kernel (E-free) from lookup table.

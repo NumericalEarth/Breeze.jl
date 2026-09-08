@@ -81,7 +81,7 @@ end
 
 struct IceDeposition{Vent, VentRe, SC, SR, LC, LR}
     ventilation :: Vent
-    ventilation_enhanced :: VentRe
+    enhanced_ventilation :: VentRe
     small_ice_ventilation_constant :: SC
     small_ice_ventilation_reynolds :: SR
     large_ice_ventilation_constant :: LC
@@ -113,7 +113,7 @@ from temperature, pressure, and the model thermodynamic constants via
 
 **Basic ventilation integrals:**
 - `ventilation`: Integrated over full size spectrum
-- `ventilation_enhanced`: For larger particles (D > 100 μm)
+- `enhanced_ventilation`: For larger particles (D > 100 μm)
 
 **Size-regime ventilation** (for melting with liquid fraction):
 - `small_ice_ventilation_*`: D ≤ Dcrit, meltwater → rain

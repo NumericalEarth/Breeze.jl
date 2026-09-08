@@ -1351,7 +1351,7 @@ melting:
 | `large_ice_ventilation_constant` | Constant melting component | ``D > D_\text{crit}``; meltwater stays on ice | `f1pr26` |
 | `large_ice_ventilation_reynolds` | Re-dependent melting component | ``D > D_\text{crit}``; meltwater stays on ice | `f1pr27` |
 | `ventilation` | Constant deposition / sublimation component | Wet PSD, all sizes | `f1pr05` |
-| `ventilation_enhanced` | Re-dependent deposition / sublimation component | Wet PSD, ``D \ge 100`` μm | `f1pr14` |
+| `enhanced_ventilation` | Re-dependent deposition / sublimation component | Wet PSD, ``D \ge 100`` μm | `f1pr14` |
 
 The ``D_\text{crit}`` split controls where meltwater is routed. It is distinct
 from the 100 μm Hall-Pruppacher ventilation transition: below 100 μm only the

@@ -153,7 +153,7 @@ function build_ice_properties_from_tables(ice_4d, rain_ice, FT;
 
     deposition = IceDeposition(
         ice_4d[:ventilation],
-        ice_4d[:ventilation_enhanced],
+        ice_4d[:enhanced_ventilation],
         ice_4d[:small_ice_ventilation_constant],
         ice_4d[:small_ice_ventilation_reynolds],
         ice_4d[:large_ice_ventilation_constant],

@@ -200,7 +200,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
     # Ventilation integral (same as deposition/refreezing)
-    C_fv = ventilation_from_terms(lookups.ventilation, lookups.ventilation_enhanced,
+    C_fv = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
                                   ν, Dᵛ, lookups.ρ_correction, parameters.floors)
 
     # Heat balance: sensible + latent

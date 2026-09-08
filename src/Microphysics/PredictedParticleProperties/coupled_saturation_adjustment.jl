@@ -135,7 +135,7 @@ end
     # The Sc correction uses the thermodynamic air density, not the `lookups` correction.
     ρ_air = density(T, P, q, constants)
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ_air)
-    C_fv = ventilation_from_terms(lookups.ventilation, lookups.ventilation_enhanced,
+    C_fv = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
                                   ν, Dᵛ, ρ_correction, parameters.floors)
 
     # This is the raw inverse relaxation coefficient; the psychrometric correction

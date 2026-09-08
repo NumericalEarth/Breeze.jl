@@ -633,7 +633,12 @@ end
 # Breeze's positive-downward 𝕎 convention; `write_p3_fall_speeds!` converts them to the
 # signed vertical advection fields `w = -𝕎`.
 struct P3FallSpeedResult{FT}
-    𝕎ᶜˡ :: FT; 𝕎ᶜˡₙ :: FT; 𝕎ʳ :: FT; 𝕎ʳₙ :: FT; 𝕎ⁱ :: FT; 𝕎ⁱₙ :: FT
+    𝕎ᶜˡ :: FT
+    𝕎ⁿᶜˡ :: FT
+    𝕎ʳ :: FT
+    𝕎ⁿʳ :: FT
+    𝕎ⁱ :: FT
+    𝕎ⁿⁱ :: FT
 end
 
 struct P3TendencyResult{FT}
@@ -658,13 +663,13 @@ end
     cloud_speeds = cloud_terminal_velocities(p3, ℳ.qᶜˡ, ρ, properties.ν,
                                              properties.μᶜˡ, properties.λᶜˡ, constants)
     𝕎ᶜˡ = cloud_speeds.mass_weighted
-    𝕎ᶜˡₙ = cloud_speeds.number_weighted
+    𝕎ⁿᶜˡ = cloud_speeds.number_weighted
 
     # Rain terminal velocities — fused call shares λ_r, ρ_correction, log10(λ_r)
     # across the two 1D table lookups (mass- and number-weighted).
     rain_speeds = rain_terminal_velocities(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     𝕎ʳ   = rain_speeds.mass_weighted
-    𝕎ʳₙ  = rain_speeds.number_weighted
+    𝕎ⁿʳ  = rain_speeds.number_weighted
     # The global ice-number cap must be seen consistently by all downstream math —
     # process rates and terminal velocities alike — so use
     # properties.nⁱ (= min(ℳ.nⁱ, Nⁱ_max/ρ)) rather than the raw prognostic here.
@@ -677,10 +682,10 @@ end
     # across mass- and number-weighted fall speeds.
     ice_speeds = ice_terminal_velocities(p3, qⁱ_total, properties.nⁱ, Fᶠ, ρᶠ, ρ;
                                          Fˡ = properties.Fˡ)
-    𝕎ⁱ, 𝕎ⁱₙ = ice_speeds.mass_weighted, ice_speeds.number_weighted
+    𝕎ⁱ, 𝕎ⁿⁱ = ice_speeds.mass_weighted, ice_speeds.number_weighted
 
     FT = typeof(ρ)
-    return P3FallSpeedResult{FT}(𝕎ᶜˡ, 𝕎ᶜˡₙ, 𝕎ʳ, 𝕎ʳₙ, 𝕎ⁱ, 𝕎ⁱₙ)
+    return P3FallSpeedResult{FT}(𝕎ᶜˡ, 𝕎ⁿᶜˡ, 𝕎ʳ, 𝕎ⁿʳ, 𝕎ⁱ, 𝕎ⁿⁱ)
 end
 
 @inline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
@@ -764,11 +769,11 @@ const P3ImpenetrableBoundaryCondition = BoundaryCondition{<:NormalFlow, Nothing}
                      one(FT))
     @inbounds begin
         μ.wᶜˡ[i, j, k]  = -surface * result.𝕎ᶜˡ
-        μ.wᶜˡₙ[i, j, k] = -surface * result.𝕎ᶜˡₙ
+        μ.wᶜˡₙ[i, j, k] = -surface * result.𝕎ⁿᶜˡ
         μ.wʳ[i, j, k]   = -surface * result.𝕎ʳ
-        μ.wʳₙ[i, j, k]  = -surface * result.𝕎ʳₙ
+        μ.wʳₙ[i, j, k]  = -surface * result.𝕎ⁿʳ
         μ.wⁱ[i, j, k]   = -surface * result.𝕎ⁱ
-        μ.wⁱₙ[i, j, k]  = -surface * result.𝕎ⁱₙ
+        μ.wⁱₙ[i, j, k]  = -surface * result.𝕎ⁿⁱ
     end
     return nothing
 end
