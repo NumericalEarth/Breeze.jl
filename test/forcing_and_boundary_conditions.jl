@@ -175,6 +175,7 @@ end
 end
 
 @testset "Energy forcing under ρE reaches the thermodynamic variable [$(FT)]" for FT in test_float_types()
+    using Breeze.Thermodynamics: mixture_heat_capacity, MoistureMassFractions
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -190,14 +191,18 @@ end
     time_step!(model, Δt)
     @test @allowscalar(ρs[2, 2, 2]) ≈ ρs_before + F * Δt
 
-    # For `ρθ` the same forcing enters as F / (cᵖᵐ Π)
+    # For `ρθ` the same forcing enters as F / (cᵖᵐ Π). Read the tendency rather than differencing
+    # the state: the increment is a thirty-second of one ULP of ρθ in Float32, so a finite
+    # difference of it is exactly zero there. At rest with no closure or radiation every other term
+    # in the tendency is zero, so what is left is the conversion. Unsaturated here, so Π = T / θ.
     model = AtmosphereModel(grid; forcing=(; ρE=Returns(F)))
-    set!(model; θ=θ₀, qᵗ=FT(0.01))
-    ρθ = thermodynamic_density(model.formulation)
-    ρθ_before = @allowscalar ρθ[2, 2, 2]
-    time_step!(model, Δt)
-    Δρθ = @allowscalar(ρθ[2, 2, 2]) - ρθ_before
-    @test 0 < Δρθ < F * Δt
+    θᵣ = model.dynamics.reference_state.potential_temperature
+    set!(model; θ=θᵣ, qᵗ=FT(0.01))
+    cᵖᵐ = mixture_heat_capacity(MoistureMassFractions(FT(0.01)), model.thermodynamic_constants)
+    Π = @allowscalar(model.temperature[2, 2, 2]) / θᵣ
+
+    update_state!(model)
+    @test @allowscalar(model.timestepper.Gⁿ.ρθ[2, 2, 2]) ≈ F / (cᵖᵐ * Π)
 
     # `E` is the specific alias: Breeze applies the ρ factor at kernel time
     model = AtmosphereModel(grid; formulation=:StaticEnergy, forcing=(; E=Returns(F)))
@@ -755,13 +760,17 @@ end
 
         q = MoistureMassFractions(qᵗ₀)
         cᵖᵐ = mixture_heat_capacity(q, model.thermodynamic_constants)
-        expected_θ_flux = 𝒬 / cᵖᵐ
+
+        # Read the condition the model will apply, rather than restating the arithmetic. The
+        # conversion divides by cᵖᵐ alone; whether it should also divide by Π, as the `ρE` forcing
+        # does, is issue #976.
+        Jᶿ = Field(BoundaryConditionOperation(thermodynamic_density(model.formulation), :bottom, model))
+        compute!(Jᶿ)
 
         time_step!(model, FT(1e-6))
 
         @test cᵖᵐ > 1000
-        @test expected_θ_flux < 𝒬
-        @test expected_θ_flux ≈ 𝒬 / cᵖᵐ
+        @test all(interior(Jᶿ) .≈ 𝒬 / cᵖᵐ)
     end
 
     @testset "Error when specifying both ρθ and ρE boundary conditions [$FT]" begin
