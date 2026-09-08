@@ -69,8 +69,9 @@ end
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
+             # An energy forcing (note: ρs and ρE are mutually exclusive) is an energy per unit mass
+             # and needs no conversion
              + ρs_forcing(i, j, k, grid, clock, model_fields)
-             # An energy forcing needs no conversion: static energy *is* an energy per unit mass
              + ρE_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
 end
