@@ -113,15 +113,11 @@ model = AtmosphereModel(grid; boundary_conditions=(; ρE=ρE_bcs, ρqᵗ=ρqᵗ_
 nothing # hide
 ```
 
-[`BulkSensibleHeatFlux`](@ref) forms its surface difference in whichever thermodynamic variable
-the model evolves — ``Δθ`` for a potential temperature model, ``Δs`` for a static energy model —
-so the same specification is correct for both.
-
-```@docs
-Breeze.BoundaryConditions.BulkSensibleHeatFlux
-Breeze.BoundaryConditions.BulkVaporFlux
-Breeze.BoundaryConditions.BulkDrag
-```
+[`BulkSensibleHeatFlux`](@ref Breeze.BoundaryConditions.BulkSensibleHeatFlux) forms its surface
+difference in whichever thermodynamic variable the model evolves — ``Δθ`` for a potential temperature
+model, ``Δs`` for a static energy model — so the same specification is correct for both. See
+[Wall fluxes](@ref "Wall fluxes") for placement on any of the six boundaries, the forms the wall state
+may take, and stability-corrected transfer coefficients.
 
 ## Forcing
 
