@@ -504,6 +504,10 @@ function invalid_key_hint(name)
                       " (or qᵗ) and applied to the prognostic moisture variable; ", name,
                       " is a key only under the microphysics that makes it prognostic, which for ",
                       "BulkMicrophysics is set by `cloud_formation`.")
+    elseif name ∈ (:ρe, :e)
+        return string('\n', "An energy flux or forcing is supplied under ", total_energy_density_name,
+                      " (or E); ", name, " names turbulent kinetic energy, so it is a key only under ",
+                      "a prognostic-TKE closure.")
     end
 
     return ""
