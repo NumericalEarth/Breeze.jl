@@ -71,11 +71,9 @@ function CloudShape(FT::DataType = Oceananigans.defaults.FloatType;
     ℂᶜˡ₃ = minimum_shape_parameter
     ℂᶜˡ₄ = maximum_shape_parameter
 
-    ℂᶜˡ₁ ≥ 0 ||
-        throw(ArgumentError("relative_dispersion_number_coefficient must be nonnegative, got $ℂᶜˡ₁"))
+    ℂᶜˡ₁ ≥ 0 || throw(ArgumentError("relative_dispersion_number_coefficient must be nonnegative, got $ℂᶜˡ₁"))
     ℂᶜˡ₂ > 0 || throw(ArgumentError("relative_dispersion_intercept must be positive, got $ℂᶜˡ₂"))
-    ℂᶜˡ₃ ≤ ℂᶜˡ₄ ||
-        throw(ArgumentError("minimum_shape_parameter $ℂᶜˡ₃ exceeds maximum_shape_parameter $ℂᶜˡ₄"))
+    ℂᶜˡ₃ ≤ ℂᶜˡ₄ || throw(ArgumentError("minimum_shape_parameter $ℂᶜˡ₃ exceeds maximum_shape_parameter $ℂᶜˡ₄"))
 
     return CloudShape(FT(ℂᶜˡ₁), FT(ℂᶜˡ₂), FT(ℂᶜˡ₃), FT(ℂᶜˡ₄))
 end
