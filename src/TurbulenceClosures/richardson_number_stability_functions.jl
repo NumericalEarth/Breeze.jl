@@ -5,7 +5,7 @@
 #####   S(Ri) = C⁰ + (C⁺ − C⁰) clamp((Ri − Ri⁰) / Riᵟ, 0, 1)   for Ri ≥ 0
 #####
 ##### with Ri = N² / S² from the stored static stability and the vertical shear, at the faces for
-##### the diffusivities and reconstructed to the centers for the dissipation.
+##### the diffusivities and from N² and S² reconstructed to the centers for the dissipation.
 #####
 
 """
@@ -29,8 +29,9 @@ so its stable asymptote is smaller than its neutral value: stratification length
 length ``ℓ / Sᴰ`` relative to the diffusivities' ``Sᵘ ℓ``.
 
 The Richardson number is formed at each interface from the closure's stored ``N²`` and the squared
-vertical shear ([`Riᶜᶜᶠ`](@ref)), and reconstructed to the cell centers for the dissipation
-([`Riᶜᶜᶜ`](@ref)).
+vertical shear ([`Riᶜᶜᶠ`](@ref)), and at the cell centers, for the dissipation, from ``N²`` and
+``S²`` reconstructed there ([`Riᶜᶜᶜ`](@ref)). Vanishing shear gives ``Ri = ±∞``, which the
+piecewise-linear functions take in stride.
 
 The defaults are the twelve endpoints, the onset and the width of CATKE's stability functions,
 calibrated against ocean large-eddy simulations by [Wagner et al. (2025)](@cite Wagner25catke),
@@ -145,30 +146,37 @@ The piecewise-linear stability function of [`RiDependentStabilityFunctions`](@re
     return ifelse(Ri < 0, C⁻, C⁺ˢ)
 end
 
+# Ri = N² / S², zero where N² = 0 (so that N² = S² = 0 is neutral rather than NaN) and ±∞ where
+# only the shear vanishes, which the stability functions map to their stable or unstable value.
+@inline richardson_number(N², S²) = ifelse(N² == 0, zero(N²), N² / S²)
+
 """
 $(TYPEDSIGNATURES)
 
 The gradient Richardson number ``Ri = N² / S²`` at (Center, Center, Face), from the stored static
-stability `N²` and the squared vertical shear of the velocities. It is zero where ``N² = 0`` and is
-bounded to ``±1000`` so that vanishing shear gives a finite ``±Ri`` rather than ``±∞``: the bound
-lies far beyond the end of the stable ramp, so it never changes a stability function's value, but
-it keeps the reconstruction to a cell center between a stable and an unstable interface a number
-rather than `NaN`.
+stability `N²` and the squared vertical shear of the velocities; zero where ``N² = 0``, and ``±∞``
+where the shear alone vanishes.
 """
 @inline function Riᶜᶜᶠ(i, j, k, grid, velocities, N²)
     S² = shearᶜᶜᶠ(i, j, k, grid, velocities.u, velocities.v)
     N²ᵢ = @inbounds N²[i, j, k]
-    Ri = ifelse(N²ᵢ == 0, zero(N²ᵢ), N²ᵢ / S²)
-    return clamp(Ri, -1000, 1000)
+    return richardson_number(N²ᵢ, S²)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-[`Riᶜᶜᶠ`](@ref) reconstructed at cell centers from the two adjacent interfaces, ignoring
-peripheral ones, as CATKE does for its dissipation.
+The gradient Richardson number at cell centers, from ``N²`` and ``S²`` each reconstructed from the
+two adjacent interfaces (ignoring peripheral ones), for the dissipation. CATKE reconstructs ``Ri``
+itself; reconstructing its numerator and denominator instead keeps a center between a stable and
+an unstable interface with no shear at a finite or infinite ``Ri`` rather than at the `NaN` of
+``(+∞ - ∞) / 2``.
 """
-@inline Riᶜᶜᶜ(i, j, k, grid, velocities, N²) = ℑbzᵃᵃᶜ(i, j, k, grid, Riᶜᶜᶠ, velocities, N²)
+@inline function Riᶜᶜᶜ(i, j, k, grid, velocities, N²)
+    S² = ℑbzᵃᵃᶜ(i, j, k, grid, shearᶜᶜᶠ, velocities.u, velocities.v)
+    N²ᵢ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
+    return richardson_number(N²ᵢ, S²)
+end
 
 const RiDependentStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:RiDependentStabilityFunctions}
 

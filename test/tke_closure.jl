@@ -591,9 +591,9 @@ using Breeze.TurbulenceClosures: stability_ramp, Riᶜᶜᶠ
     end
 
     @testset "a windless column with stable and unstable layers stays finite" begin
-        # No shear, so Ri = ±1000 at every interface and the sign changes at mid-depth. The
-        # reconstruction to the cell center there averages to zero — the neutral values — where
-        # ±Inf would have given NaN and switched the dissipation off.
+        # No shear, so Ri = ±∞ at every interface and the sign changes at mid-depth. At the cell
+        # center there Ri is formed from the reconstructed N² and S², a number, where averaging
+        # the interfaces' ±∞ would have given NaN and switched the dissipation off.
         closure = TKEBasedTurbulenceClosure(; catke_parameters()...)
         sf = closure.stability_functions
         model = AtmosphereModel(grid; closure, advection = nothing)
@@ -602,7 +602,7 @@ using Breeze.TurbulenceClosures: stability_ramp, Riᶜᶜᶠ
         set_tke!(model, FT(0.5))
 
         Ri = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.velocities, model.closure_fields.N²)))
-        @test all(abs.(Ri[interior_faces]) .== 1000)
+        @test all(isinf, Ri[interior_faces])
         @test any(Ri[interior_faces] .< 0) && any(Ri[interior_faces] .> 0)
 
         Lᵉ = column(model.closure_fields.Lᵉ)

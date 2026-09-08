@@ -132,8 +132,9 @@ C⁰ + (C⁺ - C⁰) \, \mathrm{clamp}\left( \frac{Ri - Ri⁰}{Riᵟ}, 0, 1 \rig
 ```
 
 ``Ri = N² / S²`` is formed at each interface from the stored ``N²`` and the vertical shear, zero
-where ``N² = 0`` and bounded to ``±1000`` so that vanishing shear gives a finite value; the
-dissipation function uses ``Ri`` reconstructed to the cell center. The twelve endpoints, the onset
+where ``N² = 0`` and ``±∞`` where only the shear vanishes, which the ramp maps to an endpoint; the
+dissipation function forms ``Ri`` at the cell center from ``N²`` and ``S²`` reconstructed there.
+The twelve endpoints, the onset
 and the width default to CATKE's values, calibrated against ocean large-eddy simulations and frozen
 here, and CATKE's wall coefficient ``Cˢ = 1.131`` goes with them: `catke_parameters()` returns both
 as keyword arguments,
