@@ -83,6 +83,7 @@ end
 
 function solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
     compute_anelastic_source_term!(solver, ρŨ, Δt)
+    fill!(solver.storage, 0)
     solve!(pₙ, solver)
     return pₙ
 end
