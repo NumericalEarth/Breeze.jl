@@ -7,6 +7,8 @@ using Breeze.BoundaryConditions: theta_to_energy_bcs, materialize_atmosphere_fie
 
 const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTemperatureFormulation}
 
+AtmosphereModels.specific_thermodynamic_field(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature
+
 #####
 ##### Helper accessors
 #####

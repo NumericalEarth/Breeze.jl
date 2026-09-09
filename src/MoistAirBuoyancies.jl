@@ -79,7 +79,10 @@ model = NonhydrostaticModel(grid; buoyancy, tracers = (:θ, :qᵗ))
 NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 1×1×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
 ├── timestepper: RungeKutta3TimeStepper
-├── advection scheme: Centered(order=2)
+├── advection scheme:
+│   ├── momentum: Centered(order=2)
+│   ├── θ: Centered(order=2)
+│   └── qᵗ: Centered(order=2)
 ├── tracers: (θ, qᵗ)
 ├── closure: Nothing
 ├── buoyancy: MoistAirBuoyancy with ĝ = NegativeZDirection()
