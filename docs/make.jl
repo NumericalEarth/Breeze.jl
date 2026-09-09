@@ -186,7 +186,9 @@ makedocs(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB
         size_threshold = 2 ^ 20, # 1 MiB
-        size_threshold_ignore = ["api.md"], # auto-generated, grows with the docstring count
+        # api.md is auto-generated and grows with the docstring count; the single-column closure
+        # example carries five figures, two of them 83-member heatmaps
+        size_threshold_ignore = ["api.md", "literated/single_column_tke_boundary_layer.md"],
         prettyurls = get(ENV, "CI", "false") == "true",
     ),
     pages=[

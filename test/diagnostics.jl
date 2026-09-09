@@ -4,7 +4,8 @@ using Test
 using Breeze
 using Breeze.Thermodynamics: dry_air_gas_constant, adiabatic_hydrostatic_pressure,
                              mixture_gas_constant, MoistureMassFractions
-using Breeze.AtmosphereModels: standard_pressure
+using Breeze.AtmosphereModels: standard_pressure, density_potential_temperature
+using Oceananigans.TurbulenceClosures: buoyancy_force
 using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
@@ -82,7 +83,9 @@ using GPUArraysCore: @allowscalar
     @test all(interior(θᵇ_density_field) .> 0)
 end
 
-# Regression test for #659 / PR #656: the definition of virtual potential temperature.
+# Regression test for #659 / PR #656: the definition of virtual potential temperature. The buoyancy
+# of the turbulence closures differentiates the density potential temperature, which is the virtual
+# potential temperature wherever there is no condensate, as in this subsaturated column.
 @testset "Virtual potential temperature buoyancy formulation [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
@@ -107,6 +110,7 @@ end
     pᵣ_field = dynamics.reference_state.pressure
 
     θᵥ_diagnostic = Field(VirtualPotentialTemperature(model))
+    buoyancy = buoyancy_force(model)
 
     @allowscalar for k in 1:Nz
         T_k  = T_field[1, 1, k]
@@ -117,8 +121,7 @@ end
         # θᵥ = T (Rᵐ / Rᵈ) (pˢᵗ / pᵣ)^(Rᵈ / cᵖᵈ) — dry exponent
         θᵥ_expected = T_k * (Rᵐ_k / Rᵈ) * (pˢᵗ / pᵣ_k)^(Rᵈ / cᵖᵈ)
 
-        θᵥ_kernel = Breeze.AtmosphereModels.virtual_potential_temperature(
-            1, 1, k, grid, constants, dynamics, T_field, qᵛ_field)
+        θᵥ_kernel = density_potential_temperature(1, 1, k, grid, buoyancy, T_field, qᵛ_field)
 
         @test θᵥ_kernel ≈ θᵥ_expected rtol = 100eps(FT)
         @test θᵥ_diagnostic[1, 1, k] ≈ θᵥ_expected rtol = 100eps(FT)
