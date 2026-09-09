@@ -179,6 +179,34 @@ end
     end
 end
 
+@testset "Supersaturation diagnostics [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
+    model = AtmosphereModel(grid; microphysics=SaturationAdjustment())
+
+    # Subsaturated: 𝒮 = ℋ - 1 < 0 everywhere, and exactly one less than the humidity
+    set!(model, θ=300, qᵗ=0.005)
+    𝒮 = Supersaturation(model)
+    @test 𝒮 isa Oceananigans.AbstractOperations.AbstractOperation
+    𝒮_field = SupersaturationField(model)
+    ℋ_field = RelativeHumidityField(model)
+    @test all(isfinite.(interior(𝒮_field)))
+    @test all(interior(𝒮_field) .< 0)
+    @test interior(𝒮_field) ≈ interior(ℋ_field) .- 1
+
+    # Saturated: the supersaturation vanishes wherever saturation adjustment has made condensate
+    set!(model, θ=300, qᵗ=0.03)
+    𝒮_saturated = SupersaturationField(model)
+    qˡ = model.microphysical_fields.qˡ
+    @allowscalar begin
+        for k in 1:8
+            if qˡ[1, 1, k] > 0
+                @test abs(𝒮_saturated[1, 1, k]) < FT(1e-3)
+            end
+        end
+    end
+end
+
 @testset "Dewpoint temperature diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
