@@ -41,6 +41,7 @@ export
     PrescribedDynamics,
     KinematicModel,
     AtmosphereModel,
+    SingleColumnGrid,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
@@ -305,5 +306,9 @@ using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
+
+# Loaded last: single-column / column-ensemble mode extends the dynamics, closure, and model modules.
+include("single_column_mode.jl")
+using .SingleColumnMode: SingleColumnMode, SingleColumnGrid
 
 end # module Breeze

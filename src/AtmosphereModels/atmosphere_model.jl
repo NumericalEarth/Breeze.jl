@@ -74,6 +74,12 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     particles :: Prt
 end
 
+# Materialize the model `closure` and `coriolis` in the constructor. Scalars pass through; the
+# `SingleColumnMode` module extends these for per-column *arrays* (single-column ensembles), which it
+# maps/moves to the grid architecture so they can be indexed inside GPU kernels.
+materialize_closure(closure, scalar_names, arch) = with_tracers(scalar_names, closure)
+materialize_coriolis(coriolis, arch) = coriolis
+
 """
 $(TYPEDSIGNATURES)
 
@@ -301,6 +307,10 @@ function AtmosphereModel(grid;
                          (; T=temperature), microphysical_fields)
     coupling_density = dynamics_density(dynamics)
     mass_density = total_density(dynamics)
+
+    # A per-column `coriolis` (an array of rotations) is moved to the grid architecture; a scalar
+    # coriolis passes through. See `materialize_coriolis` (extended for arrays in `SingleColumnMode`).
+    coriolis = materialize_coriolis(coriolis, arch)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, coupling_density, mass_density,
                                        velocities, dynamics, formulation, microphysics,
@@ -309,7 +319,10 @@ function AtmosphereModel(grid;
     # The closure's scalars — thermodynamic density, moisture, microphysical prognostic fields, user
     # tracers — in the order the vertically-implicit solve indexes them (see `closure_scalar_index`)
     scalar_names = closure_scalar_names(formulation, microphysics, tracer_names)
-    closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
+    # Fill the closure's tracer-indexed diffusivities. For a per-column *array* of closures,
+    # `materialize_closure` (extended in `SingleColumnMode`) maps over the array and moves it to the
+    # grid architecture; a scalar closure just gets `with_tracers`.
+    closure = materialize_closure(closure, scalar_names, arch)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
 
     # Generate tracer advection scheme for each tracer
