@@ -20,6 +20,7 @@ export
     compute_pressure_correction!,
     make_pressure_correction!,
     # Thermodynamic formulation interface (formulation types exported by their respective modules)
+    specific_thermodynamic_field,
     thermodynamic_density_name,
     thermodynamic_density,
     total_energy_density_name,

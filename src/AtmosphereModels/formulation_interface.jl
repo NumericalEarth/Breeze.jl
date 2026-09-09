@@ -86,8 +86,16 @@ Accepts a `Symbol`, `Val(Symbol)`, or formulation struct.
 """
 function thermodynamic_density_name end
 
-thermodynamic_density_name(formulation::Symbol) =
-    thermodynamic_density_name(Val(formulation))
+"""
+    specific_thermodynamic_field(formulation)
+
+Return the specific (per unit mass) thermodynamic field the `formulation` evolves — what its
+advection operator reconstructs, as opposed to the density-weighted prognostic named by
+[`thermodynamic_density_name`](@ref).
+"""
+function specific_thermodynamic_field end
+
+thermodynamic_density_name(formulation::Symbol) = thermodynamic_density_name(Val(formulation))
 
 """
     total_energy_density_name
