@@ -163,6 +163,7 @@ include("density_weighted_implicit_diffusion.jl")
 include("cell_advection_timescale.jl")
 include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
+include("checkpointing.jl")
 include("compute_hydrostatic_pressure.jl")
 
 #####

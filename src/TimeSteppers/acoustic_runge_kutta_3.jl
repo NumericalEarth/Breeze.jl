@@ -361,3 +361,13 @@ function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:TerrainC
             v = sub.time_averaged_velocities.v,
             w = sub.time_averaged_velocities.w)
 end
+
+Oceananigans.prognostic_state(timestepper::AcousticRungeKutta3) =
+    (substepper = Oceananigans.prognostic_state(timestepper.substepper),)
+
+function Oceananigans.restore_prognostic_state!(restored::AcousticRungeKutta3, from)
+    Oceananigans.restore_prognostic_state!(restored.substepper, from.substepper)
+    return restored
+end
+
+Oceananigans.restore_prognostic_state!(timestepper::AcousticRungeKutta3, ::Nothing) = timestepper
