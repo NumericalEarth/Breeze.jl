@@ -281,3 +281,6 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     return nothing
 end
+
+Oceananigans.prognostic_state(::SSPRungeKutta3) = nothing
+Oceananigans.restore_prognostic_state!(timestepper::SSPRungeKutta3, ::Nothing) = timestepper

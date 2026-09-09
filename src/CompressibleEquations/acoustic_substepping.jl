@@ -1616,3 +1616,16 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
     return nothing
 end
+
+Oceananigans.prognostic_state(substepper::AcousticSubstepper) =
+    (time_averaged_velocities = Oceananigans.prognostic_state(substepper.time_averaged_velocities),
+     time_averaged_vertical_velocity_cache = Oceananigans.prognostic_state(substepper.time_averaged_vertical_velocity_cache))
+
+function Oceananigans.restore_prognostic_state!(restored::AcousticSubstepper, from)
+    Oceananigans.restore_prognostic_state!(restored.time_averaged_velocities, from.time_averaged_velocities)
+    Oceananigans.restore_prognostic_state!(restored.time_averaged_vertical_velocity_cache,
+                                           from.time_averaged_vertical_velocity_cache)
+    return restored
+end
+
+Oceananigans.restore_prognostic_state!(substepper::AcousticSubstepper, ::Nothing) = substepper
