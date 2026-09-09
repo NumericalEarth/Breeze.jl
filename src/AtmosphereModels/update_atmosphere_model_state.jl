@@ -330,7 +330,8 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
     #####
 
-    compute_thermodynamic_tendency!(model, common_args)
+    # The moisture and tracer tendencies below advect with these velocities too.
+    compute_thermodynamic_tendency!(model, common_args, advecting_velocities.w)
 
     #####
     ##### Moisture density tendency

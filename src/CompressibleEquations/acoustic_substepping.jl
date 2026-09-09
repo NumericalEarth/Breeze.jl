@@ -85,8 +85,8 @@ Fields:
   dry density, frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
   adaptive-implicit advection.
 - `time_averaged_vertical_velocity_cache`: the acoustic-mean transport velocity the moisture and
-  tracer tendencies were built with, frozen for `scalar_substep!` (see
-  `cache_transport_velocity!`); `nothing` without adaptive-implicit advection.
+  tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
+  tendency's condensate sedimentation term (see `cache_transport_velocity!`).
 """
 struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     substeps :: N
@@ -130,7 +130,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
 
     vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
     density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
-    time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w, split by moisture and tracers
+    time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w the moisture and tracer tendencies were built with
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -242,7 +242,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
     density_cache = cache_advecting_state ? CenterField(grid) : nothing
-    time_averaged_vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
+    time_averaged_vertical_velocity_cache = ZFaceField(grid)
 
     return AcousticSubstepper(Ns, acoustic_cfl, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,

@@ -584,6 +584,101 @@ end
     @test maximum(abs.(Array(interior(ρθ, 1, 1, :)) .- ρθ¹)) > content_moved / 10
 end
 
+@testset "The acoustic stage forms the sedimentation content from the tracers' transport velocity [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(20)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+    microphysics = OneMomentCloudMicrophysics(FT)
+    adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
+    @test model.timestepper isa Breeze.TimeSteppers.AcousticRungeKutta3
+
+    Δt = FT(10)
+    set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.005, qᶜˡ=0,
+         qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
+    update_state!(model)
+    μ = model.microphysical_fields
+    for name in (:ρθ, :ρqʳ)
+        Oceananigans.TimeSteppers.time_discretization(model.advection[name]).Δt[] = Δt
+    end
+    @test @allowscalar μ.wʳ[1, 1, Nz] < -Δz / Δt # the fall alone exceeds the explicit CFL
+
+    # On the acoustic core the thermodynamic variable advects with the RK predictor velocity, the
+    # tracers with the frozen acoustic-mean velocity. Here the two differ: a predictor downdraft
+    # at Courant number one, whose explicit fraction the adaptive scheme clips to the rain's own
+    # speed so that sedimentation fluxes formed with it cancel, and a transport downdraft at half
+    # the explicit limit, which leaves the tendency half of the explicit sedimentation flux.
+    set!(model.velocities.w, (x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)))
+    w̄ = model.timestepper.substepper.time_averaged_velocities.w
+    set!(w̄, (x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-0.5), FT(0)))
+    Breeze.TimeSteppers.cache_transport_velocity!(model)
+
+    # The explicit sedimentation part of a tendency: the tendency with the rain falling minus the
+    # tendency with it suspended, everything else the same. `compute_tendencies!` reads the
+    # sedimentation velocities without refreshing them, so zeroing `wʳ` suspends the rain.
+    Gρθ = model.timestepper.Gⁿ.ρθ
+    Gρqʳ = model.timestepper.Gⁿ.ρqʳ
+    column(f) = Array(interior(f, 1, 1, :))
+    wʳ = copy(parent(μ.wʳ))
+    function sedimentation_part(tendency)
+        falling = tendency()
+        set!(μ.wʳ, 0)
+        suspended = tendency()
+        copyto!(parent(μ.wʳ), wʳ)
+        return falling .- suspended
+    end
+
+    # ρθ's tendency is built as the acoustic stage builds it, ρqʳ's as `update_state!` does.
+    function slow_ρθ_tendency()
+        Breeze.TimeSteppers.compute_slow_scalar_tendencies!(model)
+        return column(Gρθ)
+    end
+
+    function rain_tendency()
+        Breeze.AtmosphereModels.compute_tendencies!(model)
+        return column(Gρqʳ)
+    end
+
+    Sθ = sedimentation_part(slow_ρθ_tendency)
+    Sq = sedimentation_part(rain_tendency)
+    @test maximum(abs.(Sθ)) > 0
+
+    # The sedimentation mass flux the rain tendency applies through each face, integrated down
+    # from the top, through which nothing enters, ...
+    F = zeros(FT, Nz + 1)
+    for k in Nz:-1:1
+        F[k] = F[k+1] + Δz * Sq[k]
+    end
+    @test minimum(F) < 0
+
+    # ... falls everywhere, so it carries the content of the cell above each face, and the
+    # cell's dry mass fraction converts the change of θ into that of ρᵈ θ (see
+    # `expected_sedimentation_tendency`). The content ρθ's tendency moves is this, formed with
+    # the tracers' velocity, ...
+    constants = model.thermodynamic_constants
+    content(k) = @allowscalar Breeze.PotentialTemperatureFormulations.potential_temperature_condensate_content(
+        1, 1, k, grid, model.formulation, model.dynamics, constants, model.microphysics, μ,
+        Breeze.AtmosphereModels.specific_prognostic_moisture(model))
+    c = [content(k) for k in 1:Nz]
+    χ = [cₖ.χ[1] for cₖ in c]
+    h = [cₖ.h[1] for cₖ in c]
+    β = [cₖ.∂φ∂h for cₖ in c]
+    qᵈ = column(dynamics_density(model.dynamics)) ./ column(total_density(model.dynamics))
+    Sθ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, χ, h, β; coupling = qᵈ)
+    tolerance = sqrt(eps(FT)) * maximum(abs.(Sθ_expected))
+    @test all(abs.(Sθ .- Sθ_expected) .<= tolerance)
+
+    # ... and not with the predictor's, at which the explicit fractions of the combined and the
+    # transport velocity are clipped to the same speed and the fluxes cancel, so a transport
+    # velocity equal to the predictor moves no content at all.
+    set!(w̄, model.velocities.w)
+    Breeze.TimeSteppers.cache_transport_velocity!(model)
+    Sθ_predictor = sedimentation_part(slow_ρθ_tendency)
+    @test maximum(abs.(Sθ_predictor)) <= tolerance
+end
+
 @testset "Bottom precipitation flux uses transport velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))

@@ -46,7 +46,7 @@ end
 ##### Tendency computation
 #####
 
-function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemperatureModel, common_args)
+function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemperatureModel, common_args, tracer_transport_velocity)
     grid = model.grid
     arch = grid.architecture
 
@@ -57,6 +57,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemper
         model.advection.ρθ,
         radiation_flux_divergence(model.radiation),
         model.sedimentation_constituents,
+        tracer_transport_velocity,
         common_args...)
 
     Gρθ = model.timestepper.Gⁿ.ρθ
@@ -71,6 +72,7 @@ end
                                                 advection,
                                                 radiation_flux_divergence_field,
                                                 sedimenting_constituents,
+                                                tracer_transport_velocity,
                                                 dynamics,
                                                 formulation::LiquidIcePotentialTemperatureFormulation,
                                                 constants,
@@ -96,7 +98,7 @@ end
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
-             - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, velocities.w, dynamics,
+             - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, tracer_transport_velocity, dynamics,
                                                    ExplicitSedimentationFluxes(), potential_temperature_condensate_content,
                                                    formulation, dynamics, constants, microphysics,
                                                    microphysical_fields, specific_prognostic_moisture)

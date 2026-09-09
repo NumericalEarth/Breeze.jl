@@ -19,7 +19,7 @@ AtmosphereModels.static_energy_density(model::StaticEnergyModel) = model.formula
 ##### Tendency computation
 #####
 
-function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args)
+function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args, tracer_transport_velocity)
     grid = model.grid
     arch = grid.architecture
 
@@ -29,6 +29,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyMod
         model.advection.ρs,
         radiation_flux_divergence(model.radiation),
         model.sedimentation_constituents,
+        tracer_transport_velocity,
         common_args...,
         model.temperature)
 
@@ -43,6 +44,7 @@ end
                                         advection,
                                         radiation_flux_divergence_field,
                                         sedimenting_constituents,
+                                        tracer_transport_velocity,
                                         dynamics,
                                         formulation,
                                         constants,
@@ -68,7 +70,7 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
-             - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, velocities.w, dynamics,
+             - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, tracer_transport_velocity, dynamics,
                                                    ExplicitSedimentationFluxes(), static_energy_condensate_content,
                                                    dynamics, constants, microphysics, microphysical_fields,
                                                    specific_prognostic_moisture, temperature_field)

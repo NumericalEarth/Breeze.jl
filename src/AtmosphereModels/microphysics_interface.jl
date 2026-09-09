@@ -938,11 +938,12 @@ end
 #
 # The discretization below is shared. The mass fluxes are the ones the tracer tendency actually
 # applies to the cell (`sedimentation_mass_fluxes`, formed per cell because bounds-preserving
-# WENO limits its reconstructions per cell), weighted like it by the total density; the enthalpy
-# each brings is that of the cell it drains (`condensate_content_fluxes`), the cell above the face
-# when the condensate falls, the cell below when an updraft outruns its fall speed; and the cell's
-# coupling-to-total density ratio turns the resulting change of the specific variable into that
-# of the coupling-weighted prognostic.
+# WENO limits its reconstructions per cell, and at the velocity that tendency transports the
+# tracer with), weighted like it by the total density; the enthalpy each brings is that of the
+# cell it drains (`condensate_content_fluxes`), the cell above the face when the condensate falls,
+# the cell below when an updraft outruns its fall speed; and the cell's coupling-to-total density
+# ratio turns the resulting change of the specific variable into that of the coupling-weighted
+# prognostic.
 #
 # The content moves in the same two parts as the mass. The tendency carries the part of the mass
 # flux the tendency applies (`ExplicitSedimentationFluxes`: the whole flux of an explicit scheme,
@@ -967,10 +968,10 @@ where, for each of the `constituents`, `Fᵢ(w)` is the vertical advective flux 
 at velocity `w` through the face, with the scheme that transports the tracer and the part of it
 `fluxes` selects ([`ExplicitSedimentationFluxes`](@ref) for the part the tendency applies,
 [`ImplicitSedimentationFluxes`](@ref) for the remainder the adaptive implicit solve applies),
-`Wᵢ = wᵗ + wᵢ` is its total velocity and `wᵗ` the resolved transport velocity, `ρ` is the
-[`total_density`](@ref) that weights the tracer's mass flux, `ρᵈ` the [`dynamics_density`](@ref)
-that carries the thermodynamic variable (`ρθ = ρᵈ θ`, `ρs = ρᵈ s`), and `cᵢ(w)` is the content
-the flux delivers to the cell,
+`Wᵢ = wᵗ + wᵢ` is its total velocity and `wᵗ` the vertical velocity the tracer tendency
+transports the constituents with, `ρ` is the [`total_density`](@ref) that weights the tracer's
+mass flux, `ρᵈ` the [`dynamics_density`](@ref) that carries the thermodynamic variable
+(`ρθ = ρᵈ θ`, `ρs = ρᵈ s`), and `cᵢ(w)` is the content the flux delivers to the cell,
 
     cᵢ(w) = χᵢ + (∂φ/∂h) (hᵢ(w) − hᵢ) .
 
@@ -984,10 +985,13 @@ heating, `1 / (cᵖᵐ Π)` for `θˡⁱ` and one for `s`. In `cᵢ(w)`, `hᵢ(w
 upwind cell of `w` and `χᵢ`, `hᵢ`, `∂φ/∂h` are the cell's own.
 
 The tracer tendency advects each humidity at `Wᵢ` in place of `wᵗ`, so the bracket is the
-sedimentation part of the mass flux advection actually applies to the cell. A flux out drains
-the cell itself and delivers `χ` alone, changing the composition at fixed temperature; a flux in
-adds the cell's conversion of the sensible heat the arriving mass brings from another level. For
-`s` the delivered content is the upwind cell's `h`, so the sum is a flux form conserving `∫ρs`;
+sedimentation part of the mass flux advection actually applies to the cell, provided `wᵗ` is the
+velocity that tendency used: upwind selection and the adaptive implicit split are nonlinear in
+the velocity, so fluxes formed at another one would not recombine into the applied flux. A flux
+out drains the cell itself and delivers `χ` alone, changing the composition at fixed temperature;
+a flux in adds the cell's conversion of the sensible heat the arriving mass brings from another
+level. For `s` the delivered content is the upwind cell's `h`, so the sum is a flux form
+conserving `∫ρs`;
 for `θˡⁱ` it is not, since `∂θˡⁱ/∂qˣ` varies with the Exner function and transporting it between
 pressure levels would conserve `∫ρθ`, which precipitation does not (see
 [`condensate_content_fluxes`](@ref)).

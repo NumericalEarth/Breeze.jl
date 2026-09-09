@@ -340,7 +340,9 @@ end
 ##### Theta's slow tendency does NOT consume this — `compute_slow_scalar_tendencies!`
 ##### deliberately passes `model.velocities` (matching WRF's `rk_tendency`).
 ##### Mixing the two paths creates a feedback loop that destabilizes a rest
-##### atmosphere at production Δt.
+##### atmosphere at production Δt. Its condensate sedimentation term alone reads
+##### the frozen copy of this velocity, pairing its content fluxes with the mass
+##### fluxes the tracer tendencies apply.
 #####
 ##### The implicit remainder of a scalar update must split the SAME velocity
 ##### its explicit fraction was scaled by, so `scalar_substep!` reads a frozen

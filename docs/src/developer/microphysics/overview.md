@@ -197,14 +197,18 @@ released at one pressure and absorbed at another). Both formulations respond in 
 identically. The content fluxes ride the total-density-weighted mass flux the tracer tendency
 applies, and the cell's coupling-to-total density ratio (one on the anelastic core,
 ``qᵈ = ρᵈ / ρ`` on the compressible core) converts the change of the specific variable into that
-of the coupling-weighted prognostic. Under adaptive
-implicit vertical advection the tendency carries the content of the explicit fraction of each
-mass flux only; between the tracers' implicit solves of a stage and the thermodynamic variable's
-own, the time steppers call `implicit_sedimentation_step!`, which moves the content of the
-remainder from the first-order fluxes the solves actually applied, at the solved state, so the
-heat follows the mass at any fall Courant number and takes the same implicit transport and
-diffusion as the rest of the field. Rain-out thus leaves latent warming aloft and pre-cools the
-layer that later evaporates the arriving rain, the mechanism that builds cold pools.
+of the coupling-weighted prognostic. They are formed at the velocity the tracer tendency
+transports the constituents with, which on the compressible core is the substepper's
+acoustic-mean velocity rather than the RK predictor the thermodynamic variable itself advects
+with: upwind selection and the adaptive implicit split are nonlinear in the velocity, so fluxes
+formed at the predictor would not recombine into the mass flux the condensate takes. Under
+adaptive implicit vertical advection the tendency carries the content of the explicit fraction
+of each mass flux only; between the tracers' implicit solves of a stage and the thermodynamic
+variable's own, the time steppers call `implicit_sedimentation_step!`, which moves the content
+of the remainder from the first-order fluxes the solves actually applied, at the solved state,
+so the heat follows the mass at any fall Courant number and takes the same implicit transport
+and diffusion as the rest of the field. Rain-out thus leaves latent warming aloft and pre-cools
+the layer that later evaporates the arriving rain, the mechanism that builds cold pools.
 
 ### Bottom Precipitation Flux
 

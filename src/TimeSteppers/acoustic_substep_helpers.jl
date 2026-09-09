@@ -133,6 +133,13 @@ function compute_slow_scalar_tendencies!(model)
     # computed in `update_state!`'s `compute_tendencies!` via
     # `transport_velocities(model)`, which the `AcousticRungeKutta3` override
     # routes to the substepper's time-averaged velocity.
+    #
+    # The condensate sedimentation term is the exception: it pairs its content fluxes with the
+    # tracer tendencies' mass fluxes, which recombine only at the velocity they were formed at
+    # (see `condensate_sedimentation_divergence`), so it reads the frozen copy
+    # (`tendency_transport_velocities`), as `implicit_sedimentation_step!` does for the implicit
+    # remainder. Being a difference of those fluxes, zero wherever nothing sediments, it forms no
+    # part of the feedback loop above.
     common_args = (
         model.dynamics,
         model.formulation,
@@ -146,7 +153,7 @@ function compute_slow_scalar_tendencies!(model)
         model.clock,
         fields(model))
 
-    AtmosphereModels.compute_thermodynamic_tendency!(model, common_args)
+    AtmosphereModels.compute_thermodynamic_tendency!(model, common_args, tendency_transport_velocities(model).w)
 
     return nothing
 end
@@ -159,18 +166,16 @@ end
 $(TYPEDSIGNATURES)
 
 Freeze the time-averaged transport velocity that `update_state!` just built the moisture and
-tracer tendencies from. The next acoustic loop resets and rebuilds `time_averaged_velocities`,
-so `scalar_substep!` cannot read it live: the implicit remainder has to split the same velocity
-the explicit fraction in `Gⁿ` was scaled by (invariant: ⟨w⟩ = wᵉ + wⁱ). Called after every
-tendency computation the stepper issues, once per stage. A no-op when the substepper carries no
-cache — without adaptive-implicit advection there is no split to pair.
+tracer tendencies from. The next acoustic loop resets and rebuilds `time_averaged_velocities`
+(and `freeze_linearization_state!` reseeds it at outer-step start), so the stage cannot read it
+live. Two readers pair fluxes with those tendencies: the implicit remainder in `scalar_substep!`,
+which has to split the same velocity the explicit fraction in `Gⁿ` was scaled by (invariant:
+⟨w⟩ = wᵉ + wⁱ), and the condensate sedimentation term of the thermodynamic tendency (see
+`compute_slow_scalar_tendencies!`). Called after every tendency computation the stepper issues,
+once per stage.
 """
-cache_transport_velocity!(model) =
-    cache_transport_velocity!(model.timestepper.substepper.time_averaged_vertical_velocity_cache, model)
-
-cache_transport_velocity!(::Nothing, model) = nothing
-
-function cache_transport_velocity!(w_cache, model)
+function cache_transport_velocity!(model)
+    w_cache = model.timestepper.substepper.time_averaged_vertical_velocity_cache
     copyto!(parent(w_cache), parent(transport_velocities(model).w))
     return nothing
 end
@@ -178,17 +183,13 @@ end
 """
 $(TYPEDSIGNATURES)
 
-The transport velocities the scalar tendencies in `Gⁿ` were built with: the frozen vertical
-component when the cache exists, the live field otherwise. Only `w` is frozen — under adaptive
-implicit vertical advection the horizontal fluxes stay fully explicit, so the implicit solve
-reads no horizontal velocity.
+The transport velocities the moisture and tracer tendencies in `Gⁿ` were built with: the live
+horizontal components and the frozen vertical one. Only `w` is frozen — under adaptive implicit
+vertical advection the horizontal fluxes stay fully explicit, so the implicit solve reads no
+horizontal velocity, and condensate sediments vertically.
 """
 tendency_transport_velocities(model) =
-    tendency_transport_velocities(model.timestepper.substepper.time_averaged_vertical_velocity_cache, model)
-
-tendency_transport_velocities(::Nothing, model) = transport_velocities(model)
-
-tendency_transport_velocities(w_cache, model) = merge(transport_velocities(model), (; w = w_cache))
+    merge(transport_velocities(model), (; w = model.timestepper.substepper.time_averaged_vertical_velocity_cache))
 
 """
 $(TYPEDSIGNATURES)
@@ -330,7 +331,9 @@ acoustic mass-flux divergence itself, not scalar advection.
 The advecting velocity passed to each solve must be the one its slow tendency was built with,
 so the explicit/implicit velocity split is consistent: the RK stage-entry predictor velocities
 (see `compute_slow_momentum_tendencies!` and `compute_slow_scalar_tendencies!`), not the
-substepper's time-averaged transport velocities that moisture and tracers use.
+substepper's time-averaged transport velocities that moisture and tracers use. The one exception,
+on both sides of the split, is the condensate sedimentation term, which pairs with the tracers'
+mass fluxes and reads their velocity (see `compute_slow_scalar_tendencies!`).
 """
 implicit_substep!(model, Δt_stage) =
     implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage)
