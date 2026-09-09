@@ -134,7 +134,7 @@ end
         θ  = Reactant.to_rarray(Float64[_A, _σ₀, _U₀])
         dθ = Reactant.to_rarray(zeros(3))
 
-        compile_options = CompileOptions(; speculate_partial_ifs = true, raise_first = true, raise = true, sync = true)
+        compile_options = CompileOptions(; disable_loop_raising_passes = true, raise_first = true, raise = true, sync = true)
         compiled = @with_stack_size Reactant.@compile compile_options=compile_options grad_loss(
                 model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
 
