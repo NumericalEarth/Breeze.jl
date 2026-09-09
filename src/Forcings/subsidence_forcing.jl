@@ -2,7 +2,7 @@ using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: AbstractField
-using Oceananigans.Grids: Center, Face
+using Oceananigans.Grids: AbstractGrid, Center, Face, Flat
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
@@ -81,7 +81,9 @@ end
 ##### Kernel: returns the specific subsidence tendency (the ρ-multiply happens in SpecificForcing)
 #####
 
-@inline w_dz_ϕᵃᵃᶠ(i, j, k, grid, w, ϕ) = @inbounds w[1, 1, k] * ∂zᶜᶜᶠ(1, 1, k, grid, ϕ)
+# `w` and `ϕ` are reduced (x, y)-averaged fields on an ordinary grid, which ignore `i, j`, and full
+# fields in a column ensemble, where every column carries its own subsidence and its own profile.
+@inline w_dz_ϕᵃᵃᶠ(i, j, k, grid, w, ϕ) = @inbounds w[i, j, k] * ∂zᶜᶜᶠ(i, j, k, grid, ϕ)
 
 # The face values of wˢ ∂z ϕ̄ reconstructed to the cell centers. Interior cells average the faces
 # above and below. The boundary cells cannot use the boundary face, whose gradient would reach into
@@ -115,6 +117,9 @@ end
 ##### Materialization: build the horizontal average of the specific field
 #####
 
+horizontally_averaged(specific_field, grid) = Average(specific_field, dims=(1, 2)) |> Field
+horizontally_averaged(specific_field, ::AbstractGrid{<:Any, <:Flat, <:Flat}) = specific_field
+
 function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing,
                                                                field, name, model_field_names,
                                                                context::NamedTuple)
@@ -137,7 +142,10 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
 
     # `name` is the specific prognostic name (e.g. :θ); look up the matching field directly.
     specific_field = haskey(context.specific_fields, name) ? context.specific_fields[name] : field
-    averaged_field = Average(specific_field, dims=(1, 2)) |> Field
+
+    # The horizontal mean of a single column is the column itself, and in a column ensemble the
+    # columns are independent, so the subsidence acts on each column's own profile there.
+    averaged_field = horizontally_averaged(specific_field, grid)
 
     return SubsidenceForcing(wˢ, averaged_field)
 end
