@@ -19,7 +19,7 @@ diagnosed_mixing_length(model) = model.closure_fields.ℓ
 # smaller — plus Cˢ times the distance. The ground, the bottom face, is a zero; above it the wall
 # length is Cˢ times the height.
 function brute_force_envelope(grid, ℓᵇ, Cˢ)
-    zf = znodes(grid, Face())
+    zf = Array(znodes(grid, Face())) # a stretched grid on the GPU keeps its nodes on the device
     obstacles = min.(Cˢ .* zf, ℓᵇ)
     obstacles[1] = 0
     return [minimum(obstacles[m] + Cˢ * abs(zf[k] - zf[m]) for m in eachindex(zf)) for k in eachindex(zf)]
@@ -358,7 +358,7 @@ column(field) = Array(interior(field, 1, 1, :))
         set!(model; θ = θᵢ)
         set_tke!(model, e₀)
         Cˢ = closure.mixing_length.Cˢ
-        zf_stretched = znodes(stretched, Face())
+        zf_stretched = Array(znodes(stretched, Face()))
 
         ℓ = column(diagnosed_mixing_length(model))
         N² = column(model.closure_fields.N²)
