@@ -10,7 +10,7 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: AbstractGrid, RectilinearGrid, Center, Face, Flat, Bounded
 using Oceananigans.Fields: ConstantField
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, RadiativeTransferModel,
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiation, RadiativeTransferModel,
                                AbstractSolarPosition, ApparentSolarPosition,
                                DiurnalSolarPosition, FixedCosineZenith
 
@@ -157,14 +157,14 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
         rrtmgp_T₀ .= surface_temperature.constant
     end
 
-    grid_parameters = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
+    rrtmgp_grid = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
 
-    longwave_solver = NoScatLWRTE(grid_parameters;
+    longwave_solver = NoScatLWRTE(rrtmgp_grid;
                                   params = parameters,
                                   sfc_emis = rrtmgp_ε₀,
                                   inc_flux = nothing)
 
-    shortwave_solver = NoScatSWRTE(grid_parameters;
+    shortwave_solver = NoScatSWRTE(rrtmgp_grid;
                                    cos_zenith = cos_zenith,
                                    toa_flux = rrtmgp_ℐ₀,
                                    sfc_alb_direct = rrtmgp_αb₀,
@@ -188,19 +188,17 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     downwelling_shortwave_flux = ZFaceField(grid)  # Direct beam only
     flux_divergence = CenterField(grid)
 
-    surface_properties = SurfaceRadiativeProperties(surface_temperature,
-                                                    surface_emissivity,
-                                                    direct_surface_albedo,
-                                                    diffuse_surface_albedo)
+    surface_radiation = SurfaceRadiation(surface_temperature, surface_emissivity,
+                                         direct_surface_albedo, diffuse_surface_albedo)
 
     update_rrtmgp_surface_boundary_conditions!(longwave_solver.bcs.sfc_emis,
                                                shortwave_solver.bcs.sfc_alb_direct,
                                                shortwave_solver.bcs.sfc_alb_diffuse,
-                                               surface_properties, grid)
+                                               surface_radiation, grid)
 
     return RadiativeTransferModel(convert(FT, solar_constant),
                                   solar_position,
-                                  surface_properties,
+                                  surface_radiation,
                                   nothing,  # background_atmosphere = nothing for gray
                                   atmospheric_state,
                                   longwave_solver,
@@ -308,7 +306,7 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
     clock = model.clock
 
     rrtmgp_state = rtm.atmospheric_state
-    surface_temperature = rtm.surface_properties.surface_temperature
+    surface_temperature = rtm.surface_radiation.surface_temperature
 
     # Update RRTMGP atmospheric state from model fields
     update_rrtmgp_state!(rrtmgp_state, model, surface_temperature)
@@ -317,7 +315,7 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
     update_rrtmgp_surface_boundary_conditions!(rtm.longwave_solver.bcs.sfc_emis,
                                                rtm.shortwave_solver.bcs.sfc_alb_direct,
                                                rtm.shortwave_solver.bcs.sfc_alb_diffuse,
-                                               rtm.surface_properties, grid)
+                                               rtm.surface_radiation, grid)
 
     # Update solar zenith angle from the solar_position specification
     update_solar_zenith_angle!(rtm.shortwave_solver, rtm.solar_position, grid, clock)

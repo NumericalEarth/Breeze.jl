@@ -19,7 +19,7 @@ export BulkDragFunction,
        FilteredSurfaceScalar,
        PolynomialCoefficient,
        FittedStabilityFunction,
-       StabilityFunctionParameters,
+       StabilityFunction,
        RichardsonNumberMapping,
        default_neutral_drag_polynomial,
        default_neutral_sensible_heat_polynomial,
@@ -27,7 +27,9 @@ export BulkDragFunction,
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density,
                           standard_pressure, boundary_conditions_reference_state,
-                          default_drag_surface_temperature
+                          default_drag_surface_temperature, thermodynamic_density_name,
+                          total_energy_density_name, moisture_prognostic_name,
+                          total_moisture_density_name
 using ..AtmosphereModels.Diagnostics: VirtualPotentialTemperature, saturation_total_specific_moisture
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity, dry_air_gas_constant, vapor_gas_constant,
@@ -100,16 +102,19 @@ This function walks through all boundary conditions and calls
 `materialize_atmosphere_boundary_condition` on each one, allowing specialized handling for
 bulk flux boundary conditions and other atmosphere-specific boundary condition types.
 
-If `formulation` is `:LiquidIcePotentialTemperature` and `ρs` boundary conditions are provided,
-they are automatically converted to `ρθ` boundary conditions using `EnergyFluxBoundaryCondition`.
+Boundary conditions supplied under an interface key are first routed onto the prognostic field
+that carries them: the energy key `ρE` onto the thermodynamic variable of `formulation` by
+[`convert_energy_bcs`](@ref), and the moisture key `ρqᵗ` onto the moisture density of
+`microphysics` by [`convert_moisture_bcs`](@ref).
 """
 function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
                                                                            dynamics, microphysics, surface_pressure,
                                                                            thermodynamic_constants,
                                                                            microphysical_fields, specific_prognostic_moisture, temperature)
 
-    # Convert ρs boundary conditions to ρθ for potential temperature formulations
-    boundary_conditions = convert_energy_to_theta_bcs(boundary_conditions, formulation, thermodynamic_constants)
+    # Route interface keys onto the prognostic fields that carry them
+    boundary_conditions = convert_energy_bcs(boundary_conditions, formulation)
+    boundary_conditions = convert_moisture_bcs(boundary_conditions, microphysics)
 
     materialized = Dict{Symbol, Any}()
     for (name, fbcs) in pairs(boundary_conditions)
@@ -122,68 +127,129 @@ function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(bound
 end
 
 #####
-##### Convert ρs boundary conditions to ρθ for potential temperature formulations
+##### Route interface keys (ρE, ρqᵗ) onto the prognostic fields that carry them
 #####
 
-const θFormulation = Union{Val{:LiquidIcePotentialTemperature}, Val{:θ}}
-const sFormulation = Union{Val{:StaticEnergy}, Val{:s}, Val{:ρs}}
+const boundary_sides = (:west, :east, :south, :north, :bottom, :top, :immersed)
+
+# Whether the caller wrote a condition on a side, as opposed to the constructor filling it in.
+# Distinct from `nondefault_bc`, which asks whether an entry carries anything worth converting and
+# so treats an explicit no-flux as nothing at all.
+specified_bc(bc) = !(bc isa DefaultBoundaryCondition)
+
+nondefault_bc(::Nothing) = false
+nondefault_bc(::BoundaryCondition{<:Flux, Nothing}) = false
+nondefault_bc(::DefaultBoundaryCondition) = false
+nondefault_bc(bc) = true
 
 # Check if FieldBoundaryConditions has any non-default values
 has_nondefault_bcs(::Nothing) = false
 has_nondefault_bcs(fbcs) = false
+has_nondefault_bcs(fbcs::FieldBoundaryConditions) =
+    any(side -> nondefault_bc(getproperty(fbcs, side)), boundary_sides)
 
-function has_nondefault_bcs(fbcs::FieldBoundaryConditions)
-    for side in (:west, :east, :south, :north, :bottom, :top, :immersed)
-        bc = getproperty(fbcs, side)
-        bc isa Nothing && continue
-        bc isa BoundaryCondition{<:Flux, Nothing} && continue
-        bc isa DefaultBoundaryCondition && continue
-        return true
-    end
-    return false
-end
+# Error if an interface key and the prognostic field it routes onto both carry a non-default
+# condition on the same side: the two would be summed into one flux there, which is never what a
+# caller means. Different sides are two halves of one specification and are merged.
+function validate_interface_bcs(bcs, interface_name, target_name)
+    interface_bcs = get(bcs, interface_name, nothing)
+    target_bcs = get(bcs, target_name, nothing)
 
-# Validate: error if BOTH ρθ and ρs have non-default BCs
-function validate_thermodynamic_bcs(bcs)
-    has_ρθ = :ρθ ∈ keys(bcs) && has_nondefault_bcs(bcs.ρθ)
-    has_ρs = :ρs ∈ keys(bcs) && has_nondefault_bcs(bcs.ρs)
-    if has_ρθ && has_ρs
-        throw(ArgumentError("Cannot specify boundary conditions on both ρθ and ρs. " *
-                            "Use ρs for energy fluxes or ρθ for potential temperature fluxes, but not both."))
+    interface_bcs isa FieldBoundaryConditions && target_bcs isa FieldBoundaryConditions || return nothing
+
+    contested = Tuple(side for side in boundary_sides
+                      if specified_bc(getproperty(interface_bcs, side)) &&
+                         specified_bc(getproperty(target_bcs, side)))
+
+    if !isempty(contested)
+        throw(ArgumentError("Cannot specify boundary conditions on both $target_name and $interface_name " *
+                            "on the same side, but both carry one on $contested. Both are applied to " *
+                            "$target_name, so supplying both would sum them into a single flux there. " *
+                            "Use $interface_name, which is valid whatever the formulation and " *
+                            "microphysics, or $target_name, but not both on one side."))
     end
+
     return nothing
 end
 
-# Fallback: no conversion (but validate)
-function convert_energy_to_theta_bcs(bcs, formulation, constants)
-    validate_thermodynamic_bcs(bcs)
-    return bcs
+# Take each side the caller wrote under the interface key, and the target's own condition on every
+# other side. `validate_interface_bcs` has already rejected any side written under both.
+merge_interface_sides(interface_bcs, target_bcs) = interface_bcs
+
+merge_interface_sides(interface_bcs, target_bcs::FieldBoundaryConditions) =
+    FieldBoundaryConditions(; (side => (specified_bc(getproperty(interface_bcs, side)) ?
+                                        getproperty(interface_bcs, side) :
+                                        getproperty(target_bcs, side))
+                               for side in boundary_sides)...)
+
+# Strip `interface_name` from `bcs`, returning the remainder together with the conditions bound for
+# `target_name`: each side taken from the interface entry, put by `adapt` into the units
+# `target_name` requires, or from what was supplied under `target_name` itself.
+function route_interface_bcs(bcs, interface_name, target_name, adapt)
+    validate_interface_bcs(bcs, interface_name, target_name)
+
+    interface_bcs = get(bcs, interface_name, nothing)
+    bcs = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== interface_name)
+
+    target_bcs = get(bcs, target_name, FieldBoundaryConditions())
+    has_nondefault_bcs(interface_bcs) || return bcs, target_bcs
+
+    return bcs, merge_interface_sides(adapt(interface_bcs), target_bcs)
 end
 
-# Convert ρs → ρθ for potential temperature formulations
-function convert_energy_to_theta_bcs(bcs, formulation::θFormulation, constants)
-    validate_thermodynamic_bcs(bcs)
-    :ρs ∈ keys(bcs) || return bcs
-    has_nondefault_bcs(bcs.ρs) || return bcs
+"""
+$(TYPEDSIGNATURES)
 
-    ρs_bcs = set_sensible_heat_formulation_bcs(bcs.ρs, PotentialTemperatureFlux())
-    ρθ_bcs = energy_to_theta_bcs(ρs_bcs)
-    remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρs)
-    return merge(remaining, (; ρθ=ρθ_bcs))
+Assemble the boundary conditions of the prognostic thermodynamic density of `formulation`:
+move any conditions supplied under the energy key `ρE` (see
+[`total_energy_density_name`](@ref AtmosphereModels.total_energy_density_name)) onto it,
+converting the energy flux as that variable requires, and tell any bulk sensible-heat flux
+which surface difference to form. The `ρE` entry is dropped — it names an interface, not a
+field.
+"""
+function convert_energy_bcs(bcs, formulation)
+    ρᵡ_name = thermodynamic_density_name(formulation)
+    ρᵡ = Val(ρᵡ_name)
+    bcs, ρᵡ_bcs = route_interface_bcs(bcs, total_energy_density_name, ρᵡ_name,
+                                      ρE_bcs -> energy_bcs_to_thermodynamic_bcs(ρE_bcs, ρᵡ))
+
+    # `BulkSensibleHeatFlux` forms its surface difference in the prognostic variable itself,
+    # whether it arrived under `ρE` or under that variable's own key.
+    ρᵡ_bcs = set_sensible_heat_formulation_bcs(ρᵡ_bcs, sensible_heat_flux_formulation(ρᵡ))
+
+    return merge(bcs, NamedTuple{(ρᵡ_name,)}((ρᵡ_bcs,)))
 end
 
-# Set formulation on BulkSensibleHeatFlux for static energy formulations
-function convert_energy_to_theta_bcs(bcs, formulation::sFormulation, constants)
-    validate_thermodynamic_bcs(bcs)
-    :ρs ∈ keys(bcs) || return bcs
-    has_nondefault_bcs(bcs.ρs) || return bcs
+"""
+$(TYPEDSIGNATURES)
 
-    ρs_bcs = set_sensible_heat_formulation_bcs(bcs.ρs, StaticEnergyFlux())
-    remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρs)
-    return merge(remaining, (; ρs=ρs_bcs))
+Assemble the boundary conditions of the prognostic moisture density of `microphysics`, moving
+any conditions supplied under the moisture key `ρqᵗ` (see
+[`total_moisture_density_name`](@ref AtmosphereModels.total_moisture_density_name)) onto it.
+Water enters that variable unconverted whatever the scheme calls it, so unlike the energy key
+this is a pure re-key. The `ρqᵗ` entry is dropped — it names an interface, not a field.
+"""
+function convert_moisture_bcs(bcs, microphysics)
+    ρq_name = moisture_prognostic_name(microphysics)
+    bcs, ρq_bcs = route_interface_bcs(bcs, total_moisture_density_name, ρq_name, identity)
+    return merge(bcs, NamedTuple{(ρq_name,)}((ρq_bcs,)))
 end
 
-convert_energy_to_theta_bcs(bcs, f::Symbol, c) = convert_energy_to_theta_bcs(bcs, Val(f), c)
+# ρθ: an energy flux 𝒬 enters as the potential temperature flux Jᶿ = 𝒬 / cᵖᵐ, applied by
+# `EnergyFluxBoundaryCondition`.
+energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρθ}) = energy_to_theta_bcs(ρE_bcs)
+
+# ρs: static energy is an energy per unit mass, so an energy flux needs no conversion.
+energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρs}) = ρE_bcs
+
+# A new thermodynamic formulation must say how an energy flux enters its prognostic variable.
+energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{ρᵡ_name}) where ρᵡ_name =
+    throw(ArgumentError("Energy boundary conditions (ρE) are not implemented for the prognostic " *
+                        "thermodynamic variable $ρᵡ_name. Set boundary conditions on $ρᵡ_name directly."))
+
+# The surface difference Δϕ that a bulk sensible-heat flux forms, per prognostic variable.
+sensible_heat_flux_formulation(::Val{:ρθ}) = PotentialTemperatureFlux()
+sensible_heat_flux_formulation(::Val{:ρs}) = StaticEnergyFlux()
 
 # Materialize FieldBoundaryConditions by walking through each boundary
 function materialize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, dynam, micro, p₀, consts,
