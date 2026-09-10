@@ -248,6 +248,8 @@ function compute_auxiliary_variables!(model)
     # Dispatch on dynamics type (computes pressure for compressible dynamics)
     compute_auxiliary_dynamics_variables!(model)
 
+    fill_specific_boundary_halos!(model)
+
     # Compute diffusivities. Oceananigans has no `compute_closure_fields!` for a bare array of
     # field-less closures (a per-column ensemble of e.g. `VerticalScalarDiffusivity`, for which
     # `closure_fields === nothing`); there is nothing to compute or fill, so skip it. Field-carrying

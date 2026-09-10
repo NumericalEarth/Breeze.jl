@@ -883,3 +883,5 @@ based on cloud properties.
 """
 @inline cloud_ice_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
     effective_radius_model.radius
+
+fill_microphysical_boundary_halos!(microphysics, model) = nothing

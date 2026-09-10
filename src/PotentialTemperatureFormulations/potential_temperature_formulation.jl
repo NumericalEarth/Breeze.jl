@@ -89,6 +89,13 @@ AtmosphereModels.thermodynamic_density_name(::Val{:LiquidIcePotentialTemperature
 Oceananigans.fields(formulation::LiquidIcePotentialTemperatureFormulation) = (; θ=formulation.potential_temperature)
 Oceananigans.prognostic_fields(formulation::LiquidIcePotentialTemperatureFormulation) = (; ρθ=formulation.potential_temperature_density)
 
+function AtmosphereModels.fill_thermodynamic_boundary_halos!(formulation::LiquidIcePotentialTemperatureFormulation, model)
+    # Unlike vapor/P3, compressible theta transport is weighted by dry density.
+    return AtmosphereModels.fill_density_specific_boundary_halos!(
+        formulation.potential_temperature, formulation.potential_temperature_density,
+        dynamics_density(model.dynamics), model.clock, Oceananigans.fields(model))
+end
+
 #####
 ##### Materialization
 #####

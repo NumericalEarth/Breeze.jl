@@ -235,6 +235,12 @@ end
 ##### Materialize microphysical fields
 #####
 
+# Direct owner diagnostics may request default fields with an empty BC tuple;
+# AtmosphereModel supplies the complete regularized prognostic BC inventory.
+function p3_prognostic_center_field(grid, bcs, name)
+    return haskey(bcs, name) ? CenterField(grid; boundary_conditions=bcs[name]) : CenterField(grid)
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -264,14 +270,14 @@ is held at zero so nothing sediments in from above the model top.
 """
 function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
     # Create all prognostic fields
-    ρqᶜˡ = CenterField(grid)  # Cloud liquid
-    ρqʳ  = CenterField(grid)  # Rain mass
-    ρnʳ  = CenterField(grid)  # Rain number
-    ρqⁱ  = CenterField(grid)  # Ice mass
-    ρnⁱ  = CenterField(grid)  # Ice number
-    ρqᶠ  = CenterField(grid)  # Rime mass
-    ρbᶠ  = CenterField(grid)  # Rime volume
-    ρqʷⁱ = CenterField(grid)  # Liquid on ice
+    ρqᶜˡ = p3_prognostic_center_field(grid, bcs, :ρqᶜˡ)  # Cloud liquid
+    ρqʳ  = p3_prognostic_center_field(grid, bcs, :ρqʳ)   # Rain mass
+    ρnʳ  = p3_prognostic_center_field(grid, bcs, :ρnʳ)   # Rain number
+    ρqⁱ  = p3_prognostic_center_field(grid, bcs, :ρqⁱ)   # Ice mass
+    ρnⁱ  = p3_prognostic_center_field(grid, bcs, :ρnⁱ)   # Ice number
+    ρqᶠ  = p3_prognostic_center_field(grid, bcs, :ρqᶠ)   # Rime mass
+    ρbᶠ  = p3_prognostic_center_field(grid, bcs, :ρbᶠ)   # Rime volume
+    ρqʷⁱ = p3_prognostic_center_field(grid, bcs, :ρqʷⁱ)  # Liquid on ice
 
     # Diagnostic mixing ratio / number-concentration fields
     # (updated each step in update_microphysical_auxiliaries!, matching the Kessler pattern)
@@ -312,8 +318,8 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
               surface_temperature)
 
     return merge(fields,
-                 aerosol_activation_fields(p3.aerosol, grid),
-                 supersaturation_fields(p3.process_rates, grid))
+                 aerosol_activation_fields(p3.aerosol, grid, bcs),
+                 supersaturation_fields(p3.process_rates, grid, bcs))
 end
 
 # Optional field groups. Each switch gates allocation, not just transport, so a
@@ -324,20 +330,20 @@ end
 # Droplet number and unactivated aerosol. The prescribed-Nᶜˡ path takes the droplet
 # number from `p3.cloud.number_concentration` at every call and never reads `ρnᶜˡ`
 # or `ρnᵃ`.
-@inline aerosol_activation_fields(::Nothing, grid) = (;)
+@inline aerosol_activation_fields(::Nothing, grid, bcs) = (;)
 
-@inline aerosol_activation_fields(_, grid) =
-    (; ρnᶜˡ = CenterField(grid),        # Cloud number density [1/m³]
-     ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
-     nᶜˡ = CenterField(grid),         # Cloud number concentration [kg⁻¹]
-     nᵃ = CenterField(grid))          # Unactivated aerosol [kg⁻¹]
+@inline aerosol_activation_fields(_, grid, bcs) =
+    (; ρnᶜˡ = p3_prognostic_center_field(grid, bcs, :ρnᶜˡ), # Cloud number density [1/m³]
+       ρnᵃ = p3_prognostic_center_field(grid, bcs, :ρnᵃ),   # Unactivated aerosol number density [1/m³]
+       nᶜˡ = CenterField(grid),         # Cloud number concentration [kg⁻¹]
+       nᵃ = CenterField(grid))          # Unactivated aerosol [kg⁻¹]
 
 # Predicted supersaturation, off by default. With the switch off every rate that
 # would touch `sᵛ⁺ˡ` is gated to zero, so the prognostic carries no information.
-@inline supersaturation_fields(::ProcessRate{FT, false}, grid) where FT = (;)
+@inline supersaturation_fields(::ProcessRate{FT, false}, grid, bcs) where FT = (;)
 
-@inline supersaturation_fields(::ProcessRate{FT, true}, grid) where FT =
-    (; ρsᵛ⁺ˡ = CenterField(grid), sᵛ⁺ˡ = CenterField(grid))
+@inline supersaturation_fields(::ProcessRate{FT, true}, grid, bcs) where FT =
+    (; ρsᵛ⁺ˡ = p3_prognostic_center_field(grid, bcs, :ρsᵛ⁺ˡ), sᵛ⁺ˡ = CenterField(grid))
 
 #####
 ##### Gridless MicrophysicalState construction
