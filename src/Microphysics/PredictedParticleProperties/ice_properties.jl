@@ -161,7 +161,7 @@ size distribution. They are used for radiation, radar, and diagnostics.
 
 **Diagnostic integrals:**
 
-- `effective_radius`: Radiation-weighted radius ``r_e = ∫A·N'dD / ∫N'dD``
+- `effective_radius`: Tabulated radiative effective radius [m]
 - `mean_diameter`: Mass-weighted diameter ``D_m = ∫D·m·N'dD / ∫m·N'dD``
 - `mean_density`: Mass-weighted density ``ρ̄ = ∫ρ·m·N'dD / ∫m·N'dD``
 - `reflectivity`: Radar reflectivity ``Z = ∫D^6·N'dD``
