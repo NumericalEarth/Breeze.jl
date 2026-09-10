@@ -955,3 +955,10 @@ end
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρsᵛ⁺ˡ}) = result.tendency_ρsᵛ⁺ˡ
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqᵛ})  = result.tendency_ρqᵛ
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρnᵃ})  = result.tendency_ρnᵃ
+
+function AM.microphysical_transport_bounds(p3::P3, name::Symbol)
+    name in AM.prognostic_field_names(p3) || throw(ArgumentError("Unknown P3 prognostic $name"))
+    name === :ρsᵛ⁺ˡ && return nothing
+    name in (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqᶠ, :ρqʷⁱ) && return (0, 1)
+    return (0, Inf)
+end

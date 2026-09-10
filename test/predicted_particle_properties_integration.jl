@@ -701,3 +701,15 @@ using Oceananigans.TimeSteppers: update_state!
         @test all(isfinite, Array(interior(model.moisture_density)))
     end
 end
+
+@testset "P3 transport bounds distinguish fractions, number and volume" begin
+    p3 = Breeze.PredictedParticlePropertiesMicrophysics(; predict_supersaturation=true)
+    bounds(name) = Breeze.AtmosphereModels.microphysical_transport_bounds(p3, name)
+    for name in (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqᶠ, :ρqʷⁱ)
+        @test bounds(name) == (0, 1)
+    end
+    for name in (:ρnʳ, :ρnⁱ, :ρbᶠ)
+        @test bounds(name) == (0, Inf)
+    end
+    @test isnothing(bounds(:ρsᵛ⁺ˡ))
+end

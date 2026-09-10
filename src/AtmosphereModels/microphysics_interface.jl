@@ -883,3 +883,12 @@ based on cloud properties.
 """
 @inline cloud_ice_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
     effective_radius_model.radius
+
+"""
+$(TYPEDSIGNATURES)
+
+Return bounds on the specific quantity transported for prognostic `name`, or `nothing`
+for an unbounded quantity. Independent mass fractions default to `(0, 1)`.
+"""
+microphysical_transport_bounds(microphysics, name::Symbol) =
+    ifelse(name in condensate_field_names(microphysics), (0, 1), nothing)

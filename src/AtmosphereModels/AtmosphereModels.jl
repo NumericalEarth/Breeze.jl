@@ -88,6 +88,7 @@ export
 
     # Microphysics interface
     prognostic_field_names,
+    microphysical_transport_bounds,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
