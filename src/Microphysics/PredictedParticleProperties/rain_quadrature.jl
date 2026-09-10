@@ -101,7 +101,7 @@ end
 Callable evaluator for the mass-weighted rain terminal velocity:
 
 ```math
-\\mathbb{W}_{\\mathrm{mass}}(\\lambda_r) =
+\\mathbb{W}^m(\\lambda_r) =
     \\frac{\\int_0^\\infty \\mathbb{W}(D)\\, m(D)\\, e^{-\\lambda_r D}\\, dD}
          {\\int_0^\\infty m(D)\\, e^{-\\lambda_r D}\\, dD}
 ```
@@ -208,7 +208,7 @@ Apply `(ρ₀/ρ)^0.54` at the call site if needed.
 Callable evaluator for the number-weighted rain terminal velocity:
 
 ```math
-\\mathbb{W}_{\\mathrm{num}}(\\lambda_r) =
+\\mathbb{W}^n(\\lambda_r) =
     \\frac{\\int_0^\\infty \\mathbb{W}(D)\\, e^{-\\lambda_r D}\\, dD}
          {\\int_0^\\infty e^{-\\lambda_r D}\\, dD}
 ```

@@ -583,14 +583,14 @@ end
         μ = Breeze.AtmosphereModels.materialize_microphysical_fields(p3, grid, NamedTuple())
 
         @test haskey(μ, :wᶜˡ)
-        @test haskey(μ, :wᶜˡₙ)
+        @test haskey(μ, :wⁿᶜˡ)
 
         cloud_mass_velocity = microphysical_velocities(p3, μ, Val(:ρqᶜˡ))
         cloud_number_velocity = microphysical_velocities(p3, μ, Val(:ρnᶜˡ))
         @test cloud_mass_velocity !== nothing
         @test cloud_number_velocity !== nothing
         @test cloud_mass_velocity.w === μ.wᶜˡ
-        @test cloud_number_velocity.w === μ.wᶜˡₙ
+        @test cloud_number_velocity.w === μ.wⁿᶜˡ
 
         ρ = FT(1)
         T = FT(283.15)

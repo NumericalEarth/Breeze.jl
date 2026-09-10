@@ -157,7 +157,7 @@ struct ProcessRate{FT, PS}
     maximum_rime_density :: FT               # ℂʳⁱᵐᵉ₄ [kg/m³]
 
     # Riming impact parameter Ri, which sets the density of freshly accreted rime.
-    # Ri = c Dᶜ |vⁱ - vᶜ| / (T₀ - T), evaluated in the cloud-riming branch.
+    # Ri = ℂʳⁱᵐᵉ₅ Dᶜ |𝕎ⁱ - 𝕎ᶜˡ| / (T₀ - T), evaluated in the cloud-riming branch.
     rime_impact_coefficient :: FT            # ℂʳⁱᵐᵉ₅ [K s / m²]
     minimum_rime_impact :: FT                # ℂʳⁱᵐᵉ₆ [-]
     maximum_rime_impact :: FT                # ℂʳⁱᵐᵉ₇ [-]
@@ -219,8 +219,8 @@ struct ProcessRate{FT, PS}
     # Rain PSD slope bounds: the P3 rain lambda limiter. λʳ is clamped here and the
     # DSD-consistent number recomputed, so these bound ⟨D⟩ = (μʳ + 1) / λʳ.
     # `minimum_rain_slope` is the reciprocal of the reference `inv_Drmax = 1/0.002`.
-    minimum_rain_slope :: FT                # ℂʳⁿ₁, λʳ minimum [1/m]
-    maximum_rain_slope :: FT                # ℂʳⁿ₂, λʳ maximum [1/m]
+    minimum_rain_slope :: FT                # ℂʳ₁, λʳ minimum [1/m]
+    maximum_rain_slope :: FT                # ℂʳ₂, λʳ maximum [1/m]
 
     # Sink-limiting safety timescale [s]
     # If total sinks for any species × dt_safety exceed available mass,

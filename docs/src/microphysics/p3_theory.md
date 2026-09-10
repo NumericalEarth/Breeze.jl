@@ -49,7 +49,7 @@ characteristics (mass, fall speed, collection efficiency) are diagnosed from the
 ### Architectural choice: Breeze P3 updates tendencies, instead of prognostic variables
 
 The P3 reference implementation is structured as a subcycle module that updates prognostic
-variables in place over its internal Δt: it can hard-clamp ``n^i ≤ N^i_\text{max}/ρ`` after
+variables in place over its internal Δt: it can hard-clamp ``n^i ≤ \mathbb{C}_{\mathrm{phas},2}/ρ`` after
 each step, zero out small-mass species and add a compensating ``θ`` correction, and use
 ``1/Δt`` relaxation rates for nucleation and saturation adjustment.
 
@@ -328,6 +328,12 @@ species superscript immediately after the letter and the subscript last, so the
 rain PSD intercept ``N_0^r`` is `Nʳ₀` — the species stays adjacent to the letter it
 labels, as in `λʳ`.
 
+The weighting of a PSD-averaged fall speed is a superscript too, and precedes the
+species label rather than trailing it as a subscript: ``\mathbb{W}^{ncl}`` (`𝕎ⁿᶜˡ`) is
+the number-weighted cloud fall speed, and the mass-weighted one drops the marker
+entirely, ``\mathbb{W}^{cl}`` (`𝕎ᶜˡ`). The sedimentation velocity fields carry the
+same spelling, `wⁿᶜˡ` and `wᶜˡ`.
+
 **Saturation is ``^+``.** A saturation value carries a `+` in the superscript, as in
 the appendix: ``q^{v+l}`` and ``q^{v+i}`` are the saturation mass fractions over
 planar liquid and ice, and ``p^{v+}`` the saturation vapor pressure. Departures
@@ -354,8 +360,8 @@ and numerical safeguards are not free parameters and therefore do not receive
 mass of air: ``\dot{q}`` for mass [kg kg⁻¹ s⁻¹], ``\dot{n}`` for number
 [kg⁻¹ s⁻¹], ``\dot{b}`` for rime volume [m³ kg⁻¹ s⁻¹]. The subscript names the
 process and the superscript names the species the rate acts on, when the same
-process acts on more than one — ``\dot{q}^{cl}_\text{rim}`` is the riming of cloud
-water and ``\dot{q}^{r}_\text{rim}`` the riming of rain. The microphysical source
+process acts on more than one — ``\dot{q}^{cl}_\text{rime}`` is the riming of cloud
+water and ``\dot{q}^{r}_\text{rime}`` the riming of rain. The microphysical source
 term assembled from those rates for a prognostic field ``ρX`` is ``G_{ρX}``,
 matching the appendix use of ``G`` for a tendency.
 
@@ -418,7 +424,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 
 | math symbol | code | property name | description |
 | ----------- | ---- | ------------- | ----------- |
-| ``\mathbb{W}_n``, ``\mathbb{W}_m`` | | | Number- and mass-weighted mean fall speeds, positive downward [m/s] |
+| ``\mathbb{W}^m``, ``\mathbb{W}^n`` | | | Mass- and number-weighted mean fall speeds, positive downward [m/s]. With a species label the mass-weighted mean drops the ``m``, so ``\mathbb{W}^{cl}`` (`𝕎ᶜˡ`) is mass-weighted and ``\mathbb{W}^{ncl}`` (`𝕎ⁿᶜˡ`) number-weighted; a single-particle fall speed always carries its argument, ``\mathbb{W}^{cl}(D)`` |
 | ``\mathcal{K}`` | | | A PSD-integrated collection kernel, ``\int A(D) \mathbb{W}(D) N'(D)\,dD`` |
 | ``E^{ci}`` | `Eᶜⁱ` | `cloud_ice_collection_efficiency` | Ice–cloud droplet collection efficiency [-] |
 | ``E^{ri}`` | `Eʳⁱ` | `rain_ice_collection_efficiency` | Ice–rain collection efficiency [-] |
@@ -483,7 +489,7 @@ equivalent seed radius, but those are not two independent parameters.
 | Autoconversion | 4 | ``\mathbb{C}_{\mathrm{auto},1:4}`` = `autoconversion_coefficient`, `autoconversion_exponent_cloud`, `autoconversion_exponent_droplet`, `autoconversion_threshold` |
 | Accretion | 2 | ``\mathbb{C}_{\mathrm{accr},1:2}`` = `accretion_coefficient`, `accretion_exponent` |
 | Rain number | 4 | ``\mathbb{C}_{\mathrm{self},1}`` = `rain_self_collection_coefficient`; ``\mathbb{C}_{\mathrm{brkp},1:2}`` = `rain_breakup_diameter_threshold`, `rain_breakup_coefficient`; ``\mathbb{C}_{\mathrm{auto},5}`` = `initial_rain_drop_mass` |
-| Liquid PSD bounds | 4 | ``\mathbb{C}_{cl,5:6}`` = `maximum_mean_droplet_diameter`, `minimum_mean_droplet_diameter`; ``\mathbb{C}_{rn,1:2}`` = `minimum_rain_slope`, `maximum_rain_slope` |
+| Liquid PSD bounds | 4 | ``\mathbb{C}_{cl,5:6}`` = `maximum_mean_droplet_diameter`, `minimum_mean_droplet_diameter`; ``\mathbb{C}_{r,1:2}`` = `minimum_rain_slope`, `maximum_rain_slope` |
 | Aggregation | 6 | ``\mathbb{C}_{\mathrm{aggr},1:6}`` = maximum/minimum efficiency, temperature-ramp endpoints, and rime-fraction endpoints in `ProcessRate` |
 | Riming | 2 | ``\mathbb{C}_{\mathrm{rime},1:2}`` = `cloud_ice_collection_efficiency`, `rain_ice_collection_efficiency` |
 | Rime structure | 6 | ``\mathbb{C}_{\mathrm{rime},3:8}`` = rime-density bounds, impact coefficient and bounds, and `unrimed_rime_density` |
@@ -533,16 +539,16 @@ acts on only one species.
 | process | mass | number | volume |
 | ------- | ---- | ------ | ------ |
 | Condensation / evaporation | ``\dot{q}^{cl}_\text{cond}``, ``\dot{q}^{r}_\text{cond}``, ``\dot{q}^{wi}_\text{cond}``, ``\dot{q}^{r}_\text{evap}``, ``\dot{q}^{wi}_\text{evap}`` | ``\dot{n}^{r}_\text{evap}`` | |
-| CCN activation | ``\dot{q}_\text{act}`` | ``\dot{n}_\text{act}`` | |
-| Autoconversion | ``\dot{q}_\text{aut}`` | ``\dot{n}^{cl}_\text{aut}``, ``\dot{n}^{r}_\text{aut}`` | |
-| Accretion | ``\dot{q}_\text{acc}`` | | |
-| Self-collection, breakup | | ``\dot{n}^{cl}_\text{slf}``, ``\dot{n}^{r}_\text{slf}``, ``\dot{n}^{r}_\text{brk}`` | |
-| Riming | ``\dot{q}^{cl}_\text{rim}``, ``\dot{q}^{r}_\text{rim}`` | ``\dot{n}^{cl}_\text{rim}``, ``\dot{n}^{r}_\text{rim}`` | |
+| CCN activation | ``\dot{q}_\text{acti}`` | ``\dot{n}_\text{acti}`` | |
+| Autoconversion | ``\dot{q}_\text{auto}`` | ``\dot{n}^{cl}_\text{auto}``, ``\dot{n}^{r}_\text{auto}`` | |
+| Accretion | ``\dot{q}_\text{accr}`` | | |
+| Self-collection, breakup | | ``\dot{n}^{cl}_\text{self}``, ``\dot{n}^{r}_\text{self}``, ``\dot{n}^{r}_\text{brkp}`` | |
+| Riming | ``\dot{q}^{cl}_\text{rime}``, ``\dot{q}^{r}_\text{rime}`` | ``\dot{n}^{cl}_\text{rime}``, ``\dot{n}^{r}_\text{rime}`` | |
 | Above-freezing collection | ``\dot{q}^{cl}_\text{col}``, ``\dot{q}^{r}_\text{col}`` | ``\dot{n}^{cl}_\text{col}``, ``\dot{n}^{r}_\text{col}`` | |
 | Deposition / sublimation | ``\dot{q}_\text{dep}``, ``\dot{q}_\text{sub}`` | ``\dot{n}_\text{sub}`` | |
-| Ice nucleation | ``\dot{q}_\text{nuc}`` | ``\dot{n}_\text{nuc}`` | |
-| Immersion freezing | ``\dot{q}^{cl}_\text{frz}``, ``\dot{q}^{r}_\text{frz}`` | ``\dot{n}^{cl}_\text{frz}``, ``\dot{n}^{r}_\text{frz}`` | |
-| Homogeneous freezing | ``\dot{q}^{cl}_\text{hom}``, ``\dot{q}^{r}_\text{hom}`` | ``\dot{n}^{cl}_\text{hom}``, ``\dot{n}^{r}_\text{hom}`` | |
+| Ice nucleation | ``\dot{q}_\text{nucl}`` | ``\dot{n}_\text{nucl}`` | |
+| Immersion freezing | ``\dot{q}^{cl}_\text{immf}``, ``\dot{q}^{r}_\text{immf}`` | ``\dot{n}^{cl}_\text{immf}``, ``\dot{n}^{r}_\text{immf}`` | |
+| Homogeneous freezing | ``\dot{q}^{cl}_\text{homf}``, ``\dot{q}^{r}_\text{homf}`` | ``\dot{n}^{cl}_\text{homf}``, ``\dot{n}^{r}_\text{homf}`` | |
 | Hallett–Mossop splintering | | ``\dot{n}_\text{HM}`` | |
 | Aggregation | | ``\dot{n}_\text{agg}`` | |
 | Melting | ``\dot{q}_{\text{mlt},p}``, ``\dot{q}_{\text{mlt},f}`` | ``\dot{n}_\text{mlt}`` | |
@@ -558,7 +564,7 @@ acts on only one species.
 
 | math symbol | property name | description |
 | ----------- | ------------- | ----------- |
-| ``τ_{\mathrm{sink}}`` | `sink_limiting_timescale` | Numerical safety timescale for sink limiters [s], default 10; not a free parameter |
+| ``τ_\text{sink}`` | `sink_limiting_timescale` | Numerical safety timescale for sink limiters [s], default 10; not a free parameter |
 | ``\mathbb{C}_{\mathrm{nucl},4}`` | `ice_nucleation_timescale` | Cooper nucleation relaxation time [s], default 10 |
 | ``\mathbb{C}_{\mathrm{form},4}`` | `AerosolActivation.activation_timescale` | Droplet activation relaxation time [s], default 1 |
 | ``\mathbb{C}_{\mathrm{homf},2}`` | `homogeneous_freezing_timescale` | Homogeneous freezing relaxation time [s], default 10 |
@@ -1299,25 +1305,25 @@ number-weighted velocity, and the velocity-diameter integral used by evaporation
 #### Number-Weighted Fall Speed
 
 ```math
-\mathbb{W}_n = \frac{\int_0^∞ \mathbb{W}(D) N'(D)\, dD}{\int_0^∞ N'(D)\, dD}
+\mathbb{W}^n = \frac{\int_0^∞ \mathbb{W}(D) N'(D)\, dD}{\int_0^∞ N'(D)\, dD}
 ```
 
 This represents the average fall speed of particles and governs number flux:
 
 ```math
-\mathcal{F}_{ρn^i} = -\mathbb{W}_n\, ρn^i
+\mathcal{F}_{ρn^i} = -\mathbb{W}^n\, ρn^i
 ```
 
 #### Mass-Weighted Fall Speed
 
 ```math
-\mathbb{W}_m = \frac{\int_0^∞ \mathbb{W}(D) m(D) N'(D)\, dD}{\int_0^∞ m(D) N'(D)\, dD}
+\mathbb{W}^m = \frac{\int_0^∞ \mathbb{W}(D) m(D) N'(D)\, dD}{\int_0^∞ m(D) N'(D)\, dD}
 ```
 
 This governs mass flux:
 
 ```math
-\mathcal{F}_{ρq^i} = -\mathbb{W}_m\, ρq^i
+\mathcal{F}_{ρq^i} = -\mathbb{W}^m\, ρq^i
 ```
 
 ### Deposition/Sublimation Integrals
@@ -1436,7 +1442,7 @@ The aggregation rate integral:
 #### Ice-Cloud Collection (Riming)
 
 ```math
-\dot{q}^{cl}_\text{rim} = E^{ci} q^{cl} \int_0^∞ A(D) \mathbb{W}(D) N'(D)\, dD
+\dot{q}^{cl}_\text{rime} = E^{ci} q^{cl} \int_0^∞ A(D) \mathbb{W}(D) N'(D)\, dD
 ```
 
 #### Ice-Rain Collection
@@ -1592,7 +1598,7 @@ fraction prognostics in Breeze those factors are dropped, equivalent to
 Cloud droplets coalesce to form rain following [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000):
 
 ```math
-\dot{q}^{rn}_{\mathrm{auto}} = \mathbb{C}_{\mathrm{auto},1}\,
+\dot{q}^r_\text{auto} = \mathbb{C}_{\mathrm{auto},1}\,
     (q^{cl})^{\mathbb{C}_{\mathrm{auto},2}}
     \left(\frac{N^{cl}}{N^{cl}_r}\right)^{\mathbb{C}_{\mathrm{auto},3}},
 ```
@@ -1615,13 +1621,13 @@ independently identifiable free parameter.
 The autoconversion mass rate also sets the rain *number* source, through the
 free parameter ``\mathbb{C}_{\mathrm{auto},5} =`` `initial_rain_drop_mass`:
 the default is the mass of a 25 μm-radius drop. The matching cloud number sink is
-``\dot{q}^{rn}_{\mathrm{auto}} N^{cl}/q^{cl}``.
+``\dot{q}^r_\text{auto} N^{cl}/q^{cl}``.
 
 #### Accretion (KK2000)
 
 ```math
-\dot{q}^{rn}_{\mathrm{accr}} = \mathbb{C}_{\mathrm{accr},1}\,
-    (q^{cl} q^{rn})^{\mathbb{C}_{\mathrm{accr},2}},
+\dot{q}^r_\text{accr} = \mathbb{C}_{\mathrm{accr},1}\,
+    (q^{cl} q^r)^{\mathbb{C}_{\mathrm{accr},2}},
 ```
 
 with ``\mathbb{C}_{\mathrm{accr}} = (67, 1.15)``.
@@ -1633,28 +1639,28 @@ ones and very large drops breaking up. The KK2000 self-collection coefficient
 is combined with a Verlinde and Cotton (1993)-style breakup multiplier:
 
 ```math
-\dot{n}^{rn}_{\mathrm{self}} = \mathbb{C}_{\mathrm{self},1}\,
-    ρ\, q^{rn}\, n^{rn},
+\dot{n}^r_\text{self} = \mathbb{C}_{\mathrm{self},1}\,
+    ρ\, q^r\, n^r,
 ```
 
 with ``\mathbb{C}_{\mathrm{self},1} = 5.78`` m³ kg⁻¹ s⁻¹.
-A breakup multiplier modifies this rate by ``f_{\mathrm{brkp}}``:
+A breakup multiplier modifies this rate by ``f_\text{brkp}``:
 
 ```math
-f_{\mathrm{brkp}} = \begin{cases}
-1 & \bar D^{rn} < \mathbb{C}_{\mathrm{brkp},1} \\
+f_\text{brkp} = \begin{cases}
+1 & \bar D^r < \mathbb{C}_{\mathrm{brkp},1} \\
 2 - \exp\!\left[\mathbb{C}_{\mathrm{brkp},2}
-    (\bar D^{rn} - \mathbb{C}_{\mathrm{brkp},1})\right]
-  & \bar D^{rn} \ge \mathbb{C}_{\mathrm{brkp},1},
+    (\bar D^r - \mathbb{C}_{\mathrm{brkp},1})\right]
+  & \bar D^r \ge \mathbb{C}_{\mathrm{brkp},1},
 \end{cases}
 ```
 
-where ``\bar D^{rn} = 1/λ^{rn}`` is the number-mean diameter of the exponential
+where ``\bar D^r = 1/λ^r`` is the number-mean diameter of the exponential
 rain PSD, ``\mathbb{C}_{\mathrm{brkp},1} = 280`` μm, and
 ``\mathbb{C}_{\mathrm{brkp},2} = 2300`` m⁻¹. The breakup source is
-``(1-f_{\mathrm{brkp}})\dot n^{rn}_{\mathrm{self}}``. The multiplier decreases
+``(1-f_\text{brkp})\dot n^r_\text{self}``. The multiplier decreases
 immediately above the threshold but becomes negative only at
-``\bar D^{rn} > \mathbb{C}_{\mathrm{brkp},1} +
+``\bar D^r > \mathbb{C}_{\mathrm{brkp},1} +
 \log(2)/\mathbb{C}_{\mathrm{brkp},2} \approx 581`` μm; only then does breakup
 outweigh self-collection and make the net rain-number tendency positive.
 
@@ -1678,21 +1684,21 @@ ventilation-enhanced vapor diffusion equation
 appendix C, section b; [Pruppacher and Klett (1997)](@cite pruppacher2010microphysics)):
 
 ```math
-\dot{q}^{rn}_{\mathrm{evap}} = 2π\,N^{rn}_0\,ρ\,D^v\,\mathscr{S}^l
-    \left[\frac{\mathbb{C}_{\mathrm{vent},1} Γ(μ^{rn}+2)}
-                  {(λ^{rn})^{μ^{rn}+2}}
+\dot{q}^r_\text{evap} = 2π\,N^r_0\,ρ\,D^v\,\mathscr{S}^l
+    \left[\frac{\mathbb{C}_{\mathrm{vent},1} Γ(μ^r+2)}
+                  {(λ^r)^{μ^r+2}}
         + \mathbb{C}_{\mathrm{vent},2}\sqrt{ρ/η}\,
           \mathrm{Sc}^{1/3}\,I_{\mathbb{W}D}\right],
-\qquad N^{rn}_0 = \frac{n^{rn} (λ^{rn})^{μ^{rn}+1}}{Γ(μ^{rn}+1)},
+\qquad N^r_0 = \frac{n^r (λ^r)^{μ^r+1}}{Γ(μ^r+1)},
 ```
 
 with ``\mathbb{C}_{\mathrm{vent},1}`` and ``\mathbb{C}_{\mathrm{vent},2}`` read
 from `RainDrops.ventilation` (a `RainVentilation`, defaults ``0.78`` and ``0.32``),
-and ``I_{\mathbb{W}D} = ∫ D \sqrt{\mathbb{W}(D)\,D}\, e^{-λ^{rn} D}\, \mathrm{d}D`` the
+and ``I_{\mathbb{W}D} = ∫ D \sqrt{\mathbb{W}(D)\,D}\, e^{-λ^r D}\, \mathrm{d}D`` the
 velocity–diameter integral over the rain DSD, tabulated as `RainDrops.evaporation` by
-`RainVelocityDiameterIntegral`. At ``μ^{rn} = 0`` this is what `rain_ventilation_integral`
-assembles: ``N^{rn}_0 = n^{rn} λ^{rn}`` and a bracket of
-``\mathbb{C}_{\mathrm{vent},1}/(λ^{rn})^2 +
+`RainVelocityDiameterIntegral`. At ``μ^r = 0`` this is what `rain_ventilation_integral`
+assembles: ``N^r_0 = n^r λ^r`` and a bracket of
+``\mathbb{C}_{\mathrm{vent},1}/(λ^r)^2 +
 \mathbb{C}_{\mathrm{vent},2}\sqrt{ρ/η}\,\mathrm{Sc}^{1/3} I_{\mathbb{W}D}``.
 
 Only ``I_{\mathbb{W}D}`` is tabulated. Neither ventilation coefficient enters that table, and neither
@@ -1713,7 +1719,7 @@ supersaturation ``\mathscr{S}^i \ge \mathbb{C}_{\mathrm{nucl},2}`` (default 5%).
 [Cooper (1986)](@cite Cooper1986):
 
 ```math
-n_{\mathrm{Cooper}} = \mathbb{C}_{\mathrm{nucl},5}
+n_\text{Cooper} = \mathbb{C}_{\mathrm{nucl},5}
     \exp\!\left[\mathbb{C}_{\mathrm{nucl},6}(T_0 - T)\right] \rho^{-1},
 ```
 
@@ -1722,7 +1728,7 @@ with ``\mathbb{C}_{\mathrm{nucl},5} = 5`` m⁻³ and
 ice number is capped at the global maximum:
 
 ```math
-n_{\mathrm{eq}} = \min\!\left(n_{\mathrm{Cooper}},\;
+n_\text{eq} = \min\!\left(n_\text{Cooper},\;
     \mathbb{C}_{\mathrm{nucl},3}/ρ\right),\qquad
 \mathbb{C}_{\mathrm{nucl},3} = 10^5\,\mathrm{m}^{-3}.
 ```
@@ -1731,14 +1737,14 @@ An instantaneous rate ``(n_\text{eq} - n^i)/Δt`` would require the host Δt, so
 Breeze uses a fixed-timescale relaxation toward ``n_\text{eq}`` instead:
 
 ```math
-\dot{n}_{\mathrm{nucl}} = \max\!\left(0,\,
-    \frac{n_{\mathrm{eq}} - n^i}{\mathbb{C}_{\mathrm{nucl},4}}\right),
+\dot{n}_\text{nucl} = \max\!\left(0,\,
+    \frac{n_\text{eq} - n^i}{\mathbb{C}_{\mathrm{nucl},4}}\right),
 \qquad \mathbb{C}_{\mathrm{nucl},4} = 10\;\mathrm{s}.
 ```
 
 The mass rate is
-``\dot{q}_{\mathrm{nucl}} = \mathbb{C}_{\mathrm{form},1}
-\dot{n}_{\mathrm{nucl}}``, where the default
+``\dot{q}_\text{nucl} = \mathbb{C}_{\mathrm{form},1}
+\dot{n}_\text{nucl}``, where the default
 ``\mathbb{C}_{\mathrm{form},1} = (4π/3) ρ_i (1\,μ\mathrm{m})^3`` uses
 ``ρ_i = 900`` kg/m³.
 
@@ -1756,11 +1762,11 @@ toward ``\mathbb{C}_{\mathrm{phas},2} =`` `maximum_ice_number_density`
 ``= 2 \times 10^6`` m⁻³:
 
 ```math
-\dot{n}_{\mathrm{cap}} = \frac{\max(0,\;
-    n^i - \mathbb{C}_{\mathrm{phas},2}/ρ)}{τ_{\mathrm{sink}}},
+\dot{n}_\text{cap} = \frac{\max(0,\;
+    n^i - \mathbb{C}_{\mathrm{phas},2}/ρ)}{τ_\text{sink}},
 ```
 
-with numerical safety timescale ``τ_{\mathrm{sink}} =``
+with numerical safety timescale ``τ_\text{sink} =``
 `sink_limiting_timescale` (default 10 s). It enters
 ``G_{ρn^i}`` as a sink, and is the tendency-form analog of a hard clamp applied
 repeatedly during a subcycled update. The limiter is computed from the *raw*
@@ -1778,14 +1784,14 @@ cloud droplets and rain via the cloud / rain DSD integrals from
 [Barklie and Gokhale (1959)](@cite BarklieGokhale1959):
 
 ```math
-\dot{q}^{cl}_{\mathrm{immf}} = \frac{π^2}{36}\, ρ_w\,
+\dot{q}^{cl}_\text{immf} = \frac{π^2}{36}\, ρ_w\,
                       \mathbb{C}_{\mathrm{immf},3}
                       \frac{N^{cl}}{Γ(μ^{cl}+1)}\, Γ(7+μ^{cl})\,
                       \exp[\mathbb{C}_{\mathrm{immf},2}(T_0-T)]\, (λ^{cl})^{-6},
 ```
 
 ```math
-\dot{n}^{cl}_{\mathrm{immf}} = \frac{π}{6}\, \mathbb{C}_{\mathrm{immf},3}
+\dot{n}^{cl}_\text{immf} = \frac{π}{6}\, \mathbb{C}_{\mathrm{immf},3}
                       \frac{N^{cl}}{Γ(μ^{cl}+1)}\, Γ(μ^{cl}+4)\,
                       \exp[\mathbb{C}_{\mathrm{immf},2}(T_0-T)]\, (λ^{cl})^{-3},
 ```
@@ -1811,8 +1817,8 @@ remaining cloud liquid and rain are converted to ice on timescale
 ``\mathbb{C}_{\mathrm{homf},2}``:
 
 ```math
-\dot{q}^{cl}_{\mathrm{homf}} = q^{cl}/\mathbb{C}_{\mathrm{homf},2},\qquad
-\dot{q}^{rn}_{\mathrm{homf}} = q^{rn}/\mathbb{C}_{\mathrm{homf},2},
+\dot{q}^{cl}_\text{homf} = q^{cl}/\mathbb{C}_{\mathrm{homf},2},\qquad
+\dot{q}^r_\text{homf} = q^r/\mathbb{C}_{\mathrm{homf},2},
 ```
 
 with the matching number rates. The frozen mass is added to ice as fully
@@ -1841,7 +1847,7 @@ Active between ``\mathbb{C}_{\mathrm{HM},1} = 265.15`` K and
 ``F^l < \mathbb{C}_{\mathrm{HM},7} = 0.1``:
 
 ```math
-f_{\mathrm{HM}} = \begin{cases}
+f_\text{HM} = \begin{cases}
 \dfrac{T - \mathbb{C}_{\mathrm{HM},1}}
       {\mathbb{C}_{\mathrm{HM},3} - \mathbb{C}_{\mathrm{HM},1}}
   & \mathbb{C}_{\mathrm{HM},1} \le T \le \mathbb{C}_{\mathrm{HM},3} \\
@@ -1852,8 +1858,8 @@ f_{\mathrm{HM}} = \begin{cases}
 ```
 
 The peak is ``\mathbb{C}_{\mathrm{HM},3} = 268.15`` K. The number rate is
-``\dot{n}_{\mathrm{HM}} = \mathbb{C}_{\mathrm{HM},4}
-\dot{q}^{cl}_{\mathrm{rime}} f_{\mathrm{HM}}``, with
+``\dot{n}_\text{HM} = \mathbb{C}_{\mathrm{HM},4}
+\dot{q}^{cl}_\text{rime} f_\text{HM}``, with
 ``\mathbb{C}_{\mathrm{HM},4} = 3.5 \times 10^8`` kg⁻¹. The mass source uses
 ``\mathbb{C}_{\mathrm{HM},5} = 4.71 \times 10^{-13}`` kg per splinter, the mass
 of a 10 μm-diameter crystal at ``ρ_i = 900`` kg/m³.
@@ -1879,14 +1885,14 @@ multi-mode lognormal aerosol distributions and a ``\sigma_g`` width parameter.
 The activated number of each mode is:
 
 ```math
-n_\text{act} = n^a_\text{tot}\,\frac{1}{2}\left[1 - \text{erf}\!\left(\frac{2\,\ln(\mathscr{S}_m/\mathscr{S}^l)}{4.242\,\ln σ_g}\right)\right],
+n_\text{acti} = n^a_\text{tot}\,\frac{1}{2}\left[1 - \text{erf}\!\left(\frac{2\,\ln(\mathscr{S}_m/\mathscr{S}^l)}{4.242\,\ln σ_g}\right)\right],
 \qquad
-\mathscr{S}_m = \frac{2}{\sqrt{β_\text{act}}}\left(\frac{A_\text{act}}{3\, r_m}\right)^{3/2},
+\mathscr{S}_m = \frac{2}{\sqrt{β_\text{acti}}}\left(\frac{A_\text{acti}}{3\, r_m}\right)^{3/2},
 ```
 
 where ``\mathscr{S}_m`` is the mode's critical supersaturation (a function of aerosol
 size and solute activity, with the Kelvin parameter
-``A_\text{act} = 2 M_w σ_v / (ρ_w R T)``), and ``\mathscr{S}^l`` is the environmental
+``A_\text{acti} = 2 M_w σ_v / (ρ_w R T)``), and ``\mathscr{S}^l`` is the environmental
 supersaturation. The per-mode counts are summed and capped at the total aerosol
 number.
 
@@ -1894,7 +1900,7 @@ Breeze then tracks the unactivated pool explicitly, so activation cannot exceed
 what remains in it:
 
 ```math
-\dot{n}_{\mathrm{acti}} = \frac{\max\!\big(0,\; \min(n_{\mathrm{acti}}(\mathscr{S}^l),\, n^{cl} + n^a) - n^{cl}\big)}{\mathbb{C}_{\mathrm{form},4}},
+\dot{n}_\text{acti} = \frac{\max\!\big(0,\; \min(n_\text{acti}(\mathscr{S}^l),\, n^{cl} + n^a) - n^{cl}\big)}{\mathbb{C}_{\mathrm{form},4}},
 ```
 
 with ``\mathbb{C}_{\mathrm{form},4}`` = `aerosol.activation_timescale` (default
@@ -1903,7 +1909,7 @@ rate depletes ``ρn^a``, which
 prevents the spurious re-activation that occurs when ``\mathscr{S}^l`` rebounds after
 autoconversion or partial evaporation has drained ``n^{cl}``. Activation is gated
 on ``\mathscr{S}^l > \mathbb{C}_{\mathrm{form},3}`` (default ``10^{-6}``), and
-the mass source is ``\dot{n}_{\mathrm{acti}}`` times the mass of a droplet with
+the mass source is ``\dot{n}_\text{acti}`` times the mass of a droplet with
 radius ``\mathbb{C}_{\mathrm{form},2}`` (default 1 μm).
 
 Aerosol distributions are specified **per unit mass of air**: `AerosolMode`'s
@@ -1918,16 +1924,16 @@ Aerosol distributions are specified **per unit mass of air**: `AerosolMode`'s
 Ice particles collect cloud droplets at ``T \le T_0``:
 
 ```math
-\dot{q}^{cl}_\text{rim} = ρ\, E^{ci}\, ρ_\text{corr}\, \mathcal{K}^{ci}\, q^{cl}\, n^i,
+\dot{q}^{cl}_\text{rime} = ρ\, E^{ci}\, ρ_\text{corr}\, \mathcal{K}^{ci}\, q^{cl}\, n^i,
 ```
 
 where ``\mathcal{K}^{ci}`` is the PSD-integrated cloud-collection kernel
 ``\int A(D)\, \mathbb{W}(D)\, N'(D)\, dD``, read from the ice lookup table. ``E^{ci} = 0.5``,
 ``ρ_\text{corr} = (ρ_s/ρ)^{0.54}`` is the air-density fall-speed correction.
 Cloud number is collected proportionally:
-``\dot{n}^{cl}_\text{rim} = ρ\, E^{ci}\, ρ_\text{corr}\, \mathcal{K}^{ci}\, N^{cl}\, n^i``.
+``\dot{n}^{cl}_\text{rime} = ρ\, E^{ci}\, ρ_\text{corr}\, \mathcal{K}^{ci}\, N^{cl}\, n^i``.
 
-The rime volume increases as ``\dot{b}^f = \dot{q}^{cl}_\text{rim} / ρ^f``, with the
+The rime volume increases as ``\dot{b}^f = \dot{q}^{cl}_\text{rime} / ρ^f``, with the
 rime density ``ρ^f`` computed from the Cober–List parameterization
 described in [Particle Properties](@ref p3_particle_properties).
 
@@ -1952,7 +1958,7 @@ Rain collected by ice uses the ice–rain double integral
 (`IceRainCollection` family, ``f_{1\text{pr07}}``, ``f_{1\text{pr08}}``):
 
 ```math
-\dot{q}^{r}_\text{rim} = 10^{f_{1\text{pr08}} + \log_{10} N_0^r}\, ρ\, ρ_\text{corr}\, E^{ri}\, n^i,
+\dot{q}^{r}_\text{rime} = 10^{f_{1\text{pr08}} + \log_{10} N_0^r}\, ρ\, ρ_\text{corr}\, E^{ri}\, n^i,
 ```
 
 with ``E^{ri} = 1.0``. The corresponding number rate uses
@@ -2144,12 +2150,12 @@ the sensible-conduction term ``K^a (T_0-T)`` carries no ``2π``. The same
 asymmetry appears in the refreezing rate below.
 
 Wet growth fires when the total collection
-``\dot{q}^{cl}_\text{rim} + \dot{q}^{r}_\text{rim}``
+``\dot{q}^{cl}_\text{rime} + \dot{q}^{r}_\text{rime}``
 exceeds ``\dot{q}_\text{wet}`` by at least `wet_growth_excess_threshold`
 (``10^{-10}`` kg/kg/s) and there is at least
 `wet_growth_hydrometeor_threshold` (``10^{-6}`` kg/kg) of cloud plus rain to
 collect. The retained fraction is
-``\dot{q}_\text{wet} / (\dot{q}^{cl}_\text{rim} + \dot{q}^{r}_\text{rim})``.
+``\dot{q}_\text{wet} / (\dot{q}^{cl}_\text{rime} + \dot{q}^{r}_\text{rime})``.
 
 Without liquid fraction, the retained portion becomes dense rime — the riming
 rates are reduced to it and the new rime density is set to ``ρ^f_\text{max}`` — while
@@ -2245,10 +2251,10 @@ falls at its tabulated, density-corrected velocity, diagnosed by
 
 | Variable | Velocity | Reference |
 |----------|---------|-----------|
-| Cloud mass / number | mass-weighted ``\mathbb{W}_m^{cl}``, number-weighted ``\mathbb{W}_n^{cl}`` | DSD-integrated Stokes velocities |
-| Rain mass / number | mass-weighted ``\mathbb{W}_m^r``, number-weighted ``\mathbb{W}_n^r`` | Gunn–Kinzer 1949 lookup tables |
-| Ice mass / rime mass / rime volume / liquid coating | mass-weighted ``\mathbb{W}_m^i`` | Mitchell–Heymsfield 2005 |
-| Ice number | number-weighted ``\mathbb{W}_n^i`` | Mitchell–Heymsfield 2005 |
+| Cloud mass / number | mass-weighted ``\mathbb{W}^{cl}``, number-weighted ``\mathbb{W}^{ncl}`` | DSD-integrated Stokes velocities |
+| Rain mass / number | mass-weighted ``\mathbb{W}^r``, number-weighted ``\mathbb{W}^{nr}`` | Gunn–Kinzer 1949 lookup tables |
+| Ice mass / rime mass / rime volume / liquid coating | mass-weighted ``\mathbb{W}^i`` | Mitchell–Heymsfield 2005 |
+| Ice number | number-weighted ``\mathbb{W}^{ni}`` | Mitchell–Heymsfield 2005 |
 
 All ice fall speeds are corrected by the air-density factor
 ``(ρ_s/ρ)^{0.54}`` with the 600 hPa, 253.15 K reference ``ρ_s`` for ice
@@ -2288,7 +2294,7 @@ tendency. The relevant latent heats at standard conditions are:
 | Process | Affects | Key parameter / form | Reference |
 |---------|---------|-----------------------|-----------|
 | Condensation / evaporation | ``q^{cl}, q^r, q^{wi}`` | Coupled semi-analytic | [Morrison2015parameterization](@cite) |
-| CCN activation | ``q^{cl}, n^{cl}, n^a`` | Köhler equilibrium, pool-capped, ``τ_\text{act}`` | [MorrisonGrabowski2007](@cite) |
+| CCN activation | ``q^{cl}, n^{cl}, n^a`` | Köhler equilibrium, pool-capped, ``\mathbb{C}_{\mathrm{form},4}`` | [MorrisonGrabowski2007](@cite) |
 | Autoconversion | ``q^{cl} \to q^r`` | KK2000 | [KhairoutdinovKogan2000](@cite) |
 | Accretion | ``q^{cl} \to q^r`` | KK2000 | [KhairoutdinovKogan2000](@cite) |
 | Rain self-collection / breakup | ``n^r`` | Verlinde–Cotton + KK2000 | [Morrison2015parameterization](@cite) |
@@ -2465,21 +2471,21 @@ calls in `prognostic_tendencies.jl`.
 
 ```math
 G_{ρq^{cl}}
-=\rho\big[\dot{q}^{cl}_\text{cond} + \dot{q}_\text{act}
-- \dot{q}_\text{aut} - \dot{q}_\text{acc} - \dot{q}^{cl}_\text{rim}
-- \dot{q}^{cl}_\text{frz} - \dot{q}^{cl}_\text{hom}
+=\rho\big[\dot{q}^{cl}_\text{cond} + \dot{q}_\text{acti}
+- \dot{q}_\text{auto} - \dot{q}_\text{accr} - \dot{q}^{cl}_\text{rime}
+- \dot{q}^{cl}_\text{immf} - \dot{q}^{cl}_\text{homf}
 - \dot{q}^{cl}_\text{col} - \dot{q}^{cl}_\text{wet} - \dot{q}_\text{wsh} \big].
 ```
 
 | Term | Meaning |
 |------|--------|
 | ``\dot{q}^{cl}_\text{cond}`` | Condensation (positive) / evaporation (negative) — bidirectional. Includes the G&M alignment when `predict_supersaturation = true`. |
-| ``\dot{q}_\text{act}`` | CCN-activation mass source (when prognostic ``N^{cl}`` enabled). |
-| ``\dot{q}_\text{aut}`` | Autoconversion to rain. |
-| ``\dot{q}_\text{acc}`` | Accretion by rain. |
-| ``\dot{q}^{cl}_\text{rim}`` | Cloud riming by ice. |
-| ``\dot{q}^{cl}_\text{frz}`` | Immersion freezing of cloud droplets. |
-| ``\dot{q}^{cl}_\text{hom}`` | Homogeneous freezing (``T < -40°``C). |
+| ``\dot{q}_\text{acti}`` | CCN-activation mass source (when prognostic ``N^{cl}`` enabled). |
+| ``\dot{q}_\text{auto}`` | Autoconversion to rain. |
+| ``\dot{q}_\text{accr}`` | Accretion by rain. |
+| ``\dot{q}^{cl}_\text{rime}`` | Cloud riming by ice. |
+| ``\dot{q}^{cl}_\text{immf}`` | Immersion freezing of cloud droplets. |
+| ``\dot{q}^{cl}_\text{homf}`` | Homogeneous freezing (``T < -40°``C). |
 | ``\dot{q}^{cl}_\text{col}`` | Cloud collection by ice above ``T_0`` (routes to ``q^{wi}`` or shedding). |
 | ``\dot{q}^{cl}_\text{wet}`` | Wet-growth re-routing of cloud collection into ``q^{wi}`` (liquid-fraction branch). |
 | ``\dot{q}_\text{wsh}`` | Wet-growth excess cloud collection shed to rain (non-liquid-fraction branch). |
@@ -2494,15 +2500,15 @@ Only assembled when aerosol activation is enabled; in the prescribed-``N^{cl}`` 
 
 ```math
 G_{ρn^{cl}}
-=\rho\big[\dot{n}_\text{act}
-- \dot{n}^{cl}_\text{aut} - \tfrac{n^{cl}}{q^{cl}}\,\dot{q}_\text{acc} - \dot{n}^{cl}_\text{slf}
-- \dot{n}^{cl}_\text{rim} - \dot{n}^{cl}_\text{frz} - \dot{n}^{cl}_\text{hom}
+=\rho\big[\dot{n}_\text{acti}
+- \dot{n}^{cl}_\text{auto} - \tfrac{n^{cl}}{q^{cl}}\,\dot{q}_\text{accr} - \dot{n}^{cl}_\text{self}
+- \dot{n}^{cl}_\text{rime} - \dot{n}^{cl}_\text{immf} - \dot{n}^{cl}_\text{homf}
 - \dot{n}^{cl}_\text{col} + \dot{n}^{cl}_\text{corr}\big].
 ```
 
-- ``\dot{n}^{cl}_\text{aut}`` is scheme-aware: KK2000 scales by the in-cloud
+- ``\dot{n}^{cl}_\text{auto}`` is scheme-aware: KK2000 scales by the in-cloud
   ``n^{cl}/q^{cl}`` ratio.
-- ``\dot{n}^{cl}_\text{slf}`` is cloud self-collection, zero for KK2000.
+- ``\dot{n}^{cl}_\text{self}`` is cloud self-collection, zero for KK2000.
 - ``\dot{n}^{cl}_\text{corr}`` is the cloud-DSD ``λ``-bound number correction,
   applied as a relaxation over `sink_limiting_timescale` rather than as an
   instantaneous write-back.
@@ -2511,9 +2517,9 @@ G_{ρn^{cl}}
 
 ```math
 G_{ρq^r}
-=\rho\big[\dot{q}_\text{aut} + \dot{q}_\text{acc} + \dot{q}^{r}_\text{cond} + \dot{q}_{\text{mlt},f}
+=\rho\big[\dot{q}_\text{auto} + \dot{q}_\text{accr} + \dot{q}^{r}_\text{cond} + \dot{q}_{\text{mlt},f}
 + \dot{q}_\text{shed} + \dot{q}_\text{wsh} + \dot{q}^{cl}_\text{col}\,\big[\text{no } F^l\big]
-- \dot{q}^{r}_\text{evap} - \dot{q}^{r}_\text{rim} - \dot{q}^{r}_\text{frz} - \dot{q}^{r}_\text{hom}
+- \dot{q}^{r}_\text{evap} - \dot{q}^{r}_\text{rime} - \dot{q}^{r}_\text{immf} - \dot{q}^{r}_\text{homf}
 - \dot{q}^{r}_\text{col} - \dot{q}^{r}_\text{wet} \big].
 ```
 
@@ -2525,9 +2531,9 @@ G_{ρq^r}
 | ``\dot{q}_\text{wsh}`` | Wet-growth shedding of excess cloud collection. |
 | ``\dot{q}^{cl}_\text{col}`` | Above-freezing collected cloud, shed straight back to rain — only when liquid fraction is *off*. |
 | ``\dot{q}^{r}_\text{evap}`` | Rain evaporation. |
-| ``\dot{q}^{r}_\text{rim}`` | Rain riming by ice. |
-| ``\dot{q}^{r}_\text{frz}`` | Immersion freezing of rain. |
-| ``\dot{q}^{r}_\text{hom}`` | Homogeneous freezing of rain. |
+| ``\dot{q}^{r}_\text{rime}`` | Rain riming by ice. |
+| ``\dot{q}^{r}_\text{immf}`` | Immersion freezing of rain. |
+| ``\dot{q}^{r}_\text{homf}`` | Homogeneous freezing of rain. |
 | ``\dot{q}^{r}_\text{col}`` | Rain collection by ice above ``T_0``, zeroed at rate-assembly time unless liquid fraction is on. |
 | ``\dot{q}^{r}_\text{wet}`` | Wet-growth re-routing of rain collection into ``q^{wi}``. |
 
@@ -2535,21 +2541,21 @@ G_{ρq^r}
 
 ```math
 G_{ρn^r}
-=\rho\big[\dot{n}^{r}_\text{aut} + \dot{n}_\text{mlt} + \dot{n}^{r}_\text{brk}
+=\rho\big[\dot{n}^{r}_\text{auto} + \dot{n}_\text{mlt} + \dot{n}^{r}_\text{brkp}
 + \dot{n}_\text{shed} + \dot{n}^{cl}_\text{col}\, \big[\text{no } F^l\big]
 + \dot{n}_\text{wsh}
-- \dot{n}^{r}_\text{evap} - \dot{n}^{r}_\text{slf} - \dot{n}^{r}_\text{rim}
-- \dot{n}^{r}_\text{frz} - \dot{n}^{r}_\text{hom} - \dot{n}^{r}_\text{col}
+- \dot{n}^{r}_\text{evap} - \dot{n}^{r}_\text{self} - \dot{n}^{r}_\text{rime}
+- \dot{n}^{r}_\text{immf} - \dot{n}^{r}_\text{homf} - \dot{n}^{r}_\text{col}
 + \dot{n}^{r}_\text{corr}\big].
 ```
 
-- ``\dot{n}^{r}_\text{aut} = \dot{q}_\text{aut} / m_\text{seed}``, with the seed-drop mass set by
+- ``\dot{n}^{r}_\text{auto} = \dot{q}_\text{auto} / \mathbb{C}_{\mathrm{auto},5}``, with the seed-drop mass set by
   `warm_rain_scheme`: a 25 μm-radius drop for KK2000 (`initial_rain_drop_mass`).
 - ``\dot{n}_\text{mlt}`` is the number companion the process operator budgets alongside
   ``\dot{q}_{\text{mlt},f}``. It is carried explicitly rather than recomputed as
   ``(n^i/q^i)\,\dot{q}_{\text{mlt},f}``, because a whole-particle clip transfers the
   remaining population even when the dry-ice mass has already gone to zero.
-- ``\dot{n}^{r}_\text{slf}`` and ``\dot{n}^{r}_\text{brk}`` are the *netted* self-collection / breakup pair:
+- ``\dot{n}^{r}_\text{self}`` and ``\dot{n}^{r}_\text{brkp}`` are the *netted* self-collection / breakup pair:
   physically one signed rate, so Breeze collapses the two directions before
   the number limiter runs and at most one of them is nonzero.
 - ``\dot{n}_\text{shed} = \dot{q}_\text{shed} / m_{\text{shed},F^l}``, where
@@ -2568,15 +2574,15 @@ G_{ρn^r}
 
 ```math
 G_{ρq^i}
-=\rho\big[\dot{q}_\text{dep} + \dot{q}^{cl}_\text{rim} + \dot{q}^{r}_\text{rim} + \dot{q}_\text{refr}
-+ \dot{q}_\text{nuc} + \dot{q}^{cl}_\text{frz} + \dot{q}^{r}_\text{frz} + \dot{q}^{cl}_\text{hom} + \dot{q}^{r}_\text{hom}
+=\rho\big[\dot{q}_\text{dep} + \dot{q}^{cl}_\text{rime} + \dot{q}^{r}_\text{rime} + \dot{q}_\text{refr}
++ \dot{q}_\text{nucl} + \dot{q}^{cl}_\text{immf} + \dot{q}^{r}_\text{immf} + \dot{q}^{cl}_\text{homf} + \dot{q}^{r}_\text{homf}
 - \dot{q}_{\text{mlt},p} - \dot{q}_{\text{mlt},f}\big].
 ```
 
 Splintering mass does *not* appear separately in the ice mass tendency:
 splinters are fragments of rime the particle already collected, and Breeze
 carries the *full* (unreduced) riming rates, so the splintered mass is already
-inside ``\dot{q}^{cl}_\text{rim} + \dot{q}^{r}_\text{rim}``. Adding it again would double count.
+inside ``\dot{q}^{cl}_\text{rime} + \dot{q}^{r}_\text{rime}``. Adding it again would double count.
 Wet growth also contributes nothing here in either branch: with liquid fraction
 active the collected mass raises total ice and ``q^{wi}`` by equal amounts,
 leaving the dry-ice mass unchanged, and without it the retained collection
@@ -2587,7 +2593,7 @@ bidirectional; sublimation is its negative branch.
 
 ```math
 G_{ρn^i}
-=\rho\big[\dot{n}_\text{nuc} + \dot{n}^{cl}_\text{frz} + \dot{n}^{r}_\text{frz} + \dot{n}^{cl}_\text{hom} + \dot{n}^{r}_\text{hom}
+=\rho\big[\dot{n}_\text{nucl} + \dot{n}^{cl}_\text{immf} + \dot{n}^{r}_\text{immf} + \dot{n}^{cl}_\text{homf} + \dot{n}^{r}_\text{homf}
 + \dot{n}_\text{HM}
 - \dot{n}_\text{mlt} - \dot{n}_\text{sub} - \dot{n}_\text{agg} - \dot{n}_\text{cap}
 + \dot{n}^{i}_\text{corr}\big].
@@ -2598,7 +2604,7 @@ G_{ρn^i}
   liquid-coating evaporation.
 - ``\dot{n}_\text{agg}`` is the aggregation magnitude.
 - ``\dot{n}_\text{cap}`` is the soft-relaxation analog of a hard global ice-number
-  cap. When ``n^i`` exceeds ``N^i_\text{max}/ρ``, a relaxation sink over
+  cap. When ``n^i`` exceeds ``\mathbb{C}_{\mathrm{phas},2}/ρ``, a relaxation sink over
   `sink_limiting_timescale` is added to push it back toward the cap.
 - ``\dot{n}^{i}_\text{corr}`` is the ice ``λ``-limiter correction: ``n^i`` is bounded
   against the tabulated mean-size limits, and Breeze adds the difference between
@@ -2614,8 +2620,8 @@ aggregation is limited to whatever remains.
 
 ```math
 G_{ρq^f}
-=\rho\big[\dot{q}^{cl}_\text{rim} + \dot{q}^{r}_\text{rim} + \dot{q}_\text{refr}
-+ \dot{q}^{cl}_\text{frz} + \dot{q}^{r}_\text{frz} + \dot{q}^{cl}_\text{hom} + \dot{q}^{r}_\text{hom}
+=\rho\big[\dot{q}^{cl}_\text{rime} + \dot{q}^{r}_\text{rime} + \dot{q}_\text{refr}
++ \dot{q}^{cl}_\text{immf} + \dot{q}^{r}_\text{immf} + \dot{q}^{cl}_\text{homf} + \dot{q}^{r}_\text{homf}
 + \dot{q}_\text{wdn}
 - F^f\,(\dot{q}_{\text{mlt},p} + \dot{q}_{\text{mlt},f,\text{ord}} + \dot{q}_\text{sub})
 - \dot{q}^f_\text{clip}\big].
@@ -2641,8 +2647,8 @@ companion ``\dot{q}^f_\text{clip}``.
 
 ```math
 G_{ρb^f}
-=\rho\!\Bigg[\frac{\dot{q}^{cl}_\text{rim}}{ρ^f_\text{new}}
-+ \frac{\dot{q}^{r}_\text{rim} + \dot{q}_\text{refr} + \dot{q}^{cl}_\text{frz} + \dot{q}^{r}_\text{frz} + \dot{q}^{cl}_\text{hom} + \dot{q}^{r}_\text{hom}}{ρ^f_\text{max}}
+=\rho\!\Bigg[\frac{\dot{q}^{cl}_\text{rime}}{ρ^f_\text{new}}
++ \frac{\dot{q}^{r}_\text{rime} + \dot{q}_\text{refr} + \dot{q}^{cl}_\text{immf} + \dot{q}^{r}_\text{immf} + \dot{q}^{cl}_\text{homf} + \dot{q}^{r}_\text{homf}}{ρ^f_\text{max}}
 + \dot{b}_\text{wdn}
 - \frac{F^f\,(\dot{q}_{\text{mlt},p} + \dot{q}_{\text{mlt},f,\text{ord}} + \dot{q}_\text{sub})}{ρ^f}
 - \dot{b}_\text{clip}
@@ -2684,14 +2690,14 @@ rain through ``\dot{q}_\text{shed}`` over `sink_limiting_timescale`.
 ```math
 G_{ρq^v}
 =\rho\big[\dot{q}^{r}_\text{evap} + \dot{q}^{wi}_\text{evap}
-- \dot{q}^{cl}_\text{cond} - \dot{q}_\text{dep} - \dot{q}_\text{nuc} - \dot{q}_\text{act} - \dot{q}^{r}_\text{cond} - \dot{q}^{wi}_\text{cond}\big],
+- \dot{q}^{cl}_\text{cond} - \dot{q}_\text{dep} - \dot{q}_\text{nucl} - \dot{q}_\text{acti} - \dot{q}^{r}_\text{cond} - \dot{q}^{wi}_\text{cond}\big],
 ```
 
 with the bidirectional ``\dot{q}^{cl}_\text{cond}`` and ``\dot{q}_\text{dep}`` supplying their own
 evaporation / sublimation branches through their negative values.
 
 ```math
-G_{ρn^a} = -\rho\,\dot{n}_\text{act},
+G_{ρn^a} = -\rho\,\dot{n}_\text{acti},
 ```
 
 one aerosol removed per activated droplet; zero in the prescribed-``N^{cl}`` path.
@@ -2708,15 +2714,15 @@ fall speed needs, and what leaves them defined immediately after a `set!`.
 
 | Variable | Sedimentation Velocity | Flux |
 |----------|----------------------|------|
-| ``ρq^{cl}`` | ``\mathbb{W}_m^{cl}`` (mass-weighted Stokes) | ``\mathcal{F}_{ρq^{cl}} = -\mathbb{W}_m^{cl} ρq^{cl}`` |
-| ``ρn^{cl}`` | ``\mathbb{W}_n^{cl}`` (number-weighted Stokes) | ``\mathcal{F}_{ρn^{cl}} = -\mathbb{W}_n^{cl} ρn^{cl}`` |
-| ``ρq^r`` | ``\mathbb{W}_m^r`` | ``\mathcal{F}_{ρq^r} = -\mathbb{W}_m^r ρq^r`` |
-| ``ρn^r`` | ``\mathbb{W}_n^r`` | ``\mathcal{F}_{ρn^r} = -\mathbb{W}_n^r ρn^r`` |
-| ``ρq^i`` | ``\mathbb{W}_m^i`` | ``\mathcal{F}_{ρq^i} = -\mathbb{W}_m^i ρq^i`` |
-| ``ρn^i`` | ``\mathbb{W}_n^i`` | ``\mathcal{F}_{ρn^i} = -\mathbb{W}_n^i ρn^i`` |
-| ``ρq^f`` | ``\mathbb{W}_m^i`` | ``\mathcal{F}_{ρq^f} = -\mathbb{W}_m^i ρq^f`` |
-| ``ρb^f`` | ``\mathbb{W}_m^i`` | ``\mathcal{F}_{ρb^f} = -\mathbb{W}_m^i ρb^f`` |
-| ``ρq^{wi}`` | ``\mathbb{W}_m^i`` | ``\mathcal{F}_{ρq^{wi}} = -\mathbb{W}_m^i ρq^{wi}`` |
+| ``ρq^{cl}`` | ``\mathbb{W}^{cl}`` (mass-weighted Stokes) | ``\mathcal{F}_{ρq^{cl}} = -\mathbb{W}^{cl} ρq^{cl}`` |
+| ``ρn^{cl}`` | ``\mathbb{W}^{ncl}`` (number-weighted Stokes) | ``\mathcal{F}_{ρn^{cl}} = -\mathbb{W}^{ncl} ρn^{cl}`` |
+| ``ρq^r`` | ``\mathbb{W}^r`` | ``\mathcal{F}_{ρq^r} = -\mathbb{W}^r ρq^r`` |
+| ``ρn^r`` | ``\mathbb{W}^{nr}`` | ``\mathcal{F}_{ρn^r} = -\mathbb{W}^{nr} ρn^r`` |
+| ``ρq^i`` | ``\mathbb{W}^i`` | ``\mathcal{F}_{ρq^i} = -\mathbb{W}^i ρq^i`` |
+| ``ρn^i`` | ``\mathbb{W}^{ni}`` | ``\mathcal{F}_{ρn^i} = -\mathbb{W}^{ni} ρn^i`` |
+| ``ρq^f`` | ``\mathbb{W}^i`` | ``\mathcal{F}_{ρq^f} = -\mathbb{W}^i ρq^f`` |
+| ``ρb^f`` | ``\mathbb{W}^i`` | ``\mathcal{F}_{ρb^f} = -\mathbb{W}^i ρb^f`` |
+| ``ρq^{wi}`` | ``\mathbb{W}^i`` | ``\mathcal{F}_{ρq^{wi}} = -\mathbb{W}^i ρq^{wi}`` |
 
 ``ρs^{v+l}`` and ``ρn^a`` do not sediment. Cloud droplets do: cloud mass and
 number settle with DSD-integrated Stokes velocities. Here ``\mathbb{W}`` is the

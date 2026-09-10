@@ -256,7 +256,7 @@ when `p3.aerosol isa AerosolActivation`. The prescribed-Nᶜˡ path takes drople
 **Diagnostic:**
 - `qᵛ`: Vapor specific humidity (mirrors the prognostic vapor field)
 
-**Sedimentation velocities** (`wᶜˡ`, `wᶜˡₙ`, `wʳ`, `wʳₙ`, `wⁱ`, `wⁱₙ`):
+**Sedimentation velocities** (`wᶜˡ`, `wⁿᶜˡ`, `wʳ`, `wⁿʳ`, `wⁱ`, `wⁿⁱ`):
 z-Face fields, because the scalar flux divergence consumes them as advecting velocities at
 (Center, Center, Face). The surface face carries the precipitation flux out of the domain
 unless `precipitation_boundary_condition = ImpenetrableBoundaryCondition()`; the top face
@@ -296,11 +296,11 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
     # `w[i, j, Nz+1] = 0` so no precipitation falls in through the model top.
     face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
     wᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs) # Cloud mass advection velocity, wᶜˡ = -𝕎ᶜˡ
-    wᶜˡₙ = ZFaceField(grid; boundary_conditions=face_bcs) # Cloud-number advection velocity
+    wⁿᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs) # Cloud-number advection velocity
     wʳ  = ZFaceField(grid; boundary_conditions=face_bcs)  # Rain mass advection velocity, wʳ = -𝕎ʳ
-    wʳₙ = ZFaceField(grid; boundary_conditions=face_bcs) # Rain-number advection velocity
+    wⁿʳ = ZFaceField(grid; boundary_conditions=face_bcs) # Rain-number advection velocity
     wⁱ  = ZFaceField(grid; boundary_conditions=face_bcs)  # Ice mass advection velocity, wⁱ = -𝕎ⁱ
-    wⁱₙ = ZFaceField(grid; boundary_conditions=face_bcs) # Ice-number advection velocity
+    wⁿⁱ = ZFaceField(grid; boundary_conditions=face_bcs) # Ice-number advection velocity
 
     # Hallett–Mossop uses the temperature at the lowest active atmospheric cell.
     # Store one value per column rather than assuming that local k=1 is active.
@@ -308,7 +308,7 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
 
     fields = (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ,
               qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, qᵛ,
-              wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ,
+              wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ, wⁱ, wⁿⁱ,
               surface_temperature)
 
     return merge(fields,
@@ -769,11 +769,11 @@ const P3ImpenetrableBoundaryCondition = BoundaryCondition{<:NormalFlow, Nothing}
                      one(FT))
     @inbounds begin
         μ.wᶜˡ[i, j, k]  = -surface * result.𝕎ᶜˡ
-        μ.wᶜˡₙ[i, j, k] = -surface * result.𝕎ⁿᶜˡ
+        μ.wⁿᶜˡ[i, j, k] = -surface * result.𝕎ⁿᶜˡ
         μ.wʳ[i, j, k]   = -surface * result.𝕎ʳ
-        μ.wʳₙ[i, j, k]  = -surface * result.𝕎ⁿʳ
+        μ.wⁿʳ[i, j, k]  = -surface * result.𝕎ⁿʳ
         μ.wⁱ[i, j, k]   = -surface * result.𝕎ⁱ
-        μ.wⁱₙ[i, j, k]  = -surface * result.𝕎ⁿⁱ
+        μ.wⁿⁱ[i, j, k]  = -surface * result.𝕎ⁿⁱ
     end
     return nothing
 end
@@ -864,19 +864,19 @@ end
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqᶜˡ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wᶜˡ)
 
 # Cloud number: number-weighted Stokes fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnᶜˡ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wᶜˡₙ)
+@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnᶜˡ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁿᶜˡ)
 
 # Rain mass: mass-weighted fall speed
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqʳ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wʳ)
 
 # Rain number: number-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnʳ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wʳₙ)
+@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnʳ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁿʳ)
 
 # Ice mass: mass-weighted fall speed
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
 
 # Ice number: number-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱₙ)
+@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁿⁱ)
 
 # Rime mass: same as ice mass (rime falls with ice)
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqᶠ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)

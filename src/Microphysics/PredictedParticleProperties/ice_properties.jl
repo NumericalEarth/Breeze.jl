@@ -39,8 +39,8 @@ that corrects rain fall speeds.
 
 Two weighted fall speeds are computed by integrating over the size distribution:
 
-- **Number-weighted** ``\\mathbb{W}_n``: For number flux (sedimentation of particle count)
-- **Mass-weighted** ``\\mathbb{W}_m``: For mass flux (precipitation rate)
+- **Number-weighted** ``\\mathbb{W}^n``: For number flux (sedimentation of particle count)
+- **Mass-weighted** ``\\mathbb{W}^m``: For mass flux (precipitation rate)
 
 # Keyword Arguments
 

@@ -107,7 +107,7 @@ struct CloudDroplets{FT}
     # path that diagnoses μᶜˡ from a local droplet number: `diagnose_cloud_dsd` and
     # `immersion_freezing_cloud_rate`, as well as the constructor below.
     shape :: CloudShape{FT}
-    # Cloud gamma PSD shape parameter μᶜˡ ∈ [μᶜˡ_min, μᶜˡ_max].
+    # Cloud gamma PSD shape parameter μᶜˡ ∈ [ℂᶜˡ₃, ℂᶜˡ₄].
     # Diagnosed from Nᶜˡ via the Liu-Daum (2000) relation in the constructor.
     # Affects the immersion freezing PSD correction.
     shape_parameter :: FT

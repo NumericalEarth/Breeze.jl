@@ -310,7 +310,7 @@ in one step is capped by the unactivated pool ``n^a``:
 
 ```math
 n_{\\text{nuc}} = \\frac{\\max(0,\\; \\min(N_{\\text{act}}(S), n^{cl} + n^a) - n^{cl})}
-                       {\\tau_{\\text{act}}}.
+                       {\\mathbb{C}_{\\mathrm{form},4}}.
 ```
 
 This prevents the spurious re-activation that occurs when ``S`` rebounds after
@@ -320,7 +320,8 @@ droplets as if the reservoir were inexhaustible. With the cap, each activated
 droplet permanently removes one unit from ``n^a``.
 
 Mass follows as ``q_{\\text{nuc}} = n_{\\text{nuc}} \\times m_{\\text{seed}}``
-where ``m_{\\text{seed}} = (4\\pi/3) \\rho_w (10^{-6})^3`` is a 1 μm radius droplet.
+where ``m_{\\text{seed}} = (4\\pi/3) \\rho_w (\\mathbb{C}_{\\mathrm{form},2})^3`` is a
+droplet of the activated radius, 1 μm by default.
 """
 @inline function prognostic_ccn_activation_rate(aerosol::AerosolActivation, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
     FT = typeof(T)

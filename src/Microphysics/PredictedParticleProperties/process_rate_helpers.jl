@@ -354,9 +354,9 @@ The result is clamped between `parameters.minimum_rain_slope` and
 `parameters.maximum_rain_slope`.
 """
 @inline function rain_slope_parameter(qʳ, nʳ, parameters)
-    ℂʳⁿ₁ = parameters.minimum_rain_slope
-    ℂʳⁿ₂ = parameters.maximum_rain_slope
-    return clamp(unbounded_rain_slope_parameter(qʳ, nʳ, parameters), ℂʳⁿ₁, ℂʳⁿ₂)
+    ℂʳ₁ = parameters.minimum_rain_slope
+    ℂʳ₂ = parameters.maximum_rain_slope
+    return clamp(unbounded_rain_slope_parameter(qʳ, nʳ, parameters), ℂʳ₁, ℂʳ₂)
 end
 
 @inline function rain_number_from_slope(qʳ, λʳ, parameters)
@@ -369,11 +369,11 @@ end
     qʳ_eff = max(0, qʳ)
     nʳ_eff = max(0, nʳ)
     unbounded_slope = unbounded_rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
-    ℂʳⁿ₁ = parameters.minimum_rain_slope
-    ℂʳⁿ₂ = parameters.maximum_rain_slope
-    λʳ = clamp(unbounded_slope, ℂʳⁿ₁, ℂʳⁿ₂)
+    ℂʳ₁ = parameters.minimum_rain_slope
+    ℂʳ₂ = parameters.maximum_rain_slope
+    λʳ = clamp(unbounded_slope, ℂʳ₁, ℂʳ₂)
     nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
-    needs_adjustment = (unbounded_slope < ℂʳⁿ₁) | (unbounded_slope > ℂʳⁿ₂)
+    needs_adjustment = (unbounded_slope < ℂʳ₁) | (unbounded_slope > ℂʳ₂)
     return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
 end
 
