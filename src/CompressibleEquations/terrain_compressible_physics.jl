@@ -699,9 +699,10 @@ function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleMod
     arch = architecture(grid)
     dynamics = model.dynamics
 
-    # Ensure halos are filled
-    fill_halo_regions!(dynamics.dry_density)
-    fill_halo_regions!(prognostic_fields(model.formulation))
+    # Ensure halos are filled. The boundary-condition args must be threaded: without
+    # them a time-dependent boundary condition is evaluated with no clock.
+    fill_halo_regions!(dynamics.dry_density, boundary_condition_args(model)...)
+    fill_halo_regions!(prognostic_fields(model.formulation), boundary_condition_args(model)...)
 
     # Compute temperature and pressure (same as non-terrain CompressibleModel)
     launch!(arch, grid, :xyz,

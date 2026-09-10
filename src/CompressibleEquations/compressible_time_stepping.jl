@@ -374,9 +374,11 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
     dynamics = model.dynamics
 
     # Ensure halos are filled (may have been async from update_state!)
-    # These fields are needed for pressure computation via equation of state
-    fill_halo_regions!(dynamics.dry_density)
-    fill_halo_regions!(prognostic_fields(model.formulation))
+    # These fields are needed for pressure computation via equation of state.
+    # The boundary-condition args must be threaded: without them a time-dependent
+    # boundary condition is evaluated with no clock.
+    fill_halo_regions!(dynamics.dry_density, boundary_condition_args(model)...)
+    fill_halo_regions!(prognostic_fields(model.formulation), boundary_condition_args(model)...)
 
     launch!(arch, grid, :xyz,
             _compute_temperature_and_pressure!,

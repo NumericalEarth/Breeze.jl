@@ -3,11 +3,14 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze.AtmosphereModels: thermodynamic_density, surface_pressure, standard_pressure
 using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities
-using Breeze.Thermodynamics: potential_temperature_from_temperature
+using Breeze.CompressibleEquations: TerrainCompressibleModel
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
+using Breeze.Thermodynamics: potential_temperature_from_temperature, TetensFormula
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using Oceananigans.Fields: location
+using Oceananigans.Operators: ℑxᶠᵃᵃ
 using Oceananigans.TimeSteppers: compute_flux_bc_tendencies!, update_state!
 using Test
 
@@ -195,6 +198,146 @@ end
     @test model.clock.iteration == 1
     @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ FT(1.5)
     @test !any(isnan, parent(model.momentum.ρu))
+end
+
+@testset "Time-dependent Value BC on density and ρθ [$FT]" for FT in test_float_types()
+    # Regression test: the auxiliary-variable halo fills inside `update_state!`
+    # (`compute_auxiliary_dynamics_variables!`, `compute_terrain_temperature_and_pressure!`)
+    # refilled the dry density and the formulation prognostics without threading
+    # `model.clock`/`fields(model)`, re-evaluating a time-dependent lateral BC with no
+    # clock and clobbering the correctly-timed halo `compute_velocities!` had just used.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 4),
+                           x=(0, 1000), y=(0, 1000), z=(0, 200),
+                           topology=(Bounded, Bounded, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    reference_potential_temperature=FT(300),
+                                    surface_pressure=FT(1e5))
+
+    ρ₀ = FT(1.2)
+    θ₀ = FT(300)
+    U  = FT(5)
+    parameters = (; ρ₀, θ₀)
+
+    # The prescribed wall density grows linearly in time, so the expected halo value at
+    # any clock time is analytic and no reference run is needed.
+    @inline ρᵈ_west(y, z, t, p) = p.ρ₀ * (1 + t)
+    @inline ρθ_west(y, z, t, p) = p.ρ₀ * (1 + t) * p.θ₀
+
+    boundary_conditions = (ρᵈ = FieldBoundaryConditions(west = ValueBoundaryCondition(ρᵈ_west; parameters)),
+                           ρθ = FieldBoundaryConditions(west = ValueBoundaryCondition(ρθ_west; parameters)),
+                           ρu = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρ₀ * U)))
+
+    model = AtmosphereModel(grid; dynamics, boundary_conditions)
+
+    # Write the dry density directly: `set!(model; ρ=...)` refills the ρᵈ halo without a
+    # clock, which a continuous boundary condition cannot be evaluated with.
+    set!(model.dynamics.dry_density, ρ₀)
+    set!(model; θ=θ₀)
+
+    t★ = FT(3)
+    model.clock.time = t★
+    update_state!(model)
+
+    ρᵈ = model.dynamics.dry_density
+    ρθ = thermodynamic_density(model.formulation)
+
+    # A `Value` BC prescribes the boundary-face value, so the west halo satisfies
+    # ℑxᶠᵃᵃ(ρ) = ρ_wall(t) at i = 1 — with t the current clock time, not 0.
+    ρᵈ_boundary = @allowscalar ℑxᶠᵃᵃ(1, 1, 1, grid, ρᵈ)
+    ρθ_boundary = @allowscalar ℑxᶠᵃᵃ(1, 1, 1, grid, ρθ)
+    @test ρᵈ_boundary ≈ ρ₀ * (1 + t★)      # a stale halo would hold ρ₀
+    @test ρθ_boundary ≈ ρ₀ * (1 + t★) * θ₀ # a stale halo would hold ρ₀ θ₀
+
+    # `_compute_velocities!` sets u = ρu / ℑxᶠᵃᵃ(ρᵈ) over 1:Nx+1, so the west boundary
+    # face satisfies ρu = ℑxᶠᵃᵃ(ρᵈ) u unless the density halo is refilled behind it.
+    ρu_boundary = @allowscalar model.momentum.ρu[1, 1, 1]
+    u_boundary = @allowscalar model.velocities.u[1, 1, 1]
+    @test ρu_boundary ≈ u_boundary * ρᵈ_boundary
+end
+
+@testset "Time-dependent Value BC on density and ρθ over terrain [$FT]" for FT in test_float_types()
+    # Regression test for the terrain-following twin of the fill above:
+    # `compute_terrain_temperature_and_pressure!` refilled the dry density and the
+    # formulation prognostics without threading `model.clock`/`fields(model)`.
+    Oceananigans.defaults.FloatType = FT
+    Lx = Ly = FT(1000)
+    Lz = FT(200)
+    Nz = 4
+    z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1));
+                                                     formulation = LinearDecay())
+    grid = RectilinearGrid(default_arch; size=(8, 8, Nz),
+                           x=(0, Lx), y=(0, Ly), z=z_faces,
+                           topology=(Bounded, Bounded, Bounded))
+    materialize_terrain!(grid, (x, y) -> 20 * sin(2π * x / Lx) * sin(2π * y / Ly))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    reference_potential_temperature=FT(300),
+                                    surface_pressure=FT(1e5))
+
+    ρ₀ = FT(1.2)
+    θ₀ = FT(300)
+    U  = FT(5)
+    parameters = (; ρ₀, θ₀)
+
+    @inline ρᵈ_west_terrain(y, z, t, p) = p.ρ₀ * (1 + t)
+    @inline ρθ_west_terrain(y, z, t, p) = p.ρ₀ * (1 + t) * p.θ₀
+
+    boundary_conditions = (ρᵈ = FieldBoundaryConditions(west = ValueBoundaryCondition(ρᵈ_west_terrain; parameters)),
+                           ρθ = FieldBoundaryConditions(west = ValueBoundaryCondition(ρθ_west_terrain; parameters)),
+                           ρu = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρ₀ * U)))
+
+    model = AtmosphereModel(grid; dynamics, boundary_conditions)
+
+    # The terrain fill is only reached through `compute_terrain_temperature_and_pressure!`.
+    @test model isa TerrainCompressibleModel
+
+    # Write the dry density directly: `set!(model; ρ=...)` still refills the ρᵈ halo without
+    # a clock inside the density reconciliation (`reconcile_densities!`).
+    set!(model.dynamics.dry_density, ρ₀)
+    set!(model; θ=θ₀)
+
+    t★ = FT(3)
+    model.clock.time = t★
+    update_state!(model)
+
+    ρᵈ = model.dynamics.dry_density
+    ρθ = thermodynamic_density(model.formulation)
+
+    @test @allowscalar(ℑxᶠᵃᵃ(1, 1, 1, grid, ρᵈ)) ≈ ρ₀ * (1 + t★)      # a stale halo would hold ρ₀
+    @test @allowscalar(ℑxᶠᵃᵃ(1, 1, 1, grid, ρθ)) ≈ ρ₀ * (1 + t★) * θ₀ # a stale halo would hold ρ₀ θ₀
+end
+
+@testset "Time-dependent Value BC on a microphysical prognostic [$FT]" for FT in test_float_types()
+    # Regression test: `compute_auxiliary_thermodynamic_variables!` refilled the
+    # microphysical fields without threading `model.clock`/`fields(model)`, so a
+    # time-dependent BC on a prognostic moment could not be evaluated at all.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 4),
+                           x=(0, 1000), y=(0, 1000), z=(0, 200),
+                           topology=(Bounded, Bounded, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    reference_potential_temperature=FT(300),
+                                    surface_pressure=FT(1e5))
+
+    # DCMIP2016 Kessler is the scheme whose prognostic moments (ρqᶜˡ, ρqʳ) carry user
+    # boundary conditions; it requires Tetens saturation vapor pressure.
+    constants = ThermodynamicConstants(FT; saturation_vapor_pressure = TetensFormula(FT))
+    microphysics = DCMIP2016KesslerMicrophysics(FT)
+
+    ρqʳ₀ = FT(1e-3)
+    @inline ρqʳ_west(y, z, t, p) = p.ρqʳ₀ * (1 + t)
+    boundary_conditions = (; ρqʳ = FieldBoundaryConditions(west = ValueBoundaryCondition(ρqʳ_west; parameters=(; ρqʳ₀))))
+
+    model = AtmosphereModel(grid; dynamics, microphysics, boundary_conditions,
+                            thermodynamic_constants = constants)
+    set!(model; ρ=FT(1.2), θ=FT(300))
+
+    t★ = FT(3)
+    model.clock.time = t★
+    update_state!(model)
+
+    ρqʳ = model.microphysical_fields.ρqʳ
+    @test @allowscalar(ℑxᶠᵃᵃ(1, 1, 1, grid, ρqʳ)) ≈ ρqʳ₀ * (1 + t★) # a stale halo would hold ρqʳ₀
 end
 
 @testset "Bulk boundary conditions [$FT]" for FT in test_float_types()
