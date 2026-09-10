@@ -902,3 +902,18 @@ based on cloud properties.
 """
 @inline cloud_ice_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
     effective_radius_model.radius
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `(lower, upper)` bounds on the *specific* quantity transported for prognostic `name`
+(the per-unit-mass form, so `ρqˣ` is bounded as `qˣ`), or `nothing` where the quantity is
+unbounded. A transport scheme uses these to constrain the reconstruction; they are not applied
+by this package.
+
+The fallback bounds the condensate mass fractions by `(0, 1)` and leaves everything else
+unbounded. Schemes that also carry number concentrations, volumes or signed quantities should
+add a method, since those share neither the units nor the bounds of a mass fraction.
+"""
+microphysical_transport_bounds(microphysics, name::Symbol) =
+    ifelse(name in condensate_field_names(microphysics), (0, 1), nothing)

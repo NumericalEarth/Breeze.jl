@@ -701,3 +701,30 @@ using Oceananigans.TimeSteppers: update_state!
         @test all(isfinite, Array(interior(model.moisture_density)))
     end
 end
+
+@testset "P3 transport bounds distinguish fractions, number and volume" begin
+    p3 = Breeze.PredictedParticlePropertiesMicrophysics(; predict_supersaturation=true)
+    bounds(name) = Breeze.AtmosphereModels.microphysical_transport_bounds(p3, name)
+    names = Breeze.AtmosphereModels.prognostic_field_names(p3)
+
+    # Every prognostic must be classified, so that adding one cannot silently inherit a bound
+    @test all(name -> (bounds(name); true), names)
+
+    for name in intersect(names, (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqᶠ, :ρqʷⁱ))
+        @test bounds(name) == (0, 1)
+    end
+    for name in intersect(names, (:ρnᶜˡ, :ρnʳ, :ρnⁱ, :ρbᶠ, :ρnᵃ))
+        @test bounds(name) == (0, Inf)
+    end
+    @test isnothing(bounds(:ρsᵛ⁺ˡ))
+    @test_throws ArgumentError bounds(:not_a_prognostic)
+end
+
+@testset "the fallback bounds condensate mass fractions and nothing else" begin
+    bounds(m, name) = Breeze.AtmosphereModels.microphysical_transport_bounds(m, name)
+    kessler = Breeze.DCMIP2016KesslerMicrophysics()
+    for name in Breeze.AtmosphereModels.prognostic_field_names(kessler)
+        @test bounds(kessler, name) == (0, 1)
+    end
+    @test isnothing(bounds(nothing, :anything))
+end
