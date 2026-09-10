@@ -1,5 +1,6 @@
 import Breeze
 using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests, available_memory
+using Pkg.Artifacts: ensure_artifact_installed
 
 # Start with autodiscovered tests
 testsuite = find_tests(@__DIR__)
@@ -25,6 +26,11 @@ if filter_tests!(testsuite, args)
     end
 end
 
+# Install artifacts before running the tests, to avoid spurious failures to
+# concurrent downloads, or doctests not liking the extra messages printed to
+# screen during the download.
+ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
+
 if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     GC.gc(true); GC.gc(false); GC.gc(true)
     # macOS runners have little memory compared to the other runners, let's set a more
@@ -33,6 +39,10 @@ if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     # currently available memory (with a ~20% margin), with a lower bound of 1700 MiB.
     max_rss_memory = max(1_700, round(Int, available_memory() / 2 ^ 20 / 2  * 0.8))
     ENV["JULIA_TEST_MAXRSS_MB"] = string(max_rss_memory)
+elseif Sys.islinux() && get(ENV, "GITHUB_ACTIONS", "false") == "true" && available_memory() < 20 * 2^30
+    # The small (~13 GiB) ubuntu runners run earlyoom, which SIGTERMs workers nearing the
+    # memory cliff; a low cap recycles them gracefully first. Large GPU runners are excluded.
+    ENV["JULIA_TEST_MAXRSS_MB"] = "2500"
 end
 
 runtests(Breeze, args; testsuite)

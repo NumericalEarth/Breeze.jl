@@ -4,11 +4,32 @@
 
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ
 using Oceananigans.Architectures: architecture
+using Oceananigans.Fields: ConstantField
 using Oceananigans.Utils: launch!
 
+using RRTMGP: RRTMGPSolver
 using RRTMGP.AtmosphericStates: AtmosphericState
+using RRTMGP.VolumeMixingRatios: VmrGM
 
 using Breeze.AtmosphereModels: BackgroundAtmosphere, specific_humidity
+
+#####
+##### Volume mixing ratio initialization (shared by clear-sky and all-sky)
+#####
+
+# Zero-initialized global-mean volume mixing ratios: H₂O and O₃ vary per layer
+# and column, all other gases are well-mixed scalars.
+function initialize_global_mean_vmr(Ngas, Nz, Nc, FT, ArrayType)
+    vmr_h2o = ArrayType{FT}(undef, Nz, Nc)
+    vmr_o3 = ArrayType{FT}(undef, Nz, Nc)
+    global_mean_vmr = ArrayType{FT}(undef, Ngas)
+
+    fill!(vmr_h2o, zero(FT))
+    fill!(vmr_o3, zero(FT))
+    fill!(global_mean_vmr, zero(FT))
+
+    return VmrGM(vmr_h2o, vmr_o3, global_mean_vmr)
+end
 
 #####
 ##### Gas state update (shared by clear-sky and all-sky)
@@ -113,16 +134,118 @@ end
 end
 
 #####
+##### Surface boundary conditions (shared by gray, clear-sky and all-sky)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+The scalar behind a surface property that is constant in space and time, or `nothing` when the
+property carries no such scalar.
+
+A `ConstantField` is a scalar in a field's clothing — its value cannot change — so it reports the
+value it holds. A general `Field` reports `nothing`: it may be rewritten between radiation updates,
+so there is no single value to speak of.
+"""
+surface_fraction_scalar(x::Number) = x
+surface_fraction_scalar(x::ConstantField) = surface_fraction_scalar(x.constant)
+surface_fraction_scalar(x) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Throw an `ArgumentError` for any keyword whose value is a spatially uniform scalar outside ``[0, 1]``.
+
+Emissivity and albedo are fractions, so a scalar outside the unit interval is a user error — an albedo
+given in percent, say — worth rejecting at construction rather than carrying into the solver. A
+property with no single value (a `Field`, a dataset, `nothing`) passes through, since a check at
+construction says nothing about what it holds at the next solve.
+"""
+function validate_surface_fractions(; kw...)
+    for (name, value) in kw
+        x = surface_fraction_scalar(value)
+        isnothing(x) || 0 <= x <= 1 ||
+            throw(ArgumentError("`$name` must lie in [0, 1]; received $x."))
+    end
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Wrap a scalar surface property in a `ConstantField` of the working precision, passing anything
+already field-valued through unchanged, so that emissivity and both albedos are uniformly
+field-valued whether the user supplied a number, a field, or a dataset.
+"""
+constant_field_property(x::Number, FT) = ConstantField(convert(FT, x))
+constant_field_property(x, FT) = x
+
+"""
+$(TYPEDSIGNATURES)
+
+Copy the surface emissivity `ε` and the direct and diffuse albedos `αᵈ`, `αˢ` from
+`surface_radiation` into RRTMGP's band-by-column boundary-condition arrays `ε₀`, `αᵈ₀`, `αˢ₀`.
+
+Nothing else writes those arrays, so a spatially varying emissivity or albedo would otherwise never
+reach the solver, which would read whatever the allocation happened to contain. Call once at
+construction and again before every solve, so a property that evolves is picked up rather than frozen.
+
+Breeze treats all three properties as spectrally grey: every band receives the same value.
+"""
+function update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, surface_radiation, grid)
+    arch = architecture(grid)
+
+    launch!(arch, grid, :xy, _update_rrtmgp_surface_boundary_conditions!,
+            ε₀, αᵈ₀, αˢ₀,
+            surface_radiation.surface_emissivity,
+            surface_radiation.direct_surface_albedo,
+            surface_radiation.diffuse_surface_albedo,
+            grid)
+
+    return nothing
+end
+
+# Full-spectrum (clear-sky and all-sky) models keep both RTE solvers inside one `RRTMGPSolver`,
+# reached through RRTMGP's own accessors rather than its internal field nesting.
+update_rrtmgp_surface_boundary_conditions!(solver::RRTMGPSolver, surface_radiation, grid) =
+    update_rrtmgp_surface_boundary_conditions!(RRTMGP.surface_emissivity(solver),
+                                               RRTMGP.direct_sw_surface_albedo(solver),
+                                               RRTMGP.diffuse_sw_surface_albedo(solver),
+                                               surface_radiation, grid)
+
+@kernel function _update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, ε, αᵈ, αˢ, grid)
+    i, j = @index(Global, NTuple)
+
+    c = rrtmgp_column_index(i, j, grid.Nx)
+
+    @inbounds begin
+        εᵢⱼ = ε[i, j, 1]
+        αᵈᵢⱼ = αᵈ[i, j, 1]
+        αˢᵢⱼ = αˢ[i, j, 1]
+
+        for b in 1:size(ε₀, 1)
+            ε₀[b, c] = εᵢⱼ
+        end
+
+        for b in 1:size(αᵈ₀, 1)
+            αᵈ₀[b, c] = αᵈᵢⱼ
+            αˢ₀[b, c] = αˢᵢⱼ
+        end
+    end
+end
+
+#####
 ##### Copy fluxes to Oceananigans fields (shared by clear-sky and all-sky)
 #####
 
 function copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
     arch = architecture(grid)
 
-    lw_flux_up = solver.lws.flux.flux_up
-    lw_flux_dn = solver.lws.flux.flux_dn
-    sw_flux_up = solver.sws.flux.flux_up
-    sw_flux_dn = solver.sws.flux.flux_dn  # Total SW (direct + diffuse)
+    # (Nz+1, Nc) presentation views, refreshed by update_lw_fluxes!/update_sw_fluxes!
+    lw_flux_up = RRTMGP.lw_flux_up(solver)
+    lw_flux_dn = RRTMGP.lw_flux_dn(solver)
+    sw_flux_up = RRTMGP.sw_flux_up(solver)
+    sw_flux_dn = RRTMGP.sw_flux_dn(solver)  # Total SW (direct + diffuse)
 
     ℐ_lw_up = rtm.upwelling_longwave_flux
     ℐ_lw_dn = rtm.downwelling_longwave_flux
@@ -182,7 +305,7 @@ end
 # The constructors accept `surface_temperature = nothing` so that a coupled model can bind
 # its interface surface temperature after construction; solving without one is an error.
 function assert_bound_surface_temperature(rtm)
-    isnothing(rtm.surface_properties.surface_temperature) && throw(ArgumentError(
+    isnothing(rtm.surface_radiation.surface_temperature) && throw(ArgumentError(
         "This RadiativeTransferModel has no surface temperature: construct it with " *
         "`surface_temperature = ...`, or bind one before the first radiation update " *
         "(coupled models wire their interface surface temperature automatically)."))

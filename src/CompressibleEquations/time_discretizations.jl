@@ -379,6 +379,8 @@ convert_acoustic_parameter(::Type{FT}, damping::DirectDivergenceDamping) where F
     DirectDivergenceDamping{FT}(convert(FT, damping.coefficient))
 
 """
+$(TYPEDEF)
+
 Abstract supertype for upper-sponge ramp shapes. A concrete `AbstractRamp`
 is callable as `(ramp)(z, sponge_top, depth)` and returns a value in
 ``[0, 1]``: zero below ``z_{\\rm sponge\\_top} - \\text{depth}``, rising

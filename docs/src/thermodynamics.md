@@ -460,18 +460,18 @@ Consider parameters for liquid water,
 
 ```@example thermo
 using Breeze.Thermodynamics: CondensedPhase
-liquid_water = CondensedPhase(reference_latent_heat=2500800, heat_capacity=4181)
+liquid_water = CondensedPhase(reference_latent_heat=2500800, heat_capacity=4181, density=1000)
 ```
 
 and water ice,
 
 ```@example thermo
-water_ice = CondensedPhase(reference_latent_heat=2834000, heat_capacity=2108)
+water_ice = CondensedPhase(reference_latent_heat=2834000, heat_capacity=2108, density=917)
 ```
 
-These represent the latent heat of vaporization at the reference temperature and
-the specific heat capacity of each condensed phase. We can compute the specific heat
-difference ``\Delta c^β`` for liquid water:
+These represent the latent heat of vaporization at the reference temperature, specific
+heat capacity, and reference density of each condensed phase. We can compute the specific
+heat difference ``\Delta c^β`` for liquid water:
 
 ```@example thermo
 using Breeze.Thermodynamics: vapor_gas_constant
@@ -771,7 +771,7 @@ which is equation (37) of [Pressel2015](@citet) and the saturated branch of [`eq
 For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE),
 
 ```math
-e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qˡ - Lⁱᵣ qⁱ .
+s ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qˡ - Lⁱᵣ qⁱ .
 ```
 
 !!! note "The alternative 'frozen moist static energy' variable"
@@ -780,10 +780,10 @@ e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qˡ - Lⁱᵣ qⁱ .
     models such as the Global System for Atmospheric Modeling (GSAM) [Khairoutdinov2022](@cite) is
 
     ```math
-    ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵛ - Lᶠᵣ qⁱ .
+    s̃ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵛ - Lᶠᵣ qⁱ .
     ```
 
-    ``e`` and ``ẽ`` are not the same, but they obey the same conservation equation provided
+    ``s`` and ``s̃`` are not the same, but they obey the same conservation equation provided
     that total moisture fraction is conserved, or that ``\mathrm{D}qᵗ / \mathrm{D}t = 0``.
 
 ## Liquid-ice potential temperature

@@ -19,7 +19,8 @@
 ##### override for forcing or monitoring a particular direction (see its docstring) — e.g. to watch
 ##### the true three-dimensional CFL even while the wizard floats Δt on the horizontal one.
 
-using Oceananigans.Advection: Advection, cell_advection_timescale, needs_implicit_solver
+using Oceananigans.Advection: Advection, cell_advection_timescale
+using Oceananigans.BoundaryConditions: needs_implicit_solver
 using Oceananigans.Fields: ZeroField
 using Oceananigans.TurbulenceClosures: HorizontalFormulation, ThreeDimensionalFormulation
 

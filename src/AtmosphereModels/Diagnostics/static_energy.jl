@@ -26,13 +26,13 @@ const StaticEnergy = KernelFunctionOperation{Center, Center, Center, <:Any, <:An
 """
     StaticEnergy(model, flavor=:specific)
 
-Return a `KernelFunctionOperation` representing moist static energy ``e``.
+Return a `KernelFunctionOperation` representing moist static energy ``s``.
 
 Moist static energy is a conserved quantity in adiabatic, frictionless flow that
 combines sensible heat, gravitational potential energy, and latent heat:
 
 ```math
-e = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ
+s = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ
 ```
 
 where ``cᵖᵐ`` is the moist air heat capacity, ``T`` is temperature,
@@ -44,7 +44,7 @@ This is the prognostic thermodynamic variable used in `StaticEnergyThermodynamic
 # Arguments
 
 - `model`: An `AtmosphereModel` instance.
-- `flavor`: Either `:specific` (default) to return ``e``, or `:density` to return ``ρ e``.
+- `flavor`: Either `:specific` (default) to return ``s``, or `:density` to return ``ρ s``.
 
 # Examples
 
@@ -55,8 +55,8 @@ grid = RectilinearGrid(size=(1, 1, 8), extent=(1, 1, 1e3))
 model = AtmosphereModel(grid)
 set!(model, θ=300)
 
-e = StaticEnergy(model)
-Field(e)
+s = StaticEnergy(model)
+Field(s)
 
 # output
 1×1×8 Field{Center, Center, Center} on RectilinearGrid on CPU
@@ -110,11 +110,11 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     qⁱ = q.ice
 
     # Moist static energy
-    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
     if d.flavor isa Specific
-        return e
+        return s
     elseif d.flavor isa Density
-        return ρᵣ * e
+        return ρᵣ * s
     end
 end

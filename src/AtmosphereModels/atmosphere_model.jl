@@ -2,14 +2,15 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
-using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection, needs_implicit_solver
+using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection
 using Oceananigans.AbstractOperations: @at
-using Oceananigans.Architectures: Architectures
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
+using Oceananigans.Architectures: Architectures, on_architecture
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, needs_implicit_solver
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
-using Oceananigans.TimeSteppers: TimeStepper
-using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields, VerticallyImplicitTimeDiscretization
+using Oceananigans.TimeSteppers: TimeSteppers, TimeStepper, AbstractLagrangianParticles, step_lagrangian_particles!
+using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields,
+                                       closure_required_tracers, VerticallyImplicitTimeDiscretization
 using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 
@@ -21,6 +22,18 @@ using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 validate_momentum_advection(momentum_advection, grid) = momentum_advection
 
 struct DefaultValue end
+
+const ParticlesOrNothing = Union{Nothing, AbstractLagrangianParticles}
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `particles` unchanged. Extended for grids on which Lagrangian particle
+tracking is not supported, so that the combination is rejected at construction
+rather than producing wrong trajectories at run time (see
+`TerrainFollowingDiscretization/lagrangian_particles.jl`).
+"""
+validate_particles(particles, grid) = particles
 
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
@@ -35,7 +48,7 @@ function validate_tracers(tracers::Tuple)
 end
 
 mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
-                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
+                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad, Prt} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -58,7 +71,14 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     closure :: Cls
     closure_fields :: Cfs
     radiation :: Rad
+    particles :: Prt
 end
+
+# Materialize the model `closure` and `coriolis` in the constructor. Scalars pass through; the
+# `SingleColumnMode` module extends these for per-column *arrays* (single-column ensembles), which it
+# maps/moves to the grid architecture so they can be indexed inside GPU kernels.
+materialize_closure(closure, scalar_names, arch) = with_tracers(scalar_names, closure)
+materialize_coriolis(coriolis, arch) = coriolis
 
 """
 $(TYPEDSIGNATURES)
@@ -81,6 +101,12 @@ Arguments
      schemes may be provided. `scalar_advection` may be a `NamedTuple` with
      a different scheme for each respective scalar, identified by name.
 
+   * `particles` are Lagrangian particles to be advected with the flow,
+     constructed with `Oceananigans.LagrangianParticles`. Particles are advected
+     with the Cartesian velocities `model.velocities` once per time step, over the
+     full `Δt`. Default: `nothing`. See the "Lagrangian particles" section of the
+     documentation for details, including the treatment on terrain-following grids.
+
 Example
 =======
 
@@ -100,7 +126,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 │   ├── momentum: Centered(order=2)
 │   ├── ρθ: Centered(order=2)
 │   └── ρqᵛ: Centered(order=2)
-├── forcing: @NamedTuple{ρu::Returns{Float64}, ρv::Returns{Float64}, ρw::Returns{Float64}, ρθ::Returns{Float64}, ρqᵛ::Returns{Float64}, ρe::Returns{Float64}}
+├── forcing: @NamedTuple{ρu::Returns{Float64}, ρv::Returns{Float64}, ρw::Returns{Float64}, ρθ::Returns{Float64}, ρqᵛ::Returns{Float64}, ρE::Returns{Float64}}
 ├── tracers: ()
 ├── coriolis: Nothing
 └── microphysics: Nothing
@@ -129,7 +155,8 @@ function AtmosphereModel(grid;
                          microphysics = nothing,
                          timestepper = nothing,
                          timestepper_kwargs = NamedTuple(),
-                         radiation = nothing)
+                         radiation = nothing,
+                         particles::ParticlesOrNothing = nothing)
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
@@ -156,15 +183,29 @@ function AtmosphereModel(grid;
 
     momentum_advection = validate_momentum_advection(momentum_advection, grid)
     default_scalar_advection, scalar_advection = validate_tracer_advection(scalar_advection, grid)
+    particles = validate_particles(particles, grid)
 
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
-    tracer_names = validate_tracers(tracers)
+    user_tracer_names = validate_tracers(tracers)
+
+    # Prognostic-TKE closures carry their own prognostic scalar (`:ρe`). Appending it here,
+    # before `prognostic_field_names`, the boundary-condition defaults, the tracer-field allocation
+    # and `scalar_names`, is what makes it a first-class tracer everywhere downstream.
+    # The captured name must differ from the assigned one, or the closure boxes it.
+    closure_tracer_names = filter(∉(user_tracer_names), closure_required_tracers(closure))
+    tracer_names = tuple(user_tracer_names..., closure_tracer_names...)
+    tracers = tracer_names
 
     # Get field names from dynamics and formulation
     prognostic_names = prognostic_field_names(dynamics, formulation, microphysics, tracers)
+    allunique(prognostic_names) ||
+        throw(ArgumentError("Prognostic field names must be unique, but got $prognostic_names. " *
+                            "A closure-required tracer ($(closure_required_tracers(closure))) cannot " *
+                            "share its name with another prognostic field."))
     velocity_bc_names = velocity_boundary_condition_names(dynamics)
     default_bc_names = tuple(prognostic_names..., velocity_bc_names...)
+    validate_boundary_condition_names(boundary_conditions, default_bc_names)
     default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
@@ -178,9 +219,10 @@ function AtmosphereModel(grid;
     field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize atmosphere-specific boundary conditions (fill in the surface-layer θᵥ
-    # diagnostic, thermodynamic constants, convert ρe → ρθ for potential temperature
-    # formulations). Surface fluxes diagnose their pressure, density and θᵥ from the live model
-    # fields at evaluation time, so nothing about the model state is captured here.
+    # diagnostic, thermodynamic constants, route the ρE and ρqᵗ interface keys onto the
+    # prognostic fields that carry them). Wall fluxes diagnose their pressure, density and θᵥ
+    # from the live model fields at evaluation time, so nothing about the model state is
+    # captured here.
     boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
                                                                            dynamics, microphysics, thermodynamic_constants)
 
@@ -211,8 +253,10 @@ function AtmosphereModel(grid;
         velocities = materialize_velocities(velocities, grid)
     end
 
+    # Microphysical fields, including a prognostic aerosol reservoir `ρnᵃ`, start at zero. `ρnᵃ`
+    # holds a ρ-weighted count, so it is filled in by `set_default_aerosol_number!` at the end of
+    # this constructor, once the dynamics has been materialized and has a density to weight by.
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
-    initialize_model_microphysical_fields!(microphysical_fields, microphysics)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
@@ -234,7 +278,8 @@ function AtmosphereModel(grid;
 
     # Build a vertical tridiagonal solver for adaptive implicit vertical advection even when the
     # closure is explicit. When both are present, the diffusion and advection diagonals are summed
-    # into a single system (see implicit_vertical_advection.jl).
+    # into a single system (see mass_weighted_implicit_diffusion.jl for the z-Center prognostics
+    # and implicit_vertical_advection.jl for `ρw`).
     if implicit_solver === nothing && advection_needs_solver
         implicit_solver = implicit_diffusion_solver(VerticallyImplicitTimeDiscretization(), grid)
     end
@@ -242,7 +287,8 @@ function AtmosphereModel(grid;
     # Only pass `dynamics` to time steppers that accept it (Breeze's acoustic and SSP steppers).
     # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
     if timestepper_uses_dynamics(timestepper)
-        timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver, timestepper_kwargs...)
+        timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver,
+                                  cache_advecting_state = advection_needs_solver, timestepper_kwargs...)
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
     end
@@ -257,17 +303,24 @@ function AtmosphereModel(grid;
     # is the single definition both sites go through.
     model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
                          auxiliary_model_fields(temperature), microphysical_fields)
-    density = dynamics_density(dynamics)
+    coupling_density = dynamics_density(dynamics)
+    mass_density = total_density(dynamics)
+
+    # A per-column `coriolis` (an array of rotations) is moved to the grid architecture; a scalar
+    # coriolis passes through. See `materialize_coriolis` (extended for arrays in `SingleColumnMode`).
+    coriolis = materialize_coriolis(coriolis, arch)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
-                                       grid, coriolis, density,
+                                       grid, coriolis, coupling_density, mass_density,
                                        velocities, dynamics, formulation, microphysics,
                                        specific_prognostic_moisture)
 
-    # Include thermodynamic density (ρe or ρθ), moisture, microphysical prognostic fields, plus user tracers
-    closure_thermo_name = thermodynamic_density_name(formulation)
-    microphysical_names = prognostic_field_names(microphysics)
-    scalar_names = tuple(closure_thermo_name, moisture_name, microphysical_names..., tracer_names...)
-    closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
+    # The closure's scalars — thermodynamic density, moisture, microphysical prognostic fields, user
+    # tracers — in the order the vertically-implicit solve indexes them (see `closure_scalar_index`)
+    scalar_names = closure_scalar_names(formulation, microphysics, tracer_names)
+    # Fill the closure's tracer-indexed diffusivities. For a per-column *array* of closures,
+    # `materialize_closure` (extended in `SingleColumnMode`) maps over the array and moves it to the
+    # grid architecture; a scalar closure just gets `with_tracers`.
+    closure = materialize_closure(closure, scalar_names, arch)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
 
     # Generate tracer advection scheme for each tracer
@@ -278,6 +331,9 @@ function AtmosphereModel(grid;
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
+
+    # Move microphysics lookup tables to the grid architecture (CPU → GPU)
+    microphysics = on_architecture(arch, microphysics)
 
     model = AtmosphereModel(arch,
                             grid,
@@ -300,10 +356,22 @@ function AtmosphereModel(grid;
                             timestepper,
                             closure,
                             closure_fields,
-                            radiation)
+                            radiation,
+                            particles)
 
     # Initialize thermodynamics (dynamics-specific)
     initialize_model_thermodynamics!(model)
+
+    # Seed the prognostic aerosol reservoir from the microphysics scheme's distribution. Dynamics
+    # whose density is physical at construction (the anelastic reference state, a prescribed
+    # density) are fully initialized here, so a model that is never `set!` still activates.
+    # Compressible density fields are still zero, so this writes zero and the first `set!` that
+    # supplies a density fills it in. Idempotent: every `set!` rewrites it.
+    #
+    # This belongs in the constructor rather than in `initialize!(model)` because it is a
+    # *default*: `initialize!` runs after `set!`, which is where a user supplies `nᵃ` or `ρnᵃ`,
+    # so re-seeding there would overwrite a user-supplied aerosol reservoir.
+    set_default_aerosol_number!(model)
 
     return model
 end
@@ -364,8 +432,14 @@ function Base.show(io::IO, model::AtmosphereModel)
 
     print(io, "├── forcing: ", forcing_summary, "\n",
               "├── tracers: ", tracernames, "\n",
-              "├── coriolis: ", summary(model.coriolis), "\n",
-              "└── microphysics: ", Mic)
+              "├── coriolis: ", summary(model.coriolis), "\n")
+
+    if isnothing(model.particles)
+        print(io, "└── microphysics: ", Mic)
+    else
+        print(io, "├── microphysics: ", Mic, "\n",
+                  "└── particles: ", summary(model.particles))
+    end
 end
 
 # `cell_advection_timescale(model::AtmosphereModel)` and the direction-aware `CellAdvectionTimescale`
@@ -381,6 +455,40 @@ function prognostic_field_names(dynamics, formulation, microphysics, tracer_name
     return tuple(dynamics_names..., momentum_names..., formulation_names..., moist_name, microphysical_names..., tracer_names...)
 end
 
+# The scalars a turbulence closure sees, in the order `with_tracers` and `build_closure_fields`
+# receive them: the thermodynamic density, moisture, microphysical prognostics, user tracers.
+function closure_scalar_names(formulation, microphysics, tracer_names)
+    thermodynamic_name = thermodynamic_density_name(formulation)
+    moisture_name = moisture_prognostic_name(microphysics)
+    microphysical_names = prognostic_field_names(microphysics)
+    return tuple(thermodynamic_name, moisture_name, microphysical_names..., tracer_names...)
+end
+
+closure_scalar_names(model::AtmosphereModel) =
+    closure_scalar_names(model.formulation, model.microphysics, keys(model.tracers))
+
+"""
+$(TYPEDSIGNATURES)
+
+The index under which the prognostic field `name` enters the vertically-implicit solve: `nothing`
+for momentum, which is diffused with the closure's viscosity, and `Val(i)` for the `i`th closure
+scalar, which is diffused with `diffusivity(closure, closure_fields, Val(i))`.
+"""
+function closure_scalar_index(model::AtmosphereModel, name::Symbol)
+    name ∈ keys(model.momentum) && return nothing
+    return Val(findfirst(==(name), closure_scalar_names(model)))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Whether the prognostic field `name` sits out the vertically-implicit solve. The dynamics-specific
+prognostics — the compressible dry density, the kinematic driver's density — are advanced explicitly
+and have no diffusivity to apply; momentum and every scalar take the solve.
+"""
+skip_vertical_diffusion(model::AtmosphereModel, name::Symbol) =
+    name ∈ keys(dynamics_prognostic_fields(model.dynamics))
+
 function field_names(dynamics, formulation, microphysics, tracer_names)
     prog_names = prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
     moist_specific = moisture_specific_name(microphysics)
@@ -389,8 +497,104 @@ function field_names(dynamics, formulation, microphysics, tracer_names)
     return tuple(prog_names..., formulation_additional_names..., default_additional_names...)
 end
 
+#####
+##### Boundary condition and forcing name validation
+#####
+
+# `ρs`/`s` name static energy and `ρqᵛ`/`ρqᵉ` name particular moisture variables, so each is a
+# key only under the formulation or microphysics that makes it prognostic. An input meant for
+# any of them goes under the interface key — `ρE` for energy, `ρqᵗ` for water.
+function invalid_key_hint(name)
+    if name ∈ (:ρs, :s)
+        return string('\n', "An energy flux or forcing is supplied under ", total_energy_density_name,
+                      " (or E) and applied to the prognostic thermodynamic variable; ", name,
+                      " is a key only when static energy is prognostic (formulation = :StaticEnergy).")
+    elseif name ∈ (:ρqᵛ, :qᵛ, :ρqᵉ, :qᵉ)
+        return string('\n', "A water flux or forcing is supplied under ", total_moisture_density_name,
+                      " (or qᵗ) and applied to the prognostic moisture variable; ", name,
+                      " is a key only under the microphysics that makes it prognostic, which for ",
+                      "BulkMicrophysics is set by `cloud_formation`.")
+    elseif name ∈ (:ρe, :e)
+        return string('\n', "An energy flux or forcing is supplied under ", total_energy_density_name,
+                      " (or E); ", name, " names turbulent kinetic energy, so it is a key only under ",
+                      "a prognostic-TKE closure.")
+    end
+
+    return ""
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Check that every key of the user-supplied `boundary_conditions` names something that can
+carry them: a prognostic field, a velocity component of dynamics whose velocities are
+prognostic, or one of the interface keys [`total_energy_density_name`](@ref) and
+[`total_moisture_density_name`](@ref).
+
+An unrecognized key would otherwise be merged in and then never looked up, so a stale one —
+`ρe` after the `e → s` rename, say — would silently materialize default no-flux conditions in
+place of the fluxes the caller asked for.
+"""
+function validate_boundary_condition_names(boundary_conditions, field_bc_names)
+    valid_names = tuple(field_bc_names..., total_energy_density_name, total_moisture_density_name)
+    invalid_names = Tuple(name for name in keys(boundary_conditions) if name ∉ valid_names)
+    isempty(invalid_names) && return nothing
+
+    msg = string("Invalid boundary_conditions: ", invalid_names, " do not name anything that ",
+                 "carries boundary conditions!", '\n',
+                 "Boundary conditions may be set on ", valid_names, '.',
+                 mapreduce(invalid_key_hint, *, invalid_names))
+
+    throw(ArgumentError(msg))
+end
+
+energy_key_aliases_thermodynamic_density(::Val{:ρs}) = true
+energy_key_aliases_thermodynamic_density(::Val) = false
+
+# An interface key and the variable's own name at the same density weighting are one source named
+# twice; at different weightings they are two sources, which no single key can express.
+function validate_interface_forcing(user_forcings, interface_name, target_name)
+    supplied = keys(user_forcings)
+    same_weighting = ((interface_name, target_name),
+                      (specific_field_name(interface_name), specific_field_name(target_name)))
+
+    for (interface_key, target_key) in same_weighting
+        if interface_key ∈ supplied && target_key ∈ supplied
+            msg = string("Invalid forcing: ", interface_key, " and ", target_key,
+                         " name one source, so supplying both would sum it twice.", '\n',
+                         "Supply exactly one — ", interface_key,
+                         " is valid whatever the formulation and microphysics.")
+            throw(ArgumentError(msg))
+        end
+    end
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Re-key a forcing supplied under the moisture key `ρqᵗ` (see
+[`total_moisture_density_name`](@ref)), or its specific alias `qᵗ`, onto the moisture density
+that `microphysics` actually evolves, so that a setup does not name a variable whose spelling
+depends on the scheme.
+"""
+function route_moisture_forcing(user_forcings, microphysics)
+    ρqᵗ = total_moisture_density_name
+    qᵗ = specific_field_name(ρqᵗ)
+    ρq_name = moisture_prognostic_name(microphysics)
+    q_name = moisture_specific_name(microphysics)
+
+    validate_interface_forcing(user_forcings, ρqᵗ, ρq_name)
+
+    rekey(name) = name === ρqᵗ ? ρq_name :
+                  name === qᵗ  ? q_name  : name
+
+    return NamedTuple{map(rekey, keys(user_forcings))}(values(user_forcings))
+end
+
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
+                                  grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
     forcings_type = typeof(user_forcings)
@@ -400,7 +604,7 @@ function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields
 end
 
 function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
+                                  grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
     names = keys(prognostic_fields)
@@ -408,17 +612,25 @@ function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
 end
 
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
+                                  grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
 
+    # `ρqᵗ` (total moisture) is the scheme-agnostic water key. A water source enters the
+    # prognostic moisture density unconverted whatever the scheme calls it, so — unlike `ρE`,
+    # which the tendency kernels read separately in order to convert it — routing it is a pure
+    # re-key onto that name, done before anything else looks at the forcing keys.
+    user_forcings = route_moisture_forcing(user_forcings, microphysics)
     user_forcing_names = keys(user_forcings)
 
-    if :ρe ∈ keys(prognostic_fields)
-        forcing_fields = prognostic_fields
-    else
-        forcing_fields = merge(prognostic_fields, (; ρe=prognostic_fields.ρθ))
-    end
+    # `ρE` (total energy) is the formulation-agnostic energy key: a forcing supplied under it
+    # targets the prognostic thermodynamic density, and the tendency that reads it applies
+    # whatever conversion that variable needs (a division by cᵖᵐ Π for `ρθ`; none for `ρs`).
+    ρᵡ_name = thermodynamic_density_name(formulation)
+    energy_key_aliases_thermodynamic_density(Val(ρᵡ_name)) &&
+        validate_interface_forcing(user_forcings, total_energy_density_name, ρᵡ_name)
+    ρE_field = prognostic_fields[ρᵡ_name]
+    forcing_fields = merge(prognostic_fields, NamedTuple{(total_energy_density_name,)}((ρE_field,)))
 
     forcing_names = keys(forcing_fields)
 
@@ -432,7 +644,8 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
         if name ∉ forcing_names && name ∉ valid_specific_names
             msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
                          "The forcing fields are ", forcing_names,
-                         "; specific-key aliases are ", valid_specific_names, '.')
+                         "; specific-key aliases are ", valid_specific_names, '.',
+                         invalid_key_hint(name))
             throw(ArgumentError(msg))
         end
     end
@@ -444,8 +657,23 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     moist_specific = moisture_specific_name(microphysics)
     specific_fields = merge(velocities, formulation_fields, NamedTuple{(moist_specific,)}((specific_prognostic_moisture,)))
 
-    # Build context for special forcing types (used by extended materialize_forcing in Forcings module)
-    forcing_context = (; coriolis, density, specific_fields)
+    # Momentum, the dynamics mass variable, and thermodynamic density are weighted by the
+    # coupling density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and
+    # user tracers are total-air mass fractions and therefore use total density. The extra
+    # :ρE entry is the energy-forcing key, which targets the thermodynamic density.
+    coupling_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
+                                   prognostic_momentum_field_names(dynamics)...,
+                                   ρᵡ_name,
+                                   total_energy_density_name)
+
+    # Keep `density` as the coupling-density compatibility entry for other forcing
+    # materializers; SpecificForcing selects between the two explicit carriers by target.
+    forcing_context = (; coriolis,
+                         density=coupling_density,
+                         coupling_density,
+                         total_density=mass_density,
+                         coupling_density_names,
+                         specific_fields)
 
     materialized = Tuple(
         assemble_field_forcing(n, f, user_forcings, model_names, forcing_context)
@@ -582,11 +810,22 @@ end
 Models.boundary_condition_args(model::AtmosphereModel) =
     (model.clock, fields(model), dynamics_thermodynamic_fields(model.dynamics))
 
+#####
+##### Lagrangian particle tracking
+#####
+
+# Velocities are diagnostic (u = ρu/ρ) and refreshed by `update_state!`, so they are
+# current when the time steppers advect particles at the end of each step.
+@inline Models.total_velocities(model::AtmosphereModel) = model.velocities
+
+TimeSteppers.step_lagrangian_particles!(model::AtmosphereModel, Δt) =
+    step_lagrangian_particles!(model.particles, model, Δt)
+
 function total_energy(model)
     u, v, w = model.velocities
     k = @at (Center, Center, Center) (u^2 + v^2 + w^2) / 2 |> Field
-    e = static_energy(model) |> Field
-    return k + e
+    s = static_energy(model) |> Field
+    return k + s
 end
 
 # Check for NaNs in the first prognostic field

@@ -20,7 +20,7 @@ using Test
         potential_temperature_model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics,
                                                       formulation=:LiquidIcePotentialTemperature)
 
-        @test static_energy_model.advection.ρe isa Centered
+        @test static_energy_model.advection.ρs isa Centered
         @test potential_temperature_model.advection.ρθ isa Centered
 
         for model in (static_energy_model, potential_temperature_model)
@@ -37,7 +37,7 @@ using Test
         potential_temperature_model= AtmosphereModel(grid; thermodynamic_constants=constants,
                                                      dynamics, formulation=:LiquidIcePotentialTemperature, advection=WENO())
 
-        @test static_energy_model.advection.ρe isa WENO
+        @test static_energy_model.advection.ρs isa WENO
         @test potential_temperature_model.advection.ρθ isa WENO
 
         for model in (static_energy_model, potential_temperature_model)
@@ -52,7 +52,7 @@ using Test
         static_energy_model = AtmosphereModel(grid; dynamics, formulation=:StaticEnergy, kw...)
         potential_temperature_model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, kw...)
 
-        @test static_energy_model.advection.ρe isa Centered
+        @test static_energy_model.advection.ρs isa Centered
         @test potential_temperature_model.advection.ρθ isa Centered
 
         for model in (static_energy_model, potential_temperature_model)
@@ -68,10 +68,10 @@ using Test
         static_energy_model = AtmosphereModel(grid; dynamics, formulation=:StaticEnergy, kw...)
         potential_temperature_model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, kw...)
 
-        @test static_energy_model.advection.ρe isa FluxFormAdvection
-        @test static_energy_model.advection.ρe.x isa WENO
-        @test static_energy_model.advection.ρe.y isa WENO
-        @test static_energy_model.advection.ρe.z isa Centered
+        @test static_energy_model.advection.ρs isa FluxFormAdvection
+        @test static_energy_model.advection.ρs.x isa WENO
+        @test static_energy_model.advection.ρs.y isa WENO
+        @test static_energy_model.advection.ρs.z isa Centered
 
         @test potential_temperature_model.advection.ρθ isa FluxFormAdvection
         @test potential_temperature_model.advection.ρθ.x isa WENO
@@ -93,7 +93,7 @@ using Test
         static_energy_model = AtmosphereModel(grid; dynamics, formulation=:StaticEnergy, kw...)
         potential_temperature_model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, kw...)
 
-        @test static_energy_model.advection.ρe isa UpwindBiased
+        @test static_energy_model.advection.ρs isa UpwindBiased
         @test potential_temperature_model.advection.ρθ isa UpwindBiased
 
         for model in (static_energy_model, potential_temperature_model)
@@ -110,7 +110,7 @@ using Test
         static_energy_model = AtmosphereModel(grid; dynamics, formulation=:StaticEnergy, kw...)
         potential_temperature_model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, kw...)
 
-        @test static_energy_model.advection.ρe isa Centered
+        @test static_energy_model.advection.ρs isa Centered
         @test potential_temperature_model.advection.ρθ isa Centered
 
         for model in (static_energy_model, potential_temperature_model)

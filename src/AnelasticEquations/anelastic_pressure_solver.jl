@@ -83,6 +83,7 @@ end
 
 function solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
     compute_anelastic_source_term!(solver, ρŨ, Δt)
+    fill!(solver.storage, 0)  # workaround for bitwise reproducibility — see Oceananigans #5960
     solve!(pₙ, solver)
     return pₙ
 end
@@ -91,8 +92,8 @@ function compute_anelastic_source_term!(solver::FourierTridiagonalPoissonSolver,
     rhs = solver.source_term
     arch = architecture(solver)
     grid = solver.grid
-    Δt_FT = kernel_time_step(arch, grid, Δt)
-    launch!(arch, grid, :xyz, _compute_anelastic_source_term!, rhs, grid, ρŨ, Δt_FT)
+    kernel_Δt = kernel_time_step(arch, grid, Δt)
+    launch!(arch, grid, :xyz, _compute_anelastic_source_term!, rhs, grid, ρŨ, kernel_Δt)
     return nothing
 end
 

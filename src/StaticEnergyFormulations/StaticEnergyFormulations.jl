@@ -3,7 +3,7 @@
 
 Submodule defining the static energy thermodynamic formulation for atmosphere models.
 
-`StaticEnergyFormulation` uses moist static energy density `ρe` as the prognostic thermodynamic variable.
+`StaticEnergyFormulation` uses moist static energy density `ρs` as the prognostic thermodynamic variable.
 Moist static energy is a conserved quantity in adiabatic, frictionless flow that combines
 sensible heat, gravitational potential energy, and latent heat.
 """
@@ -11,7 +11,7 @@ module StaticEnergyFormulations
 
 export StaticEnergyFormulation
 
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
@@ -22,6 +22,7 @@ using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels,
     dynamics_density, total_density, dynamics_pressure, standard_pressure, dynamics_prognostic_fields,
+    pressure_from_density_temperature,
     grid_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
     c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ,
     AtmosphereModelBuoyancy,
@@ -37,9 +38,9 @@ include("static_energy_tendency.jl")
 
 # Kernel wrapper for launching static_energy_tendency
 # (needs to be defined after static_energy_tendency is defined)
-@kernel function compute_static_energy_tendency!(Gρe, grid, args)
+@kernel function compute_static_energy_tendency!(Gρs, grid, args)
     i, j, k = @index(Global, NTuple)
-    @inbounds Gρe[i, j, k] = static_energy_tendency(i, j, k, grid, args...)
+    @inbounds Gρs[i, j, k] = static_energy_tendency(i, j, k, grid, args...)
 end
 
 end # module

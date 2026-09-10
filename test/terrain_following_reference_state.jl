@@ -5,11 +5,12 @@ using Breeze
 using CUDA: @allowscalar
 
 using Oceananigans
+using Oceananigans.BoundaryConditions: Bottom
 using Oceananigans.Grids: XDirection, znode
 using Oceananigans.Models: BoundaryConditionOperation
 using Oceananigans.Operators: Δzᶜᶜᶠ, Δzᶜᶜᶜ
 using Breeze.AtmosphereModels: surface_pressure
-using Breeze.BoundaryConditions: surface_air_pressure, surface_layer_state
+using Breeze.BoundaryConditions: wall_air_pressure, surface_layer_state
 using Breeze.Thermodynamics: hydrostatic_pressure, dry_air_gas_constant, vapor_gas_constant,
                               potential_temperature_from_temperature, saturation_specific_humidity,
                               surface_density, ExnerReferenceState
@@ -323,8 +324,8 @@ using Test
 
         constants = model.thermodynamic_constants
         model_fields = surface_layer_state(model)
-        pˢ = surface_air_pressure(1, 1, grid, model_fields, constants, XDirection())
-        pˢ_center = surface_air_pressure(1, 1, grid, model_fields, constants)
+        pˢ = wall_air_pressure(1, 1, 1, grid, Bottom(), XDirection(), model_fields, constants)
+        pˢ_center = wall_air_pressure(1, 1, 1, grid, Bottom(), nothing, model_fields, constants)
         pˢ_reference = model.dynamics.reference_state.surface_pressure[1, 1, 1]
         @test pˢ ≈ pˢ_reference rtol=5e-3
         @test pˢ_center ≈ pˢ rtol=1e-12
@@ -362,7 +363,7 @@ using Test
         # retaining the reference pressure it saw during model construction.
         set!(model; θ=θ₀, qᵗ=0, ρ=0.8, u=U, enforce_mass_conservation=false)
         updated_fields = surface_layer_state(model)
-        pˢ_updated = surface_air_pressure(1, 1, grid, updated_fields, constants, XDirection())
+        pˢ_updated = wall_air_pressure(1, 1, 1, grid, Bottom(), XDirection(), updated_fields, constants)
         @test abs(pˢ_updated - pˢ_reference) > 1000
 
         compute!(Jᵘ)

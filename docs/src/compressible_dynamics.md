@@ -27,7 +27,7 @@ p = ρ R^m T ,
 ```
 
 where ``R^m`` is the mixture gas constant. For the potential-temperature thermodynamics the
-prognostic is ``χ = ρ θ`` and ``Π = 0``; for static-energy thermodynamics ``χ = ρ e`` and ``Π``
+prognostic is ``χ = ρ θ`` and ``Π = 0``; for static-energy thermodynamics ``χ = ρ s`` and ``Π``
 encodes pressure work.
 
 ## Time integration options

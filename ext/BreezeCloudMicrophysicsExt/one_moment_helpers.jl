@@ -46,7 +46,7 @@ Adapt.adapt_structure(to, k::OneMomentPrecipitationRateKernel) =
 
     # Accretion: cloud liquid captured by falling rain
     Sᵃᶜᶜ = cloud_precipitation_accretion(
-        parameters.options.cloud_liquid_rain_accretion,
+        parameters.process_params.cloud_liquid_rain_accretion,
         parameters.cloud.liquid,
         parameters.precip.rain,
         parameters.terminal_velocity.rain,
@@ -229,22 +229,23 @@ end
 
 function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
     parameters = bμp.categories.parameters
-    options = parameters.options
+    processes = parameters.processes
+    process_params = parameters.process_params
     rain = parameters.precip.rain
     snow = parameters.precip.snow
 
     print(io, summary(bμp), ":\n",
           "├── cloud_formation: ", prettysummary(bμp.cloud_formation), '\n',
-          "├── options: ", summary(options), '\n',
+          "├── processes: ", summary(processes), '\n',
           "├── cloud_liquid: ", prettysummary(parameters.cloud.liquid), '\n',
           "├── cloud_ice: ", prettysummary(parameters.cloud.ice), '\n',
           "├── rain: ", prettysummary(rain), '\n',
-          "│   ├── autoconversion: ", prettysummary(options.rain_autoconversion), '\n',
+          "│   ├── autoconversion: ", prettysummary(process_params.rain_autoconversion), '\n',
           "│   ├── area:   ", prettysummary(rain.area), '\n',
           "│   ├── vent:   ", prettysummary(rain.vent), '\n',
           "│   └── pdf:    ", prettysummary(rain.pdf), '\n',
           "├── snow: ", prettysummary(snow), "\n",
-          "│   ├── autoconversion: ", prettysummary(options.snow_autoconversion), '\n',
+          "│   ├── autoconversion: ", prettysummary(process_params.snow_autoconversion), '\n',
           "│   ├── area:   ", prettysummary(snow.area), '\n',
           "│   ├── mass:   ", prettysummary(snow.mass), '\n',
           "│   ├── ρᵢ:     ", prettysummary(snow.ρᵢ), '\n',

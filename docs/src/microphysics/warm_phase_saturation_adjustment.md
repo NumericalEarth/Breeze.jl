@@ -7,19 +7,19 @@ Mixed-phase saturation adjustment is described by [Pressel2015](@citet).
 ## Moist static energy and total moisture mass fraction
 
 The saturation adjustment solver (specific to our anelastic formulation) takes four inputs:
-* moist static energy ``e``,
+* moist static energy ``s``,
 * total moisture mass fraction ``qᵗ``,
 * height ``z``, and
 * reference pressure ``pᵣ``.
 
-Note that moist static energy density ``ρᵣ e`` and moisture density ``ρᵣ qᵗ``
+Note that moist static energy density ``ρᵣ s`` and moisture density ``ρᵣ qᵗ``
 are prognostic variables for [`AtmosphereModel`](@ref) when using [`AnelasticDynamics`](@ref),
 where ``ρᵣ`` is the reference density.
-With warm-phase microphysics, the moist static energy ``e`` is related to temperature ``T``,
+With warm-phase microphysics, the moist static energy ``s`` is related to temperature ``T``,
 height ``z``, and liquid mass fraction ``qˡ`` by
 
 ```math
-e ≡ cᵖᵐ \, T + g z - ℒˡᵣ qˡ ,
+s ≡ cᵖᵐ \, T + g z - ℒˡᵣ qˡ ,
 ```
 
 where ``cᵖᵐ`` is the mixture heat capacity, ``g`` is gravitational acceleration,
@@ -76,7 +76,7 @@ This expression can also be found in paper by [Pressel2015](@citet), equation (3
 We compute the saturation adjustment temperature by solving the nonlinear algebraic equation
 
 ```math
-0 = r(T) ≡ T - \frac{1}{cᵖᵐ} \left [ e - g z + ℒˡᵣ \max(0, qᵗ - qᵛ⁺) \right ] \,
+0 = r(T) ≡ T - \frac{1}{cᵖᵐ} \left [ s - g z + ℒˡᵣ \max(0, qᵗ - qᵛ⁺) \right ] \,
 ```
 
 where ``r`` is the "residual", using a secant method.
@@ -131,7 +131,7 @@ cᵖᵐ = mixture_heat_capacity(q, thermo)
 g = thermo.gravitational_acceleration
 z = 0.0
 ℒˡᵣ = thermo.liquid.reference_latent_heat
-e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
+s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
 ```
 
 Moist static energy has units ``\mathrm{m^2 / s^2}``, or ``\mathrm{J} / \mathrm{kg}``.
@@ -144,7 +144,7 @@ using Breeze.Microphysics: compute_temperature
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 q₀ = MoistureMassFractions(qᵗ)
-𝒰 = Breeze.Thermodynamics.StaticEnergyState(e, q₀, z, p)
+𝒰 = Breeze.Thermodynamics.StaticEnergyState(s, q₀, z, p)
 T★ = compute_temperature(𝒰, microphysics, thermo)
 ```
 
@@ -153,7 +153,7 @@ to the temperature in unsaturated conditions,
 
 ```@example microphysics
 cᵖᵐ₁ = mixture_heat_capacity(q₀, thermo)
-T₁ = (e - g * z) / cᵖᵐ₁
+T₁ = (s - g * z) / cᵖᵐ₁
 ```
 
 The difference between ``T₁`` and the solution ``T_\mathrm{eq}`` is
@@ -214,7 +214,7 @@ using Breeze.Thermodynamics: StaticEnergyState
 
 T₀ = 288
 cᵖᵈ = thermo.dry_air.heat_capacity
-e₀ = cᵖᵈ * T₀ # representative value
+s₀ = cᵖᵈ * T₀ # representative value
 z = 0.0
 p = 101325.0
 
@@ -226,7 +226,7 @@ qˡ = zeros(length(qᵗ))
 
 for (i, qᵗⁱ) in enumerate(qᵗ)
     q = MoistureMassFractions(qᵗⁱ)
-    𝒰 = StaticEnergyState(e₀, q, z, p)
+    𝒰 = StaticEnergyState(s₀, q, z, p)
     T[i] = compute_temperature(𝒰, microphysics, thermo)
     qᵛ⁺ = equilibrium_saturation_specific_humidity(T[i], p, qᵗⁱ, thermo, WarmPhaseEquilibrium())
     qˡ[i] = max(0, qᵗⁱ - qᵛ⁺)
@@ -290,8 +290,8 @@ g = thermo.gravitational_acceleration
 for k = 1:grid.Nz
     pᵣ = reference_state.pressure[1, 1, k]
     Tᵣ = θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ)
-    e₀ = cᵖᵐ * Tᵣ + g * z[k]
-    𝒰 = StaticEnergyState(e₀, q, z[k], pᵣ)
+    s₀ = cᵖᵐ * Tᵣ + g * z[k]
+    𝒰 = StaticEnergyState(s₀, q, z[k], pᵣ)
     T[k] = compute_temperature(𝒰, microphysics, thermo)
 
     # Saturation specific humidity via adjustment formula using T[k], pᵣ, and qᵗ

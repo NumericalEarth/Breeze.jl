@@ -12,7 +12,7 @@ using GPUArraysCore: @allowscalar
 using Enzyme
 using Test
 
-if @show(get(ENV, "GITHUB_ACTIONS", "false") == "true")
+if get(ENV, "GITHUB_ACTIONS", "false") == "true"
     Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
 end
 Reactant.Compiler.SROA_ATTRIBUTOR[] = true

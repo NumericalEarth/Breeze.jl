@@ -10,6 +10,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Oceananigans
 using Test
+using Adapt: adapt
 
 #####
 ##### AnelasticDynamics
@@ -206,7 +207,7 @@ using Breeze.AtmosphereModels: thermodynamic_density_name, thermodynamic_density
 
     # Boundary conditions needed for materialization (must pass grid to respect topology)
     ccc = (Center(), Center(), Center())
-    boundary_conditions = (ρθ = FieldBoundaryConditions(grid, ccc), ρe = FieldBoundaryConditions(grid, ccc))
+    boundary_conditions = (ρθ = FieldBoundaryConditions(grid, ccc), ρs = FieldBoundaryConditions(grid, ccc))
 
     @testset "LiquidIcePotentialTemperature field naming (Symbol)" begin
         @test prognostic_thermodynamic_field_names(:LiquidIcePotentialTemperature) == (:ρθ,)
@@ -215,9 +216,9 @@ using Breeze.AtmosphereModels: thermodynamic_density_name, thermodynamic_density
     end
 
     @testset "StaticEnergy field naming (Symbol)" begin
-        @test prognostic_thermodynamic_field_names(:StaticEnergy) == (:ρe,)
-        @test additional_thermodynamic_field_names(:StaticEnergy) == (:e,)
-        @test thermodynamic_density_name(:StaticEnergy) == :ρe
+        @test prognostic_thermodynamic_field_names(:StaticEnergy) == (:ρs,)
+        @test additional_thermodynamic_field_names(:StaticEnergy) == (:s,)
+        @test thermodynamic_density_name(:StaticEnergy) == :ρs
     end
 
     @testset "materialize_formulation(:LiquidIcePotentialTemperature)" begin
@@ -242,23 +243,23 @@ using Breeze.AtmosphereModels: thermodynamic_density_name, thermodynamic_density
         @test formulation.specific_energy isa Field
 
         # Test struct methods
-        @test prognostic_thermodynamic_field_names(formulation) == (:ρe,)
-        @test additional_thermodynamic_field_names(formulation) == (:e,)
-        @test thermodynamic_density_name(formulation) == :ρe
+        @test prognostic_thermodynamic_field_names(formulation) == (:ρs,)
+        @test additional_thermodynamic_field_names(formulation) == (:s,)
+        @test thermodynamic_density_name(formulation) == :ρs
         @test thermodynamic_density(formulation) === formulation.energy_density
     end
 
     @testset "Oceananigans.fields and prognostic_fields" begin
         θ_formulation = materialize_formulation(:LiquidIcePotentialTemperature, dynamics, grid, boundary_conditions)
-        e_formulation = materialize_formulation(:StaticEnergy, dynamics, grid, boundary_conditions)
+        s_formulation = materialize_formulation(:StaticEnergy, dynamics, grid, boundary_conditions)
 
         # LiquidIcePotentialTemperature
         @test haskey(Oceananigans.fields(θ_formulation), :θ)
         @test haskey(Oceananigans.prognostic_fields(θ_formulation), :ρθ)
 
         # StaticEnergy
-        @test haskey(Oceananigans.fields(e_formulation), :e)
-        @test haskey(Oceananigans.prognostic_fields(e_formulation), :ρe)
+        @test haskey(Oceananigans.fields(s_formulation), :s)
+        @test haskey(Oceananigans.prognostic_fields(s_formulation), :ρs)
     end
 end
 
@@ -300,6 +301,13 @@ using Breeze.Thermodynamics:
 
 @testset "Thermodynamics" begin
     thermo = ThermodynamicConstants()
+    @test thermo.liquid.density == 1000
+    @test thermo.ice.density == 917
+    @test occursin("density=1000.0", sprint(show, thermo.liquid))
+
+    adapted_thermo = adapt(CPU(), ThermodynamicConstants(Float32))
+    @test adapted_thermo.liquid.density === Float32(1000)
+    @test adapted_thermo.ice.density === Float32(917)
 
     # Test Saturation specific humidity calculation
     T = 293.15  # 20°C
@@ -324,10 +332,10 @@ end
         g = thermo.gravitational_acceleration
         ℒˡᵣ = thermo.liquid.reference_latent_heat
         ℒⁱᵣ = thermo.ice.reference_latent_heat
-        e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+        s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
         # Test with saturation adjustment
-        𝒰 = StaticEnergyState(e, q, z, p)
+        𝒰 = StaticEnergyState(s, q, z, p)
         T★ = temperature(𝒰, thermo)
         @test T★ ≈ T
     end

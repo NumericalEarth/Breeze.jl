@@ -53,7 +53,7 @@ end
     categories = two_moment_cloud_microphysics_categories(FT)
     @test categories isa TwoMomentCategories
     @test categories.warm_processes isa CloudMicrophysics.Parameters.SB2006
-    @test categories.air_properties isa CloudMicrophysics.Parameters.AirProperties
+    @test categories.air isa CloudMicrophysics.Parameters.AirProperties
     @test categories.cloud_liquid_fall_velocity isa CloudMicrophysics.Parameters.StokesRegimeVelType
     @test categories.rain_fall_velocity isa CloudMicrophysics.Parameters.SB2006VelType
 end
@@ -268,7 +268,7 @@ end
     # Check default aerosol activation is created
     aa = default_aerosol_activation(FT)
     @test aa isa AerosolActivation
-    @test aa.activation_parameters isa CloudMicrophysics.Parameters.AerosolActivationParameters
+    @test aa.activation isa CloudMicrophysics.Parameters.AerosolActivationParameters
     @test aa.aerosol_distribution isa CloudMicrophysics.AerosolModel.AerosolDistribution
 
     # Check aerosol activation is included in TwoMomentCategories
@@ -304,7 +304,7 @@ end
          z = 0, w = 1)
 
     # Set initial aerosol number
-    Nᵃ₀ = FT(initial_aerosol_number(microphysics))
+    Nᵃ₀ = FT(initial_aerosol_number_density(microphysics, model.dynamics.state.ρ))
     model.dynamics.state.μ = (; ρqᶜˡ=FT(0), ρnᶜˡ=FT(0), ρqʳ=FT(0), ρnʳ=FT(0), ρnᵃ=Nᵃ₀)
 
     # Initially, cloud droplet number should be zero (no droplets before activation)
