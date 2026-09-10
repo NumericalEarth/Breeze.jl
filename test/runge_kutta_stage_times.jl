@@ -72,7 +72,9 @@ end
 end
 
 @testset "Parcel SSP RK3 clock bookkeeping" begin
-    grid = RectilinearGrid(default_arch; size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    # The parcel stepper interpolates the environment at the parcel position on the host,
+    # so it runs on the CPU like the other parcel tests.
+    grid = RectilinearGrid(CPU(); size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
     model = AtmosphereModel(grid; dynamics=ParcelDynamics())
 
     T(z) = 288.0 - 0.0065 * z
