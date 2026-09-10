@@ -324,8 +324,8 @@ member(site, month) = joinpath(library, "cfsite$(lpad(site, 2, '0'))_CNRM-CM6-1_
 # * relaxation of the winds toward the GCM winds on 6 hours everywhere, and of temperature and
 #   moisture on 24 hours above the boundary layer, ramping in between 3.0 and 3.5 km, as in the LES.
 #
-# Temperature tendencies are supplied as static-energy forcings (`s`), which the model converts to
-# its potential temperature. Microphysics is warm-phase saturation adjustment; the LES also had
+# Temperature tendencies are supplied as energy forcings (`E`, a static-energy tendency), which the model
+# converts to its potential temperature. Microphysics is warm-phase saturation adjustment; the LES also had
 # drizzle, which is one reason its stratocumulus is thinner than a non-precipitating column's.
 
 function interpolated(zs, vs)
@@ -419,14 +419,14 @@ function les_driven_column(path; closure, Δt = 1minute)
                v = (subsidence, relax_v),
                θ = (subsidence, relax_θ),
                qᵉ = (subsidence, Forcing(dqdt), relax_q),
-               s = (Forcing(dTdt), Forcing(dTdt_rad)))
+               E = (Forcing(dTdt), Forcing(dTdt_rad)))
 
     ## Surface fluxes prescribed from the LES time series
     series(name) = interpolated(t, ds[name][:])
     shf, lhf, uw, vw = series("shf_surface_mean"), series("lhf_surface_mean"), series("uw_surface_mean"), series("vw_surface_mean")
     ℒᵛ = Breeze.Thermodynamics.liquid_latent_heat(ds["surface_temperature"][1], constants)
     prescribed(flux) = FluxBoundaryCondition((i, j, grid, clock, fields) -> flux(clock.time), discrete_form = true)
-    boundary_conditions = (ρs = FieldBoundaryConditions(bottom = prescribed(shf)),
+    boundary_conditions = (ρE = FieldBoundaryConditions(bottom = prescribed(shf)),
                            ρqᵉ = FieldBoundaryConditions(bottom = prescribed(t -> lhf(t) / ℒᵛ)),
                            ρu = FieldBoundaryConditions(bottom = prescribed(t -> ρ₀ * uw(t))),
                            ρv = FieldBoundaryConditions(bottom = prescribed(t -> ρ₀ * vw(t))))

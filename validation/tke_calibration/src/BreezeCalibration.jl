@@ -77,8 +77,12 @@ Breeze physics it exercises, and add a line here.
 - `2` — subsidence of cloud liquid and rain as mass fractions, relaxation of nonprecipitating
   total water, condensate removal in the upper extension, and exclusion of rain from the
   closure's saturation test (with all water retained in its dry-air denominator).
+- `3` — the branch merged forward: the SSP RK3 third-stage tendency is evaluated at tⁿ + Δt/2
+  (#980), which changes the time integration and so every trajectory; the energy flux and forcing
+  move to the formulation-agnostic `ρE`/`E` keys (#974), a re-keying that leaves the tendency —
+  still divided by cᵖᵐ Π for a `ρθ` formulation — unchanged.
 """
-const PROTOCOL_VERSION = 2
+const PROTOCOL_VERSION = 3
 
 #####
 ##### The LES library
@@ -512,7 +516,7 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
     forcing = merge((u = aloft((subsidence, relax_u), uₙ),
                      v = aloft((subsidence, relax_v), vₙ),
                      θ = aloft((subsidence, relax_θ), θₙ),
-                     s = energy_forcing,
+                     E = energy_forcing,
                      qᶜˡ = tall ? (subsidence, upper_relaxation(0)) : subsidence,
                      qʳ = tall ? (subsidence, upper_relaxation(0)) : subsidence),
                     NamedTuple{(qname,)}((aloft((subsidence, Forcing(dqdt), relax_q), qₙ),)))
@@ -556,7 +560,7 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
     tke_bc = FluxBoundaryCondition(surface_tke_flux; discrete_form = true, parameters = tke_parameters)
 
     ρqname = Symbol(:ρ, qname)
-    boundary_conditions = merge((ρs = FieldBoundaryConditions(bottom = flux_bc(series((m, n) -> padded(m.surface.shf, n)))),
+    boundary_conditions = merge((ρE = FieldBoundaryConditions(bottom = flux_bc(series((m, n) -> padded(m.surface.shf, n)))),
                            ρu = FieldBoundaryConditions(bottom = flux_bc(FT[ρ₀[j] * padded(members[j].surface.uw, n) for j in 1:N_mem, n in 1:Nt])),
                            ρv = FieldBoundaryConditions(bottom = flux_bc(FT[ρ₀[j] * padded(members[j].surface.vw, n) for j in 1:N_mem, n in 1:Nt])),
                            ρe = FieldBoundaryConditions(bottom = tke_bc)),

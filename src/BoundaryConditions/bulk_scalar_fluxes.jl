@@ -313,7 +313,7 @@ using Breeze
 
 T₀(x, y, t) = 290 + 2 * sign(cos(2π * x / 20e3))
 
-ρs_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
+ρE_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
                              gustiness = 0.1,
                              surface_temperature = T₀)
 

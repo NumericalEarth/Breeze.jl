@@ -98,6 +98,17 @@ form (all prognostics are densities) with two thermodynamic formulations:
 
 Planned: fully compressible formulation, `EntropyThermodynamics` (prognostic `ρη`).
 
+Energy and water inputs are keyed agnostically, so a setup does not name a variable whose
+spelling depends on the formulation or the microphysics:
+  - `ρE` (total energy density; specific alias `E` for forcings) is routed onto whichever
+    thermodynamic variable the formulation evolves, converted as that variable requires.
+  - `ρqᵗ` (total moisture density; specific alias `qᵗ`) is routed onto whichever moisture
+    density the microphysics evolves — a pure re-key, since water needs no conversion.
+
+The specific names (`ρs`, `ρqᵛ`, `ρqᵉ`) remain keys only where they are actually prognostic,
+supplying both an interface key and its target is an error, and unrecognized keys raise an
+`ArgumentError` rather than being silently dropped.
+
 ## Common Pitfalls
 
 1. **Type instability** in kernels — ruins GPU performance
