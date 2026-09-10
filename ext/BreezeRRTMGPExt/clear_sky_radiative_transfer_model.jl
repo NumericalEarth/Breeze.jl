@@ -5,7 +5,7 @@
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
-using Oceananigans.Grids: AbstractGrid, Center, Face
+using Oceananigans.Grids: AbstractGrid, Center, Face, Flat
 using Oceananigans.Fields: ConstantField
 
 using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity,
@@ -267,6 +267,10 @@ function _set_longitude_from_grid!(rrtmgp_λ, grid)
     launch!(arch, grid, :xy, _set_longitude_from_grid_kernel!, rrtmgp_λ, grid)
     return nothing
 end
+
+# A grid that is Flat in x — a single column or a column ensemble — has no longitude; the value is only
+# used to place the sun, which such grids specify through `solar_position` instead
+_set_longitude_from_grid!(rrtmgp_λ, ::AbstractGrid{<:Any, <:Flat}) = (fill!(rrtmgp_λ, 0); nothing)
 
 @kernel function _set_longitude_from_grid_kernel!(rrtmgp_λ, grid)
     i, j = @index(Global, NTuple)

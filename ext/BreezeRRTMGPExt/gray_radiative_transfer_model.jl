@@ -251,6 +251,9 @@ function _set_latitude_from_grid!(rrtmgp_latitude, grid)
     return nothing
 end
 
+# A grid that is Flat in y has no latitude (see `_set_longitude_from_grid!`)
+_set_latitude_from_grid!(rrtmgp_latitude, ::AbstractGrid{<:Any, <:Any, <:Flat}) = (fill!(rrtmgp_latitude, 0); nothing)
+
 @kernel function _set_latitude_from_grid_kernel!(rrtmgp_latitude, grid)
     i, j = @index(Global, NTuple)
     φ = ynode(i, j, 1, grid, Center(), Center(), Center())
