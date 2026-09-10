@@ -580,8 +580,8 @@ function profile_reference_state(grid, constants, surface_pressure, potential_te
     FT = eltype(grid)
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
-    is_column_ensemble(grid) ||
-        throw(ArgumentError("A potential temperature profile per column requires a column-ensemble grid."))
+    (topology(grid, 1) === Flat && topology(grid, 2) === Flat) ||
+        throw(ArgumentError("A potential temperature profile per column requires a single column or a column ensemble (Flat horizontal topology)."))
     size(potential_temperature) == (Nx, Ny, Nz) ||
         throw(ArgumentError("`potential_temperature` must have size ($Nx, $Ny, $Nz), got $(size(potential_temperature))."))
     validate_column_parameter(surface_pressure, Nx, Ny, "surface_pressure")
