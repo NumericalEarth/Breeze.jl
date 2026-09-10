@@ -1520,6 +1520,10 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
         # solve and recovery substitution see a transport-consistent ρθ′★ (issue #897).
         implicit_advection_substep!(model, substepper, advection, Δτ)
 
+        # On terrain `∇ᶻp′`'s slope correction reads ρθ′★ at i±1, j±1, and both writers above
+        # cover interior cells only. Must follow the implicit substep, which rewrites ρθ′★.
+        fill_halo_regions!(substepper.density_potential_temperature_predictor)
+
         launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
                 _build_vertical_rhs!,
                 substepper.vertical_solver_source_term,

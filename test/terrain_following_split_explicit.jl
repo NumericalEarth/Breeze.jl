@@ -584,5 +584,53 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         @test isfinite(maximum(abs, model.velocities.v))
     end
 
+    @testset "Terrain acoustic substep fills the horizontally-read halos" begin
+        # Two fields in the terrain acoustic path are written over interior cells and then read
+        # at i±1: the predictor (ρθ)′★ via the `∇ᶻp′` slope correction, and Gⁿρu/Gⁿρv via the
+        # slow-tendency slope projection. Probe: terrain and initial condition invariant under a
+        # shift of Nx/2 cells, so the solution must be too. `mod(x, Lx/2)` on power-of-two
+        # centers makes the shifted arguments bitwise equal, so the invariance is exact.
+        Nx, Nz = 16, 8
+        Lx, Lz = 8192.0, 8192.0
+        half  = Lx / 2
+        shift = Nx ÷ 2
+        θ₀ = 300.0
+
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1));
+                                                         formulation = LinearDecay())
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
+                               x=(0, Lx), z=z_faces, topology=(Periodic, Flat, Bounded))
+        materialize_terrain!(grid, x -> 300 * sin(2π * mod(x, half) / half))
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
+                                        reference_potential_temperature = θ₀)
+        model = AtmosphereModel(grid; dynamics)
+
+        # `enforce_mass_conservation` runs a pressure solve that breaks the bitwise invariance.
+        set!(model,
+             ρ = model.dynamics.reference_state.density,
+             θ = (x, z) -> θ₀ + 5 * sin(2π * mod(x, half) / half) * exp(-z / Lz),
+             u = 10.0,
+             enforce_mass_conservation = false)
+
+        time_step!(model, 0.5)
+
+        function shift_asymmetry(field)
+            f = Array(interior(field, :, 1, :))
+            return maximum(abs, f[1:shift, :] - f[shift+1:2shift, :]) / maximum(abs, f)
+        end
+
+        # Correct halos give bitwise invariance; the missing exchanges gave ~1e-4 relative. A
+        # trivial solution divides by zero and fails, so the checks have teeth.
+        @test shift_asymmetry(model.velocities.w) ≤ 1e-12
+        @test shift_asymmetry(model.velocities.u) ≤ 1e-12
+
+        # And the predictor exchange directly: its x halos must hold the periodic wrap, not the
+        # zeros the field was allocated with. Kept too — it pins the mechanism with no tolerance.
+        ρθ★ = model.timestepper.substepper.density_potential_temperature_predictor
+        @test all(ρθ★[0, 1, k] == ρθ★[Nx, 1, k] for k in 1:Nz)
+        @test all(ρθ★[Nx + 1, 1, k] == ρθ★[1, 1, k] for k in 1:Nz)
+    end
+
 end
 end
