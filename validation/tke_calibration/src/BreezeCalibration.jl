@@ -466,7 +466,7 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
     forcing = merge((u = aloft((subsidence, relax_u), uₙ),
                      v = aloft((subsidence, relax_v), vₙ),
                      θ = aloft((subsidence, relax_θ), θₙ),
-                     s = energy_forcing),
+                     E = energy_forcing),
                     NamedTuple{(qname,)}((aloft((subsidence, Forcing(dqdt), relax_q), qₙ),)))
 
     # Interactive radiation: RRTMGP all-sky on every column with the LES protocol's fixed sun (the GCM's
@@ -508,7 +508,7 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
     tke_bc = FluxBoundaryCondition(surface_tke_flux; discrete_form = true, parameters = tke_parameters)
 
     ρqname = Symbol(:ρ, qname)
-    boundary_conditions = merge((ρs = FieldBoundaryConditions(bottom = flux_bc(series((m, n) -> padded(m.surface.shf, n)))),
+    boundary_conditions = merge((ρE = FieldBoundaryConditions(bottom = flux_bc(series((m, n) -> padded(m.surface.shf, n)))),
                            ρu = FieldBoundaryConditions(bottom = flux_bc(FT[ρ₀[j] * padded(members[j].surface.uw, n) for j in 1:N_mem, n in 1:Nt])),
                            ρv = FieldBoundaryConditions(bottom = flux_bc(FT[ρ₀[j] * padded(members[j].surface.vw, n) for j in 1:N_mem, n in 1:Nt])),
                            ρe = FieldBoundaryConditions(bottom = tke_bc)),
