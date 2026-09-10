@@ -6,6 +6,7 @@ using Breeze: ReferenceState, AnelasticDynamics, LiquidIcePotentialTemperatureFo
 using Oceananigans: Oceananigans, prognostic_fields, Centered, UpwindBiased, Flat, Bounded, time_step!, set!
 using Oceananigans.Fields: interior
 using Oceananigans.Grids: znodes, Center
+using GPUArraysCore: @allowscalar
 using Statistics: mean
 using Test
 
@@ -387,7 +388,8 @@ end
         forcing = model.forcing.ρqᵛ.forcing
         @test forcing isa SubsidenceForcing
         @test forcing.advection === advection
-        return [forcing(1, 1, k, grid, model.clock, Oceananigans.fields(model)) for k in 1:Nz]
+        # The operator is evaluated on the host, point by point, which on a GPU reads single elements
+        return @allowscalar [forcing(1, 1, k, grid, model.clock, Oceananigans.fields(model)) for k in 1:Nz]
     end
 
     # A linear profile: every scheme must return -wˢ ∂z q = w₀ Γq in the interior
