@@ -502,6 +502,13 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
         β_stage == 1 ? substepper.final_stage_vertical_pressure_tendency_factor :
         substepper.vertical_pressure_tendency_factor
 
+    # The slope projection below interpolates Gⁿρu, Gⁿρv to (Center, Center, Face), reading
+    # face Nx+1 / Ny+1 — which the tendency kernels, launched over `size(grid)`, never write.
+    # Here rather than at the producer: this is their last writer before the substep loop.
+    # `similar` gives auxiliary BCs, so a Bounded wall face keeps its allocated zero.
+    fill_halo_regions!(Gⁿ.ρu)
+    fill_halo_regions!(Gⁿ.ρv)
+
     launch!(arch, grid, :xyz, _assemble_terrain_slow_vertical_momentum_tendency!,
             substepper.slow_vertical_momentum_tendency,
             Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
