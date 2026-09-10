@@ -321,7 +321,7 @@ member(site, month) = joinpath(library, "cfsite$(lpad(site, 2, '0'))_CNRM-CM6-1_
 #   tendencies of temperature and moisture, which are time-invariant, as forcings;
 # * the LES's radiative heating, with its diurnal cycle, as an hourly time series;
 # * the LES's surface sensible and latent heat fluxes and momentum fluxes, prescribed;
-# * relaxation of the winds toward the LES mean on 6 hours everywhere, and of temperature and
+# * relaxation of the winds toward the GCM winds on 6 hours everywhere, and of temperature and
 #   moisture on 24 hours above the boundary layer, ramping in between 3.0 and 3.5 km, as in the LES.
 #
 # Temperature tendencies are supplied as static-energy forcings (`s`), which the model converts to
@@ -406,8 +406,9 @@ function les_driven_column(path; closure, Δt = 1minute)
         set!(dTdt_rad[n], reshape(cᵖᵈ .* heating[:, min(n, length(t))], 1, 1, Nz))
     end
 
-    ## Relaxation toward the LES means: winds on 6 h everywhere, thermodynamics on 24 h above 3 km
-    uₙ, vₙ, θₙ, qₙ = profile("u_mean_nudge"), profile("v_mean_nudge"), profile("thetali_mean_nudge"), profile("qt_mean_nudge")
+    ## Relaxation, as in the LES, toward the GCM profiles the LES was initialized from: winds on 6 h everywhere,
+    ## thermodynamics on 24 h above 3 km. (The file's `*_mean_nudge` profiles are the LES's own run means, not the targets.)
+    uₙ, vₙ, θₙ, qₙ = profile("u_mean_initial"), profile("v_mean_initial"), profile("thetali_mean_initial"), profile("qt_mean_initial")
     ramp(z) = z < 3000 ? 0.0 : z > 3500 ? 1.0 : (1 - cos(π * (z - 3000) / 500)) / 2
     relax_u = Relaxation(rate = 1 / 6hours, target = (z, t) -> uₙ(z))
     relax_v = Relaxation(rate = 1 / 6hours, target = (z, t) -> vₙ(z))

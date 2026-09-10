@@ -3,7 +3,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze: ReferenceState, AnelasticDynamics, LiquidIcePotentialTemperatureFormulation,
               GeostrophicForcing, SpecificForcing
-using Oceananigans: Oceananigans, prognostic_fields
+using Oceananigans: Oceananigans, prognostic_fields, Centered, UpwindBiased, Flat, Bounded, time_step!, set!
 using Oceananigans.Fields: interior
 using Oceananigans.Grids: znodes, Center
 using Statistics: mean
@@ -367,4 +367,49 @@ end
         θ = column(model.formulation.potential_temperature)
         @test θ[boundary] - θ[neighbour] ≈ gradient₀ rtol = 1e-3
     end
+end
+
+@testset "SubsidenceForcing advection schemes [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 40
+    grid = RectilinearGrid(default_arch; size=Nz, z=(0, 2000), topology=(Flat, Flat, Bounded), halo=3)
+    w₀ = FT(-0.01)
+    Γq = FT(2e-6)
+    q₀ = FT(0.012)
+
+    function subsidence_tendencies(advection, qᵗ_profile)
+        subsidence = SubsidenceForcing(z -> w₀; advection)
+        reference_state = ReferenceState(grid)
+        model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), formulation=:LiquidIcePotentialTemperature,
+                                forcing=(; qᵛ=subsidence))
+        set!(model, θ=model.dynamics.reference_state.potential_temperature, qᵗ=qᵗ_profile)
+        time_step!(model, FT(1e-6))
+        forcing = model.forcing.ρqᵛ.forcing
+        @test forcing isa SubsidenceForcing
+        @test forcing.advection === advection
+        return [forcing(1, 1, k, grid, model.clock, Oceananigans.fields(model)) for k in 1:Nz]
+    end
+
+    # A linear profile: every scheme must return -wˢ ∂z q = w₀ Γq in the interior
+    linear(z) = q₀ - Γq * z
+    for advection in (Centered(), UpwindBiased(order=1), UpwindBiased(order=3))
+        F = subsidence_tendencies(advection, linear)
+        @test all(isapprox.(F[3:Nz-2], w₀ * Γq; rtol=1e-4))
+    end
+
+    # A two-cell (2Δz) mode: the centered scheme is blind to it, upwind schemes advect it
+    alternating(z) = q₀ + FT(1e-4) * (-1)^round(Int, z / (2000 / Nz) - 0.5)
+    F_centered = subsidence_tendencies(Centered(), alternating)
+    F_upwind = subsidence_tendencies(UpwindBiased(order=1), alternating)
+    @test maximum(abs.(F_centered[3:Nz-2])) < 1e-12
+    @test maximum(abs.(F_upwind[3:Nz-2])) > 1e-9
+end
+
+@testset "SubsidenceForcing show and 3D upwind smoke test [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 100))
+    subsidence = SubsidenceForcing(z -> -0.01; advection=UpwindBiased(order=1))
+    model = AtmosphereModel(grid; forcing=(; θ=subsidence))
+    @test occursin("advection: UpwindBiased", sprint(show, model.forcing.ρθ.forcing))
+    time_step!(model, FT(1e-6))
 end
