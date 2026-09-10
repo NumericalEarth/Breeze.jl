@@ -303,11 +303,11 @@ end
 # scans the tail behind it), which is a few tens of flops for the N ≤ 10 schemes we run.
 @inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, Vararg}, ρqᵛᵉ) where {F1}
     ρq = fields[1]
-    @inbounds q = ρq[i, j, k] / ρ
+    @inbounds mass = ρq[i, j, k]
 
-    deficit = max(0, -q)
-    borrowed = same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ, deficit)
-    @inbounds ρq[i, j, k] += ρ * borrowed
+    deficit = max(0, -mass)
+    remaining = borrow_from_lighter_species!(i, j, k, Base.tail(fields), ρqᵛᵉ, deficit)
+    @inbounds ρq[i, j, k] = ifelse(mass < 0, -remaining, mass)
 
     same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ)
     return nothing
@@ -316,25 +316,23 @@ end
 # Empty tuple: nothing to do
 @inline same_level_borrow!(i, j, k, ρ, ::Tuple{}, ρqᵛᵉ) = nothing
 
-# With a deficit argument, recurse through the candidate donors for one field.
-@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, Vararg}, ρqᵛᵉ, deficit) where {F1}
+# Recurse through the candidate donors, returning the unfunded partial density.
+@inline function borrow_from_lighter_species!(i, j, k, fields::Tuple{F1, Vararg}, ρqᵛᵉ, deficit) where {F1}
     ρq_donor = fields[1]
-    @inbounds q_donor = ρq_donor[i, j, k] / ρ
+    @inbounds mass_donor = ρq_donor[i, j, k]
 
-    borrowed = min(deficit, max(0, q_donor))
-    @inbounds ρq_donor[i, j, k] -= ρ * borrowed
+    borrowed = min(deficit, max(0, mass_donor))
+    @inbounds ρq_donor[i, j, k] -= borrowed
 
     remaining_deficit = deficit - borrowed
-    borrowed_from_tail = same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ, remaining_deficit)
-
-    return borrowed + borrowed_from_tail
+    return borrow_from_lighter_species!(i, j, k, Base.tail(fields), ρqᵛᵉ, remaining_deficit)
 end
 
-@inline function same_level_borrow!(i, j, k, ρ, ::Tuple{}, ρqᵛᵉ, deficit)
-    @inbounds qᵛ = ρqᵛᵉ[i, j, k] / ρ
-    borrowed = min(deficit, max(0, qᵛ))
-    @inbounds ρqᵛᵉ[i, j, k] -= ρ * borrowed
-    return borrowed
+@inline function borrow_from_lighter_species!(i, j, k, ::Tuple{}, ρqᵛᵉ, deficit)
+    @inbounds vapor_mass = ρqᵛᵉ[i, j, k]
+    borrowed = min(deficit, max(0, vapor_mass))
+    @inbounds ρqᵛᵉ[i, j, k] -= borrowed
+    return deficit - borrowed
 end
 
 #####
