@@ -8,7 +8,7 @@ using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: AbstractGrid, Center, Face
 using Oceananigans.Fields: ConstantField
 
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity,
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiation, specific_humidity,
                                BackgroundAtmosphere, materialize_background_atmosphere,
                                ClearSkyOptics, RadiativeTransferModel,
                                AbstractSolarPosition, ApparentSolarPosition,
@@ -171,16 +171,14 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     downwelling_shortwave_flux = ZFaceField(grid)
     flux_divergence = CenterField(grid)
 
-    surface_properties = SurfaceRadiativeProperties(surface_temperature,
-                                                    surface_emissivity,
-                                                    direct_surface_albedo,
-                                                    diffuse_surface_albedo)
+    surface_radiation = SurfaceRadiation(surface_temperature, surface_emissivity,
+                                         direct_surface_albedo, diffuse_surface_albedo)
 
-    update_rrtmgp_surface_boundary_conditions!(solver, surface_properties, grid)
+    update_rrtmgp_surface_boundary_conditions!(solver, surface_radiation, grid)
 
     return RadiativeTransferModel(convert(FT, solar_constant),
                                   solar_position,
-                                  surface_properties,
+                                  surface_radiation,
                                   background_atmosphere,
                                   atmospheric_state,
                                   solver,
@@ -287,10 +285,10 @@ function AtmosphereModels._update_radiation!(rtm::ClearSkyRadiativeTransferModel
     solver = rtm.longwave_solver
 
     # Surface emissivity and albedos (shared with all-sky), re-read in case they evolve
-    update_rrtmgp_surface_boundary_conditions!(solver, rtm.surface_properties, grid)
+    update_rrtmgp_surface_boundary_conditions!(solver, rtm.surface_radiation, grid)
 
     # Update atmospheric state
-    update_rrtmgp_gas_state!(solver.as, model, rtm.surface_properties.surface_temperature, rtm.background_atmosphere, solver.params)
+    update_rrtmgp_gas_state!(solver.as, model, rtm.surface_radiation.surface_temperature, rtm.background_atmosphere, solver.params)
 
     # Update solar zenith angle from the solar_position specification
     update_solar_zenith_angle!(solver.sws, rtm.solar_position, grid, clock)

@@ -34,10 +34,10 @@ using RRTMGP
                                                solar_constant = 1361)
 
             @test radiation !== nothing
-            @test radiation.surface_properties.surface_temperature.constant == FT(300)
-            @test radiation.surface_properties.surface_emissivity.constant == FT(0.98)
-            @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.1)
-            @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.1)
+            @test radiation.surface_radiation.surface_temperature.constant == FT(300)
+            @test radiation.surface_radiation.surface_emissivity.constant == FT(0.98)
+            @test radiation.surface_radiation.direct_surface_albedo.constant == FT(0.1)
+            @test radiation.surface_radiation.diffuse_surface_albedo.constant == FT(0.1)
             @test radiation.solar_constant == FT(1361)
 
             # Check flux fields are created
@@ -64,8 +64,8 @@ using RRTMGP
                                                direct_surface_albedo = 0.15,
                                                diffuse_surface_albedo = 0.2)
 
-            @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.15)
-            @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.2)
+            @test radiation.surface_radiation.direct_surface_albedo.constant == FT(0.15)
+            @test radiation.surface_radiation.diffuse_surface_albedo.constant == FT(0.2)
         end
 
         @testset "Field-based surface properties" begin
@@ -81,10 +81,10 @@ using RRTMGP
             @test radiation !== nothing
 
             @allowscalar begin
-                @test first(radiation.surface_properties.surface_temperature) == FT(300)
-                @test first(radiation.surface_properties.surface_emissivity) == FT(0.98)
-                @test first(radiation.surface_properties.direct_surface_albedo) == FT(0.1)
-                @test first(radiation.surface_properties.diffuse_surface_albedo) == FT(0.1)
+                @test first(radiation.surface_radiation.surface_temperature) == FT(300)
+                @test first(radiation.surface_radiation.surface_emissivity) == FT(0.98)
+                @test first(radiation.surface_radiation.direct_surface_albedo) == FT(0.1)
+                @test first(radiation.surface_radiation.diffuse_surface_albedo) == FT(0.1)
                 @test radiation.solar_constant == FT(1361)
             end
         end
