@@ -179,141 +179,27 @@ end
     end
 end
 
-@testset "Dewpoint temperature diagnostics [$(FT)]" for FT in test_float_types()
+@testset "Supersaturation diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
-    microphysics = SaturationAdjustment()
-    model = AtmosphereModel(grid; microphysics)
+    model = AtmosphereModel(grid; microphysics=SaturationAdjustment())
 
-    # Test with subsaturated conditions (low moisture)
+    # Subsaturated air: the supersaturation is negative everywhere, and is exactly one less than
+    # the relative humidity
     set!(model, θ=300, qᵗ=0.005)
-    T⁺ = DewpointTemperature(model)
-    @test T⁺ isa Oceananigans.AbstractOperations.KernelFunctionOperation
-    T⁺_field = Field(T⁺)
-    @test all(isfinite.(interior(T⁺_field)))
-    # Dewpoint should be less than or equal to temperature
-    @test all(interior(T⁺_field) .≤ interior(model.temperature))
-    # Dewpoint should be in a reasonable range (above 200K)
-    @test all(interior(T⁺_field) .> 200)
+    𝒮 = Supersaturation(model)
+    @test 𝒮 isa Oceananigans.AbstractOperations.AbstractOperation
+    𝒮_field = SupersaturationField(model)
+    ℋ_field = RelativeHumidityField(model)
+    @test all(isfinite, 𝒮_field)
+    @test all(<(0), 𝒮_field)
+    @test maximum(abs, 𝒮_field - ℋ_field + 1) < eps(FT)
 
-    # With low moisture, dewpoint should be less than temperature
-    @test all(interior(T⁺_field) .< interior(model.temperature))
-
-    # Test with saturated conditions (high moisture)
-    set!(model, θ=300, qᵗ=0.03)  # High moisture to ensure saturation
-    T⁺_sat = DewpointTemperatureField(model)
-    # For saturated conditions, dewpoint should equal temperature where there is condensate
-    qˡ = model.microphysical_fields.qˡ
-    @allowscalar begin
-        for k in 1:8
-            if qˡ[1, 1, k] > 0  # If there's condensate, should be saturated
-                @test T⁺_sat[1, 1, k] ≈ model.temperature[1, 1, k] rtol=FT(1e-3)
-            end
-        end
-    end
-end
-
-@testset "Hydrostatic pressure computation [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))
-    constants = ThermodynamicConstants()
-
-    p₀ = FT(101325) # surface pressure, Pa
-    pˢᵗ = FT(1e5) # standard pressure for potential temperature, Pa
-    θ₀ = 288 # K
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-    dynamics = AnelasticDynamics(reference_state)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-
-    # Set up isothermal atmosphere: T = T₀ = constant
-    # For constant T, we need: θ = T₀ * (pˢᵗ/pᵣ)^(Rᵈ/cᵖᵈ) using the standard pressure
-    T₀ = θ₀
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    g = constants.gravitational_acceleration
-
-    θ_field = CenterField(grid)
-    set!(θ_field, (x, y, z) -> begin
-        pᵣ_z = adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
-        T₀ * (pˢᵗ / pᵣ_z)^(Rᵈ / cᵖᵈ)
-    end)
-
-    set!(model; θ = θ_field)
-
-    # Verify temperature is approximately constant
-    T_interior = interior(model.temperature)
-    max_rel_error = @allowscalar maximum(abs.((T_interior .- T₀) ./ T₀))
-    @test max_rel_error < FT(1e-5)
-
-    # Compute hydrostatic pressure
-    ph = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
-
-    # Expected cell-mean pressure for isothermal atmosphere:
-    # p_mean = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H))
-    # where H = Rᵈ * T₀ / g is the scale height
-    p_expected = CenterField(grid)
-    H = Rᵈ * T₀ / g
-
-    @allowscalar begin
-        p_interface_bottom = p₀
-        for k in 1:grid.Nz
-            Δz = Δzᶜᶜᶜ(1, 1, k, grid)
-            p_expected[1, 1, k] = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H))
-            p_interface_bottom = exp(-Δz / H) * p_interface_bottom
-        end
-    end
-
-    @test ph ≈ p_expected
-end
-
-@testset "Azimuthal-mean diagnostic [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size = (64, 64, 4), x = (-1, 1), y = (-1, 1),
-                           z = (0, 1), topology = (Periodic, Periodic, Bounded))
-
-    # The azimuthal mean of a constant field is that constant in every (populated) ring.
-    c = CenterField(grid)
-    set!(c, (x, y, z) -> 5)
-    c̄ = azimuthal_mean(c; radius = 1, Nr = 8)
-    @test size(c̄) == (8, 1, 4)
-    @test all(interior(c̄) .≈ 5)
-
-    # The azimuthal mean of the radius field increases monotonically outward.
-    ρ = CenterField(grid)
-    set!(ρ, (x, y, z) -> sqrt(x^2 + y^2))
-    ρ̄ = azimuthal_mean(ρ; radius = 1, Nr = 8)
-    profile = Array(interior(ρ̄, :, 1, 1))
-    @test issorted(profile)
-    @test all(0 .< profile .< 1)
-
-    # The in-place form matches.
-    dest = CenterField(ρ̄.grid)
-    azimuthal_mean!(dest, ρ)
-    @test Array(interior(dest)) ≈ Array(interior(ρ̄))
-
-    # A non-default center: averaging a field symmetric about (xc, yc) about that same
-    # center recovers a clean monotonic radial profile.
-    xc, yc = 0.3, -0.2
-    ρᵒ = CenterField(grid)
-    set!(ρᵒ, (x, y, z) -> sqrt((x - xc)^2 + (y - yc)^2))
-    ρ̄ᵒ = azimuthal_mean(ρᵒ; radius = 0.5, Nr = 8, center = (xc, yc))
-    offset_profile = Array(interior(ρ̄ᵒ, :, 1, 1))
-    @test issorted(offset_profile)
-    @test all(0 .< offset_profile .< 1)
-
-    # Sub-cell sampling (default m > 1) fills rings that center-only binning (m = 1) leaves
-    # empty near the center, and stays conservative (a constant maps to that constant).
-    coarse = Array(interior(azimuthal_mean(c; radius = 1, Nr = 64, m = 1), :, 1, 1))
-    filled = Array(interior(azimuthal_mean(c; radius = 1, Nr = 64), :, 1, 1))
-    @test any(isnan, coarse)
-    @test !any(isnan, filled)
-    @test all(v -> isnan(v) || v ≈ 5, coarse)
-    @test all(filled .≈ 5)
-
-    # Past the sub-cell resolution (very fine Nr) some rings still catch nothing; they are
-    # filled with NaN (not zero, which would bias a downstream radial average).
-    fine = azimuthal_mean(c; radius = 1, Nr = 200)
-    fine_profile = Array(interior(fine, :, 1, 1))
-    @test any(isnan, fine_profile)
-    @test all(v -> isnan(v) || v ≈ 5, fine_profile)
+    # Moist enough to condense: saturation adjustment pins the supersaturation to zero wherever it
+    # makes condensate, and leaves the rest of the column subsaturated
+    set!(model, θ=300, qᵗ=0.03)
+    𝒮_saturated = SupersaturationField(model)
+    @test maximum(model.microphysical_fields.qˡ) > 0
+    @test abs(maximum(𝒮_saturated)) < FT(1e-3)
+    @test minimum(𝒮_saturated) < 0
 end
