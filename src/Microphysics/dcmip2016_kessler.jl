@@ -304,6 +304,8 @@ AtmosphereModels.liquid_mass_fraction(::DCMIP2016KM, model) = model.microphysica
 end
 AtmosphereModels.ice_mass_fraction(::DCMIP2016KM, model) = nothing
 
+@inline AtmosphereModels.precipitating_mass_fraction(i, j, k, ::DCMIP2016KM, μ) = @inbounds μ.qʳ[i, j, k]
+
 """
 $(TYPEDSIGNATURES)
 

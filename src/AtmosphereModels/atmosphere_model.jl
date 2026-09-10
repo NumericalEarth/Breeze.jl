@@ -552,7 +552,12 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # Build specific fields for subsidence forcing (maps specific field names like :u, :θ to fields)
     formulation_fields = fields(formulation)
     moist_specific = moisture_specific_name(microphysics)
-    specific_fields = merge(velocities, formulation_fields, NamedTuple{(moist_specific,)}((specific_prognostic_moisture,)))
+    # Microphysical prognostics are densities too. Subsidence must differentiate their
+    # mass fractions, then apply the density factor once through SpecificForcing.
+    microphysical_specific_fields = NamedTuple(specific_field_name(n) => Field(prognostic_fields[n] / mass_density)
+                                              for n in prognostic_field_names(microphysics))
+    specific_fields = merge(velocities, formulation_fields, microphysical_specific_fields,
+                            NamedTuple{(moist_specific,)}((specific_prognostic_moisture,)))
 
     # Momentum, the dynamics mass variable, and thermodynamic density are weighted by the
     # coupling density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and

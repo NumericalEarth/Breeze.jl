@@ -5,9 +5,9 @@
 # `Stats.cfsite<site>_<gcm>_<experiment>_2004-2008.<month>.nc` — of 200–330 MB each: 22 sites
 # along the GPCI Pacific transect, three GCMs, two climates (`amip`, `amip4K`) and four months.
 # Each file carries 10-minute horizontal means, second moments, fluxes and the TKE budget on
-# 200 levels (Δz = 20 m, to 4 km) over 3.7 days, together with everything that forced the LES:
+# 200 levels (Δz = 20 m, to 4 km) over up to 6 days, together with everything that forced the LES:
 # the large-scale subsidence and horizontal advective tendencies (time-invariant), the radiative
-# heating (diurnal), the nudging tendencies, and the surface fluxes.
+# heating (with fixed solar forcing), the nudging tendencies, and the surface fluxes.
 #
 # This script downloads the members of one GCM and reduces each to the ~0.25 MB a single-column
 # model needs: the forcing, the initial and reference profiles, the surface time series, hourly
@@ -122,8 +122,8 @@ const TIMESERIES = ("shf_surface_mean", "lhf_surface_mean", "surface_temperature
 # Profiles at the initial time
 const INITIAL_PROFILES = ("thetali_mean", "qt_mean", "u_mean", "v_mean", "temperature_mean", "ql_mean")
 
-# Whole-run time-mean profiles: the natural nudging targets for a single-column model, and the
-# nudging tendencies the LES applied
+# Whole-run time-mean profiles and the nudging tendencies the LES applied. The historical
+# `_nudge` suffix labels diagnostics, NOT relaxation targets; the GCM targets are the initial profiles.
 const NUDGING_TARGETS = ("u_mean", "v_mean", "thetali_mean", "qt_mean")
 const NUDGING_TENDENCIES = ("dudt_nudge", "dvdt_nudge", "dtdt_nudge", "dqtdt_nudge")
 

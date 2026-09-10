@@ -13,18 +13,27 @@ replayed radiation) and are superseded; their numbers are kept in *Results so fa
 ## The protocol: a column that replays the LES's own setup
 
 Each LES member (a cfSite and a month) was forced by the GCM's time-invariant large-scale state (Shen et
-al. 2022, §2). The column reproduces that forcing; only the turbulence closure differs from the LES.
+al. 2022, §2). The column approximates that setup while replacing resolved turbulence with the closure.
+The prescribed LES surface fluxes, DCMIP Kessler implementation, liquid-water potential-temperature
+relaxation, reconstructed solar forcing, and upper-column extension are additional modeling choices.
 
 | | LES (PyCLES) | Column (`run_ensemble`) |
 |---|---|---|
-| Subsidence | upstream differencing of −wˢ ∂z | `SubsidenceForcing(wˢ; advection = UpwindBiased(order = 1))` |
+| Subsidence | upstream differencing of −wˢ ∂z | `SubsidenceForcing(wˢ; advection = UpwindBiased(order = 1))`, including vapor, cloud liquid and rain |
 | Horizontal advection, GCM vertical eddy flux | time-invariant tendencies of θ, qᵗ | `Forcing` with the file's `hadv + fluc` |
 | Surface fluxes | bulk, from the GCM SST | the LES's hourly SHF, LHF, stress as flux boundary conditions |
-| Relaxation | winds to the GCM on 6 h; T, qᵗ above 3 km on 24 h | the same, toward the `*_mean_initial` (GCM) profiles |
+| Relaxation | winds to the GCM on 6 h; T, qᵗ above 3 km on 24 h | matching rates and height mask toward `*_mean_initial`; θˡ replaces T, moisture relaxation uses qᵛ + qᶜˡ |
 | Microphysics | Kessler warm rain | `DCMIP2016KesslerMicrophysics()` with Tetens saturation |
 | Radiation | RRTM every step, fixed sun (GCM insolation, insolation-weighted cos θ_z), albedo 0.06, ε 0.95 | RRTMGP all-sky every 10 min, `FixedCosineZenith` and solar constant per column, same albedo and emissivity |
 | Domain | 4 km, 20 m cells; GCM profiles patched above for radiation | LES grid or coarser to 4 km, then faces stretched 12 %/cell to 25 km; the monthly-mean GCM column above 4 km, relaxed toward on 10 min |
-| Duration, scoring | 6 days (one member 3.7); means over the last 2 days | the same window; time means of θˡ, qᵗ, qˡ, qʳ, u, v |
+| Duration, scoring | 6 days (one member 3.7); reduction uses the last 2 days (paper figures use the last day) | the reduction's window; time means of θˡ, qᵗ, qˡ, qʳ, u, v |
+
+**Protocol version 2** corrects missing cloud/rain subsidence, total-water relaxation applied to vapor
+alone, and rain incorrectly triggering the closure's saturated stability branch. Rain still contributes
+to thermodynamic liquid water, heat capacity and buoyancy loading. Above the LES top, cloud and rain
+relax toward zero alongside the prescribed GCM vapor profile. Checkpoints record this version and the
+run configuration; resuming an older or incompatible forward map is rejected. Short diagnostic runs
+must specify an averaging window they reach; an empty window is an error.
 
 The observation vector of a column is its time-mean θˡ (K), qᵗ, qˡ (g kg⁻¹), u and v (m s⁻¹) as means over
 100 m cells from the surface to 3 km (Oceananigans' conservative `regrid!`), so that columns on different
@@ -74,7 +83,7 @@ validation/tke_calibration/
 │   ├── last_iteration.jl        # one line per saved iteration of a checkpoint
 │   ├── fetch_gcm_columns.jl     # regenerate data/gcm_columns_… from CMIP6 CFsubhr (not needed to run)
 │   └── solar_parameters.jl      #   … and add the fixed-sun insolation and cos θ_z per site and month
-└── test/runtests.jl             # replay, grids, parameter spaces, observations, a 3-minute EKI end to end
+└── test/runtests.jl             # replay, grids, parameter spaces, observations, a 12-minute EKI end to end
 ```
 
 ## Running

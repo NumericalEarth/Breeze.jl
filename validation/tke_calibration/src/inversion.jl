@@ -74,13 +74,35 @@ function replay(prior, history, y, Γ; rng, scheduler, accelerator, localization
     return ekp, replayed
 end
 
-function checkpoint!(output, history, ekp, y, Γ, problem, space, σ, radiation)
-    jldsave(output; history, y, Γ = diag(Γ), space = summary(space), σ = collect(Float64, values(σ)), parameter_names = collect(String.(parameter_names(space))),
+function checkpoint_protocol(problem, space, y, Γ, radiation)
+    return (; protocol_version = PROTOCOL_VERSION, y, Γ = diag(Γ), space = summary(space),
+              parameter_names = collect(String.(parameter_names(space))),
+              members = [(m.site, m.month) for m in members(problem)],
+              z_faces = [p.zf for p in problems(problem)],
+              observation_faces = first(problems(problem)).observation_zf,
+              variables = collect(String.(first(problems(problem)).variables)),
+              radiation = String(radiation), top = first(problems(problem)).zf[end])
+end
+
+function validate_checkpoint(saved, protocol, run_configuration)
+    for (key, value) in pairs(protocol)
+        name = String(key)
+        haskey(saved, name) || error("Checkpoint lacks $name; its calibration protocol cannot be verified")
+        isequal(saved[name], value) || error("Checkpoint $name differs from the requested calibration protocol; start a new calibration")
+    end
+    haskey(saved, "run_configuration") || error("Checkpoint lacks run configuration; its calibration protocol cannot be verified")
+    isequal(saved["run_configuration"], run_configuration) ||
+        error("Checkpoint run configuration differs (time step, windows, prior, or static stability); start a new calibration")
+    return nothing
+end
+
+function checkpoint!(output, history, ekp, y, Γ, problem, space, σ, radiation, run_configuration)
+    jldsave(output; protocol_version = PROTOCOL_VERSION, history, y, Γ = diag(Γ), space = summary(space), σ = collect(Float64, values(σ)), parameter_names = collect(String.(parameter_names(space))),
                     members = [(m.site, m.month) for m in members(problem)],
                     z_faces = [p.zf for p in problems(problem)], observation_faces = first(problems(problem)).observation_zf,
                     variables = collect(String.(first(problems(problem)).variables)), radiation = String(radiation),
                     top = first(problems(problem)).zf[end],
-                    u_final = get_u_final(ekp), Δts = get_Δt(ekp))
+                    run_configuration, u_final = get_u_final(ekp), Δts = get_Δt(ekp))
     return nothing
 end
 
@@ -94,10 +116,12 @@ it; `max_iterations` is only a safety cap.
 
 Pass `resume = "results/eki.jld2"` to continue from a checkpoint: the saved forward maps are replayed
 through the update (see [`replay`](@ref)) and the run continues toward the target.
+The protocol version, targets, noise, members, grids, radiation, and run configuration must agree.
+For a short diagnostic run, pass both `stop_time` and an `averaging_window` within that run.
 """
 function run_eki(problem::AnyProblem; space = RiDependentSpace(), N_ens = 20, target_pseudotime = 1, max_iterations = 50,
                  rng = MersenneTwister(1), σ = default_observation_noise, spread = 0.5, output = "results/eki.jld2",
-                 Δt = 1minute, architecture = CPU(), stop_time = nothing, radiation = :interactive,
+                 Δt = 1minute, architecture = CPU(), stop_time = nothing, averaging_window = nothing, radiation = :interactive,
                  scheduler = DataMisfitController(terminate_at = target_pseudotime),
                  accelerator = NesterovAccelerator(),
                  localization_method = SECNice(),
@@ -105,6 +129,10 @@ function run_eki(problem::AnyProblem; space = RiDependentSpace(), N_ens = 20, ta
 
     prior = prior_distribution(space; spread)
     y, Γ = observations(problem; σ)
+    protocol = checkpoint_protocol(problem, space, y, Γ, radiation)
+    run_configuration = (; Δt, stop_time, averaging_window, spread,
+                           windows = [m.window for m in members(problem)],
+                           static_stability = [p.static_stability for p in problems(problem)])
     isempty(dirname(output)) || mkpath(dirname(output))
 
     if isnothing(resume)
@@ -112,7 +140,9 @@ function run_eki(problem::AnyProblem; space = RiDependentSpace(), N_ens = 20, ta
         ekp = build_process(initial, y, Γ; rng, scheduler, accelerator, localization_method)
         history = []
     else
-        saved = load(resume, "history")
+        checkpoint = load(resume)
+        validate_checkpoint(checkpoint, protocol, run_configuration)
+        saved = checkpoint["history"]
         size(saved[1].ϕ, 1) == length(parameter_names(space)) || error("The checkpoint has $(size(saved[1].ϕ, 1)) parameters; $space has $(length(parameter_names(space)))")
         @info "Resuming from $resume after $(length(saved)) iterations"
         ekp, history = replay(prior, saved, y, Γ; rng, scheduler, accelerator, localization_method)
@@ -123,7 +153,7 @@ function run_eki(problem::AnyProblem; space = RiDependentSpace(), N_ens = 20, ta
     for _ in 1:max_iterations
         n = length(history) + 1
         ϕ = get_ϕ_final(prior, ekp)                       # constrained parameters, (N_params, N_ens)
-        wall = @elapsed G, means = forward_map(problem, ϕ; space, Δt, architecture, stop_time, radiation)
+        wall = @elapsed G, means = forward_map(problem, ϕ; space, Δt, architecture, stop_time, averaging_window, radiation)
         misfit = [sqrt(mean(((G[:, i] .- y) ./ sqrt.(diag(Γ))) .^ 2)) for i in 1:N_ens]
         best = argmin(misfit)
 
@@ -136,7 +166,7 @@ function run_eki(problem::AnyProblem; space = RiDependentSpace(), N_ens = 20, ta
         @info "  ensemble mean parameters: " * join([@sprintf("%s = %.3f", name, mean(ϕ[k, :])) for (k, name) in enumerate(parameter_names(space))], ", ")
 
         push!(history, (iteration = n, ϕ = copy(ϕ), G, misfit, wall, Δt = Δtₙ, pseudotime = T))
-        checkpoint!(output, history, ekp, y, Γ, problem, space, σ, radiation)
+        checkpoint!(output, history, ekp, y, Γ, problem, space, σ, radiation, run_configuration)
         flush(stdout); flush(stderr)      # Julia buffers both when they are redirected to a file
 
         if !isnothing(terminate)

@@ -16,7 +16,8 @@ over the LES's target window, as means over 100 m observation cells so that ever
 """
 module BreezeCalibration
 
-export LESMember, load_member, member_path, library_members,
+export PROTOCOL_VERSION,
+       LESMember, load_member, member_path, library_members,
        ColumnEnsembleProblem, MultiResolutionProblem, forward_map, observations, run_ensemble,
        les_faces, uniform_faces, hindcast_faces, regrid_column, regrid_columns,
        observable_variables, default_variables, default_observation_noise,
@@ -40,6 +41,7 @@ using Breeze.AtmosphereModels: moisture_specific_name
 using Oceananigans.Advection: UpwindBiased
 using Oceananigans.Units
 using Oceananigans.Grids: ColumnEnsembleSize
+using Oceananigans.Grids: znode
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using NCDatasets
@@ -53,6 +55,30 @@ using EnsembleKalmanProcesses
 using EnsembleKalmanProcesses.ParameterDistributions
 using EnsembleKalmanProcesses.Localizers: SECNice, NoLocalization
 const EKP = EnsembleKalmanProcesses
+
+#####
+##### The protocol version
+#####
+
+"""
+The version of the forward map that `run_ensemble` implements. A checkpoint records it, and resuming
+into a different version is refused: EKI resumes by *replaying saved forward maps* through the update,
+so a checkpoint whose `G` came from different physics would be mixed with new evaluations and the
+posterior would mean nothing. Neither the parameter count nor the recorded grids and members catch
+this — the physics can change with all of them fixed.
+
+**Bump this whenever the map from parameters to observations changes**, in `run_ensemble` or in the
+Breeze physics it exercises, and add a line here.
+
+- `1` — the protocol of PR #975 as merged into this study: Kessler warm rain with Tetens saturation,
+  first-order upwind subsidence, relaxation toward the `*_mean_initial` GCM profiles, interactive
+  all-sky RRTMGP on a column extended to 25 km. Superseded protocols (saturation adjustment, centered
+  subsidence, replayed radiation) predate the marker and have no version recorded at all.
+- `2` — subsidence of cloud liquid and rain as mass fractions, relaxation of nonprecipitating
+  total water, condensate removal in the upper extension, and exclusion of rain from the
+  closure's saturation test (with all water retained in its dry-air denominator).
+"""
+const PROTOCOL_VERSION = 2
 
 #####
 ##### The LES library
@@ -332,6 +358,14 @@ end
 
 @inline prescribed_flux(i, j, grid, clock, fields, p) = series_value(p.F, p.t₀, p.Δt, p.Nt, clock.time, j)
 
+# The LES relaxes nonprecipitating total water. Apply that source to vapor while
+# retaining cloud water, so d(qᵛ + qᶜˡ)/dt = rate × (qₙ - qᵛ - qᶜˡ).
+@inline function total_water_relaxation(i, j, k, grid, clock, fields, p)
+    z = znode(i, j, k, grid, Center(), Center(), Center())
+    @inbounds qᵗ = (fields.ρqᵛ[i, j, k] + fields.ρqᶜˡ[i, j, k]) / p.density[i, j, k]
+    return @inbounds p.rate * p.mask(z) * (p.target[i, j, k] - qᵗ)
+end
+
 # The surface flux of ρe: ρ₀ (Cᵂu★ u★³ + Cᵂʷ wΔ³) with the coefficients of parameter set i and the
 # hourly u★³ and wΔ³ series of member j
 @inline function surface_tke_flux(i, j, grid, clock, fields, p)
@@ -404,22 +438,25 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
     grid = RectilinearGrid(architecture; size = ColumnEnsembleSize(Nz = Nz, ensemble = (N_ens, N_mem), Hz = 3),
                            z = zf, topology = (Flat, Flat, Bounded))
 
+    # Per-column profiles broadcast over the parameter dimension: regrid each member once. Regridding is
+    # not cheap — `onto_centers` builds two grids and two fields and runs a `regrid!` — so `f` must be
+    # evaluated once per member and only then indexed, never inside the (i, j, k) comprehension.
+    function column_array(f)
+        profiles = [f(members[j]) for j in 1:N_mem]
+        return FT[profiles[j][k] for i in 1:N_ens, j in 1:N_mem, k in 1:Nz]
+    end
+
     p₀ = [m.p₀ for i in 1:N_ens, m in members]
     θ₀ = [m.θ₀ for i in 1:N_ens, m in members]
     # The reference state: adiabatic per column for a column within the LES; for a tall column each column's
     # reference follows its own initial potential temperature (LES below, GCM above) so the reference pressure
     # stays realistic through the stratosphere
-    θᵣ = tall ? FT[onto_centers(members[j].initial.θ, members[j], :θ)[k] for i in 1:N_ens, j in 1:N_mem, k in 1:Nz] : θ₀
+    θᵣ = tall ? column_array(m -> onto_centers(m.initial.θ, m, :θ)) : θ₀
     reference_state = ReferenceState(grid, constants; surface_pressure = p₀, potential_temperature = θᵣ)
     dynamics = AnelasticDynamics(reference_state)
 
     closures = [closure_from(space, view(params, :, i); static_stability = problem.static_stability) for i in 1:N_ens, j in 1:N_mem]
 
-    # Per-column profiles broadcast over the parameter dimension: interpolate each member once
-    function column_array(f)
-        profiles = [f(members[j]) for j in 1:N_mem]
-        return FT[profiles[j][k] for i in 1:N_ens, j in 1:N_mem, k in 1:Nz]
-    end
     # The subsidence velocity, a point value at the faces, is interpolated (zero above the LES top)
     onto_faces(v, m) = [z ≤ les_zf[end] ? interpolate_profile(m.z, v, [z])[1] : 0.0 for z in zf]
 
@@ -434,13 +471,20 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
 
     times = problem.times
     t_end = times[end]
-    # Each member's hourly heating on the model cells, held at its last value beyond the end of its own record
-    zf_les = zf[zf .≤ les_zf[end] + 1e-6]
-    heating = [regrid_columns(reshape(permutedims(m.heating), size(m.heating, 2), 1, :), les_zf, zf_les) for m in members] # (Nt, 1, Nz_les) each
-    Nz_les = size(heating[1], 3)
-    dTdt_rad = FieldTimeSeries{Center, Center, Center}(grid, times)
-    for n in eachindex(times)
-        set!(dTdt_rad[n], FT[k ≤ Nz_les ? heating[j][min(n, length(members[j].t)), 1, k] : 0 for i in 1:N_ens, j in 1:N_mem, k in 1:Nz])
+    # Each member's hourly heating on the model cells, held at its last value beyond the end of its own
+    # record. Only `radiation = :prescribed` reads it, and the series is one field per hour over the whole
+    # ensemble grid — hundreds of megabytes at production ensemble sizes — so build it only when it is used.
+    dTdt_rad = if radiation == :prescribed
+        zf_les = zf[zf .≤ les_zf[end] + 1e-6]
+        heating = [regrid_columns(reshape(permutedims(m.heating), size(m.heating, 2), 1, :), les_zf, zf_les) for m in members] # (Nt, 1, Nz_les) each
+        Nz_les = size(heating[1], 3)
+        fts = FieldTimeSeries{Center, Center, Center}(grid, times)
+        for n in eachindex(times)
+            set!(fts[n], FT[k ≤ Nz_les ? heating[j][min(n, length(members[j].t)), 1, k] : 0 for i in 1:N_ens, j in 1:N_mem, k in 1:Nz])
+        end
+        fts
+    else
+        nothing
     end
 
     # Relaxation targets: the GCM profiles the LES was relaxed toward (its initial profiles), continued by the
@@ -452,21 +496,25 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
     relax_u = Relaxation(rate = 1 / 6hours, target = uₙ)
     relax_v = Relaxation(rate = 1 / 6hours, target = vₙ)
     relax_θ = Relaxation(rate = 1 / 24hours, mask = ramp, target = θₙ)
-    relax_q = Relaxation(rate = 1 / 24hours, mask = ramp, target = qₙ)
+    relax_q = Forcing(total_water_relaxation; discrete_form = true,
+                     parameters = (; rate = 1 / 24hours, mask = ramp, target = qₙ, density = reference_state.density))
     # Above the LES top the column is not free: relax it strongly to the GCM column (a 200 m cosine onset)
     les_top = problem.les_top
     upper(z) = z < les_top ? 0.0 : z > les_top + 200 ? 1.0 : (1 - cos(π * (z - les_top) / 200)) / 2
     upper_relaxation(target) = Relaxation(; rate = upper_relaxation_rate, mask = upper, target)
 
-    # The moisture forcing acts on the microphysics' prognostic moisture (vapor, for Kessler), the same
-    # specific variable its flux boundary condition acts on
+    # Advect every Kessler moisture category with the large-scale velocity. The LES's
+    # prescribed moistening and total-water relaxation are sources of vapor; the upper
+    # extension relaxes vapor to the GCM humidity and removes condensate on the same timescale.
     qname = moisture_specific_name(microphysics)
     aloft(f, target) = tall ? (f..., upper_relaxation(target)) : f
     energy_forcing = radiation == :prescribed ? (Forcing(dTdt), Forcing(dTdt_rad)) : (Forcing(dTdt),)
     forcing = merge((u = aloft((subsidence, relax_u), uₙ),
                      v = aloft((subsidence, relax_v), vₙ),
                      θ = aloft((subsidence, relax_θ), θₙ),
-                     s = energy_forcing),
+                     s = energy_forcing,
+                     qᶜˡ = tall ? (subsidence, upper_relaxation(0)) : subsidence,
+                     qʳ = tall ? (subsidence, upper_relaxation(0)) : subsidence),
                     NamedTuple{(qname,)}((aloft((subsidence, Forcing(dqdt), relax_q), qₙ),)))
 
     # Interactive radiation: RRTMGP all-sky on every column with the LES protocol's fixed sun (the GCM's
@@ -557,7 +605,17 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
 
     run!(simulation)
 
-    n = reshape(max.(counts, 1), 1, N_mem, 1)
+    # Every column must have contributed at least one sample, or its "time mean" is a zero profile that
+    # looks like a finite observation. This is what a `stop_time` short of a member's target window does.
+    if any(iszero, counts)
+        empty = findall(iszero, counts)
+        error("Members $([(members[j].site, members[j].month) for j in empty]) contributed no samples to " *
+              "their time mean: the run stopped at t = $(time(simulation)) s and their averaging windows are " *
+              "$([windows[j] for j in empty]). Pass `averaging_window` (and a `stop_time` that reaches it) " *
+              "when running for less than a member's own target window.")
+    end
+
+    n = reshape(counts, 1, N_mem, 1)
     return map(x -> x ./ n, sums), model
 end
 

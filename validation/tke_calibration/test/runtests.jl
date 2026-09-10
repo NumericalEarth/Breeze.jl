@@ -6,6 +6,17 @@ using EnsembleKalmanProcesses.ParameterDistributions
 using Random, Statistics, LinearAlgebra, JLD2, NCDatasets
 using Breeze.TurbulenceClosures: ConstantStabilityFunctions, RiDependentStabilityFunctions
 using Oceananigans.Units
+using Oceananigans: RectilinearGrid, Flat, Bounded
+
+@testset "total-water relaxation acts on the vapor-cloud sum" begin
+    grid = RectilinearGrid(size = 4, z = (3000, 4000), topology = (Flat, Flat, Bounded))
+    density = fill(0.8, 1, 1, 4)
+    fields = (ρqᵛ = density .* 0.006, ρqᶜˡ = density .* 0.002)
+    p = (; density, rate = 1 / 86400, mask = Returns(1), target = fill(0.008, 1, 1, 4))
+    @test BreezeCalibration.total_water_relaxation(1, 1, 2, grid, nothing, fields, p) ≈ 0 atol=1e-20
+    wet = merge(p, (; target = fill(0.009, 1, 1, 4)))
+    @test BreezeCalibration.total_water_relaxation(1, 1, 2, grid, nothing, fields, wet) ≈ 0.001 / 86400
+end
 
 # A linear toy problem in the closure's 17 parameters: G(θ) = A θ, observed with noise 0.1
 function toy_problem(rng; N_obs = 40)
@@ -144,12 +155,25 @@ end
     members = [load_member(22, "07")]
     problem = MultiResolutionProblem([ColumnEnsembleProblem(members; Δz = 100), ColumnEnsembleProblem(members; z_faces = hindcast_faces())])
     output = joinpath(mktempdir(), "eki.jld2")
-    ekp, prior, ϕ, history = run_eki(problem; space = ConstantSpace(), N_ens = 3, max_iterations = 1, output, stop_time = 3minutes)
+    # Include the 10-minute callback, so this exercises evolved profiles as well as t = 0.
+    short_run = (; stop_time = 12minutes, averaging_window = (0.0, 12minutes))
+    ekp, prior, ϕ, history = run_eki(problem; space = ConstantSpace(), N_ens = 3, max_iterations = 1, output, short_run...)
     @test length(history) == 1 && size(ϕ) == (7, 3) && all(isfinite, history[1].G)
     saved = load(output)
     @test saved["radiation"] == "interactive" && saved["top"] == 25_000 && length(saved["z_faces"]) == 2
     @test saved["parameter_names"] == collect(String.(parameter_names(ConstantSpace())))
+    @test maximum(history[1].G) > 250 # real potential temperatures, not empty-window zero means
+    @test maximum(abs, history[1].G[:, 1] - history[1].G[:, 2]) > 1e-8
+    @test saved["run_configuration"].averaging_window == short_run.averaging_window
+    protocol = BreezeCalibration.checkpoint_protocol(problem, ConstantSpace(), saved["y"], Diagonal(saved["Γ"]), :interactive)
+    old = merge(saved, Dict("protocol_version" => PROTOCOL_VERSION - 1))
+    @test_throws ErrorException BreezeCalibration.validate_checkpoint(old, protocol, saved["run_configuration"])
+    # Incompatible forward maps must be rejected before replay, even when their dimensions agree.
+    @test_throws ErrorException run_eki(problem; space = ConstantSpace(), resume = output, radiation = :prescribed, short_run...)
+    @test_throws ErrorException run_eki(problem; space = ConstantSpace(), resume = output, Δt = 30, short_run...)
+    reversed_problem = MultiResolutionProblem(reverse(problem.problems))
+    @test_throws ErrorException run_eki(reversed_problem; space = ConstantSpace(), resume = output, short_run...)
     # Resuming replays the saved forward map exactly and runs one more iteration
-    _, _, _, history₂ = run_eki(problem; space = ConstantSpace(), N_ens = 3, max_iterations = 1, output, stop_time = 3minutes, resume = output)
+    _, _, _, history₂ = run_eki(problem; space = ConstantSpace(), N_ens = 3, max_iterations = 1, output, short_run..., resume = output)
     @test length(history₂) == 2 && history₂[1].ϕ == history[1].ϕ
 end

@@ -49,7 +49,8 @@ environmental stratification. Here ``θ`` is the dry potential temperature of th
 saturation mixing ratio, ``rʷ`` the mixing ratio of nonprecipitating water — vapor, cloud liquid
 and cloud ice, so that precipitation falling through subsaturated air does not make it saturated —
 ``ϵ = Rᵈ / Rᵛ``, and ``ℒ`` the latent heat. The mixing ratios are formed exactly from Breeze's
-mass fractions with the dry-air mass fraction, ``r = q / (1 - qʷ)``.
+mass fractions with the dry-air mass fraction, ``r = q / (1 - qᵗ)``, where ``qᵗ``
+includes precipitating water. For Kessler microphysics, rain is excluded from ``qʷ``.
 
 The phase equilibrium of the microphysics (through `microphysics_phase_equilibrium`) supplies
 both the saturation test and the parcel's latent heating: over a mixed-phase surface the
@@ -105,19 +106,21 @@ end
 
 @inline function nonprecipitating_waterᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛ)
     Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛ)
-    return q.vapor + q.liquid + q.ice
+    qʳ = precipitating_mass_fraction(i, j, k, buoyancy.microphysics, buoyancy.microphysical_fields)
+    return q.vapor + q.liquid + q.ice - qʳ
 end
 
-# Mixing ratios, per unit mass of dry air: r = q / qᵈ with qᵈ = 1 - qʷ
+# Mixing ratios, per unit mass of dry air: qᵈ excludes all water, including rain.
 @inline function saturation_mixing_ratioᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛ)
     qˢ = saturation_specific_humidityᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛ)
-    qʷ = nonprecipitating_waterᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛ)
-    return qˢ / (1 - qʷ)
+    Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛ)
+    return qˢ / (1 - q.vapor - q.liquid - q.ice)
 end
 
 @inline function nonprecipitating_water_mixing_ratioᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛ)
     qʷ = nonprecipitating_waterᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛ)
-    return qʷ / (1 - qʷ)
+    Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛ)
+    return qʷ / (1 - q.vapor - q.liquid - q.ice)
 end
 
 # ln θ of the dry potential temperature θ = T (pˢᵗ / p)^{Rᵈ / cᵖᵈ}
