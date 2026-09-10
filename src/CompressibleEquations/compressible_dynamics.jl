@@ -455,6 +455,22 @@ AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_st
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
 AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
 
+# Dry-air mass fraction qᵈ = ρᵈ/ρ = 1 - qᵗ at the momentum locations. Ratio of face-interpolated
+# densities, not an interpolated cell-centered ratio, so that qᵈ ⋅ (-g ℑ(ρ)) is exactly -g ℑ(ρᵈ) —
+# the same face density `_compute_velocities!` divides by. `safe_divide` covers ρ = 0 (masked or
+# unset cells) with an unweighted force.
+@inline AtmosphereModels.coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, d::CompressibleDynamics) =
+    safe_divide(ℑxᶠᵃᵃ(i, j, k, grid, d.dry_density),
+                ℑxᶠᵃᵃ(i, j, k, grid, d.total_density), one(grid))
+
+@inline AtmosphereModels.coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, d::CompressibleDynamics) =
+    safe_divide(ℑyᵃᶠᵃ(i, j, k, grid, d.dry_density),
+                ℑyᵃᶠᵃ(i, j, k, grid, d.total_density), one(grid))
+
+@inline AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, d::CompressibleDynamics) =
+    safe_divide(ℑzᵃᵃᶠ(i, j, k, grid, d.dry_density),
+                ℑzᵃᵃᶠ(i, j, k, grid, d.total_density), one(grid))
+
 #####
 ##### Prognostic fields
 #####

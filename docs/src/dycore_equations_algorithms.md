@@ -22,6 +22,13 @@ Let ``ρ`` denote density, ``\boldsymbol{u}`` velocity, ``p`` pressure, ``\bolds
 Notation ``\boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u})`` above denotes a vector whose components are
 ``[\boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u})]_i = \boldsymbol{\nabla \cdot}\, (ρ u_i \boldsymbol{u})``.
 
+Here ``ρ`` is the *total* density of the moist mixture, so the pressure-gradient and gravitational
+terms are forces on that total mass. Breeze does not step total momentum: it is weighted by the
+formulation's coupling density (``ρᵣ`` on the anelastic core, the prognostic ``ρᵈ`` on the
+compressible core), so both forces enter the tendency rescaled by ``ρᵈ/ρ`` — exactly 1 where the
+two densities coincide. See [Compressible dynamics](@ref Compressible-section) and
+[Notation and conventions](@ref).
+
 ## Thermodynamic equation
 
 In addition to mass and momentum, Breeze advances a thermodynamic prognostic variable ``χ`` in conservative (flux) form:

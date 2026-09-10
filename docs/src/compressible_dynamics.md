@@ -1,24 +1,43 @@
 # [Compressible dynamics](@id Compressible-section)
 
 [`CompressibleDynamics`](@ref) solves the fully compressible Euler equations with prognostic
-total density ``ρ`` (including dry air, vapor, and condensate). The formulation retains acoustic waves and is suitable for problems where full
-compressibility is important — global atmospheric flows, baroclinic-wave benchmarks, and
-acoustic-mode validation.
+dry-air density ``ρ^d``; the total density ``ρ = ρ^d + ρ q^t`` (dry air plus vapor and condensate)
+is diagnosed from it and the water partial densities. The formulation retains acoustic waves and
+is suitable for problems where full compressibility is important — global atmospheric flows,
+baroclinic-wave benchmarks, and acoustic-mode validation.
 
 ## Prognostic equations
 
-The compressible formulation advances density ``ρ``, momentum ``ρ \boldsymbol{u}``, a
+The compressible formulation advances dry density ``ρ^d``, momentum ``ρ^d \boldsymbol{u}``, a
 thermodynamic variable ``χ`` (see [Governing equations](@ref Dycore-section)), total moisture
 ``ρ q^t``, and tracers in flux form:
 
 ```math
 \begin{aligned}
-&\text{Mass:} && ∂_t ρ + ∇·(ρ \boldsymbol{u}) = 0 ,\\
-&\text{Momentum:} && ∂_t(ρ \boldsymbol{u}) + ∇·(ρ \boldsymbol{u} \boldsymbol{u}) + ∇ p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + ∇·\boldsymbol{\mathcal{T}} ,\\
+&\text{Dry mass:} && ∂_t ρ^d + ∇·(ρ^d \boldsymbol{u}) = 0 ,\\
+&\text{Momentum:} && ∂_t(ρ^d \boldsymbol{u}) + ∇·(ρ^d \boldsymbol{u} \boldsymbol{u}) = - q^d ∇ p - ρ^d g \hat{\boldsymbol{z}} + ρ^d \boldsymbol{f} + ∇·\boldsymbol{\mathcal{T}} ,\\
 &\text{Thermodynamic:} && ∂_t χ + ∇·(χ \boldsymbol{u}) = Π \, ∇·\boldsymbol{u} + S_χ ,\\
 &\text{Moisture:} && ∂_t(ρ q^t) + ∇·(ρ q^t \boldsymbol{u}) = S_q .
 \end{aligned}
 ```
+
+Dry air is the prognostic mass because its continuity equation has no sedimentation or phase-change
+source; the momentum carrier is therefore also dry, and velocity is recovered as
+``\boldsymbol{u} = (ρ^d \boldsymbol{u})/ρ^d``. Pressure gradient and gravity, however, act on the
+*total* mass. Weighting the single-velocity mixture equation
+``ρ \, D\boldsymbol{u}/Dt = -∇p - ρ g \hat{\boldsymbol{z}}`` by ``ρ^d/ρ`` and folding in dry
+continuity gives the conservative form above, in which both forces carry the dry-air mass fraction
+
+```math
+q^d = ρ^d / ρ = 1 - q^t ,
+```
+
+and gravity collapses to ``-ρ^d g``. These are the height-coordinate form of the ``μ^d α`` and
+``-g μ^d`` factors in the dry-mass-coordinate equations of
+[Skamarock & Klemp (2008)](@cite SkamarockKlemp2008); without them a parcel at ``q^t = 0.02`` falls
+2% too fast. Advection, Coriolis and the stress divergence need no weight. In the code the weight is
+`coupling_mass_fractionᶠᶜᶜ` and its ``ᶜᶠᶜ``/``ᶜᶜᶠ`` counterparts, a ratio of face-interpolated
+densities so the discrete gravitational force is exactly ``-g \, ℑ^z(ρ^d)``.
 
 Pressure is closed by the moist ideal gas law
 
@@ -26,9 +45,9 @@ Pressure is closed by the moist ideal gas law
 p = ρ R^m T ,
 ```
 
-where ``R^m`` is the mixture gas constant. For the potential-temperature thermodynamics the
-prognostic is ``χ = ρ θ`` and ``Π = 0``; for static-energy thermodynamics ``χ = ρ s`` and ``Π``
-encodes pressure work.
+where ``R^m`` is the mixture gas constant and ``ρ`` is the total density. For the
+potential-temperature thermodynamics the prognostic is ``χ = ρ^d θ`` and ``Π = 0``; for
+static-energy thermodynamics ``χ = ρ^d s`` and ``Π`` encodes pressure work.
 
 ## Time integration options
 
@@ -151,16 +170,22 @@ inside the substep loop is
 \begin{aligned}
 ∂_τ ρ'    &+ ∇·(ρ\boldsymbol{u})' = G^s_ρ , \\
 ∂_τ (ρθ)' &+ ∇·\!\left(θ^L (ρ\boldsymbol{u})'\right) = G^s_{ρθ} , \\
-∂_τ (ρu)' &+ ∂_x p^L + ∂_x \left(C^L (ρθ)'\right) = G^s_{ρu} , \\
-∂_τ (ρv)' &+ ∂_y p^L + ∂_y \left(C^L (ρθ)'\right) = G^s_{ρv} , \\
-∂_τ (ρw)' &+             ∂_z \left(C^L (ρθ)'\right) + g\, ρ' = G^s_{ρw} .
+∂_τ (ρu)' &+ q^d \left[∂_x p^L + ∂_x \left(C^L (ρθ)'\right)\right] = G^s_{ρu} , \\
+∂_τ (ρv)' &+ q^d \left[∂_y p^L + ∂_y \left(C^L (ρθ)'\right)\right] = G^s_{ρv} , \\
+∂_τ (ρw)' &+ q^d \left[∂_z \left(C^L (ρθ)'\right) + g\, ρ'\right] = G^s_{ρw} .
 \end{aligned}
 ```
+
+The coupling mass fraction ``q^d = ρ^d/ρ`` is frozen at ``U^L`` with the other linearization
+coefficients (water densities are fixed across the substeps, so ``ρ'`` is both the dry and the
+total density perturbation) and evaluated at the face of the momentum component it acts on. It
+also multiplies the corresponding entries of the vertically implicit tridiagonal matrix, keeping
+matrix and right-hand side consistent, and is identically 1 for dry runs.
 
 Each ``G^s`` is the slow tendency for that variable, held constant across the ``N_τ``
 substeps of a given RK stage. For vertical momentum, ``G^s_{ρw}`` is assembled by adding the
 stage-entry vertical pressure-gradient and buoyancy imbalance,
-``-∂_z(p^L - p_r) - g(ρ^L - ρ_r)``, to the slow non-pressure tendency. The acoustic
+``-q^d\left[∂_z(p^L - p_r) + g(ρ^L - ρ_r)\right]``, to the slow non-pressure tendency. The acoustic
 linearized pressure coefficient
 ``C^L = γ^m R^m\big|_L Π^L`` and the temperature-flux factor ``θ^L`` are cached for the
 stage, which is what makes each stage's substep system linear.
@@ -199,10 +224,14 @@ The vertical acoustic equation is projected onto the same contravariant
 momentum. With static terrain slopes, the pressure part of the fast force is
 
 ```math
-\partial_\zeta p'
-- \left(\frac{\partial z}{\partial x}\right)_\zeta \partial_x p'
-- \left(\frac{\partial z}{\partial y}\right)_\zeta \partial_y p' .
+q^d \, \partial_\zeta p'
+- \left(\frac{\partial z}{\partial x}\right)_\zeta q^d \, \partial_x p'
+- \left(\frac{\partial z}{\partial y}\right)_\zeta q^d \, \partial_y p' ,
 ```
+
+where each ``q^d`` sits at the face of the momentum component whose force it converts — the
+horizontal ones exactly as they enter the ``(ρu)'`` and ``(ρv)'`` updates, so the contravariant
+projection stays in step with them.
 
 The slow vertical tendency is projected consistently as the Cartesian
 vertical-momentum slow tendency minus the slope-weighted horizontal slow

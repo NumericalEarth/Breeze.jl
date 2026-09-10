@@ -3,25 +3,30 @@
 
 Module implementing fully compressible dynamics for atmosphere models.
 
-The compressible formulation directly time-steps density as a prognostic variable
-and computes pressure from the ideal gas law. This formulation does not filter
+The compressible formulation directly time-steps the dry-air density as a prognostic
+variable and computes pressure from the ideal gas law. This formulation does not filter
 acoustic waves, so explicit time-stepping with small time steps (or acoustic
 substepping) is required.
 
-The fully compressible Euler equations in conservation form are:
+The fully compressible Euler equations in conservation form, with dry air as the mass
+and momentum carrier, are:
 
 ```math
 \\begin{aligned}
-&\\text{Mass:} && \\partial_t \\rho + \\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u}) = 0 \\\\
-&\\text{Momentum:} && \\partial_t (\\rho \\boldsymbol{u}) + \\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u} \\boldsymbol{u}) + \\boldsymbol{\\nabla} p = -\\rho g \\hat{\\boldsymbol{z}} + \\rho \\boldsymbol{f} + \\boldsymbol{\\nabla \\cdot \\mathcal{T}}
+&\\text{Dry mass:} && \\partial_t \\rho^d + \\boldsymbol{\\nabla \\cdot} (\\rho^d \\boldsymbol{u}) = 0 \\\\
+&\\text{Momentum:} && \\partial_t (\\rho^d \\boldsymbol{u}) + \\boldsymbol{\\nabla \\cdot} (\\rho^d \\boldsymbol{u} \\boldsymbol{u}) = - q^d \\boldsymbol{\\nabla} p - \\rho^d g \\hat{\\boldsymbol{z}} + \\rho^d \\boldsymbol{f} + \\boldsymbol{\\nabla \\cdot \\mathcal{T}}
 \\end{aligned}
 ```
+
+Pressure gradient and gravity act on the *total* mass ``\\rho = \\rho^d + \\rho q^t``, so on
+dry-coupled momentum they carry ``q^d = \\rho^d/\\rho = 1 - q^t``
+(`AtmosphereModels.coupling_mass_fractionᶠᶜᶜ` and its ``ᶜᶠᶜ``/``ᶜᶜᶠ`` counterparts).
 
 Pressure is computed from the ideal gas law:
 ```math
 p = \\rho R^m T
 ```
-where ``R^m`` is the mixture gas constant.
+where ``R^m`` is the mixture gas constant and ``\\rho`` is the total density.
 """
 module CompressibleEquations
 
@@ -64,6 +69,7 @@ using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
 using Breeze.Solvers: NewtonSolver
+using Breeze.Utils: safe_divide
 using Breeze.Thermodynamics: mixture_gas_constant, dry_air_gas_constant,
                              vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState
 

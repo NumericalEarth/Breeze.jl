@@ -178,6 +178,24 @@ overrides it with a diagnosed total-density field, distinct from the coupling de
 total_density(dynamics) = dynamics_density(dynamics)
 
 """
+    coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics)
+    coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics)
+    coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+
+Return ``ρᵈ / ρ`` at the momentum location: the factor converting a *mixture* force density
+(pressure gradient, gravity — both act on the total mass) into a force on the coupling-weighted
+momentum ``ρu = ρᵈ u``. Advection, Coriolis and stress take no factor.
+
+The default `1` is exact wherever `total_density === dynamics_density` (e.g. anelastic);
+`CompressibleDynamics` overrides it with ``qᵈ = 1 - qᵗ``. Derivation:
+[Compressible dynamics](@ref Compressible-section).
+"""
+@inline coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) = one(grid)
+
+@inline coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) = one(grid)
+@inline coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) = one(grid)
+
+"""
 $(TYPEDSIGNATURES)
 
 Return the density ``ρ`` at `(i, j, k)` that mass fractions are referenced to, so that ``qˣ`` and
@@ -477,6 +495,16 @@ Adapt.adapt_structure(to, s::HorizontalSlowMode) = HorizontalSlowMode(adapt(to, 
 # Vertical PG and buoyancy return zero (handled by acoustic loop)
 @inline z_pressure_gradient(i, j, k, grid, ::HorizontalSlowMode) = zero(grid)
 @inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::HorizontalSlowMode, args...) = zero(grid)
+
+# Whichever forces the wrappers let through still act on the wrapped formulation's momentum.
+const SlowMomentumMode = Union{SlowTendencyMode, HorizontalSlowMode}
+
+@inline coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, s::SlowMomentumMode) =
+    coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, s.dynamics)
+@inline coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, s::SlowMomentumMode) =
+    coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, s.dynamics)
+@inline coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, s::SlowMomentumMode) =
+    coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, s.dynamics)
 
 #####
 ##### Tendency computation interface

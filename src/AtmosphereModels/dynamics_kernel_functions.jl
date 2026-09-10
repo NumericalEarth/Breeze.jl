@@ -61,6 +61,13 @@ end
     div_𝐯w(i, j, k, grid, advection, momentum, velocities.w) +
     U_dot_∇w_metric(i, j, k, grid, advection, momentum, velocities)
 
+#####
+##### Momentum tendencies
+#####
+##### `coupling_mass_fraction*` rescales the mixture pressure and buoyancy forces onto the
+##### coupling-weighted momentum ρu = ρᵈ u. The other terms need no factor.
+#####
+
 @inline function x_momentum_tendency(i, j, k, grid,
                                      reference_density,
                                      advection,
@@ -74,8 +81,10 @@ end
                                      ρu_forcing,
                                      dynamics)
 
+    qᵈ = coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics)
+
     return ( - x_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics)
-             - x_pressure_gradient(i, j, k, grid, dynamics)
+             - qᵈ * x_pressure_gradient(i, j, k, grid, dynamics)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
              + ρu_forcing(i, j, k, grid, clock, model_fields))
@@ -94,8 +103,10 @@ end
                                      ρv_forcing,
                                      dynamics)
 
+    qᵈ = coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics)
+
     return ( - y_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics)
-             - y_pressure_gradient(i, j, k, grid, dynamics)
+             - qᵈ * y_pressure_gradient(i, j, k, grid, dynamics)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
              + ρv_forcing(i, j, k, grid, clock, model_fields))
@@ -120,10 +131,12 @@ end
                                      microphysical_fields,
                                      constants)
 
+    qᵈ = coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+
     return ( - z_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics)
-             - explicit_z_pressure_gradient(i, j, k, grid, dynamics)
-             + explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, temperature,
-                                           specific_prognostic_moisture, microphysics, microphysical_fields, constants)
+             - qᵈ * explicit_z_pressure_gradient(i, j, k, grid, dynamics)
+             + qᵈ * explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, temperature,
+                                                specific_prognostic_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
              + ρw_forcing(i, j, k, grid, clock, model_fields))

@@ -300,11 +300,14 @@ end
     @inbounds ρw̃′[i, j, k] = ρw̃_outer - ρw̃_stage
 end
 
+# Every `∇p′` returns the *force on the momentum*, weighted by `qᵈ` at its own face. These terrain
+# methods replace the flat ones wholesale, so they must apply the weight themselves.
 @inline function ∇ˣp′(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,
                                                 ρθ′, Πᴸ, γRᵐᴸ)
     stencil = dynamics.terrain_metrics.pressure_gradient_stencil
-    return terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
+    return AtmosphereModels.coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
+           terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                   stencil, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
@@ -312,7 +315,8 @@ end
                                                 dynamics::TerrainCompressibleDynamics,
                                                 ρθ′, Πᴸ, γRᵐᴸ)
     stencil = dynamics.terrain_metrics.pressure_gradient_stencil
-    return terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
+    return AtmosphereModels.coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
+           terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                   stencil, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
@@ -368,11 +372,14 @@ terrain_ρw_boundary_conditions(::TerrainFollowingGrid, ρw_bcs) =
                               bottom = NormalFlowBoundaryCondition(terrain_kinematic_bottom_ρw; discrete_form = true),
                               top = ρw_bcs.top, immersed = ρw_bcs.immersed)
 
+# ρw̃ = ρw - slopeₓ·ρu - slopeᵧ·ρv, so the force on ρw̃ collects the horizontal pressure forces *as
+# they act on ρu and ρv*: weighted at their own x/y faces, then interpolated. Weighting after the
+# interpolation would put the contravariant projection out of step with the (ρu)′,(ρv)′ updates.
 @inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    ∂x_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, AtmosphereModels.x_pressure_gradient, dynamics)
-    ∂y_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, AtmosphereModels.y_pressure_gradient, dynamics)
+    ∂x_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, weighted_x_pressure_gradient, dynamics)
+    ∂y_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, weighted_y_pressure_gradient, dynamics)
     return slope_x * ∂x_p_ccf + slope_y * ∂y_p_ccf
 end
 
@@ -397,10 +404,12 @@ end
 @inline function ∇ᶻp′(i, j, k, grid,
                       dynamics::TerrainCompressibleDynamics,
                       ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
+    qᵈ = AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
     ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+    # The correction is built from the already-weighted `∇ˣp′`/`∇ʸp′`.
     correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
                                                                             dynamics, ρθ′, Πᴸ, γRᵐᴸ)
-    return ∂z_p′ - slope_correction * correction
+    return qᵈ * ∂z_p′ - slope_correction * correction
 end
 
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
@@ -526,6 +535,7 @@ end
     Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, Gⁿρu)
     Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, Gⁿρv)
 
+    qᵈ = AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
     ∂z_p′ = terrain_vertical_pressure_gradient(i, j, k, grid, pᴸ, pᵣ)
     ρ′ᶜᶜᶠ = terrain_vertical_buoyancy_density(i, j, k, grid, ρᴸ, ρᵣ)
     horizontal_slow_tendency = slope_x * Gⁿρu_ccf + slope_y * Gⁿρv_ccf
@@ -533,9 +543,8 @@ end
 
     @inbounds Gˢρw̃[i, j, k] = (Gⁿρw[i, j, k] -
                                 horizontal_slow_tendency -
-                                vertical_pressure_tendency_factor * ∂z_p′ +
-                                horizontal_pressure_gradient -
-                                g * ρ′ᶜᶜᶠ) * (k > 1)
+                                qᵈ * (vertical_pressure_tendency_factor * ∂z_p′ + g * ρ′ᶜᶜᶠ) +
+                                horizontal_pressure_gradient) * (k > 1)
 end
 
 @inline terrain_vertical_pressure_gradient(i, j, k, grid, p, ::Nothing) =
