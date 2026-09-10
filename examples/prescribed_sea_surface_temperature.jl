@@ -174,7 +174,7 @@ filtered_velocities = FilteredSurfaceVelocities(grid; filter_timescale=1hour)
 # difference of 4 degrees K,
 
 ΔT = 4 # K
-T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
+T₀(x, t) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 
 # ## Momentum drag
 #
@@ -196,8 +196,8 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # We complete our specification by using the same polynomial coefficient for
 # sensible and latent heat fluxes. The flux type will be automatically inferred:
 
-ρs_surface_flux = BulkSensibleHeatFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
-ρqᵉ_surface_flux = BulkVaporFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
+ρE_surface_flux = BulkSensibleHeatFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
+ρqᵗ_surface_flux = BulkVaporFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
 
 # We can visualize how the neutral drag coefficient varies with wind speed,
 # and the range of stability-corrected values expected in this simulation.
@@ -259,8 +259,8 @@ fig
 
 ρu_bcs = FieldBoundaryConditions(bottom=ρu_surface_flux)
 ρv_bcs = FieldBoundaryConditions(bottom=ρv_surface_flux)
-ρs_bcs = FieldBoundaryConditions(bottom=ρs_surface_flux)
-ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_surface_flux)
+ρE_bcs = FieldBoundaryConditions(bottom=ρE_surface_flux)
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_surface_flux)
 
 # ## Model construction
 #
@@ -269,7 +269,7 @@ fig
 # schemes, microphysics, and boundary conditions.
 
 model = AtmosphereModel(grid; momentum_advection, scalar_advection, microphysics, dynamics,
-                        boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρs=ρs_bcs, ρqᵉ=ρqᵉ_bcs))
+                        boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρE=ρE_bcs, ρqᵗ=ρqᵗ_bcs))
 
 # ## Initial conditions
 #

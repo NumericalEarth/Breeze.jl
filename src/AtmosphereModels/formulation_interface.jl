@@ -86,8 +86,35 @@ Accepts a `Symbol`, `Val(Symbol)`, or formulation struct.
 """
 function thermodynamic_density_name end
 
-thermodynamic_density_name(formulation::Symbol) =
-    thermodynamic_density_name(Val(formulation))
+"""
+    specific_thermodynamic_field(formulation)
+
+Return the specific (per unit mass) thermodynamic field the `formulation` evolves — what its
+advection operator reconstructs, as opposed to the density-weighted prognostic named by
+[`thermodynamic_density_name`](@ref).
+"""
+function specific_thermodynamic_field end
+
+thermodynamic_density_name(formulation::Symbol) = thermodynamic_density_name(Val(formulation))
+
+"""
+    total_energy_density_name
+
+The key under which an *energy* input — a surface heat flux, a diabatic heating rate — is
+supplied to `AtmosphereModel`, `:ρE`, along with its specific alias `:E` for forcings.
+
+``E`` denotes total energy (`total_energy`), so the key names the physical input without
+committing to the variable that carries it: a `boundary_conditions` or `forcing` entry keyed
+`ρE` is routed onto whichever thermodynamic density the formulation evolves (see
+[`thermodynamic_density_name`](@ref)), converted as that variable requires — divided by
+``cᵖᵐ`` (fluxes) or ``cᵖᵐ Π`` (forcings) for ``ρθ``, and passed through unconverted for
+``ρs``, which is itself an energy per unit mass.
+
+``s`` names static energy specifically and ``e`` is reserved for turbulent kinetic energy, so
+neither doubles as the energy key: `ρs` is a valid key only when static energy *is* the
+prognostic thermodynamic variable.
+"""
+const total_energy_density_name = :ρE
 
 """
     thermodynamic_density(formulation)

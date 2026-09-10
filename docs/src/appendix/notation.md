@@ -50,6 +50,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``r``                          | `r`    | `rnode(i, j, k, grid, ℓz)`          | Reference (computational) vertical coordinate of a terrain-following grid; the physical height is ``z(x, y, r)`` (`znode`), matching Oceananigans' `r`/`z` convention |
 | ``s``                               | `s`    | `static_energy(model)`              | (Liquid-ice) moist static energy, ``s = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ``; ``e`` is reserved for turbulent kinetic energy |
 | ``ρ s``                             | `ρs`   | `static_energy_density(model)`      | Static energy density, the prognostic thermodynamic variable of `StaticEnergyFormulation` |
+| ``E``                               | `E`    | `total_energy(model)`               | Total energy, ``E = s + (u^2 + v^2 + w^2)/2``. `E` is also the formulation-agnostic *energy* key: a flux or forcing supplied under `E` (or `ρE`) is applied to whichever thermodynamic variable the formulation evolves |
+| ``ρ E``                             | `ρE`   |                                     | Total energy density; the `boundary_conditions` and `forcing` key for an energy input, routed onto ``ρᵡ`` |
 | ``ρᵡ``                              | `ρᵡ`   | `thermodynamic_density(formulation)` | Thermodynamic density: the generic coupling-weighted prognostic thermodynamic variable, ``ρᵡ = ρᵈ χ`` — concretely ``ρθ`` for the potential-temperature formulation or ``ρs`` for static energy. The intensive variable is recovered as ``χ = ρᵡ / ρᵈ`` |
 | ``T``                               | `T`    | `AM.temperature`                    | Temperature                                                                    |
 | ``T⁺``                              | `T⁺`   | `DewpointTemperature(model)`        | Dewpoint temperature                                                           |
@@ -59,6 +61,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρ q^{ve}``                         | `ρqᵛᵉ` | `AM.moisture_density`               | Scheme-dependent moisture density: ``ρqᵛ`` or ``ρqᵉ``                          |
 | ``ρ qᵉ``                            | `ρqᵉ`  | `AM.moisture_density`               | Equilibrium moisture density (saturation adjustment schemes)                   |
 | ``ρ qᵛ``                            | `ρqᵛ`  | `AM.moisture_density`               | Vapor density (non-equilibrium schemes)                                        |
+| ``ρ qᵗ``                            | `ρqᵗ`  |                                     | Total moisture density; the `boundary_conditions` and `forcing` key for a water input (specific alias `qᵗ` for forcings), routed onto ``ρqᵛᵉ`` whatever the microphysics calls it |
 | ``qᵛ``                              | `qᵛ`   | `AM.microphysical_fields.qᵛ`        | Vapor mass fraction, a.k.a "specific humidity"                                 |
 | ``qˡ``                              | `qˡ`   | `AM.microphysical_fields.qˡ`        | Liquid mass fraction                                                           |
 | ``qⁱ``                              | `qⁱ`   | `AM.microphysical_fields.qⁱ`        | Ice mass fraction                                                              |
@@ -145,7 +148,23 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
-| ``\ell``                            | `ℓ`    |                                     | Surface roughness length, m                                                    |
+| ``\ell``                            | `ℓ`    |                                     | A **length scale**, m; the superscript says which one. Bare ``ℓ`` is used locally where only one length scale is in play (the primary mixing length in `TKEBasedTurbulenceClosure`, the divergence-damping scale in `CompressibleEquations`) |
+| ``\ell^N``                          | `ℓᴺ`   |                                     | Stratification length of the mixing length, ``ℓᴺ = Cᴺ \sqrt{e} / N``; the primary length is ``ℓ = \min(z, ℓᴺ)`` |
+| ``\ell^u, \ell^c, \ell^e, \ell^D``  | `ℓᵘ`, `ℓᶜ`, `ℓᵉ`, `ℓᴰ` |                    | Mixing lengths for momentum, scalars, TKE and dissipation: ``ℓᵘ = Sᵘ ℓ``, ``ℓᶜ = Sᶜ ℓ``, ``ℓᵉ = Sᵉ ℓ``, ``ℓᴰ = ℓ / Sᴰ`` |
+| ``S^u, S^c, S^e, S^D``              | `Sᵘ`, `Sᶜ`, `Sᵉ`, `Sᴰ` |                    | Stability functions of `TKEBasedTurbulenceClosure`; constants ``Cᵘ, Cᶜ, Cᵉ, Cᴰ`` in `ConstantStabilityFunctions` |
+| ``\ell^r``                          | `ℓʳ`   | `roughness_length`                  | Surface roughness length for momentum, m. Superscript ``r`` elsewhere denotes *rain* (``qʳ``); the two never appear together |
+| ``\ell^{rh}``                       | `ℓʳʰ`  | `scalar_roughness_length`           | Surface roughness length for heat and moisture; defaults to ``ℓʳ/7.3`` |
+| ``\kappa``                          | `κ`    |                                     | von Kármán constant. Never used for a diffusivity in Breeze's own code — the Oceananigans accessors literally named `κᶠᶜᶜ`, `κᶜᶠᶜ`, `κᶜᶜᶠ` are the one exception, and they are thin one-liners |
+| ``K^u``                             | `Kᵘ`   |                                     | Eddy diffusivity for momentum, ``K^u = ℓ^u \sqrt{e}``, m² s⁻¹. Oceananigans' scalar-diffusivity closures spell their own field `νₑ`, which Breeze reads but does not define |
+| ``K^c``                             | `Kᶜ`   |                                     | Eddy diffusivity for scalars, ``K^c = ℓ^c \sqrt{e}``, m² s⁻¹                    |
+| ``K^e``                             | `Kᵉ`   |                                     | Eddy diffusivity for TKE, ``K^e = ℓ^e \sqrt{e}``, m² s⁻¹                        |
+| ``e``                               | `e`    |                                     | Subgrid turbulent kinetic energy, m² s⁻²                                       |
+| ``\rho e``                          | `ρe`   |                                     | Prognostic TKE density, the tracer `TKEBasedTurbulenceClosure` adds to the model |
+| ``\mathrm{Pr}``                     | `Pr`   |                                     | Turbulent Prandtl number, ``\mathrm{Pr} = K^u/K^c = S^u/S^c``                 |
+| ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``                                      |
+| ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
+| ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
+| ``h^{bl}``                          | `hᵇˡ`  |                                     | Boundary-layer depth, m; a diagnostic (the height of the capping inversion in convective conditions) |
 | ``T_0``                             | `T₀`   |                                     | Sea surface temperature                                                        |
 | ``qᵛ₀``                             | `qᵛ₀`  |                                     | Saturation specific humidity at sea surface                                    |
 | ``\mathscr{I}``                     | `ℐ`    |                                     | Radiative flux (intensity), W/m²                                               |
