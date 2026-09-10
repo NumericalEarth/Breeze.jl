@@ -5,7 +5,7 @@ using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField, set!, interpolate
 using Oceananigans.TimeSteppers: TimeSteppers, tick_stage!
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: launch!, time_difference_seconds
 
 using KernelAbstractions: @kernel, @index
 
@@ -1074,23 +1074,32 @@ function TimeSteppers.time_step!(model::AtmosphereModel{<:ParcelDynamics, <:Any,
     state = dynamics.state
     U⁰ = ts.U⁰
 
+    # Stage abscissae, as in the field-model stepper: cₘ = αₘ (cₘ₋₁ + 1) with c₀ = 0, so
+    # u^(1) sits at tⁿ + Δt and u^(2) at tⁿ + Δt/2.
+    c¹ = ts.α¹              # = 1
+    c² = ts.α² * (c¹ + 1)   # = 1/2
+
+    # Compute the next time step a priori to reduce floating point error accumulation
+    tⁿ⁺¹ = model.clock.time + Δt
+
     # Store initial state for SSP RK3 stages
     store_initial_parcel_state!(U⁰, state)
 
     # Stage 1: u^(1) = u^(0) + Δt * G(u^(0))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α¹)
-    tick_stage!(model.clock, Δt)
+    tick_stage!(model.clock, c¹ * Δt)
 
     # Stage 2: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * G(u^(1)))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α²)
-    # Don't tick - still at t + Δt for time-dependent forcing
+
+    # Back to tⁿ + Δt/2, the abscissa of u^(2); `corrected_Δt` below restores the Δt/2.
+    tick_stage!(model.clock, (c² - c¹) * Δt)
 
     # Stage 3: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α³)
 
     # Final clock update (adjust for floating point error)
-    tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹ * Δt in stage 1
-    corrected_Δt = tⁿ⁺¹ - model.clock.time
+    corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     # Apply microphysics model update AFTER all RK3 stages and clock update
