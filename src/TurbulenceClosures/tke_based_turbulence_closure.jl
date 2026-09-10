@@ -829,3 +829,8 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
               "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
               "└── negative_tke_damping_time_scale: ", prettysummary(closure.negative_tke_damping_time_scale))
 end
+
+# Kᵘ, Kᶜ, Kᵉ and Lᵉ are recomputed exactly by update_state! from the prognostic state alone
+# but this may change in the future if the closure becomes dependent on the previous state.
+Oceananigans.prognostic_state(::TKEClosureFields) = nothing
+Oceananigans.restore_prognostic_state!(closure_fields::TKEClosureFields, ::Nothing) = closure_fields
