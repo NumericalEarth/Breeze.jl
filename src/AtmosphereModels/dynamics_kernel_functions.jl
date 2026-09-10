@@ -64,7 +64,7 @@ end
 #####
 ##### Momentum tendencies
 #####
-##### `coupling_mass_fraction*` rescales the mixture pressure and buoyancy forces onto the
+##### `dynamics_mass_fraction*` rescales the mixture pressure and buoyancy forces onto the
 ##### coupling-weighted momentum ρu = ρᵈ u. The other terms need no factor.
 #####
 
@@ -81,7 +81,7 @@ end
                                      ρu_forcing,
                                      dynamics)
 
-    qᵈ = coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics)
+    qᵈ = dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics)
 
     return ( - x_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics)
              - qᵈ * x_pressure_gradient(i, j, k, grid, dynamics)
@@ -103,7 +103,7 @@ end
                                      ρv_forcing,
                                      dynamics)
 
-    qᵈ = coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics)
+    qᵈ = dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics)
 
     return ( - y_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics)
              - qᵈ * y_pressure_gradient(i, j, k, grid, dynamics)
@@ -131,7 +131,7 @@ end
                                      microphysical_fields,
                                      constants)
 
-    qᵈ = coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+    qᵈ = dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     return ( - z_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics)
              - qᵈ * explicit_z_pressure_gradient(i, j, k, grid, dynamics)

@@ -306,7 +306,7 @@ end
                                                 dynamics::TerrainCompressibleDynamics,
                                                 ρθ′, Πᴸ, γRᵐᴸ)
     stencil = dynamics.terrain_metrics.pressure_gradient_stencil
-    return AtmosphereModels.coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
+    return AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
            terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                   stencil, ρθ′, Πᴸ, γRᵐᴸ)
 end
@@ -315,7 +315,7 @@ end
                                                 dynamics::TerrainCompressibleDynamics,
                                                 ρθ′, Πᴸ, γRᵐᴸ)
     stencil = dynamics.terrain_metrics.pressure_gradient_stencil
-    return AtmosphereModels.coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
+    return AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
            terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                   stencil, ρθ′, Πᴸ, γRᵐᴸ)
 end
@@ -404,7 +404,7 @@ end
 @inline function ∇ᶻp′(i, j, k, grid,
                       dynamics::TerrainCompressibleDynamics,
                       ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
-    qᵈ = AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
     ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
     # The correction is built from the already-weighted `∇ˣp′`/`∇ʸp′`.
     correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
@@ -535,7 +535,7 @@ end
     Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, Gⁿρu)
     Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, Gⁿρv)
 
-    qᵈ = AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
     ∂z_p′ = terrain_vertical_pressure_gradient(i, j, k, grid, pᴸ, pᵣ)
     ρ′ᶜᶜᶠ = terrain_vertical_buoyancy_density(i, j, k, grid, ρᴸ, ρᵣ)
     horizontal_slow_tendency = slope_x * Gⁿρu_ccf + slope_y * Gⁿρv_ccf

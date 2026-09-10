@@ -133,7 +133,7 @@ end
 
     direction = ZDirection()
 
-    # `nothing` in the dynamics slot takes the default unit coupling mass fraction, isolating the
+    # `nothing` in the dynamics slot takes the default unit mass fraction, isolating the
     # coefficient algebra from the ρᵈ/ρ weighting (which is exercised separately below).
     code_diag(k) = get_coefficient(2, 2, k, grid, AcousticTridiagDiagonal(), nothing, direction,
                                    Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing, nothing)

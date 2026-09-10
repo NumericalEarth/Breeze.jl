@@ -6,14 +6,14 @@ using Test
 using GPUArraysCore: @allowscalar
 
 using Oceananigans.TimeSteppers: update_state!
-using Breeze.AtmosphereModels: coupling_mass_fractionᶠᶜᶜ, coupling_mass_fractionᶜᶜᶠ
+using Breeze.AtmosphereModels: dynamics_mass_fractionᶠᶜᶜ, dynamics_mass_fractionᶜᶜᶠ
 using Breeze.CompressibleEquations: assemble_slow_vertical_momentum_tendency!
 using Breeze.TimeSteppers: compute_slow_momentum_tendencies!
 
 #####
-##### Pressure gradient and gravity act on the total mass ρ = ρᵈ + Σρˣ, but compressible momentum
-##### is dry-coupled (ρu = ρᵈ u), so both carry the face dry-mass fraction qᵈ = ρᵈ/ρ. Without it a
-##### moist parcel accelerates by 1/(1 - qᵗ) too much. qᵗ = 0 is the negative control.
+##### The mixture momentum balance carries -∇p and -g ρ with total ρ = ρᵈ + Σρˣ, but momentum is
+##### dry-coupled (ρu = ρᵈ u), so both forces carry the face fraction qᵈ = ρᵈ/ρ. Without it a moist
+##### parcel accelerates by 1/(1 - qᵗ) too much. qᵗ = 0 is the negative control.
 #####
 
 # The assertions below are exact, so one moist point suffices — any mis-weighting fails at any qᵗ.
@@ -64,8 +64,8 @@ end
         @test ρᵈ[2, 1, 2] ≈ (1 - qᵗ) * ρ[2, 1, 2]
         @test maximum(p) - minimum(p) ≈ 0 atol=eps(FT) * maximum(p)
 
-        @test @allowscalar(coupling_mass_fractionᶜᶜᶠ(2, 1, 3, grid, model.dynamics)) ≈ 1 - qᵗ
-        @test @allowscalar(coupling_mass_fractionᶠᶜᶜ(2, 1, 3, grid, model.dynamics)) ≈ 1 - qᵗ
+        @test @allowscalar(dynamics_mass_fractionᶜᶜᶠ(2, 1, 3, grid, model.dynamics)) ≈ 1 - qᵗ
+        @test @allowscalar(dynamics_mass_fractionᶠᶜᶜ(2, 1, 3, grid, model.dynamics)) ≈ 1 - qᵗ
 
         for k in 2:size(grid, 3)
             ρᵈᶜᶜᶠ = (ρᵈ[2, 1, k] + ρᵈ[2, 1, k - 1]) / 2
@@ -77,8 +77,8 @@ end
     # Anelastic carries a single density, so the weight is exactly one.
     anelastic_model = AtmosphereModel(grid)
     set!(anelastic_model; θ=300, qᵗ=0.02)
-    @test @allowscalar(coupling_mass_fractionᶜᶜᶠ(2, 1, 3, grid, anelastic_model.dynamics)) == 1
-    @test @allowscalar(coupling_mass_fractionᶠᶜᶜ(2, 1, 3, grid, anelastic_model.dynamics)) == 1
+    @test @allowscalar(dynamics_mass_fractionᶜᶜᶠ(2, 1, 3, grid, anelastic_model.dynamics)) == 1
+    @test @allowscalar(dynamics_mass_fractionᶠᶜᶜ(2, 1, 3, grid, anelastic_model.dynamics)) == 1
 
     Oceananigans.defaults.FloatType = old_FT
 end

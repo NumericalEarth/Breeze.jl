@@ -567,7 +567,7 @@ end
 #   (ρθ)′ₙ(k) = ρθ′★(k) − δτᵐ⁺(θᴸ_face(k+1)(ρw)′ₙ(k+1) − θᴸ_face(k)(ρw)′ₙ(k))/Δz_c(k)
 #
 # yields the tridiag coefficients (ω≡ωᵐ⁺). Every PGF and buoyancy entry carries the face dry-mass
-# fraction qᵈ(k) (`coupling_mass_fractionᶜᶜᶠ`), matching the explicit halves in
+# fraction qᵈ(k) (`dynamics_mass_fractionᶜᶜᶠ`), matching the explicit halves in
 # `_build_vertical_rhs!`. Damping and sponge act on (ρw)′ itself and take no factor:
 #
 #   A[k,k+1] = qᵈ(k)[−(ωΔτ)² Cᴸ(k)  θᴸ_face(k+1) rdz_c(k)   /Δzᶠ(k) − (ωΔτ)² g rdz_c(k)/2]
@@ -617,7 +617,7 @@ end
     θᵏ⁻ = ℑbzᵃᵃᶠ(i, j, kᶠ - 1, grid, θᴸ)
 
     # Solver index k is the lower-diagonal entry of row (face) kᶠ = k + 1.
-    qᵈ = AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, kᶠ, grid, dynamics)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, kᶠ, grid, dynamics)
 
     pgf_term  = - δτᵐ⁺^2 * Cᵏ⁻ * θᵏ⁻ * Δz⁻¹ᵏ⁻ * Δz⁻¹ᶠ
     buoy_term = + δτᵐ⁺^2 * g * Δz⁻¹ᵏ⁻ / 2
@@ -640,7 +640,7 @@ end
     end
 
     θᶜᶜᶠ = ℑbzᵃᵃᶠ(i, j, k, grid, θᴸ)
-    qᵈ = AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     pgf_diag   = δτᵐ⁺^2 * θᶜᶜᶠ * (Cᵏ⁺ * Δz⁻¹ᵏ⁺ + Cᵏ⁻ * Δz⁻¹ᵏ⁻) * Δz⁻¹ᶠ
     buoy_diag  = δτᵐ⁺^2 * g * (Δz⁻¹ᵏ⁺ - Δz⁻¹ᵏ⁻) / 2
@@ -658,7 +658,7 @@ end
 
     @inbounds Cᵏ⁺ = γRᵐᴸ[i, j, k] * Πᴸ[i, j, k]
     θᵏ⁺ = ℑbzᵃᵃᶠ(i, j, k + 1, grid, θᴸ)
-    qᵈ = AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     pgf_term  = - δτᵐ⁺^2 * Cᵏ⁺ * θᵏ⁺ * Δz⁻¹ᵏ⁺ * Δz⁻¹ᶠ
     buoy_term = - δτᵐ⁺^2 * g * Δz⁻¹ᵏ⁺ / 2
@@ -725,19 +725,19 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
 end
 
 # Slow-tendency assembly with reference state. Buoyancy uses the diagnosed TOTAL density
-# `ρ = ρᵈ + Σρˣ` as `ρᴸ` (no virtual-density factor): gravity acts on the total mass of all
-# species. The prognostic mass variable is the dry density ρᵈ (its continuity has no sedimentation
-# source); total ρ is reconstructed each update. Across the acoustic substeps the water densities
-# are frozen, so the evolving density perturbation `ρ′ = ρᵈ′` is also the total-density
-# perturbation, and the moisture loading enters exactly once — here, through the stage-entry
-# total `ρᴸ`.
+# `ρ = ρᵈ + Σρˣ` as `ρᴸ` (no virtual-density factor): the mixture gravitational force is `-g ρ`,
+# summed over all species. The prognostic mass variable is the dry density ρᵈ (its continuity has
+# no sedimentation source); total ρ is reconstructed each update.
+# Across the acoustic substeps the water densities are frozen, so the evolving density perturbation
+# `ρ′ = ρᵈ′` is also the total-density perturbation, and the moisture loading enters exactly once —
+# here, through the stage-entry total `ρᴸ`.
 #
 # `qᵈ` converts the mixture force `-∂z p - g ρ` onto the dry-coupled ρw, reducing the buoyancy term
 # to `-g ℑᶻ(ρᵈ)`.
 @kernel function _assemble_slow_vertical_momentum_tendency!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, pᵣ, ρᵣ, grid, dynamics, g)
     i, j, k = @index(Global, NTuple)
 
-    qᵈ = AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     @inbounds begin
         # Reference-subtracted PGF and buoyancy: at Uᴸ = reference state
@@ -755,7 +755,7 @@ end
 @kernel function _assemble_slow_vertical_momentum_tendency_no_ref!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, grid, dynamics, g)
     i, j, k = @index(Global, NTuple)
 
-    qᵈ = AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     @inbounds begin
         ∂z_pᴸ  = ∂zᶜᶜᶠ(i, j, k, grid, pᴸ)
@@ -898,26 +898,26 @@ end
 # `qᵈ` at its own face, so callers that interpolate them (the terrain slope corrections) stay
 # consistent with the (ρu)′,(ρv)′ updates built from the same values.
 @inline weighted_x_pressure_gradient(i, j, k, grid, dynamics) =
-    AtmosphereModels.coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
+    AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
     AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
 
 @inline weighted_y_pressure_gradient(i, j, k, grid, dynamics) =
-    AtmosphereModels.coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
+    AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
     AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
 
 # `slope_correction` gates the terrain horizontal slope correction (see the
 # `TerrainCompressibleDynamics` method in `terrain_compressible_physics.jl`).
 # On a flat grid there is no horizontal correction, so the factor is ignored here.
 @inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) =
-    AtmosphereModels.coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
+    AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
     ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 
 @inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) =
-    AtmosphereModels.coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
+    AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
     ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 
 @inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ, slope_correction) =
-    AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) *
+    AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) *
     ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 
 @inline apply_horizontal_pressure_gradient_substep(substep, Nτ, apply_first_substep_pressure_gradient) =
@@ -975,7 +975,7 @@ end
         Gρwᵖ = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★ # pressure gradient
 
         # `∇ᶻp′` is already weighted; the buoyancy is not.
-        qᵈ = AtmosphereModels.coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+        qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
         ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
         ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
         Gρwᵇ = qᵈ * g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★) # buoyancy

@@ -1,10 +1,10 @@
 # [Compressible dynamics](@id Compressible-section)
 
 [`CompressibleDynamics`](@ref) solves the fully compressible Euler equations with prognostic
-dry-air density ``ρ^d``; the total density ``ρ = ρ^d + ρ q^t`` (dry air plus vapor and condensate)
-is diagnosed from it and the water partial densities. The formulation retains acoustic waves and
-is suitable for problems where full compressibility is important — global atmospheric flows,
-baroclinic-wave benchmarks, and acoustic-mode validation.
+dry-air density ``ρ^d``; the total density ``ρ = ρ^d + ρ^t`` adds the water partial densities
+``ρ^t`` (vapor plus condensate). The formulation retains acoustic waves and is suitable for problems
+where full compressibility is important — global atmospheric flows, baroclinic-wave benchmarks, and
+acoustic-mode validation.
 
 ## Prognostic equations
 
@@ -22,21 +22,35 @@ thermodynamic variable ``χ`` (see [Governing equations](@ref Dycore-section)), 
 ```
 
 Dry air is the prognostic mass because its continuity equation has no sedimentation or phase-change
-source; the momentum carrier is therefore also dry, and velocity is recovered as
-``\boldsymbol{u} = (ρ^d \boldsymbol{u})/ρ^d``. Pressure gradient and gravity, however, act on the
-*total* mass. Weighting the single-velocity mixture equation
-``ρ \, D\boldsymbol{u}/Dt = -∇p - ρ g \hat{\boldsymbol{z}}`` by ``ρ^d/ρ`` and folding in dry
-continuity gives the conservative form above, in which both forces carry the dry-air mass fraction
+source, and momentum is dry-coupled to match: ``\boldsymbol{u} = (ρ^d \boldsymbol{u})/ρ^d``. Since
+dry-air continuity carries no diffusive flux, ``\boldsymbol{u}`` is the velocity **of dry air**,
+rather than the barycentric velocity of the mixture. All species share this resolved advecting
+velocity. Sedimentation adds species-dependent transport velocities, and configured turbulence
+closures can contribute diffusive scalar fluxes; their contributions to the moisture equation are
+included in ``S_q``.
+
+Under this common-velocity approximation, the momentum balance is formulated as
 
 ```math
-q^d = ρ^d / ρ = 1 - q^t ,
+ρ \frac{D\boldsymbol{u}}{Dt} = -∇p - ρ g \hat{\boldsymbol{z}},
 ```
 
-and gravity collapses to ``-ρ^d g``. These are the height-coordinate form of the ``μ^d α`` and
+where ``ρ`` is the **total mixture density**. This formulation incorporates the full pressure
+gradient and the total gravitational force per unit volume, ``ρ g``. To express the balance in
+terms of dry-coupled momentum, we multiply by ``ρ^d/ρ`` and use dry-air continuity. The resulting
+conservative form above therefore contains the pressure term ``-(ρ^d/ρ)∇p`` and the gravitational
+term ``-ρ^d g\hat{\boldsymbol{z}}``. These terms follow from expressing the mixture momentum balance
+in dry-coupled variables. The dry-air mass fraction is
+
+```math
+q^d = ρ^d / ρ = 1 - q^t .
+```
+
+The pressure and gravitational terms are the height-coordinate form of the ``μ^d α`` and
 ``-g μ^d`` factors in the dry-mass-coordinate equations of
 [Skamarock & Klemp (2008)](@cite SkamarockKlemp2008); without them a parcel at ``q^t = 0.02`` falls
 2% too fast. Advection, Coriolis and the stress divergence need no weight. In the code the weight is
-`coupling_mass_fractionᶠᶜᶜ` and its ``ᶜᶠᶜ``/``ᶜᶜᶠ`` counterparts, a ratio of face-interpolated
+`dynamics_mass_fractionᶠᶜᶜ` and its ``ᶜᶠᶜ``/``ᶜᶜᶠ`` counterparts, a ratio of face-interpolated
 densities so the discrete gravitational force is exactly ``-g \, ℑ^z(ρ^d)``.
 
 Pressure is closed by the moist ideal gas law
@@ -176,7 +190,7 @@ inside the substep loop is
 \end{aligned}
 ```
 
-The coupling mass fraction ``q^d = ρ^d/ρ`` is frozen at ``U^L`` with the other linearization
+The dry-air mass fraction ``q^d = ρ^d/ρ`` is frozen at ``U^L`` with the other linearization
 coefficients (water densities are fixed across the substeps, so ``ρ'`` is both the dry and the
 total density perturbation) and evaluated at the face of the momentum component it acts on. It
 also multiplies the corresponding entries of the vertically implicit tridiagonal matrix, keeping

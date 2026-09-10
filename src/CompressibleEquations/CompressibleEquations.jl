@@ -18,9 +18,15 @@ and momentum carrier, are:
 \\end{aligned}
 ```
 
-Pressure gradient and gravity act on the *total* mass ``\\rho = \\rho^d + \\rho q^t``, so on
-dry-coupled momentum they carry ``q^d = \\rho^d/\\rho = 1 - q^t``
-(`AtmosphereModels.coupling_mass_fractionᶠᶜᶜ` and its ``ᶜᶠᶜ``/``ᶜᶜᶠ`` counterparts).
+The mixture momentum balance contains the full pressure gradient ``-∇p`` and the total
+gravitational force per unit volume ``-ρ g \\hat{\\boldsymbol{z}}``, where ``ρ = ρ^d + ρ^t`` is
+the total mixture density. Multiplying this balance by the dry-air mass fraction
+``q^d = ρ^d / ρ = 1 - q^t`` and using dry-air continuity gives the conservative equation above
+for ``ρ^d \\boldsymbol{u}``. Its pressure and gravitational contributions are therefore
+``-q^d ∇p`` and ``-ρ^d g \\hat{\\boldsymbol{z}}``.
+
+At each momentum face, ``q^d`` is computed as the ratio of the interpolated dry-air and total
+densities by `AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ` and its counterparts.
 
 Pressure is computed from the ideal gas law:
 ```math

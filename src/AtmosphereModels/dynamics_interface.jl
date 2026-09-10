@@ -151,9 +151,10 @@ end
 """
     dynamics_density(dynamics)
 
-Return the *coupling density* — the density weighting the momentum (`ρu = ρᵈ u`) and the
-thermodynamic flux variable (`ρθ = ρᵈ θ`), and the divisor for diagnosing velocity (`u = ρu/ρᵈ`)
-and potential temperature (`θ = ρθ/ρᵈ`). It is the prognostic mass variable advanced by continuity.
+Return the *coupling density*. It weights the momentum (`ρu = ρᵈ u`) and the thermodynamic
+variable (`ρθ = ρᵈ θ`), and it is the divisor used to diagnose velocity (`u = ρu/ρᵈ`) and
+potential temperature (`θ = ρθ/ρᵈ`). It is also the prognostic mass variable advanced by
+continuity.
 
 - `AnelasticDynamics`: the time-independent reference density `ρᵣ`.
 - `CompressibleDynamics`: the prognostic dry-air density `ρᵈ`.
@@ -178,22 +179,21 @@ overrides it with a diagnosed total-density field, distinct from the coupling de
 total_density(dynamics) = dynamics_density(dynamics)
 
 """
-    coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics)
-    coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics)
-    coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
+$(TYPEDSIGNATURES)
 
-Return ``ρᵈ / ρ`` at the momentum location: the factor converting a *mixture* force density
-(pressure gradient, gravity — both act on the total mass) into a force on the coupling-weighted
-momentum ``ρu = ρᵈ u``. Advection, Coriolis and stress take no factor.
+Return ``qᵈ = ρᵈ/ρ`` at an x-face: [`dynamics_density`](@ref) over [`total_density`](@ref).
 
-The default `1` is exact wherever `total_density === dynamics_density` (e.g. anelastic);
+The mixture momentum balance is forced by ``-∇p`` and ``-ρ g ẑ``, but Breeze advances ``ρu = ρᵈ u``,
+so both enter the tendency rescaled by ``qᵈ``. Advection, Coriolis and stress take no factor.
+
+Defaults to `1`, exact wherever `total_density === dynamics_density` (e.g. anelastic);
 `CompressibleDynamics` overrides it with ``qᵈ = 1 - qᵗ``. Derivation:
-[Compressible dynamics](@ref Compressible-section).
+[Compressible dynamics](@ref Compressible-section). `dynamics_mass_fractionᶜᶠᶜ` and
+`dynamics_mass_fractionᶜᶜᶠ` are the same at y- and z-faces.
 """
-@inline coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) = one(grid)
-
-@inline coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) = one(grid)
-@inline coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) = one(grid)
+@inline dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) = one(grid)
+@inline dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) = one(grid)
+@inline dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) = one(grid)
 
 """
 $(TYPEDSIGNATURES)
@@ -499,12 +499,9 @@ Adapt.adapt_structure(to, s::HorizontalSlowMode) = HorizontalSlowMode(adapt(to, 
 # Whichever forces the wrappers let through still act on the wrapped formulation's momentum.
 const SlowMomentumMode = Union{SlowTendencyMode, HorizontalSlowMode}
 
-@inline coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, s::SlowMomentumMode) =
-    coupling_mass_fractionᶠᶜᶜ(i, j, k, grid, s.dynamics)
-@inline coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, s::SlowMomentumMode) =
-    coupling_mass_fractionᶜᶠᶜ(i, j, k, grid, s.dynamics)
-@inline coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, s::SlowMomentumMode) =
-    coupling_mass_fractionᶜᶜᶠ(i, j, k, grid, s.dynamics)
+@inline dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, s::SlowMomentumMode) = dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, s.dynamics)
+@inline dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, s::SlowMomentumMode) = dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, s.dynamics)
+@inline dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, s::SlowMomentumMode) = dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, s.dynamics)
 
 #####
 ##### Tendency computation interface
