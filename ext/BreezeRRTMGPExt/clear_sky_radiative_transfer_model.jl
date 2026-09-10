@@ -47,7 +47,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
-- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
+- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361), a scalar or an `(Nx, Ny)` array of per-column values
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::ClearSkyOptics,
@@ -144,7 +144,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     cos_zenith = ArrayType{FT}(undef, Nc)
     initialize_cos_zenith!(cos_zenith, solar_position)
     rrtmgp_ℐ₀ = ArrayType{FT}(undef, Nc)
-    rrtmgp_ℐ₀ .= convert(FT, solar_constant)
+    fill_columns!(rrtmgp_ℐ₀, solar_constant)
 
     rrtmgp_ε₀ = ArrayType{FT}(undef, Nband_lw, Nc)
     rrtmgp_αb₀ = ArrayType{FT}(undef, Nband_sw, Nc)
@@ -178,7 +178,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     update_rrtmgp_surface_boundary_conditions!(solver, surface_properties, grid)
 
-    return RadiativeTransferModel(convert(FT, solar_constant),
+    return RadiativeTransferModel(materialize_solar_constant(solar_constant, FT),
                                   solar_position,
                                   surface_properties,
                                   background_atmosphere,
