@@ -137,6 +137,7 @@ function run_eki(problem::AnyProblem; space = RiDependentSpace(), N_ens = 20, ta
 
         push!(history, (iteration = n, ϕ = copy(ϕ), G, misfit, wall, Δt = Δtₙ, pseudotime = T))
         checkpoint!(output, history, ekp, y, Γ, problem, space, σ, radiation)
+        flush(stdout); flush(stderr)      # Julia buffers both when they are redirected to a file
 
         if !isnothing(terminate)
             @info "The scheduler has reached its termination time; the ensemble of iteration $n is final"
