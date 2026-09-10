@@ -40,7 +40,7 @@ end
         @test occursin("thermodynamic_constants: ThermodynamicConstants{$FT}", shown_model)
         @test occursin("forcing: @NamedTuple{", shown_model)
         @test occursin("ρu::Returns{$FT}", shown_model)
-        @test occursin("ρs::Returns{$FT}", shown_model)
+        @test occursin("ρE::Returns{$FT}", shown_model)
 
         uᵍ(z) = -10
         vᵍ(z) = 0
