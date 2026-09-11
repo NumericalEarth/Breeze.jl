@@ -27,6 +27,7 @@ isempty(options) && error("Pass at least one label=checkpoint")
 # directly — is preferred; without it the final iteration's mean is the only thing available, and it
 # is a weaker candidate, so say so rather than let the label imply otherwise.
 entries = sort!([(label = String(l), path = String(p)) for (l, p) in options], by = e -> e.label)
+source_hashes = [(; e.label, sha256 = file_sha256(e.path)) for e in entries]
 candidates = map(entries) do e
     saved = load(e.path)
     # A frozen candidate rescored against changed forcing data would credit the difference to the
@@ -57,6 +58,10 @@ radiation_interval = isnothing(interval_option) ? something(first(candidates).ra
 
 members = [load_member(s, m) for (s, m) in library_members() if s in validation_sites]
 isempty(members) && error("No library members at sites $validation_sites")
+member_ids = [(m.site, m.month) for m in members]
+validation_data = calibration_data_manifest(member_ids)
+source_code = (; revision = readchomp(`git rev-parse HEAD`),
+                 diff_sha256 = bytes2hex(sha256(read(`git diff --binary`))))
 for c in candidates
     saved_training = load(c.path, "members")
     bad = intersect(unique(s for (s, _) in saved_training), validation_sites)
@@ -86,8 +91,21 @@ for resolution in resolutions
 end
 
 isempty(dirname(output)) || mkpath(dirname(output))
-jldsave(output; results, labels, params, validation_sites, Δt, radiation_interval,
-                members = [(m.site, m.month) for m in members],
-                designs = [(; c.label, c.cases, c.N_ens, c.iterations, c.evaluated) for c in candidates],
-                protocol_version = PROTOCOL_VERSION)
+all(file_sha256(e.path) == source.sha256 for (e, source) in zip(entries, source_hashes)) ||
+    error("A candidate checkpoint changed during evaluation; freeze it before comparing")
+isequal(validation_data, calibration_data_manifest(member_ids)) ||
+    error("Validation forcing data changed during evaluation")
+comparison_manifest = (; complete = true, source_hashes, validation_data, source_code, architecture = arch_name)
+# A failed serialization must not leave a final-looking file for a watcher to accept.
+temporary, io = mktemp(dirname(abspath(output)))
+close(io)
+try
+    jldsave(temporary; results, labels, params, validation_sites, Δt, radiation_interval,
+                      members = member_ids, comparison_manifest,
+                      designs = [(; c.label, c.cases, c.N_ens, c.iterations, c.evaluated) for c in candidates],
+                      protocol_version = PROTOCOL_VERSION)
+    mv(temporary, output; force = true)
+finally
+    isfile(temporary) && rm(temporary)
+end
 @info "wrote $output"
