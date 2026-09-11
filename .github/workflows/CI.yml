@@ -161,8 +161,9 @@ jobs:
               # virtualised, but we should be able to actually use it anyway.
               echo "BREEZE_FORCE_METAL_FUNCTIONAL=true" | tee -a "${GITHUB_ENV}"
               # Encourage ParallelTestRunner to use multiple jobs on macOS, rather
-              # than the single one it'd use by default.
-              TEST_ARGS+=(--jobs=2)
+              # than the single one it'd use by default, but cap at 3.
+              NPROCM1="$(($(sysctl -n hw.logicalcpu)-1))"
+              TEST_ARGS+=(--jobs="$((${NPROCM1} < 3 ? ${NPROCM1} : 3))")
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" | tee -a "${GITHUB_ENV}"
       - name: Install earlyoom

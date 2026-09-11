@@ -1,5 +1,5 @@
 import Breeze
-using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests, available_memory
+using ParallelTestRunner: default_njobs, find_tests, parse_args, filter_tests!, runtests, available_memory
 using Pkg.Artifacts: ensure_artifact_installed
 
 # Start with autodiscovered tests
@@ -33,12 +33,13 @@ ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artif
 
 if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     GC.gc(true); GC.gc(false); GC.gc(true)
+    njobs = something(args.jobs, default_njobs())
     # macOS runners have little memory compared to the other runners, let's set a more
     # conservative limit to memory usage before reciclying a worker, to avoid trashing
     # memory or out-of-memory errors.  We set the memory limit dynamically, based on the
     # currently available memory (with a ~20% margin), with a lower bound of 1700 MiB, and
     # an upper bound of 2800 MiB.
-    max_rss_memory = clamp(round(Int, available_memory() / 2 ^ 20 / 2  * 0.8), 1_700, 2_800)
+    max_rss_memory = clamp(round(Int, available_memory() / 2 ^ 20 / njobs  * 0.8), 1_700, 2_800)
     ENV["JULIA_TEST_MAXRSS_MB"] = string(max_rss_memory)
 elseif Sys.islinux() && get(ENV, "GITHUB_ACTIONS", "false") == "true" && available_memory() < 20 * 2^30
     # The small (~13 GiB) ubuntu runners run earlyoom, which SIGTERMs workers nearing the
