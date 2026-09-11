@@ -22,8 +22,9 @@ thermodynamic variable ``χ`` (see [Governing equations](@ref Dycore-section)), 
 ```
 
 Dry air is the prognostic mass because its continuity equation has no sedimentation or phase-change
-source, and momentum is dry-coupled to match: ``\boldsymbol{u} = (ρ^d \boldsymbol{u})/ρ^d``. Since
-dry-air continuity carries no diffusive flux, ``\boldsymbol{u}`` is the velocity **of dry air**,
+source, and the momentum to match is the dry-air momentum ``ρ^d \boldsymbol{u}``, not the mixture
+momentum ``ρ \boldsymbol{u}``: ``\boldsymbol{u} = (ρ^d \boldsymbol{u})/ρ^d``. Since dry-air
+continuity carries no diffusive flux, ``\boldsymbol{u}`` is the velocity **of dry air**,
 rather than the barycentric velocity of the mixture. All species share this resolved advecting
 velocity. Sedimentation adds species-dependent transport velocities, and configured turbulence
 closures can contribute diffusive scalar fluxes; their contributions to the moisture equation are
@@ -37,10 +38,9 @@ Under this common-velocity approximation, the momentum balance is formulated as
 
 where ``ρ`` is the **total mixture density**. This formulation incorporates the full pressure
 gradient and the total gravitational force per unit volume, ``ρ g``. To express the balance in
-terms of dry-coupled momentum, we multiply by ``ρ^d/ρ`` and use dry-air continuity. The resulting
+terms of the dry-air momentum, we multiply by ``ρ^d/ρ`` and use dry-air continuity. The resulting
 conservative form above therefore contains the pressure term ``-(ρ^d/ρ)∇p`` and the gravitational
-term ``-ρ^d g\hat{\boldsymbol{z}}``. These terms follow from expressing the mixture momentum balance
-in dry-coupled variables. The dry-air mass fraction is
+term ``-ρ^d g\hat{\boldsymbol{z}}``. The dry-air mass fraction is
 
 ```math
 q^d = ρ^d / ρ = 1 - q^t .

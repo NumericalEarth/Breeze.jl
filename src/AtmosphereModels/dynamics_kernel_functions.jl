@@ -65,7 +65,7 @@ end
 ##### Momentum tendencies
 #####
 ##### `dynamics_mass_fraction*` rescales the mixture pressure and buoyancy forces onto the
-##### coupling-weighted momentum ρu = ρᵈ u. The other terms need no factor.
+##### dry-air momentum ρu = ρᵈ u (not the mixture ρ u). The other terms need no factor.
 #####
 
 @inline function x_momentum_tendency(i, j, k, grid,

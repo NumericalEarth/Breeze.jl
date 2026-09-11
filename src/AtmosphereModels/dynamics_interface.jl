@@ -151,13 +151,13 @@ end
 """
     dynamics_density(dynamics)
 
-Return the *coupling density*. It weights the momentum (`ρu = ρᵈ u`) and the thermodynamic
-variable (`ρθ = ρᵈ θ`), and it is the divisor used to diagnose velocity (`u = ρu/ρᵈ`) and
-potential temperature (`θ = ρθ/ρᵈ`). It is also the prognostic mass variable advanced by
-continuity.
+Return the *coupling density*. It weights momentum and the thermodynamic variable, and it is
+the divisor used to diagnose velocity and potential temperature.
 
-- `AnelasticDynamics`: the time-independent reference density `ρᵣ`.
-- `CompressibleDynamics`: the prognostic dry-air density `ρᵈ`.
+- `AnelasticDynamics`: the time-independent reference density `ρᵣ`, giving `ρu = ρᵣ u`
+  and `ρθ = ρᵣ θ`.
+- `CompressibleDynamics`: the prognostic dry-air density `ρᵈ`, giving dry-air momentum
+  `ρu = ρᵈ u` and `ρθ = ρᵈ θ`. This density is advanced by continuity.
 
 The *total* air density `ρ = ρᵈ + Σ ρˣ` (dry air plus every water species) is a separate, diagnosed
 quantity — see [`total_density`](@ref) — used wherever total mass enters the physics: the
@@ -183,8 +183,10 @@ $(TYPEDSIGNATURES)
 
 Return ``qᵈ = ρᵈ/ρ`` at an x-face: [`dynamics_density`](@ref) over [`total_density`](@ref).
 
-The mixture momentum balance is forced by ``-∇p`` and ``-ρ g ẑ``, but Breeze advances ``ρu = ρᵈ u``,
-so both enter the tendency rescaled by ``qᵈ``. Advection, Coriolis and stress take no factor.
+For compressible dynamics, the mixture pressure and gravitational forces ``-∇p`` and ``-ρ g ẑ``
+are rescaled by ``qᵈ`` for the prognostic dry-air momentum ``ρu = ρᵈ u``. Advection and Coriolis
+already use coupling-weighted momentum. The stress flux already uses the coupling density,
+so its divergence needs no additional factor.
 
 Defaults to `1`, exact wherever `total_density === dynamics_density` (e.g. anelastic);
 `CompressibleDynamics` overrides it with ``qᵈ = 1 - qᵗ``. Derivation:
