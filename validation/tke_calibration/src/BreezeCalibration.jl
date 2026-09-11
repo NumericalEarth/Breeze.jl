@@ -416,6 +416,11 @@ against member `j`, for every pair, on `architecture` (`CPU()` or `GPU()`). Radi
 time-mean θˡ, qᵗ (vapor + cloud liquid, as the LES's `qt`), qˡ (cloud liquid), qʳ (rain), u and v over the
 target window as arrays `(N_ens, N_members, Nz)`, and the model.
 
+The third return value times the run: `(; setup_seconds, integration_seconds, steps,
+seconds_per_step)`, with the integration measured around `run!` alone. Cost per step must be taken
+from this rather than by differencing two runs of different length — setup is tens of seconds and
+varies with contention for the device, enough to make such a difference negative.
+
 `sample_callback(model, t, active)`, if given, is called on every accumulation — the same instants that
 enter the time means, with `active[j]` saying whether member `j`'s scored window is open — so a caller can
 record closure diagnostics (diffusivities, mixing length, N², the TKE budget) averaged over exactly the
@@ -431,6 +436,7 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
                       radiation_interval = 10minutes,
                       upper_relaxation_rate = 1 / 600,
                       sample_callback = nothing)
+    setup_start = time_ns()
     members = problem.members
     microphysics = DCMIP2016KesslerMicrophysics()   # the LES's warm-rain scheme, written for Tetens' saturation vapor pressure
     constants = ThermodynamicConstants(saturation_vapor_pressure = TetensFormula())
@@ -619,7 +625,12 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
         add_callback!(simulation, sim -> @info(@sprintf("t = %.1f h, wall %.0f s", time(sim) / 3600, sim.run_wall_time)), TimeInterval(6hours))
     end
 
-    run!(simulation)
+    # Timing is measured here rather than by differencing two whole runs of different length: setup
+    # is tens of seconds and varies with GPU contention, so a difference of two wall times can be
+    # swamped by it — badly enough to return a negative cost per step.
+    setup_seconds = (time_ns() - setup_start) / 1e9
+    integration_seconds = @elapsed run!(simulation)
+    steps = model.clock.iteration
 
     # Every column must have contributed at least one sample, or its "time mean" is a zero profile that
     # looks like a finite observation. This is what a `stop_time` short of a member's target window does.
@@ -632,7 +643,9 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
     end
 
     n = reshape(counts, 1, N_mem, 1)
-    return map(x -> x ./ n, sums), model
+    timing = (; setup_seconds, integration_seconds, steps,
+                seconds_per_step = integration_seconds / max(steps, 1))
+    return map(x -> x ./ n, sums), model, timing
 end
 
 """
