@@ -13,18 +13,24 @@ commands below are **provisional** until the refinement study finishes. No coeff
 ## The protocol: a column that replays the LES's own setup
 
 Each LES member (a cfSite and a month) was forced by the GCM's time-invariant large-scale state (Shen et
-al. 2022, §2). The column reproduces that forcing; only the turbulence closure differs from the LES.
+al. 2022, §2). The column is a **controlled approximation** to that setup, not a reproduction of it: the
+turbulence closure is the object of study, but several other things also differ, and the table names them.
+The surface fluxes are replayed from the LES rather than computed by a bulk scheme, so the surface is
+prescribed rather than interactive. The relaxation acts on liquid-water potential temperature where the LES
+relaxed temperature. The microphysics is Breeze's DCMIP2016 Kessler, which is a warm-rain scheme of the same
+family as PyCLES's but has not been shown process-by-process equivalent to it. Differences in the scored
+fields therefore carry these approximations as well as the closure.
 
 | | LES (PyCLES) | Column (`run_ensemble`) |
 |---|---|---|
 | Subsidence | upstream differencing of −wˢ ∂z | `SubsidenceForcing(wˢ; advection = UpwindBiased(order = 1))`, acting on θ, qᵛ, cloud liquid and rain |
 | Horizontal advection, GCM vertical eddy flux | time-invariant tendencies of θ, qᵗ | `Forcing` with the file's `hadv + fluc` |
 | Surface fluxes | bulk, from the GCM SST | the LES's hourly SHF, LHF, stress as flux boundary conditions |
-| Relaxation | winds to the GCM on 6 h; T, qᵗ above 3 km on 24 h | the same, toward the `*_mean_initial` (GCM) profiles; the moisture target is the vapor-plus-cloud sum |
+| Relaxation | winds to the GCM on 6 h; **T**, qᵗ above 3 km on 24 h | same rates and targets (the `*_mean_initial` GCM profiles), but on **θˡ** rather than T, and the moisture target is the vapor-plus-cloud sum |
 | Microphysics | Kessler warm rain | `DCMIP2016KesslerMicrophysics()` with Tetens saturation |
-| Radiation | RRTM every step, fixed sun, albedo 0.06, ε 0.95 | RRTMGP all-sky on `radiation_interval`, `FixedCosineZenith` and solar constant per column, same albedo and emissivity |
+| Radiation | RRTM every step, fixed sun, albedo 0.06, ε 0.95 | RRTMGP all-sky on `radiation_interval`, same albedo and emissivity. The fixed sun is an **astronomical reconstruction**: `scripts/solar_parameters.jl` computes the insolation and insolation-weighted cos θ_z from each site's coordinates and writes them into the GCM-column file, so they are not the GCM's own solar output, and `FixedCosineZenith` is the wiring rather than the provenance |
 | Domain | 4 km, 20 m cells | LES grid or coarser to 4 km, then faces stretched 12 %/cell to 25 km; the monthly-mean GCM column above, relaxed toward on 10 min |
-| Duration, scoring | 6 days; means over the last 2 days | the same window; time means of θˡ, qᵗ, qˡ, qʳ, u, v |
+| Duration, scoring | 6 days | same duration; scored over the last two days — the window *our reduction* records as the target, which is not the final-day average Shen et al. plot |
 
 The observation vector of a column is its time-mean θˡ (K), qᵗ, qˡ (g kg⁻¹), u and v (m s⁻¹) as means over
 100 m cells from the surface to 3 km (Oceananigans' conservative `regrid!`), so columns on different grids
@@ -48,8 +54,9 @@ update. This matters because the coefficients one would adopt are the ensemble m
 natural to report is the average over members of Φ(θⱼ), and Φ(ϕ̄) ≠ mean Φ(θⱼ). The extra column rides the
 existing ensemble, so it costs ≈ 1/N_ens of a forward map rather than a second run.
 
-Pseudo time 1 is where the tempering says the ensemble approximates the posterior. It is **not** where the
-objective stops improving, so `optimize=true` continues past it until the directly evaluated Φ(ϕ̄) plateaus
+Pseudo time 1 is the **endpoint of the tempering budget**, and nothing more: for a nonlinear problem with
+localization and acceleration, that the ensemble there approximates a posterior is not established. It is
+certainly not where the objective stops improving, so `optimize=true` continues past it until the directly evaluated Φ(ϕ̄) plateaus
 (`objective_tolerance`, `objective_patience`, a minimum number of post-tempering iterations, and a hard
 cap), retaining the best evaluated mean as `selected_mean` in the checkpoint.
 
@@ -236,9 +243,10 @@ Differences smaller than the seed-to-seed scatter are not rankings, and no run s
   kinematic quantities. These affect diagnostic plots only; the five scored fields are unaffected. Treat an
   archive array's units as unknown until checked against the original source.
 - **GCM columns** (`data/gcm_columns_CNRM-CM6-1_amip.nc`): 2004–2008 monthly-mean `ta`, `hus`, `ps` from the
-  CMIP6 CNRM-CM6-1 `amip` `r1i1p1f2` CFsubhr output at the 21 cfSites, plus the monthly-mean TOA insolation
-  and insolation-weighted cos θ_z per site and month. `scripts/fetch_gcm_columns.jl` and
-  `scripts/solar_parameters.jl` regenerate it.
+  CMIP6 CNRM-CM6-1 `amip` `r1i1p1f2` CFsubhr output at the 21 cfSites, plus, for each site and month, a TOA insolation and
+  insolation-weighted cos θ_z that `scripts/solar_parameters.jl` computes **astronomically from the site
+  coordinates** and stores alongside the GCM fields. They share a file with GCM output but are not GCM
+  output. `scripts/fetch_gcm_columns.jl` and `scripts/solar_parameters.jl` regenerate it.
 
 ## Hardware note
 

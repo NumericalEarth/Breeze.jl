@@ -17,7 +17,9 @@
 #
 #     julia --project scripts/compare_ensemble_sizes.jl results/ladder/*.jld2
 #     julia --project scripts/compare_ensemble_sizes.jl "small=a.jld2" "large=b.jld2"
-using BreezeCalibration, JLD2, Printf, Statistics, LinearAlgebra
+# No BreezeCalibration dependency: this reads checkpoints and does arithmetic, so it loads in seconds
+# and never touches the package precompile cache that the GPU jobs are queued behind.
+using JLD2, Printf, Statistics, LinearAlgebra
 
 field(nt, k) = (isnothing(nt) || !haskey(nt, k)) ? missing : getproperty(nt, k)
 

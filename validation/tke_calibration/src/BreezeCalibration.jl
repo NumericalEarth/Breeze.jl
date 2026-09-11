@@ -445,7 +445,10 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
                       sample_callback = nothing)
     setup_start = time_ns()
     members = problem.members
-    microphysics = DCMIP2016KesslerMicrophysics()   # the LES's warm-rain scheme, written for Tetens' saturation vapor pressure
+    # A warm-rain scheme of the same family as the LES's, written for Tetens' saturation vapor pressure.
+    # Not demonstrated process-by-process equivalent to PyCLES's Kessler: differences in the scored
+    # fields carry this approximation as well as the closure.
+    microphysics = DCMIP2016KesslerMicrophysics()
     constants = ThermodynamicConstants(saturation_vapor_pressure = TetensFormula())
     device(x) = on_architecture(architecture, x)    # arrays read inside kernels (boundary-condition parameters) live on the device
     N_ens, N_mem = size(params, 2), length(members)
