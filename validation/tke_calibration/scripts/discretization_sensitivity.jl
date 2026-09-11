@@ -30,10 +30,16 @@
 #                                                                   [members=22/07,17/07,14/01,2/01]
 #                                                                   [top=25000|les] [output=...]
 #
-# NOTE the sweeps run at whatever `params` is — `default_parameters()` unless `checkpoint=` supplies a
-# fitted candidate. A fitted candidate can be far more sensitive to a numerical choice than the default
-# it was measured around (design B was), so a pass at the default licenses a setting for exploration
-# only, and must be repeated against a real candidate before it is adopted for production.
+# NOTE the sweeps run at whatever `params` is — `default_parameters()` unless `parameters=` or
+# `checkpoint=` says otherwise. Two limits follow, and both bite:
+#
+#   * A fitted candidate can be far more sensitive to a numerical choice than the default it was
+#     measured around (design B was), so a pass at the default licenses a setting for exploration only
+#     and must be repeated against a real candidate before production adopts it.
+#   * The Ri-dependent defaults set all three Ri endpoints equal, so the closure they describe is
+#     Ri-independent and Ri⁰/Riᵟ are inert. A sweep at the defaults therefore tests nothing about the
+#     Ri family. Run it a second time with `parameters=catke` for a genuinely Ri-dependent closure
+#     (to a different `output=`, or the partials will refuse to mix the two).
 using BreezeCalibration, Printf, Statistics, JLD2
 using LinearAlgebra: diag
 using Oceananigans: CPU, GPU
@@ -78,7 +84,17 @@ grid_for(stretching) =
     resolution == "20" ? ColumnEnsembleProblem(members; top, stretching) :
     ColumnEnsembleProblem(members; Δz = parse(Float64, resolution), top, stretching)
 problem = grid_for(base_stretching)
-params = reshape(collect(Float64, default_parameters()), :, 1)
+# Which coefficients the sweep runs at. This is not a detail: `default_parameters(RiDependentSpace())`
+# sets all three Ri endpoints equal, so its stability functions are constant and Ri⁰/Riᵟ are inert —
+# deliberately, since that reproduces Breeze's default closure. A sweep at the defaults therefore
+# exercises no Ri dependence at all and says nothing about the Ri family's sensitivity to a numerical
+# choice. `catke` is CATKE's published set, whose three endpoints differ, and is the cheapest way to
+# put a genuinely Ri-dependent closure through the same sweep.
+parameter_set = get(options, "parameters", "default")
+params = reshape(collect(Float64, parameter_set == "default" ? default_parameters() :
+                                  parameter_set == "catke" ? catke_calibration_parameters() :
+                                  parameter_set == "prior_center" ? prior_center() :
+                                  error("parameters must be default, catke or prior_center")), :, 1)
 source_checkpoint = get(options, "checkpoint", nothing)
 if !isnothing(source_checkpoint)
     saved = load(source_checkpoint)
