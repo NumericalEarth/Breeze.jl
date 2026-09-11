@@ -4,6 +4,7 @@
 #     julia -t auto --project scripts/calibrate.jl [N_ens] [space=ri|constant] [resolutions=50,100,hindcast] [arch=cpu|gpu]
 #                                                  [top=25000|les] [radiation=interactive|prescribed] [variables=θˡ,qᵗ,qˡ,u,v]
 #                                                  [pseudotime=1] [max_iterations=50] [localization=secnice|none]
+#                                                  [sites=2,5,8,...] [months=01,07]
 #                                                  [output=...] [resume=...]
 #
 # `space=ri` (default) calibrates the 17 parameters of the Ri-dependent stability functions, `space=constant`
@@ -41,12 +42,27 @@ architecture = get(options, "arch", "cpu") == "gpu" ? GPU() : CPU()
 # Localization corrects the sampling error of a small ensemble's covariance. It is worth turning off
 # to see what a large ensemble does without it, since the correction itself biases the update.
 localization_method = get(options, "localization", "secnice") == "none" ? NoLocalization() : SECNice()
-tag = (space isa RiDependentSpace ? "ri" : "constant") * "_" * join(resolutions, "_") * (isnothing(top) ? "" : "_top$(round(Int, top))") * (radiation == :interactive ? "_rrtmgp" : "")
+# Training members: by default two months at eight sites along the transect — Peru and California
+# stratocumulus, the deep tropics, and the trades — leaving the other months and sites for evaluation.
+#
+# The forward map's cost depends on the total number of columns, N_ens × N_members, and on a GPU that
+# cost is strongly sublinear (eight times the columns for 1.62 times the time). Training members and
+# ensemble members are therefore interchangeable in the budget, and they buy different things: a
+# larger ensemble reduces the sampling error of the covariance, more members reduce generalization
+# error. `sites` and `months` spend the budget on the second.
+sites = parse.(Int, split(get(options, "sites", "2,5,8,11,14,17,20,23"), ','))
+months = String.(split(get(options, "months", "01,07"), ','))
+training = [(site, month) for site in sites for month in months]
+available = Set(library_members())
+missing_members = filter(m -> m ∉ available, training)
+isempty(missing_members) || error("The library has no member for $missing_members")
+
+# The training split is part of what identifies a calibration, so it belongs in the default filename
+tag = (space isa RiDependentSpace ? "ri" : "constant") * "_" * join(resolutions, "_") *
+      (isnothing(top) ? "" : "_top$(round(Int, top))") * (radiation == :interactive ? "_rrtmgp" : "") *
+      "_n$(length(training))"
 output = get(options, "output", joinpath(@__DIR__, "..", "results", "eki_$tag.jld2"))
 
-# Training members: two months at eight sites along the transect — Peru and California stratocumulus,
-# the deep tropics, and the trades — leaving the other months and sites for evaluation.
-training = [(site, month) for site in (2, 5, 8, 11, 14, 17, 20, 23) for month in ("01", "07")]
 @info "Loading $(length(training)) training members"
 members = [load_member(s, m) for (s, m) in training]
 
