@@ -23,19 +23,19 @@ $(TYPEDSIGNATURES)
 A bulk sensible heat flux function. The flux is computed as:
 
 ```math
-J = - ρ₀ Cᵀ |U| Δϕ
+J = - ρˢ Cᵀ |U| Δϕ
 ```
 
 where ``Cᵀ`` is the transfer coefficient, ``|U|`` is the wind speed tangential to the
 wall, and ``Δϕ`` is the difference between the near-wall atmospheric value and the wall
 value of the thermodynamic variable appropriate to the formulation:
 
-- For `LiquidIcePotentialTemperatureFormulation`: ``Δϕ = θ - θ₀``, where
-  ``θ₀ = T₀ / Π₀`` and ``Π₀ = (p₀ / pˢᵗ)^{Rᵈ / cᵖᵈ}`` (potential temperature flux)
-- For `StaticEnergyFormulation`: ``Δϕ = s - (cᵖᵐ T₀ + g z₀)`` (static energy flux),
-  with ``z₀`` the height of the wall
+- For `LiquidIcePotentialTemperatureFormulation`: ``Δϕ = θ - θˢ``, where
+  ``θˢ = Tˢ / Πˢ`` and ``Πˢ = (pˢ / pˢᵗ)^{Rᵈ / cᵖᵈ}`` (potential temperature flux)
+- For `StaticEnergyFormulation`: ``Δϕ = s - (cᵖᵐ Tˢ + g zˢ)`` (static energy flux),
+  with ``zˢ`` the height of the wall
 
-Here ``p₀`` is the actual surface pressure, while ``pˢᵗ`` is the fixed reference pressure
+Here ``pˢ`` is the actual surface pressure, while ``pˢᵗ`` is the fixed reference pressure
 used to define potential temperature.
 
 The flux may be placed on any of the six boundaries of a bounded domain. The sign above
@@ -83,48 +83,48 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 
 # Compute the thermodynamic variable difference at the wall.
 # Default to potential temperature flux when formulation is not set (ρθ BCs passed directly).
-@inline bulk_sensible_heat_difference(i, j, k, grid, side, ::Nothing, bf, T₀, fields, p₀, fs) =
-    bulk_sensible_heat_difference(i, j, k, grid, side, PotentialTemperatureFlux(), bf, T₀, fields, p₀, fs)
+@inline bulk_sensible_heat_difference(i, j, k, grid, side, ::Nothing, bf, Tˢ, fields, pˢ, fs) =
+    bulk_sensible_heat_difference(i, j, k, grid, side, PotentialTemperatureFlux(), bf, Tˢ, fields, pˢ, fs)
 
-@inline function wall_potential_temperature(bf, T₀, p₀)
+@inline function wall_potential_temperature(bf, Tˢ, pˢ)
     pˢᵗ = bf.standard_pressure
     constants = bf.thermodynamic_constants
-    return potential_temperature_from_temperature(T₀, p₀, pˢᵗ, constants)
+    return potential_temperature_from_temperature(Tˢ, pˢ, pˢᵗ, constants)
 end
 
 # No filtered scalar: read from the near-wall cell of the 3D field
-@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::PotentialTemperatureFlux, bf, T₀, fields, p₀, ::Nothing)
+@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::PotentialTemperatureFlux, bf, Tˢ, fields, pˢ, ::Nothing)
     θ = @inbounds fields.θ[i, j, k]
-    return θ - wall_potential_temperature(bf, T₀, p₀)
+    return θ - wall_potential_temperature(bf, Tˢ, pˢ)
 end
 
 # With filtered scalar: read from the 2D filtered field (bottom only)
-@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::PotentialTemperatureFlux, bf, T₀, fields, p₀, fs::FilteredSurfaceScalar)
+@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::PotentialTemperatureFlux, bf, Tˢ, fields, pˢ, fs::FilteredSurfaceScalar)
     θ = @inbounds fs.field[i, j, 1]
-    return θ - wall_potential_temperature(bf, T₀, p₀)
+    return θ - wall_potential_temperature(bf, Tˢ, pˢ)
 end
 
-# Static energy of saturated air in contact with the wall, s₀ = cᵖᵐ T₀ + g z₀, with the
+# Static energy of saturated air in contact with the wall, sˢ = cᵖᵐ Tˢ + g zˢ, with the
 # near-wall vapor fraction in the heat capacity and no condensate at the wall
-@inline function wall_static_energy(i, j, k, grid, side, bf, T₀, fields)
+@inline function wall_static_energy(i, j, k, grid, side, bf, Tˢ, fields)
     constants = bf.thermodynamic_constants
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
     g = constants.gravitational_acceleration
     qᵛ = @inbounds fields.qᵛ[i, j, k]
     cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ
-    z₀ = wall_height(i, j, k, grid, side)
-    return cᵖᵐ * T₀ + g * z₀
+    zˢ = wall_height(i, j, k, grid, side)
+    return cᵖᵐ * Tˢ + g * zˢ
 end
 
-@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::StaticEnergyFlux, bf, T₀, fields, p₀, ::Nothing)
+@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::StaticEnergyFlux, bf, Tˢ, fields, pˢ, ::Nothing)
     s = @inbounds fields.s[i, j, k]
-    return s - wall_static_energy(i, j, k, grid, side, bf, T₀, fields)
+    return s - wall_static_energy(i, j, k, grid, side, bf, Tˢ, fields)
 end
 
-@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::StaticEnergyFlux, bf, T₀, fields, p₀, fs::FilteredSurfaceScalar)
+@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::StaticEnergyFlux, bf, Tˢ, fields, pˢ, fs::FilteredSurfaceScalar)
     s = @inbounds fs.field[i, j, 1]
-    return s - wall_static_energy(i, j, k, grid, side, bf, T₀, fields)
+    return s - wall_static_energy(i, j, k, grid, side, bf, Tˢ, fields)
 end
 
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, ℓ::Integer, m::Integer,
@@ -132,19 +132,19 @@ end
     fields = surface_layer_state(model_fields, dynamics_fields)
     side = bf.side
     i, j, k = near_wall_indices(ℓ, m, grid, side)
-    T₀ = wall_value(ℓ, m, grid, side, bf.surface_temperature, clock)
+    Tˢ = wall_value(ℓ, m, grid, side, bf.surface_temperature, clock)
 
     U² = wall_wind_speed²(i, j, k, grid, side, nothing, fields, bf.filtered_velocities)
     Ũ = sqrt(U² + bf.gustiness^2)
 
     constants = bf.thermodynamic_constants
-    p₀ = wall_air_pressure(i, j, k, grid, side, nothing, fields, constants)
-    ρ₀ = surface_density(p₀, T₀, constants)
+    pˢ = wall_air_pressure(i, j, k, grid, side, nothing, fields, constants)
+    ρˢ = surface_density(pˢ, Tˢ, constants)
 
-    Cᵀ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, T₀, bf.filtered_velocities, p₀)
+    Cᵀ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, Tˢ, bf.filtered_velocities, pˢ)
 
-    Δϕ = bulk_sensible_heat_difference(i, j, k, grid, side, bf.formulation, bf, T₀, fields, p₀, bf.filtered_scalar)
-    return outward_flux_sign(side) * ρ₀ * Cᵀ * Ũ * Δϕ
+    Δϕ = bulk_sensible_heat_difference(i, j, k, grid, side, bf.formulation, bf, Tˢ, fields, pˢ, bf.filtered_scalar)
+    return outward_flux_sign(side) * ρˢ * Cᵀ * Ũ * Δϕ
 end
 
 const BulkSensibleHeatFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkSensibleHeatFluxFunction}
@@ -175,15 +175,15 @@ Create a bulk vapor flux function for computing wall moisture fluxes.
 The flux is computed as:
 
 ```math
-Jᵛ = - ρ₀ Cᵛ |U| (qᵛ - q₀), \\qquad q₀ = β ℋ₀ qᵛ⁺(T₀) + (1 - β) qᵛ,
+Jᵛ = - ρˢ Cᵛ |U| (qᵛ - qˢ), \\qquad qˢ = β ℋˢ qᵛ⁺(Tˢ) + (1 - β) qᵛ,
 ```
 
 where ``Cᵛ`` is the transfer coefficient, ``|U|`` is the wind speed tangential to the wall,
-``qᵛ`` is the near-wall specific humidity, and ``q₀`` is the specific humidity of the air in
+``qᵛ`` is the near-wall specific humidity, and ``qˢ`` is the specific humidity of the air in
 contact with the wall. Over the wet fraction ``β`` of the wall (the `moisture_availability`)
-that is the saturation specific humidity ``qᵛ⁺`` at the wall temperature ``T₀`` times the
-wall relative humidity ``ℋ₀`` (unity for a wet wall); over the dry fraction it is the
-humidity of the air itself, so that ``qᵛ - q₀ = β (qᵛ - ℋ₀ qᵛ⁺)`` and the flux is ``β``
+that is the saturation specific humidity ``qᵛ⁺`` at the wall temperature ``Tˢ`` times the
+wall relative humidity ``ℋˢ`` (unity for a wet wall); over the dry fraction it is the
+humidity of the air itself, so that ``qᵛ - qˢ = β (qᵛ - ℋˢ qᵛ⁺)`` and the flux is ``β``
 times the flux over a wet wall.
 
 The flux may be placed on any of the six boundaries of a bounded domain. The sign above is
@@ -252,34 +252,34 @@ end
     i, j, k = near_wall_indices(ℓ, m, grid, side)
     constants = bf.thermodynamic_constants
     surface = bf.surface
-    T₀ = wall_value(ℓ, m, grid, side, bf.surface_temperature, clock)
-    ℋ₀ = wall_value(ℓ, m, grid, side, bf.surface_relative_humidity, clock)
-    p₀ = wall_air_pressure(i, j, k, grid, side, nothing, fields, constants)
-    ρ₀ = surface_density(p₀, T₀, constants)
-    qᵛ₀ = ℋ₀ * saturation_specific_humidity(T₀, ρ₀, constants, surface)
+    Tˢ = wall_value(ℓ, m, grid, side, bf.surface_temperature, clock)
+    ℋˢ = wall_value(ℓ, m, grid, side, bf.surface_relative_humidity, clock)
+    pˢ = wall_air_pressure(i, j, k, grid, side, nothing, fields, constants)
+    ρˢ = surface_density(pˢ, Tˢ, constants)
+    qᵛˢ = ℋˢ * saturation_specific_humidity(Tˢ, ρˢ, constants, surface)
 
-    Δq = bulk_vapor_difference(i, j, k, fields, bf.filtered_scalar, qᵛ₀)
+    Δq = bulk_vapor_difference(i, j, k, fields, bf.filtered_scalar, qᵛˢ)
 
     U² = wall_wind_speed²(i, j, k, grid, side, nothing, fields, bf.filtered_velocities)
     Ũ = sqrt(U² + bf.gustiness^2)
 
-    Cᵛ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, T₀, bf.filtered_velocities, p₀)
+    Cᵛ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, Tˢ, bf.filtered_velocities, pˢ)
 
-    # Over the wet fraction β of the wall the air in contact with it holds qᵛ₀ = ℋ₀ qᵛ⁺(T₀), and
-    # over the dry fraction the humidity of the air itself, so that qᵛ - q₀ = β (qᵛ - qᵛ₀)
+    # Over the wet fraction β of the wall the air in contact with it holds qᵛˢ = ℋˢ qᵛ⁺(Tˢ), and
+    # over the dry fraction the humidity of the air itself, so that qᵛ - qˢ = β (qᵛ - qᵛˢ)
     β = bf.moisture_availability
-    return outward_flux_sign(side) * ρ₀ * Cᵛ * Ũ * β * Δq
+    return outward_flux_sign(side) * ρˢ * Cᵛ * Ũ * β * Δq
 end
 
 # Vapor difference dispatch on filtered_scalar
-@inline function bulk_vapor_difference(i, j, k, fields, ::Nothing, qᵛ₀)
+@inline function bulk_vapor_difference(i, j, k, fields, ::Nothing, qᵛˢ)
     qᵛ = @inbounds fields.qᵛ[i, j, k]
-    return qᵛ - qᵛ₀
+    return qᵛ - qᵛˢ
 end
 
-@inline function bulk_vapor_difference(i, j, k, fields, fs::FilteredSurfaceScalar, qᵛ₀)
+@inline function bulk_vapor_difference(i, j, k, fields, fs::FilteredSurfaceScalar, qᵛˢ)
     qᵛ = @inbounds fs.field[i, j, 1]
-    return qᵛ - qᵛ₀
+    return qᵛ - qᵛˢ
 end
 
 const BulkVaporFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkVaporFluxFunction}
@@ -295,7 +295,7 @@ Create a `FluxBoundaryCondition` for wall sensible heat flux, on any of the six 
 
 The bulk formula computes
 ```math
-J = -ρ₀ Cᵀ |U| Δϕ
+J = -ρˢ Cᵀ |U| Δϕ
 ```
 where ``Δϕ`` depends on the thermodynamic formulation: ``Δθ`` for potential
 temperature or ``Δs`` for static energy. The formulation is set automatically
@@ -308,11 +308,11 @@ See [`BulkSensibleHeatFluxFunction`](@ref) for details.
 ```jldoctest
 using Breeze
 
-T₀(x, y, t) = 290 + 2 * sign(cos(2π * x / 20e3))
+Tˢ(x, y, t) = 290 + 2 * sign(cos(2π * x / 20e3))
 
 ρE_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
                              gustiness = 0.1,
-                             surface_temperature = T₀)
+                             surface_temperature = Tˢ)
 
 # output
 FluxBoundaryCondition: BulkSensibleHeatFluxFunction(coefficient=0.001, gustiness=0.1)
@@ -340,11 +340,11 @@ See [`BulkVaporFluxFunction`](@ref) for details.
 ```jldoctest
 using Breeze
 
-T₀(x, y, t) = 290 + 2 * sign(cos(2π * x / 20e3))
+Tˢ(x, y, t) = 290 + 2 * sign(cos(2π * x / 20e3))
 
 moisture_bc = BulkVaporFlux(coefficient = 1e-3,
                             gustiness = 0.1,
-                            surface_temperature = T₀)
+                            surface_temperature = Tˢ)
 
 # output
 FluxBoundaryCondition: BulkVaporFluxFunction(coefficient=0.001, gustiness=0.1)

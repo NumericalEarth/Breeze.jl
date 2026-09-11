@@ -432,7 +432,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
     Cᴰ = 1e-3
     gustiness = 0.1
-    T₀ = 290
+    Tˢ = 290
 
     @testset "BulkDrag construction and application [$FT]" begin
         drag = BulkDrag()
@@ -461,13 +461,13 @@ end
                                                 reference_potential_temperature = FT(300),
                                                 base_pressure = FT(1e5),
                                                 standard_pressure = FT(1e5))
-        ρu_bcs_no_T₀ = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
+        ρu_bcs_no_Tˢ = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         @test_throws ArgumentError AtmosphereModel(grid; dynamics=compressible_dyn,
-                                                         boundary_conditions=(; ρu=ρu_bcs_no_T₀))
+                                                         boundary_conditions=(; ρu=ρu_bcs_no_Tˢ))
     end
 
     @testset "BulkSensibleHeatFlux construction and application [$FT]" begin
-        bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
+        bc = BulkSensibleHeatFlux(surface_temperature=Tˢ, coefficient=Cᴰ, gustiness=gustiness)
         @test bc isa BoundaryCondition
 
         # Test with ρθ (potential temperature formulation)
@@ -483,7 +483,7 @@ end
         using Oceananigans.Models: BoundaryConditionOperation
 
         grid_1 = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 100))
-        bc = BulkSensibleHeatFlux(surface_temperature=FT(T₀), coefficient=FT(Cᴰ), gustiness=FT(gustiness))
+        bc = BulkSensibleHeatFlux(surface_temperature=FT(Tˢ), coefficient=FT(Cᴰ), gustiness=FT(gustiness))
         ρθ_bcs = FieldBoundaryConditions(bottom=bc)
         model = AtmosphereModel(grid_1; boundary_conditions=(; ρθ=ρθ_bcs))
 
@@ -491,11 +491,11 @@ end
         pˢᵗ = standard_pressure(model.dynamics)
         set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5))
         model_fields = surface_layer_state(model)
-        p₀ = @allowscalar wall_air_pressure(1, 1, 1, grid_1, Bottom(), nothing, model_fields, constants)
-        θ_surface = potential_temperature_from_temperature(FT(T₀), p₀, pˢᵗ, constants)
+        pˢ = @allowscalar wall_air_pressure(1, 1, 1, grid_1, Bottom(), nothing, model_fields, constants)
+        θ_surface = potential_temperature_from_temperature(FT(Tˢ), pˢ, pˢᵗ, constants)
 
-        @test p₀ != pˢᵗ
-        @test abs(θ_surface - FT(T₀)) > increment_tolerance(FT)
+        @test pˢ != pˢᵗ
+        @test abs(θ_surface - FT(Tˢ)) > increment_tolerance(FT)
 
         set!(model; θ=θ_surface)
 
@@ -512,7 +512,7 @@ end
 
         grid_1 = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 100))
         fv = FilteredSurfaceVelocities(grid_1; filter_timescale=FT(3600))
-        bc = BulkSensibleHeatFlux(surface_temperature = FT(T₀),
+        bc = BulkSensibleHeatFlux(surface_temperature = FT(Tˢ),
                                   coefficient = FT(Cᴰ),
                                   gustiness = FT(gustiness),
                                   filtered_velocities = fv)
@@ -523,8 +523,8 @@ end
         pˢᵗ = standard_pressure(model.dynamics)
         set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5))
         model_fields = surface_layer_state(model)
-        p₀ = @allowscalar wall_air_pressure(1, 1, 1, grid_1, Bottom(), nothing, model_fields, constants)
-        θ_surface = potential_temperature_from_temperature(FT(T₀), p₀, pˢᵗ, constants)
+        pˢ = @allowscalar wall_air_pressure(1, 1, 1, grid_1, Bottom(), nothing, model_fields, constants)
+        θ_surface = potential_temperature_from_temperature(FT(Tˢ), pˢ, pˢᵗ, constants)
 
         set!(model; θ=θ_surface)
         Oceananigans.initialize!(model)
@@ -540,7 +540,7 @@ end
         @test all(abs.(interior(Jᶿ_field)) .<= increment_tolerance(FT))
     end
 
-    @testset "BulkDrag uses ρ₀, filtered u and θᵥ [$FT]" begin
+    @testset "BulkDrag uses ρˢ, filtered u and θᵥ [$FT]" begin
         using Oceananigans.Models: BoundaryConditionOperation
         using Breeze.Thermodynamics: surface_density
 
@@ -549,7 +549,7 @@ end
 
         drag = BulkDrag(coefficient = FT(Cᴰ),
                         gustiness = FT(gustiness),
-                        surface_temperature = FT(T₀),
+                        surface_temperature = FT(Tˢ),
                         filtered_velocities = fv)
         ρu_bcs = FieldBoundaryConditions(bottom = drag)
         model = AtmosphereModel(grid_1; boundary_conditions=(; ρu=ρu_bcs))
@@ -569,16 +569,16 @@ end
 
         constants = model.thermodynamic_constants
         model_fields = surface_layer_state(model)
-        p₀ = @allowscalar wall_air_pressure(1, 1, 1, grid_1, Bottom(), XDirection(), model_fields, constants)
-        ρ₀ = surface_density(p₀, FT(T₀), constants)
+        pˢ = @allowscalar wall_air_pressure(1, 1, 1, grid_1, Bottom(), XDirection(), model_fields, constants)
+        ρˢ = surface_density(pˢ, FT(Tˢ), constants)
         Ũ = sqrt(U^2 + FT(gustiness)^2)
-        Jᵘ_expected = - ρ₀ * FT(Cᴰ) * Ũ * U
+        Jᵘ_expected = - ρˢ * FT(Cᴰ) * Ũ * U
 
         @test all(abs.(Array(interior(Jᵘ_field)) .- Jᵘ_expected) .<= increment_tolerance(FT))
     end
 
     @testset "BulkSensibleHeatFlux with StaticEnergyFormulation [$FT]" begin
-        bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
+        bc = BulkSensibleHeatFlux(surface_temperature=Tˢ, coefficient=Cᴰ, gustiness=gustiness)
 
         # Test with ρs on static energy formulation
         ρs_bcs = FieldBoundaryConditions(bottom=bc)
@@ -615,7 +615,7 @@ end
     end
 
     @testset "BulkSensibleHeatFlux with ρE auto-converts for θ formulation [$FT]" begin
-        bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
+        bc = BulkSensibleHeatFlux(surface_temperature=Tˢ, coefficient=Cᴰ, gustiness=gustiness)
 
         # ρE BCs with θ formulation: should route onto ρθ
         ρE_bcs = FieldBoundaryConditions(bottom=bc)
@@ -627,7 +627,7 @@ end
     end
 
     @testset "BulkVaporFlux construction and application [$FT]" begin
-        bc = BulkVaporFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
+        bc = BulkVaporFlux(surface_temperature=Tˢ, coefficient=Cᴰ, gustiness=gustiness)
         @test bc isa BoundaryCondition
 
         ρqᵛ_bcs = FieldBoundaryConditions(bottom=bc)
@@ -642,10 +642,10 @@ end
         using Oceananigans.BoundaryConditions: getbc
         using Oceananigans.TimeSteppers: update_state!
 
-        # The surface humidity is q₀ = β qᵛ⁺ + (1 - β) qᵛ, so the vapor flux over a surface with
+        # The surface humidity is qˢ = β qᵛ⁺ + (1 - β) qᵛ, so the vapor flux over a surface with
         # moisture availability β is β times the flux over a saturated surface
         function surface_vapor_flux(; coefficient=Cᴰ, kw...)
-            bc = BulkVaporFlux(; surface_temperature=T₀, coefficient, gustiness, kw...)
+            bc = BulkVaporFlux(; surface_temperature=Tˢ, coefficient, gustiness, kw...)
             model = AtmosphereModel(grid; boundary_conditions=(; ρqᵛ=FieldBoundaryConditions(bottom=bc)))
             set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5), qᵗ=FT(0.005))
             update_state!(model)
@@ -675,7 +675,7 @@ end
         @test Jᵛ != 0
 
         @test_throws ArgumentError surface_vapor_flux(coefficient=coef, moisture_availability=0.5)
-        @test_throws ArgumentError BulkVaporFlux(surface_temperature=T₀, coefficient=Cᴰ, moisture_availability=1.5)
+        @test_throws ArgumentError BulkVaporFlux(surface_temperature=Tˢ, coefficient=Cᴰ, moisture_availability=1.5)
     end
 
     @testset "materialize_surface_field [$FT]" begin
@@ -702,9 +702,9 @@ end
     @testset "Combined bulk boundary conditions [$FT]" begin
         ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
-        ρθ_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
+        ρθ_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=Tˢ,
                                                                      coefficient=Cᴰ, gustiness=gustiness))
-        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=Tˢ,
                                                                coefficient=Cᴰ, gustiness=gustiness))
 
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
@@ -719,9 +719,9 @@ end
     @testset "Combined bulk boundary conditions with StaticEnergyFormulation [$FT]" begin
         ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
-        ρs_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
+        ρs_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=Tˢ,
                                                                      coefficient=Cᴰ, gustiness=gustiness))
-        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=Tˢ,
                                                                coefficient=Cᴰ, gustiness=gustiness))
 
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρs=ρs_bcs, ρqᵛ=ρqᵛ_bcs)
@@ -736,10 +736,10 @@ end
     @testset "PolynomialCoefficient full model build + time step [$FT]" begin
         coef = PolynomialCoefficient()
 
-        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
 
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
@@ -780,10 +780,10 @@ end
     @testset "PolynomialCoefficient with no stability correction [$FT]" begin
         coef = PolynomialCoefficient(stability_function=nothing)
 
-        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
 
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)

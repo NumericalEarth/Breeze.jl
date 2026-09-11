@@ -20,12 +20,12 @@ Create a bulk drag function for computing wall momentum fluxes using bulk aerody
 formulas. The momentum flux is computed in the same form as the scalar bulk fluxes,
 
 ```math
-Jᵘ = - ρ₀ Cᴰ |U| u
+Jᵘ = - ρˢ Cᴰ |U| u
 ```
 
 where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is the wind speed
 tangential to the wall (with gustiness to prevent singularities at low wind), `u` is the
-velocity component at the first cell face, and `ρ₀` is the surface density computed from
+velocity component at the first cell face, and `ρˢ` is the surface density computed from
 the surface pressure and surface temperature. Monin–Obukhov similarity is a profile law
 for `u` (not `ρu`), so using `u` here keeps the formulation consistent with the similarity
 theory underlying `Cᴰ`.
@@ -38,7 +38,7 @@ is for the bottom; on every wall the drag removes tangential momentum from the d
 When a [`FilteredSurfaceVelocities`](@ref) is supplied via `filtered_velocities`,
 *every* field entering the formula — the wind speed `|U|`, the velocity `u`, and the
 surface-layer virtual potential temperature difference `Δθᵥ` used in stability — is read from the filtered
-state. The surface density `ρ₀` is computed from the (slowly varying) surface
+state. The surface density `ρˢ` is computed from the (slowly varying) surface
 temperature and pressure and is not filtered. Temporal filtering of the matching
 velocity is used to mitigate log-layer mismatch in wall-modeled large-eddy
 simulations, where the spurious correlation between the instantaneous friction
@@ -49,7 +49,7 @@ on the bottom boundary only.
 
 # Monin–Obukhov consistency
 
-`ρ₀` is computed from the surface temperature and the live model pressure extrapolated
+`ρˢ` is computed from the surface temperature and the live model pressure extrapolated
 hydrostatically from the first cell center to the bottom face. It is therefore a true
 surface density that follows both terrain and changes in the model state.
 
@@ -69,7 +69,7 @@ for `CompressibleDynamics`, which has no equivalent reference profile — pass
 - `coefficient`: The drag coefficient (default: `1e-3`). Can be a constant or a
   [`PolynomialCoefficient`](@ref) for wind and stability-dependent transfer coefficients.
 - `gustiness`: Minimum wind speed to prevent singularities when winds are calm (default: `0`)
-- `surface_temperature`: Surface temperature, used to compute `ρ₀` and required when
+- `surface_temperature`: Surface temperature, used to compute `ρˢ` and required when
   using `PolynomialCoefficient` with stability correction. Can be a `Field`,
   `Function`, or `Number`. A function takes the non-`Flat` coordinates of the wall followed
   by the time, as for Oceananigans boundary conditions: `(x, y, t)` on the bottom and top,
@@ -115,7 +115,7 @@ end
 #####
 ##### getbc for BulkDragFunction
 #####
-##### Jᵘ = ∓ ρ₀ Cᴰ Ũ u, mirroring the scalar bulk flux form, with the sign that removes
+##### Jᵘ = ∓ ρˢ Cᴰ Ũ u, mirroring the scalar bulk flux form, with the sign that removes
 ##### tangential momentum through the wall (see `outward_flux_sign`). `u` is read from the
 ##### filtered field at the appropriate face location when filtering is enabled.
 #####
@@ -125,15 +125,15 @@ end
     fields = surface_layer_state(model_fields, dynamics_fields)
     side = df.side
     i, j, k = near_wall_indices(ℓ, m, grid, side)
-    T₀ = wall_value(ℓ, m, grid, side, df.surface_temperature, clock)
+    Tˢ = wall_value(ℓ, m, grid, side, df.surface_temperature, clock)
     u  = near_wall_velocity(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
     U² = wall_wind_speed²(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
     Ũ  = sqrt(U² + df.gustiness^2)
     constants = df.thermodynamic_constants
-    p₀ = wall_air_pressure(i, j, k, grid, side, df.direction, fields, constants)
-    ρ₀ = surface_density(p₀, T₀, constants)
-    Cᴰ = bulk_coefficient(i, j, k, grid, side, df.coefficient, fields, T₀, df.filtered_velocities, p₀)
-    return outward_flux_sign(side) * ρ₀ * Cᴰ * Ũ * u
+    pˢ = wall_air_pressure(i, j, k, grid, side, df.direction, fields, constants)
+    ρˢ = surface_density(pˢ, Tˢ, constants)
+    Cᴰ = bulk_coefficient(i, j, k, grid, side, df.coefficient, fields, Tˢ, df.filtered_velocities, pˢ)
+    return outward_flux_sign(side) * ρˢ * Cᴰ * Ũ * u
 end
 
 const BulkDragBoundaryCondition = BoundaryCondition{<:Flux, <:BulkDragFunction}

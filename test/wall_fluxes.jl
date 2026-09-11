@@ -52,11 +52,11 @@ function closed_box_model(FT; formulation=:LiquidIcePotentialTemperature, coeffi
     grid = RectilinearGrid(default_arch, FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z=(0, 1),
                            topology=(Bounded, Bounded, Bounded))
 
-    T₀ = wall_temperatures(FT)
-    ℋ₀ = wall_humidities(FT)
-    drag(side) = BulkDrag(; coefficient, surface_temperature=T₀[side])
-    heat(side) = BulkSensibleHeatFlux(; coefficient, surface_temperature=T₀[side])
-    vapor(side) = BulkVaporFlux(; coefficient, surface_temperature=T₀[side], surface_relative_humidity=ℋ₀[side])
+    Tˢ = wall_temperatures(FT)
+    ℋˢ = wall_humidities(FT)
+    drag(side) = BulkDrag(; coefficient, surface_temperature=Tˢ[side])
+    heat(side) = BulkSensibleHeatFlux(; coefficient, surface_temperature=Tˢ[side])
+    vapor(side) = BulkVaporFlux(; coefficient, surface_temperature=Tˢ[side], surface_relative_humidity=ℋˢ[side])
 
     # Drag acts on the two momentum components tangential to each wall
     ρu_bcs = FieldBoundaryConditions(south=drag(:south), north=drag(:north), bottom=drag(:bottom), top=drag(:top))
@@ -92,8 +92,8 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
     old_FT = Oceananigans.defaults.FloatType
     Oceananigans.defaults.FloatType = FT
 
-    T₀ = wall_temperatures(FT)
-    ℋ₀ = wall_humidities(FT)
+    Tˢ = wall_temperatures(FT)
+    ℋˢ = wall_humidities(FT)
     C = FT(2e-3)
     θᵢ, ℋᵢ = FT(290), FT(0.5)
     u, v, w = FT(1), FT(2), FT(3)
@@ -122,28 +122,28 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
                                   side ∈ (:west, :east)  ? ((:ρv, v), (:ρw, w)) : ((:ρu, u), (:ρw, w))
             for (name, uₜ) in tangential_momentum
                 field = getproperty(model.momentum, name)
-                p₀ᵘ = wall_pressure(model, side, i, j, k, momentum_direction(name))
-                ρ₀ = surface_density(p₀ᵘ, T₀[side], constants)
-                expected = sign * ρ₀ * C * Ũ * uₜ
+                pᵘˢ = wall_pressure(model, side, i, j, k, momentum_direction(name))
+                ρˢ = surface_density(pᵘˢ, Tˢ[side], constants)
+                expected = sign * ρˢ * C * Ũ * uₜ
                 @test evaluate_bc(model, field, side, probe...) ≈ expected rtol=10 * eps(FT)
             end
 
             # Sensible heat: into the domain when the wall is warmer than the air
             bc = wall_bc(prognostic_fields(model).ρθ, side)
-            p₀ = wall_pressure(model, side, i, j, k)
+            pˢ = wall_pressure(model, side, i, j, k)
             pˢᵗ = bc.condition.standard_pressure
-            ρ₀ = surface_density(p₀, T₀[side], constants)
-            θ₀ = potential_temperature_from_temperature(T₀[side], p₀, pˢᵗ, constants)
+            ρˢ = surface_density(pˢ, Tˢ[side], constants)
+            θ₀ = potential_temperature_from_temperature(Tˢ[side], pˢ, pˢᵗ, constants)
             θ = @allowscalar fields.θ[i, j, k]
-            expected = sign * ρ₀ * C * Ũ * (θ - θ₀)
+            expected = sign * ρˢ * C * Ũ * (θ - θ₀)
             @test evaluate_bc(model, prognostic_fields(model).ρθ, side, probe...) ≈ expected rtol=100 * eps(FT)
 
             # Vapor: into the domain when the wall is moister than the air
             bc = wall_bc(prognostic_fields(model).ρqᵛ, side)
-            ρ₀ = surface_density(p₀, T₀[side], constants)
-            qᵛ₀ = ℋ₀[side] * saturation_specific_humidity(T₀[side], ρ₀, constants, PlanarLiquidSurface())
+            ρˢ = surface_density(pˢ, Tˢ[side], constants)
+            qᵛˢ = ℋˢ[side] * saturation_specific_humidity(Tˢ[side], ρˢ, constants, PlanarLiquidSurface())
             qᵛ = @allowscalar fields.qᵛ[i, j, k]
-            expected = sign * ρ₀ * C * Ũ * (qᵛ - qᵛ₀)
+            expected = sign * ρˢ * C * Ũ * (qᵛ - qᵛˢ)
             @test evaluate_bc(model, prognostic_fields(model).ρqᵛ, side, probe...) ≈ expected rtol=100 * eps(FT)
         end
     end
@@ -163,13 +163,13 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
         wall_height = (west=nothing, east=nothing, south=nothing, north=nothing, bottom=FT(0), top=FT(1))
         for side in sides
             i, j, k = near_wall_cell(side, probe..., Nx, Ny, Nz)
-            z₀ = isnothing(wall_height[side]) ? (@allowscalar znode(i, j, k, grid, Center(), Center(), Center())) : wall_height[side]
-            ρ₀ = surface_density(wall_pressure(model, side, i, j, k), T₀[side], constants)
+            zˢ = isnothing(wall_height[side]) ? (@allowscalar znode(i, j, k, grid, Center(), Center(), Center())) : wall_height[side]
+            ρˢ = surface_density(wall_pressure(model, side, i, j, k), Tˢ[side], constants)
             qᵛ = @allowscalar fields.qᵛ[i, j, k]
             cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ
-            s₀ = cᵖᵐ * T₀[side] + g * z₀
+            sˢ = cᵖᵐ * Tˢ[side] + g * zˢ
             s = @allowscalar fields.s[i, j, k]
-            expected = outward_sign(side) * ρ₀ * C * tangential_speed[side] * (s - s₀)
+            expected = outward_sign(side) * ρˢ * C * tangential_speed[side] * (s - sˢ)
             @test evaluate_bc(model, prognostic_fields(model).ρs, side, probe...) ≈ expected rtol=100 * eps(FT)
         end
     end
@@ -180,9 +180,9 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
         # At rest the drag vanishes, so give the walls a gust to move heat and vapor. The gust
         # and the time step are large enough that the change in a near-wall cell is well above
         # the roundoff of the cell's ρθ in single precision.
-        gusty(side) = BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T₀[side])
-        gusty_vapor(side) = BulkVaporFlux(; coefficient=C, gustiness=FT(1), surface_temperature=T₀[side],
-                                          surface_relative_humidity=ℋ₀[side])
+        gusty(side) = BulkSensibleHeatFlux(; coefficient=C, gustiness=FT(1), surface_temperature=Tˢ[side])
+        gusty_vapor(side) = BulkVaporFlux(; coefficient=C, gustiness=FT(1), surface_temperature=Tˢ[side],
+                                          surface_relative_humidity=ℋˢ[side])
         boundary_conditions = (; ρθ = FieldBoundaryConditions(; (side => gusty(side) for side in sides)...),
                                  ρqᵛ = FieldBoundaryConditions(; (side => gusty_vapor(side) for side in sides)...))
         model = AtmosphereModel(model.grid; boundary_conditions, advection=WENO(order=3))
@@ -194,7 +194,7 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
         Δρqᵛ = Array(interior(prognostic_fields(model).ρqᵛ)) .- ρqᵛ⁰
 
         # The air is at 290 K; walls warmer than that heat the near-wall cell, colder ones cool it
-        warmer(side) = T₀[side] > θᵢ
+        warmer(side) = Tˢ[side] > θᵢ
         near(A, side) = (side === :west  ? A[1, 2:Ny-1, 2:Nz-1] : side === :east  ? A[Nx, 2:Ny-1, 2:Nz-1] :
                          side === :south ? A[2:Nx-1, 1, 2:Nz-1] : side === :north ? A[2:Nx-1, Ny, 2:Nz-1] :
                          side === :bottom ? A[2:Nx-1, 2:Ny-1, 1] : A[2:Nx-1, 2:Ny-1, Nz])
@@ -235,12 +235,12 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
                 x, y, z = @allowscalar (xnode(i, j, k, grid, Center(), Center(), Center()),
                                         ynode(i, j, k, grid, Center(), Center(), Center()),
                                         znode(i, j, k, grid, Center(), Center(), Center()))
-                T₀ⁱʲᵏ = side === :west ? T_wall(y, z, t) : side === :bottom ? T_wall(x, y, t) : T_wall(x, z, t)
-                p₀ = wall_pressure(model, side, i, j, k)
-                ρ₀ = surface_density(p₀, T₀ⁱʲᵏ, constants)
-                θ₀ = potential_temperature_from_temperature(T₀ⁱʲᵏ, p₀, bc.condition.standard_pressure, constants)
+                Tˢⁱʲᵏ = side === :west ? T_wall(y, z, t) : side === :bottom ? T_wall(x, y, t) : T_wall(x, z, t)
+                pˢ = wall_pressure(model, side, i, j, k)
+                ρˢ = surface_density(pˢ, Tˢⁱʲᵏ, constants)
+                θ₀ = potential_temperature_from_temperature(Tˢⁱʲᵏ, pˢ, bc.condition.standard_pressure, constants)
                 θ = @allowscalar fields.θ[i, j, k]
-                expected = outward_sign(side) * ρ₀ * C * FT(1) * (θ - θ₀)   # at rest: Ũ = gustiness
+                expected = outward_sign(side) * ρˢ * C * FT(1) * (θ - θ₀)   # at rest: Ũ = gustiness
                 @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, j, k) ≈ expected rtol=100 * eps(FT)
             end
         end
@@ -260,12 +260,12 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
         for (side, T_wall, i, k) in ((:bottom, x -> T_bottom(x, FT(20)), 2, 1), (:top, x -> T_top(x, FT(20)), 3, 4))
             bc = wall_bc(prognostic_fields(model).ρθ, side)
             x = @allowscalar xnode(i, 1, k, grid, Center(), Center(), Center())
-            T₀ⁱᵏ = T_wall(x)
-            p₀ = wall_pressure(model, side, i, 1, k)
-            ρ₀ = surface_density(p₀, T₀ⁱᵏ, constants)
-            θ₀ = potential_temperature_from_temperature(T₀ⁱᵏ, p₀, bc.condition.standard_pressure, constants)
+            Tˢⁱᵏ = T_wall(x)
+            pˢ = wall_pressure(model, side, i, 1, k)
+            ρˢ = surface_density(pˢ, Tˢⁱᵏ, constants)
+            θ₀ = potential_temperature_from_temperature(Tˢⁱᵏ, pˢ, bc.condition.standard_pressure, constants)
             θ = @allowscalar fields.θ[i, 1, k]
-            expected = outward_sign(side) * ρ₀ * C * FT(1) * (θ - θ₀)
+            expected = outward_sign(side) * ρˢ * C * FT(1) * (θ - θ₀)
             @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, 1, k) ≈ expected rtol=100 * eps(FT)
         end
     end
@@ -288,13 +288,13 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
 
         for (side, i, j, k) in ((:west, 1, 2, 3), (:south, 3, 1, 2), (:top, 2, 3, 4))
             bc = wall_bc(prognostic_fields(model).ρθ, side)
-            T₀ⁱʲᵏ = @allowscalar (side === :west ? T_fields.west[1, j, k] :
+            Tˢⁱʲᵏ = @allowscalar (side === :west ? T_fields.west[1, j, k] :
                                   side === :south ? T_fields.south[i, 1, k] : T_fields.top[i, j, 1])
-            p₀ = wall_pressure(model, side, i, j, k)
-            ρ₀ = surface_density(p₀, T₀ⁱʲᵏ, constants)
-            θ₀ = potential_temperature_from_temperature(T₀ⁱʲᵏ, p₀, bc.condition.standard_pressure, constants)
+            pˢ = wall_pressure(model, side, i, j, k)
+            ρˢ = surface_density(pˢ, Tˢⁱʲᵏ, constants)
+            θ₀ = potential_temperature_from_temperature(Tˢⁱʲᵏ, pˢ, bc.condition.standard_pressure, constants)
             θ = @allowscalar fields.θ[i, j, k]
-            expected = outward_sign(side) * ρ₀ * C * FT(1) * (θ - θ₀)
+            expected = outward_sign(side) * ρˢ * C * FT(1) * (θ - θ₀)
             @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, j, k) ≈ expected rtol=100 * eps(FT)
         end
     end
@@ -307,7 +307,7 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
         set!(model; θ=θᵢ, ℋ=ℋᵢ)
         grid = model.grid
         clock, fields, dynamics_fields = boundary_condition_args(model)
-        T₀ = wall_temperatures(FT)
+        Tˢ = wall_temperatures(FT)
         walls = (west=West(), east=East(), south=South(), north=North(), bottom=Bottom(), top=Top())
         Nx, Ny, Nz = size(grid)
         for side in sides
@@ -316,8 +316,8 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
             i, j, k = near_wall_cell(side, 2, 2, 2, Nx, Ny, Nz)
             wall = walls[side]
             surface_fields = surface_layer_state(model)
-            p₀ = wall_pressure(model, side, i, j, k)
-            Cᵂ = @allowscalar bulk_coefficient(i, j, k, grid, wall, coef, surface_fields, T₀[side], nothing, p₀)
+            pˢ = wall_pressure(model, side, i, j, k)
+            Cᵂ = @allowscalar bulk_coefficient(i, j, k, grid, wall, coef, surface_fields, Tˢ[side], nothing, pˢ)
             # the neutral log-law value at the wall distance of the near-wall cell
             U = @allowscalar sqrt(tangential_speed²(i, j, k, grid, wall, nothing, fields))
             h = @allowscalar wall_distance(i, j, k, grid, wall)

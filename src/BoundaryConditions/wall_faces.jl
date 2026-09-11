@@ -86,7 +86,7 @@ wall_normal_direction(::HorizontalWall) = ZDirection()
 @inline wall_air_pressureᶜᶜᶜ(i, j, k, grid, ::VerticalWall, fields, constants) = @inbounds fields.p[i, j, k]
 
 # A scalar flux is evaluated at the cell center; a momentum flux at the face of the component it
-# acts on, so the pressure that sets ρ₀ there is interpolated to that face.
+# acts on, so the pressure that sets ρˢ there is interpolated to that face.
 @inline wall_air_pressure(i, j, k, grid, side, ::Nothing, fields, constants) =
     wall_air_pressureᶜᶜᶜ(i, j, k, grid, side, fields, constants)
 

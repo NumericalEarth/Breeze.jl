@@ -350,17 +350,17 @@ function materialize_bulk_drag(df, side, grid, dynamics, microphysics, constants
     validate_drag_direction(side, df.direction)
     validate_wall_filtering(side, df.filtered_velocities)
 
-    # The momentum-drag formula `Jᵘ = -ρ₀ Cᴰ |U| u` needs a surface temperature to
-    # compute ρ₀. When the user did not supply one (allowed for constant `coefficient`),
+    # The momentum-drag formula `Jᵘ = -ρˢ Cᴰ |U| u` needs a surface temperature to
+    # compute ρˢ. When the user did not supply one (allowed for constant `coefficient`),
     # fall back to the reference-state surface temperature derived from the dynamics.
-    T₀_input = if isnothing(df.surface_temperature)
+    Tˢ_input = if isnothing(df.surface_temperature)
         default_drag_surface_temperature(dynamics, grid, constants)
     else
         df.surface_temperature
     end
-    T₀ = materialize_surface_field(T₀_input, grid, side)
+    Tˢ = materialize_surface_field(Tˢ_input, grid, side)
     coef = materialize_coefficient(df.coefficient, grid, dynamics, microphysics, constants, Val(:momentum))
-    new_df = BulkDragFunction(df.direction, side, coef, df.gustiness, T₀, df.filtered_velocities, constants)
+    new_df = BulkDragFunction(df.direction, side, coef, df.gustiness, Tˢ, df.filtered_velocities, constants)
     return BoundaryCondition(Flux(), new_df)
 end
 
@@ -399,7 +399,7 @@ function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBound
     bf = bc.condition
     validate_wall(side)
     validate_wall_filtering(side, bf.filtered_velocities)
-    T₀ = materialize_surface_field(bf.surface_temperature, grid, side)
+    Tˢ = materialize_surface_field(bf.surface_temperature, grid, side)
     pˢᵗ = standard_pressure(dynamics)
     coef = materialize_coefficient(bf.coefficient, grid, dynamics, microphysics, constants, Val(:scalar))
     # Auto-create FilteredSurfaceScalar if filtered_velocities is provided
@@ -410,7 +410,7 @@ function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBound
                               filter_timescale=bf.filtered_velocities.filter_timescale)
     end
 
-    new_bf = BulkSensibleHeatFluxFunction(side, coef, bf.gustiness, T₀, pˢᵗ, constants,
+    new_bf = BulkSensibleHeatFluxFunction(side, coef, bf.gustiness, Tˢ, pˢᵗ, constants,
                                           bf.formulation, bf.filtered_velocities, fs)
     return BoundaryCondition(Flux(), new_bf)
 end
@@ -422,8 +422,8 @@ function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCond
     bf = bc.condition
     validate_wall(side)
     validate_wall_filtering(side, bf.filtered_velocities)
-    T₀ = materialize_surface_field(bf.surface_temperature, grid, side)
-    ℋ₀ = materialize_surface_field(bf.surface_relative_humidity, grid, side)
+    Tˢ = materialize_surface_field(bf.surface_temperature, grid, side)
+    ℋˢ = materialize_surface_field(bf.surface_relative_humidity, grid, side)
     surface = coefficient_surface(bf.coefficient)
     β = convert(eltype(grid), resolve_moisture_availability(bf.moisture_availability, bf.coefficient))
     coef = materialize_coefficient(bf.coefficient, grid, dynamics, microphysics, constants, Val(:scalar))
@@ -436,7 +436,7 @@ function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCond
                               filter_timescale=bf.filtered_velocities.filter_timescale)
     end
 
-    new_bf = BulkVaporFluxFunction(side, coef, bf.gustiness, T₀, ℋ₀, constants, surface, β,
+    new_bf = BulkVaporFluxFunction(side, coef, bf.gustiness, Tˢ, ℋˢ, constants, surface, β,
                                    bf.filtered_velocities, fs)
 
     return BoundaryCondition(Flux(), new_bf)

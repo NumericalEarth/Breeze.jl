@@ -298,7 +298,7 @@ using Test
         z_plateau = 1921.0
         p₀ = 100798.0
         θ₀ = 288.0
-        T₀ = 300.0
+        Tˢ = 300.0
         U = 5.0
         Cᴰ = 1e-3
 
@@ -308,11 +308,11 @@ using Test
                                topology=(Periodic, Flat, Bounded))
         materialize_terrain!(grid, x -> z_plateau)
 
-        drag = Breeze.BulkDrag(coefficient=Cᴰ, surface_temperature=T₀)
+        drag = Breeze.BulkDrag(coefficient=Cᴰ, surface_temperature=Tˢ)
         ρu_bcs = FieldBoundaryConditions(bottom=drag)
-        sensible_heat = Breeze.BulkSensibleHeatFlux(coefficient=Cᴰ, surface_temperature=T₀)
+        sensible_heat = Breeze.BulkSensibleHeatFlux(coefficient=Cᴰ, surface_temperature=Tˢ)
         ρθ_bcs = FieldBoundaryConditions(bottom=sensible_heat)
-        vapor = Breeze.BulkVaporFlux(coefficient=Cᴰ, surface_temperature=T₀)
+        vapor = Breeze.BulkVaporFlux(coefficient=Cᴰ, surface_temperature=Tˢ)
         ρqᵛ_bcs = FieldBoundaryConditions(bottom=vapor)
         dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                         base_pressure=p₀, reference_potential_temperature=θ₀)
@@ -341,7 +341,7 @@ using Test
 
         Jᵘ = Field(BoundaryConditionOperation(model.momentum.ρu, :bottom, model))
         compute!(Jᵘ)
-        ρˢ = surface_density(pˢ, T₀, constants)
+        ρˢ = surface_density(pˢ, Tˢ, constants)
         Jᵘ_expected = -ρˢ * Cᴰ * U^2
         @test all(isapprox.(Array(interior(Jᵘ)), Jᵘ_expected; rtol=1e-6))
 
@@ -349,13 +349,13 @@ using Test
                                                   :bottom, model))
         compute!(Jᶿ)
         pˢᵗ = model.dynamics.standard_pressure
-        θˢ = potential_temperature_from_temperature(T₀, pˢ_center, pˢᵗ, constants)
+        θˢ = potential_temperature_from_temperature(Tˢ, pˢ_center, pˢᵗ, constants)
         Jᶿ_expected = -ρˢ * Cᴰ * U * (θ₀ - θˢ)
         @test all(isapprox.(Array(interior(Jᶿ)), Jᶿ_expected; rtol=1e-6))
 
         Jᵛ = Field(BoundaryConditionOperation(model.moisture_density, :bottom, model))
         compute!(Jᵛ)
-        qᵛˢ = saturation_specific_humidity(T₀, ρˢ, constants, PlanarLiquidSurface())
+        qᵛˢ = saturation_specific_humidity(Tˢ, ρˢ, constants, PlanarLiquidSurface())
         Jᵛ_expected = ρˢ * Cᴰ * U * qᵛˢ
         @test all(isapprox.(Array(interior(Jᵛ)), Jᵛ_expected; rtol=1e-6))
 
@@ -367,7 +367,7 @@ using Test
         @test abs(pˢ_updated - pˢ_reference) > 1000
 
         compute!(Jᵘ)
-        ρˢ_updated = surface_density(pˢ_updated, T₀, constants)
+        ρˢ_updated = surface_density(pˢ_updated, Tˢ, constants)
         Jᵘ_updated = -ρˢ_updated * Cᴰ * U^2
         @test all(isapprox.(Array(interior(Jᵘ)), Jᵘ_updated; rtol=1e-6))
     end
