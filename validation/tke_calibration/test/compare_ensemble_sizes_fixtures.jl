@@ -130,6 +130,32 @@ end
     @test !occursin("No seed recorded", out)
 end
 
+@testset "a mixed group of duplicate and distinct seeds keeps one run per seed" begin
+    # Seeds [1, 1, 2] pass a bare "more than one distinct seed" test while double-weighting seed 1 in
+    # the scatter. The duplicate must be dropped before the pairing test, not after.
+    m1 = fixture(joinpath(dir, "mix1.jld2"); seed = 1)
+    m2 = fixture(joinpath(dir, "mix2.jld2"); seed = 1)
+    m3 = fixture(joinpath(dir, "mix3.jld2"); seed = 2)
+    ok, out = run_script(m1, m2, m3)
+    @test ok
+    @test occursin("Duplicate seeds", out)
+    @test occursin("seeds 1, 2", out)            # the surviving pair, not 1, 1, 2
+end
+
+@testset "metadata that is absent in every checkpoint is not agreement" begin
+    # Two checkpoints both lacking a field compare equal as `missing`, which would let the gate pass
+    # on runs whose provenance is simply unrecorded.
+    for (name, key) in (("protocol version", "protocol_version"), ("radiation mode", "radiation"),
+                        ("algorithm configuration", "algorithm_configuration"))
+        strip_key = Dict(key => missing)
+        b1 = fixture(joinpath(dir, "nometa1_$key.jld2"); seed = 1, overrides = strip_key)
+        b2 = fixture(joinpath(dir, "nometa2_$key.jld2"); seed = 2, overrides = strip_key)
+        ok, out = run_script(b1, b2)
+        @test !ok
+        @test occursin("is not recorded in", out)
+    end
+end
+
 @testset "a checkpoint without a directly evaluated mean still reports" begin
     n1 = fixture(joinpath(dir, "nomean1.jld2"); include_selected = false, seed = 1)
     n2 = fixture(joinpath(dir, "nomean2.jld2"); include_selected = false, seed = 2)

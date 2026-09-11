@@ -23,6 +23,10 @@ using JLD2, Printf, Statistics, LinearAlgebra
 
 field(nt, k) = (isnothing(nt) || !haskey(nt, k)) ? missing : getproperty(nt, k)
 
+# A checkpoint is summarized here and the file's big arrays are dropped before the next one opens.
+# Nothing downstream reads `history[n].G` — only ϕ, misfit, wall and `selected_mean.G` — and at
+# 25 200 observations, 800 members and 30 iterations that unread field is about 4.8 GB per run, so
+# retaining every history would exhaust a login node on a replicated ladder.
 function load_entry(label, path)
     saved = load(String(path))
     history = saved["history"]
@@ -36,17 +40,27 @@ function load_entry(label, path)
     # Φ of a member, derived from its normalized misfit (Φ = ½ misfit²). Reported over the whole
     # history, not just the final iteration: EKI's objective is not monotone in the iteration.
     member_Φ = [0.5 * minimum(h.misfit)^2 for h in history]
-    return (; label = String(label), path = String(path), saved, history, final,
-              N_ens = size(final.ϕ, 2), cases = length(saved["members"]), iterations = length(history),
-              protocol = get(saved, "protocol_version", missing), run_configuration, metadata, seed,
-              Δt = field(run_configuration, :Δt),
-              stop_reason = get(final, :stop_reason, missing), pseudotime = final.pseudotime,
-              selected, selected_Φ = isnothing(selected) ? missing : selected.objective,
-              selected_iteration = isnothing(selected) ? missing : selected.iteration,
-              final_mean_Φ = get(final, :mean_objective, missing),
-              best_member_Φ = minimum(member_Φ), best_member_iteration = argmin(member_Φ),
-              final_member_Φ = last(member_Φ),
-              names = saved["parameter_names"], y = saved["y"], Γ = saved["Γ"])
+    selected_iteration = isnothing(selected) ? missing : selected.iteration
+    # The only ensembles kept: the one the mean was selected from, for spreads, and the last, for N_ens.
+    selected_ϕ = ismissing(selected_iteration) ? nothing : copy(history[selected_iteration].ϕ)
+    entry = (; label = String(label), path = String(path), final_ϕ = copy(final.ϕ), selected_ϕ,
+               N_ens = size(final.ϕ, 2), cases = length(saved["members"]), iterations = length(history),
+               protocol = get(saved, "protocol_version", missing), run_configuration, metadata, seed,
+               Δt = field(run_configuration, :Δt),
+               stop_reason = get(final, :stop_reason, missing), pseudotime = final.pseudotime,
+               wall_hours = sum(h.wall for h in history) / 3600,
+               members = get(saved, "members", missing), z_faces = get(saved, "z_faces", missing),
+               radiation = get(saved, "radiation", missing),
+               algorithm = get(saved, "algorithm_configuration", missing),
+               selected, selected_Φ = isnothing(selected) ? missing : selected.objective,
+               selected_iteration,
+               final_mean_Φ = get(final, :mean_objective, missing),
+               best_member_Φ = minimum(member_Φ), best_member_iteration = argmin(member_Φ),
+               final_member_Φ = last(member_Φ),
+               names = saved["parameter_names"], y = saved["y"], Γ = saved["Γ"])
+    saved = nothing; history = nothing; final = nothing
+    GC.gc()
+    return entry
 end
 
 entries = [load_entry((occursin('=', a) ? split(a, '=', limit = 2) : (replace(basename(a), r"\.jld2$" => ""), a))...) for a in ARGS]
@@ -62,16 +76,23 @@ const allowed_to_differ = (:seed, :N_ens)
 
 function incompatibilities(entries)
     problems = String[]
-    check(name, f) = length(unique(f(e) for e in entries)) == 1 ||
-                     push!(problems, "$name differs: " * join(unique(string(f(e)) for e in entries), " | "))
+    function check(name, f)
+        values = [f(e) for e in entries]
+        # Missing metadata is not agreement. Two checkpoints that both lack a field compare equal as
+        # `missing`, which would let the gate pass on runs whose provenance is simply unrecorded.
+        any(ismissing, values) && return push!(problems, "$name is not recorded in " *
+            join(entries[i].label for i in eachindex(values) if ismissing(values[i]), ", "))
+        length(unique(values)) == 1 ||
+            push!(problems, "$name differs: " * join(unique(string(v) for v in values), " | "))
+    end
     check("parameter space", e -> e.names)
     check("observations y", e -> e.y)
     check("observation noise Γ", e -> e.Γ)
     check("protocol version", e -> e.protocol)
-    check("members", e -> get(e.saved, "members", missing))
-    check("grid faces", e -> get(e.saved, "z_faces", missing))
-    check("radiation mode", e -> get(e.saved, "radiation", missing))
-    check("algorithm configuration", e -> get(e.saved, "algorithm_configuration", missing))
+    check("members", e -> e.members)
+    check("grid faces", e -> e.z_faces)
+    check("radiation mode", e -> e.radiation)
+    check("algorithm configuration", e -> e.algorithm)
     # The run configuration compared field by field, so the message names the field
     configs = [e.run_configuration for e in entries]
     if any(isnothing, configs)
@@ -100,11 +121,12 @@ end
 println("\n===== runs")
 @printf "%-20s %6s %6s %7s %8s %6s %9s %9s %24s\n" "run" "N_ens" "cases" "seed" "Δt (s)" "iters" "pseudo t" "wall h" "stop reason"
 for e in entries
-    @printf "%-20s %6d %6d %7s %8s %6d %9.3f %9.2f %24s\n" e.label e.N_ens e.cases string(coalesce(e.seed, "unknown")) string(coalesce(e.Δt, "?")) e.iterations e.pseudotime sum(h.wall for h in e.history)/3600 string(e.stop_reason)
+    @printf "%-20s %6d %6d %7s %8s %6d %9.3f %9.2f %24s\n" e.label e.N_ens e.cases string(coalesce(e.seed, "unknown")) string(coalesce(e.Δt, "?")) e.iterations e.pseudotime e.wall_hours string(e.stop_reason)
 end
 println("\n`tempering_budget`: the scheduler's pseudo time ran out. `mean_objective_plateau`: the")
-println("optimization criterion was met. `none`: the iteration cap was reached. Only the second is a")
-println("statement about the objective.")
+println("optimization criterion was met. `none`: no stopping criterion was recorded at the last saved")
+println("iteration — the run may still be going, have been interrupted, or have hit the cap. Only the")
+println("second is a statement about the objective.")
 
 #####
 ##### The objective, evaluated rather than inferred
@@ -132,9 +154,29 @@ groups = Dict{Tuple{Int, Int}, Vector{Int}}()
 for i in usable
     push!(get!(groups, (entries[i].N_ens, entries[i].cases), Int[]), i)
 end
-# Distinct seeds only: two runs at the same configuration with the same seed are one experiment, and
-# runs whose seed is unrecorded cannot be asserted independent.
-paired = Dict(k => v for (k, v) in groups if length(unique(seed_of(entries[i]) for i in v)) > 1)
+# Distinct seeds only, and one run per seed. Two runs at the same configuration with the same seed are
+# one experiment repeated: counting both would weight it twice in the scatter and understate it.
+# A mixed group like seeds [1, 1, 2] passes a bare "more than one distinct seed" test, so deduplicate
+# before testing rather than after.
+function one_per_seed(indices)
+    seen = Set()
+    kept = Int[]
+    for i in indices
+        s = seed_of(entries[i])
+        s in seen && continue
+        push!(seen, s)
+        push!(kept, i)
+    end
+    return kept
+end
+deduplicated = Dict(k => one_per_seed(v) for (k, v) in groups)
+for (k, v) in groups
+    dropped = setdiff(v, deduplicated[k])
+    isempty(dropped) ||
+        @warn "Duplicate seeds at N_ens = $(k[1]), cases = $(k[2]): keeping one run per seed, dropping " *
+              join((entries[i].label for i in dropped), ", ")
+end
+paired = Dict(k => v for (k, v) in deduplicated if length(v) > 1)
 
 if length(usable) < length(entries)
     unknown = [entries[i].label for i in eachindex(entries) if i ∉ usable]
@@ -157,7 +199,7 @@ else
         for (k, name) in enumerate(group[1].names)
             # The spread to compare against is the one at the selected iteration, not at the end:
             # the ensemble keeps contracting after the mean that was selected.
-            within = mean(std(e.history[e.selected_iteration].ϕ[k, :]) for e in group)
+            within = mean(std(e.selected_ϕ[k, :]) for e in group)
             across = std(ϕs[k, :])
             @printf "    %-8s %12.4f %14.4f %16s\n" name mean(ϕs[k, :]) across (within > 0 ? @sprintf("%.2f", across / within) : "—")
         end
@@ -180,7 +222,7 @@ if length(with_G) > 1
     @printf "%-20s %24s %28s\n" "run" "coefficients (spreads)" "response (σ per obs cell)"
     for e in with_G
         e === reference && continue
-        within = [std(reference.history[reference.selected_iteration].ϕ[k, :]) for k in eachindex(e.names)]
+        within = [std(reference.selected_ϕ[k, :]) for k in eachindex(e.names)]
         dϕ = (vec(e.selected.parameters) .- vec(reference.selected.parameters)) ./ max.(within, eps())
         dG = (e.selected.G .- reference.selected.G) ./ σ
         @printf "%-20s %24s %28s\n" e.label @sprintf("RMS %.2f, max %.2f", sqrt(mean(dϕ.^2)), maximum(abs.(dϕ))) @sprintf("RMS %.3f, max %.2f", sqrt(mean(dG.^2)), maximum(abs.(dG)))
