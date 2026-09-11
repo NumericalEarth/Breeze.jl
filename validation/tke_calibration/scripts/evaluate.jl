@@ -12,6 +12,7 @@
 # something else as well as skill, and the script says so.
 using BreezeCalibration, JLD2, Statistics, Printf
 using Oceananigans: CPU, GPU
+include(joinpath(@__DIR__, "calibration_data_manifest.jl"))
 
 options = Dict(split(a, '=', limit = 2) for a in filter(a -> occursin('=', a), ARGS))
 path = get(options, "checkpoint", joinpath(@__DIR__, "..", "results", "eki.jld2"))
@@ -19,6 +20,9 @@ output = get(options, "output", joinpath(@__DIR__, "..", "results", "evaluation.
 resolutions = split(get(options, "resolutions", "20,50,100,hindcast"), ',')
 
 saved = load(path)
+# The coefficients are frozen, the forcing data is not. Scoring a checkpoint against LES or GCM files
+# that have changed since it was fitted would attribute the difference to the coefficients.
+validate_data_manifest(saved)
 history = saved["history"]
 ϕ_last = history[end].ϕ
 space = space_of(size(ϕ_last, 1))

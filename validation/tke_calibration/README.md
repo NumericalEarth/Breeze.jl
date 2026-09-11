@@ -73,7 +73,9 @@ Three roles, and the distinction is load-bearing:
 - **Validation** (sites 3, 12, 21, all months): chooses the design — the training split, the ensemble size,
   which closure family to adopt. Named explicitly and identical for every calibration compared, so the
   yardstick does not move with the design being judged.
-- **Reserved test** (sites 6, 9, 15, 18, all months): touched by nothing. `evaluate.jl` integrates and saves
+- **Reserved test** (sites 6, 9, 15, 18): touched by nothing. Sixteen (site, month) pairs in principle,
+  **fifteen in practice** — cfSite 15 January is absent from the library — which is why the member list is
+  always derived from `library_members()` rather than formed as a product of sites and months. `evaluate.jl` integrates and saves
   these scores but does not print them without `reveal=true`, which is meant to be passed once, after the
   coefficients are frozen.
 
@@ -85,23 +87,33 @@ an untouched resolution test.
 The GPU reproduces the CPU to 2.7 × 10⁻¹² relative on the time means, and is 17.8× faster than the same
 node's CPU at production size (1.62 s/step against 0.091 at 3 200 columns).
 
-Cost per step is nearly flat in ensemble size — 16 training cases, 50 m grid, Δt = 60 s:
+Cost per column falls with ensemble size, with diminishing returns. Measured on an H100 at the real
+56-case problem, summed over the three production grids — **Δt = 30 s with radiation every 1800 s, which
+is not the production setting**, so these are evidence about how cost scales with columns and grids and
+not a production timing:
 
-| N_ens | columns | s/step | VRAM |
-|---|---|---|---|
-| 200 | 3 200 | 0.086 | 1.3 GiB |
-| 400 | 6 400 | 0.102 | 1.6 GiB |
-| 800 | 12 800 | 0.112 | 2.0 GiB |
-| 1600 | 25 600 | 0.140 | 4.5 GiB |
+| N_ens | columns | sum s/step (3 grids) | s/step per 1000 columns | pool GiB |
+|---|---|---|---|---|
+| 200 | 11 200 | 0.06739 | 0.006017 | 1.9 |
+| 400 | 22 400 | 0.07917 | 0.003534 | 3.7 |
+| 800 | 44 800 | 0.13082 | 0.002920 | 7.3 |
+| 1600 | 89 600 | 0.22809 | 0.002546 | 14.5 |
 
-Eight times the columns for 1.62× the time. **Ensemble members and training cases are not
-interchangeable, though**: the forward map depends on total columns, but the localized EKI update forms an
-N_obs × N_obs covariance on the host, with N_obs = grids × cases × 5 × 30. Measured: 16 cases on one grid
-is 1.9 s per update; 56 cases on three grids is 25 200 observations, a 4.73 GB covariance and ~150 s. Cases
-are charged twice, ensemble members once.
+The gain per doubling shrinks (41 %, 17 %, 13 %) but never vanishes, so a larger chunk is always cheaper
+per column; the bound on chunk size is memory, not a knee. Those pool figures are occupancy after the run,
+not an instrumented peak, so they bound nothing — the gate for a chunk size is running that configuration
+to completion on the smallest production device.
 
-Radiation is ~80 % of the step cost, and it fires on model time, so refining Δt adds no radiation calls.
-Forward map on the 50 m grid at 3 200 columns (144 h = the latest training window end):
+**Ensemble members and training cases are not interchangeable**: the forward map depends on total columns,
+but the localized EKI update forms an N_obs × N_obs covariance on the host, with N_obs = grids × cases ×
+5 × 30. Measured: 16 cases on one grid is 1.9 s per update; 56 cases on three grids is 25 200 observations,
+a 4.73 GB covariance and 150–172 s. At those two ensemble sizes (200 and 400) the update cost was similar,
+which is consistent with the N_obs³ solve dominating, but two points do not establish independence of N_ens.
+Cases are charged twice, ensemble members once.
+
+Radiation is a large share of the step cost, and it fires on model time, so refining Δt adds no radiation
+calls. Forward map on the 50 m grid at 3 200 columns with 16 cases (144 h = the latest training window
+end) — again *not* production, which is 56 cases at Δt = 7.5 s with radiation every 600 s:
 
 | Δt | radiation interval | min per forward map |
 |---|---|---|

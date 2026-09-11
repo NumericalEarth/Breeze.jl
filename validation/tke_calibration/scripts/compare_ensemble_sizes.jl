@@ -21,7 +21,16 @@
 # and never touches the package precompile cache that the GPU jobs are queued behind.
 using JLD2, Printf, Statistics, LinearAlgebra
 
-field(nt, k) = (isnothing(nt) || !haskey(nt, k)) ? missing : getproperty(nt, k)
+# Metadata normalization is shared with the other analyses: `saved_metadata_value` rebuilds a value
+# JLD2 had to reconstruct — `MoistStaticStability` here, and the NamedTuple containing it — from
+# `propertynames`, keeping the saved type name. Without it, such values have no `keys` and compare
+# unequal to themselves, so two loads of the SAME file would be reported as incompatible: a gate that
+# invents differences is worse than the missing gate it replaced.
+include(joinpath(@__DIR__, "saved_metadata.jl"))
+const canonical = saved_metadata_value
+
+"""Property `k` of a loaded container, or `missing`. Works on reconstructed types, which lack `keys`."""
+field(nt, k) = (isnothing(nt) || ismissing(nt) || k ∉ propertynames(nt)) ? missing : canonical(getproperty(nt, k))
 
 # A checkpoint is summarized here and the file's big arrays are dropped before the next one opens.
 # Nothing downstream reads `history[n].G` — only ϕ, misfit, wall and `selected_mean.G` — and at
@@ -39,11 +48,31 @@ function load_entry(label, path)
     seed = coalesce(field(metadata, :seed), field(run_configuration, :seed))
     # Φ of a member, derived from its normalized misfit (Φ = ½ misfit²). Reported over the whole
     # history, not just the final iteration: EKI's objective is not monotone in the iteration.
-    member_Φ = [0.5 * minimum(h.misfit)^2 for h in history]
+    # Over finite members only: one diverged member turns `minimum` into NaN and would discard the
+    # information the other members carry. A wholly failed iteration stays `missing`, not zero.
+    function best_finite_member(misfit)
+        finite = filter(isfinite, misfit)
+        return isempty(finite) ? missing : 0.5 * minimum(finite)^2
+    end
+    member_Φ = [best_finite_member(h.misfit) for h in history]
+    # A per-iteration table of scalars. Kept where the arrays are dropped: it is what a convergence
+    # plot needs, and it is a few hundred bytes against the gigabytes of `G` that go.
+    iteration_table = [(; iteration = h.iteration,
+                     mean_objective = get(h, :mean_objective, missing),
+                     best_member_objective = member_Φ[n],
+                     # The mean was evaluated BEFORE this iteration's update, so its own pseudo time is
+                     # not the post-update total. Keep both rather than conflate them.
+                     evaluation_pseudotime = get(h, :evaluation_pseudotime, missing),
+                     pseudotime = get(h, :pseudotime, missing),
+                     wall = get(h, :wall, missing),
+                     shared_forward_wall = get(h, :shared_forward_wall, missing),
+                     optimizer_wall = get(h, :optimizer_wall, missing),
+                     stop_reason = get(h, :stop_reason, missing))
+                  for (n, h) in enumerate(history)]
     selected_iteration = isnothing(selected) ? missing : selected.iteration
     # The only ensembles kept: the one the mean was selected from, for spreads, and the last, for N_ens.
     selected_ϕ = ismissing(selected_iteration) ? nothing : copy(history[selected_iteration].ϕ)
-    entry = (; label = String(label), path = String(path), final_ϕ = copy(final.ϕ), selected_ϕ,
+    entry = (; label = String(label), path = String(path), final_ϕ = copy(final.ϕ), selected_ϕ, iteration_table,
                N_ens = size(final.ϕ, 2), cases = length(saved["members"]), iterations = length(history),
                protocol = get(saved, "protocol_version", missing), run_configuration, metadata, seed,
                Δt = field(run_configuration, :Δt),
@@ -55,7 +84,9 @@ function load_entry(label, path)
                selected, selected_Φ = isnothing(selected) ? missing : selected.objective,
                selected_iteration,
                final_mean_Φ = get(final, :mean_objective, missing),
-               best_member_Φ = minimum(member_Φ), best_member_iteration = argmin(member_Φ),
+               best_member_Φ = all(ismissing, member_Φ) ? missing : minimum(skipmissing(member_Φ)),
+               best_member_iteration = all(ismissing, member_Φ) ? missing :
+                   argmin(i -> coalesce(member_Φ[i], Inf), eachindex(member_Φ)),
                final_member_Φ = last(member_Φ),
                names = saved["parameter_names"], y = saved["y"], Γ = saved["Γ"])
     saved = nothing; history = nothing; final = nothing
@@ -63,7 +94,10 @@ function load_entry(label, path)
     return entry
 end
 
-entries = [load_entry((occursin('=', a) ? split(a, '=', limit = 2) : (replace(basename(a), r"\.jld2$" => ""), a))...) for a in ARGS]
+# `csv=` is an option, not a checkpoint; everything else is `label=path` or a bare path.
+const options = filter(a -> startswith(a, "csv="), ARGS)
+const checkpoint_args = filter(a -> !startswith(a, "csv="), ARGS)
+entries = [load_entry((occursin('=', a) ? split(a, '=', limit = 2) : (replace(basename(a), r"\.jld2$" => ""), a))...) for a in checkpoint_args]
 isempty(entries) && error("Pass one or more checkpoints")
 
 #####
@@ -77,7 +111,7 @@ const allowed_to_differ = (:seed, :N_ens)
 function incompatibilities(entries)
     problems = String[]
     function check(name, f)
-        values = [f(e) for e in entries]
+        values = [canonical(f(e)) for e in entries]
         # Missing metadata is not agreement. Two checkpoints that both lack a field compare equal as
         # `missing`, which would let the gate pass on runs whose provenance is simply unrecorded.
         any(ismissing, values) && return push!(problems, "$name is not recorded in " *
@@ -98,7 +132,7 @@ function incompatibilities(entries)
     if any(isnothing, configs)
         push!(problems, "some checkpoints record no run configuration")
     else
-        for key in union(keys.(configs)...)
+        for key in union((propertynames(c) for c in configs)...)
             key in allowed_to_differ && continue
             length(unique(field(c, key) for c in configs)) == 1 ||
                 push!(problems, "run configuration $key differs: " * join(unique(string(field(c, key)) for c in configs), " | "))
@@ -136,7 +170,7 @@ println("\n===== objective Φ = ½⟨((G − y)/σ)²⟩, directly evaluated")
 @printf "%-20s %16s %8s %16s %16s %10s\n" "run" "selected mean" "at iter" "final mean" "best member" "at iter"
 for e in entries
     fmt(x) = ismissing(x) ? "—" : @sprintf("%.4f", x)
-    @printf "%-20s %16s %8s %16s %16s %10d\n" e.label fmt(e.selected_Φ) string(coalesce(e.selected_iteration, "—")) fmt(e.final_mean_Φ) fmt(e.best_member_Φ) e.best_member_iteration
+    @printf "%-20s %16s %8s %16s %16s %10s\n" e.label fmt(e.selected_Φ) string(coalesce(e.selected_iteration, "—")) fmt(e.final_mean_Φ) fmt(e.best_member_Φ) string(coalesce(e.best_member_iteration, "—"))
 end
 println("\nThe selected mean is what a calibration adopts. The best-member column is the lowest member")
 println("objective over the whole history, a diagnostic only: a member is a draw from a contracting")
@@ -232,4 +266,69 @@ if length(with_G) > 1
     println("differs by little is the signature of a direction the training data constrains weakly; it")
     println("says nothing about predictions on other cases, resolutions or regimes, where the same two")
     println("parameter sets may well diverge.")
+end
+
+#####
+##### Optional CSV export
+#####
+#
+# Two slim tables, so a convergence or ladder figure can be drawn without reopening multi-gigabyte
+# histories and without a second copy of the compatibility gate above. They are written only after
+# that gate passes, so a CSV cannot describe a comparison the script would have refused.
+#
+#     ... csv=results/final/ladder     writes ladder_iterations.csv and ladder_parameters.csv
+
+let
+    if !isempty(options)
+        stem = first(options)[5:end]
+        isempty(dirname(stem)) || mkpath(dirname(stem))
+        # Quote every cell: labels and paths are user-supplied and may contain commas or quotes.
+        function cell(x)
+            (ismissing(x) || isnothing(x)) && return ""
+            s = string(x)
+            return any(c -> c in (',', '"', '\n'), s) ? "\"" * replace(s, "\"" => "\"\"") * "\"" : s
+        end
+
+        open(stem * "_iterations.csv", "w") do io
+            println(io, "run,N_ens,cases,seed,protocol,dt,radiation_interval,iteration,mean_objective," *
+                        "best_so_far_mean_objective,best_member_objective,evaluation_pseudotime,pseudotime," *
+                        "stop_reason,attributed_forward_seconds,shared_forward_seconds,optimizer_seconds," *
+                        "selected_iteration,selected_objective")
+            for e in entries
+                best_so_far = missing
+                for it in e.iteration_table
+                    # Best *so far* rather than best overall: a convergence plot should show what the
+                    # run knew at each iteration, not information from its future.
+                    # A nonfinite mean is a failed evaluation, not a candidate: it must not become the
+                    # best so far. The raw column keeps it visible as the invalid diagnostic it is.
+                    if !ismissing(it.mean_objective) && isfinite(it.mean_objective)
+                        best_so_far = ismissing(best_so_far) ? it.mean_objective : min(best_so_far, it.mean_objective)
+                    end
+                    println(io, join(cell.((e.label, e.N_ens, e.cases, coalesce(e.seed, missing),
+                                            e.protocol, coalesce(e.Δt, missing),
+                                            field(e.run_configuration, :radiation_interval),
+                                            it.iteration, it.mean_objective, best_so_far,
+                                            it.best_member_objective, it.evaluation_pseudotime,
+                                            it.pseudotime, it.stop_reason, it.wall,
+                                            it.shared_forward_wall, it.optimizer_wall,
+                                            e.selected_iteration, e.selected_Φ)), ","))
+                end
+            end
+        end
+
+        open(stem * "_parameters.csv", "w") do io
+            println(io, "run,N_ens,cases,seed,protocol,dt,radiation_interval,selected_iteration,parameter,selected_value,spread_at_selected")
+            for e in entries
+                isnothing(e.selected) && continue
+                for (k, name) in enumerate(e.names)
+                    spread = isnothing(e.selected_ϕ) ? missing : std(e.selected_ϕ[k, :])
+                    println(io, join(cell.((e.label, e.N_ens, e.cases, coalesce(e.seed, missing),
+                                            e.protocol, coalesce(e.Δt, missing),
+                                            field(e.run_configuration, :radiation_interval),
+                                            e.selected_iteration, name, vec(e.selected.parameters)[k], spread)), ","))
+                end
+            end
+        end
+        println("\nwrote $(stem)_iterations.csv and $(stem)_parameters.csv")
+    end
 end

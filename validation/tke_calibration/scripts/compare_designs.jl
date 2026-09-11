@@ -10,6 +10,7 @@
 #           [resolutions=50,20] [validation=3,12,21] [arch=gpu] [dt=] [radiation_interval=] [output=...]
 using BreezeCalibration, JLD2, Statistics, Printf
 using Oceananigans: CPU, GPU
+include(joinpath(@__DIR__, "calibration_data_manifest.jl"))
 
 options = Dict(split(a, '=', limit = 2) for a in filter(a -> occursin('=', a), ARGS))
 resolutions = split(pop!(options, "resolutions", "50,20"), ',')
@@ -28,6 +29,9 @@ isempty(options) && error("Pass at least one label=checkpoint")
 entries = sort!([(label = String(l), path = String(p)) for (l, p) in options], by = e -> e.label)
 candidates = map(entries) do e
     saved = load(e.path)
+    # A frozen candidate rescored against changed forcing data would credit the difference to the
+    # coefficients. Warn-only for legacy checkpoints, which record no hashes.
+    validate_data_manifest(saved)
     history = saved["history"]
     selected = get(saved, "selected_mean", nothing)
     ϕ = isnothing(selected) ? vec(mean(history[end].ϕ, dims = 2)) : vec(selected.parameters)

@@ -163,3 +163,72 @@ end
     @test ok
     @test occursin("—", out)   # the selected-mean column is blank rather than fabricated
 end
+
+@testset "a checkpoint holding a type this process cannot load compares with itself" begin
+    # The failure this covers is not hypothetical: real checkpoints store `static_stability`, a Breeze
+    # type, inside `run_configuration`. Analysis processes do not load Breeze, so JLD2 reconstructs it
+    # and the containing NamedTuple. Reconstructed values have no `keys` and are not `isequal` to
+    # themselves across two loads, so the compatibility gate reported the SAME FILE as incompatible
+    # with itself. Synthetic NamedTuple fixtures cannot reproduce that — the foreign type has to be
+    # written by a process that has it and read by one that does not.
+    foreign = joinpath(dir, "foreign.jld2")
+    writer = joinpath(dir, "write_foreign.jl")
+    write(writer, """
+        using JLD2, Statistics, Random
+        module ForeignStability
+            struct MadeUpStaticStability end
+        end
+        using .ForeignStability
+        N_obs, N_par, N_ens = $N_obs, $N_par, 8
+        rng = MersenneTwister(1)
+        y = collect(range(280, 300, length = N_obs)); Γ = fill(0.25^2, N_obs)
+        history = map(1:3) do n
+            ϕ = 0.5 .+ 0.1 .* rand(rng, N_par, N_ens)
+            G = y .+ 0.3 .* randn(rng, N_obs, N_ens)
+            (; iteration = n, ϕ, G, wall = 100.0,
+               misfit = [sqrt(mean(((G[:, i] .- y) ./ sqrt.(Γ)) .^ 2)) for i in 1:N_ens],
+               mean_objective = 1.0, pseudotime = 0.3n, stop_reason = :none)
+        end
+        jldsave("$foreign"; history, y, Γ, protocol_version = 3,
+                parameter_names = ["Cᵘ", "Cᶜ", "Cᵉ", "Cᴰ"], members = [(2, "01")],
+                z_faces = [collect(0.0:50.0:200.0)], radiation = "interactive",
+                selected_mean = nothing,
+                algorithm_configuration = (; scheduler = "DataMisfitController"),
+                experiment_metadata = (; seed = 1),
+                run_configuration = (; Δt = 7.5, radiation_interval = 600.0, spread = 0.5, N_ens = 8,
+                                       static_stability = [ForeignStability.MadeUpStaticStability()]))
+        """)
+    run(`$(Base.julia_cmd()) --startup-file=no --project=$(joinpath(@__DIR__, "..")) $writer`)
+
+    ok, out = run_script("copy_a=$foreign", "copy_b=$foreign")
+    @test ok                                        # the same file must be compatible with itself
+    @test !occursin("do not answer the same question", out)
+    @test !occursin("static_stability differs", out)
+end
+
+@testset "a diverged member does not erase the diagnostic for the rest" begin
+    # `minimum(h.misfit)` is NaN if any single member diverged, which would discard what every other
+    # member of that iteration achieved. The best-member diagnostic takes the minimum over finite
+    # members; an iteration where *all* members failed stays missing rather than becoming a number.
+    mixed = joinpath(dir, "mixed_finite.jld2")
+    fixture(mixed)
+    d = load(mixed)
+    h = d["history"]
+    poisoned = map(enumerate(h)) do (n, it)
+        misfit = copy(it.misfit)
+        n == 2 && (misfit[1] = NaN)              # one member diverges
+        n == 3 && (misfit .= NaN)                # the whole iteration fails
+        merge(it, (; misfit))
+    end
+    d["history"] = poisoned
+    jldsave(mixed; (Symbol(k) => v for (k, v) in d)...)
+
+    ok, out = run_script(mixed, "csv=$(joinpath(dir, "mixed"))")
+    @test ok
+    rows = readlines(joinpath(dir, "mixed_iterations.csv"))
+    @test length(rows) == 1 + length(h)
+    best = [split(r, ',')[11] for r in rows[2:end]]        # best_member_objective
+    @test all(!isempty, best[[1, 2, 4]])                   # survives one diverged member
+    @test isempty(best[3])                                 # all-NaN iteration reports nothing
+    @test !any(r -> occursin("NaN", r), best)
+end
