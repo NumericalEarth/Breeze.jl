@@ -417,9 +417,16 @@ time-mean θˡ, qᵗ (vapor + cloud liquid, as the LES's `qt`), qˡ (cloud liqui
 target window as arrays `(N_ens, N_members, Nz)`, and the model.
 
 The third return value times the run: `(; setup_seconds, integration_seconds, steps,
-seconds_per_step)`, with the integration measured around `run!` alone. Cost per step must be taken
-from this rather than by differencing two runs of different length — setup is tens of seconds and
-varies with contention for the device, enough to make such a difference negative.
+seconds_per_step)`, with the integration measured around `run!` alone.
+
+None of these is a reliable cost per step on its own, and neither is differencing two runs. Setup
+varies with contention for the device; `run!` carries its own one-offs (the first `update_state!`,
+the first radiation call, late specialization) worth tens of seconds at production size; and a
+short run is the first at its column shape, so it is warmed differently from a long one. Each of
+those has produced a wrong answer here, twice a negative one. To measure cost per step, time a
+block *inside one run* — `sample_callback` fires on the accumulation schedule, so it can stamp
+`CUDA.synchronize(); time_ns()` at two iterations and difference them — over enough steps to
+contain several radiation calls.
 
 `sample_callback(model, t, active)`, if given, is called on every accumulation — the same instants that
 enter the time means, with `active[j]` saying whether member `j`'s scored window is open — so a caller can
