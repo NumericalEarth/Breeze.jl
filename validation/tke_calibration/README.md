@@ -5,60 +5,121 @@ the CNRM-CM6-1 `amip` members of the Shen et al. (2022) library of GCM-forced la
 through Breeze's column-ensemble mode: every (parameter set, LES member) pair is one column of a single
 `AtmosphereModel`, so one model run evaluates the whole ensemble on all training members at once.
 
-Status (2026-09-10): the pipeline is complete and tested; the first calibration under the final protocol
-(below) is running on a laptop CPU at roughly an hour per EKI iteration. It is meant to move to a GPU. All
-earlier calibrations used a protocol that differed from the LES (no precipitation, centered subsidence,
-replayed radiation) and are superseded; their numbers are kept in *Results so far* as a baseline.
+**Status (2026-09-11).** The pipeline runs on the GPU and is validated there. The numerics are *not* yet
+settled: Δt = 60 s is measurably unconverged, and the time step and radiation interval quoted in the
+commands below are **provisional** until the refinement study finishes. No coefficients are adopted yet.
+`PROTOCOL_VERSION = 3`; checkpoints record it and refuse to resume across a change.
 
 ## The protocol: a column that replays the LES's own setup
 
 Each LES member (a cfSite and a month) was forced by the GCM's time-invariant large-scale state (Shen et
-al. 2022, §2). The column approximates that setup while replacing resolved turbulence with the closure.
-The prescribed LES surface fluxes, DCMIP Kessler implementation, liquid-water potential-temperature
-relaxation, reconstructed solar forcing, and upper-column extension are additional modeling choices.
+al. 2022, §2). The column reproduces that forcing; only the turbulence closure differs from the LES.
 
 | | LES (PyCLES) | Column (`run_ensemble`) |
 |---|---|---|
-| Subsidence | upstream differencing of −wˢ ∂z | `SubsidenceForcing(wˢ; advection = UpwindBiased(order = 1))`, including vapor, cloud liquid and rain |
+| Subsidence | upstream differencing of −wˢ ∂z | `SubsidenceForcing(wˢ; advection = UpwindBiased(order = 1))`, acting on θ, qᵛ, cloud liquid and rain |
 | Horizontal advection, GCM vertical eddy flux | time-invariant tendencies of θ, qᵗ | `Forcing` with the file's `hadv + fluc` |
 | Surface fluxes | bulk, from the GCM SST | the LES's hourly SHF, LHF, stress as flux boundary conditions |
-| Relaxation | winds to the GCM on 6 h; T, qᵗ above 3 km on 24 h | matching rates and height mask toward `*_mean_initial`; θˡ replaces T, moisture relaxation uses qᵛ + qᶜˡ |
+| Relaxation | winds to the GCM on 6 h; T, qᵗ above 3 km on 24 h | the same, toward the `*_mean_initial` (GCM) profiles; the moisture target is the vapor-plus-cloud sum |
 | Microphysics | Kessler warm rain | `DCMIP2016KesslerMicrophysics()` with Tetens saturation |
-| Radiation | RRTM every step, fixed sun (GCM insolation, insolation-weighted cos θ_z), albedo 0.06, ε 0.95 | RRTMGP all-sky every 10 min, `FixedCosineZenith` and solar constant per column, same albedo and emissivity |
-| Domain | 4 km, 20 m cells; GCM profiles patched above for radiation | LES grid or coarser to 4 km, then faces stretched 12 %/cell to 25 km; the monthly-mean GCM column above 4 km, relaxed toward on 10 min |
-| Duration, scoring | 6 days (one member 3.7); reduction uses the last 2 days (paper figures use the last day) | the reduction's window; time means of θˡ, qᵗ, qˡ, qʳ, u, v |
-
-**Protocol version 2** corrects missing cloud/rain subsidence, total-water relaxation applied to vapor
-alone, and rain incorrectly triggering the closure's saturated stability branch. Rain still contributes
-to thermodynamic liquid water, heat capacity and buoyancy loading. Above the LES top, cloud and rain
-relax toward zero alongside the prescribed GCM vapor profile. Checkpoints record this version and the
-run configuration; resuming an older or incompatible forward map is rejected. Short diagnostic runs
-must specify an averaging window they reach; an empty window is an error.
+| Radiation | RRTM every step, fixed sun, albedo 0.06, ε 0.95 | RRTMGP all-sky on `radiation_interval`, `FixedCosineZenith` and solar constant per column, same albedo and emissivity |
+| Domain | 4 km, 20 m cells | LES grid or coarser to 4 km, then faces stretched 12 %/cell to 25 km; the monthly-mean GCM column above, relaxed toward on 10 min |
+| Duration, scoring | 6 days; means over the last 2 days | the same window; time means of θˡ, qᵗ, qˡ, qʳ, u, v |
 
 The observation vector of a column is its time-mean θˡ (K), qᵗ, qˡ (g kg⁻¹), u and v (m s⁻¹) as means over
-100 m cells from the surface to 3 km (Oceananigans' conservative `regrid!`), so that columns on different
-grids are scored alike; the LES targets are regridded the same way. Observation noise per cell: 0.25 K,
-0.25 and 0.1 g kg⁻¹, 0.5 m s⁻¹. Rain water is diagnosed but not scored (the LES's horizontal-mean rain is
-not the quantity a mean-field Kessler column produces, and scoring it diverged a calibration). Turbulent
-fluxes and TKE are deliberately not targets: the column's TKE need not equal the LES's (see the CATKE paper).
+100 m cells from the surface to 3 km (Oceananigans' conservative `regrid!`), so columns on different grids
+are scored alike; the LES targets are regridded the same way. Observation noise per cell: 0.25 K, 0.25 and
+0.1 g kg⁻¹, 0.5 m s⁻¹. Rain is diagnosed but not scored. Turbulent fluxes and TKE are not targets.
 
-**Parameters.** `RiDependentSpace`, 17: the twelve endpoints of `RiDependentStabilityFunctions` (Cᵘ, Cᶜ, Cᵉ,
-Cᴰ in unstable, neutral and stable air), the transition Ri⁰ and Riᵟ, the wall coefficient Cˢ of
-`GradientLimitedMixingLength`, and two surface-TKE-flux coefficients (Jᵉ = Cᵂu★ u★³ + Cᵂʷ wΔ³, CATKE's form,
-zero in the default closure). `ConstantSpace`, 7: `ConstantStabilityFunctions(Cᵘ, Cᶜ, Cᵉ, Cᴰ)`, Cˢ and the
-two flux coefficients, i.e. a Nakanishi–Niino-form closure. Priors are independent constrained Gaussians on
-(0, ∞) centered on the defaults (1 for the flux coefficients) with a standard deviation of half the center.
+**Parameters.** `RiDependentSpace`, 17: the twelve endpoints of `RiDependentStabilityFunctions`, the
+transition Ri⁰ and Riᵟ, the wall coefficient Cˢ of `GradientLimitedMixingLength`, and two surface-TKE-flux
+coefficients (Jᵉ = Cᵂu★ u★³ + Cᵂʷ wΔ³, zero in the default closure). `ConstantSpace`, 7:
+`ConstantStabilityFunctions(Cᵘ, Cᶜ, Cᵉ, Cᴰ)`, Cˢ and the two flux coefficients. Priors are independent
+constrained Gaussians on (0, ∞) centred on the defaults (1 for the flux coefficients), standard deviation
+half the centre.
 
-**Inversion.** EnsembleKalmanProcesses' `Inversion()` with its defaults: the `DataMisfitController`
-(Iglesias–Yang tempering, Δtₙ = 1 / mean squared normalized misfit, stop at pseudo time 1 where the ensemble
-approximates the posterior), SECNice localization, Nesterov acceleration. The update is deterministic, so a
-checkpoint (every iteration: parameters, forward map, misfit, step) resumes exactly by replaying the saved
-forward maps. Ensemble sizes 200 (17 parameters) and 100 (7). Training members: sites 2, 5, 8, 11, 14, 17,
-20, 23 × {January, July} = 16; the other 67 members (all April and October) are held out.
+## What the inversion optimizes, and when it stops
 
-**Grids.** Calibration on three grids at once — 50 m, 100 m, and NumericalEarth's hindcast grid (50 m at the
-surface stretching 10 % per level; 23 cells below 4 km) — so the parameters hold across the resolutions the
-closure is used at; the 20 m LES grid is used for evaluation.
+EnsembleKalmanProcesses' `Inversion()` with the `DataMisfitController` (Iglesias–Yang tempering), SECNice
+localization and Nesterov acceleration.
+
+Every iteration evaluates **one extra column at the constrained ensemble mean**, excluded from the EKI
+update. This matters because the coefficients one would adopt are the ensemble mean ϕ̄, while the misfit
+natural to report is the average over members of Φ(θⱼ), and Φ(ϕ̄) ≠ mean Φ(θⱼ). The extra column rides the
+existing ensemble, so it costs ≈ 1/N_ens of a forward map rather than a second run.
+
+Pseudo time 1 is where the tempering says the ensemble approximates the posterior. It is **not** where the
+objective stops improving, so `optimize=true` continues past it until the directly evaluated Φ(ϕ̄) plateaus
+(`objective_tolerance`, `objective_patience`, a minimum number of post-tempering iterations, and a hard
+cap), retaining the best evaluated mean as `selected_mean` in the checkpoint.
+
+Two cautions the scripts enforce in their wording. The spread of the terminal ensemble is **not** a
+posterior uncertainty — EKI is not a sampler here — so it is reported as spread. And `selected_mean` is the
+**best evaluated candidate**, not an established optimum, until its plateau is corroborated by independent
+seeds and local perturbation.
+
+## Held-out data: validation and a reserved test
+
+Three roles, and the distinction is load-bearing:
+
+- **Training**: the sites and months the inversion fits.
+- **Validation** (sites 3, 12, 21, all months): chooses the design — the training split, the ensemble size,
+  which closure family to adopt. Named explicitly and identical for every calibration compared, so the
+  yardstick does not move with the design being judged.
+- **Reserved test** (sites 6, 9, 15, 18, all months): touched by nothing. `evaluate.jl` integrates and saves
+  these scores but does not print them without `reveal=true`, which is meant to be passed once, after the
+  coefficients are frozen.
+
+The 20 m LES grid has been used during design work, so it is an **untrained-resolution transfer** check, not
+an untouched resolution test.
+
+## Cost, measured on one A100-SXM4-40GB
+
+The GPU reproduces the CPU to 2.7 × 10⁻¹² relative on the time means, and is 17.8× faster than the same
+node's CPU at production size (1.62 s/step against 0.091 at 3 200 columns).
+
+Cost per step is nearly flat in ensemble size — 16 training cases, 50 m grid, Δt = 60 s:
+
+| N_ens | columns | s/step | VRAM |
+|---|---|---|---|
+| 200 | 3 200 | 0.086 | 1.3 GiB |
+| 400 | 6 400 | 0.102 | 1.6 GiB |
+| 800 | 12 800 | 0.112 | 2.0 GiB |
+| 1600 | 25 600 | 0.140 | 4.5 GiB |
+
+Eight times the columns for 1.62× the time. **Ensemble members and training cases are not
+interchangeable, though**: the forward map depends on total columns, but the localized EKI update forms an
+N_obs × N_obs covariance on the host, with N_obs = grids × cases × 5 × 30. Measured: 16 cases on one grid
+is 1.9 s per update; 56 cases on three grids is 25 200 observations, a 4.73 GB covariance and ~150 s. Cases
+are charged twice, ensemble members once.
+
+Radiation is ~80 % of the step cost, and it fires on model time, so refining Δt adds no radiation calls.
+Forward map on the 50 m grid at 3 200 columns (144 h = the latest training window end):
+
+| Δt | radiation interval | min per forward map |
+|---|---|---|
+| 60 s | 10 min | 15.4 |
+| 60 s | 30 min | 9.0 |
+| 30 s | 30 min | 14.2 |
+| 15 s | 30 min | 24.6 |
+| 7.5 s | 30 min | 41.6 |
+
+Measure cost from the `timing` returned by `run_ensemble`, never by differencing two runs of different
+length: setup is tens of seconds and varies, and the first configuration measured in a process is inflated
+in both setup and per-step.
+
+## Numerics: provisional, and why it matters
+
+`scripts/discretization_sensitivity.jl` asks of each knob how far the *scored* observation vector moves
+when the knob is refined, in units of the observation noise, next to the misfit the inversion is reducing.
+A knob whose refinement moves the score by a sizeable fraction of that misfit is one the coefficients
+would absorb.
+
+- **Time step**: Δt = 60 s sits 1.20 σ from 15 s against a 4.68 σ misfit (a ratio of 0.26); 30 s is 0.80 σ;
+  15 s is still 0.29 σ from 3.75 s. **Δt = 60 s is not converged for calibration.** The refinement study
+  (3.75 and 1.875 s) is running; until it reports, every `dt=` below is provisional.
+- **Radiation interval**: 0.085 σ between 10 and 30 minutes, a ratio of 0.018 — nearly free, and the
+  cheapest source of time for a finer step.
 
 ## Layout
 
@@ -67,23 +128,26 @@ validation/tke_calibration/
 ├── Project.toml                 # the study's environment; Breeze from ../.. via [sources]
 ├── data/gcm_columns_CNRM-CM6-1_amip.nc   # monthly-mean GCM columns above the LES (committed, 0.3 MB)
 ├── src/                         # the BreezeCalibration module
-│   ├── BreezeCalibration.jl     #   LES members, parameter spaces, ColumnEnsembleProblem, run_ensemble, scores
+│   ├── BreezeCalibration.jl     #   PROTOCOL_VERSION, LES members, parameter spaces, run_ensemble, scores
 │   ├── grids.jl                 #   LES / uniform / hindcast faces, conservative regridding
 │   ├── multiresolution.jl       #   several grids in one inversion
-│   └── inversion.jl             #   priors, run_eki, checkpoint and replay
+│   └── inversion.jl             #   priors, run_eki, the evaluated mean, optimization mode, checkpoints
 ├── scripts/
-│   ├── smoke_test.jl            # 2 × 2 columns for 3 hours; first thing to run on a new machine
-│   ├── time_forward_map.jl      # seconds per step versus ensemble size, to size a run
-│   ├── validate_radiation.jl    # RRTMGP on the LES's initial state against the LES's own heating
-│   ├── calibrate.jl             # the EKI run (checkpointed, resumable)
-│   ├── evaluate.jl              # a checkpoint's parameters against the defaults on all 83 members
-│   ├── compare_calibrations.jl  # held-out skill versus resolution for several calibrations
-│   ├── visualize.jl             # parameters, misfit trajectory, importance, profiles
-│   ├── profile_stamps.jl        # every member's θˡ and qᵗ profiles, LES versus column
-│   ├── last_iteration.jl        # one line per saved iteration of a checkpoint
-│   ├── fetch_gcm_columns.jl     # regenerate data/gcm_columns_… from CMIP6 CFsubhr (not needed to run)
-│   └── solar_parameters.jl      #   … and add the fixed-sun insolation and cos θ_z per site and month
-└── test/runtests.jl             # replay, grids, parameter spaces, observations, a 12-minute EKI end to end
+│   ├── smoke_test.jl                  # 2 × 2 columns for 3 hours; first thing to run on a new machine
+│   ├── discretization_sensitivity.jl  # Δt and radiation interval against the observation noise
+│   ├── calibrate.jl                   # one EKI run (checkpointed, resumable)
+│   ├── batched_calibrate.jl           # several independent runs sharing forward evaluations
+│   ├── evaluate.jl                    # a checkpoint's candidates on all 83 members, split train/validation/reserved
+│   ├── compare_designs.jl             # designs against each other on the common validation sites
+│   ├── design_objective.jl            # one pooled objective per design, from saved means
+│   ├── compare_ensemble_sizes.jl      # trajectory, spread and agreement across ensemble sizes
+│   ├── polish_candidate.jl            # local perturbation around a candidate
+│   ├── diagnose_candidate.jl          # closure diagnostics over the scored window
+│   └── …                              # visualization, export, data regeneration
+└── test/
+    ├── runtests.jl                    # replay, grids, spaces, observations, EKI end to end
+    ├── gpu_pipeline.jl                # exact batching and diagnostics on CUDA (ConstantSpace)
+    └── ri_space_column_independence.jl # the same exactness for RiDependentSpace
 ```
 
 ## Running
@@ -91,91 +155,91 @@ validation/tke_calibration/
 ```bash
 cd validation/tke_calibration
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
-julia -t auto --project=. test/runtests.jl                     # a few minutes; downloads the LES artifact (27 MB)
-julia -t auto --project=. scripts/smoke_test.jl [arch=gpu]     # 2 members × 2 parameter sets, 3 hours
-julia -t auto --project=. scripts/time_forward_map.jl 200 [arch=gpu]
-
-# The two calibrations, then their evaluation on every member at four resolutions
-julia -t auto --project=. scripts/calibrate.jl 200 space=ri       output=results/eki_ri.jld2       [arch=gpu]
-julia -t auto --project=. scripts/calibrate.jl 100 space=constant output=results/eki_constant.jld2 [arch=gpu]
-julia -t auto --project=. scripts/evaluate.jl checkpoint=results/eki_ri.jld2       output=results/evaluation_ri.jld2       [arch=gpu]
-julia -t auto --project=. scripts/evaluate.jl checkpoint=results/eki_constant.jld2 output=results/evaluation_constant.jld2 [arch=gpu]
-
-# Figures and tables
-julia --project=. scripts/compare_calibrations.jl "Ri=results/evaluation_ri.jld2" "constant=results/evaluation_constant.jld2"
-julia --project=. scripts/visualize.jl checkpoint=results/eki_ri.jld2 evaluation=results/evaluation_ri.jld2 resolution=50
-julia --project=. scripts/profile_stamps.jl evaluation=results/evaluation_ri.jld2 resolution=50
-julia --project=. scripts/last_iteration.jl results/eki_ri.jld2 all
-
-# Continue an interrupted calibration (same space and resolutions)
-julia -t auto --project=. scripts/calibrate.jl resume=results/eki_ri.jld2 output=results/eki_ri.jld2
+julia -t auto --project=. test/runtests.jl                       # a few minutes; downloads the LES artifact (27 MB)
+julia -t auto --project=. test/gpu_pipeline.jl                   # on a CUDA machine
+julia -t auto --project=. scripts/smoke_test.jl arch=gpu         # 2 members × 2 parameter sets, 3 hours
 ```
 
-`calibrate.jl` and `evaluate.jl` default to the protocol above (`resolutions=50,100,hindcast`, `top=25000`,
-`radiation=interactive`). `top=les radiation=prescribed` gives the control experiment: a column ending at the
-LES top with the LES's hourly heating replayed, which is the experiment to fall back on if the interactive
-radiation misbehaves. `evaluate.jl` reads the column top and radiation from the checkpoint.
+A small ensemble is *slower* on the GPU than on the CPU — the smoke test is a few hundred columns, where
+launch overhead dominates. That is expected, not a regression; the GPU wins from ~1 000 columns up.
 
-**GPU.** `arch=gpu` builds the column ensemble on `GPU()` (CUDA). Everything the kernels read is moved with
-`on_architecture`; the regridding and the EKI update stay on the host. The GPU path has not been exercised yet
-(the pipeline was developed on an Apple laptop): run `smoke_test.jl arch=gpu`, then `time_forward_map.jl`, first.
+One calibration. The `dt` and `radiation_interval` here are provisional pending the refinement study:
 
-**Cost on the CPU** (Apple M5 Max, 9 threads; Oceananigans' column-ensemble kernels scale weakly with
-threads): a forward map is one run per grid of 3200 columns (200 × 16) for 6 days at Δt = 60 s. With the
-LES-top column and prescribed radiation the three coarse grids together took about 25 min per iteration; the
-25 km column with RRTMGP roughly doubles that. Reaching pseudo time 1 has taken 10–15 iterations, so a
-17-parameter calibration is a 10-hour job here, the 7-parameter one about half — hence the GPU.
+```bash
+julia -t auto --project=. scripts/calibrate.jl 400 space=ri resolutions=50,100,hindcast arch=gpu \
+      optimize=true max_iterations=40 dt=7.5 radiation_interval=1800 \
+      sites=2,5,8,11,14,17,20,23 months=01,04,07,10 output=results/eki_ri.jld2
+```
 
-## Results so far (superseded protocol)
+Several independent runs — ensemble sizes and seeds — sharing forward evaluations while keeping separate
+optimizers and checkpoints:
 
-Held-out medians over 67 members of the RMSE below 3 km of the calibrated ensemble mean, θˡ (K) / qᵗ (g kg⁻¹) /
-wind (m s⁻¹). Columns ended at the LES top with the LES's heating replayed, saturation-adjustment microphysics
-and centered subsidence, but the corrected GCM relaxation targets; both calibrations fit the five fields on the
-50 m, 100 m and hindcast grids together.
+```bash
+julia -t auto --project=. scripts/batched_calibrate.jl space=ri runs=200:1,400:1,400:2,800:1 \
+      dt=7.5 radiation_interval=1800 resolutions=50,100,hindcast max_columns=32000 \
+      sites=2,5,8,11,14,17,20,23 months=01,04,07,10 output=results/final_ri
+```
 
-| grid | Nakanishi–Niino defaults | Ri-dependent (17) | constant (7) |
-|---|---|---|---|
-| 20 m | 1.08 / 0.99 / 0.34 | 0.67 / 0.52 / 0.22 | 0.73 / 0.60 / 0.25 |
-| 50 m | 1.24 / 1.10 / 0.35 | 0.78 / 0.56 / 0.23 | 0.84 / 0.65 / 0.24 |
-| 100 m | 1.35 / 1.33 / 0.35 | 0.74 / 0.66 / 0.23 | 0.86 / 0.75 / 0.25 |
-| hindcast | 1.26 / 1.33 / 0.35 | 0.90 / 0.76 / 0.26 | 1.01 / 0.78 / 0.27 |
+Evaluation and comparison. `evaluate.jl` takes the time step and radiation interval from the checkpoint, so
+a calibration is scored under the protocol it was fit under:
 
-What these established: the closure's error roughly halves under calibration and the improvement carries
-across resolutions; the Ri-dependent stability functions beat the constant ones by 0.06–0.12 K; the mixing
-length and dissipation coefficients are weakly identifiable jointly (Cˢ between 2.6 and 5.2 with similar
-skill); the worst cases are deep-convective April members in the ITCZ (sites 13–15) and deep trade cumulus
-(sites 8, 12, 21–23), where the column's inversion and entrainment zone are misplaced. The 2Δz noise seen
-above the inversion came from the centered subsidence difference and is gone with the upwind scheme.
+```bash
+julia -t auto --project=. scripts/evaluate.jl checkpoint=results/eki_ri.jld2 resolutions=20,50,100,hindcast \
+      arch=gpu output=results/evaluation_ri.jld2
+julia --project=. scripts/compare_designs.jl A=results/design/A.jld2 B=results/design/B.jld2 \
+      resolutions=50,20 arch=gpu output=results/design_comparison.jld2
+julia --project=. scripts/design_objective.jl results/design_comparison.jld2
+```
 
-Radiation validation for the new protocol (`validate_radiation.jl`, RRTMGP on the LES's initial state
-against the LES's first-hour heating, five members): cloud-top cooling peaks agree (−1.6 vs −1.75 K/day at
-site 22 July), RMS heating difference 0.18–0.40 K/day on 100 m cells, column-integrated cooling below 4 km
-4–15 % weaker in the column (46 vs 54 W m⁻² at site 22 July). Candidates for the residual: RRTMGP's 10 μm
-droplets against PyCLES's density-dependent effective radius, RRTMGP against RRTMG, the hour-1 vs t = 0
-comparison.
+Resuming is automatic for the batched driver and explicit for a single run
+(`resume=results/eki_ri.jld2`). A resume across a different protocol version, training split, grid set,
+time step or optimizer is refused rather than silently accepted: EKI resumes by replaying saved forward
+maps, so mixing them would leave the result meaningless while every dimension still matched.
 
-## Plan
+## The design question: ensemble members against cases
 
-1. **Finish the two calibrations under the final protocol** (`space=ri` 200 members, `space=constant` 100),
-   evaluate both at 20 m, 50 m, 100 m and the hindcast grid, and compare them with the superseded results:
-   the difference isolates what precipitation, upwind subsidence and interactive radiation change.
-2. **Decide the defaults.** If the Ri-dependent set is worth its ten extra parameters, propose it as the
-   closure's calibrated default in a follow-up PR; otherwise the constant set.
-3. **Then**: refit with the 20 m grid included if the coarse-grid parameters do not transfer to it; test a
-   subgrid condensation scheme on the cumulus cases, which no coefficient choice fixes; extend to the
-   `amip4K` members (in the artifact) for the warming response.
+Because cost is sublinear in columns, the interesting question is not "is N_ens = 200 enough" but how to
+spend a budget. A first study at Δt = 30 s on the 50 m grid, three designs at ~6 400 columns each, scored on
+the common validation sites and pooled into the noise-normalized objective Φ:
+
+| design | N_ens × cases | Φ (mean of 20 and 50 m) |
+|---|---|---|
+| default coefficients | — | 8.195 |
+| A | 400 × 16 | 3.046 |
+| B | 200 × 32 | 3.034 |
+| C | 114 × 56 | 5.785 |
+
+Calibration is worth a factor 2.7. A and B are indistinguishable on one seed each. C is clearly worse —
+**but that is not evidence against 56 cases.** Holding columns fixed forced its ensemble down to 114, only
+6.7× the parameter dimension, and C also fit its *own* training set worse (misfit 4.33 against B's 2.79),
+which is an under-resolved optimizer rather than poor generalization. More cases means more physics to
+explore and so wants a *larger* ensemble, not a smaller one; the two should grow together. A design at
+400 × 56 is the current test of that, and the final ladder varies N_ens at fixed cases rather than trading
+one against the other.
+
+Differences smaller than the seed-to-seed scatter are not rankings, and no run so far has error bars.
 
 ## Data
 
 - **LES**: Breeze's lazy artifact `shen_et_al_2022_les_profiles`, a reduction of Shen et al.'s CC0 library
   (doi:10.22002/D1.20052) by `validation/cloud_les_library/`; 83 `amip` CNRM-CM6-1 members (cfSites 2–15,
-  17–23 × January, April, July, October; site 15 January is absent). Each file carries its forcing, hourly
-  radiative heating and surface fluxes, initial and relaxation profiles and time-mean targets.
+  17–23 × January, April, July, October; site 15 January is absent).
+
+  The archive stores some diagnostics in units the variable names do not announce — `tke_mean` is a density
+  ρ₀ e, and `qt_flux_z`/`qt_sgs_flux_z` are mass fluxes, where the column model carries specific and
+  kinematic quantities. These affect diagnostic plots only; the five scored fields are unaffected. Treat an
+  archive array's units as unknown until checked against the original source.
 - **GCM columns** (`data/gcm_columns_CNRM-CM6-1_amip.nc`): 2004–2008 monthly-mean `ta`, `hus`, `ps` from the
-  CMIP6 CNRM-CM6-1 `amip` `r1i1p1f2` CFsubhr output at the 21 cfSites (hybrid-sigma pressure and hydrostatic
-  heights computed), plus the astronomical monthly-mean TOA insolation and insolation-weighted cos θ_z per site
-  and month (S₀ = 1361 W m⁻²). `scripts/fetch_gcm_columns.jl` and `scripts/solar_parameters.jl` regenerate it
-  (temperature streams from CEDA's OPeNDAP server; the humidity files must be downloaded from DKRZ).
+  CMIP6 CNRM-CM6-1 `amip` `r1i1p1f2` CFsubhr output at the 21 cfSites, plus the monthly-mean TOA insolation
+  and insolation-weighted cos θ_z per site and month. `scripts/fetch_gcm_columns.jl` and
+  `scripts/solar_parameters.jl` regenerate it.
+
+## Hardware note
+
+`sinfo` reports only `gpu:1` and does not distinguish models. On this cluster `gpudev` is a **Tesla T4**,
+not an A100: its FP64 throughput is a small fraction of an A100's and it measured 5.4× slower end to end on
+this workload, with 15 GB of VRAM that will not hold the larger configurations. Query the node before
+trusting a partition name, and keep timing comparisons on one model.
 
 ## References
 
