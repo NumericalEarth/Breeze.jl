@@ -43,6 +43,7 @@ using Breeze.AtmosphereModels: AtmosphereModels,
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
+    AbstractReferencePressureState,
     with_moisture,
     temperature,
     PlanarLiquidSurface,
