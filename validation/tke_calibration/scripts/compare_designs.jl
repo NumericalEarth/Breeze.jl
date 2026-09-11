@@ -9,6 +9,7 @@
 #     julia -t auto --project scripts/compare_designs.jl "A=results/design/A.jld2" "B=..." \
 #           [resolutions=50,20] [validation=3,12,21] [arch=gpu] [dt=] [radiation_interval=] [output=...]
 using BreezeCalibration, JLD2, Statistics, Printf
+using LinearAlgebra: diag
 using Oceananigans: CPU, GPU
 include(joinpath(@__DIR__, "calibration_data_manifest.jl"))
 
@@ -85,9 +86,16 @@ for resolution in resolutions
               ColumnEnsembleProblem(members; Δz = parse(Float64, resolution))
     @info "resolution $resolution: $(length(labels)) × $(length(members)) = $(length(labels) * length(members)) columns, $(length(problem.zf) - 1) cells"
     scores, means = evaluate(params, problem; space, architecture, Δt, radiation_interval)
+    # Preserve exactly the scored profiles, targets and weights used in this evaluation. A later
+    # numerical comparison then needs neither another integration nor mutable LES input files.
+    G = hcat([vcat([BreezeCalibration.observation_vector(problem, map(x -> vec(x[i, j, :]), means))
+                   for j in eachindex(members)]...) for i in axes(params, 2)]...)
+    y, Γ = observations(problem)
+    observation_data = (; G, y, variance = diag(Γ), variables = problem.variables,
+                         zf = problem.observation_zf)
     println("\n===== resolution $resolution, validation sites $(join(validation_sites, ", ")):")
     rmse_table(scores, labels)
-    results[resolution] = (; scores, means, zf = problem.zf)
+    results[resolution] = (; scores, means, zf = problem.zf, observation_data)
 end
 
 isempty(dirname(output)) || mkpath(dirname(output))
