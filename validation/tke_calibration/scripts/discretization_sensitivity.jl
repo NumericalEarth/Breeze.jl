@@ -14,10 +14,23 @@
 #
 # The stretched extension above the LES top exists only so RRTMGP has an atmosphere, and it is 30 %,
 # 41 % and 43 % of the 50 m, 100 m and hindcast grids at the default 1.12. `extend_faces` grows the
-# faces geometrically from the LES top upward, so coarsening it leaves every cell below the LES top —
-# and so every scored cell — unchanged. The only paths by which it can move the score are the radiative
-# heating profile and the upper relaxation. That makes it a narrow, physical sensitivity rather than a
-# general accuracy trade, which is why it is worth testing separately from Δz.
+# faces geometrically from the LES top upward, so coarsening it leaves every *face* below the LES top,
+# and so the resolution of every scored cell, unchanged.
+#
+# That is not the same as leaving the scored cells' *values* unchanged, and an earlier version of this
+# comment claimed the only couplings were the radiative heating profile and the upper relaxation. That
+# was wrong. **The LES top is an interior face, not a boundary**, so the column below it remains coupled
+# to the first extension cell through at least:
+#
+#   - subsidence. `onto_faces` sets wˢ to the interpolated LES value for `z ≤ les_zf[end]` and zero only
+#     strictly above, so the LES-top face carries a nonzero velocity; with first-order upwind advection a
+#     downward wˢ there draws on the cell above, which is the first extension cell;
+#   - the turbulent flux across that face, which depends on the state and the diffusivity either side;
+#   - rain sedimenting through it.
+#
+# The strong relaxation toward the GCM column above the LES top may well suppress all of these, but that
+# is an expectation, not a demonstration: no experiment here isolates the paths. The trial measures the
+# total effect on the scored vector, which is the quantity the decision needs; it does not attribute it.
 #
 # THE DECISION RULE, for all three: a setting is adopted when the RMS change from the finest setting is
 # ≤ 0.1 σ AND the relative change in the objective Φ is ≤ 1 %. The ratio of the change to the misfit is
