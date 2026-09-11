@@ -104,9 +104,15 @@ Forward map on the 50 m grid at 3 200 columns (144 h = the latest training windo
 | 15 s | 30 min | 24.6 |
 | 7.5 s | 30 min | 41.6 |
 
-Measure cost from the `timing` returned by `run_ensemble`, never by differencing two runs of different
-length: setup is tens of seconds and varies, and the first configuration measured in a process is inflated
-in both setup and per-step.
+Measuring cost correctly takes more care than it looks. `run_ensemble` returns a `timing` whose
+`integration_seconds` covers `run!` alone, excluding model setup — but `run!` still carries one-offs of its
+own (the first `update_state!`, the first radiation call, late kernel specialization) worth tens of seconds
+at production size. So: **difference `integration_seconds` between a short and a long run of the same
+configuration**, with both long enough to contain several radiation calls at the same cadence. Differencing
+wall times instead leaves setup variation in, badly enough to have produced a negative cost per step;
+dividing a single short run by its step count instead charges the one-offs to every step, badly enough to
+have overstated one by 6×. Discard the first configuration measured in a process, whichever it is: it is
+inflated in both setup and per-step.
 
 ## Numerics: provisional, and why it matters
 
@@ -236,10 +242,20 @@ Differences smaller than the seed-to-seed scatter are not rankings, and no run s
 
 ## Hardware note
 
-`sinfo` reports only `gpu:1` and does not distinguish models. On this cluster `gpudev` is a **Tesla T4**,
-not an A100: its FP64 throughput is a small fraction of an A100's and it measured 5.4× slower end to end on
-this workload, with 15 GB of VRAM that will not hold the larger configurations. Query the node before
-trusting a partition name, and keep timing comparisons on one model.
+`sinfo` reports only `gpu:1` and does not distinguish models, and this cluster runs four, each name taken
+from a job log on the node rather than from the partition name:
+
+| partition | device | VRAM |
+|---|---|---|
+| `gpua100` | A100-SXM4-40GB | 41 GB |
+| `gpua100largex4` | A100-SXM4-80GB | 82 GB |
+| `gpuprod` | H100 80GB HBM3 | 79 GB |
+| `gpudev` (default) | Tesla T4 | 15 GB |
+
+**Exclude the T4 from production scheduling.** Its FP64 throughput is a small fraction of an A100's and it
+measured 5.4× slower end to end on this workload; its 15 GB must not set the batching chunk limit, which
+should be chosen for the A100-40GB and H100-80GB the study actually runs on. Query the node before
+trusting a partition name, and never compare timings across models.
 
 ## References
 
