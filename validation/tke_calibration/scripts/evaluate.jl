@@ -3,7 +3,8 @@
 #
 #     julia -t auto --project scripts/evaluate.jl [checkpoint=results/eki.jld2] [resolutions=20,50,100,hindcast] [arch=cpu|gpu]
 #                                                 [top=25000|les] [radiation=interactive|prescribed]
-#                                                 [dt=] [radiation_interval=] [output=results/evaluation.jld2]
+#                                                 [dt=] [radiation_interval=] [reserved=6,9,15,18] [reveal=true]
+#                                                 [output=results/evaluation.jld2]
 #
 # `resolutions` is a comma-separated list of uniform spacings in m and/or `hindcast`. The column top, the
 # radiation, the time step and the radiation interval all default to what the checkpoint records, so a
@@ -48,6 +49,17 @@ end
 
 members = [load_member(s, m) for (s, m) in library_members()]
 istrain = [(m.site, m.month) in training for m in members]
+
+# Held-out members split into two roles. A set that chooses anything — the training design, the
+# ensemble size, which closure family to adopt — is a *validation* set, and reporting a final skill
+# on it overstates the skill, because the choice already fitted it. The reserved sites are kept out
+# of every such decision so that one number at the end is an honest out-of-sample test. They are
+# integrated and saved either way (no extra model runs); only the reporting is gated.
+reserved_sites = parse.(Int, split(get(options, "reserved", "6,9,15,18"), ','))
+reveal = get(options, "reveal", "false") == "true"
+isreserved = [m.site in reserved_sites for m in members]
+isvalidation = .!istrain .& .!isreserved
+any(istrain .& isreserved) && error("Sites $(reserved_sites) are reserved but appear in the training set")
 params = hcat([collect(Float64, p) for p in sets]...)
 
 variables = Tuple(Symbol.(split(get(options, "variables", join(String.(default_variables), ',')), ',')))
@@ -82,18 +94,25 @@ for resolution in resolutions
     problem = problem_for(resolution)
     @info "Evaluating $(length(sets)) parameter sets on $(length(members)) members at resolution $resolution ($(length(problem.zf) - 1) cells, top $(problem.zf[end]) m, radiation $radiation)"
     scores, means = evaluate(params, problem; space, radiation, architecture, Δt, radiation_interval)
-    println("\n===== resolution $resolution, all $(length(members)) members:")
-    rmse_table(scores, labels)
+    println("\n===== resolution $resolution")
     println("training members ($(count(istrain))):")
     rmse_table(scores[:, istrain], labels)
-    println("held-out members ($(count(.!istrain))):")
-    rmse_table(scores[:, .!istrain], labels)
+    println("validation members ($(count(isvalidation)), sites $(join(sort(unique(m.site for m in members[isvalidation])), ", ")) — these choose the design):")
+    rmse_table(scores[:, isvalidation], labels)
+    if reveal
+        println("RESERVED TEST members ($(count(isreserved)), sites $(join(reserved_sites, ", "))) — reveal only after the coefficients are frozen:")
+        rmse_table(scores[:, isreserved], labels)
+    else
+        println("reserved test members ($(count(isreserved)), sites $(join(reserved_sites, ", "))): computed and saved, not shown.")
+        println("  They are the final test. Anything that selects a design or a coefficient must use the")
+        println("  validation rows above; pass reveal=true only once nothing further will be chosen.")
+    end
     results[resolution] = (; scores, means, zc = problem.zc, zf = problem.zf)
 end
 
 les = (zc = members[1].z, θˡ = hcat([m.targets.θˡ for m in members]...), qᵗ = hcat([m.targets.qᵗ for m in members]...),
        qˡ = hcat([m.targets.qˡ for m in members]...), cloud_fraction = [m.targets.cloud_fraction for m in members])
 isempty(dirname(output)) || mkpath(dirname(output))
-jldsave(output; results, labels, members = [(m.site, m.month) for m in members], istrain, params, Δt, radiation_interval,
+jldsave(output; results, labels, members = [(m.site, m.month) for m in members], istrain, isvalidation, isreserved, reserved_sites, params, Δt, radiation_interval,
                 protocol_version = PROTOCOL_VERSION, checkpoint = path,
                 parameter_names = collect(String.(parameter_names(space))), les)
