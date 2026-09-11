@@ -57,15 +57,25 @@ using DocStringExtensions: TYPEDSIGNATURES
 ##### The surface-layer field tuple
 #####
 
-# The wall diagnostics below read the thermodynamic pressure `p` and density `ρ`, which arrive
-# in a second field tuple that `boundary_condition_args` passes after the model fields: they are
-# dimension-reduced fields under anelastic dynamics and cannot ride in the tuple whose entries user
-# forcings and boundary functions look up positionally (see
-# `AtmosphereModels.dynamics_thermodynamic_fields`). Merging the two is resolved at compile time,
-# and everything downstream of here reads its fields by name.
+"""
+$(TYPEDSIGNATURES)
+
+The field tuple the wall diagnostics read: the model fields merged with the thermodynamic pressure
+`p` and density `ρ`.
+
+Those two arrive separately, in the tuple `boundary_condition_args` passes after the model fields,
+because under `AnelasticDynamics` they are dimension-reduced fields. Admitting them to
+`Oceananigans.fields(model)` would make the positional lookup that user forcings and boundary
+functions perform on it non-concrete, and the GPU compiler then rejects every kernel that performs
+one — see `AtmosphereModels.dynamics_thermodynamic_fields`. Merging the two here is resolved at
+compile time, and everything downstream reads its fields by name, which stays type-stable however
+heterogeneous the merged tuple is.
+
+The single-argument method assembles the same tuple from a model, for host-side callers: the
+filtered Δθᵥ update and the tests.
+"""
 @inline surface_layer_state(model_fields, dynamics_fields) = merge(model_fields, dynamics_fields)
 
-# The same tuple, assembled from a model by host-side callers (the filtered Δθᵥ update, tests).
 surface_layer_state(model) = surface_layer_state(Oceananigans.fields(model),
                                                  dynamics_thermodynamic_fields(model.dynamics))
 
