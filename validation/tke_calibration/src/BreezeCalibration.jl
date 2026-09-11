@@ -415,6 +415,12 @@ against member `j`, for every pair, on `architecture` (`CPU()` or `GPU()`). Radi
 (RRTMGP every `radiation_interval`) or `:prescribed` (the LES's own hourly heating replayed). Returns the
 time-mean θˡ, qᵗ (vapor + cloud liquid, as the LES's `qt`), qˡ (cloud liquid), qʳ (rain), u and v over the
 target window as arrays `(N_ens, N_members, Nz)`, and the model.
+
+`sample_callback(model, t, active)`, if given, is called on every accumulation — the same instants that
+enter the time means, with `active[j]` saying whether member `j`'s scored window is open — so a caller can
+record closure diagnostics (diffusivities, mixing length, N², the TKE budget) averaged over exactly the
+scored window. That is not the same as diagnosing the mean state: the stability functions and the
+saturation switch are nonlinear, so the mean of the closure and the closure of the mean differ.
 """
 function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
                       space = space_of(size(params, 1)),
@@ -423,7 +429,8 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
                       subsidence_advection = UpwindBiased(order = 1),
                       radiation = :interactive,
                       radiation_interval = 10minutes,
-                      upper_relaxation_rate = 1 / 600)
+                      upper_relaxation_rate = 1 / 600,
+                      sample_callback = nothing)
     members = problem.members
     microphysics = DCMIP2016KesslerMicrophysics()   # the LES's warm-rain scheme, written for Tetens' saturation vapor pressure
     constants = ThermodynamicConstants(saturation_vapor_pressure = TetensFormula())
@@ -599,6 +606,11 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
             sums.u[:, j, :] .+= u_now[:, j, :]; sums.v[:, j, :] .+= v_now[:, j, :]
             counts[j] += 1
         end
+        # Diagnostics are sampled here, on exactly the instants and the columns that enter the score,
+        # so a time-mean diagnostic is the mean of the closure over the scored window rather than the
+        # closure evaluated on the mean state — a different quantity for anything nonlinear, which
+        # every stability function and the saturation switch are. `nothing` costs a branch per sample.
+        isnothing(sample_callback) || sample_callback(model, t, active)
         return nothing
     end
     add_callback!(simulation, accumulate!, TimeInterval(10minutes))
