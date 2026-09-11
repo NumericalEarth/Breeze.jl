@@ -63,7 +63,7 @@ jobs:
       matrix:
         version:
           - "min"
-          - "1.12.6"
+          - "1.13.0"
         os:
           - ubuntu-latest
           - macOS-latest

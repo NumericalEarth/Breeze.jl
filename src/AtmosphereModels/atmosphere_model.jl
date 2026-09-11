@@ -74,6 +74,12 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     particles :: Prt
 end
 
+# Materialize the model `closure` and `coriolis` in the constructor. Scalars pass through; the
+# `SingleColumnMode` module extends these for per-column *arrays* (single-column ensembles), which it
+# maps/moves to the grid architecture so they can be indexed inside GPU kernels.
+materialize_closure(closure, scalar_names, arch) = with_tracers(scalar_names, closure)
+materialize_coriolis(coriolis, arch) = coriolis
+
 """
 $(TYPEDSIGNATURES)
 
@@ -120,7 +126,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 │   ├── momentum: Centered(order=2)
 │   ├── ρθ: Centered(order=2)
 │   └── ρqᵛ: Centered(order=2)
-├── forcing: @NamedTuple{ρu::Returns{Float64}, ρv::Returns{Float64}, ρw::Returns{Float64}, ρθ::Returns{Float64}, ρqᵛ::Returns{Float64}, ρs::Returns{Float64}}
+├── forcing: @NamedTuple{ρu::Returns{Float64}, ρv::Returns{Float64}, ρw::Returns{Float64}, ρθ::Returns{Float64}, ρqᵛ::Returns{Float64}, ρE::Returns{Float64}}
 ├── tracers: ()
 ├── coriolis: Nothing
 └── microphysics: Nothing
@@ -199,6 +205,7 @@ function AtmosphereModel(grid;
                             "share its name with another prognostic field."))
     velocity_bc_names = velocity_boundary_condition_names(dynamics)
     default_bc_names = tuple(prognostic_names..., velocity_bc_names...)
+    validate_boundary_condition_names(boundary_conditions, default_bc_names)
     default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
@@ -301,6 +308,10 @@ function AtmosphereModel(grid;
                          (; T=temperature), microphysical_fields)
     coupling_density = dynamics_density(dynamics)
     mass_density = total_density(dynamics)
+
+    # A per-column `coriolis` (an array of rotations) is moved to the grid architecture; a scalar
+    # coriolis passes through. See `materialize_coriolis` (extended for arrays in `SingleColumnMode`).
+    coriolis = materialize_coriolis(coriolis, arch)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, coupling_density, mass_density,
                                        velocities, dynamics, formulation, microphysics,
@@ -309,7 +320,10 @@ function AtmosphereModel(grid;
     # The closure's scalars — thermodynamic density, moisture, microphysical prognostic fields, user
     # tracers — in the order the vertically-implicit solve indexes them (see `closure_scalar_index`)
     scalar_names = closure_scalar_names(formulation, microphysics, tracer_names)
-    closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
+    # Fill the closure's tracer-indexed diffusivities. For a per-column *array* of closures,
+    # `materialize_closure` (extended in `SingleColumnMode`) maps over the array and moves it to the
+    # grid architecture; a scalar closure just gets `with_tracers`.
+    closure = materialize_closure(closure, scalar_names, arch)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
 
     # Generate tracer advection scheme for each tracer
@@ -486,6 +500,102 @@ function field_names(dynamics, formulation, microphysics, tracer_names)
     return tuple(prog_names..., formulation_additional_names..., default_additional_names...)
 end
 
+#####
+##### Boundary condition and forcing name validation
+#####
+
+# `ρs`/`s` name static energy and `ρqᵛ`/`ρqᵉ` name particular moisture variables, so each is a
+# key only under the formulation or microphysics that makes it prognostic. An input meant for
+# any of them goes under the interface key — `ρE` for energy, `ρqᵗ` for water.
+function invalid_key_hint(name)
+    if name ∈ (:ρs, :s)
+        return string('\n', "An energy flux or forcing is supplied under ", total_energy_density_name,
+                      " (or E) and applied to the prognostic thermodynamic variable; ", name,
+                      " is a key only when static energy is prognostic (formulation = :StaticEnergy).")
+    elseif name ∈ (:ρqᵛ, :qᵛ, :ρqᵉ, :qᵉ)
+        return string('\n', "A water flux or forcing is supplied under ", total_moisture_density_name,
+                      " (or qᵗ) and applied to the prognostic moisture variable; ", name,
+                      " is a key only under the microphysics that makes it prognostic, which for ",
+                      "BulkMicrophysics is set by `cloud_formation`.")
+    elseif name ∈ (:ρe, :e)
+        return string('\n', "An energy flux or forcing is supplied under ", total_energy_density_name,
+                      " (or E); ", name, " names turbulent kinetic energy, so it is a key only under ",
+                      "a prognostic-TKE closure.")
+    end
+
+    return ""
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Check that every key of the user-supplied `boundary_conditions` names something that can
+carry them: a prognostic field, a velocity component of dynamics whose velocities are
+prognostic, or one of the interface keys [`total_energy_density_name`](@ref) and
+[`total_moisture_density_name`](@ref).
+
+An unrecognized key would otherwise be merged in and then never looked up, so a stale one —
+`ρe` after the `e → s` rename, say — would silently materialize default no-flux conditions in
+place of the fluxes the caller asked for.
+"""
+function validate_boundary_condition_names(boundary_conditions, field_bc_names)
+    valid_names = tuple(field_bc_names..., total_energy_density_name, total_moisture_density_name)
+    invalid_names = Tuple(name for name in keys(boundary_conditions) if name ∉ valid_names)
+    isempty(invalid_names) && return nothing
+
+    msg = string("Invalid boundary_conditions: ", invalid_names, " do not name anything that ",
+                 "carries boundary conditions!", '\n',
+                 "Boundary conditions may be set on ", valid_names, '.',
+                 mapreduce(invalid_key_hint, *, invalid_names))
+
+    throw(ArgumentError(msg))
+end
+
+energy_key_aliases_thermodynamic_density(::Val{:ρs}) = true
+energy_key_aliases_thermodynamic_density(::Val) = false
+
+# An interface key and the variable's own name at the same density weighting are one source named
+# twice; at different weightings they are two sources, which no single key can express.
+function validate_interface_forcing(user_forcings, interface_name, target_name)
+    supplied = keys(user_forcings)
+    same_weighting = ((interface_name, target_name),
+                      (specific_field_name(interface_name), specific_field_name(target_name)))
+
+    for (interface_key, target_key) in same_weighting
+        if interface_key ∈ supplied && target_key ∈ supplied
+            msg = string("Invalid forcing: ", interface_key, " and ", target_key,
+                         " name one source, so supplying both would sum it twice.", '\n',
+                         "Supply exactly one — ", interface_key,
+                         " is valid whatever the formulation and microphysics.")
+            throw(ArgumentError(msg))
+        end
+    end
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Re-key a forcing supplied under the moisture key `ρqᵗ` (see
+[`total_moisture_density_name`](@ref)), or its specific alias `qᵗ`, onto the moisture density
+that `microphysics` actually evolves, so that a setup does not name a variable whose spelling
+depends on the scheme.
+"""
+function route_moisture_forcing(user_forcings, microphysics)
+    ρqᵗ = total_moisture_density_name
+    qᵗ = specific_field_name(ρqᵗ)
+    ρq_name = moisture_prognostic_name(microphysics)
+    q_name = moisture_specific_name(microphysics)
+
+    validate_interface_forcing(user_forcings, ρqᵗ, ρq_name)
+
+    rekey(name) = name === ρqᵗ ? ρq_name :
+                  name === qᵗ  ? q_name  : name
+
+    return NamedTuple{map(rekey, keys(user_forcings))}(values(user_forcings))
+end
+
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
@@ -509,13 +619,21 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
 
+    # `ρqᵗ` (total moisture) is the scheme-agnostic water key. A water source enters the
+    # prognostic moisture density unconverted whatever the scheme calls it, so — unlike `ρE`,
+    # which the tendency kernels read separately in order to convert it — routing it is a pure
+    # re-key onto that name, done before anything else looks at the forcing keys.
+    user_forcings = route_moisture_forcing(user_forcings, microphysics)
     user_forcing_names = keys(user_forcings)
 
-    if :ρs ∈ keys(prognostic_fields)
-        forcing_fields = prognostic_fields
-    else
-        forcing_fields = merge(prognostic_fields, (; ρs=prognostic_fields.ρθ))
-    end
+    # `ρE` (total energy) is the formulation-agnostic energy key: a forcing supplied under it
+    # targets the prognostic thermodynamic density, and the tendency that reads it applies
+    # whatever conversion that variable needs (a division by cᵖᵐ Π for `ρθ`; none for `ρs`).
+    ρᵡ_name = thermodynamic_density_name(formulation)
+    energy_key_aliases_thermodynamic_density(Val(ρᵡ_name)) &&
+        validate_interface_forcing(user_forcings, total_energy_density_name, ρᵡ_name)
+    ρE_field = prognostic_fields[ρᵡ_name]
+    forcing_fields = merge(prognostic_fields, NamedTuple{(total_energy_density_name,)}((ρE_field,)))
 
     forcing_names = keys(forcing_fields)
 
@@ -529,7 +647,8 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
         if name ∉ forcing_names && name ∉ valid_specific_names
             msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
                          "The forcing fields are ", forcing_names,
-                         "; specific-key aliases are ", valid_specific_names, '.')
+                         "; specific-key aliases are ", valid_specific_names, '.',
+                         invalid_key_hint(name))
             throw(ArgumentError(msg))
         end
     end
@@ -544,11 +663,11 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # Momentum, the dynamics mass variable, and thermodynamic density are weighted by the
     # coupling density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and
     # user tracers are total-air mass fractions and therefore use total density. The extra
-    # :ρs entry is the energy-forcing alias retained by potential-temperature formulations.
+    # :ρE entry is the energy-forcing key, which targets the thermodynamic density.
     coupling_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
                                    prognostic_momentum_field_names(dynamics)...,
-                                   thermodynamic_density_name(formulation),
-                                   :ρs)
+                                   ρᵡ_name,
+                                   total_energy_density_name)
 
     # Keep `density` as the coupling-density compatibility entry for other forcing
     # materializers; SpecificForcing selects between the two explicit carriers by target.

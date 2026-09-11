@@ -129,35 +129,20 @@ const CompressibleAcousticModel{Arc} = AtmosphereModel{<:CompressibleDynamics, <
 """
 $(TYPEDSIGNATURES)
 
-Set the adaptive-implicit split time step to the interval of the *next* Wicker–Skamarock
-stage, so the explicit velocity fraction frozen into `Gⁿ` pairs with the implicit fraction
-the next stage applies. One writer, once per stage, read by every field — mirrors
-Oceananigans' `RungeKutta3TimeStepper` and `SplitRungeKuttaTimeStepper` specializations.
-
-Stage 1 of step ``n`` is written before ``Δtₙ`` is known and deliberately uses ``β₁ Δtₙ₋₁``:
-rewriting the split at stage entry would desynchronize it from tendencies frozen against the
-earlier value. The cost is confined to CFL targeting on one stage when ``Δt`` changes.
+The adaptive-implicit split time step for the *next* Wicker–Skamarock stage, so the explicit
+velocity fraction frozen into `Gⁿ` pairs with the implicit fraction the next stage applies.
+Stage 1 of step ``n`` is evaluated before ``Δtₙ`` is known and deliberately uses ``β₁ Δtₙ₋₁``;
+the cost is confined to CFL targeting on one stage when ``Δt`` changes (see
+`maybe_prepare_first_time_step!` for the cold-start seeding).
 """
-@inline function Oceananigans.Advection.update_advection_timestep!(a::AdaptiveImplicitVerticalAdvection, timestepper::AcousticRungeKutta3, clock)
-    td = OceananigansTimeSteppers.time_discretization(a)
-
-    # `clock.stage` names the stage about to run; recover the outer Δt from the completed
-    # stage's clock increment, then scale by the upcoming stage's fraction.
+@inline function Oceananigans.Advection.adaptive_advection_timestep(timestepper::AcousticRungeKutta3, clock)
     stage = clock.stage
     completed = ifelse(stage == 1, 3, stage - 1)
     Δt = clock.last_stage_Δt / stage_increment(timestepper, completed)
-
-    # Fallback for an unseeded clock (`maybe_prepare_first_time_step!` normally seeds it).
     Δt_stage = stage_fraction(timestepper, stage) * Δt
     Δt_last = stage_fraction(timestepper, stage) * clock.last_Δt
-    td.Δt[] = ifelse(isfinite(Δt_stage), Δt_stage, Δt_last)
-    return nothing
+    return ifelse(isfinite(Δt_stage), Δt_stage, Δt_last)
 end
-
-# Disambiguates against Oceananigans' `(::FluxFormAdvection, timestepper, clock)`: the AIVA
-# alias keys on the z time discretization, so an AIVA-z `FluxFormAdvection` matches both.
-Oceananigans.Advection.update_advection_timestep!(a::FluxFormAdvection, timestepper::AcousticRungeKutta3, clock) =
-    Oceananigans.Advection.update_advection_timestep!(a.z, timestepper, clock)
 
 #####
 ##### Per-stage substep wrapper
@@ -194,8 +179,14 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     compute_flux_bc_tendencies!(model)
     compute_closure_tendencies!(model)
 
+    # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless
+    # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
+    # substep inside the loop, dispatched on the scheme type.
+    add_implicit_advection_tendency!(model)
+
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
-    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰)
+    θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
+    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection)
 
     # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
     # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
@@ -233,7 +224,7 @@ $(TYPEDSIGNATURES)
 
 Seed `clock.last_stage_Δt` before the first step (or for a clock carrying a non-finite value)
 with the increment a completed third stage leaves, ``(1 - β₂) Δt`` — what
-`update_advection_timestep!` inverts at stage 1. `PerturbationAdvection` open boundaries read
+`adaptive_advection_timestep` inverts at stage 1. `PerturbationAdvection` open boundaries read
 the same field.
 
 Also seed the substepper's time-averaged transport velocity before the first tendencies are
@@ -370,3 +361,13 @@ function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:TerrainC
             v = sub.time_averaged_velocities.v,
             w = sub.time_averaged_velocities.w)
 end
+
+Oceananigans.prognostic_state(timestepper::AcousticRungeKutta3) =
+    (substepper = Oceananigans.prognostic_state(timestepper.substepper),)
+
+function Oceananigans.restore_prognostic_state!(restored::AcousticRungeKutta3, from)
+    Oceananigans.restore_prognostic_state!(restored.substepper, from.substepper)
+    return restored
+end
+
+Oceananigans.restore_prognostic_state!(timestepper::AcousticRungeKutta3, ::Nothing) = timestepper

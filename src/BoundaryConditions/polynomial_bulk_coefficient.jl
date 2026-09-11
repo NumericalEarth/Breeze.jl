@@ -14,10 +14,10 @@ const default_neutral_sensible_heat_polynomial   = (1.28e-4, 6.8e-5, 2.43e-3)
 const default_neutral_latent_heat_polynomial     = (1.2e-4,  7.0e-5, 2.55e-3)
 
 #####
-##### StabilityFunctionParameters: Ψ function constants
+##### StabilityFunction: Ψ function constants
 #####
 
-struct StabilityFunctionParameters{FT}
+struct StabilityFunction{FT}
     γᴰ :: FT
     γᵀ :: FT
     a :: FT
@@ -27,13 +27,8 @@ struct StabilityFunctionParameters{FT}
 end
 
 """
-    StabilityFunctionParameters(FT = Oceananigans.defaults.FloatType;
-                                γᴰ = 19.3,
-                                γᵀ = 11.6,
-                                a = 1,
-                                b = 2/3,
-                                c = 5,
-                                d = 0.35)
+    StabilityFunction(FT = Oceananigans.defaults.FloatType;
+                      γᴰ = 19.3, γᵀ = 11.6, a = 1, b = 2/3, c = 5, d = 0.35)
 
 Parameters for the integrated Monin-Obukhov stability functions ``Ψ^D(ζ)``
 and ``Ψ^T(ζ)``.
@@ -57,14 +52,9 @@ For stable conditions (``ζ ≥ 0``), uses [Beljaars & Holtslag (1991)](@cite be
 * Hogström, U. L. F. (1996). Review of some basic characteristics of the atmospheric surface layer.
   Boundary-Layer Meteorology, 78, 215-246.
 """
-function StabilityFunctionParameters(FT = Oceananigans.defaults.FloatType;
-                                     γᴰ = 19.3,
-                                     γᵀ = 11.6,
-                                     a = 1,
-                                     b = 2/3,
-                                     c = 5,
-                                     d = 0.35)
-    return StabilityFunctionParameters{FT}(FT(γᴰ), FT(γᵀ), FT(a), FT(b), FT(c), FT(d))
+function StabilityFunction(FT = Oceananigans.defaults.FloatType;
+                           γᴰ = 19.3, γᵀ = 11.6, a = 1, b = 2/3, c = 5, d = 0.35)
+    return StabilityFunction{FT}(FT(γᴰ), FT(γᵀ), FT(a), FT(b), FT(c), FT(d))
 end
 
 #####
@@ -162,13 +152,13 @@ end
 struct FittedStabilityFunction{FT, RM, SP}
     scalar_roughness_length :: FT
     richardson_number_mapping :: RM
-    stability_function_parameters :: SP
+    stability_function :: SP
 end
 
 """
     FittedStabilityFunction(scalar_roughness_length;
                             richardson_number_mapping = RichardsonNumberMapping(typeof(scalar_roughness_length)),
-                            stability_function_parameters = StabilityFunctionParameters(typeof(scalar_roughness_length)))
+                            stability_function = StabilityFunction(typeof(scalar_roughness_length)))
 
 Stability correction based on Monin-Obukhov similarity theory using the
 [Li et al. (2010)](@cite Li2010) analytical mapping from bulk Richardson
@@ -193,7 +183,7 @@ scalar correction factor.
 
 # Keyword Arguments
 - `richardson_number_mapping`: [`RichardsonNumberMapping`](@ref) coefficients (default: [Li et al. (2010)](@cite Li2010)).
-- `stability_function_parameters`: [`StabilityFunctionParameters`](@ref) (default: [Hogström (1996)](@cite hogstrom1996review) / [Beljaars & Holtslag (1991)](@cite beljaars1991flux)).
+- `stability_function`: [`StabilityFunction`](@ref) (default: [Hogström (1996)](@cite hogstrom1996review) / [Beljaars & Holtslag (1991)](@cite beljaars1991flux)).
 
 # References
 
@@ -207,10 +197,10 @@ scalar correction factor.
 """
 function FittedStabilityFunction(scalar_roughness_length;
                                  richardson_number_mapping = RichardsonNumberMapping(typeof(scalar_roughness_length)),
-                                 stability_function_parameters = StabilityFunctionParameters(typeof(scalar_roughness_length)))
+                                 stability_function = StabilityFunction(typeof(scalar_roughness_length)))
     return FittedStabilityFunction(scalar_roughness_length,
                                    richardson_number_mapping,
-                                   stability_function_parameters)
+                                   stability_function)
 end
 
 Base.summary(::FittedStabilityFunction) = "FittedStabilityFunction (Li et al. 2010)"
@@ -226,8 +216,8 @@ end
 # Callable interface: compute stability correction factor
 @inline function (sf::FittedStabilityFunction)(Riᴮ, α, β, transfer_type=Val(:momentum))
     ζ = bulk_to_flux_richardson_number(Riᴮ, α, β, sf.richardson_number_mapping)
-    Ψᴰ = integrated_stability_momentum(ζ, sf.stability_function_parameters)
-    Ψᵀ = integrated_stability_scalar(ζ, sf.stability_function_parameters)
+    Ψᴰ = integrated_stability_momentum(ζ, sf.stability_function)
+    Ψᵀ = integrated_stability_scalar(ζ, sf.stability_function)
     return stability_correction_factor(α, β, Ψᴰ, Ψᵀ, transfer_type)
 end
 
