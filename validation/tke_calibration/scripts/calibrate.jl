@@ -3,7 +3,8 @@
 #
 #     julia -t auto --project scripts/calibrate.jl [N_ens] [space=ri|constant] [resolutions=50,100,hindcast] [arch=cpu|gpu]
 #                                                  [top=25000|les] [radiation=interactive|prescribed] [variables=θˡ,qᵗ,qˡ,u,v]
-#                                                  [pseudotime=1] [max_iterations=50] [output=...] [resume=...]
+#                                                  [pseudotime=1] [max_iterations=50] [localization=secnice|none]
+#                                                  [output=...] [resume=...]
 #
 # `space=ri` (default) calibrates the 17 parameters of the Ri-dependent stability functions, `space=constant`
 # the 7 of the constant-coefficient (Nakanishi–Niino-form) closure. `resolutions` is a comma-separated list of
@@ -37,6 +38,9 @@ top = get(options, "top", "25000"); top = top == "les" ? nothing : parse(Float64
 radiation = Symbol(get(options, "radiation", "interactive"))                              # interactive (RRTMGP) or prescribed (the LES's heating)
 get(options, "arch", "cpu") == "gpu" && @eval using CUDA
 architecture = get(options, "arch", "cpu") == "gpu" ? GPU() : CPU()
+# Localization corrects the sampling error of a small ensemble's covariance. It is worth turning off
+# to see what a large ensemble does without it, since the correction itself biases the update.
+localization_method = get(options, "localization", "secnice") == "none" ? NoLocalization() : SECNice()
 tag = (space isa RiDependentSpace ? "ri" : "constant") * "_" * join(resolutions, "_") * (isnothing(top) ? "" : "_top$(round(Int, top))") * (radiation == :interactive ? "_rrtmgp" : "")
 output = get(options, "output", joinpath(@__DIR__, "..", "results", "eki_$tag.jld2"))
 
@@ -59,7 +63,7 @@ if isnothing(resume)
 else
     @info "Resuming EKI from $resume toward pseudo time $target_pseudotime ($space, grids of $cells cells)"
 end
-ekp, prior, ϕ, history = run_eki(problem; space, N_ens, target_pseudotime, max_iterations, output, resume, radiation, architecture)
+ekp, prior, ϕ, history = run_eki(problem; space, N_ens, target_pseudotime, max_iterations, output, resume, radiation, architecture, localization_method)
 
 println("\nfinal ensemble (constrained parameters):")
 for (k, name) in enumerate(parameter_names(space))
