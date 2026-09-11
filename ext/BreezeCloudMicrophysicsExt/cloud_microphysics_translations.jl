@@ -227,7 +227,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the snow sublimation/deposition rate (dqˢ/dt).
+Compute the snow sublimation/deposition rate (dqˢⁿ/dt).
 
 Positive values mean deposition (vapor → snow), negative means sublimation (snow → vapor).
 Unlike rain evaporation, both signs are physical for snow.
@@ -240,7 +240,7 @@ for snow that uses Breeze's internal thermodynamics instead of Thermodynamics.jl
 - `vel`: Snow terminal velocity parameters
 - `aps`: Air properties (kinematic viscosity, vapor diffusivity, thermal conductivity)
 - `q`: `MoistureMassFractions` containing vapor, liquid, and ice mass fractions
-- `qˢ`: Snow specific humidity
+- `qˢⁿ`: Snow specific humidity
 - `ρ`: Air density
 - `T`: Temperature
 - `constants`: Breeze ThermodynamicConstants
@@ -253,7 +253,7 @@ Rate of change of snow specific humidity (positive = deposition, negative = subl
     vel::Blk1MVelTypeSnow{FT},
     aps::AirProperties{FT},
     q::MoistureMassFractions{FT},
-    qˢ::FT,
+    qˢⁿ::FT,
     ρ::FT,
     T::FT,
     constants,
@@ -268,9 +268,9 @@ Rate of change of snow specific humidity (positive = deposition, negative = subl
     𝒮 = supersaturation(T, ρ, q, constants, PlanarIceSurface())
 
     G = diffusional_growth_factor_ice(aps, T, constants)
-    n₀ = get_n0(pdf, qˢ, ρ)
+    n₀ = get_n0(pdf, qˢⁿ, ρ)
     v₀ = get_v0(vel, ρ)
-    λ⁻¹ = lambda_inverse(pdf, mass, qˢ, ρ)
+    λ⁻¹ = lambda_inverse(pdf, mass, qˢⁿ, ρ)
 
     # Ventilated sublimation/deposition rate from Mason equation
     base_rate = 4 * FT(π) * n₀ / ρ * 𝒮 * G * λ⁻¹^2
@@ -285,7 +285,7 @@ Rate of change of snow specific humidity (positive = deposition, negative = subl
     rate = base_rate * ventilation
 
     # Both sublimation (𝒮 < 0) and deposition (𝒮 > 0) are physical for snow
-    has_snow = qˢ > ϵ_numerics(FT)
+    has_snow = qˢⁿ > ϵ_numerics(FT)
     return ifelse(has_snow, rate, zero(FT))
 end
 
@@ -296,7 +296,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the snow melting rate (dqˢ/dt due to melting, always non-negative).
+Compute the snow melting rate (dqˢⁿ/dt due to melting, always non-negative).
 
 Sensible-heat-driven melting: heat from warm air (``T > Tᶠ``) melts snow to rain.
 The rate is proportional to (``T - Tᶠ``) and includes ventilation corrections.
@@ -308,7 +308,7 @@ that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 - `snow_params`: Snow microphysics parameters (pdf, mass, vent)
 - `vel`: Snow terminal velocity parameters
 - `aps`: Air properties (kinematic viscosity, vapor diffusivity, thermal conductivity)
-- `qˢ`: Snow specific humidity
+- `qˢⁿ`: Snow specific humidity
 - `ρ`: Air density
 - `T`: Temperature
 - `Tᶠ`: Freezing temperature
@@ -321,7 +321,7 @@ Rate of snow mass lost to melting [kg/kg/s] (always non-negative)
     (; pdf, mass, vent)::Snow{FT},
     vel::Blk1MVelTypeSnow{FT},
     aps::AirProperties{FT},
-    qˢ::FT,
+    qˢⁿ::FT,
     ρ::FT,
     T::FT,
     Tᶠ::FT,
@@ -336,9 +336,9 @@ Rate of snow mass lost to melting [kg/kg/s] (always non-negative)
     # Latent heat of fusion: ℒⁱ(vapor→ice) - ℒˡ(vapor→liquid) = ℒf(liquid→ice)
     ℒf = ice_latent_heat(T, constants) - liquid_latent_heat(T, constants)
 
-    n₀ = get_n0(pdf, qˢ, ρ)
+    n₀ = get_n0(pdf, qˢⁿ, ρ)
     v₀ = get_v0(vel, ρ)
-    λ⁻¹ = lambda_inverse(pdf, mass, qˢ, ρ)
+    λ⁻¹ = lambda_inverse(pdf, mass, qˢⁿ, ρ)
 
     # Sensible-heat-driven melting rate
     base_rate = 4 * FT(π) * n₀ / ρ * K_therm / ℒf * (T - Tᶠ) * λ⁻¹^2
@@ -353,7 +353,7 @@ Rate of snow mass lost to melting [kg/kg/s] (always non-negative)
     melt_rate = base_rate * ventilation
 
     # Only melt when snow exists and temperature is above freezing
-    melting = (qˢ > ϵ_numerics(FT)) & (T > Tᶠ)
+    melting = (qˢⁿ > ϵ_numerics(FT)) & (T > Tᶠ)
     return ifelse(melting, melt_rate, zero(FT))
 end
 

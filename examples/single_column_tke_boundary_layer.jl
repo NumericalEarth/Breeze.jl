@@ -111,7 +111,7 @@ function boundary_layer_simulation(; Lz, Δz₁, θ₀, Γ, stop_time, stretchin
     z = PiecewiseStretchedDiscretization(z = [0, Lz], Δz = [Δz₁, stretching * Δz₁])
     grid = RectilinearGrid(size = length(z) - 1; z, topology = (Flat, Flat, Bounded))
 
-    reference_state = ReferenceState(grid, surface_pressure = 1e5, potential_temperature = θ₀)
+    reference_state = ReferenceState(grid, base_pressure = 1e5, potential_temperature = θ₀)
     dynamics = AnelasticDynamics(reference_state)
 
     if isnothing(surface_temperature)

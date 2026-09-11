@@ -74,7 +74,7 @@ constants = model.thermodynamic_constants
 p₀ = 101325   # Surface pressure (Pa)
 pˢᵗ = 1e5     # Standard pressure (Pa)
 
-reference = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
+reference = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
 
 # The sound speed at the surface determines the acoustic wave propagation speed.
 

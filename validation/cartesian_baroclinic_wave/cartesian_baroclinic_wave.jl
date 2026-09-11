@@ -223,7 +223,7 @@ T₀ᵣ = 250
 θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
 dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                surface_pressure = p₀,
+                                base_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
 model = AtmosphereModel(grid; dynamics, coriolis,

@@ -52,23 +52,23 @@ vapor_source_field(model) = AtmosphereModels.specific_prognostic_moisture(model)
 # `FilteredSurfaceVelocities` at all.
 const StabilityCorrectedCoefficient = PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}
 
-initialize_filtered_Δθᵥ!(::Nothing, coef, T₀, model) = nothing
-initialize_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, model) = nothing
+initialize_filtered_Δθᵥ!(::Nothing, coef, Tˢ, model) = nothing
+initialize_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, Tˢ, model) = nothing
 
-function initialize_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef::StabilityCorrectedCoefficient, T₀, model)
-    initialize_Δθᵥ!(fv, coef, T₀, model.grid, model.clock)
+function initialize_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef::StabilityCorrectedCoefficient, Tˢ, model)
+    initialize_Δθᵥ!(fv, coef, Tˢ, model.grid, model.clock, surface_layer_state(model))
     return nothing
 end
 
-update_filtered_Δθᵥ!(::Nothing, coef, T₀, model) = nothing
-update_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, model) = nothing
+update_filtered_Δθᵥ!(::Nothing, coef, Tˢ, model) = nothing
+update_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, Tˢ, model) = nothing
 
-function update_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef::StabilityCorrectedCoefficient, T₀, model)
+function update_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef::StabilityCorrectedCoefficient, Tˢ, model)
     key = (model.clock.iteration, model.clock.stage)
     fv.last_Δθᵥ_update[] == key && return nothing
     Δt = model.clock.last_Δt
     isinf(Δt) && return nothing # no valid Δt yet (before first time step)
-    update_Δθᵥ!(fv, coef, T₀, model.grid, model.clock, Δt)
+    update_Δθᵥ!(fv, coef, Tˢ, model.grid, model.clock, Δt, surface_layer_state(model))
     fv.last_Δθᵥ_update[] = key
     return nothing
 end

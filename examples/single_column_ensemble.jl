@@ -37,7 +37,7 @@ grid = RectilinearGrid(size = ColumnEnsembleSize(Nz=Nz, ensemble=(N, 1), Hz=3),
 # The columns share one anelastic reference state (a dry, neutrally stratified background).
 
 constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=290)
+reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=290)
 dynamics = AnelasticDynamics(reference_state)
 
 # ## Per-column vertical diffusivity

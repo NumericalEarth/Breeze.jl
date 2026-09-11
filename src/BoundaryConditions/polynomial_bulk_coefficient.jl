@@ -352,7 +352,59 @@ end
 ##### PolynomialCoefficient struct
 #####
 
-struct PolynomialCoefficient{FT, C, SF, S, θᵛ, Q, P, TC, TT}
+"""
+$(TYPEDSIGNATURES)
+
+The virtual potential temperature a stability-dependent bulk boundary condition compares against
+its surface value, evaluated from the model field tuple the boundary-condition kernel is handed
+rather than from fields captured at construction.
+
+Boundary conditions are materialized before the dynamics is, so there are no model fields to
+capture at that point; deferring the read is what lets a compressible model's stability correction
+follow its prognostic pressure and density. The `T` entry comes from
+`AtmosphereModels.auxiliary_model_fields` and the `p` and `ρ` entries from
+`AtmosphereModels.dynamics_thermodynamic_fields`, which the caller has merged into one tuple by
+this point, so this reads the same thermodynamic pressure the rest of the model does: prognostic
+under `CompressibleDynamics`, the hydrostatic reference profile under `AnelasticDynamics`.
+"""
+struct NearWallVirtualPotentialTemperature{M, N, FT, TC}
+    microphysics :: M
+    specific_moisture_name :: N
+    standard_pressure :: FT
+    thermodynamic_constants :: TC
+end
+
+Adapt.adapt_structure(to, θᵥ::NearWallVirtualPotentialTemperature) =
+    NearWallVirtualPotentialTemperature(Adapt.adapt(to, θᵥ.microphysics),
+                                        Adapt.adapt(to, θᵥ.specific_moisture_name),
+                                        Adapt.adapt(to, θᵥ.standard_pressure),
+                                        Adapt.adapt(to, θᵥ.thermodynamic_constants))
+
+@inline function near_wall_specific_moisture(i, j, k, fields, ::Val{name}) where name
+    moisture = getproperty(fields, name)
+    return @inbounds moisture[i, j, k]
+end
+
+@inline function (θᵥ::NearWallVirtualPotentialTemperature)(i, j, k, grid, fields)
+    @inbounds begin
+        p = fields.p[i, j, k]
+        ρ = fields.ρ[i, j, k]
+        T = fields.T[i, j, k]
+    end
+    qᵛᵉ = near_wall_specific_moisture(i, j, k, fields, θᵥ.specific_moisture_name)
+    q = grid_moisture_fractions(i, j, k, grid, θᵥ.microphysics, ρ, qᵛᵉ, fields)
+    return virtual_potential_temperature(T, p, θᵥ.standard_pressure, q,
+                                         θᵥ.thermodynamic_constants)
+end
+
+@inline near_wall_virtual_potential_temperature(i, j, k, grid,
+                                                θᵥ::NearWallVirtualPotentialTemperature,
+                                                fields) = θᵥ(i, j, k, grid, fields)
+
+@inline near_wall_virtual_potential_temperature(i, j, k, grid, θᵥ, fields) =
+    @inbounds θᵥ[i, j, k]
+
+struct PolynomialCoefficient{FT, C, SF, S, θᵛ, SP, TC, TT}
     polynomial :: C
     roughness_length :: FT
     minimum_wind_speed :: FT
@@ -360,8 +412,7 @@ struct PolynomialCoefficient{FT, C, SF, S, θᵛ, Q, P, TC, TT}
     surface :: S
     moisture_availability :: FT      # the fraction β of the surface that is saturated
     virtual_potential_temperature :: θᵛ
-    specific_humidity :: Q           # the specific humidity of the air, read in the first cell
-    surface_pressure :: P
+    standard_pressure :: SP
     thermodynamic_constants :: TC
     transfer_type :: TT
 end
@@ -404,12 +455,12 @@ will be automatically selected based on the boundary condition type:
   `PlanarMixedPhaseSurface(liquid_fraction)`.
 - `moisture_availability`: The fraction ``β ∈ [0, 1]`` of the surface that is saturated (default: 1,
   an ocean). The surface specific humidity entering the stability correction is
-  ``q₀ = β qᵛ⁺(T₀) + (1 - β) qᵛ``, with ``qᵛ`` the specific humidity of the air in the first cell,
+  ``qˢ = β qᵛ⁺(Tˢ) + (1 - β) qᵛ``, with ``qᵛ`` the specific humidity of the air in the first cell,
   so that ``β = 0`` describes a dry surface whose virtual potential temperature carries no moisture
-  contribution of its own. See [`surface_virtual_potential_temperature`](@ref).
+  contribution of its own. See [`wall_virtual_potential_temperature`](@ref).
 
-The measurement height is automatically determined from the grid as the height of the first
-cell center above the surface.
+The measurement height is automatically determined from the grid as half the first-cell
+thickness, the height of its center above the local surface.
 
 # Examples
 
@@ -488,7 +539,7 @@ function PolynomialCoefficient(FT = Oceananigans.defaults.FloatType;
                                  stability_function,
                                  surface,
                                  FT(moisture_availability),
-                                 nothing, nothing, nothing, nothing,
+                                 nothing, nothing, nothing,
                                  transfer_type)
 end
 
@@ -500,8 +551,7 @@ Adapt.adapt_structure(to, coef::PolynomialCoefficient) =
                           coef.surface,
                           coef.moisture_availability,
                           Adapt.adapt(to, coef.virtual_potential_temperature),
-                          Adapt.adapt(to, coef.specific_humidity),
-                          Adapt.adapt(to, coef.surface_pressure),
+                          Adapt.adapt(to, coef.standard_pressure),
                           Adapt.adapt(to, coef.thermodynamic_constants),
                           coef.transfer_type)
 
@@ -554,7 +604,7 @@ $(TYPEDSIGNATURES)
 
 Compute bulk Richardson number:
 ```math
-Riᴮ = (g / θ̄ᵥ) h (θᵥ - θᵥ₀) / U²
+Riᴮ = (g / θ̄ᵥ) h (θᵥ - θᵥˢ) / U²
 ```
 
 Wind speed is clamped to `U_min` to avoid singularity.
@@ -562,16 +612,16 @@ Wind speed is clamped to `U_min` to avoid singularity.
 # Arguments
 - `h`: Measurement height (m)
 - `θᵥ`: Virtual potential temperature at measurement height (K)
-- `θᵥ₀`: Virtual potential temperature at surface (K)
+- `θᵥˢ`: Virtual potential temperature at surface (K)
 - `U`: Wind speed (m/s)
 - `U_min`: Minimum wind speed (m/s)
-- `g`: Gravitational acceleration (m/s², default: 9.81)
+- `g`: Gravitational acceleration (m/s²)
 """
-@inline function bulk_richardson_number(h, θᵥ, θᵥ₀, U, U_min, g = 9.81)
+@inline function bulk_richardson_number(h, θᵥ, θᵥˢ, U, U_min, g)
     # Avoid division by zero
     U_safe = max(U, U_min)
-    θᵥ_mean = (θᵥ + θᵥ₀) / 2
-    return (g / θᵥ_mean) * h * (θᵥ - θᵥ₀) / U_safe^2
+    θᵥ_mean = (θᵥ + θᵥˢ) / 2
+    return (g / θᵥ_mean) * h * (θᵥ - θᵥˢ) / U_safe^2
 end
 
 #####
@@ -581,28 +631,29 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the virtual potential temperature of a planar `surface` with surface temperature `T₀`,
-surface pressure `p₀`, moisture availability `β` and first-cell specific humidity `qᵛ`,
+Compute the virtual potential temperature of a planar `surface` with surface temperature `Tˢ`,
+surface pressure `pˢ`, standard pressure `pˢᵗ`, moisture availability `β` and first-cell specific
+humidity `qᵛ`,
 
 ```math
-θᵥ₀ = T₀ (1 + δᵛᵈ q₀), \\qquad q₀ = β qᵛ⁺ + (1 - β) qᵛ,
+θᵥˢ = \\frac{Tˢ}{Πᵈˢ} (1 + δᵛᵈ qˢ), \\qquad qˢ = β qᵛ⁺ + (1 - β) qᵛ,
+\\qquad Πᵈˢ = (pˢ / pˢᵗ)^{Rᵈ/cᵖᵈ}
 ```
 
 where ``qᵛ⁺`` is the saturation specific humidity at the surface and ``δᵛᵈ = Rᵛ/Rᵈ - 1``
 (≈ 0.608 for water vapor in Earth's atmosphere; the actual value depends on the gas constants in
 `constants`). A saturated surface (``β = 1``, the default) carries its saturation humidity; a dry
 surface (``β = 0``) carries the humidity of the air above it, and so contributes no moisture of its
-own to the surface buoyancy.
+own to the surface buoyancy. The dry Exner factor is required because the stability difference
+compares two virtual *potential* temperatures, not virtual temperature at the surface against
+potential temperature aloft.
 """
-@inline function surface_virtual_potential_temperature(T₀, p₀, constants, surface, β = 1, qᵛ = 0)
-    qᵛ⁺ = saturation_total_specific_moisture(T₀, p₀, constants, surface)
-    q₀ = β * qᵛ⁺ + (1 - β) * qᵛ
-
-    Rᵈ = dry_air_gas_constant(constants)
-    Rᵛ = vapor_gas_constant(constants)
-    δᵛᵈ = Rᵛ / Rᵈ - 1
-
-    return T₀ * (1 + δᵛᵈ * q₀)
+@inline function wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, β = 1, qᵛ = 0)
+    qᵛ⁺ = saturation_total_specific_moisture(Tˢ, pˢ, constants, surface)
+    qˢ = β * qᵛ⁺ + (1 - β) * qᵛ
+    # The same θᵥ the air-side of the stability difference goes through, with no condensate at the
+    # surface. Sharing it is what keeps the two sides of that subtraction defined identically.
+    return virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, MoistureMassFractions(qˢ), constants)
 end
 
 #####
@@ -614,37 +665,41 @@ $(TYPEDSIGNATURES)
 
 Evaluate the bulk transfer coefficient for given conditions.
 
-For a materialized `PolynomialCoefficient` (with `virtual_potential_temperature`,
-`surface_pressure`, and `thermodynamic_constants` filled in during model construction),
-the stability correction is computed internally from the stored fields.
+The surface pressure `pˢ` that the stability correction needs is an argument rather than
+stored state: a bulk boundary condition diagnoses it from the live model fields at the column
+being evaluated, so it follows both terrain and the evolving state.
 
 # Arguments
 - `i`, `j`: Grid indices
 - `grid`: The grid
 - `U`: Wind speed (m/s)
-- `T₀`: Surface temperature (K) at location `(i, j)`
+- `Tˢ`: Surface temperature (K) at location `(i, j)`
+- `h`: Measurement height (m) above the local surface; the short form uses half the first-cell
+  thickness
+- `Δθᵥ_source`: Field of the filtered surface-layer virtual potential temperature difference, or
+  `nothing` to form it from the instantaneous state
+- `fields`: The surface-layer field tuple the instantaneous diagnostic reads. Required, because a
+  materialized `coef.virtual_potential_temperature` is a `NearWallVirtualPotentialTemperature` that
+  has no fields of its own; pass `nothing` only when `Δθᵥ_source` or
+  `coef.virtual_potential_temperature` is an ordinary field, which is then read directly.
+- `pˢ`: Air pressure (Pa) at the surface below `(i, j)`
 
 Returns the transfer coefficient (dimensionless).
+
+There are deliberately only these two methods. Earlier `fields`-less forms were separated from
+these by arity alone and silently forwarded `fields = nothing`, which crashes for every coefficient
+`materialize_coefficient` builds — the instantaneous diagnostic would dereference `nothing.p`. A
+kernel cannot raise a useful error, so the argument is mandatory instead.
 """
-# Default: evaluate at the bottom wall, at the first cell centre height
-@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀)
-    h = wall_distance(i, j, 1, grid, Bottom())
-    return coef(i, j, 1, grid, Bottom(), U, T₀, h, nothing)
-end
-
-# Explicit height: used for filtered velocity with a fixed reference height.
-# Optional `Δθᵥ_source` selects a filtered surface-layer virtual potential temperature
-# difference over the one formed from the instantaneous state.
-@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h)
-    return coef(i, j, 1, grid, Bottom(), U, T₀, h, nothing)
-end
-
-@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h, Δθᵥ_source)
-    return coef(i, j, 1, grid, Bottom(), U, T₀, h, Δθᵥ_source)
+# Short form: the near-wall cell of `side`, at the wall distance of its centre, with the
+# instantaneous Δθᵥ.
+@inline function (coef::PolynomialCoefficient)(i, j, k, grid, side, U, Tˢ, fields, pˢ)
+    h = wall_distance(i, j, k, grid, side)
+    return coef(i, j, k, grid, side, U, Tˢ, h, nothing, fields, pˢ)
 end
 
 # General form: on the wall `side`, next to the near-wall cell (i, j, k), at wall distance h
-@inline function (coef::PolynomialCoefficient)(i, j, k, grid, side, U, T₀, h, Δθᵥ_source)
+@inline function (coef::PolynomialCoefficient)(i, j, k, grid, side, U, Tˢ, h, Δθᵥ_source, fields, pˢ)
     C¹⁰ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height using logarithmic profile:
@@ -654,36 +709,41 @@ end
     Cʰ = C¹⁰ * (log(10 / ℓʳ) / α)^2
 
     # Apply stability correction (reads the filtered Δθᵥ when `Δθᵥ_source` is provided)
-    return stability_corrected_coefficient(i, j, k, grid, side, coef, Cʰ, h, α, U, T₀, Δθᵥ_source)
+    return stability_corrected_coefficient(i, j, k, grid, side, coef, Cʰ, h, α, U, Tˢ,
+                                           Δθᵥ_source, fields, pˢ)
 end
 
 # No stability correction (stability_function = nothing) — `Δθᵥ_source` is ignored
 @inline stability_corrected_coefficient(i, j, k, grid, side,
-    ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cʰ, h, α, U, T₀, Δθᵥ_source) = Cʰ
+    ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cʰ, h, α, U, Tˢ,
+    Δθᵥ_source, fields, pˢ) = Cʰ
 
 # Vertical walls: buoyancy acts along the wall, so the surface layer has no
 # Monin–Obukhov stability correction
 @inline stability_corrected_coefficient(i, j, k, grid, ::VerticalWall,
-    ::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀, Δθᵥ_source) = Cʰ
+    ::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, Tˢ,
+    Δθᵥ_source, fields, pˢ) = Cʰ
 
 # FittedStabilityFunction correction (Li et al. 2010 mapping + MOST Ψ functions) on
 # horizontal walls. The `Δθᵥ_source` argument selects the surface-layer virtual potential
 # temperature difference:
-#   - `nothing` → formed from the instantaneous near-wall state and `T₀`
+#   - `nothing` → formed from the instantaneous near-wall state and `Tˢ`
 #   - a filtered 2D field → read `Δθᵥ_source[i, j, 1]`
-# The wall value θᵥ₀ is formed from the instantaneous state either way: it only sets the
+# The wall value θᵥˢ is formed from the instantaneous state either way: it only sets the
 # mean temperature in the Richardson number, where its fluctuations are negligible.
 @inline function stability_corrected_coefficient(i, j, k, grid, side::HorizontalWall,
-    coef::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀, Δθᵥ_source)
+    coef::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, Tˢ,
+    Δθᵥ_source, fields, pˢ)
 
     sf = coef.stability_function
     ℓʳ = coef.roughness_length
     ℓʳʰ = sf.scalar_roughness_length
     β = log(ℓʳ / ℓʳʰ)
 
-    Δθᵥ = surface_layer_Δθᵥ(i, j, k, coef, T₀, Δθᵥ_source)
-    θᵥ₀ = surface_virtual_potential_temperature(i, j, k, coef, T₀)
-    Riᴮ = stability_sign(side) * bulk_richardson_number(h, θᵥ₀ + Δθᵥ, θᵥ₀, U, coef.minimum_wind_speed)
+    Δθᵥ = surface_layer_Δθᵥ(i, j, k, grid, coef, Tˢ, Δθᵥ_source, fields, pˢ)
+    θᵥˢ = wall_virtual_potential_temperature(i, j, k, coef, Tˢ, fields, pˢ)
+    g = coef.thermodynamic_constants.gravitational_acceleration
+    Riᴮ = stability_sign(side) * bulk_richardson_number(h, θᵥˢ + Δθᵥ, θᵥˢ, U, coef.minimum_wind_speed, g)
 
     return Cʰ * sf(Riᴮ, α, β, coef.transfer_type)
 end
@@ -692,12 +752,13 @@ end
 $(TYPEDSIGNATURES)
 
 The virtual potential temperature of the wall next to the cell `(i, j, k)`, from the wall
-temperature `T₀` and the coefficient's surface pressure, constants, surface phase, moisture
-availability and the specific humidity of the air in the near-wall cell.
+temperature `Tˢ`, the air pressure `pˢ` at the wall, and the coefficient's standard pressure,
+constants, surface phase and moisture availability, together with the specific humidity of the air
+in the near-wall cell.
 """
-@inline function surface_virtual_potential_temperature(i, j, k, coef::PolynomialCoefficient, T₀)
-    qᵛ = @inbounds coef.specific_humidity[i, j, k]
-    return surface_virtual_potential_temperature(T₀, coef.surface_pressure,
+@inline function wall_virtual_potential_temperature(i, j, k, coef::PolynomialCoefficient, Tˢ, fields, pˢ)
+    qᵛ = @inbounds fields.qᵛ[i, j, k]
+    return wall_virtual_potential_temperature(Tˢ, pˢ, coef.standard_pressure,
                                                  coef.thermodynamic_constants, coef.surface,
                                                  coef.moisture_availability, qᵛ)
 end
@@ -705,22 +766,22 @@ end
 """
 $(TYPEDSIGNATURES)
 
-The surface-layer virtual potential temperature difference ``Δθᵥ = θᵥ(z₁) - θᵥ₀`` between the
-near-wall cell `(i, j, k)` and the wall at temperature `T₀`, from the instantaneous state: the
+The surface-layer virtual potential temperature difference ``Δθᵥ = θᵥ(z₁) - θᵥˢ`` between the
+near-wall cell `(i, j, k)` and the wall at temperature `Tˢ`, from the instantaneous state: the
 stability input of the bulk coefficient, and the result that
 [`FilteredSurfaceVelocities`](@ref) filters on the bottom wall.
 """
-@inline function surface_layer_Δθᵥ(i, j, k, coef::PolynomialCoefficient, T₀)
-    θᵥ = @inbounds coef.virtual_potential_temperature[i, j, k]
-    return θᵥ - surface_virtual_potential_temperature(i, j, k, coef, T₀)
+@inline function surface_layer_Δθᵥ(i, j, k, grid, coef::PolynomialCoefficient, Tˢ, fields, pˢ)
+    θᵥ = near_wall_virtual_potential_temperature(i, j, k, grid, coef.virtual_potential_temperature, fields)
+    return θᵥ - wall_virtual_potential_temperature(i, j, k, coef, Tˢ, fields, pˢ)
 end
 
-# At the bottom wall
-@inline surface_layer_Δθᵥ(i, j, coef::PolynomialCoefficient, T₀) = surface_layer_Δθᵥ(i, j, 1, coef, T₀)
-
 # Dispatch on whether a filtered difference is supplied
-@inline surface_layer_Δθᵥ(i, j, k, coef, T₀, ::Nothing) = surface_layer_Δθᵥ(i, j, k, coef, T₀)
-@inline surface_layer_Δθᵥ(i, j, k, coef, T₀, Δθᵥ_filtered) = @inbounds Δθᵥ_filtered[i, j, 1]
+@inline surface_layer_Δθᵥ(i, j, k, grid, coef, Tˢ, ::Nothing, fields, pˢ) =
+    surface_layer_Δθᵥ(i, j, k, grid, coef, Tˢ, fields, pˢ)
+
+@inline surface_layer_Δθᵥ(i, j, k, grid, coef, Tˢ, Δθᵥ_filtered, fields, pˢ) =
+    @inbounds Δθᵥ_filtered[i, j, 1]
 
 #####
 ##### Bulk coefficient evaluation
@@ -735,7 +796,7 @@ end
 ##### Evaluation height helper
 #####
 
-@inline evaluation_height(i, j, grid, ::Nothing) = znode(i, j, 1, grid, Center(), Center(), Center())
+@inline evaluation_height(i, j, grid, ::Nothing) = Δzᶜᶜᶜ(i, j, 1, grid) / 2
 @inline evaluation_height(i, j, grid, h) = h
 
 #####
@@ -746,13 +807,12 @@ end
 ##### cell centre.
 #####
 
-@inline bulk_coefficient(i, j, k, grid, side, C::Number, fields, T₀, fv) = C
+@inline bulk_coefficient(i, j, k, grid, side, C::Number, fields, Tˢ, fv, pˢ) = C
 
-@inline function bulk_coefficient(i, j, k, grid, side, C::PolynomialCoefficient, fields, T₀, ::Nothing)
+@inline function bulk_coefficient(i, j, k, grid, side, C::PolynomialCoefficient, fields, Tˢ, ::Nothing, pˢ)
     U² = tangential_speed²(i, j, k, grid, side, nothing, fields)
     U = sqrt(U²)
-    h = wall_distance(i, j, k, grid, side)
-    return C(i, j, k, grid, side, U, T₀, h, nothing)
+    return C(i, j, k, grid, side, U, Tˢ, fields, pˢ)
 end
 
 #####
@@ -764,11 +824,12 @@ end
 ##### every term is computed from filtered state.
 #####
 
-@inline function bulk_coefficient(i, j, k, grid, side::Bottom, C::PolynomialCoefficient, fields, T₀, fv::FilteredSurfaceVelocities)
+@inline function bulk_coefficient(i, j, k, grid, side::Bottom, C::PolynomialCoefficient, fields, Tˢ,
+                                  fv::FilteredSurfaceVelocities, pˢ)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv)
     U = sqrt(U²)
     h = evaluation_height(i, j, grid, fv.height)
-    return C(i, j, k, grid, side, U, T₀, h, fv.Δθᵥ)
+    return C(i, j, k, grid, side, U, Tˢ, h, fv.Δθᵥ, fields, pˢ)
 end
 
 #####
@@ -783,7 +844,7 @@ fill_polynomial(coef::PolynomialCoefficient, polynomial, transfer_type) =
                           coef.stability_function,
                           coef.surface,
                           coef.moisture_availability,
-                          nothing, nothing, nothing, nothing,
+                          nothing, nothing, nothing,
                           transfer_type)
 
 # Type alias for PolynomialCoefficient with no polynomial set

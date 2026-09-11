@@ -2,9 +2,10 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Test
 using Breeze
-using Breeze.Thermodynamics: dry_air_gas_constant, adiabatic_hydrostatic_pressure,
-                             mixture_gas_constant, MoistureMassFractions
-using Breeze.AtmosphereModels: standard_pressure
+using Breeze.Thermodynamics: dry_air_gas_constant, compute_hydrostatic_reference!,
+                             mixture_gas_constant, MoistureMassFractions,
+                             surface_pressure_from_cell_center
+using Breeze.AtmosphereModels: dynamics_pressure, standard_pressure, total_density
 using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
@@ -92,7 +93,7 @@ end
     constants = ThermodynamicConstants()
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
@@ -218,29 +219,37 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))
     constants = ThermodynamicConstants()
 
-    p₀ = FT(101325) # surface pressure, Pa
+    p₀ = FT(101325) # base pressure at z = 0, Pa
     pˢᵗ = FT(1e5) # standard pressure for potential temperature, Pa
-    θ₀ = 288 # K
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-    dynamics = AnelasticDynamics(reference_state)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-
-    # Set up isothermal atmosphere: T = T₀ = constant
-    # For constant T, we need: θ = T₀ * (pˢᵗ/pᵣ)^(Rᵈ/cᵖᵈ) using the standard pressure
-    T₀ = θ₀
+    T₀ = FT(288) # K
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     g = constants.gravitational_acceleration
+    H = Rᵈ * T₀ / g # isothermal scale height
 
+    # Both the reference profile and the model state are isothermal at T₀. The reference matters
+    # because `compute_hydrostatic_pressure!` diagnoses its anchor from `dynamics_pressure` and
+    # `total_density`, which under `AnelasticDynamics` are the reference profile, while it marches
+    # the column with `model.temperature`. Building the reference from a constant θ instead would
+    # make those two different atmospheres — isentropic below, isothermal above — and the anchor
+    # would then miss p₀ by the reference's lapse rate across the half cell rather than by
+    # anything to do with the diagnostic under test.
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=T₀)
+    set!(reference_state.temperature, T₀)
+    compute_hydrostatic_reference!(reference_state, constants)
+
+    dynamics = AnelasticDynamics(reference_state)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+
+    # θ that makes the state isothermal against that reference: θ = T₀ (pˢᵗ/p)^(Rᵈ/cᵖᵈ),
+    # with p the isothermal profile the reference now carries.
     θ_field = CenterField(grid)
-    set!(θ_field, (x, y, z) -> begin
-        pᵣ_z = adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
-        T₀ * (pˢᵗ / pᵣ_z)^(Rᵈ / cᵖᵈ)
-    end)
+    set!(θ_field, (x, y, z) -> T₀ * (pˢᵗ / (p₀ * exp(-z / H)))^(Rᵈ / cᵖᵈ))
 
     set!(model; θ = θ_field)
 
-    # Verify temperature is approximately constant
+    # The state really is isothermal, so the half-cell extrapolation below is exact rather than
+    # merely close: `p exp(gΔzρ/2p)` is the isothermal solution when `p/ρ = Rᵈ T`.
     T_interior = interior(model.temperature)
     max_rel_error = @allowscalar maximum(abs.((T_interior .- T₀) ./ T₀))
     @test max_rel_error < FT(1e-5)
@@ -248,11 +257,21 @@ end
     # Compute hydrostatic pressure
     ph = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
 
-    # Expected cell-mean pressure for isothermal atmosphere:
-    # p_mean = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H))
-    # where H = Rᵈ * T₀ / g is the scale height
+    # `compute_hydrostatic_pressure!` anchors each column at the pressure it *diagnoses* at that
+    # column's bottom face, by extrapolating the first cell center down half a cell, so that it
+    # follows the terrain surface instead of assuming the reference datum sits at the ground. On
+    # an isothermal column that extrapolation is exact, and this domain's bottom face is at z = 0,
+    # so the diagnosed anchor must reproduce the datum — no tolerance to choose.
+    Δz₁ = @allowscalar Δzᶜᶜᶜ(1, 1, 1, grid)
+    p¹ = @allowscalar dynamics_pressure(model.dynamics)[1, 1, 1]
+    ρ¹ = @allowscalar total_density(model.dynamics)[1, 1, 1]
+    pˢ = surface_pressure_from_cell_center(p¹, ρ¹, Δz₁, g)
+    @test pˢ ≈ p₀
+
+    # Expected cell-mean pressure for an isothermal atmosphere, marched from the datum itself
+    # rather than from the diagnosed anchor, so the anchor and the column integration are checked
+    # independently: p_mean = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H)).
     p_expected = CenterField(grid)
-    H = Rᵈ * T₀ / g
 
     @allowscalar begin
         p_interface_bottom = p₀
@@ -264,6 +283,13 @@ end
     end
 
     @test ph ≈ p_expected
+
+    # The anelastic pressure solve determines only the gradient of its kinematic pressure
+    # anomaly. A spatially uniform offset is therefore a gauge change and must not alter a
+    # thermodynamic pressure diagnostic.
+    set!(model.dynamics.pressure_anomaly, FT(1000))
+    ph_with_shifted_gauge = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
+    @test ph_with_shifted_gauge ≈ ph
 end
 
 @testset "Azimuthal-mean diagnostic [$(FT)]" for FT in test_float_types()

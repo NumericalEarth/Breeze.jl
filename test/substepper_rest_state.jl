@@ -82,12 +82,12 @@ function _build_rest_model(arch; substeps = nothing,
     td = SplitExplicitTimeDiscretization(; td_kwargs...)
     # Use the isentropic θ̄(z) reference path (`_compute_exner_reference!`),
     # which the moist baroclinic wave example uses and which gives discrete
-    # hydrostatic balance to ulp via Newton iteration. Align surface_pressure
+    # hydrostatic balance to ulp via Newton iteration. Align base_pressure
     # with standard_pressure so Π_surface = 1 and tests are bit-identical
     # against an analytic isothermal reference.
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = θ_isothermal_ref,
-                               surface_pressure = 1e5,
+                               base_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
                                   thermodynamic_constants = constants)
@@ -370,7 +370,7 @@ total_dry_mass(model) = sum(Float64.(interior(model.dynamics.dry_density)))
     constants = ThermodynamicConstants(eltype(grid))
     dyn = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                reference_potential_temperature = θ_isothermal_ref,
-                               surface_pressure = 1e5, standard_pressure = 1e5)
+                               base_pressure = 1e5, standard_pressure = 1e5)
     model = AtmosphereModel(grid; dynamics = dyn,
                                   thermodynamic_constants = constants,
                                   coriolis = FPlane(f = eltype(grid)(f)))
@@ -412,7 +412,7 @@ end
     constants = ThermodynamicConstants(eltype(grid))
     dyn = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                reference_potential_temperature = θ_isothermal_ref,
-                               surface_pressure = 1e5, standard_pressure = 1e5)
+                               base_pressure = 1e5, standard_pressure = 1e5)
     model = AtmosphereModel(grid; dynamics = dyn,
                                   thermodynamic_constants = constants)
 

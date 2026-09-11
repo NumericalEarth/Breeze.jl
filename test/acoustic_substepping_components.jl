@@ -565,10 +565,10 @@ for arch in arches
         constants = ThermodynamicConstants(FT)
 
         @testset "Construction and basic properties" begin
-            ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+            ref = ExnerReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
             @test ref isa ExnerReferenceState
             @test eltype(ref) == FT
-            @test ref.surface_pressure == FT(101325)
+            @test ref.base_pressure == FT(101325)
             @test ref.surface_potential_temperature == FT(300)
 
             # Pressure should decrease monotonically
@@ -580,14 +580,14 @@ for arch in arches
         end
 
         @testset "show/summary" begin
-            ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+            ref = ExnerReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
             s = sprint(show, ref)
             @test occursin("ExnerReferenceState", s)
             @test occursin("p₀", s)
         end
 
         @testset "surface_density" begin
-            ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+            ref = ExnerReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
             ρ₀ = surface_density(ref)
             @test ρ₀ > 0
             @test ρ₀ isa FT
@@ -596,7 +596,7 @@ for arch in arches
         @testset "Function-valued θ₀" begin
             g = constants.gravitational_acceleration
             θ_func(z) = FT(300) * exp(FT(1e-4) * z / g)
-            ref = ExnerReferenceState(grid, constants; surface_pressure=100000, potential_temperature=θ_func)
+            ref = ExnerReferenceState(grid, constants; base_pressure=100000, potential_temperature=θ_func)
             @test ref isa ExnerReferenceState
 
             # Pressure should still decrease monotonically

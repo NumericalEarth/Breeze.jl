@@ -32,7 +32,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
 
     atol = test_tol(FT)
     microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=solver_tol(FT)), equilibrium=WarmPhaseEquilibrium())
@@ -113,7 +113,7 @@ end
     g = constants.gravitational_acceleration
     z = zero(FT)
 
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
     pᵣ = @allowscalar first(reference_state.pressure)
     ρᵣ = @allowscalar first(reference_state.density)
 
@@ -250,7 +250,7 @@ end
     z = zero(FT)
 
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
     pᵣ = @allowscalar first(reference_state.pressure)
 
     equilibrium = WarmPhaseEquilibrium()
@@ -276,11 +276,11 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
     atol = test_tol(FT)
 
     pᵣ = @allowscalar reference_state.pressure[1, 1, 1]
-    p₀ = reference_state.surface_pressure
+    p₀ = reference_state.base_pressure
     z = FT(0.5)
 
     # Case 0: Absolute zero potential temperature

@@ -24,7 +24,7 @@ grid = RectilinearGrid(CPU();
                        topology = (Bounded, Flat, Bounded))
 
 thermodynamic_constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermodynamic_constants, surface_pressure=1e5, potential_temperature=300)
+reference_state = ReferenceState(grid, thermodynamic_constants, base_pressure=1e5, potential_temperature=300)
 dynamics = AnelasticDynamics(reference_state)
 advection = WENO(order=9)
 model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection)

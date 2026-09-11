@@ -81,7 +81,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
         constants = ThermodynamicConstants(FT)
         reference_state = Breeze.ReferenceState(grid, constants;
-                                                surface_pressure = FT(101325),
+                                                base_pressure = FT(101325),
                                                 potential_temperature = FT(300))
         dynamics = Breeze.AnelasticDynamics(reference_state)
         model = Breeze.AtmosphereModel(grid; dynamics,

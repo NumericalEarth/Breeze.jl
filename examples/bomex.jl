@@ -58,7 +58,7 @@ grid = RectilinearGrid(GPU(); x, y, z,
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants,
-                                 surface_pressure = 101500,
+                                 base_pressure = 101500,
                                  potential_temperature = 299.1)
 
 dynamics = AnelasticDynamics(reference_state)
@@ -78,7 +78,7 @@ w′θ′ = 8e-3     # K m/s (sensible heat flux)
 w′qᵗ′ = 5.2e-5  # m/s (moisture flux)
 
 FT = eltype(grid)
-p₀ = reference_state.surface_pressure
+p₀ = reference_state.base_pressure
 θ₀ = reference_state.potential_temperature
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
