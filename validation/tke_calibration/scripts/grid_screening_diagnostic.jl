@@ -6,15 +6,21 @@
 # grids, and the EKI update scales with the *cube* of the observation length. Screening the early
 # iterations on one cheap grid and refining on all three would cut both.
 #
-# The necessary condition is that the cheap objective ranks the ensemble the way the full one does. If
-# it does not, screening actively selects the wrong members and the schedule is dead — and that can be
-# established with no new integration at all, because every iteration's forward map is stored in the
-# checkpoint and each grid's block is a slice of it.
+# The question it asks is whether the cheap objective carries the same information about the ensemble
+# as the full one — and it can be asked with no new integration at all, because every iteration's
+# forward map is stored in the checkpoint and each grid's block is a slice of it.
 #
-# WHAT THIS CANNOT DO. It compares objectives on a *fixed* ensemble. A real coarse-to-fine run would
-# take different update steps from the first iteration onward, so its trajectory would diverge from
-# this one. Agreement here does not prove a transferred optimum works — only a refit does. Disagreement
-# does disprove it. Treat a pass as a licence to spend GPU time on the refit, not as the result.
+# WHAT THIS IS NOT. EKI does not select the best member: it updates using the covariance between the
+# parameters and the forward maps across the whole ensemble. So rank agreement and the regret of the
+# member a cheap objective *would* pick are proxies for whether the cheap objective orders the ensemble
+# the same way, not the mechanism by which a coarse-to-fine run would actually move. It also compares
+# objectives on a *fixed* ensemble, and a real coarse-to-fine run would take different update steps
+# from the first iteration onward, so its trajectory would diverge from this one.
+#
+# Read the result accordingly, in both directions. High agreement is motivation to spend GPU time on a
+# refit, not a substitute for one. Low agreement on a single ensemble is a warning that deprioritizes a
+# subset; it does not disprove the schedule, because the update could still move sensibly on covariances
+# whose ordering these statistics do not capture.
 #
 #     julia --project scripts/grid_screening_diagnostic.jl results/final/constant/n400_seed1.jld2
 #
@@ -57,13 +63,38 @@ function objectives(G, s)
     return [mean(abs2, (view(G, rows, i) .- yₛ) ./ σₛ) / 2 for i in axes(G, 2)]
 end
 
+"""
+Ranks with ties averaged, which is what Spearman's ρ is defined on. `invperm(sortperm(x))` breaks ties
+by position instead, which would report a spurious ordering between members whose objectives are equal
+— and equal objectives are not exotic here: a degenerate parameter set can give several members the
+same profile.
+"""
+function tied_ranks(x)
+    order = sortperm(x)
+    r = zeros(Float64, length(x))
+    i = 1
+    while i <= length(x)
+        j = i
+        while j < length(x) && x[order[j + 1]] == x[order[i]]
+            j += 1
+        end
+        for k in i:j
+            r[order[k]] = (i + j) / 2   # the mean of the ranks the tied block occupies
+        end
+        i = j + 1
+    end
+    return r
+end
+
 """Spearman's ρ, on the members where both objectives are finite."""
 function rank_correlation(a, b)
     keep = findall(i -> isfinite(a[i]) && isfinite(b[i]), eachindex(a))
     length(keep) > 2 || return NaN
-    rank(x) = invperm(sortperm(x[keep]))
-    ra, rb = rank(a), rank(b)
-    return cor(Float64.(ra), Float64.(rb))
+    ra, rb = tied_ranks(a[keep]), tied_ranks(b[keep])
+    # With every value tied, a rank vector is constant and its correlation is 0/0. Report that as
+    # undefined rather than letting a NaN read as a computed correlation of zero.
+    (allequal(ra) || allequal(rb)) && return NaN
+    return cor(ra, rb)
 end
 
 history = saved["history"]
@@ -87,7 +118,14 @@ for i in wanted
     h = history[i]
     full = objectives(h.G, collect(eachindex(z_faces)))
     finite = findall(isfinite, full)
-    best_full = isempty(finite) ? 0 : finite[argmin(full[finite])]
+    # An early iteration from a broad prior can leave no member with a finite objective on every grid.
+    # Say so and move on: indexing the best of an empty set would crash, and reporting a comparison
+    # over no members would be worse.
+    if isempty(finite)
+        @printf "\n=== iteration %d: no member has a finite objective on all grids; nothing to compare\n" h.iteration
+        continue
+    end
+    best_full = finite[argmin(full[finite])]
     n_top = max(1, round(Int, quantile_fraction * length(finite)))
     top_full = Set(finite[partialsortperm(full[finite], 1:n_top)])
     @printf "\n=== iteration %d: %d of %d members finite, full Φ best %.4f, mean %.4f\n" h.iteration length(finite) length(full) full[best_full] mean(full[finite])
@@ -105,7 +143,11 @@ for i in wanted
     end
 end
 
-println("\nSpearman near 1 and a small regret mean the cheap objective selects what the full one would.")
-println("A low rank correlation kills the schedule outright. A high one licenses a refit — it does not")
-println("replace one: this compares objectives on a fixed ensemble, and a real coarse-to-fine run would")
-println("take different steps from the first update onward.")
+println("\nSpearman near 1 with a small regret means the cheap objective orders this ensemble the way the")
+println("full one does. That is motivation to try a refit on the subset, not evidence that one would")
+println("succeed: EKI updates on the covariance between parameters and forward maps over the whole")
+println("ensemble rather than by selecting a best member, and a real coarse-to-fine run would take")
+println("different steps from the first update onward, so its trajectory leaves this one immediately.")
+println("Low agreement on a single ensemble is a reason to deprioritize a subset, not to rule it out.")
+println("\nRanking can change as the ensemble contracts, which is when small differences between grids")
+println("start to matter, so a subset should be judged over several iterations rather than the first.")
