@@ -60,7 +60,7 @@ Construct a gray atmosphere radiative transfer model for the given grid.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
-- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
+- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361), a scalar or an `(Nx, Ny)` array of per-column values
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::GrayOptics,
@@ -146,7 +146,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     rrtmgp_αb₀ = ArrayType{FT}(undef, 1, Nc)
     rrtmgp_αw₀ = ArrayType{FT}(undef, 1, Nc)
 
-    rrtmgp_ℐ₀ .= convert(FT, solar_constant)  # Top-of-atmosphere solar flux
+    fill_columns!(rrtmgp_ℐ₀, solar_constant)  # Top-of-atmosphere solar flux, a scalar or per column
 
     surface_emissivity = constant_field_property(surface_emissivity, FT)
     direct_surface_albedo = constant_field_property(direct_surface_albedo, FT)
@@ -196,7 +196,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                shortwave_solver.bcs.sfc_alb_diffuse,
                                                surface_radiation, grid)
 
-    return RadiativeTransferModel(convert(FT, solar_constant),
+    return RadiativeTransferModel(materialize_solar_constant(solar_constant, FT),
                                   solar_position,
                                   surface_radiation,
                                   nothing,  # background_atmosphere = nothing for gray
@@ -249,6 +249,9 @@ function _set_latitude_from_grid!(rrtmgp_latitude, grid)
     return nothing
 end
 
+# A grid that is Flat in y has no latitude (see `_set_longitude_from_grid!`)
+_set_latitude_from_grid!(rrtmgp_latitude, ::AbstractGrid{<:Any, <:Any, <:Flat}) = (fill!(rrtmgp_latitude, 0); nothing)
+
 @kernel function _set_latitude_from_grid_kernel!(rrtmgp_latitude, grid)
     i, j = @index(Global, NTuple)
     φ = ynode(i, j, 1, grid, Center(), Center(), Center())
@@ -268,7 +271,20 @@ initialize_cos_zenith!(cos_zenith_array, ::DiurnalSolarPosition) = nothing
 # Fixed zenith: write the user-supplied value once. After this the array is
 # never touched, since `update_solar_zenith_angle!` is a no-op for this case.
 function initialize_cos_zenith!(cos_zenith_array, sp::FixedCosineZenith)
-    cos_zenith_array .= convert(eltype(cos_zenith_array), sp.cos_zenith)
+    fill_columns!(cos_zenith_array, sp.cos_zenith)
+    return nothing
+end
+
+# The solar constant as stored: a grid-eltype scalar, or the user's (Nx, Ny) array as is
+materialize_solar_constant(solar_constant::Number, FT) = convert(FT, solar_constant)
+materialize_solar_constant(solar_constant::AbstractArray, FT) = solar_constant
+
+# A per-column RRTMGP array (length Nc, column index i + (j - 1) Nx) from a scalar or an (Nx, Ny) array
+fill_columns!(column_array, value::Number) = (column_array .= convert(eltype(column_array), value); nothing)
+function fill_columns!(column_array, values::AbstractArray)
+    length(values) == length(column_array) ||
+        throw(ArgumentError("expected $(length(column_array)) per-column values (one per (i, j)), got $(length(values))"))
+    copyto!(column_array, convert.(eltype(column_array), vec(values)))
     return nothing
 end
 

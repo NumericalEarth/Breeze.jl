@@ -1,0 +1,3 @@
+results/
+data/*.jld2
+data/hus_*.nc

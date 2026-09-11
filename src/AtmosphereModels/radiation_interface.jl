@@ -44,8 +44,8 @@ radiation_flux_divergence(radiation) = radiation.flux_divergence
 @inline radiation_flux_divergence(i, j, k, grid, ::Nothing) = zero(eltype(grid))
 @inline radiation_flux_divergence(i, j, k, grid, flux_divergence) = @inbounds flux_divergence[i, j, k]
 
-struct RadiativeTransferModel{FT<:Number, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, S}
-    solar_constant :: FT # Scalar
+struct RadiativeTransferModel{FT<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, S}
+    solar_constant :: FT # a scalar, or an (Nx, Ny) array of per-column values
     solar_position :: SOP # AbstractSolarPosition: how to obtain cos(θ_z) on each update
     surface_radiation :: SP
     background_atmosphere :: BA # BackgroundAtmosphere or Nothing (for gray)

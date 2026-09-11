@@ -36,6 +36,8 @@ data/P3_LUT/*.dat*
 validation_output/
 *.jld2
 *.nc
+# except the GCM columns the TKE calibration needs above the LES (0.3 MB)
+!validation/tke_calibration/data/gcm_columns_CNRM-CM6-1_amip.nc
 *.gif
 *.pdf
 *.png

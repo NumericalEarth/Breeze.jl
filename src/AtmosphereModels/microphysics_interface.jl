@@ -462,6 +462,10 @@ volume. It defaults to all prognostic fields; schemes with prognostic number con
 condensate_field_names(microphysics) = prognostic_field_names(microphysics)
 condensate_field_names(::Nothing) = tuple()
 
+# Precipitating water is part of the thermodynamic moisture bundle, but does not
+# equilibrate as cloud condensate during a saturated parcel displacement.
+@inline precipitating_mass_fraction(i, j, k, microphysics, microphysical_fields) = 0
+
 
 """
 $(TYPEDSIGNATURES)

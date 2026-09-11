@@ -150,7 +150,7 @@ end
     Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
     ρ_field = total_density(dynamics)  # total ρ: water/tracer mass-fraction advection & diffusion
-    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, Uᵗ, c)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, c) # for PrescribedDynamics

@@ -1,4 +1,6 @@
 [deps]
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 AtmosphericProfilesLibrary = "86bc3604-9858-485a-bdbe-831ec50de11d"
 Breeze = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
