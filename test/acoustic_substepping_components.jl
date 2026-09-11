@@ -277,7 +277,7 @@ for arch in arches
         @testset "1 km grid, Δt=12" begin
             grid = RectilinearGrid(arch; size=(100, 6, 10), halo=(5, 5, 5),
                                    x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
-            # Δx = 1000 m, ℂᵃᶜ ≈ 347 m/s, acoustic_cfl = 0.5 (ERF/WRF target)
+            # Δx = 1000 m, cᵃᶜ ≈ 347 m/s, acoustic_cfl = 0.5 (ERF/WRF target)
             # N = ceil(12 * 347 / (0.5 * 1000)) = ceil(8.33) = 9
             N = compute_acoustic_substeps(grid, 12, constants, ν)
             @test N isa Int

@@ -11,7 +11,7 @@
 #####
 ##### Ventilation Sc correction (H4)
 #####
-##### The ventilation-enhanced table stores 0.44 × ∫ C(D)√(V×D) N'(D) dD
+##### The ventilation-enhanced table stores 0.44 × ∫ C(D)√(𝕎×D) N'(D) dD
 ##### with dimensions [m² s^(-1/2)]. At runtime, multiplying by
 ##### Sc^(1/3) × √ρ_fac / √ν restores the correct dimensions [m].
 ##### This helper centralizes the correction so that all call sites (the vapor
@@ -76,8 +76,8 @@ struct P3IceLookups{FT, P}
     ρ_correction :: FT
     "Constant ventilation term 0.65 ∫ C(D) N'(D) dD [m]"
     ventilation :: FT
-    "Enhanced ventilation term 0.44 ∫ C(D) √(V D) N'(D) dD [m² s^(-1/2)], before the Sc correction"
-    ventilation_enhanced :: FT
+    "Enhanced ventilation term 0.44 ∫ C(D) √(𝕎 D) N'(D) dD [m² s^(-1/2)], before the Sc correction"
+    enhanced_ventilation :: FT
 end
 
 """
@@ -98,7 +98,7 @@ Build the [`P3IceLookups`](@ref) of the ice population `(qⁱ, qʷⁱ, nⁱ, F�
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
     return P3IceLookups{FT, typeof(prep)}(m_mean, Fˡ, prep, ρ_correction,
                                           evaluate_at(deposition.ventilation, prep),
-                                          evaluate_at(deposition.ventilation_enhanced, prep))
+                                          evaluate_at(deposition.enhanced_ventilation, prep))
 end
 
 # Standalone entry point: diagnose the liquid fraction, then bracket.
@@ -108,8 +108,8 @@ end
 
 # C(D) fᵛ(D) from its two tabulated terms. The Sc correction is the caller's: the vapor
 # relaxation coefficient uses the thermodynamic air density, wet growth the dynamics density.
-@inline ventilation_from_terms(ventilation, ventilation_enhanced, ν, Dᵛ, ρ_correction, floors) =
-    ventilation + ventilation_sc_correction(ν, Dᵛ, ρ_correction, floors) * ventilation_enhanced
+@inline ventilation_from_terms(ventilation, enhanced_ventilation, ν, Dᵛ, ρ_correction, floors) =
+    ventilation + ventilation_sc_correction(ν, Dᵛ, ρ_correction, floors) * enhanced_ventilation
 
 """
 $(TYPEDSIGNATURES)

@@ -147,11 +147,11 @@ end
 Δx, Δz = Lx / Nx, Lz / Nz
 Rᵈ = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
-ℂᵃᶜ = sqrt(cᵖᵈ / (cᵖᵈ - Rᵈ) * Rᵈ * θ₀)
+cᵃᶜ = sqrt(cᵖᵈ / (cᵖᵈ - Rᵈ) * Rᵈ * θ₀)
 
 cfl = 0.5
 Δt_advective    = cfl * min(Δx, Δz) / U
-Δt_compressible = cfl * min(Δx, Δz) / (ℂᵃᶜ + U)
+Δt_compressible = cfl * min(Δx, Δz) / (cᵃᶜ + U)
 
 time_steps = Dict(
     :anelastic    => Δt_advective,

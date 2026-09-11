@@ -375,13 +375,13 @@ function AtmosphereModels.materialize_microphysical_fields(bμp::WPNE2M, grid, b
     # Cloud liquid terminal velocity (mass-weighted)
     wᶜˡ = ZFaceField(grid; boundary_conditions=w_bcs)
     # Cloud liquid terminal velocity (number-weighted)
-    wᶜˡₙ = ZFaceField(grid; boundary_conditions=w_bcs)
+    wⁿᶜˡ = ZFaceField(grid; boundary_conditions=w_bcs)
     # Rain terminal velocity (mass-weighted)
     wʳ = ZFaceField(grid; boundary_conditions=w_bcs)
     # Rain terminal velocity (number-weighted)
-    wʳₙ = ZFaceField(grid; boundary_conditions=w_bcs)
+    wⁿʳ = ZFaceField(grid; boundary_conditions=w_bcs)
 
-    return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wᶜˡₙ, wʳ, wʳₙ)
+    return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ)
 end
 
 #####
@@ -459,27 +459,27 @@ end
     𝕎_cl = cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
                                    qᶜˡ⁺, ρ, Nᶜˡ)
 
-    wᶜˡₙ = -𝕎_cl[1]  # number-weighted, negative = downward
+    wⁿᶜˡ = -𝕎_cl[1]  # number-weighted, negative = downward
     wᶜˡ = -𝕎_cl[2]   # mass-weighted
 
     # Rain terminal velocities: (number-weighted, mass-weighted)
     𝕎  = CM2.rain_terminal_velocity(sb, categories.rain_fall_velocity, qʳ⁺, ρ, Nʳ)
 
-    wʳₙ = -𝕎[1]  # number-weighted
+    wⁿʳ = -𝕎[1]  # number-weighted
     wʳ = -𝕎[2]   # mass-weighted
 
     # Apply bottom boundary condition
     bc = bμp.precipitation_boundary_condition
     wᶜˡ₀  = bottom_terminal_velocity(bc, wᶜˡ)
-    wᶜˡₙ₀ = bottom_terminal_velocity(bc, wᶜˡₙ)
+    wⁿᶜˡ₀ = bottom_terminal_velocity(bc, wⁿᶜˡ)
     wʳ₀   = bottom_terminal_velocity(bc, wʳ)
-    wʳₙ₀  = bottom_terminal_velocity(bc, wʳₙ)
+    wⁿʳ₀  = bottom_terminal_velocity(bc, wⁿʳ)
 
     @inbounds begin
         μ.wᶜˡ[i, j, k]  = ifelse(k == 1, wᶜˡ₀,  wᶜˡ)
-        μ.wᶜˡₙ[i, j, k] = ifelse(k == 1, wᶜˡₙ₀, wᶜˡₙ)
+        μ.wⁿᶜˡ[i, j, k] = ifelse(k == 1, wⁿᶜˡ₀, wⁿᶜˡ)
         μ.wʳ[i, j, k]   = ifelse(k == 1, wʳ₀,   wʳ)
-        μ.wʳₙ[i, j, k]  = ifelse(k == 1, wʳₙ₀,  wʳₙ)
+        μ.wⁿʳ[i, j, k]  = ifelse(k == 1, wⁿʳ₀,  wⁿʳ)
     end
 
     return nothing
@@ -529,8 +529,8 @@ end
 
 # Cloud liquid number: use number-weighted terminal velocity
 @inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnᶜˡ})
-    wᶜˡₙ = μ.wᶜˡₙ
-    return (; u = ZeroField(), v = ZeroField(), w = wᶜˡₙ)
+    wⁿᶜˡ = μ.wⁿᶜˡ
+    return (; u = ZeroField(), v = ZeroField(), w = wⁿᶜˡ)
 end
 
 # Rain mass: use mass-weighted terminal velocity
@@ -541,8 +541,8 @@ end
 
 # Rain number: use number-weighted terminal velocity
 @inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnʳ})
-    wʳₙ = μ.wʳₙ
-    return (; u = ZeroField(), v = ZeroField(), w = wʳₙ)
+    wⁿʳ = μ.wⁿʳ
+    return (; u = ZeroField(), v = ZeroField(), w = wⁿʳ)
 end
 
 #####

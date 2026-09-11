@@ -285,7 +285,7 @@ using Oceananigans.TimeSteppers: update_state!
 
         # `div_ρUc` reads these as advecting velocities via `Az_qᶜᶜᶠ`, so they must be
         # located at (Center, Center, Face) like the resolved `w`.
-        velocity_names = (:wᶜˡ, :wᶜˡₙ, :wʳ, :wʳₙ, :wⁱ, :wⁱₙ)
+        velocity_names = (:wᶜˡ, :wⁿᶜˡ, :wʳ, :wⁿʳ, :wⁱ, :wⁿⁱ)
         for name in velocity_names
             @test location(μ[name]) === (Center, Center, Face)
             @test location(μ[name]) === location(model.velocities.w)

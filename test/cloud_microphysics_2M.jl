@@ -212,14 +212,14 @@ end
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, nᶜˡ=0, qʳ=0.001, nʳ=1e5)
 
     wʳ_bottom = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
-    wʳₙ_bottom = @allowscalar model.microphysical_fields.wʳₙ[1, 1, 1]
+    wⁿʳ_bottom = @allowscalar model.microphysical_fields.wⁿʳ[1, 1, 1]
     wᶜˡ_bottom = @allowscalar model.microphysical_fields.wᶜˡ[1, 1, 1]
-    wᶜˡₙ_bottom = @allowscalar model.microphysical_fields.wᶜˡₙ[1, 1, 1]
+    wⁿᶜˡ_bottom = @allowscalar model.microphysical_fields.wⁿᶜˡ[1, 1, 1]
 
     @test wʳ_bottom == 0
-    @test wʳₙ_bottom == 0
+    @test wⁿʳ_bottom == 0
     @test wᶜˡ_bottom == 0
-    @test wᶜˡₙ_bottom == 0
+    @test wⁿᶜˡ_bottom == 0
 end
 
 @testset "TwoMomentCloudMicrophysics show methods [$FT]" for FT in test_float_types()

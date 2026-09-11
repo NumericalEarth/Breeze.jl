@@ -384,8 +384,8 @@ end
     # The fall speed is read at the shared Table-1 bracket, which is indexed with the
     # total ice mass.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, lookups)
-    ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport, μᶜˡ, λᶜˡ)
+    𝕎ⁱ = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, lookups)
+    ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, 𝕎ⁱ, ρ, constants, transport, μᶜˡ, λᶜˡ)
 
     # =========================================================================
     # Wet growth capacity and collection rerouting

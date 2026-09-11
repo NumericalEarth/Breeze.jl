@@ -93,6 +93,9 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathbb{W}^{ci}``                 | `𝕎ᶜⁱ`  |                                     | Terminal velocity of cloud ice (scalar, positive downward)                     |
 | ``\mathbb{W}^r``                    | `𝕎ʳ`   |                                     | Terminal velocity of rain (scalar, positive downward)                          |
 | ``\mathbb{W}^{sn}``                 | `𝕎ˢⁿ`  |                                     | Terminal velocity of snow (scalar, positive downward)                          |
+| ``\mathbb{W}^i``                    | `𝕎ⁱ`   |                                     | Terminal velocity of ice (scalar, positive downward); P3 labels dry ice ``i``  |
+| ``\mathbb{W}^{nx}``                 | `𝕎ⁿˣ`  |                                     | Number-weighted terminal velocity of species ``x`` (`𝕎ⁿᶜˡ`, `𝕎ⁿʳ`, `𝕎ⁿⁱ`); a bare species label is the mass-weighted mean, and the weighting marker is a superscript preceding the species |
+| ``w^x``                             | `wˣ`   |                                     | Signed vertical advection velocity of species ``x``, ``wˣ = -𝕎ˣ`` (`wᶜˡ`, `wⁿᶜˡ`, `wʳ`, `wⁿʳ`, `wⁱ`, `wⁿⁱ`) |
 | ``qᵛ⁺``                             | `qᵛ⁺`  |                                     | Saturation specific humidity over a surface                                    |
 | ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation specific humidity over a planar liquid surface                      |
 | ``qᵛ⁺ⁱ``                            | `qᵛ⁺ⁱ` |                                     | Saturation specific humidity over a planar ice surface                         |
@@ -103,7 +106,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ξ``                               | `ξ`    | `psychrometric_correction`           | Psychrometric correction, ``ξ = 1 + ℒ² qᵛ⁺ / (cᵖ Rᵛ T²)``; ``ξˡ`` and ``ξⁱ`` name the liquid and ice phase |
 | ``δqˡ``, ``δqⁱ``                    | `δqˡ`, `δqⁱ` |                               | Saturation-adjustment increments, ``δq = (qᵛ - qᵛ⁺) / ξ`` for the liquid and ice phase |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
-| ``\mathbb{C}^{ac}``                 | `ℂᵃᶜ`  |                                     | Acoustic sound speed, ``ℂᵃᶜ = \sqrt{γ Rᵈ T}``                                  |
+| ``c^{ac}``                          | `cᵃᶜ`  |                                     | Acoustic sound speed, ``cᵃᶜ = \sqrt{γ Rᵈ T}``                                  |
+| ``\mathbb{C}_{X,i}``               | `ℂˣᵢ`  | descriptive parameter property      | The ``i``-th calibratable empirical coefficient in relation ``X``; source uses modifier letters because Unicode lacks general subscript letters; state, physical constants, case inputs, switches, and numerical safeguards do not receive ``\mathbb{C}`` |
 | ``\mathcal{R}``                     | `ℛ`    | `TC.molar_gas_constant`             | Universal (molar) gas constant                                                 |
 | ``Tᵗʳ``                             | `Tᵗʳ`  | `TC.triple_point_temperature`       | Temperature at the vapor-liquid-ice triple point                               |
 | ``pᵗʳ``                             | `pᵗʳ`  | `TC.triple_point_pressure`          | Pressure at the vapor-liquid-ice triple point                                  |
