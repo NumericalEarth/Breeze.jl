@@ -367,41 +367,41 @@ follow its prognostic pressure and density. The `T` entry comes from
 this point, so this reads the same thermodynamic pressure the rest of the model does: prognostic
 under `CompressibleDynamics`, the hydrostatic reference profile under `AnelasticDynamics`.
 """
-struct BoundaryVirtualPotentialTemperature{M, N, FT, TC}
+struct NearWallVirtualPotentialTemperature{M, N, FT, TC}
     microphysics :: M
     specific_moisture_name :: N
     standard_pressure :: FT
     thermodynamic_constants :: TC
 end
 
-Adapt.adapt_structure(to, θᵥ::BoundaryVirtualPotentialTemperature) =
-    BoundaryVirtualPotentialTemperature(Adapt.adapt(to, θᵥ.microphysics),
+Adapt.adapt_structure(to, θᵥ::NearWallVirtualPotentialTemperature) =
+    NearWallVirtualPotentialTemperature(Adapt.adapt(to, θᵥ.microphysics),
                                         Adapt.adapt(to, θᵥ.specific_moisture_name),
                                         Adapt.adapt(to, θᵥ.standard_pressure),
                                         Adapt.adapt(to, θᵥ.thermodynamic_constants))
 
-@inline function boundary_specific_moisture(i, j, k, fields, ::Val{name}) where name
+@inline function near_wall_specific_moisture(i, j, k, fields, ::Val{name}) where name
     moisture = getproperty(fields, name)
     return @inbounds moisture[i, j, k]
 end
 
-@inline function (θᵥ::BoundaryVirtualPotentialTemperature)(i, j, k, grid, fields)
+@inline function (θᵥ::NearWallVirtualPotentialTemperature)(i, j, k, grid, fields)
     @inbounds begin
         p = fields.p[i, j, k]
         ρ = fields.ρ[i, j, k]
         T = fields.T[i, j, k]
     end
-    qᵛᵉ = boundary_specific_moisture(i, j, k, fields, θᵥ.specific_moisture_name)
+    qᵛᵉ = near_wall_specific_moisture(i, j, k, fields, θᵥ.specific_moisture_name)
     q = grid_moisture_fractions(i, j, k, grid, θᵥ.microphysics, ρ, qᵛᵉ, fields)
     return virtual_potential_temperature(T, p, θᵥ.standard_pressure, q,
                                          θᵥ.thermodynamic_constants)
 end
 
-@inline boundary_virtual_potential_temperature(i, j, k, grid,
-                                                θᵥ::BoundaryVirtualPotentialTemperature,
+@inline near_wall_virtual_potential_temperature(i, j, k, grid,
+                                                θᵥ::NearWallVirtualPotentialTemperature,
                                                 fields) = θᵥ(i, j, k, grid, fields)
 
-@inline boundary_virtual_potential_temperature(i, j, k, grid, θᵥ, fields) =
+@inline near_wall_virtual_potential_temperature(i, j, k, grid, θᵥ, fields) =
     @inbounds θᵥ[i, j, k]
 
 struct PolynomialCoefficient{FT, C, SF, S, θᵛ, SP, TC, TT}
@@ -457,7 +457,7 @@ will be automatically selected based on the boundary condition type:
   an ocean). The surface specific humidity entering the stability correction is
   ``qˢ = β qᵛ⁺(Tˢ) + (1 - β) qᵛ``, with ``qᵛ`` the specific humidity of the air in the first cell,
   so that ``β = 0`` describes a dry surface whose virtual potential temperature carries no moisture
-  contribution of its own. See [`surface_virtual_potential_temperature`](@ref).
+  contribution of its own. See [`wall_virtual_potential_temperature`](@ref).
 
 The measurement height is automatically determined from the grid as half the first-cell
 thickness, the height of its center above the local surface.
@@ -648,7 +648,7 @@ own to the surface buoyancy. The dry Exner factor is required because the stabil
 compares two virtual *potential* temperatures, not virtual temperature at the surface against
 potential temperature aloft.
 """
-@inline function surface_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, β = 1, qᵛ = 0)
+@inline function wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, β = 1, qᵛ = 0)
     qᵛ⁺ = saturation_total_specific_moisture(Tˢ, pˢ, constants, surface)
     qˢ = β * qᵛ⁺ + (1 - β) * qᵛ
     # The same θᵥ the air-side of the stability difference goes through, with no condensate at the
@@ -679,7 +679,7 @@ being evaluated, so it follows both terrain and the evolving state.
 - `Δθᵥ_source`: Field of the filtered surface-layer virtual potential temperature difference, or
   `nothing` to form it from the instantaneous state
 - `fields`: The surface-layer field tuple the instantaneous diagnostic reads. Required, because a
-  materialized `coef.virtual_potential_temperature` is a `BoundaryVirtualPotentialTemperature` that
+  materialized `coef.virtual_potential_temperature` is a `NearWallVirtualPotentialTemperature` that
   has no fields of its own; pass `nothing` only when `Δθᵥ_source` or
   `coef.virtual_potential_temperature` is an ordinary field, which is then read directly.
 - `pˢ`: Air pressure (Pa) at the surface below `(i, j)`
@@ -741,7 +741,7 @@ end
     β = log(ℓʳ / ℓʳʰ)
 
     Δθᵥ = surface_layer_Δθᵥ(i, j, k, grid, coef, Tˢ, Δθᵥ_source, fields, pˢ)
-    θᵥˢ = surface_virtual_potential_temperature(i, j, k, coef, Tˢ, fields, pˢ)
+    θᵥˢ = wall_virtual_potential_temperature(i, j, k, coef, Tˢ, fields, pˢ)
     g = coef.thermodynamic_constants.gravitational_acceleration
     Riᴮ = stability_sign(side) * bulk_richardson_number(h, θᵥˢ + Δθᵥ, θᵥˢ, U, coef.minimum_wind_speed, g)
 
@@ -756,9 +756,9 @@ temperature `Tˢ`, the air pressure `pˢ` at the wall, and the coefficient's sta
 constants, surface phase and moisture availability, together with the specific humidity of the air
 in the near-wall cell.
 """
-@inline function surface_virtual_potential_temperature(i, j, k, coef::PolynomialCoefficient, Tˢ, fields, pˢ)
+@inline function wall_virtual_potential_temperature(i, j, k, coef::PolynomialCoefficient, Tˢ, fields, pˢ)
     qᵛ = @inbounds fields.qᵛ[i, j, k]
-    return surface_virtual_potential_temperature(Tˢ, pˢ, coef.standard_pressure,
+    return wall_virtual_potential_temperature(Tˢ, pˢ, coef.standard_pressure,
                                                  coef.thermodynamic_constants, coef.surface,
                                                  coef.moisture_availability, qᵛ)
 end
@@ -772,8 +772,8 @@ stability input of the bulk coefficient, and the result that
 [`FilteredSurfaceVelocities`](@ref) filters on the bottom wall.
 """
 @inline function surface_layer_Δθᵥ(i, j, k, grid, coef::PolynomialCoefficient, Tˢ, fields, pˢ)
-    θᵥ = boundary_virtual_potential_temperature(i, j, k, grid, coef.virtual_potential_temperature, fields)
-    return θᵥ - surface_virtual_potential_temperature(i, j, k, coef, Tˢ, fields, pˢ)
+    θᵥ = near_wall_virtual_potential_temperature(i, j, k, grid, coef.virtual_potential_temperature, fields)
+    return θᵥ - wall_virtual_potential_temperature(i, j, k, coef, Tˢ, fields, pˢ)
 end
 
 # Dispatch on whether a filtered difference is supplied

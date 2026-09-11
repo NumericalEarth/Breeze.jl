@@ -306,7 +306,7 @@ function materialize_coefficient(coef::PolynomialCoefficient, grid, dynamics, mi
                                  constants, transfer_type)
     pˢᵗ = standard_pressure(dynamics)
     moisture_name = Val(moisture_specific_name(microphysics))
-    θᵥ = BoundaryVirtualPotentialTemperature(microphysics, moisture_name, pˢᵗ, constants)
+    θᵥ = NearWallVirtualPotentialTemperature(microphysics, moisture_name, pˢᵗ, constants)
 
     return PolynomialCoefficient(coef.polynomial,
                                  coef.roughness_length,

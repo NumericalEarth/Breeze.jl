@@ -13,7 +13,7 @@ using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  integrated_stability_momentum,
                                  integrated_stability_scalar,
                                  stability_correction_factor,
-                                 surface_virtual_potential_temperature
+                                 wall_virtual_potential_temperature
 using Breeze.AtmosphereModels.Diagnostics: saturation_total_specific_moisture
 using Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition, Bottom
@@ -275,7 +275,7 @@ using GPUArraysCore: @allowscalar
         cᵖᵈ = constants.dry_air.heat_capacity
         Πᵈˢ = (pˢ / pˢᵗ)^(Rᵈ / cᵖᵈ)
         θᵥˢ_expected = Tˢ / Πᵈˢ * (1 + (Rᵛ / Rᵈ - 1) * qᵛ⁺)
-        θᵥˢ = surface_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface)
+        θᵥˢ = wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface)
         @test θᵥˢ ≈ θᵥˢ_expected
         @test θᵥˢ > Tˢ * FT(1.05)
 
@@ -380,11 +380,11 @@ using GPUArraysCore: @allowscalar
         surface = PlanarLiquidSurface()
         δᵛᵈ = vapor_gas_constant(constants) / dry_air_gas_constant(constants) - 1
 
-        θᵥˢ_saturated = surface_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, 1, qᵛ)
-        θᵥˢ_dry = surface_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, 0, qᵛ)
-        θᵥˢ_half = surface_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, FT(0.5), qᵛ)
+        θᵥˢ_saturated = wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, 1, qᵛ)
+        θᵥˢ_dry = wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, 0, qᵛ)
+        θᵥˢ_half = wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, FT(0.5), qᵛ)
 
-        @test θᵥˢ_saturated == surface_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface)
+        @test θᵥˢ_saturated == wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface)
         @test θᵥˢ_saturated > θᵥˢ_dry > Tˢ
         # pˢ = pˢᵗ here, so the Exner factor is unity and θᵥˢ reduces to Tˢ (1 + δᵛᵈ qᵛ)
         @test θᵥˢ_dry ≈ Tˢ * (1 + δᵛᵈ * qᵛ)
@@ -500,7 +500,7 @@ using GPUArraysCore: @allowscalar
         fields = (; qᵛ=qᵛ_field, p=p_field, ρ=ρ_field)
         pˢ = 1e5
 
-        θᵥˢ = surface_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, 0.5, 1e-3)
+        θᵥˢ = wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, 0.5, 1e-3)
         Δθᵥ = 305.0 - θᵥˢ
         @test Breeze.BoundaryConditions.surface_layer_Δθᵥ(1, 1, 1, grid, coef, Tˢ, fields, pˢ) ≈ Δθᵥ
 
@@ -515,7 +515,7 @@ using GPUArraysCore: @allowscalar
         @test fv.Δθᵥ[1, 1, 1] ≈ Δθᵥ atol=1e-10
     end
 
-    # `materialize_coefficient` always installs a `BoundaryVirtualPotentialTemperature`, which
+    # `materialize_coefficient` always installs a `NearWallVirtualPotentialTemperature`, which
     # carries no fields of its own and evaluates itself from the surface-layer tuple. The forms that
     # cannot receive that tuple used to exist and would dereference `nothing.p`; they are gone, and
     # the live diagnostic is exercised here against the field it is supposed to reproduce.
@@ -533,7 +533,7 @@ using GPUArraysCore: @allowscalar
         coef = Breeze.BoundaryConditions.materialize_coefficient(bare, grid, model.dynamics,
                                                                  nothing, constants, Val(:momentum))
         @test coef.virtual_potential_temperature isa
-              Breeze.BoundaryConditions.BoundaryVirtualPotentialTemperature
+              Breeze.BoundaryConditions.NearWallVirtualPotentialTemperature
 
         fields = Breeze.BoundaryConditions.surface_layer_state(model)
         U, Tˢ, pˢ = FT(5), FT(292), FT(101325)
@@ -546,7 +546,7 @@ using GPUArraysCore: @allowscalar
         # captured `KernelFunctionOperation`.
         θᵥ_operation = Field(VirtualPotentialTemperature(model))
         compute!(θᵥ_operation)
-        θᵥ_boundary = @allowscalar Breeze.BoundaryConditions.boundary_virtual_potential_temperature(
+        θᵥ_boundary = @allowscalar Breeze.BoundaryConditions.near_wall_virtual_potential_temperature(
             1, 1, 1, grid, coef.virtual_potential_temperature, fields)
         @test θᵥ_boundary ≈ @allowscalar(θᵥ_operation[1, 1, 1]) rtol=1e-6
 
