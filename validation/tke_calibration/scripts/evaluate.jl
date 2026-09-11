@@ -3,7 +3,7 @@
 #
 #     julia -t auto --project scripts/evaluate.jl [checkpoint=results/eki.jld2] [resolutions=20,50,100,hindcast] [arch=cpu|gpu]
 #                                                 [top=25000|les] [radiation=interactive|prescribed]
-#                                                 [dt=] [radiation_interval=] [reserved=6,9,15,18] [reveal=true]
+#                                                 [dt=] [radiation_interval=] [validation=3,12,21] [reserved=6,9,15,18] [reveal=true]
 #                                                 [output=results/evaluation.jld2]
 #
 # `resolutions` is a comma-separated list of uniform spacings in m and/or `hindcast`. The column top, the
@@ -27,7 +27,7 @@ calibrated_mean = named(space, vec(mean(ϕ_last, dims = 2)))
 calibrated_best = named(space, ϕ_last[:, best])
 training = saved["members"]
 
-# The adopted optimum is `selected_mean`: the ensemble mean whose objective, evaluated directly
+# `selected_mean` is the ensemble mean whose objective, evaluated directly
 # rather than inferred from the members, was lowest over the whole run. It is not in general the
 # last iteration's mean — EKI's objective is not monotone in the iteration, and under `optimize`
 # the run deliberately continues past the tempering budget. Score it whenever the checkpoint has it.
@@ -35,11 +35,11 @@ selected = get(saved, "selected_mean", nothing)
 if isnothing(selected)
     labels = ["default (Nakanishi–Niino)", "EKI final mean", "EKI best member"]
     sets = (default_parameters(space), calibrated_mean, calibrated_best)
-    @warn "The checkpoint records no directly evaluated mean; scoring the final iteration's mean instead, which is not the adopted optimum"
+    @warn "The checkpoint records no directly evaluated mean; scoring the final iteration's mean instead, which is not the best evaluated candidate and may not be near it"
 else
-    labels = ["default (Nakanishi–Niino)", "selected mean (adopted)", "EKI final mean", "EKI best member"]
+    labels = ["default (Nakanishi–Niino)", "best evaluated mean", "EKI final mean", "EKI best member"]
     sets = (default_parameters(space), named(space, vec(selected.parameters)), calibrated_mean, calibrated_best)
-    @info @sprintf("Adopted optimum from iteration %d, directly evaluated objective %.4f", selected.iteration, selected.objective)
+    @info @sprintf("Best directly evaluated ensemble mean is from iteration %d, objective %.4f — a candidate, not an established optimum until the plateau is corroborated by independent seeds", selected.iteration, selected.objective)
 end
 
 println("parameters ($space):")
@@ -56,10 +56,19 @@ istrain = [(m.site, m.month) in training for m in members]
 # of every such decision so that one number at the end is an honest out-of-sample test. They are
 # integrated and saved either way (no extra model runs); only the reporting is gated.
 reserved_sites = parse.(Int, split(get(options, "reserved", "6,9,15,18"), ','))
+validation_sites = parse.(Int, split(get(options, "validation", "3,12,21"), ','))
 reveal = get(options, "reveal", "false") == "true"
+
+# The validation set must be the *same* sites for every calibration being compared, so it is named
+# explicitly rather than derived as "everything not trained on". Derived that way it would shrink and
+# shift as the training split changes — a design comparison whose yardstick moves with the design.
 isreserved = [m.site in reserved_sites for m in members]
-isvalidation = .!istrain .& .!isreserved
-any(istrain .& isreserved) && error("Sites $(reserved_sites) are reserved but appear in the training set")
+isvalidation = [m.site in validation_sites for m in members]
+isdiagnostic = .!istrain .& .!isreserved .& .!isvalidation   # neither trained on nor part of either judgement
+isempty(intersect(validation_sites, reserved_sites)) || error("Validation and reserved sites overlap: $(intersect(validation_sites, reserved_sites))")
+trained_sites = unique(s for (s, _) in training)
+bad = intersect(trained_sites, union(validation_sites, reserved_sites))
+isempty(bad) || error("Sites $bad are trained on but are also held out for judgement")
 params = hcat([collect(Float64, p) for p in sets]...)
 
 variables = Tuple(Symbol.(split(get(options, "variables", join(String.(default_variables), ',')), ',')))
@@ -97,8 +106,12 @@ for resolution in resolutions
     println("\n===== resolution $resolution")
     println("training members ($(count(istrain))):")
     rmse_table(scores[:, istrain], labels)
-    println("validation members ($(count(isvalidation)), sites $(join(sort(unique(m.site for m in members[isvalidation])), ", ")) — these choose the design):")
+    println("validation members ($(count(isvalidation)), sites $(join(validation_sites, ", ")) — the same sites for every calibration; these choose the design):")
     rmse_table(scores[:, isvalidation], labels)
+    if any(isdiagnostic)
+        println("further non-training members ($(count(isdiagnostic))) — diagnostic only, not a basis for selection:")
+        rmse_table(scores[:, isdiagnostic], labels)
+    end
     if reveal
         println("RESERVED TEST members ($(count(isreserved)), sites $(join(reserved_sites, ", "))) — reveal only after the coefficients are frozen:")
         rmse_table(scores[:, isreserved], labels)
@@ -113,6 +126,6 @@ end
 les = (zc = members[1].z, θˡ = hcat([m.targets.θˡ for m in members]...), qᵗ = hcat([m.targets.qᵗ for m in members]...),
        qˡ = hcat([m.targets.qˡ for m in members]...), cloud_fraction = [m.targets.cloud_fraction for m in members])
 isempty(dirname(output)) || mkpath(dirname(output))
-jldsave(output; results, labels, members = [(m.site, m.month) for m in members], istrain, isvalidation, isreserved, reserved_sites, params, Δt, radiation_interval,
+jldsave(output; results, labels, members = [(m.site, m.month) for m in members], istrain, isvalidation, isreserved, isdiagnostic, reserved_sites, validation_sites, params, Δt, radiation_interval,
                 protocol_version = PROTOCOL_VERSION, checkpoint = path,
                 parameter_names = collect(String.(parameter_names(space))), les)
