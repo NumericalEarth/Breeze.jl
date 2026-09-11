@@ -42,6 +42,18 @@ architecture = get(options, "arch", "cpu") == "gpu" ? GPU() : CPU()
 # Localization corrects the sampling error of a small ensemble's covariance. It is worth turning off
 # to see what a large ensemble does without it, since the correction itself biases the update.
 localization_method = get(options, "localization", "secnice") == "none" ? NoLocalization() : SECNice()
+# The seed draws the initial ensemble from the prior. EKI is not a global optimizer and its terminal
+# ensemble is not a posterior sample, so repeating a calibration under independent seeds is the only
+# way to tell a robust coefficient from one the initial draw chose. The seed goes in the filename.
+seed = parse(Int, get(options, "seed", "1"))
+rng = MersenneTwister(seed)
+# The discretization is part of the calibration, not a performance detail: at Δt = 60 s the scored
+# observation vector still sits 1.20 σ from Δt = 15 s against a 4.68 σ misfit, so coefficients fit at
+# 60 s absorb a quarter of what they are meant to explain (`discretization_sensitivity.jl`). The
+# radiation interval, by contrast, costs 0.085 σ between 10 and 30 min while radiation is ~80 % of
+# the step, so it is where the time for a finer step comes from.
+Δt = parse(Float64, get(options, "dt", "60"))
+radiation_interval = parse(Float64, get(options, "radiation_interval", "600"))
 # Training members: by default two months at eight sites along the transect — Peru and California
 # stratocumulus, the deep tropics, and the trades — leaving the other months and sites for evaluation.
 #
@@ -60,7 +72,7 @@ isempty(missing_members) || error("The library has no member for $missing_member
 # The training split is part of what identifies a calibration, so it belongs in the default filename
 tag = (space isa RiDependentSpace ? "ri" : "constant") * "_" * join(resolutions, "_") *
       (isnothing(top) ? "" : "_top$(round(Int, top))") * (radiation == :interactive ? "_rrtmgp" : "") *
-      "_n$(length(training))"
+      "_n$(length(training))_dt$(round(Int, Δt))_r$(round(Int, radiation_interval / 60))" * (seed == 1 ? "" : "_seed$seed")
 output = get(options, "output", joinpath(@__DIR__, "..", "results", "eki_$tag.jld2"))
 
 @info "Loading $(length(training)) training members"
@@ -79,7 +91,8 @@ if isnothing(resume)
 else
     @info "Resuming EKI from $resume toward pseudo time $target_pseudotime ($space, grids of $cells cells)"
 end
-ekp, prior, ϕ, history = run_eki(problem; space, N_ens, target_pseudotime, max_iterations, output, resume, radiation, architecture, localization_method)
+ekp, prior, ϕ, history = run_eki(problem; space, N_ens, target_pseudotime, max_iterations, output, resume, radiation,
+                                 architecture, localization_method, rng, Δt, radiation_interval)
 
 println("\nfinal ensemble (constrained parameters):")
 for (k, name) in enumerate(parameter_names(space))

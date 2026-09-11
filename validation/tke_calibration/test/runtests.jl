@@ -8,6 +8,31 @@ using Breeze.TurbulenceClosures: ConstantStabilityFunctions, RiDependentStabilit
 using Oceananigans.Units
 using Oceananigans: RectilinearGrid, Flat, Bounded
 
+@testset "optimizer configuration survives checkpoint serialization" begin
+    scheduler = DataMisfitController()
+    accelerator = NesterovAccelerator()
+    algorithm = BreezeCalibration.algorithm_configuration(scheduler, accelerator, SECNice())
+    protocol = (; protocol_version = PROTOCOL_VERSION)
+    configuration = (; Δt = 15.0, radiation_interval = 600.0)
+    path = joinpath(mktempdir(), "configuration.jld2")
+    jldsave(path; protocol_version = PROTOCOL_VERSION, run_configuration = configuration,
+                 algorithm_configuration = algorithm)
+    saved = load(path)
+    @test isnothing(BreezeCalibration.validate_checkpoint(saved, protocol, configuration; algorithm))
+    # A snapshot must not acquire the mutable runtime state of its source objects.
+    push!(scheduler.iteration, 1)
+    accelerator.θ_prev = 0.5
+    fresh = BreezeCalibration.algorithm_configuration(DataMisfitController(), NesterovAccelerator(), SECNice())
+    @test algorithm == fresh
+    for alternative in (BreezeCalibration.algorithm_configuration(DataMisfitController(), NesterovAccelerator(), NoLocalization()),
+                        BreezeCalibration.algorithm_configuration(DataMisfitController(terminate_at = 2), NesterovAccelerator(), SECNice()),
+                        BreezeCalibration.algorithm_configuration(DataMisfitController(), accelerator, SECNice()))
+        @test_throws ErrorException BreezeCalibration.validate_checkpoint(saved, protocol, configuration; algorithm = alternative)
+    end
+    delete!(saved, "algorithm_configuration")
+    @test_throws ErrorException BreezeCalibration.validate_checkpoint(saved, protocol, configuration; algorithm)
+end
+
 @testset "total-water relaxation acts on the vapor-cloud sum" begin
     grid = RectilinearGrid(size = 4, z = (3000, 4000), topology = (Flat, Flat, Bounded))
     density = fill(0.8, 1, 1, 4)
@@ -171,6 +196,8 @@ end
     # Incompatible forward maps must be rejected before replay, even when their dimensions agree.
     @test_throws ErrorException run_eki(problem; space = ConstantSpace(), resume = output, radiation = :prescribed, short_run...)
     @test_throws ErrorException run_eki(problem; space = ConstantSpace(), resume = output, Δt = 30, short_run...)
+    @test_throws ErrorException run_eki(problem; space = ConstantSpace(), resume = output, radiation_interval = 300, short_run...)
+    @test_throws ErrorException run_eki(problem; space = ConstantSpace(), resume = output, localization_method = NoLocalization(), short_run...)
     reversed_problem = MultiResolutionProblem(reverse(problem.problems))
     @test_throws ErrorException run_eki(reversed_problem; space = ConstantSpace(), resume = output, short_run...)
     # Resuming replays the saved forward map exactly and runs one more iteration
