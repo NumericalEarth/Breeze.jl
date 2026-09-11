@@ -13,6 +13,7 @@ parser.add_argument("input", type=Path)
 parser.add_argument("output", type=Path)
 parser.add_argument("--cases", default="22/07,2/01", help="Two site/month pairs")
 parser.add_argument("--color-limit", type=float, help="Symmetric difference color limit in noise units")
+parser.add_argument("--title", help="Identify the coefficient set or experiment in exported figures")
 args = parser.parse_args()
 with args.input.open() as stream:
     rows = list(csv.DictReader(stream))
@@ -59,7 +60,7 @@ for column, (site, month) in enumerate(cases):
         if row == 0:
             ax.set_title(f"Site {site} · month {month}", loc="left", pad=12)
     axes[0, column].legend(frameon=False, fontsize=9)
-fig.suptitle(f"Sensitivity of the cloud layer to the {knob}", fontsize=19, fontweight="bold")
+fig.suptitle(args.title or f"Sensitivity of the cloud layer to the {knob}", fontsize=19, fontweight="bold")
 args.output.mkdir(parents=True, exist_ok=True)
 for extension in ("png", "pdf", "svg"):
     fig.savefig(args.output / f"{prefix}_profiles.{extension}", facecolor="white")
@@ -83,7 +84,8 @@ for ax, (site, month) in zip(axes, cases):
     ax.set(xticks=range(len(labels)), xticklabels=labels, title=f"Site {site} · month {month}")
 axes[0].set_ylabel("Height (km)")
 fig.colorbar(im, ax=axes, label="Profile difference / observation noise", shrink=.85)
-fig.suptitle(f"Where refinement matters: differences from {reference:g} s", fontsize=17, fontweight="bold")
+title = f"Where refinement matters: differences from {reference:g} s"
+fig.suptitle(f"{args.title}\n{title}" if args.title else title, fontsize=17, fontweight="bold")
 for extension in ("png", "pdf", "svg"):
     fig.savefig(args.output / f"{prefix}_difference.{extension}", facecolor="white")
 plt.close(fig)
