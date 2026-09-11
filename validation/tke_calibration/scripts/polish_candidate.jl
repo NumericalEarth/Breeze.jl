@@ -2,15 +2,17 @@
 # Every coordinate direction plus fixed random directions is evaluated in one GPU ensemble.
 # julia --project scripts/polish_candidate.jl checkpoint=... output=... [radius=0.1]
 #   [minimum_radius=0.0125] [max_iterations=12] [random_directions=8] [seed=41] [arch=gpu]
+#   [selection=mean|best_evaluated] -- the latter also searches all previously evaluated members
 using BreezeCalibration, JLD2, Statistics, LinearAlgebra, Random, Printf, CUDA
 using Oceananigans: CPU, GPU
+include(joinpath(@__DIR__, "evaluated_candidate.jl"))
 
 function main()
     options = Dict(split(a, '='; limit = 2) for a in ARGS)
     source = load(options["checkpoint"])
     source["protocol_version"] == PROTOCOL_VERSION || error("Physics protocol mismatch")
-    haskey(source, "selected_mean") && !isnothing(source["selected_mean"]) || error("No directly evaluated mean candidate")
-    parameters = copy(source["selected_mean"].parameters)
+    starting_candidate = evaluated_candidate(source; selection = Symbol(get(options, "selection", "mean")))
+    parameters = copy(starting_candidate.parameters)
     all(>(0), parameters) || error("Log-coordinate refinement requires positive parameters")
     space = space_of(length(parameters))
     members = [load_member(s, m) for (s, m) in source["members"]]
@@ -23,7 +25,9 @@ function main()
     y, Γ = source["y"], Diagonal(source["Γ"])
     protocol = BreezeCalibration.checkpoint_protocol(problem, space, y, Γ, Symbol(source["radiation"]))
     BreezeCalibration.validate_checkpoint(source, protocol, configuration)
-    architecture = get(options, "arch", "gpu") == "gpu" ? GPU() : CPU()
+    architecture_name = get(options, "arch", "gpu")
+    architecture_name in ("cpu", "gpu") || error("arch must be gpu or cpu")
+    architecture = architecture_name == "gpu" ? GPU() : CPU()
     if architecture isa GPU
         CUDA.functional() || error("CUDA is required")
         CUDA.allowscalar(false)
@@ -34,6 +38,10 @@ function main()
     max_iterations = parse(Int, get(options, "max_iterations", "12"))
     number_of_random_directions = parse(Int, get(options, "random_directions", "8"))
     relative_tolerance = parse(Float64, get(options, "tolerance", "0.0001"))
+    0 < minimum_radius <= radius || error("Require 0 < minimum_radius <= radius")
+    max_iterations > 0 || error("max_iterations must be positive")
+    number_of_random_directions >= 0 || error("random_directions must be nonnegative")
+    relative_tolerance > 0 || error("tolerance must be positive")
     rng = MersenneTwister(parse(Int, get(options, "seed", "41")))
     random = randn(rng, length(parameters), number_of_random_directions)
     random ./= sqrt.(sum(abs2, random; dims = 1))
@@ -41,8 +49,8 @@ function main()
     directions = hcat(zeros(length(parameters)), directions, -directions)
     history = []
     output = options["output"]; mkpath(dirname(abspath(output)))
-    best_G = copy(source["selected_mean"].G)
-    best_objective = source["selected_mean"].objective
+    best_G = copy(starting_candidate.G)
+    best_objective = starting_candidate.objective
     converged = false
 
     for iteration in 1:max_iterations
@@ -71,7 +79,8 @@ function main()
         else
             radius = max(radius / 2, minimum_radius)
         end
-        jldsave(output * ".tmp"; protocol_version = PROTOCOL_VERSION, source_checkpoint = options["checkpoint"],
+        jldsave(output * ".tmp"; protocol_version = PROTOCOL_VERSION, source_checkpoint = abspath(options["checkpoint"]),
+                 starting_candidate,
                  parameters, parameter_names = source["parameter_names"], objective = best_objective,
                  G = best_G, history, converged, run_configuration = configuration,
                  members = source["members"], z_faces = source["z_faces"], relative_tolerance,

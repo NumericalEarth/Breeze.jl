@@ -35,9 +35,11 @@ const models=__MODEL_DATA__;
 const colors=['#243d50','#00888b','#c36335','#7b53a1','#567e2b'];
 const channels=[['Cᵘ','Momentum transport','Kᵘ = Sᵘ ℓ √e'],['Cᶜ','Heat and water transport','Kᶜ = Sᶜ ℓ √e'],['Cᵉ','TKE transport','Kᵉ = Sᵉ ℓ √e'],['Cᴰ','Dissipation','ε = Sᴰ e³ᐟ² / ℓ']];
 const selected=new Set(models.map((_,i)=>i));
+const maximumRi=Math.max(20,...models.filter(m=>m.space==='ri').map(m=>Math.ceil(m.parameters['Ri⁰']+m.parameters['Riᵟ'])));
+function escapeText(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function sf(model,key,ri){const p=model.parameters;if(key in p)return p[key];if(ri<0)return p[key+'⁻'];const r=Math.max(0,Math.min(1,(ri-p['Ri⁰'])/p['Riᵟ']));return p[key+'⁰']+(p[key+'⁺']-p[key+'⁰'])*r;}
-function riAt(t){return t<.2?-1+t/.2:Math.expm1((t-.2)/.8*Math.log(21));}
-function tx(ri){return ri<0?.2*(ri+1):.2+.8*Math.log1p(ri)/Math.log(21);}
+function riAt(t){return t<.2?-1+t/.2:Math.expm1((t-.2)/.8*Math.log1p(maximumRi));}
+function tx(ri){return ri<0?.2*(ri+1):.2+.8*Math.log1p(ri)/Math.log1p(maximumRi);}
 function fmt(v){return Math.abs(v)<.001||Math.abs(v)>=1e4?v.toExponential(2):Number(v.toPrecision(4)).toString();}
 document.getElementById('status').textContent='These curves show '+models.map(m=>m.label+' ('+m.status+')').join('; ')+'. Ensemble-size and numerical convergence must be established separately.';
 document.getElementById('provenance').textContent=JSON.stringify(models,null,2);
@@ -49,10 +51,10 @@ function draw(){const ri=riAt(+document.getElementById('ri').value/1000),e=10**+
  channels.forEach(([key],c)=>{const samples=Array.from({length:401},(_,k)=>riAt(k/400));const all=models.flatMap((m,i)=>selected.has(i)?samples.map(r=>sf(m,key,r)):[]);const low=Math.floor(Math.log10(Math.max(1e-8,Math.min(...all)))),high=Math.max(low+1,Math.ceil(Math.log10(Math.max(...all))));const x=r=>48+414*tx(r),y=s=>218-190*(Math.log10(Math.max(s,1e-8))-low)/(high-low);let parts=['<rect x="48" y="18" width="82.8" height="200" fill="#fff2e8"/><rect x="130.8" y="18" width="331.2" height="200" fill="#f1f7f7"/>'];
  if(!all.length){document.getElementById('chart'+c).innerHTML='';return;}
  for(let p=low;p<=high;p++){const yy=y(10**p);parts.push(`<line x1="48" x2="462" y1="${yy}" y2="${yy}" stroke="#dbe4e7"/><text x="41" y="${yy+4}" text-anchor="end" fill="#526574" font-size="11">${fmt(10**p)}</text>`);}
- for(const r of [-1,0,.25,1,5,20])parts.push(`<text x="${x(r)}" y="239" text-anchor="middle" fill="#526574" font-size="11">${r}</text>`);
+ for(const r of [-1,0,.25,1,5,maximumRi])parts.push(`<text x="${x(r)}" y="239" text-anchor="middle" fill="#526574" font-size="11">${r}</text>`);
  models.forEach((m,i)=>{if(!selected.has(i))return;const d=samples.map((r,k)=>(k?'L':'M')+x(r).toFixed(2)+','+y(sf(m,key,r)).toFixed(2)).join(' ');parts.push(`<path d="${d}" fill="none" stroke="${colors[i%colors.length]}" stroke-width="2.6"/><circle cx="${x(ri)}" cy="${y(sf(m,key,ri))}" r="4" fill="${colors[i%colors.length]}"/>`);});parts.push(`<line x1="${x(ri)}" x2="${x(ri)}" y1="18" y2="218" stroke="#526574" stroke-dasharray="3 4"/><text x="255" y="256" text-anchor="middle" fill="#526574" font-size="11">Richardson number (expanded near zero)</text>`);document.getElementById('chart'+c).innerHTML=parts.join('');});
  let table='<tr><th>Closure</th><th>Kᵘ (m²/s)</th><th>Kᶜ (m²/s)</th><th>Kᵉ (m²/s)</th><th>ε (m²/s³)</th><th>Pr</th></tr>',neutral='<tr><th>Closure</th><th>κ</th><th>e/u★²</th><th>Neutral Pr</th></tr>';
- models.forEach((m,i)=>{if(!selected.has(i))return;const u=sf(m,'Cᵘ',ri),c=sf(m,'Cᶜ',ri),te=sf(m,'Cᵉ',ri),d=sf(m,'Cᴰ',ri),u0=sf(m,'Cᵘ',0),c0=sf(m,'Cᶜ',0),d0=sf(m,'Cᴰ',0);table+='<tr><td>'+m.label+'</td>'+[u*l*Math.sqrt(e),c*l*Math.sqrt(e),te*l*Math.sqrt(e),d*e**1.5/l,u/c].map(v=>'<td>'+fmt(v)+'</td>').join('')+'</tr>';neutral+='<tr><td>'+m.label+'</td>'+[m.parameters['Cˢ']*(u0**3/d0)**.25,1/Math.sqrt(u0*d0),u0/c0].map(v=>'<td>'+fmt(v)+'</td>').join('')+'</tr>';});document.getElementById('transport').innerHTML=table;document.getElementById('neutral').innerHTML=neutral;
+ models.forEach((m,i)=>{if(!selected.has(i))return;const u=sf(m,'Cᵘ',ri),c=sf(m,'Cᶜ',ri),te=sf(m,'Cᵉ',ri),d=sf(m,'Cᴰ',ri),u0=sf(m,'Cᵘ',0),c0=sf(m,'Cᶜ',0),d0=sf(m,'Cᴰ',0);table+='<tr><td>'+escapeText(m.label)+'</td>'+[u*l*Math.sqrt(e),c*l*Math.sqrt(e),te*l*Math.sqrt(e),d*e**1.5/l,u/c].map(v=>'<td>'+fmt(v)+'</td>').join('')+'</tr>';neutral+='<tr><td>'+escapeText(m.label)+'</td>'+[m.parameters['Cˢ']*(u0**3/d0)**.25,1/Math.sqrt(u0*d0),u0/c0].map(v=>'<td>'+fmt(v)+'</td>').join('')+'</tr>';});document.getElementById('transport').innerHTML=table;document.getElementById('neutral').innerHTML=neutral;
 }
 ['ri','energy','length'].forEach(id=>document.getElementById(id).addEventListener('input',draw));draw();
 </script></html>
