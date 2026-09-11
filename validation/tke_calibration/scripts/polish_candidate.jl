@@ -6,11 +6,13 @@
 using BreezeCalibration, JLD2, Statistics, LinearAlgebra, Random, Printf, CUDA
 using Oceananigans: CPU, GPU
 include(joinpath(@__DIR__, "evaluated_candidate.jl"))
+include(joinpath(@__DIR__, "calibration_data_manifest.jl"))
 
 function main()
     options = Dict(split(a, '='; limit = 2) for a in ARGS)
     source = load(options["checkpoint"])
     source["protocol_version"] == PROTOCOL_VERSION || error("Physics protocol mismatch")
+    validate_data_manifest(source)
     starting_candidate = evaluated_candidate(source; selection = Symbol(get(options, "selection", "mean")))
     parameters = copy(starting_candidate.parameters)
     all(>(0), parameters) || error("Log-coordinate refinement requires positive parameters")

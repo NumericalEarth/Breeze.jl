@@ -5,6 +5,7 @@
 using BreezeCalibration, JLD2, Statistics, NCDatasets, CUDA
 using Oceananigans: CPU, GPU, interior
 include(joinpath(@__DIR__, "closure_diagnostics.jl"))
+include(joinpath(@__DIR__, "calibration_data_manifest.jl"))
 
 function main()
     options = Dict(split(a, '='; limit = 2) for a in ARGS)
@@ -21,6 +22,7 @@ function main()
         status = isnothing(selected) ? "exploratory final mean" : "best directly evaluated mean candidate"
     end
     source["protocol_version"] == metadata["protocol_version"] == PROTOCOL_VERSION || error("Physics protocol mismatch")
+    validate_data_manifest(metadata)
     configuration = metadata["run_configuration"]
     space = space_of(length(candidate))
     member_ids = [(parse(Int, first(split(s, '/'))), String(last(split(s, '/'))))

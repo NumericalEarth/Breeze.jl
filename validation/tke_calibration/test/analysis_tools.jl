@@ -2,6 +2,24 @@
 # julia --project test/analysis_tools.jl
 using BreezeCalibration, JLD2, Test
 include(joinpath(@__DIR__, "..", "scripts", "evaluated_candidate.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "calibration_data_manifest.jl"))
+
+@testset "Forcing-data identity" begin
+    current = calibration_data_manifest([(22, "07")])
+    @test length(current.gcm_sha256) == 64
+    @test length(only(current.les).sha256) == 64
+    saved = Dict("run_configuration" => (; data_manifest = current), "members" => [(22, "07")])
+    @test isnothing(validate_data_manifest(saved))
+    changed = merge(current, (; gcm_sha256 = repeat("0", 64)))
+    saved["run_configuration"] = (; data_manifest = changed)
+    @test_throws ErrorException validate_data_manifest(saved)
+    mktemp() do path, io
+        write(io, "first"); flush(io)
+        before = file_sha256(path)
+        write(io, "second"); flush(io)
+        @test file_sha256(path) != before
+    end
+end
 
 @testset "Best evaluated point is distinct from mean-based stopping" begin
     selected = (; parameters = ones(7), G = [1.0, 2.0], objective = 0.5, iteration = 2)

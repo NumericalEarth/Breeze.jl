@@ -17,6 +17,7 @@
 #                                                                   [top=25000|les] [output=...]
 using BreezeCalibration, Printf, Statistics, JLD2
 using Oceananigans: CPU, GPU
+include(joinpath(@__DIR__, "calibration_data_manifest.jl"))
 
 const observation_scales = BreezeCalibration.observation_scales
 const scored = (:θˡ, :qᵗ, :qˡ, :u, :v)
@@ -43,6 +44,7 @@ source_checkpoint = get(options, "checkpoint", nothing)
 if !isnothing(source_checkpoint)
     saved = load(source_checkpoint)
     saved["protocol_version"] == PROTOCOL_VERSION || error("Checkpoint physics version differs")
+    validate_data_manifest(saved)
     haskey(saved, "selected_mean") && !isnothing(saved["selected_mean"]) ||
         error("Checkpoint must contain a directly evaluated selected mean")
     params = reshape(copy(saved["selected_mean"].parameters), :, 1)

@@ -7,6 +7,7 @@ using BreezeCalibration, EnsembleKalmanProcesses, JLD2, Random, Statistics, Prin
 using Oceananigans: CPU, GPU
 
 const BC = BreezeCalibration
+include(joinpath(@__DIR__, "calibration_data_manifest.jl"))
 function main()
     options = Dict(split(a, '='; limit = 2) for a in ARGS)
     space_name = get(options, "space", "ri")
@@ -50,7 +51,8 @@ function main()
     y, Γ = observations(problem; σ)
     stopping = (; optimize = true, objective_tolerance = parse(Float64, get(options, "tolerance", "0.005")),
                   objective_patience = 3, minimum_optimization_iterations = 6, target_pseudotime = 1.0)
-    run_configuration = (; Δt, radiation_interval, upper_relaxation_rate = 1 / 600,
+    data_manifest = calibration_data_manifest([(m.site, m.month) for m in members])
+    run_configuration = (; Δt, radiation_interval, upper_relaxation_rate = 1 / 600, data_manifest,
                            stop_time, averaging_window, spread,
                            windows = [m.window for m in members],
                            static_stability = [p.static_stability for p in problems])
