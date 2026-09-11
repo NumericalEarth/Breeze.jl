@@ -50,6 +50,38 @@ end
     @test_throws ErrorException BreezeCalibration.validate_checkpoint(saved, protocol, configuration; algorithm)
 end
 
+@testset "batched forward maps preserve independent optimizer trajectories" begin
+    prior = prior_distribution(ConstantSpace())
+    rng = MersenneTwister(18)
+    A = randn(rng, 12, 7)
+    y, Γ = ones(12), Diagonal(ones(12))
+    initials = [construct_initial_ensemble(MersenneTwister(n), prior, n) for n in (20, 30)]
+    function process(initial)
+        BreezeCalibration.build_process(copy(initial), y, Γ; rng = MersenneTwister(4),
+            scheduler = DataMisfitController(on_terminate = "continue"),
+            accelerator = NesterovAccelerator(), localization_method = SECNice())
+    end
+    grouped, separate = process.(initials), process.(initials)
+    grouped_history, separate_history = [[], []], [[], []]
+    stopping = (; optimize = true, objective_tolerance = 0.005, objective_patience = 3,
+                  minimum_optimization_iterations = 6, target_pseudotime = 1.0)
+    for iteration in 1:3
+        ensembles = [get_ϕ_final(prior, process) for process in grouped]
+        parameters, ranges = BreezeCalibration.batched_forward_parameters(ensembles)
+        @test ranges == [1:21, 22:52]
+        all_G = A * parameters .^ 2
+        for k in eachindex(grouped)
+            BreezeCalibration.record_eki_iteration!(grouped_history[k], grouped[k], ensembles[k],
+                all_G[:, ranges[k]], y, Γ, 0.0; stopping)
+            ϕ = get_ϕ_final(prior, separate[k])
+            G = A * hcat(ϕ, mean(ϕ; dims = 2)) .^ 2
+            BreezeCalibration.record_eki_iteration!(separate_history[k], separate[k], ϕ, G, y, Γ, 0.0; stopping)
+            @test get_u_final(grouped[k]) ≈ get_u_final(separate[k]) rtol = 1e-10
+            @test grouped_history[k][end].mean_objective ≈ separate_history[k][end].mean_objective rtol = 1e-10
+        end
+    end
+end
+
 @testset "total-water relaxation acts on the vapor-cloud sum" begin
     grid = RectilinearGrid(size = 4, z = (3000, 4000), topology = (Flat, Flat, Bounded))
     density = fill(0.8, 1, 1, 4)

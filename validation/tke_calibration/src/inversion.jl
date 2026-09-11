@@ -80,6 +80,38 @@ function mean_objective_plateau(history; patience = 3, minimum_iterations = 6,
            maximum(recent) - best <= relative_tolerance * scale
 end
 
+function batched_forward_parameters(ensembles)
+    augmented = [hcat(ϕ, mean(ϕ; dims = 2)) for ϕ in ensembles]
+    stops = cumsum([size(ϕ, 2) for ϕ in augmented])
+    starts = vcat(1, stops[1:end-1] .+ 1)
+    ranges = [a:b for (a, b) in zip(starts, stops)]
+    return reduce(hcat, augmented), ranges
+end
+
+function record_eki_iteration!(history, ekp, ϕ, augmented_G, y, Γ, wall; stopping)
+    n = length(history) + 1
+    evaluation_pseudotime = sum(get_Δt(ekp))
+    G, diagnostics = ensemble_mean_diagnostics(ϕ, augmented_G, y, Γ)
+    misfit = [sqrt(mean(((G[:, i] .- y) ./ sqrt.(diag(Γ))) .^ 2)) for i in axes(ϕ, 2)]
+    best = argmin(misfit)
+    evaluated = merge((; iteration = n, ϕ = copy(ϕ), G, misfit, wall, evaluation_pseudotime), diagnostics)
+    plateau = stopping.optimize && mean_objective_plateau(vcat(history, [evaluated]);
+              patience = stopping.objective_patience, minimum_iterations = stopping.minimum_optimization_iterations,
+              relative_tolerance = stopping.objective_tolerance, minimum_pseudotime = stopping.target_pseudotime)
+    optimizer_wall = @elapsed terminate = plateau ? true : update_ensemble!(ekp, G)
+    applied_update = isnothing(terminate)
+    Δtₙ = plateau ? 0.0 : applied_update ? get_Δt(ekp)[end] : NaN
+    T = sum(get_Δt(ekp))
+    stop_reason = plateau ? :mean_objective_plateau : applied_update ? :none : :tempering_budget
+    push!(history, merge(evaluated, (; Δt = Δtₙ, pseudotime = T, applied_update, stop_reason, optimizer_wall)))
+    @info @sprintf("EKI iteration %d: forward map %.0f s; normalized misfit mean %.2f, best %.2f (member %d); Δt = %.4f, pseudo time %.3f",
+                   n, wall, mean(misfit), misfit[best], best, Δtₙ, T)
+    @info @sprintf("  evaluated mean: objective %.8g, normalized RMS %.6f (evaluation pseudo time %.3f)",
+                   diagnostics.mean_objective, diagnostics.mean_misfit, evaluation_pseudotime)
+    @info @sprintf("  optimizer update %.2f s", optimizer_wall)
+    return stop_reason
+end
+
 """
 Rebuild an ensemble Kalman process from a saved `history` of (constrained ensemble, forward map) pairs by
 replaying the saved forward maps through the update. The update is deterministic (no stochastic
@@ -139,12 +171,13 @@ function validate_checkpoint(saved, protocol, run_configuration; algorithm = not
     return nothing
 end
 
-function checkpoint!(output, history, ekp, y, Γ, problem, space, σ, radiation, run_configuration, algorithm)
+function checkpoint!(output, history, ekp, y, Γ, problem, space, σ, radiation, run_configuration, algorithm;
+                     experiment_metadata = (;))
     temporary = output * ".tmp"
     candidates = [h for h in history if haskey(h, :mean_objective) && isfinite(h.mean_objective)]
     selected = isempty(candidates) ? nothing : candidates[argmin([h.mean_objective for h in candidates])]
     jldsave(temporary; protocol_version = PROTOCOL_VERSION, checkpoint_format_version = 2,
-                    algorithm_configuration = algorithm, history, y, Γ = diag(Γ), space = summary(space), σ = collect(Float64, values(σ)), parameter_names = collect(String.(parameter_names(space))),
+                    algorithm_configuration = algorithm, experiment_metadata, history, y, Γ = diag(Γ), space = summary(space), σ = collect(Float64, values(σ)), parameter_names = collect(String.(parameter_names(space))),
                     members = [(m.site, m.month) for m in members(problem)],
                     z_faces = [p.zf for p in problems(problem)], observation_faces = first(problems(problem)).observation_zf,
                     variables = collect(String.(first(problems(problem)).variables)), radiation = String(radiation),
@@ -220,35 +253,15 @@ function run_eki(problem::AnyProblem; space = RiDependentSpace(), N_ens = 20, ta
     for _ in 1:max_iterations
         n = length(history) + 1
         ϕ = get_ϕ_final(prior, ekp)                       # constrained parameters, (N_params, N_ens)
-        evaluation_pseudotime = sum(get_Δt(ekp))
         augmented = hcat(ϕ, mean(ϕ; dims = 2))
         wall = @elapsed augmented_G, means = forward_map(problem, augmented; space, Δt, architecture,
                               stop_time, averaging_window, radiation, radiation_interval, upper_relaxation_rate)
-        G, diagnostics = ensemble_mean_diagnostics(ϕ, augmented_G, y, Γ)
-        misfit = [sqrt(mean(((G[:, i] .- y) ./ sqrt.(diag(Γ))) .^ 2)) for i in 1:N_ens]
-        best = argmin(misfit)
-
-        evaluated = merge((; iteration = n, ϕ = copy(ϕ), G, misfit, wall, evaluation_pseudotime), diagnostics)
-        plateau = optimize && mean_objective_plateau(vcat(history, [evaluated]);
-                  patience = objective_patience, minimum_iterations = minimum_optimization_iterations,
-                  relative_tolerance = objective_tolerance, minimum_pseudotime = target_pseudotime)
-        terminate = plateau ? true : update_ensemble!(ekp, G)
-        applied_update = isnothing(terminate)
-        Δtₙ = plateau ? 0.0 : applied_update ? get_Δt(ekp)[end] : NaN
-        T = sum(get_Δt(ekp))
-
-        @info @sprintf("EKI iteration %d: forward map %.0f s; normalized misfit mean %.2f, best %.2f (member %d); Δt = %.4f, pseudo time %.3f",
-                       n, wall, mean(misfit), misfit[best], best, Δtₙ, T)
+        stop_reason = record_eki_iteration!(history, ekp, ϕ, augmented_G, y, Γ, wall; stopping)
         @info "  ensemble mean parameters: " * join([@sprintf("%s = %.3f", name, mean(ϕ[k, :])) for (k, name) in enumerate(parameter_names(space))], ", ")
-        @info @sprintf("  evaluated mean: objective %.8g, normalized RMS %.6f (evaluation pseudo time %.3f)",
-                       diagnostics.mean_objective, diagnostics.mean_misfit, evaluation_pseudotime)
-
-        stop_reason = plateau ? :mean_objective_plateau : applied_update ? :none : :tempering_budget
-        push!(history, merge(evaluated, (; Δt = Δtₙ, pseudotime = T, applied_update, stop_reason)))
         checkpoint!(output, history, ekp, y, Γ, problem, space, σ, radiation, run_configuration, algorithm)
         flush(stdout); flush(stderr)      # Julia buffers both when they are redirected to a file
 
-        if !isnothing(terminate)
+        if stop_reason != :none
             @info "Stopped at iteration $n: $stop_reason; inspect numerical, seed and ensemble-size convergence before adopting coefficients"
             terminated = true
             break
