@@ -32,7 +32,7 @@ grid = RectilinearGrid(CPU(); size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1),
                        topology=(Periodic, Periodic, Bounded))
 
 constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
 dynamics = AnelasticDynamics(reference_state)
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)

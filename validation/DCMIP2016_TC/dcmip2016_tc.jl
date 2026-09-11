@@ -286,7 +286,7 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
     θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                    surface_pressure = pb,
+                                    base_pressure = pb,
                                     reference_potential_temperature = θᵣ)
 
     microphysics = InstantaneousPrecipitation(equilibrium = WarmPhaseEquilibrium())
@@ -302,11 +302,11 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
     Uᵍ = 1.0
     ρu_bcs  = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ, surface_temperature = Ts))
     ρv_bcs  = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ, surface_temperature = Ts))
-    ρs_bcs  = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient = Cᵀ, gustiness = Uᵍ,
+    ρE_bcs  = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient = Cᵀ, gustiness = Uᵍ,
                                                                     surface_temperature = Ts))
-    ρqᵛ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = Cᵀ, gustiness = Uᵍ,
+    ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = Cᵀ, gustiness = Uᵍ,
                                                              surface_temperature = Ts))
-    boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρs = ρs_bcs, ρqᵛ = ρqᵛ_bcs)
+    boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρE = ρE_bcs, ρqᵗ = ρqᵗ_bcs)
 
     model = AtmosphereModel(grid; dynamics, coriolis, microphysics, closure, boundary_conditions,
                             thermodynamic_constants = constants,

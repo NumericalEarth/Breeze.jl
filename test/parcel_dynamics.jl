@@ -96,13 +96,13 @@ end
     @test dynamics.density === nothing
     @test dynamics.pressure === nothing
     @test dynamics.vertical_velocity_formulation isa PrescribedVerticalVelocity
-    @test dynamics.surface_pressure == 101325.0
+    @test dynamics.base_pressure == 101325.0
     @test dynamics.standard_pressure == 1e5
 
     # PrognosticVerticalVelocity construction
     dynamics_b = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
     @test dynamics_b.vertical_velocity_formulation isa PrognosticVerticalVelocity
-    @test dynamics_b.surface_pressure == 101325.0
+    @test dynamics_b.base_pressure == 101325.0
 end
 
 #####
@@ -344,7 +344,7 @@ using Oceananigans: interpolate
 
     # Create an isentropic reference state (constant θ = 300 K)
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     # Set environmental profiles from the isentropic reference state
@@ -395,7 +395,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics=nothing)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     # Environmental moisture profile (not used by parcel, but needed for initialization)
@@ -443,7 +443,7 @@ OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysi
     @test model.dynamics isa ParcelDynamics
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     qᵗ₀ = 0.015
@@ -480,7 +480,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     # High initial moisture to ensure supersaturation during ascent
@@ -516,7 +516,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     qᵗ₀ = 0.015
@@ -568,7 +568,7 @@ TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysi
     @test model.dynamics isa ParcelDynamics
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     qᵗ₀ = 0.015
@@ -607,7 +607,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     # High initial moisture to ensure supersaturation during ascent
@@ -646,7 +646,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     qᵗ₀ = 0.015
@@ -717,7 +717,7 @@ end
     model = AtmosphereModel(grid; dynamics, microphysics=nothing)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     set!(model,
@@ -749,7 +749,7 @@ end
     model = AtmosphereModel(grid; dynamics, microphysics=nothing)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     set!(model,
@@ -795,7 +795,7 @@ end
     @test model.dynamics.vertical_velocity_formulation isa PrognosticVerticalVelocity
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     qᵗ₀ = 0.015

@@ -92,7 +92,7 @@ using Oceananigans.TimeSteppers: update_state!
                                extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
         p3 = PredictedParticlePropertiesMicrophysics(FT)
@@ -148,7 +148,7 @@ using Oceananigans.TimeSteppers: update_state!
                                extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
 
@@ -276,7 +276,7 @@ using Oceananigans.TimeSteppers: update_state!
                                extent = (100, 100, 200))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
@@ -301,7 +301,7 @@ using Oceananigans.TimeSteppers: update_state!
                                    extent = (100, 100, 200))
             constants = ThermodynamicConstants(FT)
             reference_state = ReferenceState(grid, constants;
-                                             surface_pressure = FT(101325),
+                                             base_pressure = FT(101325),
                                              potential_temperature = FT(285))
             dynamics = AnelasticDynamics(reference_state)
             p3 = PredictedParticlePropertiesMicrophysics(FT; precipitation_boundary_condition)
@@ -354,7 +354,7 @@ using Oceananigans.TimeSteppers: update_state!
                                extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
         p3 = PredictedParticlePropertiesMicrophysics(FT)
@@ -450,7 +450,7 @@ using Oceananigans.TimeSteppers: update_state!
 
         function make_model()
             dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                            surface_pressure = FT(1e5),
+                                            base_pressure = FT(1e5),
                                             standard_pressure = FT(1e5),
                                             reference_potential_temperature = z -> FT(280))
             return AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
@@ -587,7 +587,7 @@ using Oceananigans.TimeSteppers: update_state!
         # automatic standard-atmosphere reference so this exercises the no-reference path.
         dynamics_without_reference =
             CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                 surface_pressure = FT(1e5),
+                                 base_pressure = FT(1e5),
                                  standard_pressure = FT(1e5),
                                  reference_state = nothing)
         model_without_reference =
@@ -640,7 +640,7 @@ using Oceananigans.TimeSteppers: update_state!
                                extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
         # The point of the budget check below is that the cloud -> rain conversion conserves
@@ -682,7 +682,7 @@ using Oceananigans.TimeSteppers: update_state!
             extent = (100, 100, 100))
         dynamics = CompressibleDynamics(
             SplitExplicitTimeDiscretization();
-            surface_pressure = FT(1e5),
+            base_pressure = FT(1e5),
             standard_pressure = FT(1e5),
             reference_potential_temperature = z -> FT(280))
         model = AtmosphereModel(

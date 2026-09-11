@@ -4,45 +4,53 @@ using Test
 using Breeze
 using Oceananigans
 using Oceananigans.Fields: fill_halo_regions!
+using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
+using Breeze.AnelasticEquations: AnelasticTridiagonalSolverFormulation, solve_for_anelastic_pressure!
 using Statistics: mean
 
 @testset "Anelastic pressure solver recovers analytic solution [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
-    constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=288)
-    dynamics = AnelasticDynamics(reference_state)
 
     #=
-    ρᵣ = 2 + cos(π z / 2)
-    ∂z ρᵣ ∂z ϕ = ?
+    ρᵣ = z, and the predictor momentum ρw = z² - z³ (which vanishes at both boundaries).
+    The anelastic pressure ϕ = p′/ρᵣ (kinematic) satisfies ∂z(ρᵣ ∂z ϕ) = ∂z(ρw) / Δt:
 
-    ϕ = cos(π z)
-    ⟹ ∂z ϕ = -π sin(π z)
-    ⟹ (2 + cos(π z)) ∂z ϕ = -π (2 sin(π z) + cos(π z) sin(π z))
-    ⟹ ∂z (1 + cos(π z / 2)) ∂z ϕ = -π² (2 cos(π z) + 2 cos²(π z) - 1)
+    ρw = z² - z³            ⟹ ∂z ρw = 2z - 3z²
+    ϕ  = z²/2 - z³/3        ⟹ ∂z ϕ = z - z², so z ∂z ϕ = z² - z³
+                           ⟹ ∂z(z ∂z ϕ) = 2z - 3z²
 
-    ϕ = z² / 2 - z³ / 3 = z² (1/2 - z/3)
-    ∂z ϕ = z (1 - z) = z - z²
-    ∂z² ϕ = 1 - 2z
-    ⟹ z ∂z ϕ = z² - z³
-    ⟹ ∂z (z ∂z ϕ) = 2 z - 3 z²
+    so with Δt = 1 the discrete solve should recover ϕ = z²/2 - z³/3 (up to the mean, since the
+    solve is defined only to within an additive constant by the homogeneous Neumann boundaries).
 
-    R = ∂z ρw = 2 z - 3 z²
-    ⟹ ρw = z² - z³
+    We exercise the solver directly here — an `AtmosphereModel` on this `(Flat, Flat, Bounded)` grid
+    runs in single-column mode, where the pressure solve is intentionally omitted (see
+    `single_column_mode.jl`).
     =#
 
-    set!(dynamics.reference_state.density, z -> z)
-    fill_halo_regions!(dynamics.reference_state.density)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-    set!(model, ρw = z -> z^2 - z^3)
+    # Reference density ρᵣ = z.
+    ρᵣ = CenterField(grid)
+    set!(ρᵣ, z -> z)
+    fill_halo_regions!(ρᵣ)
 
-    # Test for zero mean (using kinematic pressure p'/ρᵣ directly)
+    # Predictor momentum ρw = z² - z³.
+    ρu = XFaceField(grid)
+    ρv = YFaceField(grid)
+    ρw = ZFaceField(grid)
+    set!(ρw, z -> z^2 - z^3)
+    fill_halo_regions!(ρw)
+
+    # Solve for the kinematic pressure ϕ = p′/ρᵣ with Δt = 1.
+    solver = FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation=AnelasticTridiagonalSolverFormulation(ρᵣ))
+    ϕ = CenterField(grid)
+    solve_for_anelastic_pressure!(ϕ, solver, (ρu, ρv, ρw), 1)
+    fill_halo_regions!(ϕ)
+
+    # Test for zero mean (the solve is defined only up to an additive constant).
     atol = 10 * grid.Nz * eps(FT)
-    ϕ = model.dynamics.pressure_anomaly
     @test mean(ϕ) ≈ 0 atol=atol
 
-    # Test for exact solution
+    # Test for the exact solution (mean removed to match the mean-zero numerical solution).
     ϕ_exact = CenterField(grid)
     set!(ϕ_exact, z -> z^2 / 2 - z^3 / 3 - 1 / 12)
     parent(ϕ_exact) .-= mean(ϕ_exact)

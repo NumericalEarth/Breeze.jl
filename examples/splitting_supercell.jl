@@ -251,7 +251,7 @@ fig
 # compared with it.
 
 reference_state_anelastic = ReferenceState(grid, constants;
-                                           surface_pressure = p₀,
+                                           base_pressure = p₀,
                                            potential_temperature = θ₀)
 
 # ## Dynamics — anelastic
@@ -395,7 +395,7 @@ results["anelastic"] = run_simulation(model_anelastic, "anelastic")
 # tendency vanishes on a rest atmosphere.
 
 dynamics_compressible = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                             surface_pressure = p₀,
+                                             base_pressure = p₀,
                                              standard_pressure = pˢᵗ,
                                              reference_potential_temperature = θ_background,
                                              reference_vapor_mass_fraction = qᵛ_bg)

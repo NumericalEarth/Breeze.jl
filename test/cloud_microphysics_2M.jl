@@ -53,7 +53,7 @@ end
     categories = two_moment_cloud_microphysics_categories(FT)
     @test categories isa TwoMomentCategories
     @test categories.warm_processes isa CloudMicrophysics.Parameters.SB2006
-    @test categories.air_properties isa CloudMicrophysics.Parameters.AirProperties
+    @test categories.air isa CloudMicrophysics.Parameters.AirProperties
     @test categories.cloud_liquid_fall_velocity isa CloudMicrophysics.Parameters.StokesRegimeVelType
     @test categories.rain_fall_velocity isa CloudMicrophysics.Parameters.SB2006VelType
 end
@@ -63,7 +63,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = TwoMomentCloudMicrophysics()
@@ -93,7 +93,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = TwoMomentCloudMicrophysics()
@@ -127,7 +127,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = TwoMomentCloudMicrophysics()
@@ -162,7 +162,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = TwoMomentCloudMicrophysics()
@@ -203,7 +203,7 @@ end
                            topology=(Periodic, Periodic, Bounded))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = TwoMomentCloudMicrophysics(; precipitation_boundary_condition=ImpenetrableBoundaryCondition())
@@ -239,7 +239,7 @@ end
                            topology=(Periodic, Periodic, Bounded))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = TwoMomentCloudMicrophysics()
@@ -268,7 +268,7 @@ end
     # Check default aerosol activation is created
     aa = default_aerosol_activation(FT)
     @test aa isa AerosolActivation
-    @test aa.activation_parameters isa CloudMicrophysics.Parameters.AerosolActivationParameters
+    @test aa.activation isa CloudMicrophysics.Parameters.AerosolActivationParameters
     @test aa.aerosol_distribution isa CloudMicrophysics.AerosolModel.AerosolDistribution
 
     # Check aerosol activation is included in TwoMomentCategories
@@ -292,7 +292,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
     constants = model.thermodynamic_constants
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
 
     qᵗ(z) = 0.015 * exp(-z / 2500)
 

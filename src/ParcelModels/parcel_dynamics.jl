@@ -5,7 +5,7 @@ using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField, set!, interpolate
 using Oceananigans.TimeSteppers: TimeSteppers, tick_stage!
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: launch!, time_difference_seconds
 
 using KernelAbstractions: @kernel, @index
 
@@ -13,6 +13,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
     PlanarLiquidSurface,
     with_moisture, mixture_heat_capacity, density,
+    reject_renamed_surface_pressure,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
@@ -131,7 +132,7 @@ Lagrangian parcel dynamics for [`AtmosphereModel`](@ref).
 - `timestepper`: SSP RK3 timestepper with tendencies
 - `density`: environmental density field [kg/m³]
 - `pressure`: environmental pressure field [Pa]
-- `surface_pressure`: surface pressure [Pa]
+- `base_pressure`: pressure of the reference atmosphere at ``z = 0`` [Pa]
 - `standard_pressure`: standard pressure for potential temperature [Pa]
 """
 struct ParcelDynamics{S, TS, D, P, U, FT}
@@ -140,7 +141,7 @@ struct ParcelDynamics{S, TS, D, P, U, FT}
     density :: D
     pressure :: P
     vertical_velocity_formulation :: U
-    surface_pressure :: FT
+    base_pressure :: FT
     standard_pressure :: FT
 end
 
@@ -154,8 +155,10 @@ constructing the `AtmosphereModel`.
 """
 function ParcelDynamics(FT::DataType=Oceananigans.defaults.FloatType;
                         vertical_velocity_formulation = PrescribedVerticalVelocity(),
-                        surface_pressure = 101325,
-                        standard_pressure = 1e5)
+                        base_pressure = 101325,
+                        standard_pressure = 1e5,
+                        surface_pressure = nothing)
+    reject_renamed_surface_pressure(surface_pressure)
     U = typeof(vertical_velocity_formulation)
     return ParcelDynamics{Nothing, Nothing, Nothing, Nothing, U, FT}(
         nothing,
@@ -163,7 +166,7 @@ function ParcelDynamics(FT::DataType=Oceananigans.defaults.FloatType;
         nothing,
         nothing,
         vertical_velocity_formulation,
-        convert(FT, surface_pressure),
+        convert(FT, base_pressure),
         convert(FT, standard_pressure)
     )
 end
@@ -178,7 +181,7 @@ function Base.show(io::IO, d::ParcelDynamics)
     println(io, "├── vertical_velocity_formulation: ", summary(d.vertical_velocity_formulation))
     println(io, "├── density: ", isnothing(d.density) ? "unset" : summary(d.density))
     println(io, "├── pressure: ", isnothing(d.pressure) ? "unset" : summary(d.pressure))
-    println(io, "├── surface_pressure: ", d.surface_pressure)
+    println(io, "├── base_pressure: ", d.base_pressure)
     print(io, "└── standard_pressure: ", d.standard_pressure)
 end
 
@@ -216,7 +219,7 @@ AtmosphereModels.dynamics_pressure_solver(::ParcelDynamics, grid) = nothing
 AtmosphereModels.dynamics_pressure(d::ParcelDynamics) = d.pressure
 AtmosphereModels.pressure_anomaly(::ParcelDynamics) = ZeroField()
 AtmosphereModels.total_pressure(d::ParcelDynamics) = d.pressure
-AtmosphereModels.surface_pressure(d::ParcelDynamics) = d.surface_pressure
+AtmosphereModels.base_pressure(d::ParcelDynamics) = d.base_pressure
 AtmosphereModels.standard_pressure(d::ParcelDynamics) = d.standard_pressure
 
 #####
@@ -225,7 +228,7 @@ AtmosphereModels.standard_pressure(d::ParcelDynamics) = d.standard_pressure
 
 function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, constants, microphysics)
     FT = eltype(grid)
-    p₀ = convert(FT, d.surface_pressure)
+    p₀ = convert(FT, d.base_pressure)
     pˢᵗ = convert(FT, d.standard_pressure)
     g = constants.gravitational_acceleration
 
@@ -341,7 +344,7 @@ Adapt.adapt_structure(to, d::ParcelDynamics) =
                    adapt(to, d.density),
                    adapt(to, d.pressure),
                    d.vertical_velocity_formulation,
-                   d.surface_pressure,
+                   d.base_pressure,
                    d.standard_pressure)
 
 Oceananigans.Architectures.on_architecture(to, d::ParcelDynamics) =
@@ -350,7 +353,7 @@ Oceananigans.Architectures.on_architecture(to, d::ParcelDynamics) =
                    on_architecture(to, d.density),
                    on_architecture(to, d.pressure),
                    d.vertical_velocity_formulation,
-                   d.surface_pressure,
+                   d.base_pressure,
                    d.standard_pressure)
 
 #####
@@ -1074,23 +1077,32 @@ function TimeSteppers.time_step!(model::AtmosphereModel{<:ParcelDynamics, <:Any,
     state = dynamics.state
     U⁰ = ts.U⁰
 
+    # Stage abscissae, as in the field-model stepper: cₘ = αₘ (cₘ₋₁ + 1) with c₀ = 0, so
+    # u^(1) sits at tⁿ + Δt and u^(2) at tⁿ + Δt/2.
+    c¹ = ts.α¹              # = 1
+    c² = ts.α² * (c¹ + 1)   # = 1/2
+
+    # Compute the next time step a priori to reduce floating point error accumulation
+    tⁿ⁺¹ = model.clock.time + Δt
+
     # Store initial state for SSP RK3 stages
     store_initial_parcel_state!(U⁰, state)
 
     # Stage 1: u^(1) = u^(0) + Δt * G(u^(0))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α¹)
-    tick_stage!(model.clock, Δt)
+    tick_stage!(model.clock, c¹ * Δt)
 
     # Stage 2: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * G(u^(1)))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α²)
-    # Don't tick - still at t + Δt for time-dependent forcing
+
+    # Back to tⁿ + Δt/2, the abscissa of u^(2); `corrected_Δt` below restores the Δt/2.
+    tick_stage!(model.clock, (c² - c¹) * Δt)
 
     # Stage 3: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α³)
 
     # Final clock update (adjust for floating point error)
-    tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹ * Δt in stage 1
-    corrected_Δt = tⁿ⁺¹ - model.clock.time
+    corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     # Apply microphysics model update AFTER all RK3 stages and clock update
