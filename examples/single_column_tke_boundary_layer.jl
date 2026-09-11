@@ -484,7 +484,9 @@ function les_means(path)
              qˡ = ds["ql_mean"][:],
              u = ds["u_mean"][:],
              e = specific_les_tke(ds),
-             w′qᵗ′ = ds["qt_flux_z_mean"][:] .+ ds["qt_sgs_flux_z_mean"][:],
+             ## PyCLES archives centered mass fluxes. Normalize by the reference density
+             ## before comparing them to the SCM's kinematic -Kᶜ ∂z(qᵗ).
+             w′qᵗ′ = (ds["qt_flux_z_mean"][:] .+ ds["qt_sgs_flux_z_mean"][:]) ./ ds["rho0"][:],
              P = ds["tke_prod_S_mean"][:],
              B = ds["tke_prod_B_mean"][:],
              cloud_fraction = mean(ds["cloud_fraction"][ds["time"][:] .≥ ds.attrib["target_window_start"]]),

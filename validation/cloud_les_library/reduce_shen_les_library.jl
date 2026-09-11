@@ -202,6 +202,7 @@ function reduce_member!(output_path, source_path, source_name; site, gcm, experi
             # the original archive satisfies tke_mean = rho0_full * tke_nd_mean.
             attrib = name == "tke_mean" ? Dict("units" => "J m-3", "long_name" => "resolved turbulent kinetic energy density") :
                      name == "tke_nd_mean" ? Dict("units" => "m2 s-2", "long_name" => "resolved specific turbulent kinetic energy") :
+                     name in ("qt_flux_z", "qt_sgs_flux_z") ? Dict("units" => "kg m-2 s-1", "long_name" => "cell-centered nonprecipitating water mass flux") :
                      Dict{String, String}()
             profile(label, timemean(P[name][:, :], target); attrib)
         end
