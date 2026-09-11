@@ -465,6 +465,17 @@ end
 # The LES targets are the time means over the same window; the error of a column is the root mean
 # square of its difference from the LES below 3 km, above which both are relaxed to the same state.
 
+function specific_les_tke(ds)
+    haskey(ds, "tke_nd_mean") && return ds["tke_nd_mean"][:]
+    ## Older reduced artifacts kept energy density but omitted specific TKE. The exact
+    ## conversion uses rho0_full; rho0 is a nearby, staggered reference density.
+    density_name = haskey(ds, "rho0_full") ? "rho0_full" : "rho0"
+    if density_name == "rho0"
+        @warn "Legacy LES artifact: approximating specific TKE using the staggered rho0 profile. Regenerated profiles retain exact tke_nd_mean."
+    end
+    return ds["tke_mean"][:] ./ ds[density_name][:]
+end
+
 function les_means(path)
     ds = NCDataset(path)
     means = (z = ds["z"][:],
@@ -472,14 +483,10 @@ function les_means(path)
              qᵗ = ds["qt_mean"][:],
              qˡ = ds["ql_mean"][:],
              u = ds["u_mean"][:],
-             e = ds["tke_mean"][:],
+             e = specific_les_tke(ds),
              w′qᵗ′ = ds["qt_flux_z_mean"][:] .+ ds["qt_sgs_flux_z_mean"][:],
              P = ds["tke_prod_S_mean"][:],
              B = ds["tke_prod_B_mean"][:],
-             ## The LES budget's residual is its dissipation: the shear and buoyancy production,
-             ## the transport and pressure terms, and what the SGS scheme diffuses
-             ε = -(ds["tke_prod_S_mean"][:] .+ ds["tke_prod_B_mean"][:] .+ ds["tke_prod_T_mean"][:] .+
-                   ds["tke_prod_P_mean"][:] .+ ds["tke_prod_A_mean"][:] .+ ds["tke_prod_D_mean"][:]),
              cloud_fraction = mean(ds["cloud_fraction"][ds["time"][:] .≥ ds.attrib["target_window_start"]]),
              surface_temperature = mean(ds["surface_temperature"][:]))
     close(ds)
@@ -531,8 +538,10 @@ detail_les = map(les_means, details)
 
 # The top row is the state — liquid-water potential temperature, total water, cloud liquid — and the
 # bottom row the turbulence: the turbulent kinetic energy, the total-water flux, and the TKE budget of
-# shear production ``P``, buoyancy flux ``B`` and dissipation ``-ε`` against the LES's, whose
-# dissipation is the residual of its budget. Solid lines are the dry static stability, dashed the
+# shear production ``P``, buoyancy flux ``B`` and closure dissipation ``-ε``. The LES curves show
+# resolved shear and buoyancy production; its total dissipation cannot be reconstructed from
+# these archived terms without verifying the budget definitions and accounting for the TKE tendency.
+# Solid lines are the dry static stability, dashed the
 # moist; blue is Nakanishi–Niino, red CATKE; black is the LES. The flux and budget axes are scaled
 # to the LES, and the budget is shown for the moist-``N²`` configurations; the dry ones run off the
 # axes, for reasons the figures make plain.
@@ -561,7 +570,7 @@ function detail_figure(name, columns, les)
     below = les.z .≤ ztop
     xlims!(ax_θ, minimum(les.θˡ[below]) - 1, maximum(les.θˡ[below]) + 1)
     xlims!(ax_F, -0.5e3 * maximum(abs, les.w′qᵗ′[below]), 3e3 * maximum(abs, les.w′qᵗ′[below]))
-    budget_scale = 3e4 * maximum(abs, vcat(les.P[below], les.B[below], les.ε[below]))
+    budget_scale = 3e4 * maximum(abs, vcat(les.P[below], les.B[below]))
     xlims!(ax_b, -budget_scale, budget_scale)
 
     les_kw = (color = :black, linewidth = 3.5)
@@ -572,7 +581,6 @@ function detail_figure(name, columns, les)
     lines!(ax_F, 1e3 .* les.w′qᵗ′, les.z; les_kw...)
     lines!(ax_b, 1e4 .* les.P, les.z; les_kw..., linestyle = :solid)
     lines!(ax_b, 1e4 .* les.B, les.z; les_kw..., linestyle = :dash)
-    lines!(ax_b, -1e4 .* les.ε, les.z; les_kw..., linestyle = :dot)
     vlines!(ax_b, [0]; color = :gray80, linewidth = 1)
 
     for (set, column) in pairs(columns)
@@ -593,7 +601,7 @@ function detail_figure(name, columns, les)
 
     axislegend(ax_θ, position = :lt, framevisible = false)
     axislegend(ax_b, [LineElement(linestyle = :solid), LineElement(linestyle = :dash), LineElement(linestyle = :dot)],
-               ["P", "B", "−ε"], position = :rt, framevisible = false)
+               ["P", "B", "−ε (SCM)"], position = :rt, framevisible = false)
     return fig
 end
 

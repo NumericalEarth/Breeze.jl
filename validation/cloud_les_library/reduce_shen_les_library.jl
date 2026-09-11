@@ -102,7 +102,7 @@ const TARGET_WINDOW = 2 * 86400 # the final two days
 # Time-mean profiles over the final `TARGET_WINDOW` seconds
 const TARGET_PROFILES = ("thetali_mean", "qt_mean", "qv_mean", "ql_mean", "qr_mean", "temperature_mean",
                          "theta_rho_mean", "u_mean", "v_mean", "cloud_fraction", "rh_mean",
-                         "tke_mean", "tke_prod_S", "tke_prod_B", "tke_prod_D", "tke_prod_T", "tke_prod_P", "tke_prod_A",
+                         "tke_mean", "tke_nd_mean", "tke_prod_S", "tke_prod_B", "tke_prod_D", "tke_prod_T", "tke_prod_P", "tke_prod_A",
                          "qt_flux_z", "qt_sgs_flux_z", "s_flux_z", "s_sgs_flux_z",
                          "u_sgs_flux_z", "v_sgs_flux_z", "w_sgs_flux_z",
                          "w_mean2", "qt_mean2", "thetali_mean2", "buoyancy_frequency_mean",
@@ -127,7 +127,7 @@ const INITIAL_PROFILES = ("thetali_mean", "qt_mean", "u_mean", "v_mean", "temper
 const NUDGING_TARGETS = ("u_mean", "v_mean", "thetali_mean", "qt_mean")
 const NUDGING_TENDENCIES = ("dudt_nudge", "dvdt_nudge", "dtdt_nudge", "dqtdt_nudge")
 
-const REFERENCE_PROFILES = ("p0", "rho0", "temperature0", "qv0")
+const REFERENCE_PROFILES = ("p0", "rho0", "rho0_full", "temperature0", "qv0")
 
 timemean(x, sel) = vec(mean(view(x, :, sel), dims=2))
 
@@ -198,7 +198,12 @@ function reduce_member!(output_path, source_path, source_name; site, gcm, experi
         for name in TARGET_PROFILES
             haskey(P, name) || continue
             label = endswith(name, "_mean") ? name : name * "_mean"
-            profile(label, timemean(P[name][:, :], target))
+            # PyCLES stores both TKE density and specific TKE. Preserve both explicitly:
+            # the original archive satisfies tke_mean = rho0_full * tke_nd_mean.
+            attrib = name == "tke_mean" ? Dict("units" => "J m-3", "long_name" => "resolved turbulent kinetic energy density") :
+                     name == "tke_nd_mean" ? Dict("units" => "m2 s-2", "long_name" => "resolved specific turbulent kinetic energy") :
+                     Dict{String, String}()
+            profile(label, timemean(P[name][:, :], target); attrib)
         end
 
         for name in HOURLY_PROFILES
