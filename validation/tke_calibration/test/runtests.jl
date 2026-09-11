@@ -8,6 +8,23 @@ using Breeze.TurbulenceClosures: ConstantStabilityFunctions, RiDependentStabilit
 using Oceananigans.Units
 using Oceananigans: RectilinearGrid, Flat, Bounded
 
+@testset "the ensemble mean is an independent forward evaluation" begin
+    parameters = reshape([1.0, 3.0], 1, :)
+    augmented = hcat(parameters, mean(parameters; dims = 2))
+    # A nonlinear forward map makes the two notions of mean distinguishable.
+    G, diagnostic = BreezeCalibration.ensemble_mean_diagnostics(parameters, augmented .^ 2,
+                                                                [0.0], Diagonal([1.0]))
+    @test size(G) == (1, 2) && G == [1.0 9.0]
+    @test diagnostic.mean_G == [4.0] && diagnostic.mean_parameters == [2.0]
+    @test diagnostic.mean_objective == 8.0
+    @test diagnostic.mean_G != vec(mean(G; dims = 2))
+    history(values, T = 2.0) = [(; mean_objective = value, evaluation_pseudotime = T) for value in values]
+    @test BreezeCalibration.mean_objective_plateau(history([2.0, 1.5, 1.0, 1.001, 1.002, 1.001]))
+    @test !BreezeCalibration.mean_objective_plateau(history([2.0, 1.5, 1.2, 1.1, 1.0, 0.9]))
+    @test !BreezeCalibration.mean_objective_plateau(history(fill(1.0, 6), 0.5))
+    @test !BreezeCalibration.mean_objective_plateau(history([1.0, 2.0, 2.0, 2.0, 2.0, 2.0]))
+end
+
 @testset "optimizer configuration survives checkpoint serialization" begin
     scheduler = DataMisfitController()
     accelerator = NesterovAccelerator()
@@ -189,6 +206,10 @@ end
     @test saved["parameter_names"] == collect(String.(parameter_names(ConstantSpace())))
     @test maximum(history[1].G) > 250 # real potential temperatures, not empty-window zero means
     @test maximum(abs, history[1].G[:, 1] - history[1].G[:, 2]) > 1e-8
+    @test size(history[1].G, 2) == 3 && length(history[1].mean_G) == size(history[1].G, 1)
+    @test history[1].mean_parameters == vec(mean(history[1].ϕ; dims = 2))
+    @test history[1].mean_misfit > 0 && isfinite(history[1].mean_objective)
+    @test saved["selected_mean"].objective == history[1].mean_objective
     @test saved["run_configuration"].averaging_window == short_run.averaging_window
     protocol = BreezeCalibration.checkpoint_protocol(problem, ConstantSpace(), saved["y"], Diagonal(saved["Γ"]), :interactive)
     old = merge(saved, Dict("protocol_version" => PROTOCOL_VERSION - 1))

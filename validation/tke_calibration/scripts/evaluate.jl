@@ -25,8 +25,21 @@ best = argmin(history[end].misfit)
 calibrated_mean = named(space, vec(mean(ϕ_last, dims = 2)))
 calibrated_best = named(space, ϕ_last[:, best])
 training = saved["members"]
-labels = ["default (Nakanishi–Niino)", "EKI ensemble mean", "EKI best member"]
-sets = (default_parameters(space), calibrated_mean, calibrated_best)
+
+# The adopted optimum is `selected_mean`: the ensemble mean whose objective, evaluated directly
+# rather than inferred from the members, was lowest over the whole run. It is not in general the
+# last iteration's mean — EKI's objective is not monotone in the iteration, and under `optimize`
+# the run deliberately continues past the tempering budget. Score it whenever the checkpoint has it.
+selected = get(saved, "selected_mean", nothing)
+if isnothing(selected)
+    labels = ["default (Nakanishi–Niino)", "EKI final mean", "EKI best member"]
+    sets = (default_parameters(space), calibrated_mean, calibrated_best)
+    @warn "The checkpoint records no directly evaluated mean; scoring the final iteration's mean instead, which is not the adopted optimum"
+else
+    labels = ["default (Nakanishi–Niino)", "selected mean (adopted)", "EKI final mean", "EKI best member"]
+    sets = (default_parameters(space), named(space, vec(selected.parameters)), calibrated_mean, calibrated_best)
+    @info @sprintf("Adopted optimum from iteration %d, directly evaluated objective %.4f", selected.iteration, selected.objective)
+end
 
 println("parameters ($space):")
 for (label, p) in zip(labels, sets)

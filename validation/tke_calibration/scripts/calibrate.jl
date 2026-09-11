@@ -4,7 +4,7 @@
 #     julia -t auto --project scripts/calibrate.jl [N_ens] [space=ri|constant] [resolutions=50,100,hindcast] [arch=cpu|gpu]
 #                                                  [top=25000|les] [radiation=interactive|prescribed] [variables=θˡ,qᵗ,qˡ,u,v]
 #                                                  [pseudotime=1] [max_iterations=50] [localization=secnice|none]
-#                                                  [sites=2,5,8,...] [months=01,07]
+#                                                  [sites=2,5,8,...] [months=01,07] [optimize=true]
 #                                                  [output=...] [resume=...]
 #
 # `space=ri` (default) calibrates the 17 parameters of the Ri-dependent stability functions, `space=constant`
@@ -54,6 +54,12 @@ rng = MersenneTwister(seed)
 # the step, so it is where the time for a finer step comes from.
 Δt = parse(Float64, get(options, "dt", "60"))
 radiation_interval = parse(Float64, get(options, "radiation_interval", "600"))
+# Pseudo time 1 is where the tempering says the ensemble approximates the posterior; it is not where
+# the objective stops improving, and it is the objective at the *adopted* coefficients that matters.
+# `optimize=true` evaluates the ensemble mean directly each iteration and continues past the
+# tempering budget until that objective plateaus, retaining the best evaluated mean as
+# `selected_mean`. Use it for final coefficients; the default reproduces the tempering-only run.
+optimize = get(options, "optimize", "false") == "true"
 # Training members: by default two months at eight sites along the transect — Peru and California
 # stratocumulus, the deep tropics, and the trades — leaving the other months and sites for evaluation.
 #
@@ -72,7 +78,7 @@ isempty(missing_members) || error("The library has no member for $missing_member
 # The training split is part of what identifies a calibration, so it belongs in the default filename
 tag = (space isa RiDependentSpace ? "ri" : "constant") * "_" * join(resolutions, "_") *
       (isnothing(top) ? "" : "_top$(round(Int, top))") * (radiation == :interactive ? "_rrtmgp" : "") *
-      "_n$(length(training))_dt$(round(Int, Δt))_r$(round(Int, radiation_interval / 60))" * (seed == 1 ? "" : "_seed$seed")
+      (optimize ? "_opt" : "") * "_n$(length(training))_dt$(round(Int, Δt))_r$(round(Int, radiation_interval / 60))" * (seed == 1 ? "" : "_seed$seed")
 output = get(options, "output", joinpath(@__DIR__, "..", "results", "eki_$tag.jld2"))
 
 @info "Loading $(length(training)) training members"
@@ -92,7 +98,7 @@ else
     @info "Resuming EKI from $resume toward pseudo time $target_pseudotime ($space, grids of $cells cells)"
 end
 ekp, prior, ϕ, history = run_eki(problem; space, N_ens, target_pseudotime, max_iterations, output, resume, radiation,
-                                 architecture, localization_method, rng, Δt, radiation_interval)
+                                 architecture, localization_method, rng, Δt, radiation_interval, optimize)
 
 println("\nfinal ensemble (constrained parameters):")
 for (k, name) in enumerate(parameter_names(space))

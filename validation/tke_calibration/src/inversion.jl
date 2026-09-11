@@ -85,8 +85,8 @@ Rebuild an ensemble Kalman process from a saved `history` of (constrained ensemb
 replaying the saved forward maps through the update. The update is deterministic (no stochastic
 perturbation with an accelerator, and both `SECNice` and the Nesterov accelerator are deterministic), so
 the replay reproduces the state of the original process — including the accelerator's momentum and the
-scheduler's pseudo time — which is verified against the saved ensembles at every step. If the replay drifts
-from what was saved, the process is rebuilt from the last saved ensemble instead, losing only momentum.
+scheduler's pseudo time — which is verified against the saved ensembles at every step. A drift from the
+saved ensembles is an error: silently dropping momentum would change the optimization experiment.
 
 Returns the process and the history with the pseudo-time bookkeeping of the replay filled in.
 """
@@ -94,13 +94,11 @@ function replay(prior, history, y, Γ; rng, scheduler, accelerator, localization
     # Schedulers and accelerators carry mutable state, so each process gets its own copy
     ekp = build_process(unconstrained(prior, history[1].ϕ), y, Γ; rng, scheduler = deepcopy(scheduler), accelerator = deepcopy(accelerator), localization_method)
     replayed = []
-    exact = true
     for h in history
         ϕ = get_ϕ_final(prior, ekp)
         discrepancy = maximum(abs.(ϕ .- h.ϕ) ./ abs.(h.ϕ))
         if discrepancy > tolerance
-            @warn @sprintf("Replay of iteration %d differs from the checkpoint (max relative discrepancy %.2e)", h.iteration, discrepancy)
-            exact = false
+            error(@sprintf("Replay of iteration %d differs from the checkpoint (max relative discrepancy %.2e); refusing to change optimizer state silently", h.iteration, discrepancy))
         end
         if get(h, :applied_update, true)
             terminate = update_ensemble!(ekp, h.G)
@@ -109,13 +107,6 @@ function replay(prior, history, y, Γ; rng, scheduler, accelerator, localization
             Δt = h.Δt
         end
         push!(replayed, merge(h, (; Δt, pseudotime = sum(get_Δt(ekp)))))
-    end
-
-    if !exact # start afresh from the last saved ensemble, applying its saved update
-        T = sum(get_Δt(ekp)[1:end-1])
-        ekp = build_process(unconstrained(prior, history[end].ϕ), y, Γ; rng, scheduler = remaining(deepcopy(scheduler), T), accelerator = deepcopy(accelerator), localization_method)
-        update_ensemble!(ekp, history[end].G)
-        @info @sprintf("Rebuilt the process from the ensemble of iteration %d at pseudo time %.3f", history[end].iteration, T)
     end
 
     return ekp, replayed
@@ -178,6 +169,10 @@ Pass `resume = "results/eki.jld2"` to continue from a checkpoint: the saved forw
 through the update (see [`replay`](@ref)) and the run continues toward the target.
 The protocol version, targets, noise, members, grids, radiation, run configuration, and optimizer must agree.
 For a short diagnostic run, pass both `stop_time` and an `averaging_window` within that run.
+Every iteration evaluates an additional column at the constrained ensemble mean, excluded from the
+EKI update. `optimize = true` continues past the tempering budget until that directly evaluated
+objective plateaus; this stopping diagnostic must be checked with independent seeds and local
+perturbations. The best evaluated mean is retained separately as `selected_mean` in the checkpoint.
 """
 function run_eki(problem::AnyProblem; space = RiDependentSpace(), N_ens = 20, target_pseudotime = 1, max_iterations = 50,
                  rng = MersenneTwister(1), σ = default_observation_noise, spread = 0.5, output = "results/eki.jld2",
@@ -190,6 +185,12 @@ function run_eki(problem::AnyProblem; space = RiDependentSpace(), N_ens = 20, ta
                  localization_method = SECNice(),
                  resume = nothing)
 
+    objective_patience >= 1 || error("objective_patience must be positive")
+    minimum_optimization_iterations >= 1 || error("minimum_optimization_iterations must be positive")
+    objective_tolerance > 0 || error("objective_tolerance must be positive")
+    if optimize && scheduler isa DataMisfitController && scheduler.on_terminate == "stop"
+        error("Optimization mode requires a scheduler that continues beyond its tempering budget")
+    end
     prior = prior_distribution(space; spread)
     y, Γ = observations(problem; σ)
     protocol = checkpoint_protocol(problem, space, y, Γ, radiation)
