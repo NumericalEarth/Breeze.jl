@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How stability changes turbulent mixing</title>
+<style>
+:root{color-scheme:light;--ink:#172936;--muted:#526574;--line:#dbe4e7;--paper:#f5f8f8}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,sans-serif}main{max-width:1200px;margin:auto;padding:42px 24px}h1{font-size:clamp(30px,4vw,48px);line-height:1.12;letter-spacing:-.035em;margin:10px 0 22px}h2{font-size:23px;line-height:1.25;margin:0 0 12px}p{max-width:900px}.eyebrow{color:#087f83;letter-spacing:.12em;font-size:12px;font-weight:750;text-transform:uppercase}.notice{background:#fff1dd;border-left:4px solid #c78729;padding:12px 18px;margin:24px 0}.controls,.panel{background:white;border:1px solid var(--line);border-radius:12px;padding:22px}.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;position:sticky;top:0;z-index:2;box-shadow:0 4px 15px #1231}.controls label{display:block;font-weight:650;font-size:14px}.controls input{width:100%;accent-color:#087f83}.value{font-variant-numeric:tabular-nums;color:#087f83;font-size:21px;font-weight:650}.charts{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:20px 0}.panel h3{margin:0;font-size:18px}.sub{color:var(--muted);font-size:14px;margin:3px 0 12px}.panel svg{display:block;width:100%;height:auto}.legend{display:flex;flex-wrap:wrap;gap:18px;margin:22px 0 8px}.legend label{cursor:pointer;font-size:14px}.swatch{display:inline-block;width:22px;height:4px;vertical-align:middle;margin:0 6px}.tablewrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}th,td{padding:11px 12px;text-align:right;border-bottom:1px solid var(--line)}th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-weight:600}.explain{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin:30px 0}.explain b{display:block;font-size:18px;margin-bottom:8px}.explain p{margin:0;color:var(--muted);font-size:15px}.formula{font-family:Georgia,serif;font-size:20px}.small{font-size:13px;color:var(--muted)}details{margin-top:24px}pre{white-space:pre-wrap;font-size:12px}@media(max-width:700px){main{padding:24px 14px}.controls{position:static;grid-template-columns:1fr;gap:10px}.charts,.explain{grid-template-columns:1fr}}
+</style>
+<main>
+<div class="eyebrow">Breeze · TKE closure laboratory</div>
+<h1>How stability changes<br>turbulent mixing</h1>
+<p>A turbulence closure decides how vigorously eddies transport momentum, heat and water—and how much turbulent kinetic energy they retain. Calibration changes those decisions through four stability functions and the mixing length.</p>
+<div class="notice" id="status"></div>
+<div class="explain">
+<div><b>1 · Diagnose the environment</b><p>The Richardson number compares buoyancy to shear: <span class="formula">Ri = N² / S²</span>. Negative Ri means unstable stratification. Large positive Ri means buoyancy resists vertical motion strongly relative to shear.</p></div>
+<div><b>2 · Set the transport</b><p>Each diffusivity is <span class="formula">K = S(Ri) ℓ √e</span>. A constant closure uses the same coefficient in every regime. A variable-Ri closure can respond differently in unstable, neutral and stable air.</p></div>
+<div><b>3 · Evolve the energy</b><p>Shear and buoyancy produce or remove TKE, while dissipation removes it. Changing a coefficient therefore changes both transport now and the energy available for transport later.</p></div>
+</div>
+<div class="controls">
+<div><label for="ri">Richardson number · Ri</label><div id="riValue" class="value"></div><input id="ri" type="range" min="0" max="1000" value="350"></div>
+<div><label for="energy">Turbulent kinetic energy · e</label><div id="energyValue" class="value"></div><input id="energy" type="range" min="-3" max="1" step=".01" value="-.3"></div>
+<div><label for="length">Mixing length · ℓ</label><div id="lengthValue" class="value"></div><input id="length" type="range" min="0" max="2.7" step=".01" value="1.7"></div>
+</div>
+<div class="legend" id="legend"></div>
+<div class="charts" id="charts"></div>
+<section class="panel"><h2>What these coefficients do at the selected state</h2>
+<p class="sub">This local calculation holds e and ℓ fixed to isolate the coefficients. In the SCM, both evolve and feed back on the result.</p>
+<div class="tablewrap"><table id="transport"></table></div></section>
+<section class="panel" style="margin-top:20px"><h2>Read the combinations, not just the individual numbers</h2>
+<p class="sub">Neutral local-equilibrium limits, neglecting TKE transport, reveal combinations that can remain similar even when individual coefficients move. They are diagnostic limits rather than imposed constraints.</p>
+<div class="tablewrap"><table id="neutral"></table></div>
+<p class="small">κ = Cˢ (Sᵘ(0)³ / Sᴰ(0))¼ · e/u★² = 1/√(Sᵘ(0)Sᴰ(0)) · Pr = Sᵘ(0)/Sᶜ(0). A fitted profile improvement alone does not establish that every physical limit improves.</p></section>
+<details><summary>Coefficient values and provenance</summary><pre id="provenance"></pre></details>
+</main>
+<script>
+const models=__MODEL_DATA__;
+const colors=['#243d50','#00888b','#c36335','#7b53a1','#567e2b'];
+const channels=[['Cᵘ','Momentum transport','Kᵘ = Sᵘ ℓ √e'],['Cᶜ','Heat and water transport','Kᶜ = Sᶜ ℓ √e'],['Cᵉ','TKE transport','Kᵉ = Sᵉ ℓ √e'],['Cᴰ','Dissipation','ε = Sᴰ e³ᐟ² / ℓ']];
+const selected=new Set(models.map((_,i)=>i));
+function sf(model,key,ri){const p=model.parameters;if(key in p)return p[key];if(ri<0)return p[key+'⁻'];const r=Math.max(0,Math.min(1,(ri-p['Ri⁰'])/p['Riᵟ']));return p[key+'⁰']+(p[key+'⁺']-p[key+'⁰'])*r;}
+function riAt(t){return t<.2?-1+t/.2:Math.expm1((t-.2)/.8*Math.log(21));}
+function tx(ri){return ri<0?.2*(ri+1):.2+.8*Math.log1p(ri)/Math.log(21);}
+function fmt(v){return Math.abs(v)<.001||Math.abs(v)>=1e4?v.toExponential(2):Number(v.toPrecision(4)).toString();}
+document.getElementById('status').textContent='These curves show '+models.map(m=>m.label+' ('+m.status+')').join('; ')+'. Ensemble-size and numerical convergence must be established separately.';
+document.getElementById('provenance').textContent=JSON.stringify(models,null,2);
+const legend=document.getElementById('legend');
+models.forEach((m,i)=>{const label=document.createElement('label'),input=document.createElement('input'),swatch=document.createElement('span');input.type='checkbox';input.checked=true;input.onchange=()=>{input.checked?selected.add(i):selected.delete(i);draw();};swatch.className='swatch';swatch.style.background=colors[i%colors.length];label.append(input,swatch,document.createTextNode(m.label));legend.append(label);});
+channels.forEach(([key,title,formula],i)=>{const card=document.createElement('section');card.className='panel';card.innerHTML='<h3>'+title+'</h3><div class="sub">'+formula+' · stability coefficient on a logarithmic scale</div><svg id="chart'+i+'" viewBox="0 0 480 260" role="img" aria-label="'+title+' versus Richardson number"></svg>';document.getElementById('charts').append(card);});
+function draw(){const ri=riAt(+document.getElementById('ri').value/1000),e=10**+document.getElementById('energy').value,l=10**+document.getElementById('length').value;
+ document.getElementById('riValue').textContent=fmt(ri)+(ri<0?' · unstable':' · stable/neutral');document.getElementById('energyValue').textContent=fmt(e)+' m²/s²';document.getElementById('lengthValue').textContent=fmt(l)+' m';
+ channels.forEach(([key],c)=>{const samples=Array.from({length:401},(_,k)=>riAt(k/400));const all=models.flatMap((m,i)=>selected.has(i)?samples.map(r=>sf(m,key,r)):[]);const low=Math.floor(Math.log10(Math.max(1e-8,Math.min(...all)))),high=Math.max(low+1,Math.ceil(Math.log10(Math.max(...all))));const x=r=>48+414*tx(r),y=s=>218-190*(Math.log10(Math.max(s,1e-8))-low)/(high-low);let parts=['<rect x="48" y="18" width="82.8" height="200" fill="#fff2e8"/><rect x="130.8" y="18" width="331.2" height="200" fill="#f1f7f7"/>'];
+ if(!all.length){document.getElementById('chart'+c).innerHTML='';return;}
+ for(let p=low;p<=high;p++){const yy=y(10**p);parts.push(`<line x1="48" x2="462" y1="${yy}" y2="${yy}" stroke="#dbe4e7"/><text x="41" y="${yy+4}" text-anchor="end" fill="#526574" font-size="11">${fmt(10**p)}</text>`);}
+ for(const r of [-1,0,.25,1,5,20])parts.push(`<text x="${x(r)}" y="239" text-anchor="middle" fill="#526574" font-size="11">${r}</text>`);
+ models.forEach((m,i)=>{if(!selected.has(i))return;const d=samples.map((r,k)=>(k?'L':'M')+x(r).toFixed(2)+','+y(sf(m,key,r)).toFixed(2)).join(' ');parts.push(`<path d="${d}" fill="none" stroke="${colors[i%colors.length]}" stroke-width="2.6"/><circle cx="${x(ri)}" cy="${y(sf(m,key,ri))}" r="4" fill="${colors[i%colors.length]}"/>`);});parts.push(`<line x1="${x(ri)}" x2="${x(ri)}" y1="18" y2="218" stroke="#526574" stroke-dasharray="3 4"/><text x="255" y="256" text-anchor="middle" fill="#526574" font-size="11">Richardson number (expanded near zero)</text>`);document.getElementById('chart'+c).innerHTML=parts.join('');});
+ let table='<tr><th>Closure</th><th>Kᵘ (m²/s)</th><th>Kᶜ (m²/s)</th><th>Kᵉ (m²/s)</th><th>ε (m²/s³)</th><th>Pr</th></tr>',neutral='<tr><th>Closure</th><th>κ</th><th>e/u★²</th><th>Neutral Pr</th></tr>';
+ models.forEach((m,i)=>{if(!selected.has(i))return;const u=sf(m,'Cᵘ',ri),c=sf(m,'Cᶜ',ri),te=sf(m,'Cᵉ',ri),d=sf(m,'Cᴰ',ri),u0=sf(m,'Cᵘ',0),c0=sf(m,'Cᶜ',0),d0=sf(m,'Cᴰ',0);table+='<tr><td>'+m.label+'</td>'+[u*l*Math.sqrt(e),c*l*Math.sqrt(e),te*l*Math.sqrt(e),d*e**1.5/l,u/c].map(v=>'<td>'+fmt(v)+'</td>').join('')+'</tr>';neutral+='<tr><td>'+m.label+'</td>'+[m.parameters['Cˢ']*(u0**3/d0)**.25,1/Math.sqrt(u0*d0),u0/c0].map(v=>'<td>'+fmt(v)+'</td>').join('')+'</tr>';});document.getElementById('transport').innerHTML=table;document.getElementById('neutral').innerHTML=neutral;
+}
+['ri','energy','length'].forEach(id=>document.getElementById(id).addEventListener('input',draw));draw();
+</script></html>

@@ -8,9 +8,8 @@
 #   Δt                  — the time step (default 60, 30, 15 s)
 #   radiation_interval   — how often RRTMGP is called (default 600, 1200, 1800 s)
 #
-# The second is also the main performance knob: interactive radiation is ~80 % of the step cost at
-# production ensemble size, so if the score is insensitive between 10 and 30 min, the calibration runs
-# roughly twice as fast for nothing.
+# Radiation is a substantial part of the cost. Test its sampling interval independently: a faster
+# forward map is useful only if the scored profiles remain sufficiently accurate.
 #
 #     julia -t auto --project scripts/discretization_sensitivity.jl [dts=60,30,15] [intervals=600,1200,1800]
 #                                                                   [resolution=50] [arch=cpu|gpu]
@@ -44,8 +43,9 @@ source_checkpoint = get(options, "checkpoint", nothing)
 if !isnothing(source_checkpoint)
     saved = load(source_checkpoint)
     saved["protocol_version"] == PROTOCOL_VERSION || error("Checkpoint physics version differs")
-    history = saved["history"]
-    params = reshape(vec(mean(history[end].ϕ; dims = 2)), :, 1)
+    haskey(saved, "selected_mean") && !isnothing(saved["selected_mean"]) ||
+        error("Checkpoint must contain a directly evaluated selected mean")
+    params = reshape(copy(saved["selected_mean"].parameters), :, 1)
 end
 
 @info "Discretization sensitivity (protocol $PROTOCOL_VERSION): $(length(members)) members on the " *
@@ -59,15 +59,41 @@ les(v, j) = observation_scales[v] .* regrid_column(members[j].targets[v], proble
 function sweep(label, values, run, finest)
     runs = Dict{Float64, Any}()
     for value in values
-        t = @elapsed means = run(value)
-        runs[value] = means
         # Preserve every expensive run independently, even if a later refinement fails.
         isempty(dirname(output)) || mkpath(dirname(output))
         partial = output * "." * (label == "Δt" ? "dt" : "radiation") * ".$value.jld2"
-        jldsave(partial; protocol_version = PROTOCOL_VERSION, label, value, means, params,
+        reference = get(options, "reference", "")
+        reusable = isfile(partial) ? partial : reference
+        reused = false
+        if isfile(reusable)
+            saved = load(reusable)
+            same_protocol = saved["protocol_version"] == PROTOCOL_VERSION &&
+                            saved["params"] == params && saved["zf"] == problem.zf &&
+                            saved["observation_zf"] == zo &&
+                            saved["members"] == [(m.site, m.month) for m in members]
+            saved_dt = saved["label"] == "Δt" ? saved["value"] : saved["radiation_dt"]
+            saved_interval = saved["label"] == "Δt" ? saved["radiation_interval"] : saved["value"]
+            wanted_dt = label == "Δt" ? value : radiation_dt
+            wanted_interval = label == "Δt" ? radiation_interval : value
+            reused = same_protocol && saved_dt == wanted_dt && saved_interval == wanted_interval
+            if reused
+                means, t = saved["means"], 0.0
+                @info "Reusing validated forward evaluation" reusable
+            elseif reusable == partial
+                error("Existing partial result has incompatible settings: $partial")
+            end
+        end
+        if !reused
+            t = @elapsed means = run(value)
+        end
+        runs[value] = means
+        if !(reused && reusable == partial)
+            jldsave(partial; protocol_version = PROTOCOL_VERSION, label, value, means, params,
                         radiation_interval, radiation_dt, source_checkpoint,
                         members = [(m.site, m.month) for m in members], zf = problem.zf,
-                        observation_zf = zo, resolution, top = problem.zf[end], wall = t)
+                        observation_zf = zo, resolution, top = problem.zf[end], wall = t,
+                            reused_from = reused ? reusable : nothing)
+        end
         @printf "  %s = %-7g %7.0f s wall\n" label value t
         flush(stdout)
     end
