@@ -305,6 +305,13 @@ surface_temperature_value(ref) = @allowscalar ref.surface_temperature[1, 1, 1]
 # parameterized by T(z) and holds no data below its bottom face, so extending T¹ downward is the
 # only reduction available here; the θ-parameterized `ExnerReferenceState` integrates its profile
 # instead (see `moist_hydrostatic_pressure`).
+#
+# The constructor does not use this reduction: given θ analytically it integrates in closed form,
+# exact for constant θ. So the two disagree on a raised domain — for z = (2000, 6000), θ₀ = 288,
+# they anchor at 79320.21 and 78446.23 Pa, a 1.1% shift of the stored ground pressure and of the
+# boundary value aliased to it, from recomputing an unchanged reference. The closed form is the
+# accurate one; the gap below the domain does not shrink with resolution. Both are the identity
+# when the bottom face is at z = 0.
 function update_reference_surface_state!(ref::ReferenceState, constants)
     FT = eltype(ref)
     Rᵈ = dry_air_gas_constant(constants)
