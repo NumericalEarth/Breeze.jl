@@ -233,11 +233,12 @@ function AtmosphereModel(grid;
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
-    # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3
-    # (per-substep solve) and with AcousticRungeKutta3 (moisture and tracers via the generic
-    # implicit step; momentum and the thermodynamic variable via a per-stage solve after the
-    # acoustic substep loop — see TimeSteppers/acoustic_substep_helpers.jl). On terrain-following
-    # grids the split partitions the contravariant velocity (see `advecting_vertical_velocity`).
+    # Adaptive implicit vertical advection is supported for all prognostics with the SSP
+    # Runge-Kutta steppers (per-substep solve) and with AcousticRungeKutta3 (moisture and
+    # tracers via the generic implicit step; momentum and the thermodynamic variable via a
+    # per-stage solve after the acoustic substep loop — see
+    # TimeSteppers/acoustic_substep_helpers.jl). On terrain-following grids the split
+    # partitions the contravariant velocity (see `advecting_vertical_velocity`).
     advection_needs_solver = needs_implicit_solver(momentum_advection) ||
                              needs_implicit_solver(default_scalar_advection) ||
                              any(needs_implicit_solver, values(scalar_advection))
@@ -380,8 +381,13 @@ end
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
 timestepper_uses_dynamics(::Val) = false
 timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
+timestepper_uses_dynamics(::Val{:SSPRungeKutta43}) = true
 timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
 timestepper_uses_dynamics(s::Symbol) = timestepper_uses_dynamics(Val(s))
+
+# The name a time stepper prints under in `show(::AtmosphereModel)`. Steppers that are
+# aliases of one parametric type (the SSP Runge-Kutta family) extend this to print the alias.
+timestepper_name(timestepper) = nameof(typeof(timestepper))
 
 function Base.summary(model::AtmosphereModel)
     A = nameof(typeof(model.grid.architecture))
@@ -408,7 +414,7 @@ Base.eltype(model::AtmosphereModel) = eltype(model.grid)
 Architectures.architecture(model::AtmosphereModel) = model.grid.architecture
 
 function Base.show(io::IO, model::AtmosphereModel)
-    TS = nameof(typeof(model.timestepper))
+    TS = timestepper_name(model.timestepper)
     Mic = nameof(typeof(model.microphysics))
     tracernames = prettykeys(model.tracers)
     forcing_summary = atmosphere_model_forcing_summary(model)

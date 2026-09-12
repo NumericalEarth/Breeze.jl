@@ -73,7 +73,7 @@ Thermodynamic closures needed for ``R^m``, ``c^{pm}`` and the Exner function ``�
 
 ## Time discretization and pressure correction
 
-The anelastic formulation uses a multi-stage time integrator for advection, Coriolis, buoyancy, forcing, and tracer terms, coupled with a projection step to enforce the anelastic constraint at each substep. Denote the predicted momentum by ``\widetilde{(ρᵣ \boldsymbol{u})}``. The projection is
+The anelastic formulation uses a multi-stage time integrator for advection, Coriolis, buoyancy, forcing, and tracer terms, coupled with a projection step to enforce the anelastic constraint at each substep. Two strong stability preserving Runge-Kutta integrators are available: the default three-stage [`SSPRungeKutta3`](@ref) of [Shu and Osher (1988)](@cite Shu1988Efficient), and the four-stage [`SSPRungeKutta43`](@ref) of [Kraaijevanger (1991)](@cite Kraaijevanger1991), which is also third order but preserves strong stability at twice the time step, chosen with `timestepper = :SSPRungeKutta43`. Denote the predicted momentum by ``\widetilde{(ρᵣ \boldsymbol{u})}``. The projection is
 
 1. Solve the variable-coefficient Poisson problem for the pressure correction potential ``\phi``:
 
