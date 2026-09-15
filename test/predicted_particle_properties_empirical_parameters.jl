@@ -174,6 +174,14 @@ function fall_speed_test_diameters(FT)
     return sort!(Ds)
 end
 
+# Building the P3 scheme parses a multi-megabyte lookup table and runs the rain
+# quadrature: about 0.13 s and 130 MiB each time. The scheme is immutable and the
+# testsets below only read from it, so they share one default instance per float type.
+const DEFAULT_P3_FLOAT32 = PredictedParticlePropertiesMicrophysics(Float32)
+const DEFAULT_P3_FLOAT64 = PredictedParticlePropertiesMicrophysics(Float64)
+shared_p3(::Type{Float32}) = DEFAULT_P3_FLOAT32
+shared_p3(::Type{Float64}) = DEFAULT_P3_FLOAT64
+
 @testset "P3 empirical parameter containers" begin
 
     #####
@@ -309,7 +317,7 @@ end
         reference = P3_REFERENCE[FT]
         rtol = integral_tolerance(FT)
 
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = shared_p3(FT)
         ν = FT(P3_REFERENCE_VENTILATION_VISCOSITY)
         Dᵛ = FT(P3_REFERENCE_VENTILATION_DIFFUSIVITY)
 
@@ -339,7 +347,7 @@ end
         @test custom_cloud.shape_parameter ≈ liu_daum_shape_parameter(FT(100e6), custom_shape)
         @test custom_cloud.freezing_psd_correction != default_cloud.freezing_psd_correction
 
-        default_p3 = PredictedParticlePropertiesMicrophysics(FT)
+        default_p3 = shared_p3(FT)
         custom_p3 = PredictedParticlePropertiesMicrophysics(FT; cloud = custom_cloud)
         @test custom_p3.cloud.shape === custom_shape
 
@@ -407,7 +415,7 @@ end
     end
 
     @testset "Ventilation coefficients enter the expected terms [$FT]" for FT in all_float_types()
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = shared_p3(FT)
         parameters = p3.process_rates
         table = p3.rain.evaporation
 
@@ -477,7 +485,7 @@ end
         @test p3.rain.evaporation isa PPP.TabulatedFunction1D
 
         # The tables were actually built from the custom law, not the default one.
-        default_p3 = PredictedParticlePropertiesMicrophysics(FT)
+        default_p3 = shared_p3(FT)
         @test p3.rain.velocity_mass(FT(2.5)) != default_p3.rain.velocity_mass(FT(2.5))
         @test p3.rain.evaporation(FT(2.5)) != default_p3.rain.evaporation(FT(2.5))
 
@@ -603,7 +611,7 @@ end
         @test @inferred(liu_daum_shape_parameter(FT(1e8), shape)) isa FT
         @test @inferred(rain_fall_speed(FT(1e-4), one(FT), fall_speed)) isa FT
 
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = shared_p3(FT)
         integral = @inferred rain_ventilation_integral(p3.rain.evaporation, ventilation,
                                                        FT(1e-4), FT(1e3), FT(1.5e-5),
                                                        FT(2.2e-5), p3.process_rates)

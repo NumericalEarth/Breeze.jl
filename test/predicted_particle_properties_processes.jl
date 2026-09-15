@@ -318,11 +318,16 @@ function documented_predict_supersaturation_disabled_semantics()
            count(required, theory) >= 2
 end
 
+# Building the P3 scheme parses a multi-megabyte lookup table and runs the rain
+# quadrature: about 0.13 s and 130 MiB each time. The testsets below only read from
+# the scheme, so they share one default instance instead of rebuilding it ~37 times.
+const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
+
 @testset "P3 Processes" begin
 
     @testset "Rime splintering respects its temperature and size guards" begin
         FT = Float64
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = DEFAULT_P3
         parameters = p3.process_rates
 
         cloud_riming = FT(3e-7)
@@ -389,7 +394,7 @@ end
 
     @testset "rain DSD lambda limiter recomputes number" begin
         FT = Float64
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = DEFAULT_P3
         parameters = p3.process_rates
         qʳ = FT(1e-3)
         nʳ = FT(1e-5)
@@ -417,7 +422,7 @@ end
 
     @testset "ice lambda limiter recomputes number" begin
         FT = Float64
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = DEFAULT_P3
         constants = ThermodynamicConstants(FT)
         ρ = FT(0.8)
         q = MoistureMassFractions(FT(1e-3))
@@ -577,7 +582,7 @@ end
 
     @testset "P3 sediments cloud mass and number with Stokes velocities" begin
         FT = Float64
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = DEFAULT_P3
         constants = ThermodynamicConstants(FT)
         grid = RectilinearGrid(CPU(), FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
         μ = Breeze.AtmosphereModels.materialize_microphysical_fields(p3, grid, NamedTuple())
@@ -661,7 +666,7 @@ end
 
     @testset "microphysical_state plumbs velocities.w into ℳ.w (parcel path)" begin
         FT = Float64
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         ρ = FT(1)
         μ = (ρqᶜˡ = FT(0), ρnᶜˡ = FT(0), ρqʳ = FT(0), ρnʳ = FT(0),
              ρqⁱ = FT(0), ρnⁱ = FT(0), ρqᶠ = FT(0), ρbᶠ = FT(0),
@@ -676,7 +681,7 @@ end
         grid = RectilinearGrid(CPU(), FT;
                                size = (1, 1, 4), x = (0, 1), y = (0, 1), z = (0, 4),
                                topology = (Periodic, Periodic, Bounded))
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
 
         μ = (; ρqᶜˡ = CenterField(grid), ρnᶜˡ = CenterField(grid),
              ρqʳ  = CenterField(grid), ρnʳ  = CenterField(grid),
@@ -696,7 +701,7 @@ end
     @testset "compute_p3_process_rates uses resolved supersaturation forcing" begin
         FT = Float64
         constants = ThermodynamicConstants(FT)
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
 
         ρ = FT(1)
         T = FT(280)
@@ -804,7 +809,7 @@ end
     #####
 
     @testset "rain_autoconversion_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
 
         # KK2000 formula with typical cumulus values
@@ -833,7 +838,7 @@ end
     end
 
     @testset "rain_accretion_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
 
         qᶜˡ = FT(1e-3)
@@ -865,7 +870,7 @@ end
         p3_kk = PredictedParticlePropertiesMicrophysics(FT; warm_rain_scheme = KhairoutdinovKogan2000())
 
         # KK2000 is the default and the only scheme
-        p3_default = PredictedParticlePropertiesMicrophysics(FT)
+        p3_default = DEFAULT_P3
         @test p3_default.warm_rain_scheme isa KhairoutdinovKogan2000
         @test KhairoutdinovKogan2000 <: AbstractWarmRainScheme
         @test rain_autoconversion_rate(p3_default, qᶜˡ, Nᶜˡ, ρ, qʳ) ==
@@ -899,7 +904,7 @@ end
     end
 
     @testset "rain_evaporation_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -930,7 +935,7 @@ end
     end
 
     @testset "coupled_saturation_adjustment_rates" begin
-        p3_base = PredictedParticlePropertiesMicrophysics()
+        p3_base = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
         process_rates = ProcessRate(FT; sink_limiting_timescale=FT(10))
@@ -1062,7 +1067,7 @@ end
     end
 
     @testset "coupled_saturation_adjustment_rates wet-ice coating" begin
-        p3_base = PredictedParticlePropertiesMicrophysics()
+        p3_base = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
         process_rates = ProcessRate(FT; sink_limiting_timescale=FT(10))
@@ -1180,7 +1185,7 @@ end
 
     @testset "CCN activation and the vapor caps share one psychrometric convention" begin
         FT = Float64
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = DEFAULT_P3
         constants = ThermodynamicConstants(FT)
         τ = p3.process_rates.sink_limiting_timescale
 
@@ -1285,7 +1290,7 @@ end
     end
 
     @testset "ice_melting_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -1317,7 +1322,7 @@ end
     end
 
     @testset "ice_melting_rates partitioning" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -1367,7 +1372,7 @@ end
     # these three helpers reverting to a hard-coded global.
     @testset "Configured numerical floors reach the pure PSD helpers" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
 
         default_floors = PPP.NumericalFloors(FT)
@@ -1401,7 +1406,7 @@ end
 
     @testset "wet_growth_capacity keeps sensible term outside 2π/Lf" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -1439,7 +1444,7 @@ end
 
     @testset "wet growth preserves collection number sinks" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -1511,7 +1516,7 @@ end
 
     @testset "wet growth is inactive below the hydrometeor gate" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -1582,7 +1587,7 @@ end
 
     @testset "refreezing_rate keeps sensible term outside 2π/Lf" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -1612,7 +1617,7 @@ end
     end
 
     @testset "ice_aggregation_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
 
         qi = FT(1e-4)
@@ -1648,7 +1653,7 @@ end
     end
 
     @testset "cloud_riming_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
 
         qc = FT(1e-3)
@@ -1681,7 +1686,7 @@ end
     end
 
     @testset "rain_riming_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
 
         # Ice must dominate rain for rain riming
@@ -1708,7 +1713,7 @@ end
     end
 
     @testset "rime_density follows the Cober-List Ri fit" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -1761,7 +1766,7 @@ end
     end
 
     @testset "Rime consistency enforcement" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         parameters = p3.process_rates
 
@@ -1882,7 +1887,7 @@ end
     end
 
     @testset "compute_p3_process_rates integration" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -1950,7 +1955,7 @@ end
     @testset "rain self-collection and breakup net into a single signed term" begin
         FT = Float64
         constants = ThermodynamicConstants(FT)
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = DEFAULT_P3
 
         ρ = FT(1.0)
         T = FT(283.15)
@@ -2108,7 +2113,7 @@ end
     @testset "above-freezing rain collection uses table number kernel" begin
         FT = Float64
         constants = ThermodynamicConstants(FT)
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = DEFAULT_P3
 
         ρ = FT(1.0)
         T = FT(278.15)
@@ -2145,7 +2150,7 @@ end
     end
 
     @testset "compute_p3_process_rates vapor-limits cloud evaporation before cloud budget" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -2188,7 +2193,7 @@ end
     end
 
     @testset "predict_supersaturation applies G&M before M&G process rates" begin
-        p3_base = PredictedParticlePropertiesMicrophysics()
+        p3_base = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
         process_rates = ProcessRate(FT;
@@ -2239,7 +2244,7 @@ end
     end
 
     @testset "predict_supersaturation tendency matches formulation final recompute" begin
-        p3_base = PredictedParticlePropertiesMicrophysics()
+        p3_base = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
         process_rates = ProcessRate(FT;
@@ -2273,7 +2278,7 @@ end
     end
 
     @testset "predict_supersaturation final recompute uses formulation state with splintering active" begin
-        p3_base = PredictedParticlePropertiesMicrophysics()
+        p3_base = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
         process_rates = ProcessRate(FT;
@@ -2309,7 +2314,7 @@ end
     end
 
     @testset "predict_supersaturation reset matches potential-temperature formulation state" begin
-        p3_base = PredictedParticlePropertiesMicrophysics()
+        p3_base = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
         τ = FT(10)
@@ -2342,7 +2347,7 @@ end
     end
 
     @testset "predict_supersaturation reset matches static-energy formulation state" begin
-        p3_base = PredictedParticlePropertiesMicrophysics()
+        p3_base = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
         τ = FT(10)
@@ -2379,7 +2384,7 @@ end
     end
 
     @testset "compute_p3_process_rates uses prognostic cloud number" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -2439,7 +2444,7 @@ end
         constants = ThermodynamicConstants(FT)
 
         # Load the P3 lookup tables
-        p3_tab = PredictedParticlePropertiesMicrophysics()
+        p3_tab = DEFAULT_P3
 
         ρ = FT(1.0)
 

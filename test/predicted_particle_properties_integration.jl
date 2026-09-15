@@ -16,6 +16,11 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Oceananigans.Fields: interior, location
 using Oceananigans.TimeSteppers: update_state!
 
+# Building the P3 scheme parses a multi-megabyte lookup table and runs the rain
+# quadrature: about 0.13 s and 130 MiB each time. The scheme is immutable and the
+# testsets below only read from it, so they share one default instance.
+const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
+
 @testset "P3 atmosphere integration" begin
     @testset "Hallett–Mossop surface temperature follows the immersed bottom" begin
         FT = Float64
@@ -36,7 +41,7 @@ using Oceananigans.TimeSteppers: update_state!
     end
 
     @testset "Density reconciliation distinguishes specific inputs and preserved densities" begin
-        p3 = PredictedParticlePropertiesMicrophysics(Float64)
+        p3 = DEFAULT_P3
         CE = Breeze.CompressibleEquations
         specific_input_names = (:qᶜˡ, :qᶠ, :nⁱ)
         density_weighted_input_names =
@@ -50,7 +55,7 @@ using Oceananigans.TimeSteppers: update_state!
     end
 
     @testset "P3 contributes only physical condensate mass to total density" begin
-        p3 = PredictedParticlePropertiesMicrophysics(Float64)
+        p3 = DEFAULT_P3
         condensate_names = (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqʷⁱ)
 
         @test AtmosphereModels.condensate_field_names(p3) == condensate_names
@@ -95,7 +100,7 @@ using Oceananigans.TimeSteppers: update_state!
                                          base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = DEFAULT_P3
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
                                 microphysics = p3)
 
@@ -152,7 +157,7 @@ using Oceananigans.TimeSteppers: update_state!
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
 
-        prescribed = PredictedParticlePropertiesMicrophysics(FT)
+        prescribed = DEFAULT_P3
         @test isnothing(prescribed.aerosol)
         @test :ρnᶜˡ ∉ AtmosphereModels.prognostic_field_names(prescribed)
         @test :ρnᵃ ∉ AtmosphereModels.prognostic_field_names(prescribed)
@@ -244,7 +249,7 @@ using Oceananigans.TimeSteppers: update_state!
                                size = 4,
                                z = (0, 1000),
                                topology = (Flat, Flat, Bounded))
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = DEFAULT_P3
         model = AtmosphereModel(grid; dynamics = ParcelDynamics(FT), microphysics = p3)
 
         temperature_profile(z) = FT(285)
@@ -280,7 +285,7 @@ using Oceananigans.TimeSteppers: update_state!
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
-                                microphysics = PredictedParticlePropertiesMicrophysics(FT))
+                                microphysics = DEFAULT_P3)
         μ = model.microphysical_fields
 
         # `div_ρUc` reads these as advecting velocities via `Az_qᶜᶜᶠ`, so they must be
@@ -357,7 +362,7 @@ using Oceananigans.TimeSteppers: update_state!
                                          base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        p3 = DEFAULT_P3
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
                                 microphysics = p3)
         μ = model.microphysical_fields
@@ -454,7 +459,7 @@ using Oceananigans.TimeSteppers: update_state!
                                             standard_pressure = FT(1e5),
                                             reference_potential_temperature = z -> FT(280))
             return AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
-                                   microphysics = PredictedParticlePropertiesMicrophysics(FT),
+                                   microphysics = DEFAULT_P3,
                                    timestepper = :AcousticRungeKutta3)
         end
 
@@ -593,7 +598,7 @@ using Oceananigans.TimeSteppers: update_state!
         model_without_reference =
             AtmosphereModel(grid; dynamics = dynamics_without_reference,
                             thermodynamic_constants = constants,
-                            microphysics = PredictedParticlePropertiesMicrophysics(FT),
+                            microphysics = DEFAULT_P3,
                             timestepper = :AcousticRungeKutta3)
         set!(model_without_reference; ρ = fixed_total_density, T = FT(280),
              ℋ = relative_humidity, enforce_mass_conservation = false)
@@ -687,7 +692,7 @@ using Oceananigans.TimeSteppers: update_state!
             reference_potential_temperature = z -> FT(280))
         model = AtmosphereModel(
             grid; dynamics,
-            microphysics = PredictedParticlePropertiesMicrophysics(FT),
+            microphysics = DEFAULT_P3,
             timestepper = :AcousticRungeKutta3)
         set!(model; ρᵈ = FT(1), T = FT(280), qᵛ = FT(0.01),
              qᶜˡ = FT(1e-4),

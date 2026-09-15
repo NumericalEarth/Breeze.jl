@@ -54,11 +54,16 @@ using Oceananigans.Fields: interior
 
 const PPP = Breeze.Microphysics.PredictedParticleProperties
 
+# Building the P3 scheme parses a multi-megabyte lookup table and runs the rain
+# quadrature: about 0.13 s and 130 MiB each time. The scheme is immutable and the
+# testsets below only read from it, so they share one default instance.
+const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
+
 @testset "P3 Integrals" begin
 
     @testset "Smoke tests - type construction" begin
         # Test main scheme construction
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         @test p3 isa PredictedParticlePropertiesMicrophysics
         @test p3.process_rates.liquid_water_density == 1000.0
         @test p3.minimum_mass_mixing_ratio == 1e-14
@@ -86,7 +91,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         dynamics = Breeze.AnelasticDynamics(reference_state)
         model = Breeze.AtmosphereModel(grid; dynamics,
                                        thermodynamic_constants = constants,
-                                       microphysics = PredictedParticlePropertiesMicrophysics(FT))
+                                       microphysics = DEFAULT_P3)
 
         qᵗ = FT(0.02)
         qᶜˡ = FT(0.005)
@@ -223,7 +228,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
     @testset "Thermodynamic constants are shared" begin
         # `process_rates` holds the single water density every rate reads.
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         @test p3.process_rates.liquid_water_density ≈ 1000.0
 
         default_constants = ThermodynamicConstants()
@@ -254,7 +259,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     @testset "Prognostic field names" begin
         # ρnᶜˡ is not advected by default, because the prescribed-Nᶜˡ path takes
         # droplet number from `cloud.number_concentration`.
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         names = prognostic_field_names(p3)
 
         @test p3.process_rates.predict_supersaturation === false
@@ -287,7 +292,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
     @testset "Show methods" begin
         # Just test that show methods don't error
-        p3 = PredictedParticlePropertiesMicrophysics()
+        p3 = DEFAULT_P3
         io = IOBuffer()
         show(io, p3)
         @test length(take!(io)) > 0
