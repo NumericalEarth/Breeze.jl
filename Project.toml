@@ -31,7 +31,7 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 [extensions]
 BreezeCloudMicrophysicsExt = ["CloudMicrophysics", "SpecialFunctions"]
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
-BreezeReactantExt = ["Reactant", "Oceananigans"]
+BreezeReactantExt = "Reactant"
 
 [compat]
 Adapt = "4.3.0"
