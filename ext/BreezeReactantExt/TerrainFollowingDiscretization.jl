@@ -1,3 +1,6 @@
+# Reactant must be loaded before OceananigansReactantExt can be looked up, and Oceananigans is
+# a trigger of this extension so that its Reactant extension may load while this one precompiles.
+using Reactant: Reactant
 using Oceananigans: Oceananigans
 using Breeze.TerrainFollowingDiscretization: TerrainFollowingVerticalDiscretization,
                                              LinearDecay, TwoLevelDecay, TwoLevelBasis
