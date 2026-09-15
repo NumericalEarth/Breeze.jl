@@ -126,9 +126,6 @@ end
     F_specific_profile(z) = FT(-1e-5) * (1 + z / 100)
 
     # Path A: manual ρᵣ multiply, supplied under :ρθ (the pre-change idiom)
-    # `AtmosphereModel` defaults to `AnelasticDynamics(ReferenceState(grid, constants))`
-    # with `constants = ThermodynamicConstants(eltype(grid))`, so build the reference
-    # state directly rather than a throwaway model just to read its density.
     ρᵣ = ReferenceState(grid).density
     F_density_field = Field{Nothing, Nothing, Center}(grid)
     set!(F_density_field, z -> F_specific_profile(z))
