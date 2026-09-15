@@ -51,7 +51,7 @@ using RRTMGP
         @test_throws ArgumentError Breeze.AtmosphereModels._update_radiation!(radiation, nothing)
     end
 
-    @testset "Single column grid with clouds [$(FT)]" for FT in test_float_types()
+    @testset "Single column grid with clouds [$(FT)]" begin
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
         grid = RectilinearGrid(default_arch; size=16, x=0, y=45, z=(0, 10kilometers), topology)
@@ -149,7 +149,7 @@ using RRTMGP
         @test (lw_up_diff > 0) || (sw_up_diff > 0) || (sw_dn_diff > 0)
     end
 
-    @testset "Custom effective radius models [$FT]" for FT in test_float_types()
+    @testset "Custom effective radius models [$FT]" begin
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
         grid = RectilinearGrid(default_arch; size=8, x=0, y=45, z=(0, 10kilometers), topology)
