@@ -229,7 +229,6 @@ end
 #####
 
 function _track_rest_drift(model, Δt; n_steps = 200, sample_every = 10)
-    ref = model.dynamics.reference_state
     set_rest_state!(model)
 
     drift = Float64[]
