@@ -81,6 +81,7 @@ using Oceananigans.Utils: IterationInterval
 
 include("gray_radiative_transfer_model.jl")
 include("rrtmgp_shared_utilities.jl")
+include("rrtmgp_column_batching.jl")
 include("clear_sky_radiative_transfer_model.jl")
 include("all_sky_radiative_transfer_model.jl")
 
