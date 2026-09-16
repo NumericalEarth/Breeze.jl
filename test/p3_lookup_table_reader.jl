@@ -11,11 +11,6 @@ using Breeze.Microphysics.PredictedParticleProperties:
     prepare_interpolation,
     rain_terminal_velocities
 
-# Building the P3 scheme parses a multi-megabyte lookup table and runs the rain
-# quadrature: about 0.13 s and 130 MiB each time. The scheme is immutable and the
-# testsets below only read from it, so they share one default instance.
-const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
-
 @testset "Rime-density-indexed table transforms" begin
     # Tables that return whichever argument the rime-density index occupies: the last of
     # four for the ice tables, the last of five for the ice-rain tables. The wrappers
@@ -102,7 +97,7 @@ end
     raised = NumericalFloors(FT; divisor = 1e-15)
     raised_p3 = PredictedParticlePropertiesMicrophysics(
         FT; process_rates = ProcessRate(FT; floors = raised))
-    default_p3 = DEFAULT_P3
+    default_p3 = PredictedParticlePropertiesMicrophysics(FT)
 
     @test raised_p3.process_rates.floors.divisor == FT(1e-15)
 
@@ -121,13 +116,13 @@ end
 
 @testset "PredictedParticlePropertiesMicrophysics constructor with lookup tables" begin
     # Test constructor interface
-    p3 = DEFAULT_P3
+    p3 = PredictedParticlePropertiesMicrophysics()
     @test p3 isa PredictedParticlePropertiesMicrophysics
     @test p3.ice.ice_rain.number isa RimeDensityIndexedTable5D
 end
 
 @testset "Process rates with table-loaded ice integrals" begin
-    p3 = DEFAULT_P3
+    p3 = PredictedParticlePropertiesMicrophysics()
 
     FT = Float64
     qⁱ = FT(1e-4)    # ice mass mixing ratio

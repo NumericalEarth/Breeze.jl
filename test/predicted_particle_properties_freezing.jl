@@ -56,11 +56,6 @@ using Breeze.Thermodynamics:
 using Oceananigans: CPU, RectilinearGrid
 using Oceananigans.Fields: interior
 
-# Building the P3 scheme parses a multi-megabyte lookup table and runs the rain
-# quadrature: about 0.13 s and 130 MiB each time. The scheme is immutable and the
-# testsets below only read from it, so they share one default instance.
-const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
-
 @testset "P3 Tabulated and Freezing" begin
 
     #####
@@ -185,7 +180,7 @@ const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
 
     @testset "rain_evaporation_rate sign with tabulated scheme" begin
         # With tabulated rain, evaporation in subsaturated air should be positive magnitude (M7)
-        p3_tab = DEFAULT_P3
+        p3_tab = PredictedParticlePropertiesMicrophysics()
 
         FT = Float64
         constants = ThermodynamicConstants(FT)
@@ -208,7 +203,7 @@ const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
     @testset "tabulated rain evaporation - positive, finite, bounded" begin
         # Verify PSD-integrated rain evaporation from the tables
         # is physically reasonable.
-        p3_tab = DEFAULT_P3
+        p3_tab = PredictedParticlePropertiesMicrophysics()
 
         FT = Float64
         constants = ThermodynamicConstants(FT)
@@ -231,7 +226,7 @@ const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
     end
 
     @testset "tabulated rain terminal velocity - positive and monotone" begin
-        p3_tab = DEFAULT_P3
+        p3_tab = PredictedParticlePropertiesMicrophysics()
 
         FT = Float64
         ρ = FT(1.0)
@@ -258,7 +253,7 @@ const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
         # down to ≈1.56e-15 kg, and newly nucleated ice is ≈3.77e-15 kg. The lookup
         # takes the raw m̄ and clamps only the table coordinate, so small ice must fall
         # slower than heavier ice instead of collapsing to a single speed.
-        p3_tab = DEFAULT_P3
+        p3_tab = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         ρ  = FT(0.8)
         Fᶠ = FT(0.0)
@@ -278,7 +273,7 @@ const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
     end
 
     @testset "Homogeneous freezing" begin
-        p3 = DEFAULT_P3
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         # --- homogeneous_freezing_cloud_rate ---
@@ -347,7 +342,7 @@ const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
     end
 
     @testset "Immersion freezing PSD weighting (H1)" begin
-        p3 = DEFAULT_P3
+        p3 = PredictedParticlePropertiesMicrophysics(Float64)
 
         # Cloud immersion freezing: PSD correction on mass only.
         # Large drops freeze preferentially, so mean frozen mass > mean drop mass.
@@ -533,6 +528,7 @@ const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(Float64)
     end
 
     @testset "Vapor + cloud + rain + ice mass conservation" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         ρ = FT(1.0)

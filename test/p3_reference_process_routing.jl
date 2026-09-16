@@ -88,18 +88,11 @@ function routing_derived_state(p3, air_density, microphysical_state,
     return properties, state
 end
 
-# The default P3 scheme parses a multi-megabyte lookup table and runs the rain
-# quadrature, so build it (and the constants) once and share it across the testsets
-# below, none of which mutate either object.
-const DEFAULT_FT = Float64
-const DEFAULT_P3 = PredictedParticlePropertiesMicrophysics(DEFAULT_FT)
-const DEFAULT_CONSTANTS = ThermodynamicConstants(DEFAULT_FT)
-
 @testset "P3 process routing regressions" begin
     @testset "near-liquid whole-particle cleanup transfers existing number" begin
-        FT = DEFAULT_FT
-        p3 = DEFAULT_P3
-        constants = DEFAULT_CONSTANTS
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
         τ = p3.process_rates.sink_limiting_timescale
         air_density = one(FT)
         air_temperature = FT(268.15)
@@ -131,9 +124,9 @@ const DEFAULT_CONSTANTS = ThermodynamicConstants(DEFAULT_FT)
     end
 
     @testset "wet-ice vapor exchange uses total particle mass" begin
-        FT = DEFAULT_FT
-        p3 = DEFAULT_P3
-        constants = DEFAULT_CONSTANTS
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
         air_density = one(FT)
         air_temperature = FT(272.15)
         pressure = FT(8e4)
@@ -165,9 +158,9 @@ const DEFAULT_CONSTANTS = ThermodynamicConstants(DEFAULT_FT)
     end
 
     @testset "post-process whole-particle clip removes rime companions exactly" begin
-        FT = DEFAULT_FT
-        p3 = DEFAULT_P3
-        constants = DEFAULT_CONSTANTS
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
         τ = p3.process_rates.sink_limiting_timescale
         air_density = one(FT)
         air_temperature = FT(272)
@@ -226,10 +219,10 @@ const DEFAULT_CONSTANTS = ThermodynamicConstants(DEFAULT_FT)
     end
 
     @testset "immersion-freezing budgets preserve frozen-particle mass" begin
-        FT = DEFAULT_FT
-        p3 = DEFAULT_P3
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
         parameters = p3.process_rates
-        constants = DEFAULT_CONSTANTS
+        constants = ThermodynamicConstants(FT)
         τ = parameters.sink_limiting_timescale
         air_temperature = FT(136)
         air_density = one(FT)
@@ -298,9 +291,9 @@ const DEFAULT_CONSTANTS = ThermodynamicConstants(DEFAULT_FT)
     end
 
     @testset "Hallett–Mossop diameter is volume-equivalent" begin
-        FT = DEFAULT_FT
-        p3 = DEFAULT_P3
-        constants = DEFAULT_CONSTANTS
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
         air_density = one(FT)
         air_temperature = p3.process_rates.splintering_temperature_peak
         pressure = FT(8e4)
@@ -352,7 +345,7 @@ const DEFAULT_CONSTANTS = ThermodynamicConstants(DEFAULT_FT)
         FT = Float64
         process_rates = ProcessRate(FT; liquid_fraction_active = false)
         p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates)
-        constants = DEFAULT_CONSTANTS
+        constants = ThermodynamicConstants(FT)
         τ = process_rates.sink_limiting_timescale
         air_density = one(FT)
 
