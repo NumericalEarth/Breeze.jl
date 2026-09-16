@@ -16,7 +16,7 @@ using Test
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation)
 
@@ -76,7 +76,7 @@ end
     dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                     terrain_metrics = metrics,
                                     reference_potential_temperature = θ_profile,
-                                    surface_pressure = FT(101325),
+                                    base_pressure = FT(101325),
                                     standard_pressure = FT(1e5))
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants)
 
@@ -104,7 +104,7 @@ end
 
     p₀ = FT(101500)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
 
     # Test with no microphysics first (no saturation adjustment effects)
@@ -159,7 +159,7 @@ end
 
     grid = RectilinearGrid(default_arch; size=(1, 1, 8), x=(0, 1e3), y=(0, 1e3), z=(0, 1e3))
     constants = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
     microphysics = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
 
     @testset "Scalar ℋ (subsaturated)" begin

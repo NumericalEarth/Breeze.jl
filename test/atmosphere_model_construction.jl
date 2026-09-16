@@ -66,7 +66,7 @@ end
 
     for p₀ in (101325, 100000), θ₀ in (288, 300), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
         @testset let p₀ = p₀, θ₀ = θ₀, formulation = formulation
-            reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+            reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
 
             # Check that interpolating to the first face (k=1) recovers surface values
             # Note: surface_density correctly converts potential temperature to temperature using the Exner function
@@ -103,7 +103,7 @@ end
 
     p₀ = 101325
     θ₀ = 300
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = SaturationAdjustment()
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation, microphysics)
@@ -137,7 +137,7 @@ end
 
     p₀ = 101325
     θ₀ = 300
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
 
     for formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)

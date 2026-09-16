@@ -7,7 +7,7 @@
 ##### Nishizawa & Kitamura 2018).
 #####
 ##### `FilteredSurfaceVelocities` holds the filtered velocity components and the
-##### filtered surface-layer virtual potential temperature difference `Δθᵥ = θᵥ(z₁) - θᵥ₀`,
+##### filtered surface-layer virtual potential temperature difference `Δθᵥ = θᵥ(z₁) - θᵥˢ`,
 ##### the stability input of stability-dependent bulk coefficients. Per-BC scalar
 ##### sensible heat differences (Δθ, Δs) and vapor differences (Δqᵛ) are held separately
 ##### in `FilteredSurfaceScalar`.
@@ -26,7 +26,7 @@ using Oceananigans.Utils: launch!, KernelParameters, prettysummary
 struct FilteredSurfaceVelocities{U, V, Θ, H, FT, R, RΘ}
     u :: U   # Field{Face, Center, Nothing}
     v :: V   # Field{Center, Face, Nothing}
-    Δθᵥ :: Θ # Field{Center, Center, Nothing} — filtered surface-layer difference θᵥ(z₁) - θᵥ₀
+    Δθᵥ :: Θ # Field{Center, Center, Nothing} — filtered surface-layer difference θᵥ(z₁) - θᵥˢ
     height :: H
     filter_timescale :: FT
     last_update :: R      # Ref{Tuple{Int, Int}} on CPU, Tuple{Int, Int} on GPU (for u, v)
@@ -54,7 +54,7 @@ an exponential (first-order) filter:
 where `τ` is a finite `filter_timescale`. The default `filter_timescale=Inf` disables
 temporal averaging: each update samples the current surface state directly.
 
-`Δθ̄ᵥ` filters the *result* the stability correction needs, ``Δθᵥ = θᵥ(z₁) - θᵥ₀``,
+`Δθ̄ᵥ` filters the *result* the stability correction needs, ``Δθᵥ = θᵥ(z₁) - θᵥˢ``,
 formed at every update by the attached `PolynomialCoefficient` from the instantaneous
 first-cell virtual potential temperature and specific humidity, the surface
 temperature, the moisture availability and the surface phase. Filtering the one
@@ -209,14 +209,16 @@ end
     @inbounds f̂[i, j, 1] = filter_surface_value(f̂[i, j, 1], fⁿ, ϵ)
 end
 
-# The surface-layer difference θᵥ(z₁) - θᵥ₀ is formed at the first cell (the height at
+# The surface-layer difference θᵥ(z₁) - θᵥˢ is formed at the first cell (the height at
 # which the bulk coefficient evaluates stability) from the instantaneous state and the
-# surface temperature `T₀` (a number, a field on the bottom, or a function of the wall
-# coordinates and time, evaluated by `wall_value`), and the result is filtered.
-@kernel function _update_filtered_Δθᵥ!(Δθ̂ᵥ, coef, T₀, grid, clock, ϵ)
+# surface temperature `Tˢ` (a number, a field on the bottom, or a function of the wall
+# coordinates and time, evaluated by `wall_value`), and the result is filtered. `fields`
+# is the surface-layer field tuple the instantaneous θᵥ diagnostic reads.
+@kernel function _update_filtered_Δθᵥ!(Δθ̂ᵥ, coef, Tˢ, grid, clock, fields, ϵ)
     i, j = @index(Global, NTuple)
-    T₀ᵢⱼ = wall_value(i, j, grid, Bottom(), T₀, clock)
-    Δθᵥⁿ = surface_layer_Δθᵥ(i, j, coef, T₀ᵢⱼ)
+    Tˢᵢⱼ = wall_value(i, j, grid, Bottom(), Tˢ, clock)
+    pˢ = wall_air_pressure(i, j, 1, grid, Bottom(), nothing, fields, coef.thermodynamic_constants)
+    Δθᵥⁿ = surface_layer_Δθᵥ(i, j, 1, grid, coef, Tˢᵢⱼ, fields, pˢ)
     @inbounds Δθ̂ᵥ[i, j, 1] = filter_surface_value(Δθ̂ᵥ[i, j, 1], Δθᵥⁿ, ϵ)
 end
 
@@ -288,13 +290,17 @@ $(TYPEDSIGNATURES)
 
 Set the filtered surface-layer virtual potential temperature difference to its current
 value, formed by the bulk coefficient `coef` from the first-cell state and the surface
-temperature `T₀` (a number, a field on the bottom, or a function of the wall coordinates
+temperature `Tˢ` (a number, a field on the bottom, or a function of the wall coordinates
 and time, evaluated at `clock.time`).
+
+`fields` is the surface-layer field tuple ([`surface_layer_state`](@ref)); it is mandatory rather
+than defaulted, because the instantaneous θᵥ diagnostic evaluates itself from it and a kernel
+cannot report a useful error when it is missing.
 """
-function initialize_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, clock)
+function initialize_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, Tˢ, grid, clock, fields)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
-    launch!(arch, grid, kp, _update_filtered_Δθᵥ!, fv.Δθᵥ, coef, T₀, grid, clock, nothing)
+    launch!(arch, grid, kp, _update_filtered_Δθᵥ!, fv.Δθᵥ, coef, Tˢ, grid, clock, fields, nothing)
     return nothing
 end
 
@@ -302,14 +308,15 @@ end
 $(TYPEDSIGNATURES)
 
 Apply the exponential filter to the surface-layer virtual potential temperature difference,
-with the surface temperature `T₀` evaluated at `clock.time`.
+with the surface temperature `Tˢ` evaluated at `clock.time`. `fields` carries the same
+requirement as [`initialize_Δθᵥ!`](@ref).
 """
-function update_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, clock, Δt)
-    isinf(fv.filter_timescale) && return initialize_Δθᵥ!(fv, coef, T₀, grid, clock)
+function update_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, Tˢ, grid, clock, Δt, fields)
+    isinf(fv.filter_timescale) && return initialize_Δθᵥ!(fv, coef, Tˢ, grid, clock, fields)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     ϵ = Δt / fv.filter_timescale
-    launch!(arch, grid, kp, _update_filtered_Δθᵥ!, fv.Δθᵥ, coef, T₀, grid, clock, ϵ)
+    launch!(arch, grid, kp, _update_filtered_Δθᵥ!, fv.Δθᵥ, coef, Tˢ, grid, clock, fields, ϵ)
     return nothing
 end
 

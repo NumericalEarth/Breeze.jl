@@ -101,9 +101,9 @@ function default_aerosol_activation(FT::DataType = Float64; τⁿᵘᶜ = 1)
     mode = CMAM.Mode_κ(r_dry, stdev, Nᵃ₀, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
     aerosol_distribution = CMAM.AerosolDistribution((mode,))
 
-    activation_parameters = AerosolActivationParameters(FT)
+    activation = AerosolActivationParameters(FT)
 
-    return AerosolActivation(activation_parameters, aerosol_distribution, FT(τⁿᵘᶜ))
+    return AerosolActivation(activation, aerosol_distribution, FT(τⁿᵘᶜ))
 end
 
 
@@ -115,7 +115,7 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
 # Fields
 - `warm_processes`: [Seifert and Beheng (2006)](@cite SeifertBeheng2006) parameters bundling autoconversion, accretion, self-collection,
   breakup, evaporation, number adjustment, and size distribution parameters
-- `air_properties`: `AirProperties` for thermodynamic calculations
+- `air`: `AirProperties` for thermodynamic calculations
 - `cloud_liquid_fall_velocity`: `StokesRegimeVelType` for cloud droplet terminal velocity
 - `rain_fall_velocity`: `SB2006VelType` or `Chen2022VelTypeRain` for raindrop terminal velocity
 - `aerosol_activation`: `AerosolActivation` parameters for cloud droplet nucleation (or `nothing` to disable)
@@ -131,7 +131,7 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
 """
 struct TwoMomentCategories{W, AP, LV, RV, AA, TL} <: AbstractNumberConcentrationCategories
     warm_processes :: W
-    air_properties :: AP
+    air :: AP
     cloud_liquid_fall_velocity :: LV
     rain_fall_velocity :: RV
     aerosol_activation :: AA
@@ -143,7 +143,7 @@ Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
 """
     two_moment_cloud_microphysics_categories(FT = Oceananigans.defaults.FloatType;
                                              warm_processes = SB2006(FT),
-                                             air_properties = AirProperties(FT),
+                                             air = AirProperties(FT),
                                              cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
                                              rain_fall_velocity = SB2006VelType(FT),
                                              aerosol_activation = default_aerosol_activation(FT))
@@ -153,7 +153,7 @@ parameters and aerosol activation.
 
 # Keyword arguments
 - `warm_processes`: [Seifert-Beheng 2006](@cite SeifertBeheng2006) parameters for warm-rain microphysics
-- `air_properties`: Air properties for thermodynamic calculations
+- `air`: Air properties for thermodynamic calculations
 - `cloud_liquid_fall_velocity`: Terminal velocity parameters for cloud droplets (Stokes regime)
 - `rain_fall_velocity`: Terminal velocity parameters for rain drops
 - `aerosol_activation`: Aerosol activation parameters (default: continental aerosol).
@@ -169,13 +169,13 @@ parameters and aerosol activation.
 """
 function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.defaults.FloatType;
                                                   warm_processes = SB2006(FT),
-                                                  air_properties = AirProperties(FT),
+                                                  air = AirProperties(FT),
                                                   cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
                                                   rain_fall_velocity = SB2006VelType(FT),
                                                   aerosol_activation = default_aerosol_activation(FT),
                                                   τⁿᵘᵐ = FT(10))
 
-    return TwoMomentCategories(warm_processes, air_properties,
+    return TwoMomentCategories(warm_processes, air,
                                cloud_liquid_fall_velocity, rain_fall_velocity,
                                aerosol_activation, τⁿᵘᵐ)
 end
@@ -375,13 +375,13 @@ function AtmosphereModels.materialize_microphysical_fields(bμp::WPNE2M, grid, b
     # Cloud liquid terminal velocity (mass-weighted)
     wᶜˡ = ZFaceField(grid; boundary_conditions=w_bcs)
     # Cloud liquid terminal velocity (number-weighted)
-    wᶜˡₙ = ZFaceField(grid; boundary_conditions=w_bcs)
+    wⁿᶜˡ = ZFaceField(grid; boundary_conditions=w_bcs)
     # Rain terminal velocity (mass-weighted)
     wʳ = ZFaceField(grid; boundary_conditions=w_bcs)
     # Rain terminal velocity (number-weighted)
-    wʳₙ = ZFaceField(grid; boundary_conditions=w_bcs)
+    wⁿʳ = ZFaceField(grid; boundary_conditions=w_bcs)
 
-    return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wᶜˡₙ, wʳ, wʳₙ)
+    return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ)
 end
 
 #####
@@ -459,27 +459,27 @@ end
     𝕎_cl = cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
                                    qᶜˡ⁺, ρ, Nᶜˡ)
 
-    wᶜˡₙ = -𝕎_cl[1]  # number-weighted, negative = downward
+    wⁿᶜˡ = -𝕎_cl[1]  # number-weighted, negative = downward
     wᶜˡ = -𝕎_cl[2]   # mass-weighted
 
     # Rain terminal velocities: (number-weighted, mass-weighted)
     𝕎  = CM2.rain_terminal_velocity(sb, categories.rain_fall_velocity, qʳ⁺, ρ, Nʳ)
 
-    wʳₙ = -𝕎[1]  # number-weighted
+    wⁿʳ = -𝕎[1]  # number-weighted
     wʳ = -𝕎[2]   # mass-weighted
 
     # Apply bottom boundary condition
     bc = bμp.precipitation_boundary_condition
     wᶜˡ₀  = bottom_terminal_velocity(bc, wᶜˡ)
-    wᶜˡₙ₀ = bottom_terminal_velocity(bc, wᶜˡₙ)
+    wⁿᶜˡ₀ = bottom_terminal_velocity(bc, wⁿᶜˡ)
     wʳ₀   = bottom_terminal_velocity(bc, wʳ)
-    wʳₙ₀  = bottom_terminal_velocity(bc, wʳₙ)
+    wⁿʳ₀  = bottom_terminal_velocity(bc, wⁿʳ)
 
     @inbounds begin
         μ.wᶜˡ[i, j, k]  = ifelse(k == 1, wᶜˡ₀,  wᶜˡ)
-        μ.wᶜˡₙ[i, j, k] = ifelse(k == 1, wᶜˡₙ₀, wᶜˡₙ)
+        μ.wⁿᶜˡ[i, j, k] = ifelse(k == 1, wⁿᶜˡ₀, wⁿᶜˡ)
         μ.wʳ[i, j, k]   = ifelse(k == 1, wʳ₀,   wʳ)
-        μ.wʳₙ[i, j, k]  = ifelse(k == 1, wʳₙ₀,  wʳₙ)
+        μ.wⁿʳ[i, j, k]  = ifelse(k == 1, wⁿʳ₀,  wⁿʳ)
     end
 
     return nothing
@@ -522,8 +522,8 @@ end
 
 # Cloud liquid number: use number-weighted terminal velocity
 @inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnᶜˡ})
-    wᶜˡₙ = μ.wᶜˡₙ
-    return (; u = ZeroField(), v = ZeroField(), w = wᶜˡₙ)
+    wⁿᶜˡ = μ.wⁿᶜˡ
+    return (; u = ZeroField(), v = ZeroField(), w = wⁿᶜˡ)
 end
 
 # Rain mass: use mass-weighted terminal velocity
@@ -534,8 +534,8 @@ end
 
 # Rain number: use number-weighted terminal velocity
 @inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnʳ})
-    wʳₙ = μ.wʳₙ
-    return (; u = ZeroField(), v = ZeroField(), w = wʳₙ)
+    wⁿʳ = μ.wⁿʳ
+    return (; u = ZeroField(), v = ZeroField(), w = wⁿʳ)
 end
 
 #####
@@ -583,9 +583,9 @@ end
     # ===== Process rates =====
 
     # Aerosol activation (vapor → new cloud droplets)
-    Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air_properties,
+    Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air,
                                              ρ, ℳ, 𝒰, constants)
-    dNᶜˡ_act = aerosol_activation_tendency(categories.aerosol_activation, categories.air_properties,
+    dNᶜˡ_act = aerosol_activation_tendency(categories.aerosol_activation, categories.air,
                                             ρ, ℳ, 𝒰, constants)
 
     # Condensation on existing droplets, budget reduced by activation
@@ -595,7 +595,7 @@ end
     Sᶜᵒⁿᵈ_eff = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
 
     # Rain evaporation (mass and number)
-    evap = rain_evaporation_2m(sb, categories.air_properties, q, max(0, qʳ), ρ, Nʳ, T, constants)
+    evap = rain_evaporation_2m(sb, categories.air, q, max(0, qʳ), ρ, Nʳ, T, constants)
     Sᵉᵛᵃᵖ = max(evap.evap_rate_1, -max(0, qʳ) / τⁿᵘᵐ)
     dNʳ_evap = evap.evap_rate_0
 
@@ -820,7 +820,7 @@ Mass tendency for cloud liquid [kg/kg/s]
     constants,
 ) where {FT}
 
-    ap = aerosol_activation.activation_parameters
+    ap = aerosol_activation.activation
 
     # Compute number tendency using the disequilibrium approach
     dNᶜˡ_act = aerosol_activation_tendency(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
@@ -873,7 +873,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
     constants,
 ) where {FT}
 
-    ap = aerosol_activation.activation_parameters
+    ap = aerosol_activation.activation
     ad = aerosol_activation.aerosol_distribution
 
     # Compute maximum supersaturation

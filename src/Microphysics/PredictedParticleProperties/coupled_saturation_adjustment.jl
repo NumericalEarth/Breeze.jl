@@ -135,7 +135,7 @@ end
     # The Sc correction uses the thermodynamic air density, not the `lookups` correction.
     ρ_air = density(T, P, q, constants)
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ_air)
-    C_fv = ventilation_from_terms(lookups.ventilation, lookups.ventilation_enhanced,
+    C_fv = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
                                   ν, Dᵛ, ρ_correction, parameters.floors)
 
     # This is the raw inverse relaxation coefficient; the psychrometric correction
@@ -268,9 +268,9 @@ cloud/precipitation fraction framework is handled separately.
     rain_evaporation = min(max(0, -raw_rain_growth), max(0, qʳ) / τ)
 
     is_sublimation = raw_ice_growth < 0
-    calibration = ifelse(is_sublimation,
-                         p3.process_rates.calibration_factor_sublimation,
-                         p3.process_rates.calibration_factor_deposition)
+    ℂᵈⁱᶠᶠ₁ = p3.process_rates.calibration_factor_deposition
+    ℂᵈⁱᶠᶠ₂ = p3.process_rates.calibration_factor_sublimation
+    calibration = ifelse(is_sublimation, ℂᵈⁱᶠᶠ₂, ℂᵈⁱᶠᶠ₁)
     deposition_raw = raw_ice_growth * calibration
     # Sublimation is limited to the dry ice mass per unit time, `qⁱ / τ`.
     deposition = clamp(deposition_raw, -max(0, qⁱ) / τ, max(0, qᵛ) / τ)

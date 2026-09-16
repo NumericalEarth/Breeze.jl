@@ -109,7 +109,7 @@ interior(jordan_p, 1, 1, :) .= jordan_p_mb
 ## The only environmental pressure we need as a scalar is the surface value, which
 ## anchors both the reference state and the acoustic substepper. The rest of p(z)
 ## then follows hydrostatically from θ(z) inside `ReferenceState`.
-surface_pressure = first(jordan_p)
+base_pressure = first(jordan_p)
 
 # ## A look at the environment
 #
@@ -184,7 +184,7 @@ g = constants.gravitational_acceleration
 κ = Rᵈ / constants.dry_air.heat_capacity
 cᵖᵈ = constants.dry_air.heat_capacity
 
-reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature = θₑ)
+reference_state = ReferenceState(grid, constants; base_pressure, potential_temperature = θₑ)
 
 # ## Vortex kinematics — RMW(z) and modified-Rankine v(r, z)
 #
@@ -293,7 +293,7 @@ vortex_grid = RectilinearGrid(CPU(), Float64;
                               size = (Nr_vortex, Nz), x = (0, r_max_vortex), z = (0, Lz),
                               topology = (Bounded, Flat, Bounded))
 
-vortex_reference = ReferenceState(vortex_grid, constants; surface_pressure, potential_temperature = θₑ)
+vortex_reference = ReferenceState(vortex_grid, constants; base_pressure, potential_temperature = θₑ)
 
 ## Reference columns and the prescribed (tangential) wind vⱽ, as Fields on the
 ## (r, z) grid. The reference fields are reduced in the horizontal — (Nothing,
@@ -507,7 +507,7 @@ sponge_ρθ = Forcing(sponge_ρθ_fn; discrete_form = true, parameters = sponge_
 
 coriolis = FPlane(; f)
 dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                surface_pressure, reference_potential_temperature = θₑ)
+                                base_pressure, reference_potential_temperature = θₑ)
 ## The heating enters via the specific key `θ` (a θ tendency, ρ applied by the model);
 ## the sponge relaxes the density `ρθ`. Both act on the same prognostic and are combined.
 forcing = (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, θ = heating_forcing, ρθ = sponge_ρθ)

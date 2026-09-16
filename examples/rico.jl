@@ -61,7 +61,7 @@ grid = RectilinearGrid(GPU(); x, y, z,
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants,
-                                 surface_pressure = 101540,
+                                 base_pressure = 101540,
                                  potential_temperature = 297.9)
 
 dynamics = AnelasticDynamics(reference_state)

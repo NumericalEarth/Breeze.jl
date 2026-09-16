@@ -97,13 +97,13 @@ end
         mixed = equilibrium isa MixedPhaseEquilibrium
         T = mixed ? FT(253.15) : FT(283.15)
         λ = mixed ? equilibrated_surface(equilibrium, T).liquid_fraction : one(FT)
-        qʳ, qˢ = FT(0.002), mixed ? FT(0.001) : zero(FT)
+        qʳ, qˢⁿ = FT(0.002), mixed ? FT(0.001) : zero(FT)
         adjustment = SaturationAdjustment(FT; equilibrium)
 
         for cloud in (zero(FT), FT(0.001))
             qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, equilibrium)
             qᵛ = iszero(cloud) ? qᵛ⁺ / 2 : qᵛ⁺
-            q = MoistureMassFractions(qᵛ, λ * cloud + qʳ, (1 - λ) * cloud + qˢ)
+            q = MoistureMassFractions(qᵛ, λ * cloud + qʳ, (1 - λ) * cloud + qˢⁿ)
             p = ρ * mixture_gas_constant(q, constants) * T
             θ = potential_temperature_from_temperature(T, p, pˢᵗ, constants, q)
             energy_state = with_temperature(StaticEnergyState(zero(FT), q, FT(50), p), T, constants)
@@ -111,7 +111,7 @@ end
                       LiquidIceDensityState(θ, q, pˢᵗ, ρ), energy_state)
             for solver in (adjustment.solver, FixedIterations(6)), state in states
                 solver_adjustment = SaturationAdjustment(FT; equilibrium, solver)
-                adjusted = @inferred adjust_thermodynamic_state(state, solver_adjustment, constants, (qʳ, qˢ))
+                adjusted = @inferred adjust_thermodynamic_state(state, solver_adjustment, constants, (qʳ, qˢⁿ))
                 @test temperature(adjusted, constants) ≈ T atol=FT(5e-4)
                 @test adjusted.moisture_mass_fractions.vapor ≈ q.vapor rtol=FT(1e-3)
                 @test adjusted.moisture_mass_fractions.liquid ≈ q.liquid rtol=FT(1e-3)
@@ -124,7 +124,7 @@ end
 
             microphysics = OneMomentCloudMicrophysics(FT; cloud_formation=adjustment)
             model = AtmosphereModel(grid; microphysics, thermodynamic_constants=constants, dynamics=CompressibleDynamics())
-            precipitation = mixed ? (; qʳ, qˢ) : (; qʳ)
+            precipitation = mixed ? (; qʳ, qˢⁿ) : (; qʳ)
             set!(model; ρ, θ, qᵗ=total_specific_moisture(q), precipitation...)
             @test all(abs.(Array(interior(model.temperature)) .- T) .≤ FT(5e-4))
             @test all(abs.(Array(interior(model.microphysical_fields.qᶜˡ)) .- λ * cloud) .≤ FT(1e-6))
@@ -147,7 +147,7 @@ end
         set!(model; T=FT(283.15), p=FT(1e5), ρ=one(FT), qᵗ=FT(0.01), z=FT(50))
         state = model.dynamics.state
         energy = state.ℰ
-        state.μ = mixed ? (ρqʳ=FT(0.012), ρqˢ=FT(0.003)) : (ρqʳ=FT(0.012),)
+        state.μ = mixed ? (ρqʳ=FT(0.012), ρqˢⁿ=FT(0.003)) : (ρqʳ=FT(0.012),)
         time_step!(model, zero(FT))
         q = state.𝒰.moisture_mass_fractions
         @test total_specific_moisture(q) ≈ FT(0.01)
@@ -162,9 +162,9 @@ end
 
 @testset "Moisture conversion counts independent species [$FT]" for FT in test_float_types()
     ρ = FT(0.8)
-    qᵛ, qᶜˡ, qᶜⁱ, qʳ, qˢ = FT.((0.008, 0.001, 0.0005, 0.002, 0.0003))
-    qᵗ = qᵛ + qᶜˡ + qᶜⁱ + qʳ + qˢ
-    μ = (ρqᶜˡ = ρ * qᶜˡ, ρqᶜⁱ = ρ * qᶜⁱ, ρqʳ = ρ * qʳ, ρqˢ = ρ * qˢ,
+    qᵛ, qᶜˡ, qᶜⁱ, qʳ, qˢⁿ = FT.((0.008, 0.001, 0.0005, 0.002, 0.0003))
+    qᵗ = qᵛ + qᶜˡ + qᶜⁱ + qʳ + qˢⁿ
+    μ = (ρqᶜˡ = ρ * qᶜˡ, ρqᶜⁱ = ρ * qᶜⁱ, ρqʳ = ρ * qʳ, ρqˢⁿ = ρ * qˢⁿ,
          ρnᶜˡ = ρ * FT(1e8), ρnʳ = ρ * FT(1e5))
 
     for microphysics in (nothing, InstantaneousPrecipitation(FT), SaturationAdjustment(FT), BulkMicrophysics(FT))
@@ -189,7 +189,7 @@ end
     @test qᵉ + state.qʳ ≈ FT(0.01)
 
     p3 = PredictedParticlePropertiesMicrophysics(FT)
-    p3_densities = merge(μ, (ρqⁱ = ρ * qᶜⁱ, ρqʷⁱ = ρ * qˢ, ρqᶠ = ρ * qᶜⁱ / 2))
+    p3_densities = merge(μ, (ρqⁱ = ρ * qᶜⁱ, ρqʷⁱ = ρ * qˢⁿ, ρqᶠ = ρ * qᶜⁱ / 2))
     @test specific_prognostic_moisture_from_total(p3, qᵗ, p3_densities, ρ) ≈ qᵛ
 end
 

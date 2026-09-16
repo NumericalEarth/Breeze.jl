@@ -40,7 +40,7 @@ constants = ThermodynamicConstants()
 θ₀ = 300   # Surface potential temperature (K)
 p₀ = 1e5   # Surface pressure (Pa)
 reference_state = ReferenceState(grid, constants;
-                                 surface_pressure=p₀,
+                                 base_pressure=p₀,
                                  potential_temperature=θ₀)
 
 # ## Prescribing dynamics with divergence correction

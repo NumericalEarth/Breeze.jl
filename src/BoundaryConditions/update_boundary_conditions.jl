@@ -42,23 +42,25 @@ end
 # Source field helpers for FilteredSurfaceScalar
 function sensible_heat_source_field(bf, model)
     return KernelFunctionOperation{Center, Center, Center}(sensible_heat_difference, model.grid,
-                                                         bf, model.clock, Oceananigans.fields(model))
+                                                         bf, model.clock, surface_layer_state(model))
 end
 
 @inline function sensible_heat_difference(i, j, k, grid, bf, clock, fields)
-    T₀ = wall_value(i, j, grid, Bottom(), bf.surface_temperature, clock)
-    return bulk_sensible_heat_difference(i, j, k, grid, Bottom(), bf.formulation, bf, T₀, fields, nothing)
+    Tˢ = wall_value(i, j, grid, Bottom(), bf.surface_temperature, clock)
+    pˢ = wall_air_pressure(i, j, 1, grid, Bottom(), nothing, fields, bf.thermodynamic_constants)
+    return bulk_sensible_heat_difference(i, j, k, grid, Bottom(), bf.formulation, bf, Tˢ, fields, pˢ, nothing)
 end
 
 function vapor_source_field(bf, model)
     return KernelFunctionOperation{Center, Center, Center}(vapor_difference, model.grid,
-                                                         bf, model.clock, Oceananigans.fields(model))
+                                                         bf, model.clock, surface_layer_state(model))
 end
 
 @inline function vapor_difference(i, j, k, grid, bf, clock, fields)
-    T₀ = wall_value(i, j, grid, Bottom(), bf.surface_temperature, clock)
-    qᵛ₀ = wall_specific_humidity(i, j, grid, Bottom(), bf, T₀, clock)
-    return bulk_vapor_difference(i, j, k, fields, nothing, qᵛ₀)
+    Tˢ = wall_value(i, j, grid, Bottom(), bf.surface_temperature, clock)
+    pˢ = wall_air_pressure(i, j, 1, grid, Bottom(), nothing, fields, bf.thermodynamic_constants)
+    qᵛˢ = wall_specific_humidity(i, j, grid, Bottom(), bf, Tˢ, clock, pˢ)
+    return bulk_vapor_difference(i, j, k, fields, nothing, qᵛˢ)
 end
 
 # Δθᵥ filter — dedup-aware variants. Only a stability-corrected `PolynomialCoefficient`
@@ -67,23 +69,23 @@ end
 # `FilteredSurfaceVelocities` at all.
 const StabilityCorrectedCoefficient = PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}
 
-initialize_filtered_Δθᵥ!(::Nothing, coef, T₀, model) = nothing
-initialize_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, model) = nothing
+initialize_filtered_Δθᵥ!(::Nothing, coef, Tˢ, model) = nothing
+initialize_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, Tˢ, model) = nothing
 
-function initialize_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef::StabilityCorrectedCoefficient, T₀, model)
-    initialize_Δθᵥ!(fv, coef, T₀, model.grid, model.clock)
+function initialize_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef::StabilityCorrectedCoefficient, Tˢ, model)
+    initialize_Δθᵥ!(fv, coef, Tˢ, model.grid, model.clock, surface_layer_state(model))
     return nothing
 end
 
-update_filtered_Δθᵥ!(::Nothing, coef, T₀, model) = nothing
-update_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, model) = nothing
+update_filtered_Δθᵥ!(::Nothing, coef, Tˢ, model) = nothing
+update_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, Tˢ, model) = nothing
 
-function update_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef::StabilityCorrectedCoefficient, T₀, model)
+function update_filtered_Δθᵥ!(fv::FilteredSurfaceVelocities, coef::StabilityCorrectedCoefficient, Tˢ, model)
     key = (model.clock.iteration, model.clock.stage)
     fv.last_Δθᵥ_update[] == key && return nothing
     Δt = model.clock.last_Δt
     isinf(Δt) && return nothing # no valid Δt yet (before first time step)
-    update_Δθᵥ!(fv, coef, T₀, model.grid, model.clock, Δt)
+    update_Δθᵥ!(fv, coef, Tˢ, model.grid, model.clock, Δt, surface_layer_state(model))
     fv.last_Δθᵥ_update[] = key
     return nothing
 end

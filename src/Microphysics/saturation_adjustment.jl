@@ -81,11 +81,11 @@ AtmosphereModels.microphysics_model_update!(::SaturationAdjustment, model) = not
 #####
 
 @inline function equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, ::WarmPhaseEquilibrium, precipitation=(0, 0))
-    qʳ, qˢ = precipitation
-    qᵉ = qᵗ - qʳ - qˢ
+    qʳ, qˢⁿ = precipitation
+    qᵉ = qᵗ - qʳ - qˢⁿ
     qᶜˡ = max(0, qᵉ - qᵛ⁺)
     qᵛ = qᵉ - qᶜˡ
-    return MoistureMassFractions(qᵛ, qᶜˡ + qʳ, oftype(qᵛ, qˢ))
+    return MoistureMassFractions(qᵛ, qᶜˡ + qʳ, oftype(qᵛ, qˢⁿ))
 end
 
 #####
@@ -95,12 +95,12 @@ end
 @inline function equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium::MixedPhaseEquilibrium, precipitation=(0, 0))
     surface = equilibrated_surface(equilibrium, T)
     λ = surface.liquid_fraction
-    qʳ, qˢ = precipitation
-    qᵉ = qᵗ - qʳ - qˢ
+    qʳ, qˢⁿ = precipitation
+    qᵉ = qᵗ - qʳ - qˢⁿ
     qᶜ = max(0, qᵉ - qᵛ⁺)
     qᵛ = qᵉ - qᶜ
     qˡ = λ * qᶜ + qʳ
-    qⁱ = (1 - λ) * qᶜ + qˢ
+    qⁱ = (1 - λ) * qᶜ + qˢⁿ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -213,7 +213,7 @@ The state selects the constraint: fixed pressure for pressure-based states, or f
 density with pressure `p = ρ Rᵐ T` for `LiquidIceDensityState`. The conserved
 thermodynamic variable, initial temperature guesses, and solver are retained in either case.
 
-`precipitation = (qʳ, qˢ)` specifies fixed rain and snow mass fractions, included in
+`precipitation = (qʳ, qˢⁿ)` specifies fixed rain and snow mass fractions, included in
 the state's total water, heat capacity, gas constant, and latent energy.
 """
 @inline function adjust_thermodynamic_state(𝒰₀::ATS, microphysics::SA, constants, precipitation=(0, 0))
@@ -222,9 +222,9 @@ the state's total water, heat capacity, gas constant, and latent energy.
 
     # Initial temperature with no cloud condensate.
     qᵗ = total_specific_moisture(𝒰₀)
-    qʳ, qˢ = precipitation
-    qᵉ = qᵗ - qʳ - qˢ
-    q₁ = MoistureMassFractions(qᵉ, oftype(qᵗ, qʳ), oftype(qᵗ, qˢ))
+    qʳ, qˢⁿ = precipitation
+    qᵉ = qᵗ - qʳ - qˢⁿ
+    q₁ = MoistureMassFractions(qᵉ, oftype(qᵗ, qʳ), oftype(qᵗ, qˢⁿ))
     𝒰₁ = with_moisture(𝒰₀, q₁)
     T₁ = temperature(𝒰₁, constants)
 
@@ -245,7 +245,7 @@ the state's total water, heat capacity, gas constant, and latent energy.
     ℒⁱᵣ = constants.ice.reference_latent_heat
     q̃₁ = 𝒰₁.moisture_mass_fractions
     qˡ₁ = q̃₁.liquid - qʳ
-    qⁱ₁ = q̃₁.ice - qˢ
+    qⁱ₁ = q̃₁.ice - qˢⁿ
     cᵖᵐ = mixture_heat_capacity(q̃₁, constants)
     ΔT = (ℒˡᵣ * qˡ₁ + ℒⁱᵣ * qⁱ₁) / cᵖᵐ
     ϵT = convert(FT, 0.01) # minimum increment for second guess

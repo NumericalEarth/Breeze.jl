@@ -25,7 +25,7 @@ using Test
 const scm_constants = ThermodynamicConstants()
 
 function single_column_model(grid; closure = VerticalScalarDiffusivity(ν=1.0, κ=1.0))
-    reference_state = ReferenceState(grid, scm_constants; surface_pressure=101325, potential_temperature=290)
+    reference_state = ReferenceState(grid, scm_constants; base_pressure=101325, potential_temperature=290)
     return AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), closure)
 end
 
@@ -139,7 +139,7 @@ thermodynamic_name(model) = :ρθ ∈ keys(prognostic_fields(model)) ? :ρθ : :
         κ(i, j) = FT(0.5) * (i + N₁ * (j - 1))  # distinct vertical diffusivity per column
         grid = RectilinearGrid(arch, FT; size = ColumnEnsembleSize(Nz=Nz, ensemble=(N₁, N₂), Hz=3),
                                z = (0, 2000), topology = (Flat, Flat, Bounded))
-        rs = ReferenceState(grid, scm_constants; surface_pressure=101325, potential_temperature=290)
+        rs = ReferenceState(grid, scm_constants; base_pressure=101325, potential_temperature=290)
         closures = [VerticalScalarDiffusivity(ν=κ(i, j), κ=κ(i, j)) for i in 1:N₁, j in 1:N₂]
         ensemble = AtmosphereModel(grid; dynamics=AnelasticDynamics(rs), closure=closures)
         @test ensemble.closure isa AbstractArray
@@ -169,7 +169,7 @@ thermodynamic_name(model) = :ρθ ∈ keys(prognostic_fields(model)) ? :ρθ : :
         N₁, N₂ = 3, 2
         grid = RectilinearGrid(arch, FT; size = ColumnEnsembleSize(Nz=Nz, ensemble=(N₁, N₂), Hz=3),
                                z = (0, 2000), topology = (Flat, Flat, Bounded))
-        rs = ReferenceState(grid, scm_constants; surface_pressure=101325, potential_temperature=290)
+        rs = ReferenceState(grid, scm_constants; base_pressure=101325, potential_temperature=290)
         planes = [FPlane(FT; f = FT(1e-4) * (i + N₁ * (j - 1))) for i in 1:N₁, j in 1:N₂]
         ensemble = AtmosphereModel(grid; dynamics=AnelasticDynamics(rs), coriolis=planes,
                                    closure=VerticalScalarDiffusivity(ν=1.0, κ=1.0))
@@ -189,7 +189,7 @@ thermodynamic_name(model) = :ρθ ∈ keys(prognostic_fields(model)) ? :ρθ : :
         N₁, N₂ = 3, 2
         grid = RectilinearGrid(arch, FT; size = ColumnEnsembleSize(Nz=Nz, ensemble=(N₁, N₂), Hz=3),
                                z = (0, 2000), topology = (Flat, Flat, Bounded))
-        rs = ReferenceState(grid, scm_constants; surface_pressure=101325, potential_temperature=290)
+        rs = ReferenceState(grid, scm_constants; base_pressure=101325, potential_temperature=290)
         Q = on_architecture(arch, [FT(1e-3) * (i + N₁ * (j - 1)) for i in 1:N₁, j in 1:N₂])
         θ_forcing = Forcing(column_heating, discrete_form=true, parameters=Q)
         ensemble = AtmosphereModel(grid; dynamics=AnelasticDynamics(rs),
@@ -211,13 +211,13 @@ thermodynamic_name(model) = :ρθ ∈ keys(prognostic_fields(model)) ? :ρθ : :
         p₀ = [FT(101325 - 200 * (i - 1)) for i in 1:N₁, j in 1:N₂]
         grid = RectilinearGrid(arch, FT; size = ColumnEnsembleSize(Nz=Nz, ensemble=(N₁, N₂), Hz=3),
                                z = (0, 2000), topology = (Flat, Flat, Bounded))
-        rs = ReferenceState(grid, scm_constants; surface_pressure=p₀, potential_temperature=θ₀)
+        rs = ReferenceState(grid, scm_constants; base_pressure=p₀, potential_temperature=θ₀)
         @test size(interior(rs.density)) == (N₁, N₂, Nz)
 
         # Each column's reference density matches a standalone reference built with that column's p₀, θ₀.
         for j in 1:N₂, i in 1:N₁
             g = RectilinearGrid(arch, FT; size=Nz, z=(0, 2000), topology=(Flat, Flat, Bounded))
-            r = ReferenceState(g, scm_constants; surface_pressure=p₀[i, j], potential_temperature=θ₀[i, j])
+            r = ReferenceState(g, scm_constants; base_pressure=p₀[i, j], potential_temperature=θ₀[i, j])
             @test Array(interior(rs.density))[i, j, :] ≈ Array(interior(r.density))[1, 1, :]
         end
 
@@ -228,7 +228,7 @@ thermodynamic_name(model) = :ρθ ∈ keys(prognostic_fields(model)) ? :ρθ : :
 
     @testset "Three-dimensional model keeps the reduced reference profile" begin
         grid = RectilinearGrid(arch, FT; size=(4, 4, Nz), extent=(1000, 1000, 2000))
-        reference_state = ReferenceState(grid, scm_constants; surface_pressure=101325, potential_temperature=290)
+        reference_state = ReferenceState(grid, scm_constants; base_pressure=101325, potential_temperature=290)
         # No regression: on a non-ensemble grid the reference profile stays reduced (1×1×Nz).
         @test size(interior(reference_state.density)) == (1, 1, Nz)
     end

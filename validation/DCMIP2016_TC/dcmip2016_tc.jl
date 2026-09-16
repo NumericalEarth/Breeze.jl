@@ -286,7 +286,7 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
     θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                    surface_pressure = pb,
+                                    base_pressure = pb,
                                     reference_potential_temperature = θᵣ)
 
     microphysics = InstantaneousPrecipitation(equilibrium = WarmPhaseEquilibrium())

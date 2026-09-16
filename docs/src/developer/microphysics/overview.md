@@ -145,7 +145,7 @@ conserved thermodynamic variable and prescribed precipitation.
 |----------|---------------|---------------------|----------|
 | Prognostic | `CenterField` | User-provided via `bcs` | `ρqᶜˡ`, `ρqʳ`, `ρnᶜˡ` |
 | Auxiliary/Diagnostic | `CenterField` | None needed | `qᵛ`, `qˡ`, `qᶜˡ`, `qʳ` |
-| Velocities | `ZFaceField` | `bottom=nothing` | `wʳ`, `wᶜˡ`, `wʳₙ` |
+| Velocities | `ZFaceField` | `bottom=nothing` | `wʳ`, `wᶜˡ`, `wⁿʳ` |
 
 ### Velocity and Humidity Functions
 
