@@ -715,8 +715,7 @@ specific_prognostic_moisture_from_total(microphysics, 0.02, μ, 1.2)
     moisture_less_condensate(qᵗ, μ, ρ, condensate_field_names(microphysics))
 
 @inline moisture_less_condensate(qᵗ, μ, ρ, ::Tuple{}) = qᵗ
-@inline moisture_less_condensate(qᵗ, μ, ρ, names::Tuple{Symbol, Vararg}) =
-    qᵗ - sum_microphysical_components(μ, names) / ρ
+@inline moisture_less_condensate(qᵗ, μ, ρ, names::Tuple{Symbol, Vararg}) = qᵗ - sum_microphysical_components(μ, names) / ρ
 
 """
 $(TYPEDSIGNATURES)
