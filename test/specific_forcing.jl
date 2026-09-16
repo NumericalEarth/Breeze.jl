@@ -126,8 +126,7 @@ end
     F_specific_profile(z) = FT(-1e-5) * (1 + z / 100)
 
     # Path A: manual ρᵣ multiply, supplied under :ρθ (the pre-change idiom)
-    model_A = AtmosphereModel(grid; forcing = (; ρθ = (x, y, z, t) -> 0))  # placeholder
-    ρᵣ = model_A.dynamics.reference_state.density
+    ρᵣ = ReferenceState(grid).density
     F_density_field = Field{Nothing, Nothing, Center}(grid)
     set!(F_density_field, z -> F_specific_profile(z))
     set!(F_density_field, ρᵣ * F_density_field)

@@ -48,9 +48,12 @@ near_wall_cell(side, i, j, k, Nx, Ny, Nz) = (side === :west   ? (1, j, k) :
 wall_temperatures(FT) = (west=FT(295), east=FT(285), south=FT(287), north=FT(288), bottom=FT(299), top=FT(280))
 wall_humidities(FT)   = (west=FT(0.78), east=FT(0.78), south=FT(0.78), north=FT(0.78), bottom=FT(1), top=FT(1))
 
+closed_box_grid(FT; Nx=4, Ny=4, Nz=4) =
+    RectilinearGrid(default_arch, FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z=(0, 1),
+                    topology=(Bounded, Bounded, Bounded))
+
 function closed_box_model(FT; formulation=:LiquidIcePotentialTemperature, coefficient=FT(2e-3), Nx=4, Ny=4, Nz=4)
-    grid = RectilinearGrid(default_arch, FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z=(0, 1),
-                           topology=(Bounded, Bounded, Bounded))
+    grid = closed_box_grid(FT; Nx, Ny, Nz)
 
     Tˢ = wall_temperatures(FT)
     ℋˢ = wall_humidities(FT)
@@ -175,8 +178,8 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
     end
 
     @testset "Wall fluxes heat and moisten the near-wall cells with the right sign" begin
-        model = closed_box_model(FT; coefficient=C)
-        Nx, Ny, Nz = size(model.grid)
+        grid = closed_box_grid(FT)
+        Nx, Ny, Nz = size(grid)
         # At rest the drag vanishes, so give the walls a gust to move heat and vapor. The gust
         # and the time step are large enough that the change in a near-wall cell is well above
         # the roundoff of the cell's ρθ in single precision.
@@ -185,7 +188,7 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
                                           surface_relative_humidity=ℋˢ[side])
         boundary_conditions = (; ρθ = FieldBoundaryConditions(; (side => gusty(side) for side in sides)...),
                                  ρqᵛ = FieldBoundaryConditions(; (side => gusty_vapor(side) for side in sides)...))
-        model = AtmosphereModel(model.grid; boundary_conditions, advection=WENO(order=3))
+        model = AtmosphereModel(grid; boundary_conditions, advection=WENO(order=3))
         set!(model; θ=θᵢ, ℋ=FT(0.3))
         ρθ⁰ = Array(interior(prognostic_fields(model).ρθ))
         ρqᵛ⁰ = Array(interior(prognostic_fields(model).ρqᵛ))
