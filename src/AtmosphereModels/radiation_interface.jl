@@ -435,3 +435,225 @@ function Base.show(io::IO, radiation::RadiativeTransferModel)
 
     print(io, "└── diffuse_surface_albedo: ", radiation.surface_radiation.diffuse_surface_albedo)
 end
+
+#####
+##### Backend-agnostic column helpers shared by every radiation extension
+#####
+
+using Oceananigans.Architectures: architecture
+using Oceananigans.Grids: xnode, ynode, znode, Center, Face
+using Breeze.CelestialMechanics: SingleColumnGrid
+
+"""
+$(TYPEDSIGNATURES)
+
+The column index `c = i + (j - 1) Nx` of horizontal cell `(i, j)`: every column-based radiation
+backend stores its per-column arrays in this order.
+"""
+@inline column_index(i, j, Nx) = i + (j - 1) * Nx
+
+#####
+##### Solar position: infer (λ, φ) from a single-column grid when the user gave none
+#####
+
+# Single-column grids: infer (λ, φ) from the grid when the user didn't pass one
+maybe_infer_solar_position(sp::ApparentSolarPosition{Nothing}, grid::SingleColumnGrid) =
+    ApparentSolarPosition(grid_inferred_coordinate(grid), sp.epoch)
+
+function grid_inferred_coordinate(grid::SingleColumnGrid)
+    λ = xnode(1, 1, 1, grid, Center(), Center(), Center())
+    φ = ynode(1, 1, 1, grid, Center(), Center(), Center())
+    return (λ, φ)
+end
+
+# Otherwise (3D grid or explicit coordinate): leave as-is — per-column kernels
+# will read λ/φ from the grid as needed.
+maybe_infer_solar_position(sp::AbstractSolarPosition, grid) = sp
+
+#####
+##### Surface properties: validation and materialization
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+The scalar behind a surface property that is constant in space and time, or `nothing` when the
+property carries no such scalar.
+
+A `ConstantField` is a scalar in a field's clothing — its value cannot change — so it reports the
+value it holds. A general `Field` reports `nothing`: it may be rewritten between radiation updates,
+so there is no single value to speak of.
+"""
+surface_fraction_scalar(x::Number) = x
+surface_fraction_scalar(x::ConstantField) = surface_fraction_scalar(x.constant)
+surface_fraction_scalar(x) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Throw an `ArgumentError` for any keyword whose value is a spatially uniform scalar outside ``[0, 1]``.
+
+Emissivity and albedo are fractions, so a scalar outside the unit interval is a user error — an albedo
+given in percent, say — worth rejecting at construction rather than carrying into the solver. A
+property with no single value (a `Field`, a dataset, `nothing`) passes through, since a check at
+construction says nothing about what it holds at the next solve.
+"""
+function validate_surface_fractions(; kw...)
+    for (name, value) in kw
+        x = surface_fraction_scalar(value)
+        isnothing(x) || 0 <= x <= 1 ||
+            throw(ArgumentError("`$name` must lie in [0, 1]; received $x."))
+    end
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Wrap a scalar surface property in a `ConstantField` of the working precision, passing anything
+already field-valued through unchanged, so that emissivity and both albedos are uniformly
+field-valued whether the user supplied a number, a field, or a dataset.
+"""
+constant_field_property(x::Number, FT) = ConstantField(convert(FT, x))
+constant_field_property(x, FT) = x
+
+"""
+$(TYPEDSIGNATURES)
+
+Resolve the albedo keywords of a `RadiativeTransferModel` constructor into a
+`(direct, diffuse)` pair of materialized surface albedos.
+
+Either `surface_albedo` alone (used for both the direct and the diffuse albedo) or *both*
+`direct_surface_albedo` and `diffuse_surface_albedo` must be given; any other combination is
+an `ArgumentError`. Each is passed through [`materialize_surface_property`](@ref) with
+`grid` and `solar_position`.
+"""
+function resolve_surface_albedos(surface_albedo, direct_surface_albedo, diffuse_surface_albedo, grid, solar_position)
+    error_msg = "Must either provide surface_albedo or *both* of
+                 direct_surface_albedo and diffuse_surface_albedo"
+
+    if !isnothing(surface_albedo)
+        if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)
+            throw(ArgumentError(error_msg))
+        end
+
+        surface_albedo = materialize_surface_property(surface_albedo, grid, solar_position)
+        return surface_albedo, surface_albedo
+
+    elseif !isnothing(diffuse_surface_albedo) && !isnothing(direct_surface_albedo)
+        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid, solar_position)
+        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid, solar_position)
+        return direct_surface_albedo, diffuse_surface_albedo
+    end
+
+    throw(ArgumentError(error_msg))
+end
+
+# The constructors accept `surface_temperature = nothing` so that a coupled model can bind
+# its interface surface temperature after construction; solving without one is an error.
+function assert_bound_surface_temperature(rtm)
+    isnothing(rtm.surface_radiation.surface_temperature) && throw(ArgumentError(
+        "This RadiativeTransferModel has no surface temperature: construct it with " *
+        "`surface_temperature = ...`, or bind one before the first radiation update " *
+        "(coupled models wire their interface surface temperature automatically)."))
+    return nothing
+end
+
+#####
+##### Boundary-face pressure and temperature
+#####
+##### Column solvers need pressure and temperature on the bottom face (k = 1) and the top face
+##### (k = Nz + 1), which no interior interpolation reaches. Rather than inheriting whatever the
+##### halo carries, extrapolate from the adjacent cells: pressure hydrostatically over the half
+##### cell, `∂p/∂z = -ρ g`, and temperature linearly through the two nearest cell centers.
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Pressure on the bottom face of column `(i, j)`, extrapolated hydrostatically from the lowest
+cell center: `p₁ + ρ₁ g (z₁ᶜ - z₁ᶠ)`.
+"""
+@inline function bottom_face_pressure(i, j, grid, p, ρ, g)
+    zᶜ = znode(i, j, 1, grid, Center(), Center(), Center())
+    zᶠ = znode(i, j, 1, grid, Center(), Center(), Face())
+    return @inbounds p[i, j, 1] + ρ[i, j, 1] * g * (zᶜ - zᶠ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Pressure on the top face of column `(i, j)`, extrapolated hydrostatically from the highest
+cell center: `p_Nz - ρ_Nz g (z_{Nz+1}ᶠ - z_Nzᶜ)`.
+"""
+@inline function top_face_pressure(i, j, grid, p, ρ, g)
+    Nz = size(grid, 3)
+    zᶜ = znode(i, j, Nz, grid, Center(), Center(), Center())
+    zᶠ = znode(i, j, Nz+1, grid, Center(), Center(), Face())
+    return @inbounds p[i, j, Nz] - ρ[i, j, Nz] * g * (zᶠ - zᶜ)
+end
+
+# Linear extrapolation of a cell-centered field from the centers of cells `k₁` and `k₂` to the face at `zᶠ`.
+@inline function extrapolate_to_face(i, j, k₁, k₂, zᶠ, grid, T)
+    z₁ = znode(i, j, k₁, grid, Center(), Center(), Center())
+    z₂ = znode(i, j, k₂, grid, Center(), Center(), Center())
+    @inbounds T₁ = T[i, j, k₁]
+    @inbounds T₂ = T[i, j, k₂]
+    return T₁ + (T₂ - T₁) * (zᶠ - z₁) / (z₂ - z₁)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Temperature on the bottom face of column `(i, j)`, extrapolated linearly from cells 1 and 2.
+"""
+@inline function bottom_face_temperature(i, j, grid, T)
+    zᶠ = znode(i, j, 1, grid, Center(), Center(), Face())
+    return extrapolate_to_face(i, j, 1, 2, zᶠ, grid, T)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Temperature on the top face of column `(i, j)`, extrapolated linearly from cells `Nz-1` and `Nz`.
+"""
+@inline function top_face_temperature(i, j, grid, T)
+    Nz = size(grid, 3)
+    zᶠ = znode(i, j, Nz+1, grid, Center(), Center(), Face())
+    return extrapolate_to_face(i, j, Nz-1, Nz, zᶠ, grid, T)
+end
+
+#####
+##### Radiation flux divergence from the four flux fields
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute `rtm.flux_divergence = -∂F_net/∂z` (W m⁻³) from the four `ZFaceField` fluxes of `rtm`,
+with `F_net` the sum of the up- and downwelling longwave and shortwave fluxes, all signed
+positive upward (downwelling fluxes are stored negative).
+"""
+function compute_radiation_flux_divergence!(rtm, grid)
+    arch = architecture(grid)
+    ℐ_lw_up = rtm.upwelling_longwave_flux
+    ℐ_lw_dn = rtm.downwelling_longwave_flux
+    ℐ_sw_up = rtm.upwelling_shortwave_flux
+    ℐ_sw_dn = rtm.downwelling_shortwave_flux
+    flux_div = rtm.flux_divergence
+    launch!(arch, grid, :xyz, _compute_radiation_flux_divergence!,
+            flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, grid)
+    return nothing
+end
+
+@kernel function _compute_radiation_flux_divergence!(flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, grid)
+    i, j, k = @index(Global, NTuple)
+    # Net flux at faces k and k+1 (positive upward)
+    @inbounds begin
+        F_k  = ℐ_lw_up[i, j, k]   + ℐ_lw_dn[i, j, k]   + ℐ_sw_up[i, j, k]   + ℐ_sw_dn[i, j, k]
+        F_k1 = ℐ_lw_up[i, j, k+1] + ℐ_lw_dn[i, j, k+1] + ℐ_sw_up[i, j, k+1] + ℐ_sw_dn[i, j, k+1]
+    end
+    Δz = Δzᶜᶜᶜ(i, j, k, grid)
+    # Flux divergence: -dF/dz (positive when flux convergence warms)
+    @inbounds flux_div[i, j, k] = -(F_k1 - F_k) / Δz
+end

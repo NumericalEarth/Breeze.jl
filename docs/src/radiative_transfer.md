@@ -230,7 +230,7 @@ model = AtmosphereModel(grid; clock, dynamics, radiation)
 
 The cosine of the zenith angle is written into the RRTMGP boundary-condition
 array once at construction and never recomputed; the per-step
-`update_solar_zenith_angle!` call becomes a no-op.
+`update_cos_zenith!` call becomes a no-op.
 
 #### Choosing a value
 
