@@ -1020,8 +1020,7 @@ function update_parcel_moisture!(model)
     microphysics = model.microphysics
     qᵛᵉ, q = parcel_moisture_partition(microphysics, state.ρ, state.μ, state.qᵗ, state.𝒰)
     𝒰 = with_moisture(state.𝒰, q)
-    state.𝒰 = AtmosphereModels.maybe_adjust_thermodynamic_state(
-        𝒰, microphysics, qᵛᵉ, model.thermodynamic_constants, state.μ, state.ρ)
+    state.𝒰 = AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, microphysics, qᵛᵉ, model.thermodynamic_constants, state.μ, state.ρ)
     return nothing
 end
 
