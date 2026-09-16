@@ -511,7 +511,9 @@ end
 
 Base.summary(::RadiativeTransferModel) = "RadiativeTransferModel"
 
-function Base.show(io::IO, radiation::RadiativeTransferModel)
+# The lines every backend shares, up to (not including) the final diffuse-albedo line, so a
+# backend with more to show (an extension's optics, say) can append its own lines after them.
+function show_radiation_summary(io::IO, radiation::RadiativeTransferModel)
     print(io, summary(radiation), "\n",
           "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n",
           "├── solar_position: ", radiation.solar_position, "\n")
@@ -531,6 +533,11 @@ function Base.show(io::IO, radiation::RadiativeTransferModel)
                   "├── ice_effective_radius: ", radiation.ice_effective_radius, "\n")
     end
 
+    return nothing
+end
+
+function Base.show(io::IO, radiation::RadiativeTransferModel)
+    show_radiation_summary(io, radiation)
     print(io, "└── diffuse_surface_albedo: ", radiation.surface_radiation.diffuse_surface_albedo)
 end
 

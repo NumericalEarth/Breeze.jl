@@ -14,6 +14,7 @@ InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
 NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
+NumericalRadiation = "cd8119b0-1744-44d6-9ede-6ad1ad750b26"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
@@ -23,6 +24,7 @@ SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 
 [sources]
 Breeze = {path = ".."}
+NumericalRadiation = {url = "https://github.com/NumericalEarth/NumericalRadiation.jl.git", rev = "glw/breeze-coupling"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
@@ -39,6 +41,7 @@ InteractiveUtils = "<0.0.1, 1"
 KernelAbstractions = "0.9.41"
 Literate = "2"
 NCDatasets = "0.14"
+NumericalRadiation = "0.1"
 Oceananigans = "0.112"
 Pkg = "<0.0.1, 1"
 RRTMGP = "0.22, 0.23, 1"
