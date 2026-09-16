@@ -226,8 +226,10 @@ end
     @test 𝒮 isa Oceananigans.AbstractOperations.AbstractOperation
     𝒮_field = SupersaturationField(model)
     ℋ_field = RelativeHumidityField(model)
-    @test all(isfinite, 𝒮_field)
-    @test all(<(0), 𝒮_field)
+    # Reductions over the field itself, and over floats rather than booleans: `all(f, field)`
+    # builds a Bool reduced field, whose `initarray!` has no method on Julia 1.13
+    @test maximum(abs, 𝒮_field) < Inf   # finite everywhere: a NaN anywhere would fail this
+    @test maximum(𝒮_field) < 0
     @test maximum(abs, 𝒮_field - ℋ_field + 1) < eps(FT)
 
     # Moist enough to condense: saturation adjustment pins the supersaturation to zero wherever it
