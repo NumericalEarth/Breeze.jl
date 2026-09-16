@@ -23,7 +23,7 @@ function Oceananigans.BoundaryConditions.update_boundary_condition!(
     update_filtered_surface_state!(fv, model)
     update_filtered_Δθᵥ!(fv, bc.condition.coefficient, bc.condition.surface_temperature, model)
     fs = bc.condition.filtered_scalar
-    source = sensible_heat_source_field(bc.condition.formulation, model)
+    source = sensible_heat_source_field(bc.condition, model)
     update_filtered_surface_state!(fs, source, model)
     return nothing
 end
@@ -34,17 +34,32 @@ function Oceananigans.BoundaryConditions.update_boundary_condition!(
     update_filtered_surface_state!(fv, model)
     update_filtered_Δθᵥ!(fv, bc.condition.coefficient, bc.condition.surface_temperature, model)
     fs = bc.condition.filtered_scalar
-    source = vapor_source_field(model)
+    source = vapor_source_field(bc.condition, model)
     update_filtered_surface_state!(fs, source, model)
     return nothing
 end
 
 # Source field helpers for FilteredSurfaceScalar
-sensible_heat_source_field(::PotentialTemperatureFlux, model) = model.formulation.potential_temperature
-sensible_heat_source_field(::StaticEnergyFlux, model) = model.formulation.specific_energy
-sensible_heat_source_field(::Nothing, model) = model.formulation.potential_temperature
+function sensible_heat_source_field(bf, model)
+    return KernelFunctionOperation{Center, Center, Center}(sensible_heat_difference, model.grid,
+                                                         bf, model.clock, Oceananigans.fields(model))
+end
 
-vapor_source_field(model) = AtmosphereModels.specific_prognostic_moisture(model)
+@inline function sensible_heat_difference(i, j, k, grid, bf, clock, fields)
+    T₀ = wall_value(i, j, grid, Bottom(), bf.surface_temperature, clock)
+    return bulk_sensible_heat_difference(i, j, k, grid, Bottom(), bf.formulation, bf, T₀, fields, nothing)
+end
+
+function vapor_source_field(bf, model)
+    return KernelFunctionOperation{Center, Center, Center}(vapor_difference, model.grid,
+                                                         bf, model.clock, Oceananigans.fields(model))
+end
+
+@inline function vapor_difference(i, j, k, grid, bf, clock, fields)
+    T₀ = wall_value(i, j, grid, Bottom(), bf.surface_temperature, clock)
+    qᵛ₀ = wall_specific_humidity(i, j, grid, Bottom(), bf, T₀, clock)
+    return bulk_vapor_difference(i, j, k, fields, nothing, qᵛ₀)
+end
 
 # Δθᵥ filter — dedup-aware variants. Only a stability-corrected `PolynomialCoefficient`
 # consumes the filtered surface-layer difference, so the update is a no-op for a constant
@@ -89,11 +104,12 @@ end
 
 function initialize_boundary_condition!(
         bc::BoundaryCondition{<:Flux, <:BulkSensibleHeatFluxFunction}, side, field, model)
+    validate_wall_density(bc.condition.moisture, model)
     fv = bc.condition.filtered_velocities
     initialize_filtered_surface_state!(fv, model)
     initialize_filtered_Δθᵥ!(fv, bc.condition.coefficient, bc.condition.surface_temperature, model)
     fs = bc.condition.filtered_scalar
-    source = sensible_heat_source_field(bc.condition.formulation, model)
+    source = sensible_heat_source_field(bc.condition, model)
     initialize_filtered_surface_state!(fs, source, model)
     return nothing
 end
@@ -104,7 +120,7 @@ function initialize_boundary_condition!(
     initialize_filtered_surface_state!(fv, model)
     initialize_filtered_Δθᵥ!(fv, bc.condition.coefficient, bc.condition.surface_temperature, model)
     fs = bc.condition.filtered_scalar
-    source = vapor_source_field(model)
+    source = vapor_source_field(bc.condition, model)
     initialize_filtered_surface_state!(fs, source, model)
     return nothing
 end

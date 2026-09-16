@@ -385,13 +385,29 @@ the specific (per-mass) name. For example, `:ρqᶜˡ` → `:qᶜˡ`.
 """
 specific_field_name(name::Symbol) = (s = string(name); Symbol(s[nextind(s, 1):end]))
 
+# Resolve names to literals at compile time: string processing cannot run inside GPU kernels.
+# QuoteNode keeps a scalar Symbol literal from being interpreted as a variable name.
+@generated specific_field_name(::Val{name}) where name = QuoteNode(specific_field_name(name))
+@generated specific_field_names(::Val{names}) where names = :($(map(specific_field_name, names)))
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the specific (per-mass) names of the independent condensate species, i.e.
+[`condensate_field_names`](@ref) with the leading `ρ` stripped from each. These are the fields
+a microphysical state ``ℳ`` carries, so the pair lets one generic method convert ``qᵗ`` from
+either density-weighted variables or a state.
+"""
+@inline specific_condensate_names(microphysics) = specific_field_names(Val(condensate_field_names(microphysics)))
+
 """
 $(TYPEDSIGNATURES)
 
 Return the specific (per-mass) moisture field name by stripping the `ρ` prefix
-from [`moisture_prognostic_name`](@ref).
+from [`moisture_prognostic_name`](@ref). The name is resolved at compile time, so the
+lookup `fields[moisture_specific_name(microphysics)]` is free inside kernels.
 """
-moisture_specific_name(microphysics) = specific_field_name(moisture_prognostic_name(microphysics))
+@inline moisture_specific_name(microphysics) = specific_field_name(Val(moisture_prognostic_name(microphysics)))
 
 """
 $(TYPEDSIGNATURES)
@@ -424,11 +440,16 @@ $(TYPEDSIGNATURES)
 Possibly apply saturation adjustment. If a `microphysics` scheme does not invoke saturation adjustment,
 just return the `state` unmodified.
 
-This function takes the thermodynamic state, microphysics scheme, total moisture, and thermodynamic
-constants. Schemes that use saturation adjustment override this to adjust the moisture partition.
-Non-equilibrium schemes simply return the state unchanged.
+The arguments are the thermodynamic state, microphysics scheme, prognostic specific moisture,
+and thermodynamic constants. The six-argument form also receives the density-weighted
+microphysical prognostics and total density, so precipitation can be retained during adjustment.
+Non-equilibrium schemes return the state unchanged.
 """
 @inline maybe_adjust_thermodynamic_state(state, ::Nothing, qᵛ, constants) = state
+
+# Density-weighted prognostics specify precipitation retained during adjustment.
+@inline maybe_adjust_thermodynamic_state(state, microphysics, qᵛᵉ, constants, μ, ρ) =
+    maybe_adjust_thermodynamic_state(state, microphysics, qᵛᵉ, constants)
 
 """
 $(TYPEDSIGNATURES)
@@ -636,19 +657,66 @@ $(TYPEDSIGNATURES)
 Convert total specific moisture ``qᵗ`` to the scheme-dependent specific moisture ``qᵛᵉ``
 by subtracting the appropriate condensate from the microphysical state ``ℳ``.
 
-For non-equilibrium schemes, ``qᵛᵉ = qᵛ = qᵗ - qˡ`` (subtract all condensate).
-For saturation adjustment schemes, ``qᵛᵉ = qᵉ = qᵗ - qʳ`` (subtract only precipitation).
+For non-equilibrium schemes, subtract cloud condensate and precipitation to recover vapor.
+For saturation adjustment schemes, subtract only precipitation to recover equilibrium moisture
+(vapor plus cloud liquid and ice).
 For `Nothing` microphysics, ``qᵛᵉ = qᵗ`` (all moisture is vapor).
+
+The condensate to subtract is named by [`condensate_field_names`](@ref).
+This conversion preserves total water, including when the input state contains negative vapor.
 
 This is used by parcel models that store total moisture ``qᵗ`` as the prognostic
 variable, to produce the correct input for [`moisture_fractions`](@ref).
 """
-@inline specific_prognostic_moisture_from_total(::Nothing, qᵗ, ℳ) = qᵗ
-@inline specific_prognostic_moisture_from_total(::Nothing, qᵗ, ::NothingMicrophysicalState) = qᵗ
-@inline specific_prognostic_moisture_from_total(::Nothing, qᵗ, ::NamedTuple) = qᵗ
+@inline specific_prognostic_moisture_from_total(microphysics, qᵗ, ℳ::AbstractMicrophysicalState) =
+    moisture_less_condensate(qᵗ, ℳ, specific_condensate_names(microphysics))
 
-# Generic fallback: no condensate prognostics → all moisture is vapor/equilibrium.
+# An empty state has no condensate to subtract, even if the scheme names condensate species.
 @inline specific_prognostic_moisture_from_total(microphysics, qᵗ, ::NothingMicrophysicalState) = qᵗ
+
+@inline moisture_less_condensate(qᵗ, ℳ, ::Tuple{}) = qᵗ
+@inline moisture_less_condensate(qᵗ, ℳ, names::Tuple{Symbol, Vararg}) =
+    qᵗ - sum_microphysical_components(ℳ, names)
+
+"""
+$(TYPEDSIGNATURES)
+
+Convert total specific moisture ``qᵗ`` to the scheme-dependent specific moisture ``qᵛᵉ``
+given the density-weighted microphysical variables `μ` and the total air density `ρ`,
+
+```math
+qᵛᵉ = qᵗ - Σ ρqᶜ / ρ
+```
+
+where the sum runs over the independent condensate mass densities named by
+[`condensate_field_names`](@ref). Diagnostic cloud fractions, number concentrations, and
+dependent moments (such as the P3 rime mass ``ρqᶠ``, already contained in ``ρqⁱ``) are
+therefore excluded. Both the values of `μ` and `ρ` may be scalars or fields.
+
+Since `condensate_field_names` is the complement of the prognostic moisture — the same
+partition [`total_condensate_density`](@ref) uses — this recovers vapor for non-equilibrium
+schemes and equilibrium moisture ``qᵉ`` for saturation-adjustment schemes, with no
+per-scheme method needed.
+
+```jldoctest
+using Breeze
+using Breeze.AtmosphereModels: specific_prognostic_moisture_from_total
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
+
+microphysics = DCMIP2016KesslerMicrophysics()
+μ = (ρqᶜˡ=0.0012, ρqʳ=0.0024)
+specific_prognostic_moisture_from_total(microphysics, 0.02, μ, 1.2)
+
+# output
+0.017
+```
+"""
+@inline specific_prognostic_moisture_from_total(microphysics, qᵗ, μ::NamedTuple, ρ) =
+    moisture_less_condensate(qᵗ, μ, ρ, condensate_field_names(microphysics))
+
+@inline moisture_less_condensate(qᵗ, μ, ρ, ::Tuple{}) = qᵗ
+@inline moisture_less_condensate(qᵗ, μ, ρ, names::Tuple{Symbol, Vararg}) =
+    qᵗ - sum_microphysical_components(μ, names) / ρ
 
 """
 $(TYPEDSIGNATURES)
@@ -741,6 +809,15 @@ end
 @inline function sum_microphysical_densities(i, j, k, microphysical_fields, names::Tuple{Symbol, Vararg})
     ρqˣ = @inbounds getproperty(microphysical_fields, first(names))[i, j, k]
     return ρqˣ + sum_microphysical_densities(i, j, k, microphysical_fields, Base.tail(names))
+end
+
+# Sum scalars, whole fields, or state components. Stop at the last component to avoid
+# adding a scalar zero to lazy field expressions; moisture_less_condensate handles empty tuples.
+@inline sum_microphysical_components(μ, names::Tuple{Symbol}) = getproperty(μ, first(names))
+
+@inline function sum_microphysical_components(μ, names::Tuple{Symbol, Vararg})
+    qˣ = getproperty(μ, first(names))
+    return qˣ + sum_microphysical_components(μ, Base.tail(names))
 end
 
 """

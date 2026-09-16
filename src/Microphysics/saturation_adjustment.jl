@@ -1,13 +1,14 @@
-using ..Thermodynamics:
+using Breeze.Thermodynamics:
     Thermodynamics,
     MoistureMassFractions,
-    mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity,
     adjustment_saturation_specific_humidity,
+    density,
     temperature,
     is_absolute_zero,
     with_moisture,
+    with_temperature,
     total_specific_moisture,
     AbstractThermodynamicState,
     LiquidIceDensityState,
@@ -79,23 +80,27 @@ AtmosphereModels.microphysics_model_update!(::SaturationAdjustment, model) = not
 ##### Warm-phase equilibrium moisture fractions
 #####
 
-@inline function equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, ::WarmPhaseEquilibrium)
-    qˡ = max(0, qᵗ - qᵛ⁺)
-    qᵛ = qᵗ - qˡ
-    return MoistureMassFractions(qᵛ, qˡ)
+@inline function equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, ::WarmPhaseEquilibrium, precipitation=(0, 0))
+    qʳ, qˢ = precipitation
+    qᵉ = qᵗ - qʳ - qˢ
+    qᶜˡ = max(0, qᵉ - qᵛ⁺)
+    qᵛ = qᵉ - qᶜˡ
+    return MoistureMassFractions(qᵛ, qᶜˡ + qʳ, oftype(qᵛ, qˢ))
 end
 
 #####
 ##### Mixed-phase equilibrium moisture fractions
 #####
 
-@inline function equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium::MixedPhaseEquilibrium)
+@inline function equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium::MixedPhaseEquilibrium, precipitation=(0, 0))
     surface = equilibrated_surface(equilibrium, T)
     λ = surface.liquid_fraction
-    qᶜ = max(0, qᵗ - qᵛ⁺)
-    qᵛ = qᵗ - qᶜ
-    qˡ = λ * qᶜ
-    qⁱ = (1 - λ) * qᶜ
+    qʳ, qˢ = precipitation
+    qᵉ = qᵗ - qʳ - qˢ
+    qᶜ = max(0, qᵉ - qᵛ⁺)
+    qᵛ = qᵉ - qᶜ
+    qˡ = λ * qᶜ + qʳ
+    qⁱ = (1 - λ) * qᶜ + qˢ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -162,18 +167,32 @@ end
 ##### Saturation adjustment utilities
 #####
 
-@inline function adjust_state(𝒰₀, T, constants, equilibrium)
-    pᵣ = 𝒰₀.reference_pressure
+# Pressure-based states saturate at fixed pressure and total water. Density-based
+# states saturate at their own density, with pressure diagnosed by the equation of state.
+@inline saturation_adjustment_specific_humidity(T, 𝒰, constants, equilibrium) =
+    adjustment_saturation_specific_humidity(T, 𝒰.reference_pressure, total_specific_moisture(𝒰), constants, equilibrium)
+
+@inline saturation_adjustment_specific_humidity(T, 𝒰::LiquidIceDensityState, constants, equilibrium) =
+    saturation_specific_humidity(T, 𝒰.density, constants, equilibrium)
+
+@inline function adjust_state(𝒰₀, T, constants, equilibrium, precipitation=(0, 0))
     qᵗ = total_specific_moisture(𝒰₀)
-    qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
-    q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
+    qᵛ⁺ = saturation_adjustment_specific_humidity(T, 𝒰₀, constants, equilibrium)
+    q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium, precipitation)
     return with_moisture(𝒰₀, q₁)
 end
 
-@inline function saturation_adjustment_residual(T, 𝒰₀, constants, equilibrium)
-    𝒰₁ = adjust_state(𝒰₀, T, constants, equilibrium)
-    T₁ = temperature(𝒰₁, constants)
-    return T - T₁
+@inline function saturation_adjustment_residual(T, 𝒰₀, constants, equilibrium, precipitation=(0, 0))
+    𝒰₁ = adjust_state(𝒰₀, T, constants, equilibrium, precipitation)
+    return saturation_adjustment_residual(T, 𝒰₁, constants)
+end
+
+@inline saturation_adjustment_residual(T, 𝒰, constants) = T - temperature(𝒰, constants)
+
+# At fixed density, solve θˡⁱ(T, ρ, q) - θ₀ = 0 directly. Reusing with_temperature
+# preserves the equation of state without nesting the θˡⁱ-to-T inversion in the secant solve.
+@inline function saturation_adjustment_residual(T, 𝒰::LiquidIceDensityState, constants)
+    return with_temperature(𝒰, T, constants).potential_temperature - 𝒰.potential_temperature
 end
 
 const ATS = AbstractThermodynamicState
@@ -189,107 +208,54 @@ end
 $(TYPEDSIGNATURES)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
+
+The state selects the constraint: fixed pressure for pressure-based states, or fixed
+density with pressure `p = ρ Rᵐ T` for `LiquidIceDensityState`. The conserved
+thermodynamic variable, initial temperature guesses, and solver are retained in either case.
+
+`precipitation = (qʳ, qˢ)` specifies fixed rain and snow mass fractions, included in
+the state's total water, heat capacity, gas constant, and latent energy.
 """
-@inline function adjust_thermodynamic_state(𝒰₀::ATS, microphysics::SA, constants)
+@inline function adjust_thermodynamic_state(𝒰₀::ATS, microphysics::SA, constants, precipitation=(0, 0))
     FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
 
-    # Compute an initial guess assuming unsaturated conditions
+    # Initial temperature with no cloud condensate.
     qᵗ = total_specific_moisture(𝒰₀)
-    q₁ = MoistureMassFractions(qᵗ)
+    qʳ, qˢ = precipitation
+    qᵉ = qᵗ - qʳ - qˢ
+    q₁ = MoistureMassFractions(qᵉ, oftype(qᵗ, qʳ), oftype(qᵗ, qˢ))
     𝒰₁ = with_moisture(𝒰₀, q₁)
     T₁ = temperature(𝒰₁, constants)
 
+    # Unsaturated: keep everything but precipitation as vapor. For pressure-based states,
+    # this all-vapor density-based `qᵛ⁺₁` and the pressure-based `adjustment_saturation_specific_humidity`
+    # that `adjust_state` iterates with coincide exactly when qᵉ = qᵛ⁺ (both reduce to
+    # ϵᵈᵛ (1 - qᵗ) pᵛ⁺ / (p - pᵛ⁺) there), and qᵉ - qᵛ⁺₁(qᵉ) increases with qᵉ, so this test and
+    # the secant branch below share a single saturation threshold.
     equilibrium = microphysics.equilibrium
-    qᵛ⁺₁ = saturation_specific_humidity(𝒰₁, constants, equilibrium)
-    qᵗ ≤ qᵛ⁺₁ && return 𝒰₁
+    qᵛ⁺₁ = saturation_specific_humidity(T₁, density(𝒰₁, constants), constants, equilibrium)
+    qᵉ ≤ qᵛ⁺₁ && return 𝒰₁
 
-    # If we made it here, the state is saturated.
-    # So, we re-initialize our first guess assuming saturation
-    𝒰₁ = adjust_state(𝒰₀, T₁, constants, equilibrium)
+    # First saturated estimate.
+    𝒰₁ = adjust_state(𝒰₀, T₁, constants, equilibrium, precipitation)
 
-    # Next, we generate a second guess scaled by the supersaturation implied by T₁.
-    # Use the adjusted moisture fractions (not the all-vapor q₁) so ΔT reflects
-    # the actual condensate released during adjustment.
+    # Latent heating from cloud formation sets the second temperature estimate.
     ℒˡᵣ = constants.liquid.reference_latent_heat
     ℒⁱᵣ = constants.ice.reference_latent_heat
     q̃₁ = 𝒰₁.moisture_mass_fractions
-    qˡ₁ = q̃₁.liquid
-    qⁱ₁ = q̃₁.ice
+    qˡ₁ = q̃₁.liquid - qʳ
+    qⁱ₁ = q̃₁.ice - qˢ
     cᵖᵐ = mixture_heat_capacity(q̃₁, constants)
     ΔT = (ℒˡᵣ * qˡ₁ + ℒⁱᵣ * qⁱ₁) / cᵖᵐ
     ϵT = convert(FT, 0.01) # minimum increment for second guess
     T₂ = T₁ + max(ϵT, ΔT / 2) # reduce the increment, recognizing it is an overshoot
 
-    # Secant iteration on the temperature residual. `adjust_state` depends only on the
-    # invariants of 𝒰₀ (its reference pressure and total moisture), so the residual is a
-    # pure function of T and the adjusted state is recovered from the converged root.
-    @inline residual(T) = saturation_adjustment_residual(T, 𝒰₀, constants, equilibrium)
+    # Keep total water and precipitation fixed during equilibration.
+    @inline residual(T) = saturation_adjustment_residual(T, 𝒰₀, constants, equilibrium, precipitation)
     T★ = secant_solve(residual, microphysics.solver, T₁, T₂, T₂)
 
-    return adjust_state(𝒰₀, T★, constants, equilibrium)
-end
-
-#####
-##### Density-consistent saturation adjustment for the density-based θˡⁱ state
-#####
-
-# Residual for a constant-density saturated state at temperature `T`: saturate at the actual
-# density (density-based qsat), form the equilibrium partition, and return the density-based θˡⁱ
-# minus the target θ₀ together with the partition `q`. A root in `T` is the state that is both
-# saturated at ρ and conserves θˡⁱ. See NumericalEarth/Breeze.jl#765.
-@inline function saturated_density_residual(T, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, equilibrium)
-    q   = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
-    Rᵐ  = mixture_gas_constant(q, constants)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    κ   = Rᵐ / cᵖᵐ
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
-    L   = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
-    p   = ρ * Rᵐ * T
-    θ   = (T - L) * (pˢᵗ / p)^κ
-    return θ - θ₀, q
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Saturation adjustment for the `LiquidIceDensityState`: a secant on the
-constant-density θˡⁱ-conservation residual, so `qsat` and the θˡⁱ inversion are evaluated at the
-state's actual density `ρ` (with true pressure `p = ρRᵐT`) rather than a fixed reference pressure.
-This is the density-consistent analogue of the generic (reference-pressure) `adjust_state` secant;
-like that one it holds θˡⁱ fixed (conserves it). See NumericalEarth/Breeze.jl#765.
-"""
-@inline function adjust_thermodynamic_state(𝒰₀::LiquidIceDensityState, microphysics::SA, constants)
-    FT = eltype(𝒰₀)
-    is_absolute_zero(𝒰₀) && return 𝒰₀
-
-    θ₀  = 𝒰₀.potential_temperature
-    ρ   = 𝒰₀.density
-    pˢᵗ = 𝒰₀.standard_pressure
-    qᵗ  = total_specific_moisture(𝒰₀)
-    equilibrium = microphysics.equilibrium
-
-    # Unsaturated? No condensation — return the all-vapor state.
-    𝒰₁ = with_moisture(𝒰₀, MoistureMassFractions(qᵗ))
-    T₁ = temperature(𝒰₁, constants)
-    qᵗ ≤ saturation_specific_humidity(T₁, ρ, constants, equilibrium) && return 𝒰₁
-
-    # Saturated: secant on the constant-density residual r(T) = θˡⁱ(T) − θ₀.
-    _, q₁ = saturated_density_residual(T₁, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
-
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
-    cᵖ₁ = mixture_heat_capacity(q₁, constants)
-    ΔT  = (ℒˡᵣ * q₁.liquid + ℒⁱᵣ * q₁.ice) / cᵖ₁   # latent warming implied at T₁
-    T₂  = T₁ + max(convert(FT, 0.01), ΔT / 2)
-
-    @inline residual(T) = first(saturated_density_residual(T, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium))
-    T★ = secant_solve(residual, microphysics.solver, T₁, T₂, T₂)
-
-    _, q = saturated_density_residual(T★, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
-    return with_moisture(𝒰₀, q)
+    return adjust_state(𝒰₀, T★, constants, equilibrium, precipitation)
 end
 
 """
