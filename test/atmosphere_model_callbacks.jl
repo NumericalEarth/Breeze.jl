@@ -84,7 +84,7 @@ end
                                 topology=(Bounded, Bounded, Bounded))
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                         reference_potential_temperature=FT(300),
-                                        surface_pressure=FT(1e5))
+                                        base_pressure=FT(1e5))
 
         times = [FT(0), FT(10), FT(20), FT(30)]
         fts = FieldTimeSeries{Nothing, Center, Center}(cgrid, times; backend=InMemory(2))

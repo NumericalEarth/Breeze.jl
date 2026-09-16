@@ -2,9 +2,10 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Test
 using Breeze
-using Breeze.Thermodynamics: dry_air_gas_constant, adiabatic_hydrostatic_pressure,
-                             mixture_gas_constant, MoistureMassFractions
-using Breeze.AtmosphereModels: standard_pressure
+using Breeze.Thermodynamics: dry_air_gas_constant, compute_hydrostatic_reference!,
+                             mixture_gas_constant, MoistureMassFractions,
+                             surface_pressure_from_cell_center
+using Breeze.AtmosphereModels: dynamics_pressure, standard_pressure, total_density
 using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
@@ -92,7 +93,7 @@ end
     constants = ThermodynamicConstants()
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
@@ -179,6 +180,40 @@ end
     end
 end
 
+@testset "Dewpoint temperature diagnostics [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
+    microphysics = SaturationAdjustment()
+    model = AtmosphereModel(grid; microphysics)
+
+    # Test with subsaturated conditions (low moisture)
+    set!(model, θ=300, qᵗ=0.005)
+    T⁺ = DewpointTemperature(model)
+    @test T⁺ isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    T⁺_field = Field(T⁺)
+    @test all(isfinite.(interior(T⁺_field)))
+    # Dewpoint should be less than or equal to temperature
+    @test all(interior(T⁺_field) .≤ interior(model.temperature))
+    # Dewpoint should be in a reasonable range (above 200K)
+    @test all(interior(T⁺_field) .> 200)
+
+    # With low moisture, dewpoint should be less than temperature
+    @test all(interior(T⁺_field) .< interior(model.temperature))
+
+    # Test with saturated conditions (high moisture)
+    set!(model, θ=300, qᵗ=0.03)  # High moisture to ensure saturation
+    T⁺_sat = DewpointTemperatureField(model)
+    # For saturated conditions, dewpoint should equal temperature where there is condensate
+    qˡ = model.microphysical_fields.qˡ
+    @allowscalar begin
+        for k in 1:8
+            if qˡ[1, 1, k] > 0  # If there's condensate, should be saturated
+                @test T⁺_sat[1, 1, k] ≈ model.temperature[1, 1, k] rtol=FT(1e-3)
+            end
+        end
+    end
+end
+
 @testset "Supersaturation diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
@@ -202,4 +237,134 @@ end
     @test maximum(model.microphysical_fields.qˡ) > 0
     @test abs(maximum(𝒮_saturated)) < FT(1e-3)
     @test minimum(𝒮_saturated) < 0
+end
+
+@testset "Hydrostatic pressure computation [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))
+    constants = ThermodynamicConstants()
+
+    p₀ = FT(101325) # base pressure at z = 0, Pa
+    pˢᵗ = FT(1e5) # standard pressure for potential temperature, Pa
+    T₀ = FT(288) # K
+    Rᵈ = dry_air_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    g = constants.gravitational_acceleration
+    H = Rᵈ * T₀ / g # isothermal scale height
+
+    # Both the reference profile and the model state are isothermal at T₀. The reference matters
+    # because `compute_hydrostatic_pressure!` diagnoses its anchor from `dynamics_pressure` and
+    # `total_density`, which under `AnelasticDynamics` are the reference profile, while it marches
+    # the column with `model.temperature`. Building the reference from a constant θ instead would
+    # make those two different atmospheres — isentropic below, isothermal above — and the anchor
+    # would then miss p₀ by the reference's lapse rate across the half cell rather than by
+    # anything to do with the diagnostic under test.
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=T₀)
+    set!(reference_state.temperature, T₀)
+    compute_hydrostatic_reference!(reference_state, constants)
+
+    dynamics = AnelasticDynamics(reference_state)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+
+    # θ that makes the state isothermal against that reference: θ = T₀ (pˢᵗ/p)^(Rᵈ/cᵖᵈ),
+    # with p the isothermal profile the reference now carries.
+    θ_field = CenterField(grid)
+    set!(θ_field, (x, y, z) -> T₀ * (pˢᵗ / (p₀ * exp(-z / H)))^(Rᵈ / cᵖᵈ))
+
+    set!(model; θ = θ_field)
+
+    # The state really is isothermal, so the half-cell extrapolation below is exact rather than
+    # merely close: `p exp(gΔzρ/2p)` is the isothermal solution when `p/ρ = Rᵈ T`.
+    T_interior = interior(model.temperature)
+    max_rel_error = @allowscalar maximum(abs.((T_interior .- T₀) ./ T₀))
+    @test max_rel_error < FT(1e-5)
+
+    # Compute hydrostatic pressure
+    ph = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
+
+    # `compute_hydrostatic_pressure!` anchors each column at the pressure it *diagnoses* at that
+    # column's bottom face, by extrapolating the first cell center down half a cell, so that it
+    # follows the terrain surface instead of assuming the reference datum sits at the ground. On
+    # an isothermal column that extrapolation is exact, and this domain's bottom face is at z = 0,
+    # so the diagnosed anchor must reproduce the datum — no tolerance to choose.
+    Δz₁ = @allowscalar Δzᶜᶜᶜ(1, 1, 1, grid)
+    p¹ = @allowscalar dynamics_pressure(model.dynamics)[1, 1, 1]
+    ρ¹ = @allowscalar total_density(model.dynamics)[1, 1, 1]
+    pˢ = surface_pressure_from_cell_center(p¹, ρ¹, Δz₁, g)
+    @test pˢ ≈ p₀
+
+    # Expected cell-mean pressure for an isothermal atmosphere, marched from the datum itself
+    # rather than from the diagnosed anchor, so the anchor and the column integration are checked
+    # independently: p_mean = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H)).
+    p_expected = CenterField(grid)
+
+    @allowscalar begin
+        p_interface_bottom = p₀
+        for k in 1:grid.Nz
+            Δz = Δzᶜᶜᶜ(1, 1, k, grid)
+            p_expected[1, 1, k] = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H))
+            p_interface_bottom = exp(-Δz / H) * p_interface_bottom
+        end
+    end
+
+    @test ph ≈ p_expected
+
+    # The anelastic pressure solve determines only the gradient of its kinematic pressure
+    # anomaly. A spatially uniform offset is therefore a gauge change and must not alter a
+    # thermodynamic pressure diagnostic.
+    set!(model.dynamics.pressure_anomaly, FT(1000))
+    ph_with_shifted_gauge = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
+    @test ph_with_shifted_gauge ≈ ph
+end
+
+@testset "Azimuthal-mean diagnostic [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (64, 64, 4), x = (-1, 1), y = (-1, 1),
+                           z = (0, 1), topology = (Periodic, Periodic, Bounded))
+
+    # The azimuthal mean of a constant field is that constant in every (populated) ring.
+    c = CenterField(grid)
+    set!(c, (x, y, z) -> 5)
+    c̄ = azimuthal_mean(c; radius = 1, Nr = 8)
+    @test size(c̄) == (8, 1, 4)
+    @test all(interior(c̄) .≈ 5)
+
+    # The azimuthal mean of the radius field increases monotonically outward.
+    ρ = CenterField(grid)
+    set!(ρ, (x, y, z) -> sqrt(x^2 + y^2))
+    ρ̄ = azimuthal_mean(ρ; radius = 1, Nr = 8)
+    profile = Array(interior(ρ̄, :, 1, 1))
+    @test issorted(profile)
+    @test all(0 .< profile .< 1)
+
+    # The in-place form matches.
+    dest = CenterField(ρ̄.grid)
+    azimuthal_mean!(dest, ρ)
+    @test Array(interior(dest)) ≈ Array(interior(ρ̄))
+
+    # A non-default center: averaging a field symmetric about (xc, yc) about that same
+    # center recovers a clean monotonic radial profile.
+    xc, yc = 0.3, -0.2
+    ρᵒ = CenterField(grid)
+    set!(ρᵒ, (x, y, z) -> sqrt((x - xc)^2 + (y - yc)^2))
+    ρ̄ᵒ = azimuthal_mean(ρᵒ; radius = 0.5, Nr = 8, center = (xc, yc))
+    offset_profile = Array(interior(ρ̄ᵒ, :, 1, 1))
+    @test issorted(offset_profile)
+    @test all(0 .< offset_profile .< 1)
+
+    # Sub-cell sampling (default m > 1) fills rings that center-only binning (m = 1) leaves
+    # empty near the center, and stays conservative (a constant maps to that constant).
+    coarse = Array(interior(azimuthal_mean(c; radius = 1, Nr = 64, m = 1), :, 1, 1))
+    filled = Array(interior(azimuthal_mean(c; radius = 1, Nr = 64), :, 1, 1))
+    @test any(isnan, coarse)
+    @test !any(isnan, filled)
+    @test all(v -> isnan(v) || v ≈ 5, coarse)
+    @test all(filled .≈ 5)
+
+    # Past the sub-cell resolution (very fine Nr) some rings still catch nothing; they are
+    # filled with NaN (not zero, which would bias a downstream radial average).
+    fine = azimuthal_mean(c; radius = 1, Nr = 200)
+    fine_profile = Array(interior(fine, :, 1, 1))
+    @test any(isnan, fine_profile)
+    @test all(v -> isnan(v) || v ≈ 5, fine_profile)
 end

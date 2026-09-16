@@ -11,15 +11,21 @@ using ClimaComms: ClimaComms
 using Dates: Dates
 using RRTMGP: RRTMGP
 using SpecialFunctions: SpecialFunctions
+
+# TODO: remove the `if VERSION < v"1.13"` check when we upgrade to new version of Reactant.
+allow_unanalyzable = if VERSION < v"1.13"
 using Reactant: Reactant
 
-allow_unanalyzable = if VERSION < v"1.12"
+if VERSION < v"1.12"
     # For some reason `BreezeReactantExt` is non-analyzable,
     # but only in Julia v1.11-.
     BreezeReactantExt = isdefined(Base, :get_extension) ? Base.get_extension(Breeze, :BreezeReactantExt) : Breeze.BreezeReactantExt
     (BreezeReactantExt,)
 else
     ()
+end
+else
+()
 end
 
 # Copy from `docs/make.jl`, where we also need to find all submodules of a given module.

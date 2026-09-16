@@ -359,6 +359,25 @@ The physical meaning of the prognostic moisture field depends on the scheme:
 moisture_prognostic_name(::Nothing) = :ρqᵛ
 
 """
+    total_moisture_density_name
+
+The key under which a *water* input — a surface evaporative flux, a moisture source — is
+supplied to `AtmosphereModel`, `:ρqᵗ`, along with its specific alias `:qᵗ` for forcings.
+
+``qᵗ`` denotes total moisture, so the key names the physical input without committing to the
+variable that carries it: a `boundary_conditions` or `forcing` entry keyed `ρqᵗ` is routed onto
+whichever moisture density the microphysics evolves (see [`moisture_prognostic_name`](@ref)).
+Unlike an energy input, no conversion is involved: water added to the prognostic moisture is
+water added to ``qᵗ`` under every scheme, so the routing is a pure re-key.
+
+The prognostic moisture name is scheme-dependent — `:ρqᵛ` for non-equilibrium cloud formation,
+`:ρqᵉ` for saturation adjustment — and changes with the `cloud_formation` option of
+`BulkMicrophysics`, so keying a surface flux by that name ties a setup to one scheme. `ρqᵗ` is
+never itself prognostic and therefore works for any of them.
+"""
+const total_moisture_density_name = :ρqᵗ
+
+"""
 $(TYPEDSIGNATURES)
 
 Strip the leading `ρ` from a density-weighted field name to obtain
@@ -544,7 +563,7 @@ Grid indices cannot be eliminated because:
 
 Schemes should write all auxiliary fields in one function. This includes:
 - Specific moisture fractions (`qᶜˡ`, `qʳ`, etc.) from the microphysical state
-- Derived quantities (`qˡ = qᶜˡ + qʳ`, `qⁱ = qᶜⁱ + qˢ`)
+- Derived quantities (`qˡ = qᶜˡ + qʳ`, `qⁱ = qᶜⁱ + qˢⁿ`)
 - Vapor mass fraction `qᵛ` from the thermodynamic state
 - Terminal velocities for sedimentation
 
@@ -667,7 +686,7 @@ end
 @inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵛᵉ)
     z = zero(qᵛᵉ)
     qˡ = get(ℳ, :qᶜˡ, z) + get(ℳ, :qʳ, z)
-    qⁱ = get(ℳ, :qᶜⁱ, z) + get(ℳ, :qˢ, z)
+    qⁱ = get(ℳ, :qᶜⁱ, z) + get(ℳ, :qˢⁿ, z)
     return MoistureMassFractions(qᵛᵉ, qˡ, qⁱ)
 end
 

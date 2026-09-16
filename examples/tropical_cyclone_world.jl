@@ -76,7 +76,7 @@ p₀ = 101325  # Pa
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
-                                 surface_pressure = p₀,
+                                 base_pressure = p₀,
                                  potential_temperature = T₀,
                                  vapor_mass_fraction = 0)
 
@@ -117,15 +117,15 @@ Uᵍ = 1
 ρu_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ))
 ρv_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ))
 
-ρs_bcs = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient = Cᵀ,
+ρE_bcs = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient = Cᵀ,
                                                                gustiness = Uᵍ,
                                                                surface_temperature = T₀))
 
-ρqᵉ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = β*Cᵀ,
+ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = β*Cᵀ,
                                                         gustiness = Uᵍ,
                                                         surface_temperature = T₀))
 
-boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρs=ρs_bcs, ρqᵉ=ρqᵉ_bcs)
+boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρE=ρE_bcs, ρqᵗ=ρqᵗ_bcs)
 nothing #hide
 
 # ## Radiative forcing
@@ -133,21 +133,21 @@ nothing #hide
 # The paper (Eq. 1) prescribes a piecewise radiative tendency: constant cooling
 # at ``Ṫ = 1`` K/day for ``T > T^{ts}`` (troposphere), and Newtonian relaxation toward ``T^{ts}``
 # with timescale ``τ_r = 20`` days for ``T ≤ T^{ts}`` (stratosphere). We apply this as an
-# energy forcing on ``ρs``, so that Breeze handles the conversion to ``ρθ`` tendency.
+# energy forcing on ``ρE``, so that Breeze handles the conversion to the ``ρθ`` tendency.
 
 Ṫ  = 1 / day
 τᵣ = 20days
 ρᵣ = reference_state.density
 parameters = (; Tᵗˢ, Ṫ, τᵣ, ρᵣ, cᵖᵈ)
 
-@inline function ρs_forcing_func(i, j, k, grid, clock, model_fields, p)
+@inline function ρE_forcing_func(i, j, k, grid, clock, model_fields, p)
     @inbounds T = model_fields.T[i, j, k]
     @inbounds ρ = p.ρᵣ[i, j, k]
     ∂t_T = ifelse(T > p.Tᵗˢ, -p.Ṫ, (p.Tᵗˢ - T) / p.τᵣ)
     return ρ * p.cᵖᵈ * ∂t_T
 end
 
-ρs_forcing = Forcing(ρs_forcing_func; discrete_form=true, parameters)
+ρE_forcing = Forcing(ρE_forcing_func; discrete_form=true, parameters)
 
 # ## Sponge layer
 #
@@ -157,7 +157,7 @@ end
 sponge_mask = GaussianMask{:z}(center=26kilometers, width=2kilometers)
 ρw_sponge = Relaxation(rate=1/30, mask=sponge_mask)
 
-forcing = (; ρs=ρs_forcing, ρw=ρw_sponge)
+forcing = (; ρE=ρE_forcing, ρw=ρw_sponge)
 nothing #hide
 
 # ## Model

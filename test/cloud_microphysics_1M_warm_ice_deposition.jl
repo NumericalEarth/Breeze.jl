@@ -41,16 +41,16 @@ override_process_params(parameters; overrides...) =
     qᶜˡ = FT(0)
     qᶜⁱ = FT(0)
     qʳ = FT(0)
-    qˢ = FT(0)
+    qˢⁿ = FT(0)
 
-    q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qᶜⁱ + qˢ)
+    q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qᶜⁱ + qˢⁿ)
     𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), FT(101325)), T, constants)
     ρ = density(𝒰, constants)
 
     qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
     @test qᵛ > qᵛ⁺ⁱ
 
-    ℳ = BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
+    ℳ = BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
     G = BreezeCloudMicrophysicsExt.mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
     tps = TDI.TD.Parameters.ThermodynamicsParameters(FT)
@@ -62,11 +62,11 @@ override_process_params(parameters; overrides...) =
         tps,
         ρ,
         T,
-        qᵛ + qᶜˡ + qᶜⁱ + qʳ + qˢ,
+        qᵛ + qᶜˡ + qᶜⁱ + qʳ + qˢⁿ,
         qᶜˡ,
         qᶜⁱ,
         qʳ,
-        qˢ,
+        qˢⁿ,
     )
 
     @test reference.dq_icl_dt == zero(FT)
@@ -91,7 +91,7 @@ end
         rain_snow_accretion = nothing,
     )
 
-    evaluate_tendencies = function (parameters, T, qᵛ, qᶜˡ, qᶜⁱ, qʳ, qˢ;
+    evaluate_tendencies = function (parameters, T, qᵛ, qᶜˡ, qᶜⁱ, qʳ, qˢⁿ;
                                     freezing_temperature = FT(273.15))
         categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(
             FT;
@@ -100,14 +100,14 @@ end
         )
         cloud_formation = NonEquilibriumCloudFormation(nothing, CloudIce(FT))
         microphysics = OneMomentCloudMicrophysics(FT; categories, cloud_formation)
-        q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qᶜⁱ + qˢ)
+        q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qᶜⁱ + qˢⁿ)
         𝒰 = with_temperature(
             LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), FT(101325)),
             T,
             constants,
         )
         ρ = density(𝒰, constants)
-        ℳ = BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
+        ℳ = BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
         tendencies = @inferred BreezeCloudMicrophysicsExt.mpne1m_tendencies(
             microphysics,
             ρ,
@@ -118,7 +118,7 @@ end
         return tendencies, microphysics
     end
 
-    disabled_parameters = CMP.Microphysics1MParams(FT; disabled_options...)
+    disabled_microphysics = CMP.Microphysics1MParams(FT; disabled_options...)
 
     # Supersaturation-dependent ice autoconversion transfers cloud ice to snow.
     options = merge(disabled_options, (; snow_autoconversion = CMP.WithSupersaturation()))
@@ -126,8 +126,8 @@ end
                                          snow_autoconversion = (; r_ice_snow = FT(25e-6)))
     tendencies, = evaluate_tendencies(parameters, FT(250), FT(0.01), FT(0), FT(1e-4), FT(0), FT(0))
     @test tendencies.ρqᶜⁱ < 0
-    @test tendencies.ρqˢ > 0
-    @test tendencies.ρqᶜⁱ ≈ -tendencies.ρqˢ
+    @test tendencies.ρqˢⁿ > 0
+    @test tendencies.ρqᶜⁱ ≈ -tendencies.ρqˢⁿ
 
     # SublimationOnly suppresses supersaturated snow deposition.
     options = merge(disabled_options, (; snow_deposition_sublimation = CMP.SublimationOnly()))
@@ -139,11 +139,11 @@ end
     parameters = CMP.Microphysics1MParams(FT; options...)
     tendencies, = evaluate_tendencies(parameters, FT(250), FT(0.01), FT(0), FT(0), FT(0), FT(1e-4))
     @test tendencies.ρqᵛ < 0
-    @test tendencies.ρqˢ > 0
+    @test tendencies.ρqˢⁿ > 0
 
     # Numerical repair remains active when physical cloud formation is disabled.
     tendencies, = evaluate_tendencies(
-        disabled_parameters,
+        disabled_microphysics,
         FT(250),
         FT(0.001),
         FT(-1e-4),
@@ -156,7 +156,7 @@ end
     @test sum(tendencies) ≈ zero(FT) atol=eps(FT)
 
     tendencies, = evaluate_tendencies(
-        disabled_parameters,
+        disabled_microphysics,
         FT(250),
         FT(0.001),
         FT(0),
@@ -169,7 +169,7 @@ end
     @test sum(tendencies) ≈ zero(FT) atol=eps(FT)
 
     tendencies, = evaluate_tendencies(
-        disabled_parameters,
+        disabled_microphysics,
         FT(250),
         FT(0.001),
         FT(0),
@@ -178,7 +178,7 @@ end
         FT(-1e-4),
     )
     @test tendencies.ρqᵛ < 0
-    @test tendencies.ρqˢ > 0
+    @test tendencies.ρqˢⁿ > 0
     @test sum(tendencies) ≈ zero(FT) atol=eps(FT)
 
     # TemperatureDependent formation uses the Frostenberg deposition timescale.

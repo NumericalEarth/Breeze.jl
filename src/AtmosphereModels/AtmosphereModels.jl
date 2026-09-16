@@ -23,6 +23,7 @@ export
     specific_thermodynamic_field,
     thermodynamic_density_name,
     thermodynamic_density,
+    total_energy_density_name,
     DefaultTemperatureSolver,
     default_temperature_solver,
     # Helpers
@@ -35,6 +36,7 @@ export
     surface_precipitation_flux,
     specific_humidity,
     moisture_prognostic_name,
+    total_moisture_density_name,
     moisture_specific_name,
     specific_prognostic_moisture,
 
@@ -163,6 +165,7 @@ include("density_weighted_implicit_diffusion.jl")
 include("cell_advection_timescale.jl")
 include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
+include("checkpointing.jl")
 include("compute_hydrostatic_pressure.jl")
 
 #####
