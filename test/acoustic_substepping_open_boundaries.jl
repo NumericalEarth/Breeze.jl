@@ -339,7 +339,6 @@ for arch in arches
         model_low,  ρ_wall = build_α_model(0.05)
         model_high, _      = build_α_model(1.0)
 
-        Nx = size(model_low.grid, 1)
         ρ_west_low  = @allowscalar mean(interior(model_low.dynamics.dry_density)[1, :, :])
         ρ_west_high = @allowscalar mean(interior(model_high.dynamics.dry_density)[1, :, :])
 
