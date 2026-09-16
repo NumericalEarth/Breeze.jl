@@ -73,7 +73,7 @@ adjustment schemes.
 Saturation adjustment schemes override `grid_moisture_fractions` directly since they read cloud
 condensate from diagnostic fields.
 
-### Total-Water Conversion
+### Total Water Conversion
 
 [`condensate_field_names`](@ref Breeze.AtmosphereModels.condensate_field_names) lists the
 independent condensate mass densities outside the scheme's prognostic moisture. This one
