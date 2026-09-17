@@ -263,7 +263,7 @@ simulation.output_writers[:profiles] = JLD2Writer(model, avg_outputs;
                                                   filename = "tc_world_profiles.jld2",
                                                   schedule = TimeInterval(1day),
                                                   init = save_parameters,
-                                                  overwrite_existing = true)
+                                                  overwrite_files = true)
 
 # Surface fields for tracking TC development.
 
@@ -272,7 +272,7 @@ simulation.output_writers[:surface] = JLD2Writer(model, surface_outputs;
                                                  filename = "tc_world_surface.jld2",
                                                  indices = (:, :, 1),
                                                  schedule = TimeInterval(30minutes),
-                                                 overwrite_existing = true)
+                                                 overwrite_files = true)
 
 # ## Run
 
