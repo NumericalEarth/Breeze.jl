@@ -159,7 +159,7 @@ end
 $(TYPEDEF)
 $(TYPEDFIELDS)
 
-Longwave layer optics of column `column` of `columns` for [`NumericalRadiation.streaming_longwave_fluxes!`](@ref):
+Longwave layer optics of column `column` of `columns` for `NumericalRadiation.streaming_longwave_fluxes!`:
 `(ig, k)` returns `(τ, B_top, B_bottom)`, the gas absorption optical depth of layer `k` at
 g point `ig` plus the cloud absorption of both phases, and the Planck sources at the layer's
 top and bottom interfaces.
@@ -215,7 +215,7 @@ end
 $(TYPEDEF)
 $(TYPEDFIELDS)
 
-Shortwave layer optics of column `column` of `columns` for [`NumericalRadiation.streaming_shortwave_fluxes!`](@ref):
+Shortwave layer optics of column `column` of `columns` for `NumericalRadiation.streaming_shortwave_fluxes!`:
 `(ig, k)` returns `(τ_absorption, τ_scattering, asymmetry)`, the gas absorption optical depth
 of layer `k` at g point `ig`, the Rayleigh scattering of the layer's air (dry air plus water
 vapor), and the scattering of both cloud phases folded in.

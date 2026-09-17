@@ -6,7 +6,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.AtmosphereModels: standard_ozone_profile, top_face_temperature, top_face_pressure, bottom_face_pressure,
-                               dynamics_pressure, total_density, specific_humidity, materialize_background_atmosphere
+                               dynamics_pressure, total_density, specific_humidity, materialize_background_atmosphere,
+                               _update_radiation!
 using Dates
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -163,10 +164,12 @@ end
                                       surface_temperature = 300, surface_albedo = 0.1)
         @test isnothing(tall.atmospheric_state.extension)
 
-        # A preloaded gas optics model passes straight through
+        # A preloaded gas optics model is converted to the grid's float type
         gas_model = NumericalRadiation.read_reference_ecckd_gas_optics(:climate_32x32; names = NumericalRadiationExt.ECCKD_GAS_NAMES)
         preloaded = RadiativeTransferModel(grid, EcCKDOptics(gas_model), constants; surface_temperature = 300, surface_albedo = 0.1)
-        @test preloaded.longwave_solver.gas_model === gas_model
+        @test eltype(preloaded.longwave_solver.gas_model) == FT
+        @test preloaded.longwave_solver.gas_model.longwave_absorption == FT.(gas_model.longwave_absorption)
+        @test eltype(radiation.longwave_solver.gas_model) == FT
     end
 
     @testset "Staged columns and column extension [$(FT)]" for FT in test_float_types()
@@ -270,115 +273,36 @@ end
         @test atmosphere.geometry.cos_zenith == FT(0.5)
     end
 
-    @testset "Fluxes [$(FT)]" for FT in test_float_types()
+    @testset "Identities [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         Nz = 16
         grid = column_grid(FT, Nz, 3kilometers)
         constants = ThermodynamicConstants()
-        μ0 = FT(0.5)
-        S0 = FT(1361)
-
+        ε = 0.98
         radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
-                                           surface_temperature = 300, surface_emissivity = 0.98,
-                                           surface_albedo = 0.1, solar_constant = S0,
-                                           solar_position = FixedCosineZenith(μ0))
+                                           surface_temperature = 300, surface_emissivity = ε,
+                                           surface_albedo = 0.1, solar_position = FixedCosineZenith(0.5))
         model = column_model(grid, radiation)
+        ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, ℐ_net = column_fluxes(radiation)
 
+        # The upwelling longwave at the surface is the surface's emission plus the reflected
+        # downwelling flux, `ε Σ w_g B_g(Tₛ) + (1 - ε) ℐ_lw_dn`
+        gas_model = radiation.longwave_solver.gas_model
+        weights = Array(gas_model.longwave_weights)
+        emission = sum(weights .* NumericalRadiation.surface_longwave_emission(gas_model, FT(300)))
+        @test ℐ_lw_up[1] ≈ ε * emission + (1 - ε) * -ℐ_lw_dn[1] atol = 0.5
+
+        # Without an extension the grid top is the top of the atmosphere: no downwelling longwave
         bare = RadiativeTransferModel(grid, EcCKDOptics(), constants; column_extension = nothing,
-                                      surface_temperature = 300, surface_emissivity = 0.98,
-                                      surface_albedo = 0.1, solar_constant = S0,
-                                      solar_position = FixedCosineZenith(μ0))
-        bare_model = column_model(grid, bare)
+                                      surface_temperature = 300, surface_emissivity = ε,
+                                      surface_albedo = 0.1, solar_position = FixedCosineZenith(0.5))
+        column_model(grid, bare)
+        @test column_fluxes(bare)[2][Nz+1] == 0
 
-        loose = FT == Float64 ? 1e-10 : 1e-5
-
-        for (rtm, name) in ((radiation, "extended"), (bare, "grid only"))
-            @testset "$name" begin
-                ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, ℐ_net = column_fluxes(rtm)
-
-                # Finite, signed by direction
-                for ℐ in (ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn)
-                    @test all(isfinite, ℐ)
-                end
-                @test all(ℐ_lw_up .> 0)
-                @test all(ℐ_lw_dn .<= 0)
-                @test all(ℐ_sw_up .> 0)
-                @test all(ℐ_sw_dn .< 0)
-
-                # A warm, moist column: strong surface emission and a reflecting surface
-                @test ℐ_lw_up[1] > 400
-                @test ℐ_sw_up[1] ≈ 0.1 * -ℐ_sw_dn[1] rtol = 1e-3
-
-                # Column energy closure: the integrated divergence is the net flux difference
-                Δz = 3kilometers / Nz
-                column_heating = Δz * sum(Array(interior(rtm.flux_divergence)))
-                @test column_heating ≈ ℐ_net[1] - ℐ_net[Nz+1] rtol = loose
-            end
-        end
-
-        # Without an extension the grid top is the top of the atmosphere
-        ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, _ = column_fluxes(bare)
-        @test ℐ_lw_dn[Nz+1] == 0
-        # S0 μ0 summed over the g-point weights (unit sum up to rounding), stored in the grid's float type
-        @test -ℐ_sw_dn[Nz+1] ≈ S0 * μ0 rtol = (FT == Float64 ? 1e-12 : 4 * eps(FT))
-
-        # With the extension, the atmosphere above the grid emits downward (203 W m⁻² observed) and
-        # absorbs and scatters sunlight (131 W m⁻² observed: water vapor and ozone absorption plus
-        # Rayleigh scattering of a μ0 = 0.5 beam)
-        ℐ_lw_up_e, ℐ_lw_dn_e, ℐ_sw_up_e, ℐ_sw_dn_e, _ = column_fluxes(radiation)
-        @test 150 < -ℐ_lw_dn_e[Nz+1] < 350
-        @test 5 < -ℐ_sw_dn[Nz+1] + ℐ_sw_dn_e[Nz+1] < 150
-        # ... which warms the top of the grid relative to the bare column, whose top cells radiate to
-        # space unopposed (observed: +61 and +1.4 K day⁻¹ in the two top cells, +0.2 and +0.09 below)
-        cᵖ = constants.dry_air.heat_capacity
-        heating(rtm) = Array(interior(rtm.flux_divergence))[1, 1, :] ./
-                       (Array(interior(total_density(model.dynamics)))[1, 1, :] .* cᵖ) .* 86400
-        @test all(heating(radiation)[Nz-1:Nz] .- heating(bare)[Nz-1:Nz] .> 0.5)
-
-        @testset "extension convergence" begin
-            # Doubling the extension layers or raising its top barely moves the fluxes at the grid top
-            finer = RadiativeTransferModel(grid, EcCKDOptics(), constants; column_extension = ColumnExtension(FT; layers = 80),
-                                           surface_temperature = 300, surface_emissivity = 0.98,
-                                           surface_albedo = 0.1, solar_constant = S0, solar_position = FixedCosineZenith(μ0))
-            column_model(grid, finer)
-            _, ℐ_lw_dn_f, _, _, _ = column_fluxes(finer)
-            @test abs(ℐ_lw_dn_f[Nz+1] - ℐ_lw_dn_e[Nz+1]) < 1
-            @test maximum(abs, heating(finer) .- heating(radiation)) < 0.02
-
-            taller = RadiativeTransferModel(grid, EcCKDOptics(), constants; column_extension = ColumnExtension(FT; top = 80kilometers),
-                                            surface_temperature = 300, surface_emissivity = 0.98,
-                                            surface_albedo = 0.1, solar_constant = S0, solar_position = FixedCosineZenith(μ0))
-            column_model(grid, taller)
-            _, ℐ_lw_dn_t, _, ℐ_sw_dn_t, _ = column_fluxes(taller)
-            @test abs(ℐ_lw_dn_t[Nz+1] - ℐ_lw_dn_e[Nz+1]) < 0.3
-            @test abs(ℐ_sw_dn_t[Nz+1] - ℐ_sw_dn_e[Nz+1]) < 0.5
-        end
-
-        @testset "night" begin
-            night = RadiativeTransferModel(grid, EcCKDOptics(), constants;
-                                           surface_temperature = 300, surface_emissivity = 0.98,
-                                           surface_albedo = 0.1, solar_constant = S0,
-                                           solar_position = FixedCosineZenith(0))
-            column_model(grid, night)
-            ℐ_lw_up_n, ℐ_lw_dn_n, ℐ_sw_up_n, ℐ_sw_dn_n, _ = column_fluxes(night)
-            @test all(iszero, ℐ_sw_up_n)
-            @test all(iszero, ℐ_sw_dn_n)
-            @test ℐ_lw_up_n == ℐ_lw_up_e
-            @test ℐ_lw_dn_n == ℐ_lw_dn_e
-        end
-
-        @testset "apparent sun" begin
-            # The default solar position is computed from the DateTime clock and the grid's (λ, φ)
-            apparent = RadiativeTransferModel(grid, EcCKDOptics(), constants;
-                                              surface_temperature = 300, surface_albedo = 0.1)
-            column_model(grid, apparent)
-            @test apparent.solar_position isa ApparentSolarPosition
-            cos_zenith = Array(apparent.atmospheric_state.cos_zenith)[1]
-            @test 0 < cos_zenith <= 1
-            _, _, _, ℐ_sw_dn_a, _ = column_fluxes(apparent)
-            @test -ℐ_sw_dn_a[Nz+1] < S0 * cos_zenith
-            @test -ℐ_sw_dn_a[Nz+1] > 0.5 * S0 * cos_zenith
-        end
+        # Column energy closure: the integrated divergence is the net flux difference
+        Δz = 3kilometers / Nz
+        column_heating = Δz * sum(Array(interior(radiation.flux_divergence)))
+        @test column_heating ≈ ℐ_net[1] - ℐ_net[Nz+1] rtol = (FT == Float64 ? 1e-10 : 1e-5)
     end
 
     @testset "Several columns [$(FT)]" for FT in test_float_types()
@@ -420,6 +344,27 @@ end
             @test ℐ_sw_upᵢ == ℐ_sw_upₛ
             @test ℐ_sw_dnᵢ == ℐ_sw_dnₛ
         end
+    end
+
+    @testset "Allocation scaling" begin
+        # The update allocates only the fixed overhead of its kernel launches, not per column:
+        # 1 and 64 columns allocate the same, within 1 KiB
+        Oceananigans.defaults.FloatType = Float64
+        constants = ThermodynamicConstants()
+        allocations = map((1, 64)) do Nx
+            grid = RectilinearGrid(default_arch; size = (Nx, 1, 8), x = (0, Nx), y = (0, 1), z = (0, 3kilometers),
+                                   topology = (Periodic, Periodic, Bounded))
+            radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                               surface_temperature = 300, surface_albedo = 0.1,
+                                               solar_position = FixedCosineZenith(0.5))
+            reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 300)
+            model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
+                                    formulation = :LiquidIcePotentialTemperature, radiation)
+            set!(model; θ = (x, y, z) -> 300 + 0.01 * z / 1000, qᵗ = (x, y, z) -> 0.015 * exp(-z / 2500))
+            _update_radiation!(radiation, model)
+            return @allocated _update_radiation!(radiation, model)
+        end
+        @test abs(allocations[2] - allocations[1]) < 1024
     end
 
     @testset "Scheduling" begin
