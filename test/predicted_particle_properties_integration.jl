@@ -12,7 +12,9 @@ using Breeze.ParcelModels: step_parcel_state!
 using Oceananigans: Bounded, CPU, Center, CenterField, Face, Field, Flat, GridFittedBottom,
                      ImmersedBoundaryGrid, RectilinearGrid, compute!, set!, time_step!
 using Oceananigans.Architectures: on_architecture
-using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.BoundaryConditions: BoundaryCondition, FieldBoundaryConditions, Flux,
+                                       FluxBoundaryCondition, ImpenetrableBoundaryCondition,
+                                       Value, ValueBoundaryCondition
 using Oceananigans.Fields: interior, location
 using Oceananigans.TimeSteppers: update_state!
 
@@ -700,4 +702,43 @@ using Oceananigans.TimeSteppers: update_state!
         @test all(isfinite, Array(interior(μ.ρqᶜˡ)))
         @test all(isfinite, Array(interior(model.moisture_density)))
     end
+end
+
+# Defined at top level and capturing nothing, so it compiles for the GPU halo-fill kernel.
+prescribed_ice_density(x, y, t) = 1e-4
+
+@testset "P3 prognostics carry the boundary conditions they are given" begin
+    FT = Float64
+    grid = RectilinearGrid(default_arch, FT; size = (2, 2, 2), extent = (100, 100, 100))
+    constants = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid, constants;
+                                     base_pressure = FT(101325),
+                                     potential_temperature = FT(285))
+    dynamics = AnelasticDynamics(reference_state)
+    p3 = PredictedParticlePropertiesMicrophysics(FT)
+
+    # A constant surface rain flux, and a function-valued condition on the ice mass. The
+    # function-valued one matters on its own: the microphysical halos are refilled during
+    # `update_state!`, and that fill has to pass the same boundary-condition arguments as the
+    # prognostic fill or `getbc` is called with the wrong signature.
+    rain_flux = FluxBoundaryCondition(FT(-1e-5))
+    ice_value = ValueBoundaryCondition(prescribed_ice_density)
+    boundary_conditions = (; ρqʳ = FieldBoundaryConditions(bottom = rain_flux),
+                             ρqⁱ = FieldBoundaryConditions(top = ice_value))
+
+    model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                            microphysics = p3, boundary_conditions)
+
+    μ = model.microphysical_fields
+    @test μ.ρqʳ.boundary_conditions.bottom === rain_flux
+    @test μ.ρqⁱ.boundary_conditions.top isa BoundaryCondition{<:Value}
+    @test μ.ρqⁱ.boundary_conditions.top.condition.func === prescribed_ice_density
+
+    # A prognostic that was given nothing keeps the default, rather than erroring.
+    @test μ.ρqᶜˡ.boundary_conditions.bottom isa BoundaryCondition{<:Flux}
+
+    # The halo refill during `update_state!` must evaluate the function-valued condition.
+    set!(model; θ = FT(285), qᵛ = FT(0.01), enforce_mass_conservation = false)
+    @test_nowarn update_state!(model)
+    @test all(isfinite, Array(interior(μ.ρqⁱ)))
 end
