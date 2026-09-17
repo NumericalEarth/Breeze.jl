@@ -163,6 +163,60 @@ end
 const RelativeHumidityField = Field{C, C, C, <:RelativeHumidityOp}
 RelativeHumidityField(model) = Field(RelativeHumidity(model))
 
+"""
+$(TYPEDSIGNATURES)
+
+Return an `AbstractOperation` representing the *supersaturation with respect to liquid water*,
+
+```math
+𝒮 = ℋ - 1 = \\frac{pᵛ}{pᵛ⁺} - 1
+```
+
+computed from [`RelativeHumidity`](@ref). Air with ``𝒮 > 0`` grows cloud droplets by
+condensation and, above a droplet's critical supersaturation, activates it; air with
+``𝒮 < 0`` evaporates them. Because the supersaturation in a cloud is a small residual of
+two much larger numbers, it is the natural diagnostic to output rather than the humidity
+itself.
+
+## Examples
+
+```jldoctest supersaturation
+using Breeze
+
+grid = RectilinearGrid(size=(1, 1, 128), extent=(1e3, 1e3, 1e3))
+model = AtmosphereModel(grid; microphysics=SaturationAdjustment())
+set!(model, θ=300, qᵗ=0.005)  # subsaturated
+
+𝒮 = Supersaturation(model)
+
+# output
+BinaryOperation at (Center, Center, Center)
+├── grid: 1×1×128 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+└── tree:
+    - at (Center, Center, Center)
+    ├── KernelFunctionOperation at (Center, Center, Center)
+    └── 1
+```
+
+The convenience constructor returns the `Field` instead:
+
+```jldoctest supersaturation
+𝒮_field = SupersaturationField(model)
+maximum(𝒮_field) < 0   # the sounding is subsaturated everywhere
+
+# output
+true
+```
+"""
+Supersaturation(model) = RelativeHumidity(model) - 1
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a `Field` holding the supersaturation ``𝒮 = ℋ - 1``. See [`Supersaturation`](@ref).
+"""
+SupersaturationField(model) = Field(Supersaturation(model))
+
 #####
 ##### Number Concentration
 #####
