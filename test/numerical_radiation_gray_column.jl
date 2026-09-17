@@ -73,7 +73,8 @@ function layer_optical_depths(model, κ)
     return τ, τ_above, τ_below
 end
 
-@testset "Gray column through the ecCKD kernel [$(FT)]" for FT in test_float_types()
+# Both float types always: this is the test that pins the Float32 kernel path at rounding accuracy
+@testset "Gray column through the ecCKD kernel [$(FT)]" for FT in all_float_types()
     Oceananigans.defaults.FloatType = FT
     rtol = FT == Float64 ? 1e-12 : 200 * eps(Float32)
 
@@ -163,7 +164,11 @@ end
     function longwave_boundary_fluxes(Nz)
         grid = column_grid(FT, Nz, 3kilometers)
         radiation = gray_radiation(grid, κ_lw, 0; surface_temperature = T₀, cos_zenith = 0)
-        gray_column_model(grid, radiation, T_target)
+        model = gray_column_model(grid, radiation, T_target)
+        # Every layer, the reference's included, stays above the solver's thin-layer branch
+        # (τ ≤ 1e-3), where the Planck path switches to its trapezoidal form and the error
+        # being ratioed would turn first order
+        @test all(layer_optical_depths(model, κ_lw)[1] .> 1e-3)
         return column(radiation.upwelling_longwave_flux)[Nz+1], -column(radiation.downwelling_longwave_flux)[1]
     end
 

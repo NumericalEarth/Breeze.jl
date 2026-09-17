@@ -69,13 +69,16 @@ Sample `extension` on the geometrically stretched layers between the top face of
 on the grid's architecture, taking the ozone profile from `background` when the extension carries
 none. Returns `nothing` when the grid already reaches `extension.top`.
 """
-function materialize_column_extension(extension::ColumnExtension{FT}, grid, background::BackgroundAtmosphere) where FT
+function materialize_column_extension(extension::ColumnExtension, grid, background::BackgroundAtmosphere)
+    # Sampled in the grid's float type, whatever the extension's: a default `ColumnExtension()`
+    # is Float64, and a Float32 grid must run Float32 kernels
+    FT = eltype(grid)
     Nz = size(grid, 3)
     zᶠ = Array(znodes(grid, Face()))
-    z_top = zᶠ[Nz+1]
-    Δz_top = zᶠ[Nz+1] - zᶠ[Nz]
+    z_top = FT(zᶠ[Nz+1])
+    Δz_top = FT(zᶠ[Nz+1] - zᶠ[Nz])
 
-    faces = column_extension_faces(extension, z_top, Δz_top)
+    faces = FT.(column_extension_faces(extension, z_top, Δz_top))
     Nₑ = length(faces) - 1
     Nₑ == 0 && return nothing
 
@@ -96,9 +99,9 @@ function materialize_column_extension(extension::ColumnExtension{FT}, grid, back
                                        on_architecture(arch, temperature_interfaces),
                                        on_architecture(arch, specific_humidity),
                                        on_architecture(arch, ozone_mole_fraction),
-                                       extension.blending_height,
+                                       FT(extension.blending_height),
                                        join_temperature,
-                                       FT(z_top))
+                                       z_top)
 end
 
 materialize_column_extension(::Nothing, grid, background) = nothing

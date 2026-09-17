@@ -1,24 +1,25 @@
 #####
-##### Host view of a staged column
+##### Host copy of a staged column
 #####
-##### A CPU-only reference path: a staged column presented as NumericalRadiation's
-##### `ColumnAtmosphere`, so that the array `optical_properties!` and `radiative_fluxes!` can be
-##### run on it as the reference the column kernels are checked against.
+##### A staged column copied to the host and presented as NumericalRadiation's `ColumnAtmosphere`,
+##### so that the array `optical_properties!` and `radiative_fluxes!` can be run on it as the
+##### reference the column kernels are checked against. The copy is explicit: the column arrays
+##### live on the grid's architecture, and the array path of NumericalRadiation is host-only.
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-The staged column `(i, j)` of `rtm` as a NumericalRadiation `ColumnAtmosphere`: views of the
-column's rows, the well-mixed gases materialized as `χ .* dry_air`, the surface temperature and
-emissivity at `(i, j)`, and the column's cosine of the solar zenith angle.
+The staged column `(i, j)` of `rtm` as a NumericalRadiation `ColumnAtmosphere` on the host:
+copies of the column's rows, the well-mixed gases materialized as `χ .* dry_air`, the surface
+temperature and emissivity at `(i, j)`, and the column's cosine of the solar zenith angle.
 """
 function column_atmosphere(rtm::EcCKDRadiativeTransferModel, i, j)
     columns = rtm.atmospheric_state
     Nx = rtm.flux_divergence.grid.Nx
     c = column_index(i, j, Nx)
 
-    row(a) = view(a, c, :)
+    row(a) = Array(view(a, c, :))
     dry_air = row(columns.dry_air)
     χ = rtm.longwave_solver.mole_fractions
 
@@ -32,10 +33,10 @@ function column_atmosphere(rtm::EcCKDRadiativeTransferModel, i, j)
              cfc12 = χ.cfc12 .* dry_air)
 
     surface_radiation = rtm.surface_radiation
-    surface = (temperature = surface_radiation.surface_temperature[i, j, 1],
-               emissivity = surface_radiation.surface_emissivity[i, j, 1])
+    surface = @allowscalar (temperature = surface_radiation.surface_temperature[i, j, 1],
+                            emissivity = surface_radiation.surface_emissivity[i, j, 1])
 
-    geometry = (cos_zenith = columns.cos_zenith[c],)
+    geometry = (cos_zenith = @allowscalar(columns.cos_zenith[c]),)
 
     return ColumnAtmosphere(; pressure_layers = row(columns.pressure_layers),
                               pressure_interfaces = row(columns.pressure_interfaces),

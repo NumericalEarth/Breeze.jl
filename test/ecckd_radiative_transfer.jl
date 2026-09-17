@@ -8,6 +8,7 @@ using Breeze
 using Breeze.AtmosphereModels: standard_ozone_profile, top_face_temperature, top_face_pressure, bottom_face_pressure,
                                dynamics_pressure, total_density, specific_humidity, materialize_background_atmosphere,
                                _update_radiation!
+using Adapt: adapt
 using Dates
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -164,8 +165,17 @@ end
         gas_model = NumericalRadiation.read_reference_ecckd_gas_optics(:climate_32x32; names = NumericalRadiationExt.ECCKD_GAS_NAMES)
         preloaded = RadiativeTransferModel(grid, EcCKDOptics(gas_model), constants; surface_temperature = 300, surface_albedo = 0.1)
         @test eltype(preloaded.longwave_solver.gas_model) == FT
-        @test preloaded.longwave_solver.gas_model.longwave_absorption == FT.(gas_model.longwave_absorption)
+        @test Array(preloaded.longwave_solver.gas_model.longwave_absorption) == FT.(gas_model.longwave_absorption)
         @test eltype(radiation.longwave_solver.gas_model) == FT
+
+        # A user-supplied extension is sampled in the grid's float type, whatever its own
+        # (the default `ColumnExtension()` is Float64)
+        Oceananigans.defaults.FloatType = Float64
+        default_extension = RadiativeTransferModel(grid, EcCKDOptics(), constants; column_extension = ColumnExtension(),
+                                                   surface_temperature = 300, surface_albedo = 0.1)
+        @test default_extension.atmospheric_state.extension isa MaterializedColumnExtension{FT}
+        @test eltype(default_extension.atmospheric_state.extension.Δz) == FT
+        Oceananigans.defaults.FloatType = FT
     end
 
     @testset "Staged columns and column extension [$(FT)]" for FT in test_float_types()
@@ -211,9 +221,11 @@ end
 
         # Interfaces increase in pressure downward, and the boundary faces are extrapolated from the cells
         @test all(diff(p_int) .> 0)
-        @test p_int[N+1] == bottom_face_pressure(1, 1, grid, dynamics_pressure(model.dynamics), total_density(model.dynamics), g)
-        @test p_int[Nₑ+1] == top_face_pressure(1, 1, grid, dynamics_pressure(model.dynamics), total_density(model.dynamics), g)
-        @test T_int[Nₑ+1] == top_face_temperature(1, 1, grid, model.temperature)
+        @allowscalar begin
+            @test p_int[N+1] == bottom_face_pressure(1, 1, grid, dynamics_pressure(model.dynamics), total_density(model.dynamics), g)
+            @test p_int[Nₑ+1] == top_face_pressure(1, 1, grid, dynamics_pressure(model.dynamics), total_density(model.dynamics), g)
+            @test T_int[Nₑ+1] == top_face_temperature(1, 1, grid, model.temperature)
+        end
         @test T_int[1] == T_lay[1]
 
         # Column amounts in the dry convention of the ecCKD tables: the composite amount carries
@@ -259,8 +271,9 @@ end
         @test abs(T_lay[Nₑ] - T_int[Nₑ+1]) < 2
         @test T_lay[1] ≈ standard_atmosphere_temperature(zₑ[end]) rtol = 1e-6
 
-        # Host round trip: the column atmosphere views the staged rows
+        # Host round trip: the column atmosphere copies the staged rows to the host
         atmosphere = column_atmosphere(radiation, 1, 1)
+        @test atmosphere.pressure_layers isa Vector{FT}
         @test length(atmosphere.pressure_layers) == N
         @test length(atmosphere.pressure_interfaces) == N + 1
         @test atmosphere.gases.composite == n_dry
@@ -284,8 +297,8 @@ end
 
         # The upwelling longwave at the surface is the surface's emission plus the reflected
         # downwelling flux, `ε Σ w_g B_g(Tₛ) + (1 - ε) ℐ_lw_dn`
-        gas_model = radiation.longwave_solver.gas_model
-        weights = Array(gas_model.longwave_weights)
+        gas_model = adapt(Array, radiation.longwave_solver.gas_model)   # the emission is evaluated on the host
+        weights = gas_model.longwave_weights
         emission = sum(weights .* NumericalRadiation.surface_longwave_emission(gas_model, FT(300)))
         @test ℐ_lw_up[1] ≈ ε * emission + (1 - ε) * -ℐ_lw_dn[1] atol = 0.5
 

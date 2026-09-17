@@ -10,6 +10,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
+using GPUArraysCore: @allowscalar
 using NCDatasets
 using NumericalRadiation: LongwaveOptics, ShortwaveOptics, RadiativeFluxes,
                           CloudlessLongwave, CloudlessShortwave,
@@ -60,8 +61,8 @@ function array_path_fluxes(rtm, i, j)
     ε = atmosphere.surface.emissivity
     μ₀ = atmosphere.geometry.cos_zenith
     S₀ = rtm.shortwave_solver.solar_constant
-    α_direct = rtm.surface_radiation.direct_surface_albedo[i, j, 1]
-    α_diffuse = rtm.surface_radiation.diffuse_surface_albedo[i, j, 1]
+    α_direct = @allowscalar rtm.surface_radiation.direct_surface_albedo[i, j, 1]
+    α_diffuse = @allowscalar rtm.surface_radiation.diffuse_surface_albedo[i, j, 1]
 
     longwave_bcs = LongwaveBoundaryConditions(surface_longwave_up = surface_longwave_emission(gas_model, Tₛ; emissivity = ε),
                                               surface_albedo = FT(1 - ε))
@@ -88,7 +89,8 @@ function column_model(grid, radiation; humidity_factor = 1)
     return model
 end
 
-@testset "Kernel path versus array path [$(FT)]" for FT in test_float_types()
+# Both float types always: this is the test that pins the Float32 optics path bitwise
+@testset "Kernel path versus array path [$(FT)]" for FT in all_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 12
     grid = RectilinearGrid(default_arch, FT; size = (2, 1, Nz), x = (0, 2), y = (0, 1), z = (0, 3kilometers),

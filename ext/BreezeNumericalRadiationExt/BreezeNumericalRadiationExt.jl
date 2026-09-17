@@ -46,6 +46,7 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ
 using Oceananigans.Utils: launch!, IterationInterval, prettysummary
 
 using Adapt: Adapt, adapt
+using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 
@@ -56,6 +57,6 @@ include("ecckd_radiative_transfer_model.jl")
 include("column_staging_kernels.jl")
 include("layer_optics.jl")
 include("radiative_transfer_kernels.jl")
-include("host_update.jl")
+include("column_atmosphere.jl")
 
 end # module
