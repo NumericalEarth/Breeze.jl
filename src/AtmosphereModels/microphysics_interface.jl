@@ -23,10 +23,11 @@
 # sources to `Gⁿ`.
 #####
 
+using Breeze.Thermodynamics: MoistureMassFractions
+using Breeze.Utils: sum_properties
+
 using Oceananigans.Fields: set!
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ
-
-using ..Thermodynamics: MoistureMassFractions
 
 #####
 ##### MicrophysicalState abstraction
@@ -676,7 +677,7 @@ variable, to produce the correct input for [`moisture_fractions`](@ref).
 
 @inline moisture_less_condensate(qᵗ, ℳ, ::Tuple{}) = qᵗ
 @inline moisture_less_condensate(qᵗ, ℳ, names::Tuple{Symbol, Vararg}) =
-    qᵗ - sum_microphysical_components(ℳ, names)
+    qᵗ - sum_properties(ℳ, names)
 
 """
 $(TYPEDSIGNATURES)
@@ -715,7 +716,7 @@ specific_prognostic_moisture_from_total(microphysics, 0.02, μ, 1.2)
     moisture_less_condensate(qᵗ, μ, ρ, condensate_field_names(microphysics))
 
 @inline moisture_less_condensate(qᵗ, μ, ρ, ::Tuple{}) = qᵗ
-@inline moisture_less_condensate(qᵗ, μ, ρ, names::Tuple{Symbol, Vararg}) = qᵗ - sum_microphysical_components(μ, names) / ρ
+@inline moisture_less_condensate(qᵗ, μ, ρ, names::Tuple{Symbol, Vararg}) = qᵗ - sum_properties(μ, names) / ρ
 
 """
 $(TYPEDSIGNATURES)
@@ -808,15 +809,6 @@ end
 @inline function sum_microphysical_densities(i, j, k, microphysical_fields, names::Tuple{Symbol, Vararg})
     ρqˣ = @inbounds getproperty(microphysical_fields, first(names))[i, j, k]
     return ρqˣ + sum_microphysical_densities(i, j, k, microphysical_fields, Base.tail(names))
-end
-
-# Sum scalars, whole fields, or state components. Stop at the last component to avoid
-# adding a scalar zero to lazy field expressions; moisture_less_condensate handles empty tuples.
-@inline sum_microphysical_components(μ, names::Tuple{Symbol}) = getproperty(μ, first(names))
-
-@inline function sum_microphysical_components(μ, names::Tuple{Symbol, Vararg})
-    qˣ = getproperty(μ, first(names))
-    return qˣ + sum_microphysical_components(μ, Base.tail(names))
 end
 
 """
