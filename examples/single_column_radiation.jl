@@ -1,23 +1,25 @@
-# # Single column radiation (gray, clear-sky, and all-sky)
+# # Single column radiation: RRTMGP versus ecCKD
 #
-# This example sets up a single-column atmospheric model with an idealized
-# temperature and moisture profile. We compute radiative fluxes using RRTMGP's
-# gray atmosphere solver with the optical thickness parameterization
-# by [OGormanSchneider2008](@citet), and compare against clear-sky full-spectrum
-# gas optics, doubled CO₂, and all-sky (cloudy) radiation. Each full-spectrum
-# case is solved twice: with RRTMGP's correlated-``k`` tables, and with the ecCKD
-# gas optics of [HoganMatricardi2022](@citet) through NumericalRadiation.jl.
+# Breeze has two full-spectrum radiative transfer formulations. [`ClearSkyOptics`](@ref)
+# and [`AllSkyOptics`](@ref) solve the column with RRTMGP's correlated-``k`` tables
+# through RRTMGP.jl; [`EcCKDOptics`](@ref) solves it with the ecCKD gas optics of
+# [HoganMatricardi2022](@citet) through NumericalRadiation.jl. This example puts both on
+# one column with an idealized tropical profile and compares them in three scenarios:
+# clear sky with present-day CO₂ (420 ppm), clear sky with doubled CO₂ (840 ppm), and all
+# sky with a liquid cloud between 1 and 2 km. The question is where the two formulations
+# agree, where they do not, and by how much.
 
 using Breeze
 using Oceananigans.Units
 using CairoMakie
 using Printf
+using Dates
 
 using NCDatasets  # For the RRTMGP and ecCKD lookup tables
 using RRTMGP
 using NumericalRadiation: NumericalRadiation  # Loads the ecCKD extension; NumericalRadiation exports its own ThermodynamicConstants
 
-# ## Grid and thermodynamics
+# ## Grid
 #
 # We create a single column spanning 20 km with 64 layers at a particular place.
 
@@ -64,89 +66,40 @@ reference_state = ReferenceState(grid, constants; base_pressure, standard_pressu
 
 dynamics = AnelasticDynamics(reference_state)
 
-# ## Radiative transfer models
+# ## Six radiative transfer models
 #
-# We create a gray radiative transfer model using the [OGormanSchneider2008](@citet)
-# optical thickness parameterization. The solar zenith angle is computed from the
-# model clock and grid location. We also create clear-sky full-spectrum models
-# with present-day and doubled CO₂ concentrations.
+# Every model shares the surface properties and the solar constant, and the two all-sky
+# models share the effective radii of the cloud particles. The solar zenith angle is
+# computed from the model clock and the grid location.
 
-using Dates
+surface = (; surface_temperature, surface_emissivity = 0.98, surface_albedo = 0.1, solar_constant = 1361)
+effective_radii = (liquid_effective_radius = ConstantRadiusParticles(10e-6),
+                   ice_effective_radius = ConstantRadiusParticles(30e-6))
 
-gray_radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
-                                        surface_temperature,
-                                        surface_emissivity = 0.98,
-                                        surface_albedo = 0.1,
-                                        solar_constant = 1361)        # W/m²
-
-# Clear-sky with default CO₂ (~420 ppm)
-clear_sky_radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
-                                             surface_temperature,
-                                             surface_emissivity = 0.98,
-                                             surface_albedo = 0.1,
-                                             solar_constant = 1361)    # W/m²
-
-# Clear-sky with doubled CO₂ (~840 ppm) to show the radiative forcing effect
 high_co2_atmosphere = BackgroundAtmosphere(CO₂ = 840e-6)
-high_co2_radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+
+# The three RRTMGP models treat the 20 km grid top as the top of the atmosphere.
+
+rrtmgp = (clear_sky = RadiativeTransferModel(grid, ClearSkyOptics(), constants; surface...),
+          high_co2  = RadiativeTransferModel(grid, ClearSkyOptics(), constants; surface...,
+                                             background_atmosphere = high_co2_atmosphere),
+          all_sky   = RadiativeTransferModel(grid, AllSkyOptics(), constants; surface..., effective_radii...))
+
+# By default an ecCKD model extends the radiation column above the grid top with a
+# [`ColumnExtension`](@ref). Here we switch it off with `column_extension = nothing`, so
+# that both formulations solve the same problem and every difference below is a difference
+# in the optics. The all-sky ecCKD model takes its cloud optics from the Mie droplet and
+# Baum ice scattering tables selected by [`CloudScatteringTables`](@ref).
+
+ecckd = (clear_sky = RadiativeTransferModel(grid, EcCKDOptics(), constants; surface...,
+                                            column_extension = nothing),
+         high_co2  = RadiativeTransferModel(grid, EcCKDOptics(), constants; surface...,
                                             background_atmosphere = high_co2_atmosphere,
-                                            surface_temperature,
-                                            surface_emissivity = 0.98,
-                                            surface_albedo = 0.1,
-                                            solar_constant = 1361)    # W/m²
+                                            column_extension = nothing),
+         all_sky   = RadiativeTransferModel(grid, EcCKDOptics(clouds = CloudScatteringTables()), constants;
+                                            surface..., effective_radii..., column_extension = nothing))
 
-# All-sky with cloud scattering optics
-all_sky_radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
-                                           surface_temperature,
-                                           surface_emissivity = 0.98,
-                                           surface_albedo = 0.1,
-                                           solar_constant = 1361,
-                                           liquid_effective_radius = ConstantRadiusParticles(10e-6),
-                                           ice_effective_radius = ConstantRadiusParticles(30e-6))
-
-# ## ecCKD radiative transfer models
-#
-# [`EcCKDOptics`](@ref) solves the same three full-spectrum cases with the ecCKD
-# gas optics (32 longwave and 32 shortwave g-points) through NumericalRadiation.jl.
-# One difference from the RRTMGP models above is built in: an ecCKD model extends
-# the radiation column above the top of the grid with a [`ColumnExtension`](@ref)
-# (by default 40 layers up to 65 km, following the U.S. Standard Atmosphere), so
-# that the fluxes at the top of the domain include the stratosphere above it,
-# whereas the RRTMGP models treat the 20 km grid top as the top of the atmosphere.
-# All-sky ecCKD radiation uses the Mie droplet and Baum ice scattering tables
-# selected by [`CloudScatteringTables`](@ref).
-
-ecckd_clear_sky_radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
-                                                   surface_temperature,
-                                                   surface_emissivity = 0.98,
-                                                   surface_albedo = 0.1,
-                                                   solar_constant = 1361)
-
-ecckd_high_co2_radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
-                                                  background_atmosphere = high_co2_atmosphere,
-                                                  surface_temperature,
-                                                  surface_emissivity = 0.98,
-                                                  surface_albedo = 0.1,
-                                                  solar_constant = 1361)
-
-ecckd_all_sky_radiation = RadiativeTransferModel(grid, EcCKDOptics(clouds = CloudScatteringTables()), constants;
-                                                 surface_temperature,
-                                                 surface_emissivity = 0.98,
-                                                 surface_albedo = 0.1,
-                                                 solar_constant = 1361,
-                                                 liquid_effective_radius = ConstantRadiusParticles(10e-6),
-                                                 ice_effective_radius = ConstantRadiusParticles(30e-6))
-
-# We collect the seven radiation models in a `NamedTuple` so that the rest of the
-# example can treat them uniformly.
-
-radiation = (gray            = gray_radiation,
-             clear_sky       = clear_sky_radiation,
-             high_co2        = high_co2_radiation,
-             all_sky         = all_sky_radiation,
-             ecckd_clear_sky = ecckd_clear_sky_radiation,
-             ecckd_high_co2  = ecckd_high_co2_radiation,
-             ecckd_all_sky   = ecckd_all_sky_radiation)
+formulations = (; rrtmgp, ecckd)
 
 # ## Atmosphere models
 #
@@ -155,48 +108,61 @@ radiation = (gray            = gray_radiation,
 clock = Clock(time=DateTime(1950, 11, 1, 17, 0, 0))  # local noon at λ = -76°
 microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
 
-models = map(radiation) do radiation
-    AtmosphereModel(grid; clock, dynamics, microphysics, radiation)
-end
+build_model(radiation) = AtmosphereModel(grid; clock, dynamics, microphysics, radiation)
+models = map(formulation -> map(build_model, formulation), formulations)
 
 # ## Initial condition: the tropical profile with a cloud
 #
 # We set the temperature to the tropical profile `Tᵢ` of the reference state. The relative
 # humidity is 80 % throughout, except for a layer between 1 and 2 km that we supersaturate
-# slightly so that saturation adjustment produces a cloud for the all-sky comparison.
+# slightly so that saturation adjustment produces a cloud for the all-sky scenario.
 
 ℋᵢ(z) = ifelse(1kilometer < z < 2kilometers, 1.05, 0.8)
 
-foreach(model -> set!(model; T=Tᵢ, ℋ=ℋᵢ), models)
+for formulation in models, model in formulation
+    set!(model; T=Tᵢ, ℋ=ℋᵢ)
+end
 
-# ## Visualization
+# ## The atmospheric state and the fluxes
 #
 # After `set!`, the radiation has been computed. We build Fields and
 # AbstractOperations to visualize the atmospheric state and radiative fluxes.
 
-T = models.gray.temperature
-pᵣ = reference_state.pressure
-qᵛ = specific_humidity(models.gray)
-ℋ = RelativeHumidityField(models.gray)
+T = models.rrtmgp.clear_sky.temperature
+qᵛ = specific_humidity(models.rrtmgp.clear_sky)
+ℋ = RelativeHumidityField(models.rrtmgp.clear_sky)
+qˡ = models.rrtmgp.all_sky.microphysical_fields.qˡ
 
 # The net flux is the sum of all four components. Because downwelling fluxes are
 # stored with a negative sign, the sum is already "up minus down". The upwelling
 # shortwave carries the radiation scattered back to space by air and clouds and
 # reflected by the surface, so leaving it out would misstate the net flux, and with
-# it the heating rate, wherever the shortwave scatters or reflects. Gray optics uses a
-# non-scattering shortwave solver, so its upwelling shortwave is identically zero.
+# it the heating rate, wherever the shortwave scatters or reflects.
 
-net_flux(radiation) = radiation.upwelling_longwave_flux + radiation.downwelling_longwave_flux +
-                      radiation.upwelling_shortwave_flux + radiation.downwelling_shortwave_flux
+net_longwave(radiation) = radiation.upwelling_longwave_flux + radiation.downwelling_longwave_flux
+net_shortwave(radiation) = radiation.upwelling_shortwave_flux + radiation.downwelling_shortwave_flux
+net_flux(radiation) = net_longwave(radiation) + net_shortwave(radiation)
 
-# Get cloud liquid for visualization
-qˡ = models.all_sky.microphysical_fields.qˡ
+# The `RadiativeTransferModel` computes the heating tendency `Q = -dF_net/dz` (W/m³) from
+# the radiative flux divergence. We convert to K/day using `dT/dt = Q / (ρᵣ cₚ)` with the
+# reference density and dry-air heat capacity; the model tendencies use the local mixture
+# heat capacity and are therefore slightly different in moist and cloudy layers.
+
+ρᵣ = reference_state.density
+to_K_per_day = 86400 / cᵖᵈ
+heating_rate(radiation) = to_K_per_day * radiation.flux_divergence / ρᵣ
 
 set_theme!(fontsize=14, linewidth=2.5)
 
 # Format altitude ticks in km (but keep internal units in meters).
 z_ticks_km = 0:5:20
 z_ticks_m = ((z_ticks_km .* 1000), string.(z_ticks_km))
+
+# Colors distinguish the scenarios; line styles the formulations
+# (solid for RRTMGP, dashed for ecCKD).
+colors = (clear_sky = :dodgerblue, high_co2 = :orangered, all_sky = :lime)
+scenario_labels = (clear_sky = "Clear sky (420 ppm)", high_co2 = "2×CO₂ (840 ppm)", all_sky = "All sky (cloudy)")
+linestyles = (rrtmgp = :solid, ecckd = :dash)
 
 fig = Figure(size=(1800, 800), fontsize=14)
 nothing #hide
@@ -224,25 +190,10 @@ lines!(ax_q, qᵛ; color=:gray30)
 lines!(ax_H, 100ℋ; color=:gray30)
 lines!(ax_ql, 1000qˡ; color=:lime)  # Convert to g/kg
 
-# Colors distinguish the radiation scenarios; line styles the gas optics
-# (solid for RRTMGP, dashed for ecCKD).
-c_gray = :black
-c_clear = :dodgerblue
-c_2xco2 = :orangered
-c_allsky = :lime
-
-styles = (gray            = (color=c_gray,   linestyle=:solid),
-          clear_sky       = (color=c_clear,  linestyle=:solid),
-          high_co2        = (color=c_2xco2,  linestyle=:solid),
-          all_sky         = (color=c_allsky, linestyle=:solid),
-          ecckd_clear_sky = (color=c_clear,  linestyle=:dash),
-          ecckd_high_co2  = (color=c_2xco2,  linestyle=:dash),
-          ecckd_all_sky   = (color=c_allsky, linestyle=:dash))
-
 # Downwelling fluxes are negative, so we negate them for display.
-function plot_fluxes!(name)
-    rtm = radiation[name]
-    style = styles[name]
+function plot_fluxes!(formulation, scenario)
+    rtm = formulations[formulation][scenario]
+    style = (color=colors[scenario], linestyle=linestyles[formulation])
     lines!(ax_lw_up,  rtm.upwelling_longwave_flux;    style...)
     lines!(ax_lw_dn, -rtm.downwelling_longwave_flux;  style...)
     lines!(ax_sw_dn, -rtm.downwelling_shortwave_flux; style...)
@@ -251,99 +202,138 @@ function plot_fluxes!(name)
     return nothing
 end
 
-foreach(plot_fluxes!, keys(radiation))
+for formulation in keys(formulations), scenario in keys(rrtmgp)
+    plot_fluxes!(formulation, scenario)
+end
 
-# Legend
-scenario_handles = [LineElement(color=c, linewidth=3) for c in (c_gray, c_clear, c_2xco2, c_allsky)]
-scenario_labels = ["Gray", "Clear-sky (420 ppm)", "2×CO₂ (840 ppm)", "All-sky (cloudy)"]
-optics_handles = [LineElement(color=:gray50, linewidth=3, linestyle=s) for s in (:solid, :dash)]
-optics_labels = ["RRTMGP", "ecCKD"]
-Legend(fig[1, 5], [scenario_handles, optics_handles], [scenario_labels, optics_labels], ["Scenario", "Gas optics"];
+scenario_handles = [LineElement(color=c, linewidth=3) for c in colors]
+formulation_handles = [LineElement(color=:gray50, linewidth=3, linestyle=s) for s in linestyles]
+Legend(fig[1, 5], [scenario_handles, formulation_handles],
+       [collect(scenario_labels), ["RRTMGP", "ecCKD"]], ["Scenario", "Formulation"];
        framevisible=false, tellwidth=false)
 
 fig
 
-# ## Fluxes at the surface and at the top of the domain
-#
-# Four numbers per model summarize the figure: the upwelling longwave flux at the
-# top of the domain (the outgoing longwave radiation, OLR, for the RRTMGP models),
-# the downwelling longwave and shortwave fluxes at the surface, and the shortwave
-# reflected out of the top of the domain.
+# The dashed curves sit on the solid ones almost everywhere: at this scale the two
+# formulations are indistinguishable in all three scenarios. The comparison lives in the
+# differences.
 
-function print_boundary_fluxes(name)
-    rtm = radiation[name]
-    @printf("%-16s  LW ↑ top: %6.1f  LW ↓ top: %5.1f  LW ↓ surface: %6.1f  SW ↓ surface: %6.1f  SW ↑ top: %6.1f  W/m²\n",
-            name,
-            rtm.upwelling_longwave_flux[1, 1, Nz+1],
-            -rtm.downwelling_longwave_flux[1, 1, Nz+1],
-            -rtm.downwelling_longwave_flux[1, 1, 1],
-            -rtm.downwelling_shortwave_flux[1, 1, 1],
-            rtm.upwelling_shortwave_flux[1, 1, Nz+1])
+# ## The differences
+#
+# The ecCKD minus RRTMGP profiles of the four flux components and of the heating rate,
+# for each scenario, show where the formulations part.
+
+fig_diff = Figure(size=(1800, 450), fontsize=14)
+nothing #hide
+
+difference_axes = (lw_up   = Axis(fig_diff[1, 1]; xlabel="Δ LW ↑ (W/m²)", ylabel="Altitude (km)", yticks=z_ticks_m),
+                   lw_dn   = Axis(fig_diff[1, 2]; xlabel="Δ LW ↓ (W/m²)", yticks=z_ticks_m),
+                   sw_dn   = Axis(fig_diff[1, 3]; xlabel="Δ SW ↓ (W/m²)", yticks=z_ticks_m),
+                   sw_up   = Axis(fig_diff[1, 4]; xlabel="Δ SW ↑ (W/m²)", yticks=z_ticks_m),
+                   heating = Axis(fig_diff[1, 5]; xlabel="Δ heating rate (K/day)", yticks=z_ticks_m))
+
+[hideydecorations!(ax, grid=false) for ax in Tuple(difference_axes)[2:end]]
+
+function plot_differences!(scenario)
+    e, r = ecckd[scenario], rrtmgp[scenario]
+    style = (color=colors[scenario], label=scenario_labels[scenario])
+    lines!(difference_axes.lw_up,    e.upwelling_longwave_flux    - r.upwelling_longwave_flux;    style...)
+    lines!(difference_axes.lw_dn,   -e.downwelling_longwave_flux  + r.downwelling_longwave_flux;  style...)
+    lines!(difference_axes.sw_dn,   -e.downwelling_shortwave_flux + r.downwelling_shortwave_flux; style...)
+    lines!(difference_axes.sw_up,    e.upwelling_shortwave_flux   - r.upwelling_shortwave_flux;   style...)
+    lines!(difference_axes.heating,  heating_rate(e) - heating_rate(r);                           style...)
     return nothing
 end
 
-foreach(print_boundary_fluxes, keys(radiation))
+foreach(plot_differences!, keys(rrtmgp))
 
-# The two gas optics agree closely where they solve the same problem. In clear sky
-# the upwelling longwave flux at 20 km differs by 1.4 W/m² (RRTMGP 256.5, ecCKD 257.9),
-# the downwelling longwave at the surface by 2.1 W/m² (410.0 versus 412.1) and the
-# reflected shortwave at 20 km by 3.0 W/m² (97.0 versus 94.0) -- the spread expected
-# between two independent correlated-k models. Doubling CO₂ reduces the upwelling
-# longwave flux at 20 km by 4.1 W/m² (RRTMGP) and 4.0 W/m² (ecCKD). With the cloud, both
-# models reflect about 490 W/m² back out of the domain and pass 93 to 94 W/m² to the
-# surface, and the surface receives 3 W/m² more longwave from the ecCKD model's cloud than
-# from RRTMGP's.
+for ax in difference_axes
+    vlines!(ax, 0; color=:gray50, linestyle=:dash, linewidth=1)
+    xlims!(ax, -6, 6)
+end
+
+xlims!(difference_axes.heating, -3, 3)
+axislegend(difference_axes.sw_up, position=:lb)
+
+fig_diff
+
+# ## Boundary fluxes and the CO₂ forcing
 #
-# The one systematic difference is the column extension. The ecCKD models receive
-# 10.2 W/m² of longwave radiation on the top face from the stratosphere above 20 km,
-# which the RRTMGP models (whose atmosphere ends at 20 km) do not, and which grows to
-# 11.5 W/m² with doubled CO₂; that back-radiation is why the ecCKD 2×CO₂ forcing at the
-# top of the domain (4.8 W/m²) exceeds RRTMGP's (4.2 W/m²) even though the two
-# outgoing-longwave reductions agree. On the shortwave side the stratosphere above the
-# grid absorbs sunlight before it enters the domain, so the downwelling shortwave at the
-# surface is 8 W/m² lower in the ecCKD models (563.7 versus 572.0 W/m²); the same effect
-# appears in the heating rates below.
+# Four numbers per scenario summarize the figures: the upwelling longwave flux at the top of
+# the column (the outgoing longwave radiation, OLR), the downwelling longwave and shortwave
+# fluxes at the surface, and the shortwave reflected out of the top. The 2×CO₂ forcing is
+# the reduction in the net upward flux between the 420 ppm and 840 ppm scenarios, at the top
+# of the column and at the surface, split into its longwave and shortwave parts.
 
-# ## Heating rates
+top = Nz + 1
+
+print_header(title) = @printf("%-22s %8s %8s %16s\n", title, "RRTMGP", "ecCKD", "ecCKD − RRTMGP")
+print_row(label, r, e) = @printf("  %-20s %8.1f %8.1f %16.1f\n", label, r, e, e - r)
+
+for scenario in keys(rrtmgp)
+    r, e = rrtmgp[scenario], ecckd[scenario]
+    print_header(scenario_labels[scenario])
+    print_row("OLR",          r.upwelling_longwave_flux[1, 1, top],    e.upwelling_longwave_flux[1, 1, top])
+    print_row("LW ↓ surface", -r.downwelling_longwave_flux[1, 1, 1],   -e.downwelling_longwave_flux[1, 1, 1])
+    print_row("SW ↓ surface", -r.downwelling_shortwave_flux[1, 1, 1],  -e.downwelling_shortwave_flux[1, 1, 1])
+    print_row("SW ↑ top",     r.upwelling_shortwave_flux[1, 1, top],   e.upwelling_shortwave_flux[1, 1, top])
+end
+
+forcing(net, formulation, k) = net(formulation.clear_sky)[1, 1, k] - net(formulation.high_co2)[1, 1, k]
+
+print_header("2×CO₂ forcing (W/m²)")
+print_row("longwave, top",      forcing(net_longwave, rrtmgp, top),  forcing(net_longwave, ecckd, top))
+print_row("longwave, surface",  forcing(net_longwave, rrtmgp, 1),    forcing(net_longwave, ecckd, 1))
+print_row("shortwave, top",     forcing(net_shortwave, rrtmgp, top), forcing(net_shortwave, ecckd, top))
+print_row("shortwave, surface", forcing(net_shortwave, rrtmgp, 1),   forcing(net_shortwave, ecckd, 1))
+
+# Where the two formulations solve the same problem, they agree. In clear sky the ecCKD
+# OLR is 1.4 W/m² higher than RRTMGP's (257.9 versus 256.5), the surface receives 1.8 W/m²
+# more longwave (411.8 versus 410.0) and 0.3 W/m² more sunlight, and 0.9 W/m² less
+# shortwave is reflected out of the top (96.2 versus 97.0): the spread expected between two
+# correlated-``k`` models fit independently to line-by-line references. The CO₂ forcing
+# agrees to 0.1 W/m²: doubling CO₂ cuts the OLR by 4.1 W/m² (RRTMGP) and 4.0 W/m² (ecCKD),
+# adds 0.8 to 0.9 W/m² of longwave at the surface, and takes 0.9 W/m² of sunlight from the
+# surface through the near-infrared bands of CO₂, so that the net surface forcing nearly
+# vanishes in both. Below 17 km the clear-sky heating rates differ by 0.17 K/day (root mean
+# square), most in the lowest cell, which cools 1.0 K/day with ecCKD and is neutral with
+# RRTMGP.
 #
-# The `RadiativeTransferModel` automatically computes the heating tendency
-# `Q = -dF_net/dz` (W/m³) from the radiative flux divergence. We convert to K/day
-# using `dT/dt = Q / (ρᵣ cₚ)`. For this compact comparison we use the reference
-# density and dry-air heat capacity; the model tendencies use the local mixture
-# heat capacity and are therefore slightly different in moist and cloudy layers.
+# The cloud is where they part, because the cloud optics differ in kind: RRTMGP's all-sky
+# lookup tables against the Mie and Baum scattering tables mapped onto the ecCKD g-points.
+# The same liquid water reflects 3.5 W/m² more sunlight with ecCKD (493.0 versus
+# 489.5 W/m²), emits 2.9 W/m² more longwave to the surface (447.3 versus 444.4) and lets
+# 3.1 W/m² more longwave out of the top, twice the clear-sky difference. In the cloud-top
+# cell at 1.7 km, where longwave cooling outruns shortwave heating even at local noon, the
+# net cooling is 11.0 K/day with RRTMGP and 13.6 K/day with ecCKD. The other place the
+# heating rates disagree is the top cell: with the atmosphere ending at 20 km, both
+# formulations absorb the ultraviolet that ozone above would have absorbed in that one cell,
+# RRTMGP at 6.1 K/day and ecCKD at 7.5 K/day.
 
-# Convert W/m³ → K/day: Q / (ρᵣ cᵖᵈ) × 86400
-ρᵣ = reference_state.density
-to_K_per_day = 86400 / cᵖᵈ
+# ## The column extension
+#
+# One thing the RRTMGP formulation cannot represent is the atmosphere above the grid. An
+# ecCKD model built with the default [`ColumnExtension`](@ref) continues the column above
+# 20 km with 40 layers up to 65 km following the U.S. Standard Atmosphere, so the top face
+# receives longwave radiation from the stratosphere, the sunlight entering the grid has
+# already crossed the ozone layer, and the ozone heating that the models above put in their
+# top cell is spread over the extension where it belongs.
 
-heating_rate(radiation) = to_K_per_day * radiation.flux_divergence / ρᵣ
+extended_radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants; surface...)
+extended_model = build_model(extended_radiation)
+set!(extended_model; T=Tᵢ, ℋ=ℋᵢ)
 
-fig2 = Figure(size=(800, 500), fontsize=14)
+@printf("LW ↓ top face:     %6.1f W/m² with the extension, %6.1f without\n",
+        -extended_radiation.downwelling_longwave_flux[1, 1, top],
+        -ecckd.clear_sky.downwelling_longwave_flux[1, 1, top])
+@printf("SW ↓ surface:      %6.1f W/m² with the extension, %6.1f without\n",
+        -extended_radiation.downwelling_shortwave_flux[1, 1, 1],
+        -ecckd.clear_sky.downwelling_shortwave_flux[1, 1, 1])
+@printf("Top cell heating:  %6.2f K/day with the extension, %6.2f without\n",
+        heating_rate(extended_radiation)[1, 1, Nz],
+        heating_rate(ecckd.clear_sky)[1, 1, Nz])
 
-ax_Q = Axis(fig2[1, 1]; xlabel="Heating rate (K/day)", ylabel="Altitude (km)",
-            yticks=z_ticks_m, title="Radiative heating rates")
-
-heating_labels = (gray            = "Gray",
-                  clear_sky       = "Clear-sky (420 ppm), RRTMGP",
-                  high_co2        = "2×CO₂ (840 ppm), RRTMGP",
-                  all_sky         = "All-sky (cloudy), RRTMGP",
-                  ecckd_clear_sky = "Clear-sky (420 ppm), ecCKD",
-                  ecckd_high_co2  = "2×CO₂ (840 ppm), ecCKD",
-                  ecckd_all_sky   = "All-sky (cloudy), ecCKD")
-
-plot_heating!(name) = lines!(ax_Q, heating_rate(radiation[name]); label=heating_labels[name], styles[name]...)
-foreach(plot_heating!, keys(radiation))
-
-vlines!(ax_Q, 0; color=:gray50, linestyle=:dash, linewidth=1)
-axislegend(ax_Q, position=:lt)
-
-fig2
-
-# Below 17 km the clear-sky heating rates of the two gas optics differ by 0.16 K/day
-# (root mean square), most in the lowest cell where the ecCKD model cools 1 K/day
-# faster, and the net radiative cooling of the cloud-top cell at local noon (longwave
-# cooling less shortwave heating) reaches -11.0 K/day with RRTMGP and -13.5 K/day with
-# ecCKD. The profiles part in the top two kilometers: the RRTMGP models absorb the
-# ultraviolet sunlight that ozone would have absorbed higher up in their top cells
-# (6.1 K/day at 19.8 km), whereas the ecCKD models absorb most of it in the column
-# extension above the grid and heat the top cell by 2.4 K/day.
+# The extension supplies 10.2 W/m² of downwelling longwave on the top face, where the
+# no-extension model (and any RRTMGP model) has none; it absorbs 8.6 W/m² of the sunlight
+# above the grid, so the surface receives 563.7 W/m² instead of 572.3; and the ozone heating
+# of the top cell falls from 7.5 K/day to 2.4 K/day.

@@ -433,10 +433,12 @@ with `using NumericalRadiation: NumericalRadiation`), and [`GrayOptics`](@ref),
 [`ClearSkyOptics`](@ref) and [`AllSkyOptics`](@ref) remain RRTMGP models. Because both
 backends fill the same fields, one script can build an RRTMGP model and an ecCKD model on
 two `AtmosphereModel`s with identical initial conditions and difference their fluxes; the
-[single column radiation example](literated/single_column_radiation.md) does exactly that. On the same 15 km clear-sky
-column the two agree to a few W m⁻² in the boundary fluxes and to a few tenths of a K
-day⁻¹ in the heating rates, the spread expected between two independent correlated-``k``
-models.
+[single column radiation example](literated/single_column_radiation.md) does exactly that.
+On the same 20 km column, with `column_extension = nothing` so that both stop at the grid
+top, the two agree to 2 W m⁻² in the clear-sky boundary fluxes, to 0.1 W m⁻² in the 2×CO₂
+forcing and to 0.2 K day⁻¹ (root mean square) in the clear-sky heating rates, the spread
+expected between two independent correlated-``k`` models; they part at cloud top, where the
+cloud optics differ in kind.
 
 ## Surface Properties
 
