@@ -27,13 +27,40 @@ Nz = 64
 grid = RectilinearGrid(size=Nz, x=λ, y=φ, z=(0, 20kilometers),
                        topology=(Flat, Flat, Bounded))
 
-# Set up the thermodynamic constants and reference state.
-surface_temperature = 300
-constants = ThermodynamicConstants()
+# ## Thermodynamics and a tropical reference state
+#
+# The column holds an idealized tropical temperature profile: 300 K at the surface, cooling
+# at 6.5 K/km to a 196 K tropopause at 16 km, and isothermal above. The anelastic reference
+# state supplies the pressure and density that the radiation solvers see, so it must follow
+# the same profile: a 300 K dry adiabat would reach 107 K at 20 km and put half the real
+# mass of air (and of ozone and CO₂) in the stratosphere. `ReferenceState` integrates the
+# hydrostatic balance for a potential temperature profile `θᵣ(z)`, which we form from the
+# analytic hydrostatic pressure of the temperature profile.
 
-reference_state = ReferenceState(grid, constants;
-                                 base_pressure = 101325,
-                                 potential_temperature = surface_temperature)
+surface_temperature = 300
+tropopause_temperature = 196
+lapse_rate = 6.5e-3  # K/m
+Tᵢ(z) = max(surface_temperature - lapse_rate * z, tropopause_temperature)
+
+constants = ThermodynamicConstants()
+g = constants.gravitational_acceleration
+Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
+cᵖᵈ = constants.dry_air.heat_capacity  # J/(kg·K)
+
+base_pressure = 101325
+standard_pressure = 1e5
+z_tropopause = (surface_temperature - tropopause_temperature) / lapse_rate
+p_tropopause = base_pressure * (tropopause_temperature / surface_temperature)^(g / (Rᵈ * lapse_rate))
+
+# Hydrostatic pressure of the temperature profile: a power law under the constant lapse rate
+# and an exponential in the isothermal stratosphere
+pᵢ(z) = z < z_tropopause ? base_pressure * (Tᵢ(z) / surface_temperature)^(g / (Rᵈ * lapse_rate)) :
+                           p_tropopause * exp(-g * (z - z_tropopause) / (Rᵈ * tropopause_temperature))
+
+θᵢ(z) = Tᵢ(z) * (standard_pressure / pᵢ(z))^(Rᵈ / cᵖᵈ)
+
+reference_state = ReferenceState(grid, constants; base_pressure, standard_pressure,
+                                 potential_temperature = θᵢ)
 
 dynamics = AnelasticDynamics(reference_state)
 
@@ -132,14 +159,12 @@ models = map(radiation) do radiation
     AtmosphereModel(grid; clock, dynamics, microphysics, radiation)
 end
 
-# ## Initial condition: idealized tropical profile with a cloud
+# ## Initial condition: the tropical profile with a cloud
 #
-# We prescribe a tropical-like temperature profile: 300 K at the surface, cooling at
-# 6.5 K/km to a 196 K tropopause at 16 km, and isothermal above. The relative humidity
-# is 80 % throughout, except for a layer between 1 and 2 km that we supersaturate
+# We set the temperature to the tropical profile `Tᵢ` of the reference state. The relative
+# humidity is 80 % throughout, except for a layer between 1 and 2 km that we supersaturate
 # slightly so that saturation adjustment produces a cloud for the all-sky comparison.
 
-Tᵢ(z) = max(300 - 6.5e-3 * z, 196)
 ℋᵢ(z) = ifelse(1kilometer < z < 2kilometers, 1.05, 0.8)
 
 foreach(model -> set!(model; T=Tᵢ, ℋ=ℋᵢ), models)
@@ -260,22 +285,24 @@ end
 foreach(print_boundary_fluxes, keys(radiation))
 
 # The two gas optics agree closely where they solve the same problem. In clear sky
-# the upwelling longwave flux at 20 km differs by 1.5 W/m² (RRTMGP 256.2, ecCKD 257.7),
-# the downwelling longwave at the surface by 2.4 W/m² (410.4 versus 412.8), the
-# downwelling shortwave at the surface by 4 W/m² (570.2 versus 566.3) and the reflected
-# shortwave at 20 km by 1.8 W/m² (97.9 versus 96.1) -- the spread expected between two
-# independent correlated-k models. Doubling CO₂ reduces the upwelling longwave flux
-# at 20 km by 4.1 W/m² in both. With the cloud, both models reflect about 490 W/m² back
-# out of the domain and pass 93 W/m² to the surface, and the surface receives 3 W/m²
-# more longwave from the ecCKD model's cloud than from RRTMGP's.
+# the upwelling longwave flux at 20 km differs by 1.4 W/m² (RRTMGP 256.5, ecCKD 257.9),
+# the downwelling longwave at the surface by 2.1 W/m² (410.0 versus 412.1) and the
+# reflected shortwave at 20 km by 3.0 W/m² (97.0 versus 94.0) -- the spread expected
+# between two independent correlated-k models. Doubling CO₂ reduces the upwelling
+# longwave flux at 20 km by 4.1 W/m² (RRTMGP) and 4.0 W/m² (ecCKD). With the cloud, both
+# models reflect about 490 W/m² back out of the domain and pass 93 to 94 W/m² to the
+# surface, and the surface receives 3 W/m² more longwave from the ecCKD model's cloud than
+# from RRTMGP's.
 #
 # The one systematic difference is the column extension. The ecCKD models receive
-# 6 W/m² of longwave radiation on the top face from the stratosphere above 20 km, which
-# the RRTMGP models (whose atmosphere ends at 20 km) do not, and which grows to 7.1 W/m²
-# with doubled CO₂; that back-radiation is why the ecCKD 2×CO₂ forcing at the top of the
-# domain (4.8 W/m²) exceeds RRTMGP's (4.2 W/m²) even though the two outgoing-longwave
-# reductions agree. The shortwave side of the same effect appears in the heating rates
-# below.
+# 10.2 W/m² of longwave radiation on the top face from the stratosphere above 20 km,
+# which the RRTMGP models (whose atmosphere ends at 20 km) do not, and which grows to
+# 11.5 W/m² with doubled CO₂; that back-radiation is why the ecCKD 2×CO₂ forcing at the
+# top of the domain (4.8 W/m²) exceeds RRTMGP's (4.2 W/m²) even though the two
+# outgoing-longwave reductions agree. On the shortwave side the stratosphere above the
+# grid absorbs sunlight before it enters the domain, so the downwelling shortwave at the
+# surface is 8 W/m² lower in the ecCKD models (563.7 versus 572.0 W/m²); the same effect
+# appears in the heating rates below.
 
 # ## Heating rates
 #
@@ -287,7 +314,6 @@ foreach(print_boundary_fluxes, keys(radiation))
 
 # Convert W/m³ → K/day: Q / (ρᵣ cᵖᵈ) × 86400
 ρᵣ = reference_state.density
-cᵖᵈ = constants.dry_air.heat_capacity  # J/(kg·K)
 to_K_per_day = 86400 / cᵖᵈ
 
 heating_rate(radiation) = to_K_per_day * radiation.flux_divergence / ρᵣ
@@ -313,10 +339,11 @@ axislegend(ax_Q, position=:lt)
 
 fig2
 
-# Below 17 km the clear-sky heating rates of the two gas optics differ by 0.19 K/day
+# Below 17 km the clear-sky heating rates of the two gas optics differ by 0.16 K/day
 # (root mean square), most in the lowest cell where the ecCKD model cools 1 K/day
-# faster, and the cloud-top longwave cooling reaches -10.6 K/day with RRTMGP and
-# -13.1 K/day with ecCKD. The profiles part in the top two kilometers: the RRTMGP
-# models absorb the ultraviolet sunlight that ozone would have absorbed higher up in
-# their top cells (6.6 K/day at 19.8 km), whereas the ecCKD models absorb it in the
-# column extension above the grid and heat the top cell by 1.5 K/day.
+# faster, and the net radiative cooling of the cloud-top cell at local noon (longwave
+# cooling less shortwave heating) reaches -11.0 K/day with RRTMGP and -13.5 K/day with
+# ecCKD. The profiles part in the top two kilometers: the RRTMGP models absorb the
+# ultraviolet sunlight that ozone would have absorbed higher up in their top cells
+# (6.1 K/day at 19.8 km), whereas the ecCKD models absorb most of it in the column
+# extension above the grid and heat the top cell by 2.4 K/day.

@@ -179,7 +179,7 @@ microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 Tᵣ = reference_state.temperature
 ρᵣ = reference_state.density
-cᵖᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass  # J/(kg·K)
+cᵖᵈ = constants.dry_air.heat_capacity  # J/(kg·K)
 τ_sponge = 6hours
 
 @inline function stratospheric_relaxation(i, j, k, grid, clock, model_fields, p)
