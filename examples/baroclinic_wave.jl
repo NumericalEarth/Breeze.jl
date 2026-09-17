@@ -303,7 +303,7 @@ for k in (1, 16)
     ow = JLD2Writer(model, outputs; filename,
                     indices = (:, :, k),
                     schedule = TimeInterval(6hours),
-                    overwrite_existing = true)
+                    overwrite_files = true)
 
     simulation.output_writers[Symbol(filename)] = ow
 end
