@@ -13,6 +13,8 @@ using Oceananigans
 using Oceananigans.Units
 using Test
 
+previous_float_type = Oceananigans.defaults.FloatType
+
 @testset "Standard atmosphere temperature" begin
     # U.S. Standard Atmosphere 1976 layer bases
     @test standard_atmosphere_temperature(0) == 288.15
@@ -99,7 +101,7 @@ end
     end
 end
 
-Oceananigans.defaults.FloatType = Float64
+Oceananigans.defaults.FloatType = previous_float_type
 
 @testset "Geometric stretching" begin
     # 1 + 2 + 4 = 7

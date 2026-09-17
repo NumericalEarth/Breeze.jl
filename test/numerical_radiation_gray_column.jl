@@ -74,6 +74,8 @@ function layer_optical_depths(model, κ)
 end
 
 # Both float types always: this is the test that pins the Float32 kernel path at rounding accuracy
+previous_float_type = Oceananigans.defaults.FloatType
+
 @testset "Gray column through the ecCKD kernel [$(FT)]" for FT in all_float_types()
     Oceananigans.defaults.FloatType = FT
     rtol = FT == Float64 ? 1e-12 : 200 * eps(Float32)
@@ -186,4 +188,4 @@ end
     @test 3.3 < errors[2] / errors[3] < 4.7
 end
 
-Oceananigans.defaults.FloatType = Float64
+Oceananigans.defaults.FloatType = previous_float_type

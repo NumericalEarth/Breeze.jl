@@ -92,6 +92,8 @@ function column_model(grid, radiation; humidity_factor = 1)
 end
 
 # Both float types always: this is the test that pins the Float32 optics path
+previous_float_type = Oceananigans.defaults.FloatType
+
 @testset "Kernel path versus array path [$(FT)]" for FT in all_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 12
@@ -134,4 +136,4 @@ end
     end
 end
 
-Oceananigans.defaults.FloatType = Float64
+Oceananigans.defaults.FloatType = previous_float_type

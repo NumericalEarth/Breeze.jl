@@ -681,6 +681,8 @@ using GPUArraysCore: @allowscalar
 using Oceananigans.Fields: ConstantField
 using Oceananigans.Units: kilometers
 
+previous_float_type = Oceananigans.defaults.FloatType
+
 @testset "Radiation interface helpers [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 1), y=(0, 1), z=[0, 100, 300, 600, 1000])
@@ -767,3 +769,4 @@ using Oceananigans.Units: kilometers
         @test all(Array(interior(rtm.flux_divergence)) .≈ -2)
     end
 end
+Oceananigans.defaults.FloatType = previous_float_type

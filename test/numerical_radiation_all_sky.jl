@@ -81,6 +81,8 @@ function column_fluxes(radiation)
     return (; ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn)
 end
 
+previous_float_type = Oceananigans.defaults.FloatType
+
 @testset "All-sky ecCKD RadiativeTransferModel" begin
 
     @testset "Construction and types [$(FT)]" for FT in test_float_types()
@@ -294,4 +296,4 @@ end
     end
 end
 
-Oceananigans.defaults.FloatType = Float64
+Oceananigans.defaults.FloatType = previous_float_type

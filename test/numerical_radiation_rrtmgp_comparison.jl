@@ -105,6 +105,8 @@ function solved_column(grid, optics; CO₂ = 420e-6, microphysics = nothing, clo
     return column_diagnostics(radiation, model), seconds
 end
 
+previous_float_type = Oceananigans.defaults.FloatType
+
 @testset "ecCKD versus RRTMGP clear sky" begin
     Oceananigans.defaults.FloatType = Float64
     grid = column_grid(Float64)
@@ -213,4 +215,4 @@ end
     end
 end
 
-Oceananigans.defaults.FloatType = Float64
+Oceananigans.defaults.FloatType = previous_float_type

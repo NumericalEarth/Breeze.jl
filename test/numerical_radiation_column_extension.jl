@@ -75,6 +75,8 @@ function heating_rate(radiation, model)
     return Array(interior(radiation.flux_divergence))[1, 1, :] ./ (ρ .* cᵖ) .* 86400
 end
 
+previous_float_type = Oceananigans.defaults.FloatType
+
 @testset "Column extension above a BOMEX-like column [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 32
@@ -198,4 +200,4 @@ end
     end
 end
 
-Oceananigans.defaults.FloatType = Float64
+Oceananigans.defaults.FloatType = previous_float_type
