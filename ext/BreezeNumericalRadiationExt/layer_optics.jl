@@ -136,20 +136,12 @@ The scalar gas amounts (mol m⁻²) of layer `k` of column `c` as a `NamedTuple`
             cfc12 = χ.cfc12 * n_dry)
 end
 
-# The two cloud phases of a cloud optics container: `nothing` for clear sky
+# The two cloud phases of a cloud optics container: `nothing` for clear sky. Each phase is folded
+# into the layer optics by NumericalRadiation's `add_cloud_scattering_layer` (shortwave) and
+# `cloud_absorption_optical_depth` (longwave), whose `Nothing` methods leave the layer untouched,
+# so the clear-sky and all-sky kernels are the same code with no branch.
 @inline cloud_phases(::Nothing) = (nothing, nothing)
 @inline cloud_phases(cloud::NamedTuple) = (cloud.liquid, cloud.ice)
-
-# Fold a cloud phase into the shortwave scattering optics of a layer; a `nothing` phase leaves
-# the layer untouched
-@inline add_cloud_scattering(::Nothing, ig, radius_bracket, water_path, τ_absorption, τ_scattering, asymmetry) =
-    (τ_absorption, τ_scattering, asymmetry)
-
-@inline function add_cloud_scattering(cloud::SpectralCloudOptics, ig, radius_bracket, water_path,
-                                      τ_absorption, τ_scattering, asymmetry)
-    κ, ω, g = cloud_layer_optics(cloud, ig, radius_bracket)
-    return add_scattering_layer(τ_absorption, τ_scattering, asymmetry, κ, ω, g, water_path)
-end
 
 #####
 ##### Layer optics functors
@@ -258,12 +250,12 @@ end
     asymmetry = zero(τ_scattering)
 
     τ_absorption, τ_scattering, asymmetry =
-        add_cloud_scattering(optics.liquid_cloud, ig, optics.liquid_bracket, liquid_water_path,
-                             τ_absorption, τ_scattering, asymmetry)
+        add_cloud_scattering_layer(τ_absorption, τ_scattering, asymmetry,
+                                   optics.liquid_cloud, ig, optics.liquid_bracket, liquid_water_path)
 
     τ_absorption, τ_scattering, asymmetry =
-        add_cloud_scattering(optics.ice_cloud, ig, optics.ice_bracket, ice_water_path,
-                             τ_absorption, τ_scattering, asymmetry)
+        add_cloud_scattering_layer(τ_absorption, τ_scattering, asymmetry,
+                                   optics.ice_cloud, ig, optics.ice_bracket, ice_water_path)
 
     return τ_absorption, τ_scattering, asymmetry
 end

@@ -35,8 +35,8 @@ using NumericalRadiation: EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel,
                           GasOpticsStencil, gas_optics_stencil, source_table_bracket,
                           longwave_optical_depth, shortwave_optical_depth, rayleigh_optical_depth,
                           longwave_source, TabulatedSurfaceEmission,
-                          SpectralCloudOptics, effective_radius_bracket, cloud_layer_optics,
-                          add_scattering_layer, cloud_absorption_optical_depth,
+                          SpectralCloudOptics, effective_radius_bracket,
+                          add_cloud_scattering_layer, cloud_absorption_optical_depth,
                           streaming_longwave_fluxes!, ShortwaveColumnScratch, streaming_shortwave_fluxes!
 
 using Oceananigans.Architectures: architecture, on_architecture, array_type
