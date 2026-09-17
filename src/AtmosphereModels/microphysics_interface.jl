@@ -907,24 +907,19 @@ based on cloud properties.
 $(TYPEDSIGNATURES)
 
 Return `(lower, upper)` bounds on the *specific* quantity transported for prognostic `name`
-(the per-unit-mass form, so `ρqˣ` is bounded as `qˣ`), or `nothing` where no bound applies.
-A transport scheme uses these to constrain its reconstruction; nothing here applies them.
+(the per-unit-mass form, so `ρqˣ` is bounded as `qˣ`), or `nothing` where the quantity must not
+be bounded at all. A bounds-preserving transport scheme uses these; nothing here applies them.
 
-The fallback bounds the condensate mass fractions by `(0, 1)` and returns `nothing` for
-everything else. A scheme that carries anything other than mass fractions should add a method,
-because number concentrations, volumes and signed quantities share neither the units nor the
-bounds of a mass fraction, and bounding them by `(0, 1)` clips them to nonsense.
+Almost every microphysical quantity is simply non-negative, and that is all a positivity-
+preserving limiter needs. It cannot be told that directly — `bounds` takes two sides — so such a
+quantity is given a nominal upper bound of one. That bound is inert unless the reconstruction
+overshoots the cell mean by more than a factor of two, and where it does engage it damps a
+greater-than-100% overshoot, which such a scheme wants damped in any case.
 
-Only quantities bounded on *both* sides are reported. A one-sided "non-negative, unbounded
-above" cannot be expressed here: the consumer is a bounds-preserving advection scheme, whose
-`bounds` argument must be an `NTuple{2}` — so `(0, Inf)` is rejected outright as
-`Tuple{Int, Float64}` — and a homogeneous `(0.0, Inf)` puts an `Inf` into
-`abs((cᵐᵃˣ - cᵢ) / (M - cᵢ + ε₂))`, which the primal discards through a `min` but which leaves
-a `0 * Inf` NaN in the adjoint. Returning `nothing` keeps the positivity of those fields where
-it is already enforced, in the microphysics, rather than smuggling an `Inf` into a division.
+`nothing` is reserved for quantities that are genuinely signed, where a lower bound of zero would
+limit a correct field. Returning `nothing` gives up positivity, so it is not the right answer for
+a quantity that merely lacks an upper bound.
 
-Callers may ask about any advected name, including ones this scheme does not own, so an
-unrecognized `name` returns `nothing` rather than throwing.
 """
 microphysical_transport_bounds(microphysics, name::Symbol) =
     name in condensate_field_names(microphysics) ? (0, 1) : nothing

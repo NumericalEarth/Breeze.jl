@@ -702,7 +702,7 @@ using Oceananigans.TimeSteppers: update_state!
     end
 end
 
-@testset "P3 transport bounds report only two-sided bounds" begin
+@testset "P3 transport bounds keep positivity and leave the signed quantity alone" begin
     bounds(m, name) = Breeze.AtmosphereModels.microphysical_transport_bounds(m, name)
 
     # Both aerosol settings, because the prognostic list itself differs: without aerosol
@@ -714,13 +714,19 @@ end
     @test :ρnᵃ ∈ Breeze.AtmosphereModels.prognostic_field_names(activated)
 
     for p3 in (prescribed, activated)
-        for name in (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqᶠ, :ρqʷⁱ)
+        names = Breeze.AtmosphereModels.prognostic_field_names(p3)
+
+        # Everything non-negative is bounded, so the limiter preserves its positivity. That is
+        # the whole point: handing these `nothing` would give up positivity on exactly the
+        # number concentrations whose negatives produce NaN downstream.
+        for name in names
+            name === :ρsᵛ⁺ˡ && continue
             @test bounds(p3, name) == (0, 1)
         end
-        # Numbers, the rime volume and the signed supersaturation carry no two-sided bound.
-        for name in (:ρnᶜˡ, :ρnʳ, :ρnⁱ, :ρbᶠ, :ρnᵃ, :ρsᵛ⁺ˡ)
-            @test isnothing(bounds(p3, name))
-        end
+
+        # Supersaturation is signed and must not be bounded below by zero.
+        @test isnothing(bounds(p3, :ρsᵛ⁺ˡ))
+
         # A caller iterating the model's advected names asks about the moisture prognostic and
         # about names this scheme does not own. Neither may throw.
         @test isnothing(bounds(p3, Breeze.AtmosphereModels.moisture_prognostic_name(p3)))
