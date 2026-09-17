@@ -77,13 +77,16 @@ function read_ecckd_tables(read)
     end
 end
 
-load_gas_optics_model(selector::Union{Symbol, AbstractString}) =
-    read_ecckd_tables(() -> read_reference_ecckd_gas_optics(selector; names = ECCKD_GAS_NAMES))
+# The tables are read in the grid's float type; a preloaded model is converted to it (and to
+# the grid's architecture) by `adapt` below.
+load_gas_optics_model(selector::Union{Symbol, AbstractString}, FT) =
+    read_ecckd_tables(() -> read_reference_ecckd_gas_optics(selector; names = ECCKD_GAS_NAMES, float_type = FT))
 
-load_gas_optics_model(paths::NamedTuple) =
-    read_ecckd_tables(() -> read_ecckd_tabulated_gas_optics(paths.longwave, paths.shortwave; names = ECCKD_GAS_NAMES))
+load_gas_optics_model(paths::NamedTuple, FT) =
+    read_ecckd_tables(() -> read_ecckd_tabulated_gas_optics(paths.longwave, paths.shortwave;
+                                                            names = ECCKD_GAS_NAMES, float_type = FT))
 
-load_gas_optics_model(model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}) = model
+load_gas_optics_model(model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}, FT) = model
 
 # Warn once at construction when the extension's temperatures leave the Planck source table, where
 # the interpolation holds the table edge (a gray `σT⁴` model has no table and no edge).
@@ -176,10 +179,10 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     # Gas optics tables, then the extension sampled on the host (it needs the background's O₃
     # as a profile, before materialization turns it into a field on the grid)
-    host_gas_model = load_gas_optics_model(optics.gas_model)
+    host_gas_model = load_gas_optics_model(optics.gas_model, FT)
     extension = materialize_column_extension(column_extension, grid, background_atmosphere)
     warn_source_table_range(host_gas_model, extension)
-    gas_model = adapt(array_type(arch), host_gas_model)
+    gas_model = adapt(array_type(arch){FT}, host_gas_model)
 
     background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 

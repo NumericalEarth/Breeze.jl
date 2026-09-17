@@ -4,9 +4,10 @@ module BreezeNumericalRadiationExt
 ##### ecCKD radiation for AtmosphereModel through NumericalRadiation.jl
 #####
 ##### The extension stages the grid's columns (plus a column extension above the grid top) into
-##### top-down spectral column arrays, solves the longwave and shortwave fluxes of every column
-##### with NumericalRadiation's ecCKD gas optics and two-stream solvers, and copies the fluxes back
-##### onto the grid's `ZFaceField`s in Breeze's positive-upward convention.
+##### top-down spectral column arrays, solves the longwave and shortwave fluxes of every column in
+##### one kernel with NumericalRadiation's scalar ecCKD gas optics and streaming column solvers,
+##### and copies the fluxes back onto the grid's `ZFaceField`s in Breeze's positive-upward
+##### convention.
 #####
 
 using Breeze
@@ -28,11 +29,13 @@ using Breeze.Thermodynamics: ThermodynamicConstants
 
 using NumericalRadiation: EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel,
                           read_reference_ecckd_gas_optics, read_ecckd_tabulated_gas_optics,
-                          ColumnAtmosphere, RadiativeFluxes, LongwaveOptics, ShortwaveOptics,
-                          CloudlessLongwave, CloudlessShortwave,
-                          LongwaveBoundaryConditions, ShortwaveBoundaryConditions,
-                          optical_properties!, radiative_fluxes!,
-                          surface_longwave_emission, longwave_source, source_table_bracket
+                          ColumnAtmosphere,
+                          GasOpticsStencil, gas_optics_stencil, source_table_bracket,
+                          longwave_optical_depth, shortwave_optical_depth, rayleigh_optical_depth,
+                          longwave_source, TabulatedSurfaceEmission,
+                          SpectralCloudOptics, effective_radius_bracket, cloud_layer_optics,
+                          add_scattering_layer, cloud_absorption_optical_depth,
+                          streaming_longwave_fluxes!, ShortwaveColumnScratch, streaming_shortwave_fluxes!
 
 using Oceananigans.Architectures: architecture, on_architecture, array_type
 using Oceananigans.Fields: ZFaceField, CenterField, AbstractField
@@ -48,6 +51,8 @@ include("spectral_columns.jl")
 include("column_extension.jl")
 include("ecckd_radiative_transfer_model.jl")
 include("column_staging_kernels.jl")
+include("layer_optics.jl")
+include("radiative_transfer_kernels.jl")
 include("host_update.jl")
 
 end # module

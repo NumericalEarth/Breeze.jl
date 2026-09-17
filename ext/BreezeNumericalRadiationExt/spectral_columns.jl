@@ -118,6 +118,9 @@ end
 Adapt.adapt_structure(to, columns::SpectralColumns{FT}) where FT =
     SpectralColumns{FT}((adapt(to, getfield(columns, name)) for name in fieldnames(SpectralColumns))...)
 
+Base.eltype(::SpectralColumns{FT}) where FT = FT
+Base.eltype(::Type{<:SpectralColumns{FT}}) where FT = FT
+
 """
 $(TYPEDSIGNATURES)
 

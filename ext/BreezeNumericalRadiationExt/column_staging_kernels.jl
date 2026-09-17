@@ -1,9 +1,8 @@
 #####
-##### Column staging kernels: grid → spectral columns → grid
+##### Column staging kernels: grid → spectral columns
 #####
 ##### Kernel A stages every grid cell into its column layer and every grid face into its column
-##### interface. Kernel B stacks the extension layers above the grid top, hydrostatically. Kernel D
-##### copies the solved fluxes back onto the grid's faces with Breeze's sign convention.
+##### interface. Kernel B stacks the extension layers above the grid top, hydrostatically.
 #####
 
 """
@@ -156,40 +155,5 @@ extend_spectral_columns!(columns, ::Nothing, model) = nothing
 
         # The top of the atmosphere radiates at the temperature of the top layer
         columns.temperature_interfaces[c, 1] = columns.temperature_layers[c, 1]
-    end
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Copy the solved column fluxes onto the four `ZFaceField`s of `rtm` (kernel D): grid face `k` is
-column interface `N + 2 - k`, and the downwelling fluxes change sign to Breeze's positive-upward
-convention.
-"""
-function copy_spectral_fluxes!(rtm, grid)
-    arch = architecture(grid)
-    columns = rtm.atmospheric_state
-    Nx, Ny, Nz = size(grid)
-
-    launch!(arch, grid, (Nx, Ny, Nz+1), _copy_spectral_fluxes!,
-            rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux,
-            rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
-            columns, grid)
-
-    return nothing
-end
-
-@kernel function _copy_spectral_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, columns, grid)
-    i, j, k = @index(Global, NTuple)
-
-    N = number_of_layers(columns)
-    c = column_index(i, j, grid.Nx)
-    kᶠ = N + 2 - k
-
-    @inbounds begin
-        ℐ_lw_up[i, j, k] = columns.flux_up_lw[c, kᶠ]
-        ℐ_lw_dn[i, j, k] = -columns.flux_down_lw[c, kᶠ]
-        ℐ_sw_up[i, j, k] = columns.flux_up_sw[c, kᶠ]
-        ℐ_sw_dn[i, j, k] = -columns.flux_down_sw[c, kᶠ]
     end
 end
