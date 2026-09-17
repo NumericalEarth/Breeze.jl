@@ -53,8 +53,8 @@ end
     FT = eltype(columns)
     c = column_index(i, j, grid.Nx)
     N = number_of_layers(columns)
-    Nlongwave_gpoints = length(gas_model.longwave_weights)
-    Nshortwave_gpoints = length(gas_model.shortwave_weights)
+    Ngˡʷ = length(gas_model.longwave_weights)
+    Ngˢʷ = length(gas_model.shortwave_weights)
 
     stage_column_stencils!(columns, gas_model, c, N)
 
@@ -76,7 +76,7 @@ end
 
     streaming_longwave_fluxes!(view(columns.longwave_up, c, :), view(columns.longwave_down, c, :),
                                longwave, surface_emission, 1 - ε, zero(FT),
-                               gas_model.longwave_weights, Nlongwave_gpoints, N,
+                               gas_model.longwave_weights, Ngˡʷ, N,
                                view(columns.transmittance, c, :), view(columns.source_up, c, :))
 
     # Shortwave: the horizontal irradiance at the top of the atmosphere is `S₀ μ₀`, zero at night
@@ -87,7 +87,7 @@ end
 
     streaming_shortwave_fluxes!(view(columns.shortwave_up, c, :), view(columns.shortwave_down, c, :),
                                 shortwave, μ₀, solar_constant * max(μ₀, 0), α_direct, α_diffuse,
-                                gas_model.shortwave_weights, Nshortwave_gpoints, N, column_scratch(columns.shortwave, c))
+                                gas_model.shortwave_weights, Ngˢʷ, N, column_scratch(columns.shortwave, c))
 end
 
 """

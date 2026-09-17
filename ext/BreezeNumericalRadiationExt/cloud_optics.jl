@@ -72,11 +72,11 @@ load_cloud_optics(FT, ::Nothing, gas_model, liquid_radius, ice_radius, arch) = (
 
 # The cloud optics must be mapped onto the same g points the gas model integrates over
 function validate_cloud_g_points(cloud::NamedTuple, weights, region)
-    Ngpoints = length(weights)
+    Ng = length(weights)
     for phase in (cloud.liquid, cloud.ice)
-        size(phase.mass_extinction_coefficient, 1) == Ngpoints ||
+        size(phase.mass_extinction_coefficient, 1) == Ng ||
             throw(ArgumentError("The $region cloud optics are mapped onto " *
-                                "$(size(phase.mass_extinction_coefficient, 1)) g points but the gas model has $Ngpoints"))
+                                "$(size(phase.mass_extinction_coefficient, 1)) g points but the gas model has $Ng"))
     end
     return nothing
 end

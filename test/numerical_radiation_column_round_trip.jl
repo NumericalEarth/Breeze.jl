@@ -40,21 +40,21 @@ function array_path_fluxes(rtm, model, i, j)
     gas_model = rtm.longwave_solver.gas_model
     FT = eltype(gas_model)
     N = number_of_layers(columns)
-    Nlongwave_gpoints = length(gas_model.longwave_weights)
-    Nshortwave_gpoints = length(gas_model.shortwave_weights)
+    Ngˡʷ = length(gas_model.longwave_weights)
+    Ngˢʷ = length(gas_model.shortwave_weights)
 
-    longwave = LongwaveOptics(zeros(FT, Nlongwave_gpoints, N), zeros(FT, Nlongwave_gpoints, N);
-                              source_top = zeros(FT, Nlongwave_gpoints, N),
-                              source_bottom = zeros(FT, Nlongwave_gpoints, N),
-                              weights = zeros(FT, Nlongwave_gpoints))
-    shortwave = ShortwaveOptics(zeros(FT, Nshortwave_gpoints, N); weights = zeros(FT, Nshortwave_gpoints))
+    longwave = LongwaveOptics(zeros(FT, Ngˡʷ, N), zeros(FT, Ngˡʷ, N);
+                              source_top = zeros(FT, Ngˡʷ, N),
+                              source_bottom = zeros(FT, Ngˡʷ, N),
+                              weights = zeros(FT, Ngˡʷ))
+    shortwave = ShortwaveOptics(zeros(FT, Ngˢʷ, N); weights = zeros(FT, Ngˢʷ))
 
     atmosphere = column_atmosphere(rtm, model, i, j)
     optical_properties!(longwave, shortwave, gas_model, atmosphere)
 
     air = atmosphere.gases.composite
-    for k in 1:N, gpoint in 1:Nshortwave_gpoints
-        shortwave.rayleigh_optical_depth[gpoint, k] = rayleigh_optical_depth(gas_model, gpoint, air[k])
+    for k in 1:N, g in 1:Ngˢʷ
+        shortwave.rayleigh_optical_depth[g, k] = rayleigh_optical_depth(gas_model, g, air[k])
     end
 
     Tₛ = atmosphere.surface.temperature

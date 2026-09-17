@@ -2,7 +2,7 @@
 ##### Per-layer optics of one staged column
 #####
 ##### The streaming solvers of NumericalRadiation take the optics of a column as a functor
-##### `(gpoint, k) -> ...` evaluated per g point and layer. The two functors below read the staged
+##### `(g, k) -> ...` evaluated per g point and layer. The two functors below read the staged
 ##### column arrays of one column and call NumericalRadiation's scalar layer API: the gas optics
 ##### stencil and Planck brackets are read back from the arrays kernel C fills once per layer, the
 ##### well-mixed gases are formed from their mole fractions relative to dry air, and cloud phases
@@ -152,8 +152,8 @@ end
 $(TYPEDEF)
 
 Longwave layer optics of column `column` of `columns` for `NumericalRadiation.streaming_longwave_fluxes!`:
-`(gpoint, k)` returns `(τ, B_top, B_bottom)`, the gas absorption optical depth of layer `k` at
-g point `gpoint` plus the cloud absorption of both phases, and the Planck sources at the layer's
+`(g, k)` returns `(τ, B_top, B_bottom)`, the gas absorption optical depth of layer `k` at
+g point `g` plus the cloud absorption of both phases, and the Planck sources at the layer's
 top and bottom interfaces.
 
 Fields:
@@ -177,7 +177,7 @@ struct LongwaveLayerOptics{M, C, L, I, BL, BI, FT}
     column :: Int
 end
 
-@inline function (optics::LongwaveLayerOptics)(gpoint, k)
+@inline function (optics::LongwaveLayerOptics)(g, k)
     columns = optics.columns
     model = optics.gas_model
     c = optics.column
@@ -195,12 +195,12 @@ end
     bracket_top = interface_source_bracket(model, columns, c, k)
     bracket_bottom = interface_source_bracket(model, columns, c, k + 1)
 
-    τ = longwave_optical_depth(model, gpoint, gases, stencil) +
-        cloud_absorption_optical_depth(optics.liquid_cloud, gpoint, optics.liquid_bracket, liquid_water_path) +
-        cloud_absorption_optical_depth(optics.ice_cloud, gpoint, optics.ice_bracket, ice_water_path)
+    τ = longwave_optical_depth(model, g, gases, stencil) +
+        cloud_absorption_optical_depth(optics.liquid_cloud, g, optics.liquid_bracket, liquid_water_path) +
+        cloud_absorption_optical_depth(optics.ice_cloud, g, optics.ice_bracket, ice_water_path)
 
-    B_top = longwave_source(model, gpoint, T_top, bracket_top)
-    B_bottom = longwave_source(model, gpoint, T_bottom, bracket_bottom)
+    B_top = longwave_source(model, g, T_top, bracket_top)
+    B_bottom = longwave_source(model, g, T_bottom, bracket_bottom)
 
     return τ, B_top, B_bottom
 end
@@ -209,8 +209,8 @@ end
 $(TYPEDEF)
 
 Shortwave layer optics of column `column` of `columns` for `NumericalRadiation.streaming_shortwave_fluxes!`:
-`(gpoint, k)` returns `(τ_absorption, τ_scattering, ĝ)`, the gas absorption optical depth
-of layer `k` at g point `gpoint`, the Rayleigh scattering of the layer's air (the composite
+`(g, k)` returns `(τ_absorption, τ_scattering, 𝒢)`, the gas absorption optical depth
+of layer `k` at g point `g`, the Rayleigh scattering of the layer's air (the composite
 amount, which in the dry convention of the staging kernels is the layer's total mass over `mᵈ`,
 as in NumericalRadiation's array path), and the scattering of both cloud phases folded in.
 
@@ -235,7 +235,7 @@ struct ShortwaveLayerOptics{M, C, L, I, BL, BI, FT}
     column :: Int
 end
 
-@inline function (optics::ShortwaveLayerOptics)(gpoint, k)
+@inline function (optics::ShortwaveLayerOptics)(g, k)
     columns = optics.columns
     model = optics.gas_model
     c = optics.column
@@ -248,17 +248,17 @@ end
         ice_water_path = columns.ice_water_path[c, k]
     end
 
-    τ_absorption = shortwave_optical_depth(model, gpoint, gases, stencil)
-    τ_scattering = rayleigh_optical_depth(model, gpoint, gases.composite)
-    ĝ = zero(τ_scattering)
+    τ_absorption = shortwave_optical_depth(model, g, gases, stencil)
+    τ_scattering = rayleigh_optical_depth(model, g, gases.composite)
+    𝒢 = zero(τ_scattering)
 
-    τ_absorption, τ_scattering, ĝ = add_cloud_scattering_layer(τ_absorption, τ_scattering, ĝ,
-                                                               optics.liquid_cloud, gpoint, optics.liquid_bracket,
+    τ_absorption, τ_scattering, 𝒢 = add_cloud_scattering_layer(τ_absorption, τ_scattering, 𝒢,
+                                                               optics.liquid_cloud, g, optics.liquid_bracket,
                                                                liquid_water_path)
 
-    τ_absorption, τ_scattering, ĝ = add_cloud_scattering_layer(τ_absorption, τ_scattering, ĝ,
-                                                               optics.ice_cloud, gpoint, optics.ice_bracket,
+    τ_absorption, τ_scattering, 𝒢 = add_cloud_scattering_layer(τ_absorption, τ_scattering, 𝒢,
+                                                               optics.ice_cloud, g, optics.ice_bracket,
                                                                ice_water_path)
 
-    return τ_absorption, τ_scattering, ĝ
+    return τ_absorption, τ_scattering, 𝒢
 end
