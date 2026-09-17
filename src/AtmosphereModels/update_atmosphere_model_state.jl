@@ -322,7 +322,8 @@ end
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛᵉ, constants)
+    μ = extract_microphysical_prognostics(i, j, k, microphysics, microphysical_fields)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛᵉ, constants, μ, ρ)
 
     update_microphysical_fields!(microphysical_fields, i, j, k, grid,
                                  microphysics, ρ, 𝒰₁, constants)

@@ -346,7 +346,7 @@ function set_sensible_heat_formulation(bc::BulkSensibleHeatFluxBoundaryCondition
     bf = bc.condition
     new_bf = BulkSensibleHeatFluxFunction(bf.side, bf.coefficient, bf.gustiness, bf.surface_temperature,
                                           bf.standard_pressure, bf.thermodynamic_constants,
-                                          formulation, bf.filtered_velocities, bf.filtered_scalar)
+                                          formulation, bf.filtered_velocities, bf.filtered_scalar, bf.moisture)
     return BoundaryCondition(Flux(), new_bf)
 end
 

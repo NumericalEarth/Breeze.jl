@@ -312,6 +312,9 @@ end
 @inline MoistureMassFractions(vapor::FT) where FT = MoistureMassFractions(vapor, zero(vapor), zero(vapor))
 @inline MoistureMassFractions(vapor::FT, liquid::FT) where FT = MoistureMassFractions(vapor, liquid, zero(vapor))
 
+@inline MoistureMassFractions{FT}(q::MoistureMassFractions) where FT =
+    MoistureMassFractions(convert(FT, q.vapor), convert(FT, q.liquid), convert(FT, q.ice))
+
 const MMF = MoistureMassFractions
 Base.zero(::Type{MMF{FT}}) where FT = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
 
