@@ -3,7 +3,7 @@
 Breeze.jl computes longwave and shortwave radiative fluxes with a [`RadiativeTransferModel`](@ref), whose flux divergence enters the energy tendency of an [`AtmosphereModel`](@ref). Two radiation backends are available as package extensions, selected by the optics passed to the constructor:
 
 - [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) solves gray-atmosphere ([`GrayOptics`](@ref)), clear-sky ([`ClearSkyOptics`](@ref)), and all-sky ([`AllSkyOptics`](@ref)) radiation with its correlated-``k`` lookup tables; load it with `using RRTMGP, ClimaComms, NCDatasets`.
-- [NumericalRadiation.jl](https://github.com/NumericalEarth/NumericalRadiation.jl) solves clear-sky and all-sky radiation with the ecCKD gas optics ([`EcCKDOptics`](@ref)) in one kernel per column, on CPUs and GPUs; load it with `using NumericalRadiation, NCDatasets`. See [ecCKD radiation with NumericalRadiation.jl](@ref) below.
+- [NumericalRadiation.jl](https://github.com/NumericalEarth/NumericalRadiation.jl) solves clear-sky and all-sky radiation with the ecCKD gas optics ([`EcCKDOptics`](@ref)) in one kernel per column, on CPUs and GPUs; load it with `using NumericalRadiation: NumericalRadiation` and `using NCDatasets` (NumericalRadiation exports its own `ThermodynamicConstants`, so it is loaded qualified next to Breeze). See [ecCKD radiation with NumericalRadiation.jl](@ref) below.
 
 Both backends fill the same four flux fields and the same flux divergence, so a simulation switches between them by changing the optics alone.
 
@@ -405,7 +405,9 @@ tables are evaluated once, at construction, at the constant effective radii of
 `liquid_effective_radius` and `ice_effective_radius` (only
 [`ConstantRadiusParticles`](@ref) for now). The shortwave folds the cloud scattering into
 the two-stream solution with delta-Eddington scaling; the longwave adds the cloud
-absorption and neglects longwave scattering, as ecRad does by default. With
+absorption only and neglects longwave cloud scattering (ecRad's
+`do_lw_cloud_scattering = false` setting, as RRTMGP's no-scattering longwave solver does).
+With
 `clouds = nothing` (the default) the sky is clear whatever the microphysics holds.
 
 ### Sign and units conventions

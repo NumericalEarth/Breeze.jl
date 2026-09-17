@@ -98,7 +98,7 @@ fraction of the stencil is `n_h2o / n_dry`, guarded as in NumericalRadiation's a
         p = columns.pressure_layers[c, k]
         T = columns.temperature_layers[c, k]
         n_dry = max(columns.dry_air[c, k], sqrt(eps(FT)))
-        n_h2o = max(columns.water_vapor[c, k], zero(FT))
+        n_h2o = max(0, columns.water_vapor[c, k])
         store_layer_stencil!(columns, c, k, gas_optics_stencil(model, p, T, n_h2o / n_dry))
     end
     @inbounds for k in 1:N+1

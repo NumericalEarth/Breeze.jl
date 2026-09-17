@@ -174,17 +174,29 @@ end
     @test occursin("├── gas_model: (longwave = \"lw.nc\", shortwave = \"sw.nc\")", str)
 
     @testset "Constructor without the extension" begin
+        # Order-independent: ParallelTestRunner reuses its workers, so another test file may
+        # already have loaded the NumericalRadiation extension in this process. The fallback
+        # method in src is reached through `invoke` either way; the plain call throws only when
+        # the extension is absent.
         grid = RectilinearGrid(default_arch; size=4, x=0, y=45, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
         constants = ThermodynamicConstants()
+        fallback = Tuple{Oceananigans.Grids.AbstractGrid, EcCKDOptics, Vararg{Any}}
         err = try
-            RadiativeTransferModel(grid, EcCKDOptics(), constants; surface_temperature = 300, surface_albedo = 0.1)
+            invoke(RadiativeTransferModel, fallback, grid, EcCKDOptics(), constants)
             nothing
         catch e
             e
         end
         @test err isa ArgumentError
         @test occursin("EcCKDOptics", err.msg)
-        @test occursin("NumericalRadiation", err.msg)
-        @test occursin("NCDatasets", err.msg)
+        @test occursin("using NumericalRadiation: NumericalRadiation", err.msg)
+        @test occursin("using NCDatasets", err.msg)
+
+        if isnothing(Base.get_extension(Breeze, :BreezeNumericalRadiationExt))
+            @test_throws ArgumentError RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                                              surface_temperature = 300, surface_albedo = 0.1)
+        else
+            @test_skip RadiativeTransferModel(grid, EcCKDOptics(), constants)   # the extension is loaded in this worker
+        end
     end
 end

@@ -72,7 +72,8 @@ abstract type AbstractOptics end
 $(TYPEDEF)
 
 Type representing gray atmosphere radiation ([O'Gorman & Schneider 2008](@cite OGormanSchneider2008)),
-can be used as optics argument in [`RadiativeTransferModel`](@ref).
+can be used as optics argument in [`RadiativeTransferModel`](@ref). Solved by RRTMGP.jl's gray
+solver, which requires `using RRTMGP, ClimaComms, NCDatasets`.
 
 # References
 
@@ -83,7 +84,8 @@ struct GrayOptics <: AbstractOptics end
 """
 $(TYPEDEF)
 
-Type representing full-spectrum clear-sky radiation using RRTMGP gas optics, can be used as optics argument in [`RadiativeTransferModel`](@ref).
+Type representing full-spectrum clear-sky radiation using RRTMGP gas optics, can be used as optics
+argument in [`RadiativeTransferModel`](@ref). Requires `using RRTMGP, ClimaComms, NCDatasets`.
 """
 struct ClearSkyOptics <: AbstractOptics end
 
@@ -91,7 +93,8 @@ struct ClearSkyOptics <: AbstractOptics end
 $(TYPEDEF)
 
 Type representing full-spectrum all-sky (cloudy) radiation using RRTMGP gas and cloud optics,
-can be used as optics argument in [`RadiativeTransferModel`](@ref).
+can be used as optics argument in [`RadiativeTransferModel`](@ref). Requires
+`using RRTMGP, ClimaComms, NCDatasets`.
 
 All-sky radiation includes scattering by cloud liquid and ice particles, requiring
 cloud water path, cloud fraction, and effective radius inputs from the microphysics scheme.
@@ -137,7 +140,9 @@ $(TYPEDFIELDS)
 Full-spectrum radiation with the ecCKD correlated-*k* gas optics of
 [Hogan & Matricardi (2022)](@cite HoganMatricardi2022), solved column by column by
 NumericalRadiation.jl. Can be used as the optics argument of [`RadiativeTransferModel`](@ref)
-once the extension is loaded (`using NumericalRadiation, NCDatasets`).
+once the extension is loaded with `using NumericalRadiation: NumericalRadiation` and
+`using NCDatasets` (NumericalRadiation exports its own `ThermodynamicConstants`, so it is
+loaded qualified next to `using Breeze`).
 
 The solved column reaches beyond the top of the grid through a [`ColumnExtension`](@ref), so that
 the downwelling fluxes at the top of the domain include the emission and absorption of the
@@ -195,7 +200,7 @@ Valid optics types are:
 - [`ClearSkyOptics()`](@ref) - Full-spectrum clear-sky radiation using RRTMGP gas optics
 - [`AllSkyOptics()`](@ref) - Full-spectrum all-sky (cloudy) radiation using RRTMGP gas and cloud optics
 - [`EcCKDOptics()`](@ref) - Full-spectrum clear- or all-sky radiation using ecCKD gas optics via
-  NumericalRadiation.jl (requires `using NumericalRadiation, NCDatasets`)
+  NumericalRadiation.jl (requires `using NumericalRadiation: NumericalRadiation` and `using NCDatasets`)
 
 The RRTMGP optics require `using RRTMGP, ClimaComms, NCDatasets`. NumericalRadiation exports its own
 `ThermodynamicConstants`, so load it qualified (`using NumericalRadiation: NumericalRadiation`) next to
@@ -288,8 +293,10 @@ end
 
 # The NumericalRadiation extension replaces this with the constructor proper
 function RadiativeTransferModel(grid::AbstractGrid, optics::EcCKDOptics, args...; kw...)
-    msg = "EcCKDOptics requires the NumericalRadiation extension: " *
-          "load NumericalRadiation and NCDatasets (`using NumericalRadiation, NCDatasets`)."
+    # NumericalRadiation exports its own `ThermodynamicConstants`, which clashes with Breeze's
+    # when both are loaded unqualified, so the hint loads it qualified
+    msg = "EcCKDOptics requires the NumericalRadiation extension: load NumericalRadiation and " *
+          "NCDatasets with `using NumericalRadiation: NumericalRadiation` and `using NCDatasets`."
     return throw(ArgumentError(msg))
 end
 

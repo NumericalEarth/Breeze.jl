@@ -65,9 +65,9 @@ end
 # The ecCKD tables live in netCDF files that NumericalRadiation reads through its NCDatasets
 # extension; without it the reader throws an `ArgumentError` naming NCDatasets, which is
 # rewrapped here to say what to do in terms of this constructor.
-function read_ecckd_tables(read)
+function read_ecckd_tables(load)
     try
-        return read()
+        return load()
     catch err
         if err isa ArgumentError && occursin("NCDatasets", err.msg)
             throw(ArgumentError("EcCKDOptics reads its gas optics tables from netCDF files, which requires NCDatasets:\n\n" *
@@ -119,8 +119,10 @@ With `optics.clouds::CloudScatteringTables` the radiation is all-sky: the cloud 
 of every grid cell (from the model's microphysics) scatter and absorb with the scattering tables
 mapped onto the ecCKD g points at the constant effective radii of `liquid_effective_radius` and
 `ice_effective_radius`; the shortwave folds the cloud scattering into the two-stream solution and
-the longwave adds the cloud absorption (longwave cloud scattering is neglected, as in ecRad's
-default). With `optics.clouds = nothing` the sky is clear whatever the microphysics holds.
+the longwave adds the cloud absorption `κ (1 - ω) W` only and neglects longwave cloud scattering
+(ecRad's `do_lw_cloud_scattering = false` setting, and what RRTMGP's no-scattering longwave
+solver does; scattering is a planned follow-up). With `optics.clouds = nothing` the sky is clear
+whatever the microphysics holds.
 
 The gas optics and cloud scattering tables are read from netCDF files, which requires
 `using NCDatasets`.
