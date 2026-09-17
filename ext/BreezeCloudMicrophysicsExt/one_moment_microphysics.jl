@@ -746,7 +746,7 @@ end
 # Used by parcel models. Grid models use grid_moisture_fractions instead, which splits
 # saturation adjustment from non-equilibrium the same way.
 
-# Saturation adjustment: `specific_prognostic_moisture_from_total` returns the equilibrium
+# Saturation adjustment: `specific_prognostic_moisture` returns the equilibrium
 # moisture qᵉ = qᵛ + qᶜˡ, so cloud has to be removed to recover vapor.
 @inline function AM.moisture_fractions(bμp::WP1M, ℳ::WarmPhaseOneMomentState, qᵉ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
@@ -754,7 +754,7 @@ end
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-# Non-equilibrium: `specific_prognostic_moisture_from_total` already returned true vapor
+# Non-equilibrium: `specific_prognostic_moisture` already returned true vapor
 # (qᵗ minus every condensate), so subtracting cloud again would double-count it.
 @inline function AM.moisture_fractions(bμp::WPNE1M, ℳ::WarmPhaseOneMomentState, qᵛ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ

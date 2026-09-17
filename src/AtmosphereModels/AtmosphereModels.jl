@@ -56,7 +56,6 @@ export
     compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
-    specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
     aerosol_field_names,

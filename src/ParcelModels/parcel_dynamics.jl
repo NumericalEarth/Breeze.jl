@@ -17,7 +17,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
-    specific_prognostic_moisture, specific_prognostic_moisture_from_total
+    specific_prognostic_moisture
 using Breeze.TimeSteppers: SSPRungeKutta3
 using Breeze.Solvers: SecantSolver, secant_solve
 
@@ -1010,7 +1010,7 @@ end
 function parcel_moisture_partition(microphysics, ρ, μ, qᵗ, 𝒰)
     zero_velocities = (; u = zero(ρ), v = zero(ρ), w = zero(ρ))
     ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, zero_velocities)
-    qᵛᵉ = specific_prognostic_moisture_from_total(microphysics, qᵗ, ℳ)
+    qᵛᵉ = specific_prognostic_moisture(microphysics, qᵗ, ℳ)
     return qᵛᵉ, moisture_fractions(microphysics, ℳ, qᵛᵉ)
 end
 

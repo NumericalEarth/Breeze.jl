@@ -1,7 +1,6 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.AtmosphereModels: specific_prognostic_moisture_from_total
 using Breeze.ParcelModels: ParcelDynamics
 using Breeze.Microphysics: adjust_thermodynamic_state, DCMIP2016KesslerMicrophysics
 using Breeze.Thermodynamics: MoistureMassFractions, LiquidIceDensityState, LiquidIcePotentialTemperatureState,
@@ -56,7 +55,7 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     q = MoistureMassFractions(qᵛ, FT(0.001))
     p = ρ * mixture_gas_constant(q, constants) * T
     θ = potential_temperature_from_temperature(T, p, pˢᵗ, constants, q)
-    qᵉ = specific_prognostic_moisture_from_total(microphysics, total_specific_moisture(q), (;), ρ)
+    qᵉ = specific_prognostic_moisture(microphysics, total_specific_moisture(q), (;), ρ)
     state = LiquidIceDensityState(θ, MoistureMassFractions(qᵉ), pˢᵗ, ρ)
     adjusted = adjust_thermodynamic_state(state, microphysics, constants)
     @test temperature(adjusted, constants) ≈ T atol=microphysics.solver.abstol
@@ -168,29 +167,29 @@ end
          ρnᶜˡ = ρ * FT(1e8), ρnʳ = ρ * FT(1e5))
 
     for microphysics in (nothing, InstantaneousPrecipitation(FT), SaturationAdjustment(FT), BulkMicrophysics(FT))
-        @test specific_prognostic_moisture_from_total(microphysics, qᵗ, (;), ρ) ≈ qᵗ
+        @test specific_prognostic_moisture(microphysics, qᵗ, (;), ρ) ≈ qᵗ
     end
 
     warm_total = qᵛ + qᶜˡ + qʳ
     for microphysics in (DCMIP2016KesslerMicrophysics(FT), OneMomentCloudMicrophysics(FT), TwoMomentCloudMicrophysics(FT))
-        @test specific_prognostic_moisture_from_total(microphysics, warm_total, μ, ρ) ≈ qᵛ
+        @test specific_prognostic_moisture(microphysics, warm_total, μ, ρ) ≈ qᵛ
     end
 
     warm_adjustment = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
     mixed_adjustment = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
     warm = OneMomentCloudMicrophysics(FT; cloud_formation=warm_adjustment)
     mixed = OneMomentCloudMicrophysics(FT; cloud_formation=mixed_adjustment)
-    @test specific_prognostic_moisture_from_total(warm, warm_total, μ, ρ) ≈ qᵛ + qᶜˡ
-    @test specific_prognostic_moisture_from_total(mixed, qᵗ, μ, ρ) ≈ qᵛ + qᶜˡ + qᶜⁱ
+    @test specific_prognostic_moisture(warm, warm_total, μ, ρ) ≈ qᵛ + qᶜˡ
+    @test specific_prognostic_moisture(mixed, qᵗ, μ, ρ) ≈ qᵛ + qᶜˡ + qᶜⁱ
 
     # Conversion alone must not create water when precipitation exceeds the total.
     state = BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState(FT(0.001), FT(0.012))
-    qᵉ = specific_prognostic_moisture_from_total(warm, FT(0.01), state)
+    qᵉ = specific_prognostic_moisture(warm, FT(0.01), state)
     @test qᵉ + state.qʳ ≈ FT(0.01)
 
     p3 = PredictedParticlePropertiesMicrophysics(FT)
     p3_densities = merge(μ, (ρqⁱ = ρ * qᶜⁱ, ρqʷⁱ = ρ * qˢⁿ, ρqᶠ = ρ * qᶜⁱ / 2))
-    @test specific_prognostic_moisture_from_total(p3, qᵗ, p3_densities, ρ) ≈ qᵛ
+    @test specific_prognostic_moisture(p3, qᵗ, p3_densities, ρ) ≈ qᵛ
 end
 
 @testset "Total-water initialization with cloud and rain [$FT]" for FT in test_float_types()

@@ -416,6 +416,8 @@ $(TYPEDSIGNATURES)
 Return the prognostic specific moisture field for `model`.
 
 This is ``qᵛ`` for non-equilibrium schemes or ``qᵉ`` for saturation adjustment schemes.
+To convert total specific moisture instead, pass `microphysics`, `qᵗ`, and either a
+microphysical state or density-weighted microphysical variables and total air density.
 """
 specific_prognostic_moisture(model) = model.microphysical_fields[moisture_specific_name(model.microphysics)]
 
@@ -669,14 +671,14 @@ This conversion preserves total water, including when the input state contains n
 This is used by parcel models that store total moisture ``qᵗ`` as the prognostic
 variable, to produce the correct input for [`moisture_fractions`](@ref).
 """
-@inline specific_prognostic_moisture_from_total(microphysics, qᵗ, ℳ::AbstractMicrophysicalState) =
-    moisture_less_condensate(qᵗ, ℳ, specific_condensate_names(microphysics))
+@inline specific_prognostic_moisture(microphysics, qᵗ, ℳ::AbstractMicrophysicalState) =
+    subtract_condensate(qᵗ, ℳ, specific_condensate_names(microphysics))
 
 # An empty state has no condensate to subtract, even if the scheme names condensate species.
-@inline specific_prognostic_moisture_from_total(microphysics, qᵗ, ::NothingMicrophysicalState) = qᵗ
+@inline specific_prognostic_moisture(microphysics, qᵗ, ::NothingMicrophysicalState) = qᵗ
 
-@inline moisture_less_condensate(qᵗ, ℳ, ::Tuple{}) = qᵗ
-@inline moisture_less_condensate(qᵗ, ℳ, names::Tuple{Symbol, Vararg}) =
+@inline subtract_condensate(qᵗ, ℳ, ::Tuple{}) = qᵗ
+@inline subtract_condensate(qᵗ, ℳ, names::Tuple{Symbol, Vararg}) =
     qᵗ - sum_properties(ℳ, names)
 
 """
@@ -701,22 +703,21 @@ per-scheme method needed.
 
 ```jldoctest
 using Breeze
-using Breeze.AtmosphereModels: specific_prognostic_moisture_from_total
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
 
 microphysics = DCMIP2016KesslerMicrophysics()
 μ = (ρqᶜˡ=0.0012, ρqʳ=0.0024)
-specific_prognostic_moisture_from_total(microphysics, 0.02, μ, 1.2)
+specific_prognostic_moisture(microphysics, 0.02, μ, 1.2)
 
 # output
 0.017
 ```
 """
-@inline specific_prognostic_moisture_from_total(microphysics, qᵗ, μ::NamedTuple, ρ) =
-    moisture_less_condensate(qᵗ, μ, ρ, condensate_field_names(microphysics))
+@inline specific_prognostic_moisture(microphysics, qᵗ, μ::NamedTuple, ρ) =
+    subtract_condensate(qᵗ, μ, ρ, condensate_field_names(microphysics))
 
-@inline moisture_less_condensate(qᵗ, μ, ρ, ::Tuple{}) = qᵗ
-@inline moisture_less_condensate(qᵗ, μ, ρ, names::Tuple{Symbol, Vararg}) = qᵗ - sum_properties(μ, names) / ρ
+@inline subtract_condensate(qᵗ, μ, ρ, ::Tuple{}) = qᵗ
+@inline subtract_condensate(qᵗ, μ, ρ, names::Tuple{Symbol, Vararg}) = qᵗ - sum_properties(μ, names) / ρ
 
 """
 $(TYPEDSIGNATURES)

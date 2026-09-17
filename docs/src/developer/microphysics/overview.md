@@ -88,7 +88,7 @@ list defines the water budget used by both grid and parcel models:
 The default includes every microphysical prognostic field. Schemes with number
 concentrations or dependent moments must override it to exclude those fields.
 
-[`specific_prognostic_moisture_from_total`](@ref Breeze.AtmosphereModels.specific_prognostic_moisture_from_total)
+[`specific_prognostic_moisture`](@ref Breeze.AtmosphereModels.specific_prognostic_moisture)
 uses these names to compute ``qᵛᵉ = qᵗ - Σ ρqᶜ / ρ`` from density-weighted variables,
 or subtracts the corresponding specific fractions from a microphysical state. Here ``ρ``
 is **total air density**, including water. Number concentrations and dependent masses

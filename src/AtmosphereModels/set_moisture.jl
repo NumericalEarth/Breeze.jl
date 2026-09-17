@@ -14,7 +14,7 @@ round-off-sized residuals so the conversion preserves the supplied water budget.
 function convert_total_moisture!(model)
     ρ = total_density(model.dynamics)
     qᵗ = model.moisture_density / ρ
-    qᵛᵉ = specific_prognostic_moisture_from_total(model.microphysics, qᵗ, model.microphysical_fields, ρ)
+    qᵛᵉ = specific_prognostic_moisture(model.microphysics, qᵗ, model.microphysical_fields, ρ)
     moisture = specific_prognostic_moisture(model)
 
     validate_total_moisture(qᵗ, qᵛᵉ, moisture)
