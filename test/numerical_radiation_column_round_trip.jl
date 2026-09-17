@@ -9,6 +9,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 ##### reproduce the kernel's fluxes bit for bit.
 #####
 
+using Adapt: adapt
 using Breeze
 using GPUArraysCore: @allowscalar
 using NCDatasets
@@ -37,7 +38,7 @@ using .NumericalRadiationExt: column_atmosphere, number_of_layers
 # reference is patched to the kernel's amount so the comparison stays bitwise.
 function array_path_fluxes(rtm, model, i, j)
     columns = rtm.atmospheric_state
-    gas_model = rtm.longwave_solver.gas_model
+    gas_model = adapt(Array, rtm.longwave_solver.gas_model)
     FT = eltype(gas_model)
     N = number_of_layers(columns)
     Ngˡʷ = length(gas_model.longwave_weights)
