@@ -701,3 +701,57 @@ using Oceananigans.TimeSteppers: update_state!
         @test all(isfinite, Array(interior(model.moisture_density)))
     end
 end
+
+@testset "P3 transport bounds keep positivity and leave the signed quantity alone" begin
+    bounds(m, name) = Breeze.AtmosphereModels.microphysical_transport_bounds(m, name)
+
+    # Both aerosol settings, because the prognostic list itself differs: without aerosol
+    # activation there is no `ρnᶜˡ` and no `ρnᵃ` to classify.
+    prescribed = Breeze.PredictedParticlePropertiesMicrophysics(; predict_supersaturation=true)
+    activated = Breeze.PredictedParticlePropertiesMicrophysics(; predict_supersaturation=true,
+                                                                 aerosol=AerosolActivation(AerosolMode()))
+    @test :ρnᶜˡ ∈ Breeze.AtmosphereModels.prognostic_field_names(activated)
+    @test :ρnᵃ ∈ Breeze.AtmosphereModels.prognostic_field_names(activated)
+
+    for p3 in (prescribed, activated)
+        names = Breeze.AtmosphereModels.prognostic_field_names(p3)
+
+        # Everything non-negative is bounded, so the limiter preserves its positivity. That is
+        # the whole point: handing these `nothing` would give up positivity on exactly the
+        # number concentrations whose negatives produce NaN downstream.
+        for name in names
+            name === :ρsᵛ⁺ˡ && continue
+            @test bounds(p3, name) == (0, 1)
+        end
+
+        # Supersaturation is signed and must not be bounded below by zero.
+        @test isnothing(bounds(p3, :ρsᵛ⁺ˡ))
+
+        # A caller iterating the model's advected names asks about the moisture prognostic and
+        # about names this scheme does not own. Neither may throw.
+        @test isnothing(bounds(p3, Breeze.AtmosphereModels.moisture_prognostic_name(p3)))
+        @test isnothing(bounds(p3, :not_a_prognostic))
+    end
+end
+
+@testset "the fallback bounds condensate mass fractions and nothing else" begin
+    bounds(m, name) = Breeze.AtmosphereModels.microphysical_transport_bounds(m, name)
+    kessler = Breeze.DCMIP2016KesslerMicrophysics()
+    for name in Breeze.AtmosphereModels.prognostic_field_names(kessler)
+        @test bounds(kessler, name) == (0, 1)
+    end
+    @test isnothing(bounds(kessler, :not_a_prognostic))
+    @test isnothing(bounds(nothing, :anything))
+end
+
+@testset "reported bounds are accepted by a bounds-preserving scheme" begin
+    # The consumer requires an `NTuple{2}`, so a heterogeneous tuple such as `(0, Inf)` would be
+    # rejected at construction. Anything this interface reports has to survive that.
+    p3 = Breeze.PredictedParticlePropertiesMicrophysics(; predict_supersaturation=true)
+    for name in Breeze.AtmosphereModels.prognostic_field_names(p3)
+        b = Breeze.AtmosphereModels.microphysical_transport_bounds(p3, name)
+        isnothing(b) && continue
+        @test b isa NTuple{2}
+        @test_nowarn WENO(; bounds=b)
+    end
+end
