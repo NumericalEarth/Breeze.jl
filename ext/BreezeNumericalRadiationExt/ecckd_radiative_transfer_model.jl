@@ -115,7 +115,15 @@ Construct a full-spectrum `RadiativeTransferModel` on `grid` with the ecCKD gas 
 on the grid's layers plus the layers of `column_extension` above the grid top (a
 [`ColumnExtension`](@ref), or `nothing` to stop at the grid top).
 
-The gas optics tables are read from netCDF files, which requires `using NCDatasets`.
+With `optics.clouds::CloudScatteringTables` the radiation is all-sky: the cloud liquid and ice
+of every grid cell (from the model's microphysics) scatter and absorb with the scattering tables
+mapped onto the ecCKD g points at the constant effective radii of `liquid_effective_radius` and
+`ice_effective_radius`; the shortwave folds the cloud scattering into the two-stream solution and
+the longwave adds the cloud absorption (longwave cloud scattering is neglected, as in ecRad's
+default). With `optics.clouds = nothing` the sky is clear whatever the microphysics holds.
+
+The gas optics and cloud scattering tables are read from netCDF files, which requires
+`using NCDatasets`.
 
 # Keyword Arguments
 - `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere()`).
@@ -134,8 +142,10 @@ The gas optics tables are read from netCDF files, which requires `using NCDatase
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 - `schedule`: When to recompute the fluxes (default: `IterationInterval(1)`, every iteration)
-- `liquid_effective_radius`: Model for cloud liquid effective radius in meters (default: `ConstantRadiusParticles(10e-6)`)
-- `ice_effective_radius`: Model for cloud ice effective radius in meters (default: `ConstantRadiusParticles(30e-6)`)
+- `liquid_effective_radius`: Model for cloud liquid effective radius in meters (default: `ConstantRadiusParticles(10e-6)`);
+  only `ConstantRadiusParticles` for now
+- `ice_effective_radius`: Model for cloud ice effective radius in meters (default: `ConstantRadiusParticles(30e-6)`);
+  only `ConstantRadiusParticles` for now
 - `column_extension`: The atmosphere above the grid top (default: `ColumnExtension(eltype(grid))`;
   `nothing` solves the grid's column only, with no atmosphere above it)
 """
@@ -157,10 +167,6 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     FT = eltype(grid)
     arch = architecture(grid)
-
-    isnothing(optics.clouds) ||
-        throw(ArgumentError("All-sky ecCKD radiation (`EcCKDOptics(clouds = ...)`) is not available yet; " *
-                            "use `EcCKDOptics(clouds = nothing)` for clear-sky radiation."))
 
     solar_position = maybe_infer_solar_position(solar_position, grid)
 
@@ -184,6 +190,12 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     warn_source_table_range(host_gas_model, extension)
     gas_model = adapt(array_type(arch){FT}, host_gas_model)
 
+    longwave_cloud, shortwave_cloud = load_cloud_optics(optics.clouds, optics.gas_model,
+                                                        liquid_effective_radius.radius, ice_effective_radius.radius,
+                                                        arch, FT)
+    validate_cloud_g_points(longwave_cloud, gas_model.longwave_weights, "longwave")
+    validate_cloud_g_points(shortwave_cloud, gas_model.shortwave_weights, "shortwave")
+
     background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
     Nx, Ny, Nz = size(grid)
@@ -206,8 +218,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                       cfc11 = convert(FT, background_atmosphere.CFC₁₁),
                       cfc12 = convert(FT, background_atmosphere.CFC₁₂))
 
-    longwave = EcCKDLongwave(gas_model, nothing, gas_model.longwave_weights, mole_fractions)
-    shortwave = EcCKDShortwave(gas_model, nothing, gas_model.shortwave_weights, convert(FT, solar_constant))
+    longwave = EcCKDLongwave(gas_model, longwave_cloud, gas_model.longwave_weights, mole_fractions)
+    shortwave = EcCKDShortwave(gas_model, shortwave_cloud, gas_model.shortwave_weights, convert(FT, solar_constant))
 
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)

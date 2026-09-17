@@ -107,10 +107,6 @@ end
                                                           surface_temperature = 300, surface_albedo = 0.1,
                                                           ice_effective_radius = VariableRadiusParticles())
 
-        # All-sky optics land in a follow-up
-        @test_throws ArgumentError RadiativeTransferModel(grid, EcCKDOptics(clouds = CloudScatteringTables()), constants;
-                                                          surface_temperature = 300, surface_albedo = 0.1)
-
         # The extension needs an ozone profile it can evaluate above the grid
         materialized = materialize_background_atmosphere(BackgroundAtmosphere(), grid)
         @test_throws ArgumentError RadiativeTransferModel(grid, EcCKDOptics(), constants;

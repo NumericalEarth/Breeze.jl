@@ -13,7 +13,7 @@ module BreezeNumericalRadiationExt
 using Breeze
 
 using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, SurfaceRadiation,
-                               EcCKDOptics, ColumnExtension, BackgroundAtmosphere,
+                               EcCKDOptics, CloudScatteringTables, ColumnExtension, BackgroundAtmosphere,
                                ConstantRadiusParticles, AbstractSolarPosition, ApparentSolarPosition,
                                materialize_background_atmosphere, materialize_surface_property,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
@@ -29,6 +29,8 @@ using Breeze.Thermodynamics: ThermodynamicConstants
 
 using NumericalRadiation: EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel,
                           read_reference_ecckd_gas_optics, read_ecckd_tabulated_gas_optics,
+                          reference_ecckd_definition_paths, ecrad_data_file,
+                          read_cloud_scattering_table, read_ecckd_spectral_mapping,
                           ColumnAtmosphere,
                           GasOpticsStencil, gas_optics_stencil, source_table_bracket,
                           longwave_optical_depth, shortwave_optical_depth, rayleigh_optical_depth,
@@ -49,6 +51,7 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 
 include("spectral_columns.jl")
 include("column_extension.jl")
+include("cloud_optics.jl")
 include("ecckd_radiative_transfer_model.jl")
 include("column_staging_kernels.jl")
 include("layer_optics.jl")
