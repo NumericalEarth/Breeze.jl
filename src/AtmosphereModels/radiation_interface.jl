@@ -197,7 +197,9 @@ Valid optics types are:
 - [`EcCKDOptics()`](@ref) - Full-spectrum clear- or all-sky radiation using ecCKD gas optics via
   NumericalRadiation.jl (requires `using NumericalRadiation, NCDatasets`)
 
-The RRTMGP optics require `using RRTMGP, ClimaComms, NCDatasets`.
+The RRTMGP optics require `using RRTMGP, ClimaComms, NCDatasets`. NumericalRadiation exports its own
+`ThermodynamicConstants`, so load it qualified (`using NumericalRadiation: NumericalRadiation`) next to
+`using Breeze`.
 
 The `constants` argument provides physical constants for the radiative transfer solver.
 
@@ -216,6 +218,8 @@ obtained on each radiation update. See [`AbstractSolarPosition`](@ref) and its s
 
 ```jldoctest
 julia> using Breeze, Oceananigans.Units, RRTMGP, NCDatasets
+
+julia> using NumericalRadiation: NumericalRadiation
 
 julia> grid = RectilinearGrid(; size=16, x=0, y=45, z=(0, 10kilometers),
                               topology=(Flat, Flat, Bounded));
@@ -254,6 +258,21 @@ RadiativeTransferModel
 ├── surface_emissivity: ConstantField(0.98)
 ├── direct_surface_albedo: ConstantField(0.1)
 └── diffuse_surface_albedo: ConstantField(0.1)
+
+julia> RadiativeTransferModel(grid, EcCKDOptics(), ThermodynamicConstants();
+                              surface_temperature = 300,
+                              surface_albedo = 0.1)
+RadiativeTransferModel
+├── solar_constant: 1361.0 W m⁻²
+├── solar_position: ApparentSolarPosition(coordinate=(0.0, 45.0), epoch=<from clock>)
+├── surface_temperature: ConstantField(300.0) K
+├── surface_emissivity: ConstantField(0.98)
+├── direct_surface_albedo: ConstantField(0.1)
+├── liquid_effective_radius: ConstantRadiusParticles{Float64}(1.0e-5)
+├── ice_effective_radius: ConstantRadiusParticles{Float64}(3.0e-5)
+├── diffuse_surface_albedo: ConstantField(0.1)
+├── optics: EcCKDOptics with 32 longwave and 32 shortwave g-points, clear sky
+└── column_extension: 40 layers from 10000.0 m to 65000.0 m
 ```
 
 # References

@@ -34,7 +34,7 @@ features:
     details: Saturation adjustment, Kessler, one- and two-moment bulk schemes via [`CloudMicrophysics.jl`](https://github.com/CliMA/CloudMicrophysics.jl), and Predicted Particle Properties (P3) mixed-phase microphysics
   - icon: ☀️
     title: Radiative transfer
-    details: Gray, clear-sky, and all-sky solvers via [`RRTMGP.jl`](https://github.com/CliMA/RRTMGP.jl)
+    details: Gray, clear-sky, and all-sky solvers via [`RRTMGP.jl`](https://github.com/CliMA/RRTMGP.jl) and ecCKD gas optics via [`NumericalRadiation.jl`](https://github.com/NumericalEarth/NumericalRadiation.jl)
   - icon: 🦾
     title: High-order advection
     details: Including bounds-preserving WENO schemes
