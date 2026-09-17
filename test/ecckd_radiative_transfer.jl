@@ -216,9 +216,10 @@ end
         @test T_int[Nₑ+1] == top_face_temperature(1, 1, grid, model.temperature)
         @test T_int[1] == T_lay[1]
 
-        # Dry mass of the grid's column: Σ n_dry Mᵈ == Σ ρ (1 - qᵗ) Δz
+        # Column amounts in the dry convention of the ecCKD tables: the composite amount carries
+        # the layer's total mass, Σ n_dry Mᵈ == Σ ρ Δz, and the vapor is counted on top of it
         Δz = 3kilometers / Nz
-        @test sum(n_dry[Nₑ+1:N]) * Mᵈ ≈ sum(ρ .* (1 .- qᵛ) .* Δz) rtol = tight
+        @test sum(n_dry[Nₑ+1:N]) * Mᵈ ≈ sum(ρ .* Δz) rtol = tight
         @test sum(n_h2o[Nₑ+1:N]) * Mᵛ ≈ sum(ρ .* qᵛ .* Δz) rtol = tight
 
         # Extension layers, bottom-up from the grid top (layer m is column layer Nₑ + 1 - m)
@@ -241,9 +242,9 @@ end
         @test p_int[1:Nₑ+1] ≈ p_reference rtol = loose
         @test T_lay[Nₑ:-1:1] ≈ Tₘ rtol = tight
 
-        # Moist-molar-mass gas amounts: Mᵈ n_dry + Mᵛ n_h2o == Δp / g and n_h2o / n_dry == χ
+        # Dry-convention gas amounts: n_dry == Δp / (g Mᵈ) and n_h2o / n_dry == χ
         Δp = p_int[2:Nₑ+1] .- p_int[1:Nₑ]   # top-down
-        @test Mᵈ .* n_dry[1:Nₑ] .+ Mᵛ .* n_h2o[1:Nₑ] ≈ Δp ./ g rtol = tight
+        @test n_dry[1:Nₑ] ≈ Δp ./ (g * Mᵈ) rtol = tight
         @test n_h2o[Nₑ:-1:1] ./ n_dry[Nₑ:-1:1] ≈ χₑ rtol = tight
         @test n_o3[Nₑ:-1:1] ./ n_dry[Nₑ:-1:1] ≈ standard_ozone_profile.(zₑ) rtol = tight
 

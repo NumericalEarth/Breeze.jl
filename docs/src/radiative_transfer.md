@@ -375,7 +375,11 @@ The ecCKD reference models tabulate eight gases. Two vary in space: water vapor,
 from the model's prognostic moisture, and ozone, from `BackgroundAtmosphere.O₃`. Five are
 well-mixed and read from the [`BackgroundAtmosphere`](@ref): CO₂, CH₄, N₂O, CFC₁₁ and
 CFC₁₂. Nitrogen and oxygen form the "composite" dry-air gas whose absorption the tables
-fold in. The remaining gases of `BackgroundAtmosphere` (CO, NO₂, CFC₂₂, CCl₄, CF₄ and the
+fold in. Gas amounts follow the "dry" column convention the ecCKD tables were derived with:
+the composite amount of a layer is its total mass over the dry molar mass, `ρ Δz / Mᵈ`
+(`Δp / (g Mᵈ)` for a hydrostatic layer), the water vapor `ρ qᵛ Δz / Mᵛ` is counted on top of
+it, and the well-mixed gases are their mole fractions times the composite amount.
+The remaining gases of `BackgroundAtmosphere` (CO, NO₂, CFC₂₂, CCl₄, CF₄ and the
 HFCs) are not tabulated and must be left at zero; a nonzero value throws an `ArgumentError`
 rather than being silently ignored.
 

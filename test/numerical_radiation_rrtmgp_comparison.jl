@@ -124,11 +124,12 @@ end
     @printf("%-28s %12.4f %12.4f K day⁻¹ (RMSE, max over cells 3:Nz-2)\n", "heating difference", heating_rmse, heating_max)
     @printf("%-28s %12.2f %12.2f ms per update\n", "time", 1e3 * ecckd_seconds, 1e3 * rrtmgp_seconds)
 
-    # The OLR gate was raised once from the literature-derived 3 to 3.9 W m⁻²: the observed
-    # 3.10 W m⁻² (1.1 %) is independent of the vertical resolution (3.10, 3.27, 3.35 at
-    # Nz = 60, 120, 240), persists in a much drier column (2.87 at 1 g kg⁻¹), and the 2×CO₂
-    # forcings below agree to 0.04 W m⁻², so it is the spread between the two gas-optics
-    # models on this column rather than a staging error
+    # The OLR gate was raised once from the literature-derived 3 to 3.9 W m⁻² and is
+    # calibrated at Nz = 60: the observed 3.11 W m⁻² (1.1 %) grows weakly with the vertical
+    # resolution (3.11, 3.27, 3.36 at Nz = 60, 120, 240, the signature of the two models'
+    # different Planck-source discretizations), persists in a much drier column (2.87 at
+    # 1 g kg⁻¹), and the 2×CO₂ forcings below agree to 0.04 W m⁻², so it is the spread
+    # between the two gas-optics models on this column rather than a staging error
     @test abs(ecckd.olr - rrtmgp.olr) ≤ 3.9
     @test abs(ecckd.surface_longwave_down - rrtmgp.surface_longwave_down) ≤ 4
     @test abs(ecckd.surface_shortwave_down - rrtmgp.surface_shortwave_down) ≤ 6
@@ -151,7 +152,7 @@ end
                 ecckd_forcing.surface, rrtmgp_forcing.surface, ecckd_forcing.surface - rrtmgp_forcing.surface)
 
         # Doubling CO₂ reduces the outgoing longwave (a positive forcing) in both models
-        # (observed: 4.97 and 5.01 W m⁻² at the top, 0.90 and 0.86 W m⁻² at the surface)
+        # (observed: 4.97 and 5.01 W m⁻² at the top, 0.92 and 0.86 W m⁻² at the surface)
         @test ecckd_forcing.toa > 0
         @test rrtmgp_forcing.toa > 0
         @test abs(ecckd_forcing.toa - rrtmgp_forcing.toa) ≤ 0.4
@@ -187,13 +188,13 @@ end
         @printf("%-28s %12.2f %12.2f ms per update\n", "time", 1e3 * ecckd_cloudy_seconds, 1e3 * rrtmgp_cloudy_seconds)
 
         # Both models see the cloud: it reflects more than 50 W m⁻² of extra sunlight to space
-        # (observed: 87.7 → 429.2 and 88.0 → 424.4 W m⁻²)
+        # (observed: 87.6 → 429.2 and 88.0 → 424.4 W m⁻²)
         @test ecckd_cloudy.toa_shortwave_up > ecckd.toa_shortwave_up + 50
         @test rrtmgp_cloudy.toa_shortwave_up > rrtmgp.toa_shortwave_up + 50
 
         # Twice the clear-sky spread between the two cloud optics in the boundary fluxes
-        # (observed: 5.39, 1.48, 0.32 and 4.86 W m⁻²) and in the heating of the clear cells
-        # (observed: RMSE 0.143, max 0.42 K day⁻¹, the clear-sky level)
+        # (observed: 5.39, 1.46, 0.32 and 4.84 W m⁻²) and in the heating of the clear cells
+        # (observed: RMSE 0.142, max 0.42 K day⁻¹, the clear-sky level)
         @test abs(ecckd_cloudy.olr - rrtmgp_cloudy.olr) ≤ 2 * 3.9
         @test abs(ecckd_cloudy.surface_longwave_down - rrtmgp_cloudy.surface_longwave_down) ≤ 2 * 4
         @test abs(ecckd_cloudy.surface_shortwave_down - rrtmgp_cloudy.surface_shortwave_down) ≤ 2 * 6

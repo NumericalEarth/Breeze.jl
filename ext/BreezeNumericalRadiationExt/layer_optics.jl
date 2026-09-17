@@ -217,8 +217,9 @@ $(TYPEDFIELDS)
 
 Shortwave layer optics of column `column` of `columns` for `NumericalRadiation.streaming_shortwave_fluxes!`:
 `(ig, k)` returns `(τ_absorption, τ_scattering, asymmetry)`, the gas absorption optical depth
-of layer `k` at g point `ig`, the Rayleigh scattering of the layer's air (dry air plus water
-vapor), and the scattering of both cloud phases folded in.
+of layer `k` at g point `ig`, the Rayleigh scattering of the layer's air (the composite amount,
+which in the dry convention of the staging kernels is the layer's total mass over `Mᵈ`, as in
+NumericalRadiation's array path), and the scattering of both cloud phases folded in.
 """
 struct ShortwaveLayerOptics{M, C, L, I, BL, BI, FT}
     "ecCKD gas optics model"
@@ -253,7 +254,7 @@ end
     end
 
     τ_absorption = shortwave_optical_depth(model, ig, gases, stencil)
-    τ_scattering = rayleigh_optical_depth(model, ig, gases.composite + gases.h2o)
+    τ_scattering = rayleigh_optical_depth(model, ig, gases.composite)
     asymmetry = zero(τ_scattering)
 
     τ_absorption, τ_scattering, asymmetry =

@@ -29,10 +29,11 @@ using .NumericalRadiationExt: column_atmosphere, number_of_layers
 # diffuse surface albedos.
 #
 # The one documented difference is the Rayleigh air amount: the array `optical_properties!`
-# takes the hydrostatic `Δp / (g Mᵈ)` of each layer (it has no other handle on the air mass),
-# whereas the kernel uses the staged molar amounts `n_dry + n_h2o`, the layer's actual mass.
-# The reference is patched to the kernel's convention so the comparison stays bitwise;
-# the two conventions differ by O(10⁻⁴) in the shortwave fluxes.
+# forms the hydrostatic `Δp / (g Mᵈ)` of each layer from the interface pressures with its own
+# constants, whereas the kernel uses the staged composite amount, the layer's mass over `Mᵈ`
+# (`ρ Δz / Mᵈ` in the grid, `Δp / (g Mᵈ)` with Breeze's constants in the extension). The two
+# agree to rounding and discretization; the reference is patched to the kernel's amount so
+# the comparison stays bitwise.
 function array_path_fluxes(rtm, i, j)
     columns = rtm.atmospheric_state
     gas_model = rtm.longwave_solver.gas_model
@@ -50,7 +51,7 @@ function array_path_fluxes(rtm, i, j)
     atmosphere = column_atmosphere(rtm, i, j)
     optical_properties!(longwave, shortwave, gas_model, atmosphere)
 
-    air = atmosphere.gases.composite .+ atmosphere.gases.h2o
+    air = atmosphere.gases.composite
     for k in 1:N, ig in 1:ng_sw
         shortwave.rayleigh_optical_depth[ig, k] = rayleigh_optical_depth(gas_model, ig, air[k])
     end

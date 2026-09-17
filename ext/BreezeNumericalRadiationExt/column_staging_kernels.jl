@@ -12,6 +12,11 @@ Stage the grid's cells and faces of `model` into `columns` (kernel A): layer pre
 temperature, the molar amounts of dry air, water vapor and ozone, and the cloud water paths,
 plus interface pressure and temperature — interior faces by interpolation, the bottom and top
 faces by extrapolation from the adjacent cells (never from the halo).
+
+The gas amounts follow the "dry" column convention of the ecCKD tables: the composite
+(dry-air) amount is the layer's total mass over the dry molar mass, `ρ Δz / Mᵈ`, and the
+water vapor `ρ qᵛ Δz / Mᵛ` is counted on top of it, so `n_h2o / n_dry` is the mole fraction the
+tables are indexed by and `n_dry` is also the air amount of the Rayleigh scattering.
 """
 function stage_spectral_columns!(columns::SpectralColumns, model, background_atmosphere)
     grid = model.grid
@@ -49,8 +54,13 @@ end
         qˡ = max(0, q.liquid)
         qⁱ = max(0, q.ice)
 
-        # Molar column amounts (mol m⁻²) from the mass of each constituent in the cell
-        n_dry = ρᵢ * (1 - qᵛ - qˡ - qⁱ) * Δz / Mᵈ
+        # Molar column amounts (mol m⁻²) in the "dry" convention the ecCKD tables were derived
+        # with: the composite (dry-air) amount is the layer's total mass over the dry molar mass,
+        # `ρ Δz / Mᵈ` (`Δp / (g Mᵈ)` for a hydrostatic layer), and the water vapor `ρ qᵛ Δz / Mᵛ`
+        # is counted on top of it rather than removed from it. NumericalRadiation's CKDMIP and
+        # RFMIP validation passes only with this convention; the moist form `ρ (1 - qᵗ) Δz / Mᵈ`
+        # biases the surface downwelling longwave by -0.2 W m⁻².
+        n_dry = ρᵢ * Δz / Mᵈ
         n_h2o = ρᵢ * qᵛ * Δz / Mᵛ
 
         columns.pressure_layers[c, kᶜ] = p[i, j, k]
@@ -82,8 +92,9 @@ $(TYPEDSIGNATURES)
 
 Stack the extension layers of `columns.extension` above the grid top of every column (kernel B):
 the temperature profile anchored to the grid's top face, hydrostatic interface pressures with the
-virtual temperature, log-mean layer pressures, and the moist-molar-mass gas amounts
-`n_dry = Δp / (g (Mᵈ + Mᵛ χ))`, `n_h2o = χ n_dry`, `n_o3 = χ_o3 n_dry`. Extension layers are clear.
+virtual temperature, log-mean layer pressures, and the gas amounts in the dry convention of
+kernel A, `n_dry = Δp / (g Mᵈ)`, `n_h2o = χ n_dry`, `n_o3 = χ_o3 n_dry`, with `χ` the H₂O mole
+fraction relative to dry air. Extension layers are clear.
 """
 function extend_spectral_columns!(columns::SpectralColumns, extension::MaterializedColumnExtension, model)
     grid = model.grid
@@ -137,7 +148,7 @@ extend_spectral_columns!(columns, ::Nothing, model) = nothing
             p_above = p_below * exp(-g * Δz / (Rᵈ * Tᵥ))
             Δp = p_below - p_above
             p_layer = Δp / log(p_below / p_above)
-            n_dry = Δp / (g * (Mᵈ + Mᵛ * χ))
+            n_dry = Δp / (g * Mᵈ)   # the layer's mass over Mᵈ, as in kernel A
 
             columns.pressure_layers[c, kᶜ] = p_layer
             columns.temperature_layers[c, kᶜ] = T
