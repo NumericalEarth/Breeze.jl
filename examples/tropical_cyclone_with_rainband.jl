@@ -547,7 +547,7 @@ outputs = (; w, vθ, θ)
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,
                 schedule = TimeInterval(1hour),
-                overwrite_existing = true)
+                overwrite_files = true)
 
 simulation.output_writers[:fields] = ow
 

@@ -281,7 +281,7 @@ avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in
 filename = "bomex.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs; filename,
                                                   schedule = AveragedTimeInterval(1hour),
-                                                  overwrite_existing = true)
+                                                  overwrite_files = true)
 
 # Output horizontal slices at z = 600 m for animation
 # Find the k-index closest to z = 600 m
@@ -301,7 +301,7 @@ slice_outputs = (
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = "bomex_slices.jld2",
                                                 schedule = TimeInterval(30seconds),
-                                                overwrite_existing = true)
+                                                overwrite_files = true)
 
 @info "Running BOMEX simulation..."
 run!(simulation)
