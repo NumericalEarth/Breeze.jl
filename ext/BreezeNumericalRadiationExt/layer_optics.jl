@@ -209,7 +209,7 @@ end
 $(TYPEDEF)
 
 Shortwave layer optics of column `column` of `columns` for `NumericalRadiation.streaming_shortwave_fluxes!`:
-`(gpoint, k)` returns `(τ_absorption, τ_scattering, asymmetry)`, the gas absorption optical depth
+`(gpoint, k)` returns `(τ_absorption, τ_scattering, ĝ)`, the gas absorption optical depth
 of layer `k` at g point `gpoint`, the Rayleigh scattering of the layer's air (the composite
 amount, which in the dry convention of the staging kernels is the layer's total mass over `mᵈ`,
 as in NumericalRadiation's array path), and the scattering of both cloud phases folded in.
@@ -250,15 +250,15 @@ end
 
     τ_absorption = shortwave_optical_depth(model, gpoint, gases, stencil)
     τ_scattering = rayleigh_optical_depth(model, gpoint, gases.composite)
-    asymmetry = zero(τ_scattering)
+    ĝ = zero(τ_scattering)
 
-    τ_absorption, τ_scattering, asymmetry = add_cloud_scattering_layer(τ_absorption, τ_scattering, asymmetry,
-                                                                       optics.liquid_cloud, gpoint, optics.liquid_bracket,
-                                                                       liquid_water_path)
+    τ_absorption, τ_scattering, ĝ = add_cloud_scattering_layer(τ_absorption, τ_scattering, ĝ,
+                                                               optics.liquid_cloud, gpoint, optics.liquid_bracket,
+                                                               liquid_water_path)
 
-    τ_absorption, τ_scattering, asymmetry = add_cloud_scattering_layer(τ_absorption, τ_scattering, asymmetry,
-                                                                       optics.ice_cloud, gpoint, optics.ice_bracket,
-                                                                       ice_water_path)
+    τ_absorption, τ_scattering, ĝ = add_cloud_scattering_layer(τ_absorption, τ_scattering, ĝ,
+                                                               optics.ice_cloud, gpoint, optics.ice_bracket,
+                                                               ice_water_path)
 
-    return τ_absorption, τ_scattering, asymmetry
+    return τ_absorption, τ_scattering, ĝ
 end
