@@ -6,7 +6,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 ##### The column kernel calls NumericalRadiation's scalar layer API and streaming solvers, whose
 ##### array counterparts (`optical_properties!` and `radiative_fluxes!`) are loops over the same
 ##### functions. Running the array path on the host view of a staged column must therefore
-##### reproduce the kernel's fluxes bit for bit.
+##### reproduce the kernel's fluxes to the rounding of the sums over g-points.
 #####
 
 using Adapt: adapt
@@ -23,7 +23,8 @@ using Oceananigans.Units
 using Test
 
 const NumericalRadiationExt = Base.get_extension(Breeze, :BreezeNumericalRadiationExt)
-using .NumericalRadiationExt: column_atmosphere, number_of_layers
+using .NumericalRadiationExt: column_atmosphere, number_of_layers,
+                              number_of_longwave_g_points, number_of_shortwave_g_points
 
 # The array path of NumericalRadiation on the host view of staged column `(i, j)`, with the
 # boundary conditions of the kernel: no downwelling longwave at the top, surface emission
@@ -35,7 +36,7 @@ using .NumericalRadiationExt: column_atmosphere, number_of_layers
 # constants of the column atmosphere, which `column_atmosphere` takes from the model), whereas
 # the kernel uses the staged composite amount, the layer's mass over `mᵈ` (`ρ Δz / mᵈ` in the
 # grid, `Δp / (g mᵈ)` in the extension). The two agree to rounding and discretization; the
-# reference is patched to the kernel's amount so the comparison stays bitwise.
+# reference is patched to the kernel's amount so the discretization does not enter the comparison.
 function array_path_fluxes(rtm, model, i, j)
     columns = rtm.atmospheric_state
     gas_model = adapt(Array, rtm.longwave_solver.gas_model)
@@ -90,7 +91,7 @@ function column_model(grid, radiation; humidity_factor = 1)
     return model
 end
 
-# Both float types always: this is the test that pins the Float32 optics path bitwise
+# Both float types always: this is the test that pins the Float32 optics path
 @testset "Kernel path versus array path [$(FT)]" for FT in all_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 12
@@ -107,6 +108,9 @@ end
             model = column_model(grid, radiation; humidity_factor = x -> x < 1 ? 1 : 2)
             N = number_of_layers(radiation.atmospheric_state)
             faces = N + 2 .- (1:Nz+1)   # column interface of grid face k
+            # GPU fma reordering in the sum over g-points separates the two paths by a few ulps
+            rtol_lw = number_of_longwave_g_points(radiation) * eps(FT)
+            rtol_sw = number_of_shortwave_g_points(radiation) * eps(FT)
 
             for i in 1:2
                 reference = array_path_fluxes(radiation, model, i, 1)
@@ -115,10 +119,10 @@ end
                 ℐ_sw_up = Array(interior(radiation.upwelling_shortwave_flux))[i, 1, :]
                 ℐ_sw_dn = Array(interior(radiation.downwelling_shortwave_flux))[i, 1, :]
 
-                @test ℐ_lw_up == reference.longwave_up[faces]
-                @test ℐ_lw_dn == -reference.longwave_down[faces]
-                @test ℐ_sw_up == reference.shortwave_up[faces]
-                @test ℐ_sw_dn == -reference.shortwave_down[faces]
+                @test ℐ_lw_up ≈ reference.longwave_up[faces] rtol = rtol_lw
+                @test ℐ_lw_dn ≈ -reference.longwave_down[faces] rtol = rtol_lw
+                @test ℐ_sw_up ≈ reference.shortwave_up[faces] rtol = rtol_sw
+                @test ℐ_sw_dn ≈ -reference.shortwave_down[faces] rtol = rtol_sw
 
                 # The flux divergence is the face difference of the net flux
                 F_net = ℐ_lw_up .+ ℐ_lw_dn .+ ℐ_sw_up .+ ℐ_sw_dn
