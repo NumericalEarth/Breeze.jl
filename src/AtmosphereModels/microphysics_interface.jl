@@ -907,13 +907,24 @@ based on cloud properties.
 $(TYPEDSIGNATURES)
 
 Return `(lower, upper)` bounds on the *specific* quantity transported for prognostic `name`
-(the per-unit-mass form, so `ρqˣ` is bounded as `qˣ`), or `nothing` where the quantity is
-unbounded. A transport scheme uses these to constrain the reconstruction; they are not applied
-by this package.
+(the per-unit-mass form, so `ρqˣ` is bounded as `qˣ`), or `nothing` where no bound applies.
+A transport scheme uses these to constrain its reconstruction; nothing here applies them.
 
-The fallback bounds the condensate mass fractions by `(0, 1)` and leaves everything else
-unbounded. Schemes that also carry number concentrations, volumes or signed quantities should
-add a method, since those share neither the units nor the bounds of a mass fraction.
+The fallback bounds the condensate mass fractions by `(0, 1)` and returns `nothing` for
+everything else. A scheme that carries anything other than mass fractions should add a method,
+because number concentrations, volumes and signed quantities share neither the units nor the
+bounds of a mass fraction, and bounding them by `(0, 1)` clips them to nonsense.
+
+Only quantities bounded on *both* sides are reported. A one-sided "non-negative, unbounded
+above" cannot be expressed here: the consumer is a bounds-preserving advection scheme, whose
+`bounds` argument must be an `NTuple{2}` — so `(0, Inf)` is rejected outright as
+`Tuple{Int, Float64}` — and a homogeneous `(0.0, Inf)` puts an `Inf` into
+`abs((cᵐᵃˣ - cᵢ) / (M - cᵢ + ε₂))`, which the primal discards through a `min` but which leaves
+a `0 * Inf` NaN in the adjoint. Returning `nothing` keeps the positivity of those fields where
+it is already enforced, in the microphysics, rather than smuggling an `Inf` into a division.
+
+Callers may ask about any advected name, including ones this scheme does not own, so an
+unrecognized `name` returns `nothing` rather than throwing.
 """
 microphysical_transport_bounds(microphysics, name::Symbol) =
-    ifelse(name in condensate_field_names(microphysics), (0, 1), nothing)
+    name in condensate_field_names(microphysics) ? (0, 1) : nothing

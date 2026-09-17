@@ -964,16 +964,17 @@ end
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρnᵃ})  = result.tendency_ρnᵃ
 
 # P3 transports quantities in three different units, so one bound does not serve all of them.
-# The mass fractions are the only ones bounded above: each is a fraction of the total mass, so it
-# lies in [0, 1]. This list includes `ρqᶠ`, which `condensate_field_names` deliberately omits —
-# rime is part of the ice mass and would be double-counted in a condensate sum, but the rime mass
-# *fraction* is still a fraction and is still bounded by one.
+# The mass fractions are the only ones bounded on both sides: each is a fraction of the total
+# mass, so it lies in [0, 1]. This list includes `ρqᶠ`, which `condensate_field_names`
+# deliberately omits — rime is part of the ice mass and would be double-counted in a condensate
+# sum, but the rime mass *fraction* is still a fraction and is still bounded by one.
 #
-# Number concentrations and the rime volume `ρbᶠ` are non-negative but have no upper bound in
-# their own units. Supersaturation is signed, so it has no bound at all.
+# Everything else reports no bound. Number concentrations have no upper bound in their own
+# units; the rime volume's specific form is bounded above only by `qᶠ / minimum_rime_density`,
+# which is state-dependent rather than constant; and supersaturation is signed. Their
+# positivity is maintained by the microphysics, not by the transport scheme — see the note in
+# `microphysical_transport_bounds` on why a one-sided bound is not expressible here.
 function AM.microphysical_transport_bounds(p3::P3, name::Symbol)
-    name in AM.prognostic_field_names(p3) || throw(ArgumentError("Unknown P3 prognostic $name"))
-    name === :ρsᵛ⁺ˡ && return nothing
     name in (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqᶠ, :ρqʷⁱ) && return (0, 1)
-    return (0, Inf)
+    return nothing
 end
