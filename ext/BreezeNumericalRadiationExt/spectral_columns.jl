@@ -75,7 +75,7 @@ struct SpectralColumns{FT, AI, AF, V, SW, X}
 end
 
 const SHORTWAVE_LAYER_SCRATCH = (:reflectance, :transmittance, :direct_reflectance,
-                                 :direct_diffuse_transmittance, :direct_transmittance)
+                                 :direct_diffuse_transmittance, :direct_flux)
 const SHORTWAVE_INTERFACE_SCRATCH = (:stack_albedo, :source)
 
 # The float type is that of the layer arrays; every other parameter follows from the fields.

@@ -13,7 +13,7 @@
                                                               view(shortwave.transmittance, c, :),
                                                               view(shortwave.direct_reflectance, c, :),
                                                               view(shortwave.direct_diffuse_transmittance, c, :),
-                                                              view(shortwave.direct_transmittance, c, :),
+                                                              view(shortwave.direct_flux, c, :),
                                                               view(shortwave.stack_albedo, c, :),
                                                               view(shortwave.source, c, :))
 
