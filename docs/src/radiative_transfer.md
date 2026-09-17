@@ -376,9 +376,13 @@ from the model's prognostic moisture, and ozone, from `BackgroundAtmosphere.O₃
 well-mixed and read from the [`BackgroundAtmosphere`](@ref): CO₂, CH₄, N₂O, CFC₁₁ and
 CFC₁₂. Nitrogen and oxygen form the "composite" dry-air gas whose absorption the tables
 fold in. Gas amounts follow the "dry" column convention the ecCKD tables were derived with:
-the composite amount of a layer is its total mass over the dry molar mass, `ρ Δz / Mᵈ`
-(`Δp / (g Mᵈ)` for a hydrostatic layer), the water vapor `ρ qᵛ Δz / Mᵛ` is counted on top of
-it, and the well-mixed gases are their mole fractions times the composite amount.
+the composite amount of a layer is its total mass over the dry molar mass, `ρ Δz / mᵈ`
+(`Δp / (g mᵈ)` for a hydrostatic layer), the water vapor `ρ qᵛ Δz / mᵛ` is counted on top of
+it, and the well-mixed gases are their mole fractions times the composite amount. The
+molar masses `mᵈ` and `mᵛ` and the gravitational acceleration `g` are those of the
+`ThermodynamicConstants` passed to `RadiativeTransferModel`; the Stefan–Boltzmann constant
+of the gray Planck source (used by g-points without a Planck source table) is carried by
+NumericalRadiation's gas optics model.
 The remaining gases of `BackgroundAtmosphere` (CO, NO₂, CFC₂₂, CCl₄, CF₄ and the
 HFCs) are not tabulated and must be left at zero; a nonzero value throws an `ArgumentError`
 rather than being silently ignored.

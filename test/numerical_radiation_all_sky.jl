@@ -33,8 +33,8 @@ const CLOUD_BOTTOM = 1kilometer
 const CLOUD_TOP = 1.5kilometers
 const CLOUD_CELL = 3
 const CLOUD_LIQUID = 0.5e-3   # kg kg⁻¹
-const S0 = 1361
-const μ0 = 0.5
+const S₀ = 1361
+const μ₀ = 0.5
 
 column_grid(FT) = RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, TOP),
                                   topology = (Flat, Flat, Bounded))
@@ -42,7 +42,7 @@ column_grid(FT) = RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0
 function radiation(grid, optics; liquid_radius = 10e-6, ice_radius = 30e-6, kw...)
     return RadiativeTransferModel(grid, optics, ThermodynamicConstants();
                                   surface_temperature = 300, surface_emissivity = 0.98, surface_albedo = 0.1,
-                                  solar_constant = S0, solar_position = FixedCosineZenith(μ0),
+                                  solar_constant = S₀, solar_position = FixedCosineZenith(μ₀),
                                   liquid_effective_radius = ConstantRadiusParticles(liquid_radius),
                                   ice_effective_radius = ConstantRadiusParticles(ice_radius), kw...)
 end
@@ -221,7 +221,7 @@ end
         # The cloud emits toward the surface as a warm black body: at least 30 W m⁻² more
         # downwelling longwave, and the cloud base is close to black
         @test -cloudy.ℐ_lw_dn[1] ≥ -clear.ℐ_lw_dn[1] + 30
-        σ = 5.670374419e-8
+        σ = all_sky.longwave_solver.gas_model.stefan_boltzmann
         T_base = Array(interior(model.temperature))[1, 1, CLOUD_CELL]
         @test -cloudy.ℐ_lw_dn[CLOUD_CELL] > 0.9 * σ * T_base^4
 

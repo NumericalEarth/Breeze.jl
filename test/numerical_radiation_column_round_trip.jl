@@ -30,31 +30,31 @@ using .NumericalRadiationExt: column_atmosphere, number_of_layers
 # diffuse surface albedos.
 #
 # The one documented difference is the Rayleigh air amount: the array `optical_properties!`
-# forms the hydrostatic `Δp / (g Mᵈ)` of each layer from the interface pressures with its own
-# constants, whereas the kernel uses the staged composite amount, the layer's mass over `Mᵈ`
-# (`ρ Δz / Mᵈ` in the grid, `Δp / (g Mᵈ)` with Breeze's constants in the extension). The two
-# agree to rounding and discretization; the reference is patched to the kernel's amount so
-# the comparison stays bitwise.
-function array_path_fluxes(rtm, i, j)
+# forms the hydrostatic `Δp / (g mᵈ)` of each layer from the interface pressures (with the
+# constants of the column atmosphere, which `column_atmosphere` takes from the model), whereas
+# the kernel uses the staged composite amount, the layer's mass over `mᵈ` (`ρ Δz / mᵈ` in the
+# grid, `Δp / (g mᵈ)` in the extension). The two agree to rounding and discretization; the
+# reference is patched to the kernel's amount so the comparison stays bitwise.
+function array_path_fluxes(rtm, model, i, j)
     columns = rtm.atmospheric_state
     gas_model = rtm.longwave_solver.gas_model
     FT = eltype(gas_model)
     N = number_of_layers(columns)
-    ng_lw = length(gas_model.longwave_weights)
-    ng_sw = length(gas_model.shortwave_weights)
+    Nlongwave_gpoints = length(gas_model.longwave_weights)
+    Nshortwave_gpoints = length(gas_model.shortwave_weights)
 
-    longwave = LongwaveOptics(zeros(FT, ng_lw, N), zeros(FT, ng_lw, N);
-                              source_top = zeros(FT, ng_lw, N),
-                              source_bottom = zeros(FT, ng_lw, N),
-                              weights = zeros(FT, ng_lw))
-    shortwave = ShortwaveOptics(zeros(FT, ng_sw, N); weights = zeros(FT, ng_sw))
+    longwave = LongwaveOptics(zeros(FT, Nlongwave_gpoints, N), zeros(FT, Nlongwave_gpoints, N);
+                              source_top = zeros(FT, Nlongwave_gpoints, N),
+                              source_bottom = zeros(FT, Nlongwave_gpoints, N),
+                              weights = zeros(FT, Nlongwave_gpoints))
+    shortwave = ShortwaveOptics(zeros(FT, Nshortwave_gpoints, N); weights = zeros(FT, Nshortwave_gpoints))
 
-    atmosphere = column_atmosphere(rtm, i, j)
+    atmosphere = column_atmosphere(rtm, model, i, j)
     optical_properties!(longwave, shortwave, gas_model, atmosphere)
 
     air = atmosphere.gases.composite
-    for k in 1:N, ig in 1:ng_sw
-        shortwave.rayleigh_optical_depth[ig, k] = rayleigh_optical_depth(gas_model, ig, air[k])
+    for k in 1:N, gpoint in 1:Nshortwave_gpoints
+        shortwave.rayleigh_optical_depth[gpoint, k] = rayleigh_optical_depth(gas_model, gpoint, air[k])
     end
 
     Tₛ = atmosphere.surface.temperature
@@ -108,7 +108,7 @@ end
             faces = N + 2 .- (1:Nz+1)   # column interface of grid face k
 
             for i in 1:2
-                reference = array_path_fluxes(radiation, i, 1)
+                reference = array_path_fluxes(radiation, model, i, 1)
                 ℐ_lw_up = Array(interior(radiation.upwelling_longwave_flux))[i, 1, :]
                 ℐ_lw_dn = Array(interior(radiation.downwelling_longwave_flux))[i, 1, :]
                 ℐ_sw_up = Array(interior(radiation.upwelling_shortwave_flux))[i, 1, :]

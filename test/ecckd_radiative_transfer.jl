@@ -196,17 +196,17 @@ end
         @test number_of_layers(columns) == N
 
         g = constants.gravitational_acceleration
-        Mᵈ = constants.dry_air.molar_mass
-        Mᵛ = constants.vapor.molar_mass
-        Rᵈ = constants.molar_gas_constant / Mᵈ
+        mᵈ = constants.dry_air.molar_mass
+        mᵛ = constants.vapor.molar_mass
+        Rᵈ = constants.molar_gas_constant / mᵈ
 
         p_lay = Array(columns.pressure_layers)[1, :]
         T_lay = Array(columns.temperature_layers)[1, :]
         p_int = Array(columns.pressure_interfaces)[1, :]
         T_int = Array(columns.temperature_interfaces)[1, :]
-        n_dry = Array(columns.dry_air)[1, :]
-        n_h2o = Array(columns.water_vapor)[1, :]
-        n_o3 = Array(columns.ozone)[1, :]
+        dry_air_moles = Array(columns.dry_air)[1, :]
+        water_vapor_moles = Array(columns.water_vapor)[1, :]
+        ozone_moles = Array(columns.ozone)[1, :]
 
         tight = FT == Float64 ? 1e-12 : 1e-5
         loose = FT == Float64 ? 1e-10 : 1e-4
@@ -229,36 +229,36 @@ end
         @test T_int[1] == T_lay[1]
 
         # Column amounts in the dry convention of the ecCKD tables: the composite amount carries
-        # the layer's total mass, Σ n_dry Mᵈ == Σ ρ Δz, and the vapor is counted on top of it
+        # the layer's total mass, `Σ dry_air_moles mᵈ == Σ ρ Δz`, and the vapor is counted on top of it
         Δz = 3kilometers / Nz
-        @test sum(n_dry[Nₑ+1:N]) * Mᵈ ≈ sum(ρ .* Δz) rtol = tight
-        @test sum(n_h2o[Nₑ+1:N]) * Mᵛ ≈ sum(ρ .* qᵛ .* Δz) rtol = tight
+        @test sum(dry_air_moles[Nₑ+1:N]) * mᵈ ≈ sum(ρ .* Δz) rtol = tight
+        @test sum(water_vapor_moles[Nₑ+1:N]) * mᵛ ≈ sum(ρ .* qᵛ .* Δz) rtol = tight
 
         # Extension layers, bottom-up from the grid top (layer m is column layer Nₑ + 1 - m)
         Δzₑ = Array(extension.Δz)
         zₑ = Array(extension.z_layer)
         Tₑ = Array(extension.temperature_layers)
         qₑ = Array(extension.specific_humidity)
-        χₑ = qₑ ./ (1 .- qₑ) .* (Mᵈ / Mᵛ)
+        χₑ = qₑ ./ (1 .- qₑ) .* (mᵈ / mᵛ)
         h = extension.blending_height
         anchor = T_int[Nₑ+1] - extension.join_temperature
         Tₘ = Tₑ .+ anchor .* exp.(-(zₑ .- extension.base) ./ h)
-        Tᵥ = Tₘ .* (1 .+ (Mᵈ / Mᵛ - 1) .* qₑ)
+        Tᵛ = Tₘ .* (1 .+ (mᵈ / mᵛ - 1) .* qₑ)
 
         # Hydrostatic interface pressures with the virtual temperature, layer by layer
         p_reference = similar(p_int, Nₑ + 1)
         p_reference[Nₑ+1] = p_int[Nₑ+1]
         for m in 1:Nₑ
-            p_reference[Nₑ+1-m] = p_reference[Nₑ+2-m] * exp(-g * Δzₑ[m] / (Rᵈ * Tᵥ[m]))
+            p_reference[Nₑ+1-m] = p_reference[Nₑ+2-m] * exp(-g * Δzₑ[m] / (Rᵈ * Tᵛ[m]))
         end
         @test p_int[1:Nₑ+1] ≈ p_reference rtol = loose
         @test T_lay[Nₑ:-1:1] ≈ Tₘ rtol = tight
 
-        # Dry-convention gas amounts: n_dry == Δp / (g Mᵈ) and n_h2o / n_dry == χ
+        # Dry-convention gas amounts: `dry_air_moles == Δp / (g mᵈ)` and `water_vapor_moles / dry_air_moles == χ`
         Δp = p_int[2:Nₑ+1] .- p_int[1:Nₑ]   # top-down
-        @test n_dry[1:Nₑ] ≈ Δp ./ (g * Mᵈ) rtol = tight
-        @test n_h2o[Nₑ:-1:1] ./ n_dry[Nₑ:-1:1] ≈ χₑ rtol = tight
-        @test n_o3[Nₑ:-1:1] ./ n_dry[Nₑ:-1:1] ≈ standard_ozone_profile.(zₑ) rtol = tight
+        @test dry_air_moles[1:Nₑ] ≈ Δp ./ (g * mᵈ) rtol = tight
+        @test water_vapor_moles[Nₑ:-1:1] ./ dry_air_moles[Nₑ:-1:1] ≈ χₑ rtol = tight
+        @test ozone_moles[Nₑ:-1:1] ./ dry_air_moles[Nₑ:-1:1] ≈ standard_ozone_profile.(zₑ) rtol = tight
 
         # The extension is clear and reaches the top
         @test all(iszero, Array(columns.liquid_water_path)[1, 1:Nₑ])
@@ -271,16 +271,21 @@ end
         @test abs(T_lay[Nₑ] - T_int[Nₑ+1]) < 2
         @test T_lay[1] ≈ standard_atmosphere_temperature(zₑ[end]) rtol = 1e-6
 
-        # Host round trip: the column atmosphere copies the staged rows to the host
-        atmosphere = column_atmosphere(radiation, 1, 1)
+        # Host round trip: the column atmosphere copies the staged rows to the host and carries
+        # the model's constants
+        atmosphere = column_atmosphere(radiation, model, 1, 1)
         @test atmosphere.pressure_layers isa Vector{FT}
         @test length(atmosphere.pressure_layers) == N
         @test length(atmosphere.pressure_interfaces) == N + 1
-        @test atmosphere.gases.composite == n_dry
-        @test atmosphere.gases.co2 ≈ 420e-6 .* n_dry
+        @test atmosphere.gases.composite == dry_air_moles
+        @test atmosphere.gases.co2 ≈ 420e-6 .* dry_air_moles
         @test atmosphere.surface.temperature == FT(300)
         @test atmosphere.surface.emissivity == FT(0.98)
         @test atmosphere.geometry.cos_zenith == FT(0.5)
+        @test atmosphere.constants.gravity == FT(g)
+        @test atmosphere.constants.dry_air_molar_mass == FT(mᵈ)
+        @test atmosphere.constants.water_molar_mass == FT(mᵛ)
+        @test atmosphere.constants.stefan_boltzmann == radiation.longwave_solver.gas_model.stefan_boltzmann
     end
 
     @testset "Identities [$(FT)]" for FT in test_float_types()

@@ -18,7 +18,7 @@ using Oceananigans
 using Oceananigans.Units
 using Test
 
-const σ_SB = 5.670374419e-8
+# The diffusivity of NumericalRadiation's no-scattering longwave solver, pinned here
 const DIFFUSIVITY = 1.66
 
 column_grid(FT, Nz, top) = RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, top),
@@ -64,10 +64,10 @@ column(field) = Array(interior(field))[1, 1, :]
 function layer_optical_depths(model, κ)
     grid = model.grid
     Nz = size(grid, 3)
-    Mᵈ = model.thermodynamic_constants.dry_air.molar_mass
+    mᵈ = model.thermodynamic_constants.dry_air.molar_mass
     ρ = column(total_density(model.dynamics))
     Δz = [Oceananigans.Operators.Δzᶜᶜᶜ(1, 1, k, grid) for k in 1:Nz]
-    τ = κ .* ρ .* Δz ./ Mᵈ
+    τ = κ .* ρ .* Δz ./ mᵈ
     τ_above = [sum(τ[k:Nz]) for k in 1:Nz+1]   # cells above face k
     τ_below = [sum(τ[1:k-1]) for k in 1:Nz+1]  # cells below face k
     return τ, τ_above, τ_below
@@ -100,7 +100,9 @@ end
     ℐ_sw_up = column(radiation.upwelling_shortwave_flux)
     ℐ_sw_dn = column(radiation.downwelling_shortwave_flux)
 
-    B = σ_SB * T₀^4
+    # The gray source is `σ T⁴` with the Stefan–Boltzmann constant the gas model carries
+    σ = radiation.longwave_solver.gas_model.stefan_boltzmann
+    B = σ * T₀^4
 
     @testset "Isothermal longwave" begin
         τ, τ_above, _ = layer_optical_depths(model, κ_lw)

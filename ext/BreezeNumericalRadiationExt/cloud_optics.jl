@@ -35,8 +35,8 @@ spectral_mapping_paths(gas_model) =
 
 # One phase on one spectral region: the table mapped onto the g points at the model's constant
 # effective radius, in the grid's float type and on its architecture
-function spectral_cloud_optics(table, mapping, effective_radius, arch, FT)
-    cloud = SpectralCloudOptics(table, mapping; effective_radius, float_type = FT)
+function spectral_cloud_optics(FT, table, mapping, effective_radius, arch)
+    cloud = SpectralCloudOptics(FT, table, mapping; effective_radius)
     return adapt(array_type(arch){FT}, cloud)
 end
 
@@ -51,7 +51,7 @@ or `(longwave = path, shortwave = path)` definition files) at the constant effec
 
 Clear sky (`tables::Nothing`) returns `(nothing, nothing)`: the layer optics then add no cloud.
 """
-function load_cloud_optics(tables::CloudScatteringTables, gas_model, liquid_radius, ice_radius, arch, FT)
+function load_cloud_optics(FT, tables::CloudScatteringTables, gas_model, liquid_radius, ice_radius, arch)
     liquid_table = read_ecckd_tables(() -> read_cloud_scattering_table(cloud_scattering_table_path(tables.liquid)))
     ice_table = read_ecckd_tables(() -> read_cloud_scattering_table(cloud_scattering_table_path(tables.ice)))
 
@@ -59,24 +59,24 @@ function load_cloud_optics(tables::CloudScatteringTables, gas_model, liquid_radi
     longwave_mapping = read_ecckd_tables(() -> read_ecckd_spectral_mapping(paths.longwave))
     shortwave_mapping = read_ecckd_tables(() -> read_ecckd_spectral_mapping(paths.shortwave))
 
-    longwave = (liquid = spectral_cloud_optics(liquid_table, longwave_mapping, liquid_radius, arch, FT),
-                ice = spectral_cloud_optics(ice_table, longwave_mapping, ice_radius, arch, FT))
+    longwave = (liquid = spectral_cloud_optics(FT, liquid_table, longwave_mapping, liquid_radius, arch),
+                ice = spectral_cloud_optics(FT, ice_table, longwave_mapping, ice_radius, arch))
 
-    shortwave = (liquid = spectral_cloud_optics(liquid_table, shortwave_mapping, liquid_radius, arch, FT),
-                 ice = spectral_cloud_optics(ice_table, shortwave_mapping, ice_radius, arch, FT))
+    shortwave = (liquid = spectral_cloud_optics(FT, liquid_table, shortwave_mapping, liquid_radius, arch),
+                 ice = spectral_cloud_optics(FT, ice_table, shortwave_mapping, ice_radius, arch))
 
     return longwave, shortwave
 end
 
-load_cloud_optics(::Nothing, gas_model, liquid_radius, ice_radius, arch, FT) = (nothing, nothing)
+load_cloud_optics(FT, ::Nothing, gas_model, liquid_radius, ice_radius, arch) = (nothing, nothing)
 
 # The cloud optics must be mapped onto the same g points the gas model integrates over
 function validate_cloud_g_points(cloud::NamedTuple, weights, region)
-    ng = length(weights)
+    Ngpoints = length(weights)
     for phase in (cloud.liquid, cloud.ice)
-        size(phase.mass_extinction_coefficient, 1) == ng ||
+        size(phase.mass_extinction_coefficient, 1) == Ngpoints ||
             throw(ArgumentError("The $region cloud optics are mapped onto " *
-                                "$(size(phase.mass_extinction_coefficient, 1)) g points but the gas model has $ng"))
+                                "$(size(phase.mass_extinction_coefficient, 1)) g points but the gas model has $Ngpoints"))
     end
     return nothing
 end

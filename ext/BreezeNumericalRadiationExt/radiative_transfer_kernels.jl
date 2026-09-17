@@ -9,14 +9,13 @@
 #####
 
 # The per-column scratch of the shortwave adding method: views of row `c` of the scratch arrays
-@inline column_scratch(shortwave, c) =
-    ShortwaveColumnScratch(view(shortwave.reflectance, c, :),
-                           view(shortwave.transmittance, c, :),
-                           view(shortwave.direct_reflectance, c, :),
-                           view(shortwave.direct_diffuse_transmittance, c, :),
-                           view(shortwave.direct_transmittance, c, :),
-                           view(shortwave.stack_albedo, c, :),
-                           view(shortwave.source, c, :))
+@inline column_scratch(shortwave, c) = ShortwaveColumnScratch(view(shortwave.reflectance, c, :),
+                                                              view(shortwave.transmittance, c, :),
+                                                              view(shortwave.direct_reflectance, c, :),
+                                                              view(shortwave.direct_diffuse_transmittance, c, :),
+                                                              view(shortwave.direct_transmittance, c, :),
+                                                              view(shortwave.stack_albedo, c, :),
+                                                              view(shortwave.source, c, :))
 
 """
 $(TYPEDSIGNATURES)
@@ -54,8 +53,8 @@ end
     FT = eltype(columns)
     c = column_index(i, j, grid.Nx)
     N = number_of_layers(columns)
-    ng_lw = length(gas_model.longwave_weights)
-    ng_sw = length(gas_model.shortwave_weights)
+    Nlongwave_gpoints = length(gas_model.longwave_weights)
+    Nshortwave_gpoints = length(gas_model.shortwave_weights)
 
     stage_column_stencils!(columns, gas_model, c, N)
 
@@ -69,26 +68,26 @@ end
 
     # Longwave: no downwelling flux enters the top of the atmosphere; the surface emits
     # `ε B(T₀)` per g point and reflects `1 - ε` of the downwelling flux
-    liquid_lw, ice_lw = cloud_phases(longwave_cloud)
-    longwave = LongwaveLayerOptics(gas_model, columns, mole_fractions, liquid_lw, ice_lw,
-                                   effective_radius_bracket(liquid_lw, liquid_radius),
-                                   effective_radius_bracket(ice_lw, ice_radius), c)
+    longwave_liquid, longwave_ice = cloud_phases(longwave_cloud)
+    longwave = LongwaveLayerOptics(gas_model, columns, mole_fractions, longwave_liquid, longwave_ice,
+                                   effective_radius_bracket(longwave_liquid, liquid_radius),
+                                   effective_radius_bracket(longwave_ice, ice_radius), c)
     surface_emission = TabulatedSurfaceEmission(gas_model, T₀; emissivity = ε)
 
-    streaming_longwave_fluxes!(view(columns.flux_up_lw, c, :), view(columns.flux_down_lw, c, :),
+    streaming_longwave_fluxes!(view(columns.longwave_up, c, :), view(columns.longwave_down, c, :),
                                longwave, surface_emission, 1 - ε, zero(FT),
-                               gas_model.longwave_weights, ng_lw, N,
+                               gas_model.longwave_weights, Nlongwave_gpoints, N,
                                view(columns.transmittance, c, :), view(columns.source_up, c, :))
 
     # Shortwave: the horizontal irradiance at the top of the atmosphere is `S₀ μ₀`, zero at night
-    liquid_sw, ice_sw = cloud_phases(shortwave_cloud)
-    shortwave = ShortwaveLayerOptics(gas_model, columns, mole_fractions, liquid_sw, ice_sw,
-                                     effective_radius_bracket(liquid_sw, liquid_radius),
-                                     effective_radius_bracket(ice_sw, ice_radius), c)
+    shortwave_liquid, shortwave_ice = cloud_phases(shortwave_cloud)
+    shortwave = ShortwaveLayerOptics(gas_model, columns, mole_fractions, shortwave_liquid, shortwave_ice,
+                                     effective_radius_bracket(shortwave_liquid, liquid_radius),
+                                     effective_radius_bracket(shortwave_ice, ice_radius), c)
 
-    streaming_shortwave_fluxes!(view(columns.flux_up_sw, c, :), view(columns.flux_down_sw, c, :),
+    streaming_shortwave_fluxes!(view(columns.shortwave_up, c, :), view(columns.shortwave_down, c, :),
                                 shortwave, μ₀, solar_constant * max(μ₀, 0), α_direct, α_diffuse,
-                                gas_model.shortwave_weights, ng_sw, N, column_scratch(columns.shortwave, c))
+                                gas_model.shortwave_weights, Nshortwave_gpoints, N, column_scratch(columns.shortwave, c))
 end
 
 """
@@ -111,7 +110,8 @@ function copy_spectral_fluxes!(rtm, grid)
     return nothing
 end
 
-@kernel function _copy_spectral_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, columns, grid)
+@kernel function _copy_spectral_fluxes!(upwelling_longwave, downwelling_longwave, upwelling_shortwave, downwelling_shortwave,
+                                        columns, grid)
     i, j, k = @index(Global, NTuple)
 
     N = number_of_layers(columns)
@@ -119,10 +119,10 @@ end
     kᶠ = N + 2 - k
 
     @inbounds begin
-        ℐ_lw_up[i, j, k] = columns.flux_up_lw[c, kᶠ]
-        ℐ_lw_dn[i, j, k] = -columns.flux_down_lw[c, kᶠ]
-        ℐ_sw_up[i, j, k] = columns.flux_up_sw[c, kᶠ]
-        ℐ_sw_dn[i, j, k] = -columns.flux_down_sw[c, kᶠ]
+        upwelling_longwave[i, j, k] = columns.longwave_up[c, kᶠ]
+        downwelling_longwave[i, j, k] = -columns.longwave_down[c, kᶠ]
+        upwelling_shortwave[i, j, k] = columns.shortwave_up[c, kᶠ]
+        downwelling_shortwave[i, j, k] = -columns.shortwave_down[c, kᶠ]
     end
 end
 

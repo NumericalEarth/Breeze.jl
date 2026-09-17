@@ -4,38 +4,37 @@
 
 """
 $(TYPEDEF)
-$(TYPEDFIELDS)
 
-The longwave half of an ecCKD radiation model: the gas optics model, the cloud optics (`nothing`
-for clear sky), the longwave spectral weights, and the mole fractions of the well-mixed gases
-relative to dry air.
+The longwave half of an ecCKD radiation model.
+
+Fields:
+- `gas_model`: ecCKD gas optics model
+- `cloud`: Longwave cloud optics, or `nothing` for clear sky
+- `weights`: Longwave spectral weights
+- `mole_fractions`: Mole fractions of the well-mixed gases relative to dry air
 """
 struct EcCKDLongwave{M, C, W, FT}
-    "ecCKD gas optics model"
     gas_model :: M
-    "Longwave cloud optics, or `nothing` for clear sky"
     cloud :: C
-    "Longwave spectral weights"
     weights :: W
-    "Mole fractions of the well-mixed gases relative to dry air"
     mole_fractions :: NamedTuple{(:co2, :ch4, :n2o, :cfc11, :cfc12), NTuple{5, FT}}
 end
 
 """
 $(TYPEDEF)
-$(TYPEDFIELDS)
 
-The shortwave half of an ecCKD radiation model: the gas optics model, the cloud optics (`nothing`
-for clear sky), the shortwave spectral weights, and the solar constant.
+The shortwave half of an ecCKD radiation model.
+
+Fields:
+- `gas_model`: ecCKD gas optics model
+- `cloud`: Shortwave cloud optics, or `nothing` for clear sky
+- `weights`: Shortwave spectral weights
+- `solar_constant`: Solar constant [W m⁻²]
 """
 struct EcCKDShortwave{M, C, W, FT}
-    "ecCKD gas optics model"
     gas_model :: M
-    "Shortwave cloud optics, or `nothing` for clear sky"
     cloud :: C
-    "Shortwave spectral weights"
     weights :: W
-    "Solar constant [W m⁻²]"
     solar_constant :: FT
 end
 
@@ -79,14 +78,13 @@ end
 
 # The tables are read in the grid's float type; a preloaded model is converted to it (and to
 # the grid's architecture) by `adapt` below.
-load_gas_optics_model(selector::Union{Symbol, AbstractString}, FT) =
-    read_ecckd_tables(() -> read_reference_ecckd_gas_optics(selector; names = ECCKD_GAS_NAMES, float_type = FT))
+load_gas_optics_model(FT, selector::Union{Symbol, AbstractString}) =
+    read_ecckd_tables(() -> read_reference_ecckd_gas_optics(FT, selector; names = ECCKD_GAS_NAMES))
 
-load_gas_optics_model(paths::NamedTuple, FT) =
-    read_ecckd_tables(() -> read_ecckd_tabulated_gas_optics(paths.longwave, paths.shortwave;
-                                                            names = ECCKD_GAS_NAMES, float_type = FT))
+load_gas_optics_model(FT, paths::NamedTuple) =
+    read_ecckd_tables(() -> read_ecckd_tabulated_gas_optics(FT, paths.longwave, paths.shortwave; names = ECCKD_GAS_NAMES))
 
-load_gas_optics_model(model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}, FT) = model
+load_gas_optics_model(FT, model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}) = model
 
 # Warn once at construction when the extension's temperatures leave the Planck source table, where
 # the interpolation holds the table edge (a gray `σT⁴` model has no table and no edge).
@@ -102,8 +100,8 @@ end
 
 warn_source_table_range(gas_model, extension) = nothing
 
-effective_radius_model(model::ConstantRadiusParticles, FT) = ConstantRadiusParticles(convert(FT, model.radius))
-effective_radius_model(model, FT) =
+effective_radius_model(FT, model::ConstantRadiusParticles) = ConstantRadiusParticles(convert(FT, model.radius))
+effective_radius_model(FT, model) =
     throw(ArgumentError("EcCKDOptics supports only `ConstantRadiusParticles` effective radius models for now; " *
                         "received $(summary(model)). Variable effective radii are a planned follow-up."))
 
@@ -125,7 +123,9 @@ solver does; scattering is a planned follow-up). With `optics.clouds = nothing` 
 whatever the microphysics holds.
 
 The gas optics and cloud scattering tables are read from netCDF files, which requires
-`using NCDatasets`.
+`using NCDatasets`. The staging kernels take gravity and the molar masses from `constants`;
+the Stefan–Boltzmann constant of the gray Planck source (used by g points without a source
+table) is carried by the gas optics model.
 
 # Keyword Arguments
 - `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere()`).
@@ -177,8 +177,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     validate_background_gases(background_atmosphere)
 
-    liquid_effective_radius = effective_radius_model(liquid_effective_radius, FT)
-    ice_effective_radius = effective_radius_model(ice_effective_radius, FT)
+    liquid_effective_radius = effective_radius_model(FT, liquid_effective_radius)
+    ice_effective_radius = effective_radius_model(FT, ice_effective_radius)
 
     direct_surface_albedo, diffuse_surface_albedo =
         resolve_surface_albedos(surface_albedo, direct_surface_albedo, diffuse_surface_albedo, grid, solar_position)
@@ -187,14 +187,13 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     # Gas optics tables, then the extension sampled on the host (it needs the background's O₃
     # as a profile, before materialization turns it into a field on the grid)
-    host_gas_model = load_gas_optics_model(optics.gas_model, FT)
+    host_gas_model = load_gas_optics_model(FT, optics.gas_model)
     extension = materialize_column_extension(column_extension, grid, background_atmosphere)
     warn_source_table_range(host_gas_model, extension)
     gas_model = adapt(array_type(arch){FT}, host_gas_model)
 
-    longwave_cloud, shortwave_cloud = load_cloud_optics(optics.clouds, optics.gas_model,
-                                                        liquid_effective_radius.radius, ice_effective_radius.radius,
-                                                        arch, FT)
+    longwave_cloud, shortwave_cloud = load_cloud_optics(FT, optics.clouds, optics.gas_model,
+                                                        liquid_effective_radius.radius, ice_effective_radius.radius, arch)
     validate_cloud_g_points(longwave_cloud, gas_model.longwave_weights, "longwave")
     validate_cloud_g_points(shortwave_cloud, gas_model.shortwave_weights, "shortwave")
 

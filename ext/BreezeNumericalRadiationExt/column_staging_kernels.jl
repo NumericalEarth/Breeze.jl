@@ -14,9 +14,10 @@ plus interface pressure and temperature — interior faces by interpolation, the
 faces by extrapolation from the adjacent cells (never from the halo).
 
 The gas amounts follow the "dry" column convention of the ecCKD tables: the composite
-(dry-air) amount is the layer's total mass over the dry molar mass, `ρ Δz / Mᵈ`, and the
-water vapor `ρ qᵛ Δz / Mᵛ` is counted on top of it, so `n_h2o / n_dry` is the mole fraction the
-tables are indexed by and `n_dry` is also the air amount of the Rayleigh scattering.
+(dry-air) amount is the layer's total mass over the dry molar mass, `ρ Δz / mᵈ`, and the
+water vapor `ρ qᵛ Δz / mᵛ` is counted on top of it, so the ratio of the water vapor to the
+dry-air amount is the mole fraction the tables are indexed by and the dry-air amount is also
+the air amount of the Rayleigh scattering.
 """
 function stage_spectral_columns!(columns::SpectralColumns, model, background_atmosphere)
     grid = model.grid
@@ -24,19 +25,19 @@ function stage_spectral_columns!(columns::SpectralColumns, model, background_atm
     constants = model.thermodynamic_constants
 
     g = constants.gravitational_acceleration
-    Mᵈ = constants.dry_air.molar_mass
-    Mᵛ = constants.vapor.molar_mass
+    mᵈ = constants.dry_air.molar_mass
+    mᵛ = constants.vapor.molar_mass
 
     launch!(arch, grid, :xyz, _stage_spectral_columns!,
             columns, grid,
             dynamics_pressure(model.dynamics), model.temperature, total_density(model.dynamics),
             specific_prognostic_moisture(model), model.microphysics, model.microphysical_fields,
-            background_atmosphere.O₃, g, Mᵈ, Mᵛ)
+            background_atmosphere.O₃, g, mᵈ, mᵛ)
 
     return nothing
 end
 
-@kernel function _stage_spectral_columns!(columns, grid, p, T, ρ, qᵛᵉ, microphysics, microphysical_fields, O₃, g, Mᵈ, Mᵛ)
+@kernel function _stage_spectral_columns!(columns, grid, p, T, ρ, qᵛᵉ, microphysics, microphysical_fields, O₃, g, mᵈ, mᵛ)
     i, j, k = @index(Global, NTuple)
 
     Nz = size(grid, 3)
@@ -56,18 +57,18 @@ end
 
         # Molar column amounts (mol m⁻²) in the "dry" convention the ecCKD tables were derived
         # with: the composite (dry-air) amount is the layer's total mass over the dry molar mass,
-        # `ρ Δz / Mᵈ` (`Δp / (g Mᵈ)` for a hydrostatic layer), and the water vapor `ρ qᵛ Δz / Mᵛ`
+        # `ρ Δz / mᵈ` (`Δp / (g mᵈ)` for a hydrostatic layer), and the water vapor `ρ qᵛ Δz / mᵛ`
         # is counted on top of it rather than removed from it. NumericalRadiation's CKDMIP and
-        # RFMIP validation passes only with this convention; the moist form `ρ (1 - qᵗ) Δz / Mᵈ`
+        # RFMIP validation passes only with this convention; the moist form `ρ (1 - qᵗ) Δz / mᵈ`
         # biases the surface downwelling longwave by -0.2 W m⁻².
-        n_dry = ρᵢ * Δz / Mᵈ
-        n_h2o = ρᵢ * qᵛ * Δz / Mᵛ
+        dry_air_moles = ρᵢ * Δz / mᵈ
+        water_vapor_moles = ρᵢ * qᵛ * Δz / mᵛ
 
         columns.pressure_layers[c, kᶜ] = p[i, j, k]
         columns.temperature_layers[c, kᶜ] = T[i, j, k]
-        columns.dry_air[c, kᶜ] = n_dry
-        columns.water_vapor[c, kᶜ] = n_h2o
-        columns.ozone[c, kᶜ] = O₃[i, j, k] * n_dry
+        columns.dry_air[c, kᶜ] = dry_air_moles
+        columns.water_vapor[c, kᶜ] = water_vapor_moles
+        columns.ozone[c, kᶜ] = O₃[i, j, k] * dry_air_moles
         columns.liquid_water_path[c, kᶜ] = ρᵢ * qˡ * Δz
         columns.ice_water_path[c, kᶜ] = ρᵢ * qⁱ * Δz
 
@@ -93,8 +94,9 @@ $(TYPEDSIGNATURES)
 Stack the extension layers of `columns.extension` above the grid top of every column (kernel B):
 the temperature profile anchored to the grid's top face, hydrostatic interface pressures with the
 virtual temperature, log-mean layer pressures, and the gas amounts in the dry convention of
-kernel A, `n_dry = Δp / (g Mᵈ)`, `n_h2o = χ n_dry`, `n_o3 = χ_o3 n_dry`, with `χ` the H₂O mole
-fraction relative to dry air. Extension layers are clear.
+kernel A — the dry air `Δp / (g mᵈ)` (NumericalRadiation's `hydrostatic_air_moles`), the water
+vapor `χ` times it with `χ` the H₂O mole fraction relative to dry air, and the ozone its mole
+fraction times it. Extension layers are clear.
 """
 function extend_spectral_columns!(columns::SpectralColumns, extension::MaterializedColumnExtension, model)
     grid = model.grid
@@ -102,18 +104,18 @@ function extend_spectral_columns!(columns::SpectralColumns, extension::Materiali
     constants = model.thermodynamic_constants
 
     g = constants.gravitational_acceleration
-    Mᵈ = constants.dry_air.molar_mass
-    Mᵛ = constants.vapor.molar_mass
-    Rᵈ = constants.molar_gas_constant / Mᵈ
+    mᵈ = constants.dry_air.molar_mass
+    mᵛ = constants.vapor.molar_mass
+    Rᵈ = dry_air_gas_constant(constants)
 
-    launch!(arch, grid, :xy, _extend_spectral_columns!, columns, extension, grid, g, Rᵈ, Mᵈ, Mᵛ)
+    launch!(arch, grid, :xy, _extend_spectral_columns!, columns, extension, grid, g, Rᵈ, mᵈ, mᵛ)
 
     return nothing
 end
 
 extend_spectral_columns!(columns, ::Nothing, model) = nothing
 
-@kernel function _extend_spectral_columns!(columns, extension, grid, g, Rᵈ, Mᵈ, Mᵛ)
+@kernel function _extend_spectral_columns!(columns, extension, grid, g, Rᵈ, mᵈ, mᵛ)
     i, j = @index(Global, NTuple)
 
     c = column_index(i, j, grid.Nx)
@@ -142,19 +144,19 @@ extend_spectral_columns!(columns, ::Nothing, model) = nothing
 
             # Specific humidity q → mole fraction relative to dry air χ and virtual temperature
             q = extension.specific_humidity[m]
-            χ = q / (1 - q) * Mᵈ / Mᵛ
-            Tᵥ = T * (1 + (Mᵈ / Mᵛ - 1) * q)
+            χ = q / (1 - q) * mᵈ / mᵛ
+            Tᵛ = T * (1 + (mᵈ / mᵛ - 1) * q)
 
-            p_above = p_below * exp(-g * Δz / (Rᵈ * Tᵥ))
+            p_above = p_below * exp(-g * Δz / (Rᵈ * Tᵛ))
             Δp = p_below - p_above
             p_layer = Δp / log(p_below / p_above)
-            n_dry = Δp / (g * Mᵈ)   # the layer's mass over Mᵈ, as in kernel A
+            dry_air_moles = hydrostatic_air_moles(Δp, g, mᵈ)   # the layer's mass over mᵈ, as in kernel A
 
             columns.pressure_layers[c, kᶜ] = p_layer
             columns.temperature_layers[c, kᶜ] = T
-            columns.dry_air[c, kᶜ] = n_dry
-            columns.water_vapor[c, kᶜ] = χ * n_dry
-            columns.ozone[c, kᶜ] = extension.ozone[m] * n_dry
+            columns.dry_air[c, kᶜ] = dry_air_moles
+            columns.water_vapor[c, kᶜ] = χ * dry_air_moles
+            columns.ozone[c, kᶜ] = extension.ozone[m] * dry_air_moles
             columns.liquid_water_path[c, kᶜ] = 0
             columns.ice_water_path[c, kᶜ] = 0
 

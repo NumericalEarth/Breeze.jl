@@ -9,32 +9,33 @@
 
 """
 $(TYPEDEF)
-$(TYPEDFIELDS)
 
 A [`ColumnExtension`](@ref) sampled on its `Nₑ` layers above the grid top, ready for the column
 staging kernels. Layers are indexed bottom-up from the grid top (`m = 1` sits on the grid's top
 face); the temperature profile is stored unanchored, and the kernel adds
 `(T_top - join_temperature) exp(-(z - base) / blending_height)` with `T_top` the temperature of
 the grid's top face in each column.
+
+Fields:
+- `Δz`: Layer thickness [m], `(Nₑ,)`
+- `z_layer`: Layer center height [m], `(Nₑ,)`
+- `temperature_layers`: Unanchored layer temperature `temperature(z_layer)` [K], `(Nₑ,)`
+- `temperature_interfaces`: Unanchored interface temperature `temperature(z_face)` [K], `(Nₑ + 1,)`
+- `specific_humidity`: Layer specific humidity [kg kg⁻¹], `(Nₑ,)`
+- `ozone`: Layer ozone mole fraction [mol mol⁻¹], `(Nₑ,)`
+- `blending_height`: Decay height of the temperature anchor [m]; `0` disables it
+- `join_temperature`: The profile temperature at the grid top, `temperature(base)` [K]
+- `base`: Height of the grid's top face [m]
 """
 struct MaterializedColumnExtension{FT, V}
-    "Layer thickness [m], `(Nₑ,)`"
     Δz :: V
-    "Layer center height [m], `(Nₑ,)`"
     z_layer :: V
-    "Unanchored layer temperature `temperature(z_layer)` [K], `(Nₑ,)`"
     temperature_layers :: V
-    "Unanchored interface temperature `temperature(z_face)` [K], `(Nₑ + 1,)`"
     temperature_interfaces :: V
-    "Layer specific humidity [kg kg⁻¹], `(Nₑ,)`"
     specific_humidity :: V
-    "Layer ozone mole fraction [mol mol⁻¹], `(Nₑ,)`"
     ozone :: V
-    "Decay height of the temperature anchor [m]; `0` disables it"
     blending_height :: FT
-    "The profile temperature at the grid top, `temperature(base)` [K]"
     join_temperature :: FT
-    "Height of the grid's top face [m]"
     base :: FT
 end
 

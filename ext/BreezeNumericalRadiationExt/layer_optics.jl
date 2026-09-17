@@ -2,7 +2,7 @@
 ##### Per-layer optics of one staged column
 #####
 ##### The streaming solvers of NumericalRadiation take the optics of a column as a functor
-##### `(ig, k) -> ...` evaluated per g point and layer. The two functors below read the staged
+##### `(gpoint, k) -> ...` evaluated per g point and layer. The two functors below read the staged
 ##### column arrays of one column and call NumericalRadiation's scalar layer API: the gas optics
 ##### stencil and Planck brackets are read back from the arrays kernel C fills once per layer, the
 ##### well-mixed gases are formed from their mole fractions relative to dry air, and cloud phases
@@ -22,12 +22,12 @@ nothing to store for a model without interpolation tables (`stencil::Nothing`).
 """
 @inline function store_layer_stencil!(columns::SpectralColumns, c, k, stencil::GasOpticsStencil)
     @inbounds begin
-        columns.stencil_ip[c, k] = stencil.pressure[1]
-        columns.stencil_wp[c, k] = stencil.pressure[3]
-        columns.stencil_it[c, k] = stencil.temperature[1]
-        columns.stencil_wt[c, k] = stencil.temperature[3]
-        columns.stencil_ih[c, k] = stencil.h2o[1]
-        columns.stencil_wh[c, k] = stencil.h2o[3]
+        columns.pressure_index[c, k] = stencil.pressure[1]
+        columns.pressure_weight[c, k] = stencil.pressure[3]
+        columns.temperature_index[c, k] = stencil.temperature[1]
+        columns.temperature_weight[c, k] = stencil.temperature[3]
+        columns.water_vapor_index[c, k] = stencil.water_vapor[1]
+        columns.water_vapor_weight[c, k] = stencil.water_vapor[3]
     end
     return nothing
 end
@@ -41,9 +41,9 @@ The gas optics stencil of layer `k` of column `c`, rebuilt from the six scalars 
 [`store_layer_stencil!`](@ref); `nothing` for a model without interpolation tables.
 """
 @inline function layer_stencil(::EcCKDTabulatedGasOpticsModel, columns::SpectralColumns, c, k)
-    @inbounds stencil = GasOpticsStencil(columns.stencil_ip[c, k], columns.stencil_wp[c, k],
-                                         columns.stencil_it[c, k], columns.stencil_wt[c, k],
-                                         columns.stencil_ih[c, k], columns.stencil_wh[c, k])
+    @inbounds stencil = GasOpticsStencil(columns.pressure_index[c, k], columns.pressure_weight[c, k],
+                                         columns.temperature_index[c, k], columns.temperature_weight[c, k],
+                                         columns.water_vapor_index[c, k], columns.water_vapor_weight[c, k])
     return stencil
 end
 
@@ -57,8 +57,8 @@ store for a model without a source table (`bracket::Nothing`).
 """
 @inline function store_source_bracket!(columns::SpectralColumns, c, k, bracket::Tuple)
     @inbounds begin
-        columns.source_is[c, k] = bracket[1]
-        columns.source_ws[c, k] = bracket[3]
+        columns.source_index[c, k] = bracket[1]
+        columns.source_weight[c, k] = bracket[3]
     end
     return nothing
 end
@@ -77,8 +77,8 @@ whose source is the gray `σT⁴`.
     # Decided by the model type, so this folds away
     model.longwave_source_table === nothing && return nothing
     @inbounds begin
-        i = Int(columns.source_is[c, k])
-        w = columns.source_ws[c, k]
+        i = Int(columns.source_index[c, k])
+        w = columns.source_weight[c, k]
     end
     return (i, i + 1, w)
 end
@@ -90,16 +90,17 @@ $(TYPEDSIGNATURES)
 
 Fill the gas optics stencils of the `N` layers and the Planck brackets of the `N + 1`
 interfaces of column `c` from its staged pressure, temperature and gas amounts. The H₂O mole
-fraction of the stencil is `n_h2o / n_dry`, guarded as in NumericalRadiation's array path.
+fraction of the stencil is the water vapor amount over the dry-air amount, guarded as in
+NumericalRadiation's array path.
 """
 @inline function stage_column_stencils!(columns::SpectralColumns, model, c, N)
     FT = eltype(columns)
     @inbounds for k in 1:N
         p = columns.pressure_layers[c, k]
         T = columns.temperature_layers[c, k]
-        n_dry = max(columns.dry_air[c, k], sqrt(eps(FT)))
-        n_h2o = max(0, columns.water_vapor[c, k])
-        store_layer_stencil!(columns, c, k, gas_optics_stencil(model, p, T, n_h2o / n_dry))
+        dry_air_moles = max(columns.dry_air[c, k], sqrt(eps(FT)))
+        water_vapor_moles = max(0, columns.water_vapor[c, k])
+        store_layer_stencil!(columns, c, k, gas_optics_stencil(model, p, T, water_vapor_moles / dry_air_moles))
     end
     @inbounds for k in 1:N+1
         T = columns.temperature_interfaces[c, k]
@@ -121,19 +122,19 @@ The scalar gas amounts (mol m⁻²) of layer `k` of column `c` as a `NamedTuple`
 """
 @inline function layer_gas_amounts(columns::SpectralColumns, mole_fractions, c, k)
     @inbounds begin
-        n_dry = columns.dry_air[c, k]
-        n_h2o = columns.water_vapor[c, k]
-        n_o3 = columns.ozone[c, k]
+        dry_air_moles = columns.dry_air[c, k]
+        water_vapor_moles = columns.water_vapor[c, k]
+        ozone_moles = columns.ozone[c, k]
     end
     χ = mole_fractions
-    return (composite = n_dry,
-            h2o = n_h2o,
-            o3 = n_o3,
-            co2 = χ.co2 * n_dry,
-            ch4 = χ.ch4 * n_dry,
-            n2o = χ.n2o * n_dry,
-            cfc11 = χ.cfc11 * n_dry,
-            cfc12 = χ.cfc12 * n_dry)
+    return (composite = dry_air_moles,
+            h2o = water_vapor_moles,
+            o3 = ozone_moles,
+            co2 = χ.co2 * dry_air_moles,
+            ch4 = χ.ch4 * dry_air_moles,
+            n2o = χ.n2o * dry_air_moles,
+            cfc11 = χ.cfc11 * dry_air_moles,
+            cfc12 = χ.cfc12 * dry_air_moles)
 end
 
 # The two cloud phases of a cloud optics container: `nothing` for clear sky. Each phase is folded
@@ -149,33 +150,34 @@ end
 
 """
 $(TYPEDEF)
-$(TYPEDFIELDS)
 
 Longwave layer optics of column `column` of `columns` for `NumericalRadiation.streaming_longwave_fluxes!`:
-`(ig, k)` returns `(τ, B_top, B_bottom)`, the gas absorption optical depth of layer `k` at
-g point `ig` plus the cloud absorption of both phases, and the Planck sources at the layer's
+`(gpoint, k)` returns `(τ, B_top, B_bottom)`, the gas absorption optical depth of layer `k` at
+g point `gpoint` plus the cloud absorption of both phases, and the Planck sources at the layer's
 top and bottom interfaces.
+
+Fields:
+- `gas_model`: ecCKD gas optics model
+- `columns`: The staged columns
+- `mole_fractions`: Mole fractions of the well-mixed gases relative to dry air
+- `liquid_cloud`: Longwave liquid cloud optics, or `nothing`
+- `ice_cloud`: Longwave ice cloud optics, or `nothing`
+- `liquid_bracket`: Effective radius bracket of the liquid cloud optics
+- `ice_bracket`: Effective radius bracket of the ice cloud optics
+- `column`: Column index `c = i + (j - 1) Nx`
 """
 struct LongwaveLayerOptics{M, C, L, I, BL, BI, FT}
-    "ecCKD gas optics model"
     gas_model :: M
-    "The staged columns"
     columns :: C
-    "Mole fractions of the well-mixed gases relative to dry air"
     mole_fractions :: NamedTuple{(:co2, :ch4, :n2o, :cfc11, :cfc12), NTuple{5, FT}}
-    "Longwave liquid cloud optics, or `nothing`"
     liquid_cloud :: L
-    "Longwave ice cloud optics, or `nothing`"
     ice_cloud :: I
-    "Effective radius bracket of the liquid cloud optics"
     liquid_bracket :: BL
-    "Effective radius bracket of the ice cloud optics"
     ice_bracket :: BI
-    "Column index `c = i + (j - 1) Nx`"
     column :: Int
 end
 
-@inline function (optics::LongwaveLayerOptics)(ig, k)
+@inline function (optics::LongwaveLayerOptics)(gpoint, k)
     columns = optics.columns
     model = optics.gas_model
     c = optics.column
@@ -193,46 +195,47 @@ end
     bracket_top = interface_source_bracket(model, columns, c, k)
     bracket_bottom = interface_source_bracket(model, columns, c, k + 1)
 
-    τ = longwave_optical_depth(model, ig, gases, stencil) +
-        cloud_absorption_optical_depth(optics.liquid_cloud, ig, optics.liquid_bracket, liquid_water_path) +
-        cloud_absorption_optical_depth(optics.ice_cloud, ig, optics.ice_bracket, ice_water_path)
+    τ = longwave_optical_depth(model, gpoint, gases, stencil) +
+        cloud_absorption_optical_depth(optics.liquid_cloud, gpoint, optics.liquid_bracket, liquid_water_path) +
+        cloud_absorption_optical_depth(optics.ice_cloud, gpoint, optics.ice_bracket, ice_water_path)
 
-    B_top = longwave_source(model, ig, T_top, bracket_top)
-    B_bottom = longwave_source(model, ig, T_bottom, bracket_bottom)
+    B_top = longwave_source(model, gpoint, T_top, bracket_top)
+    B_bottom = longwave_source(model, gpoint, T_bottom, bracket_bottom)
 
     return τ, B_top, B_bottom
 end
 
 """
 $(TYPEDEF)
-$(TYPEDFIELDS)
 
 Shortwave layer optics of column `column` of `columns` for `NumericalRadiation.streaming_shortwave_fluxes!`:
-`(ig, k)` returns `(τ_absorption, τ_scattering, asymmetry)`, the gas absorption optical depth
-of layer `k` at g point `ig`, the Rayleigh scattering of the layer's air (the composite amount,
-which in the dry convention of the staging kernels is the layer's total mass over `Mᵈ`, as in
-NumericalRadiation's array path), and the scattering of both cloud phases folded in.
+`(gpoint, k)` returns `(τ_absorption, τ_scattering, asymmetry)`, the gas absorption optical depth
+of layer `k` at g point `gpoint`, the Rayleigh scattering of the layer's air (the composite
+amount, which in the dry convention of the staging kernels is the layer's total mass over `mᵈ`,
+as in NumericalRadiation's array path), and the scattering of both cloud phases folded in.
+
+Fields:
+- `gas_model`: ecCKD gas optics model
+- `columns`: The staged columns
+- `mole_fractions`: Mole fractions of the well-mixed gases relative to dry air
+- `liquid_cloud`: Shortwave liquid cloud optics, or `nothing`
+- `ice_cloud`: Shortwave ice cloud optics, or `nothing`
+- `liquid_bracket`: Effective radius bracket of the liquid cloud optics
+- `ice_bracket`: Effective radius bracket of the ice cloud optics
+- `column`: Column index `c = i + (j - 1) Nx`
 """
 struct ShortwaveLayerOptics{M, C, L, I, BL, BI, FT}
-    "ecCKD gas optics model"
     gas_model :: M
-    "The staged columns"
     columns :: C
-    "Mole fractions of the well-mixed gases relative to dry air"
     mole_fractions :: NamedTuple{(:co2, :ch4, :n2o, :cfc11, :cfc12), NTuple{5, FT}}
-    "Shortwave liquid cloud optics, or `nothing`"
     liquid_cloud :: L
-    "Shortwave ice cloud optics, or `nothing`"
     ice_cloud :: I
-    "Effective radius bracket of the liquid cloud optics"
     liquid_bracket :: BL
-    "Effective radius bracket of the ice cloud optics"
     ice_bracket :: BI
-    "Column index `c = i + (j - 1) Nx`"
     column :: Int
 end
 
-@inline function (optics::ShortwaveLayerOptics)(ig, k)
+@inline function (optics::ShortwaveLayerOptics)(gpoint, k)
     columns = optics.columns
     model = optics.gas_model
     c = optics.column
@@ -245,17 +248,17 @@ end
         ice_water_path = columns.ice_water_path[c, k]
     end
 
-    τ_absorption = shortwave_optical_depth(model, ig, gases, stencil)
-    τ_scattering = rayleigh_optical_depth(model, ig, gases.composite)
+    τ_absorption = shortwave_optical_depth(model, gpoint, gases, stencil)
+    τ_scattering = rayleigh_optical_depth(model, gpoint, gases.composite)
     asymmetry = zero(τ_scattering)
 
-    τ_absorption, τ_scattering, asymmetry =
-        add_cloud_scattering_layer(τ_absorption, τ_scattering, asymmetry,
-                                   optics.liquid_cloud, ig, optics.liquid_bracket, liquid_water_path)
+    τ_absorption, τ_scattering, asymmetry = add_cloud_scattering_layer(τ_absorption, τ_scattering, asymmetry,
+                                                                       optics.liquid_cloud, gpoint, optics.liquid_bracket,
+                                                                       liquid_water_path)
 
-    τ_absorption, τ_scattering, asymmetry =
-        add_cloud_scattering_layer(τ_absorption, τ_scattering, asymmetry,
-                                   optics.ice_cloud, ig, optics.ice_bracket, ice_water_path)
+    τ_absorption, τ_scattering, asymmetry = add_cloud_scattering_layer(τ_absorption, τ_scattering, asymmetry,
+                                                                       optics.ice_cloud, gpoint, optics.ice_bracket,
+                                                                       ice_water_path)
 
     return τ_absorption, τ_scattering, asymmetry
 end

@@ -25,14 +25,14 @@ using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, Surface
                                column_extension_faces,
                                dynamics_pressure, total_density, specific_prognostic_moisture,
                                grid_moisture_fractions
-using Breeze.Thermodynamics: ThermodynamicConstants
+using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
 
 using NumericalRadiation: EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel,
                           read_reference_ecckd_gas_optics, read_ecckd_tabulated_gas_optics,
                           reference_ecckd_definition_paths, ecrad_data_file,
                           read_cloud_scattering_table, read_ecckd_spectral_mapping,
-                          ColumnAtmosphere,
-                          GasOpticsStencil, gas_optics_stencil, source_table_bracket,
+                          ColumnAtmosphere, PhysicalConstants,
+                          GasOpticsStencil, gas_optics_stencil, source_table_bracket, hydrostatic_air_moles,
                           longwave_optical_depth, shortwave_optical_depth, rayleigh_optical_depth,
                           longwave_source, TabulatedSurfaceEmission,
                           SpectralCloudOptics, effective_radius_bracket,
@@ -48,7 +48,7 @@ using Oceananigans.Utils: launch!, IterationInterval, prettysummary
 using Adapt: Adapt, adapt
 using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
 include("spectral_columns.jl")
 include("column_extension.jl")
