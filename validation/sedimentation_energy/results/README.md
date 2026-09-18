@@ -11,19 +11,36 @@ Oceananigans: **0.111.0**, pinned in the dedicated manifest, not the manuscript'
 Each TOML contains source and script/environment hashes. See the parent
 [README](../README.md) for commands, equations, tolerances and case definitions.
 
-## Completed local runs
+## Completed runs
 
 | Backend | Precision | Isolated cases / harness assertions | Coupled cases / finite-state assertions |
 |---|---|---|---|
 | CPU | Float64 | 85 / 201 pass | 8 / 242 pass |
 | CPU | Float32 | 85 / 201 pass | NOT RUN |
 | Metal, Apple M5 Max | Float32 | 85 / 201 pass | 8 / 242 pass |
+| CUDA, NVIDIA Tesla T4 | Float64 | 85 / 201 pass | Attempted; no case results before time limit |
+| CUDA, NVIDIA Tesla T4 | Float32 | NOT RUN | NOT RUN |
 
 These assertion counts validate the harness and controls, **not energy
 conservation**. All 12 original isothermal composition-contrast cases fail the
 physical invariant on each tested backend/precision. Raw data are the adjacent
-`cpu-*` and `metal-*` TOML files; temperature fields/tendencies were computed on
+`cpu-*`, `metal-*` and `cuda-*` TOML files; temperature fields/tendencies were computed on
 the selected backend, with host Float64 diagnostic analysis.
+
+CUDA used Julia 1.12.6, CUDA.jl 6.4.0, runtime 12.9.0/compiler 12.9.86, and
+system driver 550.90.12. The isolated suite completed all 85 cases and 201
+assertions in 5m15.9s after substantial startup/precompilation. The single
+20-minute Slurm job then hit its wall limit (accounted elapsed 20m20s); it
+produced no coupled case results and never reached Float32. No extension or
+second allocation was made. This is a completed CUDA isolated suite, **not**
+a completed CUDA campaign matrix.
+
+The remote worktree remained at `dae9e46d`, with only the untracked campaign
+directory (`source_dirty=true`). Its script/Project/Manifest SHA256 hashes
+match campaign commit `18f08809` exactly; its production source diff is empty.
+CUDA64 reproduces the nonisothermal beta_cv ratios above to <9e-14 from unity.
+The active-limiter mass residual is -1.80578365e-5 kg/m²/s, with local
+phase-only temperature residual ≤6.64e-16 K/s.
 
 ## Isothermal compressible defect: demonstrated
 
