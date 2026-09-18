@@ -182,7 +182,19 @@ AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, 
     return (; χ = (χˡ, χⁱ), h, ∂φ∂h = ∂θ∂h)
 end
 
-# Fixed-density convention: condensate replaces dry air and pressure is prescribed.
+"""
+$(TYPEDSIGNATURES)
+
+Return the transported liquid/ice enthalpies and local potential-temperature heating response.
+Fixed-density dynamics retain the dry-air replacement convention at prescribed pressure:
+transport `hˣ - hᵈ` and use `1 / (cᵖᵐ Π)`. `CompressibleDynamics` transports phase enthalpy `hˣ`
+and uses `β_cv` for isolated sedimentation at fixed volume and gas partial densities, without
+phase change or resolved motion. These instantaneous responses do not reconstruct finite-step energy.
+
+This callback serves the liquid-ice potential-temperature formulation. The compressible
+`temperature_and_pressure` diagnosis supports that formulation, not `StaticEnergyFormulation`;
+this sedimentation correction does not add a compressible static-energy diagnosis.
+"""
 @inline function sedimentation_thermal_response(dynamics, q, constants, T, Π)
     r = sedimentation_replacement(dynamics, q)
     cʳ = mixture_heat_capacity(r, constants)
