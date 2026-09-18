@@ -106,7 +106,9 @@ function gpu_array_bytes(object, seen = IdDict{Any, Nothing}())
         return sizeof(eltype(storage)) * length(storage)
     elseif object isa AbstractArray
         isbitstype(eltype(object)) && return 0
-        return sum(x -> gpu_array_bytes(x, seen), object; init = 0)
+        return sum(eachindex(object); init = 0) do index
+            isassigned(object, index) ? gpu_array_bytes(object[index], seen) : 0
+        end
     elseif object isa Number || object isa Symbol || object isa AbstractString || object isa Function ||
            object isa Module || object isa Type || isnothing(object)
         return 0
@@ -120,7 +122,9 @@ function gpu_array_bytes(object, seen = IdDict{Any, Nothing}())
         haskey(seen, object) && return 0
         seen[object] = nothing
     end
-    return sum(name -> gpu_array_bytes(getfield(object, name), seen), fieldnames(T); init = 0)
+    return sum(fieldnames(T); init = 0) do name
+        isdefined(object, name) ? gpu_array_bytes(getfield(object, name), seen) : 0
+    end
 end
 
 function benchmark_update(backend, FT, Nxy; nrepeat = NREPEAT)
