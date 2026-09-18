@@ -1,4 +1,5 @@
 import Breeze
+using NumericalRadiation: NumericalRadiation
 using ParallelTestRunner: default_njobs, find_tests, parse_args, filter_tests!, runtests, available_memory
 using Pkg.Artifacts: ensure_artifact_installed
 
@@ -30,6 +31,7 @@ end
 # concurrent downloads, or doctests not liking the extra messages printed to
 # screen during the download.
 ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
+ensure_artifact_installed("ecrad_data", joinpath(pkgdir(NumericalRadiation), "Artifacts.toml"))
 
 if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     GC.gc(true); GC.gc(false); GC.gc(true)

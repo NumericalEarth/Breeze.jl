@@ -3,11 +3,14 @@ module BreezeRRTMGPExt
 using Breeze
 
 using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles, materialize_surface_property,
-                               dynamics_pressure, total_density
+                               dynamics_pressure, total_density,
+                               column_index, compute_radiation_flux_divergence!,
+                               validate_surface_fractions, constant_field_property, resolve_surface_albedos,
+                               assert_bound_surface_temperature, maybe_infer_solar_position,
+                               initialize_cos_zenith!, update_cos_zenith!
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 
-using Dates: AbstractDateTime, DateTime, Millisecond
 using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
@@ -27,11 +30,6 @@ using RRTMGP.RTE: NoScatLWRTE, NoScatSWRTE
 using RRTMGP.RTESolver: solve_lw!, solve_sw!
 
 using ClimaComms: ClimaComms
-
-using Breeze.CelestialMechanics: cos_solar_zenith_angle
-
-const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
-const DateTimeClock = Clock{DateTime}
 
 """
     RRTMGPParameters(constants::ThermodynamicConstants)
@@ -71,11 +69,6 @@ end
 
 # Radiation is column-local: each rank solves its own columns on its child architecture
 rrtmgp_context(arch::Distributed) = rrtmgp_context(child_architecture(arch))
-
-compute_datetime(dt::AbstractDateTime, epoch) = dt
-compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round(Int, 1000t))
-# When epoch is nothing and time is numeric, we can't compute datetime (used for fixed zenith angle)
-compute_datetime(t::Number, epoch::Nothing) = nothing
 
 using Oceananigans.Utils: IterationInterval
 

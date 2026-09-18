@@ -19,7 +19,7 @@ using RRTMGP
 # construction and again after a solve (so a property that evolves is picked up).
 
 # Compare against the column ordering the extension actually uses, rather than a copy of it.
-const rrtmgp_column_index = Base.get_extension(Breeze, :BreezeRRTMGPExt).rrtmgp_column_index
+using Breeze.AtmosphereModels: column_index
 
 # All-sky and clear-sky keep both RTE solvers inside one `RRTMGPSolver`, which publishes accessors;
 # gray keeps a `NoScatLWRTE` and a `NoScatSWRTE` side by side, which do not.
@@ -44,7 +44,7 @@ function expected_surface_array(field, grid, Nband)
     expected = similar(values, Nband, Nx * Ny)
 
     for j in 1:Ny, i in 1:Nx
-        expected[:, rrtmgp_column_index(i, j, Nx)] .= values[i, j, 1]
+        expected[:, column_index(i, j, Nx)] .= values[i, j, 1]
     end
 
     return expected
