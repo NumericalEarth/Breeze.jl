@@ -12,7 +12,7 @@ RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 
 [sources]
 Breeze = {path = ".."}
-NumericalRadiation = {url = "https://github.com/NumericalEarth/NumericalRadiation.jl.git", rev = "glw/breeze-coupling"}
+NumericalRadiation = {url = "https://github.com/NumericalEarth/NumericalRadiation.jl.git", rev = "main"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
