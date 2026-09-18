@@ -927,14 +927,15 @@ end
 # Each formulation supplies three things at a cell (`condensate_content`): per phase, the content
 # χˣ = ∂φ/∂qˣ|_T, with what the dynamics put in place of the departed mass taking it up
 # (`sedimentation_replacement`: dry air where the total density is fixed, the local mixture where
-# it falls with the condensate); per phase, the enthalpy hˣ − hʳ of that condensate relative to
-# its replacement; and ∂φ/∂h, the change of the specific variable per unit heating. A flux out of
-# a cell removes χ per unit mass, so the cell the condensate leaves keeps its temperature; a flux
+# it falls with the condensate); per phase, the transported enthalpy (hˣ on the compressible
+# core, hˣ − hᵈ under the fixed-density convention); and ∂φ/∂h, the local thermal response.
+# A flux out of a cell removes χ per unit mass, so the cell the condensate leaves keeps its temperature; a flux
 # in delivers χ plus ∂φ/∂h (h_upwind − h), the sensible heat the mass brings. For s the content is
 # h and ∂s/∂h = 1, so the sum collapses to the flux form ∂z(h_up F) and ∫ρs is conserved. For θˡⁱ
 # it must not: χ is a Jacobian that varies with the Exner function, so moving it between pressure
 # levels would conserve ∫ρθ, which precipitation does not (heat released at one pressure and
-# absorbed at another). Both formulations respond in temperature identically by construction.
+# absorbed at another). These are instantaneous responses, not exact finite-step thermal
+# reconstructions.
 #
 # The discretization below is shared. The mass fluxes are the ones the tracer tendency actually
 # applies to the cell (`sedimentation_mass_fluxes`, formed per cell because bounds-preserving
@@ -979,9 +980,11 @@ mass flux, `ρᵈ` the [`dynamics_density`](@ref) that carries the thermodynamic
 `(; χ = (χˡ, χⁱ), h = (hˡ, hⁱ), ∂φ∂h)` at a cell: per phase the content `χˣ = ∂φ/∂qˣ` at fixed
 temperature, with what the dynamics put in place of the departed mass taking it up
 ([`sedimentation_replacement`](@ref)), `−ℒˣᵣ / (cᵖᵐ Π)` to leading order for `θˡⁱ` and
-`(cˣ − cʳ) T − (ℒˣᵣ − ℒʳ)` for `s`; per phase the enthalpy `hˣ − hʳ` the falling mass carries,
-which is also the content of `s`; and `∂φ/∂h`, the change of the specific variable per unit
-heating, `1 / (cᵖᵐ Π)` for `θˡⁱ` and one for `s`. In `cᵢ(w)`, `hᵢ(w)` is the enthalpy in the
+`(cˣ − cʳ) T − (ℒˣᵣ − ℒʳ)` for `s`; the transported phase enthalpy (relative to dry air
+under the fixed-density convention); and the local thermal response `∂φ/∂h`. For `θˡⁱ`,
+this is `1 / (cᵖᵐ Π)` at prescribed pressure, or
+`[1 - (Rᵐ/cᵖᵐ)(1 - D/T)] / (cᵛᵐ Π)` at fixed gas partial densities, where
+`D = (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ`. For `s` it is one. In `cᵢ(w)`, `hᵢ(w)` is the enthalpy in the
 upwind cell of `w` and `χᵢ`, `hᵢ`, `∂φ/∂h` are the cell's own.
 
 The tracer tendency advects each humidity at `Wᵢ` in place of `wᵗ`, so the bracket is the

@@ -1029,12 +1029,12 @@ Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, 
     # Every flux is downward: through a cell's upper face it drains the cell above and delivers
     # the cell's content plus its heating response times the enthalpy brought in excess of the
     # cell's own, through its lower face it delivers the content alone, and the cell's qᵈ converts
-    # the change of θ into that of ρᵈ θ. The enthalpy is taken relative to the mixture, like the
-    # content.
+    # the change of θ into that of ρᵈ θ. The transported enthalpy belongs to the phase;
+    # only the local composition derivative uses mixture replacement.
     content(; replacement) = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ; replacement) for k in 1:Nz]
-    enthalpy(; replacement) = [condensate_content(:StaticEnergy, :liquid, T[k], q[k], p[k], pˢᵗ; replacement) for k in 1:Nz]
-    β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], p[k], pˢᵗ) for k in 1:Nz]
-    expected(replacement) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; replacement), enthalpy(; replacement), β;
+    enthalpy = [constants.liquid.heat_capacity * T[k] - constants.liquid.reference_latent_heat for k in 1:Nz]
+    β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], p[k], pˢᵗ; fixed_volume=true) for k in 1:Nz]
+    expected(replacement) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; replacement), enthalpy, β;
                                                             coupling = qᵈ)
 
     scale = maximum(abs.(G))

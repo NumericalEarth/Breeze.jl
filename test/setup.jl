@@ -73,15 +73,17 @@ end
 # Change of the specific variable of `formulation` per unit heating at fixed composition and
 # pressure, ∂φ/∂h: a Float64 central difference in temperature of Breeze's own state functions,
 # divided by the mixture heat capacity. One for static energy, 1 / (cᵖᵐ Π) for potential
-# temperature. The height is immaterial and set to zero.
-function heating_response(formulation, T, q, p, pˢᵗ)
+# temperature. With fixed_volume=true, vary p proportionally to T at fixed gas partial
+# densities and divide by cᵛᵐ instead. The height is immaterial and set to zero.
+function heating_response(formulation, T, q, p, pˢᵗ; fixed_volume=false)
     Thermodynamics = Breeze.Thermodynamics
     constants = Thermodynamics.ThermodynamicConstants(Float64)
     δ = 1e-3
     q₀ = Thermodynamics.MoistureMassFractions(Float64(q.vapor), Float64(q.liquid), Float64(q.ice))
     function φ(Tε)
         if formulation === :LiquidIcePotentialTemperature
-            𝒰 = Thermodynamics.LiquidIcePotentialTemperatureState(0.0, q₀, Float64(pˢᵗ), Float64(p))
+            pε = fixed_volume ? Float64(p) * Tε / Float64(T) : Float64(p)
+            𝒰 = Thermodynamics.LiquidIcePotentialTemperatureState(0.0, q₀, Float64(pˢᵗ), pε)
             return Thermodynamics.with_temperature(𝒰, Tε, constants).potential_temperature
         else
             𝒰 = Thermodynamics.StaticEnergyState(0.0, q₀, 0.0, Float64(p))
@@ -89,7 +91,8 @@ function heating_response(formulation, T, q, p, pˢᵗ)
         end
     end
     cᵖᵐ = Thermodynamics.mixture_heat_capacity(q₀, constants)
-    return (φ(Float64(T) + δ) - φ(Float64(T) - δ)) / (2δ * cᵖᵐ)
+    capacity = fixed_volume ? cᵖᵐ - Thermodynamics.mixture_gas_constant(q₀, constants) : cᵖᵐ
+    return (φ(Float64(T) + δ) - φ(Float64(T) - δ)) / (2δ * capacity)
 end
 
 # Expected sedimentation tendency of the coupling-weighted thermodynamic prognostic in a column

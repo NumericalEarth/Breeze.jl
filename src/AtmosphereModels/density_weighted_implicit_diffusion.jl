@@ -316,6 +316,10 @@ thermodynamic variable's own, so the moved content takes the same implicit trans
 diffusion as the rest of the field (see the note above); each thermodynamic formulation
 implements it by supplying its content function and arguments to this one. A no-op when no
 constituent is advected adaptively implicitly.
+
+For potential temperature this is a derivative-times-increment update, not an exact finite
+thermal-energy reconstruction. Matching the implicit mass flux alone does not remove that
+finite-step error.
 """
 function implicit_sedimentation_step!(model, Δt, velocities, condensate_content, args...)
     constituents = model.sedimentation_constituents

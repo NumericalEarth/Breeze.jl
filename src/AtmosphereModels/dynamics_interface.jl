@@ -195,7 +195,9 @@ responds depends on what the departed mass gives way to:
 
 The thermodynamic formulations differentiate their variable along `q → q + ε (eˣ − r)`, with
 `r` this replacement, for the content per unit falling mass — at which the cell the condensate
-leaves keeps its temperature — and take the enthalpy the mass carries relative to `r` (see
+leaves keeps its temperature instantaneously. This composition derivative is distinct from
+the transported enthalpy: compressible sedimentation carries phase enthalpy, while the
+fixed-density convention transports enthalpy relative to dry air (see
 [`condensate_sedimentation_divergence`](@ref)).
 """
 @inline sedimentation_replacement(dynamics, q) = zero(typeof(q))

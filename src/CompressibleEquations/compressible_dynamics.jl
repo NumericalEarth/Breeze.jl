@@ -460,6 +460,19 @@ AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_
 # takes up the mass the falling condensate leaves behind (see `sedimentation_replacement`).
 AtmosphereModels.sedimentation_replacement(::CompressibleDynamics, q) = q
 
+# Isolated sedimentation holds gas partial densities fixed: dp/p = dT/T and
+# ρ cᵛᵐ dT/dt = Q_h - Σ hˣ rˣ. Thus dθ/dT = [1 - κ(1 - D/T)] / Π.
+# Only phase enthalpy crosses a face; mixture subtraction belongs in the local χ.
+@inline function PotentialTemperatureFormulations.sedimentation_thermal_response(::CompressibleDynamics, q, constants, T, Π)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    D = (constants.liquid.reference_latent_heat * q.liquid + constants.ice.reference_latent_heat * q.ice) / cᵖᵐ
+    hˡ = constants.liquid.heat_capacity * T - constants.liquid.reference_latent_heat
+    hⁱ = constants.ice.heat_capacity * T - constants.ice.reference_latent_heat
+    β = (1 - Rᵐ / cᵖᵐ * (1 - D / T)) / ((cᵖᵐ - Rᵐ) * Π)
+    return (hˡ, hⁱ), β
+end
+
 #####
 ##### Prognostic fields
 #####

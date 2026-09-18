@@ -146,12 +146,11 @@ AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, 
 # the mixture changing as condensate gives way to its replacement (lnΠ = (Rᵐ / cᵖᵐ) ln(p / pˢᵗ)
 # is written through Π so that every state type that defines an Exner function serves).
 #
-# What the falling mass carries between cells is its enthalpy relative to its replacement,
-# hˣ − hʳ = Δcˣ T − (ℒˣᵣ − ℒʳ), the content of the static energy. A cell receiving it converts
-# that sensible heat through ∂θˡⁱ/∂h = 1 / (cᵖᵐ Π), the factor that turns heating rates into ρθ
-# tendencies. χ itself is not transported: it varies with Π, so moving it between pressure levels
-# would conserve ∫ρθ, which precipitation does not. The shared
-# `condensate_sedimentation_divergence` owns the discretization.
+# The transported enthalpy and thermal response depend on the dynamics. Compressible
+# sedimentation carries phase enthalpy and heats at fixed gas partial densities; the anelastic
+# core retains its dry-air replacement convention at fixed pressure. χ remains a local
+# composition derivative, not a transported quantity. These are instantaneous responses;
+# multiplying them by a finite mass increment does not exactly reconstruct thermal energy.
 @inline function potential_temperature_condensate_content(i, j, k, grid, formulation, dynamics, constants,
                                                           microphysics, microphysical_fields, specific_prognostic_moisture)
     𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
@@ -178,13 +177,19 @@ AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, 
     χˡ = -(ℒˡᵣ - ℒʳ - Δcˡ * D) / (cᵖᵐ * Π) + θlnΠ * (Rʳ / Rᵐ + Δcˡ / cᵖᵐ)
     χⁱ = -(ℒⁱᵣ - ℒʳ - Δcⁱ * D) / (cᵖᵐ * Π) + θlnΠ * (Rʳ / Rᵐ + Δcⁱ / cᵖᵐ)
 
-    # Enthalpy of each phase relative to its replacement, and the response of θ to heating
     T = Π * θ + D
-    hˡ = Δcˡ * T - (ℒˡᵣ - ℒʳ)
-    hⁱ = Δcⁱ * T - (ℒⁱᵣ - ℒʳ)
-    ∂θ∂h = 1 / (cᵖᵐ * Π)
+    h, ∂θ∂h = sedimentation_thermal_response(dynamics, q, constants, T, Π)
+    return (; χ = (χˡ, χⁱ), h, ∂φ∂h = ∂θ∂h)
+end
 
-    return (; χ = (χˡ, χⁱ), h = (hˡ, hⁱ), ∂φ∂h = ∂θ∂h)
+# Fixed-density convention: condensate replaces dry air and pressure is prescribed.
+@inline function sedimentation_thermal_response(dynamics, q, constants, T, Π)
+    r = sedimentation_replacement(dynamics, q)
+    cʳ = mixture_heat_capacity(r, constants)
+    ℒʳ = constants.liquid.reference_latent_heat * r.liquid + constants.ice.reference_latent_heat * r.ice
+    hˡ = (constants.liquid.heat_capacity - cʳ) * T - (constants.liquid.reference_latent_heat - ℒʳ)
+    hⁱ = (constants.ice.heat_capacity - cʳ) * T - (constants.ice.reference_latent_heat - ℒʳ)
+    return (hˡ, hⁱ), 1 / (mixture_heat_capacity(q, constants) * Π)
 end
 
 #####
