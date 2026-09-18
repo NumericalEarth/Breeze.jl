@@ -1,0 +1,63 @@
+{
+  "source_commit": "a03c3b7e5bd48cd66efb216434109de459bb26f2",
+  "hashes_match_committed_harness": true,
+  "cuda32_isolated_unique_cases": 85,
+  "cuda32_isolated_overlap": 0,
+  "artifacts_sha256": {
+    "cuda-64-coupled.toml": "da324b1a3c85d36493b64f9bfda9fecd022e890aa21f3f98a87ea4f477d514d9",
+    "cuda-32-finite-only.toml": "660f1f4abfa520a1c5ae789344d8859f78758895f62c811841581d199c2da659",
+    "cuda-32-isolated-partial.toml": "6f5157fab73347209d793181c7cdd9f83d9b07f79a299416d1a989128235ee6c",
+    "cuda-32-coupled.toml": "b9097cec74fc8c7749d333cb36dfcefed16a80ab86719b4571b5ab587272f9bb"
+  },
+  "finite_only_driver_sha256": {
+    "codex-112-finite-only.jl": "613186819c8b3d68b7724036ee96e2d0466d23e5b0383e0f96cd0948e73126cb",
+    "codex-112-finite-only-selected.jl": "ee156db7b0bf9b8564653c6a727540d5348061e4a754bac26b75700d9e80834c",
+    "codex-112-cuda32-completion.sbatch": "c02eb786db83874684ce13749a0f2f35c50e4b35fcca49338c38358e6aba5c99",
+    "codex-112-finite-only-selection.json": "ab08231e9d162537925e5705db66e20c7e4c9668b5fed280c8ca06c5bc35500c",
+    "codex-112-cuda32-completion-harness.sha256": "4723803310ec41f635cfca4a392ff18082957666b9660211470c6bcfe7f36b12"
+  },
+  "finite_only_selection": {
+    "source_commit": "a03c3b7e5bd48cd66efb216434109de459bb26f2",
+    "case_count": 24,
+    "names": [
+      "implicit-liquid-LiquidIcePotentialTemperature-dt1.5-closedfalse",
+      "implicit-liquid-LiquidIcePotentialTemperature-dt1.5-closedtrue",
+      "implicit-liquid-LiquidIcePotentialTemperature-dt2.5-closedfalse",
+      "implicit-liquid-LiquidIcePotentialTemperature-dt2.5-closedtrue",
+      "implicit-liquid-LiquidIcePotentialTemperature-dt10.0-closedfalse",
+      "implicit-liquid-LiquidIcePotentialTemperature-dt10.0-closedtrue",
+      "implicit-liquid-StaticEnergy-dt1.5-closedfalse",
+      "implicit-liquid-StaticEnergy-dt1.5-closedtrue",
+      "implicit-liquid-StaticEnergy-dt2.5-closedfalse",
+      "implicit-liquid-StaticEnergy-dt2.5-closedtrue",
+      "implicit-liquid-StaticEnergy-dt10.0-closedfalse",
+      "implicit-liquid-StaticEnergy-dt10.0-closedtrue",
+      "implicit-ice-LiquidIcePotentialTemperature-dt1.5-closedfalse",
+      "implicit-ice-LiquidIcePotentialTemperature-dt1.5-closedtrue",
+      "implicit-ice-LiquidIcePotentialTemperature-dt2.5-closedfalse",
+      "implicit-ice-LiquidIcePotentialTemperature-dt2.5-closedtrue",
+      "implicit-ice-LiquidIcePotentialTemperature-dt10.0-closedfalse",
+      "implicit-ice-LiquidIcePotentialTemperature-dt10.0-closedtrue",
+      "implicit-ice-StaticEnergy-dt1.5-closedfalse",
+      "implicit-ice-StaticEnergy-dt1.5-closedtrue",
+      "implicit-ice-StaticEnergy-dt2.5-closedfalse",
+      "implicit-ice-StaticEnergy-dt2.5-closedtrue",
+      "implicit-ice-StaticEnergy-dt10.0-closedfalse",
+      "implicit-ice-StaticEnergy-dt10.0-closedtrue"
+    ],
+    "prior_saved_cases": 61,
+    "overlap_with_prior": [],
+    "loop_sha256": "8965d74a5d853cbc82e6c07bad189605ce588724d1eabeeed578fcefe5d688e9",
+    "harness_sha256": {
+      "experiments.jl": "2bc76ae825f6e5a6fd6432828f5693619037fd43e81b3bdbbd47012f18d46408",
+      "run_campaign.jl": "b6a9fa5f56858dd13f83a3e02f838c6c6ea23d36cf149fc9cb88766fbb80650b",
+      "Project.toml": "64125c4da5e36dea5823759c90e629f40c65cfa9481b9d996a3224f6077f7177",
+      "Manifest.toml": "19351cbf1a127125ad62ac285a4602d8aed4ad3204a98365296bf84808db27bb"
+    }
+  },
+  "jobs": {
+    "1259": "TIMEOUT; 61 saved cases, no completed suite assertion count",
+    "1261": "COMPLETED exit0; CUDA64 coupled 8 cases/242 assertions",
+    "1266": "COMPLETED exit0; CUDA32 coupled 8 cases/242 assertions, finite-only 24 cases/36 assertions"
+  }
+}

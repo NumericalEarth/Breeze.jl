@@ -1,4 +1,4 @@
-# Recorded campaign: 17 September 2026
+# Recorded campaign: 17–18 September 2026
 
 **Conclusion: these tests falsify an unconditional energy-conservation claim.**
 They support two isolated compressible corrections, but neither a full model
@@ -18,8 +18,8 @@ Each TOML contains source and script/environment hashes. See the parent
 | CPU | Float64 | 85 / 201 pass | 8 / 242 pass |
 | CPU | Float32 | 85 / 201 pass | NOT RUN |
 | Metal, Apple M5 Max | Float32 | 85 / 201 pass | 8 / 242 pass |
-| CUDA, NVIDIA Tesla T4 | Float64 | 85 / 201 pass | Attempted; no case results before time limit |
-| CUDA, NVIDIA Tesla T4 | Float32 | NOT RUN | NOT RUN |
+| CUDA, NVIDIA Tesla T4 | Float64 | 85 / 201 pass | 8 / 242 pass |
+| CUDA, NVIDIA Tesla T4 | Float32 | 85 unique cases across two jobs; finite-only part 36 assertions pass | 8 / 242 pass |
 
 These assertion counts validate the harness and controls, **not energy
 conservation**. All 12 original isothermal composition-contrast cases fail the
@@ -27,20 +27,34 @@ physical invariant on each tested backend/precision. Raw data are the adjacent
 `cpu-*`, `metal-*` and `cuda-*` TOML files; temperature fields/tendencies were computed on
 the selected backend, with host Float64 diagnostic analysis.
 
-CUDA used Julia 1.12.6, CUDA.jl 6.4.0, runtime 12.9.0/compiler 12.9.86, and
-system driver 550.90.12. The isolated suite completed all 85 cases and 201
-assertions in 5m15.9s after substantial startup/precompilation. The single
-20-minute Slurm job then hit its wall limit (accounted elapsed 20m20s); it
-produced no coupled case results and never reached Float32. No extension or
-second allocation was made. This is a completed CUDA isolated suite, **not**
-a completed CUDA campaign matrix.
+CUDA used Julia 1.12.6, CUDA.jl 6.4.0, runtime 12.9.0/compiler 12.9.86,
+system driver 550.90.12, and the existing Tesla T4 node. Each allocation used
+one GPU/two CPUs and a 20-minute bound. No scalar indexing was enabled.
 
-The remote worktree remained at `dae9e46d`, with only the untracked campaign
-directory (`source_dirty=true`). Its script/Project/Manifest SHA256 hashes
-match campaign commit `18f08809` exactly; its production source diff is empty.
-CUDA64 reproduces the nonisothermal beta_cv ratios above to <9e-14 from unity.
-The active-limiter mass residual is -1.80578365e-5 kg/m²/s, with local
-phase-only temperature residual ≤6.64e-16 K/s.
+The initial CUDA64 isolated run completed 85 cases/201 assertions before its
+allocation timed out. Its production source was dae9e46d, with an untracked
+campaign directory; script/environment hashes match 18f08809. CUDA64 coupled
+then completed in job1261: eight cases/242 finite-state assertions, source
+a03c3b7e (clean). Its profiles match recorded CPU64 within 5.12e-13 K.
+
+CUDA32 isolated completed across two allocations: job1259 saved 61 cases before
+a compilation-bound timeout; job1266 executed only the missing 24 finite
+implicit cases (36/36 assertions), plus the eight coupled cases (242/242).
+The 61-case file has no completed flag or final assertion summary; no single-run
+85-case/201-assertion pass is claimed. The two case-name sets are disjoint.
+All four harness/environment hashes match the committed files. Both later
+worktrees were clean at a03c3b7e, whose production tree is the original baseline.
+See [continuation provenance](cuda-continuation-provenance.json) for hashes,
+case selection, and job outcomes. The finite-only driver retained the exact
+committed loop/functions/assertions and changed only selection, suite label,
+and the absolute experiments.jl loader path.
+
+CUDA64 reproduces the nonisothermal beta_cv ratios to <9e-14 from unity.
+CUDA32 ratios range from 0.99999436 to 1.00005609, with maximum absolute
+rate error 8.15e-8 K/s; its isothermal phase-only maximum is 1.01e-7 K/s.
+The active bounded-limiter mass residual is -1.80607e-5 kg/m²/s on CUDA32.
+These are diagnostic substitutions on the original source, distinct from
+validation of the subsequently prepared compressible-only candidate.
 
 ## Isothermal compressible defect: demonstrated
 
@@ -110,8 +124,10 @@ temperature errors (-0.501229, +0.451009) K on CPU64 and
 (-0.501222, +0.451019) K on Metal32 (open bottom). The independent finite
 reference uses the PR's **dry-air replacement convention**, not a unique
 physical anelastic energy law. Static-energy controls agree within 1.14e-13 K
-(CPU64), 3.24e-5 K (Float32). The Float32 floor is
-`eps(Float32)*280 = 3.34e-5 K`; those residuals are numerical noise.
+(CPU64), 3.24e-5 K (CPU/Metal Float32), and 5.99e-5 K (CUDA32). The Float32 floor is
+`eps(Float32)*280 = 3.34e-5 K`; these controls remain within the 2e-4 K
+harness tolerance. CUDA32 potential-temperature errors reach 0.501220 K,
+consistent with the finite-step limitation observed on the other backends.
 
 The open CPU64 theta test has thermal-energy residual -1259.45 J/m². The
 corresponding closed test has near-zero column residual despite cell errors
