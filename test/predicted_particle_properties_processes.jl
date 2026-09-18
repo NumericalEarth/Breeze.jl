@@ -743,7 +743,7 @@ end
                                  zero(FT), zero(FT), FT(1e8), one(FT))
         q = MoistureMassFractions(FT(0.005), FT(1.1e-4), FT(1e-5))
         𝒰 = LiquidIcePotentialTemperatureState(FT(280), q, FT(1e5), FT(9e4))
-        aerosol = AerosolActivation(AerosolMode(FT))
+        aerosol = AerosolActivation(AerosolMode(FT); prognostic_aerosol = true)
 
         p3_with_aerosol = PredictedParticlePropertiesMicrophysics(FT; aerosol)
         aerosol_tendencies = @inferred bundled_p3_tendencies(

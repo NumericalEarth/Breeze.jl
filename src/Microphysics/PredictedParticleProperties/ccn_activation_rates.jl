@@ -66,8 +66,9 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Dispatch CCN activation: prescribed (Nothing) or prognostic (AerosolActivation).
-Returns `(; mass, number)` named tuple.
+Dispatch CCN activation on the aerosol configuration, returning `(; mass, number)`:
+prescribed Nᶜˡ (`Nothing`), a fixed population, or a prognostic reservoir that `number`
+also depletes.
 """
 @inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ,
                                         qᵛ, qᵛ⁺ˡ, T, ρ, constants)
@@ -83,8 +84,17 @@ Returns `(; mass, number)` named tuple.
     return (; mass, number = zero(FT))
 end
 
-@inline function compute_ccn_activation(aerosol::AerosolActivation, p3, qᶜˡ, nᶜˡ, nᵃ,
-                                        qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+# Fixed population: `ℳ.nᵃ` is zero here, as in the prescribed-Nᶜˡ path, so the rate is
+# taken against the whole distribution instead.
+@inline function compute_ccn_activation(aerosol::AerosolActivation{FT, false}, p3, qᶜˡ, nᶜˡ, nᵃ,
+                                        qᵛ, qᵛ⁺ˡ, T, ρ, constants) where FT
+    result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
+    return (; mass = result.qcnuc, number = result.ncnuc)
+end
+
+# Prognostic reservoir: `nᵃ` is what remains, and caps what can still activate.
+@inline function compute_ccn_activation(aerosol::AerosolActivation{FT, true}, p3, qᶜˡ, nᶜˡ, nᵃ,
+                                        qᵛ, qᵛ⁺ˡ, T, ρ, constants) where FT
     result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
     return (; mass = result.qcnuc, number = result.ncnuc)
 end

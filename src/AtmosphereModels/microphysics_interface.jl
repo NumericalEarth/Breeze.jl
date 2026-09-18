@@ -478,8 +478,8 @@ Return the aerosol population stored in a microphysics scheme's native units.
 
 The units are the scheme's own: a volumetric distribution returns [m⁻³], while a
 distribution specified per unit mass of air returns [kg⁻¹]. Use
-[`initial_aerosol_number_density`](@ref) to obtain the value that the prognostic `ρnᵃ`
-holds, whichever basis a scheme uses.
+[`initial_aerosol_number_density`](@ref) to obtain the value a prognostic `ρnᵃ` holds,
+whichever basis a scheme uses. A scheme may report a population here and carry no `ρnᵃ`.
 
 Returns `0` by default.
 """
@@ -491,9 +491,11 @@ $(TYPEDSIGNATURES)
 Return the default aerosol number *density* ``ρ nᵃ`` [m⁻³] for a microphysics scheme,
 given the air density `ρ` (a field for grid models, a number for parcels).
 
-This is the value `set!` writes into the prognostic field `ρnᵃ` when the user supplies
-neither `nᵃ` nor `ρnᵃ`. It is derived from the aerosol size distribution stored in the
-microphysics scheme, so it stays consistent with the activation parameters.
+This is the value `set!` writes into the prognostic field `ρnᵃ` when the scheme has one
+and the user supplies neither `nᵃ` nor `ρnᵃ`. It is derived from the aerosol size
+distribution stored in the microphysics scheme, so it stays consistent with the activation
+parameters. A scheme may report a population here and still have no field to write it to;
+`aerosol_field_names(microphysics) == ()` is what says so.
 
 Each scheme is responsible for the units of its own aerosol distribution: the density
 argument is here so that a scheme whose distribution is specified *per unit mass*

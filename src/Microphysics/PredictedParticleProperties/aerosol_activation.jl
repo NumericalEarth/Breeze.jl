@@ -41,12 +41,12 @@ Default chemistry is ammonium sulfate (NH₄)₂SO₄.
   [`total_activated_number`](@ref) and `sum_aerosol_number` are all [kg⁻¹], and the
   activation cap compares them against the per-mass `nᶜˡ = ρnᶜˡ/ρ` and `nᵃ = ρnᵃ/ρ`.
 
-  The prognostic reservoir `ρnᵃ` holds the ρ-weighted counterpart. Nothing needs to be
-  initialized by hand: `AtmosphereModel` construction and every `set!` write it as the air
-  density times this field summed over all of an [`AerosolActivation`](@ref)'s modes, so a
-  multi-mode population is seeded from its own parameters and stays consistent with them.
-  Pass `nᵃ` [kg⁻¹] or `ρnᵃ` [m⁻³] to `set!` to override, which is also how a partly depleted
-  reservoir survives a `set!`.
+  With [`AerosolActivation`](@ref)'s `prognostic_aerosol`, the reservoir `ρnᵃ` holds the
+  ρ-weighted counterpart and nothing needs to be initialized by hand: `AtmosphereModel`
+  construction and every `set!` write it as the air density times this field summed over all
+  modes, so a multi-mode population is seeded from its own parameters and stays consistent
+  with them. Pass `nᵃ` [kg⁻¹] or `ρnᵃ` [m⁻³] to `set!` to override, which is also how a
+  partly depleted reservoir survives a `set!`.
 - `mean_radius`: Geometric mean radius [m], default 0.05 μm
 - `geometric_std`: Geometric standard deviation [-], default 2
 - `vant_hoff_factor`: van't Hoff factor [-], default 3
@@ -110,7 +110,9 @@ end
 
 # Container for the multi-mode aerosol activation parameters; see the `AerosolActivation`
 # constructor.
-struct AerosolActivation{FT, M}
+# `D` is `prognostic_aerosol`, in the type rather than a field so its gates fold to
+# constants (see `supersaturation_prognostic_names` in `p3_microphysical_state.jl`).
+struct AerosolActivation{FT, D, M}
     modes :: M                       # Tuple of AerosolMode{FT}
     molecular_weight_water :: FT     # Mw [kg/mol]
     universal_gas_constant :: FT     # R [J/(mol·K)]
@@ -137,6 +139,13 @@ Construct an `AerosolActivation` from one or more [`AerosolMode`](@ref)s.
 
 The activation timescale ``τ_{act}`` controls how quickly the cloud
 droplet number relaxes toward the activated equilibrium. Default 1.0 s.
+
+`prognostic_aerosol` is independent of the droplet number, which is prognostic either way.
+`false` (default) holds the population at the distribution total, allocating no ``ρn^a``:
+the cap ``\\min(N_{\\text{act}}, n^{cl} + n^a)`` never binds and droplet number relaxes
+toward ``N_{\\text{act}}(S)`` at every call. `true` carries the reservoir ``ρn^a`` instead,
+drawn down one per activated droplet, so the cap tightens as it is consumed and a
+supersaturation rebound cannot re-activate aerosol already in the cloud.
 
 Everything else the activation physics needs is a keyword here rather than a
 literal in [`activated_number`](@ref): the condensate density and molecular
@@ -174,8 +183,19 @@ length(aerosol.modes)
 # output
 2
 ```
+
+The population is fixed unless `prognostic_aerosol` asks for a reservoir:
+
+```jldoctest
+using Breeze.Microphysics.PredictedParticleProperties: AerosolActivation, AerosolMode
+summary(AerosolActivation(AerosolMode()))
+
+# output
+"AerosolActivation(1 mode, fixed reservoir)"
+```
 """
 function AerosolActivation(mode1::AerosolMode{FT}, rest::AerosolMode{FT}...;
+                           prognostic_aerosol = false,
                            thermodynamic_constants = ThermodynamicConstants(FT),
                            molecular_weight_water = thermodynamic_constants.vapor.molar_mass,
                            universal_gas_constant = thermodynamic_constants.molar_gas_constant,
@@ -194,7 +214,9 @@ function AerosolActivation(mode1::AerosolMode{FT}, rest::AerosolMode{FT}...;
                            minimum_saturation_mass_fraction = 1e-20) where FT
     modes = (mode1, rest...)
     liquid_water_density = thermodynamic_constants.liquid.density
-    return AerosolActivation(modes, FT(molecular_weight_water),
+    prognostic_aerosol = Bool(prognostic_aerosol)
+    return AerosolActivation{FT, prognostic_aerosol, typeof(modes)}(
+                             modes, FT(molecular_weight_water),
                              FT(universal_gas_constant), FT(activation_timescale),
                              FT(liquid_water_density),
                              FT(surface_tension_reference),
@@ -207,7 +229,19 @@ function AerosolActivation(mode1::AerosolMode{FT}, rest::AerosolMode{FT}...;
                              FT(minimum_saturation_mass_fraction))
 end
 
-Base.summary(a::AerosolActivation) = "AerosolActivation($(length(a.modes)) mode$(length(a.modes) == 1 ? "" : "s"))"
+"""
+$(TYPEDSIGNATURES)
+
+Whether `ρnᵃ` is a prognostic field; see `prognostic_aerosol` in the
+[`AerosolActivation`](@ref) constructor.
+"""
+@inline has_prognostic_aerosol(::AerosolActivation{FT, D}) where {FT, D} = D
+
+function Base.summary(a::AerosolActivation)
+    n = length(a.modes)
+    reservoir = has_prognostic_aerosol(a) ? "prognostic reservoir" : "fixed reservoir"
+    return "AerosolActivation($n mode$(n == 1 ? "" : "s"), $reservoir)"
+end
 
 function Base.show(io::IO, a::AerosolActivation)
     print(io, summary(a))
@@ -354,6 +388,9 @@ droplet of the activated radius, 1 μm by default.
     return (; ncnuc, qcnuc)
 end
 
+# Fixed-population form: with the whole distribution as the pool the cap cannot bind
+# (`total_activated_number` is already capped there), leaving the plain relaxation toward
+# the M&G2007 equilibrium.
 @inline function prognostic_ccn_activation_rate(aerosol::AerosolActivation, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
     return prognostic_ccn_activation_rate(aerosol, nᶜˡ, sum_aerosol_number(aerosol), qᵛ, qᵛ⁺ˡ, T)
 end
