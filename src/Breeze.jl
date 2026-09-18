@@ -45,6 +45,7 @@ export
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
+    DYCOMSRadiation,
     BackgroundAtmosphere,
     standard_ozone_profile,
     GrayOptics,

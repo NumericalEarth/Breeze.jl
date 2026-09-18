@@ -71,6 +71,7 @@ export
 
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
+    DYCOMSRadiation,
     BackgroundAtmosphere,
     standard_ozone_profile,
     materialize_background_atmosphere,
@@ -159,6 +160,7 @@ include("atmosphere_model.jl")
 include("atmosphere_model_buoyancy.jl")
 include("solar_position.jl")
 include("radiation_interface.jl")
+include("dycoms_radiation.jl")
 include("dynamics_kernel_functions.jl")
 include("implicit_vertical_advection.jl")
 include("density_weighted_implicit_diffusion.jl")
