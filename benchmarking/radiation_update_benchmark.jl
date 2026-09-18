@@ -104,8 +104,11 @@ function gpu_array_bytes(object, seen = IdDict{Any, Nothing}())
         haskey(seen, storage) && return 0
         seen[storage] = nothing
         return sizeof(eltype(storage)) * length(storage)
-    elseif object isa AbstractArray || object isa Number || object isa Symbol || object isa AbstractString ||
-           object isa Function || object isa Module || object isa Type || isnothing(object)
+    elseif object isa AbstractArray
+        isbitstype(eltype(object)) && return 0
+        return sum(x -> gpu_array_bytes(x, seen), object; init = 0)
+    elseif object isa Number || object isa Symbol || object isa AbstractString || object isa Function ||
+           object isa Module || object isa Type || isnothing(object)
         return 0
     elseif object isa Tuple || object isa NamedTuple
         return sum(x -> gpu_array_bytes(x, seen), object; init = 0)
