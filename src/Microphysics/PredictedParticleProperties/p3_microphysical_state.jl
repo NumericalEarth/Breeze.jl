@@ -66,6 +66,8 @@ end
 # air density here. Skipping the multiplication makes the diagnosed `nᵃ = ρnᵃ / ρ`
 # proportional to `1 / ρ` instead of equal to the configured number mixing ratio.
 # The prescribed-Nᶜˡ path has no `ρnᵃ` field, and returns 0 to match the framework default.
+# A fixed population has no `ρnᵃ` either, so there is nothing to seed; the number reported
+# here is still the population, which is what it permanently is.
 @inline AM.initial_aerosol_number(p3::P3) = initial_aerosol_number(p3.aerosol)
 @inline initial_aerosol_number(::Nothing) = 0
 @inline initial_aerosol_number(aerosol::AerosolActivation) = sum_aerosol_number(aerosol)
@@ -91,17 +93,20 @@ end
 @inline supersaturation_prognostic_names(::ProcessRate{FT, false}) where FT = ()
 @inline supersaturation_prognostic_names(::ProcessRate{FT, true}) where FT = (:ρsᵛ⁺ˡ,)
 
-# Droplet number and aerosol depletion are prognostic iff `p3.aerosol` is a concrete
-# `AerosolActivation`. In the prescribed-Nᶜˡ path, `nᶜˡ`
+# Droplet number is prognostic iff `p3.aerosol` is a concrete `AerosolActivation`. In the
+# prescribed-Nᶜˡ path, `nᶜˡ`
 # is the scheme parameter `p3.cloud.number_concentration` at every microphysics call, so
 # no rate reads `ρnᶜˡ` or `ρnᵃ`. Advecting them would integrate transport unrelated to the
 # number the physics uses, and `materialize_microphysical_fields` does not even allocate
 # them in that path.
 @inline cloud_prognostic_names(::Nothing) = (:ρqᶜˡ,)
-@inline cloud_prognostic_names(_) = (:ρqᶜˡ, :ρnᶜˡ)
+@inline cloud_prognostic_names(::AerosolActivation) = (:ρqᶜˡ, :ρnᶜˡ)
 
+# The reservoir is a separate switch: prognostic droplet number does not require an
+# aerosol budget, so only `prognostic_aerosol = true` carries `ρnᵃ`.
 @inline aerosol_prognostic_names(::Nothing) = ()
-@inline aerosol_prognostic_names(_) = (:ρnᵃ,)
+@inline aerosol_prognostic_names(::AerosolActivation{FT, false}) where FT = ()
+@inline aerosol_prognostic_names(::AerosolActivation{FT, true}) where FT = (:ρnᵃ,)
 
 @inline AM.aerosol_field_names(p3::P3) = aerosol_prognostic_names(p3.aerosol)
 
@@ -115,7 +120,7 @@ Return prognostic field names for the P3 scheme.
 - Rain: ρqʳ, ρnʳ
 - Ice (always): ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ
 - Liquid supersaturation (only when `predict_supersaturation = true`): ρsᵛ⁺ˡ
-- Aerosol (only when `aerosol::AerosolActivation` is set): ρnᵃ
+- Aerosol (only when `aerosol::AerosolActivation` sets `prognostic_aerosol`): ρnᵃ
 """
 @inline function AM.prognostic_field_names(p3::P3)
     cloud_names = cloud_prognostic_names(p3.aerosol)
@@ -178,13 +183,14 @@ AM.negative_moisture_correction(p3::P3) = p3.negative_moisture_correction
 # aerosol container so each tuple folds to a constant. The prescribed-Nᶜˡ path has no
 # `ρnᶜˡ`/`ρnᵃ` fields at all, so there is nothing to repair.
 @inline cloud_number_correction_pairs(::Nothing, μ) = ()
-@inline cloud_number_correction_pairs(_, μ) = ((μ.ρnᶜˡ, μ.ρqᶜˡ),)
+@inline cloud_number_correction_pairs(::AerosolActivation, μ) = ((μ.ρnᶜˡ, μ.ρqᶜˡ),)
 
 @inline cloud_number_correction_fields(::Nothing, μ) = ()
-@inline cloud_number_correction_fields(_, μ) = (μ.ρnᶜˡ,)
+@inline cloud_number_correction_fields(::AerosolActivation, μ) = (μ.ρnᶜˡ,)
 
 @inline aerosol_correction_fields(::Nothing, μ) = ()
-@inline aerosol_correction_fields(_, μ) = (μ.ρnᵃ,)
+@inline aerosol_correction_fields(::AerosolActivation{FT, false}, μ) where FT = ()
+@inline aerosol_correction_fields(::AerosolActivation{FT, true}, μ) where FT = (μ.ρnᵃ,)
 
 """
 $(TYPEDSIGNATURES)
@@ -248,10 +254,12 @@ The P3 scheme requires the following fields on `grid`:
 - `ρqⁱ`, `ρnⁱ`: Ice mass and number densities
 - `ρqᶠ`, `ρbᶠ`: Rime mass and volume densities
 - `ρqʷⁱ`: Liquid water on ice mass density
-- `ρnᶜˡ`, `ρnᵃ`: Cloud number and unactivated aerosol number densities, allocated only
-when `p3.aerosol isa AerosolActivation`. The prescribed-Nᶜˡ path takes droplet
-  number from `p3.cloud.number_concentration`, so neither field exists there and
-  neither is advected.
+- `ρnᶜˡ`: Cloud number density, allocated only when `p3.aerosol isa AerosolActivation`.
+  The prescribed-Nᶜˡ path takes droplet number from `p3.cloud.number_concentration`, so
+  the field does not exist there and is not advected.
+- `ρnᵃ`: Unactivated aerosol number density, allocated only when that `AerosolActivation`
+  sets `prognostic_aerosol`. A fixed population is a scheme parameter, so nothing is
+  allocated or advected for it.
 
 **Diagnostic:**
 - `qᵛ`: Vapor specific humidity (mirrors the prognostic vapor field)
@@ -323,14 +331,19 @@ end
 
 # Droplet number and unactivated aerosol. The prescribed-Nᶜˡ path takes the droplet
 # number from `p3.cloud.number_concentration` at every call and never reads `ρnᶜˡ`
-# or `ρnᵃ`.
+# or `ρnᵃ`. A fixed population needs neither `ρnᵃ` nor the `nᵃ` diagnostic mirroring it.
 @inline aerosol_activation_fields(::Nothing, grid) = (;)
 
-@inline aerosol_activation_fields(_, grid) =
-    (; ρnᶜˡ = CenterField(grid),        # Cloud number density [1/m³]
-     ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
-     nᶜˡ = CenterField(grid),         # Cloud number concentration [kg⁻¹]
-     nᵃ = CenterField(grid))          # Unactivated aerosol [kg⁻¹]
+@inline aerosol_activation_fields(aerosol::AerosolActivation, grid) =
+    merge((; ρnᶜˡ = CenterField(grid),  # Cloud number density [1/m³]
+           nᶜˡ = CenterField(grid)),    # Cloud number concentration [kg⁻¹]
+          aerosol_reservoir_fields(aerosol, grid))
+
+@inline aerosol_reservoir_fields(::AerosolActivation{FT, false}, grid) where FT = (;)
+
+@inline aerosol_reservoir_fields(::AerosolActivation{FT, true}, grid) where FT =
+    (; ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
+     nᵃ = CenterField(grid))            # Unactivated aerosol [kg⁻¹]
 
 # Predicted supersaturation, off by default. With the switch off every rate that
 # would touch `sᵛ⁺ˡ` is gated to zero, so the prognostic carries no information.
@@ -382,7 +395,7 @@ end
     bᶠ  = rime_state.bᶠ
     # ρsᵛ⁺ˡ is absent unless predicted supersaturation is enabled; default to 0.
     sᵛ⁺ˡ = get_or_default(μ, Val(:ρsᵛ⁺ˡ), 0 * ρ) / ρ
-    # ρnᵃ is absent unless prognostic-aerosol path is enabled; default to 0.
+    # ρnᵃ is absent unless the reservoir is prognostic; default to 0.
     nᵃ = get_or_default(μ, Val(:ρnᵃ), 0 * ρ) / ρ
     return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, sᵛ⁺ˡ, nᵃ,
                                 vertical_velocity(velocities, FT))
@@ -408,11 +421,14 @@ end
 # path the `ρnᶜˡ`/`ρnᵃ` fields do not exist at all.
 @inline grid_cloud_droplet_number(p3::P3, ::Nothing, μ, i, j, k, ρ) =
     p3.cloud.number_concentration / ρ
-@inline grid_cloud_droplet_number(p3::P3, _, μ, i, j, k, ρ) =
+@inline grid_cloud_droplet_number(p3::P3, ::AerosolActivation, μ, i, j, k, ρ) =
     @inbounds μ.ρnᶜˡ[i, j, k] / ρ
 
 @inline grid_aerosol_number(::Nothing, μ, i, j, k, ρ) = 0 * ρ
-@inline grid_aerosol_number(_, μ, i, j, k, ρ) = @inbounds μ.ρnᵃ[i, j, k] / ρ
+@inline grid_aerosol_number(::AerosolActivation{FT, false}, μ, i, j, k, ρ) where FT = 0 * ρ
+
+@inline grid_aerosol_number(::AerosolActivation{FT, true}, μ, i, j, k, ρ) where FT =
+    @inbounds μ.ρnᵃ[i, j, k] / ρ
 
 # Same for the optional supersaturation prognostic: absent with prediction
 # disabled, where it collapses to zero anyway.
@@ -569,9 +585,17 @@ end
 # Configurations without the prognostic have no field to write.
 @inline write_cloud_number_diagnostics!(μ, i, j, k, ::Nothing, ℳ) = nothing
 
-@inline function write_cloud_number_diagnostics!(μ, i, j, k, _, ℳ)
+@inline function write_cloud_number_diagnostics!(μ, i, j, k, aerosol::AerosolActivation, ℳ)
     @inbounds μ.nᶜˡ[i, j, k] = ℳ.nᶜˡ
-    @inbounds μ.nᵃ[i, j, k]  = ℳ.nᵃ
+    write_aerosol_diagnostic!(μ, i, j, k, aerosol, ℳ)
+    return nothing
+end
+
+# A fixed population has no `nᵃ` field to mirror.
+@inline write_aerosol_diagnostic!(μ, i, j, k, ::AerosolActivation{FT, false}, ℳ) where FT = nothing
+
+@inline function write_aerosol_diagnostic!(μ, i, j, k, ::AerosolActivation{FT, true}, ℳ) where FT
+    @inbounds μ.nᵃ[i, j, k] = ℳ.nᵃ
     return nothing
 end
 
@@ -714,8 +738,8 @@ end
     coating_mass_tendency = tendency_ρqʷⁱ(rates, ρ, p3.process_rates)
     supersaturation_tendency = tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates)
     vapor_mass_tendency = tendency_ρqᵛ(rates, ρ)
-    # Aerosol depletion: every activated cloud droplet removes one from ρnᵃ.
-    # Zero in the prescribed-Nᶜˡ path (rates.ccn_activation_number is 0 there).
+    # Aerosol depletion: every activated cloud droplet removes one from ρnᵃ. Zero in the
+    # prescribed-Nᶜˡ path, and discarded when the population is fixed rather than prognostic.
     aerosol_number_tendency = tendency_ρnᵃ(rates, ρ)
 
     FT = typeof(ρ)
@@ -800,8 +824,15 @@ end
 # Configurations without a prognostic have no `Gⁿ` slot to add to.
 @inline add_p3_cloud_number_tendencies!(G, i, j, k, ::Nothing, result) = nothing
 
-@inline function add_p3_cloud_number_tendencies!(G, i, j, k, _, result)
+@inline function add_p3_cloud_number_tendencies!(G, i, j, k, aerosol::AerosolActivation, result)
     @inbounds G.ρnᶜˡ[i, j, k] += result.tendency_ρnᶜˡ
+    add_p3_aerosol_tendency!(G, i, j, k, aerosol, result)
+    return nothing
+end
+
+@inline add_p3_aerosol_tendency!(G, i, j, k, ::AerosolActivation{FT, false}, result) where FT = nothing
+
+@inline function add_p3_aerosol_tendency!(G, i, j, k, ::AerosolActivation{FT, true}, result) where FT
     @inbounds G.ρnᵃ[i, j, k] += result.tendency_ρnᵃ
     return nothing
 end

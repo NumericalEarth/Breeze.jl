@@ -195,8 +195,11 @@ single setting in Breeze.
     By default Breeze takes cloud droplet number from a scheme constant,
     `cloud.number_concentration`. Passing
     `aerosol = AerosolActivation(AerosolMode())` switches on the prognostic
-    path, which adds ``ρn^{cl}`` and an unactivated-aerosol reservoir
-    ``ρn^a`` to the prognostic set.
+    path, which adds ``ρn^{cl}`` to the prognostic set. Whether the aerosol
+    population is also a state variable is a second, independent switch:
+    `prognostic_aerosol = true` adds an unactivated reservoir ``ρn^a`` that
+    activation depletes. By default the population is held fixed and no
+    ``ρn^a`` is carried.
 
 ### Prognostic Variables
 
@@ -213,9 +216,10 @@ neither allocates nor advects it.
 
 **Aerosol** (0–1 variables):
 
-- ``ρn^a``: Unactivated aerosol number concentration [1/m³], allocated together
-  with ``ρn^{cl}`` when `aerosol isa AerosolActivation`. Each activated droplet
-  removes one unit from this reservoir.
+- ``ρn^a``: Unactivated aerosol number concentration [1/m³], allocated when
+  `aerosol isa AerosolActivation` *and* `prognostic_aerosol = true`. Each activated droplet
+  removes one unit from it. By default (`prognostic_aerosol = false`) the population is a
+  scheme parameter, and nothing is allocated or advected for it.
 
 **Rain** (2 variables):
 
@@ -1894,10 +1898,10 @@ where ``\mathscr{S}_m`` is the mode's critical supersaturation (a function of ae
 size and solute activity, with the Kelvin parameter
 ``A_\text{acti} = 2 M_w σ_v / (ρ_w R T)``), and ``\mathscr{S}^l`` is the environmental
 supersaturation. The per-mode counts are summed and capped at the total aerosol
-number.
+number, giving the equilibrium count activation relaxes ``n^{cl}`` toward.
 
-Breeze then tracks the unactivated pool explicitly, so activation cannot exceed
-what remains in it:
+With `prognostic_aerosol = true` Breeze also tracks the unactivated pool explicitly, so
+activation cannot exceed what remains in it:
 
 ```math
 \dot{n}_\text{acti} = \frac{\max\!\big(0,\; \min(n_\text{acti}(\mathscr{S}^l),\, n^{cl} + n^a) - n^{cl}\big)}{\mathbb{C}_{\mathrm{form},4}},
@@ -1907,7 +1911,10 @@ with ``\mathbb{C}_{\mathrm{form},4}`` = `aerosol.activation_timescale` (default
 1 s), separate from the Cooper ``\mathbb{C}_{\mathrm{nucl},4} = 10`` s. The same
 rate depletes ``ρn^a``, which
 prevents the spurious re-activation that occurs when ``\mathscr{S}^l`` rebounds after
-autoconversion or partial evaporation has drained ``n^{cl}``. Activation is gated
+autoconversion or partial evaporation has drained ``n^{cl}``. By default the pool is
+instead held at ``n^a_\text{tot}``, where the cap cannot
+bind (``n_\text{acti} \le n^a_\text{tot}`` already), leaving the plain relaxation
+``\max(0, n_\text{acti}(\mathscr{S}^l) - n^{cl}) / \mathbb{C}_{\mathrm{form},4}``. Activation is gated
 on ``\mathscr{S}^l > \mathbb{C}_{\mathrm{form},3}`` (default ``10^{-6}``), and
 the mass source is ``\dot{n}_\text{acti}`` times the mass of a droplet with
 radius ``\mathbb{C}_{\mathrm{form},2}`` (default 1 μm).
@@ -2338,9 +2345,9 @@ P3 tracks eight prognostic densities by default,
 that is, the cloud liquid mass, the rain mass and number, the dry ice mass and
 number, the rime mass and rime volume, and the liquid coating on ice — alongside
 the host's vapor density ``ρq^v``. Three more appear when the corresponding option
-is enabled: the cloud droplet number ``ρn^{cl}`` and unactivated aerosol number
-``ρn^a`` with aerosol activation, and the supersaturation ``ρs^{v+l}`` with predicted
-supersaturation. Together they describe the complete microphysical state.
+is enabled: the cloud droplet number ``ρn^{cl}`` with aerosol activation, the
+unactivated aerosol number ``ρn^a`` when that activation also sets `prognostic_aerosol`,
+and the supersaturation ``ρs^{v+l}`` with predicted supersaturation. Together they describe the complete microphysical state.
 
 This section documents each variable, its physical meaning, and the source-term
 assembly used in `tendency_ρ*` (`prognostic_tendencies.jl`) to build the
@@ -2377,9 +2384,10 @@ appear as gains; their negative branches contribute as losses elsewhere.
 | ``ρn^{cl}`` | Cloud droplet number density | m⁻³ | Number of cloud droplets per unit volume |
 | ``ρn^a`` | Unactivated aerosol number density | m⁻³ | Aerosol not yet activated into droplets |
 
-``ρn^{cl}`` and ``ρn^a`` are prognostic only when the optional aerosol-activation path
+``ρn^{cl}`` is prognostic only when the optional aerosol-activation path
 (`AerosolActivation` in `aerosol_activation.jl`) is enabled, where CCN-activation source
-terms drive them. Otherwise droplet number is
+terms drive it; ``ρn^a`` additionally requires `prognostic_aerosol = true`, since a fixed
+population needs no budget. Otherwise droplet number is
 the scheme parameter `cloud.number_concentration`, which defaults to
 ``200 \times 10^6`` m⁻³ (200 cm⁻³); marine air is closer to ``\sim 50`` cm⁻³.
 Every rate reads that constant, and neither field is allocated or advected.
@@ -2700,7 +2708,8 @@ evaporation / sublimation branches through their negative values.
 G_{ρn^a} = -\rho\,\dot{n}_\text{acti},
 ```
 
-one aerosol removed per activated droplet; zero in the prescribed-``N^{cl}`` path.
+one aerosol removed per activated droplet; zero in the prescribed-``N^{cl}`` path, and
+discarded with no field to write in the `prognostic_aerosol = false` path.
 
 ### Sedimentation
 
@@ -2761,9 +2770,10 @@ prognostic_field_names(microphysics)
 (:ρqᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ)
 ```
 
-``ρnᶜˡ`` and ``ρnᵃ`` appear only when `aerosol`
+``ρnᶜˡ`` appears only when `aerosol`
 is an `AerosolActivation`: the default prescribed-Nᶜˡ path takes droplet number
-from `cloud.number_concentration`, so neither field is allocated or advected there. ``ρsᵛ⁺ˡ`` appears only when
+from `cloud.number_concentration`, so the field is not allocated or advected there.
+``ρnᵃ`` additionally requires `prognostic_aerosol = true`. ``ρsᵛ⁺ˡ`` appears only when
 `predict_supersaturation = true`.
 
 P3's aerosol distribution is specified **per unit mass of air**: `AerosolMode.number_mixing_ratio`
@@ -2771,8 +2781,8 @@ is in kg⁻¹, and so are the activated numbers it produces and the ``n^{cl}`` a
 activation cap compares them against. The prognostic reservoir ``ρn^a`` therefore holds the
 ``ρ``-weighted count in m⁻³.
 
-Nothing needs to be initialized by hand. `AtmosphereModel` construction and every `set!` write
-``ρn^a`` from [`initial_aerosol_number_density`](@ref Breeze.AtmosphereModels.initial_aerosol_number_density), which for P3 is the air density times
+When the reservoir is prognostic, nothing needs to be initialized by hand: `AtmosphereModel`
+construction and every `set!` write ``ρn^a`` from [`initial_aerosol_number_density`](@ref Breeze.AtmosphereModels.initial_aerosol_number_density), which for P3 is the air density times
 `AerosolMode.number_mixing_ratio` summed over all modes, so a multi-mode population is seeded from
 its own parameters. Because that weighting needs a density, the value is written against whichever
 density is established at the time: the reference density for anelastic dynamics, a prescribed

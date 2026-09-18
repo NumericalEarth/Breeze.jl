@@ -184,7 +184,8 @@ using Oceananigans.TimeSteppers: update_state!
         # The rates still see the prescribed parameter, so cloud processes are active.
         @test any(Array(interior(μ.ρqʳ)) .> 0)
 
-        # The aerosol-activation path does carry both, and there `μ.nᶜˡ` is the specific
+        # The aerosol-activation path does carry `ρnᶜˡ` and `nᶜˡ` (but not the reservoir,
+        # which `prognostic_aerosol` gates separately), and there `μ.nᶜˡ` is the specific
         # counterpart that `compute_tendencies!` advects, so it must equal `ρnᶜˡ / ρ`.
         prognostic = PredictedParticlePropertiesMicrophysics(FT;
             aerosol = AerosolActivation(AerosolMode(FT)))

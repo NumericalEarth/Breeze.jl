@@ -78,7 +78,8 @@ The scheme tracks 8 prognostic densities by default, and up to 11 with every opt
 | ``ρqᶠ``, ``ρbᶠ`` | Rime mass and volume | always |
 | ``ρqʷⁱ`` | Liquid water on ice | always |
 | ``ρsᵛ⁺ˡ`` | Predicted liquid supersaturation | `predict_supersaturation` |
-| ``ρnᶜˡ``, ``ρnᵃ`` | Cloud number and unactivated aerosol number | `aerosol` |
+| ``ρnᶜˡ`` | Cloud droplet number | `aerosol` |
+| ``ρnᵃ`` | Unactivated aerosol number | `aerosol`, with `prognostic_aerosol` |
 
 Each optional group is gated on a type, so a configuration that does not use one neither
 allocates nor advects it. Cloud droplet number is prognostic only with an
@@ -121,6 +122,12 @@ Pass `aerosol = AerosolActivation(AerosolMode())` to enable prognostic cloud
 droplet number from aerosol activation physics (Morrison & Grabowski 2007).
 When `aerosol = nothing` (default), cloud droplet number uses the prescribed
 `CloudDroplets.number_concentration`.
+
+Whether the aerosol population is itself a state variable is a second, independent choice.
+By default it is held fixed at the distribution total, which allocates no ``ρn^a`` field,
+tendency slot, or Runge-Kutta stage copy. Pass
+`AerosolActivation(AerosolMode(); prognostic_aerosol=true)` to carry a reservoir that
+activation depletes instead, so a cloud cannot re-activate aerosol it already holds.
 
 # Configuring the empirical warm-phase parameters
 

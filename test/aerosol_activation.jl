@@ -2,18 +2,22 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Test
 import Breeze
-using Breeze.AtmosphereModels: aerosol_field_names
+using Breeze.AtmosphereModels: aerosol_field_names, prognostic_field_names,
+                               settable_specific_microphysical_names
 using Breeze.Microphysics.PredictedParticleProperties:
     AerosolMode,
     AerosolActivation,
     P3MicrophysicalState,
     activated_number,
+    compute_ccn_activation,
+    has_prognostic_aerosol,
     total_activated_number,
     sum_aerosol_number,
     prognostic_ccn_activation_rate
 
-using Oceananigans: Flat, Bounded, RectilinearGrid, CenterField
+using Oceananigans: Flat, Bounded, RectilinearGrid, CenterField, time_step!
 using Oceananigans.Fields: interior, set!
+using Oceananigans.TimeSteppers: update_state!
 
 @testset "Aerosol Activation" begin
     FT = Float64
@@ -128,9 +132,9 @@ end
 
     FT = Float64
 
-    # Construct P3 with prognostic CCN
+    # Construct P3 with prognostic CCN and a prognostic aerosol reservoir
     p3 = PredictedParticlePropertiesMicrophysics(FT;
-        aerosol = AerosolActivation(AerosolMode(FT)))
+        aerosol = AerosolActivation(AerosolMode(FT); prognostic_aerosol = true))
 
     @test !isnothing(p3.aerosol)
     @test length(p3.aerosol.modes) == 1
@@ -206,7 +210,8 @@ end
         multimode = AerosolActivation(
             AerosolMode(FT; number_mixing_ratio = 300e6),
             AerosolMode(FT; number_mixing_ratio = 100e6, mean_radius = 1.0e-6, geometric_std = 2.5),
-            AerosolMode(FT; number_mixing_ratio = 25e6,  mean_radius = 2.0e-6))
+            AerosolMode(FT; number_mixing_ratio = 25e6,  mean_radius = 2.0e-6);
+            prognostic_aerosol = true)
         p3_multimode = PredictedParticlePropertiesMicrophysics(FT; aerosol = multimode)
 
         nᵃ_summed = FT(425e6)
@@ -330,5 +335,149 @@ end
 
         set!(model; T = FT(288), ρ = FT(0.4), p = FT(1e5), z = FT(0.2), nᵃ = FT(5e7))
         @test model.dynamics.state.μ.ρnᵃ ≈ FT(0.4) * FT(5e7)
+    end
+end
+
+# `prognostic_aerosol = false` predicts droplet number from the M&G2007 activation with no
+# aerosol budget, and must be reachable without giving up prognostic `ρnᶜˡ`.
+@testset "Fixed aerosol reservoir" begin
+    using Breeze.Microphysics.PredictedParticleProperties:
+        PredictedParticlePropertiesMicrophysics
+
+    FT = Float64
+    prognostic = AerosolActivation(AerosolMode(FT); prognostic_aerosol = true)
+    fixed = AerosolActivation(AerosolMode(FT))
+
+    @testset "The switch is carried in the type, not a field" begin
+        # A fixed population is the default: the reservoir is opt-in.
+        @test !has_prognostic_aerosol(AerosolActivation(AerosolMode(FT)))
+        @test has_prognostic_aerosol(prognostic)
+        @test !has_prognostic_aerosol(fixed)
+        # A runtime branch here would leak a Union into `prognostic_field_names` and force
+        # the GPU prognostic-extraction recursion to allocate.
+        p3 = PredictedParticlePropertiesMicrophysics(FT; aerosol = fixed)
+        @test @inferred(aerosol_field_names(p3)) == ()
+        @test @inferred(prognostic_field_names(p3)) isa Tuple{Vararg{Symbol}}
+        @test summary(fixed) == "AerosolActivation(1 mode, fixed reservoir)"
+        @test summary(prognostic) == "AerosolActivation(1 mode, prognostic reservoir)"
+        # Both settings share every activation parameter; only the reservoir differs.
+        @test fixed.modes == prognostic.modes
+        @test fixed.activation_timescale == prognostic.activation_timescale
+    end
+
+    @testset "Droplet number stays prognostic while the reservoir does not" begin
+        p3_fixed = PredictedParticlePropertiesMicrophysics(FT; aerosol = fixed)
+        p3_prognostic = PredictedParticlePropertiesMicrophysics(FT; aerosol = prognostic)
+
+        @test :ρnᶜˡ ∈ prognostic_field_names(p3_fixed)
+        @test :ρnᵃ ∉ prognostic_field_names(p3_fixed)
+        @test :ρnᶜˡ ∈ prognostic_field_names(p3_prognostic)
+        @test :ρnᵃ ∈ prognostic_field_names(p3_prognostic)
+
+        @test aerosol_field_names(p3_fixed) == ()
+        @test aerosol_field_names(p3_prognostic) == (:ρnᵃ,)
+
+        # `nᵃ` is only settable where it is state.
+        @test :nᶜˡ ∈ settable_specific_microphysical_names(p3_fixed)
+        @test :nᵃ ∉ settable_specific_microphysical_names(p3_fixed)
+        @test :nᵃ ∈ settable_specific_microphysical_names(p3_prognostic)
+    end
+
+    @testset "Activation draws on the whole distribution" begin
+        # With no reservoir the `min(N_act, nᶜˡ + nᵃ)` cap cannot bind, leaving a plain
+        # relaxation of `nᶜˡ` toward the equilibrium activated count.
+        p3_fixed = PredictedParticlePropertiesMicrophysics(FT; aerosol = fixed)
+        p3_prognostic = PredictedParticlePropertiesMicrophysics(FT; aerosol = prognostic)
+        constants = Breeze.ThermodynamicConstants(FT)
+
+        nᶜˡ, qᶜˡ = FT(1e6), FT(1e-5)
+        qᵛ, qᵛ⁺ˡ, T, ρ = FT(0.015), FT(0.0145), FT(280), FT(1)
+
+        whole_distribution = prognostic_ccn_activation_rate(fixed, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
+        @test whole_distribution.ncnuc > 0
+
+        # `ℳ.nᵃ` is zero on the fixed path, so the dispatch must ignore it and activate
+        # against the whole distribution anyway.
+        fixed_rate = compute_ccn_activation(fixed, p3_fixed, qᶜˡ, nᶜˡ, zero(FT),
+                                            qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+        @test fixed_rate.number == whole_distribution.ncnuc
+
+        # The prognostic path reads that same argument as the remaining reservoir, so an
+        # exhausted one shuts activation off.
+        drained = compute_ccn_activation(prognostic, p3_prognostic, qᶜˡ, nᶜˡ, zero(FT),
+                                         qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+        @test drained.number == 0
+    end
+
+    @testset "Nothing is allocated or advected for the reservoir" begin
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 2), extent = (100, 100, 100))
+        constants = Breeze.ThermodynamicConstants(FT)
+        reference_state = Breeze.ReferenceState(grid, constants;
+                                                base_pressure = FT(101325),
+                                                potential_temperature = FT(285))
+
+        build(aerosol) = Breeze.AtmosphereModel(grid;
+            dynamics = Breeze.AnelasticDynamics(reference_state),
+            thermodynamic_constants = constants,
+            microphysics = PredictedParticlePropertiesMicrophysics(FT; aerosol))
+
+        fixed_model = build(fixed)
+        prognostic_model = build(prognostic)
+
+        for name in (:ρnᵃ, :nᵃ)
+            @test !haskey(fixed_model.microphysical_fields, name)
+            @test haskey(prognostic_model.microphysical_fields, name)
+        end
+        @test !hasproperty(fixed_model.timestepper.Gⁿ, :ρnᵃ)
+        @test hasproperty(fixed_model.timestepper.Gⁿ, :ρnᶜˡ)
+
+        # There is no reservoir to own, so `set!` rejects the key rather than dropping it.
+        @test_throws ArgumentError set!(fixed_model; θ = FT(285), qᵛ = FT(0.011),
+                                        nᵃ = FT(1e8), enforce_mass_conservation = false)
+
+        # A prognostic reservoir stops activating once drained; a fixed one keeps relaxing
+        # toward the equilibrium count.
+        small_pool = FT(2e7)
+        nᶜˡ₀ = FT(1e6)
+        set!(fixed_model; θ = FT(285), qᵛ = FT(0.011), qᶜˡ = FT(1e-5), nᶜˡ = nᶜˡ₀,
+             enforce_mass_conservation = false)
+        set!(prognostic_model; θ = FT(285), qᵛ = FT(0.011), qᶜˡ = FT(1e-5), nᶜˡ = nᶜˡ₀,
+             nᵃ = small_pool, enforce_mass_conservation = false)
+        for model in (fixed_model, prognostic_model)
+            update_state!(model)
+            for _ in 1:20
+                time_step!(model, FT(1))
+            end
+        end
+
+        fixed_nᶜˡ = Array(interior(fixed_model.microphysical_fields.nᶜˡ))
+        prognostic_nᶜˡ = Array(interior(prognostic_model.microphysical_fields.nᶜˡ))
+        prognostic_nᵃ = Array(interior(prognostic_model.microphysical_fields.nᵃ))
+
+        # Both activate, but the prognostic path cannot pass `nᶜˡ₀ + nᵃ₀`. The tolerance
+        # covers drift of the *specific* number as condensation and sedimentation move the
+        # density it is divided by; the cap itself is enforced on ρ-weighted counts.
+        reservoir_ceiling = nᶜˡ₀ + small_pool
+        @test all(prognostic_nᶜˡ .> nᶜˡ₀)
+        @test all(prognostic_nᶜˡ .<= FT(1.01) * reservoir_ceiling)
+        @test all(prognostic_nᵃ .< FT(1e-3) * small_pool)
+
+        @test all(fixed_nᶜˡ .> reservoir_ceiling)
+        @test all(fixed_nᶜˡ .<= FT(1.01) * sum_aerosol_number(fixed))
+    end
+
+    @testset "Parcels carry no reservoir either" begin
+        # Parcel models interpolate on the host, so they run on the CPU regardless of
+        # `default_arch`.
+        grid = RectilinearGrid(size = 4, z = (0, 1), topology = (Flat, Flat, Bounded))
+        model = Breeze.AtmosphereModel(grid;
+            dynamics = Breeze.ParcelDynamics(),
+            microphysics = PredictedParticlePropertiesMicrophysics(FT; aerosol = fixed))
+
+        set!(model; T = FT(288), ρ = FT(0.8), p = FT(1e5), z = FT(0.1))
+        @test !haskey(model.dynamics.state.μ, :ρnᵃ)
+        @test haskey(model.dynamics.state.μ, :ρnᶜˡ)
+        @test_throws ArgumentError set!(model; T = FT(288), ρ = FT(0.8), p = FT(1e5),
+                                        z = FT(0.1), nᵃ = FT(5e7))
     end
 end

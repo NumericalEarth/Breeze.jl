@@ -130,7 +130,8 @@ end
           p3_supersaturation_tendency_fields(G, p3.process_rates))
 
 @inline p3_aerosol_tendency_fields(G, ::Nothing) = (;)
-@inline p3_aerosol_tendency_fields(G, _) = (; G.ρnᶜˡ, G.ρnᵃ)
+@inline p3_aerosol_tendency_fields(G, ::AerosolActivation{FT, false}) where FT = (; G.ρnᶜˡ)
+@inline p3_aerosol_tendency_fields(G, ::AerosolActivation{FT, true}) where FT = (; G.ρnᶜˡ, G.ρnᵃ)
 
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, false}) where FT = (;)
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, true}) where FT = (; G.ρsᵛ⁺ˡ)
