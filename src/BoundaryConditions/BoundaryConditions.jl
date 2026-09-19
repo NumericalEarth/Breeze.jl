@@ -1,6 +1,7 @@
 module BoundaryConditions
 
-export BulkDragFunction,
+export GABLSRoughWallCoefficient,
+       BulkDragFunction,
        XDirectionBulkDragFunction,
        YDirectionBulkDragFunction,
        BulkDrag,
@@ -51,7 +52,7 @@ using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑ
                               ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
 
 using Adapt: Adapt
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
 
 #####
 ##### The surface-layer field tuple
@@ -86,6 +87,7 @@ surface_layer_state(model) = surface_layer_state(Oceananigans.fields(model),
 include("filtered_surface_state.jl")
 include("wall_faces.jl")
 include("polynomial_bulk_coefficient.jl")
+include("gabls_rough_wall_coefficient.jl")
 include("bulk_drag.jl")
 include("bulk_scalar_fluxes.jl")
 include("thermodynamic_variable_bcs.jl")

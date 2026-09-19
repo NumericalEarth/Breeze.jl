@@ -137,6 +137,7 @@ export
 
     # BoundaryConditions
     BulkDrag,
+    GABLSRoughWallCoefficient,
     BulkSensibleHeatFlux,
     BulkVaporFlux,
     PolynomialCoefficient,
