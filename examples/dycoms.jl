@@ -229,7 +229,13 @@ qˡ₀ = Field(Average(qˡ, dims=(1, 2)))
 compute!(qˡ₀)
 
 zᶜ = Oceananigans.Grids.znodes(grid, Center())
-qˡ_profile = Array(view(qˡ₀, 1, 1, :))
+
+## `interior`, not `view`: `qˡ₀` is a computed `Field` whose operand is a `Reduction`, and
+## `view` of such a Field is another Field that carries the operand along -- so `Array` of it
+## falls back to scalar indexing and errors on the GPU. `interior` hands back the underlying
+## array, which copies to the host cleanly. (Plotting below still passes `Field`s to Makie
+## directly; this line is pulling numbers out for `findall`, not plotting.)
+qˡ_profile = Array(interior(qˡ₀, 1, 1, :))
 cloudy = findall(q -> q > 1e-6, qˡ_profile)
 @info @sprintf("Initial cloud base: %.1f m, cloud top: %.1f m, max qˡ: %.2e kg/kg",
                zᶜ[first(cloudy)], zᶜ[last(cloudy)], maximum(qˡ_profile))
