@@ -230,15 +230,22 @@ compute!(qˡ₀)
 
 zᶜ = Oceananigans.Grids.znodes(grid, Center())
 
+## Locate cloud base and top in the mean profile. This is a one-off print, not plotting --
+## the figures below hand `Field`s to Makie directly, as `examples-rules.md` requires -- but
+## `findall` and indexing `zᶜ` are host algorithms, so the profile has to come across.
 ## `interior`, not `view`: `qˡ₀` is a computed `Field` whose operand is a `Reduction`, and
-## `view` of such a Field is another Field that carries the operand along -- so `Array` of it
-## falls back to scalar indexing and errors on the GPU. `interior` hands back the underlying
-## array, which copies to the host cleanly. (Plotting below still passes `Field`s to Makie
-## directly; this line is pulling numbers out for `findall`, not plotting.)
+## `view` of such a `Field` is another `Field` that carries the operand along, so `Array` of
+## it falls back to scalar indexing and errors on the GPU.
 qˡ_profile = Array(interior(qˡ₀, 1, 1, :))
-cloudy = findall(q -> q > 1e-6, qˡ_profile)
-@info @sprintf("Initial cloud base: %.1f m, cloud top: %.1f m, max qˡ: %.2e kg/kg",
-               zᶜ[first(cloudy)], zᶜ[last(cloudy)], maximum(qˡ_profile))
+cloudy = findall(>(1e-6), qˡ_profile)
+
+if isempty(cloudy)
+    @warn "No cloud in the initial condition — expected base ≈ 600 m, top ≈ 840 m"
+else
+    ## `maximum` of the `Field` reduces on the device; only base and top need the host copy.
+    @info @sprintf("Initial cloud base: %.1f m, cloud top: %.1f m, max qˡ: %.2e kg/kg",
+                   zᶜ[first(cloudy)], zᶜ[last(cloudy)], maximum(qˡ₀))
+end
 
 # ## Simulation
 #
