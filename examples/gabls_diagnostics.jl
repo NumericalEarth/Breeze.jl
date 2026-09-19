@@ -253,7 +253,11 @@ end
 function corrected_flux_field(grid, resolved, sgs, surface)
     operation = KernelFunctionOperation{Nothing, Nothing, F}(
         surface_corrected_flux, grid, resolved, sgs, surface)
-    return Field(operation)
+    # `surface` is a reduced scalar with z indices `1:1`. The default
+    # `Field(operation)` intersects operand indices and would therefore
+    # truncate this face profile to its bottom value. Override the indices
+    # explicitly so the operation is materialized on every vertical face.
+    return Field(operation; indices=(:, :, :))
 end
 
 function optional_sgs_dissipation(model)
@@ -296,13 +300,14 @@ function boundary_layer_height(stress_profile; fraction=0.05)
         return (; h_0_05=zero(eltype(values)), h=zero(eltype(values)), valid=false)
     end
 
-    crossing_index = findfirst(k -> values[k] <= target, 2:length(values))
-    if isnothing(crossing_index)
+    relative_crossing_index = findfirst(value -> value <= target, @view values[2:end])
+    if isnothing(relative_crossing_index)
         fallback = last(coordinates)
         return (; h_0_05=fallback, h=fallback / (1 - fraction), valid=false)
     end
 
-    k = crossing_index
+    # `findfirst` returns the index within the view, whose first index is one.
+    k = relative_crossing_index + 1
     lower_value = values[k-1]
     upper_value = values[k]
     lower_height = coordinates[k-1]
