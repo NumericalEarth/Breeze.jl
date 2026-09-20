@@ -186,7 +186,7 @@ AM.negative_moisture_correction(p3::P3) = p3.negative_moisture_correction
 @inline cloud_number_correction_pairs(::AerosolActivation, μ) = tuple((μ.ρnᶜˡ, μ.ρqᶜˡ))
 
 @inline cloud_number_correction_fields(::Nothing, μ) = ()
-@inline cloud_number_correction_fields(::AerosolActivation, μ) = (μ.ρnᶜˡ,)
+@inline cloud_number_correction_fields(::AerosolActivation, μ) = tuple(μ.ρnᶜˡ)
 
 @inline aerosol_correction_fields(::Nothing, μ) = ()
 @inline aerosol_correction_fields(::AerosolActivation{FT, false}, μ) where FT = ()
