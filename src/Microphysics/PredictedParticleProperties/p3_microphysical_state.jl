@@ -585,7 +585,7 @@ end
 # Configurations without the prognostic have no field to write.
 @inline write_cloud_number_diagnostics!(μ, i, j, k, ::Nothing, ℳ) = nothing
 
-@inline function write_cloud_number_diagnostics!(μ, i, j, k, aerosol::AerosolActivation, ℳ)
+@inline function write_cloud_number_diagnostics!(μ, i, j, k, grid, aerosol::AerosolActivation, ℳ)
     @inbounds μ.nᶜˡ[i, j, k] = ℳ.nᶜˡ
     write_aerosol_diagnostic!(μ, i, j, k, aerosol, ℳ)
     return nothing
