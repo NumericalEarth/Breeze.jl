@@ -34,6 +34,7 @@ The following table also uses a few conventions that suffuse the source code and
 * `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
 * "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
 * Phase or mixture identifiers (``d``, ``v``, ``m``, and ``t`` for *total*) appear as superscripts (e.g., ``Rᵈ``, ``cᵖᵐ``, ``qᵗ``, ``ρᵗ``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
+* The superscript ``s`` is reserved for *surface* (e.g. ``pˢ``, ``θˢ``, ``ρˢ``: values at a column's bottom face). Snow therefore takes ``sn`` (e.g. ``qˢⁿ``, ``ρqˢⁿ``, ``𝕎ˢⁿ``). Other multi-letter superscripts keep their own spellings: ``st`` for *standard* (``pˢᵗ``) and ``sw`` for *shortwave* (``τˢʷ``).
 * Momentum and the thermodynamic variable are stored *coupling-density-weighted* (``ρu = ρᵈ u``, and the thermodynamic density ``ρᵡ = ρᵈ χ`` — i.e. ``ρθ = ρᵈ θ`` or ``ρs``). The coupling density is `dynamics_density(dynamics)`: the reference density ``ρᵣ`` for [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), and the prognostic dry-air density ``ρᵈ`` for [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics). Velocity and ``θ`` are recovered by dividing by the coupling density.
 * Water/moisture is stored as *partial densities* (`ρqᵛ`, `ρqˡ`, `ρqⁱ`, …; mass per volume) and recovered as **mass fractions** by dividing by the *total* air density ``ρ = ρᵈ + ρᵗ`` (``qˣ = ρˣ/ρ``), where ``ρᵗ = ρqᵛᵉ + Σ ρqᶜ`` is the total condensate density (all phases of the condensable species). The thermodynamics works in mass fractions throughout. The total density (`total_density(dynamics)`) — diagnosed on the compressible core, the reference density on the anelastic core — is also the carrier for scalar/water advection, the equation of state, and buoyancy.
 
@@ -68,14 +69,14 @@ The following table also uses a few conventions that suffuse the source code and
 | ``qᶜˡ``                             | `qᶜˡ`  | `AM.microphysical_fields.qᶜˡ`       | Cloud liquid mass fraction                                                     |
 | ``qᶜⁱ``                             | `qᶜⁱ`  | `AM.microphysical_fields.qᶜⁱ`       | Cloud ice mass fraction                                                        |
 | ``qʳ``                              | `qʳ`   |                                     | Rain mass fraction                                                             |
-| ``qˢ``                              | `qˢ`   |                                     | Snow mass fraction                                                             |
+| ``qˢⁿ``                             | `qˢⁿ`  |                                     | Snow mass fraction                                                             |
 | ``ρqᵛ``                             | `ρqᵛ`  |                                     | Vapor density                                                                  |
 | ``ρqˡ``                             | `ρqˡ`  |                                     | Liquid density                                                                 |
 | ``ρqⁱ``                             | `ρqⁱ`  |                                     | Ice density                                                                    |
 | ``ρqᶜˡ``                            | `ρqᶜˡ` |                                     | Cloud liquid density                                                           |
 | ``ρqᶜⁱ``                            | `ρqᶜⁱ` |                                     | Cloud ice density                                                              |
 | ``ρqʳ``                             | `ρqʳ`  | `AM.microphysical_fields.ρqʳ`       | Rain density                                                                   |
-| ``ρqˢ``                             | `ρqˢ`  | `AM.microphysical_fields.ρqˢ`       | Snow density                                                                   |
+| ``ρqˢⁿ``                            | `ρqˢⁿ` | `AM.microphysical_fields.ρqˢⁿ`      | Snow density                                                                   |
 | ``n^{cl}``                          | `nᶜˡ`  | `AM.microphysical_fields.nᶜˡ`       | Cloud droplet number per unit mass (1/kg); P3 allocates this diagnostic only with aerosol activation |
 | ``n^r``                             | `nʳ`   | `AM.microphysical_fields.nʳ`        | Rain drop number per unit mass (1/kg)                                          |
 | ``n^a``                             | `nᵃ`   | `AM.microphysical_fields.nᵃ`        | Aerosol number per unit mass (1/kg); allocated only with aerosol activation    |
@@ -91,7 +92,10 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathbb{W}^{cl}``                 | `𝕎ᶜˡ`  |                                     | Terminal velocity of cloud liquid (scalar, positive downward)                  |
 | ``\mathbb{W}^{ci}``                 | `𝕎ᶜⁱ`  |                                     | Terminal velocity of cloud ice (scalar, positive downward)                     |
 | ``\mathbb{W}^r``                    | `𝕎ʳ`   |                                     | Terminal velocity of rain (scalar, positive downward)                          |
-| ``\mathbb{W}^s``                    | `𝕎ˢ`   |                                     | Terminal velocity of snow (scalar, positive downward)                          |
+| ``\mathbb{W}^{sn}``                 | `𝕎ˢⁿ`  |                                     | Terminal velocity of snow (scalar, positive downward)                          |
+| ``\mathbb{W}^i``                    | `𝕎ⁱ`   |                                     | Terminal velocity of ice (scalar, positive downward); P3 labels dry ice ``i``  |
+| ``\mathbb{W}^{nx}``                 | `𝕎ⁿˣ`  |                                     | Number-weighted terminal velocity of species ``x`` (`𝕎ⁿᶜˡ`, `𝕎ⁿʳ`, `𝕎ⁿⁱ`); a bare species label is the mass-weighted mean, and the weighting marker is a superscript preceding the species |
+| ``w^x``                             | `wˣ`   |                                     | Signed vertical advection velocity of species ``x``, ``wˣ = -𝕎ˣ`` (`wᶜˡ`, `wⁿᶜˡ`, `wʳ`, `wⁿʳ`, `wⁱ`, `wⁿⁱ`) |
 | ``qᵛ⁺``                             | `qᵛ⁺`  |                                     | Saturation specific humidity over a surface                                    |
 | ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation specific humidity over a planar liquid surface                      |
 | ``qᵛ⁺ⁱ``                            | `qᵛ⁺ⁱ` |                                     | Saturation specific humidity over a planar ice surface                         |
@@ -102,7 +106,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ξ``                               | `ξ`    | `psychrometric_correction`           | Psychrometric correction, ``ξ = 1 + ℒ² qᵛ⁺ / (cᵖ Rᵛ T²)``; ``ξˡ`` and ``ξⁱ`` name the liquid and ice phase |
 | ``δqˡ``, ``δqⁱ``                    | `δqˡ`, `δqⁱ` |                               | Saturation-adjustment increments, ``δq = (qᵛ - qᵛ⁺) / ξ`` for the liquid and ice phase |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
-| ``\mathbb{C}^{ac}``                 | `ℂᵃᶜ`  |                                     | Acoustic sound speed, ``ℂᵃᶜ = \sqrt{γ Rᵈ T}``                                  |
+| ``c^{ac}``                          | `cᵃᶜ`  |                                     | Acoustic sound speed, ``cᵃᶜ = \sqrt{γ Rᵈ T}``                                  |
+| ``\mathbb{C}_{X,i}``               | `ℂˣᵢ`  | descriptive parameter property      | The ``i``-th calibratable empirical coefficient in relation ``X``; source uses modifier letters because Unicode lacks general subscript letters; state, physical constants, case inputs, switches, and numerical safeguards do not receive ``\mathbb{C}`` |
 | ``\mathcal{R}``                     | `ℛ`    | `TC.molar_gas_constant`             | Universal (molar) gas constant                                                 |
 | ``Tᵗʳ``                             | `Tᵗʳ`  | `TC.triple_point_temperature`       | Temperature at the vapor-liquid-ice triple point                               |
 | ``pᵗʳ``                             | `pᵗʳ`  | `TC.triple_point_pressure`          | Pressure at the vapor-liquid-ice triple point                                  |
@@ -124,7 +129,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{L}^l(T)``                | `ℒˡ`   | `liquid_latent_heat(T, constants)`  | Temperature-dependent latent heat of condensation                              |
 | ``\mathcal{L}^i(T)``                | `ℒⁱ`   | `ice_latent_heat(T, constants)`     | Temperature-dependent latent heat of deposition                                |
 | ``θ₀``                              | `θ₀`   | `RS.potential_temperature`          | (Constant) reference potential temperature for the anelastic formulation       |
-| ``p₀``                              | `p₀`   | `RS.surface_pressure`               | Surface reference pressure                                              |
+| ``p₀``                              | `p₀`   | `RS.base_pressure`                  | Reference pressure at ``z = 0``: the datum the reference profiles are anchored to |
+| ``pˢ``                              | `pˢ`   | `RS.surface_pressure`               | Reference pressure at a column's bottom face (the terrain surface over terrain), ``p₀`` reduced to that height |
 | ``p^{st}``                          | `pˢᵗ`  | `RS.standard_pressure`              | Standard pressure for potential temperature (default 10⁵ Pa)                   |
 | ``ρᵣ``                              | `ρᵣ`   | `RS.density`                        | Density of a dry reference state for the anelastic formulation                 |
 | ``αᵣ``                              | `αᵣ`   |                                     | Specific volume of a dry reference state, ``αᵣ = Rᵈ θ₀ / pᵣ``                  |

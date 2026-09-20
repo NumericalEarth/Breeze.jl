@@ -65,10 +65,11 @@ using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
 using Breeze.Solvers: NewtonSolver
 using Breeze.Thermodynamics: mixture_gas_constant, dry_air_gas_constant,
+                             reject_renamed_surface_pressure,
                              vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
-                               surface_pressure, standard_pressure, thermodynamic_density,
+                               base_pressure, standard_pressure, thermodynamic_density,
                                thermodynamic_density_name, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 

@@ -39,8 +39,8 @@ that corrects rain fall speeds.
 
 Two weighted fall speeds are computed by integrating over the size distribution:
 
-- **Number-weighted** ``V_n``: For number flux (sedimentation of particle count)
-- **Mass-weighted** ``V_m``: For mass flux (precipitation rate)
+- **Number-weighted** ``\\mathbb{W}^n``: For number flux (sedimentation of particle count)
+- **Mass-weighted** ``\\mathbb{W}^m``: For mass flux (precipitation rate)
 
 # Keyword Arguments
 
@@ -79,9 +79,9 @@ end
 ##### particle motion through air.
 #####
 
-struct IceDeposition{V, V1, SC, SR, LC, LR}
-    ventilation :: V
-    ventilation_enhanced :: V1
+struct IceDeposition{Vent, VentRe, SC, SR, LC, LR}
+    ventilation :: Vent
+    enhanced_ventilation :: VentRe
     small_ice_ventilation_constant :: SC
     small_ice_ventilation_reynolds :: SR
     large_ice_ventilation_constant :: LC
@@ -113,7 +113,7 @@ from temperature, pressure, and the model thermodynamic constants via
 
 **Basic ventilation integrals:**
 - `ventilation`: Integrated over full size spectrum
-- `ventilation_enhanced`: For larger particles (D > 100 μm)
+- `enhanced_ventilation`: For larger particles (D > 100 μm)
 
 **Size-regime ventilation** (for melting with liquid fraction):
 - `small_ice_ventilation_*`: D ≤ Dcrit, meltwater → rain
@@ -233,7 +233,7 @@ dominant growth mechanism for snow, and depends on the differential fall speeds 
 particles of different sizes. Consumed by [`ice_aggregation_rate`](@ref).
 
 **Cloud collection** (ice + cloud droplets → rime on ice):
-The PSD-integrated sweep-out kernel ``\\int V(D) A(D) N'(D) \\, dD`` [m³/s] per
+The PSD-integrated sweep-out kernel ``\\int \\mathbb{W}(D) A(D) N'(D) \\, dD`` [m³/s] per
 particle, with the collision kernel set to zero for ice diameters below 100 μm.
 Cloud droplets are small enough relative to ice that their own size distribution
 does not enter the collision geometry, so a single ice-PSD integral suffices.

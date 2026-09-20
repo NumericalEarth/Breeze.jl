@@ -69,7 +69,7 @@ p₀ = 101325  # Surface pressure [Pa]
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
-                                 surface_pressure = p₀,
+                                 base_pressure = p₀,
                                  potential_temperature = θ₀,
                                  vapor_mass_fraction = 0)
 
@@ -323,13 +323,13 @@ slices_filename = filename * "_slices.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   filename = averages_filename,
                                                   schedule = AveragedTimeInterval(1hour),
-                                                  overwrite_existing = true)
+                                                  overwrite_files = true)
 
 slice_outputs = (; w, qᵛ, T)
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = slices_filename,
                                                 schedule = TimeInterval(10minutes),
-                                                overwrite_existing = true)
+                                                overwrite_files = true)
 
 @info "Starting simulation..."
 run!(simulation)

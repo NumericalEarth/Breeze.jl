@@ -95,7 +95,7 @@ function convective_boundary_layer(arch = CPU();
     if isnothing(dynamics)
         # Default: anelastic dynamics with reference state
         reference_state = ReferenceState(grid, constants;
-            surface_pressure = p₀,
+            base_pressure = p₀,
             potential_temperature = θ₀
         )
         dynamics = AnelasticDynamics(reference_state)
@@ -103,7 +103,7 @@ function convective_boundary_layer(arch = CPU();
         # CompressibleDynamics is passed in pre-constructed;
         # set reference_potential_temperature for acoustic substepping if not already set
         dynamics = CompressibleDynamics(dynamics.time_discretization;
-            surface_pressure = p₀,
+            base_pressure = p₀,
             reference_potential_temperature = θ₀
         )
     end

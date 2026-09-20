@@ -356,7 +356,7 @@ end
     dcmip2016_klemp_wilhelmson_kessler!(T_ref, qᵛ_ref, qᶜˡ_ref, qʳ_ref, ρ_prof, p_prof, Δt, z_centers, constants, microphysics)
 
     # Run Breeze implementation
-    ref_state = ReferenceState(grid, constants; surface_pressure=p₀)
+    ref_state = ReferenceState(grid, constants; base_pressure=p₀)
     dynamics = AnelasticDynamics(ref_state)
     model = AtmosphereModel(grid; dynamics, microphysics, thermodynamic_constants=constants)
 
@@ -430,7 +430,7 @@ end
     constants = ThermodynamicConstants(FT; saturation_vapor_pressure = TetensFormula(FT))
     microphysics = DCMIP2016KesslerMicrophysics(FT)
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                    surface_pressure = FT(1e5),
+                                    base_pressure = FT(1e5),
                                     standard_pressure = FT(1e5),
                                     reference_potential_temperature = z -> FT(285))
     model = AtmosphereModel(grid; dynamics, microphysics,
