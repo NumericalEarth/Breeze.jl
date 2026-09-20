@@ -183,7 +183,7 @@ AM.negative_moisture_correction(p3::P3) = p3.negative_moisture_correction
 # aerosol container so each tuple folds to a constant. The prescribed-Nᶜˡ path has no
 # `ρnᶜˡ`/`ρnᵃ` fields at all, so there is nothing to repair.
 @inline cloud_number_correction_pairs(::Nothing, μ) = ()
-@inline cloud_number_correction_pairs(::AerosolActivation, μ) = ((μ.ρnᶜˡ, μ.ρqᶜˡ),)
+@inline cloud_number_correction_pairs(::AerosolActivation, μ) = tuple((μ.ρnᶜˡ, μ.ρqᶜˡ))
 
 @inline cloud_number_correction_fields(::Nothing, μ) = ()
 @inline cloud_number_correction_fields(::AerosolActivation, μ) = (μ.ρnᶜˡ,)
