@@ -2,7 +2,8 @@ module TurbulenceClosures
 
 export TKEBasedTurbulenceClosure,
        TKEMixingLength,
-       ConstantStabilityFunctions
+       ConstantStabilityFunctions,
+       SurfaceLayerDiffusivity
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
@@ -120,5 +121,6 @@ end
 end
 
 include("tke_based_turbulence_closure.jl")
+include("surface_layer_diffusivity.jl")
 
 end # module TurbulenceClosures

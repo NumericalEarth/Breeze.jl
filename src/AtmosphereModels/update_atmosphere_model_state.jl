@@ -55,6 +55,11 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
         callback.callsite isa UpdateStateCallsite && callback(model)
     end
 
+    # Closures with physical-time filter state update here, after UpdateState callbacks have
+    # refreshed time-dependent wall operands, but before tendencies consume their diffusivities.
+    # The fallback is a no-op; stateful closures must deduplicate RK stages and repeated calls.
+    update_completed_step_closure_state!(model.closure_fields, model.closure, model)
+
     # Refresh per-scheme advection state — the adaptive-implicit split time step and any
     # bounds-preserving limiter — before the tendencies that consume it.
     update_advection!(model.advection, model)
@@ -65,6 +70,8 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
 
     return nothing
 end
+
+update_completed_step_closure_state!(closure_fields, closure, model) = nothing
 
 #####
 ##### Compute forcing-specific quantities (e.g., horizontal averages for subsidence)

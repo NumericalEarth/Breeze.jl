@@ -227,6 +227,7 @@ export
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
     TKEBasedTurbulenceClosure, TKEMixingLength, ConstantStabilityFunctions,
+    SurfaceLayerDiffusivity,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
