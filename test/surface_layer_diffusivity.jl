@@ -16,6 +16,15 @@ using Oceananigans.Grids: Center, Face, znodes
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.TurbulenceClosures: ExplicitTimeDiscretization
 
+function periodic_horizontal_halos_match(field, nx, ny)
+    values = Array(parent(field))
+    hx = (size(values, 1) - nx) ÷ 2
+    hy = (size(values, 2) - ny) ÷ 2
+    x_indices = vcat((nx + 1):(nx + hx), (hx + 1):(hx + nx), (hx + 1):(2hx))
+    y_indices = vcat((ny + 1):(ny + hy), (hy + 1):(hy + ny), (hy + 1):(2hy))
+    return values == values[x_indices, y_indices, :]
+end
+
 @testset "SurfaceLayerDiffusivity construction [$(FT)]" for FT in test_float_types()
     closure = SurfaceLayerDiffusivity(FT;
         filter_timescale=100,
@@ -96,6 +105,23 @@ end
     @test model.closure_fields.surface_u_flux[1, 1, 1] < 0
     surface_density = ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
     @test model.closure_fields.surface_u_flux[1, 1, 1] * surface_density ≈ -0.04
+
+    # The completed-step hook updates the diffusivity interiors after update_state! has
+    # already filled closure halos. Deliberately poison one horizontal halo, then require
+    # the hook to leave all viscosity and scalar-diffusivity halos synchronized.
+    halo_model = AtmosphereModel(grid; closure, boundary_conditions, advection=nothing)
+    set!(halo_model; θ=300, u=(x, y, z) -> z / 10 + x / 100, v=0, w=0)
+    halo_fields = halo_model.closure_fields
+    coefficient_fields = (halo_fields.Kᵘ,
+                          values(halo_fields.tupled_tracer_diffusivities)...)
+    for coefficient in coefficient_fields
+        parent(coefficient)[1, :, :] .= -999
+    end
+    halo_model.clock.time = 1
+    halo_model.clock.iteration = 1
+    update_completed_step_closure_state!(halo_fields, halo_model.closure, halo_model)
+    @test all(periodic_horizontal_halos_match(coefficient, grid.Nx, grid.Ny)
+              for coefficient in coefficient_fields)
 
     # Neutral manufactured log profile. The baseline deliberately uses physical face height,
     # so the discrete stress differs from u★² by z_f / logarithmic_mean(z₁, z₂).
@@ -226,6 +252,8 @@ end
     set!(implicit_control; θ=300, u=nonlinear_u, v=0, w=0)
     Oceananigans.time_step!(implicit_model, 0.2)
     Oceananigans.time_step!(implicit_control, 0.2)
+    @test periodic_horizontal_halos_match(implicit_model.closure_fields.Kᵘ,
+                                          grid.Nx, grid.Ny)
     implicit_difference = Array(interior(implicit_model.momentum.ρu)) .-
                           Array(interior(implicit_control.momentum.ρu))
     @test sum(implicit_difference) ≈ 0 atol=1000eps(Float64)
@@ -242,14 +270,17 @@ end
     set!(scalar_implicit_control; θ=nonlinear_θ, u=1, v=0, w=0)
     Oceananigans.time_step!(scalar_implicit_model, 0.2)
     Oceananigans.time_step!(scalar_implicit_control, 0.2)
+    @test periodic_horizontal_halos_match(
+        scalar_implicit_model.closure_fields.tupled_tracer_diffusivities.ρθ,
+        grid.Nx, grid.Ny)
     scalar_ρθ = Breeze.AtmosphereModels.prognostic_fields(scalar_implicit_model).ρθ
     control_ρθ = Breeze.AtmosphereModels.prognostic_fields(scalar_implicit_control).ρθ
     scalar_implicit_difference = Array(interior(scalar_ρθ)) .- Array(interior(control_ρθ))
     @test sum(scalar_implicit_difference) ≈ 0 atol=1000eps(Float64)
     @test maximum(abs, scalar_implicit_difference) > 0
 
-    # Restore the complete model state, refresh only derived quantities at the same iteration,
-    # then continue both branches. Covariances and the filter clock must evolve identically.
+    # Restore the complete model state and refresh only the restarted branch. The continued
+    # branch must be restart-equivalent without an artificial extra update_state! call.
     continued_model = AtmosphereModel(grid; closure, boundary_conditions, advection=nothing)
     set!(continued_model; θ=300, u=nonlinear_u, v=0, w=0)
     Oceananigans.time_step!(continued_model, 0.2)
@@ -257,7 +288,6 @@ end
     restarted_model = AtmosphereModel(grid; closure, boundary_conditions, advection=nothing)
     set!(restarted_model; θ=300, u=nonlinear_u, v=0, w=0)
     Oceananigans.restore_prognostic_state!(restarted_model, checkpoint_state)
-    Oceananigans.TimeSteppers.update_state!(continued_model)
     Oceananigans.TimeSteppers.update_state!(restarted_model)
     Oceananigans.time_step!(continued_model, 0.2)
     Oceananigans.time_step!(restarted_model, 0.2)

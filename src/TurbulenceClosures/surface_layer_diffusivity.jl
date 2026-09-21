@@ -643,6 +643,9 @@ function AtmosphereModels.update_completed_step_closure_state!(
     closure_fields.previous_update_time[] = model.clock.time
     closure_fields.previous_update_iteration[] = iteration
     compute_surface_layer_diffusivities!(closure_fields, closure, model)
+    # The completed-step recomputation follows the ordinary auxiliary halo fill. Keep the
+    # coefficient halos synchronized so a checkpoint pickup starts from the same state.
+    fill_halo_regions!(closure_fields; only_local_halos=true)
     return nothing
 end
 
