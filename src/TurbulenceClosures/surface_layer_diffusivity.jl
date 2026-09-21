@@ -26,12 +26,20 @@ resolved vertical fluxes. Covariances use a centered online recurrence; raw filt
 retained for diagnostics but do not drive the closure. The momentum viscosity is
 
 ```math
-ν_{SL} = W(z) κ u_⋆ z [1 - τ^r_∥ / u_⋆²]_+,
+ν_{SL} = W(z) κ u_⋆ z [1 - a τ^r_∥ / u_⋆²]_+,
 ```
 
 and each scalar diffusivity independently replaces its signed flux deficit. The default support
 is the first interior vertical face. `support=2` also activates the second interior face with
 weight `1/2`. Surface boundary fluxes are diagnosed but are not modified.
+
+`resolved_flux_factor=a` (default `1`) scales the signed resolved contribution only when
+computing the momentum and scalar deficits. For example, `a=2` assumes additional transport
+equal to the resolved flux, so an aligned resolved flux carrying half the wall flux shuts off
+the corresponding coefficient. This is a sensitivity parameter, not a measurement of numerical
+transport: numerical flux need not be proportional to, or have the sign of, resolved covariance.
+Countergradient resolved transport increases the deficit. Stored resolved covariances, projected
+stresses, and prescribed surface fluxes retain their physical, unscaled values.
 
 `minimum_scalar_fluxes` is a named tuple keyed by transported prognostic scalar name. Each value
 has the kinematic flux units of that scalar and explicitly defines its near-zero guard. Scalars
@@ -55,6 +63,7 @@ summary(closure)
 """
 struct SurfaceLayerDiffusivity{TD, FT, G} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 1}
     filter_timescale :: FT
+    resolved_flux_factor :: FT
     von_karman_constant :: FT
     turbulent_prandtl_number :: FT
     minimum_friction_velocity :: FT
@@ -67,6 +76,7 @@ end
 function SurfaceLayerDiffusivity(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                  FT = Oceananigans.defaults.FloatType;
                                  filter_timescale = 300,
+                                 resolved_flux_factor = 1,
                                  von_karman_constant = 0.4,
                                  turbulent_prandtl_number = 1,
                                  minimum_friction_velocity = 1e-4,
@@ -76,6 +86,11 @@ function SurfaceLayerDiffusivity(time_discretization::TD = VerticallyImplicitTim
                                  support = 1) where TD
     isfinite(filter_timescale) && filter_timescale > 0 ||
         throw(ArgumentError("filter_timescale must be finite and positive"))
+    isfinite(resolved_flux_factor) && resolved_flux_factor ≥ 0 ||
+        throw(ArgumentError("resolved_flux_factor must be finite and nonnegative"))
+    resolved_flux_factor = convert(FT, resolved_flux_factor)
+    isfinite(resolved_flux_factor) ||
+        throw(ArgumentError("resolved_flux_factor must be finite and nonnegative in the closure float type"))
     isfinite(von_karman_constant) && von_karman_constant > 0 ||
         throw(ArgumentError("von_karman_constant must be finite and positive"))
     isfinite(turbulent_prandtl_number) && turbulent_prandtl_number > 0 ||
@@ -93,6 +108,7 @@ function SurfaceLayerDiffusivity(time_discretization::TD = VerticallyImplicitTim
     guards = map(value -> convert(FT, value), minimum_scalar_fluxes)
     return SurfaceLayerDiffusivity{TD, FT, typeof(guards)}(
         convert(FT, filter_timescale),
+        resolved_flux_factor,
         convert(FT, von_karman_constant),
         convert(FT, turbulent_prandtl_number),
         convert(FT, minimum_friction_velocity),
@@ -110,6 +126,7 @@ function Utils.with_tracers(tracer_names, closure::SurfaceLayerDiffusivity{TD, F
                         for name in tracer_names)
     return SurfaceLayerDiffusivity{TD, FT, typeof(guards)}(
         closure.filter_timescale,
+        closure.resolved_flux_factor,
         closure.von_karman_constant,
         closure.turbulent_prandtl_number,
         closure.minimum_friction_velocity,
@@ -125,6 +142,7 @@ Base.summary(::SurfaceLayerDiffusivity{TD}) where TD =
 function Base.show(io::IO, closure::SurfaceLayerDiffusivity)
     print(io, summary(closure), '\n',
           "├── filter_timescale: ", prettysummary(closure.filter_timescale), '\n',
+          "├── resolved_flux_factor: ", prettysummary(closure.resolved_flux_factor), '\n',
           "├── support: ", closure.support, '\n',
           "├── von_karman_constant: ", prettysummary(closure.von_karman_constant), '\n',
           "├── turbulent_prandtl_number: ", prettysummary(closure.turbulent_prandtl_number), '\n',
@@ -164,7 +182,7 @@ end
                                safe_stress
     transverse_resolved_stress = (resolved_stress_v * stress_u - resolved_stress_u * stress_v) /
                                  safe_stress
-    deficit = max(0, 1 - parallel_resolved_stress / safe_stress)
+    deficit = max(0, 1 - closure.resolved_flux_factor * parallel_resolved_stress / safe_stress)
     friction_velocity = sqrt(stress_magnitude)
     raw_viscosity = weight * closure.von_karman_constant * friction_velocity * z * deficit
     cap_active = valid & isfinite(closure.maximum_viscosity) &
@@ -180,7 +198,7 @@ end
     valid = isfinite(surface_flux) & (abs(surface_flux) > flux_guard) &
             (friction_velocity > closure.minimum_friction_velocity) & (weight > 0)
     safe_surface_flux = ifelse(valid, surface_flux, one(surface_flux))
-    deficit = max(0, 1 - resolved_flux / safe_surface_flux)
+    deficit = max(0, 1 - closure.resolved_flux_factor * resolved_flux / safe_surface_flux)
     raw_diffusivity = weight * closure.von_karman_constant * friction_velocity * z /
                       closure.turbulent_prandtl_number * deficit
     cap_active = valid & isfinite(closure.maximum_diffusivity) &

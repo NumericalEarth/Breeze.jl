@@ -15,6 +15,7 @@ using Oceananigans.Fields: location
 using Oceananigans.Grids: Center, Face, znodes
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.TurbulenceClosures: ExplicitTimeDiscretization
+using Oceananigans.Utils: with_tracers
 
 function periodic_horizontal_halos_match(field, nx, ny)
     values = Array(parent(field))
@@ -31,6 +32,7 @@ end
         minimum_scalar_fluxes=(ρθ=1e-8, ρqᵗ=1e-12),
         support=2)
     @test closure.filter_timescale === FT(100)
+    @test closure.resolved_flux_factor === FT(1)
     @test closure.minimum_scalar_fluxes.ρθ === FT(1e-8)
     @test closure.minimum_scalar_fluxes.ρqᵗ === FT(1e-12)
     @test closure.support == 2
@@ -50,6 +52,129 @@ end
     @test_throws ArgumentError SurfaceLayerDiffusivity(FT; maximum_viscosity=NaN)
     @test_throws ArgumentError SurfaceLayerDiffusivity(FT; maximum_diffusivity=-1)
     @test_throws ArgumentError SurfaceLayerDiffusivity(FT; maximum_diffusivity=NaN)
+    for factor in (-1, -1e-100, Inf, -Inf, NaN)
+        @test_throws ArgumentError SurfaceLayerDiffusivity(FT; resolved_flux_factor=factor)
+    end
+    @test_throws ArgumentError SurfaceLayerDiffusivity(Float32; resolved_flux_factor=1e100)
+    @test SurfaceLayerDiffusivity(FT; resolved_flux_factor=0).resolved_flux_factor === FT(0)
+end
+
+@testset "Resolved flux factor constitutive law [$FT]" for FT in all_float_types()
+    default = SurfaceLayerDiffusivity(FT)
+    unit = SurfaceLayerDiffusivity(FT; resolved_flux_factor=1)
+    doubled = SurfaceLayerDiffusivity(FT; resolved_flux_factor=2)
+    @test isbitstype(typeof(doubled))
+    @test adapt(CPU(), doubled) === doubled
+    reconstructed = with_tracers((:ρθ, :ρqᵛ), doubled)
+    @test reconstructed.resolved_flux_factor === FT(2)
+    @test reconstructed.minimum_scalar_fluxes == (ρθ=FT(Inf), ρqᵛ=FT(Inf))
+    @test occursin("resolved_flux_factor: 2", sprint(show, reconstructed))
+
+    momentum(flux, closure; weight=FT(1)) = momentum_surface_layer_properties(
+        flux, FT(-0.01), FT(-0.04), FT(0), FT(12.5), weight, closure)
+    for flux in FT.((-0.08, -0.02, 0, 0.02))
+        @test momentum(flux, default) === momentum(flux, unit)
+        original = momentum(flux, unit)
+        scaled = momentum(flux, doubled)
+        # Independent pre-factor constitutive formula, not just two new constructors.
+        stress = sqrt(FT(0.04)^2)
+        parallel = -flux * FT(0.04) / stress
+        old_deficit = max(0, 1 - parallel / stress)
+        @test original.deficit === old_deficit
+        @test original.viscosity === FT(1) * FT(0.4) * sqrt(stress) * FT(12.5) * old_deficit
+        @test scaled.parallel_resolved_stress === original.parallel_resolved_stress
+        @test scaled.transverse_resolved_stress === original.transverse_resolved_stress
+    end
+    half = momentum(FT(-0.02), doubled)
+    @test half.viscosity === FT(0)
+    @test half.deficit === FT(0)
+    @test momentum(FT(0.02), doubled).deficit ≈ FT(2)
+    @test momentum(FT(0.02), doubled).viscosity ≈ FT(2)
+    @test momentum(FT(0), doubled; weight=FT(0)).viscosity === FT(0)
+    @test momentum(FT(0), doubled; weight=FT(0.5)).viscosity ≈ FT(0.5)
+    capped = SurfaceLayerDiffusivity(FT; resolved_flux_factor=2,
+                                    maximum_viscosity=0.3, maximum_diffusivity=0.2)
+    @test momentum(FT(0.02), capped).viscosity === FT(0.3)
+    @test momentum(FT(0.02), capped).cap_active
+    calm = momentum_surface_layer_properties(FT(0.02), FT(0), FT(0), FT(0),
+                                              FT(12.5), FT(1), doubled)
+    @test !calm.valid
+    @test calm.viscosity === FT(0)
+
+    for surface in FT.((-0.1, 0.1))
+        scalar(flux, closure; weight=FT(1), guard=FT(1e-8)) =
+            scalar_surface_layer_properties(flux, surface, FT(0.2),
+                                            FT(12.5), weight, guard, closure)
+        for fraction in FT.((-1, 0, 0.25, 0.5, 1, 2))
+            @test scalar(fraction * surface, default) === scalar(fraction * surface, unit)
+            old_deficit = max(0, 1 - fraction * surface / surface)
+            @test scalar(fraction * surface, unit).deficit === old_deficit
+            @test scalar(fraction * surface, unit).diffusivity ===
+                  FT(1) * FT(0.4) * FT(0.2) * FT(12.5) / FT(1) * old_deficit
+        end
+        @test scalar(surface / 2, doubled).diffusivity === FT(0)
+        @test scalar(surface / 4, doubled).diffusivity ≈ FT(0.5)
+        @test scalar(-surface / 2, doubled).deficit ≈ FT(2)
+        @test scalar(-surface / 2, doubled).diffusivity ≈ FT(2)
+        @test scalar(FT(0), doubled; weight=FT(0.5)).diffusivity ≈ FT(0.5)
+        @test scalar(FT(0), doubled; weight=FT(0)).diffusivity === FT(0)
+        @test scalar(FT(0), doubled; guard=abs(surface)).diffusivity === FT(0)
+        @test !scalar(FT(0), doubled; guard=abs(surface)).valid
+        @test scalar(-surface, capped).diffusivity === FT(0.2)
+        @test scalar(-surface, capped).cap_active
+    end
+    zero_flux = scalar_surface_layer_properties(FT(0), FT(0), FT(0.2),
+                                                FT(12.5), FT(1), FT(0), doubled)
+    @test !zero_flux.valid
+    @test zero_flux.diffusivity === FT(0)
+end
+
+@testset "Resolved flux factor preserves physical filter diagnostics" begin
+    Oceananigans.defaults.FloatType = Float64
+    grid = RectilinearGrid(CPU(); size=(4, 4, 4), extent=(50, 50, 50))
+    boundary_conditions = (
+        ρu=FieldBoundaryConditions(bottom=FluxBoundaryCondition(-1.0)),
+        ρv=FieldBoundaryConditions(bottom=FluxBoundaryCondition(0.0)),
+        ρE=FieldBoundaryConditions(bottom=FluxBoundaryCondition(-0.1)))
+    models = map((1, 2)) do factor
+        closure = SurfaceLayerDiffusivity(Float64; resolved_flux_factor=factor,
+            filter_timescale=100, minimum_scalar_fluxes=(ρθ=1e-8,))
+        model = AtmosphereModel(grid; closure, boundary_conditions, advection=nothing)
+        set!(model; θ=300, u=1, v=0, w=0)
+        model.clock.time = 100
+        model.clock.iteration = 1
+        set!(model.velocities.u, 3)
+        set!(model.velocities.v, 1)
+        set!(model.velocities.w, -0.2)
+        update_completed_step_closure_state!(model.closure_fields, model.closure, model)
+        model
+    end
+    ordinary, doubled = models
+    @test doubled.closure.resolved_flux_factor == 2
+    for name in (:resolved_u_flux, :resolved_v_flux, :transverse_stress,
+                 :uw_product_mean, :vw_product_mean)
+        for face in 1:2
+            @test Array(interior(getproperty(ordinary.closure_fields, name)[face])) ==
+                  Array(interior(getproperty(doubled.closure_fields, name)[face]))
+        end
+    end
+    for name in keys(ordinary.closure_fields.resolved_scalar_flux), face in 1:2
+        @test Array(interior(getproperty(ordinary.closure_fields.resolved_scalar_flux, name)[face])) ==
+              Array(interior(getproperty(doubled.closure_fields.resolved_scalar_flux, name)[face]))
+    end
+    @test doubled.closure_fields.Kᵘ[1, 1, 2] < ordinary.closure_fields.Kᵘ[1, 1, 2]
+    # Checkpoint an accepted physical step, not the synthetic velocity-only filter sample above.
+    continued = AtmosphereModel(grid; closure=doubled.closure, boundary_conditions, advection=nothing)
+    set!(continued; θ=300, u=(x, y, z) -> z^2 / 100, v=0, w=0)
+    Oceananigans.time_step!(continued, 0.2)
+    state = deepcopy(Oceananigans.prognostic_state(continued))
+    restarted = AtmosphereModel(grid; closure=doubled.closure, boundary_conditions, advection=nothing)
+    set!(restarted; θ=300, u=1, v=0, w=0)
+    Oceananigans.restore_prognostic_state!(restarted, state)
+    Oceananigans.TimeSteppers.update_state!(restarted)
+    Oceananigans.time_step!(continued, 0.2)
+    Oceananigans.time_step!(restarted, 0.2)
+    @test Oceananigans.prognostic_state(continued) == Oceananigans.prognostic_state(restarted)
 end
 
 @testset "SurfaceLayerDiffusivity device closure fields" begin
