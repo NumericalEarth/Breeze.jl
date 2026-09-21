@@ -88,8 +88,8 @@ julia --project run_benchmarks.jl --device CPU --backend reactant --ad --simplif
 ```
 
 Each result is recorded with `mode = "ad"` and a `checkpointing` label
-(`periodic4`, `binomial3`, `none`) in `benchmark_results.json`; the label is
-also appended to the benchmark name (`..._reactant_AD_periodic4`). `Time/Step`
+(`periodic_4`, `binomial_3`, `none`) in `benchmark_results.json`; the label is
+also appended to the benchmark name (`..._reactant_AD_periodic_4`). `Time/Step`
 is the wall time of the combined forward+backward program divided by
 `--time_steps`.
 

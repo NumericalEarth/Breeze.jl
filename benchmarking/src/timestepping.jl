@@ -81,5 +81,5 @@ Short string identifying a loop checkpointing strategy, used in benchmark
 names and recorded in `BenchmarkResult.checkpointing`.
 """
 checkpointing_label(checkpointing::Bool) = checkpointing ? "auto" : "none"
-checkpointing_label(checkpointing::Reactant.Periodic) = "periodic$(checkpointing.n)"
-checkpointing_label(checkpointing::Reactant.Binomial) = "binomial$(checkpointing.budget)"
+checkpointing_label(checkpointing::Reactant.Periodic) = "periodic_$(checkpointing.n)"
+checkpointing_label(checkpointing::Reactant.Binomial) = "binomial_$(checkpointing.budget)"
