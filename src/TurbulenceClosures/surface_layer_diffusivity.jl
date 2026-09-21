@@ -219,6 +219,19 @@ struct SurfaceLayerDiffusivityFields{K, TK, F, TF, SF, B, TB, R1, R2}
     previous_update_iteration :: R2
 end
 
+# Only diffusivities are read by the momentum, tracer, and implicit-solver kernels.
+# The full fields object remains on the host: its wall boundary conditions and Ref clocks
+# are needed to sample/update filters and to restore their state from checkpoints.
+struct SurfaceLayerDiffusivityDeviceFields{K, TK}
+    Kᵘ :: K
+    tupled_tracer_diffusivities :: TK
+end
+
+Adapt.adapt_structure(to, fields::SurfaceLayerDiffusivityFields) =
+    SurfaceLayerDiffusivityDeviceFields(
+        adapt(to, fields.Kᵘ),
+        adapt(to, fields.tupled_tracer_diffusivities))
+
 two_surface_fields(grid) =
     (Field{Center, Center, Nothing}(grid), Field{Center, Center, Nothing}(grid))
 

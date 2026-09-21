@@ -1,11 +1,12 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Test
+using Adapt: adapt
 import Oceananigans
 using Breeze
 using Breeze.TurbulenceClosures: exponential_filter_weight, exponential_mean_and_covariance,
     momentum_surface_layer_properties, scalar_surface_layer_properties, support_weight,
-    SurfaceLayerDiffusivityFields
+    SurfaceLayerDiffusivityFields, SurfaceLayerDiffusivityDeviceFields
 using Breeze.AtmosphereModels: compute_tendencies!, dynamics_thermodynamic_fields,
     update_completed_step_closure_state!
 using Oceananigans: fields
@@ -42,6 +43,29 @@ using Oceananigans.TurbulenceClosures: ExplicitTimeDiscretization
     @test_throws ArgumentError SurfaceLayerDiffusivity(FT; maximum_diffusivity=NaN)
 end
 
+@testset "SurfaceLayerDiffusivity device closure fields" begin
+    if CUDA.functional()
+        Oceananigans.defaults.FloatType = Float32
+        grid = RectilinearGrid(GPU(); size=(4, 4, 4), extent=(50, 50, 50))
+        boundary_conditions = (;
+            ρu=FieldBoundaryConditions(bottom=FluxBoundaryCondition(-0.04f0)),
+            ρv=FieldBoundaryConditions(bottom=FluxBoundaryCondition(0f0)))
+        closure = SurfaceLayerDiffusivity(Float32;
+            support=2, minimum_scalar_fluxes=(ρθ=1f-8,))
+        model = AtmosphereModel(grid; closure, boundary_conditions, advection=nothing)
+        set!(model; θ=300, u=1, v=0, w=0)
+        host_fields = model.closure_fields
+        device_fields = CUDA.cudaconvert(host_fields)
+        @test device_fields isa SurfaceLayerDiffusivityDeviceFields
+        @test isbitstype(typeof(device_fields))
+        @test propertynames(device_fields) == (:Kᵘ, :tupled_tracer_diffusivities)
+        @test host_fields.previous_update_time isa Base.RefValue
+        @test host_fields.previous_update_iteration isa Base.RefValue
+        Oceananigans.time_step!(model, 0.1f0)
+        @test all(isfinite, Array(interior(host_fields.Kᵘ)))
+    end
+end
+
 @testset "SurfaceLayerDiffusivity CPU model integration" begin
     Oceananigans.defaults.FloatType = Float64
     grid = RectilinearGrid(CPU(); size=(4, 4, 4), extent=(50, 50, 50))
@@ -53,6 +77,14 @@ end
     model = AtmosphereModel(grid; closure, boundary_conditions, advection=nothing)
     set!(model; θ=300, u=(x, y, z) -> z / 10, v=0, w=0)
     @test model.closure_fields isa SurfaceLayerDiffusivityFields
+    kernel_fields = adapt(CPU(), model.closure_fields)
+    @test kernel_fields isa SurfaceLayerDiffusivityDeviceFields
+    @test propertynames(kernel_fields) == (:Kᵘ, :tupled_tracer_diffusivities)
+    @test kernel_fields.Kᵘ[1, 1, 2] == model.closure_fields.Kᵘ[1, 1, 2]
+    @test keys(kernel_fields.tupled_tracer_diffusivities) ==
+          keys(model.closure_fields.tupled_tracer_diffusivities)
+    @test model.closure_fields.previous_update_time isa Base.RefValue
+    @test model.closure_fields.previous_update_iteration isa Base.RefValue
 
     viscosity = Array(interior(model.closure_fields.Kᵘ, 1, 1, :))
     @test location(model.closure_fields.Kᵘ) === (Center, Center, Face)
