@@ -50,8 +50,8 @@ With `--ad`, the benchmark times a forward+backward pass instead of forward
 stepping only: `loss` runs `--time_steps` steps of the model inside a
 checkpointed `Reactant.@trace` loop and reduces to a scalar, and `grad_loss!`
 differentiates it with Enzyme reverse mode with respect to the initial
-potential temperature. Both are compiled together into one XLA program (with
-`disable_loop_raising_passes=true`), so this requires `--backend reactant`.
+potential temperature. Both are compiled together into one XLA program, so
+this requires `--backend reactant`.
 The loop body is compiled once regardless of `--time_steps`.
 
 `--checkpoints` controls how Enzyme checkpoints the loop in the reverse pass.

@@ -40,8 +40,7 @@ directly through eager `time_step!`.
 With `ad=true` (Reactant only) the forward+backward pass `grad_loss!` is
 benchmarked instead, using `checkpointing` as the loop checkpointing strategy
 for the reverse pass (`true`, `false`, `Reactant.Periodic(n)`, or
-`Reactant.Binomial(budget)`; see `loss` in timestepping.jl). The AD program is
-compiled with `disable_loop_raising_passes=true`.
+`Reactant.Binomial(budget)`; see `loss` in timestepping.jl).
 
 Returns a `BenchmarkResult` containing timing information and system metadata.
 """
@@ -100,13 +99,10 @@ function benchmark_time_stepping(model;
             dθ_init = CenterField(grid); set!(dθ_init, 0)
             dmodel  = Enzyme.make_zero(model)
             if verbose
-                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true, disable_loop_raising_passes=true)..."
+                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true)..."
             end
-            # `disable_loop_raising_passes` is not a @compile keyword; it has to
-            # go through a CompileOptions, which then replaces all other options.
-            compile_options = Reactant.CompileOptions(; disable_loop_raising_passes = true, raise_first = true, raise = true, sync = true)
             compile_start = time_ns()
-            compiled_grad! = Reactant.@compile compile_options=compile_options grad_loss!(
+            compiled_grad! = Reactant.@compile raise=true raise_first=true sync=true grad_loss!(
                 model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
             compile_time_seconds = (time_ns() - compile_start) / 1e9
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
