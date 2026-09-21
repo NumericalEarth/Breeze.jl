@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -14,7 +16,7 @@ using Test
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation)
 
@@ -74,17 +76,20 @@ end
     dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                     terrain_metrics = metrics,
                                     reference_potential_temperature = θ_profile,
-                                    surface_pressure = FT(101325),
+                                    base_pressure = FT(101325),
                                     standard_pressure = FT(1e5))
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants)
 
+    # Check consistency against the construction reference: setting ρ and θ to the reference
+    # density/potential temperature must diagnose pressure equal to pᵣ. `set!` preserves the
+    # reference built at construction unless `compute_reference_state=true` is passed.
     set!(model,
-         ρ = model.dynamics.terrain_reference_density,
+         ρ = model.dynamics.reference_state.density,
          θ = (x, z) -> θ_profile(z),
          enforce_mass_conservation = false)
 
     p = model.dynamics.pressure
-    pᵣ = model.dynamics.terrain_reference_pressure
+    pᵣ = model.dynamics.reference_state.pressure
     @test @allowscalar maximum(abs, interior(p) .- interior(pᵣ)) < FT(1e-6)
 end
 
@@ -99,7 +104,7 @@ end
 
     p₀ = FT(101500)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
 
     # Test with no microphysics first (no saturation adjustment effects)
@@ -154,7 +159,7 @@ end
 
     grid = RectilinearGrid(default_arch; size=(1, 1, 8), x=(0, 1e3), y=(0, 1e3), z=(0, 1e3))
     constants = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
     microphysics = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
 
     @testset "Scalar ℋ (subsaturated)" begin

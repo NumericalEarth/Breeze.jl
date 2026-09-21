@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using Dates
 using GPUArraysCore: @allowscalar
@@ -43,19 +45,19 @@ using RRTMGP
 
         # Legal to construct without one (a coupled model binds it later)...
         radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants; surface_albedo = 0.1)
-        @test isnothing(radiation.surface_properties.surface_temperature)
+        @test isnothing(radiation.surface_radiation.surface_temperature)
 
         # ...but solving before anything is bound fails loudly.
         @test_throws ArgumentError Breeze.AtmosphereModels._update_radiation!(radiation, nothing)
     end
 
-    @testset "Single column grid with clouds [$(FT)]" for FT in test_float_types()
+    @testset "Single column grid with clouds [$(FT)]" begin
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
         grid = RectilinearGrid(default_arch; size=16, x=0, y=45, z=(0, 10kilometers), topology)
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -99,22 +101,34 @@ using RRTMGP
         # Get fluxes
         ℐ_lw_up_clear = clear_sky_radiation.upwelling_longwave_flux
         ℐ_lw_dn_clear = clear_sky_radiation.downwelling_longwave_flux
+        ℐ_sw_up_clear = clear_sky_radiation.upwelling_shortwave_flux
         ℐ_sw_dn_clear = clear_sky_radiation.downwelling_shortwave_flux
 
         ℐ_lw_up_allsky = all_sky_radiation.upwelling_longwave_flux
         ℐ_lw_dn_allsky = all_sky_radiation.downwelling_longwave_flux
+        ℐ_sw_up_allsky = all_sky_radiation.upwelling_shortwave_flux
         ℐ_sw_dn_allsky = all_sky_radiation.downwelling_shortwave_flux
 
         # Basic sanity: sign convention and finite values for all-sky
         @test all(isfinite, interior(ℐ_lw_up_allsky))
         @test all(isfinite, interior(ℐ_lw_dn_allsky))
+        @test all(isfinite, interior(ℐ_sw_up_allsky))
         @test all(isfinite, interior(ℐ_sw_dn_allsky))
 
         # Allow small numerical tolerance (wider for Float32)
         ε = FT == Float32 ? FT(1e-2) : FT(1e-6)
         @test all(interior(ℐ_lw_up_allsky) .≥ -ε)
         @test all(interior(ℐ_lw_dn_allsky) .≤ ε)
+        @test all(interior(ℐ_sw_up_allsky) .≥ -ε)
         @test all(interior(ℐ_sw_dn_allsky) .≤ ε)
+
+        # The Oceananigans output field must retain RRTMGP's upward shortwave flux.
+        # (`longwave_solver` holds the combined RRTMGP solver for full-spectrum optics.)
+        rrtmgp_sw_up_allsky = Array(RRTMGP.sw_flux_up(all_sky_radiation.longwave_solver))
+        @test vec(Array(interior(ℐ_sw_up_allsky))) == vec(rrtmgp_sw_up_allsky)
+
+        # Atmospheric scattering and surface reflection must send shortwave back up.
+        @allowscalar @test ℐ_sw_up_allsky[1, 1, size(grid, 3) + 1] > 0
 
         # Surface upwelling LW should be significant
         @allowscalar @test ℐ_lw_up_allsky[1, 1, 1] > 100
@@ -127,20 +141,21 @@ using RRTMGP
         # All-sky should differ from clear-sky when clouds are present
         # The difference should be noticeable in at least one flux component
         lw_up_diff = sum(abs, interior(ℐ_lw_up_allsky) .- interior(ℐ_lw_up_clear))
+        sw_up_diff = sum(abs, interior(ℐ_sw_up_allsky) .- interior(ℐ_sw_up_clear))
         sw_dn_diff = sum(abs, interior(ℐ_sw_dn_allsky) .- interior(ℐ_sw_dn_clear))
 
         # At least one of LW or SW should show a difference due to clouds
         # (The magnitude depends on cloud amount, but should be non-zero)
-        @test (lw_up_diff > 0) || (sw_dn_diff > 0)
+        @test (lw_up_diff > 0) || (sw_up_diff > 0) || (sw_dn_diff > 0)
     end
 
-    @testset "Custom effective radius models [$FT]" for FT in test_float_types()
+    @testset "Custom effective radius models [$FT]" begin
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
         grid = RectilinearGrid(default_arch; size=8, x=0, y=45, z=(0, 10kilometers), topology)
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 

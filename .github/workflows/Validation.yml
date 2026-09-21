@@ -44,13 +44,13 @@ jobs:
           - ubuntu-latest
     steps:
       - name: "Check out repository"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: "Install Julia"
         uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         with:
           version: ${{ matrix.version }}
       - name: "Cache Julia depot"
-        uses: julia-actions/cache@a45e8fa8be21c18a06b7177052533149e61e9b38 # v3.1.0
+        uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
       - name: Instantiate examples environment
         shell: julia --color=yes --project=examples {0}
         run: |

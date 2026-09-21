@@ -1,18 +1,23 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Test
 using Breeze
 using Breeze.BoundaryConditions
 using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  FittedStabilityFunction,
-                                 StabilityFunctionParameters,
+                                 StabilityFunction,
                                  RichardsonNumberMapping,
                                  neutral_coefficient_10m,
                                  bulk_richardson_number,
                                  bulk_to_flux_richardson_number,
                                  integrated_stability_momentum,
                                  integrated_stability_scalar,
-                                 stability_correction_factor
+                                 stability_correction_factor,
+                                 wall_virtual_potential_temperature
+using Breeze.AtmosphereModels.Diagnostics: saturation_total_specific_moisture
 using Oceananigans
-using Oceananigans.BoundaryConditions: BoundaryCondition
+using Oceananigans.BoundaryConditions: BoundaryCondition, Bottom
+using Oceananigans.Grids: XDirection
 using GPUArraysCore: @allowscalar
 
 @testset "PolynomialCoefficient [$FT]" for FT in test_float_types()
@@ -34,7 +39,7 @@ using GPUArraysCore: @allowscalar
         # FittedStabilityFunction embeds parameter structs
         sf = coef.stability_function
         @test sf.richardson_number_mapping isa RichardsonNumberMapping
-        @test sf.stability_function_parameters isa StabilityFunctionParameters
+        @test sf.stability_function isa StabilityFunction
         @test sf.richardson_number_mapping.strongly_stable_transition ≈ 0.2
 
         # Test explicit coefficients
@@ -70,8 +75,8 @@ using GPUArraysCore: @allowscalar
         mapping_custom = RichardsonNumberMapping(strongly_stable_transition = 0.3)
         @test mapping_custom.strongly_stable_transition ≈ 0.3
 
-        # Default StabilityFunctionParameters
-        params = StabilityFunctionParameters()
+        # Default StabilityFunction
+        params = StabilityFunction()
         @test params.γᴰ ≈ 19.3
         @test params.γᵀ ≈ 11.6
         @test params.a ≈ 1.0
@@ -80,14 +85,14 @@ using GPUArraysCore: @allowscalar
         @test params.d ≈ 0.35
 
         # Custom parameters
-        params_custom = StabilityFunctionParameters(γᴰ = 16.0, γᵀ = 12.0)
+        params_custom = StabilityFunction(γᴰ = 16.0, γᵀ = 12.0)
         @test params_custom.γᴰ ≈ 16.0
         @test params_custom.γᵀ ≈ 12.0
     end
 
     @testset "Neutral coefficient computation" begin
         # Test Large & Yeager form at U = 10 m/s
-        coeffs = (0.142, 0.076, 2.7)  # Large & Yeager (2009) drag coefficients
+        coeffs = (0.142, 0.076, 2.7) .* 1e-3 # Large & Yeager (2009) drag coefficients
         U = 10.0
         U_min = 0.1
         C = neutral_coefficient_10m(coeffs, U, U_min)
@@ -116,19 +121,20 @@ using GPUArraysCore: @allowscalar
         θᵥ_sfc = 290.0
         U = 10.0
         U_min = 0.1
+        g = ThermodynamicConstants(Float64).gravitational_acceleration
 
         # Unstable case: warm surface (θᵥ < θᵥ_sfc)
         θᵥ_unstable = 288.0
-        Ri_unstable = bulk_richardson_number(z, θᵥ_unstable, θᵥ_sfc, U, U_min)
+        Ri_unstable = bulk_richardson_number(z, θᵥ_unstable, θᵥ_sfc, U, U_min, g)
         @test Ri_unstable < 0
 
         # Neutral case: same temperature
-        Ri_neutral = bulk_richardson_number(z, θᵥ_sfc, θᵥ_sfc, U, U_min)
+        Ri_neutral = bulk_richardson_number(z, θᵥ_sfc, θᵥ_sfc, U, U_min, g)
         @test Ri_neutral ≈ 0.0 atol=1e-10
 
         # Stable case: cold surface (θᵥ > θᵥ_sfc)
         θᵥ_stable = 292.0
-        Ri_stable = bulk_richardson_number(z, θᵥ_stable, θᵥ_sfc, U, U_min)
+        Ri_stable = bulk_richardson_number(z, θᵥ_stable, θᵥ_sfc, U, U_min, g)
         @test Ri_stable > 0
     end
 
@@ -168,7 +174,7 @@ using GPUArraysCore: @allowscalar
     end
 
     @testset "Integrated stability functions Ψᴰ and Ψᵀ" begin
-        params = StabilityFunctionParameters()
+        params = StabilityFunction()
 
         # At ζ = 0, both Ψᴰ and Ψᵀ should be 0 (continuity)
         @test integrated_stability_momentum(0.0, params) ≈ 0.0 atol=1e-10
@@ -253,18 +259,53 @@ using GPUArraysCore: @allowscalar
         @test f_m != f_s
     end
 
+    @testset "Surface virtual potential temperature includes Exner reduction" begin
+        grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
+        constants = ThermodynamicConstants(FT)
+        surface = PlanarLiquidSurface()
+        Tˢ = FT(300)
+        pˢ = FT(8e4)
+        pˢᵗ = FT(1e5)
+
+        qᵛ⁺ = Breeze.AtmosphereModels.Diagnostics.saturation_total_specific_moisture(Tˢ, pˢ,
+                                                                                      constants,
+                                                                                      surface)
+        Rᵈ = dry_air_gas_constant(constants)
+        Rᵛ = vapor_gas_constant(constants)
+        cᵖᵈ = constants.dry_air.heat_capacity
+        Πᵈˢ = (pˢ / pˢᵗ)^(Rᵈ / cᵖᵈ)
+        θᵥˢ_expected = Tˢ / Πᵈˢ * (1 + (Rᵛ / Rᵈ - 1) * qᵛ⁺)
+        θᵥˢ = wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface)
+        @test θᵥˢ ≈ θᵥˢ_expected
+        @test θᵥˢ > Tˢ * FT(1.05)
+
+        θᵥ_field = CenterField(grid)
+        set!(θᵥ_field, θᵥˢ)
+        qᵛ_field = CenterField(grid)
+        fields = (; qᵛ=qᵛ_field)
+        coef = PolynomialCoefficient((FT(0.142), FT(0.076), FT(2.7)), FT(1.5e-4), FT(0.1),
+                                     FittedStabilityFunction(FT(1.5e-4 / 7.3)), surface, FT(1),
+                                     θᵥ_field, pˢᵗ, constants, Val(:momentum))
+        C = coef(1, 1, 1, grid, Bottom(), FT(10), Tˢ, fields, pˢ)
+        C_neutral = neutral_coefficient_10m(coef.polynomial, FT(10), coef.minimum_wind_speed)
+        @test C ≈ C_neutral
+    end
+
     @testset "Callable interface" begin
         # Create a simple grid with first cell center at 10m
         grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
 
         # Test evaluation with no stability correction
         coef = PolynomialCoefficient(
-            polynomial = (0.142, 0.076, 2.7),
+            polynomial = (0.142, 0.076, 2.7) .* 1e-3,
             stability_function = nothing
         )
         U = 10.0
-        T₀ = 290.0
-        C = coef(1, 1, grid, U, T₀)
+        Tˢ = 290.0
+        pˢ = 1e5
+        qᵛ_field = CenterField(grid)  # dry air in the first cell
+        fields = (; qᵛ=qᵛ_field)
+        C = coef(1, 1, 1, grid, Bottom(), U, Tˢ, fields, pˢ)
         @test C isa Number
         @test C > 0
 
@@ -273,17 +314,18 @@ using GPUArraysCore: @allowscalar
         set!(θᵥ_field, 288.0)  # cooler than surface → unstable
 
         coef_fitted = PolynomialCoefficient(
-            (0.142, 0.076, 2.7),     # polynomial
+            (0.142, 0.076, 2.7) .* 1e-3, # polynomial
             1.5e-4,                   # roughness_length
             0.1,                      # minimum_wind_speed
             FittedStabilityFunction(1.5e-4 / 7.3),
             Breeze.PlanarLiquidSurface(),
+            1.0,                      # moisture_availability
             θᵥ_field,
             1e5,
             Breeze.Thermodynamics.ThermodynamicConstants(),
             Val(:momentum)
         )
-        C_fitted = coef_fitted(1, 1, grid, U, T₀)
+        C_fitted = coef_fitted(1, 1, 1, grid, Bottom(), U, Tˢ, fields, pˢ)
         @test C_fitted isa Number
         @test C_fitted > 0
         # Unstable conditions should enhance transfer
@@ -297,7 +339,7 @@ using GPUArraysCore: @allowscalar
         bc = Breeze.BulkDrag(coefficient = coef, gustiness = 0.5, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with momentum coefficients
-        @test bc.condition.coefficient.polynomial == (0.142, 0.076, 2.7)
+        @test bc.condition.coefficient.polynomial == default_neutral_drag_polynomial
         @test bc.condition.gustiness == 0.5
         @test bc.condition.surface_temperature === SST
         @test bc.condition.coefficient.transfer_type === Val(:momentum)
@@ -310,7 +352,7 @@ using GPUArraysCore: @allowscalar
         bc = Breeze.BulkSensibleHeatFlux(coefficient = coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with sensible heat coefficients
-        @test bc.condition.coefficient.polynomial == (0.128, 0.068, 2.43)
+        @test bc.condition.coefficient.polynomial == default_neutral_sensible_heat_polynomial
         @test bc.condition.coefficient.transfer_type === Val(:scalar)
     end
 
@@ -321,8 +363,41 @@ using GPUArraysCore: @allowscalar
         bc = Breeze.BulkVaporFlux(coefficient = coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with latent heat coefficients
-        @test bc.condition.coefficient.polynomial == (0.120, 0.070, 2.55)
+        @test bc.condition.coefficient.polynomial == default_neutral_latent_heat_polynomial
         @test bc.condition.coefficient.transfer_type === Val(:scalar)
+    end
+
+    @testset "moisture_availability" begin
+        # The surface humidity entering the stability correction is qˢ = β qᵛ⁺ + (1 - β) qᵛ: a
+        # saturated surface (β = 1) carries its saturation humidity and a dry one (β = 0) the
+        # humidity of the air above it, so that its virtual potential temperature has no moisture
+        # contribution of its own.
+        constants = ThermodynamicConstants(FT)
+        Tˢ = FT(265)
+        pˢ = FT(1e5)
+        pˢᵗ = FT(1e5)
+        qᵛ = FT(1e-3)
+        surface = PlanarLiquidSurface()
+        δᵛᵈ = vapor_gas_constant(constants) / dry_air_gas_constant(constants) - 1
+
+        θᵥˢ_saturated = wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, 1, qᵛ)
+        θᵥˢ_dry = wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, 0, qᵛ)
+        θᵥˢ_half = wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, FT(0.5), qᵛ)
+
+        @test θᵥˢ_saturated == wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface)
+        @test θᵥˢ_saturated > θᵥˢ_dry > Tˢ
+        # pˢ = pˢᵗ here, so the Exner factor is unity and θᵥˢ reduces to Tˢ (1 + δᵛᵈ qᵛ)
+        @test θᵥˢ_dry ≈ Tˢ * (1 + δᵛᵈ * qᵛ)
+        @test θᵥˢ_half ≈ (θᵥˢ_saturated + θᵥˢ_dry) / 2
+
+        @test PolynomialCoefficient().moisture_availability == 1
+        coef = PolynomialCoefficient(moisture_availability = 0)
+        @test coef.moisture_availability == 0
+        @test_throws ArgumentError PolynomialCoefficient(moisture_availability = 2)
+
+        # The value survives materialization
+        bc = Breeze.BulkDrag(coefficient = coef, surface_temperature = Tˢ)
+        @test bc.condition.coefficient.moisture_availability == 0
     end
 
     @testset "FilteredSurfaceVelocities construction" begin
@@ -334,9 +409,9 @@ using GPUArraysCore: @allowscalar
         @test fv.filter_timescale == Inf
         @test size(fv.u) == (4, 4, 1)
         @test size(fv.v) == (4, 4, 1)
-        @test size(fv.θᵥ) == (4, 4, 1)
+        @test size(fv.Δθᵥ) == (4, 4, 1)
         @test fv.last_update[] == (0, 0)
-        @test fv.last_θᵥ_update[] == (0, 0)
+        @test fv.last_Δθᵥ_update[] == (0, 0)
 
         # With explicit height and timescale
         fv2 = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
@@ -399,23 +474,85 @@ using GPUArraysCore: @allowscalar
         @test fs.field[1, 1, 1] ≈ expected atol=1e-10
     end
 
-    @testset "FilteredSurfaceVelocities θᵥ update!" begin
+    @testset "FilteredSurfaceVelocities Δθᵥ update!" begin
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
         fv = FilteredSurfaceVelocities(grid; filter_timescale=20.0)
 
-        # θᵥ source is a 3D field-like; here just use a CenterField at constant value.
-        θᵢ = 305
-        θᵥ_source = CenterField(grid)
-        set!(θᵥ_source, θᵢ)
+        # The filter stores the surface-layer difference θᵥ(z₁) - θᵥˢ, formed from the
+        # instantaneous state by a materialized coefficient and the surface temperature
+        θᵥ_field = CenterField(grid)
+        set!(θᵥ_field, 305.0)
+        qᵛ_field = CenterField(grid)
+        set!(qᵛ_field, 1e-3)
+        constants = Breeze.Thermodynamics.ThermodynamicConstants()
+        surface = Breeze.PlanarLiquidSurface()
+        pˢᵗ = 1e5
+        coef = PolynomialCoefficient((0.142, 0.076, 2.7) .* 1e-3, 1.5e-4, 0.1, FittedStabilityFunction(1.5e-4 / 7.3),
+                                     surface, 0.5, θᵥ_field, pˢᵗ, constants, Val(:momentum))
+        Tˢ = 300.0
 
-        Breeze.BoundaryConditions.update_θᵥ!(fv, θᵥ_source, grid, 2.0)
+        # The pressure and density the surface-layer state supplies, and the bottom-face pressure
+        # the coefficient therefore sees
+        p_field = CenterField(grid)
+        ρ_field = CenterField(grid)
+        set!(p_field, 1e5)
+        set!(ρ_field, 0)
+        fields = (; qᵛ=qᵛ_field, p=p_field, ρ=ρ_field)
+        pˢ = 1e5
+
+        θᵥˢ = wall_virtual_potential_temperature(Tˢ, pˢ, pˢᵗ, constants, surface, 0.5, 1e-3)
+        Δθᵥ = 305.0 - θᵥˢ
+        @test Breeze.BoundaryConditions.surface_layer_Δθᵥ(1, 1, 1, grid, coef, Tˢ, fields, pˢ) ≈ Δθᵥ
+
+        clock = Oceananigans.TimeSteppers.Clock(time=0.0)
+        Breeze.BoundaryConditions.update_Δθᵥ!(fv, coef, Tˢ, grid, clock, 2.0, fields)
         ε = 2.0 / 20.0
-        expected = (0.0 + ε * θᵢ) / (1 + ε)
-        @test fv.θᵥ[1, 1, 1] ≈ expected atol=1e-10
+        expected = (0.0 + ε * Δθᵥ) / (1 + ε)
+        @test fv.Δθᵥ[1, 1, 1] ≈ expected atol=1e-10
 
-        # Initialize sets the field directly from the source (no time integration)
-        Breeze.BoundaryConditions.initialize_θᵥ!(fv, θᵥ_source, grid)
-        @test fv.θᵥ[1, 1, 1] ≈ θᵢ atol=1e-10
+        # Initialize sets the field directly from the current difference (no time integration)
+        Breeze.BoundaryConditions.initialize_Δθᵥ!(fv, coef, Tˢ, grid, clock, fields)
+        @test fv.Δθᵥ[1, 1, 1] ≈ Δθᵥ atol=1e-10
+    end
+
+    # `materialize_coefficient` always installs a `NearWallVirtualPotentialTemperature`, which
+    # carries no fields of its own and evaluates itself from the surface-layer tuple. The forms that
+    # cannot receive that tuple used to exist and would dereference `nothing.p`; they are gone, and
+    # the live diagnostic is exercised here against the field it is supposed to reproduce.
+    @testset "Materialized coefficient evaluates θᵥ from the live fields [$FT]" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        constants = ThermodynamicConstants(FT)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants,
+                                dynamics=CompressibleDynamics())
+        set!(model; ρ=1, θ=FT(300), qᵗ=0)
+
+        bare = PolynomialCoefficient((0.142, 0.076, 2.7), FT(1.5e-4), FT(0.1),
+                                     FittedStabilityFunction(FT(1.5e-4 / 7.3)),
+                                     Breeze.PlanarLiquidSurface(), FT(1), nothing, FT(1e5),
+                                     constants, Val(:momentum))
+        coef = Breeze.BoundaryConditions.materialize_coefficient(bare, grid, model.dynamics,
+                                                                 nothing, constants, Val(:momentum))
+        @test coef.virtual_potential_temperature isa
+              Breeze.BoundaryConditions.NearWallVirtualPotentialTemperature
+
+        fields = Breeze.BoundaryConditions.surface_layer_state(model)
+        U, Tˢ, pˢ = FT(5), FT(292), FT(101325)
+        C = @allowscalar coef(1, 1, 1, grid, Bottom(), U, Tˢ, fields, pˢ)
+        @test C isa FT
+        @test isfinite(C) && C > 0
+
+        # The instantaneous diagnostic must agree with the `VirtualPotentialTemperature` operation
+        # the model exposes — it is the same quantity, reached through the field tuple instead of a
+        # captured `KernelFunctionOperation`.
+        θᵥ_operation = Field(VirtualPotentialTemperature(model))
+        compute!(θᵥ_operation)
+        θᵥ_boundary = @allowscalar Breeze.BoundaryConditions.near_wall_virtual_potential_temperature(
+            1, 1, 1, grid, coef.virtual_potential_temperature, fields)
+        @test θᵥ_boundary ≈ @allowscalar(θᵥ_operation[1, 1, 1]) rtol=1e-6
+
+        # Passing the tuple is mandatory: there is no method that silently omits it.
+        @test !hasmethod(typeof(coef), Tuple{Int, Int, Int, typeof(grid), Bottom, FT, FT, FT})
+        @test !hasmethod(typeof(coef), Tuple{Int, Int, Int, typeof(grid), Bottom, FT, FT, FT, Nothing})
     end
 
     @testset "BulkDrag with filtered_velocities" begin
@@ -433,7 +570,7 @@ using GPUArraysCore: @allowscalar
         SST(x, y) = 300.0
         bc2 = Breeze.BulkDrag(coefficient=coef, surface_temperature=SST, filtered_velocities=fv)
         @test bc2.condition.filtered_velocities === fv
-        @test bc2.condition.coefficient.polynomial == (0.142, 0.076, 2.7)
+        @test bc2.condition.coefficient.polynomial == default_neutral_drag_polynomial
     end
 
     @testset "BulkSensibleHeatFlux with filtered_velocities" begin
@@ -482,21 +619,23 @@ using GPUArraysCore: @allowscalar
         grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
 
         coef = PolynomialCoefficient(
-            polynomial = (0.142, 0.076, 2.7),
+            polynomial = (0.142, 0.076, 2.7) .* 1e-3,
             stability_function = nothing
         )
         U = 10.0
-        T₀ = 290.0
+        Tˢ = 290.0
+        pˢ = 1e5
+        fields = (; qᵛ=CenterField(grid))
 
-        # Default call (first cell center height = 10m)
-        C_default = coef(1, 1, grid, U, T₀)
+        # Default call (half the first cell thickness = 10m)
+        C_default = coef(1, 1, 1, grid, Bottom(), U, Tˢ, fields, pˢ)
 
         # Explicit height = 10m should give the same result
-        C_10m = coef(1, 1, grid, U, T₀, 10.0)
+        C_10m = coef(1, 1, 1, grid, Bottom(), U, Tˢ, 10.0, nothing, fields, pˢ)
         @test C_10m ≈ C_default atol=1e-12
 
         # Different height should give a different coefficient
-        C_20m = coef(1, 1, grid, U, T₀, 20.0)
+        C_20m = coef(1, 1, 1, grid, Bottom(), U, Tˢ, 20.0, nothing, fields, pˢ)
         @test C_20m != C_default
         # Higher evaluation height → coefficient adjusted by log ratio
         @test C_20m > 0
@@ -621,7 +760,7 @@ using GPUArraysCore: @allowscalar
         using Breeze.BoundaryConditions: evaluation_height
         grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
 
-        # Nothing → uses znode (first cell center at 10m for this grid)
+        # Nothing → uses the first-cell height above the surface (10 m here)
         h_default = evaluation_height(1, 1, grid, nothing)
         @test h_default ≈ 10.0
 
@@ -805,7 +944,7 @@ using GPUArraysCore: @allowscalar
 
     @testset "Drag flux uses filtered velocity, not instantaneous" begin
         using Oceananigans.Models: BoundaryConditionOperation
-        using Breeze.AtmosphereModels: surface_pressure as model_surface_pressure
+        using Breeze.BoundaryConditions: wall_air_pressure, surface_layer_state
         using Breeze.Thermodynamics: surface_density
 
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
@@ -817,7 +956,7 @@ using GPUArraysCore: @allowscalar
 
         # Build model with constant coefficient and filtered velocities. No
         # `surface_temperature` is supplied; `materialize_bulk_drag` fills it from
-        # the reference-state surface temperature so ρ₀ can be evaluated.
+        # the reference-state surface temperature so ρˢ can be evaluated.
 ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness, filtered_velocities=fv))
         ρv_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
                                                                  filtered_velocities=fv))
@@ -840,17 +979,19 @@ using GPUArraysCore: @allowscalar
         τˣ_field = Field(τˣ_op)
         compute!(τˣ_field)
 
-        # New formula: τ = -ρ₀ * Cᴰ * Ũ * u, with `u` and `Ũ` read from filtered fields.
-        p₀ = model_surface_pressure(model.dynamics)
-        T₀_default = Breeze.AtmosphereModels.default_drag_surface_temperature(model.dynamics,
+        # New formula: τ = -ρˢ * Cᴰ * Ũ * u, with `u` and `Ũ` read from filtered fields.
+        model_fields = surface_layer_state(model)
+        pˢ = wall_air_pressure(2, 2, 1, grid, Bottom(), XDirection(), model_fields,
+                               model.thermodynamic_constants)
+        Tˢ_default = Breeze.AtmosphereModels.default_drag_surface_temperature(model.dynamics,
                                                                               grid,
                                                                               model.thermodynamic_constants)
-        ρ₀ = surface_density(p₀, T₀_default, model.thermodynamic_constants)
+        ρˢ = surface_density(pˢ, Tˢ_default, model.thermodynamic_constants)
         Ũ_filtered = sqrt(U_f^2 + FT(gustiness)^2)
-        expected_filtered = - ρ₀ * Cᴰ * Ũ_filtered * U_f
+        expected_filtered = - ρˢ * Cᴰ * Ũ_filtered * U_f
 
         Ũ_unfiltered = sqrt(u₀^2 + FT(gustiness)^2)
-        expected_unfiltered = - ρ₀ * Cᴰ * Ũ_unfiltered * u₀
+        expected_unfiltered = - ρˢ * Cᴰ * Ũ_unfiltered * u₀
 
         # The actual flux should match the filtered prediction, not the instantaneous
         @test τˣ_field[2, 2, 1] ≈ expected_filtered
@@ -866,7 +1007,7 @@ using GPUArraysCore: @allowscalar
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
         Cᴰ = 1e-3
         gustiness = 0.1
-        T₀ = FT(290)
+        Tˢ = FT(290)
         τ_filter = FT(3600)  # 1 hour
 
         fv = FilteredSurfaceVelocities(grid; filter_timescale=τ_filter)
@@ -875,10 +1016,10 @@ using GPUArraysCore: @allowscalar
                                                                  filtered_velocities=fv))
         ρv_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
                                                                  filtered_velocities=fv))
-        ρθ_bcs = FieldBoundaryConditions(bottom=Breeze.BulkSensibleHeatFlux(surface_temperature=T₀,
+        ρθ_bcs = FieldBoundaryConditions(bottom=Breeze.BulkSensibleHeatFlux(surface_temperature=Tˢ,
                                                                              coefficient=Cᴰ, gustiness=gustiness,
                                                                              filtered_velocities=fv))
-        ρqᵛ_bcs = FieldBoundaryConditions(bottom=Breeze.BulkVaporFlux(surface_temperature=T₀,
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=Breeze.BulkVaporFlux(surface_temperature=Tˢ,
                                                                        coefficient=Cᴰ, gustiness=gustiness,
                                                                        filtered_velocities=fv))
 

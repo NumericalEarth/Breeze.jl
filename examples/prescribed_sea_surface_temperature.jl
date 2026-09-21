@@ -55,7 +55,7 @@ grid = RectilinearGrid(size = (128, 128), halo = (5, 5),
 
 p₀, θ₀ = 101325, 285 # Pa, K
 constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀)
+reference_state = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ₀)
 dynamics = AnelasticDynamics(reference_state)
 
 # The microphysics scheme uses saturation adjustment to maintain thermodynamic
@@ -174,7 +174,7 @@ filtered_velocities = FilteredSurfaceVelocities(grid; filter_timescale=1hour)
 # difference of 4 degrees K,
 
 ΔT = 4 # K
-T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
+T₀(x, t) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 
 # ## Momentum drag
 #
@@ -196,8 +196,8 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # We complete our specification by using the same polynomial coefficient for
 # sensible and latent heat fluxes. The flux type will be automatically inferred:
 
-ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
-ρqᵉ_surface_flux = BulkVaporFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
+ρE_surface_flux = BulkSensibleHeatFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
+ρqᵗ_surface_flux = BulkVaporFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
 
 # We can visualize how the neutral drag coefficient varies with wind speed,
 # and the range of stability-corrected values expected in this simulation.
@@ -209,6 +209,7 @@ using Breeze.BoundaryConditions: neutral_coefficient_10m, bulk_richardson_number
 
 h = grid.Lz / grid.Nz / 2  # first cell center height
 U_min = 0.1                # m s⁻¹
+g = constants.gravitational_acceleration
 ℓ = coef.roughness_length
 sf = coef.stability_function
 α = log(h / ℓ)
@@ -222,10 +223,10 @@ T_stable   = θ₀ - ΔT_line  # strongly stable
 
 U_range = range(3, 25, length=200)
 Cᴰ_neutral  = [neutral_coefficient_10m(default_neutral_drag_polynomial, U, U_min) for U in U_range]
-Cᴰ_unstable = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_unstable, U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
-Cᴰ_stable   = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_stable,   U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
-Cᴰ_sim_warm = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_warm, U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
-Cᴰ_sim_cold = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_cold, U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_unstable = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_unstable, U, U_min, g), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_stable   = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_stable,   U, U_min, g), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_sim_warm = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_warm, U, U_min, g), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_sim_cold = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_cold, U, U_min, g), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
 
 fig = Figure(size=(1100, 400))
 
@@ -259,8 +260,8 @@ fig
 
 ρu_bcs = FieldBoundaryConditions(bottom=ρu_surface_flux)
 ρv_bcs = FieldBoundaryConditions(bottom=ρv_surface_flux)
-ρe_bcs = FieldBoundaryConditions(bottom=ρe_surface_flux)
-ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_surface_flux)
+ρE_bcs = FieldBoundaryConditions(bottom=ρE_surface_flux)
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_surface_flux)
 
 # ## Model construction
 #
@@ -269,7 +270,7 @@ fig
 # schemes, microphysics, and boundary conditions.
 
 model = AtmosphereModel(grid; momentum_advection, scalar_advection, microphysics, dynamics,
-                        boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs))
+                        boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρE=ρE_bcs, ρqᵗ=ρqᵗ_bcs))
 
 # ## Initial conditions
 #
@@ -327,8 +328,8 @@ qᵛ = specific_humidity(model)
 τˣ = BoundaryConditionOperation(ρu, :bottom, model)
 
 ## Sensible heat flux 𝒬ᵀ
-ρe = static_energy_density(model)
-𝒬ᵀ = BoundaryConditionOperation(ρe, :bottom, model)
+ρs = static_energy_density(model)
+𝒬ᵀ = BoundaryConditionOperation(ρs, :bottom, model)
 
 ## Latent heat flux: ``𝒬ᵛ = ℒˡ Jᵛ`` (using reference ``θ₀`` for latent heat)
 ρqᵉ = model.moisture_density
@@ -386,7 +387,7 @@ outputs = (; s, ξ, T, θ, qˡ, qᵛ⁺, qᵛ, τˣ, 𝒬ᵀ, 𝒬ᵛ, Σ𝒬=�
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,
                 schedule = TimeInterval(2minutes),
-                overwrite_existing = true)
+                overwrite_files = true)
 
 simulation.output_writers[:jld2] = ow
 
@@ -501,7 +502,7 @@ Colorbar(fig[3, 3], hmqˡ, label="qˡ (kg/kg)")
 
 # Now we are ready to make a cool animation.
 
-CairoMakie.record(fig, "prescribed_sea_surface_temperature.mp4", 1:Nt, framerate=12) do nn
+CairoMakie.record(fig, "prescribed_sea_surface_temperature.mp4", 1:Nt; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide

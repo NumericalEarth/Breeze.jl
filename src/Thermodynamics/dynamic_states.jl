@@ -9,6 +9,17 @@ abstract type AbstractThermodynamicState{FT} end
     return density(T, pᵣ, q, constants)
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the air pressure of the thermodynamic state `𝒰`, in Pa.
+
+States closed on a reference pressure — `LiquidIcePotentialTemperatureState` and
+`StaticEnergyState` — carry it directly. `LiquidIceDensityState` is closed on the
+density instead, so its pressure is diagnosed from the ideal gas law, `p = ρ Rᵐ T`.
+"""
+@inline air_pressure(𝒰::AbstractThermodynamicState, constants) = 𝒰.reference_pressure
+
 @inline function saturation_specific_humidity(𝒰::AbstractThermodynamicState, constants, equil)
     T = temperature(𝒰, constants)
     ρ = density(𝒰, constants)
@@ -180,8 +191,15 @@ end
     LiquidIceDensityState(𝒰.potential_temperature, q, 𝒰.standard_pressure, 𝒰.density,
                           𝒰.temperature_solver)
 
-# Density is carried directly (not derived from a reference pressure).
+# Density is carried directly (not derived from a reference pressure), so the pressure
+# is the one quantity that has to be diagnosed rather than read off the state.
 @inline density(𝒰::LiquidIceDensityState, constants) = 𝒰.density
+
+@inline function air_pressure(𝒰::LiquidIceDensityState, constants)
+    q = 𝒰.moisture_mass_fractions
+    Rᵐ = mixture_gas_constant(q, constants)
+    return 𝒰.density * Rᵐ * temperature(𝒰, constants)
+end
 
 # Invert θˡⁱ at constant density: solve  r(T) = T − (ρ Rᵐ T / pˢᵗ)^κ θ − (ℒˡ qˡ + ℒⁱ qⁱ)/cᵖᵐ = 0.
 # Newton converges quadratically (r′ = 1 − κ Φ/T ≈ 1 − κ ≈ 0.72 is well away from zero). With no
@@ -281,7 +299,7 @@ end
     StaticEnergyState{FT}(𝒰.static_energy, q, 𝒰.height, 𝒰.reference_pressure)
 
 @inline function temperature(𝒰::StaticEnergyState, constants::ThermodynamicConstants)
-    e = 𝒰.static_energy
+    s = 𝒰.static_energy
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
 
@@ -293,8 +311,8 @@ end
     qˡ = q.liquid
     qⁱ = q.ice
 
-    # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
-    return (e - g * z + ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
+    # s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    return (s - g * z + ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
 end
 
 @inline function with_temperature(𝒰::StaticEnergyState, T, constants)
@@ -307,7 +325,7 @@ end
     qˡ = q.liquid
     qⁱ = q.ice
 
-    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
-    return StaticEnergyState(e, q, z, 𝒰.reference_pressure)
+    return StaticEnergyState(s, q, z, 𝒰.reference_pressure)
 end

@@ -9,9 +9,9 @@
 # **against** the wind bend **upward**.  The effective propagation speed for
 # a wave in direction ``\hat{\boldsymbol{n}}`` is
 # ```math
-# \mathbb{C}^{ac} + \boldsymbol{u} \cdot \hat{\boldsymbol{n}}
+# c^{ac} + \boldsymbol{u} \cdot \hat{\boldsymbol{n}}
 # ```
-# where ``ℂᵃᶜ`` is the acoustic sound speed and ``\boldsymbol{u}`` is the wind
+# where ``cᵃᶜ`` is the acoustic sound speed and ``\boldsymbol{u}`` is the wind
 # velocity.  Wavefronts tilt toward regions of lower effective propagation
 # speed, "ducting" sound energy along the surface — which is why distant
 # sounds are often heard more clearly downwind. For more on this topic, see
@@ -56,9 +56,12 @@ grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
 # compressible time step with Reactant/Enzyme, and the default tolerance-based `NewtonSolver`
 # (a `while` loop) compiles to an XLA `while` op that does not differentiate cheaply, while a high
 # iteration count needlessly inflates the traced graph (NumericalEarth/Breeze.jl#767). The forward
-# and adjoint models use identical dynamics and formulation.
+# and adjoint models use identical dynamics and formulation. We also use the full-pressure form
+# (`reference_state = nothing`) so reinitializing the differentiated model does not rebuild a
+# model-owned hydrostatic reference inside the traced loss.
 formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2))
-model = AtmosphereModel(grid; formulation, dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+model = AtmosphereModel(grid; formulation,
+                        dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state = nothing))
 
 # ## Background state
 #
@@ -71,14 +74,14 @@ constants = model.thermodynamic_constants
 p₀ = 101325   # Surface pressure (Pa)
 pˢᵗ = 1e5     # Standard pressure (Pa)
 
-reference = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
+reference = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
 
 # The sound speed at the surface determines the acoustic wave propagation speed.
 
 Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
 cᵖᵈ = constants.dry_air.heat_capacity
 γ = cᵖᵈ / (cᵖᵈ - Rᵈ)
-ℂᵃᶜ = sqrt(γ * Rᵈ * θ₀)
+cᵃᶜ = sqrt(γ * Rᵈ * θ₀)
 
 # The wind profile follows the classic log-law of the atmospheric surface layer.
 
@@ -91,7 +94,7 @@ Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 #
 # We initialize a localized Gaussian density pulse representing an acoustic disturbance.
 # For a rightward-propagating acoustic wave, the velocity perturbation is in phase with
-# the density perturbation: ``u' = (ℂᵃᶜ / ρ₀) ρ'``.
+# the density perturbation: ``u' = (cᵃᶜ / ρ₀) ρ'``.
 
 δρ = 0.01    # Density perturbation amplitude (kg/m³)
 σ = 20       # Pulse width (m)
@@ -100,18 +103,18 @@ gaussian(x, z) = exp(-(x^2 + z^2) / 2σ^2)
 ρ₀ = interior(reference.density, 1, 1, 1)[]
 
 ρᵢ_func(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
-uᵢ_func(x, z) = Uᵢ(z) # + (ℂᵃᶜ / ρ₀) * δρ * gaussian(x, z)
+uᵢ_func(x, z) = Uᵢ(z) # + (cᵃᶜ / ρ₀) * δρ * gaussian(x, z)
 
 set!(model, ρ=ρᵢ_func, θ=θ₀, u=uᵢ_func)
 
 
 # ## Simulation setup
 #
-# Acoustic waves travel fast (``ℂᵃᶜ ≈ 347`` m/s), so we need a small time step.
-# The [Courant–Friedrichs–Lewy (CFL) condition](https://en.wikipedia.org/wiki/Courant%E2%80%93Friedrichs%E2%80%93Lewy_condition) is based on the effective propagation speed ``ℂᵃᶜ + \mathrm{max}(U)``.
+# Acoustic waves travel fast (``cᵃᶜ ≈ 347`` m/s), so we need a small time step.
+# The [Courant–Friedrichs–Lewy (CFL) condition](https://en.wikipedia.org/wiki/Courant%E2%80%93Friedrichs%E2%80%93Lewy_condition) is based on the effective propagation speed ``cᵃᶜ + \mathrm{max}(U)``.
 
 Δx, Δz = Lx / Nx, Lz / Nz
-Δt = 0.5 * min(Δx, Δz) / (ℂᵃᶜ + Uᵢ(Lz))
+Δt = 0.5 * min(Δx, Δz) / (cᵃᶜ + Uᵢ(Lz))
 stop_time = 0.5 # (s) — long enough for the wave to traverse the domain and for refraction to bend rays visibly
 
 simulation = Simulation(model; Δt, stop_time)
@@ -152,7 +155,7 @@ outputs = (; ρ′, u′, w, U, R, W²)
 
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
                                               schedule = TimeInterval(0.01),
-                                              overwrite_existing = true)
+                                              overwrite_files = true)
 
 run!(simulation)
 
@@ -209,7 +212,7 @@ Colorbar(fig[3, 3], hmu; label = "u′ (m/s)")
 title = @lift "Acoustic wave in log-layer shear — t = $(prettytime(times[$n]))"
 fig[0, :] = Label(fig, title, fontsize = 16, tellwidth = false)
 
-CairoMakie.record(fig, "acoustic_wave.mp4", 1:Nt, framerate = 18) do nn
+CairoMakie.record(fig, "acoustic_wave.mp4", 1:Nt; framerate = 18, compression = 23) do nn
     n[] = nn
 end
 nothing #hide
@@ -265,7 +268,8 @@ grid_ad = RectilinearGrid(ReactantState(); size = (Nx, Nz),
                           topology = (Periodic, Flat, Bounded))
 
 formulation_ad = LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2)) # fixed-trip, low-iteration EOS inversion so Enzyme can differentiate it cheaply (see forward model)
-model_ad = AtmosphereModel(grid_ad; formulation = formulation_ad, dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+model_ad = AtmosphereModel(grid_ad; formulation = formulation_ad,
+                           dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state = nothing))
 
 # ### Fixed and varying fields
 #

@@ -95,11 +95,26 @@ make_pressure_correction!(model, Δt) = nothing
 #####
 
 """
-    mean_pressure(dynamics)
+    dynamics_pressure(dynamics)
 
-Return the mean (background/reference) pressure field in Pa.
+Return the pressure field appropriate to the dynamical formulation, in Pa — the pressure
+entering the equation of state, buoyancy, and the thermodynamic tendencies.
+
+For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``,
+excluding the non-hydrostatic pressure anomaly that enforces the divergence constraint but does
+not perturb the thermodynamic state. For compressible dynamics, this is the diagnosed
+equation-of-state pressure. The anomaly and total-pressure counterparts are
+[`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
+
+This is the pressure every physics parameterization should read, including radiation. Call the
+accessor rather than reaching into `dynamics.reference_state` directly: which of the two the
+reference state *is* varies by formulation. On the anelastic core it is the thermodynamic
+pressure, and `dynamics_pressure` returns it. On the compressible core (flat or terrain) it is a
+pressure-gradient device built once from a fixed profile, it does not track the thermodynamic
+state, and several dynamics types carry none at all. [`total_density`](@ref) is the density
+counterpart.
 """
-function mean_pressure end
+function dynamics_pressure end
 
 """
     pressure_anomaly(dynamics)
@@ -114,6 +129,20 @@ function pressure_anomaly end
 Return the total pressure (mean + anomaly) in Pa.
 """
 function total_pressure end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return pressure consistent with a prescribed temperature during thermodynamic initialization.
+
+The default retains [`dynamics_pressure`](@ref) (appropriate for anelastic/reference-pressure
+models, where pressure is not a function of the state being set). Compressible dynamics overrides
+this with the equation of state `p = ρ Rᵐ T`, avoiding a fixed-point error when density or
+composition was changed immediately before setting temperature.
+"""
+@inline function pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
+    return @inbounds dynamics_pressure(dynamics)[i, j, k]
+end
 
 #####
 ##### Density and pressure access interface
@@ -149,6 +178,27 @@ overrides it with a diagnosed total-density field, distinct from the coupling de
 total_density(dynamics) = dynamics_density(dynamics)
 
 """
+$(TYPEDSIGNATURES)
+
+Return the density ``ρ`` at `(i, j, k)` that mass fractions are referenced to, so that ``qˣ`` and
+``ρ`` give a partial pressure — the vapor pressure is ``pᵛ = ρ qᵛ Rᵛ T``.
+
+This is the *total* density, condensate loading included, not the gas-phase density ``ρᵈ + ρᵛ``:
+``Rᵐ(q) = qᵈ Rᵈ + qᵛ Rᵛ`` uses ``qᵈ = 1 - qᵛ - qˡ - qⁱ``, so ``p / (Rᵐ(q) T)`` returns the total
+and the two differ by ``1 - qˡ - qⁱ``. Total is required for consistency with
+`saturation_specific_humidity(T, ρ, …) = pᵛ⁺ / (ρ Rᵛ T)`, which references ``qᵛ⁺`` to the same
+``ρ``; mixing the two would break ``qᵛ / qᵛ⁺`` as the saturation ratio. The name is inherited and
+does not describe this.
+
+The default returns `total_density(dynamics)`. `AnelasticDynamics` overrides it because its
+`dynamics_density` is the *dry* reference profile ``ρᵣ(z)``, so the override rediagnoses the local
+moist total density at the reference pressure.
+"""
+@inline function gas_phase_density(i, j, k, dynamics, T, q, constants)
+    return @inbounds total_density(dynamics)[i, j, k]
+end
+
+"""
     advecting_vertical_velocity(dynamics, velocities)
 
 Return the vertical velocity that advects momentum through the grid's coordinate surfaces:
@@ -159,16 +209,6 @@ split must partition this velocity on both the explicit (flux-scaling) and impli
 (tridiagonal) sides, so it stays consistent with the momentum flux divergence.
 """
 @inline advecting_vertical_velocity(dynamics, velocities) = velocities.w
-
-"""
-    dynamics_pressure(dynamics)
-
-Return the pressure field appropriate to the dynamical formulation.
-
-For anelastic dynamics, returns the reference pressure (hydrostatic background state).
-For compressible dynamics, returns the prognostic pressure field.
-"""
-function dynamics_pressure end
 
 #####
 ##### Buoyancy interface
@@ -218,27 +258,38 @@ function validate_velocity_boundary_conditions(dynamics, user_boundary_condition
 end
 
 """
+    base_pressure(dynamics)
+
+Return the pressure of the reference atmosphere at ``z = 0``: the datum its hydrostatic profiles
+are anchored to, and a property of that atmosphere rather than of the grid. Always a scalar.
+
+This is not the pressure at the ground. On a domain whose bottom does not sit at ``z = 0`` — a
+raised height-coordinate domain, or any terrain-following grid — the two differ by ``O(ρgh)``.
+For the pressure at the ground, which is what a column integration is anchored at, use
+[`surface_pressure`](@ref).
+"""
+function base_pressure end
+
+"""
     surface_pressure(dynamics)
 
-Return the surface pressure used for boundary condition regularization.
-For anelastic dynamics, this is the reference state surface pressure.
-For compressible dynamics, this may be a constant or computed value.
+Return the pressure of the reference atmosphere at the bottom face of each column — the ground —
+obtained by reducing the [`base_pressure`](@ref) datum to that height along the reference profile,
+as a 2D ``(Center, Center, Nothing)`` field. Horizontally uniform for a single-column reference on
+a height-coordinate grid; genuinely column-dependent when the reference thermodynamics varies
+horizontally or on a terrain-following grid, where the bottom face is the terrain surface.
+
+This is the anchor for a hydrostatic column integration, and what every consumer of "the pressure
+at the surface" over terrain wants. Reading it keeps a consumer consistent with the reference
+state; reading the datum instead disagrees with it by ``O(ρgh)`` per column.
+
+Equal to the datum, exactly, for the usual domain whose bottom sits at ``z = 0``. Extended by each
+dynamics that carries a materialized reference state; dynamics without one have no reference
+surface pressure to report. When the pressure should follow the live model state instead,
+extrapolate it from the first cell center with `Thermodynamics.surface_pressure_from_cell_center`,
+as the surface fluxes and the diagnostic hydrostatic pressure do.
 """
 function surface_pressure end
-
-"""
-    boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants)
-
-Return a reference state with `pressure`, `density`, and `standard_pressure` fields
-suitable for constructing boundary-condition diagnostics (e.g. virtual potential
-temperature for stability-dependent bulk fluxes).
-
-Boundary conditions are materialized before `materialize_dynamics` runs, so this
-hook lets each dynamics type decide what to expose at that point. The default
-returns `dynamics.reference_state`, which works for dynamics where the user
-constructs a fully-built reference state up front (e.g. `AnelasticDynamics`).
-"""
-boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants) = dynamics.reference_state
 
 """
     dynamics_reference_state(dynamics)

@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using Breeze.Thermodynamics: TetensFormula
 using GPUArraysCore: @allowscalar
@@ -12,12 +14,12 @@ function run_nan_checker_test(arch; erroring)
     model = AtmosphereModel(grid)
     simulation = Simulation(model, Δt=1, stop_iteration=2, verbose=false)
     @allowscalar model.momentum.ρu[1, 1, 1] = NaN
-    erroring && erroring_NaNChecker!(simulation)
 
     if erroring
+        erroring_NaNChecker!(simulation)
         @test_throws ErrorException run!(simulation)
     else
-        run!(simulation)
+        @test_logs (:info, r"NaN found in field ρu\. Stopping simulation") run!(simulation)
         @test model.clock.iteration == 1 # simulation stopped after one iteration
     end
 
@@ -38,7 +40,7 @@ end
         @test occursin("thermodynamic_constants: ThermodynamicConstants{$FT}", shown_model)
         @test occursin("forcing: @NamedTuple{", shown_model)
         @test occursin("ρu::Returns{$FT}", shown_model)
-        @test occursin("ρe::Returns{$FT}", shown_model)
+        @test occursin("ρE::Returns{$FT}", shown_model)
 
         uᵍ(z) = -10
         vᵍ(z) = 0
@@ -64,31 +66,32 @@ end
 
     for p₀ in (101325, 100000), θ₀ in (288, 300), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
         @testset let p₀ = p₀, θ₀ = θ₀, formulation = formulation
-            reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+            reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
 
             # Check that interpolating to the first face (k=1) recovers surface values
             # Note: surface_density correctly converts potential temperature to temperature using the Exner function
             ρ₀ = surface_density(reference_state)
-            for i = 1:Nx, j = 1:Ny
-                @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
-                @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
-            end
+            # On an ordinary 3D grid the reference profiles are reduced
+            # `(Nothing, Nothing, Center)` fields, so every horizontal index reads the same
+            # column: checking one (i, j) covers the whole horizontal extent.
+            @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, reference_state.pressure)
+            @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, reference_state.density)
 
             dynamics = AnelasticDynamics(reference_state)
             model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation)
 
-            # Test round-trip consistency: set θ, get ρe; then set ρe, get back θ
+            # Test round-trip consistency: set θ, get ρs; then set ρs, get back θ
             set!(model; θ = θ₀)
 
-            ρe₁ = Field(static_energy_density(model))
-            e₁ = Field(static_energy(model))
+            ρs₁ = Field(static_energy_density(model))
+            s₁ = Field(static_energy(model))
             ρθ₁ = Field(liquid_ice_potential_temperature_density(model))
             θ₁ = Field(liquid_ice_potential_temperature(model))
 
-            set!(model; ρe = ρe₁)
-            @test static_energy(model) ≈ e₁
+            set!(model; ρs = ρs₁)
+            @test static_energy(model) ≈ s₁
             @test liquid_ice_potential_temperature(model) ≈ θ₁
-            @test static_energy_density(model) ≈ ρe₁
+            @test static_energy_density(model) ≈ ρs₁
             @test liquid_ice_potential_temperature_density(model) ≈ ρθ₁
         end
     end
@@ -101,7 +104,7 @@ end
 
     p₀ = 101325
     θ₀ = 300
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = SaturationAdjustment()
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation, microphysics)
@@ -135,7 +138,7 @@ end
 
     p₀ = 101325
     θ₀ = 300
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
 
     for formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)

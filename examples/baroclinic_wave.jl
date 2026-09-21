@@ -110,7 +110,7 @@ z_faces = ExponentialDiscretization(Nz, 0, H; scale = H/2, bias = :left)
 
 grid = LatitudeLongitudeGrid(GPU();
                              size = (Nλ, Nφ, Nz),
-                             halo = (5, 5, 5),
+                             halo = (3, 3, 3),
                              longitude = (0, 360),
                              latitude = (-75, 75),
                              z = z_faces)
@@ -238,7 +238,7 @@ T₀ᵣ = 250
 θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
 dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                surface_pressure = p₀,
+                                base_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
 model = AtmosphereModel(grid; dynamics, coriolis,
@@ -303,7 +303,7 @@ for k in (1, 16)
     ow = JLD2Writer(model, outputs; filename,
                     indices = (:, :, k),
                     schedule = TimeInterval(6hours),
-                    overwrite_existing = true)
+                    overwrite_files = true)
 
     simulation.output_writers[Symbol(filename)] = ow
 end
@@ -367,7 +367,7 @@ for ax in (ax1, ax2, ax3)
     hidespines!(ax)
 end
 
-CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 12) do nn
+CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide

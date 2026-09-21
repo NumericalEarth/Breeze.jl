@@ -190,7 +190,7 @@ filename = "wave_clouds.jld2"
 
 output_writer = JLD2Writer(model, outputs; filename,
                            schedule = TimeInterval(4),
-                           overwrite_existing = true)
+                           overwrite_files = true)
 
 simulation.output_writers[:fields] = output_writer
 
@@ -235,7 +235,7 @@ fig
 
 # We can also make a movie:
 
-CairoMakie.record(fig, "wave_clouds.mp4", 1:Nt, framerate = 12) do nn
+CairoMakie.record(fig, "wave_clouds.mp4", 1:Nt; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide

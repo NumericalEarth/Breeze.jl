@@ -34,8 +34,8 @@ jobs:
       files: ${{ steps.filter.outputs.files }}
     steps:
       - name: "Check out repository"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
           filters: |
@@ -51,7 +51,7 @@ jobs:
     if: ${{ needs.check-files.outputs.files == 'true' }}
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - check-bounds ${{ matrix.check-bounds }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 75
+    timeout-minutes: 90
     container:
       image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && format('ghcr.io/numericalearth/breeze-docker-images:test-julia_{0}', matrix.version) ) || '' }}
       options: --gpus=all
@@ -63,7 +63,7 @@ jobs:
       matrix:
         version:
           - "min"
-          - "1.12.6"
+          - "1.13.0"
         os:
           - ubuntu-latest
           - macOS-latest
@@ -101,7 +101,7 @@ jobs:
         run: |
           df -hT
       - name: "Check out repository"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: "Install Julia"
         uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         # On the self-hosted GPU runners we use a Docker image with Julia pre-installed.
@@ -109,12 +109,18 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
+      - name: Set JULIA_CPU_TARGET
+        if: ${{ runner.environment == 'github-hosted' && runner.arch == 'X64' }}
+        shell: bash
+        run: |
+          # Pool of GitHub-hosted runners can have several different ISAs, try to
+          # target all of them, with safe fallbacks.
+          echo "JULIA_CPU_TARGET=generic;haswell,-xsaveopt,clone_all;x86-64-v4,-rdrnd,base(1)" | tee -a "${GITHUB_ENV}"
       - name: Show versioninfo
-        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         run: |
           julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
       - name: "Cache Julia depot"
-        uses: julia-actions/cache@a45e8fa8be21c18a06b7177052533149e61e9b38 # v3.1.0
+        uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
         with:
           # On self-hosted runners we use the prebuilt Docker container, which already
           # caches pkgimages and such, so we don't need to cache here most things.  Only
@@ -144,6 +150,10 @@ jobs:
               # concurrent jobs, some of them reaching a large memory usage.  We reduce the
               # number of jobs to avoid memory issues.
               TEST_ARGS+=(--jobs=$(($(nproc) - 1)))
+          elif [[ ${{ matrix.os }} == ubuntu-* ]] && [[ ${{ matrix.version }} == 'min' ]]; then
+              # With Julia v1.11 we have observed somewhat frequent OOM's in `turbulence_closures`
+              # tests, reduce number of jobs to reduce resources contention.
+              TEST_ARGS+=(--jobs=$(($(nproc) - 1)))
           fi
 
           if [[ ${{ runner.os }} == "macOS" ]]; then
@@ -151,8 +161,9 @@ jobs:
               # virtualised, but we should be able to actually use it anyway.
               echo "BREEZE_FORCE_METAL_FUNCTIONAL=true" | tee -a "${GITHUB_ENV}"
               # Encourage ParallelTestRunner to use multiple jobs on macOS, rather
-              # than the single one it'd use by default.
-              TEST_ARGS+=(--jobs=2)
+              # than the single one it'd use by default, but cap at 3.
+              NPROCM1="$(($(sysctl -n hw.logicalcpu)-1))"
+              TEST_ARGS+=(--jobs="$((${NPROCM1} < 3 ? ${NPROCM1} : 3))")
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" | tee -a "${GITHUB_ENV}"
       - name: Install earlyoom

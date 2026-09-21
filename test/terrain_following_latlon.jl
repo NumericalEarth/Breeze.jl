@@ -1,11 +1,6 @@
-using Breeze
-using Oceananigans.Architectures: CPU
+include(joinpath(@__DIR__, "setup.jl"))
 
-# Run under `default_arch` when the test runner provides it (which routes to
-# GPU when CUDA is functional, matching project convention); otherwise fall
-# back to CPU() so this file can also be included directly with
-# `julia --project=. test/<this file>.jl` during development.
-@isdefined(default_arch) || (default_arch = CPU())
+using Breeze
 
 using CUDA: @allowscalar
 
@@ -140,7 +135,7 @@ using Test
             slope_stencil = SlopeInsideInterpolation(),
             reference_potential_temperature = 300)
         model = AtmosphereModel(grid; dynamics)
-        set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
+        set!(model, θ=300, ρ=model.dynamics.reference_state.density, u=0, w=0)
 
         @test model.dynamics.terrain_metrics.pressure_gradient_stencil isa SlopeInsideInterpolation
         @test model.timestepper.substepper.substeps === nothing  # adaptive
@@ -251,7 +246,7 @@ using Test
                                         reference_potential_temperature=θ_of_z)
         model = AtmosphereModel(grid; dynamics)
         constants = model.thermodynamic_constants
-        pᵣ = model.dynamics.terrain_reference_pressure
+        pᵣ = model.dynamics.reference_state.pressure
 
         for i in 1:Nλ, j in 1:Nφ, k in 1:Nz
             z = znode(i, j, k, grid, Center(), Center(), Center())

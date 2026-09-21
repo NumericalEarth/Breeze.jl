@@ -2,21 +2,24 @@
 ##### Compute hydrostatic pressure
 #####
 
-using ..Thermodynamics: dry_air_gas_constant
+using ..Thermodynamics: dry_air_gas_constant, surface_pressure_from_cell_center
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
-@kernel function _compute_hydrostatic_pressure!(ph, grid, dynamics, temperature, constants)
+@kernel function _compute_hydrostatic_pressure!(ph, grid, p, ρ, temperature, constants)
     i, j = @index(Global, NTuple)
 
-    p₀ = surface_pressure(dynamics)
     Nz = grid.Nz
     g = constants.gravitational_acceleration
     Rᵈ = dry_air_gas_constant(constants)
 
     @inbounds begin
-        # Start with pressure at bottom interface
-        p_interface_bottom = p₀
+        # The integration starts at the bottom face of this column, so it must start from the
+        # pressure *there*, not from the z = 0 datum: on a terrain-following grid the bottom face
+        # is the terrain surface and the two differ by O(ρgh) per column. Diagnose it from the live
+        # state by extrapolating the first cell center down half a cell, which is independent of
+        # where the reference-pressure datum sits.
+        p_interface_bottom = surface_pressure_from_cell_center(i, j, 1, grid, p, ρ, g)
 
         # Compute cell-mean pressure and interface pressures in a single pass
         for k in 1:Nz
@@ -38,7 +41,8 @@ function compute_hydrostatic_pressure!(ph, model)
     arch = grid.architecture
 
     launch!(arch, grid, :xy, _compute_hydrostatic_pressure!,
-            ph, grid, model.dynamics, model.temperature, model.thermodynamic_constants)
+            ph, grid, dynamics_pressure(model.dynamics), total_density(model.dynamics),
+            model.temperature, model.thermodynamic_constants)
 
     fill_halo_regions!(ph)
 

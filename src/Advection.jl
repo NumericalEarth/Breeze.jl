@@ -6,13 +6,18 @@ using Oceananigans.Advection:
     _advective_tracer_flux_x,
     _advective_tracer_flux_y,
     _advective_tracer_flux_z,
+    BoundsPreservation,
     BoundsPreservingWENO,
     bounded_tracer_flux_divergence_x,
     bounded_tracer_flux_divergence_y,
     bounded_tracer_flux_divergence_z
 
+using Adapt: Adapt
+using Oceananigans.Advection: WENO, explicit_velocity_scaleᶜᶜᶠ
+using Oceananigans.Utils: AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
+using Oceananigans.TimeSteppers: time_discretization
 
 using ..AtmosphereModels: AtmosphereModels, div_ρUc
 
@@ -43,6 +48,39 @@ end
     div_x = bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c)
     div_y = bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c)
     div_z = bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, U.w, c)
+    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
+end
+
+# A bounds-preserving WENO whose vertical time discretization is adaptive-implicit.
+const BoundsPreservingAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:BoundsPreservation}
+
+# Indexing yields wᵉ = s·w, the explicit fraction of the IMEX split, so the bounded flux
+# functions consume it without duplicating their reconstruction (issue #913).
+struct ExplicitVerticalVelocity{G, S, T, W}
+    grid :: G
+    advection_scheme :: S
+    time_discretization :: T
+    vertical_velocity :: W
+end
+
+Adapt.adapt_structure(to, v::ExplicitVerticalVelocity) =
+    ExplicitVerticalVelocity(Adapt.adapt(to, v.grid), Adapt.adapt(to, v.advection_scheme),
+                             Adapt.adapt(to, v.time_discretization), Adapt.adapt(to, v.vertical_velocity))
+
+@inline Base.getindex(v::ExplicitVerticalVelocity, i, j, k) =
+    @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, v.grid, v.advection_scheme, v.time_discretization,
+                                         v.vertical_velocity) * v.vertical_velocity[i, j, k]
+
+# Disambiguates against the `ZeroField` shortcut above.
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, ::BoundsPreservingAVIDWENO, ρ, U, ::ZeroField) = zero(grid)
+
+# Without the s-scaled velocity the bounded path transported 1 + (1 - s) times: a full
+# explicit flux plus the implicit remainder (issue #913). Horizontal fluxes stay explicit.
+@inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingAVIDWENO, ρ, U, c)
+    wᵉ = ExplicitVerticalVelocity(grid, advection, time_discretization(advection), U.w)
+    div_x = bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c)
+    div_y = bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c)
+    div_z = bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, wᵉ, c)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
 end
 

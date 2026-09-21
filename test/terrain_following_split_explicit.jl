@@ -1,16 +1,11 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using Breeze.AtmosphereModels: transport_velocities
-using Oceananigans.Architectures: CPU
-
-# Run under `default_arch` when the test runner provides it (which routes to
-# GPU when CUDA is functional, matching project convention); otherwise fall
-# back to CPU() so this file can also be included directly with
-# `julia --project=. test/<this file>.jl` during development.
-@isdefined(default_arch) || (default_arch = CPU())
 
 using CUDA: @allowscalar
 
-using Breeze.CompressibleEquations: assemble_slow_vertical_momentum_tendency!, compute_acoustic_substeps, compute_contravariant_velocity!, freeze_linearization_state!, δpᴸ, terrain_horizontal_linearized_pressure_gradient_correction, ∇ᶻp′
+using Breeze.CompressibleEquations: acoustic_recovered_vertical_momentum, assemble_slow_vertical_momentum_tendency!, compute_acoustic_substeps, compute_contravariant_velocity!, freeze_linearization_state!, δpᴸ, terrain_horizontal_linearized_pressure_gradient_correction, terrain_slope_x_ccf, terrain_slope_y_ccf, ∇ᶻp′
 using Breeze.TimeSteppers: compute_slow_momentum_tendencies!, compute_slow_scalar_tendencies!
 using Oceananigans
 using Oceananigans.BoundaryConditions: fill_halo_regions!
@@ -28,6 +23,46 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
 @allowscalar begin
 @testset "TerrainFollowing split-explicit dynamics" begin
+    @testset "Terrain acoustic recovery cancels the stage-base horizontal momenta" begin
+        Nx, Ny, Nz = 8, 8, 6
+        Lx, Ly, Lz = 10000.0, 10000.0, 5000.0
+
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1));
+                                                         formulation = LinearDecay())
+        grid = RectilinearGrid(default_arch;
+                               size = (Nx, Ny, Nz),
+                               halo = (5, 5, 5),
+                               x = (0, Lx),
+                               y = (0, Ly),
+                               z = z_faces,
+                               topology = (Periodic, Periodic, Bounded))
+        materialize_terrain!(grid, (x, y) -> 200 * sin(2π * x / Lx) * sin(2π * y / Ly))
+
+        # Recovery dispatches on the terrain metrics, not on the time discretization.
+        dynamics = CompressibleDynamics(ExplicitTimeStepping())
+        model = AtmosphereModel(grid; dynamics)
+
+        ρwᴸ_ccf = 3
+        ρu′, ρv′, ρw̃′ = XFaceField(grid), YFaceField(grid), ZFaceField(grid)
+        set!(ρu′, 1)
+        set!(ρv′, 2)
+        set!(ρw̃′, 4)
+
+        # An interior point on a slope: the ℑ stencils span i:i+1, j:j+1, k-1:k, which stays
+        # off the halos that `set!(::Field, ::Number)` leaves at zero.
+        i, j, k = 3, 3, 3
+        slope_x = terrain_slope_x_ccf(i, j, k, grid)
+        slope_y = terrain_slope_y_ccf(i, j, k, grid)
+        @test slope_x != 0
+        @test slope_y != 0
+
+        # ρw = ρwᴸ + ρw̃′ + slopeₓ ℑρu′ + slopeᵧ ℑρv′, the stage-base horizontal momenta
+        # having cancelled against those buried in ρw̃ᴸ.
+        recovered = acoustic_recovered_vertical_momentum(i, j, k, grid, model.dynamics,
+                                                         ρwᴸ_ccf, ρu′, ρv′, ρw̃′)
+        @test recovered ≈ ρwᴸ_ccf + 4 + slope_x * 1 + slope_y * 2
+    end
+
     @testset "Split-explicit zero terrain matches height coordinates" begin
         Nx, Nz = 8, 6
         Lx, Lz = 10000.0, 5000.0
@@ -51,7 +86,10 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             end
             time_discretization = SplitExplicitTimeDiscretization(substeps=6,
                                                                   damping=damping)
-            dynamics = CompressibleDynamics(time_discretization)
+            # Isolate the pure slope-term reduction: disable the terrain reference (on by default
+            # for terrain grids) so both branches difference the full pressure and the flat
+            # (h ≡ 0) terrain path matches the height path to machine precision.
+            dynamics = CompressibleDynamics(time_discretization; reference_state=nothing)
             model = AtmosphereModel(grid; dynamics)
             set!(model,
                  ρ=1,
@@ -137,7 +175,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         reference_potential_temperature=300)
         model = AtmosphereModel(grid; dynamics)
-        set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
+        set!(model, θ=300, ρ=model.dynamics.reference_state.density, u=0, w=0)
 
         @test model.timestepper isa AcousticRungeKutta3
         @test transport_velocities(model).w === model.timestepper.substepper.time_averaged_velocities.w
@@ -214,7 +252,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
                                         reference_potential_temperature=300)
         model = AtmosphereModel(model_grid; dynamics)
-        set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
+        set!(model, θ=300, ρ=model.dynamics.reference_state.density, u=0, w=0)
 
         @test model.timestepper.substepper.substeps === nothing
         time_step!(model, Δt)
@@ -246,7 +284,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             model = AtmosphereModel(grid; dynamics)
             set!(model,
                  θ=300,
-                 ρ=model.dynamics.terrain_reference_density,
+                 ρ=model.dynamics.reference_state.density,
                  u=(x, z) -> 1 + 0.1 * sin(2π * x / Lx),
                  w=0)
 
@@ -334,13 +372,13 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                                                                            depth=Lz/3));
                                         slope_stencil = SlopeInsideInterpolation(),
                                         reference_potential_temperature=θ_of_z,
-                                        surface_pressure=p₀,
+                                        base_pressure=p₀,
                                         standard_pressure=pˢᵗ)
         model = AtmosphereModel(grid; dynamics,
                                 thermodynamic_constants=constants)
 
         set!(model,
-             ρ = model.dynamics.terrain_reference_density,
+             ρ = model.dynamics.reference_state.density,
              θ = (x, z) -> θ_of_z(z),
              u = U,
              v = 0,
@@ -411,7 +449,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         model = AtmosphereModel(grid; dynamics)
         set!(model,
              θ=300,
-             ρ=model.dynamics.terrain_reference_density,
+             ρ=model.dynamics.reference_state.density,
              u=(x, z) -> 1 + 1e-3 * sin(2π * x / Lx),
              v=0,
              w=0)
@@ -447,7 +485,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         model = AtmosphereModel(grid; dynamics)
         set!(model,
              θ=300,
-             ρ=model.dynamics.terrain_reference_density,
+             ρ=model.dynamics.reference_state.density,
              u=(x, z) -> 0.1 * sin(2π * x / Lx),
              w=0)
 

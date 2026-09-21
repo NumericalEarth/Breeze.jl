@@ -10,9 +10,9 @@
 """
 $(TYPEDSIGNATURES)
 
-Return the day of year (1-365/366) for a given DateTime.
+Return the day of year (1-365/366) for a given `AbstractDateTime`.
 """
-day_of_year(dt::DateTime) = Dates.dayofyear(dt)
+day_of_year(dt::AbstractDateTime) = Dates.dayofyear(dt)
 
 """
 $(TYPEDSIGNATURES)
@@ -83,7 +83,7 @@ The hour angle ``ω`` is zero at solar noon and increases by 15° per hour
 - `datetime`: UTC datetime
 - `longitude`: longitude in degrees (positive East)
 """
-function hour_angle(datetime::DateTime, longitude)
+function hour_angle(datetime::AbstractDateTime, longitude)
     # Get UTC hour as a decimal
     hour_utc = Dates.hour(datetime) + Dates.minute(datetime) / 60 + Dates.second(datetime) / 3600
 
@@ -128,7 +128,7 @@ where:
 # Returns
 A value between -1 and 1. Negative values indicate the sun is below the horizon.
 """
-function cos_solar_zenith_angle(datetime::DateTime, longitude, latitude)
+function cos_solar_zenith_angle(datetime::AbstractDateTime, longitude, latitude)
     φ = deg2rad(latitude)
     doy = day_of_year(datetime)
     δ = solar_declination(doy)
@@ -149,7 +149,7 @@ Compute the cosine of the solar zenith angle for the grid's location.
 For single-column grids with `Flat` horizontal topology,
 extracts latitude from the y-coordinate and longitude from the x-coordinate.
 """
-function cos_solar_zenith_angle(i, j, grid::SingleColumnGrid, datetime::DateTime)
+function cos_solar_zenith_angle(i, j, grid::SingleColumnGrid, datetime::AbstractDateTime)
     λ = xnode(i, j, 1, grid, Center(), Center(), Center())
     φ = ynode(i, j, 1, grid, Center(), Center(), Center())
     return cos_solar_zenith_angle(datetime, λ, φ)

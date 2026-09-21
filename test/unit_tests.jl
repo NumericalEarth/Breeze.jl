@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 #####
 ##### Consolidated unit tests for fast-running tests
 #####
@@ -8,15 +10,16 @@
 using Breeze
 using Oceananigans
 using Test
+using Adapt: adapt
 
 #####
 ##### AnelasticDynamics
 #####
 
-using Breeze: ReferenceState, AnelasticDynamics
+using Breeze: ReferenceState, AnelasticDynamics, total_density
 using Breeze.AtmosphereModels: materialize_dynamics, default_dynamics
-using Breeze.AtmosphereModels: mean_pressure, pressure_anomaly, total_pressure
-using Breeze.AtmosphereModels: dynamics_density, dynamics_pressure
+using Breeze.AtmosphereModels: dynamics_pressure, pressure_anomaly, total_pressure
+using Breeze.AtmosphereModels: dynamics_density
 
 @testset "AnelasticDynamics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -24,7 +27,7 @@ using Breeze.AtmosphereModels: dynamics_density, dynamics_pressure
     constants = ThermodynamicConstants()
 
     @testset "Constructor with ReferenceState" begin
-        reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+        reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
         dynamics = AnelasticDynamics(reference_state)
 
         @test dynamics isa AnelasticDynamics
@@ -53,13 +56,14 @@ using Breeze.AtmosphereModels: dynamics_density, dynamics_pressure
     end
 
     @testset "Pressure utilities" begin
-        reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+        reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
         dynamics_stub = AnelasticDynamics(reference_state)
         dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
-        # Test mean_pressure
-        p̄ = mean_pressure(dynamics)
+        # Test dynamics_pressure
+        p̄ = dynamics_pressure(dynamics)
         @test p̄ === reference_state.pressure
+        @test total_density(dynamics) === reference_state.density
 
         # Test pressure_anomaly (returns an AbstractOperation)
         p′ = pressure_anomaly(dynamics)
@@ -87,7 +91,7 @@ using Breeze.Thermodynamics: pressure_balanced_density
         @test dynamics isa CompressibleDynamics
         @test dynamics.dry_density === nothing  # Not materialized yet
         @test dynamics.standard_pressure == 1e5
-        @test dynamics.surface_pressure == 101325
+        @test dynamics.base_pressure == 101325
     end
 
     @testset "materialize_dynamics" begin
@@ -100,15 +104,22 @@ using Breeze.Thermodynamics: pressure_balanced_density
         @test dynamics.pressure isa Field
         @test dynamics_density(dynamics) === dynamics.dry_density
         @test dynamics_pressure(dynamics) === dynamics.pressure
+        @test total_density(dynamics) === dynamics.total_density
     end
 
     @testset "materialize_dynamics seeds pressure" begin
-        surface_pressure = FT(100000)
-        dynamics_stub = CompressibleDynamics(; surface_pressure)
+        base_pressure = FT(100000)
         constants = ThermodynamicConstants(FT)
-        dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
-        @test all(Array(interior(dynamics.pressure)) .== surface_pressure)
+        dynamics_stub = CompressibleDynamics(; base_pressure, reference_state=nothing)
+        dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
+        @test all(Array(interior(dynamics.pressure)) .== base_pressure)
+
+        automatic_stub = CompressibleDynamics(; base_pressure)
+        automatic_dynamics = materialize_dynamics(automatic_stub, grid, NamedTuple(), constants)
+        pressure = Array(interior(automatic_dynamics.pressure))
+        reference_pressure = Array(interior(automatic_dynamics.reference_state.pressure))
+        @test all(pressure .== reference_pressure)
     end
 end
 
@@ -134,13 +145,13 @@ end
                            z = (0, 1000))
 
     constants = ThermodynamicConstants(FT)
-    surface_pressure = FT(100000)
+    base_pressure = FT(100000)
     standard_pressure = FT(100000)
     θ_reference(z) = FT(300) + FT(0.01) * z
     qᵛ_reference(z) = FT(0.012) * exp(-z / FT(1000))
 
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=2);
-                                    surface_pressure,
+                                    base_pressure,
                                     standard_pressure,
                                     reference_potential_temperature = θ_reference,
                                     reference_vapor_mass_fraction = qᵛ_reference)
@@ -196,7 +207,7 @@ using Breeze.AtmosphereModels: thermodynamic_density_name, thermodynamic_density
 
     # Boundary conditions needed for materialization (must pass grid to respect topology)
     ccc = (Center(), Center(), Center())
-    boundary_conditions = (ρθ = FieldBoundaryConditions(grid, ccc), ρe = FieldBoundaryConditions(grid, ccc))
+    boundary_conditions = (ρθ = FieldBoundaryConditions(grid, ccc), ρs = FieldBoundaryConditions(grid, ccc))
 
     @testset "LiquidIcePotentialTemperature field naming (Symbol)" begin
         @test prognostic_thermodynamic_field_names(:LiquidIcePotentialTemperature) == (:ρθ,)
@@ -205,9 +216,9 @@ using Breeze.AtmosphereModels: thermodynamic_density_name, thermodynamic_density
     end
 
     @testset "StaticEnergy field naming (Symbol)" begin
-        @test prognostic_thermodynamic_field_names(:StaticEnergy) == (:ρe,)
-        @test additional_thermodynamic_field_names(:StaticEnergy) == (:e,)
-        @test thermodynamic_density_name(:StaticEnergy) == :ρe
+        @test prognostic_thermodynamic_field_names(:StaticEnergy) == (:ρs,)
+        @test additional_thermodynamic_field_names(:StaticEnergy) == (:s,)
+        @test thermodynamic_density_name(:StaticEnergy) == :ρs
     end
 
     @testset "materialize_formulation(:LiquidIcePotentialTemperature)" begin
@@ -232,23 +243,23 @@ using Breeze.AtmosphereModels: thermodynamic_density_name, thermodynamic_density
         @test formulation.specific_energy isa Field
 
         # Test struct methods
-        @test prognostic_thermodynamic_field_names(formulation) == (:ρe,)
-        @test additional_thermodynamic_field_names(formulation) == (:e,)
-        @test thermodynamic_density_name(formulation) == :ρe
+        @test prognostic_thermodynamic_field_names(formulation) == (:ρs,)
+        @test additional_thermodynamic_field_names(formulation) == (:s,)
+        @test thermodynamic_density_name(formulation) == :ρs
         @test thermodynamic_density(formulation) === formulation.energy_density
     end
 
     @testset "Oceananigans.fields and prognostic_fields" begin
         θ_formulation = materialize_formulation(:LiquidIcePotentialTemperature, dynamics, grid, boundary_conditions)
-        e_formulation = materialize_formulation(:StaticEnergy, dynamics, grid, boundary_conditions)
+        s_formulation = materialize_formulation(:StaticEnergy, dynamics, grid, boundary_conditions)
 
         # LiquidIcePotentialTemperature
         @test haskey(Oceananigans.fields(θ_formulation), :θ)
         @test haskey(Oceananigans.prognostic_fields(θ_formulation), :ρθ)
 
         # StaticEnergy
-        @test haskey(Oceananigans.fields(e_formulation), :e)
-        @test haskey(Oceananigans.prognostic_fields(e_formulation), :ρe)
+        @test haskey(Oceananigans.fields(s_formulation), :s)
+        @test haskey(Oceananigans.prognostic_fields(s_formulation), :ρs)
     end
 end
 
@@ -290,6 +301,13 @@ using Breeze.Thermodynamics:
 
 @testset "Thermodynamics" begin
     thermo = ThermodynamicConstants()
+    @test thermo.liquid.density == 1000
+    @test thermo.ice.density == 917
+    @test occursin("density=1000.0", sprint(show, thermo.liquid))
+
+    adapted_thermo = adapt(CPU(), ThermodynamicConstants(Float32))
+    @test adapted_thermo.liquid.density === Float32(1000)
+    @test adapted_thermo.ice.density === Float32(917)
 
     # Test Saturation specific humidity calculation
     T = 293.15  # 20°C
@@ -314,10 +332,10 @@ end
         g = thermo.gravitational_acceleration
         ℒˡᵣ = thermo.liquid.reference_latent_heat
         ℒⁱᵣ = thermo.ice.reference_latent_heat
-        e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+        s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
         # Test with saturation adjustment
-        𝒰 = StaticEnergyState(e, q, z, p)
+        𝒰 = StaticEnergyState(s, q, z, p)
         T★ = temperature(𝒰, thermo)
         @test T★ ≈ T
     end

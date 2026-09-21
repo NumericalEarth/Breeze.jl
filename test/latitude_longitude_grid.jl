@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 #####
 ##### Tests for LatitudeLongitudeGrid + CompressibleDynamics + SphericalCoriolis
 #####
@@ -13,12 +15,6 @@ using Oceananigans
 using Oceananigans.Architectures: architecture
 using Oceananigans.Units
 using Test
-
-# Note: When run through the test runner, test_float_types is defined in the init_code.
-# When run directly, we need to define it.
-if !@isdefined(test_float_types)
-    test_float_types() = (Float64,)
-end
 
 #####
 ##### Helper to build a LatitudeLongitudeGrid for tests
@@ -85,7 +81,7 @@ end
 
     coriolis = SphericalCoriolis()
     dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                    surface_pressure = 100000,
+                                    base_pressure = 100000,
                                     reference_potential_temperature = 300)
 
     model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
@@ -134,7 +130,11 @@ end
     grid = build_test_llg(default_arch)
 
     coriolis = SphericalCoriolis()
-    dynamics = CompressibleDynamics(ExplicitTimeStepping())
+    # Full-pressure PGF/buoyancy (no reference). A constant-θ column is isentropic and its
+    # hydrostatic pressure reaches zero at a finite height (~29 km for the default θᵣ = 288 K), so
+    # the automatic reference — a per-column isentropic integration — is ill-posed over the 30 km
+    # domain. This test only checks that explicit time-stepping runs, so disable it.
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state=nothing)
 
     model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 

@@ -51,19 +51,22 @@ end
 struct CondensedPhase{FT}
     reference_latent_heat :: FT
     heat_capacity :: FT
+    density :: FT
 end
 
 function Base.summary(ph::CondensedPhase{FT}) where FT
     return string("CondensedPhase{", FT, "}(",
                   "reference_latent_heat=", prettysummary(ph.reference_latent_heat), ", ",
-                  "heat_capacity=", prettysummary(ph.heat_capacity), ")")
+                  "heat_capacity=", prettysummary(ph.heat_capacity), ", ",
+                  "density=", prettysummary(ph.density), ")")
 end
 
 Base.show(io::IO, ph::CondensedPhase) = print(io, summary(ph))
 
 Adapt.adapt_structure(to, pt::CondensedPhase) =
     CondensedPhase(adapt(to, pt.reference_latent_heat),
-                   adapt(to, pt.heat_capacity))
+                   adapt(to, pt.heat_capacity),
+                   adapt(to, pt.density))
 
 """
 $(TYPEDSIGNATURES)
@@ -83,14 +86,24 @@ Arguments
 - `reference_latent_heat`: Difference between the internal energy of the gaseous phase at
   the `energy_reference_temperature`.
 - `heat_capacity`: Heat capacity of the phase of matter.
+- `density`: Reference mass density of the phase of matter [kg/m³].
 """
-function CondensedPhase(FT = Oceananigans.defaults.FloatType; reference_latent_heat, heat_capacity)
+function CondensedPhase(FT = Oceananigans.defaults.FloatType;
+                        reference_latent_heat,
+                        heat_capacity,
+                        density)
     return CondensedPhase{FT}(convert(FT, reference_latent_heat),
-                              convert(FT, heat_capacity))
+                              convert(FT, heat_capacity),
+                              convert(FT, density))
 end
 
-liquid_water(FT) = CondensedPhase(FT; reference_latent_heat=2500800, heat_capacity=4181)
-water_ice(FT)    = CondensedPhase(FT; reference_latent_heat=2834000, heat_capacity=2108)
+liquid_water(FT) = CondensedPhase(FT; reference_latent_heat=2500800,
+                                      heat_capacity=4181,
+                                      density=1000)
+
+water_ice(FT) = CondensedPhase(FT; reference_latent_heat=2834000,
+                                   heat_capacity=2108,
+                                   density=917)
 
 """
 $(TYPEDEF)
@@ -178,6 +191,8 @@ internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
 The `gravitational_acceleration` parameter is included to compute [`ReferenceState`](@ref)
 quantities associated with hydrostatic balance.
+The `liquid` and `ice` phases contain their respective reference densities for use by
+microphysical parameterizations.
 """
 function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 molar_gas_constant = 8.314462618,
