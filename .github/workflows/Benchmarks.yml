@@ -72,7 +72,7 @@ jobs:
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
           # untested). Small grid to keep the gradient compile bounded. The
-          # loop body is compiled once regardless of Nsteps, so 32 steps cost
+          # loop body is compiled once regardless of Nsteps, so 64 steps cost
           # little extra compile; --checkpoints sweeps the checkpoint budget of
           # the binomial (revolve) schedule Enzyme uses for the reverse pass
           # (each value is a separate compile + run, recorded as its own
@@ -80,11 +80,11 @@ jobs:
           # ("AD benchmark").
           - dynamics: 'compressible_explicit'
             microphysics: 'nothing'
-            grid: '64x64x32'
+            grid: '128x128x32'
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 32 --checkpoints 2,4,8 --checkpointing_mode binomial'
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,4,8 --checkpointing_mode binomial'
           # Scalar-tendency kernel sweep (no model): time the bare WENO
           # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
           # the Reactant-compiled XLA program and the eager vanilla launch.
