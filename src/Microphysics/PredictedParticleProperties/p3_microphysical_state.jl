@@ -962,3 +962,25 @@ end
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρsᵛ⁺ˡ}) = result.tendency_ρsᵛ⁺ˡ
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqᵛ})  = result.tendency_ρqᵛ
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρnᵃ})  = result.tendency_ρnᵃ
+
+# Every P3 prognostic except one is non-negative, and for a positivity-preserving limiter that
+# is the whole of what matters. It cannot be said directly — `bounds` takes two sides — so a
+# quantity that is merely non-negative is given a nominal upper bound of one.
+#
+# What that costs is bounded and acceptable. The limiter forms
+# θᵐᵃˣ = |(cᵐᵃˣ - cᵢ) / (M - cᵢ + ε₂)|, so with cᵐᵃˣ = 1 far below a number concentration of
+# ~1e8 kg⁻¹ it reduces to roughly cᵢ / (M - cᵢ): the upper bound is inert unless the
+# reconstruction overshoots the cell mean by more than a factor of two, and where it does engage
+# it is damping a greater-than-100% overshoot, which a positivity-preserving scheme wants damped
+# anyway. Below that threshold θ is bit-for-bit what it would be against any larger bound, and
+# only θᵐⁱⁿ — the positivity — does any work.
+#
+# The exception is `ρsᵛ⁺ˡ`. Predicted supersaturation is qᵛ - qᵛ⁺ˡ and is legitimately negative
+# wherever the air is subsaturated, so a lower bound of zero limits a correct field hard: a cell
+# mean of -0.01 reconstructing to -0.1 gives θ ≈ 0.11. It is the one quantity here that must be
+# left unbounded, and the reason this method has to exist.
+function AM.microphysical_transport_bounds(p3::P3, name::Symbol)
+    name === :ρsᵛ⁺ˡ && return nothing
+    name in AM.prognostic_field_names(p3) && return (0, 1)
+    return nothing
+end
