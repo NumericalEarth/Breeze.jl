@@ -67,7 +67,7 @@ table lookups.
     ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
     # Same λʳ the process rates use.
-    log_slope = log10(rain_slope_parameter(qʳ_eff, nʳ, parameters))
+    log_slope = log(rain_slope_parameter(qʳ_eff, nʳ, parameters)) / log(FT(10))
 
     mass_weighted_velocity = p3.rain.velocity_mass(log_slope) * ρ_correction
     number_weighted_velocity = p3.rain.velocity_number(log_slope) * ρ_correction

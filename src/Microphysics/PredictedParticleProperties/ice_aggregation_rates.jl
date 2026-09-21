@@ -1,14 +1,15 @@
 @inline function ice_rain_collection_lookup(table::IceRainCollection,
                                             m̄, λr, Fᶠ, Fˡ, ρᶠ)
-    log_m = log10(m̄)
-    log_λ = log10(λr)
+    ln10 = log(oftype(m̄, 10))
+    log_m = log(m̄) / ln10
+    log_λ = log(λr) / ln10
     # Both rain-ice tables share `(log_m, log_λ, Fᶠ, Fˡ, ρᶠ)` axes
     # by construction, so prep indices once and reuse across evaluations.
     prep = prepare_interpolation(table.mass, log_m, log_λ, Fᶠ, Fˡ, ρᶠ)
     # The table stores rain-ice mass and number kernels as log10;
     # exponentiate to recover physical values.
-    return exp10(evaluate_at(table.mass, prep)),
-           exp10(evaluate_at(table.number, prep))
+    return exp(ln10 * evaluate_at(table.mass, prep)),
+           exp(ln10 * evaluate_at(table.number, prep))
 end
 
 #####
