@@ -1,3 +1,5 @@
+include(joinpath(dirname(@__DIR__), "setup.jl"))
+
 #####
 ##### Reactant correctness — compressible AtmosphereModel parity over one
 ##### `time_step!`. Builds the same model on a vanilla architecture and on
