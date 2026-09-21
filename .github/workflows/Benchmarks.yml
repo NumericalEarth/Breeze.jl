@@ -71,15 +71,20 @@ jobs:
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
-          # untested), small grid + small Nsteps to keep the gradient compile
-          # and per-step memory bounded.
+          # untested). Small grid to keep the gradient compile bounded. The
+          # loop body is compiled once regardless of Nsteps, so 32 steps cost
+          # little extra compile; --checkpoints sweeps the checkpoint budget of
+          # the binomial (revolve) schedule Enzyme uses for the reverse pass
+          # (each value is a separate compile + run, recorded as its own
+          # result). To reproduce locally on CPU see benchmarking/README.md
+          # ("AD benchmark").
           - dynamics: 'compressible_explicit'
             microphysics: 'nothing'
             grid: '64x64x32'
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 1'
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 32 --checkpoints 2,4,8 --checkpointing_mode binomial'
           # Scalar-tendency kernel sweep (no model): time the bare WENO
           # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
           # the Reactant-compiled XLA program and the eager vanilla launch.
@@ -231,20 +236,22 @@ jobs:
               microphysics = d['microphysics']
               backend = d.get('backend', 'vanilla')
               mode = d.get('mode', 'forward')
+              checkpointing = d.get('checkpointing', '')
 
               gpu = d['metadata']['gpu_name']
 
               grid = d['grid_size']
               grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
 
-              # AD (forward+backward via Enzyme) entries get their own chart.
-              # Skip the forward-only clauses below so an AD point doesn't
-              # also land on a forward chart that happens to match its config.
+              # AD (forward+backward via Enzyme) entries get their own chart,
+              # one line per checkpointing strategy. Skip the forward-only
+              # clauses below so an AD point doesn't also land on a forward
+              # chart that happens to match its config.
               if mode == 'ad':
                   level_1 = f'{base_name}; AD; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
-                  level_4 = f'{grid_str}'
+                  level_4 = f'{grid_str} {checkpointing}'.strip()
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})

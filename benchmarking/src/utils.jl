@@ -24,6 +24,8 @@ end
                             dynamics::AbstractString = "",
                             microphysics::AbstractString = "",
                             backend::AbstractString = "vanilla",
+                            ad::Bool = false,
+                            checkpointing = true,
                             )
 
 Run a benchmark by executing `time_steps` time steps of the given model.
@@ -34,6 +36,12 @@ program with `Reactant.@compile raise=true raise_first=true sync=true` —
 compile time is recorded separately. The compiled program is then executed
 once for warmup and once timed. The vanilla path drives `many_time_steps!`
 directly through eager `time_step!`.
+
+With `ad=true` (Reactant only) the forward+backward pass `grad_loss!` is
+benchmarked instead, using `checkpointing` as the loop checkpointing strategy
+for the reverse pass (`true`, `false`, `Reactant.Periodic(n)`, or
+`Reactant.Binomial(budget)`; see `loss` in timestepping.jl). The AD program is
+compiled with `disable_loop_raising_passes=true`.
 
 Returns a `BenchmarkResult` containing timing information and system metadata.
 """
@@ -49,6 +57,7 @@ function benchmark_time_stepping(model;
                                  microphysics::AbstractString = "",
                                  backend::AbstractString = "vanilla",
                                  ad::Bool = false,
+                                 checkpointing = true,
                                  )
 
     grid = model.grid
@@ -59,6 +68,10 @@ function benchmark_time_stepping(model;
     total_points = Nx * Ny * Nz
     is_reactant = arch isa ReactantState
     mode = ad ? "ad" : "forward"
+    # `true` is Reactant's default for a static-bound loop, Periodic(isqrt(N));
+    # resolve it here so the recorded strategy names the actual checkpoint count.
+    checkpointing = checkpointing === true ? Reactant.Periodic(isqrt(time_steps)) : checkpointing
+    checkpointing_str = ad ? checkpointing_label(checkpointing) : ""
 
     ad && !is_reactant && error("AD benchmark requires a Reactant backend (got $backend)")
 
@@ -67,6 +80,7 @@ function benchmark_time_stepping(model;
         @info "  Architecture: $arch"
         @info "  Backend: $backend"
         @info "  Mode: $mode"
+        ad && @info "  Checkpointing: $checkpointing_str"
         @info "  Float type: $FT"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
         @info "  Time step: $(Δt_FT) s"
@@ -86,13 +100,16 @@ function benchmark_time_stepping(model;
             dθ_init = CenterField(grid); set!(dθ_init, 0)
             dmodel  = Enzyme.make_zero(model)
             if verbose
-                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps)) with Reactant (raise=true)..."
+                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true, disable_loop_raising_passes=true)..."
             end
+            # `disable_loop_raising_passes` is not a @compile keyword; it has to
+            # go through a CompileOptions, which then replaces all other options.
+            compile_options = Reactant.CompileOptions(; disable_loop_raising_passes = true, raise_first = true, raise = true, sync = true)
             compile_start = time_ns()
-            compiled_grad! = Reactant.@compile raise=true raise_first=true sync=true grad_loss!(
-                model, dmodel, θ_init, dθ_init, Δt_FT, time_steps)
+            compiled_grad! = Reactant.@compile compile_options=compile_options grad_loss!(
+                model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
             compile_time_seconds = (time_ns() - compile_start) / 1e9
-            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps)
+            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
         else
             if verbose
                 @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
@@ -152,6 +169,7 @@ function benchmark_time_stepping(model;
         String(microphysics),
         String(backend),
         mode,
+        checkpointing_str,
         (Nx, Ny, Nz),
         time_steps,
         Δt_FT,
