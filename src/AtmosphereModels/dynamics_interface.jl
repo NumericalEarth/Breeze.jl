@@ -198,7 +198,7 @@ The thermodynamic formulations differentiate their variable along `q → q + ε 
 leaves keeps its temperature instantaneously. This composition derivative is distinct from
 the transported enthalpy: compressible sedimentation carries phase enthalpy, while the
 fixed-density convention transports enthalpy relative to dry air (see
-[`condensate_sedimentation_divergence`](@ref)).
+[`sedimentation_tendency`](@ref)).
 """
 @inline sedimentation_replacement(dynamics, q) = zero(typeof(q))
 

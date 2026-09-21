@@ -136,7 +136,7 @@ function compute_slow_scalar_tendencies!(model)
     #
     # The condensate sedimentation term is the exception: it pairs its content fluxes with the
     # tracer tendencies' mass fluxes, which recombine only at the velocity they were formed at
-    # (see `condensate_sedimentation_divergence`), so it reads the frozen copy
+    # (see `sedimentation_tendency`), so it reads the frozen copy
     # (`tendency_transport_velocities`), as `implicit_sedimentation_step!` does for the implicit
     # remainder. Being a difference of those fluxes, zero wherever nothing sediments, it forms no
     # part of the feedback loop above.

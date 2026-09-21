@@ -98,8 +98,8 @@ end
 ##### Advective mass fluxes for the sedimentation of condensate content
 #####
 #
-# General method of `AtmosphereModels.sedimentation_mass_fluxes`, consumed by the
-# thermodynamic-variable tendencies through `condensate_content_fluxes`: through the two faces
+# General method of `AtmosphereModels.sedimentation_mass_fluxes`, consumed by
+# `AtmosphereModels.sedimentation_tendency`: through the two faces
 # of cell (i, j, k), the vertical advective flux of `q` at the combined velocity `wᵗ + wˢ` and at
 # the transport velocity `wᵗ` alone, with the tracer's own advection scheme, so that their
 # difference is by construction the sedimentation part of the mass flux the tracer tendency

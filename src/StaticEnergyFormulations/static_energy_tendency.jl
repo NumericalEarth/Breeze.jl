@@ -70,24 +70,16 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
-             - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, tracer_transport_velocity, dynamics,
-                                                   ExplicitSedimentationFluxes(), static_energy_condensate_content,
-                                                   dynamics, constants, microphysics, microphysical_fields,
-                                                   specific_prognostic_moisture, temperature_field)
+             + sedimentation_tendency(i, j, k, grid, sedimenting_constituents, tracer_transport_velocity,
+                                      formulation, dynamics, constants, microphysics, microphysical_fields,
+                                      specific_prognostic_moisture, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              + ρs_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
 end
 
-# The remainder of the sedimentation transport that the adaptive implicit solve applies to the
-# tracers, moved with its content after their solves.
-AtmosphereModels.implicit_sedimentation_step!(model::StaticEnergyModel, Δt, velocities) =
-    implicit_sedimentation_step!(model, Δt, velocities, static_energy_condensate_content,
-                                 model.dynamics, model.thermodynamic_constants, model.microphysics,
-                                 model.microphysical_fields, specific_prognostic_moisture(model), model.temperature)
-
 #####
-##### Sedimentation transport of the condensate part of ρs
+##### Condensate content of ρs for its sedimentation tendency
 #####
 #
 # The content per unit falling mass of phase x is χˣ = ∂s/∂qˣ at fixed T along q → q + ε (eˣ − r),
@@ -103,11 +95,11 @@ AtmosphereModels.implicit_sedimentation_step!(model::StaticEnergyModel, Δt, vel
 # deficit: cᵖᵈ and 0 for dry air, cᵖᵐ and ℒˡᵣ qˡ + ℒⁱᵣ qⁱ for the mixture, whose enthalpy is
 # s − g z. The geopotential is independent of the composition and drops out. The frictional
 # heating from the fall (g wˣ qˣ) is neglected. The content is the enthalpy the falling mass
-# carries and ∂s/∂h = 1, so the shared `condensate_sedimentation_divergence` reduces here to the
-# flux form: each flux carries the enthalpy of the cell it drains, and ∫ρs is conserved.
-@inline function static_energy_condensate_content(i, j, k, grid, dynamics, constants,
-                                                  microphysics, microphysical_fields, specific_prognostic_moisture,
-                                                  temperature_field)
+# carries and ∂s/∂h = 1, so the shared `sedimentation_tendency` reduces here to the flux form:
+# each flux carries the enthalpy of the cell it drains, and ∫ρs is conserved.
+@inline function AtmosphereModels.condensate_content(i, j, k, grid, ::StaticEnergyFormulation, dynamics, constants,
+                                                     microphysics, microphysical_fields, specific_prognostic_moisture,
+                                                     temperature_field)
     @inbounds T = temperature_field[i, j, k]
     @inbounds ρ = total_density(dynamics)[i, j, k]
     @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]

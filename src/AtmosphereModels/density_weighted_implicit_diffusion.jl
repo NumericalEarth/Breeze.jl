@@ -305,37 +305,38 @@ implicit_sedimentation(constituents) = any(c -> c.advection isa AIVA, constituen
 $(TYPEDSIGNATURES)
 
 Move the condensate content of the thermodynamic variable with the sedimentation mass that the
-adaptive implicit vertical solve has just applied to the tracers: subtract `Δt` times the
-[`condensate_sedimentation_divergence`](@ref) of the [`ImplicitSedimentationFluxes`](@ref) from
-the [`thermodynamic_density`](@ref). `velocities` are the transport velocities whose vertical
-component the tracers' solves split, `Δt` the interval they solved over, and
-`condensate_content(i, j, k, grid, args...)` the formulation's `(; χ, h, ∂φ∂h)` at a cell (see
-[`condensate_sedimentation_divergence`](@ref)).
-The time steppers call the three-argument method between the tracers' solves of a stage and the
-thermodynamic variable's own, so the moved content takes the same implicit transport and
-diffusion as the rest of the field (see the note above); each thermodynamic formulation
-implements it by supplying its content function and arguments to this one. A no-op when no
-constituent is advected adaptively implicitly.
+adaptive implicit vertical solve has just applied to the tracers: add `Δt` times the
+sedimentation tendency of the first-order remainder the solves applied, at the solved state, to
+the [`thermodynamic_density`](@ref) (the tendency of [`sedimentation_tendency`](@ref) formed
+from [`implicit_sedimentation_mass_fluxes`](@ref)). `velocities` are the transport velocities
+whose vertical component the tracers' solves split, `Δt` the interval they solved over, and
+`formulation` selects the [`condensate_content`](@ref) methods, defaulting to the model's.
+The time steppers call this between the tracers' solves of a stage and the thermodynamic
+variable's own, so the moved content takes the same implicit transport and diffusion as the rest
+of the field (see the note above). A no-op when no constituent is advected adaptively implicitly.
 
 For potential temperature this is a derivative-times-increment update, not an exact finite
 thermal-energy reconstruction. Matching the implicit mass flux alone does not remove that
 finite-step error.
 """
-function implicit_sedimentation_step!(model, Δt, velocities, condensate_content, args...)
+function implicit_sedimentation_step!(model, Δt, velocities, formulation = model.formulation)
     constituents = model.sedimentation_constituents
     implicit_sedimentation(constituents) || return nothing
     grid = model.grid
     arch = grid.architecture
     φ = thermodynamic_density(model.formulation)
     launch!(arch, grid, :xyz, _implicit_sedimentation_step!,
-            φ, grid, kernel_time_step(arch, grid, Δt), constituents, velocities.w, model.dynamics,
-            condensate_content, args)
+            φ, grid, kernel_time_step(arch, grid, Δt), constituents, velocities.w,
+            formulation, model.dynamics, model.thermodynamic_constants, model.microphysics,
+            model.microphysical_fields, specific_prognostic_moisture(model), model.temperature)
     return nothing
 end
 
-@kernel function _implicit_sedimentation_step!(φ, grid, Δt, constituents, wᵗ, dynamics, condensate_content, args)
+@kernel function _implicit_sedimentation_step!(φ, grid, Δt, constituents, wᵗ, formulation, dynamics, constants,
+                                               microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     i, j, k = @index(Global, NTuple)
-    divergence = condensate_sedimentation_divergence(i, j, k, grid, constituents, wᵗ, dynamics,
-                                                     ImplicitSedimentationFluxes(), condensate_content, args...)
-    @inbounds φ[i, j, k] -= Δt * divergence
+    tendency = sedimentation_content_tendency(i, j, k, grid, constituents, wᵗ, implicit_constituent_mass_fluxes,
+                                              formulation, dynamics, constants, microphysics, microphysical_fields,
+                                              specific_prognostic_moisture, temperature)
+    @inbounds φ[i, j, k] += Δt * tendency
 end

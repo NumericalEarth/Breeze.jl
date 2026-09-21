@@ -157,7 +157,7 @@ Compute the thermodynamic tendency. Dispatches on the thermodynamic formulation 
 `common_args` are the arguments the scalar tendencies share, and `tracer_transport_velocity` the
 vertical velocity the moisture and tracer tendencies were built with, which the condensate
 sedimentation term pairs its content fluxes with (see
-[`condensate_sedimentation_divergence`](@ref)). The two need not agree: a time stepper may advect
+[`sedimentation_tendency`](@ref)). The two need not agree: a time stepper may advect
 the thermodynamic variable with a velocity its tracers do not share.
 """
 function compute_thermodynamic_tendency! end

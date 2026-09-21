@@ -5,7 +5,7 @@ using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity,
                                total_density, dynamics_density, standard_pressure,
                                implicit_advection_velocities, density_weighted_advection_diagonal,
                                implicit_advection_density, implicit_step_scheme, closure_scalar_index,
-                               ExplicitSedimentationFluxes, phase_content
+                               phase_content, specific_prognostic_moisture
 using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState,
                              LiquidIceDensityState, StaticEnergyState, mixture_gas_constant
 using CloudMicrophysics
@@ -38,6 +38,35 @@ end
 
 Breeze.AtmosphereModels.transport_velocities(model::MockSurfaceFluxTransportModel) =
     (; u = ZeroField(), v = ZeroField(), w = model.transport_w)
+
+# Synthetic condensate contents for the sedimentation coupling tests, passed in place of the
+# formulation so that `condensate_content` dispatches to them: a uniform content with no
+# enthalpy contrast, and contents indexed by the cell that identify the cell each flux draws its
+# enthalpy from and the cell that converts it.
+struct UniformContent{FT}
+    χ :: FT
+end
+struct EnthalpyContent end
+struct LocalContent end
+struct GeneralContent end
+
+@inline Breeze.AtmosphereModels.condensate_content(i, j, k, grid, content::UniformContent, args...) =
+    (; χ = (content.χ, zero(content.χ)), h = (zero(content.χ), zero(content.χ)), ∂φ∂h = one(content.χ))
+
+@inline function Breeze.AtmosphereModels.condensate_content(i, j, k, grid, ::EnthalpyContent, args...)
+    FT = eltype(grid)
+    return (; χ = (FT(k), FT(10k)), h = (FT(k), FT(10k)), ∂φ∂h = one(FT))
+end
+
+@inline function Breeze.AtmosphereModels.condensate_content(i, j, k, grid, ::LocalContent, args...)
+    FT = eltype(grid)
+    return (; χ = (FT(k), FT(10k)), h = (zero(FT), zero(FT)), ∂φ∂h = one(FT))
+end
+
+@inline function Breeze.AtmosphereModels.condensate_content(i, j, k, grid, ::GeneralContent, args...)
+    FT = eltype(grid)
+    return (; χ = (FT(k), FT(10k)), h = (FT(k^2), FT(-k)), ∂φ∂h = FT(1) / 2)
+end
 
 #####
 ##### One-moment microphysics tests
@@ -452,7 +481,7 @@ end
     # anelastic coupling ratio is one), outflow through the bottom included, so the column loses
     # deficit with the rain that leaves.
     χ = FT(-2500)
-    uniform_content(i, j, k, grid) = (; χ = (χ, zero(χ)), h = (zero(χ), zero(χ)), ∂φ∂h = one(χ))
+    uniform_content = UniformContent(χ)
     ρθ = model.formulation.potential_temperature_density
     ρθ⁰ = Array(interior(ρθ, 1, 1, :))
     Breeze.AtmosphereModels.implicit_sedimentation_step!(model, Δt, model.velocities, uniform_content)
@@ -658,9 +687,9 @@ end
     # `expected_sedimentation_tendency`). The content ρθ's tendency moves is this, formed with
     # the tracers' velocity, ...
     constants = model.thermodynamic_constants
-    content(k) = @allowscalar Breeze.PotentialTemperatureFormulations.potential_temperature_condensate_content(
+    content(k) = @allowscalar Breeze.AtmosphereModels.condensate_content(
         1, 1, k, grid, model.formulation, model.dynamics, constants, model.microphysics, μ,
-        Breeze.AtmosphereModels.specific_prognostic_moisture(model))
+        specific_prognostic_moisture(model), model.temperature)
     c = [content(k) for k in 1:Nz]
     χ = [cₖ.χ[1] for cₖ in c]
     h = [cₖ.h[1] for cₖ in c]
@@ -1060,9 +1089,9 @@ Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, 
     Tₛ = column(energy_model.temperature)
     pᵣ = column(energy_model.dynamics.reference_state.pressure)
     for k in 1:Nz
-        c = @allowscalar Breeze.StaticEnergyFormulations.static_energy_condensate_content(
-            1, 1, k, grid, mixture_dynamics, constants, energy_model.microphysics, μₛ,
-            Breeze.AtmosphereModels.specific_prognostic_moisture(energy_model), energy_model.temperature)
+        c = @allowscalar Breeze.AtmosphereModels.condensate_content(
+            1, 1, k, grid, energy_model.formulation, mixture_dynamics, constants, energy_model.microphysics, μₛ,
+            specific_prognostic_moisture(energy_model), energy_model.temperature)
         qₖ = MoistureMassFractions(qᵛₛ[k], qˡₛ[k], zero(FT))
         χ_expected = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ; replacement=:mixture)
         χ_dry = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ)
@@ -1122,9 +1151,10 @@ end
     ρᵣᶠ(k) = @allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρᵣ)
     q̄(k) = @allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ) # Centered(order=2) face reconstruction
     Az = FT(100 * 100)
-    divergence(content, wᵗ, k) = @allowscalar Breeze.AtmosphereModels.condensate_sedimentation_divergence(
-        1, 1, k, grid, model.sedimentation_constituents, wᵗ, model.dynamics,
-        ExplicitSedimentationFluxes(), content)
+    # The divergence of the content flux the tendency applies is minus the signed tendency.
+    divergence(content, wᵗ, k) = -(@allowscalar Breeze.AtmosphereModels.sedimentation_tendency(
+        1, 1, k, grid, model.sedimentation_constituents, wᵗ, content, model.dynamics, constants,
+        model.microphysics, μ, specific_prognostic_moisture(model), model.temperature))
     transport_velocities = (FT(0), FT(1), FT(5))
 
     # Each flux brings the enthalpy of the cell it drains: the cell above face k (enthalpy k)
@@ -1134,7 +1164,7 @@ end
     # transport velocity above the fall speed makes both fluxes draw from the cell below. With
     # the content equal to the enthalpy and a unit heating response, as for static energy, the
     # delivered content is the upwind enthalpy itself and the divergence takes the flux form.
-    enthalpy_content(i, j, k, grid) = (; χ = (FT(k), FT(10k)), h = (FT(k), FT(10k)), ∂φ∂h = one(FT))
+    enthalpy_content = EnthalpyContent()
     for wᵗ_value in transport_velocities
         wᵗ = set!(ZFaceField(grid), wᵗ_value)
         W = wᵗ_value + wʳ
@@ -1149,7 +1179,7 @@ end
     # With a uniform enthalpy no sensible heat moves between cells, and every flux, in or out,
     # delivers the cell's own content: the divergence is the content of cell k times the
     # sedimentation part of the mass divergence the tracer tendency applies.
-    local_content(i, j, k, grid) = (; χ = (FT(k), FT(10k)), h = (zero(FT), zero(FT)), ∂φ∂h = one(FT))
+    local_content = LocalContent()
     for wᵗ_value in transport_velocities
         wᵗ = set!(ZFaceField(grid), wᵗ_value)
         W = wᵗ_value + wʳ
@@ -1162,7 +1192,7 @@ end
 
     # In general each flux delivers the cell's content plus its heating response times the
     # enthalpy of the cell the flux drains in excess of the cell's own.
-    general_content(i, j, k, grid) = (; χ = (FT(k), FT(10k)), h = (FT(k^2), FT(-k)), ∂φ∂h = FT(1) / 2)
+    general_content = GeneralContent()
     for wᵗ_value in transport_velocities
         wᵗ = set!(ZFaceField(grid), wᵗ_value)
         W = wᵗ_value + wʳ
@@ -1266,7 +1296,7 @@ end
     set!(μ.wᶜˡ, 0)
     set!(μ.qᶜˡ, 0)
     χ = FT(-2.5e6)
-    uniform_content(i, j, k, grid) = (; χ = (χ, zero(χ)), h = (zero(χ), zero(χ)), ∂φ∂h = one(χ))
+    uniform_content = UniformContent(χ)
 
     wᵗ = ZFaceField(grid)
     ρᵣ = model.dynamics.reference_state.density
@@ -1281,8 +1311,9 @@ end
     unlimited_scheme = adapt_advection_order(materialize_advection(WENO(FT; order=5), grid), grid)
     unlimited = ((; rain.w, rain.q, rain.ρq, rain.phase, advection = unlimited_scheme),)
 
-    heat(constituents, k) = @allowscalar Breeze.AtmosphereModels.condensate_sedimentation_divergence(
-        1, 1, k, grid, constituents, wᵗ, model.dynamics, ExplicitSedimentationFluxes(), uniform_content)
+    heat(constituents, k) = -(@allowscalar Breeze.AtmosphereModels.sedimentation_tendency(
+        1, 1, k, grid, constituents, wᵗ, uniform_content, model.dynamics, model.thermodynamic_constants,
+        model.microphysics, μ, specific_prognostic_moisture(model), model.temperature))
     mass(advection, k) = @allowscalar Breeze.AtmosphereModels.div_ρUc(1, 1, k, grid, advection, ρᵣ, U, μ.qʳ)
     atol = sqrt(eps(FT)) * abs(χ) * FT(1e-3) * 2 / Δz
 

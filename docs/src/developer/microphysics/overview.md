@@ -172,7 +172,9 @@ own scheme, so bounds- and positivity-preserving schemes limit the falling humid
 they would without sedimentation. What follows weights those same fluxes to carry the
 *thermodynamic variable's* share; it forms no flux of its own.
 
-The thermodynamic-variable tendencies consume the constituents: each constituent's
+The thermodynamic-variable tendencies consume the constituents through `sedimentation_tendency`,
+which returns the signed cell-local tendency they add; each formulation supplies its
+`condensate_content` (`χ`, transported enthalpy and `∂φ/∂h` at a cell). Each constituent's
 sedimentation mass flux — the advective flux of its humidity at the combined resolved and fall
 velocity minus the flux at the resolved velocity alone, computed with the same advection scheme
 that transports the tracer's mass (for bounds-preserving WENO, from the same per-cell limited
@@ -182,19 +184,25 @@ to the cell. The falling mass carries its enthalpy and each cell converts what i
 locally: a flux out of a cell removes the cell's own ``χˣ``, the partial derivative of the
 specific variable with respect to that condensate mass fraction at fixed temperature, so the
 cell the condensate leaves keeps its temperature; a flux in delivers ``χˣ`` plus ``∂φ/∂h`` times
-the enthalpy ``hˣ - hʳ`` the arriving mass brings in excess of the receiving cell's. What takes
+the enthalpy the arriving mass brings in excess of the receiving cell's (the phase enthalpy
+``hˣ`` on the compressible core, ``hˣ - hᵈ`` under the fixed-density convention). What takes
 up the departed mass is the dynamics' call (`sedimentation_replacement`): dry air on the
 anelastic core, whose total density is fixed so that ``qᵈ`` absorbs the change; the local
 mixture on the compressible core, whose prognostic dry density has no sedimentation source, so
 that the diagnosed total density falls with the condensate and every mass fraction
-renormalizes. The enthalpy is then ``(cˣ - cʳ) T - (ℒˣᵣ - ℒʳ)`` (``(cˣ - cᵖᵈ) T - ℒˣᵣ`` against
-dry air, ``hˣ - (s - g z)`` against the mixture), which is also the content of `ρs`; with
-``∂s/∂h = 1`` the sum collapses to the flux form and ``∫ρs`` is conserved. For `ρθ` the content
-is ``∂θˡⁱ/∂qˣ`` along the same composition change (to leading order ``-ℒˣᵣ / (cᵖᵐ Π)``) with
-``∂θˡⁱ/∂h = 1 / (cᵖᵐ Π)``, and must not collapse: that Jacobian varies with the Exner function,
+renormalizes. The content of `ρs` is ``(cˣ - cʳ) T - (ℒˣᵣ - ℒʳ)`` (``(cˣ - cᵖᵈ) T - ℒˣᵣ``
+against dry air, ``hˣ - (s - g z)`` against the mixture), the enthalpy of the condensate
+relative to its replacement; with ``∂s/∂h = 1`` the sum collapses to the negative divergence of
+a face flux and ``∫ρs`` is conserved. For `ρθ` the content is ``∂θˡⁱ/∂qˣ`` along the same
+composition change (to leading order ``-ℒˣᵣ / (cᵖᵐ Π)``) with ``∂θˡⁱ/∂h = 1 / (cᵖᵐ Π)`` at
+prescribed pressure (the anelastic core) or the fixed-gas-density response ``β_cv`` on the
+compressible core (`sedimentation_thermal_response`), and must not collapse: that Jacobian
+varies with the Exner function,
 so moving it between pressure levels would conserve ``∫ρθ``, which precipitation does not (heat
-released at one pressure and absorbed at another). Both formulations respond in temperature
-identically. The content fluxes ride the total-density-weighted mass flux the tracer tendency
+released at one pressure and absorbed at another). The `ρθ` tendency is therefore a cell-local
+response, not the divergence of a unique conservative thermodynamic face flux, and both tendencies
+are instantaneous responses rather than exact finite-step thermal reconstructions. The content
+fluxes ride the total-density-weighted mass flux the tracer tendency
 applies, and the cell's coupling-to-total density ratio (one on the anelastic core,
 ``qᵈ = ρᵈ / ρ`` on the compressible core) converts the change of the specific variable into that
 of the coupling-weighted prognostic. They are formed at the velocity the tracer tendency
@@ -202,10 +210,11 @@ transports the constituents with, which on the compressible core is the substepp
 acoustic-mean velocity rather than the RK predictor the thermodynamic variable itself advects
 with: upwind selection and the adaptive implicit split are nonlinear in the velocity, so fluxes
 formed at the predictor would not recombine into the mass flux the condensate takes. Under
-adaptive implicit vertical advection the tendency carries the content of the explicit fraction
-of each mass flux only; between the tracers' implicit solves of a stage and the thermodynamic
-variable's own, the time steppers call `implicit_sedimentation_step!`, which moves the content
-of the remainder from the first-order fluxes the solves actually applied, at the solved state,
+adaptive implicit vertical advection `sedimentation_tendency` carries the content of the explicit
+fraction of each mass flux only; between the tracers' implicit solves of a stage and the
+thermodynamic variable's own, the time steppers call `implicit_sedimentation_step!`, which moves
+the content of the remainder from the first-order fluxes the solves actually applied, at the
+solved state,
 so the heat follows the mass at any fall Courant number and takes the same implicit transport
 and diffusion as the rest of the field. Rain-out thus leaves latent warming aloft and pre-cools
 the layer that later evaporates the arriving rain, the mechanism that builds cold pools.

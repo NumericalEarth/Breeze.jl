@@ -58,7 +58,8 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemper
         radiation_flux_divergence(model.radiation),
         model.sedimentation_constituents,
         tracer_transport_velocity,
-        common_args...)
+        common_args...,
+        model.temperature)
 
     Gρθ = model.timestepper.Gⁿ.ρθ
     launch!(arch, grid, :xyz, compute_potential_temperature_tendency!, Gρθ, grid, ρθ_args)
@@ -83,7 +84,8 @@ end
                                                 closure,
                                                 closure_fields,
                                                 clock,
-                                                model_fields)
+                                                model_fields,
+                                                temperature_field)
 
     potential_temperature = formulation.potential_temperature
     ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (advection/diffusion carrier)
@@ -98,10 +100,9 @@ end
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
-             - condensate_sedimentation_divergence(i, j, k, grid, sedimenting_constituents, tracer_transport_velocity, dynamics,
-                                                   ExplicitSedimentationFluxes(), potential_temperature_condensate_content,
-                                                   formulation, dynamics, constants, microphysics,
-                                                   microphysical_fields, specific_prognostic_moisture)
+             + sedimentation_tendency(i, j, k, grid, sedimenting_constituents, tracer_transport_velocity,
+                                      formulation, dynamics, constants, microphysics, microphysical_fields,
+                                      specific_prognostic_moisture, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
              + (Fρs + div_ℐ) / (cᵖᵐ * Π)
@@ -118,15 +119,8 @@ end
     return diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 end
 
-# The remainder of the sedimentation transport that the adaptive implicit solve applies to the
-# tracers, moved with its content after their solves.
-AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, Δt, velocities) =
-    implicit_sedimentation_step!(model, Δt, velocities, potential_temperature_condensate_content,
-                                 model.formulation, model.dynamics, model.thermodynamic_constants,
-                                 model.microphysics, model.microphysical_fields, specific_prognostic_moisture(model))
-
 #####
-##### Sedimentation transport of the condensate part of ρθ
+##### Condensate content of ρθ for its sedimentation tendency
 #####
 #
 # The content per unit falling mass of phase x is χˣ = ∂θˡⁱ/∂qˣ at fixed T and p along
@@ -151,8 +145,10 @@ AtmosphereModels.implicit_sedimentation_step!(model::PotentialTemperatureModel, 
 # core retains its dry-air replacement convention at fixed pressure. χ remains a local
 # composition derivative, not a transported quantity. These are instantaneous responses;
 # multiplying them by a finite mass increment does not exactly reconstruct thermal energy.
-@inline function potential_temperature_condensate_content(i, j, k, grid, formulation, dynamics, constants,
-                                                          microphysics, microphysical_fields, specific_prognostic_moisture)
+# The temperature is rediagnosed from the state, T = Π θ + D, so the temperature field is unused.
+@inline function AtmosphereModels.condensate_content(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
+                                                     dynamics, constants, microphysics, microphysical_fields,
+                                                     specific_prognostic_moisture, temperature_field)
     𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
                                  microphysics, microphysical_fields, specific_prognostic_moisture)
     q = 𝒰.moisture_mass_fractions
