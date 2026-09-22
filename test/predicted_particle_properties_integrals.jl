@@ -277,9 +277,9 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test p3_supersaturation.process_rates isa ProcessRate{Float64, true}
         @test :ρsᵛ⁺ˡ ∈ prognostic_field_names(p3_supersaturation)
 
-        # Aerosol activation adds the droplet number, and `prognostic_aerosol` the reservoir.
+        # Aerosol activation adds the droplet number, and `prognostic` the reservoir.
         p3_aerosol = PredictedParticlePropertiesMicrophysics(;
-            aerosol = AerosolActivation(AerosolMode(Float64); prognostic_aerosol = true))
+            aerosol = AerosolActivation(AerosolMode(Float64); prognostic = true))
         names_aerosol = prognostic_field_names(p3_aerosol)
         @test :ρnᶜˡ ∈ names_aerosol
         @test :ρnᵃ ∈ names_aerosol

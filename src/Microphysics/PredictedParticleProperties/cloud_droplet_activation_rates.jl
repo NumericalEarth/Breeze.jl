@@ -1,21 +1,22 @@
 #####
-##### CCN activation rates
+##### Cloud-droplet activation rates
 #####
-##### Cloud-droplet activation for the prescribed-Nᶜˡ and prognostic-CCN paths.
-##### All rate functions take the P3 scheme as first positional argument
-##### to access parameters. No keyword arguments (GPU compatibility).
+##### Prescribed droplet number uses a seed-mass source. Aerosol activation
+##### predicts droplet number, with an optional prognostic aerosol reservoir.
+##### No keyword arguments (GPU compatibility).
 #####
 ##### Notation follows docs/src/appendix/notation.md
 #####
 
 #####
-##### CCN activation
+##### Activation with prescribed droplet number
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-Compute CCN activation rate for the 1-moment (prescribed Nᶜˡ) case.
+Compute the cloud-droplet seed mass rate for prescribed droplet concentration `Nᶜˡ`.
+This approximation does not use an aerosol distribution or evolve droplet number.
 
 When the air is supersaturated
 and the cloud mass is below the minimum threshold for the prescribed droplet
@@ -31,9 +32,9 @@ heat capacity and then capping it with the dry-air one would mix two conventions
 one cell's vapor budget, so the dry-air form is used throughout.
 
 # Returns
-- Rate of vapor → cloud liquid conversion from CCN activation [kg/kg/s]
+- Rate of vapor → cloud liquid conversion from droplet activation [kg/kg/s]
 """
-@inline function ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, ρ, Nᶜˡ, constants)
+@inline function prescribed_cloud_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, ρ, Nᶜˡ, constants)
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
 
@@ -66,12 +67,18 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Dispatch CCN activation on the aerosol configuration, returning `(; mass, number)`:
-prescribed Nᶜˡ (`Nothing`), a fixed population, or a prognostic reservoir that `number`
-also depletes.
+Compute cloud-droplet activation rates for the aerosol configuration, returning
+`(; mass, number)` in [kg/kg/s] and [kg⁻¹ s⁻¹], respectively.
+
+- `nothing`: use [`prescribed_cloud_activation_rate`](@ref) to supply seed mass
+  for prescribed `Nᶜˡ`, with a zero number tendency because droplet number is not evolved.
+- [`AerosolActivation`](@ref): use [`aerosol_activation_rate`](@ref) to predict
+  both mass and droplet number from the aerosol distribution. With `prognostic=false`
+  the aerosol population is fixed; `prognostic=true` additionally tracks an unactivated
+  reservoir that the number rate depletes.
 """
-@inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ,
-                                        qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+@inline function compute_cloud_droplet_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ,
+                                                  qᵛ, qᵛ⁺ˡ, T, ρ, constants)
     FT = typeof(qᶜˡ)
     # Prescribed-Nᶜˡ path: the activation target is the scheme parameter, not the
     # DSD-diagnosed `Nᶜˡ`.
@@ -79,22 +86,22 @@ also depletes.
     # returned `Nᶜˡ` toward zero — using that value would collapse `qᶜˡ_target`
     # and block any seed mass from forming in a warm-bubble parcel.
     Nᶜˡ_target = p3.cloud.number_concentration
-    mass = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, ρ,
-                               Nᶜˡ_target, constants)
+    mass = prescribed_cloud_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, ρ,
+                                            Nᶜˡ_target, constants)
     return (; mass, number = zero(FT))
 end
 
 # Fixed population: `ℳ.nᵃ` is zero here, as in the prescribed-Nᶜˡ path, so the rate is
 # taken against the whole distribution instead.
-@inline function compute_ccn_activation(aerosol::AerosolActivation{FT, false}, p3, qᶜˡ, nᶜˡ, nᵃ,
-                                        qᵛ, qᵛ⁺ˡ, T, ρ, constants) where FT
-    result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
+@inline function compute_cloud_droplet_activation(aerosol::AerosolActivation{<:Any, false},
+                                                  p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+    result = aerosol_activation_rate(aerosol, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
     return (; mass = result.qcnuc, number = result.ncnuc)
 end
 
 # Prognostic reservoir: `nᵃ` is what remains, and caps what can still activate.
-@inline function compute_ccn_activation(aerosol::AerosolActivation{FT, true}, p3, qᶜˡ, nᶜˡ, nᵃ,
-                                        qᵛ, qᵛ⁺ˡ, T, ρ, constants) where FT
-    result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
+@inline function compute_cloud_droplet_activation(aerosol::AerosolActivation{<:Any, true},
+                                                  p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+    result = aerosol_activation_rate(aerosol, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
     return (; mass = result.qcnuc, number = result.ncnuc)
 end

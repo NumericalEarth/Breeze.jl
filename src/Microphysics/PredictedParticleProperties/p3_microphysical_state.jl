@@ -58,7 +58,7 @@ end
 # P3's aerosol distribution is specified per unit mass: `AerosolMode.number_mixing_ratio` is
 # [kg⁻¹], so `sum_aerosol_number` is [kg⁻¹] and so are `activated_number` and
 # `total_activated_number`. That is the basis the activation cap in
-# `prognostic_ccn_activation_rate` compares against, since `nᶜˡ = ρnᶜˡ/ρ` and `nᵃ = ρnᵃ/ρ`
+# `aerosol_activation_rate` compares against, since `nᶜˡ = ρnᶜˡ/ρ` and `nᵃ = ρnᵃ/ρ`
 # are both per unit mass, and it is the basis `tendency_ρnᶜˡ` assumes when it multiplies
 # `ncnuc` by ρ.
 #
@@ -103,10 +103,10 @@ end
 @inline cloud_prognostic_names(::AerosolActivation) = (:ρqᶜˡ, :ρnᶜˡ)
 
 # The reservoir is a separate switch: prognostic droplet number does not require an
-# aerosol budget, so only `prognostic_aerosol = true` carries `ρnᵃ`.
+# aerosol budget, so only `prognostic = true` carries `ρnᵃ`.
 @inline aerosol_prognostic_names(::Nothing) = ()
-@inline aerosol_prognostic_names(::AerosolActivation{FT, false}) where FT = ()
-@inline aerosol_prognostic_names(::AerosolActivation{FT, true}) where FT = (:ρnᵃ,)
+@inline aerosol_prognostic_names(::AerosolActivation{<:Any, false}) = ()
+@inline aerosol_prognostic_names(::AerosolActivation{<:Any, true}) = (:ρnᵃ,)
 
 @inline AM.aerosol_field_names(p3::P3) = aerosol_prognostic_names(p3.aerosol)
 
@@ -120,7 +120,7 @@ Return prognostic field names for the P3 scheme.
 - Rain: ρqʳ, ρnʳ
 - Ice (always): ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ
 - Liquid supersaturation (only when `predict_supersaturation = true`): ρsᵛ⁺ˡ
-- Aerosol (only when `aerosol::AerosolActivation` sets `prognostic_aerosol`): ρnᵃ
+- Aerosol (only when `aerosol::AerosolActivation` sets `prognostic`): ρnᵃ
 """
 @inline function AM.prognostic_field_names(p3::P3)
     cloud_names = cloud_prognostic_names(p3.aerosol)
@@ -189,8 +189,8 @@ AM.negative_moisture_correction(p3::P3) = p3.negative_moisture_correction
 @inline cloud_number_correction_fields(::AerosolActivation, μ) = tuple(μ.ρnᶜˡ)
 
 @inline aerosol_correction_fields(::Nothing, μ) = ()
-@inline aerosol_correction_fields(::AerosolActivation{FT, false}, μ) where FT = ()
-@inline aerosol_correction_fields(::AerosolActivation{FT, true}, μ) where FT = (μ.ρnᵃ,)
+@inline aerosol_correction_fields(::AerosolActivation{<:Any, false}, μ) = ()
+@inline aerosol_correction_fields(::AerosolActivation{<:Any, true}, μ) = (μ.ρnᵃ,)
 
 """
 $(TYPEDSIGNATURES)
@@ -258,7 +258,7 @@ The P3 scheme requires the following fields on `grid`:
   The prescribed-Nᶜˡ path takes droplet number from `p3.cloud.number_concentration`, so
   the field does not exist there and is not advected.
 - `ρnᵃ`: Unactivated aerosol number density, allocated only when that `AerosolActivation`
-  sets `prognostic_aerosol`. A fixed population is a scheme parameter, so nothing is
+  sets `prognostic`. A fixed population is a scheme parameter, so nothing is
   allocated or advected for it.
 
 **Diagnostic:**
@@ -320,28 +320,31 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
               surface_temperature)
 
     return merge(fields,
-                 aerosol_activation_fields(p3.aerosol, grid),
+                 cloud_number_fields(p3.aerosol, grid),
+                 aerosol_fields(p3.aerosol, grid),
                  supersaturation_fields(p3.process_rates, grid))
 end
 
 # Optional field groups. Each switch gates allocation, not just transport, so a
-# configuration never carries memory for state it does not use. Both dispatch on a
-# *type* (`Nothing` / `ProcessRate{FT, PS}`) so the merged NamedTuple is a
-# compile-time constant, which lets the read sites fold their guards away.
+# configuration never carries memory for state it does not use. Each dispatches on a
+# *type* (`Nothing` / `AerosolActivation{<:Any, D}` / `ProcessRate{FT, PS}`) so the merged
+# NamedTuple is a compile-time constant, which lets the read sites fold their guards away.
 
-# Droplet number and unactivated aerosol. The prescribed-Nᶜˡ path takes the droplet
-# number from `p3.cloud.number_concentration` at every call and never reads `ρnᶜˡ`
-# or `ρnᵃ`. A fixed population needs neither `ρnᵃ` nor the `nᵃ` diagnostic mirroring it.
-@inline aerosol_activation_fields(::Nothing, grid) = (;)
+# Droplet number, prognostic only where a source predicts it. Today that source is
+# activation, so the switch is `p3.aerosol`; the prescribed-Nᶜˡ path takes the number
+# from `p3.cloud.number_concentration` at every call and never reads `ρnᶜˡ`.
+@inline cloud_number_fields(::Nothing, grid) = (;)
 
-@inline aerosol_activation_fields(aerosol::AerosolActivation, grid) =
-    merge((; ρnᶜˡ = CenterField(grid),  # Cloud number density [1/m³]
-           nᶜˡ = CenterField(grid)),    # Cloud number concentration [kg⁻¹]
-          aerosol_reservoir_fields(aerosol, grid))
+@inline cloud_number_fields(::AerosolActivation, grid) =
+    (; ρnᶜˡ = CenterField(grid),        # Cloud number density [1/m³]
+     nᶜˡ = CenterField(grid))           # Cloud number concentration [kg⁻¹]
 
-@inline aerosol_reservoir_fields(::AerosolActivation{FT, false}, grid) where FT = (;)
+# Unactivated aerosol, carried only by a reservoir that activation draws down. A fixed
+# population is a scheme parameter, so it needs neither `ρnᵃ` nor the `nᵃ` mirroring it.
+@inline aerosol_fields(::Nothing, grid) = (;)
+@inline aerosol_fields(::AerosolActivation{<:Any, false}, grid) = (;)
 
-@inline aerosol_reservoir_fields(::AerosolActivation{FT, true}, grid) where FT =
+@inline aerosol_fields(::AerosolActivation{<:Any, true}, grid) =
     (; ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
      nᵃ = CenterField(grid))            # Unactivated aerosol [kg⁻¹]
 
@@ -425,10 +428,9 @@ end
     @inbounds μ.ρnᶜˡ[i, j, k] / ρ
 
 @inline grid_aerosol_number(::Nothing, μ, i, j, k, ρ) = 0 * ρ
-@inline grid_aerosol_number(::AerosolActivation{FT, false}, μ, i, j, k, ρ) where FT = 0 * ρ
+@inline grid_aerosol_number(::AerosolActivation{<:Any, false}, μ, i, j, k, ρ) = 0 * ρ
 
-@inline grid_aerosol_number(::AerosolActivation{FT, true}, μ, i, j, k, ρ) where FT =
-    @inbounds μ.ρnᵃ[i, j, k] / ρ
+@inline grid_aerosol_number(::AerosolActivation{<:Any, true}, μ, i, j, k, ρ) = @inbounds μ.ρnᵃ[i, j, k] / ρ
 
 # Same for the optional supersaturation prognostic: absent with prediction
 # disabled, where it collapses to zero anyway.
@@ -572,39 +574,41 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.qᶠ[i, j, k]  = ℳ.qᶠ
     @inbounds μ.bᶠ[i, j, k]  = ℳ.bᶠ
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
-    write_cloud_number_diagnostics!(μ, i, j, k, p3.aerosol, ℳ)
-    write_supersaturation_diagnostic!(μ, i, j, k, p3.process_rates, ℳ)
+    write_cloud_number_diagnostic!(μ, i, j, k, grid, p3.aerosol, ℳ)
+    write_aerosol_diagnostic!(μ, i, j, k, grid, p3.aerosol, ℳ)
+    write_supersaturation_diagnostic!(μ, i, j, k, grid, p3.process_rates, ℳ)
     p3_compute_fall_speeds!(μ, i, j, k, p3, ρ, ℳ, 𝒰, constants)
 
     return nothing
 end
 
-# Diagnostics for the optional prognostic groups. Each specific field is what
-# `compute_tendencies!` advects to assemble the matching ∂(ρx)/∂t, so it has to equal
-# `ρx / ρ` — which `ℳ.nᶜˡ` does in the aerosol-activation path, where the field exists.
-# Configurations without the prognostic have no field to write.
-@inline write_cloud_number_diagnostics!(μ, i, j, k, ::Nothing, ℳ) = nothing
+# Diagnostics for the optional prognostic groups, one writer per group, each dispatching
+# on the type that gates it. Every specific field is what `compute_tendencies!` advects to
+# assemble the matching ∂(ρx)/∂t, so it has to equal `ρx / ρ` — which `ℳ.nᶜˡ` does in the
+# aerosol-activation path, where the field exists. Configurations without the prognostic
+# have no field to write.
+@inline write_cloud_number_diagnostic!(μ, i, j, k, grid, ::Nothing, ℳ) = nothing
 
-@inline function write_cloud_number_diagnostics!(μ, i, j, k, grid, aerosol::AerosolActivation, ℳ)
+@inline function write_cloud_number_diagnostic!(μ, i, j, k, grid, ::AerosolActivation, ℳ)
     @inbounds μ.nᶜˡ[i, j, k] = ℳ.nᶜˡ
-    write_aerosol_diagnostic!(μ, i, j, k, aerosol, ℳ)
     return nothing
 end
 
-# A fixed population has no `nᵃ` field to mirror.
-@inline write_aerosol_diagnostic!(μ, i, j, k, ::AerosolActivation{FT, false}, ℳ) where FT = nothing
+# Neither the prescribed-Nᶜˡ path nor a fixed population has an `nᵃ` field to mirror.
+@inline write_aerosol_diagnostic!(μ, i, j, k, grid, ::Nothing, ℳ) = nothing
+@inline write_aerosol_diagnostic!(μ, i, j, k, grid, ::AerosolActivation{<:Any, false}, ℳ) = nothing
 
-@inline function write_aerosol_diagnostic!(μ, i, j, k, ::AerosolActivation{FT, true}, ℳ) where FT
+@inline function write_aerosol_diagnostic!(μ, i, j, k, grid, ::AerosolActivation{<:Any, true}, ℳ)
     @inbounds μ.nᵃ[i, j, k] = ℳ.nᵃ
     return nothing
 end
 
 @inline write_supersaturation_diagnostic!(
-    μ, i, j, k, ::ProcessRate{FT, false}, ℳ
+    μ, i, j, k, grid, ::ProcessRate{FT, false}, ℳ
 ) where FT = nothing
 
 @inline function write_supersaturation_diagnostic!(
-    μ, i, j, k, ::ProcessRate{FT, true}, ℳ
+    μ, i, j, k, grid, ::ProcessRate{FT, true}, ℳ
 ) where FT
     @inbounds μ.sᵛ⁺ˡ[i, j, k] = ℳ.sᵛ⁺ˡ
     return nothing
@@ -804,7 +808,7 @@ end
 
 # `G` is the reduced tuple from `p3_tendency_fields`. The `+=` lands on top of the
 # advection, diffusion and forcing the scalar kernels have already written.
-@inline function add_p3_tendencies!(G, i, j, k, p3::P3, result::P3TendencyResult)
+@inline function add_p3_tendencies!(G, i, j, k, grid, p3::P3, result::P3TendencyResult)
     @inbounds begin
         G.ρqᶜˡ[i, j, k] += result.tendency_ρqᶜˡ
         G.ρqʳ[i, j, k]  += result.tendency_ρqʳ
@@ -816,33 +820,35 @@ end
         G.ρqʷⁱ[i, j, k] += result.tendency_ρqʷⁱ
         G.ρqᵛ[i, j, k]  += result.tendency_ρqᵛ
     end
-    add_p3_cloud_number_tendencies!(G, i, j, k, p3.aerosol, result)
-    add_p3_supersaturation_tendency!(G, i, j, k, p3.process_rates, result)
+    add_cloud_number_tendency!(G, i, j, k, grid, p3.aerosol, result)
+    add_aerosol_tendency!(G, i, j, k, grid, p3.aerosol, result)
+    add_supersaturation_tendency!(G, i, j, k, grid, p3.process_rates, result)
     return nothing
 end
 
+# One adder per optional group, gated by the same types as the fields above.
 # Configurations without a prognostic have no `Gⁿ` slot to add to.
-@inline add_p3_cloud_number_tendencies!(G, i, j, k, ::Nothing, result) = nothing
+@inline add_cloud_number_tendency!(G, i, j, k, grid, ::Nothing, result) = nothing
 
-@inline function add_p3_cloud_number_tendencies!(G, i, j, k, aerosol::AerosolActivation, result)
+@inline function add_cloud_number_tendency!(G, i, j, k, grid, ::AerosolActivation, result)
     @inbounds G.ρnᶜˡ[i, j, k] += result.tendency_ρnᶜˡ
-    add_p3_aerosol_tendency!(G, i, j, k, aerosol, result)
     return nothing
 end
 
-@inline add_p3_aerosol_tendency!(G, i, j, k, ::AerosolActivation{FT, false}, result) where FT = nothing
+@inline add_aerosol_tendency!(G, i, j, k, grid, ::Nothing, result) = nothing
+@inline add_aerosol_tendency!(G, i, j, k, grid, ::AerosolActivation{<:Any, false}, result) = nothing
 
-@inline function add_p3_aerosol_tendency!(G, i, j, k, ::AerosolActivation{FT, true}, result) where FT
+@inline function add_aerosol_tendency!(G, i, j, k, grid, ::AerosolActivation{<:Any, true}, result)
     @inbounds G.ρnᵃ[i, j, k] += result.tendency_ρnᵃ
     return nothing
 end
 
-@inline add_p3_supersaturation_tendency!(
-    G, i, j, k, ::ProcessRate{FT, false}, result
+@inline add_supersaturation_tendency!(
+    G, i, j, k, grid, ::ProcessRate{FT, false}, result
 ) where FT = nothing
 
-@inline function add_p3_supersaturation_tendency!(
-    G, i, j, k, ::ProcessRate{FT, true}, result
+@inline function add_supersaturation_tendency!(
+    G, i, j, k, grid, ::ProcessRate{FT, true}, result
 ) where FT
     @inbounds G.ρsᵛ⁺ˡ[i, j, k] += result.tendency_ρsᵛ⁺ˡ
     return nothing

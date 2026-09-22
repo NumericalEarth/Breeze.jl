@@ -108,7 +108,7 @@ end
     result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
                                  surface_temperature, temperature_tendency,
                                  vapor_tendency)
-    add_p3_tendencies!(G, i, j, k, p3, result)
+    add_p3_tendencies!(G, i, j, k, grid, p3, result)
 end
 
 #####
@@ -130,8 +130,8 @@ end
           p3_supersaturation_tendency_fields(G, p3.process_rates))
 
 @inline p3_aerosol_tendency_fields(G, ::Nothing) = (;)
-@inline p3_aerosol_tendency_fields(G, ::AerosolActivation{FT, false}) where FT = (; G.ρnᶜˡ)
-@inline p3_aerosol_tendency_fields(G, ::AerosolActivation{FT, true}) where FT = (; G.ρnᶜˡ, G.ρnᵃ)
+@inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, false}) = (; G.ρnᶜˡ)
+@inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, true}) = (; G.ρnᶜˡ, G.ρnᵃ)
 
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, false}) where FT = (;)
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, true}) where FT = (; G.ρsᵛ⁺ˡ)

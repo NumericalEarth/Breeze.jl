@@ -29,7 +29,8 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NM
     precipitation_boundary_condition :: BC
     # Repair of negative densities produced by the (non-positive-definite) advection operator
     negative_moisture_correction :: NMC
-    # Aerosol activation (nothing = prescribed CCN, AerosolActivation = prognostic CCN)
+    # Droplet number: prescribed with nothing, prognostic with AerosolActivation.
+    # The aerosol reservoir is prognostic only with AerosolActivation(...; prognostic=true).
     aerosol :: AERO
     # Warm-rain (autoconversion/accretion/self-collection) scheme selector
     warm_rain_scheme :: WRS
@@ -79,7 +80,7 @@ The scheme tracks 8 prognostic densities by default, and up to 11 with every opt
 | ``ρqʷⁱ`` | Liquid water on ice | always |
 | ``ρsᵛ⁺ˡ`` | Predicted liquid supersaturation | `predict_supersaturation` |
 | ``ρnᶜˡ`` | Cloud droplet number | `aerosol` |
-| ``ρnᵃ`` | Unactivated aerosol number | `aerosol`, with `prognostic_aerosol` |
+| ``ρnᵃ`` | Unactivated aerosol number | `aerosol`, with `prognostic` |
 
 Each optional group is gated on a type, so a configuration that does not use one neither
 allocates nor advects it. Cloud droplet number is prognostic only with an
@@ -116,7 +117,7 @@ parameter `cloud.number_concentration`.
   to disable the repair (P3's process rates then see zero-clamped values while the
   prognostic fields keep their negative mass).
 
-# Prognostic CCN Activation
+# Cloud Droplet Activation
 
 Pass `aerosol = AerosolActivation(AerosolMode())` to enable prognostic cloud
 droplet number from aerosol activation physics (Morrison & Grabowski 2007).
@@ -126,7 +127,7 @@ When `aerosol = nothing` (default), cloud droplet number uses the prescribed
 Whether the aerosol population is itself a state variable is a second, independent choice.
 By default it is held fixed at the distribution total, which allocates no ``ρn^a`` field,
 tendency slot, or Runge-Kutta stage copy. Pass
-`AerosolActivation(AerosolMode(); prognostic_aerosol=true)` to carry a reservoir that
+`AerosolActivation(AerosolMode(); prognostic=true)` to carry a reservoir that
 activation depletes instead, so a cloud cannot re-activate aerosol it already holds.
 
 # Configuring the empirical warm-phase parameters
@@ -172,7 +173,7 @@ PredictedParticlePropertiesMicrophysics
 ├── cloud: CloudDroplets
 ├── process_rates: ProcessRate
 ├── negative_moisture_correction: SpeciesBorrowing(vertical_borrowing = nothing)
-├── aerosol: nothing (prescribed CCN)
+├── aerosol: nothing (prescribed droplet number)
 └── warm_rain_scheme: KhairoutdinovKogan2000
 ```
 
@@ -228,7 +229,7 @@ function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, "├── negative_moisture_correction: ",
           isnothing(p3.negative_moisture_correction) ? "nothing (no repair)" :
           summary(p3.negative_moisture_correction), "\n")
-    print(io, "├── aerosol: ", isnothing(p3.aerosol) ? "nothing (prescribed CCN)" : summary(p3.aerosol), "\n")
+    print(io, "├── aerosol: ", isnothing(p3.aerosol) ? "nothing (prescribed droplet number)" : summary(p3.aerosol), "\n")
     print(io, "└── warm_rain_scheme: ", summary(p3.warm_rain_scheme))
 end
 

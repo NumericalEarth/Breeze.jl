@@ -743,7 +743,7 @@ end
                                  zero(FT), zero(FT), FT(1e8), one(FT))
         q = MoistureMassFractions(FT(0.005), FT(1.1e-4), FT(1e-5))
         𝒰 = LiquidIcePotentialTemperatureState(FT(280), q, FT(1e5), FT(9e4))
-        aerosol = AerosolActivation(AerosolMode(FT); prognostic_aerosol = true)
+        aerosol = AerosolActivation(AerosolMode(FT); prognostic = true)
 
         p3_with_aerosol = PredictedParticlePropertiesMicrophysics(FT; aerosol)
         aerosol_tendencies = @inferred bundled_p3_tendencies(
@@ -1178,7 +1178,7 @@ end
         @test dep_sink_total * dt_safety <= qdep_cap + FT(10) * eps(FT)
     end
 
-    @testset "CCN activation and the vapor caps share one psychrometric convention" begin
+    @testset "Prescribed droplet activation and the vapor caps share one psychrometric convention" begin
         FT = Float64
         p3 = PredictedParticlePropertiesMicrophysics(FT)
         constants = ThermodynamicConstants(FT)
@@ -1196,8 +1196,8 @@ end
         q = MoistureMassFractions(qᵛ, qᶜˡ, zero(FT))
         Nᶜˡ = p3.cloud.number_concentration
 
-        ccn = PPP.compute_ccn_activation(p3.aerosol, p3, qᶜˡ, zero(FT), zero(FT),
-                                         qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+        activation = PPP.compute_cloud_droplet_activation(p3.aerosol, p3, qᶜˡ, zero(FT), zero(FT),
+                                                          qᵛ, qᵛ⁺ˡ, T, ρ, constants)
 
         Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
         ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
@@ -1205,7 +1205,7 @@ end
         cons7 = FT(4 * FT(π) / 3 * 1000 * (1e-6)^3)
         deficit = Nᶜˡ / ρ * cons7
         @test (qᵛ - qᵛ⁺ˡ) / ξˡ < deficit
-        @test ccn.mass ≈ ((qᵛ - qᵛ⁺ˡ) / ξˡ) / τ rtol=FT(1e-14)
+        @test activation.mass ≈ ((qᵛ - qᵛ⁺ˡ) / ξˡ) / τ rtol=FT(1e-14)
 
         # The moist mixture heat capacity gives a materially different factor, so sizing
         # the rate with it and capping it with cᵖᵈ would disagree within one cell.
@@ -1216,10 +1216,10 @@ end
 
         # With one convention, a vapor-limited activation rate exactly fills
         # `limit_vapor_rates`'s liquid budget instead of being rescaled by it.
-        limited = PPP.limit_vapor_rates(zero(FT), ccn.mass, zero(FT), zero(FT), zero(FT),
+        limited = PPP.limit_vapor_rates(zero(FT), activation.mass, zero(FT), zero(FT), zero(FT),
                                         zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
                                         qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, τ, FT(273.15))
-        @test limited.ccn_activation_mass ≈ ccn.mass rtol=FT(1e-12)
+        @test limited.ccn_activation_mass ≈ activation.mass rtol=FT(1e-12)
     end
 
     @testset "limit_vapor_rates caps evaporation when subsaturated" begin

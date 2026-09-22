@@ -502,6 +502,6 @@ Aerosol-pool tendency: each activated cloud droplet removes one unit from the
 unactivated reservoir, so ``∂ρn^a/∂t = -ρ \\, n_{\\text{nuc}}`` with
 ``n_{\\text{nuc}}`` the same activation rate that sources ``ρn^{cl}``. In the
 prescribed-Nᶜˡ path `rates.ccn_activation_number` is zero, so this returns 0. With
-`prognostic_aerosol = false` there is no `ρnᵃ` to write to and the value is dropped.
+`prognostic = false` there is no `ρnᵃ` to write to and the value is dropped.
 """
 @inline tendency_ρnᵃ(rates::P3ProcessRates, ρ) = -ρ * rates.ccn_activation_number

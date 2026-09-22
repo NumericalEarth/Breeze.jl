@@ -220,8 +220,8 @@ struct P3ProcessRates{FT}
     wet_growth_shedding_number :: FT   # Rain number from wet growth shedding [1/kg/s]
 
     # Warm/mixed-phase budget terms
-    ccn_activation_mass :: FT          # CCN activation mass rate (vapor → cloud) [kg/kg/s]
-    ccn_activation_number :: FT        # CCN activation number rate [1/kg/s] (prognostic CCN only)
+    ccn_activation_mass :: FT          # Cloud-droplet activation mass rate (vapor → cloud) [kg/kg/s]
+    ccn_activation_number :: FT        # Cloud-droplet activation number rate [1/kg/s] (AerosolActivation only)
     rain_condensation :: FT            # Rain condensation (vapor → rain) [kg/kg/s]
     coating_condensation :: FT         # Condensation on ice liquid coating [kg/kg/s]
     coating_evaporation :: FT          # Evaporation from ice liquid coating [kg/kg/s]
@@ -284,11 +284,12 @@ end
                                                       state.lookups)
     cond = vapor_rates.condensation
 
-    # CCN activation (prescribed or prognostic; depletes ℳ.nᵃ when prognostic)
-    ccn = compute_ccn_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ,
-                                 qᵛ, qᵛ⁺ˡ, T, ρ, constants)
-    ccn_activation_mass = ccn.mass
-    ccn_activation_number = ccn.number
+    # Cloud-droplet activation: prescribed number or aerosol-based prediction.
+    # The number rate also depletes ℳ.nᵃ when the aerosol reservoir is prognostic.
+    activation = compute_cloud_droplet_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ,
+                                                  qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+    ccn_activation_mass = activation.mass
+    ccn_activation_number = activation.number
 
     # =========================================================================
     # Rain processes

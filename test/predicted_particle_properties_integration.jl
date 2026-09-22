@@ -185,7 +185,7 @@ using Oceananigans.TimeSteppers: update_state!
         @test any(Array(interior(μ.ρqʳ)) .> 0)
 
         # The aerosol-activation path does carry `ρnᶜˡ` and `nᶜˡ` (but not the reservoir,
-        # which `prognostic_aerosol` gates separately), and there `μ.nᶜˡ` is the specific
+        # which `prognostic` gates separately), and there `μ.nᶜˡ` is the specific
         # counterpart that `compute_tendencies!` advects, so it must equal `ρnᶜˡ / ρ`.
         prognostic = PredictedParticlePropertiesMicrophysics(FT;
             aerosol = AerosolActivation(AerosolMode(FT)))

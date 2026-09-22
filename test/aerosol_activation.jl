@@ -9,11 +9,11 @@ using Breeze.Microphysics.PredictedParticleProperties:
     AerosolActivation,
     P3MicrophysicalState,
     activated_number,
-    compute_ccn_activation,
+    compute_cloud_droplet_activation,
     has_prognostic_aerosol,
     total_activated_number,
     sum_aerosol_number,
-    prognostic_ccn_activation_rate
+    aerosol_activation_rate
 
 using Oceananigans: Flat, Bounded, RectilinearGrid, CenterField, time_step!
 using Oceananigans.Fields: interior, set!
@@ -90,7 +90,7 @@ using Oceananigans.TimeSteppers: update_state!
         @test sum_aerosol_number(aerosol) == 400e6
     end
 
-    @testset "Prognostic CCN activation rate" begin
+    @testset "Aerosol activation rate" begin
         mode = AerosolMode(FT)
         aerosol = AerosolActivation(mode)
 
@@ -99,7 +99,7 @@ using Oceananigans.TimeSteppers: update_state!
         qᵛ⁺ˡ = FT(0.0145)   # saturation mixing ratio (supersaturated)
         T = FT(280.0)
 
-        result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
+        result = aerosol_activation_rate(aerosol, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
 
         # Supersaturated: should produce positive rates
         @test result.ncnuc > 0
@@ -110,7 +110,7 @@ using Oceananigans.TimeSteppers: update_state!
 
         # Subsaturated: should produce zero rates
         qᵛ_sub = FT(0.014)
-        result_sub = prognostic_ccn_activation_rate(aerosol, nᶜˡ, qᵛ_sub, qᵛ⁺ˡ, T)
+        result_sub = aerosol_activation_rate(aerosol, nᶜˡ, qᵛ_sub, qᵛ⁺ˡ, T)
         @test result_sub.ncnuc == 0
         @test result_sub.qcnuc == 0
     end
@@ -126,20 +126,20 @@ using Oceananigans.TimeSteppers: update_state!
     end
 end
 
-@testset "Prognostic CCN integration with P3" begin
+@testset "Aerosol activation integration with P3" begin
     using Breeze.Microphysics.PredictedParticleProperties:
         PredictedParticlePropertiesMicrophysics
 
     FT = Float64
 
-    # Construct P3 with prognostic CCN and a prognostic aerosol reservoir
+    # Construct P3 with prognostic droplet number and a prognostic aerosol reservoir
     p3 = PredictedParticlePropertiesMicrophysics(FT;
-        aerosol = AerosolActivation(AerosolMode(FT); prognostic_aerosol = true))
+        aerosol = AerosolActivation(AerosolMode(FT); prognostic = true))
 
     @test !isnothing(p3.aerosol)
     @test length(p3.aerosol.modes) == 1
 
-    # Construct P3 with prescribed CCN (default)
+    # Construct P3 with prescribed droplet number (default)
     p3_prescribed = PredictedParticlePropertiesMicrophysics(FT)
     @test isnothing(p3_prescribed.aerosol)
     @test aerosol_field_names(p3) == (:ρnᵃ,)
@@ -153,7 +153,7 @@ end
 
     # P3's aerosol distribution is per unit mass [kg⁻¹], and the prognostic `ρnᵃ` holds
     # ρ nᵃ [m⁻³], so the reservoir must be seeded ρ-weighted. Without the weighting the
-    # `min(N_activated, nᶜˡ + nᵃ)` cap in `prognostic_ccn_activation_rate` acquires a
+    # `min(N_activated, nᶜˡ + nᵃ)` cap in `aerosol_activation_rate` acquires a
     # spurious inverse-density dependence, because that comparison is entirely per unit mass.
     nᵃ₀ = FT(sum_aerosol_number(p3.aerosol))
     @test Breeze.initial_aerosol_number(p3) == nᵃ₀
@@ -211,7 +211,7 @@ end
             AerosolMode(FT; number_mixing_ratio = 300e6),
             AerosolMode(FT; number_mixing_ratio = 100e6, mean_radius = 1.0e-6, geometric_std = 2.5),
             AerosolMode(FT; number_mixing_ratio = 25e6,  mean_radius = 2.0e-6);
-            prognostic_aerosol = true)
+            prognostic = true)
         p3_multimode = PredictedParticlePropertiesMicrophysics(FT; aerosol = multimode)
 
         nᵃ_summed = FT(425e6)
@@ -338,14 +338,14 @@ end
     end
 end
 
-# `prognostic_aerosol = false` predicts droplet number from the M&G2007 activation with no
+# `prognostic = false` predicts droplet number from the M&G2007 activation with no
 # aerosol budget, and must be reachable without giving up prognostic `ρnᶜˡ`.
 @testset "Fixed aerosol reservoir" begin
     using Breeze.Microphysics.PredictedParticleProperties:
         PredictedParticlePropertiesMicrophysics
 
     FT = Float64
-    prognostic = AerosolActivation(AerosolMode(FT); prognostic_aerosol = true)
+    prognostic = AerosolActivation(AerosolMode(FT); prognostic = true)
     fixed = AerosolActivation(AerosolMode(FT))
 
     @testset "The switch is carried in the type, not a field" begin
@@ -393,19 +393,19 @@ end
         nᶜˡ, qᶜˡ = FT(1e6), FT(1e-5)
         qᵛ, qᵛ⁺ˡ, T, ρ = FT(0.015), FT(0.0145), FT(280), FT(1)
 
-        whole_distribution = prognostic_ccn_activation_rate(fixed, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
+        whole_distribution = aerosol_activation_rate(fixed, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
         @test whole_distribution.ncnuc > 0
 
         # `ℳ.nᵃ` is zero on the fixed path, so the dispatch must ignore it and activate
         # against the whole distribution anyway.
-        fixed_rate = compute_ccn_activation(fixed, p3_fixed, qᶜˡ, nᶜˡ, zero(FT),
-                                            qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+        fixed_rate = compute_cloud_droplet_activation(fixed, p3_fixed, qᶜˡ, nᶜˡ, zero(FT),
+                                                      qᵛ, qᵛ⁺ˡ, T, ρ, constants)
         @test fixed_rate.number == whole_distribution.ncnuc
 
         # The prognostic path reads that same argument as the remaining reservoir, so an
         # exhausted one shuts activation off.
-        drained = compute_ccn_activation(prognostic, p3_prognostic, qᶜˡ, nᶜˡ, zero(FT),
-                                         qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+        drained = compute_cloud_droplet_activation(prognostic, p3_prognostic, qᶜˡ, nᶜˡ, zero(FT),
+                                                   qᵛ, qᵛ⁺ˡ, T, ρ, constants)
         @test drained.number == 0
     end
 

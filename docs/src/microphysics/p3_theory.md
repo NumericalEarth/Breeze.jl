@@ -197,7 +197,7 @@ single setting in Breeze.
     `aerosol = AerosolActivation(AerosolMode())` switches on the prognostic
     path, which adds ``ρn^{cl}`` to the prognostic set. Whether the aerosol
     population is also a state variable is a second, independent switch:
-    `prognostic_aerosol = true` adds an unactivated reservoir ``ρn^a`` that
+    `prognostic = true` adds an unactivated reservoir ``ρn^a`` that
     activation depletes. By default the population is held fixed and no
     ``ρn^a`` is carried.
 
@@ -211,14 +211,14 @@ neither allocates nor advects it.
 
 - ``ρq^{cl}``: Cloud droplet mass concentration [kg/m³].
 - ``ρn^{cl}``: Cloud droplet number concentration [1/m³], prognostic only when aerosol
-  activation is enabled. Otherwise droplet number is the scheme parameter
+  activation is enabled. With `aerosol = nothing` droplet number is the scheme parameter
   `cloud.number_concentration` and this field does not exist.
 
 **Aerosol** (0–1 variables):
 
 - ``ρn^a``: Unactivated aerosol number concentration [1/m³], allocated when
-  `aerosol isa AerosolActivation` *and* `prognostic_aerosol = true`. Each activated droplet
-  removes one unit from it. By default (`prognostic_aerosol = false`) the population is a
+  `aerosol isa AerosolActivation` *and* `prognostic = true`. Each activated droplet
+  removes one unit from it. By default (`prognostic = false`) the population is a
   scheme parameter, and nothing is allocated or advected for it.
 
 **Rain** (2 variables):
@@ -1548,7 +1548,8 @@ The bulk of the implementation lives in:
   (cloud / rain / ice / coated-ice condensation, evaporation, deposition, sublimation).
 - `rain_process_rates.jl` and `warm_rain_schemes.jl` — warm-rain rates and the
   KK2000 scheme selector.
-- `ccn_activation_rates.jl` and `aerosol_activation.jl` — prognostic droplet activation.
+- `cloud_droplet_activation_rates.jl` and `aerosol_activation.jl`: droplet activation
+  with prescribed number or aerosol-based prediction.
 - `ice_nucleation_rates.jl` — Cooper deposition nucleation, immersion freezing,
   homogeneous freezing, Hallett–Mossop splintering.
 - `melting_rates.jl` — heat-balance melting (with optional Fˡ split).
@@ -1880,10 +1881,18 @@ exists, the local air temperature is used. With more than one ice category
 the 250 μm threshold and correspondingly keeps the cloud-riming branch enabled
 (`splintering_cloud_riming_scale = 1`).
 
-### Droplet Activation (CCN)
+### Cloud Droplet Activation
 
-Cloud droplet number is prognostic when CCN activation is enabled. Aerosol
-activation follows the equilibrium Köhler-theory approach of
+CCN activation and aerosol activation describe the same physical process: aerosol
+particles acting as cloud condensation nuclei grow into cloud droplets. P3 represents
+this process in two ways. With `aerosol = nothing`, droplet concentration is prescribed
+by `cloud.number_concentration`. When the air is supersaturated, activation supplies
+seed mass if cloud liquid falls below the mass of that many newly activated droplets.
+This path does not evolve droplet number or an aerosol reservoir.
+
+With [`AerosolActivation`](@ref), cloud droplet number is prognostic for either value
+of `prognostic`; that switch controls only whether the unactivated aerosol reservoir
+is also prognostic. Activation follows the equilibrium Köhler-theory approach of
 [Morrison and Grabowski (2007)](@cite MorrisonGrabowski2007), with
 multi-mode lognormal aerosol distributions and a ``\sigma_g`` width parameter.
 The activated number of each mode is:
@@ -1900,7 +1909,7 @@ size and solute activity, with the Kelvin parameter
 supersaturation. The per-mode counts are summed and capped at the total aerosol
 number, giving the equilibrium count activation relaxes ``n^{cl}`` toward.
 
-With `prognostic_aerosol = true` Breeze also tracks the unactivated pool explicitly, so
+With `prognostic = true` Breeze also tracks the unactivated pool explicitly, so
 activation cannot exceed what remains in it:
 
 ```math
@@ -2346,7 +2355,7 @@ that is, the cloud liquid mass, the rain mass and number, the dry ice mass and
 number, the rime mass and rime volume, and the liquid coating on ice — alongside
 the host's vapor density ``ρq^v``. Three more appear when the corresponding option
 is enabled: the cloud droplet number ``ρn^{cl}`` with aerosol activation, the
-unactivated aerosol number ``ρn^a`` when that activation also sets `prognostic_aerosol`,
+unactivated aerosol number ``ρn^a`` when that activation also sets `prognostic`,
 and the supersaturation ``ρs^{v+l}`` with predicted supersaturation. Together they describe the complete microphysical state.
 
 This section documents each variable, its physical meaning, and the source-term
@@ -2386,8 +2395,8 @@ appear as gains; their negative branches contribute as losses elsewhere.
 
 ``ρn^{cl}`` is prognostic only when the optional aerosol-activation path
 (`AerosolActivation` in `aerosol_activation.jl`) is enabled, where CCN-activation source
-terms drive it; ``ρn^a`` additionally requires `prognostic_aerosol = true`, since a fixed
-population needs no budget. Otherwise droplet number is
+terms drive it; ``ρn^a`` additionally requires `prognostic = true`, since a fixed
+population needs no budget. With `aerosol = nothing` droplet number is instead
 the scheme parameter `cloud.number_concentration`, which defaults to
 ``200 \times 10^6`` m⁻³ (200 cm⁻³); marine air is closer to ``\sim 50`` cm⁻³.
 Every rate reads that constant, and neither field is allocated or advected.
@@ -2709,7 +2718,7 @@ G_{ρn^a} = -\rho\,\dot{n}_\text{acti},
 ```
 
 one aerosol removed per activated droplet; zero in the prescribed-``N^{cl}`` path, and
-discarded with no field to write in the `prognostic_aerosol = false` path.
+discarded with no field to write in the `prognostic = false` path.
 
 ### Sedimentation
 
@@ -2773,7 +2782,7 @@ prognostic_field_names(microphysics)
 ``ρnᶜˡ`` appears only when `aerosol`
 is an `AerosolActivation`: the default prescribed-Nᶜˡ path takes droplet number
 from `cloud.number_concentration`, so the field is not allocated or advected there.
-``ρnᵃ`` additionally requires `prognostic_aerosol = true`. ``ρsᵛ⁺ˡ`` appears only when
+``ρnᵃ`` additionally requires `prognostic = true`. ``ρsᵛ⁺ˡ`` appears only when
 `predict_supersaturation = true`.
 
 P3's aerosol distribution is specified **per unit mass of air**: `AerosolMode.number_mixing_ratio`
