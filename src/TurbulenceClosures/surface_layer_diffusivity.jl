@@ -33,9 +33,10 @@ $(TYPEDEF)
 
 A shallow vertical eddy diffusivity that complements resolved near-wall transport.
 
-At each supported interior vertical face, exponentially filtered local covariances estimate
-resolved vertical fluxes. Covariances use a centered online recurrence; raw filtered products are
-retained for diagnostics but do not drive the closure. The momentum viscosity is
+At each supported interior vertical face, exponentially filtered local transport estimates
+the resolved vertical fluxes. With `resolved_transport=:covariance` (the default), this is a
+stable centered online covariance; raw filtered products are retained for diagnostics but do
+not drive the closure. The momentum viscosity is
 
 ```math
 ν_{SL} = W(z) κ u_⋆ z [1 - a τ^r_∥ / u_⋆²]_+,
@@ -52,6 +53,16 @@ the corresponding coefficient. This is a sensitivity parameter, not a measuremen
 transport: numerical flux need not be proportional to, or have the sign of, resolved covariance.
 Countergradient resolved transport increases the deficit. Stored resolved covariances, projected
 stresses, and prescribed surface fluxes retain their physical, unscaled values.
+
+With `resolved_transport=:scheme_native`, the model binds its materialized momentum and
+per-scalar advection schemes to this closure. The closure filters the instantaneous difference
+between the advection operator's vertical face flux and the centered physical product, then adds
+that correction to the stable covariance. It also stores the raw scheme flux for diagnosis.
+This mode requires `resolved_flux_factor=1`, explicit supported advection on an anelastic,
+bottom-bounded rectilinear grid, and a single closure. Bounded WENO uses its updated limiter.
+Fluxes are sampled once at each accepted model state; they are not RK-stage-integrated fluxes
+or an accounting of every source of numerical error. The filter state, including the numerical
+correction, is preserved in checkpoints.
 
 `minimum_scalar_fluxes` is a named tuple keyed by transported prognostic scalar name. Each value
 has the kinematic flux units of that scalar and explicitly defines its near-zero guard. Scalars

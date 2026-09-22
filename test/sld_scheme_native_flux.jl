@@ -1,4 +1,5 @@
 using Test
+using Adapt
 using Breeze
 using Oceananigans
 
@@ -151,6 +152,30 @@ end
     @test_throws ArgumentError AtmosphereModel(grid;
         closure=(SurfaceLayerDiffusivity(Float32; resolved_transport=:scheme_native),),
         advection=Centered(order=2))
+end
+
+@testset "scheme-native filter checkpoint and adaptation" begin
+    model = native_test_model(WENO(order=5))
+    model.clock.time += 0.1f0
+    model.clock.iteration += 1
+    update_state!(model; compute_tendencies=false)
+    fields = model.closure_fields
+    @test maximum(abs, Array(interior(fields.numerical_u_correction[1]))) > 0
+    @test typeof(adapt(CPU(), model.closure).advection.momentum) ==
+          typeof(model.advection.momentum)
+
+    checkpoint = deepcopy(Oceananigans.prognostic_state(fields))
+    restarted = native_test_model(WENO(order=5))
+    Oceananigans.restore_prognostic_state!(restarted.closure_fields, checkpoint)
+    @test Oceananigans.prognostic_state(restarted.closure_fields) == checkpoint
+
+    # The accepted state was already sampled before the checkpoint. A refresh
+    # at the same iteration must leave its covariance and numerical correction intact.
+    restarted.clock.time = model.clock.time
+    restarted.clock.iteration = model.clock.iteration
+    update_completed_step_closure_state!(restarted.closure_fields,
+                                         restarted.closure, restarted)
+    @test Oceananigans.prognostic_state(restarted.closure_fields) == checkpoint
 end
 
 @testset "Float32 centered covariance plus filtered correction" begin
