@@ -9,6 +9,9 @@ using ..Thermodynamics:
     MoistureMassFractions,
     mixture_gas_constant
 
+initialize_closure_fields_with_specific_tracers!(closure_fields, closure, model) =
+    initialize_closure_fields!(closure_fields, closure, model)
+
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
 
 function prioritize_names(names)
@@ -477,7 +480,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
     enforce_mass_conservation && enforce_mass_conservation!(model)
 
-    initialize_closure_fields!(model.closure_fields, model.closure, model)
+    initialize_closure_fields_with_specific_tracers!(model.closure_fields, model.closure, model)
 
     # Optional adiabatic (FV3 na_init) spin-up of the nonhydrostatic state, in place.
     if balancer !== false

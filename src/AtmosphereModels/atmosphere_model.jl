@@ -78,6 +78,7 @@ end
 # `SingleColumnMode` module extends these for per-column *arrays* (single-column ensembles), which it
 # maps/moves to the grid architecture so they can be indexed inside GPU kernels.
 materialize_closure(closure, scalar_names, arch) = with_tracers(scalar_names, closure)
+bind_closure_advection(closure, advection) = closure
 materialize_coriolis(coriolis, arch) = coriolis
 
 """
@@ -320,9 +321,6 @@ function AtmosphereModel(grid;
     # Fill the closure's tracer-indexed diffusivities. For a per-column *array* of closures,
     # `materialize_closure` (extended in `SingleColumnMode`) maps over the array and moves it to the
     # grid architecture; a scalar closure just gets `with_tracers`.
-    closure = materialize_closure(closure, scalar_names, arch)
-    closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
-
     # Generate tracer advection scheme for each tracer
     # scalar_advection is always a NamedTuple after validate_tracer_advection (either user's partial NamedTuple or empty)
     # with_tracers fills in missing names using default_generator
@@ -331,6 +329,10 @@ function AtmosphereModel(grid;
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
+
+    closure = materialize_closure(closure, scalar_names, arch)
+    closure = bind_closure_advection(closure, materialized_advection)
+    closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
 
     # Move microphysics lookup tables to the grid architecture (CPU → GPU)
     microphysics = on_architecture(arch, microphysics)
