@@ -5,7 +5,8 @@ using Breeze
 using Breeze.AtmosphereModels: thermodynamic_density, base_pressure, standard_pressure
 using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities,
                                  wall_air_pressure, surface_layer_state
-using Breeze.Thermodynamics: potential_temperature_from_temperature
+using Breeze.Thermodynamics: potential_temperature_from_temperature,
+                             LiquidIcePotentialTemperatureState, exner_function
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition, Bottom
@@ -843,25 +844,41 @@ end
         grid_1 = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
         𝒬 = FT(1000)
 
-        ρE_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
-        model = AtmosphereModel(grid_1; boundary_conditions=(; ρE=ρE_bcs))
+        # Two base pressures discriminate the conversions: 𝒬 / cᵖᵐ is identical for both, while
+        # Π is ≈1 at sea level and ≈0.90 at 700 hPa.
+        fluxes = FT[]
+        for p₀ in (FT(101325), FT(70000))
+            constants = ThermodynamicConstants(FT)
+            reference_state = ReferenceState(grid_1, constants; base_pressure=p₀, standard_pressure=FT(1e5))
+            ρE_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
+            model = AtmosphereModel(grid_1; dynamics=AnelasticDynamics(reference_state),
+                                    boundary_conditions=(; ρE=ρE_bcs))
 
-        θ₀_ref = model.dynamics.reference_state.potential_temperature
-        set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
+            θ₀_ref = model.dynamics.reference_state.potential_temperature
+            set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
 
-        q = MoistureMassFractions(qᵗ₀)
-        cᵖᵐ = mixture_heat_capacity(q, model.thermodynamic_constants)
+            q = MoistureMassFractions(qᵗ₀)
+            cᵖᵐ = mixture_heat_capacity(q, model.thermodynamic_constants)
 
-        # Read the condition the model will apply, rather than restating the arithmetic. The
-        # conversion divides by cᵖᵐ alone; whether it should also divide by Π, as the `ρE` forcing
-        # does, is issue #976.
-        Jᶿ = Field(BoundaryConditionOperation(thermodynamic_density(model.formulation), :bottom, model))
-        compute!(Jᶿ)
+            # Read the condition the model will apply, rather than restating the arithmetic.
+            Jᶿ = Field(BoundaryConditionOperation(thermodynamic_density(model.formulation), :bottom, model))
+            compute!(Jᶿ)
 
-        time_step!(model, FT(1e-6))
+            time_step!(model, FT(1e-6))
 
-        @test cᵖᵐ > 1000
-        @test all(interior(Jᶿ) .≈ 𝒬 / cᵖᵐ)
+            # Π in the boundary cell, from the same reference pressure the `ρE` forcing divides by.
+            pᵣ = @allowscalar dynamics_pressure(model.dynamics)[1, 1, 1]
+            𝒰 = LiquidIcePotentialTemperatureState(zero(FT), q, standard_pressure(model.dynamics), pᵣ)
+            Π = exner_function(𝒰, model.thermodynamic_constants)
+
+            @test cᵖᵐ > 1000
+            @test all(interior(Jᶿ) .≈ 𝒬 / (cᵖᵐ * Π))
+
+            push!(fluxes, @allowscalar interior(Jᶿ)[1, 1, 1])
+        end
+
+        # Dividing by cᵖᵐ alone would make these equal; dividing by cᵖᵐ Π separates them by ~1/Π.
+        @test fluxes[2] > 1.05 * fluxes[1]
     end
 
     @testset "Error when specifying both ρθ and ρE boundary conditions [$FT]" begin
@@ -1015,12 +1032,12 @@ end
     end
 
     @testset "EnergyFluxBoundaryConditionFunction summary [$FT]" begin
-        ef_number = EnergyFluxBoundaryConditionFunction(500, nothing, nothing, nothing, nothing)
+        ef_number = EnergyFluxBoundaryConditionFunction(500, nothing, nothing, nothing, nothing, nothing)
         s = summary(ef_number)
         @test occursin("500", s) || occursin("5", s)
 
         𝒬_func(x, y, t) = 100
-        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing, nothing, nothing)
+        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing, nothing, nothing, nothing)
         s_func = summary(ef_func)
         @test occursin("Function", s_func) || occursin("function", s_func)
     end
