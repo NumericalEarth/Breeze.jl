@@ -150,6 +150,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{Q}^T``                   | `𝒬ᵀ`   |                                     | Surface sensible heat flux, ``\mathcal{Q}^T = cᵖᵐ Jᵀ``                         |
 | ``\mathcal{Q}^v``                   | `𝒬ᵛ`   |                                     | Surface latent heat flux, ``\mathcal{Q}^v = \mathcal{L}^l Jᵛ``                 |
 | ``Jᵀ``                              | `Jᵀ`   |                                     | Surface temperature flux, kg K/m²s                                             |
+| ``Jᶿ``                              | `Jᶿ`   |                                     | Surface potential-temperature flux, ``Jᶿ = Jᵀ / Π``, kg K/m²s                  |
 | ``Jᵛ``                              | `Jᵛ`   |                                     | Surface moisture flux, kg/m²s                                                  |
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
