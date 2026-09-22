@@ -321,8 +321,7 @@ saturation-adjustment relaxation coefficient, both of which pass `p3.rain.ventil
     schmidt_factor = cbrt(ν / max(Dᵛ, coefficient_floor))
     inverse_sqrt_viscosity = 1 / sqrt(max(ν, coefficient_floor))
     integral = constant_integral + ℂᵛᵉⁿᵗ₂ * schmidt_factor *
-                                      inverse_sqrt_viscosity *
-                                      table(log(λʳ) / log(FT(10)))
+                                      inverse_sqrt_viscosity * table(log10(λʳ))
 
     return (; λʳ, Nʳ₀, integral)
 end

@@ -12,14 +12,6 @@
 ##### Utility functions
 #####
 
-# Base-10 logs and exponentials are written in base e throughout the runtime
-# kernels, as `log(x) / log(10)` and `exp(log(10) * x)`. `log10`/`exp10` lower to
-# the CUDA intrinsics `__nv_log10`/`__nv_exp10`, which Reactant raises to
-# `math.log10`/`math.exp10` — neither of which has a StableHLO form, so they reach
-# XLA export unraised and the compile fails. `log`/`exp` do have one. The `log(10)`
-# factor folds at compile time.
-# TODO: use `log10`/`exp10` again once the raisings land upstream in Enzyme-JAX.
-
 """
 $(TYPEDSIGNATURES)
 
@@ -404,7 +396,7 @@ shape parameter computed when the table was generated.
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ)
     m̄ = safe_divide(qⁱ, nⁱ, one(FT))
-    log_m = log(ifelse(m̄ > 0, m̄, one(FT))) / log(FT(10))
+    log_m = log10(ifelse(m̄ > 0, m̄, one(FT)))
     return p3.ice.bulk.shape(log_m, Fᶠ, Fˡ, ρᶠ)
 end
 

@@ -50,7 +50,7 @@ end
 # `minimum_mass_mixing_ratio`, and the table clamps to its own mass axis (min ≈ 1.56e-15 kg).
 @inline function ice_table_bracket(table::P3Table4D, m_mean, Fᶠ, Fˡ, ρᶠ, floors)
     FT = typeof(m_mean)
-    log_m = log(max(m_mean, FT(floors.mass_scale))) / log(FT(10))
+    log_m = log10(max(m_mean, FT(floors.mass_scale)))
     return prepare_interpolation(table, log_m, Fᶠ, Fˡ, ρᶠ)
 end
 
