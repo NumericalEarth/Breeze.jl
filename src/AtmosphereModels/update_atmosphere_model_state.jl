@@ -279,7 +279,10 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.microphysical_fields)
+    # The microphysical inventory holds the prognostic densities as well as the diagnostics just
+    # computed, and a prognostic may carry a function-valued boundary condition, so this fill
+    # needs the same arguments as the prognostic fill in `update_state!`.
+    fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
     fill_halo_regions!(model.formulation)
 
     return nothing
