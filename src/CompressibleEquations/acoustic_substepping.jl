@@ -893,6 +893,16 @@ end
 @inline apply_horizontal_pressure_gradient_substep(substep, Nτ) =
     apply_horizontal_pressure_gradient_substep(substep, Nτ, false)
 
+# Run the `Nτ` acoustic substeps of one stage, calling `substep!(apply_pressure_gradient)` for
+# each. A plain loop here; BreezeReactantExt extends this on `ReactantState` to trace the loop
+# instead of unrolling `Nτ` copies of the body.
+function acoustic_substep_loop!(substep!, arch, Nτ, apply_first_substep_pressure_gradient)
+    for substep in 1:Nτ
+        substep!(apply_horizontal_pressure_gradient_substep(substep, Nτ, apply_first_substep_pressure_gradient))
+    end
+    return nothing
+end
+
 # Build per-column predictors `ρ′★`, `ρθ′★` (cell centers) AND
 # the explicit RHS for the tridiagonal `(ρw)′ᵐ⁺` solve at z-faces.
 #
@@ -1461,18 +1471,14 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
-    # Substep loop
-    for substep in 1:Nτ
-        # Step A: explicit horizontal forward of (ρu)′, (ρv)′. Following the
-        # MPAS forward-backward acoustic sequence, the first small step in a
-        # multi-step stage includes the frozen large-step pressure gradient
-        # but skips the acoustic perturbation pressure gradient until
-        # mass/thermodynamic perturbations have been advanced once. For
-        # degenerate one-substep stages, apply the perturbation pressure
-        # gradient immediately so the stage still contains the fast force.
-        apply_pressure_gradient = apply_horizontal_pressure_gradient_substep(substep, Nτ,
-            substepper.apply_first_substep_pressure_gradient)
-
+    # Substep loop. `apply_pressure_gradient` follows the MPAS forward-backward acoustic
+    # sequence: the first small step in a multi-step stage includes the frozen large-step
+    # pressure gradient but skips the acoustic perturbation pressure gradient until
+    # mass/thermodynamic perturbations have been advanced once. For degenerate one-substep
+    # stages, apply the perturbation pressure gradient immediately so the stage still
+    # contains the fast force.
+    acoustic_substep_loop!(arch, Nτ, substepper.apply_first_substep_pressure_gradient) do apply_pressure_gradient
+        # Step A: explicit horizontal forward of (ρu)′, (ρv)′.
         launch!(arch, grid, :xyz, _explicit_horizontal_step!,
                 substepper.momentum_perturbation.u,
                 substepper.momentum_perturbation.v,
