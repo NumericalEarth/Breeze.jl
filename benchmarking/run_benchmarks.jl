@@ -21,6 +21,7 @@
 
 using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
 using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation, BenchmarkResult
+using BreezeBenchmarks: checkpointing_label
 using BreezeBenchmarks: scalar_tendency_problem, model_tendency_problem, benchmark_tendency
 using JSON: JSON
 using BFloat16s: BFloat16
@@ -143,6 +144,19 @@ function parse_commandline()
                    "stepping loop instead of forward only. Reactant backend only."
             action = :store_true
 
+        "--checkpoints"
+            help = "Loop checkpointing for the AD reverse pass (--ad only): number of checkpoints, " *
+                   "'auto' (isqrt(time_steps)), or 'none' (keep the whole tape). " *
+                   "Multiple values can be specified as comma-separated list; each is a separate compile."
+            arg_type = String
+            default = "auto"
+
+        "--checkpointing_mode"
+            help = "How an integer --checkpoints value is interpreted (--ad only): 'binomial' " *
+                   "(revolve schedule with a budget of n checkpoints) or 'periodic' (n evenly spaced checkpoints)."
+            arg_type = String
+            default = "binomial"
+
         "--time_steps"
             help = "Number of time steps (benchmark mode only)"
             arg_type = Int
@@ -243,6 +257,28 @@ function make_backend_arch(backend, device)
         return ReactantState()
     else
         error("Unknown backend: $backend. Use 'vanilla' or 'reactant'.")
+    end
+end
+
+"""
+    make_checkpointing(name, mode, time_steps)
+
+Map a `--checkpoints` entry to the value passed as `checkpointing` to
+`benchmark_time_stepping`: `"auto"` -> `Reactant.Periodic(isqrt(time_steps))`
+(Reactant's default for a static loop), `"none"` -> `false`, and an integer
+`n` -> `Reactant.Periodic(n)` or `Reactant.Binomial(n)` according to `mode`.
+"""
+function make_checkpointing(name, mode, time_steps)
+    name == "auto" && return Reactant.Periodic(isqrt(time_steps))
+    name == "none" && return false
+    n = tryparse(Int, name)
+    isnothing(n) && error("Unknown checkpoints value: $name. Use an integer, 'auto', or 'none'.")
+    if mode == "periodic"
+        return Reactant.Periodic(n)
+    elseif mode == "binomial"
+        return Reactant.Binomial(n)
+    else
+        error("Unknown checkpointing_mode: $mode. Use 'periodic' or 'binomial'.")
     end
 end
 
@@ -353,6 +389,14 @@ function run_benchmarks(args)
     output_interval = args["output_interval"] * 60  # Convert minutes to seconds
     output_dir = args["output_dir"]
 
+    # Checkpointing only matters for the AD reverse pass; without --ad run a
+    # single pass so the product below does not duplicate forward benchmarks.
+    checkpointings = if args["ad"]
+        [make_checkpointing(s, args["checkpointing_mode"], time_steps) for s in parse_list(args["checkpoints"])]
+    else
+        [true]
+    end
+
     results = []
 
     println("=" ^ 95)
@@ -371,6 +415,7 @@ function run_benchmarks(args)
     println("Microphysics: ", microphysics_schemes)
     if mode == "benchmark"
         println("Time steps: ", time_steps, " (warmup: ", warmup_steps, ")")
+        args["ad"] && println("AD checkpointing: ", args["checkpoints"], " (", args["checkpointing_mode"], ")")
     else
         println("Stop time: ", args["stop_time"], " hours")
         println("Output interval: ", args["output_interval"], " minutes")
@@ -380,8 +425,8 @@ function run_benchmarks(args)
     println()
 
     # Loop over all combinations using Iterators.product
-    for (backend_name, topo_name, (Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name) in
-            Iterators.product(backends, topologies, sizes, float_types, dynamics_names, advections, closures, microphysics_schemes)
+    for (backend_name, topo_name, (Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name, checkpointing) in
+            Iterators.product(backends, topologies, sizes, float_types, dynamics_names, advections, closures, microphysics_schemes, checkpointings)
 
         # Set floating point precision so constructors pick up the right default
         Oceananigans.defaults.FloatType = FT
@@ -389,7 +434,7 @@ function run_benchmarks(args)
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
         ft_str = FT == Float32 ? "F32" : FT == Float64 ? "F64" : "BF16"
-        mode_suffix = args["ad"] ? "_AD" : ""
+        mode_suffix = args["ad"] ? "_AD_$(checkpointing_label(checkpointing))" : ""
 
         # Tendency modes time a tendency evaluation with no Simulation.
         # "scalar_tendency" uses the bare scalar WENO kernel (no model);
@@ -498,6 +543,7 @@ function run_benchmarks(args)
                                     microphysics=micro_name,
                                     backend=backend_name,
                                     ad=args["ad"],
+                                    checkpointing,
                                     )
         elseif mode == "simulate"
             run_benchmark_simulation(model;
