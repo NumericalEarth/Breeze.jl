@@ -1050,7 +1050,7 @@ end
     𝒬 = FT(1000)
     θ₀ = FT(290)
     qᵗ₀ = FT(0.01)
-    Δt = FT(1e-6)
+    Δt = FT(1)   # 1e-6 puts the increment below eps(ρθ) in Float32
 
     # Test a representative subset of boundaries (bottom and west are sufficient for coverage)
     for ρE_bcs in [
