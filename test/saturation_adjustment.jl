@@ -1,4 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
+include(joinpath(@__DIR__, "supposition_setup.jl"))
 
 using Breeze
 using GPUArraysCore: @allowscalar
@@ -27,6 +28,30 @@ test_tol(FT::Type{Float64}) = 10 * sqrt(solver_tol(FT))
 test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
+
+@testset "Saturation adjustment recovers the temperature [$(FT)]" for FT in all_float_types()
+    constants = ThermodynamicConstants(FT)
+    microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=solver_tol(FT)), equilibrium=WarmPhaseEquilibrium())
+    atol = test_tol(FT)
+    g = constants.gravitational_acceleration
+    z = zero(FT)
+
+    # A state assembled from (T, qᵛ⁺(T, p, qᵗ), qᵗ − qᵛ⁺) is already in equilibrium, so the
+    # adjustment must return T within the solver tolerance; subsaturated draws (qᵗ ≤ qᵛ⁺)
+    # exercise the identity branch.
+    @breeze_check function saturation_adjustment_recovers_temperature(T = spstn_temperatures(FT; lo=270, hi=320),
+                                                                      p = spstn_pressures(FT; lo=7e4, hi=1.05e5),
+                                                                      qᵗ = spstn_floats(FT; lo=1e-3, hi=5e-2))
+        qᵛ⁺ = adjustment_saturation_specific_humidity(T, p, qᵗ, constants, microphysics.equilibrium)
+        saturated = qᵗ > qᵛ⁺
+        event!("saturated", saturated)
+        q = saturated ? MoistureMassFractions(qᵛ⁺, qᵗ - qᵛ⁺) : MoistureMassFractions(qᵗ)
+        cᵖᵐ = mixture_heat_capacity(q, constants)
+        s = cᵖᵐ * T + g * z - constants.liquid.reference_latent_heat * q.liquid
+        T★ = compute_temperature(StaticEnergyState(s, q, z, p), microphysics, constants)
+        return qᵛ⁺ isa FT && isapprox(T★, T; atol)
+    end
+end
 
 @testset "Warm-phase saturation adjustment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -65,13 +90,13 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation, microphysics)
         ρᵣ = @allowscalar first(reference_state.density)
 
-        # Reduced parameter sweep: 3×3 = 9 per formulation (was 5×7 = 35)
+        # The scalar adjustment is covered by the property test above; here the model path is
+        # exercised on a small (T, qᵗ) sweep.
         for T₂ in 280:20:320, qᵗ₂ in 1e-2:2e-2:5e-2
             @testset let T₂=T₂, qᵗ₂=qᵗ₂
                 T₂ = convert(FT, T₂)
                 qᵗ₂ = convert(FT, qᵗ₂)
                 qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, constants, microphysics.equilibrium)
-                @test qᵛ⁺₂ isa FT
 
                 if qᵗ₂ > qᵛ⁺₂ # saturated conditions
                     qˡ₂ = qᵗ₂ - qᵛ⁺₂
@@ -79,10 +104,6 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
                     cᵖᵐ = mixture_heat_capacity(q₂, constants)
                     ℒˡᵣ = constants.liquid.reference_latent_heat
                     s₂ = cᵖᵐ * T₂ + g * z - ℒˡᵣ * qˡ₂
-
-                    𝒰₂ = StaticEnergyState(s₂, q₂, z, pᵣ)
-                    T★ = compute_temperature(𝒰₂, microphysics, constants)
-                    @test T★ ≈ T₂ atol=atol
 
                     set!(model, ρs = ρᵣ * s₂, qᵗ = qᵗ₂)
                     T★ = @allowscalar first(model.temperature)

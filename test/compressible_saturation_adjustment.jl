@@ -1,4 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
+include(joinpath(@__DIR__, "supposition_setup.jl"))
 
 using Breeze
 using Oceananigans
@@ -40,13 +41,10 @@ end
     rtol = FT == Float64 ? FT(1e-9) : FT(1e-4)
     qtol = FT == Float64 ? FT(1e-5) : FT(1e-3)
 
-    moistures = (MoistureMassFractions(FT(0.020)),                          # vapor only
-                 MoistureMassFractions(FT(0.018), FT(0.005), FT(0)),        # liquid condensate
-                 MoistureMassFractions(FT(0.015), FT(0.003), FT(0.002)))    # mixed phase
-
     @testset "constant-density θˡⁱ→T inversion is self-consistent and round-trips" begin
-        θ = FT(300); ρ = FT(1)
-        for q in moistures
+        @breeze_check function density_state_inversion_is_self_consistent(θ = spstn_temperatures(FT; lo=250, hi=350),
+                                                                          ρ = spstn_floats(FT; lo=0.3, hi=1.4),
+                                                                          q = spstn_mass_fractions(FT))
             𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ)
             T = temperature(𝒰, constants)
             Rᵐ = mixture_gas_constant(q, constants)
@@ -54,9 +52,10 @@ end
             κ = Rᵐ / cᵖᵐ
             L = (ℒˡ * q.liquid + ℒⁱ * q.ice) / cᵖᵐ
             # self-consistent fixed point: T = (ρRᵐT/pˢᵗ)^κ θ + L  (and p = ρRᵐT)
-            @test T ≈ (ρ * Rᵐ * T / pˢᵗ)^κ * θ + L  rtol=rtol
+            fixed_point_ok = isapprox(T, (ρ * Rᵐ * T / pˢᵗ)^κ * θ + L; rtol)
             # θˡⁱ round-trips: θ → T → θ
-            @test with_temperature(𝒰, T, constants).potential_temperature ≈ θ  rtol=rtol
+            round_trip_ok = isapprox(with_temperature(𝒰, T, constants).potential_temperature, θ; rtol)
+            return fixed_point_ok && round_trip_ok
         end
     end
 
