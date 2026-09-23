@@ -194,7 +194,9 @@ single setting in Breeze.
 !!! note "Prescribed vs. prognostic droplet number"
     The default droplet concentration is `cloud.number_concentration`.
     `aerosol = AerosolActivation(AerosolMode())` makes droplet number prognostic.
-    Setting `prognostic=true` in [`AerosolActivation`](@ref) also tracks aerosol depletion.
+    Setting `prognostic=true` in
+    [`AerosolActivation`](@ref Breeze.Microphysics.PredictedParticleProperties.AerosolActivation)
+    also tracks aerosol depletion.
 
 ### Prognostic Variables
 
@@ -206,7 +208,7 @@ neither allocates nor advects it.
 
 - ``ρq^{cl}``: Cloud droplet mass concentration [kg/m³].
 - ``ρn^{cl}``: Cloud droplet number concentration [1/m³], allocated with
-  [`AerosolActivation`](@ref).
+  [`AerosolActivation`](@ref Breeze.Microphysics.PredictedParticleProperties.AerosolActivation).
 
 **Aerosol** (0–1 variables):
 
