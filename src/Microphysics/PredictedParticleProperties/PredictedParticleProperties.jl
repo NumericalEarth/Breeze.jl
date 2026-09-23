@@ -101,13 +101,13 @@ export
     tabulate_rain_from_quadrature,
     rime_density_index,
 
-    # Aerosol activation (prognostic CCN)
+    # Aerosol activation
     AerosolMode,
     AerosolActivation,
     activated_number,
     total_activated_number,
     sum_aerosol_number,
-    prognostic_ccn_activation_rate
+    aerosol_activation_rate
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS, TYPEDEF
 using SpecialFunctions: erf
@@ -172,7 +172,7 @@ include("transport_properties.jl")
 include("process_rate_parameters.jl")
 
 #####
-##### Aerosol activation (prognostic CCN)
+##### Aerosol activation
 #####
 
 include("aerosol_activation.jl")
@@ -226,13 +226,13 @@ include("rain_quadrature.jl")
 @adapt_architecture PredictedParticlePropertiesMicrophysics
 
 #####
-##### Process-rate helpers, the shared Table-1 lookups (`P3IceLookups`), CCN activation,
+##### Process-rate helpers, the shared Table-1 lookups (`P3IceLookups`), droplet activation,
 ##### and the coupled saturation-adjustment solver
 #####
 
 include("process_rate_helpers.jl")
 include("tabulated_kernels.jl")
-include("ccn_activation_rates.jl")
+include("cloud_droplet_activation_rates.jl")
 include("coupled_saturation_adjustment.jl")
 
 #####
