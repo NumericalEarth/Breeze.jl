@@ -80,6 +80,27 @@ end
         𝒰dry = adjust_thermodynamic_state(
             LiquidIceDensityState(θ₀, MoistureMassFractions(FT(0.002)), pˢᵗ, ρ), sa, constants)
         @test 𝒰dry.moisture_mass_fractions.liquid == 0
+
+        # For any (θ, ρ, qᵗ): θˡⁱ and ρ are carried exactly, total water is conserved, every
+        # fraction is non-negative, and a condensing state sits on the saturation curve at ρ.
+        # Total moisture is drawn relative to saturation, from dry air to threefold supersaturation.
+        @breeze_check function density_adjustment_invariants(θ = spstn_temperatures(FT; lo=250, hi=330),
+                                                             ρ = spstn_floats(FT; lo=0.3, hi=1.4),
+                                                             f = spstn_floats(FT; lo=0, hi=3))
+            𝒰_dry = LiquidIceDensityState(θ, MoistureMassFractions(zero(FT)), pˢᵗ, ρ)
+            T_dry = temperature(𝒰_dry, constants)
+            qᵗ = min(f * saturation_specific_humidity(T_dry, ρ, constants, WarmPhaseEquilibrium()), FT(0.05))
+            𝒰★ = adjust_thermodynamic_state(LiquidIceDensityState(θ, MoistureMassFractions(qᵗ), pˢᵗ, ρ), sa, constants)
+            q = 𝒰★.moisture_mass_fractions
+            T★ = temperature(𝒰★, constants)
+            qᵛ⁺ = saturation_specific_humidity(T★, ρ, constants, WarmPhaseEquilibrium())
+            event!("condensing", q.liquid > 0)
+            carried = 𝒰★.potential_temperature == θ && 𝒰★.density == ρ
+            conserved = isapprox(q.vapor + q.liquid + q.ice, qᵗ; rtol = spstn_rounding_rtol(FT))
+            nonnegative = q.vapor >= 0 && q.liquid >= 0 && q.ice >= 0
+            on_curve = q.liquid > 0 ? isapprox(q.vapor, qᵛ⁺; atol = qtol) : qᵗ <= qᵛ⁺ * (1 + qtol)
+            return carried && conserved && nonnegative && on_curve
+        end
     end
 
     @testset "fixes the κ·ΔL temperature inconsistency" begin

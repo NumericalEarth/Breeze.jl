@@ -1,4 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
+include(joinpath(@__DIR__, "supposition_setup.jl"))
 
 using Breeze
 using Test
@@ -6,6 +7,7 @@ using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
 using Breeze.AtmosphereModels: microphysics_model_update!, surface_precipitation_flux
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient
+using Breeze.Microphysics: step_kessler_microphysics, mass_fractions_to_mixing_ratios, mixing_ratios_to_mass_fractions
 using Breeze.Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
@@ -264,6 +266,55 @@ end
 
         @test qᵛ_back ≈ qᵛ rtol=1e-10
         @test qˡ_back ≈ qˡ rtol=1e-10
+    end
+end
+
+@testset "Kessler step properties [$FT]" for FT in all_float_types()
+    microphysics = DCMIP2016KesslerMicrophysics(FT)
+    constants = ThermodynamicConstants(FT; saturation_vapor_pressure=TetensFormula(FT))
+    f₅ = saturation_adjustment_coefficient(microphysics.dcmip_temperature_scale, constants)
+    δT = constants.saturation_vapor_pressure.liquid_temperature_offset
+    k₁ = microphysics.autoconversion_rate
+    rtol = spstn_rounding_rtol(FT)
+    atol = 100 * eps(FT)
+
+    # Mass fractions → mixing ratios → mass fractions is the identity.
+    @breeze_check function kessler_moisture_conversions_round_trip(qᵛ = spstn_floats(FT; lo=0, hi=3e-2),
+                                                                    qᶜˡ = spstn_floats(FT; lo=0, hi=5e-3),
+                                                                    qʳ = spstn_floats(FT; lo=0, hi=5e-3),
+                                                                    ρ = spstn_floats(FT; lo=0.3, hi=1.3))
+        rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ, ρ * qᶜˡ, ρ * qʳ, ρ)
+        qᵛ★, qᶜˡ★, qʳ★, qᵗ★ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
+        return isapprox(qᵛ★, qᵛ; rtol) && isapprox(qᶜˡ★, qᶜˡ; rtol) && isapprox(qʳ★, qʳ; rtol) &&
+               isapprox(qᵗ★, qᵛ + qᶜˡ + qʳ; rtol)
+    end
+
+    # With no sedimentation flux divergence and Δt k₁ ≤ 1 (so autoconversion cannot remove more
+    # cloud than exists) a Kessler step conserves rᵛ + rᶜˡ + rʳ, keeps every mixing ratio
+    # non-negative, and returns Δrˡ = rᵛ_in − rᵛ_out.
+    @breeze_check function kessler_step_conserves_water(rᵛ = spstn_floats(FT; lo=0, hi=3e-2),
+                                                        rᶜˡ = spstn_floats(FT; lo=0, hi=5e-3),
+                                                        rʳ = spstn_floats(FT; lo=0, hi=5e-3),
+                                                        T = spstn_temperatures(FT; lo=250, hi=320),
+                                                        ρ = spstn_floats(FT; lo=0.3, hi=1.3),
+                                                        p = spstn_pressures(FT; lo=5e4, hi=1.05e5),
+                                                        f = spstn_unit_interval(FT))
+        Δt = f / k₁
+        rᵛ★, rᶜˡ★, rʳ★, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, p, Δt,
+                                                          microphysics, constants, f₅, δT, FT)
+        conserved = isapprox(rᵛ★ + rᶜˡ★ + rʳ★, rᵛ + rᶜˡ + rʳ; atol)
+        nonnegative = rᵛ★ >= 0 && rᶜˡ★ >= 0 && rʳ★ >= 0
+        return conserved && nonnegative && isapprox(Δrˡ, rᵛ - rᵛ★; atol)
+    end
+
+    # Rain falls faster the more of it there is (Klemp & Wilhelmson 1978, eq. 2.15).
+    @breeze_check function kessler_terminal_velocity_increases_with_rain(rʳ = spstn_floats(FT; lo=0, hi=1e-2),
+                                                                         δ = spstn_floats(FT; lo=1e-5, hi=1e-2),
+                                                                         ρ = spstn_floats(FT; lo=0.3, hi=1.3),
+                                                                         ρ₁ = spstn_floats(FT; lo=0.9, hi=1.3))
+        𝕎₁ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+        𝕎₂ = kessler_terminal_velocity(rʳ + δ, ρ, ρ₁, microphysics)
+        return 𝕎₁ >= 0 && 𝕎₂ > 𝕎₁
     end
 end
 

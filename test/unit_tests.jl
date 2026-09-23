@@ -419,6 +419,7 @@ using Breeze.Thermodynamics:
     PlanarLiquidSurface,
     PlanarIceSurface,
     PlanarMixedPhaseSurface,
+    dewpoint_temperature,
     absolute_zero_latent_heat,
     specific_heat_difference,
     vapor_gas_constant
@@ -494,6 +495,28 @@ end
             ice_ok = saturation_vapor_pressure(T₁ⁱ + δⁱ, thermo, PlanarIceSurface()) >
                      saturation_vapor_pressure(T₁ⁱ, thermo, PlanarIceSurface())
             return liquid_ok && ice_ok
+        end
+    end
+end
+
+@testset "Dewpoint temperature inversion [$FT]" for FT in all_float_types()
+    thermo = ThermodynamicConstants(FT)
+
+    @testset "$name" for (name, surface) in (("liquid", PlanarLiquidSurface()), ("ice", PlanarIceSurface()))
+        # The dewpoint inverts the saturation vapor pressure: for pᵛ = pᵛ⁺(T⁺) with T⁺ ≤ T the
+        # secant solve recovers T⁺ within its tolerance (reltol 1e-4 on pᵛ, about 1.5 mK)...
+        @breeze_check function dewpoint_inverts_saturation_vapor_pressure(T⁺ = spstn_temperatures(FT; lo=200, hi=300),
+                                                                          Δ = spstn_floats(FT; lo=0, hi=40))
+            T = T⁺ + Δ
+            pᵛ = saturation_vapor_pressure(T⁺, thermo, surface)
+            return abs(dewpoint_temperature(pᵛ, T, thermo, surface) - T⁺) <= FT(0.01)
+        end
+
+        # ...and a saturated or supersaturated state (pᵛ ≥ pᵛ⁺(T)) returns T itself.
+        @breeze_check function saturated_dewpoint_is_temperature(T = spstn_temperatures(FT),
+                                                                 f = spstn_floats(FT; lo=1, hi=3))
+            pᵛ = f * saturation_vapor_pressure(T, thermo, surface)
+            return dewpoint_temperature(pᵛ, T, thermo, surface) == T
         end
     end
 end

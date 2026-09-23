@@ -15,6 +15,8 @@ using Breeze.Thermodynamics:
     with_moisture,
     saturation_specific_humidity,
     mixture_heat_capacity,
+    total_specific_moisture,
+    PlanarLiquidSurface,
     PlanarMixedPhaseSurface
 
 using Breeze.MoistAirBuoyancies: compute_boussinesq_adjustment_temperature
@@ -50,6 +52,68 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         s = cᵖᵐ * T + g * z - constants.liquid.reference_latent_heat * q.liquid
         T★ = compute_temperature(StaticEnergyState(s, q, z, p), microphysics, constants)
         return qᵛ⁺ isa FT && isapprox(T★, T; atol)
+    end
+end
+
+# Liquid fraction of the condensate implied by an equilibrated surface
+equilibrium_liquid_fraction(surface::PlanarMixedPhaseSurface) = surface.liquid_fraction
+equilibrium_liquid_fraction(::PlanarLiquidSurface) = 1
+
+@testset "Saturation adjustment invariants [$(FT)]" for FT in all_float_types()
+    constants = ThermodynamicConstants(FT)
+    g = constants.gravitational_acceleration
+    tol = test_tol(FT)
+    equilibria = (("warm", WarmPhaseEquilibrium()),
+                  ("mixed", MixedPhaseEquilibrium(FT; freezing_temperature=273.15, homogeneous_ice_nucleation_temperature=233.15)))
+
+    @testset "$name phase" for (name, equilibrium) in equilibria
+        microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=solver_tol(FT)), equilibrium)
+
+        # Starting from an all-vapor state with total moisture qᵗ, the adjustment must conserve
+        # total water and the prognostic thermodynamic variable, keep every fraction
+        # non-negative, leave unsaturated states all-vapor, put saturated states on the
+        # saturation curve with the equilibrium liquid/ice partition, and be idempotent.
+        function adjustment_invariants_hold(𝒰₀, qᵗ, thermodynamic_variable)
+            𝒰★ = adjust_thermodynamic_state(𝒰₀, microphysics, constants)
+            q = 𝒰★.moisture_mass_fractions
+            qᶜ = q.liquid + q.ice
+            T★ = compute_temperature(𝒰★, nothing, constants)
+            qᵛ⁺ = saturation_specific_humidity(𝒰★, constants, equilibrium)
+            event!("condensing", qᶜ > 0)
+
+            conserved = isapprox(total_specific_moisture(q), qᵗ; rtol = spstn_rounding_rtol(FT)) &&
+                        thermodynamic_variable(𝒰★) == thermodynamic_variable(𝒰₀)
+            nonnegative = q.vapor >= 0 && q.liquid >= 0 && q.ice >= 0
+            equilibrated = qᶜ == 0 ? qᵗ <= qᵛ⁺ * (1 + tol) : isapprox(q.vapor, qᵛ⁺; rtol = FT(0.1) * tol)
+            λ = equilibrium_liquid_fraction(Breeze.Microphysics.equilibrated_surface(equilibrium, T★))
+            partitioned = abs(q.liquid - λ * qᶜ) <= tol * qᶜ
+            q★★ = adjust_thermodynamic_state(𝒰★, microphysics, constants).moisture_mass_fractions
+            idempotent = isapprox(q★★.vapor, q.vapor; rtol = FT(0.1) * tol)
+            return conserved && nonnegative && equilibrated && partitioned && idempotent
+        end
+
+        # Total moisture is drawn relative to saturation, from dry air to threefold supersaturation.
+        @breeze_check function static_energy_adjustment_invariants(T = spstn_temperatures(FT; lo=230, hi=320),
+                                                                   p = spstn_pressures(FT; lo=5e4, hi=1.05e5),
+                                                                   z = spstn_heights(FT; lo=0, hi=5e3),
+                                                                   f = spstn_floats(FT; lo=0, hi=3))
+            qᵛ⁺₀ = equilibrium_saturation_specific_humidity(T, p, zero(FT), constants, equilibrium)
+            qᵗ = min(f * qᵛ⁺₀, FT(0.05))
+            q₀ = MoistureMassFractions(qᵗ)
+            𝒰₀ = StaticEnergyState(mixture_heat_capacity(q₀, constants) * T + g * z, q₀, z, p)
+            return adjustment_invariants_hold(𝒰₀, qᵗ, 𝒰 -> 𝒰.static_energy)
+        end
+
+        @breeze_check function potential_temperature_adjustment_invariants(θ = spstn_temperatures(FT; lo=230, hi=330),
+                                                                           p = spstn_pressures(FT; lo=5e4, hi=1.05e5),
+                                                                           f = spstn_floats(FT; lo=0, hi=3))
+            𝒰_dry = LiquidIcePotentialTemperatureState(θ, MoistureMassFractions(zero(FT)), FT(1e5), p)
+            T = compute_temperature(𝒰_dry, nothing, constants)
+            qᵛ⁺₀ = equilibrium_saturation_specific_humidity(T, p, zero(FT), constants, equilibrium)
+            qᵗ = min(f * qᵛ⁺₀, FT(0.05))
+            𝒰₀ = with_moisture(𝒰_dry, MoistureMassFractions(qᵗ))
+            return adjustment_invariants_hold(𝒰₀, qᵗ, 𝒰 -> 𝒰.potential_temperature)
+        end
     end
 end
 

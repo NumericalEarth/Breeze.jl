@@ -1,4 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
+include(joinpath(@__DIR__, "supposition_setup.jl"))
 
 using Breeze
 using Breeze.CelestialMechanics: cos_solar_zenith_angle, day_of_year, hour_angle,
@@ -76,5 +77,23 @@ Dates.second(dt::WrappedDateTime) = Dates.second(_as_datetime(dt))
 
         @test cos_solar_zenith_angle(1, 1, grid, WrappedDateTime(dt)) ==
               cos_solar_zenith_angle(1, 1, grid, dt)
+    end
+end
+
+@testset "Solar geometry properties" begin
+    datetimes = map(k -> DateTime(2000, 1, 1) + Millisecond(k), Data.Integers(0, 946_080_000_000))  # 30 years
+
+    # cos θ_z is a cosine, the hour angle advances 15° per hour so longitude is 360°-periodic...
+    @breeze_check function cos_zenith_angle_is_bounded_and_periodic(dt = datetimes,
+                                                                    longitude = spstn_floats(Float64; lo=-180, hi=180),
+                                                                    latitude = spstn_floats(Float64; lo=-90, hi=90))
+        c = cos_solar_zenith_angle(dt, longitude, latitude)
+        c_shifted = cos_solar_zenith_angle(dt, longitude + 360, latitude)
+        return -1 <= c <= 1 && isapprox(c, c_shifted; atol=1e-9)
+    end
+
+    # ...and Spencer's (1971) declination stays within the obliquity of the ecliptic (23.45° ≈ 0.409 rad).
+    @breeze_check function declination_within_obliquity(day = Data.Integers(1, 366))
+        return abs(solar_declination(day)) <= 0.41
     end
 end
