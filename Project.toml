@@ -27,6 +27,7 @@ ClimaComms = "3a4d1b5c-c61d-41fd-a00a-5873ba7a1b0d"
 CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
 RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
+ReactantCore = "a3311ec8-5e00-46d5-b541-4f83e724a433"
 
 [extensions]
 BreezeCloudMicrophysicsExt = ["CloudMicrophysics", "SpecialFunctions"]
@@ -50,6 +51,7 @@ OffsetArrays = "1.4"
 Printf = "1"
 RRTMGP = "0.22, 0.23, 1"
 Reactant = "0.2.268 - 0.2.274, 0.2.278"
+ReactantCore = "0.1"
 SpecialFunctions = "2"
 Statistics = "<0.0.1, 1"
 julia = "1.11.9"
