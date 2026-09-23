@@ -1,13 +1,13 @@
 ####
 #### SurfaceLayerDiffusivity
 ####
-#### A shallow, vertically implicit diffusivity that supplies the neutral-similarity
+#### A shallow, vertically implicit diffusivity that supplies the surface-similarity
 #### momentum and scalar flux not carried by time-filtered resolved covariance.
 ####
 
 using Oceananigans.TurbulenceClosures: buoyancy_tracers
 using Oceananigans: fields, prognostic_state, restore_prognostic_state!
-using Oceananigans.BoundaryConditions: getbc
+using Oceananigans.BoundaryConditions: NoFluxBoundaryCondition, getbc
 using Oceananigans.Advection: AbstractCenteredAdvectionScheme,
                                 AbstractUpwindBiasedAdvectionScheme,
                                 BoundsPreservingWENO, FluxFormAdvection,
@@ -22,7 +22,8 @@ using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶠ, ℑxz
 using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: KernelParameters, time_difference_seconds
 
-using ..AtmosphereModels: dynamics_thermodynamic_fields, dynamics_density, total_density
+using ..AtmosphereModels: dynamics_thermodynamic_fields, dynamics_density,
+                          moisture_prognostic_name
 using ..AtmosphereModels: reconstructed_fields, tracer_density_to_specific!,
                           tracer_specific_to_density!
 using ..AnelasticEquations: AnelasticDynamics
@@ -39,7 +40,7 @@ stable centered online covariance; raw filtered products are retained for diagno
 not drive the closure. The momentum viscosity is
 
 ```math
-ν_{SL} = W(z) κ u_⋆ z [1 - a τ^r_∥ / u_⋆²]_+,
+ν_{SL} = W(z) κ u_⋆ z [1 - a τ^r_∥ / u_⋆²]_+ / φᵐ(z/L),
 ```
 
 and each scalar diffusivity independently replaces its signed flux deficit. The default support
@@ -63,6 +64,18 @@ bottom-bounded rectilinear grid, and a single closure. Bounded WENO uses its upd
 Fluxes are sampled once at each accepted model state; they are not RK-stage-integrated fluxes
 or an accounting of every source of numerical error. The filter state, including the numerical
 correction, is preserved in checkpoints.
+
+`stability_strength=λ` (default `0`) optionally applies the stable Monin–Obukhov gradient
+functions ``φᵐ = 1 + λ βᵐ ζ`` and ``φʰ = 1 + λ βʰ ζ``, with ``ζ = z/L``, by dividing the momentum
+viscosity by ``φᵐ`` and every scalar diffusivity by ``φʰ``. `λ=0` is exactly the neutral closure;
+`λ=1` uses the slopes `momentum_stability_parameter=βᵐ` (default `4.8`) and
+`scalar_stability_parameter=βʰ` (default `7.8`). The local inverse Obukhov length
+``1/L = -κ g Fᶿ / (θ₀ u_⋆³)`` is computed in each column from the same filtered wall stress and
+filtered kinematic potential-temperature flux ``Fᶿ`` that drive the closure, with ``θ₀`` the anelastic
+reference potential temperature. Only the stable branch is defined: columns with an upward or guarded
+buoyancy flux use ``φ = 1``, and `stability_state` records each column as stable (`1`), neutral (`0`),
+or upward-flux (`-1`). `λ > 0` requires a dry anelastic model (`microphysics=nothing`, no wall moisture
+flux) and an active `ρθ` guard in `minimum_scalar_fluxes`; other models are rejected.
 
 `minimum_scalar_fluxes` is a named tuple keyed by transported prognostic scalar name. Each value
 has the kinematic flux units of that scalar and explicitly defines its near-zero guard. Scalars
@@ -91,6 +104,9 @@ struct SurfaceLayerDiffusivity{TD, FT, G, M, A} <: AbstractScalarDiffusivity{TD,
     advection :: A
     von_karman_constant :: FT
     turbulent_prandtl_number :: FT
+    stability_strength :: FT
+    momentum_stability_parameter :: FT
+    scalar_stability_parameter :: FT
     minimum_friction_velocity :: FT
     minimum_scalar_fluxes :: G
     maximum_viscosity :: FT
@@ -105,6 +121,9 @@ function SurfaceLayerDiffusivity(time_discretization::TD = VerticallyImplicitTim
                                  resolved_transport = :covariance,
                                  von_karman_constant = 0.4,
                                  turbulent_prandtl_number = 1,
+                                 stability_strength = 0,
+                                 momentum_stability_parameter = 4.8,
+                                 scalar_stability_parameter = 7.8,
                                  minimum_friction_velocity = 1e-4,
                                  minimum_scalar_fluxes = NamedTuple(),
                                  maximum_viscosity = Inf,
@@ -125,6 +144,12 @@ function SurfaceLayerDiffusivity(time_discretization::TD = VerticallyImplicitTim
         throw(ArgumentError("von_karman_constant must be finite and positive"))
     isfinite(turbulent_prandtl_number) && turbulent_prandtl_number > 0 ||
         throw(ArgumentError("turbulent_prandtl_number must be finite and positive"))
+    for (name, value) in ((:stability_strength, stability_strength),
+                          (:momentum_stability_parameter, momentum_stability_parameter),
+                          (:scalar_stability_parameter, scalar_stability_parameter))
+        isfinite(value) && value ≥ 0 && isfinite(convert(FT, value)) ||
+            throw(ArgumentError("$name must be finite and nonnegative"))
+    end
     isfinite(minimum_friction_velocity) && minimum_friction_velocity ≥ 0 ||
         throw(ArgumentError("minimum_friction_velocity must be finite and nonnegative"))
     maximum_viscosity ≥ 0 && !isnan(maximum_viscosity) ||
@@ -143,6 +168,9 @@ function SurfaceLayerDiffusivity(time_discretization::TD = VerticallyImplicitTim
         mode, nothing,
         convert(FT, von_karman_constant),
         convert(FT, turbulent_prandtl_number),
+        convert(FT, stability_strength),
+        convert(FT, momentum_stability_parameter),
+        convert(FT, scalar_stability_parameter),
         convert(FT, minimum_friction_velocity),
         guards,
         convert(FT, maximum_viscosity),
@@ -153,20 +181,29 @@ end
 SurfaceLayerDiffusivity(FT::DataType; kw...) =
     SurfaceLayerDiffusivity(VerticallyImplicitTimeDiscretization(), FT; kw...)
 
-function Utils.with_tracers(tracer_names, closure::SurfaceLayerDiffusivity{TD, FT}) where {TD, FT}
-    guards = NamedTuple(name => convert(FT, get(closure.minimum_scalar_fluxes, name, Inf))
-                        for name in tracer_names)
-    return SurfaceLayerDiffusivity{TD, FT, typeof(guards), typeof(closure.resolved_transport), typeof(closure.advection)}(
+# Rebuild a closure with new scalar guards or bound advection, retaining every parameter.
+function rebuild_surface_layer_diffusivity(closure::SurfaceLayerDiffusivity{TD, FT},
+                                           guards, advection) where {TD, FT}
+    return SurfaceLayerDiffusivity{TD, FT, typeof(guards), typeof(closure.resolved_transport), typeof(advection)}(
         closure.filter_timescale,
         closure.resolved_flux_factor,
-        closure.resolved_transport, closure.advection,
+        closure.resolved_transport, advection,
         closure.von_karman_constant,
         closure.turbulent_prandtl_number,
+        closure.stability_strength,
+        closure.momentum_stability_parameter,
+        closure.scalar_stability_parameter,
         closure.minimum_friction_velocity,
         guards,
         closure.maximum_viscosity,
         closure.maximum_diffusivity,
         closure.support)
+end
+
+function Utils.with_tracers(tracer_names, closure::SurfaceLayerDiffusivity{TD, FT}) where {TD, FT}
+    guards = NamedTuple(name => convert(FT, get(closure.minimum_scalar_fluxes, name, Inf))
+                        for name in tracer_names)
+    return rebuild_surface_layer_diffusivity(closure, guards, closure.advection)
 end
 
 Base.summary(::SurfaceLayerDiffusivity{TD}) where TD =
@@ -180,20 +217,18 @@ function Base.show(io::IO, closure::SurfaceLayerDiffusivity)
           "├── support: ", closure.support, '\n',
           "├── von_karman_constant: ", prettysummary(closure.von_karman_constant), '\n',
           "├── turbulent_prandtl_number: ", prettysummary(closure.turbulent_prandtl_number), '\n',
+          "├── stability_strength: ", prettysummary(closure.stability_strength), '\n',
+          "├── momentum_stability_parameter: ", prettysummary(closure.momentum_stability_parameter), '\n',
+          "├── scalar_stability_parameter: ", prettysummary(closure.scalar_stability_parameter), '\n',
           "├── minimum_friction_velocity: ", prettysummary(closure.minimum_friction_velocity), '\n',
           "├── minimum_scalar_fluxes: ", prettysummary(closure.minimum_scalar_fluxes), '\n',
           "├── maximum_viscosity: ", prettysummary(closure.maximum_viscosity), '\n',
           "└── maximum_diffusivity: ", prettysummary(closure.maximum_diffusivity))
 end
 
-Adapt.adapt_structure(to, closure::SurfaceLayerDiffusivity{TD, FT}) where {TD, FT} =
-    SurfaceLayerDiffusivity{TD, FT, typeof(adapt(to, closure.minimum_scalar_fluxes)),
-                            typeof(closure.resolved_transport), typeof(adapt(to, closure.advection))}(
-        closure.filter_timescale, closure.resolved_flux_factor,
-        closure.resolved_transport, adapt(to, closure.advection),
-        closure.von_karman_constant, closure.turbulent_prandtl_number,
-        closure.minimum_friction_velocity, adapt(to, closure.minimum_scalar_fluxes),
-        closure.maximum_viscosity, closure.maximum_diffusivity, closure.support)
+Adapt.adapt_structure(to, closure::SurfaceLayerDiffusivity) =
+    rebuild_surface_layer_diffusivity(closure, adapt(to, closure.minimum_scalar_fluxes),
+                                      adapt(to, closure.advection))
 
 validate_native_scheme(::AbstractCenteredAdvectionScheme) = nothing
 validate_native_scheme(::AbstractUpwindBiasedAdvectionScheme) = nothing
@@ -212,12 +247,7 @@ function AtmosphereModels.bind_closure_advection(closure::SurfaceLayerDiffusivit
         time_discretization(scheme) isa ExplicitTimeDiscretization ||
             throw(ArgumentError("scheme-native SLD currently requires explicit advection"))
     end
-    return SurfaceLayerDiffusivity{TD, FT, G, Val{:scheme_native}, typeof(advection)}(
-        closure.filter_timescale, closure.resolved_flux_factor,
-        closure.resolved_transport, advection,
-        closure.von_karman_constant, closure.turbulent_prandtl_number,
-        closure.minimum_friction_velocity, closure.minimum_scalar_fluxes,
-        closure.maximum_viscosity, closure.maximum_diffusivity, closure.support)
+    return rebuild_surface_layer_diffusivity(closure, closure.minimum_scalar_fluxes, advection)
 end
 
 function AtmosphereModels.bind_closure_advection(closures::Tuple, advection)
@@ -247,7 +277,7 @@ end
 
 @inline function momentum_surface_layer_properties(resolved_u_flux, resolved_v_flux,
                                                    surface_u_flux, surface_v_flux,
-                                                   z, weight, closure)
+                                                   z, weight, closure, stability_function=1)
     stress_u = -surface_u_flux
     stress_v = -surface_v_flux
     stress_magnitude = sqrt(stress_u^2 + stress_v^2)
@@ -262,7 +292,8 @@ end
                                  safe_stress
     deficit = max(0, 1 - closure.resolved_flux_factor * parallel_resolved_stress / safe_stress)
     friction_velocity = sqrt(stress_magnitude)
-    raw_viscosity = weight * closure.von_karman_constant * friction_velocity * z * deficit
+    raw_viscosity = weight * closure.von_karman_constant * friction_velocity * z * deficit /
+                    stability_function
     cap_active = valid & isfinite(closure.maximum_viscosity) &
                  (raw_viscosity > closure.maximum_viscosity)
     viscosity_value = ifelse(valid, min(raw_viscosity, closure.maximum_viscosity),
@@ -272,18 +303,61 @@ end
 end
 
 @inline function scalar_surface_layer_properties(resolved_flux, surface_flux, friction_velocity,
-                                                 z, weight, flux_guard, closure)
+                                                 z, weight, flux_guard, closure,
+                                                 stability_function=1)
     valid = isfinite(surface_flux) & (abs(surface_flux) > flux_guard) &
             (friction_velocity > closure.minimum_friction_velocity) & (weight > 0)
     safe_surface_flux = ifelse(valid, surface_flux, one(surface_flux))
     deficit = max(0, 1 - closure.resolved_flux_factor * resolved_flux / safe_surface_flux)
     raw_diffusivity = weight * closure.von_karman_constant * friction_velocity * z /
-                      closure.turbulent_prandtl_number * deficit
+                      closure.turbulent_prandtl_number * deficit / stability_function
     cap_active = valid & isfinite(closure.maximum_diffusivity) &
                  (raw_diffusivity > closure.maximum_diffusivity)
     diffusivity_value = ifelse(valid, min(raw_diffusivity, closure.maximum_diffusivity),
                                oftype(raw_diffusivity, 0))
     return (; diffusivity=diffusivity_value, deficit, valid, cap_active)
+end
+
+# Local Monin–Obukhov stability of one column from the filtered wall fluxes that drive the
+# closure: kinematic stress (m² s⁻²) and kinematic potential-temperature flux Fᶿ (K m s⁻¹).
+# With the anelastic buoyancy b ≈ g θ′/θ₀, the surface buoyancy flux is g Fᶿ/θ₀ and
+#
+#     1/L = -κ g Fᶿ / (θ₀ u★³).
+#
+# The inverse length is finite in the zero-flux limit. It is zero where the stress or heat flux
+# is inactive (guarded or nonfinite). `state` is +1 for a stable column, -1 for an upward
+# (unstable) buoyancy flux, and 0 otherwise.
+@inline function obukhov_stability_properties(surface_u_flux, surface_v_flux, heat_flux,
+                                              heat_flux_guard, reference_potential_temperature,
+                                              gravitational_acceleration, closure)
+    stress_magnitude = sqrt(surface_u_flux^2 + surface_v_flux^2)
+    friction_velocity = sqrt(stress_magnitude)
+    momentum_valid = isfinite(stress_magnitude) &
+                     (stress_magnitude > closure.minimum_friction_velocity^2)
+    heat_valid = isfinite(heat_flux) & (abs(heat_flux) > heat_flux_guard)
+    safe_friction_velocity = ifelse(momentum_valid, friction_velocity, one(friction_velocity))
+    buoyancy_flux = gravitational_acceleration * heat_flux / reference_potential_temperature
+    raw_inverse_length = -closure.von_karman_constant * buoyancy_flux /
+                         safe_friction_velocity^3
+    valid = momentum_valid & heat_valid & isfinite(raw_inverse_length)
+    inverse_obukhov_length = ifelse(valid, raw_inverse_length, zero(raw_inverse_length))
+    stable = inverse_obukhov_length > 0
+    unstable = inverse_obukhov_length < 0
+    state = ifelse(stable, 1, ifelse(unstable, -1, 0))
+    return (; inverse_obukhov_length, stable, unstable, state)
+end
+
+# Stable Monin–Obukhov gradient functions φᵐ = 1 + λ βᵐ ζ and φʰ = 1 + λ βʰ ζ with ζ = z/L.
+# Only the stable branch is defined: ζ ≤ 0 (unstable or neutral) uses the ζ → 0 limit φ = 1.
+# With λ = 0 both functions are exactly one. Clamping ζ to the largest finite value keeps
+# 0 × ζ exact; a λ > 0 overflow gives φ = Inf and so a zero coefficient.
+@inline function surface_layer_stability_functions(z, inverse_obukhov_length, closure)
+    stability_parameter = z * inverse_obukhov_length
+    ζ = min(max(0, stability_parameter), floatmax(stability_parameter))
+    λ = closure.stability_strength
+    momentum = 1 + λ * closure.momentum_stability_parameter * ζ
+    scalar = 1 + λ * closure.scalar_stability_parameter * ζ
+    return (; momentum, scalar)
 end
 
 struct SurfaceLayerDiffusivityFields{K, TK, F, TF, SF, B, TB, R1, R2}
@@ -315,6 +389,10 @@ struct SurfaceLayerDiffusivityFields{K, TK, F, TF, SF, B, TB, R1, R2}
     scalar_deficit :: TF
     scalar_active :: TF
     diffusivity_cap_active :: TF
+    inverse_obukhov_length :: F
+    stability_state :: F
+    momentum_stability_function :: Tuple{F, F}
+    scalar_stability_function :: Tuple{F, F}
     momentum_boundary_conditions :: B
     scalar_boundary_conditions :: TB
     previous_update_time :: R1
@@ -359,6 +437,37 @@ function validate_surface_layer_configuration(grid, closure, model)
     end
     return nothing
 end
+
+# The stable correction is first supported for dry anelastic potential-temperature models. Then
+# θˡⁱ = θ, and with no wall moisture flux the kinematic θ flux is the surface buoyancy-flux
+# source (w′θᵥ′/θᵥ = w′θ′/θ at the wall). Moist or compressible models need a different local
+# buoyancy flux and are rejected rather than given a wrong one.
+validate_stability_configuration(closure_fields, closure, model) =
+    closure.stability_strength > 0 ? validate_dry_stable_configuration(closure_fields, closure, model) :
+                                     nothing
+
+function validate_dry_stable_configuration(closure_fields, closure, model)
+    model.dynamics isa AnelasticDynamics ||
+        throw(ArgumentError("SurfaceLayerDiffusivity stability_strength > 0 currently " *
+                            "supports AnelasticDynamics only"))
+    isnothing(model.microphysics) ||
+        throw(ArgumentError("SurfaceLayerDiffusivity stability_strength > 0 currently " *
+                            "supports dry models (microphysics=nothing) only"))
+    moisture_name = moisture_prognostic_name(model.microphysics)
+    moisture_boundary_condition = get(closure_fields.scalar_boundary_conditions, moisture_name, nothing)
+    validate_dry_wall_moisture_flux(moisture_boundary_condition)
+    guard = get(closure.minimum_scalar_fluxes, :ρθ, Inf)
+    isfinite(guard) ||
+        throw(ArgumentError("SurfaceLayerDiffusivity stability_strength > 0 requires an active " *
+                            "ρθ wall flux; set minimum_scalar_fluxes=(ρθ=...,)"))
+    return nothing
+end
+
+validate_dry_wall_moisture_flux(::Nothing) = nothing
+validate_dry_wall_moisture_flux(::NoFluxBoundaryCondition) = nothing
+validate_dry_wall_moisture_flux(boundary_condition) =
+    throw(ArgumentError("SurfaceLayerDiffusivity stability_strength > 0 requires no wall " *
+                        "moisture flux; got $(summary(boundary_condition))"))
 
 function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, tracer_names, bcs,
                                                                closure::SurfaceLayerDiffusivity)
@@ -411,6 +520,13 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     scalar_deficit = tracer_surface_fields(grid, tracer_names)
     scalar_active = tracer_surface_fields(grid, tracer_names)
     diffusivity_cap_active = tracer_surface_fields(grid, tracer_names)
+    inverse_obukhov_length = Field{Center, Center, Nothing}(grid)
+    stability_state = Field{Center, Center, Nothing}(grid)
+    momentum_stability_function = two_surface_fields(grid)
+    scalar_stability_function = two_surface_fields(grid)
+    set!(inverse_obukhov_length, 0)
+    set!(stability_state, 0)
+    foreach(field -> set!(field, 1), (momentum_stability_function..., scalar_stability_function...))
     momentum_boundary_conditions = (; u=bcs.ρu.bottom, v=bcs.ρv.bottom)
     scalar_boundary_conditions = NamedTuple(name => bcs[name].bottom for name in tracer_names)
 
@@ -424,6 +540,8 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
         surface_u_flux, surface_v_flux, surface_scalar_flux,
         momentum_deficit, transverse_stress, momentum_active, viscosity_cap_active,
         scalar_deficit, scalar_active, diffusivity_cap_active,
+        inverse_obukhov_length, stability_state,
+        momentum_stability_function, scalar_stability_function,
         momentum_boundary_conditions, scalar_boundary_conditions,
         Ref(clock.time), Ref(clock.iteration))
 end
@@ -659,10 +777,12 @@ end
 end
 
 @kernel function _compute_momentum_diffusivity!(Kᵘ, deficit, transverse_stress, active,
-                                                cap_active, resolved_u_flux, resolved_v_flux,
+                                                cap_active, stability_function,
+                                                resolved_u_flux, resolved_v_flux,
                                                 numerical_u_correction,
                                                 numerical_v_correction,
                                                 surface_u_flux, surface_v_flux,
+                                                inverse_obukhov_length,
                                                 grid, closure, face, weight)
     i, j = @index(Global, NTuple)
     z = height_above_bottomᶜᶜᶠ(i, j, face, grid)
@@ -677,10 +797,12 @@ end
     resolved_v = ifelse(native, native_v, covariance_v)
     surface_u = @inbounds surface_u_flux[i, j, 1]
     surface_v = @inbounds surface_v_flux[i, j, 1]
+    φ = surface_layer_stability_functions(z, @inbounds(inverse_obukhov_length[i, j, 1]), closure)
     properties = momentum_surface_layer_properties(
-        resolved_u, resolved_v, surface_u, surface_v, z, weight, closure)
+        resolved_u, resolved_v, surface_u, surface_v, z, weight, closure, φ.momentum)
     @inbounds begin
         Kᵘ[i, j, face] = properties.viscosity
+        stability_function[i, j, 1] = φ.momentum
         deficit[i, j, 1] = properties.deficit
         transverse_stress[i, j, 1] = properties.transverse_resolved_stress
         active[i, j, 1] = properties.valid
@@ -691,6 +813,7 @@ end
 @kernel function _compute_scalar_diffusivity!(Kᶜ, deficit, active, cap_active,
                                               resolved_flux, numerical_correction, surface_flux,
                                               surface_u_flux, surface_v_flux,
+                                              inverse_obukhov_length,
                                               grid, closure, flux_guard, face, weight)
     i, j = @index(Global, NTuple)
     z = height_above_bottomᶜᶜᶠ(i, j, face, grid)
@@ -705,14 +828,46 @@ end
     end
     resolved = ifelse(native, native_flux, covariance)
     filtered_surface_flux = @inbounds surface_flux[i, j, 1]
+    φ = surface_layer_stability_functions(z, @inbounds(inverse_obukhov_length[i, j, 1]), closure)
     properties = scalar_surface_layer_properties(
         resolved, filtered_surface_flux, friction_velocity,
-        z, weight, flux_guard, closure)
+        z, weight, flux_guard, closure, φ.scalar)
     @inbounds begin
         Kᶜ[i, j, face] = properties.diffusivity
         deficit[i, j, 1] = properties.deficit
         active[i, j, 1] = properties.valid
         cap_active[i, j, 1] = properties.cap_active
+    end
+end
+
+@kernel function _compute_obukhov_stability!(inverse_obukhov_length, stability_state,
+                                             scalar_stability_function,
+                                             surface_u_flux, surface_v_flux, surface_heat_flux,
+                                             heat_flux_guard, reference_potential_temperature,
+                                             gravitational_acceleration, grid, closure)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        surface_u = surface_u_flux[i, j, 1]
+        surface_v = surface_v_flux[i, j, 1]
+        heat_flux = surface_heat_flux[i, j, 1]
+    end
+    stability = obukhov_stability_properties(surface_u, surface_v, heat_flux, heat_flux_guard,
+                                             reference_potential_temperature,
+                                             gravitational_acceleration, closure)
+    @inbounds begin
+        inverse_obukhov_length[i, j, 1] = stability.inverse_obukhov_length
+        stability_state[i, j, 1] = stability.state
+    end
+    # Record the scalar gradient function, shared by all scalars, at both candidate faces.
+    first_height = height_above_bottomᶜᶜᶠ(i, j, 2, grid)
+    second_height = height_above_bottomᶜᶜᶠ(i, j, 3, grid)
+    first_φ = surface_layer_stability_functions(first_height, stability.inverse_obukhov_length,
+                                                closure)
+    second_φ = surface_layer_stability_functions(second_height, stability.inverse_obukhov_length,
+                                                 closure)
+    @inbounds begin
+        scalar_stability_function[1][i, j, 1] = first_φ.scalar
+        scalar_stability_function[2][i, j, 1] = second_φ.scalar
     end
 end
 
@@ -723,6 +878,7 @@ end
 
 function initialize_surface_layer_filters!(closure_fields, closure, model)
     validate_surface_layer_configuration(model.grid, closure, model)
+    validate_stability_configuration(closure_fields, closure, model)
     grid = model.grid
     arch = grid.architecture
     parameters = surface_kernel_parameters(grid)
@@ -864,16 +1020,20 @@ function compute_surface_layer_diffusivities!(closure_fields, closure, model)
     arch = grid.architecture
     parameters = surface_kernel_parameters(grid)
     FT = eltype(grid)
+    heat_flux = get(closure_fields.surface_scalar_flux, :ρθ, nothing)
+    compute_obukhov_stability!(closure_fields, closure, model, model.dynamics, heat_flux)
     for (slot, face) in enumerate((2, 3))
         weight = FT(support_weight(face, closure.support))
         launch!(arch, grid, parameters, _compute_momentum_diffusivity!,
                 closure_fields.Kᵘ, closure_fields.momentum_deficit[slot],
                 closure_fields.transverse_stress[slot], closure_fields.momentum_active[slot],
                 closure_fields.viscosity_cap_active[slot],
+                closure_fields.momentum_stability_function[slot],
                 closure_fields.resolved_u_flux[slot], closure_fields.resolved_v_flux[slot],
                 closure_fields.numerical_u_correction[slot],
                 closure_fields.numerical_v_correction[slot],
                 closure_fields.surface_u_flux, closure_fields.surface_v_flux,
+                closure_fields.inverse_obukhov_length,
                 grid, closure, face, weight)
         for name in keys(closure_fields.tupled_tracer_diffusivities)
             launch!(arch, grid, parameters, _compute_scalar_diffusivity!,
@@ -885,9 +1045,38 @@ function compute_surface_layer_diffusivities!(closure_fields, closure, model)
                     closure_fields.numerical_scalar_correction[name][slot],
                     closure_fields.surface_scalar_flux[name],
                     closure_fields.surface_u_flux, closure_fields.surface_v_flux,
+                    closure_fields.inverse_obukhov_length,
                     grid, closure, closure.minimum_scalar_fluxes[name], face, weight)
         end
     end
+    return nothing
+end
+
+# The local Obukhov length uses the filtered potential-temperature wall flux and the anelastic
+# reference potential temperature. Without both, the column stays neutral (1/L = 0, φ = 1);
+# `validate_stability_configuration` rejects such models when the correction is enabled.
+function compute_obukhov_stability!(closure_fields, closure, model, dynamics::AnelasticDynamics,
+                                    heat_flux::Field)
+    grid = model.grid
+    FT = eltype(grid)
+    reference_potential_temperature = convert(FT, dynamics.reference_state.potential_temperature)
+    gravitational_acceleration =
+        convert(FT, model.thermodynamic_constants.gravitational_acceleration)
+    launch!(grid.architecture, grid, surface_kernel_parameters(grid), _compute_obukhov_stability!,
+            closure_fields.inverse_obukhov_length, closure_fields.stability_state,
+            closure_fields.scalar_stability_function,
+            closure_fields.surface_u_flux, closure_fields.surface_v_flux, heat_flux,
+            closure.minimum_scalar_fluxes.ρθ, reference_potential_temperature,
+            gravitational_acceleration, grid, closure)
+    return nothing
+end
+
+# Without anelastic dynamics or a ρθ wall flux there is no supported local buoyancy flux: the
+# neutral closure leaves 1/L = 0, and the stability correction is rejected on first use.
+function compute_obukhov_stability!(closure_fields, closure, model, dynamics, heat_flux)
+    closure.stability_strength > 0 &&
+        throw(ArgumentError("SurfaceLayerDiffusivity stability_strength > 0 currently supports " *
+                            "AnelasticDynamics only, with a ρθ wall flux"))
     return nothing
 end
 
@@ -956,7 +1145,11 @@ surface_layer_prognostic_fields(closure_fields) = (;
     viscosity_cap_active=closure_fields.viscosity_cap_active,
     scalar_deficit=closure_fields.scalar_deficit,
     scalar_active=closure_fields.scalar_active,
-    diffusivity_cap_active=closure_fields.diffusivity_cap_active)
+    diffusivity_cap_active=closure_fields.diffusivity_cap_active,
+    inverse_obukhov_length=closure_fields.inverse_obukhov_length,
+    stability_state=closure_fields.stability_state,
+    momentum_stability_function=closure_fields.momentum_stability_function,
+    scalar_stability_function=closure_fields.scalar_stability_function)
 
 function Oceananigans.prognostic_state(closure_fields::SurfaceLayerDiffusivityFields)
     field_state = prognostic_state(surface_layer_prognostic_fields(closure_fields))
@@ -969,7 +1162,8 @@ function Oceananigans.restore_prognostic_state!(restored::SurfaceLayerDiffusivit
     restored_fields = surface_layer_prognostic_fields(restored)
     # Checkpoints written before the scheme-native option contain only the original
     # covariance state. The new diagnostic filter fields remain zero on such pickup;
-    # covariance-mode evolution is therefore unchanged.
+    # covariance-mode evolution is therefore unchanged. Stability diagnostics are
+    # recomputed from the restored filtered wall fluxes by every coefficient update.
     names = Tuple(name for name in keys(restored_fields) if hasproperty(from, name))
     matching_fields = NamedTuple{names}(getproperty(restored_fields, name) for name in names)
     from_fields = NamedTuple{names}(getproperty(from, name) for name in names)
