@@ -262,7 +262,7 @@ function convert_moisture_bcs(bcs, microphysics)
     return merge(bcs, NamedTuple{(ρq_name,)}((ρq_bcs,)))
 end
 
-# ρθ: an energy flux 𝒬 enters as the potential temperature flux Jᶿ = 𝒬 / (cᵖᵐ Π), applied by
+# ρθ: an energy flux 𝒬ᵀ enters as the potential temperature flux Jᶿ = 𝒬ᵀ / (cᵖᵐ Π), applied by
 # `EnergyFluxBoundaryCondition`.
 energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρθ}) = energy_to_theta_bcs(ρE_bcs)
 
