@@ -35,8 +35,11 @@ using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
                                       virtual_potential_temperature
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity, MoistureMassFractions,
-                        LiquidIcePotentialTemperatureState, exner_function,
+                        LiquidIcePotentialTemperatureState,
                         potential_temperature_from_temperature, surface_pressure_from_cell_center
+
+# Extended below with a grid-point method: `exner_function(i, j, k, grid, ef, q, dynamics_fields)`.
+import ..Thermodynamics: exner_function
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: Architectures

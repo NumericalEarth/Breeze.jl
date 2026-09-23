@@ -79,9 +79,10 @@ const NorthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:North}
 @inline _energy_flux_density(density, fields, i, j, k) = @inbounds density[i, j, k]
 @inline _energy_flux_density(::Nothing, fields, i, j, k) = @inbounds fields.ρᵈ[i, j, k]
 
-# `exner_function` ignores the state's potential temperature, so the zero θ is inert — the same
-# shortcut `potential_temperature_from_temperature` takes.
-@inline function near_wall_exner_function(i, j, k, ef, q, dynamics_fields)
+# Π at a grid point, from the pressure `getbc` receives in `dynamics_fields`. The state-taking
+# method ignores the potential temperature, so the zero θ is inert — the same shortcut
+# `potential_temperature_from_temperature` takes.
+@inline function exner_function(i, j, k, grid, ef, q, dynamics_fields)
     p = @inbounds dynamics_fields.p[i, j, k]
     𝒰 = LiquidIcePotentialTemperatureState(zero(p), q, ef.standard_pressure, p)
     return exner_function(𝒰, ef.thermodynamic_constants)
@@ -93,7 +94,7 @@ end
     ρ = _energy_flux_density(ef.density, fields, i, j, k)
     q = grid_moisture_fractions(i, j, k, grid, ef.microphysics, ρ, qᵛ, fields)
     cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
-    Π = near_wall_exner_function(i, j, k, ef, q, dynamics_fields)
+    Π = exner_function(i, j, k, grid, ef, q, dynamics_fields)
     return 𝒬ᵀ / (cᵖᵐ * Π)
 end
 
@@ -218,7 +219,7 @@ const NorthThetaFluxBC  = ThetaFluxBoundaryConditionFunction{<:Any, <:North}
     ρ = @inbounds tf.density[i, j, k]
     q = grid_moisture_fractions(i, j, k, grid, tf.microphysics, ρ, qᵛ, fields)
     cᵖᵐ = mixture_heat_capacity(q, tf.thermodynamic_constants)
-    Π = near_wall_exner_function(i, j, k, tf, q, dynamics_fields)
+    Π = exner_function(i, j, k, grid, tf, q, dynamics_fields)
     return Jᶿ * cᵖᵐ * Π
 end
 
