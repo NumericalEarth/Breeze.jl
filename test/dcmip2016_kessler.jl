@@ -276,7 +276,6 @@ end
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
     k₁ = microphysics.autoconversion_rate
     rtol = spstn_rounding_rtol(FT)
-    atol = 100 * eps(FT)
 
     # Mass fractions → mixing ratios → mass fractions is the identity.
     @breeze_check function kessler_moisture_conversions_round_trip(qᵛ = spstn_floats(FT; lo=0, hi=3e-2),
@@ -291,7 +290,8 @@ end
 
     # With no sedimentation flux divergence and Δt k₁ ≤ 1 (so autoconversion cannot remove more
     # cloud than exists) a Kessler step conserves rᵛ + rᶜˡ + rʳ, keeps every mixing ratio
-    # non-negative, and returns Δrˡ = rᵛ_in − rᵛ_out.
+    # non-negative, and returns Δrˡ = rᵛ_in − rᵛ_out (compared as rᵛ_out ≈ rᵛ_in − Δrˡ, whose
+    # operands carry the magnitude the rounding error scales with).
     @breeze_check function kessler_step_conserves_water(rᵛ = spstn_floats(FT; lo=0, hi=3e-2),
                                                         rᶜˡ = spstn_floats(FT; lo=0, hi=5e-3),
                                                         rʳ = spstn_floats(FT; lo=0, hi=5e-3),
@@ -302,9 +302,9 @@ end
         Δt = f / k₁
         rᵛ★, rᶜˡ★, rʳ★, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, p, Δt,
                                                           microphysics, constants, f₅, δT, FT)
-        conserved = isapprox(rᵛ★ + rᶜˡ★ + rʳ★, rᵛ + rᶜˡ + rʳ; atol)
+        conserved = isapprox(rᵛ★ + rᶜˡ★ + rʳ★, rᵛ + rᶜˡ + rʳ; rtol)
         nonnegative = rᵛ★ >= 0 && rᶜˡ★ >= 0 && rʳ★ >= 0
-        return conserved && nonnegative && isapprox(Δrˡ, rᵛ - rᵛ★; atol)
+        return conserved && nonnegative && isapprox(rᵛ★, rᵛ - Δrˡ; rtol)
     end
 
     # Rain falls faster the more of it there is (Klemp & Wilhelmson 1978, eq. 2.15).

@@ -98,7 +98,8 @@ end
             carried = 𝒰★.potential_temperature == θ && 𝒰★.density == ρ
             conserved = isapprox(q.vapor + q.liquid + q.ice, qᵗ; rtol = spstn_rounding_rtol(FT))
             nonnegative = q.vapor >= 0 && q.liquid >= 0 && q.ice >= 0
-            on_curve = q.liquid > 0 ? isapprox(q.vapor, qᵛ⁺; atol = qtol) : qᵗ <= qᵛ⁺ * (1 + qtol)
+            # 1e-3 relative in qᵛ⁺ is ~15 mK, far above the solver's 0.1 mK tolerance
+            on_curve = q.liquid > 0 ? isapprox(q.vapor, qᵛ⁺; rtol = FT(1e-3)) : qᵗ <= qᵛ⁺ * (1 + FT(1e-3))
             return carried && conserved && nonnegative && on_curve
         end
     end

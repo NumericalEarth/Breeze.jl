@@ -28,13 +28,15 @@ solver_tol(::Type{Float64}) = 1e-6
 solver_tol(::Type{Float32}) = 1e-3
 test_tol(FT::Type{Float64}) = 10 * sqrt(solver_tol(FT))
 test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
+# test_tol is in kelvin; the equivalent relative tolerance for temperatures of O(300 K)
+relative_test_tol(FT) = test_tol(FT) / 300
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
 @testset "Saturation adjustment recovers the temperature [$(FT)]" for FT in all_float_types()
     constants = ThermodynamicConstants(FT)
     microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=solver_tol(FT)), equilibrium=WarmPhaseEquilibrium())
-    atol = test_tol(FT)
+    rtol = relative_test_tol(FT)
     g = constants.gravitational_acceleration
     z = zero(FT)
 
@@ -51,7 +53,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         cᵖᵐ = mixture_heat_capacity(q, constants)
         s = cᵖᵐ * T + g * z - constants.liquid.reference_latent_heat * q.liquid
         T★ = compute_temperature(StaticEnergyState(s, q, z, p), microphysics, constants)
-        return qᵛ⁺ isa FT && isapprox(T★, T; atol)
+        return qᵛ⁺ isa FT && isapprox(T★, T; rtol)
     end
 end
 

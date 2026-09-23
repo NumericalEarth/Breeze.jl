@@ -365,7 +365,7 @@ end
                                                             pˢᵗ = spstn_pressures(FT; lo=9e4, hi=1.1e5))
         θ = potential_temperature_from_temperature(T, p, pˢᵗ, thermo)
         T★ = temperature_from_potential_temperature(θ, p, pˢᵗ, thermo)
-        ordering_ok = abs(p - pˢᵗ) < 100 || (θ >= T) == (p <= pˢᵗ)
+        ordering_ok = isapprox(p, pˢᵗ; rtol = FT(1e-3)) || (θ >= T) == (p <= pˢᵗ)
         return isapprox(T★, T; rtol = spstn_rounding_rtol(FT)) && ordering_ok
     end
 end
@@ -504,12 +504,14 @@ end
 
     @testset "$name" for (name, surface) in (("liquid", PlanarLiquidSurface()), ("ice", PlanarIceSurface()))
         # The dewpoint inverts the saturation vapor pressure: for pᵛ = pᵛ⁺(T⁺) with T⁺ ≤ T the
-        # secant solve recovers T⁺ within its tolerance (reltol 1e-4 on pᵛ, about 1.5 mK)...
+        # secant solve returns a T★ whose saturation vapor pressure matches pᵛ to the solver's
+        # relative tolerance of 1e-4 (about 1.5 mK in temperature)...
         @breeze_check function dewpoint_inverts_saturation_vapor_pressure(T⁺ = spstn_temperatures(FT; lo=200, hi=300),
                                                                           Δ = spstn_floats(FT; lo=0, hi=40))
             T = T⁺ + Δ
             pᵛ = saturation_vapor_pressure(T⁺, thermo, surface)
-            return abs(dewpoint_temperature(pᵛ, T, thermo, surface) - T⁺) <= FT(0.01)
+            T★ = dewpoint_temperature(pᵛ, T, thermo, surface)
+            return isapprox(saturation_vapor_pressure(T★, thermo, surface), pᵛ; rtol = FT(1e-4))
         end
 
         # ...and a saturated or supersaturated state (pᵛ ≥ pᵛ⁺(T)) returns T itself.
