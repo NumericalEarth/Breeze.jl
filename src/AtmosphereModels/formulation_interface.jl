@@ -107,8 +107,8 @@ supplied to `AtmosphereModel`, `:ρE`, along with its specific alias `:E` for fo
 committing to the variable that carries it: a `boundary_conditions` or `forcing` entry keyed
 `ρE` is routed onto whichever thermodynamic density the formulation evolves (see
 [`thermodynamic_density_name`](@ref)), converted as that variable requires — divided by
-``cᵖᵐ`` (fluxes) or ``cᵖᵐ Π`` (forcings) for ``ρθ``, and passed through unconverted for
-``ρs``, which is itself an energy per unit mass.
+``cᵖᵐ Π`` for ``ρθ``, whether it arrives as a flux or as a forcing, and passed through
+unconverted for ``ρs``, which is itself an energy per unit mass.
 
 ``s`` names static energy specifically and ``e`` is reserved for turbulent kinetic energy, so
 neither doubles as the energy key: `ρs` is a valid key only when static energy *is* the
