@@ -212,7 +212,11 @@ end
 Base.summary(ml::LocalMinimumMixingLength{FT}) where FT = "LocalMinimumMixingLength{$FT}"
 Base.summary(ml::IntegralMixingLength{FT}) where FT = "IntegralMixingLength{$FT}"
 Base.summary(ml::GradientLimitedMixingLength{FT}) where FT = "GradientLimitedMixingLength{$FT}"
-Base.show(io::IO, ml::AbstractMixingLength) = print(io, summary(ml), " (Cˢ = ", prettysummary(ml.Cˢ), ")")
+# One line describing a mixing length, for its own `show` and for nesting under the closure's.
+# A wrapper that carries no length coefficients of its own overrides this to name what it wraps.
+mixing_length_summary(ml::AbstractMixingLength) = string(summary(ml), " (Cˢ = ", prettysummary(ml.Cˢ), ")")
+
+Base.show(io::IO, ml::AbstractMixingLength) = print(io, mixing_length_summary(ml))
 
 @inline convert_eltype(::Type{FT}, ml::LocalMinimumMixingLength) where FT = LocalMinimumMixingLength{FT}(convert(FT, ml.Cˢ))
 @inline convert_eltype(::Type{FT}, ml::IntegralMixingLength) where FT = IntegralMixingLength{FT}(convert(FT, ml.Cˢ))
@@ -473,48 +477,68 @@ centers — penetrates air of static stability ``N²`` before its kinetic energy
 buoyancy. Infinite where ``N² ≤ 0``, so that neutral and unstable air is no obstacle.
 """
 @inline function buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
-    FT = eltype(grid)
-    N²⁺ = clip(@inbounds N²[i, j, k])
-    ℓᵇ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e) / sqrt(N²⁺)
-    return ifelse(N²⁺ == 0, FT(Inf), ℓᵇ)
+    N²ᵢ = @inbounds N²[i, j, k]
+    vₜ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
+    return buoyancy_penetration_depth(eltype(grid), vₜ, N²ᵢ)
 end
 
-# The local minimum at a face: the ground — or an immersed bottom — through the wall length, and
-# the stratification there through the penetration depth
-@inline function local_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
-    d = closure.mixing_length.Cˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
-    ℓᵇ = buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
+# ℓᵇ = √e / N from a turbulent velocity and a signed N², at no particular location: the one place
+# the penetration depth is defined, so that a corrected stability reaches it the same way the stored
+# one does. `Inf` where N² ≤ 0, so that neutral and unstable air is no obstacle.
+@inline function buoyancy_penetration_depth(::Type{FT}, vₜ, N²) where FT
+    N²⁺ = clip(N²)
+    return ifelse(N²⁺ == 0, FT(Inf), vₜ / sqrt(N²⁺))
+end
+
+# The local bound at a level: the ground — or an immersed bottom — through the wall length `d`, and
+# the stratification there through the penetration depth `ℓᵇ`. A `NaN` from 0 × Inf falls back to `d`.
+@inline function local_mixing_length(d, ℓᵇ)
     ℓ = min(d, ℓᵇ)
     return ifelse(isnan(ℓ), d, ℓ)
 end
 
+# The local minimum at a face. `ml` is passed explicitly rather than read from `closure.mixing_length`
+# so that a wrapper (`ConditionalStabilityMixingLength`) can hand in the model it wraps, which owns
+# the surface and interior length coefficients.
+@inline function local_mixing_lengthᶜᶜᶠ(i, j, k, grid, ml, closure, e, N²)
+    d = ml.Cˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
+    ℓᵇ = buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
+    return local_mixing_length(d, ℓᵇ)
+end
+
 # The local minimum at a cell center, with N² reconstructed from the two adjacent faces
-@inline function local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, N²)
-    FT = eltype(grid)
-    d = closure.mixing_length.Cˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
-    N²⁺ = clip(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²))
-    ℓᵇ = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
-    ℓ = min(d, ifelse(N²⁺ == 0, FT(Inf), ℓᵇ))
-    return ifelse(isnan(ℓ), d, ℓ)
+@inline function local_mixing_lengthᶜᶜᶜ(i, j, k, grid, ml, closure, e, N²)
+    d = ml.Cˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
+    N²ᵢ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
+    vₜ = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
+    return local_mixing_length(d, buoyancy_penetration_depth(eltype(grid), vₜ, N²ᵢ))
 end
 
 # `LocalMinimumMixingLength`: the local minimum at every face
-@inline function fill_mixing_length!(ℓ, i, j, grid, ::LocalMinimumMixingLength, closure, e, N²)
+@inline function fill_mixing_length!(ℓ, i, j, grid, ml::LocalMinimumMixingLength, closure, e, N², tracers, buoyancy)
     for k in 1:grid.Nz+1
-        @inbounds ℓ[i, j, k] = local_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
+        @inbounds ℓ[i, j, k] = local_mixing_lengthᶜᶜᶠ(i, j, k, grid, ml, closure, e, N²)
     end
     return nothing
 end
 
-# `GradientLimitedMixingLength`: the local minimum, then the two sweeps that bound its slope by Cˢ —
-# upward from the ground, where ℓ = 0, then downward. The top of the domain is not an obstacle.
-@inline function fill_mixing_length!(ℓ, i, j, grid, ml::GradientLimitedMixingLength, closure, e, N²)
-    Cˢ = ml.Cˢ
+"""
+$(TYPEDSIGNATURES)
+
+The two sweeps that bound the slope of ``ℓ`` by `Cˢ` — upward from the ground, where ``ℓ = 0``, then
+downward — over a column, given a `local_bound(i, j, k, grid, args...)` that supplies the bound at
+each face. The top of the domain is not an obstacle.
+
+The bound at level `k` is read before `ℓ[i, j, k]` is written, so `local_bound` may itself read the
+column's current contents at `k`: that is how [`ConditionalStabilityMixingLength`](@ref) runs a
+second envelope over a corrected stability without a second field to hold it.
+"""
+@inline function gradient_limited_sweeps!(ℓ, i, j, grid, Cˢ, local_bound::LB, args...) where LB
     Nz = grid.Nz
     @inbounds begin
         ℓ[i, j, 1] = 0 # the ground; the diffusivities at the bottom face are masked regardless
         for k in 2:Nz+1
-            ℓₖ = local_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
+            ℓₖ = local_bound(i, j, k, grid, args...)
             ℓ[i, j, k] = min(ℓₖ, ℓ[i, j, k-1] + Cˢ * Δzᶜᶜᶜ(i, j, k-1, grid))
         end
         for k in Nz:-1:1
@@ -523,6 +547,10 @@ end
     end
     return nothing
 end
+
+# `GradientLimitedMixingLength`: the local minimum, then the slope-limiting envelope
+@inline fill_mixing_length!(ℓ, i, j, grid, ml::GradientLimitedMixingLength, closure, e, N², tracers, buoyancy) =
+    gradient_limited_sweeps!(ℓ, i, j, grid, ml.Cˢ, local_mixing_lengthᶜᶜᶠ, ml, closure, e, N²)
 
 # `IntegralMixingLength`: Bougeault & Lacarrère's parcel walks from every face. The environment's
 # buoyancy relative to the parcel, Δb, grows by N² Δz across each cell — N² at the cell from the two
@@ -569,7 +597,7 @@ end
     return s # the ground stops what the stratification does not
 end
 
-@inline function fill_mixing_length!(ℓ, i, j, grid, ml::IntegralMixingLength, closure, e, N²)
+@inline function fill_mixing_length!(ℓ, i, j, grid, ml::IntegralMixingLength, closure, e, N², tracers, buoyancy)
     Cˢ = ml.Cˢ
     for k in 1:grid.Nz+1
         w★ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
@@ -589,10 +617,10 @@ Compute the primary mixing length at every face of every column, by the formulat
 [`GradientLimitedMixingLength`](@ref)), from the specific turbulent kinetic energy `e` at the cell
 centers and the stored static stability `N²` at the faces. One thread per column.
 """
-@kernel function _compute_mixing_length!(ℓ, grid, closure, e, N²)
+@kernel function _compute_mixing_length!(ℓ, grid, closure, e, N², tracers, buoyancy)
     i, j = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
-    fill_mixing_length!(ℓ, i, j, grid, closure_ij.mixing_length, closure_ij, e, N²)
+    fill_mixing_length!(ℓ, i, j, grid, closure_ij.mixing_length, closure_ij, e, N², tracers, buoyancy)
 end
 
 """
@@ -608,13 +636,13 @@ formulation.
 @inline mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields) =
     mixing_lengthᶜᶜᶜ(i, j, k, grid, closure.mixing_length, closure, e, closure_fields)
 
-@inline mixing_lengthᶜᶜᶜ(i, j, k, grid, ::LocalMinimumMixingLength, closure, e, closure_fields) =
-    local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²)
+@inline mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::LocalMinimumMixingLength, closure, e, closure_fields) =
+    local_mixing_lengthᶜᶜᶜ(i, j, k, grid, ml, closure, e, closure_fields.N²)
 
 @inline function mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::AbstractMixingLength, closure, e, closure_fields)
     ℓ = closure_fields.ℓ
     ℓᶠ = @inbounds min(ℓ[i, j, k], ℓ[i, j, k+1]) + ml.Cˢ * Δzᶜᶜᶜ(i, j, k, grid) / 2
-    return min(ℓᶠ, local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²))
+    return min(ℓᶠ, local_mixing_lengthᶜᶜᶜ(i, j, k, grid, ml, closure, e, closure_fields.N²))
 end
 
 #####
@@ -747,7 +775,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
             closure_fields.N², grid, closure, tracers, buoyancy)
 
     launch!(arch, grid, :xy, _compute_mixing_length!,
-            closure_fields.ℓ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
+            closure_fields.ℓ, grid, closure, tracers[TKE_NAME], closure_fields.N², tracers, buoyancy)
 
     launch!(arch, grid, parameters, _compute_tke_closure_fields!,
             closure_fields, grid, closure, model.velocities, tracers)
@@ -820,7 +848,7 @@ end
 
 function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
     print(io, summary(closure), '\n',
-              "├── mixing_length: ", summary(closure.mixing_length), " (Cˢ = ", prettysummary(closure.mixing_length.Cˢ), ")", '\n',
+              "├── mixing_length: ", mixing_length_summary(closure.mixing_length), '\n',
               "├── stability_functions: ", summary(closure.stability_functions), '\n')
     show_stability_function_lines(io, closure.stability_functions, "│   ")
     print(io, '\n',

@@ -101,6 +101,45 @@ length ([Deardorff (1980)](@cite Deardorff1980)), which the equivalent normaliza
 ``ℓ = \\min(z, 0.76 \\sqrt{e} / N)`` carries on the penetration depth instead. The mixing length is
 computed column by column, once per stage, into the closure field `closure_fields.ℓ`.
 
+#### Conditional stability
+
+[`ConditionalStabilityMixingLength`](@ref) is an optional wrapper, off by default, for the subgrid
+conditional instability a grid-mean stability cannot see: a cell that is subsaturated on average may
+still hold saturated air, and an eddy leaving it condenses over part of its excursion and feels less
+stratification than the mean reports. It wraps [`GradientLimitedMixingLength`](@ref), which keeps
+ownership of the surface and interior length coefficients — the wrapper adds none.
+
+The wrapped model is evaluated first, giving ``ℓ₀``. With ``𝒟 = qʷ - qˢ`` the signed saturation
+excess in mass-fraction units — the condensate in cloud, the vapor deficit outside it — its
+unresolved distribution is taken to be Gaussian of width
+``σ_𝒟² = C_𝒟^g ℓ₀² (∂_z 𝒟)² + (C_𝒟^0)²``, the first term stirring the mean gradient over the mixing
+length and the second a background width that permits variability in a well-mixed layer. Over a trial
+excursion ``h = C^h ℓ₀``, along which ``𝒟`` grows at a rate ``A`` fixed by local thermodynamics, the
+expected saturated fraction is
+
+```math
+f = ∫_0^1 Φ\left( \frac{𝒟 + A h ξ}{σ_𝒟} \right) dξ,
+```
+
+evaluated by three-point Gauss–Legendre quadrature. The stability is then weakened towards the
+saturated response ``N_m²``, never strengthened,
+
+```math
+N₁² = N₀² - C^{\mathrm{cond}} f \max(N₀² - N_m², 0), \qquad 0 ≤ C^{\mathrm{cond}} ≤ 1,
+```
+
+and the wrapped model's envelope is run a second time over ``N₁²``. Four sweeps and a fixed
+quadrature per level keep the cost ``O(N_z)``, and ``ℓ₁ ≥ ℓ₀`` in exact arithmetic. Where the air is
+already saturated the stored ``N²`` *is* ``N_m²``, so the correction vanishes identically and the
+wrapper changes nothing.
+
+The four coefficients ``C_𝒟^g``, ``C_𝒟^0``, ``C^h`` and ``C^{\mathrm{cond}}`` are **not calibrated**,
+and all default to zero: ``C^{\mathrm{cond}} = 0`` reproduces the wrapped model bitwise and skips the
+correction entirely. ``N₁²`` bounds the mixing length alone — the Richardson number, the buoyancy
+flux and the stored ``N²`` are untouched — so this is a length correction, not a subgrid cloud
+scheme. It does not resolve inhibition barriers, entrainment, energy gained along a path, or
+asymmetric updraft and downdraft statistics.
+
 ### Static stability
 
 The squared buoyancy frequency ``N²`` enters the closure three times — in the stratification length,

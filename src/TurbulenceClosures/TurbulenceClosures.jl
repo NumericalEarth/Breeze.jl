@@ -5,6 +5,7 @@ export TKEBasedTurbulenceClosure,
        LocalMinimumMixingLength,
        IntegralMixingLength,
        GradientLimitedMixingLength,
+       ConditionalStabilityMixingLength,
        ConstantStabilityFunctions,
        PiecewiseStabilityFunction,
        RationalStabilityFunction,
@@ -16,6 +17,7 @@ export TKEBasedTurbulenceClosure,
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
 using KernelAbstractions: @kernel, @index
+using SpecialFunctions: erf
 
 using Oceananigans: Oceananigans
 
@@ -141,5 +143,6 @@ end
 include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
 include("richardson_number_stability_functions.jl")
+include("conditional_stability_mixing_length.jl")
 
 end # module TurbulenceClosures
