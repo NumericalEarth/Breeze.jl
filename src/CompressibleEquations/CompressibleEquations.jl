@@ -73,6 +73,9 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_
                                thermodynamic_density_name, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
+# ReactantCore is reached through Oceananigans, which binds it in `Fields`; not a direct dependency.
+using Oceananigans.Fields.ReactantCore: @trace
+
 include("time_discretizations.jl")
 include("compressible_dynamics.jl")
 include("compressible_buoyancy.jl")
