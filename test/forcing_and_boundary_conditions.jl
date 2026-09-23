@@ -1087,6 +1087,72 @@ end
     end
 end
 
+@testset "Energy flux converts at each face's own cell [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    using Oceananigans.Models: BoundaryConditionOperation
+
+    # The six `getbc` methods differ only in which boundary cell they hand the conversion. Before
+    # `Π` entered this path that index reached only `qᵛ` and density, where the wrong cell costs a
+    # percent. Over this column `Π` runs ≈0.97 at the lowest cell to ≈0.53 at the highest, so a
+    # misread cell now fails loudly instead of rounding away.
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 15000),
+                           topology=(Bounded, Bounded, Bounded))
+
+    𝒬ᵀ = FT(1000)
+    qᵗ₀ = FT(0.01)
+
+    ρE_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(𝒬ᵀ),
+                                     top    = FluxBoundaryCondition(𝒬ᵀ),
+                                     west   = FluxBoundaryCondition(𝒬ᵀ),
+                                     east   = FluxBoundaryCondition(𝒬ᵀ),
+                                     south  = FluxBoundaryCondition(𝒬ᵀ),
+                                     north  = FluxBoundaryCondition(𝒬ᵀ))
+
+    model = AtmosphereModel(grid; boundary_conditions=(; ρE=ρE_bcs))
+
+    # No θ: nothing the conversion reads depends on it. Density and pressure are the anelastic
+    # reference fields, built at construction, and `exner_function` ignores the state's θ. Moisture
+    # stays vapor-only because the default microphysics is `nothing`, so `grid_moisture_fractions`
+    # returns `MoistureMassFractions(qᵛ)` unpartitioned. Give this model a microphysics and θ does
+    # become load-bearing: `set!` would then split `qᵗ` into condensate using temperature.
+    set!(model; qᵗ=qᵗ₀)
+
+    q = MoistureMassFractions(qᵗ₀)
+    constants = model.thermodynamic_constants
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    pˢᵗ = standard_pressure(model.dynamics)
+    p = Array(interior(dynamics_pressure(model.dynamics)))
+    Nx, Ny, Nz = size(grid)
+
+    # The anelastic reference pressure is a column, so `Π` varies in `k` only. That is enough to
+    # catch any error in the vertical index, and any error that confuses a horizontal index with
+    # it; a pure i↔j or 1↔N mix-up between two horizontal faces would not show here.
+    p_cell(i, j, k) = FT(p[min(i, size(p, 1)), min(j, size(p, 2)), k])
+    Π_cell(i, j, k) = exner_function(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, p_cell(i, j, k)),
+                                     constants)
+
+    # Premise for everything below: `Π` must vary enough across the column that reading the wrong
+    # cell is visible. Without it the six assertions would pass under any index.
+    @test Π_cell(1, 1, 1) / Π_cell(1, 1, Nz) > 1.5
+
+    ρθ = thermodynamic_density(model.formulation)
+
+    # The cell each side's method must read, in the order `interior` returns it.
+    cells = (bottom = [(i, j, 1)  for i in 1:Nx, j in 1:Ny],
+             top    = [(i, j, Nz) for i in 1:Nx, j in 1:Ny],
+             west   = [(1, j, k)  for j in 1:Ny, k in 1:Nz],
+             east   = [(Nx, j, k) for j in 1:Ny, k in 1:Nz],
+             south  = [(i, 1, k)  for i in 1:Nx, k in 1:Nz],
+             north  = [(i, Ny, k) for i in 1:Nx, k in 1:Nz])
+
+    for side in (:bottom, :top, :west, :east, :south, :north)
+        Jᶿ = Array(interior(Field(BoundaryConditionOperation(ρθ, side, model))))
+        expected = [𝒬ᵀ / (cᵖᵐ * Π_cell(c...)) for c in getproperty(cells, side)]
+        @test vec(Jᶿ) ≈ vec(expected)
+    end
+
+end
+
 @testset "ThetaFluxBC getbc coverage [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     using Oceananigans.Models: BoundaryConditionOperation
