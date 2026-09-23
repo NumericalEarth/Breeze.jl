@@ -26,16 +26,31 @@ spstn_rng() = Xoshiro(BREEZE_CHECK_SEED)
     @breeze_check [option=value ...] function name(a = generator, ...) ... end
 
 `Supposition.@check` with Breeze defaults `rng = spstn_rng()`,
-`max_examples = BREEZE_CHECK_MAX_EXAMPLES`, `db = false`. Explicit options win.
-`rng` has to be passed per check because `SuppositionReport`'s `rng` keyword
-always overrides `CheckConfig.rng`.
+`max_examples = BREEZE_CHECK_MAX_EXAMPLES`, `db = false`, `record = false`.
+Explicit options win. `rng` has to be passed per check because
+`SuppositionReport`'s `rng` keyword always overrides `CheckConfig.rng`.
+
+The report is not recorded into the enclosing `@testset`: ParallelTestRunner
+serializes test sets from its workers back to the main process, which does not
+load Supposition and cannot deserialize a `SuppositionReport` (nor the property
+closures it holds). The outcome is asserted with a plain `@test` instead;
+Supposition still prints a failing or erroring report, with the shrunk
+counterexample, when the check finishes.
 """
 macro breeze_check(exprs...)
     given = Set(e.args[1] for e in exprs if Meta.isexpr(e, :(=)) && e.args[1] isa Symbol)
-    defaults = (:(rng = spstn_rng()), :(max_examples = BREEZE_CHECK_MAX_EXAMPLES), :(db = false))
+    defaults = (:(rng = spstn_rng()), :(max_examples = BREEZE_CHECK_MAX_EXAMPLES), :(db = false), :(record = false))
     options = [d for d in defaults if !(d.args[1] in given)]
-    return esc(:(Supposition.@check $(options...) $(exprs...)))
+    return esc(quote
+        local report = Supposition.@check $(options...) $(exprs...)
+        Test.@test spstn_passed(report)
+    end)
 end
+
+# `Supposition.Pass` is the only passing outcome; `Fail` (a counterexample) and `Error`
+# (an exception) have already been printed by Supposition when the check finished.
+spstn_passed(report::Supposition.SuppositionReport) =
+    !isnothing(report.result) && something(report.result) isa Supposition.Pass
 
 # Relative tolerance for closed-form identities, scaled by machine epsilon so one
 # property serves Float32 and Float64.
