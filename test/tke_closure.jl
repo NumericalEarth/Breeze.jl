@@ -602,9 +602,11 @@ end
 ##### Richardson-number-dependent stability functions
 #####
 
-using Breeze.TurbulenceClosures: stability_ramp, Riᶜᶜᶠ
+using Breeze.TurbulenceClosures: stability_ramp, rational_stability, Riᶜᶜᶠ,
+                                 momentum_stability_function, tracer_stability_function,
+                                 tke_stability_function, dissipation_stability_function
 
-@testset "RiDependentStabilityFunctions [$(FT)]" for FT in test_float_types()
+@testset "PiecewiseStabilityFunction [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 32
     Lz = 1000
@@ -614,9 +616,13 @@ using Breeze.TurbulenceClosures: stability_ramp, Riᶜᶜᶠ
     interior_faces = 2:Nz
 
     @testset "CATKE's values and the constants they imply" begin
-        sf = RiDependentStabilityFunctions()
+        sf = PiecewiseStabilityFunction()
         @test isbits(sf)
+        @test sf isa PiecewiseStabilityFunction{FT}
+        # The deprecated name is the same type, so old scripts construct and dispatch unchanged
+        @test RiDependentStabilityFunctions === PiecewiseStabilityFunction
         @test sf isa RiDependentStabilityFunctions{FT}
+        @test RiDependentStabilityFunctions() === sf
         @test (sf.Cᵘ⁻, sf.Cᵘ⁰, sf.Cᵘ⁺) == FT.((0.370, 0.361, 0.242))
         @test (sf.Cᶜ⁻, sf.Cᶜ⁰, sf.Cᶜ⁺) == FT.((0.572, 0.369, 0.098))
         @test (sf.Cᵉ⁻, sf.Cᵉ⁰, sf.Cᵉ⁺) == FT.((1.447, 7.863, 0.548))
@@ -625,10 +631,10 @@ using Breeze.TurbulenceClosures: stability_ramp, Riᶜᶜᶠ
 
         parameters = catke_parameters()
         @test parameters.mixing_length.Cˢ == 1.131
-        @test parameters.stability_functions isa RiDependentStabilityFunctions
+        @test parameters.stability_functions isa PiecewiseStabilityFunction
         closure = TKEBasedTurbulenceClosure(; parameters...)
         @test closure.mixing_length.Cˢ === FT(1.131)
-        @test closure.stability_functions isa RiDependentStabilityFunctions{FT}
+        @test closure.stability_functions isa PiecewiseStabilityFunction{FT}
         @test isbits(closure)
 
         # What CATKE's neutral values mean in the atmospheric surface layer: a von Kármán constant
@@ -644,15 +650,15 @@ using Breeze.TurbulenceClosures: stability_ramp, Riᶜᶜᶠ
         @test sf.Cᵘ⁺ / sf.Cᶜ⁺ ≈ 2.47 atol=0.01
 
         # Keyword promotion and float type
-        mixed = RiDependentStabilityFunctions(Cᵘ⁻ = 1, Riᵟ = 2)
+        mixed = PiecewiseStabilityFunction(Cᵘ⁻ = 1, Riᵟ = 2)
         @test mixed.Cᵘ⁻ === FT(1)
         @test mixed.Riᵟ === FT(2)
         @test mixed.Cᵘ⁰ === FT(0.361)
-        closure32 = TKEBasedTurbulenceClosure(Float32; stability_functions = RiDependentStabilityFunctions())
-        @test closure32.stability_functions isa RiDependentStabilityFunctions{Float32}
+        closure32 = TKEBasedTurbulenceClosure(Float32; stability_functions = PiecewiseStabilityFunction())
+        @test closure32.stability_functions isa PiecewiseStabilityFunction{Float32}
 
         str = sprint(show, closure)
-        @test occursin("RiDependentStabilityFunctions", str)
+        @test occursin("PiecewiseStabilityFunction", str)
         @test occursin("Ri⁰", str)
         @test occursin("Ri → ∞", sprint(show, sf))
     end
@@ -741,6 +747,280 @@ using Breeze.TurbulenceClosures: stability_ramp, Riᶜᶜᶠ
 
     @testset "with the moist static stability" begin
         closure = TKEBasedTurbulenceClosure(; catke_parameters()..., static_stability = MoistStaticStability())
+        microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+        model = AtmosphereModel(grid; closure, microphysics, advection = nothing)
+        set!(model; θ = 288, qᵗ = z -> ifelse(z < Lz / 2, 4e-3, 13e-3), u = z -> 0.005 * z)
+        set_tke!(model, FT(0.1))
+        for _ in 1:5
+            time_step!(model, 10)
+        end
+        @test all(isfinite, column(model.tracers.ρe))
+        @test all(isfinite, column(model.closure_fields.Kᶜ))
+    end
+end
+
+#####
+##### Rational stability functions
+#####
+
+@testset "RationalStabilityFunction [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 32
+    Lz = 1000
+    grid = RectilinearGrid(default_arch; size = Nz, z = (0, Lz), topology = (Flat, Flat, Bounded))
+    zf = znodes(grid, Face())
+    zc = znodes(grid, Center())
+    interior_faces = 2:Nz
+
+    Riᶠ(model) = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid,
+                                                                           model.velocities,
+                                                                           model.closure_fields.N²)))
+
+    @testset "construction, defaults and validation" begin
+        sf = RationalStabilityFunction()
+        @test isbits(sf) # a GPU kernel can only carry an isbits closure
+        @test sf isa RationalStabilityFunction{FT}
+
+        # The twelve endpoints are CATKE's, carried over from the piecewise family unchanged
+        piecewise = PiecewiseStabilityFunction()
+        for name in (:Cᵘ⁻, :Cᵘ⁰, :Cᵘ⁺, :Cᶜ⁻, :Cᶜ⁰, :Cᶜ⁺, :Cᵉ⁻, :Cᵉ⁰, :Cᵉ⁺, :Cᴰ⁻, :Cᴰ⁰, :Cᴰ⁺)
+            @test getfield(sf, name) === getfield(piecewise, name)
+        end
+
+        # The transition scales default to the midpoint of the piecewise ramp, the exponents to one
+        @test sf.Ri⁻ === FT(0.764)
+        @test sf.Ri⁺ === FT(0.764)
+        @test sf.Ri⁺ ≈ piecewise.Ri⁰ + piecewise.Riᵟ / 2 atol=1e-3
+        @test sf.p⁻ === FT(1)
+        @test sf.p⁺ === FT(1)
+
+        # Fourteen free stability coefficients with the exponents fixed, sixteen fields in all
+        @test length(fieldnames(RationalStabilityFunction)) == 16
+
+        # Mixed integer and float keyword arguments are promoted, as elsewhere in the closure
+        mixed = RationalStabilityFunction(Cᵘ⁻ = 1, Ri⁺ = 2, p⁺ = 3)
+        @test mixed.Cᵘ⁻ === FT(1)
+        @test mixed.Ri⁺ === FT(2)
+        @test mixed.p⁺ === FT(3)
+        @test mixed.Cᵘ⁰ === FT(0.361)
+
+        closure = TKEBasedTurbulenceClosure(stability_functions = RationalStabilityFunction())
+        @test closure.stability_functions isa RationalStabilityFunction{FT}
+        @test isbits(closure)
+        closure32 = TKEBasedTurbulenceClosure(Float32; stability_functions = RationalStabilityFunction())
+        @test closure32.stability_functions isa RationalStabilityFunction{Float32}
+        closure64 = TKEBasedTurbulenceClosure(Float64; stability_functions = RationalStabilityFunction())
+        @test closure64.stability_functions isa RationalStabilityFunction{Float64}
+
+        str = sprint(show, closure)
+        @test occursin("RationalStabilityFunction", str)
+        @test occursin("transition scales", str)
+        @test occursin("exponents", str)
+        @test occursin("Ri → -∞", sprint(show, sf))
+
+        # Every endpoint, both scales and both exponents must be positive
+        @test_throws ArgumentError RationalStabilityFunction(Cᵘ⁰ = 0)
+        @test_throws ArgumentError RationalStabilityFunction(Cᴰ⁺ = -1)
+        @test_throws ArgumentError RationalStabilityFunction(Cᵉ⁻ = NaN)
+        @test_throws ArgumentError RationalStabilityFunction(Ri⁻ = 0)
+        @test_throws ArgumentError RationalStabilityFunction(Ri⁺ = -0.5)
+        @test_throws ArgumentError RationalStabilityFunction(p⁻ = 0)
+        @test_throws ArgumentError RationalStabilityFunction(p⁺ = -2)
+    end
+
+    @testset "the rational shape and its limits" begin
+        C⁻, C⁰, C⁺, Ri⁻, Ri⁺ = FT.((1, 2, 5, 0.5, 2))
+        S(Ri) = rational_stability(FT(Ri), C⁻, C⁰, C⁺, Ri⁻, Ri⁺, one(FT), one(FT))
+
+        # The three endpoints, exactly: neutral at Ri = 0 and the two asymptotes at ±∞
+        @test S(0) === C⁰
+        @test S(-0.0) === C⁰
+        @test S(Inf) === C⁺
+        @test S(-Inf) === C⁻
+        @test S(0) isa FT
+
+        # Halfway to each asymptote at that branch's transition scale
+        @test S(Ri⁺) ≈ (C⁰ + C⁺) / 2
+        @test S(-Ri⁻) ≈ (C⁰ + C⁻) / 2
+        # and nine tenths of the way at nine times the scale
+        @test S(9Ri⁺) ≈ C⁰ + 9 * (C⁺ - C⁰) / 10
+        @test S(-9Ri⁻) ≈ C⁰ + 9 * (C⁻ - C⁰) / 10
+
+        # p = 1 is the closed form S = C⁰ + (C - C⁰) |Ri| / (|Ri| + Ri^±)
+        for Ri in FT.((0.01, 0.3, 1, 7, 250))
+            @test S(Ri) ≈ C⁰ + (C⁺ - C⁰) * Ri / (Ri + Ri⁺)
+            @test S(-Ri) ≈ C⁰ + (C⁻ - C⁰) * Ri / (Ri + Ri⁻)
+        end
+
+        # The two branches are independent: the stable scale and exponent do not touch Ri < 0
+        wider = rational_stability(FT(-1), C⁻, C⁰, C⁺, Ri⁻, 100Ri⁺, one(FT), FT(4))
+        @test wider ≈ S(-1)
+        narrower = rational_stability(FT(1), C⁻, C⁰, C⁺, 100Ri⁻, Ri⁺, FT(4), one(FT))
+        @test narrower ≈ S(1)
+
+        # Monotone in |Ri| on each branch, and bounded by the endpoints it travels between
+        stable = [S(Ri) for Ri in FT.((0, 0.1, 0.5, 1, 2, 5, 20, 1000))]
+        @test issorted(stable)                          # C⁰ < C⁺ here, so S rises
+        @test all(C⁰ .≤ stable .≤ C⁺)
+        unstable = [S(-Ri) for Ri in FT.((0, 0.1, 0.5, 1, 2, 5, 20, 1000))]
+        @test issorted(unstable, rev = true)            # C⁻ < C⁰ here, so S falls
+        @test all(C⁻ .≤ unstable .≤ C⁰)
+
+        # Nothing overflows: huge and tiny finite Richardson numbers, and the float extremes
+        extremes = FT.((floatmax(FT), -floatmax(FT), sqrt(floatmax(FT)), -sqrt(floatmax(FT)),
+                        floatmin(FT), -floatmin(FT), nextfloat(zero(FT)), -nextfloat(zero(FT)),
+                        1e30, -1e30, 1e-30, -1e-30, Inf, -Inf, 0))
+        @test all(isfinite, S.(extremes))
+        @test !any(isnan, S.(extremes))
+        @test all(min(C⁻, C⁰) .≤ S.(extremes) .≤ max(C⁺, C⁰))
+        @test S(floatmax(FT)) ≈ C⁺
+        @test S(-floatmax(FT)) ≈ C⁻
+        @test S(nextfloat(zero(FT))) ≈ C⁰
+        @test S(-nextfloat(zero(FT))) ≈ C⁰
+
+        # Exponents other than one keep the endpoints and the halfway point, and only sharpen
+        # or flatten the transition around the scale
+        for p in FT.((0.5, 1, 2, 4))
+            Sᵖ(Ri) = rational_stability(FT(Ri), C⁻, C⁰, C⁺, Ri⁻, Ri⁺, p, p)
+            @test Sᵖ(0) === C⁰
+            @test Sᵖ(Inf) === C⁺
+            @test Sᵖ(-Inf) === C⁻
+            @test Sᵖ(Ri⁺) ≈ (C⁰ + C⁺) / 2
+            @test Sᵖ(-Ri⁻) ≈ (C⁰ + C⁻) / 2
+            @test all(isfinite, Sᵖ.(extremes))
+        end
+        # Sharper: at p = 4 the function is closer to C⁰ below the scale and closer to C⁺ above it
+        sharp(Ri) = rational_stability(FT(Ri), C⁻, C⁰, C⁺, Ri⁻, Ri⁺, FT(4), FT(4))
+        @test sharp(Ri⁺ / 2) < S(Ri⁺ / 2)
+        @test sharp(2Ri⁺) > S(2Ri⁺)
+    end
+
+    @testset "the constant submodel is exact" begin
+        # Three coinciding endpoints give that constant at every Richardson number, with no limit
+        # to take: the term multiplying the shape factor is identically zero
+        C = FT(0.37)
+        S(Ri) = rational_stability(FT(Ri), C, C, C, FT(0.764), FT(0.764), one(FT), one(FT))
+        Ris = FT.((-Inf, -1e30, -3, -0.1, 0, 0.1, 3, 1e30, Inf, floatmax(FT), -floatmax(FT)))
+        @test all(S.(Ris) .=== C)
+
+        # and the whole closure then reproduces `ConstantStabilityFunctions` in a model
+        constants = (Cᵘ = 0.149, Cᶜ = 0.201, Cᵉ = 0.298, Cᴰ = 0.388)
+        rational = RationalStabilityFunction(Cᵘ⁻ = constants.Cᵘ, Cᵘ⁰ = constants.Cᵘ, Cᵘ⁺ = constants.Cᵘ,
+                                             Cᶜ⁻ = constants.Cᶜ, Cᶜ⁰ = constants.Cᶜ, Cᶜ⁺ = constants.Cᶜ,
+                                             Cᵉ⁻ = constants.Cᵉ, Cᵉ⁰ = constants.Cᵉ, Cᵉ⁺ = constants.Cᵉ,
+                                             Cᴰ⁻ = constants.Cᴰ, Cᴰ⁰ = constants.Cᴰ, Cᴰ⁺ = constants.Cᴰ)
+
+        for Ri in FT.((-Inf, -2, 0, 0.3, 2, Inf))
+            @test momentum_stability_function(rational, Ri) === FT(constants.Cᵘ)
+            @test tracer_stability_function(rational, Ri) === FT(constants.Cᶜ)
+            @test tke_stability_function(rational, Ri) === FT(constants.Cᵉ)
+            @test dissipation_stability_function(rational, Ri) === FT(constants.Cᴰ)
+        end
+
+        # A stratified, sheared column, where Ri varies with height, run with each of the two
+        θᵢ(z) = 300 + 0.01z
+        uᵢ(z) = 0.02z
+        fields = map((ConstantStabilityFunctions(; constants...), rational)) do stability_functions
+            closure = TKEBasedTurbulenceClosure(; stability_functions)
+            model = AtmosphereModel(grid; closure, advection = nothing)
+            set!(model; θ = θᵢ, u = uᵢ)
+            set_tke!(model, FT(0.5))
+            (Kᵘ = column(model.closure_fields.Kᵘ), Kᶜ = column(model.closure_fields.Kᶜ),
+             Kᵉ = column(model.closure_fields.Kᵉ), Lᵉ = column(model.closure_fields.Lᵉ))
+        end
+        @test fields[1].Kᵘ == fields[2].Kᵘ
+        @test fields[1].Kᶜ == fields[2].Kᶜ
+        @test fields[1].Kᵉ == fields[2].Kᵉ
+        @test fields[1].Lᵉ == fields[2].Lᵉ
+    end
+
+    @testset "in a model: neutral, stable and unstable columns" begin
+        sf = RationalStabilityFunction()
+        closure = TKEBasedTurbulenceClosure(; mixing_length = GradientLimitedMixingLength(Cˢ = 1.131),
+                                              stability_functions = sf)
+        Cˢ = closure.mixing_length.Cˢ
+        e₀ = FT(0.5)
+        model = AtmosphereModel(grid; closure, advection = nothing)
+
+        # Neutral shear: Ri = 0, so the neutral endpoints exactly, with no plateau needed to get
+        # them, and the dissipation Cᴰ⁰ √e / (Cˢ z) — Sᴰ multiplies ε, it does not divide it
+        set!(model; θ = 300, u = z -> 0.01 * z)
+        set_tke!(model, e₀)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        Kᵉ = column(model.closure_fields.Kᵉ)
+        Lᵉ = column(model.closure_fields.Lᵉ)
+        @test all(Riᶠ(model)[interior_faces] .== 0)
+        @test all(Kᵘ[interior_faces] .≈ sf.Cᵘ⁰ .* Cˢ .* zf[interior_faces] .* sqrt(e₀))
+        @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᶜ⁰ / sf.Cᵘ⁰)
+        @test all(Kᵉ[interior_faces] ./ Kᵘ[interior_faces] .≈ sf.Cᵉ⁰ / sf.Cᵘ⁰)
+        @test all(Lᵉ .≈ -sf.Cᴰ⁰ * sqrt(e₀) ./ (Cˢ .* zc))
+
+        # Stable stratification with weak shear: the ratio Kᶜ/Kᵘ follows the rational functions
+        # pointwise, and lies between its neutral and its stable value rather than at either
+        set!(model; θ = z -> 300 + 0.03 * z, u = z -> 1e-3 * z)
+        set_tke!(model, e₀)
+        Ri = Riᶠ(model)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        @test all(Ri[interior_faces] .> 0)
+        expected = [tracer_stability_function(sf, r) / momentum_stability_function(sf, r) for r in Ri[interior_faces]]
+        @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ expected)
+        # Kᶜ/Kᵘ = 1/Pr falls with Ri, and at a finite Ri has not yet reached its stable limit
+        @test all(sf.Cᶜ⁺ / sf.Cᵘ⁺ .< expected .< sf.Cᶜ⁰ / sf.Cᵘ⁰)
+
+        # Unstable stratification with shear: the unstable branch, again pointwise, and again
+        # short of its asymptote at a finite Ri
+        set!(model; θ = z -> 300 - 0.01 * z, u = z -> 0.01 * z)
+        set_tke!(model, e₀)
+        Ri = Riᶠ(model)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        @test all(Ri[interior_faces] .< 0)
+        @test all(isfinite, Ri[interior_faces])
+        expected = [tracer_stability_function(sf, r) / momentum_stability_function(sf, r) for r in Ri[interior_faces]]
+        @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ expected)
+        @test all(sf.Cᶜ⁰ / sf.Cᵘ⁰ .< expected .< sf.Cᶜ⁻ / sf.Cᵘ⁻)
+    end
+
+    @testset "a windless column with stable and unstable layers stays finite" begin
+        # No shear, so Ri = ±∞ at every interface: the rational functions must return their
+        # asymptotes there rather than the ∞/∞ of the naive xᵖ/(1 + xᵖ)
+        sf = RationalStabilityFunction()
+        closure = TKEBasedTurbulenceClosure(stability_functions = sf)
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        θᵢ(z) = 300 - 0.005 * min(z, Lz / 2) + 0.01 * max(0, z - Lz / 2)
+        set!(model; θ = θᵢ)
+        set_tke!(model, FT(0.5))
+
+        Ri = Riᶠ(model)
+        @test all(isinf, Ri[interior_faces])
+        @test any(Ri[interior_faces] .< 0) && any(Ri[interior_faces] .> 0)
+
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        Lᵉ = column(model.closure_fields.Lᵉ)
+        @test all(isfinite, Kᵘ)
+        @test all(isfinite, Kᶜ)
+        @test all(isfinite, Lᵉ)
+        @test all(Lᵉ .< 0)
+        # The asymptotes are reached exactly where the shear vanishes
+        stable_faces = [k for k in interior_faces if Ri[k] > 0]
+        unstable_faces = [k for k in interior_faces if Ri[k] < 0]
+        @test all(Kᶜ[stable_faces] ./ Kᵘ[stable_faces] .≈ sf.Cᶜ⁺ / sf.Cᵘ⁺)
+        @test all(Kᶜ[unstable_faces] ./ Kᵘ[unstable_faces] .≈ sf.Cᶜ⁻ / sf.Cᵘ⁻)
+
+        for _ in 1:10
+            time_step!(model, 10)
+        end
+        ρe = column(model.tracers.ρe)
+        @test all(isfinite, ρe)
+        @test all(ρe .≥ 0)
+    end
+
+    @testset "with the moist static stability" begin
+        closure = TKEBasedTurbulenceClosure(stability_functions = RationalStabilityFunction(),
+                                            static_stability = MoistStaticStability())
         microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
         model = AtmosphereModel(grid; closure, microphysics, advection = nothing)
         set!(model; θ = 288, qᵗ = z -> ifelse(z < Lz / 2, 4e-3, 13e-3), u = z -> 0.005 * z)

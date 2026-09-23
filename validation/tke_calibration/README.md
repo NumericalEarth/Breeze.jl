@@ -37,10 +37,15 @@ The observation vector of a column is its time-mean θˡ (K), qᵗ, qˡ (g kg⁻
 are scored alike; the LES targets are regridded the same way. Observation noise per cell: 0.25 K, 0.25 and
 0.1 g kg⁻¹, 0.5 m s⁻¹. Rain is diagnosed but not scored. Turbulent fluxes and TKE are not targets.
 
-**Parameters.** `RiDependentSpace`, 17: the twelve endpoints of `RiDependentStabilityFunctions`, the
-transition Ri⁰ and Riᵟ, the wall coefficient Cˢ of `GradientLimitedMixingLength`, and two surface-TKE-flux
-coefficients (Jᵉ = Cᵂu★ u★³ + Cᵂʷ wΔ³, zero in the default closure). `ConstantSpace`, 7:
-`ConstantStabilityFunctions(Cᵘ, Cᶜ, Cᵉ, Cᴰ)`, Cˢ and the two flux coefficients. Priors are independent
+**Parameters.** `RiDependentSpace`, 17: the twelve endpoints of `PiecewiseStabilityFunction` (formerly
+`RiDependentStabilityFunctions`; the space keeps its old name so that stored checkpoints, which record
+`summary(space)`, still read back), the transition Ri⁰ and Riᵟ, the wall coefficient Cˢ of
+`GradientLimitedMixingLength`, and two surface-TKE-flux coefficients (Jᵉ = Cᵂu★ u★³ + Cᵂʷ wΔ³, zero in the
+default closure). `RationalSpace`, also 17: the same twelve endpoints of `RationalStabilityFunction` with
+its transition scales Ri⁻ and Ri⁺ in place of Ri⁰ and Riᵟ, the exponents p⁻ and p⁺ held fixed at one, then
+Cˢ and the two flux coefficients. The two 17-parameter spaces cannot be told apart by a bare count, so
+`space_of(17)` stays `RiDependentSpace` and `RationalSpace` must be named; no campaign uses it yet.
+`ConstantSpace`, 7: `ConstantStabilityFunctions(Cᵘ, Cᶜ, Cᵉ, Cᴰ)`, Cˢ and the two flux coefficients. Priors are independent
 constrained Gaussians on (0, ∞) centred on the defaults (1 for the flux coefficients), standard deviation
 half the centre.
 

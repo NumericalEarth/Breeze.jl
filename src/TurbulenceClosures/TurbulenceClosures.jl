@@ -6,7 +6,9 @@ export TKEBasedTurbulenceClosure,
        IntegralMixingLength,
        GradientLimitedMixingLength,
        ConstantStabilityFunctions,
-       RiDependentStabilityFunctions,
+       PiecewiseStabilityFunction,
+       RationalStabilityFunction,
+       RiDependentStabilityFunctions, # deprecated alias of PiecewiseStabilityFunction
        catke_parameters,
        DryStaticStability,
        MoistStaticStability

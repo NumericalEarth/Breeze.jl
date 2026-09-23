@@ -134,7 +134,8 @@ between a stratification length that shuts the mixing off and one that lets it t
 
 The stability functions are either constants ([`ConstantStabilityFunctions`](@ref), the default),
 ``S^u = Cᵘ``, ``S^c = Cᶜ``, ``S^e = Cᵉ``, ``S^D = Cᴰ``, or functions of the gradient Richardson
-number ([`RiDependentStabilityFunctions`](@ref)). Three consequences of the constants are worth
+number ([`PiecewiseStabilityFunction`](@ref) or [`RationalStabilityFunction`](@ref)). Three
+consequences of the constants are worth
 stating, because they are what the constants mean:
 
 - the turbulent Prandtl number is ``Pr = K^u / K^c = Cᵘ / Cᶜ``, and the TKE Schmidt number
@@ -151,7 +152,7 @@ Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiin
 for this normalization of the mixing length; they give ``κ = 0.40``, ``e / u_\star² = 4.2``,
 ``Pr = 0.74`` and ``Ri^\dagger = 0.25``. They are placeholders for calibration.
 
-[`RiDependentStabilityFunctions`](@ref) follow CATKE ([Wagner et al. 2025](@cite Wagner25catke)):
+[`PiecewiseStabilityFunction`](@ref) follows CATKE ([Wagner et al. 2025](@cite Wagner25catke)):
 each of ``S^u, S^c, S^e, S^D`` is a constant ``C⁻`` in unstable stratification, its neutral value
 ``C⁰`` from ``Ri = 0`` to the onset ``Ri⁰`` of the stable transition, and a linear ramp over the
 width ``Riᵟ`` to a stable asymptote ``C⁺``,
@@ -178,7 +179,7 @@ closure = TKEBasedTurbulenceClosure(; catke_parameters()...)
 closure.stability_functions
 
 # output
-RiDependentStabilityFunctions{Float64}
+PiecewiseStabilityFunction{Float64}
 ├── Ri < 0 (Cᵘ⁻, Cᶜ⁻, Cᵉ⁻, Cᴰ⁻): 0.37, 0.572, 1.447, 0.923
 ├── Ri = 0 (Cᵘ⁰, Cᶜ⁰, Cᵉ⁰, Cᴰ⁰): 0.361, 0.369, 7.863, 1.604
 ├── Ri → ∞ (Cᵘ⁺, Cᶜ⁺, Cᵉ⁺, Cᴰ⁺): 0.242, 0.098, 0.548, 0.579
@@ -194,13 +195,52 @@ to be expected. In the neutral surface layer the two coefficient sets imply
 | | ``κ`` | ``e / u_\star²`` | ``Pr`` | ``K^e / K^u`` | ``Ri^\dagger`` |
 |:--|:--|:--|:--|:--|:--|
 | `ConstantStabilityFunctions` (Nakanishi–Niino) | 0.40 | 4.2 | 0.74 | 2.0 | 0.25 |
-| `RiDependentStabilityFunctions` (CATKE, ``Ri = 0``) | 0.47 | 1.3 | 0.98 | 21.8 | 0.18 |
+| `PiecewiseStabilityFunction` (CATKE, ``Ri = 0``) | 0.47 | 1.3 | 0.98 | 21.8 | 0.18 |
 
 with ``κ = Cˢ (C^{u}{}^3 / C^D)^{1/4}``, ``e / u_\star² = 1 / \sqrt{C^u C^D}``, ``Pr = C^u / C^c``
 and ``Ri^\dagger = C^u / (C^c + C^D)`` evaluated at the neutral values. The atmospheric surface
 layer constrains the first three well, which is why the constants remain the default; in stable
 stratification CATKE's Prandtl number rises to ``C^{u+} / C^{c+} = 2.5``. A convective length
 scale, a surface flux of turbulent kinetic energy and a non-local flux are natural extensions.
+
+[`RationalStabilityFunction`](@ref) keeps those same twelve endpoints and reaches them without a
+plateau or a threshold: each function leaves its neutral value immediately, in both directions, and
+saturates on the two transition scales ``Ri⁻`` and ``Ri⁺`` shared by all four,
+
+```math
+S(Ri) = C⁰ + (C^\pm - C⁰) \frac{x^p}{1 + x^p}, \qquad x = \frac{|Ri|}{Ri^\pm},
+```
+
+with the branch ``\pm`` taken from the sign of ``Ri``. The unstable value ``C⁻`` is now the limit as
+``Ri → -∞`` rather than the value at every ``Ri < 0``, so unstable air mixes less vigorously near
+neutral and the unstable and stable sides still carry independent shapes. Counting free coefficients,
+the twelve endpoints and the two scales make fourteen, the same as the piecewise family's twelve plus
+``Ri⁰`` and ``Riᵟ``; the exponents ``p⁻`` and ``p⁺`` default to one and are held fixed, and freeing
+them would make sixteen. At ``p = 1`` the shape is ``|Ri| / (|Ri| + Ri^\pm)``, halfway to the
+asymptote at ``|Ri| = Ri^\pm`` and nine tenths of the way at ``9 Ri^\pm``.
+
+```jldoctest
+using Breeze
+
+closure = TKEBasedTurbulenceClosure(stability_functions = RationalStabilityFunction())
+closure.stability_functions
+
+# output
+RationalStabilityFunction{Float64}
+├── Ri → -∞ (Cᵘ⁻, Cᶜ⁻, Cᵉ⁻, Cᴰ⁻): 0.37, 0.572, 1.447, 0.923
+├── Ri = 0  (Cᵘ⁰, Cᶜ⁰, Cᵉ⁰, Cᴰ⁰): 0.361, 0.369, 7.863, 1.604
+├── Ri → ∞  (Cᵘ⁺, Cᶜ⁺, Cᵉ⁺, Cᴰ⁺): 0.242, 0.098, 0.548, 0.579
+├── transition scales: Ri⁻ = 0.764, Ri⁺ = 0.764
+└── exponents: p⁻ = 1.0, p⁺ = 1.0
+```
+
+Both families reduce exactly to constants when each function's three endpoints coincide, so
+`ConstantStabilityFunctions` is nested in either. The rational family is continuous at ``Ri = 0``,
+where the piecewise one steps from ``C⁻`` to ``C⁰``, but it is differentiable there only for
+``p > 1``: at ``p = 1`` the one-sided slopes are ``+(C⁺ - C⁰)/Ri⁺`` and ``-(C⁻ - C⁰)/Ri⁻`` and
+generally disagree, and for ``p < 1`` they are infinite. The defaults carry CATKE's endpoints over unchanged, with
+``Ri⁻ = Ri⁺ = 0.764``, the midpoint of the piecewise ramp; they are a starting point, not a
+calibration of this shape.
 
 ### Numerics
 

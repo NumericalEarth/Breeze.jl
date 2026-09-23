@@ -1,7 +1,7 @@
 # Batching independent calibrations into one forward map is only valid if a column's result does not
 # depend on which other columns share the grid. `test/gpu_pipeline.jl` establishes that for
 # `ConstantSpace`. The column indexing is shared, but the closure *array* is not: `RiDependentSpace`
-# builds `RiDependentStabilityFunctions` per column, a larger struct with a different adapted type on
+# builds `PiecewiseStabilityFunction` per column, a larger struct with a different adapted type on
 # the device, so the property is worth demonstrating rather than inherited.
 #
 # Six parameter sets are run as one ensemble and as two ensembles of three, and the time means are

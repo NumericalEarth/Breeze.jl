@@ -21,7 +21,7 @@ export PROTOCOL_VERSION,
        ColumnEnsembleProblem, MultiResolutionProblem, forward_map, observations, run_ensemble,
        les_faces, uniform_faces, hindcast_faces, regrid_column, regrid_columns,
        observable_variables, default_variables, default_observation_noise,
-       ParameterSpace, RiDependentSpace, ConstantSpace, named, space_of,
+       ParameterSpace, RiDependentSpace, RationalSpace, ConstantSpace, all_parameter_spaces, named, space_of,
        Parameters, default_parameters, catke_calibration_parameters, prior_center, closure_from, parameter_names,
        run_eki, evaluate, rmse_table, replay, prior_distribution,
        DataMisfitController, NesterovAccelerator, DefaultAccelerator, SECNice, NoLocalization
@@ -195,13 +195,14 @@ end
 ##### Parameter spaces
 #####
 
-# The physical parameters of the closure: the coefficients of its stability functions — twelve for the
-# Richardson-number-dependent functions (momentum, tracers, TKE and dissipation, each in unstable air, at
-# neutral and in the stable limit, with the onset and width of their stable transition) or four constants —
-# and the wall coefficient of the mixing length. Two more parameters set a surface flux of turbulent kinetic
-# energy, CATKE's Jᵉ = Cᵂu★ u★³ + Cᵂʷ wΔ³ with wΔ³ = Δz Jᵇ the convective velocity of the first cell: the
-# production inside the first grid cell that the resolved shear and buoyancy cannot carry. Zero flux is the
-# default closure.
+# The physical parameters of the closure: the coefficients of its stability functions — twelve for either
+# Richardson-number-dependent family (momentum, tracers, TKE and dissipation, each in unstable air, at
+# neutral and in the stable limit, plus the two coefficients that place the transition: the onset and width
+# of the piecewise ramp, or the unstable and stable transition scales of the rational form) or four
+# constants — and the wall coefficient of the mixing length. Two more parameters set a surface flux of
+# turbulent kinetic energy, CATKE's Jᵉ = Cᵂu★ u★³ + Cᵂʷ wΔ³ with wΔ³ = Δz Jᵇ the convective velocity of
+# the first cell: the production inside the first grid cell that the resolved shear and buoyancy cannot
+# carry. Zero flux is the default closure.
 
 """
 A set of free parameters of `TKEBasedTurbulenceClosure`: names, defaults, the prior's center and the closure
@@ -212,9 +213,24 @@ abstract type ParameterSpace end
 
 """
 The 17 parameters of the Richardson-number-dependent closure: the twelve endpoints of
-`RiDependentStabilityFunctions`, the transition Ri⁰ and Riᵟ, Cˢ, Cᵂu★ and Cᵂʷ.
+`PiecewiseStabilityFunction` (formerly `RiDependentStabilityFunctions`), the transition Ri⁰ and Riᵟ,
+Cˢ, Cᵂu★ and Cᵂʷ.
 """
 struct RiDependentSpace <: ParameterSpace end
+
+"""
+The parameters of the rational closure: the twelve endpoints of `RationalStabilityFunction`, its two
+transition scales Ri⁻ and Ri⁺, then the mixing-length and surface-TKE-flux coefficients — here Cˢ, Cᵂu★
+and Cᵂʷ, seventeen in all. The exponents p⁻ and p⁺ stay fixed at one and are not free parameters.
+
+The trailing mixing-length entries are the only part of this space tied to the mixing-length
+formulation: a split-slope `GradientLimitedMixingLength` adds `Cⁱ` beside `Cˢ` here and in
+`closure_from`, and nothing else changes — `RationalStabilityFunction` itself is independent of the
+mixing length. Nothing keys off the size, and `space_of` finds a space by its names, so growing this
+one is local. On this base it happens to share its size with `RiDependentSpace`, which is why the
+count-based `space_of(::Int)` still resolves 17 to `RiDependentSpace` and this space must be named.
+"""
+struct RationalSpace <: ParameterSpace end
 
 """
 The 7 parameters of the constant-coefficient closure, `ConstantStabilityFunctions` in Nakanishi–Niino's
@@ -223,27 +239,50 @@ form: Cᵘ, Cᶜ, Cᵉ, Cᴰ, Cˢ, Cᵂu★ and Cᵂʷ.
 struct ConstantSpace <: ParameterSpace end
 
 Base.summary(::RiDependentSpace) = "RiDependentSpace"
+Base.summary(::RationalSpace) = "RationalSpace"
 Base.summary(::ConstantSpace) = "ConstantSpace"
 Base.show(io::IO, space::ParameterSpace) = print(io, summary(space))
 
 parameter_names(::RiDependentSpace) = (:Cᵘ⁻, :Cᵘ⁰, :Cᵘ⁺, :Cᶜ⁻, :Cᶜ⁰, :Cᶜ⁺, :Cᵉ⁻, :Cᵉ⁰, :Cᵉ⁺, :Cᴰ⁻, :Cᴰ⁰, :Cᴰ⁺, :Ri⁰, :Riᵟ, :Cˢ, :Cᵂu★, :Cᵂʷ)
+parameter_names(::RationalSpace) = (:Cᵘ⁻, :Cᵘ⁰, :Cᵘ⁺, :Cᶜ⁻, :Cᶜ⁰, :Cᶜ⁺, :Cᵉ⁻, :Cᵉ⁰, :Cᵉ⁺, :Cᴰ⁻, :Cᴰ⁰, :Cᴰ⁺, :Ri⁻, :Ri⁺, :Cˢ, :Cᵂu★, :Cᵂʷ)
 parameter_names(::ConstantSpace) = (:Cᵘ, :Cᶜ, :Cᵉ, :Cᴰ, :Cˢ, :Cᵂu★, :Cᵂʷ)
 parameter_names() = parameter_names(RiDependentSpace())
 
 """The named tuple of `values` in `space`."""
 named(space::ParameterSpace, values) = NamedTuple{parameter_names(space)}(Tuple(Float64.(collect(values))))
 
-"""The parameter space with `n` parameters."""
+"""
+The parameter space with `n` parameters. `RiDependentSpace` and `RationalSpace` both have 17, so a bare
+count cannot tell them apart and resolves to `RiDependentSpace`, the space of the running campaigns;
+name `RationalSpace` explicitly, or pass a `NamedTuple`, whose names do distinguish them.
+"""
 space_of(n::Int) = n == 17 ? RiDependentSpace() : n == 7 ? ConstantSpace() : error("No parameter space has $n parameters")
-space_of(p::NamedTuple) = space_of(length(p))
 space_of(v::AbstractVector) = space_of(length(v))
 
 """
-Nakanishi–Niino's constants in Breeze's normalization — at all three endpoints for the Ri-dependent space,
-so that its stability functions are constant and the closure is Breeze's default — with CATKE's
-transition Ri⁰ and Riᵟ (then inert), the default wall coefficient and zero surface TKE flux.
+Every parameter space, in the order `space_of` searches them. One list, so that adding a space is one
+edit rather than several.
+"""
+all_parameter_spaces() = (RiDependentSpace(), RationalSpace(), ConstantSpace())
+
+"""The parameter space whose names are exactly `names`, which is unambiguous where the count is not."""
+function space_of(names::Tuple{Vararg{Symbol}})
+    for space in all_parameter_spaces()
+        parameter_names(space) == names && return space
+    end
+    error("No parameter space has the names $names")
+end
+
+space_of(p::NamedTuple) = space_of(keys(p))
+
+"""
+Nakanishi–Niino's constants in Breeze's normalization — at all three endpoints for either
+Richardson-number-dependent space, so that its stability functions are constant and the closure is
+Breeze's default — with a transition that is then inert (CATKE's Ri⁰ and Riᵟ for `RiDependentSpace`, the
+default scales Ri⁻ and Ri⁺ for `RationalSpace`), the default wall coefficient and zero surface TKE flux.
 """
 default_parameters(space::RiDependentSpace) = named(space, (0.149, 0.149, 0.149, 0.201, 0.201, 0.201, 0.298, 0.298, 0.298, 0.388, 0.388, 0.388, 0.254, 1.02, 1.316, 0.0, 0.0))
+default_parameters(space::RationalSpace) = named(space, (0.149, 0.149, 0.149, 0.201, 0.201, 0.201, 0.298, 0.298, 0.298, 0.388, 0.388, 0.388, 0.764, 0.764, 1.316, 0.0, 0.0))
 default_parameters(space::ConstantSpace) = named(space, (0.149, 0.201, 0.298, 0.388, 1.316, 0.0, 0.0))
 default_parameters() = default_parameters(RiDependentSpace())
 
@@ -265,11 +304,22 @@ parameter_index(space::ParameterSpace, name) = findfirst(==(name), parameter_nam
 """The closure for one parameter set of `space`, with the gradient-limited mixing length."""
 function closure_from(space::RiDependentSpace, values; static_stability = MoistStaticStability())
     p = named(space, values)
-    stability_functions = RiDependentStabilityFunctions(; Cᵘ⁻ = p.Cᵘ⁻, Cᵘ⁰ = p.Cᵘ⁰, Cᵘ⁺ = p.Cᵘ⁺,
-                                                          Cᶜ⁻ = p.Cᶜ⁻, Cᶜ⁰ = p.Cᶜ⁰, Cᶜ⁺ = p.Cᶜ⁺,
-                                                          Cᵉ⁻ = p.Cᵉ⁻, Cᵉ⁰ = p.Cᵉ⁰, Cᵉ⁺ = p.Cᵉ⁺,
-                                                          Cᴰ⁻ = p.Cᴰ⁻, Cᴰ⁰ = p.Cᴰ⁰, Cᴰ⁺ = p.Cᴰ⁺,
-                                                          Ri⁰ = p.Ri⁰, Riᵟ = p.Riᵟ)
+    stability_functions = PiecewiseStabilityFunction(; Cᵘ⁻ = p.Cᵘ⁻, Cᵘ⁰ = p.Cᵘ⁰, Cᵘ⁺ = p.Cᵘ⁺,
+                                                       Cᶜ⁻ = p.Cᶜ⁻, Cᶜ⁰ = p.Cᶜ⁰, Cᶜ⁺ = p.Cᶜ⁺,
+                                                       Cᵉ⁻ = p.Cᵉ⁻, Cᵉ⁰ = p.Cᵉ⁰, Cᵉ⁺ = p.Cᵉ⁺,
+                                                       Cᴰ⁻ = p.Cᴰ⁻, Cᴰ⁰ = p.Cᴰ⁰, Cᴰ⁺ = p.Cᴰ⁺,
+                                                       Ri⁰ = p.Ri⁰, Riᵟ = p.Riᵟ)
+    return TKEBasedTurbulenceClosure(; mixing_length = GradientLimitedMixingLength(Cˢ = p.Cˢ), stability_functions, static_stability)
+end
+
+"""The closure for one parameter set of the rational space; the exponents stay at their default of one."""
+function closure_from(space::RationalSpace, values; static_stability = MoistStaticStability())
+    p = named(space, values)
+    stability_functions = RationalStabilityFunction(; Cᵘ⁻ = p.Cᵘ⁻, Cᵘ⁰ = p.Cᵘ⁰, Cᵘ⁺ = p.Cᵘ⁺,
+                                                      Cᶜ⁻ = p.Cᶜ⁻, Cᶜ⁰ = p.Cᶜ⁰, Cᶜ⁺ = p.Cᶜ⁺,
+                                                      Cᵉ⁻ = p.Cᵉ⁻, Cᵉ⁰ = p.Cᵉ⁰, Cᵉ⁺ = p.Cᵉ⁺,
+                                                      Cᴰ⁻ = p.Cᴰ⁻, Cᴰ⁰ = p.Cᴰ⁰, Cᴰ⁺ = p.Cᴰ⁺,
+                                                      Ri⁻ = p.Ri⁻, Ri⁺ = p.Ri⁺)
     return TKEBasedTurbulenceClosure(; mixing_length = GradientLimitedMixingLength(Cˢ = p.Cˢ), stability_functions, static_stability)
 end
 

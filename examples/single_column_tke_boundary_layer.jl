@@ -39,11 +39,13 @@ using Statistics
 # ``Cˢ z`` in neutral air attached to the surface, the stratification length ``\sqrt{e} / N`` in
 # stably stratified air, and bounded by the stratified air around any layer that is neither. The default [`ConstantStabilityFunctions`](@ref) are the
 # Mellor–Yamada constants of Nakanishi and Niino, which put the neutral log layer at ``κ = 0.40``
-# with ``e / u_\star² = 4.2``. [`RiDependentStabilityFunctions`](@ref) are CATKE's: each function
+# with ``e / u_\star² = 4.2``. [`PiecewiseStabilityFunction`](@ref) is CATKE's: each function
 # takes one value in unstable air, another at neutral, and ramps to a third as the Richardson
 # number grows, so that stratification lengthens the dissipation length and raises the Prandtl
-# number. `catke_parameters()` supplies them together with CATKE's wall coefficient. Everything
-# below is run with both.
+# number. `catke_parameters()` supplies them together with CATKE's wall coefficient.
+# [`RationalStabilityFunction`](@ref) carries the same three endpoints per function but travels
+# between them smoothly, with no neutral plateau and no onset. Everything below is run with the
+# first two.
 
 closures = (NN09 = TKEBasedTurbulenceClosure(),
             CATKE = TKEBasedTurbulenceClosure(; catke_parameters()...))

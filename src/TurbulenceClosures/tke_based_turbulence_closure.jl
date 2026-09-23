@@ -21,9 +21,10 @@
 ##### which bounds ℓ by the stratified air above and below an elevated neutral or unstable layer, where
 ##### the local minimum lets it grow to the distance to the ground.
 #####
-##### The stability functions Sᵘ, Sᶜ, Sᵉ, Sᴰ are either constants (`ConstantStabilityFunctions`)
-##### or piecewise-linear functions of the Richardson number in the form of CATKE
-##### (`RiDependentStabilityFunctions`, richardson_number_stability_functions.jl).
+##### The stability functions Sᵘ, Sᶜ, Sᵉ, Sᴰ are either constants (`ConstantStabilityFunctions`) or
+##### functions of the Richardson number: piecewise-linear in the form of CATKE
+##### (`PiecewiseStabilityFunction`) or rational (`RationalStabilityFunction`), both in
+##### richardson_number_stability_functions.jl.
 #####
 ##### The tracer `ρe` is advected and vertically diffused (with Kᵉ) by the dynamical core like every
 ##### other scalar. Following CATKE, the sinks — dissipation, the negative part of the buoyancy flux
@@ -240,7 +241,8 @@ where ``Kᵘ``, ``Kᶜ`` and ``Kᵉ`` are the eddy diffusivities of momentum, sc
 kinetic energy, ``S²`` the squared vertical shear, ``N²`` the squared buoyancy frequency, ``ℓ`` the
 primary mixing length ([`AbstractMixingLength`](@ref): [`GradientLimitedMixingLength`](@ref) by default,
 [`LocalMinimumMixingLength`](@ref) or [`IntegralMixingLength`](@ref)), and ``Sᵘ, Sᶜ, Sᵉ, Sᴰ`` stability functions
-([`ConstantStabilityFunctions`](@ref) or [`RiDependentStabilityFunctions`](@ref)). ``N²`` is
+([`ConstantStabilityFunctions`](@ref), [`PiecewiseStabilityFunction`](@ref) or
+[`RationalStabilityFunction`](@ref)). ``N²`` is
 diagnosed once per time-step stage at the cell
 interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default, or
 [`DryStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is

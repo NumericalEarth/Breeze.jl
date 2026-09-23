@@ -4,7 +4,7 @@ using BreezeCalibration
 using EnsembleKalmanProcesses
 using EnsembleKalmanProcesses.ParameterDistributions
 using Random, Statistics, LinearAlgebra, JLD2, NCDatasets
-using Breeze.TurbulenceClosures: ConstantStabilityFunctions, RiDependentStabilityFunctions
+using Breeze.TurbulenceClosures: ConstantStabilityFunctions, PiecewiseStabilityFunction, RationalStabilityFunction
 using Oceananigans.Units
 using Oceananigans: RectilinearGrid, Flat, Bounded
 
@@ -167,7 +167,7 @@ end
     @test space_of(17) isa RiDependentSpace && space_of(7) isa ConstantSpace
     @test_throws ErrorException space_of(5)
 
-    for space in (RiDependentSpace(), ConstantSpace())
+    for space in (RiDependentSpace(), RationalSpace(), ConstantSpace())
         p = default_parameters(space)
         @test p.Cᵂu★ == 0 && prior_center(space).Cᵂu★ == 1
         closure = closure_from(space, collect(p))
@@ -175,9 +175,38 @@ end
         @test closure_from(p).stability_functions == closure.stability_functions
     end
     @test closure_from(ConstantSpace(), collect(default_parameters(ConstantSpace()))).stability_functions isa ConstantStabilityFunctions
-    @test closure_from(default_parameters()).stability_functions isa RiDependentStabilityFunctions
+    @test closure_from(default_parameters()).stability_functions isa PiecewiseStabilityFunction
     @test BreezeCalibration.parameter_index(ConstantSpace(), :Cᵂʷ) == 7
     @test BreezeCalibration.parameter_index(RiDependentSpace(), :Cᵂu★) == 16
+
+    # The rational space: its stability coefficients are the twelve endpoints and the two transition
+    # scales, in that order, followed by the mixing-length and surface-flux coefficients. Asserted by
+    # structure rather than by a total count, so that a split-slope mixing length adding `Cⁱ` beside
+    # `Cˢ` does not falsify it.
+    rational_names = parameter_names(RationalSpace())
+    @test rational_names[1:14] == (:Cᵘ⁻, :Cᵘ⁰, :Cᵘ⁺, :Cᶜ⁻, :Cᶜ⁰, :Cᶜ⁺, :Cᵉ⁻, :Cᵉ⁰, :Cᵉ⁺, :Cᴰ⁻, :Cᴰ⁰, :Cᴰ⁺, :Ri⁻, :Ri⁺)
+    @test :Cˢ ∈ rational_names && :Cᵂu★ ∈ rational_names && :Cᵂʷ ∈ rational_names
+    @test :p⁻ ∉ rational_names && :p⁺ ∉ rational_names # the exponents are fixed, not calibrated
+    @test RationalSpace() ∈ all_parameter_spaces()
+
+    # On this base it happens to share its size with the Ri-dependent space, so a bare count still
+    # resolves to the space the campaigns run in, while the names tell the two apart
+    @test length(rational_names) == length(parameter_names(RiDependentSpace()))
+    @test space_of(17) isa RiDependentSpace
+    @test space_of(collect(default_parameters(RationalSpace()))) isa RiDependentSpace
+    @test space_of(default_parameters(RationalSpace())) isa RationalSpace
+    @test space_of(default_parameters(RiDependentSpace())) isa RiDependentSpace
+    @test space_of(default_parameters(ConstantSpace())) isa ConstantSpace
+    @test summary(RationalSpace()) == "RationalSpace"
+    @test BreezeCalibration.parameter_index(RationalSpace(), :Ri⁺) == 14
+
+    # Its defaults, like the Ri-dependent space's, put the three endpoints of each function on the
+    # same value, so the default closure of either is Breeze's constant-coefficient one
+    rational = closure_from(default_parameters(RationalSpace())).stability_functions
+    @test rational isa RationalStabilityFunction
+    @test rational.Cᵘ⁻ == rational.Cᵘ⁰ == rational.Cᵘ⁺ == 0.149
+    @test rational.p⁻ == 1 && rational.p⁺ == 1
+    @test prior_distribution(RationalSpace()) isa typeof(prior_distribution(RiDependentSpace()))
 end
 
 @testset "multi-resolution observations" begin
