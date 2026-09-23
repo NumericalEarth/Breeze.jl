@@ -121,8 +121,9 @@ end
 
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
+    ρ = parent(density)
     for ρc in tracers
-        parent(ρc) ./= parent(density)
+        @. parent(ρc) = ifelse(ρ == 0, zero(ρ), parent(ρc) / ρ)
     end
     return nothing
 end
