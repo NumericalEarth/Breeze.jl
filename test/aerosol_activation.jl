@@ -132,14 +132,14 @@ end
 
     FT = Float64
 
-    # Construct P3 with prognostic droplet number and a prognostic aerosol reservoir
+    # Prognostic droplet number and aerosol reservoir
     p3 = PredictedParticlePropertiesMicrophysics(FT;
         aerosol = AerosolActivation(AerosolMode(FT); prognostic = true))
 
     @test !isnothing(p3.aerosol)
     @test length(p3.aerosol.modes) == 1
 
-    # Construct P3 with prescribed droplet number (default)
+    # Prescribed droplet number (default)
     p3_prescribed = PredictedParticlePropertiesMicrophysics(FT)
     @test isnothing(p3_prescribed.aerosol)
     @test aerosol_field_names(p3) == (:ρnᵃ,)
@@ -151,10 +151,7 @@ end
         @test state.nᵃ == 0
     end
 
-    # P3's aerosol distribution is per unit mass [kg⁻¹], and the prognostic `ρnᵃ` holds
-    # ρ nᵃ [m⁻³], so the reservoir must be seeded ρ-weighted. Without the weighting the
-    # `min(N_activated, nᶜˡ + nᵃ)` cap in `aerosol_activation_rate` acquires a
-    # spurious inverse-density dependence, because that comparison is entirely per unit mass.
+    # The scheme reports its population per unit mass [kg⁻¹]; `ρnᵃ` is the ρ-weighted form.
     nᵃ₀ = FT(sum_aerosol_number(p3.aerosol))
     @test Breeze.initial_aerosol_number(p3) == nᵃ₀
 
@@ -338,8 +335,7 @@ end
     end
 end
 
-# `prognostic = false` predicts droplet number from the M&G2007 activation with no
-# aerosol budget, and must be reachable without giving up prognostic `ρnᶜˡ`.
+# Droplet number remains prognostic with a fixed aerosol population.
 @testset "Fixed aerosol reservoir" begin
     using Breeze.Microphysics.PredictedParticleProperties:
         PredictedParticlePropertiesMicrophysics

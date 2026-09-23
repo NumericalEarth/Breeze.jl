@@ -101,7 +101,7 @@ export
     tabulate_rain_from_quadrature,
     rime_density_index,
 
-    # Aerosol activation (prognostic droplet number)
+    # Aerosol activation
     AerosolMode,
     AerosolActivation,
     activated_number,
@@ -172,7 +172,7 @@ include("transport_properties.jl")
 include("process_rate_parameters.jl")
 
 #####
-##### Aerosol activation (prognostic droplet number)
+##### Aerosol activation
 #####
 
 include("aerosol_activation.jl")

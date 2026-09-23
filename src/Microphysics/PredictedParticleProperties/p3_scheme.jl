@@ -29,8 +29,7 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NM
     precipitation_boundary_condition :: BC
     # Repair of negative densities produced by the (non-positive-definite) advection operator
     negative_moisture_correction :: NMC
-    # Droplet number: prescribed with nothing, prognostic with AerosolActivation.
-    # The aerosol reservoir is prognostic only with AerosolActivation(...; prognostic=true).
+    # Aerosol activation parameters, or nothing for prescribed droplet number.
     aerosol :: AERO
     # Warm-rain (autoconversion/accretion/self-collection) scheme selector
     warm_rain_scheme :: WRS
@@ -82,10 +81,7 @@ The scheme tracks 8 prognostic densities by default, and up to 11 with every opt
 | ``ρnᶜˡ`` | Cloud droplet number | `aerosol` |
 | ``ρnᵃ`` | Unactivated aerosol number | `aerosol`, with `prognostic` |
 
-Each optional group is gated on a type, so a configuration that does not use one neither
-allocates nor advects it. Cloud droplet number is prognostic only with an
-`AerosolActivation`: the default prescribed-Nᶜˡ path takes it from the scheme
-parameter `cloud.number_concentration`.
+Optional fields are allocated and advected only when enabled.
 
 # Keyword Arguments
 
@@ -119,16 +115,10 @@ parameter `cloud.number_concentration`.
 
 # Cloud Droplet Activation
 
-Pass `aerosol = AerosolActivation(AerosolMode())` to enable prognostic cloud
-droplet number from aerosol activation physics (Morrison & Grabowski 2007).
-When `aerosol = nothing` (default), cloud droplet number uses the prescribed
-`CloudDroplets.number_concentration`.
-
-Whether the aerosol population is itself a state variable is a second, independent choice.
-By default it is held fixed at the distribution total, which allocates no ``ρn^a`` field,
-tendency slot, or Runge-Kutta stage copy. Pass
-`AerosolActivation(AerosolMode(); prognostic=true)` to carry a reservoir that
-activation depletes instead, so a cloud cannot re-activate aerosol it already holds.
+By default, cloud droplet concentration is prescribed by `cloud.number_concentration`.
+Pass `aerosol = AerosolActivation(AerosolMode())` to predict droplet number from
+aerosol activation. Set `prognostic=true` in [`AerosolActivation`](@ref) to also
+track depletion of the unactivated aerosol reservoir.
 
 # Configuring the empirical warm-phase parameters
 

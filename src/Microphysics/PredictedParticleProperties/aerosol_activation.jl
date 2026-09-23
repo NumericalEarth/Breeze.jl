@@ -37,16 +37,9 @@ Default chemistry is ammonium sulfate (NH₄)₂SO₄.
 # Keyword Arguments
 
 - `number_mixing_ratio`: Aerosol number *per unit mass of air* [kg⁻¹], default 300×10⁶.
-  This is the basis of the whole activation path: [`activated_number`](@ref),
-  [`total_activated_number`](@ref) and `sum_aerosol_number` are all [kg⁻¹], and the
-  activation cap compares them against the per-mass `nᶜˡ = ρnᶜˡ/ρ` and `nᵃ = ρnᵃ/ρ`.
-
-  With [`AerosolActivation`](@ref)'s `prognostic`, the reservoir `ρnᵃ` holds the
-  ρ-weighted counterpart and nothing needs to be initialized by hand: `AtmosphereModel`
-  construction and every `set!` write it as the air density times this field summed over all
-  modes, so a multi-mode population is seeded from its own parameters and stays consistent
-  with them. Pass `nᵃ` [kg⁻¹] or `ρnᵃ` [m⁻³] to `set!` to override, which is also how a
-  partly depleted reservoir survives a `set!`.
+  With `prognostic=true` in [`AerosolActivation`](@ref), the reservoir `ρnᵃ` is
+  initialized to air density times the total over all modes once density is available.
+  `set!` repeats this initialization unless `nᵃ` [kg⁻¹] or `ρnᵃ` [m⁻³] is supplied.
 - `mean_radius`: Geometric mean radius [m], default 0.05 μm
 - `geometric_std`: Geometric standard deviation [-], default 2
 - `vant_hoff_factor`: van't Hoff factor [-], default 3
@@ -108,11 +101,8 @@ function Base.show(io::IO, m::AerosolMode)
     print(io, "σg=", m.geometric_std, ")")
 end
 
-# Container for the multi-mode aerosol activation parameters; see the `AerosolActivation`
-# constructor.
-# `D` is `prognostic`, in the type rather than a field so its gates fold to
-# constants (see `supersaturation_prognostic_names` in `p3_microphysical_state.jl`).
-struct AerosolActivation{FT, D, M}
+# P selects a prognostic aerosol reservoir at compile time.
+struct AerosolActivation{FT, P, M}
     modes :: M                       # Tuple of AerosolMode{FT}
     molecular_weight_water :: FT     # Mw [kg/mol]
     universal_gas_constant :: FT     # R [J/(mol·K)]
@@ -140,13 +130,10 @@ Construct an `AerosolActivation` from one or more [`AerosolMode`](@ref)s.
 The activation timescale ``τ_{act}`` controls how quickly the cloud
 droplet number relaxes toward the activated equilibrium. Default 1.0 s.
 
-The reservoir switch `prognostic` is independent of the droplet number, which
-`AerosolActivation` predicts either way.
-`false` (default) holds the population at the distribution total, allocating no ``ρn^a``:
-the cap ``\\min(N_{\\text{act}}, n^{cl} + n^a)`` never binds and droplet number relaxes
-toward ``N_{\\text{act}}(S)`` at every call. `true` carries the reservoir ``ρn^a`` instead,
-drawn down one per activated droplet, so the cap tightens as it is consumed and a
-supersaturation rebound cannot re-activate aerosol already in the cloud.
+Passing an `AerosolActivation` to P3 makes cloud droplet number prognostic. The
+`prognostic` keyword is separate: `true` carries the unactivated aerosol reservoir
+``ρn^a``, which activation depletes, while the default `false` holds the population
+fixed at the distribution total.
 
 Everything else the activation physics needs is a keyword here rather than a
 literal in [`activated_number`](@ref): the condensate density and molecular
@@ -185,7 +172,7 @@ length(aerosol.modes)
 2
 ```
 
-The population is fixed unless `prognostic` asks for a reservoir:
+The aerosol population is fixed by default:
 
 ```jldoctest
 using Breeze.Microphysics.PredictedParticleProperties: AerosolActivation, AerosolMode
@@ -233,10 +220,9 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Whether `ρnᵃ` is a prognostic field; see `prognostic` in the
-[`AerosolActivation`](@ref) constructor.
+Return whether the aerosol reservoir `ρnᵃ` is prognostic.
 """
-@inline has_prognostic_aerosol(::AerosolActivation{<:Any, D}) where D = D
+@inline has_prognostic_aerosol(::AerosolActivation{<:Any, P}) where P = P
 
 function Base.summary(a::AerosolActivation)
     n = length(a.modes)
@@ -329,33 +315,25 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute droplet activation rates from aerosol activation physics, drawing the
-activated droplets out of the unactivated pool ``n^a``.
-
-Omitting `nᵃ` uses the whole prescribed aerosol population as the pool. Both forms
-predict cloud-droplet number; only a prognostic aerosol reservoir is depleted.
+Compute cloud droplet activation rates from the aerosol distribution.
+The supplied `nᵃ` limits activation to the remaining aerosol population;
+omitting it uses the full distribution.
 
 Returns a named tuple `(; ncnuc, qcnuc)`:
-- `ncnuc`: Cloud number activation rate [kg⁻¹ s⁻¹] (also the depletion rate
-  of a prognostic unactivated aerosol pool, with density weighting for `ρnᵃ`).
+- `ncnuc`: Cloud number activation rate [kg⁻¹ s⁻¹]
 - `qcnuc`: Cloud mass activation rate [kg/kg/s]
 
-Following Morrison & Grabowski (2007) augmented with explicit aerosol-pool
-tracking (matching the two-moment Seifert–Beheng convention used elsewhere in
-this codebase), the equilibrium number of activated droplets at supersaturation
-``S`` is ``N_{\\text{act}}(S)``, but the number that can *actually* be activated
-in one step is capped by the unactivated pool ``n^a``:
+The equilibrium count ``N_{\\text{act}}(S)`` follows
+[Morrison and Grabowski (2007)](@cite MorrisonGrabowski2007). Capping the target
+by the available aerosol gives
 
 ```math
 n_{\\text{nuc}} = \\frac{\\max(0,\\; \\min(N_{\\text{act}}(S), n^{cl} + n^a) - n^{cl})}
                        {\\mathbb{C}_{\\mathrm{form},4}}.
 ```
 
-This prevents the spurious re-activation that occurs when ``S`` rebounds after
-autoconversion or partial cloud evaporation drains ``n^{cl}`` — without an
-aerosol-pool sink, the diagnostic ``N_{\\text{act}}(S)`` keeps generating new
-droplets as if the reservoir were inexhaustible. With the cap, each activated
-droplet permanently removes one unit from ``n^a``.
+Each activated droplet consumes one aerosol from a prognostic reservoir,
+giving the density tendency ``-ρ \\, n_{\\text{nuc}}``.
 
 Mass follows as ``q_{\\text{nuc}} = n_{\\text{nuc}} \\times m_{\\text{seed}}``
 where ``m_{\\text{seed}} = (4\\pi/3) \\rho_w (\\mathbb{C}_{\\mathrm{form},2})^3`` is a

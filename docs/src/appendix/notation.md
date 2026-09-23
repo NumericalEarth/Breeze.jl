@@ -77,11 +77,11 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρqᶜⁱ``                            | `ρqᶜⁱ` |                                     | Cloud ice density                                                              |
 | ``ρqʳ``                             | `ρqʳ`  | `AM.microphysical_fields.ρqʳ`       | Rain density                                                                   |
 | ``ρqˢⁿ``                            | `ρqˢⁿ` | `AM.microphysical_fields.ρqˢⁿ`      | Snow density                                                                   |
-| ``n^{cl}``                          | `nᶜˡ`  | `AM.microphysical_fields.nᶜˡ`       | Cloud droplet number per unit mass (1/kg); P3 allocates this diagnostic only with aerosol activation |
+| ``n^{cl}``                          | `nᶜˡ`  | `AM.microphysical_fields.nᶜˡ`       | Cloud droplet number per unit mass (1/kg)                                      |
 | ``n^r``                             | `nʳ`   | `AM.microphysical_fields.nʳ`        | Rain drop number per unit mass (1/kg)                                          |
 | ``n^a``                             | `nᵃ`   | `AM.microphysical_fields.nᵃ`        | Aerosol number per unit mass (1/kg)                                            |
-| ``\rho n^{cl}``                     | `ρnᶜˡ` | `AM.microphysical_fields.ρnᶜˡ`      | Cloud droplet number density (1/m³), prognostic (absent in P3's prescribed-Nᶜˡ path) |
-| ``\rho n^r``                        | `ρnʳ`  | `AM.microphysical_fields.ρnʳ`       | Rain drop number density (1/m³), prognostic                                    |
+| ``\rho n^{cl}``                     | `ρnᶜˡ` | `AM.microphysical_fields.ρnᶜˡ`      | Cloud droplet number density (1/m³)                                            |
+| ``\rho n^r``                        | `ρnʳ`  | `AM.microphysical_fields.ρnʳ`       | Rain drop number density (1/m³)                                                |
 | ``\rho n^a``                        | `ρnᵃ`  | `AM.microphysical_fields.ρnᵃ`       | Aerosol number density (1/m³)                                                  |
 | ``N^{cl}``                          | `Nᶜˡ`  |                                     | Volumetric cloud droplet number density, ``Nᶜˡ = ρ nᶜˡ`` (1/m³)               |
 | ``N^r``                             | `Nʳ`   |                                     | Volumetric rain drop number density, ``Nʳ = ρ nʳ`` (1/m³)                      |
@@ -93,7 +93,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathbb{W}^{ci}``                 | `𝕎ᶜⁱ`  |                                     | Terminal velocity of cloud ice (scalar, positive downward)                     |
 | ``\mathbb{W}^r``                    | `𝕎ʳ`   |                                     | Terminal velocity of rain (scalar, positive downward)                          |
 | ``\mathbb{W}^{sn}``                 | `𝕎ˢⁿ`  |                                     | Terminal velocity of snow (scalar, positive downward)                          |
-| ``\mathbb{W}^i``                    | `𝕎ⁱ`   |                                     | Terminal velocity of ice (scalar, positive downward); P3 labels dry ice ``i``  |
+| ``\mathbb{W}^i``                    | `𝕎ⁱ`   |                                     | Terminal velocity of ice (scalar, positive downward); ``i`` is dry ice, distinct from cloud ice ``ci`` |
 | ``\mathbb{W}^{nx}``                 | `𝕎ⁿˣ`  |                                     | Number-weighted terminal velocity of species ``x`` (`𝕎ⁿᶜˡ`, `𝕎ⁿʳ`, `𝕎ⁿⁱ`); a bare species label is the mass-weighted mean, and the weighting marker is a superscript preceding the species |
 | ``w^x``                             | `wˣ`   |                                     | Signed vertical advection velocity of species ``x``, ``wˣ = -𝕎ˣ`` (`wᶜˡ`, `wⁿᶜˡ`, `wʳ`, `wⁿʳ`, `wⁱ`, `wⁿⁱ`) |
 | ``qᵛ⁺``                             | `qᵛ⁺`  |                                     | Saturation specific humidity over a surface                                    |

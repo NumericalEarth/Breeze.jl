@@ -364,7 +364,7 @@ end
         _, no_rime_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
             p3, cloud_riming, rain_riming, parameters.splintering_temperature_peak, D_ice, Fˡ, surface_T, zero(FT))
 
-        # H4: Cloud riming contributes to splintering
+        # Cloud riming contributes to splintering
         @test cloud_only_n > 0
         cloud_only_q, _ = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
             p3, cloud_riming, zero(FT), parameters.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
@@ -461,7 +461,7 @@ end
         parameters = ProcessRate(FT)
 
         # Create rates with typical warm-rain and ice process activity
-        # Sign convention (M7): all one-directional rates are positive magnitudes
+        # Sign convention: all one-directional rates are positive magnitudes
         rates = P3ProcessRates(
             # Phase 1: Cloud condensation/evaporation (bidirectional: +cond, −evap)
             FT(5e-7),   # condensation
@@ -482,11 +482,11 @@ end
             FT(0),      # clipping_rime_mass
             FT(0),      # clipping_rime_volume
             FT(0),      # post_process_clipping
-            # D2: Sublimation number loss
+            # Sublimation number loss
             FT(0.0),    # sublimation_number
             # Phase 2: Aggregation (positive magnitude)
             FT(500.0),  # aggregation
-            FT(0.0),    # ni_limit (C3: global Nⁱ cap; zero in warm-environment test)
+            FT(0.0),    # ni_limit (global Nⁱ cap; zero in warm-environment test)
             # Phase 2: Riming (all positive magnitudes)
             FT(1e-7),   # cloud_riming
             FT(1e4),    # cloud_riming_number (positive magnitude)
@@ -515,21 +515,21 @@ end
             FT(0.0),    # cloud_warm_collection (warm environment test)
             FT(0.0),    # cloud_warm_collection_number
             FT(0.0),    # rain_warm_collection
-            FT(0.0),    # rain_warm_collection_number (M9)
+            FT(0.0),    # rain_warm_collection_number
             FT(0.0),    # wet_growth_cloud
             FT(0.0),    # wet_growth_rain
-            FT(0.0),    # wet_growth_shedding (D8)
-            FT(0.0),    # wet_growth_shedding_number (D8)
-            FT(0.0),    # ccn_activation_mass (M9 stub)
-            FT(0.0),    # ccn_activation_number (M9 stub)
-            FT(0.0),    # rain_condensation (M9 stub)
-            FT(0.0),    # coating_condensation (M9 stub)
-            FT(0.0),    # coating_evaporation (M9 stub)
-            FT(0.0),    # wet_growth_densification_mass (H9)
-            FT(0.0),    # wet_growth_densification_volume (H9)
-            FT(0.0),    # cloud_number_correction (M6)
-            FT(0.0),    # rain_number_correction (M6)
-            FT(0.0),    # ice_number_correction (M4)
+            FT(0.0),    # wet_growth_shedding
+            FT(0.0),    # wet_growth_shedding_number
+            FT(0.0),    # ccn_activation_mass
+            FT(0.0),    # ccn_activation_number
+            FT(0.0),    # rain_condensation
+            FT(0.0),    # coating_condensation
+            FT(0.0),    # coating_evaporation
+            FT(0.0),    # wet_growth_densification_mass
+            FT(0.0),    # wet_growth_densification_volume
+            FT(0.0),    # cloud_number_correction
+            FT(0.0),    # rain_number_correction
+            FT(0.0),    # ice_number_correction
             FT(0.0),    # predicted_supersaturation_adjustment
             FT(0.0),    # predicted_supersaturation_tendency
         )
@@ -909,7 +909,7 @@ end
         ρ = FT(1.0)
         P = FT(101325.0)
 
-        # Subsaturated: qv < qv_sat → positive evaporation rate (M7: positive magnitude)
+        # Subsaturated: qv < qv_sat → positive evaporation rate (positive magnitude)
         qv_sat = FT(0.012)
         qv_sub = FT(0.008)    # 67% RH
         rate_sub = rain_evaporation_rate(p3, qr, nr, qv_sub, qv_sat, T, ρ, P, constants)
@@ -1601,7 +1601,7 @@ end
         Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
         ε = Rᵈ / Rᵥ
         e_s0 = PPP.saturation_vapor_pressure_at_freezing(constants, T₀)
-        # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
+        # Set qv = q_sat0 (mixing ratio convention) so latent term vanishes
         qv = ε * e_s0 / max(P - e_s0, FT(1))
 
         refreezing = PPP.refreezing_rate(p3, qi, qwi, ni, T, qv, Ff, ρf,
@@ -1624,7 +1624,7 @@ end
         T_warm = FT(268.15)    # -5C
         ρ = FT(1.0)
         rate_warm = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ)
-        @test rate_warm > 0     # Positive magnitude (M7)
+        @test rate_warm > 0     # Positive magnitude
 
         # Very cold (T < 253.15 K): much less aggregation
         T_cold = FT(233.15)    # -40C
@@ -1640,7 +1640,7 @@ end
         rate_rimed = ice_aggregation_rate(p3, qi, ni, T_warm, FT(0.95), ρf, ρ)
         @test rate_rimed == 0
 
-        # Rate scales with ρ × rhofaci where rhofaci = (ρ₀/ρ)^0.54 (M11).
+        # Rate scales with ρ × rhofaci where rhofaci = (ρ₀/ρ)^0.54.
         # Combined scaling: rate ∝ ρ × (ρ₀/ρ)^0.54 = ρ₀^0.54 × ρ^0.46
         ρ_half = FT(0.5)
         rate_half_ρ = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ_half)
@@ -1835,7 +1835,7 @@ end
         @test capped.bᶠ ≈ capped.qᶠ / capped.ρᶠ
         @test capped.Fᶠ == 1
 
-        # D14: Julia's qⁱ is already dry ice, so the rime cap is qⁱ itself and there is
+        # Julia's qⁱ is already dry ice, so the rime cap is qⁱ itself and there is
         # no qʷⁱ argument to subtract.
         liquid_rime = consistent_rime_state(p3, FT(1e-4), FT(8e-5), FT(2e-7))
         # qᶠ = 8e-5 < qⁱ_dry = 1e-4, so NOT capped
@@ -1939,7 +1939,7 @@ end
         @test rates.partial_melting == 0
         @test rates.complete_melting == 0
 
-        # Aggregation should be positive magnitude (M7)
+        # Aggregation should be positive magnitude
         @test rates.aggregation >= 0
 
         # Rime density should be physical
@@ -2477,7 +2477,7 @@ end
         @test rates_tab.complete_melting == 0
         @test rates_tab.aggregation >= 0
 
-        # Rain evaporation should be positive magnitude (M7)
+        # Rain evaporation should be positive magnitude
         @test rates_tab.rain_evaporation > 0
         @test isfinite(rates_tab.rain_evaporation)
     end

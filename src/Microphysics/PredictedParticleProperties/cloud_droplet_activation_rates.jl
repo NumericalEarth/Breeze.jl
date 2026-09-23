@@ -3,9 +3,6 @@
 #####
 ##### Prescribed droplet number uses a seed-mass source. Aerosol activation
 ##### predicts droplet number, with an optional prognostic aerosol reservoir.
-##### No keyword arguments (GPU compatibility).
-#####
-##### Notation follows docs/src/appendix/notation.md
 #####
 
 #####
@@ -15,24 +12,13 @@
 """
 $(TYPEDSIGNATURES)
 
-Compute the cloud-droplet seed mass rate for prescribed droplet concentration `Nᶜˡ`.
-This approximation does not use an aerosol distribution or evolve droplet number.
+Return the vapor-to-cloud mass rate [kg/kg/s] for prescribed droplet concentration `Nᶜˡ`.
 
-When the air is supersaturated
-and the cloud mass is below the minimum threshold for the prescribed droplet
-concentration, a seed mass is created. The target cloud mass is
+In supersaturated air, supply seed mass up to
 ``N^{cl} / ρ × m_{\\text{drop}}`` where ``m_{\\text{drop}} = (4π/3) ρ_w r^3``
-for ``r = 1`` μm. The rate is limited by the available supersaturation.
-
-The supersaturation limit divides by the same liquid psychrometric factor
-``ξˡ = 1 + ℒˡ² q^{v+ℓ} / (c_p^d R_v T²)`` that `limit_vapor_rates` uses to build
-`qcon_cap` and that the Grabowski-Morrison alignment uses in
-`predicted_supersaturation_adjustment`. Sizing the rate with the moist mixture
-heat capacity and then capping it with the dry-air one would mix two conventions inside
-one cell's vapor budget, so the dry-air form is used throughout.
-
-# Returns
-- Rate of vapor → cloud liquid conversion from droplet activation [kg/kg/s]
+and the default seed radius is 1 μm. The supersaturation cap uses
+``ξˡ = 1 + ℒˡ² q^{v+ℓ} / (c_p^d R_v T²)`` with the dry-air heat capacity,
+consistent with `limit_vapor_rates` and `predicted_supersaturation_adjustment`.
 """
 @inline function prescribed_cloud_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, ρ, Nᶜˡ, constants)
     FT = typeof(qᶜˡ)
@@ -67,39 +53,31 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute cloud-droplet activation rates for the aerosol configuration, returning
-`(; mass, number)` in [kg/kg/s] and [kg⁻¹ s⁻¹], respectively.
+Return cloud droplet activation rates `(; mass, number)` in [kg/kg/s] and [kg⁻¹ s⁻¹].
 
-- `nothing`: use [`prescribed_cloud_activation_rate`](@ref) to supply seed mass
-  for prescribed `Nᶜˡ`, with a zero number tendency because droplet number is not evolved.
-- [`AerosolActivation`](@ref): use [`aerosol_activation_rate`](@ref) to predict
-  both mass and droplet number from the aerosol distribution. With `prognostic=false`
-  the aerosol population is fixed; `prognostic=true` additionally tracks an unactivated
-  reservoir that the number rate depletes.
+With `nothing`, droplet number is prescribed and `number` is zero.
+With [`AerosolActivation`](@ref), both rates follow the aerosol distribution;
+`prognostic=true` also limits activation to the remaining reservoir.
 """
 @inline function compute_cloud_droplet_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ,
                                                   qᵛ, qᵛ⁺ˡ, T, ρ, constants)
     FT = typeof(qᶜˡ)
-    # Prescribed-Nᶜˡ path: the activation target is the scheme parameter, not the
-    # DSD-diagnosed `Nᶜˡ`.
-    # When `qᶜˡ` is below the mass threshold, `diagnose_cloud_dsd` clamps the
-    # returned `Nᶜˡ` toward zero — using that value would collapse `qᶜˡ_target`
-    # and block any seed mass from forming in a warm-bubble parcel.
+    # `prescribed_cloud_activation_rate` takes Nᶜˡ per volume and divides by ρ itself,
+    # so the target is the scheme parameter directly. The per-mass `nᶜˡ` is unused.
     Nᶜˡ_target = p3.cloud.number_concentration
     mass = prescribed_cloud_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, ρ,
                                             Nᶜˡ_target, constants)
     return (; mass, number = zero(FT))
 end
 
-# Fixed population: `ℳ.nᵃ` is zero here, as in the prescribed-Nᶜˡ path, so the rate is
-# taken against the whole distribution instead.
+# Fixed populations use the full distribution; the unused nᵃ argument is zero.
 @inline function compute_cloud_droplet_activation(aerosol::AerosolActivation{<:Any, false},
                                                   p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, ρ, constants)
     result = aerosol_activation_rate(aerosol, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
     return (; mass = result.qcnuc, number = result.ncnuc)
 end
 
-# Prognostic reservoir: `nᵃ` is what remains, and caps what can still activate.
+# Prognostic populations are limited by the remaining nᵃ.
 @inline function compute_cloud_droplet_activation(aerosol::AerosolActivation{<:Any, true},
                                                   p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, ρ, constants)
     result = aerosol_activation_rate(aerosol, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
