@@ -12,7 +12,6 @@ using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Reactant
-using Reactant: @trace
 using Enzyme
 using GPUArraysCore: @allowscalar
 using Statistics: mean
@@ -52,13 +51,6 @@ function make_grid(topo, nd; arch=ReactantState())
     return RectilinearGrid(arch; size=sz, extent=ext, topology=topo)
 end
 
-function run_time_steps!(model, Δt, Nsteps)
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
-        time_step!(model, Δt)
-    end
-    return nothing
-end
-
 get_temperature(model) = Array(interior(model.temperature))
 
 function make_init_fields(grid)
@@ -75,9 +67,8 @@ end
 
 function loss(model, θ_init, Δt, Nsteps)
     set!(model; θ=θ_init, ρ=initial_density(model))
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
-        time_step!(model, Δt)
-    end
+    simulation = Simulation(model; Δt, stop_iteration=Nsteps, verbose=false)
+    run!(simulation)
     return mean(interior(model.temperature) .^ 2)
 end
 

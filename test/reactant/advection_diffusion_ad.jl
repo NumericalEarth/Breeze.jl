@@ -7,7 +7,6 @@ using Oceananigans.TurbulenceClosures: ScalarDiffusivity
 using Oceananigans.Grids: xnodes, ynodes
 using CUDA
 using Reactant
-using Reactant: @trace
 using GPUArraysCore: @allowscalar
 using Enzyme
 using Test
@@ -93,9 +92,8 @@ function loss(model, T⁰, θ, xc, yc, Δt, Nₛ, Δx)
     interior(T⁰) .= reshape(T_vals, size(interior(T⁰)))
 
     set!(model; ρc = T⁰, ρ = 1.0, θ = 300.0, u = U₀_, v = 0.0, w = 0.0)
-    @trace track_numbers = false mincut = true checkpointing = false for _ in 1:Nₛ
-        time_step!(model, Δt)
-    end
+    simulation = Simulation(model; Δt, stop_iteration=Nₛ, verbose=false)
+    run!(simulation)
     return Δx^2 * sum(interior(model.tracers.ρc) .^ 2)
 end
 

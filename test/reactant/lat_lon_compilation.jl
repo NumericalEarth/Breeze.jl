@@ -13,7 +13,6 @@ using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Reactant
-using Reactant: @trace
 using Enzyme
 using GPUArraysCore: @allowscalar
 using Statistics: mean
@@ -69,9 +68,8 @@ end
 
 function loss(model, θ_init, Δt, Nsteps)
     set!(model; θ=θ_init, ρ=initial_density(model))
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
-        time_step!(model, Δt)
-    end
+    simulation = Simulation(model; Δt, stop_iteration=Nsteps, verbose=false)
+    run!(simulation)
     return mean(interior(model.temperature) .^ 2)
 end
 
