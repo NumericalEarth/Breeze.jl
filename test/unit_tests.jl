@@ -667,3 +667,106 @@ Breeze.AtmosphereModels.materialize_surface_property(::TestSurfacePropertySource
     # ...and dispatches to source-specific methods.
     @test materialize_surface_property(TestSurfacePropertySource(), grid, nothing) == FT(0.5)
 end
+
+#####
+##### Backend-agnostic radiation helpers
+#####
+
+using Breeze.AtmosphereModels: column_index, resolve_surface_albedos, validate_surface_fractions,
+                               constant_field_property, maybe_infer_solar_position,
+                               compute_radiation_flux_divergence!,
+                               bottom_face_pressure, top_face_pressure,
+                               bottom_face_temperature, top_face_temperature
+using GPUArraysCore: @allowscalar
+using Oceananigans.Fields: ConstantField
+using Oceananigans.Units: kilometers
+
+previous_float_type = Oceananigans.defaults.FloatType
+
+@testset "Radiation interface helpers [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 1), y=(0, 1), z=[0, 100, 300, 600, 1000])
+
+    @testset "column_index" begin
+        Nx = 3
+        @test column_index(1, 1, Nx) == 1
+        @test column_index(3, 1, Nx) == 3
+        @test column_index(1, 2, Nx) == 4
+        @test column_index(2, 3, Nx) == 8
+    end
+
+    @testset "Surface fractions" begin
+        @test isnothing(validate_surface_fractions(a = 0.5, b = ConstantField(0.98), c = CenterField(grid), d = nothing))
+        @test_throws ArgumentError validate_surface_fractions(surface_albedo = 1.5)
+        @test_throws ArgumentError validate_surface_fractions(surface_emissivity = ConstantField(-0.1))
+
+        α = constant_field_property(0.2, FT)
+        @test α isa ConstantField
+        @test α.constant isa FT
+        @test α.constant ≈ 0.2
+        field = CenterField(grid)
+        @test constant_field_property(field, FT) === field
+    end
+
+    @testset "resolve_surface_albedos" begin
+        sp = FixedCosineZenith(0.5)
+        direct, diffuse = resolve_surface_albedos(0.1, nothing, nothing, grid, sp)
+        @test direct === diffuse
+        @test direct isa FT
+        @test direct ≈ 0.1
+
+        direct, diffuse = resolve_surface_albedos(nothing, 0.2, 0.3, grid, sp)
+        @test direct ≈ 0.2
+        @test diffuse ≈ 0.3
+
+        @test_throws ArgumentError resolve_surface_albedos(0.1, 0.2, nothing, grid, sp)
+        @test_throws ArgumentError resolve_surface_albedos(nothing, 0.2, nothing, grid, sp)
+        @test_throws ArgumentError resolve_surface_albedos(nothing, nothing, nothing, grid, sp)
+    end
+
+    @testset "maybe_infer_solar_position" begin
+        column_grid = RectilinearGrid(default_arch; size=4, x=-70.0, y=42.0, z=(0, 1kilometers),
+                                      topology=(Flat, Flat, Bounded))
+        inferred = maybe_infer_solar_position(ApparentSolarPosition(), column_grid)
+        @test inferred.coordinate == (-70, 42)
+
+        explicit = ApparentSolarPosition(coordinate = (10, 20))
+        @test maybe_infer_solar_position(explicit, column_grid) === explicit
+        @test maybe_infer_solar_position(ApparentSolarPosition(), grid).coordinate === nothing
+        @test maybe_infer_solar_position(FixedCosineZenith(0.5), column_grid) isa FixedCosineZenith
+    end
+
+    @testset "Boundary-face pressure and temperature" begin
+        # Linear profiles are reproduced exactly by hydrostatic (constant ρ) and linear extrapolation.
+        g = 10
+        p = CenterField(grid)
+        ρ = CenterField(grid)
+        T = CenterField(grid)
+        set!(p, (x, y, z) -> 1e5 - g * z)
+        set!(ρ, 1)
+        set!(T, (x, y, z) -> 300 - 0.01z)
+
+        @allowscalar begin
+            @test bottom_face_pressure(1, 1, grid, p, ρ, g) ≈ 1e5
+            @test top_face_pressure(2, 2, grid, p, ρ, g) ≈ 1e5 - g * 1000
+            @test bottom_face_temperature(1, 2, grid, T) ≈ 300
+            @test top_face_temperature(2, 1, grid, T) ≈ 290
+        end
+    end
+
+    @testset "compute_radiation_flux_divergence!" begin
+        # Only the four flux fields and the divergence field are touched, so a NamedTuple stands in for the model.
+        rtm = (upwelling_longwave_flux = ZFaceField(grid),
+               downwelling_longwave_flux = ZFaceField(grid),
+               upwelling_shortwave_flux = ZFaceField(grid),
+               downwelling_shortwave_flux = ZFaceField(grid),
+               flux_divergence = CenterField(grid))
+
+        # F_net = 2z + 1: half from the upwelling longwave, half from the (negative) downwelling shortwave.
+        set!(rtm.upwelling_longwave_flux, (x, y, z) -> 3z + 1)
+        set!(rtm.downwelling_shortwave_flux, (x, y, z) -> -z)
+        compute_radiation_flux_divergence!(rtm, grid)
+        @test all(Array(interior(rtm.flux_divergence)) .≈ -2)
+    end
+end
+Oceananigans.defaults.FloatType = previous_float_type

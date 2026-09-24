@@ -1,6 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
+using Breeze.AtmosphereModels: update_cos_zenith!
 using Dates
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -227,7 +228,7 @@ end
         dynamics = AnelasticDynamics(reference_state)
 
         # The motivating case: a numeric clock with a fixed cos(θ_z).
-        # Used to crash because `update_solar_zenith_angle!` had no path for
+        # Used to crash because `update_cos_zenith!` had no path for
         # numeric clock + epoch=nothing. Now this works via FixedCosineZenith.
         cos_θz = convert(FT, 0.5)
         radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
@@ -358,13 +359,13 @@ end
         # Step clock to midnight (t = day/2) and re-update — cos(θ_z) clamped to 0
         model.clock.time = 43200.0  # 12 h
         model.clock.iteration = 1
-        ext = Base.get_extension(Breeze, :BreezeRRTMGPExt)
-        ext.update_solar_zenith_angle!(radiation.shortwave_solver, sp, grid, model.clock)
-        @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] == 0
+        cos_zenith = radiation.shortwave_solver.bcs.cos_zenith
+        update_cos_zenith!(cos_zenith, sp, grid, model.clock)
+        @allowscalar @test cos_zenith[1] == 0
 
         # Step to t = day (back to noon) — should match the initial value
         model.clock.time = 86400.0
-        ext.update_solar_zenith_angle!(radiation.shortwave_solver, sp, grid, model.clock)
+        update_cos_zenith!(cos_zenith, sp, grid, model.clock)
         @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] ≈ cos(deg2rad(latitude))
     end
 
