@@ -422,10 +422,11 @@ end
 #####
 ##### Account for the latent-heat feedback that reduces the effective
 ##### supersaturation drive during condensation (ξˡ) and ice deposition (ξⁱ).
-##### `psychrometric_correction` itself is not P3-specific and lives beside its
-##### mixture-heat-capacity counterpart `thermodynamic_adjustment_factor` in
-##### `Microphysics/bulk_microphysics.jl`; only the two phase-named wrappers below,
-##### which fix the dry-air heat capacity P3 uses, stay here.
+##### `psychrometric_correction` itself is not P3-specific and lives in
+##### `Thermodynamics/vapor_saturation.jl`. Its mixture-heat-capacity counterpart
+##### `thermodynamic_adjustment_factor` lives in `Microphysics/bulk_microphysics.jl`.
+##### Only the two phase-named wrappers below, which fix the dry-air heat capacity P3
+##### uses, stay here.
 #####
 
 # Named for the phase each caller drives, so call sites still read as ξˡ / ξⁱ.
@@ -436,7 +437,7 @@ end
     psychrometric_correction(ℒⁱ, qᵛ⁺ⁱ, p3_dry_air_heat_capacity(constants, typeof(T)), Rᵛ, T)
 
 #####
-##### Saturation vapor pressure at freezing (M6)
+##### Saturation vapor pressure at freezing
 #####
 ##### Derive e_s(T₀) from the Clausius-Clapeyron or Tetens formula.
 #####
@@ -451,7 +452,7 @@ end
 # ℒ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density difference ρᵛ - ρᵛ⁺(T₀).
 # A dry-air mixing ratio ε e_s0/(P - e_s0) would only be correct against a vapor
 # variable that is itself a dry-air mixing ratio; mixing the two mass bases would
-# bias the melting and refreezing heat balances, so all three call sites share this.
+# bias the melting and refreezing heat balances, so both call sites share this.
 @inline function freezing_point_saturation_mass_fraction(constants, T₀, ρ)
     Rᵛ = typeof(ρ)(vapor_gas_constant(constants))
     return saturation_vapor_pressure_at_freezing(constants, T₀) / (Rᵛ * T₀ * ρ)

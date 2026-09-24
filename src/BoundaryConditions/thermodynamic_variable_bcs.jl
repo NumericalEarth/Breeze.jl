@@ -19,24 +19,31 @@ A wrapper for boundary conditions that converts energy flux to potential tempera
 When using `LiquidIcePotentialTemperatureFormulation`, the prognostic thermodynamic variable
 is ``ρθ`` (potential temperature density). This wrapper allows users to specify energy fluxes
 (e.g., sensible heat flux in W/m²) which are converted to potential temperature fluxes by
-dividing by the local mixture heat capacity ``cᵖᵐ``.
+dividing by the local mixture heat capacity ``cᵖᵐ`` and the Exner function ``Π``.
 
 The relationship is:
 ```math
-Jᶿ = 𝒬 / cᵖᵐ
+Jᶿ = 𝒬ᵀ / (cᵖᵐ Π)
 ```
 
-where ``𝒬`` is the energy flux and ``Jᶿ`` is the potential temperature flux.
+where ``𝒬ᵀ`` is the energy flux and ``Jᶿ`` is the potential temperature flux. At fixed moisture
+``T = Π θ + (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ`` gives ``δT = Π δθ``, so an enthalpy input
+``𝒬ᵀ = ρ cᵖᵐ \\overline{w'T'}`` reaches ``θ`` as ``Jᶿ = ρ \\overline{w'T'} / Π = 𝒬ᵀ / (cᵖᵐ Π)``. The
+condensate term cancels, so the conversion holds saturated as well as dry. This is the same
+conversion the ``ρE`` interior forcing and the radiative flux divergence apply. In the same spirit,
+[`BulkSensibleHeatFlux`](@ref) refers its wall temperature to ``θ``, though through a dry ``Πˢ``
+at the wall face rather than the moist ``Π`` of the adjacent cell.
 
 The mixture heat capacity is computed using moisture fractions from the microphysics scheme,
 which correctly accounts for liquid and ice condensate when present.
 """
-struct EnergyFluxBoundaryConditionFunction{C, S, M, TC, D}
+struct EnergyFluxBoundaryConditionFunction{C, S, M, TC, D, P}
     condition :: C
     side :: S
     microphysics :: M
     thermodynamic_constants :: TC
     density :: D
+    standard_pressure :: P
 end
 
 function Adapt.adapt_structure(to, ef::EnergyFluxBoundaryConditionFunction)
@@ -44,7 +51,8 @@ function Adapt.adapt_structure(to, ef::EnergyFluxBoundaryConditionFunction)
                                                Adapt.adapt(to, ef.side),
                                                Adapt.adapt(to, ef.microphysics),
                                                Adapt.adapt(to, ef.thermodynamic_constants),
-                                               Adapt.adapt(to, ef.density))
+                                               Adapt.adapt(to, ef.density),
+                                               Adapt.adapt(to, ef.standard_pressure))
 end
 
 function Base.summary(ef::EnergyFluxBoundaryConditionFunction)
@@ -71,55 +79,65 @@ const NorthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:North}
 @inline _energy_flux_density(density, fields, i, j, k) = @inbounds density[i, j, k]
 @inline _energy_flux_density(::Nothing, fields, i, j, k) = @inbounds fields.ρᵈ[i, j, k]
 
-# Convert energy flux to potential temperature flux: Jᶿ = 𝒬 / cᵖᵐ
-@inline function 𝒬_to_Jᶿ(i, j, k, grid, ef, 𝒬, fields)
+# Π at a grid point, from the pressure `getbc` receives in `dynamics_fields`. The state-taking
+# method ignores the potential temperature, so the zero θ is inert — the same shortcut
+# `potential_temperature_from_temperature` takes.
+@inline function exner_function(i, j, k, grid, ef, q, dynamics_fields)
+    p = @inbounds dynamics_fields.p[i, j, k]
+    𝒰 = LiquidIcePotentialTemperatureState(zero(p), q, ef.standard_pressure, p)
+    return exner_function(𝒰, ef.thermodynamic_constants)
+end
+
+# Convert energy flux to potential temperature flux: Jᶿ = 𝒬ᵀ / (cᵖᵐ Π)
+@inline function 𝒬ᵀ_to_Jᶿ(i, j, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
     qᵛ = @inbounds fields.qᵛ[i, j, k]
     ρ = _energy_flux_density(ef.density, fields, i, j, k)
     q = grid_moisture_fractions(i, j, k, grid, ef.microphysics, ρ, qᵛ, fields)
     cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
-    return 𝒬 / cᵖᵐ
+    Π = exner_function(i, j, k, grid, ef, q, dynamics_fields)
+    return 𝒬ᵀ / (cᵖᵐ * Π)
 end
 
 # getbc for bottom boundary (k = 1)
 @inline function OceananigansBC.getbc(ef::BottomEnergyFluxBC, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, i, j, grid, clock, fields, dynamics_fields)
-    return 𝒬_to_Jᶿ(i, j, 1, grid, ef, 𝒬, fields)
+    𝒬ᵀ = OceananigansBC.getbc(ef.condition, i, j, grid, clock, fields, dynamics_fields)
+    return 𝒬ᵀ_to_Jᶿ(i, j, 1, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 # getbc for top boundary (k = Nz)
 @inline function OceananigansBC.getbc(ef::TopEnergyFluxBC, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, i, j, grid, clock, fields, dynamics_fields)
-    return 𝒬_to_Jᶿ(i, j, grid.Nz, grid, ef, 𝒬, fields)
+    𝒬ᵀ = OceananigansBC.getbc(ef.condition, i, j, grid, clock, fields, dynamics_fields)
+    return 𝒬ᵀ_to_Jᶿ(i, j, grid.Nz, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 # getbc for west boundary (i = 1)
 @inline function OceananigansBC.getbc(ef::WestEnergyFluxBC, j::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, j, k, grid, clock, fields, dynamics_fields)
-    return 𝒬_to_Jᶿ(1, j, k, grid, ef, 𝒬, fields)
+    𝒬ᵀ = OceananigansBC.getbc(ef.condition, j, k, grid, clock, fields, dynamics_fields)
+    return 𝒬ᵀ_to_Jᶿ(1, j, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 # getbc for east boundary (i = Nx)
 @inline function OceananigansBC.getbc(ef::EastEnergyFluxBC, j::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, j, k, grid, clock, fields, dynamics_fields)
-    return 𝒬_to_Jᶿ(grid.Nx, j, k, grid, ef, 𝒬, fields)
+    𝒬ᵀ = OceananigansBC.getbc(ef.condition, j, k, grid, clock, fields, dynamics_fields)
+    return 𝒬ᵀ_to_Jᶿ(grid.Nx, j, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 # getbc for south boundary (j = 1)
 @inline function OceananigansBC.getbc(ef::SouthEnergyFluxBC, i::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, i, k, grid, clock, fields, dynamics_fields)
-    return 𝒬_to_Jᶿ(i, 1, k, grid, ef, 𝒬, fields)
+    𝒬ᵀ = OceananigansBC.getbc(ef.condition, i, k, grid, clock, fields, dynamics_fields)
+    return 𝒬ᵀ_to_Jᶿ(i, 1, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 # getbc for north boundary (j = Ny)
 @inline function OceananigansBC.getbc(ef::NorthEnergyFluxBC, i::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, i, k, grid, clock, fields, dynamics_fields)
-    return 𝒬_to_Jᶿ(i, grid.Ny, k, grid, ef, 𝒬, fields)
+    𝒬ᵀ = OceananigansBC.getbc(ef.condition, i, k, grid, clock, fields, dynamics_fields)
+    return 𝒬ᵀ_to_Jᶿ(i, grid.Ny, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 const EnergyFluxBCType = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction}
@@ -130,11 +148,11 @@ const EnergyFluxBCType = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryCondition
 Create a boundary condition that wraps an energy flux and converts it to a potential
 temperature flux for use with `LiquidIcePotentialTemperatureFormulation`.
 
-The energy flux is divided by the local mixture heat capacity ``cᵖᵐ`` to obtain the
-potential temperature flux: ``Jᶿ = 𝒬 / cᵖᵐ``.
+The energy flux is divided by the local mixture heat capacity ``cᵖᵐ`` and the Exner function
+``Π`` to obtain the potential temperature flux: ``Jᶿ = 𝒬ᵀ / (cᵖᵐ Π)``.
 """
 function EnergyFluxBoundaryCondition(flux)
-    ef = EnergyFluxBoundaryConditionFunction(flux, nothing, nothing, nothing, nothing)
+    ef = EnergyFluxBoundaryConditionFunction(flux, nothing, nothing, nothing, nothing, nothing)
     return BoundaryCondition(Flux(), ef)
 end
 
@@ -150,32 +168,35 @@ A wrapper for boundary conditions that converts potential temperature flux to en
 
 When building a diagnostic `energy_density` field from a `PotentialTemperatureFormulation`,
 the boundary conditions on `ρθ` (potential temperature density) must be converted to
-energy flux boundary conditions by multiplying by the local mixture heat capacity ``cᵖᵐ``.
+energy flux boundary conditions by multiplying by the local mixture heat capacity ``cᵖᵐ``
+and the Exner function ``Π``.
 
 The relationship is:
 ```math
-𝒬 = Jᶿ cᵖᵐ
+𝒬ᵀ = Jᶿ cᵖᵐ Π
 ```
 
-where ``𝒬`` is the energy flux and ``Jᶿ`` is the potential temperature flux.
+where ``𝒬ᵀ`` is the energy flux and ``Jᶿ`` is the potential temperature flux.
 """
-struct ThetaFluxBoundaryConditionFunction{C, S, M, TC, D}
+struct ThetaFluxBoundaryConditionFunction{C, S, M, TC, D, P}
     condition :: C
     side :: S
     microphysics :: M
     thermodynamic_constants :: TC
     density :: D
+    standard_pressure :: P
 end
 
 ThetaFluxBoundaryConditionFunction(condition, side, microphysics, thermodynamic_constants) =
-    ThetaFluxBoundaryConditionFunction(condition, side, microphysics, thermodynamic_constants, nothing)
+    ThetaFluxBoundaryConditionFunction(condition, side, microphysics, thermodynamic_constants, nothing, nothing)
 
 function Adapt.adapt_structure(to, tf::ThetaFluxBoundaryConditionFunction)
     return ThetaFluxBoundaryConditionFunction(Adapt.adapt(to, tf.condition),
                                               Adapt.adapt(to, tf.side),
                                               Adapt.adapt(to, tf.microphysics),
                                               Adapt.adapt(to, tf.thermodynamic_constants),
-                                              Adapt.adapt(to, tf.density))
+                                              Adapt.adapt(to, tf.density),
+                                              Adapt.adapt(to, tf.standard_pressure))
 end
 
 function Base.summary(tf::ThetaFluxBoundaryConditionFunction)
@@ -192,55 +213,56 @@ const EastThetaFluxBC   = ThetaFluxBoundaryConditionFunction{<:Any, <:East}
 const SouthThetaFluxBC  = ThetaFluxBoundaryConditionFunction{<:Any, <:South}
 const NorthThetaFluxBC  = ThetaFluxBoundaryConditionFunction{<:Any, <:North}
 
-# Convert potential temperature flux to energy flux: 𝒬 = Jᶿ × cᵖᵐ
-@inline function Jᶿ_to_𝒬(i, j, k, grid, tf, Jᶿ, fields)
+# Convert potential temperature flux to energy flux: 𝒬ᵀ = Jᶿ cᵖᵐ Π
+@inline function Jᶿ_to_𝒬ᵀ(i, j, k, grid, tf, Jᶿ, fields, dynamics_fields)
     qᵛ = @inbounds fields.qᵛ[i, j, k]
     ρ = @inbounds tf.density[i, j, k]
     q = grid_moisture_fractions(i, j, k, grid, tf.microphysics, ρ, qᵛ, fields)
     cᵖᵐ = mixture_heat_capacity(q, tf.thermodynamic_constants)
-    return Jᶿ * cᵖᵐ
+    Π = exner_function(i, j, k, grid, tf, q, dynamics_fields)
+    return Jᶿ * cᵖᵐ * Π
 end
 
 # getbc for bottom boundary (k = 1)
 @inline function OceananigansBC.getbc(tf::BottomThetaFluxBC, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     Jᶿ = OceananigansBC.getbc(tf.condition, i, j, grid, clock, fields, dynamics_fields)
-    return Jᶿ_to_𝒬(i, j, 1, grid, tf, Jᶿ, fields)
+    return Jᶿ_to_𝒬ᵀ(i, j, 1, grid, tf, Jᶿ, fields, dynamics_fields)
 end
 
 # getbc for top boundary (k = Nz)
 @inline function OceananigansBC.getbc(tf::TopThetaFluxBC, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     Jᶿ = OceananigansBC.getbc(tf.condition, i, j, grid, clock, fields, dynamics_fields)
-    return Jᶿ_to_𝒬(i, j, grid.Nz, grid, tf, Jᶿ, fields)
+    return Jᶿ_to_𝒬ᵀ(i, j, grid.Nz, grid, tf, Jᶿ, fields, dynamics_fields)
 end
 
 # getbc for west boundary (i = 1)
 @inline function OceananigansBC.getbc(tf::WestThetaFluxBC, j::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     Jᶿ = OceananigansBC.getbc(tf.condition, j, k, grid, clock, fields, dynamics_fields)
-    return Jᶿ_to_𝒬(1, j, k, grid, tf, Jᶿ, fields)
+    return Jᶿ_to_𝒬ᵀ(1, j, k, grid, tf, Jᶿ, fields, dynamics_fields)
 end
 
 # getbc for east boundary (i = Nx)
 @inline function OceananigansBC.getbc(tf::EastThetaFluxBC, j::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     Jᶿ = OceananigansBC.getbc(tf.condition, j, k, grid, clock, fields, dynamics_fields)
-    return Jᶿ_to_𝒬(grid.Nx, j, k, grid, tf, Jᶿ, fields)
+    return Jᶿ_to_𝒬ᵀ(grid.Nx, j, k, grid, tf, Jᶿ, fields, dynamics_fields)
 end
 
 # getbc for south boundary (j = 1)
 @inline function OceananigansBC.getbc(tf::SouthThetaFluxBC, i::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     Jᶿ = OceananigansBC.getbc(tf.condition, i, k, grid, clock, fields, dynamics_fields)
-    return Jᶿ_to_𝒬(i, 1, k, grid, tf, Jᶿ, fields)
+    return Jᶿ_to_𝒬ᵀ(i, 1, k, grid, tf, Jᶿ, fields, dynamics_fields)
 end
 
 # getbc for north boundary (j = Ny)
 @inline function OceananigansBC.getbc(tf::NorthThetaFluxBC, i::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     Jᶿ = OceananigansBC.getbc(tf.condition, i, k, grid, clock, fields, dynamics_fields)
-    return Jᶿ_to_𝒬(i, grid.Ny, k, grid, tf, Jᶿ, fields)
+    return Jᶿ_to_𝒬ᵀ(i, grid.Ny, k, grid, tf, Jᶿ, fields, dynamics_fields)
 end
 
 const ThetaFluxBCType = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction}
@@ -251,8 +273,8 @@ const ThetaFluxBCType = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFu
 Create a boundary condition that wraps a potential temperature flux and converts it to
 an energy flux for use with diagnostic energy density fields.
 
-The potential temperature flux is multiplied by the local mixture heat capacity ``cᵖᵐ``
-to obtain the energy flux: ``𝒬 = Jᶿ cᵖᵐ``.
+The potential temperature flux is multiplied by the local mixture heat capacity ``cᵖᵐ`` and the
+Exner function ``Π`` to obtain the energy flux: ``𝒬ᵀ = Jᶿ cᵖᵐ Π``.
 """
 function ThetaFluxBoundaryCondition(flux)
     tf = ThetaFluxBoundaryConditionFunction(flux, nothing, nothing, nothing)
@@ -290,7 +312,7 @@ energy_to_theta_bcs(fbcs::FieldBoundaryConditions) = map_field_boundary_conditio
 theta_to_energy_bc(bc) = bc
 # For EnergyFluxBC, extract the original energy flux
 theta_to_energy_bc(bc::EnergyFluxBCType) = BoundaryCondition(Flux(), bc.condition.condition)
-# For regular flux BCs (actual θ fluxes), wrap to multiply by cᵖᵐ
+# For regular flux BCs (actual θ fluxes), wrap to multiply by cᵖᵐ Π
 theta_to_energy_bc(bc::BoundaryCondition{<:Flux}) = ThetaFluxBoundaryCondition(bc.condition)
 
 theta_to_energy_bcs(fbcs::FieldBoundaryConditions) = map_field_boundary_conditions(theta_to_energy_bc, fbcs)
@@ -321,7 +343,8 @@ function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC
                                                    side, loc, grid, dynamics, microphysics, constants)
     ef = bc.condition
     density = dynamics_density(dynamics)
-    new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density)
+    pˢᵗ = convert(eltype(grid), standard_pressure(dynamics))
+    new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density, pˢᵗ)
     return BoundaryCondition(Flux(), new_ef)
 end
 
@@ -332,7 +355,8 @@ function materialize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
                                                    side, loc, grid, dynamics, microphysics, constants)
     tf = bc.condition
     density = dynamics_density(dynamics)
-    new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants, density)
+    pˢᵗ = convert(eltype(grid), standard_pressure(dynamics))
+    new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants, density, pˢᵗ)
     return BoundaryCondition(Flux(), new_tf)
 end
 
