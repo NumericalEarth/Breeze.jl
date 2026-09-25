@@ -583,8 +583,8 @@ end
     @test all(abs.(Δρθₐ .- qᵈₐ .* χ .* Δρqʳₐ) .<= sqrt(eps(FT)) * maximum(abs.(χ .* Δρqʳₐ)))
 
     # A full acoustic step at that fall Courant number leaves finite fields.
-    interior(μₐ.ρqʳ, 1, 1, :) .= ρqʳₐ⁰
-    interior(ρθₐ, 1, 1, :) .= ρθₐ⁰
+    interior(μₐ.ρqʳ, 1, 1, :) .= Oceananigans.on_architecture(default_arch, ρqʳₐ⁰)
+    interior(ρθₐ, 1, 1, :) .= Oceananigans.on_architecture(default_arch, ρθₐ⁰)
     update_state!(acoustic_model)
     time_step!(acoustic_model, Δtₐ)
     @test all(isfinite, interior(acoustic_model.formulation.potential_temperature_density))
