@@ -1,7 +1,9 @@
 using ..Thermodynamics:
+    LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
     MoistureMixingRatio,
     PlanarLiquidSurface,
+    StaticEnergyState,
     mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity,
@@ -9,13 +11,16 @@ using ..Thermodynamics:
     TetensFormulaThermodynamicConstants,
     total_mixing_ratio,
     total_specific_moisture,
-    with_moisture
+    vapor_gas_constant,
+    with_moisture,
+    with_temperature
 
 using ..AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
     kernel_time_step,
     standard_pressure,
+    thermodynamic_density_name,
     total_density
 
 using ..ParcelModels: ParcelModel
@@ -24,7 +29,8 @@ using Oceananigans: Oceananigans, CenterField, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture
 using Oceananigans.Fields: interpolate
-using Oceananigans.Grids: Center, znode
+using Oceananigans.Grids: Center
+using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 
@@ -105,9 +111,37 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 5. **Rain Sedimentation**: Rain water falls gravitationally.
 
 # Implementation Details
-- The microphysics update is applied via a GPU-compatible kernel launched from `microphysics_model_update!`.
-- Rain sedimentation uses subcycling to satisfy CFL constraints, following the Fortran implementation.
-- All microphysical updates are applied directly to the state variables in the kernel.
+- The microphysics update is applied via a GPU-compatible kernel launched from `microphysics_model_update!`,
+  once per time step after the dynamics (operator splitting). All microphysical updates are applied
+  directly to the prognostic fields in the kernel.
+- **Density basis.** The prognostic water fields are partial densities, `ρqˣ = ρˣ`. The Kessler
+  processes act on dry-air mixing ratios `rˣ = ρˣ / ρᵈ`, where the dry-air density is the prognostic
+  `ρᵈ` on the compressible core and `ρᵈ = ρᵣ - ρᵗ` on the anelastic core (the reference density `ρᵣ`
+  is the total density there; see [`dry_air_density`](@ref Breeze.Microphysics.dry_air_density)).
+  Phase changes and cloud-to-rain conversion conserve `rᵗ` and hence `ρᵗ`.
+- **Rain sedimentation** is an upwind, flux-form update of the rain partial density on the
+  finite-volume cells: the flux `ρqʳ 𝕎ʳ` through each face is the same on both sides of the face
+  and is divided by the thickness of the receiving cell, `Δzᶜᶜᶜ`, so the column rain budget closes
+  to the surface flux on any vertical grid (uniform, stretched, or piecewise), including the top
+  cell, which only loses rain through its bottom face. Vapor and cloud partial densities are not
+  touched by sedimentation. The update is subcycled to satisfy `substep_cfl` on every cell's
+  thickness (the DCMIP2016 Fortran uses the distance between levels and a half cell at the top).
+- **Surface precipitation.** `surface_precipitation_flux` is the substep-mean bottom-face flux
+  `(ρqʳ 𝕎ʳ)₁`, exactly the water removed from the column; `precipitation_rate` is that flux per
+  unit of the final surface density.
+- **Thermodynamics** (`LiquidIcePotentialTemperatureFormulation` only). Temperature is recovered
+  from the prognostic `θˡⁱ` with Breeze's own `θˡⁱ ↔ T` relation. Sedimentation happens at fixed
+  temperature, so `θˡⁱ` absorbs the change of liquid loading (falling rain carries water, not heat).
+  Phase changes (saturation adjustment and rain evaporation) conserve `θˡⁱ`, as
+  [`SaturationAdjustment`](@ref) does: the saturation adjustment is the DCMIP2016 single Newton step,
+  linearized with the temperature response `∂T/∂rˡ` of the invariant
+  ([`phase_change_temperature_slope`](@ref Breeze.Microphysics.phase_change_temperature_slope)), and
+  the invariant is what is written back, so the post-step temperature follows from `θˡⁱ` and the new
+  partition. This differs from the DCMIP2016 Fortran, which increments `T` by `ℒˡᵣ Δrˡ / cᵖᵈ`; that
+  increment is not consistent with `θˡⁱ` (moist heat capacity, composition dependence of the Exner
+  function) and acts as a spurious net `θˡⁱ` source. Conserving `θˡⁱ` is consistency with the
+  prognostic invariant of the formulation; it is not exact conservation of the physical mixture
+  enthalpy, which the formulation's constant-latent-heat `θˡⁱ` does not represent either.
 
 # Keyword Arguments
 
@@ -457,6 +491,13 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # (e.g., during model construction before any time step has been taken)
     (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
 
+    # The kernel carries θˡⁱ through sedimentation and phase change (see the constructor
+    # docstring); it has no static-energy counterpart yet.
+    thermodynamic_density_name(model.formulation) === :ρθ ||
+        throw(ArgumentError(string("DCMIP2016KesslerMicrophysics requires the ",
+                                   "LiquidIcePotentialTemperatureFormulation (prognostic ρθ), but the model's ",
+                                   "formulation evolves ", thermodynamic_density_name(model.formulation), ".")))
+
     # Total density weights water mass fractions and enters the Kessler air-density corrections.
     # The coupling density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
     # dynamics, is the dry-air carrier of Kessler mixing ratios. These fields alias for anelastic
@@ -500,11 +541,110 @@ end
 # makes the dependence explicit to the compiler (and to static analysis like JETLS), so an
 # incompatible formulation fails as a clear `MethodError` rather than a dynamic `getproperty`
 # inside the GPU kernel. `validate_microphysics` catches the mismatch earlier still.
-@inline function saturation_adjustment_coefficient(T_DCMIP2016, constants::TetensFormulaThermodynamicConstants)
+"""
+$(TYPEDSIGNATURES)
+
+Return the DCMIP2016 saturation adjustment coefficient ``f₅ = a T_DCMIP2016 ∂T/∂rˡ``, where `a` is
+the liquid coefficient of the Tetens formula and `∂T∂rˡ` is the temperature change per unit of
+vapor mixing ratio converted to liquid. `a T_DCMIP2016 / (T - δT)²` approximates
+``∂ \\ln pᵛ⁺ / ∂T`` of the Tetens formula, so `f₅ rᵛ⁺ / (T - δT)²` is the change of the saturation
+mixing ratio produced by the latent heating of a unit condensation — the denominator of the
+linearized (single Newton step) saturation adjustment of [Klemp and Wilhelmson (1978)](@cite Klemp1978).
+
+The two-argument form uses the DCMIP2016 Fortran value ``∂T/∂rˡ = ℒˡᵣ / cᵖᵈ``. The kernel uses
+[`phase_change_temperature_slope`](@ref) instead, which is the derivative of the temperature
+recovered from the model's own prognostic invariant.
+"""
+@inline function saturation_adjustment_coefficient(T_DCMIP2016, ∂T∂rˡ, constants::TetensFormulaThermodynamicConstants)
     a = constants.saturation_vapor_pressure.liquid_coefficient
+    return a * T_DCMIP2016 * ∂T∂rˡ
+end
+
+@inline function saturation_adjustment_coefficient(T_DCMIP2016, constants::TetensFormulaThermodynamicConstants)
     ℒˡᵣ = constants.liquid.reference_latent_heat
     cᵖᵈ = constants.dry_air.heat_capacity
-    return a * T_DCMIP2016 * ℒˡᵣ / cᵖᵈ
+    return saturation_adjustment_coefficient(T_DCMIP2016, ℒˡᵣ / cᵖᵈ, constants)
+end
+
+#####
+##### Thermodynamic coupling: density basis and the prognostic invariant
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the dry-air density that carries the Kessler mixing ratios, `rˣ = ρˣ / ρᵈ`.
+
+`ϱ` is the coupling density of the dynamics and `ρᵗ` the total water partial density. On the
+compressible core (`dry_air_coupled = true`) the coupling density is the prognostic dry-air
+density itself. On the anelastic core (`dry_air_coupled = false`) the coupling density is the
+fixed reference density `ρᵣ`, which is the *total* density of the anelastic state, so the dry air
+is what remains once the water is removed, `ρᵈ = ρᵣ - ρᵗ`. Sedimentation changes `ρᵗ`, and hence
+`ρᵈ` on the anelastic core: water that falls into a cell displaces dry air there.
+"""
+@inline dry_air_density(ϱ, ρᵗ, dry_air_coupled) = ifelse(dry_air_coupled, ϱ, ϱ - ρᵗ)
+
+# The pressure-based liquid-ice potential temperature state of a Kessler cell, from the
+# prognostic θˡⁱ and the dry-air mixing ratios of vapor and (cloud plus rain) liquid. This is
+# the state Breeze diagnoses for the anelastic θˡⁱ formulation, so `temperature` and
+# `with_temperature` on it are Breeze's own θˡⁱ ↔ T relations.
+@inline function kessler_thermodynamic_state(θˡⁱ, rᵛ, rˡ, p, pˢᵗ)
+    r = MoistureMixingRatio(rᵛ, rˡ)
+    q = MoistureMassFractions(r)
+    return LiquidIcePotentialTemperatureState(θˡⁱ, q, pˢᵗ, p)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return ``∂T/∂rˡ``, the temperature change per unit of vapor mixing ratio converted to liquid at
+fixed total moisture, holding the prognostic invariant of the thermodynamic state `𝒰` fixed.
+
+For a [`LiquidIcePotentialTemperatureState`](@ref Breeze.Thermodynamics.LiquidIcePotentialTemperatureState),
+``T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ`` with ``Π = (p / pˢᵗ)^{Rᵐ / cᵖᵐ}``, so at fixed ``θˡⁱ``, ``p`` and ``qᵗ``
+(``δqᵛ = -δqˡ``),
+
+```math
+\\frac{∂T}{∂qˡ} = θˡⁱ Π \\ln\\frac{p}{pˢᵗ} \\frac{∂κ}{∂qˡ} + \\frac{ℒˡᵣ}{cᵖᵐ} - \\frac{ℒˡᵣ qˡ (cˡ - cᵖᵛ)}{(cᵖᵐ)^2} ,
+\\qquad
+\\frac{∂κ}{∂qˡ} = -\\frac{Rᵛ cᵖᵐ + Rᵐ (cˡ - cᵖᵛ)}{(cᵖᵐ)^2} ,
+```
+
+and ``∂T/∂rˡ = (1 - qᵗ) ∂T/∂qˡ``. The leading term is ``ℒˡᵣ / cᵖᵐ``; the DCMIP2016 Fortran uses
+``ℒˡᵣ / cᵖᵈ``, which differs by the moist heat capacity and neglects the composition dependence of
+the Exner function. For a [`StaticEnergyState`](@ref Breeze.Thermodynamics.StaticEnergyState),
+``T = (s - g z + ℒˡᵣ qˡ) / cᵖᵐ`` gives ``∂T/∂qˡ = (ℒˡᵣ - T (cˡ - cᵖᵛ)) / cᵖᵐ``.
+"""
+@inline function phase_change_temperature_slope(𝒰::LiquidIcePotentialTemperatureState, constants)
+    q = 𝒰.moisture_mass_fractions
+    θ = 𝒰.potential_temperature
+    p = 𝒰.reference_pressure
+    pˢᵗ = 𝒰.standard_pressure
+    Rᵐ = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵛ = constants.vapor.heat_capacity
+    cˡ = constants.liquid.heat_capacity
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    qˡ = q.liquid
+    qᵗ = total_specific_moisture(q)
+    Δc = cˡ - cᵖᵛ
+    Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
+    ∂κ∂qˡ = -(Rᵛ * cᵖᵐ + Rᵐ * Δc) / cᵖᵐ^2
+    ∂T∂qˡ = θ * Π * log(p / pˢᵗ) * ∂κ∂qˡ + ℒˡᵣ / cᵖᵐ - ℒˡᵣ * qˡ * Δc / cᵖᵐ^2
+    return ∂T∂qˡ * (1 - qᵗ)
+end
+
+@inline function phase_change_temperature_slope(𝒰::StaticEnergyState, constants)
+    q = 𝒰.moisture_mass_fractions
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    cᵖᵛ = constants.vapor.heat_capacity
+    cˡ = constants.liquid.heat_capacity
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    T = temperature(𝒰, constants)
+    qᵗ = total_specific_moisture(q)
+    ∂T∂qˡ = (ℒˡᵣ - T * (cˡ - cᵖᵛ)) / cᵖᵐ
+    return ∂T∂qˡ * (1 - qᵗ)
 end
 
 #####
@@ -516,15 +656,20 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Apply one Kessler microphysics step: autoconversion, accretion, saturation adjustment,
-rain evaporation, and condensation.
+Apply the local (cell-internal) Kessler processes to dry-air mixing ratios: autoconversion,
+accretion, saturation adjustment, and rain evaporation.
 
-`Δr𝕎` is the sedimentation flux divergence (zero for parcel models).
+`T` is the temperature of the incoming state and `∂T∂rˡ` the temperature response to
+condensation at fixed prognostic invariant (see [`phase_change_temperature_slope`](@ref)), which
+linearizes the saturation adjustment about that invariant. The function returns the new
+partition only; the caller keeps the invariant fixed, so the temperature after the step is the
+one the invariant implies for the new partition. Sedimentation is applied by the caller,
+before this step, in partial-density space.
 
-Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
+Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)` where `Δrˡ` is the net vapor → liquid conversion.
 """
-@inline function step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, p, Δt,
-                                           microphysics, constants, f₅, δT, FT)
+@inline function step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, T, ∂T∂rˡ, ρ, p, Δt,
+                                           microphysics, constants, δT, FT)
     surface = PlanarLiquidSurface()
     Cᵨ     = microphysics.density_scale
     Cᵉᵛ₁   = microphysics.evaporation_ventilation_coefficient_1
@@ -533,17 +678,18 @@ Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
     βᵉᵛ₂   = microphysics.evaporation_ventilation_exponent_2
     Cᵈⁱᶠᶠ  = microphysics.diffusivity_coefficient
     Cᵗʰᵉʳᵐ = microphysics.thermal_conductivity_coefficient
+    f₅ = saturation_adjustment_coefficient(microphysics.dcmip_temperature_scale, ∂T∂rˡ, constants)
 
     # Autoconversion + Accretion: cloud → rain (KW eq. 2.13)
     Δrᴾ = cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
     rᶜˡ = max(0, rᶜˡ - Δrᴾ)
-    rʳ = max(0, rʳ + Δrᴾ + Δr𝕎)
+    rʳ = max(0, rʳ + Δrᴾ)
 
     # Saturation specific humidity
     qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, surface)
     rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
 
-    # Saturation adjustment
+    # Saturation adjustment: one Newton step of rᵛ - Δr = rᵛ⁺(T + ∂T∂rˡ Δr)
     Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T - δT)^2)
 
     # Rain evaporation (KW eq. 2.14)
@@ -614,13 +760,87 @@ end
 ##### GPU kernel for Kessler microphysics
 #####
 
-# Algorithm overview:
-# 1. Convert mass fractions → mixing ratios; compute terminal velocities and CFL timestep
-# 2. Subcycle: sedimentation, autoconversion, accretion, saturation adjustment, evaporation
-# 3. Convert mixing ratios → mass fractions; update prognostic fields
+# Algorithm overview (one column per work item):
+# 1. Clip negative inputs, compute rain terminal velocities, and pick the number of
+#    sedimentation substeps from the CFL condition on every cell's thickness.
+# 2. Subcycle, bottom to top within each substep. Per cell:
+#    a. recover T from the prognostic θˡⁱ and the incoming partition (Breeze's θˡⁱ ↔ T relation);
+#    b. sedimentation: upwind flux-form update of the rain partial density ρqʳ on the
+#       finite-volume cell (fluxes ρqʳ 𝕎ʳ through the faces, divided by the cell thickness
+#       Δzᶜᶜᶜ), at fixed temperature, so θˡⁱ absorbs the change of liquid loading;
+#    c. local Kessler physics on the dry-air mixing ratios of the post-sedimentation state at
+#       fixed θˡⁱ: the partition is linearized about the invariant and the invariant is what is
+#       written back, so phase change is exactly θˡⁱ-conserving, like `SaturationAdjustment`.
+# 3. The surface precipitation is the substep-mean bottom-face flux (ρqʳ 𝕎ʳ)₁ — exactly the
+#    mass removed from the column — normalized by the final surface density.
 #
-# Note: Breeze uses liquid-ice potential temperature (θˡⁱ), related to T by:
-#   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
+# The prognostic fields ρqᵛ, ρqᶜˡ, ρqʳ hold the water partial densities throughout; the
+# mixing ratios are formed per cell from the dry-air density (see `dry_air_density`).
+
+@inline function kessler_column_cell!(i, j, k, grid, Fᵗᵒᵖ, Δt, microphysics,
+                                      density, coupling_density, dry_air_coupled,
+                                      pressure, pˢᵗ, constants, δT,
+                                      θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+    FT = eltype(grid)
+
+    @inbounds begin
+        ρ   = density[i, j, k]
+        ϱ   = coupling_density[i, j, k]
+        p   = pressure[i, j, k]
+        θ₀  = θˡⁱ[i, j, k]
+        ρᵛ  = ρqᵛ[i, j, k]
+        ρᶜˡ = μ.ρqᶜˡ[i, j, k]
+        ρʳ  = μ.ρqʳ[i, j, k]
+        𝕎ʳ  = μ.𝕎ʳ[i, j, k]
+    end
+
+    # Temperature of the incoming state from the prognostic invariant
+    ρᵈ₀ = dry_air_density(ϱ, ρᵛ + ρᶜˡ + ρʳ, dry_air_coupled)
+    𝒰₀ = kessler_thermodynamic_state(θ₀, ρᵛ / ρᵈ₀, (ρᶜˡ + ρʳ) / ρᵈ₀, p, pˢᵗ)
+    T = temperature(𝒰₀, constants)
+
+    # Rain sedimentation: upwind fluxes ρqʳ 𝕎ʳ through the top (from the cell above) and
+    # bottom faces, divided by the thickness of this cell. The same products are used on
+    # both sides of every face, so the column budget telescopes to the surface flux.
+    Fᵇᵒᵗ = ρʳ * 𝕎ʳ
+    ρʳ = max(0, ρʳ + Δt * (Fᵗᵒᵖ - Fᵇᵒᵗ) / Δzᶜᶜᶜ(i, j, k, grid))
+
+    # Sedimentation at fixed temperature: the invariant absorbs the change of liquid loading
+    ρᵈ = dry_air_density(ϱ, ρᵛ + ρᶜˡ + ρʳ, dry_air_coupled)
+    rᵛ  = ρᵛ / ρᵈ
+    rᶜˡ = ρᶜˡ / ρᵈ
+    rʳ  = ρʳ / ρᵈ
+    𝒰₁ = with_temperature(kessler_thermodynamic_state(θ₀, rᵛ, rᶜˡ + rʳ, p, pˢᵗ), T, constants)
+    θ₁ = 𝒰₁.potential_temperature
+
+    # Local Kessler physics at fixed θ₁ (the temperature after the step is implied by θ₁ and
+    # the new partition; `update_state!` diagnoses it)
+    ∂T∂rˡ = phase_change_temperature_slope(𝒰₁, constants)
+    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, T, ∂T∂rˡ, ρ, p, Δt,
+                                               microphysics, constants, δT, FT)
+
+    @inbounds begin
+        ρqᵛ[i, j, k]    = ρᵈ * rᵛ
+        μ.ρqᶜˡ[i, j, k] = ρᵈ * rᶜˡ
+        μ.ρqʳ[i, j, k]  = ρᵈ * rʳ
+        θˡⁱ[i, j, k]    = θ₁
+        ρθˡⁱ[i, j, k]   = ϱ * θ₁
+    end
+
+    return nothing
+end
+
+# Rain terminal velocity of cell k from the current partial densities
+@inline function kessler_rain_terminal_velocity(i, j, k, microphysics, density, coupling_density,
+                                                dry_air_coupled, ρ₁, ρqᵛ, μ)
+    @inbounds begin
+        ρ   = density[i, j, k]
+        ϱ   = coupling_density[i, j, k]
+        ρᵗ  = ρqᵛ[i, j, k] + μ.ρqᶜˡ[i, j, k] + μ.ρqʳ[i, j, k]
+        rʳ  = μ.ρqʳ[i, j, k] / dry_air_density(ϱ, ρᵗ, dry_air_coupled)
+    end
+    return kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+end
 
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
                                         density, coupling_density, dry_air_coupled,
@@ -628,64 +848,35 @@ end
                                         θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
-    precipitation_rate_field = μ.precipitation_rate
-
-    # Thermodynamic constants
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    cᵖᵈ = constants.dry_air.heat_capacity
-    # Saturation adjustment coefficient: f₅ = a × T_DCMIP2016 × ℒˡᵣ / cᵖᵈ
-    T_DCMIP2016 = microphysics.dcmip_temperature_scale
-    f₅ = saturation_adjustment_coefficient(T_DCMIP2016, constants)
 
     # Temperature offset for saturation adjustment (from TetensFormula)
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
 
-    # Microphysics parameters
     cfl = microphysics.substep_cfl
-    Cᵨ  = microphysics.density_scale
 
     # Reference density at surface for terminal velocity (KW eq. 2.15)
     @inbounds ρ₁ = density[i, j, 1]
 
     #####
-    ##### PHASE 1: Convert mass fraction → mixing ratio
+    ##### PHASE 1: clip inputs, terminal velocities, and the sedimentation CFL limit
     #####
 
     max_Δt = Δt
-    zᵏ = znode(i, j, 1, grid, Center(), Center(), Center())
 
-    for k = 1:(Nz-1)
+    for k = 1:Nz
         @inbounds begin
-            ρ = density[i, j, k]
-            qᵛ = ρqᵛ[i, j, k] / ρ
-            rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ, μ.ρqᶜˡ[i, j, k], μ.ρqʳ[i, j, k], ρ)
+            ρqᵛ[i, j, k]    = max(0, ρqᵛ[i, j, k])
+            μ.ρqᶜˡ[i, j, k] = max(0, μ.ρqᶜˡ[i, j, k])
+            μ.ρqʳ[i, j, k]  = max(0, μ.ρqʳ[i, j, k])
 
-            𝕎ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+            𝕎ʳᵏ = kessler_rain_terminal_velocity(i, j, k, microphysics, density, coupling_density,
+                                                 dry_air_coupled, ρ₁, ρqᵛ, μ)
             μ.𝕎ʳ[i, j, k] = 𝕎ʳᵏ
 
-            # Store mixing ratios in diagnostic fields during physics
-            μ.qᵛ[i, j, k]  = rᵛ
-            μ.qᶜˡ[i, j, k] = rᶜˡ
-            μ.qʳ[i, j, k]  = rʳ
-
-            # CFL check for sedimentation
-            zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
-            Δz = zᵏ⁺¹ - zᵏ
-            max_Δt = min(max_Δt, cfl * Δz / 𝕎ʳᵏ)
-            zᵏ = zᵏ⁺¹
+            # Rain leaves cell k through its bottom face at 𝕎ʳᵏ: the substep may not empty
+            # more than a `cfl` fraction of the cell's thickness (every cell, including the top)
+            max_Δt = min(max_Δt, cfl * Δzᶜᶜᶜ(i, j, k, grid) / 𝕎ʳᵏ)
         end
-    end
-
-    # k = Nz: no CFL update needed
-    @inbounds begin
-        ρ = density[i, j, Nz]
-        qᵛ = ρqᵛ[i, j, Nz] / ρ
-        rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ, μ.ρqᶜˡ[i, j, Nz], μ.ρqʳ[i, j, Nz], ρ)
-
-        μ.𝕎ʳ[i, j, Nz] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
-        μ.qᵛ[i, j, Nz]  = rᵛ
-        μ.qᶜˡ[i, j, Nz] = rᶜˡ
-        μ.qʳ[i, j, Nz]  = rʳ
     end
 
     # Subcycling for CFL constraint on rain sedimentation
@@ -696,182 +887,57 @@ end
     Fˢᵘʳᶠ = zero(FT)
 
     #####
-    ##### PHASE 2: Subcycle microphysics (in mixing ratio space)
+    ##### PHASE 2: Subcycle sedimentation and microphysics (in partial-density space)
     #####
 
     for m = 1:Ns
-
-        # Accumulate surface rain mass flux. Kessler mixing ratios are dry-air based for
-        # compressible dynamics (ρʳ = ρᵈrʳ); the anelastic path retains its fixed-density
-        # mass-fraction flux (ρʳ = ρqʳ).
-        @inbounds begin
-            ρ₁ = density[i, j, 1]
-            ρᵈ₁ = coupling_density[i, j, 1]
-            rᵛ₁ = μ.qᵛ[i, j, 1]
-            rᶜˡ₁ = μ.qᶜˡ[i, j, 1]
-            rʳ₁ = μ.qʳ[i, j, 1]
-            rᵗ₁ = rᵛ₁ + rᶜˡ₁ + rʳ₁
-            qʳ₁ = rʳ₁ / (1 + rᵗ₁)
-            ρqʳ₁ = ifelse(dry_air_coupled, ρᵈ₁ * rʳ₁, ρ₁ * qʳ₁)
-            Fˢᵘʳᶠ += ρqʳ₁ * μ.𝕎ʳ[i, j, 1]
-        end
-
-        zᵏ = znode(i, j, 1, grid, Center(), Center(), Center())
+        # The bottom-face flux of cell 1, with the same product cell 1 uses for its outflow
+        @inbounds Fˢᵘʳᶠ += μ.ρqʳ[i, j, 1] * μ.𝕎ʳ[i, j, 1]
 
         for k = 1:(Nz-1)
-            @inbounds begin
-                ρ = density[i, j, k]
-                p = pressure[i, j, k]
-                θˡⁱᵏ = θˡⁱ[i, j, k]
-                rᵛ = μ.qᵛ[i, j, k]
-                rᶜˡ = μ.qᶜˡ[i, j, k]
-                rʳ = μ.qʳ[i, j, k]
-
-                # Compute temperature from θˡⁱ
-                rˡ = rᶜˡ + rʳ
-                r = MoistureMixingRatio(rᵛ, rˡ)
-                cᵖᵐ = mixture_heat_capacity(r, constants)
-                Rᵐ  = mixture_gas_constant(r, constants)
-                q = MoistureMassFractions(r)
-                qˡ = q.liquid
-                Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-                Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
-
-                # Rain sedimentation flux (upstream differencing)
-                ρᵏ = Cᵨ * coupling_density[i, j, k]
-                𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
-                zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
-                Δz = zᵏ⁺¹ - zᵏ
-                ρᵏ⁺¹ = Cᵨ * coupling_density[i, j, k+1]
-                rʳᵏ⁺¹ = μ.qʳ[i, j, k+1]
-                𝕎ʳᵏ⁺¹ = μ.𝕎ʳ[i, j, k+1]
-                Δr𝕎 = Δtₛ * (ρᵏ⁺¹ * rʳᵏ⁺¹ * 𝕎ʳᵏ⁺¹ - ρᵏ * rʳ * 𝕎ʳᵏ) / (ρᵏ * Δz)
-                zᵏ = zᵏ⁺¹
-
-                # Core microphysics step
-                rᵛ, rᶜˡ, rʳ, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
-                                                             microphysics, constants, f₅, δT, FT)
-
-                μ.qᵛ[i, j, k]  = rᵛ
-                μ.qᶜˡ[i, j, k] = rᶜˡ
-                μ.qʳ[i, j, k]  = rʳ
-
-                # Update θˡⁱ from latent heating
-                ΔT_phase = ℒˡᵣ / cᵖᵈ * Δrˡ
-                T = Tᵏ + ΔT_phase
-
-                rˡ = rᶜˡ + rʳ
-                r = MoistureMixingRatio(rᵛ, rˡ)
-                cᵖᵐ = mixture_heat_capacity(r, constants)
-                Rᵐ  = mixture_gas_constant(r, constants)
-                q = MoistureMassFractions(r)
-                qˡ = q.liquid
-                Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-                θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
-
-                θˡⁱ[i, j, k]  = θˡⁱ_new
-                ρᵈ = coupling_density[i, j, k]
-                ρθˡⁱ[i, j, k] = ρᵈ * θˡⁱ_new
-            end
+            # Inflow through the top face: the cell above has not been updated yet this substep
+            @inbounds Fᵗᵒᵖ = μ.ρqʳ[i, j, k+1] * μ.𝕎ʳ[i, j, k+1]
+            kessler_column_cell!(i, j, k, grid, Fᵗᵒᵖ, Δtₛ, microphysics,
+                                 density, coupling_density, dry_air_coupled,
+                                 pressure, pˢᵗ, constants, δT, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
         end
 
-        # k = Nz: top boundary, rain falls out
-        @inbounds begin
-            k = Nz
-            ρ = density[i, j, k]
-            p = pressure[i, j, k]
-            θˡⁱᵏ = θˡⁱ[i, j, k]
-            rᵛ = μ.qᵛ[i, j, k]
-            rᶜˡ = μ.qᶜˡ[i, j, k]
-            rʳ = μ.qʳ[i, j, k]
-
-            # Compute temperature from θˡⁱ
-            rˡ = rᶜˡ + rʳ
-            r = MoistureMixingRatio(rᵛ, rˡ)
-            cᵖᵐ = mixture_heat_capacity(r, constants)
-            Rᵐ  = mixture_gas_constant(r, constants)
-            q = MoistureMassFractions(r)
-            qˡ = q.liquid
-            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-            Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
-
-            # Rain sedimentation flux at top boundary
-            𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
-            zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
-            zᵏ⁻¹ = znode(i, j, k-1, grid, Center(), Center(), Center())
-            Δz_half = (zᵏ - zᵏ⁻¹) / 2
-            Δr𝕎 = -Δtₛ * rʳ * 𝕎ʳᵏ / Δz_half
-
-            # Core microphysics step (shared with ParcelModel)
-            rᵛ, rᶜˡ, rʳ, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
-                                                         microphysics, constants, f₅, δT, FT)
-
-            μ.qᵛ[i, j, k]  = rᵛ
-            μ.qᶜˡ[i, j, k] = rᶜˡ
-            μ.qʳ[i, j, k]  = rʳ
-
-            # Update θˡⁱ from latent heating
-            ΔT_phase = ℒˡᵣ / cᵖᵈ * Δrˡ
-            T = Tᵏ + ΔT_phase
-
-            rˡ = rᶜˡ + rʳ
-            r = MoistureMixingRatio(rᵛ, rˡ)
-            cᵖᵐ = mixture_heat_capacity(r, constants)
-            Rᵐ  = mixture_gas_constant(r, constants)
-            q = MoistureMassFractions(r)
-            qˡ = q.liquid
-            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-            θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
-
-            θˡⁱ[i, j, k]  = θˡⁱ_new
-            ρᵈ = coupling_density[i, j, k]
-            ρθˡⁱ[i, j, k] = ρᵈ * θˡⁱ_new
-        end
+        # k = Nz: no rain enters through the model top
+        kessler_column_cell!(i, j, Nz, grid, zero(FT), Δtₛ, microphysics,
+                             density, coupling_density, dry_air_coupled,
+                             pressure, pˢᵗ, constants, δT, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
         # Update terminal velocities for next subcycle
         if m < Ns
             for k = 1:Nz
-                @inbounds begin
-                    ρ = density[i, j, k]
-                    rʳ = μ.qʳ[i, j, k]
-                    μ.𝕎ʳ[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
-                end
+                @inbounds μ.𝕎ʳ[i, j, k] = kessler_rain_terminal_velocity(i, j, k, microphysics, density,
+                                                                         coupling_density, dry_air_coupled,
+                                                                         ρ₁, ρqᵛ, μ)
             end
         end
     end
 
+    # Surface precipitation rate: the substep-mean surface mass flux per unit of the final
+    # surface density, so that `surface_precipitation_flux` (ρ × rate) recovers the flux exactly.
     @inbounds begin
-        rᵗ₁ = μ.qᵛ[i, j, 1] + μ.qᶜˡ[i, j, 1] + μ.qʳ[i, j, 1]
-        final_surface_density = ifelse(dry_air_coupled,
-                                       coupling_density[i, j, 1] * (1 + rᵗ₁),
-                                       density[i, j, 1])
-        precipitation_rate_field[i, j, 1] = Fˢᵘʳᶠ * inv_Ns / final_surface_density
+        ρᵗ₁ = ρqᵛ[i, j, 1] + μ.ρqᶜˡ[i, j, 1] + μ.ρqʳ[i, j, 1]
+        final_surface_density = ifelse(dry_air_coupled, coupling_density[i, j, 1] + ρᵗ₁, density[i, j, 1])
+        μ.precipitation_rate[i, j, 1] = Fˢᵘʳᶠ * inv_Ns / final_surface_density
     end
 
     #####
-    ##### PHASE 3: Convert mixing ratio → mass fraction
+    ##### PHASE 3: diagnostic mass fractions on the final total density
     #####
+    # `grid_moisture_fractions` reads these when `update_state!` diagnoses the thermodynamic
+    # state, before `update_microphysical_fields!` refreshes them, so they must be current here.
 
     for k = 1:Nz
         @inbounds begin
-            ρ = density[i, j, k]
-            ρᵈ = coupling_density[i, j, k]
-            rᵛ = μ.qᵛ[i, j, k]
-            rᶜˡ = μ.qᶜˡ[i, j, k]
-            rʳ = μ.qʳ[i, j, k]
-
-            qᵛ, qᶜˡ, qʳ, _qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
-
-            # Compressible water partial densities are carried by dry air because rˣ = ρˣ/ρᵈ.
-            # After sedimentation changes rᵗ, ρᵈrˣ is consistent with the newly diagnosed
-            # total density ρ = ρᵈ(1 + rᵗ). Anelastic dynamics instead retain their legacy
-            # fixed-reference-density mass-fraction writeback.
-            ρqᵛ[i, j, k]    = ifelse(dry_air_coupled, ρᵈ * rᵛ, ρ * qᵛ)
-            μ.ρqᶜˡ[i, j, k] = ifelse(dry_air_coupled, ρᵈ * rᶜˡ, ρ * qᶜˡ)
-            μ.ρqʳ[i, j, k]  = ifelse(dry_air_coupled, ρᵈ * rʳ, ρ * qʳ)
-            μ.qᵛ[i, j, k]   = qᵛ
-            μ.qᶜˡ[i, j, k]  = qᶜˡ
-            μ.qʳ[i, j, k]   = qʳ
+            ρᵗ = ρqᵛ[i, j, k] + μ.ρqᶜˡ[i, j, k] + μ.ρqʳ[i, j, k]
+            ρ = ifelse(dry_air_coupled, coupling_density[i, j, k] + ρᵗ, density[i, j, k])
+            μ.qᵛ[i, j, k]  = ρqᵛ[i, j, k] / ρ
+            μ.qᶜˡ[i, j, k] = μ.ρqᶜˡ[i, j, k] / ρ
+            μ.qʳ[i, j, k]  = μ.ρqʳ[i, j, k] / ρ
         end
     end
 end
@@ -942,17 +1008,18 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     qᵛ_s = max(0, state.qᵗ - qᶜˡ_s - qʳ_s)
     rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ_s, μ.ρqᶜˡ, μ.ρqʳ, ρ)
 
-    # Temperature from thermodynamic state
+    # Temperature from thermodynamic state, and its response to condensation at fixed
+    # invariant (static energy or θˡⁱ, whichever the parcel carries)
     T = temperature(𝒰, constants)
+    ∂T∂rˡ = phase_change_temperature_slope(𝒰, constants)
 
     # Saturation adjustment parameters
-    f₅ = saturation_adjustment_coefficient(microphysics.dcmip_temperature_scale, constants)
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
     FT = typeof(ρ)
 
-    # Core microphysics step (no sedimentation for parcel: Δr𝕎 = 0)
-    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, p_parcel, Δt,
-                                               microphysics, constants, f₅, δT, FT)
+    # Core microphysics step (no sedimentation for a parcel)
+    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, T, ∂T∂rˡ, ρ, p_parcel, Δt,
+                                               microphysics, constants, δT, FT)
 
     # Convert mixing ratios → mass fractions (shared helper)
     _, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
@@ -962,8 +1029,8 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     state.qᵗ = qᵗ
     state.ρqᵗ = ρ * qᵗ
 
-    # Update thermodynamic state with new moisture fractions.
-    # Parcel models conserve specific static energy; latent heating is implicit.
+    # Update thermodynamic state with new moisture fractions. The parcel's invariant (static
+    # energy or θˡⁱ) is conserved by the phase change; latent heating is implicit in it.
     rˡ = rᶜˡ + rʳ
     r = MoistureMixingRatio(rᵛ, rˡ)
     q = MoistureMassFractions(r)
