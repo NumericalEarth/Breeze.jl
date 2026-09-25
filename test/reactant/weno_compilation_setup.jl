@@ -13,6 +13,7 @@ using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Reactant
+using Reactant: @trace
 using Enzyme
 using GPUArraysCore: @allowscalar
 using Statistics: mean
@@ -64,21 +65,23 @@ function initial_density(model)
     return isnothing(ref) ? one(FT) : ref.density
 end
 
-# The simulation carries Δt and the number of steps; `run!` reinitializes it each call.
-function loss(simulation, θ_init)
-    model = simulation.model
+function loss(model, θ_init, Δt, Nsteps)
     set!(model; θ=θ_init, ρ=initial_density(model))
-    run!(simulation)
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
+        time_step!(model, Δt)
+    end
     return mean(interior(model.temperature) .^ 2)
 end
 
-function grad_loss(simulation, dsimulation, θ_init, dθ_init)
+function grad_loss(model, dmodel, θ_init, dθ_init, Δt, Nsteps)
     parent(dθ_init) .= 0
     _, loss_value = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
-        Enzyme.Duplicated(simulation, dsimulation),
-        Enzyme.Duplicated(θ_init, dθ_init))
+        Enzyme.Duplicated(model, dmodel),
+        Enzyme.Duplicated(θ_init, dθ_init),
+        Enzyme.Const(Δt),
+        Enzyme.Const(Nsteps))
     return dθ_init, loss_value
 end
 
@@ -106,16 +109,15 @@ function run_weno_tests(scheme_label, scheme)
             end
 
             # Reconstruct for backward + FD phases
-            Ns = 1
             model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), advection=scheme)
-            simulation = Simulation(model; Δt, stop_iteration=Ns, verbose=false)
 
             θ_init, dθ_init = make_init_fields(grid)
-            dsimulation = Enzyme.make_zero(simulation)
+            dmodel = Enzyme.make_zero(model)
+            Ns = 1
 
             compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-                simulation, dsimulation, θ_init, dθ_init)
-            dθ, loss_val = compiled_grad(simulation, dsimulation, θ_init, dθ_init)
+                model, dmodel, θ_init, dθ_init, Δt, Ns)
+            dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
             ad_grad = @allowscalar Array(interior(dθ))
 
             # ── Raise backward ──
@@ -133,11 +135,10 @@ function run_weno_tests(scheme_label, scheme)
             # convergence is not an artifact of a particular ε.
             @testset "FD validation" begin
                 grid_fd = make_grid(topo, nd; arch=default_arch)
-                make_fd_simulation() = Simulation(AtmosphereModel(grid_fd; dynamics=CompressibleDynamics(), advection=scheme);
-                                                  Δt, stop_iteration=Ns, verbose=false)
+                make_fd_model() = AtmosphereModel(grid_fd; dynamics=CompressibleDynamics(), advection=scheme)
 
                 θ₀_fd = CenterField(grid_fd); set!(θ₀_fd, (args...) -> 300.0)
-                J₀ = loss(make_fd_simulation(), θ₀_fd)
+                J₀ = loss(make_fd_model(), θ₀_fd, Δt, Ns)
 
                 test_cells = nd == 2 ? [(1,1,1), (4,4,1)] : [(1,1,1), (4,4,4)]
 
@@ -145,7 +146,7 @@ function run_weno_tests(scheme_label, scheme)
                     @testset let ε=ε, (ic, jc, kc)=(ic, jc, kc)
                         θ_fd = CenterField(grid_fd); set!(θ_fd, (args...) -> 300.0)
                         @allowscalar interior(θ_fd, ic, jc, kc)[] += ε
-                        J₊ = loss(make_fd_simulation(), θ_fd)
+                        J₊ = loss(make_fd_model(), θ_fd, Δt, Ns)
                         fd = (J₊ - J₀) / ε
                         ad = ad_grad[ic, jc, kc]
                         @test ad ≈ fd rtol=0.001

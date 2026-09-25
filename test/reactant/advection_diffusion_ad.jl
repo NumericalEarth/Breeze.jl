@@ -7,6 +7,7 @@ using Oceananigans.TurbulenceClosures: ScalarDiffusivity
 using Oceananigans.Grids: xnodes, ynodes
 using CUDA
 using Reactant
+using Reactant: @trace
 using GPUArraysCore: @allowscalar
 using Enzyme
 using Test
@@ -58,7 +59,7 @@ end
 ##### Model builders and loss
 #####
 
-function build_case(N, L, κ, Δt, Nₛ)
+function build_case(N, L, κ)
     grid = RectilinearGrid(ReactantState();
         size = (N, N), x = (-L/2, L/2), y = (-L/2, L/2),
         topology = (Periodic, Periodic, Flat))
@@ -69,21 +70,18 @@ function build_case(N, L, κ, Δt, Nₛ)
         closure   = ScalarDiffusivity(κ = Float64(κ)),
         tracers   = :ρc)
 
-    simulation = Simulation(model; Δt, stop_iteration=Nₛ, verbose=false)
-
     T⁰  = CenterField(grid)
     dT⁰ = CenterField(grid)
     set!(dT⁰, 0.0)
+    dmodel = Enzyme.make_zero(model)
 
     xc = Reactant.to_rarray(Array(xnodes(grid, Center())))
     yc = Reactant.to_rarray(Array(ynodes(grid, Center())))
 
-    return simulation, T⁰, dT⁰, xc, yc
+    return model, dmodel, T⁰, dT⁰, xc, yc, L / N
 end
 
-# The simulation carries Δt and the number of steps; `run!` reinitializes it each call.
-function loss(simulation, T⁰, θ, xc, yc, Δx)
-    model = simulation.model
+function loss(model, T⁰, θ, xc, yc, Δt, Nₛ, Δx)
     A_  = @allowscalar θ[1]
     σ₀_ = @allowscalar θ[2]
     U₀_ = @allowscalar θ[3]
@@ -95,21 +93,25 @@ function loss(simulation, T⁰, θ, xc, yc, Δx)
     interior(T⁰) .= reshape(T_vals, size(interior(T⁰)))
 
     set!(model; ρc = T⁰, ρ = 1.0, θ = 300.0, u = U₀_, v = 0.0, w = 0.0)
-    run!(simulation)
+    @trace track_numbers = false mincut = true checkpointing = false for _ in 1:Nₛ
+        time_step!(model, Δt)
+    end
     return Δx^2 * sum(interior(model.tracers.ρc) .^ 2)
 end
 
-function grad_loss(simulation, dsimulation, T⁰, dT⁰, θ, dθ, xc, yc, Δx)
+function grad_loss(model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
     parent(dT⁰) .= 0
     dθ .= 0
     _, J = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
-        Enzyme.Duplicated(simulation, dsimulation),
+        Enzyme.Duplicated(model, dmodel),
         Enzyme.Duplicated(T⁰,   dT⁰),
         Enzyme.Duplicated(θ, dθ),
         Enzyme.Const(xc),
         Enzyme.Const(yc),
+        Enzyme.Const(Δt),
+        Enzyme.Const(Nₛ),
         Enzyme.Const(Δx))
     return dθ, J
 end
@@ -128,16 +130,15 @@ end
         Nₛ = ceil(Int, _t_f / Δt)
         Δt = _t_f / Nₛ
 
-        simulation, T⁰, dT⁰, xc, yc = build_case(N, _L, _κ, Δt, Nₛ)
-        dsimulation = Enzyme.make_zero(simulation)
+        model, dmodel, T⁰, dT⁰, xc, yc, _ = build_case(N, _L, _κ)
         θ  = Reactant.to_rarray(Float64[_A, _σ₀, _U₀])
         dθ = Reactant.to_rarray(zeros(3))
 
         compile_options = CompileOptions(; disable_loop_raising_passes = true, raise_first = true, raise = true, sync = true)
         compiled = @with_stack_size Reactant.@compile compile_options=compile_options grad_loss(
-                simulation, dsimulation, T⁰, dT⁰, θ, dθ, xc, yc, Δx)
+                model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
 
-        dθ_result, J_ad = compiled(simulation, dsimulation, T⁰, dT⁰, θ, dθ, xc, yc, Δx)
+        dθ_result, J_ad = compiled(model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
         J_ad  = Float64(J_ad)
         grads = Array(dθ_result)
 

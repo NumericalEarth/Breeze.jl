@@ -14,6 +14,7 @@ using CloudMicrophysics
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Reactant
+using Reactant: @trace
 using Enzyme
 using GPUArraysCore: @allowscalar
 using Statistics: mean
@@ -47,21 +48,23 @@ grid_configs = [
 ##### Helpers
 #####
 
-# The simulation carries Δt and the number of steps; `run!` reinitializes it each call.
-function loss(simulation, θ_init)
-    model = simulation.model
+function loss(model, θ_init, Δt, Nsteps)
     set!(model; θ=θ_init, ρ=1.0, ρqᵛ=0.01, ρqᶜˡ=1e-4, ρqᶜⁱ=1e-5, ρqʳ=1e-5, ρqˢⁿ=1e-6)
-    run!(simulation)
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
+        time_step!(model, Δt)
+    end
     return mean(interior(model.temperature) .^ 2)
 end
 
-function grad_loss(simulation, dsimulation, θ_init, dθ_init)
+function grad_loss(model, dmodel, θ_init, dθ_init, Δt, Nsteps)
     parent(dθ_init) .= 0
     _, loss_value = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
-        Enzyme.Duplicated(simulation, dsimulation),
-        Enzyme.Duplicated(θ_init, dθ_init))
+        Enzyme.Duplicated(model, dmodel),
+        Enzyme.Duplicated(θ_init, dθ_init),
+        Enzyme.Const(Δt),
+        Enzyme.Const(Nsteps))
     return dθ_init, loss_value
 end
 
@@ -87,14 +90,13 @@ end
 
         @testset "Raise backward" begin
             model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), microphysics)
-            simulation = Simulation(model; Δt, stop_iteration=Ns, verbose=false)
             θ_init  = CenterField(grid); set!(θ_init,  (args...) -> 300.0)
             dθ_init = CenterField(grid); set!(dθ_init, 0)
-            dsimulation = Enzyme.make_zero(simulation)
+            dmodel  = Enzyme.make_zero(model)
 
             compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-                simulation, dsimulation, θ_init, dθ_init)
-            dθ, loss_val = @with_stack_size compiled_grad(simulation, dsimulation, θ_init, dθ_init)
+                model, dmodel, θ_init, dθ_init, Δt, Ns)
+            dθ, loss_val = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
             ad_grad = @allowscalar Array(interior(dθ))
 
             @test loss_val > 0
