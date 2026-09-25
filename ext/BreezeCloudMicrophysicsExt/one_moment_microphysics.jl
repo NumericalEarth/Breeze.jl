@@ -197,6 +197,8 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
         cloud_formation = NonEquilibriumCloudFormation(liquid, ice)
     end
 
+    validate_rain_autoconversion(categories.parameters.process_params.rain_autoconversion)
+
     return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction)
 end
 
@@ -221,10 +223,29 @@ function condensate_formation_from_option(option, params, reference)
     return ConstantRateCondensateFormation(rate)
 end
 
+# The Kessler rain autoconversion threshold and timescale blend between quiescent ("slow") and
+# convective ("fast") values with the vertical velocity `thermo.w`. We evaluate it at rest
+# (`w = 0`), which is exact only when the slow and fast values are equal (the defaults), so
+# `validate_rain_autoconversion` rejects parameters whose rate would depend on `w`.
+# TODO: carry the vertical velocity in the one-moment microphysical states (as the two-moment
+# state already does), pass it here, and remove `validate_rain_autoconversion`.
+validate_rain_autoconversion(parameters) = nothing
+
+function validate_rain_autoconversion(parameters::KesslerAcnv)
+    if parameters.τ_slow != parameters.τ_fast || parameters.q_threshold_slow != parameters.q_threshold_fast
+        throw(ArgumentError("Velocity-dependent Kessler rain autoconversion is not supported: " *
+                            "OneMomentCloudMicrophysics evaluates autoconversion at rest, so the " *
+                            "rain autoconversion parameters must have τ_slow == τ_fast and " *
+                            "q_threshold_slow == q_threshold_fast, got " * prettysummary(parameters)))
+    end
+    return nothing
+end
+
 @inline function liquid_autoconversion(parameters, qᶜˡ)
     micro = (; q_lcl = qᶜˡ)
+    thermo = (; w = zero(qᶜˡ))
     option = parameters.processes.rain_autoconversion
-    return conv_q_lcl_to_q_rai(option, parameters, nothing, micro, nothing)
+    return conv_q_lcl_to_q_rai(option, parameters, nothing, micro, thermo)
 end
 
 @inline function ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
