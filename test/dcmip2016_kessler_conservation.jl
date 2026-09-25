@@ -356,15 +356,16 @@ end
     ρ = column(model.dynamics.reference_state.density)
     ρqᵛ = column(model.moisture_density)
     ρqʳ = column(model.microphysical_fields.ρqʳ)
-    ρqᵛ[5] = -FT(1e-4) * ρ[5]
-    ρqʳ[Nz-3] = -FT(2e-5) * ρ[Nz-3]
+    ρqᵛ[5] = -FT(2e-4) * ρ[5]
+    ρqʳ[Nz-3] = -FT(4e-5) * ρ[Nz-3]
     set!(model.moisture_density, reshape(ρqᵛ, 1, 1, Nz))
     set!(model.microphysical_fields.ρqʳ, reshape(ρqʳ, 1, 1, Nz))
     clipped = -(ρqᵛ[5] * Δz[5] + ρqʳ[Nz-3] * Δz[Nz-3])
 
+    # The injected signal must stand well clear of the round-off floor of the inventory sums,
+    # eps(FT) × W₀ × Nz, so that the bound below (relative to the created mass) is meaningful
     W₀ = water_inventory(model, Δz)
-    tolerance = budget_rtol(FT) * W₀
-    @test clipped > 10 * tolerance # the created mass is resolvable against the budget round-off
+    @test clipped / (eps(FT) * W₀ * Nz) ≥ 1000
 
     Δt = FT(20)
     kessler_step!(model, Δt)
@@ -375,7 +376,7 @@ end
     @test all(ρqʳ₁ .≥ 0)
     @test ρqᵛ₁[5] == 0
     # The water created is exactly the clipped mass, nothing more
-    @test abs((W₁ + surface_flux(model) * Δt - W₀) - clipped) ≤ tolerance
+    @test W₁ + surface_flux(model) * Δt - W₀ ≈ clipped rtol=budget_rtol(FT)
 end
 
 #####

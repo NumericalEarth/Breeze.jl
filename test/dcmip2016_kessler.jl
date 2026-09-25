@@ -836,6 +836,103 @@ end
     end
 end
 
+@testset "Bounded departure from the legacy algorithm where the physics was corrected" begin
+    # Where the physics was deliberately corrected — the anelastic density basis, the top cell and
+    # the θˡⁱ-conserving phase change — equality with the legacy translation is not expected. This
+    # pins the size of the departure on the former "Physical fidelity" column (uniform 100 m, all
+    # processes, one 10 s step) so that a future change cannot silently move the scheme further
+    # from the legacy behaviour, nor silently restore it. Measured values (KESSLER receipts,
+    # `legacy_departure.log`): Δqᵛ 5.1e-4, Δqᶜˡ 1.2e-2, Δqʳ 4.9e-2 of the species maxima;
+    # Δθˡⁱ 2.8e-2 K = 9.5e-5 relative = 0.56 % of the step's latent heating; the legacy water
+    # residual is −3.6e-4 kg m⁻², the current one is at round-off.
+    FT = Float64
+    Nz = 40
+    grid = RectilinearGrid(CPU(), FT; size = (1, 1, Nz), x = (0, 100), y = (0, 100), z = (0, 4000),
+                           topology = (Periodic, Periodic, Bounded))
+    z_centers = collect(znodes(grid, Center()))
+    Δz = FT(4000 / Nz)
+
+    T_prof = FT(288) .- FT(0.0065) .* z_centers
+    p_prof = FT(101325) .* (T_prof ./ FT(288)) .^ (FT(9.81) / (FT(287) * FT(0.0065)))
+    ρ_prof = p_prof ./ (FT(287) .* T_prof)
+    p₀ = FT(1e5)
+
+    rᵛ_init = [FT(0.015 * exp(-((z - 1000) / 1000)^2)) for z in z_centers]
+    rᶜˡ_init = [FT(1500 < z < 2500 ? 0.002 : 0) for z in z_centers]
+    rʳ_init = [FT(1000 < z < 2000 ? 0.0005 : 0) for z in z_centers]
+    rᵗ_init = rᵛ_init .+ rᶜˡ_init .+ rʳ_init
+    qᵛ_init = rᵛ_init ./ (1 .+ rᵗ_init)
+    qᶜˡ_init = rᶜˡ_init ./ (1 .+ rᵗ_init)
+    qʳ_init = rʳ_init ./ (1 .+ rᵗ_init)
+    Δt = FT(10)
+
+    cᵖ = 1003.0
+    constants = ThermodynamicConstants(FT;
+        dry_air_heat_capacity = cᵖ, vapor_heat_capacity = cᵖ,
+        dry_air_molar_mass = 8.314462618 / 287.0, vapor_molar_mass = 8.314462618 / 287.0,
+        saturation_vapor_pressure = TetensFormula(liquid_temperature_offset=36),
+        liquid = Breeze.Thermodynamics.CondensedPhase(FT; reference_latent_heat = 2500000.0, heat_capacity = cᵖ, density = 1000),
+        ice = Breeze.Thermodynamics.CondensedPhase(FT; reference_latent_heat = 2834000.0, heat_capacity = cᵖ, density = 917))
+    microphysics = DCMIP2016KesslerMicrophysics(FT)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+
+    θ_of(T, qᵛ, qˡ, p) = begin
+        q = MoistureMassFractions(qᵛ, qˡ)
+        cᵖᵐ = mixture_heat_capacity(q, constants)
+        Rᵐ = mixture_gas_constant(q, constants)
+        (T - ℒˡᵣ * qˡ / cᵖᵐ) / (p / p₀)^(Rᵐ / cᵖᵐ)
+    end
+    θ_init = [θ_of(T_prof[k], qᵛ_init[k], qᶜˡ_init[k] + qʳ_init[k], p_prof[k]) for k in 1:Nz]
+
+    # Legacy algorithm, in the old port's anelastic convention (sedimentation on the total density)
+    T_l = copy(T_prof); qᵛ_l = copy(qᵛ_init); qᶜˡ_l = copy(qᶜˡ_init); qʳ_l = copy(qʳ_init)
+    F_l = dcmip2016_fortran_kessler!(T_l, qᵛ_l, qᶜˡ_l, qʳ_l, ρ_prof, p_prof, Δt, z_centers, constants, microphysics)
+    θ_l = [θ_of(T_l[k], qᵛ_l[k], qᶜˡ_l[k] + qʳ_l[k], p_prof[k]) for k in 1:Nz]
+
+    # Current kernel
+    ref_state = ReferenceState(grid, constants; base_pressure=p₀)
+    model = AtmosphereModel(grid; dynamics = AnelasticDynamics(ref_state), microphysics, thermodynamic_constants=constants)
+    set!(model.dynamics.reference_state.density, reshape(ρ_prof, 1, 1, Nz))
+    set!(model.dynamics.reference_state.pressure, reshape(p_prof, 1, 1, Nz))
+    set!(model.moisture_density, reshape(ρ_prof .* qᵛ_init, 1, 1, Nz))
+    set!(model.microphysical_fields.ρqᶜˡ, reshape(ρ_prof .* qᶜˡ_init, 1, 1, Nz))
+    set!(model.microphysical_fields.ρqʳ, reshape(ρ_prof .* qʳ_init, 1, 1, Nz))
+    set!(model.formulation.potential_temperature_density, reshape(ρ_prof .* θ_init, 1, 1, Nz))
+    model.clock.last_Δt = Δt
+    update_state!(model)
+    microphysics_model_update!(model.microphysics, model)
+
+    column(f) = vec(Array(interior(f)))
+    qᵛ_n = column(model.moisture_density) ./ ρ_prof
+    qᶜˡ_n = column(model.microphysical_fields.ρqᶜˡ) ./ ρ_prof
+    qʳ_n = column(model.microphysical_fields.ρqʳ) ./ ρ_prof
+    θ_n = column(model.formulation.potential_temperature)
+    F_n = column(model.microphysical_fields.precipitation_rate)[1] * ρ_prof[1]
+
+    departure(a, b) = maximum(abs.(a .- b)) / maximum(b)
+    @test departure(qᵛ_n, qᵛ_l) < 2e-3
+    @test departure(qᶜˡ_n, qᶜˡ_l) < 3e-2
+    @test departure(qʳ_n, qʳ_l) < 1e-1
+
+    # The invariant departs by a bounded fraction of the step's latent heating, and it does depart:
+    # the legacy T-increment is the inconsistency this branch removes
+    Δqˡ_step = maximum(abs.((qᶜˡ_n .+ qʳ_n) .- (qᶜˡ_init .+ qʳ_init)))
+    latent_heating = ℒˡᵣ * Δqˡ_step / cᵖ
+    @test latent_heating > 1
+    @test maximum(abs.(θ_n .- θ_l)) < 0.02 * latent_heating
+    @test maximum(abs.(θ_n .- θ_l)) > 1e-3
+    @test maximum(abs.(θ_n .- θ_l) ./ θ_l) < 2e-4
+
+    # Neither column rains out within one step; the legacy convention does not conserve the
+    # prognostic water, the current one does
+    @test F_l == 0 && F_n == 0
+    W₀ = sum(ρ_prof .* (qᵛ_init .+ qᶜˡ_init .+ qʳ_init)) * Δz
+    W_l = sum(ρ_prof .* (qᵛ_l .+ qᶜˡ_l .+ qʳ_l)) * Δz
+    W_n = sum(ρ_prof .* (qᵛ_n .+ qᶜˡ_n .+ qʳ_n)) * Δz
+    @test abs(W_l - W₀) > 1e-5
+    @test abs(W_n - W₀) < 1e-11 * W₀
+end
+
 @testset "Thermodynamic constants validation" begin
     FT = Float64
     grid = RectilinearGrid(CPU(), size=(1, 1, 4), extent=(1, 1, 1))
