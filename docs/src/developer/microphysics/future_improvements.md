@@ -6,7 +6,8 @@ for future development.
 ## 1. Consolidate Redundant State Types
 
 **Issue**: `WarmRainState` (in `microphysics_interface.jl`) and `WarmPhaseOneMomentState`
-(in the CloudMicrophysics extension) are nearly identical structs.
+(in the CloudMicrophysics extension) are nearly identical structs: both hold `qᶜˡ` and `qʳ`, and
+`WarmPhaseOneMomentState` also holds the vertical velocity `w` used by the rain autoconversion.
 
 **Impact**: Code duplication, potential for inconsistency.
 
