@@ -131,8 +131,7 @@ BoundaryConditions.needs_implicit_solver(a::DensityWeightedImplicitOperator) =
     ρᶜ = densityᶜᶜᶜ(i, j, k, grid, ρ)
     V⁻¹ = 1 / volume(i, j, k, grid, ℓx, ℓy, Center())
 
-    return Δt * V⁻¹ / ρᶜ * (Az⁺ * ρᶠ⁺ * max(wⁱ⁺, 0) -
-                               Az⁻ * ρᶠ⁻ * min(wⁱ⁻, 0))
+    return Δt * V⁻¹ / ρᶜ * (Az⁺ * ρᶠ⁺ * max(wⁱ⁺, 0) - Az⁻ * ρᶠ⁻ * min(wⁱ⁻, 0))
 end
 
 # As with the advection coefficients, `ρ` is interpolated in z only, so these are exact for
