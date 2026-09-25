@@ -129,6 +129,11 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 - **Surface precipitation.** `surface_precipitation_flux` is the substep-mean bottom-face flux
   `(ρqʳ 𝕎ʳ)₁`, exactly the water removed from the column; `precipitation_rate` is that flux per
   unit of the final surface density.
+- **Negative inputs.** Negative water partial densities handed to the kernel (for example by
+  advection) are clipped to zero on entry, as in the DCMIP2016 Fortran. Clipping *creates* the
+  clipped mass; it is the only non-conservative operation left in the kernel, and the water budget
+  above closes for non-negative inputs only. Keeping the prognostics non-negative upstream (see
+  `negative_moisture_correction`) is what makes the closure hold in a simulation.
 - **Thermodynamics** (`LiquidIcePotentialTemperatureFormulation` only). Temperature is recovered
   from the prognostic `θˡⁱ` with Breeze's own `θˡⁱ ↔ T` relation. Sedimentation happens at fixed
   temperature, so `θˡⁱ` absorbs the change of liquid loading (falling rain carries water, not heat).

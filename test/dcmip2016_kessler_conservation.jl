@@ -70,13 +70,17 @@ function column_model(FT, faces, microphysics; θ = 300)
     return model
 end
 
-# Set the water partial densities from specific values on the reference density
+# Set the water partial densities from specific values on the reference density. The
+# temperature is diagnosed from the scheme's diagnostic mass-fraction fields, which the same
+# `update_state!` pass refreshes only after reading them, so two passes are needed for the
+# diagnosed temperature to reflect freshly set cloud and rain.
 function set_water!(model; qᵛ = nothing, qᶜˡ = nothing, qʳ = nothing)
     Nz = model.grid.Nz
     ρ = column(model.dynamics.reference_state.density)
     isnothing(qᵛ)  || set!(model.moisture_density, reshape(ρ .* qᵛ, 1, 1, Nz))
     isnothing(qᶜˡ) || set!(model.microphysical_fields.ρqᶜˡ, reshape(ρ .* qᶜˡ, 1, 1, Nz))
     isnothing(qʳ)  || set!(model.microphysical_fields.ρqʳ, reshape(ρ .* qʳ, 1, 1, Nz))
+    update_state!(model)
     update_state!(model)
     return nothing
 end
@@ -326,6 +330,49 @@ end
             end
         end
     end
+end
+
+#####
+##### Negative inputs: clipped on entry, a documented source, not covered by the budgets above
+#####
+
+@testset "Kessler clips negative inputs on entry [$FT]" for FT in all_float_types()
+    # Advection can hand the kernel negative partial densities. The kernel clips them to zero
+    # before doing anything else (as the DCMIP2016 Fortran does), which *creates* exactly the
+    # clipped mass. The budget tests above therefore hold for non-negative states only; this
+    # test pins the size of the source so it is not mistaken for closure.
+    faces = junction_faces(FT)
+    Δz = diff(faces)
+    microphysics = sedimentation_only_microphysics(FT)
+    model = column_model(FT, faces, microphysics)
+    z = cell_centers(faces)
+    Nz = length(z)
+    q⁺ = saturation_profile(model)
+    set_water!(model; qᵛ = FT(0.5) .* q⁺, qᶜˡ = zeros(FT, Nz), qʳ = FT.(rain_profile.(z)))
+
+    # Negative vapor in one cell and negative rain in another, written straight into the
+    # prognostics (bypassing any negative-moisture correction of `update_state!`)
+    ρ = column(model.dynamics.reference_state.density)
+    ρqᵛ = column(model.moisture_density)
+    ρqʳ = column(model.microphysical_fields.ρqʳ)
+    ρqᵛ[5] = -FT(1e-4) * ρ[5]
+    ρqʳ[Nz-3] = -FT(2e-5) * ρ[Nz-3]
+    set!(model.moisture_density, reshape(ρqᵛ, 1, 1, Nz))
+    set!(model.microphysical_fields.ρqʳ, reshape(ρqʳ, 1, 1, Nz))
+    clipped = -(ρqᵛ[5] * Δz[5] + ρqʳ[Nz-3] * Δz[Nz-3])
+    @test clipped > 0
+
+    W₀ = water_inventory(model, Δz)
+    Δt = FT(20)
+    kessler_step!(model, Δt)
+    W₁ = water_inventory(model, Δz)
+    ρqᵛ₁, ρqᶜˡ₁, ρqʳ₁ = water_densities(model)
+
+    @test all(ρqᵛ₁ .≥ 0)
+    @test all(ρqʳ₁ .≥ 0)
+    @test ρqᵛ₁[5] == 0
+    # The water created is exactly the clipped mass, nothing more
+    @test W₁ + surface_flux(model) * Δt - W₀ ≈ clipped rtol=budget_rtol(FT)
 end
 
 #####

@@ -292,7 +292,8 @@ end
     p₀ = FT(100000.0)
 
     # Initial moisture profiles (mixing ratios): a moist layer, a cloud layer above the
-    # autoconversion threshold, and rain that falls through the junction and out of the top cell
+    # autoconversion threshold, and rain that falls through the junction, out of the top cell
+    # and out of the bottom cell
     rᵛ_init = zeros(FT, Nz)
     rᶜˡ_init = zeros(FT, Nz)
     rʳ_init = zeros(FT, Nz)
@@ -303,7 +304,7 @@ end
         if 1500 < z < 2500
             rᶜˡ_init[k] = 0.002
         end
-        if 1000 < z < 2000 || k == Nz
+        if 1000 < z < 2000 || k == Nz || k == 1
             rʳ_init[k] = 0.0005
         end
     end
