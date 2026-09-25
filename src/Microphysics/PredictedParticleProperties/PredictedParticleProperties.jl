@@ -20,7 +20,7 @@ rather than multiple discrete ice categories.
 
 This implementation is based on the following P3 papers:
 
-1. **Morrison & Milbrandt (2015a)** - Original P3: m(D), A(D), V(D), process rates
+1. **Morrison & Milbrandt (2015a)** - Original P3: ``m(D)``, ``A(D)``, ``\\mathbb{W}(D)``, process rates
    [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization)
 
 2. **Morrison et al. (2015b)** - Part II: Case study validation
@@ -49,26 +49,31 @@ export
     PredictedParticlePropertiesMicrophysics,
     P3Microphysics,
     P3MicrophysicalState,
-    ProcessRateParameters,
+    ProcessRate,
     NumericalFloors,
 
     # Ice properties
-    IceProperties,
+    IceParticles,
     IceFallSpeed,
     IceDeposition,
-    IceBulkProperties,
+    IceBulk,
     IceCollection,
     IceLambdaLimiter,
     IceRainCollection,
 
     # Rain and cloud droplet properties
-    RainProperties,
-    CloudDropletProperties,
+    RainDrops,
+    CloudDroplets,
+
+    # Empirical parameter containers for the warm-phase fits
+    CloudShape,
+    RainFallSpeed,
+    RainVentilation,
 
     # Rain PSD quadrature evaluators
-    RainMassWeightedVelocityEvaluator,
-    RainNumberWeightedVelocityEvaluator,
-    RainEvaporationVentilationEvaluator,
+    RainMassWeightedVelocity,
+    RainNumberWeightedVelocity,
+    RainVelocityDiameterIntegral,
 
     # Tabulated wrapper
     TabulatedFunction1D,
@@ -96,13 +101,13 @@ export
     tabulate_rain_from_quadrature,
     rime_density_index,
 
-    # Aerosol activation (prognostic CCN)
+    # Aerosol activation
     AerosolMode,
     AerosolActivation,
     activated_number,
     total_activated_number,
     sum_aerosol_number,
-    prognostic_ccn_activation_rate
+    aerosol_activation_rate
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS, TYPEDEF
 using SpecialFunctions: erf
@@ -167,7 +172,7 @@ include("transport_properties.jl")
 include("process_rate_parameters.jl")
 
 #####
-##### Aerosol activation (prognostic CCN)
+##### Aerosol activation
 #####
 
 include("aerosol_activation.jl")
@@ -212,22 +217,22 @@ include("rain_quadrature.jl")
 @adapt_architecture RimeDensityIndexedTable5D
 @adapt_architecture IceFallSpeed
 @adapt_architecture IceDeposition
-@adapt_architecture IceBulkProperties
+@adapt_architecture IceBulk
 @adapt_architecture IceCollection
 @adapt_architecture IceLambdaLimiter
 @adapt_architecture IceRainCollection
-@adapt_architecture IceProperties
-@adapt_architecture RainProperties
+@adapt_architecture IceParticles
+@adapt_architecture RainDrops
 @adapt_architecture PredictedParticlePropertiesMicrophysics
 
 #####
-##### Process-rate helpers, the shared Table-1 lookups (`P3IceLookups`), CCN activation,
+##### Process-rate helpers, the shared Table-1 lookups (`P3IceLookups`), droplet activation,
 ##### and the coupled saturation-adjustment solver
 #####
 
 include("process_rate_helpers.jl")
 include("tabulated_kernels.jl")
-include("ccn_activation_rates.jl")
+include("cloud_droplet_activation_rates.jl")
 include("coupled_saturation_adjustment.jl")
 
 #####

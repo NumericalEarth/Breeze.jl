@@ -273,7 +273,8 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     coupling_density = dynamics_density(twin_dynamics)
     mass_density = total_density(twin_dynamics)
     twin_model_fields = merge(twin_prognostic, fields(formulation), model.velocities,
-                              (; T = model.temperature), twin_microphysical)
+                              auxiliary_model_fields(model.temperature),
+                              twin_microphysical)
     twin_forcing = atmosphere_model_forcing(NamedTuple(), twin_prognostic, twin_model_fields,
                                             grid, model.coriolis, coupling_density, mass_density,
                                             model.velocities, twin_dynamics, formulation,
@@ -287,5 +288,5 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
                            model.pressure_solver, model.velocities, twin_tracers,
                            nothing, twin_advection, model.coriolis, twin_forcing,
                            twin_microphysics, twin_microphysical, (), twin_timestepper,
-                           nothing, model.closure_fields, nothing)
+                           nothing, model.closure_fields, nothing, nothing)
 end

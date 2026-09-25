@@ -7,6 +7,8 @@ using Breeze.BoundaryConditions: theta_to_energy_bcs, materialize_atmosphere_fie
 
 const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTemperatureFormulation}
 
+AtmosphereModels.specific_thermodynamic_field(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature
+
 #####
 ##### Helper accessors
 #####
@@ -35,7 +37,7 @@ function AtmosphereModels.static_energy_density(model::PotentialTemperatureModel
     # Regularize the converted BCs (populate microphysics, constants, side)
     loc = (Center(), Center(), Center())
     ρs_bcs = materialize_atmosphere_field_bcs(ρs_bcs, loc, model.grid, model.dynamics, model.microphysics,
-                                              nothing, model.thermodynamic_constants, nothing, nothing, nothing)
+                                              model.thermodynamic_constants)
 
     # Create the energy density operation and wrap in a Field with proper BCs
     ρs_op = Diagnostics.StaticEnergy(model, :density)
@@ -53,7 +55,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemper
     ρθ_args = (
         Val(1),
         model.forcing.ρθ,
-        model.forcing.ρs,
+        model.forcing.ρE,
         model.advection.ρθ,
         radiation_flux_divergence(model.radiation),
         model.sedimentation_constituents,
@@ -69,7 +71,7 @@ end
 @inline function potential_temperature_tendency(i, j, k, grid,
                                                 id,
                                                 ρθ_forcing,
-                                                ρs_forcing,
+                                                ρE_forcing,
                                                 advection,
                                                 radiation_flux_divergence_field,
                                                 sedimenting_constituents,
@@ -95,7 +97,7 @@ end
     cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
-    Fρs = ρs_forcing(i, j, k, grid, clock, model_fields)
+    FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
     div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
@@ -105,7 +107,7 @@ end
                                       specific_prognostic_moisture, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
-             + (Fρs + div_ℐ) / (cᵖᵐ * Π)
+             + (FρE + div_ℐ) / (cᵖᵐ * Π)
     )
 end
 

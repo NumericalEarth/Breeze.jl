@@ -360,6 +360,25 @@ The physical meaning of the prognostic moisture field depends on the scheme:
 moisture_prognostic_name(::Nothing) = :ρqᵛ
 
 """
+    total_moisture_density_name
+
+The key under which a *water* input — a surface evaporative flux, a moisture source — is
+supplied to `AtmosphereModel`, `:ρqᵗ`, along with its specific alias `:qᵗ` for forcings.
+
+``qᵗ`` denotes total moisture, so the key names the physical input without committing to the
+variable that carries it: a `boundary_conditions` or `forcing` entry keyed `ρqᵗ` is routed onto
+whichever moisture density the microphysics evolves (see [`moisture_prognostic_name`](@ref)).
+Unlike an energy input, no conversion is involved: water added to the prognostic moisture is
+water added to ``qᵗ`` under every scheme, so the routing is a pure re-key.
+
+The prognostic moisture name is scheme-dependent — `:ρqᵛ` for non-equilibrium cloud formation,
+`:ρqᵉ` for saturation adjustment — and changes with the `cloud_formation` option of
+`BulkMicrophysics`, so keying a surface flux by that name ties a setup to one scheme. `ρqᵗ` is
+never itself prognostic and therefore works for any of them.
+"""
+const total_moisture_density_name = :ρqᵗ
+
+"""
 $(TYPEDSIGNATURES)
 
 Strip the leading `ρ` from a density-weighted field name to obtain
@@ -460,8 +479,8 @@ Return the aerosol population stored in a microphysics scheme's native units.
 
 The units are the scheme's own: a volumetric distribution returns [m⁻³], while a
 distribution specified per unit mass of air returns [kg⁻¹]. Use
-[`initial_aerosol_number_density`](@ref) to obtain the value that the prognostic `ρnᵃ`
-holds, whichever basis a scheme uses.
+[`initial_aerosol_number_density`](@ref) to obtain the value a prognostic `ρnᵃ` holds,
+whichever basis a scheme uses. A scheme may report a population here and carry no `ρnᵃ`.
 
 Returns `0` by default.
 """
@@ -473,9 +492,11 @@ $(TYPEDSIGNATURES)
 Return the default aerosol number *density* ``ρ nᵃ`` [m⁻³] for a microphysics scheme,
 given the air density `ρ` (a field for grid models, a number for parcels).
 
-This is the value `set!` writes into the prognostic field `ρnᵃ` when the user supplies
-neither `nᵃ` nor `ρnᵃ`. It is derived from the aerosol size distribution stored in the
-microphysics scheme, so it stays consistent with the activation parameters.
+This is the value `set!` writes into the prognostic field `ρnᵃ` when the scheme has one
+and the user supplies neither `nᵃ` nor `ρnᵃ`. It is derived from the aerosol size
+distribution stored in the microphysics scheme, so it stays consistent with the activation
+parameters. A scheme may report a population here and still have no field to write it to;
+`aerosol_field_names(microphysics) == ()` is what says so.
 
 Each scheme is responsible for the units of its own aerosol distribution: the density
 argument is here so that a scheme whose distribution is specified *per unit mass*
@@ -545,7 +566,7 @@ Grid indices cannot be eliminated because:
 
 Schemes should write all auxiliary fields in one function. This includes:
 - Specific moisture fractions (`qᶜˡ`, `qʳ`, etc.) from the microphysical state
-- Derived quantities (`qˡ = qᶜˡ + qʳ`, `qⁱ = qᶜⁱ + qˢ`)
+- Derived quantities (`qˡ = qᶜˡ + qʳ`, `qⁱ = qᶜⁱ + qˢⁿ`)
 - Vapor mass fraction `qᵛ` from the thermodynamic state
 - Terminal velocities for sedimentation
 
@@ -668,7 +689,7 @@ end
 @inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵛᵉ)
     z = zero(qᵛᵉ)
     qˡ = get(ℳ, :qᶜˡ, z) + get(ℳ, :qʳ, z)
-    qⁱ = get(ℳ, :qᶜⁱ, z) + get(ℳ, :qˢ, z)
+    qⁱ = get(ℳ, :qᶜⁱ, z) + get(ℳ, :qˢⁿ, z)
     return MoistureMassFractions(qᵛᵉ, qˡ, qⁱ)
 end
 
@@ -952,8 +973,10 @@ end
 # CFL-limited fraction under adaptive implicit vertical advection). The remainder that the
 # tridiagonal solve applies depends on the solved tracer state, so its content is moved by
 # `implicit_sedimentation_step!` between the tracers' solves and the thermodynamic variable's
-# own, from the fluxes the solves actually applied, and then takes the same implicit transport
-# and diffusion as the rest of the field. An estimate of that remainder at the pre-solve state
+# own, from the fluxes the solves actually applied, and then takes the thermodynamic variable's
+# post-solve (its implicit transport and diffusion on the SSP path; diffusion only on the acoustic
+# path, whose implicit thermodynamic transport runs inside the substep loop). An estimate of that
+# remainder at the pre-solve state
 # would overstate a one-cell loss by the factor 1 + C at implicit Courant number C, precisely in
 # the regime the solve exists for.
 

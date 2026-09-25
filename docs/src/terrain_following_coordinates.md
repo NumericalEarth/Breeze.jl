@@ -700,6 +700,16 @@ problems we want to absorb rather than reflect upgoing energy. Breeze provides
 sponge folded into the column tridiag of the acoustic substep. See
 [`SplitExplicitTimeDiscretization`](@ref) for the keyword interface.
 
+### Particle trajectories over terrain
+
+Lagrangian particles store *physical* positions ``(x, y, z)``, so Breeze inverts
+the coordinate map ``z(x, y, r)`` for ``r`` before interpolating velocities to a
+particle, and bounces particles off the local terrain surface
+``z(x, y, r_\text{bottom})`` rather than the flat reference level
+``r_\text{bottom}``. Trajectories are advanced with the Cartesian ``w``, not the
+contravariant ``\tilde{w}``. See [Lagrangian particles](@ref) for the full
+description and its limitations.
+
 ## Time integration
 
 Terrain dynamics inherit Breeze's
@@ -905,7 +915,7 @@ materialize_terrain!(grid, hill)
 td = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5)
 dyn = CompressibleDynamics(td;
     reference_potential_temperature  = θ_profile,
-    surface_pressure                 = p₀,
+    base_pressure                    = p₀,
 )
 model = AtmosphereModel(grid; dynamics = dyn, advection = WENO(order = 9),
                         timestepper = :AcousticRungeKutta3)

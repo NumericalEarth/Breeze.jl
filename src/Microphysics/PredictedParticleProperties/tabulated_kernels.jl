@@ -1,17 +1,17 @@
 #####
-##### P3 Process Rates
+##### P3 Tabulated Kernels
 #####
-##### Microphysical process rate calculations for the P3 scheme.
-##### All rate functions take the P3 scheme as first positional argument
-##### to access parameters. No keyword arguments (GPU compatibility).
+##### What sits between the lookup tables and the process rates: the Schmidt-number
+##### correction for the ventilation-enhanced table, and `P3IceLookups`, the Table-1
+##### coordinate and integrals every ice-side rate reads.
 #####
 ##### Notation follows docs/src/appendix/notation.md
 #####
 
 #####
-##### Ventilation Sc correction (H4)
+##### Ventilation Sc correction
 #####
-##### The ventilation-enhanced table stores 0.44 × ∫ C(D)√(V×D) N'(D) dD
+##### The ventilation-enhanced table stores 0.44 × ∫ C(D)√(𝕎×D) N'(D) dD
 ##### with dimensions [m² s^(-1/2)]. At runtime, multiplying by
 ##### Sc^(1/3) × √ρ_fac / √ν restores the correct dimensions [m].
 ##### This helper centralizes the correction so that all call sites (the vapor
@@ -76,8 +76,8 @@ struct P3IceLookups{FT, P}
     ρ_correction :: FT
     "Constant ventilation term 0.65 ∫ C(D) N'(D) dD [m]"
     ventilation :: FT
-    "Enhanced ventilation term 0.44 ∫ C(D) √(V D) N'(D) dD [m² s^(-1/2)], before the Sc correction"
-    ventilation_enhanced :: FT
+    "Enhanced ventilation term 0.44 ∫ C(D) √(𝕎 D) N'(D) dD [m² s^(-1/2)], before the Sc correction"
+    enhanced_ventilation :: FT
 end
 
 """
@@ -94,11 +94,11 @@ Build the [`P3IceLookups`](@ref) of the ice population `(qⁱ, qʷⁱ, nⁱ, F�
     FT = typeof(m_mean)
     prep = ice_table_bracket(deposition.ventilation, m_mean, Fᶠ, Fˡ, ρᶠ, floors)
     # The ice reference density (≈0.83 kg/m³ at 600 hPa, 253.15 K; see `IceFallSpeed`),
-    # not the rain reference ≈1.275 kg/m³ of `ProcessRateParameters`.
+    # not the rain reference ≈1.275 kg/m³ of `ProcessRate`.
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
     return P3IceLookups{FT, typeof(prep)}(m_mean, Fˡ, prep, ρ_correction,
                                           evaluate_at(deposition.ventilation, prep),
-                                          evaluate_at(deposition.ventilation_enhanced, prep))
+                                          evaluate_at(deposition.enhanced_ventilation, prep))
 end
 
 # Standalone entry point: diagnose the liquid fraction, then bracket.
@@ -108,8 +108,8 @@ end
 
 # C(D) fᵛ(D) from its two tabulated terms. The Sc correction is the caller's: the vapor
 # relaxation coefficient uses the thermodynamic air density, wet growth the dynamics density.
-@inline ventilation_from_terms(ventilation, ventilation_enhanced, ν, Dᵛ, ρ_correction, floors) =
-    ventilation + ventilation_sc_correction(ν, Dᵛ, ρ_correction, floors) * ventilation_enhanced
+@inline ventilation_from_terms(ventilation, enhanced_ventilation, ν, Dᵛ, ρ_correction, floors) =
+    ventilation + ventilation_sc_correction(ν, Dᵛ, ρ_correction, floors) * enhanced_ventilation
 
 """
 $(TYPEDSIGNATURES)
@@ -118,8 +118,8 @@ Compute per-particle ventilation integral C(D) × f_v(D) for deposition
 using PSD-integrated lookup tables.
 """
 @inline function deposition_ventilation(vent::P3Table4D,
-                                          vent_e::P3Table4D,
-                                          m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction)
+                                        vent_e::P3Table4D,
+                                        m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction)
     floors = parameters.floors
     # Both tables share Table-1 axes, so the coordinate is bracketed once.
     prep = ice_table_bracket(vent, m_mean, Fᶠ, Fˡ, ρᶠ, floors)

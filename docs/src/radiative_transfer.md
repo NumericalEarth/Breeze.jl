@@ -27,7 +27,7 @@ surface_temperature = 300
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
-                                 surface_pressure = 101325,
+                                 base_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
 dynamics = AnelasticDynamics(reference_state)

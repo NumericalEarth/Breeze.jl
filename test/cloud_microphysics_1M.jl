@@ -92,14 +92,14 @@ end
     @test converted_categories.freezing_temperature === FT(273)
 
     # Disabled formation options materialize as zero-rate Breeze models.
-    disabled_parameters = Microphysics1MParams(
+    disabled_microphysics = Microphysics1MParams(
         FT;
         cloud_liquid_formation = nothing,
         cloud_ice_formation = nothing,
     )
     disabled_categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(
         FT;
-        parameters = disabled_parameters,
+        parameters = disabled_microphysics,
     )
     μ1_disabled = OneMomentCloudMicrophysics(FT; categories = disabled_categories)
     @test iszero(μ1_disabled.cloud_formation.liquid.rate)
@@ -182,7 +182,7 @@ end
 
     prog_fields_mixed = Breeze.AtmosphereModels.prognostic_field_names(μ1_mixed)
     @test :ρqʳ in prog_fields_mixed
-    @test :ρqˢ in prog_fields_mixed
+    @test :ρqˢⁿ in prog_fields_mixed
 end
 
 @testset "OneMomentCloudMicrophysics non-equilibrium time-stepping [$(FT)]" for FT in test_float_types()
@@ -190,7 +190,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -203,6 +203,8 @@ end
     @test haskey(model.microphysical_fields, :qᶜˡ)
     @test haskey(model.microphysical_fields, :qʳ)
 
+    test_kernel_functions_inferred(model)
+
     # Single time step (reduced from 6 iterations)
     time_step!(model, 1)
     @test model.clock.time == 1
@@ -214,7 +216,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
@@ -237,7 +239,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
@@ -247,7 +249,7 @@ end
     set!(model; θ=300, qᵗ=0.015)
 
     @test haskey(model.microphysical_fields, :ρqʳ)
-    @test haskey(model.microphysical_fields, :ρqˢ)
+    @test haskey(model.microphysical_fields, :ρqˢⁿ)
     @test haskey(model.microphysical_fields, :qᶜˡ)
     @test haskey(model.microphysical_fields, :qᶜⁱ)
 
@@ -261,7 +263,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     # Test non-equilibrium scheme only (saturation adjustment is tested elsewhere)
@@ -300,7 +302,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -377,7 +379,7 @@ end
     grid = RectilinearGrid(default_arch; size=(6, 6, 6), extent=(100, 100, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = OneMomentCloudMicrophysics()
     scalar_advection = (; ρqʳ = WENO(FT; order=5, bounds=(0, 1)))
@@ -398,7 +400,7 @@ end
     grid = RectilinearGrid(default_arch; size=(6, 6, 6), extent=(100, 100, 1))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = OneMomentCloudMicrophysics()
     adaptive_discretization = AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5)
@@ -437,7 +439,7 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = OneMomentCloudMicrophysics()
     adaptive_discretization = AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5)
@@ -545,7 +547,13 @@ end
     @test all(isfinite, interior(ρθ))
     @test all(isfinite, interior(ρqʳ))
 
-    # ... and on the compressible acoustic path.
+    # ... and on the compressible acoustic path. There the thermodynamic variable's implicit
+    # vertical transport is solved inside the acoustic substep loop, before the tracers' solves,
+    # so the content moved after them takes only the post-loop diffusion solve: a change of the
+    # finite-step splitting (first order in Δt), while the mass the content follows and the water
+    # budget are unchanged; no energy-conservation statement is implied. At the
+    # operator level the step moves χ times the mass the tracer's solve moved, weighted by the
+    # cell's dry mass fraction, with a nonzero implicit remainder.
     acoustic_grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, 800))
     acoustic_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
     acoustic_advection = (; ρqʳ = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.05)))
@@ -553,7 +561,32 @@ end
                                      scalar_advection=acoustic_advection)
     set!(acoustic_model; ρ=acoustic_model.dynamics.reference_state.density, θ=300, qᵗ=0.005, qᶜˡ=0,
          qʳ=(x, y, z) -> ifelse(z > 400, FT(1e-3), FT(0)))
-    time_step!(acoustic_model, 1)
+    μₐ = acoustic_model.microphysical_fields
+    Δtₐ = FT(10)
+    Oceananigans.TimeSteppers.time_discretization(acoustic_model.advection.ρqʳ).Δt[] = Δtₐ
+    ρqʳₐ⁰ = Array(interior(μₐ.ρqʳ, 1, 1, :))
+    implicit_step!(μₐ.ρqʳ, acoustic_model.timestepper.implicit_solver, acoustic_model.closure,
+                   acoustic_model.closure_fields, closure_scalar_index(acoustic_model, :ρqʳ),
+                   acoustic_model.clock, fields(acoustic_model), Δtₐ,
+                   implicit_step_scheme(acoustic_model.advection.ρqʳ),
+                   implicit_advection_velocities(acoustic_model.dynamics, acoustic_model.velocities, :ρqʳ,
+                                                 acoustic_model.microphysics, μₐ),
+                   implicit_advection_density(acoustic_model.dynamics, acoustic_model.formulation, :ρqʳ))
+    Δρqʳₐ = Array(interior(μₐ.ρqʳ, 1, 1, :)) .- ρqʳₐ⁰
+    @test maximum(abs.(Δρqʳₐ)) > 0
+    ρθₐ = acoustic_model.formulation.potential_temperature_density
+    ρθₐ⁰ = Array(interior(ρθₐ, 1, 1, :))
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(acoustic_model, Δtₐ, acoustic_model.velocities, uniform_content)
+    Δρθₐ = Array(interior(ρθₐ, 1, 1, :)) .- ρθₐ⁰
+    qᵈₐ = Array(interior(dynamics_density(acoustic_model.dynamics), 1, 1, :)) ./
+          Array(interior(total_density(acoustic_model.dynamics), 1, 1, :))
+    @test all(abs.(Δρθₐ .- qᵈₐ .* χ .* Δρqʳₐ) .<= sqrt(eps(FT)) * maximum(abs.(χ .* Δρqʳₐ)))
+
+    # A full acoustic step at that fall Courant number leaves finite fields.
+    interior(μₐ.ρqʳ, 1, 1, :) .= ρqʳₐ⁰
+    interior(ρθₐ, 1, 1, :) .= ρθₐ⁰
+    update_state!(acoustic_model)
+    time_step!(acoustic_model, Δtₐ)
     @test all(isfinite, interior(acoustic_model.formulation.potential_temperature_density))
     @test all(isfinite, interior(acoustic_model.microphysical_fields.ρqʳ))
 end
@@ -565,7 +598,7 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = OneMomentCloudMicrophysics(FT)
     adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
@@ -713,7 +746,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -753,7 +786,7 @@ end
                            topology=(Periodic, Periodic, Bounded))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -781,7 +814,7 @@ end
                            topology=(Periodic, Periodic, Bounded))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics(; precipitation_boundary_condition=ImpenetrableBoundaryCondition())
@@ -804,7 +837,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=260)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=260)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
@@ -815,11 +848,13 @@ end
     @test :ρqᶜˡ in prog_fields
     @test :ρqᶜⁱ in prog_fields
     @test :ρqʳ in prog_fields
-    @test :ρqˢ in prog_fields
+    @test :ρqˢⁿ in prog_fields
 
     set!(model; θ=260, qᵗ=0.010)
     @test haskey(model.microphysical_fields, :ρqᶜⁱ)
     @test haskey(model.microphysical_fields, :qᶜⁱ)
+
+    test_kernel_functions_inferred(model)
 
     time_step!(model, 1)
     @test model.clock.iteration == 1
@@ -839,7 +874,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -891,7 +926,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), extent=(100, 100, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=280)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=280)
     dynamics = AnelasticDynamics(reference_state)
     cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
     microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
@@ -916,7 +951,7 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, 800))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
 
     # Unsaturated column with a mid-column rain blob: no winds, no cloud, no closure, so
@@ -1076,7 +1111,7 @@ Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, 
 
     # The static-energy content along the same composition change, hˣ − h_mixture, checked
     # against the central difference through dynamics that declare the mixture replacement
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     energy_model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
                                    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation),
                                    formulation = :StaticEnergy)
@@ -1132,7 +1167,7 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = OneMomentCloudMicrophysics()
     model = AtmosphereModel(grid; dynamics, microphysics)
@@ -1213,7 +1248,7 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
 
     # A mid-column rain blob in an unsaturated column with non-equilibrium cloud formation, so
     # that both kernels work with the model's temperature (the saturation-adjusted temperature
@@ -1280,7 +1315,7 @@ end
     grid = RectilinearGrid(default_arch; size=Nz, z=(0, Nz * Δz), topology=(Flat, Flat, Bounded))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = OneMomentCloudMicrophysics()
     scalar_advection = (; ρqʳ = WENO(FT; order=5, bounds=(0, 1)))
@@ -1307,8 +1342,15 @@ end
     limited = model.sedimentation_constituents
     rain = only(filter(c -> c.q === μ.qʳ, limited))
     @test rain.advection isa WENO
-    @test rain.advection.bounds == (0, 1)
+    @test rain.advection.bounds.minimum_value == 0
+    @test rain.advection.bounds.maximum_value == 1
     unlimited_scheme = adapt_advection_order(materialize_advection(WENO(FT; order=5), grid), grid)
+
+    # The bounds-preserving limiter is cached on the scheme and refreshed from the specific field
+    # by `update_state!` before the tendencies; the rain profile was written directly above, so
+    # refresh it here the way `update_advection!` does.
+    Oceananigans.Advection.update_bounds_preserving_limiter!(rain.advection, grid, μ.qʳ)
+    @test any(θ -> θ < 1, Array(interior(rain.advection.bounds.limiter, 1, 1, :)))
     unlimited = ((; rain.w, rain.q, rain.ρq, rain.phase, advection = unlimited_scheme),)
 
     heat(constituents, k) = -(@allowscalar Breeze.AtmosphereModels.sedimentation_tendency(
@@ -1333,33 +1375,33 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=250)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=250)
     dynamics = AnelasticDynamics(reference_state)
     cloud_formation = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
     microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
     model = AtmosphereModel(grid; dynamics, microphysics)
 
-    set!(model; θ=250, qᵗ=0.01, qʳ=0.0005, qˢ=0.0005)
+    set!(model; θ=250, qᵗ=0.01, qʳ=0.0005, qˢⁿ=0.0005)
     μ = model.microphysical_fields
     qᶜⁱ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qᶜⁱ)
     qʳ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qʳ)
-    qˢ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qˢ)
+    qˢⁿ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qˢⁿ)
     wʳ = @allowscalar μ.wʳ[1, 1, 1]
-    wˢ = @allowscalar μ.wˢ[1, 1, 1]
+    wˢⁿ = @allowscalar μ.wˢⁿ[1, 1, 1]
 
     # Rain and snow are the constituents, with liquid and ice phase; the diagnosed cloud
     # liquid and cloud ice move no mass and appear in neither
     constituents = model.sedimentation_constituents
     @test length(constituents) == 2
     @test any(c -> c.w === μ.wʳ && c.q === μ.qʳ && c.phase === Val(:liquid), constituents)
-    @test any(c -> c.w === μ.wˢ && c.q === μ.qˢ && c.phase === Val(:ice), constituents)
+    @test any(c -> c.w === μ.wˢⁿ && c.q === μ.qˢⁿ && c.phase === Val(:ice), constituents)
     @test qᶜⁱ > 0
-    @test wˢ < 0
+    @test wˢⁿ < 0
 
     flux = bottom_precipitation_flux(model)
     compute!(flux)
     ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
-    @test @allowscalar flux[1, 1] ≈ -ρ_face * (wʳ * qʳ + wˢ * qˢ)
+    @test @allowscalar flux[1, 1] ≈ -ρ_face * (wʳ * qʳ + wˢⁿ * qˢⁿ)
 end
 
 @testset "Mixed-phase non-equilibrium snow field materialization [$(FT)]" for FT in test_float_types()
@@ -1367,7 +1409,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=260)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=260)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
@@ -1375,11 +1417,11 @@ end
     model = AtmosphereModel(grid; dynamics, microphysics)
 
     # Snow terminal velocity field should exist
-    @test haskey(model.microphysical_fields, :wˢ)
+    @test haskey(model.microphysical_fields, :wˢⁿ)
 
     # Snow sedimentation velocity dispatch
     μ = model.microphysical_fields
-    vel_snow = microphysical_velocities(microphysics, μ, Val(:ρqˢ))
+    vel_snow = microphysical_velocities(microphysics, μ, Val(:ρqˢⁿ))
     @test vel_snow !== nothing
     @test haskey(vel_snow, :w)
 
@@ -1409,7 +1451,7 @@ end
                            topology=(Periodic, Periodic, Bounded))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=260)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=260)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
@@ -1429,8 +1471,8 @@ end
     @test qᶜⁱ_max > FT(1e-6)
 
     # Snow should have formed from ice autoconversion
-    qˢ_max = maximum(model.microphysical_fields.qˢ)
-    @test qˢ_max > FT(0)
+    qˢⁿ_max = maximum(model.microphysical_fields.qˢⁿ)
+    @test qˢⁿ_max > FT(0)
 
     # Model should complete without errors (all tendencies computed)
     @test model.clock.iteration > 0

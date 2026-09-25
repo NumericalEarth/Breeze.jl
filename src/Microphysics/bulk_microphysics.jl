@@ -185,7 +185,7 @@ struct FourCategories{L, I, R, S, C, V, A}
     snow :: S
     collisions :: C
     hydrometeor_velocities :: V
-    air_properties :: A
+    air :: A
 end
 
 FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities) =

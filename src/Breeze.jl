@@ -41,6 +41,7 @@ export
     PrescribedDynamics,
     KinematicModel,
     AtmosphereModel,
+    SingleColumnGrid,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
@@ -81,6 +82,7 @@ export
     static_energy_density,
     static_energy,
     total_energy,
+    total_energy_density_name,
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
@@ -88,6 +90,7 @@ export
     total_pressure,
     specific_humidity,
     moisture_prognostic_name,
+    total_moisture_density_name,
     moisture_specific_name,
     specific_prognostic_moisture,
 
@@ -105,7 +108,6 @@ export
     vapor_gas_constant,
     PlanarLiquidSurface,
     PlanarIceSurface,
-    DrySurface,
 
     # Microphysics
     aerosol_field_names,
@@ -224,6 +226,7 @@ export
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
+    TKEBasedTurbulenceClosure, TKEMixingLength, ConstantStabilityFunctions,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
@@ -303,5 +306,9 @@ using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
+
+# Loaded last: single-column / column-ensemble mode extends the dynamics, closure, and model modules.
+include("single_column_mode.jl")
+using .SingleColumnMode: SingleColumnMode, SingleColumnGrid
 
 end # module Breeze

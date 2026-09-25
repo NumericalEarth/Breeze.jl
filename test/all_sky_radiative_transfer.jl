@@ -45,19 +45,19 @@ using RRTMGP
 
         # Legal to construct without one (a coupled model binds it later)...
         radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants; surface_albedo = 0.1)
-        @test isnothing(radiation.surface_properties.surface_temperature)
+        @test isnothing(radiation.surface_radiation.surface_temperature)
 
         # ...but solving before anything is bound fails loudly.
         @test_throws ArgumentError Breeze.AtmosphereModels._update_radiation!(radiation, nothing)
     end
 
-    @testset "Single column grid with clouds [$(FT)]" for FT in test_float_types()
+    @testset "Single column grid with clouds [$(FT)]" begin
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
         grid = RectilinearGrid(default_arch; size=16, x=0, y=45, z=(0, 10kilometers), topology)
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -149,13 +149,13 @@ using RRTMGP
         @test (lw_up_diff > 0) || (sw_up_diff > 0) || (sw_dn_diff > 0)
     end
 
-    @testset "Custom effective radius models [$FT]" for FT in test_float_types()
+    @testset "Custom effective radius models [$FT]" begin
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
         grid = RectilinearGrid(default_arch; size=8, x=0, y=45, z=(0, 10kilometers), topology)
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 

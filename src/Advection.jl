@@ -9,23 +9,26 @@ using Oceananigans.Advection:
     _advective_tracer_flux_z,
     AdaptiveImplicitVerticalAdvection,
     _biased_interpolate_zᵃᵃᶠ,
+    BoundsPreservation,
     BoundsPreservingWENO,
     LeftBias,
     RightBias,
     upwind_biased_product,
+    rescaled_reconstruction,
     implicit_vertical_velocityᶜᶜᶠ,
     bounded_tracer_flux_divergence_x,
     bounded_tracer_flux_divergence_y,
     bounded_tracer_flux_divergence_z,
     explicit_velocity_scaleᶜᶜᶠ,
     vertical_scheme,
-    _ω̂₁, _ω̂ₙ, _ε₂
+    WENO
 
+using Adapt: Adapt
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: Field, ZeroField
 using Oceananigans.Grids: Center
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
-using Oceananigans.Utils: SumOfArrays
+using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.TimeSteppers: time_discretization
 using DocStringExtensions: TYPEDSIGNATURES
 
@@ -36,29 +39,6 @@ using ..AtmosphereModels:
     transport_velocities
 
 const AIVA = AdaptiveImplicitVerticalAdvection
-
-# TODO: upstream AIVA support for the bounds-preserving path to Oceananigans.
-# `bounded_tracer_flux_divergence_z` lacks the `::AIVA` dispatch that
-# `advective_tracer_flux_z` has, so this wrapper applies the explicit CFL scaling from
-# below. It must be deleted the moment upstream learns to scale that path itself, or the
-# velocity would be scaled twice.
-struct CFLScaledVerticalVelocity{A, G, W}
-    advection :: A
-    grid :: G
-    velocity :: W
-end
-
-@inline function Base.getindex(w::CFLScaledVerticalVelocity, i, j, k)
-    scheme = vertical_scheme(w.advection)
-    td = time_discretization(scheme)
-    scale = explicit_velocity_scaleᶜᶜᶠ(i, j, k, w.grid, scheme, td, w.velocity)
-    @inbounds velocity = w.velocity[i, j, k]
-    return scale * velocity
-end
-
-@inline explicit_vertical_velocity(advection, grid, w) = w
-@inline explicit_vertical_velocity(advection::AIVA, grid, w) =
-    CFLScaledVerticalVelocity(advection, grid, w)
 
 # Simple wrappers: interpolate ρ to face, multiply existing flux
 @inline tracer_mass_flux_x(i, j, k, grid, ρ, args...) =
@@ -71,9 +51,6 @@ end
     ℑzᵃᵃᶠ(i, j, k, grid, ρ) * _advective_tracer_flux_z(i, j, k, grid, args...)
 
 # Main operator
-# `tracer_mass_flux_z` reaches Oceananigans' `advective_tracer_flux_z(..., ::AVID, ...)`,
-# which applies `explicit_velocity_scaleᶜᶜᶠ` itself, so `U.w` is passed unscaled here.
-# The bounds-preserving path below has no such dispatch and does need the wrapper.
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection, ρ, U, c)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (
         δxᶜᵃᵃ(i, j, k, grid, tracer_mass_flux_x, ρ, advection, U.u, c) +
@@ -87,12 +64,52 @@ end
 
 # Is this immersed-boundary safe without having to extend it in ImmersedBoundaries.jl? I think so... (velocity on immmersed boundaries is masked to 0)
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c)
-    explicit_w = explicit_vertical_velocity(advection, grid, U.w)
     div_x = bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c)
     div_y = bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c)
-    div_z = bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, explicit_w, c)
+    div_z = bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, U.w, c)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
 end
+
+# A bounds-preserving WENO whose vertical time discretization is adaptive-implicit.
+const BoundsPreservingAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:BoundsPreservation}
+
+# Indexing yields wᵉ = s·w, the explicit fraction of the IMEX split, so the bounded flux
+# functions consume it without duplicating their reconstruction (issue #913).
+struct ExplicitVerticalVelocity{G, S, T, W}
+    grid :: G
+    advection_scheme :: S
+    time_discretization :: T
+    vertical_velocity :: W
+end
+
+Adapt.adapt_structure(to, v::ExplicitVerticalVelocity) =
+    ExplicitVerticalVelocity(Adapt.adapt(to, v.grid), Adapt.adapt(to, v.advection_scheme),
+                             Adapt.adapt(to, v.time_discretization), Adapt.adapt(to, v.vertical_velocity))
+
+@inline Base.getindex(v::ExplicitVerticalVelocity, i, j, k) =
+    @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, v.grid, v.advection_scheme, v.time_discretization,
+                                         v.vertical_velocity) * v.vertical_velocity[i, j, k]
+
+# Disambiguates against the `ZeroField` shortcut above.
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, ::BoundsPreservingAVIDWENO, ρ, U, ::ZeroField) = zero(grid)
+
+# Without the s-scaled velocity the bounded path transported 1 + (1 - s) times: a full
+# explicit flux plus the implicit remainder (issue #913). Horizontal fluxes stay explicit.
+@inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingAVIDWENO, ρ, U, c)
+    wᵉ = ExplicitVerticalVelocity(grid, advection, time_discretization(advection), U.w)
+    div_x = bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c)
+    div_y = bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c)
+    div_z = bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, wᵉ, c)
+    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
+end
+
+# The vertical velocity the bounded flux functions below transport with: the velocity itself
+# for an explicit scheme, its s-scaled explicit fraction under adaptive implicit vertical
+# advection (the same `ExplicitVerticalVelocity` the bounded divergence uses, so the scaling is
+# applied exactly once).
+@inline explicit_vertical_velocity(advection, grid, w) = w
+@inline explicit_vertical_velocity(advection::BoundsPreservingAVIDWENO, grid, w) =
+    ExplicitVerticalVelocity(grid, advection, time_discretization(advection), w)
 
 #####
 ##### Advective mass fluxes for the sedimentation of condensate content
@@ -123,14 +140,11 @@ end
 @inline sedimentation_mass_flux(i, j, k, grid, advection, w, q) =
     _advective_tracer_flux_z(i, j, k, grid, advection, w, q)
 
-# Bounds-preserving WENO limits, cell by cell, the two face reconstructions that draw on the
-# cell itself, so the flux through a face depends on which cell's tendency is being formed:
-# the two cells sharing a face do not see the same flux through it once the limiter engages,
-# and `div_ρUc` is not the difference of two face-local fluxes. The fluxes of cell k are
-# therefore rebuilt from the same limited reconstructions `bounded_tracer_flux_divergence_z`
-# forms its mass fluxes from, so the latent heat stays with the mass at cloud and precipitation
-# edges, where the limiter acts and the unlimited WENO fluxes would move heat the tracer
-# tendency does not move.
+# Bounds-preserving WENO rescales its face reconstructions by the cached limiter of the cell
+# each one draws on, so the fluxes of cell k are rebuilt from the same limited reconstructions
+# `bounded_tracer_flux_divergence_z` forms its mass fluxes from: the latent heat stays with the
+# mass at cloud and precipitation edges, where the limiter acts and the unlimited WENO fluxes
+# would move heat the tracer tendency does not move.
 @inline function AtmosphereModels.sedimentation_mass_fluxes(i, j, k, grid, advection::BoundsPreservingWENO, wᵗ, wˢ, q)
     w = SumOfArrays{2}(wᵗ, wˢ)
     c₋ᴸ, c₋ᴿ, c₊ᴸ, c₊ᴿ = bounded_face_reconstructions(i, j, k, grid, advection, q)
@@ -149,41 +163,24 @@ end
     return Azᶜᶜᶠ(i, j, k, grid) * upwind_biased_product(wₑ, cᴸ, cᴿ)
 end
 
-# TODO: move `bounded_face_reconstructions` upstream. It reproduces the reconstruction and
-# limiting half of `Oceananigans.Advection.bounded_tracer_flux_divergence_z`, reaching into the
-# private `_ω̂₁`, `_ω̂ₙ`, `_ε₂` constants to do it, so that `sedimentation_mass_fluxes` and
-# `bottom_advective_tracer_flux` form the same face fluxes the tracer tendency applies. The
-# clean fix is for Oceananigans to factor this helper out of its divergence and export it;
-# until then this copy has to be kept in sync by hand.
-
 # Reconstructions of `c` at the lower (`k`) and upper (`k + 1`) faces of cell (i, j, k), returned
-# as `(c₋ᴸ, c₋ᴿ, c₊ᴸ, c₊ᴿ)`, with the cell's bounds-preserving limiter θ applied to the two that
-# draw on the cell itself (`c₋ᴿ` and `c₊ᴸ`), exactly as `bounded_tracer_flux_divergence_z` does.
+# as `(c₋ᴸ, c₋ᴿ, c₊ᴸ, c₊ᴿ)`, each rescaled by the cached bounds-preserving limiter θ of the cell it
+# draws on (k − 1, k, k and k + 1), exactly as `bounded_tracer_flux_divergence_z` forms its face
+# states, so that the two cells sharing a face see the same limited flux through it and the
+# latent heat moves with exactly the mass the tracer tendency moves. The limiter is refreshed by
+# `update_advection!` before the tendencies that consume it (see `update_state!`).
 @inline function bounded_face_reconstructions(i, j, k, grid, advection::BoundsPreservingWENO, c)
-    c_min = @inbounds advection.bounds[1]
-    c_max = @inbounds advection.bounds[2]
+    θ = advection.bounds.limiter
 
     c₊ᴸ = _biased_interpolate_zᵃᵃᶠ(i, j, k+1, grid, advection, LeftBias,  c)
     c₊ᴿ = _biased_interpolate_zᵃᵃᶠ(i, j, k+1, grid, advection, RightBias, c)
     c₋ᴸ = _biased_interpolate_zᵃᵃᶠ(i, j, k,   grid, advection, LeftBias,  c)
     c₋ᴿ = _biased_interpolate_zᵃᵃᶠ(i, j, k,   grid, advection, RightBias, c)
 
-    FT = eltype(c)
-    ω̂₁ = convert(FT, _ω̂₁)
-    ω̂ₙ = convert(FT, _ω̂ₙ)
-    ε₂ = convert(FT, _ε₂)
-
-    @inbounds cᵢⱼ = c[i, j, k]
-    p̃ = (cᵢⱼ - ω̂₁ * c₋ᴿ - ω̂ₙ * c₊ᴸ) / (1 - 2ω̂₁)
-    M = max(p̃, c₊ᴸ, c₋ᴿ)
-    m = min(p̃, c₊ᴸ, c₋ᴿ)
-
-    θ_max = abs((c_max - cᵢⱼ) / (M - cᵢⱼ + ε₂))
-    θ_min = abs((c_min - cᵢⱼ) / (m - cᵢⱼ + ε₂))
-    θ = min(θ_max, θ_min, one(grid))
-
-    c₊ᴸ = θ * (c₊ᴸ - cᵢⱼ) + cᵢⱼ
-    c₋ᴿ = θ * (c₋ᴿ - cᵢⱼ) + cᵢⱼ
+    c₊ᴸ = rescaled_reconstruction(c₊ᴸ, i, j, k,   grid, θ, c)
+    c₊ᴿ = rescaled_reconstruction(c₊ᴿ, i, j, k+1, grid, θ, c)
+    c₋ᴸ = rescaled_reconstruction(c₋ᴸ, i, j, k-1, grid, θ, c)
+    c₋ᴿ = rescaled_reconstruction(c₋ᴿ, i, j, k,   grid, θ, c)
 
     return c₋ᴸ, c₋ᴿ, c₊ᴸ, c₊ᴿ
 end
@@ -227,7 +224,7 @@ end
 end
 
 # Bounds-preserving WENO: the bottom face flux of cell 1 as `bounded_tracer_flux_divergence_z`
-# forms it, from the reconstructions limited by that cell.
+# forms it, from the reconstructions rescaled by the cached limiter of each donor cell.
 @inline function bottom_advective_tracer_flux(i, j, grid, advection::BoundsPreservingWENO, ρ, w, c)
     c₋ᴸ, c₋ᴿ, _, _ = bounded_face_reconstructions(i, j, 1, grid, advection, c)
     explicit_w = explicit_vertical_velocity(advection, grid, w)

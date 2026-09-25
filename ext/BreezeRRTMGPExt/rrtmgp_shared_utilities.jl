@@ -184,7 +184,7 @@ constant_field_property(x, FT) = x
 $(TYPEDSIGNATURES)
 
 Copy the surface emissivity `ε` and the direct and diffuse albedos `αᵈ`, `αˢ` from
-`surface_properties` into RRTMGP's band-by-column boundary-condition arrays `ε₀`, `αᵈ₀`, `αˢ₀`.
+`surface_radiation` into RRTMGP's band-by-column boundary-condition arrays `ε₀`, `αᵈ₀`, `αˢ₀`.
 
 Nothing else writes those arrays, so a spatially varying emissivity or albedo would otherwise never
 reach the solver, which would read whatever the allocation happened to contain. Call once at
@@ -192,14 +192,14 @@ construction and again before every solve, so a property that evolves is picked 
 
 Breeze treats all three properties as spectrally grey: every band receives the same value.
 """
-function update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, surface_properties, grid)
+function update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, surface_radiation, grid)
     arch = architecture(grid)
 
     launch!(arch, grid, :xy, _update_rrtmgp_surface_boundary_conditions!,
             ε₀, αᵈ₀, αˢ₀,
-            surface_properties.surface_emissivity,
-            surface_properties.direct_surface_albedo,
-            surface_properties.diffuse_surface_albedo,
+            surface_radiation.surface_emissivity,
+            surface_radiation.direct_surface_albedo,
+            surface_radiation.diffuse_surface_albedo,
             grid)
 
     return nothing
@@ -207,11 +207,11 @@ end
 
 # Full-spectrum (clear-sky and all-sky) models keep both RTE solvers inside one `RRTMGPSolver`,
 # reached through RRTMGP's own accessors rather than its internal field nesting.
-update_rrtmgp_surface_boundary_conditions!(solver::RRTMGPSolver, surface_properties, grid) =
+update_rrtmgp_surface_boundary_conditions!(solver::RRTMGPSolver, surface_radiation, grid) =
     update_rrtmgp_surface_boundary_conditions!(RRTMGP.surface_emissivity(solver),
                                                RRTMGP.direct_sw_surface_albedo(solver),
                                                RRTMGP.diffuse_sw_surface_albedo(solver),
-                                               surface_properties, grid)
+                                               surface_radiation, grid)
 
 @kernel function _update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, ε, αᵈ, αˢ, grid)
     i, j = @index(Global, NTuple)
@@ -305,7 +305,7 @@ end
 # The constructors accept `surface_temperature = nothing` so that a coupled model can bind
 # its interface surface temperature after construction; solving without one is an error.
 function assert_bound_surface_temperature(rtm)
-    isnothing(rtm.surface_properties.surface_temperature) && throw(ArgumentError(
+    isnothing(rtm.surface_radiation.surface_temperature) && throw(ArgumentError(
         "This RadiativeTransferModel has no surface temperature: construct it with " *
         "`surface_temperature = ...`, or bind one before the first radiation update " *
         "(coupled models wire their interface surface temperature automatically)."))

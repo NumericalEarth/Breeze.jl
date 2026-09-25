@@ -22,7 +22,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
                                  points=(2, 2, 2, 5))
     table_5d = TabulatedFunction((x1, x2, x3, x4, x5) -> Float64(x5), CPU(), Float64;
                                  range=(unit_axis, unit_axis, unit_axis, unit_axis,
-                                        index_axis),
+                                 index_axis),
                                  points=(2, 2, 2, 2, 5))
     wrapped_4d = RimeDensityIndexedTable4D(table_4d)
     wrapped_5d = RimeDensityIndexedTable5D(table_5d)
@@ -96,7 +96,7 @@ end
     # velocities are unphysical on purpose: this asserts plumbing, not physics.
     raised = NumericalFloors(FT; divisor = 1e-15)
     raised_p3 = PredictedParticlePropertiesMicrophysics(
-        FT; process_rates = ProcessRateParameters(FT; floors = raised))
+        FT; process_rates = ProcessRate(FT; floors = raised))
     default_p3 = PredictedParticlePropertiesMicrophysics(FT)
 
     @test raised_p3.process_rates.floors.divisor == FT(1e-15)

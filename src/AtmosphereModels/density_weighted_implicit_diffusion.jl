@@ -267,8 +267,11 @@ end
 ##### whose last term is the implicit sedimentation divergence at the solved state. Adding its
 ##### content to φ* and solving (I + Δt Lᵠ) φ = φ* keeps φ = χ q exactly for a uniform content χ;
 ##### adding it after the solve would exempt it from the transport and diffusion that acted on the
-##### rest of φ. Both time steppers therefore order a stage: the tracers' solves, this step, the
-##### thermodynamic variable's solve.
+##### rest of φ. The SSP stepper therefore orders a stage: the tracers' solves, this step, the
+##### thermodynamic variable's solve. The acoustic stepper solves the thermodynamic variable's
+##### implicit vertical transport inside its substep loop, before the tracers' solves, so there
+##### the content added here takes only the post-loop diffusion solve — a first-order splitting
+##### difference; the mass the content follows is still the mass the tracers' solves moved.
 #####
 
 @inline function implicit_sedimentation_mass_fluxes(i, j, k, grid, advection::AIVA, wᵗ, wˢ, ρq, ρ)
@@ -312,8 +315,10 @@ from [`implicit_sedimentation_mass_fluxes`](@ref)). `velocities` are the transpo
 whose vertical component the tracers' solves split, `Δt` the interval they solved over, and
 `formulation` selects the [`condensate_content`](@ref) methods, defaulting to the model's.
 The time steppers call this between the tracers' solves of a stage and the thermodynamic
-variable's own, so the moved content takes the same implicit transport and diffusion as the rest
-of the field (see the note above). A no-op when no constituent is advected adaptively implicitly.
+variable's post-loop solve, so the moved content takes the same implicit diffusion as the rest of
+the field, and on the SSP path its implicit vertical transport too; the acoustic stepper applies
+that transport inside its substep loop, before this step (see the note above). A no-op when no
+constituent is advected adaptively implicitly.
 
 For potential temperature this is a derivative-times-increment update, not an exact finite
 thermal-energy reconstruction. Matching the implicit mass flux alone does not remove that

@@ -61,7 +61,7 @@ grid = RectilinearGrid(GPU(); x, y, z,
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants,
-                                 surface_pressure = 101540,
+                                 base_pressure = 101540,
                                  potential_temperature = 297.9)
 
 dynamics = AnelasticDynamics(reference_state)
@@ -80,11 +80,11 @@ T₀ = 299.8    # Sea surface temperature (K)
 # We implement the specified bulk formula with Breeze utilities whose scope
 # currently extends only to constant coefficients (but could expand in the future),
 
-ρs_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
-ρqᵉ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
+ρE_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
+ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
 
-ρs_bcs = FieldBoundaryConditions(bottom=ρs_flux)
-ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_flux)
+ρE_bcs = FieldBoundaryConditions(bottom=ρE_flux)
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
@@ -164,7 +164,7 @@ forcing = (; u = (subsidence, geostrophic.u),
              w = sponge,
              qᵉ = (subsidence, qᵉ_large_scale_forcing),
              θ = (subsidence, θ_large_scale_forcing))
-boundary_conditions = (ρs=ρs_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
+boundary_conditions = (ρE=ρE_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
 # ## Model setup
@@ -284,7 +284,7 @@ averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for na
 filename = "rico.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
                                                   schedule = AveragedTimeInterval(2hour),
-                                                  overwrite_existing = true)
+                                                  overwrite_files = true)
 
 # For an animation, we also output slices,
 #
@@ -309,7 +309,7 @@ filename = "rico_slices.jld2"
 output_interval = 20seconds
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
                                                 schedule = TimeInterval(output_interval),
-                                                overwrite_existing = true)
+                                                overwrite_files = true)
 
 # We're finally ready to run this thing,
 

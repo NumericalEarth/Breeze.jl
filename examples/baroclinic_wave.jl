@@ -238,7 +238,7 @@ T₀ᵣ = 250
 θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
 dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                surface_pressure = p₀,
+                                base_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
 model = AtmosphereModel(grid; dynamics, coriolis,
@@ -303,7 +303,7 @@ for k in (1, 16)
     ow = JLD2Writer(model, outputs; filename,
                     indices = (:, :, k),
                     schedule = TimeInterval(6hours),
-                    overwrite_existing = true)
+                    overwrite_files = true)
 
     simulation.output_writers[Symbol(filename)] = ow
 end

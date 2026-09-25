@@ -1,9 +1,9 @@
 #####
 ##### PSD correction factors for spherical drop immersion freezing
 #####
-##### For a gamma PSD N'(D) = N₀ D^μ exp(-λD), the volume-integrated
-##### freezing rate (proportional to droplet volume cubed) gains a factor relative to
-##### the mean-mass monodisperse approximation. For spherical drops the
+##### For a gamma PSD N'(D) = N₀ D^μ exp(-λD), volume-dependent per-drop freezing
+##### gives a PSD-integrated mass freezing rate enhanced relative to the
+##### mean-mass monodisperse approximation. For spherical drops the
 ##### correction is exactly:
 #####
 #####   C(μ) = Γ(μ+7) Γ(μ+1) / Γ(μ+4)²
@@ -22,11 +22,10 @@ $(TYPEDSIGNATURES)
 Compute the analytically exact PSD correction factor for volume-dependent
 immersion freezing of spherical drops with a gamma size distribution.
 
-For a gamma PSD N'(D) = N₀ D^μ exp(−λD), the Barklie-Gokhale (1959)
-freezing rate is proportional to mean droplet volume times number, but because the
-freezing probability scales with drop volume V ∝ D³, the PSD-integrated
-rate contains ⟨D³⟩ whilst the mean-mass approximation uses ⟨D⟩³. The
-ratio of the two is:
+For a gamma PSD N'(D) = N₀ D^μ exp(−λD), the Barklie-Gokhale (1959) freezing probability
+per drop scales with volume ∝ D³, so the mass freezing rate ∝ mass × volume ∝ D⁶. The
+PSD-integrated rate is therefore ``M₆``, against ``M₃²/M₀`` for the mean-mass
+approximation, where ``M_k = ∫ D^k N'(D) \\, dD``. Their ratio is:
 
 ```math
 C(\\mu) = \\frac{\\Gamma(\\mu + 7)\\,\\Gamma(\\mu + 1)}{\\Gamma(\\mu + 4)^2}
@@ -39,7 +38,7 @@ three `loggamma` calls the gamma form would cost at every grid point.
 Exact values:
 - μ = 0: 720 × 1 / 36 = 20.0
 - μ = 2: 40320 × 2 / 14400 = 5.6
-- μ = 5: ≈ 2.945
+- μ = 5: 11×10×9 / (8×7×6) ≈ 2.946
 - Monotonically decreasing with μ (narrower PSD → less enhancement)
 
 # Arguments

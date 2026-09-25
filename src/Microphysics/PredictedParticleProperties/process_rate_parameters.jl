@@ -5,7 +5,7 @@
 ##### These parameters control timescales, efficiencies, and thresholds.
 #####
 
-export ProcessRateParameters, NumericalFloors
+export ProcessRate, NumericalFloors
 
 struct NumericalFloors{FT}
     saturation_mass_fraction :: FT  # floors qᵛ⁺ˡ, qᵛ⁺ⁱ in supersaturation denominators [kg/kg]
@@ -65,7 +65,7 @@ function NumericalFloors(FT::DataType = Oceananigans.defaults.FloatType;
                                FT(mean_particle_mass_fallback))
 end
 
-# Re-typing conversion, used when `ProcessRateParameters(FT)` is handed floors
+# Re-typing conversion, used when `ProcessRate(FT)` is handed floors
 # that were built at a different precision.
 function NumericalFloors{FT}(floors::NumericalFloors) where FT
     return NumericalFloors{FT}(floors.saturation_mass_fraction,
@@ -90,7 +90,7 @@ function Base.show(io::IO, floors::NumericalFloors)
     print(io, summary(floors), "(mass_scale=", floors.mass_scale, ")")
 end
 
-struct ProcessRateParameters{FT, PS}
+struct ProcessRate{FT, PS}
     # Properties cached from `ThermodynamicConstants`. These are not independent
     # parameters: each is copied from the constants at construction and cannot be set
     # separately, so the two can never disagree.
@@ -108,30 +108,30 @@ struct ProcessRateParameters{FT, PS}
 
     # Rain fall-speed air-density correction, (ρ₀/ρ)^α
     reference_air_density :: FT      # ρ₀ [kg/m³]
-    fall_speed_density_correction_exponent :: FT  # α [-]
+    fall_speed_density_correction_exponent :: FT  # ℂᵈᵉⁿˢ₁ [-]
     minimum_fall_speed_air_density :: FT          # floor on ρ in the correction [kg/m³]
 
     # Newly formed particles
-    nucleated_ice_mass :: FT         # mᵢ₀ [kg], mass of newly nucleated ice crystal
-    activated_droplet_radius :: FT   # r₀ [m], radius of a newly activated cloud droplet
-    activation_supersaturation_threshold :: FT  # S above which CCN activation proceeds [-]
+    nucleated_ice_mass :: FT         # ℂᶠᵒʳᵐ₁ [kg], newly nucleated ice crystal mass
+    activated_droplet_radius :: FT   # ℂᶠᵒʳᵐ₂ [m], newly activated droplet radius
+    activation_supersaturation_threshold :: FT  # ℂᶠᵒʳᵐ₃, activation onset [-]
 
     # Rain autoconversion (Khairoutdinov-Kogan 2000)
-    autoconversion_coefficient :: FT         # k₁ = 1350 × (Nc_ref_cm)^β, see KK2000 Eq. 29
-    autoconversion_exponent_cloud :: FT      # α [-]
-    autoconversion_exponent_droplet :: FT    # β [-]
-    autoconversion_threshold :: FT           # qᶜˡ threshold [kg/kg]
-    autoconversion_reference_concentration :: FT  # Nᶜˡ reference [1/m³]
+    autoconversion_coefficient :: FT         # ℂᵃᵘᵗᵒ₁, see KK2000 Eq. 29
+    autoconversion_exponent_cloud :: FT      # ℂᵃᵘᵗᵒ₂ [-]
+    autoconversion_exponent_droplet :: FT    # ℂᵃᵘᵗᵒ₃ [-]
+    autoconversion_threshold :: FT           # ℂᵃᵘᵗᵒ₄ [kg/kg]
+    autoconversion_reference_concentration :: FT  # unit-defining Nᶜˡ_r [1/m³], not free
 
     # Rain accretion (Khairoutdinov-Kogan 2000)
-    accretion_coefficient :: FT              # k₂ [s⁻¹]
-    accretion_exponent :: FT                 # α [-]
+    accretion_coefficient :: FT              # ℂᵃᶜᶜʳ₁ [s⁻¹]
+    accretion_exponent :: FT                 # ℂᵃᶜᶜʳ₂ [-]
 
     # Rain self-collection and breakup (KK2000 self-collection rate combined with
     # the Verlinde-Cotton 1993 breakup multiplier)
-    rain_self_collection_coefficient :: FT        # k_rr [-]
-    rain_breakup_diameter_threshold :: FT    # D_th threshold for breakup [m] (1/λ_r convention)
-    rain_breakup_coefficient :: FT           # κ_br [1/m]
+    rain_self_collection_coefficient :: FT   # ℂˢᵉˡᶠ₁ [m³ kg⁻¹ s⁻¹]
+    rain_breakup_diameter_threshold :: FT    # ℂᵇʳᵏᵖ₁ [m] (1/λʳ convention)
+    rain_breakup_coefficient :: FT           # ℂᵇʳᵏᵖ₂ [1/m]
 
     # Evaporation/sublimation timescales
     rain_evaporation_timescale :: FT         # τ_evap [s]
@@ -139,86 +139,88 @@ struct ProcessRateParameters{FT, PS}
     # Ice aggregation. The sticking efficiency ramps linearly from its minimum to maximum
     # between the two temperatures, and is then shut off between the two rime
     # fractions, above which heavily rimed particles no longer aggregate.
-    maximum_aggregation_efficiency :: FT     # Eⁱⁱ_max [-]
-    minimum_aggregation_efficiency :: FT     # Eⁱⁱ_min [-], the cold-ice value
-    aggregation_efficiency_ramp_start_temperature :: FT # T where Eⁱⁱ starts increasing [K]
-    aggregation_efficiency_ramp_end_temperature :: FT   # T where Eⁱⁱ reaches Eⁱⁱ_max [K]
-    minimum_aggregation_rime_fraction :: FT  # Fᶠ below which aggregation is unreduced [-]
-    maximum_aggregation_rime_fraction :: FT  # Fᶠ above which aggregation is off [-]
+    maximum_aggregation_efficiency :: FT     # ℂᵃᵍᵍʳ₁ [-]
+    minimum_aggregation_efficiency :: FT     # ℂᵃᵍᵍʳ₂ [-], cold-ice value
+    aggregation_efficiency_ramp_start_temperature :: FT # ℂᵃᵍᵍʳ₃ [K]
+    aggregation_efficiency_ramp_end_temperature :: FT   # ℂᵃᵍᵍʳ₄ [K]
+    minimum_aggregation_rime_fraction :: FT  # ℂᵃᵍᵍʳ₅ [-]
+    maximum_aggregation_rime_fraction :: FT  # ℂᵃᵍᵍʳ₆ [-]
 
     # Cloud riming
-    cloud_ice_collection_efficiency :: FT    # Eᶜⁱ [-]
+    cloud_ice_collection_efficiency :: FT    # ℂʳⁱᵐᵉ₁ [-]
 
     # Rain riming
-    rain_ice_collection_efficiency :: FT     # Eʳⁱ [-]
+    rain_ice_collection_efficiency :: FT     # ℂʳⁱᵐᵉ₂ [-]
 
     # Rime density bounds
-    minimum_rime_density :: FT               # ρ_rim_min [kg/m³]
-    maximum_rime_density :: FT               # ρ_rim_max [kg/m³]
+    minimum_rime_density :: FT               # ℂʳⁱᵐᵉ₃ [kg/m³]
+    maximum_rime_density :: FT               # ℂʳⁱᵐᵉ₄ [kg/m³]
 
     # Riming impact parameter Ri, which sets the density of freshly accreted rime.
-    # Ri = c Dᶜ |vⁱ - vᶜ| / (T₀ - T), evaluated in the cloud-riming branch.
-    rime_impact_coefficient :: FT            # c [K s / m²]
-    minimum_rime_impact :: FT                # Ri floor [-]
-    maximum_rime_impact :: FT                # Ri ceiling [-]
+    # Ri = ℂʳⁱᵐᵉ₅ Dᶜ |𝕎ⁱ - 𝕎ᶜˡ| / (T₀ - T), evaluated in the cloud-riming branch.
+    rime_impact_coefficient :: FT            # ℂʳⁱᵐᵉ₅ [K s / m²]
+    minimum_rime_impact :: FT                # ℂʳⁱᵐᵉ₆ [-]
+    maximum_rime_impact :: FT                # ℂʳⁱᵐᵉ₇ [-]
     minimum_riming_supercooling :: FT        # smallest T₀ - T admitted in Ri [K]
-    unrimed_rime_density :: FT               # ρᶠ assigned when cloud riming is inactive [kg/m³]
+    unrimed_rime_density :: FT               # ℂʳⁱᵐᵉ₈ [kg/m³]
 
     # Shedding
-    shed_drop_mass :: FT                     # m_shed [kg] (cloud/wet-growth shedding)
-    shed_drop_mass_liqfrac :: FT             # m_shed [kg] (liquid-fraction shedding)
+    shed_drop_mass :: FT                     # ℂˢʰᵉᵈ₁ [kg] (cloud/wet-growth shedding)
+    shed_drop_mass_liqfrac :: FT             # ℂˢʰᵉᵈ₂ [kg] (liquid-fraction shedding)
 
     # Wet growth is off where there is too little cloud plus rain to collect, or where
     # collection barely outpaces the freezing capacity.
-    wet_growth_hydrometeor_threshold :: FT   # qᶜˡ + qʳ below which wet growth is off [kg/kg]
-    wet_growth_excess_threshold :: FT        # collection in excess of the freezing capacity
+    wet_growth_hydrometeor_threshold :: FT   # ℂʷᵉᵗᵍ₁ [kg/kg]
+    wet_growth_excess_threshold :: FT        # ℂʷᵉᵗᵍ₂, excess over freezing capacity
                                              # needed to fire wet growth [kg/kg/s]
 
     # Refreezing
-    refreezing_timescale :: FT               # τ_frz [s]
+    refreezing_timescale :: FT               # ℂᵖʰᵃˢ₁ [s]
 
     # Deposition nucleation (Cooper 1986)
-    ice_nucleation_temperature_threshold :: FT   # T below which nucleation occurs [K]
-    ice_nucleation_supersaturation_threshold :: FT  # Sⁱ threshold [-]
-    maximum_ice_nucleation_concentration :: FT   # Nⁱ_max [1/m³]
-    ice_nucleation_timescale :: FT               # τ_nuc [s]
-    ice_nucleation_coefficient :: FT             # Cooper (1986) prefactor [1/m³] (default 5.0)
-    ice_nucleation_temperature_coefficient :: FT # Cooper (1986) supercooling rate [1/K] (default 0.304)
+    ice_nucleation_temperature_threshold :: FT   # ℂⁿᵘᶜˡ₁ [K]
+    ice_nucleation_supersaturation_threshold :: FT  # ℂⁿᵘᶜˡ₂ [-]
+    maximum_ice_nucleation_concentration :: FT   # ℂⁿᵘᶜˡ₃ [1/m³]
+    ice_nucleation_timescale :: FT               # ℂⁿᵘᶜˡ₄ [s]
+    ice_nucleation_coefficient :: FT             # ℂⁿᵘᶜˡ₅ [1/m³]
+    ice_nucleation_temperature_coefficient :: FT # ℂⁿᵘᶜˡ₆ [1/K]
 
     # Immersion freezing (Barklie-Gokhale 1959)
-    maximum_immersion_freezing_temperature :: FT # T_max [K]
-    immersion_freezing_coefficient :: FT     # aimm [-]
-    immersion_freezing_nucleation_coefficient :: FT  # bimm [m⁻³s⁻¹]
+    maximum_immersion_freezing_temperature :: FT # ℂⁱᵐᵐᶠ₁ [K]
+    immersion_freezing_coefficient :: FT     # ℂⁱᵐᵐᶠ₂ [-]
+    immersion_freezing_nucleation_coefficient :: FT  # ℂⁱᵐᵐᶠ₃ [m⁻³s⁻¹]
 
     # Rime splintering (Hallett-Mossop)
-    minimum_splintering_temperature :: FT    # lower temperature bound [K]
-    maximum_splintering_temperature :: FT    # upper temperature bound [K]
-    splintering_temperature_peak :: FT       # T_peak [K]
-    splintering_rate :: FT                   # splinters per kg rime
-    splintering_crystal_mass :: FT           # mass per HM splinter [kg] (a 10 μm crystal)
-    splintering_diameter_threshold :: FT     # minimum diameter [m] for HM splintering
+    minimum_splintering_temperature :: FT    # ℂᴴᴹ₁ [K]
+    maximum_splintering_temperature :: FT    # ℂᴴᴹ₂ [K]
+    splintering_temperature_peak :: FT       # ℂᴴᴹ₃ [K]
+    splintering_rate :: FT                   # ℂᴴᴹ₄ [1/kg rime]
+    splintering_crystal_mass :: FT           # ℂᴴᴹ₅ [kg]
+    splintering_diameter_threshold :: FT     # ℂᴴᴹ₆ [m]
     splintering_cloud_riming_scale :: FT     # 1.0 for nCat=1 (include), 0.0 for nCat>1 (exclude)
-    maximum_splintering_liquid_fraction :: FT # Fˡ max for HM splintering
-    maximum_splintering_surface_temperature :: FT # warm-surface shutoff [K] (Inf disables)
+    maximum_splintering_liquid_fraction :: FT # ℂᴴᴹ₇ [-]
+    maximum_splintering_surface_temperature :: FT # ℂᴴᴹ₈ [K] (Inf disables)
 
     # Initial rain drop mass (for autoconversion number tendency)
-    initial_rain_drop_mass :: FT             # m_rain_init [kg]
+    initial_rain_drop_mass :: FT             # ℂᵃᵘᵗᵒ₅, autoconversion seed mass [kg]
 
     # Homogeneous freezing (Koop et al. 2000)
-    homogeneous_freezing_temperature :: FT   # T < threshold: all cloud/rain freezes [K]
-    homogeneous_freezing_timescale :: FT     # τ_hom [s], effective instantaneous
+    homogeneous_freezing_temperature :: FT   # ℂʰᵒᵐᶠ₁ [K]
+    homogeneous_freezing_timescale :: FT     # ℂʰᵒᵐᶠ₂ [s]
 
     # Rime densification
-    rime_densification_timescale :: FT       # τ_densif [s]
+    rime_densification_timescale :: FT       # ℂᵈᵉⁿˢ₂ [s]
 
     # Cloud size distribution bounds, imposed on the number-weighted mean droplet
     # diameter ⟨D⟩ = (μᶜˡ + 1) / λᶜˡ rather than on λᶜˡ itself; see `cloud_slope_bounds`.
-    maximum_mean_droplet_diameter :: FT     # ⟨D⟩ maximum [m]
-    minimum_mean_droplet_diameter :: FT     # ⟨D⟩ minimum [m]
+    maximum_mean_droplet_diameter :: FT     # ℂᶜˡ₅, ⟨D⟩ maximum [m]
+    minimum_mean_droplet_diameter :: FT     # ℂᶜˡ₆, ⟨D⟩ minimum [m]
 
-    # Rain size distribution slope bounds
-    minimum_rain_slope :: FT                # λʳ minimum [1/m]
-    maximum_rain_slope :: FT                # λʳ maximum [1/m]
+    # Rain PSD slope bounds: the P3 rain lambda limiter. λʳ is clamped here and the
+    # DSD-consistent number recomputed, so these bound ⟨D⟩ = (μʳ + 1) / λʳ.
+    # `minimum_rain_slope` equals the reference `inv_Drmax = 1/0.002`, i.e. D_max ≈ 2 mm.
+    minimum_rain_slope :: FT                # ℂʳ₁, λʳ minimum [1/m]
+    maximum_rain_slope :: FT                # ℂʳ₂, λʳ maximum [1/m]
 
     # Sink-limiting safety timescale [s]
     # If total sinks for any species × dt_safety exceed available mass,
@@ -232,16 +234,16 @@ struct ProcessRateParameters{FT, PS}
 
     # Global ice number limiter.
     # Applied as a relaxation sink whenever nⁱ × ρ exceeds the maximum.
-    maximum_ice_number_density :: FT         # Nⁱ_max [1/m³]
+    maximum_ice_number_density :: FT         # ℂᵖʰᵃˢ₂ [1/m³]
 
     # Liquid fraction clipping threshold (Milbrandt et al. 2025)
     # Fl < this: instantly freeze all qwi to rime; Fl > (1 - this): fully melt to rain.
     # Implemented as a relaxation drain over refreezing_timescale.
-    liquid_fraction_clipping_threshold :: FT              # [-]
+    liquid_fraction_clipping_threshold :: FT # ℂᵖʰᵃˢ₃ [-]
 
     # A separate "complete melting" diagnostic: a particle this liquid is
     # transferred whole to rain regardless of the clipping threshold above.
-    complete_melting_liquid_fraction :: FT                # [-]
+    complete_melting_liquid_fraction :: FT   # ℂᵖʰᵃˢ₄ [-]
 
     # Tiny-ice threshold for warm pre-processing. Ice holding less than
     # this at T ≥ T₀ is converted to rain outright.
@@ -274,8 +276,8 @@ struct ProcessRateParameters{FT, PS}
     # Ad hoc multipliers to increase or decrease deposition and/or sublimation rates.
     # The representation of ice capacitances is highly simplified and the appropriate
     # values in the diffusional growth equation are uncertain.
-    calibration_factor_deposition :: FT
-    calibration_factor_sublimation :: FT
+    calibration_factor_deposition :: FT      # ℂᵈⁱᶠᶠ₁ [-]
+    calibration_factor_sublimation :: FT     # ℂᵈⁱᶠᶠ₂ [-]
 
     # Numerical floors shared by every process rate
     floors :: NumericalFloors{FT}
@@ -286,14 +288,24 @@ $(TYPEDSIGNATURES)
 
 Construct process rate parameters with default values from P3 literature.
 
-The liquid-water density, the pure-ice density, the dry-air gas constant used by the
-reference-density calculation, and every particle mass derived from a radius all come
-from `thermodynamic_constants`, so none of them can disagree with the model's own
-constants.
+The liquid-water density, the pure-ice density, and the dry-air gas constant used by the
+reference-density calculation come from the supplied `thermodynamic_constants`.
+The default `shed_drop_mass` and `initial_rain_drop_mass` also use that liquid-water
+density. The default `nucleated_ice_mass` uses `nucleated_ice_density` (900 kg/m³),
+while `splintering_crystal_mass` uses `splintering_crystal_density`, which defaults to
+`nucleated_ice_density`. Both ice seed densities are configurable independently of
+`pure_ice_density`.
 
 These parameters control the rates of all microphysical processes:
 autoconversion, accretion, aggregation, riming, melting, evaporation,
 deposition, nucleation, and freezing.
+
+Calibratable empirical values are denoted ``\\mathbb{C}`` in the theory. When a
+kernel unpacks one into a formula-local variable, the implementation uses the matching
+Unicode identifier, such as `ℂᵃᵘᵗᵒ₁`. The public fields and constructor keywords remain
+descriptive; each calibratable field comment records its exact `ℂ` symbol. Physical
+constants, case inputs, switches, and numerical safeguards do not receive `ℂ`. See the
+[complete calibration inventory](@ref p3_calibration_inventory).
 
 Ice terminal-velocity, projected-area, collection, and ventilation integrals are
 read from the P3 lookup tables by [`read_lookup_tables`](@ref).
@@ -304,7 +316,7 @@ path uses ``μ_r = 0``. None are duplicated in this rate-parameter container.
 # Default Sources
 
 - Autoconversion/accretion: Khairoutdinov and Kogan (2000)
-- Self-collection/breakup: Seifert and Beheng (2001, 2006)
+- Self-collection: Khairoutdinov and Kogan (2000); breakup: Verlinde and Cotton (1993)
 - Aggregation: Morrison and Milbrandt (2015)
 - Nucleation: Cooper (1986)
 - Freezing: Barklie and Gokhale (1959)
@@ -318,19 +330,19 @@ prognostic set entirely while `params.predict_supersaturation` remains usable in
 ordinary Boolean expressions.
 
 ```jldoctest
-using Breeze.Microphysics.PredictedParticleProperties: ProcessRateParameters
-params = ProcessRateParameters(Float64)
+using Breeze.Microphysics.PredictedParticleProperties: ProcessRate
+params = ProcessRate(Float64)
 typeof(params)
 
 # output
-ProcessRateParameters{Float64, false}
+ProcessRate{Float64, false}
 ```
 
 All parameters are keyword arguments with physically-based defaults. The coupled
 donor-budget limiter uses four re-projection passes by default; set
 `coupled_sink_limiting_iterations` to tune that count.
 """
-function ProcessRateParameters(FT::DataType = Oceananigans.defaults.FloatType;
+function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         # Shared thermodynamic properties. `liquid_water_density`, `pure_ice_density`, and
         # every mass derived from them come from here, so they cannot fall out of step
         # with the model's own constants.
@@ -526,7 +538,7 @@ function ProcessRateParameters(FT::DataType = Oceananigans.defaults.FloatType;
 
     predict_supersaturation = Bool(predict_supersaturation)
 
-    return ProcessRateParameters{FT, predict_supersaturation}(
+    return ProcessRate{FT, predict_supersaturation}(
         FT(thermodynamic_constants.liquid.density),
         FT(thermodynamic_constants.ice.density),
         FT(freezing_temperature),
@@ -611,14 +623,14 @@ end
 
 # Gate a rate on the predicted-supersaturation switch. Dispatching on the type value
 # folds the branch at compile time while preserving a user-facing `Bool` field.
-@inline gate_predicted_supersaturation(::ProcessRateParameters{FT, false}, x) where FT = 0 * x
-@inline gate_predicted_supersaturation(::ProcessRateParameters{FT, true}, x) where FT = x
+@inline gate_predicted_supersaturation(::ProcessRate{FT, false}, x) where FT = 0 * x
+@inline gate_predicted_supersaturation(::ProcessRate{FT, true}, x) where FT = x
 
-@inline predicts_supersaturation(::ProcessRateParameters{FT, PS}) where {FT, PS} = PS
+@inline predicts_supersaturation(::ProcessRate{FT, PS}) where {FT, PS} = PS
 
-Base.summary(::ProcessRateParameters) = "ProcessRateParameters"
+Base.summary(::ProcessRate) = "ProcessRate"
 
-function Base.show(io::IO, p::ProcessRateParameters)
+function Base.show(io::IO, p::ProcessRate)
     print(io, summary(p), "(")
     print(io, "T₀=", p.freezing_temperature, "K, ")
     print(io, "ρʷ=", p.liquid_water_density, "kg/m³, ")

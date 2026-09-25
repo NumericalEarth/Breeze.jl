@@ -4,7 +4,7 @@
 ##### The concept containers that hold the ice-side integrals of the P3 scheme —
 ##### fall speed, deposition, bulk properties, collection, the λ limiter, and
 ##### ice-rain collection — the lookup-table containers they are read from, and
-##### the `IceProperties` container that gathers them.
+##### the `IceParticles` container that gathers them.
 #####
 ##### Every container follows the materialization pattern: the user-facing
 ##### constructor builds a skeleton whose integral fields are `nothing`, and
@@ -39,8 +39,8 @@ that corrects rain fall speeds.
 
 Two weighted fall speeds are computed by integrating over the size distribution:
 
-- **Number-weighted** ``V_n``: For number flux (sedimentation of particle count)
-- **Mass-weighted** ``V_m``: For mass flux (precipitation rate)
+- **Number-weighted** ``\\mathbb{W}^n``: For number flux (sedimentation of particle count)
+- **Mass-weighted** ``\\mathbb{W}^m``: For mass flux (precipitation rate)
 
 # Keyword Arguments
 
@@ -60,7 +60,7 @@ function IceFallSpeed(FT::DataType = Oceananigans.defaults.FloatType;
                       reference_pressure = 60000,     # 600 hPa
                       reference_temperature = 253.15, # -20 °C
                       reference_air_density = reference_pressure /
-                          (dry_air_gas_constant(thermodynamic_constants) * reference_temperature))
+                      (dry_air_gas_constant(thermodynamic_constants) * reference_temperature))
     return IceFallSpeed(FT(reference_air_density), nothing, nothing)
 end
 
@@ -79,9 +79,9 @@ end
 ##### particle motion through air.
 #####
 
-struct IceDeposition{V, V1, SC, SR, LC, LR}
-    ventilation :: V
-    ventilation_enhanced :: V1
+struct IceDeposition{Vent, VentRe, SC, SR, LC, LR}
+    ventilation :: Vent
+    enhanced_ventilation :: VentRe
     small_ice_ventilation_constant :: SC
     small_ice_ventilation_reynolds :: SR
     large_ice_ventilation_constant :: LC
@@ -113,7 +113,7 @@ from temperature, pressure, and the model thermodynamic constants via
 
 **Basic ventilation integrals:**
 - `ventilation`: Integrated over full size spectrum
-- `ventilation_enhanced`: For larger particles (D > 100 μm)
+- `enhanced_ventilation`: For larger particles (D > 100 μm)
 
 **Size-regime ventilation** (for melting with liquid fraction):
 - `small_ice_ventilation_*`: D ≤ Dcrit, meltwater → rain
@@ -139,7 +139,7 @@ Base.show(io::IO, d::IceDeposition) = print(io, summary(d), "()")
 ##### particle size distribution.
 #####
 
-struct IceBulkProperties{FT, EF, DM, RH, RF, LA, MU, SH}
+struct IceBulk{FT, EF, DM, RH, RF, LA, MU, SH}
     maximum_mean_diameter :: FT
     minimum_mean_diameter :: FT
     effective_radius :: EF
@@ -154,22 +154,29 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct `IceBulkProperties` with parameters and quadrature-based integrals.
+Construct `IceBulk` with parameters and quadrature-based integrals.
 
 These integrals compute bulk properties by averaging over the particle
 size distribution. They are used for radiation, radar, and diagnostics.
 
 **Diagnostic integrals:**
 
-- `effective_radius`: Radiation-weighted radius ``r_e = ∫A·N'dD / ∫N'dD``
+- `effective_radius`: Radiation-weighted radius
+  ``r_e = (3/(4ρ_i^*)) ∫m·N'dD / ∫A·N'dD``, with the table generator's
+  reference ice density ``ρ_i^* = 916.7`` kg/m³
 - `mean_diameter`: Mass-weighted diameter ``D_m = ∫D·m·N'dD / ∫m·N'dD``
 - `mean_density`: Mass-weighted density ``ρ̄ = ∫ρ·m·N'dD / ∫m·N'dD``
-- `reflectivity`: Radar reflectivity ``Z = ∫D^6·N'dD``
+- `reflectivity`: Number-normalized equivalent radar reflectivity. Dry ice uses
+  ``0.1892 ∫D_{eq}^6 N'dD / ∫N'dD``, with equivalent diameter computed from particle
+  mass at 917 kg/m³. Partially melted ice uses the generator's wet-ice scattering
+  calculation; the fully liquid limit uses ``D^6``. Multiply by ice number density
+  for the volume integral.
 
-**Distribution parameters (for λ-limiting):**
+**Tabulated distribution parameters:**
 
-- `slope`: Slope parameter λ from prognostic constraints
-- `shape`: Shape parameter μⁱ from empirical μⁱ-λ relationship
+- `slope`: Slope parameter λ recorded when the table was generated
+- `shape`: Shape parameter μⁱ recorded when the table was generated, read back by
+  `compute_ice_shape_parameter`
 
 **Process integrals:**
 
@@ -185,18 +192,18 @@ size distribution. They are used for radiation, radar, and diagnostics.
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
 [Field et al. (2007)](@cite FieldEtAl2007) for μⁱ-λ relationship.
 """
-function IceBulkProperties(FT::DataType = Oceananigans.defaults.FloatType;
-                           maximum_mean_diameter = 20e-3,
-                           minimum_mean_diameter = 2e-6)
-    return IceBulkProperties(
+function IceBulk(FT::DataType = Oceananigans.defaults.FloatType;
+                 maximum_mean_diameter = 20e-3,
+                 minimum_mean_diameter = 2e-6)
+    return IceBulk(
         FT(maximum_mean_diameter),
         FT(minimum_mean_diameter),
         nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
-Base.summary(::IceBulkProperties) = "IceBulkProperties"
+Base.summary(::IceBulk) = "IceBulk"
 
-function Base.show(io::IO, bp::IceBulkProperties)
+function Base.show(io::IO, bp::IceBulk)
     print(io, summary(bp), "(")
     print(io, "Dmax=", bp.maximum_mean_diameter, ", ")
     print(io, "Dmin=", bp.minimum_mean_diameter, ")")
@@ -233,7 +240,7 @@ dominant growth mechanism for snow, and depends on the differential fall speeds 
 particles of different sizes. Consumed by [`ice_aggregation_rate`](@ref).
 
 **Cloud collection** (ice + cloud droplets → rime on ice):
-The PSD-integrated sweep-out kernel ``\\int V(D) A(D) N'(D) \\, dD`` [m³/s] per
+The PSD-integrated sweep-out kernel ``\\int \\mathbb{W}(D) A(D) N'(D) \\, dD`` [m³/s] per
 particle, with the collision kernel set to zero for ice diameters below 100 μm.
 Cloud droplets are small enough relative to ice that their own size distribution
 does not enter the collision geometry, so a single ice-PSD integral suffices.
@@ -249,7 +256,7 @@ Ice-rain collection is handled separately, by [`IceRainCollection`](@ref) and th
 rain slope parameter ``λ_r`` in addition to the ice PSD.
 
 Collection efficiencies are not stored here. They live in
-[`ProcessRateParameters`](@ref) alongside the other rate parameters, as
+[`ProcessRate`](@ref) alongside the other rate parameters, as
 `cloud_ice_collection_efficiency` (``E^{ci}``) and
 `rain_ice_collection_efficiency` (``E^{ri}``).
 
@@ -290,9 +297,11 @@ adjustments.
 - Very large λ → all particles tiny (mean size → 0)
 - Very small λ → all particles huge (mean size → ∞)
 
-These integrals compute the limiting values:
-- `small_q`: λ limit when q is small (prevents vanishingly tiny particles)
-- `large_q`: λ limit when q is large (prevents unrealistically huge particles)
+The columns store inverse mean particle masses [kg⁻¹] at the limiting PSDs.
+Multiplying them by total ice mass fraction (including liquid coating) gives the
+bounds on `nⁱ`:
+- `small_q`: inverse minimum mean mass, giving the maximum number at the upper λ bound
+- `large_q`: inverse maximum mean mass, giving the minimum number at the lower λ bound
 
 The limiter ensures the diagnosed size distribution remains physically
 sensible even when the prognostic constraints become degenerate.
@@ -341,10 +350,10 @@ Base.summary(::IceRainCollection) = "IceRainCollection"
 Base.show(io::IO, ::IceRainCollection) = print(io, "IceRainCollection(2 integrals)")
 
 #####
-##### IceProperties: the container combining all ice particle property concepts
+##### IceParticles: the container combining all ice particle property concepts
 #####
 
-struct IceProperties{FT, FS, DP, BP, CL, LL, IR}
+struct IceParticles{FT, FS, DP, BP, CL, LL, IR}
     # Top-level parameters
     minimum_rime_density :: FT
     maximum_rime_density :: FT
@@ -353,7 +362,7 @@ struct IceProperties{FT, FS, DP, BP, CL, LL, IR}
     # Table 1, so `on_architecture` transfers every table to the device exactly once.
     fall_speed :: FS
     deposition :: DP
-    bulk_properties :: BP
+    bulk :: BP
     collection :: CL
     lambda_limiter :: LL
     ice_rain :: IR
@@ -378,6 +387,7 @@ This container organizes all ice-related computations:
 - **Bulk properties**: Population-averaged diameter, density, reflectivity
 - **Collection**: Integrals for aggregation and riming rates
 - **Lambda limiter**: Constraints on size distribution slope
+- **Ice-rain collection**: Double-PSD integrals for ice-rain interaction
 
 # Keyword Arguments
 
@@ -391,32 +401,32 @@ This container organizes all ice-related computations:
 The mass-diameter relationship is from
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 """
-function IceProperties(FT::DataType = Oceananigans.defaults.FloatType;
-                       thermodynamic_constants = ThermodynamicConstants(FT),
-                       minimum_rime_density = 50,
-                       maximum_rime_density = 900,
-                       maximum_shape_parameter = 20)
-    return IceProperties(
+function IceParticles(FT::DataType = Oceananigans.defaults.FloatType;
+                      thermodynamic_constants = ThermodynamicConstants(FT),
+                      minimum_rime_density = 50,
+                      maximum_rime_density = 900,
+                      maximum_shape_parameter = 20)
+    return IceParticles(
         FT(minimum_rime_density),
         FT(maximum_rime_density),
         FT(maximum_shape_parameter),
         IceFallSpeed(FT; thermodynamic_constants),
         IceDeposition(FT),
-        IceBulkProperties(FT),
+        IceBulk(FT),
         IceCollection(),
         IceLambdaLimiter(),
         IceRainCollection())
 end
 
-Base.summary(::IceProperties) = "IceProperties"
+Base.summary(::IceParticles) = "IceParticles"
 
-function Base.show(io::IO, ice::IceProperties)
+function Base.show(io::IO, ice::IceParticles)
     print(io, summary(ice), '\n')
     print(io, "├── ρᶠ: [", ice.minimum_rime_density, ", ", ice.maximum_rime_density, "] kg/m³\n")
     print(io, "├── μmax: ", ice.maximum_shape_parameter, "\n")
     print(io, "├── ", ice.fall_speed, "\n")
     print(io, "├── ", ice.deposition, "\n")
-    print(io, "├── ", ice.bulk_properties, "\n")
+    print(io, "├── ", ice.bulk, "\n")
     print(io, "├── ", ice.collection, "\n")
     print(io, "├── ", ice.lambda_limiter, "\n")
     print(io, "└── ", ice.ice_rain)

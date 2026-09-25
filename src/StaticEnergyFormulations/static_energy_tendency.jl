@@ -13,6 +13,8 @@ const StaticEnergyModel = AtmosphereModel{<:Any, <:StaticEnergyFormulation}
 AtmosphereModels.liquid_ice_potential_temperature(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :specific)
 AtmosphereModels.liquid_ice_potential_temperature_density(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :density)
 AtmosphereModels.static_energy(model::StaticEnergyModel) = model.formulation.specific_energy
+
+AtmosphereModels.specific_thermodynamic_field(formulation::StaticEnergyFormulation) = formulation.specific_energy
 AtmosphereModels.static_energy_density(model::StaticEnergyModel) = model.formulation.energy_density
 
 #####
@@ -26,6 +28,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyMod
     ρs_args = (
         Val(1),
         model.forcing.ρs,
+        model.forcing.ρE,
         model.advection.ρs,
         radiation_flux_divergence(model.radiation),
         model.sedimentation_constituents,
@@ -41,6 +44,7 @@ end
 @inline function static_energy_tendency(i, j, k, grid,
                                         id,
                                         ρs_forcing,
+                                        ρE_forcing,
                                         advection,
                                         radiation_flux_divergence_field,
                                         sedimenting_constituents,
@@ -74,7 +78,10 @@ end
                                       formulation, dynamics, constants, microphysics, microphysical_fields,
                                       specific_prognostic_moisture, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
+             # An energy forcing (note: ρs and ρE are mutually exclusive) is an energy per unit mass
+             # and needs no conversion
              + ρs_forcing(i, j, k, grid, clock, model_fields)
+             + ρE_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
 end
 

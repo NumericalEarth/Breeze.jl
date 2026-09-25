@@ -69,7 +69,7 @@ p₀ = 101325  # Surface pressure [Pa]
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
-                                 surface_pressure = p₀,
+                                 base_pressure = p₀,
                                  potential_temperature = θ₀,
                                  vapor_mass_fraction = 0)
 
@@ -168,7 +168,7 @@ microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 # equilibrium: ozone absorbs shortwave radiation and the coarse upper cells
 # respond strongly. A Newtonian relaxation of temperature toward the initial
 # profile above 8 km keeps the stratosphere anchored without affecting the
-# tropospheric dynamics. We apply this as an energy forcing on `ρs`, which
+# tropospheric dynamics. We apply this as an energy forcing on `ρE`, which
 # Breeze automatically converts to a `ρθ` tendency.
 
 Tᵣ = reference_state.temperature
@@ -189,7 +189,7 @@ end
 sponge = Forcing(stratospheric_relaxation; discrete_form=true,
                  parameters=(; Tᵣ, ρᵣ, cᵖᵈ, τ=τ_sponge))
 
-forcing = (; ρs=sponge)
+forcing = (; ρE=sponge)
 
 # ## Model assembly
 
@@ -200,7 +200,7 @@ weno_order = 5
 momentum_advection = WENO(order=weno_order)
 
 scalar_advection = (ρθ  = WENO(order=weno_order),
-                    ρqᵗ = WENO(order=weno_order, bounds=(0, 1)))
+                    ρqᵉ = WENO(order=weno_order, bounds=(0, 1)))
 
 model = AtmosphereModel(grid; dynamics, microphysics, radiation, forcing,
                         momentum_advection, scalar_advection,
@@ -323,13 +323,13 @@ slices_filename = filename * "_slices.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   filename = averages_filename,
                                                   schedule = AveragedTimeInterval(1hour),
-                                                  overwrite_existing = true)
+                                                  overwrite_files = true)
 
 slice_outputs = (; w, qᵛ, T)
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = slices_filename,
                                                 schedule = TimeInterval(10minutes),
-                                                overwrite_existing = true)
+                                                overwrite_files = true)
 
 @info "Starting simulation..."
 run!(simulation)

@@ -47,7 +47,7 @@ function sedimentation_column(FT, phase, donor_temperature, closed, speed; compr
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch, FT; size=(1, 1, 2), x=(0, 1), y=(0, 1), z=(0, 200))
     constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
-    reference = ReferenceState(grid, constants; surface_pressure=1e5, potential_temperature=280)
+    reference = ReferenceState(grid, constants; base_pressure=1e5, potential_temperature=280)
     dynamics = compressible ? CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=280) :
                              AnelasticDynamics(reference)
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants,

@@ -37,9 +37,9 @@ using Breeze.Microphysics.PredictedParticleProperties:
     rain_riming_rate,
     rime_density,
     P3MicrophysicalState,
-    RainMassWeightedVelocityEvaluator,
-    RainNumberWeightedVelocityEvaluator,
-    RainEvaporationVentilationEvaluator,
+    RainMassWeightedVelocity,
+    RainNumberWeightedVelocity,
+    RainVelocityDiameterIntegral,
     homogeneous_freezing_cloud_rate,
     homogeneous_freezing_rain_rate,
     immersion_freezing_cloud_rate,
@@ -82,7 +82,7 @@ using Oceananigans.Fields: interior
         exact(x) = sum(c * xi for (c, xi) in zip(coefficients, x))
 
         data = [exact(ntuple(d -> ranges[d][1] +
-                                  (i[d] - 1) * (ranges[d][2] - ranges[d][1]) / (points[d] - 1), 5))
+                             (i[d] - 1) * (ranges[d][2] - ranges[d][1]) / (points[d] - 1), 5))
                 for i in CartesianIndices(points)]
         table = make_lookup_table(data, ranges, CPU())
 
@@ -109,8 +109,8 @@ using Oceananigans.Fields: interior
         @test evaluate_at(other, prep) ≈ 2 * evaluate_at(table, prep)
     end
 
-    @testset "RainMassWeightedVelocityEvaluator - monotonicity" begin
-        evaluator = RainMassWeightedVelocityEvaluator()
+    @testset "RainMassWeightedVelocity - monotonicity" begin
+        evaluator = RainMassWeightedVelocity()
 
         # λ_r = 1000 m⁻¹ → D_mean = 1mm (large drops, fast)
         # λ_r = 10000 m⁻¹ → D_mean = 100μm (small drops, slow)
@@ -122,7 +122,7 @@ using Oceananigans.Fields: interior
         @test V_large > V_small  # Larger drops (small λ_r) fall faster
     end
 
-    @testset "RainMassWeightedVelocityEvaluator - analytical comparison" begin
+    @testset "RainMassWeightedVelocity - analytical comparison" begin
         # For simple power law V(D) = ar * D^br (valid ~134μm to 1.5mm):
         # V_mass = ar * Γ(4 + br) / (Γ(4) * λ_r^br)
         # At λ_r = 5000 m⁻¹ (D_mean = 200μm, intermediate drops):
@@ -135,15 +135,15 @@ using Oceananigans.Fields: interior
         # Analytical: V_mass = ar * Γ(4+br) / (Γ(4) * λ^br)
         V_analytical = ar * gamma(4 + br) / (gamma(4) * λ_r^br)
 
-        evaluator = RainMassWeightedVelocityEvaluator()
+        evaluator = RainMassWeightedVelocity()
         V_numerical = evaluator(log10(λ_r))
 
         # Should agree within 30% (power law is approximate; piecewise formula differs)
         @test abs(V_numerical - V_analytical) / V_analytical < 0.30
     end
 
-    @testset "RainNumberWeightedVelocityEvaluator - positive and monotone" begin
-        evaluator = RainNumberWeightedVelocityEvaluator()
+    @testset "RainNumberWeightedVelocity - positive and monotone" begin
+        evaluator = RainNumberWeightedVelocity()
 
         V_large = evaluator(log10(1000.0))
         V_small = evaluator(log10(10000.0))
@@ -153,12 +153,12 @@ using Oceananigans.Fields: interior
         @test V_large > V_small
     end
 
-    @testset "RainEvaporationVentilationEvaluator - large λ_r limit" begin
-        # M3: Evaluator now returns Reynolds integral only: I_Re = ∫ D √Re exp(-λD) dD
+    @testset "RainVelocityDiameterIntegral - large λ_r limit" begin
+        # The quadrature returns the Reynolds integral only: I_Re = ∫ D √Re exp(-λD) dD
         # At λ_r → ∞ (tiny drops), √Re → 0, so I_Re → 0 (but stays positive).
         # The full evaporation integral is assembled at runtime:
         #   I_evap = f1r/λ² + f2r × Sc^(1/3) × I_Re
-        evaluator = RainEvaporationVentilationEvaluator()
+        evaluator = RainVelocityDiameterIntegral()
 
         λ_r = 1e5   # Large (very tiny drops)
         I_Re = evaluator(log10(λ_r))
@@ -168,8 +168,8 @@ using Oceananigans.Fields: interior
         @test I_Re < 1.0 / λ_r^2   # upper bound: √Re contribution is small for tiny drops
     end
 
-    @testset "RainEvaporationVentilationEvaluator - positive" begin
-        evaluator = RainEvaporationVentilationEvaluator()
+    @testset "RainVelocityDiameterIntegral - positive" begin
+        evaluator = RainVelocityDiameterIntegral()
 
         for log_λ in [2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
             I = evaluator(log_λ)
@@ -179,7 +179,7 @@ using Oceananigans.Fields: interior
     end
 
     @testset "rain_evaporation_rate sign with tabulated scheme" begin
-        # With tabulated rain, evaporation in subsaturated air should be positive magnitude (M7)
+        # With tabulated rain, evaporation in subsaturated air should be positive magnitude
         p3_tab = PredictedParticlePropertiesMicrophysics()
 
         FT = Float64
@@ -193,7 +193,7 @@ using Oceananigans.Fields: interior
         qv_sub = FT(0.008)   # 67% RH — subsaturated
 
         rate_sub = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P, constants)
-        @test rate_sub > 0   # Positive magnitude (M7)
+        @test rate_sub > 0   # Positive magnitude
 
         # Saturated: zero evaporation
         rate_sat = rain_evaporation_rate(p3_tab, qr, nr, qv_sat, qv_sat, T, ρ, P, constants)
@@ -217,7 +217,7 @@ using Oceananigans.Fields: interior
 
         rate_tab = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P, constants)
 
-        # Should be positive magnitude (M7) and finite
+        # Should be positive magnitude and finite
         @test rate_tab > 0
         @test isfinite(rate_tab)
 
@@ -292,7 +292,7 @@ using Oceananigans.Fields: interior
         @test frozen_mass_rate > 0
         @test frozen_number_rate > 0
 
-        # D25: there is no mass-number consistency cap — all Nᶜˡ transfers to ice.
+        # There is no mass-number consistency cap — all Nᶜˡ transfers to ice.
         # With trace qᶜˡ and large Nᶜˡ, freezing still activates.
         qᶜˡ_trace = FT(1e-7)
         Nᶜˡ_continental = FT(750e6)
@@ -341,7 +341,7 @@ using Oceananigans.Fields: interior
         @test N32r isa Float32
     end
 
-    @testset "Immersion freezing PSD weighting (H1)" begin
+    @testset "Immersion freezing PSD weighting" begin
         p3 = PredictedParticlePropertiesMicrophysics(Float64)
 
         # Cloud immersion freezing: PSD correction on mass only.
@@ -508,18 +508,18 @@ using Oceananigans.Fields: interior
     end
 
     #####
-    ##### ProcessRateParameters defaults
+    ##### ProcessRate defaults
     #####
     ##### The immersion-freezing PSD correction is not stored in
-    ##### `ProcessRateParameters`. `immersion_freezing_cloud_rate` evaluates
+    ##### `ProcessRate`. `immersion_freezing_cloud_rate` evaluates
 ##### `psd_correction_spherical_volume` from the locally diagnosed Liu-Daum μᶜˡ,
     ##### so its correction varies with cloud droplet number.
     ##### `immersion_freezing_rain_rate` evaluates the same function at fixed μ_r = 0,
     ##### so the rain correction is constant.
     #####
 
-    @testset "ProcessRateParameters defaults" begin
-        parameters = ProcessRateParameters(Float64)
+    @testset "ProcessRate defaults" begin
+        parameters = ProcessRate(Float64)
 
         @test parameters.reference_air_density ≈ 100000 / (dry_air_gas_constant(ThermodynamicConstants(Float64)) * 273.15) rtol=1e-12
         @test parameters.ice_nucleation_supersaturation_threshold == 0.05
@@ -534,7 +534,7 @@ using Oceananigans.Fields: interior
         ρ = FT(1.0)
 
         # Create rates with typical mixed-phase values, including homogeneous freezing
-        # Sign convention (M7): all one-directional rates are positive magnitudes
+        # Sign convention: all one-directional rates are positive magnitudes
         rates = P3ProcessRates(
             FT(5e-7),   # condensation (bidirectional)
             FT(1e-7),   # autoconversion
@@ -552,9 +552,9 @@ using Oceananigans.Fields: interior
             FT(0),      # clipping_rime_mass
             FT(0),      # clipping_rime_volume
             FT(0),      # post_process_clipping
-            FT(0.0),    # sublimation_number (D2: nisub)
+            FT(0.0),    # sublimation_number (nisub)
             FT(500.0),  # aggregation (positive magnitude)
-            FT(0.0),    # ni_limit (C3: global Nⁱ cap)
+            FT(0.0),    # ni_limit (global Nⁱ cap)
             FT(1e-7),   # cloud_riming
             FT(1e4),    # cloud_riming_number (positive magnitude)
             FT(5e-8),   # rain_riming
@@ -578,7 +578,7 @@ using Oceananigans.Fields: interior
             FT(1e-8),   # cloud_warm_collection (above-freezing cloud collection → qʷⁱ)
             FT(1e4),    # cloud_warm_collection_number
             FT(5e-9),   # rain_warm_collection (above-freezing rain collection → qʷⁱ)
-            FT(1e2),    # rain_warm_collection_number (M9)
+            FT(1e2),    # rain_warm_collection_number
             FT(3e-8),   # wet_growth_cloud (cloud riming redirected to qʷⁱ)
             FT(2e-8),   # wet_growth_rain (rain riming redirected to qʷⁱ)
             # wet_growth_shedding is nonzero ONLY in the dry (non-liquid-fraction)
@@ -589,16 +589,16 @@ using Oceananigans.Fields: interior
             # struct describes an unreachable state and double-charges cloud.
             FT(0.0),    # wet_growth_shedding (dry-branch only; 0 under LF routing)
             FT(0.0),    # wet_growth_shedding_number (dry-branch only)
-            FT(0.0),    # ccn_activation_mass (M9 stub)
-            FT(0.0),    # ccn_activation_number (M9 stub)
-            FT(0.0),    # rain_condensation (M9 stub)
-            FT(0.0),    # coating_condensation (M9 stub)
-            FT(0.0),    # coating_evaporation (M9 stub)
-            FT(0.0),    # wet_growth_densification_mass (H9)
-            FT(0.0),    # wet_growth_densification_volume (H9)
-            FT(0.0),    # cloud_number_correction (M6)
-            FT(0.0),    # rain_number_correction (M6)
-            FT(0.0),    # ice_number_correction (M4)
+            FT(0.0),    # ccn_activation_mass
+            FT(0.0),    # ccn_activation_number
+            FT(0.0),    # rain_condensation
+            FT(0.0),    # coating_condensation
+            FT(0.0),    # coating_evaporation
+            FT(0.0),    # wet_growth_densification_mass
+            FT(0.0),    # wet_growth_densification_volume
+            FT(0.0),    # cloud_number_correction
+            FT(0.0),    # rain_number_correction
+            FT(0.0),    # ice_number_correction
         FT(0.0),    # predicted_supersaturation_adjustment
         FT(0.0),    # predicted_supersaturation_tendency
         )

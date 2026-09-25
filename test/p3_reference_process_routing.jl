@@ -6,7 +6,7 @@ import Breeze
 using Breeze.Microphysics.PredictedParticleProperties:
     P3MicrophysicalState,
     PredictedParticlePropertiesMicrophysics,
-    ProcessRateParameters,
+    ProcessRate,
     compute_p3_process_rates,
     immersion_freezing_cloud_rate,
     immersion_freezing_rain_rate,
@@ -343,7 +343,7 @@ end
 
     @testset "non-liquid-fraction mode uses the fast routing" begin
         FT = Float64
-        process_rates = ProcessRateParameters(FT; liquid_fraction_active = false)
+        process_rates = ProcessRate(FT; liquid_fraction_active = false)
         p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates)
         constants = ThermodynamicConstants(FT)
         τ = process_rates.sink_limiting_timescale
@@ -353,13 +353,13 @@ end
         @test p3.process_rates.tiny_ice_to_rain_threshold == FT(1e-12)
         overridden_qsmall = FT(3e-9)
         p3_overridden = PredictedParticlePropertiesMicrophysics(
-            FT; process_rates = ProcessRateParameters(
+            FT; process_rates = ProcessRate(
                 FT; liquid_fraction_active = false,
                 tiny_ice_to_rain_threshold = overridden_qsmall))
         @test p3_overridden.process_rates.tiny_ice_to_rain_threshold == overridden_qsmall
 
         mixed_precision = PredictedParticlePropertiesMicrophysics(
-            Float64; process_rates = ProcessRateParameters(
+            Float64; process_rates = ProcessRate(
                 Float32; liquid_fraction_active = false))
         @test mixed_precision.process_rates.tiny_ice_to_rain_threshold isa Float32
         @test mixed_precision.process_rates.tiny_ice_to_rain_threshold == Float32(1e-12)
@@ -425,8 +425,8 @@ end
 
         @test coated_wet_growth_props.qⁱ_total == wet_growth_props.qⁱ_total
         @test coated_wet_growth_props.Fˡ == wet_growth_props.Fˡ == 0
-        @test coated_wet_growth_fall_speeds.wⁱ == wet_growth_fall_speeds.wⁱ
-        @test coated_wet_growth_fall_speeds.wⁿⁱ == wet_growth_fall_speeds.wⁿⁱ
+        @test coated_wet_growth_fall_speeds.𝕎ⁱ == wet_growth_fall_speeds.𝕎ⁱ
+        @test coated_wet_growth_fall_speeds.𝕎ⁿⁱ == wet_growth_fall_speeds.𝕎ⁿⁱ
         @test coated_wet_growth_rates.cloud_riming ≈ wet_growth_rates.cloud_riming
         @test coated_wet_growth_rates.rain_riming ≈ wet_growth_rates.rain_riming
         @test coated_wet_growth_rates.shedding ≈ inactive_coating / τ

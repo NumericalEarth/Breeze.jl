@@ -215,8 +215,10 @@ fraction of each mass flux only; between the tracers' implicit solves of a stage
 thermodynamic variable's own, the time steppers call `implicit_sedimentation_step!`, which moves
 the content of the remainder from the first-order fluxes the solves actually applied, at the
 solved state,
-so the heat follows the mass at any fall Courant number and takes the same implicit transport
-and diffusion as the rest of the field. Rain-out thus leaves latent warming aloft and pre-cools
+so the heat follows the mass at any fall Courant number and then takes the thermodynamic
+variable's post-solve: its implicit transport and diffusion on the SSP path, diffusion only on the
+acoustic path, whose implicit thermodynamic transport runs inside the substep loop (a first-order
+splitting difference). Rain-out thus leaves latent warming aloft and pre-cools
 the layer that later evaporates the arriving rain, the mechanism that builds cold pools.
 
 ### Bottom Precipitation Flux

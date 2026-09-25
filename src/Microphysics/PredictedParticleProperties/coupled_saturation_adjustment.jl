@@ -52,19 +52,19 @@ local state passes through unchanged.
                                          sᵛ⁺ˡ, T, ρ, constants)
 
 @inline function predicted_supersaturation_adjustment(
-    ::ProcessRateParameters{FT, false}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
+    ::ProcessRate{FT, false}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
 ) where FT
     cloud_water_adjustment = zero(qᶜˡ)
     return (; cloud_water_adjustment,
-              rate = zero(qᶜˡ),
-              qᶜˡ,
-              qᵛ,
-              qᵛ⁺ˡ,
-              T)
+            rate = zero(qᶜˡ),
+            qᶜˡ,
+            qᵛ,
+            qᵛ⁺ˡ,
+            T)
 end
 
 @inline function predicted_supersaturation_adjustment(
-    parameters::ProcessRateParameters{PFT, true}, p3,
+    parameters::ProcessRate{PFT, true}, p3,
     qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
 ) where PFT
     FT = typeof(qᶜˡ)
@@ -87,11 +87,11 @@ end
         adjusted_temperature, ρ, constants, PlanarLiquidSurface())
 
     return (; cloud_water_adjustment,
-              rate = cloud_water_adjustment / τ,
-              qᶜˡ = qᶜˡ + cloud_water_adjustment,
-              qᵛ = qᵛ - cloud_water_adjustment,
-              qᵛ⁺ˡ = adjusted_saturation,
-              T = adjusted_temperature)
+            rate = cloud_water_adjustment / τ,
+            qᶜˡ = qᶜˡ + cloud_water_adjustment,
+            qᵛ = qᵛ - cloud_water_adjustment,
+            qᵛ⁺ˡ = adjusted_saturation,
+            T = adjusted_temperature)
 end
 
 @inline function cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, Dᵛ, μᶜˡ, λᶜˡ,
@@ -110,10 +110,10 @@ end
     nʳ_eff = max(nʳ, FT(p3.minimum_number_mixing_ratio))
     active = qʳ_eff >= p3.minimum_mass_mixing_ratio
 
-    ventilation = rain_ventilation_integral(p3.rain.evaporation, qʳ_eff, nʳ_eff,
-                                           transport.ν, transport.Dᵛ, parameters)
-    relaxation_coefficient = 2 * FT(π) * ventilation.Nʳ₀ * ρ * transport.Dᵛ *
-                             ventilation.integral
+    integrals = rain_ventilation_integral(p3.rain.evaporation, p3.rain.ventilation, qʳ_eff, nʳ_eff,
+                                          transport.ν, transport.Dᵛ, parameters)
+    relaxation_coefficient = 2 * FT(π) * integrals.Nʳ₀ * ρ * transport.Dᵛ *
+                             integrals.integral
 
     return ifelse(active, relaxation_coefficient, zero(FT))
 end
@@ -135,7 +135,7 @@ end
     # The Sc correction uses the thermodynamic air density, not the `lookups` correction.
     ρ_air = density(T, P, q, constants)
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ_air)
-    C_fv = ventilation_from_terms(lookups.ventilation, lookups.ventilation_enhanced,
+    C_fv = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
                                   ν, Dᵛ, ρ_correction, parameters.floors)
 
     # This is the raw inverse relaxation coefficient; the psychrometric correction
@@ -242,8 +242,8 @@ cloud/precipitation fraction framework is handled separately.
 
     𝒮ˡ = supersaturation / max(qᵛ⁺ˡ, FT(floors.divisor))
     𝒮ⁱ = qᵛ / max(qᵛ⁺ⁱ, FT(floors.divisor)) - 1
-    # The tiny-mass clauses below all gate on the total hydrometeor mass
-    # (`qⁱ_total`, computed above).
+    # Each tiny-mass clause below gates on its own reservoir: `qᶜˡ` for cloud, `qʳ` for
+    # rain, and the total ice mass `qⁱ_total` (computed above) for both ice clauses.
     tiny_mass = parameters.tiny_mass_evaporation_threshold
     subsaturated = -parameters.subsaturation_evaporation_threshold
     raw_cloud_growth = ifelse((𝒮ˡ < subsaturated) & (qᶜˡ < tiny_mass),
@@ -253,8 +253,8 @@ cloud/precipitation fraction framework is handled separately.
     # Match the cloud/rain branches above: do NOT clamp the prognostic
     # before the sign flip. When advection leaves qⁱ or qʷⁱ slightly negative,
     # the override should produce a positive deposition/coating-condensation
-    # rate so the downstream cap (lines 943 / 946) can pull mass back from
-    # vapor and restore the field. The qᵛ/τ caps still bound the magnitude.
+    # rate so the `deposition` and `coating_condensation` caps below can pull mass back
+    # from vapor and restore the field. The qᵛ/τ caps still bound the magnitude.
     raw_ice_growth = ifelse((𝒮ⁱ < subsaturated) & (qⁱ_total < tiny_mass) &
                             (Fˡ < parameters.liquid_fraction_clipping_threshold),
                             -qⁱ / τ, raw_ice_growth)
@@ -268,9 +268,9 @@ cloud/precipitation fraction framework is handled separately.
     rain_evaporation = min(max(0, -raw_rain_growth), max(0, qʳ) / τ)
 
     is_sublimation = raw_ice_growth < 0
-    calibration = ifelse(is_sublimation,
-                         p3.process_rates.calibration_factor_sublimation,
-                         p3.process_rates.calibration_factor_deposition)
+    ℂᵈⁱᶠᶠ₁ = p3.process_rates.calibration_factor_deposition
+    ℂᵈⁱᶠᶠ₂ = p3.process_rates.calibration_factor_sublimation
+    calibration = ifelse(is_sublimation, ℂᵈⁱᶠᶠ₂, ℂᵈⁱᶠᶠ₁)
     deposition_raw = raw_ice_growth * calibration
     # Sublimation is limited to the dry ice mass per unit time, `qⁱ / τ`.
     deposition = clamp(deposition_raw, -max(0, qⁱ) / τ, max(0, qᵛ) / τ)
