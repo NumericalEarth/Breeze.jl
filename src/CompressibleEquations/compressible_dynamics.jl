@@ -463,9 +463,12 @@ AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_st
 AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
 
 # Sedimentation drains the diagnosed total density but not the prognostic dry density (its
-# continuity has no sedimentation source), so every mass fraction renormalizes: the local mixture
-# takes up the mass the falling condensate leaves behind (see `sedimentation_replacement`).
-AtmosphereModels.sedimentation_replacement(::CompressibleDynamics, q) = q
+# continuity has no sedimentation source), so every mass fraction renormalizes: the composition
+# moves toward the falling phase along q̂ˣ − q (see `sedimentation_composition_increment`).
+@inline function AtmosphereModels.sedimentation_composition_increment(::CompressibleDynamics, q, phase)
+    q̂ = AtmosphereModels.unit_composition(phase, q)
+    return MoistureMassFractions(q̂.vapor - q.vapor, q̂.liquid - q.liquid, q̂.ice - q.ice)
+end
 
 # Isolated sedimentation holds gas partial densities fixed: dp/p = dT/T and
 # ρ cᵛᵐ dT/dt = Q_h - Σ hˣ rˣ. Thus dθ/dT = [1 - κ(1 - D/T)] / Π.

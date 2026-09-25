@@ -86,7 +86,7 @@ unit departing mass (to leading order ``-\mathscr{L}^x_r / (c^{pm} Π)``); trans
 Jacobian between pressure levels would instead conserve ``∫ρθ^{li}``, which precipitation does
 not. (On the compressible core the total density falls with the sedimenting condensate, so the
 local mixture rather than dry air takes up the departed mass and the content becomes the
-enthalpy of the condensate relative to that of the mixture; see `sedimentation_replacement`.)
+enthalpy of the condensate relative to that of the mixture; see `sedimentation_composition_increment`.)
 
 Thermodynamic closures needed for ``R^m``, ``c^{pm}`` and the Exner function ``Π = (pᵣ / p_0)^{R^m / c^{pm}}`` are given in [Thermodynamics](@ref Thermodynamics-section) section.
 

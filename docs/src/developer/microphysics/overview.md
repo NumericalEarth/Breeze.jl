@@ -185,14 +185,14 @@ locally: a flux out of a cell removes the cell's own ``χˣ``, the partial deriv
 specific variable with respect to that condensate mass fraction at fixed temperature, so the
 cell the condensate leaves keeps its temperature; a flux in delivers ``χˣ`` plus ``∂φ/∂h`` times
 the enthalpy the arriving mass brings in excess of the receiving cell's (the phase enthalpy
-``hˣ`` on the compressible core, ``hˣ - hᵈ`` under the fixed-density convention). What takes
-up the departed mass is the dynamics' call (`sedimentation_replacement`): dry air on the
-anelastic core, whose total density is fixed so that ``qᵈ`` absorbs the change; the local
-mixture on the compressible core, whose prognostic dry density has no sedimentation source, so
-that the diagnosed total density falls with the condensate and every mass fraction
-renormalizes. The content of `ρs` is ``(cˣ - cʳ) T - (ℒˣᵣ - ℒʳ)`` (``(cˣ - cᵖᵈ) T - ℒˣᵣ``
-against dry air, ``hˣ - (s - g z)`` against the mixture), the enthalpy of the condensate
-relative to its replacement; with ``∂s/∂h = 1`` the sum collapses to the negative divergence of
+``hˣ`` on the compressible core, ``hˣ - hᵈ`` under the fixed-density convention). The
+composition increment per unit falling mass is the dynamics' call
+(`sedimentation_composition_increment`): ``q̂ˣ - q̂ᵈ`` on the anelastic core, whose total density
+is fixed so that dry air makes up the departed mass; ``q̂ˣ - q`` on the compressible core, whose
+prognostic dry density has no sedimentation source, so that the diagnosed total density falls
+with the condensate and every mass fraction renormalizes. The content of `ρs` is the enthalpy
+change along that increment, ``Δcᵖ T - ΔΛ`` (``(cˣ - cᵖᵈ) T - ℒˣᵣ`` against dry air,
+``hˣ - (s - g z)`` against the mixture); with ``∂s/∂h = 1`` the sum collapses to the negative divergence of
 a face flux and ``∫ρs`` is conserved. For `ρθ` the content is ``∂θˡⁱ/∂qˣ`` along the same
 composition change (to leading order ``-ℒˣᵣ / (cᵖᵐ Π)``) with ``∂θˡⁱ/∂h = 1 / (cᵖᵐ Π)`` at
 prescribed pressure (the anelastic core) or the fixed-gas-density response ``β_cv`` on the

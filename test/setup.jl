@@ -44,14 +44,14 @@ end
 # Content per unit falling condensate of `phase` (`:liquid` or `:ice`) for the thermodynamic
 # variable of `formulation` (`:LiquidIcePotentialTemperature` or `:StaticEnergy`): the partial
 # derivative of the specific variable with respect to that condensate mass fraction at fixed
-# temperature `T` and pressure `p`, with `replacement` taking up the departed mass, so that
-# losing condensate at this content leaves the temperature unchanged: `:dry_air` on a core
-# whose total density is fixed (anelastic), so the dry mass fraction absorbs the change, or
-# `:mixture` on a core whose total density falls with the condensate (compressible), so every
-# mass fraction renormalizes. A Float64 central difference of Breeze's own state functions, independent of the
+# temperature `T` and pressure `p`, along the composition increment of the core, so that losing
+# condensate at this content leaves the temperature unchanged: with `renormalize=false` the
+# total density is fixed (anelastic) and the dry mass fraction makes up the departed mass; with
+# `renormalize=true` the total density falls with the condensate (compressible) and every mass
+# fraction renormalizes. A Float64 central difference of Breeze's own state functions, independent of the
 # closed forms the tendencies use. The geopotential does not depend on the composition, so the
 # height is immaterial and set to zero.
-function condensate_content(formulation, phase, T, q, p, pˢᵗ; replacement=:dry_air)
+function condensate_content(formulation, phase, T, q, p, pˢᵗ; renormalize=false)
     Thermodynamics = Breeze.Thermodynamics
     constants = Thermodynamics.ThermodynamicConstants(Float64)
     δ = 1e-6
@@ -59,7 +59,7 @@ function condensate_content(formulation, phase, T, q, p, pˢᵗ; replacement=:dr
     eˣ = phase === :liquid ? (0.0, 1.0, 0.0) : (0.0, 0.0, 1.0)
     function perturbed(ε)
         qε = q₀ .+ ε .* eˣ
-        replacement === :mixture && (qε = qε ./ (1 + ε))
+        renormalize && (qε = qε ./ (1 + ε))
         return Thermodynamics.MoistureMassFractions(qε...)
     end
     function φ(qε)

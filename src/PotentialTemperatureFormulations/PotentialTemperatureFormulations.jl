@@ -23,7 +23,8 @@ using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
     pressure_from_density_temperature,
     dynamics_prognostic_fields, grid_moisture_fractions, maybe_adjust_thermodynamic_state,
     div_ρUc, c_div_ρU, ∇_dot_Jᶜ, AtmosphereModelBuoyancy,
-    sedimentation_tendency, sedimentation_replacement,
+    sedimentation_tendency, sedimentation_composition_increment,
+    heat_capacity_increment, gas_constant_increment, latent_heat_increment, enthalpy_increment,
     radiation_flux_divergence, materialize_formulation,
     DefaultTemperatureSolver, default_temperature_solver
 using Breeze.Solvers: materialize_solver

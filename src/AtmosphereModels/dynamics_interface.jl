@@ -1,3 +1,5 @@
+using ..Thermodynamics: MoistureMassFractions, dry_air_gas_constant, vapor_gas_constant
+
 #####
 ##### Dynamics Interface
 #####
@@ -180,27 +182,46 @@ total_density(dynamics) = dynamics_density(dynamics)
 """
 $(TYPEDSIGNATURES)
 
-Return the composition, as `MoistureMassFractions`, of what takes up the mass that sedimentation
-removes from a cell whose moisture mass fractions are `q`. Continuity advances the coupling
-density ([`dynamics_density`](@ref)) without a sedimentation source on every core, so falling
-condensate changes the prognostic `ρᵈ φ` only through the specific variable `φ`, and how `φ`
-responds depends on what the departed mass gives way to:
+Return the change of the moisture mass fractions per unit mass of condensate `phase` that
+sediments out of a cell whose mass fractions are `q`, as a `MoistureMassFractions` difference
+vector (the dry-air change is implied by `Σq = 1`). Continuity advances the coupling density
+([`dynamics_density`](@ref)) without a sedimentation source on every core, so the increment
+depends on what the total density does:
 
-- a single, fixed density (the default; `AnelasticDynamics`): the total density the mass
-  fractions are referenced to does not respond, so the dry mass fraction `qᵈ = 1 − qᵛ − qˡ − qⁱ`
-  absorbs the change and dry air (zero moisture fractions) takes up the departed mass;
-- a diagnosed total density that follows the condensate (`CompressibleDynamics`: prognostic dry
-  density `ρᵈ`, `ρ = ρᵈ + Σρˣ`): every mass fraction renormalizes, so the local mixture `q`
-  itself takes up the departed mass.
+- fixed (the default; `AnelasticDynamics`): the total density the mass fractions are referenced
+  to does not respond, so the dry mass fraction `qᵈ = 1 − qᵛ − qˡ − qⁱ` makes up the departed mass
+  and the increment is `q̂ˣ − q̂ᵈ`, with `q̂ˣ` the composition with all mass in `x`;
+- diagnosed and falling with the condensate (`CompressibleDynamics`: prognostic dry density
+  `ρᵈ`, `ρ = ρᵈ + Σρˣ`): every mass fraction renormalizes and the increment is `q̂ˣ − q`.
 
-The thermodynamic formulations differentiate their variable along `q → q + ε (eˣ − r)`, with
-`r` this replacement, for the content per unit falling mass — at which the cell the condensate
-leaves keeps its temperature instantaneously. This composition derivative is distinct from
-the transported enthalpy: compressible sedimentation carries phase enthalpy, while the
-fixed-density convention transports enthalpy relative to dry air (see
-[`sedimentation_tendency`](@ref)).
+[`condensate_content`](@ref) differentiates the thermodynamic variable along this increment,
+`∂φ/∂qˣ = ∇_q φ · Δq`: the content per unit falling mass at which the cell the condensate leaves
+keeps its temperature.
 """
-@inline sedimentation_replacement(dynamics, q) = zero(typeof(q))
+@inline sedimentation_composition_increment(dynamics, q, phase) = unit_composition(phase, q)
+
+# The composition with all mass in one phase, q̂ˣ, typed like `q`
+@inline unit_composition(::Val{:liquid}, q) = MoistureMassFractions(zero(q.vapor), one(q.vapor), zero(q.vapor))
+@inline unit_composition(::Val{:ice}, q) = MoistureMassFractions(zero(q.vapor), zero(q.vapor), one(q.vapor))
+
+# Changes of the mixture properties along a composition increment Δq, whose dry-air entry is
+# Δqᵈ = −(Δqᵛ + Δqˡ + Δqⁱ)
+@inline dry_air_increment(Δq) = -(Δq.vapor + Δq.liquid + Δq.ice)
+
+@inline heat_capacity_increment(Δq, constants) =
+    dry_air_increment(Δq) * constants.dry_air.heat_capacity + Δq.vapor * constants.vapor.heat_capacity +
+    Δq.liquid * constants.liquid.heat_capacity + Δq.ice * constants.ice.heat_capacity
+
+@inline gas_constant_increment(Δq, constants) =
+    dry_air_increment(Δq) * dry_air_gas_constant(constants) + Δq.vapor * vapor_gas_constant(constants)
+
+@inline latent_heat_increment(Δq, constants) =
+    Δq.liquid * constants.liquid.reference_latent_heat + Δq.ice * constants.ice.reference_latent_heat
+
+# The enthalpy of the mixture per unit mass changes along Δq at fixed temperature by
+# Δcᵖ T − ΔΛ: the enthalpy of the condensate relative to what its mass gives way to
+@inline enthalpy_increment(Δq, constants, T) =
+    heat_capacity_increment(Δq, constants) * T - latent_heat_increment(Δq, constants)
 
 """
 $(TYPEDSIGNATURES)

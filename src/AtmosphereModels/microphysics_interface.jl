@@ -977,9 +977,10 @@ end
 #
 # The falling mass carries its enthalpy, and each cell converts what it gains or loses locally.
 # Each formulation supplies three things at a cell (`condensate_content`): per phase, the content
-# χˣ = ∂φ/∂qˣ|_T, with what the dynamics put in place of the departed mass taking it up
-# (`sedimentation_replacement`: dry air where the total density is fixed, the local mixture where
-# it falls with the condensate); per phase, the transported enthalpy (hˣ on the compressible
+# χˣ = ∂φ/∂qˣ|_T along the composition increment of the dynamics
+# (`sedimentation_composition_increment`: dry air makes up the departed mass where the total
+# density is fixed, every fraction renormalizes where it falls with the condensate); per phase,
+# the transported enthalpy (hˣ on the compressible
 # core, hˣ − hᵈ under the fixed-density convention); and ∂φ/∂h, the local thermal response.
 # A flux out of a cell removes χ per unit mass, so the cell the condensate leaves keeps its
 # temperature; a flux in delivers χ plus ∂φ/∂h (h_upwind − h), the sensible heat the mass brings.
@@ -1016,8 +1017,8 @@ $(TYPEDSIGNATURES)
 
 Return the condensate content of the thermodynamic variable of `formulation` at cell `(i, j, k)`,
 as `(; χ = (χˡ, χⁱ), h = (hˡ, hⁱ), ∂φ∂h)`: per phase the content `χˣ = ∂φ/∂qˣ` of the specific
-variable `φ` at fixed temperature, with what the dynamics put in place of the departed mass
-taking it up ([`sedimentation_replacement`](@ref)); per phase the enthalpy the falling mass
+variable `φ` at fixed temperature along the dynamics' composition increment
+([`sedimentation_composition_increment`](@ref)); per phase the enthalpy the falling mass
 carries (phase enthalpy `hˣ` on the compressible core, `hˣ − hᵈ` under the fixed-density
 convention); and `∂φ/∂h`, the local response of `φ` to heating: one for `s`, and for `θˡⁱ`
 `1 / (cᵖᵐ Π)` at prescribed pressure (the anelastic core) or the fixed-gas-density response

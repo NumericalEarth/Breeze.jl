@@ -89,21 +89,20 @@ end
 ##### Condensate content of ρs for its sedimentation tendency
 #####
 #
-# The content per unit falling mass of phase x is χˣ = ∂s/∂qˣ at fixed T along q → q + ε (eˣ − r),
-# where r is the composition that takes up the departed mass (`sedimentation_replacement`): dry
-# air on the anelastic core, whose total density is fixed, the local mixture on the compressible
-# core, whose total density falls with the condensate. Losing condensate at this content leaves
-# the temperature unchanged on either core. From s = cᵖᵐ T + g z − ℒˡᵣ qˡ − ℒⁱᵣ qⁱ,
+# The content per unit falling mass of phase x is χˣ = ∇_q s · Δqˣ at fixed T along the
+# composition increment Δqˣ of `sedimentation_composition_increment`: q̂ˣ − q̂ᵈ on the anelastic
+# core, whose total density is fixed, q̂ˣ − q on the compressible core, whose total density falls
+# with the condensate. Losing condensate at this content leaves the temperature unchanged on
+# either core. From s = cᵖᵐ T + g z − Λ, with Δcᵖ and ΔΛ the changes of cᵖᵐ and Λ along Δqˣ,
 #
-#   χˣ = (cˣ − cʳ) T − (ℒˣᵣ − ℒʳ) = hˣ − hʳ ,
+#   χˣ = Δcᵖ T − ΔΛ ,
 #
-# the enthalpy hˣ = cˣ T − ℒˣᵣ of the condensate relative to the enthalpy hʳ = cʳ T − ℒʳ of what
-# replaces it, with cʳ the replacement's heat capacity and ℒʳ = ℒˡᵣ rˡ + ℒⁱᵣ rⁱ its latent
-# deficit: cᵖᵈ and 0 for dry air, cᵖᵐ and ℒˡᵣ qˡ + ℒⁱᵣ qⁱ for the mixture, whose enthalpy is
-# s − g z. The geopotential is independent of the composition and drops out. The frictional
-# heating from the fall (g wˣ qˣ) is neglected. The content is the enthalpy the falling mass
-# carries and ∂s/∂h = 1, so the shared `sedimentation_tendency` reduces here to the flux form:
-# each flux carries the enthalpy of the cell it drains, and ∫ρs is conserved.
+# the enthalpy of the condensate relative to what its mass gives way to: hˣ − hᵈ against dry
+# air, hˣ − (s − g z) against the mixture. The geopotential is independent of the composition and
+# drops out. The frictional heating from the fall (g wˣ qˣ) is neglected. The content is the
+# enthalpy the falling mass carries and ∂s/∂h = 1, so the shared `sedimentation_tendency`
+# reduces here to the flux form: each flux carries the enthalpy of the cell it drains, and ∫ρs
+# is conserved.
 @inline function AtmosphereModels.condensate_content(i, j, k, grid, ::StaticEnergyFormulation, dynamics, constants,
                                                      microphysics, microphysical_fields, specific_prognostic_moisture,
                                                      temperature_field)
@@ -111,15 +110,8 @@ end
     @inbounds ρ = total_density(dynamics)[i, j, k]
     @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
-    r = sedimentation_replacement(dynamics, q)
-
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
-    cʳ = mixture_heat_capacity(r, constants)
-    ℒʳ = ℒˡᵣ * r.liquid + ℒⁱᵣ * r.ice
-
-    χˡ = (constants.liquid.heat_capacity - cʳ) * T - (ℒˡᵣ - ℒʳ)
-    χⁱ = (constants.ice.heat_capacity - cʳ) * T - (ℒⁱᵣ - ℒʳ)
+    χˡ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:liquid)), constants, T)
+    χⁱ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:ice)), constants, T)
     return (; χ = (χˡ, χⁱ), h = (χˡ, χⁱ), ∂φ∂h = one(T))
 end
 

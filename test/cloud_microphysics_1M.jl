@@ -1038,13 +1038,16 @@ end
     @test sum(interior(ρθ)) > Σρθ
 end
 
-# Dynamics whose total density falls with the sedimenting condensate, so that the local mixture
-# takes up the departed mass, wrapped around an anelastic model for the static-energy check below
-struct MixtureReplacementDynamics{D}
+# Dynamics whose total density falls with the sedimenting condensate, so that every mass fraction
+# renormalizes, wrapped around an anelastic model for the static-energy check below
+struct RenormalizingDynamics{D}
     dynamics :: D
 end
-Breeze.AtmosphereModels.total_density(d::MixtureReplacementDynamics) = total_density(d.dynamics)
-Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, q) = q
+Breeze.AtmosphereModels.total_density(d::RenormalizingDynamics) = total_density(d.dynamics)
+function Breeze.AtmosphereModels.sedimentation_composition_increment(::RenormalizingDynamics, q, phase)
+    q̂ = Breeze.AtmosphereModels.unit_composition(phase, q)
+    return MoistureMassFractions(q̂.vapor - q.vapor, q̂.liquid - q.liquid, q̂.ice - q.ice)
+end
 
 @testset "Compressible sedimentation lets the mixture take up the departed mass [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -1058,8 +1061,8 @@ Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, 
 
     # On the compressible core the prognostic dry density has no sedimentation source, so rain
     # leaving a cell lowers its total density and every mass fraction renormalizes: the content
-    # is the derivative along q → q + ε (eˣ − q), the mixture rather than dry air taking up the
-    # departed mass, and the divergence of the total-density-weighted content flux converts to
+    # is the derivative along q̂ˣ − q, every mass fraction renormalizing rather than dry air
+    # making up the departed mass, and the divergence of the total-density-weighted content flux converts to
     # the prognostic ρᵈ φ through the cell's qᵈ = ρᵈ / ρ. Moist enough (unsaturated throughout)
     # that the dry-air derivative the anelastic core uses fails the check the kernel meets.
     # Only the θ formulation runs on the compressible core so far.
@@ -1097,30 +1100,30 @@ Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, 
     # the cell's content plus its heating response times the enthalpy brought in excess of the
     # cell's own, through its lower face it delivers the content alone, and the cell's qᵈ converts
     # the change of θ into that of ρᵈ θ. The transported enthalpy belongs to the phase;
-    # only the local composition derivative uses mixture replacement.
-    content(; replacement) = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ; replacement) for k in 1:Nz]
+    # only the local composition derivative renormalizes.
+    content(; renormalize) = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ; renormalize) for k in 1:Nz]
     enthalpy = [constants.liquid.heat_capacity * T[k] - constants.liquid.reference_latent_heat for k in 1:Nz]
     β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], p[k], pˢᵗ; fixed_volume=true) for k in 1:Nz]
-    expected(replacement) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; replacement), enthalpy, β;
+    expected(renormalize) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; renormalize), enthalpy, β;
                                                             coupling = qᵈ)
 
     scale = maximum(abs.(G))
     tolerance = scale * sqrt(eps(FT))
     @test scale > 0
-    @test all(abs.(G .- expected(:mixture)) .<= tolerance)
-    @test any(abs.(G .- expected(:dry_air)) .> tolerance)
+    @test all(abs.(G .- expected(true)) .<= tolerance)
+    @test any(abs.(G .- expected(false)) .> tolerance)
     @test G[3] < 0 # rain arriving below the blob pre-cools
     @test G[5] > 0 # rain leaving the blob top leaves latent warming behind
 
     # The static-energy content along the same composition change, hˣ − h_mixture, checked
-    # against the central difference through dynamics that declare the mixture replacement
+    # against the central difference through dynamics whose mass fractions renormalize
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     energy_model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
                                    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation),
                                    formulation = :StaticEnergy)
     set!(energy_model; θ=300, qᵗ=0.012, qʳ=rain_blob)
     update_state!(energy_model)
-    mixture_dynamics = MixtureReplacementDynamics(energy_model.dynamics)
+    mixture_dynamics = RenormalizingDynamics(energy_model.dynamics)
     μₛ = energy_model.microphysical_fields
     qᵛₛ = column(μₛ.qᵛ)
     qˡₛ = column(μₛ.qˡ)
@@ -1131,7 +1134,7 @@ Breeze.AtmosphereModels.sedimentation_replacement(::MixtureReplacementDynamics, 
             1, 1, k, grid, energy_model.formulation, mixture_dynamics, constants, energy_model.microphysics, μₛ,
             specific_prognostic_moisture(energy_model), energy_model.temperature)
         qₖ = MoistureMassFractions(qᵛₛ[k], qˡₛ[k], zero(FT))
-        χ_expected = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ; replacement=:mixture)
+        χ_expected = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ; renormalize=true)
         χ_dry = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ)
         @test isapprox(c.χ[1], χ_expected; rtol=sqrt(eps(FT)))
         @test !isapprox(c.χ[1], χ_dry; rtol=sqrt(eps(FT)))

@@ -125,29 +125,26 @@ end
 ##### Condensate content of ρθ for its sedimentation tendency
 #####
 #
-# The content per unit falling mass of phase x is χˣ = ∂θˡⁱ/∂qˣ at fixed T and p along
-# q → q + ε (eˣ − r), where r is the composition that takes up the departed mass
-# (`sedimentation_replacement`): dry air on the anelastic core, whose total density is fixed,
-# the local mixture on the compressible core, whose total density falls with the condensate
-# while the pressure p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T does not. Losing condensate at this content leaves
-# the temperature unchanged on either core. From T = Π θ + (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ with
-# Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ),
+# The content per unit falling mass of phase x is the derivative χˣ = ∇_q θˡⁱ · Δqˣ at fixed T
+# and p along the composition increment Δqˣ of `sedimentation_composition_increment`: q̂ˣ − q̂ᵈ on
+# the anelastic core, whose total density is fixed, q̂ˣ − q on the compressible core, whose total
+# density falls with the condensate while the pressure p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T does not. Losing
+# condensate at this content leaves the temperature unchanged on either core. With
+# T = Π θ + Λ / cᵖᵐ, Λ = ℒˡᵣ qˡ + ℒⁱᵣ qⁱ, Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ), and Δcᵖ, ΔR, ΔΛ the changes of
+# cᵖᵐ, Rᵐ and Λ along Δqˣ,
 #
-#   χˣ = −(ℒˣᵣ − ℒʳ − Δcˣ D) / (cᵖᵐ Π) + θ lnΠ (Rʳ / Rᵐ + Δcˣ / cᵖᵐ) ,
+#   χˣ = −(ΔΛ − D Δcᵖ) / (cᵖᵐ Π) + θ lnΠ (Δcᵖ / cᵖᵐ − ΔR / Rᵐ) ,
 #
-# with D = T − Π θ the latent deficit, Δcˣ = cˣ − cʳ, and cʳ, Rʳ, ℒʳ = ℒˡᵣ rˡ + ℒⁱᵣ rⁱ the heat
-# capacity, gas constant and latent deficit of the replacement (cᵖᵈ, Rᵈ, 0 for dry air; cᵖᵐ, Rᵐ,
-# cᵖᵐ D for the mixture). The first term is the deficit the falling condensate carries,
-# −ℒˣᵣ / (cᵖᵐ Π) to leading order; the rest accounts for the heat capacity and gas constant of
-# the mixture changing as condensate gives way to its replacement (lnΠ = (Rᵐ / cᵖᵐ) ln(p / pˢᵗ)
-# is written through Π so that every state type that defines an Exner function serves).
+# with D = Λ / cᵖᵐ = T − Π θ the latent deficit. The first term is the deficit the falling
+# condensate carries, −ℒˣᵣ / (cᵖᵐ Π) to leading order; the second accounts for the heat capacity
+# and gas constant of the mixture changing with the composition (lnΠ = (Rᵐ / cᵖᵐ) ln(p / pˢᵗ) is
+# written through Π so that every state type that defines an Exner function serves).
 #
-# The transported enthalpy and thermal response depend on the dynamics. Compressible
-# sedimentation carries phase enthalpy and heats at fixed gas partial densities; the anelastic
-# core retains its dry-air replacement convention at fixed pressure. χ remains a local
-# composition derivative, not a transported quantity. These are instantaneous responses;
-# multiplying them by a finite mass increment does not exactly reconstruct thermal energy.
-# The temperature is rediagnosed from the state, T = Π θ + D, so the temperature field is unused.
+# The transported enthalpy and thermal response depend on the dynamics
+# (`sedimentation_thermal_response`). χ remains a local composition derivative, not a
+# transported quantity. These are instantaneous responses; multiplying them by a finite mass
+# increment does not exactly reconstruct thermal energy. The temperature is rediagnosed from the
+# state, T = Π θ + D, so the temperature field is unused.
 @inline function AtmosphereModels.condensate_content(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
                                                      dynamics, constants, microphysics, microphysical_fields,
                                                      specific_prognostic_moisture, temperature_field)
@@ -158,47 +155,44 @@ end
     Π = exner_function(𝒰, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
-
-    # What takes up the departed mass, and its heat capacity, gas constant and latent deficit
-    r = sedimentation_replacement(dynamics, q)
-    cʳ = mixture_heat_capacity(r, constants)
-    Rʳ = mixture_gas_constant(r, constants)
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
-    ℒʳ = ℒˡᵣ * r.liquid + ℒⁱᵣ * r.ice
-
-    Δcˡ = constants.liquid.heat_capacity - cʳ
-    Δcⁱ = constants.ice.heat_capacity - cʳ
-    D = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
+    D = (constants.liquid.reference_latent_heat * q.liquid + constants.ice.reference_latent_heat * q.ice) / cᵖᵐ
     θlnΠ = θ * log(Π)
 
-    χˡ = -(ℒˡᵣ - ℒʳ - Δcˡ * D) / (cᵖᵐ * Π) + θlnΠ * (Rʳ / Rᵐ + Δcˡ / cᵖᵐ)
-    χⁱ = -(ℒⁱᵣ - ℒʳ - Δcⁱ * D) / (cᵖᵐ * Π) + θlnΠ * (Rʳ / Rᵐ + Δcⁱ / cᵖᵐ)
+    Δqˡ = sedimentation_composition_increment(dynamics, q, Val(:liquid))
+    Δqⁱ = sedimentation_composition_increment(dynamics, q, Val(:ice))
+    χˡ = potential_temperature_content(Δqˡ, constants, cᵖᵐ, Rᵐ, D, Π, θlnΠ)
+    χⁱ = potential_temperature_content(Δqⁱ, constants, cᵖᵐ, Rᵐ, D, Π, θlnΠ)
 
     T = Π * θ + D
     h, ∂θ∂h = sedimentation_thermal_response(dynamics, q, constants, T, Π)
     return (; χ = (χˡ, χⁱ), h, ∂φ∂h = ∂θ∂h)
 end
 
+# The derivative of θˡⁱ above along one composition increment
+@inline function potential_temperature_content(Δq, constants, cᵖᵐ, Rᵐ, D, Π, θlnΠ)
+    Δcᵖ = heat_capacity_increment(Δq, constants)
+    ΔR = gas_constant_increment(Δq, constants)
+    ΔΛ = latent_heat_increment(Δq, constants)
+    return -(ΔΛ - D * Δcᵖ) / (cᵖᵐ * Π) + θlnΠ * (Δcᵖ / cᵖᵐ - ΔR / Rᵐ)
+end
+
 """
 $(TYPEDSIGNATURES)
 
 Return the transported liquid/ice enthalpies and local potential-temperature heating response.
-Fixed-density dynamics retain the dry-air replacement convention at prescribed pressure:
-transport `hˣ - hᵈ` and use `1 / (cᵖᵐ Π)`. `CompressibleDynamics` transports phase enthalpy `hˣ`
-and uses `β_cv` for isolated sedimentation at fixed volume and gas partial densities, without
-phase change or resolved motion. These instantaneous responses do not reconstruct finite-step energy.
+With a fixed total density (the default) the departed condensate mass is made up by dry air at
+prescribed pressure: transport `hˣ − hᵈ`, the enthalpy change along the composition increment,
+and respond with `1 / (cᵖᵐ Π)`. `CompressibleDynamics` transports phase enthalpy `hˣ` and uses
+`β_cv` for isolated sedimentation at fixed volume and gas partial densities, without phase
+change or resolved motion. These instantaneous responses do not reconstruct finite-step energy.
 
 This callback serves the liquid-ice potential-temperature formulation. The compressible
 `temperature_and_pressure` diagnosis supports that formulation, not `StaticEnergyFormulation`;
 this sedimentation correction does not add a compressible static-energy diagnosis.
 """
 @inline function sedimentation_thermal_response(dynamics, q, constants, T, Π)
-    r = sedimentation_replacement(dynamics, q)
-    cʳ = mixture_heat_capacity(r, constants)
-    ℒʳ = constants.liquid.reference_latent_heat * r.liquid + constants.ice.reference_latent_heat * r.ice
-    hˡ = (constants.liquid.heat_capacity - cʳ) * T - (constants.liquid.reference_latent_heat - ℒʳ)
-    hⁱ = (constants.ice.heat_capacity - cʳ) * T - (constants.ice.reference_latent_heat - ℒʳ)
+    hˡ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:liquid)), constants, T)
+    hⁱ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:ice)), constants, T)
     return (hˡ, hⁱ), 1 / (mixture_heat_capacity(q, constants) * Π)
 end
 
