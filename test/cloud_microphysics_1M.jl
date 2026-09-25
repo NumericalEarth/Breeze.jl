@@ -344,7 +344,7 @@ end
     ρ = @allowscalar total_density(model.dynamics)[1, 1, 1]
     accretion_params = parameters.process_params.cloud_liquid_rain_accretion
     expected_production =
-        conv_q_lcl_to_q_rai(parameters.processes.rain_autoconversion, parameters, nothing, (; q_lcl = qᶜˡ), nothing) +
+        conv_q_lcl_to_q_rai(parameters.processes.rain_autoconversion, parameters, nothing, (; q_lcl = qᶜˡ), (; w = zero(qᶜˡ))) +
         accretion(parameters.cloud.liquid, parameters.precip.rain, parameters.terminal_velocity.rain,
                   accretion_params.e, qᶜˡ, qʳ, ρ)
     @test @allowscalar production[1, 1, 1] ≈ expected_production
