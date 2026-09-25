@@ -605,7 +605,7 @@ $(TYPEDSIGNATURES)
 Return ``∂T/∂rˡ``, the temperature change per unit of vapor mixing ratio converted to liquid at
 fixed total moisture, holding the prognostic invariant of the thermodynamic state `𝒰` fixed.
 
-For a [`LiquidIcePotentialTemperatureState`](@ref Breeze.Thermodynamics.LiquidIcePotentialTemperatureState),
+For a `LiquidIcePotentialTemperatureState`,
 ``T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ`` with ``Π = (p / pˢᵗ)^{Rᵐ / cᵖᵐ}``, so at fixed ``θˡⁱ``, ``p`` and ``qᵗ``
 (``δqᵛ = -δqˡ``),
 
@@ -617,7 +617,7 @@ For a [`LiquidIcePotentialTemperatureState`](@ref Breeze.Thermodynamics.LiquidIc
 
 and ``∂T/∂rˡ = (1 - qᵗ) ∂T/∂qˡ``. The leading term is ``ℒˡᵣ / cᵖᵐ``; the DCMIP2016 Fortran uses
 ``ℒˡᵣ / cᵖᵈ``, which differs by the moist heat capacity and neglects the composition dependence of
-the Exner function. For a [`StaticEnergyState`](@ref Breeze.Thermodynamics.StaticEnergyState),
+the Exner function. For a `StaticEnergyState`,
 ``T = (s - g z + ℒˡᵣ qˡ) / cᵖᵐ`` gives ``∂T/∂qˡ = (ℒˡᵣ - T (cˡ - cᵖᵛ)) / cᵖᵐ``.
 """
 @inline function phase_change_temperature_slope(𝒰::LiquidIcePotentialTemperatureState, constants)
