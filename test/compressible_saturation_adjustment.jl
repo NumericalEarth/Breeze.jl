@@ -154,6 +154,8 @@ end
         @test qᵛ[I] ≈ saturation_specific_humidity(T[I], ρ[I], constants, eq)  atol = 1e-4
     end
 
+    test_kernel_functions_inferred(model)
+
     time_step!(model, 1e-3)
     @test all(isfinite, interior(model.temperature))
 end

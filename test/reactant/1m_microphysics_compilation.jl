@@ -94,7 +94,7 @@ end
             dθ_init = CenterField(grid); set!(dθ_init, 0)
             dmodel  = Enzyme.make_zero(model)
 
-            compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+            compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_loss(
                 model, dmodel, θ_init, dθ_init, Δt, Ns)
             dθ, loss_val = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
             ad_grad = @allowscalar Array(interior(dθ))

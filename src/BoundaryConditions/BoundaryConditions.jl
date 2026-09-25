@@ -25,16 +25,22 @@ export BulkDragFunction,
        default_neutral_sensible_heat_polynomial,
        default_neutral_latent_heat_polynomial
 
-using Breeze.AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density, total_density,
-                               dynamics_thermodynamic_fields, standard_pressure,
-                               default_drag_surface_temperature, thermodynamic_density_name,
-                               total_energy_density_name, moisture_prognostic_name, moisture_specific_name,
-                               total_moisture_density_name
-using Breeze.AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
-                                           virtual_potential_temperature
-using Breeze.Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
-                             mixture_heat_capacity, MoistureMassFractions, surface_pressure_from_cell_center,
-                             potential_temperature_from_temperature, StaticEnergyState, with_temperature
+using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density, total_density,
+                          dynamics_thermodynamic_fields,
+                          standard_pressure, default_drag_surface_temperature,
+                          moisture_specific_name, thermodynamic_density_name,
+                          total_energy_density_name, moisture_prognostic_name,
+                          total_moisture_density_name
+using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
+                                      virtual_potential_temperature
+using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
+                        mixture_heat_capacity, MoistureMassFractions,
+                        LiquidIcePotentialTemperatureState, StaticEnergyState,
+                        potential_temperature_from_temperature, surface_pressure_from_cell_center,
+                        with_temperature
+
+# Extended below with a grid-point method: `exner_function(i, j, k, grid, ef, q, dynamics_fields)`.
+import ..Thermodynamics: exner_function
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: Architectures
@@ -261,7 +267,7 @@ function convert_moisture_bcs(bcs, microphysics)
     return merge(bcs, NamedTuple{(ρq_name,)}((ρq_bcs,)))
 end
 
-# ρθ: an energy flux 𝒬 enters as the potential temperature flux Jᶿ = 𝒬 / cᵖᵐ, applied by
+# ρθ: an energy flux 𝒬ᵀ enters as the potential temperature flux Jᶿ = 𝒬ᵀ / (cᵖᵐ Π), applied by
 # `EnergyFluxBoundaryCondition`.
 energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρθ}) = energy_to_theta_bcs(ρE_bcs)
 

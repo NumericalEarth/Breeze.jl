@@ -14,7 +14,7 @@
 #####       𝕎_num = ∫ 𝕎(D) exp(-λ_r D) dD / ∫ exp(-λ_r D) dD              [m/s]
 #####
 #####  3. Evaporation velocity-diameter integral:
-#####       I_𝕎D = ∫ D √(𝕎(D)×D) exp(-λ_r D) dD                           [m^(5/2)]
+#####       I_𝕎D = ∫ D √(𝕎(D)×D) exp(-λ_r D) dD                      [m³ s^(-1/2)]
 #####       where 𝕎(D) is the piecewise Gunn-Kinzer/Beard fall speed.
 #####       ν is NOT baked in; 1/√ν is applied at runtime.
 #####       Full evaporation integral assembled at runtime:
@@ -319,7 +319,7 @@ end
 Evaluate ``I_{\\mathbb{W}D}(λ_r) = ∫ D √{\\mathbb{W}(D)D} \\exp(-λ_r D) \\, \\mathrm{d}D``
 at the given `log10(λ_r)`.
 
-Returns the velocity-diameter integral in [m^(5/2)]. The `1/√ν`, constant
+Returns the velocity-diameter integral in [m³ s^(-1/2)]. The `1/√ν`, constant
 (``\\mathbb{C}_{\\mathrm{vent},1}``),
 and Schmidt number (Sc^(1/3)) contributions are applied at runtime.
 """

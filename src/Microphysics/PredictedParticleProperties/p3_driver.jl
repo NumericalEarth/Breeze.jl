@@ -80,8 +80,10 @@ end
 ##### (ρqᵛ, ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ, and the optional ρnᶜˡ/ρnᵃ/ρsᵛ⁺ˡ).
 ##### They are computed *jointly*: the coupled donor-budget limiters see every species at
 ##### once, so one kernel evaluates all of them per cell and adds each straight into `Gⁿ`.
-##### The evaluation is fully inlined; `compute_p3_process_rates` brackets Table 1 once per
-##### cell (`P3IceLookups`) and every ice integral is read at that bracket.
+##### The evaluation is fully inlined. Table 1 is bracketed twice per cell: once at the
+##### diagnostic ice population (`p3_ice_moments`) and once at the bounded population
+##### (`P3IceLookups`, inside `compute_p3_process_rates`). Each ice integral is read at
+##### whichever bracket matches the population it belongs to.
 #####
 
 @kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
@@ -108,7 +110,7 @@ end
     result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
                                  surface_temperature, temperature_tendency,
                                  vapor_tendency)
-    add_p3_tendencies!(G, i, j, k, p3, result)
+    add_p3_tendencies!(G, i, j, k, grid, p3, result)
 end
 
 #####
@@ -130,7 +132,8 @@ end
           p3_supersaturation_tendency_fields(G, p3.process_rates))
 
 @inline p3_aerosol_tendency_fields(G, ::Nothing) = (;)
-@inline p3_aerosol_tendency_fields(G, _) = (; G.ρnᶜˡ, G.ρnᵃ)
+@inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, false}) = (; G.ρnᶜˡ)
+@inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, true}) = (; G.ρnᶜˡ, G.ρnᵃ)
 
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, false}) where FT = (;)
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, true}) where FT = (; G.ρsᵛ⁺ˡ)

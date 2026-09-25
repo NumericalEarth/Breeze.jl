@@ -103,7 +103,7 @@ end
     # Use the dry-ice PSD ventilation tables (small + large) for melting. The total
     # Ventilation/VentilationEnhanced tables use the wet-ice PSD and are not
     # appropriate for melting (they are not flagged as melting integrals during
-    # table generation, so they don't use the dry-ice PSD from the M5 fix).
+    # table generation, so they are not evaluated over the dry-ice PSD).
     # All 4 tables share Table-1 axes, so they are read at the one bracket `prep`.
     dep = p3.ice.deposition
     sc_corr = ventilation_sc_correction(ν, Dᵛ, ρ_correction, parameters.floors)
@@ -148,7 +148,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute partitioned ice melting rates using PSD-resolved partitioning (H9).
+Compute partitioned ice melting rates using PSD-resolved partitioning.
 
 Above freezing, ice particles melt. The meltwater is partitioned using
 tabulated small/large ice ventilation integrals:
@@ -237,7 +237,7 @@ Number of melted particles equals number of rain drops produced.
     nⁱ_eff = max(0, nⁱ)
 
     # |∂nⁱ/∂t| = (nⁱ/qⁱ) × ∂qⁱ_melt/∂t (positive magnitude)
-    # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
+    # Sign convention: returns positive; caller subtracts in tendency assembly.
     ratio = safe_divide(nⁱ_eff, qⁱ_eff, zero(FT))
 
     return ratio * qⁱ_melt_rate
