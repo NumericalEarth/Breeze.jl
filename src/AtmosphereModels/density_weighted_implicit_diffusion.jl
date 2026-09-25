@@ -97,26 +97,21 @@ BoundaryConditions.needs_implicit_solver(a::DensityWeightedImplicitOperator) =
 @inline density_weighted_advection_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ℓz, ρ) =
     implicit_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
 
-# Oceananigans assumes impermeable boundaries and masks peripheral faces out of the AIVA diagonal.
-# A sedimenting tracer (its velocity arrives wrapped in `OutflowEnabledVelocity`, see
-# `implicit_advection_velocities`) instead leaves through the open bottom, so its diagonal is the
-# upstream one with the `active⁺`/`active⁻` peripheral factors dropped; keeping the outflow term
-# makes the implicit first-order flux conservative and positivity-preserving. The off-diagonals
-# need no change, since they couple interior faces only. Defining this on the Breeze-owned seam
-# rather than on `implicit_advection_diagonal` keeps it on the solve path whatever upstream's
-# signature.
+# Oceananigans masks peripheral faces out of the AIVA diagonal, assuming impermeable boundaries.
+# A sedimenting tracer (velocity wrapped in `OutflowEnabledVelocity` by
+# `implicit_advection_velocities`) leaves through the open bottom instead, so its diagonal is the
+# upstream one without the peripheral masks: keeping the outflow term makes the implicit
+# first-order flux conservative and positivity-preserving. The off-diagonals couple interior
+# faces only and need no change.
 #
-# `peripheral_node` is also true at immersed faces, and the masks are dropped there too. That is
-# currently harmless — sedimentation velocities are negative, so the `max(wⁱ⁺, 0)` inflow term
-# vanishes at an immersed upper face, and the domain top holds `w = 0` — and at an immersed
-# bottom it is the intended behavior, since precipitation should leave the lowest fluid cell onto
-# the terrain. It is not covered by a test.
+# The masks are dropped at immersed faces too. Harmless at an immersed upper face, where the
+# inflow term `max(wⁱ⁺, 0)` vanishes for a negative sedimentation velocity, and intended at an
+# immersed bottom, where precipitation leaves the lowest fluid cell onto the terrain. Untested.
 #
-# TODO: upstream this to Oceananigans rather than copying the coefficient. The seam is a one-line
-# predicate on the velocity, say `active_implicit_face(w, i, j, k, grid, ℓx, ℓy)`, defaulting to
-# `!peripheral_node(...)` and returning `true` for a velocity that permits outflow. Until that
-# exists this body duplicates `Oceananigans.Advection.implicit_advection_diagonal` and must track
-# changes to it (the `ρᶠ/ρᶜ` weighting in particular).
+# TODO: upstream as a predicate `active_implicit_face(i, j, k, grid, w, ℓx, ℓy)`, defaulting to
+# `!peripheral_node(...)` and `true` for a velocity that permits outflow. Until then this body
+# duplicates `Oceananigans.Advection.implicit_advection_diagonal` and must track it (the `ρᶠ/ρᶜ`
+# weighting in particular).
 @inline function density_weighted_advection_diagonal(i, j, k, grid, advection::AIVA, w::OutflowEnabledVelocity, Δt, ℓx, ℓy, ℓz::Center, ρ)
     scheme = vertical_scheme(advection)
     td = time_discretization(scheme)
