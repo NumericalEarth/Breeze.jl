@@ -1,4 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
+include(joinpath(@__DIR__, "supposition_setup.jl"))
 
 using Breeze
 using GPUArraysCore: @allowscalar
@@ -14,6 +15,8 @@ using Breeze.Thermodynamics:
     with_moisture,
     saturation_specific_humidity,
     mixture_heat_capacity,
+    total_specific_moisture,
+    PlanarLiquidSurface,
     PlanarMixedPhaseSurface
 
 using Breeze.MoistAirBuoyancies: compute_boussinesq_adjustment_temperature
@@ -25,8 +28,96 @@ solver_tol(::Type{Float64}) = 1e-6
 solver_tol(::Type{Float32}) = 1e-3
 test_tol(FT::Type{Float64}) = 10 * sqrt(solver_tol(FT))
 test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
+# test_tol is in kelvin; the equivalent relative tolerance for temperatures of O(300 K)
+relative_test_tol(FT) = test_tol(FT) / 300
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
+
+@testset "Saturation adjustment recovers the temperature [$(FT)]" for FT in all_float_types()
+    constants = ThermodynamicConstants(FT)
+    microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=solver_tol(FT)), equilibrium=WarmPhaseEquilibrium())
+    rtol = relative_test_tol(FT)
+    g = constants.gravitational_acceleration
+    z = zero(FT)
+
+    # A state assembled from (T, qᵛ⁺(T, p, qᵗ), qᵗ − qᵛ⁺) is already in equilibrium, so the
+    # adjustment must return T within the solver tolerance; subsaturated draws (qᵗ ≤ qᵛ⁺)
+    # exercise the identity branch.
+    @breeze_check function saturation_adjustment_recovers_temperature(T = spstn_temperatures(FT; lo=270, hi=320),
+                                                                      p = spstn_pressures(FT; lo=7e4, hi=1.05e5),
+                                                                      qᵗ = spstn_floats(FT; lo=1e-3, hi=5e-2))
+        qᵛ⁺ = adjustment_saturation_specific_humidity(T, p, qᵗ, constants, microphysics.equilibrium)
+        saturated = qᵗ > qᵛ⁺
+        event!("saturated", saturated)
+        q = saturated ? MoistureMassFractions(qᵛ⁺, qᵗ - qᵛ⁺) : MoistureMassFractions(qᵗ)
+        cᵖᵐ = mixture_heat_capacity(q, constants)
+        s = cᵖᵐ * T + g * z - constants.liquid.reference_latent_heat * q.liquid
+        T★ = compute_temperature(StaticEnergyState(s, q, z, p), microphysics, constants)
+        return qᵛ⁺ isa FT && isapprox(T★, T; rtol)
+    end
+end
+
+# Liquid fraction of the condensate implied by an equilibrated surface
+equilibrium_liquid_fraction(surface::PlanarMixedPhaseSurface) = surface.liquid_fraction
+equilibrium_liquid_fraction(::PlanarLiquidSurface) = 1
+
+@testset "Saturation adjustment invariants [$(FT)]" for FT in all_float_types()
+    constants = ThermodynamicConstants(FT)
+    g = constants.gravitational_acceleration
+    tol = test_tol(FT)
+    equilibria = (("warm", WarmPhaseEquilibrium()),
+                  ("mixed", MixedPhaseEquilibrium(FT; freezing_temperature=273.15, homogeneous_ice_nucleation_temperature=233.15)))
+
+    @testset "$name phase" for (name, equilibrium) in equilibria
+        microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=solver_tol(FT)), equilibrium)
+
+        # Starting from an all-vapor state with total moisture qᵗ, the adjustment must conserve
+        # total water and the prognostic thermodynamic variable, keep every fraction
+        # non-negative, leave unsaturated states all-vapor, put saturated states on the
+        # saturation curve with the equilibrium liquid/ice partition, and be idempotent.
+        function adjustment_invariants_hold(𝒰₀, qᵗ, thermodynamic_variable)
+            𝒰★ = adjust_thermodynamic_state(𝒰₀, microphysics, constants)
+            q = 𝒰★.moisture_mass_fractions
+            qᶜ = q.liquid + q.ice
+            T★ = compute_temperature(𝒰★, nothing, constants)
+            qᵛ⁺ = saturation_specific_humidity(𝒰★, constants, equilibrium)
+            event!("condensing", qᶜ > 0)
+
+            conserved = isapprox(total_specific_moisture(q), qᵗ; rtol = spstn_rounding_rtol(FT)) &&
+                        thermodynamic_variable(𝒰★) == thermodynamic_variable(𝒰₀)
+            nonnegative = q.vapor >= 0 && q.liquid >= 0 && q.ice >= 0
+            equilibrated = qᶜ == 0 ? qᵗ <= qᵛ⁺ * (1 + tol) : isapprox(q.vapor, qᵛ⁺; rtol = FT(0.1) * tol)
+            λ = equilibrium_liquid_fraction(Breeze.Microphysics.equilibrated_surface(equilibrium, T★))
+            partitioned = abs(q.liquid - λ * qᶜ) <= tol * qᶜ
+            q★★ = adjust_thermodynamic_state(𝒰★, microphysics, constants).moisture_mass_fractions
+            idempotent = isapprox(q★★.vapor, q.vapor; rtol = FT(0.1) * tol)
+            return conserved && nonnegative && equilibrated && partitioned && idempotent
+        end
+
+        # Total moisture is drawn relative to saturation, from dry air to threefold supersaturation.
+        @breeze_check function static_energy_adjustment_invariants(T = spstn_temperatures(FT; lo=230, hi=320),
+                                                                   p = spstn_pressures(FT; lo=5e4, hi=1.05e5),
+                                                                   z = spstn_heights(FT; lo=0, hi=5e3),
+                                                                   f = spstn_floats(FT; lo=0, hi=3))
+            qᵛ⁺₀ = equilibrium_saturation_specific_humidity(T, p, zero(FT), constants, equilibrium)
+            qᵗ = min(f * qᵛ⁺₀, FT(0.05))
+            q₀ = MoistureMassFractions(qᵗ)
+            𝒰₀ = StaticEnergyState(mixture_heat_capacity(q₀, constants) * T + g * z, q₀, z, p)
+            return adjustment_invariants_hold(𝒰₀, qᵗ, 𝒰 -> 𝒰.static_energy)
+        end
+
+        @breeze_check function potential_temperature_adjustment_invariants(θ = spstn_temperatures(FT; lo=230, hi=330),
+                                                                           p = spstn_pressures(FT; lo=5e4, hi=1.05e5),
+                                                                           f = spstn_floats(FT; lo=0, hi=3))
+            𝒰_dry = LiquidIcePotentialTemperatureState(θ, MoistureMassFractions(zero(FT)), FT(1e5), p)
+            T = compute_temperature(𝒰_dry, nothing, constants)
+            qᵛ⁺₀ = equilibrium_saturation_specific_humidity(T, p, zero(FT), constants, equilibrium)
+            qᵗ = min(f * qᵛ⁺₀, FT(0.05))
+            𝒰₀ = with_moisture(𝒰_dry, MoistureMassFractions(qᵗ))
+            return adjustment_invariants_hold(𝒰₀, qᵗ, 𝒰 -> 𝒰.potential_temperature)
+        end
+    end
+end
 
 @testset "Warm-phase saturation adjustment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -65,13 +156,13 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation, microphysics)
         ρᵣ = @allowscalar first(reference_state.density)
 
-        # Reduced parameter sweep: 3×3 = 9 per formulation (was 5×7 = 35)
+        # The scalar adjustment is covered by the property test above; here the model path is
+        # exercised on a small (T, qᵗ) sweep.
         for T₂ in 280:20:320, qᵗ₂ in 1e-2:2e-2:5e-2
             @testset let T₂=T₂, qᵗ₂=qᵗ₂
                 T₂ = convert(FT, T₂)
                 qᵗ₂ = convert(FT, qᵗ₂)
                 qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, constants, microphysics.equilibrium)
-                @test qᵛ⁺₂ isa FT
 
                 if qᵗ₂ > qᵛ⁺₂ # saturated conditions
                     qˡ₂ = qᵗ₂ - qᵛ⁺₂
@@ -79,10 +170,6 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
                     cᵖᵐ = mixture_heat_capacity(q₂, constants)
                     ℒˡᵣ = constants.liquid.reference_latent_heat
                     s₂ = cᵖᵐ * T₂ + g * z - ℒˡᵣ * qˡ₂
-
-                    𝒰₂ = StaticEnergyState(s₂, q₂, z, pᵣ)
-                    T★ = compute_temperature(𝒰₂, microphysics, constants)
-                    @test T★ ≈ T₂ atol=atol
 
                     set!(model, ρs = ρᵣ * s₂, qᵗ = qᵗ₂)
                     T★ = @allowscalar first(model.temperature)

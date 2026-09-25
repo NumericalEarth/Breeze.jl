@@ -1,4 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
+include(joinpath(@__DIR__, "supposition_setup.jl"))
 
 #####
 ##### Consolidated unit tests for fast-running tests
@@ -293,9 +294,15 @@ end
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
+    MoistureMixingRatio,
     StaticEnergyState,
+    LiquidIcePotentialTemperatureState,
     temperature,
+    density,
+    exner_function,
+    mixture_gas_constant,
     mixture_heat_capacity,
+    total_specific_moisture,
     temperature_from_potential_temperature,
     potential_temperature_from_temperature
 
@@ -316,32 +323,26 @@ using Breeze.Thermodynamics:
     @test q★ > 0
 end
 
-@testset "StaticEnergyState [$(FT)]" for FT in test_float_types()
-    T = FT(253.15)
-    p = FT(101325)
-    z = FT(1000)
+@testset "StaticEnergyState [$(FT)]" for FT in all_float_types()
     thermo = ThermodynamicConstants(FT)
+    g = thermo.gravitational_acceleration
+    ℒˡᵣ = thermo.liquid.reference_latent_heat
+    ℒⁱᵣ = thermo.ice.reference_latent_heat
 
-    # Reduced parameter sweep for faster testing (was 6×7×7 = 294, now 3×3×3 = 27)
-    for qᵛ in (5e-3, 1.5e-2, 3e-2), qˡ in (0, 1.5e-4, 3e-4), qⁱ in (0, 1.5e-4, 3e-4)
-        qᵛ = convert(FT, qᵛ)
-        qˡ = convert(FT, qˡ)
-        qⁱ = convert(FT, qⁱ)
-        q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
+    # temperature(::StaticEnergyState) is the closed-form inverse of
+    # s = cᵖᵐ T + g z − ℒˡᵣ qˡ − ℒⁱᵣ qⁱ, so the round trip holds to rounding for any state.
+    @breeze_check function static_energy_temperature_round_trip(T = spstn_temperatures(FT),
+                                                                p = spstn_pressures(FT),
+                                                                z = spstn_heights(FT),
+                                                                q = spstn_mass_fractions(FT))
         cᵖᵐ = mixture_heat_capacity(q, thermo)
-        g = thermo.gravitational_acceleration
-        ℒˡᵣ = thermo.liquid.reference_latent_heat
-        ℒⁱᵣ = thermo.ice.reference_latent_heat
-        s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
-
-        # Test with saturation adjustment
-        𝒰 = StaticEnergyState(s, q, z, p)
-        T★ = temperature(𝒰, thermo)
-        @test T★ ≈ T
+        s = cᵖᵐ * T + g * z - ℒˡᵣ * q.liquid - ℒⁱᵣ * q.ice
+        T★ = temperature(StaticEnergyState(s, q, z, p), thermo)
+        return isapprox(T★, T; rtol = spstn_rounding_rtol(FT))
     end
 end
 
-@testset "Potential temperature convenience functions [$(FT)]" for FT in test_float_types()
+@testset "Potential temperature convenience functions [$(FT)]" for FT in all_float_types()
     thermo = ThermodynamicConstants(FT)
     p = FT(101325)
     pˢᵗ = FT(1e5)
@@ -352,12 +353,59 @@ end
     θ_integer_temperature = potential_temperature_from_temperature(290, p, pˢᵗ, thermo)
 
     @test θ != T
-    @test temperature_from_potential_temperature(θ, p, pˢᵗ, thermo) ≈ T
     @test θ_default isa FT
     @test temperature_from_potential_temperature(θ_default, p, thermo) isa FT
     @test temperature_from_potential_temperature(θ_default, p, thermo) ≈ T
     @test θ_integer_temperature isa FT
     @test θ_integer_temperature ≈ θ
+
+    # θ ↔ T are an exact inverse pair through the Exner function, and θ ≥ T exactly when p ≤ pˢᵗ.
+    @breeze_check function potential_temperature_round_trip(T = spstn_temperatures(FT),
+                                                            p = spstn_pressures(FT),
+                                                            pˢᵗ = spstn_pressures(FT; lo=9e4, hi=1.1e5))
+        θ = potential_temperature_from_temperature(T, p, pˢᵗ, thermo)
+        T★ = temperature_from_potential_temperature(θ, p, pˢᵗ, thermo)
+        ordering_ok = isapprox(p, pˢᵗ; rtol = FT(1e-3)) || (θ >= T) == (p <= pˢᵗ)
+        return isapprox(T★, T; rtol = spstn_rounding_rtol(FT)) && ordering_ok
+    end
+end
+
+@testset "Thermodynamic identities [$(FT)]" for FT in all_float_types()
+    thermo = ThermodynamicConstants(FT)
+    rtol = spstn_rounding_rtol(FT)
+
+    # Equation of state: density(T, p, q) = p / (Rᵐ T), so ρ Rᵐ T recovers p.
+    @breeze_check function ideal_gas_law_closes(T = spstn_temperatures(FT),
+                                                p = spstn_pressures(FT),
+                                                q = spstn_mass_fractions(FT))
+        ρ = density(T, p, q, thermo)
+        Rᵐ = mixture_gas_constant(q, thermo)
+        return isapprox(ρ * Rᵐ * T, p; rtol)
+    end
+
+    # Mass fractions ↔ mixing ratios is a bijection that preserves the mixture properties.
+    @breeze_check function mixing_ratio_round_trip(q = spstn_mass_fractions(FT; total_max=0.1))
+        r = MoistureMixingRatio(q)
+        q★ = MoistureMassFractions(r)
+        return isapprox(q★.vapor, q.vapor; rtol) &&
+               isapprox(q★.liquid, q.liquid; rtol) &&
+               isapprox(q★.ice, q.ice; rtol) &&
+               isapprox(total_specific_moisture(r), total_specific_moisture(q); rtol) &&
+               isapprox(mixture_gas_constant(r, thermo), mixture_gas_constant(q, thermo); rtol) &&
+               isapprox(mixture_heat_capacity(r, thermo), mixture_heat_capacity(q, thermo); rtol)
+    end
+
+    # The Exner function Π = (p / pˢᵗ)^(Rᵐ/cᵖᵐ) lies in (0, 1] for p ≤ pˢᵗ and increases with p.
+    @breeze_check function exner_function_bounded_and_increasing(q = spstn_mass_fractions(FT),
+                                                                 pˢᵗ = spstn_pressures(FT; lo=9e4, hi=1.1e5),
+                                                                 f = spstn_floats(FT; lo=0.01, hi=1),
+                                                                 δ = spstn_floats(FT; lo=10, hi=5e4))
+        θ = FT(300)
+        p₁ = f * pˢᵗ
+        Π₁ = exner_function(LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, p₁), thermo)
+        Π₂ = exner_function(LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, p₁ + δ), thermo)
+        return 0 < Π₁ <= 1 && Π₂ > Π₁
+    end
 end
 
 #####
@@ -371,6 +419,7 @@ using Breeze.Thermodynamics:
     PlanarLiquidSurface,
     PlanarIceSurface,
     PlanarMixedPhaseSurface,
+    dewpoint_temperature,
     absolute_zero_latent_heat,
     specific_heat_difference,
     vapor_gas_constant
@@ -391,34 +440,85 @@ function reference_mixed_surface_pressure(T, thermo, λ)
     return pᵗʳ * (T / Tᵗʳ)^(Δcᵝ / Rᵛ) * exp((one(T) / Tᵗʳ - one(T) / T) * ℒ₀ / Rᵛ)
 end
 
-@testset "Saturation vapor pressure surfaces [$FT]" for FT in test_float_types()
+@testset "Saturation vapor pressure surfaces [$FT]" for FT in all_float_types()
     thermo = ThermodynamicConstants(FT)
-    Tᵗʳ = thermo.triple_point_temperature
-    temperatures = FT.((Tᵗʳ * FT(0.9), Tᵗʳ, Tᵗʳ * FT(1.1)))
-
     liquid_surface = PlanarLiquidSurface()
     ice_surface = PlanarIceSurface()
     rtol = FT === Float64 ? 1e-12 : FT(1e-5)
 
-    @testset "Planar homogeneous surfaces" begin
-        for T in temperatures
-            pˡ = saturation_vapor_pressure(T, thermo, thermo.liquid)
-            pⁱ = saturation_vapor_pressure(T, thermo, thermo.ice)
-
-            @test saturation_vapor_pressure(T, thermo, liquid_surface) ≈ pˡ rtol=rtol
-            @test saturation_vapor_pressure(T, thermo, ice_surface) ≈ pⁱ rtol=rtol
-        end
+    @breeze_check function homogeneous_surfaces_match_condensed_phases(T = spstn_temperatures(FT))
+        pˡ = saturation_vapor_pressure(T, thermo, thermo.liquid)
+        pⁱ = saturation_vapor_pressure(T, thermo, thermo.ice)
+        return isapprox(saturation_vapor_pressure(T, thermo, liquid_surface), pˡ; rtol) &&
+               isapprox(saturation_vapor_pressure(T, thermo, ice_surface), pⁱ; rtol)
     end
 
-    @testset "Planar mixed-phase surfaces" begin
-        for λ in (zero(FT), FT(0.5), one(FT))  # Reduced from 5 to 3 values
-            surface = PlanarMixedPhaseSurface(λ)
-            for T in temperatures
-                p_surface = saturation_vapor_pressure(T, thermo, surface)
-                p_reference = reference_mixed_surface_pressure(T, thermo, λ)
+    @breeze_check function mixed_surface_matches_reference(T = spstn_temperatures(FT),
+                                                           λ = spstn_unit_interval(FT))
+        p_surface = saturation_vapor_pressure(T, thermo, PlanarMixedPhaseSurface(λ))
+        return isapprox(p_surface, reference_mixed_surface_pressure(T, thermo, λ); rtol)
+    end
+end
 
-                @test p_surface ≈ p_reference rtol=rtol
-            end
+@testset "Saturation vapor pressure formulations [$FT]" for FT in all_float_types()
+    rtol = spstn_rounding_rtol(FT)
+    Tᶠ = FT(273.15)
+
+    formulations = (("ClausiusClapeyron", ThermodynamicConstants(FT)),
+                    ("TetensFormula", ThermodynamicConstants(FT; saturation_vapor_pressure=TetensFormula(FT))),
+                    ("FlatauPolynomial", ThermodynamicConstants(FT; saturation_vapor_pressure=FlatauPolynomial(FT))))
+
+    @testset "$name" for (name, thermo) in formulations
+        # The saturation vapor pressure over a mixed-phase surface lies between the ice and liquid
+        # values (a geometric blend for Clausius-Clapeyron, an arithmetic one for Tetens and Flatau).
+        # Also a regression for a missing `saturation_vapor_pressure(..., ::PlanarMixedPhaseSurface)`
+        # method — without it, `SaturationAdjustment` (which uses `MixedPhaseEquilibrium`) throws a
+        # `MethodError`, which also breaks GPU kernel codegen (`InvalidIRError`).
+        @breeze_check function mixed_phase_svp_between_ice_and_liquid(T = spstn_temperatures(FT; hi=Tᶠ),
+                                                                      λ = spstn_unit_interval(FT))
+            pˡ = saturation_vapor_pressure(T, thermo, PlanarLiquidSurface())
+            pⁱ = saturation_vapor_pressure(T, thermo, PlanarIceSurface())
+            pᵐ = saturation_vapor_pressure(T, thermo, PlanarMixedPhaseSurface(λ))
+            lo, hi = minmax(pˡ, pⁱ)
+            slack = rtol * hi
+            return isfinite(pᵐ) && pᵐ > 0 && lo - slack <= pᵐ <= hi + slack
+        end
+
+        # Saturation vapor pressure increases strictly with temperature. The ice fits are only
+        # valid below freezing, the liquid ones up to about 330 K.
+        @breeze_check function svp_strictly_increasing_in_temperature(T₁ˡ = spstn_temperatures(FT; lo=200, hi=280),
+                                                                      δˡ = spstn_floats(FT; lo=0.05, hi=50),
+                                                                      T₁ⁱ = spstn_temperatures(FT; lo=200, hi=260),
+                                                                      δⁱ = spstn_floats(FT; lo=0.05, hi=13))
+            liquid_ok = saturation_vapor_pressure(T₁ˡ + δˡ, thermo, PlanarLiquidSurface()) >
+                        saturation_vapor_pressure(T₁ˡ, thermo, PlanarLiquidSurface())
+            ice_ok = saturation_vapor_pressure(T₁ⁱ + δⁱ, thermo, PlanarIceSurface()) >
+                     saturation_vapor_pressure(T₁ⁱ, thermo, PlanarIceSurface())
+            return liquid_ok && ice_ok
+        end
+    end
+end
+
+@testset "Dewpoint temperature inversion [$FT]" for FT in all_float_types()
+    thermo = ThermodynamicConstants(FT)
+
+    @testset "$name" for (name, surface) in (("liquid", PlanarLiquidSurface()), ("ice", PlanarIceSurface()))
+        # The dewpoint inverts the saturation vapor pressure: for pᵛ = pᵛ⁺(T⁺) with T⁺ ≤ T the
+        # secant solve returns a T★ whose saturation vapor pressure matches pᵛ to the solver's
+        # relative tolerance of 1e-4 (about 1.5 mK in temperature)...
+        @breeze_check function dewpoint_inverts_saturation_vapor_pressure(T⁺ = spstn_temperatures(FT; lo=200, hi=300),
+                                                                          Δ = spstn_floats(FT; lo=0, hi=40))
+            T = T⁺ + Δ
+            pᵛ = saturation_vapor_pressure(T⁺, thermo, surface)
+            T★ = dewpoint_temperature(pᵛ, T, thermo, surface)
+            return isapprox(saturation_vapor_pressure(T★, thermo, surface), pᵛ; rtol = FT(1e-4))
+        end
+
+        # ...and a saturated or supersaturated state (pᵛ ≥ pᵛ⁺(T)) returns T itself.
+        @breeze_check function saturated_dewpoint_is_temperature(T = spstn_temperatures(FT),
+                                                                 f = spstn_floats(FT; lo=1, hi=3))
+            pᵛ = f * saturation_vapor_pressure(T, thermo, surface)
+            return dewpoint_temperature(pᵛ, T, thermo, surface) == T
         end
     end
 end
@@ -433,21 +533,9 @@ end
     pᵛ⁺_ref = saturation_vapor_pressure(Tᵣ, thermo, PlanarLiquidSurface())
     @test pᵛ⁺_ref ≈ FT(610) rtol=rtol
 
-    # Test monotonicity: pressure increases with temperature (liquid)
-    T_warm = FT(300)
-    T_cold = FT(250)
-    pᵛ⁺_warm = saturation_vapor_pressure(T_warm, thermo, PlanarLiquidSurface())
-    pᵛ⁺_cold = saturation_vapor_pressure(T_cold, thermo, PlanarLiquidSurface())
-    @test pᵛ⁺_warm > pᵛ⁺_ref > pᵛ⁺_cold
-
     # Test ice surface at reference temperature
     pⁱ_ref = saturation_vapor_pressure(Tᵣ, thermo, PlanarIceSurface())
     @test pⁱ_ref ≈ FT(610) rtol=rtol
-
-    # Test monotonicity for ice
-    pⁱ_warm = saturation_vapor_pressure(T_warm, thermo, PlanarIceSurface())
-    pⁱ_cold = saturation_vapor_pressure(T_cold, thermo, PlanarIceSurface())
-    @test pⁱ_warm > pⁱ_ref > pⁱ_cold
 
     # Verify analytic expressions for liquid
     pᵣ = FT(610)
@@ -462,15 +550,6 @@ end
     δTⁱ = FT(7.65)
     expected_ice = pᵣ * exp(aⁱ * (T_test - Tᵣ) / (T_test - δTⁱ))
     @test saturation_vapor_pressure(T_test, thermo, PlanarIceSurface()) ≈ expected_ice rtol=rtol
-
-    # Test mixed-phase surface: linear interpolation between liquid and ice
-    for λ in (FT(0), FT(0.5), FT(1))
-        surface = PlanarMixedPhaseSurface(λ)
-        pˡ = saturation_vapor_pressure(T_test, thermo, PlanarLiquidSurface())
-        pⁱ = saturation_vapor_pressure(T_test, thermo, PlanarIceSurface())
-        expected_mixed = λ * pˡ + (1 - λ) * pⁱ
-        @test saturation_vapor_pressure(T_test, thermo, surface) ≈ expected_mixed rtol=rtol
-    end
 end
 
 @testset "Flatau vs Clausius-Clapeyron comparison [$FT]" for FT in test_float_types()
@@ -493,18 +572,6 @@ end
     # far below the fit range the argument is clamped rather than extrapolated
     @test saturation_vapor_pressure(FT(150), thermo_flatau, PlanarLiquidSurface()) ==
           saturation_vapor_pressure(FT(193.16), thermo_flatau, PlanarLiquidSurface())
-
-    # mixed-phase surface: λ-weighted blend of the liquid and ice polynomials. Regression for a
-    # missing `saturation_vapor_pressure(..., ::PlanarMixedPhaseSurface)` method — without it,
-    # `SaturationAdjustment` (which uses `MixedPhaseEquilibrium`) throws a `MethodError`, which also
-    # breaks GPU kernel codegen (`InvalidIRError`).
-    T_mixed = FT(268)
-    pˡ = saturation_vapor_pressure(T_mixed, thermo_flatau, PlanarLiquidSurface())
-    pⁱ = saturation_vapor_pressure(T_mixed, thermo_flatau, PlanarIceSurface())
-    for λ in (FT(0), FT(0.5), FT(1))
-        surface = PlanarMixedPhaseSurface(λ)
-        @test saturation_vapor_pressure(T_mixed, thermo_flatau, surface) ≈ λ * pˡ + (1 - λ) * pⁱ
-    end
 end
 
 @testset "Flatau mixed-phase SVP compiles on device [$FT]" for FT in test_float_types()
