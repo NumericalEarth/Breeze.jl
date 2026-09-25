@@ -5,7 +5,7 @@ using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
 using Breeze.AtmosphereModels: microphysics_model_update!, surface_precipitation_flux
-using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient, step_kessler_microphysics
 using Breeze.Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
@@ -199,6 +199,253 @@ function kessler_column_reference!(θ, ρᵛ, ρᶜˡ, ρʳ, ρ, ϱ, p, Δz, Δt
     end
 
     return surface_mass_flux / Ns
+end
+
+"""
+    dcmip2016_fortran_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constants, microphysics)
+
+The **legacy** reference: a direct translation of the DCMIP2016 Fortran Kessler algorithm
+(`kessler.f90` in [DOI: 10.5281/zenodo.1298671](https://doi.org/10.5281/zenodo.1298671)) with
+the modifications the original Breeze port made to carry `θˡⁱ`: level spacing `z[k+1] - z[k]`
+and a half cell at the top in the sedimentation divergence and CFL bound, dry-air mixing
+ratios on `sedimentation_density`, the accretion rate on the pre-sedimentation rain, and
+`T += ℒˡᵣ Δrˡ / cᵖᵈ` after the partition update. Kept verbatim (only renamed) so that the parts
+of the scheme this branch did not change — the process formulas, and the sedimentation of a
+dry-air-carried rain on a uniform grid away from the top cell — remain checked against an
+independent implementation. It is *not* the current algorithm (see
+`kessler_column_reference!`), and exact whole-column agreement with it is no longer expected
+where the physics was deliberately corrected.
+
+Applies one microphysics time step to column arrays, including subcycling
+for rain sedimentation CFL constraints. Returns the substep-mean surface rain mass flux.
+"""
+function dcmip2016_fortran_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constants, microphysics;
+                                             sedimentation_density = ρ,
+                                             dry_air_coupled = false)
+    Nz = length(T)
+    FT = eltype(T)
+
+    # Thermodynamic constants
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    cᵖᵈ = constants.dry_air.heat_capacity
+
+    # Saturation adjustment parameters
+    f₅ = saturation_adjustment_coefficient(microphysics.dcmip_temperature_scale, constants)
+    T_offset = constants.saturation_vapor_pressure.liquid_temperature_offset
+
+    # Autoconversion and accretion parameters
+    k₁   = microphysics.autoconversion_rate
+    rᶜˡ★ = microphysics.autoconversion_threshold
+    k₂   = microphysics.accretion_rate
+    βᵃᶜᶜ = microphysics.accretion_exponent
+    Cᵨ   = microphysics.density_scale
+
+    # Evaporation parameters
+    Cᵉᵛ₁   = microphysics.evaporation_ventilation_coefficient_1
+    Cᵉᵛ₂   = microphysics.evaporation_ventilation_coefficient_2
+    βᵉᵛ₁   = microphysics.evaporation_ventilation_exponent_1
+    βᵉᵛ₂   = microphysics.evaporation_ventilation_exponent_2
+    Cᵈⁱᶠᶠ  = microphysics.diffusivity_coefficient
+    Cᵗʰᵉʳᵐ = microphysics.thermal_conductivity_coefficient
+
+    cfl = microphysics.substep_cfl
+    p₀ = 100000.0
+
+    # Initialize θˡⁱ from T
+    θˡⁱ = zeros(FT, Nz)
+    for k = 1:Nz
+        qˡ = qᶜˡ[k] + qʳ[k]
+        q = MoistureMassFractions(qᵛ[k], qˡ)
+        cᵖᵐ = mixture_heat_capacity(q, constants)
+        Rᵐ = mixture_gas_constant(q, constants)
+        Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
+        θˡⁱ[k] = (T[k] - ℒˡᵣ * qˡ / cᵖᵐ) / Π
+    end
+
+    # Convert mass fractions to mixing ratios and compute terminal velocities
+    rᵛ = zeros(FT, Nz)
+    rᶜˡ = zeros(FT, Nz)
+    rʳ = zeros(FT, Nz)
+    𝕎ʳ = zeros(FT, Nz)
+
+    ρ₁ = ρ[1]
+    max_Δt = Δt
+
+    for k = 1:Nz
+        qᵗ = qᵛ[k] + qᶜˡ[k] + qʳ[k]
+        rᵛ[k] = qᵛ[k] / (1 - qᵗ)
+        rᶜˡ[k] = qᶜˡ[k] / (1 - qᵗ)
+        rʳ[k] = qʳ[k] / (1 - qᵗ)
+        𝕎ʳ[k] = kessler_terminal_velocity(rʳ[k], ρ[k], ρ₁, microphysics)
+
+        if k < Nz && 𝕎ʳ[k] > 0
+            Δz = z[k+1] - z[k]
+            max_Δt = min(max_Δt, cfl * Δz / 𝕎ʳ[k])
+        end
+    end
+
+    # Subcycling
+    Ns = max(1, ceil(Int, Δt / max_Δt))
+    Δtₛ = Δt / Ns
+    surface_mass_flux = zero(FT)
+
+    for s = 1:Ns
+        rᵗ₁ = rᵛ[1] + rᶜˡ[1] + rʳ[1]
+        qʳ₁ = rʳ[1] / (1 + rᵗ₁)
+        ρqʳ₁ = ifelse(dry_air_coupled,
+                      sedimentation_density[1] * rʳ[1],
+                      ρ[1] * qʳ₁)
+        surface_mass_flux += ρqʳ₁ * 𝕎ʳ[1]
+
+        zᵏ = z[1]
+
+        for k = 1:Nz
+            # Recover T from θˡⁱ
+            rᵗ = rᵛ[k] + rᶜˡ[k] + rʳ[k]
+            qᵛ_local = rᵛ[k] / (1 + rᵗ)
+            qˡ_local = (rᶜˡ[k] + rʳ[k]) / (1 + rᵗ)
+
+            q = MoistureMassFractions(qᵛ_local, qˡ_local)
+            cᵖᵐ = mixture_heat_capacity(q, constants)
+            Rᵐ = mixture_gas_constant(q, constants)
+            Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
+            T[k] = Π * θˡⁱ[k] + ℒˡᵣ * qˡ_local / cᵖᵐ
+
+            # Rain sedimentation (upstream differencing)
+            if k < Nz
+                zᵏ⁺¹ = z[k+1]
+                Δz = zᵏ⁺¹ - zᵏ
+                flux_out = sedimentation_density[k+1] * rʳ[k+1] * 𝕎ʳ[k+1]
+                flux_in = sedimentation_density[k] * rʳ[k] * 𝕎ʳ[k]
+                Δr𝕎 = Δtₛ * (flux_out - flux_in) / (sedimentation_density[k] * Δz)
+                zᵏ = zᵏ⁺¹
+            else
+                Δz_half = 0.5 * (z[k] - z[k-1])
+                Δr𝕎 = -Δtₛ * rʳ[k] * 𝕎ʳ[k] / Δz_half
+            end
+
+            # Autoconversion and accretion (KW eq. 2.13)
+            Aʳ = max(0.0, k₁ * (rᶜˡ[k] - rᶜˡ★))
+            denom = 1.0 + Δtₛ * k₂ * rʳ[k]^βᵃᶜᶜ
+            Δrᴾ = rᶜˡ[k] - (rᶜˡ[k] - Δtₛ * Aʳ) / denom
+
+            rᶜˡ_new = max(0.0, rᶜˡ[k] - Δrᴾ)
+            rʳ_new = max(0.0, rʳ[k] + Δrᴾ + Δr𝕎)
+
+            # Saturation adjustment
+            qᵛ⁺ = saturation_specific_humidity(T[k], ρ[k], constants, PlanarLiquidSurface())
+            rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
+            Δrˢᵃᵗ = (rᵛ[k] - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T[k] - T_offset)^2)
+
+            # Rain evaporation (KW eq. 2.14)
+            ρᵏ = ρ[k] * Cᵨ
+            ρrʳ = ρᵏ * rʳ_new
+            Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
+            Dᵗʰ = Cᵈⁱᶠᶠ / (p[k] * rᵛ⁺) + Cᵗʰᵉʳᵐ
+
+            Δrᵛ⁺ = max(0.0, rᵛ⁺ - rᵛ[k])
+            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + 1e-20)
+            Δrᴱmax = max(0.0, -Δrˢᵃᵗ - rᶜˡ_new)
+            Δrᴱ = min(min(Δtₛ * Ėʳ, Δrᴱmax), rʳ_new)
+
+            Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
+
+            # Update mixing ratios
+            rᵛ_new = max(0.0, rᵛ[k] - Δrᶜ + Δrᴱ)
+            rᶜˡ_final = rᶜˡ_new + Δrᶜ
+            rʳ_final = rʳ_new - Δrᴱ
+
+            # Update θˡⁱ via latent heating
+            ΔT = (ℒˡᵣ / cᵖᵈ) * (Δrᶜ - Δrᴱ)
+            T_new = T[k] + ΔT
+
+            rᵗ_new = rᵛ_new + rᶜˡ_final + rʳ_final
+            qᵛ_new = rᵛ_new / (1 + rᵗ_new)
+            qˡ_new = (rᶜˡ_final + rʳ_final) / (1 + rᵗ_new)
+
+            q_new = MoistureMassFractions(qᵛ_new, qˡ_new)
+            cᵖᵐ_new = mixture_heat_capacity(q_new, constants)
+            Rᵐ_new = mixture_gas_constant(q_new, constants)
+            Π_new = (p[k] / p₀)^(Rᵐ_new / cᵖᵐ_new)
+            θˡⁱ[k] = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
+
+            rᵛ[k] = rᵛ_new
+            rᶜˡ[k] = rᶜˡ_final
+            rʳ[k] = rʳ_final
+        end
+
+        # Recalculate terminal velocities for next subcycle
+        if s < Ns
+            for k = 1:Nz
+                𝕎ʳ[k] = kessler_terminal_velocity(rʳ[k], ρ[k], ρ₁, microphysics)
+            end
+        end
+    end
+
+    # Convert back to mass fractions and recover final T
+    for k = 1:Nz
+        rᵗ = rᵛ[k] + rᶜˡ[k] + rʳ[k]
+        qᵛ[k] = rᵛ[k] / (1 + rᵗ)
+        qᶜˡ[k] = rᶜˡ[k] / (1 + rᵗ)
+        qʳ[k] = rʳ[k] / (1 + rᵗ)
+
+        q = MoistureMassFractions(qᵛ[k], qᶜˡ[k] + qʳ[k])
+        cᵖᵐ = mixture_heat_capacity(q, constants)
+        Rᵐ = mixture_gas_constant(q, constants)
+        Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
+        T[k] = Π * θˡⁱ[k] + ℒˡᵣ * (qᶜˡ[k] + qʳ[k]) / cᵖᵐ
+    end
+
+    return surface_mass_flux / Ns
+end
+
+"""
+    legacy_kessler_adjustment(rᵛ, rᶜˡ, rʳ, T, ρ, p, Δt, constants, microphysics)
+
+The per-cell adjustment block of the DCMIP2016 Fortran (autoconversion and accretion,
+saturation adjustment, rain evaporation) with its own `f₅ = a T_DCMIP2016 ℒˡᵣ / cᵖᵈ`,
+extracted verbatim from `dcmip2016_fortran_kessler!` for a scalar comparison.
+Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
+"""
+function legacy_kessler_adjustment(rᵛ, rᶜˡ, rʳ, T, ρ, p, Δt, constants, microphysics)
+    f₅ = saturation_adjustment_coefficient(microphysics.dcmip_temperature_scale, constants)
+    T_offset = constants.saturation_vapor_pressure.liquid_temperature_offset
+    k₁   = microphysics.autoconversion_rate
+    rᶜˡ★ = microphysics.autoconversion_threshold
+    k₂   = microphysics.accretion_rate
+    βᵃᶜᶜ = microphysics.accretion_exponent
+    Cᵨ   = microphysics.density_scale
+    Cᵉᵛ₁   = microphysics.evaporation_ventilation_coefficient_1
+    Cᵉᵛ₂   = microphysics.evaporation_ventilation_coefficient_2
+    βᵉᵛ₁   = microphysics.evaporation_ventilation_exponent_1
+    βᵉᵛ₂   = microphysics.evaporation_ventilation_exponent_2
+    Cᵈⁱᶠᶠ  = microphysics.diffusivity_coefficient
+    Cᵗʰᵉʳᵐ = microphysics.thermal_conductivity_coefficient
+
+    Aʳ = max(0.0, k₁ * (rᶜˡ - rᶜˡ★))
+    denom = 1.0 + Δt * k₂ * rʳ^βᵃᶜᶜ
+    Δrᴾ = rᶜˡ - (rᶜˡ - Δt * Aʳ) / denom
+    rᶜˡ_new = max(0.0, rᶜˡ - Δrᴾ)
+    rʳ_new = max(0.0, rʳ + Δrᴾ)
+
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
+    Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T - T_offset)^2)
+
+    ρᵏ = ρ * Cᵨ
+    ρrʳ = ρᵏ * rʳ_new
+    Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
+    Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
+    Δrᵛ⁺ = max(0.0, rᵛ⁺ - rᵛ)
+    Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + 1e-20)
+    Δrᴱmax = max(0.0, -Δrˢᵃᵗ - rᶜˡ_new)
+    Δrᴱ = min(min(Δt * Ėʳ, Δrᴱmax), rʳ_new)
+
+    Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
+    rᵛ_new = max(0.0, rᵛ - Δrᶜ + Δrᴱ)
+    rᶜˡ_final = rᶜˡ_new + Δrᶜ
+    rʳ_final = rʳ_new - Δrᴱ
+    return rᵛ_new, rᶜˡ_final, rʳ_final, Δrᶜ - Δrᴱ
 end
 
 #####
@@ -494,6 +741,99 @@ end
     @test precipitation_flux ≈ surface_ρ .* precipitation_rate rtol=rtol
     @test all(≈(surface_mass_flux_ref; rtol), precipitation_flux)
     @test maximum(abs.(precipitation_flux .- surface_ρᵈ .* precipitation_rate)) > 1e-8
+end
+
+#####
+##### Legacy DCMIP2016 algorithm: independent coverage of what did not change
+#####
+
+@testset "Legacy Fortran translation agrees where the physics is unchanged" begin
+    FT = Float64
+    constants = ThermodynamicConstants(FT; saturation_vapor_pressure = TetensFormula(FT))
+    microphysics = DCMIP2016KesslerMicrophysics(FT)
+
+    @testset "Process formulas with the legacy latent-heating slope" begin
+        # With ∂T/∂rˡ = ℒˡᵣ/cᵖᵈ the current step reproduces the Fortran adjustment block
+        # exactly: autoconversion, accretion, the single-step saturation adjustment and rain
+        # evaporation are untouched. Only the slope input and the temperature update policy changed.
+        ℒ_over_cᵖᵈ = constants.liquid.reference_latent_heat / constants.dry_air.heat_capacity
+        δT = constants.saturation_vapor_pressure.liquid_temperature_offset
+        for (T, ρ, p) in ((FT(295), FT(1.15), FT(98000)), (FT(280), FT(0.95), FT(80000)), (FT(262), FT(0.7), FT(55000)))
+            qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+            rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
+            states = ((1.03rᵛ⁺, 0.0,    0.0),    # supersaturated, clear
+                      (0.9rᵛ⁺,  8e-4,   0.0),    # subsaturated cloud
+                      (0.6rᵛ⁺,  0.0,    1.5e-3), # subsaturated rain
+                      (1.0rᵛ⁺,  2.5e-3, 5e-4))   # saturated, cloud above the autoconversion threshold, rain
+            for (rᵛ, rᶜˡ, rʳ) in states, Δt in (FT(2), FT(20))
+                legacy = legacy_kessler_adjustment(rᵛ, rᶜˡ, rʳ, T, ρ, p, Δt, constants, microphysics)
+                current = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, T, ℒ_over_cᵖᵈ, ρ, p, Δt, microphysics, constants, δT, FT)
+                @test all(isapprox.(current, legacy; rtol = 1e-14, atol = 1e-20))
+            end
+        end
+    end
+
+    @testset "Sedimentation of dry-air-carried rain on a uniform grid" begin
+        # The Fortran carries mixing ratios on the dry-air density, so the compressible core
+        # (prognostic ρᵈ) is where its sedimentation is comparable. On a uniform grid, away from
+        # the top cell, and with no phase change (dry column, evaporation off, no cloud), the two
+        # algorithms are the same algorithm: identical rain, invariant and surface flux.
+        Nz = 12
+        grid = RectilinearGrid(CPU(), FT; size = (5, 5, Nz), halo = (5, 5, 5), x = (0, 500), y = (0, 500),
+                               z = (0, 1200), topology = (Periodic, Periodic, Bounded))
+        no_evaporation = DCMIP2016KesslerMicrophysics(FT; evaporation_ventilation_coefficient_1 = 0,
+                                                          evaporation_ventilation_coefficient_2 = 0)
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = FT(1e5),
+                                        standard_pressure = FT(1e5), reference_potential_temperature = z -> FT(290))
+        model = AtmosphereModel(grid; dynamics, microphysics = no_evaporation, thermodynamic_constants = constants,
+                                timestepper = :AcousticRungeKutta3)
+        # Rain everywhere except the top cell (the Fortran's half-cell treatment is inactive there)
+        qʳ_profile(x, y, z) = FT(z < 1100 ? 0.002 * exp(-((z - 500) / 300)^2) : 0)
+        set!(model; ρ = FT(1.1), T = FT(290), qᵛ = FT(0), qᶜˡ = FT(0), qʳ = qʳ_profile, enforce_mass_conservation = false)
+        update_state!(model); update_state!(model)
+
+        column(field) = vec(Array(interior(field, 1, 1, :)))
+        ρ = column(model.dynamics.total_density)
+        ρᵈ = column(model.dynamics.dry_density)
+        p = column(model.dynamics.pressure)
+        T = column(model.temperature)
+        qᵛ = column(model.moisture_density) ./ ρ
+        qᶜˡ = column(model.microphysical_fields.ρqᶜˡ) ./ ρ
+        qʳ = column(model.microphysical_fields.ρqʳ) ./ ρ
+        z = collect(znodes(grid, Center()))
+        @test qʳ[Nz] == 0
+        @test qʳ[Nz-1] > 0
+
+        Δt = FT(20)
+        T_ref = copy(T); qᵛ_ref = copy(qᵛ); qᶜˡ_ref = copy(qᶜˡ); qʳ_ref = copy(qʳ)
+        surface_mass_flux_legacy =
+            dcmip2016_fortran_kessler!(T_ref, qᵛ_ref, qᶜˡ_ref, qʳ_ref, ρ, p, Δt, z, constants, no_evaporation;
+                                       sedimentation_density = ρᵈ, dry_air_coupled = true)
+        qᵗ_ref = qᵛ_ref .+ qᶜˡ_ref .+ qʳ_ref
+        rʳ_ref = qʳ_ref ./ (1 .- qᵗ_ref)
+
+        ℒˡᵣ = constants.liquid.reference_latent_heat
+        θˡⁱ_ref = similar(T_ref)
+        for k in eachindex(T_ref)
+            q = MoistureMassFractions(qᵛ_ref[k], qᶜˡ_ref[k] + qʳ_ref[k])
+            cᵖᵐ = mixture_heat_capacity(q, constants)
+            Rᵐ = mixture_gas_constant(q, constants)
+            Π = (p[k] / FT(1e5))^(Rᵐ / cᵖᵐ)
+            θˡⁱ_ref[k] = (T_ref[k] - ℒˡᵣ * (qᶜˡ_ref[k] + qʳ_ref[k]) / cᵖᵐ) / Π
+        end
+
+        model.clock.last_Δt = Δt
+        microphysics_model_update!(model.microphysics, model)
+
+        rtol = 1e-10
+        @test column(model.microphysical_fields.ρqʳ) ≈ ρᵈ .* rʳ_ref rtol=rtol
+        @test column(model.formulation.potential_temperature_density) ≈ ρᵈ .* θˡⁱ_ref rtol=rtol
+        @test column(model.moisture_density) == zeros(FT, Nz)
+        precipitation_flux = Array(interior(compute!(surface_precipitation_flux(model))))
+        @test all(≈(surface_mass_flux_legacy; rtol), precipitation_flux)
+        @test surface_mass_flux_legacy > 0
+        @test sum(rʳ_ref .* ρᵈ) < sum(qʳ .* ρ) # rain actually left through the surface
+    end
 end
 
 @testset "Thermodynamic constants validation" begin

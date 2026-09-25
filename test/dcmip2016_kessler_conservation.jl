@@ -347,8 +347,9 @@ end
     model = column_model(FT, faces, microphysics)
     z = cell_centers(faces)
     Nz = length(z)
-    q⁺ = saturation_profile(model)
-    set_water!(model; qᵛ = FT(0.5) .* q⁺, qᶜˡ = zeros(FT, Nz), qʳ = FT.(rain_profile.(z)))
+    # A dry, raining column keeps the inventory small, so the created mass stands out from the
+    # round-off of the inventory difference at either precision
+    set_water!(model; qᵛ = zeros(FT, Nz), qᶜˡ = zeros(FT, Nz), qʳ = FT.(rain_profile.(z)))
 
     # Negative vapor in one cell and negative rain in another, written straight into the
     # prognostics (bypassing any negative-moisture correction of `update_state!`)
@@ -360,9 +361,11 @@ end
     set!(model.moisture_density, reshape(ρqᵛ, 1, 1, Nz))
     set!(model.microphysical_fields.ρqʳ, reshape(ρqʳ, 1, 1, Nz))
     clipped = -(ρqᵛ[5] * Δz[5] + ρqʳ[Nz-3] * Δz[Nz-3])
-    @test clipped > 0
 
     W₀ = water_inventory(model, Δz)
+    tolerance = budget_rtol(FT) * W₀
+    @test clipped > 10 * tolerance # the created mass is resolvable against the budget round-off
+
     Δt = FT(20)
     kessler_step!(model, Δt)
     W₁ = water_inventory(model, Δz)
@@ -372,7 +375,7 @@ end
     @test all(ρqʳ₁ .≥ 0)
     @test ρqᵛ₁[5] == 0
     # The water created is exactly the clipped mass, nothing more
-    @test W₁ + surface_flux(model) * Δt - W₀ ≈ clipped rtol=budget_rtol(FT)
+    @test abs((W₁ + surface_flux(model) * Δt - W₀) - clipped) ≤ tolerance
 end
 
 #####
