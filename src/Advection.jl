@@ -239,22 +239,23 @@ end
 #####
 #
 # Scheme-independent implementation of `AtmosphereModels.bottom_precipitation_flux`: the
-# bottom-face flux of every sedimentation constituent, summed inside one kernel function. It
+# bottom-face flux of every sedimenting condensate, summed inside one kernel function. It
 # lives here rather than in `AtmosphereModels` because it builds on
 # `bottom_advective_tracer_flux`, and `AtmosphereModels` is loaded before this module.
-# Reusing the `(; w, q, ρq, phase, advection)` constituents the model resolved once means the
-# diagnostic can never disagree with the thermodynamic tendencies about which masses fall, with
-# which humidity field and advection scheme. The tuple recursion keeps the kernel type-stable
-# across constituents that carry different advection schemes.
-@inline bottom_precipitation_flux_kernel(i, j, k, grid, constituents, ρ, wᵗ) =
-    sedimenting_bottom_flux(i, j, grid, constituents, ρ, wᵗ)
+# Reusing the `SedimentingCondensate`s the model resolved once means the diagnostic can never
+# disagree with the thermodynamic tendencies about which masses fall, with which humidity field
+# and advection scheme. The tuple recursion keeps the kernel type-stable across condensates that
+# carry different advection schemes.
+@inline bottom_precipitation_flux_kernel(i, j, k, grid, condensates, ρ, wᵗ) =
+    sedimenting_bottom_flux(i, j, grid, condensates, ρ, wᵗ)
 
 @inline sedimenting_bottom_flux(i, j, grid, ::Tuple{}, ρ, wᵗ) = zero(grid)
 
-@inline function sedimenting_bottom_flux(i, j, grid, constituents, ρ, wᵗ)
-    (; w, q, advection) = first(constituents)
-    flux = bottom_advective_tracer_flux(i, j, grid, advection, ρ, SumOfArrays{2}(wᵗ, w), q)
-    return flux + sedimenting_bottom_flux(i, j, grid, Base.tail(constituents), ρ, wᵗ)
+@inline function sedimenting_bottom_flux(i, j, grid, condensates, ρ, wᵗ)
+    condensate = first(condensates)
+    w = SumOfArrays{2}(wᵗ, condensate.velocity)
+    flux = bottom_advective_tracer_flux(i, j, grid, condensate.advection, ρ, w, condensate.specific_humidity)
+    return flux + sedimenting_bottom_flux(i, j, grid, Base.tail(condensates), ρ, wᵗ)
 end
 
 # Any scheme that declares its sedimenting condensate through `sedimentation_velocity` and
@@ -263,7 +264,7 @@ end
 # precipitation by internal means (such as `DCMIP2016KM`) override this method instead.
 function AtmosphereModels.bottom_precipitation_flux(model, microphysics)
     operation = KernelFunctionOperation{Center, Center, Nothing}(bottom_precipitation_flux_kernel, model.grid,
-                                                                 model.sedimentation_constituents,
+                                                                 values(model.sedimentation),
                                                                  total_density(model.dynamics),
                                                                  transport_velocities(model).w)
     return Field(operation)

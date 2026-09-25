@@ -132,18 +132,18 @@ signed vertical coordinate that is positive upward, so the corresponding velocit
 signed velocity at the cell's bottom face and applies the precipitation boundary condition at
 `k = 1`.
 
-#### Sedimentation constituents
+#### Sedimenting condensates
 
-At construction the model resolves, once, a tuple of `(; w, q, ρq, phase, advection)`
-constituents, one for every name in `condensate_field_names` with a `sedimentation_velocity`: the
-velocity field, the specific-humidity field and the prognostic density behind it, the phase tag,
-and the advection scheme that transports the tracer (`model.sedimentation_constituents`, `()`
-when nothing sediments). Number tracers (e.g.
-`:ρnᶜˡ`) and non-additive particle properties (P3's rime mass `ρqᶠ`, a portion of `ρqⁱ`, and
-rime volume `ρbᶠ`) are not condensate masses and are never consulted. Condensate that does not
-sediment, such as cloud condensate diagnosed by saturation adjustment, moves no mass and needs
-no declaration. A sedimenting mass without a `condensate_phase` is an error at construction,
-since its latent heat would otherwise be left behind.
+At construction the model resolves its sedimenting condensates into `model.sedimentation`, a
+`NamedTuple` of `SedimentingCondensate`s keyed by prognostic name, one for every name in
+`condensate_field_names` with a `sedimentation_velocity`: the velocity field the mass falls with
+(`velocity`), its specific-humidity field (`specific_humidity`), the prognostic partial density it
+is diagnosed from (`density`), its `condensate_phase` tag (`phase`), and the advection scheme that
+transports the tracer (`advection`). The result is `(;)` when nothing sediments. Number tracers
+(e.g. `ρnʳ`) fall but are not condensate masses and carry no latent heat, so they are absent;
+condensate that does not sediment, such as cloud condensate diagnosed by saturation adjustment,
+moves no mass and needs no declaration. A sedimenting mass without a `condensate_phase` is an
+error at construction, since its latent heat could not follow the falling mass.
 
 !!! note "Velocity and phase are independent"
     P3's liquid on ice `ρqʷⁱ` is liquid water riding on an ice particle: it falls at `wⁱ`, yet
@@ -172,9 +172,9 @@ own scheme, so bounds- and positivity-preserving schemes limit the falling humid
 they would without sedimentation. What follows weights those same fluxes to carry the
 *thermodynamic variable's* share; it forms no flux of its own.
 
-The thermodynamic-variable tendencies consume the constituents through `sedimentation_tendency`,
+The thermodynamic-variable tendencies consume the sedimenting condensates through `sedimentation_tendency`,
 which returns the signed cell-local tendency they add; each formulation supplies its
-`condensate_content` (`χ`, transported enthalpy and `∂φ/∂h` at a cell). Each constituent's
+`condensate_content` (`χ`, transported enthalpy and `∂φ/∂h` at a cell). Each condensate's
 sedimentation mass flux — the advective flux of its humidity at the combined resolved and fall
 velocity minus the flux at the resolved velocity alone, computed with the same advection scheme
 that transports the tracer's mass (for bounds-preserving WENO, from the same per-cell limited
@@ -206,7 +206,7 @@ fluxes ride the total-density-weighted mass flux the tracer tendency
 applies, and the cell's coupling-to-total density ratio (one on the anelastic core,
 ``qᵈ = ρᵈ / ρ`` on the compressible core) converts the change of the specific variable into that
 of the coupling-weighted prognostic. They are formed at the velocity the tracer tendency
-transports the constituents with, which on the compressible core is the substepper's
+transports the condensates with, which on the compressible core is the substepper's
 acoustic-mean velocity rather than the RK predictor the thermodynamic variable itself advects
 with: upwind selection and the adaptive implicit split are nonlinear in the velocity, so fluxes
 formed at the predictor would not recombine into the mass flux the condensate takes. Under
@@ -226,7 +226,7 @@ the layer that later evaporates the arriving rain, the mechanism that builds col
 `bottom_precipitation_flux(model)` returns the flux of precipitating moisture through the
 bottom boundary [kg m⁻² s⁻¹, positive downward]. A scheme that implements
 `sedimentation_velocity` and `condensate_phase` gets it for free: the default method sums the
-bottom-face flux of every sedimentation constituent, evaluating each with the advection scheme
+bottom-face flux of every sedimenting condensate, evaluating each with the advection scheme
 that transports that tracer, so the diagnostic agrees with the boundary flux the tendency
 operator applies. Schemes that move precipitation by their own internal means (such as
 `DCMIP2016KM`) override `bottom_precipitation_flux` directly instead.

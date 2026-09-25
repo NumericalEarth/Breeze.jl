@@ -67,7 +67,7 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     forcing :: Frc
     microphysics :: Mic
     microphysical_fields :: Cnd
-    sedimentation_constituents :: Sed
+    sedimentation :: Sed
     timestepper :: Tst
     closure :: Cls
     closure_fields :: Cfs
@@ -259,7 +259,7 @@ function AtmosphereModel(grid;
     # The closure's scalars — thermodynamic density, moisture, microphysical prognostic fields, user
     # tracers — in the order the vertically-implicit solve indexes them (see `closure_scalar_index`).
     # Resolved here, ahead of the closure, because the advection schemes below are built from these
-    # names and the sedimentation constituents need those schemes.
+    # names and the sedimenting condensates need those schemes.
     scalar_names = closure_scalar_names(formulation, microphysics, tracer_names)
 
     # Generate tracer advection scheme for each tracer
@@ -274,11 +274,10 @@ function AtmosphereModel(grid;
     # Microphysical fields, including a prognostic aerosol reservoir `ρnᵃ`, start at zero. `ρnᵃ`
     # holds a ρ-weighted count, so it is filled in by `set_default_aerosol_number!` at the end of
     # this constructor, once the dynamics has been materialized and has a density to weight by.
-    # Sedimentation constituents carry each tracer's materialized advection scheme, so the
+    # The sedimenting condensates carry each tracer's materialized advection scheme, so the
     # advection schemes must exist first.
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
-    sedimentation_constituents = materialize_sedimentation_constituents(dynamics, microphysics, microphysical_fields,
-                                                                        materialized_advection)
+    sedimentation = materialize_sedimentation(dynamics, microphysics, microphysical_fields, materialized_advection)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
@@ -362,7 +361,7 @@ function AtmosphereModel(grid;
                             forcing,
                             microphysics,
                             microphysical_fields,
-                            sedimentation_constituents,
+                            sedimentation,
                             timestepper,
                             closure,
                             closure_fields,

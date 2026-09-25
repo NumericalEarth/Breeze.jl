@@ -742,14 +742,18 @@ using Oceananigans.TimeSteppers: update_state!
         @test isnothing(sedimentation_velocity(p3, μ, Val(:ρnᵃ)))
         @test isnothing(microphysical_velocities(p3, μ, Val(:ρnᵃ)))
 
-        # The four condensate masses are the sedimentation constituents: rime mass, rime
-        # volume and the number moments fall too, but are not masses and carry no latent heat.
-        constituents = model.sedimentation_constituents
-        @test length(constituents) == 4
-        @test any(c -> c.w === μ.wᶜˡ && c.q === μ.qᶜˡ && c.phase === Val(:liquid), constituents)
-        @test any(c -> c.w === μ.wʳ && c.q === μ.qʳ && c.phase === Val(:liquid), constituents)
-        @test any(c -> c.w === μ.wⁱ && c.q === μ.qⁱ && c.phase === Val(:ice), constituents)
-        @test any(c -> c.w === μ.wⁱ && c.q === μ.qʷⁱ && c.phase === Val(:liquid), constituents)
+        # The four condensate masses sediment: rime mass, rime volume and the number moments
+        # fall too, but are not masses and carry no latent heat.
+        sedimentation = model.sedimentation
+        @test keys(sedimentation) == (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqʷⁱ)
+        @test sedimentation.ρqᶜˡ.velocity === μ.wᶜˡ && sedimentation.ρqᶜˡ.specific_humidity === μ.qᶜˡ
+        @test sedimentation.ρqᶜˡ.phase === Val(:liquid)
+        @test sedimentation.ρqʳ.velocity === μ.wʳ && sedimentation.ρqʳ.specific_humidity === μ.qʳ
+        @test sedimentation.ρqʳ.phase === Val(:liquid)
+        @test sedimentation.ρqⁱ.velocity === μ.wⁱ && sedimentation.ρqⁱ.specific_humidity === μ.qⁱ
+        @test sedimentation.ρqⁱ.phase === Val(:ice)
+        @test sedimentation.ρqʷⁱ.velocity === μ.wⁱ && sedimentation.ρqʷⁱ.specific_humidity === μ.qʷⁱ
+        @test sedimentation.ρqʷⁱ.phase === Val(:liquid)
     end
 
     @testset "Sedimentation heat transport bins liquid on ice by phase" begin
@@ -804,7 +808,7 @@ using Oceananigans.TimeSteppers: update_state!
         β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
 
         # Phase-resolved advective sedimentation mass fluxes: with zero resolved velocity
-        # and the default Centered(order=2) scheme, each constituent's flux at face k is
+        # and the default Centered(order=2) scheme, each condensate's flux at face k is
         # its fall speed times its face-interpolated humidity. qʷⁱ contributes its
         # ice-speed flux to Φˡ; with no transport velocity every flux is downward, so the
         # flux through a cell's upper face brings the enthalpy of the cell above.

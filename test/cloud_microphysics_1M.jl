@@ -32,7 +32,7 @@ struct MockSurfaceFluxTransportModel{G, D, V, M, A, S, W}
     velocities :: V
     microphysical_fields :: M
     advection :: A
-    sedimentation_constituents :: S
+    sedimentation :: S
     transport_w :: W
 end
 
@@ -760,7 +760,7 @@ end
                                                model.velocities,
                                                model.microphysical_fields,
                                                model.advection,
-                                               model.sedimentation_constituents,
+                                               model.sedimentation,
                                                transport_w)
 
     spf = bottom_precipitation_flux(mock_model, microphysics)
@@ -910,18 +910,21 @@ end
     wʳ = @allowscalar μ.wʳ[1, 1, 2]
     @test wʳ <= 0
 
-    # Both sedimenting masses are resolved as constituents, each with its own velocity field,
-    # humidity field, phase, and the advection scheme that transports it
-    constituents = model.sedimentation_constituents
-    @test length(constituents) == 2
-    rain = constituents[findfirst(c -> c.w === μ.wʳ, constituents)]
-    @test rain.q === μ.qʳ
-    @test rain.phase === Val(:liquid)
-    @test rain.advection === model.advection.ρqʳ
-    @test any(c -> c.w === μ.wᶜˡ && c.q === μ.qᶜˡ && c.phase === Val(:liquid), constituents)
+    # Both sedimenting masses are resolved into `model.sedimentation`, keyed by name, each with its
+    # own velocity field, humidity field, phase, and the advection scheme that transports it
+    sedimentation = model.sedimentation
+    @test keys(sedimentation) == (:ρqᶜˡ, :ρqʳ)
+    @test sedimentation.ρqʳ.velocity === μ.wʳ
+    @test sedimentation.ρqʳ.specific_humidity === μ.qʳ
+    @test sedimentation.ρqʳ.density === μ.ρqʳ
+    @test sedimentation.ρqʳ.phase === Val(:liquid)
+    @test sedimentation.ρqʳ.advection === model.advection.ρqʳ
+    @test sedimentation.ρqᶜˡ.velocity === μ.wᶜˡ
+    @test sedimentation.ρqᶜˡ.specific_humidity === μ.qᶜˡ
+    @test sedimentation.ρqᶜˡ.phase === Val(:liquid)
 end
 
-@testset "Diagnosed cloud condensate is not a sedimentation constituent [$(FT)]" for FT in test_float_types()
+@testset "Diagnosed cloud condensate does not sediment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), extent=(100, 100, 100))
 
@@ -937,12 +940,12 @@ end
     @test @allowscalar(μ.qᶜˡ[1, 1, 1]) > 0
 
     # Under saturation adjustment only rain is prognostic and falls; the diagnosed cloud
-    # liquid moves no mass and therefore appears in no constituent.
-    constituents = model.sedimentation_constituents
-    @test length(constituents) == 1
-    @test constituents[1].w === μ.wʳ
-    @test constituents[1].q === μ.qʳ
-    @test constituents[1].phase === Val(:liquid)
+    # liquid moves no mass and therefore is absent from `model.sedimentation`.
+    sedimentation = model.sedimentation
+    @test keys(sedimentation) == (:ρqʳ,)
+    @test sedimentation.ρqʳ.velocity === μ.wʳ
+    @test sedimentation.ρqʳ.specific_humidity === μ.qʳ
+    @test sedimentation.ρqʳ.phase === Val(:liquid)
 end
 
 @testset "Sedimentation transports the condensate part of ρθ and ρs [$(FT)]" for FT in test_float_types()
@@ -978,7 +981,7 @@ end
         # The sedimentation mass flux advection actually applies: with zero resolved
         # velocity and the default Centered(order=2) scheme, the flux difference at face k
         # is wʳ[k] times the face-interpolated rain humidity (only rain sediments here;
-        # diagnosed cloud moves no mass and is not a constituent).
+        # diagnosed cloud moves no mass and does not sediment).
         wʳ = [(@allowscalar μ.wʳ[1, 1, k]) for k in 1:Nz+1]
         qʳᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ)) for k in 1:Nz+1]
         Φ = wʳ .* qʳᶠ
@@ -1140,7 +1143,7 @@ end
 @testset "A mixed-phase condensate mass carries the blended content [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
-    # `phase_content` picks a constituent's content out of the formulation's (χˡ, χⁱ) pair. The
+    # `phase_content` picks a condensate's content out of the formulation's (χˡ, χⁱ) pair. The
     # content is linear in composition, so a mass leaving along f eˡ + (1 − f) eⁱ carries
     # f χˡ + (1 − f) χⁱ exactly, with the pure phases as endpoints.
     χ = (FT(-2500), FT(-2830))  # representative ∂s/∂qˡ and ∂s/∂qⁱ magnitudes [J/kg]
@@ -1173,7 +1176,7 @@ end
     model = AtmosphereModel(grid; dynamics, microphysics)
     μ = model.microphysical_fields
 
-    # Rain with a uniform fall speed and a height-dependent humidity; the cloud constituent is
+    # Rain with a uniform fall speed and a height-dependent humidity; the cloud condensate is
     # emptied so only rain contributes. Synthetic contents indexed by the cell identify the cell
     # each flux draws its enthalpy from and the cell that converts it.
     wʳ = FT(-2)
@@ -1188,7 +1191,7 @@ end
     Az = FT(100 * 100)
     # The divergence of the content flux the tendency applies is minus the signed tendency.
     divergence(content, wᵗ, k) = -(@allowscalar Breeze.AtmosphereModels.sedimentation_tendency(
-        1, 1, k, grid, model.sedimentation_constituents, wᵗ, content, model.dynamics, constants,
+        1, 1, k, grid, values(model.sedimentation), wᵗ, content, model.dynamics, constants,
         model.microphysics, μ, specific_prognostic_moisture(model), model.temperature))
     transport_velocities = (FT(0), FT(1), FT(5))
 
@@ -1337,10 +1340,10 @@ end
     ρᵣ = model.dynamics.reference_state.density
     U = (; u = ZeroField(), v = ZeroField(), w = μ.wʳ)
 
-    # The rain constituent carries the model's materialized bounds-preserving scheme; the
+    # The sedimenting rain carries the model's materialized bounds-preserving scheme; the
     # unlimited twin is the same WENO materialized the way the model does it.
-    limited = model.sedimentation_constituents
-    rain = only(filter(c -> c.q === μ.qʳ, limited))
+    limited = values(model.sedimentation)
+    rain = model.sedimentation.ρqʳ
     @test rain.advection isa WENO
     @test rain.advection.bounds.minimum_value == 0
     @test rain.advection.bounds.maximum_value == 1
@@ -1351,10 +1354,11 @@ end
     # refresh it here the way `update_advection!` does.
     Oceananigans.Advection.update_bounds_preserving_limiter!(rain.advection, grid, μ.qʳ)
     @test any(θ -> θ < 1, Array(interior(rain.advection.bounds.limiter, 1, 1, :)))
-    unlimited = ((; rain.w, rain.q, rain.ρq, rain.phase, advection = unlimited_scheme),)
+    unlimited = (Breeze.AtmosphereModels.SedimentingCondensate(rain.velocity, rain.specific_humidity, rain.density,
+                                                              rain.phase, unlimited_scheme),)
 
-    heat(constituents, k) = -(@allowscalar Breeze.AtmosphereModels.sedimentation_tendency(
-        1, 1, k, grid, constituents, wᵗ, uniform_content, model.dynamics, model.thermodynamic_constants,
+    heat(condensates, k) = -(@allowscalar Breeze.AtmosphereModels.sedimentation_tendency(
+        1, 1, k, grid, condensates, wᵗ, uniform_content, model.dynamics, model.thermodynamic_constants,
         model.microphysics, μ, specific_prognostic_moisture(model), model.temperature))
     mass(advection, k) = @allowscalar Breeze.AtmosphereModels.div_ρUc(1, 1, k, grid, advection, ρᵣ, U, μ.qʳ)
     atol = sqrt(eps(FT)) * abs(χ) * FT(1e-3) * 2 / Δz
@@ -1370,7 +1374,7 @@ end
     @test any(k -> !isapprox(heat(limited, k), heat(unlimited, k); atol), 1:Nz)
 end
 
-@testset "Mixed-phase constituents and snow bottom flux [$(FT)]" for FT in test_float_types()
+@testset "Mixed-phase sedimenting condensates and snow bottom flux [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -1389,12 +1393,14 @@ end
     wʳ = @allowscalar μ.wʳ[1, 1, 1]
     wˢⁿ = @allowscalar μ.wˢⁿ[1, 1, 1]
 
-    # Rain and snow are the constituents, with liquid and ice phase; the diagnosed cloud
-    # liquid and cloud ice move no mass and appear in neither
-    constituents = model.sedimentation_constituents
-    @test length(constituents) == 2
-    @test any(c -> c.w === μ.wʳ && c.q === μ.qʳ && c.phase === Val(:liquid), constituents)
-    @test any(c -> c.w === μ.wˢⁿ && c.q === μ.qˢⁿ && c.phase === Val(:ice), constituents)
+    # Rain and snow sediment, with liquid and ice phase; the diagnosed cloud liquid and cloud
+    # ice move no mass and appear in neither
+    sedimentation = model.sedimentation
+    @test keys(sedimentation) == (:ρqʳ, :ρqˢⁿ)
+    @test sedimentation.ρqʳ.velocity === μ.wʳ && sedimentation.ρqʳ.specific_humidity === μ.qʳ
+    @test sedimentation.ρqʳ.phase === Val(:liquid)
+    @test sedimentation.ρqˢⁿ.velocity === μ.wˢⁿ && sedimentation.ρqˢⁿ.specific_humidity === μ.qˢⁿ
+    @test sedimentation.ρqˢⁿ.phase === Val(:ice)
     @test qᶜⁱ > 0
     @test wˢⁿ < 0
 

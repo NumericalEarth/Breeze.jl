@@ -247,7 +247,7 @@ end
 ##### Sedimentation of condensate content by the implicit remainder
 #####
 ##### The thermodynamic tendencies move the condensate part of ρθ / ρs with the explicit fraction
-##### of each constituent's sedimentation mass flux. The remainder the tridiagonal solve applies to
+##### of each condensate's sedimentation mass flux. The remainder the tridiagonal solve applies to
 ##### the tracer depends on the solved state, so its content is moved here, after the tracers'
 ##### solves of a stage, from the fluxes the solve actually applied: the first-order upwind fluxes
 ##### of the implicit velocity at the solved humidity ρq / ρ, mirroring
@@ -299,8 +299,8 @@ end
     return Azᶜᶜᶠ(i, j, k, grid) * (upward + downward)
 end
 
-# Whether the implicit solve advances any constituent's mass at all.
-implicit_sedimentation(constituents) = any(c -> c.advection isa AIVA, constituents)
+# Whether the implicit solve advances any condensate's mass at all.
+implicit_sedimentation(condensates) = any(c -> c.advection isa AIVA, condensates)
 
 """
 $(TYPEDSIGNATURES)
@@ -316,29 +316,29 @@ The time steppers call this between the tracers' solves of a stage and the therm
 variable's post-loop solve, so the moved content takes the same implicit diffusion as the rest of
 the field, and on the SSP path its implicit vertical transport too; the acoustic stepper applies
 that transport inside its substep loop, before this step (see the note above). A no-op when no
-constituent is advected adaptively implicitly.
+condensate is advected adaptively implicitly.
 
 For potential temperature this is a derivative-times-increment update, not an exact finite
 thermal-energy reconstruction. Matching the implicit mass flux alone does not remove that
 finite-step error.
 """
 function implicit_sedimentation_step!(model, Δt, velocities, formulation = model.formulation)
-    constituents = model.sedimentation_constituents
-    implicit_sedimentation(constituents) || return nothing
+    condensates = values(model.sedimentation)
+    implicit_sedimentation(condensates) || return nothing
     grid = model.grid
     arch = grid.architecture
     φ = thermodynamic_density(model.formulation)
     launch!(arch, grid, :xyz, _implicit_sedimentation_step!,
-            φ, grid, kernel_time_step(arch, grid, Δt), constituents, velocities.w,
+            φ, grid, kernel_time_step(arch, grid, Δt), condensates, velocities.w,
             formulation, model.dynamics, model.thermodynamic_constants, model.microphysics,
             model.microphysical_fields, specific_prognostic_moisture(model), model.temperature)
     return nothing
 end
 
-@kernel function _implicit_sedimentation_step!(φ, grid, Δt, constituents, wᵗ, formulation, dynamics, constants,
+@kernel function _implicit_sedimentation_step!(φ, grid, Δt, condensates, wᵗ, formulation, dynamics, constants,
                                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     i, j, k = @index(Global, NTuple)
-    tendency = sedimentation_content_tendency(i, j, k, grid, constituents, wᵗ, implicit_constituent_mass_fluxes,
+    tendency = sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, implicit_condensate_mass_fluxes,
                                               formulation, dynamics, constants, microphysics, microphysical_fields,
                                               specific_prognostic_moisture, temperature)
     @inbounds φ[i, j, k] += Δt * tendency

@@ -270,14 +270,14 @@ end
     @test wʳ < 0
     @test wʳ < wᶜˡ
 
-    # Both masses are sedimentation constituents; the number tracers fall too but are not
-    # condensate masses, so they carry no latent heat and are not constituents
-    constituents = model.sedimentation_constituents
-    @test length(constituents) == 2
-    @test all(c -> c.phase === Val(:liquid), constituents)
-    @test any(c -> c.w === μ.wʳ && c.q === μ.qʳ, constituents)
-    @test any(c -> c.w === μ.wᶜˡ && c.q === μ.qᶜˡ, constituents)
-    @test !any(c -> c.w === μ.wⁿʳ || c.w === μ.wⁿᶜˡ, constituents)
+    # Both masses sediment; the number tracers fall too but are not condensate masses, so they
+    # carry no latent heat and are absent from `model.sedimentation`
+    sedimentation = model.sedimentation
+    @test keys(sedimentation) == (:ρqᶜˡ, :ρqʳ)
+    @test all(c -> c.phase === Val(:liquid), values(sedimentation))
+    @test sedimentation.ρqʳ.velocity === μ.wʳ && sedimentation.ρqʳ.specific_humidity === μ.qʳ
+    @test sedimentation.ρqᶜˡ.velocity === μ.wᶜˡ && sedimentation.ρqᶜˡ.specific_humidity === μ.qᶜˡ
+    @test !any(c -> c.velocity === μ.wⁿʳ || c.velocity === μ.wⁿᶜˡ, values(sedimentation))
 end
 
 @testset "TwoMomentCloudMicrophysics ImpenetrableBoundaryCondition [$FT]" for FT in test_float_types()
