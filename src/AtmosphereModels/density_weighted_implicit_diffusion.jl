@@ -117,8 +117,7 @@ BoundaryConditions.needs_implicit_solver(a::DensityWeightedImplicitOperator) =
 # `!peripheral_node(...)` and returning `true` for a velocity that permits outflow. Until that
 # exists this body duplicates `Oceananigans.Advection.implicit_advection_diagonal` and must track
 # changes to it (the `ρᶠ/ρᶜ` weighting in particular).
-@inline function density_weighted_advection_diagonal(i, j, k, grid, advection::AIVA, w::OutflowEnabledVelocity,
-                                                     Δt, ℓx, ℓy, ℓz::Center, ρ)
+@inline function density_weighted_advection_diagonal(i, j, k, grid, advection::AIVA, w::OutflowEnabledVelocity, Δt, ℓx, ℓy, ℓz::Center, ρ)
     scheme = vertical_scheme(advection)
     td = time_discretization(scheme)
     wⁱ⁺ = implicit_vertical_velocity(ℓx, ℓy, i, j, k+1, grid, scheme, td, w)
