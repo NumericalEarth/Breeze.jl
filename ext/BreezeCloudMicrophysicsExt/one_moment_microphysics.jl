@@ -1023,6 +1023,10 @@ end
     return ifelse(qʳ ≥ 0, ΣρS, ρSⁿᵘᵐ)
 end
 
+# Saturation adjustment partitions ρqᵉ diagnostically, so precipitation sources are drawn from ρqᵉ.
+@inline AM.microphysical_tendency(bμp::Union{WP1M, MP1M}, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants) =
+    - AM.microphysical_tendency(bμp, Val(:ρqʳ), ρ, ℳ, 𝒰, constants) - AM.microphysical_tendency(bμp, Val(:ρqˢⁿ), ρ, ℳ, 𝒰, constants)
+
 #####
 ##### Microphysical tendencies for warm-phase non-equilibrium 1M (WPNE1M)
 #####
