@@ -101,6 +101,7 @@ jobs:
           julia --color=yes --project=docs --threads 1,$(($(nproc)-1)) docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JULIA_NUM_GC_THREADS: "4,1"
       - name: "Upload Manifest"
         if: always()
         timeout-minutes: 2
