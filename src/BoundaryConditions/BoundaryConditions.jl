@@ -25,7 +25,7 @@ export BulkDragFunction,
        default_neutral_sensible_heat_polynomial,
        default_neutral_latent_heat_polynomial
 
-using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density,
+using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density, total_density,
                           dynamics_thermodynamic_fields,
                           standard_pressure, default_drag_surface_temperature,
                           moisture_specific_name, thermodynamic_density_name,
@@ -35,14 +35,16 @@ using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
                                       virtual_potential_temperature
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity, MoistureMassFractions,
-                        LiquidIcePotentialTemperatureState,
-                        potential_temperature_from_temperature, surface_pressure_from_cell_center
+                        LiquidIcePotentialTemperatureState, StaticEnergyState,
+                        potential_temperature_from_temperature, surface_pressure_from_cell_center,
+                        with_temperature
 
 # Extended below with a grid-point method: `exner_function(i, j, k, grid, ef, q, dynamics_fields)`.
 import ..Thermodynamics: exner_function
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: Architectures
+using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        BoundaryCondition,
                                        DefaultBoundaryCondition,
@@ -424,8 +426,9 @@ function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBound
                               filter_timescale=bf.filtered_velocities.filter_timescale)
     end
 
+    moisture = (; microphysics, density=total_density(dynamics))
     new_bf = BulkSensibleHeatFluxFunction(side, coef, bf.gustiness, Tˢ, pˢᵗ, constants,
-                                          bf.formulation, bf.filtered_velocities, fs)
+                                          bf.formulation, bf.filtered_velocities, fs, moisture)
     return BoundaryCondition(Flux(), new_bf)
 end
 
@@ -491,9 +494,9 @@ materialize_surface_field(f::Function, grid, side) = f
 BulkDragFunction(d, side, coef::NothingPolynomialCoefficient, g, t, fv, c) =
     BulkDragFunction(d, side, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t, fv, c)
 
-BulkSensibleHeatFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, s, c, f, fv, fs) =
+BulkSensibleHeatFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, s, c, f, fv, fs, moisture) =
     BulkSensibleHeatFluxFunction(side, fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)),
-                                 g, t, s, c, f, fv, fs)
+                                 g, t, s, c, f, fv, fs, moisture)
 
 BulkVaporFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, h, c, s, β, fv, fs) =
     BulkVaporFluxFunction(side, fill_polynomial(coef, default_neutral_latent_heat_polynomial, Val(:scalar)), g, t, h, c, s, β, fv, fs)

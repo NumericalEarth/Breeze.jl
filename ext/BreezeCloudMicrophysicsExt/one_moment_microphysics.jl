@@ -759,22 +759,6 @@ end
 end
 
 #####
-##### specific_prognostic_moisture_from_total: convert qᵗ to qᵛᵉ
-#####
-
-# SA warm-phase: qᵉ = qᵗ - qʳ (subtract precipitation)
-@inline AM.specific_prognostic_moisture_from_total(bμp::WP1M, qᵗ, ℳ::WarmPhaseOneMomentState) = qᵗ - ℳ.qʳ
-
-# SA mixed-phase: qᵉ = qᵗ - qʳ - qˢⁿ (subtract precipitation)
-@inline AM.specific_prognostic_moisture_from_total(bμp::MP1M, qᵗ, ℳ::MixedPhaseOneMomentState) = qᵗ - ℳ.qʳ - ℳ.qˢⁿ
-
-# NE warm-phase: qᵛ = qᵗ - qᶜˡ - qʳ (subtract all condensate)
-@inline AM.specific_prognostic_moisture_from_total(bμp::WPNE1M, qᵗ, ℳ::WarmPhaseOneMomentState) = max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
-
-# NE mixed-phase: qᵛ = qᵗ - qᶜˡ - qᶜⁱ - qʳ - qˢⁿ (subtract all condensate)
-@inline AM.specific_prognostic_moisture_from_total(bμp::MPNE1M, qᵗ, ℳ::MixedPhaseOneMomentState) = max(0, qᵗ - ℳ.qᶜˡ - ℳ.qᶜⁱ - ℳ.qʳ - ℳ.qˢⁿ)
-
-#####
 ##### Moisture fraction computation
 #####
 
@@ -783,7 +767,7 @@ end
 # Used by parcel models. Grid models use grid_moisture_fractions instead, which splits
 # saturation adjustment from non-equilibrium the same way.
 
-# Saturation adjustment: `specific_prognostic_moisture_from_total` returns the equilibrium
+# Saturation adjustment: `specific_prognostic_moisture` returns the equilibrium
 # moisture qᵉ = qᵛ + qᶜˡ, so cloud has to be removed to recover vapor.
 @inline function AM.moisture_fractions(bμp::WP1M, ℳ::WarmPhaseOneMomentState, qᵉ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
@@ -791,7 +775,7 @@ end
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-# Non-equilibrium: `specific_prognostic_moisture_from_total` already returned true vapor
+# Non-equilibrium: `specific_prognostic_moisture` already returned true vapor
 # (qᵗ minus every condensate), so subtracting cloud again would double-count it.
 @inline function AM.moisture_fractions(bμp::WPNE1M, ℳ::WarmPhaseOneMomentState, qᵛ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
@@ -865,12 +849,17 @@ end
 # Non-equilibrium: no adjustment (cloud liquid and ice are prognostic)
 @inline AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::NonEquilibrium1M, qᵛ, constants) = 𝒰₀
 
+# Warm-phase schemes carry no snow
+@inline snow_mass_fraction(::WP1M, μ, ρ) = zero(ρ)
+@inline snow_mass_fraction(::MP1M, μ, ρ) = μ.ρqˢⁿ / ρ
+
 # Saturation adjustment (warm-phase and mixed-phase)
-@inline function AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::Union{WP1M, MP1M}, qᵉ, constants)
-    q₁ = MoistureMassFractions(qᵉ)
+@inline function AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::Union{WP1M, MP1M}, qᵉ, constants, μ, ρ)
+    qʳ = μ.ρqʳ / ρ
+    qˢⁿ = snow_mass_fraction(bμp, μ, ρ)
+    q₁ = MoistureMassFractions(qᵉ, qʳ, qˢⁿ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
-    𝒰′ = adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)
-    return 𝒰′
+    return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants, (qʳ, qˢⁿ))
 end
 
 #####
