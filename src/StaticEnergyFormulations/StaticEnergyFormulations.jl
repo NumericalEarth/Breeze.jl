@@ -25,6 +25,7 @@ using Breeze.AtmosphereModels: AtmosphereModels,
     pressure_from_density_temperature,
     grid_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
     c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ,
+    sedimentation_tendency, sedimentation_composition_increment, enthalpy_increment,
     AtmosphereModelBuoyancy,
     radiation_flux_divergence
 

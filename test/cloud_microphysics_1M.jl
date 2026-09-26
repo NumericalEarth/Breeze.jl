@@ -1,8 +1,15 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, condensate_phase,
+                               total_density, dynamics_density, standard_pressure,
+                               implicit_advection_velocities, density_weighted_advection_diagonal,
+                               implicit_advection_density, implicit_step_scheme, closure_scalar_index,
+                               phase_content, specific_prognostic_moisture
+using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState,
+                             LiquidIceDensityState, StaticEnergyState, mixture_gas_constant
 using CloudMicrophysics
+using CloudMicrophysics.Microphysics1M: conv_q_lcl_to_q_rai, accretion
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce, Microphysics1MParams
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -13,6 +20,53 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 using Breeze.Microphysics: ConstantRateCondensateFormation
 
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.TimeSteppers: update_state!, implicit_step!
+using Oceananigans: fields
+using Oceananigans.Fields: ZeroField, ZFaceField
+using Oceananigans.Operators: ℑzᵃᵃᶠ
+using Oceananigans.Advection: materialize_advection, adapt_advection_order
+
+struct MockSurfaceFluxTransportModel{G, D, V, M, A, S, W}
+    grid :: G
+    dynamics :: D
+    velocities :: V
+    microphysical_fields :: M
+    advection :: A
+    sedimentation :: S
+    transport_w :: W
+end
+
+Breeze.AtmosphereModels.transport_velocities(model::MockSurfaceFluxTransportModel) =
+    (; u = ZeroField(), v = ZeroField(), w = model.transport_w)
+
+# Synthetic condensate contents for the sedimentation coupling tests, passed in place of the
+# formulation so that `condensate_content` dispatches to them: a uniform content with no
+# enthalpy contrast, and contents indexed by the cell that identify the cell each flux draws its
+# enthalpy from and the cell that converts it.
+struct UniformContent{FT}
+    χ :: FT
+end
+struct EnthalpyContent end
+struct LocalContent end
+struct GeneralContent end
+
+@inline Breeze.AtmosphereModels.condensate_content(i, j, k, grid, content::UniformContent, args...) =
+    (; χ = (content.χ, zero(content.χ)), h = (zero(content.χ), zero(content.χ)), ∂φ∂h = one(content.χ))
+
+@inline function Breeze.AtmosphereModels.condensate_content(i, j, k, grid, ::EnthalpyContent, args...)
+    FT = eltype(grid)
+    return (; χ = (FT(k), FT(10k)), h = (FT(k), FT(10k)), ∂φ∂h = one(FT))
+end
+
+@inline function Breeze.AtmosphereModels.condensate_content(i, j, k, grid, ::LocalContent, args...)
+    FT = eltype(grid)
+    return (; χ = (FT(k), FT(10k)), h = (zero(FT), zero(FT)), ∂φ∂h = one(FT))
+end
+
+@inline function Breeze.AtmosphereModels.condensate_content(i, j, k, grid, ::GeneralContent, args...)
+    FT = eltype(grid)
+    return (; χ = (FT(k), FT(10k)), h = (FT(k^2), FT(-k)), ∂φ∂h = FT(1) / 2)
+end
 
 #####
 ##### One-moment microphysics tests
@@ -269,7 +323,425 @@ end
     @test model.clock.iteration == 1
 end
 
-@testset "Surface precipitation flux diagnostic [$(FT)]" for FT in test_float_types()
+@testset "Bottom precipitation flux diagnostic [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=300)
+
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    set!(model; ρ = 2, θ = 300, qᵗ = 0.020, qᶜˡ = 0.0001, qʳ = 0.005,
+         enforce_mass_conservation = false)
+
+    production = precipitation_rate(model, :liquid)
+    compute!(production)
+
+    parameters = microphysics.categories.parameters
+    qᶜˡ = @allowscalar model.microphysical_fields.qᶜˡ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ = @allowscalar total_density(model.dynamics)[1, 1, 1]
+    accretion_params = parameters.process_params.cloud_liquid_rain_accretion
+    expected_production =
+        conv_q_lcl_to_q_rai(parameters.processes.rain_autoconversion, parameters, nothing, (; q_lcl = qᶜˡ), (; w = zero(qᶜˡ))) +
+        accretion(parameters.cloud.liquid, parameters.precip.rain, parameters.terminal_velocity.rain,
+                  accretion_params.e, qᶜˡ, qʳ, ρ)
+    @test @allowscalar production[1, 1, 1] ≈ expected_production
+
+    spf = bottom_precipitation_flux(model)
+    @test spf isa Field
+    compute!(spf)
+
+    # The bottom precipitation flux uses the advection scheme's face reconstruction.
+    # For uniform condensate fields with Centered(order=2) advection, each
+    # face-reconstructed tracer equals its cell-center value. The density is
+    # face-interpolated (ℑz) to match the advection operator.
+    wᶜˡ = @allowscalar model.microphysical_fields.wᶜˡ[1, 1, 1]
+    wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    qᶜˡ = @allowscalar model.microphysical_fields.qᶜˡ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
+    ρ_reference_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
+    expected_flux = -ρ_face * (wᶜˡ * qᶜˡ + wʳ * qʳ)
+
+    # `set!` weights the specific condensate inputs by the supplied `ρ` and adds the
+    # resulting partial densities to it, so the reconciled total density is
+    # ρ (1 + qᶜˡ + qʳ) evaluated with the *input* specific values.
+    @test ρ_face ≈ FT(2) * (1 + FT(0.0001) + FT(0.005))
+    @test !isapprox(ρ_face, ρ_reference_face)
+    @test @allowscalar spf[1, 1] ≈ expected_flux
+    @test @allowscalar spf[1, 1] > 0
+end
+
+@testset "Bounds-preserving WENO bottom precipitation flux [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(6, 6, 6), extent=(100, 100, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics()
+    scalar_advection = (; ρqʳ = WENO(FT; order=5, bounds=(0, 1)))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection)
+
+    set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
+    flux = bottom_precipitation_flux(model)
+    compute!(flux)
+
+    wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
+    @test @allowscalar flux[1, 1] ≈ -ρ_face * wʳ * qʳ
+end
+
+@testset "Adaptive implicit sedimentation includes boundary outflow [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(6, 6, 6), extent=(100, 100, 1))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics()
+    adaptive_discretization = AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5)
+    scalar_advection = (; ρqʳ = WENO(FT; order=5, time_discretization=adaptive_discretization))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection)
+
+    set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
+    advection = model.advection.ρqʳ
+    td = Oceananigans.TimeSteppers.time_discretization(advection)
+    Δt = FT(10)
+    td.Δt[] = Δt
+
+    velocities = implicit_advection_velocities(model.dynamics, model.velocities, :ρqʳ,
+                                                model.microphysics, model.microphysical_fields)
+    ρ = total_density(model.dynamics)
+
+    # The Breeze-owned seam every scalar's implicit solve passes through (see
+    # `DensityWeightedImplicitOperator`): with the bottom face unmasked, the outflow term makes
+    # the bottom-cell diagonal positive, where the impermeable upstream coefficient vanishes.
+    diagonal = @allowscalar density_weighted_advection_diagonal(1, 1, 1, grid, advection, velocities.w,
+                                                                Δt, Center(), Center(), Center(), ρ)
+    @test diagonal > 0
+
+    flux = bottom_precipitation_flux(model)
+    compute!(flux)
+    wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, ρ)
+    @test @allowscalar flux[1, 1] ≈ -ρ_face * wʳ * qʳ
+end
+
+@testset "Adaptive implicit sedimentation heat follows the solved mass [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(20)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics()
+    adaptive_discretization = AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5)
+    scalar_advection = (; ρqʳ = WENO(FT; order=5, time_discretization=adaptive_discretization))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection)
+    μ = model.microphysical_fields
+
+    # A rain shaft above a dry lower half, falling at 8 m/s through 20 m cells over 10 s: a fall
+    # Courant number of 4, of which the explicit fraction carries 1/8 and the solve the rest.
+    Δt = FT(10)
+    w₀ = FT(-8)
+    set!(model; θ=300, qᵗ=0.005, qᶜˡ=0, qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
+    set!(μ.wʳ, (x, y, z) -> ifelse(z < Nz * Δz, w₀, FT(0)))
+    set!(μ.wᶜˡ, 0)
+    td = Oceananigans.TimeSteppers.time_discretization(model.advection.ρqʳ)
+    td.Δt[] = Δt
+
+    # The rain's implicit solve, exactly as the time steppers issue it
+    ρqʳ = μ.ρqʳ
+    ρqʳ⁰ = Array(interior(ρqʳ, 1, 1, :))
+    implicit_step!(ρqʳ, model.timestepper.implicit_solver, model.closure, model.closure_fields,
+                   closure_scalar_index(model, :ρqʳ), model.clock, fields(model), Δt,
+                   implicit_step_scheme(model.advection.ρqʳ),
+                   implicit_advection_velocities(model.dynamics, model.velocities, :ρqʳ, model.microphysics, μ),
+                   implicit_advection_density(model.dynamics, model.formulation, :ρqʳ))
+    Δρqʳ = Array(interior(ρqʳ, 1, 1, :)) .- ρqʳ⁰
+
+    # Nothing enters through the top, so the top cell only drains: backward Euler leaves it
+    # 1 / (1 + C) of its rain at the face-weighted implicit Courant number C, where an estimate at
+    # the pre-solve state, C q, overstates the loss by the factor 1 + C.
+    ρ = total_density(model.dynamics)
+    ρᶠ = @allowscalar ℑzᵃᵃᶠ(1, 1, Nz, grid, ρ)
+    ρᶜ = @allowscalar ρ[1, 1, Nz]
+    α = -w₀ * Δt / Δz
+    C = α * (1 - FT(0.5) / α) * ρᶠ / ρᶜ
+    @test C > 3
+    @test Δρqʳ[Nz] ≈ -C / (1 + C) * ρqʳ⁰[Nz]
+
+    # With a uniform synthetic content and enthalpy (no sensible heat moves between cells), the
+    # heat the post-solve step moves is χ times the mass the solve moved, cell by cell (the
+    # anelastic coupling ratio is one), outflow through the bottom included, so the column loses
+    # deficit with the rain that leaves.
+    χ = FT(-2500)
+    uniform_content = UniformContent(χ)
+    ρθ = model.formulation.potential_temperature_density
+    ρθ⁰ = Array(interior(ρθ, 1, 1, :))
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(model, Δt, model.velocities, uniform_content)
+    Δρθ = Array(interior(ρθ, 1, 1, :)) .- ρθ⁰
+    tolerance = sqrt(eps(FT)) * maximum(abs.(χ .* Δρqʳ))
+    @test all(abs.(Δρθ .- χ .* Δρqʳ) .<= tolerance)
+    @test sum(Δρqʳ) < 0
+    @test sum(Δρθ) > 0
+
+    # With resolved transport and diffusion in the solves as well, the order matters: adding the
+    # content to ρθ* before ρθ's solve keeps ρθ = χ ρqʳ exactly for a uniform content, adding it
+    # after exempts it from the transport and diffusion that acted on the rest of ρθ (see
+    # `implicit_sedimentation_step!`). Here the resolved Courant number is one (half of it
+    # implicit), the fall Courant number 1.5 (four fifths of it implicit), and κ Δt / Δz² = 1/4.
+    adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+    transport_model = AtmosphereModel(grid; dynamics, microphysics,
+                                      closure = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ=10),
+                                      scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
+    μₜ = transport_model.microphysical_fields
+    set!(transport_model; θ=300, qᵗ=0.005, qᶜˡ=0, qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
+    set!(μₜ.wʳ, (x, y, z) -> ifelse(z < Nz * Δz, FT(-3), FT(0)))
+    set!(μₜ.wᶜˡ, 0)
+    set!(transport_model.velocities.w, (x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)))
+    for name in (:ρθ, :ρqʳ)
+        Oceananigans.TimeSteppers.time_discretization(transport_model.advection[name]).Δt[] = Δt
+    end
+
+    ρqʳₜ = μₜ.ρqʳ
+    ρθₜ = transport_model.formulation.potential_temperature_density
+    ρqʳₜ⁰ = CenterField(grid)
+    set!(ρqʳₜ⁰, ρqʳₜ)
+    interior(ρθₜ) .= χ .* interior(ρqʳₜ)
+
+    solve!(name, u) = implicit_step!(u, transport_model.timestepper.implicit_solver, transport_model.closure,
+                                     transport_model.closure_fields, closure_scalar_index(transport_model, name),
+                                     transport_model.clock, fields(transport_model), Δt,
+                                     implicit_step_scheme(transport_model.advection[name]),
+                                     implicit_advection_velocities(transport_model.dynamics, transport_model.velocities,
+                                                                   name, transport_model.microphysics, μₜ),
+                                     implicit_advection_density(transport_model.dynamics, transport_model.formulation, name))
+
+    # The order the time steppers issue: the tracer's solve, the content of the mass it moved,
+    # the thermodynamic variable's solve.
+    solve!(:ρqʳ, ρqʳₜ)
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(transport_model, Δt, transport_model.velocities, uniform_content)
+    solve!(:ρθ, ρθₜ)
+    ρqʳ¹ = Array(interior(ρqʳₜ, 1, 1, :))
+    moved = maximum(abs.(χ .* (ρqʳ¹ .- Array(interior(ρqʳₜ⁰, 1, 1, :)))))
+    @test moved > 0
+    @test all(abs.(Array(interior(ρθₜ, 1, 1, :)) .- χ .* ρqʳ¹) .<= sqrt(eps(FT)) * maximum(abs.(χ .* ρqʳ¹)))
+
+    # The reverse order leaves the moved content out of the transport that acted on the rest of ρθ.
+    interior(ρθₜ) .= χ .* interior(ρqʳₜ⁰)
+    solve!(:ρθ, ρθₜ)
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(transport_model, Δt, transport_model.velocities, uniform_content)
+    @test maximum(abs.(Array(interior(ρθₜ, 1, 1, :)) .- χ .* ρqʳ¹)) > moved / 10
+
+    # The step is wired into both time steppers: one step with the fall speed above the
+    # explicit CFL leaves finite fields on the anelastic SSP path ...
+    time_step!(model, Δt)
+    @test all(isfinite, interior(ρθ))
+    @test all(isfinite, interior(ρqʳ))
+
+    # ... and on the compressible acoustic path. There the thermodynamic variable's implicit
+    # vertical transport is solved inside the acoustic substep loop, before the tracers' solves,
+    # so the content moved after them takes only the post-loop diffusion solve: a change of the
+    # finite-step splitting (first order in Δt), while the mass the content follows and the water
+    # budget are unchanged; no energy-conservation statement is implied. At the
+    # operator level the step moves χ times the mass the tracer's solve moved, weighted by the
+    # cell's dry mass fraction, with a nonzero implicit remainder.
+    acoustic_grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, 800))
+    acoustic_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+    acoustic_advection = (; ρqʳ = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.05)))
+    acoustic_model = AtmosphereModel(acoustic_grid; dynamics=acoustic_dynamics, microphysics=OneMomentCloudMicrophysics(),
+                                     scalar_advection=acoustic_advection)
+    set!(acoustic_model; ρ=acoustic_model.dynamics.reference_state.density, θ=300, qᵗ=0.005, qᶜˡ=0,
+         qʳ=(x, y, z) -> ifelse(z > 400, FT(1e-3), FT(0)))
+    μₐ = acoustic_model.microphysical_fields
+    Δtₐ = FT(10)
+    Oceananigans.TimeSteppers.time_discretization(acoustic_model.advection.ρqʳ).Δt[] = Δtₐ
+    ρqʳₐ⁰ = Array(interior(μₐ.ρqʳ, 1, 1, :))
+    implicit_step!(μₐ.ρqʳ, acoustic_model.timestepper.implicit_solver, acoustic_model.closure,
+                   acoustic_model.closure_fields, closure_scalar_index(acoustic_model, :ρqʳ),
+                   acoustic_model.clock, fields(acoustic_model), Δtₐ,
+                   implicit_step_scheme(acoustic_model.advection.ρqʳ),
+                   implicit_advection_velocities(acoustic_model.dynamics, acoustic_model.velocities, :ρqʳ,
+                                                 acoustic_model.microphysics, μₐ),
+                   implicit_advection_density(acoustic_model.dynamics, acoustic_model.formulation, :ρqʳ))
+    Δρqʳₐ = Array(interior(μₐ.ρqʳ, 1, 1, :)) .- ρqʳₐ⁰
+    @test maximum(abs.(Δρqʳₐ)) > 0
+    ρθₐ = acoustic_model.formulation.potential_temperature_density
+    ρθₐ⁰ = Array(interior(ρθₐ, 1, 1, :))
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(acoustic_model, Δtₐ, acoustic_model.velocities, uniform_content)
+    Δρθₐ = Array(interior(ρθₐ, 1, 1, :)) .- ρθₐ⁰
+    qᵈₐ = Array(interior(dynamics_density(acoustic_model.dynamics), 1, 1, :)) ./
+          Array(interior(total_density(acoustic_model.dynamics), 1, 1, :))
+    @test all(abs.(Δρθₐ .- qᵈₐ .* χ .* Δρqʳₐ) .<= sqrt(eps(FT)) * maximum(abs.(χ .* Δρqʳₐ)))
+
+    # A full acoustic step at that fall Courant number leaves finite fields.
+    interior(μₐ.ρqʳ, 1, 1, :) .= Oceananigans.on_architecture(default_arch, ρqʳₐ⁰)
+    interior(ρθₐ, 1, 1, :) .= Oceananigans.on_architecture(default_arch, ρθₐ⁰)
+    update_state!(acoustic_model)
+    time_step!(acoustic_model, Δtₐ)
+    @test all(isfinite, interior(acoustic_model.formulation.potential_temperature_density))
+    @test all(isfinite, interior(acoustic_model.microphysical_fields.ρqʳ))
+end
+
+@testset "The SSP RK3 stage solves ρθ after moving the implicitly sedimented content [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(20)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics(FT)
+    adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
+
+    # A rain shaft falling through a resolved downdraft at Courant number one, so half of ρθ's
+    # transport is implicit and most of the rain's motion is. The pressure projection would
+    # remove the downdraft from a column, so one stage is run on its own, as the time stepper
+    # runs it, from the tendencies built for it.
+    Δt = FT(10)
+    set!(model; θ=300, qᵛ=0.005, qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)),
+         w=(x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)), enforce_mass_conservation=false)
+    model.clock.last_Δt = Δt # what `update_advection_timestep!` hands the adaptive schemes
+    update_state!(model; compute_tendencies=true)
+    μ = model.microphysical_fields
+    @test @allowscalar model.velocities.w[1, 1, 4] ≈ -2
+    @test @allowscalar μ.wʳ[1, 1, Nz] < -Δz / Δt # the fall alone exceeds the explicit CFL
+
+    ρθ = model.formulation.potential_temperature_density
+    ρθ⁰ = CenterField(grid)
+    set!(ρθ⁰, ρθ)
+    Gρθ = model.timestepper.Gⁿ.ρθ
+    Breeze.TimeSteppers.ssp_rk3_substep!(model, Δt, one(FT))
+    ρθ¹ = Array(interior(ρθ, 1, 1, :))
+
+    # Replay the stage's operations on ρθ, reading the rain the stage solved: the explicit
+    # update, the content of the implicitly sedimented mass, then ρθ's own solve ...
+    solve_ρθ!() = implicit_step!(ρθ, model.timestepper.implicit_solver, model.closure, model.closure_fields,
+                                 closure_scalar_index(model, :ρθ), model.clock, fields(model), Δt,
+                                 implicit_step_scheme(model.advection.ρθ),
+                                 implicit_advection_velocities(model.dynamics, model.velocities, :ρθ, model.microphysics, μ),
+                                 implicit_advection_density(model.dynamics, model.formulation, :ρθ))
+    interior(ρθ) .= interior(ρθ⁰) .+ Δt .* interior(Gρθ)
+    ρθ_explicit = Array(interior(ρθ, 1, 1, :))
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(model, Δt, model.velocities)
+    content_moved = maximum(abs.(Array(interior(ρθ, 1, 1, :)) .- ρθ_explicit))
+    @test content_moved > 0
+    solve_ρθ!()
+    @test all(abs.(Array(interior(ρθ, 1, 1, :)) .- ρθ¹) .<= sqrt(eps(FT)) * maximum(abs.(ρθ¹)))
+
+    # ... whereas solving first leaves the moved content out of the transport the solve applied.
+    interior(ρθ) .= interior(ρθ⁰) .+ Δt .* interior(Gρθ)
+    solve_ρθ!()
+    Breeze.AtmosphereModels.implicit_sedimentation_step!(model, Δt, model.velocities)
+    @test maximum(abs.(Array(interior(ρθ, 1, 1, :)) .- ρθ¹)) > content_moved / 10
+end
+
+@testset "The acoustic stage forms the sedimentation content from the tracers' transport velocity [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(20)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+    microphysics = OneMomentCloudMicrophysics(FT)
+    adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
+    @test model.timestepper isa Breeze.TimeSteppers.AcousticRungeKutta3
+
+    Δt = FT(10)
+    set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.005, qᶜˡ=0,
+         qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
+    update_state!(model)
+    μ = model.microphysical_fields
+    for name in (:ρθ, :ρqʳ)
+        Oceananigans.TimeSteppers.time_discretization(model.advection[name]).Δt[] = Δt
+    end
+    @test @allowscalar μ.wʳ[1, 1, Nz] < -Δz / Δt # the fall alone exceeds the explicit CFL
+
+    # On the acoustic core the thermodynamic variable advects with the RK predictor velocity, the
+    # tracers with the frozen acoustic-mean velocity. Here the two differ: a predictor downdraft
+    # at Courant number one, whose explicit fraction the adaptive scheme clips to the rain's own
+    # speed so that sedimentation fluxes formed with it cancel, and a transport downdraft at half
+    # the explicit limit, which leaves the tendency half of the explicit sedimentation flux.
+    set!(model.velocities.w, (x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)))
+    w̄ = model.timestepper.substepper.time_averaged_velocities.w
+    set!(w̄, (x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-0.5), FT(0)))
+    Breeze.TimeSteppers.cache_transport_velocity!(model)
+
+    # The explicit sedimentation part of a tendency: the tendency with the rain falling minus the
+    # tendency with it suspended, everything else the same. `compute_tendencies!` reads the
+    # sedimentation velocities without refreshing them, so zeroing `wʳ` suspends the rain.
+    Gρθ = model.timestepper.Gⁿ.ρθ
+    Gρqʳ = model.timestepper.Gⁿ.ρqʳ
+    column(f) = Array(interior(f, 1, 1, :))
+    wʳ = copy(parent(μ.wʳ))
+    function sedimentation_part(tendency)
+        falling = tendency()
+        set!(μ.wʳ, 0)
+        suspended = tendency()
+        copyto!(parent(μ.wʳ), wʳ)
+        return falling .- suspended
+    end
+
+    # ρθ's tendency is built as the acoustic stage builds it, ρqʳ's as `update_state!` does.
+    function slow_ρθ_tendency()
+        Breeze.TimeSteppers.compute_slow_scalar_tendencies!(model)
+        return column(Gρθ)
+    end
+
+    function rain_tendency()
+        Breeze.AtmosphereModels.compute_tendencies!(model)
+        return column(Gρqʳ)
+    end
+
+    Sθ = sedimentation_part(slow_ρθ_tendency)
+    Sq = sedimentation_part(rain_tendency)
+    @test maximum(abs.(Sθ)) > 0
+
+    # The sedimentation mass flux the rain tendency applies through each face, integrated down
+    # from the top, through which nothing enters, ...
+    F = zeros(FT, Nz + 1)
+    for k in Nz:-1:1
+        F[k] = F[k+1] + Δz * Sq[k]
+    end
+    @test minimum(F) < 0
+
+    # ... falls everywhere, so it carries the content of the cell above each face, and the
+    # cell's dry mass fraction converts the change of θ into that of ρᵈ θ (see
+    # `expected_sedimentation_tendency`). The content ρθ's tendency moves is this, formed with
+    # the tracers' velocity, ...
+    constants = model.thermodynamic_constants
+    content(k) = @allowscalar Breeze.AtmosphereModels.condensate_content(
+        1, 1, k, grid, model.formulation, model.dynamics, constants, model.microphysics, μ,
+        specific_prognostic_moisture(model), model.temperature)
+    c = [content(k) for k in 1:Nz]
+    χ = [cₖ.χ[1] for cₖ in c]
+    h = [cₖ.h[1] for cₖ in c]
+    β = [cₖ.∂φ∂h for cₖ in c]
+    qᵈ = column(dynamics_density(model.dynamics)) ./ column(total_density(model.dynamics))
+    Sθ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, χ, h, β; coupling = qᵈ)
+    tolerance = sqrt(eps(FT)) * maximum(abs.(Sθ_expected))
+    @test all(abs.(Sθ .- Sθ_expected) .<= tolerance)
+
+    # ... and not with the predictor's, at which the explicit fractions of the combined and the
+    # transport velocity are clipped to the same speed and the fluxes cancel, so a transport
+    # velocity equal to the predictor moves no content at all.
+    set!(w̄, model.velocities.w)
+    Breeze.TimeSteppers.cache_transport_velocity!(model)
+    Sθ_predictor = sedimentation_part(slow_ρθ_tendency)
+    @test maximum(abs.(Sθ_predictor)) <= tolerance
+end
+
+@testset "Bottom precipitation flux uses transport velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -282,16 +754,28 @@ end
 
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
 
-    spf = surface_precipitation_flux(model)
-    @test spf isa Field
+    transport_w = set!(ZFaceField(grid), FT(-1))
+    mock_model = MockSurfaceFluxTransportModel(model.grid,
+                                               model.dynamics,
+                                               model.velocities,
+                                               model.microphysical_fields,
+                                               model.advection,
+                                               model.sedimentation,
+                                               transport_w)
+
+    spf = bottom_precipitation_flux(mock_model, microphysics)
     compute!(spf)
 
+    wᵗ = @allowscalar transport_w[1, 1, 1]
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
-    ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
-    expected_flux = -wʳ * ρqʳ
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
 
+    expected_flux = -ρ_face * (wᵗ + wʳ) * qʳ
+    sedimentation_only_flux = -ρ_face * wʳ * qʳ
+
+    @test !isapprox(expected_flux, sedimentation_only_flux)
     @test @allowscalar spf[1, 1] ≈ expected_flux
-    @test @allowscalar spf[1, 1] > 0
 end
 
 # Consolidated simulation-based tests (reduced simulation times)
@@ -385,7 +869,7 @@ end
     @test contains(str_ne, "cloud_formation")
 end
 
-@testset "microphysical_velocities [$(FT)]" for FT in test_float_types()
+@testset "sedimentation_velocity, condensate_phase, and microphysical_velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -398,15 +882,535 @@ end
     set!(model; θ=300, qᵗ=0.015, qʳ=0.001)
 
     μ = model.microphysical_fields
+
+    # sedimentation_velocity returns vertical velocity component fields
+    w_rain = sedimentation_velocity(microphysics, μ, Val(:ρqʳ))
+    @test w_rain !== nothing
+    @test w_rain === μ.wʳ
+
+    # WPNE1M has cloud liquid sedimentation
+    w_cloud = sedimentation_velocity(microphysics, μ, Val(:ρqᶜˡ))
+    @test w_cloud !== nothing
+    @test w_cloud === μ.wᶜˡ
+
+    # Thermodynamic phase of each condensate mass
+    @test condensate_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
+    @test condensate_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
+
+    # microphysical_velocities wraps sedimentation_velocity in a velocity tuple
     vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
     @test vel_rain !== nothing
     @test haskey(vel_rain, :w)
 
-    # Cloud liquid sedimentation velocity (non-equilibrium has it)
-    @test haskey(model.microphysical_fields, :wᶜˡ)
     vel_cloud = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
     @test vel_cloud !== nothing
     @test haskey(vel_cloud, :w)
+
+    # Sedimentation velocity values should be negative downward
+    wʳ = @allowscalar μ.wʳ[1, 1, 2]
+    @test wʳ <= 0
+
+    # Both sedimenting masses are resolved into `model.sedimentation`, keyed by name, each with its
+    # own velocity field, humidity field, phase, and the advection scheme that transports it
+    sedimentation = model.sedimentation
+    @test keys(sedimentation) == (:ρqᶜˡ, :ρqʳ)
+    @test sedimentation.ρqʳ.velocity === μ.wʳ
+    @test sedimentation.ρqʳ.specific_humidity === μ.qʳ
+    @test sedimentation.ρqʳ.density === μ.ρqʳ
+    @test sedimentation.ρqʳ.phase === Val(:liquid)
+    @test sedimentation.ρqʳ.advection === model.advection.ρqʳ
+    @test sedimentation.ρqᶜˡ.velocity === μ.wᶜˡ
+    @test sedimentation.ρqᶜˡ.specific_humidity === μ.qᶜˡ
+    @test sedimentation.ρqᶜˡ.phase === Val(:liquid)
+end
+
+@testset "Diagnosed cloud condensate does not sediment [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), extent=(100, 100, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=280)
+    dynamics = AnelasticDynamics(reference_state)
+    cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    set!(model; θ=280, qᵗ=0.03, qʳ=0.001)
+    μ = model.microphysical_fields
+    @test @allowscalar(μ.qᶜˡ[1, 1, 1]) > 0
+
+    # Under saturation adjustment only rain is prognostic and falls; the diagnosed cloud
+    # liquid moves no mass and therefore is absent from `model.sedimentation`.
+    sedimentation = model.sedimentation
+    @test keys(sedimentation) == (:ρqʳ,)
+    @test sedimentation.ρqʳ.velocity === μ.wʳ
+    @test sedimentation.ρqʳ.specific_humidity === μ.qʳ
+    @test sedimentation.ρqʳ.phase === Val(:liquid)
+end
+
+@testset "Sedimentation transports the condensate part of ρθ and ρs [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, 800))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
+    cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
+
+    # Unsaturated column with a mid-column rain blob: no winds, no cloud, no closure, so
+    # the only thermodynamic tendency is the sedimentation transport of the rain's content.
+    rain_blob(x, y, z) = ifelse(300 < z < 500, FT(1e-3), FT(0))
+    Δz = FT(100)
+
+    for formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
+        dynamics = AnelasticDynamics(reference_state)
+        microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+        model = AtmosphereModel(grid; dynamics, microphysics, formulation)
+        set!(model; θ=300, qᵗ=0.005, qʳ=rain_blob)
+        update_state!(model)
+
+        μ = model.microphysical_fields
+        column(f) = Array(interior(f, 1, 1, :))
+        qˡ = column(μ.qˡ)
+        qᵛ = column(μ.qᵛ)
+        pᵣ = column(model.dynamics.reference_state.pressure)
+        pˢᵗ = reference_state.standard_pressure
+        ρᵣ = model.dynamics.reference_state.density
+        ρᵣᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρᵣ)) for k in 1:Nz+1]
+
+        # The sedimentation mass flux advection actually applies: with zero resolved
+        # velocity and the default Centered(order=2) scheme, the flux difference at face k
+        # is wʳ[k] times the face-interpolated rain humidity (only rain sediments here;
+        # diagnosed cloud moves no mass and does not sediment).
+        wʳ = [(@allowscalar μ.wʳ[1, 1, k]) for k in 1:Nz+1]
+        qʳᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ)) for k in 1:Nz+1]
+        Φ = wʳ .* qʳᶠ
+
+        # The content per unit falling liquid is ∂φ/∂qˡ at fixed temperature, the enthalpy it
+        # carries is the static-energy content hˡ − hᵈ, and the heating response is ∂φ/∂h (see
+        # `condensate_content` and `heating_response` in setup.jl), all at the temperature the
+        # tendency kernel works with: the θ kernel diagnoses it from θ and q, the s kernel reads
+        # `model.temperature`.
+        q = [MoistureMassFractions(qᵛ[k], qˡ[k], zero(FT)) for k in 1:Nz]
+        if formulation == :LiquidIcePotentialTemperature
+            θ = column(model.formulation.potential_temperature)
+            T = [Breeze.Thermodynamics.temperature(LiquidIcePotentialTemperatureState(θ[k], q[k], pˢᵗ, pᵣ[k]), constants)
+                 for k in 1:Nz]
+            G = column(model.timestepper.Gⁿ.ρθ)
+        else
+            T = column(model.temperature)
+            G = column(model.timestepper.Gⁿ.ρs)
+        end
+        χ = [condensate_content(formulation, :liquid, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+        h = [condensate_content(:StaticEnergy, :liquid, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+        β = [heating_response(formulation, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+
+        # With no transport velocity every flux is downward: through a cell's upper face it
+        # drains the cell above and delivers χ plus β times the enthalpy brought in excess of the
+        # cell's own; through its lower face it drains the cell itself and delivers χ alone.
+        G_expected = expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φ, χ, h, β)
+
+        scale = maximum(abs.(G))
+        tolerance = scale * sqrt(eps(FT))
+        @test scale > 0
+        @test all(abs.(G .- G_expected) .<= tolerance)
+        @test G[3] < 0                 # rain arriving below the blob pre-cools
+        @test G[5] > 0                 # rain leaving the blob top leaves latent warming behind
+
+        # The enthalpy is the content of s and ∂s/∂h = 1, so for s the sum is a flux form,
+        # conservative with the blob away from the boundaries. ∫ρθ is not: the Jacobian ∂θˡⁱ/∂qˡ
+        # differs between cells and is converted locally rather than transported.
+        formulation == :StaticEnergy && @test abs(sum(G)) <= tolerance
+    end
+
+    # Rain sedimenting out of the open bottom removes its deficit, so ∫ρθ rises: the latent
+    # warming from forming the rain stays in the column.
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; dynamics, microphysics)
+    low_rain(x, y, z) = ifelse(z < 200, FT(1e-3), FT(0))
+    set!(model; θ=300, qᵗ=0.005, qʳ=low_rain)
+    ρθ = model.formulation.potential_temperature_density
+    Σρθ = sum(interior(ρθ))
+    for _ in 1:5
+        time_step!(model, 1)
+    end
+    @test sum(interior(ρθ)) > Σρθ
+end
+
+# Dynamics whose total density falls with the sedimenting condensate, so that every mass fraction
+# renormalizes, wrapped around an anelastic model for the static-energy check below
+struct RenormalizingDynamics{D}
+    dynamics :: D
+end
+Breeze.AtmosphereModels.total_density(d::RenormalizingDynamics) = total_density(d.dynamics)
+function Breeze.AtmosphereModels.sedimentation_composition_increment(::RenormalizingDynamics, q, phase)
+    q̂ = Breeze.AtmosphereModels.unit_composition(phase, q)
+    return MoistureMassFractions(q̂.vapor - q.vapor, q̂.liquid - q.liquid, q̂.ice - q.ice)
+end
+
+@testset "Compressible sedimentation lets the mixture take up the departed mass [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(100)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+
+    constants = ThermodynamicConstants()
+    cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
+    rain_blob(x, y, z) = ifelse(300 < z < 500, FT(2e-3), FT(0))
+
+    # On the compressible core the prognostic dry density has no sedimentation source, so rain
+    # leaving a cell lowers its total density and every mass fraction renormalizes: the content
+    # is the derivative along q̂ˣ − q, every mass fraction renormalizing rather than dry air
+    # making up the departed mass, and the divergence of the total-density-weighted content flux converts to
+    # the prognostic ρᵈ φ through the cell's qᵈ = ρᵈ / ρ. Moist enough (unsaturated throughout)
+    # that the dry-air derivative the anelastic core uses fails the check the kernel meets.
+    # Only the θ formulation runs on the compressible core so far.
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=300)
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; dynamics, microphysics)
+    set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.012, qʳ=rain_blob)
+    update_state!(model)
+
+    μ = model.microphysical_fields
+    column(f) = Array(interior(f, 1, 1, :))
+    qˡ = column(μ.qˡ)
+    qᵛ = column(μ.qᵛ)
+    ρ = total_density(model.dynamics)
+    ρᶜ = column(ρ)
+    qᵈ = column(dynamics_density(model.dynamics)) ./ ρᶜ
+    ρᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρ)) for k in 1:Nz+1]
+    wʳ = [(@allowscalar μ.wʳ[1, 1, k]) for k in 1:Nz+1]
+    qʳᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ)) for k in 1:Nz+1]
+    Φ = wʳ .* qʳᶠ
+
+    # The temperature the kernel works with is the inversion of θ and q at the total density.
+    # The pressure p = ρ Rᵐ T is the gas-phase pressure (ρᵈ Rᵈ + ρᵛ Rᵛ) T, which condensate
+    # leaving at fixed T does not change.
+    q = [MoistureMassFractions(qᵛ[k], qˡ[k], zero(FT)) for k in 1:Nz]
+    pˢᵗ = standard_pressure(model.dynamics)
+    θ = column(model.formulation.potential_temperature)
+    solver = model.formulation.temperature_solver
+    T = [Breeze.Thermodynamics.temperature(LiquidIceDensityState(θ[k], q[k], pˢᵗ, ρᶜ[k], solver), constants)
+         for k in 1:Nz]
+    p = [ρᶜ[k] * mixture_gas_constant(q[k], constants) * T[k] for k in 1:Nz]
+    G = column(model.timestepper.Gⁿ.ρθ)
+
+    # Every flux is downward: through a cell's upper face it drains the cell above and delivers
+    # the cell's content plus its heating response times the enthalpy brought in excess of the
+    # cell's own, through its lower face it delivers the content alone, and the cell's qᵈ converts
+    # the change of θ into that of ρᵈ θ. The transported enthalpy belongs to the phase;
+    # only the local composition derivative renormalizes.
+    content(; renormalize) = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ; renormalize) for k in 1:Nz]
+    enthalpy = [constants.liquid.heat_capacity * T[k] - constants.liquid.reference_latent_heat for k in 1:Nz]
+    β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], p[k], pˢᵗ; fixed_volume=true) for k in 1:Nz]
+    expected(renormalize) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; renormalize), enthalpy, β;
+                                                            coupling = qᵈ)
+
+    scale = maximum(abs.(G))
+    tolerance = scale * sqrt(eps(FT))
+    @test scale > 0
+    @test all(abs.(G .- expected(true)) .<= tolerance)
+    @test any(abs.(G .- expected(false)) .> tolerance)
+    @test G[3] < 0 # rain arriving below the blob pre-cools
+    @test G[5] > 0 # rain leaving the blob top leaves latent warming behind
+
+    # The static-energy content along the same composition change, hˣ − h_mixture, checked
+    # against the central difference through dynamics whose mass fractions renormalize
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
+    energy_model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
+                                   microphysics = OneMomentCloudMicrophysics(FT; cloud_formation),
+                                   formulation = :StaticEnergy)
+    set!(energy_model; θ=300, qᵗ=0.012, qʳ=rain_blob)
+    update_state!(energy_model)
+    mixture_dynamics = RenormalizingDynamics(energy_model.dynamics)
+    μₛ = energy_model.microphysical_fields
+    qᵛₛ = column(μₛ.qᵛ)
+    qˡₛ = column(μₛ.qˡ)
+    Tₛ = column(energy_model.temperature)
+    pᵣ = column(energy_model.dynamics.reference_state.pressure)
+    for k in 1:Nz
+        c = @allowscalar Breeze.AtmosphereModels.condensate_content(
+            1, 1, k, grid, energy_model.formulation, mixture_dynamics, constants, energy_model.microphysics, μₛ,
+            specific_prognostic_moisture(energy_model), energy_model.temperature)
+        qₖ = MoistureMassFractions(qᵛₛ[k], qˡₛ[k], zero(FT))
+        χ_expected = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ; renormalize=true)
+        χ_dry = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ)
+        @test isapprox(c.χ[1], χ_expected; rtol=sqrt(eps(FT)))
+        @test !isapprox(c.χ[1], χ_dry; rtol=sqrt(eps(FT)))
+        @test c.h === c.χ # the content of s is the enthalpy the falling mass carries
+        @test c.∂φ∂h == 1
+    end
+end
+
+@testset "A mixed-phase condensate mass carries the blended content [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    # `phase_content` picks a condensate's content out of the formulation's (χˡ, χⁱ) pair. The
+    # content is linear in composition, so a mass leaving along f eˡ + (1 − f) eⁱ carries
+    # f χˡ + (1 − f) χⁱ exactly, with the pure phases as endpoints.
+    χ = (FT(-2500), FT(-2830))  # representative ∂s/∂qˡ and ∂s/∂qⁱ magnitudes [J/kg]
+
+    @test phase_content(Val(:liquid), χ) === χ[1]
+    @test phase_content(Val(:ice), χ) === χ[2]
+
+    # Endpoints agree with the pure-phase methods; the interior is linear in f
+    @test phase_content(one(FT), χ) ≈ χ[1] rtol=eps(FT)
+    @test phase_content(zero(FT), χ) ≈ χ[2] rtol=eps(FT)
+    for f in (FT(0.25), FT(0.5), FT(0.7))
+        @test phase_content(f, χ) ≈ f * χ[1] + (1 - f) * χ[2] rtol=eps(FT)
+    end
+
+    # Linearity is what makes a fraction exact: half-and-half is the midpoint of the two.
+    @test phase_content(FT(0.5), χ) ≈ (χ[1] + χ[2]) / 2 rtol=eps(FT)
+    @test phase_content(FT(0.5), χ) ≈ (phase_content(Val(:liquid), χ) + phase_content(Val(:ice), χ)) / 2 rtol=eps(FT)
+end
+
+@testset "Sedimentation delivers the local content plus the converted upwind enthalpy [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 4
+    Δz = FT(100)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; dynamics, microphysics)
+    μ = model.microphysical_fields
+
+    # Rain with a uniform fall speed and a height-dependent humidity; the cloud condensate is
+    # emptied so only rain contributes. Synthetic contents indexed by the cell identify the cell
+    # each flux draws its enthalpy from and the cell that converts it.
+    wʳ = FT(-2)
+    set!(μ.wʳ, wʳ)
+    set!(μ.qʳ, (x, y, z) -> FT(1e-3) * (1 + z / (Nz * Δz)))
+    set!(μ.wᶜˡ, 0)
+    set!(μ.qᶜˡ, 0)
+
+    ρᵣ = model.dynamics.reference_state.density
+    ρᵣᶠ(k) = @allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρᵣ)
+    q̄(k) = @allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ) # Centered(order=2) face reconstruction
+    Az = FT(100 * 100)
+    # The divergence of the content flux the tendency applies is minus the signed tendency.
+    divergence(content, wᵗ, k) = -(@allowscalar Breeze.AtmosphereModels.sedimentation_tendency(
+        1, 1, k, grid, values(model.sedimentation), wᵗ, content, model.dynamics, constants,
+        model.microphysics, μ, specific_prognostic_moisture(model), model.temperature))
+    transport_velocities = (FT(0), FT(1), FT(5))
+
+    # Each flux brings the enthalpy of the cell it drains: the cell above face k (enthalpy k)
+    # for a downward velocity, the cell below (enthalpy k − 1) for an upward one. With no
+    # transport both fluxes are downward; a transport velocity below the fall speed leaves the
+    # total velocity downward while the transport flux it replaces drained the cell below; a
+    # transport velocity above the fall speed makes both fluxes draw from the cell below. With
+    # the content equal to the enthalpy and a unit heating response, as for static energy, the
+    # delivered content is the upwind enthalpy itself and the divergence takes the flux form.
+    enthalpy_content = EnthalpyContent()
+    for wᵗ_value in transport_velocities
+        wᵗ = set!(ZFaceField(grid), wᵗ_value)
+        W = wᵗ_value + wʳ
+        h(w, k) = w > 0 ? FT(k - 1) : FT(k)
+        F(k) = ρᵣᶠ(k) * Az * q̄(k) * (h(W, k) * W - h(wᵗ_value, k) * wᵗ_value)
+        for k in 2:Nz-1
+            expected = (F(k + 1) - F(k)) / (Az * Δz)
+            @test divergence(enthalpy_content, wᵗ, k) ≈ expected
+        end
+    end
+
+    # With a uniform enthalpy no sensible heat moves between cells, and every flux, in or out,
+    # delivers the cell's own content: the divergence is the content of cell k times the
+    # sedimentation part of the mass divergence the tracer tendency applies.
+    local_content = LocalContent()
+    for wᵗ_value in transport_velocities
+        wᵗ = set!(ZFaceField(grid), wᵗ_value)
+        W = wᵗ_value + wʳ
+        M(k) = ρᵣᶠ(k) * Az * q̄(k) * (W - wᵗ_value)
+        for k in 2:Nz-1
+            expected = FT(k) * (M(k + 1) - M(k)) / (Az * Δz)
+            @test divergence(local_content, wᵗ, k) ≈ expected
+        end
+    end
+
+    # In general each flux delivers the cell's content plus its heating response times the
+    # enthalpy of the cell the flux drains in excess of the cell's own.
+    general_content = GeneralContent()
+    for wᵗ_value in transport_velocities
+        wᵗ = set!(ZFaceField(grid), wᵗ_value)
+        W = wᵗ_value + wʳ
+        h(w, face) = w > 0 ? FT((face - 1)^2) : FT(face^2) # enthalpy of the cell the flux through `face` drains
+        for k in 2:Nz-1
+            delivered(w, face) = FT(k) + (h(w, face) - FT(k^2)) / 2
+            F(face) = ρᵣᶠ(face) * Az * q̄(face) * (delivered(W, face) * W - delivered(wᵗ_value, face) * wᵗ_value)
+            expected = (F(k + 1) - F(k)) / (Az * Δz)
+            @test divergence(general_content, wᵗ, k) ≈ expected
+        end
+    end
+end
+
+@testset "Both formulations agree on the temperature change sedimentation causes [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(100)
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
+
+    # A mid-column rain blob in an unsaturated column with non-equilibrium cloud formation, so
+    # that both kernels work with the model's temperature (the saturation-adjusted temperature
+    # leaves rain out of the liquid). Rain evaporation is part of the rain tendency but changes
+    # neither θˡⁱ nor s, so the temperature change each formulation implies is diagnosed from its
+    # thermodynamic tendency and the sedimentation part of the mass tendency alone, over a short
+    # interval and in Float64, which keeps the nonlinear remainder and the roundoff well below
+    # the tolerance. The flux form of the Jacobian ∂θˡⁱ/∂qˡ disagreed here with static energy by
+    # a factor of two, and in sign in two cells.
+    rain_blob(x, y, z) = ifelse(300 < z < 500, FT(1e-3), FT(0))
+    Δt = 1e-3
+    ΔT = Dict{Symbol, Vector{Float64}}()
+    for formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
+        dynamics = AnelasticDynamics(reference_state)
+        microphysics = OneMomentCloudMicrophysics(FT)
+        model = AtmosphereModel(grid; dynamics, microphysics, formulation)
+        set!(model; θ=300, qᵛ=0.005, qʳ=rain_blob)
+        update_state!(model)
+
+        μ = model.microphysical_fields
+        column(f) = Float64.(Array(interior(f, 1, 1, :)))
+        ρᵣ = column(model.dynamics.reference_state.density)
+        pᵣ = column(model.dynamics.reference_state.pressure)
+        pˢᵗ = Float64(reference_state.standard_pressure)
+        z = [Float64(znode(1, 1, k, grid, Center(), Center(), Center())) for k in 1:Nz]
+        constants₆₄ = ThermodynamicConstants(Float64)
+
+        # The sedimentation part of the rain mass tendency: the Centered(order=2) flux at the fall speed
+        ρᵣᶠ = [Float64(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, model.dynamics.reference_state.density)) for k in 1:Nz+1]
+        Fʳ = [ρᵣᶠ[k] * Float64(@allowscalar μ.wʳ[1, 1, k]) * Float64(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ)) for k in 1:Nz+1]
+        Δqˡ = [-Δt * (Fʳ[k+1] - Fʳ[k]) / (Float64(Δz) * ρᵣ[k]) for k in 1:Nz]
+
+        qᵛ = column(μ.qᵛ)
+        qˡ = column(μ.qˡ)
+        q₀ = [MoistureMassFractions(qᵛ[k], qˡ[k], 0.0) for k in 1:Nz]
+        q₁ = [MoistureMassFractions(qᵛ[k], qˡ[k] + Δqˡ[k], 0.0) for k in 1:Nz]
+        if formulation == :LiquidIcePotentialTemperature
+            θ = column(model.formulation.potential_temperature)
+            Δθ = Δt .* column(model.timestepper.Gⁿ.ρθ) ./ ρᵣ
+            T₀ = [Breeze.Thermodynamics.temperature(LiquidIcePotentialTemperatureState(θ[k], q₀[k], pˢᵗ, pᵣ[k]), constants₆₄) for k in 1:Nz]
+            T₁ = [Breeze.Thermodynamics.temperature(LiquidIcePotentialTemperatureState(θ[k] + Δθ[k], q₁[k], pˢᵗ, pᵣ[k]), constants₆₄) for k in 1:Nz]
+        else
+            s = column(model.formulation.specific_energy)
+            Δs = Δt .* column(model.timestepper.Gⁿ.ρs) ./ ρᵣ
+            T₀ = [Breeze.Thermodynamics.temperature(StaticEnergyState(s[k], q₀[k], z[k], pᵣ[k]), constants₆₄) for k in 1:Nz]
+            T₁ = [Breeze.Thermodynamics.temperature(StaticEnergyState(s[k] + Δs[k], q₁[k], z[k], pᵣ[k]), constants₆₄) for k in 1:Nz]
+        end
+        @test all(isapprox.(T₀, column(model.temperature); rtol=sqrt(eps(FT)))) # both kernels see this temperature
+        ΔT[formulation] = T₁ .- T₀
+    end
+
+    ΔTθ = ΔT[:LiquidIcePotentialTemperature]
+    ΔTs = ΔT[:StaticEnergy]
+    scale = maximum(abs.(ΔTs))
+    @test scale > 0
+    @test all(abs.(ΔTθ .- ΔTs) .<= 1e-3 * scale)
+    @test ΔTs[4] < 0 # rain from the colder cell above cools the blob's lower cell
+end
+
+@testset "Bounds-preserving WENO sedimentation heat follows the limited mass flux [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(100)
+    grid = RectilinearGrid(default_arch; size=Nz, z=(0, Nz * Δz), topology=(Flat, Flat, Bounded))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics()
+    scalar_advection = (; ρqʳ = WENO(FT; order=5, bounds=(0, 1)))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection)
+    μ = model.microphysical_fields
+
+    # A rain shaft with a sharp base and a dry gap, falling at a uniform speed: WENO
+    # reconstructs nonzero face values in the dry cells at the base and in the gap, where the
+    # limiter then pins them to the cell's zero. A uniform content isolates the mass fluxes
+    # from the donor rule.
+    set!(μ.wʳ, FT(-2))
+    set!(μ.qʳ, z -> ifelse(z > Nz * Δz / 2 && !(5Δz < z < 6Δz), FT(1e-3), FT(0)))
+    set!(μ.wᶜˡ, 0)
+    set!(μ.qᶜˡ, 0)
+    χ = FT(-2.5e6)
+    uniform_content = UniformContent(χ)
+
+    wᵗ = ZFaceField(grid)
+    ρᵣ = model.dynamics.reference_state.density
+    U = (; u = ZeroField(), v = ZeroField(), w = μ.wʳ)
+
+    # The sedimenting rain carries the model's materialized bounds-preserving scheme; the
+    # unlimited twin is the same WENO materialized the way the model does it.
+    limited = values(model.sedimentation)
+    rain = model.sedimentation.ρqʳ
+    @test rain.advection isa WENO
+    @test rain.advection.bounds.minimum_value == 0
+    @test rain.advection.bounds.maximum_value == 1
+    unlimited_scheme = adapt_advection_order(materialize_advection(WENO(FT; order=5), grid), grid)
+
+    # The bounds-preserving limiter is cached on the scheme and refreshed from the specific field
+    # by `update_state!` before the tendencies; the rain profile was written directly above, so
+    # refresh it here the way `update_advection!` does.
+    Oceananigans.Advection.update_bounds_preserving_limiter!(rain.advection, grid, μ.qʳ)
+    @test any(θ -> θ < 1, Array(interior(rain.advection.bounds.limiter, 1, 1, :)))
+    unlimited = (Breeze.AtmosphereModels.SedimentingCondensate(rain.velocity, rain.specific_humidity, rain.density,
+                                                              rain.phase, unlimited_scheme),)
+
+    heat(condensates, k) = -(@allowscalar Breeze.AtmosphereModels.sedimentation_tendency(
+        1, 1, k, grid, condensates, wᵗ, uniform_content, model.dynamics, model.thermodynamic_constants,
+        model.microphysics, μ, specific_prognostic_moisture(model), model.temperature))
+    mass(advection, k) = @allowscalar Breeze.AtmosphereModels.div_ρUc(1, 1, k, grid, advection, ρᵣ, U, μ.qʳ)
+    atol = sqrt(eps(FT)) * abs(χ) * FT(1e-3) * 2 / Δz
+
+    # Cell by cell, the heat divergence is χ times the mass divergence the tracer tendency
+    # applies with its limited reconstructions...
+    for k in 1:Nz
+        @test isapprox(heat(limited, k), χ * mass(rain.advection, k); atol)
+    end
+
+    # ... and the limiter does act: the unlimited WENO fluxes, which the coupling used to
+    # take, move heat somewhere the limited mass flux does not.
+    @test any(k -> !isapprox(heat(limited, k), heat(unlimited, k); atol), 1:Nz)
+end
+
+@testset "Mixed-phase sedimenting condensates and snow bottom flux [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=250)
+    dynamics = AnelasticDynamics(reference_state)
+    cloud_formation = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    set!(model; θ=250, qᵗ=0.01, qʳ=0.0005, qˢⁿ=0.0005)
+    μ = model.microphysical_fields
+    qᶜⁱ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qᶜⁱ)
+    qʳ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qʳ)
+    qˢⁿ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qˢⁿ)
+    wʳ = @allowscalar μ.wʳ[1, 1, 1]
+    wˢⁿ = @allowscalar μ.wˢⁿ[1, 1, 1]
+
+    # Rain and snow sediment, with liquid and ice phase; the diagnosed cloud liquid and cloud
+    # ice move no mass and appear in neither
+    sedimentation = model.sedimentation
+    @test keys(sedimentation) == (:ρqʳ, :ρqˢⁿ)
+    @test sedimentation.ρqʳ.velocity === μ.wʳ && sedimentation.ρqʳ.specific_humidity === μ.qʳ
+    @test sedimentation.ρqʳ.phase === Val(:liquid)
+    @test sedimentation.ρqˢⁿ.velocity === μ.wˢⁿ && sedimentation.ρqˢⁿ.specific_humidity === μ.qˢⁿ
+    @test sedimentation.ρqˢⁿ.phase === Val(:ice)
+    @test qᶜⁱ > 0
+    @test wˢⁿ < 0
+
+    flux = bottom_precipitation_flux(model)
+    compute!(flux)
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
+    @test @allowscalar flux[1, 1] ≈ -ρ_face * (wʳ * qʳ + wˢⁿ * qˢⁿ)
 end
 
 @testset "Mixed-phase non-equilibrium snow field materialization [$(FT)]" for FT in test_float_types()

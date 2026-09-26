@@ -21,7 +21,7 @@ AtmosphereModels.static_energy_density(model::StaticEnergyModel) = model.formula
 ##### Tendency computation
 #####
 
-function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args)
+function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args, tracer_transport_velocity)
     grid = model.grid
     arch = grid.architecture
 
@@ -31,6 +31,8 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyMod
         model.forcing.ρE,
         model.advection.ρs,
         radiation_flux_divergence(model.radiation),
+        values(model.sedimentation),
+        tracer_transport_velocity,
         common_args...,
         model.temperature)
 
@@ -45,6 +47,8 @@ end
                                         ρE_forcing,
                                         advection,
                                         radiation_flux_divergence_field,
+                                        sedimenting_condensates,
+                                        tracer_transport_velocity,
                                         dynamics,
                                         formulation,
                                         constants,
@@ -70,12 +74,45 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
+             + sedimentation_tendency(i, j, k, grid, sedimenting_condensates, tracer_transport_velocity,
+                                      formulation, dynamics, constants, microphysics, microphysical_fields,
+                                      specific_prognostic_moisture, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              # An energy forcing (note: ρs and ρE are mutually exclusive) is an energy per unit mass
              # and needs no conversion
              + ρs_forcing(i, j, k, grid, clock, model_fields)
              + ρE_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
+end
+
+#####
+##### Condensate content of ρs for its sedimentation tendency
+#####
+#
+# The content per unit falling mass of phase x is χˣ = ∇_q s · Δqˣ at fixed T along the
+# composition increment Δqˣ of `sedimentation_composition_increment`: q̂ˣ − q̂ᵈ on the anelastic
+# core, whose total density is fixed, q̂ˣ − q on the compressible core, whose total density falls
+# with the condensate. Losing condensate at this content leaves the temperature unchanged on
+# either core. From s = cᵖᵐ T + g z − Λ, with Δcᵖ and ΔΛ the changes of cᵖᵐ and Λ along Δqˣ,
+#
+#   χˣ = Δcᵖ T − ΔΛ ,
+#
+# the enthalpy of the condensate relative to what its mass gives way to: hˣ − hᵈ against dry
+# air, hˣ − (s − g z) against the mixture. The geopotential is independent of the composition and
+# drops out. The frictional heating from the fall (g wˣ qˣ) is neglected. The content is the
+# enthalpy the falling mass carries and ∂s/∂h = 1, so the shared `sedimentation_tendency`
+# reduces here to the flux form: each flux carries the enthalpy of the cell it drains, and ∫ρs
+# is conserved.
+@inline function AtmosphereModels.condensate_content(i, j, k, grid, ::StaticEnergyFormulation, dynamics, constants,
+                                                     microphysics, microphysical_fields, specific_prognostic_moisture,
+                                                     temperature_field)
+    @inbounds T = temperature_field[i, j, k]
+    @inbounds ρ = total_density(dynamics)[i, j, k]
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    χˡ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:liquid)), constants, T)
+    χⁱ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:ice)), constants, T)
+    return (; χ = (χˡ, χⁱ), h = (χˡ, χⁱ), ∂φ∂h = one(T))
 end
 
 #####

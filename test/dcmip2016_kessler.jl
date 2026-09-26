@@ -4,7 +4,7 @@ using Breeze
 using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
-using Breeze.AtmosphereModels: microphysics_model_update!, surface_precipitation_flux
+using Breeze.AtmosphereModels: microphysics_model_update!, bottom_precipitation_flux
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -507,7 +507,7 @@ end
     # The public surface flux must use the compressible model's total surface density, not its
     # dry density (nor a reference-state density).
     precipitation_rate = Array(interior(model.microphysical_fields.precipitation_rate))
-    precipitation_flux = Array(interior(compute!(surface_precipitation_flux(model))))
+    precipitation_flux = Array(interior(compute!(bottom_precipitation_flux(model))))
     surface_ρ = Array(interior(model.dynamics.total_density, :, :, 1))
     surface_ρᵈ = Array(interior(model.dynamics.dry_density, :, :, 1))
 

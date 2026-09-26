@@ -1,7 +1,6 @@
 using Oceananigans: CenterField, Field
-using Oceananigans.BoundaryConditions: BoundaryCondition, FieldBoundaryConditions, NormalFlow
-using Oceananigans.Fields: ZeroField, ZFaceField
-using Oceananigans.Grids: Center, Face
+using Oceananigans.Fields: ZeroField
+using Oceananigans.Grids: Center
 using Oceananigans.Operators: ℑzᵃᵃᶜ
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
@@ -286,29 +285,25 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
 
-    # Sedimentation velocity fields (pre-computed once per RK-stage tendency evaluation).
-    # These are *advecting* velocities: the scalar flux divergence reads them at
-    # (Center, Center, Face) via `Az_qᶜᶜᶠ(i, j, k, grid, w) = Azᶜᶜᶠ(i, j, k, grid) * w[i, j, k]`,
-    # so they must live at z-Faces. `bottom = nothing` leaves the kernel-written surface
-    # value untouched by `fill_halo_regions!` (the surface boundary condition is applied in
-    # `write_p3_fall_speeds!` instead), while the default impenetrable top boundary holds
-    # `w[i, j, Nz+1] = 0` so no precipitation falls in through the model top.
-    face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
-    wᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs) # Cloud mass advection velocity, wᶜˡ = -𝕎ᶜˡ
-    wⁿᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs) # Cloud-number advection velocity
-    wʳ  = ZFaceField(grid; boundary_conditions=face_bcs)  # Rain mass advection velocity, wʳ = -𝕎ʳ
-    wⁿʳ = ZFaceField(grid; boundary_conditions=face_bcs) # Rain-number advection velocity
-    wⁱ  = ZFaceField(grid; boundary_conditions=face_bcs)  # Ice mass advection velocity, wⁱ = -𝕎ⁱ
-    wⁿⁱ = ZFaceField(grid; boundary_conditions=face_bcs) # Ice-number advection velocity
+    # Sedimentation velocity fields, diagnosed once per RK-stage tendency evaluation. The
+    # scalar flux divergence reads them at the cell's z-Face, so they live at (Center, Center,
+    # Face), with the bottom face written by the diagnosing kernel rather than by halo filling
+    # and an impenetrable top holding w = 0 so nothing falls in through the model top.
+    wᶜˡ = AM.sedimentation_velocity_field(grid)  # Cloud mass-weighted terminal velocity
+    wⁿᶜˡ = AM.sedimentation_velocity_field(grid) # Cloud number-weighted terminal velocity
+    wʳ = AM.sedimentation_velocity_field(grid)   # Rain mass-weighted terminal velocity
+    wⁿʳ = AM.sedimentation_velocity_field(grid)  # Rain number-weighted terminal velocity
+    wⁱ = AM.sedimentation_velocity_field(grid)   # Ice mass-weighted terminal velocity
+    wⁿⁱ = AM.sedimentation_velocity_field(grid)  # Ice number-weighted terminal velocity
 
     # Hallett–Mossop uses the temperature at the lowest active atmospheric cell.
     # Store one value per column rather than assuming that local k=1 is active.
     surface_temperature = Field{Center, Center, Nothing}(grid)
 
     fields = (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ,
-              qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, qᵛ,
-              wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ, wⁱ, wⁿⁱ,
-              surface_temperature)
+                qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, qᵛ,
+                wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ, wⁱ, wⁿⁱ,
+                surface_temperature)
 
     return merge(fields,
                  cloud_number_fields(p3.aerosol, grid),
@@ -747,40 +742,17 @@ end
 ##### Surface precipitation boundary condition
 #####
 #
-# The fall-speed fields are at (Center, Center, Face), so index `k = 1` is the bottom
-# face of the domain and carries the surface precipitation flux. `nothing` (the default)
-# keeps the diagnosed fall speed there, so precipitation leaves the domain through an open
-# surface. An `ImpenetrableBoundaryCondition` zeroes it, so precipitation instead
-# accumulates in the lowest cell. Mirrors `bottom_terminal_velocity` in the one-moment
-# scheme; dispatch is on the boundary-condition *type*, so it folds to a constant per
-# concrete P3 type and stays GPU-safe.
-#
-# TODO: Use the lowest *active* face of each column rather than `k = 1` so the condition
-# also applies over an immersed bottom. `compute_p3_surface_temperature!` already performs
-# that column scan for Hallett-Mossop; the one-moment scheme has the same limitation.
+# The bottom-face and sign conventions live in `AM.write_sedimentation_velocity!`, shared
+# with the CloudMicrophysics-based schemes.
 
-const P3ImpenetrableBoundaryCondition = BoundaryCondition{<:NormalFlow, Nothing}
-
-@inline bottom_fall_speed_factor(::Nothing, FT) = one(FT)
-@inline bottom_fall_speed_factor(::P3ImpenetrableBoundaryCondition, FT) = zero(FT)
-
-@inline function write_p3_fall_speeds!(μ, i, j, k, p3::P3,
-                                       result::P3FallSpeedResult{FT}) where FT
-    # `k` indexes the bottom face of cell `k`. The positive-downward 𝕎 is negated to
-    # obtain the vertical advection velocity w. Because sedimentation is downward, the donor
-    # cell for that face is cell `k` itself. The top face (`k = Nz+1`) is outside the `:xyz`
-    # launch region and is held at zero by the impenetrable top boundary condition.
-    surface = ifelse(k == 1,
-                     bottom_fall_speed_factor(p3.precipitation_boundary_condition, FT),
-                     one(FT))
-    @inbounds begin
-        μ.wᶜˡ[i, j, k]  = -surface * result.𝕎ᶜˡ
-        μ.wⁿᶜˡ[i, j, k] = -surface * result.𝕎ⁿᶜˡ
-        μ.wʳ[i, j, k]   = -surface * result.𝕎ʳ
-        μ.wⁿʳ[i, j, k]  = -surface * result.𝕎ⁿʳ
-        μ.wⁱ[i, j, k]   = -surface * result.𝕎ⁱ
-        μ.wⁿⁱ[i, j, k]  = -surface * result.𝕎ⁿⁱ
-    end
+@inline function write_p3_fall_speeds!(μ, i, j, k, p3::P3, result::P3FallSpeedResult)
+    bc = p3.precipitation_boundary_condition
+    AM.write_sedimentation_velocity!(μ.wᶜˡ, i, j, k, bc, result.𝕎ᶜˡ)
+    AM.write_sedimentation_velocity!(μ.wⁿᶜˡ, i, j, k, bc, result.𝕎ⁿᶜˡ)
+    AM.write_sedimentation_velocity!(μ.wʳ, i, j, k, bc, result.𝕎ʳ)
+    AM.write_sedimentation_velocity!(μ.wⁿʳ, i, j, k, bc, result.𝕎ⁿʳ)
+    AM.write_sedimentation_velocity!(μ.wⁱ, i, j, k, bc, result.𝕎ⁱ)
+    AM.write_sedimentation_velocity!(μ.wⁿⁱ, i, j, k, bc, result.𝕎ⁿⁱ)
     return nothing
 end
 
@@ -864,42 +836,45 @@ with vapor, liquid (cloud + rain + liquid on ice), and ice components.
 end
 
 #####
-##### Microphysical velocities (sedimentation)
+##### Sedimentation velocities
 #####
 #
 # Terminal velocities are diagnosed in update_microphysical_auxiliaries! and stored in
-# diagnostic fields, so they are current whenever `update_state!` has run.
-# microphysical_velocities returns NamedTuples compatible with Oceananigans'
-# sum_of_velocities.
+# diagnostic fields, so they are current whenever `update_state!` has run. The generic
+# `microphysical_velocities` wrapper turns each of these into the `(u, v, w)` NamedTuple
+# that the advection operator adds to the transport velocity.
 
-@inline AM.microphysical_velocities(::P3, μ, name) = nothing  # Default: no sedimentation
+# Cloud mass and number: mass- and number-weighted Stokes fall speeds
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqᶜˡ}) = μ.wᶜˡ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnᶜˡ}) = μ.wⁿᶜˡ
 
-# Cloud mass: mass-weighted Stokes fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqᶜˡ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wᶜˡ)
+# Rain mass and number
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqʳ}) = μ.wʳ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnʳ}) = μ.wⁿʳ
 
-# Cloud number: number-weighted Stokes fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnᶜˡ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁿᶜˡ)
+# Ice mass and number
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqⁱ}) = μ.wⁱ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρnⁱ}) = μ.wⁿⁱ
 
-# Rain mass: mass-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqʳ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wʳ)
+# Rime mass, rime volume, and liquid on ice all ride on the ice particle, so they fall
+# at the ice mass-weighted speed.
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqᶠ}) = μ.wⁱ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρbᶠ}) = μ.wⁱ
+@inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqʷⁱ}) = μ.wⁱ
 
-# Rain number: number-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnʳ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁿʳ)
-
-# Ice mass: mass-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
-
-# Ice number: number-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁿⁱ)
-
-# Rime mass: same as ice mass (rime falls with ice)
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqᶠ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
-
-# Rime volume: same as ice mass
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρbᶠ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
-
-# Liquid on ice: same as ice mass
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqʷⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
+# Thermodynamic phase of each sedimenting condensate mass, which routes its mass flux to the
+# right latent heat in the sedimentation transport of ρθ and ρs.
+#
+# Liquid on ice `ρqʷⁱ` rides on an ice particle and falls at `wⁱ`, but its enthalpy is liquid:
+# no fusion enthalpy has been released for it, and `moisture_fractions` counts it in qˡ. The
+# velocity and the phase are independent declarations, so this is one tracer with two
+# properties, not a contradiction. Rime mass `ρqᶠ` and rime volume `ρbᶠ` need no phase: the
+# interface consults only `condensate_field_names`, which excludes them (`ρqᶠ` is a portion of
+# `ρqⁱ`, Fᶠ = qᶠ / qⁱ, and `ρbᶠ` is not a mass), so neither can double-count the ice.
+@inline AM.condensate_phase(::P3, ::Val{:ρqᶜˡ}) = Val(:liquid)
+@inline AM.condensate_phase(::P3, ::Val{:ρqʳ})  = Val(:liquid)
+@inline AM.condensate_phase(::P3, ::Val{:ρqʷⁱ}) = Val(:liquid)
+@inline AM.condensate_phase(::P3, ::Val{:ρqⁱ})  = Val(:ice)
 
 #####
 ##### Microphysical tendencies
