@@ -149,7 +149,7 @@ jobs:
               # On the GPU runners we sometimes run out-of-memory because we have several
               # concurrent jobs, some of them reaching a large memory usage.  We reduce the
               # number of jobs to avoid memory issues.
-              TEST_ARGS+=(--jobs=$(($(nproc) - 2)))
+              TEST_ARGS+=(--jobs=$(($(nproc) - 3)))
           elif [[ ${{ matrix.os }} == ubuntu-* ]] && [[ ${{ matrix.version }} == 'min' ]]; then
               # With Julia v1.11 we have observed somewhat frequent OOM's in `turbulence_closures`
               # tests, reduce number of jobs to reduce resources contention.
