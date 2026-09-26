@@ -849,10 +849,14 @@ end
 # Non-equilibrium: no adjustment (cloud liquid and ice are prognostic)
 @inline AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::NonEquilibrium1M, qᵛ, constants) = 𝒰₀
 
+# Warm-phase schemes carry no snow
+@inline snow_mass_fraction(::WP1M, μ, ρ) = zero(ρ)
+@inline snow_mass_fraction(::MP1M, μ, ρ) = μ.ρqˢⁿ / ρ
+
 # Saturation adjustment (warm-phase and mixed-phase)
 @inline function AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::Union{WP1M, MP1M}, qᵉ, constants, μ, ρ)
     qʳ = μ.ρqʳ / ρ
-    qˢⁿ = get(μ, :ρqˢⁿ, zero(ρ)) / ρ
+    qˢⁿ = snow_mass_fraction(bμp, μ, ρ)
     q₁ = MoistureMassFractions(qᵉ, qʳ, qˢⁿ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
     return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants, (qʳ, qˢⁿ))
