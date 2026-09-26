@@ -47,7 +47,12 @@ function get_submodules(mod::Module; self=true)
 end
 
 @testset "Aqua" begin
-    Aqua.test_all(Breeze; piracies=false)
+    Aqua.test_all(
+        Breeze;
+        piracies=false,
+        # The persist tasks check often takes a very long time on Windows.
+        persistent_tasks=!Sys.iswindows(),
+    )
 
     # `test_piracies` doesn't recurse in inner modules, so we have to test that manually.
     @testset "No type piracy in $(mod)" for mod in get_submodules(Breeze)
