@@ -54,7 +54,7 @@ jobs:
       statuses: write
     runs-on: aws-linux-nvidia-gpu-l4
     container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.6'
+      image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.13.0'
       options: --gpus=all
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
