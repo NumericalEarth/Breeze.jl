@@ -94,6 +94,12 @@ function run_weno_tests(scheme_label, scheme)
         Δt = 0.02
 
         @testset "$label" for (label, topo, nd) in topologies
+            # Force release of memory
+            GC.gc(true); GC.gc(false); GC.gc(true)
+            if Sys.islinux()
+                @ccall malloc_trim(0::Csize_t)::Cint
+            end
+
             grid = make_grid(topo, nd)
 
             # ── Build ──
