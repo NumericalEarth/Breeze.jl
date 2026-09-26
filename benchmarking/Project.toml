@@ -9,6 +9,7 @@ ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
 Breeze = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
 CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
@@ -23,12 +24,15 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [sources]
 Breeze = {path = ".."}
+CUDA = {rev = "tb/launch-indextype", url = "https://github.com/JuliaGPU/CUDA.jl.git"}
+CUDACore = {rev = "tb/launch-indextype", subdir = "CUDACore", url = "https://github.com/JuliaGPU/CUDA.jl.git"}
 
 [compat]
 AMDGPU = "2.3.0"
 ArgParse = "1"
 BFloat16s = "0.6"
 CUDA = "5, 6.0"
+CUDACore = "6.4.0"
 CloudMicrophysics = "0.41"
 Dates = "<0.0.1, 1"
 Enzyme = "0.13.118"
