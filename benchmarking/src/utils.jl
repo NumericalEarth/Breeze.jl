@@ -7,8 +7,6 @@ function memory_reclaim(arch)
     # Reclaim memory, so that next benchmarks will start from a clean state.
     if arch isa GPU{CUDABackend}
         CUDA.reclaim()
-    elseif arch isa GPU{ROCBackend}
-        AMDGPU.reclaim()
     end
 end
 
@@ -102,7 +100,7 @@ function benchmark_time_stepping(model;
                 @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true)..."
             end
             compile_start = time_ns()
-            compiled_grad! = Reactant.@compile raise=true raise_first=true sync=true grad_loss!(
+            compiled_grad! = grad_loss!(
                 model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
             compile_time_seconds = (time_ns() - compile_start) / 1e9
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
@@ -111,7 +109,7 @@ function benchmark_time_stepping(model;
                 @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
             end
             compile_start = time_ns()
-            compiled_loop! = Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt_FT, time_steps)
+            compiled_loop! = step_loop!(model, Δt_FT, time_steps)
             compile_time_seconds = (time_ns() - compile_start) / 1e9
             invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
         end
@@ -387,11 +385,6 @@ synchronize_device(::Oceananigans.Architectures.CPU) = nothing
 
 function synchronize_device(::Oceananigans.Architectures.GPU{CUDABackend})
     CUDA.synchronize()
-    return nothing
-end
-
-function synchronize_device(::Oceananigans.Architectures.GPU{ROCBackend})
-    AMDGPU.synchronize()
     return nothing
 end
 

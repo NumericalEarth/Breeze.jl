@@ -29,13 +29,6 @@ function BenchmarkMetadata(arch)
             gpu_name = "Unknown GPU"
             cuda_version = "Unknown"
         end
-    elseif arch isa GPU{ROCBackend}
-        try
-            gpu_name = unsafe_string(pointer(UInt8.(collect(AMDGPU.HIP.properties(AMDGPU.device()).name))))
-        catch
-            gpu_name = "Unknown GPU"
-        end
-        cuda_version = "unknown"
     elseif arch isa GPU{MetalBackend}
         gpu_name = string(Metal.device().name)
         cuda_version = "unknown"
