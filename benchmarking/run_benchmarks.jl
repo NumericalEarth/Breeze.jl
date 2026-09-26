@@ -35,7 +35,6 @@ using Breeze.Microphysics: NonEquilibriumCloudFormation
 # Reactant must be loaded before CUDA so that ReactantCUDAExt activates with
 # CUDA's kernel compilation hooks correctly registered.
 using CUDA: CUDABackend
-using AMDGPU: ROCBackend
 using Metal: MetalBackend
 
 # Load CloudMicrophysics extension for OneMomentCloudMicrophysics
