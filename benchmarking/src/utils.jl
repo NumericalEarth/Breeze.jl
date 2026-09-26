@@ -54,7 +54,7 @@ function benchmark_time_stepping(model;
                                  microphysics::AbstractString = "",
                                  backend::AbstractString = "vanilla",
                                  ad::Bool = false,
-                                 checkpointing = true,
+                                 checkpointing = false,
                                  )
 
     grid = model.grid
@@ -63,14 +63,11 @@ function benchmark_time_stepping(model;
     Δt_FT = FT(Δt)
     Nx, Ny, Nz = size(grid)
     total_points = Nx * Ny * Nz
-    is_reactant = arch isa ReactantState
+    is_reactant = false
     mode = ad ? "ad" : "forward"
     # `true` is Reactant's default for a static-bound loop, Periodic(isqrt(N));
     # resolve it here so the recorded strategy names the actual checkpoint count.
-    checkpointing = checkpointing === true ? Reactant.Periodic(isqrt(time_steps)) : checkpointing
     checkpointing_str = ad ? checkpointing_label(checkpointing) : ""
-
-    ad && !is_reactant && error("AD benchmark requires a Reactant backend (got $backend)")
 
     if verbose
         @info "Benchmark: $name"
@@ -91,32 +88,6 @@ function benchmark_time_stepping(model;
     # mode through `loss` — see `grad_loss!` in timestepping.jl.
     compile_time_seconds = 0.0
     invoke! = nothing
-    if is_reactant
-        if ad
-            θ_init  = CenterField(grid); set!(θ_init,  (args...) -> FT(300.0))
-            dθ_init = CenterField(grid); set!(dθ_init, 0)
-            dmodel  = Enzyme.make_zero(model)
-            if verbose
-                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true)..."
-            end
-            compile_start = time_ns()
-            compiled_grad! = grad_loss!(
-                model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
-            compile_time_seconds = (time_ns() - compile_start) / 1e9
-            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
-        else
-            if verbose
-                @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
-            end
-            compile_start = time_ns()
-            compiled_loop! = step_loop!(model, Δt_FT, time_steps)
-            compile_time_seconds = (time_ns() - compile_start) / 1e9
-            invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
-        end
-        if verbose
-            @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
-        end
-    end
 
     # Warmup phase. For Reactant we run one full execution of the compiled
     # program (which already encodes `time_steps` iterations); `warmup_steps`

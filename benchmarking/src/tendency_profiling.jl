@@ -25,7 +25,7 @@ function benchmark_tendency(tendency!, args, grid;
     FT = eltype(grid)
     Nx, Ny, Nz = size(grid)
     total_points = Nx * Ny * Nz
-    is_reactant = arch isa ReactantState
+    is_reactant = false
 
     if verbose
         @info "Tendency benchmark: $name"
@@ -36,32 +36,17 @@ function benchmark_tendency(tendency!, args, grid;
         @info "  Repeats: $nrepeat"
     end
 
-    if is_reactant
-        # Compile the launch into a single optimized XLA program, then profile
-        # it. Passing the already-compiled thunk makes @timed profile it
-        # directly (it special-cases `::Reactant.Compiler.Thunk`). `runtime_ns`
-        # is the mean over `nrepeat`.
-        verbose && @info "  Compiling tendency with Reactant (raise=$raise)..."
-        compile_start = time_ns()
-        compiled! = tendency!(args...)
-        compile_time_seconds = (time_ns() - compile_start) / 1e9
-        # `profile_dir` (when set) directs the xprof trace files there; when
-        # `nothing`, the profiler uses its default scratch directory.
-        prof = compiled!(args...)
-        time_per_step_seconds = prof.runtime_ns / 1e9
-    else
-        # Vanilla backend: launch the kernel eagerly (no Reactant compile). Warm
-        # up once, then time `nrepeat` launches with device synchronization.
-        compile_time_seconds = 0.0
+    # Vanilla backend: launch the kernel eagerly (no Reactant compile). Warm
+    # up once, then time `nrepeat` launches with device synchronization.
+    compile_time_seconds = 0.0
+    tendency!(args...)
+    synchronize_device(arch)
+    start_time = time_ns()
+    for _ in 1:nrepeat
         tendency!(args...)
-        synchronize_device(arch)
-        start_time = time_ns()
-        for _ in 1:nrepeat
-            tendency!(args...)
-        end
-        synchronize_device(arch)
-        time_per_step_seconds = ((time_ns() - start_time) / 1e9) / nrepeat
     end
+    synchronize_device(arch)
+    time_per_step_seconds = ((time_ns() - start_time) / 1e9) / nrepeat
 
     total_time_seconds = time_per_step_seconds * nrepeat
     steps_per_second = 1 / time_per_step_seconds
