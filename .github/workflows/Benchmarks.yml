@@ -117,7 +117,7 @@ jobs:
         shell: bash
         working-directory: ./benchmarking
     container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.6'
+      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.13.0'
       options: --gpus=all
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
