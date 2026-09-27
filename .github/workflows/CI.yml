@@ -146,6 +146,9 @@ jobs:
               echo "BREEZE_ENSURE_CUDA_FUNCTIONAL=true" | tee -a "${GITHUB_ENV}"
               # In Julia v1.12+, use multiple GC threads.
               echo "JULIA_NUM_GC_THREADS=4,1" | tee -a "${GITHUB_ENV}"
+              # Reduce memory threshold after which workers are recycled, to try
+              # and keep memory usage at bay.
+              echo "JULIA_TEST_MAXRSS_MB=3500" | tee -a "${GITHUB_ENV}"
               # On the GPU runners we sometimes run out-of-memory because we have several
               # concurrent jobs, some of them reaching a large memory usage.  We reduce the
               # number of jobs to avoid memory issues.
