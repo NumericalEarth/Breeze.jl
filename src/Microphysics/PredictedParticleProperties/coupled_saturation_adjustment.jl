@@ -242,8 +242,8 @@ cloud/precipitation fraction framework is handled separately.
 
     𝒮ˡ = supersaturation / max(qᵛ⁺ˡ, FT(floors.divisor))
     𝒮ⁱ = qᵛ / max(qᵛ⁺ⁱ, FT(floors.divisor)) - 1
-    # The tiny-mass clauses below all gate on the total hydrometeor mass
-    # (`qⁱ_total`, computed above).
+    # Each tiny-mass clause below gates on its own reservoir: `qᶜˡ` for cloud, `qʳ` for
+    # rain, and the total ice mass `qⁱ_total` (computed above) for both ice clauses.
     tiny_mass = parameters.tiny_mass_evaporation_threshold
     subsaturated = -parameters.subsaturation_evaporation_threshold
     raw_cloud_growth = ifelse((𝒮ˡ < subsaturated) & (qᶜˡ < tiny_mass),
@@ -253,8 +253,8 @@ cloud/precipitation fraction framework is handled separately.
     # Match the cloud/rain branches above: do NOT clamp the prognostic
     # before the sign flip. When advection leaves qⁱ or qʷⁱ slightly negative,
     # the override should produce a positive deposition/coating-condensation
-    # rate so the downstream cap (lines 943 / 946) can pull mass back from
-    # vapor and restore the field. The qᵛ/τ caps still bound the magnitude.
+    # rate so the `deposition` and `coating_condensation` caps below can pull mass back
+    # from vapor and restore the field. The qᵛ/τ caps still bound the magnitude.
     raw_ice_growth = ifelse((𝒮ⁱ < subsaturated) & (qⁱ_total < tiny_mass) &
                             (Fˡ < parameters.liquid_fraction_clipping_threshold),
                             -qⁱ / τ, raw_ice_growth)

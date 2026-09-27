@@ -149,6 +149,8 @@ end
     @test haskey(model.microphysical_fields, :qᶜˡ)
     @test haskey(model.microphysical_fields, :qʳ)
 
+    test_kernel_functions_inferred(model)
+
     # Single time step (reduced from 6 iterations)
     time_step!(model, 1)
     @test model.clock.time == 1
@@ -367,6 +369,8 @@ end
     set!(model; θ=260, qᵗ=0.010)
     @test haskey(model.microphysical_fields, :ρqᶜⁱ)
     @test haskey(model.microphysical_fields, :qᶜⁱ)
+
+    test_kernel_functions_inferred(model)
 
     time_step!(model, 1)
     @test model.clock.iteration == 1

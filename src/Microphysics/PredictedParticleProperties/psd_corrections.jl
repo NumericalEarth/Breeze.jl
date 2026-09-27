@@ -1,9 +1,9 @@
 #####
 ##### PSD correction factors for spherical drop immersion freezing
 #####
-##### For a gamma PSD N'(D) = N₀ D^μ exp(-λD), the volume-integrated
-##### freezing rate (proportional to droplet volume cubed) gains a factor relative to
-##### the mean-mass monodisperse approximation. For spherical drops the
+##### For a gamma PSD N'(D) = N₀ D^μ exp(-λD), volume-dependent per-drop freezing
+##### gives a PSD-integrated mass freezing rate enhanced relative to the
+##### mean-mass monodisperse approximation. For spherical drops the
 ##### correction is exactly:
 #####
 #####   C(μ) = Γ(μ+7) Γ(μ+1) / Γ(μ+4)²

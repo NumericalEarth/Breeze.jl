@@ -3,9 +3,9 @@ $(TYPEDSIGNATURES)
 
 Compute the density of newly accreted cloud rime from the rime-impact parameter.
 
-Diagnose the cloud gamma PSD from `qᶜˡ` and `Nᶜˡ`, compute the droplet impact speed
-relative to falling ice, form the rime-impact parameter `Ri`, and apply the
-piecewise density fit of [Cober and List (1993)](@cite CoberList1993). When cloud
+Take the already-diagnosed cloud gamma PSD parameters `μᶜˡ` and `λᶜˡ`, compute the
+droplet impact speed relative to falling ice, form the rime-impact parameter `Ri`, and
+apply the piecewise density fit of [Cober and List (1993)](@cite CoberList1993). When cloud
 riming is inactive or the air is above freezing, the fallback value `400 kg m⁻³`
 is used.
 
@@ -18,6 +18,7 @@ is used.
 - `ρ`: Air density [kg/m³]
 - `constants`: Thermodynamic constants
 - `transport`: Air transport properties at `(T, P)`
+- `μᶜˡ`, `λᶜˡ`: Cloud gamma PSD shape and slope parameters, diagnosed upstream
 
 # Returns
 - Rime density [kg/m³]
@@ -166,9 +167,9 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 # Arguments
 - `p3`: P3 microphysics scheme
 - `qⁱ`: Ice mass fraction [kg/kg]
+- `qʷⁱ`: Liquid water on ice mass fraction [kg/kg]
 - `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
-- `P`: Pressure [Pa]
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]

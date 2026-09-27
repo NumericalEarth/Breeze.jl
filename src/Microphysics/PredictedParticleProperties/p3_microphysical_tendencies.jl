@@ -42,7 +42,7 @@ reached through the prognostic loop.
 """
 $(TYPEDSIGNATURES)
 
-Cloud liquid tendency: loses mass to autoconversion, accretion, and riming.
+Cloud liquid tendency: gains from condensation and droplet activation; loses to autoconversion, accretion, riming, freezing, and collection by melting ice.
 """
 @inline AM.microphysical_tendency(p3::P3, name::Val{:ρqᶜˡ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) =
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
@@ -74,7 +74,7 @@ Ice mass tendency: gains from deposition, riming, refreezing; loses to melting.
 """
 $(TYPEDSIGNATURES)
 
-Ice number tendency: loses from melting and aggregation.
+Ice number tendency: gains from nucleation, freezing, and splintering; loses to melting, sublimation, and aggregation.
 """
 @inline AM.microphysical_tendency(p3::P3, name::Val{:ρnⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) =
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
@@ -98,7 +98,7 @@ Rime volume tendency: gains from new rime; loses with melting.
 """
 $(TYPEDSIGNATURES)
 
-Liquid on ice tendency: loses from shedding and refreezing.
+Liquid on ice tendency: gains from partial melting and above-freezing collection; loses to shedding and refreezing.
 """
 @inline AM.microphysical_tendency(p3::P3, name::Val{:ρqʷⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) =
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)

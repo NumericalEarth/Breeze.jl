@@ -17,7 +17,7 @@
 # Internal implementation detail — not part of the public API.
 struct P3DerivedState{FT, Q, L}
     # Bounded prognostic state
-    nⁱ :: FT        # bounded by maximum_ice_number_density / ρ
+    nⁱ :: FT        # λ-limiter bounded (the global Nⁱ cap is applied before it)
     nʳ :: FT        # DSD-bounded rain number
     qᶠ :: FT        # consistent rime mass
     bᶠ :: FT        # consistent rime volume
@@ -35,7 +35,7 @@ struct P3DerivedState{FT, Q, L}
     qᵛ :: FT        # vapor mass fraction
     qᵛ⁺ˡ :: FT      # saturation vapor fraction over liquid
     qᵛ⁺ⁱ :: FT      # saturation vapor fraction over ice
-    q :: Q          # MoistureMassFractions for heat capacity / density
+    q :: Q          # MoistureMassFractions for the moist-air density
     # Transport properties
     Dᵛ :: FT       # water vapor diffusivity [m²/s]
     Kᵃ :: FT       # thermal conductivity of air [W/m/K]
@@ -113,7 +113,7 @@ struct P3Phase2Rates{FT}
     shedding :: FT
     shedding_number :: FT
     refreezing :: FT
-    complete_melting :: FT  # Phase 1 value + M8/M12c clipping
+    complete_melting :: FT  # Phase 1 value, or the whole-particle clip rate
     melting_number :: FT
     whole_particle_clipping :: Bool
     nucleation_mass :: FT
@@ -135,7 +135,7 @@ end
 #   - `partial_melting`:  meltwater stays on the ice as liquid coating (large particles)
 #   - `complete_melting`: meltwater sheds to rain (small particles)
 #
-# Sign convention (M7): all one-directional rates store positive magnitudes. Bidirectional
+# Sign convention: all one-directional rates store positive magnitudes. Bidirectional
 # rates (condensation, deposition) are positive for a source and negative for a sink.
 # Signs are applied explicitly in the `tendency_*` functions.
 struct P3ProcessRates{FT}
@@ -163,7 +163,7 @@ struct P3ProcessRates{FT}
     clipping_rime_volume :: FT     # Rime volume removed exactly by whole-particle clips [m³/kg/s]
     post_process_clipping :: FT    # One when the post-process liquid-fraction clip fires
 
-    # D2/D1: Ice number loss from vapor-driven sinks (sublimation + coating evaporation)
+    # Ice number loss from vapor-driven sinks (sublimation + coating evaporation)
     sublimation_number :: FT       # Ice number loss magnitude from sublimation / coating evaporation [1/kg/s]
 
     # Phase 2: Ice aggregation (positive magnitude)
@@ -207,7 +207,7 @@ struct P3ProcessRates{FT}
     cloud_warm_collection :: FT        # Cloud collected above T₀ [kg/kg/s]
     cloud_warm_collection_number :: FT # Cloud number loss from warm collection [1/kg/s]
     rain_warm_collection :: FT         # Rain collected above T₀ → qʷⁱ [kg/kg/s]
-    rain_warm_collection_number :: FT  # M9: Rain number loss from warm collection [1/kg/s]
+    rain_warm_collection_number :: FT  # Rain number loss from warm collection [1/kg/s]
 
     # Liquid-fraction wet growth: collected hydrometeors redirected to qʷⁱ when
     # collection exceeds freezing capacity.
@@ -220,8 +220,8 @@ struct P3ProcessRates{FT}
     wet_growth_shedding_number :: FT   # Rain number from wet growth shedding [1/kg/s]
 
     # Warm/mixed-phase budget terms
-    ccn_activation_mass :: FT          # CCN activation mass rate (vapor → cloud) [kg/kg/s]
-    ccn_activation_number :: FT        # CCN activation number rate [1/kg/s] (prognostic CCN only)
+    ccn_activation_mass :: FT          # Cloud-droplet activation mass rate (vapor → cloud) [kg/kg/s]
+    ccn_activation_number :: FT        # Cloud-droplet activation number rate [1/kg/s] (AerosolActivation only)
     rain_condensation :: FT            # Rain condensation (vapor → rain) [kg/kg/s]
     coating_condensation :: FT         # Condensation on ice liquid coating [kg/kg/s]
     coating_evaporation :: FT          # Evaporation from ice liquid coating [kg/kg/s]
@@ -284,11 +284,11 @@ end
                                                       state.lookups)
     cond = vapor_rates.condensation
 
-    # CCN activation (prescribed or prognostic; depletes ℳ.nᵃ when prognostic)
-    ccn = compute_ccn_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ,
-                                 qᵛ, qᵛ⁺ˡ, T, ρ, constants)
-    ccn_activation_mass = ccn.mass
-    ccn_activation_number = ccn.number
+    # Cloud droplet activation
+    activation = compute_cloud_droplet_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ,
+                                                  qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+    ccn_activation_mass = activation.mass
+    ccn_activation_number = activation.number
 
     # =========================================================================
     # Rain processes

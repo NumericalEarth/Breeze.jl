@@ -12,11 +12,12 @@ over the ice particle size distribution.
 
 The collection rate is:
 ```math
-\\frac{dq^{cl}}{dt} = -E^{ci} q^{cl} ρ n^i ⟨A \\mathbb{W}⟩
+\\frac{dq^{cl}}{dt} = -E^{ci} q^{cl} ρ\\, ρ_\\text{corr}\\, n^i ⟨A \\mathbb{W}⟩
 ```
-where ``⟨A \\mathbb{W}⟩`` is the PSD-averaged product of projected area and terminal
-velocity, approximated using the mean-mass diameter with a correction
-factor for the exponential PSD.
+where ``⟨A \\mathbb{W}⟩`` is the number-normalized sweep-out kernel
+``\\int \\mathbb{W}(D) A(D) N'(D) \\, dD / \\int N'(D) \\, dD`` [m³/s]
+read from Table 1 at the ice bracket, and
+``ρ_\\text{corr}`` is the ice air-density correction.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -62,8 +63,8 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
              (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 
-    # PSD-integrated cloud-water collection kernel ⟨A×𝕎⟩ from lookup table
-    # ∫ 𝕎(D) A(D) N'(D) dD with E=1 (geometric kernel).
+    # Number-normalized cloud-water collection kernel ⟨A×𝕎⟩ from the lookup table,
+    # ∫ 𝕎(D) A(D) N'(D) dD / ∫ N'(D) dD, with E=1.
     collection_kernel = evaluate_at(p3.ice.collection.cloud_collection, lookups.prep)
 
     # Collection rate = E × qc × ni × ρ × rhofaci × ⟨A×𝕎⟩
@@ -140,29 +141,24 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute rain collection (riming) by ice particles using the continuous
-collection equation with collision kernel integrated over the ice PSD,
-plus a correction for the rain drop size distribution (C5 fix).
+Compute rain collection (riming) by ice particles from the Table 2 double-PSD
+collection kernel.
 
-**C5 correction (double-PSD integration):**
+**Double-PSD integration:**
 
-The ice-rain collection tables integrate over *both* the ice PSD and the rain PSD,
-capturing how rain drop size affects the collision geometry.
-The geometric cross section is ``π/4 (D^i + D^r)^2``, not just ``π/4 (D^i)^2``.
-For an exponential rain PSD (``μ^r = 0``) the exact cross-section correction to the
-single-PSD ice-side integral is:
-
-```math
-C = 1 + 8 \\frac{\\bar{D}^r}{\\bar{D}^i} + 20 \\left(\\frac{\\bar{D}^r}{\\bar{D}^i}\\right)^2
-```
-
-where ``\\bar{D}^r = 1/λ^r`` and ``\\bar{D}^i`` is the mean ice diameter.
-When ``n^r = 0`` the correction is 1 (no change from the legacy path).
+Table 2 integrates over *both* the ice PSD and the rain PSD. The collision cross
+section is ``(√{A(D^i)} + √{π/4} D^r)^2``, where ``A(D^i)`` is the ice projected
+area. For spherical ice this reduces to ``π/4 (D^i + D^r)^2``. The ice PSD is
+normalized to unit number, and the rain intercept ``N_0^r`` is factored out, so the
+rate is ``\\mathcal{K} × N_0^r × n^i × ρ × ρ_\\text{corr} × E^{ri}``, with
+``N_0^r = n^r λ^r`` at ``μ^r = 0``. Here ``n^r`` is the mass-specific number
+recomputed from the bounded rain slope, so the rain PSD preserves mass when the
+slope limiter binds.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qʳ`: Rain mass fraction [kg/kg]
-- `nʳ`: Rain number concentration [1/kg]; use 0 to disable C5 correction
+- `nʳ`: Rain number concentration [1/kg]; floored at `minimum_number_mixing_ratio`
 - `qⁱ`: Ice mass fraction [kg/kg]
 - `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
