@@ -78,7 +78,7 @@ jobs:
         include:
           # `--check-bounds=auto` is necessary for testing Reactant workloads
           # until https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
-          - version: "1.12.6"
+          - version: "1.13.0"
             os: aws-linux-nvidia-gpu-l4-4xl
             arch: "default"
             check-bounds: "auto"
