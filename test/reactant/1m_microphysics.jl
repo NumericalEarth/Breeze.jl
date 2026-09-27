@@ -1,4 +1,4 @@
-include("microphysics_compilation_setup.jl")
+include(joinpath(@__DIR__, "microphysics_compilation_setup.jl"))
 
 using Breeze.Microphysics: NonEquilibriumCloudFormation
 using CloudMicrophysics
