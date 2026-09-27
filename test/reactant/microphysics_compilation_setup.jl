@@ -83,6 +83,8 @@ function run_microphysics_tests(scheme_label, microphysics, initial_state)
         Ns = 1
 
         @testset "$label" for (label, make_grid) in grid_configs
+            GC.gc(true); GC.gc(false); GC.gc(true)
+
             grid = make_grid(ReactantState())
 
             @testset "Build" begin
