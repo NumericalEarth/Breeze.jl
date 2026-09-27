@@ -65,7 +65,7 @@ jobs:
             microphysics: '1M_MixedNonEquilibrium'
             grid: '256x256x128'
             advection: 'WENO5'
-            backend: 'vanilla, reactant'
+            backend: 'vanilla'
             topology: 'PBB'
             extra_flags: '--simplified --float_type=Float32'
           # AD: forward+backward via Enzyme reverse-mode through the same
@@ -78,13 +78,6 @@ jobs:
           # (each value is a separate compile + run, recorded as its own
           # result). To reproduce locally on CPU see benchmarking/README.md
           # ("AD benchmark").
-          - dynamics: 'compressible_explicit'
-            microphysics: 'nothing'
-            grid: '128x128x32'
-            advection: 'WENO5'
-            backend: 'reactant'
-            topology: 'PBB'
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,4,8 --checkpointing_mode binomial'
           # Scalar-tendency kernel sweep (no model): time the bare WENO
           # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
           # the Reactant-compiled XLA program and the eager vanilla launch.
@@ -94,7 +87,7 @@ jobs:
             microphysics: 'none'
             grid: '256x256x128'
             advection: 'WENO5, WENO7, WENO9'
-            backend: 'vanilla, reactant'
+            backend: 'vanilla'
             topology: 'PPB'
             # `mode` distinguishes the two tendency entries in the artifact names
             # (their other matrix fields are identical, so without this they
@@ -108,7 +101,7 @@ jobs:
             microphysics: 'none'
             grid: '256x256x128'
             advection: 'WENO5, WENO7, WENO9'
-            backend: 'vanilla, reactant'
+            backend: 'vanilla'
             topology: 'PPB'
             mode: 'model_tendency'
             extra_flags: '--mode model_tendency --float_type=Float32 --time_steps 320'

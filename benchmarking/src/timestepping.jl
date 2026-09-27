@@ -24,7 +24,7 @@ On non-Reactant backends `@trace` is a no-op decorator and this is equivalent
 to `many_time_steps!`.
 """
 function step_loop!(model, Δt, Nsteps)
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
+    for _ in 1:Nsteps
         time_step!(model, Δt)
     end
     return nothing
@@ -50,17 +50,6 @@ end
 ##### `Periodic(isqrt(Nsteps))` before compiling so the result records it.
 #####
 
-function loss(model, θ_init, Δt, Nsteps, checkpointing)
-    set!(model; θ=θ_init, ρ=1.0)
-    # NOTE: forward step_loop! uses mincut=true, but the min-cut planner
-    # blows host RAM during AD compile (graph algorithm over the dataflow
-    # graph of one body iteration). Run AD without mincut.
-    @trace checkpointing=checkpointing track_numbers=false for _ in 1:Nsteps
-        time_step!(model, Δt)
-    end
-    return mean(interior(model.temperature) .^ 2)
-end
-
 function grad_loss!(model, dmodel, θ_init, dθ_init, Δt, Nsteps, checkpointing)
     parent(dθ_init) .= 0
     _, loss_value = Enzyme.autodiff(
@@ -81,5 +70,3 @@ Short string identifying a loop checkpointing strategy, used in benchmark
 names and recorded in `BenchmarkResult.checkpointing`.
 """
 checkpointing_label(checkpointing::Bool) = checkpointing ? "auto" : "none"
-checkpointing_label(checkpointing::Reactant.Periodic) = "periodic_$(checkpointing.n)"
-checkpointing_label(checkpointing::Reactant.Binomial) = "binomial_$(checkpointing.budget)"
