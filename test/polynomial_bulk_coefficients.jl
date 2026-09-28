@@ -1,4 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
+include(joinpath(@__DIR__, "supposition_setup.jl"))
 
 using Test
 using Breeze
@@ -1047,4 +1048,86 @@ using GPUArraysCore: @allowscalar
         @test fv.u[2, 2, 1] > 45.0       # but barely (still close to 50)
     end
     end # @allowscalar
+end
+
+@testset "Surface-layer stability function properties [$FT]" for FT in all_float_types()
+    params = StabilityFunction(FT)
+    mapping = RichardsonNumberMapping(FT)
+    sf = FittedStabilityFunction(FT(1.5e-4 / 7.3))
+    rtol = spstn_rounding_rtol(FT)
+
+    # Ψᴰ and Ψᵀ vanish at neutral stability and decrease strictly with ζ (positive when unstable,
+    # negative when stable) across the unstable Hogström (1996) and stable Beljaars & Holtslag (1991)
+    # branches. The sign check skips |ζ| < 1e-3, where the stable branch cancels catastrophically.
+    @breeze_check function integrated_stability_functions_decrease_with_ζ(ζ₁ = spstn_floats(FT; lo=-5, hi=5),
+                                                                          δ = spstn_floats(FT; lo=1e-3, hi=3))
+        ζ₂ = ζ₁ + δ
+        Ψᴰ₁, Ψᴰ₂ = integrated_stability_momentum(ζ₁, params), integrated_stability_momentum(ζ₂, params)
+        Ψᵀ₁, Ψᵀ₂ = integrated_stability_scalar(ζ₁, params), integrated_stability_scalar(ζ₂, params)
+        signs_ok = abs(ζ₁) < FT(1e-3) || (sign(Ψᴰ₁) == -sign(ζ₁) && sign(Ψᵀ₁) == -sign(ζ₁))
+        return Ψᴰ₂ < Ψᴰ₁ && Ψᵀ₂ < Ψᵀ₁ && signs_ok
+    end
+
+    # Li et al. (2010) Riᴮ → ζ mapping: neutral maps to neutral (so the fitted stability function
+    # applies no correction), and for the fitted roughness range (z/ℓ ≥ 50) the sign of Riᴮ is
+    # preserved and ζ increases with Riᴮ within each regime. The weakly and strongly stable
+    # regressions do not join continuously at Riᴮ = 0.2, so monotonicity is only checked within a regime.
+    @breeze_check function richardson_mapping_preserves_sign_and_order(Riᴮ₁ = spstn_floats(FT; lo=-2, hi=1),
+                                                                       δ = spstn_floats(FT; lo=1e-3, hi=0.5),
+                                                                       α = spstn_floats(FT; lo=log(50), hi=log(1e6)),
+                                                                       β = spstn_floats(FT; lo=0, hi=3))
+        Riᴮ₂ = Riᴮ₁ + δ
+        ζ₁ = bulk_to_flux_richardson_number(Riᴮ₁, α, β, mapping)
+        ζ₂ = bulk_to_flux_richardson_number(Riᴮ₂, α, β, mapping)
+        neutral = bulk_to_flux_richardson_number(zero(FT), α, β, mapping) == 0 &&
+                  isapprox(sf(zero(FT), α, β), 1; rtol) && isapprox(sf(zero(FT), α, β, Val(:scalar)), 1; rtol)
+        sign_preserved = abs(Riᴮ₁) < FT(1e-3) || sign(ζ₁) == sign(Riᴮ₁)
+        Ri★ = mapping.strongly_stable_transition
+        same_regime = Riᴮ₂ <= Ri★ || Riᴮ₁ > Ri★
+        return neutral && sign_preserved && (!same_regime || ζ₂ > ζ₁)
+    end
+
+    # The correction factor is 1 at neutral stability, does not decrease with Ψ, and the α/10
+    # floor on the denominators caps it at 100.
+    @breeze_check function stability_correction_factor_bounded(α = spstn_floats(FT; lo=1, hi=15),
+                                                               β = spstn_floats(FT; lo=0, hi=4),
+                                                               Ψᴰ = spstn_floats(FT; lo=-20, hi=20),
+                                                               Ψᵀ = spstn_floats(FT; lo=-20, hi=20),
+                                                               δ = spstn_floats(FT; lo=1e-2, hi=5))
+        fᴰ = stability_correction_factor(α, β, Ψᴰ, Ψᵀ, Val(:momentum))
+        fᵀ = stability_correction_factor(α, β, Ψᴰ, Ψᵀ, Val(:scalar))
+        fᴰ⁺ = stability_correction_factor(α, β, Ψᴰ + δ, Ψᵀ + δ, Val(:momentum))
+        fᵀ⁺ = stability_correction_factor(α, β, Ψᴰ + δ, Ψᵀ + δ, Val(:scalar))
+        neutral = isapprox(stability_correction_factor(α, β, zero(FT), zero(FT), Val(:momentum)), 1; rtol) &&
+                  isapprox(stability_correction_factor(α, β, zero(FT), zero(FT), Val(:scalar)), 1; rtol)
+        bounded = 0 < fᴰ <= 100 * (1 + rtol) && 0 < fᵀ <= 100 * (1 + rtol)
+        return neutral && bounded && fᴰ⁺ >= fᴰ && fᵀ⁺ >= fᵀ
+    end
+
+    # Riᴮ is antisymmetric in the air and surface virtual potential temperatures, carries the sign
+    # of their difference, and floors the wind speed at U_min.
+    @breeze_check function bulk_richardson_number_antisymmetric(h = spstn_floats(FT; lo=1, hi=100),
+                                                                θᵥ = spstn_temperatures(FT; lo=250, hi=320),
+                                                                θᵥˢ = spstn_temperatures(FT; lo=250, hi=320),
+                                                                U = spstn_floats(FT; lo=0, hi=30),
+                                                                U_min = spstn_floats(FT; lo=0.1, hi=1))
+        g = FT(9.81)
+        Ri = bulk_richardson_number(h, θᵥ, θᵥˢ, U, U_min, g)
+        antisymmetric = Ri == -bulk_richardson_number(h, θᵥˢ, θᵥ, U, U_min, g)
+        floored = bulk_richardson_number(h, θᵥ, θᵥˢ, min(U, U_min), U_min, g) ==
+                  bulk_richardson_number(h, θᵥ, θᵥˢ, U_min, U_min, g)
+        return antisymmetric && sign(Ri) == sign(θᵥ - θᵥˢ) && floored
+    end
+
+    # The Large & Yeager (2009) neutral coefficient a₀ + a₁U + a₂/U is bounded below by
+    # a₀ + 2√(a₁a₂) and stays finite because the wind speed is floored at U_min.
+    coefficients = FT.((0.142, 0.076, 2.7) .* 1e-3)
+    @breeze_check function neutral_coefficient_bounded(U = spstn_floats(FT; lo=0, hi=60),
+                                                       U_min = spstn_floats(FT; lo=0.1, hi=2))
+        a₀, a₁, a₂ = coefficients
+        C = neutral_coefficient_10m(coefficients, U, U_min)
+        lower = a₀ + 2 * sqrt(a₁ * a₂)
+        return isfinite(C) && C >= lower * (1 - rtol) &&
+               (U >= U_min || C == neutral_coefficient_10m(coefficients, U_min, U_min))
+    end
 end

@@ -1,4 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
+include(joinpath(@__DIR__, "supposition_setup.jl"))
 
 using Test
 import Breeze
@@ -613,6 +614,28 @@ using Oceananigans.Fields: interior
 
         total_water_tendency = dqv + dqc + dqr + dqi + dqwi
         @test abs(total_water_tendency) < 1e-15 * ρ
+    end
+
+    @testset "Water mass conservation for arbitrary process rates [$FT]" for FT in all_float_types()
+        # Every mass rate moves water between two of (vapor, cloud, rain, ice, liquid on ice), so
+        # the five mass tendencies sum to zero whatever the rates are, with one exception: under
+        # the default liquid-fraction routing `wet_growth_shedding` is a sink of both cloud and
+        # qʷⁱ but a source of rain only, so it is pinned to zero (see the hand-built case above).
+        # Number rates do not enter the mass budget, so they are left random as well.
+        names = fieldnames(P3ProcessRates)
+        pinned = (:wet_growth_shedding, :wet_growth_shedding_number)
+        magnitude = FT(1e-3)
+        n = length(names)
+        rates_generator = map(Data.Vectors(spstn_floats(FT; lo=-magnitude, hi=magnitude); min_size=n, max_size=n)) do values
+            return P3ProcessRates{FT}(ntuple(i -> ifelse(names[i] in pinned, zero(FT), values[i]), n)...)
+        end
+
+        @breeze_check function total_water_tendency_vanishes(rates = rates_generator,
+                                                             ρ = spstn_floats(FT; lo=0.1, hi=1.5))
+            total = tendency_ρqᵛ(rates, ρ) + tendency_ρqᶜˡ(rates, ρ) + tendency_ρqʳ(rates, ρ) +
+                    tendency_ρqⁱ(rates, ρ) + tendency_ρqʷⁱ(rates, ρ)
+            return abs(total) <= 1000 * eps(FT) * ρ * magnitude
+        end
     end
 
 end
