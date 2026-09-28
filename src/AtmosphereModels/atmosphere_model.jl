@@ -219,9 +219,8 @@ function AtmosphereModel(grid;
     all_names = field_names(dynamics, formulation, microphysics, tracers)
     field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
-    # Move microphysics lookup tables to the grid architecture (CPU → GPU) before anything
-    # captures the object: the energy-flux boundary conditions of the potential-temperature
-    # formulation carry it into their halo-filling kernels.
+    # Move microphysics lookup tables to the device before the boundary conditions capture them:
+    # a boundary condition that stores the microphysics carries it into its halo-filling kernel.
     microphysics = on_architecture(arch, microphysics)
 
     # Materialize atmosphere-specific boundary conditions (fill in the surface-layer θᵥ
