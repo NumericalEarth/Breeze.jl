@@ -164,6 +164,7 @@ export
 
     # TimeSteppers
     SSPRungeKutta3,
+    SSPRungeKutta43,
     AcousticRungeKutta3,
     AcousticSubstepper,
 
