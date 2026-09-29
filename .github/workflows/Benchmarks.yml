@@ -240,10 +240,11 @@ jobs:
 
               gpu = d['metadata']['gpu_name']
 
-              extra = ''
-              if backend == 'reactant':
-                  extra = (f"Reactant v{d['metadata'].get('reactant_version', 'unknown')}, "
-                           f"Reactant_jll v{d['metadata'].get('reactant_jll_version', 'unknown')}")
+              versions = d['metadata'].get('package_versions', {})
+              extra = ', '.join(
+                  f"{p} v{versions.get(p, 'unknown')}"
+                  for p in ('Oceananigans', 'CUDA', 'GPUCompiler', 'Reactant', 'Reactant_jll')
+              )
 
               grid = d['grid_size']
               grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"

@@ -660,8 +660,6 @@ function generate_markdown_report(filename, entries)
             println(io, "| Julia | ", metadata["julia_version"], " |")
             println(io, "| Oceananigans | ", metadata["oceananigans_version"], " |")
             println(io, "| Breeze | ", metadata["breeze_version"], " |")
-            println(io, "| Reactant | ", metadata["reactant_version"], " |")
-            println(io, "| Reactant_jll | ", metadata["reactant_jll_version"], " |")
             println(io, "| Architecture | ", metadata["architecture"], " |")
             println(io, "| CPU | ", metadata["cpu_model"], " |")
             println(io, "| Threads | ", metadata["num_threads"], " |")
@@ -670,6 +668,10 @@ function generate_markdown_report(filename, entries)
                 println(io, "| CUDA | ", metadata["cuda_version"], " |")
             end
             println(io, "| Hostname | ", metadata["hostname"], " |")
+            for (name, version) in sort!(collect(get(metadata, "package_versions", Dict{String, Any}())))
+                name == "Oceananigans" && continue  # already listed above
+                println(io, "| ", name, " | ", version, " |")
+            end
             println(io)
         end
 
