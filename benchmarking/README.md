@@ -339,6 +339,8 @@ result.metadata
 # ├── julia_version: 1.11.4
 # ├── oceananigans_version: 0.104.2
 # ├── breeze_version: 0.3.1
+# ├── reactant_version: 0.2.286
+# ├── reactant_jll_version: 0.0.412
 # ├── architecture: GPU
 # ├── gpu_name: NVIDIA H200
 # ├── cuda_version: 12.6
