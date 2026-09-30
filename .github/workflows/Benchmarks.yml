@@ -240,6 +240,12 @@ jobs:
 
               gpu = d['metadata']['gpu_name']
 
+              versions = d['metadata'].get('package_versions', {})
+              extra = ', '.join(
+                  f"{p} v{versions.get(p, 'unknown')}"
+                  for p in ('Oceananigans', 'CUDA', 'GPUCompiler', 'Reactant', 'Reactant_jll')
+              )
+
               grid = d['grid_size']
               grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
 
@@ -254,7 +260,7 @@ jobs:
                   level_4 = f'{grid_str} {checkpointing}'.strip()
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   continue
 
               # Scalar-tendency kernel sweep (no model): compare WENO orders on
@@ -274,7 +280,7 @@ jobs:
                   level_4 = f'{ft_short} {backend}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   continue
 
               # We want to group benchmarks in different ways. NOTE:
@@ -286,7 +292,7 @@ jobs:
                   level_4 = f'{microphysics}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   pass
 
               if dynamics == 'anelastic' and microphysics == 'nothing':
@@ -296,7 +302,7 @@ jobs:
                   level_4 = f'{advection} {grid}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   pass
 
               if microphysics == 'nothing':
@@ -306,7 +312,7 @@ jobs:
                   level_4 = f'{grid_str}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
 
               # Reactant vs vanilla sweep: compare backends across grid sizes
               # for a fixed compressible_explicit + WENO5 + 1M mixed-phase
@@ -318,7 +324,7 @@ jobs:
                   level_4 = f'{backend} {grid_str}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
 
           with open('github-action-benchmark.json', 'w') as f:
               json.dump(data, f)
