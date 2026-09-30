@@ -300,7 +300,8 @@ function AtmosphereModels._update_radiation!(rtm::ClearSkyRadiativeTransferModel
     # get zero fluxes (RRTMGP zeroes night columns internally).
     update_sw_fluxes!(solver)
 
-    copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
+    # Not batched: one batch spanning every latitude row.
+    copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, size(grid, 2), 0)
 
     # Compute radiation flux divergence
     compute_radiation_flux_divergence!(rtm, grid)
