@@ -16,7 +16,7 @@ struct BenchmarkMetadata
     timestamp::DateTime
 end
 
-    const TRACKED_PACKAGES = ("Oceananigans", "LLVM", "Enzyme", "Reactant", "Reactant_jll")
+const TRACKED_PACKAGES = ("Oceananigans", "LLVM", "Enzyme", "Reactant", "Reactant_jll")
 
 function loaded_package_versions(names = TRACKED_PACKAGES)
     versions = Dict{String, String}()
