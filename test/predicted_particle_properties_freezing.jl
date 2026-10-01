@@ -154,7 +154,7 @@ using Oceananigans.Fields: interior
     end
 
     @testset "RainVelocityDiameterIntegral - large λ_r limit" begin
-        # M3: the quadrature now returns the Reynolds integral only: I_Re = ∫ D √Re exp(-λD) dD
+        # The quadrature returns the Reynolds integral only: I_Re = ∫ D √Re exp(-λD) dD
         # At λ_r → ∞ (tiny drops), √Re → 0, so I_Re → 0 (but stays positive).
         # The full evaporation integral is assembled at runtime:
         #   I_evap = f1r/λ² + f2r × Sc^(1/3) × I_Re
@@ -179,7 +179,7 @@ using Oceananigans.Fields: interior
     end
 
     @testset "rain_evaporation_rate sign with tabulated scheme" begin
-        # With tabulated rain, evaporation in subsaturated air should be positive magnitude (M7)
+        # With tabulated rain, evaporation in subsaturated air should be positive magnitude
         p3_tab = PredictedParticlePropertiesMicrophysics()
 
         FT = Float64
@@ -193,7 +193,7 @@ using Oceananigans.Fields: interior
         qv_sub = FT(0.008)   # 67% RH — subsaturated
 
         rate_sub = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P, constants)
-        @test rate_sub > 0   # Positive magnitude (M7)
+        @test rate_sub > 0   # Positive magnitude
 
         # Saturated: zero evaporation
         rate_sat = rain_evaporation_rate(p3_tab, qr, nr, qv_sat, qv_sat, T, ρ, P, constants)
@@ -217,7 +217,7 @@ using Oceananigans.Fields: interior
 
         rate_tab = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P, constants)
 
-        # Should be positive magnitude (M7) and finite
+        # Should be positive magnitude and finite
         @test rate_tab > 0
         @test isfinite(rate_tab)
 
@@ -292,7 +292,7 @@ using Oceananigans.Fields: interior
         @test frozen_mass_rate > 0
         @test frozen_number_rate > 0
 
-        # D25: there is no mass-number consistency cap — all Nᶜˡ transfers to ice.
+        # There is no mass-number consistency cap — all Nᶜˡ transfers to ice.
         # With trace qᶜˡ and large Nᶜˡ, freezing still activates.
         qᶜˡ_trace = FT(1e-7)
         Nᶜˡ_continental = FT(750e6)
@@ -341,7 +341,7 @@ using Oceananigans.Fields: interior
         @test N32r isa Float32
     end
 
-    @testset "Immersion freezing PSD weighting (H1)" begin
+    @testset "Immersion freezing PSD weighting" begin
         p3 = PredictedParticlePropertiesMicrophysics(Float64)
 
         # Cloud immersion freezing: PSD correction on mass only.
@@ -534,7 +534,7 @@ using Oceananigans.Fields: interior
         ρ = FT(1.0)
 
         # Create rates with typical mixed-phase values, including homogeneous freezing
-        # Sign convention (M7): all one-directional rates are positive magnitudes
+        # Sign convention: all one-directional rates are positive magnitudes
         rates = P3ProcessRates(
             FT(5e-7),   # condensation (bidirectional)
             FT(1e-7),   # autoconversion
@@ -552,9 +552,9 @@ using Oceananigans.Fields: interior
             FT(0),      # clipping_rime_mass
             FT(0),      # clipping_rime_volume
             FT(0),      # post_process_clipping
-            FT(0.0),    # sublimation_number (D2: nisub)
+            FT(0.0),    # sublimation_number (nisub)
             FT(500.0),  # aggregation (positive magnitude)
-            FT(0.0),    # ni_limit (C3: global Nⁱ cap)
+            FT(0.0),    # ni_limit (global Nⁱ cap)
             FT(1e-7),   # cloud_riming
             FT(1e4),    # cloud_riming_number (positive magnitude)
             FT(5e-8),   # rain_riming
@@ -578,7 +578,7 @@ using Oceananigans.Fields: interior
             FT(1e-8),   # cloud_warm_collection (above-freezing cloud collection → qʷⁱ)
             FT(1e4),    # cloud_warm_collection_number
             FT(5e-9),   # rain_warm_collection (above-freezing rain collection → qʷⁱ)
-            FT(1e2),    # rain_warm_collection_number (M9)
+            FT(1e2),    # rain_warm_collection_number
             FT(3e-8),   # wet_growth_cloud (cloud riming redirected to qʷⁱ)
             FT(2e-8),   # wet_growth_rain (rain riming redirected to qʷⁱ)
             # wet_growth_shedding is nonzero ONLY in the dry (non-liquid-fraction)
@@ -589,16 +589,16 @@ using Oceananigans.Fields: interior
             # struct describes an unreachable state and double-charges cloud.
             FT(0.0),    # wet_growth_shedding (dry-branch only; 0 under LF routing)
             FT(0.0),    # wet_growth_shedding_number (dry-branch only)
-            FT(0.0),    # ccn_activation_mass (M9 stub)
-            FT(0.0),    # ccn_activation_number (M9 stub)
-            FT(0.0),    # rain_condensation (M9 stub)
-            FT(0.0),    # coating_condensation (M9 stub)
-            FT(0.0),    # coating_evaporation (M9 stub)
-            FT(0.0),    # wet_growth_densification_mass (H9)
-            FT(0.0),    # wet_growth_densification_volume (H9)
-            FT(0.0),    # cloud_number_correction (M6)
-            FT(0.0),    # rain_number_correction (M6)
-            FT(0.0),    # ice_number_correction (M4)
+            FT(0.0),    # ccn_activation_mass
+            FT(0.0),    # ccn_activation_number
+            FT(0.0),    # rain_condensation
+            FT(0.0),    # coating_condensation
+            FT(0.0),    # coating_evaporation
+            FT(0.0),    # wet_growth_densification_mass
+            FT(0.0),    # wet_growth_densification_volume
+            FT(0.0),    # cloud_number_correction
+            FT(0.0),    # rain_number_correction
+            FT(0.0),    # ice_number_correction
         FT(0.0),    # predicted_supersaturation_adjustment
         FT(0.0),    # predicted_supersaturation_tendency
         )

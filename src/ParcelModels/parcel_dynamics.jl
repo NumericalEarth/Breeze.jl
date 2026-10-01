@@ -277,9 +277,9 @@ density-weighted scalars for schemes with prognostic microphysics.
 The prognostic variables use the same ρ-weighted names as the grid-based model
 (e.g., `:ρqᶜˡ`, `:ρqʳ`) from `prognostic_field_names(microphysics)`.
 
-All values start at zero, including a prognostic aerosol reservoir `ρnᵃ`: it holds a
-ρ-weighted count, so its default is only meaningful once the parcel has an environmental
-density, which `set!` supplies through [`set_parcel_aerosol_number`](@ref).
+All values start at zero. A scheme that carries a prognostic aerosol reservoir `ρnᵃ` holds a
+ρ-weighted count there, so its default is only meaningful once the parcel has an
+environmental density, which `set!` supplies through [`set_parcel_aerosol_number`](@ref).
 """
 function materialize_parcel_microphysics_prognostics(FT, microphysics)
     names = AtmosphereModels.prognostic_field_names(microphysics)
@@ -293,6 +293,9 @@ $(TYPEDSIGNATURES)
 Return `μ` with its aerosol reservoir `ρnᵃ` [m⁻³] set from the parcel's environmental
 density `ρ`: to `ρ * nᵃ` if `nᵃ` [kg⁻¹] is given, to `ρnᵃ` if that is given, and otherwise
 to the scheme default [`AtmosphereModels.initial_aerosol_number_density`](@ref).
+
+Schemes without a prognostic reservoir have no `ρnᵃ` to set, so `μ` is returned unchanged;
+supplying `nᵃ` or `ρnᵃ` for one of those is an `ArgumentError` rather than a silent no-op.
 
 Because `set!` calls this on every invocation, a later `set!` also resets the reservoir to
 the distribution default. Pass `nᵃ` or `ρnᵃ` explicitly to carry a depleted reservoir
@@ -393,9 +396,10 @@ conditions interpolated at that height.
 - `y`: Initial parcel y-position [m], default: 0
 - `z`: Initial parcel height [m], required to initialize parcel state
 - `w_parcel`: Initial parcel vertical velocity [m/s], for `PrognosticVerticalVelocity`
-- `nᵃ`: Initial aerosol number per unit mass [kg⁻¹]. Defaults to the value implied by the
-  scheme's aerosol distribution, so a depleted reservoir must be passed explicitly to
-  survive a `set!` (see [`set_parcel_aerosol_number`](@ref))
+- `nᵃ`: Initial aerosol number per unit mass [kg⁻¹], for a scheme that carries a prognostic
+  reservoir. Defaults to the value implied by the scheme's aerosol distribution, so a
+  depleted reservoir must be passed explicitly to survive a `set!` (see
+  [`set_parcel_aerosol_number`](@ref))
 - `ρnᵃ`: Initial aerosol number density [m⁻³], the ρ-weighted alternative to `nᵃ`
 """
 function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,

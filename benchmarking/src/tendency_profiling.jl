@@ -104,6 +104,7 @@ function benchmark_tendency(tendency!, args, grid;
         "none",      # microphysics
         String(backend),
         String(mode),
+        "",          # checkpointing — only meaningful for AD time stepping
         (Nx, Ny, Nz),
         nrepeat,
         0.0,         # Δt — not applicable to a single tendency evaluation

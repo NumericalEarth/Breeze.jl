@@ -49,23 +49,12 @@ struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
     sᵛ⁺ˡ :: FT
     "Unactivated aerosol number concentration [1/kg] (zero when no aerosol prognostic)"
     nᵃ  :: FT
-    "Cell-center vertical velocity [m/s] (retained for the common microphysical-state interface)"
+    "Cell-center vertical velocity [m/s]; drives the adiabatic temperature tendency"
     w   :: FT
 end
 
-# Initial aerosol reservoir for the prognostic-ρnᵃ path.
-#
-# P3's aerosol distribution is specified per unit mass: `AerosolMode.number_mixing_ratio` is
-# [kg⁻¹], so `sum_aerosol_number` is [kg⁻¹] and so are `activated_number` and
-# `total_activated_number`. That is the basis the activation cap in
-# `prognostic_ccn_activation_rate` compares against, since `nᶜˡ = ρnᶜˡ/ρ` and `nᵃ = ρnᵃ/ρ`
-# are both per unit mass, and it is the basis `tendency_ρnᶜˡ` assumes when it multiplies
-# `ncnuc` by ρ.
-#
-# The prognostic field `ρnᵃ` therefore holds ρ nᵃ [m⁻³], and seeding it means multiplying by
-# air density here. Skipping the multiplication makes the diagnosed `nᵃ = ρnᵃ / ρ`
-# proportional to `1 / ρ` instead of equal to the configured number mixing ratio.
-# The prescribed-Nᶜˡ path has no `ρnᵃ` field, and returns 0 to match the framework default.
+# Aerosol modes specify number per unit mass [kg⁻¹]; multiply by air density
+# to initialize the prognostic number density [m⁻³].
 @inline AM.initial_aerosol_number(p3::P3) = initial_aerosol_number(p3.aerosol)
 @inline initial_aerosol_number(::Nothing) = 0
 @inline initial_aerosol_number(aerosol::AerosolActivation) = sum_aerosol_number(aerosol)
@@ -91,17 +80,19 @@ end
 @inline supersaturation_prognostic_names(::ProcessRate{FT, false}) where FT = ()
 @inline supersaturation_prognostic_names(::ProcessRate{FT, true}) where FT = (:ρsᵛ⁺ˡ,)
 
-# Droplet number and aerosol depletion are prognostic iff `p3.aerosol` is a concrete
-# `AerosolActivation`. In the prescribed-Nᶜˡ path, `nᶜˡ`
+# Droplet number is prognostic iff `p3.aerosol` is a concrete `AerosolActivation`. In the
+# prescribed-Nᶜˡ path, `nᶜˡ`
 # is the scheme parameter `p3.cloud.number_concentration` at every microphysics call, so
 # no rate reads `ρnᶜˡ` or `ρnᵃ`. Advecting them would integrate transport unrelated to the
 # number the physics uses, and `materialize_microphysical_fields` does not even allocate
 # them in that path.
 @inline cloud_prognostic_names(::Nothing) = (:ρqᶜˡ,)
-@inline cloud_prognostic_names(_) = (:ρqᶜˡ, :ρnᶜˡ)
+@inline cloud_prognostic_names(::AerosolActivation) = (:ρqᶜˡ, :ρnᶜˡ)
 
+# Carry the aerosol reservoir only with prognostic=true.
 @inline aerosol_prognostic_names(::Nothing) = ()
-@inline aerosol_prognostic_names(_) = (:ρnᵃ,)
+@inline aerosol_prognostic_names(::AerosolActivation{<:Any, false}) = ()
+@inline aerosol_prognostic_names(::AerosolActivation{<:Any, true}) = (:ρnᵃ,)
 
 @inline AM.aerosol_field_names(p3::P3) = aerosol_prognostic_names(p3.aerosol)
 
@@ -115,7 +106,7 @@ Return prognostic field names for the P3 scheme.
 - Rain: ρqʳ, ρnʳ
 - Ice (always): ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ
 - Liquid supersaturation (only when `predict_supersaturation = true`): ρsᵛ⁺ˡ
-- Aerosol (only when `aerosol::AerosolActivation` is set): ρnᵃ
+- Aerosol (only when `aerosol::AerosolActivation` sets `prognostic`): ρnᵃ
 """
 @inline function AM.prognostic_field_names(p3::P3)
     cloud_names = cloud_prognostic_names(p3.aerosol)
@@ -178,13 +169,14 @@ AM.negative_moisture_correction(p3::P3) = p3.negative_moisture_correction
 # aerosol container so each tuple folds to a constant. The prescribed-Nᶜˡ path has no
 # `ρnᶜˡ`/`ρnᵃ` fields at all, so there is nothing to repair.
 @inline cloud_number_correction_pairs(::Nothing, μ) = ()
-@inline cloud_number_correction_pairs(_, μ) = ((μ.ρnᶜˡ, μ.ρqᶜˡ),)
+@inline cloud_number_correction_pairs(::AerosolActivation, μ) = tuple((μ.ρnᶜˡ, μ.ρqᶜˡ))
 
 @inline cloud_number_correction_fields(::Nothing, μ) = ()
-@inline cloud_number_correction_fields(_, μ) = (μ.ρnᶜˡ,)
+@inline cloud_number_correction_fields(::AerosolActivation, μ) = tuple(μ.ρnᶜˡ)
 
 @inline aerosol_correction_fields(::Nothing, μ) = ()
-@inline aerosol_correction_fields(_, μ) = (μ.ρnᵃ,)
+@inline aerosol_correction_fields(::AerosolActivation{<:Any, false}, μ) = ()
+@inline aerosol_correction_fields(::AerosolActivation{<:Any, true}, μ) = (μ.ρnᵃ,)
 
 """
 $(TYPEDSIGNATURES)
@@ -193,7 +185,7 @@ Effective cloud droplet number concentration [kg⁻¹] seen by P3's process rate
 
 In the prescribed-Nᶜˡ path (`p3.aerosol === nothing`), the droplet number is always
 `p3.cloud.number_concentration` at every microphysics call, so this helper returns
-that prescribed value and ignores its `ρnᶜˡ` argument. Droplet number is
+that prescribed value divided by `ρ` and ignores its `ρnᶜˡ` argument. Droplet number is
 not a state variable in that configuration: `prognostic_field_names` omits `ρnᶜˡ` and
 `materialize_microphysical_fields` does not allocate it.
 
@@ -248,13 +240,20 @@ The P3 scheme requires the following fields on `grid`:
 - `ρqⁱ`, `ρnⁱ`: Ice mass and number densities
 - `ρqᶠ`, `ρbᶠ`: Rime mass and volume densities
 - `ρqʷⁱ`: Liquid water on ice mass density
-- `ρnᶜˡ`, `ρnᵃ`: Cloud number and unactivated aerosol number densities, allocated only
-when `p3.aerosol isa AerosolActivation`. The prescribed-Nᶜˡ path takes droplet
-  number from `p3.cloud.number_concentration`, so neither field exists there and
-  neither is advected.
+- `ρnᶜˡ`: Cloud number density, allocated only when `p3.aerosol isa AerosolActivation`.
+- `ρnᵃ`: Unactivated aerosol number density, allocated with `AerosolActivation(...; prognostic=true)`.
+- `ρsᵛ⁺ˡ`: Liquid supersaturation, allocated with `predict_supersaturation = true`.
 
-**Diagnostic:**
+**Specific diagnostics** (rewritten by `update_microphysical_auxiliaries!`):
 - `qᵛ`: Vapor specific humidity (mirrors the prognostic vapor field)
+- `qᶜˡ`, `qʳ`, `nʳ`, `qⁱ`, `nⁱ`, `qᶠ`, `bᶠ`, `qʷⁱ`: specific counterparts of the
+  density-weighted prognostics
+- `nᶜˡ`, `nᵃ`, `sᵛ⁺ˡ`: specific counterparts of the optional prognostics, each
+  allocated alongside its own prognostic
+
+**Surface temperature** (`surface_temperature`): one value per column for
+Hallett–Mossop splintering, refreshed by `compute_p3_surface_temperature!` before
+each stage's microphysical tendencies.
 
 **Sedimentation velocities** (`wᶜˡ`, `wⁿᶜˡ`, `wʳ`, `wⁿʳ`, `wⁱ`, `wⁿⁱ`):
 z-Face fields, because the scalar flux divergence consumes them as advecting velocities at
@@ -312,25 +311,24 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
               surface_temperature)
 
     return merge(fields,
-                 aerosol_activation_fields(p3.aerosol, grid),
+                 cloud_number_fields(p3.aerosol, grid),
+                 aerosol_fields(p3.aerosol, grid),
                  supersaturation_fields(p3.process_rates, grid))
 end
 
-# Optional field groups. Each switch gates allocation, not just transport, so a
-# configuration never carries memory for state it does not use. Both dispatch on a
-# *type* (`Nothing` / `ProcessRate{FT, PS}`) so the merged NamedTuple is a
-# compile-time constant, which lets the read sites fold their guards away.
+# Type dispatch fixes the optional field set at compile time for GPU kernels.
+@inline cloud_number_fields(::Nothing, grid) = (;)
 
-# Droplet number and unactivated aerosol. The prescribed-Nᶜˡ path takes the droplet
-# number from `p3.cloud.number_concentration` at every call and never reads `ρnᶜˡ`
-# or `ρnᵃ`.
-@inline aerosol_activation_fields(::Nothing, grid) = (;)
-
-@inline aerosol_activation_fields(_, grid) =
+@inline cloud_number_fields(::AerosolActivation, grid) =
     (; ρnᶜˡ = CenterField(grid),        # Cloud number density [1/m³]
-     ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
-     nᶜˡ = CenterField(grid),         # Cloud number concentration [kg⁻¹]
-     nᵃ = CenterField(grid))          # Unactivated aerosol [kg⁻¹]
+     nᶜˡ = CenterField(grid))           # Cloud number concentration [kg⁻¹]
+
+@inline aerosol_fields(::Nothing, grid) = (;)
+@inline aerosol_fields(::AerosolActivation{<:Any, false}, grid) = (;)
+
+@inline aerosol_fields(::AerosolActivation{<:Any, true}, grid) =
+    (; ρnᵃ = CenterField(grid),         # Unactivated aerosol number density [1/m³]
+     nᵃ = CenterField(grid))            # Unactivated aerosol [kg⁻¹]
 
 # Predicted supersaturation, off by default. With the switch off every rate that
 # would touch `sᵛ⁺ˡ` is gated to zero, so the prognostic carries no information.
@@ -345,14 +343,6 @@ end
 #
 # P3 is a non-equilibrium scheme: all condensate comes from prognostic fields μ.
 
-"""
-$(TYPEDSIGNATURES)
-
-Build a [`P3MicrophysicalState`](@ref) from density-weighted prognostic variables.
-
-P3 is a non-equilibrium scheme, so all cloud and precipitation variables come
-from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
-"""
 # Compile-time NamedTuple field lookup with a default — used so that the gridless
 # `microphysical_state` path works whether or not `μ` carries the optional
 # `ρnᶜˡ`/`ρnᵃ` (prognostic aerosol) and `ρsᵛ⁺ˡ` (predicted supersaturation) fields.
@@ -366,6 +356,14 @@ end
 # All call sites pass face fields (or ZeroField placeholders); no scalar fallback needed.
 @inline interpolate_w_to_center(grid, i, j, k, w_field, FT) = FT(ℑzᵃᵃᶜ(i, j, k, grid, w_field))
 
+"""
+$(TYPEDSIGNATURES)
+
+Build a [`P3MicrophysicalState`](@ref) from density-weighted prognostic variables.
+
+P3 is a non-equilibrium scheme, so all cloud and precipitation variables come
+from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
+"""
 @inline function AM.microphysical_state(p3::P3, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
     # ρnᶜˡ is absent unless the aerosol-activation path is enabled; the prescribed-Nᶜˡ
@@ -382,7 +380,7 @@ end
     bᶠ  = rime_state.bᶠ
     # ρsᵛ⁺ˡ is absent unless predicted supersaturation is enabled; default to 0.
     sᵛ⁺ˡ = get_or_default(μ, Val(:ρsᵛ⁺ˡ), 0 * ρ) / ρ
-    # ρnᵃ is absent unless prognostic-aerosol path is enabled; default to 0.
+    # ρnᵃ is absent unless the reservoir is prognostic; default to 0.
     nᵃ = get_or_default(μ, Val(:ρnᵃ), 0 * ρ) / ρ
     return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, sᵛ⁺ˡ, nᵃ,
                                 vertical_velocity(velocities, FT))
@@ -408,11 +406,13 @@ end
 # path the `ρnᶜˡ`/`ρnᵃ` fields do not exist at all.
 @inline grid_cloud_droplet_number(p3::P3, ::Nothing, μ, i, j, k, ρ) =
     p3.cloud.number_concentration / ρ
-@inline grid_cloud_droplet_number(p3::P3, _, μ, i, j, k, ρ) =
+@inline grid_cloud_droplet_number(p3::P3, ::AerosolActivation, μ, i, j, k, ρ) =
     @inbounds μ.ρnᶜˡ[i, j, k] / ρ
 
 @inline grid_aerosol_number(::Nothing, μ, i, j, k, ρ) = 0 * ρ
-@inline grid_aerosol_number(_, μ, i, j, k, ρ) = @inbounds μ.ρnᵃ[i, j, k] / ρ
+@inline grid_aerosol_number(::AerosolActivation{<:Any, false}, μ, i, j, k, ρ) = 0 * ρ
+
+@inline grid_aerosol_number(::AerosolActivation{<:Any, true}, μ, i, j, k, ρ) = @inbounds μ.ρnᵃ[i, j, k] / ρ
 
 # Same for the optional supersaturation prognostic: absent with prediction
 # disabled, where it collapses to zero anyway.
@@ -510,8 +510,8 @@ end
         # signature carries them. ℳ.w == 0 is acceptable in this auxiliary path because
         # nothing downstream of it consumes w: the auxiliary writes are copies of the
         # prognostic state, and the fall-speed path reads only the size distributions.
-        # `w` enters P3 solely through the adiabatic temperature tendency and CCN
-        # activation, both of which live in the tendency kernel.
+        # `w` enters P3 solely through the adiabatic temperature tendency, which lives
+        # in the tendency kernel.
         velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
         ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
         clamp_rime_state!(μ, i, j, k, ρ, ℳ)
@@ -556,31 +556,36 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.qᶠ[i, j, k]  = ℳ.qᶠ
     @inbounds μ.bᶠ[i, j, k]  = ℳ.bᶠ
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
-    write_cloud_number_diagnostics!(μ, i, j, k, p3.aerosol, ℳ)
-    write_supersaturation_diagnostic!(μ, i, j, k, p3.process_rates, ℳ)
+    write_cloud_number_diagnostic!(μ, i, j, k, grid, p3.aerosol, ℳ)
+    write_aerosol_diagnostic!(μ, i, j, k, grid, p3.aerosol, ℳ)
+    write_supersaturation_diagnostic!(μ, i, j, k, grid, p3.process_rates, ℳ)
     p3_compute_fall_speeds!(μ, i, j, k, p3, ρ, ℳ, 𝒰, constants)
 
     return nothing
 end
 
-# Diagnostics for the optional prognostic groups. Each specific field is what
-# `compute_tendencies!` advects to assemble the matching ∂(ρx)/∂t, so it has to equal
-# `ρx / ρ` — which `ℳ.nᶜˡ` does in the aerosol-activation path, where the field exists.
-# Configurations without the prognostic have no field to write.
-@inline write_cloud_number_diagnostics!(μ, i, j, k, ::Nothing, ℳ) = nothing
+# Specific diagnostics must equal ρx / ρ for advection of the prognostic ρx.
+@inline write_cloud_number_diagnostic!(μ, i, j, k, grid, ::Nothing, ℳ) = nothing
 
-@inline function write_cloud_number_diagnostics!(μ, i, j, k, _, ℳ)
+@inline function write_cloud_number_diagnostic!(μ, i, j, k, grid, ::AerosolActivation, ℳ)
     @inbounds μ.nᶜˡ[i, j, k] = ℳ.nᶜˡ
-    @inbounds μ.nᵃ[i, j, k]  = ℳ.nᵃ
+    return nothing
+end
+
+@inline write_aerosol_diagnostic!(μ, i, j, k, grid, ::Nothing, ℳ) = nothing
+@inline write_aerosol_diagnostic!(μ, i, j, k, grid, ::AerosolActivation{<:Any, false}, ℳ) = nothing
+
+@inline function write_aerosol_diagnostic!(μ, i, j, k, grid, ::AerosolActivation{<:Any, true}, ℳ)
+    @inbounds μ.nᵃ[i, j, k] = ℳ.nᵃ
     return nothing
 end
 
 @inline write_supersaturation_diagnostic!(
-    μ, i, j, k, ::ProcessRate{FT, false}, ℳ
+    μ, i, j, k, grid, ::ProcessRate{FT, false}, ℳ
 ) where FT = nothing
 
 @inline function write_supersaturation_diagnostic!(
-    μ, i, j, k, ::ProcessRate{FT, true}, ℳ
+    μ, i, j, k, grid, ::ProcessRate{FT, true}, ℳ
 ) where FT
     @inbounds μ.sᵛ⁺ˡ[i, j, k] = ℳ.sᵛ⁺ˡ
     return nothing
@@ -594,8 +599,8 @@ struct P3CoreIceProps{FT, P}
     Fˡ :: FT
     ρᶠ :: FT
     qⁱ_total :: FT
-    # impose_max_Ni cap mirrored from compute_p3_process_rates so the tabulated
-    # rate decomposition uses the same nⁱ throughout the process path.
+    # Number after the global cap, number floor, and λ-limiter in `p3_ice_moments`.
+    # `compute_p3_process_rates` reuses it throughout the tabulated process rates.
     nⁱ :: FT
     # Number diagnosed before the lambda limiter; the process payload combines it
     # with mean density to build the volume-equivalent diameter.
@@ -670,9 +675,10 @@ end
     rain_speeds = rain_terminal_velocities(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     𝕎ʳ   = rain_speeds.mass_weighted
     𝕎ⁿʳ  = rain_speeds.number_weighted
-    # The global ice-number cap must be seen consistently by all downstream math —
-    # process rates and terminal velocities alike — so use
-    # properties.nⁱ (= min(ℳ.nⁱ, Nⁱ_max/ρ)) rather than the raw prognostic here.
+    # The bounded ice number must be seen consistently by all downstream math —
+    # process rates and terminal velocities alike — so use `properties.nⁱ`, which
+    # `p3_ice_moments` builds from the raw prognostic by applying the global cap, the
+    # number floor, and the λ-limiter clamp, rather than the raw prognostic here.
     # The ice fall-speed lookup is indexed with the total ice mass.
     # `properties.qⁱ_total` includes the liquid coating only when that prognostic
     # mode is active, so a stale restart coating cannot affect the
@@ -714,8 +720,8 @@ end
     coating_mass_tendency = tendency_ρqʷⁱ(rates, ρ, p3.process_rates)
     supersaturation_tendency = tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates)
     vapor_mass_tendency = tendency_ρqᵛ(rates, ρ)
-    # Aerosol depletion: every activated cloud droplet removes one from ρnᵃ.
-    # Zero in the prescribed-Nᶜˡ path (rates.ccn_activation_number is 0 there).
+    # Aerosol depletion: every activated cloud droplet removes one from ρnᵃ. Zero in the
+    # prescribed-Nᶜˡ path, and discarded when the population is fixed rather than prognostic.
     aerosol_number_tendency = tendency_ρnᵃ(rates, ρ)
 
     FT = typeof(ρ)
@@ -780,7 +786,7 @@ end
 
 # `G` is the reduced tuple from `p3_tendency_fields`. The `+=` lands on top of the
 # advection, diffusion and forcing the scalar kernels have already written.
-@inline function add_p3_tendencies!(G, i, j, k, p3::P3, result::P3TendencyResult)
+@inline function add_p3_tendencies!(G, i, j, k, grid, p3::P3, result::P3TendencyResult)
     @inbounds begin
         G.ρqᶜˡ[i, j, k] += result.tendency_ρqᶜˡ
         G.ρqʳ[i, j, k]  += result.tendency_ρqʳ
@@ -792,26 +798,34 @@ end
         G.ρqʷⁱ[i, j, k] += result.tendency_ρqʷⁱ
         G.ρqᵛ[i, j, k]  += result.tendency_ρqᵛ
     end
-    add_p3_cloud_number_tendencies!(G, i, j, k, p3.aerosol, result)
-    add_p3_supersaturation_tendency!(G, i, j, k, p3.process_rates, result)
+    add_cloud_number_tendency!(G, i, j, k, grid, p3.aerosol, result)
+    add_aerosol_tendency!(G, i, j, k, grid, p3.aerosol, result)
+    add_supersaturation_tendency!(G, i, j, k, grid, p3.process_rates, result)
     return nothing
 end
 
-# Configurations without a prognostic have no `Gⁿ` slot to add to.
-@inline add_p3_cloud_number_tendencies!(G, i, j, k, ::Nothing, result) = nothing
+# Match tendency writes to the allocated prognostic fields.
+@inline add_cloud_number_tendency!(G, i, j, k, grid, ::Nothing, result) = nothing
 
-@inline function add_p3_cloud_number_tendencies!(G, i, j, k, _, result)
+@inline function add_cloud_number_tendency!(G, i, j, k, grid, ::AerosolActivation, result)
     @inbounds G.ρnᶜˡ[i, j, k] += result.tendency_ρnᶜˡ
+    return nothing
+end
+
+@inline add_aerosol_tendency!(G, i, j, k, grid, ::Nothing, result) = nothing
+@inline add_aerosol_tendency!(G, i, j, k, grid, ::AerosolActivation{<:Any, false}, result) = nothing
+
+@inline function add_aerosol_tendency!(G, i, j, k, grid, ::AerosolActivation{<:Any, true}, result)
     @inbounds G.ρnᵃ[i, j, k] += result.tendency_ρnᵃ
     return nothing
 end
 
-@inline add_p3_supersaturation_tendency!(
-    G, i, j, k, ::ProcessRate{FT, false}, result
+@inline add_supersaturation_tendency!(
+    G, i, j, k, grid, ::ProcessRate{FT, false}, result
 ) where FT = nothing
 
-@inline function add_p3_supersaturation_tendency!(
-    G, i, j, k, ::ProcessRate{FT, true}, result
+@inline function add_supersaturation_tendency!(
+    G, i, j, k, grid, ::ProcessRate{FT, true}, result
 ) where FT
     @inbounds G.ρsᵛ⁺ˡ[i, j, k] += result.tendency_ρsᵛ⁺ˡ
     return nothing

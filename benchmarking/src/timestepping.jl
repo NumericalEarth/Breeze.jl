@@ -38,19 +38,30 @@ end
 ##### Enzyme reverse-mode AD over `loss`. Both are compiled together via
 ##### `Reactant.@compile raise=true`.
 #####
+##### `checkpointing` selects the loop checkpointing strategy Enzyme uses in
+##### the reverse pass and is one of
+#####   - `false`: no checkpointing, the whole forward tape is kept;
+#####   - `true`: Reactant's default, `Periodic(isqrt(Nsteps))`;
+#####   - `Reactant.Periodic(n)`: `n` evenly spaced checkpoints;
+#####   - `Reactant.Binomial(budget)`: revolve schedule with at most `budget`
+#####     checkpoints live at once.
+##### It is a plain Julia value (not traced), so each strategy is a separate
+##### compile. `benchmark_time_stepping` resolves `true` to an explicit
+##### `Periodic(isqrt(Nsteps))` before compiling so the result records it.
+#####
 
-function loss(model, θ_init, Δt, Nsteps)
+function loss(model, θ_init, Δt, Nsteps, checkpointing)
     set!(model; θ=θ_init, ρ=1.0)
     # NOTE: forward step_loop! uses mincut=true, but the min-cut planner
     # blows host RAM during AD compile (graph algorithm over the dataflow
     # graph of one body iteration). Run AD without mincut.
-    @trace checkpointing=true track_numbers=false for _ in 1:Nsteps
+    @trace checkpointing=checkpointing track_numbers=false for _ in 1:Nsteps
         time_step!(model, Δt)
     end
     return mean(interior(model.temperature) .^ 2)
 end
 
-function grad_loss!(model, dmodel, θ_init, dθ_init, Δt, Nsteps)
+function grad_loss!(model, dmodel, θ_init, dθ_init, Δt, Nsteps, checkpointing)
     parent(dθ_init) .= 0
     _, loss_value = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
@@ -58,6 +69,17 @@ function grad_loss!(model, dmodel, θ_init, dθ_init, Δt, Nsteps)
         Enzyme.Duplicated(model, dmodel),
         Enzyme.Duplicated(θ_init, dθ_init),
         Enzyme.Const(Δt),
-        Enzyme.Const(Nsteps))
+        Enzyme.Const(Nsteps),
+        Enzyme.Const(checkpointing))
     return loss_value
 end
+
+"""
+    checkpointing_label(checkpointing)
+
+Short string identifying a loop checkpointing strategy, used in benchmark
+names and recorded in `BenchmarkResult.checkpointing`.
+"""
+checkpointing_label(checkpointing::Bool) = checkpointing ? "auto" : "none"
+checkpointing_label(checkpointing::Reactant.Periodic) = "periodic_$(checkpointing.n)"
+checkpointing_label(checkpointing::Reactant.Binomial) = "binomial_$(checkpointing.budget)"

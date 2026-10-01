@@ -13,7 +13,6 @@ using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Reactant
-using Reactant: @trace
 using Enzyme
 using GPUArraysCore: @allowscalar
 using Statistics: mean
@@ -67,23 +66,21 @@ function initial_density(model)
     return isnothing(ref) ? one(FT) : ref.density
 end
 
-function loss(model, θ_init, Δt, Nsteps)
+# The simulation carries Δt and the number of steps; `run!` reinitializes it each call.
+function loss(simulation, θ_init)
+    model = simulation.model
     set!(model; θ=θ_init, ρ=initial_density(model))
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
-        time_step!(model, Δt)
-    end
+    run!(simulation)
     return mean(interior(model.temperature) .^ 2)
 end
 
-function grad_loss(model, dmodel, θ_init, dθ_init, Δt, Nsteps)
+function grad_loss(simulation, dsimulation, θ_init, dθ_init)
     parent(dθ_init) .= 0
     _, loss_value = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
-        Enzyme.Duplicated(model, dmodel),
-        Enzyme.Duplicated(θ_init, dθ_init),
-        Enzyme.Const(Δt),
-        Enzyme.Const(Nsteps))
+        Enzyme.Duplicated(simulation, dsimulation),
+        Enzyme.Duplicated(θ_init, dθ_init))
     return dθ_init, loss_value
 end
 
@@ -104,14 +101,15 @@ end
             @test model.dynamics isa CompressibleDynamics
         end
 
-        model  = AtmosphereModel(grid; dynamics=make_dynamics(), coriolis=SphericalCoriolis())
-        θ_init, dθ_init = make_init_fields(grid)
-        dmodel = Enzyme.make_zero(model)
         Ns = 1
+        model = AtmosphereModel(grid; dynamics=make_dynamics(), coriolis=SphericalCoriolis())
+        simulation = Simulation(model; Δt, stop_iteration=Ns, verbose=false)
+        θ_init, dθ_init = make_init_fields(grid)
+        dsimulation = Enzyme.make_zero(simulation)
 
-        compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-            model, dmodel, θ_init, dθ_init, Δt, Ns)
-        dθ, loss_val = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
+        compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+            simulation, dsimulation, θ_init, dθ_init)
+        dθ, loss_val = @with_stack_size compiled_grad(simulation, dsimulation, θ_init, dθ_init)
         ad_grad = @allowscalar Array(interior(dθ))
 
         # ── Raise backward ──
@@ -125,16 +123,17 @@ end
         # ── FD validation ──
         @testset "FD validation" begin
             grid_fd = make_grid(arch=default_arch)
-            make_fd_model() = AtmosphereModel(grid_fd; dynamics=make_dynamics(), coriolis=SphericalCoriolis())
+            make_fd_simulation() = Simulation(AtmosphereModel(grid_fd; dynamics=make_dynamics(), coriolis=SphericalCoriolis());
+                                              Δt, stop_iteration=Ns, verbose=false)
 
             θ₀_fd = CenterField(grid_fd); set!(θ₀_fd, (args...) -> 300.0)
-            J₀ = loss(make_fd_model(), θ₀_fd, Δt, Ns)
+            J₀ = loss(make_fd_simulation(), θ₀_fd)
 
             for ε in (1e-4, 1e-6), (ic, jc, kc) in [(1,1,1), (4,4,4)]
                 @testset let ε=ε, (ic, jc, kc)=(ic, jc, kc)
                     θ_fd = CenterField(grid_fd); set!(θ_fd, (args...) -> 300.0)
                     @allowscalar interior(θ_fd, ic, jc, kc)[] += ε
-                    J₊ = loss(make_fd_model(), θ_fd, Δt, Ns)
+                    J₊ = loss(make_fd_simulation(), θ_fd)
                     fd = (J₊ - J₀) / ε
                     ad = ad_grad[ic, jc, kc]
                     @test ad ≈ fd rtol=0.001

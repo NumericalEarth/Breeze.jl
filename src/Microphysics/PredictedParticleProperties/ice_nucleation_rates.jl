@@ -46,7 +46,7 @@ than a grid-mean vapor state.
     Sⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, floors.saturation_mass_fraction)
 
     # Conditions for nucleation
-    # m6: the supersaturation threshold is inclusive
+    # The supersaturation threshold is inclusive
     nucleation_active = (T < ℂⁿᵘᶜˡ₁) & (Sⁱ >= ℂⁿᵘᶜˡ₂)
 
     # Cooper (1986): N_ice = c_nuc × exp(b_nuc × (T₀ - T)) [1/m³]

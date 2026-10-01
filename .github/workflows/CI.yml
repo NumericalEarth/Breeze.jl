@@ -78,7 +78,7 @@ jobs:
         include:
           # `--check-bounds=auto` is necessary for testing Reactant workloads
           # until https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
-          - version: "1.12.6"
+          - version: "1.13.0"
             os: aws-linux-nvidia-gpu-l4-4xl
             arch: "default"
             check-bounds: "auto"
@@ -146,10 +146,13 @@ jobs:
               echo "BREEZE_ENSURE_CUDA_FUNCTIONAL=true" | tee -a "${GITHUB_ENV}"
               # In Julia v1.12+, use multiple GC threads.
               echo "JULIA_NUM_GC_THREADS=4,1" | tee -a "${GITHUB_ENV}"
+              # Reduce memory threshold after which workers are recycled, to try
+              # and keep memory usage at bay.
+              echo "JULIA_TEST_MAXRSS_MB=3500" | tee -a "${GITHUB_ENV}"
               # On the GPU runners we sometimes run out-of-memory because we have several
               # concurrent jobs, some of them reaching a large memory usage.  We reduce the
               # number of jobs to avoid memory issues.
-              TEST_ARGS+=(--jobs=$(($(nproc) - 1)))
+              TEST_ARGS+=(--jobs=$(($(nproc) - 2)))
           elif [[ ${{ matrix.os }} == ubuntu-* ]] && [[ ${{ matrix.version }} == 'min' ]]; then
               # With Julia v1.11 we have observed somewhat frequent OOM's in `turbulence_closures`
               # tests, reduce number of jobs to reduce resources contention.

@@ -196,6 +196,16 @@ function Utils.prettysummary(acnv::CloudMicrophysics.Parameters.Acnv1M)
                   "k=", prettysummary(acnv.k), ")")
 end
 
+function Utils.prettysummary(acnv::KesslerAcnv)
+    return string("KesslerAcnv(",
+                  "τ_slow=", prettysummary(acnv.τ_slow), ", ",
+                  "τ_fast=", prettysummary(acnv.τ_fast), ", ",
+                  "q_threshold_slow=", prettysummary(acnv.q_threshold_slow), ", ",
+                  "q_threshold_fast=", prettysummary(acnv.q_threshold_fast), ", ",
+                  "w_0=", prettysummary(acnv.w_0), ", ",
+                  "k=", prettysummary(acnv.k), ")")
+end
+
 function Utils.prettysummary(area::CloudMicrophysics.Parameters.ParticleArea)
     return string("ParticleArea(",
                   "a0=", prettysummary(area.a0), ", ",
