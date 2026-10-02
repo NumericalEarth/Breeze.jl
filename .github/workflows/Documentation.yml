@@ -54,7 +54,7 @@ jobs:
       statuses: write
     runs-on: aws-linux-nvidia-gpu-l4
     container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.6'
+      image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.13.0'
       options: --gpus=all
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
@@ -101,6 +101,7 @@ jobs:
           julia --color=yes --project=docs --threads 1,$(($(nproc)-1)) docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JULIA_NUM_GC_THREADS: "4,1"
       - name: "Upload Manifest"
         if: always()
         timeout-minutes: 2
@@ -139,7 +140,7 @@ jobs:
       - name: "Install Julia"
         uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         with:
-          version: "1.12.6"
+          version: "1.13"
       - name: "Cache Julia depot"
         uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
       - name: "Download docs build artifact"
