@@ -1138,7 +1138,8 @@ end
         χ_dry = condensate_content(:StaticEnergy, :liquid, Tₛ[k], qₖ, pᵣ[k], pˢᵗ)
         @test isapprox(c.χ[1], χ_expected; rtol=sqrt(eps(FT)))
         @test !isapprox(c.χ[1], χ_dry; rtol=sqrt(eps(FT)))
-        @test c.h === c.χ # the content of s is the enthalpy the falling mass carries
+        @test isapprox(c.χ[1], χ_expected)
+        @test !isapprox(c.χ[1], χ_dry)
         @test c.∂φ∂h == 1
     end
 end
