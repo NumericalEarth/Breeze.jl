@@ -206,23 +206,6 @@ P3 is a non-equilibrium scheme: vapor (`qᵛ`) is the prognostic moisture variab
 """
 AM.moisture_prognostic_name(::P3) = :ρqᵛ
 
-"""
-$(TYPEDSIGNATURES)
-
-Convert total moisture to the prognostic moisture variable for P3.
-
-For P3, the prognostic moisture is vapor: `qᵛ = qᵗ - qᶜˡ - qʳ - qⁱ - qʷⁱ`.
-
-This helper is used by parcel-style paths that still carry total moisture.
-"""
-@inline function AM.specific_prognostic_moisture_from_total(::P3, qᵗ, ℳ::P3MicrophysicalState)
-    return max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ - ℳ.qⁱ - ℳ.qʷⁱ)
-end
-
-@inline function AM.specific_prognostic_moisture_from_total(::P3, qᵗ, μ_fields::NamedTuple, ρ)
-    return qᵗ - μ_fields.ρqᶜˡ / ρ - μ_fields.ρqʳ / ρ - μ_fields.ρqⁱ / ρ - μ_fields.ρqʷⁱ / ρ
-end
-
 #####
 ##### Materialize microphysical fields
 #####

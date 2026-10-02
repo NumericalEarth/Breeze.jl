@@ -174,7 +174,8 @@ end
     z = znode(i, j, k, grid, c, c, c)
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     𝒰s₀ = StaticEnergyState(s, q, z, pᵣ)
-    𝒰s₁ = maybe_adjust_thermodynamic_state(𝒰s₀, microphysics, qᵛᵉ, constants)
+    μ = AtmosphereModels.extract_microphysical_prognostics(i, j, k, microphysics, microphysical_fields)
+    𝒰s₁ = maybe_adjust_thermodynamic_state(𝒰s₀, microphysics, qᵛᵉ, constants, μ, ρ)
     T = temperature(𝒰s₁, constants)
 
     pˢᵗ = standard_pressure(dynamics)

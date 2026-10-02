@@ -24,6 +24,14 @@ Materialize a dynamics stub into a complete dynamics object with all required fi
 
 The `microphysics` argument is optional and used by dynamics types that need to know
 the microphysics scheme to create appropriate prognostic state (e.g., `ParcelDynamics`).
+
+Boundary conditions are materialized *before* the dynamics (NumericalEarth/Breeze.jl#777)
+and may capture `total_density(dynamics_stub)` or `dynamics_density(dynamics_stub)`.
+A dynamics must therefore either return `nothing` for these on its stub, so that boundary
+conditions resolve the density from the prognostic fields at run time, or return the same
+field object that the materialized dynamics carries. Replacing the stub's density field
+during materialization would leave those boundary conditions reading a stale field; the
+bulk sensible heat flux checks for this when the model is initialized.
 """
 function materialize_dynamics end
 

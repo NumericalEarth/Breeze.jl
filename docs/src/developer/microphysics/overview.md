@@ -66,22 +66,56 @@ Velocity components are interpolated from cell faces to cell centers and passed 
 | `grid_moisture_fractions` | `(i, j, k, grid, microphysics, ρ, qᵛᵉ, μ_fields)` | **Generic wrapper**. Builds state and dispatches. |
 
 The argument `qᵛᵉ` is the scheme-dependent specific moisture: vapor (``qᵛ``) for
-non-equilibrium schemes, or equilibrium moisture (``qᵉ = qᵛ + qᶜˡ``) for saturation
+non-equilibrium schemes, or equilibrium moisture (``qᵉ = qᵛ + qᶜˡ + qᶜⁱ``) for saturation
 adjustment schemes.
 
 **Note**: Non-equilibrium schemes don't need `𝒰` to build their state (they use prognostic fields).
 Saturation adjustment schemes override `grid_moisture_fractions` directly since they read cloud
 condensate from diagnostic fields.
 
+### Total Water Conversion
+
+[`condensate_field_names`](@ref Breeze.AtmosphereModels.condensate_field_names) lists the
+independent condensate mass densities outside the scheme's prognostic moisture. This one
+list defines the water budget used by both grid and parcel models:
+
+| Cloud formation | Prognostic moisture | Independent condensates to subtract from total water |
+|-----------------|---------------------|-----------------------------------------------------|
+| Non-equilibrium | Vapor ``qᵛ`` | Cloud liquid, cloud ice, and precipitation |
+| Saturation adjustment | Equilibrium moisture ``qᵉ`` | Precipitation only |
+| No condensates | Vapor or equilibrium moisture | None |
+
+The default includes every microphysical prognostic field. Schemes with number
+concentrations or dependent moments must override it to exclude those fields.
+
+[`specific_prognostic_moisture`](@ref Breeze.AtmosphereModels.specific_prognostic_moisture)
+uses these names to compute ``qᵛᵉ = qᵗ - Σ ρqᶜ / ρ`` from density-weighted variables,
+or subtracts the corresponding specific fractions from a microphysical state. Here ``ρ``
+is **total air density**, including water. Number concentrations and dependent masses
+(such as P3 rime mass, already included in total ice) are excluded from the sum.
+
+The conversion preserves total water without clipping. Model initialization validates the
+result using a tolerance relative to the water amounts in each cell. Correction of
+microphysical overshoots during time stepping is a separate operation.
+
 ### Thermodynamic Adjustment
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `maybe_adjust_thermodynamic_state` | `(𝒰, microphysics, qᵛᵉ, constants)` | Apply saturation adjustment if scheme uses it. |
+| `maybe_adjust_thermodynamic_state` | `(𝒰, microphysics, qᵛᵉ, constants, μ, ρ)` | Apply saturation adjustment while retaining prognostic precipitation. |
 
-This function is fully gridless—it takes only scalar thermodynamic arguments.
-Non-equilibrium schemes simply return `𝒰` unchanged. Saturation adjustment schemes perform
-iterative adjustment to partition moisture between vapor and condensate.
+[`maybe_adjust_thermodynamic_state`](@ref Breeze.AtmosphereModels.maybe_adjust_thermodynamic_state)
+takes scalar thermodynamic arguments and the density-weighted microphysical prognostics
+`μ`. Its default delegates to the four-argument form `(𝒰, microphysics, qᵛᵉ, constants)`;
+non-equilibrium schemes return `𝒰` unchanged. For schemes with prognostic precipitation,
+`μ` and total density `ρ` supply the rain and snow retained while adjusting cloud condensate.
+
+[`adjust_thermodynamic_state`](@ref Breeze.Microphysics.adjust_thermodynamic_state) shares
+the initial guesses and secant iteration across thermodynamic states. The state selects
+the saturation constraint and residual: pressure-based states solve the temperature
+residual at fixed pressure; `LiquidIceDensityState` solves the potential-temperature
+residual at fixed density, with pressure given by ``p = ρ Rᵐ T``. Both retain the original
+conserved thermodynamic variable and prescribed precipitation.
 
 ### Auxiliary Field Updates
 
@@ -170,7 +204,7 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
 | `compute_microphysical_tendencies!` | — | ✓† | Override for fused bundle schemes |
 | `grid_moisture_fractions` | — | ✓‡ | Override for saturation adjustment |
-| `maybe_adjust_thermodynamic_state` | — | ✓‡ | Override for saturation adjustment |
+| `maybe_adjust_thermodynamic_state` | ✓‡ | ✓‡ | Override for saturation adjustment |
 
 † Only needed for bundle/fused-kernel schemes (e.g. mixed-phase 1M).
 ‡ Only needed for saturation adjustment schemes.

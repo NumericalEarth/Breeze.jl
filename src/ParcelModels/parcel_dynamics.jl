@@ -12,13 +12,14 @@ using KernelAbstractions: @kernel, @index
 using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
     PlanarLiquidSurface,
-    with_moisture, mixture_heat_capacity, density,
+    with_moisture, with_temperature, mixture_heat_capacity, density,
     reject_renamed_surface_pressure,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
-    specific_prognostic_moisture, specific_prognostic_moisture_from_total
+    specific_prognostic_moisture
 using Breeze.TimeSteppers: SSPRungeKutta3
+using Breeze.Solvers: SecantSolver, secant_solve
 
 #####
 ##### Vertical velocity formulations
@@ -386,6 +387,11 @@ conditions interpolated at that height.
 - `ℋ`: Relative humidity profile ℋ(z) [0-1] - function, array, or constant.
        If provided, `qᵗ` is computed as `qᵗ = ℋ * qᵛ⁺(T, ρ)`.
 
+The parcel's total water is partitioned with the condensate its microphysical prognostics
+carry, so the initial static energy is that of the environment at its temperature with that
+condensate. Saturation adjustment schemes then equilibrate the state at fixed static energy,
+as at every substep.
+
 **Velocities**:
 - `u`: Zonal velocity u(z) [m/s] - function, array, or constant (default: 0)
 - `v`: Meridional velocity v(z) [m/s] - function, array, or constant (default: 0)
@@ -423,13 +429,34 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
     fill_halo_regions!(dynamics.density)
     fill_halo_regions!(dynamics.pressure)
 
-    # Compute temperature from potential temperature using thermodynamic functions
-    if !isnothing(θ) && isnothing(T)
-        isnothing(p) && error("Pressure `p` must be provided when setting potential temperature `θ`")
-        set_temperature_from_potential_temperature!(model.temperature, θ, dynamics.pressure, pˢᵗ, constants)
-    elseif !isnothing(T)
-        set!(model.temperature, T)
+    qᵛᵉ = specific_prognostic_moisture(model)
+    setting_θ = !isnothing(θ) && isnothing(T)
+    setting_θ && isnothing(p) &&
+        error("Pressure `p` must be provided when setting potential temperature `θ`")
+
+    set!(qᵛᵉ, isnothing(qᵗ) ? 0 : qᵗ)
+    if setting_θ && !isnothing(ℋ) && isnothing(qᵗ)
+        potential_temperature = CenterField(model.grid)
+        relative_humidity = CenterField(model.grid)
+        set!(potential_temperature, θ)
+        set!(relative_humidity, ℋ)
+        FT = eltype(model.grid)
+        solver = SecantSolver(FT; abstol=0, reltol=4eps(FT), maxiter=20)
+        launch!(model.grid.architecture, model.grid, :xyz, _set_temperature_and_relative_humidity!,
+                model.temperature, qᵛᵉ, potential_temperature, relative_humidity, dynamics.pressure, dynamics.density,
+                pˢᵗ, constants, solver)
+    else
+        if setting_θ
+            set_temperature_from_potential_temperature!(model.temperature, θ, dynamics.pressure,
+                                                       qᵛᵉ, pˢᵗ, constants)
+        elseif !isnothing(T)
+            set!(model.temperature, T)
+        end
+        if !isnothing(ℋ) && isnothing(qᵗ)
+            set_moisture_from_relative_humidity!(qᵛᵉ, ℋ, model.temperature, dynamics.density, constants)
+        end
     end
+    fill_halo_regions!(qᵛᵉ)
     fill_halo_regions!(model.temperature)
 
     # Set velocities
@@ -439,21 +466,6 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
     fill_halo_regions!(model.velocities.u)
     fill_halo_regions!(model.velocities.v)
     fill_halo_regions!(model.velocities.w)
-
-    # Compute specific humidity from relative humidity if ℋ is provided
-    if !isnothing(ℋ) && isnothing(qᵗ)
-        qᵛᵉ = specific_prognostic_moisture(model)
-        set_moisture_from_relative_humidity!(qᵛᵉ, ℋ,
-                                              model.temperature, dynamics.density, constants)
-    elseif !isnothing(qᵗ)
-        qᵛᵉ = specific_prognostic_moisture(model)
-        set!(qᵛᵉ, qᵗ)
-    else
-        # Default to zero moisture
-        qᵛᵉ = specific_prognostic_moisture(model)
-        set!(qᵛᵉ, 0)
-    end
-    fill_halo_regions!(specific_prognostic_moisture(model))
 
     # Initialize parcel state if z is provided
     if !isnothing(z)
@@ -470,6 +482,10 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
         dynamics.state.w = convert(eltype(model.grid), w_parcel)
     end
 
+    # Bring the thermodynamic state to what the first substep sees: water partitioned with the
+    # final prognostics and, for saturation adjustment, equilibrated at fixed static energy.
+    isnothing(z) || update_parcel_moisture!(model)
+
     return nothing
 end
 
@@ -477,27 +493,51 @@ end
 ##### Helper functions for set!
 #####
 
-@kernel function _set_temperature_from_potential_temperature!(T_field, θ_field, p_field, pˢᵗ, constants)
+@kernel function _set_temperature_and_relative_humidity!(temperature_field, moisture_field,
+                                                         potential_temperature, relative_humidity,
+                                                         pressure, density, pˢᵗ, constants, solver)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        θ = potential_temperature[i, j, k]
+        ℋ = relative_humidity[i, j, k]
+        p = pressure[i, j, k]
+        ρ = density[i, j, k]
+    end
+    @inline vapor(T) = ℋ * saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    @inline residual(T) = T - temperature_from_potential_temperature(θ, p, pˢᵗ, constants, vapor(T))
+    T₁ = temperature_from_potential_temperature(θ, p, pˢᵗ, constants)
+    T = secant_solve(residual, solver, T₁, T₁ + 1, T₁)
+    @inbounds temperature_field[i, j, k] = T
+    @inbounds moisture_field[i, j, k] = vapor(T)
+end
+
+@kernel function _set_temperature_from_potential_temperature!(T_field, θ_field, p_field, qᵛ_field, pˢᵗ, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         θₖ = θ_field[i, j, k]
         pₖ = p_field[i, j, k]
+        qᵛₖ = qᵛ_field[i, j, k]
     end
-    @inbounds T_field[i, j, k] = @inline temperature_from_potential_temperature(θₖ, pₖ, pˢᵗ, constants)
+    @inbounds T_field[i, j, k] = @inline temperature_from_potential_temperature(θₖ, pₖ, pˢᵗ, constants, qᵛₖ)
 end
 
 """
 $(TYPEDSIGNATURES)
 
 Set temperature field from potential temperature, using proper thermodynamic relations.
+
+The moisture field `qᵛ_field` supplies the mixture gas constant and heat capacity that define
+the Exner function, so a moist column converts ``θ → T`` with ``Rᵐ / cᵖᵐ`` rather than the dry
+exponent. Moisture is taken to be all vapor, the same no-condensate assumption the rest of
+`set!` makes before microphysics repartitions the water.
 """
-function set_temperature_from_potential_temperature!(T_field, θ, p_field, pˢᵗ, constants)
+function set_temperature_from_potential_temperature!(T_field, θ, p_field, qᵛ_field, pˢᵗ, constants)
     grid = T_field.grid
     arch = grid.architecture
     θ_field = CenterField(grid)
     set!(θ_field, θ)
     launch!(arch, grid, :xyz, _set_temperature_from_potential_temperature!,
-            T_field, θ_field, p_field, pˢᵗ, constants)
+            T_field, θ_field, p_field, qᵛ_field, pˢᵗ, constants)
     return nothing
 end
 
@@ -538,12 +578,13 @@ end
 $(TYPEDSIGNATURES)
 
 Initialize the parcel state by interpolating environmental conditions at the given position.
+The total water is partitioned with the condensate carried by the microphysical prognostics,
+so the static energy is that of the environment at its temperature with that condensate.
 """
 function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     grid = model.grid
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
-    g = constants.gravitational_acceleration
     FT = eltype(grid)
 
     x₀ = convert(FT, x₀)
@@ -573,13 +614,19 @@ function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     state.qᵗ = qᵗ₀
     state.ρqᵗ = ρ₀ * qᵗ₀
 
-    # Compute static energy and thermodynamic state
-    q = MoistureMassFractions(qᵗ₀)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    s = cᵖᵐ * T₀ + g * z₀
-    state.ℰ = s
-    state.ρℰ = ρ₀ * s
-    state.𝒰 = StaticEnergyState(s, q, z₀, p₀)
+    # Keep the carried condensate within the new total water before partitioning it.
+    AtmosphereModels.fix_negative_moisture!(model)
+
+    # The environment is at T₀ with the condensate the prognostics carry, so that condensate
+    # enters the static energy through the mixture heat capacity and the latent terms. Cloud
+    # condensate of saturation adjustment schemes is left to the adjustment `set!` applies once
+    # the prognostics are final.
+    𝒰ᵛ = StaticEnergyState(zero(FT), MoistureMassFractions(qᵗ₀), z₀, p₀)
+    _, q = parcel_moisture_partition(model.microphysics, ρ₀, state.μ, qᵗ₀, 𝒰ᵛ)
+    𝒰 = with_temperature(StaticEnergyState(zero(FT), q, z₀, p₀), T₀, constants)
+    state.ℰ = 𝒰.static_energy
+    state.ρℰ = ρ₀ * state.ℰ
+    state.𝒰 = 𝒰
 
     return nothing
 end
@@ -929,18 +976,55 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     state.μ = ssp_rk3_microphysics_substep(U⁰.μ, ρ⁰, state.μ, ρᵐ,
                                            tendencies.Gμ, Δt, α, ρ⁺)
 
-    # Restore scheme-specific coupled constraints after the prognostic substep.
-    state.μ = AtmosphereModels.postprocess_microphysical_prognostics(
-        model.microphysics, state.μ, state.ρ)
+    update_parcel_moisture!(model)
+    return nothing
+end
 
-    # Update moisture fractions in thermodynamic state
+"""
+$(TYPEDSIGNATURES)
+
+Keep parcel condensates nonnegative and within the conserved total-water budget.
+Excess condensate is reduced proportionally at fixed energy.
+"""
+function AtmosphereModels.fix_negative_moisture!(model::ParcelModel)
+    state = model.dynamics.state
+    μ = state.μ
+    isnothing(μ) && return nothing
     microphysics = model.microphysics
-    zero_velocities = (; u = zero(state.ρ), v = zero(state.ρ), w = zero(state.ρ))
-    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero_velocities)
-    qᵛᵉ = specific_prognostic_moisture_from_total(microphysics, state.qᵗ, ℳ)
-    q⁺ = moisture_fractions(microphysics, ℳ, qᵛᵉ)
-    state.𝒰 = with_moisture(state.𝒰, q⁺)
+    names = AtmosphereModels.condensate_field_names(microphysics)
+    ρqᶜ = sum(name -> max(0, μ[name]), names; init=zero(state.ρ))
+    ρqᵗ = state.ρ * state.qᵗ
+    ratio = ifelse(ρqᶜ > ρqᵗ, ρqᵗ / ρqᶜ, one(ρqᵗ))
+    condensates = NamedTuple{names}(map(name -> ratio * max(0, μ[name]), names))
+    corrected = merge(μ, condensates)
 
+    # Zero dependent moments when their water reservoir is empty.
+    field_names = NamedTuple{keys(μ)}(keys(μ))
+    for (number, mass) in AtmosphereModels.correction_number_mass_pairs(microphysics, field_names)
+        value = ifelse(corrected[mass] > 0, corrected[number], zero(corrected[number]))
+        corrected = merge(corrected, NamedTuple{(number,)}((value,)))
+    end
+    state.μ = AtmosphereModels.postprocess_microphysical_prognostics(microphysics, corrected, state.ρ)
+    return nothing
+end
+
+# Partition the parcel's total water with the condensate carried by the microphysical
+# prognostics `μ`, returning the scheme's prognostic moisture ``qᵛᵉ`` and the full partition.
+# Saturation adjustment schemes read their cloud condensate from `𝒰`.
+function parcel_moisture_partition(microphysics, ρ, μ, qᵗ, 𝒰)
+    zero_velocities = (; u = zero(ρ), v = zero(ρ), w = zero(ρ))
+    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, zero_velocities)
+    qᵛᵉ = specific_prognostic_moisture(microphysics, qᵗ, ℳ)
+    return qᵛᵉ, moisture_fractions(microphysics, ℳ, qᵛᵉ)
+end
+
+function update_parcel_moisture!(model)
+    AtmosphereModels.fix_negative_moisture!(model)
+    state = model.dynamics.state
+    microphysics = model.microphysics
+    qᵛᵉ, q = parcel_moisture_partition(microphysics, state.ρ, state.μ, state.qᵗ, state.𝒰)
+    𝒰 = with_moisture(state.𝒰, q)
+    state.𝒰 = AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, microphysics, qᵛᵉ, model.thermodynamic_constants, state.μ, state.ρ)
     return nothing
 end
 
@@ -1039,18 +1123,7 @@ function step_parcel_state!(model::ParcelModel, Δt)
     # Step microphysics prognostics forward using tendencies (density-weighted)
     state.μ = apply_microphysical_tendencies(state.μ, tendencies.Gμ, Δt, ρ⁻, ρ⁺)
 
-    # Restore scheme-specific coupled constraints after the prognostic substep.
-    state.μ = AtmosphereModels.postprocess_microphysical_prognostics(
-        model.microphysics, state.μ, state.ρ)
-
-    # Update moisture fractions in thermodynamic state
-    microphysics = model.microphysics
-    zero_velocities = (; u = zero(state.ρ), v = zero(state.ρ), w = zero(state.ρ))
-    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero_velocities)
-    qᵛᵉ = specific_prognostic_moisture_from_total(microphysics, state.qᵗ, ℳ)
-    q⁺ = moisture_fractions(microphysics, ℳ, qᵛᵉ)
-    state.𝒰 = with_moisture(state.𝒰, q⁺)
-
+    update_parcel_moisture!(model)
     return nothing
 end
 

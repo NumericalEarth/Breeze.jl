@@ -486,13 +486,6 @@ end
 end
 
 #####
-##### specific_prognostic_moisture_from_total: convert qᵗ to qᵛᵉ
-#####
-
-# NE two-moment: qᵛ = qᵗ - qᶜˡ - qʳ (subtract all condensate)
-@inline AtmosphereModels.specific_prognostic_moisture_from_total(bμp::WPNE2M, qᵗ, ℳ::WarmPhaseTwoMomentState) = max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
-
-#####
 ##### Moisture fraction computation
 #####
 

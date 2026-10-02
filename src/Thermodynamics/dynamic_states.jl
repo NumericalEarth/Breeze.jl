@@ -71,10 +71,8 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute temperature from potential temperature and pressure.
-
-This is a convenience function that constructs a `LiquidIcePotentialTemperatureState`
-with no condensate and computes temperature using the standard thermodynamic relations.
+Compute temperature from liquid-ice potential temperature and pressure using the
+mixture gas constant and heat capacity.
 
 # Arguments
 - `θ`: Potential temperature [K]
@@ -83,18 +81,19 @@ with no condensate and computes temperature using the standard thermodynamic rel
 
 # Additional Arguments
 - `pˢᵗ`: Standard pressure for potential temperature definition [Pa]
-- `qᵛ`: Specific humidity [kg/kg]
+- `q`: Vapor specific humidity [kg/kg] or `MoistureMassFractions` containing the
+  vapor, total liquid (cloud + rain), and total ice (cloud + snow) mass fractions.
+  Defaults to dry air.
 """
-@inline function temperature_from_potential_temperature(θ, p, pˢᵗ, constants, qᵛ)
-    FT = promote_type(typeof(θ), typeof(p), typeof(qᵛ))
-    θ = convert(FT, θ)
-    p = convert(FT, p)
-    pˢᵗ = convert(FT, pˢᵗ)
-    qᵛ = convert(FT, qᵛ)
-    q = MoistureMassFractions(qᵛ)  # vapor only, no condensate
-    𝒰 = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, p)
+@inline function temperature_from_potential_temperature(θ, p, pˢᵗ, constants, q::MoistureMassFractions)
+    FT = promote_type(typeof(θ), typeof(p), typeof(q.vapor))
+    𝒰 = LiquidIcePotentialTemperatureState(convert(FT, θ), MoistureMassFractions{FT}(q),
+                                           convert(FT, pˢᵗ), convert(FT, p))
     return temperature(𝒰, constants)
 end
+
+@inline temperature_from_potential_temperature(θ, p, pˢᵗ, constants, qᵛ) =
+    temperature_from_potential_temperature(θ, p, pˢᵗ, constants, MoistureMassFractions(qᵛ))
 
 @inline temperature_from_potential_temperature(θ, p, pˢᵗ, constants) =
     temperature_from_potential_temperature(θ, p, pˢᵗ, constants, zero(θ))
@@ -105,10 +104,8 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute potential temperature from temperature and pressure.
-
-This is a convenience function that constructs a `LiquidIcePotentialTemperatureState`
-with no condensate and computes potential temperature using the standard thermodynamic relations.
+Compute liquid-ice potential temperature from temperature and pressure using the
+mixture gas constant and heat capacity.
 
 # Arguments
 - `T`: Temperature [K]
@@ -117,19 +114,21 @@ with no condensate and computes potential temperature using the standard thermod
 
 # Additional Arguments
 - `pˢᵗ`: Standard pressure for potential temperature definition [Pa]
-- `qᵛ`: Specific humidity [kg/kg]
+- `q`: Vapor specific humidity [kg/kg] or `MoistureMassFractions` containing the
+  vapor, total liquid (cloud + rain), and total ice (cloud + snow) mass fractions.
+  Defaults to dry air.
 """
-@inline function potential_temperature_from_temperature(T, p, pˢᵗ, constants, qᵛ)
-    FT = promote_type(typeof(T), typeof(p), typeof(qᵛ))
+@inline function potential_temperature_from_temperature(T, p, pˢᵗ, constants, q::MoistureMassFractions)
+    FT = promote_type(typeof(T), typeof(p), typeof(q.vapor))
     T = convert(FT, T)
-    p = convert(FT, p)
-    pˢᵗ = convert(FT, pˢᵗ)
-    qᵛ = convert(FT, qᵛ)
-    q = MoistureMassFractions(qᵛ)  # vapor only, no condensate
-    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, p)
+    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), MoistureMassFractions{FT}(q),
+                                            convert(FT, pˢᵗ), convert(FT, p))
     𝒰₁ = with_temperature(𝒰₀, T, constants)
     return 𝒰₁.potential_temperature
 end
+
+@inline potential_temperature_from_temperature(T, p, pˢᵗ, constants, qᵛ) =
+    potential_temperature_from_temperature(T, p, pˢᵗ, constants, MoistureMassFractions(qᵛ))
 
 @inline potential_temperature_from_temperature(T, p, pˢᵗ, constants) =
     potential_temperature_from_temperature(T, p, pˢᵗ, constants, zero(T))
