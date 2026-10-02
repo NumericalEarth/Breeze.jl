@@ -304,14 +304,8 @@ AtmosphereModels.liquid_mass_fraction(::DCMIP2016KM, model) = model.microphysica
 end
 AtmosphereModels.ice_mass_fraction(::DCMIP2016KM, model) = nothing
 
-"""
-$(TYPEDSIGNATURES)
-
-Return `nothing`.
-
-Rain sedimentation is handled internally by the kernel rather than through the advection interface.
-"""
-@inline AtmosphereModels.microphysical_velocities(::DCMIP2016KM, μ, name) = nothing
+# Rain sedimentation is applied by the scheme's own column kernel, so no tracer
+# advertises a sedimentation velocity and the generic fallback (`nothing`) stands.
 
 """
 $(TYPEDSIGNATURES)
@@ -348,19 +342,19 @@ AtmosphereModels.precipitation_rate(model, ::DCMIP2016KM, ::Val{:ice}) = nothing
 """
 $(TYPEDSIGNATURES)
 
-Return the surface precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
+Return the bottom precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
 
-The surface precipitation flux is the substep-mean ``ρ^r v^t_{rain}`` at the surface.
+The bottom precipitation flux is the substep-mean ``ρ^r v^t_{rain}`` at the lowest face.
 The stored precipitation rate is normalized so multiplying it by the final total density
 recovers this mass flux exactly. Units are kg/m²/s.
 
-This implements the Breeze `surface_precipitation_flux(model)` interface.
+This implements the Breeze `bottom_precipitation_flux(model)` interface.
 """
-function AtmosphereModels.surface_precipitation_flux(model, ::DCMIP2016KM)
+function AtmosphereModels.bottom_precipitation_flux(model, ::DCMIP2016KM)
     grid = model.grid
     μ = model.microphysical_fields
     ρ = total_density(model.dynamics)
-    # surface_precipitation_flux = ρ × precipitation_rate (kg/m²/s)
+    # bottom_precipitation_flux = ρ × precipitation_rate (kg/m²/s)
     kernel = DCMIP2016KesslerSurfaceFluxKernel(μ.precipitation_rate, ρ)
     op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid)
     return Field(op)
@@ -376,7 +370,7 @@ Adapt.adapt_structure(to, k::DCMIP2016KesslerSurfaceFluxKernel) =
                                       adapt(to, k.density))
 
 @inline function (kernel::DCMIP2016KesslerSurfaceFluxKernel)(i, j, k_idx, grid)
-    # surface_precipitation_flux = ρ × precipitation_rate
+    # bottom_precipitation_flux = ρ × precipitation_rate
     @inbounds P = kernel.precipitation_rate[i, j]
     @inbounds ρ = kernel.density[i, j, 1]
     return ρ * P
@@ -881,7 +875,7 @@ end
 #####
 #
 # DCMIP2016 has specific auxiliary fields (no qˡ total liquid field).
-# Rain sedimentation is handled by the internal kernel, not microphysical_velocities.
+# Rain sedimentation is handled by the internal kernel, not sedimentation_velocity.
 
 @inline function AtmosphereModels.update_microphysical_auxiliaries!(μ, i, j, k, grid, ::DCMIP2016KM, ℳ::AtmosphereModels.WarmRainState, ρ, 𝒰, constants)
     # State fields
@@ -892,7 +886,7 @@ end
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
 
     # Note: DCMIP2016 does NOT have a qˡ (total liquid) field
-    # Rain sedimentation is handled internally, not via microphysical_velocities
+    # Rain sedimentation is handled internally, not via sedimentation_velocity
 
     return nothing
 end
