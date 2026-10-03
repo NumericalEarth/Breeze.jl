@@ -1388,7 +1388,7 @@ function AM.compute_microphysical_tendencies!(microphysics::MPNE1M, model)
             G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢⁿ,
             grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
-            model.microphysical_fields, AM.transport_velocities(model))
+            model.microphysical_fields, model.velocities)
 
     return nothing
 end

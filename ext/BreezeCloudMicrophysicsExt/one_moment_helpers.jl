@@ -7,7 +7,7 @@ function AtmosphereModels.precipitation_rate(model, microphysics::OneMomentLiqui
     qᶜˡ = model.microphysical_fields.qᶜˡ
     ρqʳ = model.microphysical_fields.ρqʳ
     ρ = model.dynamics.reference_state.density
-    w = AtmosphereModels.transport_velocities(model).w
+    w = model.velocities.w
     kernel = OneMomentPrecipitationRateKernel(microphysics.categories, qᶜˡ, ρqʳ, ρ, w)
     op = KernelFunctionOperation{Center, Center, Center}(kernel, grid)
     return Field(op)
