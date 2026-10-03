@@ -57,7 +57,7 @@ end
     z = 0:100:65e3
     q = standard_specific_humidity.(z)
     @test issorted(q, rev=true)
-    @test all(q .>= 3e-6)
+    @test all(>=(3e-6), q)
 end
 
 @testset "ColumnExtension [$(FT)]" for FT in all_float_types()
