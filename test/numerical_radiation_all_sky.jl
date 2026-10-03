@@ -204,8 +204,10 @@ previous_float_type = Oceananigans.defaults.FloatType
         cloudy = column_fluxes(all_sky)
         clear = column_fluxes(clear_sky)
 
-        @test all(isfinite, cloudy.ℐ_lw_up) && all(isfinite, cloudy.ℐ_lw_dn)
-        @test all(isfinite, cloudy.ℐ_sw_up) && all(isfinite, cloudy.ℐ_sw_dn)
+        @test all(isfinite, cloudy.ℐ_lw_up)
+        @test all(isfinite, cloudy.ℐ_lw_dn)
+        @test all(isfinite, cloudy.ℐ_sw_up)
+        @test all(isfinite, cloudy.ℐ_sw_dn)
 
         # The cloud shades the surface: at least 30 % less sunlight reaches it, and every
         # face below the cloud base sees the shade
