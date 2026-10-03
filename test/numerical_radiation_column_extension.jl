@@ -100,10 +100,10 @@ previous_float_type = Oceananigans.defaults.FloatType
             for ℐ in (ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn)
                 @test all(isfinite, ℐ)
             end
-            @test all(ℐ_lw_up .> 0)
-            @test all(ℐ_lw_dn .<= 0)
-            @test all(ℐ_sw_up .> 0)
-            @test all(ℐ_sw_dn .< 0)
+            @test all(>(0), ℐ_lw_up)
+            @test all(<=(0), ℐ_lw_dn)
+            @test all(>(0), ℐ_sw_up)
+            @test all(<(0), ℐ_sw_dn)
 
             # A warm, moist column: strong surface emission and a reflecting surface
             @test ℐ_lw_up[1] > 400
