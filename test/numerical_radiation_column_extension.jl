@@ -135,7 +135,7 @@ previous_float_type = Oceananigans.defaults.FloatType
     # ... which warms the top of the grid relative to the bare column, whose top cells radiate
     # to space unopposed (observed: +123, +8.3, +3.8 and +2.6 K day⁻¹ in the top four cells)
     Δheating = heating_rate(extended, model) .- heating_rate(bare, model)
-    @test all(Δheating[Nz-3:Nz] .> 0.5)
+    @test all(>(0.5), Δheating[Nz-3:Nz])
 
     @testset "Extension convergence" begin
         heating₁ = heating_rate(extended, model)
