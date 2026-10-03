@@ -766,7 +766,7 @@ previous_float_type = Oceananigans.defaults.FloatType
         set!(rtm.upwelling_longwave_flux, (x, y, z) -> 3z + 1)
         set!(rtm.downwelling_shortwave_flux, (x, y, z) -> -z)
         compute_radiation_flux_divergence!(rtm, grid)
-        @test all(Array(interior(rtm.flux_divergence)) .≈ -2)
+        @test all(≈(-2), Array(interior(rtm.flux_divergence)))
     end
 end
 Oceananigans.defaults.FloatType = previous_float_type
