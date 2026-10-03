@@ -222,7 +222,7 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test T_lay[N:-1:Nₑ+1] == T
 
         # Interfaces increase in pressure downward, and the boundary faces are extrapolated from the cells
-        @test all(diff(p_int) .> 0)
+        @test all(>(0), diff(p_int))
         @allowscalar begin
             @test p_int[N+1] == bottom_face_pressure(1, 1, grid, dynamics_pressure(model.dynamics), total_density(model.dynamics), g)
             @test p_int[Nₑ+1] == top_face_pressure(1, 1, grid, dynamics_pressure(model.dynamics), total_density(model.dynamics), g)
