@@ -9,6 +9,8 @@ using Test: @testset, @test
 using CloudMicrophysics: CloudMicrophysics
 using ClimaComms: ClimaComms
 using Dates: Dates
+using NCDatasets: NCDatasets
+using NumericalRadiation: NumericalRadiation
 using RRTMGP: RRTMGP
 using SpecialFunctions: SpecialFunctions
 using Reactant: Reactant
