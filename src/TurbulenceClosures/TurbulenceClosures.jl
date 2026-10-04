@@ -59,7 +59,7 @@ using ..AtmosphereModels: AtmosphereModels
 ##### Density-weighted fluxes for tuples of closures
 #####
 
-@inline sum_closure_fluxes(flux, i, j, k, grid, ρ, ::Tuple{}, ::Tuple{}, args...) = zero(grid)
+@inline sum_closure_fluxes(i, j, k, grid, flux, ρ, ::Tuple{}, ::Tuple{}, args...) = zero(grid)
 
 @inline function sum_closure_fluxes(flux, i, j, k, grid, ρ,
                                     closures::Tuple{C, Vararg}, closure_fields::Tuple{F, Vararg},
