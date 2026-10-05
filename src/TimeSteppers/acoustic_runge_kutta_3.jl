@@ -1,6 +1,5 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: TendencyCallsite
 using Oceananigans.Utils: time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -12,7 +11,7 @@ using Oceananigans.TimeSteppers:
 
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, microphysics_model_update!,
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowTendencyMode, microphysics_model_update!,
                                 compute_closure_tendencies!
 
 using Breeze.CompressibleEquations:
@@ -152,11 +151,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Run one Wicker–Skamarock RK3 stage: compute slow tendencies, run the
-`TendencyCallsite` callbacks, then execute the linearized-acoustic
-substep loop, then update remaining scalars.
+Run one Wicker–Skamarock RK3 stage: complete the slow tendencies built by
+`update_state!`, then execute the linearized-acoustic substep loop, then
+update remaining scalars.
 """
-function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, callbacks)
+function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
@@ -168,24 +167,11 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, callbacks)
     prepare_acoustic_cache!(substepper, model)
     cache_advecting_state!(model)
 
-    # Slow tendencies (advection + Coriolis + diffusion; PGF and buoyancy
-    # are excluded — those are handled inside the substep loop in
-    # linearized form about the RK stage-entry state).
-    compute_slow_momentum_tendencies!(model)
-    compute_slow_scalar_tendencies!(model)
-
-    # Boundary flux tendencies must be added after the stage tendencies are
-    # assembled. Adding them before this function would be overwritten by
-    # compute_slow_momentum_tendencies! / compute_slow_scalar_tendencies!.
+    # `update_state!` built the slow tendencies (advection + Coriolis + diffusion; PGF and
+    # buoyancy are excluded — those are handled inside the substep loop in linearized form
+    # about the RK stage-entry state). Add the boundary flux and closure tendencies to them.
     compute_flux_bc_tendencies!(model)
     compute_closure_tendencies!(model)
-
-    # Every tendency is final here: the momentum, thermodynamic, and density tendencies were
-    # just built, and the moisture and tracer tendencies were built by the preceding
-    # `update_state!`, which leaves the callbacks to this point (see `run_tendency_callbacks!`).
-    for callback in callbacks
-        callback.callsite isa TendencyCallsite && callback(model)
-    end
 
     # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless
     # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
@@ -226,11 +212,6 @@ end
 #####
 ##### Time stepping (main entry point)
 #####
-
-# `acoustic_rk3_substep!` builds the momentum, thermodynamic, and density tendencies in slow
-# form, so `update_state!` skips them and the tendency callbacks run after the stage builds them.
-AtmosphereModels.compute_dynamical_tendencies!(::CompressibleAcousticModel, model_fields, common_args) = nothing
-AtmosphereModels.run_tendency_callbacks!(::CompressibleAcousticModel, callbacks) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -285,7 +266,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     freeze_linearization_state!(ts.substepper, model)
 
     # Stage 1: U* = Uⁿ + (Δt/3) R(Uⁿ)
-    acoustic_rk3_substep!(model, Δt, β₁, callbacks)
+    acoustic_rk3_substep!(model, Δt, β₁)
 
     tick_stage!(model.clock, β₁ * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
@@ -294,14 +275,14 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     cache_transport_velocity!(model)
 
     # Stage 2: U** = Uⁿ + (Δt/2) R(U*)
-    acoustic_rk3_substep!(model, Δt, β₂, callbacks)
+    acoustic_rk3_substep!(model, Δt, β₂)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     cache_transport_velocity!(model)
 
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**)
-    acoustic_rk3_substep!(model, Δt, β₃, callbacks)
+    acoustic_rk3_substep!(model, Δt, β₃)
 
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
@@ -344,10 +325,10 @@ end
 ##### the stage, after its own substep loop, while Breeze builds them between
 ##### stages and so advects with the *preceding* loop's average.
 #####
-##### Theta's slow tendency does NOT consume this — `compute_slow_scalar_tendencies!`
-##### deliberately passes `model.velocities` (matching WRF's `rk_tendency`).
-##### Mixing the two paths creates a feedback loop that destabilizes a rest
-##### atmosphere at production Δt.
+##### Theta's slow tendency does NOT consume this — `thermodynamic_transport_velocities`
+##### routes it to `model.velocities` (matching WRF's `rk_tendency`; see
+##### `slow_thermodynamic_velocities`). Mixing the two paths creates a feedback
+##### loop that destabilizes a rest atmosphere at production Δt.
 #####
 ##### The implicit remainder of a scalar update must split the SAME velocity
 ##### its explicit fraction was scaled by, so `scalar_substep!` reads a frozen
@@ -374,6 +355,12 @@ function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:TerrainC
             v = sub.time_averaged_velocities.v,
             w = sub.time_averaged_velocities.w)
 end
+
+# `update_state!` builds the slow tendencies the stages apply: momentum without the pressure-gradient
+# force and buoyancy, which the substep loop integrates, and the thermodynamic variable advected by
+# the RK predictor velocity rather than the time-averaged transport velocity.
+AtmosphereModels.momentum_tendency_dynamics(model::CompressibleAcousticModel) = SlowTendencyMode(model.dynamics)
+AtmosphereModels.thermodynamic_transport_velocities(model::CompressibleAcousticModel) = slow_thermodynamic_velocities(model)
 
 Oceananigans.prognostic_state(timestepper::AcousticRungeKutta3) =
     (substepper = Oceananigans.prognostic_state(timestepper.substepper),)

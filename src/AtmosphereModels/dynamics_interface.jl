@@ -534,6 +534,24 @@ replaced by the contravariant vertical momentum ``\\rho \\tilde{w}``.
 """
 advecting_momentum(model) = model.momentum
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the dynamics the momentum tendencies are built with: `model.dynamics`, or, for a time
+stepper that integrates the pressure-gradient force and buoyancy itself, `model.dynamics`
+wrapped in `SlowTendencyMode`.
+"""
+momentum_tendency_dynamics(model) = model.dynamics
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the velocity tuple used for thermodynamic-variable advection: `transport_velocities(model)`,
+unless the time stepper advects the thermodynamic variable with a different velocity than
+moisture and tracers.
+"""
+thermodynamic_transport_velocities(model) = transport_velocities(model)
+
 #####
 ##### Auxiliary dynamics variables interface
 #####

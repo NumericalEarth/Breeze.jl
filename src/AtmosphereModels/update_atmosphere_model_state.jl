@@ -198,12 +198,13 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
         model.clock,
         model_fields)
 
-    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
-    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
+    dynamics = momentum_tendency_dynamics(model)
+    u_args = tuple(momentum_args..., model.forcing.ρu, dynamics)
+    v_args = tuple(momentum_args..., model.forcing.ρv, dynamics)
 
     # Extra arguments for vertical velocity are required to compute buoyancy
     w_args = tuple(momentum_args..., model.forcing.ρw,
-                   model.dynamics,
+                   dynamics,
                    model.formulation,
                    model.temperature,
                    specific_prognostic_moisture(model),
@@ -343,11 +344,15 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     # already current for this stage — and, unlike a tendency-time refresh, they stay
     # current after an `update_state!` that skips tendency computation.
 
-    # Use transport velocities (contravariant for terrain-following grids)
-    advecting_velocities = transport_velocities(model)
+    #####
+    ##### Momentum tendencies (skip for kinematic dynamics)
+    #####
 
-    # Arguments common to energy density, moisture density, and tracer density tendencies:
-    common_args = (
+    compute_momentum_tendencies!(model, model_fields)
+
+    # Arguments common to energy density, moisture density, and tracer density tendencies,
+    # given the advecting velocities (contravariant for terrain-following grids):
+    tendency_args(advecting_velocities) = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
@@ -360,11 +365,13 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
         model.clock,
         model_fields)
 
+    common_args = tendency_args(transport_velocities(model))
+
     #####
-    ##### Momentum, thermodynamic density, and dynamics-specific tendencies
+    ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
     #####
 
-    compute_dynamical_tendencies!(model, model_fields, common_args)
+    compute_thermodynamic_tendency!(model, tendency_args(thermodynamic_transport_velocities(model)))
 
     #####
     ##### Moisture density tendency
@@ -413,38 +420,16 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     compute_microphysical_tendencies!(model)
 
-    run_tendency_callbacks!(model, callbacks)
+    #####
+    ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
+    #####
 
-    return nothing
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute the momentum tendencies (a no-op for kinematic dynamics), the thermodynamic density
-tendency (dispatched on the thermodynamic formulation), and any dynamics-specific tendency
-(e.g., density for compressible dynamics). A time stepper that builds these itself in each stage
-turns this off for its models, so `compute_tendencies!` builds only the remaining tendencies.
-"""
-function compute_dynamical_tendencies!(model, model_fields, common_args)
-    compute_momentum_tendencies!(model, model_fields)
-    compute_thermodynamic_tendency!(model, common_args)
     compute_dynamics_tendency!(model)
-    return nothing
-end
 
-"""
-$(TYPEDSIGNATURES)
-
-Run the `TendencyCallsite` callbacks once `compute_tendencies!` has assembled the tendencies.
-A time stepper that builds part of the tendencies itself later in each stage turns this off for
-its models and runs the callbacks after its own assembly, so a callback's change to a tendency
-is never overwritten.
-"""
-function run_tendency_callbacks!(model, callbacks)
     for callback in callbacks
         callback.callsite isa TendencyCallsite && callback(model)
     end
+
     return nothing
 end
 

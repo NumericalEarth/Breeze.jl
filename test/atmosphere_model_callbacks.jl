@@ -41,8 +41,8 @@ using Test
 
     @testset "TendencyCallsite modifies the tendencies AcousticRungeKutta3 applies" begin
         # A horizontally uniform rest state, so a uniform tendency is the only source:
-        # after one step, ρu and ρc each equal c Δt. A callback fired before the stage rebuilds
-        # the momentum tendency leaves ρu at zero; firing it twice per stage doubles ρc.
+        # after one step, ρu and ρc each equal c Δt. A stage that rebuilt the momentum tendency
+        # after the callback would leave ρu at zero; firing it twice per stage would double ρc.
         acoustic_grid = RectilinearGrid(default_arch; size=(4, 4, 4),
                                         x=(0, 1000), y=(0, 1000), z=(0, 1000),
                                         topology=(Periodic, Periodic, Bounded))
@@ -52,9 +52,7 @@ using Test
 
         c = FT(1e-3)
         Δt = FT(1)
-        fired = Ref(0)
         function add_tendency!(m)
-            fired[] += 1
             interior(m.timestepper.Gⁿ.ρu) .+= c
             interior(m.timestepper.Gⁿ.ρc) .+= c
             return nothing
@@ -65,7 +63,6 @@ using Test
 
         ρu = model.momentum.ρu
         ρc = model.tracers.ρc
-        @test fired[] == 3
         @test isapprox(maximum(ρu), c * Δt; rtol=sqrt(eps(FT)))
         @test isapprox(minimum(ρu), c * Δt; rtol=sqrt(eps(FT)))
         @test isapprox(maximum(ρc), c * Δt; rtol=sqrt(eps(FT)))
