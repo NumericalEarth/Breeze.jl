@@ -78,6 +78,10 @@ export
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
+    EcCKDOptics,
+    CloudScatteringTables,
+    ColumnExtension,
+    standard_atmosphere_temperature,
 
     # Solar position specifications
     AbstractSolarPosition,

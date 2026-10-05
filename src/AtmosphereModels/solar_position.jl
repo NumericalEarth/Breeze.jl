@@ -216,3 +216,120 @@ function Base.show(io::IO, sp::DiurnalSolarPosition)
               "day_length = ",  prettysummary(sp.day_length),  " s, ",
               "noon_offset = ", prettysummary(sp.noon_offset), " s)")
 end
+
+#####
+##### cos(θ_z) evaluation: fill a per-column array from a solar-position specification
+#####
+##### Every radiation backend stores cos(θ_z) as one value per column, indexed by
+##### `column_index(i, j, Nx)`, and refreshes it before each shortwave solve. The
+##### functions below own that evaluation, so a backend only needs to hand over
+##### its column array.
+#####
+
+using Dates: AbstractDateTime, Millisecond
+using Oceananigans.Architectures: architecture
+using Oceananigans.Grids: λnode, φnode, Center
+using Breeze.CelestialMechanics: cos_solar_zenith_angle
+
+compute_datetime(dt::AbstractDateTime, epoch) = dt
+compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round(Int, 1000t))
+# When epoch is nothing and time is numeric, we can't compute datetime (used for fixed zenith angle)
+compute_datetime(t::Number, epoch::Nothing) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Fill `cos_zenith` once at construction from the solar-position specification.
+
+[`ApparentSolarPosition`](@ref) and [`DiurnalSolarPosition`](@ref) need no pre-fill:
+[`update_cos_zenith!`](@ref) populates the array on the first radiation update (iteration 0
+always triggers one). [`FixedCosineZenith`](@ref) writes the user-supplied value here; after this
+the array is never touched, since `update_cos_zenith!` is a no-op for that case.
+"""
+initialize_cos_zenith!(cos_zenith, ::ApparentSolarPosition) = nothing
+initialize_cos_zenith!(cos_zenith, ::DiurnalSolarPosition) = nothing
+
+function initialize_cos_zenith!(cos_zenith, sp::FixedCosineZenith)
+    cos_zenith .= convert(eltype(cos_zenith), sp.cos_zenith)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Update the per-column cosine of the solar zenith angle in `cos_zenith`, dispatched on the
+solar-position specification:
+
+- [`ApparentSolarPosition`](@ref): recompute cos(θ_z) from the model clock and
+  observer (λ, φ) — either an explicit coordinate or the grid's λ/φ per column.
+- [`DiurnalSolarPosition`](@ref): analytical hour angle from the (numeric) clock.
+- [`FixedCosineZenith`](@ref): no-op. The array was set once at construction
+  by [`initialize_cos_zenith!`](@ref).
+
+Values are clamped to be non-negative (sun above the horizon).
+"""
+update_cos_zenith!(cos_zenith, ::FixedCosineZenith, grid, clock) = nothing
+
+function update_cos_zenith!(cos_zenith, sp::ApparentSolarPosition, grid, clock)
+    datetime = compute_datetime(clock.time, sp.epoch)
+    validate_datetime(sp, datetime)
+    update_apparent_zenith!(cos_zenith, sp.coordinate, grid, datetime)
+    return nothing
+end
+
+# Idealized diurnal cycle: pure analytical hour angle, no calendar / orbit.
+# Requires a numeric clock (seconds since the start of the simulation).
+function update_cos_zenith!(cos_zenith, sp::DiurnalSolarPosition, grid, clock)
+    validate_diurnal_clock(sp, clock.time)
+    t = clock.time
+    # cos is periodic, so no `mod` is required — the math handles wrapping itself.
+    ω = (2π / sp.day_length) * (t - sp.noon_offset)
+    φ = deg2rad(sp.latitude)
+    δ = deg2rad(sp.declination)
+    cos_θz = sin(φ) * sin(δ) + cos(φ) * cos(δ) * cos(ω)
+    cos_zenith .= max(cos_θz, 0)
+    return nothing
+end
+
+@noinline validate_diurnal_clock(::DiurnalSolarPosition, ::Number) = nothing
+@noinline function validate_diurnal_clock(::DiurnalSolarPosition, t)
+    throw(ArgumentError(
+        "DiurnalSolarPosition requires a numeric model clock (seconds since the start " *
+        "of the simulation), but `model.clock.time` is a $(typeof(t)). For an idealized " *
+        "diurnal cycle there is no calendar — construct the model with " *
+        "`Clock(time = 0.0)` (or another numeric Clock) instead of a DateTime clock."))
+end
+
+# Helpful actionable error when the user uses a numeric clock without an epoch.
+@noinline validate_datetime(::ApparentSolarPosition, ::AbstractDateTime) = nothing
+@noinline function validate_datetime(::ApparentSolarPosition, ::Nothing)
+    throw(ArgumentError(
+        "Cannot compute apparent solar position: the model clock holds a numeric " *
+        "time and `ApparentSolarPosition.epoch` is `nothing`. Either:\n" *
+        "  • use a `DateTime` clock, e.g. `Clock(time=DateTime(2024,1,1,12,0,0))`,\n" *
+        "  • supply an epoch, e.g. `ApparentSolarPosition(epoch=DateTime(2024,1,1))`, or\n" *
+        "  • use `FixedCosineZenith(cos_zenith)` for an idealized fixed sun."))
+end
+
+# Explicit (λ, φ): one cos(θ_z) value broadcast to every column
+function update_apparent_zenith!(cos_zenith, coordinate::Tuple, grid, datetime)
+    cos_θz = cos_solar_zenith_angle(datetime, coordinate...)
+    cos_zenith .= max.(cos_θz, 0)
+    return nothing
+end
+
+# Per-column (λ, φ) from the grid: launch a 2D kernel
+function update_apparent_zenith!(cos_zenith, ::Nothing, grid, datetime)
+    arch = architecture(grid)
+    launch!(arch, grid, :xy, _update_apparent_zenith!, cos_zenith, grid, datetime)
+    return nothing
+end
+
+@kernel function _update_apparent_zenith!(cos_zenith, grid, datetime)
+    i, j = @index(Global, NTuple)
+    λ = λnode(i, j, 1, grid, Center(), Center(), Center())
+    φ = φnode(i, j, 1, grid, Center(), Center(), Center())
+    cos_θz = cos_solar_zenith_angle(datetime, λ, φ)
+    c = column_index(i, j, grid.Nx)
+    @inbounds cos_zenith[c] = max(cos_θz, 0)  # Clamp to positive (sun above horizon)
+end

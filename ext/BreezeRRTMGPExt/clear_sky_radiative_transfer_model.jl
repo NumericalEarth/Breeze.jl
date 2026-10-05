@@ -4,8 +4,8 @@
 
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
-using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
-using Oceananigans.Grids: AbstractGrid, Center, Face
+using Oceananigans.Grids: xnode
+using Oceananigans.Grids: AbstractGrid, Center
 using Oceananigans.Fields: ConstantField
 
 using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiation, specific_humidity,
@@ -15,7 +15,6 @@ using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiation, specific_humi
                                DiurnalSolarPosition, FixedCosineZenith
 using Breeze.Thermodynamics: ThermodynamicConstants
 
-using Dates: AbstractDateTime, Millisecond
 using KernelAbstractions: @kernel, @index
 
 using RRTMGP: ClearSkyRadiation, RRTMGPSolver, lookup_tables, update_lw_fluxes!, update_sw_fluxes!
@@ -65,9 +64,6 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)
 
-    error_msg = "Must either provide surface_albedo or *both* of
-                 direct_surface_albedo and diffuse_surface_albedo"
-
     solar_position = maybe_infer_solar_position(solar_position, grid)
 
     validate_surface_fractions(; surface_emissivity, surface_albedo,
@@ -76,21 +72,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # Materialize background atmosphere (converts O₃ functions to fields)
     background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
-    if !isnothing(surface_albedo)
-        if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)
-            throw(ArgumentError(error_msg))
-        end
-
-        surface_albedo = materialize_surface_property(surface_albedo, grid, solar_position)
-        diffuse_surface_albedo = surface_albedo
-        direct_surface_albedo = surface_albedo
-
-    elseif !isnothing(diffuse_surface_albedo) && !isnothing(direct_surface_albedo)
-        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid, solar_position)
-        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid, solar_position)
-    else
-        throw(ArgumentError(error_msg))
-    end
+    direct_surface_albedo, diffuse_surface_albedo =
+        resolve_surface_albedos(surface_albedo, direct_surface_albedo, diffuse_surface_albedo, grid, solar_position)
 
     surface_emissivity = materialize_surface_property(surface_emissivity, grid, solar_position)
 
@@ -269,7 +252,7 @@ end
 @kernel function _set_longitude_from_grid_kernel!(rrtmgp_λ, grid)
     i, j = @index(Global, NTuple)
     λ = xnode(i, j, 1, grid, Center(), Center(), Center())
-    c = rrtmgp_column_index(i, j, grid.Nx)
+    c = column_index(i, j, grid.Nx)
     @inbounds rrtmgp_λ[c] = λ
 end
 
@@ -291,7 +274,7 @@ function AtmosphereModels._update_radiation!(rtm::ClearSkyRadiativeTransferModel
     update_rrtmgp_gas_state!(solver.as, model, rtm.surface_radiation.surface_temperature, rtm.background_atmosphere, solver.params)
 
     # Update solar zenith angle from the solar_position specification
-    update_solar_zenith_angle!(solver.sws, rtm.solar_position, grid, clock)
+    update_cos_zenith!(solver.sws.bcs.cos_zenith, rtm.solar_position, grid, clock)
 
     # Longwave
     update_lw_fluxes!(solver)
