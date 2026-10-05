@@ -93,15 +93,21 @@ jobs:
           # Running doctests need to run `git` commands in this directory, but `git`
           # complains about dubious ownership when using the Docker image.
           git config --global --add safe.directory ${PWD}
+      - name: Start earlyoom
+        id: earlyoom
+        run: |
+          earlyoom -m 2 -s 100 -r 60 --prefer 'julia'
+        background: true
       - name: Build documentation
         shell: bash
         timeout-minutes: 110
         run:
-          earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           julia --color=yes --project=docs --threads 1,$(($(nproc)-1)) docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JULIA_NUM_GC_THREADS: "4,1"
+      - name: Stop earlyoom
+        cancel: earlyoom
       - name: "Upload Manifest"
         if: always()
         timeout-minutes: 2
