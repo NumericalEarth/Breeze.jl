@@ -218,7 +218,7 @@ struct ProcessRate{FT, PS}
 
     # Rain PSD slope bounds: the P3 rain lambda limiter. λʳ is clamped here and the
     # DSD-consistent number recomputed, so these bound ⟨D⟩ = (μʳ + 1) / λʳ.
-    # `minimum_rain_slope` is the reciprocal of the reference `inv_Drmax = 1/0.002`.
+    # `minimum_rain_slope` equals the reference `inv_Drmax = 1/0.002`, i.e. D_max ≈ 2 mm.
     minimum_rain_slope :: FT                # ℂʳ₁, λʳ minimum [1/m]
     maximum_rain_slope :: FT                # ℂʳ₂, λʳ maximum [1/m]
 
@@ -288,10 +288,13 @@ $(TYPEDSIGNATURES)
 
 Construct process rate parameters with default values from P3 literature.
 
-The liquid-water density, the pure-ice density, the dry-air gas constant used by the
-reference-density calculation, and every particle mass derived from a radius all come
-from `thermodynamic_constants`, so none of them can disagree with the model's own
-constants.
+The liquid-water density, the pure-ice density, and the dry-air gas constant used by the
+reference-density calculation come from the supplied `thermodynamic_constants`.
+The default `shed_drop_mass` and `initial_rain_drop_mass` also use that liquid-water
+density. The default `nucleated_ice_mass` uses `nucleated_ice_density` (900 kg/m³),
+while `splintering_crystal_mass` uses `splintering_crystal_density`, which defaults to
+`nucleated_ice_density`. Both ice seed densities are configurable independently of
+`pure_ice_density`.
 
 These parameters control the rates of all microphysical processes:
 autoconversion, accretion, aggregation, riming, melting, evaporation,
@@ -313,7 +316,7 @@ path uses ``μ_r = 0``. None are duplicated in this rate-parameter container.
 # Default Sources
 
 - Autoconversion/accretion: Khairoutdinov and Kogan (2000)
-- Self-collection/breakup: Seifert and Beheng (2001, 2006)
+- Self-collection: Khairoutdinov and Kogan (2000); breakup: Verlinde and Cotton (1993)
 - Aggregation: Morrison and Milbrandt (2015)
 - Nucleation: Cooper (1986)
 - Freezing: Barklie and Gokhale (1959)

@@ -187,7 +187,7 @@ net rain-number tendency changes sign only when ``f_{brkp} = 0``, at
     # Breakup rate: (1 - breakup_modifier) × self_collection
     # When Dʳ < Dᵗʰ: modifier = 1 → breakup = 0 (no effect)
     # When Dʳ ≥ Dᵗʰ: modifier < 1 → breakup > 0 (number source)
-    # self_collection is positive magnitude (M7); breakup is positive (number source).
+    # self_collection is a positive magnitude; breakup is positive (number source).
     rate = (FT(1) - breakup_modifier) * self_collection
     active = qʳ_eff >= p3.minimum_mass_mixing_ratio
     return ifelse(active, rate, zero(FT))
@@ -225,9 +225,10 @@ Compute rain evaporation rate using ventilation-enhanced diffusion.
 Rain drops evaporate when the ambient air is subsaturated (qᵛ < qᵛ⁺ˡ).
 The evaporation rate is enhanced by ventilation (air flow around falling drops).
 
-`p3.rain.evaporation` is the tabulated ventilation integral built by
-`tabulate_rain_from_quadrature`. The inner method computes λʳ from (qʳ, Nʳ), looks up
-`I_evap(λʳ) = ∫ D fᵛᵉ(D) exp(-λʳ D) dD`, then applies
+`p3.rain.evaporation` is the tabulated velocity-diameter integral
+``I_{\\mathbb{W}D}`` built by `tabulate_rain_from_quadrature`. The inner method
+computes λʳ from (qʳ, Nʳ), assembles the full ventilation integral `I_evap` from that
+table read plus the runtime `1/√ν`, `ℂᵛᵉⁿᵗ` and Schmidt contributions, then applies
 `dqʳ/dt = 2π × Nʳ₀ × I_evap × (S-1) / thermo_factor`
 (Mason 1971, capacitance C = D/2 so 4πC = 2πD).
 
@@ -243,7 +244,7 @@ The evaporation rate is enhanced by ventilation (air flow around falling drops).
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `qᵛ⁺ˡ`: Saturation vapor mass fraction over liquid [kg/kg]
 - `T`: Temperature [K]
-- `ρ`: Air density [kg/m³]
+- `ρ`: Air density [kg/m³]; currently unused
 - `P`: Air pressure [Pa]
 - `constants`: Thermodynamic constants
 
@@ -362,7 +363,7 @@ $(TYPEDSIGNATURES)
 Cloud-droplet number loss from autoconversion (mass → drop count conversion),
 dispatched on `p3.warm_rain_scheme`. Returned as a positive magnitude.
 
-For KK2000 the loss is `autoconversion × Nᶜˡ / qᶜˡ`: cloud number is lost in
+For KK2000 the loss is `autoconversion × Nᶜˡ / (ρ qᶜˡ)`: cloud number is lost in
 proportion to the cloud mass lost.
 """
 @inline cloud_number_loss_from_autoconversion(p3, autoconversion, qᶜˡ, Nᶜˡ, ρ) =
@@ -381,8 +382,9 @@ Mass per newly-formed rain drop produced by autoconversion, dispatched on
 `p3.warm_rain_scheme`. Used to convert autoconversion mass rate into a rain
 number source.
 
-For KK2000 this is the mass of a 25 μm radius drop ≈ 6.545e-11 kg, read from
-`p3.process_rates.initial_rain_drop_mass` so the radius is user-configurable.
+For KK2000 this is the mass of a 25 μm radius drop ≈ 6.545e-11 kg, read from the
+configurable `p3.process_rates.initial_rain_drop_mass`. The 25 μm radius appears only
+inside that keyword's default expression; there is no separate radius keyword.
 """
 @inline rain_seed_drop_mass(p3) = rain_seed_drop_mass(p3.warm_rain_scheme, p3)
 
