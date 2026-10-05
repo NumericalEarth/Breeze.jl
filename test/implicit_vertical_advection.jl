@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Oceananigans
-using Oceananigans: TendencyCallsite
+using Oceananigans: TendencyCallsite, UpdateStateCallsite
 using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization,
                               cell_advection_timescale, AdaptiveImplicitVerticalAdvection,
                               vertical_scheme, FluxFormAdvection
@@ -537,10 +537,10 @@ import Breeze.AtmosphereModels as AM
         ts = model.timestepper
         β = (ts.β₁, ts.β₂, ts.β₃)
 
-        # `TendencyCallsite` callbacks fire at the end of `compute_tendencies!`, just after
-        # `update_state!` refreshed the split — so a callback sees the value the upcoming stage
-        # (`clock.stage` of step `clock.iteration + 1`) builds its tendencies with and then hands
-        # to its own implicit solve.
+        # `TendencyCallsite` callbacks fire inside each stage, once its tendencies are final and
+        # before its implicit solve. Only `update_state!` writes the split, so a callback sees the
+        # value the stage (`clock.stage` of step `clock.iteration + 1`) built its tendencies with
+        # and then hands to its own implicit solve.
         observed = Dict{Tuple{Int, Int}, FT}()
         record(m) = (observed[(m.clock.iteration + 1, m.clock.stage)] = split_timestep(m.advection.ρc); nothing)
         callbacks = [Callback(record, IterationInterval(1); callsite=TendencyCallsite())]
@@ -629,18 +629,25 @@ import Breeze.AtmosphereModels as AM
 
         pair_substepper = pair_model.timestepper.substepper
 
-        # `TendencyCallsite` fires at the end of `compute_tendencies!`: `live` is the velocity the
-        # tendencies were just built from, and `cache` the copy frozen after the *previous*
-        # tendency computation — the one the stage in between actually split.
+        # `UpdateStateCallsite` fires in `update_state!` just before the tendencies are built:
+        # `live` is the velocity they are built from, and `cache` the copy frozen after the
+        # *previous* tendency computation — the one the stage in between actually split. The
+        # following stage reseeds the live field before its `TendencyCallsite` fires, so that
+        # callsite records only the split and the tendency the stage then applies.
         observed = NamedTuple[]
+        stages = NamedTuple[]
         function record_transport(m)
             push!(observed, (live = Array(interior(AM.transport_velocities(m).w)),
-                             cache = Array(interior(pair_substepper.time_averaged_vertical_velocity_cache)),
-                             split_Δt = time_discretization(vertical_scheme(m.advection.ρc)).Δt[],
-                             Gρc = maximum(abs, Array(interior(m.timestepper.Gⁿ.ρc)))))
+                             cache = Array(interior(pair_substepper.time_averaged_vertical_velocity_cache))))
             return nothing
         end
-        transport_callbacks = [Callback(record_transport, IterationInterval(1); callsite=TendencyCallsite())]
+        function record_stage(m)
+            push!(stages, (split_Δt = time_discretization(vertical_scheme(m.advection.ρc)).Δt[],
+                           Gρc = maximum(abs, Array(interior(m.timestepper.Gⁿ.ρc)))))
+            return nothing
+        end
+        transport_callbacks = [Callback(record_transport, IterationInterval(1); callsite=UpdateStateCallsite()),
+                               Callback(record_stage, IterationInterval(1); callsite=TendencyCallsite())]
 
         for _ in 1:2
             time_step!(pair_model, FT(30); callbacks=transport_callbacks)
@@ -650,7 +657,7 @@ import Breeze.AtmosphereModels as AM
         # first tendency computation, so stage 1 of step 1 transports tracers with a physical
         # velocity instead of the substepper's zero-initialized field.
         @test maximum(abs, first(observed).live) > 0
-        @test first(observed).Gρc > 0
+        @test first(stages).Gρc > 0
 
         # The pairing invariant: the velocity a stage's implicit remainder splits is exactly the
         # one the explicit fraction in its `Gⁿ` was scaled by.
@@ -666,8 +673,8 @@ import Breeze.AtmosphereModels as AM
         # goes through the implicit remainder at the tightest stage.
         Δz_pair = 4kilometers / 8
         pair_cfl = time_discretization(vertical_scheme(pair_model.advection.ρc)).cfl
-        fractions = [min(one(FT), pair_cfl * Δz_pair / (maximum(abs, o.live) * o.split_Δt))
-                     for o in observed if maximum(abs, o.live) > 0]
+        fractions = [min(one(FT), pair_cfl * Δz_pair / (maximum(abs, o.live) * stage.split_Δt))
+                     for (o, stage) in zip(observed, stages) if maximum(abs, o.live) > 0]
         @test minimum(fractions) < 1
     end
 

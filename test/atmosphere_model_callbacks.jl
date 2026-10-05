@@ -39,6 +39,39 @@ using Test
         @test fired_update[] == fired_tend[]
     end
 
+    @testset "TendencyCallsite modifies the tendencies AcousticRungeKutta3 applies" begin
+        # A horizontally uniform rest state, so a uniform tendency is the only source:
+        # after one step, ρu and ρc each equal c Δt. A callback fired before the stage rebuilds
+        # the momentum tendency leaves ρu at zero; firing it twice per stage doubles ρc.
+        acoustic_grid = RectilinearGrid(default_arch; size=(4, 4, 4),
+                                        x=(0, 1000), y=(0, 1000), z=(0, 1000),
+                                        topology=(Periodic, Periodic, Bounded))
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+        model = AtmosphereModel(acoustic_grid; dynamics, timestepper=:AcousticRungeKutta3, tracers=:ρc)
+        set!(model; ρ=model.dynamics.reference_state.density, θ=300)
+
+        c = FT(1e-3)
+        Δt = FT(1)
+        fired = Ref(0)
+        function add_tendency!(m)
+            fired[] += 1
+            interior(m.timestepper.Gⁿ.ρu) .+= c
+            interior(m.timestepper.Gⁿ.ρc) .+= c
+            return nothing
+        end
+
+        callbacks = [Callback(add_tendency!, IterationInterval(1); callsite=TendencyCallsite())]
+        time_step!(model, Δt; callbacks)
+
+        ρu = model.momentum.ρu
+        ρc = model.tracers.ρc
+        @test fired[] == 3
+        @test isapprox(maximum(ρu), c * Δt; rtol=sqrt(eps(FT)))
+        @test isapprox(minimum(ρu), c * Δt; rtol=sqrt(eps(FT)))
+        @test isapprox(maximum(ρc), c * Δt; rtol=sqrt(eps(FT)))
+        @test isapprox(minimum(ρc), c * Δt; rtol=sqrt(eps(FT)))
+    end
+
     @testset "compute_tendencies! still callable without callbacks" begin
         model = AtmosphereModel(grid)
         Breeze.AtmosphereModels.compute_tendencies!(model)

@@ -425,10 +425,23 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     compute_dynamics_tendency!(model)
 
+    run_tendency_callbacks!(model, callbacks)
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Run the `TendencyCallsite` callbacks once `compute_tendencies!` has assembled the tendencies.
+A time stepper that rebuilds part of the tendencies later in each stage turns this off for its
+models and runs the callbacks itself, after its own assembly, so a callback's change to a
+tendency is never overwritten.
+"""
+function run_tendency_callbacks!(model, callbacks)
     for callback in callbacks
         callback.callsite isa TendencyCallsite && callback(model)
     end
-
     return nothing
 end
 

@@ -1,5 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
+using Oceananigans: TendencyCallsite
 using Oceananigans.Utils: time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -151,11 +152,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Run one Wicker–Skamarock RK3 stage: compute slow tendencies, then
-execute the linearized-acoustic substep loop, then update remaining
-scalars.
+Run one Wicker–Skamarock RK3 stage: compute slow tendencies, run the
+`TendencyCallsite` callbacks, then execute the linearized-acoustic
+substep loop, then update remaining scalars.
 """
-function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
+function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, callbacks)
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
@@ -178,6 +179,13 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     # compute_slow_momentum_tendencies! / compute_slow_scalar_tendencies!.
     compute_flux_bc_tendencies!(model)
     compute_closure_tendencies!(model)
+
+    # Every tendency is final here: the momentum and thermodynamic tendencies were just
+    # rebuilt, and the moisture and tracer tendencies were built by the preceding
+    # `update_state!`, which leaves the callbacks to this point (see `run_tendency_callbacks!`).
+    for callback in callbacks
+        callback.callsite isa TendencyCallsite && callback(model)
+    end
 
     # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless
     # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
@@ -218,6 +226,10 @@ end
 #####
 ##### Time stepping (main entry point)
 #####
+
+# `acoustic_rk3_substep!` rebuilds the momentum and thermodynamic tendencies after
+# `update_state!`, so the tendency callbacks run there instead of in `compute_tendencies!`.
+AtmosphereModels.run_tendency_callbacks!(::CompressibleAcousticModel, callbacks) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -272,7 +284,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     freeze_linearization_state!(ts.substepper, model)
 
     # Stage 1: U* = Uⁿ + (Δt/3) R(Uⁿ)
-    acoustic_rk3_substep!(model, Δt, β₁)
+    acoustic_rk3_substep!(model, Δt, β₁, callbacks)
 
     tick_stage!(model.clock, β₁ * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
@@ -281,14 +293,14 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     cache_transport_velocity!(model)
 
     # Stage 2: U** = Uⁿ + (Δt/2) R(U*)
-    acoustic_rk3_substep!(model, Δt, β₂)
+    acoustic_rk3_substep!(model, Δt, β₂, callbacks)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     cache_transport_velocity!(model)
 
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**)
-    acoustic_rk3_substep!(model, Δt, β₃)
+    acoustic_rk3_substep!(model, Δt, β₃, callbacks)
 
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
