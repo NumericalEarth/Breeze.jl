@@ -180,8 +180,8 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, callbacks)
     compute_flux_bc_tendencies!(model)
     compute_closure_tendencies!(model)
 
-    # Every tendency is final here: the momentum and thermodynamic tendencies were just
-    # rebuilt, and the moisture and tracer tendencies were built by the preceding
+    # Every tendency is final here: the momentum, thermodynamic, and density tendencies were
+    # just built, and the moisture and tracer tendencies were built by the preceding
     # `update_state!`, which leaves the callbacks to this point (see `run_tendency_callbacks!`).
     for callback in callbacks
         callback.callsite isa TendencyCallsite && callback(model)
@@ -227,8 +227,9 @@ end
 ##### Time stepping (main entry point)
 #####
 
-# `acoustic_rk3_substep!` rebuilds the momentum and thermodynamic tendencies after
-# `update_state!`, so the tendency callbacks run there instead of in `compute_tendencies!`.
+# `acoustic_rk3_substep!` builds the momentum, thermodynamic, and density tendencies in slow
+# form, so `update_state!` skips them and the tendency callbacks run after the stage builds them.
+AtmosphereModels.compute_dynamical_tendencies!(::CompressibleAcousticModel, model_fields, common_args) = nothing
 AtmosphereModels.run_tendency_callbacks!(::CompressibleAcousticModel, callbacks) = nothing
 
 """

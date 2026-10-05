@@ -234,6 +234,9 @@ end
                 θ = (x, y, z) -> FT(300))
     update_state!(model)
 
+    # `AcousticRungeKutta3` builds the θ tendency in each stage, not in `update_state!`.
+    Breeze.TimeSteppers.compute_slow_scalar_tendencies!(model)
+
     Gρθ = interior(model.timestepper.Gⁿ.ρθ) |> Array
     ρ = interior(Breeze.AtmosphereModels.dynamics_density(model.dynamics)) |> Array
     expected = ρ .* F_θ
