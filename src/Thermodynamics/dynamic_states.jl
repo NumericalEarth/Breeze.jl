@@ -24,7 +24,7 @@ States closed on a reference pressure — `LiquidIcePotentialTemperatureState` a
 `StaticEnergyState` — carry it directly. `LiquidIceDensityState` is closed on the
 density instead, so its pressure is diagnosed from the ideal gas law, `p = ρ Rᵐ T`.
 """
-@inline air_pressure(𝒰::AbstractThermodynamicState, constants) = 𝒰.reference_pressure
+@inline air_pressure(𝒰::AbstractReferencePressureState, constants) = 𝒰.reference_pressure
 
 @inline function saturation_specific_humidity(𝒰::AbstractThermodynamicState, constants, equil)
     T = temperature(𝒰, constants)
