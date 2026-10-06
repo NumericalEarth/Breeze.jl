@@ -8,7 +8,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 ##### sequencing, the explicit horizontal step and vertical tridiagonal
 ##### coefficients, substepper and time-stepper construction, divergence
 ##### damping strategies, the upper sponge, the Exner reference state,
-##### slow-tendency modes, and show methods.
+##### the slow-dynamics wrapper, and show methods.
 #####
 ##### Open-boundary behavior lives in
 ##### `test/acoustic_substepping_open_boundaries.jl`; longer time
@@ -28,7 +28,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
                                     implicit_damping_factors
-using Breeze.AtmosphereModels: SlowDynamics, HorizontalSlowMode,
+using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density
 using Breeze.Thermodynamics: ExnerReferenceState, surface_density
@@ -610,10 +610,10 @@ for arch in arches
     end
 
     #####
-    ##### SlowDynamics and HorizontalSlowMode
+    ##### SlowDynamics
     #####
 
-    @testset "SlowDynamics and HorizontalSlowMode [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+    @testset "SlowDynamics [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
@@ -632,13 +632,6 @@ for arch in arches
             @test z_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, slow) == 0
             @test dynamics_density(slow) === model.dynamics.dry_density
-        end
-
-        @testset "HorizontalSlowMode" begin
-            hslow = HorizontalSlowMode(model.dynamics)
-            @test z_pressure_gradient(1, 1, 1, grid, hslow) == 0
-            @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, hslow) == 0
-            @test dynamics_density(hslow) === model.dynamics.dry_density
         end
         Oceananigans.defaults.FloatType = old_FT
     end
