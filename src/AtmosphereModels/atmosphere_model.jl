@@ -258,6 +258,9 @@ function AtmosphereModel(grid;
     # `ρnᵃ` holds a ρ-weighted count there, so it is filled in by `set_default_aerosol_number!`
     # at the end of this constructor, once the dynamics has a density to weight by.
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
+    prognostic_microphysical_fields = NamedTuple{prognostic_field_names(microphysics)}(microphysical_fields)
+    prognostic_microphysical_fields = TracerFields(prognostic_microphysical_fields, grid, regularized_boundary_conditions)
+    microphysical_fields = merge(microphysical_fields, prognostic_microphysical_fields)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
@@ -266,9 +269,6 @@ function AtmosphereModel(grid;
         moisture_density = CenterField(grid, boundary_conditions=regularized_boundary_conditions[moisture_name])
     end
 
-    prognostic_microphysical_fields = NamedTuple(name => microphysical_fields[name] for name in prognostic_field_names(microphysics))
-    prognostic_microphysical_fields = TracerFields(prognostic_microphysical_fields, grid, regularized_boundary_conditions)
-    microphysical_fields = merge(microphysical_fields, prognostic_microphysical_fields)
     prognostic_model_fields = collect_prognostic_fields(formulation,
                                                         dynamics,
                                                         momentum,
