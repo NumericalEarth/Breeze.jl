@@ -7,14 +7,18 @@ using Test
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
     MoistureMassFractions,
+    AbstractReferencePressureState,
     LiquidIceDensityState,
+    LiquidIcePotentialTemperatureState,
+    StaticEnergyState,
     temperature,
     with_temperature,
     mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity
 
-using Breeze.Microphysics: SaturationAdjustment, adjust_thermodynamic_state, WarmPhaseEquilibrium
+using Breeze.Microphysics: SaturationAdjustment, adjust_state, adjust_thermodynamic_state, WarmPhaseEquilibrium,
+                           saturation_adjustment_specific_humidity
 using Oceananigans.TimeSteppers: update_state!
 
 @testset "Compressible density reconciliation modes" begin
@@ -81,6 +85,18 @@ end
         𝒰dry = adjust_thermodynamic_state(
             LiquidIceDensityState(θ₀, MoistureMassFractions(FT(0.002)), pˢᵗ, ρ), sa, constants)
         @test 𝒰dry.moisture_mass_fractions.liquid == 0
+    end
+
+    # NumericalEarth/Breeze.jl#859: `adjust_state` serves every state, so the only method that
+    # reads `reference_pressure` is the saturation specific humidity of reference-pressure states.
+    # The density-closed state, which has no `reference_pressure`, must select its own method.
+    @testset "the reference-pressure saturation path excludes the density state" begin
+        argument_types(𝒮) = Tuple{FT, 𝒮, typeof(constants), WarmPhaseEquilibrium}
+        state_type(𝒮) = which(saturation_adjustment_specific_humidity, argument_types(𝒮)).sig.parameters[3]
+        @test state_type(LiquidIceDensityState) === LiquidIceDensityState
+        @test state_type(LiquidIcePotentialTemperatureState) === AbstractReferencePressureState
+        @test state_type(StaticEnergyState) === AbstractReferencePressureState
+        @test hasmethod(adjust_state, Tuple{LiquidIceDensityState, FT, typeof(constants), WarmPhaseEquilibrium})
     end
 
     @testset "fixes the κ·ΔL temperature inconsistency" begin

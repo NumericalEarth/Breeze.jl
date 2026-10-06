@@ -62,8 +62,10 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     @test adjusted.moisture_mass_fractions.liquid ≈ q.liquid rtol=1e-3
 end
 
+# Parcel models interpolate the environment at the parcel position on the host when `set!`
+# receives `z`, so they run on the CPU here, as in `parcel_dynamics.jl`.
 @testset "Parcel initialization preserves θ and relative humidity [$FT]" for FT in test_float_types()
-    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
+    grid = RectilinearGrid(CPU(), FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(FT), microphysics=nothing)
     constants = model.thermodynamic_constants
     T, p, ℋ = FT.((300, 80000, 0.8))
@@ -137,7 +139,7 @@ end
 end
 
 @testset "Parcel condensate overshoots preserve water and energy [$FT]" for FT in test_float_types()
-    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
+    grid = RectilinearGrid(CPU(), FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
     for equilibrium in (WarmPhaseEquilibrium(), MixedPhaseEquilibrium(FT))
         mixed = equilibrium isa MixedPhaseEquilibrium
         adjustment = SaturationAdjustment(FT; equilibrium)
@@ -253,7 +255,7 @@ end
 end
 
 @testset "Parcel initialization partitions carried condensate [$FT]" for FT in test_float_types()
-    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
+    grid = RectilinearGrid(CPU(), FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
     T, p, ρ, z = FT.((283.15, 1e5, 1.2, 50))
     qᶜˡ, qʳ = FT(0.001), FT(0.002)
 

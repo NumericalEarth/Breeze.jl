@@ -11,6 +11,7 @@ using Breeze.Thermodynamics:
     with_temperature,
     total_specific_moisture,
     AbstractThermodynamicState,
+    AbstractReferencePressureState,
     LiquidIceDensityState,
     WarmPhaseEquilibrium,
     MixedPhaseEquilibrium,
@@ -167,35 +168,38 @@ end
 ##### Saturation adjustment utilities
 #####
 
-# Pressure-based states saturate at fixed pressure and total water. Density-based
-# states saturate at their own density, with pressure diagnosed by the equation of state.
-@inline saturation_adjustment_specific_humidity(T, 𝒰, constants, equilibrium) =
+const ATS = AbstractThermodynamicState
+const ARPS = AbstractReferencePressureState
+
+# The state selects the saturation constraint. Reference-pressure states saturate at fixed
+# pressure and total water; `LiquidIceDensityState` saturates at its own density, with pressure
+# diagnosed by the equation of state. Only the first method reads `reference_pressure`, so it is
+# constrained to the states that carry one (NumericalEarth/Breeze.jl#859).
+@inline saturation_adjustment_specific_humidity(T, 𝒰::ARPS, constants, equilibrium) =
     adjustment_saturation_specific_humidity(T, 𝒰.reference_pressure, total_specific_moisture(𝒰), constants, equilibrium)
 
 @inline saturation_adjustment_specific_humidity(T, 𝒰::LiquidIceDensityState, constants, equilibrium) =
     saturation_specific_humidity(T, 𝒰.density, constants, equilibrium)
 
-@inline function adjust_state(𝒰₀, T, constants, equilibrium, precipitation=(0, 0))
+@inline function adjust_state(𝒰₀::ATS, T, constants, equilibrium, precipitation=(0, 0))
     qᵗ = total_specific_moisture(𝒰₀)
     qᵛ⁺ = saturation_adjustment_specific_humidity(T, 𝒰₀, constants, equilibrium)
     q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium, precipitation)
     return with_moisture(𝒰₀, q₁)
 end
 
-@inline function saturation_adjustment_residual(T, 𝒰₀, constants, equilibrium, precipitation=(0, 0))
+@inline function saturation_adjustment_residual(T, 𝒰₀::ATS, constants, equilibrium, precipitation=(0, 0))
     𝒰₁ = adjust_state(𝒰₀, T, constants, equilibrium, precipitation)
     return saturation_adjustment_residual(T, 𝒰₁, constants)
 end
 
-@inline saturation_adjustment_residual(T, 𝒰, constants) = T - temperature(𝒰, constants)
+@inline saturation_adjustment_residual(T, 𝒰::ARPS, constants) = T - temperature(𝒰, constants)
 
 # At fixed density, solve θˡⁱ(T, ρ, q) - θ₀ = 0 directly. Reusing with_temperature
 # preserves the equation of state without nesting the θˡⁱ-to-T inversion in the secant solve.
 @inline function saturation_adjustment_residual(T, 𝒰::LiquidIceDensityState, constants)
     return with_temperature(𝒰, T, constants).potential_temperature - 𝒰.potential_temperature
 end
-
-const ATS = AbstractThermodynamicState
 
 # This function allows saturation adjustment to be used as a microphysics scheme directly
 @inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, qᵉ, constants)
@@ -209,7 +213,7 @@ $(TYPEDSIGNATURES)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 
-The state selects the constraint: fixed pressure for pressure-based states, or fixed
+The state selects the constraint: fixed pressure for reference-pressure states, or fixed
 density with pressure `p = ρ Rᵐ T` for `LiquidIceDensityState`. The conserved
 thermodynamic variable, initial temperature guesses, and solver are retained in either case.
 
