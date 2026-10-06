@@ -143,19 +143,42 @@ end
 # The transported enthalpy and thermal response depend on the dynamics
 # (`sedimentation_thermal_response`). χ remains a local composition derivative, not a
 # transported quantity. These are instantaneous responses; multiplying them by a finite mass
-# increment does not exactly reconstruct thermal energy. The temperature is rediagnosed from the
-# state, T = Π θ + D, so the temperature field is unused.
+# increment does not exactly reconstruct thermal energy.
+#
+# The explicit tendency is built in `update_state!` right after the temperature field was
+# diagnosed from the same θ and q, so the content reads that temperature and recovers the Exner
+# function from T = Π θ + D, rather than inverting θ for T again (a Newton iteration on the
+# compressible core) in this cell and both of its neighbors. `implicit_sedimentation_step!` runs
+# after the tracers' solves have moved q, where the temperature field no longer matches the
+# state, so it passes `nothing` (see `content_temperature`) and T is rediagnosed from (θ, q).
 @inline function AtmosphereModels.condensate_content(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
                                                      dynamics, constants, microphysics, microphysical_fields,
                                                      specific_prognostic_moisture, temperature_field)
+    @inbounds ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
+    @inbounds θ = formulation.potential_temperature[i, j, k]
+    @inbounds T = temperature_field[i, j, k]
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    return potential_temperature_condensate_content(dynamics, constants, q, θ, T)
+end
+
+@inline function AtmosphereModels.condensate_content(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
+                                                     dynamics, constants, microphysics, microphysical_fields,
+                                                     specific_prognostic_moisture, ::Nothing)
     𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
                                  microphysics, microphysical_fields, specific_prognostic_moisture)
-    q = 𝒰.moisture_mass_fractions
-    θ = 𝒰.potential_temperature
-    Π = exner_function(𝒰, constants)
+    T = temperature(𝒰, constants)
+    return potential_temperature_condensate_content(dynamics, constants, 𝒰.moisture_mass_fractions,
+                                                    𝒰.potential_temperature, T)
+end
+
+# The content, transported enthalpies and thermal response of a cell with mass fractions `q`,
+# potential temperature `θ` and temperature `T`, with Π = (T − D) / θ
+@inline function potential_temperature_condensate_content(dynamics, constants, q, θ, T)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
     D = (constants.liquid.reference_latent_heat * q.liquid + constants.ice.reference_latent_heat * q.ice) / cᵖᵐ
+    Π = (T - D) / θ
     θlnΠ = θ * log(Π)
 
     Δqˡ = sedimentation_composition_increment(dynamics, q, Val(:liquid))
@@ -163,10 +186,12 @@ end
     χˡ = potential_temperature_content(Δqˡ, constants, cᵖᵐ, Rᵐ, D, Π, θlnΠ)
     χⁱ = potential_temperature_content(Δqⁱ, constants, cᵖᵐ, Rᵐ, D, Π, θlnΠ)
 
-    T = Π * θ + D
     h, ∂θ∂h = sedimentation_thermal_response(dynamics, q, constants, T, Π)
     return (; χ = (χˡ, χⁱ), h, ∂φ∂h = ∂θ∂h)
 end
+
+# `implicit_sedimentation_step!` rediagnoses T from the post-solve state (see above).
+AtmosphereModels.content_temperature(::LiquidIcePotentialTemperatureFormulation, temperature_field) = nothing
 
 # The derivative of θˡⁱ above along one composition increment
 @inline function potential_temperature_content(Δq, constants, cᵖᵐ, Rᵐ, D, Π, θlnΠ)

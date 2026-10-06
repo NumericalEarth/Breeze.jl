@@ -326,9 +326,20 @@ function implicit_sedimentation_step!(model, Δt, velocities, formulation = mode
     launch!(arch, grid, :xyz, _implicit_sedimentation_step!,
             φ, grid, kernel_time_step(arch, grid, Δt), condensates, velocities.w,
             formulation, model.dynamics, model.thermodynamic_constants, model.microphysics,
-            model.microphysical_fields, specific_prognostic_moisture(model), model.temperature)
+            model.microphysical_fields, specific_prognostic_moisture(model),
+            content_temperature(formulation, model.temperature))
     return nothing
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the temperature argument `implicit_sedimentation_step!` passes to
+[`condensate_content`](@ref) for `formulation`: the model's `temperature_field` by default, or
+`nothing` for a formulation whose content rediagnoses the temperature from the post-solve state,
+which the tracers' solves have moved away from the one the temperature field was diagnosed from.
+"""
+content_temperature(formulation, temperature_field) = temperature_field
 
 @kernel function _implicit_sedimentation_step!(φ, grid, Δt, condensates, wᵗ, formulation, dynamics, constants,
                                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
