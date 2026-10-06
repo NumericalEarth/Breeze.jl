@@ -114,7 +114,7 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
     ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
-    # m9: no velocity clamping is applied; the table bounds are sufficient.
+    # No velocity clamping is applied; the table bounds are sufficient.
     velocity = tabulated_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ,
                                     ρᶠ, ρ_correction, parameters)
     active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
@@ -140,6 +140,12 @@ end
 @inline tabulated_fall_speed(table::P3Table4D, prep::PreparedInterpolation, ρ_correction) =
     evaluate_at(table, prep) * ρ_correction
 
+# Concrete return struct, so the pair stays one isbits value on the GPU.
+struct IceTerminalVelocities{FT}
+    mass_weighted :: FT
+    number_weighted :: FT
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -164,15 +170,9 @@ speed framework.
 - `Fˡ`: Liquid fraction (optional, for tabulated lookup)
 
 # Returns
-- `NamedTuple` with fields `mass_weighted`, `number_weighted` [m/s]
+- `IceTerminalVelocities` with fields `mass_weighted`, `number_weighted` [m/s]
   (both positive downward)
 """
-# Concrete return struct, so the pair stays one isbits value on the GPU.
-struct IceTerminalVelocities{FT}
-    mass_weighted :: FT
-    number_weighted :: FT
-end
-
 @inline function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     parameters = p3.process_rates

@@ -149,6 +149,8 @@ end
     @test haskey(model.microphysical_fields, :qᶜˡ)
     @test haskey(model.microphysical_fields, :qʳ)
 
+    test_kernel_functions_inferred(model)
+
     # Single time step (reduced from 6 iterations)
     time_step!(model, 1)
     @test model.clock.time == 1
@@ -368,6 +370,8 @@ end
     @test haskey(model.microphysical_fields, :ρqᶜⁱ)
     @test haskey(model.microphysical_fields, :qᶜⁱ)
 
+    test_kernel_functions_inferred(model)
+
     time_step!(model, 1)
     @test model.clock.iteration == 1
 end
@@ -477,4 +481,34 @@ end
 
     # Model should complete without errors (all tendencies computed)
     @test model.clock.iteration > 0
+end
+
+@testset "Saturation-adjustment 1M tendencies conserve water without transport" begin
+    FT = Float64
+    AM = Breeze.AtmosphereModels
+    TD = Breeze.Thermodynamics
+    constants = ThermodynamicConstants(FT)
+    ρ, p, T = FT(1), FT(1e5), FT(280)
+    qᵛ⁺ = TD.saturation_specific_humidity(T, ρ, constants, TD.PlanarLiquidSurface())
+
+    #         qᵛ     qᶜˡ     qʳ
+    cases = ((qᵛ⁺,   2e-3,   0),     # autoconversion
+             (qᵛ⁺,   2e-3,   1e-4),  # accretion
+             (qᵛ⁺/2, 0,      1e-4),  # rain evaporation
+             (qᵛ⁺,   0,     -1e-5))  # negative-rain relaxation
+
+    for equilibrium in (WarmPhaseEquilibrium(), MixedPhaseEquilibrium(FT)), (qᵛ, qᶜˡ, qʳ) in cases
+        microphysics = OneMomentCloudMicrophysics(FT; cloud_formation=SaturationAdjustment(FT; equilibrium))
+        ℳ = equilibrium isa WarmPhaseEquilibrium ?
+            BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState(FT(qᶜˡ), FT(qʳ)) :
+            BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(FT(qᶜˡ), zero(FT), FT(qʳ), zero(FT))
+        q = AM.moisture_fractions(microphysics, ℳ, qᵛ + qᶜˡ)
+        𝒰 = TD.LiquidIcePotentialTemperatureState(T, q, p, p)
+
+        names = (AM.moisture_prognostic_name(microphysics), AM.prognostic_field_names(microphysics)...)
+        S = NamedTuple{names}(map(n -> AM.microphysical_tendency(microphysics, Val(n), ρ, ℳ, 𝒰, constants), names))
+
+        @test S.ρqʳ != 0
+        @test sum(S) ≈ 0 atol=sqrt(eps(FT)) * abs(S.ρqʳ)
+    end
 end

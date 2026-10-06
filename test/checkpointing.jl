@@ -61,7 +61,7 @@ function run_with_restart(build, dir)
 
     model = build()
     simulation = Simulation(model; Δt, stop_iteration=NSPIN + NRESTART, verbose=false)
-    run!(simulation, pickup=checkpoint)
+    @test_logs (:info, r"Picking up simulation from checkpoint file") run!(simulation; pickup=checkpoint)
     return snapshot(model)
 end
 

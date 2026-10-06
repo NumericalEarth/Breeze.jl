@@ -8,20 +8,19 @@ testsuite = find_tests(@__DIR__)
 # Parse arguments
 args = parse_args(ARGS)
 
-const REACTANT_COMPAT = VERSION < v"1.13-" && Base.JLOptions().check_bounds != 1
+const REACTANT_COMPAT = VERSION < v"1.14-" && Base.JLOptions().check_bounds != 1
 
 # These aren't test files, they are only used as setup for other tests.
 delete!(testsuite, "setup")
 delete!(testsuite, "reactant/weno_compilation_setup")
+delete!(testsuite, "reactant/microphysics_compilation_setup")
 
 if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
     # limitation).
-    if !REACTANT_COMPAT
-        for key in keys(testsuite)
-            if startswith(key, "reactant/") && !REACTANT_COMPAT
-                delete!(testsuite, key)
-            end
+    for key in keys(testsuite)
+        if startswith(key, "reactant/") && !REACTANT_COMPAT
+            delete!(testsuite, key)
         end
     end
 end

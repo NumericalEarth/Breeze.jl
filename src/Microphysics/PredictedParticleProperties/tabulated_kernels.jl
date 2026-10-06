@@ -9,7 +9,7 @@
 #####
 
 #####
-##### Ventilation Sc correction (H4)
+##### Ventilation Sc correction
 #####
 ##### The ventilation-enhanced table stores 0.44 × ∫ C(D)√(𝕎×D) N'(D) dD
 ##### with dimensions [m² s^(-1/2)]. At runtime, multiplying by

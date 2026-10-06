@@ -161,15 +161,22 @@ size distribution. They are used for radiation, radar, and diagnostics.
 
 **Diagnostic integrals:**
 
-- `effective_radius`: Radiation-weighted radius ``r_e = ∫A·N'dD / ∫N'dD``
+- `effective_radius`: Radiation-weighted radius
+  ``r_e = (3/(4ρ_i^*)) ∫m·N'dD / ∫A·N'dD``, with the table generator's
+  reference ice density ``ρ_i^* = 916.7`` kg/m³
 - `mean_diameter`: Mass-weighted diameter ``D_m = ∫D·m·N'dD / ∫m·N'dD``
 - `mean_density`: Mass-weighted density ``ρ̄ = ∫ρ·m·N'dD / ∫m·N'dD``
-- `reflectivity`: Radar reflectivity ``Z = ∫D^6·N'dD``
+- `reflectivity`: Number-normalized equivalent radar reflectivity. Dry ice uses
+  ``0.1892 ∫D_{eq}^6 N'dD / ∫N'dD``, with equivalent diameter computed from particle
+  mass at 917 kg/m³. Partially melted ice uses the generator's wet-ice scattering
+  calculation; the fully liquid limit uses ``D^6``. Multiply by ice number density
+  for the volume integral.
 
-**Distribution parameters (for λ-limiting):**
+**Tabulated distribution parameters:**
 
-- `slope`: Slope parameter λ from prognostic constraints
-- `shape`: Shape parameter μⁱ from empirical μⁱ-λ relationship
+- `slope`: Slope parameter λ recorded when the table was generated
+- `shape`: Shape parameter μⁱ recorded when the table was generated, read back by
+  `compute_ice_shape_parameter`
 
 **Process integrals:**
 
@@ -290,9 +297,11 @@ adjustments.
 - Very large λ → all particles tiny (mean size → 0)
 - Very small λ → all particles huge (mean size → ∞)
 
-These integrals compute the limiting values:
-- `small_q`: λ limit when q is small (prevents vanishingly tiny particles)
-- `large_q`: λ limit when q is large (prevents unrealistically huge particles)
+The columns store inverse mean particle masses [kg⁻¹] at the limiting PSDs.
+Multiplying them by total ice mass fraction (including liquid coating) gives the
+bounds on `nⁱ`:
+- `small_q`: inverse minimum mean mass, giving the maximum number at the upper λ bound
+- `large_q`: inverse maximum mean mass, giving the minimum number at the lower λ bound
 
 The limiter ensures the diagnosed size distribution remains physically
 sensible even when the prognostic constraints become degenerate.

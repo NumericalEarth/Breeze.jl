@@ -35,7 +35,11 @@ using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
                                       virtual_potential_temperature
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity, MoistureMassFractions,
+                        LiquidIcePotentialTemperatureState,
                         potential_temperature_from_temperature, surface_pressure_from_cell_center
+
+# Extended below with a grid-point method: `exner_function(i, j, k, grid, ef, q, dynamics_fields)`.
+import ..Thermodynamics: exner_function
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: Architectures
@@ -261,7 +265,7 @@ function convert_moisture_bcs(bcs, microphysics)
     return merge(bcs, NamedTuple{(ρq_name,)}((ρq_bcs,)))
 end
 
-# ρθ: an energy flux 𝒬 enters as the potential temperature flux Jᶿ = 𝒬 / cᵖᵐ, applied by
+# ρθ: an energy flux 𝒬ᵀ enters as the potential temperature flux Jᶿ = 𝒬ᵀ / (cᵖᵐ Π), applied by
 # `EnergyFluxBoundaryCondition`.
 energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρθ}) = energy_to_theta_bcs(ρE_bcs)
 

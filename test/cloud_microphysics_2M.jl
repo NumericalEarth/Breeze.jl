@@ -82,6 +82,8 @@ end
     @test haskey(model.microphysical_fields, :wᶜˡ)
     @test haskey(model.microphysical_fields, :wʳ)
 
+    test_kernel_functions_inferred(model)
+
     # Single time step (reduced from 6 iterations)
     time_step!(model, 1)
     @test model.clock.time == 1
