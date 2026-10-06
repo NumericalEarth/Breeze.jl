@@ -345,6 +345,9 @@ result.metadata
 # ├── cpu_model: AMD EPYC
 # ├── num_threads: 64
 # ├── hostname: ...
+# ├── CUDA: 5.9.0
+# ├── Reactant: 0.2.286
+# ├── Reactant_jll: 0.0.412
 # └── timestamp: 2026-01-30T12:00:00
 ```
 

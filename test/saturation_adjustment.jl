@@ -239,6 +239,24 @@ end
     end
 end
 
+@testset "Non-precipitating BulkMicrophysics time-stepping [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 1), y=(0, 1), z=(0, 1000))
+    reference_state = ReferenceState(grid, ThermodynamicConstants(FT); base_pressure=101325, potential_temperature=300)
+
+    models = map((BulkMicrophysics(FT), SaturationAdjustment(FT))) do microphysics
+        model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics)
+        set!(model; θ=300, qᵗ=0.025)
+        time_step!(model, 1)
+        model
+    end
+
+    qˡ = Array(interior(models[1].microphysical_fields.qˡ))
+    @test maximum(qˡ) > 0
+    @test qˡ == Array(interior(models[2].microphysical_fields.qˡ))
+    @test Array(interior(models[1].temperature)) == Array(interior(models[2].temperature))
+end
+
 @testset "Saturation adjustment NaN robustness [$(FT)]" for FT in test_float_types()
     # Regression test: adjust_thermodynamic_state must never return NaN.
     # The secant iteration can stagnate (r₂ ≈ r₁) in Float32, producing ΔTΔr = Inf,
