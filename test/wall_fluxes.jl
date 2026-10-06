@@ -531,13 +531,6 @@ end
     heat = BulkSensibleHeatFlux(coefficient=FT(0.002), surface_temperature=FT(290))
     microphysics = CloudMicrophysicsExtension.OneMomentCloudMicrophysics(FT)
 
-    # The name of the specific moisture the wall composition looks up must fold to a literal,
-    # since the lookup runs inside the flux kernels.
-    specific_name(m) = Breeze.AtmosphereModels.moisture_specific_name(m)
-    prognostic_name = Breeze.AtmosphereModels.moisture_prognostic_name(microphysics)
-    @test specific_name(microphysics) === Breeze.AtmosphereModels.specific_field_name(prognostic_name)
-    @test (@allocated specific_name(microphysics)) == 0
-
     # Subsaturated air carrying rain: the wall composition recovers the rain mass fraction only
     # if the density-weighted rain is divided by the model's total density.
     qᵗ = FT(0.005)

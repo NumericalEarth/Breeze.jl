@@ -1014,7 +1014,7 @@ end
 function parcel_moisture_partition(microphysics, ρ, μ, qᵗ, 𝒰)
     zero_velocities = (; u = zero(ρ), v = zero(ρ), w = zero(ρ))
     ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, zero_velocities)
-    qᵛᵉ = specific_prognostic_moisture(microphysics, qᵗ, ℳ)
+    qᵛᵉ = specific_prognostic_moisture(microphysics, qᵗ, μ, ρ)
     return qᵛᵉ, moisture_fractions(microphysics, ℳ, qᵛᵉ)
 end
 

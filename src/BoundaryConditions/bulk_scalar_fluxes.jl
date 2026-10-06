@@ -99,11 +99,11 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 end
 
 # The total air density `fields.ρ` (from `dynamics_thermodynamic_fields`) converts the
-# density-weighted microphysical prognostics (ρqʳ, ρqˢⁿ, …) into mass fractions.
+# density-weighted moisture and microphysical prognostics (ρqᵛ, ρqʳ, ρqˢⁿ, …) into mass fractions.
 @inline function wall_moisture_fractions(i, j, k, grid, microphysics, fields)
     @inbounds begin
         ρ = fields.ρ[i, j, k]
-        qᵛᵉ = fields[moisture_specific_name(microphysics)][i, j, k]
+        qᵛᵉ = fields[moisture_prognostic_name(microphysics)][i, j, k] / ρ
     end
     return grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, fields)
 end

@@ -90,8 +90,7 @@ concentrations or dependent moments must override it to exclude those fields.
 
 [`specific_prognostic_moisture`](@ref Breeze.AtmosphereModels.specific_prognostic_moisture)
 uses these names to compute ``qᵛᵉ = qᵗ - Σ ρqᶜ / ρ`` from density-weighted variables,
-or subtracts the corresponding specific fractions from a microphysical state. Here ``ρ``
-is **total air density**, including water. Number concentrations and dependent masses
+for both grid and parcel models. Here ``ρ`` is **total air density**, including water. Number concentrations and dependent masses
 (such as P3 rime mass, already included in total ice) are excluded from the sum.
 
 The conversion preserves total water without clipping. Model initialization validates the

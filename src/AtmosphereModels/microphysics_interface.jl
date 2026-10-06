@@ -386,29 +386,13 @@ the specific (per-mass) name. For example, `:ρqᶜˡ` → `:qᶜˡ`.
 """
 specific_field_name(name::Symbol) = (s = string(name); Symbol(s[nextind(s, 1):end]))
 
-# Resolve names to literals at compile time: string processing cannot run inside GPU kernels.
-# QuoteNode keeps a scalar Symbol literal from being interpreted as a variable name.
-@generated specific_field_name(::Val{name}) where name = QuoteNode(specific_field_name(name))
-@generated specific_field_names(::Val{names}) where names = :($(map(specific_field_name, names)))
-
-"""
-$(TYPEDSIGNATURES)
-
-Return the specific (per-mass) names of the independent condensate species, i.e.
-[`condensate_field_names`](@ref) with the leading `ρ` stripped from each. These are the fields
-a microphysical state ``ℳ`` carries, so the pair lets one generic method convert ``qᵗ`` from
-either density-weighted variables or a state.
-"""
-@inline specific_condensate_names(microphysics) = specific_field_names(Val(condensate_field_names(microphysics)))
-
 """
 $(TYPEDSIGNATURES)
 
 Return the specific (per-mass) moisture field name by stripping the `ρ` prefix
-from [`moisture_prognostic_name`](@ref). The name is resolved at compile time, so the
-lookup `fields[moisture_specific_name(microphysics)]` is free inside kernels.
+from [`moisture_prognostic_name`](@ref).
 """
-@inline moisture_specific_name(microphysics) = specific_field_name(Val(moisture_prognostic_name(microphysics)))
+moisture_specific_name(microphysics) = specific_field_name(moisture_prognostic_name(microphysics))
 
 """
 $(TYPEDSIGNATURES)
@@ -416,8 +400,8 @@ $(TYPEDSIGNATURES)
 Return the prognostic specific moisture field for `model`.
 
 This is ``qᵛ`` for non-equilibrium schemes or ``qᵉ`` for saturation adjustment schemes.
-To convert total specific moisture instead, pass `microphysics`, `qᵗ`, and either a
-microphysical state or density-weighted microphysical variables and total air density.
+To convert total specific moisture instead, pass `microphysics`, `qᵗ`, the density-weighted
+microphysical variables, and the total air density.
 """
 specific_prognostic_moisture(model) = model.microphysical_fields[moisture_specific_name(model.microphysics)]
 
@@ -660,33 +644,6 @@ end
 $(TYPEDSIGNATURES)
 
 Convert total specific moisture ``qᵗ`` to the scheme-dependent specific moisture ``qᵛᵉ``
-by subtracting the appropriate condensate from the microphysical state ``ℳ``.
-
-For non-equilibrium schemes, subtract cloud condensate and precipitation to recover vapor.
-For saturation adjustment schemes, subtract only precipitation to recover equilibrium moisture
-(vapor plus cloud liquid and ice).
-For `Nothing` microphysics, ``qᵛᵉ = qᵗ`` (all moisture is vapor).
-
-The condensate to subtract is named by [`condensate_field_names`](@ref).
-This conversion preserves total water, including when the input state contains negative vapor.
-
-This is used by parcel models that store total moisture ``qᵗ`` as the prognostic
-variable, to produce the correct input for [`moisture_fractions`](@ref).
-"""
-@inline specific_prognostic_moisture(microphysics, qᵗ, ℳ::AbstractMicrophysicalState) =
-    subtract_condensate(qᵗ, ℳ, specific_condensate_names(microphysics))
-
-# An empty state has no condensate to subtract, even if the scheme names condensate species.
-@inline specific_prognostic_moisture(microphysics, qᵗ, ::NothingMicrophysicalState) = qᵗ
-
-@inline subtract_condensate(qᵗ, ℳ, ::Tuple{}) = qᵗ
-@inline subtract_condensate(qᵗ, ℳ, names::Tuple{Symbol, Vararg}) =
-    qᵗ - sum_properties(ℳ, names)
-
-"""
-$(TYPEDSIGNATURES)
-
-Convert total specific moisture ``qᵗ`` to the scheme-dependent specific moisture ``qᵛᵉ``
 given the density-weighted microphysical variables `μ` and the total air density `ρ`,
 
 ```math
@@ -697,6 +654,10 @@ where the sum runs over the independent condensate mass densities named by
 [`condensate_field_names`](@ref). Diagnostic cloud fractions, number concentrations, and
 dependent moments (such as the P3 rime mass ``ρqᶠ``, already contained in ``ρqⁱ``) are
 therefore excluded. Both the values of `μ` and `ρ` may be scalars or fields.
+For `Nothing` microphysics there is no condensate, so ``qᵛᵉ = qᵗ``.
+
+This is used both by `set!`, to convert a total moisture input, and by parcel models, which
+carry total moisture ``qᵗ`` as their prognostic variable.
 
 Since `condensate_field_names` is the complement of the prognostic moisture — the same
 partition [`total_condensate_density`](@ref) uses — this recovers vapor for non-equilibrium
@@ -715,7 +676,7 @@ specific_prognostic_moisture(microphysics, 0.02, μ, 1.2)
 0.017
 ```
 """
-@inline specific_prognostic_moisture(microphysics, qᵗ, μ::NamedTuple, ρ) =
+@inline specific_prognostic_moisture(microphysics, qᵗ, μ, ρ) =
     subtract_condensate(qᵗ, μ, ρ, condensate_field_names(microphysics))
 
 @inline subtract_condensate(qᵗ, μ, ρ, ::Tuple{}) = qᵗ

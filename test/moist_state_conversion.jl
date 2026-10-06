@@ -185,9 +185,12 @@ end
     @test specific_prognostic_moisture(mixed, qᵗ, μ, ρ) ≈ qᵛ + qᶜˡ + qᶜⁱ
 
     # Conversion alone must not create water when precipitation exceeds the total.
-    state = BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState(FT(0.001), FT(0.012))
-    qᵉ = specific_prognostic_moisture(warm, FT(0.01), state)
-    @test qᵉ + state.qʳ ≈ FT(0.01)
+    rain = (; ρqʳ = ρ * FT(0.012))
+    qᵉ = specific_prognostic_moisture(warm, FT(0.01), rain, ρ)
+    @test qᵉ + rain.ρqʳ / ρ ≈ FT(0.01)
+
+    # Without microphysics there is no condensate, so all moisture is vapor.
+    @test specific_prognostic_moisture(nothing, FT(0.01), nothing, ρ) == FT(0.01)
 
     p3 = PredictedParticlePropertiesMicrophysics(FT)
     p3_densities = merge(μ, (ρqⁱ = ρ * qᶜⁱ, ρqʷⁱ = ρ * qˢⁿ, ρqᶠ = ρ * qᶜⁱ / 2))
