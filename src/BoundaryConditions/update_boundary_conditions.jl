@@ -106,7 +106,6 @@ end
 
 function initialize_boundary_condition!(
         bc::BoundaryCondition{<:Flux, <:BulkSensibleHeatFluxFunction}, side, field, model)
-    validate_wall_density(bc.condition.moisture, model)
     fv = bc.condition.filtered_velocities
     initialize_filtered_surface_state!(fv, model)
     initialize_filtered_Δθᵥ!(fv, bc.condition.coefficient, bc.condition.surface_temperature, model)

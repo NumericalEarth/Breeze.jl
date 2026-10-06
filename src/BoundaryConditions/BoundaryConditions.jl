@@ -25,7 +25,7 @@ export BulkDragFunction,
        default_neutral_sensible_heat_polynomial,
        default_neutral_latent_heat_polynomial
 
-using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density, total_density,
+using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density,
                           dynamics_thermodynamic_fields,
                           standard_pressure, default_drag_surface_temperature,
                           moisture_specific_name, thermodynamic_density_name,
@@ -426,9 +426,8 @@ function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBound
                               filter_timescale=bf.filtered_velocities.filter_timescale)
     end
 
-    moisture = (; microphysics, density=total_density(dynamics))
     new_bf = BulkSensibleHeatFluxFunction(side, coef, bf.gustiness, Tˢ, pˢᵗ, constants,
-                                          bf.formulation, bf.filtered_velocities, fs, moisture)
+                                          bf.formulation, bf.filtered_velocities, fs, microphysics)
     return BoundaryCondition(Flux(), new_bf)
 end
 
@@ -494,9 +493,9 @@ materialize_surface_field(f::Function, grid, side) = f
 BulkDragFunction(d, side, coef::NothingPolynomialCoefficient, g, t, fv, c) =
     BulkDragFunction(d, side, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t, fv, c)
 
-BulkSensibleHeatFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, s, c, f, fv, fs, moisture) =
+BulkSensibleHeatFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, s, c, f, fv, fs, microphysics) =
     BulkSensibleHeatFluxFunction(side, fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)),
-                                 g, t, s, c, f, fv, fs, moisture)
+                                 g, t, s, c, f, fv, fs, microphysics)
 
 BulkVaporFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, h, c, s, β, fv, fs) =
     BulkVaporFluxFunction(side, fill_polynomial(coef, default_neutral_latent_heat_polynomial, Val(:scalar)), g, t, h, c, s, β, fv, fs)

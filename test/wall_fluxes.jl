@@ -523,7 +523,7 @@ end
     end
 end
 
-@testset "Wall density is the model's density [$FT]" for FT in test_float_types()
+@testset "Wall composition uses the model's total density [$FT]" for FT in test_float_types()
     grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
     heat = BulkSensibleHeatFlux(coefficient=FT(0.002), surface_temperature=FT(290))
     microphysics = CloudMicrophysicsExtension.OneMomentCloudMicrophysics(FT)
@@ -535,25 +535,19 @@ end
     @test specific_name(microphysics) === Breeze.AtmosphereModels.specific_field_name(prognostic_name)
     @test (@allocated specific_name(microphysics)) == 0
 
-    for dynamics in (nothing, CompressibleDynamics())
+    # Subsaturated air carrying rain: the wall composition recovers the rain mass fraction only
+    # if the density-weighted rain is divided by the model's total density.
+    qᵗ = FT(0.005)
+    qʳ = FT(1e-3)
+    for (dynamics, density_input) in ((nothing, (;)), (CompressibleDynamics(), (; ρ=one(FT))))
         model = AtmosphereModel(grid; dynamics, microphysics,
                                 boundary_conditions=(ρE=FieldBoundaryConditions(bottom=heat),))
+        set!(model; density_input..., θ=FT(300), qᵗ, qʳ)
         bf = prognostic_fields(model).ρθ.boundary_conditions.bottom.condition
-        density = Breeze.AtmosphereModels.total_density(model.dynamics)
-
-        # Anelastic dynamics keep the reference density the boundary condition captured before the
-        # dynamics were materialized; the compressible stub has none, so the wall density is rebuilt
-        # from the prognostic fields.
-        if isnothing(dynamics)
-            @test bf.moisture.density === density
-        else
-            @test isnothing(bf.moisture.density)
-        end
-        Oceananigans.initialize!(model)
-
-        # A captured density that is not the model's is caught at initialization, not read silently.
-        stale = merge(bf.moisture, (; density=CenterField(grid)))
-        @test_throws ArgumentError Breeze.BoundaryConditions.validate_wall_density(stale, model)
+        q = @allowscalar Breeze.BoundaryConditions.wall_moisture_fractions(1, 1, 1, grid, bf.microphysics,
+                                                                           surface_layer_state(model))
+        @test q.liquid ≈ qʳ rtol=10eps(FT)
+        @test q.vapor + q.liquid + q.ice ≈ qᵗ rtol=10eps(FT)
     end
 end
 

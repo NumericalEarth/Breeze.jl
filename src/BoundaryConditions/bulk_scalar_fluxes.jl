@@ -15,7 +15,7 @@ struct BulkSensibleHeatFluxFunction{S, C, G, T, SP, TC, F, FV, FS, M}
     formulation :: F
     filtered_velocities :: FV  # Nothing or FilteredSurfaceVelocities
     filtered_scalar :: FS      # Nothing or FilteredSurfaceScalar
-    moisture :: M
+    microphysics :: M
 end
 
 """
@@ -80,7 +80,7 @@ Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
                                  bf.formulation,
                                  Adapt.adapt(to, bf.filtered_velocities),
                                  Adapt.adapt(to, bf.filtered_scalar),
-                                 Adapt.adapt(to, bf.moisture))
+                                 Adapt.adapt(to, bf.microphysics))
 
 Base.summary(bf::BulkSensibleHeatFluxFunction) =
     string("BulkSensibleHeatFluxFunction(coefficient=", bf.coefficient,
@@ -94,39 +94,17 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 @inline function wall_potential_temperature(i, j, k, grid, bf, Tˢ, fields, pˢ)
     pˢᵗ = bf.standard_pressure
     constants = bf.thermodynamic_constants
-    q = wall_moisture_fractions(i, j, k, grid, bf.moisture, fields)
+    q = wall_moisture_fractions(i, j, k, grid, bf.microphysics, fields)
     return potential_temperature_from_temperature(Tˢ, pˢ, pˢᵗ, constants, q)
 end
 
-# Total air density at the sampling point, which converts the density-weighted microphysical
-# prognostics (ρqʳ, ρqˢⁿ, …) into mass fractions. Bulk boundary conditions are materialized before
-# the dynamics (NumericalEarth/Breeze.jl#777), so `density` is whatever `total_density` returned on
-# the dynamics stub: the reference density for `AnelasticDynamics`, which materialization keeps,
-# and `nothing` for `CompressibleDynamics`, which allocates its density later. `nothing` is
-# resolved from the prognostic fields at run time; a captured `Field` must be the model's own
-# density, which `validate_wall_density` checks when the boundary condition is initialized.
-@inline wall_density(i, j, k, density, microphysics, fields) = @inbounds density[i, j, k]
-
-@inline function wall_density(i, j, k, ::Nothing, microphysics, fields)
-    moisture_density = fields[moisture_prognostic_name(microphysics)]
-    return total_density(i, j, k, fields.ρᵈ, microphysics, moisture_density, fields)
-end
-
-validate_wall_density(moisture, model) = validate_captured_density(moisture.density, model)
-validate_captured_density(::Nothing, model) = nothing
-
-function validate_captured_density(density, model)
-    density === total_density(model.dynamics) && return nothing
-    throw(ArgumentError("The density captured by a BulkSensibleHeatFlux boundary condition is not \
-                         the model's total density. Boundary conditions are materialized before \
-                         the dynamics, so `total_density` of the dynamics stub must be either \
-                         `nothing` or the same field the materialized dynamics carries."))
-end
-
-@inline function wall_moisture_fractions(i, j, k, grid, moisture, fields)
-    microphysics = moisture.microphysics
-    ρ = wall_density(i, j, k, moisture.density, microphysics, fields)
-    @inbounds qᵛᵉ = fields[moisture_specific_name(microphysics)][i, j, k]
+# The total air density `fields.ρ` (from `dynamics_thermodynamic_fields`) converts the
+# density-weighted microphysical prognostics (ρqʳ, ρqˢⁿ, …) into mass fractions.
+@inline function wall_moisture_fractions(i, j, k, grid, microphysics, fields)
+    @inbounds begin
+        ρ = fields.ρ[i, j, k]
+        qᵛᵉ = fields[moisture_specific_name(microphysics)][i, j, k]
+    end
     return grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, fields)
 end
 
@@ -143,7 +121,7 @@ end
 
 @inline function wall_static_energy(i, j, k, grid, side, bf, Tˢ, fields, pˢ)
     constants = bf.thermodynamic_constants
-    q = wall_moisture_fractions(i, j, k, grid, bf.moisture, fields)
+    q = wall_moisture_fractions(i, j, k, grid, bf.microphysics, fields)
     k₀ = ifelse(side isa Bottom, 1, k)
     zˢ = wall_height(i, j, k₀, grid, side)
     𝒰ˢ = StaticEnergyState(zero(q.vapor), q, zˢ, pˢ)
