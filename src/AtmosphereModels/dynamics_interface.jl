@@ -425,7 +425,7 @@ For compressible dynamics, returns `-∂p/∂z`.
 @inline z_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 #####
-##### Slow tendency mode for split-explicit time-stepping
+##### Slow dynamics for split-explicit time-stepping
 #####
 
 """
@@ -433,28 +433,28 @@ $(TYPEDEF)
 
 Wrapper type indicating that only "slow" tendencies should be computed.
 
-When computing momentum tendencies with a `SlowTendencyMode`-wrapped dynamics,
+When computing momentum tendencies with a `SlowDynamics`-wrapped dynamics,
 the "fast" terms (pressure gradient and buoyancy) return zero. This is used
 for split-explicit time-stepping where fast terms are handled separately
 in an acoustic substep loop.
 
 See also [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization).
 """
-struct SlowTendencyMode{D}
+struct SlowDynamics{D}
     dynamics :: D
 end
 
-Adapt.adapt_structure(to, s::SlowTendencyMode) = SlowTendencyMode(adapt(to, s.dynamics))
+Adapt.adapt_structure(to, s::SlowDynamics) = SlowDynamics(adapt(to, s.dynamics))
 
 # Forward dynamics_density to the wrapped dynamics
-@inline dynamics_density(s::SlowTendencyMode) = dynamics_density(s.dynamics)
+@inline dynamics_density(s::SlowDynamics) = dynamics_density(s.dynamics)
 
-# Fast terms return zero in slow tendency mode
-@inline x_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
-@inline y_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
-@inline z_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+# Fast terms return zero for slow dynamics
+@inline x_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
+@inline y_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
+@inline z_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
 
-@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowTendencyMode, args...) = zero(grid)
+@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowDynamics, args...) = zero(grid)
 
 """
 $(TYPEDEF)
@@ -537,11 +537,11 @@ advecting_momentum(model) = model.momentum
 """
 $(TYPEDSIGNATURES)
 
-Return the dynamics the momentum tendencies are built with: `model.dynamics`, or, for a time
-stepper that integrates the pressure-gradient force and buoyancy itself, `model.dynamics`
-wrapped in `SlowTendencyMode`.
+Return the part of `dynamics` that `timestepper` integrates through its tendencies: all of it,
+unless the time stepper integrates the pressure-gradient force and buoyancy separately, in which
+case it returns `SlowDynamics(dynamics)`.
 """
-momentum_tendency_dynamics(model) = model.dynamics
+slow_dynamics(timestepper, dynamics) = dynamics
 
 """
 $(TYPEDSIGNATURES)

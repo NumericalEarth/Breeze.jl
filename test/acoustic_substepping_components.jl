@@ -28,7 +28,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
                                     implicit_damping_factors
-using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
+using Breeze.AtmosphereModels: SlowDynamics, HorizontalSlowMode,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density
 using Breeze.Thermodynamics: ExnerReferenceState, surface_density
@@ -610,10 +610,10 @@ for arch in arches
     end
 
     #####
-    ##### SlowTendencyMode and HorizontalSlowMode
+    ##### SlowDynamics and HorizontalSlowMode
     #####
 
-    @testset "SlowTendencyMode and HorizontalSlowMode [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+    @testset "SlowDynamics and HorizontalSlowMode [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
@@ -625,8 +625,8 @@ for arch in arches
         ref = model.dynamics.reference_state
         set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
 
-        @testset "SlowTendencyMode" begin
-            slow = SlowTendencyMode(model.dynamics)
+        @testset "SlowDynamics" begin
+            slow = SlowDynamics(model.dynamics)
             @test x_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test y_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test z_pressure_gradient(1, 1, 1, grid, slow) == 0

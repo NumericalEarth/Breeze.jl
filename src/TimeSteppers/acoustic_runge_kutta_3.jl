@@ -11,7 +11,7 @@ using Oceananigans.TimeSteppers:
 
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowTendencyMode, microphysics_model_update!,
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, microphysics_model_update!,
                                 compute_closure_tendencies!
 
 using Breeze.CompressibleEquations:
@@ -359,7 +359,7 @@ end
 # `update_state!` builds the slow tendencies the stages apply: momentum without the pressure-gradient
 # force and buoyancy, which the substep loop integrates, and the thermodynamic variable advected by
 # the RK predictor velocity rather than the time-averaged transport velocity.
-AtmosphereModels.momentum_tendency_dynamics(model::CompressibleAcousticModel) = SlowTendencyMode(model.dynamics)
+AtmosphereModels.slow_dynamics(::AcousticRungeKutta3, dynamics) = SlowDynamics(dynamics)
 AtmosphereModels.thermodynamic_transport_velocities(model::CompressibleAcousticModel) = slow_thermodynamic_velocities(model)
 
 Oceananigans.prognostic_state(timestepper::AcousticRungeKutta3) =

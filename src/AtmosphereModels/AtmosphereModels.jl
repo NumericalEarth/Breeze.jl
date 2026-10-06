@@ -15,7 +15,7 @@ export
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
-    SlowTendencyMode,
+    SlowDynamics,
     HorizontalSlowMode,
     compute_pressure_correction!,
     make_pressure_correction!,

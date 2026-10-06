@@ -198,7 +198,7 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
         model.clock,
         model_fields)
 
-    dynamics = momentum_tendency_dynamics(model)
+    dynamics = slow_dynamics(model.timestepper, model.dynamics)
     u_args = tuple(momentum_args..., model.forcing.ρu, dynamics)
     v_args = tuple(momentum_args..., model.forcing.ρv, dynamics)
 
