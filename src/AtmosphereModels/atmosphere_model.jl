@@ -7,6 +7,7 @@ using Oceananigans.AbstractOperations: @at
 using Oceananigans.Architectures: Architectures, on_architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, needs_implicit_solver
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
+using Oceananigans.Fields: TracerFields
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
 using Oceananigans.TimeSteppers: TimeSteppers, TimeStepper, AbstractLagrangianParticles, step_lagrangian_particles!
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields,
@@ -266,6 +267,8 @@ function AtmosphereModel(grid;
     end
 
     prognostic_microphysical_fields = NamedTuple(name => microphysical_fields[name] for name in prognostic_field_names(microphysics))
+    prognostic_microphysical_fields = TracerFields(prognostic_microphysical_fields, grid, regularized_boundary_conditions)
+    microphysical_fields = merge(microphysical_fields, prognostic_microphysical_fields)
     prognostic_model_fields = collect_prognostic_fields(formulation,
                                                         dynamics,
                                                         momentum,
