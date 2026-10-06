@@ -594,7 +594,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     aps::AirProperties{FT},
     ρ::FT,
     ℳ::WarmPhaseTwoMomentState{FT},
-    𝒰::AbstractReferencePressureState,
+    𝒰,
     constants,
 ) where {FT}
 
