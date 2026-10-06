@@ -488,7 +488,10 @@ end
     @testset "$formulation" for formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
         fv = FilteredSurfaceVelocities(grid)
         C = FT(0.002)
-        T_wall(t) = FT(290) + FT(10) * sinpi(t / FT(20))
+        # Capture values, not the type `FT`: a captured `Type` is not isbits on Julia 1.11,
+        # so the closure could not be passed to GPU kernels.
+        T₀, ΔT, period = FT(290), FT(10), FT(20)
+        T_wall(t) = T₀ + ΔT * sinpi(t / period)
         heat = BulkSensibleHeatFlux(coefficient=C, surface_temperature=T_wall, filtered_velocities=fv)
         model = AtmosphereModel(grid; formulation, microphysics=nothing,
                                 boundary_conditions=(ρE=FieldBoundaryConditions(bottom=heat),))
@@ -556,7 +559,8 @@ end
     τ = FT(10)
     fv = FilteredSurfaceVelocities(grid; filter_timescale=τ)
     C = FT(0.002)
-    T_wall(t) = FT(290) + FT(10) * sinpi(t / FT(20))
+    T₀, ΔT, period = FT(290), FT(10), FT(20)
+    T_wall(t) = T₀ + ΔT * sinpi(t / period)
     vapor = BulkVaporFlux(coefficient=C, gustiness=one(FT), surface_temperature=T_wall, filtered_velocities=fv)
     model = AtmosphereModel(grid; microphysics=nothing,
                             boundary_conditions=(ρqᵗ=FieldBoundaryConditions(bottom=vapor),))
