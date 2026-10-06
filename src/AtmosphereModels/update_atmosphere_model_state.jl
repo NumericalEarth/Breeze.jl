@@ -281,7 +281,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.microphysical_fields)
+    fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
     fill_halo_regions!(model.formulation)
 
     return nothing
@@ -496,3 +496,15 @@ compute_closure_tendencies!(model) =
     compute_closure_tendencies!(model.timestepper.Gⁿ, model.closure_fields, model.closure, model)
 
 compute_closure_tendencies!(Gⁿ, closure_fields, closure, model) = nothing
+
+compute_closure_tendencies!(Gⁿ, ::Tuple{}, ::Tuple{}, model) = nothing
+
+function compute_closure_tendencies!(Gⁿ, closure_fields::Tuple{F, Vararg},
+                                     closures::Tuple{C, Vararg}, model) where {F, C}
+    compute_closure_tendencies!(Gⁿ, first(closure_fields), first(closures), model)
+    compute_closure_tendencies!(Gⁿ, Base.tail(closure_fields), Base.tail(closures), model)
+    return nothing
+end
+
+compute_closure_tendencies!(Gⁿ, closure_fields::Tuple, closures::Tuple, model) =
+    throw(ArgumentError("The numbers of closures and closure fields must match."))
