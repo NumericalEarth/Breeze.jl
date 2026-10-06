@@ -31,13 +31,12 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyMod
         model.forcing.ρE,
         model.advection.ρs,
         radiation_flux_divergence(model.radiation),
-        values(model.sedimentation),
-        tracer_transport_velocity,
         common_args...,
         model.temperature)
 
     Gρs = model.timestepper.Gⁿ.ρs
     launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρs, grid, ρs_args)
+    add_sedimentation_tendency!(Gρs, model, tracer_transport_velocity)
     return nothing
 end
 
@@ -47,8 +46,6 @@ end
                                         ρE_forcing,
                                         advection,
                                         radiation_flux_divergence_field,
-                                        sedimenting_condensates,
-                                        tracer_transport_velocity,
                                         dynamics,
                                         formulation,
                                         constants,
@@ -74,9 +71,6 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
-             + sedimentation_tendency(i, j, k, grid, sedimenting_condensates, tracer_transport_velocity,
-                                      formulation, dynamics, constants, microphysics, microphysical_fields,
-                                      specific_prognostic_moisture, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              # An energy forcing (note: ρs and ρE are mutually exclusive) is an energy per unit mass
              # and needs no conversion

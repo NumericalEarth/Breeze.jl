@@ -58,13 +58,12 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemper
         model.forcing.ρE,
         model.advection.ρθ,
         radiation_flux_divergence(model.radiation),
-        values(model.sedimentation),
-        tracer_transport_velocity,
         common_args...,
         model.temperature)
 
     Gρθ = model.timestepper.Gⁿ.ρθ
     launch!(arch, grid, :xyz, compute_potential_temperature_tendency!, Gρθ, grid, ρθ_args)
+    add_sedimentation_tendency!(Gρθ, model, tracer_transport_velocity)
     return nothing
 end
 
@@ -74,8 +73,6 @@ end
                                                 ρE_forcing,
                                                 advection,
                                                 radiation_flux_divergence_field,
-                                                sedimenting_condensates,
-                                                tracer_transport_velocity,
                                                 dynamics,
                                                 formulation::LiquidIcePotentialTemperatureFormulation,
                                                 constants,
@@ -102,9 +99,6 @@ end
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
-             + sedimentation_tendency(i, j, k, grid, sedimenting_condensates, tracer_transport_velocity,
-                                      formulation, dynamics, constants, microphysics, microphysical_fields,
-                                      specific_prognostic_moisture, temperature_field)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
              + (FρE + div_ℐ) / (cᵖᵐ * Π)

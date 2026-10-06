@@ -334,6 +334,35 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Add the explicit condensate [`sedimentation_tendency`](@ref) of the thermodynamic variable to its
+tendency `G`, with `tracer_transport_velocity` the vertical velocity the moisture and tracer
+tendencies advect with. The term runs in a kernel of its own rather than inside the thermodynamic
+tendency kernel: fused, its per-constituent flux reconstructions and condensate contents raise that
+kernel's register use and cut its occupancy for every cell, whether or not anything sediments
+there. A no-op when no condensate sediments.
+"""
+function add_sedimentation_tendency!(G, model, tracer_transport_velocity)
+    condensates = values(model.sedimentation)
+    isempty(condensates) && return nothing
+    grid = model.grid
+    launch!(grid.architecture, grid, :xyz, _add_sedimentation_tendency!,
+            G, grid, condensates, tracer_transport_velocity, model.formulation, model.dynamics,
+            model.thermodynamic_constants, model.microphysics, model.microphysical_fields,
+            specific_prognostic_moisture(model), model.temperature)
+    return nothing
+end
+
+@kernel function _add_sedimentation_tendency!(G, grid, condensates, wᵗ, formulation, dynamics, constants,
+                                              microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
+    i, j, k = @index(Global, NTuple)
+    @inbounds G[i, j, k] += sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
+                                                   microphysics, microphysical_fields, specific_prognostic_moisture,
+                                                   temperature)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
 Return the temperature argument `implicit_sedimentation_step!` passes to
 [`condensate_content`](@ref) for `formulation`: the model's `temperature_field` by default, or
 `nothing` for a formulation whose content rediagnoses the temperature from the post-solve state,
