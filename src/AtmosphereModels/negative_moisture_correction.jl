@@ -244,15 +244,6 @@ end
 
 @inline vertical_borrow!(ρqᵛᵉ, i, j, grid, ::Nothing) = nothing
 
-# The sign tests below read the partial density directly rather than dividing by ρ first. ρ is
-# positive, so ρqᵛ and qᵛ always share a sign, and the division only cost a read of ρ₀ and a
-# divide. With those gone this routine no longer needs the density at all.
-#
-# Each level that gives up its whole deficit is *assigned* zero rather than having the deficit
-# added back. `ρqᵛ + fl(fl(-ρqᵛ Δz) / Δz)` is not zero: the multiply and divide by Δz do not
-# cancel in floating point. Since this phase runs last it has the final say on the sign, so a
-# residual here is a negative vapor density surviving the routine whose postcondition is that
-# there are none.
 @inline function vertical_borrow!(ρqᵛᵉ, i, j, grid, ::VerticalBorrowing)
     Nz = size(grid, 3)
     # Sweep from top to bottom, pushing deficit to level below (more moisture there).
@@ -266,6 +257,7 @@ end
         negative = ρqᵛ_k < 0
         deficit = ifelse(negative, -ρqᵛ_k * Δz_k, zero(ρqᵛ_k))
 
+        # Assigned, not incremented, because -ρqᵛ Δz / Δz need not round back to -ρqᵛ
         @inbounds ρqᵛᵉ[i, j, k] = ifelse(negative, zero(ρqᵛ_k), ρqᵛ_k)
         @inbounds ρqᵛᵉ[i, j, k - 1] -= deficit / Δz_below   # receive deficit
     end
@@ -287,9 +279,7 @@ end
     available = ρqᵛ_top * Δz_top      # mass available above [kg/m²]
     dq_mass = ifelse(can_borrow, min(needed, available), zero(ρqᵛ_bot))
 
-    # `min` returns one of its arguments unchanged, so these two tests say exactly whether the
-    # bottom was fully funded and whether the donor was fully drained. Those are the two cases
-    # that have to land on zero.
+    # `min` returns one of its arguments, so these comparisons are exact
     funded = can_borrow & (dq_mass == needed)
     drained = can_borrow & (dq_mass == available)
 
@@ -310,12 +300,7 @@ end
 # The unrolled work is O(N²) pointwise reads/writes for N condensate fields (each field
 # scans the tail behind it), which is a few tens of flops for the N ≤ 10 schemes we run.
 #
-# Every reservoir in the chain is a partial density, and `total_condensate_density` adds them
-# with no density weighting, so the transfers are done directly in those units. Converting each
-# one to a mass fraction and back would divide and multiply by the same `ρ`, which is exact in
-# principle but not in floating point: `ρ * (ρq / ρ)` does not return `ρq`, so a fully funded
-# deficit would settle near zero instead of on it and a fully drained donor could be pushed
-# below zero — new negatives left behind by the routine whose job is to remove them.
+# Every reservoir is a partial density, and the transfers are made in those units.
 @inline function same_level_borrow!(i, j, k, fields::Tuple{F1, Vararg}, ρqᵛᵉ) where {F1}
     ρq = fields[1]
     @inbounds mass = ρq[i, j, k]
@@ -323,9 +308,7 @@ end
     deficit = max(0, -mass)
     remaining = borrow_from_lighter_species!(i, j, k, Base.tail(fields), ρqᵛᵉ, deficit)
 
-    # `zero(mass) - remaining` rather than `-remaining` so that a fully funded deficit settles on
-    # +0.0; both forms are exact for a partially funded one. A `mass` that was already -0.0 is
-    # not negative, so it passes through untouched.
+    # `zero(mass) - remaining`, not `-remaining`, so that a fully funded deficit is +0.0
     @inbounds ρq[i, j, k] = ifelse(mass < 0, zero(mass) - remaining, mass)
 
     same_level_borrow!(i, j, k, Base.tail(fields), ρqᵛᵉ)

@@ -20,19 +20,14 @@ function borrowing_oracle(values)
     return mass
 end
 
-# `same_level_borrow!` is pointwise and architecture-independent, so it is exercised here on
-# the CPU, where the reservoirs can be read back exactly. The P3 integration tests cover it
-# on whichever architecture they run.
+# Pointwise, so exercised on the CPU, where the reservoirs can be read back exactly
 @testset "Species borrowing leaves no residual negative" begin
     for FT in all_float_types()
         grid = RectilinearGrid(CPU(), FT; size=(1, 1, 1), extent=(1, 1, 1))
         fields = ntuple(_ -> CenterField(grid), 5)
         condensates, vapor = fields[1:4], fields[5]
 
-        # Ordered reservoirs: coating, ice, rain, cloud, vapor [kg/m³]. The first two are
-        # deficits small enough that a round trip through mass-fraction units would not return
-        # them to zero; the rest cover several donors, a deficit vapor cannot cover, and a
-        # negative in a reservoir with no lighter donor behind it.
+        # Reservoirs, heaviest to lightest: coating, ice, rain, cloud, vapor [kg/m³]
         cases = ((-1.7428903875682522e-9, 0, 0, 0, 0.005),
                  (-6.488883055408995e-24, 0, 0, 0, 0.005),
                  (-0.004, 0.001, 0.002, 0, 0.005),
@@ -56,8 +51,7 @@ end
 
             for n in eachindex(actual)
                 @test abs(BigFloat(actual[n]) - expected[n]) <= 16eps(FT) * scale
-                # A fully funded deficit has to land on zero, not near it. A tolerance here
-                # would admit exactly the residual negative this routine exists to remove.
+                # A fully funded deficit lands exactly on zero
                 iszero(expected[n]) && @test iszero(actual[n])
                 expected[n] >= 0 && @test actual[n] >= 0
             end
@@ -69,13 +63,8 @@ end
     end
 end
 
-# The vertical phase runs after species borrowing, so it has the final say on the sign of the
-# vapor density. It used to add the deficit back rather than storing zero, and
-# `ρqᵛ + fl(fl(-ρqᵛ Δz) / Δz)` is not zero when Δz is not a power of two, so the level it had
-# just repaired kept a residual negative.
 @testset "Vertical borrowing leaves no residual negative" begin
-    # Spacings and columns found by searching for cases the old formulation got wrong; with
-    # uniform Δz the multiply and divide cancel exactly and nothing can be detected.
+    # Non-uniform spacings, for which -ρqᵛ Δz / Δz does not round back to -ρqᵛ
     cases = ((Float64[17.925947, 21.916277, 18.430248, 32.64371, 26.351135],
               Float64[0.00079591933, 6.736659e-5, -0.00022146673, 0.0012925179, 0.0008010718]),
              (Float64[43.71562, 28.572842, 31.05178, 25.83191, 11.608398],
@@ -99,8 +88,7 @@ end
         after = collect(interior(ρqᵛ)[1, 1, :])
 
         @test all(isfinite, after)
-        # Every column here holds more vapor than deficit, so the sweep can fund all of it and
-        # nothing may be left negative. A tolerance would admit exactly the residual this is about.
+        # Every column holds more vapor than deficit, so nothing may be left negative
         @test all(>=(0), after)
         # Transfers are mass per unit area, so the column integral is what is conserved.
         @test abs(sum(BigFloat.(after) .* BigFloat.(Δz)) - mass_before) <=
