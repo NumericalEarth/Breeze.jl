@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Test
 using Breeze
 using Oceananigans
@@ -20,7 +22,7 @@ using Logging: Warn
     writer = JLD2Writer(model, outputs;
                         filename = filepath,
                         schedule = IterationInterval(1),
-                        overwrite_existing = true)
+                        overwrite_files = true)
 
     try
         @test_logs min_level=Warn Oceananigans.initialize!(writer, model)

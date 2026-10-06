@@ -29,6 +29,9 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture
 using Oceananigans.Models: boundary_condition_args
+using Oceananigans: fields
+using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
+using Oceananigans.TimeSteppers: implicit_step!
 using Oceananigans.Grids: ZDirection, rnode, znode
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
 using Oceananigans.Operators:
@@ -79,9 +82,16 @@ Fields:
   chemistry/TKE); the slow ρθ tendency uses the current RK predictor velocity instead, not this cache.
 - `slow_vertical_momentum_tendency` (Gˢρw, z-faces): advection+Coriolis+closure+forcing (PGF/buoyancy
   excluded — those are in the fast operator).
+- `vertical_solver_source_term` (z-faces): explicit RHS of the (ρw)′ tridiagonal system.
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
+- `vertical_velocity_cache`, `density_cache`: the stage-entry predictor velocity and its carrier
+  dry density, frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
+  adaptive-implicit advection.
+- `time_averaged_vertical_velocity_cache`: the acoustic-mean transport velocity the moisture and
+  tracer tendencies were built with, frozen for `scalar_substep!` (see
+  `cache_transport_velocity!`); `nothing` without adaptive-implicit advection.
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
@@ -118,7 +128,12 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
     time_averaged_velocities :: TAV
 
     slow_vertical_momentum_tendency :: GT
+    vertical_solver_source_term :: GT
     vertical_solver :: TS
+
+    vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
+    density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
+    time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w, split by moisture and tracers
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -145,7 +160,11 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.previous_density_potential_temperature_perturbation),
                        adapt(to, a.time_averaged_velocities),
                        adapt(to, a.slow_vertical_momentum_tendency),
-                       adapt(to, a.vertical_solver))
+                       adapt(to, a.vertical_solver_source_term),
+                       adapt(to, a.vertical_solver),
+                       adapt(to, a.vertical_velocity_cache),
+                       adapt(to, a.density_cache),
+                       adapt(to, a.time_averaged_vertical_velocity_cache))
 
 #####
 ##### Section 2 — Constructor
@@ -162,7 +181,8 @@ The wall target re-enters via the prognostic momentum's own BC after each subste
 The `prognostic_momentum` kwarg is retained for backwards compatibility but no longer consulted.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
-                            prognostic_momentum = nothing, substep_floattype = eltype(grid))
+                            prognostic_momentum = nothing, substep_floattype = eltype(grid),
+                            cache_advecting_state = false)
     Ns = split_explicit.substeps
     FT = eltype(grid)
     ω = convert(FT, split_explicit.forward_weight)
@@ -211,6 +231,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                                 w = ZFaceField(grid))
 
     slow_vertical_momentum_tendency = ZFaceField(grid)
+    vertical_solver_source_term = ZFaceField(grid) # RHS stays FT, like the (ρw)′ solve target
 
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -221,6 +242,10 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                                                upper_diagonal = AcousticTridiagUpper(),
                                                scratch,
                                                tridiagonal_direction = ZDirection())
+
+    vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
+    density_cache = cache_advecting_state ? CenterField(grid) : nothing
+    time_averaged_vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
 
     return AcousticSubstepper(Ns, acoustic_cfl, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
@@ -240,7 +265,11 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               previous_density_potential_temperature_perturbation,
                               time_averaged_velocities,
                               slow_vertical_momentum_tendency,
-                              vertical_solver)
+                              vertical_solver_source_term,
+                              vertical_solver,
+                              vertical_velocity_cache,
+                              density_cache,
+                              time_averaged_vertical_velocity_cache)
 end
 
 #####
@@ -261,11 +290,24 @@ After this call:
 """
 function freeze_linearization_state!(substepper::AcousticSubstepper, model)
     refresh_linearization_basic_state!(substepper, model)
+    seed_time_averaged_velocities!(substepper, model)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Seed the time-averaged transport velocity with the outer-step-start velocities: stage 1 has no
+prior acoustic loop in this outer step to average over. Called at outer-step start by
+[`freeze_linearization_state!`](@ref), and by `maybe_prepare_first_time_step!` *before* the
+first tendency computation, so the first stage splits a physical velocity instead of the
+constructor's zeros.
+"""
+function seed_time_averaged_velocities!(substepper::AcousticSubstepper, model)
     velocities = outer_step_start_transport_velocities(model)
 
-    # Seed the time-averaged velocity with the outer-step-start velocities (full
-    # parent arrays, halos included). The three staggered components have
-    # different array sizes, so each is copied over its own bounds.
+    # Full parent arrays, halos included. The three staggered components have different array
+    # sizes, so each is copied over its own bounds.
     for (avg, src) in zip(substepper.time_averaged_velocities, velocities)
         copyto!(parent(avg), parent(src))
     end
@@ -401,10 +443,10 @@ acoustic CFL:
 
 ```math
 N \\approx
-\\left\\lceil \\frac{|\\Delta t| \\, \\mathbb{C}^{ac}}{\\nu \\, \\Delta x_\\min} \\right\\rceil ,
+\\left\\lceil \\frac{|\\Delta t| \\, c^{ac}}{\\nu \\, \\Delta x_\\min} \\right\\rceil ,
 ```
 
-with ``\\mathbb{C}^{ac} = \\sqrt{γ^d R^d T_r}`` for a nominal reference
+with ``c^{ac} = \\sqrt{γ^d R^d T_r}`` for a nominal reference
 temperature ``T_r = 300\\,\\mathrm{K}`` and ``ν`` the target acoustic
 Courant number `acoustic_cfl` (default `0.5`, the conventional ERF/WRF
 target — equivalent to a safety factor of `2`).
@@ -414,7 +456,7 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_
     Rᵈ   = dry_air_gas_constant(thermodynamic_constants)
     cᵖᵈ  = thermodynamic_constants.dry_air.heat_capacity
     γᵈ   = cᵖᵈ / (cᵖᵈ - Rᵈ)
-    ℂᵃᶜ  = sqrt(γᵈ * Rᵈ * FT(300))
+    cᵃᶜ  = sqrt(γᵈ * Rᵈ * FT(300))
 
     Δx_min = let
         TX, TY, _ = topology(grid)
@@ -423,7 +465,7 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_
         min(Δx, Δy)
     end
 
-    return max(1, ceil(Int, abs(FT(Δt)) * ℂᵃᶜ / (acoustic_cfl * Δx_min)))
+    return max(1, ceil(Int, abs(FT(Δt)) * cᵃᶜ / (acoustic_cfl * Δx_min)))
 end
 
 @inline acoustic_substeps(N::Int, grid, Δt, constants, acoustic_cfl) = N
@@ -851,6 +893,33 @@ end
 @inline apply_horizontal_pressure_gradient_substep(substep, Nτ) =
     apply_horizontal_pressure_gradient_substep(substep, Nτ, false)
 
+"""
+$(TYPEDSIGNATURES)
+
+Run the `Nτ` acoustic substeps of one RK3 stage by calling [`acoustic_substep!`](@ref) for each.
+
+`apply_pressure_gradient` follows the MPAS forward-backward acoustic sequence: the first small
+step in a multi-step stage includes the frozen large-step pressure gradient but skips the
+acoustic perturbation pressure gradient until mass/thermodynamic perturbations have been
+advanced once. For degenerate one-substep stages, apply the perturbation pressure gradient
+immediately so the stage still contains the fast force.
+
+The first substep is peeled off and the remaining `Nτ - 1` run under `ReactantCore.@trace`,
+which is a plain loop on ordinary arrays and a single traced `while` loop under Reactant, so
+the compiled program holds one copy of the substep body rather than `Nτ`. Peeling keeps
+`apply_pressure_gradient` a compile-time constant: it is the only quantity that depends on the
+substep index, and it is `true` for every substep after the first.
+"""
+function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
+    apply_pressure_gradient = apply_horizontal_pressure_gradient_substep(1, Nτ,
+        substepper.apply_first_substep_pressure_gradient)
+    acoustic_substep!(model, substepper, stage, advection, apply_pressure_gradient)
+    @trace track_numbers=false for _ in 2:Nτ
+        acoustic_substep!(model, substepper, stage, advection, true)
+    end
+    return nothing
+end
+
 # Build per-column predictors `ρ′★`, `ρθ′★` (cell centers) AND
 # the explicit RHS for the tridiagonal `(ρw)′ᵐ⁺` solve at z-faces.
 #
@@ -1242,7 +1311,7 @@ end
         ρθᵐ⁺ = ρθᴸ[i, j, k] + ρθ′[i, j, k]
         ρuᵐ⁺ = ρuᴸ[i, j, k] + ρu′[i, j, k]
         ρvᵐ⁺ = ρvᴸ[i, j, k] + ρv′[i, j, k]
-        ρwᵐ⁺ = acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw′)
+        ρwᵐ⁺ = acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρwᴸ[i, j, k], ρu′, ρv′, ρw′)
 
         ρ[i, j, k]  = ρᵐ⁺
         ρθ[i, j, k] = ρθᵐ⁺
@@ -1253,8 +1322,8 @@ end
     end
 end
 
-@inline acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw′) =
-    @inbounds ρwᴸ[i, j, k] + ρw′[i, j, k]
+@inline acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρwᴸ_ccf, ρu′, ρv′, ρw′) =
+    @inbounds ρwᴸ_ccf + ρw′[i, j, k]
 
 #####
 ##### Section 12 — Substep loop driver
@@ -1358,16 +1427,162 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
-substep loop. Number and size of substeps in this stage depend on
-`substepper.substep_distribution`.
+Advance the implicit half of the IMEX split for the thermodynamic perturbation over one
+substep: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★`, solved on the θ predictor between Step B and Step C so
+the pressure solve and recovery act on a transport-consistent predictor. Coefficients read the
+frozen stage-entry state; the base-state part rides `Gˢρθ`
+(see `add_implicit_advection_tendency!`).
 """
-function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ)
+implicit_advection_substep!(model, substepper, advection, Δτ) = nothing
+
+function implicit_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ)
+    w = substepper.vertical_velocity_cache
+    ρᵈ = substepper.density_cache
+    implicit_step!(substepper.density_potential_temperature_predictor,
+                   model.timestepper.implicit_solver, nothing, nothing, nothing,
+                   model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Advance the acoustic perturbation fields of `substepper` by one substep of size `stage.Δτ`.
+`stage` holds the loop-invariant quantities of the current RK3 stage: the substep size `Δτ`,
+the Crank–Nicolson weights `δτᵐ⁺` and `δτˢ⁻`, and the slow thermodynamic tendency `Gˢρᵡ`.
+Everything is passed explicitly so that the loop calling this can be traced by Reactant with
+no captured state; see [`acoustic_substep_loop!`](@ref).
+"""
+function acoustic_substep!(model, substepper, stage, advection, apply_pressure_gradient)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
     constants = model.thermodynamic_constants
     g = convert(FT, constants.gravitational_acceleration)
+    ω = FT(substepper.forward_weight)
+    Gⁿ = model.timestepper.Gⁿ
+    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
+
+    # Step A: explicit horizontal forward of (ρu)′, (ρv)′.
+    launch!(arch, grid, :xyz, _explicit_horizontal_step!,
+            substepper.momentum_perturbation.u,
+            substepper.momentum_perturbation.v,
+            grid, model.dynamics, Δτ,
+            substepper.density_potential_temperature_perturbation,
+            substepper.linearization_exner,
+            Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
+            apply_pressure_gradient)
+
+    fill_halo_regions!(substepper.momentum_perturbation.u)
+    fill_halo_regions!(substepper.momentum_perturbation.v)
+
+    # Impenetrability on the wall-normal momentum perturbations, before the
+    # predictor takes their horizontal divergence (mass conservation).
+    enforce_wall_impenetrability!(substepper, model, grid, arch)
+
+    # (old (ρθ)′ is stashed into ρθ′ˢ⁻ inside `_build_predictors!`, then halo-filled.)
+
+    # Implicit-vertical-damping prefactors. When the damping strategy
+    # is `ThermalDivergenceDamping(damp_vertical=true)`, the
+    # vertical part of the divergence damping is folded into the
+    # tridiag with `dᵐ⁺ = ω·α·Δz²` on the LHS and
+    # `dˢ⁻ = (1−ω)·α·Δz²` on the predictor RHS. Both reduce to
+    # zero for `NoDivergenceDamping` or when the user opts out via
+    # `damp_vertical=false`.
+    dᵐ⁺, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, grid, FT)
+
+    # Step B: build predictors ρ′★, ρθ′★ (3D), then the (ρw)′ᵐ⁺ tridiag RHS (3D).
+    # `_build_predictors!` also stashes old (ρθ)′ into ρθ′ˢ⁻; halo-fill it for the damping.
+    launch!(arch, grid, :xyz, _build_predictors!,
+            substepper.density_predictor,
+            substepper.density_potential_temperature_predictor,
+            substepper.previous_density_potential_temperature_perturbation,
+            substepper.density_perturbation,
+            substepper.density_potential_temperature_perturbation,
+            substepper.momentum_perturbation.w,
+            substepper.momentum_perturbation.u, substepper.momentum_perturbation.v,
+            grid, model.dynamics, Δτ, δτˢ⁻,
+            Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
+            substepper.linearization_potential_temperature)
+    fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
+
+    # Implicit half of the IMEX vertical-advection split for the thermodynamic
+    # perturbation, applied to the predictor between Step B and Step C so the pressure
+    # solve and recovery substitution see a transport-consistent ρθ′★ (issue #897).
+    implicit_advection_substep!(model, substepper, advection, Δτ)
+
+    launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
+            _build_vertical_rhs!,
+            substepper.vertical_solver_source_term,
+            substepper.density_predictor,
+            substepper.density_potential_temperature_predictor,
+            substepper.density_perturbation,
+            substepper.density_potential_temperature_perturbation,
+            substepper.momentum_perturbation.w,
+            grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
+            substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
+            g, dˢ⁻, substepper.vertical_momentum_tendency_factor,
+            substepper.slow_vertical_momentum_tendency,
+            substepper.sponge, apply_pressure_gradient)
+
+    # Step C: implicit tridiag solve for (ρw)′ with implicit-half δτᵐ⁺
+    # and (when active) implicit vertical damping prefactor `dᵐ⁺`.
+    # `sponge` may add an implicit Rayleigh contribution on the
+    # diagonal in a layer below the lid.
+    solve!(substepper.momentum_perturbation.w, substepper.vertical_solver,
+           substepper.vertical_solver_source_term,
+           substepper.linearization_exner, substepper.linearization_potential_temperature,
+           substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺,
+           substepper.sponge)
+
+    # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′
+    launch!(arch, grid, :xyz, _post_solve_recovery!,
+            substepper.density_perturbation,
+            substepper.density_potential_temperature_perturbation,
+            substepper.momentum_perturbation.w,
+            substepper.momentum_perturbation.u,
+            substepper.momentum_perturbation.v,
+            substepper.density_predictor,
+            substepper.density_potential_temperature_predictor,
+            substepper.time_averaged_velocities,
+            grid, model.dynamics, δτᵐ⁺,
+            substepper.linearization_potential_temperature)
+
+    # Per-substep open-boundary enforcement (issue #738): relax the outermost
+    # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
+    # the halo fill, so the boundary cell tracks the prescribed inflow state.
+    apply_open_boundary_relaxation!(substepper, model, grid, arch)
+
+    fill_halo_regions!(substepper.density_perturbation)
+    fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+
+    # Step E: optional Klemp 2018 post-substep damping (no-op for
+    # `NoDivergenceDamping`).
+    apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
+
+    fill_halo_regions!(substepper.momentum_perturbation.u)
+    fill_halo_regions!(substepper.momentum_perturbation.v)
+
+    # The damping kernel also writes the south/west wall face; re-enforce
+    # impenetrability so the next substep's divergence and the accumulated
+    # transport velocity see a closed wall (mass conservation).
+    enforce_wall_impenetrability!(substepper, model, grid, arch)
+    # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
+substep loop. Number and size of substeps in this stage depend on
+`substepper.substep_distribution`.
+"""
+function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection = nothing)
+    grid = model.grid
+    arch = architecture(grid)
+    FT = eltype(grid)
+    constants = model.thermodynamic_constants
 
     # Substep count Nτ and size Δτ for this stage (WS-RK3 weights β = (1/3, 1/2, 1)).
     # The distribution decides how to split: ProportionalSubsteps fits ⌈β·N⌉ substeps to
@@ -1399,118 +1614,8 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
-    # Substep loop
-    for substep in 1:Nτ
-        # Step A: explicit horizontal forward of (ρu)′, (ρv)′. Following the
-        # MPAS forward-backward acoustic sequence, the first small step in a
-        # multi-step stage includes the frozen large-step pressure gradient
-        # but skips the acoustic perturbation pressure gradient until
-        # mass/thermodynamic perturbations have been advanced once. For
-        # degenerate one-substep stages, apply the perturbation pressure
-        # gradient immediately so the stage still contains the fast force.
-        apply_pressure_gradient = apply_horizontal_pressure_gradient_substep(substep, Nτ,
-            substepper.apply_first_substep_pressure_gradient)
-
-        launch!(arch, grid, :xyz, _explicit_horizontal_step!,
-                substepper.momentum_perturbation.u,
-                substepper.momentum_perturbation.v,
-                grid, model.dynamics, Δτ,
-                substepper.density_potential_temperature_perturbation,
-                substepper.linearization_exner,
-                Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
-                apply_pressure_gradient)
-
-        fill_halo_regions!(substepper.momentum_perturbation.u)
-        fill_halo_regions!(substepper.momentum_perturbation.v)
-
-        # Impenetrability on the wall-normal momentum perturbations, before the
-        # predictor takes their horizontal divergence (mass conservation).
-        enforce_wall_impenetrability!(substepper, model, grid, arch)
-
-        # (old (ρθ)′ is stashed into ρθ′ˢ⁻ inside `_build_predictors!`, then halo-filled.)
-
-        # Implicit-vertical-damping prefactors. When the damping strategy
-        # is `ThermalDivergenceDamping(damp_vertical=true)`, the
-        # vertical part of the divergence damping is folded into the
-        # tridiag with `dᵐ⁺ = ω·α·Δz²` on the LHS and
-        # `dˢ⁻ = (1−ω)·α·Δz²` on the predictor RHS. Both reduce to
-        # zero for `NoDivergenceDamping` or when the user opts out via
-        # `damp_vertical=false`.
-        dᵐ⁺, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, grid, FT)
-
-        # Step B: build predictors ρ′★, ρθ′★ (3D), then the (ρw)′ᵐ⁺ tridiag RHS (3D).
-        # `_build_predictors!` also stashes old (ρθ)′ into ρθ′ˢ⁻; halo-fill it for the damping.
-        launch!(arch, grid, :xyz, _build_predictors!,
-                substepper.density_predictor,
-                substepper.density_potential_temperature_predictor,
-                substepper.previous_density_potential_temperature_perturbation,
-                substepper.density_perturbation,
-                substepper.density_potential_temperature_perturbation,
-                substepper.momentum_perturbation.w,
-                substepper.momentum_perturbation.u, substepper.momentum_perturbation.v,
-                grid, model.dynamics, Δτ, δτˢ⁻,
-                Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
-                substepper.linearization_potential_temperature)
-        fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
-
-        launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
-                _build_vertical_rhs!,
-                substepper.momentum_perturbation.w,
-                substepper.density_predictor,
-                substepper.density_potential_temperature_predictor,
-                substepper.density_perturbation,
-                substepper.density_potential_temperature_perturbation,
-                substepper.momentum_perturbation.w,
-                grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
-                substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
-                g, dˢ⁻, substepper.vertical_momentum_tendency_factor,
-                substepper.slow_vertical_momentum_tendency,
-                substepper.sponge, apply_pressure_gradient)
-
-        # Step C: implicit tridiag solve for (ρw)′ with implicit-half δτᵐ⁺
-        # and (when active) implicit vertical damping prefactor `dᵐ⁺`.
-        # `sponge` may add an implicit Rayleigh contribution on the
-        # diagonal in a layer below the lid.
-        solve!(substepper.momentum_perturbation.w, substepper.vertical_solver,
-               substepper.momentum_perturbation.w,
-               substepper.linearization_exner, substepper.linearization_potential_temperature,
-               substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺,
-               substepper.sponge)
-
-        # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′
-        launch!(arch, grid, :xyz, _post_solve_recovery!,
-                substepper.density_perturbation,
-                substepper.density_potential_temperature_perturbation,
-                substepper.momentum_perturbation.w,
-                substepper.momentum_perturbation.u,
-                substepper.momentum_perturbation.v,
-                substepper.density_predictor,
-                substepper.density_potential_temperature_predictor,
-                substepper.time_averaged_velocities,
-                grid, model.dynamics, δτᵐ⁺,
-                substepper.linearization_potential_temperature)
-
-        # Per-substep open-boundary enforcement (issue #738): relax the outermost
-        # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
-        # the halo fill, so the boundary cell tracks the prescribed inflow state.
-        apply_open_boundary_relaxation!(substepper, model, grid, arch)
-
-        fill_halo_regions!(substepper.density_perturbation)
-        fill_halo_regions!(substepper.density_potential_temperature_perturbation)
-
-        # Step E: optional Klemp 2018 post-substep damping (no-op for
-        # `NoDivergenceDamping`).
-        apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
-
-        fill_halo_regions!(substepper.momentum_perturbation.u)
-        fill_halo_regions!(substepper.momentum_perturbation.v)
-
-        # The damping kernel also writes the south/west wall face; re-enforce
-        # impenetrability so the next substep's divergence and the accumulated
-        # transport velocity see a closed wall (mass conservation).
-        enforce_wall_impenetrability!(substepper, model, grid, arch)
-        # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
-    end
+    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
+    acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a
     # time-averaged velocity field. Read by `update_state!` through
@@ -1524,7 +1629,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # `ρᵡ`, and `model.momentum.*` are still the stage-entry Uᴸ values here
     # (the substep loop only touched substepper.* perturbation fields). The
     # recovery kernel reads them as Uᴸ AND writes the full state back to the
-    # same fields — per-thread read-before-write makes this aliasing safe
+    # same fields; per-thread read-before-write makes this aliasing safe
     # because all reads are local to the same grid point.
     ρᵡ = thermodynamic_density(model.formulation)
     launch!(arch, grid, :xyz, _recover_full_state!,
@@ -1549,3 +1654,16 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
     return nothing
 end
+
+Oceananigans.prognostic_state(substepper::AcousticSubstepper) =
+    (time_averaged_velocities = Oceananigans.prognostic_state(substepper.time_averaged_velocities),
+     time_averaged_vertical_velocity_cache = Oceananigans.prognostic_state(substepper.time_averaged_vertical_velocity_cache))
+
+function Oceananigans.restore_prognostic_state!(restored::AcousticSubstepper, from)
+    Oceananigans.restore_prognostic_state!(restored.time_averaged_velocities, from.time_averaged_velocities)
+    Oceananigans.restore_prognostic_state!(restored.time_averaged_vertical_velocity_cache,
+                                           from.time_averaged_vertical_velocity_cache)
+    return restored
+end
+
+Oceananigans.restore_prognostic_state!(substepper::AcousticSubstepper, ::Nothing) = substepper

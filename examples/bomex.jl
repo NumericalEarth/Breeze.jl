@@ -58,7 +58,7 @@ grid = RectilinearGrid(GPU(); x, y, z,
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants,
-                                 surface_pressure = 101500,
+                                 base_pressure = 101500,
                                  potential_temperature = 299.1)
 
 dynamics = AnelasticDynamics(reference_state)
@@ -78,13 +78,13 @@ w′θ′ = 8e-3     # K m/s (sensible heat flux)
 w′qᵗ′ = 5.2e-5  # m/s (moisture flux)
 
 FT = eltype(grid)
-p₀ = reference_state.surface_pressure
+p₀ = reference_state.base_pressure
 θ₀ = reference_state.potential_temperature
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′θ′))
-ρqᵉ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′qᵗ′))
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′qᵗ′))
 
 # ## Surface momentum flux (drag)
 #
@@ -162,38 +162,39 @@ qᵉ_drying_forcing = Forcing(drying)
 # A prescribed radiative cooling profile is applied to the thermodynamic equation
 # ([Siebesma2003](@citet); Appendix B, Eq. B3). Below the inversion, radiative cooling
 # of about 2 K/day counteracts the surface heating. We supply the cooling as a specific
-# energy tendency `e` (J/kg/s) so it is consistently applied to the potential temperature
+# energy tendency `E` (J/kg/s) so it is consistently applied to the potential temperature
 # equation (see below).
 
 radiative_cooling = Field{Nothing, Nothing, Center}(grid)
 cᵖᵈ = constants.dry_air.heat_capacity
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
 set!(radiative_cooling, z -> cᵖᵈ * dTdt_bomex(1, z))
-e_radiation_forcing = Forcing(radiative_cooling)
+E_radiation_forcing = Forcing(radiative_cooling)
 
 # ## Assembling all the forcings
 #
-# Forcings are keyed under specific prognostic names (`u`, `v`, `θ`, `qᵉ`, `e`);
-# Breeze applies the density factor ``ρ`` automatically at kernel time. When
-# multiple forcings act on the same prognostic field — e.g. subsidence and the
-# geostrophic adjustment on the horizontal velocity — they are combined as a
-# tuple, and Breeze sums their contributions.
+# Forcings are keyed under specific prognostic names (`u`, `v`, `θ`, `qᵉ`) or under
+# `E`, the energy key, which applies to whichever thermodynamic variable the model
+# evolves — here `θ`. Breeze applies the density factor ``ρ`` automatically at kernel
+# time. When multiple forcings act on the same prognostic field — e.g. subsidence and
+# the geostrophic adjustment on the horizontal velocity — they are combined as a tuple,
+# and Breeze sums their contributions.
 #
-# Forcings on `e` and `θ` both contribute to the tendency of `ρθ` in different
+# Forcings on `E` and `θ` both contribute to the tendency of `ρθ` in different
 # ways. The tendency for `ρθ` is written
 #
 # ```math
-# ∂_t (ρ θ) = - \boldsymbol{\nabla \cdot} \, ( ρ \boldsymbol{u} θ ) + ρ F_θ + \frac{ρ F_e}{cᵖᵐ Π} + \cdots
+# ∂_t (ρ θ) = - \boldsymbol{\nabla \cdot} \, ( ρ \boldsymbol{u} θ ) + ρ F_θ + \frac{ρ F_E}{cᵖᵐ Π} + \cdots
 # ```
 #
-# where ``F_e`` denotes the specific energy forcing supplied under `e` and
+# where ``F_E`` denotes the specific energy forcing supplied under `E` and
 # ``F_θ`` denotes the specific potential-temperature forcing supplied under `θ`.
 
 forcing = (; u = (subsidence, geostrophic.u),
              v = (subsidence, geostrophic.v),
              θ = subsidence,
              qᵉ = (subsidence, qᵉ_drying_forcing),
-             e = e_radiation_forcing)
+             E = E_radiation_forcing)
 nothing #hide
 
 # ## Model setup
@@ -204,7 +205,7 @@ microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 advection = WENO(order=9)
 
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics, advection, forcing,
-                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
+                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # ## Initial conditions
 #
@@ -280,7 +281,7 @@ avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in
 filename = "bomex.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs; filename,
                                                   schedule = AveragedTimeInterval(1hour),
-                                                  overwrite_existing = true)
+                                                  overwrite_files = true)
 
 # Output horizontal slices at z = 600 m for animation
 # Find the k-index closest to z = 600 m
@@ -300,7 +301,7 @@ slice_outputs = (
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = "bomex_slices.jld2",
                                                 schedule = TimeInterval(30seconds),
-                                                overwrite_existing = true)
+                                                overwrite_files = true)
 
 @info "Running BOMEX simulation..."
 run!(simulation)
@@ -423,7 +424,7 @@ rowgap!(fig.layout, 1, -50)
 rowgap!(fig.layout, 2, -50)
 
 # Record animation
-CairoMakie.record(fig, "bomex_slices.mp4", 1:Nt, framerate=12) do nn
+CairoMakie.record(fig, "bomex_slices.mp4", 1:Nt; framerate=12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide

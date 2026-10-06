@@ -2,7 +2,8 @@ module BreezeRRTMGPExt
 
 using Breeze
 
-using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles, materialize_surface_property
+using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles, materialize_surface_property,
+                               dynamics_pressure, total_density
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 
@@ -11,6 +12,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU, GPU
+using Oceananigans.DistributedComputations: Distributed, child_architecture
 using Oceananigans.Fields: ZFaceField, CenterField
 
 # RRTMGP imports (external types - cannot modify)
@@ -66,6 +68,9 @@ end
 function rrtmgp_context(arch::GPU)
     return ClimaComms.context(ClimaComms.CUDADevice())
 end
+
+# Radiation is column-local: each rank solves its own columns on its child architecture
+rrtmgp_context(arch::Distributed) = rrtmgp_context(child_architecture(arch))
 
 compute_datetime(dt::AbstractDateTime, epoch) = dt
 compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round(Int, 1000t))

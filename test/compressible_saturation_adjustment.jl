@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using Oceananigans
 using Test
@@ -16,6 +18,16 @@ using Breeze.Thermodynamics:
 
 using Breeze.Microphysics: SaturationAdjustment, adjust_state, adjust_thermodynamic_state, WarmPhaseEquilibrium
 using Oceananigans.TimeSteppers: update_state!
+
+@testset "Compressible density reconciliation modes" begin
+    CE = Breeze.CompressibleEquations
+
+    @test CE.density_reconciliation_mode(true, false, false, ()) isa Val{:total_density}
+    @test CE.density_reconciliation_mode(false, true, false, ()) isa Val{:dry_density}
+    @test CE.density_reconciliation_mode(false, false, true, ()) isa Val{:dry_density}
+    @test CE.density_reconciliation_mode(false, false, false, (:qᶜˡ,)) isa Val{:dry_density}
+    @test CE.density_reconciliation_mode(false, false, false, ()) isa Val{:diagnose_total_density}
+end
 
 # Regression tests for the compressible θˡⁱ density-based thermodynamic state
 # (NumericalEarth/Breeze.jl#765): the temperature inversion and the saturation adjustment must be
@@ -129,7 +141,7 @@ end
     constants = ThermodynamicConstants(Float64)
     θref(z) = 300.0 * exp(9.80616 * z / (1005 * 300.0))
     dyn = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                               surface_pressure = 1e5, standard_pressure = 1e5,
+                               base_pressure = 1e5, standard_pressure = 1e5,
                                reference_potential_temperature = θref)
     model = AtmosphereModel(grid; dynamics = dyn,
                             microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
@@ -153,6 +165,8 @@ end
         @test qᵛ[I] ≈ saturation_specific_humidity(T[I], ρ[I], constants, eq)  atol = 1e-4
     end
 
+    test_kernel_functions_inferred(model)
+
     time_step!(model, 1e-3)
     @test all(isfinite, interior(model.temperature))
 end
@@ -172,7 +186,7 @@ end
 
     make_model() = AtmosphereModel(grid;
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        surface_pressure = 1e5, standard_pressure = 1e5,
+                                        base_pressure = 1e5, standard_pressure = 1e5,
                                         reference_potential_temperature = z -> 300.0),
         microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
         thermodynamic_constants = constants,

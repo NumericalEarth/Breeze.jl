@@ -1,11 +1,6 @@
-using Breeze
-using Oceananigans.Architectures: CPU
+include(joinpath(@__DIR__, "setup.jl"))
 
-# Run under `default_arch` when the test runner provides it (which routes to
-# GPU when CUDA is functional, matching project convention); otherwise fall
-# back to CPU() so this file can also be included directly with
-# `julia --project=. test/<this file>.jl` during development.
-@isdefined(default_arch) || (default_arch = CPU())
+using Breeze
 
 using CUDA: @allowscalar
 

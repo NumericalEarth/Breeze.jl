@@ -304,7 +304,7 @@ Fields
   step (see `acoustic_cfl`).
 - `acoustic_cfl`: Target horizontal acoustic Courant number used by the
   adaptive substep count when `substeps === nothing`. The substep count
-  is ``N \\approx \\lceil \\Delta t \\, \\mathbb{C}^{ac} /
+  is ``N \\approx \\lceil \\Delta t \\, c^{ac} /
   (\\mathrm{acoustic\\_cfl} \\cdot \\Delta x_\\min) \\rceil``, so smaller
   values give more substeps. Default `0.5` (the ERF/WRF target —
   equivalent to the conventional safety factor of `2`). Ignored when
@@ -379,6 +379,8 @@ convert_acoustic_parameter(::Type{FT}, damping::DirectDivergenceDamping) where F
     DirectDivergenceDamping{FT}(convert(FT, damping.coefficient))
 
 """
+$(TYPEDEF)
+
 Abstract supertype for upper-sponge ramp shapes. A concrete `AbstractRamp`
 is callable as `(ramp)(z, sponge_top, depth)` and returns a value in
 ``[0, 1]``: zero below ``z_{\\rm sponge\\_top} - \\text{depth}``, rising

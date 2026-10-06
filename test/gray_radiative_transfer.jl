@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using Dates
 using GPUArraysCore: @allowscalar
@@ -32,15 +34,16 @@ using RRTMGP
                                                solar_constant = 1361)
 
             @test radiation !== nothing
-            @test radiation.surface_properties.surface_temperature.constant == FT(300)
-            @test radiation.surface_properties.surface_emissivity.constant == FT(0.98)
-            @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.1)
-            @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.1)
+            @test radiation.surface_radiation.surface_temperature.constant == FT(300)
+            @test radiation.surface_radiation.surface_emissivity.constant == FT(0.98)
+            @test radiation.surface_radiation.direct_surface_albedo.constant == FT(0.1)
+            @test radiation.surface_radiation.diffuse_surface_albedo.constant == FT(0.1)
             @test radiation.solar_constant == FT(1361)
 
             # Check flux fields are created
             @test radiation.upwelling_longwave_flux !== nothing
             @test radiation.downwelling_longwave_flux !== nothing
+            @test radiation.upwelling_shortwave_flux !== nothing
             @test radiation.downwelling_shortwave_flux !== nothing
 
             # Check flux divergence field
@@ -53,6 +56,7 @@ using RRTMGP
             # Check flux fields have correct size (Nz+1 levels)
             @test size(radiation.upwelling_longwave_flux) == (1, 1, Nz + 1)
             @test size(radiation.downwelling_longwave_flux) == (1, 1, Nz + 1)
+            @test size(radiation.upwelling_shortwave_flux) == (1, 1, Nz + 1)
             @test size(radiation.downwelling_shortwave_flux) == (1, 1, Nz + 1)
 
             radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
@@ -60,8 +64,8 @@ using RRTMGP
                                                direct_surface_albedo = 0.15,
                                                diffuse_surface_albedo = 0.2)
 
-            @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.15)
-            @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.2)
+            @test radiation.surface_radiation.direct_surface_albedo.constant == FT(0.15)
+            @test radiation.surface_radiation.diffuse_surface_albedo.constant == FT(0.2)
         end
 
         @testset "Field-based surface properties" begin
@@ -77,10 +81,10 @@ using RRTMGP
             @test radiation !== nothing
 
             @allowscalar begin
-                @test first(radiation.surface_properties.surface_temperature) == FT(300)
-                @test first(radiation.surface_properties.surface_emissivity) == FT(0.98)
-                @test first(radiation.surface_properties.direct_surface_albedo) == FT(0.1)
-                @test first(radiation.surface_properties.diffuse_surface_albedo) == FT(0.1)
+                @test first(radiation.surface_radiation.surface_temperature) == FT(300)
+                @test first(radiation.surface_radiation.surface_emissivity) == FT(0.98)
+                @test first(radiation.surface_radiation.direct_surface_albedo) == FT(0.1)
+                @test first(radiation.surface_radiation.diffuse_surface_albedo) == FT(0.1)
                 @test radiation.solar_constant == FT(1361)
             end
         end
@@ -110,7 +114,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -135,7 +139,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -158,6 +162,7 @@ end
         # Sign convention: positive = upward, negative = downward
         ℐ_lw_up = radiation.upwelling_longwave_flux
         ℐ_lw_dn = radiation.downwelling_longwave_flux
+        ℐ_sw_up = radiation.upwelling_shortwave_flux
         ℐ_sw_dn = radiation.downwelling_shortwave_flux
 
         @allowscalar begin
@@ -179,7 +184,19 @@ end
 
         @test all(interior(ℐ_lw_up) .≥ 0)  # Upwelling should be positive
         @test all(interior(ℐ_lw_dn) .≤ 0)  # Downwelling should be negative
+        @test all(iszero, interior(ℐ_sw_up))  # Non-scattering gray optics has no upward shortwave
         @test all(interior(ℐ_sw_dn) .≤ 0)  # Downwelling should be negative
+
+        # Integrating -∂ℐ_net/∂z over the column must recover the boundary-flux
+        # difference, where ℐ_net sums all four streams (positive upward).
+        ℐ_net = vec(Array(interior(ℐ_lw_up))) .+
+                vec(Array(interior(ℐ_lw_dn))) .+
+                vec(Array(interior(ℐ_sw_up))) .+
+                vec(Array(interior(ℐ_sw_dn)))
+
+        Δz = 10kilometers / Nz  # the grid is uniform in z
+        column_heating = Δz * sum(Array(interior(radiation.flux_divergence)))
+        @test column_heating ≈ ℐ_net[1] - ℐ_net[end] rtol = sqrt(eps(FT))
     end
 end
 
@@ -205,7 +222,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -250,7 +267,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -318,7 +335,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -358,7 +375,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -390,7 +407,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -415,7 +432,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 

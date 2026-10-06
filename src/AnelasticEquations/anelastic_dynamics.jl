@@ -90,19 +90,13 @@ end
 $(TYPEDSIGNATURES)
 
 Default surface temperature for `BulkDrag` under `AnelasticDynamics`: the
-reference-state surface temperature, recovered from the reference potential
-temperature via the surface Exner function ``T₀ = (p₀/pˢᵗ)^{Rᵈ/cᵖᵈ}\\,θ₀``.
+reference-state temperature at the bottom face of the domain.
 
 Used only when the user constructs `BulkDrag` without an explicit
 `surface_temperature`. The result is a horizontally uniform scalar.
 """
-function AtmosphereModels.default_drag_surface_temperature(dynamics::AnelasticDynamics, grid, constants)
-    ref = dynamics.reference_state
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    Π₀ = (ref.surface_pressure / ref.standard_pressure)^(Rᵈ / cᵖᵈ)
-    return Π₀ * ref.potential_temperature
-end
+AtmosphereModels.default_drag_surface_temperature(dynamics::AnelasticDynamics, grid, constants) =
+    surface_temperature_value(dynamics.reference_state)
 
 #####
 ##### Density and pressure access interface
@@ -118,6 +112,14 @@ reference state density ``ρᵣ(z)``.
 """
 AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
+# The anelastic reference density ρᵣ(z) is a dry reference state evaluated at the reference
+# temperature, so it is not the local moist density that mass fractions are referenced to.
+# Rediagnose that at the reference pressure: ρ = pᵣ(z) / (Rᵐ(q) T).
+@inline function AtmosphereModels.gas_phase_density(i, j, k, dynamics::AnelasticDynamics, T, q, constants)
+    @inbounds p = dynamics.reference_state.pressure[i, j, k]
+    return density(T, p, q, constants)
+end
+
 #####
 ##### Prognostic fields
 #####
@@ -130,6 +132,13 @@ AtmosphereModels.additional_dynamics_field_names(::AnelasticDynamics) = ()
 $(TYPEDSIGNATURES)
 
 Return the surface pressure from the reference state for boundary condition regularization.
+"""
+AtmosphereModels.base_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.base_pressure
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the reference pressure at the bottom face of the domain, as a 2D field.
 """
 AtmosphereModels.surface_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.surface_pressure
 
@@ -147,7 +156,7 @@ AtmosphereModels.dynamics_reference_state(dynamics::AnelasticDynamics) = dynamic
 #####
 
 function Base.summary(dynamics::AnelasticDynamics)
-    p₀_str = prettysummary(dynamics.reference_state.surface_pressure)
+    p₀_str = prettysummary(dynamics.reference_state.base_pressure)
     θ₀_str = prettysummary(dynamics.reference_state.potential_temperature)
     return string("AnelasticDynamics(p₀=", p₀_str, ", θ₀=", θ₀_str, ")")
 end

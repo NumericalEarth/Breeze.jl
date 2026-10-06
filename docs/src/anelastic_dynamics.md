@@ -51,7 +51,7 @@ where ``\phi`` is a nonhydrostatic pressure correction potential defined by the 
 Breeze advances a conservative moist static energy density
 
 ```math
-ρᵣ e ≡ ρᵣ \left ( c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i \right ),
+ρᵣ s ≡ ρᵣ \left ( c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i \right ),
 ```
 
 where ``c^{p m}`` is the mixture heat capacity, ``T`` is temperature, ``g`` is gravitational acceleration,
@@ -63,10 +63,10 @@ and
 According to [Pauluis2008](@citet), the moist static energy obeys
 
 ```math
-\partial_t(ρᵣ e) + \boldsymbol{\nabla \cdot}\, (ρᵣ e \boldsymbol{u}) = - ρᵣ w b + S_e ,
+\partial_t(ρᵣ s) + \boldsymbol{\nabla \cdot}\, (ρᵣ s \boldsymbol{u}) = - ρᵣ w b + S_s ,
 ```
 
-with vertical velocity ``w``, buoyancy ``b`` as above, and ``S_e`` including microphysical and external energy sources/sinks.
+with vertical velocity ``w``, buoyancy ``b`` as above, and ``S_s`` including microphysical and external energy sources/sinks.
 The ``ρᵣ w b`` term is the buoyancy flux that links the energy and momentum budgets in the anelastic limit.
 
 Thermodynamic closures needed for ``R^m``, ``c^{pm}`` and the Exner function ``Π = (pᵣ / p_0)^{R^m / c^{pm}}`` are given in [Thermodynamics](@ref Thermodynamics-section) section.
@@ -96,6 +96,6 @@ In Breeze this projection is implemented as a Fourier-tridiagonal solve in the v
 - ``ρᵣ(z)``, ``pᵣ(z)``: Reference density and pressure satisfying hydrostatic balance for a constant ``θᵣ``.
 - ``α = R^m T / pᵣ``, ``αᵣ = R^d θᵣ / pᵣ``: Specific volume and its reference value.
 - ``b = g (α - αᵣ) / αᵣ``: Buoyancy.
-- ``e``: Moist static energy.
+- ``s``: Moist static energy.
 - ``q^t``: Total specific humidity (vapor + condensates).
 - ``\phi``: Nonhydrostatic pressure correction potential used by the projection.

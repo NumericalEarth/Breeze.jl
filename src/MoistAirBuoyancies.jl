@@ -29,6 +29,7 @@ using ..Thermodynamics:
     Thermodynamics,
     ThermodynamicConstants,
     ReferenceState,
+    reject_renamed_surface_pressure,
     mixture_heat_capacity,
     mixture_gas_constant,
     saturation_specific_humidity,
@@ -79,7 +80,10 @@ model = NonhydrostaticModel(grid; buoyancy, tracers = (:θ, :qᵗ))
 NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 1×1×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
 ├── timestepper: RungeKutta3TimeStepper
-├── advection scheme: Centered(order=2)
+├── advection scheme:
+│   ├── momentum: Centered(order=2)
+│   ├── θ: Centered(order=2)
+│   └── qᵗ: Centered(order=2)
 ├── tracers: (θ, qᵗ)
 ├── closure: Nothing
 ├── buoyancy: MoistAirBuoyancy with ĝ = NegativeZDirection()
@@ -87,13 +91,16 @@ NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ```
 """
 function MoistAirBuoyancy(grid;
-                          surface_pressure = 101325,
+                          base_pressure = 101325,
                           reference_potential_temperature = 288,
                           standard_pressure = 1e5,
-                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)))
+                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
+                          surface_pressure = nothing)
+
+    reject_renamed_surface_pressure(surface_pressure)
 
     reference_state = ReferenceState(grid, thermodynamic_constants;
-                                     surface_pressure,
+                                     base_pressure,
                                      potential_temperature = reference_potential_temperature,
                                      standard_pressure)
 

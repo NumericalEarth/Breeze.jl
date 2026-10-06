@@ -148,7 +148,7 @@ function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM2MCategories})
     print(io, summary(bμp), ":\n",
           "├── cloud_formation: ", prettysummary(bμp.cloud_formation), '\n',
           "├── warm_processes: ", prettysummary(categories.warm_processes), '\n',
-          "├── air_properties: ", prettysummary(categories.air_properties), '\n',
+          "├── air: ", prettysummary(categories.air), '\n',
           "├── cloud_liquid_fall_velocity: ", prettysummary(categories.cloud_liquid_fall_velocity), '\n',
           "├── rain_fall_velocity: ", prettysummary(categories.rain_fall_velocity), '\n',
           "└── precipitation_boundary_condition: ", bμp.precipitation_boundary_condition)

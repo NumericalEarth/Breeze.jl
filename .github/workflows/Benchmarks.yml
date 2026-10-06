@@ -71,15 +71,20 @@ jobs:
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
-          # untested), small grid + small Nsteps to keep the gradient compile
-          # and per-step memory bounded.
+          # untested). Small grid to keep the gradient compile bounded. The
+          # loop body is compiled once regardless of Nsteps, so 64 steps cost
+          # little extra compile; --checkpoints sweeps the checkpoint budget of
+          # the binomial (revolve) schedule Enzyme uses for the reverse pass
+          # (each value is a separate compile + run, recorded as its own
+          # result). To reproduce locally on CPU see benchmarking/README.md
+          # ("AD benchmark").
           - dynamics: 'compressible_explicit'
             microphysics: 'nothing'
-            grid: '64x64x32'
+            grid: '128x128x32'
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 1'
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,4,8 --checkpointing_mode binomial'
           # Scalar-tendency kernel sweep (no model): time the bare WENO
           # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
           # the Reactant-compiled XLA program and the eager vanilla launch.
@@ -112,7 +117,7 @@ jobs:
         shell: bash
         working-directory: ./benchmarking
     container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.6'
+      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.13.0'
       options: --gpus=all
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
@@ -120,7 +125,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: "Check out repository"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: df before cleanup
         run: |
           df -hT
@@ -136,13 +141,19 @@ jobs:
         run: |
           using Pkg
           Pkg.instantiate()
+      - name: Start earlyoom
+        id: earlyoom
+        run: |
+          earlyoom -m 2 -s 100 -r 60 --prefer 'julia'
+        background: true
       - name: Run benchmarks
         timeout-minutes: 45
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
-          earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
+      - name: Stop earlyoom
+        cancel: earlyoom
       - name: "Upload benchmark results as artifacts"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -231,23 +242,31 @@ jobs:
               microphysics = d['microphysics']
               backend = d.get('backend', 'vanilla')
               mode = d.get('mode', 'forward')
+              checkpointing = d.get('checkpointing', '')
 
               gpu = d['metadata']['gpu_name']
+
+              versions = d['metadata'].get('package_versions', {})
+              extra = ', '.join(
+                  f"{p} v{versions.get(p, 'unknown')}"
+                  for p in ('Oceananigans', 'CUDA', 'GPUCompiler', 'Reactant', 'Reactant_jll')
+              )
 
               grid = d['grid_size']
               grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
 
-              # AD (forward+backward via Enzyme) entries get their own chart.
-              # Skip the forward-only clauses below so an AD point doesn't
-              # also land on a forward chart that happens to match its config.
+              # AD (forward+backward via Enzyme) entries get their own chart,
+              # one line per checkpointing strategy. Skip the forward-only
+              # clauses below so an AD point doesn't also land on a forward
+              # chart that happens to match its config.
               if mode == 'ad':
                   level_1 = f'{base_name}; AD; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
-                  level_4 = f'{grid_str}'
+                  level_4 = f'{grid_str} {checkpointing}'.strip()
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   continue
 
               # Scalar-tendency kernel sweep (no model): compare WENO orders on
@@ -267,7 +286,7 @@ jobs:
                   level_4 = f'{ft_short} {backend}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   continue
 
               # We want to group benchmarks in different ways. NOTE:
@@ -279,7 +298,7 @@ jobs:
                   level_4 = f'{microphysics}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   pass
 
               if dynamics == 'anelastic' and microphysics == 'nothing':
@@ -289,7 +308,7 @@ jobs:
                   level_4 = f'{advection} {grid}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   pass
 
               if microphysics == 'nothing':
@@ -299,7 +318,7 @@ jobs:
                   level_4 = f'{grid_str}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
 
               # Reactant vs vanilla sweep: compare backends across grid sizes
               # for a fixed compressible_explicit + WENO5 + 1M mixed-phase
@@ -311,7 +330,7 @@ jobs:
                   level_4 = f'{backend} {grid_str}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
 
           with open('github-action-benchmark.json', 'w') as f:
               json.dump(data, f)
@@ -343,7 +362,7 @@ jobs:
           git commit -m'Save benchmark results for commit ${{ github.sha }}'
           git push -u origin main
       - name: "Publish benchmark results"
-        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: Breeze.jl Benchmarks
           tool: "customBiggerIsBetter"

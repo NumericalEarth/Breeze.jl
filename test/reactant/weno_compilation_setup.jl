@@ -1,3 +1,5 @@
+include(joinpath(dirname(@__DIR__), "setup.jl"))
+
 #####
 ##### Reactant compilation tests — WENO advection
 #####
@@ -92,6 +94,9 @@ function run_weno_tests(scheme_label, scheme)
         Δt = 0.02
 
         @testset "$label" for (label, topo, nd) in topologies
+            # Force release of memory
+            GC.gc(true); GC.gc(false); GC.gc(true)
+
             grid = make_grid(topo, nd)
 
             # ── Build ──
@@ -113,7 +118,7 @@ function run_weno_tests(scheme_label, scheme)
             dmodel = Enzyme.make_zero(model)
             Ns = 1
 
-            compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+            compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_loss(
                 model, dmodel, θ_init, dθ_init, Δt, Ns)
             dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
             ad_grad = @allowscalar Array(interior(dθ))

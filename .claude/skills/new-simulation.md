@@ -15,7 +15,7 @@ Set up, run, and visualize a new atmospheric simulation with Breeze.
   boundary conditions, initial conditions, forcing, closure parameters
 - Check parameter tables, figure captions, and coordinate conventions
 - Identify the paper's prognostic variables and how forcing is applied
-- Identify Breeze's prognostics (`ρθ` or `ρe`) and derive any transformations needed
+- Identify Breeze's prognostics (`ρθ` or `ρs`) and derive any transformations needed
 
 **If designing a new case:**
 - Ask the user for the science goal or phenomenon to simulate

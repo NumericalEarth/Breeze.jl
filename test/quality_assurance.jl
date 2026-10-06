@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze: Breeze
 using Aqua: Aqua
 using ExplicitImports: ExplicitImports

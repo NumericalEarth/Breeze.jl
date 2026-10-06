@@ -24,7 +24,7 @@ grid = RectilinearGrid(CPU();
                        topology = (Bounded, Flat, Bounded))
 
 thermodynamic_constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermodynamic_constants, surface_pressure=1e5, potential_temperature=300)
+reference_state = ReferenceState(grid, thermodynamic_constants, base_pressure=1e5, potential_temperature=300)
 dynamics = AnelasticDynamics(reference_state)
 advection = WENO(order=9)
 model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection)
@@ -59,7 +59,7 @@ E = total_energy(model)
 fig = Figure()
 ax = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Initial potential temperature θ (K)")
 hm = heatmap!(ax, θ)
-Colorbar(fig[1, 2], hm, label = "ρe′ (J/kg)")
+Colorbar(fig[1, 2], hm, label = "θ (K)")
 fig
 
 # ## Simulation rising
@@ -85,7 +85,7 @@ outputs = (; θ, w)
 filename = "dry_thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
                     schedule = TimeInterval(10seconds),
-                    overwrite_existing = true)
+                    overwrite_files = true)
 
 simulation.output_writers[:jld2] = writer
 
@@ -137,7 +137,7 @@ hmw = heatmap!(axw, wn, colorrange = (-w_range, w_range), colormap = :balance)
 Colorbar(fig[1, 2], hmθ, label = "θ (K)", vertical = true)
 Colorbar(fig[2, 2], hmw, label = "w (m/s)", vertical = true)
 
-CairoMakie.record(fig, "dry_thermal_bubble.mp4", 1:length(θt), framerate = 12) do nn
+CairoMakie.record(fig, "dry_thermal_bubble.mp4", 1:length(θt); framerate = 12, compression = 23) do nn
     n[] = nn
 end
 
@@ -218,7 +218,7 @@ moist_outputs = (; θ, w, qˡ′)
 moist_filename = "cloudy_thermal_bubble.jld2"
 moist_writer = JLD2Writer(moist_model, moist_outputs; filename=moist_filename,
                           schedule = TimeInterval(10seconds),
-                          overwrite_existing = true)
+                          overwrite_files = true)
 
 moist_simulation.output_writers[:jld2] = moist_writer
 
@@ -253,7 +253,7 @@ Colorbar(fig[1, 1], hmθ, label = "θ (K)", vertical = true)
 Colorbar(fig[1, 4], hmw, label = "w (m/s)", vertical = true)
 Colorbar(fig[2, 4], hml, label = "qˡ (kg/kg)", vertical = true)
 
-CairoMakie.record(fig, "cloudy_thermal_bubble.mp4", 1:length(θt), framerate = 24) do nn
+CairoMakie.record(fig, "cloudy_thermal_bubble.mp4", 1:length(θt); framerate = 24, compression = 23) do nn
     n[] = nn
 end
 nothing #hide
@@ -321,7 +321,7 @@ precip_outputs = (; θ=θ_precip, w=w_precip, qᶜˡ=qᶜˡ_precip, qʳ=qʳ_prec
 precip_filename = "precipitating_thermal_bubble.jld2"
 precip_writer = JLD2Writer(precip_model, precip_outputs; filename=precip_filename,
                            schedule = TimeInterval(30seconds),
-                           overwrite_existing = true)
+                           overwrite_files = true)
 
 precip_simulation.output_writers[:jld2] = precip_writer
 
@@ -367,7 +367,7 @@ Colorbar(fig[2, 4], hmqʳ, label="qʳ (kg/kg)", vertical=true, width=15)
 colgap!(fig.layout, 10)
 rowgap!(fig.layout, 10)
 
-CairoMakie.record(fig, "precipitating_thermal_bubble.mp4", 1:Nt, framerate=12) do nn
+CairoMakie.record(fig, "precipitating_thermal_bubble.mp4", 1:Nt; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide

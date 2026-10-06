@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -30,7 +32,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
 
     atol = test_tol(FT)
     microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=solver_tol(FT)), equilibrium=WarmPhaseEquilibrium())
@@ -52,8 +54,8 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
     q₁ = MoistureMassFractions(qᵗ)
     cᵖᵐ = mixture_heat_capacity(q₁, constants)
-    e₁ = cᵖᵐ * T₁ + g * z
-    𝒰₁ = StaticEnergyState(e₁, q₁, z, pᵣ)
+    s₁ = cᵖᵐ * T₁ + g * z
+    𝒰₁ = StaticEnergyState(s₁, q₁, z, pᵣ)
 
     @test compute_temperature(𝒰₁, microphysics, constants) ≈ T₁ atol=atol
     @test compute_temperature(𝒰₁, nothing, constants) ≈ T₁ atol=atol
@@ -76,13 +78,13 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
                     q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₂)
                     cᵖᵐ = mixture_heat_capacity(q₂, constants)
                     ℒˡᵣ = constants.liquid.reference_latent_heat
-                    e₂ = cᵖᵐ * T₂ + g * z - ℒˡᵣ * qˡ₂
+                    s₂ = cᵖᵐ * T₂ + g * z - ℒˡᵣ * qˡ₂
 
-                    𝒰₂ = StaticEnergyState(e₂, q₂, z, pᵣ)
+                    𝒰₂ = StaticEnergyState(s₂, q₂, z, pᵣ)
                     T★ = compute_temperature(𝒰₂, microphysics, constants)
                     @test T★ ≈ T₂ atol=atol
 
-                    set!(model, ρe = ρᵣ * e₂, qᵗ = qᵗ₂)
+                    set!(model, ρs = ρᵣ * s₂, qᵗ = qᵗ₂)
                     T★ = @allowscalar first(model.temperature)
                     qᵛ = @allowscalar first(model.microphysical_fields.qᵛ)
                     qˡ = @allowscalar first(model.microphysical_fields.qˡ)
@@ -111,7 +113,7 @@ end
     g = constants.gravitational_acceleration
     z = zero(FT)
 
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
     pᵣ = @allowscalar first(reference_state.pressure)
     ρᵣ = @allowscalar first(reference_state.density)
 
@@ -154,13 +156,13 @@ end
             qˡ = qᵗ - qᵛ⁺
             q = MoistureMassFractions(qᵛ⁺, qˡ)
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            e = cᵖᵐ * T_warm + g * z - ℒˡᵣ * qˡ
+            s = cᵖᵐ * T_warm + g * z - ℒˡᵣ * qˡ
 
-            𝒰 = StaticEnergyState(e, q, z, pᵣ)
+            𝒰 = StaticEnergyState(s, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, constants)
             @test T★ ≈ T_warm atol=atol
 
-            set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
+            set!(model, ρs = ρᵣ * s, qᵗ = qᵗ)
             T★ = @allowscalar first(model.temperature)
             qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
             qˡm = @allowscalar first(model.microphysical_fields.qˡ)
@@ -182,13 +184,13 @@ end
             qⁱ = qᵗ - qᵛ⁺
             q = MoistureMassFractions(qᵛ⁺, zero(FT), qⁱ)
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            e = cᵖᵐ * T_cold + g * z - ℒⁱᵣ * qⁱ
+            s = cᵖᵐ * T_cold + g * z - ℒⁱᵣ * qⁱ
 
-            𝒰 = StaticEnergyState(e, q, z, pᵣ)
+            𝒰 = StaticEnergyState(s, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, constants)
             @test T★ ≈ T_cold atol=atol
 
-            set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
+            set!(model, ρs = ρᵣ * s, qᵗ = qᵗ)
             T★ = @allowscalar first(model.temperature)
             qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
             qˡm = @allowscalar first(model.microphysical_fields.qˡ)
@@ -217,13 +219,13 @@ end
             @test q.vapor + q.liquid + q.ice ≈ qᵗ
 
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+            s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
-            𝒰_unadjusted = StaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
+            𝒰_unadjusted = StaticEnergyState(s, MoistureMassFractions(qᵗ), z, pᵣ)
             T★ = compute_temperature(𝒰_unadjusted, microphysics, constants)
             @test T★ ≈ T atol=atol
 
-            set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
+            set!(model, ρs = ρᵣ * s, qᵗ = qᵗ)
             T★ = @allowscalar first(model.temperature)
             qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
             qˡm = @allowscalar first(model.microphysical_fields.qˡ)
@@ -248,7 +250,7 @@ end
     z = zero(FT)
 
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
     pᵣ = @allowscalar first(reference_state.pressure)
 
     equilibrium = WarmPhaseEquilibrium()
@@ -259,8 +261,8 @@ end
     qᵗ = FT(0.05)
     q = MoistureMassFractions(qᵗ)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    e = cᵖᵐ * T_ref + g * z  # energy without condensate correction (all-vapor initial)
-    𝒰₀ = StaticEnergyState(e, q, z, pᵣ)
+    s = cᵖᵐ * T_ref + g * z  # energy without condensate correction (all-vapor initial)
+    𝒰₀ = StaticEnergyState(s, q, z, pᵣ)
 
     𝒰₁ = adjust_thermodynamic_state(𝒰₀, microphysics, constants)
     T★ = compute_temperature(𝒰₁, nothing, constants)
@@ -274,11 +276,11 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
     atol = test_tol(FT)
 
     pᵣ = @allowscalar reference_state.pressure[1, 1, 1]
-    p₀ = reference_state.surface_pressure
+    p₀ = reference_state.base_pressure
     z = FT(0.5)
 
     # Case 0: Absolute zero potential temperature

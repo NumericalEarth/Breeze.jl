@@ -36,7 +36,7 @@ Breeze supports two concrete choices for ``χ``:
 
 - **Liquid-ice potential temperature density** (``χ = ρ θ^{li}``): The potential temperature is materially conserved under adiabatic motion, so ``Π = 0``. This is the simplest thermodynamic formulation.
 
-- **Static energy density** (``χ = ρ e``): The moist static energy ``e = c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i`` includes gravitational potential energy and latent heat. In this case ``Π \neq 0`` and encodes the pressure work term.
+- **Static energy density** (``χ = ρ s``): The moist static energy ``s = c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i`` includes gravitational potential energy and latent heat. In this case ``Π \neq 0`` and encodes the pressure work term.
 
 The thermodynamic equation couples to the momentum equation through the equation of state (below) and buoyancy.
 
@@ -71,7 +71,7 @@ Thermodynamic relations (mixture gas constant ``R^m``, heat capacity ``c^{pm}``,
 - ``p``: Pressure
 - ``T``: Temperature
 - ``θ``: Potential temperature
-- ``χ``: Thermodynamic prognostic variable (``ρθ`` or ``ρe``)
+- ``χ``: Thermodynamic prognostic variable (``ρθ`` or ``ρs``)
 
 ### Moisture
 - ``q^t``: Total specific humidity (vapor + condensates)
@@ -86,7 +86,7 @@ Thermodynamic relations (mixture gas constant ``R^m``, heat capacity ``c^{pm}``,
 
 ### Thermodynamic closures
 - ``Π = (p / p_0)^{R^m / c^{pm}}``: Exner function
-- ``\mathbb{C}^{ac} = \sqrt{γ^m R^m T}``: Acoustic sound speed, where ``γ^m = c^{pm} / c^{vm}``
+- ``c^{ac} = \sqrt{γ^m R^m T}``: Acoustic sound speed, where ``γ^m = c^{pm} / c^{vm}``
 - ``b``: Buoyancy
 
 See [Thermodynamics](@ref Thermodynamics-section) for full definitions of ``R^m(q)``, ``c^{pm}(q)``, and ``Π``.

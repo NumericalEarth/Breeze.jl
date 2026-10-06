@@ -41,6 +41,7 @@ export
     PrescribedDynamics,
     KinematicModel,
     AtmosphereModel,
+    SingleColumnGrid,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
@@ -61,6 +62,7 @@ export
     mixture_heat_capacity,
     dynamics_density,
     dynamics_pressure,
+    total_density,
 
     # Advective timescale control for the time-step wizard
     CellAdvectionTimescale,
@@ -80,6 +82,7 @@ export
     static_energy_density,
     static_energy,
     total_energy,
+    total_energy_density_name,
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
@@ -87,6 +90,7 @@ export
     total_pressure,
     specific_humidity,
     moisture_prognostic_name,
+    total_moisture_density_name,
     moisture_specific_name,
     specific_prognostic_moisture,
 
@@ -106,6 +110,8 @@ export
     PlanarIceSurface,
 
     # Microphysics
+    aerosol_field_names,
+    prognostic_field_names,
     SaturationAdjustment,
     InstantaneousPrecipitation,
     MixedPhaseEquilibrium,
@@ -121,9 +127,12 @@ export
     number_concentration_field,
     BulkMicrophysics,
     initial_aerosol_number,
+    initial_aerosol_number_density,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
     ConstantRateCondensateFormation,
+    P3Microphysics,
+    PredictedParticlePropertiesMicrophysics,
 
     # BoundaryConditions
     BulkDrag,
@@ -217,6 +226,7 @@ export
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
+    TKEBasedTurbulenceClosure, TKEMixingLength, ConstantStabilityFunctions,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
@@ -225,6 +235,9 @@ export
     FieldTimeSeries, FieldDataset, InMemory, OnDisk,
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
+
+include("Utils.jl")
+using .Utils
 
 include("Solvers.jl")
 using .Solvers
@@ -293,5 +306,9 @@ using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
+
+# Loaded last: single-column / column-ensemble mode extends the dynamics, closure, and model modules.
+include("single_column_mode.jl")
+using .SingleColumnMode: SingleColumnMode, SingleColumnGrid
 
 end # module Breeze

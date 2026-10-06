@@ -12,7 +12,20 @@ struct BenchmarkMetadata
     cpu_model::String
     num_threads::Int
     hostname::String
+    package_versions::Dict{String, String}
     timestamp::DateTime
+end
+
+const TRACKED_PACKAGES = ("Oceananigans", "LLVM", "Enzyme", "Reactant", "Reactant_jll")
+
+function loaded_package_versions(names = TRACKED_PACKAGES)
+    versions = Dict{String, String}()
+    for (id, mod) in Base.loaded_modules
+        id.name in names || continue
+        version = pkgversion(mod)
+        isnothing(version) || (versions[id.name] = string(version))
+    end
+    return versions
 end
 
 function BenchmarkMetadata(arch)
@@ -62,6 +75,7 @@ function BenchmarkMetadata(arch)
         cpu_model,
         Threads.nthreads(),
         gethostname(),
+        loaded_package_versions(),
         now(UTC)
     )
 end
@@ -79,5 +93,8 @@ function Base.show(io::IO, ::MIME"text/plain", m::BenchmarkMetadata)
     println(io, "├── cpu_model: ", m.cpu_model)
     println(io, "├── num_threads: ", m.num_threads)
     println(io, "├── hostname: ", m.hostname)
+    for name in sort!(collect(keys(m.package_versions)))
+        println(io, "├── ", name, ": ", m.package_versions[name])
+    end
     print(io,   "└── timestamp: ", m.timestamp)
 end

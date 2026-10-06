@@ -105,7 +105,7 @@ fig
   `T ≤ Tʰ` (``λ = 0``, all ice).
 - The moist static energy in Breeze includes both liquid and ice latent heats in mixed-phase conditions:
   ```math
-  e = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ .
+  s = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ .
   ```
 
 For details about the saturation adjustment algorithm itself and moist static energy,
