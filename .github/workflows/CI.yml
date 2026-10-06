@@ -78,7 +78,7 @@ jobs:
         include:
           # `--check-bounds=auto` is necessary for testing Reactant workloads
           # until https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
-          - version: "1.12.6"
+          - version: "1.13.0"
             os: aws-linux-nvidia-gpu-l4-4xl
             arch: "default"
             check-bounds: "auto"
@@ -146,6 +146,9 @@ jobs:
               echo "BREEZE_ENSURE_CUDA_FUNCTIONAL=true" | tee -a "${GITHUB_ENV}"
               # In Julia v1.12+, use multiple GC threads.
               echo "JULIA_NUM_GC_THREADS=4,1" | tee -a "${GITHUB_ENV}"
+              # Reduce memory threshold after which workers are recycled, to try
+              # and keep memory usage at bay.
+              echo "JULIA_TEST_MAXRSS_MB=3500" | tee -a "${GITHUB_ENV}"
               # On the GPU runners we sometimes run out-of-memory because we have several
               # concurrent jobs, some of them reaching a large memory usage.  We reduce the
               # number of jobs to avoid memory issues.
@@ -194,20 +197,31 @@ jobs:
           using Pkg;
           Pkg.instantiate()
           '
-      - name: Run tests
+      - name: Set TMPDIR and create directory
         shell: bash
+        # We have to use `${GITHUB_WORKSPACE}` instead of `github.workspace` because GitHub
+        # is terrible and the two don't match inside containers:
+        # https://github.com/actions/runner/issues/2058
+        run: |
+          export TMPDIR="${GITHUB_WORKSPACE}/tmp"
+          mkdir -vp "${TMPDIR}"
+          echo "TMPDIR=${TMPDIR}" | tee -a "${GITHUB_ENV}"
+      - name: Start earlyoom
+        if:  ${{ runner.os == 'Linux' }}
+        id: earlyoom
+        run: |
+          earlyoom -m 2 -s 100 -r 60 --prefer 'julia'
+        background: true
+      - name: Run tests
+        uses: julia-actions/julia-runtest@6e050c8013b833b1195105ff2fce9cd802f53271 # v1.12.0
+        with:
+          check_bounds: "${{ matrix.check-bounds }}"
+          optimize: "0"
+          test_args: "${{ env.runtest_test_args }}"
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
-        run: |
-          if [[ ${{ runner.os }} == 'Linux' ]]; then
-              # We use earlyoom only on the Linux machines
-              earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          fi
-
-          export TMPDIR="${{ github.workspace }}/tmp"
-          mkdir -vp "${TMPDIR}"
-
-          julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+      - name: Stop earlyoom
+        cancel: earlyoom
       - name: "Upload Manifest"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -222,13 +236,13 @@ jobs:
         if: always()
         with:
           name: mlir-dumps-${{ matrix.version }}-${{ matrix.os }}
-          path: ${{ github.workspace }}/tmp/
+          path: "${{ env.TMPDIR }}"
           if-no-files-found: ignore
           retention-days: 7
       - name: "Process Julia coverage files"
         uses: julia-actions/julia-processcoverage@03114f09f119417c3242a9fb6e0b722676aedf38 # v1.2.2
       - name: "Upload coverage data to CodeCov"
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
