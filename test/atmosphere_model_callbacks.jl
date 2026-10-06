@@ -63,10 +63,10 @@ using Test
 
         ρu = model.momentum.ρu
         ρc = model.tracers.ρc
-        @test isapprox(maximum(ρu), c * Δt; rtol=sqrt(eps(FT)))
-        @test isapprox(minimum(ρu), c * Δt; rtol=sqrt(eps(FT)))
-        @test isapprox(maximum(ρc), c * Δt; rtol=sqrt(eps(FT)))
-        @test isapprox(minimum(ρc), c * Δt; rtol=sqrt(eps(FT)))
+        @test isapprox(maximum(ρu), c * Δt)
+        @test isapprox(minimum(ρu), c * Δt)
+        @test isapprox(maximum(ρc), c * Δt)
+        @test isapprox(minimum(ρc), c * Δt)
     end
 
     @testset "compute_tendencies! still callable without callbacks" begin
