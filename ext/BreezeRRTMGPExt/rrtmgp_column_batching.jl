@@ -11,7 +11,7 @@
 # so a j-slab is a unit-stride `view`. On the GPU such a view of a `CuArray` is itself a
 # `CuArray`, so the solver kernels see what they would see unbatched.
 
-using RRTMGP: update_lw_fluxes!, update_sw_fluxes!
+using RRTMGP: AllSkyRadiation, ClearSkyRadiation, update_lw_fluxes!, update_sw_fluxes!
 using RRTMGP.AtmosphericStates: AerosolState, AtmosphericState, CloudState
 using RRTMGP.BCs: LwBCs, SwBCs
 using RRTMGP.Fluxes: update_presentation!
@@ -143,6 +143,14 @@ is the batch width.
 """
 column_batch_rows(solver, Nx) = solver.grid_params.ncol ÷ Nx
 
+# The (gas, cloud, aerosol) lookup tables each radiation method hands `solve_lw!`/`solve_sw!`,
+# transcribed from RRTMGP's `update_lw_fluxes!(solver, method)` methods. Clear-sky has no cloud
+# optics.
+longwave_lookups(lookups, ::ClearSkyRadiation) = (lookups.lookup_lw, nothing, lookups.lookup_lw_aero)
+longwave_lookups(lookups, ::AllSkyRadiation) = (lookups.lookup_lw, lookups.lookup_lw_cld, lookups.lookup_lw_aero)
+shortwave_lookups(lookups, ::ClearSkyRadiation) = (lookups.lookup_sw, nothing, lookups.lookup_sw_aero)
+shortwave_lookups(lookups, ::AllSkyRadiation) = (lookups.lookup_sw, lookups.lookup_sw_cld, lookups.lookup_sw_aero)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -162,9 +170,10 @@ function solve_radiation_batches!(rtm, solver, grid)
         return nothing
     end
 
-    # TODO: open-codes `update_lw_fluxes!(solver, ::AllSkyRadiation)` to inject a column view, so
-    # the all-sky lookup triple is hardcoded and clear-sky cannot reuse this loop.
-    lookups = solver.lookups
+    # TODO: open-codes `update_lw_fluxes!`/`update_sw_fluxes!` to inject a column view, so
+    # `longwave_lookups`/`shortwave_lookups` must track RRTMGP's per-method dispatch.
+    lookups_lw = longwave_lookups(solver.lookups, solver.radiation_method)
+    lookups_sw = shortwave_lookups(solver.lookups, solver.radiation_method)
     scaling = solver.deep_atmosphere_inverse_scaling
 
     for j_offset in 0:batch_rows:(Ny - 1)
@@ -173,14 +182,10 @@ function solve_radiation_batches!(rtm, solver, grid)
         as = column_view(solver.as, columns)
         batch_scaling = column_view(scaling, columns)
 
-        solve_lw!(column_view(solver.lws, columns), as,
-                  lookups.lookup_lw, lookups.lookup_lw_cld, lookups.lookup_lw_aero,
-                  batch_scaling)
+        solve_lw!(column_view(solver.lws, columns), as, lookups_lw..., batch_scaling)
         update_presentation!(solver.presented_flux_lw, solver.lws.flux)
 
-        solve_sw!(column_view(solver.sws, columns), as,
-                  lookups.lookup_sw, lookups.lookup_sw_cld, lookups.lookup_sw_aero,
-                  batch_scaling)
+        solve_sw!(column_view(solver.sws, columns), as, lookups_sw..., batch_scaling)
         update_presentation!(solver.presented_flux_sw, solver.sws.flux)
 
         copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset)

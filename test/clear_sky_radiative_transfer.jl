@@ -131,4 +131,83 @@ using RRTMGP
         column_heating = Δz * sum(Array(interior(radiation.flux_divergence)))
         @test column_heating ≈ ℐ_net[1] - ℐ_net[end] rtol = sqrt(eps(FT))
     end
+
+    @testset "Column batch rows" begin
+        resolve_column_batch_rows = Base.get_extension(Breeze, :BreezeRRTMGPExt).resolve_column_batch_rows
+
+        @test resolve_column_batch_rows(nothing, 4, 6) == 6  # unbatched
+        @test resolve_column_batch_rows(8, 4, 6) == 2        # whole rows that divide Ny
+        @test resolve_column_batch_rows(5, 4, 6) == 2        # rounded up to whole rows
+        @test resolve_column_batch_rows(12, 4, 6) == 3
+        @test resolve_column_batch_rows(13, 4, 6) == 6       # rounded up to a divisor of Ny
+        @test resolve_column_batch_rows(100, 4, 6) == 6      # larger than the domain
+
+        # A prime Ny has no divisor near the request, so the batch lands far above it.
+        rows = @test_logs (:warn, r"rounded up") resolve_column_batch_rows(3, 1, 7)
+        @test rows == 7
+
+        @test_throws ArgumentError resolve_column_batch_rows(0, 4, 6)
+    end
+
+    # Clear-sky radiation is deterministic and column-local, so solving the domain in batches must
+    # reproduce the unbatched fluxes exactly.
+    @testset "Column batching reproduces the unbatched solve [$(FT)]" for FT in test_float_types()
+        Oceananigans.defaults.FloatType = FT
+
+        Nx, Ny, Nz = 4, 6, 8
+        grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz),
+                               x=(0, 1kilometers), y=(0, 1kilometers), z=(0, 10kilometers),
+                               topology=(Periodic, Periodic, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         base_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+        solar_position = ApparentSolarPosition(coordinate = (0, 45), epoch = DateTime(2024, 6, 21, 12))
+
+        # Horizontally varying state and albedo, so a column solved against the wrong slab of state
+        # or boundary conditions changes the fluxes.
+        L = 1kilometers
+        θ(x, y, z) = 300 + 0.01 * z / 1000 + 2 * sin(2π * x / L) * cos(2π * y / L)
+        qᵗ(x, y, z) = (0.010 + 0.005 * y / L) * exp(-z / 2500)
+        α = Field{Center, Center, Nothing}(grid)
+        set!(α, (x, y) -> 0.1 + 0.3 * x / L + 0.2 * y / L)
+
+        function solve_clear_sky(column_batch_size)
+            radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+                                               solar_position,
+                                               surface_temperature = 300,
+                                               surface_albedo = α,
+                                               column_batch_size)
+
+            model = AtmosphereModel(grid; dynamics, radiation,
+                                    clock = Clock(time=DateTime(2024, 6, 21, 12)),
+                                    formulation = :LiquidIcePotentialTemperature)
+            set!(model; θ, qᵗ)
+
+            return radiation
+        end
+
+        unbatched = solve_clear_sky(nothing)
+        batched = solve_clear_sky(2Nx)  # three batches of two latitude rows
+
+        @test unbatched.longwave_solver.grid_params.ncol == Nx * Ny
+        @test batched.longwave_solver.grid_params.ncol == 2Nx
+
+        for name in (:upwelling_longwave_flux, :downwelling_longwave_flux,
+                     :upwelling_shortwave_flux, :downwelling_shortwave_flux,
+                     :flux_divergence)
+
+            ℐ = Array(interior(getproperty(unbatched, name)))
+            ℐᵇ = Array(interior(getproperty(batched, name)))
+
+            @test all(isfinite, ℐ)
+            @test ℐᵇ == ℐ
+        end
+
+        # The fluxes vary across the domain, so the comparison is not between uniform fields.
+        ℐ_sw_up = Array(interior(unbatched.upwelling_shortwave_flux))
+        @test !all(ℐ_sw_up .== ℐ_sw_up[1, 1, 1])
+    end
 end
