@@ -56,7 +56,6 @@ export
     compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
-    specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
     aerosol_field_names,
@@ -176,6 +175,7 @@ include("Diagnostics/Diagnostics.jl")
 using .Diagnostics
 
 # set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
+include("set_moisture.jl")
 include("set_atmosphere_model.jl")
 include("set_to_mean.jl")
 
