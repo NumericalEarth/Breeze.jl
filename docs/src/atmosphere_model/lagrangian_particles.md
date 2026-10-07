@@ -41,7 +41,7 @@ particle's physical altitude changes at the rate ``w``.
 
 ## When particles are advected
 
-Both Breeze time steppers — `SSPRungeKutta3` and `AcousticRungeKutta3` — advect
+All Breeze time steppers — `SSPRungeKutta3`, `SSPRungeKutta43`, and `AcousticRungeKutta3` — advect
 particles **once per time step**, at the end of the step, over the full `Δt`, using
 the velocity of the freshly updated state ``U^{n+1}``:
 
