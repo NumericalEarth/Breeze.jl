@@ -235,6 +235,10 @@ struct TKEClosureFields{K, L, KC, LC}
     # The linear implicit coefficient of the TKE equation, ∂ₜe = Lᵉ e + ⋯, at (Center, Center, Center):
     # the dissipation rate, the negative part of the buoyancy flux and the damping of negative TKE.
     Lᵉ :: L
+    # The squared buoyancy frequency N² = ∂z b at (Center, Center, Face), stored by the diffusivity
+    # kernel for the kernels that follow it (the implicit coefficient and the next stage's TKE
+    # sources), which read the same T, qᵛ and p: it is a `pow` and a `log` per value (see `∂z_b`).
+    N² :: K
     tupled_tracer_diffusivities :: KC         # per-tracer diffusivity lookup, by closure-scalar position
     tupled_implicit_linear_coefficients :: LC # `Lᵉ` for the TKE tracer, zero for every other
 end
@@ -244,6 +248,7 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.Kᶜ),
                      adapt(to, fields.Kᵉ),
                      adapt(to, fields.Lᵉ),
+                     adapt(to, fields.N²),
                      adapt(to, fields.tupled_tracer_diffusivities),
                      adapt(to, fields.tupled_implicit_linear_coefficients))
 
@@ -259,6 +264,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     Kᶜ = ZFaceField(grid, boundary_conditions=bcs.Kᶜ)
     Kᵉ = ZFaceField(grid, boundary_conditions=bcs.Kᵉ)
     Lᵉ = CenterField(grid)
+    N² = ZFaceField(grid)
 
     # Indexed by the `Val(id)` the model hands to `diffusivity` and `implicit_linear_coefficient`:
     # TKE is transported with `Kᵉ` and damped with `Lᵉ`, every other scalar is transported with
@@ -266,7 +272,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
     implicit_linear_coefficients = NamedTuple(name => name === TKE_NAME ? Lᵉ : ZeroField() for name in tracer_names)
 
-    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients)
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, Lᵉ, N², tracer_diffusivities, implicit_linear_coefficients)
 end
 
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
@@ -309,18 +315,25 @@ The stratification length ``ℓᴺ = Cᴺ \\sqrt{e} / N`` at (Center, Center, Fa
 turbulent kinetic energy field `e` at the centers, whose square root — floored at `minimum_tke` —
 is reconstructed at the face; infinite where ``N² ≤ 0``.
 """
-@inline function stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, tracers, buoyancy)
+@inline stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, tracers, buoyancy) =
+    stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, ∂z_b(i, j, k, grid, buoyancy, tracers))
+
+@inline function stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
     FT = eltype(grid)
-    N² = ∂z_b(i, j, k, grid, buoyancy, tracers)
     N²⁺ = clip(N²)
     Cᴺ = closure.mixing_length.Cᴺ
     ℓᴺ = Cᴺ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e) / sqrt(N²⁺)
     return ifelse(N²⁺ == 0, FT(Inf), ℓᴺ)
 end
 
-@inline function stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy)
+@inline stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy) =
+    reconstructed_stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, ∂z_b, buoyancy, tracers)
+
+# `N²_args` is `(∂z_b, buoyancy, tracers)` (evaluated) or `(stored_buoyancy_frequency, N²)` (the
+# values the diffusivity kernel stored): the same face values either way.
+@inline function reconstructed_stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, N²_args...)
     FT = eltype(grid)
-    N² = ℑbzᵃᵃᶜ(i, j, k, grid, ∂z_b, buoyancy, tracers)
+    N² = ℑbzᵃᵃᶜ(i, j, k, grid, N²_args...)
     N²⁺ = clip(N²)
     Cᴺ = closure.mixing_length.Cᴺ
     ℓᴺ = Cᴺ * turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
@@ -335,9 +348,12 @@ turbulent kinetic energy field `e` at the centers, whose square root — floored
 is reconstructed at the face. The same function computes the closure's diffusivities and, evaluated
 in a `KernelFunctionOperation` at (Center, Center, Face), diagnoses ``ℓ`` from the model state.
 """
-@inline function mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, tracers, buoyancy)
+@inline mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, tracers, buoyancy) =
+    mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, ∂z_b(i, j, k, grid, buoyancy, tracers))
+
+@inline function mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
     d = height_above_bottomᶜᶜᶠ(i, j, k, grid)
-    ℓᴺ = stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, tracers, buoyancy)
+    ℓᴺ = stratification_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
     ℓ = min(d, ℓᴺ)
     return ifelse(isnan(ℓ), d, ℓ)
 end
@@ -347,9 +363,12 @@ $(TYPEDSIGNATURES)
 
 `mixing_lengthᶜᶜᶠ` at cell centers, where the dissipation lives with ``e``.
 """
-@inline function mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy)
+@inline mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy) =
+    stored_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, ∂z_b, buoyancy, tracers)
+
+@inline function stored_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, N²_args...)
     d = height_above_bottomᶜᶜᶜ(i, j, k, grid)
-    ℓᴺ = stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy)
+    ℓᴺ = reconstructed_stratification_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, N²_args...)
     ℓ = min(d, ℓᴺ)
     return ifelse(isnan(ℓ), d, ℓ)
 end
@@ -367,7 +386,8 @@ end
     # The one diffusivity the closure forms, ℓ √e — with √e floored at the minimum TKE and
     # reconstructed from the centers to the face — which the stability functions scale into
     # Kᵘ, Kᶜ and Kᵉ.
-    ℓ = mixing_lengthᶜᶜᶠ(i, j, k, grid, closure_ij, e, tracers, buoyancy)
+    N² = ∂z_b(i, j, k, grid, buoyancy, tracers)
+    ℓ = mixing_lengthᶜᶜᶠ(i, j, k, grid, closure_ij, e, N²)
     K = ℓ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
 
     Sᵘ = momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, tracers, buoyancy)
@@ -383,6 +403,7 @@ end
         closure_fields.Kᵘ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵘ))
         closure_fields.Kᶜ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᶜ))
         closure_fields.Kᵉ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵉ))
+        closure_fields.N²[i, j, k] = N²
     end
 end
 
@@ -400,6 +421,10 @@ Buoyancy production ``-Kᶜ N²`` at (Center, Center, Face); negative in stable 
 """
 @inline buoyancy_productionᶜᶜᶠ(i, j, k, grid, Kᶜ, buoyancy, tracers) = @inbounds -Kᶜ[i, j, k] * ∂z_b(i, j, k, grid, buoyancy, tracers)
 
+# The same products from the N² the diffusivity kernel stored (`TKEClosureFields.N²`).
+@inline stored_buoyancy_productionᶜᶜᶠ(i, j, k, grid, Kᶜ, N²) = @inbounds -Kᶜ[i, j, k] * N²[i, j, k]
+@inline stored_buoyancy_frequency(i, j, k, grid, N²) = @inbounds N²[i, j, k]
+
 """
 $(TYPEDSIGNATURES)
 
@@ -409,10 +434,10 @@ the dissipation rate ``ω = Sᴰ \\sqrt{e} / ℓ`` — or, where ``e`` is negati
 remove. Following CATKE, these are the terms treated implicitly in ``e``, so that ``e`` stays
 positive for any time step.
 """
-@inline function tke_sink_rate(i, j, k, grid, closure, e, B, velocities, tracers, buoyancy)
+@inline function tke_sink_rate(i, j, k, grid, closure, e, B, velocities, tracers, buoyancy, N²)
     eᵐⁱⁿ = closure.minimum_tke
     eᵢ = @inbounds e[i, j, k]
-    ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, tracers, buoyancy)
+    ℓ = stored_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, stored_buoyancy_frequency, N²)
     Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, tracers, buoyancy)
 
     # `minimum_tke` floors only the turbulent velocity of the mixing length above; the dissipation
@@ -436,8 +461,8 @@ end
     closure_ij = getclosure(i, j, closure)
     e = tracers[TKE_NAME]
 
-    B = ℑbzᵃᵃᶜ(i, j, k, grid, buoyancy_productionᶜᶜᶠ, closure_fields.Kᶜ, buoyancy, tracers)
-    ω = tke_sink_rate(i, j, k, grid, closure_ij, e, B, velocities, tracers, buoyancy)
+    B = ℑbzᵃᵃᶜ(i, j, k, grid, stored_buoyancy_productionᶜᶜᶠ, closure_fields.Kᶜ, closure_fields.N²)
+    ω = tke_sink_rate(i, j, k, grid, closure_ij, e, B, velocities, tracers, buoyancy, closure_fields.N²)
     active = !inactive_cell(i, j, k, grid)
 
     @inbounds Lᵉ[i, j, k] = - ω * active
@@ -489,7 +514,7 @@ to centers — to the tendency of the `ρe` tracer. Under an explicit time discr
     closure_ij = getclosure(i, j, closure)
 
     P = ℑbzᵃᵃᶜ(i, j, k, grid, shear_productionᶜᶜᶠ, closure_fields.Kᵘ, velocities.u, velocities.v)
-    B = ℑbzᵃᵃᶜ(i, j, k, grid, buoyancy_productionᶜᶜᶠ, closure_fields.Kᶜ, buoyancy, tracers)
+    B = ℑbzᵃᵃᶜ(i, j, k, grid, stored_buoyancy_productionᶜᶜᶠ, closure_fields.Kᶜ, closure_fields.N²)
     B⁺ = max(0, B)
 
     ρᵢ = @inbounds ρ[i, j, k]
