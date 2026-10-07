@@ -109,7 +109,10 @@ end
         closed in (true, false), speed in (0, 1)
         model = sedimentation_column(FT, phase, donor_temperature, closed, speed; compressible)
         data = sedimentation_temperature_rates(model, phase, compressible)
-        tolerance = FT === Float32 ? 2e-6 : 2e-9 # K/s; includes host finite-difference error
+        # The reference rate is exactly zero in the second cell and whenever nothing falls
+        # (speed = 0), so the comparison needs an absolute tolerance: the FT roundoff of the
+        # device tendencies plus the error of the host finite differences, in K/s.
+        tolerance = FT === Float32 ? 2e-6 : 2e-9
         @test maximum(abs.(data.rate .- data.reference_rate)) < tolerance
         @test abs(sum(data.energy_rate) * 100 - data.boundary_energy_rate) < sum(data.capacity) * 100 * tolerance
         if closed

@@ -821,16 +821,14 @@ using Oceananigans.TimeSteppers: update_state!
         G_expected = expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φˡ, χˡ, hˡ, β) .+
                      expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φⁱ, χⁱ, hⁱ, β)
 
-        scale = maximum(abs.(G))
-        tolerance = scale * sqrt(eps(FT))
-        @test scale > 0
-        @test all(abs.(G .- G_expected) .<= tolerance)
+        @test maximum(abs.(G)) > 0
+        @test G ≈ G_expected
 
         # Binning qʷⁱ as ice instead (the ice content at wⁱ) must not reproduce the model:
         # the difference is the fusion enthalpy of the liquid-on-ice flux.
         Φʷ = @. wⁱ * qʷⁱᶠ
         G_as_ice = G_expected .+ expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φʷ, χⁱ .- χˡ, hⁱ .- hˡ, β)
-        @test !all(abs.(G .- G_as_ice) .<= tolerance)
+        @test !(G ≈ G_as_ice)
     end
 
     @testset "P3 bottom precipitation flux" begin

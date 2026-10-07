@@ -487,8 +487,7 @@ end
     ρθ⁰ = Array(interior(ρθ, 1, 1, :))
     Breeze.AtmosphereModels.implicit_sedimentation_step!(model, Δt, model.velocities, uniform_content)
     Δρθ = Array(interior(ρθ, 1, 1, :)) .- ρθ⁰
-    tolerance = sqrt(eps(FT)) * maximum(abs.(χ .* Δρqʳ))
-    @test all(abs.(Δρθ .- χ .* Δρqʳ) .<= tolerance)
+    @test Δρθ ≈ χ .* Δρqʳ
     @test sum(Δρqʳ) < 0
     @test sum(Δρθ) > 0
 
@@ -532,7 +531,7 @@ end
     ρqʳ¹ = Array(interior(ρqʳₜ, 1, 1, :))
     moved = maximum(abs.(χ .* (ρqʳ¹ .- Array(interior(ρqʳₜ⁰, 1, 1, :)))))
     @test moved > 0
-    @test all(abs.(Array(interior(ρθₜ, 1, 1, :)) .- χ .* ρqʳ¹) .<= sqrt(eps(FT)) * maximum(abs.(χ .* ρqʳ¹)))
+    @test Array(interior(ρθₜ, 1, 1, :)) ≈ χ .* ρqʳ¹
 
     # The reverse order leaves the moved content out of the transport that acted on the rest of ρθ.
     interior(ρθₜ) .= χ .* interior(ρqʳₜ⁰)
@@ -579,7 +578,7 @@ end
     Δρθₐ = Array(interior(ρθₐ, 1, 1, :)) .- ρθₐ⁰
     qᵈₐ = Array(interior(dynamics_density(acoustic_model.dynamics), 1, 1, :)) ./
           Array(interior(total_density(acoustic_model.dynamics), 1, 1, :))
-    @test all(abs.(Δρθₐ .- qᵈₐ .* χ .* Δρqʳₐ) .<= sqrt(eps(FT)) * maximum(abs.(χ .* Δρqʳₐ)))
+    @test Δρθₐ ≈ qᵈₐ .* χ .* Δρqʳₐ
 
     # A full acoustic step at that fall Courant number leaves finite fields.
     interior(μₐ.ρqʳ, 1, 1, :) .= Oceananigans.on_architecture(default_arch, ρqʳₐ⁰)
@@ -636,7 +635,7 @@ end
     content_moved = maximum(abs.(Array(interior(ρθ, 1, 1, :)) .- ρθ_explicit))
     @test content_moved > 0
     solve_ρθ!()
-    @test all(abs.(Array(interior(ρθ, 1, 1, :)) .- ρθ¹) .<= sqrt(eps(FT)) * maximum(abs.(ρθ¹)))
+    @test Array(interior(ρθ, 1, 1, :)) ≈ ρθ¹
 
     # ... whereas solving first leaves the moved content out of the transport the solve applied.
     interior(ρθ) .= interior(ρθ⁰) .+ Δt .* interior(Gρθ)
@@ -730,7 +729,7 @@ end
     qᵈ = column(dynamics_density(model.dynamics)) ./ column(total_density(model.dynamics))
     Sθ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, χ, h, β; coupling = qᵈ)
     tolerance = sqrt(eps(FT)) * maximum(abs.(Sθ_expected))
-    @test all(abs.(Sθ .- Sθ_expected) .<= tolerance)
+    @test Sθ ≈ Sθ_expected
 
     # ... and not with the predictor's, at which the explicit fractions of the combined and the
     # transport velocity are clipped to the same speed and the fluxes cancel, so a transport
@@ -1013,7 +1012,7 @@ end
         scale = maximum(abs.(G))
         tolerance = scale * sqrt(eps(FT))
         @test scale > 0
-        @test all(abs.(G .- G_expected) .<= tolerance)
+        @test G ≈ G_expected
         @test G[3] < 0                 # rain arriving below the blob pre-cools
         @test G[5] > 0                 # rain leaving the blob top leaves latent warming behind
 
@@ -1107,11 +1106,9 @@ end
     expected(renormalize) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; renormalize), enthalpy, β;
                                                             coupling = qᵈ)
 
-    scale = maximum(abs.(G))
-    tolerance = scale * sqrt(eps(FT))
-    @test scale > 0
-    @test all(abs.(G .- expected(true)) .<= tolerance)
-    @test any(abs.(G .- expected(false)) .> tolerance)
+    @test maximum(abs.(G)) > 0
+    @test G ≈ expected(true)
+    @test !(G ≈ expected(false))
     @test G[3] < 0 # rain arriving below the blob pre-cools
     @test G[5] > 0 # rain leaving the blob top leaves latent warming behind
 
@@ -1311,7 +1308,7 @@ end
     ΔTs = ΔT[:StaticEnergy]
     scale = maximum(abs.(ΔTs))
     @test scale > 0
-    @test all(abs.(ΔTθ .- ΔTs) .<= 1e-3 * scale)
+    @test ΔTθ ≈ ΔTs rtol=1e-3
     @test ΔTs[4] < 0 # rain from the colder cell above cools the blob's lower cell
 end
 
@@ -1365,17 +1362,16 @@ end
         1, 1, k, grid, condensates, wᵗ, uniform_content, model.dynamics, model.thermodynamic_constants,
         model.microphysics, μ, specific_prognostic_moisture(model), model.temperature))
     mass(advection, k) = @allowscalar Breeze.AtmosphereModels.div_ρUc(1, 1, k, grid, advection, ρᵣ, U, μ.qʳ)
-    atol = sqrt(eps(FT)) * abs(χ) * FT(1e-3) * 2 / Δz
+    column_of(f) = [f(k) for k in 1:Nz]
+    limited_heat = column_of(k -> heat(limited, k))
 
-    # Cell by cell, the heat divergence is χ times the mass divergence the tracer tendency
+    # Down the column, the heat divergence is χ times the mass divergence the tracer tendency
     # applies with its limited reconstructions...
-    for k in 1:Nz
-        @test isapprox(heat(limited, k), χ * mass(rain.advection, k); atol)
-    end
+    @test limited_heat ≈ χ .* column_of(k -> mass(rain.advection, k))
 
     # ... and the limiter does act: the unlimited WENO fluxes, which the coupling used to
     # take, move heat somewhere the limited mass flux does not.
-    @test any(k -> !isapprox(heat(limited, k), heat(unlimited, k); atol), 1:Nz)
+    @test !(limited_heat ≈ column_of(k -> heat(unlimited, k)))
 end
 
 @testset "Mixed-phase sedimenting condensates and snow bottom flux [$(FT)]" for FT in test_float_types()
