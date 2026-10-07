@@ -136,15 +136,11 @@ using RRTMGP
         resolve_column_batch_rows = Base.get_extension(Breeze, :BreezeRRTMGPExt).resolve_column_batch_rows
 
         @test resolve_column_batch_rows(nothing, 4, 6) == 6  # unbatched
-        @test resolve_column_batch_rows(8, 4, 6) == 2        # whole rows that divide Ny
+        @test resolve_column_batch_rows(8, 4, 6) == 2        # whole rows
         @test resolve_column_batch_rows(5, 4, 6) == 2        # rounded up to whole rows
-        @test resolve_column_batch_rows(12, 4, 6) == 3
-        @test resolve_column_batch_rows(13, 4, 6) == 6       # rounded up to a divisor of Ny
+        @test resolve_column_batch_rows(13, 4, 6) == 4       # rows need not divide Ny
+        @test resolve_column_batch_rows(3, 1, 7) == 3        # nor a prime Ny
         @test resolve_column_batch_rows(100, 4, 6) == 6      # larger than the domain
-
-        # A prime Ny has no divisor near the request, so the batch lands far above it.
-        rows = @test_logs (:warn, r"rounded up") resolve_column_batch_rows(3, 1, 7)
-        @test rows == 7
 
         @test_throws ArgumentError resolve_column_batch_rows(0, 4, 6)
     end
@@ -190,20 +186,23 @@ using RRTMGP
         end
 
         unbatched = solve_clear_sky(nothing)
-        batched = solve_clear_sky(2Nx)  # three batches of two latitude rows
-
         @test unbatched.longwave_solver.grid_params.ncol == Nx * Ny
-        @test batched.longwave_solver.grid_params.ncol == 2Nx
 
-        for name in (:upwelling_longwave_flux, :downwelling_longwave_flux,
-                     :upwelling_shortwave_flux, :downwelling_shortwave_flux,
-                     :flux_divergence)
+        # Three disjoint batches of two rows, then two batches of four rows that overlap on rows 3-4
+        for batch_rows in (2, 4)
+            batched = solve_clear_sky(batch_rows * Nx)
+            @test batched.longwave_solver.grid_params.ncol == batch_rows * Nx
 
-            ℐ = Array(interior(getproperty(unbatched, name)))
-            ℐᵇ = Array(interior(getproperty(batched, name)))
+            for name in (:upwelling_longwave_flux, :downwelling_longwave_flux,
+                         :upwelling_shortwave_flux, :downwelling_shortwave_flux,
+                         :flux_divergence)
 
-            @test all(isfinite, ℐ)
-            @test ℐᵇ == ℐ
+                ℐ = Array(interior(getproperty(unbatched, name)))
+                ℐᵇ = Array(interior(getproperty(batched, name)))
+
+                @test all(isfinite, ℐ)
+                @test ℐᵇ == ℐ
+            end
         end
 
         # The fluxes vary across the domain, so the comparison is not between uniform fields.

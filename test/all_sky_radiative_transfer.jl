@@ -184,4 +184,68 @@ using RRTMGP
         # Should run without error
         @test all(isfinite, interior(radiation.upwelling_longwave_flux))
     end
+
+    # Breeze's cloud fraction is binary, so McICA's random draws cannot change the sampled cloud
+    # mask (`rand() ≥ 1 - 1` always, `rand() ≥ 1 - 0` never). All-sky radiation with clouds is then
+    # deterministic and column-local, and batching must reproduce the unbatched fluxes exactly.
+    @testset "Column batching reproduces the unbatched cloudy solve [$(FT)]" begin
+        Oceananigans.defaults.FloatType = FT
+
+        Nx, Ny, Nz = 4, 6, 8
+        grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz),
+                               x=(0, 1kilometers), y=(0, 1kilometers), z=(0, 10kilometers),
+                               topology=(Periodic, Periodic, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         base_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+        microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+        solar_position = ApparentSolarPosition(coordinate = (0, 45), epoch = DateTime(2024, 6, 21, 12))
+
+        # Moisture varies in y, so some columns are cloudy and others are not
+        L = 1kilometers
+        θ(x, y, z) = 300 + 0.005 * z / 1000 + 2 * sin(2π * x / L)
+        qᵗ(x, y, z) = 0.020 * (y / L)^2 * exp(-z / 3000)
+
+        function solve_all_sky(column_batch_size)
+            radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
+                                               solar_position,
+                                               surface_temperature = 300,
+                                               surface_albedo = 0.1,
+                                               column_batch_size)
+
+            model = AtmosphereModel(grid; dynamics, microphysics, radiation,
+                                    clock = Clock(time=DateTime(2024, 6, 21, 12)),
+                                    formulation = :LiquidIcePotentialTemperature)
+            set!(model; θ, qᵗ)
+
+            return radiation, model
+        end
+
+        unbatched, model = solve_all_sky(nothing)
+
+        # Clouds in some columns but not all
+        column_liquid = sum(Array(interior(model.microphysical_fields.qˡ)), dims=3)
+        @test any(column_liquid .> 0)
+        @test any(column_liquid .== 0)
+
+        # Three disjoint batches of two rows, then two batches of four rows that overlap on rows 3-4
+        for batch_rows in (2, 4)
+            batched, _ = solve_all_sky(batch_rows * Nx)
+            @test batched.longwave_solver.grid_params.ncol == batch_rows * Nx
+
+            for name in (:upwelling_longwave_flux, :downwelling_longwave_flux,
+                         :upwelling_shortwave_flux, :downwelling_shortwave_flux,
+                         :flux_divergence)
+
+                ℐ = Array(interior(getproperty(unbatched, name)))
+                ℐᵇ = Array(interior(getproperty(batched, name)))
+
+                @test all(isfinite, ℐ)
+                @test ℐᵇ == ℐ
+            end
+        end
+    end
 end

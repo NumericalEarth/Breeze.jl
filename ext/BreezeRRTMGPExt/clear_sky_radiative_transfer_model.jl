@@ -48,12 +48,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
-- `column_batch_size`: Number of columns solved at once, trading speed for memory (default:
-  `nothing`, one batch). Sizing the solver workspace for a batch rather than the whole domain
-  caps the dominant RRTMGP allocation. The request is rounded up to whole latitude rows and then
-  to a divisor of `Ny`, with a warning if that lands more than 2× above it. Costs GPU occupancy:
-  the solver runs one thread per column, so batches below ~10⁵ columns take as long as a larger
-  one and step time then scales with the batch count.
+$(column_batch_size_docstring)
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::ClearSkyOptics,
@@ -108,9 +103,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # RRTMGP grid + context. `grid_params` sizes the solver workspace (one batch), not the state.
     context = rrtmgp_context(arch)
     ArrayType = ClimaComms.array_type(context.device)
-    batch_rows = resolve_column_batch_rows(column_batch_size, Nx, Ny)
-    Nc_batch = Nx * batch_rows
-    grid_params = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc_batch)
+    grid_params = rrtmgp_grid_params(FT, context, grid, column_batch_size)
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
     radiation_method = ClearSkyRadiation(false)
