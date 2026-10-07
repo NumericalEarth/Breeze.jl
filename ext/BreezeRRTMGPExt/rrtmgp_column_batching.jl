@@ -56,7 +56,7 @@ function resolve_column_batch_rows(column_batch_size, Nx, Ny)
 end
 
 #####
-##### Column views of RRTMGP's state types
+##### Batch views of RRTMGP's state types
 #####
 #
 # Each rebuilds the struct around `view`s of the column dimension; non-column members pass
@@ -66,73 +66,73 @@ end
 # RRTMGP has no column-subsetting API; the fix is upstream — a way to rebind `bcs` on an existing
 # workspace, or a column-range argument on `update_lw_fluxes!`/`update_sw_fluxes!`.
 
-@inline column_view(::Nothing, columns) = nothing
+@inline batch_view(::Nothing, columns) = nothing
 
 # Column index is the trailing dimension, except for the incident-flux fields below.
-@inline column_view(a::AbstractVector, columns) = view(a, columns)
-@inline column_view(a::AbstractMatrix, columns) = view(a, :, columns)
-@inline column_view(a::AbstractArray{<:Any, 3}, columns) = view(a, :, :, columns)
+@inline batch_view(a::AbstractVector, columns) = view(a, columns)
+@inline batch_view(a::AbstractMatrix, columns) = view(a, :, columns)
+@inline batch_view(a::AbstractArray{<:Any, 3}, columns) = view(a, :, :, columns)
 
 # `inc_flux` and `inc_flux_diffuse` are `(ncol, ngpt)` — column *first*; RRTMGP indexes them
 # `inc_flux[gcol, igpt]`.
-@inline incident_flux_view(::Nothing, columns) = nothing
-@inline incident_flux_view(a::AbstractMatrix, columns) = view(a, columns, :)
+@inline incident_flux_batch_view(::Nothing, columns) = nothing
+@inline incident_flux_batch_view(a::AbstractMatrix, columns) = view(a, columns, :)
 
-@inline column_view(vmr::VmrGM, columns) =
-    VmrGM(column_view(vmr.vmr_h2o, columns),
-          column_view(vmr.vmr_o3, columns),
+@inline batch_view(vmr::VmrGM, columns) =
+    VmrGM(batch_view(vmr.vmr_h2o, columns),
+          batch_view(vmr.vmr_o3, columns),
           vmr.vmr)                              # per gas, not per column
 
-@inline column_view(cloud_state::CloudState, columns) =
-    CloudState(column_view(cloud_state.cld_r_eff_liq, columns),
-               column_view(cloud_state.cld_r_eff_ice, columns),
-               column_view(cloud_state.cld_path_liq, columns),
-               column_view(cloud_state.cld_path_ice, columns),
-               column_view(cloud_state.cld_frac, columns),
-               column_view(cloud_state.cld_cover_sw, columns),
-               column_view(cloud_state.cld_cover_lw, columns),
-               column_view(cloud_state.mask_lw, columns),
-               column_view(cloud_state.mask_sw, columns),
+@inline batch_view(cloud_state::CloudState, columns) =
+    CloudState(batch_view(cloud_state.cld_r_eff_liq, columns),
+               batch_view(cloud_state.cld_r_eff_ice, columns),
+               batch_view(cloud_state.cld_path_liq, columns),
+               batch_view(cloud_state.cld_path_ice, columns),
+               batch_view(cloud_state.cld_frac, columns),
+               batch_view(cloud_state.cld_cover_sw, columns),
+               batch_view(cloud_state.cld_cover_lw, columns),
+               batch_view(cloud_state.mask_lw, columns),
+               batch_view(cloud_state.mask_sw, columns),
                cloud_state.mask_type,
                cloud_state.ice_rgh)
 
-@inline column_view(aerosol_state::AerosolState, columns) =
-    AerosolState(column_view(aerosol_state.aod_sw_ext, columns),
-                 column_view(aerosol_state.aod_sw_sca, columns),
-                 column_view(aerosol_state.aero_mask, columns),
-                 column_view(aerosol_state.aero_size, columns),
-                 column_view(aerosol_state.aero_mass, columns))
+@inline batch_view(aerosol_state::AerosolState, columns) =
+    AerosolState(batch_view(aerosol_state.aod_sw_ext, columns),
+                 batch_view(aerosol_state.aod_sw_sca, columns),
+                 batch_view(aerosol_state.aero_mask, columns),
+                 batch_view(aerosol_state.aero_size, columns),
+                 batch_view(aerosol_state.aero_mass, columns))
 
-@inline column_view(as::AtmosphericState, columns) =
-    AtmosphericState(column_view(as.lon, columns),
-                     column_view(as.lat, columns),
-                     column_view(as.layerdata, columns),
-                     column_view(as.p_lev, columns),
-                     column_view(as.t_lev, columns),
-                     column_view(as.t_sfc, columns),
-                     column_view(as.vmr, columns),
-                     column_view(as.cloud_state, columns),
-                     column_view(as.aerosol_state, columns))
+@inline batch_view(as::AtmosphericState, columns) =
+    AtmosphericState(batch_view(as.lon, columns),
+                     batch_view(as.lat, columns),
+                     batch_view(as.layerdata, columns),
+                     batch_view(as.p_lev, columns),
+                     batch_view(as.t_lev, columns),
+                     batch_view(as.t_sfc, columns),
+                     batch_view(as.vmr, columns),
+                     batch_view(as.cloud_state, columns),
+                     batch_view(as.aerosol_state, columns))
 
-@inline column_view(bcs::LwBCs, columns) =
-    LwBCs(column_view(bcs.sfc_emis, columns),
-          incident_flux_view(bcs.inc_flux, columns))
+@inline batch_view(bcs::LwBCs, columns) =
+    LwBCs(batch_view(bcs.sfc_emis, columns),
+          incident_flux_batch_view(bcs.inc_flux, columns))
 
-@inline column_view(bcs::SwBCs, columns) =
-    SwBCs(column_view(bcs.cos_zenith, columns),
-          column_view(bcs.toa_flux, columns),
-          column_view(bcs.sfc_alb_direct, columns),
-          incident_flux_view(bcs.inc_flux_diffuse, columns),
-          column_view(bcs.sfc_alb_diffuse, columns))
+@inline batch_view(bcs::SwBCs, columns) =
+    SwBCs(batch_view(bcs.cos_zenith, columns),
+          batch_view(bcs.toa_flux, columns),
+          batch_view(bcs.sfc_alb_direct, columns),
+          incident_flux_batch_view(bcs.inc_flux_diffuse, columns),
+          batch_view(bcs.sfc_alb_diffuse, columns))
 
 # Only `bcs` is sliced: the optics, sources, flux buffers and cache are the shared batch-width
 # workspace, and `columns` is a global range. Allocates nothing.
-@inline column_view(lws::TwoStreamLWRTE, columns) =
-    TwoStreamLWRTE(lws.context, lws.op, lws.src, column_view(lws.bcs, columns),
+@inline batch_view(lws::TwoStreamLWRTE, columns) =
+    TwoStreamLWRTE(lws.context, lws.op, lws.src, batch_view(lws.bcs, columns),
                    lws.fluxb, lws.flux, lws.band_flux, lws.state_cache)
 
-@inline column_view(sws::TwoStreamSWRTE, columns) =
-    TwoStreamSWRTE(sws.context, sws.op, sws.src, column_view(sws.bcs, columns),
+@inline batch_view(sws::TwoStreamSWRTE, columns) =
+    TwoStreamSWRTE(sws.context, sws.op, sws.src, batch_view(sws.bcs, columns),
                    sws.fluxb, sws.flux, sws.band_flux, sws.state_cache)
 
 """
@@ -170,7 +170,7 @@ function solve_radiation_batches!(rtm, solver, grid)
         return nothing
     end
 
-    # TODO: open-codes `update_lw_fluxes!`/`update_sw_fluxes!` to inject a column view, so
+    # TODO: open-codes `update_lw_fluxes!`/`update_sw_fluxes!` to inject a batch view, so
     # `longwave_lookups`/`shortwave_lookups` must track RRTMGP's per-method dispatch.
     lookups_lw = longwave_lookups(solver.lookups, solver.radiation_method)
     lookups_sw = shortwave_lookups(solver.lookups, solver.radiation_method)
@@ -179,13 +179,13 @@ function solve_radiation_batches!(rtm, solver, grid)
     for j_offset in 0:batch_rows:(Ny - 1)
         columns = (j_offset * Nx + 1):((j_offset + batch_rows) * Nx)
 
-        as = column_view(solver.as, columns)
-        batch_scaling = column_view(scaling, columns)
+        as = batch_view(solver.as, columns)
+        batch_scaling = batch_view(scaling, columns)
 
-        solve_lw!(column_view(solver.lws, columns), as, lookups_lw..., batch_scaling)
+        solve_lw!(batch_view(solver.lws, columns), as, lookups_lw..., batch_scaling)
         update_presentation!(solver.presented_flux_lw, solver.lws.flux)
 
-        solve_sw!(column_view(solver.sws, columns), as, lookups_sw..., batch_scaling)
+        solve_sw!(batch_view(solver.sws, columns), as, lookups_sw..., batch_scaling)
         update_presentation!(solver.presented_flux_sw, solver.sws.flux)
 
         copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset)
