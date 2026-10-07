@@ -130,15 +130,12 @@ end
 
 @inline function AtmosphereModels.sedimentation_mass_fluxes(i, j, k, grid, advection, wᵗ, wˢ, q)
     w = SumOfArrays{2}(wᵗ, wˢ)
-    F⁻ = (sedimentation_mass_flux(i, j, k,   grid, advection, w,  q),
-          sedimentation_mass_flux(i, j, k,   grid, advection, wᵗ, q))
-    F⁺ = (sedimentation_mass_flux(i, j, k+1, grid, advection, w,  q),
-          sedimentation_mass_flux(i, j, k+1, grid, advection, wᵗ, q))
+    F⁻ = (_advective_tracer_flux_z(i, j, k,   grid, advection, w,  q),
+          _advective_tracer_flux_z(i, j, k,   grid, advection, wᵗ, q))
+    F⁺ = (_advective_tracer_flux_z(i, j, k+1, grid, advection, w,  q),
+          _advective_tracer_flux_z(i, j, k+1, grid, advection, wᵗ, q))
     return F⁻, F⁺
 end
-
-@inline sedimentation_mass_flux(i, j, k, grid, advection, w, q) =
-    _advective_tracer_flux_z(i, j, k, grid, advection, w, q)
 
 # Bounds-preserving WENO rescales its face reconstructions by the cached limiter of the cell
 # each one draws on, so the fluxes of cell k are rebuilt from the same limited reconstructions
