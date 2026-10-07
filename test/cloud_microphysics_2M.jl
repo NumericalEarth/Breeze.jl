@@ -203,10 +203,9 @@ end
     ρ_reference_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
     expected_flux = -ρ_face * (wᶜˡ * qᶜˡ + wʳ * qʳ)
 
-    # `set!` weights the specific condensate inputs by the supplied `ρ` and adds the
-    # resulting partial densities to it, so the reconciled total density is
-    # ρ (1 + qᶜˡ + qʳ) evaluated with the *input* specific values.
-    @test ρ_face ≈ FT(2) * (1 + FT(0.001) + FT(0.001))
+    # A supplied `ρ` is the total density: `set!` weights the specific condensate inputs by it
+    # and backs out the dry density ρᵈ = ρ − Σρqˣ, so the total density stays the supplied value.
+    @test ρ_face ≈ FT(2)
     @test !isapprox(ρ_face, ρ_reference_face)
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] > 0

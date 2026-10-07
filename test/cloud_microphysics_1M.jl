@@ -365,10 +365,9 @@ end
     ρ_reference_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
     expected_flux = -ρ_face * (wᶜˡ * qᶜˡ + wʳ * qʳ)
 
-    # `set!` weights the specific condensate inputs by the supplied `ρ` and adds the
-    # resulting partial densities to it, so the reconciled total density is
-    # ρ (1 + qᶜˡ + qʳ) evaluated with the *input* specific values.
-    @test ρ_face ≈ FT(2) * (1 + FT(0.0001) + FT(0.005))
+    # A supplied `ρ` is the total density: `set!` weights the specific condensate inputs by it
+    # and backs out the dry density ρᵈ = ρ − Σρqˣ, so the total density stays the supplied value.
+    @test ρ_face ≈ FT(2)
     @test !isapprox(ρ_face, ρ_reference_face)
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] > 0
@@ -692,9 +691,10 @@ end
         return falling .- suspended
     end
 
-    # ρθ's tendency is built as the acoustic stage builds it, ρqʳ's as `update_state!` does.
+    # The acoustic stage builds both tendencies in `update_state!`'s `compute_tendencies!`: ρθ's
+    # advected by the predictor velocity, its sedimentation term and ρqʳ's by the transport velocity.
     function slow_ρθ_tendency()
-        Breeze.TimeSteppers.compute_slow_scalar_tendencies!(model)
+        Breeze.AtmosphereModels.compute_tendencies!(model)
         return column(Gρθ)
     end
 
