@@ -38,6 +38,18 @@ GPU "dynamic invocation error" → run on CPU. If it passes, the issue is GPU-sp
 | `quality_assurance.jl` | Explicit imports, Aqua.jl |
 | `doctests.jl` | Doctest verification |
 | `reactant_*.jl` | Reactant compilation |
+| `distributed/*.jl` | Distributed architecture test driver |
+| `mpi/*.jl` | Implementation of distributed test |
+
+## Distributed (MPI) Tests
+
+Multi-rank tests use a driver/worker split, following Oceananigans.jl's `test/distributed`:
+
+- `test/distributed/<name>.jl` is a normal ParallelTestRunner test (a *driver*). It launches
+  `mpiexec -n N julia ... test/mpi/<name>.jl <args>` and checks the exit status and a sentinel line.
+- `test/mpi/<name>.jl` is the *worker*, run in lockstep on every rank. `test/mpi/` is excluded from
+  autodiscovery in `runtests.jl`. Workers can be run stand-alone:
+  `mpiexec -n 4 julia --project=test test/mpi/acoustic_wave.jl xy`.
 
 ## Writing Tests
 

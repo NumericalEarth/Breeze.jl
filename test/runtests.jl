@@ -15,6 +15,9 @@ delete!(testsuite, "setup")
 delete!(testsuite, "reactant/weno_compilation_setup")
 delete!(testsuite, "reactant/microphysics_compilation_setup")
 
+# MPI worker scripts are launched on several ranks by the drivers in `distributed/`, never run directly.
+filter!(((name, _),) -> !startswith(name, "mpi/"), testsuite)
+
 if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
     # limitation).
