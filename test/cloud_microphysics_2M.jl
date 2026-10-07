@@ -367,6 +367,17 @@ end
     @test categories_no_act.aerosol_activation === nothing
 end
 
+@testset "AerosolActivation with CompressibleDynamics [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 1000))
+    model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), microphysics=TwoMomentCloudMicrophysics())
+
+    # Supersaturated air in an updraft activates cloud droplets
+    set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.025, w=1)
+    time_step!(model, 0.01)
+    @test maximum(model.microphysical_fields.nᶜˡ) > 0
+end
+
 @testset "AerosolActivation in parcel model [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 

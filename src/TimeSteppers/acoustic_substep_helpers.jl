@@ -9,10 +9,7 @@ using Oceananigans.Utils: launch!, KernelParameters
 using Oceananigans.TimeSteppers: implicit_step!
 
 using Breeze.AtmosphereModels:
-    AtmosphereModels,
     AtmosphereModel,
-    SlowTendencyMode,
-    advecting_momentum,
     advecting_vertical_velocity,
     dynamics_density,
     total_density,
@@ -23,12 +20,7 @@ using Breeze.AtmosphereModels:
     dynamics_prognostic_fields,
     implicit_advection_velocities,
     implicit_step_scheme,
-    implicit_sedimentation_step!,
-    compute_x_momentum_tendency!,
-    compute_y_momentum_tendency!,
-    compute_z_momentum_tendency!,
-    compute_dynamics_tendency!,
-    specific_prognostic_moisture
+    implicit_sedimentation_step!
 
 using Breeze.CompressibleEquations: CompressibleDynamics
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
@@ -37,69 +29,18 @@ const TerrainCompressibleAcousticModel =
     AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}}
 
 #####
-##### Slow momentum tendencies
+##### Thermodynamic-variable transport velocity
 #####
-##### `SlowTendencyMode` zeros the pressure-gradient force and buoyancy in the
-##### momentum tendency assembly. The PGF and buoyancy are handled in
-##### linearized form inside the substep loop, so the slow tendency carries
-##### only advection, Coriolis, closure, and forcing.
-#####
-
-slow_momentum_advection_momentum(model) = model.momentum
-
-function slow_momentum_advection_momentum(model::TerrainCompressibleAcousticModel)
-    return advecting_momentum(model)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute slow momentum tendencies (advection, Coriolis, closure, forcing).
-The pressure-gradient force and buoyancy are excluded; they are handled
-in linearized form inside the acoustic substep loop.
-"""
-function compute_slow_momentum_tendencies!(model)
-    grid = model.grid
-    arch = architecture(grid)
-
-    slow_dynamics = SlowTendencyMode(model.dynamics)
-
-    model_fields = fields(model)
-
-    momentum_args = (
-        dynamics_density(model.dynamics),
-        model.advection.momentum,
-        model.velocities,
-        model.closure,
-        model.closure_fields,
-        slow_momentum_advection_momentum(model),
-        model.coriolis,
-        model.clock,
-        model_fields)
-
-    u_args = tuple(momentum_args..., model.forcing.ρu, slow_dynamics)
-    v_args = tuple(momentum_args..., model.forcing.ρv, slow_dynamics)
-
-    w_args = tuple(momentum_args..., model.forcing.ρw,
-                   slow_dynamics,
-                   model.formulation,
-                   model.temperature,
-                   specific_prognostic_moisture(model),
-                   model.microphysics,
-                   model.microphysical_fields,
-                   model.thermodynamic_constants)
-
-    Gⁿ = model.timestepper.Gⁿ
-
-    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gⁿ.ρu, grid, u_args)
-    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gⁿ.ρv, grid, v_args)
-    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gⁿ.ρw, grid, w_args)
-
-    return nothing
-end
-
-#####
-##### Slow scalar tendencies (density and thermodynamic variable)
+##### The thermodynamic variable is advected by the current RK predictor velocity
+##### (`model.velocities`), matching WRF (`rk_tendency` in `solve_em.F`, called with
+##### `grid%ru, grid%rv, grid%ww`) and MPAS. Routing the substepper's time-averaged
+##### velocity here creates a closed feedback loop (Gⁿ.ρθ → ρθ′ → PGF → (ρu)′ →
+##### time-averaged velocity → next stage's Gⁿ.ρθ) that destabilizes the rest
+##### atmosphere; T4 blows up at production Δt. For nonflat terrain, the same current
+##### predictor is used horizontally while vertical transport uses the current
+##### terrain-following `w̃`. The dynamics-transport split applies only to **moisture,
+##### tracers, chemistry, TKE**, which `transport_velocities(model)` routes to the
+##### substepper's time-averaged velocity.
 #####
 
 slow_thermodynamic_velocities(model) = model.velocities
@@ -109,56 +50,6 @@ function slow_thermodynamic_velocities(model::TerrainCompressibleAcousticModel)
     v = model.velocities.v
     w̃ = model.dynamics.contravariant_vertical_velocity
     return (; u, v, w=w̃)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute slow tendencies for density and the thermodynamic variable:
-
-  - ``Gˢ_ρᵈ = -∇·m``: full dry-density tendency (continuity equation),
-    written into `model.timestepper.Gⁿ.ρᵈ`.
-  - ``Gˢ_ρᵡ``: full thermodynamic-density tendency (advection + physics).
-"""
-function compute_slow_scalar_tendencies!(model)
-    compute_dynamics_tendency!(model)
-
-    # Theta's slow tendency uses the current RK predictor velocity
-    # (`model.velocities`), matching WRF (`rk_tendency` in `solve_em.F`,
-    # called with `grid%ru, grid%rv, grid%ww`) and MPAS. Routing the
-    # substepper's time-averaged velocity here creates a closed feedback
-    # loop (Gⁿ.ρθ → ρθ′ → PGF → (ρu)′ → time-averaged velocity →
-    # next stage's Gⁿ.ρθ) that destabilizes the rest atmosphere; T4
-    # blows up at production Δt. For nonflat terrain, the same current
-    # predictor is used horizontally while vertical scalar transport uses
-    # the current terrain-following `w̃`. The dynamics-transport split applies
-    # only to **moisture, tracers, chemistry, TKE** — those tendencies are
-    # computed in `update_state!`'s `compute_tendencies!` via
-    # `transport_velocities(model)`, which the `AcousticRungeKutta3` override
-    # routes to the substepper's time-averaged velocity.
-    #
-    # The condensate sedimentation term is the exception: it pairs its content fluxes with the
-    # tracer tendencies' mass fluxes, which recombine only at the velocity they were formed at
-    # (see `sedimentation_tendency`), so it reads the frozen copy
-    # (`tendency_transport_velocities`), as `implicit_sedimentation_step!` does for the implicit
-    # remainder. Being a difference of those fluxes, zero wherever nothing sediments, it forms no
-    # part of the feedback loop above.
-    common_args = (
-        model.dynamics,
-        model.formulation,
-        model.thermodynamic_constants,
-        specific_prognostic_moisture(model),
-        slow_thermodynamic_velocities(model),
-        model.microphysics,
-        model.microphysical_fields,
-        model.closure,
-        model.closure_fields,
-        model.clock,
-        fields(model))
-
-    AtmosphereModels.compute_thermodynamic_tendency!(model, common_args, tendency_transport_velocities(model).w)
-
-    return nothing
 end
 
 #####
@@ -171,11 +62,11 @@ $(TYPEDSIGNATURES)
 Freeze the time-averaged transport velocity that `update_state!` just built the moisture and
 tracer tendencies from. The next acoustic loop resets and rebuilds `time_averaged_velocities`
 (and `freeze_linearization_state!` reseeds it at outer-step start), so the stage cannot read it
-live. Two readers pair fluxes with those tendencies: the implicit remainder in `scalar_substep!`,
-which has to split the same velocity the explicit fraction in `Gⁿ` was scaled by (invariant:
-⟨w⟩ = wᵉ + wⁱ), and the condensate sedimentation term of the thermodynamic tendency (see
-`compute_slow_scalar_tendencies!`). Called after every tendency computation the stepper issues,
-once per stage.
+live. The implicit remainder in `scalar_substep!` pairs fluxes with those tendencies: it has to
+split the same velocity the explicit fraction in `Gⁿ` was scaled by (invariant: ⟨w⟩ = wᵉ + wⁱ),
+as does `implicit_sedimentation_step!`. (The condensate sedimentation term of the thermodynamic
+tendency is built in `update_state!` with the same live velocity.) Called after every tendency
+computation the stepper issues, once per stage.
 """
 function cache_transport_velocity!(model)
     w_cache = model.timestepper.substepper.time_averaged_vertical_velocity_cache
@@ -341,10 +232,10 @@ acoustic mass-flux divergence itself, not scalar advection.
 
 The advecting velocity passed to each solve must be the one its slow tendency was built with,
 so the explicit/implicit velocity split is consistent: the RK stage-entry predictor velocities
-(see `compute_slow_momentum_tendencies!` and `compute_slow_scalar_tendencies!`), not the
+(see `slow_thermodynamic_velocities`), not the
 substepper's time-averaged transport velocities that moisture and tracers use. The one exception,
 on both sides of the split, is the condensate sedimentation term, which pairs with the tracers'
-mass fluxes and reads their velocity (see `compute_slow_scalar_tendencies!`).
+mass fluxes and reads their velocity.
 """
 # First-order upwind flux of the stage-entry thermodynamic state carried by the implicit
 # half's velocity wⁱ = (1 - s) w, density-weighted like the implicit Center-field

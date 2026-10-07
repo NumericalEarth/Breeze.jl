@@ -669,7 +669,7 @@ end
 #
 # ∂t (ρw) + ∇·(ρw u) + ∂z p + g ρ = 0
 #
-# The dynamics kernel runs in `SlowTendencyMode` for SplitExplicit,
+# The dynamics kernel runs with `SlowDynamics` for SplitExplicit,
 # which zeroes the PGF and buoyancy in `Gⁿρw`. We reinstate the
 # **Uᴸ-state** PGF and buoyancy here so the slow ρw tendency has the
 # form
@@ -856,7 +856,7 @@ end
 #   (ρu)′^{τ+Δτ} = (ρu)′^τ + Δτ (Gⁿρu − ∂x pᴸ − ∂x(Cᴸ (ρθ)′))
 #   (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ (Gⁿρv − ∂y pᴸ − ∂y(Cᴸ (ρθ)′))
 #
-# `Gⁿρu` (SlowTendencyMode) carries non-pressure slow terms with PGF zeroed;
+# `Gⁿρu` (SlowDynamics) carries non-pressure slow terms with PGF zeroed;
 # we reinstate the frozen large-step PGF here (MPAS keeps it in `tend_u_euler`).
 # Forward-backward sequencing skips only the acoustic perturbation PGF.
 @kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Πᴸ,

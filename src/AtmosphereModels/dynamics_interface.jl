@@ -471,7 +471,7 @@ For compressible dynamics, returns `-∂p/∂z`.
 @inline z_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 #####
-##### Slow tendency mode for split-explicit time-stepping
+##### Slow dynamics for split-explicit time-stepping
 #####
 
 """
@@ -479,61 +479,28 @@ $(TYPEDEF)
 
 Wrapper type indicating that only "slow" tendencies should be computed.
 
-When computing momentum tendencies with a `SlowTendencyMode`-wrapped dynamics,
+When computing momentum tendencies with a `SlowDynamics`-wrapped dynamics,
 the "fast" terms (pressure gradient and buoyancy) return zero. This is used
 for split-explicit time-stepping where fast terms are handled separately
 in an acoustic substep loop.
 
 See also [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization).
 """
-struct SlowTendencyMode{D}
+struct SlowDynamics{D}
     dynamics :: D
 end
 
-Adapt.adapt_structure(to, s::SlowTendencyMode) = SlowTendencyMode(adapt(to, s.dynamics))
+Adapt.adapt_structure(to, s::SlowDynamics) = SlowDynamics(adapt(to, s.dynamics))
 
 # Forward dynamics_density to the wrapped dynamics
-@inline dynamics_density(s::SlowTendencyMode) = dynamics_density(s.dynamics)
+@inline dynamics_density(s::SlowDynamics) = dynamics_density(s.dynamics)
 
-# Fast terms return zero in slow tendency mode
-@inline x_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
-@inline y_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
-@inline z_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+# Fast terms return zero for slow dynamics
+@inline x_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
+@inline y_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
+@inline z_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
 
-@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowTendencyMode, args...) = zero(grid)
-
-"""
-$(TYPEDEF)
-
-Wrapper type indicating that vertical "fast" terms should be excluded from tendencies.
-
-When computing momentum tendencies with a `HorizontalSlowMode`-wrapped dynamics,
-the horizontal pressure gradient is computed normally, but the vertical pressure
-gradient and buoyancy return zero. These vertical fast terms are handled by the
-acoustic substep loop through perturbation variables ``-ψ ∂ρ''/∂z - g ρ''``.
-
-Including the full vertical PG and buoyancy in the slow tendency introduces a
-hydrostatic truncation error ``O(Δz^2)`` that drives spurious acoustic modes.
-The horizontal PG does not suffer from this issue and can safely be included.
-"""
-struct HorizontalSlowMode{D}
-    dynamics :: D
-end
-
-Adapt.adapt_structure(to, s::HorizontalSlowMode) = HorizontalSlowMode(adapt(to, s.dynamics))
-
-# Forward dynamics_density to the wrapped dynamics
-@inline dynamics_density(s::HorizontalSlowMode) = dynamics_density(s.dynamics)
-
-# Horizontal PG: forward to the wrapped dynamics
-@inline x_pressure_gradient(i, j, k, grid, s::HorizontalSlowMode) =
-    x_pressure_gradient(i, j, k, grid, s.dynamics)
-@inline y_pressure_gradient(i, j, k, grid, s::HorizontalSlowMode) =
-    y_pressure_gradient(i, j, k, grid, s.dynamics)
-
-# Vertical PG and buoyancy return zero (handled by acoustic loop)
-@inline z_pressure_gradient(i, j, k, grid, ::HorizontalSlowMode) = zero(grid)
-@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::HorizontalSlowMode, args...) = zero(grid)
+@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowDynamics, args...) = zero(grid)
 
 #####
 ##### Tendency computation interface
@@ -579,6 +546,24 @@ For terrain-following coordinates, the vertical component `ρw` is
 replaced by the contravariant vertical momentum ``\\rho \\tilde{w}``.
 """
 advecting_momentum(model) = model.momentum
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the part of `dynamics` that `timestepper` integrates through its tendencies: all of it,
+unless the time stepper integrates the pressure-gradient force and buoyancy separately, in which
+case it returns `SlowDynamics(dynamics)`.
+"""
+slow_dynamics(timestepper, dynamics) = dynamics
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the velocity tuple used for thermodynamic-variable advection: `transport_velocities(model)`,
+unless the time stepper advects the thermodynamic variable with a different velocity than
+moisture and tracers.
+"""
+thermodynamic_transport_velocities(model) = transport_velocities(model)
 
 #####
 ##### Auxiliary dynamics variables interface
