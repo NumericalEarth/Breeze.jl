@@ -198,12 +198,13 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
         model.clock,
         model_fields)
 
-    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
-    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
+    dynamics = slow_dynamics(model.timestepper, model.dynamics)
+    u_args = tuple(momentum_args..., model.forcing.ρu, dynamics)
+    v_args = tuple(momentum_args..., model.forcing.ρv, dynamics)
 
     # Extra arguments for vertical velocity are required to compute buoyancy
     w_args = tuple(momentum_args..., model.forcing.ρw,
-                   model.dynamics,
+                   dynamics,
                    model.formulation,
                    model.temperature,
                    specific_prognostic_moisture(model),
@@ -350,11 +351,9 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     compute_momentum_tendencies!(model, model_fields)
 
-    # Use transport velocities (contravariant for terrain-following grids)
-    advecting_velocities = transport_velocities(model)
-
-    # Arguments common to energy density, moisture density, and tracer density tendencies:
-    common_args = (
+    # Arguments common to energy density, moisture density, and tracer density tendencies,
+    # given the advecting velocities (contravariant for terrain-following grids):
+    tendency_args(advecting_velocities) = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
@@ -367,11 +366,13 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
         model.clock,
         model_fields)
 
+    common_args = tendency_args(transport_velocities(model))
+
     #####
     ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
     #####
 
-    compute_thermodynamic_tendency!(model, common_args)
+    compute_thermodynamic_tendency!(model, tendency_args(thermodynamic_transport_velocities(model)))
 
     #####
     ##### Moisture density tendency

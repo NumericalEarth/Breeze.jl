@@ -15,8 +15,7 @@ export
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
-    SlowTendencyMode,
-    HorizontalSlowMode,
+    SlowDynamics,
     compute_pressure_correction!,
     make_pressure_correction!,
     # Thermodynamic formulation interface (formulation types exported by their respective modules)
