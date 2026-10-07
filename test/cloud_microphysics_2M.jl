@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, condensate_phase, total_density
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, condensate_liquid_fraction, total_density
 using CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -239,10 +239,10 @@ end
     @test w_cloud_number === μ.wⁿᶜˡ
 
     # Thermodynamic phase of each condensate mass; number tracers are not masses
-    @test condensate_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
-    @test condensate_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
-    @test condensate_phase(microphysics, Val(:ρnᶜˡ)) === nothing
-    @test condensate_phase(microphysics, Val(:ρnʳ)) === nothing
+    @test condensate_liquid_fraction(microphysics, Val(:ρqᶜˡ)) == 1
+    @test condensate_liquid_fraction(microphysics, Val(:ρqʳ)) == 1
+    @test condensate_liquid_fraction(microphysics, Val(:ρnᶜˡ)) === nothing
+    @test condensate_liquid_fraction(microphysics, Val(:ρnʳ)) === nothing
 
     # microphysical_velocities wraps sedimentation_velocity in a velocity tuple
     vel_rain_mass = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
@@ -273,7 +273,7 @@ end
     # carry no latent heat and are absent from `model.sedimentation`
     sedimentation = model.sedimentation
     @test keys(sedimentation) == (:ρqᶜˡ, :ρqʳ)
-    @test all(c -> c.phase === Val(:liquid), values(sedimentation))
+    @test all(c -> c.liquid_fraction == 1, values(sedimentation))
     @test sedimentation.ρqʳ.velocity === μ.wʳ && sedimentation.ρqʳ.specific_humidity === μ.qʳ
     @test sedimentation.ρqᶜˡ.velocity === μ.wᶜˡ && sedimentation.ρqᶜˡ.specific_humidity === μ.qᶜˡ
     @test !any(c -> c.velocity === μ.wⁿʳ || c.velocity === μ.wⁿᶜˡ, values(sedimentation))

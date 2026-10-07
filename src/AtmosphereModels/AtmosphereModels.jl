@@ -62,7 +62,7 @@ export
     initial_aerosol_number,
     initial_aerosol_number_density,
     sedimentation_velocity,
-    condensate_phase,
+    condensate_liquid_fraction,
     sedimentation_velocity_field,
     write_sedimentation_velocity!,
     microphysical_velocities,

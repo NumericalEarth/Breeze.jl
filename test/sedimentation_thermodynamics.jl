@@ -15,7 +15,8 @@ end
 
 AM.prognostic_field_names(::SedimentationOnly) = (:ρqʳ,)
 AM.moisture_prognostic_name(::SedimentationOnly) = :ρqᵛ
-AM.condensate_phase(m::SedimentationOnly, ::Val{:ρqʳ}) = m.phase
+AM.condensate_liquid_fraction(::SedimentationOnly{Val{:liquid}}, ::Val{:ρqʳ}) = 1
+AM.condensate_liquid_fraction(::SedimentationOnly{Val{:ice}}, ::Val{:ρqʳ}) = 0
 AM.sedimentation_velocity(::SedimentationOnly, μ, ::Val{:ρqʳ}) = μ.wʳ
 AM.compute_microphysical_tendencies!(::SedimentationOnly, model) = nothing
 AM.microphysics_model_update!(::SedimentationOnly, model) = nothing

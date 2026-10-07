@@ -3,7 +3,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Test
 
 using Breeze
-using Breeze.AtmosphereModels: AtmosphereModels, condensate_phase, microphysical_velocities,
+using Breeze.AtmosphereModels: AtmosphereModels, condensate_liquid_fraction, microphysical_velocities,
                                sedimentation_velocity
 using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState
 using Breeze.Microphysics.PredictedParticleProperties: AerosolActivation,
@@ -721,13 +721,13 @@ using Oceananigans.TimeSteppers: update_state!
         # on ice falls with the ice (below) but is liquid: no fusion enthalpy has been released
         # for it. Rime mass `ρqᶠ` lives inside the dry ice mass `ρqⁱ` and rime volume `ρbᶠ` is
         # an ice property, so neither is a condensate mass and neither carries a phase.
-        @test condensate_phase(p3, Val(:ρqᶜˡ)) === Val(:liquid)
-        @test condensate_phase(p3, Val(:ρqʳ)) === Val(:liquid)
-        @test condensate_phase(p3, Val(:ρqʷⁱ)) === Val(:liquid)
-        @test condensate_phase(p3, Val(:ρqⁱ)) === Val(:ice)
-        @test isnothing(condensate_phase(p3, Val(:ρqᶠ)))
-        @test isnothing(condensate_phase(p3, Val(:ρbᶠ)))
-        @test isnothing(condensate_phase(p3, Val(:ρnʳ)))
+        @test condensate_liquid_fraction(p3, Val(:ρqᶜˡ)) == 1
+        @test condensate_liquid_fraction(p3, Val(:ρqʳ)) == 1
+        @test condensate_liquid_fraction(p3, Val(:ρqʷⁱ)) == 1
+        @test condensate_liquid_fraction(p3, Val(:ρqⁱ)) == 0
+        @test isnothing(condensate_liquid_fraction(p3, Val(:ρqᶠ)))
+        @test isnothing(condensate_liquid_fraction(p3, Val(:ρbᶠ)))
+        @test isnothing(condensate_liquid_fraction(p3, Val(:ρnʳ)))
 
         # Every sedimenting prognostic reaches the advection operator through the generic
         # `microphysical_velocities` wrapper, which reads `sedimentation_velocity`.
@@ -747,13 +747,13 @@ using Oceananigans.TimeSteppers: update_state!
         sedimentation = model.sedimentation
         @test keys(sedimentation) == (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqʷⁱ)
         @test sedimentation.ρqᶜˡ.velocity === μ.wᶜˡ && sedimentation.ρqᶜˡ.specific_humidity === μ.qᶜˡ
-        @test sedimentation.ρqᶜˡ.phase === Val(:liquid)
+        @test sedimentation.ρqᶜˡ.liquid_fraction == 1
         @test sedimentation.ρqʳ.velocity === μ.wʳ && sedimentation.ρqʳ.specific_humidity === μ.qʳ
-        @test sedimentation.ρqʳ.phase === Val(:liquid)
+        @test sedimentation.ρqʳ.liquid_fraction == 1
         @test sedimentation.ρqⁱ.velocity === μ.wⁱ && sedimentation.ρqⁱ.specific_humidity === μ.qⁱ
-        @test sedimentation.ρqⁱ.phase === Val(:ice)
+        @test sedimentation.ρqⁱ.liquid_fraction == 0
         @test sedimentation.ρqʷⁱ.velocity === μ.wⁱ && sedimentation.ρqʷⁱ.specific_humidity === μ.qʷⁱ
-        @test sedimentation.ρqʷⁱ.phase === Val(:liquid)
+        @test sedimentation.ρqʷⁱ.liquid_fraction == 1
     end
 
     @testset "Sedimentation heat transport bins liquid on ice by phase" begin

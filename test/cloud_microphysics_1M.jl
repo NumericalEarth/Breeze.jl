@@ -1,11 +1,11 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, condensate_phase,
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, condensate_liquid_fraction,
                                total_density, dynamics_density, standard_pressure,
                                implicit_advection_velocities, density_weighted_advection_diagonal,
                                implicit_advection_density, implicit_step_scheme, closure_scalar_index,
-                               phase_content, specific_prognostic_moisture
+                               liquid_fraction_content, specific_prognostic_moisture
 using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState,
                              LiquidIceDensityState, StaticEnergyState, mixture_gas_constant
 using CloudMicrophysics
@@ -868,7 +868,7 @@ end
     @test contains(str_ne, "cloud_formation")
 end
 
-@testset "sedimentation_velocity, condensate_phase, and microphysical_velocities [$(FT)]" for FT in test_float_types()
+@testset "sedimentation_velocity, condensate_liquid_fraction, and microphysical_velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -893,8 +893,8 @@ end
     @test w_cloud === μ.wᶜˡ
 
     # Thermodynamic phase of each condensate mass
-    @test condensate_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
-    @test condensate_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
+    @test condensate_liquid_fraction(microphysics, Val(:ρqʳ)) == 1
+    @test condensate_liquid_fraction(microphysics, Val(:ρqᶜˡ)) == 1
 
     # microphysical_velocities wraps sedimentation_velocity in a velocity tuple
     vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
@@ -916,11 +916,11 @@ end
     @test sedimentation.ρqʳ.velocity === μ.wʳ
     @test sedimentation.ρqʳ.specific_humidity === μ.qʳ
     @test sedimentation.ρqʳ.density === μ.ρqʳ
-    @test sedimentation.ρqʳ.phase === Val(:liquid)
+    @test sedimentation.ρqʳ.liquid_fraction == 1
     @test sedimentation.ρqʳ.advection === model.advection.ρqʳ
     @test sedimentation.ρqᶜˡ.velocity === μ.wᶜˡ
     @test sedimentation.ρqᶜˡ.specific_humidity === μ.qᶜˡ
-    @test sedimentation.ρqᶜˡ.phase === Val(:liquid)
+    @test sedimentation.ρqᶜˡ.liquid_fraction == 1
 end
 
 @testset "Diagnosed cloud condensate does not sediment [$(FT)]" for FT in test_float_types()
@@ -944,7 +944,7 @@ end
     @test keys(sedimentation) == (:ρqʳ,)
     @test sedimentation.ρqʳ.velocity === μ.wʳ
     @test sedimentation.ρqʳ.specific_humidity === μ.qʳ
-    @test sedimentation.ρqʳ.phase === Val(:liquid)
+    @test sedimentation.ρqʳ.liquid_fraction == 1
 end
 
 @testset "Sedimentation transports the condensate part of ρθ and ρs [$(FT)]" for FT in test_float_types()
@@ -1144,24 +1144,19 @@ end
 @testset "A mixed-phase condensate mass carries the blended content [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
-    # `phase_content` picks a condensate's content out of the formulation's (χˡ, χⁱ) pair. The
-    # content is linear in composition, so a mass leaving along f eˡ + (1 − f) eⁱ carries
-    # f χˡ + (1 − f) χⁱ exactly, with the pure phases as endpoints.
+    # `liquid_fraction_content` weighs the formulation's (χˡ, χⁱ) pair by a condensate's liquid
+    # fraction. The content is linear in composition, so a mass leaving along f eˡ + (1 − f) eⁱ
+    # carries f χˡ + (1 − f) χⁱ exactly, with the pure phases as exact endpoints.
     χ = (FT(-2500), FT(-2830))  # representative ∂s/∂qˡ and ∂s/∂qⁱ magnitudes [J/kg]
 
-    @test phase_content(Val(:liquid), χ) === χ[1]
-    @test phase_content(Val(:ice), χ) === χ[2]
-
-    # Endpoints agree with the pure-phase methods; the interior is linear in f
-    @test phase_content(one(FT), χ) ≈ χ[1] rtol=eps(FT)
-    @test phase_content(zero(FT), χ) ≈ χ[2] rtol=eps(FT)
+    @test liquid_fraction_content(1, χ) == χ[1]
+    @test liquid_fraction_content(0, χ) == χ[2]
     for f in (FT(0.25), FT(0.5), FT(0.7))
-        @test phase_content(f, χ) ≈ f * χ[1] + (1 - f) * χ[2] rtol=eps(FT)
+        @test liquid_fraction_content(f, χ) ≈ f * χ[1] + (1 - f) * χ[2] rtol=eps(FT)
     end
 
     # Linearity is what makes a fraction exact: half-and-half is the midpoint of the two.
-    @test phase_content(FT(0.5), χ) ≈ (χ[1] + χ[2]) / 2 rtol=eps(FT)
-    @test phase_content(FT(0.5), χ) ≈ (phase_content(Val(:liquid), χ) + phase_content(Val(:ice), χ)) / 2 rtol=eps(FT)
+    @test liquid_fraction_content(FT(0.5), χ) ≈ (χ[1] + χ[2]) / 2 rtol=eps(FT)
 end
 
 @testset "Sedimentation delivers the local content plus the converted upwind enthalpy [$(FT)]" for FT in test_float_types()
@@ -1356,7 +1351,7 @@ end
     Oceananigans.Advection.update_bounds_preserving_limiter!(rain.advection, grid, μ.qʳ)
     @test any(θ -> θ < 1, Array(interior(rain.advection.bounds.limiter, 1, 1, :)))
     unlimited = (Breeze.AtmosphereModels.SedimentingCondensate(rain.velocity, rain.specific_humidity, rain.density,
-                                                              rain.phase, unlimited_scheme),)
+                                                              rain.liquid_fraction, unlimited_scheme),)
 
     heat(condensates, k) = -(@allowscalar Breeze.AtmosphereModels.sedimentation_tendency(
         1, 1, k, grid, condensates, wᵗ, uniform_content, model.dynamics, model.thermodynamic_constants,
@@ -1398,9 +1393,9 @@ end
     sedimentation = model.sedimentation
     @test keys(sedimentation) == (:ρqʳ, :ρqˢⁿ)
     @test sedimentation.ρqʳ.velocity === μ.wʳ && sedimentation.ρqʳ.specific_humidity === μ.qʳ
-    @test sedimentation.ρqʳ.phase === Val(:liquid)
+    @test sedimentation.ρqʳ.liquid_fraction == 1
     @test sedimentation.ρqˢⁿ.velocity === μ.wˢⁿ && sedimentation.ρqˢⁿ.specific_humidity === μ.qˢⁿ
-    @test sedimentation.ρqˢⁿ.phase === Val(:ice)
+    @test sedimentation.ρqˢⁿ.liquid_fraction == 0
     @test qᶜⁱ > 0
     @test wˢⁿ < 0
 

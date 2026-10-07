@@ -416,11 +416,11 @@ const OMCM = OneMomentCloudMicrophysics
 # Rain sedimentation velocity: stored as a vertical velocity component
 @inline AM.sedimentation_velocity(bμp::OMCM, μ, ::Val{:ρqʳ}) = μ.wʳ
 
-# Thermodynamic phase of each condensate mass, for the latent heat its sedimentation carries
-@inline AM.condensate_phase(bμp::OMCM, ::Val{:ρqᶜˡ}) = Val(:liquid)
-@inline AM.condensate_phase(bμp::OMCM, ::Val{:ρqʳ})  = Val(:liquid)
-@inline AM.condensate_phase(bμp::OMCM, ::Val{:ρqᶜⁱ}) = Val(:ice)
-@inline AM.condensate_phase(bμp::OMCM, ::Val{:ρqˢⁿ}) = Val(:ice)
+# Liquid fraction of each condensate mass (1 liquid, 0 ice), for the latent heat its sedimentation carries
+@inline AM.condensate_liquid_fraction(bμp::OMCM, ::Val{:ρqᶜˡ}) = 1
+@inline AM.condensate_liquid_fraction(bμp::OMCM, ::Val{:ρqʳ})  = 1
+@inline AM.condensate_liquid_fraction(bμp::OMCM, ::Val{:ρqᶜⁱ}) = 0
+@inline AM.condensate_liquid_fraction(bμp::OMCM, ::Val{:ρqˢⁿ}) = 0
 
 #####
 ##### Type aliases

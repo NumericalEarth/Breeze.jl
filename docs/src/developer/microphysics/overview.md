@@ -151,11 +151,11 @@ conserved thermodynamic variable and prescribed precipitation.
 | Function | Arguments | Description |
 |----------|-----------|-------------|
 | `sedimentation_velocity` | `(microphysics, microphysical_fields, name)` | **Primary interface**: return the vertical sedimentation velocity field for tracer `name`, or `nothing` |
-| `condensate_phase` | `(microphysics, name)` | Return `Val(:liquid)`, `Val(:ice)`, or a liquid fraction, the thermodynamic phase of condensate mass `name`; required for every sedimenting mass |
+| `condensate_liquid_fraction` | `(microphysics, name)` | Return the liquid fraction of condensate mass `name`: `1` for liquid, `0` for ice, or a number in between for a mixed composition; required for every sedimenting mass |
 | `microphysical_velocities` | `(microphysics, microphysical_fields, name)` | **Generic wrapper** (don't override): wraps the sedimentation velocity in a velocity tuple |
 
 **Design principle**: Schemes implement `sedimentation_velocity` (how fast a tracer falls) and
-`condensate_phase` (which latent heat its mass carries); the generic `microphysical_velocities`
+`condensate_liquid_fraction` (which latent heat its mass carries); the generic `microphysical_velocities`
 wrapper calls `sedimentation_velocity` and constructs a `(u=ZeroField(), v=ZeroField(), w=w)`
 tuple for the advection operator.
 
@@ -171,29 +171,31 @@ At construction the model resolves its sedimenting condensates into `model.sedim
 `NamedTuple` of `SedimentingCondensate`s keyed by prognostic name, one for every name in
 `condensate_field_names` with a `sedimentation_velocity`: the velocity field the mass falls with
 (`velocity`), its specific-humidity field (`specific_humidity`), the prognostic partial density it
-is diagnosed from (`density`), its `condensate_phase` tag (`phase`), and the advection scheme that
+is diagnosed from (`density`), its `condensate_liquid_fraction` (`liquid_fraction`), and the advection scheme that
 transports the tracer (`advection`). The result is `(;)` when nothing sediments. Number tracers
 (e.g. `ρnʳ`) fall but are not condensate masses and carry no latent heat, so they are absent;
 condensate that does not sediment, such as cloud condensate diagnosed by saturation adjustment,
-moves no mass and needs no declaration. A sedimenting mass without a `condensate_phase` is an
-error at construction, since its latent heat could not follow the falling mass.
+moves no mass and needs no declaration. A sedimenting mass without a `condensate_liquid_fraction` is an
+error at construction, since its latent heat could not follow the falling mass. The fraction
+must match how `moisture_fractions` bins the mass into `qˡ` and `qⁱ`: the thermodynamic state
+knows only liquid and ice, so the bin fixes the latent heat and heat capacity the mass carries.
 
-!!! note "Velocity and phase are independent"
+!!! note "Velocity and liquid fraction are independent"
     P3's liquid on ice `ρqʷⁱ` is liquid water riding on an ice particle: it falls at `wⁱ`, yet
     `moisture_fractions` counts it in the thermodynamic liquid fraction `qˡ = qᶜˡ + qʳ + qʷⁱ`
     because no fusion enthalpy has been released for it. P3 therefore declares
-    `sedimentation_velocity(…, Val(:ρqʷⁱ)) = μ.wⁱ` and `condensate_phase(…, Val(:ρqʷⁱ)) = Val(:liquid)`:
+    `sedimentation_velocity(…, Val(:ρqʷⁱ)) = μ.wⁱ` and `condensate_liquid_fraction(…, Val(:ρqʷⁱ)) = 1`:
     one tracer with two independent properties.
 
 !!! note "Mixed-phase particles"
     A part-ice, part-liquid particle is two condensate masses sharing a fall speed, which is what
     the independence above buys: P3 carries ice `ρqⁱ` and the liquid on it `ρqʷⁱ`, both falling at
-    `wⁱ`, each declaring the phase whose enthalpy it holds. Splitting the mass beats blending the
+    `wⁱ`, each declaring the liquid fraction (1 or 0) whose enthalpy it holds. Splitting the mass beats blending the
     enthalpy, since freezing that liquid is a process with its own rate that must move mass
     between them.
 
-    A single mass of mixed composition may instead declare a liquid fraction,
-    `condensate_phase(…, ::Val{:ρqˣ}) = 0.3`. That is exact, not an interpolation: the content is
+    A single mass of mixed composition may instead declare a fraction in between,
+    `condensate_liquid_fraction(…, ::Val{:ρqˣ}) = 0.3`. That is exact, not an interpolation: the content is
     a directional derivative in composition space, so a mass leaving along `f eˡ + (1 - f) eⁱ`
     carries `f χˡ + (1 - f) χⁱ`. No scheme needs this yet.
 
@@ -258,7 +260,7 @@ the layer that later evaporates the arriving rain, the mechanism that builds col
 
 `bottom_precipitation_flux(model)` returns the flux of precipitating moisture through the
 bottom boundary [kg m⁻² s⁻¹, positive downward]. A scheme that implements
-`sedimentation_velocity` and `condensate_phase` gets it for free: the default method sums the
+`sedimentation_velocity` and `condensate_liquid_fraction` gets it for free: the default method sums the
 bottom-face flux of every sedimenting condensate, evaluating each with the advection scheme
 that transports that tracer, so the diagnostic agrees with the boundary flux the tendency
 operator applies. Schemes that move precipitation by their own internal means (such as
@@ -299,7 +301,7 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `materialize_microphysical_fields(microphysics, grid, bcs)` | Create prognostic + auxiliary fields |
 | `update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)` | Update auxiliary fields at grid points |
 | `sedimentation_velocity(microphysics, μ_fields, name)` | Vertical sedimentation velocity per tracer |
-| `condensate_phase(microphysics, name)` | Thermodynamic phase of each sedimenting condensate mass (`:liquid` or `:ice`) |
+| `condensate_liquid_fraction(microphysics, name)` | Liquid fraction of each sedimenting condensate mass (`1` liquid, `0` ice) |
 
 **Why these are Eulerian-only**:
 - **Field materialization**: Parcel models don't have fields; they store scalars directly in `ParcelState`.
@@ -318,7 +320,7 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `materialize_microphysical_fields` | — | ✓ | Fields for grid storage |
 | `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
 | `sedimentation_velocity` | — | ✓§ | Vertical sedimentation velocity per tracer |
-| `condensate_phase` | — | ✓§ | Thermodynamic phase of each sedimenting condensate mass |
+| `condensate_liquid_fraction` | — | ✓§ | Liquid fraction of each sedimenting condensate mass |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
 | `compute_microphysical_tendencies!` | — | ✓† | Override for fused bundle schemes |
 | `microphysical_velocities` | — | — | Generic wrapper (don't override) |

@@ -796,12 +796,12 @@ end
 #
 #   sedimentation_velocity(microphysics, microphysical_fields, ::Val{name}) → field or nothing
 #       the signed vertical velocity [m/s] the prognostic `name` falls with (negative = downward)
-#   condensate_phase(microphysics, ::Val{name}) → Val(:liquid) or Val(:ice)
-#       the thermodynamic phase of the condensate mass `name`; required for every name in
-#       condensate_field_names(microphysics) that sediments
+#   condensate_liquid_fraction(microphysics, ::Val{name}) → number in [0, 1]
+#       the liquid fraction of the condensate mass `name` (1 liquid, 0 ice); required for every
+#       name in condensate_field_names(microphysics) that sediments
 #
 # The velocity moves the tracer: `microphysical_velocities` adds it to the transport velocity
-# in `scalar_tendency`. The phase says which latent heat rides along with the falling mass
+# in `scalar_tendency`. The liquid fraction says which latent heat rides along with the falling mass
 # when the thermodynamic variables are transported by sedimentation
 # (`sedimentation_tendency`). The two are independent: P3's liquid on ice falls
 # at the ice speed but carries liquid enthalpy.
@@ -820,27 +820,31 @@ Microphysics schemes extend this function for each sedimenting tracer, dispatchi
 """
 $(TYPEDSIGNATURES)
 
-Return the thermodynamic phase of the condensate mass `name` as `Val(:liquid)` or `Val(:ice)`,
-or `nothing` (the default) for anything that is not a sedimenting condensate mass.
+Return the liquid fraction of the condensate mass `name`: `1` for liquid, `0` for ice, a number
+in between for a mass of mixed composition, or `nothing` (the default) for anything that is not
+a sedimenting condensate mass.
 
-Every name in [`condensate_field_names`](@ref) with a [`sedimentation_velocity`](@ref) must
-declare its phase; [`materialize_sedimentation`](@ref) checks this at model
-construction, since a falling mass without a phase would leave its latent heat behind. The
-phase is the enthalpy the mass carries, not what it falls with: P3's liquid on ice `ρqʷⁱ`
-falls at the ice speed yet is liquid, because no fusion enthalpy has been released for it and
-[`moisture_fractions`](@ref) counts it in the liquid mass fraction.
+The fraction must match how [`moisture_fractions`](@ref) bins the mass into the liquid and ice
+mass fractions, since those fix the latent heat and heat capacity the thermodynamic state
+attributes to it. Every name in [`condensate_field_names`](@ref) with a
+[`sedimentation_velocity`](@ref) must declare it; [`materialize_sedimentation`](@ref) checks
+this at model construction, since a falling mass without one would leave its latent heat
+behind. The fraction is the enthalpy the mass carries, not what it falls with: P3's liquid on
+ice `ρqʷⁱ` falls at the ice speed yet is liquid, because no fusion enthalpy has been released
+for it and [`moisture_fractions`](@ref) counts it in the liquid mass fraction.
 
 The default `nothing` covers three cases, none needing a method: condensate that does not
 sediment (saturation-adjusted cloud), a sedimenting tracer that is not a condensate mass (a
 number moment such as `ρnᶜˡ`, or a non-additive property such as P3's `ρqᶠ` and `ρbᶠ`), and a
-scheme that precipitates by its own means. Only a sedimenting condensate mass with no phase is
-an error.
+scheme that precipitates by its own means. Only a sedimenting condensate mass with no liquid
+fraction is an error.
 
 A mixed-phase particle is normally two condensate masses sharing a fall speed, as P3 carries ice
-`ρqⁱ` and the liquid on it `ρqʷⁱ`. One mass of mixed composition may return its liquid fraction
-instead, which `phase_content` resolves exactly, the content being linear in composition.
+`ρqⁱ` and the liquid on it `ρqʷⁱ`. One mass of mixed composition may instead return its liquid
+fraction, which `liquid_fraction_content` resolves exactly, the content being linear in
+composition.
 """
-@inline condensate_phase(microphysics, ::Val) = nothing
+@inline condensate_liquid_fraction(microphysics, ::Val) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -917,7 +921,7 @@ end
 #
 # Everything the model needs to know about each sedimenting condensate mass, resolved once at
 # construction: the velocity field it falls with, its specific-humidity field and the prognostic
-# partial density behind it, its thermodynamic phase, and the advection scheme that transports
+# partial density behind it, its liquid fraction, and the advection scheme that transports
 # it. `sedimentation_tendency` and `implicit_sedimentation_step!` read these to transport
 # the condensate part of ρθ / ρs with the falling mass, and the surface precipitation flux
 # diagnostic sums their bottom-face fluxes, so all are built from the same declarations as the
@@ -937,21 +941,20 @@ struct SedimentingCondensate{W, Q, D, P, A}
     specific_humidity :: Q
     "Prognostic partial density field the specific humidity is diagnosed from [kg m⁻³]"
     density :: D
-    "Thermodynamic phase, `Val(:liquid)`, `Val(:ice)`, or a liquid fraction (see [`condensate_phase`](@ref))"
-    phase :: P
+    "Liquid fraction of the mass: 1 liquid, 0 ice (see [`condensate_liquid_fraction`](@ref))"
+    liquid_fraction :: P
     "Advection scheme that transports the condensate mass"
     advection :: A
 end
 
 Adapt.adapt_structure(to, c::SedimentingCondensate) =
     SedimentingCondensate(adapt(to, c.velocity), adapt(to, c.specific_humidity), adapt(to, c.density),
-                          adapt(to, c.phase), adapt(to, c.advection))
+                          adapt(to, c.liquid_fraction), adapt(to, c.advection))
 
-Base.summary(c::SedimentingCondensate) = string("SedimentingCondensate(", phase_summary(c.phase), ", ", summary(c.advection), ")")
+Base.summary(c::SedimentingCondensate) = string("SedimentingCondensate(", liquid_fraction_summary(c.liquid_fraction), ", ", summary(c.advection), ")")
 Base.show(io::IO, c::SedimentingCondensate) = print(io, summary(c))
 
-phase_summary(::Val{phase}) where phase = string(phase)
-phase_summary(liquid_fraction) = string("liquid fraction ", prettysummary(liquid_fraction))
+liquid_fraction_summary(f) = f == 1 ? "liquid" : f == 0 ? "ice" : string("liquid fraction ", prettysummary(f))
 
 """
 $(TYPEDSIGNATURES)
@@ -968,12 +971,12 @@ $(TYPEDSIGNATURES)
 Return the `NamedTuple` of [`SedimentingCondensate`](@ref)s of `microphysics`, keyed by prognostic
 name: one for every name in [`condensate_field_names`](@ref) with a [`sedimentation_velocity`](@ref),
 holding that velocity field, the specific-humidity field, the prognostic partial density it is
-diagnosed from, its [`condensate_phase`](@ref) tag, and the `advection` scheme that transports the
+diagnosed from, its [`condensate_liquid_fraction`](@ref), and the `advection` scheme that transports the
 tracer's mass. Condensate that does not sediment (for example, cloud condensate diagnosed by
 saturation adjustment) is absent: it moves no mass and therefore no latent heat. The result is the
 empty `(;)` when nothing sediments, including for `Nothing` microphysics.
 
-Throws an `ArgumentError` if a sedimenting condensate mass declares no phase.
+Throws an `ArgumentError` if a sedimenting condensate mass declares no liquid fraction.
 """
 function materialize_sedimentation(microphysics, microphysical_fields, advection)
     names = condensate_field_names(microphysics)
@@ -987,13 +990,13 @@ end
 function sedimenting_condensate(microphysics, μ, advection, ::Val{name}) where name
     velocity = sedimentation_velocity(microphysics, μ, Val(name))
     isnothing(velocity) && return nothing
-    phase = condensate_phase(microphysics, Val(name))
-    isnothing(phase) &&
-        throw(ArgumentError("Condensate mass $name sediments but declares no condensate_phase, " *
+    liquid_fraction = condensate_liquid_fraction(microphysics, Val(name))
+    isnothing(liquid_fraction) &&
+        throw(ArgumentError("Condensate mass $name sediments but declares no condensate_liquid_fraction, " *
                             "so its latent heat could not follow the falling mass."))
     specific_humidity = getproperty(μ, specific_field_name(name))
     density = getproperty(μ, name)
-    return SedimentingCondensate(velocity, specific_humidity, density, phase, getproperty(advection, name))
+    return SedimentingCondensate(velocity, specific_humidity, density, liquid_fraction, getproperty(advection, name))
 end
 
 #####
@@ -1145,19 +1148,20 @@ end
 # condensate falls (both fluxes downward, both drain the cell above), rides an updraft that
 # outruns its fall speed (both upward, both drain the cell below), or falls against an updraft
 # (the flux at Wᵢ drains the cell above while the transport flux it replaces drained the cell
-# below). Constituents are binned by their thermodynamic phase, so P3's liquid on ice contributes
-# its ice-speed flux to the liquid content; a liquid fraction blends the two (`phase_content`).
+# below). Constituents are binned by their liquid fraction, so P3's liquid on ice contributes
+# its ice-speed flux to the liquid content, and a fraction in between blends the two
+# (`liquid_fraction_content`).
 @inline condensate_content_fluxes(i, j, k, grid, ::Tuple{}, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺) = (zero(grid), zero(grid))
 
 @inline function condensate_content_fluxes(i, j, k, grid, condensates::Tuple, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
     condensate = first(condensates)
     w = condensate.velocity
-    phase = condensate.phase
+    f = condensate.liquid_fraction
     F⁻, F⁺ = mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ)
-    χ = phase_content(phase, c⁰.χ)
-    h⁻ = phase_content(phase, c⁻.h)
-    h⁰ = phase_content(phase, c⁰.h)
-    h⁺ = phase_content(phase, c⁺.h)
+    χ = liquid_fraction_content(f, c⁰.χ)
+    h⁻ = liquid_fraction_content(f, c⁻.h)
+    h⁰ = liquid_fraction_content(f, c⁰.h)
+    h⁺ = liquid_fraction_content(f, c⁺.h)
     Φ⁻ = condensate_content_flux(i, j, k,     wᵗ, w, F⁻, χ, c⁰.∂φ∂h, h⁰, h⁻, h⁰)
     Φ⁺ = condensate_content_flux(i, j, k + 1, wᵗ, w, F⁺, χ, c⁰.∂φ∂h, h⁰, h⁰, h⁺)
     rest⁻, rest⁺ = condensate_content_fluxes(i, j, k, grid, Base.tail(condensates), wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
@@ -1181,14 +1185,11 @@ end
     return χ + ∂φ∂h * (h_upwind - h)
 end
 
-@inline phase_content(::Val{:liquid}, χ) = χ[1]
-@inline phase_content(::Val{:ice}, χ) = χ[2]
-
-# A single mass of mixed composition, declared as its liquid fraction. The content is a
-# directional derivative in composition space and the enthalpy is extensive, so both are linear
-# in it: a mass leaving along f eˡ + (1 − f) eⁱ carries f χˡ + (1 − f) χⁱ and f hˡ + (1 − f) hⁱ
-# exactly. The pure phases above are f = 1, 0.
-@inline phase_content(liquid_fraction::Number, χ) = liquid_fraction * χ[1] + (1 - liquid_fraction) * χ[2]
+# The content of a mass with liquid fraction f, from the formulation's (liquid, ice) pair. The
+# content is a directional derivative in composition space and the enthalpy is extensive, so both
+# are linear in f: a mass leaving along f eˡ + (1 − f) eⁱ carries f χˡ + (1 − f) χⁱ and
+# f hˡ + (1 − f) hⁱ exactly, and the pure phases f = 1, 0 recover χˡ and χⁱ exactly.
+@inline liquid_fraction_content(f, χ) = f * χ[1] + (1 - f) * χ[2]
 
 """
 $(TYPEDSIGNATURES)

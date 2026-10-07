@@ -332,9 +332,9 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 # Default fallback for tendencies (state-based)
 @inline AtmosphereModels.microphysical_tendency(bμp::TwoMomentCloudMicrophysics, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
-# Thermodynamic phase of each condensate mass, for the latent heat its sedimentation carries
-@inline AtmosphereModels.condensate_phase(bμp::WPNE2M, ::Val{:ρqᶜˡ}) = Val(:liquid)
-@inline AtmosphereModels.condensate_phase(bμp::WPNE2M, ::Val{:ρqʳ})  = Val(:liquid)
+# Liquid fraction of each condensate mass (1 liquid, 0 ice), for the latent heat its sedimentation carries
+@inline AtmosphereModels.condensate_liquid_fraction(bμp::WPNE2M, ::Val{:ρqᶜˡ}) = 1
+@inline AtmosphereModels.condensate_liquid_fraction(bμp::WPNE2M, ::Val{:ρqʳ})  = 1
 
 #####
 ##### Relaxation timescale for non-equilibrium cloud formation

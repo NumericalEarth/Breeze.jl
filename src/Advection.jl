@@ -256,7 +256,7 @@ end
 end
 
 # Any scheme that declares its sedimenting condensate through `sedimentation_velocity` and
-# `condensate_phase` gets the advection-consistent diagnostic for free; with nothing sedimenting
+# `condensate_liquid_fraction` gets the advection-consistent diagnostic for free; with nothing sedimenting
 # (including `Nothing` microphysics) the sum is empty and the flux is zero. Schemes that move
 # precipitation by internal means (such as `DCMIP2016KM`) override this method instead.
 function AtmosphereModels.bottom_precipitation_flux(model, microphysics)

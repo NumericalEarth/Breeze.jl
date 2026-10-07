@@ -845,7 +845,7 @@ end
 @inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρbᶠ}) = μ.wⁱ
 @inline AM.sedimentation_velocity(::P3, μ, ::Val{:ρqʷⁱ}) = μ.wⁱ
 
-# Thermodynamic phase of each sedimenting condensate mass, which routes its mass flux to the
+# Liquid fraction of each sedimenting condensate mass (1 liquid, 0 ice), which routes its mass flux to the
 # right latent heat in the sedimentation transport of ρθ and ρs.
 #
 # Liquid on ice `ρqʷⁱ` rides on an ice particle and falls at `wⁱ`, but its enthalpy is liquid:
@@ -854,10 +854,10 @@ end
 # properties, not a contradiction. Rime mass `ρqᶠ` and rime volume `ρbᶠ` need no phase: the
 # interface consults only `condensate_field_names`, which excludes them (`ρqᶠ` is a portion of
 # `ρqⁱ`, Fᶠ = qᶠ / qⁱ, and `ρbᶠ` is not a mass), so neither can double-count the ice.
-@inline AM.condensate_phase(::P3, ::Val{:ρqᶜˡ}) = Val(:liquid)
-@inline AM.condensate_phase(::P3, ::Val{:ρqʳ})  = Val(:liquid)
-@inline AM.condensate_phase(::P3, ::Val{:ρqʷⁱ}) = Val(:liquid)
-@inline AM.condensate_phase(::P3, ::Val{:ρqⁱ})  = Val(:ice)
+@inline AM.condensate_liquid_fraction(::P3, ::Val{:ρqᶜˡ}) = 1
+@inline AM.condensate_liquid_fraction(::P3, ::Val{:ρqʳ})  = 1
+@inline AM.condensate_liquid_fraction(::P3, ::Val{:ρqʷⁱ}) = 1
+@inline AM.condensate_liquid_fraction(::P3, ::Val{:ρqⁱ})  = 0
 
 #####
 ##### Microphysical tendencies
