@@ -41,13 +41,13 @@ end
 """
     Oceananigans.initialize!(model::AtmosphereModel)
 
-Compute everything derived from the model's current contents: the dynamics' reference state and
-seeded pressure, the boundary-condition state, and the diagnostics. Idempotent.
+Compute the dynamics' reference state and seeded pressure and the boundary-condition state from the
+model's current contents. Idempotent. The diagnostics are left to `set!` and the first time step,
+which recompute them from the state they find.
 """
 function Oceananigans.initialize!(model::AtmosphereModel)
     initialize_dynamics!(model.dynamics, model.grid, model.thermodynamic_constants)
     initialize_boundary_conditions!(prognostic_fields(model), model)
-    TimeSteppers.update_state!(model; compute_tendencies = false)
     return nothing
 end
 
