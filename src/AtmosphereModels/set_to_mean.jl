@@ -1,8 +1,7 @@
 using ..Thermodynamics: ReferenceState, ExnerReferenceState, compute_hydrostatic_reference!,
                         _compute_exner_reference!, _compute_exner_reference_3d!,
-                        bottom_face_height, constant_moist_hydrostatic_pressure,
-                        is_column_reference, moist_hydrostatic_pressure, dry_air_gas_constant,
-                        set_surface_state!, surface_reference_density, vapor_gas_constant
+                        constant_moist_hydrostatic_pressure, is_column_reference, dry_air_gas_constant,
+                        surface_reference_density, vapor_gas_constant
 using Oceananigans: CenterField
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Architectures: architecture
@@ -10,7 +9,6 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: interior, set!, ZeroField, Field
 using Oceananigans.Grids: Center, Face, znode
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
-using GPUArraysCore: @allowscalar
 using Statistics: mean!
 
 """
@@ -161,36 +159,39 @@ $(TYPEDSIGNATURES)
 Rewrite the bottom-face pressure and density of an `ExnerReferenceState` from the horizontal-mean
 near-surface state `(θˢ, qᵛˢ)`, in place.
 
-The datum is reduced with [`moist_hydrostatic_pressure`](@ref) — the same function the constructor
-anchors on — so a reset lands on the profile the constructor would have produced from this mean
-state. `set_to_mean!` is only reached on a height-coordinate grid, whose bottom face is a single
-level, so a horizontally uniform reduction is exact; terrain-following resets go through
-`reset_reference_state!`, which reduces the datum per column along the terrain.
+A horizontally uniform column has the closed-form reduction
+[`constant_moist_hydrostatic_pressure`](@ref), the value the constructor's integration converges to
+for this mean state, so a reset lands on the profile the constructor would have produced.
+`set_to_mean!` is only reached on a height-coordinate grid, whose bottom face is a single level;
+terrain-following resets go through `reset_reference_state!`, which reduces the datum per column
+along the terrain. Both updates are kernels, so the reset traces inside a compiled initialization.
 """
 function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, constants)
-    FT  = eltype(ref)
+    arch = architecture(grid)
     Rᵈ  = dry_air_gas_constant(constants)
     Rᵛ  = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
+    g   = constants.gravitational_acceleration
 
-    θˢ, qᵛˢ = @allowscalar (θ[1, 1, 1], qᵛ[1, 1, 1])
-    zˢ = bottom_face_height(grid)
-    pˢ = convert(FT, moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
-                                                ref.standard_pressure, constants))
+    launch!(arch, grid, :xy, _compute_surface_pressure_from_base!,
+            ref.surface_pressure, grid, θ, qᵛ, ref.base_pressure, ref.standard_pressure,
+            Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    fill_halo_regions!(ref.surface_pressure)
 
-    set_surface_state!(ref.surface_pressure, pˢ)
-    update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    return nothing
-end
-
-function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
     # The 3D and terrain-following forms carry no bottom boundary value on `density`, so there is
     # nothing to keep in sync.
     isnothing(ref.surface_density) && return nothing
-    ρˢ = surface_reference_density(pˢ, θˢ, qᵛˢ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    set_surface_state!(ref.surface_density, convert(eltype(ref), ρˢ))
+    launch!(arch, grid, :xy, _compute_surface_density!,
+            ref.surface_density, ref.surface_pressure, θ, qᵛ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    fill_halo_regions!(ref.surface_density)
     return nothing
+end
+
+@kernel function _compute_surface_density!(ρˢ, pˢ, θ, qᵛ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    i, j = @index(Global, NTuple)
+    @inbounds ρˢ[i, j, 1] = surface_reference_density(pˢ[i, j, 1], θ[i, j, 1], qᵛ[i, j, 1],
+                                                      pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
 end
 
 """
