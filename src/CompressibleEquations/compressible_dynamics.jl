@@ -290,16 +290,6 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         contravariant_vertical_momentum = ZFaceField(grid)
     end
 
-    # Seed the diagnostic pressure so the first `update_state!` sat-adjust does not divide by an
-    # uninitialized (zero) pressure — `(p/pˢᵗ)^κ` would collapse to zero and produce NaN
-    # temperatures. `compute_auxiliary_dynamics_variables!` overwrites pressure on every subsequent
-    # call. Seed from any built reference, else from surface pressure.
-    if reference_state isa ExnerReferenceState
-        seed_pressure!(pressure, grid, reference_state.pressure)
-    else
-        seed_pressure!(pressure, grid, base_pressure)
-    end
-
     return CompressibleDynamics(dynamics.time_discretization, density, total_density, pressure,
                                 standard_pressure, base_pressure, reference_state,
                                 terrain_metrics,
@@ -327,6 +317,21 @@ end
 # defined in `terrain_compressible_physics.jl`.
 build_reference_state(grid, ::Nothing, ref_spec, base_pressure, standard_pressure, constants) =
     ExnerReferenceState(grid, constants; base_pressure, standard_pressure, exner_kwargs(ref_spec)...)
+
+function AtmosphereModels.initialize_dynamics!(dynamics::CompressibleDynamics, grid, constants)
+    reference_state = dynamics.reference_state
+
+    # Seed the diagnostic pressure so the first `update_state!` sat-adjust does not divide by an
+    # uninitialized (zero) pressure — `(p/pˢᵗ)^κ` would collapse to zero and produce NaN
+    # temperatures. `compute_auxiliary_dynamics_variables!` overwrites pressure on every subsequent
+    # call. Seed from any built reference, else from surface pressure.
+    if reference_state isa ExnerReferenceState
+        seed_pressure!(dynamics.pressure, grid, reference_state.pressure)
+    else
+        seed_pressure!(dynamics.pressure, grid, dynamics.base_pressure)
+    end
+    return nothing
+end
 
 function seed_pressure!(pressure, grid, pressure_reference)
     arch = grid.architecture

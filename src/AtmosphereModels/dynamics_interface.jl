@@ -382,6 +382,14 @@ For compressible dynamics, no default initialization is performed.
 """
 initialize_model_thermodynamics!(model) = nothing  # default: do nothing
 
+"""
+$(TYPEDSIGNATURES)
+
+Run the device-side construction a dynamics needs after allocation (reference column, seeded
+diagnostic pressure). Nothing to do for dynamics without such state.
+"""
+initialize_dynamics!(dynamics, grid, constants) = nothing
+
 #####
 ##### Prognostic fields interface
 #####
