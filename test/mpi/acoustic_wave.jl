@@ -89,22 +89,29 @@ end
 
 @testset "Acoustic wave on Distributed($(partition_name)) [$(nranks) ranks, $(use_gpu ? "GPU" : "CPU")]" begin
     arch = Distributed(child_architecture; partition=partition_for(partition_name, nranks))
-    model = acoustic_wave_simulation(arch)
+    model = acoustic_wave_simulation(arch; stop_iteration=10)
     @test model.clock.iteration == 10
     @test model.grid.architecture isa Distributed
 
-    serial_model = acoustic_wave_simulation(CPU())
+    if rank == 0
+        serial_model = acoustic_wave_simulation(CPU())
+    end
 
     for name in (:ρu, :ρv, :ρw)
         local_field = getproperty(model.momentum, name)
-        serial_field = getproperty(serial_model.momentum, name)
         global_field = reconstruct_global_field(local_field)
-        @test !any(isnan, parent(local_field))
-        @test Array(interior(global_field)) ≈ Array(interior(serial_field)) rtol=rtol atol=rtol
+
+        if rank == 0
+            @test !any(isnan, parent(global_field))
+            serial_field = getproperty(serial_model.momentum, name)
+            @test global_field ≈ serial_field rtol=rtol
+        end
     end
 
     global_ρᵈ = reconstruct_global_field(model.dynamics.dry_density)
-    @test Array(interior(global_ρᵈ)) ≈ Array(interior(serial_model.dynamics.dry_density)) rtol=rtol
+    if rank == 0
+        @test global_ρᵈ ≈ serial_model.dynamics.dry_density rtol=rtol
+    end
 end
 
 MPI.Barrier(comm)
