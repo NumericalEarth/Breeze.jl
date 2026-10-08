@@ -49,4 +49,6 @@ elseif Sys.islinux() && get(ENV, "GITHUB_ACTIONS", "false") == "true" && availab
     ENV["JULIA_TEST_MAXRSS_MB"] = "2500"
 end
 
-runtests(Breeze, args; testsuite)
+serial = collect(filter(startswith("distributed/"), keys(testsuite)))
+
+runtests(Breeze, args; testsuite, serial)
