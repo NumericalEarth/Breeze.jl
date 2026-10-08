@@ -10,7 +10,6 @@ include(joinpath(dirname(@__DIR__), "setup.jl"))
 
 using Breeze
 using Oceananigans
-using Oceananigans.TimeSteppers: first_time_step!
 using Oceananigans.Architectures: ReactantState
 using Reactant
 using Reactant: @trace
@@ -107,12 +106,12 @@ end
         # ── Build ──
         @testset "Build" begin
             model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
+            compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+            compiled_initialize!(model)
             @test model isa AtmosphereModel
             @test model.dynamics isa CompressibleDynamics
 
             set!(model; θ=300.0, ρ=1.0)
-            compiled_first_time_step! = Reactant.@compile sync=true first_time_step!(model, Δt)
-            compiled_first_time_step!(model, Δt)
             T = get_temperature(model)
             @test all(isfinite, T)
             @test all(T .> 0)
@@ -120,6 +119,8 @@ end
 
         # Reconstruct for compilation phases
         model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
+        compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+        compiled_initialize!(model)
 
         θ_init, dθ_init = make_init_fields(grid)
         dmodel = Enzyme.make_zero(model)
