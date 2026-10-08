@@ -79,6 +79,7 @@ export
     standard_ozone_profile,
     materialize_background_atmosphere,
     materialize_surface_property,
+    resolve_column_batch_rows,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,

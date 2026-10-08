@@ -20,30 +20,14 @@ using RRTMGP.RTESolver: solve_lw!, solve_sw!
 using RRTMGP.VolumeMixingRatios: VmrGM
 
 # Shared by the clear-sky and all-sky `RadiativeTransferModel` docstrings.
-const column_batch_size_docstring = """
-- `column_batch_size`: Number of columns solved at once, trading speed for memory (default:
-  `nothing`, one batch). Sizing the solver workspace for a batch rather than the whole domain
-  caps the dominant RRTMGP allocation. The request is rounded up to whole j-rows; when those do
-  not divide `Ny`, the final batch overlaps the one before it. Costs GPU occupancy: the solver
-  runs one thread per column, so batches below ~10⁵ columns take as long as a larger one and
-  step time then scales with the batch count."""
-
-"""
-$(TYPEDSIGNATURES)
-
-Number of whole j-rows per radiation batch.
-
-`column_batch_size` is a requested number of *columns*, rounded up to whole rows and capped at
-`Ny`. `nothing` means "one batch", the unbatched default.
-"""
-function resolve_column_batch_rows(column_batch_size, Nx, Ny)
-    isnothing(column_batch_size) && return Ny
-
-    column_batch_size > 0 ||
-        throw(ArgumentError("column_batch_size must be positive, got $column_batch_size"))
-
-    return min(Ny, cld(column_batch_size, Nx))
-end
+const column_batches_docstring = """
+- `column_batches`: Number of batches to split the radiation solve into, trading speed for memory
+  (default: `nothing`, one unbatched solve). The solver workspace, RRTMGP's dominant allocation,
+  is then sized for one batch, so it shrinks by about that factor. Batches are whole j-rows of
+  `cld(Ny, column_batches)` rows each, so the domain may need fewer batches than requested; when
+  the rows do not divide `Ny`, the final batch overlaps the one before it. On GPUs the solver runs
+  one thread per column, so batches of more than ~10⁵ columns cost nothing extra, while smaller
+  batches take about as long as a full solve each."""
 
 """
 $(TYPEDSIGNATURES)
@@ -51,9 +35,9 @@ $(TYPEDSIGNATURES)
 RRTMGP grid parameters for `grid` with `ncol` set to the width of one batch of columns. These size
 the solver workspace, which every batch shares; the state arrays stay sized for the whole domain.
 """
-function rrtmgp_grid_params(FT, context, grid, column_batch_size)
+function rrtmgp_grid_params(FT, context, grid, column_batches)
     Nx, Ny, Nz = size(grid)
-    batch_rows = resolve_column_batch_rows(column_batch_size, Nx, Ny)
+    batch_rows = resolve_column_batch_rows(column_batches, Ny)
     return RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nx * batch_rows)
 end
 
@@ -137,14 +121,6 @@ batch_view(sws::TwoStreamSWRTE, columns) =
     TwoStreamSWRTE(sws.context, sws.op, sws.src, batch_view(sws.bcs, columns),
                    sws.fluxb, sws.flux, sws.band_flux, sws.state_cache)
 
-"""
-$(TYPEDSIGNATURES)
-
-j-rows per batch. The workspace is allocated from `RRTMGPGridParams(; ncol)`, so `ncol` is the
-batch width.
-"""
-column_batch_rows(solver, Nx) = solver.grid_params.ncol ÷ Nx
-
 # The (gas, cloud, aerosol) lookup tables each radiation method hands `solve_lw!`/`solve_sw!`,
 # transcribed from RRTMGP's `update_lw_fluxes!(solver, method)` methods. Clear-sky has no cloud
 # optics.
@@ -166,30 +142,33 @@ previous batch already covered.
 """
 function solve_radiation_batches!(rtm, solver, grid)
     Nx, Ny, _ = size(grid)
-    batch_rows = column_batch_rows(solver, Nx)
 
-    # Unbatched default: solve the full-size state itself rather than a view of it, so the CPU
-    # does not compile a second specialization of the RRTMGP kernels for `SubArray` state.
-    if batch_rows == Ny
+    # `column_batches = nothing` makes `with_batching` a compile-time `false`, so the unbatched
+    # solve never compiles the batched branch's `SubArray` specializations of the RRTMGP kernels.
+    if with_batching(rtm.column_batches)
+        batch_rows = resolve_column_batch_rows(rtm.column_batches, Ny)
+
+        for j in 0:batch_rows:(Ny - 1)
+            j_offset = min(j, Ny - batch_rows)
+            columns = (j_offset * Nx + 1):((j_offset + batch_rows) * Nx)
+
+            solve_radiation_batch!(rtm, solver, grid,
+                                   batch_view(solver.as, columns),
+                                   batch_view(solver.lws, columns),
+                                   batch_view(solver.sws, columns),
+                                   batch_view(solver.deep_atmosphere_inverse_scaling, columns),
+                                   batch_rows, j_offset)
+        end
+    else
         solve_radiation_batch!(rtm, solver, grid, solver.as, solver.lws, solver.sws,
                                solver.deep_atmosphere_inverse_scaling, Ny, 0)
-        return nothing
-    end
-
-    for j in 0:batch_rows:(Ny - 1)
-        j_offset = min(j, Ny - batch_rows)
-        columns = (j_offset * Nx + 1):((j_offset + batch_rows) * Nx)
-
-        solve_radiation_batch!(rtm, solver, grid,
-                               batch_view(solver.as, columns),
-                               batch_view(solver.lws, columns),
-                               batch_view(solver.sws, columns),
-                               batch_view(solver.deep_atmosphere_inverse_scaling, columns),
-                               batch_rows, j_offset)
     end
 
     return nothing
 end
+
+with_batching(::Nothing) = false
+with_batching(::Integer) = true
 
 # Solve one batch: `as`, `lws`, `sws` and `scaling` are the solver's own (unbatched) or batch
 # views of them, and `batch_rows` and `j_offset` locate the batch's j-rows in the grid.

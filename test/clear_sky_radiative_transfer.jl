@@ -133,16 +133,17 @@ using RRTMGP
     end
 
     @testset "Column batch rows" begin
-        resolve_column_batch_rows = Base.get_extension(Breeze, :BreezeRRTMGPExt).resolve_column_batch_rows
+        resolve_column_batch_rows = Breeze.AtmosphereModels.resolve_column_batch_rows
 
-        @test resolve_column_batch_rows(nothing, 4, 6) == 6  # unbatched
-        @test resolve_column_batch_rows(8, 4, 6) == 2        # whole rows
-        @test resolve_column_batch_rows(5, 4, 6) == 2        # rounded up to whole rows
-        @test resolve_column_batch_rows(13, 4, 6) == 4       # rows need not divide Ny
-        @test resolve_column_batch_rows(3, 1, 7) == 3        # nor a prime Ny
-        @test resolve_column_batch_rows(100, 4, 6) == 6      # larger than the domain
+        @test resolve_column_batch_rows(nothing, 6) == 6  # unbatched
+        @test resolve_column_batch_rows(1, 6) == 6        # one batch
+        @test resolve_column_batch_rows(3, 6) == 2
+        @test resolve_column_batch_rows(4, 6) == 2        # at most 4 batches: three of 2 rows
+        @test resolve_column_batch_rows(6, 6) == 1
+        @test resolve_column_batch_rows(2, 7) == 4        # rows need not divide Ny
 
-        @test_throws ArgumentError resolve_column_batch_rows(0, 4, 6)
+        @test_throws ArgumentError resolve_column_batch_rows(0, 6)
+        @test_throws ArgumentError resolve_column_batch_rows(7, 6)  # more batches than rows
     end
 
     # Clear-sky radiation is deterministic and column-local, so solving the domain in batches must
@@ -150,7 +151,7 @@ using RRTMGP
     @testset "Column batching reproduces the unbatched solve [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
 
-        Nx, Ny, Nz = 4, 6, 8
+        Nx, Ny, Nz = 4, 7, 8
         grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz),
                                x=(0, 1kilometers), y=(0, 1kilometers), z=(0, 10kilometers),
                                topology=(Periodic, Periodic, Bounded))
@@ -170,12 +171,12 @@ using RRTMGP
         α = Field{Center, Center, Nothing}(grid)
         set!(α, (x, y) -> 0.1 + 0.3 * x / L + 0.2 * y / L)
 
-        function solve_clear_sky(column_batch_size)
+        function solve_clear_sky(column_batches)
             radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
                                                solar_position,
                                                surface_temperature = 300,
                                                surface_albedo = α,
-                                               column_batch_size)
+                                               column_batches)
 
             model = AtmosphereModel(grid; dynamics, radiation,
                                     clock = Clock(time=DateTime(2024, 6, 21, 12)),
@@ -187,11 +188,14 @@ using RRTMGP
 
         unbatched = solve_clear_sky(nothing)
         @test unbatched.longwave_solver.grid_params.ncol == Nx * Ny
+        @test !occursin("column_batches", sprint(show, unbatched))
 
-        # Three disjoint batches of two rows, then two batches of four rows that overlap on rows 3-4
-        for batch_rows in (2, 4)
-            batched = solve_clear_sky(batch_rows * Nx)
+        # Two batches of four rows that overlap on row 4, then seven disjoint batches of one row
+        for (column_batches, batch_rows) in ((2, 4), (7, 1))
+            batched = solve_clear_sky(column_batches)
             @test batched.longwave_solver.grid_params.ncol == batch_rows * Nx
+            @test occursin("column_batches: $column_batches × $(batch_rows * Nx) columns ($batch_rows of $Ny rows)",
+                           sprint(show, batched))
 
             for name in (:upwelling_longwave_flux, :downwelling_longwave_flux,
                          :upwelling_shortwave_flux, :downwelling_shortwave_flux,

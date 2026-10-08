@@ -70,7 +70,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `liquid_effective_radius`: Model for cloud liquid effective radius in meters (default: `ConstantRadiusParticles(10e-6)`)
 - `ice_effective_radius`: Model for cloud ice effective radius in meters (default: `ConstantRadiusParticles(30e-6)`)
 - `ice_roughness`: Ice crystal roughness for cloud optics (1=smooth, 2=medium, 3=rough; default: 2)
-$(column_batch_size_docstring)
+$(column_batches_docstring)
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::AllSkyOptics,
@@ -87,7 +87,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  liquid_effective_radius = ConstantRadiusParticles(10e-6),
                                                  ice_effective_radius = ConstantRadiusParticles(30e-6),
                                                  ice_roughness = 2,
-                                                 column_batch_size = nothing)
+                                                 column_batches = nothing)
 
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)
@@ -128,7 +128,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # RRTMGP grid + context. `grid_params` sizes the solver workspace (one batch), not the state.
     context = rrtmgp_context(arch)
     ArrayType = ClimaComms.array_type(context.device)
-    grid_params = rrtmgp_grid_params(FT, context, grid, column_batch_size)
+    grid_params = rrtmgp_grid_params(FT, context, grid, column_batches)
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
     # AllSkyRadiation(aerosol_radiation, reset_rng_seed)
@@ -255,6 +255,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   flux_divergence,
                                   liquid_eff_radius,
                                   ice_eff_radius,
+                                  column_batches,
                                   schedule)
 end
 

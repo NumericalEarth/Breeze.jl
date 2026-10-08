@@ -191,7 +191,7 @@ using RRTMGP
     @testset "Column batching reproduces the unbatched cloudy solve [$(FT)]" begin
         Oceananigans.defaults.FloatType = FT
 
-        Nx, Ny, Nz = 4, 6, 8
+        Nx, Ny, Nz = 4, 7, 8
         grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz),
                                x=(0, 1kilometers), y=(0, 1kilometers), z=(0, 10kilometers),
                                topology=(Periodic, Periodic, Bounded))
@@ -209,12 +209,12 @@ using RRTMGP
         θ(x, y, z) = 300 + 0.005 * z / 1000 + 2 * sin(2π * x / L)
         qᵗ(x, y, z) = 0.020 * (y / L)^2 * exp(-z / 3000)
 
-        function solve_all_sky(column_batch_size)
+        function solve_all_sky(column_batches)
             radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
                                                solar_position,
                                                surface_temperature = 300,
                                                surface_albedo = 0.1,
-                                               column_batch_size)
+                                               column_batches)
 
             model = AtmosphereModel(grid; dynamics, microphysics, radiation,
                                     clock = Clock(time=DateTime(2024, 6, 21, 12)),
@@ -231,9 +231,9 @@ using RRTMGP
         @test any(column_liquid .> 0)
         @test any(column_liquid .== 0)
 
-        # Three disjoint batches of two rows, then two batches of four rows that overlap on rows 3-4
-        for batch_rows in (2, 4)
-            batched, _ = solve_all_sky(batch_rows * Nx)
+        # Two batches of four rows that overlap on row 4, then seven disjoint batches of one row
+        for (column_batches, batch_rows) in ((2, 4), (7, 1))
+            batched, _ = solve_all_sky(column_batches)
             @test batched.longwave_solver.grid_params.ncol == batch_rows * Nx
 
             for name in (:upwelling_longwave_flux, :downwelling_longwave_flux,

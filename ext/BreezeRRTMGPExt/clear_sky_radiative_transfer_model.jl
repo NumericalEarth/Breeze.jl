@@ -48,7 +48,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
-$(column_batch_size_docstring)
+$(column_batches_docstring)
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::ClearSkyOptics,
@@ -62,7 +62,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  surface_albedo = nothing,
                                                  solar_constant = 1361,
                                                  schedule = IterationInterval(1),
-                                                 column_batch_size = nothing)
+                                                 column_batches = nothing)
 
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)
@@ -103,7 +103,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # RRTMGP grid + context. `grid_params` sizes the solver workspace (one batch), not the state.
     context = rrtmgp_context(arch)
     ArrayType = ClimaComms.array_type(context.device)
-    grid_params = rrtmgp_grid_params(FT, context, grid, column_batch_size)
+    grid_params = rrtmgp_grid_params(FT, context, grid, column_batches)
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
     radiation_method = ClearSkyRadiation(false)
@@ -192,6 +192,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   flux_divergence,
                                   nothing,  # liquid_effective_radius = nothing for clear-sky
                                   nothing,  # ice_effective_radius = nothing for clear-sky
+                                  column_batches,
                                   schedule)
 end
 
