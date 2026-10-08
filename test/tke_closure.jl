@@ -260,6 +260,17 @@ column(field) = Array(interior(field, 1, 1, :))
         P[Nz] = S^2 * Kᵘ[Nz]
         @test all(column(Gρe) .≈ ρ .* P)
         @test all(column(Gρe) .> 0)
+
+        passive = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=FT(1), κ=FT(1))
+        for closures in ((closure, passive), (passive, closure), (passive, closure, passive))
+            tuple_model = AtmosphereModel(grid; closure=closures, advection=nothing)
+            set!(tuple_model; θ=300, u=z -> S * z)
+            set_tke!(tuple_model, e₀)
+
+            fill!(tuple_model.timestepper.Gⁿ.ρe, 0)
+            Breeze.AtmosphereModels.compute_closure_tendencies!(tuple_model)
+            @test column(tuple_model.timestepper.Gⁿ.ρe) ≈ column(Gρe)
+        end
     end
 
     @testset "dissipation decays TKE at the analytic rate" begin

@@ -198,12 +198,13 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
         model.clock,
         model_fields)
 
-    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
-    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
+    dynamics = slow_dynamics(model.timestepper, model.dynamics)
+    u_args = tuple(momentum_args..., model.forcing.ρu, dynamics)
+    v_args = tuple(momentum_args..., model.forcing.ρv, dynamics)
 
     # Extra arguments for vertical velocity are required to compute buoyancy
     w_args = tuple(momentum_args..., model.forcing.ρw,
-                   model.dynamics,
+                   dynamics,
                    model.formulation,
                    model.temperature,
                    specific_prognostic_moisture(model),
@@ -323,7 +324,8 @@ end
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛᵉ, constants)
+    μ = extract_microphysical_prognostics(i, j, k, microphysics, microphysical_fields)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛᵉ, constants, μ, ρ)
 
     update_microphysical_fields!(microphysical_fields, i, j, k, grid,
                                  microphysics, ρ, 𝒰₁, constants)
@@ -349,11 +351,9 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     compute_momentum_tendencies!(model, model_fields)
 
-    # Use transport velocities (contravariant for terrain-following grids)
-    advecting_velocities = transport_velocities(model)
-
-    # Arguments common to energy density, moisture density, and tracer density tendencies:
-    common_args = (
+    # Arguments common to energy density, moisture density, and tracer density tendencies,
+    # given the advecting velocities (contravariant for terrain-following grids):
+    tendency_args(advecting_velocities) = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
@@ -366,11 +366,17 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
         model.clock,
         model_fields)
 
+    advecting_velocities = transport_velocities(model)
+    common_args = tendency_args(advecting_velocities)
+
     #####
     ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
     #####
 
-    compute_thermodynamic_tendency!(model, common_args)
+    # The thermodynamic variable may advect with its own velocities, but its condensate
+    # sedimentation term pairs with the moisture and tracer tendencies below, so it reads theirs.
+    compute_thermodynamic_tendency!(model, tendency_args(thermodynamic_transport_velocities(model)),
+                                    advecting_velocities.w)
 
     #####
     ##### Moisture density tendency
@@ -495,3 +501,15 @@ compute_closure_tendencies!(model) =
     compute_closure_tendencies!(model.timestepper.Gⁿ, model.closure_fields, model.closure, model)
 
 compute_closure_tendencies!(Gⁿ, closure_fields, closure, model) = nothing
+
+compute_closure_tendencies!(Gⁿ, ::Tuple{}, ::Tuple{}, model) = nothing
+
+function compute_closure_tendencies!(Gⁿ, closure_fields::Tuple{F, Vararg},
+                                     closures::Tuple{C, Vararg}, model) where {F, C}
+    compute_closure_tendencies!(Gⁿ, first(closure_fields), first(closures), model)
+    compute_closure_tendencies!(Gⁿ, Base.tail(closure_fields), Base.tail(closures), model)
+    return nothing
+end
+
+compute_closure_tendencies!(Gⁿ, closure_fields::Tuple, closures::Tuple, model) =
+    throw(ArgumentError("The numbers of closures and closure fields must match."))

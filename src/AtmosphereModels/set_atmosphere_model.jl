@@ -267,7 +267,6 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     moisture_given = !isempty(direct_moisture_input_names)
     specific_moisture_given = any(name -> name ∈ (:qᵗ, :qᵛ, :qᵉ), names)
     total_moisture_given = any(name -> name ∈ (:qᵗ, :ρqᵗ), names)
-    total_moisture_was_set = total_moisture_given
 
     settable_specific_names = settable_specific_microphysical_names(model.microphysics)
     specific_microphysical_names = Tuple(name for name in names if name ∈ settable_specific_names)
@@ -301,13 +300,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             c = getproperty(model.tracers, name)
             set!(c, value)
 
-        elseif name == :ρqᵗ
-            set!(model.moisture_density, value)
-            ρ = dynamics_density(model.dynamics)
-            qᵛᵉ = specific_prognostic_moisture(model)
-            set!(qᵛᵉ, model.moisture_density / ρ)
-
-        elseif name ∈ (:ρqᵛ, :ρqᵉ)
+        elseif name ∈ (:ρqᵗ, :ρqᵛ, :ρqᵉ)
             set!(model.moisture_density, value)
             ρ = dynamics_density(model.dynamics)
             qᵛᵉ = specific_prognostic_moisture(model)
@@ -325,13 +318,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             set!(ρμ, ρ * ρμ)
 
-        elseif name == :qᵗ
-            qᵛᵉ = specific_prognostic_moisture(model)
-            set!(qᵛᵉ, value)
-            ρ = dynamics_density(model.dynamics)
-            set!(model.moisture_density, ρ * qᵛᵉ)
-
-        elseif name ∈ (:qᵛ, :qᵉ)
+        elseif name ∈ (:qᵗ, :qᵛ, :qᵉ)
             qᵛᵉ = specific_prognostic_moisture(model)
             set!(qᵛᵉ, value)
             ρ = dynamics_density(model.dynamics)
@@ -409,25 +396,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
                          moisture_given, specific_moisture_given, total_moisture_given,
                          specific_microphysical_names)
 
-    if total_moisture_was_set
-        # The moisture and microphysical prognostics are total-air mass fractions.
-        # For compressible dynamics this differs from the dry coupling density ρᵈ.
-        total_density_field = total_density(model.dynamics)
-        total_moisture = model.moisture_density / total_density_field
-
-        if !isnothing(model.microphysics) &&
-           hasmethod(specific_prognostic_moisture_from_total,
-                     Tuple{typeof(model.microphysics), typeof(total_moisture),
-                           typeof(model.microphysical_fields), typeof(total_density_field)})
-            specific_moisture_field = specific_prognostic_moisture(model)
-            set!(specific_moisture_field,
-                 specific_prognostic_moisture_from_total(model.microphysics,
-                                                         total_moisture,
-                                                         model.microphysical_fields,
-                                                         total_density_field))
-            set!(model.moisture_density, total_density_field * specific_moisture_field)
-        end
-    end
+    total_moisture_given && convert_total_moisture!(model)
 
     # Phase 2: thermodynamic variable, ℋ, and kinematic fields. Relative humidity needs a
     # preliminary thermodynamic state to diagnose saturation, then a second density-reconciliation

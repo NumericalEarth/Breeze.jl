@@ -89,6 +89,13 @@ function convective_boundary_layer(arch = CPU();
     p₀ = 101325  # Pa
     θ₀ = 309     # K
 
+    # Background potential temperature profile:
+    #   θ = θ₀ for z ≤ 600 m
+    #   θ = θ₀ + 0.004 * (z - 600) for z > 600 m
+    z_inv = 600.0   # m, inversion height
+    Γ = 0.004       # K/m, lapse rate above inversion
+    θ̄(z) = θ₀ + max(0, z - z_inv) * Γ
+
     constants = ThermodynamicConstants()
 
     # Build dynamics formulation
@@ -100,11 +107,11 @@ function convective_boundary_layer(arch = CPU();
         )
         dynamics = AnelasticDynamics(reference_state)
     elseif dynamics isa CompressibleDynamics
-        # CompressibleDynamics is passed in pre-constructed;
-        # set reference_potential_temperature for acoustic substepping if not already set
+        # CompressibleDynamics is passed in pre-constructed. Rebuild it on a hydrostatic
+        # reference state of the background profile, which also supplies the initial density.
         dynamics = CompressibleDynamics(dynamics.time_discretization;
             base_pressure = p₀,
-            reference_potential_temperature = θ₀
+            reference_potential_temperature = θ̄
         )
     end
 
@@ -167,21 +174,30 @@ function convective_boundary_layer(arch = CPU();
         )
     end
 
-    # Set initial conditions
-    # Potential temperature profile:
-    #   θ = θ₀ for z ≤ 600 m
-    #   θ = θ₀ + 0.004 * (z - 600) for z > 600 m
-    # Plus random perturbations ±0.25 K in lowest 400 m
-    z_inv = 600.0   # m, inversion height
-    Γ = 0.004       # K/m, lapse rate above inversion
+    # Set initial conditions: the background profile plus random perturbations ±0.25 K in the
+    # lowest 400 m
     δθ = 0.25       # K, perturbation amplitude
     z_pert = 400.0  # m, depth of perturbations
 
-    θᵢ(x, y, z) = θ₀ + max(0, z - z_inv) * Γ + δθ * (2 * rand() - 1) * (z < z_pert)
+    θᵢ(x, y, z) = θ̄(z) + δθ * (2 * rand() - 1) * (z < z_pert)
     uᵢ(x, y, z) = Uᵍ
     vᵢ(x, y, z) = Vᵍ
 
-    set!(model, θ = θᵢ, u = uᵢ, v = vᵢ)
+    if model.dynamics isa CompressibleDynamics
+        # A compressible model needs its density too; without it every prognostic field starts
+        # at zero. Rescale the hydrostatic reference density by θ̄ / θ so that ρθ, and hence the
+        # pressure, matches the reference state and the perturbations seed no acoustic pulse
+        # (as in examples/splitting_supercell.jl).
+        θ = CenterField(grid)
+        set!(θ, θᵢ)
+        θ̄_field = CenterField(grid)
+        set!(θ̄_field, (x, y, z) -> θ̄(z))
+        ρ = CenterField(grid)
+        set!(ρ, model.dynamics.reference_state.density * θ̄_field / θ)
+        set!(model, θ = θ, u = uᵢ, v = vᵢ, ρ = ρ)
+    else
+        set!(model, θ = θᵢ, u = uᵢ, v = vᵢ)
+    end
 
     return model
 end
