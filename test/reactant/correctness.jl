@@ -74,6 +74,8 @@ function build_model_pair(topology)
 
     vmodel = AtmosphereModel(vgrid; model_kw...)
     rmodel = AtmosphereModel(rgrid; model_kw...)
+    compiled_initialize! = Reactant.@compile sync=true initialize!(rmodel)
+    compiled_initialize!(rmodel)
 
     Nx, Ny, Nz = size(vgrid)
     u_init = 0.1 .* randn(size(vmodel.velocities.u)...)
