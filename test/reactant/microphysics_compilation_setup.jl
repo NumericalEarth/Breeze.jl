@@ -89,12 +89,16 @@ function run_microphysics_tests(scheme_label, microphysics, initial_state)
 
             @testset "Build" begin
                 model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), microphysics)
+                compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+                compiled_initialize!(model)
                 @test model isa AtmosphereModel
                 @test model.dynamics isa CompressibleDynamics
             end
 
             @testset "Raise backward" begin
                 model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), microphysics)
+                compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+                compiled_initialize!(model)
                 θ_init  = CenterField(grid); set!(θ_init,  (args...) -> 300.0)
                 dθ_init = CenterField(grid); set!(dθ_init, 0)
                 dmodel  = Enzyme.make_zero(model)

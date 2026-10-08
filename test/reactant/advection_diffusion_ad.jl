@@ -69,6 +69,8 @@ function build_case(N, L, κ)
         advection = WENO(order = 5),
         closure   = ScalarDiffusivity(κ = Float64(κ)),
         tracers   = :ρc)
+        compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+        compiled_initialize!(model)
 
     T⁰  = CenterField(grid)
     dT⁰ = CenterField(grid)
