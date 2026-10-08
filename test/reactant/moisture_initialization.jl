@@ -34,6 +34,8 @@ end
     microphysics = DCMIP2016KesslerMicrophysics(FT)
     thermodynamic_constants = ThermodynamicConstants(FT; saturation_vapor_pressure=TetensFormula(FT))
     model = AtmosphereModel(grid; microphysics, thermodynamic_constants, dynamics=CompressibleDynamics())
+    compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+    compiled_initialize!(model)
     total_water = CenterField(grid)
     set!(total_water, FT(0.01))
 
