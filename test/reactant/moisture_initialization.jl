@@ -4,6 +4,7 @@ using Breeze
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
 using Breeze.Thermodynamics: TetensFormula
 using Oceananigans
+using Oceananigans.TimeSteppers: first_time_step!
 using Oceananigans.Architectures: ReactantState
 using Reactant
 using Enzyme
@@ -34,13 +35,13 @@ end
     microphysics = DCMIP2016KesslerMicrophysics(FT)
     thermodynamic_constants = ThermodynamicConstants(FT; saturation_vapor_pressure=TetensFormula(FT))
     model = AtmosphereModel(grid; microphysics, thermodynamic_constants, dynamics=CompressibleDynamics())
-    compiled_initialize! = Reactant.@compile sync=true initialize!(model)
-    compiled_initialize!(model)
     total_water = CenterField(grid)
     set!(total_water, FT(0.01))
 
     initialize_total_water!(model, total_water)
     @test all(isapprox.(Array(interior(model.moisture_density)), FT(0.007); rtol=20eps(FT)))
+    compiled_first_time_step! = Reactant.@compile sync=true first_time_step!(model, FT(0.1))
+    compiled_first_time_step!(model, FT(0.1))
 
     # The same compiled initializer must read the current input values at each call.
     compiled = Reactant.@compile sync=true initialize_total_water!(model, total_water)
