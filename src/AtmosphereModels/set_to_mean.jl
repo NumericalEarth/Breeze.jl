@@ -214,11 +214,11 @@ function set_to_mean!(ref::ExnerReferenceState, model)
     Nz   = size(grid, 3)
 
     # Horizontal-mean θˡⁱ and qᵛ as single-column reference profiles.
-    θ̄ = Field{Nothing, Nothing, Center}(grid)
+    θ̄ = ref.potential_temperature
     mean!(θ̄, liquid_ice_potential_temperature(model))
     fill_halo_regions!(θ̄)
 
-    q̄ᵛ = Field{Nothing, Nothing, Center}(grid)
+    q̄ᵛ = ref.vapor_mass_fraction isa Field ? ref.vapor_mass_fraction : Field{Nothing, Nothing, Center}(grid)
     mean_mass_fraction!(q̄ᵛ, specific_humidity(model))
 
     Rᵈ  = dry_air_gas_constant(constants)

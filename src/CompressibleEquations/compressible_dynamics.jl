@@ -316,7 +316,7 @@ end
 # (or 3D when the profile depends on the horizontal coordinates). The terrain-following method is
 # defined in `terrain_compressible_physics.jl`.
 build_reference_state(grid, ::Nothing, ref_spec, base_pressure, standard_pressure, constants) =
-    ExnerReferenceState(grid, constants; base_pressure, standard_pressure, exner_kwargs(ref_spec)...)
+    allocate_exner_reference_state(grid, constants; base_pressure, standard_pressure, exner_kwargs(ref_spec)...)
 
 function AtmosphereModels.initialize_dynamics!(dynamics::CompressibleDynamics, grid, constants)
     reference_state = dynamics.reference_state
@@ -326,6 +326,7 @@ function AtmosphereModels.initialize_dynamics!(dynamics::CompressibleDynamics, g
     # temperatures. `compute_auxiliary_dynamics_variables!` overwrites pressure on every subsequent
     # call. Seed from any built reference, else from surface pressure.
     if reference_state isa ExnerReferenceState
+        Oceananigans.initialize!(reference_state, grid, constants)
         seed_pressure!(dynamics.pressure, grid, reference_state.pressure)
     else
         seed_pressure!(dynamics.pressure, grid, dynamics.base_pressure)
