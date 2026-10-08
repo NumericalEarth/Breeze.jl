@@ -591,6 +591,14 @@ It returns `p₀` exactly when `z == 0`.
 moist_hydrostatic_pressure(z, p₀, θᵣ, ::Nothing, pˢᵗ, constants) =
     hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
 
+# A constant moist column has a closed form, as the dry `θ₀::Number` method does: Π is linear in z,
+# so there is nothing to integrate (and nothing branches on the data, so it traces).
+moist_hydrostatic_pressure(z, p₀, θ₀::Number, qᵛ₀::Number, pˢᵗ, constants) =
+    constant_moist_hydrostatic_pressure(z, p₀, θ₀, qᵛ₀, pˢᵗ,
+                                        dry_air_gas_constant(constants), vapor_gas_constant(constants),
+                                        constants.dry_air.heat_capacity, constants.vapor.heat_capacity,
+                                        constants.gravitational_acceleration)
+
 function moist_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
