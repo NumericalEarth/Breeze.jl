@@ -239,6 +239,11 @@ struct TKEClosureFields{K, L, KC, LC}
     # kernel for the kernels that follow it (the implicit coefficient and the next stage's TKE
     # sources), which read the same T, qᵛ and p: it is a `pow` and a `log` per value (see `∂z_b`).
     N² :: K
+    # The shear production Kᵘ S² at (Center, Center, Face), stored by the diffusivity kernel from the stored
+    # Kᵘ and the velocities for the next stage's TKE sources (`_add_tke_tendencies!`), which read the same
+    # values: the shear is four vertical derivatives per face, which the sources kernel evaluated at two faces
+    # per cell.
+    P :: K
     tupled_tracer_diffusivities :: KC         # per-tracer diffusivity lookup, by closure-scalar position
     tupled_implicit_linear_coefficients :: LC # `Lᵉ` for the TKE tracer, zero for every other
 end
@@ -249,6 +254,7 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.Kᵉ),
                      adapt(to, fields.Lᵉ),
                      adapt(to, fields.N²),
+                     adapt(to, fields.P),
                      adapt(to, fields.tupled_tracer_diffusivities),
                      adapt(to, fields.tupled_implicit_linear_coefficients))
 
@@ -265,6 +271,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     Kᵉ = ZFaceField(grid, boundary_conditions=bcs.Kᵉ)
     Lᵉ = CenterField(grid)
     N² = ZFaceField(grid)
+    P = ZFaceField(grid)
 
     # Indexed by the `Val(id)` the model hands to `diffusivity` and `implicit_linear_coefficient`:
     # TKE is transported with `Kᵉ` and damped with `Lᵉ`, every other scalar is transported with
@@ -272,7 +279,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
     implicit_linear_coefficients = NamedTuple(name => name === TKE_NAME ? Lᵉ : ZeroField() for name in tracer_names)
 
-    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, Lᵉ, N², tracer_diffusivities, implicit_linear_coefficients)
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, Lᵉ, N², P, tracer_diffusivities, implicit_linear_coefficients)
 end
 
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
@@ -399,11 +406,14 @@ end
     Kᵉ = min(Sᵉ * K, closure_ij.maximum_tke_diffusivity)
 
     FT = eltype(grid)
+    Kᵘ_stored = mask_diffusivity(i, j, k, grid, FT(Kᵘ))
     @inbounds begin
-        closure_fields.Kᵘ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵘ))
+        closure_fields.Kᵘ[i, j, k] = Kᵘ_stored
         closure_fields.Kᶜ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᶜ))
         closure_fields.Kᵉ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵉ))
         closure_fields.N²[i, j, k] = N²
+        # `shear_productionᶜᶜᶠ` of the stored Kᵘ: the same product the sources kernel formed from the loaded Kᵘ
+        closure_fields.P[i, j, k] = Kᵘ_stored * shearᶜᶜᶠ(i, j, k, grid, velocities.u, velocities.v)
     end
 end
 
@@ -424,6 +434,7 @@ Buoyancy production ``-Kᶜ N²`` at (Center, Center, Face); negative in stable 
 # The same products from the N² the diffusivity kernel stored (`TKEClosureFields.N²`).
 @inline stored_buoyancy_productionᶜᶜᶠ(i, j, k, grid, Kᶜ, N²) = @inbounds -Kᶜ[i, j, k] * N²[i, j, k]
 @inline stored_buoyancy_frequency(i, j, k, grid, N²) = @inbounds N²[i, j, k]
+@inline stored_shear_productionᶜᶜᶠ(i, j, k, grid, P) = @inbounds P[i, j, k]
 
 """
 $(TYPEDSIGNATURES)
@@ -513,7 +524,10 @@ to centers — to the tendency of the `ρe` tracer. Under an explicit time discr
 
     closure_ij = getclosure(i, j, closure)
 
-    P = ℑbzᵃᵃᶜ(i, j, k, grid, shear_productionᶜᶜᶠ, closure_fields.Kᵘ, velocities.u, velocities.v)
+    # The shear production the diffusivity kernel stored (`TKEClosureFields.P`) from the same Kᵘ and velocities:
+    # nothing writes `model.velocities` between that kernel (in `update_state!`) and this one (stage start).
+    # The peripheral faces 1 and Nz + 1 are replaced by `ℑbzᵃᵃᶜ`'s `ifelse` without arithmetic on them.
+    P = ℑbzᵃᵃᶜ(i, j, k, grid, stored_shear_productionᶜᶜᶠ, closure_fields.P)
     B = ℑbzᵃᵃᶜ(i, j, k, grid, stored_buoyancy_productionᶜᶜᶠ, closure_fields.Kᶜ, closure_fields.N²)
     B⁺ = max(0, B)
 
