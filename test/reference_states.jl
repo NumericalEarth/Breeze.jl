@@ -528,6 +528,19 @@ end
         @test all(Array(interior(model.velocities.u)) .≈ u_new)
     end
 
+    # Periodic sides and rigid lids admit no horizontally uniform vertical mass flux.
+    @testset "set_to_mean! keeps the anelastic projection mass-conserving" begin
+        tall_grid = RectilinearGrid(default_arch; size=(4, 4, 16), x=(0, 100), y=(0, 100), z=(0, 15000),
+                                    topology=(Periodic, Periodic, Bounded))
+        model = AtmosphereModel(tall_grid; thermodynamic_constants=constants)
+        set!(model, T=(x, y, z) -> max(210, 300 - 6.5e-3 * z))
+        set_to_mean!(model.dynamics.reference_state, model; rescale_densities=true)
+        time_step!(model, 1)
+
+        ρw̄ = Field(Average(model.momentum.ρw, dims=(1, 2)))
+        @test maximum(abs, interior(ρw̄)) < sqrt(eps(FT))
+    end
+
     #####
     ##### set_to_mean! for the split-explicit ExnerReferenceState
     #####

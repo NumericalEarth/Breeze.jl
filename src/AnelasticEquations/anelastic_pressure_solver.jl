@@ -82,6 +82,12 @@ end
 #####
 
 function solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
+    # The tridiagonal coefficients carry ρᵣ, which may be rewritten in place after the solver is built.
+    tridiagonal_solver = solver.batched_tridiagonal_solver
+    formulation = solver.tridiagonal_formulation
+    Solvers.compute_main_diagonal!(tridiagonal_solver.b, formulation, solver.grid, solver.poisson_eigenvalues...)
+    Solvers.compute_lower_diagonal!(tridiagonal_solver.a, formulation, solver.grid)
+
     compute_anelastic_source_term!(solver, ρŨ, Δt)
     fill!(solver.storage, 0)  # workaround for bitwise reproducibility — see Oceananigans #5960
     solve!(pₙ, solver)
