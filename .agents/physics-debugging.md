@@ -6,7 +6,7 @@
 |----------|---------|
 | `T` | Temperature (K) |
 | `θ` | Potential temperature: `θ = T / Π` where `Π = (p/p₀)^κ` |
-| `ρs` | Density × static energy (J/m³) — prognostic only under `StaticEnergyThermodynamics` |
+| `ρs` | Density × static energy (J/m³) — prognostic only under `StaticEnergyFormulation` |
 | `ρθ` | Density × potential temperature (kg·K/m³) |
 | `ρE` | Density × total energy (J/m³) — the *interface* key for an energy flux or forcing, applied to whichever thermodynamic variable the model evolves |
 | `ρqᵛ`, `ρqᵉ` | Prognostic moisture density (kg/m³) — vapor under non-equilibrium cloud formation, equilibrium moisture under saturation adjustment |
