@@ -62,7 +62,8 @@ AtmosphereModels.prognostic_field_names(::IP) = tuple()
 
 AtmosphereModels.liquid_mass_fraction(::IP, model) = nothing
 AtmosphereModels.ice_mass_fraction(::IP, model) = nothing
-@inline AtmosphereModels.microphysical_velocities(::IP, μ, name) = nothing
+# Condensate is removed instantly rather than transported, so nothing sediments and the
+# generic `microphysical_velocities`/`sedimentation_velocity` fallbacks stand.
 @inline AtmosphereModels.microphysical_tendency(::IP, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 # Diagnostic vapor + a precipitation-rate field (kg m⁻³ s⁻¹ of condensed/removed water).
@@ -91,12 +92,12 @@ AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:ice}) = nothing
 """
 $(TYPEDSIGNATURES)
 
-Return the surface precipitation flux for the instantaneous-precipitation scheme.
+Return the bottom precipitation flux for the instantaneous-precipitation scheme.
 
-The scheme removes condensed water immediately, so the surface flux is the column integral
+The scheme removes condensed water immediately, so the flux is the column integral
 of the volumetric precipitation rate. Units are kg/m²/s.
 """
-function AtmosphereModels.surface_precipitation_flux(model, ::IP)
+function AtmosphereModels.bottom_precipitation_flux(model, ::IP)
     P = model.microphysical_fields.precipitation_rate
     return Field(Integral(P, dims=3))
 end

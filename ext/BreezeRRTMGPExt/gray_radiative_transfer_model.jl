@@ -210,6 +210,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   flux_divergence,
                                   nothing,  # liquid_effective_radius = nothing for gray
                                   nothing,  # ice_effective_radius = nothing for gray
+                                  nothing,  # column_batches = nothing: gray is never batched
                                   schedule)
 end
 

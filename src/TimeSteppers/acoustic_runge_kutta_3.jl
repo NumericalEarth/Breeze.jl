@@ -182,14 +182,18 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
     acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection)
 
+    # Update remaining scalars (tracers) using WS-RK3, their implicit solves included. It runs
+    # before the post-loop solves because it ends by moving the condensate content of the mass
+    # the tracers' solves sedimented, which then takes the thermodynamic variable's post-loop
+    # closure diffusion; that variable's implicit vertical transport was already applied inside
+    # the substep loop (see `implicit_sedimentation_step!`).
+    scalar_rk3_substep!(model, β * Δt)
+
     # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
     # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
     # vertical advection combined with vertically-implicit closure diffusion. A no-op when
     # the timestepper has no implicit solver.
     implicit_substep!(model, β * Δt)
-
-    # Update remaining scalars (tracers) using WS-RK3.
-    scalar_rk3_substep!(model, β * Δt)
 
     return nothing
 end
@@ -328,7 +332,9 @@ end
 ##### Theta's slow tendency does NOT consume this — `thermodynamic_transport_velocities`
 ##### routes it to `model.velocities` (matching WRF's `rk_tendency`; see
 ##### `slow_thermodynamic_velocities`). Mixing the two paths creates a feedback
-##### loop that destabilizes a rest atmosphere at production Δt.
+##### loop that destabilizes a rest atmosphere at production Δt. Its condensate
+##### sedimentation term alone reads the tracers' transport velocity, pairing its
+##### content fluxes with the mass fluxes the tracer tendencies apply.
 #####
 ##### The implicit remainder of a scalar update must split the SAME velocity
 ##### its explicit fraction was scaled by, so `scalar_substep!` reads a frozen

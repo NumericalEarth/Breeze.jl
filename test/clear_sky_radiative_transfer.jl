@@ -131,4 +131,86 @@ using RRTMGP
         column_heating = Δz * sum(Array(interior(radiation.flux_divergence)))
         @test column_heating ≈ ℐ_net[1] - ℐ_net[end] rtol = sqrt(eps(FT))
     end
+
+    @testset "Column batch rows" begin
+        resolve_column_batch_rows = Breeze.AtmosphereModels.resolve_column_batch_rows
+
+        @test resolve_column_batch_rows(nothing, 6) == 6  # unbatched
+        @test resolve_column_batch_rows(1, 6) == 6        # one batch
+        @test resolve_column_batch_rows(3, 6) == 2
+        @test resolve_column_batch_rows(4, 6) == 2        # at most 4 batches: three of 2 rows
+        @test resolve_column_batch_rows(6, 6) == 1
+        @test resolve_column_batch_rows(2, 7) == 4        # rows need not divide Ny
+
+        @test_throws ArgumentError resolve_column_batch_rows(0, 6)
+        @test_throws ArgumentError resolve_column_batch_rows(7, 6)  # more batches than rows
+    end
+
+    # Clear-sky radiation is deterministic and column-local, so solving the domain in batches must
+    # reproduce the unbatched fluxes exactly.
+    @testset "Column batching reproduces the unbatched solve [$(FT)]" for FT in test_float_types()
+        Oceananigans.defaults.FloatType = FT
+
+        Nx, Ny, Nz = 4, 7, 8
+        grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz),
+                               x=(0, 1kilometers), y=(0, 1kilometers), z=(0, 10kilometers),
+                               topology=(Periodic, Periodic, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         base_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+        solar_position = ApparentSolarPosition(coordinate = (0, 45), epoch = DateTime(2024, 6, 21, 12))
+
+        # Horizontally varying state and albedo, so a column solved against the wrong slab of state
+        # or boundary conditions changes the fluxes.
+        L = 1kilometers
+        θ(x, y, z) = 300 + 0.01 * z / 1000 + 2 * sin(2π * x / L) * cos(2π * y / L)
+        qᵗ(x, y, z) = (0.010 + 0.005 * y / L) * exp(-z / 2500)
+        α = Field{Center, Center, Nothing}(grid)
+        set!(α, (x, y) -> 0.1 + 0.3 * x / L + 0.2 * y / L)
+
+        function solve_clear_sky(column_batches)
+            radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+                                               solar_position,
+                                               surface_temperature = 300,
+                                               surface_albedo = α,
+                                               column_batches)
+
+            model = AtmosphereModel(grid; dynamics, radiation,
+                                    clock = Clock(time=DateTime(2024, 6, 21, 12)),
+                                    formulation = :LiquidIcePotentialTemperature)
+            set!(model; θ, qᵗ)
+
+            return radiation
+        end
+
+        unbatched = solve_clear_sky(nothing)
+        @test unbatched.longwave_solver.grid_params.ncol == Nx * Ny
+        @test !occursin("column_batches", sprint(show, unbatched))
+
+        # Two batches of four rows that overlap on row 4, then seven disjoint batches of one row
+        for (column_batches, batch_rows) in ((2, 4), (7, 1))
+            batched = solve_clear_sky(column_batches)
+            @test batched.longwave_solver.grid_params.ncol == batch_rows * Nx
+            @test occursin("column_batches: $column_batches × $(batch_rows * Nx) columns ($batch_rows of $Ny rows)",
+                           sprint(show, batched))
+
+            for name in (:upwelling_longwave_flux, :downwelling_longwave_flux,
+                         :upwelling_shortwave_flux, :downwelling_shortwave_flux,
+                         :flux_divergence)
+
+                ℐ = Array(interior(getproperty(unbatched, name)))
+                ℐᵇ = Array(interior(getproperty(batched, name)))
+
+                @test all(isfinite, ℐ)
+                @test ℐᵇ == ℐ
+            end
+        end
+
+        # The fluxes vary across the domain, so the comparison is not between uniform fields.
+        ℐ_sw_up = Array(interior(unbatched.upwelling_shortwave_flux))
+        @test !all(ℐ_sw_up .== ℐ_sw_up[1, 1, 1])
+    end
 end

@@ -366,13 +366,17 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
         model.clock,
         model_fields)
 
-    common_args = tendency_args(transport_velocities(model))
+    advecting_velocities = transport_velocities(model)
+    common_args = tendency_args(advecting_velocities)
 
     #####
     ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
     #####
 
-    compute_thermodynamic_tendency!(model, tendency_args(thermodynamic_transport_velocities(model)))
+    # The thermodynamic variable may advect with its own velocities, but its condensate
+    # sedimentation term pairs with the moisture and tracer tendencies below, so it reads theirs.
+    compute_thermodynamic_tendency!(model, tendency_args(thermodynamic_transport_velocities(model)),
+                                    advecting_velocities.w)
 
     #####
     ##### Moisture density tendency
