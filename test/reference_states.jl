@@ -476,7 +476,7 @@ end
         q_prof(z) = FT(0.015) * exp(-z / FT(2500))
 
         # compute_reference_state! takes f(z); set!(model, ...) takes f(x, y, z)
-        compute_reference_state!(reference_state, T_prof, q_prof, constants)
+        compute_reference_state!(model, T_prof, q_prof)
         set!(model, T=(x, y, z) -> T_prof(z), qᵗ=(x, y, z) -> q_prof(z), u=FT(5), w=FT(0))
         time_step!(model, 1)  # populates diagnostic fields
 

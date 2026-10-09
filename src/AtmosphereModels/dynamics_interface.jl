@@ -63,6 +63,14 @@ Returns `nothing` for dynamics that do not require a pressure solver (e.g., comp
 function dynamics_pressure_solver end
 
 """
+    update_pressure_solver!(solver, dynamics)
+
+Recompute the parts of `solver` that depend on the state of `dynamics`, such as its reference density.
+Default is a no-op.
+"""
+update_pressure_solver!(solver, dynamics) = nothing
+
+"""
 $(TYPEDSIGNATURES)
 
 Return the default timestepper symbol for the given dynamics.
