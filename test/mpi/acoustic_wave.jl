@@ -30,6 +30,9 @@ const nranks = MPI.Comm_size(comm)
 
 # Use one GPU per rank when there are enough of them; otherwise run on the CPU.
 const use_gpu = CUDA.functional() && length(CUDA.devices()) >= nranks
+if !use_gpu && CUDA.functional()
+    @warn "Not enough GPU devices available, falling back to CPU"
+end
 const child_architecture = use_gpu ? GPU() : CPU()
 
 # Rounding differs between CPU and GPU, so the comparison with the serial CPU run is looser on GPU.

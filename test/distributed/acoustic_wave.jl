@@ -1,3 +1,4 @@
+using CUDA: CUDA
 using MPI: mpiexec
 using Test: @test, @testset
 
@@ -17,6 +18,10 @@ end
 @testset "Distributed acoustic wave with CompressibleDynamics [MPI]" begin
     for (nranks, partition) in ((2, "x"), (2, "y"), (4, "xy"))
         @testset "Partition($(partition)) on $(nranks) ranks" begin
+            if CUDA.functional() && length(CUDA.devices()) >= nranks
+                continue
+            end
+
             result = run_mpi_worker(nranks, partition)
             if !isnothing(result)
                 succeeded, output = result
