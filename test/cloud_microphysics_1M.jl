@@ -1496,8 +1496,8 @@ end
     for equilibrium in (WarmPhaseEquilibrium(), MixedPhaseEquilibrium(FT)), (qᵛ, qᶜˡ, qʳ) in cases
         microphysics = OneMomentCloudMicrophysics(FT; cloud_formation=SaturationAdjustment(FT; equilibrium))
         ℳ = equilibrium isa WarmPhaseEquilibrium ?
-            BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState(FT(qᶜˡ), FT(qʳ)) :
-            BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(FT(qᶜˡ), zero(FT), FT(qʳ), zero(FT))
+            BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState(FT(qᶜˡ), FT(qʳ), zero(FT)) :
+            BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(FT(qᶜˡ), zero(FT), FT(qʳ), zero(FT), zero(FT))
         q = AM.moisture_fractions(microphysics, ℳ, qᵛ + qᶜˡ)
         𝒰 = TD.LiquidIcePotentialTemperatureState(T, q, p, p)
 

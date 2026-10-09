@@ -7,7 +7,8 @@ function AtmosphereModels.precipitation_rate(model, microphysics::OneMomentLiqui
     qᶜˡ = model.microphysical_fields.qᶜˡ
     ρqʳ = model.microphysical_fields.ρqʳ
     ρ = total_density(model.dynamics)
-    kernel = OneMomentPrecipitationRateKernel(microphysics.categories, qᶜˡ, ρqʳ, ρ)
+    w = model.velocities.w
+    kernel = OneMomentPrecipitationRateKernel(microphysics.categories, qᶜˡ, ρqʳ, ρ, w)
     op = KernelFunctionOperation{Center, Center, Center}(kernel, grid)
     return Field(op)
 end
@@ -19,30 +20,33 @@ AtmosphereModels.precipitation_rate(model, ::OneMomentCloudMicrophysics, ::Val{:
 ##### Precipitation rate kernel (shared by all 1M schemes)
 #####
 
-struct OneMomentPrecipitationRateKernel{C, QL, RR, RS}
+struct OneMomentPrecipitationRateKernel{C, QL, RR, RS, W}
     categories :: C
     cloud_liquid :: QL
     rain_density :: RR
     density :: RS
+    vertical_velocity :: W
 end
 
 Adapt.adapt_structure(to, k::OneMomentPrecipitationRateKernel) =
     OneMomentPrecipitationRateKernel(adapt(to, k.categories),
                                       adapt(to, k.cloud_liquid),
                                       adapt(to, k.rain_density),
-                                      adapt(to, k.density))
+                                      adapt(to, k.density),
+                                      adapt(to, k.vertical_velocity))
 
 @inline function (k::OneMomentPrecipitationRateKernel)(i, j, k_idx, grid)
     categories = k.categories
     @inbounds qᶜˡ = k.cloud_liquid[i, j, k_idx]
     @inbounds ρqʳ = k.rain_density[i, j, k_idx]
     @inbounds ρ = k.density[i, j, k_idx]
+    w = ℑzᵃᵃᶜ(i, j, k_idx, grid, k.vertical_velocity)
 
     qʳ = ρqʳ / ρ
     parameters = categories.parameters
 
     # Autoconversion: cloud liquid → rain
-    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
+    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ, w)
 
     # Accretion: cloud liquid captured by falling rain
     Sᵃᶜᶜ = cloud_precipitation_accretion(

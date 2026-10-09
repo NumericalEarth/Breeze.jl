@@ -6,6 +6,7 @@ using CloudMicrophysics.Parameters: CloudIce, CloudLiquid
 import CloudMicrophysics.BulkMicrophysicsTendencies as BMT
 import CloudMicrophysics.Parameters as CMP
 import CloudMicrophysics.ThermodynamicsInterface as TDI
+using Oceananigans
 using Test
 
 using Breeze.Thermodynamics:
@@ -50,7 +51,7 @@ override_process_params(parameters; overrides...) =
     qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
     @test qᵛ > qᵛ⁺ⁱ
 
-    ℳ = BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
+    ℳ = BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ, zero(FT))
     G = BreezeCloudMicrophysicsExt.mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
     tps = TDI.TD.Parameters.ThermodynamicsParameters(FT)
@@ -108,7 +109,7 @@ end
             constants,
         )
         ρ = density(𝒰, constants)
-        ℳ = BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
+        ℳ = BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ, zero(FT))
         tendencies = @inferred BreezeCloudMicrophysicsExt.mpne1m_tendencies(
             microphysics,
             ρ,
@@ -221,20 +222,153 @@ end
     @test all(iszero, tendencies)
 end
 
-@testset "Velocity-dependent rain autoconversion is rejected [$(FT)]" for FT in test_float_types()
+# Kessler rain autoconversion parameters whose timescale and threshold depend on the vertical velocity:
+# a 10× faster conversion and a halved threshold in convective conditions.
+function convective_rain_autoconversion(parameters)
+    acnv = parameters.process_params.rain_autoconversion
+    convective = CMP.KesslerAcnv(; acnv.τ_slow, τ_fast = acnv.τ_slow / 10,
+                                 acnv.q_threshold_slow, q_threshold_fast = acnv.q_threshold_slow / 2,
+                                 acnv.w_0, acnv.k)
+    return override_process_params(parameters; rain_autoconversion = convective)
+end
+
+@testset "Rain autoconversion depends on the vertical velocity [$(FT)]" for FT in test_float_types()
     default = CMP.Microphysics1MParams(FT)
-    acnv = default.process_params.rain_autoconversion
-    @test acnv isa CMP.KesslerAcnv
-    @test OneMomentCloudMicrophysics(FT) isa OneMomentCloudMicrophysics
+    @test default.process_params.rain_autoconversion isa CMP.KesslerAcnv
+    convective = convective_rain_autoconversion(default)
+    w₀ = convective.process_params.rain_autoconversion.w_0
+    qᶜˡ = FT(1e-3)
 
-    varied_timescale = CMP.KesslerAcnv(; acnv.τ_slow, τ_fast = acnv.τ_slow / 10, acnv.q_threshold_slow,
-                                       acnv.q_threshold_fast, acnv.w_0, acnv.k)
-    varied_threshold = CMP.KesslerAcnv(; acnv.τ_slow, acnv.τ_fast, acnv.q_threshold_slow,
-                                       q_threshold_fast = 2acnv.q_threshold_slow, acnv.w_0, acnv.k)
+    autoconversion(parameters, w) = BreezeCloudMicrophysicsExt.liquid_autoconversion(parameters, qᶜˡ, FT(w))
 
-    for varied in (varied_timescale, varied_threshold)
-        parameters = override_process_params(default; rain_autoconversion = varied)
-        categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
-        @test_throws ArgumentError OneMomentCloudMicrophysics(FT; categories)
+    # Default parameters: slow and fast values are equal, so the rate does not depend on w
+    @test autoconversion(default, 0) > 0
+    @test autoconversion(default, 10) == autoconversion(default, 0)
+    @test autoconversion(default, -10) == autoconversion(default, 0)
+
+    # Velocity-dependent parameters: quiescent rate at rest, faster in up- and downdrafts
+    @test autoconversion(convective, 0) == autoconversion(default, 0)
+    @test autoconversion(convective, w₀) > autoconversion(convective, 0)
+    @test autoconversion(convective, 10w₀) > autoconversion(convective, w₀)
+    @test autoconversion(convective, -w₀) == autoconversion(convective, w₀)
+end
+
+function autoconversion_test_model(::Type{FT}, cloud_formation, parameters) where FT
+    grid = RectilinearGrid(default_arch, FT; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 1000),
+                           topology=(Periodic, Periodic, Bounded))
+    constants = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=290)
+    categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation, categories)
+    return AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics)
+end
+
+# Uniform cloud liquid and no rain. Without rain there is no rain advection, sedimentation,
+# accretion, or evaporation, so the rain tendency is the autoconversion alone.
+function set_cloudy_state!(model; kw...)
+    if haskey(model.microphysical_fields, :ρqᶜˡ)
+        # Set qᶜˡ together with qᵗ so that qᵗ is the total water whatever the prior state
+        set!(model; θ=290, qᵗ=0.012, qᶜˡ=1e-3, kw...)
+    else # saturation adjustment: supersaturate to make cloud liquid
+        set!(model; θ=290, qᵗ=0.02, kw...)
+    end
+    return model
+end
+
+# Rain tendency and precipitation rate in the cells whose bounding w-faces are both interior.
+function rain_tendency(model)
+    Breeze.AtmosphereModels.compute_tendencies!(model)
+    precipitation = compute!(precipitation_rate(model, :liquid))
+    ks = 2:model.grid.Nz-1
+    return (tendency = Array(interior(model.timestepper.Gⁿ.ρqʳ))[:, :, ks],
+            precipitation = Array(interior(precipitation))[:, :, ks])
+end
+
+function rain_tendency_with_vertical_velocity(model, w)
+    set_cloudy_state!(model)
+    # Prescribe w directly, bypassing the pressure projection in `set!`
+    interior(model.velocities.w, :, :, 2:4) .= w
+    return rain_tendency(model)
+end
+
+@testset "Rain autoconversion in AtmosphereModel follows the vertical velocity [$(FT)]" for FT in test_float_types()
+    default = CMP.Microphysics1MParams(FT)
+    convective = convective_rain_autoconversion(default)
+    w = 5 * convective.process_params.rain_autoconversion.w_0
+
+    for (name, cloud_formation) in (("warm non-equilibrium", NonEquilibriumCloudFormation(CloudLiquid(FT), nothing)),
+                                    ("mixed-phase non-equilibrium", NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))),
+                                    ("warm saturation adjustment", SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())))
+        @testset "$name" begin
+            model = autoconversion_test_model(FT, cloud_formation, convective)
+            at_rest = rain_tendency_with_vertical_velocity(model, 0)
+            moving = rain_tendency_with_vertical_velocity(model, w)
+            @test all(at_rest.tendency .> 0)
+            @test all(moving.tendency .> at_rest.tendency)
+            @test all(moving.precipitation .> at_rest.precipitation)
+
+            # Default parameters: no dependence on w
+            model = autoconversion_test_model(FT, cloud_formation, default)
+            @test rain_tendency_with_vertical_velocity(model, w) == rain_tendency_with_vertical_velocity(model, 0)
+        end
+    end
+end
+
+function compressible_autoconversion_model(grid, cloud_formation, parameters, time_discretization)
+    FT = eltype(grid)
+    categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation, categories)
+    dynamics = CompressibleDynamics(time_discretization; reference_potential_temperature=290)
+    return AtmosphereModel(grid; dynamics, microphysics)
+end
+
+# The transport velocity differs from the physical velocity on terrain-following grids, where it
+# is the contravariant w̃ = w - (∂z/∂x) u, and under `AcousticRungeKutta3`, where it is the
+# acoustic time average. Autoconversion must follow the physical vertical velocity of the state.
+@testset "Rain autoconversion follows the physical vertical velocity [$(FT)]" for FT in test_float_types()
+    convective = convective_rain_autoconversion(CMP.Microphysics1MParams(FT))
+    w₀ = convective.process_params.rain_autoconversion.w_0
+
+    # The warm scheme uses the default microphysics kernel, the mixed-phase scheme the fused MPNE1M kernel
+    cloud_formations = (NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
+                        NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT)))
+
+    @testset "Level flow over terrain" for cloud_formation in cloud_formations
+        Nz = 4
+        z = TerrainFollowingVerticalDiscretization(collect(range(0, 2000, length=Nz+1)))
+        grid = RectilinearGrid(default_arch, FT; size=(8, Nz), halo=(5, 5), x=(-5000, 5000), z,
+                               topology=(Periodic, Flat, Bounded))
+        materialize_terrain!(grid, x -> 500 * exp(-x^2 / 1500^2))
+
+        model = compressible_autoconversion_model(grid, cloud_formation, convective, ExplicitTimeStepping())
+        ρ = model.dynamics.reference_state.density
+        set_cloudy_state!(model; ρ, u=0, w=0)
+        at_rest = rain_tendency(model)
+
+        # Above the ground, level flow has no vertical velocity but a nonzero w̃ = -(∂z/∂x) u
+        set_cloudy_state!(model; ρ, u=20, w=0)
+        w̃ = Array(interior(model.dynamics.contravariant_vertical_velocity))
+        @test maximum(abs, w̃[:, :, 2:Nz]) > w₀
+        @test rain_tendency(model) == at_rest
+    end
+
+    @testset "AcousticRungeKutta3 time-averaged velocity" for cloud_formation in cloud_formations
+        grid = RectilinearGrid(default_arch, FT; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 1000),
+                               topology=(Periodic, Periodic, Bounded))
+        model = compressible_autoconversion_model(grid, cloud_formation, convective, SplitExplicitTimeDiscretization())
+        @test model.timestepper isa AcousticRungeKutta3
+
+        set_cloudy_state!(model; ρ=model.dynamics.reference_state.density)
+        at_rest = rain_tendency(model)
+
+        # An acoustic-mean vertical velocity that disagrees with the state does not change autoconversion...
+        fill!(model.timestepper.substepper.time_averaged_velocities.w, 5w₀)
+        @test rain_tendency(model) == at_rest
+
+        # ...but the vertical velocity of the state does
+        interior(model.velocities.w, :, :, 2:4) .= 5w₀
+        moving = rain_tendency(model)
+        @test all(moving.tendency .> at_rest.tendency)
+        @test all(moving.precipitation .> at_rest.precipitation)
     end
 end
