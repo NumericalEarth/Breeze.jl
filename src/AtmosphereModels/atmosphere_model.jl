@@ -1,4 +1,5 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
+using Breeze.Utils: initialize_on_construction!
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
@@ -385,6 +386,8 @@ function AtmosphereModel(grid;
     # *default*: `initialize!` runs after `set!`, which is where a user supplies `nᵃ` or `ρnᵃ`,
     # so re-seeding there would overwrite a user-supplied aerosol reservoir.
     set_default_aerosol_number!(model)
+
+    initialize_on_construction!(arch, model)
 
     return model
 end

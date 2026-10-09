@@ -126,7 +126,7 @@ function initialize_boundary_condition!(
     return nothing
 end
 
-function initialize_boundary_conditions!(bcs::FieldBoundaryConditions, field, model)
+function AtmosphereModels.initialize_boundary_conditions!(bcs::FieldBoundaryConditions, field, model)
     initialize_boundary_condition!(bcs.west, Val(:west), field, model)
     initialize_boundary_condition!(bcs.east, Val(:east), field, model)
     initialize_boundary_condition!(bcs.south, Val(:south), field, model)
@@ -137,24 +137,15 @@ function initialize_boundary_conditions!(bcs::FieldBoundaryConditions, field, mo
     return nothing
 end
 
-initialize_boundary_conditions!(bcs, field, model) = nothing
+AtmosphereModels.initialize_boundary_conditions!(bcs, field, model) = nothing
 
-initialize_boundary_conditions!(fields::NamedTuple, model) =
+AtmosphereModels.initialize_boundary_conditions!(fields::NamedTuple, model) =
     initialize_boundary_conditions!(values(fields), model)
 
-function initialize_boundary_conditions!(fields::Tuple, model)
+function AtmosphereModels.initialize_boundary_conditions!(fields::Tuple, model)
     for field in fields
         bcs = boundary_conditions(field)
         initialize_boundary_conditions!(bcs, field, model)
     end
-    return nothing
-end
-
-#####
-##### Oceananigans.initialize! extension for AtmosphereModel
-#####
-
-function Oceananigans.initialize!(model::AtmosphereModels.AtmosphereModel)
-    initialize_boundary_conditions!(AtmosphereModels.prognostic_fields(model), model)
     return nothing
 end

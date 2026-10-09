@@ -954,7 +954,7 @@ function terrain_exner_reference_state(grid, base_pressure, ref_spec, standard_p
     # `surface_density = nothing`: the terrain-following pressure/density fields carry no bottom
     # boundary value, so there is none to keep in sync.
     return ExnerReferenceState(convert(FT, base_pressure), pˢ, nothing, θ₀,
-                               convert(FT, standard_pressure), pᵣ, ρᵣ, πᵣ)
+                               convert(FT, standard_pressure), pᵣ, ρᵣ, πᵣ, nothing, nothing)
 end
 
 # Terrain-following method of the reference-state builder (the height-coordinate method is in

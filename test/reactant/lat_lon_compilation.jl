@@ -97,12 +97,16 @@ end
         # ── Build ──
         @testset "Build" begin
             model = AtmosphereModel(grid; dynamics=make_dynamics(), coriolis=SphericalCoriolis())
+            compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+            compiled_initialize!(model)
             @test model isa AtmosphereModel
             @test model.dynamics isa CompressibleDynamics
         end
 
         Ns = 1
         model = AtmosphereModel(grid; dynamics=make_dynamics(), coriolis=SphericalCoriolis())
+        compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+        compiled_initialize!(model)
         simulation = Simulation(model; Δt, stop_iteration=Ns, verbose=false)
         θ_init, dθ_init = make_init_fields(grid)
         dsimulation = Enzyme.make_zero(simulation)

@@ -1,6 +1,6 @@
 using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
-using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
+using Oceananigans: Oceananigans, Face, UpdateStateCallsite, TendencyCallsite
 using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
@@ -38,6 +38,21 @@ end
 # prognostic fields by a full `Δt` and so must run exactly once per step — the
 # time-steppers invoke it directly. (The tendency-interface microphysics still runs
 # every RK stage as part of `compute_tendencies!`.)
+"""
+    Oceananigans.initialize!(model::AtmosphereModel)
+
+Compute the dynamics' reference state and seeded pressure and the boundary-condition state from the
+model's current contents. Idempotent. The diagnostics are left to `set!` and the first time step,
+which recompute them from the state they find.
+"""
+function Oceananigans.initialize!(model::AtmosphereModel)
+    initialize_dynamics!(model.dynamics, model.grid, model.thermodynamic_constants)
+    initialize_boundary_conditions!(prognostic_fields(model), model)
+    return nothing
+end
+
+function initialize_boundary_conditions! end
+
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
