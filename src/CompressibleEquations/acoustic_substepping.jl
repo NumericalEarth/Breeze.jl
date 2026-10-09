@@ -88,8 +88,8 @@ Fields:
   dry density, frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
   adaptive-implicit advection.
 - `time_averaged_vertical_velocity_cache`: the acoustic-mean transport velocity the moisture and
-  tracer tendencies were built with, frozen for `scalar_substep!` (see
-  `cache_transport_velocity!`); `nothing` without adaptive-implicit advection.
+  tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
+  tendency's condensate sedimentation term (see `cache_transport_velocity!`).
 """
 struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     substeps :: N
@@ -133,7 +133,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
 
     vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
     density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
-    time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w, split by moisture and tracers
+    time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w the moisture and tracer tendencies were built with
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -245,7 +245,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
     density_cache = cache_advecting_state ? CenterField(grid) : nothing
-    time_averaged_vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
+    time_averaged_vertical_velocity_cache = ZFaceField(grid)
 
     return AcousticSubstepper(Ns, acoustic_cfl, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
@@ -669,7 +669,7 @@ end
 #
 # ∂t (ρw) + ∇·(ρw u) + ∂z p + g ρ = 0
 #
-# The dynamics kernel runs in `SlowTendencyMode` for SplitExplicit,
+# The dynamics kernel runs with `SlowDynamics` for SplitExplicit,
 # which zeroes the PGF and buoyancy in `Gⁿρw`. We reinstate the
 # **Uᴸ-state** PGF and buoyancy here so the slow ρw tendency has the
 # form
@@ -856,7 +856,7 @@ end
 #   (ρu)′^{τ+Δτ} = (ρu)′^τ + Δτ (Gⁿρu − ∂x pᴸ − ∂x(Cᴸ (ρθ)′))
 #   (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ (Gⁿρv − ∂y pᴸ − ∂y(Cᴸ (ρθ)′))
 #
-# `Gⁿρu` (SlowTendencyMode) carries non-pressure slow terms with PGF zeroed;
+# `Gⁿρu` (SlowDynamics) carries non-pressure slow terms with PGF zeroed;
 # we reinstate the frozen large-step PGF here (MPAS keeps it in `tend_u_euler`).
 # Forward-backward sequencing skips only the acoustic perturbation PGF.
 @kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Πᴸ,

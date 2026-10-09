@@ -12,11 +12,11 @@ export
     dynamics_density,
     dynamics_pressure,
     total_density,
+    sedimentation_composition_increment,
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
-    SlowTendencyMode,
-    HorizontalSlowMode,
+    SlowDynamics,
     compute_pressure_correction!,
     make_pressure_correction!,
     # Thermodynamic formulation interface (formulation types exported by their respective modules)
@@ -33,7 +33,7 @@ export
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
-    surface_precipitation_flux,
+    bottom_precipitation_flux,
     specific_humidity,
     moisture_prognostic_name,
     total_moisture_density_name,
@@ -56,12 +56,16 @@ export
     compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
-    specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
     aerosol_field_names,
     initial_aerosol_number,
     initial_aerosol_number_density,
+    sedimentation_velocity,
+    condensate_liquid_fraction,
+    sedimentation_velocity_field,
+    write_sedimentation_velocity!,
+    microphysical_velocities,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     materialize_atmosphere_model_boundary_conditions,
@@ -75,6 +79,7 @@ export
     standard_ozone_profile,
     materialize_background_atmosphere,
     materialize_surface_property,
+    resolve_column_batch_rows,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
@@ -122,7 +127,7 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, fields
+using Oceananigans: Oceananigans, Center, Face, CenterField, fields
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
@@ -176,6 +181,7 @@ include("Diagnostics/Diagnostics.jl")
 using .Diagnostics
 
 # set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
+include("set_moisture.jl")
 include("set_atmosphere_model.jl")
 include("set_to_mean.jl")
 

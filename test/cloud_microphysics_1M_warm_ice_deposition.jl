@@ -267,8 +267,8 @@ end
 # accretion, or evaporation, so the rain tendency is the autoconversion alone.
 function set_cloudy_state!(model; kw...)
     if haskey(model.microphysical_fields, :ρqᶜˡ)
-        set!(model; θ=290, qᵗ=0.012, kw...)
-        set!(model; qᶜˡ=1e-3)
+        # Set qᶜˡ together with qᵗ so that qᵗ is the total water whatever the prior state
+        set!(model; θ=290, qᵗ=0.012, qᶜˡ=1e-3, kw...)
     else # saturation adjustment: supersaturate to make cloud liquid
         set!(model; θ=290, qᵗ=0.02, kw...)
     end
