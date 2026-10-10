@@ -1077,6 +1077,69 @@ end
 end
 
 #####
+##### Precipitation process rates shared by the mixed-phase 1M schemes
+#####
+#
+# Every process that moves mass into or out of rain and snow, evaluated identically for the
+# non-equilibrium (MPNE1M) and saturation-adjustment (MP1M) schemes. Vapor ↔ cloud exchange is not
+# here: MPNE1M relaxes it prognostically and saturation adjustment owns it for MP1M.
+
+@inline function mixed_phase_precipitation_rates(bμp, ρ, ℳ::MixedPhaseOneMomentState, q, T, Tᶠ, constants)
+    parameters = bμp.categories.parameters
+    processes = parameters.processes
+    process_params = parameters.process_params
+    cloud_liquid = parameters.cloud.liquid
+    cloud_ice = parameters.cloud.ice
+    rain = parameters.precip.rain
+    snow = parameters.precip.snow
+    rain_velocity = parameters.terminal_velocity.rain
+    snow_velocity = parameters.terminal_velocity.snow
+    air = parameters.air_properties
+    qᶜˡ, qᶜⁱ, qʳ, qˢⁿ = ℳ.qᶜˡ, ℳ.qᶜⁱ, ℳ.qʳ, ℳ.qˢⁿ
+
+    # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
+    Sᵉᵛᵃᵖ = rain_evaporation_rate(processes.rain_condensation_evaporation,
+                                  rain, rain_velocity, air, q, qʳ, ρ, T, constants)
+
+    # Snow sublimation/deposition: snow ↔ vapor (positive = deposition)
+    Sˢᵘᵇˡ = snow_deposition_sublimation_rate(processes.snow_deposition_sublimation,
+                                             snow, snow_velocity, air, q, qˢⁿ, ρ, T, constants)
+
+    # Snow melting: snow → rain (always non-negative)
+    Sᵐᵉˡᵗ = snow_melt_rate(processes.snow_melt, snow, snow_velocity, air, qˢⁿ, ρ, T, Tᶠ, constants)
+
+    # Collection: cloud liquid → rain
+    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
+    Sᵃᶜᶜ = cloud_precipitation_accretion(process_params.cloud_liquid_rain_accretion,
+                                         cloud_liquid, rain, rain_velocity, qᶜˡ, qʳ, ρ)
+
+    # Ice → snow autoconversion
+    Sᵃᶜⁿᵛⁱˢⁿ = ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+
+    # Accretion: cloud liquid + snow (riming when cold, shedding to rain when warm)
+    Sᵃᶜᶜˡˢⁿ = cloud_precipitation_accretion(process_params.cloud_liquid_snow_accretion,
+                                            cloud_liquid, snow, snow_velocity, qᶜˡ, qˢⁿ, ρ)
+
+    # Accretion: cloud ice + snow → snow
+    Sᵃᶜᶜⁱˢⁿ = cloud_precipitation_accretion(process_params.cloud_ice_snow_accretion,
+                                            cloud_ice, snow, snow_velocity, qᶜⁱ, qˢⁿ, ρ)
+
+    # Accretion: cloud ice + rain → snow (ice sink) and the matching rain sink
+    Sᵃᶜᶜⁱʳ = cloud_precipitation_accretion(process_params.cloud_ice_rain_accretion,
+                                           cloud_ice, rain, rain_velocity, qᶜⁱ, qʳ, ρ)
+    Sᵃᶜᶜʳⁱ = rain_sink_accretion(process_params.cloud_ice_rain_accretion,
+                                 rain, cloud_ice, rain_velocity, qᶜⁱ, qʳ, ρ)
+
+    # Rain-snow collisions (computed for both cold and warm pathways)
+    Sʳˢⁿ = rain_snow_accretion(process_params.rain_snow_accretion,
+                               snow, rain, snow_velocity, rain_velocity, qˢⁿ, qʳ, ρ)
+    Sˢⁿʳ = rain_snow_accretion(process_params.rain_snow_accretion,
+                               rain, snow, rain_velocity, snow_velocity, qʳ, qˢⁿ, ρ)
+
+    return (; Sᵉᵛᵃᵖ, Sˢᵘᵇˡ, Sᵐᵉˡᵗ, Sᵃᶜⁿᵛ, Sᵃᶜᶜ, Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜˡˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵃᶜᶜʳⁱ, Sʳˢⁿ, Sˢⁿʳ)
+end
+
+#####
 ##### Microphysical tendencies for mixed-phase non-equilibrium 1M (MPNE1M)
 #####
 #
@@ -1101,13 +1164,7 @@ end
     categories = bμp.categories
     parameters = categories.parameters
     processes = parameters.processes
-    process_params = parameters.process_params
-    cloud_liquid = parameters.cloud.liquid
     cloud_ice = parameters.cloud.ice
-    rain = parameters.precip.rain
-    snow = parameters.precip.snow
-    rain_velocity = parameters.terminal_velocity.rain
-    snow_velocity = parameters.terminal_velocity.snow
     air = parameters.air_properties
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     qᶜˡ = ℳ.qᶜˡ
@@ -1133,127 +1190,16 @@ end
     Sᵈᵉᵖ = ifelse(isnan(Sᵈᵉᵖ), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
     Sᵈᵉᵖ = ifelse((T > Tᶠ) & (Sᵈᵉᵖ > 0), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
 
-    # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
-    Sᵉᵛᵃᵖ = rain_evaporation_rate(
-        processes.rain_condensation_evaporation,
-        rain,
-        rain_velocity,
-        air,
-        q,
-        qʳ,
-        ρ,
-        T,
-        constants,
-    )
+    (; Sᵉᵛᵃᵖ, Sˢᵘᵇˡ, Sᵐᵉˡᵗ, Sᵃᶜⁿᵛ, Sᵃᶜᶜ, Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜˡˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵃᶜᶜʳⁱ, Sʳˢⁿ, Sˢⁿʳ) =
+        mixed_phase_precipitation_rates(bμp, ρ, ℳ, q, T, Tᶠ, constants)
+
     Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
-
-    # Snow sublimation/deposition: snow ↔ vapor (positive = deposition)
-    Sˢᵘᵇˡ = snow_deposition_sublimation_rate(
-        processes.snow_deposition_sublimation,
-        snow,
-        snow_velocity,
-        air,
-        q,
-        qˢⁿ,
-        ρ,
-        T,
-        constants,
-    )
     Sˢᵘᵇˡ = max(Sˢᵘᵇˡ, -max(0, qˢⁿ) / τⁿᵘᵐ)
-
-    # Snow melting: snow → rain (always non-negative)
-    Sᵐᵉˡᵗ = snow_melt_rate(
-        processes.snow_melt,
-        snow,
-        snow_velocity,
-        air,
-        qˢⁿ,
-        ρ,
-        T,
-        Tᶠ,
-        constants,
-    )
     Sᵐᵉˡᵗ = min(Sᵐᵉˡᵗ, max(0, qˢⁿ) / τⁿᵘᵐ)
 
     # Cloud ice melting: cloud ice → cloud liquid
-    Sᵐᵉˡᵗᶜⁱ = cloud_ice_melt_rate(
-        processes.cloud_ice_melt,
-        cloud_ice,
-        air,
-        qᶜⁱ,
-        ρ,
-        T,
-        Tᶠ,
-        constants,
-    )
+    Sᵐᵉˡᵗᶜⁱ = cloud_ice_melt_rate(processes.cloud_ice_melt, cloud_ice, air, qᶜⁱ, ρ, T, Tᶠ, constants)
     Sᵐᵉˡᵗᶜⁱ = min(Sᵐᵉˡᵗᶜⁱ, max(0, qᶜⁱ) / τⁿᵘᵐ)
-
-    # Collection: cloud liquid → rain (does not involve vapor)
-    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
-    Sᵃᶜᶜ = cloud_precipitation_accretion(
-        process_params.cloud_liquid_rain_accretion,
-        cloud_liquid,
-        rain,
-        rain_velocity,
-        qᶜˡ,
-        qʳ,
-        ρ,
-    )
-
-    # Ice → snow autoconversion
-    Sᵃᶜⁿᵛⁱˢⁿ = ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
-
-    # Accretion: cloud liquid + snow
-    Sᵃᶜᶜˡˢⁿ = cloud_precipitation_accretion(
-        process_params.cloud_liquid_snow_accretion,
-        cloud_liquid,
-        snow,
-        snow_velocity,
-        qᶜˡ,
-        qˢⁿ,
-        ρ,
-    )
-
-    # Accretion: cloud ice + snow → snow
-    Sᵃᶜᶜⁱˢⁿ = cloud_precipitation_accretion(
-        process_params.cloud_ice_snow_accretion,
-        cloud_ice,
-        snow,
-        snow_velocity,
-        qᶜⁱ,
-        qˢⁿ,
-        ρ,
-    )
-
-    # Accretion: cloud ice + rain → snow (ice sink)
-    Sᵃᶜᶜⁱʳ = cloud_precipitation_accretion(
-        process_params.cloud_ice_rain_accretion,
-        cloud_ice,
-        rain,
-        rain_velocity,
-        qᶜⁱ,
-        qʳ,
-        ρ,
-    )
-
-    # Rain sink from ice-rain collisions (rain sink, forms snow)
-    Sᵃᶜᶜʳⁱ = rain_sink_accretion(
-        process_params.cloud_ice_rain_accretion,
-        rain,
-        cloud_ice,
-        rain_velocity,
-        qᶜⁱ,
-        qʳ,
-        ρ,
-    )
-
-    # Rain-snow collisions (computed for both cold and warm pathways)
-    Sʳˢⁿ = rain_snow_accretion(process_params.rain_snow_accretion,
-                              snow, rain, snow_velocity, rain_velocity,
-                              qˢⁿ, qʳ, ρ)
-    Sˢⁿʳ = rain_snow_accretion(process_params.rain_snow_accretion,
-                              rain, snow, rain_velocity, snow_velocity,
-                              qʳ, qˢⁿ, ρ)
 
     # Thermal melt factor for warm accretion
     α = warm_accretion_melt_factor(T, Tᶠ, constants)
@@ -1414,16 +1360,6 @@ end
 
 @inline function mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
-    parameters = categories.parameters
-    processes = parameters.processes
-    process_params = parameters.process_params
-    cloud_liquid = parameters.cloud.liquid
-    cloud_ice = parameters.cloud.ice
-    rain = parameters.precip.rain
-    snow = parameters.precip.snow
-    rain_velocity = parameters.terminal_velocity.rain
-    snow_velocity = parameters.terminal_velocity.snow
-    air = parameters.air_properties
     qᶜˡ = ℳ.qᶜˡ
     qᶜⁱ = ℳ.qᶜⁱ
     qʳ = ℳ.qʳ
@@ -1434,28 +1370,8 @@ end
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
-    Sᵉᵛᵃᵖ = rain_evaporation_rate(processes.rain_condensation_evaporation,
-                                  rain, rain_velocity, air, q, qʳ, ρ, T, constants)
-    Sˢᵘᵇˡ = snow_deposition_sublimation_rate(processes.snow_deposition_sublimation,
-                                             snow, snow_velocity, air, q, qˢⁿ, ρ, T, constants)
-    Sᵐᵉˡᵗ = snow_melt_rate(processes.snow_melt, snow, snow_velocity, air, qˢⁿ, ρ, T, Tᶠ, constants)
-
-    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
-    Sᵃᶜᶜ = cloud_precipitation_accretion(process_params.cloud_liquid_rain_accretion,
-                                         cloud_liquid, rain, rain_velocity, qᶜˡ, qʳ, ρ)
-    Sᵃᶜⁿᵛⁱˢⁿ = ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
-    Sᵃᶜᶜˡˢⁿ = cloud_precipitation_accretion(process_params.cloud_liquid_snow_accretion,
-                                            cloud_liquid, snow, snow_velocity, qᶜˡ, qˢⁿ, ρ)
-    Sᵃᶜᶜⁱˢⁿ = cloud_precipitation_accretion(process_params.cloud_ice_snow_accretion,
-                                            cloud_ice, snow, snow_velocity, qᶜⁱ, qˢⁿ, ρ)
-    Sᵃᶜᶜⁱʳ = cloud_precipitation_accretion(process_params.cloud_ice_rain_accretion,
-                                           cloud_ice, rain, rain_velocity, qᶜⁱ, qʳ, ρ)
-    Sᵃᶜᶜʳⁱ = rain_sink_accretion(process_params.cloud_ice_rain_accretion,
-                                 rain, cloud_ice, rain_velocity, qᶜⁱ, qʳ, ρ)
-    Sʳˢⁿ = rain_snow_accretion(process_params.rain_snow_accretion,
-                               snow, rain, snow_velocity, rain_velocity, qˢⁿ, qʳ, ρ)
-    Sˢⁿʳ = rain_snow_accretion(process_params.rain_snow_accretion,
-                               rain, snow, rain_velocity, snow_velocity, qʳ, qˢⁿ, ρ)
+    (; Sᵉᵛᵃᵖ, Sˢᵘᵇˡ, Sᵐᵉˡᵗ, Sᵃᶜⁿᵛ, Sᵃᶜᶜ, Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜˡˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵃᶜᶜʳⁱ, Sʳˢⁿ, Sˢⁿʳ) =
+        mixed_phase_precipitation_rates(bμp, ρ, ℳ, q, T, Tᶠ, constants)
 
     α = warm_accretion_melt_factor(T, Tᶠ, constants)
     is_warm = T ≥ Tᶠ
