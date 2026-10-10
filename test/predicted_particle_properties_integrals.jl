@@ -81,7 +81,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
         constants = ThermodynamicConstants(FT)
         reference_state = Breeze.ReferenceState(grid, constants;
-                                                surface_pressure = FT(101325),
+                                                base_pressure = FT(101325),
                                                 potential_temperature = FT(300))
         dynamics = Breeze.AnelasticDynamics(reference_state)
         model = Breeze.AtmosphereModel(grid; dynamics,
@@ -132,7 +132,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         dep = IceDeposition()
 
         @test isnothing(dep.ventilation)
-        @test isnothing(dep.ventilation_enhanced)
+        @test isnothing(dep.enhanced_ventilation)
         @test isnothing(dep.small_ice_ventilation_constant)
         @test isnothing(dep.small_ice_ventilation_reynolds)
         @test isnothing(dep.large_ice_ventilation_constant)
@@ -277,9 +277,9 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test p3_supersaturation.process_rates isa ProcessRate{Float64, true}
         @test :ρsᵛ⁺ˡ ∈ prognostic_field_names(p3_supersaturation)
 
-        # Aerosol activation adds the droplet-number and aerosol prognostics together.
+        # Aerosol activation adds the droplet number, and `prognostic` the reservoir.
         p3_aerosol = PredictedParticlePropertiesMicrophysics(;
-            aerosol = AerosolActivation(AerosolMode(Float64)))
+            aerosol = AerosolActivation(AerosolMode(Float64); prognostic = true))
         names_aerosol = prognostic_field_names(p3_aerosol)
         @test :ρnᶜˡ ∈ names_aerosol
         @test :ρnᵃ ∈ names_aerosol

@@ -7,9 +7,10 @@
 ##### Nishizawa & Kitamura 2018).
 #####
 ##### `FilteredSurfaceVelocities` holds the filtered velocity components and the
-##### filtered surface-layer virtual potential temperature difference `Δθᵥ = θᵥ(z₁) - θᵥ₀`,
+##### filtered surface-layer virtual potential temperature difference `Δθᵥ = θᵥ(z₁) - θᵥˢ`,
 ##### the stability input of stability-dependent bulk coefficients. Per-BC scalar
-##### differences (θ, s, qᵛ) are held separately in `FilteredSurfaceScalar`.
+##### sensible heat differences (Δθ, Δs) and vapor differences (Δqᵛ) are held separately
+##### in `FilteredSurfaceScalar`.
 #####
 
 using KernelAbstractions: @kernel, @index
@@ -25,7 +26,7 @@ using Oceananigans.Utils: launch!, KernelParameters, prettysummary
 struct FilteredSurfaceVelocities{U, V, Θ, H, FT, R, RΘ}
     u :: U   # Field{Face, Center, Nothing}
     v :: V   # Field{Center, Face, Nothing}
-    Δθᵥ :: Θ # Field{Center, Center, Nothing} — filtered surface-layer difference θᵥ(z₁) - θᵥ₀
+    Δθᵥ :: Θ # Field{Center, Center, Nothing} — filtered surface-layer difference θᵥ(z₁) - θᵥˢ
     height :: H
     filter_timescale :: FT
     last_update :: R      # Ref{Tuple{Int, Int}} on CPU, Tuple{Int, Int} on GPU (for u, v)
@@ -50,9 +51,10 @@ an exponential (first-order) filter:
 
     ū ← (ū + ϵ u_new) / (1 + ϵ),     ϵ = Δt / τ
 
-where `τ` is the `filter_timescale`.
+where `τ` is a finite `filter_timescale`. The default `filter_timescale=Inf` disables
+temporal averaging: each update samples the current surface state directly.
 
-`Δθ̄ᵥ` filters the *result* the stability correction needs, ``Δθᵥ = θᵥ(z₁) - θᵥ₀``,
+`Δθ̄ᵥ` filters the *result* the stability correction needs, ``Δθᵥ = θᵥ(z₁) - θᵥˢ``,
 formed at every update by the attached `PolynomialCoefficient` from the instantaneous
 first-cell virtual potential temperature and specific humidity, the surface
 temperature, the moisture availability and the surface phase. Filtering the one
@@ -119,9 +121,12 @@ end
     FilteredSurfaceScalar(grid; height=nothing, filter_timescale=Inf)
 
 A two-dimensional field storing a temporally filtered near-surface scalar
-for use in bulk flux boundary conditions.
+for use in bulk flux boundary conditions. The bulk scalar fluxes store the complete
+near-wall difference of their scalar (``Δθ``, ``Δs``, or ``Δqᵛ``), so the wall value
+is filtered together with the atmospheric value.
 
 The filter update is the same exponential form as `FilteredSurfaceVelocities`.
+The default `filter_timescale=Inf` samples the current scalar directly without temporal averaging.
 
 # Keyword Arguments
 
@@ -185,50 +190,36 @@ end
 ##### Update kernels
 #####
 
+# `nothing` selects direct sampling, both at initialization and when temporal
+# filtering is disabled. Keeping this separate avoids arithmetic with Inf or stale NaNs.
+@inline filter_surface_value(previous, current, ::Nothing) = current
+@inline filter_surface_value(previous, current, ϵ) = (previous + ϵ * current) / (1 + ϵ)
+
 @kernel function _update_filtered_velocities!(û, v̂, u, v, grid, height, ϵ)
     i, j = @index(Global, NTuple)
     uⁿ = interpolate_or_surface(i, j, grid, u, Face(), Center(), height)
     vⁿ = interpolate_or_surface(i, j, grid, v, Center(), Face(), height)
-    @inbounds û[i, j, 1] = (û[i, j, 1] + ϵ * uⁿ) / (1 + ϵ)
-    @inbounds v̂[i, j, 1] = (v̂[i, j, 1] + ϵ * vⁿ) / (1 + ϵ)
+    @inbounds û[i, j, 1] = filter_surface_value(û[i, j, 1], uⁿ, ϵ)
+    @inbounds v̂[i, j, 1] = filter_surface_value(v̂[i, j, 1], vⁿ, ϵ)
 end
 
 @kernel function _update_filtered_scalar!(f̂, field_3d, grid, height, ϵ)
     i, j = @index(Global, NTuple)
     fⁿ = interpolate_or_surface(i, j, grid, field_3d, Center(), Center(), height)
-    @inbounds f̂[i, j, 1] = (f̂[i, j, 1] + ϵ * fⁿ) / (1 + ϵ)
+    @inbounds f̂[i, j, 1] = filter_surface_value(f̂[i, j, 1], fⁿ, ϵ)
 end
 
-# The surface-layer difference θᵥ(z₁) - θᵥ₀ is formed at the first cell (the height at
+# The surface-layer difference θᵥ(z₁) - θᵥˢ is formed at the first cell (the height at
 # which the bulk coefficient evaluates stability) from the instantaneous state and the
-# surface temperature `T₀` (a number, a field on the bottom, or a function of the wall
-# coordinates and time, evaluated by `wall_value`), and the result is filtered.
-@kernel function _update_filtered_Δθᵥ!(Δθ̂ᵥ, coef, T₀, grid, clock, ϵ)
+# surface temperature `Tˢ` (a number, a field on the bottom, or a function of the wall
+# coordinates and time, evaluated by `wall_value`), and the result is filtered. `fields`
+# is the surface-layer field tuple the instantaneous θᵥ diagnostic reads.
+@kernel function _update_filtered_Δθᵥ!(Δθ̂ᵥ, coef, Tˢ, grid, clock, fields, ϵ)
     i, j = @index(Global, NTuple)
-    T₀ᵢⱼ = wall_value(i, j, grid, Bottom(), T₀, clock)
-    Δθᵥⁿ = surface_layer_Δθᵥ(i, j, coef, T₀ᵢⱼ)
-    @inbounds Δθ̂ᵥ[i, j, 1] = (Δθ̂ᵥ[i, j, 1] + ϵ * Δθᵥⁿ) / (1 + ϵ)
-end
-
-#####
-##### Initialization kernels
-#####
-
-@kernel function _initialize_filtered_velocities!(û, v̂, u, v, grid, height)
-    i, j = @index(Global, NTuple)
-    @inbounds û[i, j, 1] = interpolate_or_surface(i, j, grid, u, Face(), Center(), height)
-    @inbounds v̂[i, j, 1] = interpolate_or_surface(i, j, grid, v, Center(), Face(), height)
-end
-
-@kernel function _initialize_filtered_scalar!(f̂, field_3d, grid, height)
-    i, j = @index(Global, NTuple)
-    @inbounds f̂[i, j, 1] = interpolate_or_surface(i, j, grid, field_3d, Center(), Center(), height)
-end
-
-@kernel function _initialize_filtered_Δθᵥ!(Δθ̂ᵥ, coef, T₀, grid, clock)
-    i, j = @index(Global, NTuple)
-    T₀ᵢⱼ = wall_value(i, j, grid, Bottom(), T₀, clock)
-    @inbounds Δθ̂ᵥ[i, j, 1] = surface_layer_Δθᵥ(i, j, coef, T₀ᵢⱼ)
+    Tˢᵢⱼ = wall_value(i, j, grid, Bottom(), Tˢ, clock)
+    pˢ = wall_air_pressure(i, j, 1, grid, Bottom(), nothing, fields, coef.thermodynamic_constants)
+    Δθᵥⁿ = surface_layer_Δθᵥ(i, j, 1, grid, coef, Tˢᵢⱼ, fields, pˢ)
+    @inbounds Δθ̂ᵥ[i, j, 1] = filter_surface_value(Δθ̂ᵥ[i, j, 1], Δθᵥⁿ, ϵ)
 end
 
 #####
@@ -236,39 +227,40 @@ end
 #####
 
 """
-    initialize!(fv::FilteredSurfaceVelocities, velocities, grid)
+$(TYPEDSIGNATURES)
 
 Set filtered surface velocities to the current near-surface values.
 """
 function initialize!(fv::FilteredSurfaceVelocities, velocities, grid)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
-    launch!(arch, grid, kp, _initialize_filtered_velocities!,
-            fv.u, fv.v, velocities.u, velocities.v, grid, fv.height)
+    launch!(arch, grid, kp, _update_filtered_velocities!,
+            fv.u, fv.v, velocities.u, velocities.v, grid, fv.height, nothing)
     return nothing
 end
 
 """
-    initialize!(fs::FilteredSurfaceScalar, field_3d, grid)
+$(TYPEDSIGNATURES)
 
 Set filtered surface scalar to the current near-surface value.
 """
 function initialize!(fs::FilteredSurfaceScalar, field_3d, grid)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
-    launch!(arch, grid, kp, _initialize_filtered_scalar!,
-            fs.field, field_3d, grid, fs.height)
+    launch!(arch, grid, kp, _update_filtered_scalar!,
+            fs.field, field_3d, grid, fs.height, nothing)
     return nothing
 end
 
 """
-    update!(fv::FilteredSurfaceVelocities, velocities, grid, Δt)
+$(TYPEDSIGNATURES)
 
 Update the filtered surface velocities using the exponential filter
 with time step `Δt`. `velocities` should be a `NamedTuple` with
 fields `u` and `v`.
 """
 function update!(fv::FilteredSurfaceVelocities, velocities, grid, Δt)
+    isinf(fv.filter_timescale) && return initialize!(fv, velocities, grid)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     ϵ = Δt / fv.filter_timescale
@@ -278,12 +270,13 @@ function update!(fv::FilteredSurfaceVelocities, velocities, grid, Δt)
 end
 
 """
-    update!(fs::FilteredSurfaceScalar, field_3d, grid, Δt)
+$(TYPEDSIGNATURES)
 
 Update the filtered surface scalar using the exponential filter
 with time step `Δt`.
 """
 function update!(fs::FilteredSurfaceScalar, field_3d, grid, Δt)
+    isinf(fs.filter_timescale) && return initialize!(fs, field_3d, grid)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     ϵ = Δt / fs.filter_timescale
@@ -293,31 +286,37 @@ function update!(fs::FilteredSurfaceScalar, field_3d, grid, Δt)
 end
 
 """
-    initialize_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, clock)
+$(TYPEDSIGNATURES)
 
 Set the filtered surface-layer virtual potential temperature difference to its current
 value, formed by the bulk coefficient `coef` from the first-cell state and the surface
-temperature `T₀` (a number, a field on the bottom, or a function of the wall coordinates
+temperature `Tˢ` (a number, a field on the bottom, or a function of the wall coordinates
 and time, evaluated at `clock.time`).
+
+`fields` is the surface-layer field tuple ([`surface_layer_state`](@ref)); it is mandatory rather
+than defaulted, because the instantaneous θᵥ diagnostic evaluates itself from it and a kernel
+cannot report a useful error when it is missing.
 """
-function initialize_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, clock)
+function initialize_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, Tˢ, grid, clock, fields)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
-    launch!(arch, grid, kp, _initialize_filtered_Δθᵥ!, fv.Δθᵥ, coef, T₀, grid, clock)
+    launch!(arch, grid, kp, _update_filtered_Δθᵥ!, fv.Δθᵥ, coef, Tˢ, grid, clock, fields, nothing)
     return nothing
 end
 
 """
-    update_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, clock, Δt)
+$(TYPEDSIGNATURES)
 
 Apply the exponential filter to the surface-layer virtual potential temperature difference,
-with the surface temperature `T₀` evaluated at `clock.time`.
+with the surface temperature `Tˢ` evaluated at `clock.time`. `fields` carries the same
+requirement as [`initialize_Δθᵥ!`](@ref).
 """
-function update_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, T₀, grid, clock, Δt)
+function update_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, Tˢ, grid, clock, Δt, fields)
+    isinf(fv.filter_timescale) && return initialize_Δθᵥ!(fv, coef, Tˢ, grid, clock, fields)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     ϵ = Δt / fv.filter_timescale
-    launch!(arch, grid, kp, _update_filtered_Δθᵥ!, fv.Δθᵥ, coef, T₀, grid, clock, ϵ)
+    launch!(arch, grid, kp, _update_filtered_Δθᵥ!, fv.Δθᵥ, coef, Tˢ, grid, clock, fields, ϵ)
     return nothing
 end
 

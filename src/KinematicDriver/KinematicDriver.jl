@@ -19,11 +19,11 @@ export
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 
-using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
+using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, Field
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition, fill_halo_regions!
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.Fields: AbstractField, FunctionField, ZeroField, field, set!
-using Oceananigans.Grids: Face, Center
+using Oceananigans.Grids: Face, Center, znode
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.TimeSteppers: Clock, TimeSteppers
 using Oceananigans.Utils: launch!, prettysummary
@@ -34,7 +34,9 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_density
-using Breeze.Thermodynamics: ReferenceState
+using Breeze.Thermodynamics: ReferenceState, column_surface_pressure,
+                             surface_boundary_value, surface_pressure_from_cell_center,
+                             surface_state_field
 
 include("prescribed_dynamics.jl")
 

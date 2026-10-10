@@ -81,14 +81,14 @@ function parse_lookup_table_file(filepath::AbstractString, FT::Type)
 
     # Column names for ice data.
     # Column 4 (`cloud_collection`) is the ice-cloud-water sweep-out integral
-    # ∫ V(D) A(D) N'(D) dD. Ice-*rain* collection is not in the 4D ice block: it
+    # ∫ 𝕎(D) A(D) N'(D) dD. Ice-*rain* collection is not in the 4D ice block: it
     # needs the rain slope parameter as an extra coordinate and lives in the 5D
     # rain-ice block embedded later in the same Table 1 file
     # (`rain_number` / `rain_mass`).
     col_names = [
         :number_weighted, :mass_weighted, :aggregation, :cloud_collection,
         :ventilation, :effective_radius, :small_q, :large_q,
-        :reflectivity, :ventilation_enhanced, :mean_diameter, :mean_density,
+        :reflectivity, :enhanced_ventilation, :mean_diameter, :mean_density,
         :slope_parameter, :shape_parameter,
         :small_ice_ventilation_constant, :small_ice_ventilation_reynolds,
         :large_ice_ventilation_constant, :large_ice_ventilation_reynolds,

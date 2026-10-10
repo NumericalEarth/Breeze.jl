@@ -11,7 +11,7 @@ using Oceananigans.TimeSteppers:
 
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, microphysics_model_update!,
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, microphysics_model_update!,
                                 compute_closure_tendencies!
 
 using Breeze.CompressibleEquations:
@@ -151,9 +151,9 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Run one Wicker–Skamarock RK3 stage: compute slow tendencies, then
-execute the linearized-acoustic substep loop, then update remaining
-scalars.
+Run one Wicker–Skamarock RK3 stage: complete the slow tendencies built by
+`update_state!`, then execute the linearized-acoustic substep loop, then
+update remaining scalars.
 """
 function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     ts = model.timestepper
@@ -167,15 +167,9 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     prepare_acoustic_cache!(substepper, model)
     cache_advecting_state!(model)
 
-    # Slow tendencies (advection + Coriolis + diffusion; PGF and buoyancy
-    # are excluded — those are handled inside the substep loop in
-    # linearized form about the RK stage-entry state).
-    compute_slow_momentum_tendencies!(model)
-    compute_slow_scalar_tendencies!(model)
-
-    # Boundary flux tendencies must be added after the stage tendencies are
-    # assembled. Adding them before this function would be overwritten by
-    # compute_slow_momentum_tendencies! / compute_slow_scalar_tendencies!.
+    # `update_state!` built the slow tendencies (advection + Coriolis + diffusion; PGF and
+    # buoyancy are excluded — those are handled inside the substep loop in linearized form
+    # about the RK stage-entry state). Add the boundary flux and closure tendencies to them.
     compute_flux_bc_tendencies!(model)
     compute_closure_tendencies!(model)
 
@@ -188,14 +182,18 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
     acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection)
 
+    # Update remaining scalars (tracers) using WS-RK3, their implicit solves included. It runs
+    # before the post-loop solves because it ends by moving the condensate content of the mass
+    # the tracers' solves sedimented, which then takes the thermodynamic variable's post-loop
+    # closure diffusion; that variable's implicit vertical transport was already applied inside
+    # the substep loop (see `implicit_sedimentation_step!`).
+    scalar_rk3_substep!(model, β * Δt)
+
     # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
     # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
     # vertical advection combined with vertically-implicit closure diffusion. A no-op when
     # the timestepper has no implicit solver.
     implicit_substep!(model, β * Δt)
-
-    # Update remaining scalars (tracers) using WS-RK3.
-    scalar_rk3_substep!(model, β * Δt)
 
     return nothing
 end
@@ -331,10 +329,12 @@ end
 ##### the stage, after its own substep loop, while Breeze builds them between
 ##### stages and so advects with the *preceding* loop's average.
 #####
-##### Theta's slow tendency does NOT consume this — `compute_slow_scalar_tendencies!`
-##### deliberately passes `model.velocities` (matching WRF's `rk_tendency`).
-##### Mixing the two paths creates a feedback loop that destabilizes a rest
-##### atmosphere at production Δt.
+##### Theta's slow tendency does NOT consume this — `thermodynamic_transport_velocities`
+##### routes it to `model.velocities` (matching WRF's `rk_tendency`; see
+##### `slow_thermodynamic_velocities`). Mixing the two paths creates a feedback
+##### loop that destabilizes a rest atmosphere at production Δt. Its condensate
+##### sedimentation term alone reads the tracers' transport velocity, pairing its
+##### content fluxes with the mass fluxes the tracer tendencies apply.
 #####
 ##### The implicit remainder of a scalar update must split the SAME velocity
 ##### its explicit fraction was scaled by, so `scalar_substep!` reads a frozen
@@ -361,6 +361,12 @@ function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:TerrainC
             v = sub.time_averaged_velocities.v,
             w = sub.time_averaged_velocities.w)
 end
+
+# `update_state!` builds the slow tendencies the stages apply: momentum without the pressure-gradient
+# force and buoyancy, which the substep loop integrates, and the thermodynamic variable advected by
+# the RK predictor velocity rather than the time-averaged transport velocity.
+AtmosphereModels.slow_dynamics(::AcousticRungeKutta3, dynamics) = SlowDynamics(dynamics)
+AtmosphereModels.thermodynamic_transport_velocities(model::CompressibleAcousticModel) = slow_thermodynamic_velocities(model)
 
 Oceananigans.prognostic_state(timestepper::AcousticRungeKutta3) =
     (substepper = Oceananigans.prognostic_state(timestepper.substepper),)

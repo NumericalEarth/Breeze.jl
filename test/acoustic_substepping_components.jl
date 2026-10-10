@@ -8,7 +8,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 ##### sequencing, the explicit horizontal step and vertical tridiagonal
 ##### coefficients, substepper and time-stepper construction, divergence
 ##### damping strategies, the upper sponge, the Exner reference state,
-##### slow-tendency modes, and show methods.
+##### the slow-dynamics wrapper, and show methods.
 #####
 ##### Open-boundary behavior lives in
 ##### `test/acoustic_substepping_open_boundaries.jl`; longer time
@@ -28,7 +28,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
                                     implicit_damping_factors
-using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
+using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density
 using Breeze.Thermodynamics: ExnerReferenceState, surface_density
@@ -277,7 +277,7 @@ for arch in arches
         @testset "1 km grid, Δt=12" begin
             grid = RectilinearGrid(arch; size=(100, 6, 10), halo=(5, 5, 5),
                                    x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
-            # Δx = 1000 m, ℂᵃᶜ ≈ 347 m/s, acoustic_cfl = 0.5 (ERF/WRF target)
+            # Δx = 1000 m, cᵃᶜ ≈ 347 m/s, acoustic_cfl = 0.5 (ERF/WRF target)
             # N = ceil(12 * 347 / (0.5 * 1000)) = ceil(8.33) = 9
             N = compute_acoustic_substeps(grid, 12, constants, ν)
             @test N isa Int
@@ -565,10 +565,10 @@ for arch in arches
         constants = ThermodynamicConstants(FT)
 
         @testset "Construction and basic properties" begin
-            ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+            ref = ExnerReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
             @test ref isa ExnerReferenceState
             @test eltype(ref) == FT
-            @test ref.surface_pressure == FT(101325)
+            @test ref.base_pressure == FT(101325)
             @test ref.surface_potential_temperature == FT(300)
 
             # Pressure should decrease monotonically
@@ -580,14 +580,14 @@ for arch in arches
         end
 
         @testset "show/summary" begin
-            ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+            ref = ExnerReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
             s = sprint(show, ref)
             @test occursin("ExnerReferenceState", s)
             @test occursin("p₀", s)
         end
 
         @testset "surface_density" begin
-            ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+            ref = ExnerReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
             ρ₀ = surface_density(ref)
             @test ρ₀ > 0
             @test ρ₀ isa FT
@@ -596,7 +596,7 @@ for arch in arches
         @testset "Function-valued θ₀" begin
             g = constants.gravitational_acceleration
             θ_func(z) = FT(300) * exp(FT(1e-4) * z / g)
-            ref = ExnerReferenceState(grid, constants; surface_pressure=100000, potential_temperature=θ_func)
+            ref = ExnerReferenceState(grid, constants; base_pressure=100000, potential_temperature=θ_func)
             @test ref isa ExnerReferenceState
 
             # Pressure should still decrease monotonically
@@ -610,10 +610,10 @@ for arch in arches
     end
 
     #####
-    ##### SlowTendencyMode and HorizontalSlowMode
+    ##### SlowDynamics
     #####
 
-    @testset "SlowTendencyMode and HorizontalSlowMode [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+    @testset "SlowDynamics [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
@@ -625,20 +625,13 @@ for arch in arches
         ref = model.dynamics.reference_state
         set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
 
-        @testset "SlowTendencyMode" begin
-            slow = SlowTendencyMode(model.dynamics)
+        @testset "SlowDynamics" begin
+            slow = SlowDynamics(model.dynamics)
             @test x_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test y_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test z_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, slow) == 0
             @test dynamics_density(slow) === model.dynamics.dry_density
-        end
-
-        @testset "HorizontalSlowMode" begin
-            hslow = HorizontalSlowMode(model.dynamics)
-            @test z_pressure_gradient(1, 1, 1, grid, hslow) == 0
-            @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, hslow) == 0
-            @test dynamics_density(hslow) === model.dynamics.dry_density
         end
         Oceananigans.defaults.FloatType = old_FT
     end

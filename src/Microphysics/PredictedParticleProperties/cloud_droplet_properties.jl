@@ -12,28 +12,30 @@ shape parameter ``μ^{cl}`` from the droplet number density, together with the b
 diagnosis is clamped to. Evaluated by [`liu_daum_shape_parameter`](@ref):
 
 ```math
-\\chi = a \\, N^{cl} + b, \\qquad
+\\chi = \\mathbb{C}_{cl,1} \\, N^{cl} + \\mathbb{C}_{cl,2}, \\qquad
 \\mu^{cl} = \\mathrm{clamp}\\!\\left(\\frac{1}{\\chi^2} - 1,\\;
-                                    \\mu^{cl}_{\\min},\\; \\mu^{cl}_{\\max}\\right)
+                                    \\mathbb{C}_{cl,3},\\; \\mathbb{C}_{cl,4}\\right)
 ```
 
-``\\chi`` is the relative dispersion of the droplet spectrum, and ``(a, b)`` are the
+``\\chi`` is the relative dispersion of the droplet spectrum, and
+``(\\mathbb{C}_{cl,1}, \\mathbb{C}_{cl,2})`` are the
 Liu-Daum regression of ``\\chi`` on droplet concentration, fit to aircraft measurements of
 warm cloud droplet spectra: at fixed water content, more droplets means a narrower
-spectrum, hence a larger ``μ^{cl}``. The bounds keep ``μ^{cl}`` inside the range the fit
-was measured over.
+spectrum, hence a larger ``μ^{cl}``. The free parameters
+``(\\mathbb{C}_{cl,3}, \\mathbb{C}_{cl,4})`` bound ``μ^{cl}`` to the range over which
+the fit was measured.
 
 The coefficient is stated here for the absolute number density in SI units [m⁻³], so
-``a`` carries units of m³. The published form uses cm⁻³, hence the 10⁻⁶ difference from
+``\\mathbb{C}_{cl,1}`` carries units of m³. The published form uses cm⁻³, hence the 10⁻⁶ difference from
 the printed 5.714 × 10⁻⁴.
 
 See the constructor for the meaning, units and defaults of each coefficient.
 """
 struct CloudShape{FT}
-    relative_dispersion_number_coefficient :: FT # a, multiplying Nᶜˡ [m³]
-    relative_dispersion_intercept :: FT          # b, the intercept [-]
-    minimum_shape_parameter :: FT                # lower bound on the diagnosed μᶜˡ [-]
-    maximum_shape_parameter :: FT                # upper bound on the diagnosed μᶜˡ [-]
+    relative_dispersion_number_coefficient :: FT # ℂᶜˡ₁, multiplying Nᶜˡ [m³]
+    relative_dispersion_intercept :: FT          # ℂᶜˡ₂, the intercept [-]
+    minimum_shape_parameter :: FT                # ℂᶜˡ₃, lower bound on diagnosed μᶜˡ [-]
+    maximum_shape_parameter :: FT                # ℂᶜˡ₄, upper bound on diagnosed μᶜˡ [-]
 end
 
 """
@@ -43,10 +45,10 @@ Construct `CloudShape`.
 
 # Keyword Arguments
 
-- `relative_dispersion_number_coefficient`: ``a`` [m³], default `5.714e-10`
-- `relative_dispersion_intercept`: ``b`` [-], default `0.2714`
-- `minimum_shape_parameter`: ``μ^{cl}_{\\min}`` [-], default `2`
-- `maximum_shape_parameter`: ``μ^{cl}_{\\max}`` [-], default `15`
+- `relative_dispersion_number_coefficient`: ``\\mathbb{C}_{cl,1}`` [m³], default `5.714e-10`
+- `relative_dispersion_intercept`: ``\\mathbb{C}_{cl,2}`` [-], default `0.2714`
+- `minimum_shape_parameter`: ``\\mathbb{C}_{cl,3}`` [-], default `2`
+- `maximum_shape_parameter`: ``\\mathbb{C}_{cl,4}`` [-], default `15`
 
 # Examples
 
@@ -55,7 +57,7 @@ using Breeze.Microphysics.PredictedParticleProperties: CloudShape
 CloudShape(Float64)
 
 # output
-CloudShape(a=5.714e-10 m³, b=0.2714, μᶜˡ ∈ [2.0, 15.0])
+CloudShape(ℂᶜˡ₁=5.714e-10 m³, ℂᶜˡ₂=0.2714, ℂᶜˡ₃=2.0, ℂᶜˡ₄=15.0)
 ```
 """
 function CloudShape(FT::DataType = Oceananigans.defaults.FloatType;
@@ -64,16 +66,16 @@ function CloudShape(FT::DataType = Oceananigans.defaults.FloatType;
                     minimum_shape_parameter = 2,
                     maximum_shape_parameter = 15)
 
-    a = relative_dispersion_number_coefficient
-    b = relative_dispersion_intercept
-    μ_min = minimum_shape_parameter
-    μ_max = maximum_shape_parameter
+    ℂᶜˡ₁ = relative_dispersion_number_coefficient
+    ℂᶜˡ₂ = relative_dispersion_intercept
+    ℂᶜˡ₃ = minimum_shape_parameter
+    ℂᶜˡ₄ = maximum_shape_parameter
 
-    a ≥ 0 || throw(ArgumentError("relative_dispersion_number_coefficient must be nonnegative, got $a"))
-    b > 0 || throw(ArgumentError("relative_dispersion_intercept must be positive, got $b"))
-    μ_min ≤ μ_max || throw(ArgumentError("minimum_shape_parameter $μ_min exceeds maximum_shape_parameter $μ_max"))
+    ℂᶜˡ₁ ≥ 0 || throw(ArgumentError("relative_dispersion_number_coefficient must be nonnegative, got $ℂᶜˡ₁"))
+    ℂᶜˡ₂ > 0 || throw(ArgumentError("relative_dispersion_intercept must be positive, got $ℂᶜˡ₂"))
+    ℂᶜˡ₃ ≤ ℂᶜˡ₄ || throw(ArgumentError("minimum_shape_parameter $ℂᶜˡ₃ exceeds maximum_shape_parameter $ℂᶜˡ₄"))
 
-    return CloudShape(FT(a), FT(b), FT(μ_min), FT(μ_max))
+    return CloudShape(FT(ℂᶜˡ₁), FT(ℂᶜˡ₂), FT(ℂᶜˡ₃), FT(ℂᶜˡ₄))
 end
 
 # Allow a container built at one precision to be reused at another, so that
@@ -90,9 +92,10 @@ Base.summary(::CloudShape) = "CloudShape"
 
 function Base.show(io::IO, p::CloudShape)
     print(io, summary(p), "(")
-    print(io, "a=", p.relative_dispersion_number_coefficient, " m³, ")
-    print(io, "b=", p.relative_dispersion_intercept, ", ")
-    print(io, "μᶜˡ ∈ [", p.minimum_shape_parameter, ", ", p.maximum_shape_parameter, "])")
+    print(io, "ℂᶜˡ₁=", p.relative_dispersion_number_coefficient, " m³, ")
+    print(io, "ℂᶜˡ₂=", p.relative_dispersion_intercept, ", ")
+    print(io, "ℂᶜˡ₃=", p.minimum_shape_parameter, ", ")
+    print(io, "ℂᶜˡ₄=", p.maximum_shape_parameter, ")")
 end
 
 # Prescribed cloud droplet parameters for warm microphysics; see the
@@ -104,12 +107,11 @@ struct CloudDroplets{FT}
     # path that diagnoses μᶜˡ from a local droplet number: `diagnose_cloud_dsd` and
     # `immersion_freezing_cloud_rate`, as well as the constructor below.
     shape :: CloudShape{FT}
-    # Cloud gamma PSD shape parameter μᶜˡ ∈ [μᶜˡ_min, μᶜˡ_max].
-    # Diagnosed from Nᶜˡ via the Liu-Daum (2000) relation in the constructor.
-    # Affects the immersion freezing PSD correction.
+    # Cloud gamma PSD shape parameter μᶜˡ ∈ [ℂᶜˡ₃, ℂᶜˡ₄] at `number_concentration`,
+    # from the Liu-Daum (2000) relation. Process rates diagnose the local μᶜˡ from `shape`.
     shape_parameter :: FT
-    # PSD correction for cloud immersion freezing: C(μᶜˡ) = Γ(μᶜˡ+7)Γ(μᶜˡ+1)/Γ(μᶜˡ+4)²
-    # Precomputed at construction time from `shape_parameter` for GPU compatibility.
+    # PSD correction for cloud immersion freezing at `shape_parameter`:
+    # C(μᶜˡ) = Γ(μᶜˡ+7)Γ(μᶜˡ+1)/Γ(μᶜˡ+4)²
     freezing_psd_correction :: FT
 end
 
@@ -120,16 +122,16 @@ Diagnose the cloud droplet gamma PSD shape parameter μᶜˡ from the absolute n
 concentration `Nᶜˡ` [m⁻³] and the [`CloudShape`](@ref) `shape`:
 
 ```math
-\\chi = a \\, N^{cl} + b, \\qquad
+\\chi = \\mathbb{C}_{cl,1} \\, N^{cl} + \\mathbb{C}_{cl,2}, \\qquad
 \\mu^{cl} = \\mathrm{clamp}\\!\\left(\\frac{1}{\\chi^2} - 1,\\;
-                                    \\mu^{cl}_{\\min},\\; \\mu^{cl}_{\\max}\\right)
+                                    \\mathbb{C}_{cl,3},\\; \\mathbb{C}_{cl,4}\\right)
 ```
 
 The relation is written for the absolute number density, so a specific droplet
 number [kg⁻¹] would first have to be multiplied by ρ. `Nᶜˡ` here is already the
 absolute density [m⁻³], so no ρ is required.
 
-Every model path — construction-time diagnosis, prognostic `diagnose_cloud_dsd`, and the
+Every model path — construction-time diagnosis, `diagnose_cloud_dsd`, and the
 `immersion_freezing_cloud_rate` PSD correction — passes `p3.cloud.shape`, so a
 custom fit reaches all three.
 
@@ -147,15 +149,15 @@ round(liu_daum_shape_parameter(100e6, shape), digits=1)  # continental default
 """
 @inline function liu_daum_shape_parameter(Nᶜˡ, shape)
     FT = typeof(float(Nᶜˡ))
-    a = FT(shape.relative_dispersion_number_coefficient)
-    b = FT(shape.relative_dispersion_intercept)
+    ℂᶜˡ₁ = FT(shape.relative_dispersion_number_coefficient)
+    ℂᶜˡ₂ = FT(shape.relative_dispersion_intercept)
     # χ is the relative dispersion of the droplet spectrum; see `CloudShape`
     # for what the regression means and why the bounds are there.
-    χ = a * Nᶜˡ + b
+    χ = ℂᶜˡ₁ * Nᶜˡ + ℂᶜˡ₂
     μᶜˡ = FT(1) / χ^2 - FT(1)
-    return clamp(μᶜˡ,
-                 FT(shape.minimum_shape_parameter),
-                 FT(shape.maximum_shape_parameter))
+    ℂᶜˡ₃ = FT(shape.minimum_shape_parameter)
+    ℂᶜˡ₄ = FT(shape.maximum_shape_parameter)
+    return clamp(μᶜˡ, ℂᶜˡ₃, ℂᶜˡ₄)
 end
 
 """
@@ -199,19 +201,17 @@ by a single `sink_limiting_factor`. This limits the frozen mass to the residual
 cloud while preserving its diagnosed mass-number ratio; it does not impose a
 minimum frozen-particle mass or independently limit the transferred number.
 
-**Cloud DSD shape parameter (C4 fix):** `μᶜˡ` is diagnosed from Nᶜˡ via a
-Liu–Daum (2000)-type relation, bounded by `shape`. Since Nᶜˡ is prescribed
-here, μᶜˡ is constant too, so it is diagnosed once at construction time via
-[`liu_daum_shape_parameter`](@ref) rather than every timestep. Pass `shape_parameter`
-explicitly to override the diagnosis (e.g., for sensitivity studies).
+**Cloud DSD shape parameter:** Process rates diagnose `μᶜˡ` from the local droplet
+concentration via [`liu_daum_shape_parameter`](@ref), using the relation and bounds
+in `shape`. This applies to both prescribed and prognostic droplet number.
+Configure `shape` for sensitivity studies that change the simulated PSD.
 
-Overriding `shape_parameter` sets *only* the construction-time value. The prognostic
-`diagnose_cloud_dsd` and `immersion_freezing_cloud_rate` paths re-diagnose μᶜˡ from the
-local droplet number and read `shape` instead, so a sensitivity study that
-must move all three sets `shape`.
+The `shape_parameter` keyword replaces the value stored in the `shape_parameter` field.
+It does not change the PSD or freezing rates used in a simulation.
 
-The `freezing_psd_correction = Γ(μᶜˡ+7)Γ(μᶜˡ+1)/Γ(μᶜˡ+4)²` is pre-computed
-at construction time and used in `immersion_freezing_cloud_rate`.
+The stored `freezing_psd_correction = Γ(μᶜˡ+7)Γ(μᶜˡ+1)/Γ(μᶜˡ+4)²` is evaluated at
+`shape_parameter`. `immersion_freezing_cloud_rate` recomputes the correction from
+the local μᶜˡ with [`psd_correction_spherical_volume`](@ref).
 
 **Typical values:**
 - Continental: Nᶜˡ ~ 100-300 × 10⁶ m⁻³ → μᶜˡ ~ 4–8
@@ -224,7 +224,8 @@ Cloud droplets are converted to rain via collision-coalescence following
 # Keyword Arguments
 
 - `number_concentration`: Nᶜˡ [1/m³], default 200×10⁶
-- `condensation_timescale`: Saturation relaxation [s], default 1.0
+- `condensation_timescale`: Saturation relaxation [s], default 1.0. The coupled
+  adjustment uses `ProcessRate.sink_limiting_timescale` instead.
 - `shape`: [`CloudShape`](@ref) holding the coefficients and bounds
   of the Liu-Daum relation, default `CloudShape(FT)`. Read by every path that
   diagnoses μᶜˡ from a local droplet number.
@@ -258,13 +259,7 @@ function CloudDroplets(FT = Oceananigans.defaults.FloatType;
     # Convert before diagnosing so the relation is evaluated entirely in `FT`; otherwise a
     # `Float64` keyword would promote the whole calculation in a `Float32` scheme.
     Nᶜˡ = FT(number_concentration)
-    # Diagnose μᶜˡ from Nᶜˡ via the Liu-Daum (2000) relation by default.
-    # Since Nᶜˡ is prescribed (not predicted), μᶜˡ is also constant — it is
-    # safe to evaluate the empirical relation once at construction time.
     μᶜˡ = isnothing(shape_parameter) ? liu_daum_shape_parameter(Nᶜˡ, shape) : FT(shape_parameter)
-    # Pre-compute PSD correction at construction time for GPU compatibility.
-    # C(μᶜˡ) = Γ(μᶜˡ+7)Γ(μᶜˡ+1)/Γ(μᶜˡ+4)² accounts for the broader-than-mean
-    # volume distribution of a gamma PSD in the immersion freezing rate.
     freezing_psd_correction = psd_correction_spherical_volume(μᶜˡ)
     return CloudDroplets(Nᶜˡ, FT(condensation_timescale), shape, μᶜˡ, FT(freezing_psd_correction))
 end
@@ -306,8 +301,9 @@ defaults admit mean droplet diameters of 1–40 μm.
 """
 @inline function cloud_slope_bounds(μᶜˡ, parameters)
     FT = typeof(μᶜˡ)
-    return ((μᶜˡ + 1) / FT(parameters.maximum_mean_droplet_diameter),
-            (μᶜˡ + 1) / FT(parameters.minimum_mean_droplet_diameter))
+    ℂᶜˡ₅ = FT(parameters.maximum_mean_droplet_diameter)
+    ℂᶜˡ₆ = FT(parameters.minimum_mean_droplet_diameter)
+    return ((μᶜˡ + 1) / ℂᶜˡ₅, (μᶜˡ + 1) / ℂᶜˡ₆)
 end
 
 """
@@ -341,7 +337,7 @@ from the clamped slope to maintain mass-PSD consistency, so that downstream rate
     λᶜˡ = clamp(unbounded_slope, minimum_slope, maximum_slope)
 
     # If the slope was clamped, recompute N from it to maintain
-    # mass consistency: N = qᶜˡ_abs × λ^(μ+1) × 6 / (π ρ_w Γ(μ+4)/Γ(μ+1))
+    # mass consistency: N = qᶜˡ_abs × λ³ × 6 / (π ρ_w Γ(μ+4)/Γ(μ+1))
     # Since Γ(μ+4)/Γ(μ+1) = (μ+3)(μ+2)(μ+1), the result simplifies to:
     Nᶜˡ_bounded = qᶜˡ_abs * FT(6) * λᶜˡ^3 /
                   (FT(π) * ρᴸ * (μᶜˡ + 3) * (μᶜˡ + 2) * (μᶜˡ + 1))
@@ -362,12 +358,12 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Diagnose the cloud PSD state from prognostic cloud liquid and cloud number.
+Diagnose the cloud PSD state from cloud liquid and cloud number.
 
-The cloud number is converted from the prognostic specific number `nᶜˡ` [kg⁻¹]
-to an absolute concentration, then
+The cloud number is converted from the specific number `nᶜˡ` [kg⁻¹] (prognostic, or
+the prescribed concentration divided by ρ) to an absolute concentration, then
 diagnose `μᶜˡ` via Liu-Daum, apply the slope bounds, and return the adjusted
-cloud number together with the PSD correction used by immersion freezing.
+cloud number together with the shape and slope parameters `μᶜˡ` and `λᶜˡ`.
 """
 @inline function diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
     FT = typeof(qᶜˡ + nᶜˡ + ρ)

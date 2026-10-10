@@ -6,8 +6,7 @@
 
 """
     materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                    dynamics, microphysics, surface_pressure, thermodynamic_constants,
-                                                    microphysical_fields, specific_prognostic_moisture, temperature)
+                                                    dynamics, microphysics, thermodynamic_constants)
 
 Regularize boundary conditions for an `AtmosphereModel`. This function is extended
 by the `BoundaryConditions` module to provide atmosphere-specific boundary condition handling.
@@ -23,15 +22,14 @@ are likewise routed onto the moisture density that `microphysics` evolves — `�
 depending on the scheme — without conversion, since water entering the prognostic moisture is
 water entering ``qᵗ`` under any of them.
 
-The `dynamics` argument provides access to the reference state for boundary conditions
-that require it, such as `VirtualPotentialTemperature` diagnostics.
+The `dynamics` argument provides the standard pressure that boundary conditions need at
+materialization time.
 
 The `microphysics` argument specifies the microphysics scheme used to compute moisture
 fractions for mixture heat capacity and virtual potential temperature calculations.
 
-The `microphysical_fields`, `specific_prognostic_moisture`, and `temperature` arguments are pre-created
-fields used to construct the `VirtualPotentialTemperature` diagnostic for stability-dependent
-boundary conditions.
+Nothing about the model state is captured here: surface fluxes read the pressure, density,
+temperature and moisture they need from the model field tuple at evaluation time.
 """
 function materialize_atmosphere_model_boundary_conditions end
 

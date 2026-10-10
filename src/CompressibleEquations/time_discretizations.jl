@@ -304,7 +304,7 @@ Fields
   step (see `acoustic_cfl`).
 - `acoustic_cfl`: Target horizontal acoustic Courant number used by the
   adaptive substep count when `substeps === nothing`. The substep count
-  is ``N \\approx \\lceil \\Delta t \\, \\mathbb{C}^{ac} /
+  is ``N \\approx \\lceil \\Delta t \\, c^{ac} /
   (\\mathrm{acoustic\\_cfl} \\cdot \\Delta x_\\min) \\rceil``, so smaller
   values give more substeps. Default `0.5` (the ERF/WRF target —
   equivalent to the conventional safety factor of `2`). Ignored when

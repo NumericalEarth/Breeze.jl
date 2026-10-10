@@ -1,7 +1,6 @@
 ---
 name: new-simulation
 description: Set up, run, and visualize a new Breeze atmospheric simulation
-user_invocable: true
 ---
 
 # New Simulation

@@ -46,7 +46,7 @@ grid = RectilinearGrid(size=700, z=(0, 7kilometers), topology=(Flat, Flat, Bound
 model = AtmosphereModel(grid; dynamics=ParcelDynamics())
 
 reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                 surface_pressure = 101325,
+                                 base_pressure = 101325,
                                  potential_temperature = 300)
 
 # Set up environmental profiles with moisture that increases toward saturation with height
@@ -165,7 +165,7 @@ kessler_model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics,
 
 # Create reference state with the Tetens-based thermodynamic constants
 kessler_reference_state = ReferenceState(grid, kessler_model.thermodynamic_constants,
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
 
 # Use the Kessler-specific reference state for initial conditions

@@ -11,6 +11,7 @@ struct BenchmarkResult
     microphysics::String
     backend::String
     mode::String  # "forward" (forward stepping only) or "ad" (forward+backward via Enzyme)
+    checkpointing::String  # loop checkpointing strategy for mode == "ad" (see checkpointing_label), "" otherwise
     grid_size::Tuple{Int, Int, Int}
     time_steps::Int
     Δt::Float64
@@ -37,6 +38,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::BenchmarkResult)
     println(io, "├── microphysics: ", r.microphysics)
     println(io, "├── backend: ", r.backend)
     println(io, "├── mode: ", r.mode)
+    isempty(r.checkpointing) || println(io, "├── checkpointing: ", r.checkpointing)
     println(io, "├── grid_size: ", r.grid_size)
     println(io, "├── time_steps: ", r.time_steps)
     println(io, "├── Δt: ", r.Δt)

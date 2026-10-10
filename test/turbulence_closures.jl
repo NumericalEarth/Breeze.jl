@@ -6,6 +6,44 @@ using Test
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
+@testset "Tuple closure fluxes [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 100), y=(0, 100), z=(0, 100))
+    first_closure = ScalarDiffusivity(ν=FT(2), κ=FT(3))
+    second_closure = ScalarDiffusivity(ν=FT(5), κ=FT(7))
+    third_closure = ScalarDiffusivity(ν=FT(11), κ=FT(13))
+
+    closures = (
+        (first_closure,),
+        (first_closure, second_closure),
+        (second_closure, first_closure),
+        (first_closure, second_closure, third_closure),
+    )
+
+    for tuple in closures
+        total = ScalarDiffusivity(ν=sum(c -> c.ν, tuple), κ=sum(c -> c.κ, tuple))
+        tuple_model = AtmosphereModel(grid; closure=tuple, advection=nothing, tracers=:ρc)
+        total_model = AtmosphereModel(grid; closure=total, advection=nothing, tracers=:ρc)
+
+        for model in (tuple_model, total_model)
+            set!(model;
+                 ρu=(x, y, z) -> sin(2π * y / 100) + cos(2π * z / 100),
+                 ρv=(x, y, z) -> sin(2π * x / 100) + cos(2π * z / 100),
+                 ρw=(x, y, z) -> sin(2π * x / 100) + cos(2π * y / 100),
+                 ρc=(x, y, z) -> sin(2π * x / 100) + cos(2π * y / 100) + sin(2π * z / 100))
+            Breeze.AtmosphereModels.compute_tendencies!(model)
+        end
+
+        for name in (:ρu, :ρv, :ρw, :ρc)
+            tuple_tendency = Array(interior(tuple_model.timestepper.Gⁿ[name]))
+            total_tendency = Array(interior(total_model.timestepper.Gⁿ[name]))
+            @test tuple_tendency ≈ total_tendency
+        end
+
+        time_step!(tuple_model, FT(0.1))
+    end
+end
+
 @testset "Time stepping with TurbulenceClosures [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 100), y=(0, 100), z=(0, 100))

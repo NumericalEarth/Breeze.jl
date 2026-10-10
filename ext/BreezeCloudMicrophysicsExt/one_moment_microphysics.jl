@@ -62,13 +62,13 @@ cloud formation in mixed-phase simulations.
 - `qᶜˡ`: Cloud liquid mixing ratio (kg/kg)
 - `qᶜⁱ`: Cloud ice mixing ratio (kg/kg)
 - `qʳ`: Rain mixing ratio (kg/kg)
-- `qˢ`: Snow mixing ratio (kg/kg)
+- `qˢⁿ`: Snow mixing ratio (kg/kg)
 """
 struct MixedPhaseOneMomentState{FT} <: AbstractMicrophysicalState{FT}
     qᶜˡ :: FT  # cloud liquid mixing ratio
     qᶜⁱ :: FT  # cloud ice mixing ratio
     qʳ  :: FT  # rain mixing ratio
-    qˢ  :: FT  # snow mixing ratio
+    qˢⁿ :: FT  # snow mixing ratio
 end
 
 struct OneMomentCloudMicrophysicsCategories{P, V, FT}
@@ -197,6 +197,8 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
         cloud_formation = NonEquilibriumCloudFormation(liquid, ice)
     end
 
+    validate_rain_autoconversion(categories.parameters.process_params.rain_autoconversion)
+
     return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction)
 end
 
@@ -221,10 +223,29 @@ function condensate_formation_from_option(option, params, reference)
     return ConstantRateCondensateFormation(rate)
 end
 
+# The Kessler rain autoconversion threshold and timescale blend between quiescent ("slow") and
+# convective ("fast") values with the vertical velocity `thermo.w`. We evaluate it at rest
+# (`w = 0`), which is exact only when the slow and fast values are equal (the defaults), so
+# `validate_rain_autoconversion` rejects parameters whose rate would depend on `w`.
+# TODO: carry the vertical velocity in the one-moment microphysical states (as the two-moment
+# state already does), pass it here, and remove `validate_rain_autoconversion`.
+validate_rain_autoconversion(parameters) = nothing
+
+function validate_rain_autoconversion(parameters::KesslerAcnv)
+    if parameters.τ_slow != parameters.τ_fast || parameters.q_threshold_slow != parameters.q_threshold_fast
+        throw(ArgumentError("Velocity-dependent Kessler rain autoconversion is not supported: " *
+                            "OneMomentCloudMicrophysics evaluates autoconversion at rest, so the " *
+                            "rain autoconversion parameters must have τ_slow == τ_fast and " *
+                            "q_threshold_slow == q_threshold_fast, got " * prettysummary(parameters)))
+    end
+    return nothing
+end
+
 @inline function liquid_autoconversion(parameters, qᶜˡ)
     micro = (; q_lcl = qᶜˡ)
+    thermo = (; w = zero(qᶜˡ))
     option = parameters.processes.rain_autoconversion
-    return conv_q_lcl_to_q_rai(option, parameters, nothing, micro, nothing)
+    return conv_q_lcl_to_q_rai(option, parameters, nothing, micro, thermo)
 end
 
 @inline function ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
@@ -334,7 +355,7 @@ end
     velocity,
     air,
     q,
-    qˢ,
+    qˢⁿ,
     ρ,
     T,
     constants,
@@ -342,8 +363,8 @@ end
     return 0
 end
 
-@inline function snow_deposition_sublimation_rate(option, snow, velocity, air, q, qˢ, ρ, T, constants)
-    return snow_sublimation_deposition(snow, velocity, air, q, qˢ, ρ, T, constants)
+@inline function snow_deposition_sublimation_rate(option, snow, velocity, air, q, qˢⁿ, ρ, T, constants)
+    return snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, T, constants)
 end
 
 @inline function snow_deposition_sublimation_rate(
@@ -352,18 +373,18 @@ end
     velocity,
     air,
     q,
-    qˢ,
+    qˢⁿ,
     ρ,
     T,
     constants,
 )
-    return min(0, snow_sublimation_deposition(snow, velocity, air, q, qˢ, ρ, T, constants))
+    return min(0, snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, T, constants))
 end
 
-@inline snow_melt_rate(::Nothing, snow, velocity, air, qˢ, ρ, T, Tᶠ, constants) = 0
+@inline snow_melt_rate(::Nothing, snow, velocity, air, qˢⁿ, ρ, T, Tᶠ, constants) = 0
 
-@inline function snow_melt_rate(option, snow, velocity, air, qˢ, ρ, T, Tᶠ, constants)
-    return snow_melting(snow, velocity, air, qˢ, ρ, T, Tᶠ, constants)
+@inline function snow_melt_rate(option, snow, velocity, air, qˢⁿ, ρ, T, Tᶠ, constants)
+    return snow_melting(snow, velocity, air, qˢⁿ, ρ, T, Tᶠ, constants)
 end
 
 @inline function cloud_ice_melt_rate(::Nothing, cloud_ice, air, qᶜⁱ, ρ, T, Tᶠ, constants)
@@ -392,20 +413,14 @@ const OMCM = OneMomentCloudMicrophysics
 # Default fallback for OneMomentCloudMicrophysics tendencies (state-based)
 @inline AM.microphysical_tendency(bμp::OMCM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
-# Default fallback for OneMomentCloudMicrophysics velocities
-@inline AM.microphysical_velocities(bμp::OMCM, μ, name) = nothing
+# Rain sedimentation velocity: stored as a vertical velocity component
+@inline AM.sedimentation_velocity(bμp::OMCM, μ, ::Val{:ρqʳ}) = μ.wʳ
 
-# Rain sedimentation: rain falls with terminal velocity (stored in microphysical fields)
-const zf = ZeroField()
-@inline AM.microphysical_velocities(bμp::OMCM, μ, ::Val{:ρqʳ}) = (u=zf, v=zf, w=μ.wʳ)
-
-# ImpenetrableBoundaryCondition alias
-const IBC = BoundaryCondition{<:NormalFlow, Nothing}
-
-# Helper for bottom terminal velocity based on precipitation_boundary_condition
-# Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBoundaryCondition
-@inline bottom_terminal_velocity(::Nothing, wʳ) = wʳ  # no boundary condition / open: keep computed value
-@inline bottom_terminal_velocity(::IBC, wʳ) = zero(wʳ)  # impenetrable boundary condition
+# Liquid fraction of each condensate mass (1 liquid, 0 ice), for the latent heat its sedimentation carries
+@inline AM.condensate_liquid_fraction(bμp::OMCM, ::Val{:ρqᶜˡ}) = 1
+@inline AM.condensate_liquid_fraction(bμp::OMCM, ::Val{:ρqʳ})  = 1
+@inline AM.condensate_liquid_fraction(bμp::OMCM, ::Val{:ρqᶜⁱ}) = 0
+@inline AM.condensate_liquid_fraction(bμp::OMCM, ::Val{:ρqˢⁿ}) = 0
 
 #####
 ##### Type aliases
@@ -438,14 +453,14 @@ const MixedPhase1M = Union{MP1M, MPNE1M}
 const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
-# Snow sedimentation: snow falls with terminal velocity (mixed-phase schemes only)
-@inline AM.microphysical_velocities(bμp::MixedPhase1M, μ, ::Val{:ρqˢ}) = (u=zf, v=zf, w=μ.wˢ)
+# Snow sedimentation velocity (mixed-phase only)
+@inline AM.sedimentation_velocity(bμp::MixedPhase1M, μ, ::Val{:ρqˢⁿ}) = μ.wˢⁿ
 
-# Cloud liquid sedimentation (non-equilibrium schemes only, where ρqᶜˡ is prognostic)
-@inline AM.microphysical_velocities(bμp::NonEquilibrium1M, μ, ::Val{:ρqᶜˡ}) = (u=zf, v=zf, w=μ.wᶜˡ)
+# Cloud liquid sedimentation velocity (non-equilibrium with cloud sedimentation)
+@inline AM.sedimentation_velocity(bμp::NonEquilibrium1M, μ, ::Val{:ρqᶜˡ}) = μ.wᶜˡ
 
-# Cloud ice sedimentation (mixed-phase non-equilibrium only, where ρqᶜⁱ is prognostic)
-@inline AM.microphysical_velocities(bμp::MPNE1M, μ, ::Val{:ρqᶜⁱ}) = (u=zf, v=zf, w=μ.wᶜⁱ)
+# Cloud ice sedimentation velocity (mixed-phase non-equilibrium)
+@inline AM.sedimentation_velocity(bμp::MPNE1M, μ, ::Val{:ρqᶜⁱ}) = μ.wᶜⁱ
 
 #####
 ##### Gridless MicrophysicalState construction
@@ -479,10 +494,10 @@ end
 @inline function AM.microphysical_state(bμp::MP1M, ρ, μ, 𝒰, velocities)
     q = 𝒰.moisture_mass_fractions
     qʳ = μ.ρqʳ / ρ
-    qˢ = μ.ρqˢ / ρ
+    qˢⁿ = μ.ρqˢⁿ / ρ
     qᶜˡ = max(zero(qʳ), q.liquid - qʳ)  # cloud liquid = total liquid - rain
-    qᶜⁱ = max(zero(qˢ), q.ice - qˢ)     # cloud ice = total ice - snow
-    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
+    qᶜⁱ = max(zero(qˢⁿ), q.ice - qˢⁿ)     # cloud ice = total ice - snow
+    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
 end
 
 # Mixed-phase non-equilibrium: all from prognostic μ
@@ -490,8 +505,8 @@ end
     qᶜˡ = μ.ρqᶜˡ / ρ
     qᶜⁱ = μ.ρqᶜⁱ / ρ
     qʳ = μ.ρqʳ / ρ
-    qˢ = μ.ρqˢ / ρ
-    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
+    qˢⁿ = μ.ρqˢⁿ / ρ
+    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
 end
 
 #####
@@ -533,8 +548,8 @@ end
 
 AM.prognostic_field_names(::WP1M) = (:ρqʳ,)
 AM.prognostic_field_names(::WPNE1M) = (:ρqᶜˡ, :ρqʳ)
-AM.prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢ)
-AM.prognostic_field_names(::MPNE1M) = (:ρqᶜˡ, :ρqᶜⁱ, :ρqʳ, :ρqˢ)
+AM.prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢⁿ)
+AM.prognostic_field_names(::MPNE1M) = (:ρqᶜˡ, :ρqᶜⁱ, :ρqʳ, :ρqˢⁿ)
 
 # Negative moisture correction chains: heaviest → lightest → vapor
 AM.correction_moisture_fields(::WP1M, μ) = (μ.ρqʳ,)
@@ -546,7 +561,7 @@ AM.correction_moisture_fields(::WPNE1M, μ) = (μ.ρqʳ, μ.ρqᶜˡ)
 #####
 
 const warm_phase_field_names = (:ρqʳ, :qᵛ, :qˡ, :qᶜˡ, :qʳ)
-const ice_phase_field_names = (:ρqˢ, :qⁱ, :qᶜⁱ, :qˢ)
+const ice_phase_field_names = (:ρqˢⁿ, :qⁱ, :qᶜⁱ, :qˢⁿ)
 
 function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bcs)
     if bμp isa WP1M
@@ -561,21 +576,19 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
 
     center_fields = center_field_tuple(grid, center_names...)
 
-    # Precipitation terminal velocities (negative = downward)
-    # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
-    face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
-    wʳ = ZFaceField(grid; boundary_conditions=face_bcs)
+    # Sedimentation velocity fields (vertical components)
+    wʳ = AM.sedimentation_velocity_field(grid)
 
     if bμp isa MPNE1M
-        wˢ = ZFaceField(grid; boundary_conditions=face_bcs)
-        wᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs)
-        wᶜⁱ = ZFaceField(grid; boundary_conditions=face_bcs)
-        return (; zip(center_names, center_fields)..., wʳ, wˢ, wᶜˡ, wᶜⁱ)
+        wˢⁿ = AM.sedimentation_velocity_field(grid)
+        wᶜˡ = AM.sedimentation_velocity_field(grid)
+        wᶜⁱ = AM.sedimentation_velocity_field(grid)
+        return (; zip(center_names, center_fields)..., wʳ, wˢⁿ, wᶜˡ, wᶜⁱ)
     elseif bμp isa MP1M
-        wˢ = ZFaceField(grid; boundary_conditions=face_bcs)
-        return (; zip(center_names, center_fields)..., wʳ, wˢ)
+        wˢⁿ = AM.sedimentation_velocity_field(grid)
+        return (; zip(center_names, center_fields)..., wʳ, wˢⁿ)
     elseif bμp isa WPNE1M
-        wᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs)
+        wᶜˡ = AM.sedimentation_velocity_field(grid)
         return (; zip(center_names, center_fields)..., wʳ, wᶜˡ)
     end
 
@@ -603,12 +616,10 @@ end
     # Derived: total liquid
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
 
-    # Terminal velocity with bottom boundary condition
+    # Sedimentation velocity with bottom boundary condition
     parameters = bμp.categories.parameters
-    𝕎 = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
-    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
-    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
     return nothing
 end
@@ -619,30 +630,26 @@ end
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
     @inbounds μ.qᶜⁱ[i, j, k] = ℳ.qᶜⁱ
     @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
-    @inbounds μ.qˢ[i, j, k] = ℳ.qˢ
+    @inbounds μ.qˢⁿ[i, j, k] = ℳ.qˢⁿ
 
     # Vapor from thermodynamic state
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
 
     # Derived: total liquid and ice
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
-    @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢ
+    @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢⁿ
 
-    # Terminal velocities with bottom boundary condition
+    # Sedimentation velocities with bottom boundary condition
     categories = bμp.categories
     parameters = categories.parameters
 
-    # Rain terminal velocity
-    𝕎 = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
-    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
-    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    # Rain sedimentation velocity
+    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
-    # Snow terminal velocity
-    𝕎ˢ = terminal_velocity(parameters.precip.snow, parameters.terminal_velocity.snow, ρ, ℳ.qˢ)
-    wˢ = -𝕎ˢ # negative = downward
-    wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
-    @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
+    # Snow sedimentation velocity
+    𝕎ˢⁿ = terminal_velocity(parameters.precip.snow, parameters.terminal_velocity.snow, ρ, ℳ.qˢⁿ)
+    write_sedimentation_velocity!(μ.wˢⁿ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ˢⁿ)
 
     return nothing
 end
@@ -662,22 +669,13 @@ end
     categories = bμp.categories
     parameters = categories.parameters
 
-    # Rain terminal velocity with bottom boundary condition
-    𝕎 = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
-    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
-    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    # Rain sedimentation velocity with bottom boundary condition
+    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
-    # Cloud liquid terminal velocity (Stokes regime)
-    𝕎ᶜˡ = CMNonEq.terminal_velocity(
-        parameters.cloud.liquid,
-        categories.hydrometeor_velocities.stokes,
-        ρ,
-        ℳ.qᶜˡ,
-    )
-    wᶜˡ = -𝕎ᶜˡ
-    wᶜˡ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜˡ)
-    @inbounds μ.wᶜˡ[i, j, k] = ifelse(k == 1, wᶜˡ₀, wᶜˡ)
+    # Cloud liquid sedimentation velocity (Stokes regime)
+    𝕎ᶜˡ = CMNonEq.terminal_velocity(parameters.cloud.liquid, categories.hydrometeor_velocities.stokes, ρ, ℳ.qᶜˡ)
+    write_sedimentation_velocity!(μ.wᶜˡ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ᶜˡ)
 
     return nothing
 end
@@ -688,70 +686,36 @@ end
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
     @inbounds μ.qᶜⁱ[i, j, k] = ℳ.qᶜⁱ
     @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
-    @inbounds μ.qˢ[i, j, k] = ℳ.qˢ
+    @inbounds μ.qˢⁿ[i, j, k] = ℳ.qˢⁿ
 
     # Vapor from thermodynamic state
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
 
     # Derived: total liquid and ice
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
-    @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢ
+    @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢⁿ
 
     categories = bμp.categories
     parameters = categories.parameters
 
-    # Rain terminal velocity
-    𝕎 = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
-    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
-    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    # Rain sedimentation velocity
+    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
-    # Snow terminal velocity
-    𝕎ˢ = terminal_velocity(parameters.precip.snow, parameters.terminal_velocity.snow, ρ, ℳ.qˢ)
-    wˢ = -𝕎ˢ # negative = downward
-    wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
-    @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
+    # Snow sedimentation velocity
+    𝕎ˢⁿ = terminal_velocity(parameters.precip.snow, parameters.terminal_velocity.snow, ρ, ℳ.qˢⁿ)
+    write_sedimentation_velocity!(μ.wˢⁿ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ˢⁿ)
 
-    # Cloud liquid terminal velocity (Stokes regime)
-    𝕎ᶜˡ = CMNonEq.terminal_velocity(
-        parameters.cloud.liquid,
-        categories.hydrometeor_velocities.stokes,
-        ρ,
-        ℳ.qᶜˡ,
-    )
-    wᶜˡ = -𝕎ᶜˡ
-    wᶜˡ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜˡ)
-    @inbounds μ.wᶜˡ[i, j, k] = ifelse(k == 1, wᶜˡ₀, wᶜˡ)
+    # Cloud liquid sedimentation velocity (Stokes regime)
+    𝕎ᶜˡ = CMNonEq.terminal_velocity(parameters.cloud.liquid, categories.hydrometeor_velocities.stokes, ρ, ℳ.qᶜˡ)
+    write_sedimentation_velocity!(μ.wᶜˡ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ᶜˡ)
 
-    # Cloud ice terminal velocity (Chen 2022 small ice)
-    𝕎ᶜⁱ = CMNonEq.terminal_velocity(
-        parameters.cloud.ice,
-        categories.hydrometeor_velocities.chen2022.small_ice,
-        ρ,
-        ℳ.qᶜⁱ,
-    )
-    wᶜⁱ = -𝕎ᶜⁱ
-    wᶜⁱ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜⁱ)
-    @inbounds μ.wᶜⁱ[i, j, k] = ifelse(k == 1, wᶜⁱ₀, wᶜⁱ)
+    # Cloud ice sedimentation velocity (Chen 2022 small ice)
+    𝕎ᶜⁱ = CMNonEq.terminal_velocity(parameters.cloud.ice, categories.hydrometeor_velocities.chen2022.small_ice, ρ, ℳ.qᶜⁱ)
+    write_sedimentation_velocity!(μ.wᶜⁱ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ᶜⁱ)
 
     return nothing
 end
-
-#####
-##### specific_prognostic_moisture_from_total: convert qᵗ to qᵛᵉ
-#####
-
-# SA warm-phase: qᵉ = qᵗ - qʳ (subtract precipitation)
-@inline AM.specific_prognostic_moisture_from_total(bμp::WP1M, qᵗ, ℳ::WarmPhaseOneMomentState) = qᵗ - ℳ.qʳ
-
-# SA mixed-phase: qᵉ = qᵗ - qʳ - qˢ (subtract precipitation)
-@inline AM.specific_prognostic_moisture_from_total(bμp::MP1M, qᵗ, ℳ::MixedPhaseOneMomentState) = qᵗ - ℳ.qʳ - ℳ.qˢ
-
-# NE warm-phase: qᵛ = qᵗ - qᶜˡ - qʳ (subtract all condensate)
-@inline AM.specific_prognostic_moisture_from_total(bμp::WPNE1M, qᵗ, ℳ::WarmPhaseOneMomentState) = max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
-
-# NE mixed-phase: qᵛ = qᵗ - qᶜˡ - qᶜⁱ - qʳ - qˢ (subtract all condensate)
-@inline AM.specific_prognostic_moisture_from_total(bμp::MPNE1M, qᵗ, ℳ::MixedPhaseOneMomentState) = max(0, qᵗ - ℳ.qᶜˡ - ℳ.qᶜⁱ - ℳ.qʳ - ℳ.qˢ)
 
 #####
 ##### Moisture fraction computation
@@ -762,7 +726,7 @@ end
 # Used by parcel models. Grid models use grid_moisture_fractions instead, which splits
 # saturation adjustment from non-equilibrium the same way.
 
-# Saturation adjustment: `specific_prognostic_moisture_from_total` returns the equilibrium
+# Saturation adjustment: `specific_prognostic_moisture` returns the equilibrium
 # moisture qᵉ = qᵛ + qᶜˡ, so cloud has to be removed to recover vapor.
 @inline function AM.moisture_fractions(bμp::WP1M, ℳ::WarmPhaseOneMomentState, qᵉ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
@@ -770,7 +734,7 @@ end
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-# Non-equilibrium: `specific_prognostic_moisture_from_total` already returned true vapor
+# Non-equilibrium: `specific_prognostic_moisture` already returned true vapor
 # (qᵗ minus every condensate), so subtracting cloud again would double-count it.
 @inline function AM.moisture_fractions(bμp::WPNE1M, ℳ::WarmPhaseOneMomentState, qᵛ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
@@ -781,7 +745,7 @@ end
 # SA: qᵉ is equilibrium moisture, subtract condensate to get vapor
 @inline function AM.moisture_fractions(bμp::MP1M, ℳ::MixedPhaseOneMomentState, qᵉ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qⁱ = ℳ.qᶜⁱ + ℳ.qˢ
+    qⁱ = ℳ.qᶜⁱ + ℳ.qˢⁿ
     qᵛ = qᵉ - ℳ.qᶜˡ - ℳ.qᶜⁱ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
@@ -789,7 +753,7 @@ end
 # NE: input is vapor; subtract condensate to get vapor (for parcel models).
 @inline function AM.moisture_fractions(bμp::MPNE1M, ℳ::MixedPhaseOneMomentState, qᵛ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qⁱ = ℳ.qᶜⁱ + ℳ.qˢ
+    qⁱ = ℳ.qᶜⁱ + ℳ.qˢⁿ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -819,9 +783,9 @@ end
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
     qᶜⁱ = @inbounds μ.qᶜⁱ[i, j, k]
     qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
-    qˢ  = @inbounds μ.ρqˢ[i, j, k] / ρ
+    qˢⁿ = @inbounds μ.ρqˢⁿ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
-    qⁱ = qᶜⁱ + qˢ
+    qⁱ = qᶜⁱ + qˢⁿ
     qᵛ = qᵉ - qᶜˡ - qᶜⁱ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
@@ -831,9 +795,9 @@ end
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ  = @inbounds μ.ρqʳ[i, j, k]  / ρ
     qᶜⁱ = @inbounds μ.ρqᶜⁱ[i, j, k] / ρ
-    qˢ  = @inbounds μ.ρqˢ[i, j, k]  / ρ
+    qˢⁿ = @inbounds μ.ρqˢⁿ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
-    qⁱ = qᶜⁱ + qˢ
+    qⁱ = qᶜⁱ + qˢⁿ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -844,12 +808,17 @@ end
 # Non-equilibrium: no adjustment (cloud liquid and ice are prognostic)
 @inline AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::NonEquilibrium1M, qᵛ, constants) = 𝒰₀
 
+# Warm-phase schemes carry no snow
+@inline snow_mass_fraction(::WP1M, μ, ρ) = zero(ρ)
+@inline snow_mass_fraction(::MP1M, μ, ρ) = μ.ρqˢⁿ / ρ
+
 # Saturation adjustment (warm-phase and mixed-phase)
-@inline function AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::Union{WP1M, MP1M}, qᵉ, constants)
-    q₁ = MoistureMassFractions(qᵉ)
+@inline function AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::Union{WP1M, MP1M}, qᵉ, constants, μ, ρ)
+    qʳ = μ.ρqʳ / ρ
+    qˢⁿ = snow_mass_fraction(bμp, μ, ρ)
+    q₁ = MoistureMassFractions(qᵉ, qʳ, qˢⁿ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
-    𝒰′ = adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)
-    return 𝒰′
+    return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants, (qʳ, qˢⁿ))
 end
 
 #####
@@ -1002,6 +971,10 @@ end
     return ifelse(qʳ ≥ 0, ΣρS, ρSⁿᵘᵐ)
 end
 
+# Saturation adjustment partitions ρqᵉ diagnostically, so precipitation sources are drawn from ρqᵉ.
+@inline AM.microphysical_tendency(bμp::Union{WP1M, MP1M}, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants) =
+    - AM.microphysical_tendency(bμp, Val(:ρqʳ), ρ, ℳ, 𝒰, constants) - AM.microphysical_tendency(bμp, Val(:ρqˢⁿ), ρ, ℳ, 𝒰, constants)
+
 #####
 ##### Microphysical tendencies for warm-phase non-equilibrium 1M (WPNE1M)
 #####
@@ -1110,10 +1083,10 @@ end
 # so they can be shared by multiple bulk microphysics schemes.
 #
 #   ρqᵛ:  −Sᶜᵒⁿᵈ − Sᵈᵉᵖ − Sᵉᵛᵃᵖ − Sˢᵘᵇˡ
-#   ρqᶜˡ: +Sᶜᵒⁿᵈ − Sᵃᶜⁿᵛ − Sᵃᶜᶜ − Sᵃᶜᶜˡˢ + Sᵐᵉˡᵗᶜⁱ
-#   ρqᶜⁱ: +Sᵈᵉᵖ − Sᵃᶜⁿᵛⁱˢ − Sᵃᶜᶜⁱˢ − Sᵃᶜᶜⁱʳ − Sᵐᵉˡᵗᶜⁱ
-#   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ − Sᵃᶜᶜʳⁱ + Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢ, Sʳˢ, Sˢʳ, α)
-#   ρqˢ:  +Sᵃᶜⁿᵛⁱˢ + Sᵃᶜᶜⁱˢ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ − Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢ, Sʳˢ, Sˢʳ, α)
+#   ρqᶜˡ: +Sᶜᵒⁿᵈ − Sᵃᶜⁿᵛ − Sᵃᶜᶜ − Sᵃᶜᶜˡˢⁿ + Sᵐᵉˡᵗᶜⁱ
+#   ρqᶜⁱ: +Sᵈᵉᵖ − Sᵃᶜⁿᵛⁱˢⁿ − Sᵃᶜᶜⁱˢⁿ − Sᵃᶜᶜⁱʳ − Sᵐᵉˡᵗᶜⁱ
+#   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ − Sᵃᶜᶜʳⁱ + Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢⁿ, Sʳˢⁿ, Sˢⁿʳ, α)
+#   ρqˢⁿ: +Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ − Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢⁿ, Sʳˢⁿ, Sˢⁿʳ, α)
 #####
 
 @inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
@@ -1127,12 +1100,12 @@ end
     snow = parameters.precip.snow
     rain_velocity = parameters.terminal_velocity.rain
     snow_velocity = parameters.terminal_velocity.snow
-    air_properties = parameters.air_properties
+    air = parameters.air_properties
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     qᶜˡ = ℳ.qᶜˡ
     qᶜⁱ = ℳ.qᶜⁱ
     qʳ = ℳ.qʳ
-    qˢ = ℳ.qˢ
+    qˢⁿ = ℳ.qˢⁿ
 
     T = temperature(𝒰, constants)
     Tᶠ = categories.freezing_temperature
@@ -1157,7 +1130,7 @@ end
         processes.rain_condensation_evaporation,
         rain,
         rain_velocity,
-        air_properties,
+        air,
         q,
         qʳ,
         ρ,
@@ -1171,34 +1144,34 @@ end
         processes.snow_deposition_sublimation,
         snow,
         snow_velocity,
-        air_properties,
+        air,
         q,
-        qˢ,
+        qˢⁿ,
         ρ,
         T,
         constants,
     )
-    Sˢᵘᵇˡ = max(Sˢᵘᵇˡ, -max(0, qˢ) / τⁿᵘᵐ)
+    Sˢᵘᵇˡ = max(Sˢᵘᵇˡ, -max(0, qˢⁿ) / τⁿᵘᵐ)
 
     # Snow melting: snow → rain (always non-negative)
     Sᵐᵉˡᵗ = snow_melt_rate(
         processes.snow_melt,
         snow,
         snow_velocity,
-        air_properties,
-        qˢ,
+        air,
+        qˢⁿ,
         ρ,
         T,
         Tᶠ,
         constants,
     )
-    Sᵐᵉˡᵗ = min(Sᵐᵉˡᵗ, max(0, qˢ) / τⁿᵘᵐ)
+    Sᵐᵉˡᵗ = min(Sᵐᵉˡᵗ, max(0, qˢⁿ) / τⁿᵘᵐ)
 
     # Cloud ice melting: cloud ice → cloud liquid
     Sᵐᵉˡᵗᶜⁱ = cloud_ice_melt_rate(
         processes.cloud_ice_melt,
         cloud_ice,
-        air_properties,
+        air,
         qᶜⁱ,
         ρ,
         T,
@@ -1220,27 +1193,27 @@ end
     )
 
     # Ice → snow autoconversion
-    Sᵃᶜⁿᵛⁱˢ = ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+    Sᵃᶜⁿᵛⁱˢⁿ = ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
 
     # Accretion: cloud liquid + snow
-    Sᵃᶜᶜˡˢ = cloud_precipitation_accretion(
+    Sᵃᶜᶜˡˢⁿ = cloud_precipitation_accretion(
         process_params.cloud_liquid_snow_accretion,
         cloud_liquid,
         snow,
         snow_velocity,
         qᶜˡ,
-        qˢ,
+        qˢⁿ,
         ρ,
     )
 
     # Accretion: cloud ice + snow → snow
-    Sᵃᶜᶜⁱˢ = cloud_precipitation_accretion(
+    Sᵃᶜᶜⁱˢⁿ = cloud_precipitation_accretion(
         process_params.cloud_ice_snow_accretion,
         cloud_ice,
         snow,
         snow_velocity,
         qᶜⁱ,
-        qˢ,
+        qˢⁿ,
         ρ,
     )
 
@@ -1267,12 +1240,12 @@ end
     )
 
     # Rain-snow collisions (computed for both cold and warm pathways)
-    Sʳˢ = rain_snow_accretion(process_params.rain_snow_accretion,
+    Sʳˢⁿ = rain_snow_accretion(process_params.rain_snow_accretion,
                               snow, rain, snow_velocity, rain_velocity,
-                              qˢ, qʳ, ρ)
-    Sˢʳ = rain_snow_accretion(process_params.rain_snow_accretion,
+                              qˢⁿ, qʳ, ρ)
+    Sˢⁿʳ = rain_snow_accretion(process_params.rain_snow_accretion,
                               rain, snow, rain_velocity, snow_velocity,
-                              qʳ, qˢ, ρ)
+                              qʳ, qˢⁿ, ρ)
 
     # Thermal melt factor for warm accretion
     α = warm_accretion_melt_factor(T, Tᶠ, constants)
@@ -1282,32 +1255,32 @@ end
 
     # Physics tendencies — conserved by construction: sum of all five = 0
     ρqᵛ_phys  = ρ * (-Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ - Sˢᵘᵇˡ)
-    ρqᶜˡ_phys = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ - Sᵃᶜᶜˡˢ + Sᵐᵉˡᵗᶜⁱ)
-    ρqᶜⁱ_phys = ρ * ( Sᵈᵉᵖ - Sᵃᶜⁿᵛⁱˢ - Sᵃᶜᶜⁱˢ - Sᵃᶜᶜⁱʳ - Sᵐᵉˡᵗᶜⁱ)
+    ρqᶜˡ_phys = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ - Sᵃᶜᶜˡˢⁿ + Sᵐᵉˡᵗᶜⁱ)
+    ρqᶜⁱ_phys = ρ * ( Sᵈᵉᵖ - Sᵃᶜⁿᵛⁱˢⁿ - Sᵃᶜᶜⁱˢⁿ - Sᵃᶜᶜⁱʳ - Sᵐᵉˡᵗᶜⁱ)
     ρqʳ_phys  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ - Sᵃᶜᶜʳⁱ + Sᵐᵉˡᵗ
-                     + ifelse(is_warm, Sᵃᶜᶜˡˢ + α * Sᵃᶜᶜˡˢ + Sˢʳ + α * Sʳˢ, zero(T))
-                     - ifelse(is_warm, zero(T), Sʳˢ))
-    ρqˢ_phys  = ρ * ( Sᵃᶜⁿᵛⁱˢ + Sᵃᶜᶜⁱˢ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ - Sᵐᵉˡᵗ
-                     + ifelse(is_warm, zero(T), Sᵃᶜᶜˡˢ + Sʳˢ)
-                     - ifelse(is_warm, α * Sᵃᶜᶜˡˢ + Sˢʳ + α * Sʳˢ, zero(T)))
+                     + ifelse(is_warm, Sᵃᶜᶜˡˢⁿ + α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
+                     - ifelse(is_warm, zero(T), Sʳˢⁿ))
+    ρqˢⁿ_phys = ρ * ( Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ - Sᵐᵉˡᵗ
+                     + ifelse(is_warm, zero(T), Sᵃᶜᶜˡˢⁿ + Sʳˢⁿ)
+                     - ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T)))
 
     # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
     # When q < 0, replace with -ρq/τⁿᵘᵐ and route the delta to the coupled tracer:
     # Exchange partners are v↔cl, cl↔r, ci↔v, r↔v, and s↔v.
-    # This preserves ρqᵛ + ρqᶜˡ + ρqᶜⁱ + ρqʳ + ρqˢ = 0 regardless of which guards fire.
+    # This preserves ρqᵛ + ρqᶜˡ + ρqᶜⁱ + ρqʳ + ρqˢⁿ = 0 regardless of which guards fire.
     δᵛ  = ifelse(qᵛ  ≥ 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
     δᶜˡ = ifelse(qᶜˡ ≥ 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ - ρqᶜˡ_phys)
     δᶜⁱ = ifelse(qᶜⁱ ≥ 0, zero(ρqᶜⁱ_phys), -ρ * qᶜⁱ / τⁿᵘᵐ - ρqᶜⁱ_phys)
     δʳ  = ifelse(qʳ  ≥ 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
-    δˢ  = ifelse(qˢ  ≥ 0, zero(ρqˢ_phys),  -ρ * qˢ  / τⁿᵘᵐ - ρqˢ_phys)
+    δˢⁿ = ifelse(qˢⁿ ≥ 0, zero(ρqˢⁿ_phys), -ρ * qˢⁿ / τⁿᵘᵐ - ρqˢⁿ_phys)
 
-    ρqᵛ  = ρqᵛ_phys  + δᵛ  - δᶜⁱ - δʳ - δˢ
+    ρqᵛ  = ρqᵛ_phys  + δᵛ  - δᶜⁱ - δʳ - δˢⁿ
     ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
     ρqᶜⁱ = ρqᶜⁱ_phys + δᶜⁱ
     ρqʳ  = ρqʳ_phys  + δʳ  - δᶜˡ
-    ρqˢ  = ρqˢ_phys  + δˢ
+    ρqˢⁿ = ρqˢⁿ_phys + δˢⁿ
 
-    return (; ρqᵛ, ρqᶜˡ, ρqᶜⁱ, ρqʳ, ρqˢ)
+    return (; ρqᵛ, ρqᶜˡ, ρqᶜⁱ, ρqʳ, ρqˢⁿ)
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
@@ -1327,8 +1300,8 @@ end
     return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 end
 
-@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqˢ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqˢ
+@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqˢⁿ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+    return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqˢⁿ
 end
 
 #####
@@ -1339,7 +1312,7 @@ end
 # `compute_microphysical_tendencies!` to compute the bundle once per cell and
 # write to all 5 G fields in a single kernel.
 
-@kernel function _compute_mpne1m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢ,
+@kernel function _compute_mpne1m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢⁿ,
                                              grid, microphysics, dynamics, formulation,
                                              constants, specific_prognostic_moisture,
                                              microphysical_fields)
@@ -1358,8 +1331,8 @@ end
     @inbounds qᶜˡ = microphysical_fields.ρqᶜˡ[i, j, k] / ρ
     @inbounds qᶜⁱ = microphysical_fields.ρqᶜⁱ[i, j, k] / ρ
     @inbounds qʳ  = microphysical_fields.ρqʳ[i, j, k]  / ρ
-    @inbounds qˢ  = microphysical_fields.ρqˢ[i, j, k]  / ρ
-    ℳ = MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
+    @inbounds qˢⁿ = microphysical_fields.ρqˢⁿ[i, j, k] / ρ
+    ℳ = MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
 
     G = mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
@@ -1367,7 +1340,7 @@ end
     @inbounds Gρqᶜˡ[i, j, k] += G.ρqᶜˡ
     @inbounds Gρqᶜⁱ[i, j, k] += G.ρqᶜⁱ
     @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
-    @inbounds Gρqˢ[i, j, k]  += G.ρqˢ
+    @inbounds Gρqˢⁿ[i, j, k]  += G.ρqˢⁿ
 end
 
 function AM.compute_microphysical_tendencies!(microphysics::MPNE1M, model)
@@ -1376,7 +1349,7 @@ function AM.compute_microphysical_tendencies!(microphysics::MPNE1M, model)
     G = model.timestepper.Gⁿ
 
     launch!(arch, grid, :xyz, _compute_mpne1m_tendencies!,
-            G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢ,
+            G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢⁿ,
             grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
             model.microphysical_fields)

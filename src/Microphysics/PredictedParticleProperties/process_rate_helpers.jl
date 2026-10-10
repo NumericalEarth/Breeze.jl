@@ -149,8 +149,8 @@ CCN activation *number* rate into the matching *mass* rate wherever one of the t
 is diagnosed from the other.
 """
 @inline function activated_droplet_mass(parameters, FT)
-    r₀ = FT(parameters.activated_droplet_radius)
-    return 4 * FT(π) / 3 * FT(parameters.liquid_water_density) * r₀^3
+    ℂᶠᵒʳᵐ₂ = FT(parameters.activated_droplet_radius)
+    return 4 * FT(π) / 3 * FT(parameters.liquid_water_density) * ℂᶠᵒʳᵐ₂^3
 end
 
 """
@@ -236,8 +236,8 @@ end
 @inline function ice_air_density_correction(parameters, reference_air_density, air_density)
     FT = typeof(reference_air_density)
     ρ_floor = FT(parameters.minimum_fall_speed_air_density)
-    α = FT(parameters.fall_speed_density_correction_exponent)
-    return (reference_air_density / max(air_density, ρ_floor))^α
+    ℂᵈᵉⁿˢ₁ = FT(parameters.fall_speed_density_correction_exponent)
+    return (reference_air_density / max(air_density, ρ_floor))^ℂᵈᵉⁿˢ₁
 end
 
 """
@@ -353,9 +353,11 @@ diagnosed from the rain mass concentration `qʳ` and number concentration `nʳ`.
 The result is clamped between `parameters.minimum_rain_slope` and
 `parameters.maximum_rain_slope`.
 """
-@inline rain_slope_parameter(qʳ, nʳ, parameters) =
-    clamp(unbounded_rain_slope_parameter(qʳ, nʳ, parameters),
-          parameters.minimum_rain_slope, parameters.maximum_rain_slope)
+@inline function rain_slope_parameter(qʳ, nʳ, parameters)
+    ℂʳ₁ = parameters.minimum_rain_slope
+    ℂʳ₂ = parameters.maximum_rain_slope
+    return clamp(unbounded_rain_slope_parameter(qʳ, nʳ, parameters), ℂʳ₁, ℂʳ₂)
+end
 
 @inline function rain_number_from_slope(qʳ, λʳ, parameters)
     FT = typeof(qʳ)
@@ -367,10 +369,11 @@ end
     qʳ_eff = max(0, qʳ)
     nʳ_eff = max(0, nʳ)
     unbounded_slope = unbounded_rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
-    λʳ = clamp(unbounded_slope, parameters.minimum_rain_slope, parameters.maximum_rain_slope)
+    ℂʳ₁ = parameters.minimum_rain_slope
+    ℂʳ₂ = parameters.maximum_rain_slope
+    λʳ = clamp(unbounded_slope, ℂʳ₁, ℂʳ₂)
     nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
-    needs_adjustment = (unbounded_slope < parameters.minimum_rain_slope) |
-                       (unbounded_slope > parameters.maximum_rain_slope)
+    needs_adjustment = (unbounded_slope < ℂʳ₁) | (unbounded_slope > ℂʳ₂)
     return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
 end
 
@@ -419,10 +422,11 @@ end
 #####
 ##### Account for the latent-heat feedback that reduces the effective
 ##### supersaturation drive during condensation (ξˡ) and ice deposition (ξⁱ).
-##### `psychrometric_correction` itself is not P3-specific and lives beside its
-##### mixture-heat-capacity counterpart `thermodynamic_adjustment_factor` in
-##### `Microphysics/bulk_microphysics.jl`; only the two phase-named wrappers below,
-##### which fix the dry-air heat capacity P3 uses, stay here.
+##### `psychrometric_correction` itself is not P3-specific and lives in
+##### `Thermodynamics/vapor_saturation.jl`. Its mixture-heat-capacity counterpart
+##### `thermodynamic_adjustment_factor` lives in `Microphysics/bulk_microphysics.jl`.
+##### Only the two phase-named wrappers below, which fix the dry-air heat capacity P3
+##### uses, stay here.
 #####
 
 # Named for the phase each caller drives, so call sites still read as ξˡ / ξⁱ.
@@ -433,7 +437,7 @@ end
     psychrometric_correction(ℒⁱ, qᵛ⁺ⁱ, p3_dry_air_heat_capacity(constants, typeof(T)), Rᵛ, T)
 
 #####
-##### Saturation vapor pressure at freezing (M6)
+##### Saturation vapor pressure at freezing
 #####
 ##### Derive e_s(T₀) from the Clausius-Clapeyron or Tetens formula.
 #####
@@ -448,7 +452,7 @@ end
 # ℒ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density difference ρᵛ - ρᵛ⁺(T₀).
 # A dry-air mixing ratio ε e_s0/(P - e_s0) would only be correct against a vapor
 # variable that is itself a dry-air mixing ratio; mixing the two mass bases would
-# bias the melting and refreezing heat balances, so all three call sites share this.
+# bias the melting and refreezing heat balances, so both call sites share this.
 @inline function freezing_point_saturation_mass_fraction(constants, T₀, ρ)
     Rᵛ = typeof(ρ)(vapor_gas_constant(constants))
     return saturation_vapor_pressure_at_freezing(constants, T₀) / (Rᵛ * T₀ * ρ)

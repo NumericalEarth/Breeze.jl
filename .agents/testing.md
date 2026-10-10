@@ -18,26 +18,22 @@ GPU "dynamic invocation error" → run on CPU. If it passes, the issue is GPU-sp
 
 ## Available Test Files
 
+Every `test/<name>.jl` is a test name for `test_args`; `ls test/` lists them all. A few anchors:
+
 | Test file | What it covers |
 |-----------|---------------|
 | `unit_tests.jl` | Core unit tests |
 | `atmosphere_model_construction.jl` | Model construction |
-| `set_atmosphere_model.jl` | Setting model fields |
 | `dynamics.jl` | Dynamical core |
-| `tracer_dynamics.jl` | Tracer transport |
-| `diagnostics.jl` | Diagnostic fields |
 | `saturation_adjustment.jl` | Thermodynamic saturation |
-| `reference_states.jl` | Reference state profiles |
-| `cloud_microphysics_0M.jl` | 0-moment microphysics |
-| `cloud_microphysics_1M.jl` | 1-moment microphysics |
-| `cloud_microphysics_2M.jl` | 2-moment microphysics |
-| `turbulence_closures.jl` | Turbulence closures |
-| `vertical_diffusion.jl` | Vertical diffusion |
-| `forcing_and_boundary_conditions.jl` | Forcing and BCs |
-| `anelastic_pressure_solver_*.jl` | Pressure solver tests |
+| `cloud_microphysics_1M.jl`, `cloud_microphysics_2M.jl` | 1- and 2-moment microphysics |
+| `predicted_particle_properties_*.jl`, `p3_*.jl` | P3 microphysics |
+| `acoustic_substepping_*.jl` | Compressible dynamics |
+| `terrain_following_*.jl` | Terrain-following coordinates |
+| `*_radiative_transfer.jl` | Radiation extensions |
 | `quality_assurance.jl` | Explicit imports, Aqua.jl |
 | `doctests.jl` | Doctest verification |
-| `reactant_*.jl` | Reactant compilation |
+| `reactant/` | Reactant compilation |
 
 ## Writing Tests
 

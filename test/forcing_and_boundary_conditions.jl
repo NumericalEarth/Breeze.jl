@@ -1,15 +1,23 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
+using Adapt: adapt
 using Breeze
-using Breeze.AtmosphereModels: thermodynamic_density, surface_pressure, standard_pressure
-using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities
-using Breeze.Thermodynamics: potential_temperature_from_temperature
+using Breeze.AtmosphereModels: thermodynamic_density, base_pressure, standard_pressure
+using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities,
+                                 wall_air_pressure, surface_layer_state
+using Breeze.Thermodynamics: potential_temperature_from_temperature,
+                             LiquidIcePotentialTemperatureState, exner_function
+using CloudMicrophysics: CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
-using Oceananigans.BoundaryConditions: BoundaryCondition
+using Oceananigans.BoundaryConditions: BoundaryCondition, Bottom
 using Oceananigans.Fields: location
+using Oceananigans.Grids: XDirection
 using Oceananigans.TimeSteppers: compute_flux_bc_tendencies!, update_state!
 using Test
+
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMicrophysics
 
 function setup_forcing_model(grid, forcing)
     model = AtmosphereModel(grid; tracers=:ρc, forcing)
@@ -116,6 +124,26 @@ end
     @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(; ρqᵗ=bcs, ρqᵛ=bcs))
     @test_throws ArgumentError AtmosphereModel(grid; microphysics=SaturationAdjustment(),
                                                      boundary_conditions=(; ρqᵗ=bcs, ρqᵉ=bcs))
+end
+
+@testset "Microphysical boundary conditions reach the prognostic fields [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    J = FT(1e-4)
+
+    # The function-valued condition is evaluated whenever the microphysical halos are filled
+    ρqʳ_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(J),
+                                      top = ValueBoundaryCondition(Returns(zero(FT))))
+
+    for microphysics in (OneMomentCloudMicrophysics(), TwoMomentCloudMicrophysics(),
+                         PredictedParticlePropertiesMicrophysics())
+        model = AtmosphereModel(grid; microphysics, boundary_conditions=(; ρqʳ=ρqʳ_bcs))
+        set!(model; θ=model.dynamics.reference_state.potential_temperature)
+
+        fill!(parent(model.timestepper.Gⁿ.ρqʳ), 0)
+        compute_flux_bc_tendencies!(model)
+        @test all(Array(interior(model.timestepper.Gⁿ.ρqʳ, :, :, 1)) .≈ J / FT(25))
+    end
 end
 
 @testset "Water forcing under ρqᵗ reaches the moisture variable [$(FT)]" for FT in test_float_types()
@@ -285,7 +313,7 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
                                                                     damping = NoDivergenceDamping());
                                     reference_potential_temperature = FT(300),
-                                    surface_pressure = FT(1e5),
+                                    base_pressure = FT(1e5),
                                     standard_pressure = FT(1e5))
 
     @inline first_dependency(x, y, t, a, b, p) = a
@@ -316,6 +344,44 @@ end
     @test all(bottom_flux_tendency((:ρu, :ρv), 2) .== 0)
 end
 
+# The same positional lookup, under `AnelasticDynamics`, whose pressure and density are
+# dimension-reduced reference profiles rather than the compressible case's three-dimensional
+# prognostics. `Adapt.adapt` unwraps a three-dimensional `Field` to its `OffsetArray` but keeps a
+# reduced one wrapped, so admitting either to `fields(model)` makes the lookup a non-concrete
+# `Union`, and the GPU compiler then rejects every kernel that performs one. Adapting with
+# `nothing` reproduces those device-side types on CPU CI as well.
+@testset "Model field tuple stays positionally inferable [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch;
+                           size = (8, 8, 8), halo = (5, 5, 5),
+                           x = (0, 1), y = (0, 1), z = (0, 1),
+                           topology = (Periodic, Periodic, Bounded))
+
+    @inline u_dependency(x, y, t, u, p) = u
+    ρu_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(u_dependency,
+                                                                    field_dependencies = :u,
+                                                                    parameters = (;)))
+    model = AtmosphereModel(grid; boundary_conditions = (; ρu = ρu_bcs))
+
+    model_fields = adapt(nothing, Oceananigans.fields(model))
+    lookup = Base.infer_return_type(getindex, Tuple{typeof(model_fields), Int})
+    @test isconcretetype(lookup)
+
+    # The thermodynamic pressure and density surface fluxes read reach them through the second
+    # field tuple instead, which is where they have to live for the lookup above to compile.
+    surface_fields = surface_layer_state(model)
+    @test haskey(surface_fields, :p)
+    @test haskey(surface_fields, :ρ)
+
+    set!(model; θ = model.dynamics.reference_state.potential_temperature, u = FT(-8.75))
+    update_state!(model; compute_tendencies = false)
+    fill!(parent(model.timestepper.Gⁿ.ρu), 0)
+    compute_flux_bc_tendencies!(model)
+
+    Δz = FT(1 / 8)
+    @test all(Array(interior(model.timestepper.Gⁿ.ρu, :, :, 1)) .≈ FT(-8.75) / Δz)
+end
+
 @testset "Time-dependent Open BC on momentum [$FT]" for FT in test_float_types()
     # Regression test for #717: `compute_velocities!` refilled the density and
     # momentum halos without threading `model.clock`/`fields(model)`, so a
@@ -328,7 +394,7 @@ end
                            topology=(Bounded, Bounded, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                     reference_potential_temperature=FT(300),
-                                    surface_pressure=FT(1e5))
+                                    base_pressure=FT(1e5))
 
     @inline ρu_west(y, z, t, p) = p.ρ * cos(p.ω * t)
     ρu_bcs = FieldBoundaryConditions(
@@ -361,7 +427,7 @@ end
                            topology=(Bounded, Bounded, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                     reference_potential_temperature=FT(300),
-                                    surface_pressure=FT(1e5))
+                                    base_pressure=FT(1e5))
 
     # 2-D (y, z) boundary slice for a west OBC on ρu (Face, Center, Center).
     # Slice values 1, 2, 3 at times 0, 10, 20 so the boundary value linearly
@@ -391,7 +457,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
     Cᴰ = 1e-3
     gustiness = 0.1
-    T₀ = 290
+    Tˢ = 290
 
     @testset "BulkDrag construction and application [$FT]" begin
         drag = BulkDrag()
@@ -418,15 +484,15 @@ end
         # constructing a model without an explicit surface_temperature must error.
         compressible_dyn = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=2);
                                                 reference_potential_temperature = FT(300),
-                                                surface_pressure = FT(1e5),
+                                                base_pressure = FT(1e5),
                                                 standard_pressure = FT(1e5))
-        ρu_bcs_no_T₀ = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
+        ρu_bcs_no_Tˢ = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         @test_throws ArgumentError AtmosphereModel(grid; dynamics=compressible_dyn,
-                                                         boundary_conditions=(; ρu=ρu_bcs_no_T₀))
+                                                         boundary_conditions=(; ρu=ρu_bcs_no_Tˢ))
     end
 
     @testset "BulkSensibleHeatFlux construction and application [$FT]" begin
-        bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
+        bc = BulkSensibleHeatFlux(surface_temperature=Tˢ, coefficient=Cᴰ, gustiness=gustiness)
         @test bc isa BoundaryCondition
 
         # Test with ρθ (potential temperature formulation)
@@ -442,19 +508,21 @@ end
         using Oceananigans.Models: BoundaryConditionOperation
 
         grid_1 = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 100))
-        bc = BulkSensibleHeatFlux(surface_temperature=FT(T₀), coefficient=FT(Cᴰ), gustiness=FT(gustiness))
+        bc = BulkSensibleHeatFlux(surface_temperature=FT(Tˢ), coefficient=FT(Cᴰ), gustiness=FT(gustiness))
         ρθ_bcs = FieldBoundaryConditions(bottom=bc)
         model = AtmosphereModel(grid_1; boundary_conditions=(; ρθ=ρθ_bcs))
 
         constants = model.thermodynamic_constants
-        p₀ = surface_pressure(model.dynamics)
         pˢᵗ = standard_pressure(model.dynamics)
-        θ_surface = potential_temperature_from_temperature(FT(T₀), p₀, pˢᵗ, constants)
+        set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5))
+        model_fields = surface_layer_state(model)
+        pˢ = @allowscalar wall_air_pressure(1, 1, 1, grid_1, Bottom(), nothing, model_fields, constants)
+        θ_surface = potential_temperature_from_temperature(FT(Tˢ), pˢ, pˢᵗ, constants)
 
-        @test p₀ != pˢᵗ
-        @test abs(θ_surface - FT(T₀)) > increment_tolerance(FT)
+        @test pˢ != pˢᵗ
+        @test abs(θ_surface - FT(Tˢ)) > increment_tolerance(FT)
 
-        set!(model; θ=θ_surface, u=FT(5))
+        set!(model; θ=θ_surface)
 
         ρθ = thermodynamic_density(model.formulation)
         Jᶿ_op = BoundaryConditionOperation(ρθ, :bottom, model)
@@ -469,7 +537,7 @@ end
 
         grid_1 = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 100))
         fv = FilteredSurfaceVelocities(grid_1; filter_timescale=FT(3600))
-        bc = BulkSensibleHeatFlux(surface_temperature = FT(T₀),
+        bc = BulkSensibleHeatFlux(surface_temperature = FT(Tˢ),
                                   coefficient = FT(Cᴰ),
                                   gustiness = FT(gustiness),
                                   filtered_velocities = fv)
@@ -477,11 +545,13 @@ end
         model = AtmosphereModel(grid_1; boundary_conditions=(; ρθ=ρθ_bcs))
 
         constants = model.thermodynamic_constants
-        p₀ = surface_pressure(model.dynamics)
         pˢᵗ = standard_pressure(model.dynamics)
-        θ_surface = potential_temperature_from_temperature(FT(T₀), p₀, pˢᵗ, constants)
+        set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5))
+        model_fields = surface_layer_state(model)
+        pˢ = @allowscalar wall_air_pressure(1, 1, 1, grid_1, Bottom(), nothing, model_fields, constants)
+        θ_surface = potential_temperature_from_temperature(FT(Tˢ), pˢ, pˢᵗ, constants)
 
-        set!(model; θ=θ_surface, u=FT(5))
+        set!(model; θ=θ_surface)
         Oceananigans.initialize!(model)
 
         ρθ = thermodynamic_density(model.formulation)
@@ -495,7 +565,7 @@ end
         @test all(abs.(interior(Jᶿ_field)) .<= increment_tolerance(FT))
     end
 
-    @testset "BulkDrag uses ρ₀, filtered u and θᵥ [$FT]" begin
+    @testset "BulkDrag uses ρˢ, filtered u and θᵥ [$FT]" begin
         using Oceananigans.Models: BoundaryConditionOperation
         using Breeze.Thermodynamics: surface_density
 
@@ -504,7 +574,7 @@ end
 
         drag = BulkDrag(coefficient = FT(Cᴰ),
                         gustiness = FT(gustiness),
-                        surface_temperature = FT(T₀),
+                        surface_temperature = FT(Tˢ),
                         filtered_velocities = fv)
         ρu_bcs = FieldBoundaryConditions(bottom = drag)
         model = AtmosphereModel(grid_1; boundary_conditions=(; ρu=ρu_bcs))
@@ -516,23 +586,24 @@ end
         # Shared FilteredSurfaceVelocities should now expose a θᵥ field
         bc_condition = Oceananigans.boundary_conditions(model.momentum.ρu).bottom.condition
         @test bc_condition.filtered_velocities === fv
-        @test bc_condition.surface_pressure ≈ surface_pressure(model.dynamics)
+        @test !hasproperty(bc_condition, :base_pressure)
 
         Jᵘ_op = BoundaryConditionOperation(model.momentum.ρu, :bottom, model)
         Jᵘ_field = Field(Jᵘ_op)
         compute!(Jᵘ_field)
 
         constants = model.thermodynamic_constants
-        p₀ = surface_pressure(model.dynamics)
-        ρ₀ = surface_density(p₀, FT(T₀), constants)
+        model_fields = surface_layer_state(model)
+        pˢ = @allowscalar wall_air_pressure(1, 1, 1, grid_1, Bottom(), XDirection(), model_fields, constants)
+        ρˢ = surface_density(pˢ, FT(Tˢ), constants)
         Ũ = sqrt(U^2 + FT(gustiness)^2)
-        Jᵘ_expected = - ρ₀ * FT(Cᴰ) * Ũ * U
+        Jᵘ_expected = - ρˢ * FT(Cᴰ) * Ũ * U
 
         @test all(abs.(Array(interior(Jᵘ_field)) .- Jᵘ_expected) .<= increment_tolerance(FT))
     end
 
     @testset "BulkSensibleHeatFlux with StaticEnergyFormulation [$FT]" begin
-        bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
+        bc = BulkSensibleHeatFlux(surface_temperature=Tˢ, coefficient=Cᴰ, gustiness=gustiness)
 
         # Test with ρs on static energy formulation
         ρs_bcs = FieldBoundaryConditions(bottom=bc)
@@ -544,8 +615,32 @@ end
         @test true
     end
 
+    @testset "Static-energy surface state includes local geopotential [$FT]" begin
+        using Oceananigans.Models: BoundaryConditionOperation
+
+        raised_grid = RectilinearGrid(default_arch; size=(1, 1, 4),
+                                      x=(0, 100), y=(0, 100), z=(FT(2000), FT(2400)))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(raised_grid, constants; potential_temperature=FT(300))
+        dynamics = AnelasticDynamics(reference_state)
+        Tˢ = Breeze.AtmosphereModels.default_drag_surface_temperature(dynamics,
+                                                                      raised_grid,
+                                                                      constants)
+        bc = BulkSensibleHeatFlux(surface_temperature=Tˢ, coefficient=FT(Cᴰ), gustiness=FT(1))
+        ρE_bcs = FieldBoundaryConditions(bottom=bc)
+        model = AtmosphereModel(raised_grid; formulation=:StaticEnergy, dynamics,
+                                thermodynamic_constants=constants,
+                                boundary_conditions=(; ρE=ρE_bcs))
+        set!(model; θ=FT(300), qᵗ=0, u=FT(5))
+
+        ρs = thermodynamic_density(model.formulation)
+        Jˢ = Field(BoundaryConditionOperation(ρs, :bottom, model))
+        compute!(Jˢ)
+        @test all(abs.(Array(interior(Jˢ))) .< FT(0.05))
+    end
+
     @testset "BulkSensibleHeatFlux with ρE auto-converts for θ formulation [$FT]" begin
-        bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
+        bc = BulkSensibleHeatFlux(surface_temperature=Tˢ, coefficient=Cᴰ, gustiness=gustiness)
 
         # ρE BCs with θ formulation: should route onto ρθ
         ρE_bcs = FieldBoundaryConditions(bottom=bc)
@@ -557,7 +652,7 @@ end
     end
 
     @testset "BulkVaporFlux construction and application [$FT]" begin
-        bc = BulkVaporFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
+        bc = BulkVaporFlux(surface_temperature=Tˢ, coefficient=Cᴰ, gustiness=gustiness)
         @test bc isa BoundaryCondition
 
         ρqᵛ_bcs = FieldBoundaryConditions(bottom=bc)
@@ -572,15 +667,16 @@ end
         using Oceananigans.BoundaryConditions: getbc
         using Oceananigans.TimeSteppers: update_state!
 
-        # The surface humidity is q₀ = β qᵛ⁺ + (1 - β) qᵛ, so the vapor flux over a surface with
+        # The surface humidity is qˢ = β qᵛ⁺ + (1 - β) qᵛ, so the vapor flux over a surface with
         # moisture availability β is β times the flux over a saturated surface
         function surface_vapor_flux(; coefficient=Cᴰ, kw...)
-            bc = BulkVaporFlux(; surface_temperature=T₀, coefficient, gustiness, kw...)
+            bc = BulkVaporFlux(; surface_temperature=Tˢ, coefficient, gustiness, kw...)
             model = AtmosphereModel(grid; boundary_conditions=(; ρqᵛ=FieldBoundaryConditions(bottom=bc)))
             set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5), qᵗ=FT(0.005))
             update_state!(model)
             bf = model.moisture_density.boundary_conditions.bottom.condition
-            Jᵛ = @allowscalar getbc(bf, 1, 1, grid, model.clock, Oceananigans.fields(model))
+            args = Oceananigans.Models.boundary_condition_args(model)
+            Jᵛ = @allowscalar getbc(bf, 1, 1, grid, args...)
             return bf, Jᵛ
         end
 
@@ -604,7 +700,7 @@ end
         @test Jᵛ != 0
 
         @test_throws ArgumentError surface_vapor_flux(coefficient=coef, moisture_availability=0.5)
-        @test_throws ArgumentError BulkVaporFlux(surface_temperature=T₀, coefficient=Cᴰ, moisture_availability=1.5)
+        @test_throws ArgumentError BulkVaporFlux(surface_temperature=Tˢ, coefficient=Cᴰ, moisture_availability=1.5)
     end
 
     @testset "materialize_surface_field [$FT]" begin
@@ -631,9 +727,9 @@ end
     @testset "Combined bulk boundary conditions [$FT]" begin
         ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
-        ρθ_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
+        ρθ_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=Tˢ,
                                                                      coefficient=Cᴰ, gustiness=gustiness))
-        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=Tˢ,
                                                                coefficient=Cᴰ, gustiness=gustiness))
 
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
@@ -648,9 +744,9 @@ end
     @testset "Combined bulk boundary conditions with StaticEnergyFormulation [$FT]" begin
         ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
-        ρs_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
+        ρs_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=Tˢ,
                                                                      coefficient=Cᴰ, gustiness=gustiness))
-        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=Tˢ,
                                                                coefficient=Cᴰ, gustiness=gustiness))
 
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρs=ρs_bcs, ρqᵛ=ρqᵛ_bcs)
@@ -665,10 +761,10 @@ end
     @testset "PolynomialCoefficient full model build + time step [$FT]" begin
         coef = PolynomialCoefficient()
 
-        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
 
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
@@ -678,21 +774,41 @@ end
         time_step!(model, 1e-6)
         @test true
 
-        # Compressible boundary conditions are materialized before the dynamics. The automatic
-        # reference must therefore be available while materializing the polynomial coefficient.
+        # Compressible boundary conditions are materialized before the dynamics. The polynomial
+        # coefficient must remain constructible there while deferring its state reads to live fields.
         compressible_model = AtmosphereModel(grid;
                                              dynamics=CompressibleDynamics(),
                                              boundary_conditions=(; ρu=ρu_bcs))
         @test compressible_model.dynamics.reference_state !== nothing
+
+        # The stability diagnostic must read prognostic compressible pressure and density from
+        # the boundary-condition field tuple, rather than a construction-time reference profile.
+        materialized_bc = Oceananigans.boundary_conditions(compressible_model.momentum.ρu).bottom
+        materialized_coef = materialized_bc.condition.coefficient
+        θᵥ = materialized_coef.virtual_potential_temperature
+        model_fields = surface_layer_state(compressible_model)
+        set!(model_fields.T, FT(300))
+        set!(model_fields.ρ, FT(1))
+        set!(model_fields.qᵛ, FT(0))
+        set!(model_fields.p, FT(1e5))
+        θᵥ_1000hPa = @allowscalar θᵥ(1, 1, 1, grid, model_fields)
+        set!(model_fields.p, FT(8e4))
+        θᵥ_800hPa = @allowscalar θᵥ(1, 1, 1, grid, model_fields)
+        κᵈ = dry_air_gas_constant(compressible_model.thermodynamic_constants) /
+             compressible_model.thermodynamic_constants.dry_air.heat_capacity
+        # No pressure or density captured at materialization: both come from the field tuple.
+        @test !any(f -> f isa Oceananigans.AbstractField, ntuple(i -> getfield(θᵥ, i), fieldcount(typeof(θᵥ))))
+        @test θᵥ_1000hPa ≈ FT(300)
+        @test θᵥ_800hPa ≈ FT(300) * FT(0.8)^(-κᵈ)
     end
 
     @testset "PolynomialCoefficient with no stability correction [$FT]" begin
         coef = PolynomialCoefficient(stability_function=nothing)
 
-        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=Tˢ))
 
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
@@ -752,25 +868,41 @@ end
         grid_1 = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
         𝒬 = FT(1000)
 
-        ρE_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
-        model = AtmosphereModel(grid_1; boundary_conditions=(; ρE=ρE_bcs))
+        # Two base pressures discriminate the conversions: 𝒬 / cᵖᵐ is identical for both, while
+        # Π is ≈1 at sea level and ≈0.90 at 700 hPa.
+        fluxes = FT[]
+        for p₀ in (FT(101325), FT(70000))
+            constants = ThermodynamicConstants(FT)
+            reference_state = ReferenceState(grid_1, constants; base_pressure=p₀, standard_pressure=FT(1e5))
+            ρE_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
+            model = AtmosphereModel(grid_1; dynamics=AnelasticDynamics(reference_state),
+                                    boundary_conditions=(; ρE=ρE_bcs))
 
-        θ₀_ref = model.dynamics.reference_state.potential_temperature
-        set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
+            θ₀_ref = model.dynamics.reference_state.potential_temperature
+            set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
 
-        q = MoistureMassFractions(qᵗ₀)
-        cᵖᵐ = mixture_heat_capacity(q, model.thermodynamic_constants)
+            q = MoistureMassFractions(qᵗ₀)
+            cᵖᵐ = mixture_heat_capacity(q, model.thermodynamic_constants)
 
-        # Read the condition the model will apply, rather than restating the arithmetic. The
-        # conversion divides by cᵖᵐ alone; whether it should also divide by Π, as the `ρE` forcing
-        # does, is issue #976.
-        Jᶿ = Field(BoundaryConditionOperation(thermodynamic_density(model.formulation), :bottom, model))
-        compute!(Jᶿ)
+            # Read the condition the model will apply, rather than restating the arithmetic.
+            Jᶿ = Field(BoundaryConditionOperation(thermodynamic_density(model.formulation), :bottom, model))
+            compute!(Jᶿ)
 
-        time_step!(model, FT(1e-6))
+            time_step!(model, FT(1e-6))
 
-        @test cᵖᵐ > 1000
-        @test all(interior(Jᶿ) .≈ 𝒬 / cᵖᵐ)
+            # Π in the boundary cell, from the same reference pressure the `ρE` forcing divides by.
+            pᵣ = @allowscalar dynamics_pressure(model.dynamics)[1, 1, 1]
+            𝒰 = LiquidIcePotentialTemperatureState(zero(FT), q, standard_pressure(model.dynamics), pᵣ)
+            Π = exner_function(𝒰, model.thermodynamic_constants)
+
+            @test cᵖᵐ > 1000
+            @test all(interior(Jᶿ) .≈ 𝒬 / (cᵖᵐ * Π))
+
+            push!(fluxes, @allowscalar interior(Jᶿ)[1, 1, 1])
+        end
+
+        # Dividing by cᵖᵐ alone would make these equal; dividing by cᵖᵐ Π separates them by ~1/Π.
+        @test fluxes[2] > 1.05 * fluxes[1]
     end
 
     @testset "Error when specifying both ρθ and ρE boundary conditions [$FT]" begin
@@ -924,12 +1056,12 @@ end
     end
 
     @testset "EnergyFluxBoundaryConditionFunction summary [$FT]" begin
-        ef_number = EnergyFluxBoundaryConditionFunction(500, nothing, nothing, nothing, nothing)
+        ef_number = EnergyFluxBoundaryConditionFunction(500, nothing, nothing, nothing, nothing, nothing)
         s = summary(ef_number)
         @test occursin("500", s) || occursin("5", s)
 
         𝒬_func(x, y, t) = 100
-        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing, nothing, nothing)
+        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing, nothing, nothing, nothing)
         s_func = summary(ef_func)
         @test occursin("Function", s_func) || occursin("function", s_func)
     end
@@ -959,7 +1091,7 @@ end
     𝒬 = FT(1000)
     θ₀ = FT(290)
     qᵗ₀ = FT(0.01)
-    Δt = FT(1e-6)
+    Δt = FT(1)   # 1e-6 puts the increment below eps(ρθ) in Float32
 
     # Test a representative subset of boundaries (bottom and west are sufficient for coverage)
     for ρE_bcs in [
@@ -977,6 +1109,72 @@ end
         Δρθ = ρθ_after - ρθ_before
         @test Δρθ != 0
     end
+end
+
+@testset "Energy flux converts at each face's own cell [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    using Oceananigans.Models: BoundaryConditionOperation
+
+    # The six `getbc` methods differ only in which boundary cell they hand the conversion. Before
+    # `Π` entered this path that index reached only `qᵛ` and density, where the wrong cell costs a
+    # percent. Over this column `Π` runs ≈0.97 at the lowest cell to ≈0.53 at the highest, so a
+    # misread cell now fails loudly instead of rounding away.
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 15000),
+                           topology=(Bounded, Bounded, Bounded))
+
+    𝒬ᵀ = FT(1000)
+    qᵗ₀ = FT(0.01)
+
+    ρE_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(𝒬ᵀ),
+                                     top    = FluxBoundaryCondition(𝒬ᵀ),
+                                     west   = FluxBoundaryCondition(𝒬ᵀ),
+                                     east   = FluxBoundaryCondition(𝒬ᵀ),
+                                     south  = FluxBoundaryCondition(𝒬ᵀ),
+                                     north  = FluxBoundaryCondition(𝒬ᵀ))
+
+    model = AtmosphereModel(grid; boundary_conditions=(; ρE=ρE_bcs))
+
+    # No θ: nothing the conversion reads depends on it. Density and pressure are the anelastic
+    # reference fields, built at construction, and `exner_function` ignores the state's θ. Moisture
+    # stays vapor-only because the default microphysics is `nothing`, so `grid_moisture_fractions`
+    # returns `MoistureMassFractions(qᵛ)` unpartitioned. Give this model a microphysics and θ does
+    # become load-bearing: `set!` would then split `qᵗ` into condensate using temperature.
+    set!(model; qᵗ=qᵗ₀)
+
+    q = MoistureMassFractions(qᵗ₀)
+    constants = model.thermodynamic_constants
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    pˢᵗ = standard_pressure(model.dynamics)
+    p = Array(interior(dynamics_pressure(model.dynamics)))
+    Nx, Ny, Nz = size(grid)
+
+    # The anelastic reference pressure is a column, so `Π` varies in `k` only. That is enough to
+    # catch any error in the vertical index, and any error that confuses a horizontal index with
+    # it; a pure i↔j or 1↔N mix-up between two horizontal faces would not show here.
+    p_cell(i, j, k) = FT(p[min(i, size(p, 1)), min(j, size(p, 2)), k])
+    Π_cell(i, j, k) = exner_function(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, p_cell(i, j, k)),
+                                     constants)
+
+    # Premise for everything below: `Π` must vary enough across the column that reading the wrong
+    # cell is visible. Without it the six assertions would pass under any index.
+    @test Π_cell(1, 1, 1) / Π_cell(1, 1, Nz) > 1.5
+
+    ρθ = thermodynamic_density(model.formulation)
+
+    # The cell each side's method must read, in the order `interior` returns it.
+    cells = (bottom = [(i, j, 1)  for i in 1:Nx, j in 1:Ny],
+             top    = [(i, j, Nz) for i in 1:Nx, j in 1:Ny],
+             west   = [(1, j, k)  for j in 1:Ny, k in 1:Nz],
+             east   = [(Nx, j, k) for j in 1:Ny, k in 1:Nz],
+             south  = [(i, 1, k)  for i in 1:Nx, k in 1:Nz],
+             north  = [(i, Ny, k) for i in 1:Nx, k in 1:Nz])
+
+    for side in (:bottom, :top, :west, :east, :south, :north)
+        Jᶿ = Array(interior(Field(BoundaryConditionOperation(ρθ, side, model))))
+        expected = [𝒬ᵀ / (cᵖᵐ * Π_cell(c...)) for c in getproperty(cells, side)]
+        @test vec(Jᶿ) ≈ vec(expected)
+    end
+
 end
 
 @testset "ThetaFluxBC getbc coverage [$FT]" for FT in test_float_types()

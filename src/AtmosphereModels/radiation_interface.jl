@@ -44,10 +44,10 @@ radiation_flux_divergence(radiation) = radiation.flux_divergence
 @inline radiation_flux_divergence(i, j, k, grid, ::Nothing) = zero(eltype(grid))
 @inline radiation_flux_divergence(i, j, k, grid, flux_divergence) = @inbounds flux_divergence[i, j, k]
 
-struct RadiativeTransferModel{FT<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, S}
+struct RadiativeTransferModel{FT<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, CB, S}
     solar_constant :: FT # a scalar, or an (Nx, Ny) array of per-column values
     solar_position :: SOP # AbstractSolarPosition: how to obtain cos(θ_z) on each update
-    surface_properties :: SP
+    surface_radiation :: SP
     background_atmosphere :: BA # BackgroundAtmosphere or Nothing (for gray)
     atmospheric_state :: AS
     longwave_solver :: LW
@@ -59,7 +59,29 @@ struct RadiativeTransferModel{FT<:Union{Number, AbstractArray}, SOP, SP, BA, AS,
     flux_divergence :: H # Center field: -dF_net/dz in W/m³
     liquid_effective_radius :: LER # Model for cloud liquid effective radius (Nothing for gray/clear-sky)
     ice_effective_radius :: IER    # Model for cloud ice effective radius (Nothing for gray/clear-sky)
+    column_batches :: CB  # Number of column batches for the RRTMGP solve (Nothing for one unbatched solve)
     schedule :: S  # Update schedule (default: IterationInterval(1) = every step)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Number of whole j-rows of columns in each radiation batch when the domain's `Ny` rows are split
+into at most `column_batches` batches. `nothing` means one unbatched solve over all `Ny` rows.
+
+Batches are whole rows so that each is a contiguous run of columns, and `cld(Ny, column_batches)`
+rows each so that every batch has the same width. When those rows do not divide `Ny`, the domain
+needs fewer than `column_batches` batches.
+"""
+resolve_column_batch_rows(::Nothing, Ny) = Ny
+
+function resolve_column_batch_rows(column_batches::Integer, Ny)
+    1 ≤ column_batches ≤ Ny ||
+        throw(ArgumentError("column_batches must lie between 1 and the number of rows of columns, " *
+                            "Ny = $Ny; got $column_batches. Use column_batches = nothing to solve " *
+                            "radiation without batching."))
+
+    return cld(Ny, column_batches)
 end
 
 """
@@ -404,7 +426,7 @@ end
 # Materialization is idempotent for already-materialized atmospheres
 materialize_background_atmosphere(::Nothing, grid) = nothing
 
-struct SurfaceRadiativeProperties{ST, SE, SA, DW}
+struct SurfaceRadiation{ST, SE, SA, DW}
     surface_temperature :: ST  # Scalar or 2D field
     surface_emissivity :: SE   # Scalar or 2D field
     direct_surface_albedo :: SA  # Scalar or 2D field
@@ -418,14 +440,14 @@ function Base.show(io::IO, radiation::RadiativeTransferModel)
           "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n",
           "├── solar_position: ", radiation.solar_position, "\n")
 
-    if radiation.surface_properties.surface_temperature isa ConstantField
-        print(io, "├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",)
+    if radiation.surface_radiation.surface_temperature isa ConstantField
+        print(io, "├── surface_temperature: ", radiation.surface_radiation.surface_temperature, " K\n",)
     else
-        print(io, "├── surface_temperature: ", summary(radiation.surface_properties.surface_temperature), "\n")
+        print(io, "├── surface_temperature: ", summary(radiation.surface_radiation.surface_temperature), "\n")
     end
 
-    print(io, "├── surface_emissivity: ", radiation.surface_properties.surface_emissivity, "\n",
-              "├── direct_surface_albedo: ", radiation.surface_properties.direct_surface_albedo, "\n")
+    print(io, "├── surface_emissivity: ", radiation.surface_radiation.surface_emissivity, "\n",
+              "├── direct_surface_albedo: ", radiation.surface_radiation.direct_surface_albedo, "\n")
 
     # Show effective radius models if present (for all-sky optics)
     if !isnothing(radiation.liquid_effective_radius)
@@ -433,5 +455,12 @@ function Base.show(io::IO, radiation::RadiativeTransferModel)
                   "├── ice_effective_radius: ", radiation.ice_effective_radius, "\n")
     end
 
-    print(io, "└── diffuse_surface_albedo: ", radiation.surface_properties.diffuse_surface_albedo)
+    # Show the resolved column batching if the solve is batched
+    if !isnothing(radiation.column_batches)
+        Nx, Ny, _ = size(radiation.flux_divergence)
+        rows = resolve_column_batch_rows(radiation.column_batches, Ny)
+        print(io, "├── column_batches: ", cld(Ny, rows), " × ", rows * Nx, " columns (", rows, " of ", Ny, " rows)\n")
+    end
+
+    print(io, "└── diffuse_surface_albedo: ", radiation.surface_radiation.diffuse_surface_albedo)
 end

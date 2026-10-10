@@ -8,7 +8,7 @@ using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: AbstractGrid, Center, Face, Flat
 using Oceananigans.Fields: ConstantField
 
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity,
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiation, specific_humidity,
                                BackgroundAtmosphere, materialize_background_atmosphere,
                                ClearSkyOptics, RadiativeTransferModel,
                                AbstractSolarPosition, ApparentSolarPosition,
@@ -18,7 +18,7 @@ using Breeze.Thermodynamics: ThermodynamicConstants
 using Dates: AbstractDateTime, Millisecond
 using KernelAbstractions: @kernel, @index
 
-using RRTMGP: ClearSkyRadiation, RRTMGPSolver, lookup_tables, update_lw_fluxes!, update_sw_fluxes!
+using RRTMGP: ClearSkyRadiation, RRTMGPSolver, lookup_tables
 using RRTMGP.AtmosphericStates: AtmosphericState
 using RRTMGP.BCs: LwBCs, SwBCs
 
@@ -48,6 +48,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361), a scalar or an `(Nx, Ny)` array of per-column values
+$(column_batches_docstring)
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::ClearSkyOptics,
@@ -60,7 +61,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  diffuse_surface_albedo = nothing,
                                                  surface_albedo = nothing,
                                                  solar_constant = 1361,
-                                                 schedule = IterationInterval(1))
+                                                 schedule = IterationInterval(1),
+                                                 column_batches = nothing)
 
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)
@@ -98,10 +100,10 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     Nx, Ny, Nz = size(grid)
     Nc = Nx * Ny
 
-    # RRTMGP grid + context
+    # RRTMGP grid + context. `grid_params` sizes the solver workspace (one batch), not the state.
     context = rrtmgp_context(arch)
     ArrayType = ClimaComms.array_type(context.device)
-    grid_params = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
+    grid_params = rrtmgp_grid_params(FT, context, grid, column_batches)
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
     radiation_method = ClearSkyRadiation(false)
@@ -124,7 +126,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     Nband_sw = luts.nbnd_sw
     Ngas = luts.ngas_sw
 
-    # Atmospheric state arrays
+    # Atmospheric state arrays, sized for the whole domain: each batch solves a `view` of them.
     rrtmgp_λ = ArrayType{FT}(undef, Nc)
     rrtmgp_φ = ArrayType{FT}(undef, Nc)
     rrtmgp_layerdata = ArrayType{FT}(undef, 4, Nz, Nc)
@@ -171,16 +173,14 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     downwelling_shortwave_flux = ZFaceField(grid)
     flux_divergence = CenterField(grid)
 
-    surface_properties = SurfaceRadiativeProperties(surface_temperature,
-                                                    surface_emissivity,
-                                                    direct_surface_albedo,
-                                                    diffuse_surface_albedo)
+    surface_radiation = SurfaceRadiation(surface_temperature, surface_emissivity,
+                                         direct_surface_albedo, diffuse_surface_albedo)
 
-    update_rrtmgp_surface_boundary_conditions!(solver, surface_properties, grid)
+    update_rrtmgp_surface_boundary_conditions!(solver, surface_radiation, grid)
 
     return RadiativeTransferModel(materialize_solar_constant(solar_constant, FT),
                                   solar_position,
-                                  surface_properties,
+                                  surface_radiation,
                                   background_atmosphere,
                                   atmospheric_state,
                                   solver,
@@ -192,6 +192,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   flux_divergence,
                                   nothing,  # liquid_effective_radius = nothing for clear-sky
                                   nothing,  # ice_effective_radius = nothing for clear-sky
+                                  column_batches,
                                   schedule)
 end
 
@@ -291,22 +292,17 @@ function AtmosphereModels._update_radiation!(rtm::ClearSkyRadiativeTransferModel
     solver = rtm.longwave_solver
 
     # Surface emissivity and albedos (shared with all-sky), re-read in case they evolve
-    update_rrtmgp_surface_boundary_conditions!(solver, rtm.surface_properties, grid)
+    update_rrtmgp_surface_boundary_conditions!(solver, rtm.surface_radiation, grid)
 
     # Update atmospheric state
-    update_rrtmgp_gas_state!(solver.as, model, rtm.surface_properties.surface_temperature, rtm.background_atmosphere, solver.params)
+    update_rrtmgp_gas_state!(solver.as, model, rtm.surface_radiation.surface_temperature, rtm.background_atmosphere, solver.params)
 
     # Update solar zenith angle from the solar_position specification
     update_solar_zenith_angle!(solver.sws, rtm.solar_position, grid, clock)
 
-    # Longwave
-    update_lw_fluxes!(solver)
-
-    # Shortwave: we always call the solver; columns with `cos_zenith ≤ 0`
-    # get zero fluxes (RRTMGP zeroes night columns internally).
-    update_sw_fluxes!(solver)
-
-    copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
+    # Longwave and shortwave, one batch of columns at a time; night columns (`cos_zenith ≤ 0`)
+    # get zero fluxes, which RRTMGP handles internally.
+    solve_radiation_batches!(rtm, solver, grid)
 
     # Compute radiation flux divergence
     compute_radiation_flux_divergence!(rtm, grid)

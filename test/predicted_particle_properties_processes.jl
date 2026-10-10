@@ -171,7 +171,7 @@ function expected_reference_ice_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, �
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
     ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
     C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
-                                      p3.ice.deposition.ventilation_enhanced,
+                                      p3.ice.deposition.enhanced_ventilation,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.ν, transport.Dᵛ, ρ_correction)
     ice_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
@@ -189,7 +189,7 @@ function expected_reference_coating_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, F�
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
     ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
     C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
-                                      p3.ice.deposition.ventilation_enhanced,
+                                      p3.ice.deposition.enhanced_ventilation,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.ν, transport.Dᵛ, ρ_correction)
     coating_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
@@ -364,7 +364,7 @@ end
         _, no_rime_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
             p3, cloud_riming, rain_riming, parameters.splintering_temperature_peak, D_ice, Fˡ, surface_T, zero(FT))
 
-        # H4: Cloud riming contributes to splintering
+        # Cloud riming contributes to splintering
         @test cloud_only_n > 0
         cloud_only_q, _ = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
             p3, cloud_riming, zero(FT), parameters.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
@@ -461,7 +461,7 @@ end
         parameters = ProcessRate(FT)
 
         # Create rates with typical warm-rain and ice process activity
-        # Sign convention (M7): all one-directional rates are positive magnitudes
+        # Sign convention: all one-directional rates are positive magnitudes
         rates = P3ProcessRates(
             # Phase 1: Cloud condensation/evaporation (bidirectional: +cond, −evap)
             FT(5e-7),   # condensation
@@ -482,11 +482,11 @@ end
             FT(0),      # clipping_rime_mass
             FT(0),      # clipping_rime_volume
             FT(0),      # post_process_clipping
-            # D2: Sublimation number loss
+            # Sublimation number loss
             FT(0.0),    # sublimation_number
             # Phase 2: Aggregation (positive magnitude)
             FT(500.0),  # aggregation
-            FT(0.0),    # ni_limit (C3: global Nⁱ cap; zero in warm-environment test)
+            FT(0.0),    # ni_limit (global Nⁱ cap; zero in warm-environment test)
             # Phase 2: Riming (all positive magnitudes)
             FT(1e-7),   # cloud_riming
             FT(1e4),    # cloud_riming_number (positive magnitude)
@@ -515,21 +515,21 @@ end
             FT(0.0),    # cloud_warm_collection (warm environment test)
             FT(0.0),    # cloud_warm_collection_number
             FT(0.0),    # rain_warm_collection
-            FT(0.0),    # rain_warm_collection_number (M9)
+            FT(0.0),    # rain_warm_collection_number
             FT(0.0),    # wet_growth_cloud
             FT(0.0),    # wet_growth_rain
-            FT(0.0),    # wet_growth_shedding (D8)
-            FT(0.0),    # wet_growth_shedding_number (D8)
-            FT(0.0),    # ccn_activation_mass (M9 stub)
-            FT(0.0),    # ccn_activation_number (M9 stub)
-            FT(0.0),    # rain_condensation (M9 stub)
-            FT(0.0),    # coating_condensation (M9 stub)
-            FT(0.0),    # coating_evaporation (M9 stub)
-            FT(0.0),    # wet_growth_densification_mass (H9)
-            FT(0.0),    # wet_growth_densification_volume (H9)
-            FT(0.0),    # cloud_number_correction (M6)
-            FT(0.0),    # rain_number_correction (M6)
-            FT(0.0),    # ice_number_correction (M4)
+            FT(0.0),    # wet_growth_shedding
+            FT(0.0),    # wet_growth_shedding_number
+            FT(0.0),    # ccn_activation_mass
+            FT(0.0),    # ccn_activation_number
+            FT(0.0),    # rain_condensation
+            FT(0.0),    # coating_condensation
+            FT(0.0),    # coating_evaporation
+            FT(0.0),    # wet_growth_densification_mass
+            FT(0.0),    # wet_growth_densification_volume
+            FT(0.0),    # cloud_number_correction
+            FT(0.0),    # rain_number_correction
+            FT(0.0),    # ice_number_correction
             FT(0.0),    # predicted_supersaturation_adjustment
             FT(0.0),    # predicted_supersaturation_tendency
         )
@@ -583,14 +583,14 @@ end
         μ = Breeze.AtmosphereModels.materialize_microphysical_fields(p3, grid, NamedTuple())
 
         @test haskey(μ, :wᶜˡ)
-        @test haskey(μ, :wᶜˡₙ)
+        @test haskey(μ, :wⁿᶜˡ)
 
         cloud_mass_velocity = microphysical_velocities(p3, μ, Val(:ρqᶜˡ))
         cloud_number_velocity = microphysical_velocities(p3, μ, Val(:ρnᶜˡ))
         @test cloud_mass_velocity !== nothing
         @test cloud_number_velocity !== nothing
         @test cloud_mass_velocity.w === μ.wᶜˡ
-        @test cloud_number_velocity.w === μ.wᶜˡₙ
+        @test cloud_number_velocity.w === μ.wⁿᶜˡ
 
         ρ = FT(1)
         T = FT(283.15)
@@ -614,22 +614,24 @@ end
         expected_mass_velocity = a_cn * (cloud.μᶜˡ + 5) * (cloud.μᶜˡ + 4) / cloud.λᶜˡ^2
         expected_number_velocity = a_cn * (cloud.μᶜˡ + 2) * (cloud.μᶜˡ + 1) / cloud.λᶜˡ^2
 
-        @test cache.wᶜˡ ≈ expected_mass_velocity rtol=FT(1e-12)
-        @test cache.wᶜˡₙ ≈ expected_number_velocity rtol=FT(1e-12)
-        @test cache.wᶜˡ > cache.wᶜˡₙ
+        @test cache.𝕎ᶜˡ ≈ expected_mass_velocity rtol=FT(1e-12)
+        @test cache.𝕎ⁿᶜˡ ≈ expected_number_velocity rtol=FT(1e-12)
+        @test cache.𝕎ᶜˡ > cache.𝕎ⁿᶜˡ
 
         # The Stokes prefactor scales with the *model's* gravitational acceleration
         # rather than a hardcoded 9.81, so doubling g doubles both fall speeds.
         heavy = ThermodynamicConstants(FT; gravitational_acceleration = 2 * constants.gravitational_acceleration)
-        vᶜ = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν, cloud.μᶜˡ, cloud.λᶜˡ, constants)
-        vᶜ_heavy = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν, cloud.μᶜˡ, cloud.λᶜˡ, heavy)
-        @test vᶜ.mass_weighted ≈ expected_mass_velocity rtol=FT(1e-12)
-        @test vᶜ_heavy.mass_weighted ≈ 2 * vᶜ.mass_weighted rtol=FT(1e-12)
-        @test vᶜ_heavy.number_weighted ≈ 2 * vᶜ.number_weighted rtol=FT(1e-12)
+        cloud_speeds = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν,
+                                                     cloud.μᶜˡ, cloud.λᶜˡ, constants)
+        heavy_cloud_speeds = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν,
+                                                           cloud.μᶜˡ, cloud.λᶜˡ, heavy)
+        @test cloud_speeds.mass_weighted ≈ expected_mass_velocity rtol=FT(1e-12)
+        @test heavy_cloud_speeds.mass_weighted ≈ 2 * cloud_speeds.mass_weighted rtol=FT(1e-12)
+        @test heavy_cloud_speeds.number_weighted ≈ 2 * cloud_speeds.number_weighted rtol=FT(1e-12)
 
         # `rime_density` forms the Cober-List impact parameter from the same
         # mass-weighted Stokes velocity, so its rime density depends on the ice fall
-        # speed only through |vᵢ - vᶜ.mass_weighted| and is symmetric about it. A
+        # speed only through |𝕎ⁱ - 𝕎ᶜˡ| and is symmetric about it. A
         # second gravitational acceleration in either function would shift that centre.
         T_rime = p3.process_rates.freezing_temperature - FT(5)
         transport_rime = air_transport_properties(T_rime, P, constants)
@@ -741,7 +743,7 @@ end
                                  zero(FT), zero(FT), FT(1e8), one(FT))
         q = MoistureMassFractions(FT(0.005), FT(1.1e-4), FT(1e-5))
         𝒰 = LiquidIcePotentialTemperatureState(FT(280), q, FT(1e5), FT(9e4))
-        aerosol = AerosolActivation(AerosolMode(FT))
+        aerosol = AerosolActivation(AerosolMode(FT); prognostic = true)
 
         p3_with_aerosol = PredictedParticlePropertiesMicrophysics(FT; aerosol)
         aerosol_tendencies = @inferred bundled_p3_tendencies(
@@ -907,7 +909,7 @@ end
         ρ = FT(1.0)
         P = FT(101325.0)
 
-        # Subsaturated: qv < qv_sat → positive evaporation rate (M7: positive magnitude)
+        # Subsaturated: qv < qv_sat → positive evaporation rate (positive magnitude)
         qv_sat = FT(0.012)
         qv_sub = FT(0.008)    # 67% RH
         rate_sub = rain_evaporation_rate(p3, qr, nr, qv_sub, qv_sat, T, ρ, P, constants)
@@ -1176,7 +1178,7 @@ end
         @test dep_sink_total * dt_safety <= qdep_cap + FT(10) * eps(FT)
     end
 
-    @testset "CCN activation and the vapor caps share one psychrometric convention" begin
+    @testset "Prescribed droplet activation and the vapor caps share one psychrometric convention" begin
         FT = Float64
         p3 = PredictedParticlePropertiesMicrophysics(FT)
         constants = ThermodynamicConstants(FT)
@@ -1194,8 +1196,8 @@ end
         q = MoistureMassFractions(qᵛ, qᶜˡ, zero(FT))
         Nᶜˡ = p3.cloud.number_concentration
 
-        ccn = PPP.compute_ccn_activation(p3.aerosol, p3, qᶜˡ, zero(FT), zero(FT),
-                                         qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+        activation = PPP.compute_cloud_droplet_activation(p3.aerosol, p3, qᶜˡ, zero(FT), zero(FT),
+                                                          qᵛ, qᵛ⁺ˡ, T, ρ, constants)
 
         Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
         ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
@@ -1203,7 +1205,7 @@ end
         cons7 = FT(4 * FT(π) / 3 * 1000 * (1e-6)^3)
         deficit = Nᶜˡ / ρ * cons7
         @test (qᵛ - qᵛ⁺ˡ) / ξˡ < deficit
-        @test ccn.mass ≈ ((qᵛ - qᵛ⁺ˡ) / ξˡ) / τ rtol=FT(1e-14)
+        @test activation.mass ≈ ((qᵛ - qᵛ⁺ˡ) / ξˡ) / τ rtol=FT(1e-14)
 
         # The moist mixture heat capacity gives a materially different factor, so sizing
         # the rate with it and capping it with cᵖᵈ would disagree within one cell.
@@ -1214,10 +1216,10 @@ end
 
         # With one convention, a vapor-limited activation rate exactly fills
         # `limit_vapor_rates`'s liquid budget instead of being rescaled by it.
-        limited = PPP.limit_vapor_rates(zero(FT), ccn.mass, zero(FT), zero(FT), zero(FT),
+        limited = PPP.limit_vapor_rates(zero(FT), activation.mass, zero(FT), zero(FT), zero(FT),
                                         zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
                                         qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, τ, FT(273.15))
-        @test limited.ccn_activation_mass ≈ ccn.mass rtol=FT(1e-12)
+        @test limited.ccn_activation_mass ≈ activation.mass rtol=FT(1e-12)
     end
 
     @testset "limit_vapor_rates caps evaporation when subsaturated" begin
@@ -1424,7 +1426,7 @@ end
         ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ)
         C_fv = PPP.deposition_ventilation(
             p3.ice.deposition.ventilation,
-            p3.ice.deposition.ventilation_enhanced,
+            p3.ice.deposition.enhanced_ventilation,
             m_mean, Ff, zero(FT), ρf, p3.process_rates, transport.ν, transport.Dᵛ,
             ρ_correction)
 
@@ -1599,7 +1601,7 @@ end
         Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
         ε = Rᵈ / Rᵥ
         e_s0 = PPP.saturation_vapor_pressure_at_freezing(constants, T₀)
-        # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
+        # Set qv = q_sat0 (mixing ratio convention) so latent term vanishes
         qv = ε * e_s0 / max(P - e_s0, FT(1))
 
         refreezing = PPP.refreezing_rate(p3, qi, qwi, ni, T, qv, Ff, ρf,
@@ -1622,7 +1624,7 @@ end
         T_warm = FT(268.15)    # -5C
         ρ = FT(1.0)
         rate_warm = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ)
-        @test rate_warm > 0     # Positive magnitude (M7)
+        @test rate_warm > 0     # Positive magnitude
 
         # Very cold (T < 253.15 K): much less aggregation
         T_cold = FT(233.15)    # -40C
@@ -1638,7 +1640,7 @@ end
         rate_rimed = ice_aggregation_rate(p3, qi, ni, T_warm, FT(0.95), ρf, ρ)
         @test rate_rimed == 0
 
-        # Rate scales with ρ × rhofaci where rhofaci = (ρ₀/ρ)^0.54 (M11).
+        # Rate scales with ρ × rhofaci where rhofaci = (ρ₀/ρ)^0.54.
         # Combined scaling: rate ∝ ρ × (ρ₀/ρ)^0.54 = ρ₀^0.54 × ρ^0.46
         ρ_half = FT(0.5)
         rate_half_ρ = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ_half)
@@ -1713,7 +1715,7 @@ end
         qcl = FT(1e-3)
         cloud_rim = FT(2e-7)
         T = FT(263.15)
-        vᵢ = FT(1.0)
+        𝕎ⁱ = FT(1.0)
         ρ = FT(1.0)
         P = FT(90000.0)
         transport = air_transport_properties(T, P, constants)
@@ -1731,13 +1733,13 @@ end
         )
         λᶜˡ = clamp(unbounded_cloud_slope, (μᶜˡ + 1) * FT(2.5e4),
                     (μᶜˡ + 1) * FT(1e6))
-        ρ_rime = rime_density(p3, qcl, cloud_rim, T, vᵢ, ρ, constants,
+        ρ_rime = rime_density(p3, qcl, cloud_rim, T, 𝕎ⁱ, ρ, constants,
                               transport, μᶜˡ, λᶜˡ)
         a_cn = constants.gravitational_acceleration * ρ_water / (FT(18) * η)
-        Vt_qc = a_cn * (μᶜˡ + 5) * (μᶜˡ + 4) / λᶜˡ^2
+        𝕎ᶜˡ = a_cn * (μᶜˡ + 5) * (μᶜˡ + 4) / λᶜˡ^2
         Dᶜˡ = (μᶜˡ + 4) / λᶜˡ
         inverse_supercooling = inv(min(FT(-0.001), T - parameters.freezing_temperature))
-        Ri = clamp(-(FT(0.5e6) * Dᶜˡ) * abs(vᵢ - Vt_qc) * inverse_supercooling, FT(1), FT(12))
+        Ri = clamp(-(FT(0.5e6) * Dᶜˡ) * abs(𝕎ⁱ - 𝕎ᶜˡ) * inverse_supercooling, FT(1), FT(12))
         expected = ifelse(
             Ri <= FT(8),
             (FT(0.051) + FT(0.114) * Ri - FT(0.0055) * Ri^2) * FT(1000),
@@ -1749,11 +1751,11 @@ end
 
         T_warm = FT(278.15)
         transport_warm = air_transport_properties(T_warm, P, constants)
-        ρ_warm = rime_density(p3, qcl, cloud_rim, T_warm, vᵢ, ρ, constants,
+        ρ_warm = rime_density(p3, qcl, cloud_rim, T_warm, 𝕎ⁱ, ρ, constants,
                               transport_warm, μᶜˡ, λᶜˡ)
         @test ρ_warm == 400
 
-        ρ_no_cloud = rime_density(p3, qcl, FT(0), T, vᵢ, ρ, constants,
+        ρ_no_cloud = rime_density(p3, qcl, FT(0), T, 𝕎ⁱ, ρ, constants,
                                   transport, μᶜˡ, λᶜˡ)
         @test ρ_no_cloud == 400
     end
@@ -1833,7 +1835,7 @@ end
         @test capped.bᶠ ≈ capped.qᶠ / capped.ρᶠ
         @test capped.Fᶠ == 1
 
-        # D14: Julia's qⁱ is already dry ice, so the rime cap is qⁱ itself and there is
+        # Julia's qⁱ is already dry ice, so the rime cap is qⁱ itself and there is
         # no qʷⁱ argument to subtract.
         liquid_rime = consistent_rime_state(p3, FT(1e-4), FT(8e-5), FT(2e-7))
         # qᶠ = 8e-5 < qⁱ_dry = 1e-4, so NOT capped
@@ -1937,7 +1939,7 @@ end
         @test rates.partial_melting == 0
         @test rates.complete_melting == 0
 
-        # Aggregation should be positive magnitude (M7)
+        # Aggregation should be positive magnitude
         @test rates.aggregation >= 0
 
         # Rime density should be physical
@@ -2475,7 +2477,7 @@ end
         @test rates_tab.complete_melting == 0
         @test rates_tab.aggregation >= 0
 
-        # Rain evaporation should be positive magnitude (M7)
+        # Rain evaporation should be positive magnitude
         @test rates_tab.rain_evaporation > 0
         @test isfinite(rates_tab.rain_evaporation)
     end

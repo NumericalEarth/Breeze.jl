@@ -479,7 +479,7 @@ function run_ensemble(problem::ColumnEnsembleProblem, params::AbstractMatrix;
     # reference follows its own initial potential temperature (LES below, GCM above) so the reference pressure
     # stays realistic through the stratosphere
     θᵣ = tall ? column_array(m -> onto_centers(m.initial.θ, m, :θ)) : θ₀
-    reference_state = ReferenceState(grid, constants; surface_pressure = p₀, potential_temperature = θᵣ)
+    reference_state = ReferenceState(grid, constants; base_pressure = p₀, potential_temperature = θᵣ)
     dynamics = AnelasticDynamics(reference_state)
 
     closures = [closure_from(space, view(params, :, i); static_stability = problem.static_stability) for i in 1:N_ens, j in 1:N_mem]

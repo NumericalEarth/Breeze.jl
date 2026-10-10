@@ -668,7 +668,7 @@ end
         grid = RectilinearGrid(default_arch, FT; size = (2, 2, 2), extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,

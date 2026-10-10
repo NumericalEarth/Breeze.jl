@@ -134,7 +134,7 @@ function boundary_layer_simulation(; closure, Lz, Δz₁, θ₀, Γ, stop_time, 
     z = PiecewiseStretchedDiscretization(z = [0, Lz], Δz = [Δz₁, stretching * Δz₁])
     grid = RectilinearGrid(size = length(z) - 1; z, topology = (Flat, Flat, Bounded))
 
-    reference_state = ReferenceState(grid, surface_pressure = 1e5, potential_temperature = θ₀)
+    reference_state = ReferenceState(grid, base_pressure = 1e5, potential_temperature = θ₀)
     dynamics = AnelasticDynamics(reference_state)
 
     if isnothing(surface_temperature)
@@ -380,7 +380,7 @@ function les_driven_column(path; closure, Δt = 1minute)
     ## The LES reference pressure extrapolated to the surface, and the initial mixed-layer θ
     p₀ = ds["p0"][1] + ds["rho0"][1] * g * z[1]
     θ₀ = ds["thetali_mean_initial"][1]
-    reference_state = ReferenceState(grid; surface_pressure = p₀, potential_temperature = θ₀)
+    reference_state = ReferenceState(grid; base_pressure = p₀, potential_temperature = θ₀)
     dynamics = AnelasticDynamics(reference_state)
     ρ₀ = surface_density(reference_state)
     microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
