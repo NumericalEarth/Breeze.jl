@@ -863,6 +863,14 @@ end
 # Numerical timescale for limiting negative-value relaxation
 const τⁿᵘᵐ = 10  # seconds
 
+# Fraction of a donor's process rates that can be honoured without draining more than
+# its content `q` over τⁿᵘᵐ: 1 when the summed sink rate `ΣS` fits, `q⁺ / (τⁿᵘᵐ ΣS)` otherwise.
+@inline function donor_limiter(q, ΣS)
+    q⁺ = max(q, zero(q))
+    demand = τⁿᵘᵐ * ΣS
+    return ifelse(demand > q⁺, q⁺ / max(demand, eps(typeof(demand))), one(demand))
+end
+
 # State-based rain tendency for all warm-phase 1M schemes
 @inline function AM.microphysical_tendency(bμp::WarmPhase1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
@@ -1253,16 +1261,47 @@ end
     # Temperature routing (branchless)
     is_warm = T ≥ Tᶠ
 
+    # Positivity: every process draws from exactly one donor reservoir. Scale each donor's
+    # processes together so that the donor cannot lose more than its content over τⁿᵘᵐ.
+    # Scaling a process scales its source and its sink alike, so conservation is untouched.
+    Sᶜᵒⁿᵈ⁺, Sᶜᵒⁿᵈ⁻ = max(Sᶜᵒⁿᵈ, 0), min(Sᶜᵒⁿᵈ, 0)
+    Sᵈᵉᵖ⁺, Sᵈᵉᵖ⁻ = max(Sᵈᵉᵖ, 0), min(Sᵈᵉᵖ, 0)
+    Sᵉᵛᵃᵖ⁺, Sᵉᵛᵃᵖ⁻ = max(Sᵉᵛᵃᵖ, 0), min(Sᵉᵛᵃᵖ, 0)
+    Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
+    Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)                       # cold: rain → snow
+    Sˢⁿʷ  = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))  # warm: snow → rain
+
+    fᵛ  = donor_limiter(qᵛ,  Sᶜᵒⁿᵈ⁺ + Sᵈᵉᵖ⁺ + Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺)
+    fᶜˡ = donor_limiter(qᶜˡ, -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ)
+    fᶜⁱ = donor_limiter(qᶜⁱ, -Sᵈᵉᵖ⁻ + Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵐᵉˡᵗᶜⁱ)
+    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
+    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
+
+    Sᶜᵒⁿᵈ = fᵛ * Sᶜᵒⁿᵈ⁺ + fᶜˡ * Sᶜᵒⁿᵈ⁻
+    Sᵈᵉᵖ  = fᵛ * Sᵈᵉᵖ⁺  + fᶜⁱ * Sᵈᵉᵖ⁻
+    Sᵉᵛᵃᵖ = fᵛ * Sᵉᵛᵃᵖ⁺ + fʳ  * Sᵉᵛᵃᵖ⁻
+    Sˢᵘᵇˡ = fᵛ * Sˢᵘᵇˡ⁺ + fˢⁿ * Sˢᵘᵇˡ⁻
+    Sᵃᶜⁿᵛ, Sᵃᶜᶜ = fᶜˡ * Sᵃᶜⁿᵛ, fᶜˡ * Sᵃᶜᶜ
+    Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵐᵉˡᵗᶜⁱ = fᶜⁱ * Sᵃᶜⁿᵛⁱˢⁿ, fᶜⁱ * Sᵃᶜᶜⁱˢⁿ, fᶜⁱ * Sᵃᶜᶜⁱʳ, fᶜⁱ * Sᵐᵉˡᵗᶜⁱ
+    Sᵃᶜᶜʳⁱ = fʳ * Sᵃᶜᶜʳⁱ
+    Sᵐᵉˡᵗ = fˢⁿ * Sᵐᵉˡᵗ
+    # Sᵃᶜᶜˡˢⁿ: the cloud-liquid part draws on cloud liquid, its warm melt part (α Sᵃᶜᶜˡˢⁿ) on snow.
+    # Sʳˢⁿ: rain donor when cold, its warm melt part (α Sʳˢⁿ) on snow. Sˢⁿʳ: snow donor (warm).
+    αSᵃᶜᶜˡˢⁿ = α * fˢⁿ * Sᵃᶜᶜˡˢⁿ
+    Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
+    Sʳˢⁿ = ifelse(is_warm, fˢⁿ, fʳ) * Sʳˢⁿ
+    Sˢⁿʳ = fˢⁿ * Sˢⁿʳ
+
     # Physics tendencies — conserved by construction: sum of all five = 0
     ρqᵛ_phys  = ρ * (-Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ - Sˢᵘᵇˡ)
     ρqᶜˡ_phys = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ - Sᵃᶜᶜˡˢⁿ + Sᵐᵉˡᵗᶜⁱ)
     ρqᶜⁱ_phys = ρ * ( Sᵈᵉᵖ - Sᵃᶜⁿᵛⁱˢⁿ - Sᵃᶜᶜⁱˢⁿ - Sᵃᶜᶜⁱʳ - Sᵐᵉˡᵗᶜⁱ)
     ρqʳ_phys  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ - Sᵃᶜᶜʳⁱ + Sᵐᵉˡᵗ
-                     + ifelse(is_warm, Sᵃᶜᶜˡˢⁿ + α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
+                     + ifelse(is_warm, Sᵃᶜᶜˡˢⁿ + αSᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
                      - ifelse(is_warm, zero(T), Sʳˢⁿ))
     ρqˢⁿ_phys = ρ * ( Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ - Sᵐᵉˡᵗ
                      + ifelse(is_warm, zero(T), Sᵃᶜᶜˡˢⁿ + Sʳˢⁿ)
-                     - ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T)))
+                     - ifelse(is_warm, αSᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T)))
 
     # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
     # When q < 0, replace with -ρq/τⁿᵘᵐ and route the delta to the coupled tracer:
@@ -1355,4 +1394,121 @@ function AM.compute_microphysical_tendencies!(microphysics::MPNE1M, model)
             model.microphysical_fields)
 
     return nothing
+end
+
+#####
+##### Microphysical tendencies for mixed-phase saturation-adjustment 1M (MP1M)
+#####
+#
+# Saturation adjustment partitions the equilibrium moisture ρqᵉ = ρ(qᵛ + qᶜˡ + qᶜⁱ) into vapor,
+# cloud liquid and cloud ice every stage, so only the exchanges with the two precipitating
+# reservoirs are tendencies. Each rate below is the MPNE1M rate of the same process:
+#
+#   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ − Sᵃᶜᶜʳⁱ + Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢⁿ, Sʳˢⁿ, Sˢⁿʳ, α)
+#   ρqˢⁿ: +Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ − Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢⁿ, Sʳˢⁿ, Sˢⁿʳ, α)
+#   ρqᵉ:  −(ρqʳ + ρqˢⁿ)
+#
+# Sinks are limited per donor reservoir (vapor, cloud liquid, cloud ice, rain, snow) with
+# `donor_limiter`, which keeps every reservoir non-negative without breaking conservation.
+#####
+
+@inline function mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+    categories = bμp.categories
+    parameters = categories.parameters
+    processes = parameters.processes
+    process_params = parameters.process_params
+    cloud_liquid = parameters.cloud.liquid
+    cloud_ice = parameters.cloud.ice
+    rain = parameters.precip.rain
+    snow = parameters.precip.snow
+    rain_velocity = parameters.terminal_velocity.rain
+    snow_velocity = parameters.terminal_velocity.snow
+    air = parameters.air_properties
+    qᶜˡ = ℳ.qᶜˡ
+    qᶜⁱ = ℳ.qᶜⁱ
+    qʳ = ℳ.qʳ
+    qˢⁿ = ℳ.qˢⁿ
+
+    T = temperature(𝒰, constants)
+    Tᶠ = categories.freezing_temperature
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
+
+    Sᵉᵛᵃᵖ = rain_evaporation_rate(processes.rain_condensation_evaporation,
+                                  rain, rain_velocity, air, q, qʳ, ρ, T, constants)
+    Sˢᵘᵇˡ = snow_deposition_sublimation_rate(processes.snow_deposition_sublimation,
+                                             snow, snow_velocity, air, q, qˢⁿ, ρ, T, constants)
+    Sᵐᵉˡᵗ = snow_melt_rate(processes.snow_melt, snow, snow_velocity, air, qˢⁿ, ρ, T, Tᶠ, constants)
+
+    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
+    Sᵃᶜᶜ = cloud_precipitation_accretion(process_params.cloud_liquid_rain_accretion,
+                                         cloud_liquid, rain, rain_velocity, qᶜˡ, qʳ, ρ)
+    Sᵃᶜⁿᵛⁱˢⁿ = ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+    Sᵃᶜᶜˡˢⁿ = cloud_precipitation_accretion(process_params.cloud_liquid_snow_accretion,
+                                            cloud_liquid, snow, snow_velocity, qᶜˡ, qˢⁿ, ρ)
+    Sᵃᶜᶜⁱˢⁿ = cloud_precipitation_accretion(process_params.cloud_ice_snow_accretion,
+                                            cloud_ice, snow, snow_velocity, qᶜⁱ, qˢⁿ, ρ)
+    Sᵃᶜᶜⁱʳ = cloud_precipitation_accretion(process_params.cloud_ice_rain_accretion,
+                                           cloud_ice, rain, rain_velocity, qᶜⁱ, qʳ, ρ)
+    Sᵃᶜᶜʳⁱ = rain_sink_accretion(process_params.cloud_ice_rain_accretion,
+                                 rain, cloud_ice, rain_velocity, qᶜⁱ, qʳ, ρ)
+    Sʳˢⁿ = rain_snow_accretion(process_params.rain_snow_accretion,
+                               snow, rain, snow_velocity, rain_velocity, qˢⁿ, qʳ, ρ)
+    Sˢⁿʳ = rain_snow_accretion(process_params.rain_snow_accretion,
+                               rain, snow, rain_velocity, snow_velocity, qʳ, qˢⁿ, ρ)
+
+    α = warm_accretion_melt_factor(T, Tᶠ, constants)
+    is_warm = T ≥ Tᶠ
+
+    # Donor-limited process rates (see `donor_limiter`)
+    Sᵉᵛᵃᵖ⁺, Sᵉᵛᵃᵖ⁻ = max(Sᵉᵛᵃᵖ, 0), min(Sᵉᵛᵃᵖ, 0)
+    Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
+    Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)
+    Sˢⁿʷ  = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
+
+    fᵛ  = donor_limiter(qᵛ,  Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺)
+    fᶜˡ = donor_limiter(qᶜˡ, Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ)
+    fᶜⁱ = donor_limiter(qᶜⁱ, Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ)
+    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
+    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
+
+    Sᵉᵛᵃᵖ = fᵛ * Sᵉᵛᵃᵖ⁺ + fʳ * Sᵉᵛᵃᵖ⁻
+    Sˢᵘᵇˡ = fᵛ * Sˢᵘᵇˡ⁺ + fˢⁿ * Sˢᵘᵇˡ⁻
+    Sᵃᶜⁿᵛ, Sᵃᶜᶜ = fᶜˡ * Sᵃᶜⁿᵛ, fᶜˡ * Sᵃᶜᶜ
+    Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ = fᶜⁱ * Sᵃᶜⁿᵛⁱˢⁿ, fᶜⁱ * Sᵃᶜᶜⁱˢⁿ, fᶜⁱ * Sᵃᶜᶜⁱʳ
+    Sᵃᶜᶜʳⁱ = fʳ * Sᵃᶜᶜʳⁱ
+    Sᵐᵉˡᵗ = fˢⁿ * Sᵐᵉˡᵗ
+    αSᵃᶜᶜˡˢⁿ = α * fˢⁿ * Sᵃᶜᶜˡˢⁿ
+    Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
+    Sʳˢⁿ = ifelse(is_warm, fˢⁿ, fʳ) * Sʳˢⁿ
+    Sˢⁿʳ = fˢⁿ * Sˢⁿʳ
+
+    ρqʳ_phys  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ - Sᵃᶜᶜʳⁱ + Sᵐᵉˡᵗ
+                     + ifelse(is_warm, Sᵃᶜᶜˡˢⁿ + αSᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
+                     - ifelse(is_warm, zero(T), Sʳˢⁿ))
+    ρqˢⁿ_phys = ρ * ( Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ - Sᵐᵉˡᵗ
+                     + ifelse(is_warm, zero(T), Sᵃᶜᶜˡˢⁿ + Sʳˢⁿ)
+                     - ifelse(is_warm, αSᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T)))
+
+    # Negative precipitation (from transport) relaxes back toward zero, drawing on ρqᵉ.
+    ρqʳ  = ifelse(qʳ  ≥ 0, ρqʳ_phys,  -ρ * qʳ  / τⁿᵘᵐ)
+    ρqˢⁿ = ifelse(qˢⁿ ≥ 0, ρqˢⁿ_phys, -ρ * qˢⁿ / τⁿᵘᵐ)
+    ρqᵉ  = -ρqʳ - ρqˢⁿ
+
+    return (; ρqᵉ, ρqʳ, ρqˢⁿ)
+end
+
+@inline AM.microphysical_tendency(bμp::MP1M, ::Val{:ρqʳ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants) =
+    mp1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+
+@inline AM.microphysical_tendency(bμp::MP1M, ::Val{:ρqˢⁿ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants) =
+    mp1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqˢⁿ
+
+@inline AM.microphysical_tendency(bμp::MP1M, ::Val{:ρqᵉ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants) =
+    mp1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵉ
+
+# Evaluate the bundle once for a request for several names (parcel models).
+@inline function AM.microphysical_tendencies(bμp::MP1M, names::Tuple, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+    G = mp1m_tendencies(bμp, ρ, ℳ, 𝒰, constants)
+    return map(name -> getproperty(G, name), names)
 end
