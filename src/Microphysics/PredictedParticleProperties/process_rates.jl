@@ -370,7 +370,7 @@ end
     below_freezing = T <= T₀
     cloud_coll = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, true, qʷⁱ, lookups)
     cloud_rim = ifelse(below_freezing, cloud_coll, zero(FT))
-    cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_rim)
+    cloud_rim_n = cloud_riming_number_rate(p3, qᶜˡ, Nᶜˡ, ρ, cloud_rim)
     # Mass and number share one Table 2 read.
     rain_coll_q, rain_coll_n = rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
                                                      true, qʷⁱ, lookups)
@@ -490,7 +490,7 @@ end
     # Above-freezing collection: the complementary halves of the two kernels
     # already evaluated above.
     cloud_warm_q = ifelse(below_freezing, zero(FT), cloud_coll)
-    cloud_warm_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_warm_q)
+    cloud_warm_n = cloud_riming_number_rate(p3, qᶜˡ, Nᶜˡ, ρ, cloud_warm_q)
     # Number sink from above-freezing rain collection fires in both branches.
     rain_warm_q_full = ifelse(below_freezing, zero(FT), rain_coll_q)
     rain_warm_n = ifelse(below_freezing, zero(FT), rain_coll_n)
@@ -1045,15 +1045,17 @@ end
 
     # Diagnose the post-process number reservoirs as well, so frozen liquid carries
     # the number left by collection, breakup, melting, and activation rather than the
-    # beginning-of-stage number. In the prescribed-Nᶜˡ path, cloud number is reset
-    # to its prescribed value immediately before homogeneous freezing.
+    # beginning-of-stage number. In the prescribed-Nᶜˡ path, re-diagnose the prescribed number
+    # against the residual cloud mass so the frozen number keeps the cloud DSD slope bounds.
     cloud_number_tendency = cloud_number_tendency_before_homogeneous_freezing(
         p3, ρ, qᶜˡ, Nᶜˡ, ccn_activation_mass, ccn_activation_number,
         autoconv, accr, cloud_self, cloud_rim_n, cloud_frz_n, cloud_warm_n)
     prognostic_cloud_number = max(0, cloud.nᶜˡ +
                                   cloud_number_tendency * dt_safety)
     prescribed_cloud_number = p3.cloud.number_concentration / ρ
-    cloud_number_remaining = ifelse(isnothing(p3.aerosol), prescribed_cloud_number,
+    prescribed_cloud = diagnose_cloud_dsd(
+        p3, cloud_remaining, prescribed_cloud_number, ρ)
+    cloud_number_remaining = ifelse(isnothing(p3.aerosol), prescribed_cloud.nᶜˡ,
                                     prognostic_cloud_number)
 
     rain_number_tendency = rain_number_tendency_before_homogeneous_freezing(
