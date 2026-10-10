@@ -186,7 +186,6 @@ function fix_negative_moisture!(microphysics, model)
 
     grid = model.grid
     arch = grid.architecture
-    ρ₀ = dynamics_density(model.dynamics)
     ρqᵛᵉ = model.moisture_density
     number_mass_pairs = correction_number_mass_pairs(microphysics, model.microphysical_fields)
     number_fields = correction_number_fields(microphysics, model.microphysical_fields)
@@ -194,7 +193,7 @@ function fix_negative_moisture!(microphysics, model)
     launch!(arch, grid, :xy,
             _fix_negative_moisture_column!,
             correction,
-            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, grid)
 
     return nothing
 end
@@ -203,14 +202,13 @@ end
 ##### Column-wise kernel
 #####
 
-@kernel function _fix_negative_moisture_column!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+@kernel function _fix_negative_moisture_column!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, grid)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
     # Phase 1: Species borrowing at each level
     for k = 1:Nz
-        @inbounds ρ = ρ₀[i, j, k]
-        apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, correction)
+        apply_same_level_correction!(i, j, k, moisture_fields, ρqᵛᵉ, correction)
     end
 
     # Zero orphaned number concentrations (mass zeroed but number still positive)
@@ -224,42 +222,43 @@ end
     end
 
     # Phase 2: Vertical borrowing (no-op when the scheme does not enable it)
-    apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction, ρ₀)
+    apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction)
 end
 
-@inline apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::VerticalBorrowing) = nothing
+@inline apply_same_level_correction!(i, j, k, moisture_fields, ρqᵛᵉ, ::VerticalBorrowing) = nothing
 
-@inline function apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::SpeciesBorrowing)
-    same_level_borrow!(i, j, k, ρ, moisture_fields, ρqᵛᵉ)
+@inline function apply_same_level_correction!(i, j, k, moisture_fields, ρqᵛᵉ, ::SpeciesBorrowing)
+    same_level_borrow!(i, j, k, moisture_fields, ρqᵛᵉ)
     return nothing
 end
 
-@inline apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction::VerticalBorrowing, ρ₀) =
-    vertical_borrow!(ρqᵛᵉ, i, j, grid, correction, ρ₀)
+@inline apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction::VerticalBorrowing) =
+    vertical_borrow!(ρqᵛᵉ, i, j, grid, correction)
 
-@inline apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction::SpeciesBorrowing, ρ₀) =
-    vertical_borrow!(ρqᵛᵉ, i, j, grid, correction.vertical_borrowing, ρ₀)
+@inline apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction::SpeciesBorrowing) =
+    vertical_borrow!(ρqᵛᵉ, i, j, grid, correction.vertical_borrowing)
 
 #####
 ##### Vertical borrowing helpers
 #####
 
-@inline vertical_borrow!(ρqᵛᵉ, i, j, grid, ::Nothing, ρ₀) = nothing
+@inline vertical_borrow!(ρqᵛᵉ, i, j, grid, ::Nothing) = nothing
 
-@inline function vertical_borrow!(ρqᵛᵉ, i, j, grid, ::VerticalBorrowing, ρ₀)
+@inline function vertical_borrow!(ρqᵛᵉ, i, j, grid, ::VerticalBorrowing)
     Nz = size(grid, 3)
     # Sweep from top to bottom, pushing deficit to level below (more moisture there).
     # Breeze convention: k = 1 is bottom, k = Nz is top.
     for k = Nz:-1:2
         @inbounds ρqᵛ_k = ρqᵛᵉ[i, j, k]
-        @inbounds ρ = ρ₀[i, j, k]
-        qᵛ = ρqᵛ_k / ρ
         Δz_k = Δzᶜᶜᶜ(i, j, k, grid)
         Δz_below = Δzᶜᶜᶜ(i, j, k - 1, grid)
 
-        # Mass deficit [kg/m²] to push downward (positive when qᵛ < 0)
-        deficit = ifelse(qᵛ < 0, -ρqᵛ_k * Δz_k, zero(ρqᵛ_k))
-        @inbounds ρqᵛᵉ[i, j, k] += deficit / Δz_k          # -> 0 when deficit > 0
+        # Mass deficit [kg/m²] to push downward (positive when the level is negative)
+        negative = ρqᵛ_k < 0
+        deficit = ifelse(negative, -ρqᵛ_k * Δz_k, zero(ρqᵛ_k))
+
+        # Assigned, not incremented, because -ρqᵛ Δz / Δz need not round back to -ρqᵛ
+        @inbounds ρqᵛᵉ[i, j, k] = ifelse(negative, zero(ρqᵛ_k), ρqᵛ_k)
         @inbounds ρqᵛᵉ[i, j, k - 1] -= deficit / Δz_below   # receive deficit
     end
 
@@ -270,23 +269,22 @@ end
     k_top = min(2, Nz)  # safe index: equals 2 when Nz ≥ 2, equals Nz when Nz < 2
 
     @inbounds ρqᵛ_bot = ρqᵛᵉ[i, j, k_bot]
-    @inbounds ρ_bot = ρ₀[i, j, k_bot]
-    qᵛ_bot = ρqᵛ_bot / ρ_bot
-
     @inbounds ρqᵛ_top = ρqᵛᵉ[i, j, k_top]
-    @inbounds ρ_top = ρ₀[i, j, k_top]
-    qᵛ_top = ρqᵛ_top / ρ_top
 
     Δz_bot = Δzᶜᶜᶜ(i, j, k_bot, grid)
     Δz_top = Δzᶜᶜᶜ(i, j, k_top, grid)
 
-    can_borrow = (Nz ≥ 2) & (qᵛ_bot < 0) & (qᵛ_top > 0)
+    can_borrow = (Nz ≥ 2) & (ρqᵛ_bot < 0) & (ρqᵛ_top > 0)
     needed = -ρqᵛ_bot * Δz_bot       # mass needed at bottom [kg/m²]
     available = ρqᵛ_top * Δz_top      # mass available above [kg/m²]
     dq_mass = ifelse(can_borrow, min(needed, available), zero(ρqᵛ_bot))
 
-    @inbounds ρqᵛᵉ[i, j, k_bot] += dq_mass / Δz_bot
-    @inbounds ρqᵛᵉ[i, j, k_top] -= dq_mass / Δz_top
+    # `min` returns one of its arguments, so these comparisons are exact
+    funded = can_borrow & (dq_mass == needed)
+    drained = can_borrow & (dq_mass == available)
+
+    @inbounds ρqᵛᵉ[i, j, k_bot] = ifelse(funded, zero(ρqᵛ_bot), ρqᵛ_bot + dq_mass / Δz_bot)
+    @inbounds ρqᵛᵉ[i, j, k_top] = ifelse(drained, zero(ρqᵛ_top), ρqᵛ_top - dq_mass / Δz_top)
 end
 
 #####
@@ -301,40 +299,42 @@ end
 # `@inline` it unrolls completely: no runtime recursion, no allocation, no dynamic dispatch.
 # The unrolled work is O(N²) pointwise reads/writes for N condensate fields (each field
 # scans the tail behind it), which is a few tens of flops for the N ≤ 10 schemes we run.
-@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, Vararg}, ρqᵛᵉ) where {F1}
+#
+# Every reservoir is a partial density, and the transfers are made in those units.
+@inline function same_level_borrow!(i, j, k, fields::Tuple{F1, Vararg}, ρqᵛᵉ) where {F1}
     ρq = fields[1]
-    @inbounds q = ρq[i, j, k] / ρ
+    @inbounds mass = ρq[i, j, k]
 
-    deficit = max(0, -q)
-    borrowed = same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ, deficit)
-    @inbounds ρq[i, j, k] += ρ * borrowed
+    deficit = max(0, -mass)
+    remaining = borrow_from_lighter_species!(i, j, k, Base.tail(fields), ρqᵛᵉ, deficit)
 
-    same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ)
+    # `zero(mass) - remaining`, not `-remaining`, so that a fully funded deficit is +0.0
+    @inbounds ρq[i, j, k] = ifelse(mass < 0, zero(mass) - remaining, mass)
+
+    same_level_borrow!(i, j, k, Base.tail(fields), ρqᵛᵉ)
     return nothing
 end
 
 # Empty tuple: nothing to do
-@inline same_level_borrow!(i, j, k, ρ, ::Tuple{}, ρqᵛᵉ) = nothing
+@inline same_level_borrow!(i, j, k, ::Tuple{}, ρqᵛᵉ) = nothing
 
-# With a deficit argument, recurse through the candidate donors for one field.
-@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, Vararg}, ρqᵛᵉ, deficit) where {F1}
+# Recurse through the candidate donors for one field, returning the partial density still unfunded.
+@inline function borrow_from_lighter_species!(i, j, k, fields::Tuple{F1, Vararg}, ρqᵛᵉ, deficit) where {F1}
     ρq_donor = fields[1]
-    @inbounds q_donor = ρq_donor[i, j, k] / ρ
+    @inbounds mass_donor = ρq_donor[i, j, k]
 
-    borrowed = min(deficit, max(0, q_donor))
-    @inbounds ρq_donor[i, j, k] -= ρ * borrowed
+    borrowed = min(deficit, max(0, mass_donor))
+    @inbounds ρq_donor[i, j, k] -= borrowed
 
-    remaining_deficit = deficit - borrowed
-    borrowed_from_tail = same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ, remaining_deficit)
-
-    return borrowed + borrowed_from_tail
+    return borrow_from_lighter_species!(i, j, k, Base.tail(fields), ρqᵛᵉ, deficit - borrowed)
 end
 
-@inline function same_level_borrow!(i, j, k, ρ, ::Tuple{}, ρqᵛᵉ, deficit)
-    @inbounds qᵛ = ρqᵛᵉ[i, j, k] / ρ
-    borrowed = min(deficit, max(0, qᵛ))
-    @inbounds ρqᵛᵉ[i, j, k] -= ρ * borrowed
-    return borrowed
+# Vapor is the donor of last resort.
+@inline function borrow_from_lighter_species!(i, j, k, ::Tuple{}, ρqᵛᵉ, deficit)
+    @inbounds vapor_mass = ρqᵛᵉ[i, j, k]
+    borrowed = min(deficit, max(0, vapor_mass))
+    @inbounds ρqᵛᵉ[i, j, k] -= borrowed
+    return deficit - borrowed
 end
 
 #####
