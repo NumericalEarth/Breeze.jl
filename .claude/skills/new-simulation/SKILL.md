@@ -1,6 +1,6 @@
 ---
 name: new-simulation
-description: Set up, run, and visualize a new Breeze atmospheric simulation
+description: Use when setting up, running, or visualizing a new atmospheric simulation, including reproducing a published case. Covers converting a paper's variables to Breeze's prognostics, checking initial conditions before long runs, and plotting Fields.
 ---
 
 # New Simulation
@@ -19,7 +19,8 @@ Set up, run, and visualize a new atmospheric simulation with Breeze.
 **If designing a new case:**
 - Ask the user for the science goal or phenomenon to simulate
 - Clarify: domain geometry, resolution, physics (buoyancy, Coriolis, microphysics, radiation), run duration
-- Study working examples first: BOMEX, RICO, prescribed_SST, thermal_bubble
+- Study working examples first: `examples/bomex.jl`, `rico.jl`, `prescribed_sea_surface_temperature.jl`,
+  `dry_thermal_bubble.jl`
 
 ## Step 2: Set Up Geometry
 
@@ -52,7 +53,8 @@ Set up, run, and visualize a new atmospheric simulation with Breeze.
 
 ## Visualization Guide
 
-**CRITICAL**: Plot `Field` objects directly — avoid `interior()`. Use `view(field, i, j, k)` to slice.
+Plot `Field` objects directly rather than extracting data with `interior()`; the Makie extension
+reads the field's coordinates and masks immersed cells. Use `view(field, i, j, k)` to slice.
 
 ```julia
 using CairoMakie

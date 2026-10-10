@@ -36,4 +36,6 @@ Pkg.test("Breeze")
 
 - Ensure all explicit imports are correct (tests check this automatically)
 - Always add tests for new functionality
-- Make sure test files are actually included / discoverable by `runtests.jl`
+- Every `test/*.jl` file is discovered automatically as a test. Helper files must be removed from
+  the test suite in `test/runtests.jl`, as `setup` is
+- `reactant/` tests run only with `--check-bounds=auto` on Julia older than 1.14
