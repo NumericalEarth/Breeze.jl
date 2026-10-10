@@ -5,36 +5,18 @@ paths:
 
 # Documentation Rules
 
-## Building Docs
-
-```sh
-julia --project=docs/ docs/make.jl
-```
-
-## Fast Local Builds
-
-For local testing, temporarily modify `docs/make.jl`:
-1. Comment out Literate examples
-2. Comment out GPU-requiring pages
-3. Optional: `doctest = false`, `linkcheck = false`
-
-**Remember to revert these changes before committing!**
-
-## Viewing Docs
-
-```julia
-using LiveServer
-serve(dir="docs/build")
-```
+Building the docs, including a fast local build, is covered by the `/build-docs` skill
+(`.claude/skills/build-docs/SKILL.md`).
 
 ## Style
 
-- Use unicode in math (e.g., ``θᵉ`` not ``\theta^e``); Documenter converts to LaTeX
-- Always add `@ref` cross-references for Breeze functions
-- Link to Oceananigans docs for external functions
-- In example code, NEVER explicitly import names already exported by `using Breeze`
+- Use Unicode in math (``θᵉ``, not ``\theta^e``); Documenter converts it to LaTeX.
+- Add `@ref` cross-references for Breeze functions and link to the Oceananigans docs for external
+  ones.
+- Cite with inline `[Author (year)](@cite Key)` woven into the prose.
+- In example code, rely on `using Oceananigans` and `using Breeze`; explicitly importing an
+  exported name hides what users actually need to type.
+- Don't write `for` loops in docs blocks unless asked; use built-in functions.
+- To find an error in a page, run its `@example` blocks directly instead of building the docs.
 
-## Docstrings
-
-- ALWAYS use `jldoctest` blocks, NEVER plain `julia` blocks
-- See `.claude/rules/docstring-rules.md` for full details
+Docstring conventions are in `.claude/rules/docstring-rules.md`.

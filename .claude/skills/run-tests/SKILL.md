@@ -1,6 +1,6 @@
 ---
 name: run-tests
-description: Run targeted Breeze tests, prioritized by what's likely to break
+description: Use after changing src/, ext/, or test/ to pick and run the tests most likely to break, on CPU, one file at a time.
 ---
 
 # Run Tests
@@ -62,5 +62,5 @@ Pkg.test("Breeze"; test_args=`atmosphere_model_construction`)
 
 - GPU tests may fail with "dynamic invocation error" — always test on CPU first
 - `quality_assurance` checks explicit imports and Aqua.jl quality — run this for any change
-- Reactant tests require `--check-bounds=auto` and Julia < 1.12
+- Reactant tests require `--check-bounds=auto` and Julia older than 1.14
 - If Julia version issues arise, delete `Manifest.toml` and run `Pkg.instantiate()`

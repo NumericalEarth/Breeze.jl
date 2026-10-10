@@ -1,48 +1,7 @@
-# Implementing Validation Cases
+# Validation Cases
 
-When reproducing paper results:
-
-## 1. Parameter Extraction
-
-- **Read the paper carefully** and extract ALL parameters: domain size, resolution, physical constants,
-  boundary conditions, initial conditions, forcing, closure parameters
-- Check parameter tables (often "Table 1") and figure captions
-- Note the coordinate system and conventions used
-
-## 2. Geometry Verification (BEFORE running long simulations)
-
-- **Always visualize the grid/domain geometry first**
-- Verify domain extents match the paper
-- Compare your geometry plot to figures in the paper
-
-## 3. Initial Condition Verification
-
-- After setting initial conditions, check:
-  - `minimum(field)` and `maximum(field)` make physical sense
-  - Spatial distribution looks correct (visualize if needed)
-
-## 4. Short Test Runs
-
-Before running a long simulation:
-- Run for a few timesteps on CPU at low resolution
-- Check for NaNs (`maximum(abs, u)` etc.), reasonable velocities, meaningful output
-- Then test on GPU to catch GPU-specific issues
-
-## 5. Progressive Validation
-
-- Run a short simulation (~1 hour sim time) and visualize
-- Compare to early-time paper figures if available
-
-## 6. Match Paper Figures
-
-- Same colormaps, axis ranges, time snapshots, diagnostics
-
-## Common Issues
-
-- **NaN blowups**: Timestep too large, unstable ICs, or `if`/`else` on GPU (use `ifelse`)
-- **Nothing happening**: Wrong sign on buoyancy anomaly, ICs not applied, forcing inactive
-- **Wrong flow direction**: Check coordinate conventions
-- **GPU issues**: Avoid branching, ensure type stability
+The general workflow for reproducing a paper (parameter extraction, checking geometry and initial
+conditions, short test runs) is in the `/new-simulation` skill. This file holds case-specific notes.
 
 ## Tropical Cyclone Genesis (Cronin & Chavas 2019)
 
