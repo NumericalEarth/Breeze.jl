@@ -1512,3 +1512,35 @@ end
     G = mp1m_tendencies(bμp, ρ, ℳ, 𝒰, constants)
     return map(name -> getproperty(G, name), names)
 end
+
+# Fused kernel: evaluate the MP1M bundle once per cell and write all three tendencies.
+@kernel function _compute_mp1m_tendencies!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, grid, microphysics, dynamics, formulation,
+                                           constants, specific_prognostic_moisture, microphysical_fields)
+    i, j, k = @index(Global, NTuple)
+
+    ρ_field = AM.total_density(dynamics)
+    @inbounds ρ = ρ_field[i, j, k]
+    @inbounds qᵉ = specific_prognostic_moisture[i, j, k]
+
+    q = AM.grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵉ, microphysical_fields)
+    𝒰 = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
+    ℳ = AM.microphysical_state(microphysics, ρ, microphysical_fields_at(microphysical_fields, i, j, k), 𝒰, nothing)
+
+    G = mp1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
+
+    @inbounds Gρqᵉ[i, j, k]  += G.ρqᵉ
+    @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
+    @inbounds Gρqˢⁿ[i, j, k] += G.ρqˢⁿ
+end
+
+@inline microphysical_fields_at(μ, i, j, k) = @inbounds (; ρqʳ = μ.ρqʳ[i, j, k], ρqˢⁿ = μ.ρqˢⁿ[i, j, k])
+
+function AM.compute_microphysical_tendencies!(microphysics::MP1M, model)
+    grid = model.grid
+    G = model.timestepper.Gⁿ
+    launch!(grid.architecture, grid, :xyz, _compute_mp1m_tendencies!,
+            G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ, grid, microphysics, model.dynamics, model.formulation,
+            model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
+            model.microphysical_fields)
+    return nothing
+end
