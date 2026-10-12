@@ -15,6 +15,9 @@ delete!(testsuite, "setup")
 delete!(testsuite, "reactant/weno_compilation_setup")
 delete!(testsuite, "reactant/microphysics_compilation_setup")
 
+# MPI worker scripts are launched on several ranks by the drivers in `distributed/`, never run directly.
+filter!(((name, _),) -> !startswith(name, "mpi/"), testsuite)
+
 if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
     # limitation).
@@ -46,4 +49,6 @@ elseif Sys.islinux() && get(ENV, "GITHUB_ACTIONS", "false") == "true" && availab
     ENV["JULIA_TEST_MAXRSS_MB"] = "2500"
 end
 
-runtests(Breeze, args; testsuite)
+serial = collect(filter(startswith("distributed/"), keys(testsuite)))
+
+runtests(Breeze, args; testsuite, serial)
