@@ -691,6 +691,31 @@ using GPUArraysCore: @allowscalar
         @test fv.u[1, 1, 1] ≈ expected_u atol=1e-6
     end
 
+    @testset "Height interpolation in filtered update on a LatitudeLongitudeGrid" begin
+        grid = LatitudeLongitudeGrid(default_arch; size=(4, 4, 4),
+                                     longitude=(100, 140), latitude=(10, 50), z=(0, 40))
+
+        # Linear in z, so interpolation to the reference height is exact; varying in λ and φ, so that
+        # reading the wrong column gives the wrong value.
+        height = 10.0
+        f(λ, φ, z) = λ + 2φ + z
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        set!(u, f)
+        set!(v, f)
+
+        fv = FilteredSurfaceVelocities(grid; height, filter_timescale=1)
+        Breeze.BoundaryConditions.initialize!(fv, (; u, v), grid)
+
+        expected_u = Field{Face, Center, Nothing}(grid)
+        expected_v = Field{Center, Face, Nothing}(grid)
+        set!(expected_u, (λ, φ) -> f(λ, φ, height))
+        set!(expected_v, (λ, φ) -> f(λ, φ, height))
+
+        @test interior(fv.u) ≈ interior(expected_u)
+        @test interior(fv.v) ≈ interior(expected_v)
+    end
+
     @testset "Wind speed dispatch with FilteredSurfaceVelocities" begin
         using Breeze.BoundaryConditions: wind_speed²ᶠᶜᶜ, wind_speed²ᶜᶠᶜ, wind_speed²ᶜᶜᶜ
 
