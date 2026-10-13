@@ -25,6 +25,8 @@ Adapt.adapt_structure(to, formulation::StaticEnergyFormulation) =
     StaticEnergyFormulation(adapt(to, formulation.energy_density),
                             adapt(to, formulation.specific_energy))
 
+@regional StaticEnergyFormulation
+
 function BoundaryConditions.fill_halo_regions!(formulation::StaticEnergyFormulation)
     fill_halo_regions!(formulation.specific_energy)
     return nothing

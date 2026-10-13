@@ -1,5 +1,6 @@
 using ..Thermodynamics: Thermodynamics, ReferenceState, ExnerReferenceState, compute_hydrostatic_reference!,
                         _compute_exner_reference!, _compute_exner_reference_3d!,
+                        launch_exner_reference_columns!,
                         bottom_face_height, constant_moist_hydrostatic_pressure,
                         is_column_reference, moist_hydrostatic_pressure, dry_air_gas_constant,
                         set_surface_state!, surface_reference_density, vapor_gas_constant
@@ -7,8 +8,8 @@ using Oceananigans: CenterField
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Fields: interior, set!, ZeroField, Field
-using Oceananigans.Grids: Center, Face, znode
+using Oceananigans.Fields: interior, set!, ZeroField, Field, AbstractField
+using Oceananigans.Grids: AbstractGrid, Center, Face, Flat, znode
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using GPUArraysCore: @allowscalar
 using Statistics: mean!
@@ -123,7 +124,7 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
 
     if rescale_densities
         ρᵣ_old = similar(dynamics_density(model.dynamics))
-        parent(ρᵣ_old) .= parent(dynamics_density(model.dynamics))
+        copy_parent!(ρᵣ_old, dynamics_density(model.dynamics))
     end
 
     # Update reference temperature and moisture from horizontal means
@@ -207,6 +208,8 @@ per-column integration path.
 Unlike the anelastic `ReferenceState` method there is no `rescale_densities` option: the Exner
 reference is only the perturbation-form base state, not the prognostic density (`ρᵈ`), so changing it
 does not require rescaling the density-weighted prognostics.
+
+On a multi-region grid the means combine every region into the single reference column.
 """
 function set_to_mean!(ref::ExnerReferenceState, model)
     constants = model.thermodynamic_constants
@@ -328,6 +331,15 @@ HydrostaticallyBalancedDensity(; surface_pressure = nothing) = HydrostaticallyBa
 
 default_hydrostatic_surface_pressure(model, θ, qᵛ, ref::ExnerReferenceState) = ref.surface_pressure
 
+# The surface pressure as the column kernel receives it: a number in the grid's float type, or a field on
+# `grid` read per column. The one value of a single-column field (the reference column of a multi-region
+# grid) is passed as a number, because the field cannot be indexed with the columns of the regions.
+surface_pressure_argument(pˢ::Number, grid) = convert(eltype(grid), pˢ)
+surface_pressure_argument(pˢ, grid) = pˢ
+
+const SingleColumnField = AbstractField{<:Any, <:Any, <:Any, <:AbstractGrid{<:Any, <:Flat, <:Flat}}
+surface_pressure_argument(pˢ::SingleColumnField, grid) = convert(eltype(grid), @allowscalar pˢ[1, 1, 1])
+
 # Without a reference state there is no callable profile to integrate below the domain bottom, so
 # the datum is reduced along the constant-θ layer implied by each column's own lowest cell. That is
 # the only reduction the model state supports here, and it agrees with the profile-integrating
@@ -344,9 +356,9 @@ function default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state)
     g   = constants.gravitational_acceleration
     pˢ = Field{Center, Center, Nothing}(grid)
 
-    launch!(arch, grid, :xy, _compute_surface_pressure_from_base!,
-            pˢ, grid, θ, qᵛ, base_pressure(dynamics), standard_pressure(dynamics),
-            Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    @apply_regionally launch!(arch, grid, :xy, _compute_surface_pressure_from_base!,
+                              pˢ, grid, θ, qᵛ, base_pressure(dynamics), standard_pressure(dynamics),
+                              Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
     fill_halo_regions!(pˢ)
     return pˢ
 end
@@ -355,14 +367,14 @@ has_nonzero_mass_fraction(::Nothing) = false
 
 function has_nonzero_mass_fraction(mass_fraction)
     field = mass_fraction isa Field ? mass_fraction : Field(mass_fraction)
-    return !all(iszero, interior(field))
+    return !all(iszero, field)
 end
 
 function has_condensate(model)
     names = condensate_field_names(model.microphysics)
     for name in names
         field = model.microphysical_fields[name]
-        all(iszero, interior(field)) || return true
+        all(iszero, field) || return true
     end
 
     if applicable(liquid_mass_fraction, model.microphysics, model)
@@ -405,7 +417,6 @@ function set_potential_temperature_hydrostatically_balanced_density!(
     dynamics  = model.dynamics
     grid      = model.grid
     arch      = architecture(grid)
-    Nz        = size(grid, 3)
     constants = model.thermodynamic_constants
 
     pˢᵗ = standard_pressure(dynamics)
@@ -427,27 +438,30 @@ function set_potential_temperature_hydrostatically_balanced_density!(
     ρ_old    = total_density(dynamics)
 
     reference_state = dynamics_reference_state(dynamics)
-    pˢ = isnothing(spec.surface_pressure) ?
-         default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state) :
-         spec.surface_pressure
+    anchor_pressure = isnothing(spec.surface_pressure) ?
+                      default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state) :
+                      spec.surface_pressure
+
+    # A scalar in the grid's float type, so that a `Float64` literal does not reach a `Float32` kernel
+    pˢ = surface_pressure_argument(anchor_pressure, grid)
 
     # Per-column hydrostatic integration → balanced total density.
-    launch!(arch, grid, :xy, _compute_exner_reference_3d!,
-            π, pressure, ρ, θ, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    @apply_regionally launch_exner_reference_columns!(π, pressure, ρ, θ, qᵛ, grid,
+                                                      pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
     fill_halo_regions!(ρ)
 
     # The diagnosed θ field is no longer needed after the column solve, so use it to retain the old
     # dry density while the prognostic dry-density-weighted fields are rescaled below.
     ρᵈ_old = θ
-    copyto!(parent(ρᵈ_old), parent(ρᵈ))
+    copy_parent!(ρᵈ_old, ρᵈ)
 
     # Scale total-density-weighted constituents by ρ / ρ_old, set dry density as the residual,
     # then scale dry-density-weighted prognostics by ρᵈ_new / ρᵈ_old.
-    scale_total_density_weighted_fields!(model, ρ, ρ_old)
-    launch!(arch, grid, :xyz, _set_dry_density_from_total_density!,
-            ρᵈ, ρ, model.microphysics, model.moisture_density, model.microphysical_fields)
+    @apply_regionally scale_total_density_weighted_fields!(model, ρ, ρ_old)
+    @apply_regionally launch!(arch, grid, :xyz, _set_dry_density_from_total_density!,
+                              ρᵈ, ρ, model.microphysics, model.moisture_density, model.microphysical_fields)
     fill_halo_regions!(ρᵈ)
-    rescale_dry_density_weighted_fields!(model, ρᵈ_old)
+    @apply_regionally rescale_dry_density_weighted_fields!(model, ρᵈ_old)
 
     update_state!(model; compute_tendencies=false)
     return nothing

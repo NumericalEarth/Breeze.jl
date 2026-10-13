@@ -16,7 +16,7 @@ using ..AtmosphereModels:
 using Oceananigans: Oceananigans, CenterField, Field, Integral
 using Oceananigans.Architectures: architecture
 using Oceananigans.TimeSteppers: update_state!
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: launch!, @apply_regionally
 using KernelAbstractions: @index, @kernel
 using DocStringExtensions: TYPEDSIGNATURES
 
@@ -131,8 +131,8 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
 
     kernel_Δt = kernel_time_step(arch, grid, Δt)
 
-    launch!(arch, grid, :xyz, _instantaneous_precipitation_update!,
-            model.dynamics, saturation_adjustment, constants, pˢᵗ, kernel_Δt, ρθˡⁱ, ρqᵛ, μ)
+    @apply_regionally launch!(arch, grid, :xyz, _instantaneous_precipitation_update!,
+                              model.dynamics, saturation_adjustment, constants, pˢᵗ, kernel_Δt, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior only; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.

@@ -53,9 +53,9 @@ function AtmosphereModels.compute_total_density!(model::CompressibleModel)
     grid = model.grid
     arch = grid.architecture
     ρ = model.dynamics.total_density
-    launch!(arch, grid, :xyz, _compute_total_density!,
-            ρ, grid, model.dynamics.dry_density, model.microphysics,
-            model.moisture_density, model.microphysical_fields)
+    @apply_regionally launch!(arch, grid, :xyz, _compute_total_density!,
+                              ρ, grid, model.dynamics.dry_density, model.microphysics,
+                              model.moisture_density, model.microphysical_fields)
     fill_halo_regions!(ρ)
     return nothing
 end
@@ -157,9 +157,9 @@ function reconcile_densities!(::Val{:total_density}, model, specific_moisture_gi
     ρᵈ = model.dynamics.dry_density
     ρ  = model.dynamics.total_density
 
-    launch!(arch, grid, :xyz, _split_total_into_dry!,
-            ρ, ρᵈ, model.microphysics, model.moisture_density,
-            model.microphysical_fields, total_moisture_given)
+    @apply_regionally launch!(arch, grid, :xyz, _split_total_into_dry!,
+                              ρ, ρᵈ, model.microphysics, model.moisture_density,
+                              model.microphysical_fields, total_moisture_given)
 
     fill_halo_regions!(ρ)
     fill_halo_regions!(ρᵈ)
@@ -175,12 +175,12 @@ function reconcile_densities!(::Val{:dry_density}, model, specific_moisture_give
     qᵛᵉ = specific_prognostic_moisture(model)
     fields = density_reconciliation_fields(model, specific_microphysical_names)
 
-    launch!(arch, grid, :xyz, _dry_to_total!,
-            ρ, ρᵈ, qᵛᵉ, model.moisture_density,
-            specific_moisture_given, total_moisture_given,
-            fields.specific_microphysical_fields,
-            fields.specific_condensate_fields,
-            fields.preserved_condensate_density_fields)
+    @apply_regionally launch!(arch, grid, :xyz, _dry_to_total!,
+                              ρ, ρᵈ, qᵛᵉ, model.moisture_density,
+                              specific_moisture_given, total_moisture_given,
+                              fields.specific_microphysical_fields,
+                              fields.specific_condensate_fields,
+                              fields.preserved_condensate_density_fields)
 
     fill_halo_regions!(ρ)
     fill_halo_regions!(ρᵈ)
@@ -207,12 +207,12 @@ function AtmosphereModels.establish_relative_humidity_densities!(model::Compress
 
     fields = density_reconciliation_fields(model, specific_microphysical_names)
 
-    launch!(arch, grid, :xyz, _establish_relative_humidity_densities!,
-            ρ, ρᵈ, qᵛᵉ, model.moisture_density,
-            fields.specific_microphysical_fields,
-            fields.specific_condensate_fields,
-            fields.preserved_condensate_density_fields,
-            total_density_given)
+    @apply_regionally launch!(arch, grid, :xyz, _establish_relative_humidity_densities!,
+                              ρ, ρᵈ, qᵛᵉ, model.moisture_density,
+                              fields.specific_microphysical_fields,
+                              fields.specific_condensate_fields,
+                              fields.preserved_condensate_density_fields,
+                              total_density_given)
 
     fill_halo_regions!(ρ)
     fill_halo_regions!(ρᵈ)
@@ -378,19 +378,19 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
     fill_halo_regions!(dynamics.dry_density)
     fill_halo_regions!(prognostic_fields(model.formulation))
 
-    launch!(arch, grid, :xyz,
-            _compute_temperature_and_pressure!,
-            model.temperature,
-            dynamics.pressure,
-            dynamics.dry_density,
-            dynamics.total_density,
-            model.formulation,
-            dynamics,
-            specific_prognostic_moisture(model),
-            grid,
-            model.microphysics,
-            model.microphysical_fields,
-            model.thermodynamic_constants)
+    @apply_regionally launch!(arch, grid, :xyz,
+                              _compute_temperature_and_pressure!,
+                              model.temperature,
+                              dynamics.pressure,
+                              dynamics.dry_density,
+                              dynamics.total_density,
+                              model.formulation,
+                              dynamics,
+                              specific_prognostic_moisture(model),
+                              grid,
+                              model.microphysics,
+                              model.microphysical_fields,
+                              model.thermodynamic_constants)
 
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(dynamics.pressure)

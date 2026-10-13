@@ -36,6 +36,9 @@ rather than producing wrong trajectories at run time (see
 """
 validate_particles(particles, grid) = particles
 
+# Extended for the grids on which `AtmosphereModel` is not supported
+validate_grid(grid) = nothing
+
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
 
@@ -159,6 +162,8 @@ function AtmosphereModel(grid;
                          timestepper_kwargs = NamedTuple(),
                          radiation = nothing,
                          particles::ParticlesOrNothing = nothing)
+
+    validate_grid(grid)
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))

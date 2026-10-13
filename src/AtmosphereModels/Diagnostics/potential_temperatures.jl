@@ -85,6 +85,8 @@ Adapt.adapt_structure(to, k::MoistPotentialTemperatureKernelFunction) =
                                             adapt(to, k.temperature),
                                             adapt(to, k.thermodynamic_constants))
 
+@regional MoistPotentialTemperatureKernelFunction
+
 @inline function virtual_potential_temperature(T, p, pˢᵗ, q, constants)
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)

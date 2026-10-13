@@ -134,17 +134,17 @@ function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, 
 
     grid = model.grid
     arch = grid.architecture
-    launch!(arch, grid, :xyz,
-            _energy_density_from_potential_temperature!,
-            formulation.energy_density,
-            formulation.specific_energy,
-            grid,
-            θ,
-            specific_prognostic_moisture(model),
-            model.dynamics,
-            model.microphysics,
-            model.microphysical_fields,
-            model.thermodynamic_constants)
+    @apply_regionally launch!(arch, grid, :xyz,
+                              _energy_density_from_potential_temperature!,
+                              formulation.energy_density,
+                              formulation.specific_energy,
+                              grid,
+                              θ,
+                              specific_prognostic_moisture(model),
+                              model.dynamics,
+                              model.microphysics,
+                              model.microphysical_fields,
+                              model.thermodynamic_constants)
 
     return nothing
 end
@@ -208,17 +208,17 @@ function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, 
     arch = grid.architecture
     formulation = model.formulation
 
-    launch!(arch, grid, :xyz,
-            _energy_density_from_temperature!,
-            formulation.energy_density,
-            formulation.specific_energy,
-            grid,
-            T_field,
-            specific_prognostic_moisture(model),
-            model.dynamics,
-            model.microphysics,
-            model.microphysical_fields,
-            model.thermodynamic_constants)
+    @apply_regionally launch!(arch, grid, :xyz,
+                              _energy_density_from_temperature!,
+                              formulation.energy_density,
+                              formulation.specific_energy,
+                              grid,
+                              T_field,
+                              specific_prognostic_moisture(model),
+                              model.dynamics,
+                              model.microphysics,
+                              model.microphysical_fields,
+                              model.thermodynamic_constants)
 
     return nothing
 end

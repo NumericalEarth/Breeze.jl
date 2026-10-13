@@ -99,6 +99,8 @@ function SSPRungeKutta3(grid, prognostic_fields;
     return SSPRungeKutta3{FT, U0, TG, TI}(α¹, α², α³, U⁰, Gⁿ, implicit_solver)
 end
 
+@regional SSPRungeKutta3
+
 #####
 ##### Stage update kernel
 #####
@@ -113,7 +115,9 @@ u^{(m)} = (1 - α) u^{(0)} + α \\left[ u^{(m-1)} + Δt \\, G \\right]
 where ``u^{(0)}`` is stored in the time stepper, ``u^{(m-1)}`` is the current field value,
 and ``G`` is the current tendency.
 """
-function ssp_rk3_substep!(model, Δt, α)
+ssp_rk3_substep!(model, Δt, α) = @apply_regionally launch_ssp_rk3_substep!(model, Δt, α)
+
+function launch_ssp_rk3_substep!(model, Δt, α)
     grid = model.grid
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
@@ -202,7 +206,7 @@ Copy prognostic fields to `U⁰` storage for use in later RK3 stages.
 function store_initial_state!(model)
     U⁰ = model.timestepper.U⁰
     for (u⁰, u) in zip(U⁰, prognostic_fields(model))
-        parent(u⁰) .= parent(u)
+        copy_parent!(u⁰, u)
     end
     return nothing
 end

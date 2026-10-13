@@ -41,11 +41,11 @@ end
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
-    tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
+    @apply_regionally tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
 
-    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
+    fill_prognostic_halo_regions!(model, boundary_condition_args(model)..., async=true)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
@@ -57,11 +57,11 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
 
     # Refresh per-scheme advection state — the adaptive-implicit split time step and any
     # bounds-preserving limiter — before the tendencies that consume it.
-    update_advection!(model.advection, model)
+    @apply_regionally update_advection!(model.advection, model)
 
     compute_tendencies && compute_tendencies!(model, callbacks)
 
-    tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
+    @apply_regionally tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
 
     return nothing
 end
@@ -146,9 +146,6 @@ $(TYPEDSIGNATURES)
 Compute velocities from momentum: `u = ρu / ρ` for each velocity component.
 """
 function compute_velocities!(model::AtmosphereModel)
-    grid = model.grid
-    arch = grid.architecture
-
     # Ensure halos are filled before velocity computation
     # (prognostic field halo fill in update_state! is async).
     # Thread clock and model fields so time-dependent boundary conditions
@@ -159,11 +156,20 @@ function compute_velocities!(model::AtmosphereModel)
     # would see last-stage values.
     density = dynamics_density(model.dynamics)
     fill_halo_regions!(density, boundary_condition_args(model)...)
-    fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
+    fill_vector_halo_regions!(model.momentum, boundary_condition_args(model)...)
 
-    # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
-    # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
-    # the trailing `fill_halo_regions!(model.velocities)`), N for Flat.
+    @apply_regionally launch_compute_velocities!(model)
+
+    fill_vector_halo_regions!(model.velocities)
+
+    return nothing
+end
+
+# Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
+# N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled afterwards), N for Flat.
+function launch_compute_velocities!(model)
+    grid = model.grid
+    arch = grid.architecture
     Nx, Ny, Nz = size(grid)
     TX, TY, TZ = topology(grid)
     launch!(arch, grid, KernelParameters(1:length(Face(), TX(), Nx),
@@ -175,7 +181,6 @@ function compute_velocities!(model::AtmosphereModel)
             grid, model.dynamics)
 
     foreach(mask_immersed_field!, model.velocities)
-    fill_halo_regions!(model.velocities)
 
     return nothing
 end
@@ -268,17 +273,17 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    launch!(arch, grid, :xyz,
-            _compute_auxiliary_thermodynamic_variables!,
-            model.temperature,
-            specific_prognostic_moisture(model),
-            model.formulation,
-            model.dynamics,
-            grid,
-            model.thermodynamic_constants,
-            model.microphysics,
-            model.microphysical_fields,
-            model.moisture_density)
+    @apply_regionally launch!(arch, grid, :xyz,
+                              _compute_auxiliary_thermodynamic_variables!,
+                              model.temperature,
+                              specific_prognostic_moisture(model),
+                              model.formulation,
+                              model.dynamics,
+                              grid,
+                              model.thermodynamic_constants,
+                              model.microphysics,
+                              model.microphysical_fields,
+                              model.moisture_density)
 
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
@@ -335,6 +340,17 @@ end
 end
 
 function compute_tendencies!(model::AtmosphereModel, callbacks=[])
+    @apply_regionally launch_compute_tendencies!(model)
+
+    for callback in callbacks
+        callback.callsite isa TendencyCallsite && callback(model)
+    end
+
+    return nothing
+end
+
+# The tendency kernels, launched region by region; the callbacks run once on the whole model.
+function launch_compute_tendencies!(model)
     grid = model.grid
     arch = grid.architecture
 
@@ -431,10 +447,6 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     compute_dynamics_tendency!(model)
 
-    for callback in callbacks
-        callback.callsite isa TendencyCallsite && callback(model)
-    end
-
     return nothing
 end
 
@@ -467,8 +479,10 @@ $(TYPEDSIGNATURES)
 
 Apply boundary conditions by adding flux divergences to the right-hand-side.
 """
-function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
+TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel) =
+    @apply_regionally launch_compute_flux_bc_tendencies!(model)
 
+function launch_compute_flux_bc_tendencies!(model)
     arch  = model.architecture
 
     # Compute boundary flux contributions

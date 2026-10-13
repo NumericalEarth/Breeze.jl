@@ -2,6 +2,7 @@ using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: Oceananigans
 using Oceananigans.Grids: Center, Face, LatitudeLongitudeGrid, OrthogonalSphericalShellGrid, φnode, znode
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
+using Oceananigans.MultiRegion: MultiRegionGrid
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ
 using Oceananigans.Units: day
 using Adapt: Adapt
@@ -62,6 +63,8 @@ Adapt.adapt_structure(to, forcing::HeldSuarezForcing) =
                       Adapt.adapt(to, forcing.total_density),
                       Adapt.adapt(to, forcing.coupling_density),
                       forcing.thermodynamic_constants)
+
+@regional HeldSuarezForcing
 
 const XMomentumHeldSuarezForcing = HeldSuarezForcing{Val{:ρu}}
 const YMomentumHeldSuarezForcing = HeldSuarezForcing{Val{:ρv}}
@@ -207,6 +210,7 @@ end
 
 validate_latitude(::Union{LatitudeLongitudeGrid, OrthogonalSphericalShellGrid}) = nothing
 validate_latitude(grid::ImmersedBoundaryGrid) = validate_latitude(grid.underlying_grid)
+validate_latitude(grid::MultiRegionGrid) = validate_latitude(first(grid))
 validate_latitude(grid) = throw(ArgumentError("HeldSuarezForcing requires a grid with latitude, not a $(nameof(typeof(grid)))."))
 
 function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::HeldSuarezForcing, field, name,

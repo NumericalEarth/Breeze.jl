@@ -21,6 +21,8 @@ Adapt.adapt_structure(to, k::StaticEnergyKernelFunction) =
                                adapt(to, k.temperature),
                                adapt(to, k.thermodynamic_constants))
 
+@regional StaticEnergyKernelFunction
+
 const StaticEnergy = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:StaticEnergyKernelFunction}
 
 """
