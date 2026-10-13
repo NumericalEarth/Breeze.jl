@@ -690,9 +690,8 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     # Keep `density` as the coupling-density compatibility entry for other forcing
     # materializers; SpecificForcing selects between the two explicit carriers by target.
-    # `pressure` is the pressure the model's thermodynamics is evaluated with (diagnosed from
-    # the equation of state under `CompressibleDynamics`, the reference profile under
-    # `AnelasticDynamics`).
+    # `pressure` is the pressure of the model's thermodynamics: diagnosed under `CompressibleDynamics`,
+    # the reference pressure under `AnelasticDynamics`
     forcing_context = (; coriolis,
                          density=coupling_density,
                          coupling_density,

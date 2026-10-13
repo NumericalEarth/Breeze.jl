@@ -110,13 +110,19 @@ end
 # The specific field each scheme reconstructs, keyed like `advection`. `momentum` limits
 # nothing; the rest name a scalar Breeze advects as a mass fraction.
 @inline function reconstructed_fields(model, advection::NamedTuple{names}) where names
+    everything = merge((; momentum = nothing), specific_scalar_fields(model))
+    return NamedTuple{names}(everything)
+end
+
+# The specific field of each closure scalar, in the order of `closure_scalar_names`. The tracers
+# are specific only between `tracer_density_to_specific!` and `tracer_specific_to_density!`.
+@inline function specific_scalar_fields(model)
     θ = NamedTuple{(thermodynamic_density_name(model.formulation),)}((specific_thermodynamic_field(model.formulation),))
     q = NamedTuple{(moisture_prognostic_name(model.microphysics),)}((specific_prognostic_moisture(model),))
     micro = NamedTuple{prognostic_field_names(model.microphysics)}(
         map(name -> model.microphysical_fields[specific_field_name(name)],
             prognostic_field_names(model.microphysics)))
-    everything = merge((; momentum = nothing), θ, q, micro, model.tracers)
-    return NamedTuple{names}(everything)
+    return merge(θ, q, micro, model.tracers)
 end
 
 function tracer_density_to_specific!(tracers, density)

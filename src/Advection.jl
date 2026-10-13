@@ -70,6 +70,18 @@ end
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
 end
 
+# The horizontal part of `div_ρUc`, from the same face fluxes
+@inline horizontal_div_ρUc(i, j, k, grid, advection, ρ, U, c) =
+    V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, tracer_mass_flux_x, ρ, advection, U.u, c) +
+                              δyᵃᶜᵃ(i, j, k, grid, tracer_mass_flux_y, ρ, advection, U.v, c))
+
+@inline horizontal_div_ρUc(i, j, k, grid, ::Nothing, ρ, U, c) = zero(grid)
+@inline horizontal_div_ρUc(i, j, k, grid, ::BoundsPreservingWENO, ρ, U, ::ZeroField) = zero(grid)
+
+@inline horizontal_div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c) =
+    V⁻¹ᶜᶜᶜ(i, j, k, grid) * (bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c) +
+                              bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c))
+
 # A bounds-preserving WENO whose vertical time discretization is adaptive-implicit.
 const BoundsPreservingAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:BoundsPreservation}
 

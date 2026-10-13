@@ -980,7 +980,7 @@ end
 
         V⁻¹ = V⁻¹ᶜᶜᶜ(i, j, k, grid)
         ∇ʰ_M  = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
-        ∇ʰ_θM = V⁻¹ * (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) + δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′))
+        ∇ʰ_θM = horizontal_theta_flux_divergence(i, j, k, grid, θᴸ, ρu′, ρv′)
 
         ρ′★[i, j, k] = ρ′[i, j, k] +
             Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) - δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
@@ -1032,6 +1032,10 @@ end
 # divergence of the perturbation θ-flux.
 @inline θFˣ(i, j, k, grid, θᴸ, ρu′) = @inbounds Axᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, θᴸ) * ρu′[i, j, k]
 @inline θFʸ(i, j, k, grid, θᴸ, ρv′) = @inbounds Ayᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, θᴸ) * ρv′[i, j, k]
+
+# ∇ʰ·(θᴸ (ρ𝐮)′), the horizontal divergence of the Θ flux
+@inline horizontal_theta_flux_divergence(i, j, k, grid, θᴸ, ρu′, ρv′) =
+    (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) + δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
 
 # θᴸ · (ρw)′ at a z-face. Used in the vertical part of the perturbation
 # θ-flux divergence; passed to `∂zᶜᶜᶜ` so the divergence is computed at
@@ -1242,12 +1246,10 @@ function apply_divergence_damping!(damping::DirectDivergenceDamping, substepper,
     return nothing
 end
 
-# δ = ∇ʰ·(θᴸ(ρ𝐮)′): area-weighted horizontal Θ-flux divergence, using the same flux-form (θFˣ, θFʸ)
-# `build_predictors!` uses for ∇ʰ_θM (so the damped divergence matches the one in the Θ equation).
+# δ = ∇ʰ·(θᴸ(ρ𝐮)′), the divergence `_build_predictors!` uses, so the damped divergence matches the Θ equation's
 @kernel function _compute_horizontal_theta_flux_divergence!(δ, grid, θᴸ, ρu′, ρv′)
     i, j, k = @index(Global, NTuple)
-    @inbounds δ[i, j, k] = (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) +
-                            δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
+    @inbounds δ[i, j, k] = horizontal_theta_flux_divergence(i, j, k, grid, θᴸ, ρu′, ρv′)
 end
 
 @kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α)
@@ -1274,7 +1276,6 @@ end
 ##### (Uᴸ_stage) values here. Dividing by ρᴸ ignores ρ's variation over the
 ##### loop, small for acoustic perturbations.
 #####
-
 
 function finalize_time_averaged_velocity!(substepper, model, Nτ)
     grid = model.grid
