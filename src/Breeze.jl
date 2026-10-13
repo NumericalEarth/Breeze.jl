@@ -154,6 +154,7 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
     SpecificForcing,
+    held_suarez_forcings,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,

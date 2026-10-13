@@ -4,7 +4,8 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
     GeostrophicForcing,
-    SpecificForcing
+    SpecificForcing,
+    held_suarez_forcings
 
 using DocStringExtensions: TYPEDSIGNATURES
 
@@ -18,6 +19,7 @@ using ..AtmosphereModels: AtmosphereModels, materialize_atmosphere_model_forcing
 include("geostrophic_forcings.jl")
 include("subsidence_forcing.jl")
 include("specific_forcing.jl")
+include("held_suarez_forcing.jl")
 
 #####
 ##### Extension of materialize_forcing with context argument

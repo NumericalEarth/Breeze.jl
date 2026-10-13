@@ -342,7 +342,7 @@ function AtmosphereModel(grid;
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, coupling_density, mass_density,
                                        velocities, dynamics, formulation, microphysics,
-                                       specific_prognostic_moisture)
+                                       specific_prognostic_moisture, thermodynamic_constants)
 
     # Fill the closure's tracer-indexed diffusivities. For a per-column *array* of closures,
     # `materialize_closure` (extended in `SingleColumnMode`) maps over the array and moves it to the
@@ -613,7 +613,7 @@ end
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture)
+                                  specific_prognostic_moisture, thermodynamic_constants)
     forcings_type = typeof(user_forcings)
     msg = string("AtmosphereModel forcing must be a NamedTuple, got $forcings_type")
     throw(ArgumentError(msg))
@@ -623,7 +623,7 @@ end
 function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture)
+                                  specific_prognostic_moisture, thermodynamic_constants)
     names = keys(prognostic_fields)
     return NamedTuple{names}(Returns(zero(eltype(prognostic_fields[name]))) for name in names)
 end
@@ -631,7 +631,7 @@ end
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture)
+                                  specific_prognostic_moisture, thermodynamic_constants)
 
     # `ρqᵗ` (total moisture) is the scheme-agnostic water key. A water source enters the
     # prognostic moisture density unconverted whatever the scheme calls it, so — unlike `ρE`,
@@ -685,10 +685,15 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     # Keep `density` as the coupling-density compatibility entry for other forcing
     # materializers; SpecificForcing selects between the two explicit carriers by target.
+    # `pressure` is the pressure the model's thermodynamics is evaluated with (diagnosed from
+    # the equation of state under `CompressibleDynamics`, the reference profile under
+    # `AnelasticDynamics`).
     forcing_context = (; coriolis,
                          density=coupling_density,
                          coupling_density,
                          total_density=mass_density,
+                         pressure=dynamics_pressure(dynamics),
+                         thermodynamic_constants,
                          coupling_density_names,
                          specific_fields)
 
