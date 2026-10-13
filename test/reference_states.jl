@@ -476,7 +476,7 @@ end
         q_prof(z) = FT(0.015) * exp(-z / FT(2500))
 
         # compute_reference_state! takes f(z); set!(model, ...) takes f(x, y, z)
-        compute_reference_state!(reference_state, T_prof, q_prof, constants)
+        compute_reference_state!(model, T_prof, q_prof)
         set!(model, T=(x, y, z) -> T_prof(z), qᵗ=(x, y, z) -> q_prof(z), u=FT(5), w=FT(0))
         time_step!(model, 1)  # populates diagnostic fields
 
@@ -526,6 +526,19 @@ end
         @test all(Array(interior(model.formulation.potential_temperature)) .≈ θ_new)
         @test all(Array(interior(specific_humidity(model))) .≈ q_new)
         @test all(Array(interior(model.velocities.u)) .≈ u_new)
+    end
+
+    # Periodic sides and rigid lids admit no horizontally uniform vertical mass flux.
+    @testset "set_to_mean! keeps the anelastic projection mass-conserving" begin
+        tall_grid = RectilinearGrid(default_arch; size=(4, 4, 16), x=(0, 100), y=(0, 100), z=(0, 15000),
+                                    topology=(Periodic, Periodic, Bounded))
+        model = AtmosphereModel(tall_grid; thermodynamic_constants=constants)
+        set!(model, T=(x, y, z) -> max(210, 300 - 6.5e-3 * z))
+        set_to_mean!(model.dynamics.reference_state, model; rescale_densities=true)
+        time_step!(model, 1)
+
+        ρw̄ = Field(Average(model.momentum.ρw, dims=(1, 2)))
+        @test maximum(abs, interior(ρw̄)) < sqrt(eps(FT))
     end
 
     #####
