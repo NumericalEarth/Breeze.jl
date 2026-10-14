@@ -40,6 +40,26 @@ end
 
 using Test
 
+@testset "Parcel thermodynamic formulation: $formulation" for formulation in (:StaticEnergy, :LiquidIcePotentialTemperature)
+    grid = RectilinearGrid(size=4, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), formulation)
+    constants = model.thermodynamic_constants
+    set!(model; T=280, p=z -> 1e5 - 10z, ρ=1.2, qᵗ=0, z=250, w=1)
+    state = model.dynamics.state
+    initial_variable = state.ℰ
+    @test temperature(state.𝒰, constants) ≈ 280
+
+    time_step!(model, 100)
+    if formulation === :StaticEnergy
+        expected_temperature = 280 - constants.gravitational_acceleration * 100 / constants.dry_air.heat_capacity
+    else
+        κ = Breeze.Thermodynamics.dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+        expected_temperature = 280 * ((1e5 - 10 * 350) / (1e5 - 10 * 250))^κ
+    end
+    @test temperature(state.𝒰, constants) ≈ expected_temperature
+    @test state.ℰ ≈ initial_variable
+end
+
 #####
 ##### ParcelState tests
 #####
@@ -287,11 +307,11 @@ end
     @test model.dynamics.state.z ≈ 10.0
 end
 
-@testset "ParcelModel with DCMIP2016KesslerMicrophysics" begin
+@testset "ParcelModel with DCMIP2016KesslerMicrophysics: $formulation" for formulation in (:StaticEnergy, :LiquidIcePotentialTemperature)
     grid = RectilinearGrid(size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
     microphysics = DCMIP2016KesslerMicrophysics()
     constants = kessler_thermodynamic_constants()
-    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics, thermodynamic_constants=constants)
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics, formulation, thermodynamic_constants=constants)
 
     T(z) = 288.0 - 0.0065 * z
     p(z) = 101325.0 * exp(-z / 8500)
@@ -747,7 +767,7 @@ end
     # A parcel warmer than its environment should have positive buoyancy and accelerate.
     grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
     dynamics = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
-    model = AtmosphereModel(grid; dynamics, microphysics=nothing)
+    model = AtmosphereModel(grid; dynamics, microphysics=nothing, formulation=:StaticEnergy)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
                                      base_pressure = 101325,
