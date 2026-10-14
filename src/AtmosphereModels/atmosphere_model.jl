@@ -188,6 +188,13 @@ function AtmosphereModel(grid;
     particles = validate_particles(particles, grid)
 
     arch = grid.architecture
+
+    # Move microphysics lookup tables to the grid architecture (CPU → GPU) before anything
+    # captures the scheme. Surface boundary conditions (energy and bulk fluxes, the
+    # `PolynomialCoefficient` θᵥ diagnostic) keep their own copy of `microphysics`, so a later
+    # transfer would leave host arrays inside device kernels.
+    microphysics = on_architecture(arch, microphysics)
+
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     user_tracer_names = validate_tracers(tracers)
 
@@ -342,9 +349,6 @@ function AtmosphereModel(grid;
     # grid architecture; a scalar closure just gets `with_tracers`.
     closure = materialize_closure(closure, scalar_names, arch)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
-
-    # Move microphysics lookup tables to the grid architecture (CPU → GPU)
-    microphysics = on_architecture(arch, microphysics)
 
     model = AtmosphereModel(arch,
                             grid,
