@@ -146,9 +146,7 @@ end
     end
 end
 
-# P3 carries lookup tables that must live on the model architecture. Surface boundary conditions
-# keep their own copy of the microphysics, so they must capture the copy that was moved there,
-# or the GPU halo fill launches with host arrays inside the condition (issue #1051).
+# Boundary conditions must capture P3's lookup tables on the model architecture (issue #1051)
 @testset "Surface boundary conditions capture the model's microphysics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))

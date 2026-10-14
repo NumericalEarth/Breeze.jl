@@ -189,10 +189,7 @@ function AtmosphereModel(grid;
 
     arch = grid.architecture
 
-    # Move microphysics lookup tables to the grid architecture (CPU → GPU) before anything
-    # captures the scheme. Surface boundary conditions (energy and bulk fluxes, the
-    # `PolynomialCoefficient` θᵥ diagnostic) keep their own copy of `microphysics`, so a later
-    # transfer would leave host arrays inside device kernels.
+    # Move microphysics lookup tables to the grid architecture before boundary conditions copy them
     microphysics = on_architecture(arch, microphysics)
 
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
