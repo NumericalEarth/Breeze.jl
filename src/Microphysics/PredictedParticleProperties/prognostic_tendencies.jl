@@ -372,7 +372,6 @@ to the cloud mass they consume.
 @inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜˡ, qᶜˡ, p3)
     FT = typeof(ρ)
     parameters = p3.process_rates
-    number_per_mass = cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ)
     seed_drop_mass = activated_droplet_mass(parameters, FT)
     activation_number = ifelse(iszero(rates.ccn_activation_number),
                                rates.ccn_activation_mass / seed_drop_mass,
@@ -384,7 +383,7 @@ to the cloud mass they consume.
     qᶜˡ, Nᶜˡ, ρ)
 
     number_loss = autoconv_n +
-                  number_per_mass * rates.accretion +
+                  cloud_number_transfer_rate(Nᶜˡ, ρ, qᶜˡ, rates.accretion) +
                   rates.cloud_self_collection +
                   rates.cloud_riming_number +
                   rates.cloud_freezing_number +

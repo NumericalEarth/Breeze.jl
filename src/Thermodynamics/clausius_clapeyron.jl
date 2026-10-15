@@ -66,3 +66,8 @@ pᵛ⁺(T) = pᵗʳ (T / Tᵗʳ)^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T)
 
     return pᵗʳ * (T / Tᵗʳ)^(Δcᵝ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * ℒ₀ / Rᵛ)
 end
+
+@inline function liquid_saturation_vapor_pressure_derivative(T, constants::ClausiusClapeyronThermodynamicConstants)
+    e = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
+    return e * liquid_latent_heat(T, constants) / (vapor_gas_constant(constants) * T^2)
+end

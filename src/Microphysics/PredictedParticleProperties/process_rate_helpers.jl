@@ -156,13 +156,14 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Cloud droplets per unit cloud mass, ``Nᶜˡ / (ρ qᶜˡ) = nᶜˡ / qᶜˡ`` [1/kg]. `Nᶜˡ` is
-volumetric [1/m³] and `qᶜˡ` is a mass fraction [kg/kg], so this is the factor that
-turns a cloud mass rate [kg/kg/s] into its companion number rate [1/kg/s], keeping
-the two consistent in mean droplet mass. Zero where there is no cloud water.
+Cloud-droplet number transfer [1/kg/s] accompanying a cloud mass transfer
+`mass_rate` [kg/kg/s], preserving the population's mean droplet mass.
+Evaluate the fractional mass-transfer rate before multiplying by number: the
+standalone ratio `Nᶜˡ / (ρ qᶜˡ)` can overflow for vanishing cloud water even when
+the mass transfer is exactly zero.
 """
-@inline cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ) =
-    safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(typeof(qᶜˡ)))
+@inline cloud_number_transfer_rate(Nᶜˡ, ρ, qᶜˡ, mass_rate) =
+    (Nᶜˡ / ρ) * safe_divide(mass_rate, qᶜˡ, zero(typeof(qᶜˡ)))
 
 """
 $(TYPEDSIGNATURES)
@@ -188,10 +189,7 @@ in mean droplet mass.
                                ccn_activation_mass / seed_drop_mass,
                                ccn_activation_number)
     autoconversion_number = cloud_number_loss_from_autoconversion(p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
-    # Grouped as (Nᶜˡ accretion) / (ρ qᶜˡ) rather than via
-    # `cloud_number_per_cloud_mass`: the bare quotient is the larger intermediate and
-    # can overflow where this form does not.
-    collection_number = safe_divide(Nᶜˡ * accretion, ρ * qᶜˡ, zero(FT))
+    collection_number = cloud_number_transfer_rate(Nᶜˡ, ρ, qᶜˡ, accretion)
     number_loss = autoconversion_number + collection_number + self_collection +
                   riming_number + freezing_number + warm_collection_number
     return activation_number - number_loss

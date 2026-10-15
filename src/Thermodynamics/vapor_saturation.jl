@@ -371,3 +371,11 @@ end
 
 @inline dewpoint_temperature(pᵛ, T, constants, equilibrium::AbstractPhaseEquilibrium) =
     dewpoint_temperature(pᵛ, T, constants, equilibrium, default_dewpoint_solver(T))
+
+"""
+$(TYPEDSIGNATURES)
+
+Temperature derivative of saturation vapor pressure over a planar liquid surface.
+Uses the derivative of the selected saturation formula, including any temperature clamp.
+"""
+function liquid_saturation_vapor_pressure_derivative end
