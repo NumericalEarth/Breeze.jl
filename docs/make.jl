@@ -50,7 +50,7 @@ examples = [
     Example("Single-column boundary layer with a prognostic-TKE closure", "single_column_tke_boundary_layer"; build_always=true, gpu=false),
     Example("Single-column ensemble", "single_column_ensemble"; build_always=true, gpu=false),
     Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
-    Example("Rising parcels with P3 microphysics", "rising_parcels"; build_always=true, gpu=false),
+    Example("Rising dry and cloudy parcels", "rising_parcels"; build_always=true, gpu=false),
     Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
     Example("P3 microphysics in a prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
     Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),

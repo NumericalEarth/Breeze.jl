@@ -10,7 +10,10 @@ cd(directory) do
     include(joinpath(root, "examples/rising_parcels.jl"))
 end
 open(joinpath(directory, "conservation.txt"), "w") do io
-    @testset "Production θ_li parcels: $name" for (name, parcel) in (("dry", dry), ("prescribed", cloudy), ("buoyant", buoyant))
+    @testset "Production θ_li parcels: $name" for (name, parcel) in (("dry", dry), ("one_moment", one_moment),
+        ("kessler", kessler), ("two_moment", two_moment), ("buoyant_two_moment", buoyant_two_moment),
+        ("prescribed", cloudy), ("buoyant", buoyant))
+        constants = parcel.model.thermodynamic_constants
         snapshots = parcel.snapshots
         @test all(s.𝒰 isa Breeze.Thermodynamics.LiquidIcePotentialTemperatureState for s in snapshots)
         theta = [s.𝒰.potential_temperature for s in snapshots]
