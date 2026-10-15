@@ -197,7 +197,7 @@ Set the thermodynamic state from temperature ``T``.
 The temperature is converted to static energy ``s`` using the relation:
 
 ```math
-s = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ .
+s = cᵖᵐ T + g z - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ .
 ```
 """
 function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:T}, value)
