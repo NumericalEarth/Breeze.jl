@@ -477,6 +477,55 @@ end
     return nothing
 end
 
+# Re-diagnose the rain and ice number where the species has mass but a number density below
+# `repair.minimum_number_density` (see `NumberConcentrationRepair`). This runs before the state
+# is read, so the size distributions, fall speeds, process rates and transport all see the
+# repaired number. Only `ρnʳ` and `ρnⁱ` are written; no mass moves.
+@inline repair_number_concentrations!(μ, i, j, k, ::Nothing, p3, ρ, 𝒰, constants) = nothing
+
+@inline function repair_number_concentrations!(μ, i, j, k, repair::NumberConcentrationRepair,
+                                               p3, ρ, 𝒰, constants)
+    FT = typeof(ρ)
+    parameters = p3.process_rates
+    @inbounds begin
+        qʳ  = μ.ρqʳ[i, j, k] / ρ
+        ρnʳ = μ.ρnʳ[i, j, k]
+        qⁱ  = μ.ρqⁱ[i, j, k] / ρ
+        ρnⁱ = μ.ρnⁱ[i, j, k]
+        qᶠ  = μ.ρqᶠ[i, j, k] / ρ
+        bᶠ  = μ.ρbᶠ[i, j, k] / ρ
+        qʷⁱ = active_liquid_on_ice(p3, μ.ρqʷⁱ[i, j, k] / ρ)
+    end
+    Nᵐⁱⁿ = repair.minimum_number_density
+
+    # Rain: exponential distribution with fixed intercept, N = (N₀ʳ)^¾ (ρqʳ / π ρʷ)^¼,
+    # then the λʳ bounds the rain size distribution applies everywhere else.
+    qʳ_positive = max(0, qʳ)
+    N₀ʳ = repair.rain_intercept
+    ρʷ = parameters.liquid_water_density
+    Nʳ = sqrt(sqrt(N₀ʳ^3 * ρ * qʳ_positive / (FT(π) * ρʷ)))
+    nʳ_repaired = bounded_rain_number(Nʳ / ρ, qʳ_positive, parameters)
+    repair_rain = (qʳ >= p3.minimum_mass_mixing_ratio) & (ρnʳ < Nᵐⁱⁿ)
+
+    # Ice: Cooper (1986), then the global cap, number floor and λ limiter that
+    # `p3_core_ice_properties` applies before every fall-speed and process-rate use.
+    T = temperature(𝒰, constants)
+    T₀ = parameters.freezing_temperature
+    ℂᶜᵒᵒᵖ₁ = repair.ice_number_coefficient
+    ℂᶜᵒᵒᵖ₂ = repair.ice_number_temperature_sensitivity
+    ℂᶜᵒᵒᵖ₃ = repair.ice_number_minimum_temperature
+    Nⁱ = max(2Nᵐⁱⁿ, ℂᶜᵒᵒᵖ₁ * exp(ℂᶜᵒᵒᵖ₂ * (T₀ - max(ℂᶜᵒᵒᵖ₃, T))))
+    rime = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    nⁱ_repaired = p3_ice_moments(p3, ρ, qⁱ_total, Nⁱ / ρ, rime.Fᶠ, Fˡ, rime.ρᶠ).nⁱ
+    repair_ice = (qⁱ_total >= p3.minimum_mass_mixing_ratio) & (ρnⁱ < Nᵐⁱⁿ)
+
+    @inbounds μ.ρnʳ[i, j, k] = ifelse(repair_rain, ρ * nʳ_repaired, ρnʳ)
+    @inbounds μ.ρnⁱ[i, j, k] = ifelse(repair_ice, ρ * nⁱ_repaired, ρnⁱ)
+    return nothing
+end
+
 # GPU-compatible update_microphysical_fields! for P3.
 # Bypasses the generic extract_microphysical_prognostics which uses runtime Symbol
 # dispatch that GPU compilers cannot resolve. Instead, directly constructs
@@ -491,6 +540,7 @@ end
         # `w` enters P3 solely through the adiabatic temperature tendency, which lives
         # in the tendency kernel.
         velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
+        repair_number_concentrations!(μ, i, j, k, p3.number_repair, p3, ρ, 𝒰, constants)
         ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
         clamp_rime_state!(μ, i, j, k, ρ, ℳ)
         AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3, ℳ, ρ, 𝒰, constants)

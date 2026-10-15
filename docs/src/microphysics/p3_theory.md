@@ -2816,7 +2816,8 @@ Host-facing entry points:
 3. **`moisture_fractions`**: Converts prognostic densities to mass fractions
    (liquid = cloud + rain + liquid-on-ice; ice = dry ice).
 4. **`update_microphysical_fields!`**: Refreshes diagnostic fields after a state update.
-   It builds the microphysical state once per cell, clamps the rime state, and hands both
+   It first applies the `number_repair` (see *Mass without number* below), then builds
+   the microphysical state once per cell, clamps the rime state, and hands both
    to `update_microphysical_auxiliaries!`, which writes the specific quantities and the
    terminal velocities.
 5. **`negative_moisture_correction`**: The repair applied at the top of `update_state!`
@@ -2863,7 +2864,10 @@ sinks against the donor reservoirs available over `sink_limiting_timescale`.
 Thus, for a single forward update no longer than that interval, limited P3 sinks
 alone cannot make the corresponding mass or number reservoirs negative. This is
 not an unconditional positivity guarantee for an arbitrary host timestep or RK
-stage. The optional ``ρs^{v+l}`` prognostic is also excluded: subsaturation is
+stage. With a longer time step the limited sinks overshoot; a number moment is then
+clamped to zero while its mass survives, leaving rain or ice with mass but no number,
+so P3 warns once when ``Δt`` exceeds `sink_limiting_timescale`. The same timescale relaxes
+the coupled saturation adjustment, so raising it well beyond ``Δt`` slows condensation. The optional ``ρs^{v+l}`` prognostic is also excluded: subsaturation is
 legitimately negative. Breeze does not implement a post-step "return small mass
 to vapor" cleanup, because that requires state mutation with a paired ``θ``
 correction.
@@ -2903,6 +2907,28 @@ diagnosed fractions at read time. `p3_core_ice_properties`
 (`p3_microphysical_state.jl`) supplies those capped values to the specialized
 fall-speed and process-rate property payloads, so the whole step sees one
 consistent state.
+
+#### Mass without number
+
+Advection, sedimentation and the process limiters can leave rain or ice with mass above
+`minimum_mass_mixing_ratio` but (almost) no number. The mean-size limiters then give that mass
+the largest admissible particles (2 mm drops, 2 cm rimed ice), which aloft, where the
+fall-speed density correction ``(ρ₀/ρ)^{0.54}`` reaches 3 to 4, fall at tens of m/s and set
+the sedimentation CFL number. Following the cleanup in the two-moment scheme of
+[Milbrandt and Yau (2005)](@cite MilbrandtYau2005), `update_microphysical_fields!` applies
+P3's `number_repair` (a [`NumberConcentrationRepair`](@ref Breeze.Microphysics.PredictedParticleProperties.NumberConcentrationRepair)
+by default) before the state is read: where ``q ≥`` `minimum_mass_mixing_ratio` but
+``ρn < N^{min} = 10^{-3}`` m⁻³, the prognostic number is replaced by a one-moment estimate,
+
+```math
+N^r = \left(N_0^r\right)^{3/4} \left(\frac{ρ q^r}{π ρ^w}\right)^{1/4}, \qquad
+N^i = \max\left(2 N^{min},\; 5 \exp\left[0.304 \left(T_0 - \max(233, T)\right)\right]\right),
+```
+
+with ``N_0^r = 10^7`` m⁻⁴ and the ice number of [Cooper (1986)](@cite Cooper1986), both in m⁻³.
+The estimate is then bounded by the same slope and λ limits the size distributions use, so a
+trace of mass carries at most the number of the smallest admissible particles. Only ``ρn^r``
+and ``ρn^i`` change; no water moves. `number_repair = nothing` disables it.
 
 #### Threshold Handling
 

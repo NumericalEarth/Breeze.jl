@@ -15,7 +15,7 @@ using LazyArtifacts: LazyArtifacts
 The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
-struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS}
+struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, NR, AERO, WRS}
     # Top-level thresholds
     minimum_mass_mixing_ratio :: FT
     minimum_number_mixing_ratio :: FT
@@ -29,6 +29,8 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NM
     precipitation_boundary_condition :: BC
     # Repair of negative densities produced by the (non-positive-definite) advection operator
     negative_moisture_correction :: NMC
+    # Re-diagnosis of rain and ice number where a species has mass but no number
+    number_repair :: NR
     # Aerosol activation parameters, or nothing for prescribed droplet number.
     aerosol :: AERO
     # Warm-rain (autoconversion/accretion/self-collection) scheme selector
@@ -112,6 +114,11 @@ Optional fields are allocated and advected only when enabled.
   to additionally redistribute leftover vapor deficits within each column, or `nothing`
   to disable the repair (P3's process rates then see zero-clamped values while the
   prognostic fields keep their negative mass).
+- `number_repair`: Re-diagnosis of the rain and ice number where a species has mass
+  (`q ≥ minimum_mass_mixing_ratio`) but a number density below 10⁻³ m⁻³, applied in
+  `update_state!` before the state is read. Defaults to [`NumberConcentrationRepair`](@ref),
+  after [Milbrandt and Yau (2005)](@cite MilbrandtYau2005); `nothing` disables it, in which case
+  such mass is given the largest particles the size limiters admit.
 
 # Cloud Droplet Activation
 
@@ -163,6 +170,7 @@ PredictedParticlePropertiesMicrophysics
 ├── cloud: CloudDroplets
 ├── process_rates: ProcessRate
 ├── negative_moisture_correction: SpeciesBorrowing(vertical_borrowing = nothing)
+├── number_repair: NumberConcentrationRepair
 ├── aerosol: nothing (prescribed droplet number)
 └── warm_rain_scheme: KhairoutdinovKogan2000
 ```
@@ -185,6 +193,7 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  minimum_number_mixing_ratio = 1e-16,
                                                  precipitation_boundary_condition = nothing,
                                                  negative_moisture_correction = SpeciesBorrowing(),
+                                                 number_repair = NumberConcentrationRepair(FT),
                                                  aerosol = nothing,
                                                  cloud = nothing,
                                                  rain = nothing,
@@ -200,6 +209,7 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                               minimum_mass_mixing_ratio, minimum_number_mixing_ratio,
                               precipitation_boundary_condition,
                               negative_moisture_correction,
+                              number_repair,
                               aerosol, cloud, rain, process_rates, warm_rain_scheme)
 end
 
@@ -219,6 +229,8 @@ function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, "├── negative_moisture_correction: ",
           isnothing(p3.negative_moisture_correction) ? "nothing (no repair)" :
           summary(p3.negative_moisture_correction), "\n")
+    print(io, "├── number_repair: ",
+          isnothing(p3.number_repair) ? "nothing (no repair)" : summary(p3.number_repair), "\n")
     print(io, "├── aerosol: ", isnothing(p3.aerosol) ? "nothing (prescribed droplet number)" : summary(p3.aerosol), "\n")
     print(io, "└── warm_rain_scheme: ", summary(p3.warm_rain_scheme))
 end

@@ -51,6 +51,7 @@ export
     P3MicrophysicalState,
     ProcessRate,
     NumericalFloors,
+    NumberConcentrationRepair,
 
     # Ice properties
     IceParticles,
@@ -182,6 +183,12 @@ include("aerosol_activation.jl")
 #####
 
 include("warm_rain_schemes.jl")
+
+#####
+##### Number concentration repair for mass without number
+#####
+
+include("number_concentration_repair.jl")
 
 #####
 ##### Main scheme type

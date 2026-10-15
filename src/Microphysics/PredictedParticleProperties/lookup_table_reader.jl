@@ -56,6 +56,7 @@ function read_lookup_tables(directory::AbstractString;
                             minimum_number_mixing_ratio = 1e-16,
                             precipitation_boundary_condition = nothing,
                             negative_moisture_correction = SpeciesBorrowing(),
+                            number_repair = NumberConcentrationRepair(FT),
                             aerosol = nothing,
                             cloud = nothing,
                             rain = nothing,
@@ -100,6 +101,7 @@ function read_lookup_tables(directory::AbstractString;
         input_process_rates,
         precipitation_boundary_condition,
         negative_moisture_correction,
+        number_repair,
         aerosol,
         warm_rain_scheme
     )
