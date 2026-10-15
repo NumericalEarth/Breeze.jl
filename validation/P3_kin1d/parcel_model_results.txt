@@ -1,0 +1,183 @@
+Production ParcelModel vs direct upstream P3 — 2026-10-15
+========================================================
+
+Outcome
+-------
+Actual ParcelModel reproduces the warm and cold trajectories closely, with
+remaining differences in activation and number concentrations. This is not an
+exact equivalence result or a demonstration of agreement with native default
+process timescales. No new Breeze advancing driver was implemented.
+
+Both runs use conserved liquid–ice potential temperature. ParcelModel uses its
+existing SSP RK3 through Simulation/run!, native moist-air P3 equations, and
+prognostic supersaturation. Only initialization writes supersaturation; subsequent
+callbacks only save data. reference_conventions.jl is not imported into this run.
+The compiled Fortran P3_MAIN reference uses its existing independent theta_li
+host; its split stepping and saturation/number projections remain upstream-only.
+
+Final comparison settings
+-------------------------
+Initial T=300 K, p=101325 Pa, water=0.015 kg/kg, no condensate; ascent at 1 or 2 m/s
+for 5400 s. No sedimentation or entrainment. Fixed aerosol 3e8/kg dry air, converted
+to 2.955e8/kg moist air. Pressure is the same prescribed isentropic profile,
+sampled on 1 m centers by ParcelModel. Native mixture thermodynamics is retained.
+Public constructors select reference gas/liquid/aerosol constants and Flatau
+saturation; no custom thermodynamic methods or process formula overrides are used.
+
+ParcelModel dt=0.00125 s; process relaxation/limiting tau=0.025 s. Upstream
+dt=0.0015625 s. Tau stays fixed during ParcelModel timestep refinement. These
+process timescales are numerical choices for this benchmark, not bug fixes or
+changed package defaults. Upstream applies its own per-step limits, so the
+comparison does not establish a shared continuum limit as tau approaches zero.
+A native-defaults trajectory was also retained separately; it is not the closely
+matching trajectory reported here.
+
+Change classification
+---------------------
+1. Bug fix: microphysics received environmental density as if it were parcel
+   density. Stored density-weighted variables now convert to the EOS parcel
+   density for rate evaluation and back afterward. Storage, buoyancy, and RK3
+   stepping are unchanged. Identical parcels with different environmental density
+   weights have identical specific tendencies. In the controlled tau=10 case,
+   this alone reduced warm-case maximum temperature error from 0.603 to 0.0356 K.
+   File: src/ParcelModels/parcel_dynamics.jl, compute_parcel_tendencies!.
+
+2. Bug fix: cloud-number transfers formed N/(rho*q) before multiplying by a mass
+   rate. The ratio could overflow for subnormal cloud water, yielding Inf*0=NaN.
+   The algebraically equivalent evaluation (N/rho)*(mass_rate/q) avoids that
+   intermediate. No water cutoff or modified physical coefficient was introduced.
+   Files: process_rate_helpers.jl and its rain/riming/prognostic call sites.
+
+3. Coupling correction with an explicit numerical reformulation: the parcel
+   supersaturation RHS now includes its prescribed pressure change and uses the
+   chain rule for s=qv-e_sat(T)*Rm/(p*Rv), with actual phase-change tendencies and
+   the selected conserved thermodynamic variable. This replaces a finite-tau
+   end-state estimate with an instantaneous RHS on the parcel path. It should be
+   reviewed separately from the two algebraic/coupling bugs above; it changes the
+   ODE supplied to RK3. Supersaturation is never projected or reset during a run.
+   The pressure derivative follows the same piecewise-linear interpolant used by
+   the parcel. Analytic saturation derivatives use the selected saturation law.
+   Files: p3_parcel.jl and the three Thermodynamics saturation-law derivatives.
+
+4. Validation configuration only: matching documented public constants, fixed
+   aerosol, smaller process timescales, fine timesteps, and read-only conversion
+   of upstream dry-basis output. These changes do not alter package defaults.
+
+The earlier changes honoring ParcelDynamics' thermodynamic formulation and fixing
+static-energy latent-heat reference offsets remain separate concerns. They were
+already present before this production-comparison work. The static-energy fix is
+PR 1080; formulation support corresponds to PR 1075. This working tree also
+contains earlier example and documentation edits, not all part of the new fixes.
+
+Accuracy evidence and limits
+----------------------------
+The native RK3 implementation is unchanged. Independent finite differences verify
+the full supersaturation chain rule for liquid and mixed-phase states under both
+static energy and theta_li. A smooth dry-ascent convergence check gives errors
+5.055e-13, 3.156e-14, and 1.960e-15 kg/kg at dt=20, 10, and 5 s: no observed loss of
+integration order in this check. It is not an order guarantee across P3 switches.
+
+Halving ParcelModel dt from 0.0025 to 0.00125 s changes cold-case temperature by at
+most 0.000184 K and ice number by 0.098% of peak (0.087% normalized time-integrated
+absolute difference). Halving upstream dt from 0.003125 to 0.0015625 s changes
+cold temperature by 0.000818 K and ice number by 0.092% of peak. The original
+0.025 s upstream trajectory substantially under-resolved the nucleation burst:
+peak ice number was about 267000/kg dry air, versus 318000 on the finer runs.
+It would have been incorrect to tune ParcelModel to that coarse trajectory.
+
+Remaining cloud-number peak-normalized differences are 15–17%; in the 0.0025 s
+run, differences above 5% occupy one saved 10 s sample near activation. Rain-number
+time-integrated differences are about 3.1–3.4%. Physical conventions (including
+rounded upstream epsilon=0.622), native limiters/projections, and finite relaxation
+remain different. No individual remaining discrepancy is attributed to a specific
+cause without a discriminating test. These two ascents do not validate every P3
+process or GPU execution.
+
+Verification
+------------
+35 new coupling/derivative/subnormal tests pass, along with existing parcel,
+process-routing, trace-regime, and P3 atmosphere-integration regression tests.
+All 5 explicit-import checks pass. The older identical-state process suite still
+passes all 433 checks; that suite uses the adapter and is supporting process-level
+evidence only. The actual trajectories pass 14 finiteness, alignment, conservation,
+positivity, and supersaturation-identity checks. The three example parcels pass
+12 conservation checks. Large PNG/SVG comparison figures were regenerated.
+
+Reproduce the finest result after the README's reference preparation:
+  julia --project=validation/P3_kin1d validation/P3_kin1d/parcel_compare.jl 0.00125 0.025 reference_constants verified
+  julia --project=validation/P3_kin1d validation/P3_kin1d/evaluate_parcel_model.jl verified_reference_constants_dt0.00125_tau0.025 0.0015625
+
+Outputs: validation_output/p3_parcel_direct/verified_reference_constants_dt0.00125_tau0.025
+Metrics below compare values every 10 s. max/peak means maximum absolute error
+divided by reference peak magnitude. L1 means sum of absolute differences divided
+by sum of reference magnitudes, not an average pointwise relative error.
+
+Actual ParcelModel, native SSP RK3, no prognostic resets or comparison adapter.
+Upstream timestep: 0.0015625 s. Both use a liquid–ice potential-temperature host.
+
+1 m/s: max temperature error 0.004392967 K; RMS 0.0028084742 K
+Vapor            max/peak=  0.011791% L1=  0.009346% final=  0.00607308 reference=  0.00607215
+Cloud liquid     max/peak=  3.931765% L1=  1.095903% final= 2.59252e-05 reference= 2.54726e-05
+Cloud number     max/peak= 17.202330% L1=  0.714928% final= 1.89673e+08 reference= 1.90481e+08
+Rain             max/peak=  0.931524% L1=  0.105185% final=    0.008901 reference=  0.00890238
+Rain number      max/peak=  7.435999% L1=  3.122814% final=     14333.5 reference=     14336.6
+Frozen ice       max/peak=  0.000000% L1=  0.000000% final=           0 reference=           0
+Ice number       max/peak=  0.000000% L1=  0.000000% final=           0 reference=           0
+Rime             max/peak=  0.000000% L1=  0.000000% final=           0 reference=           0
+Rime volume      max/peak=  0.000000% L1=  0.000000% final=           0 reference=           0
+Liquid on ice    max/peak=  0.000000% L1=  0.000000% final=           0 reference=           0
+Supersaturation  max/peak=  0.098957% L1=  0.192973% final=  1.6163e-05 reference= 1.60769e-05
+Maximum prognostic/diagnosed supersaturation difference: 4.7254859e-10 kg/kg
+
+2 m/s: max temperature error 0.0105736 K; RMS 0.0028952869 K
+Vapor            max/peak=  0.026765% L1=  0.013713% final= 0.000569796 reference= 0.000569608
+Cloud liquid     max/peak=  4.257891% L1=  1.112135% final=3.60668e-322 reference=           0
+Cloud number     max/peak= 15.371074% L1=  0.601293% final= 2.41698e-05 reference=           0
+Rain             max/peak=  1.320129% L1=  0.173026% final=3.60668e-322 reference=           0
+Rain number      max/peak=  7.196742% L1=  3.398773% final=3.60668e-322 reference=           0
+Frozen ice       max/peak=  0.014401% L1=  0.007077% final=   0.0144302 reference=   0.0144304
+Ice number       max/peak=  1.293699% L1=  0.820970% final=     75010.7 reference=     74657.2
+Rime             max/peak=  0.022721% L1=  0.005347% final=  0.00905273 reference=  0.00905321
+Rime volume      max/peak=  0.022665% L1=  0.005291% final= 1.00588e-05 reference= 1.00593e-05
+Liquid on ice    max/peak=  0.000000% L1=  0.000000% final=           0 reference=           0
+Supersaturation  max/peak=  0.105676% L1=  0.220531% final=-0.000211912 reference=-0.000211895
+Maximum prognostic/diagnosed supersaturation difference: 1.254257e-09 kg/kg
+
+Timestep refinement
+-------------------
+Upstream, 2 m/s, 0.00625 → 0.003125 s: max ΔT 0.001539065 K
+  cloud        max/peak 0.021566%; L1 0.004943%
+  cloud number max/peak 0.026844%; L1 0.009232%
+  rain         max/peak 0.012055%; L1 0.000852%
+  ice          max/peak 0.003252%; L1 0.000110%
+  ice number   max/peak 0.085110%; L1 0.068148%
+Upstream, 2 m/s, 0.003125 → 0.0015625 s: max ΔT 0.0008181721 K
+  cloud        max/peak 0.009722%; L1 0.002233%
+  cloud number max/peak 0.013578%; L1 0.004604%
+  rain         max/peak 0.005145%; L1 0.000380%
+  ice          max/peak 0.001325%; L1 0.000130%
+  ice number   max/peak 0.092457%; L1 0.085305%
+ParcelModel, 1 m/s, fixed τ=0.025 s, 0.005 → 0.0025 s: max ΔT 8.559251e-05 K
+  cloud        max/peak 0.120401%; L1 0.027615%
+  cloud number max/peak 0.183393%; L1 0.167500%
+  rain         max/peak 0.028182%; L1 0.002605%
+  ice          max/peak 0.000000%; L1 0.000000%
+  ice number   max/peak 0.000000%; L1 0.000000%
+ParcelModel, 1 m/s, fixed τ=0.025 s, 0.0025 → 0.00125 s: max ΔT 3.695866e-05 K
+  cloud        max/peak 0.044827%; L1 0.010235%
+  cloud number max/peak 0.094929%; L1 0.043139%
+  rain         max/peak 0.010471%; L1 0.000920%
+  ice          max/peak 0.000000%; L1 0.000000%
+  ice number   max/peak 0.000000%; L1 0.000000%
+ParcelModel, 2 m/s, fixed τ=0.025 s, 0.005 → 0.0025 s: max ΔT 0.0006752269 K
+  cloud        max/peak 0.042874%; L1 0.010279%
+  cloud number max/peak 0.285181%; L1 0.188378%
+  rain         max/peak 0.013472%; L1 0.002419%
+  ice          max/peak 0.000993%; L1 0.000291%
+  ice number   max/peak 0.278954%; L1 0.251265%
+ParcelModel, 2 m/s, fixed τ=0.025 s, 0.0025 → 0.00125 s: max ΔT 0.0001837477 K
+  cloud        max/peak 0.040639%; L1 0.009335%
+  cloud number max/peak 0.056506%; L1 0.032463%
+  rain         max/peak 0.012565%; L1 0.001468%
+  ice          max/peak 0.000818%; L1 0.000106%
+  ice number   max/peak 0.097948%; L1 0.087089%
