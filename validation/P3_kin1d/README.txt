@@ -237,7 +237,7 @@ Run the production parcel examples and conservation checks:
 
   julia --project=validation/P3_kin1d validation/P3_kin1d/validate_liquid_ice_parcels.jl
 
-The trajectories, conservation report, and nine large SVG/PNG figures are saved to
+The trajectories, conservation report, and five large SVG/PNG figures are saved to
 validation_output/p3_liquid_ice/parcels. Run the column example in the sibling
 kinematic directory to regenerate its JLD2 profiles and two SVG/PNG figures. That
 column was already using liquid–ice potential temperature before this rerun.
