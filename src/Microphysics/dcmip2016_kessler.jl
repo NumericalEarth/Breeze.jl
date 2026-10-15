@@ -953,15 +953,11 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     state.ρqᵗ = ρ * qᵗ
 
     # Update thermodynamic state with new moisture fractions.
-    # Parcel models conserve specific static energy; latent heating is implicit.
+    # The parcel's thermodynamic variable is conserved; latent heating is implicit.
     rˡ = rᶜˡ + rʳ
     r = MoistureMixingRatio(rᵛ, rˡ)
     q = MoistureMassFractions(r)
     state.𝒰 = with_moisture(𝒰, q)
-
-    # Keep static energy consistent with the thermodynamic state.
-    state.ℰ = state.𝒰.static_energy
-    state.ρℰ = ρ * state.ℰ
 
     return nothing
 end
