@@ -1,3 +1,66 @@
+Adiabatic ParcelModel matrix (2026-10-15)
+========================================
+
+An 18-case factorial design varies initial temperature (288, 300 K), initial
+liquid-relative humidity (60, 80, 100%), and prescribed ascent (0.5, 1, 2 m/s).
+All cases start condensate-free at 101325 Pa and run for 5400 s. There is no
+entrainment or fallout. theta_li is conserved. The same 300 K dry reference
+pressure profile is used in every case. Thus the final heights are 2.7, 5.4,
+and 10.8 km: the matrix includes both ascent-rate and ascent-distance effects.
+
+Run after installing the validation environment as described below:
+
+  julia --project=validation/P3_kin1d validation/P3_kin1d/process_reference.jl
+  julia --project=validation/P3_kin1d validation/P3_kin1d/parcel_matrix.jl prepare
+  julia --project=validation/P3_kin1d validation/P3_kin1d/trajectory_reference.jl 0.003125 liquid_ice validation_output/p3_matrix/cases.dat
+  julia --project=validation/P3_kin1d validation/P3_kin1d/parcel_matrix.jl 0.01
+  julia --project=validation/P3_kin1d validation/P3_kin1d/plot_parcel_matrix.jl
+
+The matrix reuses run_production_parcel: actual ParcelModel dynamics and native
+RK3 through Simulation/run!. The upstream uses compiled P3_MAIN in the existing
+Fortran pressure/theta_li host, not CM1 or kin1d. It retains upstream process
+updates and clipping. No Breeze comparison adapter or new advancement is used.
+This adds validation cases and plots, with no production physics/numerics changes.
+
+Initial vapor is derived from RH using Flatau saturation and epsilon=0.622;
+the identical water amount is supplied to both models on their respective mass
+bases. Fixed aerosol is 3e8 per kg dry air. As in the earlier benchmark, public
+constructors select reference constants, while Breeze retains mixture
+thermodynamics and prognostic supersaturation. Process timescale tau=0.025 s is
+held fixed when refining the integration timestep; package defaults are unchanged.
+
+Optional refinements (case IDs 3,9,14,18; then 3,9,18):
+
+  julia --project=validation/P3_kin1d -e 'using DelimitedFiles; p="validation_output/p3_matrix"; a=readdlm(joinpath(p,"cases.dat")); writedlm(joinpath(p,"refinement_cases.dat"),a[[3,9,14,18],:]); writedlm(joinpath(p,"outlier_cases.dat"),a[[3,9,18],:])'
+  julia --project=validation/P3_kin1d validation/P3_kin1d/parcel_matrix.jl 0.005 3,9,14,18
+  julia --project=validation/P3_kin1d validation/P3_kin1d/trajectory_reference.jl 0.0015625 liquid_ice validation_output/p3_matrix/refinement_cases.dat
+  julia --project=validation/P3_kin1d validation/P3_kin1d/parcel_matrix.jl 0.0025 3,9,18
+  julia --project=validation/P3_kin1d validation/P3_kin1d/trajectory_reference.jl 0.00078125 liquid_ice validation_output/p3_matrix/outlier_cases.dat
+  julia --project=validation/P3_kin1d validation/P3_kin1d/plot_parcel_matrix.jl
+
+Outputs are in validation_output/p3_matrix. Baseline figures/reports are in
+comparison_0.01_0.003125. Raw states are saved every 10 s, including prognostic
+supersaturation, theta_li, and independently diagnosed total-water components.
+Existing Breeze case files are reused; remove the relevant output directory
+before rerunning after a physics/setup change. Do not plot while runs are pending.
+The upstream raw states remain dry-air ratios; conversion for analysis is read-only.
+The pinned upstream version and reference patch are documented below and retained
+in validation_output/p3_processes.
+
+Figures (PNG and SVG, large panels with cell values):
+  final_{temperature,cloud,rain,ice,ice_number}: upstream, Breeze, signed difference;
+  trajectory_errors: maximum temperature and mean cloud/rain/ice mass differences;
+  ice_number_errors: maximum number difference / upstream peak;
+  trajectory_envelopes: min-max design envelopes and medians, not confidence bands;
+  outlier_refinement: temperature differences and ice number at available resolutions.
+
+Mass-error heatmaps divide by initial total water, avoiding division by near-zero
+species. Ice-number relative error is undefined (gray) when upstream peak number
+is <=1e-3 per kg. Trajectory maxima refer to the saved 10 s samples, not every
+internal step. Physical assertions check conservation, positivity, matching
+forcing, and supersaturation consistency; no interimplementation error threshold
+was chosen after seeing the results. See parcel_matrix_results.txt for findings.
+
 Production ParcelModel comparison (2026-10-15)
 ==============================================
 

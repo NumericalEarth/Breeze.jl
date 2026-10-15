@@ -4,8 +4,11 @@ include("reference_conventions.jl")
 root = normpath(joinpath(@__DIR__, "../../validation_output/p3_processes"))
 dt = parse(Float64, get(ARGS, 1, "0.1"))
 liquid_ice = get(ARGS, 2, "reference") == "liquid_ice"
+matrix_path = get(ARGS, 3, "")
+matrix_mode = !isempty(matrix_path)
 name = dt == 1 ? "trajectories" : "trajectories_dt$(dt)"
-directory = joinpath(root, liquid_ice ? name * "_liquid_ice" : name)
+directory = matrix_mode ? joinpath(dirname(matrix_path), "reference_dt$(dt)") :
+                          joinpath(root, liquid_ice ? name * "_liquid_ice" : name)
 mkpath(directory)
 source = read(joinpath(root, "microphy_p3.f90"), String)
 # Single-step probes save rates; trajectories need only states.
@@ -14,6 +17,13 @@ write(joinpath(directory, "microphy_p3.f90"), source)
 ispath(joinpath(directory, "lookup_tables")) || symlink(realpath(joinpath(root, "lookup_tables")), joinpath(directory, "lookup_tables"))
 cases = readdlm(joinpath(root, "cases.dat"))
 cases = vcat(cases, [300 101325 1 0 0 0 0 0 0 0 400 0; 300 101325 1 0 0 0 0 0 0 0 400 0])
+if matrix_mode
+    matrix_cases = readdlm(matrix_path)
+    # Existing initialization fields (including zero condensate), followed by
+    # speed, total moist-air water fraction, and stable matrix case identifier.
+    cases = reduce(vcat, [permutedims([row[2], 101325, 0, 0, 0, 0, 0, 0, 0, 0, 400, 0,
+                                      row[4], row[5], row[1]]) for row in eachrow(matrix_cases)])
+end
 writedlm(joinpath(directory, "cases.dat"), cases)
 driver = read(joinpath(root, "process_probe.f90"), String)
 driver = replace(driver,
@@ -71,6 +81,17 @@ subroutine mixture(rv,rl,ri,cm,rm,latent)
  latent=($(Lv)*rl+$(Ls)*ri)/total
 end subroutine
 end program""")
+end
+if matrix_mode
+    @assert liquid_ice "The matrix comparison conserves liquid–ice potential temperature."
+    driver = replace(driver,
+        "pnew, Tnew," => "case_identifier, speed, total_water, pnew, Tnew,",
+        "do test=1,14" => "do test=1,$(size(matrix_cases, 1))",
+        "read(10,*) v" => "read(10,*) v, speed, total_water, case_identifier",
+        "if (test.ge.13) qv0=0.015/(1.-0.015)" => "qv0=total_water/(1.-total_water)",
+        "if (test.ge.13)" => "if (.true.)",
+        "(test-12)" => "speed",
+        "real(test),step*dt" => "real(case_identifier),step*dt")
 end
 write(joinpath(directory, "trajectory_probe.f90"), driver)
 cd(directory) do
