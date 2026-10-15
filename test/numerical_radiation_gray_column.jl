@@ -21,8 +21,6 @@ using Test
 # The diffusivity of NumericalRadiation's no-scattering longwave solver, pinned here
 const DIFFUSIVITY = 1.66
 
-column_grid(FT, Nz, top) = RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, top),
-                                            topology = (Flat, Flat, Bounded))
 
 # The gray gas optics: one longwave and one shortwave g point, absorption per mol m⁻² of dry air
 gray_gas_model(FT, κ_lw, κ_sw) = EcCKDGasOpticsModel(names = (:composite,),
@@ -81,7 +79,7 @@ previous_float_type = Oceananigans.defaults.FloatType
     rtol = FT == Float64 ? 1e-12 : 200 * eps(Float32)
 
     Nz = 16
-    grid = column_grid(FT, Nz, 3kilometers)
+    grid = radiation_column_grid(FT, Nz, 3kilometers)
     T₀ = 280
     κ_lw = 2e-5   # τ ≈ 2 over the 3 km column
     κ_sw = 1e-5   # τ ≈ 1
@@ -166,7 +164,7 @@ end
     # sources are exact for a linear profile, and the half-level Planck path treats the source
     # as linear in optical depth within each layer, so the error is second order in Δz
     function longwave_boundary_fluxes(Nz)
-        grid = column_grid(FT, Nz, 3kilometers)
+        grid = radiation_column_grid(FT, Nz, 3kilometers)
         radiation = gray_radiation(grid, κ_lw, 0; surface_temperature = T₀, cos_zenith = 0)
         model = gray_column_model(grid, radiation, T_target)
         # Every layer, the reference's included, stays above the solver's thin-layer branch

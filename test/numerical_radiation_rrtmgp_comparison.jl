@@ -36,8 +36,7 @@ using .CloudMicrophysicsExt: OneMomentCloudMicrophysics
 const Nz = 60
 const TOP = 15kilometers
 
-column_grid(FT) = RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, TOP),
-                                  topology = (Flat, Flat, Bounded))
+column_grid(FT) = radiation_column_grid(FT, Nz, TOP)
 
 function comparison_radiation(grid, optics; CO₂ = 420e-6)
     return RadiativeTransferModel(grid, optics, ThermodynamicConstants();
@@ -131,7 +130,7 @@ previous_float_type = Oceananigans.defaults.FloatType
     # resolution (3.11, 3.27, 3.36 at Nz = 60, 120, 240, the signature of the two models'
     # different Planck-source discretizations), persists in a much drier column (2.87 at
     # 1 g kg⁻¹), and the 2×CO₂ forcings below agree to 0.04 W m⁻², so it is the spread
-    # between the two gas-optics models on this column rather than a staging error
+    # between the two gas-optics models on this column rather than an error in reading the column
     @test abs(ecckd.olr - rrtmgp.olr) ≤ 3.9
     @test abs(ecckd.surface_longwave_down - rrtmgp.surface_longwave_down) ≤ 4
     @test abs(ecckd.surface_shortwave_down - rrtmgp.surface_shortwave_down) ≤ 6

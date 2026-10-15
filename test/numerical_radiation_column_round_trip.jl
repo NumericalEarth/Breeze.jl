@@ -1,11 +1,11 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 #####
-##### Kernel path versus NumericalRadiation's array path on one staged column
+##### Kernel path versus NumericalRadiation's array path on one column
 #####
 ##### The column kernel calls NumericalRadiation's scalar layer API and streaming solvers, whose
 ##### array counterparts (`optical_properties!` and `radiative_fluxes!`) are loops over the same
-##### functions. Running the array path on the host view of a staged column must therefore
+##### functions. Running the array path on the host copy of a column must therefore
 ##### reproduce the kernel's fluxes to the rounding of the sums over g-points.
 #####
 
@@ -26,7 +26,7 @@ const NumericalRadiationExt = Base.get_extension(Breeze, :BreezeNumericalRadiati
 using .NumericalRadiationExt: column_atmosphere, number_of_layers,
                               number_of_longwave_g_points, number_of_shortwave_g_points
 
-# The array path of NumericalRadiation on the host view of staged column `(i, j)`, with the
+# The array path of NumericalRadiation on the host copy of column `(i, j)`, with the
 # boundary conditions of the kernel: no downwelling longwave at the top, surface emission
 # `ε B_g(Tₛ)` and reflection `1 - ε`; shortwave irradiance `S₀ max(μ₀, 0)` and the direct and
 # diffuse surface albedos.
@@ -34,7 +34,7 @@ using .NumericalRadiationExt: column_atmosphere, number_of_layers,
 # The one documented difference is the Rayleigh air amount: the array `optical_properties!`
 # forms the hydrostatic `Δp / (g mᵈ)` of each layer from the interface pressures (with the
 # constants of the column atmosphere, which `column_atmosphere` takes from the model), whereas
-# the kernel uses the staged composite amount, the layer's mass over `mᵈ` (`ρ Δz / mᵈ` in the
+# the kernel uses the composite amount, the layer's mass over `mᵈ` (`ρ Δz / mᵈ` in the
 # grid, `Δp / (g mᵈ)` in the extension). The two agree to rounding and discretization; the
 # reference is patched to the kernel's amount so the discretization does not enter the comparison.
 function array_path_fluxes(rtm, model, i, j)

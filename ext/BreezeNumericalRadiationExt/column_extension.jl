@@ -3,18 +3,19 @@
 #####
 ##### `ColumnExtension` describes the atmosphere above the grid top with profiles `z -> T`, `z -> q`,
 ##### `z -> χ_O₃`. The extension is materialized once, on the host, into device vectors sampled on
-##### the geometrically stretched extension layers, so that the per-column kernel only reads
-##### vectors and applies the temperature anchor of the grid's top face.
+##### the geometrically stretched extension layers, so that the column kernel only reads vectors
+##### and applies the temperature anchor of the grid's top face.
 #####
 
 """
 $(TYPEDEF)
 
 A [`ColumnExtension`](@ref) sampled on its `Nₑ` layers above the grid top, ready for the column
-staging kernels. Layers are indexed bottom-up from the grid top (`m = 1` sits on the grid's top
-face); the temperature profile is stored unanchored, and the kernel adds
-`(T_top - join_temperature) exp(-(z - base) / blending_height)` with `T_top` the temperature of
-the grid's top face in each column.
+kernel. Layers are indexed bottom-up from the grid top (`m = 1` sits on the grid's top face);
+the temperature profile is stored unanchored, and the kernel adds `(T_top - join_temperature) w`
+with `T_top` the temperature of the grid's top face in each column and `w` the anchor weight
+`exp(-(z - base) / blending_height)` (zero for `blending_height = 0`), which depends only on height
+and so is sampled here.
 
 Fields:
 - `Δz`: Layer thickness [m], `(Nₑ,)`
@@ -23,17 +24,21 @@ Fields:
 - `temperature_interfaces`: Unanchored interface temperature `temperature(z_face)` [K], `(Nₑ + 1,)`
 - `specific_humidity`: Layer specific humidity [kg kg⁻¹], `(Nₑ,)`
 - `ozone`: Layer ozone mole fraction [mol mol⁻¹], `(Nₑ,)`
+- `anchor_weight_layers`: Anchor weight at the layer centers, `(Nₑ,)`
+- `anchor_weight_interfaces`: Anchor weight on the faces, `(Nₑ + 1,)`
 - `blending_height`: Decay height of the temperature anchor [m]; `0` disables it
 - `join_temperature`: The profile temperature at the grid top, `temperature(base)` [K]
 - `base`: Height of the grid's top face [m]
 """
-struct MaterializedColumnExtension{FT, V}
+struct MaterializedColumnExtension{FT, V, W}
     Δz :: V
     z_layer :: V
     temperature_layers :: V
-    temperature_interfaces :: V
+    temperature_interfaces :: W
     specific_humidity :: V
     ozone :: V
+    anchor_weight_layers :: V
+    anchor_weight_interfaces :: W
     blending_height :: FT
     join_temperature :: FT
     base :: FT
@@ -46,6 +51,8 @@ Adapt.adapt_structure(to, extension::MaterializedColumnExtension) =
                                 adapt(to, extension.temperature_interfaces),
                                 adapt(to, extension.specific_humidity),
                                 adapt(to, extension.ozone),
+                                adapt(to, extension.anchor_weight_layers),
+                                adapt(to, extension.anchor_weight_interfaces),
                                 extension.blending_height,
                                 extension.join_temperature,
                                 extension.base)
@@ -93,6 +100,9 @@ function materialize_column_extension(extension::ColumnExtension, grid, backgrou
     ozone_mole_fraction = FT[ozone(z) for z in z_layer]
     join_temperature = FT(extension.temperature(z_top))
 
+    h = FT(extension.blending_height)
+    anchor_weight(z) = h > 0 ? exp(-(z - z_top) / h) : zero(FT)
+
     arch = architecture(grid)
     return MaterializedColumnExtension(on_architecture(arch, Δz),
                                        on_architecture(arch, z_layer),
@@ -100,7 +110,9 @@ function materialize_column_extension(extension::ColumnExtension, grid, backgrou
                                        on_architecture(arch, temperature_interfaces),
                                        on_architecture(arch, specific_humidity),
                                        on_architecture(arch, ozone_mole_fraction),
-                                       FT(extension.blending_height),
+                                       on_architecture(arch, anchor_weight.(z_layer)),
+                                       on_architecture(arch, anchor_weight.(faces)),
+                                       h,
                                        join_temperature,
                                        z_top)
 end

@@ -486,4 +486,4 @@ shortwave radiation scatters or reflects.
 
 ## Architecture Support
 
-The radiative transfer implementation supports both CPU and GPU architectures. The column-based RRTMGP solver is called from Oceananigans' field data arrays with appropriate data layout conversions. The ecCKD backend stages the grid's columns into top-down spectral column arrays with kernels and solves every column's longwave and shortwave fluxes in one kernel, so it runs on the grid's architecture without leaving the device.
+The radiative transfer implementation supports both CPU and GPU architectures. The column-based RRTMGP solver is called from Oceananigans' field data arrays with appropriate data layout conversions. The ecCKD backend solves every column's longwave and shortwave fluxes in one kernel that reads the model's fields directly and accumulates the fluxes directly into the radiation model's flux fields, so it runs on the grid's architecture without leaving the device, and its only per-column storage is the column solvers' scratch.

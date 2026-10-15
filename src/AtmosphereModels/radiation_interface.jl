@@ -691,12 +691,12 @@ function assert_bound_surface_temperature(rtm)
 end
 
 #####
-##### Boundary-face pressure and temperature
+##### Boundary-face pressure
 #####
-##### Column solvers need pressure and temperature on the bottom face (k = 1) and the top face
-##### (k = Nz + 1), which no interior interpolation reaches. Rather than inheriting whatever the
-##### halo carries, extrapolate from the adjacent cells: pressure hydrostatically over the half
-##### cell, `∂p/∂z = -ρ g`, and temperature linearly through the two nearest cell centers.
+##### The pressure field's halo does not carry the pressure of the boundary faces (a no-flux halo
+##### mirrors the boundary cell), so where a column needs the pressure on the bottom face (k = 1)
+##### or the top face (k = Nz + 1) it is extrapolated hydrostatically over the half cell,
+##### `∂p/∂z = -ρ g`.
 #####
 
 """
@@ -724,36 +724,6 @@ cell center: `p_Nz - ρ_Nz g (z_{Nz+1}ᶠ - z_Nzᶜ)`.
     return @inbounds p[i, j, Nz] - ρ[i, j, Nz] * g * (zᶠ - zᶜ)
 end
 
-# Linear extrapolation of a cell-centered field from the centers of cells `k₁` and `k₂` to the face at `zᶠ`.
-@inline function extrapolate_to_face(i, j, k₁, k₂, zᶠ, grid, T)
-    z₁ = znode(i, j, k₁, grid, Center(), Center(), Center())
-    z₂ = znode(i, j, k₂, grid, Center(), Center(), Center())
-    @inbounds T₁ = T[i, j, k₁]
-    @inbounds T₂ = T[i, j, k₂]
-    return T₁ + (T₂ - T₁) * (zᶠ - z₁) / (z₂ - z₁)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Temperature on the bottom face of column `(i, j)`, extrapolated linearly from cells 1 and 2.
-"""
-@inline function bottom_face_temperature(i, j, grid, T)
-    zᶠ = znode(i, j, 1, grid, Center(), Center(), Face())
-    return extrapolate_to_face(i, j, 1, 2, zᶠ, grid, T)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Temperature on the top face of column `(i, j)`, extrapolated linearly from cells `Nz-1` and `Nz`.
-"""
-@inline function top_face_temperature(i, j, grid, T)
-    Nz = size(grid, 3)
-    zᶠ = znode(i, j, Nz+1, grid, Center(), Center(), Face())
-    return extrapolate_to_face(i, j, Nz-1, Nz, zᶠ, grid, T)
-end
-
 #####
 ##### Radiation flux divergence from the four flux fields
 #####
@@ -777,16 +747,14 @@ function compute_radiation_flux_divergence!(rtm, grid)
     return nothing
 end
 
+# The net flux (positive upward) on face `k`: the downwelling fluxes are stored negative
+@inline net_radiative_flux(i, j, k, grid, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn) =
+    @inbounds ℐ_lw_up[i, j, k] + ℐ_lw_dn[i, j, k] + ℐ_sw_up[i, j, k] + ℐ_sw_dn[i, j, k]
+
 @kernel function _compute_radiation_flux_divergence!(flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, grid)
     i, j, k = @index(Global, NTuple)
-    # Net flux at faces k and k+1 (positive upward)
-    @inbounds begin
-        F_k  = ℐ_lw_up[i, j, k]   + ℐ_lw_dn[i, j, k]   + ℐ_sw_up[i, j, k]   + ℐ_sw_dn[i, j, k]
-        F_k1 = ℐ_lw_up[i, j, k+1] + ℐ_lw_dn[i, j, k+1] + ℐ_sw_up[i, j, k+1] + ℐ_sw_dn[i, j, k+1]
-    end
-    Δz = Δzᶜᶜᶜ(i, j, k, grid)
-    # Flux divergence: -dF/dz (positive when flux convergence warms)
-    @inbounds flux_div[i, j, k] = -(F_k1 - F_k) / Δz
+    # Positive when flux convergence warms
+    @inbounds flux_div[i, j, k] = - ∂zᶜᶜᶜ(i, j, k, grid, net_radiative_flux, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn)
 end
 
 #####

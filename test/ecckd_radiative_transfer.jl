@@ -5,7 +5,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: standard_ozone_profile, top_face_temperature, top_face_pressure, bottom_face_pressure,
+using Breeze.AtmosphereModels: standard_ozone_profile, top_face_pressure, bottom_face_pressure,
                                dynamics_pressure, total_density, specific_humidity, materialize_background_atmosphere,
                                _update_radiation!
 using Adapt: adapt
@@ -22,7 +22,7 @@ using RRTMGP
 using NumericalRadiation: NumericalRadiation
 
 const NumericalRadiationExt = Base.get_extension(Breeze, :BreezeNumericalRadiationExt)
-using .NumericalRadiationExt: SpectralColumns, MaterializedColumnExtension, EcCKDLongwave, EcCKDShortwave,
+using .NumericalRadiationExt: ColumnWorkspace, MaterializedColumnExtension, EcCKDLongwave, EcCKDShortwave,
                               EcCKDRadiativeTransferModel, column_atmosphere, number_of_layers
 
 # A stand-in for an effective radius model the extension does not support yet
@@ -41,8 +41,6 @@ function column_model(grid, radiation; humidity_factor = 1)
     return model
 end
 
-column_grid(FT, Nz, top) = RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, top),
-                                            topology = (Flat, Flat, Bounded))
 
 # The four fluxes and their sum on the faces of column (i, j), as host vectors
 function column_fluxes(radiation, i = 1, j = 1)
@@ -59,7 +57,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
     @testset "Constructor argument errors" begin
         Oceananigans.defaults.FloatType = Float64
-        grid = column_grid(Float64, 4, 10kilometers)
+        grid = radiation_column_grid(Float64, 4, 10kilometers)
         constants = ThermodynamicConstants()
 
         # Albedo keyword combinations, as for the RRTMGP optics
@@ -119,7 +117,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
     @testset "Construction and types [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
-        grid = column_grid(FT, 8, 3kilometers)
+        grid = radiation_column_grid(FT, 8, 3kilometers)
         constants = ThermodynamicConstants()
 
         radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
@@ -127,7 +125,7 @@ previous_float_type = Oceananigans.defaults.FloatType
                                            solar_position = FixedCosineZenith(0.5))
 
         @test radiation isa EcCKDRadiativeTransferModel
-        @test radiation.atmospheric_state isa SpectralColumns
+        @test radiation.atmospheric_state isa ColumnWorkspace
         @test radiation.atmospheric_state.extension isa MaterializedColumnExtension
         @test radiation.longwave_solver isa EcCKDLongwave
         @test radiation.shortwave_solver isa EcCKDShortwave
@@ -180,10 +178,10 @@ previous_float_type = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
     end
 
-    @testset "Staged columns and column extension [$(FT)]" for FT in test_float_types()
+    @testset "Column state and column extension [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         Nz = 16
-        grid = column_grid(FT, Nz, 3kilometers)
+        grid = radiation_column_grid(FT, Nz, 3kilometers)
         constants = ThermodynamicConstants()
 
         radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
@@ -191,24 +189,26 @@ previous_float_type = Oceananigans.defaults.FloatType
                                            surface_albedo = 0.1, solar_position = FixedCosineZenith(0.5))
         model = column_model(grid, radiation)
 
-        columns = radiation.atmospheric_state
-        extension = columns.extension
+        workspace = radiation.atmospheric_state
+        extension = workspace.extension
         Nₑ = length(extension.Δz)
         N = Nz + Nₑ
-        @test number_of_layers(columns) == N
+        @test number_of_layers(workspace) == N
 
         g = constants.gravitational_acceleration
         mᵈ = constants.dry_air.molar_mass
         mᵛ = constants.vapor.molar_mass
         Rᵈ = constants.molar_gas_constant / mᵈ
 
-        p_lay = Array(columns.pressure_layers)[1, :]
-        T_lay = Array(columns.temperature_layers)[1, :]
-        p_int = Array(columns.pressure_interfaces)[1, :]
-        T_int = Array(columns.temperature_interfaces)[1, :]
-        dry_air_moles = Array(columns.dry_air)[1, :]
-        water_vapor_moles = Array(columns.water_vapor)[1, :]
-        ozone_moles = Array(columns.ozone)[1, :]
+        # The column the kernel solves, evaluated on the host by the same accessors
+        atmosphere = column_atmosphere(radiation, model, 1, 1)
+        p_lay = atmosphere.pressure_layers
+        T_lay = atmosphere.temperature_layers
+        p_int = atmosphere.pressure_interfaces
+        T_int = atmosphere.temperature_interfaces
+        dry_air_moles = atmosphere.gases.composite
+        water_vapor_moles = atmosphere.gases.h2o
+        ozone_moles = atmosphere.gases.o3
 
         tight = FT == Float64 ? 1e-12 : 1e-5
         loose = FT == Float64 ? 1e-10 : 1e-4
@@ -221,13 +221,16 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test p_lay[N:-1:Nₑ+1] == p
         @test T_lay[N:-1:Nₑ+1] == T
 
-        # Interfaces increase in pressure downward, and the boundary faces are extrapolated from the cells
+        # Interfaces increase in pressure downward; the boundary faces' pressures are extrapolated
+        # hydrostatically from the cells; the top face takes the top cell's temperature (the
+        # halo mirrors it) and the bottom face continues the lowest cells' gradient
         @test all(>(0), diff(p_int))
         @allowscalar begin
             @test p_int[N+1] == bottom_face_pressure(1, 1, grid, dynamics_pressure(model.dynamics), total_density(model.dynamics), g)
             @test p_int[Nₑ+1] == top_face_pressure(1, 1, grid, dynamics_pressure(model.dynamics), total_density(model.dynamics), g)
-            @test T_int[Nₑ+1] == top_face_temperature(1, 1, grid, model.temperature)
         end
+        @test T_int[Nₑ+1] == T[Nz]
+        @test T_int[N+1] ≈ (3 * T[1] - T[2]) / 2 rtol = tight
         @test T_int[1] == T_lay[1]
 
         # Column amounts in the dry convention of the ecCKD tables: the composite amount carries
@@ -263,8 +266,9 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test ozone_moles[Nₑ:-1:1] ./ dry_air_moles[Nₑ:-1:1] ≈ standard_ozone_profile.(zₑ) rtol = tight
 
         # The extension is clear and reaches the top
-        @test all(iszero, Array(columns.liquid_water_path)[1, 1:Nₑ])
-        @test all(iszero, Array(columns.ice_water_path)[1, 1:Nₑ])
+        state = NumericalRadiationExt.ColumnState(radiation, model)
+        extension_layers = @allowscalar [NumericalRadiationExt.layer_state(state, 1, 1, k) for k in 1:Nₑ]
+        @test all(layer -> iszero(layer.liquid_water_path) && iszero(layer.ice_water_path), extension_layers)
         @test extension.base + sum(Δzₑ) ≈ 65e3 rtol = 100 * eps(FT)
         @test 1 < p_int[1] < 100   # ~10 Pa at 65 km
 
@@ -273,13 +277,10 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test abs(T_lay[Nₑ] - T_int[Nₑ+1]) < 2
         @test T_lay[1] ≈ standard_atmosphere_temperature(zₑ[end]) rtol = 1e-6
 
-        # Host round trip: the column atmosphere copies the staged rows to the host and carries
-        # the model's constants
-        atmosphere = column_atmosphere(radiation, model, 1, 1)
+        # Host round trip: the column atmosphere is on the host and carries the model's constants
         @test atmosphere.pressure_layers isa Vector{FT}
         @test length(atmosphere.pressure_layers) == N
         @test length(atmosphere.pressure_interfaces) == N + 1
-        @test atmosphere.gases.composite == dry_air_moles
         @test atmosphere.gases.co2 ≈ 420e-6 .* dry_air_moles
         @test atmosphere.surface.temperature == FT(300)
         @test atmosphere.surface.emissivity == FT(0.98)
@@ -293,7 +294,7 @@ previous_float_type = Oceananigans.defaults.FloatType
     @testset "Identities [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         Nz = 16
-        grid = column_grid(FT, Nz, 3kilometers)
+        grid = radiation_column_grid(FT, Nz, 3kilometers)
         constants = ThermodynamicConstants()
         ε = 0.98
         radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
@@ -349,7 +350,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         # Each column reproduces the single-column model with the same profile, bit for bit
         for (i, humidity_factor) in ((1, 1), (2, 2))
-            single_grid = column_grid(FT, Nz, 3kilometers)
+            single_grid = radiation_column_grid(FT, Nz, 3kilometers)
             single = RadiativeTransferModel(single_grid, EcCKDOptics(), constants;
                                             surface_temperature = 300, surface_albedo = 0.1,
                                             solar_position = FixedCosineZenith(0.5))
@@ -386,7 +387,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
     @testset "Scheduling" begin
         Oceananigans.defaults.FloatType = Float64
-        grid = column_grid(Float64, 8, 3kilometers)
+        grid = radiation_column_grid(Float64, 8, 3kilometers)
         constants = ThermodynamicConstants()
         radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
                                            surface_temperature = 300, surface_albedo = 0.1,

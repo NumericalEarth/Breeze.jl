@@ -38,11 +38,11 @@ struct EcCKDShortwave{M, C, W, FT}
     solar_constant :: FT
 end
 
-# Dispatch on `atmospheric_state::SpectralColumns`: strictly more specific than the RRTMGP
+# Dispatch on `atmospheric_state::ColumnWorkspace`: strictly more specific than the RRTMGP
 # clear-sky model (slot 4 `BackgroundAtmosphere`) and disjoint from its all-sky model.
-const EcCKDRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:SpectralColumns}
+const EcCKDRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:ColumnWorkspace}
 
-# The gases carried by the staged columns, in the order of the ecCKD tables: dry air (the
+# The gases of the column optics, in the order of the ecCKD tables: dry air (the
 # `composite` of N₂, O₂ and the trace gases the tables fold into it), the two spatially varying
 # gases, and the well-mixed gases of `BackgroundAtmosphere` the reference models tabulate.
 const ECCKD_GAS_NAMES = (:composite, :h2o, :o3, :co2, :ch4, :n2o, :cfc11, :cfc12)
@@ -123,7 +123,7 @@ solver does; scattering is a planned follow-up). With `optics.clouds = nothing` 
 whatever the microphysics holds.
 
 The gas optics and cloud scattering tables are read from netCDF files, which requires
-`using NCDatasets`. The staging kernels take gravity and the molar masses from `constants`;
+`using NCDatasets`. The column kernel takes gravity and the molar masses from `constants`;
 the Stefan–Boltzmann constant of the gray Planck source (used by g points without a source
 table) is carried by the gas optics model.
 
@@ -202,8 +202,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     Nx, Ny, Nz = size(grid)
     Nc = Nx * Ny
     N = Nz + number_of_extension_layers(extension)
-    columns = SpectralColumns(arch, FT, Nc, N, extension)
-    initialize_cos_zenith!(columns.cos_zenith, solar_position)
+    workspace = ColumnWorkspace(arch, FT, Nc, N, extension)
+    initialize_cos_zenith!(workspace.cos_zenith, solar_position)
 
     surface_emissivity = constant_field_property(surface_emissivity, FT)
     direct_surface_albedo = constant_field_property(direct_surface_albedo, FT)
@@ -232,7 +232,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   solar_position,
                                   surface_radiation,
                                   background_atmosphere,
-                                  columns,
+                                  workspace,
                                   longwave,
                                   shortwave,
                                   upwelling_longwave_flux,

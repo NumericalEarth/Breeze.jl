@@ -39,8 +39,6 @@ end
 bomex_θ(z) = piecewise_linear(z, BOMEX_HEIGHTS, BOMEX_θ)
 bomex_qᵗ(z) = piecewise_linear(z, BOMEX_HEIGHTS, BOMEX_qᵗ)
 
-column_grid(FT, Nz, top) = RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, top),
-                                            topology = (Flat, Flat, Bounded))
 
 function bomex_column_model(grid, radiation)
     constants = ThermodynamicConstants()
@@ -80,7 +78,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 @testset "Column extension above a BOMEX-like column [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 32
-    grid = column_grid(FT, Nz, 3kilometers)
+    grid = radiation_column_grid(FT, Nz, 3kilometers)
     μ₀ = FT(0.5)
     S₀ = FT(1361)
 
@@ -189,7 +187,7 @@ end
 @testset "Float32 versus Float64 fluxes" begin
     fluxes = map((Float64, Float32)) do FT
         Oceananigans.defaults.FloatType = FT
-        grid = column_grid(FT, 32, 3kilometers)
+        grid = radiation_column_grid(FT, 32, 3kilometers)
         radiation = bomex_radiation(grid; column_extension = ColumnExtension(FT))
         bomex_column_model(grid, radiation)
         return column_fluxes(radiation)
