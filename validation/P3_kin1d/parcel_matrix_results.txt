@@ -1,0 +1,81 @@
+Adiabatic parcel matrix, 2026-10-15
+=================================
+
+Design: 2 initial temperatures (288,300 K) x 3 initial relative humidities
+(60,80,100%) x 3 prescribed ascent rates (0.5,1,2 m/s), 18 paired cases.
+All run for 5400 s, from p=101325 Pa with no condensate. No entrainment or
+fallout; conserved liquid-ice potential temperature and total water.
+Common pressure profile: p(z)=101325*(1-9.816*z/(1005*300))^(1005/287.15).
+Final heights differ (2.7,5.4,10.8 km), so these are not fixed-height comparisons.
+
+Actual production ParcelModel with SSP RK3, prognostic supersaturation, native
+mixture thermodynamics, reference constants selected via public constructors.
+No adapter or custom Breeze advancement. Fixed aerosol: 3e8 per kg dry air.
+Process timescale tau=0.025 s throughout, including refinement. These are
+controlled benchmark settings, not the example's native process defaults.
+Upstream: directly compiled P3_MAIN, P3 5.5.2, existing pressure/theta_li host.
+Neither CM1 nor kin1d is run. P3 source/patch provenance: see README.txt and
+validation_output/p3_processes. Compiler: gfortran 16; Julia 1.12.7.
+
+Baseline: Breeze dt=0.01 s; upstream dt=0.003125 s. Saved every 10 s.
+Trajectory maxima below refer to those samples, not every internal step.
+All 18 pairs finite; 127 physical checks passed. Maximum pressure mismatch
+2.57e-9 Pa; theta_li drift zero; Breeze prognostic water drift zero; separately
+summed Breeze water drift 3.47e-18 kg/kg; upstream water drift 3.48e-15 kg/kg.
+No negative mass/number states. Supersaturation identity error <=3.39e-8 kg/kg.
+
+Baseline findings:
+  16/18 cases have maximum trajectory temperature difference <0.02 K.
+  Case 3 (288 K,60%,2 m/s): 0.1388 K.
+  Case 18 (300 K,100%,2 m/s): 0.3978 K.
+  Maximum final-temperature difference across all cases: 0.004029 K.
+  Maximum final cloud/rain/ice differences: 0.000724/0.002190/0.001407 g/kg.
+  Worst mean absolute cloud/rain/ice trajectory differences, normalized by
+  initial total water: 0.08597/0.06646/0.10913%. All occur in case 3.
+  These small water-normalized metrics do not imply small relative errors
+  in every individual species or accurate transition timing.
+  Cold fast ascents (288 K,2 m/s) have ice-number discrepancies of
+  29.59/34.70/53.20% of upstream peak at RH=60/80/100%, respectively.
+
+Refinement:
+  Cases 3,9,14,18: Breeze 0.01 -> 0.005; upstream 0.003125 -> 0.0015625 s.
+  Cases 3,9,18 again: Breeze 0.005 -> 0.0025; upstream 0.0015625 -> 0.00078125 s.
+
+Latest refinement step (self differences and finest cross differences):
+  Case     Breeze max dT    Upstream max dT    Cross max dT (K)
+     3          0.002769           0.299110            0.308714
+     9          0.000813           0.001113            0.006106
+    18          0.010205           0.006556            0.258606
+
+  Case     Breeze max dNi   Upstream max dNi   Cross max dNi (% reference peak)
+     3              0.581             55.330              70.010
+     9              1.748              0.581              55.452
+    18              1.319              1.997               0.797
+  Self differences use the finer same-implementation peak as denominator;
+  cross differences use the finest upstream peak.
+
+Case 3 upstream has not demonstrated timestep convergence. Its temperature
+discrepancy peaks near 1550 s during ice formation (266.80 vs 266.49 K).
+Case 18 retains a short temperature discrepancy near 3580 s (272.74 vs
+272.48 K) despite improved timestep sensitivity. Case 9 retains a large
+ice-number discrepancy late in the trajectory despite much smaller changes
+under the latest refinement; this is an unresolved implementation/numerical
+formulation difference, not explained away by coarse timestep alone.
+No process-code bug is diagnosed from these aggregate comparisons alone.
+
+Interpretation: endpoint heatmaps and envelopes look very similar, but they
+hide transient and number-concentration differences. Keep trajectory-error
+and refinement views alongside them. This matrix is an exploratory comparison,
+not proof of P3 equivalence or a converged reference across the whole design.
+No agreement threshold was selected after observing the errors.
+
+Changes in this experiment are validation setup, aggregation, and plotting
+only. No production P3 formula, ParcelModel numerics, or default changed.
+The old default benchmark's first 10 s match its archived output in a
+regression check after parameterizing the initialization.
+
+Reproduce using README.txt. Figures are large PNG and SVG files under
+validation_output/p3_matrix/comparison_0.01_0.003125. Full raw data, per-case
+errors, physical checks, and refinement measurements are retained locally.
+The shaded trajectory envelopes are min-max over this finite factorial design;
+they are not confidence intervals or probabilistic uncertainty estimates.
