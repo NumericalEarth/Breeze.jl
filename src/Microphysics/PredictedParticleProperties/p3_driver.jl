@@ -106,12 +106,58 @@ end
         surface_temperature = μ.surface_temperature[i, j, 1]
     end
 
-    properties = p3_process_properties(p3, ρ, ℳ)
-    result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
-                                 surface_temperature, temperature_tendency,
-                                 vapor_tendency)
-    add_p3_tendencies!(G, i, j, k, grid, p3, result)
+    # A deliberate branch rather than `ifelse`: cells P3 has no work in are skipped outright,
+    # which is where most of the domain sits (see `p3_processes_active`). Clear air is
+    # spatially coherent, so warps take the branch together.
+    if p3_processes_active(p3, ρ, ℳ, 𝒰, constants)
+        properties = p3_process_properties(p3, ρ, ℳ)
+        result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
+                                     surface_temperature, temperature_tendency,
+                                     vapor_tendency)
+        add_p3_tendencies!(G, i, j, k, grid, p3, result)
+    end
 end
+
+#####
+##### Cells with no microphysical work
+#####
+##### Following the reference implementation's `compute_procs` test (`microphy_p3.f90`), the
+##### process rates are evaluated only where hydrometeors are present or nucleation is
+##### possible, i.e. where the air is within `nucleation_possible_subsaturation` of
+##### saturation over liquid (T ≥ T₀) or ice (T < T₀). Elsewhere every rate is gated to
+##### zero, so the full evaluation would only add zeros to `Gⁿ`. A leftover rain or ice
+##### number with no mass counts as present: the full evaluation relaxes it to zero, and
+##### skipping the cell would leave it in place.
+#####
+
+const nucleation_possible_subsaturation = -0.05
+
+@inline function p3_processes_active(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    qsmall = p3.minimum_mass_mixing_ratio
+    nsmall = p3.minimum_number_mixing_ratio
+    qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
+    hydrometeors_present = (ℳ.qᶜˡ ≥ qsmall) | (ℳ.qʳ ≥ qsmall) |
+                           (total_ice_mass(ℳ.qⁱ, qʷⁱ) ≥ qsmall) |
+                           (ℳ.nʳ > nsmall) | (ℳ.nⁱ > nsmall) |
+                           cloud_number_present(p3.aerosol, ℳ, nsmall)
+
+    T = temperature(𝒰, constants)
+    T₀ = p3.process_rates.freezing_temperature
+    qᵛ = 𝒰.moisture_mass_fractions.vapor
+    qᵛ⁺ = p3_ice_saturation_specific_humidity(T, ρ, constants, T₀)
+    nucleation_possible = qᵛ ≥ (1 + nucleation_possible_subsaturation) * qᵛ⁺
+
+    return hydrometeors_present | nucleation_possible |
+           always_evaluate_processes(p3.process_rates)
+end
+
+# The prescribed droplet number is a scheme parameter, not a leftover to relax away.
+@inline cloud_number_present(::Nothing, ℳ, nsmall) = false
+@inline cloud_number_present(::AerosolActivation, ℳ, nsmall) = ℳ.nᶜˡ > nsmall
+
+# A predicted supersaturation relaxes towards its diagnosed value in clear air too.
+@inline always_evaluate_processes(::ProcessRate{FT, false}) where FT = false
+@inline always_evaluate_processes(::ProcessRate{FT, true}) where FT = true
 
 #####
 ##### Fused tendency override (fast path for AtmosphereModel)

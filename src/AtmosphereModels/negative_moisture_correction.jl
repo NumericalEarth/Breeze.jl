@@ -191,39 +191,48 @@ function fix_negative_moisture!(microphysics, model)
     number_mass_pairs = correction_number_mass_pairs(microphysics, model.microphysical_fields)
     number_fields = correction_number_fields(microphysics, model.microphysical_fields)
 
-    launch!(arch, grid, :xy,
-            _fix_negative_moisture_column!,
+    # Phase 1 and the number repairs touch one cell at a time, so they run over every cell;
+    # only the vertical redistribution of phase 2 has to walk a column.
+    launch!(arch, grid, :xyz,
+            _fix_negative_moisture_cell!,
             correction,
-            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀)
+
+    launch_vertical_borrowing!(arch, grid, correction, ρqᵛᵉ, ρ₀)
 
     return nothing
 end
 
 #####
-##### Column-wise kernel
+##### Cell-wise kernel: species borrowing and number repairs
 #####
 
-@kernel function _fix_negative_moisture_column!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
-    i, j = @index(Global, NTuple)
-    Nz = size(grid, 3)
+@kernel function _fix_negative_moisture_cell!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀)
+    i, j, k = @index(Global, NTuple)
 
-    # Phase 1: Species borrowing at each level
-    for k = 1:Nz
-        @inbounds ρ = ρ₀[i, j, k]
-        apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, correction)
-    end
+    # Phase 1: Species borrowing
+    @inbounds ρ = ρ₀[i, j, k]
+    apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, correction)
 
     # Zero orphaned number concentrations (mass zeroed but number still positive)
-    for k = 1:Nz
-        zero_orphaned_numbers!(i, j, k, number_mass_pairs)
-    end
+    zero_orphaned_numbers!(i, j, k, number_mass_pairs)
 
     # Clamp negative number concentrations to zero
-    for k = 1:Nz
-        clamp_negative_numbers!(i, j, k, number_fields)
-    end
+    clamp_negative_numbers!(i, j, k, number_fields)
+end
 
-    # Phase 2: Vertical borrowing (no-op when the scheme does not enable it)
+#####
+##### Column-wise kernel: vertical borrowing
+#####
+
+launch_vertical_borrowing!(arch, grid, ::SpeciesBorrowing{Nothing}, ρqᵛᵉ, ρ₀) = nothing
+
+launch_vertical_borrowing!(arch, grid, correction, ρqᵛᵉ, ρ₀) =
+    launch!(arch, grid, :xy, _vertical_borrowing_column!, correction, ρqᵛᵉ, ρ₀, grid)
+
+# Phase 2: Vertical borrowing
+@kernel function _vertical_borrowing_column!(correction, ρqᵛᵉ, ρ₀, grid)
+    i, j = @index(Global, NTuple)
     apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction, ρ₀)
 end
 
