@@ -1,3 +1,33 @@
+Downloadable reference data
+==========================
+
+Official-P3 parcel data are published as the lazy P3_parcel_reference artifact:
+https://github.com/NumericalEarth/Breeze.jl/releases/tag/P3_parcel_reference_v1.0
+
+This is direct P3_MAIN output, not CM1 data. The archive contains the 18-case
+matrix, refined references, the two original ascent benchmarks, and finer event
+diagnostics. It excludes the modified diagnostic variants. reference_data.txt
+documents provenance, units, case definitions, sampling, and limitations.
+
+From the repository root, download and read the matrix without running Fortran:
+
+  using Pkg.Artifacts, DelimitedFiles
+  reference = artifact"P3_parcel_reference"
+  cases = readdlm(joinpath(reference, "matrix", "cases.dat"))
+  states = readdlm(joinpath(reference, "matrix", "reference_dt0.003125", "reference_final.dat"))
+
+In a script under examples/, the artifact macro finds the root Artifacts.toml.
+It downloads on first use, verifies the archive checksum, and caches the data.
+The current rising_parcels.jl demonstrates native-default schemes; it does not
+yet overlay this controlled benchmark. Match its forcing, constants, aerosol,
+and documented process timescales before adding a quantitative comparison.
+No CM1 or Fortran dependency is needed in the docs build to read these data.
+
+To package regenerated output, run package_reference.jl. It writes an archive
+and candidate Artifacts.toml under validation_output/p3_reference_release.
+Publish changed data under a new version and update the binding; do not replace
+an existing version. Release assets also include the discrepancy plot/report.
+
 Outlier diagnosis (2026-10-15)
 ==============================
 
