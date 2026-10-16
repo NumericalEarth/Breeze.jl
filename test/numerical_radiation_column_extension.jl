@@ -192,9 +192,10 @@ end
         bomex_column_model(grid, radiation)
         return column_fluxes(radiation)
     end
+    # Single precision loses only rounding: the fluxes agree to about 10 eps(Float32) relative
     for (ℐ₆₄, ℐ₃₂) in zip(fluxes[1], fluxes[2])
         @test all(isfinite, ℐ₃₂)
-        @test maximum(abs, Float64.(ℐ₃₂) .- ℐ₆₄) < 1
+        @test isapprox(Float64.(ℐ₃₂), ℐ₆₄; rtol = 100 * eps(Float32))
     end
 end
 

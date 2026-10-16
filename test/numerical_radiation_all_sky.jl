@@ -214,10 +214,6 @@ previous_float_type = Oceananigans.defaults.FloatType
         # The cloud shades the surface: at least 30 % less sunlight reaches it, and every
         # face below the cloud base sees the shade
         surface_shortwave_down(f) = -f.ℐ_sw_dn[1]
-        @info "Cloud effect ($FT): surface SW↓ $(surface_shortwave_down(clear)) → $(surface_shortwave_down(cloudy)) W m⁻²; " *
-              "surface LW↓ $(-clear.ℐ_lw_dn[1]) → $(-cloudy.ℐ_lw_dn[1]) W m⁻²; " *
-              "top SW↑ $(clear.ℐ_sw_up[Nz+1]) → $(cloudy.ℐ_sw_up[Nz+1]) W m⁻²; " *
-              "OLR $(clear.ℐ_lw_up[Nz+1]) → $(cloudy.ℐ_lw_up[Nz+1]) W m⁻²"
         @test surface_shortwave_down(cloudy) ≤ 0.7 * surface_shortwave_down(clear)
         @test all(-cloudy.ℐ_sw_dn[1:CLOUD_CELL] .≤ 0.7 .* -clear.ℐ_sw_dn[1:CLOUD_CELL])
 
@@ -262,7 +258,6 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         # Smaller droplets at the same water path make a thicker cloud: more reflection, less
         # transmission, by more than 5 %
-        @info "Effective radius ($FT): top SW↑ $(small_fluxes.ℐ_sw_up[Nz+1]) (5 μm) vs $(large_fluxes.ℐ_sw_up[Nz+1]) W m⁻² (20 μm)"
         @test small_fluxes.ℐ_sw_up[Nz+1] > 1.05 * large_fluxes.ℐ_sw_up[Nz+1]
         @test -small_fluxes.ℐ_sw_dn[1] < -large_fluxes.ℐ_sw_dn[1]
 

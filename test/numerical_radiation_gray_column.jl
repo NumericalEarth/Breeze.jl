@@ -76,7 +76,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
 @testset "Gray column through the ecCKD kernel [$(FT)]" for FT in all_float_types()
     Oceananigans.defaults.FloatType = FT
-    rtol = FT == Float64 ? 1e-12 : 200 * eps(Float32)
+    rtol = FT == Float64 ? 1e-12 : 200 * eps(FT)
 
     Nz = 16
     grid = radiation_column_grid(FT, Nz, 3kilometers)
@@ -92,7 +92,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
     # The column is isothermal to rounding, and the grid is the whole atmosphere
     T = column(model.temperature)
-    @test maximum(abs.(T .- T₀)) < 10 * eps(FT) * T₀
+    @test all(≈(T₀; rtol = 10 * eps(FT)), T)
     @test isnothing(radiation.atmospheric_state.extension)
 
     ℐ_lw_up = column(radiation.upwelling_longwave_flux)
@@ -106,7 +106,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
     @testset "Isothermal longwave" begin
         τ, τ_above, _ = layer_optical_depths(model, κ_lw)
-        @test all(τ .> 1e-3)   # every layer above the thin-layer branch of the solver
+        @test all(>(1e-3), τ)   # every layer above the thin-layer branch of the solver
 
         # Upwelling: the surface (ε = 1) and every layer emit at the same temperature
         @test ℐ_lw_up ≈ fill(B, Nz + 1) rtol = rtol
@@ -170,7 +170,7 @@ end
         # Every layer, the reference's included, stays above the solver's thin-layer branch
         # (τ ≤ 1e-3), where the Planck path switches to its trapezoidal form and the error
         # being ratioed would turn first order
-        @test all(layer_optical_depths(model, κ_lw)[1] .> 1e-3)
+        @test all(>(1e-3), layer_optical_depths(model, κ_lw)[1])
         return column(radiation.upwelling_longwave_flux)[Nz+1], -column(radiation.downwelling_longwave_flux)[1]
     end
 
@@ -181,7 +181,7 @@ end
         return abs(fluxes[1] - reference[1]) + abs(fluxes[2] - reference[2])
     end
 
-    @test all(errors .> 0)
+    @test all(>(0), errors)
     @test 3.3 < errors[1] / errors[2] < 4.7
     @test 3.3 < errors[2] / errors[3] < 4.7
 end

@@ -132,7 +132,7 @@ Oceananigans.defaults.FloatType = previous_float_type
         @test all(Δz[2:end] .> Δz[1:end-1]) # layers grow with height
         # Geometric: every thickness is Δz_top rᵐ, the last one absorbing the rounding of the ratio
         r = geometric_stretching_ratio(Δz_top, extension.top - z_top, extension.layers)
-        @test all(isapprox.(Δz, Δz_top .* r .^ (0:extension.layers-1), rtol = 200 * eps(FT)))
+        @test isapprox(Δz, Δz_top .* r .^ (0:extension.layers-1); rtol = 200 * eps(FT))
 
         # Layer count and the top face agree with `top` and `layers`
         for layers in (1, 2, 5), top in (3.2e3, 10e3, 80e3)
