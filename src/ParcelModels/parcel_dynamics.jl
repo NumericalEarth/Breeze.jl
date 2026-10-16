@@ -112,7 +112,7 @@ mutable struct ParcelTendencies{FT, GM}
     Gy :: FT
     Gz :: FT
     Gw :: FT
-    Gs :: FT
+    Gℰ :: FT
     Gqᵗ :: FT
     Gμ :: GM
 end
@@ -630,7 +630,7 @@ function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     𝒰ᵛ = with_moisture(𝒰ᵛ, MoistureMassFractions(qᵗ₀))
     _, q = parcel_moisture_partition(model.microphysics, ρ₀, state.μ, qᵗ₀, 𝒰ᵛ)
     𝒰 = with_temperature(with_moisture(𝒰ᵛ, q), T₀, constants)
-    state.ℰ = 𝒰 isa StaticEnergyState ? 𝒰.static_energy : 𝒰.potential_temperature
+    state.ℰ = thermodynamic_variable(𝒰)
     state.ρℰ = ρ₀ * state.ℰ
     state.𝒰 = 𝒰
 
@@ -700,10 +700,9 @@ function compute_parcel_tendencies!(model::ParcelModel)
     # Dispatch handles the Nothing case: microphysical_tendency(::Nothing, ...) returns zero,
     # compute_microphysics_prognostic_tendencies(::Nothing, ...) returns nothing/zero NamedTuple
     ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
-    thermodynamic_variable = 𝒰 isa StaticEnergyState ? Val(:s) : Val(:θ)
-    tendencies.Gs = microphysical_tendency(microphysics, thermodynamic_variable, ρ, ℳ, 𝒰, constants)
+    tendencies.Gℰ = microphysical_tendency(microphysics, thermodynamic_variable_name(𝒰), ρ, ℳ, 𝒰, constants)
     tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:qᵗ), ρ, ℳ, 𝒰, constants)
-    Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants, model)
+    Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
     tendencies.Gμ = rescale_parcel_microphysics(Gμ, state.ρ / ρ)
 
     return nothing
@@ -779,10 +778,6 @@ end
 #####
 # These functions implement the parcel-specific microphysics interface.
 # The default fallbacks work for schemes with no explicit prognostic microphysics.
-
-# Schemes may use the parcel's prescribed pressure gradient for resolved forcing.
-compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants, model) =
-    compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
 
 # Compute tendencies for microphysics prognostic variables
 # Fallback: return nothing for schemes without prognostic microphysics
@@ -966,7 +961,7 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
 
     # Step specific quantities directly (exact conservation for adiabatic)
     state.qᵗ = (1 - α) * U⁰.qᵗ + α * (state.qᵗ + Δt * tendencies.Gqᵗ)
-    state.ℰ = (1 - α) * U⁰.ℰ + α * (state.ℰ + Δt * tendencies.Gs)
+    state.ℰ = (1 - α) * U⁰.ℰ + α * (state.ℰ + Δt * tendencies.Gℰ)
 
     # Get environmental conditions at new height
     z⁺ = state.z
@@ -1054,6 +1049,12 @@ end
     return LiquidIcePotentialTemperatureState{FT}(θ⁺, 𝒰.moisture_mass_fractions, 𝒰.standard_pressure, p⁺)
 end
 
+# The parcel's conserved thermodynamic variable ℰ, and its name for `microphysical_tendency`
+@inline thermodynamic_variable(𝒰::StaticEnergyState) = 𝒰.static_energy
+@inline thermodynamic_variable(𝒰::LiquidIcePotentialTemperatureState) = 𝒰.potential_temperature
+@inline thermodynamic_variable_name(::StaticEnergyState) = Val(:s)
+@inline thermodynamic_variable_name(::LiquidIcePotentialTemperatureState) = Val(:θ)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -1114,7 +1115,7 @@ function step_parcel_state!(model::ParcelModel, Δt)
 
     # Step specific quantities forward (exact conservation for adiabatic)
     state.qᵗ += Δt * tendencies.Gqᵗ
-    state.ℰ += Δt * tendencies.Gs
+    state.ℰ += Δt * tendencies.Gℰ
 
     # Get environmental conditions at new height
     z⁺ = state.z

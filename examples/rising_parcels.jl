@@ -245,9 +245,10 @@ dynamics_figure
 # from logarithmic axes. These ascent comparisons emphasize liquid and rain;
 # P3 additionally carries ice mass, number, rime, and liquid coating.
 #
-# The lower panels check P3's prognostic supersaturation against qᵛ − qᵛ⁺ˡ
-# diagnosed from temperature and vapor, for both ascent types. This checks its
-# coupling to expansion and latent heating without resetting the prognostic.
+# The lower panels compare P3's prognostic supersaturation with qᵛ − qᵛ⁺ˡ
+# diagnosed from temperature and vapor, for both ascent types. As in an LES,
+# the prognostic relaxes toward the diagnosed value on P3's process timescale
+# rather than following it exactly.
 
 diagnostics_figure = Figure(size=(1100, 1050))
 cloud_number_axis = Axis(diagnostics_figure[1, 1]; xlabel="Cloud / aerosol number (kg⁻¹)",

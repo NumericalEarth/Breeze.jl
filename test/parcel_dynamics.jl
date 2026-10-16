@@ -269,7 +269,7 @@ end
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
     # With specific quantity evolution, tendencies for s and qᵗ are zero
     # (no microphysical sources) giving exact conservation
-    @test tendencies.Gs ≈ 0.0
+    @test tendencies.Gℰ ≈ 0.0
     @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
@@ -308,7 +308,7 @@ end
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
     # Tendencies are zero (SaturationAdjustment operates via state adjustment, not tendencies)
-    @test tendencies.Gs ≈ 0.0
+    @test tendencies.Gℰ ≈ 0.0
     @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
@@ -348,7 +348,7 @@ end
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
     # Tendencies are zero (DCMIP2016Kessler operates via microphysics_model_update!, not tendencies)
-    @test tendencies.Gs ≈ 0.0
+    @test tendencies.Gℰ ≈ 0.0
     @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work

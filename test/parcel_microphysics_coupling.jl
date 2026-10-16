@@ -39,55 +39,23 @@ end
     end
 end
 
-@testset "Parcel supersaturation chain rule: $formulation, mixed phase=$mixed_phase" for formulation in (:StaticEnergy, :LiquidIcePotentialTemperature), mixed_phase in (false, true)
-    model = coupling_parcel(; formulation, mixed_phase)
+@testset "Parcel P3 tendencies match the gridded path: $formulation" for formulation in (:StaticEnergy, :LiquidIcePotentialTemperature)
+    # Parcels must evolve P3 exactly as LES and regional models do: the same adiabatic
+    # forcing from w and the same prognostic supersaturation tendency.
+    PPP = Breeze.Microphysics.PredictedParticleProperties
+    model = coupling_parcel(; formulation, mixed_phase=true)
     PM.compute_parcel_tendencies!(model)
     state = model.dynamics.state
     constants = model.thermodynamic_constants
     G = model.dynamics.timestepper.G
-    q = state.𝒰.moisture_mass_fractions
-    liquid = (G.Gμ.ρqᶜˡ + G.Gμ.ρqʳ + G.Gμ.ρqʷⁱ) / state.ρ
-    ice = G.Gμ.ρqⁱ / state.ρ
-    vapor = -liquid - ice
-    function displaced_supersaturation(δt)
-        updated = PM.reconstruct_thermodynamic_state(state.𝒰, state.ℰ, state.z + δt*G.Gz,
-                                                      state.𝒰.reference_pressure - 40δt*G.Gz)
-        updated = TD.with_moisture(updated, TD.MoistureMassFractions(q.vapor+δt*vapor, q.liquid+δt*liquid, q.ice+δt*ice))
-        return updated.moisture_mass_fractions.vapor - TD.saturation_specific_humidity(updated, constants, TD.PlanarLiquidSurface())
-    end
-    δt = 1e-3
-    derivative = (displaced_supersaturation(δt) - displaced_supersaturation(-δt)) / (2δt)
-    @test G.Gμ.ρsᵛ⁺ˡ / state.ρ ≈ derivative rtol=1e-6 atol=1e-12
-end
-
-@testset "Supersaturation retains RK3 convergence" begin
-    errors = Float64[]
-    for dt in (20., 10., 5.)
-        model = coupling_parcel(cloudy=false)
-        state = model.dynamics.state
-        initial_theta = state.ℰ
-        initial_water = state.qᵗ
-        run!(Simulation(model; Δt=dt, stop_time=100, verbose=false))
-        diagnosed = state.𝒰.moisture_mass_fractions.vapor -
-                    TD.saturation_specific_humidity(state.𝒰, model.thermodynamic_constants, TD.PlanarLiquidSurface())
-        push!(errors, abs(state.μ.ρsᵛ⁺ˡ/state.ρ - diagnosed))
-        @test state.ℰ ≈ initial_theta
-        @test state.qᵗ ≈ initial_water
-    end
-    @info "RK3 supersaturation errors" errors
-    @test errors[1]/errors[2] > 6
-    @test errors[2]/errors[3] > 6
-end
-
-@testset "Saturation derivatives follow selected formula" begin
-    for FT in (Float32, Float64), fit in (TD.ClausiusClapeyron(), TD.FlatauPolynomial(), TD.TetensFormula())
-        constants = ThermodynamicConstants(FT; saturation_vapor_pressure=fit)
-        T = FT(280)
-        δT = FT === Float32 ? FT(0.1) : FT(0.001)
-        expected = (TD.saturation_vapor_pressure(T+δT, constants, TD.PlanarLiquidSurface()) -
-                    TD.saturation_vapor_pressure(T-δT, constants, TD.PlanarLiquidSurface())) / (2δT)
-        actual = @inferred TD.liquid_saturation_vapor_pressure_derivative(T, constants)
-        @test actual ≈ expected rtol=FT === Float32 ? 0.001 : 1e-8
+    ρ = TD.density(state.𝒰, constants)
+    μ = PM.rescale_parcel_microphysics(state.μ, ρ / state.ρ)
+    velocities = (; u=G.Gx, v=G.Gy, w=G.Gz)
+    ℳ = Breeze.AtmosphereModels.microphysical_state(model.microphysics, ρ, μ, state.𝒰, velocities)
+    result = PPP.p3_state_tendencies(model.microphysics, ρ, ℳ, state.𝒰, constants)
+    for name in keys(state.μ)
+        expected = PPP.p3_tendency_component(result, Val(name)) * state.ρ / ρ
+        @test G.Gμ[name] ≈ expected
     end
 end
 

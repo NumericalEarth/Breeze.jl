@@ -120,12 +120,3 @@ interpolating the liquid and ice Flatau polynomials by `liquid_fraction`.
     λ = surface.liquid_fraction
     return λ * pᵛ⁺ˡ + (1 - λ) * pᵛ⁺ⁱ
 end
-
-@inline function liquid_saturation_vapor_pressure_derivative(T, constants::FlatauPolynomialThermodynamicConstants)
-    fp = constants.saturation_vapor_pressure
-    x = max(T - fp.reference_temperature, -fp.minimum_temperature_offset)
-    coefficients = fp.liquid_coefficients
-    derivative_coefficients = ntuple(n -> n * coefficients[n+1], length(coefficients)-1)
-    derivative = evalpoly(x, derivative_coefficients)
-    return ifelse(T - fp.reference_temperature > -fp.minimum_temperature_offset, derivative, zero(derivative))
-end

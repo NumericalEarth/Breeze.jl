@@ -153,10 +153,3 @@ based on the liquid fraction.
     λ = surface.liquid_fraction
     return λ * pᵛ⁺ˡ + (1 - λ) * pᵛ⁺ⁱ
 end
-
-@inline function liquid_saturation_vapor_pressure_derivative(T, constants::TetensFormulaThermodynamicConstants)
-    tf = constants.saturation_vapor_pressure
-    e = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
-    return e * tf.liquid_coefficient * (tf.reference_temperature - tf.liquid_temperature_offset) /
-           (T - tf.liquid_temperature_offset)^2
-end
