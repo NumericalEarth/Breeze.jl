@@ -15,6 +15,25 @@ using RRTMGP
 ##### Unit tests
 #####
 
+@testset "Per-column solar constant and fixed zenith [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    # A column ensemble whose columns are different places: each gets its own sun
+    grid = RectilinearGrid(default_arch; size=(3, 2, 8), x=(0, 3), y=(0, 2), z=(0, 10kilometers), topology=(Periodic, Periodic, Bounded))
+    cos_zenith = FT[0.2 0.3; 0.4 0.5; 0.6 0.7]
+    solar_constant = FT[1000 1100; 1200 1300; 1400 1500]
+    radiation = RadiativeTransferModel(grid, GrayOptics(), ThermodynamicConstants();
+                                       surface_temperature = 300, surface_albedo = 0.1,
+                                       solar_position = FixedCosineZenith(cos_zenith),
+                                       solar_constant)
+    # RRTMGP column c = i + (j - 1) Nx, i.e. column-major over (i, j)
+    @test Array(radiation.shortwave_solver.bcs.cos_zenith) == vec(cos_zenith)
+    @test Array(radiation.shortwave_solver.bcs.toa_flux) == vec(solar_constant)
+    @test radiation.solar_constant === solar_constant
+    @test_throws ArgumentError RadiativeTransferModel(grid, GrayOptics(), ThermodynamicConstants();
+                                                      surface_temperature = 300, surface_albedo = 0.1,
+                                                      solar_position = FixedCosineZenith(FT[0.1, 0.2]))
+end
+
 @testset "GrayRadiativeTransferModel construction" begin
     @testset "Single column grid [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT

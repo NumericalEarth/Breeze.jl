@@ -98,7 +98,7 @@ FixedCosineZenith(cos_zenith = 0.5)
 ```
 """
 struct FixedCosineZenith{FT} <: AbstractSolarPosition
-    "Cosine of the solar zenith angle. Should satisfy ``0 ≤ \\cos(θ_z) ≤ 1`` for the sun above the horizon."
+    "Cosine of the solar zenith angle, a scalar or an `(Nx, Ny)` array of per-column values (for a column ensemble whose columns are different places or seasons). Should satisfy ``0 ≤ \\cos(θ_z) ≤ 1`` for the sun above the horizon."
     cos_zenith :: FT
 end
 
