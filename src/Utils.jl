@@ -8,6 +8,7 @@ module Utils
 
 export sum_properties,
        safe_divide,
+       cube_root,
        chebyshev_gauss_nodes_weights,
        transform_to_diameter,
        jacobian_diameter_transform,
@@ -65,6 +66,34 @@ safe_divide(1.0, 0.0, -1.0)
 ```
 """
 @inline safe_divide(a, b, default) = ifelse(iszero(b), default, a / b)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the real cube root without introducing double-precision intermediates
+for `Float32` inputs. This is suitable for GPU backends without `Float64` support.
+
+```jldoctest
+using Breeze.Utils: cube_root
+cube_root(-8f0)
+
+# output
+-2.0f0
+```
+"""
+@inline cube_root(x) = cbrt(x)
+
+@inline function cube_root(x::Float32)
+    # Base.cbrt(Float32) refines its estimate in Float64. Use a Float32 power
+    # estimate and one Newton iteration; dividing twice avoids squaring a very
+    # small estimate. Preserve signed zero and nonfinite inputs explicitly.
+    # TODO: upstream a Float32 cbrt device override to Metal.jl, then use Base.cbrt.
+    magnitude = abs(x)
+    estimate = magnitude ^ (1f0 / 3)
+    refined = (2estimate + (magnitude / estimate) / estimate) / 3
+    regular = isfinite(x) & !iszero(x)
+    return ifelse(regular, copysign(refined, x), x)
+end
 
 #####
 ##### Chebyshev–Gauss quadrature

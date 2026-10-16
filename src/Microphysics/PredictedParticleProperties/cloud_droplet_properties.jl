@@ -273,7 +273,7 @@ mean-diameter bounds of [`cloud_slope_bounds`](@ref) are applied.
 """
 @inline function unbounded_cloud_slope_parameter(Nᶜˡ, μᶜˡ, qᶜˡ_abs, ρᴸ)
     FT = typeof(qᶜˡ_abs)
-    return cbrt(FT(π) * ρᴸ * Nᶜˡ * (μᶜˡ + 3) * (μᶜˡ + 2) * (μᶜˡ + 1) /
+    return cube_root(FT(π) * ρᴸ * Nᶜˡ * (μᶜˡ + 3) * (μᶜˡ + 2) * (μᶜˡ + 1) /
                 (FT(6) * qᶜˡ_abs))
 end
 

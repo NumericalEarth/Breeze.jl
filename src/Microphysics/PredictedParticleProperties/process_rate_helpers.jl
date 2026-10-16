@@ -342,7 +342,7 @@ end
     nʳ_eff = max(0, nʳ)
     λʳ_cubed = FT(π) * parameters.liquid_water_density * nʳ_eff /
                max(qʳ_eff, FT(parameters.floors.mass_scale))
-    return cbrt(λʳ_cubed)
+    return cube_root(λʳ_cubed)
 end
 
 """

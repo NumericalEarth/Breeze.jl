@@ -209,7 +209,9 @@ Rate of change of rain specific humidity (negative = evaporation)
     Re = 2v₀ * χv / ν_air * λ⁻¹
     size_factor = (r0 / λ⁻¹)^((ve + Δv) / 2)
 
-    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_vent
+    # Sc is positive. Julia's Float32 cbrt uses Float64 intermediates, which
+    # Metal cannot execute; the fractional power keeps this calculation in FT.
+    ventilation = aᵥ + bᵥ * Sc^(FT(1) / 3) * sqrt(Re) / size_factor * gamma_vent
 
     evap_rate = base_rate * ventilation
 

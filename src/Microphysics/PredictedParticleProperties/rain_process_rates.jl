@@ -319,7 +319,7 @@ saturation-adjustment relaxation coefficient, both of which pass `p3.rain.ventil
 
     # Constant term: ℂᵛᵉⁿᵗ₁ ∫ D exp(-λD) dD = ℂᵛᵉⁿᵗ₁ / λ² for μʳ = 0.
     constant_integral = ℂᵛᵉⁿᵗ₁ / λʳ^2
-    schmidt_factor = cbrt(ν / max(Dᵛ, coefficient_floor))
+    schmidt_factor = cube_root(ν / max(Dᵛ, coefficient_floor))
     inverse_sqrt_viscosity = 1 / sqrt(max(ν, coefficient_floor))
     integral = constant_integral + ℂᵛᵉⁿᵗ₂ * schmidt_factor *
                                       inverse_sqrt_viscosity * table(log10(λʳ))
