@@ -92,8 +92,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``N^r``                             | `Nʳ`   |                                     | Volumetric rain drop number density, ``Nʳ = ρ nʳ`` (1/m³)                      |
 | ``N^a``                             | `Nᵃ`   |                                     | Volumetric aerosol number density, ``Nᵃ = ρ nᵃ`` (1/m³)                        |
 | ``N^i``                             | `Nⁱ`   |                                     | Volumetric ice number density, ``Nⁱ = ρ nⁱ`` (1/m³)                            |
-| ``N_0^r``                           | `N₀ʳ`  | `NumberConcentrationRepair.rain_intercept` | Intercept of the exponential rain size distribution (1/m⁴)              |
-| ``N^{min}``                         | `Nᵐⁱⁿ` | `NumberConcentrationRepair.minimum_number_density` | Number density below which P3 re-diagnoses rain and ice number (1/m³) |
+| ``N^{min}``                         | `Nᵐⁱⁿ` | `ProcessRate.minimum_number_density` | Number density below which P3 re-diagnoses rain and ice number (1/m³)  |
 | ``n^{ccn}``                         | `nᶜᶜⁿ` |                                     | Cloud condensation nuclei activated per unit mass (1/kg); the activation rate ``∂nᶜᶜⁿ/∂t`` is a source of ``nᶜˡ`` |
 | ``N^{ccn}``                         | `Nᶜᶜⁿ` |                                     | Volumetric CCN number density, ``Nᶜᶜⁿ = ρ nᶜᶜⁿ`` (1/m³)                        |
 | ``q^{ccn}``                         | `qᶜᶜⁿ` |                                     | Mass fraction condensed onto newly activated CCN (kg/kg)                       |

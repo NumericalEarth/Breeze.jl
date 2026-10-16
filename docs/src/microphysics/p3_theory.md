@@ -471,8 +471,8 @@ resolution are `tabulate_rain_from_quadrature` keywords only.
 
 ### [Complete calibration inventory](@id p3_calibration_inventory)
 
-The present runtime scheme exposes **79 scalar free parameters**: the 16 warm-phase
-coefficients above and 63 process-level coefficients below. A tuple-valued field counts
+The present runtime scheme exposes **81 scalar free parameters**: the 16 warm-phase
+coefficients above and 65 process-level coefficients below. A tuple-valued field counts
 once per scalar entry, not once per Julia field. Derived quantities count once: for
 example, ``\mathbb{C}_{\mathrm{auto},5}`` may be interpreted as a rain-seed mass or an
 equivalent seed radius, but those are not two independent parameters.
@@ -497,6 +497,7 @@ equivalent seed radius, but those are not two independent parameters.
 | Hallett–Mossop | 8 | ``\mathbb{C}_{\mathrm{HM},1:8}`` = lower/upper/peak temperatures, splintering rate, splinter mass, diameter threshold, liquid-fraction limit, and surface-temperature limit |
 | Homogeneous freezing | 2 | ``\mathbb{C}_{\mathrm{homf},1:2}`` = `homogeneous_freezing_temperature`, `homogeneous_freezing_timescale` |
 | Phase and number limits | 4 | ``\mathbb{C}_{\mathrm{phas},1:4}`` = `refreezing_timescale`, `maximum_ice_number_density`, `liquid_fraction_clipping_threshold`, `complete_melting_liquid_fraction` |
+| Number repair | 2 | ``\mathbb{C}_{\mathrm{rep},1:2}`` = `repair_rain_intercept`, `repair_minimum_ice_temperature` |
 | Ice diffusion | 2 | ``\mathbb{C}_{\mathrm{diff},1:2}`` = `calibration_factor_deposition`, `calibration_factor_sublimation` |
 
 The count deliberately excludes thermodynamic and transport properties; prescribed
@@ -2816,7 +2817,7 @@ Host-facing entry points:
 3. **`moisture_fractions`**: Converts prognostic densities to mass fractions
    (liquid = cloud + rain + liquid-on-ice; ice = dry ice).
 4. **`update_microphysical_fields!`**: Refreshes diagnostic fields after a state update.
-   It first applies the `number_repair` (see *Mass without number* below), then builds
+   It first repairs mass without number (see *Mass without number* below), then builds
    the microphysical state once per cell, clamps the rime state, and hands both
    to `update_microphysical_auxiliaries!`, which writes the specific quantities and the
    terminal velocities.
@@ -2866,8 +2867,9 @@ alone cannot make the corresponding mass or number reservoirs negative. This is
 not an unconditional positivity guarantee for an arbitrary host timestep or RK
 stage. With a longer time step the limited sinks overshoot; a number moment is then
 clamped to zero while its mass survives, leaving rain or ice with mass but no number,
-so P3 warns once when ``Δt`` exceeds `sink_limiting_timescale`. The same timescale relaxes
-the coupled saturation adjustment, so raising it well beyond ``Δt`` slows condensation. The optional ``ρs^{v+l}`` prognostic is also excluded: subsaturation is
+so P3 warns once when ``Δt`` exceeds `sink_limiting_timescale`. The same timescale
+relaxes the coupled saturation adjustment, so raising it well beyond ``Δt`` slows
+condensation. The optional ``ρs^{v+l}`` prognostic is also excluded: subsaturation is
 legitimately negative. Breeze does not implement a post-step "return small mass
 to vapor" cleanup, because that requires state mutation with a paired ``θ``
 correction.
@@ -2915,20 +2917,23 @@ Advection, sedimentation and the process limiters can leave rain or ice with mas
 the largest admissible particles (2 mm drops, 2 cm rimed ice), which aloft, where the
 fall-speed density correction ``(ρ₀/ρ)^{0.54}`` reaches 3 to 4, fall at tens of m/s and set
 the sedimentation CFL number. Following the cleanup in the two-moment scheme of
-[Milbrandt and Yau (2005)](@cite MilbrandtYau2005), `update_microphysical_fields!` applies
-P3's `number_repair` (a [`NumberConcentrationRepair`](@ref Breeze.Microphysics.PredictedParticleProperties.NumberConcentrationRepair)
-by default) before the state is read: where ``q ≥`` `minimum_mass_mixing_ratio` but
-``ρn < N^{min} = 10^{-3}`` m⁻³, the prognostic number is replaced by a one-moment estimate,
+[Milbrandt and Yau (2005)](@cite MilbrandtYau2005), `update_microphysical_fields!` therefore
+replaces the prognostic number before the state is read wherever ``q ≥``
+`minimum_mass_mixing_ratio` but ``ρn < N^{min}`` (`minimum_number_density`, 10⁻³ m⁻³), with
+the one-moment estimate
 
 ```math
-N^r = \left(N_0^r\right)^{3/4} \left(\frac{ρ q^r}{π ρ^w}\right)^{1/4}, \qquad
-N^i = \max\left(2 N^{min},\; 5 \exp\left[0.304 \left(T_0 - \max(233, T)\right)\right]\right),
+N^r = \left(\mathbb{C}_{\mathrm{rep},1}\right)^{3/4} \left(\frac{ρ q^r}{π ρ^w}\right)^{1/4}, \qquad
+N^i = \max\left(2 N^{min},\; \mathbb{C}_{\mathrm{nucl},5} \exp\left[\mathbb{C}_{\mathrm{nucl},6} \left(T_0 - \max(\mathbb{C}_{\mathrm{rep},2}, T)\right)\right]\right).
 ```
 
-with ``N_0^r = 10^7`` m⁻⁴ and the ice number of [Cooper (1986)](@cite Cooper1986), both in m⁻³.
-The estimate is then bounded by the same slope and λ limits the size distributions use, so a
-trace of mass carries at most the number of the smallest admissible particles. Only ``ρn^r``
-and ``ρn^i`` change; no water moves. `number_repair = nothing` disables it.
+Rain follows an exponential distribution with intercept ``\mathbb{C}_{\mathrm{rep},1} = 10^7``
+m⁻⁴, and ice the [Cooper (1986)](@cite Cooper1986) number that deposition nucleation uses
+(``\mathbb{C}_{\mathrm{nucl},5} = 5`` m⁻³, ``\mathbb{C}_{\mathrm{nucl},6} = 0.304`` K⁻¹),
+evaluated no colder than ``\mathbb{C}_{\mathrm{rep},2} = 233`` K. The estimate is then bounded
+by the same slope and λ limits the size distributions use, so a trace of mass carries at most
+the number of the smallest admissible particles. Only ``ρn^r`` and ``ρn^i`` change; no water
+moves. The parameters live in [`ProcessRate`](@ref Breeze.Microphysics.PredictedParticleProperties.ProcessRate).
 
 #### Threshold Handling
 

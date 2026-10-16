@@ -13,11 +13,8 @@ using KernelAbstractions: @kernel, @index
 
 const P3 = PredictedParticlePropertiesMicrophysics
 
-# P3 evolves through RK-stage tendencies; it has no full-Δt operator-split update. Once per
-# step it only checks the step length against `sink_limiting_timescale`. The sink limiters
-# bound each sink so that a forward update no longer than that timescale cannot empty its
-# reservoir; a longer RK step overshoots, a number moment is clamped to zero while its mass
-# survives, and rain or ice is left with mass but no number.
+# P3 evolves through RK-stage tendencies and has no operator-split update; once per step it
+# only checks the step against `sink_limiting_timescale` (see "Positivity" in p3_theory.md).
 function AM.microphysics_model_update!(p3::P3, model)
     Δt = model.clock.last_Δt
     τ = p3.process_rates.sink_limiting_timescale

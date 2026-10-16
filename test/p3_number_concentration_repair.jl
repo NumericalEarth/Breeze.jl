@@ -3,56 +3,44 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Test
 
 using Breeze
-using Breeze.Microphysics.PredictedParticleProperties: PredictedParticleProperties,
-                                                       NumberConcentrationRepair,
-                                                       PredictedParticlePropertiesMicrophysics
+using Breeze.Microphysics.PredictedParticleProperties: PredictedParticleProperties, ProcessRate
 
 using Oceananigans: RectilinearGrid, set!
 using Oceananigans.Fields: interior
-using Oceananigans.TimeSteppers: update_state!
 
 const PPP = PredictedParticleProperties
 
 @testset "P3 number concentration repair" begin
     FT = Float64
 
-    @testset "Construction" begin
-        repair = NumberConcentrationRepair(FT)
-        @test repair.minimum_number_density == FT(1e-3)
-        @test repair.rain_intercept == FT(1e7)
-        @test repair.ice_number_minimum_temperature == FT(233)
-        @test PredictedParticlePropertiesMicrophysics(FT).number_repair isa NumberConcentrationRepair{FT}
-        @test isnothing(PredictedParticlePropertiesMicrophysics(FT; number_repair = nothing).number_repair)
-    end
-
     # Two lower cells hold a trace of rain and ice with no number; the two upper cells hold
     # rain and ice with a healthy number, which the repair must leave alone.
     trace_mass = FT(1e-12)
-    Nz = 4
     is_trace(z) = z < 200
 
-    function repaired_model(number_repair)
-        grid = RectilinearGrid(default_arch, FT; size = (1, 1, Nz), x = (0, 100), y = (0, 100), z = (0, 400))
+    function trace_model(process_rates)
+        grid = RectilinearGrid(default_arch, FT; size = (1, 1, 4), x = (0, 100), y = (0, 100), z = (0, 400))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
                                          base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
-        p3 = PredictedParticlePropertiesMicrophysics(FT; number_repair)
+        p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates)
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants, microphysics = p3)
-        set!(model; θ = FT(285), qᵛ = FT(1e-3),
-             qʳ = (x, y, z) -> is_trace(z) ? trace_mass : FT(1e-3),
-             nʳ = (x, y, z) -> is_trace(z) ? zero(FT) : FT(1e5),
-             qⁱ = (x, y, z) -> is_trace(z) ? trace_mass : FT(1e-4),
-             nⁱ = (x, y, z) -> is_trace(z) ? zero(FT) : FT(1e4),
+        # `set!` ends with `update_state!`, which applies the repair.
+        set!(model; θ = 285, qᵛ = 1e-3,
+             qʳ = (x, y, z) -> is_trace(z) ? trace_mass : 1e-3,
+             nʳ = (x, y, z) -> is_trace(z) ? 0 : 1e5,
+             qⁱ = (x, y, z) -> is_trace(z) ? trace_mass : 1e-4,
+             nⁱ = (x, y, z) -> is_trace(z) ? 0 : 1e4,
              enforce_mass_conservation = false)
-        update_state!(model)
         return model
     end
 
-    repaired = repaired_model(NumberConcentrationRepair(FT))
-    unrepaired = repaired_model(nothing)
-    column(model, name) = vec(Array(interior(getproperty(model.microphysical_fields, name))))
+    repaired = trace_model(ProcessRate(FT))
+    # A zero threshold never fires, and keeps the scheme type (and its compiled kernels) unchanged.
+    unrepaired = trace_model(ProcessRate(FT; minimum_number_density = 0))
+    column(model, name) = vec(Array(interior(model.microphysical_fields[name])))
     trace = 1:2
     healthy = 3:4
 
@@ -60,10 +48,8 @@ const PPP = PredictedParticleProperties
         p3 = repaired.microphysics
         parameters = p3.process_rates
 
-        ρnʳ = column(repaired, :ρnʳ)
-        ρnⁱ = column(repaired, :ρnⁱ)
-        @test all(ρnʳ[trace] .>= p3.number_repair.minimum_number_density)
-        @test all(ρnⁱ[trace] .> 0)
+        @test all(column(repaired, :ρnʳ)[trace] .>= parameters.minimum_number_density)
+        @test all(column(repaired, :ρnⁱ)[trace] .> 0)
 
         # A trace of rain is given the smallest drops the slope bounds admit, not the largest.
         qʳ = column(repaired, :qʳ)
@@ -112,10 +98,8 @@ const PPP = PredictedParticleProperties
     @testset "Trace mass falls slowly" begin
         # wʳ and wⁱ at the bottom face of each trace cell carry that cell's fall speed.
         for name in (:wʳ, :wⁱ)
-            repaired_speed = maximum(abs, column(repaired, name)[trace])
-            unrepaired_speed = maximum(abs, column(unrepaired, name)[trace])
-            @test repaired_speed < FT(0.1)
-            @test unrepaired_speed > FT(0.5)
+            @test maximum(abs, column(repaired, name)[trace]) < 0.1
+            @test maximum(abs, column(unrepaired, name)[trace]) > 0.5
         end
     end
 end
