@@ -1,0 +1,77 @@
+P3 parcel reference data v1.0
+============================
+
+These are direct official-P3 runs, NOT CM1 output. P3_MAIN is called by the
+Fortran host in trajectory_reference.jl. The host prescribes pressure and
+conserves liquid-ice potential temperature. Sedimentation is disabled and
+prognostic supersaturation enabled. Native P3 process updates, clipping, and
+per-step adjustments are retained. Diagnostic interventions that alter these
+policies are NOT included here.
+
+Upstream: https://github.com/P3-microphysics/P3-microphysics
+Commit: f90df9613fc90360f846d2f12114b967ef3e53ce
+P3 source version: 5.5.2
+Source SHA256: 6e354a9da133db13cd628938d1bb6f836dc00360c80c2ce48d8e7e3785eb20e2
+Lookup-table artifact tree: 4b8a8131a2d919e441f3ed745fe35bfee3009872
+Generation scripts/results: Breeze.jl validation/P3_kin1d at c0100340.
+The provenance directory contains the baseline source patch and compiler version;
+each trajectory directory contains its exact Fortran host. Reproduce with
+process_reference.jl, trajectory_reference.jl, and outlier_reference.jl baseline,
+as described in validation/P3_kin1d/README.txt. package_reference.jl packages the
+existing output and does not rerun or advance any model. No executables included.
+
+All trajectories: 5400 s; p0=101325 Pa; initially no condensate; fixed aerosol
+3e8 per kg dry air; no entrainment or fallout. Pressure at height z is
+101325 * (1 - 9.816*z/(1005*300))^(1005/287.15), with z=w*t in meters.
+
+matrix/cases.dat gives case_id, T0 [K], RH0 [fraction], w [m/s], and total
+water [kg/kg moist air]. RH is vapor pressure divided by Flatau liquid saturation
+pressure; initial vapor uses epsilon=0.622. The matrix spans T0=(288,300) K,
+RH0=(0.6,0.8,1), and w=(0.5,1,2) m/s. Final heights therefore differ.
+reference_dt0.003125 contains all 18 cases; dt0.0015625 contains IDs 3,9,14,18;
+dt0.00078125 contains IDs 3,9,18. Directory names give timesteps in seconds.
+
+two_ascents contains T0=300 K, total water=0.015 kg/kg moist air. IDs 13 and 14
+ascend at 1 and 2 m/s respectively. The host's cases.dat also lists unused
+process-test initial states; its explicit test>=13 branch sets the parcel water.
+These controlled benchmarks use reference constants; they are not automatically
+equivalent to the native-default simulations in examples/rising_parcels.jl.
+
+reference_final.dat schema (whitespace-separated; no header; every 10 s,
+starting at t=10 s, so initialization comes from the case definitions):
+  1 case ID
+  2 time [s]
+  3 pressure [Pa]
+  4 temperature [K]
+  5 vapor mixing ratio [kg/kg dry air]
+  6 cloud liquid mixing ratio [kg/kg dry air]
+  7 cloud number [1/kg dry air]
+  8 rain mixing ratio [kg/kg dry air]
+  9 rain number [1/kg dry air]
+ 10 frozen ice mixing ratio, excluding liquid coating [kg/kg dry air]
+ 11 ice number [1/kg dry air]
+ 12 rime mass, already included in frozen ice [kg/kg dry air]
+ 13 rime volume [m^3/kg dry air]
+ 14 liquid coating [kg/kg dry air]
+ 15 liquid supersaturation, rv - rv_sat [kg/kg dry air]
+
+To convert columns 5:14 to moist-air quantities, multiply by the dry fraction
+qd = 1/(1 + col5 + col6 + col8 + col10 + col14). Do not count rime twice.
+For column 15, use qd * epsilon/(epsilon + rv_sat) * col15, epsilon=0.622,
+rv_sat=col5-col15. See plot_parcel_matrix.jl for the conversion.
+
+event_diagnostics contains read-only 0.1 s process-entry samples around the
+three outliers, using dt=0.00078125 s. rate_columns.txt lists the first ten
+columns on one line, then the names of the remaining 35 rates, one per line.
+These are process-entry states, staggered by less than 0.001 s from completed
+Breeze states. Ice mass here includes coating (unlike reference_final.dat).
+intervention.patch in this directory adds instrumentation ONLY; its 10 s
+trajectory is bit-for-bit identical to the non-instrumented reference.
+
+Limits: 10 s trajectory samples miss fast freezing peaks. High-resolution
+diagnostics reveal transient differences as large as 2.96 K. Small-timestep
+convergence is affected by per-call trace cleanup and instantaneous nucleation
+adjustment. This dataset is a versioned comparison reference, not a claim of
+physical truth or full numerical equivalence. Read outlier_results.txt before
+interpreting errors. The corrected aerosol R=8.3145 benchmark setting affects
+Breeze only; the official-P3 reference already used that value.
