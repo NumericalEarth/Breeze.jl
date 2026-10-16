@@ -1,10 +1,11 @@
 # # Kinematic driver: cloud and precipitation with P3
 #
 # This example uses [`PrescribedDynamics`](@ref) to lift moist air through a
-# vertical column at 2 m/s. [`P3Microphysics`](@ref) predicts cloud droplets,
-# rain, ice, and liquid water carried on ice, with a **prognostic vapor excess over liquid**
-# and aerosol activation. Velocity is prescribed while transport, thermodynamics,
-# and microphysics evolve. We use liquid–ice potential temperature, the default
+# vertical column at 2 m/s.
+# [`P3Microphysics`](@ref PredictedParticlePropertiesMicrophysics) predicts
+# cloud droplets, rain, ice, and liquid water carried on ice, with a
+# **prognostic vapor excess over liquid** and aerosol activation. Velocity is
+# prescribed while transport, thermodynamics, and microphysics evolve. We use liquid–ice potential temperature, the default
 # thermodynamic formulation, explicitly selected below for clarity.
 #
 # This is an open column: moist air enters at the bottom, air leaves at the top,

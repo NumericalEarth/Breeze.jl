@@ -133,8 +133,9 @@ dry_figure
 # - Two-moment microphysics predicts cloud/rain mass and number
 #   [Seifert and Beheng (2006)](@cite SeifertBeheng2006), with aerosol activation
 #   [Abdul-Razzak and Ghan (2000)](@cite AbdulRazzakGhan2000).
-# - [`P3Microphysics`](@ref) adds evolving ice properties and, here, prognostic
-#   vapor excess over liquid and aerosol activation. See [P3: Theory](@ref p3_theory).
+# - [`P3Microphysics`](@ref PredictedParticlePropertiesMicrophysics) adds evolving
+#   ice properties and, here, a prognostic vapor excess over liquid and aerosol
+#   activation. See [P3: Theory](@ref p3_theory).
 #
 # These are comparisons of complete configurations: Kessler retains its saturation
 # formula, and each scheme retains its default process parameters. The plotted
