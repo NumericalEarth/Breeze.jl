@@ -252,7 +252,7 @@ struct P3ProcessRates{FT}
 end
 
 @inline function p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
-                                 temperature_tendency, vapor_tendency)
+                                 temperature_tendency, pressure_tendency)
     FT = typeof(ρ)
 
     # Unpack derived state (field access on concrete struct — GPU-safe)
@@ -280,7 +280,7 @@ end
                                                       Fᶠ, ρᶠ, T, P, ρ, constants,
                                                       transport, q,
                                                       state.μᶜˡ, state.λᶜˡ, state.nᶜˡ,
-                                                      temperature_tendency, vapor_tendency,
+                                                      temperature_tendency, pressure_tendency,
                                                       state.lookups)
     cond = vapor_rates.condensation
 
@@ -551,7 +551,7 @@ end
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
-                                          vapor_tendency)
+                                          pressure_tendency)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -640,7 +640,7 @@ end
 
     # === PHASE 1 & 2 RATES ===
     phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
-                             temperature_tendency, vapor_tendency)
+                             temperature_tendency, pressure_tendency)
     phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===

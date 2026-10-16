@@ -203,7 +203,7 @@ function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, q�
                                                qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                                constants, transport, q;
                                               temperature_tendency = zero(T),
-                                              vapor_tendency = zero(qᵛ))
+                                              pressure_tendency = zero(P))
     FT = typeof(qᶜˡ)
     τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(Breeze.Thermodynamics.vapor_gas_constant(constants))
@@ -233,7 +233,7 @@ function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, q�
     transient = (1 - exp(-total_relaxation * τ)) / τ
     supersaturation = qᵛ - qᵛ⁺ˡ
     bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * ice_relaxation
-    external_driver = vapor_tendency - dqᵛ⁺ˡ_dT * temperature_tendency
+    external_driver = qᵛ⁺ˡ * pressure_tendency / P - dqᵛ⁺ˡ_dT * temperature_tendency
     total_driver = external_driver + bergeron_driver
     supersaturation_departure = supersaturation - total_driver / total_relaxation
 
@@ -718,13 +718,16 @@ end
                                                   nothing, T, FT(0), FT(0))
         rates_cooling = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants,
                                                  nothing, T, FT(-0.01), FT(0))
-        rates_vapor_source = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants,
-                                                      nothing, T, FT(0), FT(1e-6))
+        rates_compression = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants,
+                                                     nothing, T, FT(0), FT(10))
+        rates_expansion = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants,
+                                                   nothing, T, FT(0), FT(-10))
         rates_w_only = compute_p3_process_rates(p3, ρ, ℳ_with_w, 𝒰, constants,
                                                 nothing, T, FT(0), FT(0))
 
         @test rates_cooling.condensation > rates_unforced.condensation
-        @test rates_vapor_source.condensation > rates_unforced.condensation
+        @test rates_compression.condensation > rates_unforced.condensation
+        @test rates_expansion.condensation < rates_unforced.condensation
         @test rates_w_only.condensation == rates_unforced.condensation
 
         vapor_tendency_stationary = microphysical_tendency(

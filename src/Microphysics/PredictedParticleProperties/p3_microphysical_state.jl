@@ -675,14 +675,14 @@ end
 @inline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
                                      constants, properties::P3ProcessProps,
                                      surface_temperature, temperature_tendency,
-                                     vapor_tendency)
+                                     pressure_tendency)
     Fᶠ = properties.Fᶠ
     ρᶠ = properties.ρᶠ
     # Passing `properties` lets compute_p3_process_rates skip the redundant
     # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                      surface_temperature, temperature_tendency,
-                                     vapor_tendency)
+                                     pressure_tendency)
 
     # Tendency extraction
     cloud_mass_tendency = tendency_ρqᶜˡ(rates, ρ)
@@ -711,15 +711,18 @@ end
                                 vapor_mass_tendency, aerosol_number_tendency)
 end
 
-# Adiabatic temperature tendency from the grid or parcel vertical velocity, used as
-# P3's external thermodynamic forcing on both paths. The accompanying resolved-vapor
-# tendency is zero. On the Eulerian grid path this deliberately omits resolved
-# transport, turbulent mixing, radiation, and user forcing from the diffusional-growth
-# driver; see `_p3_add_tendencies_kernel!`.
+# Hydrostatic adiabatic temperature and pressure tendencies from the local vertical
+# velocity, ∂ₜT = -g w / cᵖᵐ and ∂ₜp = -ρ g w, used as P3's external thermodynamic
+# forcing on the gridded and parcel paths alike. This deliberately omits resolved transport,
+# turbulent mixing, radiation, and user forcing from the diffusional-growth driver; see
+# `_p3_add_tendencies_kernel!`.
 @inline function p3_adiabatic_temperature_tendency(ℳ::P3MicrophysicalState, 𝒰, constants)
     cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
     return -constants.gravitational_acceleration * ℳ.w / cᵖᵐ
 end
+
+@inline p3_adiabatic_pressure_tendency(ρ, ℳ::P3MicrophysicalState, constants) =
+    -ρ * constants.gravitational_acceleration * ℳ.w
 
 #####
 ##### Surface precipitation boundary condition
@@ -914,8 +917,9 @@ end
     properties = p3_process_properties(p3, ρ, ℳ)
     surface_temperature = temperature(𝒰, constants)
     temperature_tendency = p3_adiabatic_temperature_tendency(ℳ, 𝒰, constants)
+    pressure_tendency = p3_adiabatic_pressure_tendency(ρ, ℳ, constants)
     return p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
-                               surface_temperature, temperature_tendency, zero(ρ))
+                               surface_temperature, temperature_tendency, pressure_tendency)
 end
 
 # Name-to-slot map for `P3TendencyResult`. Names P3 does not evolve (`:s`, `:qᵗ`, host

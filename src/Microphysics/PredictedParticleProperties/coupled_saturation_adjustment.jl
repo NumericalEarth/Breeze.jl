@@ -169,7 +169,7 @@ cloud/precipitation fraction framework is handled separately.
                                                      constants, transport, q,
                                                      μᶜˡ, λᶜˡ, nᶜˡ_bounded,
                                                      temperature_tendency,
-                                                     vapor_tendency,
+                                                     pressure_tendency,
                                                      lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
@@ -220,10 +220,11 @@ cloud/precipitation fraction framework is handled separately.
     supersaturation = qᵛ - qᵛ⁺ˡ
     bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * dry_ice_relaxation
     # The external forcing term is the externally driven change in liquid-relative
-    # supersaturation: dqᵛ/dt - (dqᵛ⁺ˡ/dT) dT/dt. Breeze currently approximates
-    # this with adiabatic cooling, dT/dt = -g w / cᵖᵐ, and dqᵛ/dt = 0. Resolved
-    # transport, turbulent mixing, radiation, and user forcing are omitted.
-    external_driver = vapor_tendency - dqᵛ⁺ˡ_dT * temperature_tendency
+    # supersaturation at fixed vapor, -∂ₜqᵛ⁺ˡ = -(dqᵛ⁺ˡ/dT) ∂ₜT + qᵛ⁺ˡ ∂ₜp / p, since
+    # qᵛ⁺ˡ ∝ 1/p at fixed T and composition. In adiabatic ascent the pressure term
+    # offsets about a fifth of the cooling term. Resolved vapor transport, turbulent
+    # mixing, radiation, and user forcing are omitted.
+    external_driver = qᵛ⁺ˡ * pressure_tendency / P - dqᵛ⁺ˡ_dT * temperature_tendency
     total_driver = external_driver + bergeron_driver
 
     raw_cloud_growth = growth_share(cloud_relaxation, ξˡ, total_driver, total_relaxation,

@@ -2052,10 +2052,17 @@ The dry-ice deposition rate is then
 
 where ``s^l = q^v - q^{v+l}`` is the supersaturation with respect to liquid and
 ``A`` sums two contributions: the Bergeron offset, and the external change in
-liquid-relative supersaturation ``∂_t q^v - (dq^{v+l}/dT)\, ∂_t T``. Breeze
-retains the Bergeron offset in full, and approximates the external part with
-adiabatic cooling alone, ``∂_t T = -g\, w / cᵖᵐ`` and ``∂_t q^v = 0``, where
-``w`` is the resolved (or parcel) vertical velocity. Resolved transport,
+liquid-relative supersaturation at fixed vapor,
+
+```math
+-∂_t q^{v+l} = -\frac{dq^{v+l}}{dT} ∂_t T + q^{v+l} \frac{∂_t p}{p} ,
+```
+
+since ``q^{v+l} ∝ 1/p`` at fixed temperature and composition. Breeze retains the
+Bergeron offset in full, and drives the external part with hydrostatic adiabatic
+expansion, ``∂_t T = -g\, w / cᵖᵐ`` and ``∂_t p = -ρ g\, w``, where ``w`` is the
+resolved (or parcel) vertical velocity; in ascent the pressure term offsets about a
+fifth of the cooling term. Resolved transport,
 turbulent mixing, radiation, and user forcing therefore do not enter this
 driver, even though they do act on the host thermodynamic equation. Supplying
 the complete external tendency here remains a possible future improvement.

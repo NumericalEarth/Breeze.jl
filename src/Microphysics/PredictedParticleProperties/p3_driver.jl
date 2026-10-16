@@ -97,11 +97,11 @@ end
         𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
         𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
 
-        # Approximate the resolved diffusional-growth driver with adiabatic
-        # cooling from the local vertical velocity. External vapor forcing is
+        # Approximate the resolved diffusional-growth driver with hydrostatic adiabatic
+        # expansion from the local vertical velocity. External vapor forcing is
         # intentionally neglected.
         temperature_tendency = p3_adiabatic_temperature_tendency(ℳ, 𝒰, constants)
-        vapor_tendency = zero(temperature_tendency)
+        pressure_tendency = p3_adiabatic_pressure_tendency(ρ, ℳ, constants)
 
         surface_temperature = μ.surface_temperature[i, j, 1]
     end
@@ -109,7 +109,7 @@ end
     properties = p3_process_properties(p3, ρ, ℳ)
     result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
                                  surface_temperature, temperature_tendency,
-                                 vapor_tendency)
+                                 pressure_tendency)
     add_p3_tendencies!(G, i, j, k, grid, p3, result)
 end
 
