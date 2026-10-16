@@ -153,6 +153,7 @@ export
     # Forcing utilities
     geostrophic_forcings,
     SubsidenceForcing,
+    TimeHeightProfile,
     SpecificForcing,
 
     # Grid utilities
