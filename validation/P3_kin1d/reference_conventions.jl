@@ -63,7 +63,7 @@ function reference_microphysics(P; dt=1.)
         refreezing_timescale=dt, rime_densification_timescale=dt, rain_evaporation_timescale=dt,
         shed_drop_mass_liqfrac=1/1.928e6)
     aerosol = PPP.AerosolActivation(PPP.AerosolMode(molecular_weight_water=0.018);
-        prognostic=false, activation_timescale=dt, molecular_weight_water=0.018, universal_gas_constant=8.314)
+        prognostic=false, activation_timescale=dt, molecular_weight_water=0.018, universal_gas_constant=8.3145)
     p3 = P3Microphysics(; thermodynamic_constants=constants, process_rates, aerosol)
     return p3, constants
 end

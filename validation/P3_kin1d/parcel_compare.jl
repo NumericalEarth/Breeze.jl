@@ -20,7 +20,7 @@ end
 
 function run_production_parcel(speed; dt=0.1, timescale=10., configuration="default",
                                initial_temperature=300., total_water=0.015, stop_time=5400.,
-                               case_identifier=12+speed)
+                               case_identifier=12+speed, output_interval=10)
     grid = RectilinearGrid(size=12001, z=(-0.5, 12000.5), topology=(Flat, Flat, Bounded))
     constants = parcel_thermodynamic_constants(configuration)
     rates = PPP.ProcessRate(; thermodynamic_constants=constants, predict_supersaturation=true,
@@ -30,7 +30,7 @@ function run_production_parcel(speed; dt=0.1, timescale=10., configuration="defa
     activation_timescale = configuration == "native_defaults" ? 1. : timescale
     aerosol = if configuration == "reference_constants"
         PPP.AerosolActivation(PPP.AerosolMode(number_mixing_ratio=3e8*(1-total_water), molecular_weight_water=0.018);
-                              prognostic=false, activation_timescale, molecular_weight_water=0.018, universal_gas_constant=8.314)
+                              prognostic=false, activation_timescale, molecular_weight_water=0.018, universal_gas_constant=8.3145)
     else
         PPP.AerosolActivation(PPP.AerosolMode(number_mixing_ratio=3e8*(1-total_water));
                               prognostic=false, activation_timescale)
@@ -59,7 +59,7 @@ function run_production_parcel(speed; dt=0.1, timescale=10., configuration="defa
                      q.vapor - TD.saturation_specific_humidity(state.𝒰, constants, PlanarLiquidSurface())])
     end
     simulation = Simulation(model; Δt=dt, stop_time, verbose=false)
-    add_callback!(simulation, record, TimeInterval(10))
+    add_callback!(simulation, record, TimeInterval(output_interval))
     if get(ENV, "P3_DEBUG_NONFINITE", "false") == "true"
         previous = Ref((; z=state.z, ρ=state.ρ, μ=state.μ, 𝒰=state.𝒰))
         function check_state(sim)

@@ -1,3 +1,37 @@
+Outlier diagnosis (2026-10-15)
+==============================
+
+See outlier_results.txt for controlled attribution of the three matrix outliers:
+Cooper nucleation adjustment, per-call ice/rime cleanup, and the saturation
+gas-constant ratio shifting a fast freezing event. These are not interchangeable
+with process-code bugs. One benchmark configuration error was fixed: upstream's
+aerosol gas constant is 8.3145, not 8.314. Original matrix outputs/results remain
+archived with the original setting; corrected outliers are saved separately.
+Move old cached breeze_dt* directories aside before regenerating the full matrix
+with the corrected constant (parcel_matrix.jl otherwise reuses existing files).
+
+After generating the matrix and its finest outlier reference below, run:
+
+  julia --project=validation/P3_kin1d validation/P3_kin1d/outlier_breeze.jl
+  julia --project=validation/P3_kin1d validation/P3_kin1d/outlier_process_probes.jl
+  julia --project=validation/P3_kin1d validation/P3_kin1d/outlier_reference.jl baseline
+  julia --project=validation/P3_kin1d validation/P3_kin1d/outlier_reference.jl nucleation_relaxation
+  julia --project=validation/P3_kin1d validation/P3_kin1d/outlier_reference.jl retain_trace_ice
+  julia --project=validation/P3_kin1d validation/P3_kin1d/outlier_reference.jl retain_trace_rime
+  julia --project=validation/P3_kin1d validation/P3_kin1d/outlier_reference.jl retain_trace_ice_and_rime
+  julia --project=validation/P3_kin1d validation/P3_kin1d/outlier_reference.jl consistent_saturation
+  julia --project=validation/P3_kin1d validation/P3_kin1d/evaluate_outliers.jl
+
+The Breeze runs reuse run_production_parcel and its native Simulation/RK3, with
+read-only output every 0.1 s. The reference script copies the existing generated
+Fortran host/source into isolated output directories and saves each intervention
+patch. Its baseline is checked bit-for-bit against the archived reference.
+The interventions modify upstream numerics/constants only for causal diagnosis:
+they are neither proposed upstream patches nor replacements for official data.
+The process-probe script uses the reference adapter solely for identical-state
+formula evaluation; it advances no Breeze parcel. All results/plots are under
+validation_output/p3_matrix/outliers. No CM1 or docs build is required.
+
 Adiabatic ParcelModel matrix (2026-10-15)
 ========================================
 
