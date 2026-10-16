@@ -2,8 +2,7 @@
 ##### Column workspace: the per-column storage of the ecCKD radiation, for one batch of columns
 #####
 ##### The columns are solved in batches of whole rows of the grid, `rows` rows of `Nx` columns at a
-##### time, and the workspace holds one batch: memory stops growing with the grid once the grid is
-##### larger than a batch. Within a batch, column `c = i + (jᵇ - 1) Nx` is the `jᵇ`-th row of the
+##### time (`column_batches` of the radiation model), and the workspace holds one batch. Within a batch, column `c = i + (jᵇ - 1) Nx` is the `jᵇ`-th row of the
 ##### batch, and with `N = Nz + Nₑ` layers (`Nₑ` extension layers) the arrays are laid out top-down
 ##### in NumericalRadiation's convention. The fluxes are not stored here: the column kernel
 ##### accumulates them directly into the flux fields of the radiation model.
@@ -175,24 +174,16 @@ The number of columns of a batch, `Nb = Nx × rows`.
 $(TYPEDSIGNATURES)
 
 The batches of the rows of `grid` that `workspace` holds one at a time: the `(row_offset, size)` of
-each, with `row_offset` the number of grid rows before the batch and `size` the `(Nx, rows)` of
-the columns it solves. Every batch but the last is full, so the column kernels compile for at most
-two sizes.
+each, with `row_offset` the number of grid rows before the batch and `size = (Nx, rows)` the columns
+it solves. Every batch is full, so the column kernels compile for one size: when the rows do not
+divide `Ny`, the final batch overlaps the one before it (as for the RRTMGP optics), and the
+overlapping columns are solved twice.
 """
 function column_batches(workspace::ColumnWorkspace, grid)
     Nx, Ny = size(grid, 1), size(grid, 2)
     rows = workspace.rows
-    return ((j₀, (Nx, min(rows, Ny - j₀))) for j₀ in 0:rows:Ny-1)
+    return ((min(j₀, Ny - rows), (Nx, rows)) for j₀ in 0:rows:Ny-1)
 end
-
-"""
-$(TYPEDSIGNATURES)
-
-The number of grid rows in a batch of columns: whole rows of at least
-`columns_per_batch` columns, and at most the grid; the whole grid for `nothing`.
-"""
-batch_rows(grid, ::Nothing) = size(grid, 2)
-batch_rows(grid, columns_per_batch) = clamp(cld(columns_per_batch, size(grid, 1)), 1, size(grid, 2))
 
 # Column `c` of the batch, row `jᵇ` of it
 @inline batch_column(i, jᵇ, Nx) = i + (jᵇ - 1) * Nx

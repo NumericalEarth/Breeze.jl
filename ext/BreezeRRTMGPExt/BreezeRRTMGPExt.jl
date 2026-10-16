@@ -3,7 +3,7 @@ module BreezeRRTMGPExt
 using Breeze
 
 using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles, materialize_surface_property,
-                               dynamics_pressure, total_density,
+                               dynamics_pressure, total_density, resolve_column_batch_rows,
                                column_index, compute_radiation_flux_divergence!,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
                                assert_bound_surface_temperature, maybe_infer_solar_position,
@@ -74,6 +74,7 @@ using Oceananigans.Utils: IterationInterval
 
 include("gray_radiative_transfer_model.jl")
 include("rrtmgp_shared_utilities.jl")
+include("rrtmgp_column_batching.jl")
 include("clear_sky_radiative_transfer_model.jl")
 include("all_sky_radiative_transfer_model.jl")
 

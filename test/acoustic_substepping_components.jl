@@ -8,7 +8,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 ##### sequencing, the explicit horizontal step and vertical tridiagonal
 ##### coefficients, substepper and time-stepper construction, divergence
 ##### damping strategies, the upper sponge, the Exner reference state,
-##### slow-tendency modes, and show methods.
+##### the slow-dynamics wrapper, and show methods.
 #####
 ##### Open-boundary behavior lives in
 ##### `test/acoustic_substepping_open_boundaries.jl`; longer time
@@ -18,7 +18,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
-                                    compute_acoustic_substeps,
+                                    compute_acoustic_substeps, minimum_horizontal_spacing,
                                     sponge_term_diag, sponge_rhs,
                                     apply_horizontal_pressure_gradient_substep,
                                     AcousticTridiagLower, AcousticTridiagDiagonal,
@@ -28,7 +28,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
                                     implicit_damping_factors
-using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
+using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density
 using Breeze.Thermodynamics: ExnerReferenceState, surface_density
@@ -315,6 +315,25 @@ for arch in arches
             N_bwd = compute_acoustic_substeps(grid, -12, constants, ν)
             @test N_fwd ≥ 1
             @test N_bwd == N_fwd
+        end
+
+        @testset "Substepper caches the minimum horizontal spacing" begin
+            # Δx = 1000 m, Δy = 500 m
+            grid = RectilinearGrid(arch; size=(100, 6, 10), halo=(5, 5, 5),
+                                   x=(0, 100kilometers), y=(0, 3kilometers), z=(0, 10kilometers))
+            Δx_min = minimum_horizontal_spacing(grid)
+            @test Δx_min isa FT
+            @test Δx_min == 500
+
+            substepper = AcousticSubstepper(grid, SplitExplicitTimeDiscretization())
+            @test substepper.minimum_horizontal_spacing === Δx_min
+            @test compute_acoustic_substeps(Δx_min, 12, constants, ν) ==
+                  compute_acoustic_substeps(grid, 12, constants, ν)
+
+            flat_grid = RectilinearGrid(arch; size=(100, 10), halo=(5, 5),
+                                        x=(0, 100kilometers), z=(0, 10kilometers),
+                                        topology=(Periodic, Flat, Bounded))
+            @test minimum_horizontal_spacing(flat_grid) == 1000
         end
         Oceananigans.defaults.FloatType = old_FT
     end
@@ -610,10 +629,10 @@ for arch in arches
     end
 
     #####
-    ##### SlowTendencyMode and HorizontalSlowMode
+    ##### SlowDynamics
     #####
 
-    @testset "SlowTendencyMode and HorizontalSlowMode [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+    @testset "SlowDynamics [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
@@ -625,20 +644,13 @@ for arch in arches
         ref = model.dynamics.reference_state
         set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
 
-        @testset "SlowTendencyMode" begin
-            slow = SlowTendencyMode(model.dynamics)
+        @testset "SlowDynamics" begin
+            slow = SlowDynamics(model.dynamics)
             @test x_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test y_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test z_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, slow) == 0
             @test dynamics_density(slow) === model.dynamics.dry_density
-        end
-
-        @testset "HorizontalSlowMode" begin
-            hslow = HorizontalSlowMode(model.dynamics)
-            @test z_pressure_gradient(1, 1, 1, grid, hslow) == 0
-            @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, hslow) == 0
-            @test dynamics_density(hslow) === model.dynamics.dry_density
         end
         Oceananigans.defaults.FloatType = old_FT
     end

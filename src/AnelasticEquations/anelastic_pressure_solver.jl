@@ -77,6 +77,15 @@ end
     end
 end
 
+# The tridiagonal coefficients carry ρᵣ, so they are recomputed whenever ρᵣ changes.
+function AtmosphereModels.update_pressure_solver!(solver::FourierTridiagonalPoissonSolver, ::AnelasticDynamics)
+    tridiagonal_solver = solver.batched_tridiagonal_solver
+    formulation = solver.tridiagonal_formulation
+    Solvers.compute_main_diagonal!(tridiagonal_solver.b, formulation, solver.grid, solver.poisson_eigenvalues...)
+    Solvers.compute_lower_diagonal!(tridiagonal_solver.a, formulation, solver.grid)
+    return nothing
+end
+
 #####
 ##### Pressure solve
 #####

@@ -150,11 +150,12 @@ table) is carried by the gas optics model.
   only `ConstantRadiusParticles` for now
 - `column_extension`: The atmosphere above the grid top (default: `ColumnExtension(eltype(grid))`;
   `nothing` solves the grid's column only, with no atmosphere above it)
-- `columns_per_batch`: Solve the columns in batches of whole rows of the grid of at least this
-  many columns, storing the per-column state and scratch for one batch only, to cap the radiation's
-  memory on large grids (default: `nothing`, one batch of the whole grid). Each batch is a separate
-  kernel launch, so on a GPU smaller batches cost time: aim for several times the number of columns
-  the GPU solves at once.
+- `column_batches`: Number of batches to split the radiation solve into, trading speed for memory
+  (default: `nothing`, one unbatched solve). The per-column state and scratch are then stored for
+  one batch only. Batches are whole j-rows of `cld(Ny, column_batches)` rows each, as for the
+  RRTMGP optics; when the rows do not divide `Ny`, the final batch overlaps the one before it. Each
+  batch is a separate kernel launch of a register-limited kernel, so on a GPU smaller batches cost
+  time: keep batches to several times the number of columns the GPU solves at once.
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  optics::EcCKDOptics,
@@ -171,7 +172,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  liquid_effective_radius = ConstantRadiusParticles(10e-6),
                                                  ice_effective_radius = ConstantRadiusParticles(30e-6),
                                                  column_extension = ColumnExtension(eltype(grid)),
-                                                 columns_per_batch = nothing)
+                                                 column_batches = nothing)
 
     FT = eltype(grid)
     arch = architecture(grid)
@@ -207,7 +208,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     Nx, Ny, Nz = size(grid)
     N = Nz + number_of_extension_layers(extension)
-    rows = batch_rows(grid, columns_per_batch)
+    rows = resolve_column_batch_rows(column_batches, Ny)
     workspace = ColumnWorkspace(arch, FT, Nx, rows, Nx * Ny, N, gas_model, longwave_cloud, extension)
     initialize_cos_zenith!(workspace.cos_zenith, solar_position)
 
@@ -248,6 +249,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   flux_divergence,
                                   liquid_effective_radius,
                                   ice_effective_radius,
+                                  column_batches,
                                   schedule)
 end
 

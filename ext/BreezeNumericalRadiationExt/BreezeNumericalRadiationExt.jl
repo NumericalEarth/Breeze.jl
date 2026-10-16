@@ -11,7 +11,7 @@ module BreezeNumericalRadiationExt
 
 using Breeze
 
-using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, SurfaceRadiation,
+using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, SurfaceRadiation, resolve_column_batch_rows,
                                EcCKDOptics, CloudScatteringTables, ColumnExtension, BackgroundAtmosphere,
                                ConstantRadiusParticles, AbstractSolarPosition, ApparentSolarPosition,
                                materialize_background_atmosphere, materialize_surface_property,

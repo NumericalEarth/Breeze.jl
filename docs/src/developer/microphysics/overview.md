@@ -66,22 +66,55 @@ Velocity components are interpolated from cell faces to cell centers and passed 
 | `grid_moisture_fractions` | `(i, j, k, grid, microphysics, ρ, qᵛᵉ, μ_fields)` | **Generic wrapper**. Builds state and dispatches. |
 
 The argument `qᵛᵉ` is the scheme-dependent specific moisture: vapor (``qᵛ``) for
-non-equilibrium schemes, or equilibrium moisture (``qᵉ = qᵛ + qᶜˡ``) for saturation
+non-equilibrium schemes, or equilibrium moisture (``qᵉ = qᵛ + qᶜˡ + qᶜⁱ``) for saturation
 adjustment schemes.
 
 **Note**: Non-equilibrium schemes don't need `𝒰` to build their state (they use prognostic fields).
 Saturation adjustment schemes override `grid_moisture_fractions` directly since they read cloud
 condensate from diagnostic fields.
 
+### Total Water Conversion
+
+[`condensate_field_names`](@ref Breeze.AtmosphereModels.condensate_field_names) lists the
+independent condensate mass densities outside the scheme's prognostic moisture. This one
+list defines the water budget used by both grid and parcel models:
+
+| Cloud formation | Prognostic moisture | Independent condensates to subtract from total water |
+|-----------------|---------------------|-----------------------------------------------------|
+| Non-equilibrium | Vapor ``qᵛ`` | Cloud liquid, cloud ice, and precipitation |
+| Saturation adjustment | Equilibrium moisture ``qᵉ`` | Precipitation only |
+| No condensates | Vapor or equilibrium moisture | None |
+
+The default includes every microphysical prognostic field. Schemes with number
+concentrations or dependent moments must override it to exclude those fields.
+
+[`specific_prognostic_moisture`](@ref Breeze.AtmosphereModels.specific_prognostic_moisture)
+uses these names to compute ``qᵛᵉ = qᵗ - Σ ρqᶜ / ρ`` from density-weighted variables,
+for both grid and parcel models. Here ``ρ`` is **total air density**, including water. Number concentrations and dependent masses
+(such as P3 rime mass, already included in total ice) are excluded from the sum.
+
+The conversion preserves total water without clipping. Model initialization validates the
+result using a tolerance relative to the water amounts in each cell. Correction of
+microphysical overshoots during time stepping is a separate operation.
+
 ### Thermodynamic Adjustment
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `maybe_adjust_thermodynamic_state` | `(𝒰, microphysics, qᵛᵉ, constants)` | Apply saturation adjustment if scheme uses it. |
+| `maybe_adjust_thermodynamic_state` | `(𝒰, microphysics, qᵛᵉ, constants, μ, ρ)` | Apply saturation adjustment while retaining prognostic precipitation. |
 
-This function is fully gridless—it takes only scalar thermodynamic arguments.
-Non-equilibrium schemes simply return `𝒰` unchanged. Saturation adjustment schemes perform
-iterative adjustment to partition moisture between vapor and condensate.
+[`maybe_adjust_thermodynamic_state`](@ref Breeze.AtmosphereModels.maybe_adjust_thermodynamic_state)
+takes scalar thermodynamic arguments and the density-weighted microphysical prognostics
+`μ`. Its default delegates to the four-argument form `(𝒰, microphysics, qᵛᵉ, constants)`;
+non-equilibrium schemes return `𝒰` unchanged. For schemes with prognostic precipitation,
+`μ` and total density `ρ` supply the rain and snow retained while adjusting cloud condensate.
+
+[`adjust_thermodynamic_state`](@ref Breeze.Microphysics.adjust_thermodynamic_state) shares
+the initial guesses and secant iteration across thermodynamic states. The state selects
+the saturation constraint and residual: pressure-based states solve the temperature
+residual at fixed pressure; `LiquidIceDensityState` solves the potential-temperature
+residual at fixed density, with pressure given by ``p = ρ Rᵐ T``. Both retain the original
+conserved thermodynamic variable and prescribed precipitation.
 
 ### Auxiliary Field Updates
 
@@ -113,11 +146,130 @@ iterative adjustment to partition moisture between vapor and condensate.
 | Auxiliary/Diagnostic | `CenterField` | None needed | `qᵛ`, `qˡ`, `qᶜˡ`, `qʳ` |
 | Velocities | `ZFaceField` | `bottom=nothing` | `wʳ`, `wᶜˡ`, `wⁿʳ` |
 
-### Velocity and Humidity Functions
+### Sedimentation
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `microphysical_velocities` | `(microphysics, μ_fields, name)` | Return terminal velocities for advection of tracer `name` |
+| `sedimentation_velocity` | `(microphysics, microphysical_fields, name)` | **Primary interface**: return the vertical sedimentation velocity field for tracer `name`, or `nothing` |
+| `condensate_liquid_fraction` | `(microphysics, name)` | Return the liquid fraction of condensate mass `name`: `1` for liquid, `0` for ice, or a number in between for a mixed composition; required for every sedimenting mass |
+| `microphysical_velocities` | `(microphysics, microphysical_fields, name)` | **Generic wrapper** (don't override): wraps the sedimentation velocity in a velocity tuple |
+
+**Design principle**: Schemes implement `sedimentation_velocity` (how fast a tracer falls) and
+`condensate_liquid_fraction` (which latent heat its mass carries); the generic `microphysical_velocities`
+wrapper calls `sedimentation_velocity` and constructs a `(u=ZeroField(), v=ZeroField(), w=w)`
+tuple for the advection operator.
+
+CloudMicrophysics returns positive downward terminal-speed magnitudes `𝕎ˣ`. Breeze uses a
+signed vertical coordinate that is positive upward, so the corresponding velocity is
+`wˣ = -𝕎ˣ` and falling hydrometeors have `wˣ < 0`. `write_sedimentation_velocity!` stores the
+signed velocity at the cell's bottom face and applies the precipitation boundary condition at
+`k = 1`.
+
+#### Sedimenting condensates
+
+At construction the model resolves its sedimenting condensates into `model.sedimentation`, a
+`NamedTuple` of `SedimentingCondensate`s keyed by prognostic name, one for every name in
+`condensate_field_names` with a `sedimentation_velocity`: the velocity field the mass falls with
+(`velocity`), its specific-humidity field (`specific_humidity`), the prognostic partial density it
+is diagnosed from (`density`), its `condensate_liquid_fraction` (`liquid_fraction`), and the advection scheme that
+transports the tracer (`advection`). The result is `(;)` when nothing sediments. Number tracers
+(e.g. `ρnʳ`) fall but are not condensate masses and carry no latent heat, so they are absent;
+condensate that does not sediment, such as cloud condensate diagnosed by saturation adjustment,
+moves no mass and needs no declaration. A sedimenting mass without a `condensate_liquid_fraction` is an
+error at construction, since its latent heat could not follow the falling mass. The fraction
+must match how `moisture_fractions` bins the mass into `qˡ` and `qⁱ`: the thermodynamic state
+knows only liquid and ice, so the bin fixes the latent heat and heat capacity the mass carries.
+
+!!! note "Velocity and liquid fraction are independent"
+    P3's liquid on ice `ρqʷⁱ` is liquid water riding on an ice particle: it falls at `wⁱ`, yet
+    `moisture_fractions` counts it in the thermodynamic liquid fraction `qˡ = qᶜˡ + qʳ + qʷⁱ`
+    because no fusion enthalpy has been released for it. P3 therefore declares
+    `sedimentation_velocity(…, Val(:ρqʷⁱ)) = μ.wⁱ` and `condensate_liquid_fraction(…, Val(:ρqʷⁱ)) = 1`:
+    one tracer with two independent properties.
+
+!!! note "Mixed-phase particles"
+    A part-ice, part-liquid particle is two condensate masses sharing a fall speed, which is what
+    the independence above buys: P3 carries ice `ρqⁱ` and the liquid on it `ρqʷⁱ`, both falling at
+    `wⁱ`, each declaring the liquid fraction (1 or 0) whose enthalpy it holds. Splitting the mass beats blending the
+    enthalpy, since freezing that liquid is a process with its own rate that must move mass
+    between them.
+
+    A single mass of mixed composition may instead declare a fraction in between,
+    `condensate_liquid_fraction(…, ::Val{:ρqˣ}) = 0.3`. That is exact, not an interpolation: the content is
+    a directional derivative in composition space, so a mass leaving along `f eˡ + (1 - f) eⁱ`
+    carries `f χˡ + (1 - f) χⁱ`. No scheme needs this yet.
+
+#### Sedimentation of the thermodynamic variables
+
+The *mass* sediments by ordinary tracer advection, untouched by any of this: `scalar_tendency`
+adds the fall velocity to the transport velocity and hands the sum to `div_ρUc` with the tracer's
+own scheme, so bounds- and positivity-preserving schemes limit the falling humidity exactly as
+they would without sedimentation. What follows weights those same fluxes to carry the
+*thermodynamic variable's* share; it forms no flux of its own.
+
+The thermodynamic-variable tendencies consume the sedimenting condensates through `sedimentation_tendency`,
+which returns the signed cell-local tendency they add; each formulation supplies its
+`condensate_content` (`χ`, transported enthalpy and `∂φ/∂h` at a cell). Each condensate's
+sedimentation mass flux — the advective flux of its humidity at the combined resolved and fall
+velocity minus the flux at the resolved velocity alone, computed with the same advection scheme
+that transports the tracer's mass (for bounds-preserving WENO, from the same per-cell limited
+reconstructions the tracer operator uses, so the limiter never separates heat from water at
+cloud and precipitation edges) — is binned by its phase and weighted by the content it delivers
+to the cell. The falling mass carries its enthalpy and each cell converts what it gains or loses
+locally: a flux out of a cell removes the cell's own ``χˣ``, the partial derivative of the
+specific variable with respect to that condensate mass fraction at fixed temperature, so the
+cell the condensate leaves keeps its temperature; a flux in delivers ``χˣ`` plus ``∂φ/∂h`` times
+the enthalpy the arriving mass brings in excess of the receiving cell's (the phase enthalpy
+``hˣ`` on the compressible core, ``hˣ - hᵈ`` under the fixed-density convention). The
+composition increment per unit falling mass is the dynamics' call
+(`sedimentation_composition_increment`): ``q̂ˣ - q̂ᵈ`` on the anelastic core, whose total density
+is fixed so that dry air makes up the departed mass; ``q̂ˣ - q`` on the compressible core, whose
+prognostic dry density has no sedimentation source, so that the diagnosed total density falls
+with the condensate and every mass fraction renormalizes. The content of `ρs` is the enthalpy
+change along that increment, ``Δcᵖ T - ΔΛ`` (``(cˣ - cᵖᵈ) T - ℒˣᵣ`` against dry air,
+``hˣ - (s - g z)`` against the mixture); with ``∂s/∂h = 1`` the sum collapses to the negative divergence of
+a face flux and ``∫ρs`` is conserved. For `ρθ` the content is ``∂θˡⁱ/∂qˣ`` along the same
+composition change (to leading order ``-ℒˣᵣ / (cᵖᵐ Π)``) with ``∂θˡⁱ/∂h = 1 / (cᵖᵐ Π)`` at
+prescribed pressure (the anelastic core) or the fixed-gas-density response ``β_cv`` on the
+compressible core (`sedimentation_thermal_response`), and must not collapse: that Jacobian
+varies with the Exner function,
+so moving it between pressure levels would conserve ``∫ρθ``, which precipitation does not (heat
+released at one pressure and absorbed at another). The `ρθ` tendency is therefore a cell-local
+response, not the divergence of a unique conservative thermodynamic face flux, and both tendencies
+are instantaneous responses rather than exact finite-step thermal reconstructions. The content
+fluxes ride the total-density-weighted mass flux the tracer tendency
+applies, and the cell's coupling-to-total density ratio (one on the anelastic core,
+``qᵈ = ρᵈ / ρ`` on the compressible core) converts the change of the specific variable into that
+of the coupling-weighted prognostic. They are formed at the velocity the tracer tendency
+transports the condensates with, which on the compressible core is the substepper's
+acoustic-mean velocity rather than the RK predictor the thermodynamic variable itself advects
+with: upwind selection and the adaptive implicit split are nonlinear in the velocity, so fluxes
+formed at the predictor would not recombine into the mass flux the condensate takes. Under
+adaptive implicit vertical advection `sedimentation_tendency` carries the content of the explicit
+fraction of each mass flux only; between the tracers' implicit solves of a stage and the
+thermodynamic variable's own, the time steppers call `implicit_sedimentation_step!`, which moves
+the content of the remainder from the first-order fluxes the solves actually applied, at the
+solved state,
+so the heat follows the mass at any fall Courant number and then takes the thermodynamic
+variable's post-solve: its implicit transport and diffusion on the SSP path, diffusion only on the
+acoustic path, whose implicit thermodynamic transport runs inside the substep loop (a first-order
+splitting difference). Rain-out thus leaves latent warming aloft and pre-cools
+the layer that later evaporates the arriving rain, the mechanism that builds cold pools.
+
+### Bottom Precipitation Flux
+
+`bottom_precipitation_flux(model)` returns the flux of precipitating moisture through the
+bottom boundary [kg m⁻² s⁻¹, positive downward]. A scheme that implements
+`sedimentation_velocity` and `condensate_liquid_fraction` gets it for free: the default method sums the
+bottom-face flux of every sedimenting condensate, evaluating each with the advection scheme
+that transports that tracer, so the diagnostic agrees with the boundary flux the tendency
+operator applies. Schemes that move precipitation by their own internal means (such as
+`DCMIP2016KM`) override `bottom_precipitation_flux` directly instead.
+
+### Specific Humidity
+
+| Function | Arguments | Description |
+|----------|-----------|-------------|
 | `specific_humidity` | `(microphysics, model)` | Return vapor mass fraction field |
 
 ## Scheme Implementation Checklist
@@ -148,12 +300,13 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 |----------|---------|
 | `materialize_microphysical_fields(microphysics, grid, bcs)` | Create prognostic + auxiliary fields |
 | `update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)` | Update auxiliary fields at grid points |
-| `microphysical_velocities(microphysics, μ_fields, name)` | Terminal velocities for tracer advection |
+| `sedimentation_velocity(microphysics, μ_fields, name)` | Vertical sedimentation velocity per tracer |
+| `condensate_liquid_fraction(microphysics, name)` | Liquid fraction of each sedimenting condensate mass (`1` liquid, `0` ice) |
 
 **Why these are Eulerian-only**:
 - **Field materialization**: Parcel models don't have fields; they store scalars directly in `ParcelState`.
 - **Auxiliary updates**: Parcel models recompute derived quantities on-the-fly; they don't store them in fields.
-- **Terminal velocities**: Sedimentation is a grid-based concept (advection through space). In parcel models,
+- **Sedimentation velocities**: Sedimentation is a grid-based concept (advection through space). In parcel models,
   sedimentation would be modeled as a mass sink in `microphysical_tendency`, not as spatial transport.
 
 ### Summary Table
@@ -166,16 +319,18 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `prognostic_field_names` | ✓ | ✓ | Required for both |
 | `materialize_microphysical_fields` | — | ✓ | Fields for grid storage |
 | `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
-| `microphysical_velocities` | — | ✓§ | Sedimentation advection |
+| `sedimentation_velocity` | — | ✓§ | Vertical sedimentation velocity per tracer |
+| `condensate_liquid_fraction` | — | ✓§ | Liquid fraction of each sedimenting condensate mass |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
 | `compute_microphysical_tendencies!` | — | ✓† | Override for fused bundle schemes |
+| `microphysical_velocities` | — | — | Generic wrapper (don't override) |
 | `grid_moisture_fractions` | — | ✓‡ | Override for saturation adjustment |
-| `maybe_adjust_thermodynamic_state` | — | ✓‡ | Override for saturation adjustment |
+| `maybe_adjust_thermodynamic_state` | ✓‡ | ✓‡ | Override for saturation adjustment |
 
 † Only needed for bundle/fused-kernel schemes (e.g. mixed-phase 1M).
 ‡ Only needed for saturation adjustment schemes.
-§ Only needed when one or more prognostic species sediments; non-sedimenting schemes can
-return `nothing` for every name.
+§ Only needed when one or more prognostic species sediments; non-sedimenting schemes need
+neither.
 
 ### Saturation Adjustment Schemes
 
@@ -238,6 +393,6 @@ tendencies and computing the bundle once per cell is a substantial GPU win.
 
 5. **Explicit returns**: All mutating functions `return nothing`.
 
-6. **Sedimentation is Eulerian**: Terminal velocities (`microphysical_velocities`) are only
+6. **Sedimentation is Eulerian**: Sedimentation velocities (`sedimentation_velocity`) are only
    meaningful for grid-based simulations where tracers advect through space. In parcel models,
    precipitation loss should be modeled as a sink term in `microphysical_tendency`.

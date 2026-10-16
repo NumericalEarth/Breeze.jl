@@ -56,6 +56,39 @@ using ..AtmosphereModels: AtmosphereModels
 @inline AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
 
 #####
+##### Density-weighted fluxes for tuples of closures
+#####
+
+@inline sum_closure_fluxes(i, j, k, grid, flux, ρ, ::Tuple{}, ::Tuple{}, args...) = zero(grid)
+
+@inline function sum_closure_fluxes(flux, i, j, k, grid, ρ,
+                                    closures::Tuple{C, Vararg}, closure_fields::Tuple{F, Vararg},
+                                    args...) where {C, F}
+    return flux(i, j, k, grid, ρ, first(closures), first(closure_fields), args...) +
+           sum_closure_fluxes(flux, i, j, k, grid, ρ, Base.tail(closures), Base.tail(closure_fields), args...)
+end
+
+@inline AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple,
+                                  id, c, clock, model_fields, buoyancy) =
+    sum_closure_fluxes(AtmosphereModels.∇_dot_Jᶜ, i, j, k, grid, ρ, closures, closure_fields,
+                       id, c, clock, model_fields, buoyancy)
+
+@inline AtmosphereModels.∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple,
+                                clock, model_fields, buoyancy) =
+    sum_closure_fluxes(AtmosphereModels.∂ⱼ_𝒯₁ⱼ, i, j, k, grid, ρ, closures, closure_fields,
+                       clock, model_fields, buoyancy)
+
+@inline AtmosphereModels.∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple,
+                                clock, model_fields, buoyancy) =
+    sum_closure_fluxes(AtmosphereModels.∂ⱼ_𝒯₂ⱼ, i, j, k, grid, ρ, closures, closure_fields,
+                       clock, model_fields, buoyancy)
+
+@inline AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple,
+                                clock, model_fields, buoyancy) =
+    sum_closure_fluxes(AtmosphereModels.∂ⱼ_𝒯₃ⱼ, i, j, k, grid, ρ, closures, closure_fields,
+                       clock, model_fields, buoyancy)
+
+#####
 ##### Scalar (tracer) dynamic fluxes: J = ρᵣ τ
 #####
 

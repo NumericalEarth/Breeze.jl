@@ -6,11 +6,11 @@ using Breeze.AtmosphereModels: transport_velocities
 using CUDA: @allowscalar
 
 using Breeze.CompressibleEquations: acoustic_recovered_vertical_momentum, assemble_slow_vertical_momentum_tendency!, compute_acoustic_substeps, compute_contravariant_velocity!, freeze_linearization_state!, δpᴸ, terrain_horizontal_linearized_pressure_gradient_correction, terrain_slope_x_ccf, terrain_slope_y_ccf, ∇ᶻp′
-using Breeze.TimeSteppers: compute_slow_momentum_tendencies!, compute_slow_scalar_tendencies!
 using Oceananigans
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: xnode, znode
 using Oceananigans.Operators: ∂zᶜᶜᶠ
+using Oceananigans.TimeSteppers: update_state!
 using Breeze.Thermodynamics: dry_air_gas_constant
 using Test
 
@@ -180,10 +180,9 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         @test model.timestepper isa AcousticRungeKutta3
         @test transport_velocities(model).w === model.timestepper.substepper.time_averaged_velocities.w
 
+        update_state!(model)
         substepper = model.timestepper.substepper
         freeze_linearization_state!(substepper, model)
-        compute_slow_momentum_tendencies!(model)
-        compute_slow_scalar_tendencies!(model)
         assemble_slow_vertical_momentum_tendency!(substepper, model)
         @test isapprox(maximum(abs, interior(substepper.slow_vertical_momentum_tendency)), 0; atol = 1e-12)
 

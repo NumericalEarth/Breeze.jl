@@ -39,9 +39,10 @@ thermodynamic constants of `model` as NumericalRadiation's `PhysicalConstants`.
 """
 function column_atmosphere(rtm::EcCKDRadiativeTransferModel, model, i, j)
     workspace = rtm.atmospheric_state
-    row_offset = workspace.rows * fld(j - 1, workspace.rows)
+    rows = workspace.rows
+    row_offset = min(rows * fld(j - 1, rows), size(model.grid, 2) - rows)   # the batch that solves row `j`
     state = ColumnState(rtm, model, row_offset)
-    compute_extension_pressure!(state, (size(model.grid, 1), min(workspace.rows, size(model.grid, 2) - row_offset)))
+    compute_extension_pressure!(state, (size(model.grid, 1), rows))
     N = number_of_layers(state)
     c = column_index(i, j, model.grid.Nx)
 

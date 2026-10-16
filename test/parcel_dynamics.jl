@@ -441,6 +441,7 @@ OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysi
 
     @test model isa ParcelModel
     @test model.dynamics isa ParcelDynamics
+    @test isempty(model.sedimentation)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
                                      base_pressure = 101325,

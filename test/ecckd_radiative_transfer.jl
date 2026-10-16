@@ -386,16 +386,17 @@ previous_float_type = Oceananigans.defaults.FloatType
     end
 
     @testset "Column batches" begin
-        # Batches of 2, 2 and 1 rows of 3 columns solve the same fluxes as one batch of the
-        # whole grid, bit for bit, and hold only one batch of per-column storage
+        # Three batches of 2 rows of 3 columns (the last overlapping the second, since 2 rows do
+        # not divide 5) solve the same fluxes as one batch of the whole grid, bit for bit, and
+        # hold only one batch of per-column storage
         Oceananigans.defaults.FloatType = Float64
         constants = ThermodynamicConstants()
         grid = RectilinearGrid(default_arch; size = (3, 5, 8), x = (0, 3), y = (0, 5), z = (0, 3kilometers),
                                topology = (Periodic, Periodic, Bounded))
-        fluxes = map((6, nothing)) do columns_per_batch
+        fluxes = map((3, nothing)) do column_batches
             radiation = RadiativeTransferModel(grid, EcCKDOptics(clouds = CloudScatteringTables()), constants;
                                                surface_temperature = 300, surface_albedo = 0.1,
-                                               solar_position = FixedCosineZenith(0.5), columns_per_batch)
+                                               solar_position = FixedCosineZenith(0.5), column_batches)
             reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 300)
             model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
                                     formulation = :LiquidIcePotentialTemperature, radiation,

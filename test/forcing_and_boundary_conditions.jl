@@ -7,6 +7,7 @@ using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVel
                                  wall_air_pressure, surface_layer_state
 using Breeze.Thermodynamics: potential_temperature_from_temperature,
                              LiquidIcePotentialTemperatureState, exner_function
+using CloudMicrophysics: CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition, Bottom
@@ -14,6 +15,9 @@ using Oceananigans.Fields: location
 using Oceananigans.Grids: XDirection
 using Oceananigans.TimeSteppers: compute_flux_bc_tendencies!, update_state!
 using Test
+
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMicrophysics
 
 function setup_forcing_model(grid, forcing)
     model = AtmosphereModel(grid; tracers=:ρc, forcing)
@@ -120,6 +124,53 @@ end
     @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(; ρqᵗ=bcs, ρqᵛ=bcs))
     @test_throws ArgumentError AtmosphereModel(grid; microphysics=SaturationAdjustment(),
                                                      boundary_conditions=(; ρqᵗ=bcs, ρqᵉ=bcs))
+end
+
+@testset "Microphysical boundary conditions reach the prognostic fields [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    J = FT(1e-4)
+
+    # The function-valued condition is evaluated whenever the microphysical halos are filled
+    ρqʳ_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(J),
+                                      top = ValueBoundaryCondition(Returns(zero(FT))))
+
+    for microphysics in (OneMomentCloudMicrophysics(), TwoMomentCloudMicrophysics(),
+                         PredictedParticlePropertiesMicrophysics())
+        model = AtmosphereModel(grid; microphysics, boundary_conditions=(; ρqʳ=ρqʳ_bcs))
+        set!(model; θ=model.dynamics.reference_state.potential_temperature)
+
+        fill!(parent(model.timestepper.Gⁿ.ρqʳ), 0)
+        compute_flux_bc_tendencies!(model)
+        @test all(Array(interior(model.timestepper.Gⁿ.ρqʳ, :, :, 1)) .≈ J / FT(25))
+    end
+end
+
+# Boundary conditions must capture P3's lookup tables on the model architecture (issue #1051)
+@testset "Surface boundary conditions capture the model's microphysics [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    coefficient = PolynomialCoefficient()
+    Tˢ = FT(290)
+
+    ρE_bcs  = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100)))
+    ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(; coefficient, surface_temperature=Tˢ))
+    ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(; coefficient, surface_temperature=Tˢ))
+    boundary_conditions = (; ρE=ρE_bcs, ρu=ρu_bcs, ρqᵗ=ρqᵗ_bcs)
+
+    model = AtmosphereModel(grid; microphysics=PredictedParticlePropertiesMicrophysics(), boundary_conditions)
+
+    energy_flux = thermodynamic_density(model.formulation).boundary_conditions.bottom.condition
+    drag = model.momentum.ρu.boundary_conditions.bottom.condition
+    vapor_flux = model.moisture_density.boundary_conditions.bottom.condition
+
+    @test energy_flux.microphysics === model.microphysics
+    @test drag.coefficient.virtual_potential_temperature.microphysics === model.microphysics
+    @test vapor_flux.coefficient.virtual_potential_temperature.microphysics === model.microphysics
+
+    set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5), qᵗ=FT(0.01))
+    time_step!(model, 1e-6)
+    @test model.clock.iteration == 1
 end
 
 @testset "Water forcing under ρqᵗ reaches the moisture variable [$(FT)]" for FT in test_float_types()

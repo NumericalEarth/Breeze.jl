@@ -64,12 +64,35 @@ function implicit_advection_density(dynamics, formulation, name::Symbol)
     return coupling ? dynamics_density(dynamics) : total_density(dynamics)
 end
 
+"""
+$(TYPEDEF)
+
+Wrap a sedimenting tracer's total vertical velocity so the adaptive implicit solve includes
+both transport and sedimentation, including outflow through the bottom boundary (see
+`density_weighted_advection_diagonal`).
+
+$(TYPEDFIELDS)
+"""
+struct OutflowEnabledVelocity{W}
+    velocity :: W
+end
+
+@inline Base.getindex(w::OutflowEnabledVelocity, i, j, k) = @inbounds w.velocity[i, j, k]
+
+Adapt.adapt_structure(to, w::OutflowEnabledVelocity) = OutflowEnabledVelocity(adapt(to, w.velocity))
+
 # Velocities whose vertical component the implicit solve splits — these must match the velocity
 # each prognostic's tendency advects with. Momentum advects with the (possibly contravariant)
-# advecting vertical velocity; every other prognostic advects with `velocities` as given.
-function implicit_advection_velocities(dynamics, velocities, name::Symbol)
+# advecting vertical velocity; scalars advect with `velocities` plus, for a sedimenting
+# microphysical tracer, its sedimentation velocity — the same sum `scalar_tendency` forms — and
+# that total is wrapped so the solve lets the tracer leave through the bottom boundary.
+function implicit_advection_velocities(dynamics, velocities, name::Symbol, microphysics, microphysical_fields)
     momentum = name === :ρu || name === :ρv || name === :ρw
-    return momentum ? (; w = advecting_vertical_velocity(dynamics, velocities)) : velocities
+    momentum && return (; w = advecting_vertical_velocity(dynamics, velocities))
+    sedimentation = microphysical_velocities(microphysics, microphysical_fields, Val(name))
+    isnothing(sedimentation) && return velocities
+    total = sum_of_velocities(velocities, sedimentation)
+    return merge(total, (; w = OutflowEnabledVelocity(total.w)))
 end
 
 #####

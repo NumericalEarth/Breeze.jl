@@ -68,8 +68,13 @@ The following table also uses a few conventions that suffuse the source code and
 | ``qⁱ``                              | `qⁱ`   | `AM.microphysical_fields.qⁱ`        | Ice mass fraction                                                              |
 | ``qᶜˡ``                             | `qᶜˡ`  | `AM.microphysical_fields.qᶜˡ`       | Cloud liquid mass fraction                                                     |
 | ``qᶜⁱ``                             | `qᶜⁱ`  | `AM.microphysical_fields.qᶜⁱ`       | Cloud ice mass fraction                                                        |
+| ``q^f``                             | `qᶠ`   | `AM.microphysical_fields.qᶠ`        | Rime mass fraction (P3); a portion of ``qⁱ``, not additional mass              |
+| ``b^f``                             | `bᶠ`   | `AM.microphysical_fields.bᶠ`        | Rime volume per unit mass (P3), m³/kg                                          |
+| ``q^{wi}``                          | `qʷⁱ`  | `AM.microphysical_fields.qʷⁱ`       | Liquid mass fraction carried on ice particles (P3); counted in ``qˡ``, but sediments with the ice |
 | ``qʳ``                              | `qʳ`   |                                     | Rain mass fraction                                                             |
 | ``qˢⁿ``                             | `qˢⁿ`  |                                     | Snow mass fraction                                                             |
+| ``\hat{q}^x``                       | `q̂ˣ`   |                                     | Unit composition: mass fractions with all mass in constituent ``x`` (``\hat{q}^d`` is dry air) |
+| ``Δq``                              | `Δq`   |                                     | Composition increment (a difference of mass-fraction vectors), e.g. per unit sedimenting mass |
 | ``ρqᵛ``                             | `ρqᵛ`  |                                     | Vapor density                                                                  |
 | ``ρqˡ``                             | `ρqˡ`  |                                     | Liquid density                                                                 |
 | ``ρqⁱ``                             | `ρqⁱ`  |                                     | Ice density                                                                    |
