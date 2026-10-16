@@ -1,9 +1,11 @@
 module Advection
 
 export div_ρUc,
-       bottom_advective_tracer_flux
+       bottom_advective_tracer_flux,
+       ScaledWENOWeights
 
 using Oceananigans.Advection:
+    Advection as OceananigansAdvection,
     _advective_tracer_flux_x,
     _advective_tracer_flux_y,
     _advective_tracer_flux_z,
@@ -21,6 +23,9 @@ using Oceananigans.Advection:
     bounded_tracer_flux_divergence_z,
     explicit_velocity_scaleᶜᶜᶠ,
     vertical_scheme,
+    C★,
+    ϵ,
+    advection_buffers,
     WENO
 
 using Adapt: Adapt
@@ -39,6 +44,58 @@ using ..AtmosphereModels:
     transport_velocities
 
 const AIVA = AdaptiveImplicitVerticalAdvection
+
+"""
+$(TYPEDSIGNATURES)
+
+Select WENO-Z weights that rescale overflowing, unnormalized weights. Pass the
+type as `WENO`'s `weight_computation` keyword. Finite weights use ordinary
+division; the fallback preserves the same normalized weights.
+This is useful for single-precision particle-number fields at cloud edges.
+
+```jldoctest
+using Breeze.Advection: ScaledWENOWeights
+using Oceananigans: WENO
+scheme = WENO(Float32; order=5, weight_computation=ScaledWENOWeights);
+eltype(scheme)
+
+# output
+Float32
+```
+"""
+struct ScaledWENOWeights end
+
+# TODO Oceananigans: normalize WENO-Z weights without first forming arbitrarily
+# large α. The ENA rain-number stencil (0, 0, 0, 130573.555, 119108.414) gives
+# β = (1.875e11, 6.820e10, 0) and (τ / ϵ)² > floatmax(Float32), so α / sum(α)
+# produces Inf / Inf. Keep this opt-in selector until the upstream weights are safe.
+@inline function scaled_weno_alpha(β::NTuple{N, FT}, τ::FT, optimal) where {N, FT}
+    denominators = β .+ FT(ϵ)
+    ordinary = ntuple(Val(N)) do r
+        # Explicit backend-optimized division selects a CUDA reciprocal intrinsic
+        # even when Reactant raises this kernel for CPU execution. Ordinary
+        # division keeps this selector portable and differentiable.
+        @inbounds optimal[r] * (1 + (τ / denominators[r])^2)
+    end
+    rescale = !isfinite(sum(ordinary))
+    smallest = minimum(denominators)
+    scale = max(smallest, τ)
+    # Multiply every α by (smallest / scale)². All ratios are at most one,
+    # and at least one rescaled weight remains of order one.
+    base = (smallest / scale)^2
+    scaled_smoothness = τ / scale
+    return ntuple(Val(N)) do r
+        @inbounds scaled = optimal[r] * (base + (scaled_smoothness * (smallest / denominators[r]))^2)
+        @inbounds ifelse(rescale, scaled, ordinary[r])
+    end
+end
+
+# Oceananigans specializes the alpha loop separately for each stencil width.
+for buffer in advection_buffers[2:end]
+    optimal = Expr(:tuple, [:(C★(scheme, Val($r))) for r in 0:buffer-1]...)
+    @eval @inline OceananigansAdvection.zweno_alpha_loop(scheme::WENO{$buffer, FT, ScaledWENOWeights}, β, τ) where FT =
+        scaled_weno_alpha(β, τ, $optimal)
+end
 
 # Simple wrappers: interpolate ρ to face, multiply existing flux
 @inline tracer_mass_flux_x(i, j, k, grid, ρ, args...) =
