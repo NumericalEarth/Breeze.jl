@@ -44,8 +44,8 @@ struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
     bᶠ  :: FT
     "Liquid water on ice mixing ratio [kg/kg]"
     qʷⁱ :: FT
-    "Liquid supersaturation [kg/kg] (Grabowski & Morrison 2008)"
-    sᵛ⁺ˡ :: FT
+    "Vapor excess over liquid [kg/kg] (Grabowski & Morrison 2008)"
+    δqᵛ⁺ˡ :: FT
     "Unactivated aerosol number concentration [1/kg] (zero when no aerosol prognostic)"
     nᵃ  :: FT
     "Cell-center vertical velocity [m/s]; drives the adiabatic temperature tendency"
@@ -77,7 +77,7 @@ end
 # unguarded read would be a missing-property error rather than a silent zero.
 
 @inline supersaturation_prognostic_names(::ProcessRate{FT, false}) where FT = ()
-@inline supersaturation_prognostic_names(::ProcessRate{FT, true}) where FT = (:ρsᵛ⁺ˡ,)
+@inline supersaturation_prognostic_names(::ProcessRate{FT, true}) where FT = (:ρδqᵛ⁺ˡ,)
 
 # Droplet number is prognostic iff `p3.aerosol` is a concrete `AerosolActivation`. In the
 # prescribed-Nᶜˡ path, `nᶜˡ`
@@ -104,7 +104,7 @@ Return prognostic field names for the P3 scheme.
 - Cloud number (only when `aerosol::AerosolActivation` is set): ρnᶜˡ
 - Rain: ρqʳ, ρnʳ
 - Ice (always): ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ
-- Liquid supersaturation (only when `predict_supersaturation = true`): ρsᵛ⁺ˡ
+- Vapor excess over liquid (only when `predict_supersaturation = true`): ρδqᵛ⁺ˡ
 - Aerosol (only when `aerosol::AerosolActivation` sets `prognostic`): ρnᵃ
 """
 @inline function AM.prognostic_field_names(p3::P3)
@@ -158,7 +158,7 @@ AM.negative_moisture_correction(p3::P3) = p3.negative_moisture_correction
 
 # Fields clamped to zero rather than borrowed against, because they carry no water:
 # the number moments, the rime properties, and the unactivated aerosol count.
-# `ρsᵛ⁺ˡ` is excluded because liquid supersaturation may be negative.
+# `ρδqᵛ⁺ˡ` is excluded because the vapor excess over liquid may be negative.
 @inline AM.correction_number_fields(p3::P3, μ) =
     (cloud_number_correction_fields(p3.aerosol, μ)...,
      μ.ρnʳ, μ.ρnⁱ, μ.ρqᶠ, μ.ρbᶠ,
@@ -224,13 +224,13 @@ The P3 scheme requires the following fields on `grid`:
 - `ρqʷⁱ`: Liquid water on ice mass density
 - `ρnᶜˡ`: Cloud number density, allocated only when `p3.aerosol isa AerosolActivation`.
 - `ρnᵃ`: Unactivated aerosol number density, allocated with `AerosolActivation(...; prognostic=true)`.
-- `ρsᵛ⁺ˡ`: Liquid supersaturation, allocated with `predict_supersaturation = true`.
+- `ρδqᵛ⁺ˡ`: Vapor excess over liquid, allocated with `predict_supersaturation = true`.
 
 **Specific diagnostics** (rewritten by `update_microphysical_auxiliaries!`):
 - `qᵛ`: Vapor specific humidity (mirrors the prognostic vapor field)
 - `qᶜˡ`, `qʳ`, `nʳ`, `qⁱ`, `nⁱ`, `qᶠ`, `bᶠ`, `qʷⁱ`: specific counterparts of the
   density-weighted prognostics
-- `nᶜˡ`, `nᵃ`, `sᵛ⁺ˡ`: specific counterparts of the optional prognostics, each
+- `nᶜˡ`, `nᵃ`, `δqᵛ⁺ˡ`: specific counterparts of the optional prognostics, each
   allocated alongside its own prognostic
 
 **Surface temperature** (`surface_temperature`): one value per column for
@@ -309,11 +309,11 @@ end
      nᵃ = CenterField(grid))            # Unactivated aerosol [kg⁻¹]
 
 # Predicted supersaturation, off by default. With the switch off every rate that
-# would touch `sᵛ⁺ˡ` is gated to zero, so the prognostic carries no information.
+# would touch `δqᵛ⁺ˡ` is gated to zero, so the prognostic carries no information.
 @inline supersaturation_fields(::ProcessRate{FT, false}, grid) where FT = (;)
 
 @inline supersaturation_fields(::ProcessRate{FT, true}, grid) where FT =
-    (; ρsᵛ⁺ˡ = CenterField(grid), sᵛ⁺ˡ = CenterField(grid))
+    (; ρδqᵛ⁺ˡ = CenterField(grid), δqᵛ⁺ˡ = CenterField(grid))
 
 #####
 ##### Gridless MicrophysicalState construction
@@ -323,7 +323,7 @@ end
 
 # Compile-time NamedTuple field lookup with a default — used so that the gridless
 # `microphysical_state` path works whether or not `μ` carries the optional
-# `ρnᶜˡ`/`ρnᵃ` (prognostic aerosol) and `ρsᵛ⁺ˡ` (predicted supersaturation) fields.
+# `ρnᶜˡ`/`ρnᵃ` (prognostic aerosol) and `ρδqᵛ⁺ˡ` (vapor excess over liquid) fields.
 @generated function get_or_default(μ::NamedTuple{names}, ::Val{key}, default) where {names, key}
     return key in names ? :(μ.$key) : :(default)
 end
@@ -356,11 +356,11 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
     rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ)
     qᶠ  = rime_state.qᶠ
     bᶠ  = rime_state.bᶠ
-    # ρsᵛ⁺ˡ is absent unless predicted supersaturation is enabled; default to 0.
-    sᵛ⁺ˡ = get_or_default(μ, Val(:ρsᵛ⁺ˡ), 0 * ρ) / ρ
+    # ρδqᵛ⁺ˡ is absent unless predicted supersaturation is enabled; default to 0.
+    δqᵛ⁺ˡ = get_or_default(μ, Val(:ρδqᵛ⁺ˡ), 0 * ρ) / ρ
     # ρnᵃ is absent unless the reservoir is prognostic; default to 0.
     nᵃ = get_or_default(μ, Val(:ρnᵃ), 0 * ρ) / ρ
-    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, sᵛ⁺ˡ, nᵃ,
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, δqᵛ⁺ˡ, nᵃ,
                                 vertical_velocity(velocities, FT))
 end
 
@@ -392,11 +392,11 @@ end
 
 @inline grid_aerosol_number(::AerosolActivation{<:Any, true}, μ, i, j, k, ρ) = @inbounds μ.ρnᵃ[i, j, k] / ρ
 
-# Same for the optional supersaturation prognostic: absent with prediction
+# Same for the optional vapor-excess prognostic: absent with prediction
 # disabled, where it collapses to zero anyway.
-@inline grid_supersaturation(::ProcessRate{FT, false}, μ, i, j, k, ρ) where FT = 0 * ρ
-@inline grid_supersaturation(::ProcessRate{FT, true}, μ, i, j, k, ρ) where FT =
-    @inbounds μ.ρsᵛ⁺ˡ[i, j, k] / ρ
+@inline grid_vapor_excess(::ProcessRate{FT, false}, μ, i, j, k, ρ) where FT = 0 * ρ
+@inline grid_vapor_excess(::ProcessRate{FT, true}, μ, i, j, k, ρ) where FT =
+    @inbounds μ.ρδqᵛ⁺ˡ[i, j, k] / ρ
 
 @inline function AM.grid_microphysical_state(i, j, k, grid, p3::P3, μ, ρ, 𝒰, velocities)
     nᶜˡ = grid_cloud_droplet_number(p3, p3.aerosol, μ, i, j, k, ρ)
@@ -412,10 +412,10 @@ end
     rime_state = consistent_rime_state(p3, qⁱ, @inbounds(μ.ρqᶠ[i, j, k]) / ρ, @inbounds(μ.ρbᶠ[i, j, k]) / ρ)
     qᶠ  = rime_state.qᶠ
     bᶠ  = rime_state.bᶠ
-    sᵛ⁺ˡ = grid_supersaturation(p3.process_rates, μ, i, j, k, ρ)
+    δqᵛ⁺ˡ = grid_vapor_excess(p3.process_rates, μ, i, j, k, ρ)
     nᵃ   = grid_aerosol_number(p3.aerosol, μ, i, j, k, ρ)
     w = interpolate_w_to_center(grid, i, j, k, velocities.w, FT)
-    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, sᵛ⁺ˡ, nᵃ, w)
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, δqᵛ⁺ˡ, nᵃ, w)
 end
 
 # Bounded ice moments plus the Table-1 bracket (`prep`) of the diagnostic population, which
@@ -565,7 +565,7 @@ end
 @inline function write_supersaturation_diagnostic!(
     μ, i, j, k, grid, ::ProcessRate{FT, true}, ℳ
 ) where FT
-    @inbounds μ.sᵛ⁺ˡ[i, j, k] = ℳ.sᵛ⁺ˡ
+    @inbounds μ.δqᵛ⁺ˡ[i, j, k] = ℳ.δqᵛ⁺ˡ
     return nothing
 end
 
@@ -629,7 +629,7 @@ struct P3TendencyResult{FT}
     tendency_ρqʳ :: FT; tendency_ρnʳ :: FT
     tendency_ρqⁱ :: FT; tendency_ρnⁱ :: FT
     tendency_ρqᶠ :: FT; tendency_ρbᶠ :: FT
-    tendency_ρqʷⁱ :: FT; tendency_ρsᵛ⁺ˡ :: FT
+    tendency_ρqʷⁱ :: FT; tendency_ρδqᵛ⁺ˡ :: FT
     tendency_ρqᵛ :: FT; tendency_ρnᵃ :: FT
 end
 
@@ -696,7 +696,7 @@ end
     rime_mass_tendency = tendency_ρqᶠ(rates, ρ, Fᶠ)
     rime_volume_tendency = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
     coating_mass_tendency = tendency_ρqʷⁱ(rates, ρ, p3.process_rates)
-    supersaturation_tendency = tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates)
+    supersaturation_tendency = tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates)
     vapor_mass_tendency = tendency_ρqᵛ(rates, ρ)
     # Aerosol depletion: every activated cloud droplet removes one from ρnᵃ. Zero in the
     # prescribed-Nᶜˡ path, and discarded when the population is fixed rather than prognostic.
@@ -785,7 +785,7 @@ end
 @inline function add_supersaturation_tendency!(
     G, i, j, k, grid, ::ProcessRate{FT, true}, result
 ) where FT
-    @inbounds G.ρsᵛ⁺ˡ[i, j, k] += result.tendency_ρsᵛ⁺ˡ
+    @inbounds G.ρδqᵛ⁺ˡ[i, j, k] += result.tendency_ρδqᵛ⁺ˡ
     return nothing
 end
 
@@ -935,6 +935,6 @@ end
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqᶠ})  = result.tendency_ρqᶠ
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρbᶠ})  = result.tendency_ρbᶠ
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqʷⁱ}) = result.tendency_ρqʷⁱ
-@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρsᵛ⁺ˡ}) = result.tendency_ρsᵛ⁺ˡ
+@inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρδqᵛ⁺ˡ}) = result.tendency_ρδqᵛ⁺ˡ
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρqᵛ})  = result.tendency_ρqᵛ
 @inline p3_tendency_component(result::P3TendencyResult, ::Val{:ρnᵃ})  = result.tendency_ρnᵃ

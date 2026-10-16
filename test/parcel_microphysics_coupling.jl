@@ -23,7 +23,7 @@ function coupling_parcel(; formulation=:LiquidIcePotentialTemperature, weight=1.
     state = model.dynamics.state
     constants = model.thermodynamic_constants
     saturation = TD.saturation_specific_humidity(state.𝒰, constants, TD.PlanarLiquidSurface())
-    state.μ = merge(state.μ, (; ρsᵛ⁺ˡ=state.ρ*(state.𝒰.moisture_mass_fractions.vapor-saturation)))
+    state.μ = merge(state.μ, (; ρδqᵛ⁺ˡ=state.ρ*(state.𝒰.moisture_mass_fractions.vapor-saturation)))
     return model
 end
 
@@ -41,7 +41,7 @@ end
 
 @testset "Parcel P3 tendencies match the gridded path: $formulation" for formulation in (:StaticEnergy, :LiquidIcePotentialTemperature)
     # Parcels must evolve P3 exactly as LES and regional models do: the same adiabatic
-    # forcing from w and the same prognostic supersaturation tendency.
+    # forcing from w and the same prognostic vapor-excess tendency.
     PPP = Breeze.Microphysics.PredictedParticleProperties
     model = coupling_parcel(; formulation, mixed_phase=true)
     PM.compute_parcel_tendencies!(model)

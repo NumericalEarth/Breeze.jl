@@ -77,7 +77,7 @@ end
 ##### Process-rate tendencies
 #####
 ##### "The P3 tendencies" are the tendencies of P3's own microphysical prognostics
-##### (ρqᵛ, ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ, and the optional ρnᶜˡ/ρnᵃ/ρsᵛ⁺ˡ).
+##### (ρqᵛ, ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ, and the optional ρnᶜˡ/ρnᵃ/ρδqᵛ⁺ˡ).
 ##### They are computed *jointly*: the coupled donor-budget limiters see every species at
 ##### once, so one kernel evaluates all of them per cell and adds each straight into `Gⁿ`.
 ##### The evaluation is fully inlined. Table 1 is bracketed twice per cell: once at the
@@ -136,7 +136,7 @@ end
 @inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, true}) = (; G.ρnᶜˡ, G.ρnᵃ)
 
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, false}) where FT = (;)
-@inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, true}) where FT = (; G.ρsᵛ⁺ˡ)
+@inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, true}) where FT = (; G.ρδqᵛ⁺ˡ)
 
 function AM.compute_microphysical_tendencies!(p3::P3, model)
     grid = model.grid

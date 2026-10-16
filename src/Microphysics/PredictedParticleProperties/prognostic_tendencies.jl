@@ -486,17 +486,17 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the liquid supersaturation tendency from Grabowski & Morrison (2008).
+Compute the tendency of the vapor excess over liquid from Grabowski & Morrison (2008).
 
-When `predict_supersaturation = true`, the liquid supersaturation ``sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ``
+When `predict_supersaturation = true`, the vapor excess over liquid ``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ``
 is a prognostic variable advected by the dynamical core. The microphysical
-tendency reproduces the post-step diagnosis ``sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T)``.
+tendency reproduces the post-step diagnosis ``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T)``.
 `compute_p3_process_rates` precomputes that diagnostic tendency from the final
 local ``qᵛ`` and ``T`` implied by the ordered process rates.
 
 When `predict_supersaturation = false`, returns zero tendency.
 """
-@inline function tendency_ρsᵛ⁺ˡ(rates::P3ProcessRates, ρ, parameters)
+@inline function tendency_ρδqᵛ⁺ˡ(rates::P3ProcessRates, ρ, parameters)
     raw = ρ * rates.predicted_supersaturation_tendency
     return gate_predicted_supersaturation(parameters, raw)
 end

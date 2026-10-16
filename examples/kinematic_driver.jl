@@ -2,7 +2,7 @@
 #
 # This example uses [`PrescribedDynamics`](@ref) to lift moist air through a
 # vertical column at 2 m/s. [`P3Microphysics`](@ref) predicts cloud droplets,
-# rain, ice, and liquid water carried on ice, with **prognostic supersaturation**
+# rain, ice, and liquid water carried on ice, with a **prognostic vapor excess over liquid**
 # and aerosol activation. Velocity is prescribed while transport, thermodynamics,
 # and microphysics evolve. We use liquid–ice potential temperature, the default
 # thermodynamic formulation, explicitly selected below for clarity.
@@ -57,8 +57,8 @@ reference_state = ReferenceState(grid, constants;
 # in the transported specific quantities. The flow remains prescribed even as
 # latent heating changes the temperature.
 #
-# P3's `predict_supersaturation=true` adds `ρsᵛ⁺ˡ`, the density-weighted vapor
-# excess over liquid saturation. Aerosol activation also predicts cloud droplet
+# P3's `predict_supersaturation=true` adds `ρδqᵛ⁺ˡ`, the density-weighted vapor
+# excess over liquid. Aerosol activation also predicts cloud droplet
 # number and the remaining aerosol reservoir. Number mixing ratios are in kg⁻¹.
 
 W₀ = 2
@@ -71,21 +71,21 @@ microphysics = P3Microphysics(; aerosol, predict_supersaturation=true)
 #
 # At the surface, pressure equals the standard potential-temperature reference
 # pressure, so the condensate-free inflow has T = θ₀. Its moisture and
-# supersaturation are calculated from the same relative humidity. Fresh aerosol
+# vapor excess are calculated from the same relative humidity. Fresh aerosol
 # enters with the air; all incoming hydrometeor mass and number are zero.
 # P3's default open precipitation boundary allows sedimentation out of the column.
 
 ρ₀ = surface_density(reference_state)
 qᵛ⁺ˡ₀ = saturation_specific_humidity(θ₀, ρ₀, constants, PlanarLiquidSurface())
 qᵗ₀ = ℋ₀ * qᵛ⁺ˡ₀
-sᵛ⁺ˡ₀ = qᵗ₀ - qᵛ⁺ˡ₀
+δqᵛ⁺ˡ₀ = qᵗ₀ - qᵛ⁺ˡ₀
 
 microphysical_bcs = NamedTuple(name => FieldBoundaryConditions(bottom=ValueBoundaryCondition(0))
                               for name in prognostic_field_names(microphysics))
 boundary_conditions = merge(microphysical_bcs,
     (; ρθ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * θ₀)),
        ρqᵗ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * qᵗ₀)),
-       ρsᵛ⁺ˡ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * sᵛ⁺ˡ₀)),
+       ρδqᵛ⁺ˡ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * δqᵛ⁺ˡ₀)),
        ρnᵃ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * nᵃ₀)),
        w = FieldBoundaryConditions(bottom=NormalFlowBoundaryCondition(W₀),
                                    top=NormalFlowBoundaryCondition(W₀))))
@@ -95,32 +95,32 @@ model = AtmosphereModel(grid; dynamics, microphysics, boundary_conditions,
                         advection = WENO(order=5),
                         thermodynamic_constants = constants)
 
-# ## Initializing supersaturation
+# ## Initializing the vapor excess
 #
-# First initialize the thermodynamic state. Then initialize the supersaturation
-# density from that state, so the prognostic starts with the actual vapor deficit.
+# First initialize the thermodynamic state. Then initialize the density-weighted
+# vapor excess from that state, so the prognostic starts with the actual vapor deficit.
 # This second `set!` depends on the temperature and moisture established by the first.
 
 set!(model; θ=θ_initial, ℋ=ℋ₀, w=W₀)
 μ = model.microphysical_fields
 ρ = reference_state.density
 qᵛ⁺ˡ = SaturationSpecificHumidity(model)
-set!(model; ρsᵛ⁺ˡ=ρ * (μ.qᵛ - qᵛ⁺ˡ))
+set!(model; ρδqᵛ⁺ˡ=ρ * (μ.qᵛ - qᵛ⁺ˡ))
 
 # ## Simulation and output
 #
-# Run for 3600 s, saving profiles every 30 s. The output retains both prognostic
-# and diagnosed supersaturation, along with mass and number concentrations, for
-# subsequent comparisons. Supersaturation sᵛ⁺ˡ has units of kg/kg; it is not the
-# dimensionless relative supersaturation qᵛ / qᵛ⁺ˡ − 1.
+# Run for 3600 s, saving profiles every 30 s. The output retains both the prognostic
+# and diagnosed vapor excess, along with mass and number concentrations, for
+# subsequent comparisons. The vapor excess δqᵛ⁺ˡ has units of kg/kg; it is not the
+# dimensionless supersaturation 𝒮.
 
 simulation = Simulation(model; Δt=1, stop_time=60minutes)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
-diagnosed_sᵛ⁺ˡ = Field(μ.qᵛ - qᵛ⁺ˡ)
+diagnosed_δqᵛ⁺ˡ = Field(μ.qᵛ - qᵛ⁺ˡ)
 outputs = (; T = model.temperature,
              μ.qᵛ, μ.qᶜˡ, μ.qʳ, μ.qⁱ, μ.qʷⁱ,
-             μ.nᶜˡ, μ.nʳ, μ.nⁱ, μ.nᵃ, μ.sᵛ⁺ˡ, diagnosed_sᵛ⁺ˡ)
+             μ.nᶜˡ, μ.nʳ, μ.nⁱ, μ.nᵃ, μ.δqᵛ⁺ˡ, diagnosed_δqᵛ⁺ˡ)
 filename = "kinematic_driver_p3.jld2"
 simulation.output_writers[:profiles] = JLD2Writer(model, outputs;
                                                  filename,
@@ -151,8 +151,8 @@ qⁱts = FieldTimeSeries(filename, "qⁱ")
 qʷⁱts = FieldTimeSeries(filename, "qʷⁱ")
 Tts = FieldTimeSeries(filename, "T")
 qᵛts = FieldTimeSeries(filename, "qᵛ")
-sᵛ⁺ˡts = FieldTimeSeries(filename, "sᵛ⁺ˡ")
-diagnosed_sᵛ⁺ˡts = FieldTimeSeries(filename, "diagnosed_sᵛ⁺ˡ")
+δqᵛ⁺ˡts = FieldTimeSeries(filename, "δqᵛ⁺ˡ")
+diagnosed_δqᵛ⁺ˡts = FieldTimeSeries(filename, "diagnosed_δqᵛ⁺ˡ")
 nothing #hide
 
 # The time series is indexed over the physical column cells, excluding halos.
@@ -185,18 +185,18 @@ condensate_figure
 
 # [Download the condensate figure as SVG](kinematic_driver_p3_condensate.svg).
 #
-# ## Temperature, vapor, and supersaturation
+# ## Temperature, vapor, and vapor excess
 #
-# The two supersaturation panels share a symmetric logarithmic color scale,
+# The two vapor-excess panels share a symmetric logarithmic color scale,
 # linear within ±10⁻⁵ kg/kg. This resolves small vapor excesses and larger deficits
 # on the same scale. The prognostic and diagnosed values can differ while
 # transport, cooling, and microphysical relaxation act.
 
-supersaturation_limit = max(maximum(abs, sᵛ⁺ˡts[1, 1, 1:Nz, :]),
-                            maximum(abs, diagnosed_sᵛ⁺ˡts[1, 1, 1:Nz, :]))
-supersaturation_colors = (; colormap = :balance,
+vapor_excess_limit = max(maximum(abs, δqᵛ⁺ˡts[1, 1, 1:Nz, :]),
+                            maximum(abs, diagnosed_δqᵛ⁺ˡts[1, 1, 1:Nz, :]))
+vapor_excess_colors = (; colormap = :balance,
                             colorscale = Makie.Symlog10(1e-5),
-                            colorrange = (-supersaturation_limit, supersaturation_limit),
+                            colorrange = (-vapor_excess_limit, vapor_excess_limit),
                             colorbar_ticks = ([-1e-3, -1e-4, 0, 1e-4, 1e-3],
                                               ["−10⁻³", "−10⁻⁴", "0", "10⁻⁴", "10⁻³"]))
 thermodynamics_figure = Figure(size=(1200, 1000))
@@ -204,10 +204,10 @@ plot_time_height!(thermodynamics_figure[1, 1], Tts;
                   title = "Temperature", label = "T (K)", colormap = :thermal)
 plot_time_height!(thermodynamics_figure[1, 2], qᵛts;
                   title = "Water vapor", label = "qᵛ (kg/kg)", colormap = :Blues)
-plot_time_height!(thermodynamics_figure[2, 1], sᵛ⁺ˡts;
-                  title = "Prognostic supersaturation", label = "sᵛ⁺ˡ (kg/kg)", supersaturation_colors...)
-plot_time_height!(thermodynamics_figure[2, 2], diagnosed_sᵛ⁺ˡts;
-                  title = "Diagnosed supersaturation", label = "qᵛ − qᵛ⁺ˡ (kg/kg)", supersaturation_colors...)
+plot_time_height!(thermodynamics_figure[2, 1], δqᵛ⁺ˡts;
+                  title = "Prognostic vapor excess", label = "δqᵛ⁺ˡ (kg/kg)", vapor_excess_colors...)
+plot_time_height!(thermodynamics_figure[2, 2], diagnosed_δqᵛ⁺ˡts;
+                  title = "Diagnosed vapor excess", label = "qᵛ − qᵛ⁺ˡ (kg/kg)", vapor_excess_colors...)
 save("kinematic_driver_p3_thermodynamics.png", thermodynamics_figure; px_per_unit=2)
 save("kinematic_driver_p3_thermodynamics.svg", thermodynamics_figure)
 thermodynamics_figure

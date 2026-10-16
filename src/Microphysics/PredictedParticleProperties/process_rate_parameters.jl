@@ -269,7 +269,7 @@ struct ProcessRate{FT, PS}
     # parameter so allocation decisions and kernel gates can dispatch at compile time.
     # `prognostic_field_names` must fold to a constant tuple (a `Union` return type makes
     # the host-side prognostic loop allocate), and `materialize_microphysical_fields`
-# needs the type value to decide whether `ρsᵛ⁺ˡ` exists at all.
+# needs the type value to decide whether `ρδqᵛ⁺ˡ` exists at all.
     predict_supersaturation :: Bool
 
     # Deposition/sublimation calibration factors.
@@ -325,7 +325,7 @@ path uses ``μ_r = 0``. None are duplicated in this rate-parameter container.
 # Example
 
 The second type parameter carries the value of the Boolean
-`predict_supersaturation` field, so the default `false` drops `ρsᵛ⁺ˡ` from the
+`predict_supersaturation` field, so the default `false` drops `ρδqᵛ⁺ˡ` from the
 prognostic set entirely while `params.predict_supersaturation` remains usable in
 ordinary Boolean expressions.
 

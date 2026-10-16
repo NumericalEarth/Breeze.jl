@@ -77,7 +77,7 @@ The scheme tracks 8 prognostic densities by default, and up to 11 with every opt
 | ``ρqⁱ``, ``ρnⁱ`` | Ice mass and number | always |
 | ``ρqᶠ``, ``ρbᶠ`` | Rime mass and volume | always |
 | ``ρqʷⁱ`` | Liquid water on ice | always |
-| ``ρsᵛ⁺ˡ`` | Predicted liquid supersaturation | `predict_supersaturation` |
+| ``ρδqᵛ⁺ˡ`` | Predicted vapor excess over liquid | `predict_supersaturation` |
 | ``ρnᶜˡ`` | Cloud droplet number | `aerosol` |
 | ``ρnᵃ`` | Unactivated aerosol number | `aerosol`, with `prognostic` |
 

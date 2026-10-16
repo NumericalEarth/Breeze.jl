@@ -437,12 +437,12 @@ using Oceananigans.TimeSteppers: update_state!
             grid; dynamics, thermodynamic_constants = constants,
             microphysics = supersaturation_p3)
         supersaturation_fields = supersaturation_model.microphysical_fields
-        @test !any(field === supersaturation_fields.ρsᵛ⁺ˡ for field in
+        @test !any(field === supersaturation_fields.ρδqᵛ⁺ˡ for field in
                    AtmosphereModels.correction_number_fields(
                        supersaturation_p3, supersaturation_fields))
-        set!(supersaturation_fields.ρsᵛ⁺ˡ, FT(-1e-5))
+        set!(supersaturation_fields.ρδqᵛ⁺ˡ, FT(-1e-5))
         AtmosphereModels.fix_negative_moisture!(supersaturation_model)
-        @test only_value(supersaturation_fields.ρsᵛ⁺ˡ) ≈ FT(-1e-5)
+        @test only_value(supersaturation_fields.ρδqᵛ⁺ˡ) ≈ FT(-1e-5)
     end
 
     @testset "P3 initialization is consistent for total and dry density inputs" begin

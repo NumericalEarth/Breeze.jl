@@ -21,7 +21,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     tendency_ρqᶠ,
     tendency_ρbᶠ,
     tendency_ρqʷⁱ,
-    tendency_ρsᵛ⁺ˡ,
+    tendency_ρδqᵛ⁺ˡ,
     tendency_ρqᵛ,
     rain_autoconversion_rate,
     rain_accretion_rate,
@@ -272,7 +272,7 @@ function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, q�
             coating_condensation, coating_evaporation)
 end
 
-function expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, constants)
+function expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, constants)
     FT = typeof(qᶜˡ)
     τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(Breeze.Thermodynamics.vapor_gas_constant(constants))
@@ -280,9 +280,9 @@ function expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺
     cᵖᵈ = constants.dry_air.heat_capacity
     dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
     ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
-    ε = (qᵛ - qᵛ⁺ˡ - sᵛ⁺ˡ) / ξˡ
+    ε = (qᵛ - qᵛ⁺ˡ - δqᵛ⁺ˡ) / ξˡ
     ε = max(ε, -qᶜˡ)
-    ε = ifelse(sᵛ⁺ˡ < 0, min(0, ε), ε)
+    ε = ifelse(δqᵛ⁺ˡ < 0, min(0, ε), ε)
     ε = ifelse(abs(ε) < 100 * eps(FT) * max(qᵛ⁺ˡ, qᵛ), zero(FT), ε)
     ε = ifelse(PPP.predicts_supersaturation(p3.process_rates), ε, zero(FT))
     return (; ε, rate = ε / τ)
@@ -683,7 +683,7 @@ end
              ρqⁱ  = CenterField(grid), ρnⁱ  = CenterField(grid),
              ρqᶠ  = CenterField(grid), ρbᶠ  = CenterField(grid),
              ρqʷⁱ = CenterField(grid),
-             ρsᵛ⁺ˡ = CenterField(grid), ρnᵃ = CenterField(grid))
+             ρδqᵛ⁺ˡ = CenterField(grid), ρnᵃ = CenterField(grid))
 
         w_face = ZFaceField(grid)
         set!(w_face, (x, y, z) -> 2.0)
@@ -1857,7 +1857,7 @@ end
             ρqᶠ = ρ * FT(2e-5),
             ρbᶠ = ρ * FT(5e-8),
             ρqʷⁱ = FT(0),
-            ρsᵛ⁺ˡ = FT(0),
+            ρδqᵛ⁺ˡ = FT(0),
         )
         ℳ = Breeze.AtmosphereModels.microphysical_state(p3, ρ, μ, nothing, (u = FT(0), v = FT(0), w = FT(0)))
         @test ℳ.qᶠ == FT(1e-5)
@@ -1918,7 +1918,7 @@ end
             qf,            # qᶠ
             FT(qf / 400),  # bᶠ (rime volume)
             FT(0),         # qʷⁱ (liquid on ice)
-        FT(0),         # sᵛ⁺ˡ (liquid supersaturation)
+        FT(0),         # δqᵛ⁺ˡ (vapor excess over liquid)
             FT(0),         # nᵃ
             FT(0),         # w
         )
@@ -2021,13 +2021,13 @@ end
         nⁱ = FT(1e5)
         qᶠ = FT(1e-5)
         qʷⁱ = FT(0)
-        sᵛ⁺ˡ = FT(0)
+        δqᵛ⁺ˡ = FT(0)
 
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                qᶠ, qᶠ / FT(400), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
+                                qᶠ, qᶠ / FT(400), qʷⁱ, δqᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
@@ -2125,12 +2125,12 @@ end
         nⁱ = FT(1e5)
         qᶠ = FT(2e-5)
         qʷⁱ = FT(0)
-        sᵛ⁺ˡ = FT(0)
+        δqᵛ⁺ˡ = FT(0)
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
         q = MoistureMassFractions(qᵛ, qʳ + qʷⁱ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                qᶠ, qᶠ / FT(400), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
+                                qᶠ, qᶠ / FT(400), qʷⁱ, δqᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         rime = consistent_rime_state(p3, qⁱ, qᶠ, qᶠ / FT(400))
@@ -2211,7 +2211,7 @@ end
         nⁱ = FT(0)
         qᶠ = FT(0)
         qʷⁱ = FT(0)
-        sᵛ⁺ˡ = FT(0)
+        δqᵛ⁺ˡ = FT(0)
 
         qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
         qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
@@ -2219,10 +2219,10 @@ end
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                qᶠ, FT(0), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
+                                qᶠ, FT(0), qʷⁱ, δqᵛ⁺ˡ, zero(FT), zero(FT))
 
         gm = expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
-                                                           sᵛ⁺ˡ, T, constants)
+                                                           δqᵛ⁺ˡ, T, constants)
         Tᴳᴹ = T + gm.ε * PPP.vaporization_latent_heat(constants, T) / constants.dry_air.heat_capacity
         qᵛᴳᴹ = qᵛ - gm.ε
         qᶜˡᴳᴹ = qᶜˡ + gm.ε
@@ -2259,19 +2259,19 @@ end
         qⁱ = FT(0)
         qᶠ = FT(0)
         qʷⁱ = FT(0)
-        sᵛ⁺ˡ = FT(0)
+        δqᵛ⁺ˡ = FT(0)
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0),
-                                qᶠ, FT(0), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
+                                qᶠ, FT(0), qʷⁱ, δqᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
                                                           ρ, process_rates.sink_limiting_timescale,
                                                           P, pˢᵗ, constants)
 
-        @test tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ *
+        @test tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ *
               process_rates.sink_limiting_timescale ≈ expected atol=FT(1e-12)
     end
 
@@ -2294,12 +2294,12 @@ end
         nⁱ = FT(1e3)
         qᶠ = FT(5e-5)
         qʷⁱ = FT(0)
-        sᵛ⁺ˡ = FT(0)
+        δqᵛ⁺ˡ = FT(0)
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-5)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, nⁱ,
-                                 qᶠ, qᶠ / FT(400), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
+                                 qᶠ, qᶠ / FT(400), qʷⁱ, δqᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
@@ -2307,7 +2307,7 @@ end
                                                           P, pˢᵗ, constants)
 
         @test rates.splintering_mass > 0
-        @test tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ *
+        @test tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ *
               process_rates.sink_limiting_timescale ≈ expected atol=FT(1e-12)
     end
 
@@ -2330,18 +2330,18 @@ end
         qⁱ = FT(0)
         qᶠ = FT(0)
         qʷⁱ = FT(0)
-        sᵛ⁺ˡ = FT(0)
+        δqᵛ⁺ˡ = FT(0)
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0),
-                                qᶠ, FT(0), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
+                                qᶠ, FT(0), qʷⁱ, δqᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
                                                           ρ, τ, P, pˢᵗ, constants)
 
-        @test tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
+        @test tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
     end
 
     @testset "predict_supersaturation reset matches static-energy formulation state" begin
@@ -2363,18 +2363,18 @@ end
         qⁱ = FT(0)
         qᶠ = FT(0)
         qʷⁱ = FT(0)
-        sᵛ⁺ˡ = FT(0)
+        δqᵛ⁺ˡ = FT(0)
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(StaticEnergyState(zero(FT), q, FT(0), P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0),
-                                qᶠ, FT(0), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
+                                qᶠ, FT(0), qʷⁱ, δqᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
                                                           ρ, τ, P, pˢᵗ, constants)
 
-        @test tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
+        @test tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
     end
 
     @testset "predict_supersaturation disabled docs match inactive field semantics" begin
@@ -2410,7 +2410,7 @@ end
             qf,            # qᶠ
             FT(qf / 400),  # bᶠ
             FT(0),         # qʷⁱ
-        FT(0),         # sᵛ⁺ˡ
+        FT(0),         # δqᵛ⁺ˡ
             FT(0),         # nᵃ
             FT(0),         # w
         )
@@ -2425,7 +2425,7 @@ end
             qf,             # qᶠ
             FT(qf / 400),   # bᶠ
             FT(0),          # qʷⁱ
-            FT(0),          # sᵛ⁺ˡ
+            FT(0),          # δqᵛ⁺ˡ
             FT(0),          # nᵃ
             FT(0),          # w
         )

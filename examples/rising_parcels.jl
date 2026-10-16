@@ -5,7 +5,7 @@
 # with five demonstrations: dry ascent; prescribed ascent with one-moment,
 # Kessler, and two-moment microphysics; and buoyancy-driven two-moment ascent.
 # We then extend the comparison with prescribed and buoyant P3 parcels using
-# **prognostic supersaturation** and aerosol activation.
+# a **prognostic vapor excess over liquid** and aerosol activation.
 #
 # All seven parcels use liquid–ice potential temperature, the default formulation.
 # It is conserved during closed adiabatic ascent; temperature responds to pressure
@@ -38,9 +38,9 @@ qᵗ(z) = qᵗ₀ * exp(-z / Hq)
 # ## Recording a parcel trajectory
 #
 # A shared helper initializes and runs each parcel. Snapshots copy the scalar
-# thermodynamic and microphysical states, including P3's prognostic `ρsᵛ⁺ˡ`.
-# Unlike the dimensionless relative supersaturation S, the specific prognostic
-# sᵛ⁺ˡ = qᵛ − qᵛ⁺ˡ has units of kg/kg. We initialize it consistently with the
+# thermodynamic and microphysical states, including P3's prognostic `ρδqᵛ⁺ˡ`.
+# Unlike the dimensionless supersaturation 𝒮, the prognostic vapor excess
+# δqᵛ⁺ˡ = qᵛ − qᵛ⁺ˡ has units of kg/kg. We initialize it consistently with the
 # parcel's vapor and saturation mass fractions.
 #
 # Parcel dynamics retains all condensate: precipitation forms but does not fall
@@ -65,10 +65,10 @@ function run_parcel(; microphysics=nothing, buoyant=false, stop_time=90minutes, 
          ρ = reference_state.density)
 
     state = model.dynamics.state
-    if !isnothing(state.μ) && haskey(state.μ, :ρsᵛ⁺ˡ)
+    if !isnothing(state.μ) && haskey(state.μ, :ρδqᵛ⁺ˡ)
         qᵛ⁺ˡ = saturation_specific_humidity(state.𝒰, thermodynamic_constants, PlanarLiquidSurface())
-        sᵛ⁺ˡ = state.𝒰.moisture_mass_fractions.vapor - qᵛ⁺ˡ
-        state.μ = merge(state.μ, (; ρsᵛ⁺ˡ=state.ρ * sᵛ⁺ˡ))
+        δqᵛ⁺ˡ = state.𝒰.moisture_mass_fractions.vapor - qᵛ⁺ˡ
+        state.μ = merge(state.μ, (; ρδqᵛ⁺ˡ=state.ρ * δqᵛ⁺ˡ))
     end
 
     snapshot() = (; t = model.clock.time, z = state.z, w = state.w,
@@ -95,13 +95,13 @@ nothing #hide
 # Every figure is also saved as a vector SVG for zooming and a high-resolution PNG.
 
 set_theme!(fontsize=20, linewidth=3)
-supersaturation_ticks = ([-1e-2, -1e-3, -1e-4, 0, 1e-4, 1e-3],
+vapor_excess_ticks = ([-1e-2, -1e-3, -1e-4, 0, 1e-4, 1e-3],
                          ["−10⁻²", "−10⁻³", "−10⁻⁴", "0", "10⁻⁴", "10⁻³"])
 number_ticks = (10.0 .^ (-3:3:9), ["10⁻³", "10⁰", "10³", "10⁶", "10⁹"])
 dry_z = [s.z / kilometers for s in dry.snapshots]
 dry_T = [temperature(s.𝒰, constants) for s in dry.snapshots]
 dry_Tₑ = [interpolate(s.z, dry.model.temperature) for s in dry.snapshots]
-dry_S = [s.𝒰.moisture_mass_fractions.vapor /
+dry_𝒮 = [s.𝒰.moisture_mass_fractions.vapor /
          saturation_specific_humidity(s.𝒰, constants, PlanarLiquidSurface()) - 1
          for s in dry.snapshots]
 
@@ -111,10 +111,10 @@ ax = Axis(dry_figure[1, 1]; xlabel = "Temperature (K)", ylabel = "Height (km)",
 lines!(ax, dry_T, dry_z; color=:magenta, label="Parcel")
 lines!(ax, dry_Tₑ, dry_z; color=:gray, linestyle=:dash, label="Environment")
 axislegend(ax; position=:lb)
-ax = Axis(dry_figure[1, 2]; xlabel = "Relative supersaturation S", ylabel = "Height (km)",
+ax = Axis(dry_figure[1, 2]; xlabel = "Supersaturation 𝒮", ylabel = "Height (km)",
           title = "Approach to saturation")
 vlines!(ax, [0]; color=:gray, linestyle=:dash)
-lines!(ax, dry_S, dry_z; color=:dodgerblue)
+lines!(ax, dry_𝒮, dry_z; color=:dodgerblue)
 save("rising_parcels_dry.svg", dry_figure)
 save("rising_parcels_dry.png", dry_figure; px_per_unit=2)
 dry_figure
@@ -134,11 +134,11 @@ dry_figure
 #   [Seifert and Beheng (2006)](@cite SeifertBeheng2006), with aerosol activation
 #   [Abdul-Razzak and Ghan (2000)](@cite AbdulRazzakGhan2000).
 # - [`P3Microphysics`](@ref) adds evolving ice properties and, here, prognostic
-#   supersaturation and aerosol activation. See [P3: Theory](@ref p3_theory).
+#   vapor excess over liquid and aerosol activation. See [P3: Theory](@ref p3_theory).
 #
 # These are comparisons of complete configurations: Kessler retains its saturation
 # formula, and each scheme retains its default process parameters. The plotted
-# supersaturation is diagnosed as qᵛ − qᵛ⁺ˡ in kg/kg using each model's own constants.
+# vapor excess is diagnosed as qᵛ − qᵛ⁺ˡ in kg/kg using each model's own constants.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
@@ -167,8 +167,8 @@ function plot_parcel_comparison(cases, title)
     fig = Figure(size=(1100, 1050))
     Label(fig[0, 1:2], title; fontsize=24)
     temperature_axis = Axis(fig[1, 1]; xlabel="Temperature (K)", ylabel="Height (km)")
-    saturation_axis = Axis(fig[1, 2]; xlabel="Supersaturation (kg/kg)", ylabel="Height (km)",
-                           xscale=Makie.Symlog10(1e-5), xticks=supersaturation_ticks)
+    saturation_axis = Axis(fig[1, 2]; xlabel="Vapor excess (kg/kg)", ylabel="Height (km)",
+                           xscale=Makie.Symlog10(1e-5), xticks=vapor_excess_ticks)
     cloud_axis = Axis(fig[2, 1]; xlabel="Cloud liquid (kg/kg)", ylabel="Height (km)")
     rain_axis = Axis(fig[2, 2]; xlabel="Rain (kg/kg)", ylabel="Height (km)")
     vlines!(saturation_axis, [0]; color=:gray, linestyle=:dash)
@@ -237,7 +237,7 @@ dynamics_figure
 
 # [Download the ascent-history comparison as SVG](rising_parcels_dynamics.svg).
 #
-# ## Particle populations and P3 supersaturation
+# ## Particle populations and P3 vapor excess
 #
 # The prescribed two-moment and P3 parcels also predict particle numbers. Compare
 # their cloud and rain populations directly below; dashed curves in the cloud
@@ -245,7 +245,7 @@ dynamics_figure
 # from logarithmic axes. These ascent comparisons emphasize liquid and rain;
 # P3 additionally carries ice mass, number, rime, and liquid coating.
 #
-# The lower panels compare P3's prognostic supersaturation with qᵛ − qᵛ⁺ˡ
+# The lower panels compare P3's prognostic vapor excess with qᵛ − qᵛ⁺ˡ
 # diagnosed from temperature and vapor, for both ascent types. As in an LES,
 # the prognostic relaxes toward the diagnosed value on P3's process timescale
 # rather than following it exactly.
@@ -268,11 +268,11 @@ end
 axislegend(cloud_number_axis; position=:lb)
 axislegend(rain_number_axis; position=:lb)
 for (column, parcel, title) in ((1, cloudy, "P3 prescribed ascent"), (2, buoyant, "P3 buoyant ascent"))
-    saturation_axis = Axis(diagnostics_figure[2, column]; xlabel="Supersaturation (kg/kg)",
-              ylabel="Height (km)", title, xscale=Makie.Symlog10(1e-5), xticks=supersaturation_ticks)
+    saturation_axis = Axis(diagnostics_figure[2, column]; xlabel="Vapor excess (kg/kg)",
+              ylabel="Height (km)", title, xscale=Makie.Symlog10(1e-5), xticks=vapor_excess_ticks)
     parcel_constants = parcel.model.thermodynamic_constants
     z = [s.z / kilometers for s in parcel.snapshots]
-    prognostic = [s.μ.ρsᵛ⁺ˡ / s.ρ for s in parcel.snapshots]
+    prognostic = [s.μ.ρδqᵛ⁺ˡ / s.ρ for s in parcel.snapshots]
     diagnosed = [s.𝒰.moisture_mass_fractions.vapor -
                  saturation_specific_humidity(s.𝒰, parcel_constants, PlanarLiquidSurface()) for s in parcel.snapshots]
     lines!(saturation_axis, prognostic, z; color=:dodgerblue, label="Prognostic")
@@ -283,4 +283,4 @@ save("rising_parcels_microphysics.svg", diagnostics_figure)
 save("rising_parcels_microphysics.png", diagnostics_figure; px_per_unit=2)
 diagnostics_figure
 
-# [Download the particle and supersaturation diagnostics as SVG](rising_parcels_microphysics.svg).
+# [Download the particle and vapor-excess diagnostics as SVG](rising_parcels_microphysics.svg).
