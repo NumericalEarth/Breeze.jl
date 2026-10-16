@@ -1,9 +1,11 @@
 #####
 ##### Column radiative transfer
 #####
-##### One kernel solves the longwave and shortwave fluxes of every column with NumericalRadiation's
-##### streaming solvers, one column per work item, reading the layer optics through the functors of
-##### `layer_optics.jl` and accumulating the fluxes directly into the radiation model's flux fields.
+##### The columns are solved in batches of whole rows (`column_workspace.jl`). Per batch, a layer pass
+##### stores the per-layer state with one work item per layer (`layer_optics.jl`), and one kernel
+##### solves the longwave and shortwave fluxes with NumericalRadiation's streaming solvers, one column
+##### per work item, reading the layer optics through the functors of `layer_optics.jl` and
+##### accumulating the fluxes directly into the radiation model's flux fields.
 #####
 
 """
@@ -43,18 +45,19 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Solve the longwave and shortwave fluxes of every column of `rtm` from the state of `model`:
-per column, stream the g points of the no-scattering longwave solver and of the two-stream
+Solve the longwave and shortwave fluxes of the `batch_size = (Nx, rows)` columns of the batch of
+`state`, whose layer state the layer pass has stored in `rtm`'s workspace: per column, stream the g points of the no-scattering longwave solver and of the two-stream
 shortwave solver through the column's layer optics, accumulating the fluxes into the four flux
 fields of `rtm`. At night the shortwave irradiance `S₀ max(μ₀, 0)` is zero and the shortwave
 fluxes vanish without a branch.
 """
-function solve_columns!(rtm::EcCKDRadiativeTransferModel, state, grid)
+function solve_columns!(rtm::EcCKDRadiativeTransferModel, state, batch_size)
+    grid = state.grid
     longwave = rtm.longwave_solver
     shortwave = rtm.shortwave_solver
     surface = rtm.surface_radiation
 
-    launch!(architecture(grid), grid, :xy, _column_radiative_fluxes!,
+    launch!(architecture(grid), grid, batch_size, _column_radiative_fluxes!,
             rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux,
             rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
             rtm.atmospheric_state, state, longwave.gas_model, longwave.cloud, shortwave.cloud,
@@ -73,10 +76,12 @@ end
                                            surface_temperature, surface_emissivity,
                                            direct_surface_albedo, diffuse_surface_albedo,
                                            liquid_radius, ice_radius)
-    i, j = @index(Global, NTuple)
+    i, jᵇ = @index(Global, NTuple)
 
     FT = eltype(workspace)
-    c = column_index(i, j, state.grid.Nx)
+    Nx = state.grid.Nx
+    j = jᵇ + state.row_offset
+    c = batch_column(i, jᵇ, Nx)
     N = number_of_layers(state)
     Nₑ = number_of_extension_layers(state.extension)
 
@@ -85,7 +90,7 @@ end
         ε = surface_emissivity[i, j, 1]
         α_direct = direct_surface_albedo[i, j, 1]
         α_diffuse = diffuse_surface_albedo[i, j, 1]
-        μ₀ = workspace.cos_zenith[c]
+        μ₀ = workspace.cos_zenith[column_index(i, j, Nx)]
     end
 
     up(data) = FaceFluxColumn(data, i, j, Nₑ, N, one(FT))
@@ -93,7 +98,7 @@ end
 
     # Longwave: no downwelling flux enters the top of the atmosphere; the surface emits
     # `ε B(T₀)` per g point and reflects `1 - ε` of the downwelling flux
-    longwave = LayerOptics(Longwave(), gas_model, state, mole_fractions, longwave_cloud, liquid_radius, ice_radius, i, j)
+    longwave = LayerOptics(Longwave(), gas_model, workspace, mole_fractions, longwave_cloud, liquid_radius, ice_radius, c)
     surface_emission = TabulatedSurfaceEmission(gas_model, T₀; emissivity = ε)
     transmittance, source_up = longwave_scratch(workspace, c)
 
@@ -103,7 +108,7 @@ end
                                transmittance, source_up)
 
     # Shortwave: the horizontal irradiance at the top of the atmosphere is `S₀ μ₀`, zero at night
-    shortwave = LayerOptics(Shortwave(), gas_model, state, mole_fractions, shortwave_cloud, liquid_radius, ice_radius, i, j)
+    shortwave = LayerOptics(Shortwave(), gas_model, workspace, mole_fractions, shortwave_cloud, liquid_radius, ice_radius, c)
 
     streaming_shortwave_fluxes!(up(upwelling_shortwave), down(downwelling_shortwave),
                                 shortwave, μ₀, solar_constant * max(μ₀, 0), α_direct, α_diffuse,
@@ -114,18 +119,25 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Update the ecCKD radiative fluxes of `rtm` from the current state of `model`: integrate the
-extension pressures above every column's top, solve every column into the flux fields, and
-compute the flux divergence.
+Update the ecCKD radiative fluxes of `rtm` from the current state of `model`. Batch by batch:
+integrate the extension pressures above the columns' tops, store the per-layer state, and solve
+the columns into the flux fields. Then compute the flux divergence.
 """
 function AtmosphereModels._update_radiation!(rtm::EcCKDRadiativeTransferModel, model)
     assert_bound_surface_temperature(rtm)
     grid = model.grid
-    state = ColumnState(rtm, model)
+    workspace = rtm.atmospheric_state
+    gas_model = rtm.longwave_solver.gas_model
 
-    update_cos_zenith!(rtm.atmospheric_state.cos_zenith, rtm.solar_position, grid, model.clock)
-    compute_extension_pressure!(state, model)
-    solve_columns!(rtm, state, grid)
+    update_cos_zenith!(workspace.cos_zenith, rtm.solar_position, grid, model.clock)
+
+    for (row_offset, batch_size) in column_batches(workspace, grid)
+        state = ColumnState(rtm, model, row_offset)
+        compute_extension_pressure!(state, batch_size)
+        compute_layer_state!(workspace, state, gas_model, batch_size)
+        solve_columns!(rtm, state, batch_size)
+    end
+
     compute_radiation_flux_divergence!(rtm, grid)
 
     return nothing

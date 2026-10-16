@@ -1,20 +1,22 @@
 #####
-##### The state of the extended columns, read from the model's fields on the fly
+##### The state of the extended columns, read from the model's fields
 #####
 ##### The column solvers index layers and interfaces top-down: with `N = Nz + Nₑ` layers, column
 ##### layers `1:Nₑ` are the extension (extension layer `m = Nₑ + 1 - k`, counted bottom-up from the
 ##### grid top) and column layer `k > Nₑ` is grid cell `N + 1 - k`; column interface `k` is the top
-##### of column layer `k`, so grid face `kᶠ` is column interface `N + 2 - kᶠ`. Nothing is staged:
-##### every value is computed from the model's fields (interface temperatures by interpolation of the
-##### halo-filled temperature, the surface by its resolved gradient) or from the extension's profiles
-##### and per-column pressures.
+##### of column layer `k`, so grid face `kᶠ` is column interface `N + 2 - kᶠ`. Every value is
+##### computed from the model's fields (interface temperatures by interpolation of the halo-filled
+##### temperature, the surface by its resolved gradient) or from the extension's profiles and
+##### per-column pressures, once per layer by the layer pass of `layer_optics.jl`.
 #####
 
 """
 $(TYPEDEF)
 
 The model fields, constants and column extension from which [`layer_state`](@ref) and
-[`interface_temperature`](@ref) compute the state of the extended columns on the fly.
+[`interface_temperature`](@ref) compute the state of the extended columns, and the batch of
+columns being solved: the extension pressures are those of the batch whose first row follows
+`row_offset` rows of the grid.
 """
 struct ColumnState{G, P, T, D, M, MP, MF, O, X, XP, FT}
     grid :: G
@@ -27,6 +29,7 @@ struct ColumnState{G, P, T, D, M, MP, MF, O, X, XP, FT}
     ozone :: O
     extension :: X
     extension_pressure :: XP
+    row_offset :: Int
     gravitational_acceleration :: FT
     dry_air_molar_mass :: FT
     vapor_molar_mass :: FT
@@ -44,6 +47,7 @@ Adapt.adapt_structure(to, state::ColumnState) =
                 adapt(to, state.ozone),
                 adapt(to, state.extension),
                 adapt(to, state.extension_pressure),
+                state.row_offset,
                 state.gravitational_acceleration,
                 state.dry_air_molar_mass,
                 state.vapor_molar_mass,
@@ -53,9 +57,10 @@ Adapt.adapt_structure(to, state::ColumnState) =
 $(TYPEDSIGNATURES)
 
 The [`ColumnState`](@ref) of `model` with the ozone of `rtm`'s background atmosphere and the
-extension and extension pressures of `rtm`'s workspace.
+extension and extension pressures of `rtm`'s workspace, for the batch of columns that follows
+`row_offset` rows of the grid.
 """
-function ColumnState(rtm, model)
+function ColumnState(rtm, model, row_offset)
     constants = model.thermodynamic_constants
     workspace = rtm.atmospheric_state
     FT = eltype(model.grid)
@@ -69,6 +74,7 @@ function ColumnState(rtm, model)
                        rtm.background_atmosphere.O₃,
                        workspace.extension,
                        workspace.extension_pressure,
+                       row_offset,
                        convert(FT, constants.gravitational_acceleration),
                        convert(FT, constants.dry_air.molar_mass),
                        convert(FT, constants.vapor.molar_mass),
@@ -122,7 +128,7 @@ the anchored temperature, the log-mean of the hydrostatic pressures on its faces
 amount `Δp / (g mᵈ)`, the water vapor and ozone as their mole fractions times it, and no cloud.
 """
 @inline function extension_layer_state(state, extension, i, j, m)
-    c = column_index(i, j, state.grid.Nx)
+    c = batch_column(i, j - state.row_offset, state.grid.Nx)
     T = extension_layer_temperature(state, extension, i, j, m)
     mᵈ = state.dry_air_molar_mass
     @inbounds begin
@@ -222,24 +228,25 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Integrate the extension layers' hydrostatic pressures of every column upward from the grid's top
-face, with the virtual temperature of the anchored extension profile, into
-`state.extension_pressure`; nothing to do without an extension.
+Integrate the extension layers' hydrostatic pressures of the `batch_size = (Nx, rows)` columns of
+the batch of `state` upward from the grid's top face, with the virtual temperature of the
+anchored extension profile, into `state.extension_pressure`; nothing to do without an extension.
 """
-compute_extension_pressure!(state::ColumnState, model) = compute_extension_pressure!(state, state.extension, model)
+compute_extension_pressure!(state::ColumnState, batch_size) = compute_extension_pressure!(state, state.extension, batch_size)
 
-compute_extension_pressure!(state, ::Nothing, model) = nothing
+compute_extension_pressure!(state, ::Nothing, batch_size) = nothing
 
-function compute_extension_pressure!(state, extension, model)
-    grid = model.grid
-    launch!(architecture(grid), grid, :xy, _compute_extension_pressure!, state, extension)
+function compute_extension_pressure!(state, extension, batch_size)
+    grid = state.grid
+    launch!(architecture(grid), grid, batch_size, _compute_extension_pressure!, state, extension)
     return nothing
 end
 
 @kernel function _compute_extension_pressure!(state, extension)
-    i, j = @index(Global, NTuple)
+    i, jᵇ = @index(Global, NTuple)
 
-    c = column_index(i, j, state.grid.Nx)
+    j = jᵇ + state.row_offset
+    c = batch_column(i, jᵇ, state.grid.Nx)
     g = state.gravitational_acceleration
     ϵ = state.dry_air_molar_mass / state.vapor_molar_mass
     p = top_face_pressure(i, j, state.grid, state.pressure, state.density, g)
@@ -275,6 +282,6 @@ function interface_pressure(state, extension, i, j, k)
     Nz = size(state.grid, 3)
     Nₑ = number_of_extension_layers(extension)
     k > Nₑ && return grid_interface_pressure(state, i, j, Nz + Nₑ + 2 - k)
-    c = column_index(i, j, state.grid.Nx)
+    c = batch_column(i, j - state.row_offset, state.grid.Nx)
     return @inbounds state.extension_pressure[c, Nₑ + 2 - k]
 end

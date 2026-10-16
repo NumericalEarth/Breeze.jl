@@ -150,6 +150,11 @@ table) is carried by the gas optics model.
   only `ConstantRadiusParticles` for now
 - `column_extension`: The atmosphere above the grid top (default: `ColumnExtension(eltype(grid))`;
   `nothing` solves the grid's column only, with no atmosphere above it)
+- `columns_per_batch`: Solve the columns in batches of whole rows of the grid of at least this
+  many columns, storing the per-column state and scratch for one batch only, to cap the radiation's
+  memory on large grids (default: `nothing`, one batch of the whole grid). Each batch is a separate
+  kernel launch, so on a GPU smaller batches cost time: aim for several times the number of columns
+  the GPU solves at once.
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  optics::EcCKDOptics,
@@ -165,7 +170,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  schedule = IterationInterval(1),
                                                  liquid_effective_radius = ConstantRadiusParticles(10e-6),
                                                  ice_effective_radius = ConstantRadiusParticles(30e-6),
-                                                 column_extension = ColumnExtension(eltype(grid)))
+                                                 column_extension = ColumnExtension(eltype(grid)),
+                                                 columns_per_batch = nothing)
 
     FT = eltype(grid)
     arch = architecture(grid)
@@ -200,9 +206,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
     Nx, Ny, Nz = size(grid)
-    Nc = Nx * Ny
     N = Nz + number_of_extension_layers(extension)
-    workspace = ColumnWorkspace(arch, FT, Nc, N, extension)
+    rows = batch_rows(grid, columns_per_batch)
+    workspace = ColumnWorkspace(arch, FT, Nx, rows, Nx * Ny, N, gas_model, longwave_cloud, extension)
     initialize_cos_zenith!(workspace.cos_zenith, solar_position)
 
     surface_emissivity = constant_field_property(surface_emissivity, FT)

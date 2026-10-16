@@ -32,15 +32,17 @@ end
 $(TYPEDSIGNATURES)
 
 Column `(i, j)` of `model` as NumericalRadiation's `ColumnAtmosphere` on the host: the layer and
-interface states that the column kernel of `rtm` computes (after a radiation update, which fills
-the extension pressures), the well-mixed gases materialized as `χ .* dry_air`, the surface
+interface states that the layer pass of `rtm` computes (with the extension pressures of the batch
+of columns that holds row `j`, computed here), the well-mixed gases materialized as `χ .* dry_air`, the surface
 temperature and emissivity at `(i, j)`, the column's cosine of the solar zenith angle, and the
 thermodynamic constants of `model` as NumericalRadiation's `PhysicalConstants`.
 """
 function column_atmosphere(rtm::EcCKDRadiativeTransferModel, model, i, j)
-    state = ColumnState(rtm, model)
-    N = number_of_layers(state)
     workspace = rtm.atmospheric_state
+    row_offset = workspace.rows * fld(j - 1, workspace.rows)
+    state = ColumnState(rtm, model, row_offset)
+    compute_extension_pressure!(state, (size(model.grid, 1), min(workspace.rows, size(model.grid, 2) - row_offset)))
+    N = number_of_layers(state)
     c = column_index(i, j, model.grid.Nx)
 
     layers, temperature_interfaces, pressure_interfaces, surface, cos_zenith = @allowscalar begin

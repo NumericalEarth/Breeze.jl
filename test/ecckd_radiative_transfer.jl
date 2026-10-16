@@ -266,7 +266,7 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test ozone_moles[Nₑ:-1:1] ./ dry_air_moles[Nₑ:-1:1] ≈ standard_ozone_profile.(zₑ) rtol = tight
 
         # The extension is clear and reaches the top
-        state = NumericalRadiationExt.ColumnState(radiation, model)
+        state = NumericalRadiationExt.ColumnState(radiation, model, 0)
         extension_layers = @allowscalar [NumericalRadiationExt.layer_state(state, 1, 1, k) for k in 1:Nₑ]
         @test all(layer -> iszero(layer.liquid_water_path) && iszero(layer.ice_water_path), extension_layers)
         @test extension.base + sum(Δzₑ) ≈ 65e3 rtol = 100 * eps(FT)
@@ -383,6 +383,42 @@ previous_float_type = Oceananigans.defaults.FloatType
             return @allocated _update_radiation!(radiation, model)
         end
         @test abs(allocations[2] - allocations[1]) < 1024
+    end
+
+    @testset "Column batches" begin
+        # Batches of 2, 2 and 1 rows of 3 columns solve the same fluxes as one batch of the
+        # whole grid, bit for bit, and hold only one batch of per-column storage
+        Oceananigans.defaults.FloatType = Float64
+        constants = ThermodynamicConstants()
+        grid = RectilinearGrid(default_arch; size = (3, 5, 8), x = (0, 3), y = (0, 5), z = (0, 3kilometers),
+                               topology = (Periodic, Periodic, Bounded))
+        fluxes = map((6, nothing)) do columns_per_batch
+            radiation = RadiativeTransferModel(grid, EcCKDOptics(clouds = CloudScatteringTables()), constants;
+                                               surface_temperature = 300, surface_albedo = 0.1,
+                                               solar_position = FixedCosineZenith(0.5), columns_per_batch)
+            reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 300)
+            model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
+                                    formulation = :LiquidIcePotentialTemperature, radiation,
+                                    microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()))
+            # Every column differs, and the moist ones are cloudy
+            θ(x, y, z) = 300 + 0.01 * z / 1000 + 0.1 * x + 0.2 * y
+            qᵗ(x, y, z) = (1 + 0.1 * x + 0.3 * y) * 0.012 * exp(-z / 2500)
+            set!(model; θ, qᵗ)
+            workspace = radiation.atmospheric_state
+            return (rows = workspace.rows, columns = NumericalRadiationExt.batch_columns(workspace),
+                    lw_up = Array(interior(radiation.upwelling_longwave_flux)),
+                    lw_dn = Array(interior(radiation.downwelling_longwave_flux)),
+                    sw_up = Array(interior(radiation.upwelling_shortwave_flux)),
+                    sw_dn = Array(interior(radiation.downwelling_shortwave_flux)))
+        end
+        batched, whole = fluxes
+        @test batched.rows == 2 && batched.columns == 6
+        @test whole.rows == 5 && whole.columns == 15
+        @test batched.lw_up == whole.lw_up
+        @test batched.lw_dn == whole.lw_dn
+        @test batched.sw_up == whole.sw_up
+        @test batched.sw_dn == whole.sw_dn
+        @test length(unique(batched.lw_up[:, :, end])) == 15
     end
 
     @testset "Scheduling" begin

@@ -162,7 +162,7 @@ previous_float_type = Oceananigans.defaults.FloatType
         model = column_model(grid, all_sky; microphysics = nothing)
         column_model(grid, clear_sky; microphysics = nothing)
 
-        state = NumericalRadiationExt.ColumnState(all_sky, model)
+        state = NumericalRadiationExt.ColumnState(all_sky, model, 0)
         layers = @allowscalar [NumericalRadiationExt.layer_state(state, 1, 1, k) for k in 1:NumericalRadiationExt.number_of_layers(state)]
         @test all(layer -> iszero(layer.liquid_water_path) && iszero(layer.ice_water_path), layers)
 
@@ -193,7 +193,7 @@ previous_float_type = Oceananigans.defaults.FloatType
         column_model(grid, clear_sky)   # same state; the clear-sky optics ignore the condensate
 
         # The cloud the kernel sees: one layer with the prescribed liquid water path, no ice
-        state = NumericalRadiationExt.ColumnState(all_sky, model)
+        state = NumericalRadiationExt.ColumnState(all_sky, model, 0)
         N = NumericalRadiationExt.number_of_layers(state)
         layers = @allowscalar [NumericalRadiationExt.layer_state(state, 1, 1, k) for k in 1:N]
         lwp = [layer.liquid_water_path for layer in layers]
