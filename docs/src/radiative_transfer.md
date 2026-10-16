@@ -1,6 +1,11 @@
 # Radiative Transfer
 
-Breeze.jl integrates with [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) to provide radiative transfer capabilities for atmospheric simulations. The radiative transfer model computes longwave and shortwave radiative fluxes, which can be incorporated into energy tendency equations.
+Breeze.jl computes longwave and shortwave radiative fluxes with a [`RadiativeTransferModel`](@ref), whose flux divergence enters the energy tendency of an [`AtmosphereModel`](@ref). Two radiation backends are available as package extensions, selected by the optics passed to the constructor:
+
+- [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) solves gray-atmosphere ([`GrayOptics`](@ref)), clear-sky ([`ClearSkyOptics`](@ref)), and all-sky ([`AllSkyOptics`](@ref)) radiation with its correlated-``k`` lookup tables; load it with `using RRTMGP, ClimaComms, NCDatasets`.
+- [NumericalRadiation.jl](https://github.com/NumericalEarth/NumericalRadiation.jl) solves clear-sky and all-sky radiation with the ecCKD gas optics ([`EcCKDOptics`](@ref)) in one kernel per column, on CPUs and GPUs; load it with `using NumericalRadiation: NumericalRadiation` and `using NCDatasets` (NumericalRadiation exports its own `ThermodynamicConstants`, so it is loaded qualified next to Breeze). See [ecCKD radiation with NumericalRadiation.jl](@ref) below.
+
+Both backends fill the same four flux fields and the same flux divergence, so a simulation switches between them by changing the optics alone.
 
 ## Gray Atmosphere Radiation
 
@@ -230,7 +235,7 @@ model = AtmosphereModel(grid; clock, dynamics, radiation)
 
 The cosine of the zenith angle is written into the RRTMGP boundary-condition
 array once at construction and never recomputed; the per-step
-`update_solar_zenith_angle!` call becomes a no-op.
+`update_cos_zenith!` call becomes a no-op.
 
 #### Choosing a value
 
@@ -297,7 +302,143 @@ radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
 The [`BackgroundAtmosphere`](@ref) struct specifies volume mixing ratios for radiatively active gases (CO₂, CH₄, N₂O, O₃, etc.). Water vapor is computed from the model's prognostic moisture field.
 
 Clear-sky and all-sky models accept the same `solar_position` keyword as
-gray-optics; the three optics flavors share the solar-position machinery.
+gray-optics; all optics flavors share the solar-position machinery.
+
+## ecCKD radiation with NumericalRadiation.jl
+
+[`EcCKDOptics`](@ref) selects the ecCKD correlated-``k`` gas optics of
+[HoganMatricardi2022](@citet), solved by
+[NumericalRadiation.jl](https://github.com/NumericalEarth/NumericalRadiation.jl).
+The gas optics tables ship with the ecRad data that NumericalRadiation downloads as an
+artifact, and are read from netCDF files, so both `NumericalRadiation` and `NCDatasets`
+must be loaded. NumericalRadiation exports its own `ThermodynamicConstants`; loading it
+qualified avoids the clash with Breeze's:
+
+```@example ecckd
+using Breeze, Oceananigans.Units
+using NCDatasets
+using NumericalRadiation: NumericalRadiation
+
+grid = RectilinearGrid(; size=16, x=0, y=45, z=(0, 10kilometers),
+                       topology=(Flat, Flat, Bounded))
+constants = ThermodynamicConstants()
+
+radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                   surface_temperature = 300,
+                                   surface_emissivity = 0.98,
+                                   surface_albedo = 0.1,
+                                   background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6),
+                                   column_extension = ColumnExtension(top = 65kilometers, layers = 40))
+```
+
+The keyword arguments are those of the RRTMGP clear-sky and all-sky constructors
+(surface properties, `solar_position`, `solar_constant`, `schedule`,
+`background_atmosphere`, effective radii) plus `column_extension`. The default
+`EcCKDOptics()` uses the `:climate_32x32` reference model with 32 longwave and 32
+shortwave g-points; `EcCKDOptics(:climate_64x64)` doubles the spectral resolution, and
+a `(longwave = path, shortwave = path)` pair selects ecCKD definition files of your own.
+On a `GPU()` grid the tables and the solve live on the device.
+
+### Column extension
+
+A limited-area grid rarely reaches the top of the atmosphere. Rather than treating the
+grid top as the top of the atmosphere, an ecCKD model continues the radiation column
+above it through a [`ColumnExtension`](@ref): by default 40 geometrically stretched
+layers from the grid top to 65 km, whose temperature follows the U.S. Standard
+Atmosphere ([`standard_atmosphere_temperature`](@ref)) anchored to the temperature on the
+grid's top face and relaxing to the standard profile over a 1 km `blending_height`.
+Pressure is hydrostatic above the grid, the specific humidity follows an idealized profile
+floored at the stratospheric value, and the ozone mole fraction follows
+`BackgroundAtmosphere.O₃` — a number or a function of height, evaluated above the grid as
+well — unless `ozone_mole_fraction` overrides it. Extension layers are clear.
+
+The extension is what gives the downwelling longwave flux on the grid's top face its
+stratospheric contribution (a few W m⁻² for a 20 km grid) and lets the stratospheric
+ozone absorb ultraviolet sunlight before it reaches the grid, instead of depositing that
+absorption in the grid's top cells. Pass `column_extension = nothing` to stop the column
+at the grid top, which is the right choice for comparisons with the RRTMGP models (whose
+column ends there) or for a grid that already reaches the mesosphere.
+
+```julia
+# Stop at the grid top
+radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                   surface_temperature = 300, surface_albedo = 0.1,
+                                   column_extension = nothing)
+
+# A taller, finer extension with a constant stratospheric ozone mole fraction
+extension = ColumnExtension(top = 80kilometers, layers = 60, ozone_mole_fraction = 2e-6)
+```
+
+### Gases
+
+The ecCKD reference models tabulate eight gases. Two vary in space: water vapor, taken
+from the model's prognostic moisture, and ozone, from `BackgroundAtmosphere.O₃`. Five are
+well-mixed and read from the [`BackgroundAtmosphere`](@ref): CO₂, CH₄, N₂O, CFC₁₁ and
+CFC₁₂. Nitrogen and oxygen form the "composite" dry-air gas whose absorption the tables
+fold in. Gas amounts follow the "dry" column convention the ecCKD tables were derived with:
+the composite amount of a layer is its total mass over the dry molar mass, `ρ Δz / mᵈ`
+(`Δp / (g mᵈ)` for a hydrostatic layer), the water vapor `ρ qᵛ Δz / mᵛ` is counted on top of
+it, and the well-mixed gases are their mole fractions times the composite amount. The
+molar masses `mᵈ` and `mᵛ` and the gravitational acceleration `g` are those of the
+`ThermodynamicConstants` passed to `RadiativeTransferModel`; the Stefan–Boltzmann constant
+of the gray Planck source (used by g-points without a Planck source table) is carried by
+NumericalRadiation's gas optics model.
+The remaining gases of `BackgroundAtmosphere` (CO, NO₂, CFC₂₂, CCl₄, CF₄ and the
+HFCs) are not tabulated and must be left at zero; a nonzero value throws an `ArgumentError`
+rather than being silently ignored.
+
+### Clouds
+
+All-sky ecCKD radiation adds the cloud liquid and ice diagnosed by the model's
+microphysics to the layer optics through single-scattering tables mapped onto the same
+g-points as the gas optics, selected with [`CloudScatteringTables`](@ref):
+
+```julia
+optics = EcCKDOptics(clouds = CloudScatteringTables(liquid = :mie_droplet,
+                                                    ice = :baum_general_habit_mixture))
+
+radiation = RadiativeTransferModel(grid, optics, constants;
+                                   surface_temperature = 300, surface_albedo = 0.1,
+                                   liquid_effective_radius = ConstantRadiusParticles(10e-6),
+                                   ice_effective_radius = ConstantRadiusParticles(30e-6))
+```
+
+The two selectors name the Mie droplet and Baum general-habit-mixture ice tables shipped
+with the ecRad data; a path to a netCDF file in the same format works in their place. The
+tables are evaluated once, at construction, at the constant effective radii of
+`liquid_effective_radius` and `ice_effective_radius` (only
+[`ConstantRadiusParticles`](@ref) for now). The shortwave folds the cloud scattering into
+the two-stream solution with delta-Eddington scaling; the longwave adds the cloud
+absorption only and neglects longwave cloud scattering (ecRad's
+`do_lw_cloud_scattering = false` setting, as RRTMGP's no-scattering longwave solver does).
+With
+`clouds = nothing` (the default) the sky is clear whatever the microphysics holds.
+
+### Sign and units conventions
+
+NumericalRadiation solves each column top-down with longwave and shortwave fluxes positive
+in their own direction of travel. Breeze converts on the way back to the grid, so an ecCKD
+model exposes the same four `ZFaceField`s as the RRTMGP models, in W m⁻², all
+**positive upward** with downwelling fluxes stored as negative numbers, and the same
+`flux_divergence` in W m⁻³ (see [Integration with dynamics](@ref)). On the grid's top face
+the downwelling shortwave equals `-solar_constant * cos_zenith` only without a column
+extension; with one it is reduced by the absorption above the grid. The downwelling
+longwave on the top face is zero without an extension and the emission of the atmosphere
+above with one.
+
+### Coexistence with RRTMGP
+
+The two extensions load side by side (`using RRTMGP, ClimaComms, NCDatasets` together
+with `using NumericalRadiation: NumericalRadiation`), and [`GrayOptics`](@ref),
+[`ClearSkyOptics`](@ref) and [`AllSkyOptics`](@ref) remain RRTMGP models. Because both
+backends fill the same fields, one script can build an RRTMGP model and an ecCKD model on
+two `AtmosphereModel`s with identical initial conditions and difference their fluxes; the
+[single column radiation example](literated/single_column_radiation.md) does exactly that.
+On the same 20 km column, with `column_extension = nothing` so that both stop at the grid
+top, the two agree to 2 W m⁻² in the clear-sky boundary fluxes, to 0.1 W m⁻² in the 2×CO₂
+forcing and to 0.2 K day⁻¹ (root mean square) in the clear-sky heating rates, the spread
+expected between two independent correlated-``k`` models; they part at cloud top, where the
+cloud optics differ in kind.
 
 ## Surface Properties
 
@@ -345,4 +486,4 @@ shortwave radiation scatters or reflects.
 
 ## Architecture Support
 
-The radiative transfer implementation supports both CPU and GPU architectures. The column-based RRTMGP solver is called from Oceananigans' field data arrays with appropriate data layout conversions.
+The radiative transfer implementation supports both CPU and GPU architectures. The column-based RRTMGP solver is called from Oceananigans' field data arrays with appropriate data layout conversions. The ecCKD backend stages the grid's columns into top-down spectral column arrays with kernels and solves every column's longwave and shortwave fluxes in one kernel, so it runs on the grid's architecture without leaving the device.
