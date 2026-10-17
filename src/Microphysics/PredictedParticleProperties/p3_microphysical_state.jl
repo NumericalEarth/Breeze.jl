@@ -477,6 +477,45 @@ end
     return nothing
 end
 
+@inline with_number_concentrations(ℳ::P3MicrophysicalState, nʳ, nⁱ) =
+    P3MicrophysicalState(ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, nʳ, ℳ.qⁱ, nⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ, ℳ.sᵛ⁺ˡ, ℳ.nᵃ, ℳ.w)
+
+# Rain or ice with mass but a number density below `minimum_number_density` gets a one-moment
+# number, after the cleanup of the two-moment scheme of Milbrandt and Yau (2005); otherwise the
+# size limiters give that mass the largest admissible particles. The repaired `ρnʳ`, `ρnⁱ` are
+# written back and returned in ℳ, so the fall speeds and the auxiliary fields see them.
+@inline function repair_number_concentrations!(μ, i, j, k, p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    parameters = p3.process_rates
+    Nᵐⁱⁿ = parameters.minimum_number_density
+    @inbounds ρnʳ = μ.ρnʳ[i, j, k]
+    @inbounds ρnⁱ = μ.ρnⁱ[i, j, k]
+
+    # Rain: exponential distribution with intercept ℂʳᵉᵖ₁, N = (ℂʳᵉᵖ₁)^¾ (ρqʳ / π ρʷ)^¼,
+    # within the λʳ bounds.
+    qʳ = max(0, ℳ.qʳ)
+    ℂʳᵉᵖ₁ = parameters.repair_rain_intercept
+    Nʳ = sqrt(sqrt(ℂʳᵉᵖ₁^3 * ρ * qʳ / (π * parameters.liquid_water_density)))
+    repair_rain = (ℳ.qʳ >= p3.minimum_mass_mixing_ratio) & (ρnʳ < Nᵐⁱⁿ)
+    nʳ = ifelse(repair_rain, bounded_rain_number(Nʳ / ρ, qʳ, parameters), ℳ.nʳ)
+
+    # Ice: the Cooper (1986) number of deposition nucleation, evaluated no colder than ℂʳᵉᵖ₂,
+    # within the bounds `p3_core_ice_properties` applies before every fall speed and process rate.
+    T = temperature(𝒰, constants)
+    T₀ = parameters.freezing_temperature
+    ℂⁿᵘᶜˡ₅ = parameters.ice_nucleation_coefficient
+    ℂⁿᵘᶜˡ₆ = parameters.ice_nucleation_temperature_coefficient
+    ℂʳᵉᵖ₂ = parameters.repair_minimum_ice_temperature
+    Nⁱ = max(2Nᵐⁱⁿ, ℂⁿᵘᶜˡ₅ * exp(ℂⁿᵘᶜˡ₆ * (T₀ - max(ℂʳᵉᵖ₂, T))))
+    qⁱ_total = total_ice_mass(ℳ.qⁱ, active_liquid_on_ice(p3, ℳ.qʷⁱ))
+    repair_ice = (qⁱ_total >= p3.minimum_mass_mixing_ratio) & (ρnⁱ < Nᵐⁱⁿ)
+    nⁱ_repaired = p3_core_ice_properties(p3, ρ, with_number_concentrations(ℳ, ℳ.nʳ, Nⁱ / ρ)).nⁱ
+    nⁱ = ifelse(repair_ice, nⁱ_repaired, ℳ.nⁱ)
+
+    @inbounds μ.ρnʳ[i, j, k] = ifelse(repair_rain, ρ * nʳ, ρnʳ)
+    @inbounds μ.ρnⁱ[i, j, k] = ifelse(repair_ice, ρ * nⁱ, ρnⁱ)
+    return with_number_concentrations(ℳ, nʳ, nⁱ)
+end
+
 # GPU-compatible update_microphysical_fields! for P3.
 # Bypasses the generic extract_microphysical_prognostics which uses runtime Symbol
 # dispatch that GPU compilers cannot resolve. Instead, directly constructs
@@ -491,7 +530,8 @@ end
         # `w` enters P3 solely through the adiabatic temperature tendency, which lives
         # in the tendency kernel.
         velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
-        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
+        ℳ⁰ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
+        ℳ = repair_number_concentrations!(μ, i, j, k, p3, ρ, ℳ⁰, 𝒰, constants)
         clamp_rime_state!(μ, i, j, k, ρ, ℳ)
         AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3, ℳ, ρ, 𝒰, constants)
     end
