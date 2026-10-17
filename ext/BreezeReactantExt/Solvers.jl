@@ -1,8 +1,6 @@
 using Reactant: Reactant
 using Oceananigans.Solvers: Solvers, FourierTridiagonalPoissonSolver
 
-const ConcreteReactantArray = Union{Reactant.AnyConcretePJRTArray, Reactant.AnyConcreteIFRTArray}
-
 const EagerReactantFourierTridiagonalPoissonSolver =
     FourierTridiagonalPoissonSolver{<:Any, <:Any, <:Any, <:Any, <:Any, <:ConcreteReactantArray}
 

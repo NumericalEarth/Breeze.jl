@@ -66,6 +66,12 @@ end
         expected = Array(interior(getproperty(models[2].velocities, name)))
         @test projected ≈ expected rtol=1e-12 atol=1e-14
     end
+
+    # Forcings such as `SubsidenceForcing` compute horizontal averages eagerly.
+    averages = map(models) do model
+        Array(interior(Field(Average(model.velocities.u, dims=(1, 2)))))
+    end
+    @test averages[1] ≈ averages[2] rtol=1e-12 atol=1e-14
 end
 
 @testset "Anelastic reverse-mode gradient" begin
