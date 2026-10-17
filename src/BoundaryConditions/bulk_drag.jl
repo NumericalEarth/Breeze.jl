@@ -170,13 +170,13 @@ u_drag = BulkDrag(direction=XDirection(), coefficient=1e-3)
 
 # output
 Oceananigans.FieldBoundaryConditions, with boundary conditions
-├── west: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── east: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── west: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
+├── east: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
+├── south: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
+├── north: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=0)
-├── top: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── top: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
+└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ```
 
 and similarly for `YDirection` for v. The same condition may be placed on the walls of a
@@ -190,11 +190,11 @@ drag = BulkDrag(coefficient=1e-3)
 Oceananigans.FieldBoundaryConditions, with boundary conditions
 ├── west: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
 ├── east: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
-├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── south: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
+├── north: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
 ├── top: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
-└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ```
 """
 function BulkDrag(; kwargs...)

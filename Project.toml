@@ -1,7 +1,7 @@
 name = "Breeze"
 uuid = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
 authors = ["NumericalEarth organization (github.com/NumericalEarth) and lovely contributors"]
-version = "0.12.0"
+version = "0.12.1"
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
@@ -46,7 +46,7 @@ JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"
 LazyArtifacts = "<0.0.1, 1"
 NumericalRadiation = "0.1.3"
-Oceananigans = "0.113.6"
+Oceananigans = "0.113.6, 0.114"
 OffsetArrays = "1.4"
 Printf = "1"
 RRTMGP = "0.22, 0.23, 1"
@@ -57,4 +57,4 @@ Statistics = "<0.0.1, 1"
 julia = "1.11.9"
 
 [workspace]
-projects = ["benchmarking", "docs", "examples", "test"]
+projects = ["docs", "examples", "test"]
