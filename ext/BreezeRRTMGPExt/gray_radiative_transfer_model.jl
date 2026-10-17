@@ -78,31 +78,11 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)
 
-    error_msg = "Must either provide surface_albedo or *both* of
-                 direct_surface_albedo and diffuse_surface_albedo"
-
     solar_position = maybe_infer_solar_position(solar_position, grid)
 
-    validate_surface_fractions(; surface_emissivity, surface_albedo,
-                                 direct_surface_albedo, diffuse_surface_albedo)
-
-    if !isnothing(surface_albedo)
-        if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)
-            throw(ArgumentError(error_msg))
-        end
-
-        surface_albedo = materialize_surface_property(surface_albedo, grid, solar_position)
-        diffuse_surface_albedo = surface_albedo
-        direct_surface_albedo = surface_albedo
-
-    elseif !isnothing(diffuse_surface_albedo) && !isnothing(direct_surface_albedo)
-        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid, solar_position)
-        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid, solar_position)
-    else
-        throw(ArgumentError(error_msg))
-    end
-
-    surface_emissivity = materialize_surface_property(surface_emissivity, grid, solar_position)
+    surface_radiation = materialize_surface_radiation(grid, solar_position;
+                                                      surface_temperature, surface_emissivity, surface_albedo,
+                                                      direct_surface_albedo, diffuse_surface_albedo)
 
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -148,14 +128,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     rrtmgp_ℐ₀ .= convert(FT, solar_constant)  # Top-of-atmosphere solar flux
 
-    surface_emissivity = constant_field_property(surface_emissivity, FT)
-    direct_surface_albedo = constant_field_property(direct_surface_albedo, FT)
-    diffuse_surface_albedo = constant_field_property(diffuse_surface_albedo, FT)
-
-    if surface_temperature isa Number
-        surface_temperature = ConstantField(convert(FT, surface_temperature))
-        rrtmgp_T₀ .= surface_temperature.constant
-    end
+    initialize_surface_temperature!(rrtmgp_T₀, surface_radiation.surface_temperature)
 
     rrtmgp_grid = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
 
@@ -187,9 +160,6 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     upwelling_shortwave_flux = ZFaceField(grid)    # Zero for non-scattering gray optics
     downwelling_shortwave_flux = ZFaceField(grid)  # Direct beam only
     flux_divergence = CenterField(grid)
-
-    surface_radiation = SurfaceRadiation(surface_temperature, surface_emissivity,
-                                         direct_surface_albedo, diffuse_surface_albedo)
 
     update_rrtmgp_surface_boundary_conditions!(longwave_solver.bcs.sfc_emis,
                                                shortwave_solver.bcs.sfc_alb_direct,
