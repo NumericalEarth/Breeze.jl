@@ -93,28 +93,25 @@ end
         μ₀ = workspace.cos_zenith[column_index(i, j, Nx)]
     end
 
-    # The signs are computed outside the closures: a closure capturing `FT` stores it as a
-    # `DataType`, which Julia 1.11 does not infer through
-    upward = one(FT)
-    downward = -one(FT)
-    up(data) = FaceFluxColumn(data, i, j, Nₑ, N, upward)
-    down(data) = FaceFluxColumn(data, i, j, Nₑ, N, downward)
-
     # Longwave: no downwelling flux enters the top of the atmosphere; the surface emits
     # `ε B(T₀)` per g point and reflects `1 - ε` of the downwelling flux
+    ℐ_lw_up = FaceFluxColumn(upwelling_longwave, i, j, Nₑ, N, one(FT))
+    ℐ_lw_dn = FaceFluxColumn(downwelling_longwave, i, j, Nₑ, N, -one(FT))
     longwave = LayerOptics(Longwave(), gas_model, workspace, mole_fractions, longwave_cloud, liquid_radius, ice_radius, c)
     surface_emission = TabulatedSurfaceEmission(gas_model, T₀; emissivity = ε)
     transmittance, source_up = longwave_scratch(workspace, c)
 
-    streaming_longwave_fluxes!(up(upwelling_longwave), down(downwelling_longwave),
+    streaming_longwave_fluxes!(ℐ_lw_up, ℐ_lw_dn,
                                longwave, surface_emission, 1 - ε, zero(FT),
                                gas_model.longwave_weights, length(gas_model.longwave_weights), N,
                                transmittance, source_up)
 
     # Shortwave: the horizontal irradiance at the top of the atmosphere is `S₀ μ₀`, zero at night
+    ℐ_sw_up = FaceFluxColumn(upwelling_shortwave, i, j, Nₑ, N, one(FT))
+    ℐ_sw_dn = FaceFluxColumn(downwelling_shortwave, i, j, Nₑ, N, -one(FT))
     shortwave = LayerOptics(Shortwave(), gas_model, workspace, mole_fractions, shortwave_cloud, liquid_radius, ice_radius, c)
 
-    streaming_shortwave_fluxes!(up(upwelling_shortwave), down(downwelling_shortwave),
+    streaming_shortwave_fluxes!(ℐ_sw_up, ℐ_sw_dn,
                                 shortwave, μ₀, solar_constant * max(μ₀, 0), α_direct, α_diffuse,
                                 gas_model.shortwave_weights, length(gas_model.shortwave_weights), N,
                                 shortwave_scratch(workspace, c))
