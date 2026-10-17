@@ -20,7 +20,6 @@ using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps, minimum_horizontal_spacing,
                                     sponge_term_diag, sponge_rhs,
-                                    apply_horizontal_pressure_gradient_substep,
                                     AcousticTridiagLower, AcousticTridiagDiagonal,
                                     AcousticTridiagUpper,
                                     horizontal_damping_scale, κˣ, κʸ,
@@ -47,15 +46,7 @@ const arches = (Metal.functional() || get(ENV, "BREEZE_FORCE_METAL_FUNCTIONAL", 
 
 as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float_types()
 
-@testset "MPAS first-small-step pressure-gradient sequencing" begin
-    @test apply_horizontal_pressure_gradient_substep(1, 1)
-    @test !apply_horizontal_pressure_gradient_substep(1, 2)
-    @test apply_horizontal_pressure_gradient_substep(2, 2)
-    @test !apply_horizontal_pressure_gradient_substep(1, 6)
-    @test apply_horizontal_pressure_gradient_substep(6, 6)
-end
-
-@testset "First acoustic substep retains frozen horizontal pressure gradient" begin
+@testset "Horizontal acoustic step applies the frozen horizontal pressure gradient" begin
     FT = Float64
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(CPU();
@@ -86,7 +77,7 @@ end
     fill!(ρv′, 0)
 
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
-            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ, false)
+            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ)
 
     @test @allowscalar(ρu′[2, 2, 2]) == -1
     @test @allowscalar(ρv′[2, 2, 2]) == -1.5
@@ -465,7 +456,7 @@ for arch in arches
                 FT(model.thermodynamic_constants.gravitational_acceleration), dˢ⁻,
                 substepper.vertical_momentum_tendency_factor,
                 substepper.slow_vertical_momentum_tendency,
-                substepper.sponge, true)
+                substepper.sponge)
 
         # Building the RHS must not touch its own (ρw)′ input.
         @test interior(substepper.momentum_perturbation.w) == ρw′
