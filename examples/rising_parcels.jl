@@ -117,7 +117,9 @@ vlines!(ax, [0]; color=:gray, linestyle=:dash)
 lines!(ax, dry_𝒮, dry_z; color=:dodgerblue)
 save("rising_parcels_dry.svg", dry_figure)
 save("rising_parcels_dry.png", dry_figure; px_per_unit=2)
-dry_figure
+nothing #hide
+
+# ![](rising_parcels_dry.png)
 
 # [Download the dry-ascent figure as SVG](rising_parcels_dry.svg).
 #
@@ -195,7 +197,9 @@ nothing #hide
 prescribed_figure = plot_parcel_comparison(prescribed_cases, "Same prescribed ascent · 1 m/s · 90 minutes")
 save("rising_parcels_prescribed_comparison.svg", prescribed_figure)
 save("rising_parcels_prescribed_comparison.png", prescribed_figure; px_per_unit=2)
-prescribed_figure
+nothing #hide
+
+# ![](rising_parcels_prescribed_comparison.png)
 
 # [Download the prescribed-ascent comparison as SVG](rising_parcels_prescribed_comparison.svg).
 #
@@ -215,7 +219,9 @@ buoyant_cases = ((buoyant_two_moment, "Two moment", :dodgerblue, :dashdot),
 buoyant_figure = plot_parcel_comparison(buoyant_cases, "Buoyancy-driven ascent · initially 1 m/s · 300 s")
 save("rising_parcels_buoyant_comparison.svg", buoyant_figure)
 save("rising_parcels_buoyant_comparison.png", buoyant_figure; px_per_unit=2)
-buoyant_figure
+nothing #hide
+
+# ![](rising_parcels_buoyant_comparison.png)
 
 # [Download the buoyant-parcel comparison as SVG](rising_parcels_buoyant_comparison.svg).
 
@@ -234,7 +240,9 @@ hlines!(velocity_axis, [1]; color=:gray, linestyle=:dash)
 Legend(dynamics_figure[2, 1:2], height_axis; orientation=:horizontal)
 save("rising_parcels_dynamics.svg", dynamics_figure)
 save("rising_parcels_dynamics.png", dynamics_figure; px_per_unit=2)
-dynamics_figure
+nothing #hide
+
+# ![](rising_parcels_dynamics.png)
 
 # [Download the ascent-history comparison as SVG](rising_parcels_dynamics.svg).
 #
@@ -282,6 +290,8 @@ for (column, parcel, title) in ((1, cloudy, "P3 prescribed ascent"), (2, buoyant
 end
 save("rising_parcels_microphysics.svg", diagnostics_figure)
 save("rising_parcels_microphysics.png", diagnostics_figure; px_per_unit=2)
-diagnostics_figure
+nothing #hide
+
+# ![](rising_parcels_microphysics.png)
 
 # [Download the particle and vapor-excess diagnostics as SVG](rising_parcels_microphysics.svg).
