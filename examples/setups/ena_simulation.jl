@@ -6,7 +6,6 @@ using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: znode, znodes
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ
 using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, MoistureMassFractions
-using Breeze.Advection: ScaledWENOWeights
 
 include("ena_data.jl")
 
@@ -140,7 +139,7 @@ function ena_simulation(arch=CPU(); size=(64, 64, 75), extent=(6400, 6400, 3000)
     microphysics = P3Microphysics(FT; thermodynamic_constants=constants)
     weno = WENO(order=5)
     positive = WENO(order=5, bounds=(0, 1))
-    positive_number = WENO(order=5, bounds=(FT(0), FT(Inf)), weight_computation=ScaledWENOWeights)
+    positive_number = WENO(order=5, bounds=(FT(0), FT(Inf)))
     scalar_advection = (ρθ=weno, ρqᵛ=positive, ρqᶜˡ=positive, ρqʳ=positive,
                         ρnʳ=positive_number, ρqⁱ=positive, ρnⁱ=positive_number,
                         ρqᶠ=positive, ρbᶠ=positive_number, ρqʷⁱ=positive)
