@@ -93,8 +93,12 @@ end
         μ₀ = workspace.cos_zenith[column_index(i, j, Nx)]
     end
 
-    up(data) = FaceFluxColumn(data, i, j, Nₑ, N, one(FT))
-    down(data) = FaceFluxColumn(data, i, j, Nₑ, N, -one(FT))
+    # The signs are computed outside the closures: a closure capturing `FT` stores it as a
+    # `DataType`, which Julia 1.11 does not infer through
+    upward = one(FT)
+    downward = -one(FT)
+    up(data) = FaceFluxColumn(data, i, j, Nₑ, N, upward)
+    down(data) = FaceFluxColumn(data, i, j, Nₑ, N, downward)
 
     # Longwave: no downwelling flux enters the top of the atmosphere; the surface emits
     # `ε B(T₀)` per g point and reflects `1 - ε` of the downwelling flux
