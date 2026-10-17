@@ -85,8 +85,8 @@ end
 
 @inline (profile::TimeHeightProfile)(x, y, z, t) = profile(z, t)
 
-@inline function time_height_value(i, j, k, grid, profile, time, vertical_location)
-    z = znode(i, j, k, grid, Center(), Center(), vertical_location)
+@inline function time_height_value(i, j, k, grid, profile, time, ℓx, ℓy, ℓz)
+    z = znode(i, j, k, grid, ℓx, ℓy, ℓz)
     return profile(z, time)
 end
 
@@ -98,7 +98,10 @@ The profile must already be on that architecture.
 """
 function Oceananigans.set!(field::Field, profile::TimeHeightProfile, time::Number)
     LX, LY, LZ = location(field)
-    operation = KernelFunctionOperation{LX, LY, LZ}(time_height_value, field.grid, profile, eltype(field)(time), LZ())
+    # Reduced horizontal dimensions are evaluated at cell centers.
+    horizontal_location(ℓ) = ℓ === Nothing ? Center() : ℓ()
+    operation = KernelFunctionOperation{LX, LY, LZ}(time_height_value, field.grid, profile, eltype(field)(time),
+                                                    horizontal_location(LX), horizontal_location(LY), LZ())
     field .= operation
     return field
 end

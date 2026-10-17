@@ -89,7 +89,7 @@ for use from Breeze GPU kernels.
     Dᵛ = air.D_vapor
     r = max(ifelse(
         Nᶜⁱ > ϵ_numerics(FT),
-        cbrt(3 * qᶜⁱ / (4 * FT(π) * Nᶜⁱ * ρᵢ)),
+        cube_root(3 * qᶜⁱ / (4 * FT(π) * Nᶜⁱ * ρᵢ)),
         zero(FT),
     ), FT(1e-6))
     return inv(4 * FT(π) * Dᵛ * Nᶜⁱ * r)
@@ -209,9 +209,7 @@ Rate of change of rain specific humidity (negative = evaporation)
     Re = 2v₀ * χv / ν_air * λ⁻¹
     size_factor = (r0 / λ⁻¹)^((ve + Δv) / 2)
 
-    # Sc is positive. Julia's Float32 cbrt uses Float64 intermediates, which
-    # Metal cannot execute; the fractional power keeps this calculation in FT.
-    ventilation = aᵥ + bᵥ * Sc^(FT(1) / 3) * sqrt(Re) / size_factor * gamma_vent
+    ventilation = aᵥ + bᵥ * cube_root(Sc) * sqrt(Re) / size_factor * gamma_vent
 
     evap_rate = base_rate * ventilation
 
@@ -282,7 +280,7 @@ Rate of change of snow specific humidity (positive = deposition, negative = subl
     Re = 2v₀ * χv / ν_air * λ⁻¹
     size_factor = (r0 / λ⁻¹)^((ve + Δv) / 2)
 
-    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_vent
+    ventilation = aᵥ + bᵥ * cube_root(Sc) * sqrt(Re) / size_factor * gamma_vent
 
     rate = base_rate * ventilation
 
@@ -350,7 +348,7 @@ Rate of snow mass lost to melting [kg/kg/s] (always non-negative)
     Re = 2v₀ * χv / ν_air * λ⁻¹
     size_factor = (r0 / λ⁻¹)^((ve + Δv) / 2)
 
-    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_vent
+    ventilation = aᵥ + bᵥ * cube_root(Sc) * sqrt(Re) / size_factor * gamma_vent
 
     melt_rate = base_rate * ventilation
 
@@ -460,20 +458,20 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
     # Mean rain drop mass and diameter
     (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ_safe, ρ, Nʳ_safe)
     xr_mean_safe = max(xr_mean, eps(FT))
-    Dʳ = cbrt(6 * xr_mean_safe / (π * ρᴸ))
+    Dʳ = cube_root(6 * xr_mean_safe / (π * ρᴸ))
 
     # Ventilation factors for number and mass tendencies
-    t_star = cbrt(6 * x_star / xr_mean_safe)
+    t_star = cube_root(6 * x_star / xr_mean_safe)
     a_vent_0 = av * Γ_incl(FT(-1), t_star) / FT(6)^(FT(-2) / FT(3))
     b_vent_0 = bv * Γ_incl(FT(-0.5) + FT(1.5) * β, t_star) / FT(6)^((β - one(FT)) / FT(2))
 
-    a_vent_1 = av * Γ(FT(2)) / cbrt(FT(6))
+    a_vent_1 = av * Γ(FT(2)) / cube_root(FT(6))
     b_vent_1 = bv * Γ(FT(2.5) + FT(1.5) * β) / FT(6)^((β + one(FT)) / FT(2))
 
     # Reynolds number
     Re = α * xr_mean_safe^β * sqrt(ρ0 / ρ) * Dʳ / ν_air
-    Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(Re)
-    Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(Re)
+    Fv0 = a_vent_0 + b_vent_0 * cube_root(ν_air / D_vapor) * sqrt(Re)
+    Fv1 = a_vent_1 + b_vent_1 * cube_root(ν_air / D_vapor) * sqrt(Re)
 
     # Evaporation rates (negative for evaporation)
     evap_rate_0 = min(zero(FT), 2 * FT(π) * G * 𝒮 * Nʳ_safe * Dʳ * Fv0 / xr_mean_safe)
@@ -653,12 +651,12 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
 
     # Liquid relaxation
-    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / (Nˡ * ρᴸ * FT(π) * 4 / 3)), zero(FT))
+    rˡ = ifelse(Nˡ > eps(FT), cube_root(ρ * qˡ / (Nˡ * ρᴸ * FT(π) * 4 / 3)), zero(FT))
     Kˡ = 4 * FT(π) * ρᴸ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / (Rᵛ * cᵖᵐ * T * p)
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / (Nⁱ * ρᴵ * FT(π) * 4 / 3)), zero(FT))
+    rⁱ = ifelse(Nⁱ > eps(FT), cube_root(ρ * qⁱ / (Nⁱ * ρᴵ * FT(π) * 4 / 3)), zero(FT))
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
     Kⁱ = 4 * FT(π) * Nⁱ * rⁱ * Gⁱ * γⁱ
 

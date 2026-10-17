@@ -15,14 +15,17 @@ const EagerReactantFourierTridiagonalPoissonSolver =
 # - Removing the mean, `ϕ .- mean(ϕ)`, reads a scalar, which device buffers forbid.
 #
 # Compile the whole eager solve with `@jit` instead. Inside a trace the solver storage is
-# a traced array, so this method does not apply.
+# a traced array, so this method does not apply. `@jit` compiles on every call, which is
+# acceptable for the few eager solves that model construction and `set!` perform, but makes
+# eager (untraced) time stepping of a ReactantState anelastic model slow.
 function Solvers.solve!(x, solver::EagerReactantFourierTridiagonalPoissonSolver, b=nothing)
     Reactant.@jit Solvers.solve!(x, solver, b)
     return nothing
 end
 
 # Select a complex value component by component. A complex `ifelse` lowers to an
-# `llvm.select` on an aggregate, which Reactant cannot raise to StableHLO.
+# `llvm.select` on an aggregate, which Reactant cannot raise to StableHLO
+# (https://github.com/EnzymeAD/Reactant.jl/issues/3475).
 @inline select_components(condition, a::Complex, b::Complex) =
     complex(ifelse(condition, real(a), real(b)), ifelse(condition, imag(a), imag(b)))
 

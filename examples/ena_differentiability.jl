@@ -31,7 +31,6 @@ using CUDA
 using CairoMakie
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
-using DelimitedFiles
 using Downloads
 using Printf
 using Random
@@ -127,10 +126,11 @@ wˢ_sounding = forcing_profile(7)
 # The surface sensible and latent heat fluxes and the kinematic surface stress are
 # prescribed. We use their 06 UTC values, which change little over the forecast.
 
-surface = readdlm(surface_path, Float64; skipstart=1)
-sensible_heat_flux = surface[1, 3]
-latent_heat_flux = surface[1, 4]
-kinematic_stress = surface[1, 5]
+## Columns: day, sea surface temperature, sensible heat flux, latent heat flux, stress.
+surface = parse.(Float64, split(readlines(surface_path)[2]))
+sensible_heat_flux = surface[3]
+latent_heat_flux = surface[4]
+kinematic_stress = surface[5]
 
 # ## Grid and model
 #

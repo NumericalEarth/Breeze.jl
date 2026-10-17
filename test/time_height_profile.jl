@@ -45,4 +45,12 @@ end
     set!(field, device_profile, FT(5))
     @test minimum(field) ≈ affine(FT(12.5), FT(5))
     @test maximum(field) ≈ affine(FT(87.5), FT(5))
+
+    # Horizontally reduced fields, such as forcing profiles, at centers and faces.
+    column = Field{Nothing, Nothing, Center}(grid)
+    set!(column, device_profile, FT(5))
+    @test vec(Array(interior(column))) ≈ [affine(z, FT(5)) for z in FT[12.5, 37.5, 62.5, 87.5]]
+    faces = Field{Nothing, Nothing, Face}(grid)
+    set!(faces, device_profile, FT(5))
+    @test vec(Array(interior(faces))) ≈ [affine(z, FT(5)) for z in FT[0, 25, 50, 75, 100]]
 end
