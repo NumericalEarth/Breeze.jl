@@ -251,6 +251,10 @@ struct P3ProcessRates{FT}
     predicted_supersaturation_tendency :: FT
 end
 
+# The table-heavy process groups below are guarded by branches on the species and
+# temperature they need, a deliberate exception to `ifelse`: each guard is implied by the gate inside
+# the rates it skips, so a skipped group returns exactly the zero its own gate would, while
+# warps in an ice-only anvil or in warm rain skip whole groups of lookups.
 @inline function p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
                                  temperature_tendency, vapor_tendency)
     FT = typeof(ρ)
@@ -318,9 +322,14 @@ end
     coat_evap = ifelse(wet_ice_exchange_active,
                        vapor_rates.coating_evaporation, zero(FT))
 
-    melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, constants, transport, state.lookups)
-    partial_melt = melt_rates.partial_melting
-    complete_melt = melt_rates.complete_melting
+    # Melting is zero at or below freezing, or without ice mass or number.
+    melting_possible = (T > p3.process_rates.freezing_temperature) & (nⁱ > 0) & (ℳ.qⁱ > 0)
+    partial_melt, complete_melt = if melting_possible
+        melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, constants, transport, state.lookups)
+        melt_rates.partial_melting, melt_rates.complete_melting
+    else
+        zero(FT), zero(FT)
+    end
     complete_melt = ifelse(p3.process_rates.liquid_fraction_active,
                            complete_melt, complete_melt + partial_melt)
     partial_melt = ifelse(p3.process_rates.liquid_fraction_active,
@@ -349,10 +358,15 @@ end
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
 
+    qsmall = p3.minimum_mass_mixing_ratio
+    ice_present = total_ice_mass(qⁱ, qʷⁱ) >= qsmall
+    cloud_and_ice_present = ice_present & (max(0, qᶜˡ) >= qsmall)
+    rain_and_ice_present = ice_present & (max(0, qʳ) >= qsmall)
+
     # =========================================================================
     # Aggregation
     # =========================================================================
-    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ, lookups)
+    agg = ice_present ? ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ, lookups) : zero(FT)
 
     # Global ice number limiter, expressed as a tendency on the *raw* prognostic
     # ℳ.nⁱ rather than on the locally pre-capped `state.nⁱ`, which is already
@@ -368,12 +382,16 @@ end
     # evaluated once with the gate open and split by temperature here, rather than
     # called twice with complementary gates.
     below_freezing = T <= T₀
-    cloud_coll = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, true, qʷⁱ, lookups)
+    cloud_coll = cloud_and_ice_present ?
+                 cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, true, qʷⁱ, lookups) :
+                 zero(FT)
     cloud_rim = ifelse(below_freezing, cloud_coll, zero(FT))
     cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_rim)
     # Mass and number share one Table 2 read.
-    rain_coll_q, rain_coll_n = rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
-                                                     true, qʷⁱ, lookups)
+    rain_coll_q, rain_coll_n = rain_and_ice_present ?
+                               rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
+                                                     true, qʷⁱ, lookups) :
+                               (zero(FT), zero(FT))
     rain_rim = ifelse(below_freezing, rain_coll_q, zero(FT))
     rain_rim_n = ifelse(below_freezing, rain_coll_n, zero(FT))
 
@@ -382,9 +400,11 @@ end
     # with prescribed cloud parameters, so μᶜˡ and λᶜˡ from `diagnose_cloud_dsd` are
     # passed through to the Cober-List rime density when Nᶜˡ is prognostic.
     # The fall speed is read at the shared Table-1 bracket, which is indexed with the
-    # total ice mass.
+    # total ice mass. It enters only the Cober-List density of actively forming rime;
+    # otherwise `rime_density` returns the unrimed density whatever the speed.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    𝕎ⁱ = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, lookups)
+    rime_forming = (cloud_rim >= qsmall) & (qᶜˡ >= qsmall) & (T < T₀)
+    𝕎ⁱ = rime_forming ? ice_terminal_velocity_mass_weighted(p3, qⁱ_total, lookups) : zero(FT)
     ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, 𝕎ⁱ, ρ, constants, transport, μᶜˡ, λᶜˡ)
 
     # =========================================================================
@@ -392,8 +412,13 @@ end
     # =========================================================================
     has_hydrometeors = (max(0, qᶜˡ) + max(0, qʳ)) >=
                        parameters.wet_growth_hydrometeor_threshold
-    qwgrth_raw = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
-                                     constants, transport, lookups)
+    # The capacity is zero at or above freezing or without ice number, and it is consumed
+    # only by wet growth (which needs hydrometeors) and by refreezing (which needs coating).
+    capacity_needed = (T < T₀) & (nⁱ > 0) & (has_hydrometeors | (qʷⁱ > 0))
+    qwgrth_raw = capacity_needed ?
+                 wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+                                     constants, transport, lookups) :
+                 zero(FT)
     qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
     total_collection = cloud_rim + rain_rim
@@ -437,7 +462,7 @@ end
     # =========================================================================
     # Shedding and refreezing
     # =========================================================================
-    shed = shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups)
+    shed = qʷⁱ > 0 ? shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups) : zero(FT)
     shed_n = shedding_number_rate(p3, shed)
     refrz = refreezing_rate_from_capacity(p3, qʷⁱ, qwgrth_raw)
     shed = ifelse(parameters.liquid_fraction_active, shed, zero(FT))
@@ -477,9 +502,14 @@ end
     nucleation_existing_number = ifelse(whole_particle_clipping, zero(FT), nⁱ)
     nuc_q, nuc_n = deposition_nucleation_rate(
         p3, T, qᵛ, qᵛ⁺ⁱ, nucleation_existing_number, ρ)
-    cloud_frz_q, cloud_frz_n = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ)
+    immersion_freezing_possible = T <= parameters.maximum_immersion_freezing_temperature
+    cloud_frz_q, cloud_frz_n = immersion_freezing_possible & (max(0, qᶜˡ) >= qsmall) ?
+                               immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ) :
+                               (zero(FT), zero(FT))
     μʳ = zero(FT)
-    rain_frz_q, rain_frz_n = immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μʳ)
+    rain_frz_q, rain_frz_n = immersion_freezing_possible & (max(0, qʳ) >= qsmall) ?
+                             immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μʳ) :
+                             (zero(FT), zero(FT))
 
     # Rime splintering is not diagnosed here: `compute_p3_process_rates` recomputes it
     # from the sink-limited riming rates, which is the value every consumer sees.

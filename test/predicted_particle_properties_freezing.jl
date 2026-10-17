@@ -109,6 +109,23 @@ using Oceananigans.Fields: interior
         @test evaluate_at(other, prep) ≈ 2 * evaluate_at(table, prep)
     end
 
+    @testset "Prepared interpolation reproduces the table call exactly" begin
+        # Bracketing once and reading at the bracket must give bit-for-bit what the table's
+        # own call operator gives, including at the axis ends and outside the axis ranges.
+        # Deterministic, well-spread samples from the golden-ratio sequence.
+        weyl(n) = mod(n * 0.6180339887498949, 1)
+        for FT in (Float32, Float64), points in ((50, 4, 4, 5), (7, 3, 2, 5), (11, 30, 4, 4, 5))
+            N = length(points)
+            ranges = ntuple(d -> (FT(-d), FT(2d)), N)
+            data = [FT(weyl(n)) for n in 1:prod(points)]
+            table = make_lookup_table(reshape(data, points), ranges, CPU())
+            # Every 10th sample sits on an axis end, the rest straddle the ranges.
+            coordinate(n, d) = n % 10 == 0 ? ranges[d][1 + (n ÷ 10) % 2] : FT(5d * weyl(N * n + d) - 2d)
+            coordinates = [ntuple(d -> coordinate(n, d), N) for n in 1:1000]
+            @test all(x -> evaluate_at(table, prepare_interpolation(table, x...)) === table(x...), coordinates)
+        end
+    end
+
     @testset "RainMassWeightedVelocity - monotonicity" begin
         evaluator = RainMassWeightedVelocity()
 
