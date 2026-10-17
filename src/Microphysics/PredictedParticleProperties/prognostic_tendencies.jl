@@ -372,7 +372,6 @@ to the cloud mass they consume.
 @inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜˡ, qᶜˡ, p3)
     FT = typeof(ρ)
     parameters = p3.process_rates
-    number_per_mass = cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ)
     seed_drop_mass = activated_droplet_mass(parameters, FT)
     activation_number = ifelse(iszero(rates.ccn_activation_number),
                                rates.ccn_activation_mass / seed_drop_mass,
@@ -384,7 +383,7 @@ to the cloud mass they consume.
     qᶜˡ, Nᶜˡ, ρ)
 
     number_loss = autoconv_n +
-                  number_per_mass * rates.accretion +
+                  cloud_number_transfer_rate(Nᶜˡ, ρ, qᶜˡ, rates.accretion) +
                   rates.cloud_self_collection +
                   rates.cloud_riming_number +
                   rates.cloud_freezing_number +
@@ -464,12 +463,12 @@ Vapor is produced by:
 - Rain evaporation
 - Sublimation (negative deposition)
 
-When `predict_supersaturation = true`, the G&M one-shot alignment is
+When `vapor_excess = PrognosticVaporExcess()`, the G&M one-shot alignment is
 folded into `rates.condensation` (the M&G condensation rate plus the G&M
-contribution, which `rates.predicted_supersaturation_adjustment` also carries
+contribution, which `rates.prognostic_vapor_excess_adjustment` also carries
 separately so it stays inspectable), so vapor and cloud tendencies pick it up
 automatically when integrated with `dt = sink_limiting_timescale`. See
-`predicted_supersaturation_adjustment`.
+`prognostic_vapor_excess_adjustment`.
 """
 @inline function tendency_ρqᵛ(rates::P3ProcessRates, ρ)
     # Condensation: positive = vapor loss (cond), negative = vapor gain (cloud evap)
@@ -487,19 +486,19 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the liquid supersaturation tendency from Grabowski & Morrison (2008).
+Compute the tendency of the vapor excess over liquid from Grabowski & Morrison (2008).
 
-When `predict_supersaturation = true`, the liquid supersaturation ``sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ``
+When `vapor_excess = PrognosticVaporExcess()`, the vapor excess over liquid ``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ``
 is a prognostic variable advected by the dynamical core. The microphysical
-tendency reproduces the post-step diagnosis ``sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T)``.
+tendency reproduces the post-step diagnosis ``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T)``.
 `compute_p3_process_rates` precomputes that diagnostic tendency from the final
 local ``qᵛ`` and ``T`` implied by the ordered process rates.
 
-When `predict_supersaturation = false`, returns zero tendency.
+When `vapor_excess = DiagnosticVaporExcess()`, returns zero tendency.
 """
-@inline function tendency_ρsᵛ⁺ˡ(rates::P3ProcessRates, ρ, parameters)
-    raw = ρ * rates.predicted_supersaturation_tendency
-    return gate_predicted_supersaturation(parameters, raw)
+@inline function tendency_ρδqᵛ⁺ˡ(rates::P3ProcessRates, ρ, parameters)
+    raw = ρ * rates.prognostic_vapor_excess_tendency
+    return gate_prognostic_vapor_excess(parameters, raw)
 end
 
 """

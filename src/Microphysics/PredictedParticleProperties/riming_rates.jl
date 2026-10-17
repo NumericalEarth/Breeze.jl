@@ -135,7 +135,7 @@ number removal proportional to the rimed cloud mass fraction.
 - Rate of cloud number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
 @inline function cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, riming_rate)
-    return cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ) * riming_rate
+    return cloud_number_transfer_rate(Nᶜˡ, ρ, qᶜˡ, riming_rate)
 end
 
 """
