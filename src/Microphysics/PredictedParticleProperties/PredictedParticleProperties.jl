@@ -133,7 +133,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
                              temperature,
                              vapor_gas_constant,
                              with_moisture
-using Breeze.Utils: @adapt_architecture,
+using Breeze.Utils: @adapt_architecture, cube_root,
                     chebyshev_gauss_nodes_weights,
                     jacobian_diameter_transform,
                     safe_divide,

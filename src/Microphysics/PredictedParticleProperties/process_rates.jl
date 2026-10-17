@@ -888,7 +888,7 @@ end
 
     # Recompute splintering from sink-limited riming rates
     diagnostic_mean_mass = qⁱ_total / nⁱ_diagnostic
-    D_mean = cbrt(6 * diagnostic_mean_mass / (FT(π) * ρ_mean))
+    D_mean = cube_root(6 * diagnostic_mean_mass / (FT(π) * ρ_mean))
     qᶜˡ_splintering_rate, qʳ_splintering_rate, spl_n = rime_splintering_rates(
         p3, cloud_rim, rain_rim, T, D_mean, Fˡ, surface_temperature, qᶠ)
     qᶜˡ_splintering_rate = min(qᶜˡ_splintering_rate, max(0, cloud_rim))

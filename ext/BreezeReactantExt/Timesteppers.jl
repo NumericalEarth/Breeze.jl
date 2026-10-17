@@ -1,11 +1,18 @@
 using Oceananigans: ReactantState, initialize!
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!
 using Breeze.AtmosphereModels: AtmosphereModels
-using Breeze.TimeSteppers: SSPRungeKutta3, CompressibleAcousticModel
+using Breeze.TimeSteppers: SSPRungeKutta3, CompressibleAcousticModel, prepare_acoustic_first_time_step!
 
 function OceananigansTimeSteppers.first_time_step!(model::AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}, Δt)
     initialize!(model)
     update_state!(model)
+    time_step!(model, Δt)
+    return nothing
+end
+
+function OceananigansTimeSteppers.first_time_step!(model::CompressibleAcousticModel{<:ReactantState}, Δt)
+    initialize!(model)
+    prepare_acoustic_first_time_step!(model, Δt, ())
     time_step!(model, Δt)
     return nothing
 end
