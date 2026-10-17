@@ -45,29 +45,29 @@ Fields:
   interface arrays
 - `extension`: The materialized column extension above the grid top, or `nothing`
 """
-struct SpectralColumns{FT, AI, AF, V, SW, X}
+struct SpectralColumns{FT, AI, AF, FI, FF, V, SW, X}
     pressure_layers :: AF
     temperature_layers :: AF
-    pressure_interfaces :: AF
-    temperature_interfaces :: AF
+    pressure_interfaces :: FF
+    temperature_interfaces :: FF
     pressure_index :: AI
     pressure_weight :: AF
     temperature_index :: AI
     temperature_weight :: AF
     water_vapor_index :: AI
     water_vapor_weight :: AF
-    source_index :: AI
-    source_weight :: AF
+    source_index :: FI
+    source_weight :: FF
     dry_air :: AF
     water_vapor :: AF
     ozone :: AF
     liquid_water_path :: AF
     ice_water_path :: AF
     cos_zenith :: V
-    longwave_up :: AF
-    longwave_down :: AF
-    shortwave_up :: AF
-    shortwave_down :: AF
+    longwave_up :: FF
+    longwave_down :: FF
+    shortwave_up :: FF
+    shortwave_down :: FF
     transmittance :: AF
     source_up :: AF
     shortwave :: SW
@@ -78,15 +78,19 @@ const SHORTWAVE_LAYER_SCRATCH = (:reflectance, :transmittance, :direct_reflectan
                                  :direct_diffuse_transmittance, :direct_flux)
 const SHORTWAVE_INTERFACE_SCRATCH = (:stack_albedo, :source)
 
+# Layer and interface arrays need separate types: Reactant's kernel arrays encode
+# their dimensions in the type, and interfaces have one more vertical entry.
 # The float type is that of the layer arrays; every other parameter follows from the fields.
 function SpectralColumns{FT}(args...) where FT
     fields = NamedTuple{fieldnames(SpectralColumns)}(args)
     AI = typeof(fields.pressure_index)
     AF = typeof(fields.pressure_layers)
+    FI = typeof(fields.source_index)
+    FF = typeof(fields.pressure_interfaces)
     V = typeof(fields.cos_zenith)
     SW = typeof(fields.shortwave)
     X = typeof(fields.extension)
-    return SpectralColumns{FT, AI, AF, V, SW, X}(args...)
+    return SpectralColumns{FT, AI, AF, FI, FF, V, SW, X}(args...)
 end
 
 """
