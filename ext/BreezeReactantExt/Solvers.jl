@@ -1,21 +1,23 @@
 using Reactant: Reactant
-using Oceananigans.Solvers: Solvers
+using Oceananigans.Solvers: Solvers, FourierTridiagonalPoissonSolver
 
 const ConcreteReactantArray = Union{Reactant.AnyConcretePJRTArray, Reactant.AnyConcreteIFRTArray}
 
-# TODO Oceananigans: move these methods into OceananigansReactantExt. Reactant's FFT plans
-# act only on traced arrays. Applied eagerly to a concrete array, AbstractFFTs' fallback
-# copies it into an `Array` and recurses until the stack overflows. `AtmosphereModel` with
-# `AnelasticDynamics` projects its initial momentum with the FFT pressure solver outside of
-# any trace, so compile eager transforms with `@jit`. Inside a trace, `A` is a traced array
-# and these methods do not apply.
-function Solvers.apply_transform!(A::ConcreteReactantArray, B, plan, ::Nothing)
-    Reactant.@jit Solvers.apply_transform!(A, B, plan, nothing)
-    return nothing
-end
+const EagerReactantFourierTridiagonalPoissonSolver =
+    FourierTridiagonalPoissonSolver{<:Any, <:Any, <:Any, <:Any, <:Any, <:ConcreteReactantArray}
 
-function Solvers.apply_transform!(A::ConcreteReactantArray, B, plan, transpose_dims)
-    Reactant.@jit Solvers.apply_transform!(A, B, plan, transpose_dims)
+# TODO Oceananigans: move this method into OceananigansReactantExt. `AtmosphereModel` with
+# `AnelasticDynamics` projects its initial momentum with the FFT pressure solver outside of
+# any trace, where two operations fail on concrete Reactant arrays:
+#
+# - Reactant's FFT plans act only on traced arrays. Applied to a concrete array,
+#   AbstractFFTs' fallback copies it into an `Array` and recurses until the stack overflows.
+# - Removing the mean, `ϕ .- mean(ϕ)`, reads a scalar, which device buffers forbid.
+#
+# Compile the whole eager solve with `@jit` instead. Inside a trace the solver storage is
+# a traced array, so this method does not apply.
+function Solvers.solve!(x, solver::EagerReactantFourierTridiagonalPoissonSolver, b=nothing)
+    Reactant.@jit Solvers.solve!(x, solver, b)
     return nothing
 end
 
