@@ -58,15 +58,15 @@ reference_state = ReferenceState(grid, constants;
 # in the transported specific quantities. The flow remains prescribed even as
 # latent heating changes the temperature.
 #
-# P3's `predict_supersaturation=true` adds `ρδqᵛ⁺ˡ`, the density-weighted vapor
-# excess over liquid. Aerosol activation also predicts cloud droplet
+# P3's `vapor_excess=PrognosticVaporExcess()` adds `ρδqᵛ⁺ˡ`, the density-weighted
+# vapor excess over liquid. Aerosol activation also predicts cloud droplet
 # number and the remaining aerosol reservoir. Number mixing ratios are in kg⁻¹.
 
 W₀ = 2
 nᵃ₀ = 3e8
 dynamics = PrescribedDynamics(reference_state; divergence_correction=true)
 aerosol = AerosolActivation(AerosolMode(number_mixing_ratio=nᵃ₀); prognostic=true)
-microphysics = P3Microphysics(; aerosol, predict_supersaturation=true)
+microphysics = P3Microphysics(; aerosol, vapor_excess=PrognosticVaporExcess())
 
 # ## Incoming air and precipitation boundaries
 #

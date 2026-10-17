@@ -429,20 +429,20 @@ using Oceananigans.TimeSteppers: update_state!
         @test only_value(μ.ρbᶠ) == 0
         @test only_value(μ.ρnʳ) == 0
 
-        # The predicted supersaturation is left alone: subsaturation is legitimately negative.
+        # The prognostic vapor excess is left alone: subsaturation is legitimately negative.
         # The field exists only when the switch is on, so check it on such a model.
         supersaturation_p3 =
-            PredictedParticlePropertiesMicrophysics(FT; predict_supersaturation = true)
+            PredictedParticlePropertiesMicrophysics(FT; vapor_excess = PrognosticVaporExcess())
         supersaturation_model = AtmosphereModel(
             grid; dynamics, thermodynamic_constants = constants,
             microphysics = supersaturation_p3)
-        supersaturation_fields = supersaturation_model.microphysical_fields
-        @test !any(field === supersaturation_fields.ρδqᵛ⁺ˡ for field in
+        vapor_excess_fields = supersaturation_model.microphysical_fields
+        @test !any(field === vapor_excess_fields.ρδqᵛ⁺ˡ for field in
                    AtmosphereModels.correction_number_fields(
-                       supersaturation_p3, supersaturation_fields))
-        set!(supersaturation_fields.ρδqᵛ⁺ˡ, FT(-1e-5))
+                       supersaturation_p3, vapor_excess_fields))
+        set!(vapor_excess_fields.ρδqᵛ⁺ˡ, FT(-1e-5))
         AtmosphereModels.fix_negative_moisture!(supersaturation_model)
-        @test only_value(supersaturation_fields.ρδqᵛ⁺ˡ) ≈ FT(-1e-5)
+        @test only_value(vapor_excess_fields.ρδqᵛ⁺ˡ) ≈ FT(-1e-5)
     end
 
     @testset "P3 initialization is consistent for total and dry density inputs" begin

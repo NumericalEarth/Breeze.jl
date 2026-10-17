@@ -129,14 +129,14 @@ end
 @inline p3_tendency_fields(G, p3::P3) =
     merge((; G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnʳ, G.ρqⁱ, G.ρnⁱ, G.ρqᶠ, G.ρbᶠ, G.ρqʷⁱ),
           p3_aerosol_tendency_fields(G, p3.aerosol),
-          p3_supersaturation_tendency_fields(G, p3.process_rates))
+          p3_vapor_excess_tendency_fields(G, p3.process_rates))
 
 @inline p3_aerosol_tendency_fields(G, ::Nothing) = (;)
 @inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, false}) = (; G.ρnᶜˡ)
 @inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, true}) = (; G.ρnᶜˡ, G.ρnᵃ)
 
-@inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, false}) where FT = (;)
-@inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, true}) where FT = (; G.ρδqᵛ⁺ˡ)
+@inline p3_vapor_excess_tendency_fields(G, ::ProcessRate{FT, DiagnosticVaporExcess}) where FT = (;)
+@inline p3_vapor_excess_tendency_fields(G, ::ProcessRate{FT, PrognosticVaporExcess}) where FT = (; G.ρδqᵛ⁺ˡ)
 
 function AM.compute_microphysical_tendencies!(p3::P3, model)
     grid = model.grid

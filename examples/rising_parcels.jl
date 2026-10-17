@@ -147,7 +147,7 @@ BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysics
 OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
 TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysics
 
-microphysics = P3Microphysics(; predict_supersaturation = true,
+microphysics = P3Microphysics(; vapor_excess = PrognosticVaporExcess(),
                               aerosol = AerosolActivation(AerosolMode(); prognostic=true))
 kessler_constants = ThermodynamicConstants(saturation_vapor_pressure=TetensFormula())
 one_moment = run_parcel(microphysics=OneMomentCloudMicrophysics())

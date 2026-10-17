@@ -106,7 +106,7 @@ Liquid on ice tendency: gains from partial melting and above-freezing collection
 """
 $(TYPEDSIGNATURES)
 
-Supersaturation tendency: zero when `predict_supersaturation = false`.
+Vapor excess tendency: zero when `vapor_excess = DiagnosticVaporExcess()`.
 """
 @inline AM.microphysical_tendency(p3::P3, name::Val{:ρδqᵛ⁺ˡ}, ρ,
                                   ℳ::P3MicrophysicalState, 𝒰, constants) =

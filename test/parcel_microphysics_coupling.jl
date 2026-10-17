@@ -6,7 +6,7 @@ using Test
 
 function coupling_parcel(; formulation=:LiquidIcePotentialTemperature, weight=1., cloudy=true, mixed_phase=false)
     grid = RectilinearGrid(size=101, z=(-10, 2010), topology=(Flat, Flat, Bounded))
-    microphysics = P3Microphysics(; predict_supersaturation=true)
+    microphysics = P3Microphysics(; vapor_excess=PrognosticVaporExcess())
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics, formulation)
     p(z) = 1e5 - 40z
     T = mixed_phase ? 250 : 300

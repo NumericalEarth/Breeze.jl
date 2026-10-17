@@ -44,15 +44,15 @@ sized to `sink_limiting_timescale`, so one host step with
 the host integrates with ``dt ≠ τ`` the vapor-excess alignment relaxes over multiple
 steps rather than landing in one.
 
-When `predict_supersaturation = false`, dispatch bypasses the adjustment and the
+When `vapor_excess = DiagnosticVaporExcess()`, dispatch bypasses the adjustment and the
 local state passes through unchanged.
 """
-@inline predicted_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants) =
-    predicted_supersaturation_adjustment(p3.process_rates, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
+@inline prognostic_vapor_excess_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants) =
+    prognostic_vapor_excess_adjustment(p3.process_rates, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
                                          δqᵛ⁺ˡ, T, ρ, constants)
 
-@inline function predicted_supersaturation_adjustment(
-    ::ProcessRate{FT, false}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants
+@inline function prognostic_vapor_excess_adjustment(
+    ::ProcessRate{FT, DiagnosticVaporExcess}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants
 ) where FT
     cloud_water_adjustment = zero(qᶜˡ)
     return (; cloud_water_adjustment,
@@ -63,8 +63,8 @@ local state passes through unchanged.
             T)
 end
 
-@inline function predicted_supersaturation_adjustment(
-    parameters::ProcessRate{PFT, true}, p3,
+@inline function prognostic_vapor_excess_adjustment(
+    parameters::ProcessRate{PFT, PrognosticVaporExcess}, p3,
     qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants
 ) where PFT
     FT = typeof(qᶜˡ)

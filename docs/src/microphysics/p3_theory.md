@@ -232,10 +232,11 @@ neither allocates nor advects it.
 
 - ``ρδq^{v+l}``: Density-weighted vapor excess over liquid [kg/m³]
   ([Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008)).
-  Breeze exposes a `predict_supersaturation` flag on `ProcessRate`,
-  defaulting to `false`. When `false`, the field is not allocated and is
+  Breeze selects the treatment with the `vapor_excess` keyword of `ProcessRate`
+  and `P3Microphysics`, defaulting to `DiagnosticVaporExcess()`.
+  With `DiagnosticVaporExcess()`, the field is not allocated and is
   absent from `prognostic_field_names`; diagnostics that need local saturation use
-  ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008)
+  ``q^v - q^{v+l}(T)`` directly. With `PrognosticVaporExcess()`, the bounded G&M (2008)
   adjustment fires before the M&G rates, shifting the local ``q^v``,
   ``q^{cl}``, and ``T`` (and thus ``q^{v+l}(T)``) so that
   ``q^v - q^{v+l}`` matches the advected ``δq^{v+l}``. The M&G semi-analytic
@@ -381,7 +382,7 @@ maximum to eleven. See [Prognostic Variables and Tendencies](@ref p3_prognostics
 | ``ρb^f``    | `ρbᶠ`  | Rime volume density [m³/m³] |
 | ``ρq^{wi}`` | `ρqʷⁱ` | Liquid coating on ice, mass density [kg/m³] |
 | ``ρq^v``    | `ρqᵛ`  | Water vapor density [kg/m³]; the host-coupled moisture variable |
-| ``ρδq^{v+l}`` | `ρδqᵛ⁺ˡ` | Density-weighted vapor excess over liquid [kg/m³]; only with `predict_supersaturation` |
+| ``ρδq^{v+l}`` | `ρδqᵛ⁺ˡ` | Density-weighted vapor excess over liquid [kg/m³]; only with `vapor_excess = PrognosticVaporExcess()` |
 | ``ρn^a``    | `ρnᵃ`  | Unactivated aerosol number density [m⁻³]; only with aerosol activation and `prognostic=true` |
 
 ### Size Distribution
@@ -2370,7 +2371,7 @@ number, the rime mass and rime volume, and the liquid coating on ice — alongsi
 the host's vapor density ``ρq^v``. Three more appear when the corresponding option
 is enabled: the cloud droplet number ``ρn^{cl}`` with aerosol activation, the
 unactivated aerosol number ``ρn^a`` when that activation also sets `prognostic`,
-and the vapor excess over liquid ``ρδq^{v+l}`` with predicted supersaturation. Together they describe the complete microphysical state.
+and the vapor excess over liquid ``ρδq^{v+l}`` with prognostic vapor excess. Together they describe the complete microphysical state.
 
 This section documents each variable, its physical meaning, and the source-term
 assembly used in `tendency_ρ*` (`prognostic_tendencies.jl`) to build the
@@ -2437,7 +2438,7 @@ mass / number ratio. Breeze runs with ``μ^r = 0``.
 | Symbol | Name | Units | Description |
 |--------|------|-------|-------------|
 | ``ρq^v`` | Water vapor density | kg/m³ | The host-coupled moisture variable |
-| ``ρδq^{v+l}`` | Density-weighted vapor excess over liquid, ``δq^{v+l} = q^v - q^{v+l}`` | kg/m³ | Predicted-supersaturation path, controlled by the `predict_supersaturation` flag, which defaults to `false`. When `false`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008) adjustment is active. |
+| ``ρδq^{v+l}`` | Density-weighted vapor excess over liquid, ``δq^{v+l} = q^v - q^{v+l}`` | kg/m³ | Prognostic vapor-excess path, selected by the `vapor_excess` keyword, which defaults to `DiagnosticVaporExcess()`. With `DiagnosticVaporExcess()`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v+l}(T)`` directly. With `PrognosticVaporExcess()`, the bounded G&M (2008) adjustment is active. |
 
 ### Derived Quantities
 
@@ -2507,7 +2508,7 @@ G_{ρq^{cl}}
 
 | Term | Meaning |
 |------|--------|
-| ``\dot{q}^{cl}_\text{cond}`` | Condensation (positive) / evaporation (negative) — bidirectional. Includes the G&M alignment when `predict_supersaturation = true`. |
+| ``\dot{q}^{cl}_\text{cond}`` | Condensation (positive) / evaporation (negative) — bidirectional. Includes the G&M alignment when `vapor_excess = PrognosticVaporExcess()`. |
 | ``\dot{q}_\text{acti}`` | CCN-activation mass source; present in both the prescribed and the aerosol-activation paths. |
 | ``\dot{q}_\text{auto}`` | Autoconversion to rain. |
 | ``\dot{q}_\text{accr}`` | Accretion by rain. |
@@ -2790,7 +2791,7 @@ prognostic_field_names(microphysics)
 ```
 
 [`AerosolActivation`](@ref) adds ``ρnᶜˡ``; `prognostic=true` also adds ``ρnᵃ``.
-`predict_supersaturation=true` adds ``ρδqᵛ⁺ˡ``.
+`vapor_excess = PrognosticVaporExcess()` adds ``ρδqᵛ⁺ˡ``.
 
 P3's aerosol distribution is specified **per unit mass of air**: `AerosolMode.number_mixing_ratio`
 is in kg⁻¹, and so are the activated numbers it produces and the ``n^{cl}`` and ``n^a`` that the

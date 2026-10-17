@@ -77,7 +77,7 @@ The scheme tracks 8 prognostic densities by default, and up to 11 with every opt
 | ``ρqⁱ``, ``ρnⁱ`` | Ice mass and number | always |
 | ``ρqᶠ``, ``ρbᶠ`` | Rime mass and volume | always |
 | ``ρqʷⁱ`` | Liquid water on ice | always |
-| ``ρδqᵛ⁺ˡ`` | Predicted vapor excess over liquid | `predict_supersaturation` |
+| ``ρδqᵛ⁺ˡ`` | Prognostic vapor excess over liquid | `vapor_excess = PrognosticVaporExcess()` |
 | ``ρnᶜˡ`` | Cloud droplet number | `aerosol` |
 | ``ρnᵃ`` | Unactivated aerosol number | `aerosol`, with `prognostic` |
 
@@ -98,6 +98,9 @@ Optional fields are allocated and advected only when enabled.
 - `rain`: [`RainDrops`](@ref) skeleton holding the
   [`RainFallSpeed`](@ref) the startup quadrature integrates and the
   [`RainVentilation`](@ref) the evaporation and coupled-adjustment rates read.
+- `vapor_excess`: [`DiagnosticVaporExcess`](@ref) (default) diagnoses the vapor excess
+  over liquid from the thermodynamic state; [`PrognosticVaporExcess`](@ref) carries
+  ``ρδqᵛ⁺ˡ`` as a prognostic field. Ignored when `process_rates` is supplied.
   `nothing` (default) uses `RainDrops(FT)`. Its lookup fields are materialized by
   `read_lookup_tables`; every supplied parameter is preserved.
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation.
@@ -189,11 +192,11 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  cloud = nothing,
                                                  rain = nothing,
                                                  process_rates = nothing,
-                                                 predict_supersaturation = false,
+                                                 vapor_excess = DiagnosticVaporExcess(),
                                                  warm_rain_scheme = KhairoutdinovKogan2000())
     if isnothing(process_rates)
         process_rates = ProcessRate(FT; thermodynamic_constants,
-                                    predict_supersaturation)
+                                    vapor_excess)
     end
     return read_lookup_tables(lookup_tables; FT,
                               thermodynamic_constants,

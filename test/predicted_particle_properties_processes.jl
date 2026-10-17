@@ -284,7 +284,7 @@ function expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺
     ε = max(ε, -qᶜˡ)
     ε = ifelse(δqᵛ⁺ˡ < 0, min(0, ε), ε)
     ε = ifelse(abs(ε) < 100 * eps(FT) * max(qᵛ⁺ˡ, qᵛ), zero(FT), ε)
-    ε = ifelse(PPP.predicts_supersaturation(p3.process_rates), ε, zero(FT))
+    ε = ifelse(p3.process_rates.vapor_excess isa PrognosticVaporExcess, ε, zero(FT))
     return (; ε, rate = ε / τ)
 end
 
@@ -310,10 +310,10 @@ function actual_final_liquid_ssat_after_p3_step(formulation, rates, qᵛ₀, q�
     return qᵛ₁ - qᵛ⁺ˡ₁
 end
 
-function documented_predict_supersaturation_disabled_semantics()
+function documented_diagnostic_vapor_excess_semantics()
     theory = read(joinpath(@__DIR__, "..", "docs", "src", "microphysics", "p3_theory.md"), String)
-    forbidden = "When `false`, the field is recomputed diagnostically"
-    required = "When `false`, the field is not allocated"
+    forbidden = "the field is recomputed diagnostically"
+    required = "With `DiagnosticVaporExcess()`, the field is not allocated"
     return !occursin(forbidden, theory) &&
            count(required, theory) >= 2
 end
@@ -530,8 +530,8 @@ end
             FT(0.0),    # cloud_number_correction
             FT(0.0),    # rain_number_correction
             FT(0.0),    # ice_number_correction
-            FT(0.0),    # predicted_supersaturation_adjustment
-            FT(0.0),    # predicted_supersaturation_tendency
+            FT(0.0),    # prognostic_vapor_excess_adjustment
+            FT(0.0),    # prognostic_vapor_excess_tendency
         )
 
         # Test each tendency function returns a finite number
@@ -757,7 +757,7 @@ end
         @test aerosol_allocations == 0
 
         p3_with_supersaturation = PredictedParticlePropertiesMicrophysics(
-            FT; aerosol, predict_supersaturation = true)
+            FT; aerosol, vapor_excess = PrognosticVaporExcess())
         supersaturation_tendencies = @inferred bundled_p3_tendencies(
             p3_with_supersaturation, ρ, ℳ, 𝒰, constants)
         @test supersaturation_tendencies isa NTuple{11, FT}
@@ -969,7 +969,7 @@ end
             p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-        # predict_supersaturation defaults to false, so this M&G call sees
+        # vapor_excess defaults to DiagnosticVaporExcess(), so this M&G call sees
         # the host state directly and the G&M ε is gated to zero by
         # `compute_p3_process_rates` (not this function).
         rates = PPP.coupled_saturation_adjustment_rates(
@@ -2190,13 +2190,13 @@ end
         @test cloud_sink_total ≈ FT(4.055896466237224e-12) rtol=FT(1e-12)
     end
 
-    @testset "predict_supersaturation applies G&M before M&G process rates" begin
+    @testset "PrognosticVaporExcess applies G&M before M&G process rates" begin
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
         process_rates = ProcessRate(FT;
                                     sink_limiting_timescale = FT(10),
-                                    predict_supersaturation = true)
+                                    vapor_excess = PrognosticVaporExcess())
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -2237,17 +2237,17 @@ end
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
 
-        @test rates.predicted_supersaturation_adjustment ≈ gm.rate
+        @test rates.prognostic_vapor_excess_adjustment ≈ gm.rate
         @test rates.condensation ≈ gm.rate + expected_process.condensation rtol=FT(1e-10) atol=FT(1e-14)
     end
 
-    @testset "predict_supersaturation tendency matches formulation final recompute" begin
+    @testset "PrognosticVaporExcess tendency matches formulation final recompute" begin
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
         process_rates = ProcessRate(FT;
                                     sink_limiting_timescale = FT(10),
-                                    predict_supersaturation = true)
+                                    vapor_excess = PrognosticVaporExcess())
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -2275,13 +2275,13 @@ end
               process_rates.sink_limiting_timescale ≈ expected atol=FT(1e-12)
     end
 
-    @testset "predict_supersaturation final recompute uses formulation state with splintering active" begin
+    @testset "PrognosticVaporExcess final recompute uses formulation state with splintering active" begin
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
         process_rates = ProcessRate(FT;
                                     sink_limiting_timescale = FT(10),
-                                    predict_supersaturation = true)
+                                    vapor_excess = PrognosticVaporExcess())
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -2311,14 +2311,14 @@ end
               process_rates.sink_limiting_timescale ≈ expected atol=FT(1e-12)
     end
 
-    @testset "predict_supersaturation reset matches potential-temperature formulation state" begin
+    @testset "PrognosticVaporExcess reset matches potential-temperature formulation state" begin
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
         τ = FT(10)
         process_rates = ProcessRate(FT;
                                     sink_limiting_timescale = τ,
-                                    predict_supersaturation = true)
+                                    vapor_excess = PrognosticVaporExcess())
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -2344,14 +2344,14 @@ end
         @test tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
     end
 
-    @testset "predict_supersaturation reset matches static-energy formulation state" begin
+    @testset "PrognosticVaporExcess reset matches static-energy formulation state" begin
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
         τ = FT(10)
         process_rates = ProcessRate(FT;
                                     sink_limiting_timescale = τ,
-                                    predict_supersaturation = true)
+                                    vapor_excess = PrognosticVaporExcess())
         p3 = p3_with_process_rates(p3_base, process_rates)
 
         ρ = FT(1)
@@ -2377,8 +2377,8 @@ end
         @test tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
     end
 
-    @testset "predict_supersaturation disabled docs match inactive field semantics" begin
-        @test documented_predict_supersaturation_disabled_semantics()
+    @testset "DiagnosticVaporExcess docs match inactive field semantics" begin
+        @test documented_diagnostic_vapor_excess_semantics()
     end
 
     @testset "compute_p3_process_rates uses prognostic cloud number" begin

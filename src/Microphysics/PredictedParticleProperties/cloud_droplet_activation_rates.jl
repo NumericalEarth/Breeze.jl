@@ -18,7 +18,7 @@ In supersaturated air, supply seed mass up to
 ``N^{cl} / ρ × m_{\\text{drop}}`` where ``m_{\\text{drop}} = (4π/3) ρ_w r^3``
 and the default seed radius is 1 μm. The supersaturation cap uses
 ``ξˡ = 1 + ℒˡ² q^{v+ℓ} / (c_p^d R_v T²)`` with the dry-air heat capacity,
-consistent with `limit_vapor_rates` and `predicted_supersaturation_adjustment`.
+consistent with `limit_vapor_rates` and `prognostic_vapor_excess_adjustment`.
 """
 @inline function prescribed_cloud_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, ρ, Nᶜˡ, constants)
     FT = typeof(qᶜˡ)

@@ -44,6 +44,7 @@ include("PredictedParticleProperties/PredictedParticleProperties.jl")
 using .PredictedParticleProperties
 
 # Re-export key P3 types
-export PredictedParticlePropertiesMicrophysics, P3Microphysics
+export PredictedParticlePropertiesMicrophysics, P3Microphysics,
+       DiagnosticVaporExcess, PrognosticVaporExcess
 
 end # module Microphysics

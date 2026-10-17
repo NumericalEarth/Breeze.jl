@@ -52,15 +52,15 @@ end
     return qᵛ - qᵛ⁺ˡ
 end
 
-@inline function final_predicted_supersaturation_tendency(
-    ::ProcessRate{FT, false}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
+@inline function final_prognostic_vapor_excess_tendency(
+    ::ProcessRate{FT, DiagnosticVaporExcess}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
     initial_vapor_excess, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice
 ) where FT
     return zero(qᵛ)
 end
 
-@inline function final_predicted_supersaturation_tendency(
-    ::ProcessRate{FT, true}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
+@inline function final_prognostic_vapor_excess_tendency(
+    ::ProcessRate{FT, PrognosticVaporExcess}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
     initial_vapor_excess, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice
 ) where FT
     qᵛ_final = qᵛ - (vapor_to_liquid + vapor_to_ice) * dt
@@ -244,11 +244,11 @@ struct P3ProcessRates{FT}
     # Carried separately so callers/tests can inspect the G&M contribution.
     # Sized as `ε / sink_limiting_timescale`, so dt = sink_limiting_timescale
     # integrates the one-shot adjustment exactly (see
-    # `predicted_supersaturation_adjustment`).
-    predicted_supersaturation_adjustment :: FT
+    # `prognostic_vapor_excess_adjustment`).
+    prognostic_vapor_excess_adjustment :: FT
     # End-of-step vapor-excess recompute: (qᵛ_final - qᵛ⁺ˡ(T_final) - δqᵛ⁺ˡ_initial) / τ.
     # Tied to the same dt = τ assumption.
-    predicted_supersaturation_tendency :: FT
+    prognostic_vapor_excess_tendency :: FT
 end
 
 @inline function p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
@@ -605,16 +605,16 @@ end
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     P = air_pressure(𝒰, constants)
 
-    supersaturation_adjustment = predicted_supersaturation_adjustment(
+    vapor_excess_adjustment = prognostic_vapor_excess_adjustment(
         p3, qᶜˡ, qᵛ_base, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρ, constants)
-    saturation_alignment_rate = supersaturation_adjustment.rate
-    qᶜˡ = supersaturation_adjustment.qᶜˡ
-    qᵛ = supersaturation_adjustment.qᵛ
-    T = supersaturation_adjustment.T
+    saturation_alignment_rate = vapor_excess_adjustment.rate
+    qᶜˡ = vapor_excess_adjustment.qᶜˡ
+    qᵛ = vapor_excess_adjustment.qᵛ
+    T = vapor_excess_adjustment.T
     q = MoistureMassFractions(qᵛ,
-                              q_base.liquid + supersaturation_adjustment.cloud_water_adjustment,
+                              q_base.liquid + vapor_excess_adjustment.cloud_water_adjustment,
                               q_base.ice)
-    qᵛ⁺ˡ = supersaturation_adjustment.qᵛ⁺ˡ
+    qᵛ⁺ˡ = vapor_excess_adjustment.qᵛ⁺ˡ
     qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρ, constants, T₀, qᵛ⁺ˡ)
     transport = air_transport_properties(T, P, constants)
 
@@ -1090,7 +1090,7 @@ end
     liquid_to_ice = cloud_rim + rain_rim + cloud_frz_q + rain_frz_q +
                     cloud_hom_q + rain_hom_q + refrz -
                     complete_melt - partial_melt
-    supersaturation_tendency = final_predicted_supersaturation_tendency(
+    vapor_excess_tendency = final_prognostic_vapor_excess_tendency(
         parameters, 𝒰, qᵛ, q.liquid, q.ice, ρ, constants, ℳ.δqᵛ⁺ˡ, dt_safety,
         vapor_to_liquid, vapor_to_ice, liquid_to_ice)
     # `saturation_alignment_rate` is intentionally NOT rescaled by the cloud sink limiter: the
@@ -1120,6 +1120,6 @@ end
         coat_cond, coat_evap,
         wg_densif_mass, wg_densif_vol,
         ncl_correction, nr_correction, ni_correction,
-        saturation_alignment_rate, supersaturation_tendency,
+        saturation_alignment_rate, vapor_excess_tendency,
     )
 end
