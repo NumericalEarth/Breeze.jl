@@ -885,8 +885,13 @@ Tₑ(z) = temperature(z) + (T_top - temperature(z_top)) exp(-(z - z_top) / blend
 
 with `blending_height = 0` disabling the anchor. Pressure is hydrostatic above the top face, the
 specific humidity follows `specific_humidity(z)`, and the ozone mole fraction follows
-`ozone_mole_fraction(z)` (a function or a number), or the `O₃` of the [`BackgroundAtmosphere`](@ref)
-when `ozone_mole_fraction` is `nothing`. Extension layers are clear.
+`ozone_mole_fraction(z)`, or the `O₃` of the [`BackgroundAtmosphere`](@ref) when
+`ozone_mole_fraction` is `nothing`. Each profile is a number (constant with height) or a function
+of height. Extension layers are clear.
+
+A radiation model materializes the extension on its grid: the materialized `ColumnExtension` also
+holds the extension's layers and the profiles sampled at their centers, which are `nothing` until
+then.
 
 ```jldoctest
 julia> using Breeze
@@ -910,19 +915,33 @@ ColumnExtension{Float32}
 └── ozone_mole_fraction: 1.0e-6
 ```
 """
-struct ColumnExtension{FT, T, Q, O}
+struct ColumnExtension{FT, T, Q, O, B, V}
     "Height of the top of the extended column [m]"
     top :: FT
     "Number of extension layers between the grid top and `top`"
     layers :: Int
     "Height over which the temperature anchor at the grid top decays [m]; `0` disables it"
     blending_height :: FT
-    "Temperature profile `z -> K`"
+    "Temperature profile [K]: a number or a function of height"
     temperature :: T
-    "Specific humidity profile `z -> kg kg⁻¹`"
+    "Specific humidity profile [kg kg⁻¹]: a number or a function of height"
     specific_humidity :: Q
-    "Ozone mole fraction `z -> mol mol⁻¹`, a number, or `nothing` (`BackgroundAtmosphere.O₃`)"
+    "Ozone mole fraction profile [mol mol⁻¹]: a number, a function of height, or `nothing` (`BackgroundAtmosphere.O₃`)"
     ozone_mole_fraction :: O
+    "Height of the bottom of the extension, the grid's top face [m]"
+    bottom :: B
+    "The `temperature` profile at `bottom` [K], from which the anchor measures the grid top's departure"
+    profile_temperature_at_bottom :: B
+    "Thickness of the extension layers, bottom-up [m]"
+    Δzᵃᵃᶜ :: V
+    "Height of the extension layers' centers [m]"
+    zᵃᵃᶜ :: V
+    "The `temperature` profile at the layer centers, before anchoring [K]"
+    T :: V
+    "The `specific_humidity` profile at the layer centers [kg kg⁻¹]"
+    qᵛ :: V
+    "The ozone mole fraction profile at the layer centers [mol mol⁻¹]"
+    O₃ :: V
 end
 
 """
@@ -943,12 +962,29 @@ function ColumnExtension(FT = Oceananigans.defaults.FloatType;
     layers >= 1 || throw(ArgumentError("`layers` must be at least 1; received $layers."))
     blending_height >= 0 || throw(ArgumentError("`blending_height` must be non-negative; received $blending_height."))
     return ColumnExtension(convert(FT, top), Int(layers), convert(FT, blending_height),
-                           temperature, specific_humidity, convert_number(ozone_mole_fraction, FT))
+                           temperature, specific_humidity, convert_number(ozone_mole_fraction, FT),
+                           nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
-# A constant ozone mole fraction takes the extension's float type; profiles pass through
+# A constant ozone mole fraction takes the extension's float type; functions pass through
 convert_number(x::Number, FT) = convert(FT, x)
 convert_number(x, FT) = x
+
+# Kernels read only the sampled layers: the profiles stay on the host
+Adapt.adapt_structure(to, extension::ColumnExtension) =
+    ColumnExtension(extension.top,
+                    extension.layers,
+                    extension.blending_height,
+                    nothing,
+                    nothing,
+                    nothing,
+                    extension.bottom,
+                    extension.profile_temperature_at_bottom,
+                    adapt(to, extension.Δzᵃᵃᶜ),
+                    adapt(to, extension.zᵃᵃᶜ),
+                    adapt(to, extension.T),
+                    adapt(to, extension.qᵛ),
+                    adapt(to, extension.O₃))
 
 profile_string(x::Number) = prettysummary(x)
 profile_string(::Nothing) = "nothing"

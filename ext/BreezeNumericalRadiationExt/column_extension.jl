@@ -1,81 +1,35 @@
 #####
-##### Materialized column extension
+##### Materializing the column extension
 #####
-##### `ColumnExtension` describes the atmosphere above the grid top with profiles `z -> T`, `z -> q`,
-##### `z -> χ_O₃`. The extension is materialized once, on the host, into device vectors sampled on
-##### the geometrically stretched extension layers, so that the column kernel only reads vectors
-##### and applies the temperature anchor of the grid's top face.
+##### `ColumnExtension` describes the atmosphere above the grid top with profiles of height. It is
+##### materialized once, on the host, by sampling the profiles at the centers of the geometrically
+##### stretched extension layers into device vectors, so that the column kernels only read vectors
+##### and apply the temperature anchor of the grid's top face. The extension's interface
+##### temperatures interpolate its layer temperatures, as the grid's interpolate its cells'.
 #####
 
-"""
-$(TYPEDEF)
+# A profile is a number, constant with height, or a function of height
+profile_value(profile::Number, z) = profile
+profile_value(profile, z) = profile(z)
 
-A [`ColumnExtension`](@ref) sampled on its `Nₑ` layers above the grid top, ready for the column
-kernel. Layers are indexed bottom-up from the grid top (`m = 1` sits on the grid's top face);
-the temperature profile is stored unanchored, and the kernel adds `(T_top - join_temperature) w`
-with `T_top` the temperature of the grid's top face in each column and `w` the anchor weight
-`exp(-(z - base) / blending_height)` (zero for `blending_height = 0`), which depends only on height
-and so is sampled here.
-
-Fields:
-- `Δz`: Layer thickness [m], `(Nₑ,)`
-- `z_layer`: Layer center height [m], `(Nₑ,)`
-- `temperature_layers`: Unanchored layer temperature `temperature(z_layer)` [K], `(Nₑ,)`
-- `temperature_interfaces`: Unanchored interface temperature `temperature(z_face)` [K], `(Nₑ + 1,)`
-- `specific_humidity`: Layer specific humidity [kg kg⁻¹], `(Nₑ,)`
-- `ozone`: Layer ozone mole fraction [mol mol⁻¹], `(Nₑ,)`
-- `anchor_weight_layers`: Anchor weight at the layer centers, `(Nₑ,)`
-- `anchor_weight_interfaces`: Anchor weight on the faces, `(Nₑ + 1,)`
-- `blending_height`: Decay height of the temperature anchor [m]; `0` disables it
-- `join_temperature`: The profile temperature at the grid top, `temperature(base)` [K]
-- `base`: Height of the grid's top face [m]
-"""
-struct MaterializedColumnExtension{FT, V, W}
-    Δz :: V
-    z_layer :: V
-    temperature_layers :: V
-    temperature_interfaces :: W
-    specific_humidity :: V
-    ozone :: V
-    anchor_weight_layers :: V
-    anchor_weight_interfaces :: W
-    blending_height :: FT
-    join_temperature :: FT
-    base :: FT
-end
-
-Adapt.adapt_structure(to, extension::MaterializedColumnExtension) =
-    MaterializedColumnExtension(adapt(to, extension.Δz),
-                                adapt(to, extension.z_layer),
-                                adapt(to, extension.temperature_layers),
-                                adapt(to, extension.temperature_interfaces),
-                                adapt(to, extension.specific_humidity),
-                                adapt(to, extension.ozone),
-                                adapt(to, extension.anchor_weight_layers),
-                                adapt(to, extension.anchor_weight_interfaces),
-                                extension.blending_height,
-                                extension.join_temperature,
-                                extension.base)
-
-# The ozone profile of the extension: its own `ozone_mole_fraction` when given, else the
-# `O₃` of the background atmosphere, which must be a number or a function of height here — a
-# `Field` lives on the grid and says nothing about the atmosphere above it.
-extension_ozone_profile(χ::Number, O₃) = z -> χ
-extension_ozone_profile(χ, O₃) = χ
-extension_ozone_profile(::Nothing, O₃::Number) = z -> O₃
-extension_ozone_profile(::Nothing, O₃::AbstractField) =
+# The extension samples its own ozone profile, or else the `O₃` with which the background
+# atmosphere was built. A background `O₃` given as a `Field` exists only on the grid, so it
+# cannot be sampled above it.
+extension_ozone(ozone_mole_fraction, background_O₃) = ozone_mole_fraction
+extension_ozone(::Nothing, background_O₃) = background_O₃
+extension_ozone(::Nothing, ::AbstractField) =
     throw(ArgumentError("The column extension needs an ozone profile above the grid, but " *
-                        "`BackgroundAtmosphere.O₃` is a Field on the grid: pass " *
+                        "`BackgroundAtmosphere.O₃` is a Field, which exists only on the grid: pass " *
                         "`ColumnExtension(ozone_mole_fraction = ...)` (a number or a function of height)."))
-extension_ozone_profile(::Nothing, O₃) = O₃
 
 """
 $(TYPEDSIGNATURES)
 
-Sample `extension` on the geometrically stretched layers between the top face of `grid` and
-`extension.top` (see [`column_extension_faces`](@ref)) into a [`MaterializedColumnExtension`](@ref)
-on the grid's architecture, taking the ozone profile from `background` when the extension carries
-none. Returns `nothing` when the grid already reaches `extension.top`.
+Materialize `extension` on the geometrically stretched layers between the top face of `grid` and
+`extension.top` (see [`column_extension_faces`](@ref)): the layers' thicknesses and centers and the
+profiles sampled at the centers, in the grid's float type and on its architecture, with the ozone
+profile of `background` when the extension has none. Returns `nothing` when the grid already
+reaches `extension.top`.
 """
 function materialize_column_extension(extension::ColumnExtension, grid, background::BackgroundAtmosphere)
     # Sampled in the grid's float type, whatever the extension's: a default `ColumnExtension()`
@@ -87,34 +41,26 @@ function materialize_column_extension(extension::ColumnExtension, grid, backgrou
     Δz_top = FT(zᶠ[Nz+1] - zᶠ[Nz])
 
     faces = FT.(column_extension_faces(extension, z_top, Δz_top))
-    Nₑ = length(faces) - 1
-    Nₑ == 0 && return nothing
+    length(faces) == 1 && return nothing
 
-    Δz = diff(faces)
-    z_layer = (faces[1:end-1] .+ faces[2:end]) ./ 2
-    ozone = extension_ozone_profile(extension.ozone_mole_fraction, background.O₃)
+    Δzᵃᵃᶜ = diff(faces)
+    zᵃᵃᶜ = (faces[1:end-1] .+ faces[2:end]) ./ 2
+    O₃ = extension_ozone(extension.ozone_mole_fraction, background.O₃)
+    sample(profile) = on_architecture(architecture(grid), FT[profile_value(profile, z) for z in zᵃᵃᶜ])
 
-    temperature_layers = FT[extension.temperature(z) for z in z_layer]
-    temperature_interfaces = FT[extension.temperature(z) for z in faces]
-    specific_humidity = FT[extension.specific_humidity(z) for z in z_layer]
-    ozone_mole_fraction = FT[ozone(z) for z in z_layer]
-    join_temperature = FT(extension.temperature(z_top))
-
-    h = FT(extension.blending_height)
-    anchor_weight(z) = h > 0 ? exp(-(z - z_top) / h) : zero(FT)
-
-    arch = architecture(grid)
-    return MaterializedColumnExtension(on_architecture(arch, Δz),
-                                       on_architecture(arch, z_layer),
-                                       on_architecture(arch, temperature_layers),
-                                       on_architecture(arch, temperature_interfaces),
-                                       on_architecture(arch, specific_humidity),
-                                       on_architecture(arch, ozone_mole_fraction),
-                                       on_architecture(arch, anchor_weight.(z_layer)),
-                                       on_architecture(arch, anchor_weight.(faces)),
-                                       h,
-                                       join_temperature,
-                                       z_top)
+    return ColumnExtension(convert(FT, extension.top),
+                           extension.layers,
+                           convert(FT, extension.blending_height),
+                           extension.temperature,
+                           extension.specific_humidity,
+                           extension.ozone_mole_fraction,
+                           z_top,
+                           FT(profile_value(extension.temperature, z_top)),
+                           on_architecture(architecture(grid), Δzᵃᵃᶜ),
+                           on_architecture(architecture(grid), zᵃᵃᶜ),
+                           sample(extension.temperature),
+                           sample(extension.specific_humidity),
+                           sample(O₃))
 end
 
 materialize_column_extension(::Nothing, grid, background) = nothing
@@ -124,10 +70,10 @@ $(TYPEDSIGNATURES)
 
 The number of extension layers, `Nₑ`.
 """
-@inline number_of_extension_layers(extension::MaterializedColumnExtension) = length(extension.Δz)
+@inline number_of_extension_layers(extension::ColumnExtension) = length(extension.Δzᵃᵃᶜ)
 @inline number_of_extension_layers(::Nothing) = 0
 
 extension_summary(::Nothing) = "none"
-extension_summary(extension::MaterializedColumnExtension) =
-    string(number_of_extension_layers(extension), " layers from ", prettysummary(extension.base),
-           " m to ", prettysummary(extension.base + sum(Array(extension.Δz))), " m")
+extension_summary(extension::ColumnExtension) =
+    string(number_of_extension_layers(extension), " layers from ", prettysummary(extension.bottom),
+           " m to ", prettysummary(extension.top), " m")

@@ -22,7 +22,7 @@ using RRTMGP
 using NumericalRadiation: NumericalRadiation
 
 const NumericalRadiationExt = Base.get_extension(Breeze, :BreezeNumericalRadiationExt)
-using .NumericalRadiationExt: ColumnWorkspace, MaterializedColumnExtension, EcCKDLongwave, EcCKDShortwave,
+using .NumericalRadiationExt: ColumnWorkspace, EcCKDLongwave, EcCKDShortwave,
                               EcCKDRadiativeTransferModel, column_atmosphere, number_of_layers
 
 # A stand-in for an effective radius model the extension does not support yet
@@ -126,7 +126,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         @test radiation isa EcCKDRadiativeTransferModel
         @test radiation.atmospheric_state isa ColumnWorkspace
-        @test radiation.atmospheric_state.extension isa MaterializedColumnExtension
+        @test radiation.atmospheric_state.extension isa ColumnExtension{FT}
         @test radiation.longwave_solver isa EcCKDLongwave
         @test radiation.shortwave_solver isa EcCKDShortwave
         @test number_of_layers(radiation.atmospheric_state) == 8 + 40
@@ -134,7 +134,7 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test length(radiation.shortwave_solver.weights) == 32
         @test radiation.solar_constant isa FT
         @test radiation.shortwave_solver.solar_constant isa FT
-        @test radiation.longwave_solver.mole_fractions.co2 == FT(420e-6)
+        @test radiation.longwave_solver.mole_fractions.CO₂ == FT(420e-6)
         @test radiation.surface_radiation.surface_temperature.constant == FT(300)
 
         # Concretely typed throughout
@@ -173,9 +173,17 @@ previous_float_type = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = Float64
         default_extension = RadiativeTransferModel(grid, EcCKDOptics(), constants; column_extension = ColumnExtension(),
                                                    surface_temperature = 300, surface_albedo = 0.1)
-        @test default_extension.atmospheric_state.extension isa MaterializedColumnExtension{FT}
-        @test eltype(default_extension.atmospheric_state.extension.Δz) == FT
+        @test default_extension.atmospheric_state.extension isa ColumnExtension{FT}
+        @test eltype(default_extension.atmospheric_state.extension.Δzᵃᵃᶜ) == FT
         Oceananigans.defaults.FloatType = FT
+
+        # Profiles may be numbers, constant with height
+        isothermal = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                            column_extension = ColumnExtension(FT; temperature = 220, specific_humidity = 0),
+                                            surface_temperature = 300, surface_albedo = 0.1)
+        @test all(==(FT(220)), Array(isothermal.atmospheric_state.extension.T))
+        @test all(iszero, Array(isothermal.atmospheric_state.extension.qᵛ))
+        @test isothermal.atmospheric_state.extension.profile_temperature_at_bottom == FT(220)
     end
 
     @testset "Column state and column extension [$(FT)]" for FT in test_float_types()
@@ -191,7 +199,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         workspace = radiation.atmospheric_state
         extension = workspace.extension
-        Nₑ = length(extension.Δz)
+        Nₑ = length(extension.Δzᵃᵃᶜ)
         N = Nz + Nₑ
         @test number_of_layers(workspace) == N
 
@@ -240,14 +248,14 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test sum(water_vapor_moles[Nₑ+1:N]) * mᵛ ≈ sum(ρ .* qᵛ .* Δz) rtol = tight
 
         # Extension layers, bottom-up from the grid top (layer m is column layer Nₑ + 1 - m)
-        Δzₑ = Array(extension.Δz)
-        zₑ = Array(extension.z_layer)
-        Tₑ = Array(extension.temperature_layers)
-        qₑ = Array(extension.specific_humidity)
+        Δzₑ = Array(extension.Δzᵃᵃᶜ)
+        zₑ = Array(extension.zᵃᵃᶜ)
+        Tₑ = Array(extension.T)
+        qₑ = Array(extension.qᵛ)
         χₑ = qₑ ./ (1 .- qₑ) .* (mᵈ / mᵛ)
         h = extension.blending_height
-        anchor = T_int[Nₑ+1] - extension.join_temperature
-        Tₘ = Tₑ .+ anchor .* exp.(-(zₑ .- extension.base) ./ h)
+        anchor = T_int[Nₑ+1] - extension.profile_temperature_at_bottom
+        Tₘ = Tₑ .+ anchor .* exp.(-(zₑ .- extension.bottom) ./ h)
         Tᵛ = Tₘ .* (1 .+ (mᵈ / mᵛ - 1) .* qₑ)
 
         # Hydrostatic interface pressures with the virtual temperature, layer by layer
@@ -259,6 +267,11 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test p_int[1:Nₑ+1] ≈ p_reference rtol = loose
         @test T_lay[Nₑ:-1:1] ≈ Tₘ rtol = tight
 
+        # The extension's interfaces interpolate its anchored layers linearly in height (the face
+        # above layer m is column interface Nₑ + 1 - m)
+        T_faces = [(Δzₑ[m+1] * Tₘ[m] + Δzₑ[m] * Tₘ[m+1]) / (Δzₑ[m] + Δzₑ[m+1]) for m in 1:Nₑ-1]
+        @test T_int[Nₑ:-1:2] ≈ T_faces rtol = tight
+
         # Dry-convention gas amounts: `dry_air_moles == Δp / (g mᵈ)` and `water_vapor_moles / dry_air_moles == χ`
         Δp = p_int[2:Nₑ+1] .- p_int[1:Nₑ]   # top-down
         @test dry_air_moles[1:Nₑ] ≈ Δp ./ (g * mᵈ) rtol = tight
@@ -267,9 +280,9 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         # The extension is clear and reaches the top
         state = NumericalRadiationExt.ColumnState(radiation, model, 0)
-        extension_layers = @allowscalar [NumericalRadiationExt.layer_state(state, 1, 1, k) for k in 1:Nₑ]
+        extension_layers = @allowscalar [NumericalRadiationExt.layer_state(1, 1, k, grid, state) for k in 1:Nₑ]
         @test all(layer -> iszero(layer.liquid_water_path) && iszero(layer.ice_water_path), extension_layers)
-        @test extension.base + sum(Δzₑ) ≈ 65e3 rtol = 100 * eps(FT)
+        @test extension.bottom + sum(Δzₑ) ≈ 65e3 rtol = 100 * eps(FT)
         @test 1 < p_int[1] < 100   # ~10 Pa at 65 km
 
         # The anchor: the first extension layer is close to the grid's top face, and the

@@ -99,7 +99,7 @@ end
     ℐ_lw_dn = FaceFluxColumn(downwelling_longwave, i, j, Nₑ, N, -one(FT))
     longwave = LayerOptics(Longwave(), gas_model, workspace, mole_fractions, longwave_cloud, liquid_radius, ice_radius, c)
     surface_emission = TabulatedSurfaceEmission(gas_model, T₀; emissivity = ε)
-    transmittance, source_up = longwave_scratch(workspace, c)
+    transmittance, source_up = longwave_scratch(c, workspace)
 
     streaming_longwave_fluxes!(ℐ_lw_up, ℐ_lw_dn,
                                longwave, surface_emission, 1 - ε, zero(FT),
@@ -114,7 +114,7 @@ end
     streaming_shortwave_fluxes!(ℐ_sw_up, ℐ_sw_dn,
                                 shortwave, μ₀, solar_constant * max(μ₀, 0), α_direct, α_diffuse,
                                 gas_model.shortwave_weights, length(gas_model.shortwave_weights), N,
-                                shortwave_scratch(workspace, c))
+                                shortwave_scratch(c, workspace))
 end
 
 """

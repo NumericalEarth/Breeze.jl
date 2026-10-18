@@ -35,7 +35,7 @@ Adapt.adapt_storage(::Val{:sizes_in_types}, array::Array) = SizeTypedArray(array
     @test all(isconcretetype, fieldtypes(typeof(workspace)))
     @test size(workspace.reflectance) == (2, 7)
     @test size(workspace.stack_albedo) == (2, 8)
-    @test size(workspace.temperature_interfaces) == (2, 8)
+    @test size(workspace.interface_temperatures) == (2, 8)
     @test size(workspace.liquid_water_path) == (2, 7)
     @test size(workspace.stencil.pressure_index) == (2, 7)
     @test eltype(workspace.stencil.pressure_index) === Int32
@@ -45,7 +45,6 @@ Adapt.adapt_storage(::Val{:sizes_in_types}, array::Array) = SizeTypedArray(array
 
     extension = workspace.extension
     @test all(isconcretetype, fieldtypes(typeof(extension)))
-    @test size(extension.temperature_layers) == (3,)
-    @test size(extension.temperature_interfaces) == (4,)
-    @test typeof(extension.temperature_layers) !== typeof(extension.temperature_interfaces)
+    @test size(extension.T) == (3,)
+    @test size(extension.Δzᵃᵃᶜ) == (3,)
 end

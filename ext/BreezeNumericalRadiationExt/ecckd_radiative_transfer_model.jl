@@ -17,7 +17,7 @@ struct EcCKDLongwave{M, C, W, FT}
     gas_model :: M
     cloud :: C
     weights :: W
-    mole_fractions :: NamedTuple{(:co2, :ch4, :n2o, :cfc11, :cfc12), NTuple{5, FT}}
+    mole_fractions :: NamedTuple{(:CO₂, :CH₄, :N₂O, :CFC₁₁, :CFC₁₂), NTuple{5, FT}}
 end
 
 """
@@ -87,11 +87,12 @@ load_gas_optics_model(FT, paths::NamedTuple) =
 load_gas_optics_model(FT, model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}) = model
 
 # Warn once at construction when the extension's temperatures leave the Planck source table, where
-# the interpolation holds the table edge (a gray `σT⁴` model has no table and no edge).
-function warn_source_table_range(gas_model::EcCKDTabulatedGasOpticsModel, extension::MaterializedColumnExtension)
+# the interpolation holds the table edge (a gray `σT⁴` model has no table and no edge). The
+# interface temperatures interpolate the layer temperatures, so they share their range.
+function warn_source_table_range(gas_model::EcCKDTabulatedGasOpticsModel, extension::ColumnExtension)
     source_grid = gas_model.longwave_source_temperature_grid
     isnothing(source_grid) && return nothing
-    T = extension.temperature_interfaces
+    T = Array(extension.T)
     (minimum(T) < first(source_grid) || maximum(T) > last(source_grid)) &&
         @warn "The column extension temperatures span $(extrema(T)) K, outside the ecCKD Planck source table " *
               "$(first(source_grid))–$(last(source_grid)) K; the table edge is used beyond it."
@@ -220,11 +221,11 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     surface_radiation = SurfaceRadiation(surface_temperature, surface_emissivity,
                                          direct_surface_albedo, diffuse_surface_albedo)
 
-    mole_fractions = (co2 = convert(FT, background_atmosphere.CO₂),
-                      ch4 = convert(FT, background_atmosphere.CH₄),
-                      n2o = convert(FT, background_atmosphere.N₂O),
-                      cfc11 = convert(FT, background_atmosphere.CFC₁₁),
-                      cfc12 = convert(FT, background_atmosphere.CFC₁₂))
+    mole_fractions = (CO₂ = convert(FT, background_atmosphere.CO₂),
+                      CH₄ = convert(FT, background_atmosphere.CH₄),
+                      N₂O = convert(FT, background_atmosphere.N₂O),
+                      CFC₁₁ = convert(FT, background_atmosphere.CFC₁₁),
+                      CFC₁₂ = convert(FT, background_atmosphere.CFC₁₂))
 
     longwave = EcCKDLongwave(gas_model, longwave_cloud, gas_model.longwave_weights, mole_fractions)
     shortwave = EcCKDShortwave(gas_model, shortwave_cloud, gas_model.shortwave_weights, convert(FT, solar_constant))

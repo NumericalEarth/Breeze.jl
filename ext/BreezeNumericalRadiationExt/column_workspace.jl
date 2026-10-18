@@ -24,7 +24,7 @@ Fields:
 - `dry_air`, `water_vapor`, `ozone`: Layer gas amounts [mol m⁻²], `(Nb, N)`
 - `liquid_water_path`, `ice_water_path`: Layer cloud water paths [kg m⁻²], `(Nb, N)`, or `nothing`
   for a clear sky
-- `temperature_interfaces`: Interface temperatures [K], `(Nb, N + 1)`
+- `interface_temperatures`: Interface temperatures [K], `(Nb, N + 1)`
 - `reflectance`, `transmittance`, `direct_reflectance`, `direct_diffuse_transmittance`,
   `direct_flux`: Shortwave adding-method layer scratch, `(Nb, N)`. The longwave solution
   reuses `transmittance` and `reflectance` for its layer transmittance and upward source.
@@ -32,7 +32,7 @@ Fields:
 - `extension_pressure`: Hydrostatic pressure on the extension faces, bottom-up from the grid
   top, `(Nb, Nₑ + 1)`, or `nothing` without a column extension
 - `cos_zenith`: Cosine of the solar zenith angle of every column of the grid, `(Nx Ny,)`
-- `extension`: The materialized column extension above the grid top, or `nothing`
+- `extension`: The materialized [`ColumnExtension`](@ref) above the grid top, or `nothing`
 - `rows`: The number of grid rows in a batch
 
 Layer and interface arrays carry separate types: Reactant's kernel arrays encode their
@@ -45,7 +45,7 @@ struct ColumnWorkspace{FT, AF, FF, S, W, P, V, X}
     ozone :: AF
     liquid_water_path :: W
     ice_water_path :: W
-    temperature_interfaces :: FF
+    interface_temperatures :: FF
     reflectance :: AF
     transmittance :: AF
     direct_reflectance :: AF
@@ -84,7 +84,7 @@ Adapt.adapt_structure(to, s::LayerStencils) =
 function ColumnWorkspace{FT}(args...) where FT
     fields = NamedTuple{fieldnames(ColumnWorkspace)}(args)
     AF = typeof(fields.dry_air)
-    FF = typeof(fields.temperature_interfaces)
+    FF = typeof(fields.interface_temperatures)
     S = typeof(fields.stencil)
     W = typeof(fields.liquid_water_path)
     P = typeof(fields.extension_pressure)
@@ -99,7 +99,7 @@ $(TYPEDSIGNATURES)
 Allocate a zeroed [`ColumnWorkspace`](@ref) of float type `FT` on architecture `arch` for batches
 of `rows` rows of `Nx` columns of `N` layers, and the cosine of the solar zenith angle of all `Nc`
 columns of the grid. `gas_model` decides whether there are stencils to store, `cloud` whether
-there are water paths, and `extension` (a [`MaterializedColumnExtension`](@ref) or `nothing`)
+there are water paths, and `extension` (a materialized [`ColumnExtension`](@ref) or `nothing`)
 whether there are extension pressures.
 """
 function ColumnWorkspace(arch, FT, Nx, rows, Nc, N, gas_model, cloud, extension)
@@ -140,7 +140,7 @@ Adapt.adapt_structure(to, workspace::ColumnWorkspace{FT}) where FT =
                         adapt(to, workspace.ozone),
                         adapt(to, workspace.liquid_water_path),
                         adapt(to, workspace.ice_water_path),
-                        adapt(to, workspace.temperature_interfaces),
+                        adapt(to, workspace.interface_temperatures),
                         adapt(to, workspace.reflectance),
                         adapt(to, workspace.transmittance),
                         adapt(to, workspace.direct_reflectance),
@@ -190,7 +190,7 @@ end
 
 # The scratch of batch column `c`: the shortwave adding method's, and the longwave solution's
 # transmittance and upward source in two of the same rows
-@inline shortwave_scratch(workspace, c) = ShortwaveColumnScratch(view(workspace.reflectance, c, :),
+@inline shortwave_scratch(c, workspace) = ShortwaveColumnScratch(view(workspace.reflectance, c, :),
                                                                  view(workspace.transmittance, c, :),
                                                                  view(workspace.direct_reflectance, c, :),
                                                                  view(workspace.direct_diffuse_transmittance, c, :),
@@ -198,4 +198,4 @@ end
                                                                  view(workspace.stack_albedo, c, :),
                                                                  view(workspace.source, c, :))
 
-@inline longwave_scratch(workspace, c) = (view(workspace.transmittance, c, :), view(workspace.reflectance, c, :))
+@inline longwave_scratch(c, workspace) = (view(workspace.transmittance, c, :), view(workspace.reflectance, c, :))

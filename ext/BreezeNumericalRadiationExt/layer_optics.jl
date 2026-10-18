@@ -17,7 +17,8 @@ $(TYPEDSIGNATURES)
 
 The scalar gas amounts (mol m⁻²) of `layer` (a [`layer_state`](@ref)) as a `NamedTuple` keyed by
 `ECCKD_GAS_NAMES`: its dry air, water vapor and ozone, and the well-mixed gases as
-`mole_fractions` times the dry air.
+`mole_fractions` times the dry air. The keys are the gas names of the ecCKD tables, which
+NumericalRadiation looks the gases up by; this is the one place Breeze's names are translated to them.
 """
 @inline function layer_gas_amounts(layer, mole_fractions)
     n = layer.dry_air
@@ -25,11 +26,11 @@ The scalar gas amounts (mol m⁻²) of `layer` (a [`layer_state`](@ref)) as a `N
     return (composite = n,
             h2o = layer.water_vapor,
             o3 = layer.ozone,
-            co2 = χ.co2 * n,
-            ch4 = χ.ch4 * n,
-            n2o = χ.n2o * n,
-            cfc11 = χ.cfc11 * n,
-            cfc12 = χ.cfc12 * n)
+            co2 = χ.CO₂ * n,
+            ch4 = χ.CH₄ * n,
+            n2o = χ.N₂O * n,
+            cfc11 = χ.CFC₁₁ * n,
+            cfc12 = χ.CFC₁₂ * n)
 end
 
 # The gas optics stencil of `layer`, with its H₂O mole fraction guarded as in NumericalRadiation's
@@ -55,15 +56,15 @@ function compute_layer_state!(workspace, state, gas_model, batch_size)
     grid = state.grid
     N = number_of_layers(workspace)
     arch = architecture(grid)
-    launch!(arch, grid, (batch_size..., N), _compute_layer_state!, workspace, state, gas_model)
-    launch!(arch, grid, (batch_size..., N + 1), _compute_interface_temperature!, workspace, state)
+    launch!(arch, grid, (batch_size..., N), _compute_layer_state!, workspace, grid, state, gas_model)
+    launch!(arch, grid, (batch_size..., N + 1), _compute_interface_temperature!, workspace, grid, state)
     return nothing
 end
 
-@kernel function _compute_layer_state!(workspace, state, gas_model)
+@kernel function _compute_layer_state!(workspace, grid, state, gas_model)
     i, jᵇ, k = @index(Global, NTuple)
-    c = batch_column(i, jᵇ, state.grid.Nx)
-    layer = layer_state(state, i, jᵇ + state.row_offset, k)
+    c = batch_column(i, jᵇ, grid.Nx)
+    layer = layer_state(i, jᵇ + state.row_offset, k, grid, state)
     @inbounds begin
         workspace.dry_air[c, k] = layer.dry_air
         workspace.water_vapor[c, k] = layer.water_vapor
@@ -74,10 +75,10 @@ end
     store_layer_stencil!(workspace.stencil, c, k, layer_stencil(gas_model, layer))
 end
 
-@kernel function _compute_interface_temperature!(workspace, state)
+@kernel function _compute_interface_temperature!(workspace, grid, state)
     i, jᵇ, k = @index(Global, NTuple)
-    c = batch_column(i, jᵇ, state.grid.Nx)
-    @inbounds workspace.temperature_interfaces[c, k] = interface_temperature(state, i, jᵇ + state.row_offset, k)
+    c = batch_column(i, jᵇ, grid.Nx)
+    @inbounds workspace.interface_temperatures[c, k] = interface_temperature(i, jᵇ + state.row_offset, k, grid, state)
 end
 
 @inline store_water_path!(::Nothing, c, k, path) = nothing
@@ -102,9 +103,9 @@ end
 #####
 
 # The gas optics stencil of layer `k` of batch column `c`, rebuilt from its six stored scalars
-@inline stored_layer_stencil(::Nothing, c, k) = nothing
+@inline stored_layer_stencil(c, k, ::Nothing) = nothing
 
-@inline function stored_layer_stencil(stencils::LayerStencils, c, k)
+@inline function stored_layer_stencil(c, k, stencils::LayerStencils)
     @inbounds stencil = GasOpticsStencil(stencils.pressure_index[c, k], stencils.pressure_weight[c, k],
                                          stencils.temperature_index[c, k], stencils.temperature_weight[c, k],
                                          stencils.water_vapor_index[c, k], stencils.water_vapor_weight[c, k])
@@ -112,14 +113,14 @@ end
 end
 
 # The gas amounts of layer `k` of batch column `c`
-@inline stored_layer_gases(workspace, c, k) =
+@inline stored_layer_gases(c, k, workspace) =
     @inbounds (dry_air = workspace.dry_air[c, k],
                water_vapor = workspace.water_vapor[c, k],
                ozone = workspace.ozone[c, k])
 
 # A clear sky has no stored water paths, and its `nothing` cloud phases ignore them
-@inline stored_water_path(::Nothing, c, k) = false
-@inline stored_water_path(paths, c, k) = @inbounds paths[c, k]
+@inline stored_water_path(c, k, ::Nothing) = false
+@inline stored_water_path(c, k, paths) = @inbounds paths[c, k]
 
 # The Planck source of g point `g` at temperature `T`
 @inline planck_source(gas_model, g, T) = longwave_source(gas_model, g, T, source_table_bracket(gas_model, T))
@@ -154,7 +155,7 @@ Fields:
 struct LayerOptics{S, M, W, L, I, BL, BI, FT}
     gas_model :: M
     workspace :: W
-    mole_fractions :: NamedTuple{(:co2, :ch4, :n2o, :cfc11, :cfc12), NTuple{5, FT}}
+    mole_fractions :: NamedTuple{(:CO₂, :CH₄, :N₂O, :CFC₁₁, :CFC₁₂), NTuple{5, FT}}
     liquid_cloud :: L
     ice_cloud :: I
     liquid_bracket :: BL
@@ -179,18 +180,18 @@ end
     gas_model = optics.gas_model
     workspace, c = optics.workspace, optics.column
 
-    gases = layer_gas_amounts(stored_layer_gases(workspace, c, k), optics.mole_fractions)
-    stencil = stored_layer_stencil(workspace.stencil, c, k)
-    liquid_water_path = stored_water_path(workspace.liquid_water_path, c, k)
-    ice_water_path = stored_water_path(workspace.ice_water_path, c, k)
+    gases = layer_gas_amounts(stored_layer_gases(c, k, workspace), optics.mole_fractions)
+    stencil = stored_layer_stencil(c, k, workspace.stencil)
+    liquid_water_path = stored_water_path(c, k, workspace.liquid_water_path)
+    ice_water_path = stored_water_path(c, k, workspace.ice_water_path)
 
     τ = longwave_optical_depth(gas_model, g, gases, stencil) +
         cloud_absorption_optical_depth(optics.liquid_cloud, g, optics.liquid_bracket, liquid_water_path) +
         cloud_absorption_optical_depth(optics.ice_cloud, g, optics.ice_bracket, ice_water_path)
 
     @inbounds begin
-        Bₖ = planck_source(gas_model, g, workspace.temperature_interfaces[c, k])
-        Bₖ₊₁ = planck_source(gas_model, g, workspace.temperature_interfaces[c, k + 1])
+        Bₖ = planck_source(gas_model, g, workspace.interface_temperatures[c, k])
+        Bₖ₊₁ = planck_source(gas_model, g, workspace.interface_temperatures[c, k + 1])
     end
 
     return τ, Bₖ, Bₖ₊₁
@@ -200,10 +201,10 @@ end
     gas_model = optics.gas_model
     workspace, c = optics.workspace, optics.column
 
-    gases = layer_gas_amounts(stored_layer_gases(workspace, c, k), optics.mole_fractions)
-    stencil = stored_layer_stencil(workspace.stencil, c, k)
-    liquid_water_path = stored_water_path(workspace.liquid_water_path, c, k)
-    ice_water_path = stored_water_path(workspace.ice_water_path, c, k)
+    gases = layer_gas_amounts(stored_layer_gases(c, k, workspace), optics.mole_fractions)
+    stencil = stored_layer_stencil(c, k, workspace.stencil)
+    liquid_water_path = stored_water_path(c, k, workspace.liquid_water_path)
+    ice_water_path = stored_water_path(c, k, workspace.ice_water_path)
 
     τₐ = shortwave_optical_depth(gas_model, g, gases, stencil)
     τₛ = rayleigh_optical_depth(gas_model, g, gases.composite)
