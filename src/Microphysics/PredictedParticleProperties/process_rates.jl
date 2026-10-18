@@ -54,21 +54,28 @@ end
 
 @inline function final_prognostic_vapor_excess_tendency(
     ::ProcessRate{FT, DiagnosticVaporExcess}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
-    initial_vapor_excess, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice
+    initial_vapor_excess, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice,
+    external_forcing
 ) where FT
     return zero(qᵛ)
 end
 
+# The phase-change part re-diagnoses δqᵛ⁺ˡ after applying the process rates over `dt`.
+# That state is the host's, which does not see the dynamical forcing over `dt`, so the
+# external forcing is added explicitly as in Grabowski and Morrison (2008). Without it
+# the prognostic δqᵛ⁺ˡ sees only the phase-change sink, and the host's diagnosed
+# vapor excess grows until the G&M alignment ε / τ balances the forcing, at ~ forcing × τ.
 @inline function final_prognostic_vapor_excess_tendency(
     ::ProcessRate{FT, PrognosticVaporExcess}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
-    initial_vapor_excess, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice
+    initial_vapor_excess, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice,
+    external_forcing
 ) where FT
     qᵛ_final = qᵛ - (vapor_to_liquid + vapor_to_ice) * dt
     qˡ_final = qˡ + (vapor_to_liquid - liquid_to_ice) * dt
     qⁱ_final = qⁱ + (vapor_to_ice + liquid_to_ice) * dt
     final_vapor_excess = vapor_excess_after_moisture_update(
         𝒰, qᵛ_final, qˡ_final, qⁱ_final, ρ, constants)
-    return (final_vapor_excess - initial_vapor_excess) / dt
+    return (final_vapor_excess - initial_vapor_excess) / dt + external_forcing
 end
 
 # Phase 1 process rates: condensation, rain, deposition, and melting.
@@ -246,8 +253,8 @@ struct P3ProcessRates{FT}
     # integrates the one-shot adjustment exactly (see
     # `prognostic_vapor_excess_adjustment`).
     prognostic_vapor_excess_adjustment :: FT
-    # End-of-step vapor-excess recompute: (qᵛ_final - qᵛ⁺ˡ(T_final) - δqᵛ⁺ˡ_initial) / τ.
-    # Tied to the same dt = τ assumption.
+    # End-of-step vapor-excess recompute, (qᵛ_final - qᵛ⁺ˡ(T_final) - δqᵛ⁺ˡ_initial) / τ,
+    # plus the external forcing -∂ₜqᵛ⁺ˡ (see `external_vapor_excess_forcing`).
     prognostic_vapor_excess_tendency :: FT
 end
 
@@ -740,7 +747,7 @@ end
     vapor_rates = limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
                                     rain_cond, rain_evap, dep, coat_cond, coat_evap,
                                     nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
-                                    dt_safety, T₀)
+                                    dt_safety, T₀, temperature_tendency, pressure_tendency)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number
@@ -1089,9 +1096,14 @@ end
     liquid_to_ice = cloud_rim + rain_rim + cloud_frz_q + rain_frz_q +
                     cloud_hom_q + rain_hom_q + refrz -
                     complete_melt - partial_melt
+    external_forcing = external_vapor_excess_forcing(state.qᵛ⁺ˡ,
+                                                     vaporization_latent_heat(constants, state.T),
+                                                     state.T, state.P,
+                                                     temperature_tendency, pressure_tendency,
+                                                     constants)
     vapor_excess_tendency = final_prognostic_vapor_excess_tendency(
         parameters, 𝒰, qᵛ, q.liquid, q.ice, ρ, constants, ℳ.δqᵛ⁺ˡ, dt_safety,
-        vapor_to_liquid, vapor_to_ice, liquid_to_ice)
+        vapor_to_liquid, vapor_to_ice, liquid_to_ice, external_forcing)
     # `saturation_alignment_rate` is intentionally NOT rescaled by the cloud sink limiter: the
     # G&M alignment is its own one-shot saturation adjustment with a local
     # `ε ≥ -qᶜˡ` cap, and the cloud budget at the limiter starts from the already

@@ -2275,6 +2275,79 @@ end
               process_rates.sink_limiting_timescale ≈ expected atol=FT(1e-12)
     end
 
+    @testset "PrognosticVaporExcess tendency carries the adiabatic forcing" begin
+        # A dry, subsaturated parcel has no phase change, so in ascent the prognostic
+        # vapor excess must change exactly as qᵛ - qᵛ⁺ˡ(T, p) does along the parcel.
+        p3_base = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        process_rates = ProcessRate(FT; vapor_excess = PrognosticVaporExcess())
+        p3 = p3_with_process_rates(p3_base, process_rates)
+
+        ρ = FT(1.08)
+        T = FT(290)
+        P = FT(90000)
+        pˢᵗ = FT(100000)
+        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        qᵛ = qᵛ⁺ˡ / 2
+        q = MoistureMassFractions(qᵛ, zero(FT), zero(FT))
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ℳ = P3MicrophysicalState(zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
+                                zero(FT), zero(FT), zero(FT), qᵛ - qᵛ⁺ˡ, zero(FT), zero(FT))
+
+        w = FT(2)
+        g = constants.gravitational_acceleration
+        ∂ₜT = -g * w / mixture_heat_capacity(q, constants)
+        ∂ₜp = -ρ * g * w
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, nothing, T, ∂ₜT, ∂ₜp)
+
+        # Along the parcel ρ ∝ p / T at fixed composition.
+        h = FT(1e-3)
+        Tₕ = T + ∂ₜT * h
+        ρₕ = ρ * (P + ∂ₜp * h) / P * T / Tₕ
+        expected = -(saturation_specific_humidity(Tₕ, ρₕ, constants, PlanarLiquidSurface()) - qᵛ⁺ˡ) / h
+
+        @test expected > 0
+        @test tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ ≈ expected rtol=FT(1e-3)
+
+        # Without the forcing, nothing changes the vapor excess.
+        resting = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        @test tendency_ρδqᵛ⁺ˡ(resting, ρ, p3.process_rates) == 0
+    end
+
+    @testset "Condensation cap counts the external forcing over the limiter interval" begin
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        dt_safety = FT(10)
+        P = FT(90000)
+        T = FT(283.15)
+        qᵗ = FT(1.2e-2)
+        qᵛ⁺ˡ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants, PlanarLiquidSurface())
+        qᵛ = qᵛ⁺ˡ
+        cond = FT(1e-5)
+        z = zero(FT)
+
+        limit(∂ₜT, ∂ₜp) = PPP.limit_vapor_rates(cond, z, z, z, z, z, z, z, z, z,
+                                                qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety,
+                                                FT(273.15), ∂ₜT, ∂ₜp)
+
+        # Exactly saturated with no forcing: nothing is available to condense.
+        @test limit(z, z).cond == 0
+
+        # A 2 m/s updraft supplies Aˡ dt_safety of vapor excess over the interval.
+        ρ = P / (dry_air_gas_constant(constants) * T)
+        ∂ₜT = -constants.gravitational_acceleration * 2 / constants.dry_air.heat_capacity
+        ∂ₜp = -ρ * constants.gravitational_acceleration * 2
+        ℒˡ = PPP.vaporization_latent_heat(constants, T)
+        Aˡ = PPP.external_vapor_excess_forcing(qᵛ⁺ˡ, ℒˡ, T, P, ∂ₜT, ∂ₜp, constants)
+        Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
+        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+
+        @test Aˡ > 0
+        @test Aˡ / ξˡ < cond
+        @test limit(∂ₜT, ∂ₜp).cond ≈ Aˡ / ξˡ
+    end
+
     @testset "PrognosticVaporExcess final recompute uses formulation state with splintering active" begin
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64

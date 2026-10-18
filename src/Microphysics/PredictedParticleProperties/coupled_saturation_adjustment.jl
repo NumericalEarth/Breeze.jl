@@ -94,6 +94,31 @@ end
             T = adjusted_temperature)
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Externally driven change in the vapor excess over a surface with saturation specific
+humidity `qᵛ⁺` and latent heat `ℒ`, at fixed vapor,
+
+```math
+-∂ₜqᵛ⁺ = -(dqᵛ⁺ / dT) ∂ₜT + qᵛ⁺ ∂ₜp / p ,
+```
+
+since ``qᵛ⁺ ∝ 1/p`` at fixed temperature and composition. In adiabatic ascent the
+pressure term offsets about a fifth of the cooling term. Over liquid, this forcing
+drives diffusional growth and, with [`PrognosticVaporExcess`](@ref), the prognostic
+``δqᵛ⁺ˡ``; over both surfaces it adds to the vapor excess available to the
+saturation-adjustment caps in `limit_vapor_rates`. Resolved vapor transport,
+turbulent mixing, radiation, and user forcing are omitted.
+"""
+@inline function external_vapor_excess_forcing(qᵛ⁺, ℒ, T, P, temperature_tendency,
+                                               pressure_tendency, constants)
+    FT = typeof(T)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    dqᵛ⁺_dT = qᵛ⁺ * ℒ / (Rᵛ * T^2)
+    return qᵛ⁺ * pressure_tendency / P - dqᵛ⁺_dT * temperature_tendency
+end
+
 @inline function cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, Dᵛ, μᶜˡ, λᶜˡ,
                                                     nᶜˡ_bounded)
     FT = typeof(qᶜˡ)
@@ -219,12 +244,8 @@ cloud/precipitation fraction framework is handled separately.
     # the post-G&M value, not the host-advected `δqᵛ⁺ˡ`.
     vapor_excess = qᵛ - qᵛ⁺ˡ
     bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * dry_ice_relaxation
-    # The external forcing term is the externally driven change in the vapor
-    # excess over liquid at fixed vapor, -∂ₜqᵛ⁺ˡ = -(dqᵛ⁺ˡ/dT) ∂ₜT + qᵛ⁺ˡ ∂ₜp / p, since
-    # qᵛ⁺ˡ ∝ 1/p at fixed T and composition. In adiabatic ascent the pressure term
-    # offsets about a fifth of the cooling term. Resolved vapor transport, turbulent
-    # mixing, radiation, and user forcing are omitted.
-    external_driver = qᵛ⁺ˡ * pressure_tendency / P - dqᵛ⁺ˡ_dT * temperature_tendency
+    external_driver = external_vapor_excess_forcing(qᵛ⁺ˡ, ℒˡ, T, P, temperature_tendency,
+                                                    pressure_tendency, constants)
     total_driver = external_driver + bergeron_driver
 
     raw_cloud_growth = growth_share(cloud_relaxation, ξˡ, total_driver, total_relaxation,

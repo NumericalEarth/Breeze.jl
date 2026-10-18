@@ -51,8 +51,10 @@ $(TYPEDSIGNATURES)
 Cap vapor sinks and sources against the moist-adiabatic saturation-adjustment
 budget.
 
-Defining the liquid saturation-adjustment increment `δqˡ = (qᵛ - qᵛ⁺ˡ) / ξˡ` with
-the moist-static feedback factor `ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T²)`:
+Defining the liquid saturation-adjustment increment `δqˡ = (qᵛ - qᵛ⁺ˡ + Aˡ τ) / ξˡ` with
+the moist-static feedback factor `ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T²)`, where
+`Aˡ = -∂ₜqᵛ⁺ˡ` is the external forcing (see `external_vapor_excess_forcing`) and
+`τ = dt_safety`:
 
 - Liquid-phase condensation sinks (`cond > 0`, `ccn_activation_mass`, `rain_cond`,
   `coat_cond`) cannot exceed `max(0, δqˡ)`.
@@ -72,12 +74,28 @@ increment `δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after`:
 Number rates `ccn_activation_number` and `nuc_n` are scaled by the same factor as
 their companion mass rates to preserve mean particle mass.
 
+The external forcing counts as available because the growth rates include it: they
+are evaluated from the current state, which does not yet carry the cooling and
+expansion over the next `dt_safety`. Without it the caps bind in steady ascent and
+hold the vapor excess near `A τ` rather than where diffusional growth balances
+the forcing. The ice-phase increment `δqⁱ` likewise includes `Aⁱ τ`.
+
 Returns a NamedTuple of the possibly-rescaled rates.
 """
+@inline limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                          rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                          nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
+                          dt_safety, freezing_temperature) =
+    limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                      rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                      nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
+                      dt_safety, freezing_temperature, zero(qᵛ), zero(qᵛ))
+
 @inline function limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
                                    rain_cond, rain_evap, dep, coat_cond, coat_evap,
                                    nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
-                                   dt_safety, freezing_temperature)
+                                   dt_safety, freezing_temperature,
+                                   temperature_tendency, pressure_tendency)
     FT = typeof(qᵛ)
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
@@ -87,7 +105,9 @@ Returns a NamedTuple of the possibly-rescaled rates.
     # Liquid-phase saturation-adjustment caps. In the SCF=1 limit the condensation
     # and evaporation budgets collapse to the same signed increment `δqˡ`;
     # condensation sees the positive part, evaporation the negative part.
-    δqˡ = (qᵛ - qᵛ⁺ˡ) / ξˡ
+    Aˡ = external_vapor_excess_forcing(qᵛ⁺ˡ, ℒˡ, T, P, temperature_tendency,
+                                       pressure_tendency, constants)
+    δqˡ = (qᵛ - qᵛ⁺ˡ + Aˡ * dt_safety) / ξˡ
     qcon_cap = max(0, δqˡ)
     qevp_cap = max(0, -δqˡ)
 
@@ -119,7 +139,9 @@ Returns a NamedTuple of the possibly-rescaled rates.
     ξⁱ_after = ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, Rᵛ, T_after)
 
     # Ice-phase deposition / sublimation caps.
-    δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after
+    Aⁱ = external_vapor_excess_forcing(qᵛ⁺ⁱ_after, ℒⁱ_after, T_after, P,
+                                       temperature_tendency, pressure_tendency, constants)
+    δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * dt_safety) / ξⁱ_after
     qdep_cap = max(0, δqⁱ)
     qsub_cap = max(0, -δqⁱ)
 

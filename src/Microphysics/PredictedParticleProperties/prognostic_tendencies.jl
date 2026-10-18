@@ -489,10 +489,12 @@ $(TYPEDSIGNATURES)
 Compute the tendency of the vapor excess over liquid from Grabowski & Morrison (2008).
 
 When `vapor_excess = PrognosticVaporExcess()`, the vapor excess over liquid ``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ``
-is a prognostic variable advected by the dynamical core. The microphysical
-tendency reproduces the post-step diagnosis ``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T)``.
-`compute_p3_process_rates` precomputes that diagnostic tendency from the final
-local ``qᵛ`` and ``T`` implied by the ordered process rates.
+is a prognostic variable advected by the dynamical core. Its microphysical tendency
+has two parts. The phase-change part reproduces the post-step diagnosis
+``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T)`` from the final local ``qᵛ`` and ``T`` implied by the ordered
+process rates. The external part, ``-∂ₜqᵛ⁺ˡ`` from adiabatic cooling and expansion
+(see `external_vapor_excess_forcing`), keeps the prognostic consistent with the host
+state, so the G&M alignment only corrects transport and other unrepresented forcing.
 
 When `vapor_excess = DiagnosticVaporExcess()`, returns zero tendency.
 """

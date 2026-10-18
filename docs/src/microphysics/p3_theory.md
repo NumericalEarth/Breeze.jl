@@ -245,7 +245,16 @@ neither allocates nor advects it.
   host's ``δq^{v+l}`` field. The G&M adjustment and the end-of-step
   ``δq^{v+l}`` reset both relax over `sink_limiting_timescale`, so they land
   exactly when the host integrates with
-  ``\Delta t = \text{sink\_limiting\_timescale}``.
+  ``\Delta t = \text{sink\_limiting\_timescale}``. The ``δq^{v+l}`` tendency
+  also carries the external forcing ``-∂_t q^{v+l}`` that drives diffusional growth
+  (see [Vapor Deposition and Sublimation](@ref p3_deposition) below), as in
+  [Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008). Adiabatic cooling
+  therefore changes the prognostic and the host's ``q^v - q^{v+l}`` alike, and the G&M
+  adjustment corrects only what the forcing omits, such as transport errors and
+  radiative cooling. Without that term the prognostic would see only the
+  phase-change sink, and the host's vapor excess would grow until the G&M
+  relaxation balanced the forcing, at about the forcing times
+  `sink_limiting_timescale`.
 
 From these, diagnostic properties are computed:
 
@@ -2022,7 +2031,7 @@ at `maximum_aggregation_rime_fraction` (0.9).
     The single-category aggregation kernel above is fully wired. Breeze has
     no inter-category collection kernel, since it runs a single ice category.
 
-### Vapor Deposition and Sublimation
+### [Vapor Deposition and Sublimation](@id p3_deposition)
 
 P3's deposition step uses a coupled semi-analytic vapor balance
 (`coupled_saturation_adjustment_rates`): cloud, rain, dry ice, and
@@ -2256,14 +2265,24 @@ liquid is tracked explicitly in ``q^{wi}``.
 After all liquid- and ice-phase rates are assembled, Breeze applies four caps:
 
 - Liquid condensation against
-  ``\max(0,\, q^v - q^{v+l})/(1 + (\mathcal{L}^l)^2 q^{v+l}/(c^{pd} R^v T^2))``.
+  ``\max(0,\, q^v - q^{v+l} + A^l τ_\text{sink})/(1 + (\mathcal{L}^l)^2 q^{v+l}/(c^{pd} R^v T^2))``.
 - Liquid evaporation against
-  ``\max(0,\, q^{v+l} - q^v)/(\dots)``, plus a hard zero when supersaturated.
+  ``\max(0,\, q^{v+l} - q^v - A^l τ_\text{sink})/(\dots)``, plus a hard zero when supersaturated.
 - Ice deposition against
-  ``\max(0,\, q^{v*} - q^{v+i*})/(1 + (\mathcal{L}^i)^2 q^{v+i*}/(c^{pd} R^v {T^*}^2))``,
+  ``\max(0,\, q^{v*} - q^{v+i*} + A^i τ_\text{sink})/(1 + (\mathcal{L}^i)^2 q^{v+i*}/(c^{pd} R^v {T^*}^2))``,
   where ``T^* = T + \text{net liquid}\,\cdot\, \mathcal{L}^l / c^{pd} \cdot Δt`` and
   the saturation field is recomputed at ``T^*``.
 - Ice sublimation against the negative analog.
+
+Here ``A^l = -∂_t q^{v+l}`` and ``A^i = -∂_t q^{v+i}`` are the external forcings of the
+vapor excess over liquid and ice from adiabatic cooling and expansion (see
+[Vapor Deposition and Sublimation](@ref p3_deposition)), and
+``τ_\text{sink}`` is `sink_limiting_timescale`. The forcing counts as available because
+the growth rates include it while the current state does not yet carry the cooling over
+the limiter interval. Without it the condensation cap binds in steady ascent and holds
+the vapor excess near ``A^l τ_\text{sink}``, about 1% for a 2 m/s updraft with the default
+10 s, rather than where diffusional growth balances the forcing (about 0.15% for the
+rising-parcel example).
 
 These caps follow the saturation-adjustment limits in
 [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization)
