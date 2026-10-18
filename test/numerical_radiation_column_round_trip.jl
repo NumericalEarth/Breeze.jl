@@ -101,9 +101,9 @@ previous_float_type = Oceananigans.defaults.FloatType
                            topology = (Periodic, Periodic, Bounded))
     constants = ThermodynamicConstants()
 
-    for (extension, name) in ((ColumnExtension(FT; layers = 12), "extended"), (nothing, "grid only"))
+    for (extension, name) in ((OverlyingAtmosphereColumn(FT; layers = 12), "extended"), (nothing, "grid only"))
         @testset "$name" begin
-            radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants; column_extension = extension,
+            radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants; overlying_atmosphere = extension,
                                                surface_temperature = 300, surface_emissivity = 0.98,
                                                surface_albedo = 0.1, solar_position = FixedCosineZenith(0.5))
             # Column 2 is twice as humid as column 1

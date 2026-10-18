@@ -166,7 +166,7 @@ once the extension is loaded with `using NumericalRadiation: NumericalRadiation`
 `using NCDatasets` (NumericalRadiation exports its own `ThermodynamicConstants`, so it is
 loaded qualified next to `using Breeze`).
 
-The solved column reaches beyond the top of the grid through a [`ColumnExtension`](@ref), so that
+The solved column reaches beyond the top of the grid through a [`OverlyingAtmosphereColumn`](@ref), so that
 the downwelling fluxes at the top of the domain include the emission and absorption of the
 atmosphere above it.
 
@@ -299,7 +299,7 @@ RadiativeTransferModel
 ├── ice_effective_radius: ConstantRadiusParticles{Float64}(3.0e-5)
 ├── diffuse_surface_albedo: ConstantField(0.1)
 ├── optics: EcCKDOptics with 32 longwave and 32 shortwave g-points, clear sky
-└── column_extension: 40 layers from 10000.0 m to 65000.0 m
+└── overlying_atmosphere: 40 layers from 10000.0 m to 65000.0 m
 ```
 
 # References
@@ -791,11 +791,11 @@ end
 end
 
 #####
-##### Column extension above the grid top
+##### Overlying atmosphere above the grid top
 #####
 ##### A large-eddy simulation typically spans a few kilometers, but the radiative fluxes at its top
 ##### depend on the whole atmosphere above: the stratosphere emits longwave radiation downward and
-##### ozone absorbs shortwave radiation on the way down. The column extension describes that
+##### ozone absorbs shortwave radiation on the way down. The overlying atmosphere describes that
 ##### atmosphere so that a column solver can append it above the grid and solve the whole column.
 #####
 
@@ -877,7 +877,7 @@ The atmosphere above the top of the grid, as seen by a column radiation solver.
 Radiation is solved on the grid's `Nz` layers plus `layers` extension layers stacked from the grid's
 top face `z_top` to `top`, geometrically stretched from a first layer as thick as the grid's top
 layer: with ratio `r` between successive layers, `Δz₁ (rᴺ - 1) / (r - 1) = top - z_top` (see
-[`column_extension_faces`](@ref)). No layers are added when the grid already reaches `top`.
+[`overlying_atmosphere_faces`](@ref)). No layers are added when the grid already reaches `top`.
 
 The extension temperature follows `temperature(z)`, anchored to the temperature `T_top` on the grid's
 top face so that the profile is continuous there and relaxes to `temperature(z)` over `blending_height`,
@@ -892,7 +892,7 @@ specific humidity follows `specific_humidity(z)`, and the ozone mole fraction fo
 `ozone_mole_fraction` is `nothing`. Each profile is a number (constant with height) or a function
 of height. Extension layers are clear.
 
-A radiation model materializes the extension on its grid: the materialized `ColumnExtension` also
+A radiation model materializes the extension on its grid: the materialized `OverlyingAtmosphereColumn` also
 holds the extension's layers and the profiles sampled at their centers, which are `nothing` until
 then.
 
@@ -915,8 +915,8 @@ Fields:
 ```jldoctest
 julia> using Breeze
 
-julia> ColumnExtension()
-ColumnExtension{Float64}
+julia> OverlyingAtmosphereColumn()
+OverlyingAtmosphereColumn{Float64}
 ├── top: 65000.0 m
 ├── layers: 40
 ├── blending_height: 1000.0 m
@@ -924,8 +924,8 @@ ColumnExtension{Float64}
 ├── specific_humidity: standard_specific_humidity (generic function with 1 method)
 └── ozone_mole_fraction: nothing
 
-julia> ColumnExtension(Float32, top = 80e3, layers = 60, ozone_mole_fraction = 1e-6)
-ColumnExtension{Float32}
+julia> OverlyingAtmosphereColumn(Float32, top = 80e3, layers = 60, ozone_mole_fraction = 1e-6)
+OverlyingAtmosphereColumn{Float32}
 ├── top: 80000.0 m
 ├── layers: 60
 ├── blending_height: 1000.0 m
@@ -934,7 +934,7 @@ ColumnExtension{Float32}
 └── ozone_mole_fraction: 1.0e-6
 ```
 """
-struct ColumnExtension{FT, T, Q, O, B, V}
+struct OverlyingAtmosphereColumn{FT, T, Q, O, B, V}
     top :: FT
     layers :: Int
     blending_height :: FT
@@ -953,11 +953,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct a [`ColumnExtension`](@ref) of float type `FT` reaching `top` (default 65 km) with
+Construct a [`OverlyingAtmosphereColumn`](@ref) of float type `FT` reaching `top` (default 65 km) with
 `layers` layers (default 40), a `blending_height` of 1 km for the temperature anchor, and
 the [`standard_atmosphere_temperature`](@ref) and `standard_specific_humidity` profiles.
 """
-function ColumnExtension(FT = Oceananigans.defaults.FloatType;
+function OverlyingAtmosphereColumn(FT = Oceananigans.defaults.FloatType;
                          top = 65e3,
                          layers = 40,
                          blending_height = 1e3,
@@ -967,7 +967,7 @@ function ColumnExtension(FT = Oceananigans.defaults.FloatType;
 
     layers >= 1 || throw(ArgumentError("`layers` must be at least 1; received $layers."))
     blending_height >= 0 || throw(ArgumentError("`blending_height` must be non-negative; received $blending_height."))
-    return ColumnExtension(convert(FT, top), Int(layers), convert(FT, blending_height),
+    return OverlyingAtmosphereColumn(convert(FT, top), Int(layers), convert(FT, blending_height),
                            temperature, specific_humidity, convert_number(ozone_mole_fraction, FT),
                            nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
@@ -977,8 +977,8 @@ convert_number(x::Number, FT) = convert(FT, x)
 convert_number(x, FT) = x
 
 # Kernels read only the sampled layers: the profiles stay on the host
-Adapt.adapt_structure(to, extension::ColumnExtension) =
-    ColumnExtension(extension.top,
+Adapt.adapt_structure(to, extension::OverlyingAtmosphereColumn) =
+    OverlyingAtmosphereColumn(extension.top,
                     extension.layers,
                     extension.blending_height,
                     nothing,
@@ -996,9 +996,9 @@ profile_string(x::Number) = prettysummary(x)
 profile_string(::Nothing) = "nothing"
 profile_string(x) = summary(x)
 
-Base.summary(::ColumnExtension{FT}) where FT = "ColumnExtension{$FT}"
+Base.summary(::OverlyingAtmosphereColumn{FT}) where FT = "OverlyingAtmosphereColumn{$FT}"
 
-Base.show(io::IO, extension::ColumnExtension) =
+Base.show(io::IO, extension::OverlyingAtmosphereColumn) =
     print(io, summary(extension), "\n",
           "├── top: ", prettysummary(extension.top), " m\n",
           "├── layers: ", extension.layers, "\n",
@@ -1012,7 +1012,7 @@ Base.show(io::IO, extension::ColumnExtension) =
 # parameterized by its e-folding `scale` rather than by its first spacing, which the extension
 # fixes to the grid's top layer; it stores Float64 faces; and it is singular for uniform spacing
 # (`scale → ∞`). An Oceananigans constructor from `(N, left, right, first_spacing)` would replace
-# `geometric_stack_depth`, `geometric_stretching_ratio` and the face loop of `column_extension_faces`.
+# `geometric_stack_depth`, `geometric_stretching_ratio` and the face loop of `overlying_atmosphere_faces`.
 
 # The depth spanned by `N` geometrically stretched layers of ratio `r` starting from `Δz₁`,
 # Δz₁ (1 + r + … + rᴺ⁻¹), summed term by term so that it is regular at r = 1.
@@ -1083,11 +1083,11 @@ when the grid already reaches `extension.top`.
 ```jldoctest
 julia> using Breeze
 
-julia> using Breeze.AtmosphereModels: column_extension_faces
+julia> using Breeze.AtmosphereModels: overlying_atmosphere_faces
 
-julia> extension = ColumnExtension(top = 3100, layers = 3);
+julia> extension = OverlyingAtmosphereColumn(top = 3100, layers = 3);
 
-julia> column_extension_faces(extension, 3000, 10)
+julia> overlying_atmosphere_faces(extension, 3000, 10)
 4-element Vector{Float64}:
  3000.0
  3010.0
@@ -1095,7 +1095,7 @@ julia> column_extension_faces(extension, 3000, 10)
  3100.0
 ```
 """
-function column_extension_faces(extension::ColumnExtension{FT}, z_top, Δz_top) where FT
+function overlying_atmosphere_faces(extension::OverlyingAtmosphereColumn{FT}, z_top, Δz_top) where FT
     z_top = FT(z_top)
     top = extension.top
     z_top >= top && return [z_top]

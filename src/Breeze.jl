@@ -52,7 +52,7 @@ export
     AllSkyOptics,
     EcCKDOptics,
     CloudScatteringTables,
-    ColumnExtension,
+    OverlyingAtmosphereColumn,
     standard_atmosphere_temperature,
     AbstractSolarPosition,
     ApparentSolarPosition,

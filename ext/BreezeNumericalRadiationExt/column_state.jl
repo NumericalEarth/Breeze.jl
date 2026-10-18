@@ -13,7 +13,7 @@
 """
 $(TYPEDEF)
 
-The model fields, constants and column extension from which [`layer_state`](@ref) and
+The model fields, constants and overlying atmosphere from which [`layer_state`](@ref) and
 [`interface_temperature`](@ref) compute the state of the extended columns, and the batch of
 columns being solved: the extension pressures are those of the batch whose first row follows
 `row_offset` rows of the grid.

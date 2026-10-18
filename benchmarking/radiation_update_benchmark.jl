@@ -52,7 +52,7 @@ function radiation_model(grid, backend)
               solar_position = FixedCosineZenith(0.5))
 
     if backend === :ecckd
-        return RadiativeTransferModel(grid, optics, ThermodynamicConstants(); common..., column_extension = nothing)
+        return RadiativeTransferModel(grid, optics, ThermodynamicConstants(); common..., overlying_atmosphere = nothing)
     else
         return RadiativeTransferModel(grid, optics, ThermodynamicConstants(); common...)
     end

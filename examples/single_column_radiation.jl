@@ -86,18 +86,18 @@ rrtmgp = (clear_sky = RadiativeTransferModel(grid, ClearSkyOptics(), constants; 
           all_sky   = RadiativeTransferModel(grid, AllSkyOptics(), constants; surface..., effective_radii...))
 
 # By default an ecCKD model extends the radiation column above the grid top with a
-# [`ColumnExtension`](@ref). Here we switch it off with `column_extension = nothing`, so
+# [`OverlyingAtmosphereColumn`](@ref). Here we switch it off with `overlying_atmosphere = nothing`, so
 # that both formulations solve the same problem and every difference below is a difference
 # in the optics. The all-sky ecCKD model takes its cloud optics from the Mie droplet and
 # Baum ice scattering tables selected by [`CloudScatteringTables`](@ref).
 
 ecckd = (clear_sky = RadiativeTransferModel(grid, EcCKDOptics(), constants; surface...,
-                                            column_extension = nothing),
+                                            overlying_atmosphere = nothing),
          high_co2  = RadiativeTransferModel(grid, EcCKDOptics(), constants; surface...,
                                             background_atmosphere = high_co2_atmosphere,
-                                            column_extension = nothing),
+                                            overlying_atmosphere = nothing),
          all_sky   = RadiativeTransferModel(grid, EcCKDOptics(clouds = CloudScatteringTables()), constants;
-                                            surface..., effective_radii..., column_extension = nothing))
+                                            surface..., effective_radii..., overlying_atmosphere = nothing))
 
 formulations = (; rrtmgp, ecckd)
 
@@ -310,10 +310,10 @@ print_row("shortwave, surface", forcing(net_shortwave, rrtmgp, 1),   forcing(net
 # formulations absorb the ultraviolet that ozone above would have absorbed in that one cell,
 # RRTMGP at 6.1 K/day and ecCKD at 7.5 K/day.
 
-# ## The column extension
+# ## The overlying atmosphere
 #
 # One thing the RRTMGP formulation cannot represent is the atmosphere above the grid. An
-# ecCKD model built with the default [`ColumnExtension`](@ref) continues the column above
+# ecCKD model built with the default [`OverlyingAtmosphereColumn`](@ref) continues the column above
 # 20 km with 40 layers up to 65 km following the U.S. Standard Atmosphere, so the top face
 # receives longwave radiation from the stratosphere, the sunlight entering the grid has
 # already crossed the ozone layer, and the ozone heating that the models above put in their

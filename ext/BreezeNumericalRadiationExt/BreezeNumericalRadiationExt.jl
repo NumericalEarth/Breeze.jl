@@ -3,7 +3,7 @@ module BreezeNumericalRadiationExt
 #####
 ##### ecCKD radiation for AtmosphereModel through NumericalRadiation.jl
 #####
-##### One kernel solves the longwave and shortwave fluxes of every column (plus a column extension
+##### One kernel solves the longwave and shortwave fluxes of every column (plus an overlying atmosphere
 ##### above the grid top) with NumericalRadiation's scalar ecCKD gas optics and streaming column
 ##### solvers. The layer optics read the model's fields directly and the fluxes accumulate directly
 ##### into the radiation model's `ZFaceField`s: the only per-column storage is the solvers' scratch.
@@ -12,7 +12,7 @@ module BreezeNumericalRadiationExt
 using Breeze
 
 using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, SurfaceRadiation, resolve_column_batch_rows,
-                               EcCKDOptics, CloudScatteringTables, ColumnExtension, BackgroundAtmosphere,
+                               EcCKDOptics, CloudScatteringTables, OverlyingAtmosphereColumn, BackgroundAtmosphere,
                                ConstantRadiusParticles, AbstractSolarPosition, ApparentSolarPosition,
                                materialize_background_atmosphere, materialize_surface_property,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
@@ -20,7 +20,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, Surface
                                initialize_cos_zenith!, update_cos_zenith!,
                                column_index, compute_radiation_flux_divergence!, show_radiation_summary,
                                bottom_face_pressure, top_face_pressure,
-                               column_extension_faces,
+                               overlying_atmosphere_faces,
                                dynamics_pressure, total_density, specific_prognostic_moisture,
                                grid_moisture_fractions
 using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
@@ -48,7 +48,7 @@ using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
-include("column_extension.jl")
+include("overlying_atmosphere.jl")
 include("column_workspace.jl")
 include("cloud_optics.jl")
 include("ecckd_radiative_transfer_model.jl")

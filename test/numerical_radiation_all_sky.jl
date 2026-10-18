@@ -148,7 +148,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
             # Nor does a gray one
             gray = EcCKDGasOpticsModel(names = (:composite,), longwave_absorption = [1e-3;;], shortwave_absorption = [1e-4;;])
-            @test_throws ArgumentError radiation(grid, EcCKDOptics(gray; clouds = CloudScatteringTables()); column_extension = nothing)
+            @test_throws ArgumentError radiation(grid, EcCKDOptics(gray; clouds = CloudScatteringTables()); overlying_atmosphere = nothing)
         end
     end
 

@@ -41,7 +41,7 @@ end
 # We use a 2D vertical slice (x-z) that is periodic in x and bounded in z.
 # The vertical grid is stretched: fine 100 m cells resolve the cloud layer below
 # 3 km, then a smooth transition to 1 km cells carries the column up to 15 km.
-# The radiation model's [`ColumnExtension`](@ref) adds the stratosphere above
+# The radiation model's [`OverlyingAtmosphereColumn`](@ref) adds the stratosphere above
 # the grid top, so the total cell count stays modest.
 
 Nx = 128
@@ -83,7 +83,7 @@ dynamics = AnelasticDynamics(reference_state)
 # absorption and emission. We specify well-mixed greenhouse gas concentrations
 # and a tropical ozone profile that transitions from low tropospheric values to
 # a stratospheric peak near 25 km. The peak lies above the 15 km grid top, but
-# the radiation model evaluates the ozone profile in its column extension too,
+# the radiation model evaluates the ozone profile in its overlying atmosphere too,
 # so the stratospheric ozone still absorbs sunlight before it reaches the grid.
 
 @inline function tropical_ozone(z)

@@ -42,10 +42,10 @@ function comparison_radiation(grid, optics; CO₂ = 420e-6)
                                   background_atmosphere = BackgroundAtmosphere(; CO₂),
                                   surface_temperature = 300, surface_emissivity = 0.98, surface_albedo = 0.1,
                                   solar_constant = 1361, solar_position = FixedCosineZenith(0.5),
-                                  column_extension = nothing)
+                                  overlying_atmosphere = nothing)
 end
 
-# RRTMGP takes no column extension; the grid top is the top of its atmosphere as well
+# RRTMGP takes no overlying atmosphere; the grid top is the top of its atmosphere as well
 comparison_radiation(grid, optics::Union{ClearSkyOptics, AllSkyOptics}; CO₂ = 420e-6) =
     RadiativeTransferModel(grid, optics, ThermodynamicConstants();
                            background_atmosphere = BackgroundAtmosphere(; CO₂),

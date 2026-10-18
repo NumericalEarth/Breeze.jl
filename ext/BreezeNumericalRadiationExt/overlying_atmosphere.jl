@@ -1,7 +1,7 @@
 #####
-##### Materializing the column extension
+##### Materializing the overlying atmosphere
 #####
-##### `ColumnExtension` describes the atmosphere above the grid top with profiles of height. It is
+##### `OverlyingAtmosphereColumn` describes the atmosphere above the grid top with profiles of height. It is
 ##### materialized once, on the host, by sampling the profiles at the centers of the geometrically
 ##### stretched extension layers into device vectors, so that the column kernels only read vectors
 ##### and apply the temperature anchor of the grid's top face. The extension's interface
@@ -18,21 +18,21 @@ profile_value(profile, z) = profile(z)
 extension_ozone(ozone_mole_fraction, background_O₃) = ozone_mole_fraction
 extension_ozone(::Nothing, background_O₃) = background_O₃
 extension_ozone(::Nothing, ::AbstractField) =
-    throw(ArgumentError("The column extension needs an ozone profile above the grid, but " *
+    throw(ArgumentError("The overlying atmosphere needs an ozone profile above the grid, but " *
                         "`BackgroundAtmosphere.O₃` is a Field, which exists only on the grid: pass " *
-                        "`ColumnExtension(ozone_mole_fraction = ...)` (a number or a function of height)."))
+                        "`OverlyingAtmosphereColumn(ozone_mole_fraction = ...)` (a number or a function of height)."))
 
 """
 $(TYPEDSIGNATURES)
 
 Materialize `extension` on the geometrically stretched layers between the top face of `grid` and
-`extension.top` (see [`column_extension_faces`](@ref)): the layers' thicknesses and centers and the
+`extension.top` (see [`overlying_atmosphere_faces`](@ref)): the layers' thicknesses and centers and the
 profiles sampled at the centers, in the grid's float type and on its architecture, with the ozone
 profile of `background` when the extension has none. Returns `nothing` when the grid already
 reaches `extension.top`.
 """
-function materialize_column_extension(extension::ColumnExtension, grid, background::BackgroundAtmosphere)
-    # Sampled in the grid's float type, whatever the extension's: a default `ColumnExtension()`
+function materialize_overlying_atmosphere(extension::OverlyingAtmosphereColumn, grid, background::BackgroundAtmosphere)
+    # Sampled in the grid's float type, whatever the extension's: a default `OverlyingAtmosphereColumn()`
     # is Float64, and a Float32 grid must run Float32 kernels
     FT = eltype(grid)
     Nz = size(grid, 3)
@@ -40,7 +40,7 @@ function materialize_column_extension(extension::ColumnExtension, grid, backgrou
     z_top = FT(zᶠ[Nz+1])
     Δz_top = FT(zᶠ[Nz+1] - zᶠ[Nz])
 
-    faces = FT.(column_extension_faces(extension, z_top, Δz_top))
+    faces = FT.(overlying_atmosphere_faces(extension, z_top, Δz_top))
     length(faces) == 1 && return nothing
 
     Δzᵃᵃᶜ = diff(faces)
@@ -48,7 +48,7 @@ function materialize_column_extension(extension::ColumnExtension, grid, backgrou
     O₃ = extension_ozone(extension.ozone_mole_fraction, background.O₃)
     sample(profile) = on_architecture(architecture(grid), FT[profile_value(profile, z) for z in zᵃᵃᶜ])
 
-    return ColumnExtension(convert(FT, extension.top),
+    return OverlyingAtmosphereColumn(convert(FT, extension.top),
                            extension.layers,
                            convert(FT, extension.blending_height),
                            extension.temperature,
@@ -63,17 +63,17 @@ function materialize_column_extension(extension::ColumnExtension, grid, backgrou
                            sample(O₃))
 end
 
-materialize_column_extension(::Nothing, grid, background) = nothing
+materialize_overlying_atmosphere(::Nothing, grid, background) = nothing
 
 """
 $(TYPEDSIGNATURES)
 
 The number of extension layers, `Nₑ`.
 """
-@inline number_of_extension_layers(extension::ColumnExtension) = length(extension.Δzᵃᵃᶜ)
+@inline number_of_extension_layers(extension::OverlyingAtmosphereColumn) = length(extension.Δzᵃᵃᶜ)
 @inline number_of_extension_layers(::Nothing) = 0
 
 extension_summary(::Nothing) = "none"
-extension_summary(extension::ColumnExtension) =
+extension_summary(extension::OverlyingAtmosphereColumn) =
     string(number_of_extension_layers(extension), " layers from ", prettysummary(extension.bottom),
            " m to ", prettysummary(extension.top), " m")

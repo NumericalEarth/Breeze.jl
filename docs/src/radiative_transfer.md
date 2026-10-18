@@ -328,22 +328,22 @@ radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
                                    surface_emissivity = 0.98,
                                    surface_albedo = 0.1,
                                    background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6),
-                                   column_extension = ColumnExtension(top = 65kilometers, layers = 40))
+                                   overlying_atmosphere = OverlyingAtmosphereColumn(top = 65kilometers, layers = 40))
 ```
 
 The keyword arguments are those of the RRTMGP clear-sky and all-sky constructors
 (surface properties, `solar_position`, `solar_constant`, `schedule`,
-`background_atmosphere`, effective radii) plus `column_extension`. The default
+`background_atmosphere`, effective radii) plus `overlying_atmosphere`. The default
 `EcCKDOptics()` uses the `:climate_32x32` reference model with 32 longwave and 32
 shortwave g-points; `EcCKDOptics(:climate_64x64)` doubles the spectral resolution, and
 a `(longwave = path, shortwave = path)` pair selects ecCKD definition files of your own.
 On a `GPU()` grid the tables and the solve live on the device.
 
-### Column extension
+### Overlying atmosphere
 
 A limited-area grid rarely reaches the top of the atmosphere. Rather than treating the
 grid top as the top of the atmosphere, an ecCKD model continues the radiation column
-above it through a [`ColumnExtension`](@ref): by default 40 geometrically stretched
+above it through a [`OverlyingAtmosphereColumn`](@ref): by default 40 geometrically stretched
 layers from the grid top to 65 km, whose temperature follows the U.S. Standard
 Atmosphere ([`standard_atmosphere_temperature`](@ref)) anchored to the temperature on the
 grid's top face and relaxing to the standard profile over a 1 km `blending_height`.
@@ -355,7 +355,7 @@ well — unless `ozone_mole_fraction` overrides it. Extension layers are clear.
 The extension is what gives the downwelling longwave flux on the grid's top face its
 stratospheric contribution (a few W m⁻² for a 20 km grid) and lets the stratospheric
 ozone absorb ultraviolet sunlight before it reaches the grid, instead of depositing that
-absorption in the grid's top cells. Pass `column_extension = nothing` to stop the column
+absorption in the grid's top cells. Pass `overlying_atmosphere = nothing` to stop the column
 at the grid top, which is the right choice for comparisons with the RRTMGP models (whose
 column ends there) or for a grid that already reaches the mesosphere.
 
@@ -363,10 +363,10 @@ column ends there) or for a grid that already reaches the mesosphere.
 # Stop at the grid top
 radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
                                    surface_temperature = 300, surface_albedo = 0.1,
-                                   column_extension = nothing)
+                                   overlying_atmosphere = nothing)
 
 # A taller, finer extension with a constant stratospheric ozone mole fraction
-extension = ColumnExtension(top = 80kilometers, layers = 60, ozone_mole_fraction = 2e-6)
+extension = OverlyingAtmosphereColumn(top = 80kilometers, layers = 60, ozone_mole_fraction = 2e-6)
 ```
 
 ### Gases
@@ -434,7 +434,7 @@ with `using NumericalRadiation: NumericalRadiation`), and [`GrayOptics`](@ref),
 backends fill the same fields, one script can build an RRTMGP model and an ecCKD model on
 two `AtmosphereModel`s with identical initial conditions and difference their fluxes; the
 [single column radiation example](literated/single_column_radiation.md) does exactly that.
-On the same 20 km column, with `column_extension = nothing` so that both stop at the grid
+On the same 20 km column, with `overlying_atmosphere = nothing` so that both stop at the grid
 top, the two agree to 2 W m⁻² in the clear-sky boundary fluxes, to 0.1 W m⁻² in the 2×CO₂
 forcing and to 0.2 K day⁻¹ (root mean square) in the clear-sky heating rates, the spread
 expected between two independent correlated-``k`` models; they part at cloud top, where the

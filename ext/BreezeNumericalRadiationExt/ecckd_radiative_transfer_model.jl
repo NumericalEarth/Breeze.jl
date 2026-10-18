@@ -89,12 +89,12 @@ load_gas_optics_model(FT, model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpt
 # Warn once at construction when the extension's temperatures leave the Planck source table, where
 # the interpolation holds the table edge (a gray `σT⁴` model has no table and no edge). The
 # interface temperatures interpolate the layer temperatures, so they share their range.
-function warn_source_table_range(gas_model::EcCKDTabulatedGasOpticsModel, extension::ColumnExtension)
+function warn_source_table_range(gas_model::EcCKDTabulatedGasOpticsModel, extension::OverlyingAtmosphereColumn)
     source_grid = gas_model.longwave_source_temperature_grid
     isnothing(source_grid) && return nothing
     T = Array(extension.T)
     (minimum(T) < first(source_grid) || maximum(T) > last(source_grid)) &&
-        @warn "The column extension temperatures span $(extrema(T)) K, outside the ecCKD Planck source table " *
+        @warn "The overlying atmosphere's temperatures span $(extrema(T)) K, outside the ecCKD Planck source table " *
               "$(first(source_grid))–$(last(source_grid)) K; the table edge is used beyond it."
     return nothing
 end
@@ -111,8 +111,8 @@ $(TYPEDSIGNATURES)
 
 Construct a full-spectrum `RadiativeTransferModel` on `grid` with the ecCKD gas optics of
 `optics::EcCKDOptics`, solved column by column by NumericalRadiation.jl. Radiation is solved
-on the grid's layers plus the layers of `column_extension` above the grid top (a
-[`ColumnExtension`](@ref), or `nothing` to stop at the grid top).
+on the grid's layers plus the layers of `overlying_atmosphere` above the grid top (a
+[`OverlyingAtmosphereColumn`](@ref), or `nothing` to stop at the grid top).
 
 With `optics.clouds::CloudScatteringTables` the radiation is all-sky: the cloud liquid and ice
 of every grid cell (from the model's microphysics) scatter and absorb with the scattering tables
@@ -149,7 +149,7 @@ table) is carried by the gas optics model.
   only `ConstantRadiusParticles` for now
 - `ice_effective_radius`: Model for cloud ice effective radius in meters (default: `ConstantRadiusParticles(30e-6)`);
   only `ConstantRadiusParticles` for now
-- `column_extension`: The atmosphere above the grid top (default: `ColumnExtension(eltype(grid))`;
+- `overlying_atmosphere`: The atmosphere above the grid top (default: `OverlyingAtmosphereColumn(eltype(grid))`;
   `nothing` solves the grid's column only, with no atmosphere above it)
 - `column_batches`: Number of batches to split the radiation solve into, trading speed for memory
   (default: `nothing`, one unbatched solve). The per-column state and scratch are then stored for
@@ -172,7 +172,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  schedule = IterationInterval(1),
                                                  liquid_effective_radius = ConstantRadiusParticles(10e-6),
                                                  ice_effective_radius = ConstantRadiusParticles(30e-6),
-                                                 column_extension = ColumnExtension(eltype(grid)),
+                                                 overlying_atmosphere = OverlyingAtmosphereColumn(eltype(grid)),
                                                  column_batches = nothing)
 
     FT = eltype(grid)
@@ -196,7 +196,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # Gas optics tables, then the extension sampled on the host (it needs the background's O₃
     # as a profile, before materialization turns it into a field on the grid)
     host_gas_model = load_gas_optics_model(FT, optics.gas_model)
-    extension = materialize_column_extension(column_extension, grid, background_atmosphere)
+    extension = materialize_overlying_atmosphere(overlying_atmosphere, grid, background_atmosphere)
     warn_source_table_range(host_gas_model, extension)
     gas_model = adapt(array_type(arch){FT}, host_gas_model)
 
@@ -266,5 +266,5 @@ function Base.show(io::IO, rtm::EcCKDRadiativeTransferModel)
     show_radiation_summary(io, rtm)
     print(io, "├── diffuse_surface_albedo: ", rtm.surface_radiation.diffuse_surface_albedo, "\n",
               "├── optics: ", optics_summary(rtm), "\n",
-              "└── column_extension: ", extension_summary(rtm.atmospheric_state.extension))
+              "└── overlying_atmosphere: ", extension_summary(rtm.atmospheric_state.extension))
 end

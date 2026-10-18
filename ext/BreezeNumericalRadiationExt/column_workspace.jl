@@ -30,9 +30,9 @@ Fields:
   reuses `transmittance` and `reflectance` for its layer transmittance and upward source.
 - `stack_albedo`, `source`: Shortwave adding-method interface scratch, `(Nb, N + 1)`
 - `extension_pressure`: Hydrostatic pressure on the extension faces, bottom-up from the grid
-  top, `(Nb, Nₑ + 1)`, or `nothing` without a column extension
+  top, `(Nb, Nₑ + 1)`, or `nothing` without an overlying atmosphere
 - `cos_zenith`: Cosine of the solar zenith angle of every column of the grid, `(Nx Ny,)`
-- `extension`: The materialized [`ColumnExtension`](@ref) above the grid top, or `nothing`
+- `extension`: The materialized [`OverlyingAtmosphereColumn`](@ref) above the grid top, or `nothing`
 - `rows`: The number of grid rows in a batch
 
 Layer and interface arrays carry separate types: Reactant's kernel arrays encode their
@@ -99,7 +99,7 @@ $(TYPEDSIGNATURES)
 Allocate a zeroed [`ColumnWorkspace`](@ref) of float type `FT` on architecture `arch` for batches
 of `rows` rows of `Nx` columns of `N` layers, and the cosine of the solar zenith angle of all `Nc`
 columns of the grid. `gas_model` decides whether there are stencils to store, `cloud` whether
-there are water paths, and `extension` (a materialized [`ColumnExtension`](@ref) or `nothing`)
+there are water paths, and `extension` (a materialized [`OverlyingAtmosphereColumn`](@ref) or `nothing`)
 whether there are extension pressures.
 """
 function ColumnWorkspace(arch, FT, Nx, rows, Nc, N, gas_model, cloud, extension)

@@ -126,7 +126,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         @test radiation isa EcCKDRadiativeTransferModel
         @test radiation.atmospheric_state isa ColumnWorkspace
-        @test radiation.atmospheric_state.extension isa ColumnExtension{FT}
+        @test radiation.atmospheric_state.extension isa OverlyingAtmosphereColumn{FT}
         @test radiation.longwave_solver isa EcCKDLongwave
         @test radiation.shortwave_solver isa EcCKDShortwave
         @test number_of_layers(radiation.atmospheric_state) == 8 + 40
@@ -145,19 +145,19 @@ previous_float_type = Oceananigans.defaults.FloatType
         @testset "show" begin
             str = sprint(show, radiation)
             @test occursin("├── optics: EcCKDOptics with 32 longwave and 32 shortwave g-points, clear sky", str)
-            @test occursin("└── column_extension: 40 layers from 3000.0 m to 65000.0 m", str)
+            @test occursin("└── overlying_atmosphere: 40 layers from 3000.0 m to 65000.0 m", str)
             @test occursin("├── diffuse_surface_albedo: ConstantField(0.1)", str)
         end
 
         # No extension: the column stops at the grid top
-        bare = RadiativeTransferModel(grid, EcCKDOptics(), constants; column_extension = nothing,
+        bare = RadiativeTransferModel(grid, EcCKDOptics(), constants; overlying_atmosphere = nothing,
                                       surface_temperature = 300, surface_albedo = 0.1)
         @test isnothing(bare.atmospheric_state.extension)
         @test number_of_layers(bare.atmospheric_state) == 8
-        @test occursin("└── column_extension: none", sprint(show, bare))
+        @test occursin("└── overlying_atmosphere: none", sprint(show, bare))
 
         # A grid that already reaches the extension top gets none either
-        tall = RadiativeTransferModel(grid, EcCKDOptics(), constants; column_extension = ColumnExtension(FT; top = 3kilometers),
+        tall = RadiativeTransferModel(grid, EcCKDOptics(), constants; overlying_atmosphere = OverlyingAtmosphereColumn(FT; top = 3kilometers),
                                       surface_temperature = 300, surface_albedo = 0.1)
         @test isnothing(tall.atmospheric_state.extension)
 
@@ -169,24 +169,24 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test eltype(radiation.longwave_solver.gas_model) == FT
 
         # A user-supplied extension is sampled in the grid's float type, whatever its own
-        # (the default `ColumnExtension()` is Float64)
+        # (the default `OverlyingAtmosphereColumn()` is Float64)
         Oceananigans.defaults.FloatType = Float64
-        default_extension = RadiativeTransferModel(grid, EcCKDOptics(), constants; column_extension = ColumnExtension(),
+        default_extension = RadiativeTransferModel(grid, EcCKDOptics(), constants; overlying_atmosphere = OverlyingAtmosphereColumn(),
                                                    surface_temperature = 300, surface_albedo = 0.1)
-        @test default_extension.atmospheric_state.extension isa ColumnExtension{FT}
+        @test default_extension.atmospheric_state.extension isa OverlyingAtmosphereColumn{FT}
         @test eltype(default_extension.atmospheric_state.extension.Δzᵃᵃᶜ) == FT
         Oceananigans.defaults.FloatType = FT
 
         # Profiles may be numbers, constant with height
         isothermal = RadiativeTransferModel(grid, EcCKDOptics(), constants;
-                                            column_extension = ColumnExtension(FT; temperature = 220, specific_humidity = 0),
+                                            overlying_atmosphere = OverlyingAtmosphereColumn(FT; temperature = 220, specific_humidity = 0),
                                             surface_temperature = 300, surface_albedo = 0.1)
         @test all(==(FT(220)), Array(isothermal.atmospheric_state.extension.T))
         @test all(iszero, Array(isothermal.atmospheric_state.extension.qᵛ))
         @test isothermal.atmospheric_state.extension.profile_temperature_at_bottom == FT(220)
     end
 
-    @testset "Column state and column extension [$(FT)]" for FT in test_float_types()
+    @testset "Column state and overlying atmosphere [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         Nz = 16
         grid = radiation_column_grid(FT, Nz, 3kilometers)
@@ -324,7 +324,7 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test ℐ_lw_up[1] ≈ ε * emission + (1 - ε) * -ℐ_lw_dn[1] atol = 0.5
 
         # Without an extension the grid top is the top of the atmosphere: no downwelling longwave
-        bare = RadiativeTransferModel(grid, EcCKDOptics(), constants; column_extension = nothing,
+        bare = RadiativeTransferModel(grid, EcCKDOptics(), constants; overlying_atmosphere = nothing,
                                       surface_temperature = 300, surface_emissivity = ε,
                                       surface_albedo = 0.1, solar_position = FixedCosineZenith(0.5))
         column_model(grid, bare)

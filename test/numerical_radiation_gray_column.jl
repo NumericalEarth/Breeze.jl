@@ -30,7 +30,7 @@ gray_gas_model(FT, κ_lw, κ_sw) = EcCKDGasOpticsModel(names = (:composite,),
 function gray_radiation(grid, κ_lw, κ_sw; surface_temperature, cos_zenith, albedo = 0.3)
     FT = eltype(grid)
     return RadiativeTransferModel(grid, EcCKDOptics(gray_gas_model(FT, κ_lw, κ_sw)), ThermodynamicConstants();
-                                  column_extension = nothing, surface_temperature, surface_emissivity = 1,
+                                  overlying_atmosphere = nothing, surface_temperature, surface_emissivity = 1,
                                   surface_albedo = albedo, solar_constant = 1361,
                                   solar_position = FixedCosineZenith(cos_zenith))
 end

@@ -85,7 +85,7 @@ export
     AllSkyOptics,
     EcCKDOptics,
     CloudScatteringTables,
-    ColumnExtension,
+    OverlyingAtmosphereColumn,
     standard_atmosphere_temperature,
 
     # Solar position specifications
