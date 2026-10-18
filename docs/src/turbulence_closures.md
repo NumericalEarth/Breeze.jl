@@ -75,15 +75,12 @@ layer every formulation gives ``ℓ = Cˢ z`` and in uniformly stratified air ev
   the ground, kilometers. The diffusivity ``Cᵘ ℓ \\sqrt{e}`` then jumps by two to five orders of
   magnitude whenever such a layer forms, mixes it away within a time step and collapses, or, when the
   layer persists, mixes the whole column.
-- [`GradientLimitedMixingLength`](@ref), the default, is the local minimum limited so that ``ℓ``
-  changes by no more than ``Cˢ`` per unit height, ``|∂_z ℓ| ≤ Cˢ``. Equivalently it is the lower
-  envelope of the penetration depths of every level and of the ground,
-  ``ℓ(z) = \\min_{z′} [ℓᵇ(z′) + Cˢ |z - z′|]``: an eddy reaches past a level only by the penetration
-  depth there. It coincides with the local minimum where only the ground and the level itself bind,
-  falls off toward the capping inversion in a mixed layer instead of growing as ``Cˢ z``, and is
-  bounded by the stratified air above and below an elevated layer. Two sweeps per column compute it
-  exactly, once per stage, with fixed loop lengths; it is the gradient-limited length of NEMO's TKE
-  scheme ([Gaspar et al. (1990)](@cite Gaspar1990)).
+- [`GradientLimitedMixingLength`](@ref), the default, separates the wall coefficient ``Cˢ``
+  from the interior envelope slope ``Cⁱ``:
+  ``ℓ(z) = \min(Cˢ z, \min_{z′ > 0}[ℓᵇ(z′) + Cⁱ |z-z′|])``.
+  Two sweeps compute the stratification envelope, then the wall cap is applied separately.
+  Its uncapped field `closure_fields.ℓˢ` is retained for center reconstruction.
+  Equal slopes recover the original gradient-limited formulation.
 - [`IntegralMixingLength`](@ref) is the parcel formulation of
   [Bougeault and Lacarrère (1989)](@cite BougeaultLacarrere1989): a parcel released at ``z`` with
   kinetic energy ``e★ = e / (2 Cˢ²)`` rises and sinks until the buoyancy deficit it accumulates,
@@ -94,12 +91,10 @@ layer every formulation gives ``ℓ = Cˢ z`` and in uniformly stratified air ev
   gradient-limited length, whose penetration depth is that of the obstacle; its cost is a walk per
   face whose length depends on the state.
 
-The penetration depth carries no coefficient of its own — the stability functions set the scale of
-every diffusivity — so ``Cˢ`` alone sets the ratio of the wall length to the penetration depth. The
-default ``Cˢ = 1.316`` is the reciprocal of Deardorff's coefficient ``0.76`` of the stratification
-length ([Deardorff (1980)](@cite Deardorff1980)), which the equivalent normalization
-``ℓ = \\min(z, 0.76 \\sqrt{e} / N)`` carries on the penetration depth instead. The mixing length is
-computed column by column, once per stage, into the closure field `closure_fields.ℓ`.
+The standalone mixing-length constructors retain the legacy coefficient `Cˢ = 1.316`;
+`GradientLimitedMixingLength(Cˢ=c)` sets `Cⁱ=c` as well. The default closure instead supplies
+the calibrated pair `Cˢ = 0.6565692899592015`, `Cⁱ = 1.5609936948461662`.
+The mixing length is stored in `closure_fields.ℓ`.
 
 ### Static stability
 
@@ -132,10 +127,10 @@ between a stratification length that shuts the mixing off and one that lets it t
 
 ### Stability functions
 
-The stability functions are either constants ([`ConstantStabilityFunctions`](@ref), the default),
-``S^u = Cᵘ``, ``S^c = Cᶜ``, ``S^e = Cᵉ``, ``S^D = Cᴰ``, or functions of the gradient Richardson
-number ([`RiDependentStabilityFunctions`](@ref)). Three consequences of the constants are worth
-stating, because they are what the constants mean:
+The default stability functions are [`RationalStabilityFunction`](@ref), described below.
+[`ConstantStabilityFunctions`](@ref) and [`PiecewiseStabilityFunction`](@ref) remain available
+explicitly; `RiDependentStabilityFunctions` is a compatibility alias for the latter.
+For constant stability functions, three useful relations are:
 
 - the turbulent Prandtl number is ``Pr = K^u / K^c = Cᵘ / Cᶜ``, and the TKE Schmidt number
   ``K^u / K^e = Cᵘ / Cᵉ``;
@@ -146,7 +141,7 @@ stating, because they are what the constants mean:
   kinetic energy grows below and decays above the gradient Richardson number
   ``Ri^\dagger = Cᵘ / (Cᶜ + Cᴰ)``.
 
-The defaults, ``Cᵘ = 0.149``, ``Cᶜ = 0.201``, ``Cᵉ = 0.298``, ``Cᴰ = 0.388``, are the
+The legacy constant coefficients, ``Cᵘ = 0.149``, ``Cᶜ = 0.201``, ``Cᵉ = 0.298``, ``Cᴰ = 0.388``, are the
 Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009) re-expressed
 for this normalization of the mixing length; they give ``κ = 0.40``, ``e / u_\star² = 4.2``,
 ``Pr = 0.74`` and ``Ri^\dagger = 0.25``. They are placeholders for calibration.
@@ -178,7 +173,7 @@ closure = TKEBasedTurbulenceClosure(; catke_parameters()...)
 closure.stability_functions
 
 # output
-RiDependentStabilityFunctions{Float64}
+PiecewiseStabilityFunction{Float64}
 ├── Ri < 0 (Cᵘ⁻, Cᶜ⁻, Cᵉ⁻, Cᴰ⁻): 0.37, 0.572, 1.447, 0.923
 ├── Ri = 0 (Cᵘ⁰, Cᶜ⁰, Cᵉ⁰, Cᴰ⁰): 0.361, 0.369, 7.863, 1.604
 ├── Ri → ∞ (Cᵘ⁺, Cᶜ⁺, Cᵉ⁺, Cᴰ⁺): 0.242, 0.098, 0.548, 0.579
@@ -197,17 +192,74 @@ to be expected. In the neutral surface layer the two coefficient sets imply
 | `RiDependentStabilityFunctions` (CATKE, ``Ri = 0``) | 0.47 | 1.3 | 0.98 | 21.8 | 0.18 |
 
 with ``κ = Cˢ (C^{u}{}^3 / C^D)^{1/4}``, ``e / u_\star² = 1 / \sqrt{C^u C^D}``, ``Pr = C^u / C^c``
-and ``Ri^\dagger = C^u / (C^c + C^D)`` evaluated at the neutral values. The atmospheric surface
-layer constrains the first three well, which is why the constants remain the default; in stable
-stratification CATKE's Prandtl number rises to ``C^{u+} / C^{c+} = 2.5``. A convective length
-scale, a surface flux of turbulent kinetic energy and a non-local flux are natural extensions.
+and ``Ri^\dagger = C^u / (C^c + C^D)`` evaluated at the neutral values. The tabulated critical-Richardson formula is for constant coefficients, not a stability threshold
+for the calibrated rational family.
+
+### Calibrated rational defaults and provenance
+
+[`RationalStabilityFunction`](@ref) uses
+``S(Ri) = C⁰ + (C^± - C⁰) x^p / (1+x^p)``, with ``x = |Ri|/Ri^±``.
+Both exponents are one. The function is continuous at neutral but generally has a kink there;
+this release does not claim validated automatic differentiation through the full model.
+
+The default coefficients are the evaluated member 324 of generation 11 of
+`P60-west-v3-T1-N800-s3-PrON` (800 members, seed 3, evaluated pseudotime
+0.1783616628408866). Its data RMS is 1.7068703929788749 and neutral
+``Pr₀ = 0.8001428358397753``. It was the lowest data loss among 374 exported
+generation-mean/data-best vectors across 19 arms available to the selection, with or without
+the neutral-Prandtl filter. This is a finite-progress training fit, **not** a converged
+optimum, a held-out validation result, or an exhaustive search of unexported checkpoints.
+The provisional-60 suite excludes the unresolved native-case-61 parity case.
+The stable transition scale and friction-velocity flux coefficient are near their prior bounds.
+
+| Function | Unstable limit | Neutral | Stable limit |
+|:--|--:|--:|--:|
+| momentum | 0.36113018152281917 | 0.15900569445804447 | 0.010956324667755535 |
+| scalars | 0.08170851244564359 | 0.19872163735761372 | 0.532550451554028 |
+| TKE | 1.9176239082347815 | 0.00731292096489522 | 0.02299192764300173 |
+| dissipation | 0.005407068485856925 | 0.029182354585815418 | 0.8022301180336915 |
+
+The scales are `Ri⁻ = 12.669701017862883` and `Ri⁺ = 0.0501147186437052`.
+The wall coefficient is derived, not independently fitted:
+``Cˢ = 0.4 (Cᴰ⁰ / Cᵘ⁰³)^{1/4} = 0.6565692899592015``.
+The independent interior slope is `Cⁱ = 1.5609936948461662`.
+
+Reproducing the calibrated setup **also requires** the surface TKE-density flux
+``ρ₀(Cᵂu★ u★³ + Cᵂʷ wΔ³)``, with
+`Cᵂu★ = 0.01002182909933591` and `Cᵂʷ = 0.013669219822302736`.
+[`tke_surface_flux`](@ref) implements this scalar calculation; the closure does not
+silently add a boundary condition. Use each case's lowest-center reference density, friction
+velocity cubed, and convective velocity cubed
+``wΔ³ = Δz₁ \max(Jᵇ, 0)``, where ``Δz₁`` is the bottom-cell thickness.
+For a constant-input example, construct the bottom condition explicitly:
+
+```jldoctest
+using Breeze, Oceananigans
+
+flux = tke_surface_flux(1.2, 0.3^3, 20 * 1e-3);
+tke_bc = FieldBoundaryConditions(bottom=FluxBoundaryCondition(flux));
+boundary_conditions = (; ρe=tke_bc);
+TKEBasedTurbulenceClosure().mixing_length.Cⁱ
+
+# output
+1.5609936948461662
+```
+
+For time-varying cases, use a discrete boundary callback that evaluates
+`tke_surface_flux` using the prescribed series at `clock.time`.
+The checkpoint SHA-256 is
+`bcb1b9c03ce5068f5deb81efc5f0617e8be74d777fd6b47f24d76e9b1f7f6140`;
+the calibration suite fingerprint is
+`b371f23d633f27207c0ada2404c7d46cb999d49c490b69e338b2960b732d7cb2`.
+No calibration drivers or checkpoint files are included in this PR.
 
 ### Numerics
 
 The diffusivities are computed at the cell interfaces where the fluxes live, from the stored mixing
 length and ``\sqrt{e}`` reconstructed from the cell centers and floored at `minimum_tke`; the
-dissipation reads the mixing length halfway between the two faces of its cell,
-``\min(ℓₖ, ℓₖ₊₁) + Cˢ Δz / 2``. The numerics of the TKE equation
+dissipation reconstructs the uncapped stratification envelope at the center using `Cⁱ`, then
+bounds it by the center's local penetration depth and wall length `Cˢ z`.
+The numerics of the TKE equation
 follow CATKE. The sinks — dissipation and the negative part of the buoyancy flux, as the rate
 ``-Lᵉ = Sᴰ \sqrt{e} / ℓ + |B⁻| / e``, and the damping of ``e`` that advection drives negative, at
 the rate ``1/τ`` — enter the vertically implicit tridiagonal solve of every time-step stage together
