@@ -2146,7 +2146,7 @@ once over `refreezing_timescale`:
 | High liquid fraction | ``F^l >`` `complete_melting_liquid_fraction` (0.99) | "complete melting" diagnostic |
 | Tiny warm ice | ``T \ge T_0`` and ``q^i + q^{wi} <`` `tiny_ice_to_rain_threshold` | tiny-warm-ice clip |
 
-The first two require `liquid_fraction_active`. When any fires, the dry mass and
+The first two require `liquid_fraction = PrognosticLiquidFraction()`. When any fires, the dry mass and
 number go to rain as complete melting, the coating is shed to rain, and every
 process that needs the clipped particle — deposition, coating exchange,
 aggregation, riming, wet growth, splintering, above-freezing collection, the
@@ -2235,7 +2235,7 @@ carried separately from the `shed_drop_mass` used by cloud and wet-growth
 shedding so the two paths stay independently tunable, but defaults to the same
 1 mm drop.
 
-Shedding is gated off entirely when `liquid_fraction_active = false`. In that
+Shedding is gated off entirely with `liquid_fraction = NoLiquidFraction()`. In that
 configuration any coating left on the state (from a restart, say) is drained to
 rain over `sink_limiting_timescale` instead, so ``q^{wi}`` cannot strand water.
 
@@ -2520,7 +2520,7 @@ G_{ρq^{cl}}
 | ``\dot{q}_\text{wsh}`` | Wet-growth excess cloud collection shed to rain (non-liquid-fraction branch). |
 
 ``\dot{q}^{cl}_\text{wet}`` and ``\dot{q}_\text{wsh}`` are mutually exclusive: exactly one of the
-two branches is active for a given `liquid_fraction_active` setting.
+two branches is active for a given `liquid_fraction` setting.
 
 #### Cloud Number Tendency
 

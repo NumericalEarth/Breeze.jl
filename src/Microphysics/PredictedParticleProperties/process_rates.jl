@@ -311,8 +311,7 @@ end
     has_total_ice = total_ice_mass(ℳ.qⁱ, qʷⁱ) >= p3.minimum_mass_mixing_ratio
     dep = ifelse(has_total_ice, vapor_rates.deposition, zero(FT))
 
-    liquid_fraction_active = p3.process_rates.liquid_fraction_active
-    wet_ice_exchange_active = has_total_ice & liquid_fraction_active
+    wet_ice_exchange_active = has_total_ice & tracks_liquid_on_ice(p3.process_rates)
     coat_cond = ifelse(wet_ice_exchange_active,
                        vapor_rates.coating_condensation, zero(FT))
     coat_evap = ifelse(wet_ice_exchange_active,
@@ -321,9 +320,9 @@ end
     melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, constants, transport, state.lookups)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
-    complete_melt = ifelse(p3.process_rates.liquid_fraction_active,
+    complete_melt = ifelse(tracks_liquid_on_ice(p3.process_rates),
                            complete_melt, complete_melt + partial_melt)
-    partial_melt = ifelse(p3.process_rates.liquid_fraction_active,
+    partial_melt = ifelse(tracks_liquid_on_ice(p3.process_rates),
                           partial_melt, zero(FT))
     melt_n = ice_melting_number_rate(ℳ.qⁱ, nⁱ, complete_melt)
 
@@ -400,8 +399,8 @@ end
     is_wet_growth = has_hydrometeors &
                     (total_collection >= qwgrth + parameters.wet_growth_excess_threshold)
 
-    liquid_fraction_wet_growth = parameters.liquid_fraction_active & is_wet_growth
-    dry_wet_growth = !parameters.liquid_fraction_active & is_wet_growth
+    liquid_fraction_wet_growth = tracks_liquid_on_ice(parameters) & is_wet_growth
+    dry_wet_growth = !tracks_liquid_on_ice(parameters) & is_wet_growth
     retained_fraction = clamp(safe_divide(qwgrth, total_collection, zero(FT)), 0, 1)
     retained_cloud = cloud_rim * retained_fraction
     retained_rain = rain_rim * retained_fraction
@@ -440,15 +439,15 @@ end
     shed = shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups)
     shed_n = shedding_number_rate(p3, shed)
     refrz = refreezing_rate_from_capacity(p3, qʷⁱ, qwgrth_raw)
-    shed = ifelse(parameters.liquid_fraction_active, shed, zero(FT))
-    shed_n = ifelse(parameters.liquid_fraction_active, shed_n, zero(FT))
-    refrz = ifelse(parameters.liquid_fraction_active, refrz, zero(FT))
+    shed = ifelse(tracks_liquid_on_ice(parameters), shed, zero(FT))
+    shed_n = ifelse(tracks_liquid_on_ice(parameters), shed_n, zero(FT))
+    refrz = ifelse(tracks_liquid_on_ice(parameters), refrz, zero(FT))
 
     # Liquid fraction clipping
     Fl_small = parameters.liquid_fraction_clipping_threshold
     τ_clip = parameters.refreezing_timescale
     qʷⁱ_eff = max(0, qʷⁱ)
-    clip_freeze = parameters.liquid_fraction_active & (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
+    clip_freeze = tracks_liquid_on_ice(parameters) & (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
     refrz = ifelse(clip_freeze, refrz + qʷⁱ_eff / τ_clip, refrz)
 
     # Whole-particle liquid-fraction and tiny-warm-ice clips. These predicates can
@@ -460,7 +459,7 @@ end
     high_liquid_fraction_clip = (Fˡ > parameters.complete_melting_liquid_fraction) & has_clip_mass
     tiny_warm_ice = (T >= T₀) & has_clip_mass &
                     (qⁱ_total_clip < parameters.tiny_ice_to_rain_threshold)
-    liquid_fraction_clipping = parameters.liquid_fraction_active &
+    liquid_fraction_clipping = tracks_liquid_on_ice(parameters) &
                                (warm_liquid_clip | high_liquid_fraction_clip)
     whole_particle_clipping = liquid_fraction_clipping | tiny_warm_ice
     complete_melt = ifelse(whole_particle_clipping, qⁱ_dry / τ_clip,
@@ -497,7 +496,7 @@ end
     # Mass transfer of collected rain into qʷⁱ only happens in the liquid-fraction
     # branch. In the non-liquid path, collection of rain above freezing does not
     # impact total rain mass, so zero out rain_warm_q in that case.
-    rain_warm_q = ifelse(parameters.liquid_fraction_active, rain_warm_q_full, zero(FT))
+    rain_warm_q = ifelse(tracks_liquid_on_ice(parameters), rain_warm_q_full, zero(FT))
 
     return P3Phase2Rates{FT}(
         agg, ni_lim,
@@ -564,7 +563,7 @@ end
     nⁱ_raw = ℳ.nⁱ
     qʷⁱ_prognostic = ℳ.qʷⁱ
     qʷⁱ = active_liquid_on_ice(p3, qʷⁱ_prognostic)
-    qʷⁱ_budget = ifelse(parameters.liquid_fraction_active, qʷⁱ, max(0, qʷⁱ_prognostic))
+    qʷⁱ_budget = ifelse(tracks_liquid_on_ice(parameters), qʷⁱ, max(0, qʷⁱ_prognostic))
 
     # The globally capped raw number is the baseline the ice-number correction
     # below relaxes towards; the bounded moments come from `p3_ice_moment_bounds`.
@@ -682,7 +681,7 @@ end
     shed = phase2.shedding
     shed_n = phase2.shedding_number
     inactive_coating_cleanup = ifelse(
-        parameters.liquid_fraction_active, zero(FT),
+        tracks_liquid_on_ice(parameters), zero(FT),
         qʷⁱ_budget / parameters.sink_limiting_timescale)
     shed = shed + inactive_coating_cleanup
     shed_n = shed_n + inactive_coating_cleanup / parameters.shed_drop_mass
@@ -780,8 +779,8 @@ end
     wg_shed       = wg_shed * f_cloud
     cond          = ifelse(cond < 0, cond * f_cloud, cond)
 
-    cloud_warm_to_ice = ifelse(parameters.liquid_fraction_active, cloud_warm_q, zero(FT))
-    cloud_warm_to_rain = ifelse(parameters.liquid_fraction_active, zero(FT), cloud_warm_q)
+    cloud_warm_to_ice = ifelse(tracks_liquid_on_ice(parameters), cloud_warm_q, zero(FT))
+    cloud_warm_to_rain = ifelse(tracks_liquid_on_ice(parameters), zero(FT), cloud_warm_q)
 
     # Sublimation number loss, taken from the unlimited `dep` before any budget
     # scales it; the loop below then scales `sublim_n` wherever it scales `dep`.
@@ -914,7 +913,7 @@ end
     total_ice_remaining = dry_ice_remaining + qwi_remaining
     liquid_fraction_remaining = safe_divide(qwi_remaining, total_ice_remaining,
                                             zero(FT))
-    post_process_clipping_active = parameters.liquid_fraction_active &
+    post_process_clipping_active = tracks_liquid_on_ice(parameters) &
                                    (total_ice_remaining >= p3.minimum_mass_mixing_ratio) &
                                    (liquid_fraction_remaining > 1 - parameters.liquid_fraction_clipping_threshold)
 
@@ -942,7 +941,7 @@ end
     melt_densification = bᶠ_safe * (parameters.pure_ice_density - rime_density_safe) *
                           ordinary_total_melting / (rime_density_safe * dry_ice_safe)
     densification_active = (rime_density_safe < parameters.pure_ice_density) &
-                           !parameters.liquid_fraction_active
+                           !tracks_liquid_on_ice(parameters)
     melt_densification = ifelse(densification_active, melt_densification, zero(FT))
     rime_volume_after_ordinary_processes = max(
         0, bᶠ + (rime_volume_gain - rime_volume_loss) * dt_safety)
@@ -995,7 +994,7 @@ end
     # the same species-budget ratio as rain_freezing_mass.
     # Project the remaining number-only sinks onto the population left afterward.
     cloud_warm_rain_number = ifelse(
-        parameters.liquid_fraction_active, zero(FT), cloud_warm_q / parameters.shed_drop_mass)
+        tracks_liquid_on_ice(parameters), zero(FT), cloud_warm_q / parameters.shed_drop_mass)
 
     # Net the self-collection/breakup pair before it enters the number budget.
     # Physically this is one signed rate: a base self-collection rate reduced by the

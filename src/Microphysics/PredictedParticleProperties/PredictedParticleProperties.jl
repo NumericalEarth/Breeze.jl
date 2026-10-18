@@ -53,6 +53,8 @@ export
     NumericalFloors,
     DiagnosticVaporExcess,
     PrognosticVaporExcess,
+    PrognosticLiquidFraction,
+    NoLiquidFraction,
 
     # Ice properties
     IceParticles,

@@ -218,7 +218,7 @@ above-freezing collection by ice.
     parameters = p3.process_rates
     number_from_autoconversion = autoconversion / rain_seed_drop_mass(p3)
     number_from_melting = melting_number
-    cloud_warm_rain_number = ifelse(parameters.liquid_fraction_active, zero(FT),
+    cloud_warm_rain_number = ifelse(tracks_liquid_on_ice(parameters), zero(FT),
                                     cloud_warm_collection / parameters.shed_drop_mass)
     number_gain = number_from_autoconversion + number_from_melting + breakup +
                   shedding_number + cloud_warm_rain_number + wet_growth_shedding_number
@@ -294,7 +294,7 @@ end
     return max(0, qʷⁱ) / qⁱ_total
 end
 
-@inline active_liquid_on_ice(p3, qʷⁱ) = ifelse(p3.process_rates.liquid_fraction_active, qʷⁱ, zero(qʷⁱ))
+@inline active_liquid_on_ice(p3, qʷⁱ) = ifelse(tracks_liquid_on_ice(p3.process_rates), qʷⁱ, zero(qʷⁱ))
 
 @inline function mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, floors)
     FT = typeof(qⁱ)

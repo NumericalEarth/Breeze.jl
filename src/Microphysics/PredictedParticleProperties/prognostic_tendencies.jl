@@ -31,7 +31,7 @@
 #####
 
 @inline liquid_fraction_routing_active(::Nothing) = true
-@inline liquid_fraction_routing_active(parameters::ProcessRate) = parameters.liquid_fraction_active
+@inline liquid_fraction_routing_active(parameters::ProcessRate) = tracks_liquid_on_ice(parameters)
 
 """
 $(TYPEDSIGNATURES)
@@ -159,7 +159,7 @@ Rain number loses from:
     #      with them for any non-default drop mass. Only in the non-liquid-fraction
     #      path; when liquid fraction is active, collected mass goes to qʷⁱ, not rain.
     # wet_growth_shedding_number → rain drops from excess wet growth
-    cloud_warm_rain_n = ifelse(parameters.liquid_fraction_active, zero(FT),
+    cloud_warm_rain_n = ifelse(tracks_liquid_on_ice(parameters), zero(FT),
                                rates.cloud_warm_collection / parameters.shed_drop_mass)
     n_gain = n_from_autoconv + n_from_melt +
              rates.rain_breakup +
@@ -354,7 +354,7 @@ preferentially, driving the remaining rime toward the configured solid-ice densi
     densification = bᶠ * (ρ_solid_ice - ρᶠ_safe) * ordinary_total_melting /
                     (ρᶠ_safe * qⁱ_safe)
     # Apply only below the solid-ice density when liquid fraction is not active.
-    apply_densification = (ρᶠ_safe < ρ_solid_ice) & !parameters.liquid_fraction_active
+    apply_densification = (ρᶠ_safe < ρ_solid_ice) & !tracks_liquid_on_ice(parameters)
     densification = ifelse(apply_densification, densification, zero(FT))
 
     return ρ * (volume_gain - volume_loss - densification)
@@ -431,12 +431,12 @@ end
     # Note: rain_warm_collection is zeroed at rate-assembly time in the non-liquid-
     # fraction branch, which transfers no rain mass to qʷⁱ, so it can safely be
     # added here unconditionally.
-    liquid_fraction_active = liquid_fraction_routing_active(parameters)
-    cloud_warm_gain = ifelse(liquid_fraction_active, rates.cloud_warm_collection, zero(typeof(ρ)))
-    rain_warm_gain = ifelse(liquid_fraction_active, rates.rain_warm_collection, zero(typeof(ρ)))
-    wet_growth_cloud_gain = ifelse(liquid_fraction_active, rates.wet_growth_cloud, zero(typeof(ρ)))
-    wet_growth_rain_gain = ifelse(liquid_fraction_active, rates.wet_growth_rain, zero(typeof(ρ)))
-    wet_growth_shedding_loss = ifelse(liquid_fraction_active, rates.wet_growth_shedding, zero(typeof(ρ)))
+    liquid_on_ice = liquid_fraction_routing_active(parameters)
+    cloud_warm_gain = ifelse(liquid_on_ice, rates.cloud_warm_collection, zero(typeof(ρ)))
+    rain_warm_gain = ifelse(liquid_on_ice, rates.rain_warm_collection, zero(typeof(ρ)))
+    wet_growth_cloud_gain = ifelse(liquid_on_ice, rates.wet_growth_cloud, zero(typeof(ρ)))
+    wet_growth_rain_gain = ifelse(liquid_on_ice, rates.wet_growth_rain, zero(typeof(ρ)))
+    wet_growth_shedding_loss = ifelse(liquid_on_ice, rates.wet_growth_shedding, zero(typeof(ρ)))
     gain = rates.partial_melting +
         cloud_warm_gain +
         rain_warm_gain +

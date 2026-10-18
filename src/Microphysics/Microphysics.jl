@@ -45,6 +45,7 @@ using .PredictedParticleProperties
 
 # Re-export key P3 types
 export PredictedParticlePropertiesMicrophysics, P3Microphysics,
-       DiagnosticVaporExcess, PrognosticVaporExcess
+       DiagnosticVaporExcess, PrognosticVaporExcess,
+       PrognosticLiquidFraction, NoLiquidFraction
 
 end # module Microphysics

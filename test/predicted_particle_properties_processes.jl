@@ -2006,7 +2006,7 @@ end
     @testset "above-freezing cloud collection separates cloud sink from shed rain source" begin
         FT = Float64
         constants = ThermodynamicConstants(FT)
-        process_rates = ProcessRate(FT; liquid_fraction_active = false)
+        process_rates = ProcessRate(FT; liquid_fraction = NoLiquidFraction())
         p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates)
 
         ρ = FT(1.0)
@@ -2050,7 +2050,7 @@ end
                                     p3.process_rates.shed_drop_mass
         @test tendency_ρnʳ(manual_rates, ρ, p3) ≈ expected_shed_drop_source
 
-        heavy_shed = ProcessRate(FT; liquid_fraction_active = false,
+        heavy_shed = ProcessRate(FT; liquid_fraction = NoLiquidFraction(),
                                  shed_drop_mass = 1 / 4.0e5)
         p3_heavy = PredictedParticlePropertiesMicrophysics(FT; process_rates = heavy_shed)
         @test tendency_ρnʳ(manual_rates, ρ, p3_heavy) ≈
@@ -2063,7 +2063,7 @@ end
         Fᶠ = FT(0)
         ρᶠ = FT(400)
         qⁱ = FT(1e-4)
-        process_rates = ProcessRate(FT; liquid_fraction_active = false)
+        process_rates = ProcessRate(FT; liquid_fraction = NoLiquidFraction())
 
         warm_rates = p3_process_rates_with(FT;
             cloud_warm_collection = FT(1e-8),

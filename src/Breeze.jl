@@ -135,6 +135,8 @@ export
     PredictedParticlePropertiesMicrophysics,
     DiagnosticVaporExcess,
     PrognosticVaporExcess,
+    PrognosticLiquidFraction,
+    NoLiquidFraction,
 
     # BoundaryConditions
     BulkDrag,

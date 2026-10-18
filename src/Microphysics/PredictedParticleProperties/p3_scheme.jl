@@ -101,6 +101,9 @@ Optional fields are allocated and advected only when enabled.
 - `vapor_excess`: [`DiagnosticVaporExcess`](@ref) (default) diagnoses the vapor excess
   over liquid from the thermodynamic state; [`PrognosticVaporExcess`](@ref) carries
   ``ρδqᵛ⁺ˡ`` as a prognostic field. Ignored when `process_rates` is supplied.
+- `liquid_fraction`: [`PrognosticLiquidFraction`](@ref) (default) tracks liquid water on
+  ice; [`NoLiquidFraction`](@ref) routes that liquid to rain. Ignored when
+  `process_rates` is supplied.
   `nothing` (default) uses `RainDrops(FT)`. Its lookup fields are materialized by
   `read_lookup_tables`; every supplied parameter is preserved.
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation.
@@ -193,10 +196,11 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  rain = nothing,
                                                  process_rates = nothing,
                                                  vapor_excess = DiagnosticVaporExcess(),
+                                                 liquid_fraction = PrognosticLiquidFraction(),
                                                  warm_rain_scheme = KhairoutdinovKogan2000())
     if isnothing(process_rates)
         process_rates = ProcessRate(FT; thermodynamic_constants,
-                                    vapor_excess)
+                                    vapor_excess, liquid_fraction)
     end
     return read_lookup_tables(lookup_tables; FT,
                               thermodynamic_constants,

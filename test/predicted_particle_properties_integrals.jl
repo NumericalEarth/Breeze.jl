@@ -277,6 +277,13 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test p3_vapor_excess.process_rates isa ProcessRate{Float64, PrognosticVaporExcess}
         @test :ρδqᵛ⁺ˡ ∈ prognostic_field_names(p3_vapor_excess)
 
+        @test p3.process_rates.liquid_fraction isa PrognosticLiquidFraction
+        @test PPP.tracks_liquid_on_ice(p3.process_rates)
+        p3_no_liquid_fraction =
+            PredictedParticlePropertiesMicrophysics(; liquid_fraction = NoLiquidFraction())
+        @test p3_no_liquid_fraction.process_rates isa ProcessRate{Float64, DiagnosticVaporExcess, NoLiquidFraction}
+        @test !PPP.tracks_liquid_on_ice(p3_no_liquid_fraction.process_rates)
+
         # Aerosol activation adds the droplet number, and `prognostic` the reservoir.
         p3_aerosol = PredictedParticlePropertiesMicrophysics(;
             aerosol = AerosolActivation(AerosolMode(Float64); prognostic = true))
