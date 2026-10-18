@@ -129,12 +129,15 @@ struct AllSkyOptics <: AbstractOptics end
 
 """
 $(TYPEDEF)
-$(TYPEDFIELDS)
 
 Cloud single-scattering tables for [`EcCKDOptics`](@ref): one table per condensed phase, each
 either a `Symbol` naming a table shipped with the ecRad data (`:mie_droplet` for spherical liquid
 droplets, `:baum_general_habit_mixture` for the Baum general-habit ice mixture) or a path to a
 netCDF file in the same format.
+
+Fields:
+- `liquid`: Liquid droplet scattering table, a `Symbol` selector or a file path
+- `ice`: Ice particle scattering table, a `Symbol` selector or a file path
 
 ```jldoctest
 julia> using Breeze
@@ -144,9 +147,7 @@ CloudScatteringTables(liquid=:mie_droplet, ice=:baum_general_habit_mixture)
 ```
 """
 struct CloudScatteringTables{L, I}
-    "Liquid droplet scattering table: a `Symbol` selector or a file path"
     liquid :: L
-    "Ice particle scattering table: a `Symbol` selector or a file path"
     ice :: I
 end
 
@@ -157,7 +158,6 @@ Base.show(io::IO, tables::CloudScatteringTables) =
 
 """
 $(TYPEDEF)
-$(TYPEDFIELDS)
 
 Full-spectrum radiation with the ecCKD correlated-*k* gas optics of
 [Hogan & Matricardi (2022)](@cite HoganMatricardi2022), solved column by column by
@@ -169,6 +169,12 @@ loaded qualified next to `using Breeze`).
 The solved column reaches beyond the top of the grid through a [`ColumnExtension`](@ref), so that
 the downwelling fluxes at the top of the domain include the emission and absorption of the
 atmosphere above it.
+
+Fields:
+- `gas_model`: Gas optics model: a `Symbol` or `String` selecting a reference ecCKD model shipped
+  with the ecRad data (`:climate_32x32`, `:climate_64x64`, ...), a `(longwave = path, shortwave = path)`
+  pair of ecCKD definition files, or a preloaded `NumericalRadiation` gas optics model
+- `clouds`: [`CloudScatteringTables`](@ref) for all-sky radiation, or `nothing` for clear sky
 
 ```jldoctest
 julia> using Breeze
@@ -185,13 +191,7 @@ EcCKDOptics
 ```
 """
 struct EcCKDOptics{M, C} <: AbstractOptics
-    """
-    Gas optics model: a `Symbol` or `String` selecting a reference ecCKD model shipped with the ecRad
-    data (`:climate_32x32`, `:climate_64x64`, ...), a `(longwave = path, shortwave = path)` pair of
-    ecCKD definition files, or a preloaded `NumericalRadiation` gas optics model
-    """
     gas_model :: M
-    "[`CloudScatteringTables`](@ref) for all-sky radiation, or `nothing` for clear sky"
     clouds :: C
 end
 
@@ -719,6 +719,10 @@ function assert_bound_surface_temperature(rtm)
     return nothing
 end
 
+# Checked once, when the radiation joins a model, rather than on every radiation update
+validate_radiation(radiation, clock) = nothing
+validate_radiation(radiation::RadiativeTransferModel, clock) = validate_solar_position_clock(radiation.solar_position, clock)
+
 #####
 ##### Boundary-face pressure
 #####
@@ -867,7 +871,6 @@ end
 
 """
 $(TYPEDEF)
-$(TYPEDFIELDS)
 
 The atmosphere above the top of the grid, as seen by a column radiation solver.
 
@@ -893,6 +896,22 @@ A radiation model materializes the extension on its grid: the materialized `Colu
 holds the extension's layers and the profiles sampled at their centers, which are `nothing` until
 then.
 
+Fields:
+- `top`: Height of the top of the extended column [m]
+- `layers`: Number of extension layers between the grid top and `top`
+- `blending_height`: Height over which the temperature anchor at the grid top decays [m]; `0` disables it
+- `temperature`: Temperature profile [K]
+- `specific_humidity`: Specific humidity profile [kg kg⁻¹]
+- `ozone_mole_fraction`: Ozone mole fraction profile [mol mol⁻¹], or `nothing` for `BackgroundAtmosphere.O₃`
+- `bottom`: Height of the bottom of the extension, the grid's top face [m]
+- `profile_temperature_at_bottom`: The `temperature` profile at `bottom` [K], from which the anchor
+  measures the grid top's departure
+- `Δzᵃᵃᶜ`: Thickness of the extension layers, bottom-up [m]
+- `zᵃᵃᶜ`: Height of the extension layers' centers [m]
+- `T`: The `temperature` profile at the layer centers, before anchoring [K]
+- `qᵛ`: The `specific_humidity` profile at the layer centers [kg kg⁻¹]
+- `O₃`: The ozone mole fraction profile at the layer centers [mol mol⁻¹]
+
 ```jldoctest
 julia> using Breeze
 
@@ -916,31 +935,18 @@ ColumnExtension{Float32}
 ```
 """
 struct ColumnExtension{FT, T, Q, O, B, V}
-    "Height of the top of the extended column [m]"
     top :: FT
-    "Number of extension layers between the grid top and `top`"
     layers :: Int
-    "Height over which the temperature anchor at the grid top decays [m]; `0` disables it"
     blending_height :: FT
-    "Temperature profile [K]: a number or a function of height"
     temperature :: T
-    "Specific humidity profile [kg kg⁻¹]: a number or a function of height"
     specific_humidity :: Q
-    "Ozone mole fraction profile [mol mol⁻¹]: a number, a function of height, or `nothing` (`BackgroundAtmosphere.O₃`)"
     ozone_mole_fraction :: O
-    "Height of the bottom of the extension, the grid's top face [m]"
     bottom :: B
-    "The `temperature` profile at `bottom` [K], from which the anchor measures the grid top's departure"
     profile_temperature_at_bottom :: B
-    "Thickness of the extension layers, bottom-up [m]"
     Δzᵃᵃᶜ :: V
-    "Height of the extension layers' centers [m]"
     zᵃᵃᶜ :: V
-    "The `temperature` profile at the layer centers, before anchoring [K]"
     T :: V
-    "The `specific_humidity` profile at the layer centers [kg kg⁻¹]"
     qᵛ :: V
-    "The ozone mole fraction profile at the layer centers [mol mol⁻¹]"
     O₃ :: V
 end
 
@@ -1000,6 +1006,13 @@ Base.show(io::IO, extension::ColumnExtension) =
           "├── temperature: ", profile_string(extension.temperature), "\n",
           "├── specific_humidity: ", profile_string(extension.specific_humidity), "\n",
           "└── ozone_mole_fraction: ", profile_string(extension.ozone_mole_fraction))
+
+# TODO: the extension's layers are a left-biased `Oceananigans.Grids.ExponentialDiscretization`,
+# whose spacings grow by `exp((right - left) / (N scale))`. But `ExponentialDiscretization` is
+# parameterized by its e-folding `scale` rather than by its first spacing, which the extension
+# fixes to the grid's top layer; it stores Float64 faces; and it is singular for uniform spacing
+# (`scale → ∞`). An Oceananigans constructor from `(N, left, right, first_spacing)` would replace
+# `geometric_stack_depth`, `geometric_stretching_ratio` and the face loop of `column_extension_faces`.
 
 # The depth spanned by `N` geometrically stretched layers of ratio `r` starting from `Δz₁`,
 # Δz₁ (1 + r + … + rᴺ⁻¹), summed term by term so that it is regular at r = 1.
