@@ -188,6 +188,10 @@ function AtmosphereModel(grid;
     particles = validate_particles(particles, grid)
 
     arch = grid.architecture
+
+    # Move microphysics lookup tables to the grid architecture before boundary conditions copy them
+    microphysics = on_architecture(arch, microphysics)
+
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     user_tracer_names = validate_tracers(tracers)
 
@@ -342,9 +346,6 @@ function AtmosphereModel(grid;
     # grid architecture; a scalar closure just gets `with_tracers`.
     closure = materialize_closure(closure, scalar_names, arch)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
-
-    # Move microphysics lookup tables to the grid architecture (CPU → GPU)
-    microphysics = on_architecture(arch, microphysics)
 
     model = AtmosphereModel(arch,
                             grid,
@@ -816,7 +817,7 @@ function Oceananigans.prognostic_fields(model::AtmosphereModel)
     moist_name = moisture_prognostic_name(model.microphysics)
     thermodynamic_fields = merge(prognostic_formulation_fields, NamedTuple{(moist_name,)}((model.moisture_density,)))
     μ_names = prognostic_field_names(model.microphysics)
-    μ_fields = NamedTuple{μ_names}(model.microphysical_fields[name] for name in μ_names)
+    μ_fields = model.microphysical_fields[μ_names]
     return merge(dynamics_fields, model.momentum, thermodynamic_fields, μ_fields, model.tracers)
 end
 

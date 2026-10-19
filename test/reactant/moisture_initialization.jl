@@ -41,7 +41,7 @@ end
     @test all(isapprox.(Array(interior(model.moisture_density)), FT(0.007); rtol=20eps(FT)))
 
     # The same compiled initializer must read the current input values at each call.
-    compiled = Reactant.@compile sync=true initialize_total_water!(model, total_water)
+    compiled = @with_stack_size Reactant.@compile sync=true initialize_total_water!(model, total_water)
     for water in FT.((0.01, 0.02))
         set!(total_water, water)
         compiled(model, total_water)
@@ -53,7 +53,7 @@ end
     # The Boolean runtime check must not prevent differentiation through initialization.
     dmodel = Enzyme.make_zero(model)
     dtotal_water = CenterField(grid)
-    compiled_gradient = Reactant.@compile raise=true raise_first=true sync=true initialization_gradient!(
+    compiled_gradient = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true initialization_gradient!(
         model, dmodel, total_water, dtotal_water)
     gradient = @with_stack_size compiled_gradient(model, dmodel, total_water, dtotal_water)
     @test all(isapprox.(Array(interior(gradient)), FT(1); rtol=50eps(FT)))

@@ -1,4 +1,4 @@
-using ..Thermodynamics: ReferenceState, ExnerReferenceState, compute_hydrostatic_reference!,
+using ..Thermodynamics: Thermodynamics, ReferenceState, ExnerReferenceState, compute_hydrostatic_reference!,
                         _compute_exner_reference!, _compute_exner_reference_3d!,
                         bottom_face_height, constant_moist_hydrostatic_pressure,
                         is_column_reference, moist_hydrostatic_pressure, dry_air_gas_constant,
@@ -136,6 +136,7 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
 
     # Recompute hydrostatic pressure and density
     compute_hydrostatic_reference!(ref, constants)
+    update_pressure_solver!(model.pressure_solver, model.dynamics)
 
     if rescale_densities
         rescale_density_weighted_fields!(model, ρᵣ_old)
@@ -244,6 +245,20 @@ function set_to_mean!(ref::ExnerReferenceState, model)
 
     # Recompute all diagnostics (T, qᵗ, u, v, w, …) consistent with the new reference.
     TimeSteppers.update_state!(model; compute_tendencies=false)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Recompute the reference state of `model`'s dynamics from the temperature `T̄` and the vapor, liquid and
+ice mass fractions `q̄ᵛ`, `q̄ˡ`, `q̄ⁱ` (`Number`s, `Function(z)`s, or `Field`s), and update the pressure
+solver to the new reference density.
+"""
+function Thermodynamics.compute_reference_state!(model::AtmosphereModel, T̄, q̄ᵛ, q̄ˡ=0, q̄ⁱ=0)
+    ref = dynamics_reference_state(model.dynamics)
+    Thermodynamics.compute_reference_state!(ref, T̄, q̄ᵛ, q̄ˡ, q̄ⁱ, model.thermodynamic_constants)
+    update_pressure_solver!(model.pressure_solver, model.dynamics)
     return nothing
 end
 
