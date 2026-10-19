@@ -399,9 +399,11 @@ radiative equilibrium and destabilizes when the spectral fluxes recompute. Not a
 for an observed or model ozone climatology.
 """
 @inline function standard_ozone_profile(z)
-    troposphere_O₃  = 3e-8 * (1 + 0.5 * z / 1e3)
-    stratosphere_O₃ = 8e-6 * exp(-((z - 25e3) / 5e3)^2)
-    χˢᵗ = 1 / (1 + exp(-(z - 15e3) / 2))
+    # In the precision of `z`: kernels evaluate the profile, and Metal has no Float64
+    FT = float(typeof(z))
+    troposphere_O₃  = FT(3e-8) * (1 + FT(0.5) * z / FT(1e3))
+    stratosphere_O₃ = FT(8e-6) * exp(-((z - FT(25e3)) / FT(5e3))^2)
+    χˢᵗ = 1 / (1 + exp(-(z - FT(15e3)) / 2))
     return troposphere_O₃ * (1 - χˢᵗ) + stratosphere_O₃ * χˢᵗ
 end
 

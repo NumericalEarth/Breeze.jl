@@ -87,11 +87,12 @@ dynamics = AnelasticDynamics(reference_state)
 # so the stratospheric ozone still absorbs sunlight before it reaches the grid.
 
 @inline function tropical_ozone(z)
-    troposphere_O₃ = 30e-9 * (1 + 0.5 * z / 10_000)
-    zˢᵗ = 25e3
-    Hˢᵗ = 5e3
-    stratosphere_O₃ = 8e-6 * exp(-((z - zˢᵗ) / Hˢᵗ)^2)
-    χˢᵗ = 1 / (1 + exp(-(z - 15e3) / 2))
+    FT = float(typeof(z))   # in the grid's precision, which the radiation kernels evaluate it in
+    troposphere_O₃ = FT(30e-9) * (1 + FT(0.5) * z / 10_000)
+    zˢᵗ = FT(25e3)
+    Hˢᵗ = FT(5e3)
+    stratosphere_O₃ = FT(8e-6) * exp(-((z - zˢᵗ) / Hˢᵗ)^2)
+    χˢᵗ = 1 / (1 + exp(-(z - FT(15e3)) / 2))
     return troposphere_O₃ * (1 - χˢᵗ) + stratosphere_O₃ * χˢᵗ
 end
 
@@ -192,8 +193,10 @@ cᵖᵈ = constants.dry_air.heat_capacity  # J/(kg·K)
     return ρ * p.cᵖᵈ * ∂T∂t
 end
 
+# The parameters take the grid's float type, as the kernels compute in it
+FT = eltype(grid)
 sponge = Forcing(stratospheric_relaxation; discrete_form=true,
-                 parameters=(; Tᵣ, ρᵣ, cᵖᵈ, τ=τ_sponge))
+                 parameters=(; Tᵣ, ρᵣ, cᵖᵈ=convert(FT, cᵖᵈ), τ=convert(FT, τ_sponge)))
 
 forcing = (; ρE=sponge)
 

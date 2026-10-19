@@ -285,7 +285,8 @@ function update_cos_zenith!(cos_zenith, sp::DiurnalSolarPosition, grid, clock)
     φ = deg2rad(sp.latitude)
     δ = deg2rad(sp.declination)
     cos_θz = sin(φ) * sin(δ) + cos(φ) * cos(δ) * cos(ω)
-    cos_zenith .= max(cos_θz, 0)
+    # Converted on the host: a Float32 device array (Metal has no Float64) takes no Float64 scalar
+    cos_zenith .= max(convert(eltype(cos_zenith), cos_θz), 0)
     return nothing
 end
 
@@ -323,7 +324,7 @@ end
 # Explicit (λ, φ): one cos(θ_z) value broadcast to every column
 function update_apparent_zenith!(cos_zenith, coordinate::Tuple, grid, datetime)
     cos_θz = cos_solar_zenith_angle(datetime, coordinate...)
-    cos_zenith .= max.(cos_θz, 0)
+    cos_zenith .= max(convert(eltype(cos_zenith), cos_θz), 0)
     return nothing
 end
 
