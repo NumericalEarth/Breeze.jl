@@ -342,13 +342,13 @@ dmodel = Enzyme.make_zero(reactant_model)
 dθ = Reactant.to_rarray(zeros(Nz))
 dqᵛ = Reactant.to_rarray(zeros(Nz))
 
-# We exclude one of Reactant's loop optimizations, `greedy_while_loop_batch_fission`.
-# Together with the loop-invariant code motion pattern `while_licm`, it inflates the
-# optimization of the differentiated time-step loop about tenfold. Excluding it more than
-# halves the compile time on a GPU and leaves the derivative unchanged.
+# We exclude one of Reactant's optimization patterns, `concat_insert_dim_elementwise`,
+# which batches concatenated elementwise operations. On the differentiated time-step loop
+# it more than triples the time spent optimizing the derivative, and excluding it leaves
+# the derivative unchanged.
 
 compile_options = Reactant.CompileOptions(raise=true, raise_first=true, sync=true,
-                                          excluded_passes=["greedy_while_loop_batch_fission"])
+                                          excluded_passes=["concat_insert_dim_elementwise"])
 
 compile_time = @elapsed compiled_gradient! = with_large_stack() do
     Reactant.@compile compile_options=compile_options liquid_water_path_gradient!(
