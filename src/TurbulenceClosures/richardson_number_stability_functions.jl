@@ -211,17 +211,10 @@ The piecewise-linear stability function of [`PiecewiseStabilityFunction`](@ref):
     return ifelse(Ri < 0, C⁻, C⁺ˢ)
 end
 
-@inline momentum_stability_function(sf::PiecewiseStabilityFunction, Ri) =
-    stability_ramp(Ri, sf.Cᵘ⁻, sf.Cᵘ⁰, sf.Cᵘ⁺, sf.Ri⁰, sf.Riᵟ)
-
-@inline tracer_stability_function(sf::PiecewiseStabilityFunction, Ri) =
-    stability_ramp(Ri, sf.Cᶜ⁻, sf.Cᶜ⁰, sf.Cᶜ⁺, sf.Ri⁰, sf.Riᵟ)
-
-@inline tke_stability_function(sf::PiecewiseStabilityFunction, Ri) =
-    stability_ramp(Ri, sf.Cᵉ⁻, sf.Cᵉ⁰, sf.Cᵉ⁺, sf.Ri⁰, sf.Riᵟ)
-
-@inline dissipation_stability_function(sf::PiecewiseStabilityFunction, Ri) =
-    stability_ramp(Ri, sf.Cᴰ⁻, sf.Cᴰ⁰, sf.Cᴰ⁺, sf.Ri⁰, sf.Riᵟ)
+@inline momentum_stability_function(sf::PiecewiseStabilityFunction, Ri) = stability_ramp(Ri, sf.Cᵘ⁻, sf.Cᵘ⁰, sf.Cᵘ⁺, sf.Ri⁰, sf.Riᵟ)
+@inline tracer_stability_function(sf::PiecewiseStabilityFunction, Ri) = stability_ramp(Ri, sf.Cᶜ⁻, sf.Cᶜ⁰, sf.Cᶜ⁺, sf.Ri⁰, sf.Riᵟ)
+@inline tke_stability_function(sf::PiecewiseStabilityFunction, Ri) = stability_ramp(Ri, sf.Cᵉ⁻, sf.Cᵉ⁰, sf.Cᵉ⁺, sf.Ri⁰, sf.Riᵟ)
+@inline dissipation_stability_function(sf::PiecewiseStabilityFunction, Ri) = stability_ramp(Ri, sf.Cᴰ⁻, sf.Cᴰ⁰, sf.Cᴰ⁺, sf.Ri⁰, sf.Riᵟ)
 
 #####
 ##### The rational family
