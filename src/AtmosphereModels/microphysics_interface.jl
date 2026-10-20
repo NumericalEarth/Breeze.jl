@@ -307,10 +307,14 @@ function compute_microphysical_tendencies!(microphysics, model)
     G_tuple = map(n -> getproperty(G, n), all_names)
     name_tuple = map(Val, all_names)
 
+    # Microphysics responds to the physical velocity of the current state, so we pass
+    # `model.velocities` rather than `transport_velocities(model)`, which is the contravariant
+    # vertical velocity on terrain-following grids and the acoustic time average under
+    # `AcousticRungeKutta3`.
     launch!(arch, grid, :xyz, _default_microphysical_tendencies_kernel!,
             G_tuple, name_tuple, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, specific_prognostic_moisture(model),
-            model.microphysical_fields, transport_velocities(model))
+            model.microphysical_fields, model.velocities)
 
     return nothing
 end
