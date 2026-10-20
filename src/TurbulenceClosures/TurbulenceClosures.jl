@@ -1,15 +1,11 @@
 module TurbulenceClosures
 
 export TKEBasedTurbulenceClosure,
-       AbstractMixingLength,
        LocalMinimumMixingLength,
        IntegralMixingLength,
        GradientLimitedMixingLength,
        ConstantStabilityFunctions,
-       PiecewiseStabilityFunction,
        RationalStabilityFunction,
-       RiDependentStabilityFunctions, # deprecated alias of PiecewiseStabilityFunction
-       catke_parameters,
        tke_surface_flux,
        DryStaticStability,
        MoistStaticStability

@@ -7,8 +7,8 @@
 #
 # 1. Three canonical dry boundary layers — stable, neutral and convective — each configured as a
 #    published intercomparison case, run with both of the closure's coefficient sets: the
-#    Mellor–Yamada constants of Nakanishi and Niino and the Richardson-number-dependent stability
-#    functions of CATKE.
+#    Mellor–Yamada constants of Nakanishi and Niino and the Richardson-number-dependent
+#    rational stability functions.
 # 2. Two cloud-topped boundary layers from the library of GCM-forced large-eddy simulations of
 #    [Shen et al. (2022)](@cite Shen2022), a stratocumulus deck off California and a trade-cumulus
 #    column over the open Pacific, driven in single-column mode by the forcing the LES saw and
@@ -34,19 +34,17 @@ using Statistics
 #
 # The closure's diffusivities are ``K = S ℓ \sqrt{e}`` with one primary mixing length ``ℓ`` and a
 # stability function ``S`` for each of momentum, scalars and TKE, plus one for the dissipation. The
-# mixing length is the envelope of the buoyancy penetration depths ``ℓᵇ = \sqrt{e} / N`` of every
-# level and of the ground, ``ℓ(z) = \min_{z′} [ℓᵇ(z′) + Cˢ |z - z′|]``, which is the wall length
-# ``Cˢ z`` in neutral air attached to the surface, the stratification length ``\sqrt{e} / N`` in
-# stably stratified air, and bounded by the stratified air around any layer that is neither. The default [`ConstantStabilityFunctions`](@ref) are the
-# Mellor–Yamada constants of Nakanishi and Niino, which put the neutral log layer at ``κ = 0.40``
-# with ``e / u_\star² = 4.2``. [`RiDependentStabilityFunctions`](@ref) are CATKE's: each function
-# takes one value in unstable air, another at neutral, and ramps to a third as the Richardson
-# number grows, so that stratification lengthens the dissipation length and raises the Prandtl
-# number. `catke_parameters()` supplies them together with CATKE's wall coefficient. Everything
-# below is run with both.
+# mixing length combines a wall cap ``Cˢ z`` with a gradient-limited envelope of the buoyancy
+# penetration depths ``ℓᵇ = \sqrt{e} / N``. Its interior slope ``Cⁱ`` bounds mixing lengths in
+# elevated mixed layers by the stratified air above and below them.
+# We compare the Nakanishi–Niino constant stability functions with the calibrated rational
+# defaults. The constant configuration uses its original wall coefficient.
 
-closures = (NN09 = TKEBasedTurbulenceClosure(),
-            CATKE = TKEBasedTurbulenceClosure(; catke_parameters()...))
+constant_closure(; kw...) = TKEBasedTurbulenceClosure(;
+    mixing_length = GradientLimitedMixingLength(Cˢ = 1.316),
+    stability_functions = ConstantStabilityFunctions(), kw...)
+
+closures = (NN09 = constant_closure(), Rational = TKEBasedTurbulenceClosure())
 
 # ## Three published cases
 #
@@ -207,30 +205,24 @@ depths = (stable = stress_depth, neutral = stress_depth, convective = inversion_
 #
 # The top row shows what the model carries forward in time; the bottom row shows what the closure
 # makes of it, in the order it is built: the mixing length, the diffusivity formed from it, and the
-# heat flux they produce. Solid lines are the Nakanishi–Niino constants, dashed lines CATKE's
-# functions, both against ``z / hᵇˡ`` with the depth of the default closure's layer. The
+# heat flux they produce. Solid lines are the Nakanishi–Niino constants, dashed lines the rational
+# functions, both against ``z / hᵇˡ`` with the depth of the constant closure's layer. The
 # diffusivity spans two orders of magnitude between the stable and convective cases, so each is
-# scaled by the default closure's maximum, which the legend records, and the heat flux by its
+# scaled by the constant closure's maximum, which the legend records, and the heat flux by its
 # value at the first interior face. The gray dashed line is the mixed-layer reference for the
 # convective case only: a flux decreasing linearly from the surface to an entrainment ratio of
 # about 0.2 at the inversion. The neutral case has no surface heat flux to normalize by, and so no
 # flux curve.
 #
-# CATKE's functions mix the stable layer less and let it grow less deep, since its Prandtl number
-# rises with the Richardson number, and they carry less turbulent kinetic energy everywhere:
-# ``e / u_\star²`` is a third of the constants' in the neutral surface layer, and the mixing length
-# is shorter by the ratio of the wall coefficients. Without CATKE's convective length scale, the
-# convective layer is mixed by the envelope of ``Cˢ z`` from below and the inversion from above.
-
 set_theme!(fontsize = 14, linewidth = 2.5)
 colors = (stable = :dodgerblue, neutral = :black, convective = :orangered)
-linestyles = (NN09 = :solid, CATKE = :dash)
+linestyles = (NN09 = :solid, Rational = :dash)
 
 function specific_tke(model)
     return Field(model.tracers.ρe / model.dynamics.reference_state.density)
 end
 
-mixing_length(model) = model.closure_fields.ℓ
+mixing_length(model) = model.closure_fields.ℓᵐ
 
 fig = Figure(size = (1100, 800))
 ax_θ = Axis(fig[1, 1]; xlabel = "θ - θ(z=0) (K)", ylabel = "z / hᵇˡ")
@@ -284,7 +276,7 @@ for name in keys(cases)
 end
 
 axislegend(ax_e, position = :rt, framevisible = false)
-axislegend(ax_ℓ, [LineElement(linestyle = :solid), LineElement(linestyle = :dash)], ["Nakanishi–Niino constants", "CATKE functions"],
+axislegend(ax_ℓ, [LineElement(linestyle = :solid), LineElement(linestyle = :dash)], ["Nakanishi–Niino constants", "Rational functions"],
            position = :rb, framevisible = false)
 
 save("single_column_tke_boundary_layer.png", fig) #src
@@ -508,16 +500,16 @@ end
 # condenses and its latent heating offsets part of the stratification.
 
 configurations = (
-    NN09 = TKEBasedTurbulenceClosure(static_stability = DryStaticStability()),
-    CATKE = TKEBasedTurbulenceClosure(; catke_parameters()..., static_stability = DryStaticStability()),
-    NN09_moist = TKEBasedTurbulenceClosure(),
-    CATKE_moist = TKEBasedTurbulenceClosure(; catke_parameters()...),
+    NN09 = constant_closure(static_stability = DryStaticStability()),
+    Rational = TKEBasedTurbulenceClosure(static_stability = DryStaticStability()),
+    NN09_moist = constant_closure(),
+    Rational_moist = TKEBasedTurbulenceClosure(),
 )
 
-configuration_colors = (NN09 = :dodgerblue, CATKE = :orangered, NN09_moist = :dodgerblue, CATKE_moist = :orangered)
-configuration_linestyles = (NN09 = :solid, CATKE = :solid, NN09_moist = :dash, CATKE_moist = :dash)
-configuration_labels = (NN09 = "Nakanishi–Niino, dry N²", CATKE = "CATKE, dry N²",
-                        NN09_moist = "Nakanishi–Niino, moist N²", CATKE_moist = "CATKE, moist N²")
+configuration_colors = (NN09 = :dodgerblue, Rational = :orangered, NN09_moist = :dodgerblue, Rational_moist = :orangered)
+configuration_linestyles = (NN09 = :solid, Rational = :solid, NN09_moist = :dash, Rational_moist = :dash)
+configuration_labels = (NN09 = "Nakanishi–Niino, dry N²", Rational = "Rational, dry N²",
+                        NN09_moist = "Nakanishi–Niino, moist N²", Rational_moist = "Rational, moist N²")
 
 # ## Two members in detail
 #
@@ -544,7 +536,7 @@ detail_les = map(les_means, details)
 # resolved shear and buoyancy production; its total dissipation cannot be reconstructed from
 # these archived terms without verifying the budget definitions and accounting for the TKE tendency.
 # Solid lines are the dry static stability, dashed the
-# moist; blue is Nakanishi–Niino, red CATKE; black is the LES. The flux and budget axes are scaled
+# moist; blue is Nakanishi–Niino, red Rational; black is the LES. The flux and budget axes are scaled
 # to the LES, and the budget is shown for the moist-``N²`` configurations; the dry ones run off the
 # axes, for reasons the figures make plain.
 
@@ -624,8 +616,7 @@ fig
 # the fluxes are smooth. With the Nakanishi–Niino constants the layer deepens to the LES inversion
 # and keeps a cloud at its top — twice the LES's liquid water, with the turbulent kinetic energy
 # peaking in the middle of the layer rather than at cloud top, where the LES's radiative cooling
-# puts it. CATKE's functions, whose Prandtl number rises with the Richardson number, stop the layer
-# a hundred meters short and leave a trace of cloud.
+# puts it. Compare the rational configuration against these profiles in the figure below.
 
 fig = detail_figure(:cumulus, detail_columns.cumulus, detail_les.cumulus)
 save("single_column_tke_cumulus.png", fig) #src
@@ -682,7 +673,7 @@ end
 
 function error_heatmaps(variable, label)
     fig = Figure(size = (1300, 620))
-    layout = (NN09 = (1, 1), CATKE = (1, 2), NN09_moist = (2, 1), CATKE_moist = (2, 2))
+    layout = (NN09 = (1, 1), Rational = (1, 2), NN09_moist = (2, 1), Rational_moist = (2, 2))
     colorrange = (0, maximum(filter(isfinite, vcat((vec(errors[name][variable]) for name in keys(configurations))...))))
     month_names = ["January", "April", "July", "October"]
     for (name, (row, col)) in pairs(layout)
@@ -707,17 +698,8 @@ fig = error_heatmaps(:qᵗ, "RMSE of qᵗ below 3 km (g kg⁻¹)")
 save("single_column_tke_ensemble_moisture.png", fig) #src
 fig
 
-# The pattern of the two columns holds along the whole transect. With the dry static stability the
-# error grows from the coasts into the tropics and the trades, where the boundary layer is deep and
-# cumulus-topped and every column caps too low and fogs beneath the cap. With the moist static
-# stability the error halves across the ensemble with either coefficient set and most of its
-# dependence on regime disappears: the stratocumulus coasts, the trades and the tropics score alike,
-# and only the deepest tropical columns in April (site 15), where the LES cloud layer reaches 3 km,
-# stand out. The Nakanishi–Niino constants beat CATKE's by a third with the moist static stability;
-# CATKE's carry less turbulent kinetic energy and stop the layers short. What remains is the bias of
-# the cumulus column — a well-mixed, fully cloudy layer where the LES has a stratified, sparsely
-# cloudy one — spread over every cumulus-topped member. Summarized across the ensemble, the median
-# errors of the four configurations are
+# The ensemble plots compare how static stability and stability functions affect each regime.
+# The median errors summarize the four configurations:
 
 for (name, closure) in pairs(configurations)
     θ_error = median(filter(isfinite, errors[name].θˡ))

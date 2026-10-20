@@ -192,7 +192,7 @@ RadiativeTransferModel
 * O'Gorman, P. A. and Schneider, T. (2008). The hydrological cycle over a wide range of climates simulated
     with an idealized GCM. Journal of Climate, 21, 3815–3832.
 """
-function RadiativeTransferModel(grid::AbstractGrid, optics, args...; kw...)
+function RadiativeTransferModel(grid::AbstractGrid, optics, constants=nothing; kw...)
     msg = "Unknown optics $(optics). Valid options are $(join(string.(subtypes(AbstractOptics)) .* "()", ", ")).\n" *
           "Make sure RRTMGP.jl is loaded (e.g., `using RRTMGP`)."
     return throw(ArgumentError(msg))

@@ -175,6 +175,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathrm{Pr}``                     | `Pr`   |                                     | Turbulent Prandtl number, ``\mathrm{Pr} = K^u/K^c = S^u/S^c``                 |
 | ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``                                      |
 | ``Cˢ, Cⁱ`` | `Cˢ`, `Cⁱ` | | Wall-length coefficient and independent interior envelope slope |
+| ``ℓᵐ`` | `ℓᵐ` | | Stored turbulence mixing length (`closure_fields.ℓᵐ`) |
 | ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before imposing the wall cap |
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
 | ``p⁻, p⁺`` | `p⁻`, `p⁺` | | Rational stability exponents, one for the calibrated defaults |

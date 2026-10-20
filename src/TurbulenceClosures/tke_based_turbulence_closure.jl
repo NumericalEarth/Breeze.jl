@@ -13,7 +13,7 @@
 ##### displacement where it is saturated; `DryStaticStability` is ∂z_b everywhere (static_stability.jl).
 #####
 ##### Three formulations of the mixing length share the wall coefficient Cˢ and are computed column by
-##### column, once per stage, into `closure_fields.ℓ`: `LocalMinimumMixingLength`, ℓ = min(Cˢ z, ℓᵇ),
+##### column, once per stage, into `closure_fields.ℓᵐ`: `LocalMinimumMixingLength`, ℓ = min(Cˢ z, ℓᵇ),
 ##### which knows only the ground and the stratification at the eddy's own level; `IntegralMixingLength`,
 ##### the parcel lengths of Bougeault & Lacarrère (1989), a walk per face; and the default
 ##### `GradientLimitedMixingLength`, with separate wall coefficient Cˢ and interior slope Cⁱ — the lower envelope of
@@ -22,8 +22,7 @@
 ##### the local minimum lets it grow to the distance to the ground.
 #####
 ##### The stability functions Sᵘ, Sᶜ, Sᵉ, Sᴰ are either constants (`ConstantStabilityFunctions`) or
-##### functions of the Richardson number: piecewise-linear in the form of CATKE
-##### (`PiecewiseStabilityFunction`) or rational (`RationalStabilityFunction`), both in
+##### rational functions of the Richardson number (`RationalStabilityFunction`), in
 ##### richardson_number_stability_functions.jl.
 #####
 ##### The tracer `ρe` is advected and vertically diffused (with Kᵉ) by the dynamical core like every
@@ -246,7 +245,7 @@ where ``Kᵘ``, ``Kᶜ`` and ``Kᵉ`` are the eddy diffusivities of momentum, sc
 kinetic energy, ``S²`` the squared vertical shear, ``N²`` the squared buoyancy frequency, ``ℓ`` the
 primary mixing length ([`AbstractMixingLength`](@ref): [`GradientLimitedMixingLength`](@ref) by default,
 [`LocalMinimumMixingLength`](@ref) or [`IntegralMixingLength`](@ref)), and ``Sᵘ, Sᶜ, Sᵉ, Sᴰ`` stability functions
-([`ConstantStabilityFunctions`](@ref), [`PiecewiseStabilityFunction`](@ref) or
+([`ConstantStabilityFunctions`](@ref) or
 [`RationalStabilityFunction`](@ref)). ``N²`` is
 diagnosed once per time-step stage at the cell
 interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default, or
@@ -337,6 +336,7 @@ first-cell thickness ``Δz₁``. Use the LES-prescribed time series when reprodu
 calibration case. The default coefficients accompany the selected provisional-60 fit
 in [`TKEBasedTurbulenceClosure`](@ref).
 
+The optional coefficients are positional arguments so this helper can be called in kernels.
 This scalar helper does not install a boundary condition. Supply its value through
 a bottom `FluxBoundaryCondition` on `ρe`, with the case's time-dependent inputs.
 
@@ -349,9 +349,9 @@ tke_surface_flux(1.0, 0.0, 0.0)
 0.0
 ```
 """
-@inline function tke_surface_flux(ρ, u★³, wΔ³;
-                                 Cᵂu★ = oftype(float(u★³), 0.01002182909933591),
-                                 Cᵂʷ = oftype(float(wΔ³), 0.013669219822302736))
+@inline function tke_surface_flux(ρ, u★³, wΔ³,
+                                  Cᵂu★ = oftype(float(u★³), 0.01002182909933591),
+                                  Cᵂʷ = oftype(float(wΔ³), 0.013669219822302736))
     return ρ * (Cᵂu★ * u★³ + Cᵂʷ * wΔ³)
 end
 
@@ -415,14 +415,14 @@ $(TYPEDEF)
 Precomputed fields for [`TKEBasedTurbulenceClosure`](@ref): the three diffusivities, the static
 stability ``N²``, the mixing length ``ℓ`` and the implicit linear coefficient. Unlike CATKE's, the
 mixing length is stored, because its nonlocal formulations are computed column by column rather than
-pointwise; `closure_fields.ℓ` is the diagnostic of ``ℓ`` from the model state.
+pointwise; `closure_fields.ℓᵐ` is the diagnostic of ``ℓ`` from the model state.
 """
 struct TKEClosureFields{K, N, L, KC, LC}
     Kᵘ :: K # eddy diffusivity for momentum, at (Center, Center, Face)
     Kᶜ :: K # eddy diffusivity for scalars, at (Center, Center, Face)
     Kᵉ :: K # eddy diffusivity for turbulent kinetic energy, at (Center, Center, Face)
     N² :: N # static stability, at (Center, Center, Face)
-    ℓ  :: N # the primary mixing length, at (Center, Center, Face)
+    ℓᵐ :: N # the primary mixing length, at (Center, Center, Face)
     ℓˢ :: N # stratification-only envelope, before the wall cap, for center reconstruction
     # The linear implicit coefficient of the TKE equation, ∂ₜe = Lᵉ e + ⋯, at (Center, Center, Center):
     # the dissipation rate, the negative part of the buoyancy flux and the damping of negative TKE.
@@ -436,7 +436,7 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.Kᶜ),
                      adapt(to, fields.Kᵉ),
                      adapt(to, fields.N²),
-                     adapt(to, fields.ℓ),
+                     adapt(to, fields.ℓᵐ),
                      adapt(to, fields.ℓˢ),
                      adapt(to, fields.Lᵉ),
                      adapt(to, fields.tupled_tracer_diffusivities),
@@ -498,7 +498,7 @@ const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:Const
 @inline dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.Cᴰ
 
 #####
-##### Computing the mixing length, column by column, into `closure_fields.ℓ`
+##### Computing the mixing length, column by column, into `closure_fields.ℓᵐ`
 #####
 
 # The stored face field as a kernel function, for the boundary-aware reconstruction `ℑbzᵃᵃᶜ`
@@ -688,7 +688,7 @@ end
     # The one diffusivity the closure forms, ℓ √e — with the stored mixing length and √e floored
     # at the minimum TKE and reconstructed from the centers to the face — which the stability
     # functions scale into Kᵘ, Kᶜ and Kᵉ.
-    ℓ = @inbounds closure_fields.ℓ[i, j, k]
+    ℓ = @inbounds closure_fields.ℓᵐ[i, j, k]
     K = ℓ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
 
     Sᵘ = momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N²)
@@ -797,7 +797,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
             closure_fields.N², grid, closure, tracers, buoyancy)
 
     launch!(arch, grid, :xy, _compute_mixing_length!,
-            closure_fields.ℓ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
+            closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
 
     launch!(arch, grid, parameters, _compute_tke_closure_fields!,
             closure_fields, grid, closure, model.velocities, tracers)

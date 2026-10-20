@@ -94,7 +94,7 @@ layer every formulation gives ``ℓ = Cˢ z`` and in uniformly stratified air ev
 The standalone mixing-length constructors retain the legacy coefficient `Cˢ = 1.316`;
 `GradientLimitedMixingLength(Cˢ=c)` sets `Cⁱ=c` as well. The default closure instead supplies
 the calibrated pair `Cˢ = 0.6565692899592015`, `Cⁱ = 1.5609936948461662`.
-The mixing length is stored in `closure_fields.ℓ`.
+The mixing length is stored in `closure_fields.ℓᵐ`.
 
 ### Static stability
 
@@ -128,8 +128,7 @@ between a stratification length that shuts the mixing off and one that lets it t
 ### Stability functions
 
 The default stability functions are [`RationalStabilityFunction`](@ref), described below.
-[`ConstantStabilityFunctions`](@ref) and [`PiecewiseStabilityFunction`](@ref) remain available
-explicitly; `RiDependentStabilityFunctions` is a compatibility alias for the latter.
+[`ConstantStabilityFunctions`](@ref) remain available explicitly.
 For constant stability functions, three useful relations are:
 
 - the turbulent Prandtl number is ``Pr = K^u / K^c = Cᵘ / Cᶜ``, and the TKE Schmidt number
@@ -145,55 +144,6 @@ The legacy constant coefficients, ``Cᵘ = 0.149``, ``Cᶜ = 0.201``, ``Cᵉ = 0
 Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009) re-expressed
 for this normalization of the mixing length; they give ``κ = 0.40``, ``e / u_\star² = 4.2``,
 ``Pr = 0.74`` and ``Ri^\dagger = 0.25``. They are placeholders for calibration.
-
-[`RiDependentStabilityFunctions`](@ref) follow CATKE ([Wagner et al. 2025](@cite Wagner25catke)):
-each of ``S^u, S^c, S^e, S^D`` is a constant ``C⁻`` in unstable stratification, its neutral value
-``C⁰`` from ``Ri = 0`` to the onset ``Ri⁰`` of the stable transition, and a linear ramp over the
-width ``Riᵟ`` to a stable asymptote ``C⁺``,
-
-```math
-S(Ri) = \begin{cases}
-C⁻ & Ri < 0 \\
-C⁰ + (C⁺ - C⁰) \, \mathrm{clamp}\left( \frac{Ri - Ri⁰}{Riᵟ}, 0, 1 \right) & Ri ≥ 0.
-\end{cases}
-```
-
-``Ri = N² / S²`` is formed at each interface from the stored ``N²`` and the vertical shear, zero
-where ``N² = 0`` and ``±∞`` where only the shear vanishes, which the ramp maps to an endpoint; the
-dissipation function forms ``Ri`` at the cell center from ``N²`` and ``S²`` reconstructed there.
-The twelve endpoints, the onset
-and the width default to CATKE's values, calibrated against ocean large-eddy simulations and frozen
-here, and CATKE's wall coefficient ``Cˢ = 1.131`` goes with them: `catke_parameters()` returns both
-as keyword arguments,
-
-```jldoctest
-using Breeze
-
-closure = TKEBasedTurbulenceClosure(; catke_parameters()...)
-closure.stability_functions
-
-# output
-PiecewiseStabilityFunction{Float64}
-├── Ri < 0 (Cᵘ⁻, Cᶜ⁻, Cᵉ⁻, Cᴰ⁻): 0.37, 0.572, 1.447, 0.923
-├── Ri = 0 (Cᵘ⁰, Cᶜ⁰, Cᵉ⁰, Cᴰ⁰): 0.361, 0.369, 7.863, 1.604
-├── Ri → ∞ (Cᵘ⁺, Cᶜ⁺, Cᵉ⁺, Cᴰ⁺): 0.242, 0.098, 0.548, 0.579
-└── stable transition: Ri⁰ = 0.254, Riᵟ = 1.02
-```
-
-Two things CATKE's calibration relied on are not part of this closure — the convective and
-entrainment length scales driven by the surface buoyancy flux, which dominate CATKE's mixing and
-lengthen its dissipation length in convecting layers, and the surface flux of turbulent kinetic
-energy — so weaker mixing and stronger dissipation in convective boundary layers than in CATKE are
-to be expected. In the neutral surface layer the two coefficient sets imply
-
-| | ``κ`` | ``e / u_\star²`` | ``Pr`` | ``K^e / K^u`` | ``Ri^\dagger`` |
-|:--|:--|:--|:--|:--|:--|
-| `ConstantStabilityFunctions` (Nakanishi–Niino) | 0.40 | 4.2 | 0.74 | 2.0 | 0.25 |
-| `RiDependentStabilityFunctions` (CATKE, ``Ri = 0``) | 0.47 | 1.3 | 0.98 | 21.8 | 0.18 |
-
-with ``κ = Cˢ (C^{u}{}^3 / C^D)^{1/4}``, ``e / u_\star² = 1 / \sqrt{C^u C^D}``, ``Pr = C^u / C^c``
-and ``Ri^\dagger = C^u / (C^c + C^D)`` evaluated at the neutral values. The tabulated critical-Richardson formula is for constant coefficients, not a stability threshold
-for the calibrated rational family.
 
 ### Calibrated rational defaults and provenance
 

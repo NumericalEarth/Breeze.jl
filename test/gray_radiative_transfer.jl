@@ -43,6 +43,7 @@ end
 
         constants = ThermodynamicConstants()
 
+        @test_throws ArgumentError RadiativeTransferModel(grid, nothing)
         @test_throws ArgumentError RadiativeTransferModel(grid, nothing, constants)
 
         @testset "Number-based surface properties" begin
