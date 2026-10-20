@@ -438,6 +438,9 @@ struct P3IceMomentBounds{FT}
     nⁱ_diagnostic :: FT
     nⁱ :: FT
     ρ_mean :: FT
+    # Number per unit ice mass at the tabulated lower λ bound (the largest admissible
+    # particles); times a mass it gives the smallest number that mass may carry.
+    nⁱ_minimum_per_mass :: FT
 end
 
 @inline function p3_ice_moments(p3::P3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
@@ -460,8 +463,9 @@ end
     FT = typeof(ρ)
     moments = p3_ice_moments(p3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
     ρ_mean = ice_mean_density(p3.ice.bulk, moments.prep)
+    nⁱ_minimum_per_mass = evaluate_at(p3.ice.lambda_limiter.large_q, moments.prep)
     return P3IceMomentBounds{FT}(moments.qⁱ_total, moments.nⁱ_diagnostic,
-                                 moments.nⁱ, ρ_mean)
+                                 moments.nⁱ, ρ_mean, nⁱ_minimum_per_mass)
 end
 
 # Write the consistent rime state back to the prognostic densities. `grid_microphysical_state`
@@ -673,6 +677,9 @@ struct P3ProcessProps{FT}
     nⁱ :: FT
     nⁱ_diagnostic :: FT
     ρ_mean :: FT
+    # Number per unit ice mass at the lower λ bound; the ice number budget keeps the
+    # population above this floor for the mass that remains.
+    nⁱ_minimum_per_mass :: FT
     Nᶜˡ :: FT
     λʳ :: FT
 end
@@ -965,9 +972,10 @@ end
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     λʳ = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     ρ_mean = ice_mean_density(p3.ice.bulk, ice.prep)
+    nⁱ_minimum_per_mass = evaluate_at(p3.ice.lambda_limiter.large_q, ice.prep)
     return P3ProcessProps{FT}(ice.qᶠ, ice.bᶠ, ice.Fᶠ, ice.Fˡ, ice.ρᶠ,
                               ice.qⁱ_total, ice.nⁱ, ice.nⁱ_diagnostic, ρ_mean,
-                              cloud.Nᶜˡ, λʳ)
+                              nⁱ_minimum_per_mass, cloud.Nᶜˡ, λʳ)
 end
 
 # Every P3 tendency from one process-rate evaluation, for callers with no grid. With no

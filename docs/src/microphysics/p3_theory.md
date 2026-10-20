@@ -2841,8 +2841,13 @@ tendency.
 
 The saturation-adjustment caps and per-species sink-limiting factors bound P3
 sinks against the donor reservoirs available over `sink_limiting_timescale`.
-Thus, for a single forward update no longer than that interval, limited P3 sinks
-alone cannot make the corresponding mass or number reservoirs negative. This is
+The number sinks of rain and ice are limited against the number the mass left after
+that interval needs for its largest admissible particles, not against the whole
+number, so a number-only sink such as self-collection or aggregation cannot push the
+mean size past the slope or λ bound within one interval either. Thus, for a single
+forward update no longer than that interval, limited P3 sinks alone cannot make the
+corresponding mass or number reservoirs negative, nor carry a population outside its
+size bounds. This is
 not an unconditional positivity guarantee for an arbitrary host timestep or RK
 stage. With a longer time step the limited sinks overshoot; a number moment is then
 clamped to zero while its mass survives, leaving rain or ice with mass but no number

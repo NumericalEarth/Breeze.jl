@@ -2478,4 +2478,67 @@ end
         @test rates_tab.rain_evaporation > 0
         @test isfinite(rates_tab.rain_evaporation)
     end
+
+    @testset "Number sinks respect the size bounds of the remaining mass" begin
+        FT = Float64
+        # A long limiter interval, so that the unlimited sinks would carry the population
+        # well past its size bound within one interval; the floor must hold for any τ.
+        τ = FT(600)
+        p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates = ProcessRate(FT; sink_limiting_timescale = τ))
+        parameters = p3.process_rates
+        constants = ThermodynamicConstants(FT)
+
+        # Rain: warm, slightly subsaturated, no cloud water or ice, so the only number-only
+        # sink is the netted self-collection / breakup pair and evaporation removes number
+        # in proportion to mass. Mean diameter 0.5 mm: self-collection dominates breakup,
+        # and over one interval the unlimited sink would remove six times the population.
+        # The limited sink may not take it below the number the remaining mass needs for
+        # drops at the slope limit.
+        ρ = FT(1)
+        qʳ = FT(5e-3)
+        λʳ = FT(2000)
+        nʳ = PPP.rain_number_from_slope(qʳ, λʳ, parameters)
+        ℳ = P3MicrophysicalState(FT(0), FT(0), qʳ, nʳ, FT(0), FT(0), FT(0), FT(0),
+                                 FT(0), FT(0), FT(0), FT(0))
+        𝒰 = LiquidIcePotentialTemperatureState(FT(300), MoistureMassFractions(FT(1.41e-2)), FT(1e5), FT(9e4))
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, PPP.p3_process_properties(p3, ρ, ℳ))
+
+        qʳ⁺ = qʳ + τ * tendency_ρqʳ(rates, ρ) / ρ
+        nʳ⁺ = nʳ + τ * tendency_ρnʳ(rates, ρ, p3) / ρ
+        self_unlimited = PPP.rain_self_collection_rate(p3, qʳ, nʳ, ρ)
+        net_unlimited = self_unlimited - PPP.rain_breakup_rate(p3, qʳ, nʳ, self_unlimited)
+        rain_floor = PPP.rain_number_from_slope(qʳ⁺, parameters.minimum_rain_slope, parameters)
+        @test net_unlimited > 0
+        @test τ * net_unlimited > nʳ - rain_floor                       # the limiter has to act
+        @test rates.rain_self_collection - rates.rain_breakup < net_unlimited
+        @test nʳ⁺ >= rain_floor * (1 - 1e-6)
+        @test PPP.unbounded_rain_slope_parameter(qʳ⁺, nʳ⁺, parameters) >= parameters.minimum_rain_slope * (1 - 1e-6)
+
+        # Ice: cold, slightly subsaturated over ice, ice only, number just above the
+        # tabulated lower λ bound, so aggregation is the number-only sink and sublimation
+        # removes number in proportion to mass.
+        ρ = FT(0.5)
+        qⁱ = FT(1e-2)
+        rime_state = PPP.consistent_rime_state(p3, qⁱ, FT(0), FT(0))
+        Fˡ = PPP.liquid_fraction_on_ice(qⁱ, FT(0), parameters.floors)
+        lower_bound(n) = PPP.p3_ice_moments(p3, ρ, qⁱ, n, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ).nⁱ
+        nⁱ = FT(1.0005) * lower_bound(lower_bound(FT(1)))
+        ℳ = P3MicrophysicalState(FT(0), FT(0), FT(0), FT(0), qⁱ, nⁱ, FT(0), FT(0),
+                                 FT(0), FT(0), FT(0), FT(0))
+        𝒰 = LiquidIcePotentialTemperatureState(FT(300), MoistureMassFractions(FT(6.2e-4)), FT(1e5), FT(5e4))
+        T = Breeze.Thermodynamics.temperature(𝒰, constants)
+        @test T < 260
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, PPP.p3_process_properties(p3, ρ, ℳ))
+
+        qⁱ⁺ = qⁱ + τ * (tendency_ρqⁱ(rates, ρ) + tendency_ρqʷⁱ(rates, ρ)) / ρ
+        nⁱ⁺ = nⁱ + τ * tendency_ρnⁱ(rates, ρ) / ρ
+        agg_unlimited = PPP.ice_aggregation_rate(p3, qⁱ, nⁱ, T, rime_state.Fᶠ, rime_state.ρᶠ, ρ)
+        ice_floor = PPP.p3_ice_moments(p3, ρ, qⁱ⁺, nⁱ⁺, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ).nⁱ
+        @test agg_unlimited > 0
+        @test τ * agg_unlimited > nⁱ - ice_floor                        # the limiter has to act
+        @test rates.aggregation < agg_unlimited
+        # The bound is evaluated at the bracket of the state before the step, so allow the
+        # bracket's own drift across the step.
+        @test nⁱ⁺ >= ice_floor * (1 - 1e-4)
+    end
 end

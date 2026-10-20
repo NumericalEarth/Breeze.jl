@@ -567,14 +567,15 @@ end
     # The two branches must agree: `properties` carries exactly what `p3_process_properties`
     # derives from the same two helpers, so the fallback goes through them too rather
     # than restating the bounded-moment recipe.
-    Fˡ, qⁱ_total, nⁱ, nⁱ_diagnostic, ρ_mean = if isnothing(properties)
+    Fˡ, qⁱ_total, nⁱ, nⁱ_diagnostic, ρ_mean, nⁱ_minimum_per_mass = if isnothing(properties)
         Fˡ_diagnosed = liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
         bounds = p3_ice_moment_bounds(p3, ρ, total_ice_mass(qⁱ, qʷⁱ), nⁱ_raw,
                                       Fᶠ, Fˡ_diagnosed, ρᶠ)
-        Fˡ_diagnosed, bounds.qⁱ_total, bounds.nⁱ, bounds.nⁱ_diagnostic, bounds.ρ_mean
+        Fˡ_diagnosed, bounds.qⁱ_total, bounds.nⁱ, bounds.nⁱ_diagnostic, bounds.ρ_mean,
+        bounds.nⁱ_minimum_per_mass
     else
         properties.Fˡ, properties.qⁱ_total, properties.nⁱ,
-        properties.nⁱ_diagnostic, properties.ρ_mean
+        properties.nⁱ_diagnostic, properties.ρ_mean, properties.nⁱ_minimum_per_mass
     end
 
     T = temperature(𝒰, constants)
@@ -934,8 +935,14 @@ end
     # to the population that remains. A pre-process whole-particle clip instead drains
     # the raw population directly.
     number_after_correction = ifelse(whole_particle_clipping, nⁱ_raw, nⁱ)
+    # The number sinks may not take the population below the number the total ice left
+    # after this interval needs at the lower λ bound (the largest admissible particles),
+    # so no number-only sink can push the mean size past that bound within one limiter
+    # interval. A whole-particle clip drains the raw population and needs no floor.
+    ice_number_floor = ifelse(whole_particle_clipping, zero(FT),
+                              nⁱ_minimum_per_mass * total_ice_remaining)
     particle_sink_capacity = max(
-        0, number_after_correction / dt_safety + ice_number_source_total)
+        0, (number_after_correction - ice_number_floor) / dt_safety + ice_number_source_total)
     melt_n = min(melt_n, particle_sink_capacity)
     particle_sink_capacity = max(0, particle_sink_capacity - melt_n)
     sublim_n = min(sublim_n, particle_sink_capacity)
@@ -988,7 +995,17 @@ end
     rain_number_source_total = autoconv / rain_seed_drop_mass(p3) + melt_n +
                                rain_br + shed_n + cloud_warm_rain_number + wg_shed_n
     rain_evap_n = safe_divide(nʳ * rain_evap, qʳ, zero(FT))
-    rain_number_available = max(0, nʳ) + rain_number_source_total * dt_safety
+    # The number sinks may not take the population below the number the rain mass left
+    # after this interval needs for drops at the slope limit, so no number-only sink can
+    # push the mean size past that limit within one limiter interval; the clamp in the
+    # negative-moisture correction is then left with transport and RK3 residue only.
+    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
+                        cloud_warm_to_rain + rain_cond
+    rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
+    rain_remaining = max(0, max(0, qʳ) +
+                         (rain_source_total - rain_sink_total) * dt_safety)
+    rain_number_floor = rain_number_from_slope(rain_remaining, parameters.minimum_rain_slope, parameters)
+    rain_number_available = max(0, nʳ - rain_number_floor) + rain_number_source_total * dt_safety
     rain_number_available_after_freezing =
         max(0, rain_number_available - rain_frz_n * dt_safety)
     rain_number_sink_total = rain_evap_n + rain_self + rain_rim_n + rain_warm_n
@@ -1010,12 +1027,6 @@ end
                        cloud_warm_q + wg_cloud + wg_shed + max(0, -cond)
     cloud_remaining = max(0, max(0, qᶜˡ) +
                           (cloud_source_total - cloud_sink_total) * dt_safety)
-
-    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
-                        cloud_warm_to_rain + rain_cond
-    rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
-    rain_remaining = max(0, max(0, qʳ) +
-                         (rain_source_total - rain_sink_total) * dt_safety)
 
     # Diagnose the post-process number reservoirs as well, so frozen liquid carries
     # the number left by collection, breakup, melting, and activation rather than the
