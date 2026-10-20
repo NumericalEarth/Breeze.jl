@@ -255,12 +255,11 @@ end
         @inbounds ρ = ρ₀[i, j, k]
         qᵛ = ρqᵛ_k / ρ
         Δz_k = Δzᶜᶜᶜ(i, j, k, grid)
-        Δz_below = Δzᶜᶜᶜ(i, j, k - 1, grid)
 
         # Mass deficit [kg/m²] to push downward (positive when qᵛ < 0)
         deficit = ifelse(qᵛ < 0, -ρqᵛ_k * Δz_k, zero(ρqᵛ_k))
-        @inbounds ρqᵛᵉ[i, j, k] += deficit / Δz_k          # -> 0 when deficit > 0
-        @inbounds ρqᵛᵉ[i, j, k - 1] -= deficit / Δz_below   # receive deficit
+        @inbounds ρqᵛᵉ[i, j, k] += deficit * Δz⁻¹ᶜᶜᶜ(i, j, k, grid)          # -> 0 when deficit > 0
+        @inbounds ρqᵛᵉ[i, j, k - 1] -= deficit * Δz⁻¹ᶜᶜᶜ(i, j, k - 1, grid)  # receive deficit
     end
 
     # If bottom level still negative, borrow from level above.
@@ -285,8 +284,8 @@ end
     available = ρqᵛ_top * Δz_top      # mass available above [kg/m²]
     dq_mass = ifelse(can_borrow, min(needed, available), zero(ρqᵛ_bot))
 
-    @inbounds ρqᵛᵉ[i, j, k_bot] += dq_mass / Δz_bot
-    @inbounds ρqᵛᵉ[i, j, k_top] -= dq_mass / Δz_top
+    @inbounds ρqᵛᵉ[i, j, k_bot] += dq_mass * Δz⁻¹ᶜᶜᶜ(i, j, k_bot, grid)
+    @inbounds ρqᵛᵉ[i, j, k_top] -= dq_mass * Δz⁻¹ᶜᶜᶜ(i, j, k_top, grid)
 end
 
 #####

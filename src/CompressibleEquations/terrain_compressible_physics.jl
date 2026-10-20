@@ -25,7 +25,7 @@ using Oceananigans: architecture
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.Fields: Field, ZeroField, interior, set!
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶜ
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶜ, Δz⁻¹ᶜᶜᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!, NormalFlowBoundaryCondition, FieldBoundaryConditions
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
@@ -914,7 +914,7 @@ terrain_surface_field(host_values, grid) =
     θ_face = (θ¹ + θ_surface) / 2
     Π¹_init = Π_surface - g * Δz / (cᵖᵐ¹ * θ_face)
     p¹_init = pˢᵗ * Π¹_init^(1 / κ¹)
-    p¹ = newton_hydrostatic_pressure(p_surface, ρ_surface, θ¹, Rᵐ¹, κ¹, Δz, pˢᵗ, g, p¹_init,
+    p¹ = newton_hydrostatic_pressure(p_surface, ρ_surface, θ¹, Rᵐ¹, κ¹, 2 * Δz⁻¹ᶜᶜᶜ(i, j, 1, grid), pˢᵗ, g, p¹_init,
                                      FixedIterations(5))
     Π¹ = (p¹ / pˢᵗ)^κ¹
     ρ¹ = p¹ / (Rᵐ¹ * θ¹ * Π¹)

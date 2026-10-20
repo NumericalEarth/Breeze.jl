@@ -38,7 +38,7 @@ using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, Center, Face, Field, set!
-using Oceananigans.Architectures: architecture
+using Oceananigans.Architectures: CPU, architecture, on_architecture
 using Oceananigans.Fields: FractionalIndices, interpolate
 using Oceananigans.Grids: Flat, topology, znode, rnode, ξnode, ηnode
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid

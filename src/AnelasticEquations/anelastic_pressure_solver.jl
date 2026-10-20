@@ -48,15 +48,15 @@ end
         ρ̄² = ℑzᵃᵃᶠ(i, j, 2, grid, ρᵣ)
         ρ̄ᴺ = ℑzᵃᵃᶠ(i, j, Nz, grid, ρᵣ)
 
-        D[i, j, 1]  = - ρ̄² / Δzᵃᵃᶠ(i, j,  2, grid) - ρ¹ * Δzᵃᵃᶜ(i, j,  1, grid) * (λx[i] + λy[j])
-        D[i, j, Nz] = - ρ̄ᴺ / Δzᵃᵃᶠ(i, j, Nz, grid) - ρᴺ * Δzᵃᵃᶜ(i, j, Nz, grid) * (λx[i] + λy[j])
+        D[i, j, 1]  = - ρ̄² * Δz⁻¹ᵃᵃᶠ(i, j,  2, grid) - ρ¹ * Δzᵃᵃᶜ(i, j,  1, grid) * (λx[i] + λy[j])
+        D[i, j, Nz] = - ρ̄ᴺ * Δz⁻¹ᵃᵃᶠ(i, j, Nz, grid) - ρᴺ * Δzᵃᵃᶜ(i, j, Nz, grid) * (λx[i] + λy[j])
 
         for k in 2:Nz-1
             ρᵏ = ρᵣ[1, 1, k]
             ρ̄⁺ = ℑzᵃᵃᶠ(i, j, k+1, grid, ρᵣ)
             ρ̄ᵏ = ℑzᵃᵃᶠ(i, j, k, grid, ρᵣ)
 
-            D[i, j, k] = - (ρ̄⁺ / Δzᵃᵃᶠ(i, j, k+1, grid) + ρ̄ᵏ / Δzᵃᵃᶠ(i, j, k, grid)) - ρᵏ * Δzᵃᵃᶜ(i, j, k, grid) * (λx[i] + λy[j])
+            D[i, j, k] = - (ρ̄⁺ * Δz⁻¹ᵃᵃᶠ(i, j, k+1, grid) + ρ̄ᵏ * Δz⁻¹ᵃᵃᶠ(i, j, k, grid)) - ρᵏ * Δzᵃᵃᶜ(i, j, k, grid) * (λx[i] + λy[j])
         end
     end
 end
@@ -73,7 +73,7 @@ end
     k = @index(Global)
     @inbounds begin
         ρ̄⁺ = ℑzᵃᵃᶠ(1, 1, k+1, grid, reference_density)
-        lower_diagonal[k] = ρ̄⁺ / Δzᵃᵃᶠ(1, 1, k+1, grid)
+        lower_diagonal[k] = ρ̄⁺ * Δz⁻¹ᵃᵃᶠ(1, 1, k+1, grid)
     end
 end
 
