@@ -483,16 +483,15 @@ end
     end
 end
 
-@testset "Default surface sampling responds to wall temperature [$FT]" for FT in test_float_types()
+@testset "Unfiltered surface sampling responds to wall temperature [$FT]" for FT in test_float_types()
     grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
     @testset "$formulation" for formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
-        fv = FilteredSurfaceVelocities(grid)
         C = FT(0.002)
         # Capture values, not the type `FT`: a captured `Type` is not isbits on Julia 1.11,
         # so the closure could not be passed to GPU kernels.
         T₀, ΔT, period = FT(290), FT(10), FT(20)
         T_wall(t) = T₀ + ΔT * sinpi(t / period)
-        heat = BulkSensibleHeatFlux(coefficient=C, surface_temperature=T_wall, filtered_velocities=fv)
+        heat = BulkSensibleHeatFlux(coefficient=C, surface_temperature=T_wall)
         model = AtmosphereModel(grid; formulation, microphysics=nothing,
                                 boundary_conditions=(ρE=FieldBoundaryConditions(bottom=heat),))
         energy_name = formulation === :StaticEnergy ? :s : :θ
@@ -513,7 +512,7 @@ end
         @test abs(evaluate_bc(model, energy_field, :bottom, 1, 1, 1)) ≤ 50eps(FT) * ρ₀ * C * abs(energy₀)
 
         # A warmer wall heats the air; a colder wall reverses the flux. Changes in
-        # wind must also reach the bulk flux when temporal filtering is disabled.
+        # wind must also reach the bulk flux.
         for (time, speed) in ((FT(10), FT(2)), (FT(30), FT(4)))
             model.clock.last_Δt = time - model.clock.time
             model.clock.time = time

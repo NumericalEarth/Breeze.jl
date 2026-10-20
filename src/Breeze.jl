@@ -50,6 +50,10 @@ export
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
+    EcCKDOptics,
+    CloudScatteringTables,
+    OverlyingAtmosphereColumn,
+    standard_atmosphere_temperature,
     AbstractSolarPosition,
     ApparentSolarPosition,
     DiurnalSolarPosition,
@@ -251,6 +255,10 @@ using .Thermodynamics
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
 
+# Solar geometry, needed by the radiation interface in AtmosphereModels
+include("CelestialMechanics/CelestialMechanics.jl")
+using .CelestialMechanics
+
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
@@ -300,9 +308,6 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
-
-include("CelestialMechanics/CelestialMechanics.jl")
-using .CelestialMechanics
 
 include("Forcings/Forcings.jl")
 using .Forcings
