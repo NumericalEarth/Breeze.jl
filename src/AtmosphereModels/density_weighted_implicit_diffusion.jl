@@ -45,7 +45,7 @@ using Oceananigans.Advection:
     implicit_advection_diagonal
 
 using Oceananigans.Grids: Center, Face, ZDirection
-using Oceananigans.Operators: Az, Azᶜᶜᶠ, volume
+using Oceananigans.Operators: Az, Azᶜᶜᶠ, V⁻¹
 using Oceananigans.Utils: SumOfArrays
 using Oceananigans.TurbulenceClosures:
     VerticallyImplicitDiffusionLowerDiagonal,
@@ -123,9 +123,9 @@ BoundaryConditions.needs_implicit_solver(a::DensityWeightedImplicitOperator) =
     ρᶠ⁺ = densityᶜᶜᶠ(i, j, k+1, grid, ρ)
     ρᶠ⁻ = densityᶜᶜᶠ(i, j, k,   grid, ρ)
     ρᶜ = densityᶜᶜᶜ(i, j, k, grid, ρ)
-    V⁻¹ = 1 / volume(i, j, k, grid, ℓx, ℓy, Center())
+    V⁻¹ᵏ = V⁻¹(i, j, k, grid, ℓx, ℓy, Center())
 
-    return Δt * V⁻¹ / ρᶜ * (Az⁺ * ρᶠ⁺ * max(wⁱ⁺, 0) - Az⁻ * ρᶠ⁻ * min(wⁱ⁻, 0))
+    return Δt * V⁻¹ᵏ / ρᶜ * (Az⁺ * ρᶠ⁺ * max(wⁱ⁺, 0) - Az⁻ * ρᶠ⁻ * min(wⁱ⁻, 0))
 end
 
 # As with the advection coefficients, `ρ` is interpolated in z only, so these are exact for

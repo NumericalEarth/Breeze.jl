@@ -331,9 +331,14 @@ All vertical spacings are derived through the same Jacobian:
 @inline Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid::TerrainFollowingGrid) =
     Oceananigans.Operators.Δrᶜᶜᶜ(i, j, k, grid) *
     σⁿ(i, j, k, grid, Center(), Center(), Center())
+
+@inline Oceananigans.Operators.Δz⁻¹ᶜᶜᶜ(i, j, k, grid::TerrainFollowingGrid) =
+    Oceananigans.Operators.Δr⁻¹ᶜᶜᶜ(i, j, k, grid) *
+    σ⁻¹ⁿ(i, j, k, grid, Center(), Center(), Center())
 ```
 
-— and analogously for every `(ℓx, ℓy, ℓz)` stagger combination.
+— and analogously for every `(ℓx, ℓy, ℓz)` stagger combination. The reciprocal reference spacings `Δr⁻¹` are
+stored with the reference coordinate, while `σ⁻¹ⁿ = 1 / σⁿ` is computed from the formulation like `σⁿ` itself.
 
 ### Slope arrays
 
@@ -591,7 +596,7 @@ reference field via per-column discrete Exner integration:
     Rᵐ¹, cᵖᵐ¹, κ¹ = moist_reference_constants(qᵛ[i, j, 1], Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
     Δz = Δzᶜᶜᶜ(i, j, 1, grid) / 2
     Π¹ = Πˢ - g * Δz / (cᵖᵐ¹ * (θ[i, j, 1] + θˢ[i, j, 1]) / 2)     # continuous initial guess
-    p¹ = newton_hydrostatic_pressure(pˢ[i, j, 1], ρˢ, θ[i, j, 1], Rᵐ¹, κ¹, Δz, pˢᵗ, g,
+    p¹ = newton_hydrostatic_pressure(pˢ[i, j, 1], ρˢ, θ[i, j, 1], Rᵐ¹, κ¹, 2 * Δz⁻¹ᶜᶜᶜ(i, j, 1, grid), pˢᵗ, g,
                                      pˢᵗ * Π¹^(1 / κ¹), FixedIterations(5))
     πᵣ[i, j, 1] = (p¹ / pˢᵗ)^κ¹
     pᵣ[i, j, 1] = p¹
