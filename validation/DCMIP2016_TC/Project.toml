@@ -7,6 +7,7 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
 [sources]
 Breeze = {path = "../.."}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "ss/stored-reciprocal-metrics"}
 
 [compat]
 CUDA = "5.9.7, 6.0"
