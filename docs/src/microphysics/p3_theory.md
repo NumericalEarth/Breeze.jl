@@ -65,9 +65,13 @@ the same bundle once per right-hand-side evaluation. Both paths funnel into
 no awareness of host Δt. This produces several deliberate, documented
 consequences:
 
-- **Hard prognostic clamps are replaced by tendency-form relaxations.** The global
-  ice-number cap, for example, becomes a relaxation sink toward ``N^i_{\max}/ρ``
-  over `sink_limiting_timescale` (default 10 s) rather than an instantaneous cap.
+- **The number bounds are clamps of the prognostic state, applied by the host.** P3
+  writes no prognostic itself, but the negative-moisture correction at the top of
+  `update_state!` clamps ``n^{cl}``, ``n^r`` and ``n^i`` into the range P3 admits for
+  the accompanying mass, the λ limits and the global cap ``N^i_{\max}/ρ``, through
+  `clamp_number_concentrations!` (see *Mass without number* below). Earlier versions
+  expressed these bounds as relaxation tendencies over `sink_limiting_timescale`;
+  those overshot under RK3 and transport and left mass without number.
 - **Per-Δt depletion rates use a fixed timescale.** Cooper nucleation and
   homogeneous freezing relax over `ice_nucleation_timescale` /
   `homogeneous_freezing_timescale` (both 10 s by default) rather than over
@@ -471,8 +475,8 @@ resolution are `tabulate_rain_from_quadrature` keywords only.
 
 ### [Complete calibration inventory](@id p3_calibration_inventory)
 
-The present runtime scheme exposes **81 scalar free parameters**: the 16 warm-phase
-coefficients above and 65 process-level coefficients below. A tuple-valued field counts
+The present runtime scheme exposes **79 scalar free parameters**: the 16 warm-phase
+coefficients above and 63 process-level coefficients below. A tuple-valued field counts
 once per scalar entry, not once per Julia field. Derived quantities count once: for
 example, ``\mathbb{C}_{\mathrm{auto},5}`` may be interpreted as a rain-seed mass or an
 equivalent seed radius, but those are not two independent parameters.
@@ -497,7 +501,6 @@ equivalent seed radius, but those are not two independent parameters.
 | Hallett–Mossop | 8 | ``\mathbb{C}_{\mathrm{HM},1:8}`` = lower/upper/peak temperatures, splintering rate, splinter mass, diameter threshold, liquid-fraction limit, and surface-temperature limit |
 | Homogeneous freezing | 2 | ``\mathbb{C}_{\mathrm{homf},1:2}`` = `homogeneous_freezing_temperature`, `homogeneous_freezing_timescale` |
 | Phase and number limits | 4 | ``\mathbb{C}_{\mathrm{phas},1:4}`` = `refreezing_timescale`, `maximum_ice_number_density`, `liquid_fraction_clipping_threshold`, `complete_melting_liquid_fraction` |
-| Number repair | 2 | ``\mathbb{C}_{\mathrm{rep},1:2}`` = `repair_rain_intercept`, `repair_minimum_ice_temperature` |
 | Ice diffusion | 2 | ``\mathbb{C}_{\mathrm{diff},1:2}`` = `calibration_factor_deposition`, `calibration_factor_sublimation` |
 
 The count deliberately excludes thermodynamic and transport properties; prescribed
@@ -556,8 +559,6 @@ acts on only one species.
 | Refreezing | ``\dot{q}_\text{refr}`` | | |
 | Melt densification | | | ``\dot{b}_\text{dens}`` |
 | Whole-particle clipping | ``\dot{q}^i_\text{clip}``, ``\dot{q}^f_\text{clip}`` | | ``\dot{b}_\text{clip}`` |
-| PSD number correction | | ``\dot{n}^{cl}_\text{corr}``, ``\dot{n}^{r}_\text{corr}``, ``\dot{n}^{i}_\text{corr}`` | |
-| Ice number cap | | ``\dot{n}_\text{cap}`` | |
 
 ### Timescales and Thresholds
 
@@ -1480,9 +1481,9 @@ the two tabulated bounds:
 | `small_q` | Upper bound on λ (prevents unrealistically small particles) | `f1pr09` |
 | `large_q` | Lower bound on λ (prevents unrealistically large particles) | `f1pr10` |
 
-Rather than clamping ``n^i`` against these bounds in place, Breeze diagnoses the
-bounded number and feeds the difference back as the ``\dot{n}^{i}_\text{corr}``
-relaxation tendency described in [Prognostic Equations](@ref p3_prognostics).
+Every read of the ice state diagnoses the bounded number from these bounds, and the
+negative-moisture correction writes the same bounded number back into the prognostic
+``ρn^i`` before every stage (see [Mass without number](@ref)).
 
 ### Tabulation
 
@@ -1764,25 +1765,15 @@ The mass rate is
 #### Global ice-number cap
 
 Independent of the post-nucleation cap ``\mathbb{C}_{\mathrm{nucl},3} = 10^5`` m⁻³
-above, Breeze enforces a per-cell global ice-number relaxation
-toward ``\mathbb{C}_{\mathrm{phas},2} =`` `maximum_ice_number_density`
-``= 2 \times 10^6`` m⁻³:
-
-```math
-\dot{n}_\text{cap} = \frac{\max(0,\;
-    n^i - \mathbb{C}_{\mathrm{phas},2}/ρ)}{τ_\text{sink}},
-```
-
-with numerical safety timescale ``τ_\text{sink} =``
-`sink_limiting_timescale` (default 10 s). It enters
-``G_{ρn^i}`` as a sink, and is the tendency-form analog of a hard clamp applied
-repeatedly during a subcycled update. The limiter is computed from the *raw*
-prognostic ``n^i``, not the locally pre-capped value the rate functions read —
-otherwise it would always be dead.
-
-Every other rate sees the capped
-``\min(n^i, \mathbb{C}_{\mathrm{phas},2}/ρ)``, so that process
-rates and terminal velocities are all evaluated at the same ice number.
+above, Breeze caps the ice number per cell at ``\mathbb{C}_{\mathrm{phas},2} =``
+`maximum_ice_number_density` ``= 2 \times 10^6`` m⁻³. Every rate and terminal velocity
+reads the capped ``\min(n^i, \mathbb{C}_{\mathrm{phas},2}/ρ)``, and the negative-moisture
+correction writes the same capped (and λ-bounded) number back into the prognostic
+``ρn^i`` before every stage (see *Mass without number*), so the prognostic and the value
+the rates see agree. The cap is a clamp, not a tendency: a relaxation sink sized to remove
+the whole excess within `sink_limiting_timescale` overshoots whenever transport or the
+RK3 stage structure removes number at the same time, which left ice mass without number
+in the homogeneous-freezing zone.
 
 #### Immersion freezing (Barklie–Gokhale)
 
@@ -2141,8 +2132,8 @@ once over `refreezing_timescale`:
 The first two require `liquid_fraction_active`. When any fires, the dry mass and
 number go to rain as complete melting, the coating is shed to rain, and every
 process that needs the clipped particle — deposition, coating exchange,
-aggregation, riming, wet growth, splintering, above-freezing collection, the
-number limiter, and both number corrections — is zeroed. Independent new-ice
+aggregation, riming, wet growth, splintering and above-freezing collection — is
+zeroed. Independent new-ice
 sources (nucleation and immersion / homogeneous freezing) survive. The rime mass
 and volume are drained through explicitly reconstructed companions
 (``\dot{q}^f_\text{clip}``, ``\dot{b}_\text{clip}`` in [Prognostic Equations](@ref p3_prognostics))
@@ -2524,15 +2515,12 @@ G_{ρn^{cl}}
 =\rho\big[\dot{n}_\text{acti}
 - \dot{n}^{cl}_\text{auto} - \tfrac{n^{cl}}{q^{cl}}\,\dot{q}_\text{accr} - \dot{n}^{cl}_\text{self}
 - \dot{n}^{cl}_\text{rime} - \dot{n}^{cl}_\text{immf} - \dot{n}^{cl}_\text{homf}
-- \dot{n}^{cl}_\text{col} + \dot{n}^{cl}_\text{corr}\big].
+- \dot{n}^{cl}_\text{col}\big].
 ```
 
 - ``\dot{n}^{cl}_\text{auto}`` is scheme-aware: KK2000 scales by the in-cloud
   ``n^{cl}/q^{cl}`` ratio.
 - ``\dot{n}^{cl}_\text{self}`` is cloud self-collection, zero for KK2000.
-- ``\dot{n}^{cl}_\text{corr}`` is the cloud-DSD ``λ``-bound number correction,
-  applied as a relaxation over `sink_limiting_timescale` rather than as an
-  instantaneous write-back.
 
 #### Rain Mass Tendency
 
@@ -2566,8 +2554,7 @@ G_{ρn^r}
 + \dot{n}_\text{shed} + \dot{n}^{cl}_\text{col}\, \big[\text{no } F^l\big]
 + \dot{n}_\text{wsh}
 - \dot{n}^{r}_\text{evap} - \dot{n}^{r}_\text{self} - \dot{n}^{r}_\text{rime}
-- \dot{n}^{r}_\text{immf} - \dot{n}^{r}_\text{homf} - \dot{n}^{r}_\text{col}
-+ \dot{n}^{r}_\text{corr}\big].
+- \dot{n}^{r}_\text{immf} - \dot{n}^{r}_\text{homf} - \dot{n}^{r}_\text{col}\big].
 ```
 
 - ``\dot{n}^{r}_\text{auto} = \dot{q}_\text{auto} / \mathbb{C}_{\mathrm{auto},5}``, with the seed-drop mass set by
@@ -2587,9 +2574,6 @@ G_{ρn^r}
 - ``\dot{n}^{r}_\text{evap}`` is the evaporation number sink the rain-number limiter budgeted
   (formed from the DSD-bounded ``n^r`` and rescaled by the same factor as the other
   rain-number sinks), not a fresh ``(n^r/q^r)\,\dot{q}^{r}_\text{evap}`` product.
-- ``\dot{n}^{r}_\text{corr}`` is the diagnosed PSD ``λ``-bound number correction
-  (the rain PSD diagnosis produces a clipped ``n^r``; Breeze adds a matching
-  relaxation tendency rather than mutating the prognostic state).
 
 #### Ice Mass Tendency
 
@@ -2616,22 +2600,16 @@ bidirectional; sublimation is its negative branch.
 G_{ρn^i}
 =\rho\big[\dot{n}_\text{nucl} + \dot{n}^{cl}_\text{immf} + \dot{n}^{r}_\text{immf} + \dot{n}^{cl}_\text{homf} + \dot{n}^{r}_\text{homf}
 + \dot{n}_\text{HM}
-- \dot{n}_\text{mlt} - \dot{n}_\text{sub} - \dot{n}_\text{agg} - \dot{n}_\text{cap}
-+ \dot{n}^{i}_\text{corr}\big].
+- \dot{n}_\text{mlt} - \dot{n}_\text{sub} - \dot{n}_\text{agg}\big].
 ```
 
 - ``\dot{n}_\text{HM}`` is the Hallett–Mossop number source.
 - ``\dot{n}_\text{sub}`` is the sublimation number sink, plus the number companion of
   liquid-coating evaporation.
 - ``\dot{n}_\text{agg}`` is the aggregation magnitude.
-- ``\dot{n}_\text{cap}`` is the soft-relaxation analog of a hard global ice-number
-  cap. When ``n^i`` exceeds ``\mathbb{C}_{\mathrm{phas},2}/ρ``, a relaxation sink over
-  `sink_limiting_timescale` is added to push it back toward the cap.
-- ``\dot{n}^{i}_\text{corr}`` is the ice ``λ``-limiter correction: ``n^i`` is bounded
-  against the tabulated mean-size limits, and Breeze adds the difference between
-  the bounded and the globally capped number as a relaxation tendency. It is
-  suppressed when a whole-particle clip fires, since that path drains the raw
-  population directly.
+- The global cap ``\mathbb{C}_{\mathrm{phas},2}/ρ`` and the tabulated mean-size limits are
+  not tendencies: the negative-moisture correction clamps the prognostic ``n^i`` into
+  their range before every stage (see *Mass without number*).
 
 The three number sinks are additionally projected onto the population that
 actually exists: melting takes priority, then sublimation, then number-only
@@ -2821,8 +2799,9 @@ Host-facing entry points:
    to `update_microphysical_auxiliaries!`, which writes the specific quantities and the
    terminal velocities.
 5. **`negative_moisture_correction`**: The repair applied at the top of `update_state!`
-   (see *Positivity* below). Its number clamp is followed by the number repair of
-   `repair_number_concentrations!` (see *Mass without number* below).
+   (see *Positivity* below). Its negative-number clamp is followed by
+   `clamp_number_concentrations!`, which projects the number fields onto P3's bounds
+   (see *Mass without number* below).
 
 The tendency-only architecture is described in
 [Architectural choice: Breeze P3 updates tendencies, instead of prognostic variables](@ref p3_overview).
@@ -2866,8 +2845,9 @@ Thus, for a single forward update no longer than that interval, limited P3 sinks
 alone cannot make the corresponding mass or number reservoirs negative. This is
 not an unconditional positivity guarantee for an arbitrary host timestep or RK
 stage. With a longer time step the limited sinks overshoot; a number moment is then
-clamped to zero while its mass survives, leaving rain or ice with mass but no number,
-so P3 warns once when ``Δt`` exceeds `sink_limiting_timescale`. The same timescale
+clamped to zero while its mass survives, leaving rain or ice with mass but no number
+until the number clamp restores it, so P3 warns once when ``Δt`` exceeds
+`sink_limiting_timescale`. The same timescale
 relaxes the coupled saturation adjustment, so raising it well beyond ``Δt`` slows
 condensation. The optional ``ρs^{v+l}`` prognostic is also excluded: subsaturation is
 legitimately negative. Breeze does not implement a post-step "return small mass
@@ -2894,9 +2874,9 @@ rates see the state. The default `SpeciesBorrowing`:
 - clamps the remaining non-water fields (number moments, rime properties,
   aerosol count). ``ρs^{v+l}`` is excluded, since subsaturation is
   legitimately negative;
-- re-diagnoses the rain and ice number wherever mass remains but the number density
-  has fallen below `minimum_number_density`, in the same pass as the clamp that can
-  leave it at zero (see *Mass without number* below).
+- clamps the rain, ice and (when prognostic) cloud number into the range P3 admits for
+  the accompanying mass, the λ limits and the global ice cap, in the same pass as the
+  clamp that can leave a number at zero (see *Mass without number* below).
 
 Passing `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())` additionally
 redistributes leftover vapor deficits within each column;
@@ -2916,30 +2896,33 @@ consistent state.
 #### Mass without number
 
 Advection, sedimentation and the process limiters can leave rain or ice with mass above
-`minimum_mass_mixing_ratio` but (almost) no number. The mean-size limiters then give that mass
-the largest admissible particles (2 mm drops, 2 cm rimed ice), which aloft, where the
-fall-speed density correction ``(ρ₀/ρ)^{0.54}`` reaches 3 to 4, fall at tens of m/s and set
-the sedimentation CFL number. Following the cleanup in the two-moment scheme of
-[Milbrandt and Yau (2005)](@cite MilbrandtYau2005), the `negative_moisture_correction` pass at
-the top of `update_state!` therefore replaces the prognostic number right after the clamp that
-can leave it at zero, before any halo fill, fall speed or process rate reads the stage,
-wherever ``q ≥`` `minimum_mass_mixing_ratio` but ``ρn < N^{min}`` (`minimum_number_density`,
-10⁻³ m⁻³), with the one-moment estimate
+`minimum_mass_mixing_ratio` but (almost) no number, or with far more number than its mass can
+carry. Every read of the state bounds such a population against its tabulated mean-size limits
+(`bounded_rain_number`, `bounded_ice_number`) and, for ice, the global cap
+``\mathbb{C}_{\mathrm{phas},2}``, but a prognostic left outside those limits keeps regenerating
+the degenerate state: where the number is missing, the largest admissible particles (2 mm
+drops, 2 cm rimed ice), which aloft, where the fall-speed density correction ``(ρ₀/ρ)^{0.54}``
+reaches 3 to 4, fall at tens of m/s; where there is too much number, a population held at the
+cap only through a relaxation that overshoots.
+
+The `negative_moisture_correction` pass at the top of `update_state!` therefore writes the
+bounded numbers back into the prognostic fields, right after the clamp that can leave a number
+at zero and before any halo fill, fall speed or process rate reads the stage: wherever
+``q ≥`` `minimum_mass_mixing_ratio`,
 
 ```math
-N^r = \left(\mathbb{C}_{\mathrm{rep},1}\right)^{3/4} \left(\frac{ρ q^r}{π ρ^w}\right)^{1/4}, \qquad
-N^i = \max\left(2 N^{min},\; \mathbb{C}_{\mathrm{nucl},5} \exp\left[\mathbb{C}_{\mathrm{nucl},6} \left(T_0 - \max(\mathbb{C}_{\mathrm{rep},2}, T)\right)\right]\right).
+n^r \leftarrow \mathrm{clamp}\big(n^r,\; n^r_{\min}(q^r),\; n^r_{\max}(q^r)\big), \qquad
+n^i \leftarrow \mathrm{clamp}\big(\min(n^i, \mathbb{C}_{\mathrm{phas},2}/ρ),\; n^i_{\min}(q^i),\; n^i_{\max}(q^i)\big),
 ```
 
-Rain follows an exponential distribution with intercept ``\mathbb{C}_{\mathrm{rep},1} = 10^7``
-m⁻⁴, and ice the [Cooper (1986)](@cite Cooper1986) number that deposition nucleation uses
-(``\mathbb{C}_{\mathrm{nucl},5} = 5`` m⁻³, ``\mathbb{C}_{\mathrm{nucl},6} = 0.304`` K⁻¹),
-evaluated no colder than ``\mathbb{C}_{\mathrm{rep},2} = 233`` K. The estimate is then bounded
-by the same slope and λ limits the size distributions use, so a trace of mass carries at most
-the number of the smallest admissible particles. Only ``ρn^r`` and ``ρn^i`` change; no water
-moves. The density and temperature the repair reads are the previous stage's, since the pass
-runs before either is refreshed; a repair bounded by the size limits tolerates that lag. The
-parameters live in [`ProcessRate`](@ref Breeze.Microphysics.PredictedParticleProperties.ProcessRate).
+with the same bounds every read applies, and likewise for a prognostic ``n^{cl}``. The clamp is
+a projection: idempotent, continuous, free of parameters beyond the existing limits and
+independent of the time step, so it cannot overshoot and needs no relaxation timescale. Only
+the number fields change; no water moves. Reference P3 adjusts its prognostic numbers the same
+way inside its own step; Breeze does it in the host pass that already repairs negative mass. A
+population with mass but no number thus receives the number of the largest admissible
+particles, as in reference P3. Aloft that mass is a trace, and the sedimentation CFL number it
+implies is a matter for the vertical advection scheme rather than for the size distribution.
 
 #### Threshold Handling
 

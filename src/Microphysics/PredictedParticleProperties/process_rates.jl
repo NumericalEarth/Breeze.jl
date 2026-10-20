@@ -98,7 +98,6 @@ end
 # implementation detail.
 struct P3Phase2Rates{FT}
     aggregation :: FT
-    ni_limit :: FT
     cloud_riming :: FT
     cloud_riming_number :: FT
     rain_riming :: FT
@@ -169,9 +168,6 @@ struct P3ProcessRates{FT}
     # Phase 2: Ice aggregation (positive magnitude)
     aggregation :: FT              # Ice number loss magnitude from self-collection [1/kg/s]
 
-    # Global ice number limiter (positive magnitude)
-    ni_limit :: FT                 # Ice number excess removal rate [1/kg/s]
-
     # Phase 2: Riming (all positive magnitudes)
     cloud_riming :: FT             # Cloud → ice via riming [kg/kg/s]
     cloud_riming_number :: FT      # Cloud number loss magnitude [1/kg/s]
@@ -230,14 +226,6 @@ struct P3ProcessRates{FT}
     # During wet growth, assume total soaking: qᶠ → qⁱ, bᶠ → qⁱ/ρ_rimeMax.
     wet_growth_densification_mass :: FT   # Rime mass source: (qⁱ - qᶠ)/τ [kg/kg/s]
     wet_growth_densification_volume :: FT # Rime volume change: (qⁱ/ρ_max - bᶠ)/τ [m³/kg/s]
-
-    # DSD number correction feedback.
-    # After lambda bounding, the DSD-consistent number may differ from the prognostic
-    # number. The correction is expressed as a relaxation rate over dt_safety rather
-    # than as an instantaneous write-back.
-    cloud_number_correction :: FT  # (nᶜˡ_bounded - nᶜˡ) / τ [1/kg/s]
-    rain_number_correction :: FT   # (nʳ_bounded - nʳ) / τ [1/kg/s]
-    ice_number_correction :: FT    # (nⁱ_lambda_bounded - nⁱ_global_bounded) / τ [1/kg/s]
 
     # G&M (2008) bounded supersaturation adjustment, also folded into
     # `condensation` so vapor and cloud tendencies include it automatically.
@@ -353,12 +341,6 @@ end
     # Aggregation
     # =========================================================================
     agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ, lookups)
-
-    # Global ice number limiter, expressed as a tendency on the *raw* prognostic
-    # ℳ.nⁱ rather than on the locally pre-capped `state.nⁱ`, which is already
-    # bounded and would make this limiter dead.
-    maximum_ice_number = parameters.maximum_ice_number_density
-    ni_lim = max(0, ℳ.nⁱ - maximum_ice_number / ρ) / parameters.sink_limiting_timescale
 
     # =========================================================================
     # Riming
@@ -500,7 +482,7 @@ end
     rain_warm_q = ifelse(parameters.liquid_fraction_active, rain_warm_q_full, zero(FT))
 
     return P3Phase2Rates{FT}(
-        agg, ni_lim,
+        agg,
         cloud_rim, cloud_rim_n, rain_rim, rain_rim_n, ρᶠ_new,
         wg_cloud, wg_rain, wg_shed, wg_shed_n, wg_densif_mass, wg_densif_vol,
         shed, shed_n, refrz, complete_melt, melt_n, whole_particle_clipping,
@@ -565,10 +547,6 @@ end
     qʷⁱ_prognostic = ℳ.qʷⁱ
     qʷⁱ = active_liquid_on_ice(p3, qʷⁱ_prognostic)
     qʷⁱ_budget = ifelse(parameters.liquid_fraction_active, qʷⁱ, max(0, qʷⁱ_prognostic))
-
-    # The globally capped raw number is the baseline the ice-number correction
-    # below relaxes towards; the bounded moments come from `p3_ice_moment_bounds`.
-    nⁱ_global = min(max(0, nⁱ_raw), parameters.maximum_ice_number_density / ρ)
 
     rain_active = qʳ > p3.minimum_mass_mixing_ratio
     qʳ_pos = max(0, qʳ)
@@ -665,7 +643,6 @@ end
 
     # Phase 2
     agg = phase2.aggregation
-    ni_lim = phase2.ni_limit
     cloud_rim = phase2.cloud_riming
     cloud_rim_n = phase2.cloud_riming_number
     rain_rim = phase2.rain_riming
@@ -706,7 +683,6 @@ end
     coat_cond = ifelse(whole_particle_clipping, zero(FT), coat_cond)
     coat_evap = ifelse(whole_particle_clipping, zero(FT), coat_evap)
     agg = ifelse(whole_particle_clipping, zero(FT), agg)
-    ni_lim = ifelse(whole_particle_clipping, zero(FT), ni_lim)
     cloud_rim = ifelse(whole_particle_clipping, zero(FT), cloud_rim)
     cloud_rim_n = ifelse(whole_particle_clipping, zero(FT), cloud_rim_n)
     rain_rim = ifelse(whole_particle_clipping, zero(FT), rain_rim)
@@ -951,14 +927,12 @@ end
     rime_volume_remaining = max(
         0, rime_volume_after_ordinary_processes - melt_densification * dt_safety)
 
-    ni_correction = ifelse(whole_particle_clipping, zero(FT),
-                           (nⁱ - nⁱ_global) / dt_safety)
     ice_number_source_total = nuc_n + cloud_frz_n + rain_frz_n + spl_n
-    # Global and DSD corrections conceptually replace the raw population with
-    # the bounded one before physical processes act. Give particle-removing
-    # melting/sublimation priority, then limit number-only aggregation to the
-    # population that remains. A pre-process whole-particle clip instead drains
-    # the raw population directly and suppresses both corrections.
+    # The negative-moisture correction clamps the prognostic number into the bounded
+    # range before every stage, so `nⁱ` is the population the processes act on. Give
+    # particle-removing melting/sublimation priority, then limit number-only aggregation
+    # to the population that remains. A pre-process whole-particle clip instead drains
+    # the raw population directly.
     number_after_correction = ifelse(whole_particle_clipping, nⁱ_raw, nⁱ)
     particle_sink_capacity = max(
         0, number_after_correction / dt_safety + ice_number_source_total)
@@ -1077,10 +1051,6 @@ end
     rain_hom_q = rain_hom_q * f_rain_hom
     rain_hom_n = rain_hom_n * f_rain_hom
 
-    # DSD number correction feedback
-    ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
-    nr_correction = (nʳ - ℳ.nʳ) / dt_safety
-
     # The supersaturation is re-diagnosed as sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T) at the end of the
     # step. That final T must come from the same conserved thermodynamic variable
     # (`ρθ` or `ρs`) that the host model advances, not from a standalone cᵖᵈ
@@ -1107,7 +1077,7 @@ end
         clipping_dry_mass, clipping_rime_mass, clipping_rime_volume,
         post_process_clipping,
         sublim_n,
-        agg, ni_lim,
+        agg,
         cloud_rim, cloud_rim_n, rain_rim, rain_rim_n, ρᶠ_new,
         shed, shed_n, refrz,
         nuc_q, nuc_n, cloud_frz_q, cloud_frz_n, rain_frz_q, rain_frz_n,
@@ -1119,7 +1089,6 @@ end
         ccn_activation_mass, ccn_activation_number, rain_cond,
         coat_cond, coat_evap,
         wg_densif_mass, wg_densif_vol,
-        ncl_correction, nr_correction, ni_correction,
         saturation_alignment_rate, supersaturation_tendency,
     )
 end

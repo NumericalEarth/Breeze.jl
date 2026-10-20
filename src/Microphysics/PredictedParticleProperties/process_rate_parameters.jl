@@ -232,17 +232,9 @@ struct ProcessRate{FT, PS}
     # and coating-water sink budgets. Must be positive.
     coupled_sink_limiting_iterations :: Int
 
-    # Global ice number limiter.
-    # Applied as a relaxation sink whenever nⁱ × ρ exceeds the maximum.
+    # Global ice number cap. The negative-moisture correction clamps the prognostic
+    # nⁱ × ρ to it, and every read of the ice state is capped the same way.
     maximum_ice_number_density :: FT         # ℂᵖʰᵃˢ₂ [1/m³]
-
-    # Number repair (Milbrandt and Yau 2005). Rain or ice with mass but a number density
-    # below `minimum_number_density` gets a one-moment number: rain from an exponential
-    # distribution with intercept `repair_rain_intercept`, ice from the Cooper (1986) number
-    # of deposition nucleation evaluated no colder than `repair_minimum_ice_temperature`.
-    minimum_number_density :: FT             # [1/m³]
-    repair_rain_intercept :: FT              # ℂʳᵉᵖ₁ [1/m⁴]
-    repair_minimum_ice_temperature :: FT     # ℂʳᵉᵖ₂ [K]
 
     # Liquid fraction clipping threshold (Milbrandt et al. 2025)
     # Fl < this: instantly freeze all qwi to rime; Fl > (1 - this): fully melt to rain.
@@ -329,7 +321,6 @@ path uses ``μ_r = 0``. None are duplicated in this rate-parameter container.
 - Nucleation: Cooper (1986)
 - Freezing: Barklie and Gokhale (1959)
 - Splintering: Hallett and Mossop (1974)
-- Number repair: Milbrandt and Yau (2005)
 
 # Example
 
@@ -513,14 +504,8 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         # Coupled donor-budget limiter
         coupled_sink_limiting_iterations::Integer = 4,
 
-        # Global ice number limiter: a relaxation sink drains nⁱ toward the
-        # configured maximum divided by ρ.
+        # Global ice number cap, applied as a clamp of the prognostic number
         maximum_ice_number_density = 2e6,  # [1/m³]
-
-        # Number repair (Milbrandt and Yau 2005)
-        minimum_number_density = 1e-3,          # [1/m³]
-        repair_rain_intercept = 1e7,            # [1/m⁴]
-        repair_minimum_ice_temperature = 233.0, # [K]
 
         # Liquid fraction clipping (Milbrandt et al. 2025)
         liquid_fraction_clipping_threshold = 0.01,
@@ -622,9 +607,6 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         FT(sink_limiting_timescale),
         Int(coupled_sink_limiting_iterations),
         FT(maximum_ice_number_density),
-        FT(minimum_number_density),
-        FT(repair_rain_intercept),
-        FT(repair_minimum_ice_temperature),
         FT(liquid_fraction_clipping_threshold),
         FT(complete_melting_liquid_fraction),
         FT(tiny_ice_to_rain_threshold),

@@ -149,18 +149,19 @@ correction_number_fields(microphysics, microphysical_fields) = ()
 """
 $(TYPEDSIGNATURES)
 
-Re-diagnose the number concentrations of populations at `i, j, k` that carry mass but
-(almost) no number, writing the repaired number densities back into `μ`.
+Clamp the number concentrations at `i, j, k` into the range the microphysics scheme
+admits for the mass they accompany, writing the clamped number densities back into `μ`.
 
-Called inside [`fix_negative_moisture!`](@ref) right after the negative-number clamp,
-so a number that an overshooting sink or a transport undershoot drove below zero is
-replaced in the same pass that clamps it. `ρ` and `T` are the total density and the
-temperature fields as `update_state!` finds them, i.e. those of the previous stage;
-a repair bounded by a scheme's own size limits tolerates that lag.
+Called inside [`fix_negative_moisture!`](@ref) right after the negative-number clamp, so
+a population that a sink overshoot or a transport undershoot left with mass but no
+number, or with more number than its smallest admissible particles allow, is projected
+back onto the scheme's own bounds in the same pass, before any halo fill, fall speed or
+process rate reads the stage. `ρ` is the total density as `update_state!` finds it, i.e.
+the previous stage's value, which `compute_total_density!` refreshes afterwards.
 
-Default: no repair. Two-moment schemes extend this method.
+Default: no clamp. Two-moment schemes extend this method with their bounds.
 """
-@inline repair_number_concentrations!(μ, i, j, k, grid, microphysics, ρ, T) = nothing
+@inline clamp_number_concentrations!(μ, i, j, k, grid, microphysics, ρ) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -183,9 +184,10 @@ The correction is mass-conserving at each level for species borrowing and
 column-integrated for vertical borrowing. No energy adjustment is needed because Breeze's thermodynamic
 prognostics are moist-conserved variables.
 
-After the clamp, [`repair_number_concentrations!`](@ref) gives every population that
-still carries mass but (almost) no number a scheme-defined one-moment number, so no
-halo fill, fall speed or process rate of the stage sees mass without number.
+After the clamp, [`clamp_number_concentrations!`](@ref) projects every number
+concentration onto the range its scheme admits for the accompanying mass, so no halo
+fill, fall speed or process rate of the stage sees mass without number or a mean size
+outside the scheme's limits.
 
 The borrowing chain is defined by [`correction_moisture_fields`](@ref), which
 microphysics schemes extend to specify their prognostic mass fields.
@@ -212,17 +214,16 @@ function fix_negative_moisture!(microphysics, model)
     number_mass_pairs = correction_number_mass_pairs(microphysics, μ)
     number_fields = correction_number_fields(microphysics, μ)
 
-    # The number repair scales with the density the number fields carry, the total density,
-    # which `compute_total_density!` refreshes only after this correction; like the
-    # temperature it is the previous stage's value here.
+    # The number clamp scales with the density the number fields carry, the total density,
+    # which `compute_total_density!` refreshes only after this correction, so it is the
+    # previous stage's value here.
     ρ = total_density(model.dynamics)
-    T = model.temperature
 
     launch!(arch, grid, :xy,
             _fix_negative_moisture_column!,
             correction,
             moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid,
-            microphysics, μ, ρ, T)
+            microphysics, μ, ρ)
 
     return nothing
 end
@@ -232,7 +233,7 @@ end
 #####
 
 @kernel function _fix_negative_moisture_column!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid,
-                                                microphysics, μ, ρ_total, temperature)
+                                                microphysics, μ, ρ_total)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -247,13 +248,12 @@ end
         zero_orphaned_numbers!(i, j, k, number_mass_pairs)
     end
 
-    # Clamp negative number concentrations to zero, then give any population left with
-    # mass but no number a scheme-defined one-moment number (a no-op by default).
+    # Clamp negative number concentrations to zero, then clamp every number into the range
+    # its scheme admits for the accompanying mass (a no-op by default).
     for k = 1:Nz
         clamp_negative_numbers!(i, j, k, number_fields)
         @inbounds ρ = ρ_total[i, j, k]
-        @inbounds T = temperature[i, j, k]
-        repair_number_concentrations!(μ, i, j, k, grid, microphysics, ρ, T)
+        clamp_number_concentrations!(μ, i, j, k, grid, microphysics, ρ)
     end
 
     # Phase 2: Vertical borrowing (no-op when the scheme does not enable it)

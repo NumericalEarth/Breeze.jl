@@ -446,9 +446,10 @@ end
         @test isfinite(shape_parameter)
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties)
-        τ = p3.process_rates.sink_limiting_timescale
-        @test rates.ice_number_correction ≈ (expected_nⁱ - nⁱ) / τ
-        @test tendency_ρnⁱ(rates, ρ) >= ρ * rates.ice_number_correction
+        # The bound reaches the prognostic through the negative-moisture correction's
+        # clamp, not through a tendency: the rates carry no number correction.
+        @test !hasproperty(rates, :ice_number_correction)
+        @test isfinite(tendency_ρnⁱ(rates, ρ))
     end
 
     @testset "Tendency functions - smoke tests" begin
@@ -486,7 +487,6 @@ end
             FT(0.0),    # sublimation_number
             # Phase 2: Aggregation (positive magnitude)
             FT(500.0),  # aggregation
-            FT(0.0),    # ni_limit (global Nⁱ cap; zero in warm-environment test)
             # Phase 2: Riming (all positive magnitudes)
             FT(1e-7),   # cloud_riming
             FT(1e4),    # cloud_riming_number (positive magnitude)
@@ -527,9 +527,6 @@ end
             FT(0.0),    # coating_evaporation
             FT(0.0),    # wet_growth_densification_mass
             FT(0.0),    # wet_growth_densification_volume
-            FT(0.0),    # cloud_number_correction
-            FT(0.0),    # rain_number_correction
-            FT(0.0),    # ice_number_correction
             FT(0.0),    # predicted_supersaturation_adjustment
             FT(0.0),    # predicted_supersaturation_tendency
         )
