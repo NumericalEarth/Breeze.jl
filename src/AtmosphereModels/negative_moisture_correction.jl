@@ -149,6 +149,22 @@ correction_number_fields(microphysics, microphysical_fields) = ()
 """
 $(TYPEDSIGNATURES)
 
+Re-diagnose the number concentrations of populations at `i, j, k` that carry mass but
+(almost) no number, writing the repaired number densities back into `μ`.
+
+Called inside [`fix_negative_moisture!`](@ref) right after the negative-number clamp,
+so a number that an overshooting sink or a transport undershoot drove below zero is
+replaced in the same pass that clamps it. `ρ` and `T` are the total density and the
+temperature fields as `update_state!` finds them, i.e. those of the previous stage;
+a repair bounded by a scheme's own size limits tolerates that lag.
+
+Default: no repair. Two-moment schemes extend this method.
+"""
+@inline repair_number_concentrations!(μ, i, j, k, grid, microphysics, ρ, T) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Fix negative moisture mixing ratios produced by the advection operator.
 
 Operates in one or two phases depending on the correction scheme:
@@ -166,6 +182,10 @@ orphaned number concentrations are zeroed and negatives are clamped after mass b
 The correction is mass-conserving at each level for species borrowing and
 column-integrated for vertical borrowing. No energy adjustment is needed because Breeze's thermodynamic
 prognostics are moist-conserved variables.
+
+After the clamp, [`repair_number_concentrations!`](@ref) gives every population that
+still carries mass but (almost) no number a scheme-defined one-moment number, so no
+halo fill, fall speed or process rate of the stage sees mass without number.
 
 The borrowing chain is defined by [`correction_moisture_fields`](@ref), which
 microphysics schemes extend to specify their prognostic mass fields.
@@ -188,13 +208,21 @@ function fix_negative_moisture!(microphysics, model)
     arch = grid.architecture
     ρ₀ = dynamics_density(model.dynamics)
     ρqᵛᵉ = model.moisture_density
-    number_mass_pairs = correction_number_mass_pairs(microphysics, model.microphysical_fields)
-    number_fields = correction_number_fields(microphysics, model.microphysical_fields)
+    μ = model.microphysical_fields
+    number_mass_pairs = correction_number_mass_pairs(microphysics, μ)
+    number_fields = correction_number_fields(microphysics, μ)
+
+    # The number repair scales with the density the number fields carry, the total density,
+    # which `compute_total_density!` refreshes only after this correction; like the
+    # temperature it is the previous stage's value here.
+    ρ = total_density(model.dynamics)
+    T = model.temperature
 
     launch!(arch, grid, :xy,
             _fix_negative_moisture_column!,
             correction,
-            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid,
+            microphysics, μ, ρ, T)
 
     return nothing
 end
@@ -203,7 +231,8 @@ end
 ##### Column-wise kernel
 #####
 
-@kernel function _fix_negative_moisture_column!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+@kernel function _fix_negative_moisture_column!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid,
+                                                microphysics, μ, ρ_total, temperature)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -218,9 +247,13 @@ end
         zero_orphaned_numbers!(i, j, k, number_mass_pairs)
     end
 
-    # Clamp negative number concentrations to zero
+    # Clamp negative number concentrations to zero, then give any population left with
+    # mass but no number a scheme-defined one-moment number (a no-op by default).
     for k = 1:Nz
         clamp_negative_numbers!(i, j, k, number_fields)
+        @inbounds ρ = ρ_total[i, j, k]
+        @inbounds T = temperature[i, j, k]
+        repair_number_concentrations!(μ, i, j, k, grid, microphysics, ρ, T)
     end
 
     # Phase 2: Vertical borrowing (no-op when the scheme does not enable it)

@@ -2817,12 +2817,12 @@ Host-facing entry points:
 3. **`moisture_fractions`**: Converts prognostic densities to mass fractions
    (liquid = cloud + rain + liquid-on-ice; ice = dry ice).
 4. **`update_microphysical_fields!`**: Refreshes diagnostic fields after a state update.
-   It first repairs mass without number (see *Mass without number* below), then builds
-   the microphysical state once per cell, clamps the rime state, and hands both
+   It builds the microphysical state once per cell, clamps the rime state, and hands both
    to `update_microphysical_auxiliaries!`, which writes the specific quantities and the
    terminal velocities.
 5. **`negative_moisture_correction`**: The repair applied at the top of `update_state!`
-   (see *Positivity* below).
+   (see *Positivity* below). Its number clamp is followed by the number repair of
+   `repair_number_concentrations!` (see *Mass without number* below).
 
 The tendency-only architecture is described in
 [Architectural choice: Breeze P3 updates tendencies, instead of prognostic variables](@ref p3_overview).
@@ -2893,13 +2893,16 @@ rates see the state. The default `SpeciesBorrowing`:
   rain when the dry ice is gone;
 - clamps the remaining non-water fields (number moments, rime properties,
   aerosol count). ``ρs^{v+l}`` is excluded, since subsaturation is
-  legitimately negative.
+  legitimately negative;
+- re-diagnoses the rain and ice number wherever mass remains but the number density
+  has fallen below `minimum_number_density`, in the same pass as the clamp that can
+  leave it at zero (see *Mass without number* below).
 
 Passing `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())` additionally
 redistributes leftover vapor deficits within each column;
-`negative_moisture_correction = nothing` disables the repair, in which case the
-process rates still clamp what they read at zero but the prognostic fields keep
-their negative mass.
+`negative_moisture_correction = nothing` disables the whole pass, number repair
+included, in which case the process rates still clamp what they read at zero but
+the prognostic fields keep their negative mass.
 
 #### Consistency
 
@@ -2917,10 +2920,11 @@ Advection, sedimentation and the process limiters can leave rain or ice with mas
 the largest admissible particles (2 mm drops, 2 cm rimed ice), which aloft, where the
 fall-speed density correction ``(ρ₀/ρ)^{0.54}`` reaches 3 to 4, fall at tens of m/s and set
 the sedimentation CFL number. Following the cleanup in the two-moment scheme of
-[Milbrandt and Yau (2005)](@cite MilbrandtYau2005), `update_microphysical_fields!` therefore
-replaces the prognostic number before the state is read wherever ``q ≥``
-`minimum_mass_mixing_ratio` but ``ρn < N^{min}`` (`minimum_number_density`, 10⁻³ m⁻³), with
-the one-moment estimate
+[Milbrandt and Yau (2005)](@cite MilbrandtYau2005), the `negative_moisture_correction` pass at
+the top of `update_state!` therefore replaces the prognostic number right after the clamp that
+can leave it at zero, before any halo fill, fall speed or process rate reads the stage,
+wherever ``q ≥`` `minimum_mass_mixing_ratio` but ``ρn < N^{min}`` (`minimum_number_density`,
+10⁻³ m⁻³), with the one-moment estimate
 
 ```math
 N^r = \left(\mathbb{C}_{\mathrm{rep},1}\right)^{3/4} \left(\frac{ρ q^r}{π ρ^w}\right)^{1/4}, \qquad
@@ -2933,7 +2937,9 @@ m⁻⁴, and ice the [Cooper (1986)](@cite Cooper1986) number that deposition nu
 evaluated no colder than ``\mathbb{C}_{\mathrm{rep},2} = 233`` K. The estimate is then bounded
 by the same slope and λ limits the size distributions use, so a trace of mass carries at most
 the number of the smallest admissible particles. Only ``ρn^r`` and ``ρn^i`` change; no water
-moves. The parameters live in [`ProcessRate`](@ref Breeze.Microphysics.PredictedParticleProperties.ProcessRate).
+moves. The density and temperature the repair reads are the previous stage's, since the pass
+runs before either is refreshed; a repair bounded by the size limits tolerates that lag. The
+parameters live in [`ProcessRate`](@ref Breeze.Microphysics.PredictedParticleProperties.ProcessRate).
 
 #### Threshold Handling
 

@@ -27,7 +27,7 @@ const PPP = PredictedParticleProperties
         dynamics = AnelasticDynamics(reference_state)
         p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates)
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants, microphysics = p3)
-        # `set!` ends with `update_state!`, which applies the repair.
+        # `set!` ends with `update_state!`, whose negative-moisture correction applies the repair.
         set!(model; θ = 285, qᵛ = 1e-3,
              qʳ = (x, y, z) -> is_trace(z) ? trace_mass : 1e-3,
              nʳ = (x, y, z) -> is_trace(z) ? 0 : 1e5,
@@ -101,5 +101,16 @@ const PPP = PredictedParticleProperties
             @test maximum(abs, column(repaired, name)[trace]) < 0.1
             @test maximum(abs, column(unrepaired, name)[trace]) > 0.5
         end
+    end
+
+    @testset "The repair is part of the negative-moisture correction" begin
+        # Wipe every rain and ice number, then run only the correction pass: all four cells
+        # come back with a number before any auxiliary field is refreshed.
+        μ = repaired.microphysical_fields
+        set!(μ.ρnʳ, 0)
+        set!(μ.ρnⁱ, 0)
+        Breeze.AtmosphereModels.fix_negative_moisture!(repaired)
+        @test all(column(repaired, :ρnʳ) .>= repaired.microphysics.process_rates.minimum_number_density)
+        @test all(column(repaired, :ρnⁱ) .> 0)
     end
 end
