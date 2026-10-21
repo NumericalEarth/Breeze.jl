@@ -19,7 +19,7 @@ AtmosphereModels.initialize_model_thermodynamics!(::KinematicModel) = nothing
 ##### Velocity and momentum: no-ops (no momentum, velocities may be FunctionFields)
 #####
 
-AtmosphereModels.compute_velocities!(::KinematicModel) = nothing
+AtmosphereModels.compute_velocities!(::KinematicModel; kwargs...) = nothing
 AtmosphereModels.compute_momentum_tendencies!(::KinematicModel, model_fields) = nothing
 
 #####

@@ -2,8 +2,11 @@ using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
 using Oceananigans.Advection: update_advection!
+using Oceananigans.Architectures: AbstractSerialArchitecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
-                                       update_boundary_conditions!
+                                       update_boundary_conditions!, BoundaryCondition, Flux, Gradient,
+                                       NormalFlow, Value
+using Oceananigans.Fields: Field
 using Oceananigans.Fields: flattened_unique_values
 using Oceananigans.Grids: topology
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
@@ -45,7 +48,7 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
 
-    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
+    fill_model_halo_regions!(prognostic_fields(model), model; async=true)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
@@ -137,6 +140,58 @@ function tracer_specific_to_density!(tracers, density)
 end
 
 #####
+##### Halo filling
+#####
+
+# Whether filling the halo of a boundary with boundary condition `bc` reads the clock or the model
+# fields, `boundary_condition_args(model)`. Flux conditions fill by copying the interior whatever the
+# flux; periodic, impenetrable, and `Number`-valued `Value` and `Gradient` conditions ignore the
+# arguments. Everything else (functions, arrays, field time series, open and distributed
+# boundaries) is assumed to need them.
+@inline halo_fill_needs_model_args(bc) = true
+@inline halo_fill_needs_model_args(::Union{Nothing, Missing}) = false
+@inline halo_fill_needs_model_args(::BoundaryCondition{<:Flux}) = false
+
+const ArgumentFreeBoundaryClassification =
+    Union{Oceananigans.BoundaryConditions.Periodic, Gradient, Value{Nothing}, NormalFlow{Nothing}}
+
+@inline halo_fill_needs_model_args(::BoundaryCondition{<:ArgumentFreeBoundaryClassification, <:Union{Nothing, Number}}) = false
+
+@inline halo_fill_needs_model_args(bcs::FieldBoundaryConditions) =
+    halo_fill_needs_model_args(bcs.west)   | halo_fill_needs_model_args(bcs.east)  |
+    halo_fill_needs_model_args(bcs.south)  | halo_fill_needs_model_args(bcs.north) |
+    halo_fill_needs_model_args(bcs.bottom) | halo_fill_needs_model_args(bcs.top)
+
+@inline halo_fill_needs_model_args(field::Field) = halo_fill_needs_model_args(field.boundary_conditions)
+
+"""
+$(TYPEDSIGNATURES)
+
+Fill the halo regions of `fields`, passing `boundary_condition_args(model)` only to the fields
+whose boundary conditions read them (see `halo_fill_needs_model_args`). The result is the same
+as `fill_halo_regions!(fields, boundary_condition_args(model)...; kwargs...)`, but cheaper:
+converting the model-field tuple for every halo kernel dominates the cost of filling a field
+with trivial boundary conditions.
+"""
+fill_model_halo_regions!(fields::NamedTuple, model; kwargs...) = fill_model_halo_regions!(values(fields), model; kwargs...)
+fill_model_halo_regions!(::Tuple{}, model; kwargs...) = nothing
+
+function fill_model_halo_regions!(fields::Tuple, model; kwargs...)
+    fill_model_halo_regions!(first(fields), model; kwargs...)
+    fill_model_halo_regions!(Base.tail(fields), model; kwargs...)
+    return nothing
+end
+
+function fill_model_halo_regions!(field, model; kwargs...)
+    if halo_fill_needs_model_args(field)
+        fill_halo_regions!(field, boundary_condition_args(model)...; kwargs...)
+    else
+        fill_halo_regions!(field; kwargs...)
+    end
+    return nothing
+end
+
+#####
 ##### Velocity and momentum computation
 #####
 
@@ -144,8 +199,11 @@ end
 $(TYPEDSIGNATURES)
 
 Compute velocities from momentum: `u = ρu / ρ` for each velocity component.
+
+With `fill_momentum_halos = false` the density and momentum halos are assumed to be
+filled already, as they are within `update_state!` on a serial architecture.
 """
-function compute_velocities!(model::AtmosphereModel)
+function compute_velocities!(model::AtmosphereModel; fill_momentum_halos=true)
     grid = model.grid
     arch = grid.architecture
 
@@ -157,9 +215,11 @@ function compute_velocities!(model::AtmosphereModel)
     # cannot evaluate the time argument. Note: velocities are still stale here
     # (recomputed just below), so momentum BCs with velocity `field_dependencies`
     # would see last-stage values.
-    density = dynamics_density(model.dynamics)
-    fill_halo_regions!(density, boundary_condition_args(model)...)
-    fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
+    if fill_momentum_halos
+        density = dynamics_density(model.dynamics)
+        fill_model_halo_regions!(density, model)
+        fill_model_halo_regions!(model.momentum, model)
+    end
 
     # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
     # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
@@ -241,8 +301,11 @@ Compute auxiliary model variables:
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
 """
 function compute_auxiliary_variables!(model)
-    # Compute velocities from momentum (skip for kinematic dynamics with prescribed velocities)
-    compute_velocities!(model)
+    # Compute velocities from momentum (skip for kinematic dynamics with prescribed velocities).
+    # `update_state!` has just filled the momentum halos and the dynamics density is either
+    # prognostic (filled with it) or a static reference profile, so the refill is only needed
+    # to complete the asynchronous halo exchange of a distributed architecture.
+    compute_velocities!(model; fill_momentum_halos = !(model.architecture isa AbstractSerialArchitecture))
 
     # Dispatch on thermodynamic formulation type
     compute_auxiliary_thermodynamic_variables!(model)
@@ -281,7 +344,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
+    fill_model_halo_regions!(microphysical_halo_fields(model.microphysics, model.microphysical_fields), model)
     fill_halo_regions!(model.formulation)
 
     return nothing

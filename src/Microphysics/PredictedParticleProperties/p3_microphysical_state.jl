@@ -294,6 +294,19 @@ function AM.materialize_microphysical_fields(p3::P3, grid, bcs)
                  supersaturation_fields(p3.process_rates, grid))
 end
 
+# Fields whose halos need no refill after the auxiliary thermodynamic kernel:
+#   - the prognostic densities other than the rime state, which the kernel only reads and
+#     whose halos the prognostic fill in `update_state!` has just refreshed (`clamp_rime_state!`
+#     rewrites `ρqᶠ` and `ρbᶠ`, so those two are refilled);
+#   - the sedimentation velocities, read only at their own `(i, j)` by vertical fluxes; the
+#     kernel writes the bottom face and never the top face, which keeps its initial zero;
+#   - `surface_temperature`, rebuilt before each stage's microphysical tendencies and read
+#     only at its own column.
+const P3_HALO_FREE_FIELD_NAMES = (:ρqᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqʷⁱ, :ρnᶜˡ, :ρnᵃ, :ρsᵛ⁺ˡ,
+                                  :wᶜˡ, :wⁿᶜˡ, :wʳ, :wⁿʳ, :wⁱ, :wⁿⁱ, :surface_temperature)
+
+AM.microphysical_halo_fields(::P3, μ) = Base.structdiff(μ, NamedTuple{P3_HALO_FREE_FIELD_NAMES})
+
 # Type dispatch fixes the optional field set at compile time for GPU kernels.
 @inline cloud_number_fields(::Nothing, grid) = (;)
 

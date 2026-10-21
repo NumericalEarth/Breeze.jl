@@ -26,7 +26,7 @@ Compute the pressure correction for anelastic dynamics by solving the pressure P
 function AtmosphereModels.compute_pressure_correction!(model::AnelasticModel, Δt)
     # Mask immersed velocities
     foreach(mask_immersed_field!, model.momentum)
-    fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
+    fill_model_halo_regions!(model.momentum, model)
 
     dynamics = model.dynamics
     ρŨ = model.momentum

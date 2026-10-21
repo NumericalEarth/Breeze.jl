@@ -620,6 +620,17 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Return the microphysical fields whose halos `update_state!` refills after the auxiliary
+thermodynamic kernel has run [`update_microphysical_fields!`](@ref) over the interior.
+The default is every field in `microphysical_fields`. Schemes may exclude fields whose halos
+are never read, or that the kernel leaves untouched and the prognostic halo fill has
+already refreshed.
+"""
+microphysical_halo_fields(microphysics, microphysical_fields) = microphysical_fields
+
+"""
+$(TYPEDSIGNATURES)
+
 Update all microphysical fields at grid point `(i, j, k)`.
 
 This orchestrating function:
