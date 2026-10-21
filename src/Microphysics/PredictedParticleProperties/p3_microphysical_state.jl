@@ -398,7 +398,15 @@ end
 @inline grid_supersaturation(::ProcessRate{FT, true}, μ, i, j, k, ρ) where FT =
     @inbounds μ.ρsᵛ⁺ˡ[i, j, k] / ρ
 
-@inline function AM.grid_microphysical_state(i, j, k, grid, p3::P3, μ, ρ, 𝒰, velocities)
+@inline AM.grid_microphysical_state(i, j, k, grid, p3::P3, μ, ρ, 𝒰, velocities) =
+    first(p3_grid_state_and_rime(i, j, k, grid, p3, μ, ρ, velocities))
+
+# The grid state together with the full consistent rime state (`Fᶠ` and `ρᶠ` as well as
+# the `qᶠ`, `bᶠ` the state carries), so the P3 kernels need not re-derive the rime
+# fraction and density from a state that is already consistent. The specific quantities
+# stay `ρx / ρ` rather than `ρx × (1/ρ)`: the reservoir limiters compare `q / τ × τ` with
+# `q`, so `q` must round exactly as before or cells near those limits re-sort.
+@inline function p3_grid_state_and_rime(i, j, k, grid, p3::P3, μ, ρ, velocities)
     nᶜˡ = grid_cloud_droplet_number(p3, p3.aerosol, μ, i, j, k, ρ)
     @inbounds begin
         qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
@@ -415,7 +423,8 @@ end
     sᵛ⁺ˡ = grid_supersaturation(p3.process_rates, μ, i, j, k, ρ)
     nᵃ   = grid_aerosol_number(p3.aerosol, μ, i, j, k, ρ)
     w = interpolate_w_to_center(grid, i, j, k, velocities.w, FT)
-    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, sᵛ⁺ˡ, nᵃ, w)
+    ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, sᵛ⁺ˡ, nᵃ, w)
+    return ℳ, rime_state
 end
 
 # Bounded ice moments plus the Table-1 bracket (`prep`) of the diagnostic population, which
@@ -491,9 +500,9 @@ end
         # `w` enters P3 solely through the adiabatic temperature tendency, which lives
         # in the tendency kernel.
         velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
-        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
+        ℳ, rime_state = p3_grid_state_and_rime(i, j, k, grid, p3, μ, ρ, velocities)
         clamp_rime_state!(μ, i, j, k, ρ, ℳ)
-        AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3, ℳ, ρ, 𝒰, constants)
+        p3_update_microphysical_auxiliaries!(μ, i, j, k, grid, p3, ℳ, rime_state, ρ, 𝒰, constants)
     end
     return nothing
 end
@@ -524,7 +533,14 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
 # `compute_microphysical_tendencies!` evaluates them from the current state with an
 # adiabatic-only driver, which also keeps ~1000 lines of P3 process physics out of this
 # kernel. The fall-speed path is small by comparison.
-@inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
+@inline AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants) =
+    p3_update_microphysical_auxiliaries!(μ, i, j, k, grid, p3, ℳ,
+                                         consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ),
+                                         ρ, 𝒰, constants)
+
+# `rime_state` is the consistent rime state of `ℳ` (whose `qᶠ`, `bᶠ` it already carries).
+@inline function p3_update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState,
+                                                      rime_state, ρ, 𝒰, constants)
     @inbounds μ.qᵛ[i, j, k]  = 𝒰.moisture_mass_fractions.vapor
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
     @inbounds μ.qʳ[i, j, k]  = ℳ.qʳ
@@ -537,7 +553,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     write_cloud_number_diagnostic!(μ, i, j, k, grid, p3.aerosol, ℳ)
     write_aerosol_diagnostic!(μ, i, j, k, grid, p3.aerosol, ℳ)
     write_supersaturation_diagnostic!(μ, i, j, k, grid, p3.process_rates, ℳ)
-    p3_compute_fall_speeds!(μ, i, j, k, p3, ρ, ℳ, 𝒰, constants)
+    p3_compute_fall_speeds!(μ, i, j, k, p3, ρ, ℳ, rime_state, 𝒰, constants)
 
     return nothing
 end
@@ -608,7 +624,12 @@ struct P3ProcessProps{FT}
     nⁱ :: FT
     nⁱ_diagnostic :: FT
     ρ_mean :: FT
+    # Cloud size distribution of `ℳ`, reused by `compute_p3_process_rates` when no
+    # supersaturation adjustment changes the cloud water.
     Nᶜˡ :: FT
+    nᶜˡ :: FT
+    μᶜˡ :: FT
+    λᶜˡ :: FT
     λʳ :: FT
 end
 
@@ -672,17 +693,25 @@ end
     return P3FallSpeedResult{FT}(𝕎ᶜˡ, 𝕎ⁿᶜˡ, 𝕎ʳ, 𝕎ⁿʳ, 𝕎ⁱ, 𝕎ⁿⁱ)
 end
 
+@inline p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants,
+                            properties::P3ProcessProps, surface_temperature,
+                            temperature_tendency, vapor_tendency) =
+    p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties, surface_temperature,
+                        temperature_tendency, vapor_tendency,
+                        p3_saturation_state(p3, ρ, 𝒰, constants))
+
 @inline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
                                      constants, properties::P3ProcessProps,
                                      surface_temperature, temperature_tendency,
-                                     vapor_tendency)
+                                     vapor_tendency, saturation::P3SaturationState)
     Fᶠ = properties.Fᶠ
     ρᶠ = properties.ρᶠ
     # Passing `properties` lets compute_p3_process_rates skip the redundant
-    # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
+    # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation,
+    # and `saturation` the temperature and saturation humidities the caller holds.
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                      surface_temperature, temperature_tendency,
-                                     vapor_tendency)
+                                     vapor_tendency, saturation)
 
     # Tendency extraction
     cloud_mass_tendency = tendency_ρqᶜˡ(rates, ρ)
@@ -796,7 +825,12 @@ end
 # `p3_fall_speed_compute` at `p3_fall_speed_properties`, evaluated one species at a time. The
 # branches are deliberate: clear air, warm rain, and ice-only anvil are each spatially
 # coherent, so warps take them together.
-@inline function p3_compute_fall_speeds!(μ, i, j, k, p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+@inline p3_compute_fall_speeds!(μ, i, j, k, p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) =
+    p3_compute_fall_speeds!(μ, i, j, k, p3, ρ, ℳ, consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ),
+                            𝒰, constants)
+
+@inline function p3_compute_fall_speeds!(μ, i, j, k, p3::P3, ρ, ℳ::P3MicrophysicalState, rime_state,
+                                         𝒰, constants)
     FT = typeof(ρ)
     qsmall = p3.minimum_mass_mixing_ratio
 
@@ -808,15 +842,26 @@ end
         CloudTerminalVelocities{FT}(0, 0)
     end
 
-    rain = if max(0, ℳ.qʳ) ≥ qsmall
-        rain_terminal_velocities(p3, ℳ.qʳ, ℳ.nʳ, ρ)
+    # Rain and ice fall speeds share the density power ρ^(-α) of their air-density
+    # corrections; evaluate it once where either species is present.
+    rain_present = max(0, ℳ.qʳ) ≥ qsmall
+    ice_present = total_ice_mass(ℳ.qⁱ, active_liquid_on_ice(p3, ℳ.qʷⁱ)) ≥ qsmall
+    density_power = if rain_present | ice_present
+        fall_speed_density_power(p3.process_rates, ρ)
+    else
+        zero(FT)
+    end
+
+    rain = if rain_present
+        rain_terminal_velocities(p3, ℳ.qʳ, ℳ.nʳ, ρ, density_power)
     else
         RainTerminalVelocities{FT}(0, 0)
     end
 
-    ice = if total_ice_mass(ℳ.qⁱ, active_liquid_on_ice(p3, ℳ.qʷⁱ)) ≥ qsmall
-        props = p3_core_ice_properties(p3, ρ, ℳ)
-        ice_terminal_velocities(p3, props.qⁱ_total, props.nⁱ, props.Fᶠ, props.ρᶠ, ρ; Fˡ = props.Fˡ)
+    ice = if ice_present
+        props = p3_core_ice_properties(p3, ρ, ℳ, rime_state)
+        ice_terminal_velocities(p3, props.qⁱ_total, props.nⁱ, props.Fᶠ, props.ρᶠ, ρ;
+                                Fˡ = props.Fˡ, density_power)
     else
         IceTerminalVelocities{FT}(0, 0)
     end
@@ -901,11 +946,15 @@ end
 #   2. Gridless (ParcelModel): microphysical_tendencies builds state and computes rates directly.
 
 # Ice properties shared within each specialized consumer payload.
-@inline function p3_core_ice_properties(p3, ρ, ℳ::P3MicrophysicalState)
+@inline p3_core_ice_properties(p3, ρ, ℳ::P3MicrophysicalState) =
+    p3_core_ice_properties(p3, ρ, ℳ, consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ))
+
+# `rime_state` is the consistent rime state of `ℳ`; the grid kernels pass the one
+# `p3_grid_state_and_rime` built, rather than re-deriving it from the consistent state.
+@inline function p3_core_ice_properties(p3, ρ, ℳ::P3MicrophysicalState, rime_state)
     FT = typeof(ρ)
     qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
     qⁱ_raw = total_ice_mass(ℳ.qⁱ, qʷⁱ)
-    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ)
     Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, qʷⁱ, p3.process_rates.floors)
     moments = p3_ice_moments(p3, ρ, qⁱ_raw, ℳ.nⁱ,
                              rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
@@ -926,15 +975,18 @@ end
                                 cloud.μᶜˡ, cloud.λᶜˡ, ν)
 end
 
-@inline function p3_process_properties(p3, ρ, ℳ::P3MicrophysicalState)
+@inline p3_process_properties(p3, ρ, ℳ::P3MicrophysicalState) =
+    p3_process_properties(p3, ρ, ℳ, consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ))
+
+@inline function p3_process_properties(p3, ρ, ℳ::P3MicrophysicalState, rime_state)
     FT = typeof(ρ)
-    ice = p3_core_ice_properties(p3, ρ, ℳ)
+    ice = p3_core_ice_properties(p3, ρ, ℳ, rime_state)
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     λʳ = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     ρ_mean = ice_mean_density(p3.ice.bulk, ice.prep)
     return P3ProcessProps{FT}(ice.qᶠ, ice.bᶠ, ice.Fᶠ, ice.Fˡ, ice.ρᶠ,
                               ice.qⁱ_total, ice.nⁱ, ice.nⁱ_diagnostic, ρ_mean,
-                              cloud.Nᶜˡ, λʳ)
+                              cloud.Nᶜˡ, cloud.nᶜˡ, cloud.μᶜˡ, cloud.λᶜˡ, λʳ)
 end
 
 # Every P3 tendency from one process-rate evaluation, for callers with no grid. With no

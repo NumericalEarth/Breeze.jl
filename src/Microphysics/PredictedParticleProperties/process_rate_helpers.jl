@@ -39,10 +39,31 @@ end
     return p3_ice_saturation_specific_humidity(T, ρ, constants, freezing_temperature, qᵛ⁺ˡ)
 end
 
+# Selecting the phase before evaluating the saturation vapor pressure evaluates one
+# exponential instead of two; the arithmetic is that of
+# `adjustment_saturation_specific_humidity`, so the result is the same as selecting
+# between the two evaluated humidities.
 @inline function p3_adjustment_ice_saturation_specific_humidity(T, P, qᵗ, constants, freezing_temperature)
-    qᵛ⁺ˡ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants, PlanarLiquidSurface())
-    qᵛ⁺ⁱ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants, PlanarIceSurface())
-    return ifelse(T >= freezing_temperature, qᵛ⁺ˡ, qᵛ⁺ⁱ)
+    pᵛ⁺ = phase_saturation_vapor_pressure(T, constants, T >= freezing_temperature)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    ϵᵈᵛ = Rᵈ / Rᵛ
+    return ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (P - pᵛ⁺)
+end
+
+# Saturation vapor pressure over liquid (`liquid = true`) or ice. Generic formulas
+# evaluate both and select; Tetens selects its coefficients and evaluates once.
+@inline phase_saturation_vapor_pressure(T, constants, liquid) =
+    ifelse(liquid, saturation_vapor_pressure(T, constants, PlanarLiquidSurface()),
+                   saturation_vapor_pressure(T, constants, PlanarIceSurface()))
+
+@inline function phase_saturation_vapor_pressure(T, constants::TetensFormulaThermodynamicConstants, liquid)
+    tf = constants.saturation_vapor_pressure
+    pᵛ⁺ᵣ = tf.reference_saturation_vapor_pressure
+    a = ifelse(liquid, tf.liquid_coefficient, tf.ice_coefficient)
+    Tᵣ = tf.reference_temperature
+    δT = ifelse(liquid, tf.liquid_temperature_offset, tf.ice_temperature_offset)
+    return pᵛ⁺ᵣ * exp(a * (T - Tᵣ) / (T - δT))
 end
 
 """
@@ -218,10 +239,10 @@ above-freezing collection by ice.
                                                                   wet_growth_shedding_number)
     FT = typeof(autoconversion)
     parameters = p3.process_rates
-    number_from_autoconversion = autoconversion / rain_seed_drop_mass(p3)
+    number_from_autoconversion = autoconversion * inverse_rain_seed_drop_mass(p3)
     number_from_melting = melting_number
     cloud_warm_rain_number = ifelse(parameters.liquid_fraction_active, zero(FT),
-                                    cloud_warm_collection / parameters.shed_drop_mass)
+                                    cloud_warm_collection * parameters.inverse_shed_drop_mass)
     number_gain = number_from_autoconversion + number_from_melting + breakup +
                   shedding_number + cloud_warm_rain_number + wet_growth_shedding_number
     number_loss = evaporation_number + self_collection + riming_number +
@@ -238,6 +259,31 @@ end
     ρ_floor = FT(parameters.minimum_fall_speed_air_density)
     ℂᵈᵉⁿˢ₁ = FT(parameters.fall_speed_density_correction_exponent)
     return (reference_air_density / max(air_density, ρ_floor))^ℂᵈᵉⁿˢ₁
+end
+
+# The same correction with ρ₀^α materialized at construction: (ρ₀/ρ)^α = ρ₀^α ρ^(-α),
+# one power and no division. `density_power` is `max(ρ, ρ_floor)^(-α)`, which the rain
+# and ice corrections at the same ρ share.
+@inline function fall_speed_density_power(parameters, air_density)
+    FT = typeof(air_density)
+    ρ_floor = FT(parameters.minimum_fall_speed_air_density)
+    return max(air_density, ρ_floor)^parameters.negative_density_correction_exponent
+end
+
+@inline rain_air_density_correction(parameters, density_power) =
+    parameters.reference_air_density_correction * density_power
+
+@inline ice_air_density_correction(p3, density_power) =
+    p3.ice.fall_speed.reference_air_density_correction * density_power
+
+# √((ρ₀ⁱ/ρ)^α) = ρ₀ⁱ^(α/2) ρ^(-α/2), for the ventilation Schmidt correction.
+@inline function sqrt_ice_air_density_correction(p3, air_density)
+    parameters = p3.process_rates
+    FT = typeof(air_density)
+    ρ_floor = FT(parameters.minimum_fall_speed_air_density)
+    half_exponent = parameters.negative_density_correction_exponent / 2
+    return p3.ice.fall_speed.sqrt_reference_air_density_correction *
+           max(air_density, ρ_floor)^half_exponent
 end
 
 """
@@ -334,6 +380,18 @@ end
                               p3.process_rates.floors)
 end
 
+# The rain slope of a cell and the two quantities its consumers derive from it,
+# evaluated once in `compute_p3_process_rates` (and carried in `P3DerivedState`) rather
+# than re-diagnosed from (qʳ, nʳ) by the ventilation, self-collection, breakup, and
+# rain-collection rates.
+struct P3RainSlope{FT}
+    λʳ :: FT          # bounded slope [1/m]
+    log_λʳ :: FT      # log₁₀ λʳ, the rain table coordinate
+    inverse_λʳ :: FT  # 1 / λʳ, the number-mean drop diameter [m]
+end
+
+@inline P3RainSlope(λʳ) = P3RainSlope{typeof(λʳ)}(λʳ, log10(λʳ), 1 / λʳ)
+
 # Exponential rain PSD: λʳ = (π ρʷ nʳ / qʳ)^(1/3). `bounded_rain_number` needs the
 # unclamped value to tell whether the clamp fired.
 @inline function unbounded_rain_slope_parameter(qʳ, nʳ, parameters)
@@ -360,9 +418,8 @@ The result is clamped between `parameters.minimum_rain_slope` and
 end
 
 @inline function rain_number_from_slope(qʳ, λʳ, parameters)
-    FT = typeof(qʳ)
     qʳ_eff = max(0, qʳ)
-    return qʳ_eff * λʳ^3 / (FT(π) * parameters.liquid_water_density)
+    return qʳ_eff * λʳ^3 * parameters.inverse_rain_mass_coefficient
 end
 
 @inline function bounded_rain_number(nʳ, qʳ, parameters)

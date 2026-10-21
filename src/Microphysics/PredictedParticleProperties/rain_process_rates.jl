@@ -44,7 +44,6 @@ Available schemes:
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
 
-    ℂᵃᵘᵗᵒ₁ = parameters.autoconversion_coefficient
     ℂᵃᵘᵗᵒ₂ = parameters.autoconversion_exponent_cloud
     ℂᵃᵘᵗᵒ₃ = parameters.autoconversion_exponent_droplet
     ℂᵃᵘᵗᵒ₄ = parameters.autoconversion_threshold
@@ -53,9 +52,9 @@ Available schemes:
 
     # KK2000 scales with droplet number per volume, so no reference-density
     # normalization is needed — Nᶜˡ is already per-volume [1/m³].
-    scaled_cloud_number = Nᶜˡ / parameters.autoconversion_reference_concentration
-
-    return ℂᵃᵘᵗᵒ₁ * qᶜˡ_eff^ℂᵃᵘᵗᵒ₂ * scaled_cloud_number^ℂᵃᵘᵗᵒ₃
+    # ℂᵃᵘᵗᵒ₁ (Nᶜˡ / Nᶜˡ_r)^ℂᵃᵘᵗᵒ₃ = [ℂᵃᵘᵗᵒ₁ (Nᶜˡ_r)^(-ℂᵃᵘᵗᵒ₃)] (Nᶜˡ)^ℂᵃᵘᵗᵒ₃, with the
+    # bracket materialized as `autoconversion_prefactor`.
+    return parameters.autoconversion_prefactor * qᶜˡ_eff^ℂᵃᵘᵗᵒ₂ * Nᶜˡ^ℂᵃᵘᵗᵒ₃
 end
 
 """
@@ -132,6 +131,24 @@ with ``\\mathbb{C}_{\\mathrm{self},1} = 5.78`` m³ kg⁻¹ s⁻¹ by default.
     return ifelse(active, rate, zero(FT))
 end
 
+# With the cell's rain slope, `nʳ` is already the slope-consistent number, so the
+# re-bounding (one more cube root) is skipped.
+@inline rain_self_collection_rate(p3, qʳ, nʳ, ρ, ::Nothing) = rain_self_collection_rate(p3, qʳ, nʳ, ρ)
+@inline rain_self_collection_rate(p3, qʳ, nʳ, ρ, rain::P3RainSlope) =
+    rain_self_collection_rate(p3.warm_rain_scheme, p3, qʳ, nʳ, ρ, rain)
+
+@inline function rain_self_collection_rate(::KhairoutdinovKogan2000, p3, qʳ, nʳ, ρ, rain::P3RainSlope)
+    FT = typeof(qʳ)
+    parameters = p3.process_rates
+    qʳ_eff = max(0, qʳ)
+    nʳ_eff = max(0, nʳ)
+    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+
+    ℂˢᵉˡᶠ₁ = parameters.rain_self_collection_coefficient
+    rate = ℂˢᵉˡᶠ₁ * ρ * qʳ_eff * nʳ_eff
+    return ifelse(active, rate, zero(FT))
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -162,7 +179,6 @@ net rain-number tendency changes sign only when ``f_{brkp} = 0``, at
 - Breakup rate [1/kg/s] (positive = number source)
 """
 @inline function rain_breakup_rate(p3, qʳ, nʳ, self_collection)
-    FT = typeof(qʳ)
     parameters = p3.process_rates
 
     qʳ_eff = max(0, qʳ)
@@ -171,7 +187,19 @@ net rain-number tendency changes sign only when ``f_{brkp} = 0``, at
     # Dʳ = 1/λʳ, evaluated after the rain lambda limiter has been applied and the
     # DSD-consistent number recomputed.
     λʳ = rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
-    mean_rain_diameter = 1 / λʳ
+    return rain_breakup_rate_at_diameter(p3, qʳ_eff, 1 / λʳ, self_collection)
+end
+
+# With the cell's rain slope the mean diameter 1/λʳ is already at hand.
+@inline rain_breakup_rate(p3, qʳ, nʳ, self_collection, ::Nothing) =
+    rain_breakup_rate(p3, qʳ, nʳ, self_collection)
+
+@inline rain_breakup_rate(p3, qʳ, nʳ, self_collection, rain::P3RainSlope) =
+    rain_breakup_rate_at_diameter(p3, max(0, qʳ), rain.inverse_λʳ, self_collection)
+
+@inline function rain_breakup_rate_at_diameter(p3, qʳ_eff, mean_rain_diameter, self_collection)
+    FT = typeof(qʳ_eff)
+    parameters = p3.process_rates
 
     ℂᵇʳᵏᵖ₁ = parameters.rain_breakup_diameter_threshold
     ℂᵇʳᵏᵖ₂ = parameters.rain_breakup_coefficient
@@ -327,6 +355,32 @@ saturation-adjustment relaxation coefficient, both of which pass `p3.rain.ventil
     return (; λʳ, Nʳ₀, integral)
 end
 
+# The same integral from the cell's rain slope (`nʳ` slope-consistent) and the transport
+# tuple, whose per-cell Schmidt factor `Sc^{1/3} / √ν` replaces the local re-derivation.
+@inline function rain_ventilation_integral(table, ventilation, nʳ, transport, rain::P3RainSlope,
+                                           parameters)
+    FT = typeof(nʳ)
+    Nʳ₀ = nʳ * rain.λʳ
+
+    ℂᵛᵉⁿᵗ₁ = FT(ventilation.constant_coefficient)
+    ℂᵛᵉⁿᵗ₂ = FT(ventilation.reynolds_coefficient)
+
+    constant_integral = ℂᵛᵉⁿᵗ₁ * rain.inverse_λʳ^2
+    schmidt_factor = rain_schmidt_factor(transport, parameters)
+    integral = constant_integral + ℂᵛᵉⁿᵗ₂ * schmidt_factor * table(rain.log_λʳ)
+
+    return (; λʳ = rain.λʳ, Nʳ₀, integral)
+end
+
+@inline rain_schmidt_factor(transport::TransportWithSchmidtFactor, parameters) = transport.schmidt_factor
+
+@inline function rain_schmidt_factor(transport, parameters)
+    FT = typeof(transport.ν)
+    coefficient_floor = FT(parameters.floors.transport_coefficient)
+    return cbrt(transport.ν / max(transport.Dᵛ, coefficient_floor)) /
+           sqrt(max(transport.ν, coefficient_floor))
+end
+
 # Tabulated path: use PSD-integrated ventilation integral I_evap(λʳ)
 @inline function rain_evaporation_rate(table::TabulatedFunction1D, ventilation,
                                        qʳ, nʳ, S,
@@ -389,3 +443,9 @@ inside that keyword's default expression; there is no separate radius keyword.
 @inline rain_seed_drop_mass(p3) = rain_seed_drop_mass(p3.warm_rain_scheme, p3)
 
 @inline rain_seed_drop_mass(::KhairoutdinovKogan2000, p3) = p3.process_rates.initial_rain_drop_mass
+
+# 1 / [`rain_seed_drop_mass`](@ref), stored at construction for KK2000.
+@inline inverse_rain_seed_drop_mass(p3) = inverse_rain_seed_drop_mass(p3.warm_rain_scheme, p3)
+
+@inline inverse_rain_seed_drop_mass(::KhairoutdinovKogan2000, p3) =
+    p3.process_rates.inverse_initial_rain_drop_mass

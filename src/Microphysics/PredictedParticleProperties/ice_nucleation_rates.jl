@@ -52,13 +52,14 @@ than a grid-mean vapor state.
     # Cooper (1986): N_ice = c_nuc × exp(b_nuc × (T₀ - T)) [1/m³]
     # Default c_nuc = 5.0 /m³ = 0.005 /L from Cooper (1986), divided by ρ for [1/kg]
     supercooling = freezing_temperature - T
-    cooper_number = ℂⁿᵘᶜˡ₅ * exp(ℂⁿᵘᶜˡ₆ * supercooling) / ρ
+    cooper_number = ℂⁿᵘᶜˡ₅ * exp(ℂⁿᵘᶜˡ₆ * supercooling)
 
-    # Limit to maximum and subtract existing ice
-    equilibrium_number = min(cooper_number, ℂⁿᵘᶜˡ₃ / ρ)
+    # Limit to maximum and subtract existing ice. Division by ρ > 0 preserves order, so
+    # min(a, b) / ρ is exactly min(a / ρ, b / ρ) with one division.
+    equilibrium_number = min(cooper_number, ℂⁿᵘᶜˡ₃) / ρ
 
-    # Nucleation rate: relaxation toward equilibrium
-    nucleated_number_rate = max(0, equilibrium_number - nⁱ) / ℂⁿᵘᶜˡ₄
+    # Nucleation rate: relaxation toward equilibrium over ℂⁿᵘᶜˡ₄ (stored inverse)
+    nucleated_number_rate = max(0, equilibrium_number - nⁱ) * parameters.inverse_ice_nucleation_timescale
 
     # Mass nucleation rate
     nucleated_mass_rate = nucleated_number_rate * ℂᶠᵒʳᵐ₁
@@ -135,7 +136,7 @@ gamma PSD the mass (6th moment) rate carries the correction
     supercooling = max(parameters.freezing_temperature - T, zero(FT))
 
     # Individual drop mass and volume (monodisperse assumption)
-    droplet_volume = q_eff / n_for_mass / FT(parameters.liquid_water_density)
+    droplet_volume = q_eff / n_for_mass * FT(parameters.inverse_liquid_water_density)
 
     # The per-drop freezing coefficient (NO psd_correction) is a linear per-second
     # rate. Any numerical cap is applied equally before the two moment products so
@@ -240,6 +241,7 @@ number per unit mass [1/kg].
     freezing_active = (T < ℂʰᵒᵐᶠ₁) &
                       (q_eff >= p3.minimum_mass_mixing_ratio)
 
+    # A reservoir drain, so it keeps the division (see `compute_p3_process_rates`).
     return (ifelse(freezing_active, q_eff / ℂʰᵒᵐᶠ₂, zero(FT)),
             ifelse(freezing_active, n / ℂʰᵒᵐᶠ₂, zero(FT)))
 end
@@ -362,8 +364,9 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
     # Use the Hallett-Mossop splinter crystal mass (D = 10 μm), NOT the nucleated
     # ice mass (D = 2 μm). Splinters are 125× heavier.
 
-    warm_branch = clamp((T - ℂᴴᴹ₁) / (ℂᴴᴹ₃ - ℂᴴᴹ₁), zero(FT), one(FT))
-    cold_branch = clamp((ℂᴴᴹ₂ - T) / (ℂᴴᴹ₂ - ℂᴴᴹ₃), zero(FT), one(FT))
+    # 1 / (ℂᴴᴹ₃ - ℂᴴᴹ₁) and 1 / (ℂᴴᴹ₂ - ℂᴴᴹ₃) are materialized in `ProcessRate`.
+    warm_branch = clamp((T - ℂᴴᴹ₁) * parameters.inverse_splintering_warm_range, zero(FT), one(FT))
+    cold_branch = clamp((ℂᴴᴹ₂ - T) * parameters.inverse_splintering_cold_range, zero(FT), one(FT))
     efficiency = ifelse(T <= ℂᴴᴹ₃, warm_branch, cold_branch)
 
     # Cloud-riming splintering applies only with a single ice category; with more

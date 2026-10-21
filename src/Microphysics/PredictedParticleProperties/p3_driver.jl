@@ -92,7 +92,7 @@ end
     @inbounds begin
         ρ = ρ_field[i, j, k]
         qᵛᵉ = μ.qᵛ[i, j, k]
-        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, nothing, velocities)
+        ℳ, rime_state = p3_grid_state_and_rime(i, j, k, grid, p3, μ, ρ, velocities)
         q = AM.moisture_fractions(p3, ℳ, qᵛᵉ)
         𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
         𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
@@ -109,11 +109,13 @@ end
     # A deliberate branch rather than `ifelse`: cells P3 has no work in are skipped outright,
     # which is where most of the domain sits (see `p3_processes_active`). Clear air is
     # spatially coherent, so warps take the branch together.
-    if p3_processes_active(p3, ρ, ℳ, 𝒰, constants)
-        properties = p3_process_properties(p3, ρ, ℳ)
+    # Temperature and saturation humidities are evaluated once, for the gate and the rates.
+    saturation = p3_saturation_state(p3, ρ, 𝒰, constants)
+    if p3_processes_active(p3, ℳ, 𝒰, saturation)
+        properties = p3_process_properties(p3, ρ, ℳ, rime_state)
         result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
                                      surface_temperature, temperature_tendency,
-                                     vapor_tendency)
+                                     vapor_tendency, saturation)
         add_p3_tendencies!(G, i, j, k, grid, p3, result)
     end
 end
@@ -132,7 +134,10 @@ end
 
 const nucleation_possible_subsaturation = -0.05
 
-@inline function p3_processes_active(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+@inline p3_processes_active(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) =
+    p3_processes_active(p3, ℳ, 𝒰, p3_saturation_state(p3, ρ, 𝒰, constants))
+
+@inline function p3_processes_active(p3::P3, ℳ::P3MicrophysicalState, 𝒰, saturation::P3SaturationState)
     qsmall = p3.minimum_mass_mixing_ratio
     nsmall = p3.minimum_number_mixing_ratio
     qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
@@ -141,11 +146,12 @@ const nucleation_possible_subsaturation = -0.05
                            (ℳ.nʳ > nsmall) | (ℳ.nⁱ > nsmall) |
                            cloud_number_present(p3.aerosol, ℳ, nsmall)
 
-    T = temperature(𝒰, constants)
-    T₀ = p3.process_rates.freezing_temperature
+    # Saturation over ice below T₀ and over liquid at or above it. The threshold factor
+    # is rounded to the working precision so the comparison stays in `FT`.
+    FT = typeof(qsmall)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
-    qᵛ⁺ = p3_ice_saturation_specific_humidity(T, ρ, constants, T₀)
-    nucleation_possible = qᵛ ≥ (1 + nucleation_possible_subsaturation) * qᵛ⁺
+    qᵛ⁺ = saturation.qᵛ⁺ⁱ
+    nucleation_possible = qᵛ ≥ (1 + FT(nucleation_possible_subsaturation)) * qᵛ⁺
 
     return hydrometeors_present | nucleation_possible |
            always_evaluate_processes(p3.process_rates)

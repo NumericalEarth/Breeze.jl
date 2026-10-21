@@ -73,8 +73,6 @@ function read_lookup_tables(directory::AbstractString;
     rain_ice_tables = build_table_2_functions(table2_fields, FT, arch)
 
     # Build Ice with tabulated fields
-    ice = build_ice_properties_from_tables(ice_tables_4d, rain_ice_tables, FT;
-                                           thermodynamic_constants)
 
     # Resolved before the rain tabulation below, which needs its floors.
     cloud = isnothing(cloud) ? CloudDroplets(FT) : cloud
@@ -83,6 +81,12 @@ function read_lookup_tables(directory::AbstractString;
     else
         process_rates
     end
+
+    # The ice fall-speed density correction shares the process-rate exponent α.
+    α = input_process_rates.fall_speed_density_correction_exponent
+    ice = build_ice_properties_from_tables(ice_tables_4d, rain_ice_tables, FT;
+                                           thermodynamic_constants,
+                                           density_correction_exponent = α)
 
     # Generate rain 1D tables from Julia quadrature. The supplied skeleton (or the
     # default) carries the empirical fall-speed and ventilation parameters that the
@@ -140,7 +144,8 @@ end
 #####
 
 function build_ice_properties_from_tables(ice_4d, rain_ice, FT;
-                                          thermodynamic_constants = ThermodynamicConstants(FT))
+                                          thermodynamic_constants = ThermodynamicConstants(FT),
+                                          density_correction_exponent = 0.54)
     # Start from default Ice for physical constants
     ice_base = IceParticles(FT; thermodynamic_constants)
 
@@ -148,7 +153,8 @@ function build_ice_properties_from_tables(ice_4d, rain_ice, FT;
     fall_speed = IceFallSpeed(
         ice_base.fall_speed.reference_air_density,
         ice_4d[:number_weighted],
-        ice_4d[:mass_weighted],
+        ice_4d[:mass_weighted];
+        density_correction_exponent,
     )
 
     deposition = IceDeposition(

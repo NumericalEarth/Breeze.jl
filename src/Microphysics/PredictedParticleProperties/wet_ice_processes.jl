@@ -143,9 +143,8 @@ Shed liquid forms rain drops of approximately 1 mm diameter.
 @inline function shedding_number_rate(p3, shed_rate)
     # Liquid-fraction shedding carries its own drop mass so it can be tuned
     # separately; by default it equals `shed_drop_mass`, the mass of a 1 mm drop.
-    ℂˢʰᵉᵈ₂ = p3.process_rates.shed_drop_mass_liqfrac
-
-    return shed_rate / ℂˢʰᵉᵈ₂
+    # Multiplies by the stored 1 / ℂˢʰᵉᵈ₂ (`shed_drop_mass_liqfrac`).
+    return shed_rate * p3.process_rates.inverse_shed_drop_mass_liqfrac
 end
 
 """
@@ -196,13 +195,12 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 
     Kᵃ = transport.Kᵃ
     Dᵛ = transport.Dᵛ
-    ν  = transport.ν
 
     q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
     # Ventilation integral (same as deposition/refreezing)
     C_fv = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
-                                  ν, Dᵛ, lookups.ρ_correction, parameters.floors)
+                                  transport, lookups.ρ_correction, parameters.floors)
 
     # Heat balance: sensible + latent
     Q_sensible = Kᵃ * (T₀ - T)

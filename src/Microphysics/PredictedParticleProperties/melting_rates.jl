@@ -96,7 +96,6 @@ end
     # T,P-dependent transport properties (pre-computed or computed on demand)
     Kᵃ = transport.Kᵃ       # Thermal conductivity of air [W/m/K]
     Dᵛ = transport.Dᵛ       # Diffusivity of water vapor [m²/s]
-    ν  = transport.ν        # Kinematic viscosity [m²/s]
 
     q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
@@ -106,7 +105,7 @@ end
     # table generation, so they are not evaluated over the dry-ice PSD).
     # All 4 tables share Table-1 axes, so they are read at the one bracket `prep`.
     dep = p3.ice.deposition
-    sc_corr = ventilation_sc_correction(ν, Dᵛ, ρ_correction, parameters.floors)
+    sc_corr = ventilation_sc_correction(transport, ρ_correction, parameters.floors)
     small = evaluate_at(dep.small_ice_ventilation_constant, prep) +
             sc_corr * evaluate_at(dep.small_ice_ventilation_reynolds, prep)
     large = evaluate_at(dep.large_ice_ventilation_constant, prep) +
