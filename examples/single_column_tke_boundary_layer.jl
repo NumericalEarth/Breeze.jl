@@ -203,16 +203,10 @@ depths = (stable = stress_depth, neutral = stress_depth, convective = inversion_
 
 # ## The dry cases
 #
-# The top row shows what the model carries forward in time; the bottom row shows what the closure
-# makes of it, in the order it is built: the mixing length, the diffusivity formed from it, and the
-# heat flux they produce. Solid lines are the Nakanishi–Niino constants, dashed lines the rational
-# functions, both against ``z / hᵇˡ`` with the depth of the constant closure's layer. The
-# diffusivity spans two orders of magnitude between the stable and convective cases, so each is
-# scaled by the constant closure's maximum, which the legend records, and the heat flux by its
-# value at the first interior face. The gray dashed line is the mixed-layer reference for the
-# convective case only: a flux decreasing linearly from the surface to an entrainment ratio of
-# about 0.2 at the inversion. The neutral case has no surface heat flux to normalize by, and so no
-# flux curve.
+# The figure shows what the model carries forward in time: potential temperature, wind speed, and
+# turbulent kinetic energy. Solid lines are the Nakanishi–Niino constants, dashed lines the rational
+# functions, both against ``z / hᵇˡ`` with the depth of the constant closure's layer. The legend
+# records each case's depth and the maximum of its diffusivity.
 #
 set_theme!(fontsize = 14, linewidth = 2.5)
 colors = (stable = :dodgerblue, neutral = :black, convective = :orangered)
@@ -222,26 +216,17 @@ function specific_tke(model)
     return Field(model.tracers.ρe / model.dynamics.reference_state.density)
 end
 
-mixing_length(model) = model.closure_fields.ℓᵐ
-
-fig = Figure(size = (1100, 800))
+fig = Figure(size = (1100, 400))
 ax_θ = Axis(fig[1, 1]; xlabel = "θ - θ(z=0) (K)", ylabel = "z / hᵇˡ")
 ax_U = Axis(fig[1, 2]; xlabel = "Wind speed (m s⁻¹)")
 ax_e = Axis(fig[1, 3]; xlabel = "TKE (m² s⁻²)")
-ax_ℓ = Axis(fig[2, 1]; xlabel = "Mixing length ℓ (m)", ylabel = "z / hᵇˡ")
-ax_K = Axis(fig[2, 2]; xlabel = "Kᶜ / max(Kᶜ)")
-ax_J = Axis(fig[2, 3]; xlabel = "w′θ′ / (w′θ′)₀")
 
-for ax in (ax_θ, ax_U, ax_e, ax_ℓ, ax_K, ax_J)
+for ax in (ax_θ, ax_U, ax_e)
     ylims!(ax, 0, 1.5)
 end
-for ax in (ax_U, ax_e, ax_K, ax_J)
+for ax in (ax_U, ax_e)
     hideydecorations!(ax, grid = false)
 end
-
-xlims!(ax_J, -0.25, 1.3)
-lines!(ax_J, [1, -0.2], [0, 1]; color = :gray50, linestyle = :dash)
-vlines!(ax_J, [0]; color = :gray80, linewidth = 1)
 
 for name in keys(cases)
     reference_model = simulations.NN09[name].model
@@ -253,13 +238,10 @@ for name in keys(cases)
         model = closure_simulations[name].model
         u, v, w = model.velocities
         θ = model.formulation.potential_temperature
-        Kᶜ = model.closure_fields.Kᶜ
         linestyle = linestyles[set]
 
         U = Field(sqrt(u^2 + v^2))
         e = specific_tke(model)
-        ℓ = mixing_length(model)
-        Jᶿ = Field(- Kᶜ * ∂z(θ))
 
         label = "$name: hᵇˡ = $(round(Int, hᵇˡ)) m, max Kᶜ = $(round(Int, Kᶜ_max)) m² s⁻¹"
         lines!(ax_θ, Field(θ - θ[1, 1, 1]), znodes(θ) ./ hᵇˡ; color, linestyle)
@@ -269,14 +251,11 @@ for name in keys(cases)
         else
             lines!(ax_e, e, znodes(e) ./ hᵇˡ; color, linestyle)
         end
-        lines!(ax_ℓ, ℓ, znodes(ℓ) ./ hᵇˡ; color, linestyle)
-        lines!(ax_K, Field(Kᶜ / Kᶜ_max), znodes(Kᶜ) ./ hᵇˡ; color, linestyle)
-        name == :neutral || lines!(ax_J, Field(Jᶿ / Jᶿ[1, 1, 2]), znodes(Jᶿ) ./ hᵇˡ; color, linestyle)
     end
 end
 
 axislegend(ax_e, position = :rt, framevisible = false)
-axislegend(ax_ℓ, [LineElement(linestyle = :solid), LineElement(linestyle = :dash)], ["Nakanishi–Niino constants", "Rational functions"],
+axislegend(ax_θ, [LineElement(linestyle = :solid), LineElement(linestyle = :dash)], ["Nakanishi–Niino constants", "Rational functions"],
            position = :rb, framevisible = false)
 
 save("single_column_tke_boundary_layer.png", fig) #src
@@ -460,11 +439,9 @@ end
 function specific_les_tke(ds)
     haskey(ds, "tke_nd_mean") && return ds["tke_nd_mean"][:]
     ## Older reduced artifacts kept energy density but omitted specific TKE. The exact
-    ## conversion uses rho0_full; rho0 is a nearby, staggered reference density.
+    ## conversion uses rho0_full; rho0 is a nearby, staggered reference density, so the
+    ## specific TKE is approximate for those artifacts. Regenerated profiles retain exact tke_nd_mean.
     density_name = haskey(ds, "rho0_full") ? "rho0_full" : "rho0"
-    if density_name == "rho0"
-        @warn "Legacy LES artifact: approximating specific TKE using the staggered rho0 profile. Regenerated profiles retain exact tke_nd_mean."
-    end
     return ds["tke_mean"][:] ./ ds[density_name][:]
 end
 
@@ -530,52 +507,34 @@ end
 
 detail_les = map(les_means, details)
 
-# The top row is the state — liquid-water potential temperature, total water, cloud liquid — and the
-# bottom row the turbulence: the turbulent kinetic energy, the total-water flux, and the TKE budget of
-# shear production ``P``, buoyancy flux ``B`` and closure dissipation ``-ε``. The LES curves show
-# resolved shear and buoyancy production; its total dissipation cannot be reconstructed from
-# these archived terms without verifying the budget definitions and accounting for the TKE tendency.
-# Solid lines are the dry static stability, dashed the
-# moist; blue is Nakanishi–Niino, red Rational; black is the LES. The flux and budget axes are scaled
-# to the LES, and the budget is shown for the moist-``N²`` configurations; the dry ones run off the
-# axes, for reasons the figures make plain.
+# Each figure shows the state — liquid-water potential temperature, total water, cloud liquid.
+# Solid lines are the dry static stability, dashed the moist; blue is Nakanishi–Niino, red
+# Rational; black is the LES.
 
 function detail_figure(name, columns, les)
-    fig = Figure(size = (1200, 800))
+    fig = Figure(size = (1200, 400))
     grid = columns.NN09.simulation.model.grid
     zc = znodes(grid, Center())
-    zf = znodes(grid, Face())
     ax_θ = Axis(fig[1, 1]; xlabel = "θˡ (K)", ylabel = "z (m)", title = string(name))
     ax_q = Axis(fig[1, 2]; xlabel = "qᵗ (g kg⁻¹)")
     ax_l = Axis(fig[1, 3]; xlabel = "qˡ (g kg⁻¹)")
-    ax_e = Axis(fig[2, 1]; xlabel = "TKE (m² s⁻²)", ylabel = "z (m)")
-    ax_F = Axis(fig[2, 2]; xlabel = "w′qᵗ′ (g kg⁻¹ m s⁻¹)")
-    ax_b = Axis(fig[2, 3]; xlabel = "TKE budget (10⁻⁴ m² s⁻³)")
 
     ztop = 1.6 * max(les.z[argmax(diff(les.θˡ))], 800)
-    for ax in (ax_θ, ax_q, ax_l, ax_e, ax_F, ax_b)
+    for ax in (ax_θ, ax_q, ax_l)
         ylims!(ax, 0, ztop)
     end
-    for ax in (ax_q, ax_l, ax_F, ax_b)
+    for ax in (ax_q, ax_l)
         hideydecorations!(ax, grid = false)
     end
 
     ## Axes scaled to the LES below the top of the plot
     below = les.z .≤ ztop
     xlims!(ax_θ, minimum(les.θˡ[below]) - 1, maximum(les.θˡ[below]) + 1)
-    xlims!(ax_F, -0.5e3 * maximum(abs, les.w′qᵗ′[below]), 3e3 * maximum(abs, les.w′qᵗ′[below]))
-    budget_scale = 3e4 * maximum(abs, vcat(les.P[below], les.B[below]))
-    xlims!(ax_b, -budget_scale, budget_scale)
 
     les_kw = (color = :black, linewidth = 3.5)
     lines!(ax_θ, les.θˡ, les.z; les_kw..., label = "LES")
     lines!(ax_q, 1e3 .* les.qᵗ, les.z; les_kw...)
     lines!(ax_l, 1e3 .* les.qˡ, les.z; les_kw...)
-    lines!(ax_e, les.e, les.z; les_kw...)
-    lines!(ax_F, 1e3 .* les.w′qᵗ′, les.z; les_kw...)
-    lines!(ax_b, 1e4 .* les.P, les.z; les_kw..., linestyle = :solid)
-    lines!(ax_b, 1e4 .* les.B, les.z; les_kw..., linestyle = :dash)
-    vlines!(ax_b, [0]; color = :gray80, linewidth = 1)
 
     for (set, column) in pairs(columns)
         m = column.means
@@ -584,18 +543,9 @@ function detail_figure(name, columns, les)
         lines!(ax_θ, m.θˡ, zc; color, linestyle, label = configuration_labels[set])
         lines!(ax_q, 1e3 .* m.qᵗ, zc; color, linestyle)
         lines!(ax_l, 1e3 .* m.qˡ, zc; color, linestyle)
-        lines!(ax_e, m.e, zc; color, linestyle)
-        lines!(ax_F, 1e3 .* m.w′qᵗ′, zf; color, linestyle)
-        if linestyle == :dash
-            lines!(ax_b, 1e4 .* m.P, zf; color, linestyle = :solid)
-            lines!(ax_b, 1e4 .* m.B, zf; color, linestyle = :dash)
-            lines!(ax_b, -1e4 .* m.ε, zc; color, linestyle = :dot)
-        end
     end
 
     axislegend(ax_θ, position = :lt, framevisible = false)
-    axislegend(ax_b, [LineElement(linestyle = :solid), LineElement(linestyle = :dash), LineElement(linestyle = :dot)],
-               ["P", "B", "−ε (SCM)"], position = :rt, framevisible = false)
     return fig
 end
 
