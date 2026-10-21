@@ -7,7 +7,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compu
                                        update_boundary_conditions!, BoundaryCondition, Flux, Gradient,
                                        NormalFlow, Value, PBC, _fill_bottom_halo!, _fill_top_halo!
 using Oceananigans.Fields: Field, flattened_unique_values
-using Oceananigans.Grids: topology, halo_size, Flat, Periodic, RectilinearGrid, StaticVerticalDiscretization
+using Oceananigans.Grids: AbstractUnderlyingGrid, topology, halo_size, Flat, Periodic, RectilinearGrid, StaticVerticalDiscretization
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.OutputReaders: update_field_time_series!, extract_field_time_series
@@ -205,14 +205,17 @@ end
 # which lies outside the halo at `i = 1 - Hx` unless `ρ` is independent of `i` and `j`.
 #
 # TODO: distributed grids could do the same in their periodic, unpartitioned directions.
-const HorizontallyPeriodicGrid = RectilinearGrid{<:Any, <:Union{Periodic, Flat}, <:Union{Periodic, Flat}, <:Any,
-                                                 <:StaticVerticalDiscretization,
-                                                 <:Any, <:Any, <:Any, <:Any, <:Union{CPU, GPU}}
+#
+# Dispatch on `AbstractUnderlyingGrid`, whose leading parameters (FT, TX, TY, TZ, CZ, Arch) are
+# stable across Oceananigans versions, rather than on `RectilinearGrid`'s own parameter list,
+# which grows when grids store more metrics.
+const HorizontallyPeriodicGrid = AbstractUnderlyingGrid{<:Any, <:Union{Periodic, Flat}, <:Union{Periodic, Flat}, <:Any,
+                                                        <:StaticVerticalDiscretization, <:Union{CPU, GPU}}
 
 const ColumnDensity = Field{Nothing, Nothing}
 
 computes_horizontal_halos(grid, density) = false
-computes_horizontal_halos(::HorizontallyPeriodicGrid, ::ColumnDensity) = true
+computes_horizontal_halos(grid::HorizontallyPeriodicGrid, ::ColumnDensity) = grid isa RectilinearGrid
 
 # Horizontal launch ranges covering the interior and the halos (`Hx = 0` for `Flat`).
 function horizontal_halo_ranges(grid)
