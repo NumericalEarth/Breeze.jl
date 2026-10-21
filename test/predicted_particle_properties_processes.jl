@@ -170,11 +170,11 @@ function expected_reference_ice_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, �
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, p3.process_rates.floors)
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
     ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
-    C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
+    ventilated_capacitance = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
                                       p3.ice.deposition.enhanced_ventilation,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.ν, transport.Dᵛ, ρ_correction)
-    ice_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
+    ice_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * ventilated_capacitance
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
              (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold)
@@ -188,11 +188,11 @@ function expected_reference_coating_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, F�
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, p3.process_rates.floors)
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
     ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
-    C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
+    ventilated_capacitance = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
                                       p3.ice.deposition.enhanced_ventilation,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.ν, transport.Dᵛ, ρ_correction)
-    coating_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
+    coating_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * ventilated_capacitance
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
              (Fˡ >= p3.process_rates.liquid_fraction_clipping_threshold)
@@ -1424,7 +1424,7 @@ end
 
         m_mean = qi / ni
         ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ)
-        C_fv = PPP.deposition_ventilation(
+        ventilated_capacitance = PPP.deposition_ventilation(
             p3.ice.deposition.ventilation,
             p3.ice.deposition.enhanced_ventilation,
             m_mean, Ff, zero(FT), ρf, p3.process_rates, transport.ν, transport.Dᵛ,
@@ -1436,35 +1436,35 @@ end
                                                       ρ, constants, transport)
 
         # Wet growth also warms the collected drops to T₀, with latent heats at T₀.
-        ℒᶠ₀ = PPP.fusion_latent_heat(constants, T₀)
-        ℒᶠ = PPP.fusion_latent_heat(constants, T)
+        ℒᶠʳ₀ = PPP.fusion_latent_heat(constants, T₀)
+        ℒᶠʳ = PPP.fusion_latent_heat(constants, T)
         cˡ = constants.liquid.heat_capacity
-        wet_growth_heat = ℒᶠ₀ + cˡ * (T - T₀)
-        conduction = 2 * FT(π) * C_fv * transport.Kᵃ * (T₀ - T) * ni
+        wet_growth_heat = ℒᶠʳ₀ + cˡ * (T - T₀)
+        conduction = 2 * FT(π) * ventilated_capacitance * transport.Kᵃ * (T₀ - T) * ni
 
         @test capacity ≈ conduction / wet_growth_heat rtol=1e-6
-        @test refreezing_capacity ≈ conduction / ℒᶠ rtol=1e-6
+        @test refreezing_capacity ≈ conduction / ℒᶠʳ rtol=1e-6
 
-        # The vapor term carries ℒᵛ at T₀ for wet growth and ℒⁱ for refreezing.
+        # The vapor term carries ℒˡ at T₀ for wet growth and ℒⁱ for refreezing.
         Δqv = FT(1e-3)
         drier_capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv - Δqv, Ff, ρf,
                                                  ρ, constants, transport)
         drier_refreezing_capacity = PPP.refreezing_capacity(p3, qi, qwi, ni, T, qv - Δqv,
                                                             Ff, ρf, ρ, constants, transport)
-        vapor_flux = 2 * FT(π) * C_fv * transport.Dᵛ * ρ * Δqv * ni
-        ℒᵛ₀ = PPP.vaporization_latent_heat(constants, T₀)
+        vapor_flux = 2 * FT(π) * ventilated_capacitance * transport.Dᵛ * ρ * Δqv * ni
+        ℒˡ₀ = PPP.vaporization_latent_heat(constants, T₀)
         ℒⁱ = PPP.sublimation_latent_heat(constants, T)
 
-        @test drier_capacity - capacity ≈ ℒᵛ₀ * vapor_flux / wet_growth_heat rtol=1e-6
-        @test drier_refreezing_capacity - refreezing_capacity ≈ ℒⁱ * vapor_flux / ℒᶠ rtol=1e-6
+        @test drier_capacity - capacity ≈ ℒˡ₀ * vapor_flux / wet_growth_heat rtol=1e-6
+        @test drier_refreezing_capacity - refreezing_capacity ≈ ℒⁱ * vapor_flux / ℒᶠʳ rtol=1e-6
 
         # Drops are no colder than homogeneous freezing, so the capacity stays positive
-        # where ℒᶠ₀ + cˡ (T - T₀) would change sign.
+        # where ℒᶠʳ₀ + cˡ (T - T₀) would change sign.
         T_cold = FT(190)
         cold_transport = air_transport_properties(T_cold, P, constants)
         cold_capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T_cold, qv, Ff, ρf,
                                                 ρ, constants, cold_transport)
-        @test ℒᶠ₀ + cˡ * (T_cold - T₀) < 0
+        @test ℒᶠʳ₀ + cˡ * (T_cold - T₀) < 0
         @test isfinite(cold_capacity)
         @test cold_capacity > 0
     end

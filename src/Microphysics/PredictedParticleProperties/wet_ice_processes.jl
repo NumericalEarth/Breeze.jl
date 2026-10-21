@@ -168,28 +168,28 @@ conduction and vapor-diffusion terms; see [`wet_growth_capacity`](@ref) and
     q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
     # Ventilation integral (same as deposition/melting)
-    C_fv = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
-                                  transport.ν, transport.Dᵛ, lookups.ρ_correction,
-                                  parameters.floors)
+    ventilated_capacitance = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
+                                                    transport.ν, transport.Dᵛ, lookups.ρ_correction,
+                                                    parameters.floors)
 
-    # 2π (not 4π) because C_fv stores capm = 2 × capacitance, as in melting.
-    surface_factor = 2 * FT(π) * C_fv * max(0, nⁱ)
+    # 2π (not 4π) because ventilated_capacitance stores capm = 2 × capacitance, as in melting.
+    surface_factor = 2 * FT(π) * ventilated_capacitance * max(0, nⁱ)
     conduction = surface_factor * transport.Kᵃ * (T₀ - T)          # [W/kg]
     vapor_flux = surface_factor * transport.Dᵛ * ρ * (q_sat0 - qᵛ) # [kg/kg/s]
 
     # Wet growth: collected drops warm from T to T₀, then freeze at a wet surface,
     # so the latent heats are taken at T₀. Drops are no colder than homogeneous
     # freezing, which keeps the denominator positive.
-    ℒᵛ₀ = vaporization_latent_heat(constants, T₀)
-    ℒᶠ₀ = fusion_latent_heat(constants, T₀)
+    ℒˡ₀ = vaporization_latent_heat(constants, T₀)
+    ℒᶠʳ₀ = fusion_latent_heat(constants, T₀)
     cˡ = constants.liquid.heat_capacity
     drop_temperature = max(T, parameters.homogeneous_freezing_temperature)
-    wet_growth = (conduction + ℒᵛ₀ * vapor_flux) / (ℒᶠ₀ + cˡ * (drop_temperature - T₀))
+    wet_growth = (conduction + ℒˡ₀ * vapor_flux) / (ℒᶠʳ₀ + cˡ * (drop_temperature - T₀))
 
     # Refreezing: the coating needs no warming.
     ℒⁱ = sublimation_latent_heat(constants, T)
-    ℒᶠᵘˢ = fusion_latent_heat(constants, T)
-    refreezing = (conduction + ℒⁱ * vapor_flux) / ℒᶠᵘˢ
+    ℒᶠʳ = fusion_latent_heat(constants, T)
+    refreezing = (conduction + ℒⁱ * vapor_flux) / ℒᶠʳ
 
     below_freezing = T < T₀
     return ifelse(below_freezing, max(0, wet_growth), zero(wet_growth)),
@@ -207,7 +207,7 @@ be frozen. Collected drops are warmed from `T` to `T₀` and freeze at a wet
 surface, so the heat balance uses the vaporization and fusion latent heats at `T₀`:
 
 ```math
-q_{wgrth} = 2π C f^{ve} \\frac{Kᵃ(T_0-T) + ℒᵛ_0 Dᵛ(ρ^{v+}_0-ρ^v)}{ℒᶠ_0 + cˡ (T - T_0)} × N^i
+\\dot{q}_\\text{wet} = 2π C f^{ve} \\frac{Kᵃ(T_0-T) + ℒˡ_0 Dᵛ(ρ^{v+}_0-ρ^v)}{ℒᶠʳ_0 + cˡ (T - T_0)} × N^i
 ```
 
 When the collection rate (cloud + rain riming) exceeds this capacity,
@@ -253,7 +253,7 @@ determined by the heat flux at the particle surface,
 [Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5):
 
 ```math
-\\frac{dm}{dt} = \\frac{2π}{ℒᶠᵘˢ} C f^{ve} \\left[Kᵃ(T_0-T) + ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
+\\frac{dm}{dt} = \\frac{2π}{ℒᶠʳ} C f^{ve} \\left[Kᵃ(T_0-T) + ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
 ```
 
 The conduction and vapor terms are those of [`wet_growth_capacity`](@ref), but the
