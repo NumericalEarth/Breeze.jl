@@ -375,7 +375,7 @@ end
 
 @testset "Bounds-preserving WENO bottom precipitation flux [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(6, 6, 6), extent=(100, 100, 100))
+    grid = RectilinearGrid(default_arch; size=(6, 6, 6), extent=(100, 100, 100), halo=(4, 4, 4))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
