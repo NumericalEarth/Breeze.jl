@@ -796,6 +796,26 @@ the impact parameter ``R_\text{imp}``, which depends on droplet size, impact vel
 \end{cases}
 ```
 
+The coefficients ``0.051``, ``0.114``, and ``-0.0055`` are empirical fit parameters,
+not physical constants. They are candidates for calibration, although Breeze currently
+hard-codes them, together with the branch transition ``R_\text{imp} = 8``, in
+`wet_ice_processes.jl`; they are not constructor options. The factor ``1000`` converts
+the polynomial's density from g/cm³ to kg/m³ and is not a calibration parameter.
+
+The upper-branch constants are determined by continuity and the chosen endpoint:
+
+```math
+611 = 1000 (0.051 + 0.114 \times 8 - 0.0055 \times 8^2),
+\qquad
+72.25 = \frac{900 - 611}{12 - 8}.
+```
+
+Thus ``611`` is the polynomial density at the transition, and ``72.25`` is the slope
+that connects this density to ``900`` kg/m³ at ``R_\text{imp} = 12``. They are not
+two additional independent calibration parameters if continuity and that endpoint
+are retained. A future parameterization that exposes the polynomial coefficients
+should derive the linear-branch coefficients from these constraints.
+
 Wherever the particle carries rime volume, the diagnosed rime density is bounded
 into `[minimum_rime_density, maximum_rime_density]`:
 - ``ρ^f_\text{min} = 50`` kg/m³ is the minimum rime density
@@ -810,11 +830,16 @@ The rime density affects the graupel density ``ρ^{gr}`` and thus the regime thr
 As particles rime more heavily, they become denser and more spherical.
 
 !!! note "Rime-impact clamping and table discretization"
-    ``R_\text{imp}`` is clamped to [1, 12] before the Cober–List fit is applied;
+    By default, ``R_\text{imp}`` is clamped to [1, 12] before the Cober–List fit is applied;
     the linear branch for ``R_\text{imp} > 8`` is extended to ``R_\text{imp} = 12`` so that
-    ``ρ^f = 900`` kg/m³. The lookup tables discretize ``ρ^f`` on an uneven grid
+    ``ρ^f = 900`` kg/m³. The impact bounds (`minimum_rime_impact`, `maximum_rime_impact`)
+    and density bounds (`minimum_rime_density`, `maximum_rime_density`) are configurable
+    closure choices and can also be considered for calibration. Changing these bounds
+    does not recompute the hard-coded transition, intercept, or slope of the fit.
+    The lookup tables discretize ``ρ^f`` on an uneven grid
     (50, 250, 450, 650, 900 kg/m³) and interpolate between bins; `rime_density_index`
-    maps a physical ``ρ^f`` onto that grid.
+    maps a physical ``ρ^f`` onto that grid. These grid points specify numerical sampling,
+    rather than additional empirical coefficients of the density fit.
 
 ### Summary
 
