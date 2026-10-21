@@ -62,7 +62,7 @@ where:
 
     # Table lookup uses the total mass per particle, not the dry-only mass,
     # because the tables are indexed by total mass.
-    # With no particles the rate below is nⁱ_eff * dm/dt = 0 regardless, so the
+    # With no particles the rate below is nⁱ₊ * dm/dt = 0 regardless, so the
     # fallback mean mass only has to sit inside the table's mass axis.
     m_mean = safe_divide(qⁱ_total, max(0, nⁱ), FT(floors.mean_particle_mass_fallback))
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
@@ -75,14 +75,14 @@ end
 
 # Shared body. With `P3IceLookups` the bracket floors `nⁱ` at `floors.number_scale` where the
 # standalone form above floors it at zero; the coordinates agree for `nⁱ ≥ number_scale`, and
-# below it the melt rate `nⁱ_eff × dm/dt` is negligible.
+# below it the melt rate `nⁱ₊ × dm/dt` is negligible.
 @inline function ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
                                         ρ_correction, prep)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
-    qⁱ_eff = max(0, qⁱ)
-    nⁱ_eff = max(0, nⁱ)
+    qⁱ₊ = max(0, qⁱ)
+    nⁱ₊ = max(0, nⁱ)
 
     T₀ = parameters.freezing_temperature
 
@@ -133,13 +133,13 @@ end
     dm_dt_melt = max(0, dm_dt_melt)
 
     # Total rate
-    melt_rate = nⁱ_eff * dm_dt_melt
+    melt_rate = nⁱ₊ * dm_dt_melt
 
     # Limit melting rate: physical heat-transfer rate is the true limiter.
     # Guard against numerical overflow with a safety timescale (dt_safety).
     # The driver or time integrator must additionally limit melting to
     # available ice per dt.
-    max_melt = qⁱ_eff / p3.process_rates.sink_limiting_timescale
+    max_melt = qⁱ₊ / p3.process_rates.sink_limiting_timescale
     melt_rate = min(melt_rate, max_melt)
 
     return (ifelse(is_melting, melt_rate, zero(FT)), small, large)
@@ -233,12 +233,12 @@ Number of melted particles equals number of rain drops produced.
 @inline function ice_melting_number_rate(qⁱ, nⁱ, qⁱ_melt_rate)
     FT = typeof(qⁱ)
 
-    qⁱ_eff = max(0, qⁱ)
-    nⁱ_eff = max(0, nⁱ)
+    qⁱ₊ = max(0, qⁱ)
+    nⁱ₊ = max(0, nⁱ)
 
     # |∂nⁱ/∂t| = (nⁱ/qⁱ) × ∂qⁱ_melt/∂t (positive magnitude)
     # Sign convention: returns positive; caller subtracts in tendency assembly.
-    ratio = safe_divide(nⁱ_eff, qⁱ_eff, zero(FT))
+    ratio = safe_divide(nⁱ₊, qⁱ₊, zero(FT))
 
     return ratio * qⁱ_melt_rate
 end
