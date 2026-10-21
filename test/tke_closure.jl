@@ -724,6 +724,21 @@ using Breeze.TurbulenceClosures: rational_stability, Riᶜᶜᶠ,
         @test all(ρe .≥ 0)
     end
 
+    @testset "the face Richardson number filters a 2Δz mode in N² and S²" begin
+        # N² alternates between neighboring faces, as in a saturated layer under the dry static
+        # stability, over a uniform shear: Ri must vary far less than N² does.
+        N² = ZFaceField(grid)
+        set!(N², z -> 1e-4 * (1 + 0.5 * (-1)^round(Int, z / (Lz / Nz))))
+        Oceananigans.fill_halo_regions!(N²)
+        velocities = (u = XFaceField(grid), v = YFaceField(grid))
+        set!(velocities.u, z -> 0.01 * z)
+        Oceananigans.fill_halo_regions!(velocities.u)
+        Ri = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, velocities, N²)))
+        faces = 3:Nz-1
+        @test all(isfinite, Ri[faces])
+        @test maximum(Ri[faces]) - minimum(Ri[faces]) < 0.2 * sum(Ri[faces]) / length(faces)
+    end
+
     @testset "with the moist static stability" begin
         closure = TKEBasedTurbulenceClosure(; static_stability = MoistStaticStability())
         microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
