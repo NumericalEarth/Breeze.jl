@@ -170,6 +170,7 @@ function AtmosphereModel(grid;
 
     # Use default timestepper for the dynamics if not specified
     isnothing(timestepper) && (timestepper = default_timestepper(dynamics))
+    validate_timestepper(timestepper, dynamics)
 
     # Validate that velocity boundary conditions are only provided for dynamics that support them
     validate_velocity_boundary_conditions(dynamics, boundary_conditions)
@@ -397,6 +398,10 @@ function AtmosphereModel(grid;
 
     return model
 end
+
+# Extended, on `Val`s of the time stepper name, by dynamics that only one time stepper integrates
+validate_timestepper(timestepper, dynamics) = nothing
+validate_timestepper(name::Symbol, dynamics) = validate_timestepper(Val(name), dynamics)
 
 # Breeze's acoustic and SSP time steppers accept a `dynamics` keyword;
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.

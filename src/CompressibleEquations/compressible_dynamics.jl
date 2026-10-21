@@ -576,6 +576,13 @@ AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =
 default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticRungeKutta3
 default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
 
+# The slow tendencies of `SplitExplicitTimeDiscretization` omit the vertical pressure gradient and the
+# buoyancy, which only the acoustic substeps of `AcousticRungeKutta3` integrate
+AtmosphereModels.validate_timestepper(::Val{:AcousticRungeKutta3}, ::CompressibleDynamics{<:SplitExplicitTimeDiscretization}) = nothing
+
+AtmosphereModels.validate_timestepper(::Val{name}, ::CompressibleDynamics{<:SplitExplicitTimeDiscretization}) where name =
+    throw(ArgumentError("CompressibleDynamics(SplitExplicitTimeDiscretization()) requires timestepper = :AcousticRungeKutta3, got :$name."))
+
 #####
 ##### Show methods
 #####
