@@ -307,6 +307,10 @@ const P3_HALO_FREE_FIELD_NAMES = (:ρqᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :
 
 AM.microphysical_halo_fields(::P3, μ) = Base.structdiff(μ, NamedTuple{P3_HALO_FREE_FIELD_NAMES})
 
+# `update_microphysical_fields!` builds the P3 state from `(i, j, k)` alone (with zero velocities)
+# and writes every remaining field there.
+AM.horizontally_pointwise_auxiliaries(::P3) = true
+
 # Type dispatch fixes the optional field set at compile time for GPU kernels.
 @inline cloud_number_fields(::Nothing, grid) = (;)
 

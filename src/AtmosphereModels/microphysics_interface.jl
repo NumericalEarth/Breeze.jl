@@ -631,6 +631,18 @@ microphysical_halo_fields(microphysics, microphysical_fields) = microphysical_fi
 """
 $(TYPEDSIGNATURES)
 
+Return `true` if [`update_microphysical_fields!`](@ref) at `(i, j, k)` reads the model state only
+at `(i, j, k)` (and its column) and writes every field of `microphysical_halo_fields`
+there. The auxiliary thermodynamic kernel may then run over the horizontal halos of a horizontally
+periodic grid, so that those fields need only their bottom and top halos filled.
+Defaults to `false`.
+"""
+horizontally_pointwise_auxiliaries(microphysics) = false
+horizontally_pointwise_auxiliaries(::Nothing) = true
+
+"""
+$(TYPEDSIGNATURES)
+
 Update all microphysical fields at grid point `(i, j, k)`.
 
 This orchestrating function:

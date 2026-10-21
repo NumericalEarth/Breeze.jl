@@ -1,14 +1,13 @@
 using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
-using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
+using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite, instantiated_location
 using Oceananigans.Advection: update_advection!
-using Oceananigans.Architectures: AbstractSerialArchitecture
+using Oceananigans.Architectures: AbstractSerialArchitecture, CPU, GPU
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!, BoundaryCondition, Flux, Gradient,
-                                       NormalFlow, Value
-using Oceananigans.Fields: Field
-using Oceananigans.Fields: flattened_unique_values
-using Oceananigans.Grids: topology
+                                       NormalFlow, Value, PBC, _fill_bottom_halo!, _fill_top_halo!
+using Oceananigans.Fields: Field, flattened_unique_values
+using Oceananigans.Grids: topology, halo_size, Flat, Periodic, RectilinearGrid, StaticVerticalDiscretization
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.OutputReaders: update_field_time_series!, extract_field_time_series
@@ -192,6 +191,97 @@ function fill_model_halo_regions!(field, model; kwargs...)
 end
 
 #####
+##### Diagnostics over the horizontal halos
+#####
+
+# On a serial rectilinear grid whose horizontal directions are all periodic (or flat), the
+# prognostic halo fill in `update_state!` makes every x/y halo of a prognostic field a periodic
+# image of the interior. A diagnostic computed pointwise from the prognostics over the
+# halo-extended horizontal range (`i ∈ 1-Hx:Nx+Hx`, `j ∈ 1-Hy:Ny+Hy`) is then bitwise the periodic
+# image that its x/y halo fill would copy, so only its bottom and top halos still need filling.
+# The vertical range stays `1:Nz`: z halos are filled by boundary conditions, not computed.
+#
+# The column (anelastic) density is required because `u = ρu / ℑx(ρ)` reads `ρ` at `i - 1`,
+# which lies outside the halo at `i = 1 - Hx` unless `ρ` is independent of `i` and `j`.
+#
+# TODO: distributed grids could do the same in their periodic, unpartitioned directions.
+const HorizontallyPeriodicGrid = RectilinearGrid{<:Any, <:Union{Periodic, Flat}, <:Union{Periodic, Flat}, <:Any,
+                                                 <:StaticVerticalDiscretization,
+                                                 <:Any, <:Any, <:Any, <:Any, <:Union{CPU, GPU}}
+
+const ColumnDensity = Field{Nothing, Nothing}
+
+computes_horizontal_halos(grid, density) = false
+computes_horizontal_halos(::HorizontallyPeriodicGrid, ::ColumnDensity) = true
+
+# Horizontal launch ranges covering the interior and the halos (`Hx = 0` for `Flat`).
+function horizontal_halo_ranges(grid)
+    Nx, Ny, _ = size(grid)
+    Hx, Hy, _ = halo_size(grid)
+    return 1-Hx:Nx+Hx, 1-Hy:Ny+Hy
+end
+
+# A field whose x/y halos are periodic images (or absent) and whose bottom and top halos fill
+# without model arguments can have its z halos filled alone, once its horizontal halos hold the
+# periodic images.
+@inline horizontally_periodic_bc(bc) = false
+@inline horizontally_periodic_bc(::Union{Nothing, PBC}) = true
+
+@inline function fills_vertical_halos_alone(field::Field)
+    bcs = field.boundary_conditions
+    return field.indices isa Tuple{Colon, Colon, Colon} &&
+           horizontally_periodic_bc(bcs.west)  && horizontally_periodic_bc(bcs.east) &&
+           horizontally_periodic_bc(bcs.south) && horizontally_periodic_bc(bcs.north) &&
+           !halo_fill_needs_model_args(bcs.bottom) && !halo_fill_needs_model_args(bcs.top)
+end
+
+@inline fills_vertical_halos_alone(field) = false
+
+"""
+$(TYPEDSIGNATURES)
+
+Fill the halos of `fields` whose x/y halos already hold their periodic images, as left by a
+kernel launched over the horizontal halos (see `computes_horizontal_halos`). Fields that admit it
+(`fills_vertical_halos_alone`) have only their bottom and top halos filled, over the full
+horizontal extent and in a single kernel launch for all of them; the others are filled whole.
+"""
+function fill_vertical_halo_regions!(fields::Tuple, model)
+    vertical = filter(fills_vertical_halos_alone, fields)
+    others = filter(!fills_vertical_halos_alone, fields)
+
+    if !isempty(vertical)
+        grid = model.grid
+        ii, jj = horizontal_halo_ranges(grid)
+        data = map(f -> f.data, vertical)
+        bottom_bcs = map(f -> f.boundary_conditions.bottom, vertical)
+        top_bcs = map(f -> f.boundary_conditions.top, vertical)
+        locations = map(instantiated_location, vertical)
+        launch!(grid.architecture, grid, KernelParameters(ii, jj),
+                _fill_bottom_and_top_halos!, data, bottom_bcs, top_bcs, locations, grid)
+    end
+
+    fill_model_halo_regions!(others, model)
+
+    return nothing
+end
+
+@kernel function _fill_bottom_and_top_halos!(data, bottom_bcs, top_bcs, locations, grid)
+    i, j = @index(Global, NTuple)
+    fill_bottom_and_top_halos!(i, j, grid, data, bottom_bcs, top_bcs, locations)
+end
+
+@inline fill_bottom_and_top_halos!(i, j, grid, ::Tuple{}, ::Tuple{}, ::Tuple{}, ::Tuple{}) = nothing
+
+@inline function fill_bottom_and_top_halos!(i, j, grid, data, bottom_bcs, top_bcs, locations)
+    c = first(data)
+    loc = first(locations)
+    _fill_bottom_halo!(i, j, grid, c, first(bottom_bcs), loc)
+    _fill_top_halo!(i, j, grid, c, first(top_bcs), loc)
+    fill_bottom_and_top_halos!(i, j, grid, Base.tail(data), Base.tail(bottom_bcs), Base.tail(top_bcs), Base.tail(locations))
+    return nothing
+end
+
+#####
 ##### Velocity and momentum computation
 #####
 
@@ -215,8 +305,9 @@ function compute_velocities!(model::AtmosphereModel; fill_momentum_halos=true)
     # cannot evaluate the time argument. Note: velocities are still stale here
     # (recomputed just below), so momentum BCs with velocity `field_dependencies`
     # would see last-stage values.
+    density = dynamics_density(model.dynamics)
+
     if fill_momentum_halos
-        density = dynamics_density(model.dynamics)
         fill_model_halo_regions!(density, model)
         fill_model_halo_regions!(model.momentum, model)
     end
@@ -224,18 +315,30 @@ function compute_velocities!(model::AtmosphereModel; fill_momentum_halos=true)
     # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
     # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
     # the trailing `fill_halo_regions!(model.velocities)`), N for Flat.
+    # Where possible the launch also covers the horizontal halos, which then need no fill.
     Nx, Ny, Nz = size(grid)
     TX, TY, TZ = topology(grid)
-    launch!(arch, grid, KernelParameters(1:length(Face(), TX(), Nx),
-                                         1:length(Face(), TY(), Ny),
-                                         1:length(Face(), TZ(), Nz)),
+    horizontal_halos = computes_horizontal_halos(grid, density)
+
+    if horizontal_halos
+        ii, jj = horizontal_halo_ranges(grid)
+    else
+        ii, jj = 1:length(Face(), TX(), Nx), 1:length(Face(), TY(), Ny)
+    end
+
+    launch!(arch, grid, KernelParameters(ii, jj, 1:length(Face(), TZ(), Nz)),
             _compute_velocities!,
             model.velocities.u, model.velocities.v, model.velocities.w,
             model.momentum.ρu,   model.momentum.ρv,   model.momentum.ρw,
             grid, model.dynamics)
 
     foreach(mask_immersed_field!, model.velocities)
-    fill_halo_regions!(model.velocities)
+
+    if horizontal_halos
+        fill_vertical_halo_regions!(values(model.velocities), model)
+    else
+        fill_halo_regions!(model.velocities)
+    end
 
     return nothing
 end
@@ -331,7 +434,19 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    launch!(arch, grid, :xyz,
+    # The kernel is pointwise in the horizontal for the formulations, and for microphysics schemes
+    # that declare `horizontally_pointwise_auxiliaries`, so it can cover the horizontal halos.
+    horizontal_halos = computes_horizontal_halos(grid, dynamics_density(model.dynamics)) &&
+                       horizontally_pointwise_auxiliaries(model.microphysics)
+
+    if horizontal_halos
+        ii, jj = horizontal_halo_ranges(grid)
+        workspec = KernelParameters(ii, jj, 1:size(grid, 3))
+    else
+        workspec = :xyz
+    end
+
+    launch!(arch, grid, workspec,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
             specific_prognostic_moisture(model),
@@ -343,9 +458,17 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.microphysical_fields,
             model.moisture_density)
 
-    fill_halo_regions!(model.temperature)
-    fill_model_halo_regions!(microphysical_halo_fields(model.microphysics, model.microphysical_fields), model)
-    fill_halo_regions!(model.formulation)
+    μ = microphysical_halo_fields(model.microphysics, model.microphysical_fields)
+
+    if horizontal_halos
+        # The formulations' `fill_halo_regions!` fills exactly their specific thermodynamic field.
+        θ = specific_thermodynamic_field(model.formulation)
+        fill_vertical_halo_regions!((model.temperature, θ, values(μ)...), model)
+    else
+        fill_halo_regions!(model.temperature)
+        fill_model_halo_regions!(μ, model)
+        fill_halo_regions!(model.formulation)
+    end
 
     return nothing
 end
