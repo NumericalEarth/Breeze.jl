@@ -159,7 +159,7 @@ hydrometeors can be frozen, determined by the ventilated heat balance of
 [Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5):
 
 ```math
-q_{wgrth} = \\frac{2π}{ℒᶠᵘˢ} C f^{ve} \\left[Kᵃ(T_0-T) + ℒⁱ Dᵛ(ρ^{v+}-ρ^v)\\right] × N^i
+\\dot{q}_\\text{wet} = \\frac{2π}{ℒᶠʳ} C f^{ve} \\left[Kᵃ(T_0-T) + ℒⁱ Dᵛ(ρ^{v+}-ρ^v)\\right] × N^i
 ```
 
 When the collection rate (cloud + rain riming) exceeds this capacity,
@@ -192,7 +192,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     T₀ = parameters.freezing_temperature
     below_freezing = T < T₀
 
-    ℒᶠᵘˢ = fusion_latent_heat(constants, T)
+    ℒᶠʳ = fusion_latent_heat(constants, T)
     ℒⁱ = sublimation_latent_heat(constants, T)
 
     Kᵃ = transport.Kᵃ
@@ -202,17 +202,17 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
     # Ventilation integral (same as deposition/refreezing)
-    C_fv = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
-                                  ν, Dᵛ, lookups.ρ_correction, parameters.floors)
+    ventilated_capacitance = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
+                                                    ν, Dᵛ, lookups.ρ_correction, parameters.floors)
 
     # Heat balance: sensible + latent
-    Q_sensible = Kᵃ * (T₀ - T)
-    Q_latent = ℒⁱ * Dᵛ * ρ * (q_sat0 - qᵛ)
+    𝒬ᵀ = Kᵃ * (T₀ - T)
+    𝒬ᵛ = ℒⁱ * Dᵛ * ρ * (q_sat0 - qᵛ)
 
-    # 2π (not 4π) because C_fv stores capm = 2 × capacitance, as in melting.
-    qwgrth = 2 * FT(π) * C_fv * (Q_sensible + Q_latent) / ℒᶠᵘˢ * nⁱ_eff
+    # 2π (not 4π) because ventilated_capacitance stores capm = 2 × capacitance, as in melting.
+    capacity = 2 * FT(π) * ventilated_capacitance * (𝒬ᵀ + 𝒬ᵛ) / ℒᶠʳ * nⁱ_eff
 
-    return ifelse(below_freezing, max(0, qwgrth), zero(FT))
+    return ifelse(below_freezing, max(0, capacity), zero(FT))
 end
 
 """
@@ -224,7 +224,7 @@ Below freezing, liquid coating on ice particles refreezes. The rate is
 determined by the heat flux at the particle surface:
 
 ```math
-\\frac{dm}{dt} = \\frac{2π}{ℒᶠᵘˢ} C f^{ve} \\left[Kᵃ(T_0-T) + ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
+\\frac{dm}{dt} = \\frac{2π}{ℒᶠʳ} C f^{ve} \\left[Kᵃ(T_0-T) + ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
 ```
 
 That is the same particle heat balance that sets the wet-growth capacity, so this

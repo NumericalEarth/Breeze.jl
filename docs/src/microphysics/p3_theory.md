@@ -525,9 +525,9 @@ and passed to every rate that needs them.
 Thermodynamic constants keep their appendix symbols — ``\mathcal{L}^l`` and
 ``\mathcal{L}^i`` for the latent heats of condensation and deposition, ``c^{pd}``
 for the dry-air heat capacity, ``R^v`` for the vapor gas constant. The one
-addition is ``\mathcal{L}^\text{fus} = \mathcal{L}^i - \mathcal{L}^l``, the latent
-heat of fusion, which the melting and wet-growth heat balances need. It is *not*
-written ``\mathcal{L}^f``, since `f` labels rime here.
+addition is ``\mathcal{L}^{fr} = \mathcal{L}^i - \mathcal{L}^l``, the latent
+heat of fusion, which the melting and wet-growth heat balances need. Its superscript
+`fr` abbreviates freezing, since `f` already labels rime (``q^f``, ``b^f``).
 
 ### Process Rates
 
@@ -2096,7 +2096,7 @@ following the simplified diffusion approximation in
 appendix C, section i:
 
 ```math
-\frac{dm}{dt} = -\frac{2π\, \mathcal{C}}{\mathcal{L}^\text{fus}}\,
+\frac{dm}{dt} = -\frac{2π\, \mathcal{C}}{\mathcal{L}^{fr}}\,
                 \big[K^a\,(T - T_0) + ρ\, \mathcal{L}^l\, D^v\, (q^v - q^{v+l}(T_0))\big]\, f_v,
 ```
 
@@ -2165,7 +2165,7 @@ The wet-growth capacity rate is the ventilated heat balance of a particle whose
 surface is at ``T_0`` ([Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5)):
 
 ```math
-\dot{q}_\text{wet} = \frac{2π}{\mathcal{L}^\text{fus}} \big[K^a\,(T_0 - T) + ρ\,\mathcal{L}^i\,D^v\,(q^{v+l}(T_0) - q^v_\text{cld})\big]\, f_v\, n^i,
+\dot{q}_\text{wet} = \frac{2π}{\mathcal{L}^{fr}} \big[K^a\,(T_0 - T) + ρ\,\mathcal{L}^i\,D^v\,(q^{v+l}(T_0) - q^v_\text{cld})\big]\, f_v\, n^i,
 ```
 
 where ``f_v`` is the ventilated capacitance integral (stored as `capm`, twice the
@@ -2199,7 +2199,7 @@ rates are zeroed, and no densification flag is set. Refreezing then transfers
 as the wet-growth capacity:
 
 ```math
-\dot{q}_\text{refr} = n^i\, \max\!\big(0,\; \frac{2π}{\mathcal{L}^\text{fus}} \mathcal{C} f_v [K^a (T_0 - T)
+\dot{q}_\text{refr} = n^i\, \max\!\big(0,\; \frac{2π}{\mathcal{L}^{fr}} \mathcal{C} f_v [K^a (T_0 - T)
                       + ρ\, \mathcal{L}^i D^v (q^{v+l}(T_0) - q^v)]\big),
 ```
 
@@ -2309,7 +2309,7 @@ tendency. The relevant latent heats at standard conditions are:
 
 - ``\mathcal{L}^l \approx 2.5 \times 10^6`` J/kg (vaporization)
 - ``\mathcal{L}^i \approx 2.83 \times 10^6`` J/kg (sublimation)
-- ``\mathcal{L}^\text{fus} \approx 3.34 \times 10^5`` J/kg (fusion)
+- ``\mathcal{L}^{fr} \approx 3.34 \times 10^5`` J/kg (fusion)
 
 ### Process Summary
 

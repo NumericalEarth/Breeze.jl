@@ -170,11 +170,11 @@ function expected_reference_ice_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, �
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, p3.process_rates.floors)
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
     ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
-    C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
+    ventilated_capacitance = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
                                       p3.ice.deposition.enhanced_ventilation,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.ν, transport.Dᵛ, ρ_correction)
-    ice_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
+    ice_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * ventilated_capacitance
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
              (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold)
@@ -188,11 +188,11 @@ function expected_reference_coating_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, F�
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, p3.process_rates.floors)
     ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
     ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ_air)
-    C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
+    ventilated_capacitance = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
                                       p3.ice.deposition.enhanced_ventilation,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.ν, transport.Dᵛ, ρ_correction)
-    coating_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
+    coating_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * ventilated_capacitance
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
              (Fˡ >= p3.process_rates.liquid_fraction_clipping_threshold)
@@ -1399,7 +1399,7 @@ end
                                      p3.process_rates.floors)
     end
 
-    @testset "wet_growth_capacity applies 2π/ℒᶠ to the sensible term" begin
+    @testset "wet_growth_capacity applies 2π/ℒᶠʳ to the sensible term" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
@@ -1424,7 +1424,7 @@ end
 
         m_mean = qi / ni
         ρ_correction = PPP.ice_air_density_correction(p3.process_rates, p3.ice.fall_speed.reference_air_density, ρ)
-        C_fv = PPP.deposition_ventilation(
+        ventilated_capacitance = PPP.deposition_ventilation(
             p3.ice.deposition.ventilation,
             p3.ice.deposition.enhanced_ventilation,
             m_mean, Ff, zero(FT), ρf, p3.process_rates, transport.ν, transport.Dᵛ,
@@ -1432,8 +1432,8 @@ end
 
         capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
                                            ρ, constants, transport)
-        ℒᶠ = PPP.fusion_latent_heat(constants, T)
-        expected = 2 * FT(π) * C_fv * transport.Kᵃ * (T₀ - T) / ℒᶠ * ni
+        ℒᶠʳ = PPP.fusion_latent_heat(constants, T)
+        expected = 2 * FT(π) * ventilated_capacitance * transport.Kᵃ * (T₀ - T) / ℒᶠʳ * ni
 
         @test capacity ≈ expected rtol=1e-6
     end

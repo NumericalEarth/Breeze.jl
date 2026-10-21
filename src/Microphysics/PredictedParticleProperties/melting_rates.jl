@@ -11,14 +11,14 @@ Morrison & Milbrandt (2015a) Eq. 44.
 The melting rate is determined by the heat flux to the particle:
 
 ```math
-\\frac{dm}{dt} = -\\frac{2π \\, \\text{capm}}{ℒᶠᵘˢ} × [Kᵃ(T-T_0) + ρ ℒˡ Dᵛ(q^v - q^{v+}_0)] × f^{ve}
+\\frac{dm}{dt} = -\\frac{2π \\, \\text{capm}}{ℒᶠʳ} × [Kᵃ(T-T_0) + ρ ℒˡ Dᵛ(q^v - q^{v+}_0)] × f^{ve}
 ```
 
 where capm = cap × D is the P3 capacitance convention (2× physical C).
 
 where:
 - C is the capacitance
-- ℒᶠᵘˢ is the latent heat of fusion
+- ℒᶠʳ is the latent heat of fusion
 - Kᵃ is thermal conductivity of air
 - T_0 is the freezing temperature
 - ℒˡ is latent heat of vaporization
@@ -90,8 +90,8 @@ end
     ΔT = T - T₀
     is_melting = ΔT > 0
 
-    # Thermodynamic constants: ℒᶠᵘˢ and ℒˡ are T-dependent.
-    ℒᶠᵘˢ = fusion_latent_heat(constants, T)
+    # Thermodynamic constants: ℒᶠʳ and ℒˡ are T-dependent.
+    ℒᶠʳ = fusion_latent_heat(constants, T)
     ℒˡ = vaporization_latent_heat(constants, T)
     # T,P-dependent transport properties (pre-computed or computed on demand)
     Kᵃ = transport.Kᵃ       # Thermal conductivity of air [W/m/K]
@@ -111,23 +111,23 @@ end
             sc_corr * evaluate_at(dep.small_ice_ventilation_reynolds, prep)
     large = evaluate_at(dep.large_ice_ventilation_constant, prep) +
             sc_corr * evaluate_at(dep.large_ice_ventilation_reynolds, prep)
-    C_fv = small + large
+    ventilated_capacitance = small + large
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: Kᵃ × (T - T₀)
-    Q_sensible = Kᵃ * ΔT
+    𝒬ᵀ = Kᵃ * ΔT
 
     # Latent heat: ℒˡ × Dᵛ × ρ × (qᵛ - q_sat0)
     # When subsaturated, this is negative and opposes melting
-    Q_latent = ℒˡ * Dᵛ * ρ * (qᵛ - q_sat0)
+    𝒬ᵛ = ℒˡ * Dᵛ * ρ * (qᵛ - q_sat0)
 
     # Total heat flux
-    Q_total = Q_sensible + Q_latent
+    𝒬ᵗ = 𝒬ᵀ + 𝒬ᵛ
 
     # Melting rate per particle (negative dm/dt → positive melt rate)
     # Uses 2π (not 4π) because ventilation integral stores capm = cap × D
     # (the P3 convention), which is 2× the physical capacitance.
-    dm_dt_melt = 2 * FT(π) * C_fv * Q_total / ℒᶠᵘˢ
+    dm_dt_melt = 2 * FT(π) * ventilated_capacitance * 𝒬ᵗ / ℒᶠʳ
 
     # Clamp to positive (only melting, not refreezing here)
     dm_dt_melt = max(0, dm_dt_melt)
