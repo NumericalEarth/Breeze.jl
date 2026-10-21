@@ -791,8 +791,8 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
 
     # Zero the auxiliary workspaces (predictor/damping scratch) and the
     # time-averaged-velocity accumulator slots in one launch. The velocity slots
-    # then accumulate raw `momentum_perturbation` each substep and are normalized
-    # by `finalize_time_averaged_velocity!` at stage end.
+    # then accumulate `momentum_perturbation` each substep ((ρw)′ weighted by the
+    # off-centering) and are normalized by `finalize_time_averaged_velocity!` at stage end.
     launch!(arch, grid, :xyz, _zero_stage_workspaces!,
             substepper.previous_density_potential_temperature_perturbation,
             substepper.density_predictor,
@@ -947,15 +947,19 @@ end
 #     - ω = forward_weight = "new side" weight
 #     - 1 - ω = "old side" weight
 #     - δτˢ⁻ = (1 − ω) Δτ
+#     - ωˢ⁻ = 1 − ω, ωᵐ⁺ = ω
 #
 # See derivation in the split-explicit derivation in `docs/src/compressible_dynamics.md`.
-@kernel function _build_predictors!(ρ′★, ρθ′★, ρθ′ˢ⁻, ρ′, ρθ′, ρw′, ρu′, ρv′,
-                                    grid, dynamics, Δτ, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ)
+@kernel function _build_predictors!(ρ′★, ρθ′★, ρθ′ˢ⁻, avg, ρ′, ρθ′, ρw′, ρu′, ρv′,
+                                    grid, dynamics, Δτ, δτˢ⁻, ωˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ)
 
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ρθ′ˢ⁻[i, j, k] = ρθ′[i, j, k] # stash old (ρθ)′ for the divergence damping
+
+        # Old-side share of the vertical flux applied to ρ′; the new-side share is added in _post_solve_recovery!.
+        avg.w[i, j, k] += ωˢ⁻ * ρw′[i, j, k]
 
         V⁻¹ = V⁻¹ᶜᶜᶜ(i, j, k, grid)
         ∇ʰ_M  = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
@@ -1025,14 +1029,15 @@ end
 # NOTE: this runs *before* the divergence damping, so `avg` accumulates the pre-damping (ρu)′,(ρv)′.
 # Identical for dry runs (the transport velocity is unused without scalars); for moist
 # runs it omits the per-substep damping increment from the transport average.
-@kernel function _post_solve_recovery!(ρ′, ρθ′, ρw′, ρu′, ρv′, ρ′★, ρθ′★, avg, grid, dynamics, δτᵐ⁺, θᴸ)
+# avg.w takes ωᵐ⁺ (ρw)′ₙ here; ωˢ⁻ (ρw)′ₒ is added in _build_predictors!.
+@kernel function _post_solve_recovery!(ρ′, ρθ′, ρw′, ρu′, ρv′, ρ′★, ρθ′★, avg, grid, dynamics, δτᵐ⁺, θᴸ, ωᵐ⁺)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         ρ′[i, j, k]  = ρ′★[i, j, k]  - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
         ρθ′[i, j, k] = ρθ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
         avg.u[i, j, k] += ρu′[i, j, k]
         avg.v[i, j, k] += ρv′[i, j, k]
-        avg.w[i, j, k] += ρw′[i, j, k]
+        avg.w[i, j, k] += ωᵐ⁺ * ρw′[i, j, k]
     end
 end
 
@@ -1244,9 +1249,10 @@ end
 ##### tracers, chemistry, TKE) advect against the substep-loop-averaged
 ##### velocity, not a snapshot. (The slow `ρθ` tendency is part of the
 ##### acoustic system, computed separately before the loop.) We accumulate
-##### raw `momentum_perturbation` each substep, then normalize at stage end:
+##### `momentum_perturbation` each substep, then normalize at stage end:
 #####
 #####   ⟨ρu⟩ = ρuᴸ + (1/Nτ) ∑ₙ (ρu)′(n) = model.momentum.ρu + accum/Nτ
+#####   ⟨ρw⟩ = ρwᴸ + (1/Nτ) ∑ₙ [ωˢ⁻ (ρw)′(n−1) + ωᵐ⁺ (ρw)′(n)]
 #####   ⟨u⟩  ≈ ⟨ρu⟩ / ρᴸ_face
 #####
 ##### `model.momentum.*` and `model.dynamics.dry_density` are still the stage-entry
@@ -1517,11 +1523,12 @@ function acoustic_substep!(model, substepper, stage, advection, apply_pressure_g
             substepper.density_predictor,
             substepper.density_potential_temperature_predictor,
             substepper.previous_density_potential_temperature_perturbation,
+            substepper.time_averaged_velocities,
             substepper.density_perturbation,
             substepper.density_potential_temperature_perturbation,
             substepper.momentum_perturbation.w,
             substepper.momentum_perturbation.u, substepper.momentum_perturbation.v,
-            grid, model.dynamics, Δτ, δτˢ⁻,
+            grid, model.dynamics, Δτ, δτˢ⁻, 1 - ω,
             Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
             substepper.linearization_potential_temperature)
     fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
@@ -1566,7 +1573,7 @@ function acoustic_substep!(model, substepper, stage, advection, apply_pressure_g
             substepper.density_potential_temperature_predictor,
             substepper.time_averaged_velocities,
             grid, model.dynamics, δτᵐ⁺,
-            substepper.linearization_potential_temperature)
+            substepper.linearization_potential_temperature, ω)
 
     # Per-substep open-boundary enforcement (issue #738): relax the outermost
     # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
@@ -1587,7 +1594,7 @@ function acoustic_substep!(model, substepper, stage, advection, apply_pressure_g
     # impenetrability so the next substep's divergence and the accumulated
     # transport velocity see a closed wall (mass conservation).
     enforce_wall_impenetrability!(substepper, model, grid, arch)
-    # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
+    # (time-averaged velocity accumulation is fused into `_build_predictors!` and `_post_solve_recovery!` above)
     return nothing
 end
 
