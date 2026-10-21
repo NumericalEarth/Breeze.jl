@@ -60,7 +60,8 @@ function read_lookup_tables(directory::AbstractString;
                             cloud = nothing,
                             rain = nothing,
                             process_rates = nothing,
-                            warm_rain_scheme = KhairoutdinovKogan2000())
+                            warm_rain_scheme = KhairoutdinovKogan2000(),
+                            arithmetic = IEEEArithmetic())
 
     table1_file = joinpath(directory, "p3_lookupTable_1.dat-v6.9-2momI")
     isfile(table1_file) || error("2momI table not found: $table1_file")
@@ -105,7 +106,8 @@ function read_lookup_tables(directory::AbstractString;
         precipitation_boundary_condition,
         negative_moisture_correction,
         aerosol,
-        warm_rain_scheme
+        warm_rain_scheme,
+        arithmetic
     )
 end
 

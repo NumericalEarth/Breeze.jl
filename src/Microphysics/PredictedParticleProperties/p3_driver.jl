@@ -1,4 +1,5 @@
 using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Architectures: GPU
 using Oceananigans.Fields: Center, ZeroField
 using Oceananigans.Grids: inactive_cell
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
@@ -190,6 +191,26 @@ end
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, false}) where FT = (;)
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, true}) where FT = (; G.ρsᵛ⁺ˡ)
 
+#####
+##### Kernel arithmetic: the architecture the P3 tendency kernel is compiled for
+#####
+
+p3_kernel_architecture(::IEEEArithmetic, arch) = arch
+p3_kernel_architecture(::FastArithmetic, arch) = fastmath_architecture(arch)
+
+fastmath_architecture(arch) = arch
+fastmath_architecture(arch::GPU) = GPU(fastmath_device(arch.device))
+
+# KernelAbstractions backends that support fast math (CUDA.jl's `CUDABackend`) carry a
+# `fastmath::Bool` field. Rebuild the device with that field set, keeping its other options,
+# so Breeze needs no dependency on the backend package; devices without it are returned as is.
+function fastmath_device(device)
+    D = typeof(device)
+    hasfield(D, :fastmath) || return device
+    options = map(name -> name === :fastmath ? true : getfield(device, name), fieldnames(D))
+    return D(options...)
+end
+
 function AM.compute_microphysical_tendencies!(p3::P3, model)
     grid = model.grid
     arch = grid.architecture
@@ -199,7 +220,7 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
 
     compute_p3_surface_temperature!(μ.surface_temperature, model.temperature, grid)
 
-    launch!(arch, grid, :xyz, _p3_add_tendencies_kernel!,
+    launch!(p3_kernel_architecture(p3.arithmetic, arch), grid, :xyz, _p3_add_tendencies_kernel!,
             p3_tendency_fields(model.timestepper.Gⁿ, p3),
             μ, model.formulation, model.dynamics, grid,
             model.thermodynamic_constants, p3, ρ_field,

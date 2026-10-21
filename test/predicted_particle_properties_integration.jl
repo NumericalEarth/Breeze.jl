@@ -8,17 +8,29 @@ using Breeze.AtmosphereModels: AtmosphereModels, condensate_liquid_fraction, mic
 using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState
 using Breeze.Microphysics.PredictedParticleProperties: AerosolActivation,
                                                        AerosolMode,
-                                                       PredictedParticlePropertiesMicrophysics
+                                                       FastArithmetic,
+                                                       IEEEArithmetic,
+                                                       PredictedParticlePropertiesMicrophysics,
+                                                       fastmath_architecture,
+                                                       fastmath_device,
+                                                       p3_kernel_architecture
 using Breeze.ParcelModels: step_parcel_state!
 using GPUArraysCore: @allowscalar
 
-using Oceananigans: Bounded, CPU, Center, CenterField, Face, Field, Flat, GridFittedBottom,
+using Oceananigans: Bounded, CPU, GPU, Center, CenterField, Face, Field, Flat, GridFittedBottom,
                      ImmersedBoundaryGrid, RectilinearGrid, compute!, set!, time_step!
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Oceananigans.Fields: interior, location
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: update_state!
+
+# Stand-in for a KernelAbstractions backend with a fast-math option (CUDA.jl's `CUDABackend`).
+struct FastMathCapableDevice
+    prefer_blocks :: Bool
+    always_inline :: Bool
+    fastmath :: Bool
+end
 
 @testset "P3 atmosphere integration" begin
     @testset "Hallett–Mossop surface temperature follows the immersed bottom" begin
@@ -850,5 +862,39 @@ using Oceananigans.TimeSteppers: update_state!
         compute!(flux)
         @test @allowscalar(flux[1, 1]) > 0
         @test all(isfinite, Array(interior(flux)))
+    end
+
+    @testset "P3 fast-math opt-in" begin
+        FT = Float64
+        @test PredictedParticlePropertiesMicrophysics(FT).arithmetic isa IEEEArithmetic
+        @test PredictedParticlePropertiesMicrophysics(FT; fastmath = true).arithmetic isa FastArithmetic
+
+        # The default arithmetic never changes the architecture; fast math rebuilds a GPU
+        # device with its `fastmath` option set and leaves other architectures alone.
+        device = FastMathCapableDevice(true, false, false)
+        @test p3_kernel_architecture(IEEEArithmetic(), GPU(device)).device === device
+        @test p3_kernel_architecture(FastArithmetic(), CPU()) === CPU()
+        @test fastmath_device(device) == FastMathCapableDevice(true, false, true)
+        @test fastmath_device(:no_fastmath_option) === :no_fastmath_option
+        @test fastmath_architecture(GPU(device)).device == FastMathCapableDevice(true, false, true)
+
+        # A fast-math model steps, and stays close to the IEEE model.
+        function stepped_rain(fastmath)
+            grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4), extent = (100, 100, 100))
+            constants = ThermodynamicConstants(FT)
+            reference_state = ReferenceState(grid, constants;
+                                             base_pressure = FT(101325),
+                                             potential_temperature = FT(285))
+            model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
+                                    thermodynamic_constants = constants,
+                                    microphysics = PredictedParticlePropertiesMicrophysics(FT; fastmath))
+            set!(model; θ = FT(285), qᵛ = FT(0.01), qᶜˡ = FT(0.003), qʳ = FT(0.001),
+                 enforce_mass_conservation = false)
+            time_step!(model, 1)
+            return Array(interior(model.microphysical_fields.qʳ))
+        end
+        qʳ_fast = stepped_rain(true)
+        @test all(isfinite, qʳ_fast)
+        @test qʳ_fast ≈ stepped_rain(false) rtol = 1e-3
     end
 end
