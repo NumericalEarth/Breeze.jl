@@ -155,10 +155,11 @@ Compute the wet growth freezing capacity following
 [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
 The wet growth capacity is the maximum rate at which collected
-hydrometeors can be frozen, determined by the ventilated heat balance:
+hydrometeors can be frozen, determined by the ventilated heat balance of
+[Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5):
 
 ```math
-q_{wgrth} = C f^{ve} \\left[Kᵃ(T_0-T) + \\frac{2π}{ℒᶠᵘˢ} ℒⁱ Dᵛ(ρ^{v+}-ρ^v)\\right] × N^i
+q_{wgrth} = \\frac{2π}{ℒᶠᵘˢ} C f^{ve} \\left[Kᵃ(T_0-T) + ℒⁱ Dᵛ(ρ^{v+}-ρ^v)\\right] × N^i
 ```
 
 When the collection rate (cloud + rain riming) exceeds this capacity,
@@ -208,9 +209,8 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     Q_sensible = Kᵃ * (T₀ - T)
     Q_latent = ℒⁱ * Dᵛ * ρ * (q_sat0 - qᵛ)
 
-    # 2π/ℒᶠᵘˢ multiplies only the latent term; the sensible-conduction term uses
-    # the capm convention directly.
-    qwgrth = C_fv * (Q_sensible + 2 * FT(π) * Q_latent / ℒᶠᵘˢ) * nⁱ_eff
+    # 2π (not 4π) because C_fv stores capm = 2 × capacitance, as in melting.
+    qwgrth = 2 * FT(π) * C_fv * (Q_sensible + Q_latent) / ℒᶠᵘˢ * nⁱ_eff
 
     return ifelse(below_freezing, max(0, qwgrth), zero(FT))
 end
@@ -224,14 +224,13 @@ Below freezing, liquid coating on ice particles refreezes. The rate is
 determined by the heat flux at the particle surface:
 
 ```math
-\\frac{dm}{dt} = C f^{ve} \\left[Kᵃ(T_0-T) + \\frac{2π}{ℒᶠᵘˢ} ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
+\\frac{dm}{dt} = \\frac{2π}{ℒᶠᵘˢ} C f^{ve} \\left[Kᵃ(T_0-T) + ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
 ```
 
 That is the same particle heat balance that sets the wet-growth capacity, so this
 is [`wet_growth_capacity`](@ref) capped by the liquid available on the ice. Above
 freezing the capacity is already zero, which carries the temperature gate here.
-See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization)
-appendix C, section i (and Mason 1971 for the underlying heat-balance form).
+See [Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5).
 
 # Arguments
 - `p3`: P3 microphysics scheme

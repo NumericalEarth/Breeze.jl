@@ -1399,7 +1399,7 @@ end
                                      p3.process_rates.floors)
     end
 
-    @testset "wet_growth_capacity keeps sensible term outside 2π/Lf" begin
+    @testset "wet_growth_capacity applies 2π/ℒᶠ to the sensible term" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
@@ -1432,7 +1432,8 @@ end
 
         capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
                                            ρ, constants, transport)
-        expected = C_fv * transport.Kᵃ * (T₀ - T) * ni
+        ℒᶠ = PPP.fusion_latent_heat(constants, T)
+        expected = 2 * FT(π) * C_fv * transport.Kᵃ * (T₀ - T) / ℒᶠ * ni
 
         @test capacity ≈ expected rtol=1e-6
     end
@@ -1580,12 +1581,13 @@ end
         @test rates.wet_growth_rain == 0
     end
 
-    @testset "refreezing_rate keeps sensible term outside 2π/Lf" begin
+    @testset "refreezing_rate is heat-limited when liquid is ample" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
+        # Ample liquid, so the heat balance rather than qʷⁱ/τ sets the rate.
         qwi = FT(1)
         qi = FT(1e-4)
         ni = FT(1e4)
@@ -1601,14 +1603,18 @@ end
         Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
         ε = Rᵈ / Rᵥ
         e_s0 = PPP.saturation_vapor_pressure_at_freezing(constants, T₀)
-        # Set qv = q_sat0 (mixing ratio convention) so latent term vanishes
         qv = ε * e_s0 / max(P - e_s0, FT(1))
 
         refreezing = PPP.refreezing_rate(p3, qi, qwi, ni, T, qv, Ff, ρf,
                                          ρ, constants, transport)
+        capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
+                                           ρ, constants, transport)
+        τ = p3.process_rates.sink_limiting_timescale
 
         # Refreezing should remain active below freezing with liquid-coated ice.
         @test refreezing > 0
+        @test refreezing ≈ capacity
+        @test refreezing < qwi / τ
     end
 
     @testset "ice_aggregation_rate" begin
