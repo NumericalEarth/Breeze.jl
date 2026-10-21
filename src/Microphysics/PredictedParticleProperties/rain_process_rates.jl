@@ -133,8 +133,11 @@ end
 
 # With the cell's rain slope, `nʳ` is already the slope-consistent number, so the
 # re-bounding (one more cube root) is skipped.
-@inline rain_self_collection_rate(p3, qʳ, nʳ, ρ, ::Nothing) = rain_self_collection_rate(p3, qʳ, nʳ, ρ)
-@inline rain_self_collection_rate(p3, qʳ, nʳ, ρ, rain::P3RainSlope) =
+# `p3` is typed so these do not overlap the scheme-dispatched methods, whose first argument
+# is the warm-rain scheme.
+@inline rain_self_collection_rate(p3::PredictedParticlePropertiesMicrophysics, qʳ, nʳ, ρ, ::Nothing) =
+    rain_self_collection_rate(p3, qʳ, nʳ, ρ)
+@inline rain_self_collection_rate(p3::PredictedParticlePropertiesMicrophysics, qʳ, nʳ, ρ, rain::P3RainSlope) =
     rain_self_collection_rate(p3.warm_rain_scheme, p3, qʳ, nʳ, ρ, rain)
 
 @inline function rain_self_collection_rate(::KhairoutdinovKogan2000, p3, qʳ, nʳ, ρ, rain::P3RainSlope)
