@@ -194,14 +194,14 @@ PSD-integrated number-weighted kernel.
 @inline function rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
                                        temperature_active,
                                        qʷⁱ = zero(typeof(qⁱ)),
-                                       lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
+                                       lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ),
+                                       rain = nothing)
     FT = typeof(qʳ)
     parameters = p3.process_rates
 
     ℂʳⁱᵐᵉ₂ = parameters.rain_ice_collection_efficiency
 
     qʳ_eff = max(0, qʳ)
-    nʳ_eff = max(nʳ, p3.minimum_number_mixing_ratio)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = lookups.Fˡ
     nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
@@ -210,25 +210,33 @@ PSD-integrated number-weighted kernel.
              (qʳ_eff >= p3.minimum_mass_mixing_ratio) &
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 
-    m_mean = lookups.m_mean
     density_correction = lookups.ρ_correction
+    slope = rain_collection_slope(p3, qʳ_eff, nʳ, rain)
 
-    # Diagnose rain DSD slope parameter
-    λʳ = rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
-    nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
+    mass_kernel, number_kernel = ice_rain_collection_lookup_at_log(p3.ice.ice_rain,
+                                                                   lookups.log_m_mean,
+                                                                   slope.log_λʳ, Fᶠ, Fˡ, ρᶠ)
 
-    # Use Table 2 (double-PSD kernel) for ice-rain collection. The table stores the
-    # double-PSD integrals with N₀ʳ factored out, so each rate is
-    # kernel × N₀ʳ × nⁱ × ρ × (density correction) × E, with N₀ʳ = nʳ λʳ at μʳ = 0.
-    mass_kernel, number_kernel = ice_rain_collection_lookup(p3.ice.ice_rain,
-                                                            m_mean, λʳ, Fᶠ, Fˡ, ρᶠ)
-
-    Nʳ₀ = nʳ_bounded * λʳ
+    Nʳ₀ = slope.nʳ * slope.λʳ
     prefactor = ℂʳⁱᵐᵉ₂ * Nʳ₀ * nⁱ_eff * ρ * density_correction
 
     return (ifelse(active, prefactor * mass_kernel, zero(FT)),
             ifelse(active, prefactor * number_kernel, zero(FT)))
 end
+
+# Rain slope, its log, and the slope-consistent number seen by the collection kernel:
+# re-diagnosed from (qʳ, nʳ), or read from the cell's `P3RainSlope`, with which `nʳ`
+# is already consistent.
+@inline function rain_collection_slope(p3, qʳ_eff, nʳ, ::Nothing)
+    parameters = p3.process_rates
+    nʳ_eff = max(nʳ, p3.minimum_number_mixing_ratio)
+    λʳ = rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
+    nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
+    return (; λʳ, log_λʳ = log10(λʳ), nʳ = nʳ_bounded)
+end
+
+@inline rain_collection_slope(p3, qʳ_eff, nʳ, rain::P3RainSlope) =
+    (; rain.λʳ, rain.log_λʳ, nʳ = max(nʳ, p3.minimum_number_mixing_ratio))
 
 @inline rain_collection_mass_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, temperature_active,
                                   qʷⁱ = zero(typeof(qⁱ))) =

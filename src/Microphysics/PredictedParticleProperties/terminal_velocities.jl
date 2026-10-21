@@ -42,8 +42,10 @@ end
     stokes_prefactor = cloud_stokes_prefactor(g, p3.process_rates.liquid_water_density, η,
                                               p3.process_rates.floors)
     active = qᶜˡ >= p3.minimum_mass_mixing_ratio
-    mass_weighted = cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
-    number_weighted = cloud_number_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
+    # The two moments share `a_cn / λᶜˡ²`, so divide once.
+    scaled_prefactor = stokes_prefactor / λᶜˡ^2
+    mass_weighted = scaled_prefactor * (μᶜˡ + 5) * (μᶜˡ + 4)
+    number_weighted = scaled_prefactor * (μᶜˡ + 2) * (μᶜˡ + 1)
     return CloudTerminalVelocities{FT}(ifelse(active, mass_weighted, zero(FT)),
                                        ifelse(active, number_weighted, zero(FT)))
 end
@@ -58,13 +60,14 @@ table lookups.
 # Returns
 - `RainTerminalVelocities` with fields `mass_weighted`, `number_weighted` [m/s] (positive downward)
 """
-@inline function rain_terminal_velocities(p3, qʳ, nʳ, ρ)
+@inline function rain_terminal_velocities(p3, qʳ, nʳ, ρ,
+                                          density_power = fall_speed_density_power(p3.process_rates, ρ))
     FT = typeof(qʳ)
     parameters = p3.process_rates
-    ρ₀ = parameters.reference_air_density
 
     qʳ_eff = max(0, qʳ)
-    ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
+    # (ρ₀/ρ)^α = ρ₀^α ρ^(-α), with ρ₀^α stored and ρ^(-α) = `density_power`.
+    ρ_correction = rain_air_density_correction(parameters, density_power)
 
     # Same λʳ the process rates use.
     log_slope = log10(rain_slope_parameter(qʳ_eff, nʳ, parameters))
@@ -173,19 +176,18 @@ speed framework.
 - `IceTerminalVelocities` with fields `mass_weighted`, `number_weighted` [m/s]
   (both positive downward)
 """
-@inline function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
+@inline function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)),
+                                         density_power = fall_speed_density_power(p3.process_rates, ρ))
     FT = typeof(qⁱ)
     parameters = p3.process_rates
     fs = p3.ice.fall_speed
-
-    ρ₀ = fs.reference_air_density
 
     # --- Shared computation (done once instead of twice) ---
     qⁱ_eff = max(0, qⁱ)
     nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
     m̄ = qⁱ_eff / nⁱ_eff
 
-    ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
+    ρ_correction = ice_air_density_correction(p3, density_power)
 
     velocities = fused_fall_speeds(fs.mass_weighted, fs.number_weighted,
                                     m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, parameters)

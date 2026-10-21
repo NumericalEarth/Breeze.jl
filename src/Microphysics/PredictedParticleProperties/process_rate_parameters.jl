@@ -281,6 +281,28 @@ struct ProcessRate{FT, PS}
 
     # Numerical floors shared by every process rate
     floors :: NumericalFloors{FT}
+
+    # Derived constants, materialized at construction from the fields above so the
+    # per-cell rates multiply by a stored reciprocal or prefactor instead of dividing
+    # by (or raising) a scheme parameter in every cell. They are not keywords: each is
+    # a pure function of the independent parameters and cannot disagree with them.
+    inverse_sink_limiting_timescale :: FT          # 1 / sink_limiting_timescale [1/s]
+    inverse_ice_nucleation_timescale :: FT         # 1 / ice_nucleation_timescale [1/s]
+    inverse_shed_drop_mass :: FT                   # 1 / shed_drop_mass [1/kg]
+    inverse_shed_drop_mass_liqfrac :: FT           # 1 / shed_drop_mass_liqfrac [1/kg]
+    inverse_initial_rain_drop_mass :: FT           # 1 / initial_rain_drop_mass [1/kg]
+    inverse_maximum_rime_density :: FT             # 1 / maximum_rime_density [m³/kg]
+    inverse_liquid_water_density :: FT             # 1 / liquid_water_density [m³/kg]
+    inverse_rain_mass_coefficient :: FT            # 1 / (π ρʷ), as in nʳ = qʳ λʳ³ / (π ρʷ) [m³/kg]
+    inverse_maximum_mean_droplet_diameter :: FT    # 1 / ℂᶜˡ₅ [1/m]
+    inverse_minimum_mean_droplet_diameter :: FT    # 1 / ℂᶜˡ₆ [1/m]
+    autoconversion_prefactor :: FT                 # ℂᵃᵘᵗᵒ₁ (Nᶜˡ_r)^(-ℂᵃᵘᵗᵒ₃)
+    negative_density_correction_exponent :: FT     # -ℂᵈᵉⁿˢ₁
+    reference_air_density_correction :: FT         # ρ₀^ℂᵈᵉⁿˢ₁, so (ρ₀/ρ)^α = ρ₀^α ρ^(-α)
+    aggregation_efficiency_temperature_slope :: FT # (ℂᵃᵍᵍʳ₁ - ℂᵃᵍᵍʳ₂) / (ℂᵃᵍᵍʳ₄ - ℂᵃᵍᵍʳ₃) [1/K]
+    inverse_aggregation_rime_fraction_range :: FT  # 1 / (ℂᵃᵍᵍʳ₆ - ℂᵃᵍᵍʳ₅) [-]
+    inverse_splintering_warm_range :: FT           # 1 / (ℂᴴᴹ₃ - ℂᴴᴹ₁) [1/K]
+    inverse_splintering_cold_range :: FT           # 1 / (ℂᴴᴹ₂ - ℂᴴᴹ₃) [1/K]
 end
 
 """
@@ -617,7 +639,29 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         predict_supersaturation,
         FT(calibration_factor_deposition),
         FT(calibration_factor_sublimation),
-        NumericalFloors{FT}(floors)
+        NumericalFloors{FT}(floors),
+        # Derived constants (see the struct). Each is evaluated in `FT` from the
+        # `FT`-rounded parameter, the value a per-cell `x / parameter` would see.
+        inv(FT(sink_limiting_timescale)),
+        inv(FT(ice_nucleation_timescale)),
+        inv(FT(shed_drop_mass)),
+        inv(FT(shed_drop_mass_liqfrac)),
+        inv(FT(initial_rain_drop_mass)),
+        inv(FT(maximum_rime_density)),
+        inv(FT(thermodynamic_constants.liquid.density)),
+        inv(FT(π) * FT(thermodynamic_constants.liquid.density)),
+        inv(FT(maximum_mean_droplet_diameter)),
+        inv(FT(minimum_mean_droplet_diameter)),
+        FT(autoconversion_coefficient) *
+            FT(autoconversion_reference_concentration)^(-FT(autoconversion_exponent_droplet)),
+        -FT(fall_speed_density_correction_exponent),
+        FT(reference_air_density)^FT(fall_speed_density_correction_exponent),
+        (FT(maximum_aggregation_efficiency) - FT(minimum_aggregation_efficiency)) /
+            (FT(aggregation_efficiency_ramp_end_temperature) -
+             FT(aggregation_efficiency_ramp_start_temperature)),
+        inv(FT(maximum_aggregation_rime_fraction) - FT(minimum_aggregation_rime_fraction)),
+        inv(FT(splintering_temperature_peak) - FT(minimum_splintering_temperature)),
+        inv(FT(maximum_splintering_temperature) - FT(splintering_temperature_peak))
     )
 end
 

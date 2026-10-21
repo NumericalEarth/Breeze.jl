@@ -118,6 +118,25 @@ end
     return ifelse(active, relaxation_coefficient, zero(FT))
 end
 
+# Same coefficient from the cell's rain slope, already diagnosed once in
+# `compute_p3_process_rates`; `nʳ` is the slope-consistent number.
+@inline function rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport, rain::P3RainSlope)
+    FT = typeof(qʳ)
+    qʳ_eff = max(0, qʳ)
+    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+
+    nʳ_eff = max(nʳ, FT(p3.minimum_number_mixing_ratio))
+    integrals = rain_ventilation_integral(p3.rain.evaporation, p3.rain.ventilation, nʳ_eff,
+                                          transport, rain, p3.process_rates)
+    relaxation_coefficient = 2 * FT(π) * integrals.Nʳ₀ * ρ * transport.Dᵛ *
+                             integrals.integral
+
+    return ifelse(active, relaxation_coefficient, zero(FT))
+end
+
+@inline rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport, ::Nothing) =
+    rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport)
+
 @inline ice_vapor_relaxation_coefficient(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q) =
     ice_vapor_relaxation_coefficient(p3, nⁱ, T, P, ρ, constants, transport, q,
                                      p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
@@ -134,27 +153,37 @@ end
 
     # The Sc correction uses the thermodynamic air density, not the `lookups` correction.
     ρ_air = density(T, P, q, constants)
-    ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ_air)
-    C_fv = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
-                                  ν, Dᵛ, ρ_correction, parameters.floors)
+    sc_correction = ice_vapor_sc_correction(p3, transport, ρ_air, parameters.floors)
+    C_fv = lookups.ventilation + sc_correction * lookups.enhanced_ventilation
 
     # This is the raw inverse relaxation coefficient; the psychrometric correction
     # is applied later through the coupled `ξˡ` / `ξⁱ` factor.
     return 2 * FT(π) * ρ * Dᵛ * nⁱ_eff * C_fv
 end
 
+# With the per-cell Schmidt factor at hand, √((ρ₀/ρ)^α) is a single power of ρ.
+@inline ice_vapor_sc_correction(p3, transport::TransportWithSchmidtFactor, ρ_air, floors) =
+    transport.schmidt_factor * sqrt_ice_air_density_correction(p3, ρ_air)
+
+@inline function ice_vapor_sc_correction(p3, transport, ρ_air, floors)
+    parameters = p3.process_rates
+    ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ_air)
+    return ventilation_sc_correction(transport.ν, transport.Dᵛ, ρ_correction, floors)
+end
+
 # One species' share of the diffusional-growth budget: its relaxation weight
 # `ε / ε_total` against the total driver, plus the transient approach to
 # liquid supersaturation, over the psychrometric correction `ξ` for the phase it condenses
 # into. All four species use this; only `ε` and `ξ` differ, so a transposed pair
-# would otherwise be invisible in four near-identical lines.
-@inline function growth_share(relaxation_coefficient, psychrometric_correction,
-                              external_driver, total_relaxation, supersaturation,
+# would otherwise be invisible in four near-identical lines. The caller passes the
+# reciprocals `1 / ξ` and `1 / ε_total`, which all four shares have in common.
+@inline function growth_share(relaxation_coefficient, inverse_psychrometric_correction,
+                              external_driver, inverse_total_relaxation, supersaturation,
                               transient_response)
-    relaxation_fraction = relaxation_coefficient / total_relaxation
+    relaxation_fraction = relaxation_coefficient * inverse_total_relaxation
     return (external_driver * relaxation_fraction +
-            (supersaturation - external_driver / total_relaxation) *
-            relaxation_fraction * transient_response) / psychrometric_correction
+            (supersaturation - external_driver * inverse_total_relaxation) *
+            relaxation_fraction * transient_response) * inverse_psychrometric_correction
 end
 
 """
@@ -170,25 +199,38 @@ cloud/precipitation fraction framework is handled separately.
                                                      μᶜˡ, λᶜˡ, nᶜˡ_bounded,
                                                      temperature_tendency,
                                                      vapor_tendency,
-                                                     lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
+                                                     lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ),
+                                                     rain = nothing)
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
     floors = parameters.floors
     τ = max(parameters.sink_limiting_timescale, eps(FT))
+    # 1 / max(τ, ε) = min(1 / τ, 1 / ε), since rounding preserves order. The reservoir
+    # caps below keep `q / τ`, which the sink limiters compare with the reservoir.
+    τ⁻¹ = min(parameters.inverse_sink_limiting_timescale, inv(eps(FT)))
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     ℒⁱ = sublimation_latent_heat(constants, T)
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
+    inverse_cᵖᵈ = 1 / cᵖᵈ
+    inverse_Rᵛ_T² = 1 / (Rᵛ * T^2)
 
-    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
-    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * ℒⁱ / (Rᵛ * T^2)
+    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ * inverse_Rᵛ_T²
+    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * ℒⁱ * inverse_Rᵛ_T²
     # Psychrometric correction factors over liquid (ξˡ) and ice (ξⁱ) surfaces.
-    ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
-    ξⁱ = 1 + ℒⁱ * dqᵛ⁺ⁱ_dT / cᵖᵈ
+    ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT * inverse_cᵖᵈ
+    ξⁱ = 1 + ℒⁱ * dqᵛ⁺ⁱ_dT * inverse_cᵖᵈ
+    inverse_ξˡ = 1 / ξˡ
+    inverse_ξⁱ = 1 / ξⁱ
 
     cloud_relaxation = cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, transport.Dᵛ,
                                                           μᶜˡ, λᶜˡ, nᶜˡ_bounded)
-    rain_relaxation = rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport)
+    # Both relaxation coefficients are gated on their own species; skipping them where
+    # that species is absent spares the rain ventilation table read and the ice density
+    # and ventilation evaluation (see `p3_phase1_rates`).
+    qsmall = p3.minimum_mass_mixing_ratio
+    rain_relaxation = max(0, qʳ) >= qsmall ?
+                      rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport, rain) : zero(FT)
     # `qⁱ` is the dry ice mass; `qⁱ_total` and `Fˡ` gate the relaxation and tiny-mass overrides.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = lookups.Fˡ
@@ -197,9 +239,10 @@ cloud/precipitation fraction framework is handled separately.
     # regimes (dry ice below the wet-ice threshold, liquid-coated ice at or above it),
     # so evaluate the coefficient — which carries a `density()` and a
     # ventilation-table lookup — once.
-    ice_relaxation_active = qⁱ_total >= p3.minimum_mass_mixing_ratio
-    ice_relaxation = ice_vapor_relaxation_coefficient(p3, nⁱ, T, P, ρ, constants, transport, q,
-                                                      lookups)
+    ice_relaxation_active = qⁱ_total >= qsmall
+    ice_relaxation = ice_relaxation_active ?
+                     ice_vapor_relaxation_coefficient(p3, nⁱ, T, P, ρ, constants, transport, q,
+                                                      lookups) : zero(FT)
     dry_ice_relaxation = ifelse(
         ice_relaxation_active & (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold),
         ice_relaxation, zero(FT))
@@ -209,11 +252,12 @@ cloud/precipitation fraction framework is handled separately.
         ice_relaxation_active & (Fˡ >= p3.process_rates.liquid_fraction_clipping_threshold),
         ice_relaxation, zero(FT))
 
-    ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT / cᵖᵈ) / ξⁱ
+    ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT * inverse_cᵖᵈ) * inverse_ξⁱ
     total_relaxation = max(cloud_relaxation + rain_relaxation +
                            dry_ice_relaxation * ice_liquid_coupling + coating_relaxation,
                            FT(floors.rate_scale))
-    transient_response = (1 - exp(-total_relaxation * τ)) / τ
+    inverse_total_relaxation = 1 / total_relaxation
+    transient_response = (1 - exp(-total_relaxation * τ)) * τ⁻¹
     # `qᵛ`, `qᵛ⁺ˡ`, `qᵛ⁺ⁱ` arrive already adjusted by the G&M step in
     # `compute_p3_process_rates`, so the local diagnostic supersaturation here is
     # the post-G&M value, not the host-advected `sᵛ⁺ˡ`.
@@ -226,18 +270,21 @@ cloud/precipitation fraction framework is handled separately.
     external_driver = vapor_tendency - dqᵛ⁺ˡ_dT * temperature_tendency
     total_driver = external_driver + bergeron_driver
 
-    raw_cloud_growth = growth_share(cloud_relaxation, ξˡ, total_driver, total_relaxation,
-                                    supersaturation, transient_response)
-    raw_rain_growth = growth_share(rain_relaxation, ξˡ, total_driver, total_relaxation,
-                                   supersaturation, transient_response)
-    raw_ice_growth = growth_share(dry_ice_relaxation, ξⁱ, total_driver, total_relaxation,
-                                  supersaturation, transient_response) +
-                     (qᵛ⁺ˡ - qᵛ⁺ⁱ) * dry_ice_relaxation / ξⁱ
+    raw_cloud_growth = growth_share(cloud_relaxation, inverse_ξˡ, total_driver,
+                                    inverse_total_relaxation, supersaturation,
+                                    transient_response)
+    raw_rain_growth = growth_share(rain_relaxation, inverse_ξˡ, total_driver,
+                                   inverse_total_relaxation, supersaturation,
+                                   transient_response)
+    raw_ice_growth = growth_share(dry_ice_relaxation, inverse_ξⁱ, total_driver,
+                                  inverse_total_relaxation, supersaturation,
+                                  transient_response) +
+                     (qᵛ⁺ˡ - qᵛ⁺ⁱ) * dry_ice_relaxation * inverse_ξⁱ
     # Liquid-on-ice coating uses `ξˡ` (like cloud) since the surface condenses
     # vapor as liquid; no Bergeron contribution because the surface is already
     # at liquid saturation.
-    raw_coating_growth = growth_share(coating_relaxation, ξˡ, total_driver,
-                                      total_relaxation, supersaturation,
+    raw_coating_growth = growth_share(coating_relaxation, inverse_ξˡ, total_driver,
+                                      inverse_total_relaxation, supersaturation,
                                       transient_response)
 
     𝒮ˡ = supersaturation / max(qᵛ⁺ˡ, FT(floors.divisor))
@@ -263,8 +310,9 @@ cloud/precipitation fraction framework is handled separately.
                                 (Fˡ >= parameters.liquid_fraction_clipping_threshold),
                                 -qʷⁱ / τ, raw_coating_growth)
 
-    condensation = clamp(raw_cloud_growth, -max(0, qᶜˡ) / τ, max(0, qᵛ) / τ)
-    rain_condensation = min(max(0, raw_rain_growth), max(0, qᵛ) / τ)
+    vapor_cap = max(0, qᵛ) / τ
+    condensation = clamp(raw_cloud_growth, -max(0, qᶜˡ) / τ, vapor_cap)
+    rain_condensation = min(max(0, raw_rain_growth), vapor_cap)
     rain_evaporation = min(max(0, -raw_rain_growth), max(0, qʳ) / τ)
 
     is_sublimation = raw_ice_growth < 0
@@ -273,9 +321,9 @@ cloud/precipitation fraction framework is handled separately.
     calibration = ifelse(is_sublimation, ℂᵈⁱᶠᶠ₂, ℂᵈⁱᶠᶠ₁)
     deposition_raw = raw_ice_growth * calibration
     # Sublimation is limited to the dry ice mass per unit time, `qⁱ / τ`.
-    deposition = clamp(deposition_raw, -max(0, qⁱ) / τ, max(0, qᵛ) / τ)
+    deposition = clamp(deposition_raw, -max(0, qⁱ) / τ, vapor_cap)
 
-    coating_condensation = min(max(0, raw_coating_growth), max(0, qᵛ) / τ)
+    coating_condensation = min(max(0, raw_coating_growth), vapor_cap)
     coating_evaporation = min(max(0, -raw_coating_growth), max(0, qʷⁱ) / τ)
 
     return P3CoupledVaporRates{FT}(condensation, rain_evaporation, rain_condensation,

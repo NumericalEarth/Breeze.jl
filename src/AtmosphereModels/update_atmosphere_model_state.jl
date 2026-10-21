@@ -327,10 +327,13 @@ end
     μ = extract_microphysical_prognostics(i, j, k, microphysics, microphysical_fields)
     𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛᵉ, constants, μ, ρ)
 
+    # Temperature is evaluated before the microphysical update, which may need it too
+    # (P3's cloud fall speeds), so the compiler can reuse this evaluation there.
+    T = Thermodynamics.temperature(𝒰₁, constants)
+
     update_microphysical_fields!(microphysical_fields, i, j, k, grid,
                                  microphysics, ρ, 𝒰₁, constants)
 
-    T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T
 end
 

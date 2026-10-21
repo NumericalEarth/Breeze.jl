@@ -22,6 +22,20 @@ struct IceFallSpeed{FT, N, M}
     reference_air_density :: FT
     number_weighted :: N
     mass_weighted :: M
+    # Derived from `reference_air_density` and the fall-speed density-correction exponent
+    # α (`ProcessRate.fall_speed_density_correction_exponent`), so the per-cell correction
+    # (ρ₀/ρ)^α = ρ₀^α ρ^(-α) and its square root need one power of ρ and no division.
+    reference_air_density_correction :: FT       # ρ₀^α
+    sqrt_reference_air_density_correction :: FT  # ρ₀^(α/2)
+end
+
+# The skeleton and table-materialization constructors. `density_correction_exponent` must
+# be the α of the `ProcessRate` the scheme runs with; `read_lookup_tables` passes it.
+function IceFallSpeed(reference_air_density, number_weighted, mass_weighted;
+                      density_correction_exponent = 0.54)
+    ρ₀ = reference_air_density
+    α = convert(typeof(ρ₀), density_correction_exponent)
+    return IceFallSpeed(ρ₀, number_weighted, mass_weighted, ρ₀^α, ρ₀^(α / 2))
 end
 
 """

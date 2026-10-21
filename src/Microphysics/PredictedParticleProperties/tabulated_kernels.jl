@@ -39,6 +39,23 @@ See `rain_quadrature.jl` for the table storage convention.
     return cbrt(Sc) * sqrt(ρ_correction) / sqrt(ν)
 end
 
+# The ρ-independent part `Sc^{1/3} / √ν` of the correction. It depends on the cell's
+# thermodynamic state only, so `compute_p3_process_rates` evaluates it once per cell and
+# carries it in the `transport` tuple of the phase rates, where `ventilation_sc_correction`
+# picks it up instead of re-deriving it at each of the ventilated rates.
+@inline function schmidt_viscosity_factor(ν, Dᵛ, floors)
+    FT = typeof(ν)
+    return cbrt(ν / max(Dᵛ, FT(floors.divisor))) / sqrt(ν)
+end
+
+const TransportWithSchmidtFactor = NamedTuple{(:Dᵛ, :Kᵃ, :ν, :schmidt_factor)}
+
+@inline ventilation_sc_correction(transport::TransportWithSchmidtFactor, ρ_correction, floors) =
+    transport.schmidt_factor * sqrt(ρ_correction)
+
+@inline ventilation_sc_correction(transport, ρ_correction, floors) =
+    ventilation_sc_correction(transport.ν, transport.Dᵛ, ρ_correction, floors)
+
 #####
 ##### Shared Table-1 coordinate
 #####
@@ -48,14 +65,19 @@ end
 
 # `m_mean` [kg] is a per-particle mass: the log guard is `floors.mass_scale`, NOT the bulk
 # `minimum_mass_mixing_ratio`, and the table clamps to its own mass axis (min ≈ 1.56e-15 kg).
-@inline function ice_table_bracket(table::P3Table4D, m_mean, Fᶠ, Fˡ, ρᶠ, floors)
+@inline function ice_table_log_mass(m_mean, floors)
     FT = typeof(m_mean)
-    log_m = log10(max(m_mean, FT(floors.mass_scale)))
-    return prepare_interpolation(table, log_m, Fᶠ, Fˡ, ρᶠ)
+    return log10(max(m_mean, FT(floors.mass_scale)))
 end
 
+@inline ice_table_bracket(table, m_mean, Fᶠ, Fˡ, ρᶠ, floors) =
+    ice_table_bracket_at_log_mass(table, ice_table_log_mass(m_mean, floors), Fᶠ, Fˡ, ρᶠ)
+
+@inline ice_table_bracket_at_log_mass(table::P3Table4D, log_m, Fᶠ, Fˡ, ρᶠ) =
+    prepare_interpolation(table, log_m, Fᶠ, Fˡ, ρᶠ)
+
 # Un-materialized scheme: no table to bracket against.
-@inline ice_table_bracket(::Nothing, m_mean, Fᶠ, Fˡ, ρᶠ, floors) = nothing
+@inline ice_table_bracket_at_log_mass(::Nothing, log_m, Fᶠ, Fˡ, ρᶠ) = nothing
 
 """
     P3IceLookups{FT, P}
@@ -78,6 +100,8 @@ struct P3IceLookups{FT, P}
     ventilation :: FT
     "Enhanced ventilation term 0.44 ∫ C(D) √(𝕎 D) N'(D) dD [m² s^(-1/2)], before the Sc correction"
     enhanced_ventilation :: FT
+    "log₁₀ of the floored mean particle mass, the Table-1 and Table-2 mass coordinate"
+    log_m_mean :: FT
 end
 
 """
@@ -92,13 +116,15 @@ Build the [`P3IceLookups`](@ref) of the ice population `(qⁱ, qʷⁱ, nⁱ, F�
     deposition = p3.ice.deposition
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, floors)
     FT = typeof(m_mean)
-    prep = ice_table_bracket(deposition.ventilation, m_mean, Fᶠ, Fˡ, ρᶠ, floors)
+    log_m = ice_table_log_mass(m_mean, floors)
+    prep = ice_table_bracket_at_log_mass(deposition.ventilation, log_m, Fᶠ, Fˡ, ρᶠ)
     # The ice reference density (≈0.83 kg/m³ at 600 hPa, 253.15 K; see `IceFallSpeed`),
     # not the rain reference ≈1.275 kg/m³ of `ProcessRate`.
-    ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
+    ρ_correction = ice_air_density_correction(p3, fall_speed_density_power(parameters, ρ))
     return P3IceLookups{FT, typeof(prep)}(m_mean, Fˡ, prep, ρ_correction,
                                           evaluate_at(deposition.ventilation, prep),
-                                          evaluate_at(deposition.enhanced_ventilation, prep))
+                                          evaluate_at(deposition.enhanced_ventilation, prep),
+                                          log_m)
 end
 
 # Standalone entry point: diagnose the liquid fraction, then bracket.
@@ -110,6 +136,9 @@ end
 # relaxation coefficient uses the thermodynamic air density, wet growth the dynamics density.
 @inline ventilation_from_terms(ventilation, enhanced_ventilation, ν, Dᵛ, ρ_correction, floors) =
     ventilation + ventilation_sc_correction(ν, Dᵛ, ρ_correction, floors) * enhanced_ventilation
+
+@inline ventilation_from_terms(ventilation, enhanced_ventilation, transport, ρ_correction, floors) =
+    ventilation + ventilation_sc_correction(transport, ρ_correction, floors) * enhanced_ventilation
 
 """
 $(TYPEDSIGNATURES)

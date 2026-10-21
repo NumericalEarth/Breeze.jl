@@ -301,9 +301,10 @@ defaults admit mean droplet diameters of 1–40 μm.
 """
 @inline function cloud_slope_bounds(μᶜˡ, parameters)
     FT = typeof(μᶜˡ)
-    ℂᶜˡ₅ = FT(parameters.maximum_mean_droplet_diameter)
-    ℂᶜˡ₆ = FT(parameters.minimum_mean_droplet_diameter)
-    return ((μᶜˡ + 1) / ℂᶜˡ₅, (μᶜˡ + 1) / ℂᶜˡ₆)
+    # (μᶜˡ + 1) / ℂᶜˡ₅ and (μᶜˡ + 1) / ℂᶜˡ₆, with the reciprocals stored in `ProcessRate`.
+    inverse_ℂᶜˡ₅ = FT(parameters.inverse_maximum_mean_droplet_diameter)
+    inverse_ℂᶜˡ₆ = FT(parameters.inverse_minimum_mean_droplet_diameter)
+    return ((μᶜˡ + 1) * inverse_ℂᶜˡ₅, (μᶜˡ + 1) * inverse_ℂᶜˡ₆)
 end
 
 """
@@ -328,7 +329,12 @@ the given `μᶜˡ`, the slope parameter hits its bounds. The number is then rec
 from the clamped slope to maintain mass-PSD consistency, so that downstream rates
 (autoconversion, immersion freezing) see a physically consistent cloud number.
 """
-@inline function bounded_cloud_number(Nᶜˡ, μᶜˡ, qᶜˡ, ρ, ρᴸ, mass_scale_floor, parameters)
+@inline bounded_cloud_number(Nᶜˡ, μᶜˡ, qᶜˡ, ρ, ρᴸ, mass_scale_floor, parameters) =
+    bounded_cloud_number_and_slope(Nᶜˡ, μᶜˡ, qᶜˡ, ρ, ρᴸ, mass_scale_floor, parameters).Nᶜˡ
+
+# The bounded number together with the clamped slope it was built from, which is the
+# slope of the bounded population (`cloud_slope_parameter` of the bounded number).
+@inline function bounded_cloud_number_and_slope(Nᶜˡ, μᶜˡ, qᶜˡ, ρ, ρᴸ, mass_scale_floor, parameters)
     FT = typeof(qᶜˡ)
     qᶜˡ_abs = max(qᶜˡ * ρ, FT(mass_scale_floor))  # absolute cloud content [kg/m³]
 
@@ -344,7 +350,7 @@ from the clamped slope to maintain mass-PSD consistency, so that downstream rate
 
     # Only adjust when clamping was needed; use per-volume [1/m³] convention
     needs_adjustment = (unbounded_slope < minimum_slope) | (unbounded_slope > maximum_slope)
-    return ifelse(needs_adjustment, Nᶜˡ_bounded, Nᶜˡ)
+    return (; Nᶜˡ = ifelse(needs_adjustment, Nᶜˡ_bounded, Nᶜˡ), λᶜˡ)
 end
 
 Base.summary(::CloudDroplets) = "CloudDroplets"
@@ -379,10 +385,13 @@ cloud number together with the shape and slope parameters `μᶜˡ` and `λᶜˡ
     mass_scale = FT(floors.mass_scale)
 
     μᶜˡ = liu_daum_shape_parameter(Nᶜˡ, p3.cloud.shape)
-    Nᶜˡ_bounded = bounded_cloud_number(Nᶜˡ, μᶜˡ, qᶜˡ_eff, ρ, ρᴸ, mass_scale, parameters)
+    # The clamped slope is the slope of the bounded population: where the clamp did not
+    # fire the bounded number is the input number, and where it did the number was
+    # rebuilt from the clamped slope, so re-diagnosing it would only round-trip.
+    bounded = bounded_cloud_number_and_slope(Nᶜˡ, μᶜˡ, qᶜˡ_eff, ρ, ρᴸ, mass_scale, parameters)
+    Nᶜˡ_bounded = bounded.Nᶜˡ
     nᶜˡ_bounded = safe_divide(Nᶜˡ_bounded, ρ, zero(FT))
-
-    λᶜˡ = cloud_slope_parameter(Nᶜˡ_bounded, μᶜˡ, max(qᶜˡ_eff * ρ, mass_scale), ρᴸ, parameters)
+    λᶜˡ = bounded.λᶜˡ
 
     return (; Nᶜˡ = Nᶜˡ_bounded,
             nᶜˡ = nᶜˡ_bounded,

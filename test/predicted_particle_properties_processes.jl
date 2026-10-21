@@ -81,7 +81,8 @@ function p3_with_process_rates(p3, process_rates)
         p3.precipitation_boundary_condition,
         p3.negative_moisture_correction,
         p3.aerosol,
-        p3.warm_rain_scheme)
+        p3.warm_rain_scheme,
+        p3.arithmetic)
 end
 
 function p3_process_rates_with(FT; kwargs...)
@@ -2480,5 +2481,94 @@ end
         # Rain evaporation should be positive magnitude
         @test rates_tab.rain_evaporation > 0
         @test isfinite(rates_tab.rain_evaporation)
+    end
+
+    @testset "Process rates are skipped only where they vanish" begin
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
+        ρ = FT(1)
+        P = FT(80000)
+        pˢᵗ = FT(100000)
+        τ = p3.process_rates.sink_limiting_timescale
+        qsmall = p3.minimum_mass_mixing_ratio
+
+        # Thermodynamic state at temperature T with relative humidity ℋ over liquid (T ≥ T₀)
+        # or ice (T < T₀), the surface `p3_processes_active` measures saturation against.
+        function state(T, ℋ)
+            surface = T ≥ p3.process_rates.freezing_temperature ? PlanarLiquidSurface() : PlanarIceSurface()
+            qᵛ = ℋ * saturation_specific_humidity(T, ρ, constants, surface)
+            q = MoistureMassFractions(qᵛ, FT(0), FT(0))
+            return with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        end
+
+        hydrometeors(; qᶜˡ=0, qʳ=0, nʳ=0, qⁱ=0, nⁱ=0) =
+            P3MicrophysicalState(FT(qᶜˡ), FT(0), FT(qʳ), FT(nʳ), FT(qⁱ), FT(nⁱ),
+                                 FT(0), FT(0), FT(0), FT(0), FT(0), FT(0))
+
+        tendencies(ℳ, 𝒰) = PPP.p3_state_tendencies(p3, ρ, ℳ, 𝒰, constants)
+        components(r) = ntuple(i -> getfield(r, i), fieldcount(typeof(r)))
+        active(ℳ, 𝒰) = PPP.p3_processes_active(p3, ρ, ℳ, 𝒰, constants)
+
+        clear = hydrometeors()
+        for T in (FT(285), FT(250))
+            # Clear air well below saturation: skipped, and every rate is exactly zero there.
+            𝒰_dry = state(T, FT(0.5))
+            @test !active(clear, 𝒰_dry)
+            @test all(iszero, components(tendencies(clear, 𝒰_dry)))
+
+            # Within 5% of saturation, nucleation or activation is possible.
+            @test active(clear, state(T, FT(0.97)))
+
+            # Hydrometeors at or above the mass floor, or a leftover number, are worked on.
+            @test active(hydrometeors(qʳ=1e-6, nʳ=1e3), 𝒰_dry)
+            @test active(hydrometeors(qⁱ=1e-6, nⁱ=1e3), 𝒰_dry)
+            @test active(hydrometeors(qᶜˡ=1e-6), 𝒰_dry)
+            @test active(hydrometeors(nʳ=1e3), 𝒰_dry)
+            @test active(hydrometeors(nⁱ=1e3), 𝒰_dry)
+
+            # Residue below the mass floor is skipped; the full evaluation would only drain
+            # it, at no more than its own mass per sink-limiting timescale.
+            residue = hydrometeors(qᶜˡ=qsmall / 100, qʳ=qsmall / 100, qⁱ=qsmall / 100)
+            @test !active(residue, 𝒰_dry)
+            r = tendencies(residue, 𝒰_dry)
+            mass_tendencies = (r.tendency_ρqᵛ, r.tendency_ρqᶜˡ, r.tendency_ρqʳ,
+                               r.tendency_ρqⁱ, r.tendency_ρqᶠ, r.tendency_ρqʷⁱ)
+            @test all(G -> abs(G) ≤ 3ρ * qsmall / 100 / τ, mass_tendencies)
+        end
+
+        # A predicted supersaturation relaxes in clear air too, so it is never skipped.
+        p3_ssat = PredictedParticlePropertiesMicrophysics(FT; predict_supersaturation = true)
+        @test PPP.p3_processes_active(p3_ssat, ρ, clear, state(FT(285), FT(0.5)), constants)
+    end
+
+    @testset "Grid fall speeds equal the gridless fall-speed evaluation" begin
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
+        ρ = FT(0.9)
+        P = FT(70000)
+        pˢᵗ = FT(100000)
+        speed_names = (:wᶜˡ, :wⁿᶜˡ, :wʳ, :wⁿʳ, :wⁱ, :wⁿⁱ)
+
+        for T in (FT(268), FT(278)), qᶜˡ in (0, 4e-4), qʳ in (0, 1e-3), qⁱ in (0, 2e-3)
+            q = MoistureMassFractions(FT(5e-3), FT(qᶜˡ + qʳ), FT(qⁱ))
+            𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+            ℳ = P3MicrophysicalState(FT(qᶜˡ), FT(1e8), FT(qʳ), FT(1e4), FT(qⁱ), FT(1e5),
+                                     FT(qⁱ / 2), FT(qⁱ / 800), FT(0), FT(0), FT(0), FT(0))
+
+            # k = 2 avoids the bottom face, where the precipitation boundary condition applies.
+            μ = NamedTuple(name => zeros(FT, 1, 1, 2) for name in speed_names)
+            PPP.p3_compute_fall_speeds!(μ, 1, 1, 2, p3, ρ, ℳ, 𝒰, constants)
+            properties = PPP.p3_fall_speed_properties(p3, ρ, ℳ, 𝒰, constants)
+            expected = PPP.p3_fall_speed_compute(p3, ρ, ℳ, properties, constants)
+
+            @test μ.wᶜˡ[1, 1, 2] == -expected.𝕎ᶜˡ
+            @test μ.wⁿᶜˡ[1, 1, 2] == -expected.𝕎ⁿᶜˡ
+            @test μ.wʳ[1, 1, 2] == -expected.𝕎ʳ
+            @test μ.wⁿʳ[1, 1, 2] == -expected.𝕎ⁿʳ
+            @test μ.wⁱ[1, 1, 2] == -expected.𝕎ⁱ
+            @test μ.wⁿⁱ[1, 1, 2] == -expected.𝕎ⁿⁱ
+        end
     end
 end

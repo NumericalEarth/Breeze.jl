@@ -1,7 +1,9 @@
-@inline function ice_rain_collection_lookup(table::IceRainCollection,
-                                            m̄, λr, Fᶠ, Fˡ, ρᶠ)
-    log_m = log10(m̄)
-    log_λ = log10(λr)
+@inline ice_rain_collection_lookup(table::IceRainCollection, m̄, λr, Fᶠ, Fˡ, ρᶠ) =
+    ice_rain_collection_lookup_at_log(table, log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ)
+
+# The same lookup at coordinates whose logarithms the caller already holds.
+@inline function ice_rain_collection_lookup_at_log(table::IceRainCollection,
+                                                   log_m, log_λ, Fᶠ, Fˡ, ρᶠ)
     # Both rain-ice tables share `(log_m, log_λ, Fᶠ, Fˡ, ρᶠ)` axes
     # by construction, so prep indices once and reuse across evaluations.
     prep = prepare_interpolation(table.mass, log_m, log_λ, Fᶠ, Fˡ, ρᶠ)
@@ -72,11 +74,15 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
     # Temperature-dependent sticking efficiency (linear ramp)
     # Cold ice is less sticky, near-melting ice is very sticky
-    aggregation_efficiency = clamp(ℂᵃᵍᵍʳ₂ + (T - ℂᵃᵍᵍʳ₃) / (ℂᵃᵍᵍʳ₄ - ℂᵃᵍᵍʳ₃) * (ℂᵃᵍᵍʳ₁ - ℂᵃᵍᵍʳ₂), ℂᵃᵍᵍʳ₂, ℂᵃᵍᵍʳ₁)
+    # The ramp slope (ℂᵃᵍᵍʳ₁ - ℂᵃᵍᵍʳ₂) / (ℂᵃᵍᵍʳ₄ - ℂᵃᵍᵍʳ₃) is materialized in `ProcessRate`.
+    temperature_slope = parameters.aggregation_efficiency_temperature_slope
+    aggregation_efficiency = clamp(ℂᵃᵍᵍʳ₂ + (T - ℂᵃᵍᵍʳ₃) * temperature_slope, ℂᵃᵍᵍʳ₂, ℂᵃᵍᵍʳ₁)
 
     # Rime-fraction limiter (Eii_fact): shut off aggregation for heavily rimed ice
     # Eii_fact = 1 for Fᶠ<0.6, a linear ramp to 0 for 0.6≤Fᶠ<0.9, and 0 for Fᶠ≥0.9
-    rime_fraction_factor = clamp(1 - (Fᶠ - ℂᵃᵍᵍʳ₅) / (ℂᵃᵍᵍʳ₆ - ℂᵃᵍᵍʳ₅), 0, 1)
+    # 1 / (ℂᵃᵍᵍʳ₆ - ℂᵃᵍᵍʳ₅) is materialized in `ProcessRate`.
+    rime_fraction_range⁻¹ = parameters.inverse_aggregation_rime_fraction_range
+    rime_fraction_factor = clamp(1 - (Fᶠ - ℂᵃᵍᵍʳ₅) * rime_fraction_range⁻¹, 0, 1)
     aggregation_efficiency *= rime_fraction_factor
 
     # PSD-integrated self-collection kernel (E-free) from lookup table.

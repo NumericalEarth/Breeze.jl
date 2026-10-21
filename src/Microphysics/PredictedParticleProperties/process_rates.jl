@@ -15,7 +15,7 @@
 # Derived thermodynamic and PSD state computed during setup of `compute_p3_process_rates`
 # and passed to the phase sub-functions to avoid recomputation.
 # Internal implementation detail — not part of the public API.
-struct P3DerivedState{FT, Q, L}
+struct P3DerivedState{FT, Q, L, X}
     # Bounded prognostic state
     nⁱ :: FT        # λ-limiter bounded (the global Nⁱ cap is applied before it)
     nʳ :: FT        # DSD-bounded rain number
@@ -42,7 +42,31 @@ struct P3DerivedState{FT, Q, L}
     ν :: FT        # kinematic viscosity [m²/s]
     # Table-1 quantities of the bounded ice population, bracketed once per cell
     lookups :: L   # P3IceLookups: coordinate bracket, density correction, ventilation terms
+    # Per-cell quantities several rates share (`P3CellDerivedState`), or `nothing`, in which
+    # case each rate re-derives them from the fields above as it did standalone.
+    cell :: X
 end
+
+# The 21-field form, without the shared per-cell quantities.
+@inline P3DerivedState{FT, Q, L}(fields::Vararg{Any, 21}) where {FT, Q, L} =
+    P3DerivedState{FT, Q, L, Nothing}(fields..., nothing)
+
+# Rain slope and the ventilation Schmidt factor `Sc^{1/3} / √ν`, evaluated once per cell.
+struct P3CellDerivedState{FT}
+    rain :: P3RainSlope{FT}
+    schmidt_factor :: FT
+end
+
+@inline cell_rain_slope(::Nothing) = nothing
+@inline cell_rain_slope(cell::P3CellDerivedState) = cell.rain
+
+# The transport tuple the phase rates hand to the ventilated rates; with the cell's
+# Schmidt factor it selects the shared-factor methods of `ventilation_sc_correction`.
+@inline p3_transport(state::P3DerivedState{FT, Q, L, Nothing}) where {FT, Q, L} =
+    (; Dᵛ = state.Dᵛ, Kᵃ = state.Kᵃ, ν = state.ν)
+
+@inline p3_transport(state::P3DerivedState) =
+    (; Dᵛ = state.Dᵛ, Kᵃ = state.Kᵃ, ν = state.ν, schmidt_factor = state.cell.schmidt_factor)
 
 @inline function liquid_supersaturation_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, ρ, constants)
     q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
@@ -251,6 +275,10 @@ struct P3ProcessRates{FT}
     predicted_supersaturation_tendency :: FT
 end
 
+# The table-heavy process groups below are guarded by branches on the species and
+# temperature they need, a deliberate exception to `ifelse`: each guard is implied by the gate inside
+# the rates it skips, so a skipped group returns exactly the zero its own gate would, while
+# warps in an ice-only anvil or in warm rain skip whole groups of lookups.
 @inline function p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
                                  temperature_tendency, vapor_tendency)
     FT = typeof(ρ)
@@ -269,7 +297,8 @@ end
     P = state.P
 
     # Transport properties (reconstructed as NamedTuple for existing function signatures)
-    transport = (; Dᵛ = state.Dᵛ, Kᵃ = state.Kᵃ, ν = state.ν)
+    transport = p3_transport(state)
+    rain = cell_rain_slope(state.cell)
     qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
 
     # =========================================================================
@@ -281,7 +310,7 @@ end
                                                       transport, q,
                                                       state.μᶜˡ, state.λᶜˡ, state.nᶜˡ,
                                                       temperature_tendency, vapor_tendency,
-                                                      state.lookups)
+                                                      state.lookups, rain)
     cond = vapor_rates.condensation
 
     # Cloud droplet activation
@@ -298,8 +327,8 @@ end
     cloud_self = cloud_self_collection_rate(p3, ℳ.qᶜˡ, Nᶜˡ, ρ)
     rain_evap = vapor_rates.rain_evaporation
     rain_cond = vapor_rates.rain_condensation
-    rain_self = rain_self_collection_rate(p3, ℳ.qʳ, nʳ, ρ)
-    rain_br = rain_breakup_rate(p3, ℳ.qʳ, nʳ, rain_self)
+    rain_self = rain_self_collection_rate(p3, ℳ.qʳ, nʳ, ρ, rain)
+    rain_br = rain_breakup_rate(p3, ℳ.qʳ, nʳ, rain_self, rain)
 
     # =========================================================================
     # Ice deposition/sublimation and wet-ice coating condensation/evaporation
@@ -318,9 +347,14 @@ end
     coat_evap = ifelse(wet_ice_exchange_active,
                        vapor_rates.coating_evaporation, zero(FT))
 
-    melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, constants, transport, state.lookups)
-    partial_melt = melt_rates.partial_melting
-    complete_melt = melt_rates.complete_melting
+    # Melting is zero at or below freezing, or without ice mass or number.
+    melting_possible = (T > p3.process_rates.freezing_temperature) & (nⁱ > 0) & (ℳ.qⁱ > 0)
+    partial_melt, complete_melt = if melting_possible
+        melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, constants, transport, state.lookups)
+        melt_rates.partial_melting, melt_rates.complete_melting
+    else
+        zero(FT), zero(FT)
+    end
     complete_melt = ifelse(p3.process_rates.liquid_fraction_active,
                            complete_melt, complete_melt + partial_melt)
     partial_melt = ifelse(p3.process_rates.liquid_fraction_active,
@@ -342,23 +376,29 @@ end
 
     # Unpack derived state
     (; T, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, qᶠ, bᶠ, Fˡ, Nᶜˡ, μᶜˡ, λᶜˡ, nⁱ, nʳ, lookups) = state
-    transport = (; Dᵛ = state.Dᵛ, Kᵃ = state.Kᵃ, ν = state.ν)
+    transport = p3_transport(state)
+    rain = cell_rain_slope(state.cell)
 
     qⁱ = ℳ.qⁱ
     qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
 
+    qsmall = p3.minimum_mass_mixing_ratio
+    ice_present = total_ice_mass(qⁱ, qʷⁱ) >= qsmall
+    cloud_and_ice_present = ice_present & (max(0, qᶜˡ) >= qsmall)
+    rain_and_ice_present = ice_present & (max(0, qʳ) >= qsmall)
+
     # =========================================================================
     # Aggregation
     # =========================================================================
-    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ, lookups)
+    agg = ice_present ? ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ, lookups) : zero(FT)
 
     # Global ice number limiter, expressed as a tendency on the *raw* prognostic
     # ℳ.nⁱ rather than on the locally pre-capped `state.nⁱ`, which is already
     # bounded and would make this limiter dead.
     maximum_ice_number = parameters.maximum_ice_number_density
-    ni_lim = max(0, ℳ.nⁱ - maximum_ice_number / ρ) / parameters.sink_limiting_timescale
+    ni_lim = max(0, ℳ.nⁱ - maximum_ice_number / ρ) * parameters.inverse_sink_limiting_timescale
 
     # =========================================================================
     # Riming
@@ -368,12 +408,16 @@ end
     # evaluated once with the gate open and split by temperature here, rather than
     # called twice with complementary gates.
     below_freezing = T <= T₀
-    cloud_coll = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, true, qʷⁱ, lookups)
+    cloud_coll = cloud_and_ice_present ?
+                 cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, true, qʷⁱ, lookups) :
+                 zero(FT)
     cloud_rim = ifelse(below_freezing, cloud_coll, zero(FT))
     cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_rim)
     # Mass and number share one Table 2 read.
-    rain_coll_q, rain_coll_n = rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
-                                                     true, qʷⁱ, lookups)
+    rain_coll_q, rain_coll_n = rain_and_ice_present ?
+                               rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
+                                                     true, qʷⁱ, lookups, rain) :
+                               (zero(FT), zero(FT))
     rain_rim = ifelse(below_freezing, rain_coll_q, zero(FT))
     rain_rim_n = ifelse(below_freezing, rain_coll_n, zero(FT))
 
@@ -382,18 +426,32 @@ end
     # with prescribed cloud parameters, so μᶜˡ and λᶜˡ from `diagnose_cloud_dsd` are
     # passed through to the Cober-List rime density when Nᶜˡ is prognostic.
     # The fall speed is read at the shared Table-1 bracket, which is indexed with the
-    # total ice mass.
+    # total ice mass. It enters only the Cober-List density of actively forming rime;
+    # otherwise `rime_density` returns the unrimed density whatever the speed.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    𝕎ⁱ = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, lookups)
-    ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, 𝕎ⁱ, ρ, constants, transport, μᶜˡ, λᶜˡ)
+    rime_forming = (cloud_rim >= qsmall) & (qᶜˡ >= qsmall) & (T < T₀)
+    # `rime_forming` is exactly the gate inside `rime_density`, whose closed branch returns
+    # the clamped unrimed density, so skipping the Stokes/impact evaluation is exact.
+    ρᶠ_new = if rime_forming
+        𝕎ⁱ = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, lookups)
+        rime_density(p3, qᶜˡ, cloud_rim, T, 𝕎ⁱ, ρ, constants, transport, μᶜˡ, λᶜˡ)
+    else
+        clamp(parameters.unrimed_rime_density, parameters.minimum_rime_density,
+              parameters.maximum_rime_density)
+    end
 
     # =========================================================================
     # Wet growth capacity and collection rerouting
     # =========================================================================
     has_hydrometeors = (max(0, qᶜˡ) + max(0, qʳ)) >=
                        parameters.wet_growth_hydrometeor_threshold
-    qwgrth_raw = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
-                                     constants, transport, lookups)
+    # The capacity is zero at or above freezing or without ice number, and it is consumed
+    # only by wet growth (which needs hydrometeors) and by refreezing (which needs coating).
+    capacity_needed = (T < T₀) & (nⁱ > 0) & (has_hydrometeors | (qʷⁱ > 0))
+    qwgrth_raw = capacity_needed ?
+                 wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+                                     constants, transport, lookups) :
+                 zero(FT)
     qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
     total_collection = cloud_rim + rain_rim
@@ -419,25 +477,25 @@ end
                       ifelse(dry_wet_growth, retained_rain, rain_rim))
     wg_shed = ifelse(dry_wet_growth, excess_cloud, zero(FT))
     wg_shed_n = ifelse(dry_wet_growth,
-                       (excess_cloud + excess_rain) / parameters.shed_drop_mass,
+                       (excess_cloud + excess_rain) * parameters.inverse_shed_drop_mass,
                        zero(FT))
     ρᶠ_new = ifelse(dry_wet_growth, parameters.maximum_rime_density, ρᶠ_new)
 
     # Wet growth rime densification
-    ρ_rimemax = parameters.maximum_rime_density
+    ρ_rimemax⁻¹ = parameters.inverse_maximum_rime_density
     τ_densif = parameters.rime_densification_timescale
     qⁱ_safe = max(0, qⁱ)
     bᶠ_safe = max(bᶠ, FT(parameters.floors.mass_scale))
     wg_densif_active = dry_wet_growth & (qⁱ_safe > p3.minimum_mass_mixing_ratio)
     wg_densif_mass = max(0, qⁱ_safe - qᶠ) / τ_densif
-    wg_densif_vol = (qⁱ_safe / ρ_rimemax - bᶠ_safe) / τ_densif
+    wg_densif_vol = (qⁱ_safe * ρ_rimemax⁻¹ - bᶠ_safe) / τ_densif
     wg_densif_mass = ifelse(wg_densif_active, wg_densif_mass, zero(FT))
     wg_densif_vol  = ifelse(wg_densif_active, wg_densif_vol, zero(FT))
 
     # =========================================================================
     # Shedding and refreezing
     # =========================================================================
-    shed = shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups)
+    shed = qʷⁱ > 0 ? shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups) : zero(FT)
     shed_n = shedding_number_rate(p3, shed)
     refrz = refreezing_rate_from_capacity(p3, qʷⁱ, qwgrth_raw)
     shed = ifelse(parameters.liquid_fraction_active, shed, zero(FT))
@@ -446,6 +504,8 @@ end
 
     # Liquid fraction clipping
     Fl_small = parameters.liquid_fraction_clipping_threshold
+    # The clips below drain whole reservoirs, so they keep `q / τ` (see
+    # `compute_p3_process_rates`).
     τ_clip = parameters.refreezing_timescale
     qʷⁱ_eff = max(0, qʷⁱ)
     clip_freeze = parameters.liquid_fraction_active & (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
@@ -477,9 +537,14 @@ end
     nucleation_existing_number = ifelse(whole_particle_clipping, zero(FT), nⁱ)
     nuc_q, nuc_n = deposition_nucleation_rate(
         p3, T, qᵛ, qᵛ⁺ⁱ, nucleation_existing_number, ρ)
-    cloud_frz_q, cloud_frz_n = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ)
+    immersion_freezing_possible = T <= parameters.maximum_immersion_freezing_temperature
+    cloud_frz_q, cloud_frz_n = immersion_freezing_possible & (max(0, qᶜˡ) >= qsmall) ?
+                               immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ) :
+                               (zero(FT), zero(FT))
     μʳ = zero(FT)
-    rain_frz_q, rain_frz_n = immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μʳ)
+    rain_frz_q, rain_frz_n = immersion_freezing_possible & (max(0, qʳ) >= qsmall) ?
+                             immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μʳ) :
+                             (zero(FT), zero(FT))
 
     # Rime splintering is not diagnosed here: `compute_p3_process_rates` recomputes it
     # from the sink-limited riming rates, which is the value every consumer sees.
@@ -545,13 +610,54 @@ end
                                     surface_temperature, zero(ρ), zero(ρ))
 end
 
+# Temperature and the saturation humidities of the unadjusted state. The tendency kernel
+# evaluates them once for its activity gate and hands them on, so the full evaluation does
+# not repeat the Exner power and the saturation exponentials.
+struct P3SaturationState{FT}
+    T :: FT
+    qᵛ⁺ˡ :: FT
+    qᵛ⁺ⁱ :: FT  # over ice below T₀, over liquid at or above it
+end
+
+@inline function p3_saturation_state(p3, ρ, 𝒰, constants)
+    T = temperature(𝒰, constants)
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    T₀ = p3.process_rates.freezing_temperature
+    qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρ, constants, T₀, qᵛ⁺ˡ)
+    return P3SaturationState(T, qᵛ⁺ˡ, qᵛ⁺ⁱ)
+end
+
+# Without predicted supersaturation the adjustment leaves T and qᵛ⁺ˡ untouched, so the
+# ice saturation and the cloud size distribution of the unadjusted state still hold.
+@inline adjusted_ice_saturation(::ProcessRate{FT, false}, saturation, T, ρ, constants, qᵛ⁺ˡ) where FT =
+    saturation.qᵛ⁺ⁱ
+
+@inline adjusted_ice_saturation(parameters::ProcessRate{FT, true}, saturation, T, ρ, constants, qᵛ⁺ˡ) where FT =
+    p3_ice_saturation_specific_humidity(T, ρ, constants, parameters.freezing_temperature, qᵛ⁺ˡ)
+
+@inline adjusted_cloud_dsd(::ProcessRate{FT, false}, p3, qᶜˡ, nᶜˡ, ρ, properties) where FT =
+    (; properties.Nᶜˡ, properties.nᶜˡ, properties.μᶜˡ, properties.λᶜˡ)
+
+@inline adjusted_cloud_dsd(::ProcessRate{FT, false}, p3, qᶜˡ, nᶜˡ, ρ, ::Nothing) where FT =
+    diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+
+@inline adjusted_cloud_dsd(::ProcessRate{FT, true}, p3, qᶜˡ, nᶜˡ, ρ, properties) where FT =
+    diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+
+@inline compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, surface_temperature,
+                                 temperature_tendency, vapor_tendency) =
+    compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, surface_temperature,
+                             temperature_tendency, vapor_tendency,
+                             p3_saturation_state(p3, ρ, 𝒰, constants))
+
 # Everything from here down is `@inline`. A `@noinline` device function would receive `p3`
 # (several KB of table handles), `ℳ`, `𝒰`, and `constants` as local-memory copies, and
 # ptxas allocates registers over the whole call graph anyway.
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
-                                          vapor_tendency)
+                                          vapor_tendency,
+                                          saturation::P3SaturationState)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -599,10 +705,10 @@ end
         properties.nⁱ_diagnostic, properties.ρ_mean
     end
 
-    T = temperature(𝒰, constants)
+    T = saturation.T
     q_base = 𝒰.moisture_mass_fractions
     qᵛ_base = q_base.vapor
-    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    qᵛ⁺ˡ = saturation.qᵛ⁺ˡ
     P = air_pressure(𝒰, constants)
 
     supersaturation_adjustment = predicted_supersaturation_adjustment(
@@ -615,10 +721,10 @@ end
                               q_base.liquid + supersaturation_adjustment.cloud_water_adjustment,
                               q_base.ice)
     qᵛ⁺ˡ = supersaturation_adjustment.qᵛ⁺ˡ
-    qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρ, constants, T₀, qᵛ⁺ˡ)
+    qᵛ⁺ⁱ = adjusted_ice_saturation(parameters, saturation, T, ρ, constants, qᵛ⁺ˡ)
     transport = air_transport_properties(T, P, constants)
 
-    cloud = diagnose_cloud_dsd(p3, qᶜˡ, ℳ.nᶜˡ, ρ)
+    cloud = adjusted_cloud_dsd(parameters, p3, qᶜˡ, ℳ.nᶜˡ, ρ, properties)
     Nᶜˡ = cloud.Nᶜˡ
     ℳ_adjusted = P3MicrophysicalState(qᶜˡ, ℳ.nᶜˡ, qʳ, ℳ.nʳ, qⁱ, ℳ.nⁱ,
                                       qᶠ, bᶠ, qʷⁱ, qᵛ - qᵛ⁺ˡ, ℳ.nᵃ, ℳ.w)
@@ -631,12 +737,16 @@ end
     # the dry-air `cᵖᵈ` psychrometric convention (`liquid_psychrometric_correction` /
     # `ice_psychrometric_correction`), which is a scheme constant rather than a per-cell
     # quantity, so no cᵖᵐ is carried here.
-    state = P3DerivedState{FT, typeof(q), typeof(lookups)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
+    # The rain slope's log and inverse and the Schmidt factor are shared by several rates.
+    cell = P3CellDerivedState{FT}(P3RainSlope(λʳ),
+                                  schmidt_viscosity_factor(transport.ν, transport.Dᵛ,
+                                                           parameters.floors))
+    state = P3DerivedState{FT, typeof(q), typeof(lookups), typeof(cell)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
                                                            Fˡ, Nᶜˡ, cloud.nᶜˡ,
                                                            cloud.μᶜˡ, cloud.λᶜˡ,
                                                            T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q,
                                                            transport.Dᵛ, transport.Kᵃ, transport.ν,
-                                                           lookups)
+                                                           lookups, cell)
 
     # === PHASE 1 & 2 RATES ===
     phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
@@ -685,7 +795,7 @@ end
         parameters.liquid_fraction_active, zero(FT),
         qʷⁱ_budget / parameters.sink_limiting_timescale)
     shed = shed + inactive_coating_cleanup
-    shed_n = shed_n + inactive_coating_cleanup / parameters.shed_drop_mass
+    shed_n = shed_n + inactive_coating_cleanup * parameters.inverse_shed_drop_mass
     refrz = phase2.refreezing
     nuc_q = phase2.nucleation_mass
     nuc_n = phase2.nucleation_number
@@ -732,6 +842,10 @@ end
 
     # === SINK LIMITING ===
     dt_safety = parameters.sink_limiting_timescale
+    dt_safety⁻¹ = parameters.inverse_sink_limiting_timescale
+    # Reservoir drains (`q / τ`) keep the division: the limiters compare `rate × τ` with
+    # the reservoir, and `q / τ × τ` round-trips to `q` where `q × (1/τ) × τ` can land an
+    # ulp above it, which would trip `sink_limiting_factor`'s `eps` floor.
 
     # --- Vapor sinks ---
     # The saturation-adjustment caps are applied before the per-species conservation
@@ -837,7 +951,7 @@ end
         wg_rain = wg_rain * f_rain
         rain_evap = rain_evap * f_rain
         wg_excess_rain = wg_excess_rain * f_rain
-        wg_shed_n = (wg_shed + wg_excess_rain) / parameters.shed_drop_mass
+        wg_shed_n = (wg_shed + wg_excess_rain) * parameters.inverse_shed_drop_mass
 
         total_ice_source_total = max(0, dep) + cloud_rim + rain_rim +
                                  nuc_q + cloud_frz_q + rain_frz_q +
@@ -887,8 +1001,8 @@ end
     sublim_n = sublim_n + coat_evap_n
 
     # Recompute splintering from sink-limited riming rates
-    diagnostic_mean_mass = qⁱ_total / nⁱ_diagnostic
-    D_mean = cbrt(6 * diagnostic_mean_mass / (FT(π) * ρ_mean))
+    # D = (6 m̄ / (π ρ̄))^(1/3) with m̄ = qⁱ_total / nⁱ_diagnostic, as one quotient.
+    D_mean = cbrt(FT(6 / π) * qⁱ_total / (nⁱ_diagnostic * ρ_mean))
     qᶜˡ_splintering_rate, qʳ_splintering_rate, spl_n = rime_splintering_rates(
         p3, cloud_rim, rain_rim, T, D_mean, Fˡ, surface_temperature, qᶠ)
     qᶜˡ_splintering_rate = min(qᶜˡ_splintering_rate, max(0, cloud_rim))
@@ -931,16 +1045,15 @@ end
 
     rime_density_safe = max(ρᶠ, parameters.minimum_rime_density)
     new_rime_density_safe = max(ρᶠ_new, parameters.minimum_rime_density)
-    maximum_rime_density = parameters.maximum_rime_density
+    inverse_rime_density_safe = 1 / rime_density_safe
     rime_volume_gain = cloud_rim / new_rime_density_safe +
-                       (rain_rim + refrz + cloud_frz_q + rain_frz_q) /
-                       maximum_rime_density + wg_densif_vol
-    rime_volume_loss = Fᶠ * (ordinary_total_melting + sublimation) /
-                       rime_density_safe + clipping_rime_volume
-    dry_ice_safe = max(qⁱ, FT(parameters.floors.mass_scale))
-    bᶠ_safe = Fᶠ * dry_ice_safe / rime_density_safe
-    melt_densification = bᶠ_safe * (parameters.pure_ice_density - rime_density_safe) *
-                          ordinary_total_melting / (rime_density_safe * dry_ice_safe)
+                       (rain_rim + refrz + cloud_frz_q + rain_frz_q) *
+                       parameters.inverse_maximum_rime_density + wg_densif_vol
+    rime_volume_loss = Fᶠ * (ordinary_total_melting + sublimation) *
+                       inverse_rime_density_safe + clipping_rime_volume
+    # bᶠ (ρⁱ - ρᶠ) melt / (ρᶠ qⁱ) with bᶠ = Fᶠ qⁱ / ρᶠ, so qⁱ cancels.
+    melt_densification = Fᶠ * (parameters.pure_ice_density - rime_density_safe) *
+                         ordinary_total_melting * inverse_rime_density_safe^2
     densification_active = (rime_density_safe < parameters.pure_ice_density) &
                            !parameters.liquid_fraction_active
     melt_densification = ifelse(densification_active, melt_densification, zero(FT))
@@ -952,7 +1065,7 @@ end
         0, rime_volume_after_ordinary_processes - melt_densification * dt_safety)
 
     ni_correction = ifelse(whole_particle_clipping, zero(FT),
-                           (nⁱ - nⁱ_global) / dt_safety)
+                           (nⁱ - nⁱ_global) * dt_safety⁻¹)
     ice_number_source_total = nuc_n + cloud_frz_n + rain_frz_n + spl_n
     # Global and DSD corrections conceptually replace the raw population with
     # the bounded one before physical processes act. Give particle-removing
@@ -995,7 +1108,7 @@ end
     # the same species-budget ratio as rain_freezing_mass.
     # Project the remaining number-only sinks onto the population left afterward.
     cloud_warm_rain_number = ifelse(
-        parameters.liquid_fraction_active, zero(FT), cloud_warm_q / parameters.shed_drop_mass)
+        parameters.liquid_fraction_active, zero(FT), cloud_warm_q * parameters.inverse_shed_drop_mass)
 
     # Net the self-collection/breakup pair before it enters the number budget.
     # Physically this is one signed rate: a base self-collection rate reduced by the
@@ -1011,7 +1124,7 @@ end
     rain_self = max(0, net_rain_self)
     rain_br = max(0, -net_rain_self)
 
-    rain_number_source_total = autoconv / rain_seed_drop_mass(p3) + melt_n +
+    rain_number_source_total = autoconv * inverse_rain_seed_drop_mass(p3) + melt_n +
                                rain_br + shed_n + cloud_warm_rain_number + wg_shed_n
     rain_evap_n = safe_divide(nʳ * rain_evap, qʳ, zero(FT))
     rain_number_available = max(0, nʳ) + rain_number_source_total * dt_safety
@@ -1078,8 +1191,8 @@ end
     rain_hom_n = rain_hom_n * f_rain_hom
 
     # DSD number correction feedback
-    ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
-    nr_correction = (nʳ - ℳ.nʳ) / dt_safety
+    ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) * dt_safety⁻¹
+    nr_correction = (nʳ - ℳ.nʳ) * dt_safety⁻¹
 
     # The supersaturation is re-diagnosed as sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T) at the end of the
     # step. That final T must come from the same conserved thermodynamic variable

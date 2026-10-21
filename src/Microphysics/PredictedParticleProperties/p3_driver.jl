@@ -1,4 +1,5 @@
 using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Architectures: GPU
 using Oceananigans.Fields: Center, ZeroField
 using Oceananigans.Grids: inactive_cell
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
@@ -92,7 +93,7 @@ end
     @inbounds begin
         ρ = ρ_field[i, j, k]
         qᵛᵉ = μ.qᵛ[i, j, k]
-        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, nothing, velocities)
+        ℳ, rime_state = p3_grid_state_and_rime(i, j, k, grid, p3, μ, ρ, velocities)
         q = AM.moisture_fractions(p3, ℳ, qᵛᵉ)
         𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
         𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
@@ -106,12 +107,64 @@ end
         surface_temperature = μ.surface_temperature[i, j, 1]
     end
 
-    properties = p3_process_properties(p3, ρ, ℳ)
-    result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
-                                 surface_temperature, temperature_tendency,
-                                 vapor_tendency)
-    add_p3_tendencies!(G, i, j, k, grid, p3, result)
+    # A deliberate branch rather than `ifelse`: cells P3 has no work in are skipped outright,
+    # which is where most of the domain sits (see `p3_processes_active`). Clear air is
+    # spatially coherent, so warps take the branch together.
+    # Temperature and saturation humidities are evaluated once, for the gate and the rates.
+    saturation = p3_saturation_state(p3, ρ, 𝒰, constants)
+    if p3_processes_active(p3, ℳ, 𝒰, saturation)
+        properties = p3_process_properties(p3, ρ, ℳ, rime_state)
+        result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
+                                     surface_temperature, temperature_tendency,
+                                     vapor_tendency, saturation)
+        add_p3_tendencies!(G, i, j, k, grid, p3, result)
+    end
 end
+
+#####
+##### Cells with no microphysical work
+#####
+##### Following the reference implementation's `compute_procs` test (`microphy_p3.f90`), the
+##### process rates are evaluated only where hydrometeors are present or nucleation is
+##### possible, i.e. where the air is within `nucleation_possible_subsaturation` of
+##### saturation over liquid (T ≥ T₀) or ice (T < T₀). Elsewhere every rate is gated to
+##### zero, so the full evaluation would only add zeros to `Gⁿ`. A leftover rain or ice
+##### number with no mass counts as present: the full evaluation relaxes it to zero, and
+##### skipping the cell would leave it in place.
+#####
+
+const nucleation_possible_subsaturation = -0.05
+
+@inline p3_processes_active(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) =
+    p3_processes_active(p3, ℳ, 𝒰, p3_saturation_state(p3, ρ, 𝒰, constants))
+
+@inline function p3_processes_active(p3::P3, ℳ::P3MicrophysicalState, 𝒰, saturation::P3SaturationState)
+    qsmall = p3.minimum_mass_mixing_ratio
+    nsmall = p3.minimum_number_mixing_ratio
+    qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
+    hydrometeors_present = (ℳ.qᶜˡ ≥ qsmall) | (ℳ.qʳ ≥ qsmall) |
+                           (total_ice_mass(ℳ.qⁱ, qʷⁱ) ≥ qsmall) |
+                           (ℳ.nʳ > nsmall) | (ℳ.nⁱ > nsmall) |
+                           cloud_number_present(p3.aerosol, ℳ, nsmall)
+
+    # Saturation over ice below T₀ and over liquid at or above it. The threshold factor
+    # is rounded to the working precision so the comparison stays in `FT`.
+    FT = typeof(qsmall)
+    qᵛ = 𝒰.moisture_mass_fractions.vapor
+    qᵛ⁺ = saturation.qᵛ⁺ⁱ
+    nucleation_possible = qᵛ ≥ (1 + FT(nucleation_possible_subsaturation)) * qᵛ⁺
+
+    return hydrometeors_present | nucleation_possible |
+           always_evaluate_processes(p3.process_rates)
+end
+
+# The prescribed droplet number is a scheme parameter, not a leftover to relax away.
+@inline cloud_number_present(::Nothing, ℳ, nsmall) = false
+@inline cloud_number_present(::AerosolActivation, ℳ, nsmall) = ℳ.nᶜˡ > nsmall
+
+# A predicted supersaturation relaxes towards its diagnosed value in clear air too.
+@inline always_evaluate_processes(::ProcessRate{FT, false}) where FT = false
+@inline always_evaluate_processes(::ProcessRate{FT, true}) where FT = true
 
 #####
 ##### Fused tendency override (fast path for AtmosphereModel)
@@ -138,6 +191,26 @@ end
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, false}) where FT = (;)
 @inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, true}) where FT = (; G.ρsᵛ⁺ˡ)
 
+#####
+##### Kernel arithmetic: the architecture the P3 tendency kernel is compiled for
+#####
+
+p3_kernel_architecture(::IEEEArithmetic, arch) = arch
+p3_kernel_architecture(::FastArithmetic, arch) = fastmath_architecture(arch)
+
+fastmath_architecture(arch) = arch
+fastmath_architecture(arch::GPU) = GPU(fastmath_device(arch.device))
+
+# KernelAbstractions backends that support fast math (CUDA.jl's `CUDABackend`) carry a
+# `fastmath::Bool` field. Rebuild the device with that field set, keeping its other options,
+# so Breeze needs no dependency on the backend package; devices without it are returned as is.
+function fastmath_device(device)
+    D = typeof(device)
+    hasfield(D, :fastmath) || return device
+    options = map(name -> name === :fastmath ? true : getfield(device, name), fieldnames(D))
+    return D(options...)
+end
+
 function AM.compute_microphysical_tendencies!(p3::P3, model)
     grid = model.grid
     arch = grid.architecture
@@ -147,7 +220,7 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
 
     compute_p3_surface_temperature!(μ.surface_temperature, model.temperature, grid)
 
-    launch!(arch, grid, :xyz, _p3_add_tendencies_kernel!,
+    launch!(p3_kernel_architecture(p3.arithmetic, arch), grid, :xyz, _p3_add_tendencies_kernel!,
             p3_tendency_fields(model.timestepper.Gⁿ, p3),
             μ, model.formulation, model.dynamics, grid,
             model.thermodynamic_constants, p3, ρ_field,

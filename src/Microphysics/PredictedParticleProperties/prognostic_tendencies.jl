@@ -310,11 +310,10 @@ preferentially, driving the remaining rime toward the configured solid-ice densi
     ρᶠ_safe = max(ρᶠ, parameters.minimum_rime_density)
     ρ_rim_new_safe = max(rates.rime_density_new, parameters.minimum_rime_density)
 
-    # Rain rime and freezing deposit at the maximum rime density
-    ρ_rimemax = parameters.maximum_rime_density
-    # Homogeneous freezing likewise deposits at the maximum rime density, not at
-    # the solid-ice density.
-    ρ_rim_hom = parameters.maximum_rime_density
+    # Rain rime and freezing deposit at the maximum rime density. Homogeneous freezing
+    # likewise deposits at the maximum rime density, not at the solid-ice density.
+    ρ_rimemax⁻¹ = parameters.inverse_maximum_rime_density
+    ρᶠ_safe⁻¹ = 1 / ρᶠ_safe
 
     # Phase 2: Volume gain from new rime
     # Cloud riming uses the Cober-List computed density; rain riming, immersion
@@ -326,10 +325,9 @@ preferentially, driving the remaining rime toward the configured solid-ice densi
     # same fresh-rime / maximum-rime-density split, and the soaking densification
     # comes through `wet_growth_densification_volume`.
     volume_gain = rates.cloud_riming / ρ_rim_new_safe +
-                   rates.rain_riming / ρ_rimemax +
-                   rates.refreezing / ρ_rimemax +
-                   (rates.cloud_freezing_mass + rates.rain_freezing_mass) / ρ_rimemax +
-                   (rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass) / ρ_rim_hom +
+                   (rates.rain_riming + rates.refreezing +
+                    rates.cloud_freezing_mass + rates.rain_freezing_mass +
+                    rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass) * ρ_rimemax⁻¹ +
                    rates.wet_growth_densification_volume
 
     # Ordinary melting and sublimation remove volume proportionally. A whole-
@@ -339,7 +337,7 @@ preferentially, driving the remaining rime toward the configured solid-ice densi
     ordinary_complete_melting =
         max(0, rates.complete_melting - rates.clipping_dry_mass)
     ordinary_total_melting = rates.partial_melting + ordinary_complete_melting
-    volume_loss = Fᶠ * (ordinary_total_melting + sublimation) / ρᶠ_safe +
+    volume_loss = Fᶠ * (ordinary_total_melting + sublimation) * ρᶠ_safe⁻¹ +
                   rates.clipping_rime_volume
 
     # Melt-densification. Low-density rime portions melt first, so the remaining ice
@@ -349,10 +347,8 @@ preferentially, driving the remaining rime toward the configured solid-ice densi
     # tracked explicitly in qʷⁱ. The densification target is the configured solid-ice
     # density, not the maximum rime density.
     ρ_solid_ice = parameters.pure_ice_density
-    qⁱ_safe = max(qⁱ, FT(parameters.floors.mass_scale))
-    bᶠ = Fᶠ * qⁱ_safe / ρᶠ_safe
-    densification = bᶠ * (ρ_solid_ice - ρᶠ_safe) * ordinary_total_melting /
-                    (ρᶠ_safe * qⁱ_safe)
+    # With bᶠ = Fᶠ qⁱ / ρᶠ the qⁱ cancels: Fᶠ (ρ_solid_ice - ρᶠ) |melt| / ρᶠ².
+    densification = Fᶠ * (ρ_solid_ice - ρᶠ_safe) * ordinary_total_melting * ρᶠ_safe⁻¹^2
     # Apply only below the solid-ice density when liquid fraction is not active.
     apply_densification = (ρᶠ_safe < ρ_solid_ice) & !parameters.liquid_fraction_active
     densification = ifelse(apply_densification, densification, zero(FT))

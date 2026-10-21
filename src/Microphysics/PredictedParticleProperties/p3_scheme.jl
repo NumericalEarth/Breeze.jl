@@ -15,7 +15,7 @@ using LazyArtifacts: LazyArtifacts
 The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
-struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS}
+struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS, ARI}
     # Top-level thresholds
     minimum_mass_mixing_ratio :: FT
     minimum_number_mixing_ratio :: FT
@@ -33,7 +33,35 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NM
     aerosol :: AERO
     # Warm-rain (autoconversion/accretion/self-collection) scheme selector
     warm_rain_scheme :: WRS
+    # Floating-point mode of the P3 tendency kernel: `IEEEArithmetic()` or `FastArithmetic()`
+    arithmetic :: ARI
 end
+
+#####
+##### Kernel arithmetic
+#####
+##### The P3 tendency kernel inlines rate functions from a dozen files, so a fast-math mode
+##### cannot be selected with `@fastmath` in source: the macro is lexical and would not
+##### reach the callees. Instead the mode chooses the device the kernel is compiled for
+##### (see `p3_kernel_architecture` in `p3_driver.jl`).
+#####
+
+"""
+$(TYPEDEF)
+
+Compile the P3 tendency kernel with IEEE-compliant Float32 arithmetic (the default).
+"""
+struct IEEEArithmetic end
+
+"""
+$(TYPEDEF)
+
+Compile the P3 tendency kernel in the device's fast-math mode. On CUDA GPUs this uses
+approximate division, `pow`, `exp` and `log`, and flushes Float32 subnormals to zero.
+Other architectures are unaffected. Selected with `fastmath = true` in
+[`PredictedParticlePropertiesMicrophysics`](@ref).
+"""
+struct FastArithmetic end
 
 """
 $(TYPEDSIGNATURES)
@@ -104,6 +132,8 @@ Optional fields are allocated and advected only when enabled.
   `nothing` (default) is an open surface: the diagnosed fall speed is retained at the
   bottom face, so all sedimenting species leave the domain. `ImpenetrableBoundaryCondition()`
   zeroes the fall speed there instead, so precipitation accumulates in the lowest cell.
+- `fastmath`: Compile the P3 tendency kernel in fast-math mode (`false` by default); see
+  "Fast-math tendency kernel" below.
 - `negative_moisture_correction`: Repair of negative densities left by the advection
   operator, applied at the top of `update_state!`. Defaults to `SpeciesBorrowing()`,
   which borrows along the chain ``ρqʷⁱ ← ρqⁱ ← ρqʳ ← ρqᶜˡ ← ρqᵛ``, zeroes number and
@@ -119,6 +149,16 @@ By default, cloud droplet concentration is prescribed by `cloud.number_concentra
 Pass `aerosol = AerosolActivation(AerosolMode())` to predict droplet number from
 aerosol activation. Set `prognostic=true` in [`AerosolActivation`](@ref) to also
 track depletion of the unactivated aerosol reservoir.
+
+# Fast-math tendency kernel
+
+`fastmath = true` compiles the P3 process-rate kernel with the GPU's fast-math mode:
+approximate division, `pow`, `exp` and `log`, and Float32 subnormals flushed to zero. On an
+H100 this made the P3 tendency kernel about 2.5× faster in a DCMIP2016 supercell with P3.
+The results are not roundoff-equivalent to the default: tendencies differ by up to ~10⁻³ of
+their maxima in active cells, and the sink limiters, which compare a drained reservoir against
+`eps`, can respond differently where a rate exhausts a species. Only the P3 tendency kernel is
+affected; the other kernels, and CPU or non-CUDA architectures, keep IEEE arithmetic.
 
 # Configuring the empirical warm-phase parameters
 
@@ -190,7 +230,8 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  rain = nothing,
                                                  process_rates = nothing,
                                                  predict_supersaturation = false,
-                                                 warm_rain_scheme = KhairoutdinovKogan2000())
+                                                 warm_rain_scheme = KhairoutdinovKogan2000(),
+                                                 fastmath = false)
     if isnothing(process_rates)
         process_rates = ProcessRate(FT; thermodynamic_constants,
                                     predict_supersaturation)
@@ -200,7 +241,8 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                               minimum_mass_mixing_ratio, minimum_number_mixing_ratio,
                               precipitation_boundary_condition,
                               negative_moisture_correction,
-                              aerosol, cloud, rain, process_rates, warm_rain_scheme)
+                              aerosol, cloud, rain, process_rates, warm_rain_scheme,
+                              arithmetic = fastmath ? FastArithmetic() : IEEEArithmetic())
 end
 
 # Shorthand alias
@@ -210,6 +252,7 @@ Base.summary(::PredictedParticlePropertiesMicrophysics) = "PredictedParticleProp
 
 function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, summary(p3), '\n')
+    p3.arithmetic isa FastArithmetic && print(io, "├── arithmetic: fast-math tendency kernel\n")
     print(io, "├── ρʷ: ", p3.process_rates.liquid_water_density, " kg/m³\n")
     print(io, "├── qmin: ", p3.minimum_mass_mixing_ratio, " kg/kg\n")
     print(io, "├── ice: ", summary(p3.ice), "\n")
