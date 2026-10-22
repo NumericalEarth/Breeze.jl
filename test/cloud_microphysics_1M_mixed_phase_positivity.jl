@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using CloudMicrophysics
-using CloudMicrophysics.Parameters: CloudIce, CloudLiquid
+using CloudMicrophysics.Parameters: CloudIce, CloudLiquid, Microphysics1MParams
 using Oceananigans
 using Test
 
@@ -99,6 +99,71 @@ end
     @test donor_limiter(FT(1e-4), FT(1e-4)) ≈ FT(1e-4) / (τⁿᵘᵐ * FT(1e-4))
     @test donor_limiter(FT(-1e-6), FT(1e-4)) == 0                      # empty donor gives nothing
     @test donor_limiter(zero(FT), zero(FT)) == 1
+end
+
+@testset "Mixed-phase 1M with disabled vapor exchanges [$FT]" for FT in test_float_types()
+    constants = ThermodynamicConstants(FT)
+    parameters = Microphysics1MParams(FT; rain_condensation_evaporation=nothing, snow_deposition_sublimation=nothing)
+    categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
+    ρ, ℳ, 𝒰 = mixed_phase_state(FT, constants; T = 270, qᵛ = 3.5e-3, qᶜˡ = 0, qᶜⁱ = 0, qʳ = 1e-4, qˢⁿ = 8e-3)
+
+    for q in (zero(FT), FT(1e-3), FT(-1e-6))
+        @test @inferred(donor_limiter(q, 0)) === one(FT)
+    end
+
+    for (tendencies, cloud_formation) in ((mp1m_tendencies, saturation_adjustment_1M(FT).cloud_formation),
+                                        (mpne1m_tendencies, non_equilibrium_1M(FT).cloud_formation))
+        microphysics = OneMomentCloudMicrophysics(FT; categories, cloud_formation)
+        G = @inferred tendencies(microphysics, ρ, ℳ, 𝒰, constants)
+        @test all(value -> value isa FT && isfinite(value), values(G))
+        @test G.ρqʳ < 0
+        @test G.ρqˢⁿ > 0
+        @test abs(sum(values(G))) ≤ 10eps(FT) * maximum(abs, values(G))
+    end
+end
+
+@testset "Warm snow collection respects heat and donor budgets [$FT]" for FT in test_float_types()
+    constants = ThermodynamicConstants(FT)
+    # Isolate cloud-liquid collection by snow and its associated melting.
+    parameters = Microphysics1MParams(FT; rain_autoconversion = nothing, rain_condensation_evaporation = nothing,
+                                     snow_deposition_sublimation = nothing, snow_melt = nothing)
+    parameters = Microphysics1MParams(;
+        parameters.processes,
+        process_params = merge(parameters.process_params, (; cloud_liquid_snow_accretion = (; e = FT(1)))),
+        parameters.cloud,
+        parameters.precip,
+        parameters.air_properties,
+        parameters.terminal_velocity)
+    categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
+    no_formation = ConstantRateCondensateFormation(zero(FT))
+    cloud_formations = (saturation_adjustment_1M(FT).cloud_formation,
+                        NonEquilibriumCloudFormation(no_formation, no_formation))
+
+    for (tendencies, cloud_formation) in zip((mp1m_tendencies, mpne1m_tendencies), cloud_formations)
+        microphysics = OneMomentCloudMicrophysics(FT; categories, cloud_formation)
+        # Exercise each donor limit, including cloud limitation that frees the snow budget.
+        for (T, qᶜˡ, qˢⁿ) in ((280, 1e-3, 3e-2), (300, 1e-1, 1e-5), (300, 1e-1, 3e-2), (300, 2e-1, 3e-2))
+            ρ, ℳ, 𝒰 = mixed_phase_state(FT, constants; T, qᵛ = 6e-3, qᶜˡ, qᶜⁱ = 0, qʳ = 0, qˢⁿ)
+            T = temperature(𝒰, constants)
+            Tᶠ = categories.freezing_temperature
+            rates = mixed_phase_precipitation_rates(microphysics, ρ, ℳ, 𝒰.moisture_mass_fractions, T, Tᶠ, constants)
+            G = @inferred tendencies(microphysics, ρ, ℳ, 𝒰, constants)
+            collected = ρ * min(rates.Sᵃᶜᶜˡˢⁿ, ℳ.qᶜˡ / τⁿᵘᵐ)
+            ℒf = Breeze.Thermodynamics.ice_latent_heat(T, constants) - Breeze.Thermodynamics.liquid_latent_heat(T, constants)
+            # Sensible heat from the collected liquid can melt at most α times its mass.
+            α = constants.liquid.heat_capacity * (T - Tᶠ) / ℒf
+            melted = min(α * collected, ρ * ℳ.qˢⁿ / τⁿᵘᵐ)
+            @test -G.ρqˢⁿ ≈ melted
+            @test G.ρqʳ ≈ collected + melted
+            @test abs(sum(values(G))) ≤ 10eps(FT) * maximum(abs, values(G))
+            if cloud_formation isa SaturationAdjustment
+                @test -G.ρqᵉ ≈ collected
+            else
+                @test -G.ρqᶜˡ ≈ collected
+                @test iszero(G.ρqᵛ)
+            end
+        end
+    end
 end
 
 @testset "Mixed-phase 1M models make snow and keep rain non-negative [$FT]" for FT in test_float_types()

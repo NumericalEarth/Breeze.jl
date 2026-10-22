@@ -866,8 +866,9 @@ const τⁿᵘᵐ = 10  # seconds
 # Fraction of a donor's process rates that can be honoured without draining more than
 # its content `q` over τⁿᵘᵐ: 1 when the summed sink rate `ΣS` fits, `q⁺ / (τⁿᵘᵐ ΣS)` otherwise.
 @inline function donor_limiter(q, ΣS)
-    q⁺ = max(q, zero(q))
-    demand = τⁿᵘᵐ * ΣS
+    q⁺ = max(0, q)
+    # Disabled processes return integer zeros; retain the moisture precision for zero demand.
+    demand = oftype(q, τⁿᵘᵐ) * ΣS
     return ifelse(demand > q⁺, q⁺ / max(demand, eps(typeof(demand))), one(demand))
 end
 
@@ -1215,12 +1216,16 @@ end
     Sᵉᵛᵃᵖ⁺, Sᵉᵛᵃᵖ⁻ = max(Sᵉᵛᵃᵖ, 0), min(Sᵉᵛᵃᵖ, 0)
     Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
     Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)                       # cold: rain → snow
-    Sˢⁿʷ  = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))  # warm: snow → rain
 
     fᵛ  = donor_limiter(qᵛ,  Sᶜᵒⁿᵈ⁺ + Sᵈᵉᵖ⁺ + Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺)
     fᶜˡ = donor_limiter(qᶜˡ, -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ)
     fᶜⁱ = donor_limiter(qᶜⁱ, -Sᵈᵉᵖ⁻ + Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵐᵉˡᵗᶜⁱ)
     fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
+
+    # Collected liquid supplies heat for the melt rate α Sᵃᶜᶜˡˢⁿ. Limit collection before
+    # computing this melt demand, then cap all snow sinks against the available snow.
+    Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
+    Sˢⁿʷ = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
     fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
 
     Sᶜᵒⁿᵈ = fᵛ * Sᶜᵒⁿᵈ⁺ + fᶜˡ * Sᶜᵒⁿᵈ⁻
@@ -1234,7 +1239,6 @@ end
     # Sᵃᶜᶜˡˢⁿ: the cloud-liquid part draws on cloud liquid, its warm melt part (α Sᵃᶜᶜˡˢⁿ) on snow.
     # Sʳˢⁿ: rain donor when cold, its warm melt part (α Sʳˢⁿ) on snow. Sˢⁿʳ: snow donor (warm).
     αSᵃᶜᶜˡˢⁿ = α * fˢⁿ * Sᵃᶜᶜˡˢⁿ
-    Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
     Sʳˢⁿ = ifelse(is_warm, fˢⁿ, fʳ) * Sʳˢⁿ
     Sˢⁿʳ = fˢⁿ * Sˢⁿʳ
 
@@ -1380,12 +1384,16 @@ end
     Sᵉᵛᵃᵖ⁺, Sᵉᵛᵃᵖ⁻ = max(Sᵉᵛᵃᵖ, 0), min(Sᵉᵛᵃᵖ, 0)
     Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
     Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)
-    Sˢⁿʷ  = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
 
     fᵛ  = donor_limiter(qᵛ,  Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺)
     fᶜˡ = donor_limiter(qᶜˡ, Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ)
     fᶜⁱ = donor_limiter(qᶜⁱ, Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ)
     fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
+
+    # Collected liquid supplies heat for the melt rate α Sᵃᶜᶜˡˢⁿ. Limit collection before
+    # computing this melt demand, then cap all snow sinks against the available snow.
+    Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
+    Sˢⁿʷ = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
     fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
 
     Sᵉᵛᵃᵖ = fᵛ * Sᵉᵛᵃᵖ⁺ + fʳ * Sᵉᵛᵃᵖ⁻
@@ -1395,7 +1403,6 @@ end
     Sᵃᶜᶜʳⁱ = fʳ * Sᵃᶜᶜʳⁱ
     Sᵐᵉˡᵗ = fˢⁿ * Sᵐᵉˡᵗ
     αSᵃᶜᶜˡˢⁿ = α * fˢⁿ * Sᵃᶜᶜˡˢⁿ
-    Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
     Sʳˢⁿ = ifelse(is_warm, fˢⁿ, fʳ) * Sʳˢⁿ
     Sˢⁿʳ = fˢⁿ * Sˢⁿʳ
 
