@@ -1,6 +1,7 @@
 module TurbulenceClosures
 
 export TKEBasedTurbulenceClosure,
+       AbstractMixingLength,
        LocalMinimumMixingLength,
        IntegralMixingLength,
        GradientLimitedMixingLength,

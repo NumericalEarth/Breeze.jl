@@ -230,7 +230,7 @@ export
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
-    TKEBasedTurbulenceClosure, LocalMinimumMixingLength, IntegralMixingLength,
+    TKEBasedTurbulenceClosure, AbstractMixingLength, LocalMinimumMixingLength, IntegralMixingLength,
     GradientLimitedMixingLength, ConstantStabilityFunctions,
     RationalStabilityFunction,
     tke_surface_flux, DryStaticStability, MoistStaticStability,
