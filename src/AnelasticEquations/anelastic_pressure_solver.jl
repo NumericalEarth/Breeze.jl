@@ -9,18 +9,22 @@ end
 Solvers.tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
 
 function AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, grid)
+    # With an immersed boundary we use an approximate solver on the underlying grid,
+    # which produces a divergent velocity field near terrain. Otherwise the solver is exact.
+    solver_grid = grid isa Oceananigans.ImmersedBoundaries.ImmersedBoundaryGrid ? grid.underlying_grid : grid
     reference_density = dynamics.reference_state.density
-    tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
 
-    solver = if grid isa Oceananigans.ImmersedBoundaries.ImmersedBoundaryGrid
-        # With this method, we are using an approximate solver that
-        # will produce a divergent velocity field near terrain.
-        FourierTridiagonalPoissonSolver(grid.underlying_grid; tridiagonal_formulation)
-    else # the solver is exact
-        FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
+    # Solve in pressure_solver_float_type: a copy of the grid and of ρᵣ in that type
+    FT = dynamics.pressure_solver_float_type
+    if FT != eltype(solver_grid)
+        solver_grid = with_number_type(FT, solver_grid)
+        solver_density = Field(Oceananigans.instantiated_location(reference_density), solver_grid)
+        parent(solver_density) .= parent(reference_density)
+        reference_density = solver_density
     end
 
-    return solver
+    tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
+    return FourierTridiagonalPoissonSolver(solver_grid; tridiagonal_formulation)
 end
 
 #####
@@ -78,9 +82,15 @@ end
 end
 
 # The tridiagonal coefficients carry ρᵣ, so they are recomputed whenever ρᵣ changes.
-function AtmosphereModels.update_pressure_solver!(solver::FourierTridiagonalPoissonSolver, ::AnelasticDynamics)
+function AtmosphereModels.update_pressure_solver!(solver::FourierTridiagonalPoissonSolver, dynamics::AnelasticDynamics)
     tridiagonal_solver = solver.batched_tridiagonal_solver
     formulation = solver.tridiagonal_formulation
+
+    # A solver in another float type holds its own copy of ρᵣ
+    ρᵣ = dynamics.reference_state.density
+    solver_ρᵣ = formulation.reference_density
+    solver_ρᵣ === ρᵣ || (parent(solver_ρᵣ) .= parent(ρᵣ))
+
     Solvers.compute_main_diagonal!(tridiagonal_solver.b, formulation, solver.grid, solver.poisson_eigenvalues...)
     Solvers.compute_lower_diagonal!(tridiagonal_solver.a, formulation, solver.grid)
     return nothing

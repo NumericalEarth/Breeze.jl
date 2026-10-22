@@ -12,7 +12,7 @@ using Oceananigans
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants)
 
-    dynamics = AnelasticDynamics(reference_state)
+    dynamics = AnelasticDynamics(reference_state; pressure_solver_float_type=FT)
     parent(dynamics.reference_state.density) .= 1
 
     anelastic = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
@@ -46,4 +46,32 @@ using Oceananigans
     @test maximum(abs, δᵇ) < prod(size(grid)) * eps(FT)
     # When ρᵣ == 1, the kinematic pressure p'/ρᵣ equals the Boussinesq non-hydrostatic pressure
     @test anelastic.dynamics.pressure_anomaly == boussinesq.pressures.pNHS
+end
+
+@testset "Pressure solve in another float type [$FT model, $ST solver]" for (FT, ST) in ((Float32, Float64), (Float64, Float32))
+    Oceananigans.defaults.FloatType = FT
+    Nx = Ny = Nz = 16
+    z = 0:(1/Nz):1
+    grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z)
+    constants = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid, constants)
+
+    dynamics = AnelasticDynamics(reference_state; pressure_solver_float_type=ST)
+    parent(dynamics.reference_state.density) .= 1
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+
+    solver = model.pressure_solver
+    @test eltype(solver.grid) == ST
+    @test eltype(solver.batched_tridiagonal_solver.b) == ST
+    @test eltype(model.dynamics.pressure_anomaly) == FT
+
+    set!(model, ρu=rand(size(grid)...), ρv=rand(size(grid)...), ρw=rand(size(grid)...))
+    ρu, ρv, ρw = model.momentum
+    δ = Field(∂x(ρu) + ∂y(ρv) + ∂z(ρw))
+    @test maximum(abs, δ) < prod(size(grid)) * eps(Float32)
+
+    # The solver's own copy of ρᵣ follows changes to the reference state
+    parent(model.dynamics.reference_state.density) .= 2
+    Breeze.AtmosphereModels.update_pressure_solver!(solver, model.dynamics)
+    @test all(Array(parent(solver.tridiagonal_formulation.reference_density)) .== 2)
 end
