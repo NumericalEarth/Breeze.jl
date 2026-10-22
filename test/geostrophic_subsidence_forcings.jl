@@ -343,8 +343,10 @@ end
     # neighbour, so that the boundary gradient has no tendency of its own. Using the adjacent
     # interior face alone would be a downwind difference there, and the gradient would grow at
     # the rate |wˢ| / 2Δz.
-    for (wˢ, boundary, neighbour) in ((-0.01, Nz, Nz - 1), (0.01, 1, 2))
-        model = AtmosphereModel(grid; forcing = (; θ = SubsidenceForcing(z -> wˢ)), closure = nothing, advection = nothing)
+    for advection in (Centered(), UpwindBiased(order=1)),
+        (wˢ, boundary, neighbour) in ((-0.01, Nz, Nz - 1), (0.01, 1, 2))
+
+        model = AtmosphereModel(grid; forcing = (; θ = SubsidenceForcing(z -> wˢ; advection)), closure = nothing, advection = nothing)
         ρ = column(model.dynamics.reference_state.density)
 
         set!(model; θ = z -> 300 + Γ * z)

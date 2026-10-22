@@ -4,7 +4,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Grids: AbstractGrid, Center, Face, Flat
 using Oceananigans.Operators: ∂zᶜᶜᶠ, Δzᶜᶜᶜ
-using Oceananigans.Advection: Centered, AbstractUpwindBiasedAdvectionScheme, _biased_interpolate_zᵃᵃᶠ, bias
+using Oceananigans.Advection: Centered, UpwindBiased, AbstractUpwindBiasedAdvectionScheme, _biased_interpolate_zᵃᵃᶠ, bias
 using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
 
@@ -44,13 +44,15 @@ automatically at kernel time.
         or a `Field` containing the subsidence velocity.
 
 # Keyword arguments
-- `advection`: the discretization of ``w^s ∂_z \\overline{ϕ}``. The default `Centered()` averages the
-  centered face gradients ``w^s δ_z \\overline{ϕ}`` to the cell — a centered difference that does not see a
-  two-cell (``2Δz``) mode, which subsidence therefore cannot remove. An upwind-biased scheme such as
-  `UpwindBiased(order = 1)` or `WENO(order = 5)` instead reconstructs ``\\overline{ϕ}`` at the faces from the
-  upwind side and forms ``w^s ∂_z \\overline{ϕ} = ∂_z(w^s \\overline{ϕ}) - \\overline{ϕ} \\, ∂_z w^s``, which damps
-  that mode and does not undershoot at sharp gradients; first-order upwind is the discretization most
-  large-eddy simulation codes use for prescribed subsidence.
+- `advection`: the discretization of ``w^s ∂_z \\overline{ϕ}``. The default `UpwindBiased(order = 1)`
+  reconstructs ``\\overline{ϕ}`` at the faces from the upwind side and forms
+  ``w^s ∂_z \\overline{ϕ} = ∂_z(w^s \\overline{ϕ}) - \\overline{ϕ} \\, ∂_z w^s``, which damps a two-cell (``2Δz``)
+  mode and does not undershoot at sharp gradients, such as an inversion moving through the grid; first-order
+  upwind is the discretization most large-eddy simulation codes use for prescribed subsidence. Higher-order
+  upwind-biased schemes (`UpwindBiased(order = 3)`, `WENO(order = 5)`) damp the mode as well, but may
+  over- or undershoot at a sharp gradient. `Centered()` instead averages the centered face gradients
+  ``w^s δ_z \\overline{ϕ}`` to the cell — a centered difference that does not see a ``2Δz`` mode, which
+  subsidence therefore cannot remove, so that a ``2Δz`` wave excited next to a sharp gradient persists.
 
 The horizontal average is computed automatically during `update_state!`.
 
@@ -72,10 +74,10 @@ model.forcing.ρθ.forcing
 # output
 SubsidenceForcing with wˢ: 1×1×76 Field{Nothing, Nothing, Face} reduced over dims = (1, 2) on RectilinearGrid on CPU
 ├── averaged_field: 1×1×75 Field{Nothing, Nothing, Center} reduced over dims = (1, 2) on RectilinearGrid on CPU
-└── advection: Centered(order=2)
+└── advection: UpwindBiased(order=1)
 ```
 """
-SubsidenceForcing(wˢ; advection = Centered()) = SubsidenceForcing(wˢ, nothing, advection)
+SubsidenceForcing(wˢ; advection = UpwindBiased(order = 1)) = SubsidenceForcing(wˢ, nothing, advection)
 
 function Base.summary(forcing::SubsidenceForcing)
     wˢ = forcing.subsidence_vertical_velocity
@@ -132,14 +134,20 @@ end
 
 # wˢ ∂z ϕ̄ = ∂z(wˢ ϕ̄) - ϕ̄ ∂z wˢ with upwind-biased face values: the advective form, so that a
 # prescribed wˢ with ∂z wˢ ≠ 0 does not act as a source, built from the flux form so that the
-# reconstruction is the one the scheme defines. The boundary faces use the boundary-adjacent
-# reconstruction the scheme provides for `Bounded` directions.
+# reconstruction is the one the scheme defines. A boundary cell cannot be advected by the scheme
+# alone: with subsidence through the lid (or ascent through the floor) the upwind value is a halo
+# value, which the field's own boundary condition sets to the boundary cell itself, so that the
+# cell would see no gradient and drift away from the column. It is carried at the rate of its
+# neighbour instead, as with the centered discretization, so that the boundary gradient has no
+# tendency of its own.
 @inline function w_dz_ϕᶜᶜᶜ(i, j, k, grid, scheme::AbstractUpwindBiasedAdvectionScheme, wˢ, ϕ_avg)
-    F⁺ = w_ϕᵃᵃᶠ(i, j, k+1, grid, scheme, wˢ, ϕ_avg)
-    F⁻ = w_ϕᵃᵃᶠ(i, j, k, grid, scheme, wˢ, ϕ_avg)
-    @inbounds ϕᵏ = ϕ_avg[i, j, k]
-    @inbounds δw = wˢ[i, j, k+1] - wˢ[i, j, k]
-    return (F⁺ - F⁻ - ϕᵏ * δw) / Δzᶜᶜᶜ(i, j, k, grid)
+    Nz = grid.Nz
+    kᵉ = clamp(ifelse(k == 1, 2, ifelse(k == Nz, Nz - 1, k)), 1, Nz)
+    F⁺ = w_ϕᵃᵃᶠ(i, j, kᵉ+1, grid, scheme, wˢ, ϕ_avg)
+    F⁻ = w_ϕᵃᵃᶠ(i, j, kᵉ, grid, scheme, wˢ, ϕ_avg)
+    @inbounds ϕᵏ = ϕ_avg[i, j, kᵉ]
+    @inbounds δw = wˢ[i, j, kᵉ+1] - wˢ[i, j, kᵉ]
+    return (F⁺ - F⁻ - ϕᵏ * δw) / Δzᶜᶜᶜ(i, j, kᵉ, grid)
 end
 
 @inline function (forcing::SubsidenceForcing)(i, j, k, grid, clock, fields)
