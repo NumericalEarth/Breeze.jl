@@ -2,10 +2,10 @@
 ##### AnelasticDynamics definition
 #####
 
-struct AnelasticDynamics{R, P, S}
-    reference_state :: R
-    pressure_anomaly :: P
-    pressure_solver_float_type :: S
+struct AnelasticDynamics{R, P, FT}
+reference_state :: R
+pressure_anomaly :: P
+    pressure_solver_float_type :: FT
 end
 
 """
