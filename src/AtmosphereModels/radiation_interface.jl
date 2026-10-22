@@ -603,7 +603,8 @@ end
 #####
 
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: xnode, ynode, znode, Center, Face
+using Oceananigans.Grids: xnode, ynode, znode, λnode, φnode, RectilinearGrid, Center, Face
+using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Breeze.CelestialMechanics: SingleColumnGrid
 
 """
@@ -614,6 +615,16 @@ backend stores its per-column arrays in this order.
 """
 @inline column_index(i, j, Nx) = i + (j - 1) * Nx
 
+const RectilinearUnderlyingGrid = Union{RectilinearGrid,
+                                        ImmersedBoundaryGrid{<:Any, <:Any, <:Any, <:Any, <:RectilinearGrid}}
+
+# The longitude and latitude (degrees) of column (i, j); `x` and `y` stand in for them on a rectilinear grid
+@inline column_longitude(i, j, grid) = λnode(i, j, 1, grid, Center(), Center(), Center())
+@inline column_longitude(i, j, grid::RectilinearUnderlyingGrid) = xnode(i, j, 1, grid, Center(), Center(), Center())
+
+@inline column_latitude(i, j, grid) = φnode(i, j, 1, grid, Center(), Center(), Center())
+@inline column_latitude(i, j, grid::RectilinearUnderlyingGrid) = ynode(i, j, 1, grid, Center(), Center(), Center())
+
 #####
 ##### Solar position: infer (λ, φ) from a single-column grid when the user gave none
 #####
@@ -622,11 +633,7 @@ backend stores its per-column arrays in this order.
 maybe_infer_solar_position(sp::ApparentSolarPosition{Nothing}, grid::SingleColumnGrid) =
     ApparentSolarPosition(grid_inferred_coordinate(grid), sp.epoch)
 
-function grid_inferred_coordinate(grid::SingleColumnGrid)
-    λ = xnode(1, 1, 1, grid, Center(), Center(), Center())
-    φ = ynode(1, 1, 1, grid, Center(), Center(), Center())
-    return (λ, φ)
-end
+grid_inferred_coordinate(grid::SingleColumnGrid) = (column_longitude(1, 1, grid), column_latitude(1, 1, grid))
 
 # Otherwise (3D grid or explicit coordinate): leave as-is — per-column kernels
 # will read λ/φ from the grid as needed.

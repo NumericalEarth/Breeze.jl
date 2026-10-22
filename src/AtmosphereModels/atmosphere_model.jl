@@ -36,6 +36,9 @@ rather than producing wrong trajectories at run time (see
 """
 validate_particles(particles, grid) = particles
 
+# Extended for the grids on which `AtmosphereModel` is not supported
+validate_grid(grid) = nothing
+
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
 
@@ -160,11 +163,14 @@ function AtmosphereModel(grid;
                          radiation = nothing,
                          particles::ParticlesOrNothing = nothing)
 
+    validate_grid(grid)
+
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
 
     # Use default timestepper for the dynamics if not specified
     isnothing(timestepper) && (timestepper = default_timestepper(dynamics))
+    validate_timestepper(timestepper, dynamics)
 
     # Validate that velocity boundary conditions are only provided for dynamics that support them
     validate_velocity_boundary_conditions(dynamics, boundary_conditions)
@@ -342,7 +348,7 @@ function AtmosphereModel(grid;
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, coupling_density, mass_density,
                                        velocities, dynamics, formulation, microphysics,
-                                       specific_prognostic_moisture)
+                                       specific_prognostic_moisture, thermodynamic_constants)
 
     # Fill the closure's tracer-indexed diffusivities. For a per-column *array* of closures,
     # `materialize_closure` (extended in `SingleColumnMode`) maps over the array and moves it to the
@@ -392,6 +398,10 @@ function AtmosphereModel(grid;
 
     return model
 end
+
+# Extended, on `Val`s of the time stepper name, by dynamics that only one time stepper integrates
+validate_timestepper(timestepper, dynamics) = nothing
+validate_timestepper(name::Symbol, dynamics) = validate_timestepper(Val(name), dynamics)
 
 # Breeze's acoustic and SSP time steppers accept a `dynamics` keyword;
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
@@ -613,7 +623,7 @@ end
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture)
+                                  specific_prognostic_moisture, thermodynamic_constants)
     forcings_type = typeof(user_forcings)
     msg = string("AtmosphereModel forcing must be a NamedTuple, got $forcings_type")
     throw(ArgumentError(msg))
@@ -623,7 +633,7 @@ end
 function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture)
+                                  specific_prognostic_moisture, thermodynamic_constants)
     names = keys(prognostic_fields)
     return NamedTuple{names}(Returns(zero(eltype(prognostic_fields[name]))) for name in names)
 end
@@ -631,7 +641,7 @@ end
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture)
+                                  specific_prognostic_moisture, thermodynamic_constants)
 
     # `ρqᵗ` (total moisture) is the scheme-agnostic water key. A water source enters the
     # prognostic moisture density unconverted whatever the scheme calls it, so — unlike `ρE`,
@@ -685,10 +695,14 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     # Keep `density` as the coupling-density compatibility entry for other forcing
     # materializers; SpecificForcing selects between the two explicit carriers by target.
+    # `pressure` is the pressure of the model's thermodynamics: diagnosed under `CompressibleDynamics`,
+    # the reference pressure under `AnelasticDynamics`
     forcing_context = (; coriolis,
                          density=coupling_density,
                          coupling_density,
                          total_density=mass_density,
+                         pressure=dynamics_pressure(dynamics),
+                         thermodynamic_constants,
                          coupling_density_names,
                          specific_fields)
 

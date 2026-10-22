@@ -1,21 +1,29 @@
 # # Baroclinic wave on the sphere
 #
-# This example simulates the growth of a baroclinic wave on a near-global
-# `LatitudeLongitudeGrid` following the DCMIP2016 specification
-# [UllrichEtAl2016](@citet), which extends the classic
+# This example simulates the growth of a baroclinic wave on the Yin-Yang grid of
+# [Kageyama and Sato (2004)](@cite KageyamaSato2004), following the DCMIP2016
+# specification [UllrichEtAl2016](@citet), which extends the classic
 # [JablonowskiWilliamson2006](@citet) test case.
 # A midlatitude jet in thermal-wind balance with a meridional temperature
 # gradient is seeded with a localized zonal-wind perturbation that triggers
 # baroclinic instability, producing growing Rossby waves over roughly ten days.
 #
+# A latitude-longitude grid has a pole problem: its meridians converge, so the
+# polar cells are tiny and set the time step. The Yin-Yang grid covers the
+# whole sphere with two identical pieces of a latitude-longitude grid, each
+# spanning 270° of longitude and 90° of latitude around its own equator. The
+# "Yin" panel is the low-latitude band of the geographic grid; the "Yang" panel
+# is the same band rotated so that its equator runs through the geographic
+# poles. Neither panel comes near its own poles, so the grid spacing is nearly
+# uniform, and each panel fills its halos by interpolation from the other.
+#
 # This example exercises `CompressibleDynamics` with
 # [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization)
 # (acoustic substepping via [`AcousticRungeKutta3`](@ref)) and
-# `SphericalCoriolis` (non-hydrostatic) on a 1° latitude-longitude grid spanning
-# 75° S to 75° N. Acoustic substepping lets the outer time step be set by
-# the *advective* CFL rather than the much-tighter acoustic CFL — here a
-# time-step wizard floats Δt at advective CFL ≈ 1.4 against the polar
-# `Δx_min ≈ 28.8 km`, capped at 12 min.
+# `SphericalCoriolis` (non-hydrostatic) on a 1° Yin-Yang grid. Acoustic
+# substepping lets the outer time step be set by the *advective* CFL rather
+# than the much-tighter acoustic CFL, and the Yin-Yang grid has no polar cells,
+# so a fixed 12-minute time step suffices.
 #
 # A future moist version (one-moment mixed-phase microphysics + bulk surface
 # fluxes) will be added once the moist substepper supports the larger ``Δt``
@@ -60,6 +68,10 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Units
+using Oceananigans.Coriolis: TriadScheme
+using Oceananigans.Fields: location
+using Oceananigans.MultiRegion: remapped_field, latitude_longitude_grid
+using Oceananigans.Operators: ζ₃ᶠᶠᶜ
 using Printf
 using CairoMakie
 using CUDA
@@ -92,28 +104,21 @@ a   = Oceananigans.defaults.planet_radius
 
 # ## Domain and grid
 #
-# We use a 1° latitude-longitude grid spanning 75° S to 75° N. Capping the
-# domain at ±75° (rather than the poles) keeps the polar `Δx_min` manageable:
-# `a · cos 75° · 2π/Nλ ≈ 28.8 km`. The domain extends from the surface to
-# 30 km with 64 vertical levels, exponentially stretched toward the surface
-# with `ExponentialDiscretization`: the interfaces are clustered near
-# the ground (`bias = :left`) so the smallest cells sit at the surface
-# (`Δz ≈ 150 m`) and coarsen to `≈ 1070 m` at the model top. The e-folding
-# `scale = H/2` sets how quickly the spacing grows with height.
+# Each panel of the Yin-Yang grid spans 270° × 90° with 1° cells, so the size
+# is `(270, 90, Nz)`. The cells are widest at a panel's equator (`111 km`) and
+# narrowest at its edges, 45° from its equator (`79 km`). The domain extends
+# from the surface to 30 km with 64 vertical levels, exponentially stretched
+# toward the surface with `ExponentialDiscretization`: the interfaces are
+# clustered near the ground (`bias = :left`) so the smallest cells sit at the
+# surface (`Δz ≈ 150 m`) and coarsen to `≈ 1070 m` at the model top. The
+# e-folding `scale = H/2` sets how quickly the spacing grows with height.
 
-Nλ = 360
-Nφ = 150
 Nz = 64
 H  = 30kilometers
 
 z_faces = ExponentialDiscretization(Nz, 0, H; scale = H/2, bias = :left)
 
-grid = LatitudeLongitudeGrid(GPU();
-                             size = (Nλ, Nφ, Nz),
-                             halo = (3, 3, 3),
-                             longitude = (0, 360),
-                             latitude = (-75, 75),
-                             z = z_faces)
+grid = YinYangGrid(GPU(); size = (270, 90, Nz), z = z_faces)
 
 # ## Temperature profile parameters
 
@@ -226,13 +231,18 @@ end
 # both the traditional ``f = 2Ω \sin φ`` and the non-traditional
 # ``2Ω \cos φ`` cross-terms that couple horizontal momentum to ``w``. Breeze
 # evolves prognostic ``ρw`` so the non-traditional terms are physically
-# required for self-consistent dynamics on the sphere.
+# required for self-consistent dynamics on the sphere. The axes of the Yang
+# panel are rotated from east and north, so the Coriolis parameter varies
+# along both of its grid directions; the triad scheme of
+# [Arakawa and Lamb (1981)](@cite ArakawaLamb1981) weights it isotropically,
+# so that the balanced jet is discretized alike on both panels.
 #
 # Tracer and momentum advection uses fifth-order `WENO` reconstruction. No
 # explicit closure is applied: WENO's implicit dissipation suffices on this
-# poleward-refined, near-surface-stretched grid.
+# near-surface-stretched grid. On a Yin-Yang grid, the `AtmosphereModel`
+# also removes the mass that the interpolation between the panels adds.
 
-coriolis = SphericalCoriolis(rotation_rate=Ω)
+coriolis = SphericalCoriolis(rotation_rate=Ω, scheme=TriadScheme())
 
 T₀ᵣ = 250
 θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
@@ -246,38 +256,34 @@ model = AtmosphereModel(grid; dynamics, coriolis,
                         advection = WENO(order=5))
 
 # ## Set initial conditions
+#
+# On a Yin-Yang grid, `set!` takes the geographic (eastward) velocity and
+# rotates it into the basis of each panel.
 
 set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
 
 # ## Time-stepping
 #
 # Substepping eliminates the acoustic CFL constraint on the outer Δt; only
-# the advective CFL remains. A time-step wizard targets advective CFL ≈ 1.4
-# against the polar `Δx_min ≈ 28.8 km`, capped at Δt = 12 min:
-#
-# ```math
-# Δt = \min\!\left(1.4 \cdot Δx_{\min} / U_{\max},\ 720 \text{ s}\right).
-# ```
-#
-# This is many times larger than the acoustic-CFL-limited Δt a fully
-# explicit solver would require. We run for 30 days to capture the full
-# BCI life cycle.
+# the advective CFL remains. The smallest cells, `79 km` wide, sit at the
+# edges of the panels, so a fixed `Δt = 12 min` keeps the advective CFL
+# below 0.7 even where the mature wave reaches 70 m/s. We run for 30 days
+# to capture the full BCI life cycle. The conservation fixer removes the mass
+# that the mismatch of the panels' fluxes through their seam adds.
 
 Δt = 12minutes
 stop_time = 30days
-cfl = 1.4
 
 simulation = Simulation(model; Δt, stop_time)
-conjure_time_step_wizard!(simulation; cfl, max_Δt=12minutes)
+add_conservation_fixer!(simulation)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Progress callback
 
 function progress(sim)
     u, v, w = sim.model.velocities
-    @info @sprintf("Iter %5d | t = %s | Δt = %s | max|u| = %.1f m/s | max|w| = %.4f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   maximum(abs, u), maximum(abs, w))
+    @info @sprintf("Iter %5d | t = %s | max|u| = %.1f m/s | max|w| = %.4f m/s",
+                   iteration(sim), prettytime(sim), maximum(abs, u), maximum(abs, w))
     return nothing
 end
 
@@ -285,28 +291,40 @@ add_callback!(simulation, progress, IterationInterval(50))
 
 # ## Output
 #
-# We save the velocities, the full potential temperature ``θ`` (the
-# classic surface synoptic diagnostic for the cold/warm sectors during
-# cyclogenesis), and the vertical vorticity ``ζ``, sliced at two levels:
-# k = 1 (surface) and k = 16 (lower troposphere, ~2.9 km).
+# We save the full potential temperature ``θ`` (the classic surface synoptic
+# diagnostic for the cold/warm sectors during cyclogenesis) and the vertical
+# vorticity ``ζ`` at the surface, and the vertical velocity ``w`` at k = 16
+# (lower troposphere, ~2.9 km). Vorticity is a scalar, so each panel's own
+# ``ζ`` is correct.
+#
+# Each panel stores its fields in its own coordinates. For plotting, we remap
+# the three slices onto a global 1° latitude-longitude grid: the remap
+# interpolates each node from the panel that owns it. The remap requires the
+# source and destination to have the same vertical size, so we first reduce
+# each field to one level with a kernel function.
 
-using Oceananigans.Operators: ζ₃ᶠᶠᶜ
 u, v, w = model.velocities
-ζ = KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, model.grid, u, v)
-
+ζ = KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, grid, u, v)
 θ = PotentialTemperature(model)
 
-outputs = merge(model.velocities, (; ζ, θ))
+@inline level(i, j, k, grid, f, kˡ) = @inbounds f[i, j, kˡ]
 
-for k in (1, 16)
-    filename = "baroclinic_wave_k$k"
-    ow = JLD2Writer(model, outputs; filename,
-                    indices = (:, :, k),
-                    schedule = TimeInterval(6hours),
-                    overwrite_files = true)
+geographic_grid = latitude_longitude_grid(grid)
 
-    simulation.output_writers[Symbol(filename)] = ow
+function remapped_level(f, kˡ)
+    LX, LY, _ = location(f)
+    fᵏ = Field(KernelFunctionOperation{LX, LY, Nothing}(level, grid, f, kˡ))
+    return remapped_field(fᵏ, geographic_grid)
 end
+
+outputs = (θ = remapped_level(θ, 1),
+           ζ = remapped_level(ζ, 1),
+           w = remapped_level(w, 16))
+
+simulation.output_writers[:slices] = JLD2Writer(model, outputs;
+                                                filename = "baroclinic_wave.jld2",
+                                                schedule = TimeInterval(6hours),
+                                                overwrite_files = true)
 
 # ## Run
 
@@ -320,16 +338,25 @@ run!(simulation)
 # the cyclones and anticyclones), and the **lower-tropospheric vertical
 # velocity** ``w`` at ~2.9 km (the warm conveyor belt).
 
-θ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "θ")
-ζ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "ζ")
-w_ts = FieldTimeSeries("baroclinic_wave_k16.jld2", "w")
+θ_ts = FieldTimeSeries("baroclinic_wave.jld2", "θ")
+ζ_ts = FieldTimeSeries("baroclinic_wave.jld2", "ζ")
+w_ts = FieldTimeSeries("baroclinic_wave.jld2", "w")
 times = θ_ts.times
 Nt = length(times)
 
-k_sfc = 1
-k_mid = 16
+# Each field is drawn as a surface on the unit sphere at the nodes of its own
+# location, seen from above the developing wave.
 
-# Sphere view: rotate so the developing wave faces the camera.
+function sphere(f)
+    LX, LY, _ = location(f)
+    λ = λnodes(f.grid, LX())
+    φ = φnodes(f.grid, LY())
+    x = [cosd(φ) * cosd(λ) for λ in λ, φ in φ]
+    y = [cosd(φ) * sind(λ) for λ in λ, φ in φ]
+    z = [sind(φ) for λ in λ, φ in φ]
+    return x, y, z
+end
+
 sphere_kw = (elevation = π/6, azimuth = π/2, aspect = :data)
 ζlim = 1e-4
 wlim = 0.06
@@ -341,9 +368,9 @@ w_kw = (colormap = :balance, colorrange = (-wlim, wlim))
 # ### Animation
 
 n = Observable(1)
-θn = @lift view(θ_ts[$n], :, :, k_sfc)
-ζn = @lift view(ζ_ts[$n], :, :, k_sfc)
-wn = @lift view(w_ts[$n], :, :, k_mid)
+θn = @lift interior(θ_ts[$n], :, :, 1)
+ζn = @lift interior(ζ_ts[$n], :, :, 1)
+wn = @lift interior(w_ts[$n], :, :, 1)
 
 fig = Figure(size = (1800, 700))
 
@@ -351,15 +378,15 @@ title = @lift "t = $(prettytime(times[$n]))"
 fig[0, 1:6] = Label(fig, title, fontsize=22, tellwidth=false)
 
 ax1 = Axis3(fig[1, 1]; title = "θ at surface", sphere_kw...)
-hm1 = surface!(ax1, θn; shading = NoShading, θ_kw...)
+hm1 = surface!(ax1, sphere(θ_ts[1])...; color = θn, shading = NoShading, θ_kw...)
 Colorbar(fig[1, 2], hm1; label = "θ (K)", height=Relative(0.5))
 
 ax2 = Axis3(fig[1, 3]; title = "ζ at surface", sphere_kw...)
-hm2 = surface!(ax2, ζn; shading = NoShading, ζ_kw...)
+hm2 = surface!(ax2, sphere(ζ_ts[1])...; color = ζn, shading = NoShading, ζ_kw...)
 Colorbar(fig[1, 4], hm2; label = "ζ (1/s)", height=Relative(0.5))
 
 ax3 = Axis3(fig[1, 5]; title = "w at 2.9 km", sphere_kw...)
-hm3 = surface!(ax3, wn; shading = NoShading, w_kw...)
+hm3 = surface!(ax3, sphere(w_ts[1])...; color = wn, shading = NoShading, w_kw...)
 Colorbar(fig[1, 6], hm3; label = "w (m/s)", height=Relative(0.5))
 
 for ax in (ax1, ax2, ax3)

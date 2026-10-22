@@ -42,8 +42,9 @@ using Oceananigans.TurbulenceClosures:
     _diffusive_flux_x, _diffusive_flux_y, _diffusive_flux_z
 
 using Oceananigans.TimeSteppers: time_discretization
-using Oceananigans.Utils: Utils, launch!, prettysummary
+using Oceananigans.Utils: Utils, @apply_regionally, launch!, prettysummary
 
+using Breeze.Utils: @regional
 using ..AtmosphereModels: AtmosphereModels
 
 #####
@@ -108,6 +109,19 @@ end
         + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶜ, Jᶜy, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy)
         + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, Jᶜz, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy))
 end
+
+# The horizontal part of `∇_dot_Jᶜ`, from the same face fluxes
+@inline function horizontal_∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, id, c, clock, model_fields, buoyancy)
+    disc = time_discretization(closure)
+    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (
+          δxᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶜ, Jᶜx, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy)
+        + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶜ, Jᶜy, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy))
+end
+
+@inline horizontal_∇_dot_Jᶜ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
+
+@inline horizontal_∇_dot_Jᶜ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple, args...) =
+    sum_closure_fluxes(horizontal_∇_dot_Jᶜ, i, j, k, grid, ρ, closures, closure_fields, args...)
 
 #####
 ##### Momentum dynamic stresses: 𝒯 = ρᵣ τ

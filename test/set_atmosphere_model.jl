@@ -3,6 +3,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans.OrthogonalSphericalShellGrids: RotatedLatitudeLongitudeGrid
+using Oceananigans.Units
 using Test
 
 #####
@@ -208,4 +210,34 @@ end
         ℋ_field = RelativeHumidityField(model)
         @test @allowscalar all(x -> x ≤ 1.01, interior(ℋ_field))
     end
+end
+
+#####
+##### Horizontal velocities on a grid whose intrinsic basis is rotated from (east, north)
+#####
+
+@testset "Setting geographic velocities on a RotatedLatitudeLongitudeGrid" begin
+    grid = RotatedLatitudeLongitudeGrid(default_arch, Float64;
+                                        size = (6, 6, 4),
+                                        longitude = (40, 80),
+                                        latitude = (-20, 20),
+                                        z = (0, 10kilometers),
+                                        north_pole = (0, 0),
+                                        topology = (Bounded, Bounded, Bounded))
+
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=300)
+    model = AtmosphereModel(grid; dynamics)
+
+    # Away from the walls, where the velocity vanishes
+    u_interior() = interior(model.velocities.u, 2:5, 2:5, :)
+    v_interior() = interior(model.velocities.v, 2:5, 2:5, :)
+
+    set!(model; θ=300, ρ=1, u=10, v=0, intrinsic_velocities=true)
+    @test all(x -> x ≈ 10, u_interior())
+    @test all(iszero, v_interior())
+
+    # The eastward flow points mostly along grid-y on this grid
+    set!(model; u=10, v=0)
+    @test maximum(abs, u_interior() .- 10) > 1
+    @test maximum(abs, v_interior()) > 1
 end

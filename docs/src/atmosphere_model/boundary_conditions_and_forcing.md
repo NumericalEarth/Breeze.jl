@@ -142,3 +142,54 @@ nothing # hide
 
 As with boundary conditions, an unrecognized forcing key is an error, and only one key per
 variable may be supplied.
+
+### [Held–Suarez forcing](@id held_suarez_notation)
+
+[`held_suarez_forcings`](@ref Breeze.Forcings.held_suarez_forcings) returns the Rayleigh friction and
+Newtonian temperature relaxation of [HeldSuarez1994](@citet) as `(; ρu, ρv, ρE)`, to pass as `forcing`
+or to merge with other forcings. The relaxation is supplied under the energy key `ρE`, so it is converted to
+whichever thermodynamic variable the formulation evolves:
+
+```@example bcs
+sphere = LatitudeLongitudeGrid(size=(36, 16, 8), longitude=(0, 360), latitude=(-80, 80), z=(0, 30e3))
+dynamics = CompressibleDynamics(reference_potential_temperature = z -> 250 * exp(9.81 * z / (1005 * 250)))
+model = AtmosphereModel(sphere; dynamics, forcing=held_suarez_forcings())
+model.forcing.ρE
+```
+
+Momentum is damped and temperature relaxes toward ``Tᵉ``,
+
+```math
+∂_t (ρu) = ⋯ - kᵘ ρu , \qquad ∂_t (ρv) = ⋯ - kᵘ ρv , \qquad ∂_t T = ⋯ - kᵀ (T - Tᵉ) ,
+```
+
+with
+
+```math
+\begin{aligned}
+Tᵉ &= \max \left \{ Tᵐⁱⁿ, \left [ Tᵉ₀ - ΔTʸ \sin^2 φ - Δθᶻ \log \left ( \frac{p}{p₀} \right ) \cos^2 φ \right ] \left ( \frac{p}{p₀} \right )^κ \right \} , \\
+kᵀ &= kᵃ + (kˢ - kᵃ) \max \left ( 0, \frac{σ - σᵇ}{1 - σᵇ} \right ) \cos^4 φ , \\
+kᵘ &= kᶠ \max \left ( 0, \frac{σ - σᵇ}{1 - σᵇ} \right ) .
+\end{aligned}
+```
+
+The surface pressure ``pˢ`` in ``σ = p / pˢ`` is extrapolated from the lowest cell center to the bottom face
+assuming hydrostatic balance at fixed temperature. The latitude ``φ`` is the geographic latitude of each cell,
+so the forcing is unchanged on rotated grids.
+
+The notation of this section is scoped to it. The keywords of `held_suarez_forcings` and their defaults are
+
+| symbol | keyword | default | meaning |
+| ------ | ------- | ------- | ------- |
+| ``σᵇ`` | `boundary_layer_top` | 0.7 | top of the frictional boundary layer in ``σ`` |
+| ``kᶠ`` | `friction_rate` | 1 / day | Rayleigh friction rate at the surface |
+| ``kᵃ`` | `atmosphere_relaxation_rate` | 1 / 40 days | relaxation rate of the free atmosphere |
+| ``kˢ`` | `surface_relaxation_rate` | 1 / 4 days | relaxation rate at the equatorial surface |
+| ``ΔTʸ`` | `equator_to_pole_temperature_difference` | 60 K | equator-to-pole difference of ``Tᵉ`` |
+| ``Δθᶻ`` | `vertical_potential_temperature_difference` | 10 K | static stability of ``Tᵉ`` |
+| ``Tᵉ₀`` | `equatorial_surface_temperature` | 315 K | ``Tᵉ`` at the equatorial surface |
+| ``Tᵐⁱⁿ`` | `minimum_equilibrium_temperature` | 200 K | stratospheric floor of ``Tᵉ`` |
+| ``p₀`` | `reference_pressure` | 10⁵ Pa | reference pressure of ``Tᵉ`` |
+| ``κ`` | `exner_exponent` | 2/7 | exponent of ``p / p₀`` in ``Tᵉ`` (not the von Kármán constant) |
+
+``kᵘ`` is ``k_v`` in the paper, because ``v`` is reserved for vapor.

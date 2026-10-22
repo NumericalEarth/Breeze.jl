@@ -191,10 +191,10 @@ function fix_negative_moisture!(microphysics, model)
     number_mass_pairs = correction_number_mass_pairs(microphysics, model.microphysical_fields)
     number_fields = correction_number_fields(microphysics, model.microphysical_fields)
 
-    launch!(arch, grid, :xy,
-            _fix_negative_moisture_column!,
-            correction,
-            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+    @apply_regionally launch!(arch, grid, :xy,
+                              _fix_negative_moisture_column!,
+                              correction,
+                              moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
 
     return nothing
 end

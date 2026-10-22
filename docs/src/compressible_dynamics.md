@@ -68,6 +68,25 @@ vertical momentum. `HydrostaticSphericalCoriolis()` omits that coupling. This ch
 independent of whether the dynamics evolve prognostic vertical momentum: nonhydrostatic
 models may still use the traditional approximation when the benchmark or forcing assumes it.
 
+On a Yin-Yang grid, prefer the triad scheme of [Arakawa and Lamb (1981)](@cite ArakawaLamb1981),
+`SphericalCoriolis(scheme = TriadScheme())`. The axes of the Yang panel are rotated from east and
+north, so the Coriolis parameter varies along both of its grid directions, and the O(Δ²)
+truncation error of the discrete momentum balance of a steady zonal flow differs between the
+panels; the interpolation imposes the difference on each panel through the seams. The default
+4-point averaging averages the Coriolis parameter along one grid direction only, while the triads
+weight it isotropically. Like every `SphericalCoriolis` scheme, the triads keep the nontraditional
+terms.
+
+Each panel of a Yin-Yang grid steps all of its cells with its own fluxes and interpolates its halos
+from the other panel, so the two panels disagree on the flux through the curve that divides the
+sphere between them, and the total content of every density drifts. `add_conservation_fixer!(simulation)`
+adds the callback that removes that spurious mass, evaluated from the model's own fluxes, from the
+tendencies of every stage, and from the state the acoustic loop leaves after the third stage of
+`AcousticRungeKutta3`. Each density loses its own spurious mass in proportion to its positive part,
+which keeps it non-negative and keeps a uniform mixing ratio uniform. Momentum is not corrected, so
+the fixer conserves momentum and changes the velocity by the inverse of the factor by which it
+changes the dry density, which differs from one by the relative spurious mass of a stage.
+
 ### Slow/fast decomposition and linearization point
 
 Let ``U = (ρ, ρ\boldsymbol{u}, ρθ, ρq^t, …)`` be the prognostic state vector. The right-hand

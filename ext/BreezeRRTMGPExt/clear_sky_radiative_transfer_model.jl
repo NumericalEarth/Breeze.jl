@@ -4,8 +4,7 @@
 
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
-using Oceananigans.Grids: xnode
-using Oceananigans.Grids: AbstractGrid, Center
+using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Fields: ConstantField
 
 using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiation, specific_humidity,
@@ -254,7 +253,7 @@ end
 
 @kernel function _set_longitude_from_grid_kernel!(rrtmgp_λ, grid)
     i, j = @index(Global, NTuple)
-    λ = xnode(i, j, 1, grid, Center(), Center(), Center())
+    λ = column_longitude(i, j, grid)
     c = column_index(i, j, grid.Nx)
     @inbounds rrtmgp_λ[c] = λ
 end

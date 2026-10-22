@@ -114,6 +114,7 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
     end
 
     grid = field.grid
+    validate_subsidence_grid(grid)
 
     if forcing.subsidence_vertical_velocity isa AbstractField
         wˢ = forcing.subsidence_vertical_velocity
@@ -129,6 +130,12 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
 
     return SubsidenceForcing(wˢ, averaged_field)
 end
+
+validate_subsidence_grid(grid) = nothing
+
+# TODO: Oceananigans cannot yet halo-fill the horizontal average of a multi-region field
+validate_subsidence_grid(::MultiRegionGrids) =
+    throw(ArgumentError("SubsidenceForcing needs a horizontal average, which a MultiRegionGrid does not support."))
 
 #####
 ##### compute_forcing! for subsidence forcing
