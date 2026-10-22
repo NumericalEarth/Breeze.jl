@@ -582,7 +582,8 @@ $(TYPEDSIGNATURES)
 
 Continuous hydrostatic pressure at physical height `z`, reduced from the datum `p₀` at
 ``z = 0`` along the reference profiles `θᵣ` and `qᵛᵣ`. A dry reference (`qᵛᵣ = nothing`)
-falls through to [`hydrostatic_pressure`](@ref), which has a closed form for constant `θᵣ`.
+falls through to [`hydrostatic_pressure`](@ref), which has a closed form for constant `θᵣ`; a constant
+moist reference (`θᵣ` and `qᵛᵣ` both numbers) has one too, and uses it.
 
 This is the one place the ``z = 0`` datum is converted into a pressure at some other height.
 Both reference-state families use it to obtain the anchor at the bottom face of a column: the
@@ -591,6 +592,14 @@ It returns `p₀` exactly when `z == 0`.
 """
 moist_hydrostatic_pressure(z, p₀, θᵣ, ::Nothing, pˢᵗ, constants) =
     hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
+
+# Exact, and free of the integrator's convergence branches, so it also traces when the
+# profile values are traced numbers (a reference reset inside a compiled function).
+moist_hydrostatic_pressure(z, p₀, θᵣ::Number, qᵛᵣ::Number, pˢᵗ, constants) =
+    constant_moist_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ,
+                                        dry_air_gas_constant(constants), vapor_gas_constant(constants),
+                                        constants.dry_air.heat_capacity, constants.vapor.heat_capacity,
+                                        constants.gravitational_acceleration)
 
 function moist_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
     Rᵈ = dry_air_gas_constant(constants)
