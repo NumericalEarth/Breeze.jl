@@ -26,7 +26,7 @@ function anelastic_pressure_solver(grid::AbstractGrid{FT}, reference_density, ::
 end
 
 # Another float type: solve on copies of the grid and of ρᵣ in that type
-function anelastic_pressure_solver(grid, reference_density, FT)
+function anelastic_pressure_solver(FT, grid, reference_density)
     solver_grid = with_number_type(FT, grid)
     solver_density = Field(Oceananigans.instantiated_location(reference_density), solver_grid)
     parent(solver_density) .= parent(reference_density)
