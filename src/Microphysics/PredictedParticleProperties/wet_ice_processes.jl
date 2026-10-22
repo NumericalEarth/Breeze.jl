@@ -109,19 +109,19 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 - Rate of liquid → rain shedding [kg/kg/s]
 """
 @inline function shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups::P3IceLookups)
-    qʷⁱ_eff = max(0, qʷⁱ)
-    nⁱ_eff = max(0, nⁱ)
+    qʷⁱ₊ = max(0, qʷⁱ)
+    nⁱ₊ = max(0, nⁱ)
 
     # Lookup ∫_{D≥9mm} m(D) N'(D) dD (normalized per particle)
     f1pr28 = evaluate_at(p3.ice.bulk.shedding, lookups.prep)
 
     # Fᶠ is the rime fraction of the ice-only mass, since qⁱ excludes qʷⁱ.
-    rate = Fᶠ * f1pr28 * nⁱ_eff * Fˡ
+    rate = Fᶠ * f1pr28 * nⁱ₊ * Fˡ
 
     # Bound by available liquid: qlshd ≤ qwi / dt_safety
     rate = max(0, rate)
     τ_safety = p3.process_rates.sink_limiting_timescale
-    rate = min(rate, qʷⁱ_eff / τ_safety)
+    rate = min(rate, qʷⁱ₊ / τ_safety)
 
     return rate
 end

@@ -118,10 +118,10 @@ end
 
 function expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ, transport, FT)
     parameters = p3.process_rates
-    qʳ_eff = max(0, qʳ)
-    nʳ_eff = max(max(0, nʳ), FT(1e-16))
-    λʳ = PPP.rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
-    nʳ_bounded = qʳ_eff * λʳ^3 / (FT(π) * parameters.liquid_water_density)
+    qʳ₊ = max(0, qʳ)
+    nʳ₊ = max(max(0, nʳ), FT(1e-16))
+    λʳ = PPP.rain_slope_parameter(qʳ₊, nʳ₊, parameters)
+    nʳ_bounded = qʳ₊ * λʳ^3 / (FT(π) * parameters.liquid_water_density)
     Nʳ₀ = nʳ_bounded * λʳ
     velocity_diameter_integral = p3.rain.evaporation(log10(λʳ))
     f₁ᵣ = FT(p3.rain.ventilation.constant_coefficient)
@@ -132,25 +132,25 @@ function expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ, transport, F
                            f₂ᵣ * schmidt_correction /
                            sqrt(max(transport.ν, FT(1e-10))) * velocity_diameter_integral
     rain_relaxation = FT(2π) * Nʳ₀ * ρ * transport.Dᵛ * evaporation_integral
-    return ifelse(qʳ_eff >= p3.minimum_mass_mixing_ratio, rain_relaxation, zero(FT))
+    return ifelse(qʳ₊ >= p3.minimum_mass_mixing_ratio, rain_relaxation, zero(FT))
 end
 
 function expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷⁱ,
                                                         nⁱ, T, Fᶠ, ρᶠ, ρ)
     FT = typeof(qʳ)
     parameters = p3.process_rates
-    qʳ_eff = max(0, qʳ)
-    nʳ_eff = max(0, nʳ)
+    qʳ₊ = max(0, qʳ)
+    nʳ₊ = max(0, nʳ)
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
-    nⁱ_eff = max(0, nⁱ)
+    nⁱ₊ = max(0, nⁱ)
     active = (T > parameters.freezing_temperature) &
-             (qʳ_eff > FT(1e-14)) &
+             (qʳ₊ > FT(1e-14)) &
              (qⁱ_total > FT(1e-14)) &
-             (nʳ_eff > FT(1)) &
-             (nⁱ_eff > FT(1))
+             (nʳ₊ > FT(1)) &
+             (nⁱ₊ > FT(1))
 
-    λʳ = PPP.rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
-    nʳ_bounded = PPP.rain_number_from_slope(qʳ_eff, λʳ, parameters)
+    λʳ = PPP.rain_slope_parameter(qʳ₊, nʳ₊, parameters)
+    nʳ_bounded = PPP.rain_number_from_slope(qʳ₊, λʳ, parameters)
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ, parameters.floors)
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ, parameters.floors)
     _, number_kernel = PPP.ice_rain_collection_lookup(p3.ice.ice_rain,
@@ -158,7 +158,7 @@ function expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷ�
     ρ₀ = p3.ice.fall_speed.reference_air_density
     density_correction = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
     Nʳ₀ = nʳ_bounded * λʳ
-    rate = parameters.rain_ice_collection_efficiency * Nʳ₀ * nⁱ_eff * ρ *
+    rate = parameters.rain_ice_collection_efficiency * Nʳ₀ * nⁱ₊ * ρ *
            density_correction * number_kernel
     return ifelse(active, rate, zero(FT))
 end

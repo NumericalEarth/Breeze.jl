@@ -105,12 +105,12 @@ end
 
 @inline function rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport)
     FT = typeof(qʳ)
-    qʳ_eff = max(0, qʳ)
+    qʳ₊ = max(0, qʳ)
     parameters = p3.process_rates
-    nʳ_eff = max(nʳ, FT(p3.minimum_number_mixing_ratio))
-    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+    nʳ₊ = max(nʳ, FT(p3.minimum_number_mixing_ratio))
+    active = qʳ₊ >= p3.minimum_mass_mixing_ratio
 
-    integrals = rain_ventilation_integral(p3.rain.evaporation, p3.rain.ventilation, qʳ_eff, nʳ_eff,
+    integrals = rain_ventilation_integral(p3.rain.evaporation, p3.rain.ventilation, qʳ₊, nʳ₊,
                                           transport.ν, transport.Dᵛ, parameters)
     relaxation_coefficient = 2 * FT(π) * integrals.Nʳ₀ * ρ * transport.Dᵛ *
                              integrals.integral
@@ -127,7 +127,7 @@ end
                                                   lookups::P3IceLookups)
     FT = typeof(T)
     parameters = p3.process_rates
-    nⁱ_eff = max(nⁱ, FT(p3.minimum_number_mixing_ratio))
+    nⁱ₊ = max(nⁱ, FT(p3.minimum_number_mixing_ratio))
 
     Dᵛ = transport.Dᵛ
     ν = transport.ν
@@ -140,7 +140,7 @@ end
 
     # This is the raw inverse relaxation coefficient; the psychrometric correction
     # is applied later through the coupled `ξˡ` / `ξⁱ` factor.
-    return 2 * FT(π) * ρ * Dᵛ * nⁱ_eff * ventilated_capacitance
+    return 2 * FT(π) * ρ * Dᵛ * nⁱ₊ * ventilated_capacitance
 end
 
 # One species' share of the diffusional-growth budget: its relaxation weight
