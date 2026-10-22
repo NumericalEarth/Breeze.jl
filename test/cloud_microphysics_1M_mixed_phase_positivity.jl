@@ -101,6 +101,41 @@ end
     @test donor_limiter(zero(FT), zero(FT)) == 1
 end
 
+@testset "Donor limiter preserves trace process rates [$FT]" for FT in all_float_types()
+    for (q, ΣS) in ((1e-3, 2e-4), (1e-9, 2e-10), (1e-20, 2e-21))
+        @test @inferred(donor_limiter(FT(q), FT(ΣS))) ≈ FT(0.5)
+        @test @inferred(donor_limiter(FT(q), FT(ΣS / 4))) === one(FT)
+        @test @inferred(donor_limiter(zero(FT), FT(ΣS))) === zero(FT)
+    end
+
+    for q in (zero(FT), FT(1e-9), FT(-1e-9))
+        @test @inferred(donor_limiter(q, zero(FT))) === one(FT)
+    end
+end
+
+@testset "Trace rain is collected at the donor-limited rate [$FT]" for FT in all_float_types()
+    constants = ThermodynamicConstants(FT)
+    # Isolate rain-to-snow collection with empty clouds and no vapor exchanges.
+    parameters = Microphysics1MParams(FT; rain_condensation_evaporation=nothing, snow_deposition_sublimation=nothing)
+    categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
+    no_formation = ConstantRateCondensateFormation(zero(FT))
+    cloud_formations = (saturation_adjustment_1M(FT).cloud_formation,
+                        NonEquilibriumCloudFormation(no_formation, no_formation))
+    ρ, ℳ, 𝒰 = mixed_phase_state(FT, constants; T = 270, qᵛ = 3.5e-3, qᶜˡ = 0, qᶜⁱ = 0, qʳ = 1e-9, qˢⁿ = 8e-3)
+
+    for (tendencies, cloud_formation) in zip((mp1m_tendencies, mpne1m_tendencies), cloud_formations)
+        microphysics = OneMomentCloudMicrophysics(FT; categories, cloud_formation)
+        rates = mixed_phase_precipitation_rates(microphysics, ρ, ℳ, 𝒰.moisture_mass_fractions,
+                                                temperature(𝒰, constants), categories.freezing_temperature, constants)
+        @test τⁿᵘᵐ * rates.Sʳˢⁿ > ℳ.qʳ
+        G = @inferred tendencies(microphysics, ρ, ℳ, 𝒰, constants)
+        collected = ρ * ℳ.qʳ / τⁿᵘᵐ
+        @test -G.ρqʳ ≈ collected
+        @test G.ρqˢⁿ ≈ collected
+        @test abs(sum(values(G))) ≤ 10eps(FT) * collected
+    end
+end
+
 @testset "Mixed-phase 1M with disabled vapor exchanges [$FT]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
     parameters = Microphysics1MParams(FT; rain_condensation_evaporation=nothing, snow_deposition_sublimation=nothing)

@@ -869,7 +869,9 @@ const τⁿᵘᵐ = 10  # seconds
     q⁺ = max(0, q)
     # Disabled processes return integer zeros; retain the moisture precision for zero demand.
     demand = oftype(q, τⁿᵘᵐ) * ΣS
-    return ifelse(demand > q⁺, q⁺ / max(demand, eps(typeof(demand))), one(demand))
+    # Protect the eagerly evaluated quotient at zero demand without flooring positive demand.
+    denominator = ifelse(iszero(demand), one(demand), demand)
+    return ifelse(demand > q⁺, q⁺ / denominator, one(demand))
 end
 
 # State-based rain tendency for all warm-phase 1M schemes
