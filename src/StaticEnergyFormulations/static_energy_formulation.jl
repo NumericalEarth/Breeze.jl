@@ -14,8 +14,9 @@ sensible heat, gravitational potential energy, and latent heat:
 s = cᵖᵐ T + g z - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ
 ```
 
-Here ℒ₀ = ℒᵣ − (cᵖᵛ − cᵖᶜ) Tᵣ is the latent-heat intercept at zero kelvin
-for each condensed phase. Using ℒᵣ with cᵖᵐ T would give incorrect phase-change heating.
+Here ``ℒˡ₀ = ℒˡᵣ − (cᵖᵛ − cˡ) Tᵣ`` and ``ℒⁱ₀ = ℒⁱᵣ − (cᵖᵛ − cⁱ) Tᵣ`` are the latent heats
+of condensation and deposition extrapolated to zero kelvin. Pairing the reference latent heats
+``ℒᵣ`` with ``cᵖᵐ T`` would give incorrect phase-change heating.
 
 The energy density equation includes a buoyancy flux term following [Pauluis2008](@citet).
 """

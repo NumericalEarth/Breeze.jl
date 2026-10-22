@@ -158,7 +158,8 @@ T₁ = (s - g * z) / cᵖᵐ₁
 ```
 
 The difference between ``T₁`` and the solution ``T_\mathrm{eq}`` is
-``T_\mathrm{eq} - T₁ = ℒˡ(T₁) qˡ / cᵖᵐ`` and is therefore strictly positive.
+``T_\mathrm{eq} - T₁ = ℒˡ(T₁) qˡ / cᵖᵐ``, with ``qˡ`` and ``cᵖᵐ`` evaluated at equilibrium,
+and is therefore strictly positive.
 In other words, ``T₁`` represents a lower bound.
 
 To generate a second guess for the secant solver, we start by estimating
@@ -172,12 +173,15 @@ qˡ₁ = qᵗ - qᵛ⁺₂
 In general, this represents an _overestimate_ of the liquid mass fraction,
 because ``qᵛ⁺₂`` is underestimated by the too-low temperature ``T₁``.
 We thus increment the first guess by half of the difference implied by the
-estimate ``qˡ₁``,
+estimate ``qˡ₁``. The solver approximates the latent heat by its reference value ``ℒˡᵣ``
+rather than ``ℒˡ(T₁)``; the estimate only seeds the secant iteration, so this does not
+affect the converged temperature,
 
 ```@example  microphysics
 q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₁)
 cᵖᵐ₂ = mixture_heat_capacity(q₂, thermo)
-ΔT = Breeze.Thermodynamics.liquid_latent_heat(T₁, thermo) * qˡ₁ / cᵖᵐ₂
+ℒˡᵣ = thermo.liquid.reference_latent_heat
+ΔT = ℒˡᵣ * qˡ₁ / cᵖᵐ₂
 T₂ = T₁ + ΔT / 2
 ```
 
