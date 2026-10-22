@@ -849,7 +849,7 @@ end
 # so they can be shared by multiple bulk microphysics schemes.
 
 #####
-##### Rain tendency (shared by all 1M schemes)
+##### Rain tendency for warm-phase saturation adjustment 1M (WP1M)
 #####
 #
 # Rain mass evolves via:
@@ -857,7 +857,7 @@ end
 #   - Accretion: cloud liquid + rain → rain (source)
 #   - Evaporation: rain → vapor in subsaturated air (sink)
 #
-# This tendency is the same for equilibrium and non-equilibrium cloud formation.
+# The non-equilibrium and mixed-phase schemes evaluate these processes in their tendency bundles below.
 #####
 
 # Numerical timescale for limiting negative-value relaxation
@@ -874,62 +874,8 @@ const τⁿᵘᵐ = 10  # seconds
     return ifelse(demand > q⁺, q⁺ / denominator, one(demand))
 end
 
-# State-based rain tendency for all warm-phase 1M schemes
-@inline function AM.microphysical_tendency(bμp::WarmPhase1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    categories = bμp.categories
-    parameters = categories.parameters
-    processes = parameters.processes
-    process_params = parameters.process_params
-    cloud_liquid = parameters.cloud.liquid
-    rain = parameters.precip.rain
-    rain_velocity = parameters.terminal_velocity.rain
-    qᶜˡ = ℳ.qᶜˡ
-    qʳ = ℳ.qʳ
-
-    # Autoconversion: cloud liquid → rain
-    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
-
-    # Accretion: cloud liquid captured by falling rain
-    Sᵃᶜᶜ = cloud_precipitation_accretion(
-        process_params.cloud_liquid_rain_accretion,
-        cloud_liquid,
-        rain,
-        rain_velocity,
-        qᶜˡ,
-        qʳ,
-        ρ,
-    )
-
-    # Rain evaporation in subsaturated air
-    T = temperature(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    Sᵉᵛᵃᵖ = rain_evaporation_rate(
-        processes.rain_condensation_evaporation,
-        rain,
-        rain_velocity,
-        parameters.air_properties,
-        q,
-        qʳ,
-        ρ,
-        T,
-        constants,
-    )
-
-    # Limit evaporation to available rain
-    Sᵉᵛᵃᵖ_min = -max(0, qʳ) / τⁿᵘᵐ
-    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
-
-    # Total tendency for ρqʳ
-    ΣρS = ρ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
-
-    # Numerical relaxation for negative values
-    ρSⁿᵘᵐ = -ρ * qʳ / τⁿᵘᵐ
-
-    return ifelse(qʳ ≥ 0, ΣρS, ρSⁿᵘᵐ)
-end
-
-# State-based rain tendency for mixed-phase 1M schemes
-@inline function AM.microphysical_tendency(bμp::Union{MP1M, MPNE1M}, ::Val{:ρqʳ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+# State-based rain tendency for WP1M
+@inline function AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
     parameters = categories.parameters
     processes = parameters.processes
@@ -983,8 +929,8 @@ end
 end
 
 # Saturation adjustment partitions ρqᵉ diagnostically, so precipitation sources are drawn from ρqᵉ.
-@inline AM.microphysical_tendency(bμp::Union{WP1M, MP1M}, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants) =
-    - AM.microphysical_tendency(bμp, Val(:ρqʳ), ρ, ℳ, 𝒰, constants) - AM.microphysical_tendency(bμp, Val(:ρqˢⁿ), ρ, ℳ, 𝒰, constants)
+@inline AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants) =
+    - AM.microphysical_tendency(bμp, Val(:ρqʳ), ρ, ℳ, 𝒰, constants)
 
 #####
 ##### Microphysical tendencies for warm-phase non-equilibrium 1M (WPNE1M)
