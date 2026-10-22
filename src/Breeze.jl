@@ -127,6 +127,8 @@ export
     equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
+    Supersaturation,
+    SupersaturationField,
     number_concentration,
     number_concentration_field,
     BulkMicrophysics,

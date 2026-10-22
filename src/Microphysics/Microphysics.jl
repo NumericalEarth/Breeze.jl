@@ -22,6 +22,8 @@ export
     saturation_adjustment_coefficient,
     RelativeHumidity,
     RelativeHumidityField,
+    Supersaturation,
+    SupersaturationField,
     number_concentration,
     number_concentration_field
 

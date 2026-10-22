@@ -214,6 +214,33 @@ end
     end
 end
 
+@testset "Supersaturation diagnostics [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
+    model = AtmosphereModel(grid; microphysics=SaturationAdjustment())
+
+    # Subsaturated air: the supersaturation is negative everywhere, and is exactly one less than
+    # the relative humidity
+    set!(model, θ=300, qᵗ=0.005)
+    𝒮 = Supersaturation(model)
+    @test 𝒮 isa Oceananigans.AbstractOperations.AbstractOperation
+    𝒮_field = SupersaturationField(model)
+    ℋ_field = RelativeHumidityField(model)
+    # Reductions over the field itself, and over floats rather than booleans: `all(f, field)`
+    # builds a Bool reduced field, whose `initarray!` has no method on Julia 1.13
+    @test maximum(abs, 𝒮_field) < Inf   # finite everywhere: a NaN anywhere would fail this
+    @test maximum(𝒮_field) < 0
+    @test maximum(abs, 𝒮_field - ℋ_field + 1) < eps(FT)
+
+    # Moist enough to condense: saturation adjustment pins the supersaturation to zero wherever it
+    # makes condensate, and leaves the rest of the column subsaturated
+    set!(model, θ=300, qᵗ=0.03)
+    𝒮_saturated = SupersaturationField(model)
+    @test maximum(model.microphysical_fields.qˡ) > 0
+    @test abs(maximum(𝒮_saturated)) < FT(1e-3)
+    @test minimum(𝒮_saturated) < 0
+end
+
 @testset "Hydrostatic pressure computation [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))
