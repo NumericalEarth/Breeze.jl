@@ -6,23 +6,9 @@
 # only the shear vanishes, which the stability functions map to their stable or unstable value.
 @inline richardson_number(N², S²) = ifelse(N² == 0, zero(N²), N² / S²)
 
-# A 1-2-1 average over the face and its two neighbors, for faces whose neighbors are both interior:
-# the bottom and top faces carry no shear or stratification of their own, so they and the faces
-# next to them keep their own values.
-# The stability functions are steep in Ri, so a grid-scale (2Δz) mode in N² and S² — which a
-# saturated layer under the dry static stability sustains — would otherwise be amplified into
-# alternating diffusivities. The filter removes that mode before it reaches the stability functions.
-@inline function smoothed_faceᶜᶜᶠ(i, j, k, grid, f, args...)
-    interior = (k > 2) & (k < grid.Nz)
-    f⁻ = f(i, j, ifelse(interior, k - 1, k), grid, args...)
-    f⁰ = f(i, j, k, grid, args...)
-    f⁺ = f(i, j, ifelse(interior, k + 1, k), grid, args...)
-    return ifelse(interior, (f⁻ + 2f⁰ + f⁺) / 4, f⁰)
-end
-
 @inline function Riᶜᶜᶠ(i, j, k, grid, velocities, N²)
-    S² = smoothed_faceᶜᶜᶠ(i, j, k, grid, shearᶜᶜᶠ, velocities.u, velocities.v)
-    N²ᵢ = smoothed_faceᶜᶜᶠ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
+    S² = shearᶜᶜᶠ(i, j, k, grid, velocities.u, velocities.v)
+    N²ᵢ = @inbounds N²[i, j, k]
     return richardson_number(N²ᵢ, S²)
 end
 
