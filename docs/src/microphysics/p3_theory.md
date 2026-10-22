@@ -471,8 +471,8 @@ resolution are `tabulate_rain_from_quadrature` keywords only.
 
 ### [Complete calibration inventory](@id p3_calibration_inventory)
 
-The present runtime scheme exposes **79 scalar free parameters**: the 16 warm-phase
-coefficients above and 63 process-level coefficients below. A tuple-valued field counts
+The present runtime scheme exposes **83 scalar free parameters**: the 16 warm-phase
+coefficients above and 67 process-level coefficients below. A tuple-valued field counts
 once per scalar entry, not once per Julia field. Derived quantities count once: for
 example, ``\mathbb{C}_{\mathrm{auto},5}`` may be interpreted as a rain-seed mass or an
 equivalent seed radius, but those are not two independent parameters.
@@ -490,7 +490,7 @@ equivalent seed radius, but those are not two independent parameters.
 | Liquid PSD bounds | 4 | ``\mathbb{C}_{cl,5:6}`` = `maximum_mean_droplet_diameter`, `minimum_mean_droplet_diameter`; ``\mathbb{C}_{r,1:2}`` = `minimum_rain_slope`, `maximum_rain_slope` |
 | Aggregation | 6 | ``\mathbb{C}_{\mathrm{aggr},1:6}`` = maximum/minimum efficiency, temperature-ramp endpoints, and rime-fraction endpoints in `ProcessRate` |
 | Riming | 2 | ``\mathbb{C}_{\mathrm{rime},1:2}`` = `cloud_ice_collection_efficiency`, `rain_ice_collection_efficiency` |
-| Rime structure | 6 | ``\mathbb{C}_{\mathrm{rime},3:8}`` = rime-density bounds, impact coefficient and bounds, and `unrimed_rime_density` |
+| Rime structure | 10 | ``\mathbb{C}_{\mathrm{rime},3:8}`` = rime-density bounds, impact coefficient and bounds, and `unrimed_rime_density`; ``\mathbb{C}_{\mathrm{rime},9:12}`` = `rime_density_constant_coefficient`, `rime_density_linear_coefficient`, `rime_density_quadratic_coefficient`, and `rime_density_transition_impact` |
 | Wet growth and shedding | 5 | ``\mathbb{C}_{\mathrm{shed},1:2}`` = the two shed-drop masses; ``\mathbb{C}_{\mathrm{wetg},1:2}`` = the two wet-growth thresholds; ``\mathbb{C}_{\mathrm{dens},2}`` = `rime_densification_timescale` |
 | Cooper nucleation | 6 | ``\mathbb{C}_{\mathrm{nucl},1:6}`` = temperature and supersaturation thresholds, maximum concentration, timescale, prefactor, and temperature coefficient |
 | Immersion freezing | 3 | ``\mathbb{C}_{\mathrm{immf},1:3}`` = `maximum_immersion_freezing_temperature`, `immersion_freezing_coefficient`, `immersion_freezing_nucleation_coefficient` |
@@ -504,7 +504,7 @@ aerosol distributions and cloud number; Boolean pathway choices; `NumericalFloor
 sink-limiter iterations and its safety timescale; small-mass cleanup thresholds; and quadrature or
 lookup-table resolution. Those must be measured, specified, compared, or convergence
 tested rather than silently absorbed into ``\mathbb{C}``. Coefficients embedded in the
-external ice tables are also outside the 79: they require a versioned table generator
+external ice tables are also outside the 83: they require a versioned table generator
 before Breeze can expose and calibrate them individually.
 
 ### Air Properties
@@ -796,6 +796,43 @@ the impact parameter ``R_\text{imp}``, which depends on droplet size, impact vel
 \end{cases}
 ```
 
+The polynomial coefficients and branch transition are empirical calibration parameters,
+exposed by `ProcessRate` in SI units:
+
+| Constructor keyword | Symbol | Default |
+|:--|:--|:--|
+| `rime_density_constant_coefficient` | ``\mathbb{C}_{\rm rime,9}`` | 51 kg/m³ |
+| `rime_density_linear_coefficient` | ``\mathbb{C}_{\rm rime,10}`` | 114 kg/m³ |
+| `rime_density_quadratic_coefficient` | ``\mathbb{C}_{\rm rime,11}`` | −5.5 kg/m³ |
+| `rime_density_transition_impact` | ``\mathbb{C}_{\rm rime,12}`` | 8 |
+
+The factor ``1000`` in the default formula above converts g/cm³ to kg/m³;
+it is absorbed into the constructor defaults and is not a calibration parameter.
+For dimensionless impact ``R``, define the density polynomial
+``P(R) = \mathbb{C}_{\rm rime,9} + \mathbb{C}_{\rm rime,10} R + \mathbb{C}_{\rm rime,11} R^2``.
+With transition ``R_t = \mathbb{C}_{\rm rime,12}`` and upper impact bound
+``R_u = \texttt{maximum\_rime\_impact}``, the upper branch is
+
+```math
+ρ^f = P(R_t) + \frac{ρ^f_{\rm max} - P(R_t)}{R_u - R_t} (R - R_t), \qquad R > R_t.
+```
+
+The constructor requires ``\texttt{minimum\_rime\_impact} ≤ R_t < R_u``.
+
+The upper-branch constants are determined by continuity and the chosen endpoint:
+
+```math
+611 = 1000 (0.051 + 0.114 \times 8 - 0.0055 \times 8^2),
+\qquad
+72.25 = \frac{900 - 611}{12 - 8}.
+```
+
+Thus ``611`` is the polynomial density at the transition, and ``72.25`` is the slope
+that connects this density to ``900`` kg/m³ at ``R_\text{imp} = 12``. They are not
+two additional independent calibration parameters if continuity and that endpoint
+are retained. Breeze derives the linear-branch coefficients from these constraints
+using the configured polynomial, transition, upper impact bound, and maximum density.
+
 Wherever the particle carries rime volume, the diagnosed rime density is bounded
 into `[minimum_rime_density, maximum_rime_density]`:
 - ``ρ^f_\text{min} = 50`` kg/m³ is the minimum rime density
@@ -810,11 +847,16 @@ The rime density affects the graupel density ``ρ^{gr}`` and thus the regime thr
 As particles rime more heavily, they become denser and more spherical.
 
 !!! note "Rime-impact clamping and table discretization"
-    ``R_\text{imp}`` is clamped to [1, 12] before the Cober–List fit is applied;
+    By default, ``R_\text{imp}`` is clamped to [1, 12] before the Cober–List fit is applied;
     the linear branch for ``R_\text{imp} > 8`` is extended to ``R_\text{imp} = 12`` so that
-    ``ρ^f = 900`` kg/m³. The lookup tables discretize ``ρ^f`` on an uneven grid
+    ``ρ^f = 900`` kg/m³. The impact bounds (`minimum_rime_impact`, `maximum_rime_impact`)
+    and density bounds (`minimum_rime_density`, `maximum_rime_density`) are configurable
+    closure choices and can also be considered for calibration. Changing the upper
+    impact or density bound changes the derived slope of the linear branch.
+    The lookup tables discretize ``ρ^f`` on an uneven grid
     (50, 250, 450, 650, 900 kg/m³) and interpolate between bins; `rime_density_index`
-    maps a physical ``ρ^f`` onto that grid.
+    maps a physical ``ρ^f`` onto that grid. These grid points specify numerical sampling,
+    rather than additional empirical coefficients of the density fit.
 
 ### Summary
 
