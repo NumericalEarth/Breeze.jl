@@ -37,7 +37,7 @@
 using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities:
     shearᶜᶜᶠ, ℑbzᵃᵃᶜ, mask_diffusivity, turbulent_velocityᶜᶜᶜ
 
-using Oceananigans.TurbulenceClosures: clip, height_above_bottomᶜᶜᶠ, height_above_bottomᶜᶜᶜ
+using Oceananigans.TurbulenceClosures: clip, height_above_bottomᶜᶜᶠ, height_above_bottomᶜᶜᶜ, shear_production
 using Oceananigans.Units: minute
 
 #####
@@ -417,7 +417,7 @@ stability ``N²``, the mixing length ``ℓ`` and the implicit linear coefficient
 mixing length is stored, because its nonlocal formulations are computed column by column rather than
 pointwise; `closure_fields.ℓᵐ` is the diagnostic of ``ℓ`` from the model state.
 """
-struct TKEClosureFields{K, N, L, KC, LC}
+struct TKEClosureFields{K, N, L, PV, KC, LC}
     Kᵘ :: K # eddy diffusivity for momentum, at (Center, Center, Face)
     Kᶜ :: K # eddy diffusivity for scalars, at (Center, Center, Face)
     Kᵉ :: K # eddy diffusivity for turbulent kinetic energy, at (Center, Center, Face)
@@ -427,6 +427,9 @@ struct TKEClosureFields{K, N, L, KC, LC}
     # The linear implicit coefficient of the TKE equation, ∂ₜe = Lᵉ e + ⋯, at (Center, Center, Center):
     # the dissipation rate, the negative part of the buoyancy flux and the damping of negative TKE.
     Lᵉ :: L
+    # The velocities at the start of the time step, which pair with the current stage's velocities in
+    # the time-staggered shear production, as in CATKE
+    previous_velocities :: PV
     tupled_tracer_diffusivities :: KC         # per-tracer diffusivity lookup, by closure-scalar position
     tupled_implicit_linear_coefficients :: LC # `Lᵉ` for the TKE tracer, zero for every other
 end
@@ -439,6 +442,7 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.ℓᵐ),
                      adapt(to, fields.ℓˢ),
                      adapt(to, fields.Lᵉ),
+                     adapt(to, fields.previous_velocities),
                      adapt(to, fields.tupled_tracer_diffusivities),
                      adapt(to, fields.tupled_implicit_linear_coefficients))
 
@@ -457,6 +461,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     ℓ = ZFaceField(grid)
     ℓˢ = ZFaceField(grid)
     Lᵉ = CenterField(grid)
+    previous_velocities = (u = XFaceField(grid), v = YFaceField(grid))
 
     # Indexed by the `Val(id)` the model hands to `diffusivity` and `implicit_linear_coefficient`:
     # TKE is transported with `Kᵉ` and damped with `Lᵉ`, every other scalar is transported with
@@ -464,7 +469,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
     implicit_linear_coefficients = NamedTuple(name => name === TKE_NAME ? Lᵉ : ZeroField() for name in tracer_names)
 
-    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓ, ℓˢ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients)
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓ, ℓˢ, Lᵉ, previous_velocities, tracer_diffusivities, implicit_linear_coefficients)
 end
 
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
@@ -824,9 +829,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Add the local sources of the TKE equation, ``ρ (P + B⁺)`` — shear production and the positive part
-of the buoyancy flux, formed at faces where ``Kᵘ``, ``Kᶜ``, ``S²`` and ``N²`` live and reconstructed
-to centers — to the tendency of the `ρe` tracer. Under an explicit time discretization the sinks
+Add the local sources of the TKE equation, ``ρ (P + B⁺)`` — shear production, formed as in CATKE
+from ``Kᵘ`` and the velocities at the start of the step and at the current stage, and the positive
+part of the buoyancy flux, formed at faces where ``Kᶜ`` and ``N²`` live and reconstructed to
+centers — to the tendency of the `ρe` tracer. Under an explicit time discretization the sinks
 ``ρ Lᵉ e`` are added too.
 """
 @kernel function _add_tke_tendencies!(Gρe, grid, closure, closure_fields, velocities, ρe, ρ)
@@ -834,7 +840,11 @@ to centers — to the tendency of the `ρe` tracer. Under an explicit time discr
 
     closure_ij = getclosure(i, j, closure)
 
-    P = ℑbzᵃᵃᶜ(i, j, k, grid, shear_productionᶜᶜᶠ, closure_fields.Kᵘ, velocities.u, velocities.v)
+    # Shear production as in CATKE: the Δz-weighted, boundary-aware reconstruction that matches the
+    # loss of mean kinetic energy in the discrete momentum equation, time-staggered between the
+    # velocities at the start of the step and those of the current stage
+    uⁿ, vⁿ = closure_fields.previous_velocities
+    P = shear_production(i, j, k, grid, closure_fields.Kᵘ, uⁿ, velocities.u, vⁿ, velocities.v)
     B = ℑbzᵃᵃᶜ(i, j, k, grid, buoyancy_productionᶜᶜᶠ, closure_fields.Kᶜ, closure_fields.N²)
     B⁺ = max(0, B)
 
@@ -845,12 +855,25 @@ to centers — to the tendency of the `ρe` tracer. Under an explicit time discr
     @inbounds Gρe[i, j, k] += ρᵢ * (P + B⁺ + sinks)
 end
 
+# Keep the velocities of the first stage, those at the start of the step, for the later stages. The
+# stage is compared with `ifelse` rather than branching, which Reactant cannot trace.
+@kernel function _store_previous_velocities!(previous_velocities, velocities, stage)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        previous_velocities.u[i, j, k] = ifelse(stage == 1, velocities.u[i, j, k], previous_velocities.u[i, j, k])
+        previous_velocities.v[i, j, k] = ifelse(stage == 1, velocities.v[i, j, k], previous_velocities.v[i, j, k])
+    end
+end
+
 # Called by the time steppers at the start of every stage, after the flux boundary conditions have
 # been added to the tendencies; the tracers hold their density-weighted values here.
 function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, closure::FlavorOfTKEClosure, model)
     grid = model.grid
     arch = grid.architecture
     ρ = AtmosphereModels.total_density(model.dynamics)
+
+    launch!(arch, grid, :xyz, _store_previous_velocities!,
+            closure_fields.previous_velocities, model.velocities, model.clock.stage)
 
     launch!(arch, grid, :xyz, _add_tke_tendencies!,
             Gⁿ[TKE_NAME], grid, closure, closure_fields,
@@ -882,7 +905,7 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
               "└── negative_tke_damping_time_scale: ", prettysummary(closure.negative_tke_damping_time_scale))
 end
 
-# Kᵘ, Kᶜ, Kᵉ and Lᵉ are recomputed exactly by update_state! from the prognostic state alone
-# but this may change in the future if the closure becomes dependent on the previous state.
+# Kᵘ, Kᶜ, Kᵉ and Lᵉ are recomputed exactly by update_state! from the prognostic state alone, and
+# the previous velocities are stored again at the first stage of every step, so none is restored.
 Oceananigans.prognostic_state(::TKEClosureFields) = nothing
 Oceananigans.restore_prognostic_state!(closure_fields::TKEClosureFields, ::Nothing) = closure_fields
