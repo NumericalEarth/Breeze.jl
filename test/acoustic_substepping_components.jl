@@ -18,7 +18,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
-                                    compute_acoustic_substeps,
+                                    compute_acoustic_substeps, minimum_horizontal_spacing,
                                     sponge_term_diag, sponge_rhs,
                                     apply_horizontal_pressure_gradient_substep,
                                     AcousticTridiagLower, AcousticTridiagDiagonal,
@@ -315,6 +315,25 @@ for arch in arches
             N_bwd = compute_acoustic_substeps(grid, -12, constants, ν)
             @test N_fwd ≥ 1
             @test N_bwd == N_fwd
+        end
+
+        @testset "Substepper caches the minimum horizontal spacing" begin
+            # Δx = 1000 m, Δy = 500 m
+            grid = RectilinearGrid(arch; size=(100, 6, 10), halo=(5, 5, 5),
+                                   x=(0, 100kilometers), y=(0, 3kilometers), z=(0, 10kilometers))
+            Δx_min = minimum_horizontal_spacing(grid)
+            @test Δx_min isa FT
+            @test Δx_min == 500
+
+            substepper = AcousticSubstepper(grid, SplitExplicitTimeDiscretization())
+            @test substepper.minimum_horizontal_spacing === Δx_min
+            @test compute_acoustic_substeps(Δx_min, 12, constants, ν) ==
+                  compute_acoustic_substeps(grid, 12, constants, ν)
+
+            flat_grid = RectilinearGrid(arch; size=(100, 10), halo=(5, 5),
+                                        x=(0, 100kilometers), z=(0, 10kilometers),
+                                        topology=(Periodic, Flat, Bounded))
+            @test minimum_horizontal_spacing(flat_grid) == 1000
         end
         Oceananigans.defaults.FloatType = old_FT
     end
