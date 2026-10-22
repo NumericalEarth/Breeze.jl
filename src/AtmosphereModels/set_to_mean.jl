@@ -169,16 +169,16 @@ level, so a horizontally uniform reduction is exact; terrain-following resets go
 `reset_reference_state!`, which reduces the datum per column along the terrain.
 """
 function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, constants)
-    FT  = eltype(ref)
     Rᵈ  = dry_air_gas_constant(constants)
     Rᵛ  = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
 
-    θˢ, qᵛˢ = @allowscalar (θ[1, 1, 1], qᵛ[1, 1, 1])
+    # The bottom of each column profile, read from its data: a profile allocated inside a compiled
+    # function has a traced element type, for which the reduced-Field `getindex` is ambiguous.
+    θˢ, qᵛˢ = @allowscalar (θ.data[1, 1, 1], qᵛ.data[1, 1, 1])
     zˢ = bottom_face_height(grid)
-    pˢ = convert(FT, moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
-                                                ref.standard_pressure, constants))
+    pˢ = moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ, ref.standard_pressure, constants)
 
     set_surface_state!(ref.surface_pressure, pˢ)
     update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
@@ -190,7 +190,7 @@ function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛ
     # nothing to keep in sync.
     isnothing(ref.surface_density) && return nothing
     ρˢ = surface_reference_density(pˢ, θˢ, qᵛˢ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    set_surface_state!(ref.surface_density, convert(eltype(ref), ρˢ))
+    set_surface_state!(ref.surface_density, ρˢ)
     return nothing
 end
 
