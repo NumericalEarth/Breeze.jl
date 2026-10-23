@@ -8,19 +8,29 @@ end
 
 Solvers.tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
 
-function AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, grid)
-    reference_density = dynamics.reference_state.density
+AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, grid) =
+    anelastic_pressure_solver(pressure_solver_grid(grid), dynamics.reference_state.density,
+                              dynamics.pressure_solver_float_type)
+
+# The solver is exact on a grid without an immersed boundary.
+pressure_solver_grid(grid) = grid
+
+# With an immersed boundary we use an approximate solver on the underlying grid,
+# which produces a divergent velocity field near terrain.
+pressure_solver_grid(grid::ImmersedBoundaryGrid) = grid.underlying_grid
+
+# The grid is already in the solver's float type
+function anelastic_pressure_solver(grid::AbstractGrid{FT}, reference_density, ::Type{FT}) where FT
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
+    return FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
+end
 
-    solver = if grid isa Oceananigans.ImmersedBoundaries.ImmersedBoundaryGrid
-        # With this method, we are using an approximate solver that
-        # will produce a divergent velocity field near terrain.
-        FourierTridiagonalPoissonSolver(grid.underlying_grid; tridiagonal_formulation)
-    else # the solver is exact
-        FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
-    end
-
-    return solver
+# Another float type: solve on copies of the grid and of ρᵣ in that type
+function anelastic_pressure_solver(FT, grid, reference_density)
+    solver_grid = with_number_type(FT, grid)
+    solver_density = Field(Oceananigans.instantiated_location(reference_density), solver_grid)
+    parent(solver_density) .= parent(reference_density)
+    return anelastic_pressure_solver(solver_grid, solver_density, FT)
 end
 
 #####
@@ -78,9 +88,13 @@ end
 end
 
 # The tridiagonal coefficients carry ρᵣ, so they are recomputed whenever ρᵣ changes.
-function AtmosphereModels.update_pressure_solver!(solver::FourierTridiagonalPoissonSolver, ::AnelasticDynamics)
+function AtmosphereModels.update_pressure_solver!(solver::FourierTridiagonalPoissonSolver, dynamics::AnelasticDynamics)
     tridiagonal_solver = solver.batched_tridiagonal_solver
     formulation = solver.tridiagonal_formulation
+
+    # A solver in another float type holds its own copy of ρᵣ; otherwise this copies ρᵣ onto itself
+    parent(formulation.reference_density) .= parent(dynamics.reference_state.density)
+
     Solvers.compute_main_diagonal!(tridiagonal_solver.b, formulation, solver.grid, solver.poisson_eigenvalues...)
     Solvers.compute_lower_diagonal!(tridiagonal_solver.a, formulation, solver.grid)
     return nothing
