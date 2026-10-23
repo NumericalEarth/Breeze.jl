@@ -9,7 +9,8 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Fields: TracerFields
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
-using Oceananigans.TimeSteppers: TimeSteppers, TimeStepper, AbstractLagrangianParticles, step_lagrangian_particles!
+using Oceananigans.TimeSteppers: TimeSteppers, TimeStepper, AbstractLagrangianParticles, step_lagrangian_particles!,
+                                 substep_lagrangian_particles!, materialize_lagrangian_particles
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields,
                                        closure_required_tracers, VerticallyImplicitTimeDiscretization
 using Oceananigans.TimeSteppers: time_discretization
@@ -105,9 +106,9 @@ Arguments
 
    * `particles` are Lagrangian particles to be advected with the flow,
      constructed with `Oceananigans.LagrangianParticles`. Particles are advected
-     with the Cartesian velocities `model.velocities` once per time step, over the
-     full `Δt`. Default: `nothing`. See the "Lagrangian particles" section of the
-     documentation for details, including the treatment on terrain-following grids.
+     with the Cartesian velocities `model.velocities` using the time-stepping scheme
+     of the model, stage by stage. Default: `nothing`. See the "Lagrangian particles"
+     section of the documentation for details, including the treatment on terrain-following grids.
 
 Example
 =======
@@ -322,6 +323,9 @@ function AtmosphereModel(grid;
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
     end
+
+    # Allocate the per-particle storage that the time stepper needs to advance particles
+    particles = materialize_lagrangian_particles(particles, timestepper)
     pressure_solver = dynamics_pressure_solver(dynamics, grid)
 
     moisture_specific = moisture_specific_name(microphysics)
@@ -832,11 +836,14 @@ Models.boundary_condition_args(model::AtmosphereModel) =
 #####
 
 # Velocities are diagnostic (u = ρu/ρ) and refreshed by `update_state!`, so they are
-# current when the time steppers advect particles at the end of each step.
+# current when the time steppers advect particles at the beginning of each stage.
 @inline Models.total_velocities(model::AtmosphereModel) = model.velocities
 
 TimeSteppers.step_lagrangian_particles!(model::AtmosphereModel, Δt) =
     step_lagrangian_particles!(model.particles, model, Δt)
+
+TimeSteppers.substep_lagrangian_particles!(model::AtmosphereModel, Δt, stage) =
+    substep_lagrangian_particles!(model.particles, model, Δt, stage)
 
 function total_energy(model)
     u, v, w = model.velocities

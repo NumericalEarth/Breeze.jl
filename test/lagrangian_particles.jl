@@ -8,13 +8,16 @@ using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: rnode, xnode, ynode, znode
 using Oceananigans.TimeSteppers: step_lagrangian_particles!
+using Oceananigans.Models.LagrangianParticleTracking: particle_stage, advance_particle_position
+using Breeze.TimeSteppers: DisplacementParticleStage
 using Test
 
 function particles_at(FT, x, y, z; restitution = 1)
     x = on_architecture(default_arch, FT[x])
     y = on_architecture(default_arch, FT[y])
     z = on_architecture(default_arch, FT[z])
-    return LagrangianParticles(; x, y, z, restitution=FT(restitution))
+    boundary_conditions = ParticleBoundaryConditions(ReflectingBoundary(FT(restitution)))
+    return LagrangianParticles(; x, y, z, boundary_conditions)
 end
 
 uniform_flow_particles(FT) = particles_at(FT, 100, 200, 1000)
@@ -57,13 +60,15 @@ end
 
     @testset "Construction and show" begin
         particles = uniform_flow_particles(FT)
+        # The model adds per-particle storage for its time stepper, and shares the particle properties
         model = AtmosphereModel(grid; particles)
-        @test model.particles === particles
+        @test model.particles.properties === particles.properties
+        @test keys(model.particles.timestepper.state) == (:x⁰, :y⁰, :z⁰, :Dx, :Dy, :Dz)
         @test occursin("particles: 1 LagrangianParticles", sprint(show, model))
 
         twin = adiabatic_balance_twin(model)
         @test isnothing(twin.particles)
-        @test model.particles === particles
+        @test model.particles.properties === particles.properties
 
         # Without particles, microphysics closes the summary tree
         model = AtmosphereModel(grid)
@@ -263,7 +268,7 @@ end
             time_step!(model, Δt)
         end
 
-        # Particles are advected once per step with the full Δt
+        # Particles move by u Δt per time step
         x, y, z = particle_position(particles)
         @test x ≈ 100 + 10 * Δt * 5
         @test y == 200
@@ -292,4 +297,80 @@ end
     end
 
     Oceananigans.defaults.FloatType = old_FT
+end
+
+@testset "Third-order particle time stepping with SSP RK3" begin
+    # A spatially uniform wind u(t) = U cos(ωt), driven by a forcing, carries particles along
+    # x(t) = x₀ + (U / ω) sin(ωt). Trilinear interpolation of a uniform wind is exact,
+    # so the position error measures the error of the time-stepping scheme alone.
+    # Errors are below Float32 round-off at the finest time step, so the test uses Float64.
+    FT = Float64
+    grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), extent=(1000, 1000, 1000),
+                           topology=(Periodic, Periodic, Periodic))
+
+    dynamics = BoussinesqDynamics(grid)
+    ρᵣ = Breeze.Thermodynamics.reference_value(dynamics.reference_state.density)
+    U = 10
+    ω = 2π / 100
+    ρu_forcing = Forcing((x, y, z, t, p) -> - p.ρᵣ * p.U * p.ω * sin(p.ω * t), parameters=(; ρᵣ, U, ω))
+
+    x₀ = 100
+    T = 75
+    errors = map((15, 30, 60)) do Nt
+        particles = particles_at(FT, x₀, 500, 500)
+        model = AtmosphereModel(grid; dynamics=BoussinesqDynamics(grid), advection=nothing,
+                                forcing=(; ρu=ρu_forcing), particles)
+        set!(model, u=U)
+        for _ in 1:Nt
+            time_step!(model, T / Nt)
+        end
+        # The particle crosses the periodic boundary, so the error is measured modulo the domain length
+        x, _, _ = particle_position(particles)
+        Lx = 1000
+        abs(mod(x - (x₀ + U / ω * sin(ω * T)) + Lx / 2, Lx) - Lx / 2)
+    end
+
+    rates = log2.(errors[1:end-1] ./ errors[2:end])
+    @info "SSP RK3 particle position errors: $errors, convergence rates: $rates"
+    @test all(rates .> 2.8)
+end
+
+@testset "Particle stages of Breeze time steppers" begin
+    # Integrate dx/dt = λ x, for which both schemes are third order
+    λ = -0.7
+    T = 1.0
+    grid = RectilinearGrid(CPU(); size=(4, 4, 4), extent=(1, 1, 1))
+    state = (x⁰ = zeros(1), y⁰ = zeros(1), z⁰ = zeros(1), Dx = zeros(1), Dy = zeros(1), Dz = zeros(1))
+
+    # SSP RK3, with the stage coefficients of the model's time stepper
+    timestepper = AtmosphereModel(grid).timestepper
+    @test timestepper isa SSPRungeKutta3
+
+    errors = map((10, 20, 40)) do Nt
+        Δt = T / Nt
+        X = (1.0, 2.0, 3.0)
+        for _ in 1:Nt, stage in 1:3
+            Ẋ = λ .* X
+            X = advance_particle_position(particle_stage(timestepper, stage, false), X, Ẋ, Δt, state, 1)
+        end
+        maximum(abs, X .- (1.0, 2.0, 3.0) .* exp(λ * T))
+    end
+
+    rates = log2.(errors[1:end-1] ./ errors[2:end])
+    @test all(rates .> 2.9)
+
+    # Wicker–Skamarock RK3: X⁽ᵏ⁾ = Xⁿ + βₖ Δt U(X⁽ᵏ⁻¹⁾) with β = (1/3, 1/2, 1)
+    β = (1/3, 1/2, 1.0)
+    errors = map((10, 20, 40)) do Nt
+        Δt = T / Nt
+        X = (1.0, 2.0, 3.0)
+        for _ in 1:Nt, stage in 1:3
+            Ẋ = λ .* X
+            X = advance_particle_position(DisplacementParticleStage(0.0, β[stage], stage == 1), X, Ẋ, Δt, state, 1)
+        end
+        maximum(abs, X .- (1.0, 2.0, 3.0) .* exp(λ * T))
+    end
+
+    rates = log2.(errors[1:end-1] ./ errors[2:end])
+    @test all(rates .> 2.9)
 end

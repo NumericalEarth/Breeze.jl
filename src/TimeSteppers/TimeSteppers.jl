@@ -22,6 +22,7 @@ using Breeze.AtmosphereModels: kernel_time_step
 include("ssp_runge_kutta_3.jl")
 include("acoustic_substep_helpers.jl")
 include("acoustic_runge_kutta_3.jl")
+include("lagrangian_particle_stages.jl")
 
 # Extend TimeStepper to support time steppers via Symbol
 OceananigansTimeSteppers.TimeStepper(::Val{:SSPRungeKutta3}, args...; kwargs...) =
