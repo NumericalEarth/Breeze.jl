@@ -24,9 +24,12 @@ using CairoMakie
 # ## Background atmosphere
 #
 # The grid holds environmental profiles; the parcel itself is a single moving
-# thermodynamic state. We use a constant-potential-temperature reference atmosphere
-# and an environmental humidity that decreases with height. Each parcel starts
-# at the surface with the same temperature and total water mass fraction.
+# thermodynamic state. We use a dry-adiabatic temperature profile and an environmental
+# humidity that decreases with height. Hydrostatic pressure and density are computed
+# consistently with that humidity, so a parcel matching its surroundings is neutrally
+# buoyant; against a dry reference every moist parcel would be buoyant through its
+# vapor alone. Each parcel starts at the surface with the same temperature and total
+# water mass fraction.
 
 grid = RectilinearGrid(size=700, z=(0, 7kilometers), topology=(Flat, Flat, Bounded))
 constants = ThermodynamicConstants()
@@ -58,9 +61,13 @@ function run_parcel(; microphysics=nothing, buoyant=false, stop_time=90minutes, 
                             thermodynamic_constants)
     reference_state = ReferenceState(grid, thermodynamic_constants;
                                      base_pressure = 101325,
-                                     potential_temperature = 300)
+                                     potential_temperature = 300,
+                                     vapor_mass_fraction = qᵗ)
+    ## Integrate the hydrostatic profiles with the moist gas constant, so the
+    ## environmental density includes the vapor the parcels start with.
+    compute_reference_state!(reference_state, reference_state.temperature, qᵗ, thermodynamic_constants)
     set!(model; qᵗ, z = 0, w = 1, w_parcel = 1,
-         θ = reference_state.potential_temperature,
+         T = reference_state.temperature,
          p = reference_state.pressure,
          ρ = reference_state.density)
 
@@ -205,18 +212,22 @@ nothing #hide
 #
 # ## Comparing buoyancy-driven ascent
 #
-# The two-moment and P3 parcels now start at 1 m/s and evolve for 300 s according
+# The two-moment and P3 parcels now start at 1 m/s and evolve for 10 minutes according
 # to dw/dt = −g(ρ_parcel − ρ_env)/ρ_env. They share initial conditions and the
-# buoyancy equation, but their ascent histories can diverge as microphysics changes
-# parcel density. Comparing against height separates vertical structure from time;
-# the next figure shows how long each parcel takes to reach that height.
+# buoyancy equation. As a parcel rises into drier environmental air, it becomes
+# slightly buoyant through the vapor it carries until it saturates near 1 km;
+# after that latent heating dominates in an environment with no stable layer
+# to stop it, so the ascent is rapid and the histories diverge as microphysics
+# changes parcel density. Comparing against height separates vertical structure from
+# time; the next figure shows how long each parcel takes to reach that height.
 
+buoyant_stop_time = 10minutes
 buoyant_two_moment = run_parcel(microphysics=TwoMomentCloudMicrophysics(),
-                                buoyant=true, stop_time=5minutes)
-buoyant = run_parcel(; microphysics, buoyant=true, stop_time=5minutes)
+                                buoyant=true, stop_time=buoyant_stop_time)
+buoyant = run_parcel(; microphysics, buoyant=true, stop_time=buoyant_stop_time)
 buoyant_cases = ((buoyant_two_moment, "Two moment", :dodgerblue, :dashdot),
                  (buoyant, "P3", :black, :dot))
-buoyant_figure = plot_parcel_comparison(buoyant_cases, "Buoyancy-driven ascent · initially 1 m/s · 300 s")
+buoyant_figure = plot_parcel_comparison(buoyant_cases, "Buoyancy-driven ascent · initially 1 m/s · $(prettytime(buoyant_stop_time))")
 save("rising_parcels_buoyant_comparison.svg", buoyant_figure)
 save("rising_parcels_buoyant_comparison.png", buoyant_figure; px_per_unit=2)
 nothing #hide
@@ -235,7 +246,8 @@ for (parcel, label, color, linestyle) in buoyant_cases
     lines!(height_axis, t, z; color, linestyle, label)
     lines!(velocity_axis, t, w; color, linestyle)
 end
-lines!(height_axis, [0, 300], [0, 0.3]; color=:gray, linestyle=:dash, label="Prescribed 1 m/s")
+lines!(height_axis, [0, buoyant_stop_time], [0, buoyant_stop_time / kilometers];
+       color=:gray, linestyle=:dash, label="Prescribed 1 m/s")
 hlines!(velocity_axis, [1]; color=:gray, linestyle=:dash)
 Legend(dynamics_figure[2, 1:2], height_axis; orientation=:horizontal)
 save("rising_parcels_dynamics.svg", dynamics_figure)
@@ -255,9 +267,11 @@ nothing #hide
 # P3 additionally carries ice mass, number, rime, and liquid coating.
 #
 # The lower panels compare P3's prognostic vapor excess with qᵛ − qᵛ⁺ˡ
-# diagnosed from temperature and vapor, for both ascent types. As in an LES,
-# the prognostic relaxes toward the diagnosed value on P3's process timescale
-# rather than following it exactly.
+# diagnosed from temperature and vapor, for both ascent types. The prognostic
+# carries the adiabatic forcing of the ascent along with the phase-change sink,
+# so it tracks the diagnosed value; the bounded adjustment of
+# [Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008) only corrects
+# the residual between the two.
 
 diagnostics_figure = Figure(size=(1100, 1050))
 cloud_number_axis = Axis(diagnostics_figure[1, 1]; xlabel="Cloud / aerosol number (kg⁻¹)",

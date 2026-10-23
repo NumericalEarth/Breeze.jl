@@ -1,5 +1,6 @@
 using Oceananigans
 using Breeze
+using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
 using Breeze.Thermodynamics: Thermodynamics as TD
 using Breeze.ParcelModels: ParcelModels as PM
 using Test
@@ -57,6 +58,27 @@ end
         expected = PPP.p3_tendency_component(result, Val(name)) * state.ρ / ρ
         @test G.Gμ[name] ≈ expected
     end
+end
+
+@testset "Kessler parcel update uses the parcel density" begin
+    constants = ThermodynamicConstants(saturation_vapor_pressure=TetensFormula())
+    function kessler_parcel(weight)
+        grid = RectilinearGrid(size=20, z=(0, 2000), topology=(Flat, Flat, Bounded))
+        microphysics = DCMIP2016KesslerMicrophysics()
+        model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics, thermodynamic_constants=constants)
+        # A nearly saturated parcel carrying cloud and rain; the environmental density is
+        # an arbitrary weight for the stored prognostics.
+        set!(model; T=290, p=z -> 1e5 - 10z, ρ=weight, qᵗ=0.014, z=500, w=1)
+        state = model.dynamics.state
+        state.μ = (; ρqᶜˡ=weight * 1e-3, ρqʳ=weight * 5e-4)
+        set!(model; T=290, p=z -> 1e5 - 10z, ρ=weight, qᵗ=0.014, z=500, w=1)
+        time_step!(model, 10)
+        return (state.qᵗ, state.μ.ρqᶜˡ / state.ρ, state.μ.ρqʳ / state.ρ, temperature(state.𝒰, constants))
+    end
+    first = kessler_parcel(1.)
+    second = kessler_parcel(2.)
+    @test first[2] > 0
+    @test all(first .≈ second)
 end
 
 @testset "Vanishing cloud number transfer remains finite" begin
