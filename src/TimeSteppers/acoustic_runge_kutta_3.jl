@@ -231,18 +231,23 @@ built, then freeze the copy that the first stage's implicit remainder splits.
 function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::CompressibleAcousticModel, Δt, callbacks)
     clock = model.clock
     if clock.iteration == 0 || !isfinite(clock.last_stage_Δt)
-        clock.last_Δt = Δt
-        clock.last_stage_Δt = stage_increment(model.timestepper, 3) * Δt
-        reconcile_state!(model)
-
-        # Seed the transport velocity *before* the tendencies below: `set!` has already
-        # diagnosed `model.velocities` from the initial momentum, and no acoustic loop has run
-        # to average over. Without this, stage 1 of step 1 would build its scalar tendencies
-        # from the constructor's zeros and transport no tracers vertically.
-        seed_time_averaged_velocities!(model.timestepper.substepper, model)
-        update_state!(model, callbacks)
-        cache_transport_velocity!(model)
+        prepare_acoustic_first_time_step!(model, Δt, callbacks)
     end
+    return nothing
+end
+
+# Shared with Reactant's explicit first-step entry point, which cannot branch on
+# traced clock fields. Rebuild every transport cache before computing tendencies.
+function prepare_acoustic_first_time_step!(model, Δt, callbacks)
+    model.clock.last_Δt = Δt
+    model.clock.last_stage_Δt = stage_increment(model.timestepper, 3) * Δt
+    reconcile_state!(model)
+
+    # `set!` diagnosed velocities from the initial momentum, but no acoustic loop
+    # has averaged them yet. Seed them before building the first scalar tendencies.
+    seed_time_averaged_velocities!(model.timestepper.substepper, model)
+    update_state!(model, callbacks)
+    cache_transport_velocity!(model)
     return nothing
 end
 
