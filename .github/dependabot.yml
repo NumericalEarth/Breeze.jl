@@ -29,6 +29,8 @@ updates:
     ignore:
       # Ignore package itself
       - dependency-name: "Breeze"
+      # Ignore Reactant, we handle it manually
+      - dependency-name: "Reactant"
     labels:
       - "dependencies 🖇️"
     groups:
