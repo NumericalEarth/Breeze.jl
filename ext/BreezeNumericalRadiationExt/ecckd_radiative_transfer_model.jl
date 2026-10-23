@@ -17,7 +17,7 @@ struct EcCKDLongwave{M, C, W, FT}
     gas_model :: M
     cloud :: C
     weights :: W
-    mole_fractions :: NamedTuple{(:co2, :ch4, :n2o, :cfc11, :cfc12), NTuple{5, FT}}
+    mole_fractions :: NamedTuple{(:CO₂, :CH₄, :N₂O, :CFC₁₁, :CFC₁₂), NTuple{5, FT}}
 end
 
 """
@@ -38,11 +38,11 @@ struct EcCKDShortwave{M, C, W, FT}
     solar_constant :: FT
 end
 
-# Dispatch on `atmospheric_state::SpectralColumns`: strictly more specific than the RRTMGP
+# Dispatch on `atmospheric_state::ColumnWorkspace`: strictly more specific than the RRTMGP
 # clear-sky model (slot 4 `BackgroundAtmosphere`) and disjoint from its all-sky model.
-const EcCKDRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:SpectralColumns}
+const EcCKDRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:ColumnWorkspace}
 
-# The gases carried by the staged columns, in the order of the ecCKD tables: dry air (the
+# The gases of the column optics, in the order of the ecCKD tables: dry air (the
 # `composite` of N₂, O₂ and the trace gases the tables fold into it), the two spatially varying
 # gases, and the well-mixed gases of `BackgroundAtmosphere` the reference models tabulate.
 const ECCKD_GAS_NAMES = (:composite, :h2o, :o3, :co2, :ch4, :n2o, :cfc11, :cfc12)
@@ -87,13 +87,14 @@ load_gas_optics_model(FT, paths::NamedTuple) =
 load_gas_optics_model(FT, model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}) = model
 
 # Warn once at construction when the extension's temperatures leave the Planck source table, where
-# the interpolation holds the table edge (a gray `σT⁴` model has no table and no edge).
-function warn_source_table_range(gas_model::EcCKDTabulatedGasOpticsModel, extension::MaterializedColumnExtension)
+# the interpolation holds the table edge (a gray `σT⁴` model has no table and no edge). The
+# interface temperatures interpolate the layer temperatures, so they share their range.
+function warn_source_table_range(gas_model::EcCKDTabulatedGasOpticsModel, extension::OverlyingAtmosphereColumn)
     source_grid = gas_model.longwave_source_temperature_grid
     isnothing(source_grid) && return nothing
-    T = extension.temperature_interfaces
+    T = Array(extension.T)
     (minimum(T) < first(source_grid) || maximum(T) > last(source_grid)) &&
-        @warn "The column extension temperatures span $(extrema(T)) K, outside the ecCKD Planck source table " *
+        @warn "The overlying atmosphere's temperatures span $(extrema(T)) K, outside the ecCKD Planck source table " *
               "$(first(source_grid))–$(last(source_grid)) K; the table edge is used beyond it."
     return nothing
 end
@@ -110,8 +111,8 @@ $(TYPEDSIGNATURES)
 
 Construct a full-spectrum `RadiativeTransferModel` on `grid` with the ecCKD gas optics of
 `optics::EcCKDOptics`, solved column by column by NumericalRadiation.jl. Radiation is solved
-on the grid's layers plus the layers of `column_extension` above the grid top (a
-[`ColumnExtension`](@ref), or `nothing` to stop at the grid top).
+on the grid's layers plus the layers of `overlying_atmosphere` above the grid top (a
+[`OverlyingAtmosphereColumn`](@ref), or `nothing` to stop at the grid top).
 
 With `optics.clouds::CloudScatteringTables` the radiation is all-sky: the cloud liquid and ice
 of every grid cell (from the model's microphysics) scatter and absorb with the scattering tables
@@ -123,7 +124,7 @@ solver does; scattering is a planned follow-up). With `optics.clouds = nothing` 
 whatever the microphysics holds.
 
 The gas optics and cloud scattering tables are read from netCDF files, which requires
-`using NCDatasets`. The staging kernels take gravity and the molar masses from `constants`;
+`using NCDatasets`. The column kernel takes gravity and the molar masses from `constants`;
 the Stefan–Boltzmann constant of the gray Planck source (used by g points without a source
 table) is carried by the gas optics model.
 
@@ -148,8 +149,14 @@ table) is carried by the gas optics model.
   only `ConstantRadiusParticles` for now
 - `ice_effective_radius`: Model for cloud ice effective radius in meters (default: `ConstantRadiusParticles(30e-6)`);
   only `ConstantRadiusParticles` for now
-- `column_extension`: The atmosphere above the grid top (default: `ColumnExtension(eltype(grid))`;
+- `overlying_atmosphere`: The atmosphere above the grid top (default: `OverlyingAtmosphereColumn(eltype(grid))`;
   `nothing` solves the grid's column only, with no atmosphere above it)
+- `column_batches`: Number of batches to split the radiation solve into, trading speed for memory
+  (default: `nothing`, one unbatched solve). The per-column state and scratch are then stored for
+  one batch only. Batches are whole j-rows of `cld(Ny, column_batches)` rows each, as for the
+  RRTMGP optics; when the rows do not divide `Ny`, the final batch overlaps the one before it. Each
+  batch is a separate kernel launch of a register-limited kernel, so on a GPU smaller batches cost
+  time: keep batches to several times the number of columns the GPU solves at once.
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  optics::EcCKDOptics,
@@ -165,7 +172,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  schedule = IterationInterval(1),
                                                  liquid_effective_radius = ConstantRadiusParticles(10e-6),
                                                  ice_effective_radius = ConstantRadiusParticles(30e-6),
-                                                 column_extension = ColumnExtension(eltype(grid)))
+                                                 overlying_atmosphere = OverlyingAtmosphereColumn(eltype(grid)),
+                                                 column_batches = nothing)
 
     FT = eltype(grid)
     arch = architecture(grid)
@@ -188,7 +196,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # Gas optics tables, then the extension sampled on the host (it needs the background's O₃
     # as a profile, before materialization turns it into a field on the grid)
     host_gas_model = load_gas_optics_model(FT, optics.gas_model)
-    extension = materialize_column_extension(column_extension, grid, background_atmosphere)
+    extension = materialize_overlying_atmosphere(overlying_atmosphere, grid, background_atmosphere)
     warn_source_table_range(host_gas_model, extension)
     gas_model = adapt(array_type(arch){FT}, host_gas_model)
 
@@ -200,10 +208,10 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
     Nx, Ny, Nz = size(grid)
-    Nc = Nx * Ny
     N = Nz + number_of_extension_layers(extension)
-    columns = SpectralColumns(arch, FT, Nc, N, extension)
-    initialize_cos_zenith!(columns.cos_zenith, solar_position)
+    rows = resolve_column_batch_rows(column_batches, Ny)
+    workspace = ColumnWorkspace(arch, FT, Nx, rows, Nx * Ny, N, gas_model, longwave_cloud, extension)
+    initialize_cos_zenith!(workspace.cos_zenith, solar_position)
 
     surface_emissivity = constant_field_property(surface_emissivity, FT)
     direct_surface_albedo = constant_field_property(direct_surface_albedo, FT)
@@ -213,11 +221,11 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     surface_radiation = SurfaceRadiation(surface_temperature, surface_emissivity,
                                          direct_surface_albedo, diffuse_surface_albedo)
 
-    mole_fractions = (co2 = convert(FT, background_atmosphere.CO₂),
-                      ch4 = convert(FT, background_atmosphere.CH₄),
-                      n2o = convert(FT, background_atmosphere.N₂O),
-                      cfc11 = convert(FT, background_atmosphere.CFC₁₁),
-                      cfc12 = convert(FT, background_atmosphere.CFC₁₂))
+    mole_fractions = (CO₂ = convert(FT, background_atmosphere.CO₂),
+                      CH₄ = convert(FT, background_atmosphere.CH₄),
+                      N₂O = convert(FT, background_atmosphere.N₂O),
+                      CFC₁₁ = convert(FT, background_atmosphere.CFC₁₁),
+                      CFC₁₂ = convert(FT, background_atmosphere.CFC₁₂))
 
     longwave = EcCKDLongwave(gas_model, longwave_cloud, gas_model.longwave_weights, mole_fractions)
     shortwave = EcCKDShortwave(gas_model, shortwave_cloud, gas_model.shortwave_weights, convert(FT, solar_constant))
@@ -232,7 +240,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   solar_position,
                                   surface_radiation,
                                   background_atmosphere,
-                                  columns,
+                                  workspace,
                                   longwave,
                                   shortwave,
                                   upwelling_longwave_flux,
@@ -242,7 +250,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   flux_divergence,
                                   liquid_effective_radius,
                                   ice_effective_radius,
-                                  nothing,  # column_batches = nothing: ecCKD is never batched
+                                  column_batches,
                                   schedule)
 end
 
@@ -258,5 +266,5 @@ function Base.show(io::IO, rtm::EcCKDRadiativeTransferModel)
     show_radiation_summary(io, rtm)
     print(io, "├── diffuse_surface_albedo: ", rtm.surface_radiation.diffuse_surface_albedo, "\n",
               "├── optics: ", optics_summary(rtm), "\n",
-              "└── column_extension: ", extension_summary(rtm.atmospheric_state.extension))
+              "└── overlying_atmosphere: ", extension_summary(rtm.atmospheric_state.extension))
 end

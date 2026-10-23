@@ -273,7 +273,7 @@ mean-diameter bounds of [`cloud_slope_bounds`](@ref) are applied.
 """
 @inline function unbounded_cloud_slope_parameter(Nᶜˡ, μᶜˡ, qᶜˡ_abs, ρᴸ)
     FT = typeof(qᶜˡ_abs)
-    return cube_root(FT(π) * ρᴸ * Nᶜˡ * (μᶜˡ + 3) * (μᶜˡ + 2) * (μᶜˡ + 1) /
+    return cbrt(FT(π) * ρᴸ * Nᶜˡ * (μᶜˡ + 3) * (μᶜˡ + 2) * (μᶜˡ + 1) /
                 (FT(6) * qᶜˡ_abs))
 end
 
@@ -367,22 +367,22 @@ cloud number together with the shape and slope parameters `μᶜˡ` and `λᶜˡ
 """
 @inline function diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
     FT = typeof(qᶜˡ + nᶜˡ + ρ)
-    qᶜˡ_eff = max(0, qᶜˡ)
+    qᶜˡ₊ = max(0, qᶜˡ)
     parameters = p3.process_rates
     floors = parameters.floors
-    # The floor must be `FT`-wrapped: an untyped literal promotes `nᶜˡ_eff` and every
+    # The floor must be `FT`-wrapped: an untyped literal promotes `nᶜˡ₊` and every
     # quantity derived from it to Float64 in a Float32 run, which leaves the returned
     # `nᶜˡ` inferred as `Union{Float32, Float64}` through the `ifelse` below.
-    nᶜˡ_eff = max(nᶜˡ, FT(p3.minimum_number_mixing_ratio))
-    Nᶜˡ = nᶜˡ_eff * ρ
+    nᶜˡ₊ = max(nᶜˡ, FT(p3.minimum_number_mixing_ratio))
+    Nᶜˡ = nᶜˡ₊ * ρ
     ρᴸ = parameters.liquid_water_density
     mass_scale = FT(floors.mass_scale)
 
     μᶜˡ = liu_daum_shape_parameter(Nᶜˡ, p3.cloud.shape)
-    Nᶜˡ_bounded = bounded_cloud_number(Nᶜˡ, μᶜˡ, qᶜˡ_eff, ρ, ρᴸ, mass_scale, parameters)
+    Nᶜˡ_bounded = bounded_cloud_number(Nᶜˡ, μᶜˡ, qᶜˡ₊, ρ, ρᴸ, mass_scale, parameters)
     nᶜˡ_bounded = safe_divide(Nᶜˡ_bounded, ρ, zero(FT))
 
-    λᶜˡ = cloud_slope_parameter(Nᶜˡ_bounded, μᶜˡ, max(qᶜˡ_eff * ρ, mass_scale), ρᴸ, parameters)
+    λᶜˡ = cloud_slope_parameter(Nᶜˡ_bounded, μᶜˡ, max(qᶜˡ₊ * ρ, mass_scale), ρᴸ, parameters)
 
     return (; Nᶜˡ = Nᶜˡ_bounded,
             nᶜˡ = nᶜˡ_bounded,

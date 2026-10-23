@@ -1,14 +1,14 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 #####
-##### Column extension above the grid top, ecCKD optics types, and the standard atmosphere
+##### Overlying atmosphere above the grid top, ecCKD optics types, and the standard atmosphere
 #####
 ##### None of these need NumericalRadiation: they are the backend-agnostic pieces that the
 ##### NumericalRadiation extension consumes.
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: standard_specific_humidity, geometric_stretching_ratio, column_extension_faces
+using Breeze.AtmosphereModels: standard_specific_humidity, geometric_stretching_ratio, overlying_atmosphere_faces
 using Oceananigans
 using Oceananigans.Units
 using Test
@@ -60,10 +60,10 @@ end
     @test all(>=(3e-6), q)
 end
 
-@testset "ColumnExtension [$(FT)]" for FT in all_float_types()
+@testset "OverlyingAtmosphereColumn [$(FT)]" for FT in all_float_types()
     Oceananigans.defaults.FloatType = FT
-    extension = ColumnExtension()
-    @test extension isa ColumnExtension{FT}
+    extension = OverlyingAtmosphereColumn()
+    @test extension isa OverlyingAtmosphereColumn{FT}
     @test extension.top == 65e3
     @test extension.layers == 40
     @test extension.blending_height == 1e3
@@ -72,7 +72,7 @@ end
     @test isnothing(extension.ozone_mole_fraction)
 
     ozone(z) = 1e-6
-    custom = ColumnExtension(FT; top = 80kilometers, layers = 60, blending_height = 0,
+    custom = OverlyingAtmosphereColumn(FT; top = 80kilometers, layers = 60, blending_height = 0,
                              temperature = z -> 250, specific_humidity = z -> 1e-5, ozone_mole_fraction = ozone)
     @test custom.top isa FT
     @test custom.top == 80e3
@@ -81,16 +81,16 @@ end
     @test custom.temperature(1e3) == 250
     @test custom.ozone_mole_fraction === ozone
 
-    constant_ozone = ColumnExtension(FT; ozone_mole_fraction = 1e-6)
+    constant_ozone = OverlyingAtmosphereColumn(FT; ozone_mole_fraction = 1e-6)
     @test constant_ozone.ozone_mole_fraction isa FT
     @test constant_ozone.ozone_mole_fraction ≈ 1e-6
 
-    @test_throws ArgumentError ColumnExtension(FT; layers = 0)
-    @test_throws ArgumentError ColumnExtension(FT; blending_height = -1)
+    @test_throws ArgumentError OverlyingAtmosphereColumn(FT; layers = 0)
+    @test_throws ArgumentError OverlyingAtmosphereColumn(FT; blending_height = -1)
 
     @testset "show" begin
         str = sprint(show, extension)
-        @test occursin("ColumnExtension{$FT}", str)
+        @test occursin("OverlyingAtmosphereColumn{$FT}", str)
         @test occursin("├── top: 65000.0 m", str)
         @test occursin("├── layers: 40", str)
         @test occursin("├── blending_height: 1000.0 m", str)
@@ -117,10 +117,10 @@ Oceananigans.defaults.FloatType = previous_float_type
     @test geometric_stretching_ratio(10f0, 100f0, 3) isa Float32
 
     @testset "Extension faces [$(FT)]" for FT in all_float_types()
-        extension = ColumnExtension(FT; top = 65e3, layers = 40)
+        extension = OverlyingAtmosphereColumn(FT; top = 65e3, layers = 40)
         z_top = FT(3e3)
         Δz_top = FT(100)
-        faces = column_extension_faces(extension, z_top, Δz_top)
+        faces = overlying_atmosphere_faces(extension, z_top, Δz_top)
 
         @test faces isa Vector{FT}
         @test length(faces) == 41
@@ -132,21 +132,21 @@ Oceananigans.defaults.FloatType = previous_float_type
         @test all(Δz[2:end] .> Δz[1:end-1]) # layers grow with height
         # Geometric: every thickness is Δz_top rᵐ, the last one absorbing the rounding of the ratio
         r = geometric_stretching_ratio(Δz_top, extension.top - z_top, extension.layers)
-        @test all(isapprox.(Δz, Δz_top .* r .^ (0:extension.layers-1), rtol = 200 * eps(FT)))
+        @test isapprox(Δz, Δz_top .* r .^ (0:extension.layers-1); rtol = 200 * eps(FT))
 
         # Layer count and the top face agree with `top` and `layers`
         for layers in (1, 2, 5), top in (3.2e3, 10e3, 80e3)
-            extension = ColumnExtension(FT; top, layers)
-            faces = column_extension_faces(extension, z_top, Δz_top)
+            extension = OverlyingAtmosphereColumn(FT; top, layers)
+            faces = overlying_atmosphere_faces(extension, z_top, Δz_top)
             @test length(faces) == layers + 1
             @test faces[end] == FT(top)
             @test issorted(faces)
         end
 
         # A grid that already reaches `top` gets no extension layers
-        faces = column_extension_faces(ColumnExtension(FT; top = 3e3), z_top, Δz_top)
+        faces = overlying_atmosphere_faces(OverlyingAtmosphereColumn(FT; top = 3e3), z_top, Δz_top)
         @test faces == [z_top]
-        faces = column_extension_faces(ColumnExtension(FT; top = 2e3), z_top, Δz_top)
+        faces = overlying_atmosphere_faces(OverlyingAtmosphereColumn(FT; top = 2e3), z_top, Δz_top)
         @test faces == [z_top]
     end
 end

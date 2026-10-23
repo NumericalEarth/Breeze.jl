@@ -3,17 +3,16 @@ module BreezeNumericalRadiationExt
 #####
 ##### ecCKD radiation for AtmosphereModel through NumericalRadiation.jl
 #####
-##### The extension stages the grid's columns (plus a column extension above the grid top) into
-##### top-down spectral column arrays, solves the longwave and shortwave fluxes of every column in
-##### one kernel with NumericalRadiation's scalar ecCKD gas optics and streaming column solvers,
-##### and copies the fluxes back onto the grid's `ZFaceField`s in Breeze's positive-upward
-##### convention.
+##### One kernel solves the longwave and shortwave fluxes of every column (plus an overlying atmosphere
+##### above the grid top) with NumericalRadiation's scalar ecCKD gas optics and streaming column
+##### solvers. The layer optics read the model's fields directly and the fluxes accumulate directly
+##### into the radiation model's `ZFaceField`s: the only per-column storage is the solvers' scratch.
 #####
 
 using Breeze
 
-using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, SurfaceRadiation,
-                               EcCKDOptics, CloudScatteringTables, ColumnExtension, BackgroundAtmosphere,
+using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, SurfaceRadiation, resolve_column_batch_rows,
+                               EcCKDOptics, CloudScatteringTables, OverlyingAtmosphereColumn, BackgroundAtmosphere,
                                ConstantRadiusParticles, AbstractSolarPosition, ApparentSolarPosition,
                                materialize_background_atmosphere, materialize_surface_property,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
@@ -21,8 +20,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, Surface
                                initialize_cos_zenith!, update_cos_zenith!,
                                column_index, compute_radiation_flux_divergence!, show_radiation_summary,
                                bottom_face_pressure, top_face_pressure,
-                               bottom_face_temperature, top_face_temperature,
-                               column_extension_faces,
+                               overlying_atmosphere_faces,
                                dynamics_pressure, total_density, specific_prognostic_moisture,
                                grid_moisture_fractions
 using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
@@ -41,8 +39,8 @@ using NumericalRadiation: EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel,
 
 using Oceananigans.Architectures: architecture, on_architecture, array_type
 using Oceananigans.Fields: ZFaceField, CenterField, AbstractField
-using Oceananigans.Grids: AbstractGrid, Face, znodes
-using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ
+using Oceananigans.Grids: AbstractGrid, Center, Face, znode, znodes
+using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ, ∂zᶜᶜᶠ
 using Oceananigans.Utils: launch!, IterationInterval, prettysummary
 
 using Adapt: Adapt, adapt
@@ -50,11 +48,11 @@ using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
-include("spectral_columns.jl")
-include("column_extension.jl")
+include("overlying_atmosphere.jl")
+include("column_workspace.jl")
 include("cloud_optics.jl")
 include("ecckd_radiative_transfer_model.jl")
-include("column_staging_kernels.jl")
+include("column_state.jl")
 include("layer_optics.jl")
 include("radiative_transfer_kernels.jl")
 include("column_atmosphere.jl")

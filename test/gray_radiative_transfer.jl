@@ -417,13 +417,11 @@ end
                                            surface_albedo = 0.1,
                                            solar_position = DiurnalSolarPosition(latitude = 30))
 
-        # DateTime clock is incompatible with the idealized diurnal cycle.
+        # DateTime clock is incompatible with the idealized diurnal cycle, which the model
+        # checks once, at construction
         clock = Clock(time = DateTime(2024, 6, 21, 12, 0, 0))
-        @test_throws ArgumentError begin
-            model = AtmosphereModel(grid; clock, dynamics,
-                                    formulation = :LiquidIcePotentialTemperature, radiation)
-            set!(model; θ = 300, qᵗ = 0)
-        end
+        @test_throws ArgumentError AtmosphereModel(grid; clock, dynamics,
+                                                   formulation = :LiquidIcePotentialTemperature, radiation)
     end
 
     @testset "ApparentSolarPosition + numeric clock without epoch → ArgumentError" begin
@@ -438,8 +436,8 @@ end
         dynamics = AnelasticDynamics(reference_state)
 
         # The combination that previously crashed silently: ApparentSolarPosition
-        # (default epoch=nothing) combined with a floating-point clock. We now
-        # raise an actionable ArgumentError on the first radiation update.
+        # (default epoch=nothing) combined with a floating-point clock. The model
+        # raises an actionable ArgumentError at construction.
         radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                            surface_temperature = 300,
                                            surface_albedo = 0.1,
@@ -447,13 +445,7 @@ end
 
         clock = Clock(time = 0.0)  # numeric, no epoch
 
-        # The first radiation update fires during AtmosphereModel construction
-        # (iteration 0 always triggers an update), so the throw lands there
-        # rather than inside `set!`. Wrap both calls so whichever raises is caught.
-        @test_throws ArgumentError begin
-            model = AtmosphereModel(grid; clock, dynamics,
-                                    formulation = :LiquidIcePotentialTemperature, radiation)
-            set!(model; θ = 300, qᵗ = 0)
-        end
+        @test_throws ArgumentError AtmosphereModel(grid; clock, dynamics,
+                                                   formulation = :LiquidIcePotentialTemperature, radiation)
     end
 end

@@ -272,7 +272,6 @@ update_cos_zenith!(cos_zenith, ::FixedCosineZenith, grid, clock) = nothing
 
 function update_cos_zenith!(cos_zenith, sp::ApparentSolarPosition, grid, clock)
     datetime = compute_datetime(clock.time, sp.epoch)
-    validate_datetime(sp, datetime)
     update_apparent_zenith!(cos_zenith, sp.coordinate, grid, datetime)
     return nothing
 end
@@ -280,19 +279,30 @@ end
 # Idealized diurnal cycle: pure analytical hour angle, no calendar / orbit.
 # Requires a numeric clock (seconds since the start of the simulation).
 function update_cos_zenith!(cos_zenith, sp::DiurnalSolarPosition, grid, clock)
-    validate_diurnal_clock(sp, clock.time)
     t = clock.time
     # cos is periodic, so no `mod` is required — the math handles wrapping itself.
     ω = (2π / sp.day_length) * (t - sp.noon_offset)
     φ = deg2rad(sp.latitude)
     δ = deg2rad(sp.declination)
     cos_θz = sin(φ) * sin(δ) + cos(φ) * cos(δ) * cos(ω)
-    cos_zenith .= max(cos_θz, 0)
+    # Converted on the host: a Float32 device array (Metal has no Float64) takes no Float64 scalar
+    cos_zenith .= max(convert(eltype(cos_zenith), cos_θz), 0)
     return nothing
 end
 
-@noinline validate_diurnal_clock(::DiurnalSolarPosition, ::Number) = nothing
-@noinline function validate_diurnal_clock(::DiurnalSolarPosition, t)
+"""
+$(TYPEDSIGNATURES)
+
+Check that `solar_position` can read the model's `clock`, once, when the radiation joins a model:
+[`DiurnalSolarPosition`](@ref) needs a numeric clock, and [`ApparentSolarPosition`](@ref) a
+`DateTime` clock or an `epoch` for a numeric one.
+"""
+validate_solar_position_clock(sp::DiurnalSolarPosition, clock) = validate_diurnal_clock(sp, clock.time)
+validate_solar_position_clock(sp::ApparentSolarPosition, clock) = validate_datetime(sp, compute_datetime(clock.time, sp.epoch))
+validate_solar_position_clock(solar_position, clock) = nothing
+
+validate_diurnal_clock(::DiurnalSolarPosition, ::Number) = nothing
+function validate_diurnal_clock(::DiurnalSolarPosition, t)
     throw(ArgumentError(
         "DiurnalSolarPosition requires a numeric model clock (seconds since the start " *
         "of the simulation), but `model.clock.time` is a $(typeof(t)). For an idealized " *
@@ -301,8 +311,8 @@ end
 end
 
 # Helpful actionable error when the user uses a numeric clock without an epoch.
-@noinline validate_datetime(::ApparentSolarPosition, ::AbstractDateTime) = nothing
-@noinline function validate_datetime(::ApparentSolarPosition, ::Nothing)
+validate_datetime(::ApparentSolarPosition, ::AbstractDateTime) = nothing
+function validate_datetime(::ApparentSolarPosition, ::Nothing)
     throw(ArgumentError(
         "Cannot compute apparent solar position: the model clock holds a numeric " *
         "time and `ApparentSolarPosition.epoch` is `nothing`. Either:\n" *
@@ -314,7 +324,7 @@ end
 # Explicit (λ, φ): one cos(θ_z) value broadcast to every column
 function update_apparent_zenith!(cos_zenith, coordinate::Tuple, grid, datetime)
     cos_θz = cos_solar_zenith_angle(datetime, coordinate...)
-    cos_zenith .= max.(cos_θz, 0)
+    cos_zenith .= max(convert(eltype(cos_zenith), cos_θz), 0)
     return nothing
 end
 

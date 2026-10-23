@@ -36,7 +36,7 @@ See `rain_quadrature.jl` for the table storage convention.
 @inline function ventilation_sc_correction(ν, Dᵛ, ρ_correction, floors)
     FT = typeof(ν)
     Sc = ν / max(Dᵛ, FT(floors.divisor))
-    return cube_root(Sc) * sqrt(ρ_correction) / sqrt(ν)
+    return cbrt(Sc) * sqrt(ρ_correction) / sqrt(ν)
 end
 
 #####

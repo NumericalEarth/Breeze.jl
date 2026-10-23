@@ -447,14 +447,14 @@ end
     # Liquid fraction clipping
     Fl_small = parameters.liquid_fraction_clipping_threshold
     τ_clip = parameters.refreezing_timescale
-    qʷⁱ_eff = max(0, qʷⁱ)
+    qʷⁱ₊ = max(0, qʷⁱ)
     clip_freeze = parameters.liquid_fraction_active & (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
-    refrz = ifelse(clip_freeze, refrz + qʷⁱ_eff / τ_clip, refrz)
+    refrz = ifelse(clip_freeze, refrz + qʷⁱ₊ / τ_clip, refrz)
 
     # Whole-particle liquid-fraction and tiny-warm-ice clips. These predicates can
     # overlap, so form their union and transfer each reservoir exactly once.
     qⁱ_dry = max(0, qⁱ)
-    qⁱ_total_clip = qⁱ_dry + qʷⁱ_eff
+    qⁱ_total_clip = qⁱ_dry + qʷⁱ₊
     has_clip_mass = qⁱ_total_clip >= p3.minimum_mass_mixing_ratio
     warm_liquid_clip = (T >= T₀) & (Fˡ > 1 - Fl_small) & has_clip_mass
     high_liquid_fraction_clip = (Fˡ > parameters.complete_melting_liquid_fraction) & has_clip_mass
@@ -467,7 +467,7 @@ end
                            phase1.complete_melting)
     melt_n = ifelse(whole_particle_clipping,
                     max(0, ℳ.nⁱ) / τ_clip, phase1.melting_number)
-    shed = ifelse(whole_particle_clipping, qʷⁱ_eff / τ_clip, shed)
+    shed = ifelse(whole_particle_clipping, qʷⁱ₊ / τ_clip, shed)
     shed_n = ifelse(whole_particle_clipping, zero(FT), shed_n)
     refrz = ifelse(whole_particle_clipping, zero(FT), refrz)
 
@@ -888,7 +888,7 @@ end
 
     # Recompute splintering from sink-limited riming rates
     diagnostic_mean_mass = qⁱ_total / nⁱ_diagnostic
-    D_mean = cube_root(6 * diagnostic_mean_mass / (FT(π) * ρ_mean))
+    D_mean = cbrt(6 * diagnostic_mean_mass / (FT(π) * ρ_mean))
     qᶜˡ_splintering_rate, qʳ_splintering_rate, spl_n = rime_splintering_rates(
         p3, cloud_rim, rain_rim, T, D_mean, Fˡ, surface_temperature, qᶠ)
     qᶜˡ_splintering_rate = min(qᶜˡ_splintering_rate, max(0, cloud_rim))

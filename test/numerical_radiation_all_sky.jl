@@ -14,6 +14,7 @@ using Breeze
 using Breeze.AtmosphereModels: _update_radiation!, total_density
 using CloudMicrophysics
 using Dates: DateTime
+using GPUArraysCore: @allowscalar
 using NCDatasets
 using NumericalRadiation: NumericalRadiation, SpectralCloudOptics, EcCKDGasOpticsModel
 using Oceananigans
@@ -36,8 +37,7 @@ const CLOUD_LIQUID = 0.5e-3   # kg kg⁻¹
 const S₀ = 1361
 const μ₀ = 0.5
 
-column_grid(FT) = RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, TOP),
-                                  topology = (Flat, Flat, Bounded))
+column_grid(FT) = radiation_column_grid(FT, Nz, TOP)
 
 function radiation(grid, optics; liquid_radius = 10e-6, ice_radius = 30e-6, kw...)
     return RadiativeTransferModel(grid, optics, ThermodynamicConstants();
@@ -148,7 +148,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
             # Nor does a gray one
             gray = EcCKDGasOpticsModel(names = (:composite,), longwave_absorption = [1e-3;;], shortwave_absorption = [1e-4;;])
-            @test_throws ArgumentError radiation(grid, EcCKDOptics(gray; clouds = CloudScatteringTables()); column_extension = nothing)
+            @test_throws ArgumentError radiation(grid, EcCKDOptics(gray; clouds = CloudScatteringTables()); overlying_atmosphere = nothing)
         end
     end
 
@@ -159,11 +159,12 @@ previous_float_type = Oceananigans.defaults.FloatType
         # No microphysics: the water paths are zero and the cloud optics add exactly nothing
         all_sky = all_sky_radiation(grid)
         clear_sky = clear_sky_radiation(grid)
-        column_model(grid, all_sky; microphysics = nothing)
+        model = column_model(grid, all_sky; microphysics = nothing)
         column_model(grid, clear_sky; microphysics = nothing)
 
-        @test all(iszero, Array(all_sky.atmospheric_state.liquid_water_path))
-        @test all(iszero, Array(all_sky.atmospheric_state.ice_water_path))
+        state = NumericalRadiationExt.ColumnState(all_sky, model, 0)
+        layers = @allowscalar [NumericalRadiationExt.layer_state(1, 1, k, grid, state) for k in 1:NumericalRadiationExt.number_of_layers(state)]
+        @test all(layer -> iszero(layer.liquid_water_path) && iszero(layer.ice_water_path), layers)
 
         all_sky_fluxes = column_fluxes(all_sky)
         clear_sky_fluxes = column_fluxes(clear_sky)
@@ -191,15 +192,16 @@ previous_float_type = Oceananigans.defaults.FloatType
         model = column_model(grid, all_sky)
         column_model(grid, clear_sky)   # same state; the clear-sky optics ignore the condensate
 
-        # The staged cloud: one layer with the prescribed liquid water path, no ice
-        columns = all_sky.atmospheric_state
-        N = size(columns.liquid_water_path, 2)
-        lwp = Array(columns.liquid_water_path)[1, :]
+        # The cloud the kernel sees: one layer with the prescribed liquid water path, no ice
+        state = NumericalRadiationExt.ColumnState(all_sky, model, 0)
+        N = NumericalRadiationExt.number_of_layers(state)
+        layers = @allowscalar [NumericalRadiationExt.layer_state(1, 1, k, grid, state) for k in 1:N]
+        lwp = [layer.liquid_water_path for layer in layers]
         ρ = Array(interior(total_density(model.dynamics)))[1, 1, CLOUD_CELL]
         Δz = TOP / Nz
         @test count(>(0), lwp) == 1
         @test lwp[N + 1 - CLOUD_CELL] ≈ ρ * CLOUD_LIQUID * Δz rtol = (FT == Float64 ? 1e-12 : 1e-5)
-        @test all(iszero, Array(columns.ice_water_path))
+        @test all(layer -> iszero(layer.ice_water_path), layers)
 
         cloudy = column_fluxes(all_sky)
         clear = column_fluxes(clear_sky)
@@ -212,10 +214,6 @@ previous_float_type = Oceananigans.defaults.FloatType
         # The cloud shades the surface: at least 30 % less sunlight reaches it, and every
         # face below the cloud base sees the shade
         surface_shortwave_down(f) = -f.ℐ_sw_dn[1]
-        @info "Cloud effect ($FT): surface SW↓ $(surface_shortwave_down(clear)) → $(surface_shortwave_down(cloudy)) W m⁻²; " *
-              "surface LW↓ $(-clear.ℐ_lw_dn[1]) → $(-cloudy.ℐ_lw_dn[1]) W m⁻²; " *
-              "top SW↑ $(clear.ℐ_sw_up[Nz+1]) → $(cloudy.ℐ_sw_up[Nz+1]) W m⁻²; " *
-              "OLR $(clear.ℐ_lw_up[Nz+1]) → $(cloudy.ℐ_lw_up[Nz+1]) W m⁻²"
         @test surface_shortwave_down(cloudy) ≤ 0.7 * surface_shortwave_down(clear)
         @test all(-cloudy.ℐ_sw_dn[1:CLOUD_CELL] .≤ 0.7 .* -clear.ℐ_sw_dn[1:CLOUD_CELL])
 
@@ -260,7 +258,6 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         # Smaller droplets at the same water path make a thicker cloud: more reflection, less
         # transmission, by more than 5 %
-        @info "Effective radius ($FT): top SW↑ $(small_fluxes.ℐ_sw_up[Nz+1]) (5 μm) vs $(large_fluxes.ℐ_sw_up[Nz+1]) W m⁻² (20 μm)"
         @test small_fluxes.ℐ_sw_up[Nz+1] > 1.05 * large_fluxes.ℐ_sw_up[Nz+1]
         @test -small_fluxes.ℐ_sw_dn[1] < -large_fluxes.ℐ_sw_dn[1]
 

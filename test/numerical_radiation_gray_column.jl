@@ -21,8 +21,6 @@ using Test
 # The diffusivity of NumericalRadiation's no-scattering longwave solver, pinned here
 const DIFFUSIVITY = 1.66
 
-column_grid(FT, Nz, top) = RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, top),
-                                            topology = (Flat, Flat, Bounded))
 
 # The gray gas optics: one longwave and one shortwave g point, absorption per mol m⁻² of dry air
 gray_gas_model(FT, κ_lw, κ_sw) = EcCKDGasOpticsModel(names = (:composite,),
@@ -32,7 +30,7 @@ gray_gas_model(FT, κ_lw, κ_sw) = EcCKDGasOpticsModel(names = (:composite,),
 function gray_radiation(grid, κ_lw, κ_sw; surface_temperature, cos_zenith, albedo = 0.3)
     FT = eltype(grid)
     return RadiativeTransferModel(grid, EcCKDOptics(gray_gas_model(FT, κ_lw, κ_sw)), ThermodynamicConstants();
-                                  column_extension = nothing, surface_temperature, surface_emissivity = 1,
+                                  overlying_atmosphere = nothing, surface_temperature, surface_emissivity = 1,
                                   surface_albedo = albedo, solar_constant = 1361,
                                   solar_position = FixedCosineZenith(cos_zenith))
 end
@@ -78,10 +76,10 @@ previous_float_type = Oceananigans.defaults.FloatType
 
 @testset "Gray column through the ecCKD kernel [$(FT)]" for FT in all_float_types()
     Oceananigans.defaults.FloatType = FT
-    rtol = FT == Float64 ? 1e-12 : 200 * eps(Float32)
+    rtol = FT == Float64 ? 1e-12 : 200 * eps(FT)
 
     Nz = 16
-    grid = column_grid(FT, Nz, 3kilometers)
+    grid = radiation_column_grid(FT, Nz, 3kilometers)
     T₀ = 280
     κ_lw = 2e-5   # τ ≈ 2 over the 3 km column
     κ_sw = 1e-5   # τ ≈ 1
@@ -94,7 +92,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
     # The column is isothermal to rounding, and the grid is the whole atmosphere
     T = column(model.temperature)
-    @test maximum(abs.(T .- T₀)) < 10 * eps(FT) * T₀
+    @test all(≈(T₀; rtol = 10 * eps(FT)), T)
     @test isnothing(radiation.atmospheric_state.extension)
 
     ℐ_lw_up = column(radiation.upwelling_longwave_flux)
@@ -108,7 +106,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
     @testset "Isothermal longwave" begin
         τ, τ_above, _ = layer_optical_depths(model, κ_lw)
-        @test all(τ .> 1e-3)   # every layer above the thin-layer branch of the solver
+        @test all(>(1e-3), τ)   # every layer above the thin-layer branch of the solver
 
         # Upwelling: the surface (ε = 1) and every layer emit at the same temperature
         @test ℐ_lw_up ≈ fill(B, Nz + 1) rtol = rtol
@@ -166,13 +164,13 @@ end
     # sources are exact for a linear profile, and the half-level Planck path treats the source
     # as linear in optical depth within each layer, so the error is second order in Δz
     function longwave_boundary_fluxes(Nz)
-        grid = column_grid(FT, Nz, 3kilometers)
+        grid = radiation_column_grid(FT, Nz, 3kilometers)
         radiation = gray_radiation(grid, κ_lw, 0; surface_temperature = T₀, cos_zenith = 0)
         model = gray_column_model(grid, radiation, T_target)
         # Every layer, the reference's included, stays above the solver's thin-layer branch
         # (τ ≤ 1e-3), where the Planck path switches to its trapezoidal form and the error
         # being ratioed would turn first order
-        @test all(layer_optical_depths(model, κ_lw)[1] .> 1e-3)
+        @test all(>(1e-3), layer_optical_depths(model, κ_lw)[1])
         return column(radiation.upwelling_longwave_flux)[Nz+1], -column(radiation.downwelling_longwave_flux)[1]
     end
 
@@ -183,7 +181,7 @@ end
         return abs(fluxes[1] - reference[1]) + abs(fluxes[2] - reference[2])
     end
 
-    @test all(errors .> 0)
+    @test all(>(0), errors)
     @test 3.3 < errors[1] / errors[2] < 4.7
     @test 3.3 < errors[2] / errors[3] < 4.7
 end

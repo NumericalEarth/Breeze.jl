@@ -1,10 +1,10 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 #####
-##### The column extension above a BOMEX-like boundary layer column
+##### The overlying atmosphere above a BOMEX-like boundary layer column
 #####
 ##### A 3 km large-eddy simulation column sees only the top of the troposphere; the radiative
-##### fluxes at its top depend on the atmosphere above, which the column extension supplies.
+##### fluxes at its top depend on the atmosphere above, which the overlying atmosphere supplies.
 ##### These tests pin what the extension does to the fluxes of a BOMEX-like column (Siebesma et
 ##### al. 2003 initial profiles): a bare grid radiates to space unopposed, the extension emits
 ##### longwave downward and absorbs and scatters sunlight, and refining or raising the extension
@@ -39,8 +39,6 @@ end
 bomex_θ(z) = piecewise_linear(z, BOMEX_HEIGHTS, BOMEX_θ)
 bomex_qᵗ(z) = piecewise_linear(z, BOMEX_HEIGHTS, BOMEX_qᵗ)
 
-column_grid(FT, Nz, top) = RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, top),
-                                            topology = (Flat, Flat, Bounded))
 
 function bomex_column_model(grid, radiation)
     constants = ThermodynamicConstants()
@@ -52,9 +50,9 @@ function bomex_column_model(grid, radiation)
 end
 
 # The BOMEX sea surface temperature, emissivity and albedo, and a fixed sun
-function bomex_radiation(grid; column_extension, S₀ = 1361, μ₀ = 0.5)
+function bomex_radiation(grid; overlying_atmosphere, S₀ = 1361, μ₀ = 0.5)
     FT = eltype(grid)
-    return RadiativeTransferModel(grid, EcCKDOptics(), ThermodynamicConstants(); column_extension,
+    return RadiativeTransferModel(grid, EcCKDOptics(), ThermodynamicConstants(); overlying_atmosphere,
                                   surface_temperature = 300.4, surface_emissivity = 0.98, surface_albedo = 0.1,
                                   solar_constant = S₀, solar_position = FixedCosineZenith(FT(μ₀)))
 end
@@ -77,17 +75,17 @@ end
 
 previous_float_type = Oceananigans.defaults.FloatType
 
-@testset "Column extension above a BOMEX-like column [$(FT)]" for FT in test_float_types()
+@testset "Overlying atmosphere above a BOMEX-like column [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 32
-    grid = column_grid(FT, Nz, 3kilometers)
+    grid = radiation_column_grid(FT, Nz, 3kilometers)
     μ₀ = FT(0.5)
     S₀ = FT(1361)
 
-    extended = bomex_radiation(grid; column_extension = ColumnExtension(FT), S₀, μ₀)
+    extended = bomex_radiation(grid; overlying_atmosphere = OverlyingAtmosphereColumn(FT), S₀, μ₀)
     model = bomex_column_model(grid, extended)
 
-    bare = bomex_radiation(grid; column_extension = nothing, S₀, μ₀)
+    bare = bomex_radiation(grid; overlying_atmosphere = nothing, S₀, μ₀)
     bomex_column_model(grid, bare)
 
     loose = FT == Float64 ? 1e-10 : 1e-5
@@ -142,7 +140,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         # Doubling the extension layers barely moves the fluxes at the grid top or the heating
         # of the grid's cells (observed: 0.014 W m⁻² and 0.0004 K day⁻¹)
-        finer = bomex_radiation(grid; column_extension = ColumnExtension(FT; layers = 80), S₀, μ₀)
+        finer = bomex_radiation(grid; overlying_atmosphere = OverlyingAtmosphereColumn(FT; layers = 80), S₀, μ₀)
         bomex_column_model(grid, finer)
         _, ℐ_lw_dn_f, _, _, _ = column_fluxes(finer)
         @test abs(ℐ_lw_dn_f[Nz+1] - ℐ_lw_dn₁[Nz+1]) < 1
@@ -150,7 +148,7 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         # Raising the top of the extension from 65 to 80 km adds a negligible amount of air
         # (observed: 0.006 W m⁻² longwave and 0.003 W m⁻² shortwave)
-        taller = bomex_radiation(grid; column_extension = ColumnExtension(FT; top = 80kilometers), S₀, μ₀)
+        taller = bomex_radiation(grid; overlying_atmosphere = OverlyingAtmosphereColumn(FT; top = 80kilometers), S₀, μ₀)
         bomex_column_model(grid, taller)
         _, ℐ_lw_dn_t, _, ℐ_sw_dn_t, _ = column_fluxes(taller)
         @test abs(ℐ_lw_dn_t[Nz+1] - ℐ_lw_dn₁[Nz+1]) < 0.3
@@ -158,7 +156,7 @@ previous_float_type = Oceananigans.defaults.FloatType
     end
 
     @testset "Night" begin
-        night = bomex_radiation(grid; column_extension = ColumnExtension(FT), S₀, μ₀ = 0)
+        night = bomex_radiation(grid; overlying_atmosphere = OverlyingAtmosphereColumn(FT), S₀, μ₀ = 0)
         bomex_column_model(grid, night)
         ℐ_lw_up_n, ℐ_lw_dn_n, ℐ_sw_up_n, ℐ_sw_dn_n, _ = column_fluxes(night)
         @test all(iszero, ℐ_sw_up_n)
@@ -189,14 +187,15 @@ end
 @testset "Float32 versus Float64 fluxes" begin
     fluxes = map((Float64, Float32)) do FT
         Oceananigans.defaults.FloatType = FT
-        grid = column_grid(FT, 32, 3kilometers)
-        radiation = bomex_radiation(grid; column_extension = ColumnExtension(FT))
+        grid = radiation_column_grid(FT, 32, 3kilometers)
+        radiation = bomex_radiation(grid; overlying_atmosphere = OverlyingAtmosphereColumn(FT))
         bomex_column_model(grid, radiation)
         return column_fluxes(radiation)
     end
+    # Single precision loses only rounding: the fluxes agree to about 10 eps(Float32) relative
     for (ℐ₆₄, ℐ₃₂) in zip(fluxes[1], fluxes[2])
         @test all(isfinite, ℐ₃₂)
-        @test maximum(abs, Float64.(ℐ₃₂) .- ℐ₆₄) < 1
+        @test isapprox(Float64.(ℐ₃₂), ℐ₆₄; rtol = 100 * eps(Float32))
     end
 end
 

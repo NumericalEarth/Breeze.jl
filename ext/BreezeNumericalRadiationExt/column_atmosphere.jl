@@ -1,10 +1,11 @@
 #####
-##### Host copy of a staged column
+##### Host copy of a column
 #####
-##### A staged column copied to the host and presented as NumericalRadiation's `ColumnAtmosphere`,
-##### so that the array `optical_properties!` and `radiative_fluxes!` can be run on it as the
-##### reference the column kernels are checked against. The copy is explicit: the column arrays
-##### live on the grid's architecture, and the array path of NumericalRadiation is host-only.
+##### A column evaluated on the host through the same accessors the column kernel calls and
+##### presented as NumericalRadiation's `ColumnAtmosphere`, so that the array `optical_properties!`
+##### and `radiative_fluxes!` can be run on it as the reference the column kernel is checked
+##### against. The array path of NumericalRadiation is host-only; the accessors read the model's
+##### fields elementwise, which on a GPU is scalar indexing, allowed here.
 #####
 
 """
@@ -13,7 +14,7 @@ $(TYPEDSIGNATURES)
 NumericalRadiation's `PhysicalConstants` in float type `FT` with the values of Breeze's
 `constants::ThermodynamicConstants` (gravity, the dry-air heat capacity, the molar masses and
 the gas constants), the Stefan–Boltzmann constant of `gas_model` (which carries it for its gray
-source), and `solar_constant`: the constants the staging kernels use, handed to
+source), and `solar_constant`: the constants the column kernel uses, handed to
 NumericalRadiation's array path so that both paths see the same values.
 """
 function physical_constants(FT, constants::ThermodynamicConstants, gas_model, solar_constant)
@@ -30,42 +31,43 @@ end
 """
 $(TYPEDSIGNATURES)
 
-The staged column `(i, j)` of `rtm` as a NumericalRadiation `ColumnAtmosphere` on the host:
-copies of the column's rows, the well-mixed gases materialized as `χ .* dry_air`, the surface
+Column `(i, j)` of `model` as NumericalRadiation's `ColumnAtmosphere` on the host: the layer and
+interface states that the layer pass of `rtm` computes (with the extension pressures of the batch
+of columns that holds row `j`, computed here), the gas amounts of [`layer_gas_amounts`](@ref), the surface
 temperature and emissivity at `(i, j)`, the column's cosine of the solar zenith angle, and the
-thermodynamic constants of `model` (the `AtmosphereModel` the column was staged from) as
-NumericalRadiation's `PhysicalConstants`.
+thermodynamic constants of `model` as NumericalRadiation's `PhysicalConstants`.
 """
 function column_atmosphere(rtm::EcCKDRadiativeTransferModel, model, i, j)
-    columns = rtm.atmospheric_state
-    Nx = rtm.flux_divergence.grid.Nx
-    c = column_index(i, j, Nx)
+    workspace = rtm.atmospheric_state
+    rows = workspace.rows
+    row_offset = min(rows * fld(j - 1, rows), size(model.grid, 2) - rows)   # the batch that solves row `j`
+    state = ColumnState(rtm, model, row_offset)
+    compute_extension_pressure!(state, (size(model.grid, 1), rows))
+    grid = model.grid
+    N = number_of_layers(state)
+    c = column_index(i, j, grid.Nx)
 
-    row(a) = Array(view(a, c, :))
-    dry_air = row(columns.dry_air)
-    χ = rtm.longwave_solver.mole_fractions
+    layers, interface_temperatures, interface_pressures, surface, cos_zenith = @allowscalar begin
+        ([layer_state(i, j, k, grid, state) for k in 1:N],
+         [interface_temperature(i, j, k, grid, state) for k in 1:N+1],
+         [interface_pressure(i, j, k, grid, state) for k in 1:N+1],
+         (temperature = rtm.surface_radiation.surface_temperature[i, j, 1],
+          emissivity = rtm.surface_radiation.surface_emissivity[i, j, 1]),
+         workspace.cos_zenith[c])
+    end
 
-    gases = (composite = dry_air,
-             h2o = row(columns.water_vapor),
-             o3 = row(columns.ozone),
-             co2 = χ.co2 .* dry_air,
-             ch4 = χ.ch4 .* dry_air,
-             n2o = χ.n2o .* dry_air,
-             cfc11 = χ.cfc11 .* dry_air,
-             cfc12 = χ.cfc12 .* dry_air)
+    # The gas amounts of the column kernel, keyed by the gas names of the ecCKD tables
+    amounts = [layer_gas_amounts(layer, rtm.longwave_solver.mole_fractions) for layer in layers]
+    gases = map(name -> [amount[name] for amount in amounts], NamedTuple{ECCKD_GAS_NAMES}(ECCKD_GAS_NAMES))
 
-    surface_radiation = rtm.surface_radiation
-    surface = @allowscalar (temperature = surface_radiation.surface_temperature[i, j, 1],
-                            emissivity = surface_radiation.surface_emissivity[i, j, 1])
-
-    geometry = (cos_zenith = @allowscalar(columns.cos_zenith[c]),)
-
-    constants = physical_constants(eltype(columns), model.thermodynamic_constants,
+    constants = physical_constants(eltype(workspace), model.thermodynamic_constants,
                                    rtm.longwave_solver.gas_model, rtm.solar_constant)
 
-    return ColumnAtmosphere(; pressure_layers = row(columns.pressure_layers),
-                              pressure_interfaces = row(columns.pressure_interfaces),
-                              temperature_layers = row(columns.temperature_layers),
-                              temperature_interfaces = row(columns.temperature_interfaces),
-                              gases, surface, geometry, constants)
+    return ColumnAtmosphere(; pressure_layers = [layer.pressure for layer in layers],
+                              pressure_interfaces = interface_pressures,
+                              temperature_layers = [layer.temperature for layer in layers],
+                              temperature_interfaces = interface_temperatures,
+                              gases, surface,
+                              geometry = (cos_zenith = cos_zenith,),
+                              constants)
 end

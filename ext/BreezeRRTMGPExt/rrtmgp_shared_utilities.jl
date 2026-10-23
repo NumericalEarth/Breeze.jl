@@ -223,7 +223,7 @@ end
     i, j, k = @index(Global, NTuple)
 
     c = column_index(i, j, grid.Nx)  # batch-local column
-    jᵍ = j + j_offset                 # global latitude row
+    jᵍ = j + j_offset                # global latitude row
 
     @inbounds begin
         ℐ_lw_up[i, jᵍ, k] = lw_flux_up[k, c]

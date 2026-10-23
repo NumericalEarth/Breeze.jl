@@ -52,7 +52,7 @@ export
     AllSkyOptics,
     EcCKDOptics,
     CloudScatteringTables,
-    ColumnExtension,
+    OverlyingAtmosphereColumn,
     standard_atmosphere_temperature,
     AbstractSolarPosition,
     ApparentSolarPosition,
@@ -153,7 +153,6 @@ export
     # Forcing utilities
     geostrophic_forcings,
     SubsidenceForcing,
-    TimeHeightProfile,
     SpecificForcing,
 
     # Grid utilities

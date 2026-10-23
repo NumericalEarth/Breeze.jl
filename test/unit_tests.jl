@@ -675,8 +675,7 @@ end
 using Breeze.AtmosphereModels: column_index, resolve_surface_albedos, validate_surface_fractions,
                                constant_field_property, maybe_infer_solar_position,
                                compute_radiation_flux_divergence!,
-                               bottom_face_pressure, top_face_pressure,
-                               bottom_face_temperature, top_face_temperature
+                               bottom_face_pressure, top_face_pressure
 using GPUArraysCore: @allowscalar
 using Oceananigans.Fields: ConstantField
 using Oceananigans.Units: kilometers
@@ -741,16 +740,12 @@ previous_float_type = Oceananigans.defaults.FloatType
         g = 10
         p = CenterField(grid)
         ρ = CenterField(grid)
-        T = CenterField(grid)
         set!(p, (x, y, z) -> 1e5 - g * z)
         set!(ρ, 1)
-        set!(T, (x, y, z) -> 300 - 0.01z)
 
         @allowscalar begin
             @test bottom_face_pressure(1, 1, grid, p, ρ, g) ≈ 1e5
             @test top_face_pressure(2, 2, grid, p, ρ, g) ≈ 1e5 - g * 1000
-            @test bottom_face_temperature(1, 2, grid, T) ≈ 300
-            @test top_face_temperature(2, 1, grid, T) ≈ 290
         end
     end
 

@@ -41,7 +41,7 @@ end
 # We use a 2D vertical slice (x-z) that is periodic in x and bounded in z.
 # The vertical grid is stretched: fine 100 m cells resolve the cloud layer below
 # 3 km, then a smooth transition to 1 km cells carries the column up to 15 km.
-# The radiation model's [`ColumnExtension`](@ref) adds the stratosphere above
+# The radiation model's [`OverlyingAtmosphereColumn`](@ref) adds the stratosphere above
 # the grid top, so the total cell count stays modest.
 
 Nx = 128
@@ -83,15 +83,16 @@ dynamics = AnelasticDynamics(reference_state)
 # absorption and emission. We specify well-mixed greenhouse gas concentrations
 # and a tropical ozone profile that transitions from low tropospheric values to
 # a stratospheric peak near 25 km. The peak lies above the 15 km grid top, but
-# the radiation model evaluates the ozone profile in its column extension too,
+# the radiation model evaluates the ozone profile in its overlying atmosphere too,
 # so the stratospheric ozone still absorbs sunlight before it reaches the grid.
 
 @inline function tropical_ozone(z)
-    troposphere_O₃ = 30e-9 * (1 + 0.5 * z / 10_000)
-    zˢᵗ = 25e3
-    Hˢᵗ = 5e3
-    stratosphere_O₃ = 8e-6 * exp(-((z - zˢᵗ) / Hˢᵗ)^2)
-    χˢᵗ = 1 / (1 + exp(-(z - 15e3) / 2))
+    FT = float(typeof(z))   # in the grid's precision, which the radiation kernels evaluate it in
+    troposphere_O₃ = FT(30e-9) * (1 + FT(0.5) * z / 10_000)
+    zˢᵗ = FT(25e3)
+    Hˢᵗ = FT(5e3)
+    stratosphere_O₃ = FT(8e-6) * exp(-((z - zˢᵗ) / Hˢᵗ)^2)
+    χˢᵗ = 1 / (1 + exp(-(z - FT(15e3)) / 2))
     return troposphere_O₃ * (1 - χˢᵗ) + stratosphere_O₃ * χˢᵗ
 end
 
@@ -192,8 +193,10 @@ cᵖᵈ = constants.dry_air.heat_capacity  # J/(kg·K)
     return ρ * p.cᵖᵈ * ∂T∂t
 end
 
+# The parameters take the grid's float type, as the kernels compute in it
+FT = eltype(grid)
 sponge = Forcing(stratospheric_relaxation; discrete_form=true,
-                 parameters=(; Tᵣ, ρᵣ, cᵖᵈ, τ=τ_sponge))
+                 parameters=(; Tᵣ, ρᵣ, cᵖᵈ=convert(FT, cᵖᵈ), τ=convert(FT, τ_sponge)))
 
 forcing = (; ρE=sponge)
 
