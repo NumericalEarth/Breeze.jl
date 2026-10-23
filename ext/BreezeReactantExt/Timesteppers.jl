@@ -1,5 +1,7 @@
 using Oceananigans: ReactantState, initialize!
-using Reactant: TracedRNumber
+using Oceananigans.TimeSteppers: Clock
+using Oceananigans.Utils: IterationInterval
+using Reactant: TracedRNumber, @trace
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.Microphysics: Microphysics, DCMIP2016KesslerMicrophysics
@@ -23,6 +25,36 @@ end
 # Reactant initializes through `first_time_step!`, and the eager guard branches on traced
 # clock fields; mirrors OceananigansReactantExt's no-ops for the upstream steppers.
 OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::CompressibleAcousticModel{<:ReactantState}, Δt, callbacks) = nothing
+
+#####
+##### Radiation schedules (see `update_radiation!`)
+#####
+
+# The clock's time and iteration are traced but its stage is not, so only the first-stage
+# `update_state!` of a step carries a traced conditional. Initialization (iteration 0, between
+# steps) is not traced: the traced caller prepares the initial fluxes explicitly.
+const TracedClock = Clock{<:TracedRNumber}
+
+function AtmosphereModels.radiation_update_due(schedule::IterationInterval, clock::TracedClock, model)
+    clock.stage == 2 || return false
+    return (clock.iteration > 0) & schedule(model)
+end
+
+function AtmosphereModels.conditionally_update_radiation!(due::TracedRNumber{Bool}, rtm, model)
+    @trace track_numbers=false if due
+        AtmosphereModels._update_radiation!(rtm, model)
+    end
+    return nothing
+end
+
+AtmosphereModels.validate_schedule(schedule::IterationInterval, ::ReactantState) = schedule
+
+AtmosphereModels.validate_schedule(schedule, ::ReactantState) =
+    throw(ArgumentError("The radiation schedule $(summary(schedule)) cannot be used on ReactantState. " *
+                        "Under Reactant the clock is traced, and only a stateless IterationInterval " *
+                        "can decide inside a traced time step when radiation is due. Use " *
+                        "`schedule = IterationInterval(N)`, for example IterationInterval(80) for " *
+                        "updates every 600 s with Δt = 7.5 s."))
 
 # Reverse mode cannot differentiate the data-dependent number of Kessler sedimentation substeps:
 # loop a static `maximum_sedimentation_substeps` (see `sedimentation_substep_limit`)

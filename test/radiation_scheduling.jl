@@ -59,6 +59,10 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         interior(ℐ_lw_up) .= 0
         interior(flux_div) .= 0
 
+        # During time stepping radiation updates only in the first-stage update_state! of a step,
+        # when the clock is at stage 2; emulate those calls
+        model.clock.stage = 2
+
         # Advance to iteration 1 → should NOT update (next update at iteration 3)
         model.clock.iteration = 1
         model.clock.time = DateTime(2024, 6, 21, 16, 0, 1)
@@ -82,6 +86,15 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
 
         # Verify the flux divergence was also recomputed
         @test any(Array(interior(flux_div)) .!= 0)
+
+        # The other update_state! calls at iteration 3 (later stages, the end of the step, after
+        # an operator-split update) do not update again: once per scheduled iteration
+        for stage in (3, 1)
+            interior(ℐ_lw_up) .= 0
+            model.clock.stage = stage
+            Oceananigans.TimeSteppers.update_state!(model; compute_tendencies=false)
+            @allowscalar @test ℐ_lw_up[1, 1, 1] == 0
+        end
     end
 
     @testset "TimeInterval schedule [$(FT), $(summary(optics))]" for FT in test_float_types(), optics in OPTICS
@@ -125,6 +138,9 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         # Zero out fluxes to detect updates
         interior(ℐ_lw_up) .= 0
         interior(flux_div) .= 0
+
+        # Emulate the first-stage update_state! of each step, where scheduled updates happen
+        model.clock.stage = 2
 
         # Advance by 5 seconds → should NOT update (interval is 10s)
         model.clock.iteration = 1

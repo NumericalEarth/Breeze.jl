@@ -127,7 +127,10 @@ export
     # Architecture-dispatched helpers for safely converting Δt to a kernel arg,
     # and for skipping operator-split updates before the first step
     kernel_time_step,
-    invalid_time_step
+    invalid_time_step,
+
+    # Radiation schedules that the architecture can evaluate
+    validate_schedule
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
