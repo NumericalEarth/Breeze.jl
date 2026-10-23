@@ -202,3 +202,38 @@ The following table also uses a few conventions that suffuse the source code and
 | ``(ρu)', (ρv)', (ρw)'``             | `ρu′, ρv′, ρw′` | `AcousticSubstepper.momentum_perturbation` | Momentum perturbations about the stage-entry state              |
 | ``D_τ``                             | `Dτ`   |                                     | Klemp-Skamarock-Ha divergence-damping proxy, ``D_τ = ((ρθ)'_τ - (ρθ)'_{τ-\Delta τ}) / θ^L`` |
 | ``\bar{u}, \bar{v}, \bar{w}``       | `ū, v̄, w̄` | `AcousticSubstepper.time_averaged_velocities` | Time-averaged velocities for non-acoustic scalar advection |
+
+## [Lagrangian droplet notation](@id lagrangian_droplet_notation)
+
+The per-droplet physics of `Breeze.LagrangianMicrophysics` uses the scoped notation below.
+Following the convention above, letters reserved in the main table take a local meaning here:
+``κ`` is the hygroscopicity (not the von Kármán constant), ``r`` the droplet radius (not the
+terrain-following coordinate), and ``z`` a volume ratio (not height).
+
+| math symbol                         | code   | property name                                    | description                                                                    |
+| ----------------------------------- | ------ | ------------------------------------------------ | ------------------------------------------------------------------------------ |
+| ``r``                               | `r`    |                                                  | Wet droplet radius, m                                                          |
+| ``r^d``                             | `rᵈ`   |                                                  | Dry (solute) radius of the aerosol the droplet formed on, m                    |
+| ``κ``                               | `κ`    |                                                  | Hygroscopicity parameter of κ-Köhler theory                                    |
+| ``z``                               | `z`    |                                                  | Dry-to-wet volume ratio, ``z = (rᵈ / r)^3``                                    |
+| ``σ``                               | `σ`    | `DropletPhysicsParameters.surface_tension`       | Surface tension of the droplet-air interface, N m⁻¹                            |
+| ``A``                               | `A`    | `curvature_coefficient(T, constants, parameters)` | Curvature (Kelvin) coefficient, ``A = 2σ / (Rᵛ ρᴸ T)``, m                    |
+| ``a^w``                             | `aʷ`   |                                                  | Water activity of the solution droplet                                         |
+| ``\mathscr{S}^e``                   | `𝒮ᵉ`   | `equilibrium_supersaturation`                    | Equilibrium (Köhler) supersaturation, ``1 + 𝒮ᵉ = aʷ \exp(A / r)``             |
+| ``r^c``, ``\mathscr{S}^c``          | `rᶜ`, `𝒮ᶜ` | `critical_radius`, `critical_supersaturation` | Critical radius and supersaturation: the maximum of the Köhler curve        |
+| ``D^v``                             | `Dᵛ`   | `vapor_diffusivity`                              | Diffusivity of water vapor in air, m² s⁻¹                                      |
+| ``K^T``                             | `Kᵀ`   | `thermal_conductivity`                           | Thermal conductivity of air, W m⁻¹ K⁻¹                                         |
+| ``μ``                               | `μ`    | `dynamic_viscosity`                              | Dynamic viscosity of air, Pa s                                                 |
+| ``ψ^v``, ``ψ^T``                    | `ψᵛ`, `ψᵀ` |                                              | Gas-kinetic factors, ``Dᵛ / D̃ᵛ`` and ``Kᵀ / K̃ᵀ`` (corrected coefficients have a tilde) |
+| ``α^c``, ``α^T``                    | `αᶜ`, `αᵀ` | `KineticCorrection`                          | Condensation and thermal accommodation coefficients                            |
+| ``Δ^v``, ``Δ^T``                    | `Δᵛ`, `Δᵀ` | `KineticCorrection`                          | Vapor and thermal jump lengths, m                                              |
+| ``F^v``, ``F^T``                    | `Fᵛ`, `Fᵀ` |                                              | Vapor-diffusion and heat-conduction terms of the growth law, s m⁻²             |
+| ``G``                               | `G`    |                                                  | Growth coefficient, ``G = 1 / (Fᵛ + Fᵀ)``, m² s⁻¹                              |
+| ``Φ``                               | `Φ`    | `diffusional_growth_rate`                        | Diffusional growth rate ``Φ = r \, dr/dt = fᵛ G (𝒮 - 𝒮ᵉ)``, m² s⁻¹            |
+| ``f^v``                             | `fᵛ`   | `ventilation_factor`                             | Ventilation factor                                                             |
+| ``\mathrm{Re}``, ``\mathrm{Sc}``    | `Re`, `Sc` |                                              | Droplet Reynolds number (slip speed, diameter) and Schmidt number of vapor     |
+| ``τ^p``                             | `τᵖ`   |                                                  | Stokes response time, ``τᵖ = 2 ρᴸ r^2 / (9 μ)``, s                             |
+| ``f^D``                             | `fᴰ`   | `drag_correction`                                | Schiller–Naumann drag correction, ``fᴰ = 1 + 0.15 \mathrm{Re}^{0.687}``        |
+| ``τ``                               | `τ`    | `droplet_response_time`                          | Drag response time ``τ = τᵖ / fᴰ``, s                                          |
+| ``\mathbb{W}``                      | `𝕎`    | `droplet_terminal_velocity`                      | Terminal fall speed of a droplet (positive downward), m s⁻¹                    |
+| ``v^∞``                             | `v∞`   |                                                  | Velocity the drag integrator relaxes to, ``v^∞ = u + a τ``                     |
