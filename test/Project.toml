@@ -27,6 +27,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 Breeze = {path = ".."}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "main"} # TODO: remove once Oceananigans 0.116 is registered
 
 [compat]
 Adapt = "4.3.0"
@@ -44,7 +45,7 @@ MPI = "0.20"
 Metal = "1.10"
 NCDatasets = "0.14"
 NumericalRadiation = "0.1"
-Oceananigans = "0.116"
+Oceananigans = "0.115, 0.116" # TODO: "0.116" once registered; main still reports 0.115.0
 ParallelTestRunner = "2.7.0"
 Pkg = "<0.0.1, 1"
 Printf = "<0.0.1, 1"

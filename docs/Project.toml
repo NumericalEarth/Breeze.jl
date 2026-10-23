@@ -24,6 +24,7 @@ SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 
 [sources]
 Breeze = {path = ".."}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "main"} # TODO: remove once Oceananigans 0.116 is registered
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
@@ -41,7 +42,7 @@ KernelAbstractions = "0.9.41"
 Literate = "2"
 NCDatasets = "0.14"
 NumericalRadiation = "0.1"
-Oceananigans = "0.116"
+Oceananigans = "0.115, 0.116" # TODO: "0.116" once registered; main still reports 0.115.0
 Pkg = "<0.0.1, 1"
 RRTMGP = "0.22, 0.23, 1"
 Random = "<0.0.1, 1"
