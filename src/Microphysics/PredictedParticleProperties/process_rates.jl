@@ -392,8 +392,8 @@ end
     # =========================================================================
     has_hydrometeors = (max(0, qᶜˡ) + max(0, qʳ)) >=
                        parameters.wet_growth_hydrometeor_threshold
-    qwgrth_raw = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
-                                     constants, transport, lookups)
+    # Wet growth and refreezing share one surface heat balance.
+    qwgrth_raw, qifrz_raw = freezing_capacities(p3, nⁱ, T, qᵛ, ρ, constants, transport, lookups)
     qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
     total_collection = cloud_rim + rain_rim
@@ -439,7 +439,7 @@ end
     # =========================================================================
     shed = shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups)
     shed_n = shedding_number_rate(p3, shed)
-    refrz = refreezing_rate_from_capacity(p3, qʷⁱ, qwgrth_raw)
+    refrz = refreezing_rate_from_capacity(p3, qʷⁱ, qifrz_raw)
     shed = ifelse(parameters.liquid_fraction_active, shed, zero(FT))
     shed_n = ifelse(parameters.liquid_fraction_active, shed_n, zero(FT))
     refrz = ifelse(parameters.liquid_fraction_active, refrz, zero(FT))
