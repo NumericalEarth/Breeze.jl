@@ -173,6 +173,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``K^c``                             | `Kᶜ`   |                                     | Eddy diffusivity for scalars, ``K^c = ℓ^c \sqrt{e}``, m² s⁻¹                    |
 | ``K^e``                             | `Kᵉ`   |                                     | Eddy diffusivity for TKE, ``K^e = ℓ^e \sqrt{e}``, m² s⁻¹                        |
 | ``e``                               | `e`    |                                     | Subgrid turbulent kinetic energy, m² s⁻²                                       |
+| ``eᵐⁱⁿ`` | `eᵐⁱⁿ` | `minimum_tke` | Floor on ``e`` inside ``\sqrt{e}`` of the diffusivities and length scales, and of the buoyancy sink rate ``ωᴮ = -B⁻ / \max(e, eᵐⁱⁿ)``, m² s⁻² |
+| ``ωᴮ`` | `ωᴮ` | | Implicit buoyancy sink rate of the TKE equation, ``-B⁻ / \max(e, eᵐⁱⁿ)`` with ``B⁻`` the negative part of the buoyancy flux, s⁻¹ |
 | ``\rho e``                          | `ρe`   |                                     | Prognostic TKE density, the tracer `TKEBasedTurbulenceClosure` adds to the model |
 | ``\mathrm{Pr}``                     | `Pr`   |                                     | Turbulent Prandtl number, ``\mathrm{Pr} = K^u/K^c = S^u/S^c``                 |
 | ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``; the rational stability functions use ``N² / (S² + S²ᵐⁱⁿ)`` |

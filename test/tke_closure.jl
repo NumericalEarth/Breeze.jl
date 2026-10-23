@@ -1,7 +1,8 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, absorb_stratification_coefficient, dissipationᶜᶜᶜ
+using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, absorb_stratification_coefficient, dissipationᶜᶜᶜ,
+                                 tke_sink_rate
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!, time_discretization
 using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, ExplicitTimeDiscretization,
@@ -496,6 +497,50 @@ end
         @test all(Lᵉ .≈ -ℂᴰ * sqrt(e₋) ./ (ℂˢ .* zc))
     end
 
+    @testset "the buoyancy sink is continuous at the minimum TKE" begin
+        # ωᴮ = -B⁻ / max(e, eᵐⁱⁿ): unchanged above the floor and constant below it, so that the
+        # implicit buoyancy sink ωᴮ e is continuous at e = eᵐⁱⁿ and falls linearly with e. The
+        # buoyancy flux is passed to the sink rate directly; B = 0 gives the dissipation rate alone.
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        set!(model; θ = z -> 300 + 0.005z)
+        eᵐⁱⁿ = closure.minimum_tke
+        τ = closure.negative_tke_damping_time_scale
+        B = -FT(1e-7)
+        δ = FT === Float64 ? 1e-6 : 1e-3
+        rtol = FT === Float64 ? 1e-10 : 1e-4
+        function sink_rates(e₀)
+            set_tke!(model, e₀)
+            e = model.tracers.ρe / model.dynamics.reference_state.density
+            rate(b) = column(Field(KernelFunctionOperation{Center, Center, Center}(tke_sink_rate, grid, model.closure, e, b,
+                                                                                   model.velocities, model.closure_fields)))
+            ω = rate(zero(FT))
+            return (; e = column(Field(e)), ω, ωᴮ = rate(B) .- ω)
+        end
+
+        # The left and right limits at the floor agree, for the rate and for the sink
+        below, at, above = sink_rates(eᵐⁱⁿ * (1 - δ)), sink_rates(eᵐⁱⁿ), sink_rates(eᵐⁱⁿ * (1 + δ))
+        @test all(below.e .< eᵐⁱⁿ .< above.e)
+        @test isapprox(below.ω .+ below.ωᴮ, above.ω .+ above.ωᴮ; rtol = 4δ)
+        @test isapprox(below.ωᴮ .* below.e, above.ωᴮ .* above.e; rtol = 4δ)
+        @test all(isapprox.(at.ωᴮ, -B / eᵐⁱⁿ; rtol))
+
+        # Above the floor the rate is -B⁻ / e, as without the floor
+        for e₀ in FT.((2eᵐⁱⁿ, 10eᵐⁱⁿ, 1e-4))
+            r = sink_rates(e₀)
+            @test all(isapprox.(r.ωᴮ, -B ./ r.e; rtol))
+        end
+
+        # Below the floor it is -B⁻ / eᵐⁱⁿ, so the sink ωᴮ e is linear in e, and it adds to the
+        # damping of negative TKE, which it also drives towards zero
+        for e₀ in FT.((eᵐⁱⁿ / 2, eᵐⁱⁿ / 4))
+            r = sink_rates(e₀)
+            @test all(isapprox.(r.ωᴮ, -B / eᵐⁱⁿ; rtol))
+        end
+        r = sink_rates(-FT(0.01))
+        @test all(isapprox.(r.ω, 1 / τ; rtol))
+        @test all(isapprox.(r.ωᴮ, -B / eᵐⁱⁿ; rtol))
+    end
+
     @testset "the sources enter the stage tendency" begin
         model = AtmosphereModel(grid; closure, advection = nothing)
         e₀ = FT(0.5)
@@ -558,11 +603,17 @@ end
 
     @testset "negative TKE is damped on the damping time scale" begin
         τ = FT(60)
-        model = AtmosphereModel(grid; closure, advection = nothing)
+        # Without tracer diffusivity the buoyancy flux -Kᶜ N² vanishes exactly. Otherwise the
+        # rounding-level N² that the stages leave in a Float32 neutral column would add its
+        # buoyancy sink rate -B⁻ / eᵐⁱⁿ, which applies below the minimum TKE, to the damping.
+        undiffused = TKEBasedTurbulenceClosure(mixing_length = GradientLimitedMixingLength(),
+                                               stability_functions = ConstantStabilityFunctions(),
+                                               maximum_tracer_diffusivity = 0)
+        model = AtmosphereModel(grid; closure = undiffused, advection = nothing)
         set!(model; θ = 300)
         set_tke!(model, FT(-0.1))
 
-        # No shear, no stratification and no TKE gradient, so the damping rate 1/τ is the only
+        # No shear, no buoyancy flux and no TKE gradient, so the damping rate 1/τ is the only
         # term. It is applied implicitly in each of the three SSP-RK3 stages with αΔt = Δt, Δt/4,
         # 2Δt/3, and the stage combinations make one step of length τ multiply a uniform e by
         # [1/3 + 2/3 (3/4 + 1/4 (1/2)) / (5/4)] / (5/3) = 0.48

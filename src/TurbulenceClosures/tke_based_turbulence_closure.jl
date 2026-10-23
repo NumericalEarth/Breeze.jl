@@ -780,9 +780,11 @@ $(TYPEDSIGNATURES)
 
 The rate at which the sinks of the TKE equation remove turbulent kinetic energy, ``-Lᵉ ≥ 0``:
 the dissipation rate ``ω = Sᴰ \\sqrt{e} / ℓ`` — or, where ``e`` is negative, the damping rate
-``1/τ`` — plus the negative part of the buoyancy flux divided by ``e``, where there is TKE to
-remove. Following CATKE, these are the terms treated implicitly in ``e``, so that ``e`` stays
-positive for any time step.
+``1/τ`` — plus the buoyancy sink rate ``ωᴮ = -B⁻ / \\max(e, eᵐⁱⁿ)``, the negative part of the
+buoyancy flux divided by ``e`` floored at `minimum_tke` ``eᵐⁱⁿ``. Above the floor the buoyancy
+sink ``ωᴮ e`` is ``-B⁻``; below it the sink falls linearly with ``e``, continuously at
+``e = eᵐⁱⁿ``. Following CATKE, these are the terms treated implicitly in ``e``, so that ``e``
+stays positive for any time step.
 """
 @inline function tke_sink_rate(i, j, k, grid, closure, e, B, velocities, closure_fields)
     eᵐⁱⁿ = closure.minimum_tke
@@ -796,8 +798,10 @@ positive for any time step.
     τ = closure.negative_tke_damping_time_scale
     ω = ifelse(eᵢ < 0, 1 / τ, Sᴰ * sqrt(abs(eᵢ)) / ℓ)
 
+    # The buoyancy sink rate: -B⁻ / e above the floor and -B⁻ / eᵐⁱⁿ below it, so that the
+    # implicit sink ωᴮ e is continuous at e = eᵐⁱⁿ and vanishes linearly with e
     B⁻ = min(0, B)
-    ωᴮ = -B⁻ / max(eᵢ, eᵐⁱⁿ) * (eᵢ > eᵐⁱⁿ)
+    ωᴮ = -B⁻ / max(eᵢ, eᵐⁱⁿ)
 
     return ω + ωᴮ
 end

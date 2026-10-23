@@ -146,8 +146,9 @@ TKEBasedTurbulenceClosure().mixing_length.ℂⁱ
 The diffusivities are computed at the cell interfaces where the fluxes live, from the stored mixing
 length and ``\sqrt{e}`` reconstructed from the cell centers and floored at `minimum_tke`.
 The numerics of the TKE equation follow CATKE. The sinks — dissipation and the negative part of the buoyancy flux, as the rate
-``-Lᵉ = Sᴰ \sqrt{e} / ℓ + |B⁻| / e``, and the damping of ``e`` that advection drives negative, at
-the rate ``1/τ`` — enter the vertically implicit tridiagonal solve of every time-step stage together
+``-Lᵉ = Sᴰ \sqrt{e} / ℓ + |B⁻| / \max(e, eᵐⁱⁿ)`` with ``eᵐⁱⁿ`` the `minimum_tke` (so that the buoyancy
+sink is continuous at ``e = eᵐⁱⁿ`` and falls linearly with ``e`` below it), and the damping of ``e``
+that advection drives negative, at the rate ``1/τ`` — enter the vertically implicit tridiagonal solve of every time-step stage together
 with the vertical diffusion of ``e``, so that ``e`` stays positive for any time step. The sources —
 shear production and the positive part of the buoyancy flux — enter the tendency of the same stage.
 Under an explicit time discretization the sinks enter the tendency as well.
