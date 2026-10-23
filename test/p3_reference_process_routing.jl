@@ -188,11 +188,12 @@ end
         properties = PPP.p3_process_properties(
             p3, air_density, microphysical_state)
 
+        # Condensation heating outweighs conduction, so nothing refreezes.
         @test rates.post_process_clipping == 1
-        @test rates.refreezing ≈ FT(9.89e-10)
-        @test rates.clipping_dry_mass ≈ FT(1e-9)
-        @test rates.clipping_rime_mass ≈ FT(9.945e-10)
-        @test rates.clipping_rime_volume ≈ FT(1.112638888888889e-12)
+        @test rates.refreezing == 0
+        @test rates.clipping_dry_mass ≈ dry_ice / τ
+        @test rates.clipping_rime_mass ≈ rime_mass / τ
+        @test rates.clipping_rime_volume ≈ rime_volume / τ
 
         dry_ice_after = dry_ice +
             τ * tendency_ρqⁱ(rates, air_density) / air_density
@@ -364,8 +365,10 @@ end
         @test mixed_precision.process_rates.tiny_ice_to_rain_threshold isa Float32
         @test mixed_precision.process_rates.tiny_ice_to_rain_threshold == Float32(1e-12)
 
-        wet_growth_temperature = process_rates.freezing_temperature - FT(1e-3)
-        wet_growth_vapor = FT(0.02)
+        # Partial wet growth: part of the collection freezes, the rest sheds.
+        wet_growth_temperature = process_rates.freezing_temperature - FT(1)
+        wet_growth_vapor = saturation_specific_humidity(
+            wet_growth_temperature, air_density, constants, PlanarLiquidSurface())
         wet_growth_cloud = FT(1e-3)
         wet_growth_cloud_number = FT(3e8)
         wet_growth_rain = FT(1e-3)

@@ -109,19 +109,19 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 - Rate of liquid → rain shedding [kg/kg/s]
 """
 @inline function shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups::P3IceLookups)
-    qʷⁱ_eff = max(0, qʷⁱ)
-    nⁱ_eff = max(0, nⁱ)
+    qʷⁱ₊ = max(0, qʷⁱ)
+    nⁱ₊ = max(0, nⁱ)
 
     # Lookup ∫_{D≥9mm} m(D) N'(D) dD (normalized per particle)
     f1pr28 = evaluate_at(p3.ice.bulk.shedding, lookups.prep)
 
     # Fᶠ is the rime fraction of the ice-only mass, since qⁱ excludes qʷⁱ.
-    rate = Fᶠ * f1pr28 * nⁱ_eff * Fˡ
+    rate = Fᶠ * f1pr28 * nⁱ₊ * Fˡ
 
     # Bound by available liquid: qlshd ≤ qwi / dt_safety
     rate = max(0, rate)
     τ_safety = p3.process_rates.sink_limiting_timescale
-    rate = min(rate, qʷⁱ_eff / τ_safety)
+    rate = min(rate, qʷⁱ₊ / τ_safety)
 
     return rate
 end
@@ -155,10 +155,11 @@ Compute the wet growth freezing capacity following
 [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
 The wet growth capacity is the maximum rate at which collected
-hydrometeors can be frozen, determined by the ventilated heat balance:
+hydrometeors can be frozen, determined by the ventilated heat balance of
+[Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5):
 
 ```math
-q_{wgrth} = C f^{ve} \\left[Kᵃ(T_0-T) + \\frac{2π}{ℒᶠᵘˢ} ℒⁱ Dᵛ(ρ^{v+}-ρ^v)\\right] × N^i
+\\dot{q}_\\text{wet} = \\frac{2π}{ℒᶠʳ} C f^{ve} \\left[Kᵃ(T_0-T) + ℒⁱ Dᵛ(ρ^{v+}-ρ^v)\\right] × N^i
 ```
 
 When the collection rate (cloud + rain riming) exceeds this capacity,
@@ -186,12 +187,12 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
-    nⁱ_eff = max(0, nⁱ)
+    nⁱ₊ = max(0, nⁱ)
 
     T₀ = parameters.freezing_temperature
     below_freezing = T < T₀
 
-    ℒᶠᵘˢ = fusion_latent_heat(constants, T)
+    ℒᶠʳ = fusion_latent_heat(constants, T)
     ℒⁱ = sublimation_latent_heat(constants, T)
 
     Kᵃ = transport.Kᵃ
@@ -201,18 +202,17 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
     # Ventilation integral (same as deposition/refreezing)
-    C_fv = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
-                                  ν, Dᵛ, lookups.ρ_correction, parameters.floors)
+    ventilated_capacitance = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
+                                                    ν, Dᵛ, lookups.ρ_correction, parameters.floors)
 
     # Heat balance: sensible + latent
-    Q_sensible = Kᵃ * (T₀ - T)
-    Q_latent = ℒⁱ * Dᵛ * ρ * (q_sat0 - qᵛ)
+    𝒬ᵀ = Kᵃ * (T₀ - T)
+    𝒬ᵛ = ℒⁱ * Dᵛ * ρ * (q_sat0 - qᵛ)
 
-    # 2π/ℒᶠᵘˢ multiplies only the latent term; the sensible-conduction term uses
-    # the capm convention directly.
-    qwgrth = C_fv * (Q_sensible + 2 * FT(π) * Q_latent / ℒᶠᵘˢ) * nⁱ_eff
+    # 2π (not 4π) because ventilated_capacitance stores capm = 2 × capacitance, as in melting.
+    capacity = 2 * FT(π) * ventilated_capacitance * (𝒬ᵀ + 𝒬ᵛ) / ℒᶠʳ * nⁱ₊
 
-    return ifelse(below_freezing, max(0, qwgrth), zero(FT))
+    return ifelse(below_freezing, max(0, capacity), zero(FT))
 end
 
 """
@@ -224,14 +224,13 @@ Below freezing, liquid coating on ice particles refreezes. The rate is
 determined by the heat flux at the particle surface:
 
 ```math
-\\frac{dm}{dt} = C f^{ve} \\left[Kᵃ(T_0-T) + \\frac{2π}{ℒᶠᵘˢ} ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
+\\frac{dm}{dt} = \\frac{2π}{ℒᶠʳ} C f^{ve} \\left[Kᵃ(T_0-T) + ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
 ```
 
 That is the same particle heat balance that sets the wet-growth capacity, so this
 is [`wet_growth_capacity`](@ref) capped by the liquid available on the ice. Above
 freezing the capacity is already zero, which carries the temperature gate here.
-See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization)
-appendix C, section i (and Mason 1971 for the underlying heat-balance form).
+See [Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5).
 
 # Arguments
 - `p3`: P3 microphysics scheme
