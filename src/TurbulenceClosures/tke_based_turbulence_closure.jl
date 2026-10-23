@@ -649,6 +649,11 @@ centers and the stored static stability `N²` at the faces. One thread per colum
     fill_mixing_length!(ℓ, ℓˢ, i, j, grid, closure_ij.mixing_length, closure_ij, e, N²)
 end
 
+# One thread per column. A backend that runs loops over k slowly inside a kernel (Reactant, where
+# they become one round of launches per level on GPU) may extend this for a whole-array form.
+compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²) =
+    launch!(grid.architecture, grid, :xy, _compute_mixing_length!, ℓ, ℓˢ, grid, closure, e, N²)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -801,8 +806,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
             closure_fields.N², grid, closure, tracers, buoyancy)
 
-    launch!(arch, grid, :xy, _compute_mixing_length!,
-            closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
+    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
 
     launch!(arch, grid, parameters, _compute_tke_closure_fields!,
             closure_fields, grid, closure, model.velocities, tracers)
