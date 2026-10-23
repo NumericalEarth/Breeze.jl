@@ -173,6 +173,10 @@ The following table also uses a few conventions that suffuse the source code and
 | ``K^c``                             | `Kᶜ`   |                                     | Eddy diffusivity for scalars, ``K^c = ℓ^c \sqrt{e}``, m² s⁻¹                    |
 | ``K^e``                             | `Kᵉ`   |                                     | Eddy diffusivity for TKE, ``K^e = ℓ^e \sqrt{e}``, m² s⁻¹                        |
 | ``e``                               | `e`    |                                     | Subgrid turbulent kinetic energy, m² s⁻²                                       |
+| ``ε``                               | `ε`    | `energy_injection_rate`             | Energy injection rate of a band forcing of homogeneous turbulence, m² s⁻³; equals the mean dissipation rate in statistically steady turbulence |
+| ``k_f``                             | `k_f`  | `maximum_wavenumber`                | Largest wavenumber of the band of forced Fourier modes, m⁻¹                   |
+| ``E_f``                             | `E_f`  |                                     | Kinetic energy of the forced band, ``E_f = ⟨\vert\boldsymbol{u}_f\vert²⟩ / 2``, m² s⁻² |
+| ``T_f``                             | `T_f`  | `correlation_time`                  | Correlation time of the stochastic band forcing, s                            |
 | ``\rho e``                          | `ρe`   |                                     | Prognostic TKE density, the tracer `TKEBasedTurbulenceClosure` adds to the model |
 | ``\mathrm{Pr}``                     | `Pr`   |                                     | Turbulent Prandtl number, ``\mathrm{Pr} = K^u/K^c = S^u/S^c``                 |
 | ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``                                      |
