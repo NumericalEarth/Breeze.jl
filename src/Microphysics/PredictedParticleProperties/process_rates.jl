@@ -44,16 +44,23 @@ struct P3DerivedState{FT, Q, L}
     lookups :: L   # P3IceLookups: coordinate bracket, density correction, ventilation terms
 end
 
-@inline function vapor_excess_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, ρ, constants)
+# `density_constraint` is the density held fixed during phase changes. Grid cells
+# retain the host density. Parcels pass `nothing` so heating and composition changes
+# update the density at the prescribed pressure.
+@inline vapor_excess_density(ρ, 𝒰, constants) = ρ
+@inline vapor_excess_density(::Nothing, 𝒰, constants) = density(𝒰, constants)
+
+@inline function vapor_excess_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, density_constraint, constants)
     q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
     𝒰₁ = with_moisture(𝒰, q)
     T = temperature(𝒰₁, constants)
+    ρ = vapor_excess_density(density_constraint, 𝒰₁, constants)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     return qᵛ - qᵛ⁺ˡ
 end
 
 @inline function final_prognostic_vapor_excess_tendency(
-    ::ProcessRate{FT, DiagnosticVaporExcess}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
+    ::ProcessRate{FT, DiagnosticVaporExcess}, 𝒰, qᵛ, qˡ, qⁱ, density_constraint, constants,
     initial_vapor_excess, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice,
     external_forcing
 ) where FT
@@ -66,7 +73,7 @@ end
 # the prognostic δqᵛ⁺ˡ sees only the phase-change sink, and the host's diagnosed
 # vapor excess grows until the G&M alignment ε / τ balances the forcing, at ~ forcing × τ.
 @inline function final_prognostic_vapor_excess_tendency(
-    ::ProcessRate{FT, PrognosticVaporExcess}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
+    ::ProcessRate{FT, PrognosticVaporExcess}, 𝒰, qᵛ, qˡ, qⁱ, density_constraint, constants,
     initial_vapor_excess, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice,
     external_forcing
 ) where FT
@@ -74,7 +81,7 @@ end
     qˡ_final = qˡ + (vapor_to_liquid - liquid_to_ice) * dt
     qⁱ_final = qⁱ + (vapor_to_ice + liquid_to_ice) * dt
     final_vapor_excess = vapor_excess_after_moisture_update(
-        𝒰, qᵛ_final, qˡ_final, qⁱ_final, ρ, constants)
+        𝒰, qᵛ_final, qˡ_final, qⁱ_final, density_constraint, constants)
     return (final_vapor_excess - initial_vapor_excess) / dt + external_forcing
 end
 
@@ -557,7 +564,8 @@ end
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
-                                          pressure_tendency)
+                                          pressure_tendency,
+                                          density_constraint = ρ)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -1102,7 +1110,7 @@ end
                                                      temperature_tendency, pressure_tendency,
                                                      constants)
     vapor_excess_tendency = final_prognostic_vapor_excess_tendency(
-        parameters, 𝒰, qᵛ, q.liquid, q.ice, ρ, constants, ℳ.δqᵛ⁺ˡ, dt_safety,
+        parameters, 𝒰, qᵛ, q.liquid, q.ice, density_constraint, constants, ℳ.δqᵛ⁺ˡ, dt_safety,
         vapor_to_liquid, vapor_to_ice, liquid_to_ice, external_forcing)
     # `saturation_alignment_rate` is intentionally NOT rescaled by the cloud sink limiter: the
     # G&M alignment is its own one-shot saturation adjustment with a local

@@ -98,14 +98,14 @@ Optional fields are allocated and advected only when enabled.
 - `rain`: [`RainDrops`](@ref) skeleton holding the
   [`RainFallSpeed`](@ref) the startup quadrature integrates and the
   [`RainVentilation`](@ref) the evaporation and coupled-adjustment rates read.
+  `nothing` (default) uses `RainDrops(FT)`. Its lookup fields are materialized by
+  `read_lookup_tables`; every supplied parameter is preserved.
 - `vapor_excess`: [`DiagnosticVaporExcess`](@ref) (default) diagnoses the vapor excess
   over liquid from the thermodynamic state; [`PrognosticVaporExcess`](@ref) carries
   ``ρδqᵛ⁺ˡ`` as a prognostic field. Ignored when `process_rates` is supplied.
 - `liquid_fraction`: [`PrognosticLiquidFraction`](@ref) (default) tracks liquid water on
   ice; [`NoLiquidFraction`](@ref) routes that liquid to rain. Ignored when
   `process_rates` is supplied.
-  `nothing` (default) uses `RainDrops(FT)`. Its lookup fields are materialized by
-  `read_lookup_tables`; every supplied parameter is preserved.
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation.
   `nothing` (default) is an open surface: the diagnosed fall speed is retained at the
   bottom face, so all sedimenting species leave the domain. `ImpenetrableBoundaryCondition()`

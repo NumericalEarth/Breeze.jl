@@ -40,9 +40,34 @@ end
     end
 end
 
-@testset "Parcel P3 tendencies match the gridded path: $formulation" for formulation in (:StaticEnergy, :LiquidIcePotentialTemperature)
-    # Parcels must evolve P3 exactly as LES and regional models do: the same adiabatic
-    # forcing from w and the same prognostic vapor-excess tendency.
+@testset "Parcel P3 vapor excess follows phase-change density" begin
+    for formulation in (:StaticEnergy, :LiquidIcePotentialTemperature), mixed_phase in (false, true)
+        model = coupling_parcel(; formulation, mixed_phase)
+        set!(model.velocities.w, 0)
+        state = model.dynamics.state
+        constants = model.thermodynamic_constants
+        initial_density = TD.density(state.𝒰, constants)
+        initial_pressure = TD.air_pressure(state.𝒰, constants)
+        initial_energy = state.ℰ
+        initial_moisture = state.qᵗ
+        τ = model.microphysics.process_rates.sink_limiting_timescale
+
+        # A resting parcel changes only through microphysics. Over one limiter
+        # interval, the predicted excess must match the actual parcel state after
+        # phase-change heating or cooling at fixed pressure.
+        PM.ssp_rk3_parcel_substep!(model, PM.ParcelInitialState(state), τ, 1)
+        saturation = TD.saturation_specific_humidity(state.𝒰, constants, TD.PlanarLiquidSurface())
+        diagnosed_excess = state.𝒰.moisture_mass_fractions.vapor - saturation
+
+        @test TD.density(state.𝒰, constants) != initial_density
+        @test TD.air_pressure(state.𝒰, constants) == initial_pressure
+        @test state.ℰ == initial_energy
+        @test state.qᵗ == initial_moisture
+        @test state.μ.ρδqᵛ⁺ˡ / state.ρ ≈ diagnosed_excess atol=1e-12
+    end
+end
+
+@testset "Parcel P3 tendencies match the scalar state evaluation: $formulation" for formulation in (:StaticEnergy, :LiquidIcePotentialTemperature)
     PPP = Breeze.Microphysics.PredictedParticleProperties
     model = coupling_parcel(; formulation, mixed_phase=true)
     PM.compute_parcel_tendencies!(model)
