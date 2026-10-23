@@ -176,8 +176,7 @@ Rain number loses from:
              rates.rain_homogeneous_number +
              rates.rain_warm_collection_number
 
-    # DSD number correction feedback (the rain PSD diagnosis writes back a bounded nʳ)
-    return ρ * (n_gain - n_loss + rates.rain_number_correction)
+    return ρ * (n_gain - n_loss)
 end
 
 """
@@ -235,10 +234,9 @@ Ice number loses from:
 - Melting (Phase 1)
 - Sublimation and coating evaporation (Phase 1)
 - Aggregation (Phase 2)
-- Global number limiter
 
-The λ-limiter write-back `ice_number_correction` is added separately and is signed: it
-raises `nⁱ` where the tabulated lower bound binds and lowers it where the upper bound does.
+The global ice-number cap and the λ limits are not tendencies: the negative-moisture
+correction clamps the prognostic number into their range before every stage.
 """
 @inline function tendency_ρnⁱ(rates::P3ProcessRates, ρ)
     # Gains from nucleation, freezing, splintering, homogeneous freezing
@@ -247,9 +245,8 @@ raises `nⁱ` where the tabulated lower bound binds and lowers it where the uppe
            rates.cloud_homogeneous_number + rates.rain_homogeneous_number
     # Losses (all positive magnitudes)
     # sublimation_number — ice number loss from sublimation
-    # ni_limit: global Nⁱ cap; relaxation sink above Nⁱ_max/ρ.
-    loss = rates.melting_number + rates.sublimation_number + rates.aggregation + rates.ni_limit
-    return ρ * (gain - loss + rates.ice_number_correction)
+    loss = rates.melting_number + rates.sublimation_number + rates.aggregation
+    return ρ * (gain - loss)
 end
 
 """
@@ -391,8 +388,7 @@ to the cloud mass they consume.
                   rates.cloud_homogeneous_number +
                   rates.cloud_warm_collection_number
 
-    # DSD number correction feedback (the cloud PSD diagnosis writes back a bounded Nᶜˡ)
-    return ρ * (activation_number - number_loss + rates.cloud_number_correction)
+    return ρ * (activation_number - number_loss)
 end
 
 """

@@ -368,15 +368,21 @@ end
 @inline AM.microphysical_state(::P3, ρ, ::Nothing, 𝒰, velocities) = AM.NothingMicrophysicalState(typeof(ρ))
 @inline AM.microphysical_state(::P3, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, velocities) = AM.NothingMicrophysicalState(typeof(ρ))
 
-# Apply the same rime-state writeback to parcel prognostics that
-# `AM.update_microphysical_fields!` applies to grid fields.
+# Apply to parcel prognostics the rime-state writeback of `AM.update_microphysical_fields!`
+# and the number clamp of `AM.clamp_number_concentrations!`, which the grid model applies in
+# the negative-moisture correction.
 @inline function AM.postprocess_microphysical_prognostics(p3::P3, μ::NamedTuple, ρ)
     qⁱ = μ.ρqⁱ / ρ
     qᶠ = μ.ρqᶠ / ρ
     bᶠ = μ.ρbᶠ / ρ
     rime_state = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
-    return merge(μ, (; ρqᶠ = ρ * rime_state.qᶠ,
-                     ρbᶠ = ρ * rime_state.bᶠ))
+    corrected = merge(μ, (; ρqᶠ = ρ * rime_state.qᶠ, ρbᶠ = ρ * rime_state.bᶠ))
+    velocities = (; u = zero(ρ), v = zero(ρ), w = zero(ρ))
+    ℳ = AM.microphysical_state(p3, ρ, corrected, nothing, velocities)
+    n = clamped_number_concentrations(p3, ρ, ℳ)
+    numbers = (; ρnʳ = ifelse(n.clamp_rain, ρ * n.nʳ, corrected.ρnʳ),
+                 ρnⁱ = ifelse(n.clamp_ice, ρ * n.nⁱ, corrected.ρnⁱ))
+    return merge(corrected, numbers, clamped_cloud_number_density(p3.aerosol, p3, ρ, ℳ, corrected))
 end
 
 # Droplet number and unactivated aerosol on the grid. Dispatch on the *type* of
@@ -432,6 +438,9 @@ struct P3IceMomentBounds{FT}
     nⁱ_diagnostic :: FT
     nⁱ :: FT
     ρ_mean :: FT
+    # Number per unit ice mass at the tabulated lower λ bound (the largest admissible
+    # particles); times a mass it gives the smallest number that mass may carry.
+    nⁱ_minimum_per_mass :: FT
 end
 
 @inline function p3_ice_moments(p3::P3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
@@ -454,8 +463,9 @@ end
     FT = typeof(ρ)
     moments = p3_ice_moments(p3, ρ, qⁱ_raw, nⁱ_raw, Fᶠ, Fˡ, ρᶠ)
     ρ_mean = ice_mean_density(p3.ice.bulk, moments.prep)
+    nⁱ_minimum_per_mass = evaluate_at(p3.ice.lambda_limiter.large_q, moments.prep)
     return P3IceMomentBounds{FT}(moments.qⁱ_total, moments.nⁱ_diagnostic,
-                                 moments.nⁱ, ρ_mean)
+                                 moments.nⁱ, ρ_mean, nⁱ_minimum_per_mass)
 end
 
 # Write the consistent rime state back to the prognostic densities. `grid_microphysical_state`
@@ -475,6 +485,65 @@ end
     @inbounds μ.ρqᶠ[i, j, k] = ρ * ℳ.qᶠ
     @inbounds μ.ρbᶠ[i, j, k] = ρ * ℳ.bᶠ
     return nothing
+end
+
+#####
+##### Number bounds as clamps of the prognostic state (negative-moisture correction hook)
+#####
+
+# P3 assumes that every population with mass has a mean size within its tabulated limits
+# and, for ice, a number density below the global cap, and every read of the state bounds
+# the number accordingly (`bounded_rain_number`, `p3_core_ice_properties`,
+# `diagnose_cloud_dsd`). Writing the same bounded numbers back into the prognostic fields,
+# in the negative-moisture correction right after the negative-number clamp, keeps the
+# prognostic state inside that range as well: mass without number cannot persist, a
+# population that a sink overshoot or a transport undershoot pushed out of range is projected
+# back before any halo fill, fall speed or rate reads the stage, and no relaxation tendency is
+# needed to pull it back. Reference P3 adjusts its prognostic numbers the same way. The
+# projection is idempotent and continuous, and it moves no water. Populations below
+# `minimum_mass_mixing_ratio` are left as they are, so the no-op case is exact.
+@inline function clamped_number_concentrations(p3::P3, ρ, ℳ::P3MicrophysicalState)
+    parameters = p3.process_rates
+    qᵐⁱⁿ = p3.minimum_mass_mixing_ratio
+    clamp_rain = ℳ.qʳ >= qᵐⁱⁿ
+    nʳ = bounded_rain_number(ℳ.nʳ, ℳ.qʳ, parameters)
+    clamp_ice = total_ice_mass(ℳ.qⁱ, active_liquid_on_ice(p3, ℳ.qʷⁱ)) >= qᵐⁱⁿ
+    nⁱ = p3_core_ice_properties(p3, ρ, ℳ).nⁱ
+    return (; clamp_rain, nʳ, clamp_ice, nⁱ)
+end
+
+# Cloud droplet number is prognostic only with aerosol activation; the prescribed-Nᶜˡ path
+# has no `ρnᶜˡ` to clamp.
+@inline function clamped_cloud_number(p3::P3, ρ, ℳ::P3MicrophysicalState)
+    nᶜˡ = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ).nᶜˡ
+    return (; clamp = ℳ.qᶜˡ >= p3.minimum_mass_mixing_ratio, nᶜˡ)
+end
+
+@inline function AM.clamp_number_concentrations!(μ, i, j, k, grid, p3::P3, ρ)
+    velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
+    ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, nothing, velocities)
+    n = clamped_number_concentrations(p3, ρ, ℳ)
+    @inbounds μ.ρnʳ[i, j, k] = ifelse(n.clamp_rain, ρ * n.nʳ, μ.ρnʳ[i, j, k])
+    @inbounds μ.ρnⁱ[i, j, k] = ifelse(n.clamp_ice, ρ * n.nⁱ, μ.ρnⁱ[i, j, k])
+    clamp_cloud_number!(μ, i, j, k, p3.aerosol, p3, ρ, ℳ)
+    return nothing
+end
+
+@inline clamp_cloud_number!(μ, i, j, k, ::Nothing, p3, ρ, ℳ) = nothing
+
+@inline function clamp_cloud_number!(μ, i, j, k, ::AerosolActivation, p3, ρ, ℳ)
+    c = clamped_cloud_number(p3, ρ, ℳ)
+    @inbounds μ.ρnᶜˡ[i, j, k] = ifelse(c.clamp, ρ * c.nᶜˡ, μ.ρnᶜˡ[i, j, k])
+    return nothing
+end
+
+# Parcel counterpart: the clamped cloud number density as a NamedTuple to merge into the
+# prognostics, empty when the droplet number is prescribed.
+@inline clamped_cloud_number_density(::Nothing, p3, ρ, ℳ, μ) = (;)
+
+@inline function clamped_cloud_number_density(::AerosolActivation, p3, ρ, ℳ, μ)
+    c = clamped_cloud_number(p3, ρ, ℳ)
+    return (; ρnᶜˡ = ifelse(c.clamp, ρ * c.nᶜˡ, μ.ρnᶜˡ))
 end
 
 # GPU-compatible update_microphysical_fields! for P3.
@@ -608,6 +677,9 @@ struct P3ProcessProps{FT}
     nⁱ :: FT
     nⁱ_diagnostic :: FT
     ρ_mean :: FT
+    # Number per unit ice mass at the lower λ bound; the ice number budget keeps the
+    # population above this floor for the mass that remains.
+    nⁱ_minimum_per_mass :: FT
     Nᶜˡ :: FT
     λʳ :: FT
 end
@@ -900,9 +972,10 @@ end
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     λʳ = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     ρ_mean = ice_mean_density(p3.ice.bulk, ice.prep)
+    nⁱ_minimum_per_mass = evaluate_at(p3.ice.lambda_limiter.large_q, ice.prep)
     return P3ProcessProps{FT}(ice.qᶠ, ice.bᶠ, ice.Fᶠ, ice.Fˡ, ice.ρᶠ,
                               ice.qⁱ_total, ice.nⁱ, ice.nⁱ_diagnostic, ρ_mean,
-                              cloud.Nᶜˡ, λʳ)
+                              nⁱ_minimum_per_mass, cloud.Nᶜˡ, λʳ)
 end
 
 # Every P3 tendency from one process-rate evaluation, for callers with no grid. With no

@@ -17,3 +17,7 @@ end
 # Reactant initializes through `first_time_step!`, and the eager guard branches on traced
 # clock fields; mirrors OceananigansReactantExt's no-ops for the upstream steppers.
 OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::CompressibleAcousticModel{<:ReactantState}, Δt, callbacks) = nothing
+
+# P3's once-per-step check compares the traced clock Δt with `sink_limiting_timescale`.
+AtmosphereModels.microphysics_model_update!(::PredictedParticlePropertiesMicrophysics,
+                                            ::AtmosphereModel{<:Any, <:Any, <:ReactantState}) = nothing
