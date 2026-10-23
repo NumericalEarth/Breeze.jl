@@ -55,12 +55,12 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
 
     ℂʳⁱᵐᵉ₁ = parameters.cloud_ice_collection_efficiency
 
-    qᶜˡ_eff = max(0, qᶜˡ)
+    qᶜˡ₊ = max(0, qᶜˡ)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
+    nⁱ₊ = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     active = temperature_active &
-             (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
+             (qᶜˡ₊ >= p3.minimum_mass_mixing_ratio) &
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 
     # Number-normalized cloud-water collection kernel ⟨A×𝕎⟩ from the lookup table,
@@ -68,7 +68,7 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
     collection_kernel = evaluate_at(p3.ice.collection.cloud_collection, lookups.prep)
 
     # Collection rate = E × qc × ni × ρ × rhofaci × ⟨A×𝕎⟩
-    rate = ℂʳⁱᵐᵉ₁ * qᶜˡ_eff * nⁱ_eff * ρ * lookups.ρ_correction * collection_kernel
+    rate = ℂʳⁱᵐᵉ₁ * qᶜˡ₊ * nⁱ₊ * ρ * lookups.ρ_correction * collection_kernel
 
     return ifelse(active, rate, zero(FT))
 end
@@ -201,22 +201,22 @@ PSD-integrated number-weighted kernel.
 
     ℂʳⁱᵐᵉ₂ = parameters.rain_ice_collection_efficiency
 
-    qʳ_eff = max(0, qʳ)
-    nʳ_eff = max(nʳ, p3.minimum_number_mixing_ratio)
+    qʳ₊ = max(0, qʳ)
+    nʳ₊ = max(nʳ, p3.minimum_number_mixing_ratio)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = lookups.Fˡ
-    nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
+    nⁱ₊ = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     active = temperature_active &
-             (qʳ_eff >= p3.minimum_mass_mixing_ratio) &
+             (qʳ₊ >= p3.minimum_mass_mixing_ratio) &
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 
     m_mean = lookups.m_mean
     density_correction = lookups.ρ_correction
 
     # Diagnose rain DSD slope parameter
-    λʳ = rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
-    nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
+    λʳ = rain_slope_parameter(qʳ₊, nʳ₊, parameters)
+    nʳ_bounded = rain_number_from_slope(qʳ₊, λʳ, parameters)
 
     # Use Table 2 (double-PSD kernel) for ice-rain collection. The table stores the
     # double-PSD integrals with N₀ʳ factored out, so each rate is
@@ -225,7 +225,7 @@ PSD-integrated number-weighted kernel.
                                                             m_mean, λʳ, Fᶠ, Fˡ, ρᶠ)
 
     Nʳ₀ = nʳ_bounded * λʳ
-    prefactor = ℂʳⁱᵐᵉ₂ * Nʳ₀ * nⁱ_eff * ρ * density_correction
+    prefactor = ℂʳⁱᵐᵉ₂ * Nʳ₀ * nⁱ₊ * ρ * density_correction
 
     return (ifelse(active, prefactor * mass_kernel, zero(FT)),
             ifelse(active, prefactor * number_kernel, zero(FT)))

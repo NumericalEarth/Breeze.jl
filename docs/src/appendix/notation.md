@@ -33,6 +33,7 @@ The following table also uses a few conventions that suffuse the source code and
 * `constants` refers to an instance of `ThermodynamicConstants()`
 * `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
 * "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
+* A subscript plus marks the *clamped* form of a quantity, ``x₊``: either ``\max(0, x)`` or ``x`` floored at the scheme's minimum (e.g. ``nⁱ₊``, ``qʳ₊`` in P3). The superscript ``⁺`` is reserved for saturation (``qᵛ⁺``).
 * Phase or mixture identifiers (``d``, ``v``, ``m``, and ``t`` for *total*) appear as superscripts (e.g., ``Rᵈ``, ``cᵖᵐ``, ``qᵗ``, ``ρᵗ``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
 * The superscript ``s`` is reserved for *surface* (e.g. ``pˢ``, ``θˢ``, ``ρˢ``: values at a column's bottom face). Snow therefore takes ``sn`` (e.g. ``qˢⁿ``, ``ρqˢⁿ``, ``𝕎ˢⁿ``). Other multi-letter superscripts keep their own spellings: ``st`` for *standard* (``pˢᵗ``) and ``sw`` for *shortwave* (``τˢʷ``).
 * Momentum and the thermodynamic variable are stored *coupling-density-weighted* (``ρu = ρᵈ u``, and the thermodynamic density ``ρᵡ = ρᵈ χ`` — i.e. ``ρθ = ρᵈ θ`` or ``ρs``). The coupling density is `dynamics_density(dynamics)`: the reference density ``ρᵣ`` for [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), and the prognostic dry-air density ``ρᵈ`` for [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics). Velocity and ``θ`` are recovered by dividing by the coupling density.
@@ -133,6 +134,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{L}^i_r``                 | `ℒⁱᵣ`  | `TC.ice.reference_latent_heat`      | Latent heat of deposition at the energy reference temperature                  |
 | ``\mathcal{L}^l(T)``                | `ℒˡ`   | `liquid_latent_heat(T, constants)`  | Temperature-dependent latent heat of condensation                              |
 | ``\mathcal{L}^i(T)``                | `ℒⁱ`   | `ice_latent_heat(T, constants)`     | Temperature-dependent latent heat of deposition                                |
+| ``\mathcal{L}^{fr}(T)``              | `ℒᶠʳ`  | `fusion_latent_heat(constants, T)`  | Temperature-dependent latent heat of fusion (freezing), ``ℒᶠʳ = ℒⁱ - ℒˡ``; the superscript `fr` abbreviates freezing, since `f` labels rime (`qᶠ`, `bᶠ`) |
 | ``θ₀``                              | `θ₀`   | `RS.potential_temperature`          | (Constant) reference potential temperature for the anelastic formulation       |
 | ``p₀``                              | `p₀`   | `RS.base_pressure`                  | Reference pressure at ``z = 0``: the datum the reference profiles are anchored to |
 | ``pˢ``                              | `pˢ`   | `RS.surface_pressure`               | Reference pressure at a column's bottom face (the terrain surface over terrain), ``p₀`` reduced to that height |

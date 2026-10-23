@@ -117,7 +117,7 @@ jobs:
         shell: bash
         working-directory: ./benchmarking
     container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.13.0'
+      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.13.2'
       options: --gpus=all
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
@@ -371,7 +371,7 @@ jobs:
           benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
-          comment-always: false
+          comment-always: ${{ github.event_name == 'pull_request' }}
           summary-always: true
           alert-threshold: "110%"
           fail-on-alert: false
