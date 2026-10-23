@@ -14,7 +14,6 @@ RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 
 [sources]
 Breeze = {path = ".."}
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "main"} # TODO: remove once Oceananigans 0.116 is registered
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
@@ -23,6 +22,6 @@ CairoMakie = "0.15.8"
 CloudMicrophysics = "0.41, 0.42, 0.43"
 NCDatasets = "0.14"
 NumericalRadiation = "0.1"
-Oceananigans = "0.115, 0.116" # TODO: "0.116" once registered; main still reports 0.115.0
+Oceananigans = "0.116"
 Printf = "< 0.0.1, 1"
 RRTMGP = "1.0.1"
