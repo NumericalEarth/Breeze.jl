@@ -564,6 +564,12 @@ Their variance is chosen so that ``⟨|\\boldsymbol{F}|²⟩ \\, T_f = ε`` (`en
 which is the power input when ``T_f`` is short compared with the time scale of the forced
 eddies; [Eswaran and Pope (1988)](@cite EswaranPope1988) give the correction for longer ``T_f``.
 
+!!! warning "The injected power is less than `energy_injection_rate`"
+    In forced isotropic turbulence at ``Re_λ ≈ 37``, the measured power ``⟨\\boldsymbol{u} ⋅ \\boldsymbol{F}⟩``
+    is about ``0.9 ε`` for ``T_f`` about a tenth of the eddy turnover time, and about ``0.5 ε`` for ``T_f``
+    comparable to the eddy turnover time. To inject a prescribed power, measure ``⟨\\boldsymbol{u} ⋅ \\boldsymbol{F}⟩``
+    and calibrate `energy_injection_rate`, or use [`ConstantPowerBandForcing`](@ref).
+
 The amplitudes are advanced once per time step, on the host, with the exact Ornstein-Uhlenbeck
 transition over the elapsed time, and are held fixed over the Runge-Kutta stages of the step.
 The random numbers come from a counter-based generator seeded with `seed`, so a simulation is reproducible.
