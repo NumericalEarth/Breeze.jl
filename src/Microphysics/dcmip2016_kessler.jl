@@ -738,7 +738,8 @@ end
     Nₛ, valid, needed = sedimentation_substeps(Δt, max_Δt, substep_limit)
     Ns = unsafe_trunc(Int, Nₛ) # 1 ≤ Nₛ ≤ the bound, an integer
     inv_Ns = inv(Nₛ)
-    Δtₛ = ifelse(valid, Δt * inv_Ns, convert(FT, NaN)) # an invalid step's update is NaN
+    Δtₛ = Δt * inv_Ns
+    Δtₛ = ifelse(valid, Δtₛ, oftype(Δtₛ, NaN)) # an invalid step's update is NaN
     @inbounds μ.sedimentation_substeps[i, j, 1] = max(μ.sedimentation_substeps[i, j, 1], needed)
     # Fˢᵘʳᶠ: accumulated surface rain mass flux over subcycles.
     Fˢᵘʳᶠ = zero(FT)
