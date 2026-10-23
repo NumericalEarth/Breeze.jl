@@ -54,61 +54,34 @@ the closure in stable, neutral and convective boundary layers.
 
 ### The mixing length
 
-Every formulation of the primary mixing length ([`AbstractMixingLength`](@ref)) is built from two
-lengths: the wall length ``ℂˢ z``, ``ℂˢ`` times the height above the surface, and the *buoyancy
-penetration depth*
+The primary mixing length ([`AbstractMixingLength`](@ref)) is built from the wall length ``ℂˢ z``
+and the buoyancy penetration depth ``ℓᵇ = \sqrt{e} / N``, which is infinite where ``N² ≤ 0``.
+Every formulation gives ``ℓ = ℂˢ z`` in a neutral surface layer and ``ℓ = ℓᵇ`` in uniform
+stratification; they differ elsewhere:
 
-```math
-ℓᵇ = \\frac{\\sqrt{e}}{N},
-```
+- [`LocalMinimumMixingLength`](@ref): ``ℓ = \min(ℂˢ z, ℓᵇ)``, after Deardorff (1980). In an elevated
+  layer with ``N² ≤ 0``, such as a saturated cloud layer, only the distance to the ground bounds ``ℓ``,
+  so the diffusivity can jump by orders of magnitude.
+- [`GradientLimitedMixingLength`](@ref) (default): ``ℓ(z) = \min(ℂˢ z, \min_{z′}[ℓᵇ(z′) + ℂⁱ |z - z′|])``,
+  which also bounds ``ℓ`` by the distance to nearby stratification, growing at slope ``ℂⁱ``.
+  The envelope before the wall cap is stored in `closure_fields.ℓˢ`.
+- [`IntegralMixingLength`](@ref): the parcel length of
+  [Bougeault and Lacarrère (1989)](@cite BougeaultLacarrere1989), ``ℓ = ℂˢ \min(ℓ↑, ℓ↓)``, where
+  ``ℓ↑`` and ``ℓ↓`` are the distances a parcel with energy ``e / (2 ℂˢ²)`` travels up and down before
+  its accumulated buoyancy deficit consumes that energy. It penetrates inversions more than the
+  gradient-limited length, at the cost of a state-dependent walk per face.
 
-how far an eddy with kinetic energy ``e`` penetrates air of buoyancy frequency ``N`` before its
-kinetic energy is spent against buoyancy; ``ℓᵇ`` is infinite where ``N² ≤ 0``. In a neutral surface
-layer every formulation gives ``ℓ = ℂˢ z`` and in uniformly stratified air every formulation gives
-``ℓ = ℓᵇ``; they differ in what else bounds ``ℓ``:
-
-- [`LocalMinimumMixingLength`](@ref) is the smaller of the two at the eddy's own level,
-  ``ℓ = \\min(ℂˢ z, ℓᵇ)``, the form of Deardorff (1980) and of Nakanishi and Niino's closure without
-  its turbulent-layer depth scale. It knows two obstacles, the ground and the stratification at the
-  level itself, so in an elevated layer whose static stability is not positive — a saturated cloud
-  layer under [`MoistStaticStability`](@ref), a neutral layer — nothing bounds ``ℓ`` but the distance to
-  the ground, kilometers. The diffusivity ``ℂᵘ ℓ \\sqrt{e}`` then jumps by two to five orders of
-  magnitude whenever such a layer forms, mixes it away within a time step and collapses, or, when the
-  layer persists, mixes the whole column.
-- [`GradientLimitedMixingLength`](@ref), the default, separates the wall coefficient ``ℂˢ``
-  from the interior envelope slope ``ℂⁱ``:
-  ``ℓ(z) = \min(ℂˢ z, \min_{z′ > 0}[ℓᵇ(z′) + ℂⁱ |z-z′|])``.
-  Two sweeps compute the stratification envelope, then the wall cap is applied separately.
-  Its uncapped field `closure_fields.ℓˢ` is retained for center reconstruction.
-  Equal slopes recover the original gradient-limited formulation.
-- [`IntegralMixingLength`](@ref) is the parcel formulation of
-  [Bougeault and Lacarrère (1989)](@cite BougeaultLacarrere1989): a parcel released at ``z`` with
-  kinetic energy ``e★ = e / (2 ℂˢ²)`` rises and sinks until the buoyancy deficit it accumulates,
-  ``∫ [b(z) - b(z ± s)] \\, ds``, has consumed its energy, and ``ℓ = ℂˢ \\min(ℓ↑, ℓ↓)``. The energy
-  ``e / (2 ℂˢ²)`` makes it ``ℂˢ z`` against the ground and ``ℓᵇ`` in uniform stratification like the
-  others. It carries the parcel's own energy into the air it penetrates and credits the energy gained
-  crossing unstable air, so it penetrates inversions and mixes convective layers more than the
-  gradient-limited length, whose penetration depth is that of the obstacle; its cost is a walk per
-  face whose length depends on the state.
-
-The standalone mixing-length constructors retain the legacy coefficient `ℂˢ = 1.316`;
-`GradientLimitedMixingLength(ℂˢ=c)` sets `ℂⁱ=c` as well. The default closure instead supplies
-the calibrated pair `ℂˢ = 0.6565692899592015`, `ℂⁱ = 1.5609936948461662`.
-The mixing length is stored in `closure_fields.ℓᵐ`.
+The mixing length is stored in `closure_fields.ℓᵐ`. The standalone constructors default to
+``ℂˢ = 1.316`` (`GradientLimitedMixingLength(ℂˢ=c)` also sets ``ℂⁱ = c``); the default closure uses the
+calibrated ``ℂˢ ≈ 0.657`` and ``ℂⁱ ≈ 1.56``.
 
 ### Static stability
 
-The squared buoyancy frequency ``N²`` enters the closure three times — in the stratification length,
-in the buoyancy flux ``B = -K^c N²``, and (for Richardson-number-dependent stability functions)
-in ``Ri``. It is diagnosed once per time-step stage at the cell interfaces and stored with the
-closure fields as `closure_fields.N²`, so that every term sees the same value. Which ``N²`` is
-diagnosed is the closure's `static_stability`. [`DryStaticStability`](@ref) is the gradient
-``∂_z b = g \, ∂_z \ln θᵨ`` of the buoyancy the dynamics uses, where ``θᵨ`` is the density
-potential temperature, so that liquid and ice water load the air by their mass.
-
-[`MoistStaticStability`](@ref), the default, accounts for saturation. Where the air is subsaturated
-it is the dry gradient; where it is saturated — the nonprecipitating water exceeds the saturation
-specific humidity at the interface — it is the buoyancy frequency of a saturated displacement of
+``N²`` enters the stratification length, the buoyancy flux, and ``Ri``. It is diagnosed once per
+stage at cell interfaces and stored in `closure_fields.N²`, according to the closure's
+`static_stability`. [`DryStaticStability`](@ref) uses ``g \, ∂_z \ln θᵨ``, with ``θᵨ`` the density
+potential temperature. [`MoistStaticStability`](@ref), the default, uses the dry value where
+subsaturated and, where saturated, the saturated buoyancy frequency of
 [Durran and Klemp (1982)](@cite DurranKlemp1982),
 
 ```math
@@ -116,72 +89,39 @@ N²_s = g \left[ \frac{1 + ℒ rˢ / (Rᵈ T)}{1 + ϵ ℒ² rˢ / (cᵖᵈ Rᵈ 
                \left( ∂_z \ln θ + \frac{ℒ}{cᵖᵈ T} ∂_z rˢ \right) - ∂_z rʷ \right],
 ```
 
-in which a rising parcel condenses and its latent heating offsets part of the stratification of
-the dry potential temperature ``θ``; ``rˢ`` and ``rʷ`` are the saturation and nonprecipitating-water
-mixing ratios, ``ϵ = Rᵈ / Rᵛ`` and ``ℒ`` the latent heat. The phase equilibrium of the microphysics
-supplies the saturation test and the latent heating, so over a mixed-phase surface the liquid and
-ice branches interpolate with its liquid fraction. On a saturated adiabat — uniform liquid-water
-potential temperature and total water — ``N²_s`` vanishes to within the approximations of the
-expression, while the dry ``N²`` is strongly positive; inside stratocumulus this is the difference
-between a stratification length that shuts the mixing off and one that lets it through.
+where ``rˢ`` and ``rʷ`` are the saturation and nonprecipitating-water mixing ratios, ``ϵ = Rᵈ / Rᵛ``,
+and ``ℒ`` is the latent heat, taken from the microphysics' phase equilibrium. ``N²_s`` nearly vanishes
+on a saturated adiabat, so mixing is not shut off inside stratocumulus.
 
 ### Stability functions
 
-The default stability functions are [`RationalStabilityFunction`](@ref), described below.
-[`ConstantStabilityFunctions`](@ref) remain available explicitly.
-For constant stability functions, three useful relations are:
-
-- the turbulent Prandtl number is ``Pr = K^u / K^c = ℂᵘ / ℂᶜ``, and the TKE Schmidt number
-  ``K^u / K^e = ℂᵘ / ℂᵉ``;
-- in a neutral constant-stress layer, where ``ℓ = ℂˢ z``, the closure is Prandtl's mixing-length
-  model: production balances dissipation at ``e / u_\star² = 1 / \sqrt{ℂᵘ ℂᴰ}``, and the wind
-  profile is logarithmic with von Kármán constant ``κ = ℂˢ (ℂᵘ³ / ℂᴰ)^{1/4}``;
-- in a stably stratified layer far from the surface, where ``ℓ = \sqrt{e} / N``, turbulent
-  kinetic energy grows below and decays above the gradient Richardson number
-  ``Ri^\dagger = ℂᵘ / (ℂᶜ + ℂᴰ)``.
-
-The legacy constant coefficients, ``ℂᵘ = 0.149``, ``ℂᶜ = 0.201``, ``ℂᵉ = 0.298``, ``ℂᴰ = 0.388``, are the
-Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009) re-expressed
-for this normalization of the mixing length; they give ``κ = 0.40``, ``e / u_\star² = 4.2``,
-``Pr = 0.74`` and ``Ri^\dagger = 0.25``. They are placeholders for calibration.
-
-### Calibrated rational defaults and provenance
-
-[`RationalStabilityFunction`](@ref) uses
-``S(Ri) = C⁰ + (C^± - C⁰) x^p / (1+x^p)``, with ``x = |Ri|/Ri^±``.
-Both exponents are one. The function is continuous at neutral but generally has a kink there;
-this release does not claim validated automatic differentiation through the full model.
-
-The default coefficients are the evaluated member 324 of generation 11 of
-`P60-west-v3-T1-N800-s3-PrON` (800 members, seed 3, evaluated pseudotime
-0.1783616628408866). Its data RMS is 1.7068703929788749 and neutral
-``Pr₀ = 0.8001428358397753``. It was the lowest data loss among 374 exported
-generation-mean/data-best vectors across 19 arms available to the selection, with or without
-the neutral-Prandtl filter. This is a finite-progress training fit, **not** a converged
-optimum, a held-out validation result, or an exhaustive search of unexported checkpoints.
-The provisional-60 suite excludes the unresolved native-case-61 parity case.
-The stable transition scale and friction-velocity flux coefficient are near their prior bounds.
+The default is [`RationalStabilityFunction`](@ref),
+``S(Ri) = C⁰ + (C^± - C⁰) x / (1 + x)`` with ``x = |Ri| / Ri^±``, which is continuous but kinked at
+neutral. Its calibrated coefficients (rounded) are
 
 | Function | Unstable limit | Neutral | Stable limit |
 |:--|--:|--:|--:|
-| momentum | 0.36113018152281917 | 0.15900569445804447 | 0.010956324667755535 |
-| scalars | 0.08170851244564359 | 0.19872163735761372 | 0.532550451554028 |
-| TKE | 1.9176239082347815 | 0.00731292096489522 | 0.02299192764300173 |
-| dissipation | 0.005407068485856925 | 0.029182354585815418 | 0.8022301180336915 |
+| momentum | 0.361 | 0.159 | 0.0110 |
+| scalars | 0.0817 | 0.199 | 0.533 |
+| TKE | 1.92 | 0.00731 | 0.0230 |
+| dissipation | 0.00541 | 0.0292 | 0.802 |
 
-The scales are `Ri⁻ = 12.669701017862883` and `Ri⁺ = 0.0501147186437052`.
-The wall coefficient is derived, not independently fitted:
-``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} = 0.6565692899592015``.
-The independent interior slope is `ℂⁱ = 1.5609936948461662`.
+with ``Ri⁻ ≈ 12.7`` and ``Ri⁺ ≈ 0.0501``. The wall coefficient follows from
+``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4}``. These come from an unconverged calibration fit
+and are not independently validated.
 
-Reproducing the calibrated setup **also requires** the surface TKE-density flux
-``ρ₀(ℂᵂu★ u★³ + ℂᵂʷ wΔ³)``, with
-`ℂᵂu★ = 0.01002182909933591` and `ℂᵂʷ = 0.013669219822302736`.
-[`tke_surface_flux`](@ref) implements this scalar calculation; the closure does not
-silently add a boundary condition. Use each case's lowest-center reference density, friction
-velocity cubed, and convective velocity cubed
-``wΔ³ = Δz₁ \max(Jᵇ, 0)``, where ``Δz₁`` is the bottom-cell thickness.
-For a constant-input example, construct the bottom condition explicitly:
+[`ConstantStabilityFunctions`](@ref) give ``Pr = ℂᵘ / ℂᶜ``, a log layer with
+``κ = ℂˢ (ℂᵘ³ / ℂᴰ)^{1/4}`` and ``e / u_\star² = 1 / \sqrt{ℂᵘ ℂᴰ}``, and a critical Richardson
+number ``Ri^\dagger = ℂᵘ / (ℂᶜ + ℂᴰ)``. Their defaults, ``ℂᵘ = 0.149``, ``ℂᶜ = 0.201``,
+``ℂᵉ = 0.298``, ``ℂᴰ = 0.388``, are the coefficients of
+[Nakanishi and Niino (2009)](@cite NakanishiNiino2009), giving ``κ = 0.40``, ``Pr = 0.74`` and
+``Ri^\dagger = 0.25``.
+
+### Surface TKE flux
+
+The calibrated closure also assumes a surface flux of TKE density,
+``ρ₀ (ℂᵂu★ u★³ + ℂᵂʷ wΔ³)`` with ``wΔ³ = Δz₁ \max(Jᵇ, 0)``, which the closure does not add by itself.
+[`tke_surface_flux`](@ref) computes it for use in a boundary condition:
 
 ```jldoctest
 using Breeze, Oceananigans
@@ -195,22 +135,11 @@ TKEBasedTurbulenceClosure().mixing_length.ℂⁱ
 1.5609936948461662
 ```
 
-For time-varying cases, use a discrete boundary callback that evaluates
-`tke_surface_flux` using the prescribed series at `clock.time`.
-The checkpoint SHA-256 is
-`bcb1b9c03ce5068f5deb81efc5f0617e8be74d777fd6b47f24d76e9b1f7f6140`;
-the calibration suite fingerprint is
-`b371f23d633f27207c0ada2404c7d46cb999d49c490b69e338b2960b732d7cb2`.
-No calibration drivers or checkpoint files are included in this PR.
-
 ### Numerics
 
 The diffusivities are computed at the cell interfaces where the fluxes live, from the stored mixing
-length and ``\sqrt{e}`` reconstructed from the cell centers and floored at `minimum_tke`; the
-dissipation reconstructs the uncapped stratification envelope at the center using `ℂⁱ`, then
-bounds it by the center's local penetration depth and wall length `ℂˢ z`.
-The numerics of the TKE equation
-follow CATKE. The sinks — dissipation and the negative part of the buoyancy flux, as the rate
+length and ``\sqrt{e}`` reconstructed from the cell centers and floored at `minimum_tke`.
+The numerics of the TKE equation follow CATKE. The sinks — dissipation and the negative part of the buoyancy flux, as the rate
 ``-Lᵉ = Sᴰ \sqrt{e} / ℓ + |B⁻| / e``, and the damping of ``e`` that advection drives negative, at
 the rate ``1/τ`` — enter the vertically implicit tridiagonal solve of every time-step stage together
 with the vertical diffusion of ``e``, so that ``e`` stays positive for any time step. The sources —

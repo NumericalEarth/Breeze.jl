@@ -45,14 +45,8 @@ automatically at kernel time.
 
 # Keyword arguments
 - `advection`: the discretization of ``w^s ∂_z \\overline{ϕ}``. The default `UpwindBiased(order = 1)`
-  reconstructs ``\\overline{ϕ}`` at the faces from the upwind side and forms
-  ``w^s ∂_z \\overline{ϕ} = ∂_z(w^s \\overline{ϕ}) - \\overline{ϕ} \\, ∂_z w^s``, which damps a two-cell (``2Δz``)
-  mode and does not undershoot at sharp gradients, such as an inversion moving through the grid; first-order
-  upwind is the discretization most large-eddy simulation codes use for prescribed subsidence. Higher-order
-  upwind-biased schemes (`UpwindBiased(order = 3)`, `WENO(order = 5)`) damp the mode as well, but may
-  over- or undershoot at a sharp gradient. `Centered()` instead averages the centered face gradients
-  ``w^s δ_z \\overline{ϕ}`` to the cell — a centered difference that does not see a ``2Δz`` mode, which
-  subsidence therefore cannot remove, so that a ``2Δz`` wave excited next to a sharp gradient persists.
+  damps ``2Δz`` modes and does not undershoot at sharp gradients. `Centered()` cannot see a ``2Δz`` mode,
+  so it persists; higher-order upwind schemes damp it but may over- or undershoot.
 
 The horizontal average is computed automatically during `update_state!`.
 
@@ -132,14 +126,8 @@ end
     return wᵏ * _biased_interpolate_zᵃᵃᶠ(i, j, k, grid, scheme, bias(wᵏ), ϕ)
 end
 
-# wˢ ∂z ϕ̄ = ∂z(wˢ ϕ̄) - ϕ̄ ∂z wˢ with upwind-biased face values: the advective form, so that a
-# prescribed wˢ with ∂z wˢ ≠ 0 does not act as a source, built from the flux form so that the
-# reconstruction is the one the scheme defines. A boundary cell cannot be advected by the scheme
-# alone: with subsidence through the lid (or ascent through the floor) the upwind value is a halo
-# value, which the field's own boundary condition sets to the boundary cell itself, so that the
-# cell would see no gradient and drift away from the column. It is carried at the rate of its
-# neighbour instead, as with the centered discretization, so that the boundary gradient has no
-# tendency of its own.
+# wˢ ∂z ϕ̄ = ∂z(wˢ ϕ̄) - ϕ̄ ∂z wˢ in flux form, so a divergent wˢ is not a source.
+# Boundary cells use their neighbour's tendency, since their upwind value is a halo copy of themselves.
 @inline function w_dz_ϕᶜᶜᶜ(i, j, k, grid, scheme::AbstractUpwindBiasedAdvectionScheme, wˢ, ϕ_avg)
     Nz = grid.Nz
     kᵉ = clamp(ifelse(k == 1, 2, ifelse(k == Nz, Nz - 1, k)), 1, Nz)
