@@ -1102,7 +1102,7 @@ end
     # the change of θ into that of ρᵈ θ. The transported enthalpy belongs to the phase;
     # only the local composition derivative renormalizes.
     content(; renormalize) = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ; renormalize) for k in 1:Nz]
-    enthalpy = [constants.liquid.heat_capacity * T[k] - constants.liquid.reference_latent_heat for k in 1:Nz]
+    enthalpy = [constants.liquid.heat_capacity * T[k] - Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid) for k in 1:Nz]
     β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], p[k], pˢᵗ; fixed_volume=true) for k in 1:Nz]
     expected(renormalize) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; renormalize), enthalpy, β;
                                                             coupling = qᵈ)
