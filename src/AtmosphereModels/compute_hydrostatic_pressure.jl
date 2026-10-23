@@ -3,7 +3,7 @@
 #####
 
 using ..Thermodynamics: dry_air_gas_constant, surface_pressure_from_cell_center
-using Oceananigans.Operators: Δzᶜᶜᶜ
+using Oceananigans.Operators: Δzᶜᶜᶜ, Δz⁻¹ᶜᶜᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
 @kernel function _compute_hydrostatic_pressure!(ph, grid, p, ρ, temperature, constants)
@@ -25,10 +25,11 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
         for k in 1:Nz
             T_k = temperature[i, j, k]
             Δz = Δzᶜᶜᶜ(i, j, k, grid)
+            Δz⁻¹ = Δz⁻¹ᶜᶜᶜ(i, j, k, grid)
             H = Rᵈ * T_k / g
 
             # Compute cell-mean pressure analytically for an isothermal grid
-            ph[i, j, k] = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H))
+            ph[i, j, k] = p_interface_bottom * (H * Δz⁻¹) * (1 - exp(-Δz / H))
 
             # Compute pressure at top interface of this cell (becomes bottom for next cell)
             p_interface_bottom = exp(-Δz / H) * p_interface_bottom

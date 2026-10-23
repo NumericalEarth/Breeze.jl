@@ -78,8 +78,8 @@ using Breeze.Thermodynamics: newton_hydrostatic_pressure
             Π_init = (p⁻ / pˢᵗ)^κ - g * Δz / (cᵖ * θ)
             p_init = pˢᵗ * Π_init^(1 / κ)
 
-            p5  = newton_hydrostatic_pressure(p⁻, ρ⁻, θ, Rᵐ, κ, Δz, pˢᵗ, g, p_init, FixedIterations(5))
-            p30 = newton_hydrostatic_pressure(p⁻, ρ⁻, θ, Rᵐ, κ, Δz, pˢᵗ, g, p_init, FixedIterations(30))
+            p5  = newton_hydrostatic_pressure(p⁻, ρ⁻, θ, Rᵐ, κ, 1 / Δz, pˢᵗ, g, p_init, FixedIterations(5))
+            p30 = newton_hydrostatic_pressure(p⁻, ρ⁻, θ, Rᵐ, κ, 1 / Δz, pˢᵗ, g, p_init, FixedIterations(30))
             @test p5 ≈ p30 rtol=10 * eps(FT)
         end
     end

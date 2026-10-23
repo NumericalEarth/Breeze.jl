@@ -26,6 +26,10 @@ struct TerrainFollowingVerticalDiscretization{C, D, E, F, FM} <: AbstractVertica
     Δᵃᵃᶠ :: E
     "Cell-centered reference spacing Δr"
     Δᵃᵃᶜ :: F
+    "Reciprocal of the face-centered reference spacing Δr"
+    Δ⁻¹ᵃᵃᶠ :: E
+    "Reciprocal of the cell-centered reference spacing Δr"
+    Δ⁻¹ᵃᵃᶜ :: F
     "Terrain-decay formulation (LinearDecay | TwoLevelDecay) — the generator of σ and the slopes"
     formulation :: FM
 end
@@ -39,7 +43,7 @@ The terrain components inside `formulation` are filled later by
 [`materialize_terrain!`](@ref) once the horizontal grid exists.
 """
 TerrainFollowingVerticalDiscretization(r_faces; formulation = LinearDecay()) =
-    TerrainFollowingVerticalDiscretization(r_faces, nothing, nothing, nothing, formulation)
+    TerrainFollowingVerticalDiscretization(r_faces, nothing, nothing, nothing, nothing, nothing, formulation)
 
 const TFVD = TerrainFollowingVerticalDiscretization
 const RegularTerrainFollowingVerticalDiscretization = TerrainFollowingVerticalDiscretization{<:Any, <:Any, <:Any, <:Number}
@@ -60,7 +64,7 @@ Oceananigans.Grids.coordinate_summary(::Oceananigans.Grids.Bounded, z::TFVD, nam
 # reference coordinate arrays are built later by `generate_coordinate`.
 function Oceananigans.Grids.validate_dimension_specification(T, ξ::TFVD, dir, N, FT)
     cᶠ = Oceananigans.Grids.validate_dimension_specification(T, ξ.cᵃᵃᶠ, dir, N, FT)
-    return TerrainFollowingVerticalDiscretization(cᶠ, ξ.cᵃᵃᶜ, ξ.Δᵃᵃᶠ, ξ.Δᵃᵃᶜ, ξ.formulation)
+    return TerrainFollowingVerticalDiscretization(cᶠ, ξ.cᵃᵃᶜ, ξ.Δᵃᵃᶠ, ξ.Δᵃᵃᶜ, ξ.Δ⁻¹ᵃᵃᶠ, ξ.Δ⁻¹ᵃᵃᶜ, ξ.formulation)
 end
 
 Adapt.adapt_structure(to, z::TFVD) =
@@ -68,6 +72,8 @@ Adapt.adapt_structure(to, z::TFVD) =
                                            Adapt.adapt(to, z.cᵃᵃᶜ),
                                            Adapt.adapt(to, z.Δᵃᵃᶠ),
                                            Adapt.adapt(to, z.Δᵃᵃᶜ),
+                                           Adapt.adapt(to, z.Δ⁻¹ᵃᵃᶠ),
+                                           Adapt.adapt(to, z.Δ⁻¹ᵃᵃᶜ),
                                            Adapt.adapt(to, z.formulation))
 
 Oceananigans.Architectures.on_architecture(arch, z::TFVD) =
@@ -75,6 +81,8 @@ Oceananigans.Architectures.on_architecture(arch, z::TFVD) =
                                            Oceananigans.Architectures.on_architecture(arch, z.cᵃᵃᶜ),
                                            Oceananigans.Architectures.on_architecture(arch, z.Δᵃᵃᶠ),
                                            Oceananigans.Architectures.on_architecture(arch, z.Δᵃᵃᶜ),
+                                           Oceananigans.Architectures.on_architecture(arch, z.Δ⁻¹ᵃᵃᶠ),
+                                           Oceananigans.Architectures.on_architecture(arch, z.Δ⁻¹ᵃᵃᶜ),
                                            Oceananigans.Architectures.on_architecture(arch, z.formulation))
 
 # Build the reference (r) coordinate arrays exactly like a static z grid; the
@@ -87,12 +95,13 @@ function Oceananigans.Grids.generate_coordinate(FT, topo, size, halo, coordinate
     Nz = size[3]; Hz = halo[3]
     r_faces = coordinate.cᵃᵃᶠ
     Lz, rᵃᵃᶠ, rᵃᵃᶜ, Δrᵃᵃᶠ, Δrᵃᵃᶜ = Oceananigans.Grids.generate_coordinate(FT, topo[3](), Nz, Hz, r_faces, :r, arch)
+    Δr⁻¹ᵃᵃᶠ, Δr⁻¹ᵃᵃᶜ = map(Δ -> on_architecture(arch, 1 ./ on_architecture(CPU(), Δ)), (Δrᵃᵃᶠ, Δrᵃᵃᶜ))
 
     # Allocate the formulation's terrain-component arrays (zero-filled; the
     # bottom of the domain is taken as z = 0, so z_top = Lz). Filled later by
     # `materialize_terrain!`.
     formulation = allocate_formulation(coordinate.formulation, FT, arch, size, halo, topo, Lz)
-    z = TerrainFollowingVerticalDiscretization(rᵃᵃᶠ, rᵃᵃᶜ, Δrᵃᵃᶠ, Δrᵃᵃᶜ, formulation)
+    z = TerrainFollowingVerticalDiscretization(rᵃᵃᶠ, rᵃᵃᶜ, Δrᵃᵃᶠ, Δrᵃᵃᶜ, Δr⁻¹ᵃᵃᶠ, Δr⁻¹ᵃᵃᶜ, formulation)
     return Lz, z
 end
 
@@ -124,6 +133,10 @@ const TerrainFollowingGrid = AbstractUnderlyingGrid{<:Any, <:Any, <:Any, <:Ocean
 
 @inline Oceananigans.Operators.σⁿ(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy, ℓz) =
     terrain_following_σ(i, j, k, grid, grid.z.formulation, ℓx, ℓy, ℓz)
+
+# σ is derived from the formulation rather than stored, so its reciprocal is computed too.
+@inline Oceananigans.Operators.σ⁻¹ⁿ(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy, ℓz) =
+    1 / Oceananigans.Operators.σⁿ(i, j, k, grid, ℓx, ℓy, ℓz)
 
 # The terrain is static, so the previous-step scaling equals the current one.
 # (The generic fallback returns `one(grid)` ≡ a flat grid, which makes any
@@ -180,16 +193,23 @@ const TerrainFollowingGrid = AbstractUnderlyingGrid{<:Any, <:Any, <:Any, <:Ocean
 @inline Oceananigans.Grids._node(i, j, k, grid::TerrainFollowingGrid, ℓx::Nothing, ℓy::Nothing, ℓz::Nothing) =
     tuple()
 
-# Vertical spacing = reference spacing × Jacobian, mirroring the mutable-grid
-# operators but dispatching on the terrain-following grid type.
+# Vertical spacing = reference spacing × Jacobian (and its reciprocal), mirroring the
+# mutable-grid operators but dispatching on the terrain-following grid type.
 for LX in (:ᶠ, :ᶜ), LY in (:ᶠ, :ᶜ), LZ in (:ᶠ, :ᶜ)
     zspacing = Symbol(:Δz, LX, LY, LZ)
     rspacing = Symbol(:Δr, LX, LY, LZ)
+    rcp_zspacing = Symbol(:Δz⁻¹, LX, LY, LZ)
+    rcp_rspacing = Symbol(:Δr⁻¹, LX, LY, LZ)
     ℓx = LX == :ᶜ ? :Center : :Face
     ℓy = LY == :ᶜ ? :Center : :Face
     ℓz = LZ == :ᶜ ? :Center : :Face
-    @eval @inline Oceananigans.Operators.$zspacing(i, j, k, grid::TerrainFollowingGrid) =
-        Oceananigans.Operators.$rspacing(i, j, k, grid) * Oceananigans.Operators.σⁿ(i, j, k, grid, $ℓx(), $ℓy(), $ℓz())
+    @eval begin
+        @inline Oceananigans.Operators.$zspacing(i, j, k, grid::TerrainFollowingGrid) =
+            Oceananigans.Operators.$rspacing(i, j, k, grid) * Oceananigans.Operators.σⁿ(i, j, k, grid, $ℓx(), $ℓy(), $ℓz())
+
+        @inline Oceananigans.Operators.$rcp_zspacing(i, j, k, grid::TerrainFollowingGrid) =
+            Oceananigans.Operators.$rcp_rspacing(i, j, k, grid) * Oceananigans.Operators.σ⁻¹ⁿ(i, j, k, grid, $ℓx(), $ℓy(), $ℓz())
+    end
 end
 
 # Horizontal slope of the coordinate surfaces, (∂z/∂x)_r and (∂z/∂y)_r, at the

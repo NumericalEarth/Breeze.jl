@@ -24,6 +24,7 @@ SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 
 [sources]
 Breeze = {path = ".."}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "ss/stored-reciprocal-metrics"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"

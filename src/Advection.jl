@@ -27,7 +27,7 @@ using Adapt: Adapt
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: Field, ZeroField
 using Oceananigans.Grids: Center
-using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ, Az⁻¹ᶜᶜᶠ
 using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.TimeSteppers: time_discretization
 using DocStringExtensions: TYPEDSIGNATURES
@@ -206,7 +206,7 @@ Returns a positive value for downward (out-of-domain) flux.
 @inline function bottom_advective_tracer_flux(i, j, grid, advection, ρ, w, c)
     flux_Az = _advective_tracer_flux_z(i, j, 1, grid, advection, w, c)
     ρ_face = ℑzᵃᵃᶠ(i, j, 1, grid, ρ)
-    explicit_flux = -ρ_face * flux_Az / Azᶜᶜᶠ(i, j, 1, grid)
+    explicit_flux = -ρ_face * flux_Az * Az⁻¹ᶜᶜᶠ(i, j, 1, grid)
     return explicit_flux + implicit_bottom_advective_tracer_flux(i, j, grid, advection, ρ_face, w, c)
 end
 

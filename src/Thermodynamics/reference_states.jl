@@ -4,7 +4,7 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCon
 using Oceananigans.Fields: AbstractField, CenterField, ZeroField
 using Oceananigans.Grids: znode, Face, topology, Flat
 using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ
-using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ
+using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ, Δz⁻¹ᶜᶜᶠ
 using Oceananigans.Utils: launch!
 
 using Adapt: Adapt, adapt
@@ -1079,21 +1079,21 @@ end
 end
 
 # Newton solve of the discrete hydrostatic balance for the pressure pₖ at one face,
-# given the level below (p⁻, ρ⁻) and the level-local moist constants. The residual
-#   F(p) = p / Δz + Aₖ p^(1−κₖ) − Cₖ,   Aₖ = g pˢᵗ^κₖ / (2 Rᵐₖ θₖ),  Cₖ = p⁻/Δz − g ρ⁻/2
+# given the level below (p⁻, ρ⁻), the reciprocal spacing Δz⁻¹ and the level-local moist constants. The residual
+#   F(p) = p Δz⁻¹ + Aₖ p^(1−κₖ) − Cₖ,   Aₖ = g pˢᵗ^κₖ / (2 Rᵐₖ θₖ),  Cₖ = p⁻ Δz⁻¹ − g ρ⁻/2
 # is monotone increasing in p, so Newton converges quadratically from the continuous-Π
 # initial guess pₖ — `FixedIterations(5)` reaches machine precision across the atmospheric
 # range (verified in test/solvers.jl), and both call sites (the per-column Exner kernel and
 # the terrain reference-state solve) use that same count. The iteration is delegated to the
 # unified `newton_solve` driver (see Breeze.Solvers); passing a `FixedIterations` solver
 # keeps the trip count fixed so the loop unrolls to straight-line code on the GPU.
-@inline function newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, solver)
+@inline function newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz⁻¹, pˢᵗ, g, pₖ, solver)
     Aₖ = g * pˢᵗ^κₖ / (2 * Rᵐₖ * θₖ)
-    Cₖ = p⁻ / Δz - g * ρ⁻ / 2
+    Cₖ = p⁻ * Δz⁻¹ - g * ρ⁻ / 2
     @inline function residual_and_derivative(p)
         ρp = p^(-κₖ)
-        f  = p / Δz + Aₖ * p * ρp - Cₖ
-        f′ = 1 / Δz + Aₖ * (1 - κₖ) * ρp
+        f  = p * Δz⁻¹ + Aₖ * p * ρp - Cₖ
+        f′ = Δz⁻¹ + Aₖ * (1 - κₖ) * ρp
         return f, f′
     end
     return newton_solve(residual_and_derivative, solver, pₖ)
@@ -1166,7 +1166,7 @@ end
         pᵏ = pˢᵗ * Πᵏ_init^(1/κᵏ)
 
         # Newton solve of the discrete-balance residual to machine precision.
-        pᵏ = newton_hydrostatic_pressure(p⁻, ρ⁻, θᵏ, Rᵐᵏ, κᵏ, Δz_face, pˢᵗ, g, pᵏ, FixedIterations(5))
+        pᵏ = newton_hydrostatic_pressure(p⁻, ρ⁻, θᵏ, Rᵐᵏ, κᵏ, Δz⁻¹ᶜᶜᶠ(i, j, k, grid), pˢᵗ, g, pᵏ, FixedIterations(5))
         Πᵏ = (pᵏ / pˢᵗ)^κᵏ
         ρᵏ = pᵏ / (Rᵐᵏ * θᵏ * Πᵏ)
         @inbounds begin
