@@ -3,7 +3,7 @@
 ##### kinetic energy, in the spirit of CATKE (Wagner et al. 2025)
 #####
 #####   Kᵘ = Sᵘ ℓ √e,   Kᶜ = Sᶜ ℓ √e,   Kᵉ = Sᵉ ℓ √e,   ε = Sᴰ e^{3/2} / ℓ
-#####   ℓ  = a mixing-length formulation built on the buoyancy penetration depth ℓᵇ = √e / N and the wall length Cˢ z
+#####   ℓ  = a mixing-length formulation built on the buoyancy penetration depth ℓᵇ = √e / N and the wall length ℂˢ z
 #####   ∂ₜ(ρe) + ∇·(ρ u e) = ∂z(ρ Kᵉ ∂z e) + ρ (P + B − ε),   P = Kᵘ S²,  B = −Kᶜ N²
 #####
 ##### The static stability N² is diagnosed once per stage at the cell interfaces and stored with the
@@ -12,11 +12,11 @@
 ##### dynamics, ∂z_b, where the air is subsaturated, and the buoyancy frequency of a saturated
 ##### displacement where it is saturated; `DryStaticStability` is ∂z_b everywhere (static_stability.jl).
 #####
-##### Three formulations of the mixing length share the wall coefficient Cˢ and are computed column by
-##### column, once per stage, into `closure_fields.ℓᵐ`: `LocalMinimumMixingLength`, ℓ = min(Cˢ z, ℓᵇ),
+##### Three formulations of the mixing length share the wall coefficient ℂˢ and are computed column by
+##### column, once per stage, into `closure_fields.ℓᵐ`: `LocalMinimumMixingLength`, ℓ = min(ℂˢ z, ℓᵇ),
 ##### which knows only the ground and the stratification at the eddy's own level; `IntegralMixingLength`,
 ##### the parcel lengths of Bougeault & Lacarrère (1989), a walk per face; and the default
-##### `GradientLimitedMixingLength`, with separate wall coefficient Cˢ and interior slope Cⁱ — the lower envelope of
+##### `GradientLimitedMixingLength`, with separate wall coefficient ℂˢ and interior slope ℂⁱ — the lower envelope of
 ##### every level's penetration depth, two sweeps per column, the construction of NEMO's TKE scheme —
 ##### which bounds ℓ by the stratified air above and below an elevated neutral or unstable layer, where
 ##### the local minimum lets it grow to the distance to the ground.
@@ -51,17 +51,17 @@ Constant stability functions for [`TKEBasedTurbulenceClosure`](@ref): the mixing
 momentum, tracers and turbulent kinetic energy are constant multiples of the primary length ``ℓ``,
 
 ```math
-ℓᵘ = Cᵘ ℓ, \\qquad ℓᶜ = Cᶜ ℓ, \\qquad ℓᵉ = Cᵉ ℓ,
+ℓᵘ = ℂᵘ ℓ, \\qquad ℓᶜ = ℂᶜ ℓ, \\qquad ℓᵉ = ℂᵉ ℓ,
 ```
 
-and the dissipation length is ``ℓᴰ = ℓ / Cᴰ``, so that ``ε = Cᴰ e^{3/2} / ℓ``.
+and the dissipation length is ``ℓᴰ = ℓ / ℂᴰ``, so that ``ε = ℂᴰ e^{3/2} / ℓ``.
 
-The turbulent Prandtl number is ``Pr = Cᵘ / Cᶜ`` and the TKE Schmidt number ``Cᵘ / Cᵉ``. In a
-neutral constant-stress layer, where ``ℓ = Cˢ z`` with ``Cˢ`` the wall coefficient of
-[`AbstractMixingLength`](@ref), production balances dissipation at ``e / u_\\star² = 1 / \\sqrt{Cᵘ Cᴰ}``
-with a logarithmic wind profile of von Kármán constant ``κ = Cˢ (Cᵘ³ / Cᴰ)^{1/4}``; in stratified
+The turbulent Prandtl number is ``Pr = ℂᵘ / ℂᶜ`` and the TKE Schmidt number ``ℂᵘ / ℂᵉ``. In a
+neutral constant-stress layer, where ``ℓ = ℂˢ z`` with ``ℂˢ`` the wall coefficient of
+[`AbstractMixingLength`](@ref), production balances dissipation at ``e / u_\\star² = 1 / \\sqrt{ℂᵘ ℂᴰ}``
+with a logarithmic wind profile of von Kármán constant ``κ = ℂˢ (ℂᵘ³ / ℂᴰ)^{1/4}``; in stratified
 steady state, where ``ℓ = \\sqrt{e} / N``, the gradient Richardson number is
-``Ri^\\dagger = Cᵘ / (Cᶜ + Cᴰ)``.
+``Ri^\\dagger = ℂᵘ / (ℂᶜ + ℂᴰ)``.
 
 The defaults are the Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009)
 re-expressed for this normalization of the mixing length (``κ = 0.4``, ``e/u_\\star² = 4.2``,
@@ -74,28 +74,28 @@ Fields
 $(TYPEDFIELDS)
 """
 Base.@kwdef struct ConstantStabilityFunctions{FT}
-    "momentum stability function, ``ℓᵘ = Cᵘ ℓ``"
-    Cᵘ :: FT = 0.149
-    "tracer stability function, ``ℓᶜ = Cᶜ ℓ``"
-    Cᶜ :: FT = 0.201
-    "turbulent kinetic energy stability function, ``ℓᵉ = Cᵉ ℓ``"
-    Cᵉ :: FT = 0.298
-    "dissipation stability function, ``ℓᴰ = ℓ / Cᴰ``"
-    Cᴰ :: FT = 0.388
+    "momentum stability function, ``ℓᵘ = ℂᵘ ℓ``"
+    ℂᵘ :: FT = 0.149
+    "tracer stability function, ``ℓᶜ = ℂᶜ ℓ``"
+    ℂᶜ :: FT = 0.201
+    "turbulent kinetic energy stability function, ``ℓᵉ = ℂᵉ ℓ``"
+    ℂᵉ :: FT = 0.298
+    "dissipation stability function, ``ℓᴰ = ℓ / ℂᴰ``"
+    ℂᴰ :: FT = 0.388
 end
 
 ## `Base.@kwdef` on a `{FT}` struct requires every field to share one type, so mixed
-## integer/float keyword arguments — `ConstantStabilityFunctions(Cᵉ = 1)` — are promoted here.
-ConstantStabilityFunctions(Cᵘ, Cᶜ, Cᵉ, Cᴰ) = ConstantStabilityFunctions(promote(Cᵘ, Cᶜ, Cᵉ, Cᴰ)...)
+## integer/float keyword arguments — `ConstantStabilityFunctions(ℂᵉ = 1)` — are promoted here.
+ConstantStabilityFunctions(ℂᵘ, ℂᶜ, ℂᵉ, ℂᴰ) = ConstantStabilityFunctions(promote(ℂᵘ, ℂᶜ, ℂᵉ, ℂᴰ)...)
 
 Base.summary(sf::ConstantStabilityFunctions{FT}) where FT = "ConstantStabilityFunctions{$FT}"
 
 # The lines under the stability functions' summary, with `prefix` for nesting in the closure's show
 function show_stability_function_lines(io::IO, sf::ConstantStabilityFunctions, prefix)
-    print(io, prefix, "├── Cᵘ: ", prettysummary(sf.Cᵘ), '\n',
-              prefix, "├── Cᶜ: ", prettysummary(sf.Cᶜ), '\n',
-              prefix, "├── Cᵉ: ", prettysummary(sf.Cᵉ), '\n',
-              prefix, "└── Cᴰ: ", prettysummary(sf.Cᴰ))
+    print(io, prefix, "├── ℂᵘ: ", prettysummary(sf.ℂᵘ), '\n',
+              prefix, "├── ℂᶜ: ", prettysummary(sf.ℂᶜ), '\n',
+              prefix, "├── ℂᵉ: ", prettysummary(sf.ℂᵉ), '\n',
+              prefix, "└── ℂᴰ: ", prettysummary(sf.ℂᴰ))
     return nothing
 end
 
@@ -112,7 +112,7 @@ end
 $(TYPEDEF)
 
 Supertype of the formulations of the primary mixing length ``ℓ`` of [`TKEBasedTurbulenceClosure`](@ref).
-All are built from two lengths: the wall length ``Cˢ z``, ``Cˢ`` times the height above the surface,
+All are built from two lengths: the wall length ``ℂˢ z``, ``ℂˢ`` times the height above the surface,
 and the buoyancy penetration depth
 
 ```math
@@ -121,12 +121,12 @@ and the buoyancy penetration depth
 
 how far an eddy with kinetic energy ``e`` penetrates air of buoyancy frequency ``N`` before its kinetic
 energy is spent against buoyancy — infinite where ``N² ≤ 0``. Each formulation carries a wall coefficient
-``Cˢ``; the gradient-limited form also carries an independent interior slope ``Cⁱ``.
-The penetration depth carries no coefficient. The standalone default ``Cˢ = 1.316`` is the reciprocal of
+``ℂˢ``; the gradient-limited form also carries an independent interior slope ``ℂⁱ``.
+The penetration depth carries no coefficient. The standalone default ``ℂˢ = 1.316`` is the reciprocal of
 Deardorff's coefficient ``0.76`` of the stratification length ([Deardorff 1980](@cite Deardorff1980)),
 which the equivalent normalization ``ℓ = \\min(z, 0.76 \\sqrt{e} / N)`` carries on ``ℓᵇ`` instead; see
 [`absorb_stratification_coefficient`](@ref). In a neutral surface layer every formulation gives
-``ℓ = Cˢ z`` and in uniformly stratified air every formulation gives ``ℓ = ℓᵇ``; they differ in what
+``ℓ = ℂˢ z`` and in uniformly stratified air every formulation gives ``ℓ = ℓᵇ``; they differ in what
 else bounds ``ℓ``. The formulations are [`LocalMinimumMixingLength`](@ref),
 [`IntegralMixingLength`](@ref) and the default [`GradientLimitedMixingLength`](@ref).
 """
@@ -139,19 +139,19 @@ The mixing length as the smaller of the wall length and the buoyancy penetration
 own level,
 
 ```math
-ℓ = \\min(Cˢ z, \\, ℓᵇ),
+ℓ = \\min(ℂˢ z, \\, ℓᵇ),
 ```
 
 the form of [Deardorff (1980)](@cite Deardorff1980) and of Nakanishi and Niino's closure without its
 turbulent-layer depth scale. It is local: it knows two obstacles, the ground and the stratification
 at the level itself. In an elevated layer whose static stability is not positive — a saturated cloud
 layer under [`MoistStaticStability`](@ref), a neutral layer — ``ℓᵇ`` is infinite and nothing bounds
-``ℓ`` but the distance to the ground, so ``ℓ = Cˢ z`` reaches kilometers and the diffusivity
-``Cᵘ ℓ \\sqrt{e}`` jumps by orders of magnitude when such a layer forms, mixes it away within a time
+``ℓ`` but the distance to the ground, so ``ℓ = ℂˢ z`` reaches kilometers and the diffusivity
+``ℂᵘ ℓ \\sqrt{e}`` jumps by orders of magnitude when such a layer forms, mixes it away within a time
 step and collapses. [`GradientLimitedMixingLength`](@ref), the default, adds the missing bound.
 """
 Base.@kwdef struct LocalMinimumMixingLength{FT} <: AbstractMixingLength
-    Cˢ :: FT = 1.316 # coefficient of the wall length ℓ = Cˢ z
+    ℂˢ :: FT = 1.316 # coefficient of the wall length ℓ = ℂˢ z
 end
 
 """
@@ -165,9 +165,9 @@ accumulates has consumed that energy, and likewise sinks,
 ∫_0^{ℓ↑} [b(z) - b(z + s)] \\, ds = e★, \\qquad ∫_0^{ℓ↓} [b(z - s) - b(z)] \\, ds = e★, \\qquad ℓ↓ ≤ z,
 ```
 
-and the mixing length is ``ℓ = Cˢ \\min(ℓ↑, ℓ↓)``, the combination of the original paper. The parcel's
-energy is ``e★ = e / (2 Cˢ²)`` so that the formulation coincides with the others in the two limits every
-formulation shares: against the ground ``ℓ↓ = z`` and ``ℓ = Cˢ z``, and in uniform stratification the
+and the mixing length is ``ℓ = ℂˢ \\min(ℓ↑, ℓ↓)``, the combination of the original paper. The parcel's
+energy is ``e★ = e / (2 ℂˢ²)`` so that the formulation coincides with the others in the two limits every
+formulation shares: against the ground ``ℓ↓ = z`` and ``ℓ = ℂˢ z``, and in uniform stratification the
 deficit is ``N² s² / 2`` and ``ℓ = ℓᵇ = \\sqrt{e} / N``. Unlike [`GradientLimitedMixingLength`](@ref) it
 carries the parcel's own energy into the air it penetrates and credits the energy a parcel gains
 crossing unstable air, so it penetrates inversions and mixes convective layers more. Its cost is a
@@ -176,51 +176,51 @@ a mixed layer inside one — so its kernel has data-dependent loop lengths; the 
 not an obstacle. The buoyancy differences along the path are integrated from the stored ``N²``.
 """
 Base.@kwdef struct IntegralMixingLength{FT} <: AbstractMixingLength
-    Cˢ :: FT = 1.316 # coefficient of the wall length ℓ = Cˢ z
+    ℂˢ :: FT = 1.316 # coefficient of the wall length ℓ = ℂˢ z
 end
 
 """
 $(TYPEDEF)
 
-A gradient-limited mixing length with independent wall coefficient ``Cˢ`` and interior slope ``Cⁱ``:
+A gradient-limited mixing length with independent wall coefficient ``ℂˢ`` and interior slope ``ℂⁱ``:
 
 ```math
-ℓ(z) = \\min\\left(Cˢ z, \\min_{z′ > 0} [ℓᵇ(z′) + Cⁱ |z - z′|]\\right).
+ℓ(z) = \\min\\left(ℂˢ z, \\min_{z′ > 0} [ℓᵇ(z′) + ℂⁱ |z - z′|]\\right).
 ```
 
 Two sweeps per column compute the stratification envelope; the wall cap is applied separately.
-The uncapped envelope is retained for cell-center reconstruction, so changing ``Cⁱ`` does not
-change the neutral wall length ``Cˢ z``. The domain top is not an obstacle.
+The uncapped envelope is retained for cell-center reconstruction, so changing ``ℂⁱ`` does not
+change the neutral wall length ``ℂˢ z``. The domain top is not an obstacle.
 With equal slopes this recovers the original gradient-limited formulation
 ([Gaspar et al. 1990](@cite Gaspar1990)).
 
-The standalone constructor retains `Cˢ = 1.316` and `Cⁱ = Cˢ` for compatibility:
-a single positional coefficient or a lone `Cˢ` keyword still sets both slopes.
+The standalone constructor retains `ℂˢ = 1.316` and `ℂⁱ = ℂˢ` for compatibility:
+a single positional coefficient or a lone `ℂˢ` keyword still sets both slopes.
 [`TKEBasedTurbulenceClosure`](@ref) supplies the calibrated pair instead.
 """
 Base.@kwdef struct GradientLimitedMixingLength{FT} <: AbstractMixingLength
-    Cˢ :: FT = 1.316 # wall length coefficient
-    Cⁱ :: FT = Cˢ    # interior envelope slope; equal slopes recover the original formulation
+    ℂˢ :: FT = 1.316 # wall length coefficient
+    ℂⁱ :: FT = ℂˢ    # interior envelope slope; equal slopes recover the original formulation
 end
 
-GradientLimitedMixingLength(Cˢ) = GradientLimitedMixingLength(Cˢ, Cˢ)
-GradientLimitedMixingLength{FT}(Cˢ) where FT = GradientLimitedMixingLength{FT}(Cˢ, Cˢ)
-GradientLimitedMixingLength(Cˢ, Cⁱ) = GradientLimitedMixingLength(promote(Cˢ, Cⁱ)...)
+GradientLimitedMixingLength(ℂˢ) = GradientLimitedMixingLength(ℂˢ, ℂˢ)
+GradientLimitedMixingLength{FT}(ℂˢ) where FT = GradientLimitedMixingLength{FT}(ℂˢ, ℂˢ)
+GradientLimitedMixingLength(ℂˢ, ℂⁱ) = GradientLimitedMixingLength(promote(ℂˢ, ℂⁱ)...)
 
-@inline interior_slope(ml::GradientLimitedMixingLength) = ml.Cⁱ
-@inline interior_slope(ml::AbstractMixingLength) = ml.Cˢ
+@inline interior_slope(ml::GradientLimitedMixingLength) = ml.ℂⁱ
+@inline interior_slope(ml::AbstractMixingLength) = ml.ℂˢ
 
 Base.summary(ml::LocalMinimumMixingLength{FT}) where FT = "LocalMinimumMixingLength{$FT}"
 Base.summary(ml::IntegralMixingLength{FT}) where FT = "IntegralMixingLength{$FT}"
 Base.summary(ml::GradientLimitedMixingLength{FT}) where FT = "GradientLimitedMixingLength{$FT}"
-Base.show(io::IO, ml::AbstractMixingLength) = print(io, summary(ml), " (Cˢ = ", prettysummary(ml.Cˢ), ")")
+Base.show(io::IO, ml::AbstractMixingLength) = print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), ")")
 Base.show(io::IO, ml::GradientLimitedMixingLength) =
-    print(io, summary(ml), " (Cˢ = ", prettysummary(ml.Cˢ), ", Cⁱ = ", prettysummary(ml.Cⁱ), ")")
+    print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), ", ℂⁱ = ", prettysummary(ml.ℂⁱ), ")")
 
-@inline convert_eltype(::Type{FT}, ml::LocalMinimumMixingLength) where FT = LocalMinimumMixingLength{FT}(convert(FT, ml.Cˢ))
-@inline convert_eltype(::Type{FT}, ml::IntegralMixingLength) where FT = IntegralMixingLength{FT}(convert(FT, ml.Cˢ))
+@inline convert_eltype(::Type{FT}, ml::LocalMinimumMixingLength) where FT = LocalMinimumMixingLength{FT}(convert(FT, ml.ℂˢ))
+@inline convert_eltype(::Type{FT}, ml::IntegralMixingLength) where FT = IntegralMixingLength{FT}(convert(FT, ml.ℂˢ))
 @inline convert_eltype(::Type{FT}, ml::GradientLimitedMixingLength) where FT =
-    GradientLimitedMixingLength{FT}(convert(FT, ml.Cˢ), convert(FT, ml.Cⁱ))
+    GradientLimitedMixingLength{FT}(convert(FT, ml.ℂˢ), convert(FT, ml.ℂⁱ))
 
 #####
 ##### The closure
@@ -298,7 +298,7 @@ implicitly by the closure constructor.
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                    FT = Oceananigans.defaults.FloatType;
-                                   mixing_length = GradientLimitedMixingLength(Cˢ = 0.6565692899592015, Cⁱ = 1.5609936948461662),
+                                   mixing_length = GradientLimitedMixingLength(ℂˢ = 0.6565692899592015, ℂⁱ = 1.5609936948461662),
                                    stability_functions = RationalStabilityFunction(),
                                    static_stability = MoistStaticStability(),
                                    maximum_viscosity = Inf,
@@ -329,7 +329,7 @@ TKEBasedTurbulenceClosure(FT::DataType; kw...) =
 """
 $(TYPEDSIGNATURES)
 
-Return the upward surface flux of TKE density, ``ρ (Cᵂu★ u★³ + Cᵂʷ wΔ³)``.
+Return the upward surface flux of TKE density, ``ρ (ℂᵂu★ u★³ + ℂᵂʷ wΔ³)``.
 The inputs are lowest-cell-center reference density, the cube of friction velocity, and the convective
 velocity cubed ``wΔ³ = Δz₁ max(Jᵇ, 0)``, with surface buoyancy flux ``Jᵇ`` and
 first-cell thickness ``Δz₁``. Use the LES-prescribed time series when reproducing a
@@ -350,13 +350,13 @@ tke_surface_flux(1.0, 0.0, 0.0)
 ```
 """
 @inline function tke_surface_flux(ρ, u★³, wΔ³,
-                                  Cᵂu★ = oftype(float(u★³), 0.01002182909933591),
-                                  Cᵂʷ = oftype(float(wΔ³), 0.013669219822302736))
-    return ρ * (Cᵂu★ * u★³ + Cᵂʷ * wΔ³)
+                                  ℂᵂu★ = oftype(float(u★³), 0.01002182909933591),
+                                  ℂᵂʷ = oftype(float(wΔ³), 0.013669219822302736))
+    return ρ * (ℂᵂu★ * u★³ + ℂᵂʷ * wΔ³)
 end
 
 @inline convert_eltype(::Type{FT}, sf::ConstantStabilityFunctions) where FT =
-    ConstantStabilityFunctions{FT}(convert(FT, sf.Cᵘ), convert(FT, sf.Cᶜ), convert(FT, sf.Cᵉ), convert(FT, sf.Cᴰ))
+    ConstantStabilityFunctions{FT}(convert(FT, sf.ℂᵘ), convert(FT, sf.ℂᶜ), convert(FT, sf.ℂᵉ), convert(FT, sf.ℂᴰ))
 @inline convert_eltype(::Type{FT}, ss::DryStaticStability) where FT = ss
 @inline convert_eltype(::Type{FT}, ss::MoistStaticStability) where FT = ss
 
@@ -365,9 +365,9 @@ $(TYPEDSIGNATURES)
 
 Convert the parameters of the normalization ``ℓ = \\min(z, Cᴺ \\sqrt{e} / N)`` — a coefficient
 ``Cᴺ`` on the stratification length and none on the wall distance — to the present
-``ℓ = \\min(Cˢ z, \\sqrt{e} / N)``, returning the equivalent [`LocalMinimumMixingLength`](@ref) and
+``ℓ = \\min(ℂˢ z, \\sqrt{e} / N)``, returning the equivalent [`LocalMinimumMixingLength`](@ref) and
 [`ConstantStabilityFunctions`](@ref). The two lengths differ by the factor ``Cᴺ`` everywhere, so
-the diffusivities and the dissipation rate are unchanged when ``Cˢ = 1 / Cᴺ``, the diffusivity
+the diffusivities and the dissipation rate are unchanged when ``ℂˢ = 1 / Cᴺ``, the diffusivity
 coefficients are multiplied by ``Cᴺ`` and the dissipation coefficient is divided by it.
 
 ```jldoctest
@@ -375,17 +375,17 @@ using Breeze
 using Breeze.TurbulenceClosures: absorb_stratification_coefficient
 
 mixing_length, stability_functions =
-    absorb_stratification_coefficient(0.76, ConstantStabilityFunctions(Cᵘ=0.196, Cᶜ=0.265, Cᵉ=0.392, Cᴰ=0.295))
+    absorb_stratification_coefficient(0.76, ConstantStabilityFunctions(ℂᵘ=0.196, ℂᶜ=0.265, ℂᵉ=0.392, ℂᴰ=0.295))
 
 mixing_length
 
 # output
-LocalMinimumMixingLength{Float64} (Cˢ = 1.31579)
+LocalMinimumMixingLength{Float64} (ℂˢ = 1.31579)
 ```
 """
 function absorb_stratification_coefficient(Cᴺ, sf::ConstantStabilityFunctions)
-    mixing_length = LocalMinimumMixingLength(Cˢ = 1 / Cᴺ)
-    stability_functions = ConstantStabilityFunctions(Cᵘ = Cᴺ * sf.Cᵘ, Cᶜ = Cᴺ * sf.Cᶜ, Cᵉ = Cᴺ * sf.Cᵉ, Cᴰ = sf.Cᴰ / Cᴺ)
+    mixing_length = LocalMinimumMixingLength(ℂˢ = 1 / Cᴺ)
+    stability_functions = ConstantStabilityFunctions(ℂᵘ = Cᴺ * sf.ℂᵘ, ℂᶜ = Cᴺ * sf.ℂᶜ, ℂᵉ = Cᴺ * sf.ℂᵉ, ℂᴰ = sf.ℂᴰ / Cᴺ)
     return mixing_length, stability_functions
 end
 
@@ -497,10 +497,10 @@ end
 
 const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:ConstantStabilityFunctions}
 
-@inline momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.Cᵘ
-@inline tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.Cᶜ
-@inline tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.Cᵉ
-@inline dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.Cᴰ
+@inline momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.ℂᵘ
+@inline tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.ℂᶜ
+@inline tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.ℂᵉ
+@inline dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.ℂᴰ
 
 #####
 ##### Computing the mixing length, column by column, into `closure_fields.ℓᵐ`
@@ -527,7 +527,7 @@ end
 # The local minimum at a face: the ground — or an immersed bottom — through the wall length, and
 # the stratification there through the penetration depth
 @inline function local_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
-    d = closure.mixing_length.Cˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
+    d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
     ℓᵇ = buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
     ℓ = min(d, ℓᵇ)
     return ifelse(isnan(ℓ), d, ℓ)
@@ -536,7 +536,7 @@ end
 # The local minimum at a cell center, with N² reconstructed from the two adjacent faces
 @inline function local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, N²)
     FT = eltype(grid)
-    d = closure.mixing_length.Cˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
+    d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
     N²⁺ = clip(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²))
     ℓᵇ = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
     ℓ = min(d, ifelse(N²⁺ == 0, FT(Inf), ℓᵇ))
@@ -552,7 +552,7 @@ end
     return nothing
 end
 
-# Sweep the stratification envelope at Cⁱ, then apply the wall bound Cˢ z separately.
+# Sweep the stratification envelope at ℂⁱ, then apply the wall bound ℂˢ z separately.
 # Neither the ground nor the domain top seeds the stratification envelope.
 @inline function fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml::GradientLimitedMixingLength, closure, e, N²)
     FT = eltype(grid)
@@ -564,14 +564,14 @@ end
             ℓˢ[i, j, k] = ifelse(isnan(ℓᵇ), FT(Inf), ℓᵇ)
         end
         for k in 2:Nz+1
-            ℓˢ[i, j, k] = min(ℓˢ[i, j, k], ℓˢ[i, j, k-1] + ml.Cⁱ * Δzᶜᶜᶜ(i, j, k-1, grid))
+            ℓˢ[i, j, k] = min(ℓˢ[i, j, k], ℓˢ[i, j, k-1] + ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k-1, grid))
         end
         for k in Nz:-1:1
-            ℓˢ[i, j, k] = min(ℓˢ[i, j, k], ℓˢ[i, j, k+1] + ml.Cⁱ * Δzᶜᶜᶜ(i, j, k, grid))
+            ℓˢ[i, j, k] = min(ℓˢ[i, j, k], ℓˢ[i, j, k+1] + ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k, grid))
         end
         ℓ[i, j, 1] = 0
         for k in 2:Nz+1
-            ℓ[i, j, k] = min(ℓˢ[i, j, k], ml.Cˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid))
+            ℓ[i, j, k] = min(ℓˢ[i, j, k], ml.ℂˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid))
         end
     end
     return nothing
@@ -623,13 +623,13 @@ end
 end
 
 @inline function fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml::IntegralMixingLength, closure, e, N²)
-    Cˢ = ml.Cˢ
+    ℂˢ = ml.ℂˢ
     for k in 1:grid.Nz+1
         w★ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
-        e★ = w★^2 / (2 * Cˢ^2)
+        e★ = w★^2 / (2 * ℂˢ^2)
         ascent = parcel_ascent(i, j, k, grid, N², e★)
         descent = parcel_descent(i, j, k, grid, N², e★)
-        @inbounds ℓ[i, j, k] = Cˢ * min(ascent, descent)
+        @inbounds ℓ[i, j, k] = ℂˢ * min(ascent, descent)
         @inbounds ℓˢ[i, j, k] = ℓ[i, j, k]
     end
     return nothing
@@ -655,8 +655,8 @@ $(TYPEDSIGNATURES)
 The mixing length at cell center `(i, j, k)`, where the dissipation lives with ``e``. For the local
 minimum it is the local minimum at the center, with ``N²`` reconstructed from the two adjacent faces.
 For the gradient-limited formulation, the uncapped stratification envelope is carried half a cell
-at slope ``Cⁱ``, then bounded by the center's local penetration depth and wall length ``Cˢ z``.
-The integral formulation carries its stored face length at slope ``Cˢ``.
+at slope ``ℂⁱ``, then bounded by the center's local penetration depth and wall length ``ℂˢ z``.
+The integral formulation carries its stored face length at slope ``ℂˢ``.
 """
 @inline mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields) =
     mixing_lengthᶜᶜᶜ(i, j, k, grid, closure.mixing_length, closure, e, closure_fields)
@@ -666,7 +666,7 @@ The integral formulation carries its stored face length at slope ``Cˢ``.
 
 @inline function mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::AbstractMixingLength, closure, e, closure_fields)
     # Carry the uncapped stratification envelope at the interior slope. Carrying the wall-capped
-    # face value would incorrectly impose Cⁱ on the surface layer when Cⁱ < Cˢ.
+    # face value would incorrectly impose ℂⁱ on the surface layer when ℂⁱ < ℂˢ.
     ℓˢ = closure_fields.ℓˢ
     ℓᶠ = @inbounds min(ℓˢ[i, j, k], ℓˢ[i, j, k+1]) + interior_slope(ml) * Δzᶜᶜᶜ(i, j, k, grid) / 2
     return min(ℓᶠ, local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²))
