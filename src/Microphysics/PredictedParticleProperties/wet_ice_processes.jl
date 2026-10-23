@@ -151,15 +151,63 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the wet growth freezing capacity following
-[Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
+Compute the wet growth and refreezing capacities, the maximum rates at which
+collected water and the liquid coating can freeze, from the ventilated heat
+balance of an ice particle whose surface is held at `T₀`. Both share the
+conduction and vapor-diffusion terms; see [`wet_growth_capacity`](@ref) and
+[`refreezing_rate`](@ref) for what each freezes.
 
-The wet growth capacity is the maximum rate at which collected
-hydrometeors can be frozen, determined by the ventilated heat balance of
-[Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5):
+# Returns
+- `(wet_growth, refreezing)` capacities [kg/kg/s], zero when T ≥ T₀
+"""
+@inline function freezing_capacities(p3, nⁱ, T, qᵛ, ρ, constants, transport, lookups)
+    FT = typeof(T)
+    parameters = p3.process_rates
+    T₀ = parameters.freezing_temperature
+
+    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
+
+    # Ventilation integral (same as deposition/melting)
+    ventilated_capacitance = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
+                                                    transport.ν, transport.Dᵛ, lookups.ρ_correction,
+                                                    parameters.floors)
+
+    # 2π (not 4π) because ventilated_capacitance stores capm = 2 × capacitance, as in melting.
+    surface_factor = 2 * FT(π) * ventilated_capacitance * max(0, nⁱ)
+    conduction = surface_factor * transport.Kᵃ * (T₀ - T)          # [W/kg]
+    vapor_flux = surface_factor * transport.Dᵛ * ρ * (q_sat0 - qᵛ) # [kg/kg/s]
+
+    # Wet growth: collected drops warm from T to T₀, then freeze at a wet surface,
+    # so the latent heats are taken at T₀. Drops are no colder than homogeneous
+    # freezing, which keeps the denominator positive.
+    ℒˡ₀ = vaporization_latent_heat(constants, T₀)
+    ℒᶠʳ₀ = fusion_latent_heat(constants, T₀)
+    cˡ = constants.liquid.heat_capacity
+    drop_temperature = max(T, parameters.homogeneous_freezing_temperature)
+    wet_growth = (conduction + ℒˡ₀ * vapor_flux) / (ℒᶠʳ₀ + cˡ * (drop_temperature - T₀))
+
+    # Refreezing: the coating needs no warming.
+    ℒⁱ = sublimation_latent_heat(constants, T)
+    ℒᶠʳ = fusion_latent_heat(constants, T)
+    refreezing = (conduction + ℒⁱ * vapor_flux) / ℒᶠʳ
+
+    below_freezing = T < T₀
+    return ifelse(below_freezing, max(0, wet_growth), zero(wet_growth)),
+           ifelse(below_freezing, max(0, refreezing), zero(refreezing))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the wet growth freezing capacity following
+[Musil (1970)](@cite Musil1970), Eq. (A9), as in P3 v4.
+
+The wet growth capacity is the maximum rate at which collected hydrometeors can
+be frozen. Collected drops are warmed from `T` to `T₀` and freeze at a wet
+surface, so the heat balance uses the vaporization and fusion latent heats at `T₀`:
 
 ```math
-\\dot{q}_\\text{wet} = \\frac{2π}{ℒᶠʳ} C f^{ve} \\left[Kᵃ(T_0-T) + ℒⁱ Dᵛ(ρ^{v+}-ρ^v)\\right] × N^i
+\\dot{q}_\\text{wet} = 2π C f^{ve} \\frac{Kᵃ(T_0-T) + ℒˡ_0 Dᵛ(ρ^{v+}_0-ρ^v)}{ℒᶠʳ_0 + cˡ (T - T_0)} × N^i
 ```
 
 When the collection rate (cloud + rain riming) exceeds this capacity,
@@ -181,39 +229,19 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 # Returns
 - Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
-@inline function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
-                                     constants, transport,
-                                     lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
-    FT = typeof(qⁱ)
-    parameters = p3.process_rates
+@inline wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport,
+                            lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ)) =
+    first(freezing_capacities(p3, nⁱ, T, qᵛ, ρ, constants, transport, lookups))
 
-    nⁱ₊ = max(0, nⁱ)
+"""
+$(TYPEDSIGNATURES)
 
-    T₀ = parameters.freezing_temperature
-    below_freezing = T < T₀
-
-    ℒᶠʳ = fusion_latent_heat(constants, T)
-    ℒⁱ = sublimation_latent_heat(constants, T)
-
-    Kᵃ = transport.Kᵃ
-    Dᵛ = transport.Dᵛ
-    ν  = transport.ν
-
-    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
-
-    # Ventilation integral (same as deposition/refreezing)
-    ventilated_capacitance = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
-                                                    ν, Dᵛ, lookups.ρ_correction, parameters.floors)
-
-    # Heat balance: sensible + latent
-    𝒬ᵀ = Kᵃ * (T₀ - T)
-    𝒬ᵛ = ℒⁱ * Dᵛ * ρ * (q_sat0 - qᵛ)
-
-    # 2π (not 4π) because ventilated_capacitance stores capm = 2 × capacitance, as in melting.
-    capacity = 2 * FT(π) * ventilated_capacitance * (𝒬ᵀ + 𝒬ᵛ) / ℒᶠʳ * nⁱ₊
-
-    return ifelse(below_freezing, max(0, capacity), zero(FT))
-end
+Compute the heat-limited refreezing capacity of the liquid coating on ice.
+See [`refreezing_rate`](@ref).
+"""
+@inline refreezing_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport,
+                            lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ)) =
+    last(freezing_capacities(p3, nⁱ, T, qᵛ, ρ, constants, transport, lookups))
 
 """
 $(TYPEDSIGNATURES)
@@ -221,16 +249,17 @@ $(TYPEDSIGNATURES)
 Compute refreezing rate of liquid on ice using the heat-balance formula.
 
 Below freezing, liquid coating on ice particles refreezes. The rate is
-determined by the heat flux at the particle surface:
+determined by the heat flux at the particle surface,
+[Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5):
 
 ```math
 \\frac{dm}{dt} = \\frac{2π}{ℒᶠʳ} C f^{ve} \\left[Kᵃ(T_0-T) + ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
 ```
 
-That is the same particle heat balance that sets the wet-growth capacity, so this
-is [`wet_growth_capacity`](@ref) capped by the liquid available on the ice. Above
-freezing the capacity is already zero, which carries the temperature gate here.
-See [Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5).
+The conduction and vapor terms are those of [`wet_growth_capacity`](@ref), but the
+coating is already at `T₀`, so there is no drop-warming term. The capacity is capped
+by the liquid available on the ice; above freezing it is zero, which carries the
+temperature gate here.
 
 # Arguments
 - `p3`: P3 microphysics scheme
@@ -250,7 +279,7 @@ See [Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5).
 """
 @inline function refreezing_rate(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
                                  constants, transport)
-    capacity = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+    capacity = refreezing_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
     return refreezing_rate_from_capacity(p3, qʷⁱ, capacity)
 end
 

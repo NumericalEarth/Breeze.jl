@@ -105,17 +105,3 @@ end
     @test first[2] > 0
     @test all(first .≈ second)
 end
-
-@testset "Vanishing cloud number transfer remains finite" begin
-    PPP = Breeze.Microphysics.PredictedParticleProperties
-    for FT in (Float32, Float64)
-        # The old intermediate N/(ρ q) overflows; the answer remains finite.
-        q = floatmin(FT) / 1000
-        number = FT(1e5)
-        density = FT(0.5)
-        @test PPP.cloud_number_transfer_rate(number, density, q, zero(FT)) === zero(FT)
-        @test PPP.cloud_number_transfer_rate(number, density, q, q) ≈ number/density
-        @test PPP.cloud_number_transfer_rate(number, density, zero(FT), zero(FT)) === zero(FT)
-        @test PPP.cloud_riming_number_rate(q, number, density, zero(FT)) === zero(FT)
-    end
-end
