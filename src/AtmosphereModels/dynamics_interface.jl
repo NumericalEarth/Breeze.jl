@@ -594,3 +594,18 @@ p = ρ R^m T
 where ``R^m`` is the mixture gas constant.
 """
 compute_auxiliary_dynamics_variables!(model) = nothing  # default: no-op
+
+"""
+$(TYPEDSIGNATURES)
+
+Advance time-dependent dynamics state, such as the pressure of a moving reference frame,
+to the current time of `model`. Called before auxiliary thermodynamic variables are computed.
+"""
+advance_dynamics_state!(dynamics, model) = nothing  # default: no-op
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the reference frame of `dynamics`, or `nothing` if the dynamics has no moving reference frame.
+"""
+reference_frame(dynamics) = nothing

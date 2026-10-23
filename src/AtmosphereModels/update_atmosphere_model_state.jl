@@ -244,6 +244,9 @@ function compute_auxiliary_variables!(model)
     # Compute velocities from momentum (skip for kinematic dynamics with prescribed velocities)
     compute_velocities!(model)
 
+    # Advance time-dependent dynamics state that thermodynamic diagnostics depend on
+    advance_dynamics_state!(model.dynamics, model)
+
     # Dispatch on thermodynamic formulation type
     compute_auxiliary_thermodynamic_variables!(model)
 

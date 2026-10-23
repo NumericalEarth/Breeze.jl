@@ -90,6 +90,9 @@ end
 ##### Pressure solve
 #####
 
+# The tridiagonal formulation carries the reference density in its coefficients
+solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt, reference_density) = solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
+
 function solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
     compute_anelastic_source_term!(solver, ρŨ, Δt)
     fill!(solver.storage, 0)  # workaround for bitwise reproducibility — see Oceananigans #5960

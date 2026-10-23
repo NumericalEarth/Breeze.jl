@@ -110,6 +110,54 @@ The anelastic formulation uses a multi-stage time integrator for advection, Cori
 
 In Breeze this projection is implemented as a Fourier-tridiagonal solve in the vertical with variable ``ρᵣ(z)``, aligning with the hydrostatic reference state. The hydrostatic pressure anomaly ``p_h'`` can be obtained diagnostically by vertical integration of buoyancy and used when desired to separate hydrostatic and nonhydrostatic pressure effects.
 
+## Boussinesq dynamics
+
+In domains much shallower than the atmospheric scale height, such as direct numerical simulations of cloud turbulence or laboratory convection, the reference state is effectively independent of height.
+[`BoussinesqDynamics`](@ref Breeze.AnelasticEquations.BoussinesqDynamics) is `AnelasticDynamics` expanded about a [`BoussinesqReferenceState`](@ref Breeze.Thermodynamics.BoussinesqReferenceState) with uniform pressure ``pᵣ``, temperature ``Tᵣ``, and density ``ρᵣ = pᵣ / (R^m Tᵣ)``.
+With uniform ``ρᵣ``, the anelastic constraint reduces to ``\boldsymbol{\nabla \cdot}\, \boldsymbol{u} = 0``, the buoyancy reduces to the Boussinesq buoyancy of virtual temperature anomalies, and the projection becomes a Poisson equation with constant coefficients,
+
+```math
+\nabla^2 \phi = \frac{1}{ρᵣ Δt} \, \boldsymbol{\nabla \cdot}\, \widetilde{(ρᵣ \boldsymbol{u})} ,
+```
+
+which is solved with FFTs when the vertical direction is periodic.
+
+```jldoctest
+using Breeze
+
+grid = RectilinearGrid(size=(16, 16, 16), extent=(1, 1, 1), topology=(Periodic, Periodic, Periodic))
+model = AtmosphereModel(grid; dynamics=BoussinesqDynamics(grid, temperature=290))
+model.dynamics
+
+# output
+BoussinesqDynamics(pᵣ=101325.0, Tᵣ=290.0, ρᵣ=1.2174)
+└── pressure_anomaly: 16×16×16 Field{Center, Center, Center} on RectilinearGrid on CPU
+```
+
+Because the reference pressure is uniform, the Exner function is uniform, and temperature does not decrease adiabatically with height within the domain.
+Across a 1 m domain, the neglected adiabatic temperature difference is about 0.01 K.
+
+!!! warning "Mean buoyancy in triply-periodic domains"
+    A periodic pressure field cannot balance a domain-mean buoyancy force, so a nonzero domain-mean buoyancy accelerates the domain-mean vertical momentum in a vertically-periodic domain.
+    Setting `frame_vertical_velocity` (to zero, for a fixed frame) measures buoyancy relative to the domain mean, which removes the domain-mean buoyancy; see below.
+
+### Moving reference frames
+
+A small domain inside a cloud rises or sinks with the surrounding air.
+Setting `frame_vertical_velocity` ``W`` moves the reference frame of a `BoussinesqReferenceState` vertically, and its reference pressure evolves hydrostatically,
+
+```math
+\frac{\mathrm{d} pᵣ}{\mathrm{d} t} = - \bar{ρ} \, g \, W , \qquad \bar{ρ} = \frac{pᵣ}{R^m \bar{T}} ,
+```
+
+where ``\bar{T}`` is the domain-mean temperature.
+Because the liquid-ice potential temperature is conserved during adiabatic motion, the decreasing (or increasing) reference pressure cools (or warms) the domain at the moist adiabatic rate through the Exner function, and condensation releases latent heat as usual.
+The reference temperature and moisture mass fractions follow the domain mean, so buoyancy is measured relative to the domain mean, and the reference density used by the dynamics is fixed.
+
+```julia
+dynamics = BoussinesqDynamics(grid; pressure=9e4, temperature=285, frame_vertical_velocity=2)
+```
+
 ## Symbols
 
 - ``ρᵣ(z)``, ``pᵣ(z)``: Reference density and pressure satisfying hydrostatic balance for a constant ``θᵣ``.
