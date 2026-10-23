@@ -1,4 +1,5 @@
 using Oceananigans: ReactantState, initialize!
+using Reactant: TracedRNumber
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.TimeSteppers: SSPRungeKutta3, CompressibleAcousticModel
@@ -13,6 +14,10 @@ end
 # Reactant tracing breaks if Δt is materialized via `convert` outside the kernel;
 # pass it through unchanged and let in-kernel arithmetic see the traced value.
 @inline AtmosphereModels.kernel_time_step(::ReactantState, grid, Δt) = Δt
+
+# A traced Δt is a time step: traced stepping sets `last_Δt` before the first step, and the
+# eager guard cannot branch on a traced value.
+@inline AtmosphereModels.invalid_time_step(::TracedRNumber) = false
 
 # Reactant initializes through `first_time_step!`, and the eager guard branches on traced
 # clock fields; mirrors OceananigansReactantExt's no-ops for the upstream steppers.

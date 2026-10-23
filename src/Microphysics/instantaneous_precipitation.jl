@@ -119,7 +119,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
     Δt = model.clock.last_Δt
 
     # Skip before the first step (Δt invalid during construction).
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    invalid_time_step(Δt) && return nothing
 
     pˢᵗ = standard_pressure(model.dynamics)
     constants = model.thermodynamic_constants

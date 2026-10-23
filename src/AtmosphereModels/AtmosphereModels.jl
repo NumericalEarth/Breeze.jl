@@ -124,8 +124,10 @@ export
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
 
-    # Architecture-dispatched helper for safely converting Δt to a kernel arg
-    kernel_time_step
+    # Architecture-dispatched helpers for safely converting Δt to a kernel arg,
+    # and for skipping operator-split updates before the first step
+    kernel_time_step,
+    invalid_time_step
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
@@ -145,6 +147,11 @@ using Oceananigans.Utils: prettysummary, launch!
 # kernel — BreezeReactantExt overrides this for `ReactantState` archs to pass
 # Δt through unchanged.
 @inline kernel_time_step(arch, grid, Δt) = convert(eltype(grid), Δt)
+
+# Whether `Δt` is not yet a valid time step (NaN, infinite or non-positive, as during model
+# construction), so that operator-split updates skip themselves. BreezeReactantExt overrides it
+# for traced Δt, on which the guard cannot branch; traced time stepping sets `last_Δt` first.
+@inline invalid_time_step(Δt) = isnan(Δt) || isinf(Δt) || Δt ≤ 0
 
 #####
 ##### Interfaces (define the contract that dynamics implementations must fulfill)

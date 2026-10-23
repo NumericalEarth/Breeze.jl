@@ -447,7 +447,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # Skip microphysics update if timestep is zero, infinite, or invalid
     # (e.g., during model construction before any time step has been taken)
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    invalid_time_step(Δt) && return nothing
 
     # Total density weights water mass fractions and enters the Kessler air-density corrections.
     # The coupling density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
@@ -914,7 +914,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     Δt = model.clock.last_Δt
 
     # Skip microphysics update if timestep is zero, infinite, or invalid
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    invalid_time_step(Δt) && return nothing
 
     state = model.dynamics.state
     constants = model.thermodynamic_constants
