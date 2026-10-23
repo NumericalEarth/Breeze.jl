@@ -11,14 +11,14 @@ Morrison & Milbrandt (2015a) Eq. 44.
 The melting rate is determined by the heat flux to the particle:
 
 ```math
-\\frac{dm}{dt} = -\\frac{2π \\, \\text{capm}}{ℒᶠᵘˢ} × [Kᵃ(T-T_0) + ρ ℒˡ Dᵛ(q^v - q^{v+}_0)] × f^{ve}
+\\frac{dm}{dt} = -\\frac{2π \\, \\text{capm}}{ℒᶠʳ} × [Kᵃ(T-T_0) + ρ ℒˡ Dᵛ(q^v - q^{v+}_0)] × f^{ve}
 ```
 
 where capm = cap × D is the P3 capacitance convention (2× physical C).
 
 where:
 - C is the capacitance
-- ℒᶠᵘˢ is the latent heat of fusion
+- ℒᶠʳ is the latent heat of fusion
 - Kᵃ is thermal conductivity of air
 - T_0 is the freezing temperature
 - ℒˡ is latent heat of vaporization
@@ -62,7 +62,7 @@ where:
 
     # Table lookup uses the total mass per particle, not the dry-only mass,
     # because the tables are indexed by total mass.
-    # With no particles the rate below is nⁱ_eff * dm/dt = 0 regardless, so the
+    # With no particles the rate below is nⁱ₊ * dm/dt = 0 regardless, so the
     # fallback mean mass only has to sit inside the table's mass axis.
     m_mean = safe_divide(qⁱ_total, max(0, nⁱ), FT(floors.mean_particle_mass_fallback))
     ρ_correction = ice_air_density_correction(parameters, p3.ice.fall_speed.reference_air_density, ρ)
@@ -75,14 +75,14 @@ end
 
 # Shared body. With `P3IceLookups` the bracket floors `nⁱ` at `floors.number_scale` where the
 # standalone form above floors it at zero; the coordinates agree for `nⁱ ≥ number_scale`, and
-# below it the melt rate `nⁱ_eff × dm/dt` is negligible.
+# below it the melt rate `nⁱ₊ × dm/dt` is negligible.
 @inline function ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
                                         ρ_correction, prep)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
-    qⁱ_eff = max(0, qⁱ)
-    nⁱ_eff = max(0, nⁱ)
+    qⁱ₊ = max(0, qⁱ)
+    nⁱ₊ = max(0, nⁱ)
 
     T₀ = parameters.freezing_temperature
 
@@ -90,8 +90,8 @@ end
     ΔT = T - T₀
     is_melting = ΔT > 0
 
-    # Thermodynamic constants: ℒᶠᵘˢ and ℒˡ are T-dependent.
-    ℒᶠᵘˢ = fusion_latent_heat(constants, T)
+    # Thermodynamic constants: ℒᶠʳ and ℒˡ are T-dependent.
+    ℒᶠʳ = fusion_latent_heat(constants, T)
     ℒˡ = vaporization_latent_heat(constants, T)
     # T,P-dependent transport properties (pre-computed or computed on demand)
     Kᵃ = transport.Kᵃ       # Thermal conductivity of air [W/m/K]
@@ -111,35 +111,35 @@ end
             sc_corr * evaluate_at(dep.small_ice_ventilation_reynolds, prep)
     large = evaluate_at(dep.large_ice_ventilation_constant, prep) +
             sc_corr * evaluate_at(dep.large_ice_ventilation_reynolds, prep)
-    C_fv = small + large
+    ventilated_capacitance = small + large
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: Kᵃ × (T - T₀)
-    Q_sensible = Kᵃ * ΔT
+    𝒬ᵀ = Kᵃ * ΔT
 
     # Latent heat: ℒˡ × Dᵛ × ρ × (qᵛ - q_sat0)
     # When subsaturated, this is negative and opposes melting
-    Q_latent = ℒˡ * Dᵛ * ρ * (qᵛ - q_sat0)
+    𝒬ᵛ = ℒˡ * Dᵛ * ρ * (qᵛ - q_sat0)
 
     # Total heat flux
-    Q_total = Q_sensible + Q_latent
+    𝒬ᵗ = 𝒬ᵀ + 𝒬ᵛ
 
     # Melting rate per particle (negative dm/dt → positive melt rate)
     # Uses 2π (not 4π) because ventilation integral stores capm = cap × D
     # (the P3 convention), which is 2× the physical capacitance.
-    dm_dt_melt = 2 * FT(π) * C_fv * Q_total / ℒᶠᵘˢ
+    dm_dt_melt = 2 * FT(π) * ventilated_capacitance * 𝒬ᵗ / ℒᶠʳ
 
     # Clamp to positive (only melting, not refreezing here)
     dm_dt_melt = max(0, dm_dt_melt)
 
     # Total rate
-    melt_rate = nⁱ_eff * dm_dt_melt
+    melt_rate = nⁱ₊ * dm_dt_melt
 
     # Limit melting rate: physical heat-transfer rate is the true limiter.
     # Guard against numerical overflow with a safety timescale (dt_safety).
     # The driver or time integrator must additionally limit melting to
     # available ice per dt.
-    max_melt = qⁱ_eff / p3.process_rates.sink_limiting_timescale
+    max_melt = qⁱ₊ / p3.process_rates.sink_limiting_timescale
     melt_rate = min(melt_rate, max_melt)
 
     return (ifelse(is_melting, melt_rate, zero(FT)), small, large)
@@ -233,12 +233,12 @@ Number of melted particles equals number of rain drops produced.
 @inline function ice_melting_number_rate(qⁱ, nⁱ, qⁱ_melt_rate)
     FT = typeof(qⁱ)
 
-    qⁱ_eff = max(0, qⁱ)
-    nⁱ_eff = max(0, nⁱ)
+    qⁱ₊ = max(0, qⁱ)
+    nⁱ₊ = max(0, nⁱ)
 
     # |∂nⁱ/∂t| = (nⁱ/qⁱ) × ∂qⁱ_melt/∂t (positive magnitude)
     # Sign convention: returns positive; caller subtracts in tendency assembly.
-    ratio = safe_divide(nⁱ_eff, qⁱ_eff, zero(FT))
+    ratio = safe_divide(nⁱ₊, qⁱ₊, zero(FT))
 
     return ratio * qⁱ_melt_rate
 end
