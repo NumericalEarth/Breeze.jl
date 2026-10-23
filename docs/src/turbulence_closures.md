@@ -97,7 +97,13 @@ on a saturated adiabat, so mixing is not shut off inside stratocumulus.
 
 The default is [`RationalStabilityFunction`](@ref),
 ``S(Ri) = C⁰ + (C^± - C⁰) x / (1 + x)`` with ``x = |Ri| / Ri^±``, which is continuous but kinked at
-neutral. Its calibrated coefficients (rounded) are
+neutral. The Richardson number is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, with the closure's
+`minimum_shear_squared` ``S²ᵐⁱⁿ = 10⁻¹⁰ \, \mathrm{s⁻²}`` by default. The floor keeps ``Ri`` finite and
+continuous where the shear vanishes, as in uniform or absent wind: there ``N² / S²`` would jump
+between the stable and unstable limits with the sign of a rounding-level ``N²``. With the floor the
+functions pass from neutral to their limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``, and where ``S² ≫ S²ᵐⁱⁿ``
+``Ri`` differs from ``N² / S²`` by the relative amount ``S²ᵐⁱⁿ / S²`` at most.
+Its calibrated coefficients (rounded) are
 
 | Function | Unstable limit | Neutral | Stable limit |
 |:--|--:|--:|--:|
