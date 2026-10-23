@@ -156,17 +156,9 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Cloud droplets per unit cloud mass, ``Nᶜˡ / (ρ qᶜˡ) = nᶜˡ / qᶜˡ`` [1/kg]. `Nᶜˡ` is
-volumetric [1/m³] and `qᶜˡ` is a mass fraction [kg/kg], so this is the factor that
-turns a cloud mass rate [kg/kg/s] into its companion number rate [1/kg/s], keeping
-the two consistent in mean droplet mass.
-
-Zero where the cloud mass is below `minimum_mass_mixing_ratio`, the threshold under
-which the scheme treats cloud water as absent. The threshold matters: advection and
-sedimentation leave positive but negligible `qᶜˡ` (down to subnormal values) in
-cloud-free cells while the DSD diagnosis floors `Nᶜˡ` above zero, so the unguarded
-quotient overflows to `Inf` and any companion rate of zero then yields `Inf × 0 = NaN`.
-The guard also avoids evaluating the division at all for absent cloud.
+Cloud droplets per unit cloud mass, ``Nᶜˡ / (ρ qᶜˡ)`` [1/kg], which converts a cloud
+mass rate into its number rate. Zero below `minimum_mass_mixing_ratio`, where the
+quotient would overflow to `Inf` and turn a zero companion rate into `NaN`.
 """
 @inline function cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, minimum_mass_mixing_ratio)
     FT = typeof(qᶜˡ)
