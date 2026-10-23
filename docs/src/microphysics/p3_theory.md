@@ -536,9 +536,9 @@ and passed to every rate that needs them.
 Thermodynamic constants keep their appendix symbols — ``\mathcal{L}^l`` and
 ``\mathcal{L}^i`` for the latent heats of condensation and deposition, ``c^{pd}``
 for the dry-air heat capacity, ``R^v`` for the vapor gas constant. The one
-addition is ``\mathcal{L}^\text{fus} = \mathcal{L}^i - \mathcal{L}^l``, the latent
-heat of fusion, which the melting and wet-growth heat balances need. It is *not*
-written ``\mathcal{L}^f``, since `f` labels rime here.
+addition is ``\mathcal{L}^{fr} = \mathcal{L}^i - \mathcal{L}^l``, the latent
+heat of fusion, which the melting and wet-growth heat balances need. Its superscript
+`fr` abbreviates freezing, since `f` already labels rime (``q^f``, ``b^f``).
 
 ### Process Rates
 
@@ -2114,7 +2114,7 @@ following the simplified diffusion approximation in
 appendix C, section i:
 
 ```math
-\frac{dm}{dt} = -\frac{2π\, \mathcal{C}}{\mathcal{L}^\text{fus}}\,
+\frac{dm}{dt} = -\frac{2π\, \mathcal{C}}{\mathcal{L}^{fr}}\,
                 \big[K^a\,(T - T_0) + ρ\, \mathcal{L}^l\, D^v\, (q^v - q^{v+l}(T_0))\big]\, f_v,
 ```
 
@@ -2179,15 +2179,15 @@ added to the refreezing rate rather than left as a vanishing ``q^{wi}``.
 When the latent-heat release rate from collection exceeds what conduction
 plus evaporative cooling can dissipate, ice enters wet growth.
 
-The wet-growth capacity rate (Musil 1970):
+The wet-growth capacity rate is the ventilated heat balance of a particle whose
+surface is at ``T_0`` ([Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5)):
 
 ```math
-\dot{q}_\text{wet} = \big[K^a\,(T_0 - T) + 2π\,ρ\,\mathcal{L}^i\,D^v\,(q^{v+l}(T_0) - q^v_\text{cld})/\mathcal{L}^\text{fus}\big]\, f_v\, n^i,
+\dot{q}_\text{wet} = \frac{2π}{\mathcal{L}^{fr}} \big[K^a\,(T_0 - T) + ρ\,\mathcal{L}^i\,D^v\,(q^{v+l}(T_0) - q^v_\text{cld})\big]\, f_v\, n^i,
 ```
 
-where the ``2π`` factor multiplies *only* the latent (vapor-diffusion) term;
-the sensible-conduction term ``K^a (T_0-T)`` carries no ``2π``. The same
-asymmetry appears in the refreezing rate below.
+where ``f_v`` is the ventilated capacitance integral (stored as `capm`, twice the
+physical capacitance, hence ``2π`` rather than ``4π``).
 
 Wet growth fires when the total collection
 ``\dot{q}^{cl}_\text{rime} + \dot{q}^{r}_\text{rime}``
@@ -2217,8 +2217,8 @@ rates are zeroed, and no densification flag is set. Refreezing then transfers
 as the wet-growth capacity:
 
 ```math
-\dot{q}_\text{refr} = n^i\, \max\!\big(0,\; \mathcal{C} f_v [K^a (T_0 - T)
-                      + 2π\, ρ\, \mathcal{L}^i D^v (q^{v+l}(T_0) - q^v)/\mathcal{L}^\text{fus}]\big),
+\dot{q}_\text{refr} = n^i\, \max\!\big(0,\; \frac{2π}{\mathcal{L}^{fr}} \mathcal{C} f_v [K^a (T_0 - T)
+                      + ρ\, \mathcal{L}^i D^v (q^{v+l}(T_0) - q^v)]\big),
 ```
 
 bounded by ``q^{wi} / τ_\text{sink}``, where Breeze uses the fixed
@@ -2337,7 +2337,7 @@ tendency. The relevant latent heats at standard conditions are:
 
 - ``\mathcal{L}^l \approx 2.5 \times 10^6`` J/kg (vaporization)
 - ``\mathcal{L}^i \approx 2.83 \times 10^6`` J/kg (sublimation)
-- ``\mathcal{L}^\text{fus} \approx 3.34 \times 10^5`` J/kg (fusion)
+- ``\mathcal{L}^{fr} \approx 3.34 \times 10^5`` J/kg (fusion)
 
 ### Process Summary
 
@@ -2358,7 +2358,7 @@ tendency. The relevant latent heats at standard conditions are:
 | Aggregation | ``n^i`` | ``E^{ii}(T)``, ``E^{ii}_\text{fact}(F^f)`` | [Morrison2015parameterization](@cite) |
 | Hallett–Mossop | ``n^i`` | 250 μm threshold; ``-8°``C to ``-3°``C | [Morrison2015parameterization](@cite) |
 | Melting | ``q^i \to q^{wi} \text{ or } q^r`` | Lookup-split by ``D_\text{crit}`` | [MilbrandtEtAl2025liquidfraction](@cite) |
-| Wet growth | ``q^i, q^{wi}`` | Musil 1970 | [Morrison2015parameterization](@cite) |
+| Wet growth | ``q^i, q^{wi}`` | Ventilated heat balance | [Cholette2019parameterization](@cite) |
 | Shedding | ``q^{wi} \to q^r`` | Tabulated PSD integral, ``D \ge 9`` mm | [MilbrandtEtAl2025liquidfraction](@cite) |
 | Refreezing | ``q^{wi} \to q^f`` | Wet-growth form, ``T < T_0`` | [MilbrandtEtAl2025liquidfraction](@cite) |
 | Whole-particle clipping | all ice fields ``\to q^r`` | ``F^l > 0.99``, warm fully-liquid, tiny warm ice | [MilbrandtEtAl2025liquidfraction](@cite) |
