@@ -20,6 +20,9 @@ algorithms dispatch on:
 
 The drivers [`newton_solve`](@ref) and [`secant_solve`](@ref) implement the iterations
 once, so every algorithm shares the same loop logic and the same solver vocabulary.
+[`bracketed_newton_solve`](@ref) is a safeguarded Newton–bisection variant for residuals
+with a known sign-changing bracket (for example, droplet growth in
+`Breeze.LagrangianMicrophysics`).
 
 ## Tolerance conventions
 
@@ -208,6 +211,87 @@ end
 end
 
 @inline newton_solve(residual_and_derivative, ::Nothing, x) = x
+
+#####
+##### Safeguarded (bracketed) Newton iteration driver
+#####
+
+@inline strictly_between(x, a, b) = (x - a) * (x - b) < 0 # false for NaN
+
+# One step of the safeguarded Newton–bisection iteration ("rtsafe"). The bracket
+# endpoints satisfy r(a) ≤ 0 ≤ r(b); `a` and `b` need not be ordered. The Newton step is
+# accepted only if it stays strictly inside the updated bracket and at least halves the
+# step before last; otherwise the iteration bisects. A NaN Newton step always bisects.
+@inline function bracketed_newton_step(x, r, r′, a, b, Δx, Δx₋)
+    a = ifelse(r < 0, x, a)
+    b = ifelse(r < 0, b, x)
+    xᴺ = x - r / r′
+    accept_newton = strictly_between(xᴺ, a, b) & (2 * abs(r) ≤ abs(Δx₋ * r′))
+    xⁿ = ifelse(accept_newton, xᴺ, (a + b) / 2)
+    xⁿ = ifelse(r == 0, x, xⁿ)
+    return xⁿ, a, b, abs(xⁿ - x), Δx, accept_newton
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Solve `r(x) = 0` within the bracket `[a, b]` by safeguarded Newton iteration,
+where `residual_and_derivative(x)` returns the tuple `(r(x), r′(x))`. The bracket must
+satisfy `r(a) ≤ 0 ≤ r(b)`; `a` and `b` need not be ordered, and the residual is never
+evaluated at the bracket endpoints, so it may be singular there.
+
+Each iteration shrinks the bracket and takes the Newton step only when that step stays
+strictly inside the bracket and converges fast enough; otherwise it bisects
+(the "rtsafe" strategy). The iterate therefore never leaves the bracket and the iteration
+cannot diverge or produce NaN from a bad derivative. An initial guess `x` outside the
+bracket is replaced by the bracket midpoint.
+
+* `NewtonSolver`: iterate until `r(x) = 0`, `maxiter` is reached, or the last step satisfies
+  `|Δx| ≤ max(abstol, reltol * |x|)` (Newton step) or `|Δx| ≤ abstol` (bisection step)
+* `FixedIterations`: perform exactly `iterations` steps
+
+```jldoctest
+using Breeze
+using Breeze.Solvers: bracketed_newton_solve
+
+solver = NewtonSolver(reltol=1e-12, abstol=0, maxiter=50)
+# Newton's method from x = 0.1 diverges for atan; the safeguarded iteration does not
+x = bracketed_newton_solve(x -> (atan(x - 1), 1 / (1 + (x - 1)^2)), solver, 0.1, -10.0, 30.0)
+round(x, digits=10)
+
+# output
+1.0
+```
+"""
+@inline function bracketed_newton_solve(residual_and_derivative, solver::NewtonSolver, x, a, b)
+    x = ifelse(strictly_between(x, a, b), x, (a + b) / 2)
+    Δx = abs(b - a)
+    Δx₋ = Δx
+    r, r′ = residual_and_derivative(x)
+    converged = r == 0
+    iter = 0
+    while !converged && iter < solver.maxiter
+        x, a, b, Δx, Δx₋, newton = bracketed_newton_step(x, r, r′, a, b, Δx, Δx₋)
+        r, r′ = residual_and_derivative(x)
+        # After a Newton step the error is O(Δx²), so the relative tolerance may be used;
+        # after a bisection the error is O(Δx), and the absolute tolerance must be met.
+        tolerance = ifelse(newton, max(solver.abstol, solver.reltol * abs(x)), solver.abstol)
+        converged = (Δx ≤ tolerance) | (r == 0)
+        iter += 1
+    end
+    return x
+end
+
+@inline function bracketed_newton_solve(residual_and_derivative, solver::FixedIterations, x, a, b)
+    x = ifelse(strictly_between(x, a, b), x, (a + b) / 2)
+    Δx = abs(b - a)
+    Δx₋ = Δx
+    for _ in 1:solver.iterations
+        r, r′ = residual_and_derivative(x)
+        x, a, b, Δx, Δx₋, _ = bracketed_newton_step(x, r, r′, a, b, Δx, Δx₋)
+    end
+    return x
+end
 
 #####
 ##### Secant iteration driver

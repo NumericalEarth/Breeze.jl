@@ -140,6 +140,31 @@ export
     P3Microphysics,
     PredictedParticlePropertiesMicrophysics,
 
+    # LagrangianMicrophysics
+    DropletPhysicsParameters,
+    PowerLawVaporDiffusivity,
+    LinearThermalConductivity,
+    SutherlandViscosity,
+    LinearViscosity,
+    KineticCorrection,
+    NoKineticCorrection,
+    BeardPruppacherVentilation,
+    NoVentilation,
+    KappaKoehlerActivity,
+    DiluteSolutionActivity,
+    BeardTerminalVelocity,
+    RogersYauTerminalVelocity,
+    StokesTerminalVelocity,
+    equilibrium_supersaturation,
+    critical_radius,
+    critical_supersaturation,
+    equilibrium_radius,
+    diffusional_growth_rate,
+    condensational_growth_step,
+    droplet_response_time,
+    exponential_drag_step,
+    droplet_terminal_velocity,
+
     # BoundaryConditions
     BulkDrag,
     BulkSensibleHeatFlux,
@@ -303,6 +328,9 @@ using .ParcelModels
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics
+
+include("LagrangianMicrophysics/LagrangianMicrophysics.jl")
+using .LagrangianMicrophysics
 
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures
