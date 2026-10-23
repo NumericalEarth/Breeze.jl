@@ -13,6 +13,18 @@ using RRTMGP
 using NCDatasets
 using NumericalRadiation: NumericalRadiation
 
+# A radiation stub that logs the clock of each update, to count updates under real time stepping
+struct LoggingRadiation{S, F}
+    schedule :: S
+    flux_divergence :: F
+    updates :: Vector{Tuple{Int, Int}}
+end
+
+function Breeze.AtmosphereModels._update_radiation!(radiation::LoggingRadiation, model)
+    push!(radiation.updates, (model.clock.iteration, model.clock.stage))
+    return nothing
+end
+
 # The gray RRTMGP optics and the ecCKD optics of the NumericalRadiation extension share the
 # scheduling machinery of `RadiativeTransferModel`
 const OPTICS = (GrayOptics(), EcCKDOptics())
@@ -217,5 +229,28 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         # All columns should have the same fluxes (uniform ICs, same coordinate)
         lw_array = Array(interior(ℐ_lw_up))
         @test all(lw_array[:, :, 1] .== lw_array[1, 1, 1])
+    end
+
+    # Under real time stepping, scheduled updates happen once per firing iteration, in the
+    # first-stage update_state! of the step (clock at stage 2), with both Breeze time steppers
+    @testset "Updates per firing iteration, $dynamics dynamics" for dynamics in (:anelastic, :compressible)
+        grid = RectilinearGrid(default_arch; size=8, z=(0, 1000), topology=(Flat, Flat, Bounded))
+        constants = ThermodynamicConstants()
+        radiation = LoggingRadiation(IterationInterval(3), CenterField(grid), Tuple{Int, Int}[])
+        model_dynamics = dynamics == :anelastic ?
+            AnelasticDynamics(ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)) :
+            CompressibleDynamics()
+        model = AtmosphereModel(grid; dynamics=model_dynamics, thermodynamic_constants=constants,
+                                advection=nothing, radiation)
+        set!(model; θ = z -> 300 + 0.01 * z)
+        @test !isempty(radiation.updates)
+        @test all(update -> update == (0, 1), radiation.updates) # initialization only
+
+        for _ in 1:7
+            time_step!(model, 0.1)
+        end
+
+        scheduled = filter(update -> first(update) > 0, radiation.updates)
+        @test scheduled == [(3, 2), (6, 2)]
     end
 end
