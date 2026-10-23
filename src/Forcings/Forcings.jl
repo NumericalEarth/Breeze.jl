@@ -4,7 +4,9 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
     GeostrophicForcing,
-    SpecificForcing
+    SpecificForcing,
+    ConstantPowerBandForcing,
+    StochasticBandForcing
 
 using DocStringExtensions: TYPEDSIGNATURES
 
@@ -18,6 +20,7 @@ using ..AtmosphereModels: AtmosphereModels, materialize_atmosphere_model_forcing
 include("geostrophic_forcings.jl")
 include("subsidence_forcing.jl")
 include("specific_forcing.jl")
+include("band_forcings.jl")
 
 #####
 ##### Extension of materialize_forcing with context argument
@@ -38,6 +41,13 @@ end
 function AtmosphereModels.compute_forcing!(mf::MultipleForcings)
     for forcing in mf.forcings
         compute_forcing!(forcing)
+    end
+    return nothing
+end
+
+function AtmosphereModels.compute_forcing!(mf::MultipleForcings, model)
+    for forcing in mf.forcings
+        compute_forcing!(forcing, model)
     end
     return nothing
 end

@@ -158,6 +158,54 @@ The reference temperature and moisture mass fractions follow the domain mean, so
 dynamics = BoussinesqDynamics(grid; pressure=9e4, temperature=285, frame_vertical_velocity=2)
 ```
 
+### Forcing homogeneous isotropic turbulence
+
+Direct numerical simulations of homogeneous isotropic turbulence in a triply-periodic domain sustain
+the turbulence by forcing the largest scales.
+Breeze provides two forcings that act on the Fourier modes of the velocity whose wavevectors lie in a band
+``k_\mathrm{min} ≤ |\boldsymbol{k}| ≤ k_f``, by default ``|\boldsymbol{k}| ≤ 1.5 × 2π / L``.
+In a cubic domain of side ``L``, where ``\boldsymbol{k} = 2π \boldsymbol{n} / L``, the default band holds the
+9 pairs of modes with ``|\boldsymbol{n}|² = 1`` or ``2``.
+
+- [`ConstantPowerBandForcing`](@ref) amplifies the forced modes of the velocity without changing their phases,
+  ```math
+  \boldsymbol{F} = \frac{ε}{2 E_f} \, \boldsymbol{u}_f , \qquad E_f = \frac{1}{2} ⟨|\boldsymbol{u}_f|²⟩ ,
+  ```
+  so that the power input ``⟨\boldsymbol{u} ⋅ \boldsymbol{F}⟩`` is exactly the energy injection rate ``ε``.
+  This is the continuous-time form of the forcing of the NCAR parcel-DNS code of [Chen et al. (2016)](@cite Chen2016),
+  which, after every leapfrog step, rescales the forced modes so that their energy ``E_f`` grows by ``2 ε Δt``
+  (a leapfrog step advances each of its two interleaved solutions by ``2 Δt``).
+  Breeze evaluates ``\boldsymbol{u}_f`` and ``E_f`` at every Runge-Kutta stage, so the power input is ``ε`` at every
+  stage and the forcing work per time step is ``ε Δt``. The forcing requires ``E_f ≫ ε Δt``, which holds in developed
+  turbulence: start from a velocity field with energy in the forced band, not from rest or from grid-scale noise alone.
+- [`StochasticBandForcing`](@ref) is the forcing of [Eswaran and Pope (1988)](@cite EswaranPope1988):
+  the amplitudes of the forced modes are Ornstein-Uhlenbeck processes with correlation time ``T_f``, independent
+  of the velocity, whose variance gives ``⟨|\boldsymbol{F}|²⟩ T_f = ε``. The mean power input is ``ε`` when ``T_f`` is
+  short compared with the turnover time of the forced eddies, and somewhat less otherwise.
+  The amplitudes are drawn once per time step, on the host, from a seeded counter-based random number generator.
+
+Both forcings are projected onto the plane perpendicular to the modified wavenumber of each mode, so that they are
+divergence-free on the staggered grid and do not change the pressure.
+The Fourier coefficients of the velocity in the band are computed by partial discrete Fourier transforms
+(summing over ``z``, then ``y``, then ``x``, for the few wavenumbers of the band), and the forcing is evaluated in
+physical space as a sum over the forced modes, so no three-dimensional FFTs are needed.
+The forcings return velocity tendencies and are supplied under the velocity names, so Breeze multiplies them by ``ρᵣ``:
+
+```jldoctest
+using Breeze
+
+grid = RectilinearGrid(size=(16, 16, 16), extent=(2π, 2π, 2π), topology=(Periodic, Periodic, Periodic))
+forcing = ConstantPowerBandForcing(grid; energy_injection_rate=0.1)
+
+model = AtmosphereModel(grid; dynamics = BoussinesqDynamics(grid),
+                        forcing = (u=forcing, v=forcing, w=forcing))
+
+model.forcing.ρw
+
+# output
+SpecificForcing with forcing: BandForcingComponent(w) of ConstantPowerBandForcing(ε=0.1)
+```
+
 ## Symbols
 
 - ``ρᵣ(z)``, ``pᵣ(z)``: Reference density and pressure satisfying hydrostatic balance for a constant ``θᵣ``.

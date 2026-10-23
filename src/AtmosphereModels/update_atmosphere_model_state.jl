@@ -79,7 +79,7 @@ requires horizontal averages of the fields being advected.
 """
 function compute_forcings!(model)
     for forcing in model.forcing
-        compute_forcing!(forcing)
+        compute_forcing!(forcing, model)
     end
     return nothing
 end
