@@ -106,6 +106,8 @@ end
         # ── Build ──
         @testset "Build" begin
             model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
+            compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+            compiled_initialize!(model)
             @test model isa AtmosphereModel
             @test model.dynamics isa CompressibleDynamics
 
@@ -117,6 +119,8 @@ end
 
         # Reconstruct for compilation phases
         model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
+        compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+        compiled_initialize!(model)
 
         θ_init, dθ_init = make_init_fields(grid)
         dmodel = Enzyme.make_zero(model)

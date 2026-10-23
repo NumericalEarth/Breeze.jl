@@ -1,4 +1,5 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+using Breeze.Utils: initialize_on_construction!
 using Oceananigans.Architectures: architecture, on_architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 using Oceananigans.Fields: AbstractField, CenterField, ZeroField
@@ -958,7 +959,7 @@ Fields
 - `density`: Reference density field ``ρ₀ = p₀/(Rᵈ T₀)`` (derived from π₀ and θᵣ)
 - `exner_function`: Reference Exner function π₀ (built by discrete integration)
 """
-struct ExnerReferenceState{FT, SP, SD, FP, FD, FE}
+struct ExnerReferenceState{FT, SP, SD, FP, FD, FE, FΘ, FQ}
     base_pressure :: FT
     surface_pressure :: SP
     surface_density :: SD
@@ -967,6 +968,8 @@ struct ExnerReferenceState{FT, SP, SD, FP, FD, FE}
     pressure :: FP
     density :: FD
     exner_function :: FE
+    potential_temperature :: FΘ
+    vapor_mass_fraction :: FQ
 end
 
 Adapt.adapt_structure(to, ref::ExnerReferenceState) =
@@ -977,7 +980,9 @@ Adapt.adapt_structure(to, ref::ExnerReferenceState) =
                         adapt(to, ref.standard_pressure),
                         adapt(to, ref.pressure),
                         adapt(to, ref.density),
-                        adapt(to, ref.exner_function))
+                        adapt(to, ref.exner_function),
+                        adapt(to, ref.potential_temperature),
+                        adapt(to, ref.vapor_mass_fraction))
 
 Base.eltype(::ExnerReferenceState{FT}) where FT = FT
 
@@ -1226,13 +1231,19 @@ Keyword Arguments
   A number or function `qᵛ(z)` builds a 1D column; a multi-argument function
   `qᵛ(x, y, z)` (or `qᵛ(φ, z)` on a `LatitudeLongitudeGrid`) builds a 3D field.
 """
-function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
-                             base_pressure = 101325,
-                             potential_temperature = 288,
-                             reference_temperature = nothing,
-                             standard_pressure = 1e5,
-                             vapor_mass_fraction = nothing,
-                             surface_pressure = nothing)
+function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)); kw...)
+    ref = allocate_exner_reference_state(grid, constants; kw...)
+    initialize_on_construction!(architecture(grid), ref, grid, constants)
+    return ref
+end
+
+function allocate_exner_reference_state(grid, constants;
+                                        base_pressure = 101325,
+                                        potential_temperature = 288,
+                                        reference_temperature = nothing,
+                                        standard_pressure = 1e5,
+                                        vapor_mass_fraction = nothing,
+                                        surface_pressure = nothing)
 
     reject_renamed_surface_pressure(surface_pressure)
 
@@ -1279,6 +1290,11 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
 
         launch!(arch, grid, tuple(1), _compute_isothermal_reference!,
                 πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, p₀, pˢᵗ, κ, Rᵈ, g, T₀)
+        fill_halo_regions!(θᵣ)
+        fill_halo_regions!(πᵣ)
+        fill_halo_regions!(pᵣ)
+        fill_halo_regions!(ρᵣ)
+        qᵛᵣ = nothing
     else
         # ── Isentropic base state (constant or z-dependent θ₀) ──
         # Either thermodynamic profile can make the reference horizontally varying.
@@ -1316,6 +1332,10 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
 
             launch!(arch, grid, :xy, _compute_exner_reference_3d!,
                     πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+            fill_halo_regions!(θᵣ)
+            fill_halo_regions!(πᵣ)
+            fill_halo_regions!(pᵣ)
+            fill_halo_regions!(ρᵣ)
         else
             # 1D reference: single column, broadcast to all (i,j). The unified
             # kernel handles both dry (qᵛ = ZeroField) and moist cases via the
@@ -1325,40 +1345,38 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
             # The bottom face is a single level, so one reduction of the datum serves every column.
             pˢ_value = convert(FT, moist_hydrostatic_pressure(zˢ, p₀, potential_temperature,
                                                               vapor_mass_fraction, pˢᵗ, constants))
-            pˢ = surface_state_field(grid, pˢ_value)
+            pˢ = Field{Center, Center, Nothing}(grid)
+            set!(pˢ, pˢ_value)
 
             loc = (nothing, nothing, Center())
             θᵣ = Field{Nothing, Nothing, Center}(grid)
             set!(θᵣ, potential_temperature)
-            fill_halo_regions!(θᵣ)
 
             πᵣ = Field{Nothing, Nothing, Center}(grid)
             # θ at the bottom face, which is where the bottom boundary values below live.
             θˢ = convert(FT, evaluate_profile(potential_temperature, zˢ))
 
-            qᵛᵣ = reference_moisture_field(vapor_mass_fraction, grid)
+            qᵛᵣ = if isnothing(vapor_mass_fraction)
+                ZeroField(FT)
+            else
+                qf = Field{Nothing, Nothing, Center}(grid)
+                set!(qf, vapor_mass_fraction)
+                qf
+            end
             qᵛ_surface = if isnothing(vapor_mass_fraction)
                 zero(FT)
             else
                 convert(FT, evaluate_profile(vapor_mass_fraction, zˢ))
             end
-            ρˢ = surface_state_field(grid, surface_reference_density(pˢ_value, θˢ, qᵛ_surface, pˢᵗ,
-                                                                    Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ))
+            ρˢ = Field{Center, Center, Nothing}(grid)
+            set!(ρˢ, surface_reference_density(pˢ_value, θˢ, qᵛ_surface, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ))
 
             p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(pˢ)))
             pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
             ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(ρˢ)))
             ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
-
-            launch!(arch, grid, tuple(1), _compute_exner_reference!,
-                    πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
         end
     end
-
-    fill_halo_regions!(θᵣ)
-    fill_halo_regions!(πᵣ)
-    fill_halo_regions!(pᵣ)
-    fill_halo_regions!(ρᵣ)
 
     # Surface θ₀ for the struct: for isothermal, θ_surface = T₀/Π_surface = T₀
     θ₀_val = if reference_temperature !== nothing
@@ -1367,7 +1385,44 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
         convert(FT, surface_value(potential_temperature))
     end
 
-    return ExnerReferenceState(p₀, pˢ, ρˢ, θ₀_val, pˢᵗ, pᵣ, ρᵣ, πᵣ)
+    return ExnerReferenceState(p₀, pˢ, ρˢ, θ₀_val, pˢᵗ, pᵣ, ρᵣ, πᵣ, θᵣ, qᵛᵣ)
+end
+
+const ColumnExnerReferenceState = ExnerReferenceState{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any,
+                                                      <:Field{Nothing, Nothing, Center},
+                                                      <:Union{ZeroField, Field{Nothing, Nothing, Center}}}
+
+"""
+$(TYPEDSIGNATURES)
+
+Fill the halos and integrate the discrete-balance column of a reference state from the fields its
+constructor allocated. Only the 1D isentropic column keeps its profile fields; the other reference
+states are integrated by their constructors.
+"""
+Oceananigans.initialize!(ref::ExnerReferenceState, grid, constants) = nothing
+
+function Oceananigans.initialize!(ref::ColumnExnerReferenceState, grid, constants)
+    arch = architecture(grid)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    g = constants.gravitational_acceleration
+    Nz = size(grid, 3)
+
+    fill_halo_regions!(ref.surface_pressure)
+    fill_halo_regions!(ref.surface_density)
+    fill_halo_regions!(ref.potential_temperature)
+    fill_halo_regions!(ref.vapor_mass_fraction)
+
+    launch!(arch, grid, tuple(1), _compute_exner_reference!,
+            ref.exner_function, ref.pressure, ref.density, ref.potential_temperature, ref.vapor_mass_fraction,
+            grid, Nz, ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+
+    fill_halo_regions!(ref.exner_function)
+    fill_halo_regions!(ref.pressure)
+    fill_halo_regions!(ref.density)
+    return nothing
 end
 
 """

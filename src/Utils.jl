@@ -11,12 +11,15 @@ export sum_properties,
        chebyshev_gauss_nodes_weights,
        transform_to_diameter,
        jacobian_diameter_transform,
+       initialize_on_construction!,
        @adapt_architecture
 
 using Adapt: Adapt
 using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: on_architecture
+
+initialize_on_construction!(arch, x, args...) = Oceananigans.initialize!(x, args...)
 
 #####
 ##### Sums of selected properties
