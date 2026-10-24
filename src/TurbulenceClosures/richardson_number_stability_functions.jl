@@ -2,21 +2,26 @@
 ##### Richardson-number-dependent rational stability functions
 #####
 
-# Ri = N² / S², zero where N² = 0 (so that N² = S² = 0 is neutral rather than NaN) and ±∞ where
-# only the shear vanishes, which the stability functions map to their stable or unstable value.
-@inline richardson_number(N², S²) = ifelse(N² == 0, zero(N²), N² / S²)
+# Ri = N² / (S² + S²ᵐⁱⁿ), with the closure's `minimum_shear_squared` S²ᵐⁱⁿ > 0 added to the
+# shear. The floor makes Ri a smooth function of N² and S² everywhere: zero at N² = 0 for any shear
+# (N² = S² = 0 is neutral rather than NaN), finite where the shear vanishes, and passing through
+# zero continuously as N² changes sign. Without it, Ri where S² = 0 jumps between the unstable
+# limit, neutral and the stable limit with the sign of a rounding-level N². Where S² ≫ S²ᵐⁱⁿ the
+# relative change from N² / S² is at most S²ᵐⁱⁿ / S².
+@inline richardson_number(N², S², S²ᵐⁱⁿ) = N² / (S² + S²ᵐⁱⁿ)
 
-@inline function Riᶜᶜᶠ(i, j, k, grid, velocities, N²)
+@inline function Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²)
     S² = shearᶜᶜᶠ(i, j, k, grid, velocities.u, velocities.v)
     N²ᵢ = @inbounds N²[i, j, k]
-    return richardson_number(N²ᵢ, S²)
+    return richardson_number(N²ᵢ, S², closure.minimum_shear_squared)
 end
 
-# Reconstruct N² and S² separately so opposite infinite face Richardson numbers cannot yield NaN.
-@inline function Riᶜᶜᶜ(i, j, k, grid, velocities, N²)
+# Reconstruct N² and S² separately rather than averaging the face Richardson numbers, so that the
+# center sees the stratification and shear of both faces even when Ri changes sign between them.
+@inline function Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N²)
     S² = ℑbzᵃᵃᶜ(i, j, k, grid, shearᶜᶜᶠ, velocities.u, velocities.v)
     N²ᵢ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
-    return richardson_number(N²ᵢ, S²)
+    return richardson_number(N²ᵢ, S², closure.minimum_shear_squared)
 end
 
 struct RationalStabilityFunction{FT}
@@ -87,6 +92,8 @@ end
 @inline convert_eltype(::Type{FT}, sf::RationalStabilityFunction) where FT =
     RationalStabilityFunction{FT}((convert(FT, getfield(sf, name)) for name in fieldnames(RationalStabilityFunction))...)
 
+Adapt.@adapt_structure RationalStabilityFunction
+
 Base.summary(sf::RationalStabilityFunction{FT}) where FT = "RationalStabilityFunction{$FT}"
 
 stability_endpoint_summary(ℂᵘ, ℂᶜ, ℂᵉ, ℂᴰ) = join(prettysummary.((ℂᵘ, ℂᶜ, ℂᵉ, ℂᴰ)), ", ")
@@ -130,21 +137,21 @@ end
 const RichardsonStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:RationalStabilityFunction}
 
 @inline function momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N²)
-    Ri = Riᶜᶜᶠ(i, j, k, grid, velocities, N²)
+    Ri = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²)
     return momentum_stability_function(closure.stability_functions, Ri)
 end
 
 @inline function tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N²)
-    Ri = Riᶜᶜᶠ(i, j, k, grid, velocities, N²)
+    Ri = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²)
     return tracer_stability_function(closure.stability_functions, Ri)
 end
 
 @inline function tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N²)
-    Ri = Riᶜᶜᶠ(i, j, k, grid, velocities, N²)
+    Ri = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²)
     return tke_stability_function(closure.stability_functions, Ri)
 end
 
 @inline function dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N²)
-    Ri = Riᶜᶜᶜ(i, j, k, grid, velocities, N²)
+    Ri = Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N²)
     return dissipation_stability_function(closure.stability_functions, Ri)
 end

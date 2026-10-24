@@ -99,7 +99,13 @@ on a saturated adiabat, so mixing is not shut off inside stratocumulus.
 
 The default is [`RationalStabilityFunction`](@ref),
 ``S(Ri) = C⁰ + (C^± - C⁰) x / (1 + x)`` with ``x = |Ri| / Ri^±``, which is continuous but kinked at
-neutral. Its calibrated coefficients (rounded) are
+neutral. The Richardson number is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, with the closure's
+`minimum_shear_squared` ``S²ᵐⁱⁿ = 10⁻¹⁰ \, \mathrm{s⁻²}`` by default. The floor keeps ``Ri`` finite and
+continuous where the shear vanishes, as in uniform or absent wind: there ``N² / S²`` would jump
+between the stable and unstable limits with the sign of a rounding-level ``N²``. With the floor the
+functions pass from neutral to their limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``, and where ``S² ≫ S²ᵐⁱⁿ``
+``Ri`` differs from ``N² / S²`` by the relative amount ``S²ᵐⁱⁿ / S²`` at most.
+Its calibrated coefficients (rounded) are
 
 | Function | Unstable limit | Neutral | Stable limit |
 |:--|--:|--:|--:|
@@ -142,8 +148,9 @@ TKEBasedTurbulenceClosure().mixing_length.ℂⁱ
 The diffusivities are computed at the cell interfaces where the fluxes live, from the stored mixing
 length and ``\sqrt{e}`` reconstructed from the cell centers and floored at `minimum_tke`.
 The numerics of the TKE equation follow CATKE. The sinks — dissipation and the negative part of the buoyancy flux, as the rate
-``-Lᵉ = Sᴰ \sqrt{e} / ℓ + |B⁻| / e``, and the damping of ``e`` that advection drives negative, at
-the rate ``1/τ`` — enter the vertically implicit tridiagonal solve of every time-step stage together
+``-Lᵉ = Sᴰ \sqrt{e} / ℓ + |B⁻| / \max(e, eᵐⁱⁿ)`` with ``eᵐⁱⁿ`` the `minimum_tke` (so that the buoyancy
+sink is continuous at ``e = eᵐⁱⁿ`` and falls linearly with ``e`` below it), and the damping of ``e``
+that advection drives negative, at the rate ``1/τ`` — enter the vertically implicit tridiagonal solve of every time-step stage together
 with the vertical diffusion of ``e``, so that ``e`` stays positive for any time step. The sources —
 shear production and the positive part of the buoyancy flux — enter the tendency of the same stage.
 Shear production uses the current stage's velocities in both factors of ``Kᵘ S²``; its spatial

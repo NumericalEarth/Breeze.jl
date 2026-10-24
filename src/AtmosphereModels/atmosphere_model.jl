@@ -171,9 +171,11 @@ function AtmosphereModel(grid;
 
     # Validate that the microphysics scheme is compatible with the thermodynamic constants
     validate_microphysics(microphysics, thermodynamic_constants)
+    validate_microphysics_architecture(microphysics, grid.architecture)
 
-    # Validate that the radiation's solar position can read the clock
-    validate_radiation(radiation, clock)
+    # Validate that the radiation's solar position can read the clock, and that its schedule
+    # can be evaluated on this architecture (before anything is traced)
+    validate_radiation(radiation, clock, grid.architecture)
 
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.

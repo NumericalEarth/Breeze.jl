@@ -486,6 +486,8 @@ previous_float_type = Oceananigans.defaults.FloatType
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100
         interior(ℐ_lw_up) .= 0
 
+        # Scheduled updates happen in the first-stage update_state! of a step (clock at stage 2)
+        model.clock.stage = 2
         model.clock.iteration = 1
         Oceananigans.TimeSteppers.update_state!(model; compute_tendencies = false)
         @allowscalar @test ℐ_lw_up[1, 1, 1] == 0

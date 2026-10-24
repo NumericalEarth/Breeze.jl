@@ -1264,6 +1264,15 @@ validate_microphysics(microphysics, thermodynamic_constants) = nothing
 """
 $(TYPEDSIGNATURES)
 
+Validate that `microphysics` can run on architecture `arch`; a no-op by default. Extensions throw
+an `ArgumentError` at model construction for schemes that need settings an architecture requires
+(for example a static sedimentation substep bound under Reactant).
+"""
+validate_microphysics_architecture(microphysics, arch) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Adjust the thermodynamic `state` according to the `scheme`.
 For example, if `scheme isa SaturationAdjustment`, then this function
 will adjust and return a new thermodynamic state given the specifications

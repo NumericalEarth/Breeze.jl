@@ -1,7 +1,8 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, absorb_stratification_coefficient, dissipationᶜᶜᶜ
+using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, absorb_stratification_coefficient, dissipationᶜᶜᶜ,
+                                 tke_sink_rate
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!, time_discretization
 using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, ExplicitTimeDiscretization,
@@ -9,6 +10,7 @@ using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, Exp
 using Oceananigans.BuoyancyFormulations: ∂z_b
 using Oceananigans.Units
 using Test
+using Adapt: adapt
 
 # The mixing length is stored with the closure fields: its envelope over the column is computed by
 # two sweeps, once per stage, so a script reads it as `model.closure_fields.ℓᵐ`.
@@ -46,6 +48,7 @@ end
         @test ℂˢ ≈ 1.316
         @test (sf.ℂᵘ, sf.ℂᶜ, sf.ℂᵉ, sf.ℂᴰ) == FT.((0.149, 0.201, 0.298, 0.388))
         @test closure.minimum_tke == FT(1e-6)
+        @test closure.minimum_shear_squared == FT(1e-10)
         @test closure.negative_tke_damping_time_scale == FT(60)
         @test isinf(closure.maximum_viscosity)
         @test isinf(closure.maximum_tracer_diffusivity)
@@ -64,13 +67,17 @@ end
                                               stability_functions = ConstantStabilityFunctions(ℂᵘ = 0.3, ℂᶜ = 0.3, ℂᵉ = 1, ℂᴰ = 1),
                                               maximum_viscosity = 100,
                                               minimum_tke = 1e-8,
+                                              minimum_shear_squared = 1e-12,
                                               negative_tke_damping_time_scale = 10minutes)
         @test closure.mixing_length.ℂˢ === FT(1)
         @test closure.stability_functions.ℂᵘ === FT(0.3)
         @test closure.stability_functions.ℂᵉ === FT(1)
         @test closure.maximum_viscosity === FT(100)
         @test closure.minimum_tke === FT(1e-8)
+        @test closure.minimum_shear_squared === FT(1e-12)
         @test closure.negative_tke_damping_time_scale === FT(600)
+        @test_throws ArgumentError TKEBasedTurbulenceClosure(FT; minimum_shear_squared = 0)
+        @test_throws ArgumentError TKEBasedTurbulenceClosure(FT; minimum_shear_squared = -1e-10)
 
         explicit = TKEBasedTurbulenceClosure(ExplicitTimeDiscretization())
         @test time_discretization(explicit) isa ExplicitTimeDiscretization
@@ -95,6 +102,7 @@ end
         @test occursin("MoistStaticStability", str)
         @test occursin("DryStaticStability", sprint(show, TKEBasedTurbulenceClosure(static_stability = DryStaticStability())))
         @test occursin("minimum_tke", str)
+        @test occursin("minimum_shear_squared", str)
         @test occursin("ℂᴰ", sprint(show, ConstantStabilityFunctions()))
         @test occursin("ℂˢ", sprint(show, GradientLimitedMixingLength()))
         @test occursin("LocalMinimum", sprint(show, LocalMinimumMixingLength()))
@@ -120,6 +128,9 @@ column(field) = Array(interior(field, 1, 1, :))
 @testset "Calibrated defaults and split mixing length [$(FT)]" for FT in test_float_types()
     closure = TKEBasedTurbulenceClosure(FT)
     sf = closure.stability_functions
+    @test adapt(identity, closure) === closure
+    @test adapt(identity, closure.mixing_length) === closure.mixing_length
+    @test adapt(identity, sf) === sf
     @test sf isa RationalStabilityFunction{FT}
     @test closure.mixing_length.ℂˢ === FT(0.6565692899592015)
     @test closure.mixing_length.ℂⁱ === FT(1.5609936948461662)
@@ -490,6 +501,50 @@ end
         @test all(Lᵉ .≈ -ℂᴰ * sqrt(e₋) ./ (ℂˢ .* zc))
     end
 
+    @testset "the buoyancy sink is continuous at the minimum TKE" begin
+        # ωᴮ = -B⁻ / max(e, eᵐⁱⁿ): unchanged above the floor and constant below it, so that the
+        # implicit buoyancy sink ωᴮ e is continuous at e = eᵐⁱⁿ and falls linearly with e. The
+        # buoyancy flux is passed to the sink rate directly; B = 0 gives the dissipation rate alone.
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        set!(model; θ = z -> 300 + 0.005z)
+        eᵐⁱⁿ = closure.minimum_tke
+        τ = closure.negative_tke_damping_time_scale
+        B = -FT(1e-7)
+        δ = FT === Float64 ? 1e-6 : 1e-3
+        rtol = FT === Float64 ? 1e-10 : 1e-4
+        function sink_rates(e₀)
+            set_tke!(model, e₀)
+            e = model.tracers.ρe / model.dynamics.reference_state.density
+            rate(b) = column(Field(KernelFunctionOperation{Center, Center, Center}(tke_sink_rate, grid, model.closure, e, b,
+                                                                                   model.velocities, model.closure_fields)))
+            ω = rate(zero(FT))
+            return (; e = column(Field(e)), ω, ωᴮ = rate(B) .- ω)
+        end
+
+        # The left and right limits at the floor agree, for the rate and for the sink
+        below, at, above = sink_rates(eᵐⁱⁿ * (1 - δ)), sink_rates(eᵐⁱⁿ), sink_rates(eᵐⁱⁿ * (1 + δ))
+        @test all(below.e .< eᵐⁱⁿ .< above.e)
+        @test isapprox(below.ω .+ below.ωᴮ, above.ω .+ above.ωᴮ; rtol = 4δ)
+        @test isapprox(below.ωᴮ .* below.e, above.ωᴮ .* above.e; rtol = 4δ)
+        @test all(isapprox.(at.ωᴮ, -B / eᵐⁱⁿ; rtol))
+
+        # Above the floor the rate is -B⁻ / e, as without the floor
+        for e₀ in FT.((2eᵐⁱⁿ, 10eᵐⁱⁿ, 1e-4))
+            r = sink_rates(e₀)
+            @test all(isapprox.(r.ωᴮ, -B ./ r.e; rtol))
+        end
+
+        # Below the floor it is -B⁻ / eᵐⁱⁿ, so the sink ωᴮ e is linear in e, and it adds to the
+        # damping of negative TKE, which it also drives towards zero
+        for e₀ in FT.((eᵐⁱⁿ / 2, eᵐⁱⁿ / 4))
+            r = sink_rates(e₀)
+            @test all(isapprox.(r.ωᴮ, -B / eᵐⁱⁿ; rtol))
+        end
+        r = sink_rates(-FT(0.01))
+        @test all(isapprox.(r.ω, 1 / τ; rtol))
+        @test all(isapprox.(r.ωᴮ, -B / eᵐⁱⁿ; rtol))
+    end
+
     @testset "the sources enter the stage tendency" begin
         model = AtmosphereModel(grid; closure, advection = nothing)
         e₀ = FT(0.5)
@@ -552,11 +607,17 @@ end
 
     @testset "negative TKE is damped on the damping time scale" begin
         τ = FT(60)
-        model = AtmosphereModel(grid; closure, advection = nothing)
+        # Without tracer diffusivity the buoyancy flux -Kᶜ N² vanishes exactly. Otherwise the
+        # rounding-level N² that the stages leave in a Float32 neutral column would add its
+        # buoyancy sink rate -B⁻ / eᵐⁱⁿ, which applies below the minimum TKE, to the damping.
+        undiffused = TKEBasedTurbulenceClosure(mixing_length = GradientLimitedMixingLength(),
+                                               stability_functions = ConstantStabilityFunctions(),
+                                               maximum_tracer_diffusivity = 0)
+        model = AtmosphereModel(grid; closure = undiffused, advection = nothing)
         set!(model; θ = 300)
         set_tke!(model, FT(-0.1))
 
-        # No shear, no stratification and no TKE gradient, so the damping rate 1/τ is the only
+        # No shear, no buoyancy flux and no TKE gradient, so the damping rate 1/τ is the only
         # term. It is applied implicitly in each of the three SSP-RK3 stages with αΔt = Δt, Δt/4,
         # 2Δt/3, and the stage combinations make one step of length τ multiply a uniform e by
         # [1/3 + 2/3 (3/4 + 1/4 (1/2)) / (5/4)] / (5/3) = 0.48
@@ -674,7 +735,7 @@ end
 ##### Richardson-number-dependent stability functions
 #####
 
-using Breeze.TurbulenceClosures: rational_stability, Riᶜᶜᶠ,
+using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜᶠ,
                                  momentum_stability_function, tracer_stability_function,
                                  tke_stability_function, dissipation_stability_function
 
@@ -691,14 +752,13 @@ using Breeze.TurbulenceClosures: rational_stability, Riᶜᶜᶠ,
     zc = znodes(grid, Center())
     interior_faces = 2:Nz
 
-    Riᶠ(model) = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid,
+    Riᶠ(model) = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.closure,
                                                                            model.velocities,
                                                                            model.closure_fields.N²)))
 
     @testset "a windless column with stable and unstable layers stays finite" begin
-        # No shear, so Ri = ±∞ at every interface and the sign changes at mid-depth. At the cell
-        # center there Ri is formed from the reconstructed N² and S², a number, where averaging
-        # the interfaces' ±∞ would have given NaN and switched the dissipation off.
+        # No shear, so Ri = N² / S²ᵐⁱⁿ at every interface, large and finite, and the sign changes
+        # at mid-depth. At the cell center there Ri is formed from the reconstructed N² and S².
         closure = TKEBasedTurbulenceClosure()
         sf = closure.stability_functions
         model = AtmosphereModel(grid; closure, advection = nothing)
@@ -706,8 +766,9 @@ using Breeze.TurbulenceClosures: rational_stability, Riᶜᶜᶠ,
         set!(model; θ = θᵢ)
         set_tke!(model, FT(0.5))
 
-        Ri = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.velocities, model.closure_fields.N²)))
-        @test all(isinf, Ri[interior_faces])
+        Ri = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.closure, model.velocities, model.closure_fields.N²)))
+        @test all(isfinite, Ri[interior_faces])
+        @test all(abs.(Ri[interior_faces]) .> 1e4 * max(sf.Ri⁻, sf.Ri⁺))
         @test any(Ri[interior_faces] .< 0) && any(Ri[interior_faces] .> 0)
 
         Lᵉ = column(model.closure_fields.Lᵉ)
@@ -850,6 +911,91 @@ using Breeze.TurbulenceClosures: rational_stability, Riᶜᶜᶠ,
         @test sharp(2Ri⁺) > S(2Ri⁺)
     end
 
+    @testset "the shear floor makes the Richardson number continuous" begin
+        closure = TKEBasedTurbulenceClosure(FT)
+        sf = closure.stability_functions
+        S²ᵐⁱⁿ = closure.minimum_shear_squared
+        functions = (momentum_stability_function, tracer_stability_function,
+                     tke_stability_function, dissipation_stability_function)
+        endpoints = ((sf.ℂᵘ⁻, sf.ℂᵘ⁰, sf.ℂᵘ⁺), (sf.ℂᶜ⁻, sf.ℂᶜ⁰, sf.ℂᶜ⁺),
+                     (sf.ℂᵉ⁻, sf.ℂᵉ⁰, sf.ℂᵉ⁺), (sf.ℂᴰ⁻, sf.ℂᴰ⁰, sf.ℂᴰ⁺))
+
+        # Neutral air is neutral with or without shear
+        @test richardson_number(zero(FT), zero(FT), S²ᵐⁱⁿ) === zero(FT)
+        @test richardson_number(zero(FT), FT(1e-4), S²ᵐⁱⁿ) === zero(FT)
+
+        # Without shear, a rounding-level N² of either sign leaves every function at its neutral
+        # value, to within |C± - C⁰| |N²| / (Ri± S²ᵐⁱⁿ); the unfloored N² / S² sent it to a limit
+        for N² in FT.((-1e-16, 0, 1e-16)), (S, (C⁻, C⁰, C⁺)) in zip(functions, endpoints)
+            Ri = richardson_number(N², zero(FT), S²ᵐⁱⁿ)
+            Cᵇ, Riᵇ = N² ≥ 0 ? (C⁺, sf.Ri⁺) : (C⁻, sf.Ri⁻)
+            @test abs(S(sf, Ri) - C⁰) ≤ abs(Cᵇ - C⁰) * abs(N²) / (Riᵇ * S²ᵐⁱⁿ) + 2eps(C⁰)
+            @test abs(S(sf, Ri) - C⁰) ≤ 1e-3 * C⁰
+        end
+
+        # Without shear the functions saturate monotonically once |N²| ≫ Ri± S²ᵐⁱⁿ, to within
+        # |C⁰ - C±| Ri± S²ᵐⁱⁿ / |N²| of their limits
+        for (S, (C⁻, C⁰, C⁺)) in zip(functions, endpoints)
+            magnitudes = FT.(10.0 .^ (-16:-6))
+            stable = [abs(S(sf, richardson_number(N², zero(FT), S²ᵐⁱⁿ)) - C⁺) for N² in magnitudes]
+            unstable = [abs(S(sf, richardson_number(-N², zero(FT), S²ᵐⁱⁿ)) - C⁻) for N² in magnitudes]
+            @test issorted(stable; rev = true)
+            @test issorted(unstable; rev = true)
+
+            magnitudes = FT.(10.0 .^ (-16:2:0))
+            for N² in magnitudes
+                @test abs(S(sf, richardson_number(N², zero(FT), S²ᵐⁱⁿ)) - C⁺) ≤
+                      abs(C⁰ - C⁺) * sf.Ri⁺ * S²ᵐⁱⁿ / N² + 4eps(max(C⁰, C⁺))
+                @test abs(S(sf, richardson_number(-N², zero(FT), S²ᵐⁱⁿ)) - C⁻) ≤
+                      abs(C⁰ - C⁻) * sf.Ri⁻ * S²ᵐⁱⁿ / N² + 4eps(max(C⁰, C⁻))
+            end
+        end
+
+        # With shear well above the floor, Ri is N² / S² to relative order S²ᵐⁱⁿ / S²
+        for S² in FT.((1e-6, 1e-4, 1e-2, 1)), N² in FT.((-1e-2, -1e-4, 1e-4, 1e-2))
+            Ri = richardson_number(N², S², S²ᵐⁱⁿ)
+            @test abs(Ri - N² / S²) ≤ abs(N² / S²) * (S²ᵐⁱⁿ / S² + 2eps(FT))
+        end
+
+        # Never NaN, for zero, subnormal, small, huge and infinite static stability of either sign
+        # and shear — short of both being infinite at once, a state that has already blown up
+        tiny = nextfloat(zero(FT))
+        N²s = (zero(FT), -zero(FT), tiny, -tiny, FT(1e-16), FT(-1e-16), one(FT), -one(FT),
+               floatmax(FT), -floatmax(FT), FT(Inf), FT(-Inf))
+        S²s = (zero(FT), tiny, FT(1e-16), one(FT), floatmax(FT), FT(Inf))
+        for N² in N²s, S² in S²s
+            isinf(N²) && isinf(S²) && continue
+            Ri = richardson_number(N², S², S²ᵐⁱⁿ)
+            @test !isnan(Ri)
+            @test all(S -> isfinite(S(sf, Ri)), functions)
+        end
+    end
+
+    # In Float32 the rounding level of N² at θ ≈ 300 K, about 1e-8 s⁻², exceeds Ri± S²ᵐⁱⁿ, so this
+    # protection by the default floor holds in Float64
+    FT === Float64 && @testset "a shear-free neutral column is insensitive to rounding-level stratification" begin
+        # Uniform wind, so S² = 0 at every interface. One-ulp changes of ρθ at alternate levels give
+        # N² of either sign at the rounding level, which Ri = N² / (S² + S²ᵐⁱⁿ) maps to nearly
+        # neutral, where N² / S² sent every interface to the stable or the unstable limit
+        closure = TKEBasedTurbulenceClosure()
+        function closure_fields(perturb)
+            model = AtmosphereModel(grid; closure, advection = nothing)
+            set!(model; θ = 300, u = 5)
+            perturb && (interior(model.formulation.potential_temperature_density)[:, :, 1:2:Nz] .*= 1 + eps(FT))
+            set_tke!(model, FT(0.5))
+            return (N² = column(model.closure_fields.N²), Kᵘ = column(model.closure_fields.Kᵘ),
+                    Kᶜ = column(model.closure_fields.Kᶜ), Kᵉ = column(model.closure_fields.Kᵉ),
+                    Lᵉ = column(model.closure_fields.Lᵉ))
+        end
+        neutral = closure_fields(false)
+        perturbed = closure_fields(true)
+        @test all(neutral.N²[interior_faces] .== 0)
+        @test any(perturbed.N²[interior_faces] .> 0) && any(perturbed.N²[interior_faces] .< 0)
+        for name in (:Kᵘ, :Kᶜ, :Kᵉ, :Lᵉ)
+            @test isapprox(perturbed[name], neutral[name]; rtol = 1e-4)
+        end
+    end
+
     @testset "the constant submodel is exact" begin
         # Three coinciding endpoints give that constant at every Richardson number, with no limit
         # to take: the term multiplying the shape factor is identically zero
@@ -940,8 +1086,8 @@ using Breeze.TurbulenceClosures: rational_stability, Riᶜᶜᶠ,
     end
 
     @testset "a windless column with stable and unstable layers stays finite" begin
-        # No shear, so Ri = ±∞ at every interface: the rational functions must return their
-        # asymptotes there rather than the ∞/∞ of the naive xᵖ/(1 + xᵖ)
+        # No shear, so Ri = N² / S²ᵐⁱⁿ at every interface, finite but far beyond both transition
+        # scales: the rational functions are within O(Ri± / |Ri|) of their asymptotes there
         sf = RationalStabilityFunction()
         closure = TKEBasedTurbulenceClosure(stability_functions = sf)
         model = AtmosphereModel(grid; closure, advection = nothing)
@@ -950,7 +1096,8 @@ using Breeze.TurbulenceClosures: rational_stability, Riᶜᶜᶠ,
         set_tke!(model, FT(0.5))
 
         Ri = Riᶠ(model)
-        @test all(isinf, Ri[interior_faces])
+        @test all(isfinite, Ri[interior_faces])
+        @test all(abs.(Ri[interior_faces]) .> 1e4 * max(sf.Ri⁻, sf.Ri⁺))
         @test any(Ri[interior_faces] .< 0) && any(Ri[interior_faces] .> 0)
 
         Kᵘ = column(model.closure_fields.Kᵘ)
@@ -960,11 +1107,14 @@ using Breeze.TurbulenceClosures: rational_stability, Riᶜᶜᶠ,
         @test all(isfinite, Kᶜ)
         @test all(isfinite, Lᵉ)
         @test all(Lᵉ .< 0)
-        # The asymptotes are reached exactly where the shear vanishes
+        # Where the shear vanishes the ratio follows the rational functions at Ri = N² / S²ᵐⁱⁿ,
+        # within the relative distance 1 / (1 + |Ri| / Ri±) ≤ 1e-4 of the asymptotes
         stable_faces = [k for k in interior_faces if Ri[k] > 0]
         unstable_faces = [k for k in interior_faces if Ri[k] < 0]
-        @test all(Kᶜ[stable_faces] ./ Kᵘ[stable_faces] .≈ sf.ℂᶜ⁺ / sf.ℂᵘ⁺)
-        @test all(Kᶜ[unstable_faces] ./ Kᵘ[unstable_faces] .≈ sf.ℂᶜ⁻ / sf.ℂᵘ⁻)
+        expected = [tracer_stability_function(sf, r) / momentum_stability_function(sf, r) for r in Ri]
+        @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ expected[interior_faces])
+        @test all(isapprox.(Kᶜ[stable_faces] ./ Kᵘ[stable_faces], sf.ℂᶜ⁺ / sf.ℂᵘ⁺; rtol = 1e-3))
+        @test all(isapprox.(Kᶜ[unstable_faces] ./ Kᵘ[unstable_faces], sf.ℂᶜ⁻ / sf.ℂᵘ⁻; rtol = 1e-3))
 
         for _ in 1:10
             time_step!(model, 10)

@@ -207,6 +207,9 @@ GradientLimitedMixingLength(ℂˢ) = GradientLimitedMixingLength(ℂˢ, ℂˢ)
 GradientLimitedMixingLength{FT}(ℂˢ) where FT = GradientLimitedMixingLength{FT}(ℂˢ, ℂˢ)
 GradientLimitedMixingLength(ℂˢ, ℂⁱ) = GradientLimitedMixingLength(promote(ℂˢ, ℂⁱ)...)
 
+# Coefficients may be traced scalars when a shared closure is differentiated.
+Adapt.@adapt_structure GradientLimitedMixingLength
+
 @inline interior_slope(ml::GradientLimitedMixingLength) = ml.ℂⁱ
 @inline interior_slope(ml::AbstractMixingLength) = ml.ℂˢ
 
@@ -257,7 +260,9 @@ closure applies the local production, buoyancy flux and dissipation.
 The square root of ``e`` is floored at `minimum_tke` wherever it enters a diffusivity or a length
 scale, and negative ``e`` — which advection can produce — is damped on
 `negative_tke_damping_time_scale` rather than clipped. The three `maximum_*` diffusivities clip
-the diffusivities, `Inf` by default.
+the diffusivities, `Inf` by default. The Richardson number of
+[`RationalStabilityFunction`](@ref) is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, with ``S²ᵐⁱⁿ`` the
+`minimum_shear_squared`, so that it is finite and continuous where the shear vanishes.
 """
 struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
     mixing_length :: ML                   # the primary mixing length ℓ
@@ -267,10 +272,23 @@ struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT} <: AbstractScalarDiffusivit
     maximum_tracer_diffusivity :: FT      # upper bound on Kᶜ, m² s⁻¹
     maximum_tke_diffusivity :: FT         # upper bound on Kᵉ, m² s⁻¹
     minimum_tke :: FT                     # floor on e inside √e, m² s⁻²
+    minimum_shear_squared :: FT           # shear floor S²ᵐⁱⁿ in Ri = N² / (S² + S²ᵐⁱⁿ), s⁻²
     negative_tke_damping_time_scale :: FT # time scale on which negative e is damped, s
 end
 
 const TKEClosureArray{TD} = AbstractArray{<:TKEBasedTurbulenceClosure{TD}} where TD
+
+function Adapt.adapt_structure(to, closure::TKEBasedTurbulenceClosure{TD}) where TD
+    return TKEBasedTurbulenceClosure{TD}(adapt(to, closure.mixing_length),
+                                         adapt(to, closure.stability_functions),
+                                         adapt(to, closure.static_stability),
+                                         adapt(to, closure.maximum_viscosity),
+                                         adapt(to, closure.maximum_tracer_diffusivity),
+                                         adapt(to, closure.maximum_tke_diffusivity),
+                                         adapt(to, closure.minimum_tke),
+                                         adapt(to, closure.minimum_shear_squared),
+                                         adapt(to, closure.negative_tke_damping_time_scale))
+end
 
 """Either a single `TKEBasedTurbulenceClosure` or an ensemble array of them."""
 const FlavorOfTKEClosure{TD} = Union{TKEBasedTurbulenceClosure{TD}, TKEClosureArray{TD}} where TD
@@ -278,10 +296,12 @@ const FlavorOfTKEClosure{TD} = Union{TKEBasedTurbulenceClosure{TD}, TKEClosureAr
 function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::SF, static_stability::SS,
                                        maximum_viscosity::FT, maximum_tracer_diffusivity::FT,
                                        maximum_tke_diffusivity::FT, minimum_tke::FT,
+                                       minimum_shear_squared::FT,
                                        negative_tke_damping_time_scale::FT) where {TD, ML, SF, SS, FT}
     return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT}(mixing_length, stability_functions, static_stability,
                                                          maximum_viscosity, maximum_tracer_diffusivity,
                                                          maximum_tke_diffusivity, minimum_tke,
+                                                         minimum_shear_squared,
                                                          negative_tke_damping_time_scale)
 end
 
@@ -295,6 +315,23 @@ rational stability functions, wall coefficient 0.6565692899592015 and interior s
 1.5609936948461662. Reproducing that fit also requires an explicitly supplied surface TKE flux
 boundary condition with the coefficients of [`tke_surface_flux`](@ref); it is not installed
 implicitly by the closure constructor.
+
+`minimum_shear_squared` (default `1e-10` s⁻²) is the floor ``S²ᵐⁱⁿ > 0`` added to the squared
+shear in the Richardson number of [`RationalStabilityFunction`](@ref),
+``Ri = N² / (S² + S²ᵐⁱⁿ)``. It makes the stability functions continuous where the shear vanishes,
+as in uniform or absent wind, where ``N² / S²`` would jump between the stable and unstable limits
+with the sign of a rounding-level ``N²``. There the stability functions pass from neutral to their
+limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``; where ``S² ≫ S²ᵐⁱⁿ`` they are unchanged to relative order
+``S²ᵐⁱⁿ / S²``. It does not enter [`ConstantStabilityFunctions`](@ref).
+
+```jldoctest
+using Breeze
+
+TKEBasedTurbulenceClosure().minimum_shear_squared
+
+# output
+1.0e-10
+```
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                    FT = Oceananigans.defaults.FloatType;
@@ -305,9 +342,14 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    maximum_tracer_diffusivity = Inf,
                                    maximum_tke_diffusivity = Inf,
                                    minimum_tke = 1e-6,
+                                   minimum_shear_squared = 1e-10,
                                    # CATKE's value; atmospheric turbulence evolves faster than the
                                    # ocean's, so a shorter time scale may be more appropriate here.
                                    negative_tke_damping_time_scale = 1minute) where TD
+
+    minimum_shear_squared > 0 ||
+        throw(ArgumentError("minimum_shear_squared must be positive, so that the Richardson number " *
+                            "N² / (S² + minimum_shear_squared) is finite, but it is $minimum_shear_squared"))
 
     mixing_length = convert_eltype(FT, mixing_length)
     stability_functions = convert_eltype(FT, stability_functions)
@@ -320,6 +362,7 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                          convert(FT, maximum_tracer_diffusivity),
                                          convert(FT, maximum_tke_diffusivity),
                                          convert(FT, minimum_tke),
+                                         convert(FT, minimum_shear_squared),
                                          convert(FT, negative_tke_damping_time_scale))
 end
 
@@ -644,6 +687,11 @@ centers and the stored static stability `N²` at the faces. One thread per colum
     fill_mixing_length!(ℓ, ℓˢ, i, j, grid, closure_ij.mixing_length, closure_ij, e, N²)
 end
 
+# One thread per column. A backend that runs loops over k slowly inside a kernel (Reactant, where
+# they become one round of launches per level on GPU) may extend this for a whole-array form.
+compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²) =
+    launch!(grid.architecture, grid, :xy, _compute_mixing_length!, ℓ, ℓˢ, grid, closure, e, N²)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -742,9 +790,11 @@ $(TYPEDSIGNATURES)
 
 The rate at which the sinks of the TKE equation remove turbulent kinetic energy, ``-Lᵉ ≥ 0``:
 the dissipation rate ``ω = Sᴰ \\sqrt{e} / ℓ`` — or, where ``e`` is negative, the damping rate
-``1/τ`` — plus the negative part of the buoyancy flux divided by ``e``, where there is TKE to
-remove. Following CATKE, these are the terms treated implicitly in ``e``, so that ``e`` stays
-positive for any time step.
+``1/τ`` — plus the buoyancy sink rate ``ωᴮ = -B⁻ / \\max(e, eᵐⁱⁿ)``, the negative part of the
+buoyancy flux divided by ``e`` floored at `minimum_tke` ``eᵐⁱⁿ``. Above the floor the buoyancy
+sink ``ωᴮ e`` is ``-B⁻``; below it the sink falls linearly with ``e``, continuously at
+``e = eᵐⁱⁿ``. Following CATKE, these are the terms treated implicitly in ``e``, so that ``e``
+stays positive for any time step.
 """
 @inline function tke_sink_rate(i, j, k, grid, closure, e, B, velocities, closure_fields)
     eᵐⁱⁿ = closure.minimum_tke
@@ -758,8 +808,10 @@ positive for any time step.
     τ = closure.negative_tke_damping_time_scale
     ω = ifelse(eᵢ < 0, 1 / τ, Sᴰ * sqrt(abs(eᵢ)) / ℓ)
 
+    # The buoyancy sink rate: -B⁻ / e above the floor and -B⁻ / eᵐⁱⁿ below it, so that the
+    # implicit sink ωᴮ e is continuous at e = eᵐⁱⁿ and vanishes linearly with e
     B⁻ = min(0, B)
-    ωᴮ = -B⁻ / max(eᵢ, eᵐⁱⁿ) * (eᵢ > eᵐⁱⁿ)
+    ωᴮ = -B⁻ / max(eᵢ, eᵐⁱⁿ)
 
     return ω + ωᴮ
 end
@@ -796,8 +848,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
             closure_fields.N², grid, closure, tracers, buoyancy)
 
-    launch!(arch, grid, :xy, _compute_mixing_length!,
-            closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
+    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
 
     launch!(arch, grid, parameters, _compute_tke_closure_fields!,
             closure_fields, grid, closure, model.velocities, tracers)
@@ -884,6 +935,7 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
               "├── maximum_tracer_diffusivity: ", prettysummary(closure.maximum_tracer_diffusivity), '\n',
               "├── maximum_tke_diffusivity: ", prettysummary(closure.maximum_tke_diffusivity), '\n',
               "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
+              "├── minimum_shear_squared: ", prettysummary(closure.minimum_shear_squared), '\n',
               "└── negative_tke_damping_time_scale: ", prettysummary(closure.negative_tke_damping_time_scale))
 end
 

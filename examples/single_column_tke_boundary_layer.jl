@@ -34,14 +34,14 @@ using Statistics
 #
 # The closure's diffusivities are ``K = S ℓ \sqrt{e}`` with one primary mixing length ``ℓ`` and a
 # stability function ``S`` for each of momentum, scalars and TKE, plus one for the dissipation. The
-# mixing length combines a wall cap ``Cˢ z`` with a gradient-limited envelope of the buoyancy
-# penetration depths ``ℓᵇ = \sqrt{e} / N``. Its interior slope ``Cⁱ`` bounds mixing lengths in
+# mixing length combines a wall cap ``ℂˢ z`` with a gradient-limited envelope of the buoyancy
+# penetration depths ``ℓᵇ = \sqrt{e} / N``. Its interior slope ``ℂⁱ`` bounds mixing lengths in
 # elevated mixed layers by the stratified air above and below them.
 # We compare the Nakanishi–Niino constant stability functions with the calibrated rational
 # defaults. The constant configuration uses its original wall coefficient.
 
 constant_closure(; kw...) = TKEBasedTurbulenceClosure(;
-    mixing_length = GradientLimitedMixingLength(Cˢ = 1.316),
+    mixing_length = GradientLimitedMixingLength(ℂˢ = 1.316),
     stability_functions = ConstantStabilityFunctions(), kw...)
 
 closures = (NN09 = constant_closure(), Rational = TKEBasedTurbulenceClosure())
@@ -88,7 +88,7 @@ cases = (
 # The surface exchanges momentum and heat with the first cell through bulk formulae whose transfer
 # coefficients are built from a roughness length ``ℓʳ`` and the von Kármán constant ``κ``. The
 # closure itself carries no von Kármán constant: its neutral logarithmic layer has the value
-# ``Cˢ (Cᵘ³ / Cᴰ)^{1/4}`` implied by its mixing length and stability functions, 0.40 by default.
+# ``ℂˢ (ℂᵘ³ / ℂᴰ)^{1/4}`` implied by its mixing length and stability functions, 0.40 by default.
 #
 # The neutral case prescribes the neutral log-law drag coefficient referenced to the first cell
 # center, ``Cᵈ = [κ / \ln(z₁ / ℓʳ)]²``, which the column builder below computes from its grid. The
