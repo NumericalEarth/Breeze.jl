@@ -86,11 +86,13 @@ subsaturated and, where saturated, the saturated buoyancy frequency of
 
 ```math
 N²_s = g \left[ \frac{1 + ℒ rˢ / (Rᵈ T)}{1 + ϵ ℒ² rˢ / (cᵖᵈ Rᵈ T²)}
-               \left( ∂_z \ln θ + \frac{ℒ}{cᵖᵈ T} ∂_z rˢ \right) - ∂_z rʷ \right],
+               \left( ∂_z \ln θ + \frac{ℒ}{cᵖᵈ T} ∂_z rˢ \right) - ∂_z rᵗ \right],
 ```
 
-where ``rˢ`` and ``rʷ`` are the saturation and nonprecipitating-water mixing ratios, ``ϵ = Rᵈ / Rᵛ``,
-and ``ℒ`` is the latent heat, taken from the microphysics' phase equilibrium. ``N²_s`` nearly vanishes
+where ``rˢ`` and ``rᵗ`` are the saturation and total-water mixing ratios, ``ϵ = Rᵈ / Rᵛ``,
+and ``ℒ`` is the latent heat, taken from the microphysics' phase equilibrium. Saturation is tested
+using the local moist density and excludes precipitation, while the loading term includes all
+condensate. ``N²_s`` nearly vanishes
 on a saturated adiabat, so mixing is not shut off inside stratocumulus.
 
 ### Stability functions

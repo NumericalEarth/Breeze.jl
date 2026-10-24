@@ -3,7 +3,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
 using Breeze.AtmosphereModels: compute_forcing!
-using Breeze.TurbulenceClosures: static_stabilityᶜᶜᶠ, nonprecipitating_water_mixing_ratioᶜᶜᶜ
+using Breeze.TurbulenceClosures: static_stabilityᶜᶜᶠ, nonprecipitating_waterᶜᶜᶜ
 using Oceananigans: Oceananigans, Flat, Bounded, Center, Face, Field, set!, interior, UpwindBiased
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.TurbulenceClosures: buoyancy_force, buoyancy_tracers
@@ -46,7 +46,7 @@ using Test
     stability(s) = Array(interior(Field(KernelFunctionOperation{Center, Center, Face}(
                                       static_stabilityᶜᶜᶠ, grid, s, buoyancy, tracers))))
     @test stability(MoistStaticStability())[:, :, 2:12] == stability(DryStaticStability())[:, :, 2:12]
-    ratio = Field(KernelFunctionOperation{Center, Center, Center}(
-                  nonprecipitating_water_mixing_ratioᶜᶜᶜ, grid, buoyancy, tracers.T, tracers.qᵛ))
-    @test all(isapprox.(Array(interior(ratio)), 0.002 / (1 - 0.002 - 0.02); rtol))
+    nonprecipitating_water = Field(KernelFunctionOperation{Center, Center, Center}(
+                                  nonprecipitating_waterᶜᶜᶜ, grid, buoyancy, tracers.T, tracers.qᵛᵉ))
+    @test all(isapprox.(Array(interior(nonprecipitating_water)), 0.002; rtol))
 end

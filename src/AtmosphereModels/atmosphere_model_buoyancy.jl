@@ -35,14 +35,14 @@ OceanTurbulenceClosures.buoyancy_force(model::AtmosphereModel) =
                             model.microphysics, model.microphysical_fields)
 
 # buoyancy_tracers returns tracers needed for:
-# 1. Buoyancy computation (T, qᵛ) used in ∂z_b and AMD viscosity; the condensate enters
+# 1. Buoyancy computation (T, qᵛᵉ) used in ∂z_b and AMD viscosity; the condensate enters
 #    through the microphysics carried by `AtmosphereModelBuoyancy`
 # 2. Diffusivity computation for each tracer in closure_fields.κₑ
 # The energy_density and moisture_density are first (matching closure_names order),
 # followed by user tracers, then diagnostic fields for buoyancy.
 function OceanTurbulenceClosures.buoyancy_tracers(model::AtmosphereModel)
     # Diagnostic fields for buoyancy gradient calculation
-    buoyancy_tracers = (; T = model.temperature, qᵛ = specific_humidity(model))
+    buoyancy_tracers = (; T = model.temperature, qᵛᵉ = specific_prognostic_moisture(model))
     # Prognostic tracer fields for diffusivity computation
     moist_name = moisture_prognostic_name(model.microphysics)
     prognostic_tracers = merge(prognostic_fields(model.formulation), NamedTuple{(moist_name,)}((model.moisture_density,)))
@@ -63,12 +63,12 @@ denominator at consistent grid locations.
 """
 @inline function OceanBuoyancyFormulations.∂z_b(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers)
     g = b.thermodynamic_constants.gravitational_acceleration
-    ∂z_log_θᵨ = ∂zᶜᶜᶠ(i, j, k, grid, log_density_potential_temperature, b, tracers.T, tracers.qᵛ)
+    ∂z_log_θᵨ = ∂zᶜᶜᶠ(i, j, k, grid, log_density_potential_temperature, b, tracers.T, tracers.qᵛᵉ)
     return g * ∂z_log_θᵨ
 end
 
-@inline function log_density_potential_temperature(i, j, k, grid, b, T, qᵛ)
-    θᵨ = density_potential_temperature(i, j, k, grid, b, T, qᵛ)
+@inline function log_density_potential_temperature(i, j, k, grid, b, T, qᵛᵉ)
+    θᵨ = density_potential_temperature(i, j, k, grid, b, T, qᵛᵉ)
     return log(θᵨ)
 end
 
@@ -86,10 +86,11 @@ the potential temperature of the dry air that has the density of the moist, cond
 air at the same pressure. Since ``ρ = p / (Rᵐ T)``, at fixed pressure ``θᵨ ∝ 1 / ρ`` and the
 buoyancy of the dynamics is ``b = -g ρ′ / ρᵣ ≈ g \\, θᵨ′ / θᵨ``; condensate enters through the
 dry-air mass fraction ``qᵈ``, so that liquid and ice water load the air by their mass. The
-moisture mass fractions come from the microphysics through `grid_moisture_fractions`, and the
-pressure is the dynamics pressure.
+moisture mass fractions come from the microphysics through `grid_moisture_fractions`, supplied
+with the prognostic specific moisture `qᵛᵉ` (vapor or equilibrium moisture, depending on the
+scheme), and the pressure is the dynamics pressure.
 """
-@inline function density_potential_temperature(i, j, k, grid, b::AtmosphereModelBuoyancy, T, qᵛ)
+@inline function density_potential_temperature(i, j, k, grid, b::AtmosphereModelBuoyancy, T, qᵛᵉ)
     constants = b.thermodynamic_constants
     dynamics = b.dynamics
     p_field = dynamics_pressure(dynamics)
@@ -98,12 +99,12 @@ pressure is the dynamics pressure.
     @inbounds begin
         p = p_field[i, j, k]
         ρ = ρ_field[i, j, k]
-        qᵛᵢ = qᵛ[i, j, k]
+        qᵛᵉᵢ = qᵛᵉ[i, j, k]
         Tᵢ = T[i, j, k]
     end
 
     pˢᵗ = standard_pressure(dynamics)
-    q = grid_moisture_fractions(i, j, k, grid, b.microphysics, ρ, qᵛᵢ, b.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, b.microphysics, ρ, qᵛᵉᵢ, b.microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity

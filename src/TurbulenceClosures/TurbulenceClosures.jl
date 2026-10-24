@@ -57,7 +57,7 @@ using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using ..AtmosphereModels: AtmosphereModels
 
-using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, standard_pressure, total_density,
+using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, standard_pressure, total_density, gas_phase_density,
                               precipitating_mass_fraction
 using Breeze.AtmosphereModels.Diagnostics: microphysics_phase_equilibrium
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant, saturation_specific_humidity,
