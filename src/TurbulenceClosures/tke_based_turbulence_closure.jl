@@ -207,6 +207,9 @@ GradientLimitedMixingLength(ℂˢ) = GradientLimitedMixingLength(ℂˢ, ℂˢ)
 GradientLimitedMixingLength{FT}(ℂˢ) where FT = GradientLimitedMixingLength{FT}(ℂˢ, ℂˢ)
 GradientLimitedMixingLength(ℂˢ, ℂⁱ) = GradientLimitedMixingLength(promote(ℂˢ, ℂⁱ)...)
 
+# Coefficients may be traced scalars when a shared closure is differentiated.
+Adapt.@adapt_structure GradientLimitedMixingLength
+
 @inline interior_slope(ml::GradientLimitedMixingLength) = ml.ℂⁱ
 @inline interior_slope(ml::AbstractMixingLength) = ml.ℂˢ
 
@@ -274,6 +277,18 @@ struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT} <: AbstractScalarDiffusivit
 end
 
 const TKEClosureArray{TD} = AbstractArray{<:TKEBasedTurbulenceClosure{TD}} where TD
+
+function Adapt.adapt_structure(to, closure::TKEBasedTurbulenceClosure{TD}) where TD
+    return TKEBasedTurbulenceClosure{TD}(adapt(to, closure.mixing_length),
+                                         adapt(to, closure.stability_functions),
+                                         adapt(to, closure.static_stability),
+                                         adapt(to, closure.maximum_viscosity),
+                                         adapt(to, closure.maximum_tracer_diffusivity),
+                                         adapt(to, closure.maximum_tke_diffusivity),
+                                         adapt(to, closure.minimum_tke),
+                                         adapt(to, closure.minimum_shear_squared),
+                                         adapt(to, closure.negative_tke_damping_time_scale))
+end
 
 """Either a single `TKEBasedTurbulenceClosure` or an ensemble array of them."""
 const FlavorOfTKEClosure{TD} = Union{TKEBasedTurbulenceClosure{TD}, TKEClosureArray{TD}} where TD

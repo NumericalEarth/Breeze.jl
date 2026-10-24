@@ -10,6 +10,7 @@ using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, Exp
 using Oceananigans.BuoyancyFormulations: ∂z_b
 using Oceananigans.Units
 using Test
+using Adapt: adapt
 
 # The mixing length is stored with the closure fields: its envelope over the column is computed by
 # two sweeps, once per stage, so a script reads it as `model.closure_fields.ℓᵐ`.
@@ -127,6 +128,9 @@ column(field) = Array(interior(field, 1, 1, :))
 @testset "Calibrated defaults and split mixing length [$(FT)]" for FT in test_float_types()
     closure = TKEBasedTurbulenceClosure(FT)
     sf = closure.stability_functions
+    @test adapt(identity, closure) === closure
+    @test adapt(identity, closure.mixing_length) === closure.mixing_length
+    @test adapt(identity, sf) === sf
     @test sf isa RationalStabilityFunction{FT}
     @test closure.mixing_length.ℂˢ === FT(0.6565692899592015)
     @test closure.mixing_length.ℂⁱ === FT(1.5609936948461662)

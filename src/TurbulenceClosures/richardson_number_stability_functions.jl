@@ -92,6 +92,8 @@ end
 @inline convert_eltype(::Type{FT}, sf::RationalStabilityFunction) where FT =
     RationalStabilityFunction{FT}((convert(FT, getfield(sf, name)) for name in fieldnames(RationalStabilityFunction))...)
 
+Adapt.@adapt_structure RationalStabilityFunction
+
 Base.summary(sf::RationalStabilityFunction{FT}) where FT = "RationalStabilityFunction{$FT}"
 
 stability_endpoint_summary(ℂᵘ, ℂᶜ, ℂᵉ, ℂᴰ) = join(prettysummary.((ℂᵘ, ℂᶜ, ℂᵉ, ℂᴰ)), ", ")
