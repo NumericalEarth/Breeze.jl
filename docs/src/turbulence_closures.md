@@ -146,4 +146,6 @@ The numerics of the TKE equation follow CATKE. The sinks — dissipation and the
 the rate ``1/τ`` — enter the vertically implicit tridiagonal solve of every time-step stage together
 with the vertical diffusion of ``e``, so that ``e`` stays positive for any time step. The sources —
 shear production and the positive part of the buoyancy flux — enter the tendency of the same stage.
+Shear production uses the current stage's velocities in both factors of ``Kᵘ S²``; its spatial
+reconstruction retains CATKE's grid-spacing weights.
 Under an explicit time discretization the sinks enter the tendency as well.
