@@ -56,6 +56,8 @@ end
 
 const IP = InstantaneousPrecipitation
 
+@inline Diagnostics.microphysics_phase_equilibrium(μ::IP) = microphysics_phase_equilibrium(μ.saturation_adjustment)
+
 # Prognostic vapor density; no retained condensate fields.
 AtmosphereModels.moisture_prognostic_name(::IP) = :ρqᵛ
 AtmosphereModels.prognostic_field_names(::IP) = tuple()
@@ -119,7 +121,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
     Δt = model.clock.last_Δt
 
     # Skip before the first step (Δt invalid during construction).
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    invalid_time_step(Δt) && return nothing
 
     pˢᵗ = standard_pressure(model.dynamics)
     constants = model.thermodynamic_constants

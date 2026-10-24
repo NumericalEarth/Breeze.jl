@@ -818,6 +818,14 @@ materialize_reference_state(grid, constants, base_pressure::AbstractArray, poten
 materialize_reference_state(grid, constants, base_pressure::Number, potential_temperature::AbstractArray, pˢᵗ, args...) =
     column_reference_state(grid, constants, base_pressure, potential_temperature, pˢᵗ, args...)
 
+# An (Nx, Ny, Nz) array of potential temperature gives every column its own hydrostatic reference
+# *profile* — for columns that reach through a stratified free troposphere or stratosphere, where an
+# adiabatic reference from the surface would run out of atmosphere.
+materialize_reference_state(grid, constants, base_pressure::Number, potential_temperature::AbstractArray{<:Any, 3}, pˢᵗ, args...) =
+    profile_reference_state(grid, constants, base_pressure, potential_temperature, pˢᵗ, args...)
+materialize_reference_state(grid, constants, base_pressure::AbstractArray, potential_temperature::AbstractArray{<:Any, 3}, pˢᵗ, args...) =
+    profile_reference_state(grid, constants, base_pressure, potential_temperature, pˢᵗ, args...)
+
 # Select a column's value from a per-column parameter: a scalar is shared by all columns; a matrix
 # supplies one value per column. Kernel-safe (`@inline`, allocation-free).
 @inline column_value(x::Number, i, j) = x
@@ -890,6 +898,89 @@ function column_reference_state(grid, constants, base_pressure, potential_temper
     Z = reference_moisture_field(nothing, grid)
 
     return ReferenceState(p₀₁₁, pˢ, ρˢ, Tˢ, θ₀₁₁, pˢᵗ, pᵣ, ρᵣ, Tᵣ, Z, Z, Z)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct a `ReferenceState` on a column-ensemble grid from an `(Nx, Ny, Nz)` array of reference
+potential temperatures — one profile per column, at the cell centers — and per-column (or shared)
+`base_pressure`. Each column's pressure follows from hydrostatic balance in Exner form,
+``∂_z Π = -g / (cᵖᵈ θᵣ)``, integrated from ``z = 0`` with the trapezoidal rule in ``1/θᵣ``, so that
+a column with constant ``θᵣ`` reproduces the adiabatic reference exactly. The temperature is
+``Tᵣ = θᵣ Π`` and the density follows from the ideal gas law. The bottom-face anchors
+(`surface_pressure`, `surface_density`, `surface_temperature`) are integrated to the bottom face
+with the first cell's ``θᵣ`` held below it.
+"""
+function profile_reference_state(grid, constants, base_pressure, potential_temperature, pˢᵗ,
+                                 discrete_hydrostatic_balance,
+                                 vapor_mass_fraction, liquid_mass_fraction, ice_mass_fraction)
+    FT = eltype(grid)
+    arch = architecture(grid)
+    Nx, Ny, Nz = size(grid)
+    (topology(grid, 1) === Flat && topology(grid, 2) === Flat) ||
+        throw(ArgumentError("A potential temperature profile per column requires a single column or a column ensemble (Flat horizontal topology)."))
+    size(potential_temperature) == (Nx, Ny, Nz) ||
+        throw(ArgumentError("`potential_temperature` must have size ($Nx, $Ny, $Nz), got $(size(potential_temperature))."))
+    validate_column_parameter(base_pressure, Nx, Ny, "base_pressure")
+    (vapor_mass_fraction === nothing && liquid_mass_fraction === nothing && ice_mass_fraction === nothing) ||
+        throw(ArgumentError("Moisture profiles are not yet supported with per-column reference states."))
+    discrete_hydrostatic_balance &&
+        throw(ArgumentError("`discrete_hydrostatic_balance` is not yet supported with per-column reference states."))
+    p₀ = column_parameter(base_pressure, FT, arch)
+    θᵣ = on_architecture(arch, FT.(potential_temperature))
+    ρᵣ = CenterField(grid)
+    pᵣ = CenterField(grid)
+    Tᵣ = CenterField(grid)
+    pˢ = Field{Center, Center, Nothing}(grid)
+    ρˢ = Field{Center, Center, Nothing}(grid)
+    Tˢ = Field{Center, Center, Nothing}(grid)
+    launch!(arch, grid, :xy, _compute_reference_column_profiles!,
+            ρᵣ, pᵣ, Tᵣ, pˢ, ρˢ, Tˢ, grid, Nz, p₀, θᵣ, pˢᵗ, constants)
+    fill_halo_regions!(ρᵣ)
+    fill_halo_regions!(pᵣ)
+    fill_halo_regions!(Tᵣ)
+    fill_halo_regions!(pˢ)
+    fill_halo_regions!(ρˢ)
+    fill_halo_regions!(Tˢ)
+    p₀₁₁ = @allowscalar convert(FT, column_value(p₀, 1, 1))
+    θ₀₁₁ = @allowscalar convert(FT, θᵣ[1, 1, 1])
+    Z = reference_moisture_field(nothing, grid)
+    return ReferenceState(p₀₁₁, pˢ, ρˢ, Tˢ, θ₀₁₁, pˢᵗ, pᵣ, ρᵣ, Tᵣ, Z, Z, Z)
+end
+
+@kernel function _compute_reference_column_profiles!(ρᵣ, pᵣ, Tᵣ, pˢ, ρˢ, Tˢ, grid, Nz, p₀, θᵣ, pˢᵗ, constants)
+    i, j = @index(Global, NTuple)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    Rᵈ = dry_air_gas_constant(constants)
+    g = constants.gravitational_acceleration
+    κ = Rᵈ / cᵖᵈ
+    p₀ᵢⱼ = column_value(p₀, i, j)
+    Π₀ = (p₀ᵢⱼ / pˢᵗ)^κ                     # the Exner function at z = 0
+    @inbounds begin
+        θ₁ = θᵣ[i, j, 1]
+        zˢ = znode(i, j, 1, grid, Center(), Center(), Face())
+        Πˢ = Π₀ - g * zˢ / (cᵖᵈ * θ₁)       # bottom face, θ₁ held below the first center
+        pˢ[i, j, 1] = pˢᵗ * Πˢ^(1 / κ)
+        Tˢ[i, j, 1] = θ₁ * Πˢ
+        ρˢ[i, j, 1] = pˢ[i, j, 1] / (Rᵈ * Tˢ[i, j, 1])
+
+        Π = Π₀
+        z⁻ = zero(Π)                         # height of the previous level (z = 0)
+        θ⁻ = θ₁                              # θ of the previous level: the first cell's, held to z = 0
+        for k in 1:Nz
+            z = znode(i, j, k, grid, Center(), Center(), Center())
+            θ = θᵣ[i, j, k]
+            Π -= g * (z - z⁻) / cᵖᵈ * (1 / θ⁻ + 1 / θ) / 2
+            p = pˢᵗ * Π^(1 / κ)
+            T = θ * Π
+            pᵣ[i, j, k] = p
+            Tᵣ[i, j, k] = T
+            ρᵣ[i, j, k] = p / (Rᵈ * T)
+            z⁻ = z
+            θ⁻ = θ
+        end
+    end
 end
 
 @kernel function _compute_adiabatic_reference_columns!(ρᵣ, pᵣ, Tᵣ, pˢ, ρˢ, Tˢ, grid, Nz, p₀, θ₀, pˢᵗ, constants)

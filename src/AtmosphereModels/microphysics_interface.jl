@@ -471,6 +471,10 @@ volume. It defaults to all prognostic fields; schemes with prognostic number con
 condensate_field_names(microphysics) = prognostic_field_names(microphysics)
 condensate_field_names(::Nothing) = tuple()
 
+# Precipitating water is part of the thermodynamic moisture bundle, but does not
+# equilibrate as cloud condensate during a saturated parcel displacement.
+@inline precipitating_mass_fraction(i, j, k, microphysics, microphysical_fields) = 0
+
 
 """
 $(TYPEDSIGNATURES)
@@ -1256,6 +1260,15 @@ example a specific saturation vapor pressure formula) extend this method to thro
 failure surfaces as an opaque dynamic `getproperty` / GPU compilation error.
 """
 validate_microphysics(microphysics, thermodynamic_constants) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Validate that `microphysics` can run on architecture `arch`; a no-op by default. Extensions throw
+an `ArgumentError` at model construction for schemes that need settings an architecture requires
+(for example a static sedimentation substep bound under Reactant).
+"""
+validate_microphysics_architecture(microphysics, arch) = nothing
 
 """
 $(TYPEDSIGNATURES)

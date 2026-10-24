@@ -2,8 +2,9 @@ using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: AbstractField
-using Oceananigans.Grids: Center, Face
-using Oceananigans.Operators: ∂zᶜᶜᶠ
+using Oceananigans.Grids: AbstractGrid, Center, Face, Flat
+using Oceananigans.Operators: ∂zᶜᶜᶠ, Δzᶜᶜᶜ
+using Oceananigans.Advection: Centered, UpwindBiased, AbstractUpwindBiasedAdvectionScheme, _biased_interpolate_zᵃᵃᶠ, bias
 using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
 
@@ -11,14 +12,16 @@ using Adapt: Adapt
 ##### Subsidence forcing
 #####
 
-struct SubsidenceForcing{W, A}
+struct SubsidenceForcing{W, A, S}
     subsidence_vertical_velocity :: W
     averaged_field :: A
+    advection :: S
 end
 
 Adapt.adapt_structure(to, sf::SubsidenceForcing) =
     SubsidenceForcing(Adapt.adapt(to, sf.subsidence_vertical_velocity),
-                      Adapt.adapt(to, sf.averaged_field))
+                      Adapt.adapt(to, sf.averaged_field),
+                      Adapt.adapt(to, sf.advection))
 
 """
 $(TYPEDSIGNATURES)
@@ -36,9 +39,14 @@ the specific prognostic name (e.g. `θ`, `qᵉ`, `u`); the `AtmosphereModel` dis
 wraps it in [`SpecificForcing`](@ref) so the density factor ``ρ`` is applied
 automatically at kernel time.
 
-# Fields
+# Arguments
 - `wˢ`: Either a function of `z` specifying the subsidence velocity profile,
         or a `Field` containing the subsidence velocity.
+
+# Keyword arguments
+- `advection`: the discretization of ``w^s ∂_z \\overline{ϕ}``. The default `UpwindBiased(order = 1)`
+  damps ``2Δz`` modes and does not undershoot at sharp gradients. `Centered()` cannot see a ``2Δz`` mode,
+  so it persists; higher-order upwind schemes damp it but may over- or undershoot.
 
 The horizontal average is computed automatically during `update_state!`.
 
@@ -59,10 +67,11 @@ model.forcing.ρθ.forcing
 
 # output
 SubsidenceForcing with wˢ: 1×1×76 Field{Nothing, Nothing, Face} reduced over dims = (1, 2) on RectilinearGrid on CPU
-└── averaged_field: 1×1×75 Field{Nothing, Nothing, Center} reduced over dims = (1, 2) on RectilinearGrid on CPU
+├── averaged_field: 1×1×75 Field{Nothing, Nothing, Center} reduced over dims = (1, 2) on RectilinearGrid on CPU
+└── advection: UpwindBiased(order=1)
 ```
 """
-SubsidenceForcing(wˢ) = SubsidenceForcing(wˢ, nothing)
+SubsidenceForcing(wˢ; advection = UpwindBiased(order = 1)) = SubsidenceForcing(wˢ, nothing, advection)
 
 function Base.summary(forcing::SubsidenceForcing)
     wˢ = forcing.subsidence_vertical_velocity
@@ -73,35 +82,74 @@ function Base.show(io::IO, forcing::SubsidenceForcing)
     print(io, summary(forcing))
     if !isnothing(forcing.averaged_field)
         print(io, '\n')
-        print(io, "└── averaged_field: ", prettysummary(forcing.averaged_field))
+        print(io, "├── averaged_field: ", prettysummary(forcing.averaged_field))
     end
+    print(io, '\n')
+    print(io, "└── advection: ", summary(forcing.advection))
 end
 
 #####
 ##### Kernel: returns the specific subsidence tendency (the ρ-multiply happens in SpecificForcing)
 #####
 
-@inline w_dz_ϕᵃᵃᶠ(i, j, k, grid, w, ϕ) = @inbounds w[1, 1, k] * ∂zᶜᶜᶠ(1, 1, k, grid, ϕ)
+# `w` and `ϕ` are reduced (x, y)-averaged fields on an ordinary grid, which ignore `i, j`, and full
+# fields in a column ensemble, where every column carries its own subsidence and its own profile.
+@inline w_dz_ϕᵃᵃᶠ(i, j, k, grid, w, ϕ) = @inbounds w[i, j, k] * ∂zᶜᶜᶠ(i, j, k, grid, ϕ)
 
+# The face values of wˢ ∂z ϕ̄ reconstructed to the cell centers. Interior cells average the faces
+# above and below. The boundary cells cannot use the boundary face, whose gradient would reach into
+# the halo, and must not use the adjacent interior face alone: with subsidence into the lid that is
+# a downwind difference, ∂ₜ(ϕ̄ₙ - ϕ̄ₙ₋₁) ∝ +|wˢ| (ϕ̄ₙ - ϕ̄ₙ₋₁), which doubles the gradient at the
+# lid every 2Δz/|wˢ| — an hour for 1 cm s⁻¹ and 20 m — and drives the top cell away from the
+# column. Averaging the two interior faces nearest the boundary gives the boundary cell the same
+# combination of gradients its neighbour sees, so the boundary gradient has no tendency of its own
+# and is carried neutrally, as an upwind scheme with a linearly extrapolated ghost value would.
 @inline function ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
+    w_dz_ϕ⁺⁺ = w_dz_ϕᵃᵃᶠ(i, j, k+2, grid, wˢ, ϕ_avg)
     w_dz_ϕ⁺ = w_dz_ϕᵃᵃᶠ(i, j, k+1, grid, wˢ, ϕ_avg)
     w_dz_ϕᵏ = w_dz_ϕᵃᵃᶠ(i, j, k, grid, wˢ, ϕ_avg)
-    ℑz_w_dz_ϕ = (w_dz_ϕ⁺ + w_dz_ϕᵏ) / 2
+    w_dz_ϕ⁻ = w_dz_ϕᵃᵃᶠ(i, j, k-1, grid, wˢ, ϕ_avg)
+    interior = (w_dz_ϕ⁺ + w_dz_ϕᵏ) / 2
+    at_top = (w_dz_ϕᵏ + w_dz_ϕ⁻) / 2
+    at_bottom = (w_dz_ϕ⁺ + w_dz_ϕ⁺⁺) / 2
     top = k == grid.Nz
     bottom = k == 1
-    return ifelse(top, w_dz_ϕᵏ, ifelse(bottom, w_dz_ϕ⁺, ℑz_w_dz_ϕ))
+    return ifelse(top, at_top, ifelse(bottom, at_bottom, interior))
+end
+
+# wˢ ∂z ϕ̄ at the cell center with the centered discretization above
+@inline w_dz_ϕᶜᶜᶜ(i, j, k, grid, ::Centered, wˢ, ϕ_avg) = ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
+
+# The upwind-biased flux wˢ ϕ̃ at a face, with ϕ̄ reconstructed from the upwind side of the face
+@inline function w_ϕᵃᵃᶠ(i, j, k, grid, scheme, w, ϕ)
+    @inbounds wᵏ = w[i, j, k]
+    return wᵏ * _biased_interpolate_zᵃᵃᶠ(i, j, k, grid, scheme, bias(wᵏ), ϕ)
+end
+
+# wˢ ∂z ϕ̄ = ∂z(wˢ ϕ̄) - ϕ̄ ∂z wˢ in flux form, so a divergent wˢ is not a source.
+# Boundary cells use their neighbour's tendency, since their upwind value is a halo copy of themselves.
+@inline function w_dz_ϕᶜᶜᶜ(i, j, k, grid, scheme::AbstractUpwindBiasedAdvectionScheme, wˢ, ϕ_avg)
+    Nz = grid.Nz
+    kᵉ = clamp(ifelse(k == 1, 2, ifelse(k == Nz, Nz - 1, k)), 1, Nz)
+    F⁺ = w_ϕᵃᵃᶠ(i, j, kᵉ+1, grid, scheme, wˢ, ϕ_avg)
+    F⁻ = w_ϕᵃᵃᶠ(i, j, kᵉ, grid, scheme, wˢ, ϕ_avg)
+    @inbounds ϕᵏ = ϕ_avg[i, j, kᵉ]
+    @inbounds δw = wˢ[i, j, kᵉ+1] - wˢ[i, j, kᵉ]
+    return (F⁺ - F⁻ - ϕᵏ * δw) / Δzᶜᶜᶜ(i, j, kᵉ, grid)
 end
 
 @inline function (forcing::SubsidenceForcing)(i, j, k, grid, clock, fields)
     wˢ = forcing.subsidence_vertical_velocity
     ϕ_avg = forcing.averaged_field
-    w_dz_ϕ_avg = ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
-    return - w_dz_ϕ_avg
+    return - w_dz_ϕᶜᶜᶜ(i, j, k, grid, forcing.advection, wˢ, ϕ_avg)
 end
 
 #####
 ##### Materialization: build the horizontal average of the specific field
 #####
+
+horizontally_averaged(specific_field, grid) = Average(specific_field, dims=(1, 2)) |> Field
+horizontally_averaged(specific_field, ::AbstractGrid{<:Any, <:Flat, <:Flat}) = specific_field
 
 function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing,
                                                                field, name, model_field_names,
@@ -125,9 +173,12 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
 
     # `name` is the specific prognostic name (e.g. :θ); look up the matching field directly.
     specific_field = haskey(context.specific_fields, name) ? context.specific_fields[name] : field
-    averaged_field = Average(specific_field, dims=(1, 2)) |> Field
 
-    return SubsidenceForcing(wˢ, averaged_field)
+    # The horizontal mean of a single column is the column itself, and in a column ensemble the
+    # columns are independent, so the subsidence acts on each column's own profile there.
+    averaged_field = horizontally_averaged(specific_field, grid)
+
+    return SubsidenceForcing(wˢ, averaged_field, forcing.advection)
 end
 
 #####

@@ -171,9 +171,11 @@ function AtmosphereModel(grid;
 
     # Validate that the microphysics scheme is compatible with the thermodynamic constants
     validate_microphysics(microphysics, thermodynamic_constants)
+    validate_microphysics_architecture(microphysics, grid.architecture)
 
-    # Validate that the radiation's solar position can read the clock
-    validate_radiation(radiation, clock)
+    # Validate that the radiation's solar position can read the clock, and that its schedule
+    # can be evaluated on this architecture (before anything is traced)
+    validate_radiation(radiation, clock, grid.architecture)
 
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
@@ -672,7 +674,9 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # Build specific fields for subsidence forcing (maps specific field names like :u, :θ to fields)
     formulation_fields = fields(formulation)
     moist_specific = moisture_specific_name(microphysics)
-    specific_fields = merge(velocities, formulation_fields, NamedTuple{(moist_specific,)}((specific_prognostic_moisture,)))
+    specific_names = (map(specific_field_name, prognostic_field_names(microphysics))..., moist_specific)
+    specific_fields = merge(velocities, formulation_fields,
+                            NamedTuple{specific_names}(map(n -> model_fields[n], specific_names)))
 
     # Momentum, the dynamics mass variable, and thermodynamic density are weighted by the
     # coupling density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and

@@ -453,6 +453,9 @@ const MixedPhase1M = Union{MP1M, MPNE1M}
 const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
+@inline AM.precipitating_mass_fraction(i, j, k, ::WarmPhase1M, μ) = @inbounds μ.qʳ[i, j, k]
+@inline AM.precipitating_mass_fraction(i, j, k, ::MixedPhase1M, μ) = @inbounds μ.qʳ[i, j, k] + μ.qˢⁿ[i, j, k]
+
 # Snow sedimentation velocity (mixed-phase only)
 @inline AM.sedimentation_velocity(bμp::MixedPhase1M, μ, ::Val{:ρqˢⁿ}) = μ.wˢⁿ
 
