@@ -174,8 +174,9 @@ end
     ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
     Λ₀ = condensate_latent_energy(q, constants)
 
-    # ĉᵖ Π θˡⁱ = cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ
-    return (ĉᵖ * Π * θ + Λ₀) / cᵖᵐ
+    # ĉᵖ Π θˡⁱ = cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ, arranged so that unsaturated air (ĉᵖ = cᵖᵐ, Λ₀ = 0)
+    # gives exactly T = Π θˡⁱ
+    return Π * θ * (ĉᵖ / cᵖᵐ) + Λ₀ / cᵖᵐ
 end
 
 """
@@ -257,7 +258,7 @@ end
     ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
     Λ₀ = condensate_latent_energy(q, constants)
 
-    θ = (cᵖᵐ * T - Λ₀) / (ĉᵖ * Π)
+    θ = (T - Λ₀ / cᵖᵐ) * (cᵖᵐ / ĉᵖ) / Π # = (cᵖᵐ T − Λ₀) / (ĉᵖ Π), exactly T / Π in unsaturated air
 
     return LiquidIcePotentialTemperatureState(θ, q, 𝒰.standard_pressure, 𝒰.reference_pressure, 𝒰.exner_exponent)
 end
@@ -330,7 +331,7 @@ end
     cᵖᵐ = mixture_heat_capacity(q, constants)
     κ   = exner_exponent(𝒰.exner_exponent, q, constants)
     γ   = 1 / (1 - κ)
-    θ̃   = vapor_equivalent_heat_capacity(q, constants) * θ / cᵖᵐ
+    θ̃   = θ * (vapor_equivalent_heat_capacity(q, constants) / cᵖᵐ)
     L   = condensate_latent_energy(q, constants) / cᵖᵐ
 
     T₁ = θ̃^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L     # dry closed form + latent shift (the non-iterated guess)
@@ -384,7 +385,7 @@ end
     Λ₀  = condensate_latent_energy(q, constants)
     κ   = exner_exponent(𝒰.exner_exponent, q, constants)
     p   = ρ * Rᵐ * T
-    θ   = (cᵖᵐ * T - Λ₀) / ĉᵖ * (pˢᵗ / p)^κ
+    θ   = (T - Λ₀ / cᵖᵐ) * (cᵖᵐ / ĉᵖ) * (pˢᵗ / p)^κ
     return LiquidIceDensityState(θ, q, pˢᵗ, ρ, 𝒰.temperature_solver, 𝒰.exner_exponent)
 end
 
