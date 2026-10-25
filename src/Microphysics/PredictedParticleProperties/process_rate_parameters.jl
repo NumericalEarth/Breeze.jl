@@ -232,8 +232,8 @@ struct ProcessRate{FT, PS}
     # and coating-water sink budgets. Must be positive.
     coupled_sink_limiting_iterations :: Int
 
-    # Global ice number limiter.
-    # Applied as a relaxation sink whenever nⁱ × ρ exceeds the maximum.
+    # Global ice number cap. The negative-moisture correction clamps the prognostic
+    # nⁱ × ρ to it, and every read of the ice state is capped the same way.
     maximum_ice_number_density :: FT         # ℂᵖʰᵃˢ₂ [1/m³]
 
     # Liquid fraction clipping threshold (Milbrandt et al. 2025)
@@ -504,8 +504,7 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         # Coupled donor-budget limiter
         coupled_sink_limiting_iterations::Integer = 4,
 
-        # Global ice number limiter: a relaxation sink drains nⁱ toward the
-        # configured maximum divided by ρ.
+        # Global ice number cap, applied as a clamp of the prognostic number
         maximum_ice_number_density = 2e6,  # [1/m³]
 
         # Liquid fraction clipping (Milbrandt et al. 2025)

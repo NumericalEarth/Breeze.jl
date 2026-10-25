@@ -13,8 +13,20 @@ using KernelAbstractions: @kernel, @index
 
 const P3 = PredictedParticlePropertiesMicrophysics
 
-# P3 evolves through RK-stage tendencies; it has no full-Δt operator-split update.
-AM.microphysics_model_update!(::P3, model) = nothing
+# P3 evolves through RK-stage tendencies and has no operator-split update; once per step it
+# only checks the step against `sink_limiting_timescale` (see "Positivity" in p3_theory.md).
+function AM.microphysics_model_update!(p3::P3, model)
+    Δt = model.clock.last_Δt
+    τ = p3.process_rates.sink_limiting_timescale
+    if Δt > τ
+        @warn "The time step Δt = $Δt s is longer than P3's sink_limiting_timescale = $τ s, so " *
+              "limited sinks can overshoot and leave rain or ice with mass but no number. " *
+              "Pass `process_rates = ProcessRate(FT; sink_limiting_timescale)` with a timescale " *
+              "of about Δt; it also relaxes the saturation adjustment, so a much longer one " *
+              "slows condensation." maxlog = 1
+    end
+    return nothing
+end
 
 #####
 ##### Surface air temperature

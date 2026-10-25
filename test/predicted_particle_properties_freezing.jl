@@ -554,7 +554,6 @@ using Oceananigans.Fields: interior
             FT(0),      # post_process_clipping
             FT(0.0),    # sublimation_number (nisub)
             FT(500.0),  # aggregation (positive magnitude)
-            FT(0.0),    # ni_limit (global Nⁱ cap)
             FT(1e-7),   # cloud_riming
             FT(1e4),    # cloud_riming_number (positive magnitude)
             FT(5e-8),   # rain_riming
@@ -596,9 +595,6 @@ using Oceananigans.Fields: interior
             FT(0.0),    # coating_evaporation
             FT(0.0),    # wet_growth_densification_mass
             FT(0.0),    # wet_growth_densification_volume
-            FT(0.0),    # cloud_number_correction
-            FT(0.0),    # rain_number_correction
-            FT(0.0),    # ice_number_correction
         FT(0.0),    # predicted_supersaturation_adjustment
         FT(0.0),    # predicted_supersaturation_tendency
         )
