@@ -15,6 +15,9 @@ using Breeze.Thermodynamics:
     with_temperature,
     mixture_gas_constant,
     mixture_heat_capacity,
+    vapor_equivalent_gas_constant,
+    vapor_equivalent_heat_capacity,
+    absolute_zero_latent_heat,
     saturation_specific_humidity
 
 using Breeze.Microphysics: SaturationAdjustment, adjust_state, adjust_thermodynamic_state, WarmPhaseEquilibrium,
@@ -39,9 +42,18 @@ end
 @testset "Density-based θˡⁱ state (LiquidIceDensityState) [$FT]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
     pˢᵗ = FT(1e5)
-    ℒˡ = constants.liquid.reference_latent_heat
-    ℒⁱ = constants.ice.reference_latent_heat
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
     rtol = FT == Float64 ? FT(1e-9) : FT(1e-4)
+
+    # ĉᵖ (ρ Rᵐ T / pˢᵗ)^κ̂ θˡⁱ = cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ is T = (ρ Rᵐ T / pˢᵗ)^κ̂ θ̃ + L with
+    # κ̂ = R̂ / ĉᵖ, θ̃ = ĉᵖ θˡⁱ / cᵖᵐ and L = (ℒˡ₀ qˡ + ℒⁱ₀ qⁱ) / cᵖᵐ
+    function inversion_coefficients(θ, q)
+        cᵖᵐ = mixture_heat_capacity(q, constants)
+        ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+        κ = vapor_equivalent_gas_constant(q, constants) / ĉᵖ
+        return κ, ĉᵖ * θ / cᵖᵐ, (ℒˡ₀ * q.liquid + ℒⁱ₀ * q.ice) / cᵖᵐ
+    end
     qtol = FT == Float64 ? FT(1e-5) : FT(1e-3)
 
     moistures = (MoistureMassFractions(FT(0.020)),                          # vapor only
@@ -54,11 +66,9 @@ end
             𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ)
             T = temperature(𝒰, constants)
             Rᵐ = mixture_gas_constant(q, constants)
-            cᵖᵐ = mixture_heat_capacity(q, constants)
-            κ = Rᵐ / cᵖᵐ
-            L = (ℒˡ * q.liquid + ℒⁱ * q.ice) / cᵖᵐ
-            # self-consistent fixed point: T = (ρRᵐT/pˢᵗ)^κ θ + L  (and p = ρRᵐT)
-            @test T ≈ (ρ * Rᵐ * T / pˢᵗ)^κ * θ + L  rtol=rtol
+            κ, θ̃, L = inversion_coefficients(θ, q)
+            # self-consistent fixed point: T = (ρRᵐT/pˢᵗ)^κ̂ θ̃ + L  (and p = ρRᵐT)
+            @test T ≈ (ρ * Rᵐ * T / pˢᵗ)^κ * θ̃ + L  rtol=rtol
             # θˡⁱ round-trips: θ → T → θ
             @test with_temperature(𝒰, T, constants).potential_temperature ≈ θ  rtol=rtol
         end
@@ -103,12 +113,11 @@ end
         θ = FT(300); ρ = FT(1)
         q = MoistureMassFractions(FT(0.018), FT(0.005), FT(0))
         Rᵐ = mixture_gas_constant(q, constants)
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        κ = Rᵐ / cᵖᵐ; γ = cᵖᵐ / (cᵖᵐ - Rᵐ)
-        L = (ℒˡ * q.liquid + ℒⁱ * q.ice) / cᵖᵐ
+        κ, θ̃, L = inversion_coefficients(θ, q)
+        γ = 1 / (1 - κ)
 
         T★ = temperature(LiquidIceDensityState(θ, q, pˢᵗ, ρ), constants)
-        T_noniter = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L   # the old non-iterated inversion
+        T_noniter = θ̃^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L   # the old non-iterated inversion
         @test T★ > T_noniter                            # the non-iterated inversion is biased cold
         @test isapprox(T★ - T_noniter, FT(1.39) * κ * L; rtol=FT(0.15))   # gap ≈ 1.39 κΔL (leading order)
 

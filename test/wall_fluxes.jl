@@ -9,7 +9,7 @@ using Breeze.BoundaryConditions: BulkDrag, BulkSensibleHeatFlux, BulkVaporFlux, 
                                  surface_layer_state, wall_air_pressure
 using Breeze.Thermodynamics: surface_density, saturation_specific_humidity, PlanarLiquidSurface,
                              potential_temperature_from_temperature, MoistureMassFractions,
-                             absolute_zero_latent_heat
+                             absolute_zero_latent_heat, vapor_equivalent_heat_capacity, vapor_equivalent_gas_constant
 using CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -443,12 +443,15 @@ end
         function neutral_energy(z, vapor_offset, pressure=p₀)
             q = MoistureMassFractions(qᵛ(z) + vapor_offset, qᶜˡ + qʳ)
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            Π = (pressure / pˢᵗ)^(mixture_gas_constant(q, constants) / cᵖᵐ)
-            # Static energy references latent heat to absolute zero; θˡⁱ uses the reference latent heat.
+            # Both reference latent heat to absolute zero: s = H + g z (g z cancels in the
+            # difference) and θˡⁱ = H / (ĉᵖ Π̂), Π̂ = (p / pˢᵗ)^(R̂ / ĉᵖ).
+            H = cᵖᵐ * T₀ - absolute_zero_latent_heat(constants, constants.liquid) * q.liquid
             if formulation === :StaticEnergy
-                return cᵖᵐ * T₀ - absolute_zero_latent_heat(constants, constants.liquid) * q.liquid
+                return H
             else
-                return (T₀ - constants.liquid.reference_latent_heat * q.liquid / cᵖᵐ) / Π
+                ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+                Π̂ = (pressure / pˢᵗ)^(vapor_equivalent_gas_constant(q, constants) / ĉᵖ)
+                return H / (ĉᵖ * Π̂)
             end
         end
 
