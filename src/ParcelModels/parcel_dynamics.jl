@@ -1044,7 +1044,8 @@ function reconstruct_thermodynamic_state end
 end
 
 @inline function reconstruct_thermodynamic_state(𝒰::LiquidIcePotentialTemperatureState{FT}, θ⁺, z⁺, p⁺) where FT
-    return LiquidIcePotentialTemperatureState{FT}(θ⁺, 𝒰.moisture_mass_fractions, 𝒰.standard_pressure, p⁺)
+    return LiquidIcePotentialTemperatureState(convert(FT, θ⁺), 𝒰.moisture_mass_fractions, 𝒰.standard_pressure,
+                                              convert(FT, p⁺), 𝒰.exner_exponent)
 end
 
 """

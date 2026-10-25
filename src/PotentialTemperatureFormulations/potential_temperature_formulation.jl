@@ -8,15 +8,37 @@ $(TYPEDEF)
 `LiquidIcePotentialTemperatureFormulation` uses liquid-ice potential temperature density `ρθ`
 as the prognostic thermodynamic variable.
 
-Liquid-ice potential temperature is a conserved quantity in moist adiabatic processes and is defined as:
+The liquid-ice potential temperature is defined exactly from the enthalpy,
 
 ```math
-θˡⁱ = T \\left( \\frac{p^{st}}{p} \\right)^{Rᵐ/cᵖᵐ} \\exp\\left( -\\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T} \\right)
+θˡⁱ = \\frac{H}{ĉᵖ Π} , \\qquad H = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ , \\qquad Π = \\left( \\frac{p}{pˢᵗ} \\right)^κ ,
 ```
+
+where ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ`` is the vapor-equivalent heat capacity (the heat capacity the
+parcel would have if all of its water were vapor) and ``ℒˡ₀``, ``ℒⁱ₀`` are the latent heats
+extrapolated to absolute zero. With Kirchhoff's law ``ℒ(T) = ℒ₀ + (cᵖᵛ - cˣ) T`` this is
+``θˡⁱ = [T - (ℒˡ(T) qˡ + ℒⁱ(T) qⁱ) / ĉᵖ] / Π``, and ``θˡⁱ = T / Π`` in unsaturated air.
+The exponent ``κ`` is chosen by `exponent`:
+
+* [`VaporEquivalentExponent`](@ref Breeze.Thermodynamics.VaporEquivalentExponent) (default):
+  ``κ̂ = R̂ / ĉᵖ`` with ``R̂ = qᵈ Rᵈ + qᵗ Rᵛ``.
+* [`DryExponent`](@ref Breeze.Thermodynamics.DryExponent): ``κᵈ = Rᵈ / cᵖᵈ``, so that ``Π``
+  depends on pressure alone.
+
+Because ``ĉᵖ Π`` depends on the composition only through ``qᵗ``, any phase change at fixed
+``θˡⁱ``, pressure, and total water conserves the enthalpy exactly and releases the latent heat
+``ℒ(T)``. Expansion at fixed composition is made consistent with the first law by the source
+
+```math
+ρ \\frac{Rᵐ T - κ ĉᵖ Π θˡⁱ}{ĉᵖ Π} \\frac{D \\ln p}{Dt} ,
+```
+
+which the dynamics add to the ``ρθ`` equation with ``D \\ln p / Dt ≈ - g ρ w / p``; it vanishes
+in unsaturated air with the default exponent. Energy sources ``Q`` enter as ``Q / (ĉᵖ Π)``.
 
 Recovering temperature from θˡⁱ may require an iterative inversion, depending on the
 dynamics: with prognostic-density (compressible) dynamics, temperature solves the implicit
-relation `T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ`. The inversion is controlled by `temperature_solver`:
+relation `cᵖᵐ T = ĉᵖ (ρRᵐT/pˢᵗ)^κ θ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ`. The inversion is controlled by `temperature_solver`:
 
 * `DefaultTemperatureSolver()` (default): resolved at materialization to
   [`default_temperature_solver(dynamics)`](@ref Breeze.AtmosphereModels.default_temperature_solver) —
@@ -28,16 +50,18 @@ relation `T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ`. The inversion is controlled
   reverse-mode differentiation).
 * `nothing`: the non-iterated closed-form inversion.
 """
-struct LiquidIcePotentialTemperatureFormulation{F, T, S}
+struct LiquidIcePotentialTemperatureFormulation{F, T, S, E}
     potential_temperature_density :: F  # ρθ (prognostic)
     potential_temperature :: T          # θ = ρθ / ρ (diagnostic)
     temperature_solver :: S             # solver for the θˡⁱ→T inversion (or Nothing when closed-form)
+    exponent :: E                       # Exner exponent (VaporEquivalentExponent or DryExponent)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Return a `LiquidIcePotentialTemperatureFormulation` with the given `temperature_solver`.
+Return a `LiquidIcePotentialTemperatureFormulation` with the given `temperature_solver` and
+Exner `exponent`, either `VaporEquivalentExponent()` (the default) or `DryExponent()`.
 The prognostic and diagnostic fields are materialized later in the model constructor.
 
 ```jldoctest
@@ -47,16 +71,37 @@ LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2)
 
 # output
 LiquidIcePotentialTemperatureFormulation
+├── exponent: VaporEquivalentExponent()
 └── temperature_solver: FixedIterations(2)
 ```
+
+```jldoctest
+using Breeze
+
+LiquidIcePotentialTemperatureFormulation(exponent = DryExponent())
+
+# output
+LiquidIcePotentialTemperatureFormulation
+├── exponent: DryExponent()
+└── temperature_solver: DefaultTemperatureSolver
+```
 """
-LiquidIcePotentialTemperatureFormulation(; temperature_solver = DefaultTemperatureSolver()) =
-    LiquidIcePotentialTemperatureFormulation(nothing, nothing, temperature_solver)
+LiquidIcePotentialTemperatureFormulation(; temperature_solver = DefaultTemperatureSolver(),
+                                           exponent = VaporEquivalentExponent()) =
+    LiquidIcePotentialTemperatureFormulation(nothing, nothing, temperature_solver, validate_exponent(exponent))
+
+validate_exponent(exponent::AbstractExnerExponent) = exponent
+
+validate_exponent(exponent) =
+    throw(ArgumentError("exponent must be VaporEquivalentExponent() or DryExponent(), got $exponent"))
+
+AtmosphereModels.liquid_ice_exner_exponent(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.exponent
 
 Adapt.adapt_structure(to, formulation::LiquidIcePotentialTemperatureFormulation) =
     LiquidIcePotentialTemperatureFormulation(adapt(to, formulation.potential_temperature_density),
                                              adapt(to, formulation.potential_temperature),
-                                             formulation.temperature_solver)
+                                             formulation.temperature_solver,
+                                             formulation.exponent)
 
 function BoundaryConditions.fill_halo_regions!(formulation::LiquidIcePotentialTemperatureFormulation)
     fill_halo_regions!(formulation.potential_temperature)
@@ -72,7 +117,7 @@ AtmosphereModels.additional_thermodynamic_field_names(::LiquidIcePotentialTemper
 AtmosphereModels.thermodynamic_density_name(::LiquidIcePotentialTemperatureFormulation) = :ρθ
 AtmosphereModels.thermodynamic_density(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature_density
 AtmosphereModels.with_thermodynamic_density(f::LiquidIcePotentialTemperatureFormulation, ρθ) =
-    LiquidIcePotentialTemperatureFormulation(ρθ, f.potential_temperature, f.temperature_solver)
+    LiquidIcePotentialTemperatureFormulation(ρθ, f.potential_temperature, f.temperature_solver, f.exponent)
 
 AtmosphereModels.set_hydrostatically_balanced_density!(
     formulation::LiquidIcePotentialTemperatureFormulation,
@@ -103,7 +148,8 @@ function AtmosphereModels.materialize_formulation(formulation::LiquidIcePotentia
     temperature_solver = materialize_temperature_solver(formulation.temperature_solver, dynamics, grid)
     return LiquidIcePotentialTemperatureFormulation(potential_temperature_density,
                                                     potential_temperature,
-                                                    temperature_solver)
+                                                    temperature_solver,
+                                                    formulation.exponent)
 end
 
 # `DefaultTemperatureSolver` defers the choice of solver to the dynamics: the need for an
@@ -148,7 +194,7 @@ function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid,
     pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
     pˢᵗ = standard_pressure(dynamics)
 
-    return LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
+    return LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ, formulation.exponent)
 end
 
 #####
@@ -186,5 +232,6 @@ function Base.show(io::IO, formulation::LiquidIcePotentialTemperatureFormulation
     else
         print(io, '\n')
     end
+    print(io, "├── exponent: ", summary(formulation.exponent), '\n')
     print(io, "└── temperature_solver: ", summary(formulation.temperature_solver))
 end

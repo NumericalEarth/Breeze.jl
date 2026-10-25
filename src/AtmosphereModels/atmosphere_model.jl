@@ -642,7 +642,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     # `ρE` (total energy) is the formulation-agnostic energy key: a forcing supplied under it
     # targets the prognostic thermodynamic density, and the tendency that reads it applies
-    # whatever conversion that variable needs (a division by cᵖᵐ Π for `ρθ`; none for `ρs`).
+    # whatever conversion that variable needs (a division by ĉᵖ Π for `ρθ`; none for `ρs`).
     ρᵡ_name = thermodynamic_density_name(formulation)
     energy_key_aliases_thermodynamic_density(Val(ρᵡ_name)) &&
         validate_interface_forcing(user_forcings, total_energy_density_name, ρᵡ_name)

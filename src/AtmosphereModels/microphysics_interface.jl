@@ -1003,7 +1003,7 @@ end
 ##### Sedimentation of the condensate part of the thermodynamic variables
 #####
 #
-# The thermodynamic variables carry a condensate part — the deficit −(ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / (cᵖᵐ Π)
+# The thermodynamic variables carry a condensate part — the deficit −(ℒˡ(T) qˡ + ℒⁱ(T) qⁱ) / (ĉᵖ Π)
 # of θˡⁱ, the content qˡ (cˡ T − ℒˡ₀) + qⁱ (cⁱ T − ℒⁱ₀) of s — and when condensate falls, that
 # part must fall with it. Rain-out then leaves the latent warming from forming the rain aloft
 # and pre-cools the layer that later evaporates it, the mechanism that drives cold pools.
@@ -1054,7 +1054,7 @@ variable `φ` at fixed temperature along the dynamics' composition increment
 ([`sedimentation_composition_increment`](@ref)); per phase the enthalpy the falling mass
 carries (phase enthalpy `hˣ` on the compressible core, `hˣ − hᵈ` under the fixed-density
 convention); and `∂φ/∂h`, the local response of `φ` to heating: one for `s`, and for `θˡⁱ`
-`1 / (cᵖᵐ Π)` at prescribed pressure (the anelastic core) or the fixed-gas-density response
+`1 / (ĉᵖ Π)` at prescribed pressure (the anelastic core) or the fixed-gas-density response
 `β_cv` on the compressible core (see `sedimentation_thermal_response`). Each thermodynamic
 formulation extends this function for its `formulation` type. The remaining arguments are the model's
 `dynamics`, thermodynamic `constants`, `microphysics` and `microphysical_fields`, prognostic

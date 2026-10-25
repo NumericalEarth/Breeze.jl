@@ -53,6 +53,21 @@ solves `T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ`) extend this function to retur
 default_temperature_solver(dynamics) = nothing
 
 #####
+##### Exner exponent interface
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the Exner exponent ([`VaporEquivalentExponent`](@ref Breeze.Thermodynamics.VaporEquivalentExponent)
+or [`DryExponent`](@ref Breeze.Thermodynamics.DryExponent)) that defines the liquid-ice potential
+temperature ``θˡⁱ`` of `formulation`. A formulation that does not evolve ``θˡⁱ``, and the symbol
+`:LiquidIcePotentialTemperature`, return the default `VaporEquivalentExponent()`, so diagnostics
+and boundary-flux conversions of ``θˡⁱ`` agree with the definition the formulation evolves.
+"""
+liquid_ice_exner_exponent(formulation) = VaporEquivalentExponent()
+
+#####
 ##### Field naming interface
 #####
 
@@ -107,7 +122,7 @@ supplied to `AtmosphereModel`, `:ρE`, along with its specific alias `:E` for fo
 committing to the variable that carries it: a `boundary_conditions` or `forcing` entry keyed
 `ρE` is routed onto whichever thermodynamic density the formulation evolves (see
 [`thermodynamic_density_name`](@ref)), converted as that variable requires — divided by
-``cᵖᵐ Π`` for ``ρθ``, whether it arrives as a flux or as a forcing, and passed through
+``ĉᵖ Π`` for ``ρθ``, whether it arrives as a flux or as a forcing, and passed through
 unconverted for ``ρs``, which is itself an energy per unit mass.
 
 ``s`` names static energy specifically and ``e`` is reserved for turbulent kinetic energy, so

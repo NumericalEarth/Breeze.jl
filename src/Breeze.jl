@@ -44,6 +44,8 @@ export
     SingleColumnGrid,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
+    VaporEquivalentExponent,
+    DryExponent,
     RadiativeTransferModel,
     BackgroundAtmosphere,
     standard_ozone_profile,

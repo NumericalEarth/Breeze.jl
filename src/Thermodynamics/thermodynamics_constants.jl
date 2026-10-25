@@ -394,6 +394,70 @@ The liquid and ice phases are assumed to be incompressible.
     return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cˡ + qⁱ * cⁱ
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the vapor-equivalent heat capacity of a moist air parcel with mass fractions `q`:
+the heat capacity at constant pressure the parcel would have if all of its water were vapor,
+
+```math
+ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ ,
+```
+
+where ``qᵈ = 1 - qᵗ`` is the dry-air mass fraction and ``qᵗ = qᵛ + qˡ + qⁱ`` the total moisture
+fraction. Unlike the mixture heat capacity [`mixture_heat_capacity`](@ref), ``ĉᵖ`` does not change
+when water changes phase. It normalizes the liquid-ice potential temperature ``θˡⁱ``.
+
+# Example
+
+```jldoctest
+using Breeze.Thermodynamics: vapor_equivalent_heat_capacity, mixture_heat_capacity, MoistureMassFractions
+
+constants = ThermodynamicConstants()
+vapor = MoistureMassFractions(0.012, 0.0, 0.0)
+cloud = MoistureMassFractions(0.010, 0.002, 0.0)
+vapor_equivalent_heat_capacity(vapor, constants) == vapor_equivalent_heat_capacity(cloud, constants)
+
+# output
+true
+```
+"""
+@inline function vapor_equivalent_heat_capacity(q::MMF, constants::TC)
+    qᵗ = total_specific_moisture(q)
+    qᵈ = 1 - qᵗ
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    return qᵈ * cᵖᵈ + qᵗ * cᵖᵛ
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the vapor-equivalent gas constant of a moist air parcel with mass fractions `q`:
+the gas constant the parcel would have if all of its water were vapor,
+
+```math
+R̂ = qᵈ Rᵈ + qᵗ Rᵛ ,
+```
+
+where ``qᵈ = 1 - qᵗ`` and ``qᵗ = qᵛ + qˡ + qⁱ``. In unsaturated air ``R̂`` equals the mixture gas
+constant [`mixture_gas_constant`](@ref). The ratio ``κ̂ = R̂ / ĉᵖ`` is the exponent of the
+[`VaporEquivalentExponent`](@ref) Exner function.
+"""
+@inline function vapor_equivalent_gas_constant(q::MMF, constants::TC)
+    qᵗ = total_specific_moisture(q)
+    qᵈ = 1 - qᵗ
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    return qᵈ * Rᵈ + qᵗ * Rᵛ
+end
+
+# The latent energy ℒˡ₀ qˡ + ℒⁱ₀ qⁱ of the condensate, with the latent heats extrapolated to absolute
+# zero (`absolute_zero_latent_heat`). The enthalpy relative to all-vapor water is cᵖᵐ T minus this.
+@inline condensate_latent_energy(q::MMF, constants) =
+    absolute_zero_latent_heat(constants, constants.liquid) * q.liquid +
+    absolute_zero_latent_heat(constants, constants.ice) * q.ice
+
 #####
 ##### Equation of state
 #####

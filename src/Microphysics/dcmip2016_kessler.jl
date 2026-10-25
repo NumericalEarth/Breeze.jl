@@ -1,20 +1,21 @@
 using ..Thermodynamics:
+    LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
     MoistureMixingRatio,
     PlanarLiquidSurface,
-    mixture_gas_constant,
-    mixture_heat_capacity,
     saturation_specific_humidity,
     temperature,
     TetensFormulaThermodynamicConstants,
     total_mixing_ratio,
     total_specific_moisture,
-    with_moisture
+    with_moisture,
+    with_temperature
 
 using ..AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
     kernel_time_step,
+    liquid_ice_exner_exponent,
     standard_pressure,
     total_density
 
@@ -456,8 +457,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     dry_air_coupled = ρ !== ρᵈ
     p = dynamics_pressure(model.dynamics)
 
-    # Standard pressure (reference pressure for the Exner function, pˢᵗ)
-    pˢᵗ = standard_pressure(model.dynamics)
+    # Standard pressure (reference pressure for the Exner function, pˢᵗ) and Exner exponent
+    pˢᵗ = convert(eltype(grid), standard_pressure(model.dynamics))
+    exponent = liquid_ice_exner_exponent(model.formulation)
 
     # Thermodynamic constants for liquid-ice potential temperature conversion
     constants = model.thermodynamic_constants
@@ -476,7 +478,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     launch!(arch, grid, :xy, _microphysical_update!,
             microphysics, grid, Nz, kernel_Δt, ρ, ρᵈ, dry_air_coupled,
-            p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+            p, pˢᵗ, exponent, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
@@ -610,11 +612,13 @@ end
 # 3. Convert mixing ratios → mass fractions; update prognostic fields
 #
 # Note: Breeze uses liquid-ice potential temperature (θˡⁱ), related to T by:
-#   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
+#   ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ ,
+# with the Exner exponent of the formulation; the conversions go through the state's own
+# `temperature` and `with_temperature`.
 
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
                                         density, coupling_density, dry_air_coupled,
-                                        pressure, pˢᵗ, constants,
+                                        pressure, pˢᵗ, exponent, constants,
                                         θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
@@ -719,13 +723,8 @@ end
 
                 # Compute temperature from θˡⁱ
                 rˡ = rᶜˡ + rʳ
-                r = MoistureMixingRatio(rᵛ, rˡ)
-                cᵖᵐ = mixture_heat_capacity(r, constants)
-                Rᵐ  = mixture_gas_constant(r, constants)
-                q = MoistureMassFractions(r)
-                qˡ = q.liquid
-                Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-                Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
+                q = MoistureMassFractions(MoistureMixingRatio(rᵛ, rˡ))
+                Tᵏ = temperature(LiquidIcePotentialTemperatureState(θˡⁱᵏ, q, pˢᵗ, p, exponent), constants)
 
                 # Rain sedimentation flux (upstream differencing)
                 ρᵏ = Cᵨ * coupling_density[i, j, k]
@@ -751,13 +750,9 @@ end
                 T = Tᵏ + ΔT_phase
 
                 rˡ = rᶜˡ + rʳ
-                r = MoistureMixingRatio(rᵛ, rˡ)
-                cᵖᵐ = mixture_heat_capacity(r, constants)
-                Rᵐ  = mixture_gas_constant(r, constants)
-                q = MoistureMassFractions(r)
-                qˡ = q.liquid
-                Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-                θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
+                q = MoistureMassFractions(MoistureMixingRatio(rᵛ, rˡ))
+                𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, p, exponent)
+                θˡⁱ_new = with_temperature(𝒰₀, T, constants).potential_temperature
 
                 θˡⁱ[i, j, k]  = θˡⁱ_new
                 ρᵈ = coupling_density[i, j, k]
@@ -777,13 +772,8 @@ end
 
             # Compute temperature from θˡⁱ
             rˡ = rᶜˡ + rʳ
-            r = MoistureMixingRatio(rᵛ, rˡ)
-            cᵖᵐ = mixture_heat_capacity(r, constants)
-            Rᵐ  = mixture_gas_constant(r, constants)
-            q = MoistureMassFractions(r)
-            qˡ = q.liquid
-            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-            Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
+            q = MoistureMassFractions(MoistureMixingRatio(rᵛ, rˡ))
+            Tᵏ = temperature(LiquidIcePotentialTemperatureState(θˡⁱᵏ, q, pˢᵗ, p, exponent), constants)
 
             # Rain sedimentation flux at top boundary
             𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
@@ -805,13 +795,9 @@ end
             T = Tᵏ + ΔT_phase
 
             rˡ = rᶜˡ + rʳ
-            r = MoistureMixingRatio(rᵛ, rˡ)
-            cᵖᵐ = mixture_heat_capacity(r, constants)
-            Rᵐ  = mixture_gas_constant(r, constants)
-            q = MoistureMassFractions(r)
-            qˡ = q.liquid
-            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-            θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
+            q = MoistureMassFractions(MoistureMixingRatio(rᵛ, rˡ))
+            𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, p, exponent)
+            θˡⁱ_new = with_temperature(𝒰₀, T, constants).potential_temperature
 
             θˡⁱ[i, j, k]  = θˡⁱ_new
             ρᵈ = coupling_density[i, j, k]
