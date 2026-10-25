@@ -12,16 +12,18 @@ using Adapt: Adapt
 ##### Subsidence forcing
 #####
 
-struct SubsidenceForcing{W, A, S}
+struct SubsidenceForcing{W, A, S, B}
     subsidence_vertical_velocity :: W
     averaged_field :: A
     advection :: S
+    inflow_lower_bound :: B
 end
 
 Adapt.adapt_structure(to, sf::SubsidenceForcing) =
     SubsidenceForcing(Adapt.adapt(to, sf.subsidence_vertical_velocity),
                       Adapt.adapt(to, sf.averaged_field),
-                      Adapt.adapt(to, sf.advection))
+                      Adapt.adapt(to, sf.advection),
+                      Adapt.adapt(to, sf.inflow_lower_bound))
 
 """
 $(TYPEDSIGNATURES)
@@ -48,6 +50,12 @@ automatically at kernel time.
   damps ``2Δz`` modes and does not undershoot at sharp gradients. `Centered()` cannot see a ``2Δz`` mode,
   so it persists; higher-order upwind schemes damp it but may over- or undershoot.
 
+With an upwind scheme every cell, including the two boundary cells, is updated from its own face
+fluxes. Air leaving the column through a boundary face carries the boundary cell's value. Air
+entering it carries the value extrapolated linearly from the two cells inside, so a linear
+profile crosses the boundary undistorted; for mass fractions such as moisture that value is
+bounded below by zero, so subsidence never brings negative moisture into the column.
+
 The horizontal average is computed automatically during `update_state!`.
 
 # Example
@@ -71,7 +79,7 @@ SubsidenceForcing with wˢ: 1×1×76 Field{Nothing, Nothing, Face} reduced over 
 └── advection: UpwindBiased(order=1)
 ```
 """
-SubsidenceForcing(wˢ; advection = UpwindBiased(order = 1)) = SubsidenceForcing(wˢ, nothing, advection)
+SubsidenceForcing(wˢ; advection = UpwindBiased(order = 1)) = SubsidenceForcing(wˢ, nothing, advection, nothing)
 
 function Base.summary(forcing::SubsidenceForcing)
     wˢ = forcing.subsidence_vertical_velocity
@@ -104,44 +112,61 @@ end
 # column. Averaging the two interior faces nearest the boundary gives the boundary cell the same
 # combination of gradients its neighbour sees, so the boundary gradient has no tendency of its own
 # and is carried neutrally, as an upwind scheme with a linearly extrapolated ghost value would.
+# Only the interior faces 2:Nz are used: a two-cell column has the single face 2, and a one-cell
+# column has no gradient at all.
 @inline function ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
-    w_dz_ϕ⁺⁺ = w_dz_ϕᵃᵃᶠ(i, j, k+2, grid, wˢ, ϕ_avg)
-    w_dz_ϕ⁺ = w_dz_ϕᵃᵃᶠ(i, j, k+1, grid, wˢ, ϕ_avg)
-    w_dz_ϕᵏ = w_dz_ϕᵃᵃᶠ(i, j, k, grid, wˢ, ϕ_avg)
-    w_dz_ϕ⁻ = w_dz_ϕᵃᵃᶠ(i, j, k-1, grid, wˢ, ϕ_avg)
-    interior = (w_dz_ϕ⁺ + w_dz_ϕᵏ) / 2
-    at_top = (w_dz_ϕᵏ + w_dz_ϕ⁻) / 2
-    at_bottom = (w_dz_ϕ⁺ + w_dz_ϕ⁺⁺) / 2
-    top = k == grid.Nz
-    bottom = k == 1
-    return ifelse(top, at_top, ifelse(bottom, at_bottom, interior))
+    Nz = grid.Nz
+    kᵉ = max(2, min(k, Nz - 1))
+    k⁻ = clamp(kᵉ, 2, Nz)
+    k⁺ = clamp(kᵉ + 1, 2, Nz)
+    w_dz_ϕ = (w_dz_ϕᵃᵃᶠ(i, j, k⁻, grid, wˢ, ϕ_avg) + w_dz_ϕᵃᵃᶠ(i, j, k⁺, grid, wˢ, ϕ_avg)) / 2
+    return ifelse(Nz < 2, zero(w_dz_ϕ), w_dz_ϕ)
 end
 
 # wˢ ∂z ϕ̄ at the cell center with the centered discretization above
-@inline w_dz_ϕᶜᶜᶜ(i, j, k, grid, ::Centered, wˢ, ϕ_avg) = ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
+@inline w_dz_ϕᶜᶜᶜ(i, j, k, grid, ::Centered, wˢ, ϕ_avg, lower_bound) = ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
 
-# The upwind-biased flux wˢ ϕ̃ at a face, with ϕ̄ reconstructed from the upwind side of the face
-@inline function w_ϕᵃᵃᶠ(i, j, k, grid, scheme, w, ϕ)
-    @inbounds wᵏ = w[i, j, k]
-    return wᵏ * _biased_interpolate_zᵃᵃᶠ(i, j, k, grid, scheme, bias(wᵏ), ϕ)
+# The value of ϕ̄ carried through a boundary face. Outflow carries the boundary cell's own value.
+# Inflow carries the value extrapolated linearly from the two cells inside, bounded below for mass
+# fractions; a one-cell column has no gradient to extrapolate.
+@inline function boundary_upwind_value(i, j, k, grid, wᵏ, ϕ, lower_bound)
+    Nz = grid.Nz
+    top = k == Nz + 1
+    boundary_cell = ifelse(top, Nz, 1)
+    inner_cell = clamp(ifelse(top, Nz - 1, 2), 1, Nz)
+    @inbounds ϕᵇ = ϕ[i, j, boundary_cell]
+    @inbounds Δϕ = ϕᵇ - ϕ[i, j, inner_cell]
+    inflow = ifelse(top, wᵏ < 0, wᵏ > 0)
+    return ifelse(inflow, bounded_below(ϕᵇ + Δϕ, lower_bound), ϕᵇ)
 end
 
-# wˢ ∂z ϕ̄ = ∂z(wˢ ϕ̄) - ϕ̄ ∂z wˢ in flux form, so a divergent wˢ is not a source.
-# Boundary cells use their neighbour's tendency, since their upwind value is a halo copy of themselves.
-@inline function w_dz_ϕᶜᶜᶜ(i, j, k, grid, scheme::AbstractUpwindBiasedAdvectionScheme, wˢ, ϕ_avg)
-    Nz = grid.Nz
-    kᵉ = clamp(ifelse(k == 1, 2, ifelse(k == Nz, Nz - 1, k)), 1, Nz)
-    F⁺ = w_ϕᵃᵃᶠ(i, j, kᵉ+1, grid, scheme, wˢ, ϕ_avg)
-    F⁻ = w_ϕᵃᵃᶠ(i, j, kᵉ, grid, scheme, wˢ, ϕ_avg)
-    @inbounds ϕᵏ = ϕ_avg[i, j, kᵉ]
-    @inbounds δw = wˢ[i, j, kᵉ+1] - wˢ[i, j, kᵉ]
-    return (F⁺ - F⁻ - ϕᵏ * δw) / Δzᶜᶜᶜ(i, j, kᵉ, grid)
+@inline bounded_below(ϕ, ::Nothing) = ϕ
+@inline bounded_below(ϕ, lower_bound) = max(lower_bound, ϕ)
+
+# The upwind-biased flux wˢ ϕ̃ at a face, with ϕ̄ reconstructed from the upwind side of an interior
+# face and given explicitly at the two boundary faces
+@inline function w_ϕᵃᵃᶠ(i, j, k, grid, scheme, w, ϕ, lower_bound)
+    @inbounds wᵏ = w[i, j, k]
+    ϕ̃ = _biased_interpolate_zᵃᵃᶠ(i, j, k, grid, scheme, bias(wᵏ), ϕ)
+    ϕᵇ = boundary_upwind_value(i, j, k, grid, wᵏ, ϕ, lower_bound)
+    boundary = (k == 1) | (k == grid.Nz + 1)
+    return wᵏ * ifelse(boundary, ϕᵇ, ϕ̃)
+end
+
+# wˢ ∂z ϕ̄ = ∂z(wˢ ϕ̄) - ϕ̄ ∂z wˢ in flux form, so a divergent wˢ is not a source. Every cell,
+# the boundary cells included, uses its own two face fluxes.
+@inline function w_dz_ϕᶜᶜᶜ(i, j, k, grid, scheme::AbstractUpwindBiasedAdvectionScheme, wˢ, ϕ_avg, lower_bound)
+    F⁺ = w_ϕᵃᵃᶠ(i, j, k+1, grid, scheme, wˢ, ϕ_avg, lower_bound)
+    F⁻ = w_ϕᵃᵃᶠ(i, j, k, grid, scheme, wˢ, ϕ_avg, lower_bound)
+    @inbounds ϕᵏ = ϕ_avg[i, j, k]
+    @inbounds δw = wˢ[i, j, k+1] - wˢ[i, j, k]
+    return (F⁺ - F⁻ - ϕᵏ * δw) / Δzᶜᶜᶜ(i, j, k, grid)
 end
 
 @inline function (forcing::SubsidenceForcing)(i, j, k, grid, clock, fields)
     wˢ = forcing.subsidence_vertical_velocity
     ϕ_avg = forcing.averaged_field
-    return - w_dz_ϕᶜᶜᶜ(i, j, k, grid, forcing.advection, wˢ, ϕ_avg)
+    return - w_dz_ϕᶜᶜᶜ(i, j, k, grid, forcing.advection, wˢ, ϕ_avg, forcing.inflow_lower_bound)
 end
 
 #####
@@ -178,7 +203,12 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
     # columns are independent, so the subsidence acts on each column's own profile there.
     averaged_field = horizontally_averaged(specific_field, grid)
 
-    return SubsidenceForcing(wˢ, averaged_field, forcing.advection)
+    # Fields weighted by the total density are mass fractions (moisture, microphysical moments,
+    # tracers), which must not be brought in negative through an inflow boundary
+    mass_fraction = Symbol(:ρ, name) ∉ context.coupling_density_names
+    inflow_lower_bound = mass_fraction ? 0 : nothing
+
+    return SubsidenceForcing(wˢ, averaged_field, forcing.advection, inflow_lower_bound)
 end
 
 #####

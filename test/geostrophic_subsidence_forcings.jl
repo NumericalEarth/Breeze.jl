@@ -243,7 +243,9 @@ end
 
     wˢ = 1
     Γ = 1e-2
-    ϕᵢ(x, y, z) = Γ * z
+    # Offset so that the profile stays positive below the floor, where air rises in: moisture
+    # brings in no less than zero, and a profile vanishing at the floor would need a negative inflow
+    ϕᵢ(x, y, z) = 0.1 + Γ * z
     Δt = 1e-2
     N = 5
     Δϕ_per_step = - Δt * wˢ * Γ |> FT
@@ -291,7 +293,7 @@ end
 
     wˢ = 1
     Γ = 1e-2
-    ϕᵢ(x, y, z) = Γ * z
+    ϕᵢ(x, y, z) = 0.1 + Γ * z # positive below the floor, as above
     Δt = 1e-2
     Δϕ = - Δt * wˢ * Γ |> FT
     subsidence = SubsidenceForcing(FT(wˢ))
@@ -369,6 +371,101 @@ end
         end
         θ = column(model.formulation.potential_temperature)
         @test θ[boundary] - θ[neighbour] ≈ gradient₀ rtol = 1e-3
+    end
+end
+
+# The specific subsidence tendency of `name` in a column, and the column itself
+function column_subsidence_tendency(grid, name, wˢ, profile; advection = UpwindBiased(order=1))
+    forcing = NamedTuple{(name,)}((SubsidenceForcing(wˢ; advection),))
+    model = AtmosphereModel(grid; forcing, closure = nothing, advection = nothing)
+    initial_condition = name === :θ  ? (; θ = profile) :
+                        name === :qᵛ ? (; θ = 300, qᵗ = profile) :
+                                       (; θ = 300, NamedTuple{(name,)}((profile,))...)
+    set!(model; initial_condition...)
+    Breeze.AtmosphereModels.compute_tendencies!(model)
+    ρ = Array(interior(model.dynamics.reference_state.density, 1, 1, :))
+    G = Array(interior(model.timestepper.Gⁿ[Symbol(:ρ, name)], 1, 1, :)) ./ ρ
+    return G, model
+end
+
+specific_column(model, name) = name === :qᵛ ? Array(interior(Oceananigans.fields(model).qᵛ, 1, 1, :)) :
+                                              Array(interior(Oceananigans.fields(model)[name], 1, 1, :))
+
+@testset "SubsidenceForcing outflow boundary cell uses its own fluxes [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = 10
+    grid = RectilinearGrid(default_arch; size = Nz, z = (0, Nz * Δz), topology = (Flat, Flat, Bounded))
+    q₀ = FT(1e-3)
+
+    # A wet cell beside an empty outflow cell: the outflow cell must fill at |wˢ| q₀ / Δz, the rate
+    # at which its neighbour drains into it, and the moisture must stay within its initial bounds.
+    # Borrowing the neighbour's tendency would dry the empty cell at that rate instead.
+    for (wˢ, outflow, wet) in ((-0.01, 1, 2), (0.01, Nz, Nz - 1))
+        zʷ = znodes(grid, Center())[wet]
+        G, model = column_subsidence_tendency(grid, :qᵛ, z -> wˢ, z -> q₀ * (abs(z - zʷ) < Δz / 2))
+        @test G[outflow] ≈ abs(wˢ) * q₀ / Δz rtol = 1e-6
+        @test G[wet] ≈ -abs(wˢ) * q₀ / Δz rtol = 1e-6
+
+        for _ in 1:20
+            time_step!(model, 100)
+        end
+        q = specific_column(model, :qᵛ)
+        @test minimum(q) ≥ 0
+        @test maximum(q) ≤ q₀
+    end
+
+    # A constant profile stays unchanged under divergent subsidence, down to one-cell columns
+    for N in (1, 2, 3, 8), advection in (Centered(), UpwindBiased(order=1))
+        short_grid = RectilinearGrid(default_arch; size = N, z = (0, N * Δz), topology = (Flat, Flat, Bounded))
+        G, _ = column_subsidence_tendency(short_grid, :θ, z -> -0.01 * z / (N * Δz), 300; advection)
+        @test maximum(abs, G) < 100 * eps(FT) * 300 * 0.01 / Δz
+    end
+end
+
+@testset "SubsidenceForcing inflow boundary brings in no negative moisture [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = 10
+    Lz = Nz * Δz
+    grid = RectilinearGrid(default_arch; size = Nz, z = (0, Lz), topology = (Flat, Flat, Bounded))
+    Γ = FT(1e-5)
+
+    # Profiles that vanish at the inflow boundary. The linear extrapolation brings in -Γ Δz / 2:
+    # momentum takes it, so its linear profile crosses the boundary undistorted, while moisture
+    # brings in zero and the boundary cell drains at |wˢ| q / Δz, half the interior rate.
+    for (wˢ, inflow, vanishing) in ((-0.01, Nz, z -> Γ * (Lz - z)), (0.01, 1, z -> Γ * z))
+        interior_rate = -abs(wˢ) * Γ
+
+        Gᵘ, _ = column_subsidence_tendency(grid, :u, z -> wˢ, vanishing)
+        @test all(isapprox.(Gᵘ, interior_rate; rtol = 1e-6))
+
+        Gᵠ, model = column_subsidence_tendency(grid, :qᵛ, z -> wˢ, vanishing)
+        qᵇ = Γ * Δz / 2
+        @test Gᵠ[inflow] ≈ -abs(wˢ) * qᵇ / Δz rtol = 1e-6
+        others = setdiff(1:Nz, inflow)
+        @test all(isapprox.(Gᵠ[others], interior_rate; rtol = 1e-6))
+
+        for _ in 1:20
+            time_step!(model, 10)
+            @test minimum(specific_column(model, :qᵛ)) ≥ 0
+        end
+    end
+end
+
+@testset "SubsidenceForcing on one- and two-cell columns [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Δz = 10
+    Γ = FT(0.005)
+    wˢ = -0.01
+
+    # A linear profile under uniform subsidence: every cell sees -wˢ Γ, except a one-cell column,
+    # which has no gradient
+    for N in (1, 2, 3), advection in (Centered(), UpwindBiased(order=1))
+        grid = RectilinearGrid(default_arch; size = N, z = (0, N * Δz), topology = (Flat, Flat, Bounded))
+        G, _ = column_subsidence_tendency(grid, :θ, z -> wˢ, z -> 300 + Γ * z; advection)
+        expected = N == 1 ? zero(FT) : -wˢ * Γ
+        @test all(isapprox.(G, expected; atol = 1e-6 * abs(wˢ * Γ)))
     end
 end
 
