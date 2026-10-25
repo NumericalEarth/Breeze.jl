@@ -246,7 +246,9 @@ does not describe this.
 
 The default returns `total_density(dynamics)`. `AnelasticDynamics` overrides it because its
 `dynamics_density` is the *dry* reference profile ``ρᵣ(z)``, so the override rediagnoses the local
-moist total density at the reference pressure.
+moist total density at the reference pressure; `PrescribedDynamics` does the same at its prescribed
+pressure. This is the density of the thermodynamic state, `density(𝒰, constants)`, at which the
+microphysics schemes evaluate saturation.
 """
 @inline function gas_phase_density(i, j, k, dynamics, T, q, constants)
     return @inbounds total_density(dynamics)[i, j, k]

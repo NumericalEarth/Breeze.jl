@@ -448,8 +448,10 @@ end
 
 # Saturation vapor mass fraction at the melting point T₀. Breeze's qᵛ is a
 # total-air mass fraction (ρᵛ/ρ), so this must use the same basis:
-# q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ). With this convention the diffusion term
-# ℒ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density difference ρᵛ - ρᵛ⁺(T₀).
+# q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ), with ρ the moist-air density the mass fractions are
+# referenced to (`density(𝒰, constants)`; not the anelastic reference density ρᵣ). With this
+# convention the diffusion term ℒ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density
+# difference ρᵛ - ρᵛ⁺(T₀), up to the ratio of the density that weights it to that one.
 # A dry-air mixing ratio ε e_s0/(P - e_s0) would only be correct against a vapor
 # variable that is itself a dry-air mixing ratio; mixing the two mass bases would
 # bias the melting and refreezing heat balances, so both call sites share this.

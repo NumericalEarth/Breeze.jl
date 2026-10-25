@@ -76,13 +76,14 @@ In the bundled-rate path we package all three tendencies into one gridless helpe
 the shared intermediates computed exactly once:
 
 ```@example fused_microphysics_example
-using Breeze.Thermodynamics: temperature, saturation_specific_humidity,
+using Breeze.Thermodynamics: temperature, density, saturation_specific_humidity,
                               PlanarLiquidSurface, PlanarIceSurface
 
 @inline function explicit_microphysics_tendencies(em::ExplicitMicrophysics, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)
-    q⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    q⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+    ρᵐ = density(𝒰, constants) # saturation density; ρ weights the tendencies
+    q⁺ˡ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
+    q⁺ⁱ = saturation_specific_humidity(T, ρᵐ, constants, PlanarIceSurface())
 
     τᵛˡ = em.vapor_to_liquid
     τᵛⁱ = em.vapor_to_ice

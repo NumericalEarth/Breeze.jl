@@ -69,14 +69,17 @@ where:
     prep = ice_table_bracket(p3.ice.deposition.small_ice_ventilation_constant,
                              m_mean, Fᶠ, Fˡ, ρᶠ, floors)
 
-    return ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+    # Standalone form: one air density serves as both the weighting and the saturation density.
+    return ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρ, constants, transport,
                                   ρ_correction, prep)
 end
 
 # Shared body. With `P3IceLookups` the bracket floors `nⁱ` at `floors.number_scale` where the
 # standalone form above floors it at zero; the coordinates agree for `nⁱ ≥ number_scale`, and
 # below it the melt rate `nⁱ₊ × dm/dt` is negligible.
-@inline function ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+# `ρ` weights the vapor-diffusion heat flux; `ρᵐ` is the moist-air density the mass fractions
+# are referenced to, at which the freezing-point saturation fraction is evaluated.
+@inline function ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵐ, constants, transport,
                                         ρ_correction, prep)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
@@ -98,7 +101,7 @@ end
     Dᵛ = transport.Dᵛ       # Diffusivity of water vapor [m²/s]
     ν  = transport.ν        # Kinematic viscosity [m²/s]
 
-    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
+    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρᵐ)
 
     # Use the dry-ice PSD ventilation tables (small + large) for melting. The total
     # Ventilation/VentilationEnhanced tables use the wet-ice PSD and are not
@@ -185,10 +188,10 @@ Requires tabulated small/large ice ventilation integrals.
 end
 
 # Shared-lookup variant used by `p3_phase1_rates`.
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵐ, constants, transport,
                                    lookups::P3IceLookups)
     total_melt, small, large =
-        ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+        ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵐ, constants, transport,
                                lookups.ρ_correction, lookups.prep)
     return partition_melting(total_melt, small, large)
 end

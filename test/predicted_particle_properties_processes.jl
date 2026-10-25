@@ -57,6 +57,7 @@ using Breeze.Thermodynamics:
     StaticEnergyState,
     adjustment_saturation_specific_humidity,
     saturation_specific_humidity,
+    density,
     temperature,
     with_temperature,
     mixture_heat_capacity,
@@ -306,8 +307,20 @@ function actual_final_liquid_ssat_after_p3_step(formulation, rates, qᵛ₀, q�
     end
 
     T₁ = temperature(𝒰₁, constants)
-    qᵛ⁺ˡ₁ = saturation_specific_humidity(T₁, ρ, constants, PlanarLiquidSurface())
+    qᵛ⁺ˡ₁ = saturation_specific_humidity(T₁, density(𝒰₁, constants), constants, PlanarLiquidSurface())
     return qᵛ₁ - qᵛ⁺ˡ₁
+end
+
+# The vapor fraction `δ` above saturation over `surface` at temperature `T` and pressure `P`, with
+# condensate `qˡ`, `qⁱ`. Saturation is referenced to the moist-air density of that state, which
+# itself depends on the vapor, so iterate to the fixed point.
+function vapor_above_saturation(T, P, qˡ, qⁱ, δ, constants; surface = PlanarLiquidSurface())
+    qᵛ = zero(T)
+    for _ in 1:20
+        ρᵐ = density(T, P, MoistureMassFractions(qᵛ, qˡ, qⁱ), constants)
+        qᵛ = saturation_specific_humidity(T, ρᵐ, constants, surface) + δ
+    end
+    return qᵛ
 end
 
 function documented_predict_supersaturation_disabled_semantics()
@@ -1431,7 +1444,7 @@ end
             ρ_correction)
 
         capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
-                                           ρ, constants, transport)
+                                           ρ, ρ, constants, transport)
         ℒᶠʳ = PPP.fusion_latent_heat(constants, T)
         expected = 2 * FT(π) * ventilated_capacitance * transport.Kᵃ * (T₀ - T) / ℒᶠʳ * ni
 
@@ -1479,6 +1492,7 @@ end
             qᵛ,
             qᵛ,
             q,
+            ρ,
             transport.Dᵛ,
             transport.Kᵃ,
             transport.ν,
@@ -1551,6 +1565,7 @@ end
             qᵛ,
             qᵛ,
             q,
+            ρ,
             transport.Dᵛ,
             transport.Kᵃ,
             transport.ν,
@@ -1608,7 +1623,7 @@ end
         refreezing = PPP.refreezing_rate(p3, qi, qwi, ni, T, qv, Ff, ρf,
                                          ρ, constants, transport)
         capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
-                                           ρ, constants, transport)
+                                           ρ, ρ, constants, transport)
         τ = p3.process_rates.sink_limiting_timescale
 
         # Refreezing should remain active below freezing with liquid-coated ice.
@@ -2164,7 +2179,7 @@ end
         qⁱ = FT(1e-4)
         qᶠ = FT(1e-5)
         qʷⁱ = FT(0)
-        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-10)
+        qᵛ = vapor_above_saturation(T, P, qᶜˡ + qʳ + qʷⁱ, qⁱ, FT(1e-10), constants)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
 
@@ -2216,11 +2231,13 @@ end
         qʷⁱ = FT(0)
         sᵛ⁺ˡ = FT(0)
 
-        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-        qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
-        qᵛ = qᵛ⁺ˡ + FT(1e-4)
+        # ρ weights the tendencies; saturation is referenced to the state's moist-air density ρᵐ
+        qᵛ = vapor_above_saturation(T, P, qᶜˡ, qⁱ, FT(1e-4), constants)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ρᵐ = density(𝒰, constants)
+        qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
+        qᵛ⁺ⁱ = saturation_specific_humidity(T, ρᵐ, constants, PlanarIceSurface())
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
                                 qᶠ, FT(0), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
 
@@ -2229,8 +2246,8 @@ end
         Tᴳᴹ = T + gm.ε * PPP.vaporization_latent_heat(constants, T) / constants.dry_air.heat_capacity
         qᵛᴳᴹ = qᵛ - gm.ε
         qᶜˡᴳᴹ = qᶜˡ + gm.ε
-        qᵛ⁺ˡᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρ, constants, PlanarLiquidSurface())
-        qᵛ⁺ⁱᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρ, constants, PlanarIceSurface())
+        qᵛ⁺ˡᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρᵐ, constants, PlanarLiquidSurface())
+        qᵛ⁺ⁱᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρᵐ, constants, PlanarIceSurface())
         qᴳᴹ = MoistureMassFractions(qᵛᴳᴹ, qᶜˡᴳᴹ, qⁱ)
         transportᴳᴹ = air_transport_properties(Tᴳᴹ, P, constants)
         expected_process = expected_reduced_reference_vapor_rates(
@@ -2263,7 +2280,7 @@ end
         qᶠ = FT(0)
         qʷⁱ = FT(0)
         sᵛ⁺ˡ = FT(0)
-        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
+        qᵛ = vapor_above_saturation(T, P, qᶜˡ, qⁱ, FT(1e-4), constants)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0),
@@ -2298,7 +2315,7 @@ end
         qᶠ = FT(5e-5)
         qʷⁱ = FT(0)
         sᵛ⁺ˡ = FT(0)
-        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-5)
+        qᵛ = vapor_above_saturation(T, P, qᶜˡ + qʳ + qʷⁱ, qⁱ, FT(1e-5), constants)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, nⁱ,
@@ -2334,7 +2351,7 @@ end
         qᶠ = FT(0)
         qʷⁱ = FT(0)
         sᵛ⁺ˡ = FT(0)
-        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
+        qᵛ = vapor_above_saturation(T, P, qᶜˡ, qⁱ, FT(1e-4), constants)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0),
@@ -2367,7 +2384,7 @@ end
         qᶠ = FT(0)
         qʷⁱ = FT(0)
         sᵛ⁺ˡ = FT(0)
-        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
+        qᵛ = vapor_above_saturation(T, P, qᶜˡ, qⁱ, FT(1e-4), constants)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(StaticEnergyState(zero(FT), q, FT(0), P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0),

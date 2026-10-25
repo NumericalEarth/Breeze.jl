@@ -36,6 +36,7 @@ struct P3DerivedState{FT, Q, L}
     qᵛ⁺ˡ :: FT      # saturation vapor fraction over liquid
     qᵛ⁺ⁱ :: FT      # saturation vapor fraction over ice
     q :: Q          # MoistureMassFractions for the moist-air density
+    ρᵐ :: FT        # moist-air density the mass fractions (and saturation) are referenced to
     # Transport properties
     Dᵛ :: FT       # water vapor diffusivity [m²/s]
     Kᵃ :: FT       # thermal conductivity of air [W/m/K]
@@ -44,30 +45,32 @@ struct P3DerivedState{FT, Q, L}
     lookups :: L   # P3IceLookups: coordinate bracket, density correction, ventilation terms
 end
 
-@inline function liquid_supersaturation_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, ρ, constants)
+# Saturation is referenced to the moist-air density of the updated state, the density its mass
+# fractions are referenced to (not the density that weights the tendencies).
+@inline function liquid_supersaturation_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, constants)
     q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
     𝒰₁ = with_moisture(𝒰, q)
     T = temperature(𝒰₁, constants)
-    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    qᵛ⁺ˡ = saturation_specific_humidity(T, density(𝒰₁, constants), constants, PlanarLiquidSurface())
     return qᵛ - qᵛ⁺ˡ
 end
 
 @inline function final_predicted_supersaturation_tendency(
-    ::ProcessRate{FT, false}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
+    ::ProcessRate{FT, false}, 𝒰, qᵛ, qˡ, qⁱ, constants,
     initial_supersaturation, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice
 ) where FT
     return zero(qᵛ)
 end
 
 @inline function final_predicted_supersaturation_tendency(
-    ::ProcessRate{FT, true}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
+    ::ProcessRate{FT, true}, 𝒰, qᵛ, qˡ, qⁱ, constants,
     initial_supersaturation, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice
 ) where FT
     qᵛ_final = qᵛ - (vapor_to_liquid + vapor_to_ice) * dt
     qˡ_final = qˡ + (vapor_to_liquid - liquid_to_ice) * dt
     qⁱ_final = qⁱ + (vapor_to_ice + liquid_to_ice) * dt
     final_supersaturation = liquid_supersaturation_after_moisture_update(
-        𝒰, qᵛ_final, qˡ_final, qⁱ_final, ρ, constants)
+        𝒰, qᵛ_final, qˡ_final, qⁱ_final, constants)
     return (final_supersaturation - initial_supersaturation) / dt
 end
 
@@ -318,7 +321,7 @@ end
     coat_evap = ifelse(wet_ice_exchange_active,
                        vapor_rates.coating_evaporation, zero(FT))
 
-    melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, constants, transport, state.lookups)
+    melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, state.ρᵐ, constants, transport, state.lookups)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
     complete_melt = ifelse(p3.process_rates.liquid_fraction_active,
@@ -392,7 +395,7 @@ end
     # =========================================================================
     has_hydrometeors = (max(0, qᶜˡ) + max(0, qʳ)) >=
                        parameters.wet_growth_hydrometeor_threshold
-    qwgrth_raw = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+    qwgrth_raw = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, state.ρᵐ,
                                      constants, transport, lookups)
     qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
@@ -602,11 +605,16 @@ end
     T = temperature(𝒰, constants)
     q_base = 𝒰.moisture_mass_fractions
     qᵛ_base = q_base.vapor
-    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+
+    # Saturation is referenced to the moist-air density of the state, the density the mass
+    # fractions are referenced to; ρ weights the tendencies (ρᵣ on the anelastic core). ρᵐ is
+    # held fixed through the supersaturation alignment below, as ρ was.
+    ρᵐ = density(𝒰, constants)
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
     P = air_pressure(𝒰, constants)
 
     supersaturation_adjustment = predicted_supersaturation_adjustment(
-        p3, qᶜˡ, qᵛ_base, qᵛ⁺ˡ, ℳ.sᵛ⁺ˡ, T, ρ, constants)
+        p3, qᶜˡ, qᵛ_base, qᵛ⁺ˡ, ℳ.sᵛ⁺ˡ, T, ρᵐ, constants)
     saturation_alignment_rate = supersaturation_adjustment.rate
     qᶜˡ = supersaturation_adjustment.qᶜˡ
     qᵛ = supersaturation_adjustment.qᵛ
@@ -615,7 +623,7 @@ end
                               q_base.liquid + supersaturation_adjustment.cloud_water_adjustment,
                               q_base.ice)
     qᵛ⁺ˡ = supersaturation_adjustment.qᵛ⁺ˡ
-    qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρ, constants, T₀, qᵛ⁺ˡ)
+    qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρᵐ, constants, T₀, qᵛ⁺ˡ)
     transport = air_transport_properties(T, P, constants)
 
     cloud = diagnose_cloud_dsd(p3, qᶜˡ, ℳ.nᶜˡ, ρ)
@@ -634,7 +642,7 @@ end
     state = P3DerivedState{FT, typeof(q), typeof(lookups)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
                                                            Fˡ, Nᶜˡ, cloud.nᶜˡ,
                                                            cloud.μᶜˡ, cloud.λᶜˡ,
-                                                           T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q,
+                                                           T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q, ρᵐ,
                                                            transport.Dᵛ, transport.Kᵃ, transport.ν,
                                                            lookups)
 
@@ -1091,7 +1099,7 @@ end
                     cloud_hom_q + rain_hom_q + refrz -
                     complete_melt - partial_melt
     supersaturation_tendency = final_predicted_supersaturation_tendency(
-        parameters, 𝒰, qᵛ, q.liquid, q.ice, ρ, constants, ℳ.sᵛ⁺ˡ, dt_safety,
+        parameters, 𝒰, qᵛ, q.liquid, q.ice, constants, ℳ.sᵛ⁺ˡ, dt_safety,
         vapor_to_liquid, vapor_to_ice, liquid_to_ice)
     # `saturation_alignment_rate` is intentionally NOT rescaled by the cloud sink limiter: the
     # G&M alignment is its own one-shot saturation adjustment with a local

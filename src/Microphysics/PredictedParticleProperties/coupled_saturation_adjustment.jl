@@ -44,15 +44,18 @@ sized to `sink_limiting_timescale`, so one host step with
 the host integrates with ``dt ≠ τ`` the supersaturation alignment relaxes over multiple
 steps rather than landing in one.
 
+`ρᵐ` is the moist-air density that the mass fractions, and hence the saturation specific
+humidity, are referenced to (`density(𝒰, constants)`).
+
 When `predict_supersaturation = false`, dispatch bypasses the adjustment and the
 local state passes through unchanged.
 """
-@inline predicted_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants) =
+@inline predicted_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρᵐ, constants) =
     predicted_supersaturation_adjustment(p3.process_rates, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
-                                         sᵛ⁺ˡ, T, ρ, constants)
+                                         sᵛ⁺ˡ, T, ρᵐ, constants)
 
 @inline function predicted_supersaturation_adjustment(
-    ::ProcessRate{FT, false}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
+    ::ProcessRate{FT, false}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρᵐ, constants
 ) where FT
     cloud_water_adjustment = zero(qᶜˡ)
     return (; cloud_water_adjustment,
@@ -65,7 +68,7 @@ end
 
 @inline function predicted_supersaturation_adjustment(
     parameters::ProcessRate{PFT, true}, p3,
-    qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
+    qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρᵐ, constants
 ) where PFT
     FT = typeof(qᶜˡ)
     τ = max(parameters.sink_limiting_timescale, eps(FT))
@@ -84,7 +87,7 @@ end
                                     zero(FT), cloud_water_adjustment)
     adjusted_temperature = T + cloud_water_adjustment * ℒˡ / cᵖᵈ
     adjusted_saturation = saturation_specific_humidity(
-        adjusted_temperature, ρ, constants, PlanarLiquidSurface())
+        adjusted_temperature, ρᵐ, constants, PlanarLiquidSurface())
 
     return (; cloud_water_adjustment,
             rate = cloud_water_adjustment / τ,

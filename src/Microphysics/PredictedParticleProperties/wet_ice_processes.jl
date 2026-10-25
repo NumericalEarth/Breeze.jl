@@ -174,14 +174,16 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
-- `ρ`: Air density [kg/m³]
+- `ρ`: Air density weighting the vapor-diffusion flux and the ice lookups [kg/m³]
+- `ρᵐ`: Moist-air density the mass fractions are referenced to, at which the freezing-point
+  saturation fraction is evaluated [kg/m³]
 - `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
 
 # Returns
 - Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
-@inline function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+@inline function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵐ,
                                      constants, transport,
                                      lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
     FT = typeof(qⁱ)
@@ -199,7 +201,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     Dᵛ = transport.Dᵛ
     ν  = transport.ν
 
-    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
+    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρᵐ)
 
     # Ventilation integral (same as deposition/refreezing)
     ventilated_capacitance = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
@@ -250,7 +252,7 @@ See [Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5).
 """
 @inline function refreezing_rate(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
                                  constants, transport)
-    capacity = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+    capacity = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρ, constants, transport)
     return refreezing_rate_from_capacity(p3, qʷⁱ, capacity)
 end
 

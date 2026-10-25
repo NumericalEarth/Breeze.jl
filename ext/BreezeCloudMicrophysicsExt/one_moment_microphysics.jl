@@ -248,12 +248,12 @@ end
     return conv_q_lcl_to_q_rai(option, parameters, nothing, micro, thermo)
 end
 
-@inline function ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+@inline function ice_autoconversion(parameters, q, qᶜⁱ, ρ, ρᵐ, T, Tᶠ, constants)
     option = parameters.processes.snow_autoconversion
-    return ice_autoconversion(option, parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+    return ice_autoconversion(option, parameters, q, qᶜⁱ, ρ, ρᵐ, T, Tᶠ, constants)
 end
 
-@inline function ice_autoconversion(option, parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+@inline function ice_autoconversion(option, parameters, q, qᶜⁱ, ρ, ρᵐ, T, Tᶠ, constants)
     micro = (; q_icl = qᶜⁱ)
     return conv_q_icl_to_q_sno(option, parameters, nothing, micro, nothing)
 end
@@ -264,6 +264,7 @@ end
     q,
     qᶜⁱ,
     ρ,
+    ρᵐ,
     T,
     Tᶠ,
     constants,
@@ -274,6 +275,7 @@ end
         q,
         qᶜⁱ,
         ρ,
+        ρᵐ,
         T,
         Tᶠ,
         constants,
@@ -343,10 +345,12 @@ end
     )
 end
 
-@inline rain_evaporation_rate(::Nothing, rain, velocity, air, q, qʳ, ρ, T, constants) = 0
+# `ρ` weights the prognostic precipitation (its size distribution); `ρᵐ` is the moist-air
+# density the mass fractions are referenced to, at which the supersaturation is evaluated.
+@inline rain_evaporation_rate(::Nothing, rain, velocity, air, q, qʳ, ρ, ρᵐ, T, constants) = 0
 
-@inline function rain_evaporation_rate(option, rain, velocity, air, q, qʳ, ρ, T, constants)
-    return rain_evaporation(rain, velocity, air, q, qʳ, ρ, T, constants)
+@inline function rain_evaporation_rate(option, rain, velocity, air, q, qʳ, ρ, ρᵐ, T, constants)
+    return rain_evaporation(rain, velocity, air, q, qʳ, ρ, ρᵐ, T, constants)
 end
 
 @inline function snow_deposition_sublimation_rate(
@@ -357,14 +361,15 @@ end
     q,
     qˢⁿ,
     ρ,
+    ρᵐ,
     T,
     constants,
 )
     return 0
 end
 
-@inline function snow_deposition_sublimation_rate(option, snow, velocity, air, q, qˢⁿ, ρ, T, constants)
-    return snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, T, constants)
+@inline function snow_deposition_sublimation_rate(option, snow, velocity, air, q, qˢⁿ, ρ, ρᵐ, T, constants)
+    return snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, ρᵐ, T, constants)
 end
 
 @inline function snow_deposition_sublimation_rate(
@@ -375,10 +380,11 @@ end
     q,
     qˢⁿ,
     ρ,
+    ρᵐ,
     T,
     constants,
 )
-    return min(0, snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, T, constants))
+    return min(0, snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, ρᵐ, T, constants))
 end
 
 @inline snow_melt_rate(::Nothing, snow, velocity, air, qˢⁿ, ρ, T, Tᶠ, constants) = 0
@@ -892,9 +898,10 @@ const τⁿᵘᵐ = 10  # seconds
         ρ,
     )
 
-    # Rain evaporation in subsaturated air
+    # Rain evaporation in subsaturated air, at the moist-air density of the state
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
+    ρᵐ = density(𝒰, constants)
     Sᵉᵛᵃᵖ = rain_evaporation_rate(
         processes.rain_condensation_evaporation,
         rain,
@@ -903,6 +910,7 @@ const τⁿᵘᵐ = 10  # seconds
         q,
         qʳ,
         ρ,
+        ρᵐ,
         T,
         constants,
     )
@@ -946,9 +954,10 @@ end
         ρ,
     )
 
-    # Rain evaporation in subsaturated air
+    # Rain evaporation in subsaturated air, at the moist-air density of the state
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
+    ρᵐ = density(𝒰, constants)
     Sᵉᵛᵃᵖ = rain_evaporation_rate(
         processes.rain_condensation_evaporation,
         rain,
@@ -957,6 +966,7 @@ end
         q,
         qʳ,
         ρ,
+        ρᵐ,
         T,
         constants,
     )
@@ -1009,8 +1019,12 @@ end
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
+    # Saturation is referenced to the moist-air density of the state, the density the mass
+    # fractions are referenced to; ρ weights the tendencies (ρᵣ on the anelastic core).
+    ρᵐ = density(𝒰, constants)
+
     # Condensation: vapor ↔ cloud liquid
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    qᵛ⁺ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
     Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
@@ -1023,6 +1037,7 @@ end
         q,
         qʳ,
         ρ,
+        ρᵐ,
         T,
         constants,
     )
@@ -1115,14 +1130,18 @@ end
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
+    # Saturation is referenced to the moist-air density of the state, the density the mass
+    # fractions are referenced to; ρ weights the tendencies (ρᵣ on the anelastic core).
+    ρᵐ = density(𝒰, constants)
+
     # Condensation: vapor ↔ cloud liquid
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    qᵛ⁺ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
     Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Deposition: vapor ↔ cloud ice
     # Suppress warm cloud-ice growth, matching CloudMicrophysics' INP limiter.
-    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρᵐ, constants, PlanarIceSurface())
     τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories, qᶜⁱ, T, qᵛ, qᵛ⁺ⁱ)
     Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
     Sᵈᵉᵖ = ifelse(isnan(Sᵈᵉᵖ), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
@@ -1137,6 +1156,7 @@ end
         q,
         qʳ,
         ρ,
+        ρᵐ,
         T,
         constants,
     )
@@ -1151,6 +1171,7 @@ end
         q,
         qˢⁿ,
         ρ,
+        ρᵐ,
         T,
         constants,
     )
@@ -1196,7 +1217,7 @@ end
     )
 
     # Ice → snow autoconversion
-    Sᵃᶜⁿᵛⁱˢⁿ = ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+    Sᵃᶜⁿᵛⁱˢⁿ = ice_autoconversion(parameters, q, qᶜⁱ, ρ, ρᵐ, T, Tᶠ, constants)
 
     # Accretion: cloud liquid + snow
     Sᵃᶜᶜˡˢⁿ = cloud_precipitation_accretion(

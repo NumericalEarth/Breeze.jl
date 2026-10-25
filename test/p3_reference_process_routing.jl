@@ -25,6 +25,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
 using Breeze.Thermodynamics:
     LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
+    density,
     PlanarIceSurface,
     PlanarLiquidSurface,
     ThermodynamicConstants,
@@ -40,6 +41,18 @@ function routing_thermodynamic_state(air_temperature, pressure, vapor,
     moisture = MoistureMassFractions(vapor, cloud + rain + coating, dry_ice)
     state = LiquidIcePotentialTemperatureState(zero(FT), moisture, FT(1e5), pressure)
     return with_temperature(state, air_temperature, constants)
+end
+
+# Liquid saturation vapor fraction of the air at `air_temperature` and `pressure` with condensate
+# `liquid`, `ice`: saturation is referenced to that state's moist-air density, which depends on
+# the vapor, so iterate to the fixed point.
+function saturated_vapor(air_temperature, pressure, liquid, ice, constants)
+    vapor = zero(air_temperature)
+    for _ in 1:20
+        moist_density = density(air_temperature, pressure, MoistureMassFractions(vapor, liquid, ice), constants)
+        vapor = saturation_specific_humidity(air_temperature, moist_density, constants, PlanarLiquidSurface())
+    end
+    return vapor
 end
 
 function routing_derived_state(p3, air_density, microphysical_state,
@@ -79,6 +92,7 @@ function routing_derived_state(p3, air_density, microphysical_state,
         vapor_saturation_liquid,
         vapor_saturation_ice,
         moisture,
+        air_density,
         transport.Dᵛ,
         transport.Kᵃ,
         transport.ν,
@@ -241,8 +255,7 @@ end
         @test cloud_mass_rate / cloud_number_rate ≈ expected_cloud_particle_mass
 
         pressure = FT(8e4)
-        cloud_vapor = saturation_specific_humidity(
-            air_temperature, air_density, constants, PlanarLiquidSurface())
+        cloud_vapor = saturated_vapor(air_temperature, pressure, cloud_mass, zero(FT), constants)
         cloud_thermodynamic_state = routing_thermodynamic_state(
             air_temperature, pressure, cloud_vapor,
             cloud_mass, zero(FT), zero(FT), zero(FT), constants)
@@ -271,8 +284,7 @@ end
         @test rain_mass_rate > rain_mass / τ
         @test rain_mass_rate / rain_number_rate ≈ expected_rain_particle_mass
 
-        rain_vapor = saturation_specific_humidity(
-            air_temperature, air_density, constants, PlanarLiquidSurface())
+        rain_vapor = saturated_vapor(air_temperature, pressure, rain_mass, zero(FT), constants)
         rain_thermodynamic_state = routing_thermodynamic_state(
             air_temperature, pressure, rain_vapor,
             zero(FT), rain_mass, zero(FT), zero(FT), constants)
@@ -441,8 +453,7 @@ end
         dry_ice = FT(1e-10)
         coating = FT(2e-5)
         ice_number = FT(2e3)
-        vapor = saturation_specific_humidity(
-            air_temperature, air_density, constants, PlanarLiquidSurface())
+        vapor = saturated_vapor(air_temperature, pressure, coating, dry_ice, constants)
         thermodynamic_state = routing_thermodynamic_state(
             air_temperature, pressure, vapor,
             zero(FT), zero(FT), dry_ice, coating, constants)
