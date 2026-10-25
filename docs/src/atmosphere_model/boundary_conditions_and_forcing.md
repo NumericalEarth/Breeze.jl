@@ -140,5 +140,17 @@ model = AtmosphereModel(grid; forcing=(; ρE=Returns(∂t_E)))
 nothing # hide
 ```
 
+A prescribed *temperature* tendency, the form in which large-scale and radiative heating are often
+archived, goes under `E` wrapped in [`TemperatureForcing`](@ref). It is converted to an energy
+tendency with the local mixture heat capacity ``cᵖᵐ`` at kernel time, so the temperature changes at
+the prescribed rate in moist and cloudy air as well as dry. Multiplying by the dry heat capacity
+``cᵖᵈ`` instead heats air with 20 g kg⁻¹ of vapor about 1.7% too little:
+
+```@example bcs
+∂t_T = 2 / 86400   # large-scale heating, K s⁻¹
+model = AtmosphereModel(grid; forcing=(; E=TemperatureForcing(Returns(∂t_T))))
+nothing # hide
+```
+
 As with boundary conditions, an unrecognized forcing key is an error, and only one key per
 variable may be supplied.

@@ -154,6 +154,7 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
     SpecificForcing,
+    TemperatureForcing,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
