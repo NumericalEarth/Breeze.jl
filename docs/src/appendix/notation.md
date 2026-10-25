@@ -58,6 +58,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρᵡ``                              | `ρᵡ`   | `thermodynamic_density(formulation)` | Thermodynamic density: the generic coupling-weighted prognostic thermodynamic variable, ``ρᵡ = ρᵈ χ`` — concretely ``ρθ`` for the potential-temperature formulation or ``ρs`` for static energy. The intensive variable is recovered as ``χ = ρᵡ / ρᵈ`` |
 | ``T``                               | `T`    | `AM.temperature`                    | Temperature                                                                    |
 | ``T⁺``                              | `T⁺`   | `DewpointTemperature(model)`        | Dewpoint temperature                                                           |
+| ``Tᵛ``                              | `Tᵛ`   | `HydrostaticSounding.virtual_temperature` | Virtual temperature, ``Tᵛ = Rᵐ T / Rᵈ``: the temperature at which dry air has the moist air's density at the same pressure (condensate counted as loading) |
 | ``p``                               | `p`    | `AM.pressure`                       | Pressure                                                                       |
 | ``b``                               | `b`    |                                     | Buoyancy                                                                       |
 | ``q^{ve}``                           | `qᵛᵉ`  |                                     | Scheme-dependent specific moisture: vapor (non-equilibrium) or equilibrium moisture (saturation adjustment) |
