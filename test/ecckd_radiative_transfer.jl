@@ -414,6 +414,35 @@ previous_float_type = Oceananigans.defaults.FloatType
                                                           solar_constant = FT[1361, 1361, 1361])
     end
 
+    @testset "Per-column fixed sun [$(FT)]" for FT in test_float_types()
+        # Each column of an ensemble carries its own cos(zenith) and solar constant (a GCM-forced case
+        # library: every column a place and season, with the TOA flux of its own case), and equals the
+        # model with that column's sun as scalars
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(default_arch, FT; size = (2, 1, 8), x = (0, 2), y = (0, 1), z = (0, 3kilometers),
+                               topology = (Periodic, Periodic, Bounded))
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        function shortwave(solar_constant, cos_zenith)
+            radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                               surface_temperature = 300, surface_albedo = 0.1, solar_constant,
+                                               solar_position = FixedCosineZenith(cos_zenith),
+                                               overlying_atmosphere = nothing) # the grid top is the top of the atmosphere
+            model = AtmosphereModel(grid; dynamics, radiation)
+            set!(model; θ = (x, y, z) -> 300 + 0.01 * z / 1000, qᵗ = (x, y, z) -> 0.015 * exp(-z / 2500))
+            return column_fluxes(radiation, 1, 1)[4], column_fluxes(radiation, 2, 1)[4]
+        end
+
+        S₀, μ₀ = reshape(FT[1361, 900], 2, 1), reshape(FT[0.6, 0.25], 2, 1)
+        ℐ₁, ℐ₂ = shortwave(S₀, μ₀)
+        @test ℐ₁ == shortwave(S₀[1], μ₀[1])[1]
+        @test ℐ₂ == shortwave(S₀[2], μ₀[2])[2]
+        @test ℐ₁[end] ≈ -S₀[1] * μ₀[1]
+        @test ℐ₂[end] ≈ -S₀[2] * μ₀[2]
+    end
+
     @testset "Allocation scaling" begin
         # The update allocates only the fixed overhead of its kernel launches, not per column:
         # 1 and 64 columns allocate the same, within 1 KiB

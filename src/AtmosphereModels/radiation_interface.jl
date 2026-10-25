@@ -30,8 +30,9 @@ With `schedule = IterationInterval(80)` and `Δt = 7.5` s, the fluxes are comput
 state and then every 600 s, in the steps that begin at iterations 80, 160, …
 
 Under Reactant the iteration is traced: `BreezeReactantExt` applies the scheduled update with a
-traced conditional, which requires a stateless schedule such as `IterationInterval`, and leaves
-initialization to the traced caller.
+traced conditional, which requires a stateless schedule such as `IterationInterval`, and computes
+the initial fluxes in `Breeze.TimeSteppers.prepare_first_time_step!`
+(also called by `first_time_step!`), which a traced window calls before its loop of `time_step!`.
 """
 function update_radiation!(rtm, model)
     isnothing(rtm) && return nothing

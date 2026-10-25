@@ -8,15 +8,17 @@ include(joinpath(dirname(@__DIR__), "setup.jl"))
 # stateless `IterationInterval`; `validate_schedule` rejects other schedules when the model is
 # built. A stub radiation model, whose update depends on the temperature and counts itself, checks
 # that a traced window updates radiation as often and with the same result as an eager one, with
-# Kessler cloud and rain (sedimentation substeps) and a traced first-step preparation.
+# Kessler cloud and rain (sedimentation substeps), whether the window starts from
+# `prepare_first_time_step!` or from `first_time_step!`: both compute the initial fluxes.
 
 using Breeze
-using Breeze.AtmosphereModels: validate_schedule, _update_radiation!
+using Breeze.AtmosphereModels: validate_schedule
+using Breeze.TimeSteppers: prepare_first_time_step!
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
 using Breeze.Thermodynamics: TetensFormula
 using Oceananigans
 using Oceananigans.Architectures: ReactantState, architecture, on_architecture
-using Oceananigans.TimeSteppers: update_state!
+using Oceananigans.TimeSteppers: first_time_step!
 using Oceananigans.Utils: launch!
 using Oceananigans.Utils.KernelAbstractions: @kernel, @index
 using Reactant
@@ -57,13 +59,19 @@ function scheduled_radiation_column(arch, schedule)
     return model
 end
 
-# Reactant skips the eager first-step preparation; trace it, with the initial fluxes
-function scheduled_window!(model, Δt, steps)
-    model.clock.last_Δt = Δt
-    update_state!(model)
-    _update_radiation!(model.radiation, model)
-    update_state!(model)
+# Reactant skips the eager first-step preparation, so a traced window prepares the first step
+# (with the initial fluxes) before its loop
+function prepared_window!(model, Δt, steps)
+    prepare_first_time_step!(model, Δt)
     @trace mincut=true checkpointing=false track_numbers=false for _ in 1:steps
+        time_step!(model, Δt)
+    end
+    return nothing
+end
+
+function first_step_window!(model, Δt, steps)
+    first_time_step!(model, Δt)
+    @trace mincut=true checkpointing=false track_numbers=false for _ in 2:steps
         time_step!(model, Δt)
     end
     return nothing
@@ -92,12 +100,14 @@ column_state(model) = map(f -> Array(interior(f)), (model.temperature, model.mic
         eager_updates = radiation_updates(eager) - before
         @test eager_updates == 1 + count(n -> n % 4 == 0, 1:steps-1) # initialization, then once per scheduled iteration
 
-        model = scheduled_radiation_column(ReactantState(), schedule)
-        before = radiation_updates(model)
-        Reactant.@jit scheduled_window!(model, Δt, steps)
-        @test radiation_updates(model) - before == eager_updates
-        for (traced, expected) in zip(column_state(model), column_state(eager))
-            @test traced ≈ expected rtol=1e-9
+        for window! in (prepared_window!, first_step_window!)
+            model = scheduled_radiation_column(ReactantState(), schedule)
+            before = radiation_updates(model)
+            Reactant.@jit window!(model, Δt, steps)
+            @test radiation_updates(model) - before == eager_updates
+            for (traced, expected) in zip(column_state(model), column_state(eager))
+                @test traced ≈ expected rtol=1e-9
+            end
         end
     end
 end

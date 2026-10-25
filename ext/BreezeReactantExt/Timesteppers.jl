@@ -2,14 +2,36 @@ using Oceananigans: ReactantState, initialize!
 using Oceananigans.TimeSteppers: Clock
 using Oceananigans.Utils: IterationInterval
 using Reactant: TracedRNumber, @trace
-using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!
+using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!, reconcile_state!
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.Microphysics: Microphysics, DCMIP2016KesslerMicrophysics
-using Breeze.TimeSteppers: SSPRungeKutta3, CompressibleAcousticModel
+using Breeze.TimeSteppers: TimeSteppers, SSPRungeKutta3, CompressibleAcousticModel
 
-function OceananigansTimeSteppers.first_time_step!(model::AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}, Δt)
-    initialize!(model)
+const ReactantSSPRungeKutta3Model = AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}
+
+# The eager preparation of `maybe_prepare_first_time_step!`, which Reactant skips because its guard
+# branches on the traced iteration. The traced `update_state!` cannot tell that it runs at
+# initialization either (see `radiation_update_due`), so the initial radiative fluxes are computed
+# here explicitly, and the tendencies refreshed with them.
+function TimeSteppers.prepare_first_time_step!(model::ReactantSSPRungeKutta3Model, Δt)
+    model.clock.last_Δt = Δt
+    reconcile_state!(model)
+    update_state!(model; compute_tendencies = isnothing(model.radiation))
+    initialize_radiation!(model.radiation, model)
+    return nothing
+end
+
+initialize_radiation!(::Nothing, model) = nothing
+
+function initialize_radiation!(radiation, model)
+    AtmosphereModels._update_radiation!(radiation, model)
     update_state!(model)
+    return nothing
+end
+
+function OceananigansTimeSteppers.first_time_step!(model::ReactantSSPRungeKutta3Model, Δt)
+    initialize!(model)
+    TimeSteppers.prepare_first_time_step!(model, Δt)
     time_step!(model, Δt)
     return nothing
 end
@@ -32,7 +54,7 @@ OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::CompressibleAcous
 
 # The clock's time and iteration are traced but its stage is not, so only the first-stage
 # `update_state!` of a step carries a traced conditional. Initialization (iteration 0, between
-# steps) is not traced: the traced caller prepares the initial fluxes explicitly.
+# steps) is not traced: `prepare_first_time_step!` computes the initial fluxes explicitly.
 const TracedClock = Clock{<:TracedRNumber}
 
 function AtmosphereModels.radiation_update_due(schedule::IterationInterval, clock::TracedClock, model)

@@ -20,6 +20,7 @@ include("geostrophic_forcings.jl")
 include("subsidence_forcing.jl")
 include("specific_forcing.jl")
 include("temperature_forcing.jl")
+include("nonprecipitating_water_relaxation.jl")
 
 #####
 ##### Extension of materialize_forcing with context argument

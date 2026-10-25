@@ -3,14 +3,18 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Adapt: adapt
 using Breeze
 using Breeze.AtmosphereModels: thermodynamic_density, base_pressure, standard_pressure
+using Breeze.Forcings: NonprecipitatingWaterRelaxation
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
 using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities,
                                  wall_air_pressure, surface_layer_state
-using Breeze.Thermodynamics: potential_temperature_from_temperature,
+using Breeze.Thermodynamics: TetensFormula, potential_temperature_from_temperature,
                              LiquidIcePotentialTemperatureState, exner_function
 using CloudMicrophysics: CloudMicrophysics
+using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition, Bottom
+using Oceananigans.Forcings: MultipleForcings, Relaxation
 using Oceananigans.Fields: location
 using Oceananigans.Grids: XDirection
 using Oceananigans.TimeSteppers: compute_flux_bc_tendencies!, update_state!
@@ -227,6 +231,74 @@ end
     # density-weighted relaxation merges with a caller's specific forcing
     @test AtmosphereModel(grid; microphysics=SaturationAdjustment(),
                                 forcing=(; ρqᵉ=Returns(F), qᵉ=Returns(F))) isa AtmosphereModel
+end
+
+@testset "Relaxation under qᵗ restores the non-precipitating water [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=4, z=(0, 1000), topology=(Flat, Flat, Bounded))
+
+    rate = FT(1 / 3600)
+    q★ = FT(0.012)
+    qᵛ₀, qᶜˡ₀, qᶜⁱ₀, qʳ₀, qˢⁿ₀ = FT(8e-3), FT(1e-3), FT(4e-4), FT(5e-4), FT(3e-4)
+
+    # The moisture tendency of `forcing` alone, the difference from an unforced twin
+    function moisture_tendency(microphysics, forcing; thermodynamic_constants=ThermodynamicConstants(FT), state...)
+        tendency(forcing) = begin
+            model = AtmosphereModel(grid; microphysics, forcing, thermodynamic_constants, advection=nothing)
+            set!(model; θ=FT(290), state...)
+            update_state!(model)
+            Array(interior(model.timestepper.Gⁿ[moisture_prognostic_name(microphysics)]))
+        end
+        return tendency(forcing) .- tendency((;))
+    end
+
+    model = AtmosphereModel(grid; forcing=(; qᵗ=Relaxation(; rate, target=q★)))
+    ρᵣ = Array(interior(model.dynamics.reference_state.density))
+    @test model.forcing.ρqᵛ.forcing isa NonprecipitatingWaterRelaxation
+
+    # Non-equilibrium warm rain: vapor and cloud liquid are relaxed, rain is not
+    kessler = DCMIP2016KesslerMicrophysics()
+    tetens = ThermodynamicConstants(FT; saturation_vapor_pressure=TetensFormula(FT))
+    warm = (; thermodynamic_constants=tetens, qᵛ=qᵛ₀, qᶜˡ=qᶜˡ₀, qʳ=qʳ₀)
+    G = moisture_tendency(kessler, (; qᵗ=Relaxation(; rate, target=q★)); warm...)
+    @test G ≈ ρᵣ .* rate .* (q★ - qᵛ₀ - qᶜˡ₀) rtol=sqrt(eps(FT))
+
+    # The scheme's own moisture name still relaxes the vapor alone
+    G = moisture_tendency(kessler, (; qᵛ=Relaxation(; rate, target=q★)); warm...)
+    @test G ≈ ρᵣ .* rate .* (q★ - qᵛ₀) rtol=sqrt(eps(FT))
+
+    # Under the density key the target is a density
+    ρq★ = FT(0.01)
+    G = moisture_tendency(kessler, (; ρqᵗ=Relaxation(; rate, target=ρq★)); warm...)
+    @test G ≈ rate .* (ρq★ .- ρᵣ .* (qᵛ₀ + qᶜˡ₀)) rtol=sqrt(eps(FT))
+
+    # Mixed phase: cloud ice is relaxed with the vapor and cloud liquid, rain and snow are not
+    cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
+    mixed_phase = OneMomentCloudMicrophysics(FT; cloud_formation)
+    G = moisture_tendency(mixed_phase, (; qᵗ=Relaxation(; rate, target=q★));
+                          qᵛ=qᵛ₀, qᶜˡ=qᶜˡ₀, qᶜⁱ=qᶜⁱ₀, qʳ=qʳ₀, qˢⁿ=qˢⁿ₀)
+    @test G ≈ ρᵣ .* rate .* (q★ - qᵛ₀ - qᶜˡ₀ - qᶜⁱ₀) rtol=sqrt(eps(FT))
+
+    # Saturation adjustment: the non-precipitating water is the equilibrium moisture itself, so
+    # the relaxation is that of `qᵉ`, as before
+    saturation_adjustment = SaturationAdjustment(FT)
+    G = moisture_tendency(saturation_adjustment, (; qᵗ=Relaxation(; rate, target=q★)); qᵗ=FT(0.015))
+    Gᵉ = moisture_tendency(saturation_adjustment, (; qᵉ=Relaxation(; rate, target=q★)); qᵗ=FT(0.015))
+    @test G ≈ Gᵉ rtol=sqrt(eps(FT))
+    @test G ≈ ρᵣ .* rate .* (q★ - FT(0.015)) rtol=sqrt(eps(FT))
+
+    # Without microphysics all water is vapor
+    G = moisture_tendency(nothing, (; qᵗ=Relaxation(; rate, target=q★)); qᵛ=qᵛ₀)
+    @test G ≈ ρᵣ .* rate .* (q★ - qᵛ₀) rtol=sqrt(eps(FT))
+
+    # Water sources in the same tuple pass through unchanged
+    model = AtmosphereModel(grid; forcing=(; qᵗ=(Returns(FT(1e-8)), Relaxation(; rate, target=q★))))
+    @test model.forcing.ρqᵛ isa MultipleForcings
+    @test !(model.forcing.ρqᵛ.forcings[1].forcing isa NonprecipitatingWaterRelaxation)
+    @test model.forcing.ρqᵛ.forcings[2].forcing isa NonprecipitatingWaterRelaxation
+
+    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; qᵗ=Relaxation(; rate, target=q★,
+                                                                              transform=:horizontal_average)))
 end
 
 @testset "Energy forcing under ρE reaches the thermodynamic variable [$(FT)]" for FT in test_float_types()
