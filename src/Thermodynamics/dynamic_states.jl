@@ -50,8 +50,8 @@ abstract type AbstractExnerExponent end
 """
 $(TYPEDEF)
 
-The vapor-equivalent Exner exponent ``κ̂ = R̂ / ĉᵖ``, with ``R̂ = qᵈ Rᵈ + qᵗ Rᵛ`` and
-``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ`` the gas constant and heat capacity the parcel would have if all of its
+The vapor-equivalent Exner exponent ``κ̂ = R̂ / ĉᵖ``. Here ``R̂ = qᵈ Rᵈ + qᵗ Rᵛ`` and
+``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ`` are the gas constant and heat capacity the parcel would have if all of its
 water were vapor (see [`vapor_equivalent_gas_constant`](@ref) and
 [`vapor_equivalent_heat_capacity`](@ref)). With this exponent ``θˡⁱ = T / Π̂`` in unsaturated air,
 and dry or moist unsaturated adiabatic motion conserves ``θˡⁱ`` exactly. This is the default.

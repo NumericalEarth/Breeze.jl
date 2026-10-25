@@ -313,7 +313,7 @@ total water, and accounts for the latent heat associated with liquid water and i
 where ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ`` is the vapor-equivalent heat capacity, ``ℒˡ₀`` and ``ℒⁱ₀`` are the
 latent heats extrapolated to absolute zero, ``qˡ``, ``qⁱ`` are the liquid and ice mass fractions,
 and ``Π`` is the Exner function with the exponent of `model.formulation` (see
-[`LiquidIcePotentialTemperatureFormulation`](@ref)). This is the variable that
+[`Breeze.PotentialTemperatureFormulations.LiquidIcePotentialTemperatureFormulation`](@ref)). This is the variable that
 `LiquidIcePotentialTemperatureFormulation` evolves.
 
 # Arguments
