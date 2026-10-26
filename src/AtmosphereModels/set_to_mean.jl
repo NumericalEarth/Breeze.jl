@@ -194,6 +194,11 @@ function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛ
     return nothing
 end
 
+# A column reference keeps its profiles, which `initialize!` integrates from, so the means are written
+# into them; any other reference gets a fresh column to reduce into.
+column_profile(profile::Field{Nothing, Nothing, Center}, grid) = profile
+column_profile(profile, grid) = Field{Nothing, Nothing, Center}(grid)
+
 """
     set_to_mean!(ref::ExnerReferenceState, model)
 
@@ -215,11 +220,11 @@ function set_to_mean!(ref::ExnerReferenceState, model)
     Nz   = size(grid, 3)
 
     # Horizontal-mean θˡⁱ and qᵛ as single-column reference profiles.
-    θ̄ = ref.potential_temperature
+    θ̄ = column_profile(ref.potential_temperature, grid)
     mean!(θ̄, liquid_ice_potential_temperature(model))
     fill_halo_regions!(θ̄)
 
-    q̄ᵛ = ref.vapor_mass_fraction isa Field ? ref.vapor_mass_fraction : Field{Nothing, Nothing, Center}(grid)
+    q̄ᵛ = column_profile(ref.vapor_mass_fraction, grid)
     mean_mass_fraction!(q̄ᵛ, specific_humidity(model))
 
     Rᵈ  = dry_air_gas_constant(constants)
