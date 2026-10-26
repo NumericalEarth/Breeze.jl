@@ -23,7 +23,7 @@ const DIFFUSIVITY = 1.66
 
 
 # The gray gas optics: one longwave and one shortwave g point, absorption per mol m⁻² of dry air
-gray_gas_model(FT, κ_lw, κ_sw) = EcCKDGasOpticsModel(names = (:composite,),
+gray_gas_model(FT, κ_lw, κ_sw) = EcCKDGasOpticsModel(names = (:dry_air,),
                                                      longwave_absorption = FT[κ_lw;;],
                                                      shortwave_absorption = FT[κ_sw;;])
 

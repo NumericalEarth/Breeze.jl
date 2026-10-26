@@ -42,10 +42,10 @@ end
 # clear-sky model (slot 4 `BackgroundAtmosphere`) and disjoint from its all-sky model.
 const EcCKDRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:ColumnWorkspace}
 
-# The gases of the column optics, in the order of the ecCKD tables: dry air (the
-# `composite` of N₂, O₂ and the trace gases the tables fold into it), the two spatially varying
-# gases, and the well-mixed gases of `BackgroundAtmosphere` the reference models tabulate.
-const ECCKD_GAS_NAMES = (:composite, :h2o, :o3, :co2, :ch4, :n2o, :cfc11, :cfc12)
+# The gases of the column optics, in the order of the ecCKD tables: dry air (N₂, O₂ and the trace
+# gases the tables fold into it), the two spatially varying gases, and the well-mixed gases of
+# `BackgroundAtmosphere` the reference models tabulate.
+const ECCKD_GAS_NAMES = (:dry_air, :H₂O, :O₃, :CO₂, :CH₄, :N₂O, :CFC₁₁, :CFC₁₂)
 
 # `BackgroundAtmosphere` gases the reference ecCKD models do not tabulate: rejecting a nonzero
 # value is better than silently ignoring it.
@@ -56,7 +56,7 @@ function validate_background_gases(background::BackgroundAtmosphere)
         value = getproperty(background, name)
         value == 0 || throw(ArgumentError("`BackgroundAtmosphere.$name = $value` is not supported by the ecCKD " *
                                           "gas optics, which tabulate $(join(ECCKD_GAS_NAMES[2:end], ", ")) " *
-                                          "(N₂ and O₂ form the composite gas); set it to zero."))
+                                          "(N₂ and O₂ form the dry air); set it to zero."))
     end
     return nothing
 end

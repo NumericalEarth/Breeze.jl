@@ -210,13 +210,13 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         # The column the kernel solves, evaluated on the host by the same accessors
         atmosphere = column_atmosphere(radiation, model, 1, 1)
-        p_lay = atmosphere.pressure_layers
-        T_lay = atmosphere.temperature_layers
-        p_int = atmosphere.pressure_interfaces
-        T_int = atmosphere.temperature_interfaces
-        dry_air_moles = atmosphere.gases.composite
-        water_vapor_moles = atmosphere.gases.h2o
-        ozone_moles = atmosphere.gases.o3
+        p_lay = atmosphere.layer_pressures
+        T_lay = atmosphere.layer_temperatures
+        p_int = atmosphere.interface_pressures
+        T_int = atmosphere.interface_temperatures
+        dry_air_moles = atmosphere.gases.dry_air
+        water_vapor_moles = atmosphere.gases.H₂O
+        ozone_moles = atmosphere.gases.O₃
 
         tight = FT == Float64 ? 1e-12 : 1e-5
         loose = FT == Float64 ? 1e-10 : 1e-4
@@ -241,7 +241,7 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test T_int[N+1] ≈ (3 * T[1] - T[2]) / 2 rtol = tight
         @test T_int[1] == T_lay[1]
 
-        # Column amounts in the dry convention of the ecCKD tables: the composite amount carries
+        # Column amounts in the dry convention of the ecCKD tables: the dry-air amount carries
         # the layer's total mass, `Σ dry_air_moles mᵈ == Σ ρ Δz`, and the vapor is counted on top of it
         Δz = 3kilometers / Nz
         @test sum(dry_air_moles[Nₑ+1:N]) * mᵈ ≈ sum(ρ .* Δz) rtol = tight
@@ -291,10 +291,10 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test T_lay[1] ≈ standard_atmosphere_temperature(zₑ[end]) rtol = 1e-6
 
         # Host round trip: the column atmosphere is on the host and carries the model's constants
-        @test atmosphere.pressure_layers isa Vector{FT}
-        @test length(atmosphere.pressure_layers) == N
-        @test length(atmosphere.pressure_interfaces) == N + 1
-        @test atmosphere.gases.co2 ≈ 420e-6 .* dry_air_moles
+        @test atmosphere.layer_pressures isa Vector{FT}
+        @test length(atmosphere.layer_pressures) == N
+        @test length(atmosphere.interface_pressures) == N + 1
+        @test atmosphere.gases.CO₂ ≈ 420e-6 .* dry_air_moles
         @test atmosphere.surface.temperature == FT(300)
         @test atmosphere.surface.emissivity == FT(0.98)
         @test atmosphere.geometry.cos_zenith == FT(0.5)
