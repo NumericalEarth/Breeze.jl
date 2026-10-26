@@ -173,19 +173,5 @@ model = AtmosphereModel(grid; forcing=(; E=TemperatureForcing(Returns(∂t_T))))
 nothing # hide
 ```
 
-A `Relaxation` under `qᵗ` restores the *non-precipitating* water ``qⁿᵖ = qᵛ + qᶜˡ + qᶜⁱ`` —
-vapor and cloud condensate, the "total water" of large-eddy simulation forcing protocols — and
-applies its tendency to the moisture prognostic. Precipitation is neither relaxed nor counted: it
-falls out of the large-scale state that a relaxation target describes. Under saturation adjustment
-``qⁿᵖ`` is the equilibrium moisture ``qᵉ`` itself; under non-equilibrium cloud formation, relaxing
-the vapor alone toward a total-water target would leave the air too moist by its cloud condensate.
-A `Relaxation` under the scheme's own name (`qᵛ` or `qᵉ`) still relaxes that variable alone:
-
-```@example bcs
-qᵗ★ = 0.012   # total water target, kg kg⁻¹
-model = AtmosphereModel(grid; forcing=(; qᵗ=Relaxation(rate=1/86400, target=qᵗ★)))
-nothing # hide
-```
-
 As with boundary conditions, an unrecognized forcing key is an error, and only one key per
 variable may be supplied.

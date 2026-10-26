@@ -597,8 +597,7 @@ $(TYPEDSIGNATURES)
 Re-key a forcing supplied under the moisture key `ρqᵗ` (see
 [`total_moisture_density_name`](@ref)), or its specific alias `qᵗ`, onto the moisture density
 that `microphysics` actually evolves, so that a setup does not name a variable whose spelling
-depends on the scheme. Water sources are re-keyed unchanged; a `Relaxation` under `qᵗ` becomes a
-relaxation of the non-precipitating water (see [`total_moisture_forcing`](@ref)).
+depends on the scheme.
 """
 function route_moisture_forcing(user_forcings, microphysics)
     ρqᵗ = total_moisture_density_name
@@ -611,10 +610,7 @@ function route_moisture_forcing(user_forcings, microphysics)
     rekey(name) = name === ρqᵗ ? ρq_name :
                   name === qᵗ  ? q_name  : name
 
-    convert_value(name, value) = name === ρqᵗ || name === qᵗ ? total_moisture_forcing(value) : value
-
-    names = keys(user_forcings)
-    return NamedTuple{map(rekey, names)}(map(convert_value, names, values(user_forcings)))
+    return NamedTuple{map(rekey, keys(user_forcings))}(values(user_forcings))
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,

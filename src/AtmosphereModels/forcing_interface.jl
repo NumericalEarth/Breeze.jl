@@ -97,17 +97,3 @@ recurses into tuples, and errors if `value` is itself a density-tendency forcing
 to produce a helpful error message when the wrap is rejected.
 """
 function wrap_specific_forcing end
-
-"""
-$(TYPEDSIGNATURES)
-
-The forcing that a value supplied under the total-moisture key `qᵗ` (or `ρqᵗ`) applies to the
-prognostic moisture. A water source passes through unchanged: water added to the prognostic
-moisture is water added to the column under any scheme. A `Relaxation`, however, names the
-quantity it restores, so under `qᵗ` it relaxes the non-precipitating water rather than the
-prognostic moisture alone; the `Forcings` module converts it to a
-[`NonprecipitatingWaterRelaxation`](@ref Breeze.Forcings.NonprecipitatingWaterRelaxation). Tuples
-are converted element by element.
-"""
-total_moisture_forcing(forcing) = forcing
-total_moisture_forcing(forcings::Tuple) = map(total_moisture_forcing, forcings)
