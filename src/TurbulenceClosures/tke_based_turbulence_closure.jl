@@ -188,7 +188,7 @@ A gradient-limited mixing length with independent wall coefficient ``ℂˢ`` and
 ℓ(z) = \\min\\left(ℂˢ z, \\min_{z′ > 0} [ℓᵇ(z′) + ℂⁱ |z - z′|]\\right).
 ```
 
-Two sweeps per column compute the stratification envelope; the wall cap is applied separately.
+Two sweeps per column compute the stratification envelope; the surface length bounds the result separately.
 The uncapped envelope is retained for cell-center reconstruction, so changing ``ℂⁱ`` does not
 change the neutral wall length ``ℂˢ z``. The domain top is not an obstacle.
 With equal slopes this recovers the original gradient-limited formulation
@@ -466,7 +466,7 @@ struct TKEClosureFields{K, N, L, KC, LC}
     Kᵉ :: K # eddy diffusivity for turbulent kinetic energy, at (Center, Center, Face)
     N² :: N # static stability, at (Center, Center, Face)
     ℓᵐ :: N # the primary mixing length, at (Center, Center, Face)
-    ℓˢ :: N # stratification-only envelope, before the wall cap, for center reconstruction
+    ℓˢ :: N # stratification-only envelope, before capping at the surface length, for center reconstruction
     # The linear implicit coefficient of the TKE equation, ∂ₜe = Lᵉ e + ⋯, at (Center, Center, Center):
     # the dissipation rate, the negative part of the buoyancy flux and the damping of negative TKE.
     Lᵉ :: L

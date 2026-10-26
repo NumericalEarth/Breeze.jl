@@ -183,7 +183,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``; the rational stability functions use ``N² / (S² + S²ᵐⁱⁿ)`` |
 | ``ℂˢ, ℂⁱ`` | `ℂˢ`, `ℂⁱ` | | Wall-length coefficient and independent interior envelope slope. Coefficients of `TKEBasedTurbulenceClosure` are written ``ℂ``, reserving ``C`` for bulk transfer coefficients such as the surface drag ``Cᴰ`` |
 | ``ℓᵐ`` | `ℓᵐ` | | Stored turbulence mixing length (`closure_fields.ℓᵐ`) |
-| ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before imposing the wall cap |
+| ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before capping at the surface length |
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
 | ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |
 | ``p⁻, p⁺`` | `p⁻`, `p⁺` | | Rational stability exponents, one for the calibrated defaults |

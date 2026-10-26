@@ -34,7 +34,7 @@ using Statistics
 #
 # The closure's diffusivities are ``K = S ℓ \sqrt{e}`` with one primary mixing length ``ℓ`` and a
 # stability function ``S`` for each of momentum, scalars and TKE, plus one for the dissipation. The
-# mixing length combines a wall cap ``ℂˢ z`` with a gradient-limited envelope of the buoyancy
+# mixing length combines a surface length ``ℂˢ z`` with a gradient-limited envelope of the buoyancy
 # penetration depths ``ℓᵇ = \sqrt{e} / N``. Its interior slope ``ℂⁱ`` bounds mixing lengths in
 # elevated mixed layers by the stratified air above and below them.
 # We compare the Nakanishi–Niino constant stability functions with the calibrated rational

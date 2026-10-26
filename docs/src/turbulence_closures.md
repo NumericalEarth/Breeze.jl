@@ -64,7 +64,7 @@ stratification; they differ elsewhere:
   so the diffusivity can jump by orders of magnitude.
 - [`GradientLimitedMixingLength`](@ref) (default): ``ℓ(z) = \min(ℂˢ z, \min_{z′}[ℓᵇ(z′) + ℂⁱ |z - z′|])``,
   which also bounds ``ℓ`` by the distance to nearby stratification, growing at slope ``ℂⁱ``.
-  The envelope before the wall cap is stored in `closure_fields.ℓˢ`.
+  The envelope before capping at the surface length is stored in `closure_fields.ℓˢ`.
 - [`IntegralMixingLength`](@ref): the parcel length of
   [Bougeault and Lacarrère (1989)](@cite BougeaultLacarrere1989), ``ℓ = ℂˢ \min(ℓ↑, ℓ↓)``, where
   ``ℓ↑`` and ``ℓ↓`` are the distances a parcel with energy ``e / (2 ℂˢ²)`` travels up and down before
