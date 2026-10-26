@@ -118,7 +118,7 @@ so the regridding
 * conserves the column integral of the source, cell by cell of the source;
 * reproduces a profile that is linear in ``z`` exactly, wherever the target cells are;
 * is second-order accurate, rather than first-order like the piecewise-constant
-  [`regrid!`](@ref Oceananigans.Fields.regrid!), which places the mean of a coarse target cell at the
+  `Oceananigans.Fields.regrid!`, which places the mean of a coarse target cell at the
   centroid of the source cells it overlaps rather than at its own center.
 
 With `nonnegative = true`, the slope of every source cell with ``ϕₙ ≥ 0`` is limited to
