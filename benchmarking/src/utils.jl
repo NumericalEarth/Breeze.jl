@@ -174,6 +174,9 @@ function benchmark_time_stepping(model;
         steps_per_second,
         grid_points_per_second,
         compile_time_seconds,
+        0.0,         # compile_tracing_time_seconds
+        0.0,         # compile_mlir_time_seconds
+        0.0,         # compile_xla_time_seconds
         gpu_memory_used,
         metadata,
     )
@@ -398,6 +401,21 @@ end
 function synchronize_device(::Oceananigans.Architectures.GPU{MetalBackend})
     Metal.synchronize()
     return nothing
+end
+
+"""
+    timed_reactant_compile(compile)
+
+Call `compile()`, a thunk wrapping `Reactant.@compile`, and return
+`(compiled, timings)` where `timings` is a `NamedTuple` `(; total, tracing, mlir, xla)`
+of times in seconds.
+"""
+function timed_reactant_compile(compile)
+    compiled, timings = Reactant.Profiler.profile_compile_timings(compile)
+    return compiled, (total   = timings.total_compile_time_μs / 1e6,
+                      tracing = timings.tracing_time_μs / 1e6,
+                      mlir    = timings.mlir_time_μs / 1e6,
+                      xla     = timings.xla_time_μs / 1e6)
 end
 
 # Reactant compiled functions invoked via @compile sync=true block until

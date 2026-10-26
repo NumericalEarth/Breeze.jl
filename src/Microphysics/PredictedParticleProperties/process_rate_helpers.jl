@@ -156,13 +156,16 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Cloud droplets per unit cloud mass, ``Nᶜˡ / (ρ qᶜˡ) = nᶜˡ / qᶜˡ`` [1/kg]. `Nᶜˡ` is
-volumetric [1/m³] and `qᶜˡ` is a mass fraction [kg/kg], so this is the factor that
-turns a cloud mass rate [kg/kg/s] into its companion number rate [1/kg/s], keeping
-the two consistent in mean droplet mass. Zero where there is no cloud water.
+Cloud droplets per unit cloud mass, ``Nᶜˡ / (ρ qᶜˡ)`` [1/kg], which converts a cloud
+mass rate into its number rate. Zero below `minimum_mass_mixing_ratio`, where the
+quotient would overflow to `Inf` and turn a zero companion rate into `NaN`.
 """
-@inline cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ) =
-    safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(typeof(qᶜˡ)))
+@inline function cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, minimum_mass_mixing_ratio)
+    FT = typeof(qᶜˡ)
+    absent = qᶜˡ < minimum_mass_mixing_ratio
+    qᶜˡ_safe = ifelse(absent, one(FT), qᶜˡ)
+    return ifelse(absent, zero(FT), Nᶜˡ / (ρ * qᶜˡ_safe))
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -188,10 +191,8 @@ in mean droplet mass.
                                ccn_activation_mass / seed_drop_mass,
                                ccn_activation_number)
     autoconversion_number = cloud_number_loss_from_autoconversion(p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
-    # Grouped as (Nᶜˡ accretion) / (ρ qᶜˡ) rather than via
-    # `cloud_number_per_cloud_mass`: the bare quotient is the larger intermediate and
-    # can overflow where this form does not.
-    collection_number = safe_divide(Nᶜˡ * accretion, ρ * qᶜˡ, zero(FT))
+    # The mass threshold keeps the quotient bounded by Nᶜˡ / (ρ qmin) and zero for absent cloud.
+    collection_number = accretion * cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, p3.minimum_mass_mixing_ratio)
     number_loss = autoconversion_number + collection_number + self_collection +
                   riming_number + freezing_number + warm_collection_number
     return activation_number - number_loss
@@ -317,12 +318,12 @@ end
 
 @inline function bounded_ice_number(limiter::IceLambdaLimiter, prep, qⁱ_total, nⁱ, floors)
     FT = typeof(qⁱ_total)
-    qⁱ_eff = max(0, qⁱ_total)
-    nⁱ_eff = max(0, nⁱ)
-    nⁱ_min = evaluate_at(limiter.large_q, prep) * qⁱ_eff
-    nⁱ_max = evaluate_at(limiter.small_q, prep) * qⁱ_eff
-    bounded = clamp(nⁱ_eff, nⁱ_min, nⁱ_max)
-    return ifelse(qⁱ_eff > FT(floors.mass_scale), bounded, zero(FT))
+    qⁱ₊ = max(0, qⁱ_total)
+    nⁱ₊ = max(0, nⁱ)
+    nⁱ_min = evaluate_at(limiter.large_q, prep) * qⁱ₊
+    nⁱ_max = evaluate_at(limiter.small_q, prep) * qⁱ₊
+    bounded = clamp(nⁱ₊, nⁱ_min, nⁱ_max)
+    return ifelse(qⁱ₊ > FT(floors.mass_scale), bounded, zero(FT))
 end
 
 # Un-materialized scheme (no tables, `prep === nothing`): the only bound is positivity.
@@ -338,10 +339,10 @@ end
 # unclamped value to tell whether the clamp fired.
 @inline function unbounded_rain_slope_parameter(qʳ, nʳ, parameters)
     FT = typeof(qʳ)
-    qʳ_eff = max(0, qʳ)
-    nʳ_eff = max(0, nʳ)
-    λʳ_cubed = FT(π) * parameters.liquid_water_density * nʳ_eff /
-               max(qʳ_eff, FT(parameters.floors.mass_scale))
+    qʳ₊ = max(0, qʳ)
+    nʳ₊ = max(0, nʳ)
+    λʳ_cubed = FT(π) * parameters.liquid_water_density * nʳ₊ /
+               max(qʳ₊, FT(parameters.floors.mass_scale))
     return cbrt(λʳ_cubed)
 end
 
@@ -361,20 +362,20 @@ end
 
 @inline function rain_number_from_slope(qʳ, λʳ, parameters)
     FT = typeof(qʳ)
-    qʳ_eff = max(0, qʳ)
-    return qʳ_eff * λʳ^3 / (FT(π) * parameters.liquid_water_density)
+    qʳ₊ = max(0, qʳ)
+    return qʳ₊ * λʳ^3 / (FT(π) * parameters.liquid_water_density)
 end
 
 @inline function bounded_rain_number(nʳ, qʳ, parameters)
-    qʳ_eff = max(0, qʳ)
-    nʳ_eff = max(0, nʳ)
-    unbounded_slope = unbounded_rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
+    qʳ₊ = max(0, qʳ)
+    nʳ₊ = max(0, nʳ)
+    unbounded_slope = unbounded_rain_slope_parameter(qʳ₊, nʳ₊, parameters)
     ℂʳ₁ = parameters.minimum_rain_slope
     ℂʳ₂ = parameters.maximum_rain_slope
     λʳ = clamp(unbounded_slope, ℂʳ₁, ℂʳ₂)
-    nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
+    nʳ_bounded = rain_number_from_slope(qʳ₊, λʳ, parameters)
     needs_adjustment = (unbounded_slope < ℂʳ₁) | (unbounded_slope > ℂʳ₂)
-    return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
+    return ifelse(needs_adjustment, nʳ_bounded, nʳ₊)
 end
 
 # Bulk ice density from Table 1 at the diagnostic-population bracket.
