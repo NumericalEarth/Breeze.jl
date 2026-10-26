@@ -46,7 +46,7 @@ const arches = (Metal.functional() || get(ENV, "BREEZE_FORCE_METAL_FUNCTIONAL", 
 
 as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float_types()
 
-@testset "Horizontal acoustic step applies the frozen horizontal pressure gradient" begin
+@testset "Horizontal acoustic step applies the frozen and perturbation pressure gradients" begin
     FT = Float64
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(CPU();
@@ -70,7 +70,7 @@ as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float
     set!(Πᴸ, 1)
     set!(γRᵐᴸ, 1)
     set!(pᴸ, (x, y, z) -> 2x + 3y)
-    set!(ρθ′, 0)
+    set!(ρθ′, (x, y, z) -> x + y)
     fill!(Gρu, 0)
     fill!(Gρv, 0)
     fill!(ρu′, 0)
@@ -79,8 +79,9 @@ as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
             ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ)
 
-    @test @allowscalar(ρu′[2, 2, 2]) == -1
-    @test @allowscalar(ρv′[2, 2, 2]) == -1.5
+    # −Δτ (∂x pᴸ + ∂x(Cᴸ (ρθ)′)) with Cᴸ = γRᵐᴸ Πᴸ = 1
+    @test @allowscalar(ρu′[2, 2, 2]) == -0.5 * (2 + 1)
+    @test @allowscalar(ρv′[2, 2, 2]) == -0.5 * (3 + 1)
 end
 
 @testset "Acoustic vertical tridiagonal coefficients" begin
