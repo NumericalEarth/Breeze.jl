@@ -24,7 +24,7 @@ SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 
 [sources]
 Breeze = {path = ".."}
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "49106257581d7ad9ee2e6c6ca47125c57d83aa4a"}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "mg/regular-faces-linrange"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
