@@ -370,7 +370,7 @@ end
     below_freezing = T <= T₀
     cloud_coll = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, true, qʷⁱ, lookups)
     cloud_rim = ifelse(below_freezing, cloud_coll, zero(FT))
-    cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_rim)
+    cloud_rim_n = cloud_riming_number_rate(p3, qᶜˡ, Nᶜˡ, ρ, cloud_rim)
     # Mass and number share one Table 2 read.
     rain_coll_q, rain_coll_n = rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
                                                      true, qʷⁱ, lookups)
@@ -392,8 +392,8 @@ end
     # =========================================================================
     has_hydrometeors = (max(0, qᶜˡ) + max(0, qʳ)) >=
                        parameters.wet_growth_hydrometeor_threshold
-    qwgrth_raw = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
-                                     constants, transport, lookups)
+    # Wet growth and refreezing share one surface heat balance.
+    qwgrth_raw, qifrz_raw = freezing_capacities(p3, nⁱ, T, qᵛ, ρ, constants, transport, lookups)
     qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
     total_collection = cloud_rim + rain_rim
@@ -439,7 +439,7 @@ end
     # =========================================================================
     shed = shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups)
     shed_n = shedding_number_rate(p3, shed)
-    refrz = refreezing_rate_from_capacity(p3, qʷⁱ, qwgrth_raw)
+    refrz = refreezing_rate_from_capacity(p3, qʷⁱ, qifrz_raw)
     shed = ifelse(parameters.liquid_fraction_active, shed, zero(FT))
     shed_n = ifelse(parameters.liquid_fraction_active, shed_n, zero(FT))
     refrz = ifelse(parameters.liquid_fraction_active, refrz, zero(FT))
@@ -447,14 +447,14 @@ end
     # Liquid fraction clipping
     Fl_small = parameters.liquid_fraction_clipping_threshold
     τ_clip = parameters.refreezing_timescale
-    qʷⁱ_eff = max(0, qʷⁱ)
+    qʷⁱ₊ = max(0, qʷⁱ)
     clip_freeze = parameters.liquid_fraction_active & (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
-    refrz = ifelse(clip_freeze, refrz + qʷⁱ_eff / τ_clip, refrz)
+    refrz = ifelse(clip_freeze, refrz + qʷⁱ₊ / τ_clip, refrz)
 
     # Whole-particle liquid-fraction and tiny-warm-ice clips. These predicates can
     # overlap, so form their union and transfer each reservoir exactly once.
     qⁱ_dry = max(0, qⁱ)
-    qⁱ_total_clip = qⁱ_dry + qʷⁱ_eff
+    qⁱ_total_clip = qⁱ_dry + qʷⁱ₊
     has_clip_mass = qⁱ_total_clip >= p3.minimum_mass_mixing_ratio
     warm_liquid_clip = (T >= T₀) & (Fˡ > 1 - Fl_small) & has_clip_mass
     high_liquid_fraction_clip = (Fˡ > parameters.complete_melting_liquid_fraction) & has_clip_mass
@@ -467,7 +467,7 @@ end
                            phase1.complete_melting)
     melt_n = ifelse(whole_particle_clipping,
                     max(0, ℳ.nⁱ) / τ_clip, phase1.melting_number)
-    shed = ifelse(whole_particle_clipping, qʷⁱ_eff / τ_clip, shed)
+    shed = ifelse(whole_particle_clipping, qʷⁱ₊ / τ_clip, shed)
     shed_n = ifelse(whole_particle_clipping, zero(FT), shed_n)
     refrz = ifelse(whole_particle_clipping, zero(FT), refrz)
 
@@ -490,7 +490,7 @@ end
     # Above-freezing collection: the complementary halves of the two kernels
     # already evaluated above.
     cloud_warm_q = ifelse(below_freezing, zero(FT), cloud_coll)
-    cloud_warm_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_warm_q)
+    cloud_warm_n = cloud_riming_number_rate(p3, qᶜˡ, Nᶜˡ, ρ, cloud_warm_q)
     # Number sink from above-freezing rain collection fires in both branches.
     rain_warm_q_full = ifelse(below_freezing, zero(FT), rain_coll_q)
     rain_warm_n = ifelse(below_freezing, zero(FT), rain_coll_n)
@@ -1045,15 +1045,17 @@ end
 
     # Diagnose the post-process number reservoirs as well, so frozen liquid carries
     # the number left by collection, breakup, melting, and activation rather than the
-    # beginning-of-stage number. In the prescribed-Nᶜˡ path, cloud number is reset
-    # to its prescribed value immediately before homogeneous freezing.
+    # beginning-of-stage number. In the prescribed-Nᶜˡ path, re-diagnose the prescribed number
+    # against the residual cloud mass so the frozen number keeps the cloud DSD slope bounds.
     cloud_number_tendency = cloud_number_tendency_before_homogeneous_freezing(
         p3, ρ, qᶜˡ, Nᶜˡ, ccn_activation_mass, ccn_activation_number,
         autoconv, accr, cloud_self, cloud_rim_n, cloud_frz_n, cloud_warm_n)
     prognostic_cloud_number = max(0, cloud.nᶜˡ +
                                   cloud_number_tendency * dt_safety)
     prescribed_cloud_number = p3.cloud.number_concentration / ρ
-    cloud_number_remaining = ifelse(isnothing(p3.aerosol), prescribed_cloud_number,
+    prescribed_cloud = diagnose_cloud_dsd(
+        p3, cloud_remaining, prescribed_cloud_number, ρ)
+    cloud_number_remaining = ifelse(isnothing(p3.aerosol), prescribed_cloud.nᶜˡ,
                                     prognostic_cloud_number)
 
     rain_number_tendency = rain_number_tendency_before_homogeneous_freezing(

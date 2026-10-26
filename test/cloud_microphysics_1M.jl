@@ -375,7 +375,8 @@ end
 
 @testset "Bounds-preserving WENO bottom precipitation flux [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(6, 6, 6), extent=(100, 100, 100))
+    # The limiter is computed in the first horizontal halo layer, so WENO(order=5) needs halo 4.
+    grid = RectilinearGrid(default_arch; size=(6, 6, 6), halo=(4, 4, 4), extent=(100, 100, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
@@ -1101,7 +1102,7 @@ end
     # the change of θ into that of ρᵈ θ. The transported enthalpy belongs to the phase;
     # only the local composition derivative renormalizes.
     content(; renormalize) = [condensate_content(:LiquidIcePotentialTemperature, :liquid, T[k], q[k], p[k], pˢᵗ; renormalize) for k in 1:Nz]
-    enthalpy = [constants.liquid.heat_capacity * T[k] - constants.liquid.reference_latent_heat for k in 1:Nz]
+    enthalpy = [constants.liquid.heat_capacity * T[k] - Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid) for k in 1:Nz]
     β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], p[k], pˢᵗ; fixed_volume=true) for k in 1:Nz]
     expected(renormalize) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; renormalize), enthalpy, β;
                                                             coupling = qᵈ)
