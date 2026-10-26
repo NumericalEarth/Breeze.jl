@@ -330,9 +330,9 @@ end
         q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
         cᵖᵐ = mixture_heat_capacity(q, thermo)
         g = thermo.gravitational_acceleration
-        ℒˡᵣ = thermo.liquid.reference_latent_heat
-        ℒⁱᵣ = thermo.ice.reference_latent_heat
-        s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+        ℒˡ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(thermo, thermo.liquid)
+        ℒⁱ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(thermo, thermo.ice)
+        s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ - ℒⁱ₀ * qⁱ
 
         # Test with saturation adjustment
         𝒰 = StaticEnergyState(s, q, z, p)

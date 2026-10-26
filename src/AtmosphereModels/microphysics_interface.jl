@@ -1014,7 +1014,7 @@ end
 #####
 #
 # The thermodynamic variables carry a condensate part — the deficit −(ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / (cᵖᵐ Π)
-# of θˡⁱ, the content qˡ (cˡ T − ℒˡᵣ) + qⁱ (cⁱ T − ℒⁱᵣ) of s — and when condensate falls, that
+# of θˡⁱ, the content qˡ (cˡ T − ℒˡ₀) + qⁱ (cⁱ T − ℒⁱ₀) of s — and when condensate falls, that
 # part must fall with it. Rain-out then leaves the latent warming from forming the rain aloft
 # and pre-cools the layer that later evaporates it, the mechanism that drives cold pools.
 #

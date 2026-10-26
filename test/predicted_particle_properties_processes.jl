@@ -1412,7 +1412,7 @@ end
                                      p3.process_rates.floors)
     end
 
-    @testset "wet_growth_capacity applies 2π/ℒᶠʳ to the sensible term" begin
+    @testset "wet growth (Musil 1970) and refreezing (Cholette 2019) capacities" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
@@ -1445,10 +1445,41 @@ end
 
         capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
                                            ρ, ρ, constants, transport)
-        ℒᶠʳ = PPP.fusion_latent_heat(constants, T)
-        expected = 2 * FT(π) * ventilated_capacitance * transport.Kᵃ * (T₀ - T) / ℒᶠʳ * ni
+        refreezing_capacity = PPP.refreezing_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
+                                                      ρ, ρ, constants, transport)
 
-        @test capacity ≈ expected rtol=1e-6
+        # Wet growth also warms the collected drops to T₀, with latent heats at T₀.
+        ℒᶠʳ₀ = PPP.fusion_latent_heat(constants, T₀)
+        ℒᶠʳ = PPP.fusion_latent_heat(constants, T)
+        cˡ = constants.liquid.heat_capacity
+        wet_growth_heat = ℒᶠʳ₀ + cˡ * (T - T₀)
+        conduction = 2 * FT(π) * ventilated_capacitance * transport.Kᵃ * (T₀ - T) * ni
+
+        @test capacity ≈ conduction / wet_growth_heat rtol=1e-6
+        @test refreezing_capacity ≈ conduction / ℒᶠʳ rtol=1e-6
+
+        # The vapor term carries ℒˡ at T₀ for wet growth and ℒⁱ for refreezing.
+        Δqv = FT(1e-3)
+        drier_capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv - Δqv, Ff, ρf,
+                                                 ρ, ρ, constants, transport)
+        drier_refreezing_capacity = PPP.refreezing_capacity(p3, qi, qwi, ni, T, qv - Δqv,
+                                                            Ff, ρf, ρ, ρ, constants, transport)
+        vapor_flux = 2 * FT(π) * ventilated_capacitance * transport.Dᵛ * ρ * Δqv * ni
+        ℒˡ₀ = PPP.vaporization_latent_heat(constants, T₀)
+        ℒⁱ = PPP.sublimation_latent_heat(constants, T)
+
+        @test drier_capacity - capacity ≈ ℒˡ₀ * vapor_flux / wet_growth_heat rtol=1e-6
+        @test drier_refreezing_capacity - refreezing_capacity ≈ ℒⁱ * vapor_flux / ℒᶠʳ rtol=1e-6
+
+        # Drops are no colder than homogeneous freezing, so the capacity stays positive
+        # where ℒᶠʳ₀ + cˡ (T - T₀) would change sign.
+        T_cold = FT(190)
+        cold_transport = air_transport_properties(T_cold, P, constants)
+        cold_capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T_cold, qv, Ff, ρf,
+                                                ρ, ρ, constants, cold_transport)
+        @test ℒᶠʳ₀ + cˡ * (T_cold - T₀) < 0
+        @test isfinite(cold_capacity)
+        @test cold_capacity > 0
     end
 
     @testset "wet growth preserves collection number sinks" begin
@@ -1622,7 +1653,7 @@ end
 
         refreezing = PPP.refreezing_rate(p3, qi, qwi, ni, T, qv, Ff, ρf,
                                          ρ, constants, transport)
-        capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
+        capacity = PPP.refreezing_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
                                            ρ, ρ, constants, transport)
         τ = p3.process_rates.sink_limiting_timescale
 
@@ -1966,6 +1997,38 @@ end
         # Rime density should be physical
         @test rates.rime_density_new >= 50
         @test rates.rime_density_new <= 900
+    end
+
+    @testset "Prescribed cloud number remains DSD-bounded during homogeneous freezing" begin
+        FT = Float32
+        cloud = CloudDroplets(FT; number_concentration = FT(75e6))
+        p3 = PredictedParticlePropertiesMicrophysics(FT; cloud)
+        constants = ThermodynamicConstants(FT)
+
+        ρ = FT(0.9)
+        T = FT(230)
+        P = FT(70000)
+        qᶜˡ = FT(1e-13)
+        # Saturated at the state's own moist-air density, at which the microphysics saturates
+        qᵛ = vapor_above_saturation(T, P, qᶜˡ, zero(FT), zero(FT), constants)
+        q = MoistureMassFractions(qᵛ, qᶜˡ, zero(FT))
+        𝒰 = with_temperature(StaticEnergyState(zero(FT), q, zero(FT), P), T, constants)
+        prescribed_nᶜˡ = cloud.number_concentration / ρ
+        ℳ = P3MicrophysicalState(qᶜˡ, prescribed_nᶜˡ,
+                                zero(FT), zero(FT), zero(FT), zero(FT),
+                                zero(FT), zero(FT), zero(FT), zero(FT),
+                                zero(FT), zero(FT))
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        τ = FT(p3.process_rates.homogeneous_freezing_timescale)
+        cloud_remaining = rates.cloud_homogeneous_mass * τ
+        bounded_cloud = PPP.diagnose_cloud_dsd(p3, cloud_remaining, prescribed_nᶜˡ, ρ)
+
+        @test cloud_remaining > p3.minimum_mass_mixing_ratio
+        @test bounded_cloud.nᶜˡ < prescribed_nᶜˡ
+        @test rates.cloud_homogeneous_number ≈ bounded_cloud.nᶜˡ / τ
+        @test rates.cloud_homogeneous_number / rates.cloud_homogeneous_mass ≈
+              bounded_cloud.nᶜˡ / cloud_remaining
     end
 
     @testset "rain self-collection and breakup net into a single signed term" begin
