@@ -77,14 +77,23 @@ function read_ecckd_tables(load)
 end
 
 # The tables are read in the grid's float type; a preloaded model is converted to it (and to
-# the grid's architecture) by `adapt` below.
-load_gas_optics_model(FT, selector::Union{Symbol, AbstractString}) =
-    read_ecckd_tables(() -> read_reference_ecckd_gas_optics(FT, selector; names = ECCKD_GAS_NAMES))
+# the grid's architecture) by `adapt` below. `lookup_search = nothing` keeps NumericalRadiation's default.
+lookup_keywords(::Nothing) = NamedTuple()
+lookup_keywords(lookup_search) = (; lookup_search)
 
-load_gas_optics_model(FT, paths::NamedTuple) =
-    read_ecckd_tables(() -> read_ecckd_tabulated_gas_optics(FT, paths.longwave, paths.shortwave; names = ECCKD_GAS_NAMES))
+load_gas_optics_model(FT, selector::Union{Symbol, AbstractString}, lookup_search) =
+    read_ecckd_tables(() -> read_reference_ecckd_gas_optics(FT, selector; names = ECCKD_GAS_NAMES,
+                                                                lookup_keywords(lookup_search)...))
 
-load_gas_optics_model(FT, model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}) = model
+load_gas_optics_model(FT, paths::NamedTuple, lookup_search) =
+    read_ecckd_tables(() -> read_ecckd_tabulated_gas_optics(FT, paths.longwave, paths.shortwave; names = ECCKD_GAS_NAMES,
+                                                            lookup_keywords(lookup_search)...))
+
+load_gas_optics_model(FT, model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}, ::Nothing) = model
+
+load_gas_optics_model(FT, model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}, lookup_search) =
+    throw(ArgumentError("EcCKDOptics(lookup_search = $lookup_search) applies to gas optics read from files; " *
+                        "a preloaded $(summary(model)) carries its own lookup search."))
 
 # Warn once at construction when the extension's temperatures leave the Planck source table, where
 # the interpolation holds the table edge (a gray `σT⁴` model has no table and no edge). The
@@ -205,7 +214,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     # Gas optics tables, then the extension sampled on the host (it needs the background's O₃
     # as a profile, before materialization turns it into a field on the grid)
-    host_gas_model = load_gas_optics_model(FT, optics.gas_model)
+    host_gas_model = load_gas_optics_model(FT, optics.gas_model, optics.lookup_search)
     extension = materialize_overlying_atmosphere(overlying_atmosphere, grid, background_atmosphere)
     warn_source_table_range(host_gas_model, extension)
     gas_model = adapt(array_type(arch){FT}, host_gas_model)

@@ -525,6 +525,40 @@ previous_float_type = Oceananigans.defaults.FloatType
         Oceananigans.TimeSteppers.update_state!(model; compute_tendencies = false)
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100
     end
+
+    @testset "Table lookup search" begin
+        Oceananigans.defaults.FloatType = Float64
+        grid = radiation_column_grid(Float64, 8, 3kilometers)
+        constants = ThermodynamicConstants()
+        fixed = NumericalRadiation.FixedBinarySearch()
+
+        optics = EcCKDOptics(clouds = CloudScatteringTables(), lookup_search = fixed)
+        @test optics.lookup_search === fixed
+        @test occursin("└── lookup_search: ", sprint(show, optics))
+        @test !occursin("lookup_search", sprint(show, EcCKDOptics()))
+
+        # The fixed-count search brackets the tables as the default does, so the fluxes are the same
+        fluxes = map((EcCKDOptics(clouds = CloudScatteringTables()), optics)) do optics
+            radiation = RadiativeTransferModel(grid, optics, constants;
+                                               surface_temperature = 300, surface_emissivity = 0.98,
+                                               surface_albedo = 0.1, solar_position = FixedCosineZenith(0.5))
+            column_model(grid, radiation)
+            (; gas_model = radiation.longwave_solver.gas_model,
+               lw_up = Array(interior(radiation.upwelling_longwave_flux)),
+               sw_dn = Array(interior(radiation.downwelling_shortwave_flux)))
+        end
+        default, fixed_search = fluxes
+        @test fixed_search.gas_model.lookup_search isa NumericalRadiation.FixedBinarySearch
+        @test default.gas_model.lookup_search isa NumericalRadiation.BinarySearch
+        @test fixed_search.lw_up == default.lw_up
+        @test fixed_search.sw_dn == default.sw_dn
+
+        # A preloaded gas model carries its own search
+        preloaded = NumericalRadiation.read_reference_ecckd_gas_optics(:climate_32x32; names = NumericalRadiationExt.ECCKD_GAS_NAMES)
+        @test_throws ArgumentError RadiativeTransferModel(grid, EcCKDOptics(preloaded; lookup_search = fixed), constants;
+                                                          surface_temperature = 300, surface_albedo = 0.1,
+                                                          solar_position = FixedCosineZenith(0.5))
+    end
 end
 
 Oceananigans.defaults.FloatType = previous_float_type

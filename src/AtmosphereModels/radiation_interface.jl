@@ -206,6 +206,10 @@ Fields:
   with the ecRad data (`:climate_32x32`, `:climate_64x64`, ...), a `(longwave = path, shortwave = path)`
   pair of ecCKD definition files, or a preloaded `NumericalRadiation` gas optics model
 - `clouds`: [`CloudScatteringTables`](@ref) for all-sky radiation, or `nothing` for clear sky
+- `lookup_search`: the `NumericalRadiation.AbstractLookupSearch` used to bracket the temperature and
+  Planck-source tables of a gas model read from files, or `nothing` for NumericalRadiation's default.
+  `NumericalRadiation.FixedBinarySearch()` has no data-dependent loop exit, which Reactant's
+  while-loop raising needs to differentiate through the gas optics
 
 ```jldoctest
 julia> using Breeze
@@ -221,9 +225,10 @@ EcCKDOptics
 └── clouds: CloudScatteringTables(liquid=:mie_droplet, ice=:baum_general_habit_mixture)
 ```
 """
-struct EcCKDOptics{M, C} <: AbstractOptics
+struct EcCKDOptics{M, C, S} <: AbstractOptics
     gas_model :: M
     clouds :: C
+    lookup_search :: S
 end
 
 """
@@ -231,17 +236,26 @@ $(TYPEDSIGNATURES)
 
 Construct [`EcCKDOptics`](@ref) with the reference `gas_model` (default `:climate_32x32`) and,
 for all-sky radiation, [`CloudScatteringTables`](@ref) as `clouds` (default `nothing`: clear sky).
+`lookup_search` (default `nothing`: NumericalRadiation's default) selects how the gas optics tables
+are bracketed.
 """
-EcCKDOptics(gas_model = :climate_32x32; clouds = nothing) = EcCKDOptics(gas_model, clouds)
+EcCKDOptics(gas_model = :climate_32x32; clouds = nothing, lookup_search = nothing) =
+    EcCKDOptics(gas_model, clouds, lookup_search)
 
 # Selectors and paths are shown as literals; a preloaded gas optics model by its summary
 optics_selector_string(x::Union{Symbol, AbstractString, NamedTuple}) = repr(x)
 optics_selector_string(x) = summary(x)
 
-Base.show(io::IO, optics::EcCKDOptics) =
+function Base.show(io::IO, optics::EcCKDOptics)
     print(io, "EcCKDOptics", "\n",
-          "├── gas_model: ", optics_selector_string(optics.gas_model), "\n",
-          "└── clouds: ", optics.clouds)
+          "├── gas_model: ", optics_selector_string(optics.gas_model), "\n")
+    if isnothing(optics.lookup_search)
+        print(io, "└── clouds: ", optics.clouds)
+    else
+        print(io, "├── clouds: ", optics.clouds, "\n",
+                  "└── lookup_search: ", optics.lookup_search)
+    end
+end
 
 """
 $(TYPEDSIGNATURES)
