@@ -44,31 +44,45 @@ struct P3DerivedState{FT, Q, L}
     lookups :: L   # P3IceLookups: coordinate bracket, density correction, ventilation terms
 end
 
-@inline function liquid_supersaturation_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, ρ, constants)
+# `density_constraint` is the density held fixed during phase changes. Grid cells
+# retain the host density. Parcels pass `nothing` so heating and composition changes
+# update the density at the prescribed pressure.
+@inline vapor_excess_density(ρ, 𝒰, constants) = ρ
+@inline vapor_excess_density(::Nothing, 𝒰, constants) = density(𝒰, constants)
+
+@inline function vapor_excess_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, density_constraint, constants)
     q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
     𝒰₁ = with_moisture(𝒰, q)
     T = temperature(𝒰₁, constants)
+    ρ = vapor_excess_density(density_constraint, 𝒰₁, constants)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     return qᵛ - qᵛ⁺ˡ
 end
 
-@inline function final_predicted_supersaturation_tendency(
-    ::ProcessRate{FT, false}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
-    initial_supersaturation, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice
+@inline function final_prognostic_vapor_excess_tendency(
+    ::ProcessRate{FT, DiagnosticVaporExcess}, 𝒰, qᵛ, qˡ, qⁱ, density_constraint, constants,
+    initial_vapor_excess, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice,
+    external_forcing
 ) where FT
     return zero(qᵛ)
 end
 
-@inline function final_predicted_supersaturation_tendency(
-    ::ProcessRate{FT, true}, 𝒰, qᵛ, qˡ, qⁱ, ρ, constants,
-    initial_supersaturation, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice
+# The phase-change part re-diagnoses δqᵛ⁺ˡ after applying the process rates over `dt`.
+# That state is the host's, which does not see the dynamical forcing over `dt`, so the
+# external forcing is added explicitly as in Grabowski and Morrison (2008). Without it
+# the prognostic δqᵛ⁺ˡ sees only the phase-change sink, and the host's diagnosed
+# vapor excess grows until the G&M alignment ε / τ balances the forcing, at ~ forcing × τ.
+@inline function final_prognostic_vapor_excess_tendency(
+    ::ProcessRate{FT, PrognosticVaporExcess}, 𝒰, qᵛ, qˡ, qⁱ, density_constraint, constants,
+    initial_vapor_excess, dt, vapor_to_liquid, vapor_to_ice, liquid_to_ice,
+    external_forcing
 ) where FT
     qᵛ_final = qᵛ - (vapor_to_liquid + vapor_to_ice) * dt
     qˡ_final = qˡ + (vapor_to_liquid - liquid_to_ice) * dt
     qⁱ_final = qⁱ + (vapor_to_ice + liquid_to_ice) * dt
-    final_supersaturation = liquid_supersaturation_after_moisture_update(
-        𝒰, qᵛ_final, qˡ_final, qⁱ_final, ρ, constants)
-    return (final_supersaturation - initial_supersaturation) / dt
+    final_vapor_excess = vapor_excess_after_moisture_update(
+        𝒰, qᵛ_final, qˡ_final, qⁱ_final, density_constraint, constants)
+    return (final_vapor_excess - initial_vapor_excess) / dt + external_forcing
 end
 
 # Phase 1 process rates: condensation, rain, deposition, and melting.
@@ -244,15 +258,15 @@ struct P3ProcessRates{FT}
     # Carried separately so callers/tests can inspect the G&M contribution.
     # Sized as `ε / sink_limiting_timescale`, so dt = sink_limiting_timescale
     # integrates the one-shot adjustment exactly (see
-    # `predicted_supersaturation_adjustment`).
-    predicted_supersaturation_adjustment :: FT
-    # End-of-step supersaturation recompute: (qᵛ_final - qᵛ⁺ˡ(T_final) - sᵛ⁺ˡ_initial) / τ.
-    # Tied to the same dt = τ assumption.
-    predicted_supersaturation_tendency :: FT
+    # `prognostic_vapor_excess_adjustment`).
+    prognostic_vapor_excess_adjustment :: FT
+    # End-of-step vapor-excess recompute, (qᵛ_final - qᵛ⁺ˡ(T_final) - δqᵛ⁺ˡ_initial) / τ,
+    # plus the external forcing -∂ₜqᵛ⁺ˡ (see `external_vapor_excess_forcing`).
+    prognostic_vapor_excess_tendency :: FT
 end
 
 @inline function p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
-                                 temperature_tendency, vapor_tendency)
+                                 temperature_tendency, pressure_tendency)
     FT = typeof(ρ)
 
     # Unpack derived state (field access on concrete struct — GPU-safe)
@@ -280,7 +294,7 @@ end
                                                       Fᶠ, ρᶠ, T, P, ρ, constants,
                                                       transport, q,
                                                       state.μᶜˡ, state.λᶜˡ, state.nᶜˡ,
-                                                      temperature_tendency, vapor_tendency,
+                                                      temperature_tendency, pressure_tendency,
                                                       state.lookups)
     cond = vapor_rates.condensation
 
@@ -311,8 +325,7 @@ end
     has_total_ice = total_ice_mass(ℳ.qⁱ, qʷⁱ) >= p3.minimum_mass_mixing_ratio
     dep = ifelse(has_total_ice, vapor_rates.deposition, zero(FT))
 
-    liquid_fraction_active = p3.process_rates.liquid_fraction_active
-    wet_ice_exchange_active = has_total_ice & liquid_fraction_active
+    wet_ice_exchange_active = has_total_ice & tracks_liquid_on_ice(p3.process_rates)
     coat_cond = ifelse(wet_ice_exchange_active,
                        vapor_rates.coating_condensation, zero(FT))
     coat_evap = ifelse(wet_ice_exchange_active,
@@ -321,9 +334,9 @@ end
     melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, constants, transport, state.lookups)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
-    complete_melt = ifelse(p3.process_rates.liquid_fraction_active,
+    complete_melt = ifelse(tracks_liquid_on_ice(p3.process_rates),
                            complete_melt, complete_melt + partial_melt)
-    partial_melt = ifelse(p3.process_rates.liquid_fraction_active,
+    partial_melt = ifelse(tracks_liquid_on_ice(p3.process_rates),
                           partial_melt, zero(FT))
     melt_n = ice_melting_number_rate(ℳ.qⁱ, nⁱ, complete_melt)
 
@@ -400,8 +413,8 @@ end
     is_wet_growth = has_hydrometeors &
                     (total_collection >= qwgrth + parameters.wet_growth_excess_threshold)
 
-    liquid_fraction_wet_growth = parameters.liquid_fraction_active & is_wet_growth
-    dry_wet_growth = !parameters.liquid_fraction_active & is_wet_growth
+    liquid_fraction_wet_growth = tracks_liquid_on_ice(parameters) & is_wet_growth
+    dry_wet_growth = !tracks_liquid_on_ice(parameters) & is_wet_growth
     retained_fraction = clamp(safe_divide(qwgrth, total_collection, zero(FT)), 0, 1)
     retained_cloud = cloud_rim * retained_fraction
     retained_rain = rain_rim * retained_fraction
@@ -440,15 +453,15 @@ end
     shed = shedding_rate(p3, qʷⁱ, nⁱ, Fᶠ, Fˡ, lookups)
     shed_n = shedding_number_rate(p3, shed)
     refrz = refreezing_rate_from_capacity(p3, qʷⁱ, qifrz_raw)
-    shed = ifelse(parameters.liquid_fraction_active, shed, zero(FT))
-    shed_n = ifelse(parameters.liquid_fraction_active, shed_n, zero(FT))
-    refrz = ifelse(parameters.liquid_fraction_active, refrz, zero(FT))
+    shed = ifelse(tracks_liquid_on_ice(parameters), shed, zero(FT))
+    shed_n = ifelse(tracks_liquid_on_ice(parameters), shed_n, zero(FT))
+    refrz = ifelse(tracks_liquid_on_ice(parameters), refrz, zero(FT))
 
     # Liquid fraction clipping
     Fl_small = parameters.liquid_fraction_clipping_threshold
     τ_clip = parameters.refreezing_timescale
     qʷⁱ₊ = max(0, qʷⁱ)
-    clip_freeze = parameters.liquid_fraction_active & (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
+    clip_freeze = tracks_liquid_on_ice(parameters) & (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
     refrz = ifelse(clip_freeze, refrz + qʷⁱ₊ / τ_clip, refrz)
 
     # Whole-particle liquid-fraction and tiny-warm-ice clips. These predicates can
@@ -460,7 +473,7 @@ end
     high_liquid_fraction_clip = (Fˡ > parameters.complete_melting_liquid_fraction) & has_clip_mass
     tiny_warm_ice = (T >= T₀) & has_clip_mass &
                     (qⁱ_total_clip < parameters.tiny_ice_to_rain_threshold)
-    liquid_fraction_clipping = parameters.liquid_fraction_active &
+    liquid_fraction_clipping = tracks_liquid_on_ice(parameters) &
                                (warm_liquid_clip | high_liquid_fraction_clip)
     whole_particle_clipping = liquid_fraction_clipping | tiny_warm_ice
     complete_melt = ifelse(whole_particle_clipping, qⁱ_dry / τ_clip,
@@ -497,7 +510,7 @@ end
     # Mass transfer of collected rain into qʷⁱ only happens in the liquid-fraction
     # branch. In the non-liquid path, collection of rain above freezing does not
     # impact total rain mass, so zero out rain_warm_q in that case.
-    rain_warm_q = ifelse(parameters.liquid_fraction_active, rain_warm_q_full, zero(FT))
+    rain_warm_q = ifelse(tracks_liquid_on_ice(parameters), rain_warm_q_full, zero(FT))
 
     return P3Phase2Rates{FT}(
         agg, ni_lim,
@@ -551,7 +564,8 @@ end
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
-                                          vapor_tendency)
+                                          pressure_tendency,
+                                          density_constraint = ρ)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -564,7 +578,7 @@ end
     nⁱ_raw = ℳ.nⁱ
     qʷⁱ_prognostic = ℳ.qʷⁱ
     qʷⁱ = active_liquid_on_ice(p3, qʷⁱ_prognostic)
-    qʷⁱ_budget = ifelse(parameters.liquid_fraction_active, qʷⁱ, max(0, qʷⁱ_prognostic))
+    qʷⁱ_budget = ifelse(tracks_liquid_on_ice(parameters), qʷⁱ, max(0, qʷⁱ_prognostic))
 
     # The globally capped raw number is the baseline the ice-number correction
     # below relaxes towards; the bounded moments come from `p3_ice_moment_bounds`.
@@ -605,16 +619,16 @@ end
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     P = air_pressure(𝒰, constants)
 
-    supersaturation_adjustment = predicted_supersaturation_adjustment(
-        p3, qᶜˡ, qᵛ_base, qᵛ⁺ˡ, ℳ.sᵛ⁺ˡ, T, ρ, constants)
-    saturation_alignment_rate = supersaturation_adjustment.rate
-    qᶜˡ = supersaturation_adjustment.qᶜˡ
-    qᵛ = supersaturation_adjustment.qᵛ
-    T = supersaturation_adjustment.T
+    vapor_excess_adjustment = prognostic_vapor_excess_adjustment(
+        p3, qᶜˡ, qᵛ_base, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρ, constants)
+    saturation_alignment_rate = vapor_excess_adjustment.rate
+    qᶜˡ = vapor_excess_adjustment.qᶜˡ
+    qᵛ = vapor_excess_adjustment.qᵛ
+    T = vapor_excess_adjustment.T
     q = MoistureMassFractions(qᵛ,
-                              q_base.liquid + supersaturation_adjustment.cloud_water_adjustment,
+                              q_base.liquid + vapor_excess_adjustment.cloud_water_adjustment,
                               q_base.ice)
-    qᵛ⁺ˡ = supersaturation_adjustment.qᵛ⁺ˡ
+    qᵛ⁺ˡ = vapor_excess_adjustment.qᵛ⁺ˡ
     qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρ, constants, T₀, qᵛ⁺ˡ)
     transport = air_transport_properties(T, P, constants)
 
@@ -640,7 +654,7 @@ end
 
     # === PHASE 1 & 2 RATES ===
     phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
-                             temperature_tendency, vapor_tendency)
+                             temperature_tendency, pressure_tendency)
     phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===
@@ -682,7 +696,7 @@ end
     shed = phase2.shedding
     shed_n = phase2.shedding_number
     inactive_coating_cleanup = ifelse(
-        parameters.liquid_fraction_active, zero(FT),
+        tracks_liquid_on_ice(parameters), zero(FT),
         qʷⁱ_budget / parameters.sink_limiting_timescale)
     shed = shed + inactive_coating_cleanup
     shed_n = shed_n + inactive_coating_cleanup / parameters.shed_drop_mass
@@ -741,7 +755,7 @@ end
     vapor_rates = limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
                                     rain_cond, rain_evap, dep, coat_cond, coat_evap,
                                     nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
-                                    dt_safety, T₀)
+                                    dt_safety, T₀, temperature_tendency, pressure_tendency)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number
@@ -780,8 +794,8 @@ end
     wg_shed       = wg_shed * f_cloud
     cond          = ifelse(cond < 0, cond * f_cloud, cond)
 
-    cloud_warm_to_ice = ifelse(parameters.liquid_fraction_active, cloud_warm_q, zero(FT))
-    cloud_warm_to_rain = ifelse(parameters.liquid_fraction_active, zero(FT), cloud_warm_q)
+    cloud_warm_to_ice = ifelse(tracks_liquid_on_ice(parameters), cloud_warm_q, zero(FT))
+    cloud_warm_to_rain = ifelse(tracks_liquid_on_ice(parameters), zero(FT), cloud_warm_q)
 
     # Sublimation number loss, taken from the unlimited `dep` before any budget
     # scales it; the loop below then scales `sublim_n` wherever it scales `dep`.
@@ -914,7 +928,7 @@ end
     total_ice_remaining = dry_ice_remaining + qwi_remaining
     liquid_fraction_remaining = safe_divide(qwi_remaining, total_ice_remaining,
                                             zero(FT))
-    post_process_clipping_active = parameters.liquid_fraction_active &
+    post_process_clipping_active = tracks_liquid_on_ice(parameters) &
                                    (total_ice_remaining >= p3.minimum_mass_mixing_ratio) &
                                    (liquid_fraction_remaining > 1 - parameters.liquid_fraction_clipping_threshold)
 
@@ -942,7 +956,7 @@ end
     melt_densification = bᶠ_safe * (parameters.pure_ice_density - rime_density_safe) *
                           ordinary_total_melting / (rime_density_safe * dry_ice_safe)
     densification_active = (rime_density_safe < parameters.pure_ice_density) &
-                           !parameters.liquid_fraction_active
+                           !tracks_liquid_on_ice(parameters)
     melt_densification = ifelse(densification_active, melt_densification, zero(FT))
     rime_volume_after_ordinary_processes = max(
         0, bᶠ + (rime_volume_gain - rime_volume_loss) * dt_safety)
@@ -995,7 +1009,7 @@ end
     # the same species-budget ratio as rain_freezing_mass.
     # Project the remaining number-only sinks onto the population left afterward.
     cloud_warm_rain_number = ifelse(
-        parameters.liquid_fraction_active, zero(FT), cloud_warm_q / parameters.shed_drop_mass)
+        tracks_liquid_on_ice(parameters), zero(FT), cloud_warm_q / parameters.shed_drop_mass)
 
     # Net the self-collection/breakup pair before it enters the number budget.
     # Physically this is one signed rate: a base self-collection rate reduced by the
@@ -1083,7 +1097,7 @@ end
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
     nr_correction = (nʳ - ℳ.nʳ) / dt_safety
 
-    # The supersaturation is re-diagnosed as sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T) at the end of the
+    # The vapor excess is re-diagnosed as δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T) at the end of the
     # step. That final T must come from the same conserved thermodynamic variable
     # (`ρθ` or `ρs`) that the host model advances, not from a standalone cᵖᵈ
     # latent-heating estimate.
@@ -1092,9 +1106,14 @@ end
     liquid_to_ice = cloud_rim + rain_rim + cloud_frz_q + rain_frz_q +
                     cloud_hom_q + rain_hom_q + refrz -
                     complete_melt - partial_melt
-    supersaturation_tendency = final_predicted_supersaturation_tendency(
-        parameters, 𝒰, qᵛ, q.liquid, q.ice, ρ, constants, ℳ.sᵛ⁺ˡ, dt_safety,
-        vapor_to_liquid, vapor_to_ice, liquid_to_ice)
+    external_forcing = external_vapor_excess_forcing(state.qᵛ⁺ˡ,
+                                                     vaporization_latent_heat(constants, state.T),
+                                                     state.T, state.P,
+                                                     temperature_tendency, pressure_tendency,
+                                                     constants)
+    vapor_excess_tendency = final_prognostic_vapor_excess_tendency(
+        parameters, 𝒰, qᵛ, q.liquid, q.ice, density_constraint, constants, ℳ.δqᵛ⁺ˡ, dt_safety,
+        vapor_to_liquid, vapor_to_ice, liquid_to_ice, external_forcing)
     # `saturation_alignment_rate` is intentionally NOT rescaled by the cloud sink limiter: the
     # G&M alignment is its own one-shot saturation adjustment with a local
     # `ε ≥ -qᶜˡ` cap, and the cloud budget at the limiter starts from the already
@@ -1122,6 +1141,6 @@ end
         coat_cond, coat_evap,
         wg_densif_mass, wg_densif_vol,
         ncl_correction, nr_correction, ni_correction,
-        saturation_alignment_rate, supersaturation_tendency,
+        saturation_alignment_rate, vapor_excess_tendency,
     )
 end
