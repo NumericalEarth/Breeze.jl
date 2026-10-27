@@ -91,7 +91,8 @@ function benchmark_time_stepping(model;
     # front for Reactant; eager backends compile on first call. For AD we
     # build θ_init / dθ_init on the same grid as `model` and run reverse
     # mode through `loss` — see `grad_loss!` in timestepping.jl.
-    compile_time_seconds = 0.0
+    # The compile is broken down into tracing / MLIR / XLA stages by `timed_reactant_compile`
+    compile_timings = (total = 0.0, tracing = 0.0, mlir = 0.0, xla = 0.0)
     invoke! = nothing
     if is_reactant
         if ad
@@ -101,22 +102,22 @@ function benchmark_time_stepping(model;
             if verbose
                 @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true)..."
             end
-            compile_start = time_ns()
-            compiled_grad! = Reactant.@compile raise=true raise_first=true sync=true grad_loss!(
-                model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
-            compile_time_seconds = (time_ns() - compile_start) / 1e9
+            compiled_grad!, compile_timings = timed_reactant_compile() do
+                Reactant.@compile raise=true raise_first=true sync=true grad_loss!(
+                    model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
+            end
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
         else
             if verbose
                 @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
             end
-            compile_start = time_ns()
-            compiled_loop! = Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt_FT, time_steps)
-            compile_time_seconds = (time_ns() - compile_start) / 1e9
+            compiled_loop!, compile_timings = timed_reactant_compile() do
+                Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt_FT, time_steps)
+            end
             invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
         end
         if verbose
-            @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
+            @info "    Compile time: $(@sprintf("%.3f", compile_timings.total)) s"
         end
     end
 
@@ -173,10 +174,10 @@ function benchmark_time_stepping(model;
         time_per_step_seconds,
         steps_per_second,
         grid_points_per_second,
-        compile_time_seconds,
-        0.0,         # compile_tracing_time_seconds
-        0.0,         # compile_mlir_time_seconds
-        0.0,         # compile_xla_time_seconds
+        compile_timings.total,
+        compile_timings.tracing,
+        compile_timings.mlir,
+        compile_timings.xla,
         gpu_memory_used,
         metadata,
     )
