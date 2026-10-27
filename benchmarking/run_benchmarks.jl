@@ -128,7 +128,7 @@ function parse_commandline()
             default = ""
 
         "--closure"
-            help = "Turbulence closure: nothing, SmagorinskyLilly, DynamicSmagorinsky. " *
+            help = "Turbulence closure: nothing, SmagorinskyLilly, DynamicSmagorinsky, TKEBasedTurbulenceClosure. " *
                    "Multiple closures can be specified as comma-separated list."
             arg_type = String
             default = "nothing"
