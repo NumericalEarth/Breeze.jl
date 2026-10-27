@@ -55,6 +55,8 @@ this requires `--backend reactant`.
 The loop body is compiled once regardless of `--time_steps`.
 The model runs on a `LatitudeLongitudeGrid` (the same 12 km box, with
 `SphericalCoriolis`) unless `--grid_type rectilinear` is given.
+It also has a terrain-following vertical coordinate over a 300 m Gaussian hill
+unless `--terrain none` is given.
 
 `--checkpoints` controls how Enzyme checkpoints the loop in the reverse pass.
 Each value is compiled and timed separately, so a comma-separated list sweeps

@@ -45,6 +45,13 @@ using CloudMicrophysics: CloudMicrophysics
 const CMExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .CMExt: OneMomentCloudMicrophysics
 
+# Oceananigans' Reactant extension moves a grid to ReactantState field by field through `_to_reactant`,
+# which knows only the static vertical coordinate; the terrain-following one moves with its own
+# `on_architecture`. Retire when CliMA/Oceananigans.jl#6007 lands.
+const OceananigansReactantExt = Base.get_extension(Oceananigans, :OceananigansReactantExt)
+OceananigansReactantExt.Architectures._to_reactant(z::TerrainFollowingVerticalDiscretization) =
+    Oceananigans.Architectures.on_architecture(ReactantState(), z)
+
 using Printf: @printf
 using Dates: DateTime, now, UTC
 
@@ -124,6 +131,12 @@ function parse_commandline()
             help = "Grid for the convective boundary layer: rectilinear, or latitude_longitude (the same box " *
                    "on a LatitudeLongitudeGrid, with SphericalCoriolis). Defaults to latitude_longitude " *
                    "with --ad and to rectilinear otherwise."
+            arg_type = String
+            default = ""
+
+        "--terrain"
+            help = "Terrain for the convective boundary layer: none, or hill (a terrain-following vertical " *
+                   "coordinate over a 300 m Gaussian hill). Defaults to hill with --ad and to none otherwise."
             arg_type = String
             default = ""
 
@@ -397,6 +410,7 @@ function run_benchmarks(args)
     Δt = args["dt"]
     time_steps = args["time_steps"]
     grid_type = isempty(args["grid_type"]) ? (args["ad"] ? "latitude_longitude" : "rectilinear") : args["grid_type"]
+    terrain = isempty(args["terrain"]) ? args["ad"] : args["terrain"] == "hill"
     warmup_steps = args["warmup_steps"]
     stop_time = args["stop_time"] * 3600  # Convert hours to seconds
     output_interval = args["output_interval"] * 60  # Convert minutes to seconds
@@ -513,7 +527,7 @@ function run_benchmarks(args)
         end
 
         # Only non-default grids and substep counts show in the name, so the existing names stay as they are
-        grid_suffix = grid_type == "rectilinear" ? "" : "_LatLon"
+        grid_suffix = (grid_type == "rectilinear" ? "" : "_LatLon") * (terrain ? "_Terrain" : "")
         substeps_suffix = dyn_name == "compressible_splitexplicit" && args["substeps"] != 12 ? "_N$(args["substeps"])" : ""
         name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)$(substeps_suffix)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)$(grid_suffix)_$(backend_name)$(mode_suffix)"
 
@@ -540,6 +554,7 @@ function run_benchmarks(args)
                                       microphysics,
                                       topology,
                                       grid_type = Symbol(grid_type),
+                                      terrain,
                                       simplified = args["simplified"],
                                       )
         else

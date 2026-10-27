@@ -11,6 +11,7 @@
 
 using Oceananigans
 using Oceananigans.Units
+using Oceananigans.Architectures: on_architecture
 
 using Breeze
 using Breeze: CompressibleDynamics
@@ -44,6 +45,9 @@ from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 - `grid_type`: `:rectilinear` (default) or `:latitude_longitude`, the same 12 km × 12 km box
   on a `LatitudeLongitudeGrid` centred at the case's latitude, with `SphericalCoriolis`
   in place of the f-plane.
+- `terrain`: when `true`, a terrain-following vertical coordinate over a 300 m Gaussian hill,
+  2 km wide, in the middle of the box (default `false`). The grid is built and its terrain
+  filled in on the CPU, then moved to `arch`.
 - `simplified`: When `true`, omit the geostrophic body forcing and the
   field-dependent surface-drag boundary conditions (default `false`). These
   currently do not materialize on `ReactantState`, so set this `true` for a
@@ -67,6 +71,7 @@ function convective_boundary_layer(arch = CPU();
                                    microphysics = nothing,
                                    topology = (Periodic, Periodic, Bounded),
                                    grid_type = :rectilinear,
+                                   terrain = false,
                                    simplified = false,
                                    )
 
@@ -79,31 +84,44 @@ function convective_boundary_layer(arch = CPU();
     Lz = 3kilometers
 
     latitude = 33.5
+    R = Oceananigans.defaults.planet_radius
+    Δφ = rad2deg(Ly / R)
+    Δλ = rad2deg(Lx / (R * cosd(latitude)))
+
+    # A terrain-following grid is built and its terrain filled in on the CPU, then moved to `arch`
+    grid_arch = terrain ? CPU() : arch
+    z = terrain ? TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length = Nz + 1))) : (0, Lz)
 
     grid = if grid_type == :rectilinear
-        RectilinearGrid(arch;
+        RectilinearGrid(grid_arch;
             size = (Nx, Ny, Nz),
             x = (0, Lx),
             y = (0, Ly),
-            z = (0, Lz),
+            z,
             halo = (5, 5, 5),
             topology = topology
         )
     elseif grid_type == :latitude_longitude
         # The same box in degrees, centred at `latitude`
-        R = Oceananigans.defaults.planet_radius
-        Δφ = rad2deg(Ly / R)
-        Δλ = rad2deg(Lx / (R * cosd(latitude)))
-        LatitudeLongitudeGrid(arch;
+        LatitudeLongitudeGrid(grid_arch;
             size = (Nx, Ny, Nz),
             longitude = (0, Δλ),
             latitude = (latitude - Δφ / 2, latitude + Δφ / 2),
-            z = (0, Lz),
+            z,
             halo = (5, 5, 5),
             topology = topology
         )
     else
         error("Unknown grid_type: $grid_type. Use :rectilinear or :latitude_longitude.")
+    end
+
+    if terrain
+        # A 300 m Gaussian hill, 2 km wide, in the middle of the box, in metres from the centre
+        h₀, σ = 300, 2kilometers
+        hill(x, y) = h₀ * exp(-((x - Lx / 2)^2 + (y - Ly / 2)^2) / (2σ^2))
+        hill_λφ(λ, φ) = hill(Lx / 2 + deg2rad(λ - Δλ / 2) * R * cosd(latitude), Ly / 2 + deg2rad(φ - latitude) * R)
+        materialize_terrain!(grid, grid isa LatitudeLongitudeGrid ? hill_λφ : hill)
+        grid = on_architecture(arch, grid)
     end
 
     # Reference state
