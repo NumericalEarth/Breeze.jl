@@ -5,3 +5,11 @@ lazy = true
     [[P3_lookup_tables.download]]
     sha256 = "d81442098b7c250842afc795d21295f44c8ef9e5957db5a76c156516cc76c65c"
     url = "https://github.com/NumericalEarth/Breeze.jl/releases/download/P3_lookup_tables_v1.0/P3_lookup_tables.tar.gz"
+
+[P3_parcel_reference]
+git-tree-sha1 = "1c0d918ee77cca9adf54a8e20c74556573fdf8b9"
+lazy = true
+
+    [[P3_parcel_reference.download]]
+    sha256 = "a712ad199156898ef538cb2d4293de66f203ef56298b1fd639ab5605e041e587"
+    url = "https://github.com/NumericalEarth/Breeze.jl/releases/download/P3_parcel_reference_v1.0/P3_parcel_reference.tar.gz"

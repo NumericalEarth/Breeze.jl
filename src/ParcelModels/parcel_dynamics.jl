@@ -12,12 +12,12 @@ using KernelAbstractions: @kernel, @index
 using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
     PlanarLiquidSurface,
-    with_moisture, with_temperature, mixture_heat_capacity, density,
+    with_moisture, with_temperature, density,
     reject_renamed_surface_pressure,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
-    specific_prognostic_moisture
+    specific_prognostic_moisture, thermodynamic_density_name
 using Breeze.TimeSteppers: SSPRungeKutta3
 using Breeze.Solvers: SecantSolver, secant_solve
 
@@ -65,7 +65,8 @@ Density-weighted forms (ρqᵗ, ρℰ) are also stored for consistency with the 
 - `w`: parcel vertical velocity [m/s], prognostic for `PrognosticVerticalVelocity`,
   zero for `PrescribedVerticalVelocity`
 - `ρ`: **environmental** density at parcel height [kg/m³], interpolated from background
-  profile, not the parcel's own density. The parcel density is computed from
+  profile, used as the weight for stored prognostics. Microphysical rates use
+  the parcel's own density, computed from
   `density(𝒰, constants)` using the ideal gas law applied to the parcel's thermodynamic state.
 """
 mutable struct ParcelState{FT, TH, MP}
@@ -111,7 +112,7 @@ mutable struct ParcelTendencies{FT, GM}
     Gy :: FT
     Gz :: FT
     Gw :: FT
-    Gs :: FT
+    Gℰ :: FT
     Gqᵗ :: FT
     Gμ :: GM
 end
@@ -153,6 +154,8 @@ Construct `ParcelDynamics` with default (uninitialized) state.
 
 The environmental profiles and parcel state are set using `set!` after
 constructing the `AtmosphereModel`.
+The model's `formulation` selects liquid–ice potential temperature (the default)
+or static energy as the parcel's conserved thermodynamic variable.
 """
 function ParcelDynamics(FT::DataType=Oceananigans.defaults.FloatType;
                         vertical_velocity_formulation = PrescribedVerticalVelocity(),
@@ -231,24 +234,27 @@ AtmosphereModels.standard_pressure(d::ParcelDynamics) = d.standard_pressure
 # precipitation loss through state tendencies instead of grid-based fall-velocity fields.
 AtmosphereModels.materialize_sedimentation(::ParcelDynamics, microphysics, microphysical_fields, advection) = (;)
 
-function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, constants, microphysics)
+function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, constants, microphysics,
+                                               formulation=:LiquidIcePotentialTemperature)
     FT = eltype(grid)
     p₀ = convert(FT, d.base_pressure)
     pˢᵗ = convert(FT, d.standard_pressure)
-    g = constants.gravitational_acceleration
 
     # Create density and pressure fields
     ρ = CenterField(grid)
     p = CenterField(grid)
 
     # Create default parcel state (will be overwritten by set!)
-    # Use StaticEnergyState as the default thermodynamic formulation
     q = MoistureMassFractions(zero(FT))
-    cᵖᵐ = mixture_heat_capacity(q, constants)
     T_default = FT(288.15)
     z_default = zero(FT)
-    s_default = cᵖᵐ * T_default + g * z_default
-    𝒰 = StaticEnergyState(s_default, q, z_default, p₀)
+    if thermodynamic_density_name(formulation) === :ρθ
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, p₀), T_default, constants)
+        ℰ_default = 𝒰.potential_temperature
+    else
+        𝒰 = with_temperature(StaticEnergyState(zero(FT), q, z_default, p₀), T_default, constants)
+        ℰ_default = 𝒰.static_energy
+    end
 
     # Microphysics prognostic variables based on the microphysics scheme
     μ = materialize_parcel_microphysics_prognostics(FT, microphysics)
@@ -258,7 +264,6 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     w_default = zero(FT)
     qᵗ_default = zero(FT)
     ρqᵗ_default = ρ_default * qᵗ_default
-    ℰ_default = s_default  # static energy for default formulation
     ρℰ_default = ρ_default * ℰ_default
     state = ParcelState(zero(FT), zero(FT), z_default, w_default, ρ_default,
                         qᵗ_default, ρqᵗ_default, ℰ_default, ρℰ_default, 𝒰, μ)
@@ -391,10 +396,9 @@ conditions interpolated at that height.
 - `ℋ`: Relative humidity profile ℋ(z) [0-1] - function, array, or constant.
        If provided, `qᵗ` is computed as `qᵗ = ℋ * qᵛ⁺(T, ρ)`.
 
-The parcel's total water is partitioned with the condensate its microphysical prognostics
-carry, so the initial static energy is that of the environment at its temperature with that
-condensate. Saturation adjustment schemes then equilibrate the state at fixed static energy,
-as at every substep.
+The parcel's thermodynamic variable is initialized at the environmental temperature
+with the condensate carried by its microphysical prognostics. Saturation adjustment
+then equilibrates the state at fixed static energy or liquid–ice potential temperature.
 
 **Velocities**:
 - `u`: Zonal velocity u(z) [m/s] - function, array, or constant (default: 0)
@@ -487,7 +491,7 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
     end
 
     # Bring the thermodynamic state to what the first substep sees: water partitioned with the
-    # final prognostics and, for saturation adjustment, equilibrated at fixed static energy.
+    # final prognostics and, for saturation adjustment, equilibrated at fixed thermodynamic variable.
     isnothing(z) || update_parcel_moisture!(model)
 
     return nothing
@@ -582,8 +586,8 @@ end
 $(TYPEDSIGNATURES)
 
 Initialize the parcel state by interpolating environmental conditions at the given position.
-The total water is partitioned with the condensate carried by the microphysical prognostics,
-so the static energy is that of the environment at its temperature with that condensate.
+The thermodynamic variable is initialized at the environmental temperature with
+the condensate carried by the microphysical prognostics.
 """
 function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     grid = model.grid
@@ -621,14 +625,12 @@ function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     # Keep the carried condensate within the new total water before partitioning it.
     AtmosphereModels.fix_negative_moisture!(model)
 
-    # The environment is at T₀ with the condensate the prognostics carry, so that condensate
-    # enters the static energy through the mixture heat capacity and the latent terms. Cloud
-    # condensate of saturation adjustment schemes is left to the adjustment `set!` applies once
-    # the prognostics are final.
-    𝒰ᵛ = StaticEnergyState(zero(FT), MoistureMassFractions(qᵗ₀), z₀, p₀)
+    # Initialize the conserved thermodynamic variable with the carried condensate at T₀.
+    𝒰ᵛ = reconstruct_thermodynamic_state(state.𝒰, zero(FT), z₀, p₀)
+    𝒰ᵛ = with_moisture(𝒰ᵛ, MoistureMassFractions(qᵗ₀))
     _, q = parcel_moisture_partition(model.microphysics, ρ₀, state.μ, qᵗ₀, 𝒰ᵛ)
-    𝒰 = with_temperature(StaticEnergyState(zero(FT), q, z₀, p₀), T₀, constants)
-    state.ℰ = 𝒰.static_energy
+    𝒰 = with_temperature(with_moisture(𝒰ᵛ, q), T₀, constants)
+    state.ℰ = thermodynamic_variable(𝒰)
     state.ρℰ = ρ₀ * state.ℰ
     state.𝒰 = 𝒰
 
@@ -667,10 +669,8 @@ Compute tendencies for the parcel prognostic variables.
 Position tendencies are interpolated from environmental velocity fields.
 Thermodynamic and moisture tendencies come from microphysical sources/sinks.
 
-The parcel model evolves **specific quantities** (s, qᵗ) directly, not
-density-weighted quantities. For adiabatic ascent with no microphysics,
-specific static energy and moisture are exactly conserved (ds/dt = dqᵗ/dt = 0).
-This is simpler and more accurate than stepping density-weighted quantities.
+The parcel model evolves specific static energy or liquid–ice potential temperature
+and total water directly. These quantities are conserved when their tendencies vanish.
 """
 function compute_parcel_tendencies!(model::ParcelModel)
     dynamics = model.dynamics
@@ -680,9 +680,11 @@ function compute_parcel_tendencies!(model::ParcelModel)
     constants = model.thermodynamic_constants
 
     z = state.z
-    ρ = state.ρ
     𝒰 = state.𝒰
-    μ = state.μ
+    # Prognostics are stored using the environmental density as a weight, but
+    # collision and saturation rates require the parcel's thermodynamic density.
+    ρ = density(𝒰, constants)
+    μ = rescale_parcel_microphysics(state.μ, ρ / state.ρ)
 
     # Horizontal position tendencies = environmental velocity at current height
     tendencies.Gx = interpolate(z, model.velocities.u)
@@ -698,9 +700,10 @@ function compute_parcel_tendencies!(model::ParcelModel)
     # Dispatch handles the Nothing case: microphysical_tendency(::Nothing, ...) returns zero,
     # compute_microphysics_prognostic_tendencies(::Nothing, ...) returns nothing/zero NamedTuple
     ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
-    tendencies.Gs = microphysical_tendency(microphysics, Val(:s), ρ, ℳ, 𝒰, constants)
+    tendencies.Gℰ = microphysical_tendency(microphysics, thermodynamic_variable_name(𝒰), ρ, ℳ, 𝒰, constants)
     tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:qᵗ), ρ, ℳ, 𝒰, constants)
-    tendencies.Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
+    Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
+    tendencies.Gμ = rescale_parcel_microphysics(Gμ, state.ρ / ρ)
 
     return nothing
 end
@@ -933,9 +936,8 @@ u^{(m)} = (1 - α) u^{(0)} + α \\left[u^{(m-1)} + Δt \\, G^{(m-1)}\\right]
 where ``u^{(0)}`` is the initial state, ``u^{(m-1)}`` is the current state,
 and ``G^{(m-1)}`` is the tendency at the current state.
 
-The parcel model steps specific quantities (s, qᵗ) directly for exact conservation.
-For adiabatic ascent with no microphysics sources, ds/dt = dqᵗ/dt = 0, so these
-quantities remain exactly constant throughout the simulation.
+The parcel model steps specific quantities (ℰ, qᵗ), where ℰ is static energy or
+liquid–ice potential temperature. Both are conserved when their tendencies vanish.
 """
 function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, Δt, α)
     # Compute tendencies at current state
@@ -959,7 +961,7 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
 
     # Step specific quantities directly (exact conservation for adiabatic)
     state.qᵗ = (1 - α) * U⁰.qᵗ + α * (state.qᵗ + Δt * tendencies.Gqᵗ)
-    state.ℰ = (1 - α) * U⁰.ℰ + α * (state.ℰ + Δt * tendencies.Gs)
+    state.ℰ = (1 - α) * U⁰.ℰ + α * (state.ℰ + Δt * tendencies.Gℰ)
 
     # Get environmental conditions at new height
     z⁺ = state.z
@@ -1047,6 +1049,12 @@ end
     return LiquidIcePotentialTemperatureState{FT}(θ⁺, 𝒰.moisture_mass_fractions, 𝒰.standard_pressure, p⁺)
 end
 
+# The parcel's conserved thermodynamic variable ℰ, and its name for `microphysical_tendency`
+@inline thermodynamic_variable(𝒰::StaticEnergyState) = 𝒰.static_energy
+@inline thermodynamic_variable(𝒰::LiquidIcePotentialTemperatureState) = 𝒰.potential_temperature
+@inline thermodynamic_variable_name(::StaticEnergyState) = Val(:s)
+@inline thermodynamic_variable_name(::LiquidIcePotentialTemperatureState) = Val(:θ)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -1107,7 +1115,7 @@ function step_parcel_state!(model::ParcelModel, Δt)
 
     # Step specific quantities forward (exact conservation for adiabatic)
     state.qᵗ += Δt * tendencies.Gqᵗ
-    state.ℰ += Δt * tendencies.Gs
+    state.ℰ += Δt * tendencies.Gℰ
 
     # Get environmental conditions at new height
     z⁺ = state.z

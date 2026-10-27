@@ -115,6 +115,18 @@ function parse_commandline()
             arg_type = String
             default = "anelastic"
 
+        "--substeps"
+            help = "Acoustic substeps per time step for compressible_splitexplicit dynamics."
+            arg_type = Int
+            default = 12
+
+        "--grid_type"
+            help = "Grid for the convective boundary layer: rectilinear, or latitude_longitude (the same box " *
+                   "on a LatitudeLongitudeGrid, with SphericalCoriolis). Defaults to latitude_longitude " *
+                   "with --ad and to rectilinear otherwise."
+            arg_type = String
+            default = ""
+
         "--closure"
             help = "Turbulence closure: nothing, SmagorinskyLilly, DynamicSmagorinsky. " *
                    "Multiple closures can be specified as comma-separated list."
@@ -315,13 +327,13 @@ end
 make_closure(name, FT) = name == "nothing" ? nothing : (@eval $(Symbol(name)))(FT)
 
 # Dynamics: "anelastic", "compressible_explicit", "compressible_splitexplicit"
-function make_dynamics(name::AbstractString, FT::Type)
+function make_dynamics(name::AbstractString, FT::Type; substeps = 12)
     if name == "anelastic"
         return nothing  # sentinel; convective_boundary_layer handles anelastic by default
     elseif name == "compressible_explicit"
         return CompressibleDynamics(ExplicitTimeStepping())
     elseif name == "compressible_splitexplicit"
-        return CompressibleDynamics(SplitExplicitTimeDiscretization(FT; substeps=12))
+        return CompressibleDynamics(SplitExplicitTimeDiscretization(FT; substeps))
     else
         error("Unknown dynamics: $name. Use anelastic, compressible_explicit, or compressible_splitexplicit.")
     end
@@ -384,6 +396,7 @@ function run_benchmarks(args)
     # Mode-specific parameters
     Δt = args["dt"]
     time_steps = args["time_steps"]
+    grid_type = isempty(args["grid_type"]) ? (args["ad"] ? "latitude_longitude" : "rectilinear") : args["grid_type"]
     warmup_steps = args["warmup_steps"]
     stop_time = args["stop_time"] * 3600  # Convert hours to seconds
     output_interval = args["output_interval"] * 60  # Convert minutes to seconds
@@ -499,7 +512,10 @@ function run_benchmarks(args)
             continue
         end
 
-        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)_$(backend_name)$(mode_suffix)"
+        # Only non-default grids and substep counts show in the name, so the existing names stay as they are
+        grid_suffix = grid_type == "rectilinear" ? "" : "_LatLon"
+        substeps_suffix = dyn_name == "compressible_splitexplicit" && args["substeps"] != 12 ? "_N$(args["substeps"])" : ""
+        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)$(substeps_suffix)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)$(grid_suffix)_$(backend_name)$(mode_suffix)"
 
         println("\n", "-" ^ 70)
         println("Running: $name")
@@ -508,7 +524,7 @@ function run_benchmarks(args)
         # Create arch (backend-aware) and schemes
         arch = make_backend_arch(backend_name, device)
         topology = make_topology(topo_name)
-        dynamics = make_dynamics(dyn_name, FT)
+        dynamics = make_dynamics(dyn_name, FT; substeps = args["substeps"])
         advection = make_advection(adv_name, FT)
         closure = make_closure(cls_name, FT)
         microphysics = make_microphysics(micro_name, FT)
@@ -523,6 +539,7 @@ function run_benchmarks(args)
                                       closure,
                                       microphysics,
                                       topology,
+                                      grid_type = Symbol(grid_type),
                                       simplified = args["simplified"],
                                       )
         else

@@ -28,31 +28,31 @@ Bounded Grabowski–Morrison saturation adjustment applied before the
 Morrison–Gettelman semi-analytic rates. It aligns `qᵛ`, `qᶜˡ`, `T`, `qᵛ⁺ˡ`, and
 `qᵛ⁺ⁱ` with each other before the per-species rate equations are evaluated.
 
-Given the advected liquid supersaturation ``sᵛ⁺ˡ``, the diagnostic local
+Given the advected vapor excess over liquid ``δqᵛ⁺ˡ``, the diagnostic local
 ``qᵛ - qᵛ⁺ˡ``, and the liquid-side psychrometric factor
 ``ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T²)``, compute the cloud-water increment
 
 ```math
-ε = (qᵛ - qᵛ⁺ˡ - sᵛ⁺ˡ) / ξˡ
+ε = (qᵛ - qᵛ⁺ˡ - δqᵛ⁺ˡ) / ξˡ
 ```
 
 clamped to physical limits: ``ε`` cannot evaporate more cloud than is locally
-available (``ε ≥ -qᶜˡ``), and when the advected ``sᵛ⁺ˡ`` is negative
+available (``ε ≥ -qᶜˡ``), and when the advected ``δqᵛ⁺ˡ`` is negative
 ``ε ≤ 0`` (no spurious condensation). The returned ``rate = ε / τ`` is
 sized to `sink_limiting_timescale`, so one host step with
 ``dt = sink_limiting_timescale`` reproduces the one-shot ``ε`` exactly. If
-the host integrates with ``dt ≠ τ`` the supersaturation alignment relaxes over multiple
+the host integrates with ``dt ≠ τ`` the vapor-excess alignment relaxes over multiple
 steps rather than landing in one.
 
-When `predict_supersaturation = false`, dispatch bypasses the adjustment and the
+When `vapor_excess = DiagnosticVaporExcess()`, dispatch bypasses the adjustment and the
 local state passes through unchanged.
 """
-@inline predicted_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants) =
-    predicted_supersaturation_adjustment(p3.process_rates, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
-                                         sᵛ⁺ˡ, T, ρ, constants)
+@inline prognostic_vapor_excess_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants) =
+    prognostic_vapor_excess_adjustment(p3.process_rates, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
+                                         δqᵛ⁺ˡ, T, ρ, constants)
 
-@inline function predicted_supersaturation_adjustment(
-    ::ProcessRate{FT, false}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
+@inline function prognostic_vapor_excess_adjustment(
+    ::ProcessRate{FT, DiagnosticVaporExcess}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants
 ) where FT
     cloud_water_adjustment = zero(qᶜˡ)
     return (; cloud_water_adjustment,
@@ -63,9 +63,9 @@ local state passes through unchanged.
             T)
 end
 
-@inline function predicted_supersaturation_adjustment(
-    parameters::ProcessRate{PFT, true}, p3,
-    qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, ρ, constants
+@inline function prognostic_vapor_excess_adjustment(
+    parameters::ProcessRate{PFT, PrognosticVaporExcess}, p3,
+    qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants
 ) where PFT
     FT = typeof(qᶜˡ)
     τ = max(parameters.sink_limiting_timescale, eps(FT))
@@ -74,9 +74,9 @@ end
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
     ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
 
-    cloud_water_adjustment = (qᵛ - qᵛ⁺ˡ - sᵛ⁺ˡ) / ξˡ
+    cloud_water_adjustment = (qᵛ - qᵛ⁺ˡ - δqᵛ⁺ˡ) / ξˡ
     cloud_water_adjustment = max(cloud_water_adjustment, -max(0, qᶜˡ))
-    cloud_water_adjustment = ifelse(sᵛ⁺ˡ < 0,
+    cloud_water_adjustment = ifelse(δqᵛ⁺ˡ < 0,
                                     min(cloud_water_adjustment, zero(FT)),
                                     cloud_water_adjustment)
     cloud_water_adjustment = ifelse(abs(cloud_water_adjustment) <
@@ -92,6 +92,31 @@ end
             qᵛ = qᵛ - cloud_water_adjustment,
             qᵛ⁺ˡ = adjusted_saturation,
             T = adjusted_temperature)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Externally driven change in the vapor excess over a surface with saturation specific
+humidity `qᵛ⁺` and latent heat `ℒ`, at fixed vapor,
+
+```math
+-∂ₜqᵛ⁺ = -(dqᵛ⁺ / dT) ∂ₜT + qᵛ⁺ ∂ₜp / p ,
+```
+
+since ``qᵛ⁺ ∝ 1/p`` at fixed temperature and composition. In adiabatic ascent the
+pressure term offsets about a fifth of the cooling term. Over liquid, this forcing
+drives diffusional growth and, with [`PrognosticVaporExcess`](@ref), the prognostic
+``δqᵛ⁺ˡ``; over both surfaces it adds to the vapor excess available to the
+saturation-adjustment caps in `limit_vapor_rates`. Resolved vapor transport,
+turbulent mixing, radiation, and user forcing are omitted.
+"""
+@inline function external_vapor_excess_forcing(qᵛ⁺, ℒ, T, P, temperature_tendency,
+                                               pressure_tendency, constants)
+    FT = typeof(T)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    dqᵛ⁺_dT = qᵛ⁺ * ℒ / (Rᵛ * T^2)
+    return qᵛ⁺ * pressure_tendency / P - dqᵛ⁺_dT * temperature_tendency
 end
 
 @inline function cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, Dᵛ, μᶜˡ, λᶜˡ,
@@ -145,15 +170,15 @@ end
 
 # One species' share of the diffusional-growth budget: its relaxation weight
 # `ε / ε_total` against the total driver, plus the transient approach to
-# liquid supersaturation, over the psychrometric correction `ξ` for the phase it condenses
+# the vapor excess over liquid, over the psychrometric correction `ξ` for the phase it condenses
 # into. All four species use this; only `ε` and `ξ` differ, so a transposed pair
 # would otherwise be invisible in four near-identical lines.
 @inline function growth_share(relaxation_coefficient, psychrometric_correction,
-                              external_driver, total_relaxation, supersaturation,
+                              external_driver, total_relaxation, vapor_excess,
                               transient_response)
     relaxation_fraction = relaxation_coefficient / total_relaxation
     return (external_driver * relaxation_fraction +
-            (supersaturation - external_driver / total_relaxation) *
+            (vapor_excess - external_driver / total_relaxation) *
             relaxation_fraction * transient_response) / psychrometric_correction
 end
 
@@ -169,7 +194,7 @@ cloud/precipitation fraction framework is handled separately.
                                                      constants, transport, q,
                                                      μᶜˡ, λᶜˡ, nᶜˡ_bounded,
                                                      temperature_tendency,
-                                                     vapor_tendency,
+                                                     pressure_tendency,
                                                      lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
@@ -215,32 +240,29 @@ cloud/precipitation fraction framework is handled separately.
                            FT(floors.rate_scale))
     transient_response = (1 - exp(-total_relaxation * τ)) / τ
     # `qᵛ`, `qᵛ⁺ˡ`, `qᵛ⁺ⁱ` arrive already adjusted by the G&M step in
-    # `compute_p3_process_rates`, so the local diagnostic supersaturation here is
-    # the post-G&M value, not the host-advected `sᵛ⁺ˡ`.
-    supersaturation = qᵛ - qᵛ⁺ˡ
+    # `compute_p3_process_rates`, so the local diagnostic vapor excess here is
+    # the post-G&M value, not the host-advected `δqᵛ⁺ˡ`.
+    vapor_excess = qᵛ - qᵛ⁺ˡ
     bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * dry_ice_relaxation
-    # The external forcing term is the externally driven change in liquid-relative
-    # supersaturation: dqᵛ/dt - (dqᵛ⁺ˡ/dT) dT/dt. Breeze currently approximates
-    # this with adiabatic cooling, dT/dt = -g w / cᵖᵐ, and dqᵛ/dt = 0. Resolved
-    # transport, turbulent mixing, radiation, and user forcing are omitted.
-    external_driver = vapor_tendency - dqᵛ⁺ˡ_dT * temperature_tendency
+    external_driver = external_vapor_excess_forcing(qᵛ⁺ˡ, ℒˡ, T, P, temperature_tendency,
+                                                    pressure_tendency, constants)
     total_driver = external_driver + bergeron_driver
 
     raw_cloud_growth = growth_share(cloud_relaxation, ξˡ, total_driver, total_relaxation,
-                                    supersaturation, transient_response)
+                                    vapor_excess, transient_response)
     raw_rain_growth = growth_share(rain_relaxation, ξˡ, total_driver, total_relaxation,
-                                   supersaturation, transient_response)
+                                   vapor_excess, transient_response)
     raw_ice_growth = growth_share(dry_ice_relaxation, ξⁱ, total_driver, total_relaxation,
-                                  supersaturation, transient_response) +
+                                  vapor_excess, transient_response) +
                      (qᵛ⁺ˡ - qᵛ⁺ⁱ) * dry_ice_relaxation / ξⁱ
     # Liquid-on-ice coating uses `ξˡ` (like cloud) since the surface condenses
     # vapor as liquid; no Bergeron contribution because the surface is already
     # at liquid saturation.
     raw_coating_growth = growth_share(coating_relaxation, ξˡ, total_driver,
-                                      total_relaxation, supersaturation,
+                                      total_relaxation, vapor_excess,
                                       transient_response)
 
-    𝒮ˡ = supersaturation / max(qᵛ⁺ˡ, FT(floors.divisor))
+    𝒮ˡ = vapor_excess / max(qᵛ⁺ˡ, FT(floors.divisor))
     𝒮ⁱ = qᵛ / max(qᵛ⁺ⁱ, FT(floors.divisor)) - 1
     # Each tiny-mass clause below gates on its own reservoir: `qᶜˡ` for cloud, `qʳ` for
     # rain, and the total ice mass `qⁱ_total` (computed above) for both ice clauses.
