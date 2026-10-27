@@ -20,7 +20,7 @@
 #
 #   * How to set up a single-column `AtmosphereModel` on a `(Flat, Flat, Bounded)` grid.
 #   * How to drive a boundary layer with a geostrophic wind, a bulk surface layer, and a surface
-#     heat flux or a cooling surface; and how to drive one with the large-scale forcing, radiative
+#     heat flux or a cooling rate; and how to drive one with the large-scale forcing, radiative
 #     heating and surface fluxes of a large-eddy simulation.
 #   * How to diagnose the closure's mixing length, diffusivities, fluxes and TKE budget from the
 #     model state, and how to choose between its coefficient sets and static stabilities.
