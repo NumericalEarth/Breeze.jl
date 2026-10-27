@@ -53,6 +53,8 @@ differentiates it with Enzyme reverse mode with respect to the initial
 potential temperature. Both are compiled together into one XLA program, so
 this requires `--backend reactant`.
 The loop body is compiled once regardless of `--time_steps`.
+The model runs on a `LatitudeLongitudeGrid` (the same 12 km box, with
+`SphericalCoriolis`) unless `--grid_type rectilinear` is given.
 
 `--checkpoints` controls how Enzyme checkpoints the loop in the reverse pass.
 Each value is compiled and timed separately, so a comma-separated list sweeps
@@ -70,21 +72,23 @@ anelastic pressure solver is not traced). Microphysics is not yet exercised
 under AD.
 
 ```bash
-# What CI runs (GPU): 64 steps, sweeping binomial checkpoint budgets of 2, 4 and 8
+# What CI runs (GPU): a latitude-longitude grid and split-explicit dynamics (12 acoustic
+# substeps), 64 steps, sweeping binomial checkpoint budgets of 2, 4 and 8
 julia --project run_benchmarks.jl --device GPU --backend reactant --ad --simplified \
-    --dynamics compressible_explicit --topology PBB --float_type Float32 \
+    --dynamics compressible_splitexplicit \
+    --topology PBB --float_type Float32 \
     --size 128x128x32 --time_steps 64 --checkpoints 2,4,8 --checkpointing_mode binomial
 
 # Local CPU run (no GPU needed). Use a small grid: the gradient compile is
 # the expensive part, and the reverse pass on CPU is slow.
 julia --project run_benchmarks.jl --device CPU --backend reactant --ad --simplified \
-    --dynamics compressible_explicit --topology PBB --float_type Float32 \
-    --size 16x16x8 --time_steps 32 --checkpoints 2,4,8
+    --dynamics compressible_splitexplicit \
+    --topology PBB --float_type Float32 --size 16x16x8 --time_steps 32 --checkpoints 2,4,8
 
 # Periodic checkpoints and no checkpointing, for comparison
 julia --project run_benchmarks.jl --device CPU --backend reactant --ad --simplified \
-    --dynamics compressible_explicit --topology PBB --float_type Float32 \
-    --size 16x16x8 --time_steps 32 --checkpoints "4, none" --checkpointing_mode periodic
+    --dynamics compressible_splitexplicit \
+    --topology PBB --float_type Float32 --size 16x16x8 --time_steps 32 --checkpoints "4, none" --checkpointing_mode periodic
 ```
 
 Each result is recorded with `mode = "ad"` and a `checkpointing` label

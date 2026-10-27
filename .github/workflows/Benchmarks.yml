@@ -76,9 +76,11 @@ jobs:
           # little extra compile; --checkpoints sweeps the checkpoint budget of
           # the binomial (revolve) schedule Enzyme uses for the reverse pass
           # (each value is a separate compile + run, recorded as its own
-          # result). To reproduce locally on CPU see benchmarking/README.md
-          # ("AD benchmark").
-          - dynamics: 'compressible_explicit'
+          # result). The model is the regional-forecast configuration: a
+          # LatitudeLongitudeGrid with SphericalCoriolis (the AD default) and
+          # split-explicit compressible dynamics (12 acoustic substeps). To reproduce locally
+          # on CPU see benchmarking/README.md ("AD benchmark").
+          - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '128x128x32'
             advection: 'WENO5'
