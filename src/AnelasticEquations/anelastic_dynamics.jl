@@ -3,8 +3,8 @@
 #####
 
 struct AnelasticDynamics{R, P, FT}
-reference_state :: R
-pressure_anomaly :: P
+    reference_state :: R
+    pressure_anomaly :: P
     pressure_solver_float_type :: FT
 end
 
