@@ -55,20 +55,20 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     set!(dry_model.velocities.w, -4)
     @test cell_advection_timescale(dry_model) ≈ inv(2 / Δx + 4 / Δz)
 
-    # Fully implicit vertical advection still floats on the horizontal CFL, and implicit rain
-    # sets no vertical limit even in the three-dimensional formulation.
+    # Fully implicit vertical advection still floats on the horizontal CFL.
     implicit_advection = WENO(FT; time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
     implicit_model = AtmosphereModel(grid; microphysics, advection=implicit_advection)
     set!(implicit_model.velocities.u, 2)
     set!(implicit_model.microphysical_fields.wʳ, -10)
     @test cell_advection_timescale(implicit_model) ≈ Δx / 2
-    @test CellAdvectionTimescale(ThreeDimensionalFormulation())(implicit_model) ≈ Δx / 2
+    @test CellAdvectionTimescale(ThreeDimensionalFormulation())(implicit_model) ≈ inv(2 / Δx + 10 / Δz)
 
-    # Explicit momentum keeps the air's vertical CFL, but implicit rain does not add to it
-    # (AIVA bounds its own Courant number).
+    # Explicit momentum keeps the air's vertical CFL, but implicit rain leaves the wizard's
+    # timescale (AIVA bounds its own Courant number); the true 3-D CFL still reports it.
     mixed_model = AtmosphereModel(grid; microphysics, momentum_advection=WENO(FT), scalar_advection=implicit_advection)
     set!(mixed_model.velocities.u, 2)
     set!(mixed_model.velocities.w, 4)
     set!(mixed_model.microphysical_fields.wʳ, -10)
     @test cell_advection_timescale(mixed_model) ≈ inv(2 / Δx + 4 / Δz)
+    @test CellAdvectionTimescale(ThreeDimensionalFormulation())(mixed_model) ≈ inv(2 / Δx + 6 / Δz)
 end
