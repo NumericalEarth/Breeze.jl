@@ -85,8 +85,8 @@ julia --project run_benchmarks.jl --device CPU --backend reactant --ad --simplif
 
 # Periodic checkpoints and no checkpointing, for comparison
 julia --project run_benchmarks.jl --device CPU --backend reactant --ad --simplified \
-    --dynamics compressible_explicit --topology PBB --float_type Float32 \
-    --size 16x16x8 --time_steps 32 --checkpoints "4, none" --checkpointing_mode periodic
+    --dynamics compressible_splitexplicit --substeps 4 --grid_type latitude_longitude \
+    --topology PBB --float_type Float32 --size 16x16x8 --time_steps 32 --checkpoints "4, none" --checkpointing_mode periodic
 ```
 
 Each result is recorded with `mode = "ad"` and a `checkpointing` label
