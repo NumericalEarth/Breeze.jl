@@ -231,6 +231,7 @@ jobs:
           # Build github-action-benchmark entries
           # Name format: <name>/<properties>/<gpu>/<grid_size>
           data = []
+          compile_data = []
           for d in all_data:
               base_name = d['name'].split('_')[0]
               advection = d['advection']
@@ -287,6 +288,14 @@ jobs:
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
+
+                  if advection == 'WENO5' and d.get('compile_tracing_time_seconds', 0) > 0:
+                      level_1 = f'Reactant compile time; Advection: {advection}; Grid: {grid_str}'
+                      level_2 = f'{base_name} {ft_short} {backend}'
+                      level_3 = f'{gpu}'
+                      for stage in ('tracing', 'mlir', 'xla'):
+                          name = f"{level_1}/{level_2}/{level_3}/{stage}"
+                          compile_data.append({'name': name, 'unit': 's', 'value': d[f'compile_{stage}_time_seconds'], 'extra': extra})
                   continue
 
               # We want to group benchmarks in different ways. NOTE:
@@ -334,6 +343,10 @@ jobs:
 
           with open('github-action-benchmark.json', 'w') as f:
               json.dump(data, f)
+
+          if compile_data:
+              with open('github-action-benchmark-compile.json', 'w') as f:
+                  json.dump(compile_data, f)
       - name: "Generate token"
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         if: ${{ ! github.event.pull_request.head.repo.fork }}
@@ -371,7 +384,7 @@ jobs:
           benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
-          comment-always: false
+          comment-always: ${{ github.event_name == 'pull_request' }}
           summary-always: true
           alert-threshold: "110%"
           fail-on-alert: false
@@ -379,3 +392,24 @@ jobs:
           auto-push: ${{ github.event_name == 'push' }}
           max-items-in-chart: 1000
           comment-on-alert: true
+      - name: "Clean up benchmark data clone"
+        if: ${{ hashFiles('github-action-benchmark-compile.json') != '' }}
+        run: rm -rf benchmark-data-repository
+      - name: "Publish compile times"
+        if: ${{ hashFiles('github-action-benchmark-compile.json') != '' }}
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
+        with:
+          name: Breeze.jl Compile Times
+          tool: "customSmallerIsBetter"
+          output-file-path: "github-action-benchmark-compile.json"
+          benchmark-data-dir-path: "."
+          gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
+          github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
+          comment-always: false
+          summary-always: true
+          # Compile times are noisier than run times
+          alert-threshold: "150%"
+          fail-on-alert: false
+          auto-push: ${{ github.event_name == 'push' }}
+          max-items-in-chart: 1000
+          comment-on-alert: false
