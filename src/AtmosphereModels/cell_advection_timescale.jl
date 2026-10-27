@@ -7,9 +7,11 @@
 #####   τ = 1 / (|u|/Δx + |v|/Δy + |w|/Δz).
 #####
 ##### Sedimenting prognostics are advected by the air velocity plus their fall velocity,
-##### so `|w|` is replaced by the largest vertical transport speed among the air and every
-##### explicitly advected sedimenting prognostic. This is evaluated pointwise inside the
-##### single reduction, so the cost does not grow with the number of sedimenting species.
+##### so `|w|` is replaced by the largest vertical transport speed among the air and the
+##### sedimenting prognostics. This is evaluated pointwise inside the single reduction, so the
+##### cost does not grow with the number of sedimenting species. The wizard's default counts
+##### only explicitly advected fall velocities: AIVA splits an implicit tracer's own `w + wᶠ` at
+##### its Courant number, so its sedimentation sets no limit on Δt.
 #####
 ##### Adaptive implicit vertical advection (AIVA) removes the *vertical* advective CFL as a
 ##### stability constraint: its explicit vertical velocity is `wᵉ = w · min(1, cfl/α)`, so the
@@ -41,9 +43,9 @@ vertical term), `ThreeDimensionalFormulation()` counts all three directions. Pas
 `timescale` argument of `CFL` (`CFL(Δt, CellAdvectionTimescale(...))`), to control or monitor
 which directions bind the time step.
 
-The vertical term uses the largest transport speed among the air and every explicitly
-advected sedimenting prognostic (air velocity plus fall velocity), so falling precipitation
-also constrains explicit advection.
+The vertical term uses the largest transport speed among the air and every advected
+sedimenting prognostic (air velocity plus fall velocity), so `ThreeDimensionalFormulation()`
+reports the true three-dimensional CFL whether or not the vertical advection is implicit.
 """
 struct CellAdvectionTimescale{F}
     formulation :: F
@@ -55,10 +57,13 @@ end
 # `w̃` on terrain-following grids (see `advecting_vertical_velocity`). Its magnitude is replaced by
 # the largest vertical transport speed, so Oceananigans' own kernel computes the sedimentation-aware
 # timescale in one reduction with the same topology/Flat handling.
-function Advection.cell_advection_timescale(model::AtmosphereModel, ::ThreeDimensionalFormulation)
+Advection.cell_advection_timescale(model::AtmosphereModel, ::ThreeDimensionalFormulation) =
+    three_dimensional_timescale(model, is_advected)
+
+function three_dimensional_timescale(model, counted)
     u, v, _ = model.velocities
     w = advecting_vertical_velocity(model.dynamics, model.velocities)
-    wᵗ = maximum_vertical_transport_speed(model, w)
+    wᵗ = maximum_vertical_transport_speed(model, w, counted)
     return cell_advection_timescale(model.grid, (u, v, wᵗ))
 end
 
@@ -71,8 +76,8 @@ end
 # Largest vertical transport speed among the air and the sedimenting prognostics, as a lazy
 # field at the vertical faces where `w` and the fall velocities live. With no sedimentation
 # the air velocity itself is returned, so the timescale reduces to Oceananigans' own.
-function maximum_vertical_transport_speed(model, w)
-    fall_velocities = sedimentation_velocities(model)
+function maximum_vertical_transport_speed(model, w, counted)
+    fall_velocities = sedimentation_velocities(model, counted)
     isempty(fall_velocities) && return w
     return KernelFunctionOperation{Center, Center, Face}(vertical_transport_speedᶜᶜᶠ, model.grid, w, fall_velocities)
 end
@@ -89,27 +94,30 @@ end
     return max(abs(w + wᶠ), vertical_transport_speed(i, j, k, w, Base.tail(fall_velocities)))
 end
 
-# Fall velocities of the sedimenting prognostics, i.e. the vertical component of
-# `microphysical_velocities` (which carries no horizontal part). A prognostic whose advection
-# scheme is `nothing` has no advective flux at all, sedimentation included (`div_Uc` returns
-# zero), so its fall velocity imposes no CFL limit and is skipped.
-function sedimentation_velocities(model)
+# Fall velocities of the sedimenting prognostics whose advection scheme is `counted`, i.e. the
+# vertical component of `microphysical_velocities` (which carries no horizontal part). A
+# prognostic whose advection scheme is `nothing` has no advective flux at all, sedimentation
+# included (`div_Uc` returns zero), so its fall velocity imposes no CFL limit and is skipped.
+function sedimentation_velocities(model, counted)
     names = prognostic_field_names(model.microphysics)
     velocities = map(names) do name
         transport = microphysical_velocities(model.microphysics, model.microphysical_fields, Val(name))
-        advected = model.advection[name] !== nothing
-        return advected && transport !== nothing ? transport.w : nothing
+        return counted(model.advection[name]) && transport !== nothing ? transport.w : nothing
     end
     return filter(!isnothing, velocities)
 end
 
+is_advected(scheme) = scheme !== nothing
+is_explicitly_advected(scheme) = is_advected(scheme) && !needs_implicit_solver(scheme)
+
 # Automatic default: drop the vertical term exactly when every vertically-advected prognostic uses
-# AIVA. A single explicit prognostic retains the conservative three-dimensional CFL constraint.
+# AIVA. A single explicit prognostic retains the air's vertical CFL constraint, joined by the fall
+# velocities of the explicitly advected sedimenting prognostics.
 function Advection.cell_advection_timescale(model::AtmosphereModel)
     if all_vertical_advection_is_implicit(model.advection)
         return cell_advection_timescale(model, HorizontalFormulation())
     else
-        return cell_advection_timescale(model, ThreeDimensionalFormulation())
+        return three_dimensional_timescale(model, is_explicitly_advected)
     end
 end
 

@@ -62,4 +62,13 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     set!(implicit_model.microphysical_fields.wʳ, -10)
     @test cell_advection_timescale(implicit_model) ≈ Δx / 2
     @test CellAdvectionTimescale(ThreeDimensionalFormulation())(implicit_model) ≈ inv(2 / Δx + 10 / Δz)
+
+    # Explicit momentum keeps the air's vertical CFL, but implicit rain leaves the wizard's
+    # timescale (AIVA bounds its own Courant number); the true 3-D CFL still reports it.
+    mixed_model = AtmosphereModel(grid; microphysics, momentum_advection=WENO(FT), scalar_advection=implicit_advection)
+    set!(mixed_model.velocities.u, 2)
+    set!(mixed_model.velocities.w, 4)
+    set!(mixed_model.microphysical_fields.wʳ, -10)
+    @test cell_advection_timescale(mixed_model) ≈ inv(2 / Δx + 4 / Δz)
+    @test CellAdvectionTimescale(ThreeDimensionalFormulation())(mixed_model) ≈ inv(2 / Δx + 6 / Δz)
 end
