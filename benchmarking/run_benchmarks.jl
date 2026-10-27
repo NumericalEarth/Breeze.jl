@@ -122,9 +122,10 @@ function parse_commandline()
 
         "--grid_type"
             help = "Grid for the convective boundary layer: rectilinear, or latitude_longitude (the same box " *
-                   "on a LatitudeLongitudeGrid, with SphericalCoriolis)."
+                   "on a LatitudeLongitudeGrid, with SphericalCoriolis). Defaults to latitude_longitude " *
+                   "with --ad and to rectilinear otherwise."
             arg_type = String
-            default = "rectilinear"
+            default = ""
 
         "--closure"
             help = "Turbulence closure: nothing, SmagorinskyLilly, DynamicSmagorinsky. " *
@@ -395,6 +396,7 @@ function run_benchmarks(args)
     # Mode-specific parameters
     Δt = args["dt"]
     time_steps = args["time_steps"]
+    grid_type = isempty(args["grid_type"]) ? (args["ad"] ? "latitude_longitude" : "rectilinear") : args["grid_type"]
     warmup_steps = args["warmup_steps"]
     stop_time = args["stop_time"] * 3600  # Convert hours to seconds
     output_interval = args["output_interval"] * 60  # Convert minutes to seconds
@@ -511,7 +513,7 @@ function run_benchmarks(args)
         end
 
         # Only non-default grids and substep counts show in the name, so the existing names stay as they are
-        grid_suffix = args["grid_type"] == "rectilinear" ? "" : "_LatLon"
+        grid_suffix = grid_type == "rectilinear" ? "" : "_LatLon"
         substeps_suffix = dyn_name == "compressible_splitexplicit" && args["substeps"] != 12 ? "_N$(args["substeps"])" : ""
         name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)$(substeps_suffix)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)$(grid_suffix)_$(backend_name)$(mode_suffix)"
 
@@ -537,7 +539,7 @@ function run_benchmarks(args)
                                       closure,
                                       microphysics,
                                       topology,
-                                      grid_type = Symbol(args["grid_type"]),
+                                      grid_type = Symbol(grid_type),
                                       simplified = args["simplified"],
                                       )
         else
