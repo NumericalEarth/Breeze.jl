@@ -5,6 +5,7 @@ function Oceananigans.prognostic_state(model::AtmosphereModel)
             particles      = prognostic_state(model.particles),
             fields         = prognostic_state(prognostic_fields(model)),
             closure_fields = prognostic_state(model.closure_fields),
+            radiation      = prognostic_state(model.radiation),
             timestepper    = prognostic_state(model.timestepper))
 end
 
@@ -13,6 +14,8 @@ function Oceananigans.restore_prognostic_state!(restored::AtmosphereModel, from)
     restore_prognostic_state!(restored.particles, from.particles)
     restore_prognostic_state!(prognostic_fields(restored), from.fields)
     restore_prognostic_state!(restored.closure_fields, from.closure_fields)
+    # Older checkpoints have no `radiation` entry
+    hasproperty(from, :radiation) && restore_prognostic_state!(restored.radiation, from.radiation)
     restore_prognostic_state!(restored.timestepper, from.timestepper)
     return restored
 end
