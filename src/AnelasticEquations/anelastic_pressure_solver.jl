@@ -9,8 +9,8 @@ end
 Solvers.tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
 
 AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, grid) =
-    anelastic_pressure_solver(pressure_solver_grid(grid), dynamics.reference_state.density,
-                              dynamics.pressure_solver_float_type)
+    anelastic_pressure_solver(dynamics.pressure_solver_float_type, pressure_solver_grid(grid),
+                              dynamics.reference_state.density)
 
 # The solver is exact on a grid without an immersed boundary.
 pressure_solver_grid(grid) = grid
@@ -20,7 +20,7 @@ pressure_solver_grid(grid) = grid
 pressure_solver_grid(grid::ImmersedBoundaryGrid) = grid.underlying_grid
 
 # The grid is already in the solver's float type
-function anelastic_pressure_solver(grid::AbstractGrid{FT}, reference_density, ::Type{FT}) where FT
+function anelastic_pressure_solver(::Type{FT}, grid::AbstractGrid{FT}, reference_density) where FT
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
     return FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
 end
@@ -30,7 +30,7 @@ function anelastic_pressure_solver(FT, grid, reference_density)
     solver_grid = with_number_type(FT, grid)
     solver_density = Field(Oceananigans.instantiated_location(reference_density), solver_grid)
     parent(solver_density) .= parent(reference_density)
-    return anelastic_pressure_solver(solver_grid, solver_density, FT)
+    return anelastic_pressure_solver(FT, solver_grid, solver_density)
 end
 
 #####
