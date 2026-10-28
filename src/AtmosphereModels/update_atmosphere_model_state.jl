@@ -241,14 +241,8 @@ Compute auxiliary model variables:
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
 """
 function compute_auxiliary_variables!(model)
-    # Compute velocities from momentum (skip for kinematic dynamics with prescribed velocities)
-    compute_velocities!(model)
-
-    # Dispatch on thermodynamic formulation type
-    compute_auxiliary_thermodynamic_variables!(model)
-
-    # Dispatch on dynamics type (computes pressure for compressible dynamics)
-    compute_auxiliary_dynamics_variables!(model)
+    # Velocities, thermodynamic and dynamics auxiliaries (dynamics may fuse these into one launch)
+    compute_auxiliary_state_variables!(model)
 
     # Compute diffusivities. Oceananigans has no `compute_closure_fields!` for a bare array of
     # field-less closures (a per-column ensemble of e.g. `VerticalScalarDiffusivity`, for which
@@ -260,6 +254,25 @@ function compute_auxiliary_variables!(model)
     end
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute velocities, auxiliary thermodynamic variables and auxiliary dynamics variables
+(in that order). Dynamics may extend this to fuse the three passes into fewer kernel launches.
+"""
+function compute_auxiliary_state_variables!(model)
+    # Compute velocities from momentum (skip for kinematic dynamics with prescribed velocities)
+    compute_velocities!(model)
+
+    # Dispatch on thermodynamic formulation type
+    compute_auxiliary_thermodynamic_variables!(model)
+
+    # Dispatch on dynamics type (computes pressure for compressible dynamics)
+    compute_auxiliary_dynamics_variables!(model)
 
     return nothing
 end
@@ -305,6 +318,16 @@ end
                                                              microphysical_fields,
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
+    T = auxiliary_thermodynamics_at!(i, j, k, grid, specific_prognostic_moisture, formulation, dynamics,
+                                     constants, microphysics, microphysical_fields, moisture_density)
+    @inbounds temperature[i, j, k] = T
+end
+
+# Pointwise body of `_compute_auxiliary_thermodynamic_variables!`: writes θ (or s), qᵛᵉ and the
+# microphysical diagnostics at (i, j, k) and returns the diagnosed temperature. Shared with fused
+# auxiliary kernels (see CompressibleEquations).
+@inline function auxiliary_thermodynamics_at!(i, j, k, grid, specific_prognostic_moisture, formulation, dynamics,
+                                              constants, microphysics, microphysical_fields, moisture_density)
 
     compute_auxiliary_thermodynamic_variables!(formulation, dynamics, i, j, k, grid)
 
@@ -330,8 +353,7 @@ end
     update_microphysical_fields!(microphysical_fields, i, j, k, grid,
                                  microphysics, ρ, 𝒰₁, constants)
 
-    T = Thermodynamics.temperature(𝒰₁, constants)
-    @inbounds temperature[i, j, k] = T
+    return Thermodynamics.temperature(𝒰₁, constants)
 end
 
 function compute_tendencies!(model::AtmosphereModel, callbacks=[])

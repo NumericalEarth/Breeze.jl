@@ -398,12 +398,92 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
     return nothing
 end
 
+#####
+##### Fused auxiliary pass (OPT-P1-010/040/073/074 port): velocities + auxiliary thermodynamics
+##### + temperature and pressure in one launch per `update_state!` instead of three.
+#####
+
+# Every value is pointwise in the interior except the velocity interpolation of ρ, whose halos
+# are filled up front, so results are bitwise identical to the three-kernel sequence.
+function AtmosphereModels.compute_auxiliary_state_variables!(model::CompressibleModel)
+    grid = model.grid
+    arch = grid.architecture
+    dynamics = model.dynamics
+
+    bc_args = Oceananigans.Models.boundary_condition_args(model)
+    fill_halo_regions!(dynamics.dry_density, bc_args...)
+    fill_halo_regions!(model.momentum, bc_args...)
+    fill_halo_regions!(prognostic_fields(model.formulation))
+
+    # Face-extended launch (as in compute_velocities!); centre work is masked to the interior.
+    Nx, Ny, Nz = size(grid)
+    TX, TY, TZ = Oceananigans.Grids.topology(grid)
+    launch!(arch, grid, KernelParameters(1:length(Face(), TX(), Nx),
+                                         1:length(Face(), TY(), Ny),
+                                         1:length(Face(), TZ(), Nz)),
+            _compute_fused_auxiliary_variables!,
+            model.velocities, model.momentum,
+            model.temperature, dynamics.pressure,
+            dynamics.dry_density, dynamics.total_density,
+            specific_prognostic_moisture(model),
+            model.formulation, dynamics, grid,
+            model.thermodynamic_constants,
+            model.microphysics, model.microphysical_fields,
+            model.moisture_density)
+
+    foreach(Oceananigans.ImmersedBoundaries.mask_immersed_field!, model.velocities)
+    fill_halo_regions!(model.velocities)
+    fill_halo_regions!(model.microphysical_fields, bc_args...)
+    fill_halo_regions!(model.formulation)
+    fill_halo_regions!(model.temperature)
+    fill_halo_regions!(dynamics.pressure)
+
+    return nothing
+end
+
+@kernel function _compute_fused_auxiliary_variables!(velocities, momentum, temperature_field, pressure_field,
+                                                     dry_density, total_density, specific_prognostic_moisture,
+                                                     formulation, dynamics, grid, constants,
+                                                     microphysics, microphysical_fields, moisture_density)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        velocities.u[i, j, k] = momentum.ρu[i, j, k] / ℑxᶠᵃᵃ(i, j, k, grid, dry_density)
+        velocities.v[i, j, k] = momentum.ρv[i, j, k] / ℑyᵃᶠᵃ(i, j, k, grid, dry_density)
+        velocities.w[i, j, k] = momentum.ρw[i, j, k] / ℑzᵃᵃᶠ(i, j, k, grid, dry_density)
+    end
+
+    Nx, Ny, Nz = size(grid)
+    interior = (i <= Nx) & (j <= Ny) & (k <= Nz)
+
+    if interior
+        # The diagnosed T is superseded by the temperature-and-pressure inversion below,
+        # which reads the microphysical fields just written at this point.
+        AtmosphereModels.auxiliary_thermodynamics_at!(i, j, k, grid, specific_prognostic_moisture,
+                                                      formulation, dynamics, constants, microphysics,
+                                                      microphysical_fields, moisture_density)
+        compute_temperature_and_pressure_at!(i, j, k, temperature_field, pressure_field,
+                                             dry_density, total_density, formulation, dynamics,
+                                             specific_prognostic_moisture, grid, microphysics,
+                                             microphysical_fields, constants)
+    end
+end
+
 @kernel function _compute_temperature_and_pressure!(temperature_field, pressure_field,
                                                     dry_density, total_density, formulation, dynamics,
                                                     specific_prognostic_moisture, grid, microphysics,
                                                     microphysical_fields, constants)
     i, j, k = @index(Global, NTuple)
+    compute_temperature_and_pressure_at!(i, j, k, temperature_field, pressure_field,
+                                         dry_density, total_density, formulation, dynamics,
+                                         specific_prognostic_moisture, grid, microphysics,
+                                         microphysical_fields, constants)
+end
 
+@inline function compute_temperature_and_pressure_at!(i, j, k, temperature_field, pressure_field,
+                                                    dry_density, total_density, formulation, dynamics,
+                                                    specific_prognostic_moisture, grid, microphysics,
+                                                    microphysical_fields, constants)
     @inbounds begin
         ρᵈ = dry_density[i, j, k]    # coupling density (recovers θ = ρθ/ρᵈ)
         ρ  = total_density[i, j, k]  # total air density (mass fractions, EOS, inversion)

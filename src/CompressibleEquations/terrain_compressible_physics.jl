@@ -998,3 +998,11 @@ function AtmosphereModels.reset_reference_state!(model::TerrainCompressibleModel
 
     return nothing
 end
+
+# Terrain models keep the unfused sequence (their auxiliary dynamics also builds w̃ and ρw̃).
+function AtmosphereModels.compute_auxiliary_state_variables!(model::TerrainCompressibleModel)
+    AtmosphereModels.compute_velocities!(model)
+    AtmosphereModels.compute_auxiliary_thermodynamic_variables!(model)
+    AtmosphereModels.compute_auxiliary_dynamics_variables!(model)
+    return nothing
+end
