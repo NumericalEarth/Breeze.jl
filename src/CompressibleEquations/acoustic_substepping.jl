@@ -1225,7 +1225,7 @@ end
 @kernel function _tiled_acoustic_column_substep!(ρw′, ρ′, ρθ′, ρu′, ρv′, ρθ′ˢ⁻, avg,
                                                  a, b, c, p, grid, dynamics,
                                                  Δτ, δτᵐ⁺, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ,
-                                                 Πᴸ, γRᵐᴸ, g, dᵐ⁺, dˢ⁻, fw, Gˢρw, sponge,
+                                                 Πᴸ, γRᵐᴸ, g, dᵐ⁺, dˢ⁻, fw, Gˢρw, sponge, factors,
                                                  ::Val{T}, ::Val{K}, ::Val{Nz}) where {T, K, Nz}
     P  = @localmem eltype(ρw′) (T, Nz)
     Pθ = @localmem eltype(ρw′) (T, Nz)
@@ -1270,7 +1270,7 @@ end
     i, j, _ = @index(Global, NTuple)
     li, _, lk = @index(Local, NTuple)
     if lk == 1
-        tiled_column_sweep!(ϕ, tˢ, li, i, j, ρw′, a, b, c, p, grid, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, Val(Nz))
+        tiled_column_sweep!(factors, ϕ, tˢ, li, i, j, ρw′, a, b, c, p, grid, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, Val(Nz))
     end
 
     @synchronize
@@ -1291,7 +1291,7 @@ end
 
 # The untiled kernel's sweep with f and the solution in the tile row ϕ[li, :] and t in tˢ[li, :].
 # The keep-old branch reads the old (ρw)′ from global, which is written only after the sweep.
-@inline function tiled_column_sweep!(ϕ, tˢ, li, i, j, ρw′, a, b, c, p, grid, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, ::Val{Nz}) where Nz
+@inline function tiled_column_sweep!(::Nothing, ϕ, tˢ, li, i, j, ρw′, a, b, c, p, grid, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, ::Val{Nz}) where Nz
     z = ZDirection()
     ε = 10 * eps(eltype(ρw′))
     @inbounds begin
@@ -1319,6 +1319,94 @@ end
             k -= 1
         end
     end
+    return nothing
+end
+
+#####
+##### Per-stage Thomas factorization (opt-in, `USE_STAGE_FACTORIZED_ACOUSTIC_COLUMN[]`, tiled path only)
+#####
+#
+# The (ρw)′ tridiagonal depends only on the frozen linearization state (Πᴸ, θᴸ, γRᵐᴸ), g, δτᵐ⁺ and
+# dᵐ⁺, all constant within a stage's substep loop. `_factorize_acoustic_column!` runs the forward
+# sweep's coefficient recurrence once per stage (the same expressions, in the same order, as the
+# sweep: t = c[k−1]/β, β = b[k] − a[k−1]·t) and stores a[k−1], β[k], t[k]; every substep's sweep then
+# loads three values per row instead of evaluating `get_coefficient` three times (tier A). The
+# storage (two extra 3D arrays; t uses the solver's own `t`) is allocated on first use per solver.
+const USE_STAGE_FACTORIZED_ACOUSTIC_COLUMN = Ref(false)
+
+const STAGE_FACTORIZATIONS = IdDict{Any, Any}()
+
+function stage_factorization_storage(solver)
+    return get!(STAGE_FACTORIZATIONS, solver.t) do
+        (; lower = similar(solver.t), pivot = similar(solver.t), t = solver.t)
+    end
+end
+
+@kernel function _factorize_acoustic_column!(factors, a, b, c, p, grid, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    z = ZDirection()
+    @inbounds begin
+        β = get_coefficient(i, j, 1, grid, b, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+        factors.pivot[i, j, 1] = β
+        for k = 2:Nz
+            cᵏ⁻¹ = get_coefficient(i, j, k-1, grid, c, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+            bᵏ   = get_coefficient(i, j, k,   grid, b, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+            aᵏ⁻¹ = get_coefficient(i, j, k-1, grid, a, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+            tᵏ = cᵏ⁻¹ / β
+            β = bᵏ - masked_multiply(aᵏ⁻¹, tᵏ)
+            factors.t[i, j, k] = tᵏ
+            factors.pivot[i, j, k] = β
+            factors.lower[i, j, k] = aᵏ⁻¹
+        end
+    end
+end
+
+@inline function tiled_column_sweep!(factors, ϕ, tˢ, li, i, j, ρw′, a, b, c, p, grid, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, ::Val{Nz}) where Nz
+    ε = 10 * eps(eltype(ρw′))
+    @inbounds begin
+        β = factors.pivot[i, j, 1]
+        ϕᵏ⁻ = ϕ[li, 1] / β
+        ϕ[li, 1] = ϕᵏ⁻
+        k = 2
+        while k ≤ Nz
+            fᵏ = ϕ[li, k]
+            aᵏ⁻¹ = factors.lower[i, j, k]
+            β = factors.pivot[i, j, k]
+            tˢ[li, k] = factors.t[i, j, k]
+            definitely_diagonally_dominant = abs(β) > ε
+            ϕ★ = (fᵏ - masked_multiply(aᵏ⁻¹, ϕᵏ⁻)) / β
+            ϕᵏ⁻ = ifelse(definitely_diagonally_dominant, ϕ★, ρw′[i, j, k])
+            ϕ[li, k] = ϕᵏ⁻
+            k += 1
+        end
+        k = Nz - 1
+        while k ≥ 1
+            ϕ[li, k] -= masked_multiply(tˢ[li, k+1], ϕ[li, k+1])
+            k -= 1
+        end
+    end
+    return nothing
+end
+
+stage_factors(path, substepper) = nothing
+stage_factors(::TiledAcousticColumn, substepper) =
+    USE_STAGE_FACTORIZED_ACOUSTIC_COLUMN[] ? stage_factorization_storage(substepper.vertical_solver) : nothing
+
+factorize_stage!(::Nothing, model, substepper, δτᵐ⁺) = nothing
+
+function factorize_stage!(factors, model, substepper, δτᵐ⁺)
+    grid = model.grid
+    arch = architecture(grid)
+    FT = eltype(grid)
+    g = convert(FT, model.thermodynamic_constants.gravitational_acceleration)
+    ω = FT(substepper.forward_weight)
+    dᵐ⁺, _ = implicit_damping_factors(substepper.damping, ω, grid, FT)
+    solver = substepper.vertical_solver
+    launch!(arch, grid, :xy, _factorize_acoustic_column!, factors,
+            solver.a, solver.b, solver.c, solver.parameters, grid,
+            substepper.linearization_exner, substepper.linearization_potential_temperature,
+            substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺, substepper.sponge)
     return nothing
 end
 
@@ -1773,7 +1861,8 @@ function acoustic_column_substep!(::TiledAcousticColumn{T, K}, model, substepper
             substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
             g, dᵐ⁺, dˢ⁻, substepper.vertical_momentum_tendency_factor,
             substepper.slow_vertical_momentum_tendency,
-            substepper.sponge, Val(T), Val(K), Val(Nz))
+            substepper.sponge, stage_factors(TiledAcousticColumn{T, K}(), substepper),
+            Val(T), Val(K), Val(Nz))
     launch_acoustic_column_kernel!(column!, convert_to_device(arch, args)...)
 
     fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
@@ -2006,6 +2095,8 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
     stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
+    factors = stage_factors(acoustic_column_path(grid, model.dynamics, advection), substepper)
+    factorize_stage!(factors, model, substepper, δτᵐ⁺)
     acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a
