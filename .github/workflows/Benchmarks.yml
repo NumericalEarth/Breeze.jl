@@ -71,7 +71,7 @@ jobs:
             topology: 'PBB'
             # Two Reactant compiles of the split-explicit step
             timeout: 60
-            # Profile the vanilla run's kernels (kernel_profiling/profile_kernels.jl)
+            # Profile the vanilla cases' kernels once every case is timed (--profile_kernels)
             profile_kernels: true
             extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude'
           # AD: forward+backward via Enzyme reverse-mode through the same
@@ -161,15 +161,7 @@ jobs:
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
-          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
-      - name: Profile kernels (vanilla)
-        # Per-kernel GPU times of the same configuration on the vanilla backend, with
-        # CUDA.jl's integrated profiler; after the benchmarks, so it cannot touch their timings
-        if: ${{ matrix.profile_kernels }}
-        timeout-minutes: 20
-        run: |
-          julia --color=yes --project kernel_profiling/profile_kernels.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
-          cat kernel_profile.md >> "${GITHUB_STEP_SUMMARY}"
+          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }} ${{ matrix.profile_kernels && '--profile_kernels' || '' }}
       - name: Stop earlyoom
         cancel: earlyoom
       - name: "Upload benchmark results as artifacts"
@@ -214,8 +206,9 @@ jobs:
           overwrite: false
       - name: Create job summary
         timeout-minutes: 1
-        run:
+        run: |
           cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
+          if [ -f "kernel_profile.md" ]; then cat "kernel_profile.md" >> "${GITHUB_STEP_SUMMARY}"; fi
 
   publish-benchmarks:
     name: "Publish benchmarks"
@@ -384,7 +377,7 @@ jobs:
               with open('github-action-benchmark-compile.json', 'w') as f:
                   json.dump(compile_data, f)
 
-          # Per-kernel GPU times from kernel_profiling/profile_kernels.jl: one figure per
+          # Per-kernel GPU times from run_benchmarks.jl --profile_kernels: one figure per
           # configuration, one panel per grid, one line per kernel, in ms per time step
           kernel_data = []
           for path in sorted(glob.glob('benchmarks-*/kernel_profile.json')):
