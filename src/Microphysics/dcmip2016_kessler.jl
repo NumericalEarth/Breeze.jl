@@ -317,6 +317,10 @@ All microphysical source/sink terms are applied directly to the prognostic field
 """
 @inline AtmosphereModels.microphysical_tendency(::DCMIP2016KM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
+# Kessler is operator-split: its tendency is identically zero, so the default per-cell kernel would
+# only add zero to every moisture tendency. Skip the launch (handoff Breeze #4, 368c0a0).
+AtmosphereModels.compute_microphysical_tendencies!(::DCMIP2016KM, model) = nothing
+
 #####
 ##### Precipitation rate and surface flux diagnostics
 #####
