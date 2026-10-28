@@ -595,6 +595,21 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
     return (; zip(center_names, center_fields)..., wʳ)
 end
 
+const HardwareFloat = Union{Float32, Float64}
+
+# CloudMicrophysics' 1M fall speed ends in `ifelse(q > ϵ_numerics(q), fall_w, zero(fall_w))`; branching on the same
+# predicate first skips the powers where the library would discard them (port of handoff P-L1 2ef494d / P-L1b 0a3aac0).
+@inline function precipitation_terminal_velocity(precip, vel, ρ::HardwareFloat, q::HardwareFloat)
+    if q > CloudMicrophysics.Utilities.ϵ_numerics(q)
+        return terminal_velocity(precip, vel, ρ, q)
+    else
+        FT = Base.promote_op(terminal_velocity, typeof(precip), typeof(vel), typeof(ρ), typeof(q))
+        return zero(FT)
+    end
+end
+
+@inline precipitation_terminal_velocity(precip, vel, ρ, q) = terminal_velocity(precip, vel, ρ, q)
+
 #####
 ##### update_microphysical_auxiliaries! for one-moment schemes
 #####
@@ -618,7 +633,7 @@ end
 
     # Sedimentation velocity with bottom boundary condition
     parameters = bμp.categories.parameters
-    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    𝕎ʳ = precipitation_terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
     write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
     return nothing
@@ -644,11 +659,11 @@ end
     parameters = categories.parameters
 
     # Rain sedimentation velocity
-    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    𝕎ʳ = precipitation_terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
     write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
     # Snow sedimentation velocity
-    𝕎ˢⁿ = terminal_velocity(parameters.precip.snow, parameters.terminal_velocity.snow, ρ, ℳ.qˢⁿ)
+    𝕎ˢⁿ = precipitation_terminal_velocity(parameters.precip.snow, parameters.terminal_velocity.snow, ρ, ℳ.qˢⁿ)
     write_sedimentation_velocity!(μ.wˢⁿ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ˢⁿ)
 
     return nothing
@@ -670,7 +685,7 @@ end
     parameters = categories.parameters
 
     # Rain sedimentation velocity with bottom boundary condition
-    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    𝕎ʳ = precipitation_terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
     write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
     # Cloud liquid sedimentation velocity (Stokes regime)
@@ -699,11 +714,11 @@ end
     parameters = categories.parameters
 
     # Rain sedimentation velocity
-    𝕎ʳ = terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
+    𝕎ʳ = precipitation_terminal_velocity(parameters.precip.rain, parameters.terminal_velocity.rain, ρ, ℳ.qʳ)
     write_sedimentation_velocity!(μ.wʳ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ʳ)
 
     # Snow sedimentation velocity
-    𝕎ˢⁿ = terminal_velocity(parameters.precip.snow, parameters.terminal_velocity.snow, ρ, ℳ.qˢⁿ)
+    𝕎ˢⁿ = precipitation_terminal_velocity(parameters.precip.snow, parameters.terminal_velocity.snow, ρ, ℳ.qˢⁿ)
     write_sedimentation_velocity!(μ.wˢⁿ, i, j, k, bμp.precipitation_boundary_condition, 𝕎ˢⁿ)
 
     # Cloud liquid sedimentation velocity (Stokes regime)
