@@ -263,9 +263,11 @@ jobs:
               # AD (forward+backward via Enzyme) entries get their own chart,
               # one line per checkpointing strategy. Skip the forward-only
               # clauses below so an AD point doesn't also land on a forward
-              # chart that happens to match its config.
+              # chart that happens to match its config. The chart name leaves out
+              # the dynamics and the physics, so the history stays on one chart
+              # as the AD case gains physics.
               if mode == 'ad':
-                  level_1 = f'{base_name}; AD; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+                  level_1 = f'{base_name}; AD [{ft}]'
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
                   level_4 = f'{grid_str} {checkpointing}'.strip()
