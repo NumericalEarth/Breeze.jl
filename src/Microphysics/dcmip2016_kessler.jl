@@ -268,7 +268,10 @@ function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, 
     precipitation_rate = Field{Center, Center, Nothing}(grid)
     𝕎ʳ = CenterField(grid)
 
-    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, 𝕎ʳ)
+    # Per-column sedimentation sub-cycle count of the last update (an exact float integer)
+    sedimentation_substeps = Field{Center, Center, Nothing}(grid)
+
+    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, 𝕎ʳ, sedimentation_substeps)
 end
 
 #####
@@ -390,8 +393,25 @@ and ``β^𝕎`` is the `terminal_velocity_exponent`.
     a𝕎 = microphysics.terminal_velocity_coefficient
     Cᵨ = microphysics.density_scale
     β𝕎 = microphysics.terminal_velocity_exponent
-    return a𝕎 * (rʳ * Cᵨ * ρ)^β𝕎 * sqrt(ρ₁ / ρ)
+    return a𝕎 * rain_power(rʳ * Cᵨ * ρ, β𝕎) * sqrt(ρ₁ / ρ)
 end
+
+# `b^β` for the powers of the rain mixing ratio (or rain density), whose base is exactly zero in
+# every rain-free cell. There the IEEE value of pow is returned without evaluating it: pow(±0, β) = +0
+# for β > 0 that is not an odd integer (the default exponents 0.1364, 0.875, 0.2046, 0.525). For any
+# other β, or a nonzero or NaN base, pow itself is evaluated, so the result is the same bits either
+# way (OPT-P1-081).
+@inline function rain_power(b, β)
+    FT = promote_type(typeof(b), typeof(β))
+    if (b == 0) & (β > 0) & !odd_integer(β)
+        return zero(FT)
+    else
+        return convert(FT, b^β)
+    end
+end
+
+# Whether β is an odd integer; may err towards `true` (beyond 2⁶³), which only keeps the pow.
+@inline odd_integer(β) = isinteger(β) & isodd(unsafe_trunc(Int64, β))
 
 """
     cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
@@ -416,7 +436,7 @@ The formula uses an implicit time integration for numerical stability.
     βᵃᶜᶜ = microphysics.accretion_exponent
 
     Aʳ = max(0, k₁ * (rᶜˡ - rᶜˡ★))      # Autoconversion rate
-    denom = 1 + Δt * k₂ * rʳ^βᵃᶜᶜ       # Implicit accretion factor
+    denom = 1 + Δt * k₂ * rain_power(rʳ, βᵃᶜᶜ) # Implicit accretion factor
     Δrᴾ = rᶜˡ - (rᶜˡ - Δt * Aʳ) / denom
     return Δrᴾ
 end
@@ -478,9 +498,20 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     kernel_Δt = kernel_time_step(arch, grid, Δt)
 
-    launch!(arch, grid, :xy, _microphysical_update!,
+    # Pointwise restructuring (OPT-P1-007/077), bit-identical to the column kernel:
+    # 1. phase 1 (mass fractions → mixing ratios, 𝕎ʳ) pointwise;
+    # 2. per-column sub-cycle count Ns from the column CFL minimum;
+    # 3. columns with Ns = 1 (almost all) run their single sub-cycle pointwise, evaluating the
+    #    (Jacobi) sedimentation flux from the untouched level k + 1 values;
+    # 4. columns with Ns ≥ 2 run all sub-cycles in the serial column kernel (no-op elsewhere).
+    launch!(arch, grid, :xyz, _kessler_mixing_ratios!, microphysics, ρ, ρqᵛ, μ)
+    launch!(arch, grid, :xy, _kessler_subcycle_count!, microphysics, grid, Nz, kernel_Δt, μ)
+    launch!(arch, grid, :xyz, _kessler_single_subcycle_update!,
             microphysics, grid, Nz, kernel_Δt, ρ, ρᵈ, dry_air_coupled,
             p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+    launch!(arch, grid, :xy, _microphysical_update!,
+            microphysics, grid, Nz, kernel_Δt, ρ, ρᵈ, dry_air_coupled,
+            p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ, Val(true))
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
@@ -543,7 +574,7 @@ Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
     # Rain evaporation (KW eq. 2.14)
     ρᵏ = Cᵨ * ρ
     ρrʳ = ρᵏ * rʳ
-    Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
+    Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * rain_power(ρrʳ, βᵉᵛ₁)) * rain_power(ρrʳ, βᵉᵛ₂)
     Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
     Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)
     Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))
@@ -619,10 +650,19 @@ end
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
                                         density, coupling_density, dry_air_coupled,
                                         pressure, pˢᵗ, constants,
-                                        θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+                                        θˡⁱ, ρθˡⁱ, ρqᵛ, μ, phase_one_done)
     i, j = @index(Global, NTuple)
+    prepared = phase_one_done isa Val{true}
     FT = eltype(grid)
     precipitation_rate_field = μ.precipitation_rate
+
+    if prepared
+        # Phase 1 was done by `_kessler_mixing_ratios!`; the column runs here only if the
+        # pointwise single sub-cycle update did not (Ns ≥ 2).
+        @inbounds active = μ.sedimentation_substeps[i, j, 1] != 1
+    else
+        active = true
+    end
 
     # Thermodynamic constants
     ℒˡᵣ = constants.liquid.reference_latent_heat
@@ -648,6 +688,9 @@ end
     max_Δt = Δt
     zᵏ = znode(i, j, 1, grid, Center(), Center(), Center())
 
+    if prepared
+        max_Δt = kessler_column_max_time_step(i, j, grid, Nz, Δt, cfl, μ.𝕎ʳ)
+    else
     for k = 1:(Nz-1)
         @inbounds begin
             ρ = density[i, j, k]
@@ -681,9 +724,11 @@ end
         μ.qᶜˡ[i, j, Nz] = rᶜˡ
         μ.qʳ[i, j, Nz]  = rʳ
     end
+    end # if prepared
 
-    # Subcycling for CFL constraint on rain sedimentation
-    Ns = max(1, ceil(Int, Δt / max_Δt))
+    # Subcycling for CFL constraint on rain sedimentation (no sub-cycles where the column is
+    # not active: the pointwise single sub-cycle update finished it)
+    Ns = ifelse(active, max(1, ceil(Int, Δt / max_Δt)), 0)
     inv_Ns = inv(FT(Ns))
     Δtₛ = Δt * inv_Ns
     # Fˢᵘʳᶠ: accumulated surface rain mass flux over subcycles.
@@ -834,6 +879,7 @@ end
         end
     end
 
+    if active # column-uniform: inactive columns were finished by the pointwise update
     @inbounds begin
         rᵗ₁ = μ.qᵛ[i, j, 1] + μ.qᶜˡ[i, j, 1] + μ.qʳ[i, j, 1]
         final_surface_density = ifelse(dry_air_coupled,
@@ -866,6 +912,166 @@ end
             μ.qᵛ[i, j, k]   = qᵛ
             μ.qᶜˡ[i, j, k]  = qᶜˡ
             μ.qʳ[i, j, k]   = qʳ
+        end
+    end
+    end # if active
+end
+
+#####
+##### Pointwise kernels (OPT-P1-007/077)
+#####
+#
+# Same expressions in the same order as `_microphysical_update!`, so every column reproduces
+# the column kernel bit for bit. The column kernel's level loop is Jacobi in the sedimentation
+# term: level k reads only the old values of level k + 1. In the single sub-cycle update no
+# thread stores the rain mixing ratio μ.qʳ (the only field another thread of the column reads);
+# its value after the update is dead, because the `update_state!` that follows recomputes the
+# specific moisture fields from the prognostic densities.
+
+# Column CFL minimum, as in phase 1 of `_microphysical_update!`.
+@inline function kessler_column_max_time_step(i, j, grid, Nz, Δt, cfl, 𝕎ʳ)
+    max_Δt = Δt
+    zᵏ = znode(i, j, 1, grid, Center(), Center(), Center())
+    for k = 1:(Nz-1)
+        @inbounds 𝕎ʳᵏ = 𝕎ʳ[i, j, k]
+        zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
+        Δz = zᵏ⁺¹ - zᵏ
+        max_Δt = min(max_Δt, cfl * Δz / 𝕎ʳᵏ)
+        zᵏ = zᵏ⁺¹
+    end
+    return max_Δt
+end
+
+# Phase 1, pointwise: mass fractions → mixing ratios (stored in μ.qᵛ, μ.qᶜˡ, μ.qʳ) and 𝕎ʳ.
+@kernel function _kessler_mixing_ratios!(microphysics, density, ρqᵛ, μ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρ₁ = density[i, j, 1]
+        ρ = density[i, j, k]
+        qᵛ = ρqᵛ[i, j, k] / ρ
+        rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ, μ.ρqᶜˡ[i, j, k], μ.ρqʳ[i, j, k], ρ)
+        μ.𝕎ʳ[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+        μ.qᵛ[i, j, k]  = rᵛ
+        μ.qᶜˡ[i, j, k] = rᶜˡ
+        μ.qʳ[i, j, k]  = rʳ
+    end
+end
+
+# Per-column sub-cycle count Ns, stored as an exact float integer.
+@kernel function _kessler_subcycle_count!(microphysics, grid, Nz, Δt, μ)
+    i, j = @index(Global, NTuple)
+    FT = eltype(grid)
+    max_Δt = kessler_column_max_time_step(i, j, grid, Nz, Δt, microphysics.substep_cfl, μ.𝕎ʳ)
+    Ns = max(1, ceil(Int, Δt / max_Δt))
+    @inbounds μ.sedimentation_substeps[i, j, 1] = convert(FT, Ns)
+end
+
+# The single sub-cycle of every column with Ns = 1 (column-uniform guard), including the
+# surface precipitation rate (level 1) and the mixing ratio → mass fraction writeback.
+@kernel function _kessler_single_subcycle_update!(microphysics, grid, Nz, Δt,
+                                                  density, coupling_density, dry_air_coupled,
+                                                  pressure, pˢᵗ, constants,
+                                                  θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+    i, j, k = @index(Global, NTuple)
+    FT = eltype(grid)
+
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    cᵖᵈ = constants.dry_air.heat_capacity
+    T_DCMIP2016 = microphysics.dcmip_temperature_scale
+    f₅ = saturation_adjustment_coefficient(T_DCMIP2016, constants)
+    δT = constants.saturation_vapor_pressure.liquid_temperature_offset
+    Cᵨ = microphysics.density_scale
+
+    @inbounds single = μ.sedimentation_substeps[i, j, 1] == 1
+
+    if single
+        Ns = 1
+        inv_Ns = inv(FT(Ns))
+        Δtₛ = Δt * inv_Ns
+
+        @inbounds begin
+            # Surface rain mass flux of the pre-update level-1 state (first sub-cycle)
+            Fˢᵘʳᶠ = zero(FT)
+            if k == 1
+                ρ₁ = density[i, j, 1]
+                ρᵈ₁ = coupling_density[i, j, 1]
+                rᵛ₁ = μ.qᵛ[i, j, 1]
+                rᶜˡ₁ = μ.qᶜˡ[i, j, 1]
+                rʳ₁ = μ.qʳ[i, j, 1]
+                rᵗ₁ = rᵛ₁ + rᶜˡ₁ + rʳ₁
+                qʳ₁ = rʳ₁ / (1 + rᵗ₁)
+                ρqʳ₁ = ifelse(dry_air_coupled, ρᵈ₁ * rʳ₁, ρ₁ * qʳ₁)
+                Fˢᵘʳᶠ += ρqʳ₁ * μ.𝕎ʳ[i, j, 1]
+            end
+
+            ρ = density[i, j, k]
+            p = pressure[i, j, k]
+            θˡⁱᵏ = θˡⁱ[i, j, k]
+            rᵛ = μ.qᵛ[i, j, k]
+            rᶜˡ = μ.qᶜˡ[i, j, k]
+            rʳ = μ.qʳ[i, j, k]
+
+            # Compute temperature from θˡⁱ
+            rˡ = rᶜˡ + rʳ
+            r = MoistureMixingRatio(rᵛ, rˡ)
+            cᵖᵐ = mixture_heat_capacity(r, constants)
+            Rᵐ  = mixture_gas_constant(r, constants)
+            q = MoistureMassFractions(r)
+            qˡ = q.liquid
+            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
+            Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
+
+            # Rain sedimentation flux (upstream differencing; rain falls out at the top)
+            𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
+            if k < Nz
+                ρᵏ = Cᵨ * coupling_density[i, j, k]
+                zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
+                zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
+                Δz = zᵏ⁺¹ - zᵏ
+                ρᵏ⁺¹ = Cᵨ * coupling_density[i, j, k+1]
+                rʳᵏ⁺¹ = μ.qʳ[i, j, k+1]
+                𝕎ʳᵏ⁺¹ = μ.𝕎ʳ[i, j, k+1]
+                Δr𝕎 = Δtₛ * (ρᵏ⁺¹ * rʳᵏ⁺¹ * 𝕎ʳᵏ⁺¹ - ρᵏ * rʳ * 𝕎ʳᵏ) / (ρᵏ * Δz)
+            else
+                zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
+                zᵏ⁻¹ = znode(i, j, k-1, grid, Center(), Center(), Center())
+                Δz_half = (zᵏ - zᵏ⁻¹) / 2
+                Δr𝕎 = -Δtₛ * rʳ * 𝕎ʳᵏ / Δz_half
+            end
+
+            rᵛ, rᶜˡ, rʳ, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+                                                         microphysics, constants, f₅, δT, FT)
+
+            # Update θˡⁱ from latent heating
+            ΔT_phase = ℒˡᵣ / cᵖᵈ * Δrˡ
+            T = Tᵏ + ΔT_phase
+
+            rˡ = rᶜˡ + rʳ
+            r = MoistureMixingRatio(rᵛ, rˡ)
+            cᵖᵐ = mixture_heat_capacity(r, constants)
+            Rᵐ  = mixture_gas_constant(r, constants)
+            q = MoistureMassFractions(r)
+            qˡ = q.liquid
+            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
+            θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
+
+            θˡⁱ[i, j, k]  = θˡⁱ_new
+            ρᵈ = coupling_density[i, j, k]
+            ρθˡⁱ[i, j, k] = ρᵈ * θˡⁱ_new
+
+            if k == 1
+                rᵗ₁ = rᵛ + rᶜˡ + rʳ
+                final_surface_density = ifelse(dry_air_coupled, ρᵈ * (1 + rᵗ₁), ρ)
+                μ.precipitation_rate[i, j, 1] = Fˢᵘʳᶠ * inv_Ns / final_surface_density
+            end
+
+            # Phase 3: mixing ratios → mass fractions (μ.qʳ is not stored, see above)
+            qᵛ, qᶜˡ, qʳ, _qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
+            ρqᵛ[i, j, k]    = ifelse(dry_air_coupled, ρᵈ * rᵛ, ρ * qᵛ)
+            μ.ρqᶜˡ[i, j, k] = ifelse(dry_air_coupled, ρᵈ * rᶜˡ, ρ * qᶜˡ)
+            μ.ρqʳ[i, j, k]  = ifelse(dry_air_coupled, ρᵈ * rʳ, ρ * qʳ)
+            μ.qᵛ[i, j, k]   = qᵛ
+            μ.qᶜˡ[i, j, k]  = qᶜˡ
         end
     end
 end
