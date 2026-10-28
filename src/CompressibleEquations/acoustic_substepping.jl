@@ -24,7 +24,9 @@
 ##### Refs: Wicker & Skamarock 2002 (MWR 130, 2088); Klemp et al. 2018 (MWR 146, 1911).
 #####
 
-using KernelAbstractions: @kernel, @index
+using KernelAbstractions: KernelAbstractions, @kernel, @index, @localmem, @synchronize
+using Oceananigans.Architectures: convert_to_device, device
+using Oceananigans.Utils: configure_kernel
 
 using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture
 using Oceananigans.Models: boundary_condition_args
@@ -1066,6 +1068,49 @@ acoustic_column_path(::RectilinearGrid, ::CompressibleDynamics{<:Any, <:Any, <:A
 acoustic_column_path(::RectilinearGrid, ::CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
                      ::AdaptiveImplicitVerticalAdvection) = SplitAcousticColumn()
 
+# Optional register cap for the fused column launches (CUDA only; tier A: register allocation only,
+# the instructions and therefore the stored values are unchanged). `ACOUSTIC_COLUMN_MAXREGS[] = 96`
+# reproduces the handoff's FC7 (masonlee: −5..−10 % column work at 336²/672²); 0 (default) leaves the
+# launch to KernelAbstractions. KernelAbstractions has no register option, so the capped launch repeats
+# what CUDA's KernelAbstractions backend does for a statically sized kernel, plus `maxregs`. CUDA is
+# found at run time through Oceananigans' CUDA extension, so Breeze takes no CUDA dependency.
+const ACOUSTIC_COLUMN_MAXREGS = Ref(0)
+
+function cuda_core_module()
+    ext = Base.get_extension(Oceananigans, :OceananigansCUDAExt)
+    isnothing(ext) && return nothing
+    CUDA = ext.CUDA
+    return isdefined(CUDA, :CUDACore) ? CUDA.CUDACore : CUDA
+end
+
+is_cuda_kernel(kernel!) = nameof(typeof(KernelAbstractions.backend(kernel!))) === :CUDABackend
+
+# `kernel!` is a KernelAbstractions kernel with static workgroup and static ndrange; `args` are device-converted.
+function launch_acoustic_column_kernel!(kernel!, args...)
+    maxregs = ACOUSTIC_COLUMN_MAXREGS[]
+    if maxregs > 0 && is_cuda_kernel(kernel!)
+        launch_with_register_cap!(cuda_core_module(), kernel!, maxregs, args)
+    else
+        kernel!(args...)
+    end
+    return nothing
+end
+
+function launch_with_register_cap!(cuda, kernel!, maxregs, args)
+    ndrange, workgroupsize, iterspace, dynamic = KernelAbstractions.launch_config(kernel!, nothing, nothing)
+    ctx = KernelAbstractions.mkcontext(kernel!, ndrange, iterspace)
+    threads = length(KernelAbstractions.workitems(iterspace))
+    blocks = length(KernelAbstractions.blocks(iterspace))
+    blocks == 0 && return nothing
+    kernel_args = map(cuda.cudaconvert, (ctx, args...))
+    kernel_tt = Tuple{map(Core.Typeof, kernel_args)...}
+    backend = KernelAbstractions.backend(kernel!)
+    kernel = cuda.cufunction(kernel!.f, kernel_tt; always_inline=backend.always_inline,
+                             maxthreads=threads, maxregs)
+    kernel(kernel_args...; threads, blocks)
+    return nothing
+end
+
 @kernel function _fused_acoustic_column_substep!(ρw′, ρ′, ρθ′, ρu′, ρv′, ρ′★, ρθ′★, ρθ′ˢ⁻, avg,
                                                  a, b, c, p, t, grid, dynamics,
                                                  Δτ, δτᵐ⁺, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ,
@@ -1698,8 +1743,8 @@ function acoustic_column_substep!(::FusedAcousticColumn, model, substepper, stag
     (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
     solver = substepper.vertical_solver
 
-    launch!(arch, grid, :xy, _fused_acoustic_column_substep!,
-            substepper.momentum_perturbation.w,
+    column!, _ = configure_kernel(arch, grid, :xy, _fused_acoustic_column_substep!)
+    args = (substepper.momentum_perturbation.w,
             substepper.density_perturbation,
             substepper.density_potential_temperature_perturbation,
             substepper.momentum_perturbation.u,
@@ -1716,6 +1761,7 @@ function acoustic_column_substep!(::FusedAcousticColumn, model, substepper, stag
             g, dᵐ⁺, dˢ⁻, substepper.vertical_momentum_tendency_factor,
             substepper.slow_vertical_momentum_tendency,
             substepper.sponge)
+    launch_acoustic_column_kernel!(column!, convert_to_device(arch, args)...)
 
     # The (ρθ)′ stash is read with horizontal neighbours only by the divergence damping;
     # its halo is filled together with ρ′, (ρθ)′ in `acoustic_substep!` (`stash_halo_fields`).
