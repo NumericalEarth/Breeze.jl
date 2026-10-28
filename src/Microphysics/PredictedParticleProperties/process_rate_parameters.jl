@@ -90,7 +90,50 @@ function Base.show(io::IO, floors::NumericalFloors)
     print(io, summary(floors), "(mass_scale=", floors.mass_scale, ")")
 end
 
-struct ProcessRate{FT, PS}
+"""
+$(TYPEDEF)
+
+Diagnose the vapor excess over liquid ``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T)`` from the thermodynamic
+state and relax cloud condensation toward saturation. This is P3's default; no extra
+prognostic field is carried.
+"""
+struct DiagnosticVaporExcess end
+
+"""
+$(TYPEDEF)
+
+Carry the density-weighted vapor excess over liquid ``ρδqᵛ⁺ˡ`` as a prognostic field and
+condense with the bounded saturation adjustment of
+[Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008).
+"""
+struct PrognosticVaporExcess end
+
+Base.summary(::DiagnosticVaporExcess) = "DiagnosticVaporExcess"
+Base.summary(::PrognosticVaporExcess) = "PrognosticVaporExcess"
+
+"""
+$(TYPEDEF)
+
+Track liquid water on ice ``qʷⁱ`` and hence the liquid fraction of ice particles
+[Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction). Melting and
+above-freezing collection add liquid to the ice, which is shed to rain or refrozen.
+This is P3's default.
+"""
+struct PrognosticLiquidFraction end
+
+"""
+$(TYPEDEF)
+
+Carry no liquid on ice, as in P3 before [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction):
+melting and above-freezing collection route liquid directly to rain, and any ``qʷⁱ``
+on the state is drained to rain over `sink_limiting_timescale`.
+"""
+struct NoLiquidFraction end
+
+Base.summary(::PrognosticLiquidFraction) = "PrognosticLiquidFraction"
+Base.summary(::NoLiquidFraction) = "NoLiquidFraction"
+
+struct ProcessRate{FT, VE, LF}
     # Properties cached from `ThermodynamicConstants`. These are not independent
     # parameters: each is copied from the constants at construction and cannot be set
     # separately, so the two can never disagree.
@@ -255,22 +298,20 @@ struct ProcessRate{FT, PS}
     tiny_mass_evaporation_threshold :: FT                    # [kg/kg]
     subsaturation_evaporation_threshold :: FT                # [-]
 
-    # Liquid fraction mode.
-    # When true: wet growth rime densification is suppressed (liquid tracked
-    # explicitly in qʷⁱ), and melt-densification is skipped.
-    liquid_fraction_active :: Bool
+    # Liquid fraction treatment. With `PrognosticLiquidFraction()` (default), wet growth
+    # rime densification is suppressed (liquid tracked explicitly in qʷⁱ), and
+    # melt-densification is skipped. `NoLiquidFraction()` routes that liquid to rain.
+    liquid_fraction :: LF
 
-    # Predicted supersaturation mode.
-    # When true, carry supersaturation as a prognostic variable and use
-    # bounded Grabowski-Morrison (2008) adjustment for condensation.
-    # When false (default), use relaxation-to-saturation.
+    # Vapor excess treatment: `DiagnosticVaporExcess()` (default) relaxes condensation
+    # toward saturation; `PrognosticVaporExcess()` carries `ρδqᵛ⁺ˡ` and uses the bounded
+    # Grabowski-Morrison (2008) adjustment for condensation.
     #
-    # The public field remains a `Bool`. The same value is carried by the `PS` type
-    # parameter so allocation decisions and kernel gates can dispatch at compile time.
-    # `prognostic_field_names` must fold to a constant tuple (a `Union` return type makes
-    # the host-side prognostic loop allocate), and `materialize_microphysical_fields`
-# needs the type value to decide whether `ρsᵛ⁺ˡ` exists at all.
-    predict_supersaturation :: Bool
+    # The `VE` type parameter lets allocation decisions and kernel gates dispatch at
+    # compile time. `prognostic_field_names` must fold to a constant tuple (a `Union`
+    # return type makes the host-side prognostic loop allocate), and
+    # `materialize_microphysical_fields` needs the type to decide whether `ρδqᵛ⁺ˡ` exists.
+    vapor_excess :: VE
 
     # Deposition/sublimation calibration factors.
     # Ad hoc multipliers to increase or decrease deposition and/or sublimation rates.
@@ -324,18 +365,18 @@ path uses ``μ_r = 0``. None are duplicated in this rate-parameter container.
 
 # Example
 
-The second type parameter carries the value of the Boolean
-`predict_supersaturation` field, so the default `false` drops `ρsᵛ⁺ˡ` from the
-prognostic set entirely while `params.predict_supersaturation` remains usable in
-ordinary Boolean expressions.
+The second and third type parameters are the types of `vapor_excess` and
+`liquid_fraction`. The default `DiagnosticVaporExcess()` drops `ρδqᵛ⁺ˡ` from the
+prognostic set entirely.
 
 ```jldoctest
-using Breeze.Microphysics.PredictedParticleProperties: ProcessRate
+using Breeze.Microphysics.PredictedParticleProperties: ProcessRate, DiagnosticVaporExcess,
+                                                       PrognosticLiquidFraction
 params = ProcessRate(Float64)
 typeof(params)
 
 # output
-ProcessRate{Float64, false}
+ProcessRate{Float64, DiagnosticVaporExcess, PrognosticLiquidFraction}
 ```
 
 All parameters are keyword arguments with physically-based defaults. The coupled
@@ -520,11 +561,11 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         tiny_mass_evaporation_threshold = 1e-12,
         subsaturation_evaporation_threshold = 0.001,
 
-        # Liquid fraction mode
-        liquid_fraction_active = true,
+        # Liquid fraction treatment
+        liquid_fraction = PrognosticLiquidFraction(),
 
-        # Predicted supersaturation
-        predict_supersaturation = false,
+        # Vapor excess treatment
+        vapor_excess = DiagnosticVaporExcess(),
 
         # Deposition/sublimation calibration factors
         calibration_factor_deposition = 1.0,
@@ -536,9 +577,7 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
     coupled_sink_limiting_iterations > 0 ||
         throw(ArgumentError("coupled_sink_limiting_iterations must be positive"))
 
-    predict_supersaturation = Bool(predict_supersaturation)
-
-    return ProcessRate{FT, predict_supersaturation}(
+    return ProcessRate{FT, typeof(vapor_excess), typeof(liquid_fraction)}(
         FT(thermodynamic_constants.liquid.density),
         FT(thermodynamic_constants.ice.density),
         FT(freezing_temperature),
@@ -613,20 +652,22 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         FT(tiny_ice_to_rain_threshold),
         FT(tiny_mass_evaporation_threshold),
         FT(subsaturation_evaporation_threshold),
-        Bool(liquid_fraction_active),
-        predict_supersaturation,
+        liquid_fraction,
+        vapor_excess,
         FT(calibration_factor_deposition),
         FT(calibration_factor_sublimation),
         NumericalFloors{FT}(floors)
     )
 end
 
-# Gate a rate on the predicted-supersaturation switch. Dispatching on the type value
-# folds the branch at compile time while preserving a user-facing `Bool` field.
-@inline gate_predicted_supersaturation(::ProcessRate{FT, false}, x) where FT = 0 * x
-@inline gate_predicted_supersaturation(::ProcessRate{FT, true}, x) where FT = x
+# Gate a rate on the vapor excess treatment. Dispatching on the type folds the branch
+# at compile time.
+@inline gate_prognostic_vapor_excess(::ProcessRate{FT, DiagnosticVaporExcess}, x) where FT = 0 * x
+@inline gate_prognostic_vapor_excess(::ProcessRate{FT, PrognosticVaporExcess}, x) where FT = x
 
-@inline predicts_supersaturation(::ProcessRate{FT, PS}) where {FT, PS} = PS
+# Whether liquid on ice is tracked. A compile-time constant, so `ifelse` gates fold.
+@inline tracks_liquid_on_ice(::ProcessRate{FT, VE, PrognosticLiquidFraction}) where {FT, VE} = true
+@inline tracks_liquid_on_ice(::ProcessRate{FT, VE, NoLiquidFraction}) where {FT, VE} = false
 
 Base.summary(::ProcessRate) = "ProcessRate"
 

@@ -20,17 +20,17 @@ Return the default dynamics for the given grid and thermodynamic constants.
 function default_dynamics end
 
 """
-    materialize_dynamics(dynamics_stub, grid, boundary_conditions, thermodynamic_constants, microphysics=nothing)
+    materialize_dynamics(dynamics_stub, grid, boundary_conditions, thermodynamic_constants, microphysics, formulation)
 
 Materialize a dynamics stub into a complete dynamics object with all required fields.
 
-The `microphysics` argument is optional and used by dynamics types that need to know
-the microphysics scheme to create appropriate prognostic state (e.g., `ParcelDynamics`).
+The `microphysics` and `formulation` arguments select the parcel's prognostic state.
 """
 function materialize_dynamics end
 
 # Default: ignore microphysics argument (for backward compatibility)
 materialize_dynamics(d, grid, bcs, constants, microphysics) = materialize_dynamics(d, grid, bcs, constants)
+materialize_dynamics(d, grid, bcs, constants, microphysics, formulation) = materialize_dynamics(d, grid, bcs, constants, microphysics)
 
 """
     materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)

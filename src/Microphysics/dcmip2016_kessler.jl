@@ -988,20 +988,22 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     state = model.dynamics.state
     constants = model.thermodynamic_constants
 
-    # Extract parcel state
-    ρ = state.ρ
+    # Extract parcel state. The stored prognostics are weighted by the environmental
+    # density `ρᵉ`; the microphysical rates use the parcel's own density `ρ`.
+    ρᵉ = state.ρ
     𝒰 = state.𝒰
     μ = state.μ
+    ρ = density(𝒰, constants)
 
     # Get pressure at parcel height (interpolate from environmental profile)
     p_parcel = interpolate(state.z, model.dynamics.pressure)
 
     # Convert mass fractions → mixing ratios (shared helper).
     # Parcel model stores total moisture in qᵗ; compute vapor by subtracting condensate.
-    qᶜˡ_s = max(0, μ.ρqᶜˡ / ρ)
-    qʳ_s = max(0, μ.ρqʳ / ρ)
+    qᶜˡ_s = max(0, μ.ρqᶜˡ / ρᵉ)
+    qʳ_s = max(0, μ.ρqʳ / ρᵉ)
     qᵛ_s = max(0, state.qᵗ - qᶜˡ_s - qʳ_s)
-    rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ_s, μ.ρqᶜˡ, μ.ρqʳ, ρ)
+    rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ_s, μ.ρqᶜˡ, μ.ρqʳ, ρᵉ)
 
     # Temperature from thermodynamic state
     T = temperature(𝒰, constants)
@@ -1023,20 +1025,16 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     _, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
     # Update parcel state (parcel model stores total moisture in qᵗ)
-    state.μ = (; ρqᶜˡ = ρ * qᶜˡ, ρqʳ = ρ * qʳ)
+    state.μ = (; ρqᶜˡ = ρᵉ * qᶜˡ, ρqʳ = ρᵉ * qʳ)
     state.qᵗ = qᵗ
-    state.ρqᵗ = ρ * qᵗ
+    state.ρqᵗ = ρᵉ * qᵗ
 
     # Update thermodynamic state with new moisture fractions.
-    # Parcel models conserve specific static energy; latent heating is implicit.
+    # The parcel's thermodynamic variable is conserved; latent heating is implicit.
     rˡ = rᶜˡ + rʳ
     r = MoistureMixingRatio(rᵛ, rˡ)
     q = MoistureMassFractions(r)
     state.𝒰 = with_moisture(𝒰, q)
-
-    # Keep static energy consistent with the thermodynamic state.
-    state.ℰ = state.𝒰.static_energy
-    state.ρℰ = ρ * state.ℰ
 
     return nothing
 end

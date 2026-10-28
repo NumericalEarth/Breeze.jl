@@ -138,6 +138,10 @@ export
     ConstantRateCondensateFormation,
     P3Microphysics,
     PredictedParticlePropertiesMicrophysics,
+    DiagnosticVaporExcess,
+    PrognosticVaporExcess,
+    PrognosticLiquidFraction,
+    NoLiquidFraction,
 
     # BoundaryConditions
     BulkDrag,

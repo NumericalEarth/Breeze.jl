@@ -67,6 +67,10 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρ qᵛ``                            | `ρqᵛ`  | `AM.moisture_density`               | Vapor density (non-equilibrium schemes)                                        |
 | ``ρ qᵗ``                            | `ρqᵗ`  |                                     | Total moisture density; the `boundary_conditions` and `forcing` key for a water input (specific alias `qᵗ` for forcings), routed onto ``ρqᵛᵉ`` whatever the microphysics calls it |
 | ``qᵛ``                              | `qᵛ`   | `AM.microphysical_fields.qᵛ`        | Vapor mass fraction, a.k.a "specific humidity"                                 |
+| ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation vapor mass fraction over liquid water (kg/kg)                       |
+| ``δqᵛ⁺ˡ``                           | `δqᵛ⁺ˡ` | `AM.microphysical_fields.δqᵛ⁺ˡ`     | Vapor excess over liquid, ``δqᵛ⁺ˡ = qᵛ − qᵛ⁺ˡ`` (kg/kg); P3's optional prognostic |
+| ``δqᵛ⁺ⁱ``                           | `δqᵛ⁺ⁱ` |                                     | Vapor excess over ice, ``δqᵛ⁺ⁱ = qᵛ − qᵛ⁺ⁱ`` (kg/kg)                           |
+| ``ρδqᵛ⁺ˡ``                          | `ρδqᵛ⁺ˡ` | `AM.microphysical_fields.ρδqᵛ⁺ˡ`    | Density-weighted vapor excess over liquid (kg/m³); may be negative             |
 | ``qˡ``                              | `qˡ`   | `AM.microphysical_fields.qˡ`        | Liquid mass fraction                                                           |
 | ``qⁱ``                              | `qⁱ`   | `AM.microphysical_fields.qⁱ`        | Ice mass fraction                                                              |
 | ``qᶜˡ``                             | `qᶜˡ`  | `AM.microphysical_fields.qᶜˡ`       | Cloud liquid mass fraction                                                     |

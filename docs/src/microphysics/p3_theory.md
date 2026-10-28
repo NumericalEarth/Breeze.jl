@@ -228,23 +228,33 @@ neither allocates nor advects it.
 - ``ρb^f``: Rime volume concentration [m³/m³].
 - ``ρq^{wi}``: Liquid water on ice [kg/m³].
 
-**Supersaturation prognostic** (0–1 variables):
+**Vapor-excess prognostic** (0–1 variables):
 
-- ``ρs^{v+l}``: Liquid supersaturation density [kg/m³]
+- ``ρδq^{v+l}``: Density-weighted vapor excess over liquid [kg/m³]
   ([Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008)).
-  Breeze exposes a `predict_supersaturation` flag on `ProcessRate`,
-  defaulting to `false`. When `false`, the field is not allocated and is
+  Breeze selects the treatment with the `vapor_excess` keyword of `ProcessRate`
+  and `P3Microphysics`, defaulting to `DiagnosticVaporExcess()`.
+  With `DiagnosticVaporExcess()`, the field is not allocated and is
   absent from `prognostic_field_names`; diagnostics that need local saturation use
-  ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008)
+  ``q^v - q^{v+l}(T)`` directly. With `PrognosticVaporExcess()`, the bounded G&M (2008)
   adjustment fires before the M&G rates, shifting the local ``q^v``,
   ``q^{cl}``, and ``T`` (and thus ``q^{v+l}(T)``) so that
-  ``q^v - q^{v+l}`` matches the advected ``s^l``. The M&G semi-analytic
-  rates then run on this post-G&M state — the "diagnostic supersaturation"
+  ``q^v - q^{v+l}`` matches the advected ``δq^{v+l}``. The M&G semi-analytic
+  rates then run on this post-G&M state — the "diagnostic vapor excess"
   they see is ``q^v_{\text{post-GM}} - q^{v+l}(T_{\text{post-GM}})``, not the
-  host's ``s^l`` field. The G&M adjustment and the end-of-step
-  ``s^l`` reset both relax over `sink_limiting_timescale`, so they land
+  host's ``δq^{v+l}`` field. The G&M adjustment and the end-of-step
+  ``δq^{v+l}`` reset both relax over `sink_limiting_timescale`, so they land
   exactly when the host integrates with
-  ``\Delta t = \text{sink\_limiting\_timescale}``.
+  ``\Delta t = \text{sink\_limiting\_timescale}``. The ``δq^{v+l}`` tendency
+  also carries the external forcing ``-∂_t q^{v+l}`` that drives diffusional growth
+  (see [Vapor Deposition and Sublimation](@ref p3_deposition) below), as in
+  [Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008). Adiabatic cooling
+  therefore changes the prognostic and the host's ``q^v - q^{v+l}`` alike, and the G&M
+  adjustment corrects only what the forcing omits, such as transport errors and
+  radiative cooling. Without that term the prognostic would see only the
+  phase-change sink, and the host's vapor excess would grow until the G&M
+  relaxation balanced the forcing, at about the forcing times
+  `sink_limiting_timescale`.
 
 From these, diagnostic properties are computed:
 
@@ -337,8 +347,9 @@ the appendix: ``q^{v+l}`` and ``q^{v+i}`` are the saturation mass fractions over
 planar liquid and ice, and ``p^{v+}`` the saturation vapor pressure. Departures
 from saturation get their own symbols: ``\mathscr{S}^l`` and ``\mathscr{S}^i``
 (`𝒮`) are the supersaturation ratios ``p^v / p^{v+} - 1``, and
-``s^{v+l} = q^v - q^{v+l}`` is the liquid supersaturation in mass-fraction form,
-which is what the optional prognostic ``ρs^{v+l}`` (`ρsᵛ⁺ˡ`) carries. Nothing in these
+``δq^{v+l} = q^v - q^{v+l}`` and ``δq^{v+i} = q^v - q^{v+i}`` are the vapor excesses
+over liquid and ice in mass-fraction form. The optional prognostic ``ρδq^{v+l}``
+(`ρδqᵛ⁺ˡ`) carries the excess over liquid. Nothing in these
 pages spells "sat" or "s" as a subscript to mean saturation.
 
 **Free parameters are ``\mathbb{C}``.** Empirically fitted constants do not each
@@ -380,7 +391,7 @@ maximum to eleven. See [Prognostic Variables and Tendencies](@ref p3_prognostics
 | ``ρb^f``    | `ρbᶠ`  | Rime volume density [m³/m³] |
 | ``ρq^{wi}`` | `ρqʷⁱ` | Liquid coating on ice, mass density [kg/m³] |
 | ``ρq^v``    | `ρqᵛ`  | Water vapor density [kg/m³]; the host-coupled moisture variable |
-| ``ρs^{v+l}`` | `ρsᵛ⁺ˡ` | Liquid supersaturation density [kg/m³]; only with `predict_supersaturation` |
+| ``ρδq^{v+l}`` | `ρδqᵛ⁺ˡ` | Density-weighted vapor excess over liquid [kg/m³]; only with `vapor_excess = PrognosticVaporExcess()` |
 | ``ρn^a``    | `ρnᵃ`  | Unactivated aerosol number density [m⁻³]; only with aerosol activation and `prognostic=true` |
 
 ### Size Distribution
@@ -2020,7 +2031,7 @@ at `maximum_aggregation_rime_fraction` (0.9).
     The single-category aggregation kernel above is fully wired. Breeze has
     no inter-category collection kernel, since it runs a single ice category.
 
-### Vapor Deposition and Sublimation
+### [Vapor Deposition and Sublimation](@id p3_deposition)
 
 P3's deposition step uses a coupled semi-analytic vapor balance
 (`coupled_saturation_adjustment_rates`): cloud, rain, dry ice, and
@@ -2043,19 +2054,26 @@ The dry-ice deposition rate is then
 
 ```math
 \dot{q}_\text{dep} = \left[\frac{A\,ε^i}{X}
-                        + \frac{(s^l - A/X)\,ε^i}{X\,τ_\text{sink}}\,
+                        + \frac{(δq^{v+l} - A/X)\,ε^i}{X\,τ_\text{sink}}\,
                               \left(1 - e^{-X\,τ_\text{sink}}\right)\right]
                       \frac{1}{ξ^i}
                       + \frac{(q^{v+l}-q^{v+i})\,ε^i}{ξ^i},
 \qquad ξ^i = 1 + \frac{\mathcal{L}^i}{c^{pd}}\frac{dq^{v+i}}{dT},
 ```
 
-where ``s^l = q^v - q^{v+l}`` is the supersaturation with respect to liquid and
+where ``δq^{v+l} = q^v - q^{v+l}`` is the vapor excess over liquid and
 ``A`` sums two contributions: the Bergeron offset, and the external change in
-liquid-relative supersaturation ``∂_t q^v - (dq^{v+l}/dT)\, ∂_t T``. Breeze
-retains the Bergeron offset in full, and approximates the external part with
-adiabatic cooling alone, ``∂_t T = -g\, w / cᵖᵐ`` and ``∂_t q^v = 0``, where
-``w`` is the resolved (or parcel) vertical velocity. Resolved transport,
+the vapor excess over liquid at fixed vapor,
+
+```math
+-∂_t q^{v+l} = -\frac{dq^{v+l}}{dT} ∂_t T + q^{v+l} \frac{∂_t p}{p} ,
+```
+
+since ``q^{v+l} ∝ 1/p`` at fixed temperature and composition. Breeze retains the
+Bergeron offset in full, and drives the external part with hydrostatic adiabatic
+expansion, ``∂_t T = -g\, w / cᵖᵐ`` and ``∂_t p = -ρ g\, w``, where ``w`` is the
+resolved (or parcel) vertical velocity; in ascent the pressure term offsets about a
+fifth of the cooling term. Resolved transport,
 turbulent mixing, radiation, and user forcing therefore do not enter this
 driver, even though they do act on the host thermodynamic equation. Supplying
 the complete external tendency here remains a possible future improvement.
@@ -2084,7 +2102,7 @@ default). Sublimation is additionally capped at ``q^i/τ_\text{sink}``, the dry-
 mass per unit time, and deposition at ``q^v/τ_\text{sink}``.
 
 !!! note "SCF=1 limit"
-    Breeze evaluates ``s^l`` and the saturation-adjustment caps without an
+    Breeze evaluates ``δq^{v+l}`` and the saturation-adjustment caps without an
     SCF / SPF weighting; the in-cloud and clear-sky vapor fields collapse
     to the grid-mean ``q^v`` (i.e. the `SCF = SPF = 1` limit).
 
@@ -2137,7 +2155,7 @@ once over `refreezing_timescale`:
 | High liquid fraction | ``F^l >`` `complete_melting_liquid_fraction` (0.99) | "complete melting" diagnostic |
 | Tiny warm ice | ``T \ge T_0`` and ``q^i + q^{wi} <`` `tiny_ice_to_rain_threshold` | tiny-warm-ice clip |
 
-The first two require `liquid_fraction_active`. When any fires, the dry mass and
+The first two require `liquid_fraction = PrognosticLiquidFraction()`. When any fires, the dry mass and
 number go to rain as complete melting, the coating is shed to rain, and every
 process that needs the clipped particle — deposition, coating exchange,
 aggregation, riming, wet growth, splintering, above-freezing collection, the
@@ -2230,7 +2248,7 @@ carried separately from the `shed_drop_mass` used by cloud and wet-growth
 shedding so the two paths stay independently tunable, but defaults to the same
 1 mm drop.
 
-Shedding is gated off entirely when `liquid_fraction_active = false`. In that
+Shedding is gated off entirely with `liquid_fraction = NoLiquidFraction()`. In that
 configuration any coating left on the state (from a restart, say) is drained to
 rain over `sink_limiting_timescale` instead, so ``q^{wi}`` cannot strand water.
 
@@ -2251,14 +2269,24 @@ liquid is tracked explicitly in ``q^{wi}``.
 After all liquid- and ice-phase rates are assembled, Breeze applies four caps:
 
 - Liquid condensation against
-  ``\max(0,\, q^v - q^{v+l})/(1 + (\mathcal{L}^l)^2 q^{v+l}/(c^{pd} R^v T^2))``.
+  ``\max(0,\, q^v - q^{v+l} + A^l τ_\text{sink})/(1 + (\mathcal{L}^l)^2 q^{v+l}/(c^{pd} R^v T^2))``.
 - Liquid evaporation against
-  ``\max(0,\, q^{v+l} - q^v)/(\dots)``, plus a hard zero when supersaturated.
+  ``\max(0,\, q^{v+l} - q^v - A^l τ_\text{sink})/(\dots)``, plus a hard zero when supersaturated.
 - Ice deposition against
-  ``\max(0,\, q^{v*} - q^{v+i*})/(1 + (\mathcal{L}^i)^2 q^{v+i*}/(c^{pd} R^v {T^*}^2))``,
+  ``\max(0,\, q^{v*} - q^{v+i*} + A^i τ_\text{sink})/(1 + (\mathcal{L}^i)^2 q^{v+i*}/(c^{pd} R^v {T^*}^2))``,
   where ``T^* = T + \text{net liquid}\,\cdot\, \mathcal{L}^l / c^{pd} \cdot Δt`` and
   the saturation field is recomputed at ``T^*``.
 - Ice sublimation against the negative analog.
+
+Here ``A^l = -∂_t q^{v+l}`` and ``A^i = -∂_t q^{v+i}`` are the external forcings of the
+vapor excess over liquid and ice from adiabatic cooling and expansion (see
+[Vapor Deposition and Sublimation](@ref p3_deposition)), and
+``τ_\text{sink}`` is `sink_limiting_timescale`. The forcing counts as available because
+the growth rates include it while the current state does not yet carry the cooling over
+the limiter interval. Without it the condensation cap binds in steady ascent and holds
+the vapor excess near ``A^l τ_\text{sink}``, about 1% for a 2 m/s updraft with the default
+10 s, rather than where diffusional growth balances the forcing (about 0.15% for the
+rising-parcel example).
 
 These caps follow the saturation-adjustment limits in
 [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization)
@@ -2366,7 +2394,7 @@ number, the rime mass and rime volume, and the liquid coating on ice — alongsi
 the host's vapor density ``ρq^v``. Three more appear when the corresponding option
 is enabled: the cloud droplet number ``ρn^{cl}`` with aerosol activation, the
 unactivated aerosol number ``ρn^a`` when that activation also sets `prognostic`,
-and the supersaturation ``ρs^{v+l}`` with predicted supersaturation. Together they describe the complete microphysical state.
+and the vapor excess over liquid ``ρδq^{v+l}`` with prognostic vapor excess. Together they describe the complete microphysical state.
 
 This section documents each variable, its physical meaning, and the source-term
 assembly used in `tendency_ρ*` (`prognostic_tendencies.jl`) to build the
@@ -2433,7 +2461,7 @@ mass / number ratio. Breeze runs with ``μ^r = 0``.
 | Symbol | Name | Units | Description |
 |--------|------|-------|-------------|
 | ``ρq^v`` | Water vapor density | kg/m³ | The host-coupled moisture variable |
-| ``ρs^{v+l}`` | Supersaturation density, ``s^{v+l} = q^v - q^{v+l}`` | kg/m³ | Predicted-supersaturation path, controlled by the `predict_supersaturation` flag, which defaults to `false`. When `false`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008) adjustment is active. |
+| ``ρδq^{v+l}`` | Density-weighted vapor excess over liquid, ``δq^{v+l} = q^v - q^{v+l}`` | kg/m³ | Prognostic vapor-excess path, selected by the `vapor_excess` keyword, which defaults to `DiagnosticVaporExcess()`. With `DiagnosticVaporExcess()`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v+l}(T)`` directly. With `PrognosticVaporExcess()`, the bounded G&M (2008) adjustment is active. |
 
 ### Derived Quantities
 
@@ -2503,7 +2531,7 @@ G_{ρq^{cl}}
 
 | Term | Meaning |
 |------|--------|
-| ``\dot{q}^{cl}_\text{cond}`` | Condensation (positive) / evaporation (negative) — bidirectional. Includes the G&M alignment when `predict_supersaturation = true`. |
+| ``\dot{q}^{cl}_\text{cond}`` | Condensation (positive) / evaporation (negative) — bidirectional. Includes the G&M alignment when `vapor_excess = PrognosticVaporExcess()`. |
 | ``\dot{q}_\text{acti}`` | CCN-activation mass source; present in both the prescribed and the aerosol-activation paths. |
 | ``\dot{q}_\text{auto}`` | Autoconversion to rain. |
 | ``\dot{q}_\text{accr}`` | Accretion by rain. |
@@ -2515,7 +2543,7 @@ G_{ρq^{cl}}
 | ``\dot{q}_\text{wsh}`` | Wet-growth excess cloud collection shed to rain (non-liquid-fraction branch). |
 
 ``\dot{q}^{cl}_\text{wet}`` and ``\dot{q}_\text{wsh}`` are mutually exclusive: exactly one of the
-two branches is active for a given `liquid_fraction_active` setting.
+two branches is active for a given `liquid_fraction` setting.
 
 #### Cloud Number Tendency
 
@@ -2748,7 +2776,7 @@ fall speed needs, and what leaves them defined immediately after a `set!`.
 | ``ρb^f`` | ``\mathbb{W}^i`` | ``\mathcal{F}_{ρb^f} = -\mathbb{W}^i ρb^f`` |
 | ``ρq^{wi}`` | ``\mathbb{W}^i`` | ``\mathcal{F}_{ρq^{wi}} = -\mathbb{W}^i ρq^{wi}`` |
 
-``ρs^{v+l}`` and ``ρn^a`` do not sediment. Cloud droplets do: cloud mass and
+``ρδq^{v+l}`` and ``ρn^a`` do not sediment. Cloud droplets do: cloud mass and
 number settle with DSD-integrated Stokes velocities. Here ``\mathbb{W}`` is the
 positive-downward speed; the z-face source fields are signed vertical advecting
 velocities ``w=-\mathbb{W}``.
@@ -2786,7 +2814,7 @@ prognostic_field_names(microphysics)
 ```
 
 [`AerosolActivation`](@ref) adds ``ρnᶜˡ``; `prognostic=true` also adds ``ρnᵃ``.
-`predict_supersaturation=true` adds ``ρsᵛ⁺ˡ``.
+`vapor_excess = PrognosticVaporExcess()` adds ``ρδqᵛ⁺ˡ``.
 
 P3's aerosol distribution is specified **per unit mass of air**: `AerosolMode.number_mixing_ratio`
 is in kg⁻¹, and so are the activated numbers it produces and the ``n^{cl}`` and ``n^a`` that the
@@ -2867,7 +2895,7 @@ sinks against the donor reservoirs available over `sink_limiting_timescale`.
 Thus, for a single forward update no longer than that interval, limited P3 sinks
 alone cannot make the corresponding mass or number reservoirs negative. This is
 not an unconditional positivity guarantee for an arbitrary host timestep or RK
-stage. The optional ``ρs^{v+l}`` prognostic is also excluded: subsaturation is
+stage. The optional ``ρδq^{v+l}`` prognostic is also excluded: subsaturation is
 legitimately negative. Breeze does not implement a post-step "return small mass
 to vapor" cleanup, because that requires state mutation with a paired ``θ``
 correction.
@@ -2890,7 +2918,7 @@ rates see the state. The default `SpeciesBorrowing`:
   ``ρq^i``: it is real water, and the whole-particle clip already sheds it to
   rain when the dry ice is gone;
 - clamps the remaining non-water fields (number moments, rime properties,
-  aerosol count). ``ρs^{v+l}`` is excluded, since subsaturation is
+  aerosol count). ``ρδq^{v+l}`` is excluded, since subsaturation is
   legitimately negative.
 
 Passing `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())` additionally
