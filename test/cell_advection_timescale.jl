@@ -24,7 +24,7 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     set!(model.microphysical_fields.wʳ, -10)
     @test cell_advection_timescale(model) ≈ Δz / 10
 
-    # Use the signed sum of air and fall velocities, including downdrafts and
+    # Use the signed sum of air and sedimentation velocities, including downdrafts and
     # partial cancellation in updrafts, while retaining the air's own CFL limit.
     set!(model.velocities.u, 2)
     for w in FT.((-4, 4, 20))
@@ -43,7 +43,7 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     wizard = TimeStepWizard(cfl=FT(0.7))
     @test wizard.cfl * wizard.cell_advection_timescale(model) ≈ FT(0.7) * expected
 
-    # Number-weighted fall speeds can exceed mass-weighted fall speeds.
+    # Number-weighted sedimentation velocities can exceed mass-weighted ones.
     two_moment_model = AtmosphereModel(grid; microphysics=TwoMomentCloudMicrophysics(FT))
     set!(two_moment_model.microphysical_fields.wʳ, -10)
     set!(two_moment_model.microphysical_fields.wⁿʳ, -20)
@@ -62,4 +62,13 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     set!(implicit_model.microphysical_fields.wʳ, -10)
     @test cell_advection_timescale(implicit_model) ≈ Δx / 2
     @test CellAdvectionTimescale(ThreeDimensionalFormulation())(implicit_model) ≈ inv(2 / Δx + 10 / Δz)
+
+    # Explicit momentum keeps the air's vertical CFL, but implicit rain leaves the wizard's
+    # timescale (AIVA bounds its own Courant number); the true 3-D CFL still reports it.
+    mixed_model = AtmosphereModel(grid; microphysics, momentum_advection=WENO(FT), scalar_advection=implicit_advection)
+    set!(mixed_model.velocities.u, 2)
+    set!(mixed_model.velocities.w, 4)
+    set!(mixed_model.microphysical_fields.wʳ, -10)
+    @test cell_advection_timescale(mixed_model) ≈ inv(2 / Δx + 4 / Δz)
+    @test CellAdvectionTimescale(ThreeDimensionalFormulation())(mixed_model) ≈ inv(2 / Δx + 6 / Δz)
 end
