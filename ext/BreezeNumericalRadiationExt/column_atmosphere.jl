@@ -61,7 +61,8 @@ function column_atmosphere(rtm::EcCKDRadiativeTransferModel, model, i, j)
     gases = map(name -> [amount[name] for amount in amounts], NamedTuple{ECCKD_GAS_NAMES}(ECCKD_GAS_NAMES))
 
     constants = physical_constants(eltype(workspace), model.thermodynamic_constants,
-                                   rtm.longwave_solver.gas_model, rtm.solar_constant)
+                                   rtm.longwave_solver.gas_model,
+                                   @allowscalar(solar_constant_at(rtm.solar_constant, i, j)))
 
     return ColumnAtmosphere(; layer_pressures = [layer.pressure for layer in layers],
                               interface_pressures,
