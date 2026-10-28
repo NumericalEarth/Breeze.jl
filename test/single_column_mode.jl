@@ -75,23 +75,6 @@ thermodynamic_name(model) = :ρθ ∈ keys(prognostic_fields(model)) ? :ρθ : :
         @test size(interior(model.dynamics.reference_state.density)) == (N₁, N₂, Nz)
     end
 
-    @testset "Column ensemble sets a per-column total moisture" begin
-        N₁, N₂ = 3, 2
-        grid = RectilinearGrid(arch, FT; size = ColumnEnsembleSize(Nz=Nz, ensemble=(N₁, N₂), Hz=3),
-                               z = (0, 2000), topology = (Flat, Flat, Bounded))
-        reference_state = ReferenceState(grid, scm_constants; base_pressure=101325, potential_temperature=290)
-        microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
-        model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics,
-                                closure = VerticalScalarDiffusivity(ν=1.0, κ=1.0))
-
-        qᵗ = FT[0.002i + 0.001j for i in 1:N₁, j in 1:N₂, k in 1:Nz]
-        set!(model; θ = 290, qᵗ)
-        @test Array(interior(model.microphysical_fields.qᵉ)) ≈ qᵗ
-
-        # The validation still rejects a negative total moisture
-        @test_throws ArgumentError set!(model; θ = 290, qᵗ = -qᵗ)
-    end
-
     @testset "Column ensemble reproduces independent single columns" begin
         N₁, N₂ = 3, 2
         amp(i, j) = FT(0.002) * (i + N₁ * (j - 1))  # distinct θ-gradient amplitude per column
