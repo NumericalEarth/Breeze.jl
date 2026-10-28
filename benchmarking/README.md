@@ -83,11 +83,11 @@ under AD.
 
 ```bash
 # What CI runs (GPU): a latitude-longitude grid and split-explicit dynamics (12 acoustic
-# substeps), 64 steps, sweeping binomial checkpoint budgets of 2, 4 and 8
+# substeps), 64 steps, sweeping binomial checkpoint budgets of 2 and 8
 julia --project run_benchmarks.jl --device GPU --backend reactant --ad --simplified \
     --dynamics compressible_splitexplicit \
     --topology PBB --float_type Float32 \
-    --size 128x128x32 --time_steps 64 --checkpoints 2,4,8 --checkpointing_mode binomial
+    --size 128x128x32 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial
 
 # Local CPU run (no GPU needed). Use a small grid: the gradient compile is
 # the expensive part, and the reverse pass on CPU is slow.
