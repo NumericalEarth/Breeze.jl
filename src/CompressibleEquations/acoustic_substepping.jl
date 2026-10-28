@@ -1865,7 +1865,7 @@ function acoustic_column_substep!(::TiledAcousticColumn{T, K}, model, substepper
             Val(T), Val(K), Val(Nz))
     launch_acoustic_column_kernel!(column!, convert_to_device(arch, args)...)
 
-    fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
+    # The (ρθ)′ stash halo is filled in the batched post-column fill (`stash_halo_fields`).
     return nothing
 end
 
@@ -2048,6 +2048,8 @@ end
 # The split path fills the stash itself, before the implicit advection substep.
 stash_halo_fields(::SplitAcousticColumn, substepper) = ()
 stash_halo_fields(::FusedAcousticColumn, substepper) =
+    (substepper.previous_density_potential_temperature_perturbation,)
+stash_halo_fields(::TiledAcousticColumn, substepper) =
     (substepper.previous_density_potential_temperature_perturbation,)
 
 """
