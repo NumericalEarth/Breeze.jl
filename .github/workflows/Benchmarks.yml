@@ -57,17 +57,21 @@ jobs:
             backend: 'vanilla'
             topology: 'PPB'
             extra_flags: ''
-          # Reactant vs vanilla — compressible_explicit + WENO5 + 1M mixed-phase
-          # non-eq microphysics with ice on a PBB grid. Uses --simplified to
-          # drop the geostrophic forcing and field-dependent surface drag BCs
-          # (which do not currently materialize on ReactantState).
-          - dynamics: 'compressible_explicit'
-            microphysics: '1M_MixedNonEquilibrium'
-            grid: '256x256x128'
+          # Reactant vs vanilla on the AD job's physics: a LatitudeLongitudeGrid
+          # with SphericalCoriolis, split-explicit compressible dynamics (12
+          # acoustic substeps), WENO5 and no microphysics, on a PBB grid, at the
+          # AD job's size and a larger one. Uses --simplified to drop the
+          # geostrophic forcing and field-dependent surface drag BCs (which do
+          # not currently materialize on ReactantState).
+          - dynamics: 'compressible_splitexplicit'
+            microphysics: 'nothing'
+            grid: '128x128x32, 256x256x128'
             advection: 'WENO5'
             backend: 'vanilla, reactant'
             topology: 'PBB'
-            extra_flags: '--simplified --float_type=Float32'
+            # Two Reactant compiles of the split-explicit step
+            timeout: 60
+            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude'
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
@@ -334,7 +338,13 @@ jobs:
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   pass
 
-              if microphysics == 'nothing':
+              # The Reactant vs vanilla sweep is the only forward case on a
+              # LatitudeLongitudeGrid, which the result name marks with _LatLon.
+              latlon = '_LatLon' in d['name']
+
+              # Without the latlon check the vanilla and Reactant points of the
+              # sweep would share a name here.
+              if microphysics == 'nothing' and not latlon:
                   level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
@@ -344,10 +354,10 @@ jobs:
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
 
               # Reactant vs vanilla sweep: compare backends across grid sizes
-              # for a fixed compressible_explicit + WENO5 + 1M mixed-phase
-              # non-eq microphysics configuration.
-              if dynamics == 'compressible_explicit' and microphysics == '1M_MixedNonEquilibrium' and advection == 'WENO5':
-                  level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+              # on the AD job's physics (LatitudeLongitudeGrid, split-explicit
+              # dynamics, WENO5, no microphysics).
+              if latlon and advection == 'WENO5':
+                  level_1 = f'{base_name}; LatitudeLongitudeGrid; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Compare backends'
                   level_3 = f'{gpu}'
                   level_4 = f'{backend} {grid_str}'
