@@ -70,7 +70,7 @@ the memory/recompute trade-off:
 `raise` (the default) raises them to StableHLO and differentiates that.
 `kernelad` keeps them as kernel calls and differentiates the kernel bodies
 themselves (`raise=false`, `optimize=:kernelad`). Kernel AD needs
-EnzymeAD/Reactant.jl#3472, which `Project.toml` pins, and a `Reactant_jll`
+EnzymeAD/Reactant.jl#3472 (CI's kernel AD job adds it at a fixed commit), and a `Reactant_jll`
 with EnzymeAD/Enzyme-JAX#3533's passes, which no registered version has yet.
 CI's kernel AD job uses the libReactantExtra of that PR's latest "Build
 Reactant_jll" run, set as Reactant_jll's `libReactantExtra_path` preference;

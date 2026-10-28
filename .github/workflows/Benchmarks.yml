@@ -99,8 +99,13 @@ jobs:
           # instead of the raised kernels. The pipeline's passes come from
           # EnzymeAD/Enzyme-JAX#3533, which no registered Reactant_jll has yet, so
           # this entry runs on the libReactantExtra of the latest "Build Reactant_jll"
-          # run on that PR's branch (`enzyme_jax_branch`; see the steps below).
-          # `mode` keeps its artifact names apart from the AD job's.
+          # run on that PR's branch (`enzyme_jax_branch`; see the steps below),
+          # with Reactant.jl#3472 at a fixed commit (`reactant_rev`); every other
+          # entry keeps the registered Reactant and Reactant_jll. `mode` keeps its
+          # artifact names apart from the AD job's, and while kernel AD is
+          # experimental its failure does not fail the workflow or block publishing.
+          # The Reactant.jl branch now needs Enzyme-JAX options the registered
+          # Reactant_jll lacks (preserve-xla-funcs), so it must not reach other jobs.
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '128x128x32'
@@ -109,6 +114,7 @@ jobs:
             topology: 'PBB'
             mode: 'kernelad'
             enzyme_jax_branch: 'pb/kernel-ad'
+            reactant_rev: '72794878b8f88eae5ecb087c3002b9c660f9f6f0'
             timeout: 60
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial --kernels kernelad'
           # Scalar-tendency kernel sweep (no model): time the bare WENO
@@ -149,6 +155,7 @@ jobs:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
         - /usr/local:/host-usr-local
     timeout-minutes: ${{ matrix.timeout || 30 }}
+    continue-on-error: ${{ matrix.mode == 'kernelad' }}
     steps:
       - name: "Check out repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -217,6 +224,15 @@ jobs:
               preferences["Reactant_jll"]["libReactantExtra_path"] = ARGS[1]
               open(io -> TOML.print(io, preferences), file, "w")
               print(read(file, String))' "${lib}"
+      - name: Use Reactant.jl's kernel AD branch
+        # Reactant.jl#3472 at `reactant_rev`, for the entry whose Reactant_jll build matches it
+        if: ${{ matrix.reactant_rev }}
+        shell: julia --color=yes --project {0}
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: |
+          using Pkg
+          Pkg.add(url = "https://github.com/EnzymeAD/Reactant.jl", rev = "${{ matrix.reactant_rev }}")
       - name: Instantiate benchmarking environment
         shell: julia --color=yes --project {0}
         run: |
