@@ -37,7 +37,7 @@ using Breeze.Thermodynamics:
     WarmPhaseEquilibrium,
     equilibrated_surface
 
-using Breeze.AtmosphereModels: AtmosphereModel, dynamics_pressure, gas_phase_density, total_density,
+using Breeze.AtmosphereModels: AtmosphereModel, dynamics_pressure, thermodynamic_state_density, total_density,
                                grid_moisture_fractions, specific_prognostic_moisture
 
 using Adapt: Adapt, adapt
