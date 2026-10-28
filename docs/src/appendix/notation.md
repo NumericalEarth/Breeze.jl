@@ -33,6 +33,7 @@ The following table also uses a few conventions that suffuse the source code and
 * `constants` refers to an instance of `ThermodynamicConstants()`
 * `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
 * "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
+* A subscript plus marks the *clamped* form of a quantity, ``x₊``: either ``\max(0, x)`` or ``x`` floored at the scheme's minimum (e.g. ``nⁱ₊``, ``qʳ₊`` in P3). The superscript ``⁺`` is reserved for saturation (``qᵛ⁺``).
 * Phase or mixture identifiers (``d``, ``v``, ``m``, and ``t`` for *total*) appear as superscripts (e.g., ``Rᵈ``, ``cᵖᵐ``, ``qᵗ``, ``ρᵗ``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
 * The superscript ``s`` is reserved for *surface* (e.g. ``pˢ``, ``θˢ``, ``ρˢ``: values at a column's bottom face). Snow therefore takes ``sn`` (e.g. ``qˢⁿ``, ``ρqˢⁿ``, ``𝕎ˢⁿ``). Other multi-letter superscripts keep their own spellings: ``st`` for *standard* (``pˢᵗ``) and ``sw`` for *shortwave* (``τˢʷ``).
 * Momentum and the thermodynamic variable are stored *coupling-density-weighted* (``ρu = ρᵈ u``, and the thermodynamic density ``ρᵡ = ρᵈ χ`` — i.e. ``ρθ = ρᵈ θ`` or ``ρs``). The coupling density is `dynamics_density(dynamics)`: the reference density ``ρᵣ`` for [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), and the prognostic dry-air density ``ρᵈ`` for [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics). Velocity and ``θ`` are recovered by dividing by the coupling density.
@@ -49,7 +50,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\tilde{w}``                  | `w̃`    | `AM.dynamics.contravariant_vertical_velocity` | Contravariant vertical velocity (grid-relative, normal to ``r``-surfaces) |
 | ``\rho \tilde{w}``             | `ρw̃`   | `AM.dynamics.contravariant_vertical_momentum` | Contravariant vertical momentum                                          |
 | ``r``                          | `r`    | `rnode(i, j, k, grid, ℓz)`          | Reference (computational) vertical coordinate of a terrain-following grid; the physical height is ``z(x, y, r)`` (`znode`), matching Oceananigans' `r`/`z` convention |
-| ``s``                               | `s`    | `static_energy(model)`              | (Liquid-ice) moist static energy, ``s = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ``; ``e`` is reserved for turbulent kinetic energy |
+| ``s``                               | `s`    | `static_energy(model)`              | (Liquid-ice) moist static energy, ``s = cᵖᵐ T + g z - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ``; ``e`` is reserved for turbulent kinetic energy |
 | ``ρ s``                             | `ρs`   | `static_energy_density(model)`      | Static energy density, the prognostic thermodynamic variable of `StaticEnergyFormulation` |
 | ``E``                               | `E`    | `total_energy(model)`               | Total energy, ``E = s + (u^2 + v^2 + w^2)/2``. `E` is also the formulation-agnostic *energy* key: a flux or forcing supplied under `E` (or `ρE`) is applied to whichever thermodynamic variable the formulation evolves |
 | ``ρ E``                             | `ρE`   |                                     | Total energy density; the `boundary_conditions` and `forcing` key for an energy input, routed onto ``ρᵡ`` |
@@ -64,12 +65,21 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρ qᵛ``                            | `ρqᵛ`  | `AM.moisture_density`               | Vapor density (non-equilibrium schemes)                                        |
 | ``ρ qᵗ``                            | `ρqᵗ`  |                                     | Total moisture density; the `boundary_conditions` and `forcing` key for a water input (specific alias `qᵗ` for forcings), routed onto ``ρqᵛᵉ`` whatever the microphysics calls it |
 | ``qᵛ``                              | `qᵛ`   | `AM.microphysical_fields.qᵛ`        | Vapor mass fraction, a.k.a "specific humidity"                                 |
+| ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation vapor mass fraction over liquid water (kg/kg)                       |
+| ``δqᵛ⁺ˡ``                           | `δqᵛ⁺ˡ` | `AM.microphysical_fields.δqᵛ⁺ˡ`     | Vapor excess over liquid, ``δqᵛ⁺ˡ = qᵛ − qᵛ⁺ˡ`` (kg/kg); P3's optional prognostic |
+| ``δqᵛ⁺ⁱ``                           | `δqᵛ⁺ⁱ` |                                     | Vapor excess over ice, ``δqᵛ⁺ⁱ = qᵛ − qᵛ⁺ⁱ`` (kg/kg)                           |
+| ``ρδqᵛ⁺ˡ``                          | `ρδqᵛ⁺ˡ` | `AM.microphysical_fields.ρδqᵛ⁺ˡ`    | Density-weighted vapor excess over liquid (kg/m³); may be negative             |
 | ``qˡ``                              | `qˡ`   | `AM.microphysical_fields.qˡ`        | Liquid mass fraction                                                           |
 | ``qⁱ``                              | `qⁱ`   | `AM.microphysical_fields.qⁱ`        | Ice mass fraction                                                              |
 | ``qᶜˡ``                             | `qᶜˡ`  | `AM.microphysical_fields.qᶜˡ`       | Cloud liquid mass fraction                                                     |
 | ``qᶜⁱ``                             | `qᶜⁱ`  | `AM.microphysical_fields.qᶜⁱ`       | Cloud ice mass fraction                                                        |
+| ``q^f``                             | `qᶠ`   | `AM.microphysical_fields.qᶠ`        | Rime mass fraction (P3); a portion of ``qⁱ``, not additional mass              |
+| ``b^f``                             | `bᶠ`   | `AM.microphysical_fields.bᶠ`        | Rime volume per unit mass (P3), m³/kg                                          |
+| ``q^{wi}``                          | `qʷⁱ`  | `AM.microphysical_fields.qʷⁱ`       | Liquid mass fraction carried on ice particles (P3); counted in ``qˡ``, but sediments with the ice |
 | ``qʳ``                              | `qʳ`   |                                     | Rain mass fraction                                                             |
 | ``qˢⁿ``                             | `qˢⁿ`  |                                     | Snow mass fraction                                                             |
+| ``\hat{q}^x``                       | `q̂ˣ`   |                                     | Unit composition: mass fractions with all mass in constituent ``x`` (``\hat{q}^d`` is dry air) |
+| ``Δq``                              | `Δq`   |                                     | Composition increment (a difference of mass-fraction vectors), e.g. per unit sedimenting mass |
 | ``ρqᵛ``                             | `ρqᵛ`  |                                     | Vapor density                                                                  |
 | ``ρqˡ``                             | `ρqˡ`  |                                     | Liquid density                                                                 |
 | ``ρqⁱ``                             | `ρqⁱ`  |                                     | Ice density                                                                    |
@@ -77,12 +87,12 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρqᶜⁱ``                            | `ρqᶜⁱ` |                                     | Cloud ice density                                                              |
 | ``ρqʳ``                             | `ρqʳ`  | `AM.microphysical_fields.ρqʳ`       | Rain density                                                                   |
 | ``ρqˢⁿ``                            | `ρqˢⁿ` | `AM.microphysical_fields.ρqˢⁿ`      | Snow density                                                                   |
-| ``n^{cl}``                          | `nᶜˡ`  | `AM.microphysical_fields.nᶜˡ`       | Cloud droplet number per unit mass (1/kg); P3 allocates this diagnostic only with aerosol activation |
+| ``n^{cl}``                          | `nᶜˡ`  | `AM.microphysical_fields.nᶜˡ`       | Cloud droplet number per unit mass (1/kg)                                      |
 | ``n^r``                             | `nʳ`   | `AM.microphysical_fields.nʳ`        | Rain drop number per unit mass (1/kg)                                          |
-| ``n^a``                             | `nᵃ`   | `AM.microphysical_fields.nᵃ`        | Aerosol number per unit mass (1/kg); allocated only with aerosol activation    |
-| ``\rho n^{cl}``                     | `ρnᶜˡ` | `AM.microphysical_fields.ρnᶜˡ`      | Cloud droplet number density (1/m³), prognostic (absent in P3's prescribed-Nᶜˡ path) |
-| ``\rho n^r``                        | `ρnʳ`  | `AM.microphysical_fields.ρnʳ`       | Rain drop number density (1/m³), prognostic                                    |
-| ``\rho n^a``                        | `ρnᵃ`  | `AM.microphysical_fields.ρnᵃ`       | Aerosol number density (1/m³), prognostic (only with aerosol activation)        |
+| ``n^a``                             | `nᵃ`   | `AM.microphysical_fields.nᵃ`        | Aerosol number per unit mass (1/kg)                                            |
+| ``\rho n^{cl}``                     | `ρnᶜˡ` | `AM.microphysical_fields.ρnᶜˡ`      | Cloud droplet number density (1/m³)                                            |
+| ``\rho n^r``                        | `ρnʳ`  | `AM.microphysical_fields.ρnʳ`       | Rain drop number density (1/m³)                                                |
+| ``\rho n^a``                        | `ρnᵃ`  | `AM.microphysical_fields.ρnᵃ`       | Aerosol number density (1/m³)                                                  |
 | ``N^{cl}``                          | `Nᶜˡ`  |                                     | Volumetric cloud droplet number density, ``Nᶜˡ = ρ nᶜˡ`` (1/m³)               |
 | ``N^r``                             | `Nʳ`   |                                     | Volumetric rain drop number density, ``Nʳ = ρ nʳ`` (1/m³)                      |
 | ``N^a``                             | `Nᵃ`   |                                     | Volumetric aerosol number density, ``Nᵃ = ρ nᵃ`` (1/m³)                        |
@@ -93,7 +103,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathbb{W}^{ci}``                 | `𝕎ᶜⁱ`  |                                     | Terminal velocity of cloud ice (scalar, positive downward)                     |
 | ``\mathbb{W}^r``                    | `𝕎ʳ`   |                                     | Terminal velocity of rain (scalar, positive downward)                          |
 | ``\mathbb{W}^{sn}``                 | `𝕎ˢⁿ`  |                                     | Terminal velocity of snow (scalar, positive downward)                          |
-| ``\mathbb{W}^i``                    | `𝕎ⁱ`   |                                     | Terminal velocity of ice (scalar, positive downward); P3 labels dry ice ``i``  |
+| ``\mathbb{W}^i``                    | `𝕎ⁱ`   |                                     | Terminal velocity of ice (scalar, positive downward); ``i`` is dry ice, distinct from cloud ice ``ci`` |
 | ``\mathbb{W}^{nx}``                 | `𝕎ⁿˣ`  |                                     | Number-weighted terminal velocity of species ``x`` (`𝕎ⁿᶜˡ`, `𝕎ⁿʳ`, `𝕎ⁿⁱ`); a bare species label is the mass-weighted mean, and the weighting marker is a superscript preceding the species |
 | ``w^x``                             | `wˣ`   |                                     | Signed vertical advection velocity of species ``x``, ``wˣ = -𝕎ˣ`` (`wᶜˡ`, `wⁿᶜˡ`, `wʳ`, `wⁿʳ`, `wⁱ`, `wⁿⁱ`) |
 | ``qᵛ⁺``                             | `qᵛ⁺`  |                                     | Saturation specific humidity over a surface                                    |
@@ -126,8 +136,10 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Tᵣ``                              | `Tᵣ`   | `TC.energy_reference_temperature`   | Reference temperature for internal energy relations and latent heat            |
 | ``\mathcal{L}^l_r``                 | `ℒˡᵣ`  | `TC.liquid.reference_latent_heat`   | Latent heat of condensation at the energy reference temperature                |
 | ``\mathcal{L}^i_r``                 | `ℒⁱᵣ`  | `TC.ice.reference_latent_heat`      | Latent heat of deposition at the energy reference temperature                  |
+| ``ℒˡ₀, ℒⁱ₀``                       | `ℒˡ₀`, `ℒⁱ₀` | `absolute_zero_latent_heat(TC, phase)` | Latent-heat intercepts at zero kelvin, used with absolute-temperature sensible energy |
 | ``\mathcal{L}^l(T)``                | `ℒˡ`   | `liquid_latent_heat(T, constants)`  | Temperature-dependent latent heat of condensation                              |
 | ``\mathcal{L}^i(T)``                | `ℒⁱ`   | `ice_latent_heat(T, constants)`     | Temperature-dependent latent heat of deposition                                |
+| ``\mathcal{L}^{fr}(T)``              | `ℒᶠʳ`  | `fusion_latent_heat(constants, T)`  | Temperature-dependent latent heat of fusion (freezing), ``ℒᶠʳ = ℒⁱ - ℒˡ``; the superscript `fr` abbreviates freezing, since `f` labels rime (`qᶠ`, `bᶠ`) |
 | ``θ₀``                              | `θ₀`   | `RS.potential_temperature`          | (Constant) reference potential temperature for the anelastic formulation       |
 | ``p₀``                              | `p₀`   | `RS.base_pressure`                  | Reference pressure at ``z = 0``: the datum the reference profiles are anchored to |
 | ``pˢ``                              | `pˢ`   | `RS.surface_pressure`               | Reference pressure at a column's bottom face (the terrain surface over terrain), ``p₀`` reduced to that height |
@@ -150,6 +162,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{Q}^T``                   | `𝒬ᵀ`   |                                     | Surface sensible heat flux, ``\mathcal{Q}^T = cᵖᵐ Jᵀ``                         |
 | ``\mathcal{Q}^v``                   | `𝒬ᵛ`   |                                     | Surface latent heat flux, ``\mathcal{Q}^v = \mathcal{L}^l Jᵛ``                 |
 | ``Jᵀ``                              | `Jᵀ`   |                                     | Surface temperature flux, kg K/m²s                                             |
+| ``Jᶿ``                              | `Jᶿ`   |                                     | Surface potential-temperature flux, ``Jᶿ = Jᵀ / Π``, kg K/m²s                  |
 | ``Jᵛ``                              | `Jᵛ`   |                                     | Surface moisture flux, kg/m²s                                                  |
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |

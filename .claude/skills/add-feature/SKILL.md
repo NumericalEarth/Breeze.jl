@@ -1,7 +1,6 @@
 ---
 name: add-feature
 description: Checklist for adding new physics or features to Breeze
-user_invocable: true
 ---
 
 # Add Feature

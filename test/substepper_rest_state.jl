@@ -31,8 +31,6 @@ using Breeze.CompressibleEquations: AcousticSubstepper,
                                     freeze_linearization_state!,
                                     assemble_slow_vertical_momentum_tendency!,
                                     enforce_wall_impenetrability!
-using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
-                           compute_slow_scalar_tendencies!
 
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
@@ -205,8 +203,6 @@ end
 
     sub = model.timestepper.substepper
     freeze_linearization_state!(sub, model)
-    compute_slow_momentum_tendencies!(model)
-    compute_slow_scalar_tendencies!(model)
     assemble_slow_vertical_momentum_tendency!(sub, model)
 
     max_slow_ρw = maximum(abs, interior(sub.slow_vertical_momentum_tendency))
@@ -229,7 +225,6 @@ end
 #####
 
 function _track_rest_drift(model, Δt; n_steps = 200, sample_every = 10)
-    ref = model.dynamics.reference_state
     set_rest_state!(model)
 
     drift = Float64[]

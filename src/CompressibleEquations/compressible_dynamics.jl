@@ -438,7 +438,6 @@ without_sponge(td::SplitExplicitTimeDiscretization) =
                                     td.vertical_momentum_tendency_factor,
                                     td.vertical_pressure_tendency_factor,
                                     td.final_stage_vertical_pressure_tendency_factor,
-                                    td.apply_first_substep_pressure_gradient,
                                     td.damping,
                                     nothing,
                                     td.substep_distribution,
@@ -461,6 +460,27 @@ AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_st
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
 AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
+
+# Sedimentation drains the diagnosed total density but not the prognostic dry density (its
+# continuity has no sedimentation source), so every mass fraction renormalizes: the composition
+# moves toward the falling phase along q̂ˣ − q (see `sedimentation_composition_increment`).
+@inline function AtmosphereModels.sedimentation_composition_increment(::CompressibleDynamics, q, phase)
+    q̂ = AtmosphereModels.unit_composition(phase, q)
+    return MoistureMassFractions(q̂.vapor - q.vapor, q̂.liquid - q.liquid, q̂.ice - q.ice)
+end
+
+# Isolated sedimentation holds gas partial densities fixed: dp/p = dT/T and
+# ρ cᵛᵐ dT/dt = Q_h - Σ hˣ rˣ. Thus dθ/dT = [1 - κ(1 - D/T)] / Π.
+# Only phase enthalpy crosses a face; mixture subtraction belongs in the local χ.
+@inline function PotentialTemperatureFormulations.sedimentation_thermal_response(::CompressibleDynamics, q, constants, T, Π)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    D = (constants.liquid.reference_latent_heat * q.liquid + constants.ice.reference_latent_heat * q.ice) / cᵖᵐ
+    hˡ = constants.liquid.heat_capacity * T - absolute_zero_latent_heat(constants, constants.liquid)
+    hⁱ = constants.ice.heat_capacity * T - absolute_zero_latent_heat(constants, constants.ice)
+    β = (1 - Rᵐ / cᵖᵐ * (1 - D / T)) / ((cᵖᵐ - Rᵐ) * Π)
+    return (hˡ, hⁱ), β
+end
 
 #####
 ##### Prognostic fields

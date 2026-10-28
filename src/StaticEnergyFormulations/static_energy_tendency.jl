@@ -21,7 +21,7 @@ AtmosphereModels.static_energy_density(model::StaticEnergyModel) = model.formula
 ##### Tendency computation
 #####
 
-function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args)
+function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args, tracer_transport_velocity)
     grid = model.grid
     arch = grid.architecture
 
@@ -36,6 +36,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyMod
 
     Gρs = model.timestepper.Gⁿ.ρs
     launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρs, grid, ρs_args)
+    add_sedimentation_tendency!(Gρs, model, tracer_transport_velocity)
     return nothing
 end
 
@@ -76,6 +77,37 @@ end
              + ρs_forcing(i, j, k, grid, clock, model_fields)
              + ρE_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
+end
+
+#####
+##### Condensate content of ρs for its sedimentation tendency
+#####
+#
+# The content per unit falling mass of phase x is χˣ = ∇_q s · Δqˣ at fixed T along the
+# composition increment Δqˣ of `sedimentation_composition_increment`: q̂ˣ − q̂ᵈ on the anelastic
+# core, whose total density is fixed, q̂ˣ − q on the compressible core, whose total density falls
+# with the condensate. Losing condensate at this content leaves the temperature unchanged on
+# either core. From s = cᵖᵐ T + g z − Λ₀, Λ₀ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ with the latent heats extrapolated
+# to zero kelvin (`absolute_zero_latent_heat`), and Δcᵖ and ΔΛ₀ the changes of cᵖᵐ and Λ₀ along Δqˣ,
+#
+#   χˣ = Δcᵖ T − ΔΛ₀ ,
+#
+# the enthalpy of the condensate relative to what its mass gives way to: hˣ − hᵈ against dry
+# air, hˣ − (s − g z) against the mixture. The geopotential is independent of the composition and
+# drops out. The frictional heating from the fall (g wˣ qˣ) is neglected. The content is the
+# enthalpy the falling mass carries and ∂s/∂h = 1, so the shared `sedimentation_tendency`
+# reduces here to the flux form: each flux carries the enthalpy of the cell it drains, and ∫ρs
+# is conserved.
+@inline function AtmosphereModels.condensate_content(i, j, k, grid, ::StaticEnergyFormulation, dynamics, constants,
+                                                     microphysics, microphysical_fields, specific_prognostic_moisture,
+                                                     temperature_field)
+    @inbounds T = temperature_field[i, j, k]
+    @inbounds ρ = total_density(dynamics)[i, j, k]
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    χˡ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:liquid)), constants, T)
+    χⁱ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:ice)), constants, T)
+    return (; χ = (χˡ, χⁱ), h = (χˡ, χⁱ), ∂φ∂h = one(T))
 end
 
 #####
@@ -140,7 +172,8 @@ end
     pˢᵗ = standard_pressure(dynamics)
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
-    𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, qᵛᵉ, constants)
+    μ = AtmosphereModels.extract_microphysical_prognostics(i, j, k, microphysics, microphysical_fields)
+    𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, qᵛᵉ, constants, μ, ρ)
     T = temperature(𝒰θ₁, constants)
 
     z = znode(i, j, k, grid, c, c, c)
@@ -165,7 +198,7 @@ Set the thermodynamic state from temperature ``T``.
 The temperature is converted to static energy ``s`` using the relation:
 
 ```math
-s = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ .
+s = cᵖᵐ T + g z - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ .
 ```
 """
 function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:T}, value)

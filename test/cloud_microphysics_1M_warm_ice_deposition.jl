@@ -62,6 +62,7 @@ override_process_params(parameters; overrides...) =
         tps,
         ρ,
         T,
+        zero(FT), # vertical velocity
         qᵛ + qᶜˡ + qᶜⁱ + qʳ + qˢⁿ,
         qᶜˡ,
         qᶜⁱ,
@@ -218,4 +219,22 @@ end
         freezing_temperature = FT(285),
     )
     @test all(iszero, tendencies)
+end
+
+@testset "Velocity-dependent rain autoconversion is rejected [$(FT)]" for FT in test_float_types()
+    default = CMP.Microphysics1MParams(FT)
+    acnv = default.process_params.rain_autoconversion
+    @test acnv isa CMP.KesslerAcnv
+    @test OneMomentCloudMicrophysics(FT) isa OneMomentCloudMicrophysics
+
+    varied_timescale = CMP.KesslerAcnv(; acnv.τ_slow, τ_fast = acnv.τ_slow / 10, acnv.q_threshold_slow,
+                                       acnv.q_threshold_fast, acnv.w_0, acnv.k)
+    varied_threshold = CMP.KesslerAcnv(; acnv.τ_slow, acnv.τ_fast, acnv.q_threshold_slow,
+                                       q_threshold_fast = 2acnv.q_threshold_slow, acnv.w_0, acnv.k)
+
+    for varied in (varied_timescale, varied_threshold)
+        parameters = override_process_params(default; rain_autoconversion = varied)
+        categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
+        @test_throws ArgumentError OneMomentCloudMicrophysics(FT; categories)
+    end
 end

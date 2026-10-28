@@ -57,29 +57,42 @@ jobs:
             backend: 'vanilla'
             topology: 'PPB'
             extra_flags: ''
-          # Reactant vs vanilla — compressible_explicit + WENO5 + 1M mixed-phase
-          # non-eq microphysics with ice on a PBB grid. Uses --simplified to
-          # drop the geostrophic forcing and field-dependent surface drag BCs
-          # (which do not currently materialize on ReactantState).
-          - dynamics: 'compressible_explicit'
-            microphysics: '1M_MixedNonEquilibrium'
-            grid: '256x256x128'
+          # Reactant vs vanilla on the AD job's physics: a LatitudeLongitudeGrid
+          # with SphericalCoriolis, split-explicit compressible dynamics (12
+          # acoustic substeps), WENO5 and no microphysics, on a PBB grid, at the
+          # AD job's size and a larger one. Uses --simplified to drop the
+          # geostrophic forcing and field-dependent surface drag BCs (which do
+          # not currently materialize on ReactantState).
+          - dynamics: 'compressible_splitexplicit'
+            microphysics: 'nothing'
+            grid: '128x128x32, 256x256x128'
             advection: 'WENO5'
             backend: 'vanilla, reactant'
             topology: 'PBB'
-            extra_flags: '--simplified --float_type=Float32'
+            # Two Reactant compiles of the split-explicit step
+            timeout: 60
+            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude'
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
-          # untested), small grid + small Nsteps to keep the gradient compile
-          # and per-step memory bounded.
-          - dynamics: 'compressible_explicit'
+          # untested). Small grid to keep the gradient compile bounded. The
+          # loop body is compiled once regardless of Nsteps, so 64 steps cost
+          # little extra compile; --checkpoints sweeps the checkpoint budget of
+          # the binomial (revolve) schedule Enzyme uses for the reverse pass
+          # (each value is a separate compile + run, recorded as its own
+          # result). The model is the regional-forecast configuration: a
+          # LatitudeLongitudeGrid with SphericalCoriolis (the AD default) and
+          # split-explicit compressible dynamics (12 acoustic substeps). To reproduce locally
+          # on CPU see benchmarking/README.md ("AD benchmark").
+          - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
-            grid: '64x64x32'
+            grid: '128x128x32'
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 1'
+            # The gradient compile needs more than the default 30-minute job
+            timeout: 60
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial'
           # Scalar-tendency kernel sweep (no model): time the bare WENO
           # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
           # the Reactant-compiled XLA program and the eager vanilla launch.
@@ -112,12 +125,12 @@ jobs:
         shell: bash
         working-directory: ./benchmarking
     container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.6'
+      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.13.2'
       options: --gpus=all
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
         - /usr/local:/host-usr-local
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout || 30 }}
     steps:
       - name: "Check out repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -136,13 +149,19 @@ jobs:
         run: |
           using Pkg
           Pkg.instantiate()
+      - name: Start earlyoom
+        id: earlyoom
+        run: |
+          earlyoom -m 2 -s 100 -r 60 --prefer 'julia'
+        background: true
       - name: Run benchmarks
-        timeout-minutes: 45
+        timeout-minutes: ${{ matrix.timeout || 45 }}
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
-          earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
+      - name: Stop earlyoom
+        cancel: earlyoom
       - name: "Upload benchmark results as artifacts"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -220,6 +239,7 @@ jobs:
           # Build github-action-benchmark entries
           # Name format: <name>/<properties>/<gpu>/<grid_size>
           data = []
+          compile_data = []
           for d in all_data:
               base_name = d['name'].split('_')[0]
               advection = d['advection']
@@ -231,23 +251,41 @@ jobs:
               microphysics = d['microphysics']
               backend = d.get('backend', 'vanilla')
               mode = d.get('mode', 'forward')
+              checkpointing = d.get('checkpointing', '')
 
               gpu = d['metadata']['gpu_name']
+
+              versions = d['metadata'].get('package_versions', {})
+              extra = ', '.join(
+                  f"{p} v{versions.get(p, 'unknown')}"
+                  for p in ('Oceananigans', 'CUDA', 'GPUCompiler', 'Reactant', 'Reactant_jll')
+              )
 
               grid = d['grid_size']
               grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
 
-              # AD (forward+backward via Enzyme) entries get their own chart.
-              # Skip the forward-only clauses below so an AD point doesn't
-              # also land on a forward chart that happens to match its config.
+              # AD (forward+backward via Enzyme) entries get their own chart,
+              # one line per checkpointing strategy. Skip the forward-only
+              # clauses below so an AD point doesn't also land on a forward
+              # chart that happens to match its config.
               if mode == 'ad':
                   level_1 = f'{base_name}; AD; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
-                  level_4 = f'{grid_str}'
+                  level_4 = f'{grid_str} {checkpointing}'.strip()
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
+
+                  # The forward+backward compile, one panel per checkpointing strategy and one line per
+                  # stage, next to the tendency compile times
+                  if d.get('compile_tracing_time_seconds', 0) > 0:
+                      level_1 = f'Reactant compile time; AD; Advection: {advection}; Grid: {grid_str}'
+                      level_2 = f'{base_name} {checkpointing}'.strip()
+                      level_3 = f'{gpu}'
+                      for stage in ('tracing', 'mlir', 'xla'):
+                          name = f"{level_1}/{level_2}/{level_3}/{stage}"
+                          compile_data.append({'name': name, 'unit': 's', 'value': d[f'compile_{stage}_time_seconds'], 'extra': extra})
                   continue
 
               # Scalar-tendency kernel sweep (no model): compare WENO orders on
@@ -267,7 +305,15 @@ jobs:
                   level_4 = f'{ft_short} {backend}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
+
+                  if advection == 'WENO5' and d.get('compile_tracing_time_seconds', 0) > 0:
+                      level_1 = f'Reactant compile time; Advection: {advection}; Grid: {grid_str}'
+                      level_2 = f'{base_name} {ft_short} {backend}'
+                      level_3 = f'{gpu}'
+                      for stage in ('tracing', 'mlir', 'xla'):
+                          name = f"{level_1}/{level_2}/{level_3}/{stage}"
+                          compile_data.append({'name': name, 'unit': 's', 'value': d[f'compile_{stage}_time_seconds'], 'extra': extra})
                   continue
 
               # We want to group benchmarks in different ways. NOTE:
@@ -279,7 +325,7 @@ jobs:
                   level_4 = f'{microphysics}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   pass
 
               if dynamics == 'anelastic' and microphysics == 'nothing':
@@ -289,32 +335,42 @@ jobs:
                   level_4 = f'{advection} {grid}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
                   pass
 
-              if microphysics == 'nothing':
+              # The Reactant vs vanilla sweep is the only forward case on a
+              # LatitudeLongitudeGrid, which the result name marks with _LatLon.
+              latlon = '_LatLon' in d['name']
+
+              # Without the latlon check the vanilla and Reactant points of the
+              # sweep would share a name here.
+              if microphysics == 'nothing' and not latlon:
                   level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
                   level_4 = f'{grid_str}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
 
               # Reactant vs vanilla sweep: compare backends across grid sizes
-              # for a fixed compressible_explicit + WENO5 + 1M mixed-phase
-              # non-eq microphysics configuration.
-              if dynamics == 'compressible_explicit' and microphysics == '1M_MixedNonEquilibrium' and advection == 'WENO5':
-                  level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+              # on the AD job's physics (LatitudeLongitudeGrid, split-explicit
+              # dynamics, WENO5, no microphysics).
+              if latlon and advection == 'WENO5':
+                  level_1 = f'{base_name}; LatitudeLongitudeGrid; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Compare backends'
                   level_3 = f'{gpu}'
                   level_4 = f'{backend} {grid_str}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
 
           with open('github-action-benchmark.json', 'w') as f:
               json.dump(data, f)
+
+          if compile_data:
+              with open('github-action-benchmark-compile.json', 'w') as f:
+                  json.dump(compile_data, f)
       - name: "Generate token"
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         if: ${{ ! github.event.pull_request.head.repo.fork }}
@@ -343,7 +399,7 @@ jobs:
           git commit -m'Save benchmark results for commit ${{ github.sha }}'
           git push -u origin main
       - name: "Publish benchmark results"
-        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: Breeze.jl Benchmarks
           tool: "customBiggerIsBetter"
@@ -352,7 +408,7 @@ jobs:
           benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
-          comment-always: false
+          comment-always: ${{ github.event_name == 'pull_request' }}
           summary-always: true
           alert-threshold: "110%"
           fail-on-alert: false
@@ -360,3 +416,24 @@ jobs:
           auto-push: ${{ github.event_name == 'push' }}
           max-items-in-chart: 1000
           comment-on-alert: true
+      - name: "Clean up benchmark data clone"
+        if: ${{ hashFiles('github-action-benchmark-compile.json') != '' }}
+        run: rm -rf benchmark-data-repository
+      - name: "Publish compile times"
+        if: ${{ hashFiles('github-action-benchmark-compile.json') != '' }}
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
+        with:
+          name: Breeze.jl Compile Times
+          tool: "customSmallerIsBetter"
+          output-file-path: "github-action-benchmark-compile.json"
+          benchmark-data-dir-path: "."
+          gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
+          github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
+          comment-always: false
+          summary-always: true
+          # Compile times are noisier than run times
+          alert-threshold: "150%"
+          fail-on-alert: false
+          auto-push: ${{ github.event_name == 'push' }}
+          max-items-in-chart: 1000
+          comment-on-alert: false

@@ -12,11 +12,12 @@ over the ice particle size distribution.
 
 The collection rate is:
 ```math
-\\frac{dq^{cl}}{dt} = -E^{ci} q^{cl} ρ n^i ⟨A \\mathbb{W}⟩
+\\frac{dq^{cl}}{dt} = -E^{ci} q^{cl} ρ\\, ρ_\\text{corr}\\, n^i ⟨A \\mathbb{W}⟩
 ```
-where ``⟨A \\mathbb{W}⟩`` is the PSD-averaged product of projected area and terminal
-velocity, approximated using the mean-mass diameter with a correction
-factor for the exponential PSD.
+where ``⟨A \\mathbb{W}⟩`` is the number-normalized sweep-out kernel
+``\\int \\mathbb{W}(D) A(D) N'(D) \\, dD / \\int N'(D) \\, dD`` [m³/s]
+read from Table 1 at the ice bracket, and
+``ρ_\\text{corr}`` is the ice air-density correction.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -54,20 +55,20 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
 
     ℂʳⁱᵐᵉ₁ = parameters.cloud_ice_collection_efficiency
 
-    qᶜˡ_eff = max(0, qᶜˡ)
+    qᶜˡ₊ = max(0, qᶜˡ)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
+    nⁱ₊ = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     active = temperature_active &
-             (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
+             (qᶜˡ₊ >= p3.minimum_mass_mixing_ratio) &
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 
-    # PSD-integrated cloud-water collection kernel ⟨A×𝕎⟩ from lookup table
-    # ∫ 𝕎(D) A(D) N'(D) dD with E=1 (geometric kernel).
+    # Number-normalized cloud-water collection kernel ⟨A×𝕎⟩ from the lookup table,
+    # ∫ 𝕎(D) A(D) N'(D) dD / ∫ N'(D) dD, with E=1.
     collection_kernel = evaluate_at(p3.ice.collection.cloud_collection, lookups.prep)
 
     # Collection rate = E × qc × ni × ρ × rhofaci × ⟨A×𝕎⟩
-    rate = ℂʳⁱᵐᵉ₁ * qᶜˡ_eff * nⁱ_eff * ρ * lookups.ρ_correction * collection_kernel
+    rate = ℂʳⁱᵐᵉ₁ * qᶜˡ₊ * nⁱ₊ * ρ * lookups.ρ_correction * collection_kernel
 
     return ifelse(active, rate, zero(FT))
 end
@@ -125,6 +126,7 @@ Returns `(Nᶜˡ / (ρ * qᶜˡ)) * riming_rate` [1/kg/s]: the per-mass cloud
 number removal proportional to the rimed cloud mass fraction.
 
 # Arguments
+- `p3`: the scheme, for `minimum_mass_mixing_ratio` (cloud below it is absent)
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
 - `Nᶜˡ`: Cloud droplet number concentration [1/m³]
 - `ρ`: Air density [kg/m³]
@@ -133,36 +135,31 @@ number removal proportional to the rimed cloud mass fraction.
 # Returns
 - Rate of cloud number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, riming_rate)
-    return cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ) * riming_rate
+@inline function cloud_riming_number_rate(p3, qᶜˡ, Nᶜˡ, ρ, riming_rate)
+    return cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, p3.minimum_mass_mixing_ratio) * riming_rate
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Compute rain collection (riming) by ice particles using the continuous
-collection equation with collision kernel integrated over the ice PSD,
-plus a correction for the rain drop size distribution (C5 fix).
+Compute rain collection (riming) by ice particles from the Table 2 double-PSD
+collection kernel.
 
-**C5 correction (double-PSD integration):**
+**Double-PSD integration:**
 
-The ice-rain collection tables integrate over *both* the ice PSD and the rain PSD,
-capturing how rain drop size affects the collision geometry.
-The geometric cross section is ``π/4 (D^i + D^r)^2``, not just ``π/4 (D^i)^2``.
-For an exponential rain PSD (``μ^r = 0``) the exact cross-section correction to the
-single-PSD ice-side integral is:
-
-```math
-C = 1 + 8 \\frac{\\bar{D}^r}{\\bar{D}^i} + 20 \\left(\\frac{\\bar{D}^r}{\\bar{D}^i}\\right)^2
-```
-
-where ``\\bar{D}^r = 1/λ^r`` and ``\\bar{D}^i`` is the mean ice diameter.
-When ``n^r = 0`` the correction is 1 (no change from the legacy path).
+Table 2 integrates over *both* the ice PSD and the rain PSD. The collision cross
+section is ``(√{A(D^i)} + √{π/4} D^r)^2``, where ``A(D^i)`` is the ice projected
+area. For spherical ice this reduces to ``π/4 (D^i + D^r)^2``. The ice PSD is
+normalized to unit number, and the rain intercept ``N_0^r`` is factored out, so the
+rate is ``\\mathcal{K} × N_0^r × n^i × ρ × ρ_\\text{corr} × E^{ri}``, with
+``N_0^r = n^r λ^r`` at ``μ^r = 0``. Here ``n^r`` is the mass-specific number
+recomputed from the bounded rain slope, so the rain PSD preserves mass when the
+slope limiter binds.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qʳ`: Rain mass fraction [kg/kg]
-- `nʳ`: Rain number concentration [1/kg]; use 0 to disable C5 correction
+- `nʳ`: Rain number concentration [1/kg]; floored at `minimum_number_mixing_ratio`
 - `qⁱ`: Ice mass fraction [kg/kg]
 - `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
@@ -204,22 +201,22 @@ PSD-integrated number-weighted kernel.
 
     ℂʳⁱᵐᵉ₂ = parameters.rain_ice_collection_efficiency
 
-    qʳ_eff = max(0, qʳ)
-    nʳ_eff = max(nʳ, p3.minimum_number_mixing_ratio)
+    qʳ₊ = max(0, qʳ)
+    nʳ₊ = max(nʳ, p3.minimum_number_mixing_ratio)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = lookups.Fˡ
-    nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
+    nⁱ₊ = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     active = temperature_active &
-             (qʳ_eff >= p3.minimum_mass_mixing_ratio) &
+             (qʳ₊ >= p3.minimum_mass_mixing_ratio) &
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 
     m_mean = lookups.m_mean
     density_correction = lookups.ρ_correction
 
     # Diagnose rain DSD slope parameter
-    λʳ = rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
-    nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
+    λʳ = rain_slope_parameter(qʳ₊, nʳ₊, parameters)
+    nʳ_bounded = rain_number_from_slope(qʳ₊, λʳ, parameters)
 
     # Use Table 2 (double-PSD kernel) for ice-rain collection. The table stores the
     # double-PSD integrals with N₀ʳ factored out, so each rate is
@@ -228,7 +225,7 @@ PSD-integrated number-weighted kernel.
                                                             m_mean, λʳ, Fᶠ, Fˡ, ρᶠ)
 
     Nʳ₀ = nʳ_bounded * λʳ
-    prefactor = ℂʳⁱᵐᵉ₂ * Nʳ₀ * nⁱ_eff * ρ * density_correction
+    prefactor = ℂʳⁱᵐᵉ₂ * Nʳ₀ * nⁱ₊ * ρ * density_correction
 
     return (ifelse(active, prefactor * mass_kernel, zero(FT)),
             ifelse(active, prefactor * number_kernel, zero(FT)))

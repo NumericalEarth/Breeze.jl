@@ -600,7 +600,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 
     # Extract from thermodynamic state
     T = temperature(𝒰, constants)
-    p = 𝒰.reference_pressure
+    p = air_pressure(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
     qˡ = q.liquid

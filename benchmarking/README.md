@@ -33,7 +33,7 @@ Results are saved to JSON and a markdown report is automatically generated.
 
 ## Modes
 
-The script supports two modes:
+The script supports several modes; the two main ones are:
 
 ### Benchmark Mode (default)
 
@@ -43,6 +43,59 @@ Used for measuring computational throughput.
 ```bash
 julia --project run_benchmarks.jl --mode=benchmark --size=128^3 --time_steps=100
 ```
+
+### AD benchmark
+
+With `--ad`, the benchmark times a forward+backward pass instead of forward
+stepping only: `loss` runs `--time_steps` steps of the model inside a
+checkpointed `Reactant.@trace` loop and reduces to a scalar, and `grad_loss!`
+differentiates it with Enzyme reverse mode with respect to the initial
+potential temperature. Both are compiled together into one XLA program, so
+this requires `--backend reactant`.
+The loop body is compiled once regardless of `--time_steps`.
+The model runs on a `LatitudeLongitudeGrid` (the same 12 km box, with
+`SphericalCoriolis`) unless `--grid_type rectilinear` is given.
+
+`--checkpoints` controls how Enzyme checkpoints the loop in the reverse pass.
+Each value is compiled and timed separately, so a comma-separated list sweeps
+the memory/recompute trade-off:
+
+| Value | Meaning |
+|-------|---------|
+| `n` (integer) | With the default `--checkpointing_mode binomial`, `Reactant.Binomial(n)`: a revolve schedule keeping at most `n` checkpoints live, recomputing forward segments as needed. With `--checkpointing_mode periodic`, `Reactant.Periodic(n)`: `n` evenly spaced checkpoints, each storing one model state; pick `n` dividing `--time_steps` for even intervals. |
+| `auto` (default) | Reactant's default for a static loop, `Periodic(isqrt(time_steps))`, regardless of `--checkpointing_mode`. |
+| `none` | No checkpointing; the whole forward tape is kept. |
+
+Use `--simplified` (the geostrophic forcing and surface drag BCs do not
+materialize on `ReactantState`) and `compressible_explicit` dynamics (the
+anelastic pressure solver is not traced). Microphysics is not yet exercised
+under AD.
+
+```bash
+# What CI runs (GPU): a latitude-longitude grid and split-explicit dynamics (12 acoustic
+# substeps), 64 steps, sweeping binomial checkpoint budgets of 2 and 8
+julia --project run_benchmarks.jl --device GPU --backend reactant --ad --simplified \
+    --dynamics compressible_splitexplicit \
+    --topology PBB --float_type Float32 \
+    --size 128x128x32 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial
+
+# Local CPU run (no GPU needed). Use a small grid: the gradient compile is
+# the expensive part, and the reverse pass on CPU is slow.
+julia --project run_benchmarks.jl --device CPU --backend reactant --ad --simplified \
+    --dynamics compressible_splitexplicit \
+    --topology PBB --float_type Float32 --size 16x16x8 --time_steps 32 --checkpoints 2,4,8
+
+# Periodic checkpoints and no checkpointing, for comparison
+julia --project run_benchmarks.jl --device CPU --backend reactant --ad --simplified \
+    --dynamics compressible_splitexplicit \
+    --topology PBB --float_type Float32 --size 16x16x8 --time_steps 32 --checkpoints "4, none" --checkpointing_mode periodic
+```
+
+Each result is recorded with `mode = "ad"` and a `checkpointing` label
+(`periodic_4`, `binomial_3`, `none`) in `benchmark_results.json`; the label is
+also appended to the benchmark name (`..._reactant_AD_periodic_4`). `Time/Step`
+is the wall time of the combined forward+backward program divided by
+`--time_steps`.
 
 ### Simulate Mode
 
@@ -69,7 +122,10 @@ julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=2.0 -
 |----------|---------|-------------|
 | `--mode` | `benchmark` | Mode: `benchmark` or `simulate` |
 | `--size` | `64^3` | Grid size. Formats: `NxNyxNz` or `N^3`. Comma-separated for multiple. |
-| `--device` | `GPU` | Device: `CPU` or `GPU` |
+| `--device` | `GPU` | Device: `CPU`, `GPU`, or `TPU` (TPU requires `--backend reactant`) |
+| `--backend` | `vanilla` | Execution backend: `vanilla` (eager KernelAbstractions / CUDA) or `reactant` (compiled via Reactant). Comma-separated for multiple. |
+| `--topology` | `PPB` | Grid topology: `PPB` (Periodic, Periodic, Bounded) or `PBB` (Periodic, Bounded, Bounded). Comma-separated for multiple. |
+| `--simplified` | `false` | Omit the geostrophic forcing and field-dependent surface drag BCs (required for `--backend reactant`) |
 | `--configuration` | `convective_boundary_layer` | Benchmark case to run |
 | `--float_type` | `Float32` | Floating point type: `Float32` or `Float64`. Comma-separated for multiple. |
 | `--advection` | `WENO5` | Advection scheme: `nothing`, `Centered2`, `WENO5`, `WENO9`, `bounded_WENO5`. Comma-separated for multiple. |
@@ -84,7 +140,10 @@ julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=2.0 -
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--time_steps` | `100` | Number of time steps to benchmark |
-| `--warmup_steps` | `10` | Number of warmup steps (for JIT compilation) |
+| `--warmup_steps` | `10` | Number of warmup steps (for JIT compilation). Ignored on the `reactant` backend, which warms up with one full execution of the compiled program. |
+| `--ad` | `false` | Benchmark the forward+backward (Enzyme reverse-mode) pass through the stepping loop instead of forward only. Requires `--backend reactant`. |
+| `--checkpoints` | `auto` | AD loop checkpointing (`--ad` only): integer count, `auto`, or `none`. Comma-separated for multiple; see "AD benchmark". |
+| `--checkpointing_mode` | `binomial` | Interpretation of an integer `--checkpoints` value: `binomial` (revolve) or `periodic`. |
 
 ### Simulate Mode Arguments
 
@@ -290,6 +349,9 @@ result.metadata
 # ├── cpu_model: AMD EPYC
 # ├── num_threads: 64
 # ├── hostname: ...
+# ├── CUDA: 5.9.0
+# ├── Reactant: 0.2.286
+# ├── Reactant_jll: 0.0.412
 # └── timestamp: 2026-01-30T12:00:00
 ```
 

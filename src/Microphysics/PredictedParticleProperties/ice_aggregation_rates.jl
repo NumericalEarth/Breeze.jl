@@ -64,7 +64,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     ℂᵃᵍᵍʳ₆ = parameters.maximum_aggregation_rime_fraction
 
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
+    nⁱ₊ = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     # Aggregation is gated on bulk ice mass only, with the number floored at
     # `minimum_number_mixing_ratio` before the collection kernel is evaluated.
@@ -87,12 +87,12 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
     # Number loss rate: ρ × K × n² × rhofaci (positive magnitude)
     # The ρ factor converts the volumetric kernel [m³/s] to mass-specific
-    # tendency [1/kg/s]. The 1/2 self-collection factor is already included
-    # in the kernel (table stores half-integral, analytical path includes 0.5 factor).
-    # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
+    # tendency [1/kg/s]. The 1/2 self-collection factor is already included in the
+    # tabulated kernel, which stores the half-integral.
+    # Sign convention: returns positive; caller subtracts in tendency assembly.
     # The density correction uses the ice reference density (P=600 hPa, T=-20°C), not
     # the rain reference; see `p3_ice_lookups`.
-    rate = ρ * mean_collection_kernel * nⁱ_eff^2 * lookups.ρ_correction
+    rate = ρ * mean_collection_kernel * nⁱ₊^2 * lookups.ρ_correction
 
     return ifelse(aggregation_active, rate, zero(FT))
 end
