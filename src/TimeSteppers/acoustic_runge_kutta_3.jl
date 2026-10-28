@@ -298,7 +298,10 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, Î
     # Preserve the preceding pass when Kessler will return early or a callback needs it:
     # its internal update_state! does not forward the time-stepper's callbacks.
     skip_tendencies = skip_pre_microphysics_tendencies(model.microphysics, Î”t, callbacks)
-    update_state!(model, callbacks; compute_tendencies = !skip_tendencies)
+    # When skipping, also skip the closure fields: Kessler does not read them and its own
+    # `update_state!` recomputes them from the post-microphysics state before any consumer.
+    update_state!(model, callbacks; compute_tendencies = !skip_tendencies,
+                  compute_closure_fields = !skip_tendencies)
     # These tendencies are consumed by stage 1 of the next step, after
     # `freeze_linearization_state!` has reseeded the live field.
     cache_transport_velocity!(model)

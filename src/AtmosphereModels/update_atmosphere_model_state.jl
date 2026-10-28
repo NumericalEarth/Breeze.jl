@@ -38,7 +38,13 @@ end
 # prognostic fields by a full `Δt` and so must run exactly once per step — the
 # time-steppers invoke it directly. (The tendency-interface microphysics still runs
 # every RK stage as part of `compute_tendencies!`.)
-function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
+#
+# `compute_closure_fields = false` skips the closure-field (e.g. eddy viscosity) computation and its
+# halo fill. Only callers that overwrite the closure fields with a later `update_state!` before any
+# consumer reads them may pass it (the pre-Kessler pass in the acoustic RK3 step).
+function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[];
+                                    compute_tendencies = true,
+                                    compute_closure_fields = true)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
@@ -46,7 +52,7 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
 
     fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
-    compute_auxiliary_variables!(model)
+    compute_auxiliary_variables!(model; compute_closure_fields)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
@@ -240,7 +246,7 @@ Compute auxiliary model variables:
     * specific thermodynamic variable (``s = ρs / ρ`` or ``θ = ρθ / ρ``)
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
 """
-function compute_auxiliary_variables!(model)
+function compute_auxiliary_variables!(model; compute_closure_fields=true)
     # Velocities, thermodynamic and dynamics auxiliaries (dynamics may fuse these into one launch)
     compute_auxiliary_state_variables!(model)
 
@@ -248,7 +254,7 @@ function compute_auxiliary_variables!(model)
     # field-less closures (a per-column ensemble of e.g. `VerticalScalarDiffusivity`, for which
     # `closure_fields === nothing`); there is nothing to compute or fill, so skip it. Field-carrying
     # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
-    if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
+    if compute_closure_fields && !(model.closure isa AbstractArray && isnothing(model.closure_fields))
         compute_closure_fields!(model.closure_fields, model.closure, model)
         fill_halo_regions!(model.closure_fields; only_local_halos=true)
     end
