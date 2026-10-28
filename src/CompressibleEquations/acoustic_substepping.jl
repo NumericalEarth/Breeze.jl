@@ -31,8 +31,8 @@ using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: implicit_step!
-using Oceananigans.Grids: ZDirection, rnode, znode
-using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
+using Oceananigans.Grids: ZDirection, rnode, znode, RectilinearGrid
+using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!, masked_multiply
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
@@ -926,7 +926,12 @@ end
                                     grid, dynamics, Δτ, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ)
 
     i, j, k = @index(Global, NTuple)
+    build_predictors!(i, j, k, ρ′★, ρθ′★, ρθ′ˢ⁻, ρ′, ρθ′, ρw′, ρu′, ρv′,
+                      grid, dynamics, Δτ, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ)
+end
 
+@inline function build_predictors!(i, j, k, ρ′★, ρθ′★, ρθ′ˢ⁻, ρ′, ρθ′, ρw′, ρu′, ρv′,
+                                   grid, dynamics, Δτ, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ)
     @inbounds begin
         ρθ′ˢ⁻[i, j, k] = ρθ′[i, j, k] # stash old (ρθ)′ for the divergence damping
 
@@ -940,6 +945,7 @@ end
         ρθ′★[i, j, k] = ρθ′[i, j, k] +
             Δτ * (fθ * Gˢρᵡ[i, j, k] - ∇ʰ_θM) - δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
     end
+    return nothing
 end
 
 # Face-level RHS for `(ρw)′ᵐ⁺`: split weights δτᵐ⁺ (predictor) and δτˢ⁻ (old-step) per
@@ -950,6 +956,14 @@ end
                                       grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻, Πᴸ, γRᵐᴸ, g, dˢ⁻,
                                       fw, Gˢρw, sponge)
     i, j, k = @index(Global, NTuple)
+    @inbounds ρw′_rhs[i, j, k] = vertical_rhs(i, j, k, ρ′★, ρθ′★, ρ′, ρθ′, ρw′,
+                                              grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻, Πᴸ, γRᵐᴸ, g, dˢ⁻,
+                                              fw, Gˢρw, sponge)
+end
+
+@inline function vertical_rhs(i, j, k, ρ′★, ρθ′★, ρ′, ρθ′, ρw′,
+                              grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻, Πᴸ, γRᵐᴸ, g, dˢ⁻,
+                              fw, Gˢρw, sponge)
     Nz = size(grid, 3)
 
     @inbounds begin
@@ -972,7 +986,7 @@ end
         # (tridiag b[1] = 1 ⇒ (ρw)′[1] = 0; impenetrability w(top) = 0). Branchless (launched over
         # 1:Nz+1, no warp divergence); the boundary stencils read unfilled k=0/Nz+1 halos but the
         # result is discarded.
-        ρw′_rhs[i, j, k] = ifelse((k != 1) & (k != Nz + 1), rhs, zero(rhs))
+        return ifelse((k != 1) & (k != Nz + 1), rhs, zero(rhs))
     end
 end
 
@@ -996,12 +1010,104 @@ end
 # runs it omits the per-substep damping increment from the transport average.
 @kernel function _post_solve_recovery!(ρ′, ρθ′, ρw′, ρu′, ρv′, ρ′★, ρθ′★, avg, grid, dynamics, δτᵐ⁺, θᴸ)
     i, j, k = @index(Global, NTuple)
+    post_solve_recovery!(i, j, k, ρ′, ρθ′, ρw′, ρu′, ρv′, ρ′★, ρθ′★, avg, grid, dynamics, δτᵐ⁺, θᴸ)
+end
+
+@inline function post_solve_recovery!(i, j, k, ρ′, ρθ′, ρw′, ρu′, ρv′, ρ′★, ρθ′★, avg, grid, dynamics, δτᵐ⁺, θᴸ)
     @inbounds begin
         ρ′[i, j, k]  = ρ′★[i, j, k]  - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
         ρθ′[i, j, k] = ρθ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
         avg.u[i, j, k] += ρu′[i, j, k]
         avg.v[i, j, k] += ρv′[i, j, k]
         avg.w[i, j, k] += ρw′[i, j, k]
+    end
+    return nothing
+end
+
+#####
+##### Fused acoustic column substep (flat RectilinearGrid only)
+#####
+#
+# `_fused_acoustic_column_substep!` runs `_build_predictors!` + `_build_vertical_rhs!` + the
+# batched tridiagonal `solve!` + `_post_solve_recovery!` in ONE `:xy` launch, one thread per
+# column. Each phase calls the same `@inline` per-cell body as the split kernels, in the same
+# order, so every stored value is the same expression on the same inputs (bitwise identical):
+#
+#   1. predictors ρ′★, ρθ′★ (and the (ρθ)′ stash) over cells 1…Nz;
+#   2. forward Thomas sweep over rows 1…Nz with the solver's arithmetic (`get_coefficient` on the
+#      `AcousticTridiag*` tags, `masked_multiply`, the `|β| > 10 eps` elision). The rhs of row k is
+#      formed inside the sweep with `vertical_rhs`, which reads the OLD (ρw)′ at faces k−1, k, k+1.
+#      To keep those reads valid, the solution of row k−1 is held in a register and stored to
+#      (ρw)′[k−1] only after the rhs of row k is formed (the split path keeps the rhs in a separate
+#      field instead). The rhs is never stored;
+#   3. back substitution over Nz−1…1 with the stored `t`;
+#   4. recovery of ρ′, (ρθ)′ and the ⟨ρu, ρv, ρw⟩ accumulation over cells 1…Nz.
+#
+# The column phases only read the fused-written fields (ρ′★, ρθ′★, (ρw)′, ρ′, ρθ′) in their own
+# column, which holds on a non-terrain RectilinearGrid: the terrain PGF/flux operators read
+# horizontal neighbours, and the IMEX implicit advection runs between predictors and rhs.
+# Everything else keeps the split sequence (`acoustic_column_path`).
+
+struct SplitAcousticColumn end
+struct FusedAcousticColumn end
+
+acoustic_column_path(grid, dynamics, advection) = SplitAcousticColumn()
+acoustic_column_path(::RectilinearGrid, ::CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing}, advection) =
+    FusedAcousticColumn()
+acoustic_column_path(::RectilinearGrid, ::CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
+                     ::AdaptiveImplicitVerticalAdvection) = SplitAcousticColumn()
+
+@kernel function _fused_acoustic_column_substep!(ρw′, ρ′, ρθ′, ρu′, ρv′, ρ′★, ρθ′★, ρθ′ˢ⁻, avg,
+                                                 a, b, c, p, t, grid, dynamics,
+                                                 Δτ, δτᵐ⁺, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ,
+                                                 Πᴸ, γRᵐᴸ, g, dᵐ⁺, dˢ⁻, fw, Gˢρw, sponge)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    z = ZDirection()
+    ε = 10 * eps(eltype(ρw′))
+
+    @inbounds begin
+        # 1. Predictors
+        for k = 1:Nz
+            build_predictors!(i, j, k, ρ′★, ρθ′★, ρθ′ˢ⁻, ρ′, ρθ′, ρw′, ρu′, ρv′,
+                              grid, dynamics, Δτ, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ)
+        end
+
+        # 2. Forward sweep; ϕᵏ⁻ is the not-yet-stored solution of the previous row
+        β  = get_coefficient(i, j, 1, grid, b, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+        f₁ = vertical_rhs(i, j, 1, ρ′★, ρθ′★, ρ′, ρθ′, ρw′, grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
+                          Πᴸ, γRᵐᴸ, g, dˢ⁻, fw, Gˢρw, sponge)
+        ϕᵏ⁻ = f₁ / β
+
+        for k = 2:Nz
+            fᵏ = vertical_rhs(i, j, k, ρ′★, ρθ′★, ρ′, ρθ′, ρw′, grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
+                              Πᴸ, γRᵐᴸ, g, dˢ⁻, fw, Gˢρw, sponge)
+            ρw′[i, j, k-1] = ϕᵏ⁻ # old (ρw)′[k−1] no longer needed
+
+            cᵏ⁻¹ = get_coefficient(i, j, k-1, grid, c, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+            bᵏ   = get_coefficient(i, j, k,   grid, b, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+            aᵏ⁻¹ = get_coefficient(i, j, k-1, grid, a, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+
+            tᵏ = cᵏ⁻¹ / β
+            t[i, j, k] = tᵏ
+            β = bᵏ - masked_multiply(aᵏ⁻¹, tᵏ)
+
+            # Not diagonally dominant (β ≈ 0): keep the old (ρw)′[k], as the solver does.
+            definitely_diagonally_dominant = abs(β) > ε
+            ϕ★ = (fᵏ - masked_multiply(aᵏ⁻¹, ϕᵏ⁻)) / β
+            ϕᵏ⁻ = ifelse(definitely_diagonally_dominant, ϕ★, ρw′[i, j, k])
+        end
+        ρw′[i, j, Nz] = ϕᵏ⁻
+
+        # 3. Back substitution
+        for k = Nz-1:-1:1
+            ρw′[i, j, k] -= masked_multiply(t[i, j, k+1], ρw′[i, j, k+1])
+        end
+
+        # 4. Recovery and transport-velocity accumulation
+        for k = 1:Nz
+            post_solve_recovery!(i, j, k, ρ′, ρθ′, ρw′, ρu′, ρv′, ρ′★, ρθ′★, avg, grid, dynamics, δτᵐ⁺, θᴸ)
+        end
     end
 end
 
@@ -1479,6 +1585,40 @@ function acoustic_substep!(model, substepper, stage, advection)
     # `damp_vertical=false`.
     dᵐ⁺, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, grid, FT)
 
+    # Steps B–D: predictors, (ρw)′ tridiag rhs + solve, post-solve recovery. Fused into one
+    # column launch on flat RectilinearGrids (see `_fused_acoustic_column_substep!`).
+    path = acoustic_column_path(grid, model.dynamics, advection)
+    acoustic_column_substep!(path, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻)
+
+    # Per-substep open-boundary enforcement (issue #738): relax the outermost
+    # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
+    # the halo fill, so the boundary cell tracks the prescribed inflow state.
+    apply_open_boundary_relaxation!(substepper, model, grid, arch)
+
+    fill_halo_regions!(substepper.density_perturbation)
+    fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+
+    # Step E: optional Klemp 2018 post-substep damping (no-op for
+    # `NoDivergenceDamping`).
+    apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
+
+    fill_halo_regions!(substepper.momentum_perturbation.u)
+    fill_halo_regions!(substepper.momentum_perturbation.v)
+
+    # The damping kernel also writes the south/west wall face; re-enforce
+    # impenetrability so the next substep's divergence and the accumulated
+    # transport velocity see a closed wall (mass conservation).
+    enforce_wall_impenetrability!(substepper, model, grid, arch)
+    # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
+    return nothing
+end
+
+function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻)
+    grid = model.grid
+    arch = architecture(grid)
+    Gⁿ = model.timestepper.Gⁿ
+    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
+
     # Step B: build predictors ρ′★, ρθ′★ (3D), then the (ρw)′ᵐ⁺ tridiag RHS (3D).
     # `_build_predictors!` also stashes old (ρθ)′ into ρθ′ˢ⁻; halo-fill it for the damping.
     launch!(arch, grid, :xyz, _build_predictors!,
@@ -1535,27 +1675,37 @@ function acoustic_substep!(model, substepper, stage, advection)
             substepper.time_averaged_velocities,
             grid, model.dynamics, δτᵐ⁺,
             substepper.linearization_potential_temperature)
+    return nothing
+end
 
-    # Per-substep open-boundary enforcement (issue #738): relax the outermost
-    # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
-    # the halo fill, so the boundary cell tracks the prescribed inflow state.
-    apply_open_boundary_relaxation!(substepper, model, grid, arch)
+function acoustic_column_substep!(::FusedAcousticColumn, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻)
+    grid = model.grid
+    arch = architecture(grid)
+    Gⁿ = model.timestepper.Gⁿ
+    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
+    solver = substepper.vertical_solver
 
-    fill_halo_regions!(substepper.density_perturbation)
-    fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+    launch!(arch, grid, :xy, _fused_acoustic_column_substep!,
+            substepper.momentum_perturbation.w,
+            substepper.density_perturbation,
+            substepper.density_potential_temperature_perturbation,
+            substepper.momentum_perturbation.u,
+            substepper.momentum_perturbation.v,
+            substepper.density_predictor,
+            substepper.density_potential_temperature_predictor,
+            substepper.previous_density_potential_temperature_perturbation,
+            substepper.time_averaged_velocities,
+            solver.a, solver.b, solver.c, solver.parameters, solver.t,
+            grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
+            Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
+            substepper.linearization_potential_temperature,
+            substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
+            g, dᵐ⁺, dˢ⁻, substepper.vertical_momentum_tendency_factor,
+            substepper.slow_vertical_momentum_tendency,
+            substepper.sponge)
 
-    # Step E: optional Klemp 2018 post-substep damping (no-op for
-    # `NoDivergenceDamping`).
-    apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
-
-    fill_halo_regions!(substepper.momentum_perturbation.u)
-    fill_halo_regions!(substepper.momentum_perturbation.v)
-
-    # The damping kernel also writes the south/west wall face; re-enforce
-    # impenetrability so the next substep's divergence and the accumulated
-    # transport velocity see a closed wall (mass conservation).
-    enforce_wall_impenetrability!(substepper, model, grid, arch)
-    # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
+    # The (ρθ)′ stash is read with horizontal neighbours only by the divergence damping.
+    fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
     return nothing
 end
 
