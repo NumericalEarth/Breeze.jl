@@ -27,7 +27,7 @@ All other prognostic fields are cell-centered and rescaled with broadcasting.
 function rescale_density_weighted_fields!(model, ρ⁻)
     grid = model.grid
     arch = grid.architecture
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
 
     # Momentum: kernel with interpolation to face locations
     launch!(arch, grid, :xyz, _rescale_momentum!, grid, model.momentum, ρ, ρ⁻)
@@ -56,7 +56,7 @@ end
 function rescale_dry_density_weighted_fields!(model, ρᵈ⁻)
     grid = model.grid
     arch = grid.architecture
-    ρᵈ = dynamics_density(model.dynamics)
+    ρᵈ = continuity_density(model.dynamics)
 
     launch!(arch, grid, :xyz, _rescale_momentum!, grid, model.momentum, ρᵈ, ρᵈ⁻)
 
@@ -122,8 +122,8 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
     constants = model.thermodynamic_constants
 
     if rescale_densities
-        ρᵣ_old = similar(dynamics_density(model.dynamics))
-        parent(ρᵣ_old) .= parent(dynamics_density(model.dynamics))
+        ρᵣ_old = similar(continuity_density(model.dynamics))
+        parent(ρᵣ_old) .= parent(continuity_density(model.dynamics))
     end
 
     # Update reference temperature and moisture from horizontal means
@@ -415,7 +415,7 @@ function set_potential_temperature_hydrostatically_balanced_density!(
     cᵖᵛ = constants.vapor.heat_capacity
     g   = constants.gravitational_acceleration
 
-    ρᵈ = dynamics_density(dynamics)
+    ρᵈ = continuity_density(dynamics)
 
     # Reuse diagnostic fields as column-solver scratch. `update_state!` below rebuilds all of them.
     # Aliasing `π` with `qᵛ` is safe because each column is serial in `k`: the kernel reads qᵛ[k]

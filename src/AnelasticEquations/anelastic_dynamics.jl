@@ -123,7 +123,7 @@ Return the reference density field for `AnelasticDynamics`.
 For anelastic models, the dynamics density is the time-independent
 reference state density ``ρᵣ(z)``.
 """
-AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
+AtmosphereModels.continuity_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
 # The total density ρᵣ(z) is the reference state's, not the local state's, so evaluate the
 # equation of state at the reference pressure with the local temperature and moisture:

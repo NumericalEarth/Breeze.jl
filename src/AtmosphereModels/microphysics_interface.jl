@@ -1036,7 +1036,7 @@ end
 # weighted like it by the total density; the enthalpy each brings is that of the cell it drains
 # (`condensate_content_fluxes`), the cell above the face when the condensate falls, the cell
 # below when an updraft outruns its fall speed; and the cell's coupling-to-total density ratio
-# turns the resulting change of the specific variable into that of the coupling-weighted
+# turns the resulting change of the specific variable into that of the continuity-density-weighted
 # prognostic.
 #
 # The content moves in the same two parts as the mass. `sedimentation_tendency` carries the part
@@ -1072,7 +1072,7 @@ function condensate_content end
 """
 $(TYPEDSIGNATURES)
 
-Return the tendency of the coupling-weighted thermodynamic variable (`ρθ = ρᵈ θ` or `ρs = ρᵈ s`)
+Return the tendency of the continuity-density-weighted thermodynamic variable (`ρθ = ρᵈ θ` or `ρs = ρᵈ s`)
 at cell `(i, j, k)` from the sedimentation of the condensate the `condensates` describe (see
 [`materialize_sedimentation`](@ref)): the part the tracer tendencies apply, which
 is the whole transport of an explicit scheme and the CFL-limited explicit fraction under adaptive
@@ -1089,7 +1089,7 @@ the tendency is
 where `Fᵢ(w)` is the vertical advective flux of condensate `i`'s humidity at velocity `w`
 through the face with the scheme that transports the tracer ([`sedimentation_mass_fluxes`](@ref)),
 `Wᵢ = wᵗ + wᵢ` its total velocity, `ρ` the [`total_density`](@ref) that weights the tracer's
-mass flux, `ρᵈ` the [`dynamics_density`](@ref) that carries the thermodynamic variable, and
+mass flux, `ρᵈ` the [`continuity_density`](@ref) that carries the thermodynamic variable, and
 `cᵢ(w) = χᵢ + (∂φ/∂h) (hᵢ(w) − hᵢ)` the content the flux delivers to the cell: the cell's own
 `χ` of the condensate's phase, plus its `∂φ/∂h` times the enthalpy in the upwind cell of `w` in
 excess of its own. A flux out drains the cell itself and delivers `χ` alone, changing the
@@ -1107,7 +1107,7 @@ does not. The `θˡⁱ` tendency is a cell-local response, not the divergence of
 conservative thermodynamic face flux. Continuity advances `ρᵈ` without a sedimentation source on
 every core, so the content moved per unit total mass is the change of the specific variable, and
 the cell's ratio `ρᵈ / ρ` (one on the anelastic core, the dry mass fraction on the compressible
-core) turns it into the change of the coupling-weighted prognostic.
+core) turns it into the change of the continuity-density-weighted prognostic.
 """
 @inline sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature) =
@@ -1133,7 +1133,7 @@ core) turns it into the change of the coupling-weighted prognostic.
     c⁺ = condensate_content(i, j, min(k + 1, grid.Nz), grid, formulation, dynamics, constants,
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     ρ = total_density(dynamics)
-    ρᵈ = dynamics_density(dynamics)
+    ρᵈ = continuity_density(dynamics)
     Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
     ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
     ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)

@@ -29,7 +29,7 @@ using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_s
                                     implicit_damping_factors
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
-                               buoyancy_forceᶜᶜᶜ, dynamics_density
+                               buoyancy_forceᶜᶜᶜ, continuity_density
 using Breeze.Thermodynamics: ExnerReferenceState, surface_density
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -642,7 +642,7 @@ for arch in arches
             @test y_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test z_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, slow) == 0
-            @test dynamics_density(slow) === model.dynamics.dry_density
+            @test continuity_density(slow) === model.dynamics.dry_density
         end
         Oceananigans.defaults.FloatType = old_FT
     end

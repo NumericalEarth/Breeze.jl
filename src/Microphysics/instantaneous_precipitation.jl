@@ -8,7 +8,7 @@ using ..Thermodynamics:
 
 using ..AtmosphereModels:
     AtmosphereModels,
-    dynamics_density,
+    continuity_density,
     kernel_time_step,
     total_density,
     standard_pressure
@@ -146,7 +146,7 @@ end
     i, j, k = @index(Global, NTuple)
 
     ρ_field  = total_density(dynamics)     # total ρ: mass fractions, saturation, density-based inversion
-    ρᵈ_field = dynamics_density(dynamics)  # ρᵈ: ρθ = ρᵈθ is dry-coupled
+    ρᵈ_field = continuity_density(dynamics)  # ρᵈ: ρθ = ρᵈθ is dry-coupled
 
     @inbounds begin
         ρ  = ρ_field[i, j, k]

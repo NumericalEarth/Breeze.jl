@@ -159,23 +159,23 @@ end
 #####
 
 """
-    dynamics_density(dynamics)
+    continuity_density(dynamics)
 
-Return the *coupling density* — the density weighting the momentum (`ρu = ρᵈ u`) and the
-thermodynamic flux variable (`ρθ = ρᵈ θ`), and the divisor for diagnosing velocity (`u = ρu/ρᵈ`)
-and potential temperature (`θ = ρθ/ρᵈ`). It is the prognostic mass variable advanced by continuity.
+Return the *continuity density*: the density whose continuity equation the model solves,
+``∇·(ρᵣ u) = 0`` on the anelastic core and ``∂ₜρᵈ + ∇·(ρᵈ u) = 0`` on the compressible core.
+Momentum and the thermodynamic variable are stored per unit of it (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`), so it
+is also the divisor for diagnosing velocity (`u = ρu/ρᵈ`) and potential temperature (`θ = ρθ/ρᵈ`).
 
 - `AnelasticDynamics`: the time-independent reference density `ρᵣ`.
 - `CompressibleDynamics`: the prognostic dry-air density `ρᵈ`.
 
-The *total* air density `ρ = ρᵈ + Σ ρˣ` (dry air plus every water species) is a separate, diagnosed
-quantity — see [`total_density`](@ref) — used wherever total mass enters the physics: the
-moisture **mass-fraction** recovery (`qˣ = ρˣ/ρ`, so the thermodynamics stays in mass fractions),
-scalar and water advection, the equation of state, and buoyancy. The water densities (`ρqᵛ`, `ρqˡ`,
-…) are stored as partial densities (mass per volume), *not* coupling-weighted. On the anelastic core
-the two densities coincide (`total_density === dynamics_density`).
+The *total* air density `ρ = ρᵈ + Σ ρˣ` (dry air plus every water species) is a separate quantity,
+[`total_density`](@ref): it recovers the moisture mass fractions (`qˣ = ρˣ/ρ`) and weights scalar and
+water advection. The water densities (`ρqᵛ`, `ρqˡ`, …) are stored as partial densities (mass per
+volume), not per unit of the continuity density. On the anelastic core the two densities coincide
+(`total_density === continuity_density`).
 """
-function dynamics_density end
+function continuity_density end
 
 """
     total_density(dynamics)
@@ -183,22 +183,22 @@ function dynamics_density end
 Return the model's total air density ρ = ρᵈ + Σρˣ: the density of the model's mass, which
 converts the stored partial densities to mass fractions (``qˣ = ρqˣ / ρ``) and weights scalar
 advection, hydrostatics and radiation. `CompressibleDynamics` diagnoses it from the prognostic
-dry density and the partial densities. Defaults to [`dynamics_density`](@ref), so on
+dry density and the partial densities. Defaults to [`continuity_density`](@ref), so on
 `AnelasticDynamics` it is the reference density ``ρᵣ(z)``: the anelastic approximation replaces
 the total density by ``ρᵣ``, consistent with the reference pressure ``pᵣ``.
 
 Thermodynamic relations of the local state, such as the saturation specific humidity, use
 [`thermodynamic_state_density`](@ref) instead.
 """
-total_density(dynamics) = dynamics_density(dynamics)
+total_density(dynamics) = continuity_density(dynamics)
 
 """
 $(TYPEDSIGNATURES)
 
 Return the change of the moisture mass fractions per unit mass of condensate `phase` that
 sediments out of a cell whose mass fractions are `q`, as a `MoistureMassFractions` difference
-vector (the dry-air change is implied by `Σq = 1`). Continuity advances the coupling density
-([`dynamics_density`](@ref)) without a sedimentation source on every core, so the increment
+vector (the dry-air change is implied by `Σq = 1`). Continuity advances the continuity density
+([`continuity_density`](@ref)) without a sedimentation source on every core, so the increment
 depends on what the total density does:
 
 - fixed (the default; `AnelasticDynamics`): the total density the mass fractions are referenced
@@ -508,8 +508,8 @@ end
 
 Adapt.adapt_structure(to, s::SlowDynamics) = SlowDynamics(adapt(to, s.dynamics))
 
-# Forward dynamics_density to the wrapped dynamics
-@inline dynamics_density(s::SlowDynamics) = dynamics_density(s.dynamics)
+# Forward continuity_density to the wrapped dynamics
+@inline continuity_density(s::SlowDynamics) = continuity_density(s.dynamics)
 
 # Fast terms return zero for slow dynamics
 @inline x_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)

@@ -240,7 +240,7 @@ are instantaneous responses rather than exact finite-step thermal reconstruction
 fluxes ride the total-density-weighted mass flux the tracer tendency
 applies, and the cell's coupling-to-total density ratio (one on the anelastic core,
 ``qᵈ = ρᵈ / ρ`` on the compressible core) converts the change of the specific variable into that
-of the coupling-weighted prognostic. They are formed at the velocity the tracer tendency
+of the continuity-density-weighted prognostic. They are formed at the velocity the tracer tendency
 transports the condensates with, which on the compressible core is the substepper's
 acoustic-mean velocity rather than the RK predictor the thermodynamic variable itself advects
 with: upwind selection and the adaptive implicit split are nonlinear in the velocity, so fluxes

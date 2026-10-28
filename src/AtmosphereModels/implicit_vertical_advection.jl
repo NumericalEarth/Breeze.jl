@@ -54,14 +54,14 @@ end
 implicit_step_scheme(advection, density=nothing) = DensityWeightedImplicitOperator(advection, density)
 
 # Density weighting the advective flux of each prognostic. Momentum and the thermodynamic
-# variable are carried by the coupling density (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`; see `dynamics_density`),
+# variable are carried by the continuity density (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`; see `continuity_density`),
 # while water species and tracers advect as mass fractions of the total density ρ = ρᵈ + Σρˣ
 # (see `scalar_tendency`). The implicit solve must weight its upwind coefficients with the same
 # density the explicit flux divergence uses; on the anelastic core the two densities coincide.
 function implicit_advection_density(dynamics, formulation, name::Symbol)
     coupling = name === :ρu || name === :ρv || name === :ρw ||
                name === thermodynamic_density_name(formulation)
-    return coupling ? dynamics_density(dynamics) : total_density(dynamics)
+    return coupling ? continuity_density(dynamics) : total_density(dynamics)
 end
 
 """

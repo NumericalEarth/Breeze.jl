@@ -11,7 +11,7 @@ using Oceananigans.TimeSteppers: implicit_step!
 using Breeze.AtmosphereModels:
     AtmosphereModel,
     advecting_vertical_velocity,
-    dynamics_density,
+    continuity_density,
     total_density,
     thermodynamic_density_name,
     transport_velocities,
@@ -193,7 +193,7 @@ end
 
 function cache_advecting_state!(w_cache, ρ_cache, model)
     w = advecting_vertical_velocity(model.dynamics, model.velocities)
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
     params = KernelParameters(size(parent(w_cache)), (0, 0, 0))
     launch!(architecture(model.grid), model.grid, params, _cache_advecting_state!,
             parent(w_cache), parent(ρ_cache), parent(w), parent(ρ))
@@ -206,7 +206,7 @@ advecting_state(model) =
     advecting_state(model.timestepper.substepper.vertical_velocity_cache,
                     model.timestepper.substepper.density_cache, model)
 
-advecting_state(::Nothing, ::Nothing, model) = (advecting_vertical_velocity(model.dynamics, model.velocities), dynamics_density(model.dynamics))
+advecting_state(::Nothing, ::Nothing, model) = (advecting_vertical_velocity(model.dynamics, model.velocities), continuity_density(model.dynamics))
 
 advecting_state(w_cache, ρ_cache, model) = (w_cache, ρ_cache)
 
@@ -227,7 +227,7 @@ runs once per RK stage after the substep loop and after the scalar update, whose
 `implicit_sedimentation_step!` adds to the thermodynamic variable content that takes this
 solve's diffusion too, over the stage interval — the operator split WRF and CM1 use for their
 implicit vertical pieces. Under an adaptive-implicit thermodynamic scheme the advection half of
-this solve is empty (`postloop_thermodynamic_scheme`): it was applied inside the loop. Continuity takes no implicit solve: the coupling-density tendency is the
+this solve is empty (`postloop_thermodynamic_scheme`): it was applied inside the loop. Continuity takes no implicit solve: the continuity-density tendency is the
 acoustic mass-flux divergence itself, not scalar advection.
 
 The advecting velocity passed to each solve must be the one its slow tendency was built with,
@@ -296,14 +296,14 @@ implicit_substep!(model, Δt_stage) =
 implicit_substep!(model, ::Nothing, Δt_stage) = nothing
 
 function implicit_substep!(model, implicit_solver, Δt_stage)
-    # Momentum and the thermodynamic variable are coupling-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
+    # Momentum and the thermodynamic variable are continuity-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
     # Frozen stage-entry (w, ρᵈ), so the explicit and implicit halves partition one transport.
     w, ρᵈ = advecting_state(model)
 
-    # The diffusion half of each row is weighted with the *live* coupling density instead: it
+    # The diffusion half of each row is weighted with the *live* continuity density instead: it
     # reconstructs u and θ from the prognostic the acoustic loop has just advanced, and unlike the
     # advective split it has no explicit fraction to pair with the frozen state.
-    diffusion_density = dynamics_density(model.dynamics)
+    diffusion_density = continuity_density(model.dynamics)
 
     prognostic = prognostic_fields(model)
     momentum_advection = model.advection.momentum

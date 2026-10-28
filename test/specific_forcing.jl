@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze: SpecificForcing
-using Breeze.AtmosphereModels: dynamics_density, is_density_tendency_forcing, total_density
+using Breeze.AtmosphereModels: continuity_density, is_density_tendency_forcing, total_density
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Forcings: MultipleForcings, Relaxation
 using Oceananigans.Fields: interior
@@ -235,7 +235,7 @@ end
     update_state!(model)
 
     Gρθ = interior(model.timestepper.Gⁿ.ρθ) |> Array
-    ρ = interior(Breeze.AtmosphereModels.dynamics_density(model.dynamics)) |> Array
+    ρ = interior(Breeze.AtmosphereModels.continuity_density(model.dynamics)) |> Array
     expected = ρ .* F_θ
     @test maximum(abs.(Gρθ .- expected)) < eps(FT) * 100
 end
@@ -263,7 +263,7 @@ end
                                          qᵛ=Returns(F),
                                          c=Returns(F)))
 
-    ρᵈ = dynamics_density(model.dynamics)
+    ρᵈ = continuity_density(model.dynamics)
     ρ = total_density(model.dynamics)
     @test ρ !== ρᵈ
 

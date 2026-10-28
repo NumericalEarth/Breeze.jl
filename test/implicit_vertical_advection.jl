@@ -298,7 +298,7 @@ import Breeze.AtmosphereModels as AM
         Breeze.TimeSteppers.prepare_acoustic_cache!(substepper, adaptive_model)
         Breeze.TimeSteppers.cache_advecting_state!(adaptive_model)
         w_live = AM.advecting_vertical_velocity(adaptive_model.dynamics, adaptive_model.velocities)
-        ρ_live = AM.dynamics_density(adaptive_model.dynamics)
+        ρ_live = AM.continuity_density(adaptive_model.dynamics)
         w_at_tendency = Array(parent(w_live))
         ρ_at_tendency = Array(parent(ρ_live))
         parent(w_live) .*= 3

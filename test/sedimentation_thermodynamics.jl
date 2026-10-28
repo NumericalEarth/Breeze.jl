@@ -84,7 +84,7 @@ function sedimentation_temperature_rates(model, phase, compressible)
     gas = (ρ .- ρv .- ρx) .* TH.dry_air_gas_constant(constants) .+ ρv .* TH.vapor_gas_constant(constants)
     capacity = (ρ .- ρv .- ρx) .* cd .+ ρv .* cv .+ ρx .* cx .- (compressible ? gas : zero(gas))
     pressure = compressible ? gas .* T : column(model.dynamics.reference_state.pressure)
-    weighting_density = column(AM.dynamics_density(model.dynamics))
+    weighting_density = column(AM.continuity_density(model.dynamics))
     function theta_density(k, temperature, condensate)
         density = compressible ? ρ[k] + condensate - ρx[k] : ρ[k]
         q = phase === :liquid ? TH.MoistureMassFractions(ρv[k] / density, condensate / density, 0.0) :

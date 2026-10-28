@@ -17,7 +17,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze: dynamics_density, AdiabaticBalancer
+using Breeze: continuity_density, AdiabaticBalancer
 using Breeze.AtmosphereModels: adiabatic_balance_twin, compute_pressure_correction!,
                                make_pressure_correction!, resolve_balance_Δt
 using Oceananigans
@@ -68,7 +68,7 @@ end
         @test twin.velocities       === model.velocities
         @test twin.temperature      === model.temperature
         @test twin.pressure_solver  === model.pressure_solver
-        @test dynamics_density(twin.dynamics) === dynamics_density(model.dynamics)
+        @test continuity_density(twin.dynamics) === continuity_density(model.dynamics)
         # Momentum, ρθ, moisture_density, and tracers are the exception: the twin gets its own
         # Field wrapper carrying stripped (no-flux) surface BCs, but shares the production data
         # (no reallocation).
@@ -113,9 +113,9 @@ end
 
         # Fixed point holds with the native scheme too.
         _set_discrete_rest!(model)
-        ρ₀ = deepcopy(dynamics_density(model.dynamics))
+        ρ₀ = deepcopy(continuity_density(model.dynamics))
         set!(model; balancer = AdiabaticBalancer(Δt = 0.5, cycles = 1, time_stepping = nothing))
-        @test dynamics_density(model.dynamics) ≈ ρ₀ rtol=1e-8
+        @test continuity_density(model.dynamics) ≈ ρ₀ rtol=1e-8
         @test isapprox(maximum(abs, model.momentum.ρw), 0; atol=1e-7)
         @test model.clock.iteration == 0
     end
@@ -141,12 +141,12 @@ end
     @testset "fixed point: discrete rest state preserved; production clock untouched" begin
         model = _build_production(default_arch)
         _set_discrete_rest!(model)
-        ρ₀  = deepcopy(dynamics_density(model.dynamics))
+        ρ₀  = deepcopy(continuity_density(model.dynamics))
         ρθ₀ = deepcopy(ρθ_of(model))
 
         set!(model; balancer = true)   # exercises the Bool dispatch + auto-Δt path (rest is a fixed point for any Δt)
 
-        @test dynamics_density(model.dynamics) ≈ ρ₀  rtol=1e-8
+        @test continuity_density(model.dynamics) ≈ ρ₀  rtol=1e-8
         @test ρθ_of(model)                     ≈ ρθ₀ rtol=1e-8
         @test isapprox(maximum(abs, model.momentum.ρw), 0; atol=1e-7)
         @test model.clock.iteration == 0
@@ -202,9 +202,9 @@ end
         balance_adiabatically!(ref; Δt = Δt, cycles = cycles)
 
         # The in-place twin reproduces the graft (identical explicit scheme + identical IC).
-        for (a, b) in zip((dynamics_density(model.dynamics), model.momentum.ρu, model.momentum.ρv,
+        for (a, b) in zip((continuity_density(model.dynamics), model.momentum.ρu, model.momentum.ρv,
                            model.momentum.ρw, ρθ_of(model)),
-                          (dynamics_density(ref.dynamics), ref.momentum.ρu, ref.momentum.ρv,
+                          (continuity_density(ref.dynamics), ref.momentum.ρu, ref.momentum.ρv,
                            ref.momentum.ρw, ρθ_of(ref)))
             @test a ≈ b rtol=1e-8
         end
