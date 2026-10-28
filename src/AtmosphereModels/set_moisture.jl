@@ -19,7 +19,7 @@ convert_total_moisture!(model) = convert_total_moisture!(model, condensate_field
 # Without independent condensates the staged total water is already the prognostic moisture.
 function convert_total_moisture!(model, ::Tuple{})
     ρqᵗ = model.moisture_density
-    valid = minimum(ρqᵗ) ≥ 0
+    valid = interior_minimum(ρqᵗ) ≥ 0
     set!(specific_prognostic_moisture(model), ρqᵗ / total_density(model.dynamics))
     reject_invalid_moisture!(model, valid)
     return nothing
@@ -48,6 +48,11 @@ end
     return ρqᵗ - ρqᶜ + tolerance
 end
 
+# The smallest interior value of a field. This function exists only for column ensembles, which override it
+# (see `single_column_mode.jl`): `minimum(field)` builds a reduced field, which cannot be constructed on a grid
+# of many independent columns.
+interior_minimum(field) = minimum(field)
+
 function total_moisture_covers_condensates(total_moisture_density, condensate_density, validation_field)
     margin = KernelFunctionOperation{Center, Center, Center}(total_moisture_validation_margin,
                                                             validation_field.grid,
@@ -55,7 +60,7 @@ function total_moisture_covers_condensates(total_moisture_density, condensate_de
     # Reactant reductions need a stored field. The specific moisture field is free until
     # the conversion overwrites it, and the margin does not read it.
     set!(validation_field, margin)
-    return minimum(validation_field) ≥ 0
+    return interior_minimum(validation_field) ≥ 0
 end
 
 # Traced backends, where `valid` is known only at execution time, specialize this
