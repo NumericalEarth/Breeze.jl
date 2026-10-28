@@ -76,14 +76,18 @@ jobs:
           # little extra compile; --checkpoints sweeps the checkpoint budget of
           # the binomial (revolve) schedule Enzyme uses for the reverse pass
           # (each value is a separate compile + run, recorded as its own
-          # result). To reproduce locally on CPU see benchmarking/README.md
-          # ("AD benchmark").
-          - dynamics: 'compressible_explicit'
+          # result). The model is the regional-forecast configuration: a
+          # LatitudeLongitudeGrid with SphericalCoriolis (the AD default) and
+          # split-explicit compressible dynamics (12 acoustic substeps). To reproduce locally
+          # on CPU see benchmarking/README.md ("AD benchmark").
+          - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '128x128x32'
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
+            # The gradient compile needs more than the default 30-minute job
+            timeout: 60
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,4,8 --checkpointing_mode binomial'
           # Scalar-tendency kernel sweep (no model): time the bare WENO
           # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
@@ -122,7 +126,7 @@ jobs:
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
         - /usr/local:/host-usr-local
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout || 30 }}
     steps:
       - name: "Check out repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -147,7 +151,7 @@ jobs:
           earlyoom -m 2 -s 100 -r 60 --prefer 'julia'
         background: true
       - name: Run benchmarks
-        timeout-minutes: 45
+        timeout-minutes: ${{ matrix.timeout || 45 }}
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
