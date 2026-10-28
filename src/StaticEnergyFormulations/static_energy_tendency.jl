@@ -68,15 +68,23 @@ end
                           microphysics, microphysical_fields, constants)
 
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+
+    @inbounds begin
+        ρᵈ = ρ_field[i, j, k]
+        ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
+    end
+
+    FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
+    div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
+
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             # An energy forcing (note: ρs and ρE are mutually exclusive) is an energy per unit mass
-             # and needs no conversion
              + ρs_forcing(i, j, k, grid, clock, model_fields)
-             + ρE_forcing(i, j, k, grid, clock, model_fields)
-             + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
+             # a volumetric heating Q (note: ρs and ρE forcings are mutually exclusive) changes s
+             # at Q / ρ, so ρᵈ s at (ρᵈ / ρ) Q
+             + ρᵈ / ρ * (FρE + div_ℐ))
 end
 
 #####
