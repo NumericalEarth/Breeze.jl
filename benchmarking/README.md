@@ -66,6 +66,14 @@ the memory/recompute trade-off:
 | `auto` (default) | Reactant's default for a static loop, `Periodic(isqrt(time_steps))`, regardless of `--checkpointing_mode`. |
 | `none` | No checkpointing; the whole forward tape is kept. |
 
+`--ad_kernels` chooses how the reverse pass differentiates the model's
+kernels. `raise` (the default) raises them to StableHLO and differentiates
+that. `kernelad` keeps them as kernel calls and differentiates the kernel
+bodies themselves (`raise=false`, `optimize=:kernelad`). Kernel AD needs a
+Reactant with EnzymeAD/Reactant.jl#3472, which the pinned version does not
+have, so it is not in CI's matrix yet. A kernel AD result's name ends in
+`_kernelad` (`..._reactant_AD_binomial_4_kernelad`).
+
 Use `--simplified` (the geostrophic forcing and surface drag BCs do not
 materialize on `ReactantState`) and `compressible_explicit` dynamics (the
 anelastic pressure solver is not traced). Microphysics is not yet exercised
@@ -143,6 +151,7 @@ julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=2.0 -
 | `--warmup_steps` | `10` | Number of warmup steps (for JIT compilation). Ignored on the `reactant` backend, which warms up with one full execution of the compiled program. |
 | `--ad` | `false` | Benchmark the forward+backward (Enzyme reverse-mode) pass through the stepping loop instead of forward only. Requires `--backend reactant`. |
 | `--checkpoints` | `auto` | AD loop checkpointing (`--ad` only): integer count, `auto`, or `none`. Comma-separated for multiple; see "AD benchmark". |
+| `--ad_kernels` | `raise` | How the AD pass differentiates the model's kernels (`--ad` only): `raise` or `kernelad`; see "AD benchmark". |
 | `--checkpointing_mode` | `binomial` | Interpretation of an integer `--checkpoints` value: `binomial` (revolve) or `periodic`. |
 
 ### Simulate Mode Arguments

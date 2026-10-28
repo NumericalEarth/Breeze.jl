@@ -163,6 +163,13 @@ function parse_commandline()
             arg_type = String
             default = "auto"
 
+        "--ad_kernels"
+            help = "How the AD pass differentiates the model's kernels (--ad only): 'raise' (raise them to " *
+                   "StableHLO and differentiate that, the default) or 'kernelad' (differentiate the kernel " *
+                   "bodies themselves with Reactant's optimize=:kernelad, from EnzymeAD/Reactant.jl#3472)."
+            arg_type = String
+            default = "raise"
+
         "--checkpointing_mode"
             help = "How an integer --checkpoints value is interpreted (--ad only): 'binomial' " *
                    "(revolve schedule with a budget of n checkpoints) or 'periodic' (n evenly spaced checkpoints)."
@@ -429,6 +436,7 @@ function run_benchmarks(args)
     if mode == "benchmark"
         println("Time steps: ", time_steps, " (warmup: ", warmup_steps, ")")
         args["ad"] && println("AD checkpointing: ", args["checkpoints"], " (", args["checkpointing_mode"], ")")
+        args["ad"] && println("AD kernels: ", args["ad_kernels"])
     else
         println("Stop time: ", args["stop_time"], " hours")
         println("Output interval: ", args["output_interval"], " minutes")
@@ -447,7 +455,9 @@ function run_benchmarks(args)
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
         ft_str = FT == Float32 ? "F32" : FT == Float64 ? "F64" : "BF16"
-        mode_suffix = args["ad"] ? "_AD_$(checkpointing_label(checkpointing))" : ""
+        # Only kernel AD shows in the name, so the existing raising names stay as they are
+        ad_kernels_suffix = args["ad_kernels"] == "raise" ? "" : "_$(args["ad_kernels"])"
+        mode_suffix = args["ad"] ? "_AD_$(checkpointing_label(checkpointing))$(ad_kernels_suffix)" : ""
 
         # Tendency modes time a tendency evaluation with no Simulation.
         # "scalar_tendency" uses the bare scalar WENO kernel (no model);
@@ -560,6 +570,7 @@ function run_benchmarks(args)
                                     microphysics=micro_name,
                                     backend=backend_name,
                                     ad=args["ad"],
+                                    ad_kernels=args["ad_kernels"],
                                     checkpointing,
                                     )
         elseif mode == "simulate"

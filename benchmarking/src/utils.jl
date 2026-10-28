@@ -25,6 +25,7 @@ end
                             microphysics::AbstractString = "",
                             backend::AbstractString = "vanilla",
                             ad::Bool = false,
+                            ad_kernels::AbstractString = "raise",
                             checkpointing = true,
                             )
 
@@ -40,7 +41,11 @@ directly through eager `time_step!`.
 With `ad=true` (Reactant only) the forward+backward pass `grad_loss!` is
 benchmarked instead, using `checkpointing` as the loop checkpointing strategy
 for the reverse pass (`true`, `false`, `Reactant.Periodic(n)`, or
-`Reactant.Binomial(budget)`; see `loss` in timestepping.jl).
+`Reactant.Binomial(budget)`; see `loss` in timestepping.jl). `ad_kernels`
+chooses how that pass differentiates the model's kernels: `"raise"` raises
+them to StableHLO and differentiates that (`raise=true`), `"kernelad"`
+differentiates the kernel bodies themselves (`raise=false`,
+`optimize=:kernelad`, which needs EnzymeAD/Reactant.jl#3472).
 
 Returns a `BenchmarkResult` containing timing information and system metadata.
 """
@@ -56,6 +61,7 @@ function benchmark_time_stepping(model;
                                  microphysics::AbstractString = "",
                                  backend::AbstractString = "vanilla",
                                  ad::Bool = false,
+                                 ad_kernels::AbstractString = "raise",
                                  checkpointing = true,
                                  )
 
@@ -73,6 +79,7 @@ function benchmark_time_stepping(model;
     checkpointing_str = ad ? checkpointing_label(checkpointing) : ""
 
     ad && !is_reactant && error("AD benchmark requires a Reactant backend (got $backend)")
+    ad_kernels in ("raise", "kernelad") || error("Unknown ad_kernels: $ad_kernels. Use 'raise' or 'kernelad'.")
 
     if verbose
         @info "Benchmark: $name"
@@ -80,6 +87,7 @@ function benchmark_time_stepping(model;
         @info "  Backend: $backend"
         @info "  Mode: $mode"
         ad && @info "  Checkpointing: $checkpointing_str"
+        ad && @info "  AD kernels: $ad_kernels"
         @info "  Float type: $FT"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
         @info "  Time step: $(Δt_FT) s"
@@ -99,11 +107,15 @@ function benchmark_time_stepping(model;
             θ_init  = CenterField(grid); set!(θ_init,  (args...) -> FT(300.0))
             dθ_init = CenterField(grid); set!(dθ_init, 0)
             dmodel  = Enzyme.make_zero(model)
+            # Kernel AD keeps the kernels as kernel calls and differentiates their bodies,
+            # so it does not raise them
+            raise = ad_kernels == "raise"
+            optimize = raise ? true : :kernelad
             if verbose
-                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true)..."
+                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=$raise, optimize=$optimize)..."
             end
             compiled_grad!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile raise=true raise_first=true sync=true grad_loss!(
+                Reactant.@compile raise=raise raise_first=raise optimize=optimize sync=true grad_loss!(
                     model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
             end
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
