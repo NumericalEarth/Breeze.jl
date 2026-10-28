@@ -113,14 +113,18 @@ function benchmark_time_stepping(model;
             θ_init  = CenterField(grid); set!(θ_init,  (args...) -> FT(300.0))
             dθ_init = CenterField(grid); set!(dθ_init, 0)
             dmodel  = Enzyme.make_zero(model)
+            # Kernel AD needs mincut in every traced loop: the time loop here and the
+            # acoustic substep loop inside the time step
+            mincut = kernels == "kernelad"
+            Breeze.CompressibleEquations.ACOUSTIC_SUBSTEP_MINCUT[] = mincut
             if verbose
-                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=$raise, optimize=$optimize)..."
+                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing), mincut=$mincut) with Reactant (raise=$raise, optimize=$optimize)..."
             end
             compiled_grad!, compile_timings = timed_reactant_compile() do
                 Reactant.@compile raise=raise raise_first=raise optimize=optimize sync=true grad_loss!(
-                    model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
+                    model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing, mincut)
             end
-            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
+            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing, mincut)
         else
             if verbose
                 @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=$raise)..."

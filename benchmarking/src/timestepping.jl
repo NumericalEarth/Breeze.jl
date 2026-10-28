@@ -50,18 +50,19 @@ end
 ##### `Periodic(isqrt(Nsteps))` before compiling so the result records it.
 #####
 
-function loss(model, θ_init, Δt, Nsteps, checkpointing)
+function loss(model, θ_init, Δt, Nsteps, checkpointing, mincut)
     set!(model; θ=θ_init, ρ=1.0)
     # NOTE: forward step_loop! uses mincut=true, but the min-cut planner
-    # blows host RAM during AD compile (graph algorithm over the dataflow
-    # graph of one body iteration). Run AD without mincut.
-    @trace checkpointing=checkpointing track_numbers=false for _ in 1:Nsteps
+    # blows host RAM during the raised AD compile (graph algorithm over the
+    # dataflow graph of one body iteration), so that runs without mincut.
+    # Kernel AD needs it in every loop, the acoustic substeps' included.
+    @trace mincut=mincut checkpointing=checkpointing track_numbers=false for _ in 1:Nsteps
         time_step!(model, Δt)
     end
     return mean(interior(model.temperature) .^ 2)
 end
 
-function grad_loss!(model, dmodel, θ_init, dθ_init, Δt, Nsteps, checkpointing)
+function grad_loss!(model, dmodel, θ_init, dθ_init, Δt, Nsteps, checkpointing, mincut)
     parent(dθ_init) .= 0
     _, loss_value = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
@@ -70,7 +71,8 @@ function grad_loss!(model, dmodel, θ_init, dθ_init, Δt, Nsteps, checkpointing
         Enzyme.Duplicated(θ_init, dθ_init),
         Enzyme.Const(Δt),
         Enzyme.Const(Nsteps),
-        Enzyme.Const(checkpointing))
+        Enzyme.Const(checkpointing),
+        Enzyme.Const(mincut))
     return loss_value
 end
 
