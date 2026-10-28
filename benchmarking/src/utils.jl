@@ -407,10 +407,7 @@ end
 
 # Enzyme-JAX optimization patterns left out of every benchmark compile
 const EXCLUDED_PASSES = [
-    "select_comp_iota_const_simplify",
     "select_comp_iota_to_dus",
-    "concat_to_pad",
-    "dus_to_dynamic_pad",
 ]
 
 """
