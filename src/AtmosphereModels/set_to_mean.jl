@@ -2,7 +2,8 @@ using ..Thermodynamics: Thermodynamics, ReferenceState, ExnerReferenceState, com
                         _compute_exner_reference!, _compute_exner_reference_3d!,
                         bottom_face_height, constant_moist_hydrostatic_pressure,
                         is_column_reference, moist_hydrostatic_pressure, dry_air_gas_constant,
-                        set_surface_state!, surface_reference_density, vapor_gas_constant
+                        set_surface_state!, surface_reference_density, vapor_gas_constant,
+                        VaporEquivalentExponent
 using Oceananigans: CenterField
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Architectures: architecture
@@ -237,7 +238,7 @@ function set_to_mean!(ref::ExnerReferenceState, model)
 
     launch!(arch, grid, worksize, kernel!,
             ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
-            ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+            ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, VaporEquivalentExponent())
 
     fill_halo_regions!(ref.exner_function)
     fill_halo_regions!(ref.pressure)
@@ -395,7 +396,7 @@ function set_hydrostatically_balanced_density!(formulation, model, spec::Hydrost
 end
 
 function set_potential_temperature_hydrostatically_balanced_density!(
-    model, spec::HydrostaticallyBalancedDensity, θ)
+    model, spec::HydrostaticallyBalancedDensity, θ, exponent)
 
     has_condensate(model) &&
         throw(ArgumentError("HydrostaticallyBalancedDensity does not support nonzero " *
@@ -433,7 +434,7 @@ function set_potential_temperature_hydrostatically_balanced_density!(
 
     # Per-column hydrostatic integration → balanced total density.
     launch!(arch, grid, :xy, _compute_exner_reference_3d!,
-            π, pressure, ρ, θ, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+            π, pressure, ρ, θ, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
     fill_halo_regions!(ρ)
 
     # The diagnosed θ field is no longer needed after the column solve, so use it to retain the old

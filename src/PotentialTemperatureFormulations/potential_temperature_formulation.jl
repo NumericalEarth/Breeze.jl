@@ -124,7 +124,7 @@ AtmosphereModels.set_hydrostatically_balanced_density!(
     model,
     spec::AtmosphereModels.HydrostaticallyBalancedDensity) =
     AtmosphereModels.set_potential_temperature_hydrostatically_balanced_density!(
-        model, spec, formulation.potential_temperature)
+        model, spec, formulation.potential_temperature, formulation.exponent)
 
 # Val-based versions for pre-materialization (called via Symbol fallback in interface)
 AtmosphereModels.prognostic_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperature}) = tuple(:ρθ)

@@ -773,6 +773,27 @@ end
 
         @test all(q -> q ≈ qᵗ, Array(interior(specific_humidity(model))))
 
+        # The column solve must use the formulation's Exner exponent, or the moist column is
+        # out of discrete balance under the EOS the model inverts θ with.
+        balance_grid = RectilinearGrid(default_arch; size=(2, 2, 40), x=(0, 100), y=(0, 100),
+                                       z=(0, 10000), topology=(Periodic, Periodic, Bounded))
+        g  = constants.gravitational_acceleration
+        Δz = 10000 / 40
+
+        for exponent in (VaporEquivalentExponent(), DryExponent())
+            balance_model = AtmosphereModel(balance_grid;
+                                            thermodynamic_constants = constants,
+                                            dynamics = CompressibleDynamics(ExplicitTimeStepping(); base_pressure=p₀),
+                                            formulation = LiquidIcePotentialTemperatureFormulation(; exponent))
+            set!(balance_model; θˡⁱ=θ, qᵗ, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀),
+                 enforce_mass_conservation=false)
+
+            p = Array(interior(balance_model.dynamics.pressure))
+            ρ = Array(interior(total_density(balance_model.dynamics)))
+            residual = @. (p[:, :, 2:end] - p[:, :, 1:end-1]) / Δz + g * (ρ[:, :, 2:end] + ρ[:, :, 1:end-1]) / 2
+            @test maximum(abs, residual ./ (g .* ρ[:, :, 2:end])) < 1e-10
+        end
+
         if default_arch isa CPU
             allocation_grid = RectilinearGrid(CPU();
                                                size = (16, 16, 16),

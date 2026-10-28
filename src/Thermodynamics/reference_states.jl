@@ -1103,14 +1103,16 @@ end
 # optional vapor profile qᵛ. Enforces
 #   (p[k] − p[k − 1]) / Δz_face[k] + g · (ρ[k] + ρ[k − 1]) / 2 = 0
 # at every interior face k = 2..Nz, with the level-local moist EOS
-# ρ[k] = p[k] / (Rᵐ[k] T[k]), T[k] = θ̄[k] · Π[k], Π[k] = (p/pˢᵗ)^κᵐ[k],
-# κᵐ = Rᵐ/cᵖᵐ, Rᵐ = (1-qᵛ) Rᵈ + qᵛ Rᵛ, cᵖᵐ = (1-qᵛ) cᵖᵈ + qᵛ cᵖᵛ. The dry
+# ρ[k] = p[k] / (Rᵐ[k] T[k]), T[k] = θ̄[k] · Π[k], Π[k] = (p/pˢᵗ)^κ[k],
+# Rᵐ = (1-qᵛ) Rᵈ + qᵛ Rᵛ, cᵖᵐ = (1-qᵛ) cᵖᵈ + qᵛ cᵖᵛ. The exponent κ[k] is selected by
+# `exponent` (see `column_exner_exponent`): κᵐ = Rᵐ/cᵖᵐ for `VaporEquivalentExponent` and κᵈ for
+# `DryExponent`, so the balanced column matches the EOS the model inverts θ with. The dry
 # case is recovered exactly when qᵛ ≡ 0.
 #
 # The previous MPAS-style up-then-down Π integration satisfies the
 # *continuous* hydrostatic equation but leaves a discrete-operator
 # residual ~1e-3 N/m³ that seeds an acoustic instability at production Δt.
-@inline function _compute_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+@inline function _compute_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
     # Anchor at first cell center via the continuous Π recurrence (one
     # half-step from the bottom face). Face k = 1 is the impenetrability boundary
     # face — no discrete-balance constraint applies — so the anchor is free.
@@ -1122,12 +1124,13 @@ end
     # height-coordinate column and the per-column terrain anchor.
     @inbounds begin
         qᵛ¹ = qᵛ[i, j, 1]
-        Rᵐ¹, cᵖᵐ¹, κ¹ = moist_reference_constants(qᵛ¹, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+        Rᵐ¹, cᵖᵐ¹, κᵐ¹ = moist_reference_constants(qᵛ¹, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+        κ¹, ĉᵖ¹ = column_exner_exponent(exponent, Rᵐ¹, cᵖᵐ¹, κᵐ¹, Rᵈ, cᵖᵈ)
         π₀_surface = (column_surface_pressure(pˢ, i, j) / pˢᵗ)^κ¹
 
         Δzᶜ₁ = Δzᶜᶜᶜ(i, j, 1, grid)
         θ¹ = θ₀[i, j, 1]
-        Π¹ = π₀_surface - g * Δzᶜ₁ / (2 * cᵖᵐ¹ * θ¹)
+        Π¹ = π₀_surface - g * Δzᶜ₁ / (2 * ĉᵖ¹ * θ¹)
         p¹ = pˢᵗ * Π¹^(1/κ¹)
         ρ¹ = p¹ / (Rᵐ¹ * θ¹ * Π¹)
 
@@ -1135,7 +1138,7 @@ end
         pᵣ[i, j, 1] = p¹
         ρᵣ[i, j, 1] = ρ¹
     end
-    integrate_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    integrate_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
 end
 
 # Upward discrete-balance recurrence for levels k = k_first..Nz of column (i, j), continuing from
@@ -1145,7 +1148,7 @@ end
 # O(few) iterations from the continuous-Π guess. Shared by the height-coordinate anchor above and
 # the terrain-following anchor in `Breeze.CompressibleEquations` — the two differ only in how the
 # first level is set, not in the interior recurrence.
-@inline function integrate_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, k_first, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+@inline function integrate_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, k_first, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
     @inbounds begin
         p⁻ = pᵣ[i, j, k_first - 1]
         ρ⁻ = ρᵣ[i, j, k_first - 1]
@@ -1158,11 +1161,12 @@ end
             θᵏ⁻ = θ₀[i, j, k - 1]
             qᵛᵏ = qᵛ[i, j, k]
         end
-        Rᵐᵏ, cᵖᵐᵏ, κᵏ = moist_reference_constants(qᵛᵏ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+        Rᵐᵏ, cᵖᵐᵏ, κᵐᵏ = moist_reference_constants(qᵛᵏ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+        κᵏ, ĉᵖᵏ = column_exner_exponent(exponent, Rᵐᵏ, cᵖᵐᵏ, κᵐᵏ, Rᵈ, cᵖᵈ)
 
         # Initial guess: continuous Π integration (one face step).
         θ_face = (θᵏ + θᵏ⁻) / 2
-        Πᵏ_init = @inbounds(π₀[i, j, k - 1]) - g * Δz_face / (cᵖᵐᵏ * θ_face)
+        Πᵏ_init = @inbounds(π₀[i, j, k - 1]) - g * Δz_face / (ĉᵖᵏ * θ_face)
         pᵏ = pˢᵗ * Πᵏ_init^(1/κᵏ)
 
         # Newton solve of the discrete-balance residual to machine precision.
@@ -1179,9 +1183,9 @@ end
     end
 end
 
-@kernel function _compute_exner_reference!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+@kernel function _compute_exner_reference!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
     _ = @index(Global)
-    _compute_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, 1, 1, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    _compute_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, 1, 1, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
 end
 
 """
@@ -1315,7 +1319,7 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
                   end
 
             launch!(arch, grid, :xy, _compute_exner_reference_3d!,
-                    πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+                    πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, VaporEquivalentExponent())
         else
             # 1D reference: single column, broadcast to all (i,j). The unified
             # kernel handles both dry (qᵛ = ZeroField) and moist cases via the
@@ -1351,7 +1355,7 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
             ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
 
             launch!(arch, grid, tuple(1), _compute_exner_reference!,
-                    πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+                    πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, VaporEquivalentExponent())
         end
     end
 
@@ -1387,9 +1391,9 @@ _needs_3d_reference(::Nothing) = false
 _needs_3d_reference(f::Function) = _nargs(f) > 1
 _nargs(f) = maximum(m.nargs for m in methods(f)) - 1  # subtract 1 for the function itself
 
-@kernel function _compute_exner_reference_3d!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+@kernel function _compute_exner_reference_3d!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
     i, j = @index(Global, NTuple)
-    _compute_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    _compute_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
 end
 
 # ExnerReferenceState has the same surface_density interface as ReferenceState

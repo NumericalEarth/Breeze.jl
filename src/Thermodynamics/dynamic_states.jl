@@ -120,6 +120,16 @@ true
 @inline exner_exponent(::DryExponent, q, constants) =
     dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
 
+# `exner_exponent` for the vapor-only hydrostatic column solve, from the bare scalar constants the
+# column kernels receive, paired with the heat capacity ĉᵖ = Rᵐ / κ in the continuous hydrostatic
+# balance ∂Π/∂z = -g / (ĉᵖ θ). Without condensate the vapor-equivalent κ̂ is the moist κᵐ = Rᵐ / cᵖᵐ.
+@inline column_exner_exponent(::VaporEquivalentExponent, Rᵐ, cᵖᵐ, κᵐ, Rᵈ, cᵖᵈ) = (κᵐ, cᵖᵐ)
+
+@inline function column_exner_exponent(::DryExponent, Rᵐ, cᵖᵐ, κᵐ, Rᵈ, cᵖᵈ)
+    κᵈ = Rᵈ / cᵖᵈ
+    return κᵈ, Rᵐ / κᵈ
+end
+
 #####
 ##### Liquid-ice potential temperature state
 #####

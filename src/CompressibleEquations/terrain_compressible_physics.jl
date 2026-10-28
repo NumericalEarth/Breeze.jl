@@ -33,7 +33,7 @@ using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpo
                                               TerrainFollowingGrid, ∂z∂x, ∂z∂y
 using Breeze.Thermodynamics: evaluate_profile, integrate_exner_column!,
                              newton_hydrostatic_pressure, moist_reference_constants,
-                             moist_hydrostatic_pressure
+                             moist_hydrostatic_pressure, VaporEquivalentExponent
 using Breeze.Solvers: FixedIterations
 
 #####
@@ -925,7 +925,7 @@ terrain_surface_field(host_values, grid) =
         ρᵣ[i, j, 1] = ρ¹
     end
 
-    integrate_exner_column!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    integrate_exner_column!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, VaporEquivalentExponent())
 end
 
 """
