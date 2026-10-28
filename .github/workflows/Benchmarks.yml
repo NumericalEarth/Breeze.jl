@@ -62,16 +62,17 @@ jobs:
           # acoustic substeps), WENO5 and no microphysics, on a PBB grid, at the
           # AD job's size and a larger one. Uses --simplified to drop the
           # geostrophic forcing and field-dependent surface drag BCs (which do
-          # not currently materialize on ReactantState).
+          # not currently materialize on ReactantState). Reactant runs with its
+          # kernels raised to StableHLO and unraised (kept as kernel calls).
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '128x128x32, 256x256x128'
             advection: 'WENO5'
             backend: 'vanilla, reactant'
             topology: 'PBB'
-            # Two Reactant compiles of the split-explicit step
+            # Four Reactant compiles of the split-explicit step (two sizes, raised and unraised)
             timeout: 60
-            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude'
+            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude --kernels "raise, noraise"'
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
@@ -272,7 +273,9 @@ jobs:
                   level_1 = f'{base_name}; AD; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
-                  level_4 = f'{grid_str} {checkpointing}'.strip()
+                  # Kernel AD (backend 'reactant kernelad') gets its own line next to raising
+                  kernels = backend.removeprefix('reactant').strip()
+                  level_4 = f'{grid_str} {checkpointing} {kernels}'.strip()
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})

@@ -25,7 +25,7 @@ end
                             microphysics::AbstractString = "",
                             backend::AbstractString = "vanilla",
                             ad::Bool = false,
-                            ad_kernels::AbstractString = "raise",
+                            kernels::AbstractString = "raise",
                             checkpointing = true,
                             )
 
@@ -33,17 +33,18 @@ Run a benchmark by executing `time_steps` time steps of the given model.
 
 If the model lives on a `ReactantState` architecture, the whole stepping loop
 is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
-program with `Reactant.@compile raise=true raise_first=true sync=true` —
-compile time is recorded separately. The compiled program is then executed
+program with `Reactant.@compile sync=true` —
+compile time is recorded separately. `kernels` chooses how the model's kernels
+are compiled: `"raise"` raises them to StableHLO (`raise=true`), `"noraise"`
+keeps them as kernel calls (`raise=false`). The compiled program is then executed
 once for warmup and once timed. The vanilla path drives `many_time_steps!`
 directly through eager `time_step!`.
 
 With `ad=true` (Reactant only) the forward+backward pass `grad_loss!` is
 benchmarked instead, using `checkpointing` as the loop checkpointing strategy
 for the reverse pass (`true`, `false`, `Reactant.Periodic(n)`, or
-`Reactant.Binomial(budget)`; see `loss` in timestepping.jl). `ad_kernels`
-chooses how that pass differentiates the model's kernels: `"raise"` raises
-them to StableHLO and differentiates that (`raise=true`), `"kernelad"`
+`Reactant.Binomial(budget)`; see `loss` in timestepping.jl). There `kernels`
+is `"raise"`, which differentiates the raised kernels, or `"kernelad"`, which
 differentiates the kernel bodies themselves (`raise=false`,
 `optimize=:kernelad`, which needs EnzymeAD/Reactant.jl#3472).
 
@@ -61,7 +62,7 @@ function benchmark_time_stepping(model;
                                  microphysics::AbstractString = "",
                                  backend::AbstractString = "vanilla",
                                  ad::Bool = false,
-                                 ad_kernels::AbstractString = "raise",
+                                 kernels::AbstractString = "raise",
                                  checkpointing = true,
                                  )
 
@@ -79,7 +80,8 @@ function benchmark_time_stepping(model;
     checkpointing_str = ad ? checkpointing_label(checkpointing) : ""
 
     ad && !is_reactant && error("AD benchmark requires a Reactant backend (got $backend)")
-    ad_kernels in ("raise", "kernelad") || error("Unknown ad_kernels: $ad_kernels. Use 'raise' or 'kernelad'.")
+    kernels in (ad ? ("raise", "kernelad") : ("raise", "noraise")) ||
+        error("Unknown kernels for $(mode) mode: $kernels. Use $(ad ? "'raise' or 'kernelad'" : "'raise' or 'noraise'").")
 
     if verbose
         @info "Benchmark: $name"
@@ -87,7 +89,7 @@ function benchmark_time_stepping(model;
         @info "  Backend: $backend"
         @info "  Mode: $mode"
         ad && @info "  Checkpointing: $checkpointing_str"
-        ad && @info "  AD kernels: $ad_kernels"
+        is_reactant && @info "  Kernels: $kernels"
         @info "  Float type: $FT"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
         @info "  Time step: $(Δt_FT) s"
@@ -103,14 +105,14 @@ function benchmark_time_stepping(model;
     compile_timings = (total = 0.0, tracing = 0.0, mlir = 0.0, xla = 0.0)
     invoke! = nothing
     if is_reactant
+        # Kernel AD keeps the kernels as kernel calls and differentiates their bodies, so
+        # like noraise it does not raise them
+        raise = kernels == "raise"
+        optimize = kernels == "kernelad" ? :kernelad : true
         if ad
             θ_init  = CenterField(grid); set!(θ_init,  (args...) -> FT(300.0))
             dθ_init = CenterField(grid); set!(dθ_init, 0)
             dmodel  = Enzyme.make_zero(model)
-            # Kernel AD keeps the kernels as kernel calls and differentiates their bodies,
-            # so it does not raise them
-            raise = ad_kernels == "raise"
-            optimize = raise ? true : :kernelad
             if verbose
                 @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=$raise, optimize=$optimize)..."
             end
@@ -121,10 +123,10 @@ function benchmark_time_stepping(model;
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
         else
             if verbose
-                @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
+                @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=$raise)..."
             end
             compiled_loop!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt_FT, time_steps)
+                Reactant.@compile raise=raise raise_first=raise sync=true step_loop!(model, Δt_FT, time_steps)
             end
             invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
         end

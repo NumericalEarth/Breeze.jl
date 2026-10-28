@@ -163,10 +163,11 @@ function parse_commandline()
             arg_type = String
             default = "auto"
 
-        "--ad_kernels"
-            help = "How the AD pass differentiates the model's kernels (--ad only): 'raise' (raise them to " *
-                   "StableHLO and differentiate that, the default) or 'kernelad' (differentiate the kernel " *
-                   "bodies themselves with Reactant's optimize=:kernelad, from EnzymeAD/Reactant.jl#3472)."
+        "--kernels"
+            help = "How the Reactant backend compiles the model's kernels: 'raise' (raise them to StableHLO, " *
+                   "the default), 'noraise' (forward only: keep them as kernel calls) or 'kernelad' (--ad only: " *
+                   "differentiate the kernel bodies themselves with Reactant's optimize=:kernelad, from " *
+                   "EnzymeAD/Reactant.jl#3472). Comma-separated for multiple; each is a separate compile."
             arg_type = String
             default = "raise"
 
@@ -417,6 +418,16 @@ function run_benchmarks(args)
         [true]
     end
 
+    # Kernel modes only apply to the Reactant time-stepping benchmark; Enzyme differentiates
+    # unraised kernels only through kernelad, and kernelad is a differentiation pipeline.
+    kernel_modes = parse_list(args["kernels"])
+    for kernels in kernel_modes
+        kernels in ("raise", "noraise", "kernelad") ||
+            error("Unknown --kernels value: $kernels. Use 'raise', 'noraise' or 'kernelad'.")
+        args["ad"] && kernels == "noraise" && error("--kernels noraise is forward only; use kernelad with --ad")
+        !args["ad"] && kernels == "kernelad" && error("--kernels kernelad needs --ad")
+    end
+
     results = []
 
     println("=" ^ 95)
@@ -436,7 +447,7 @@ function run_benchmarks(args)
     if mode == "benchmark"
         println("Time steps: ", time_steps, " (warmup: ", warmup_steps, ")")
         args["ad"] && println("AD checkpointing: ", args["checkpoints"], " (", args["checkpointing_mode"], ")")
-        args["ad"] && println("AD kernels: ", args["ad_kernels"])
+        println("Kernels (Reactant): ", kernel_modes)
     else
         println("Stop time: ", args["stop_time"], " hours")
         println("Output interval: ", args["output_interval"], " minutes")
@@ -446,8 +457,13 @@ function run_benchmarks(args)
     println()
 
     # Loop over all combinations using Iterators.product
-    for (backend_name, topo_name, (Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name, checkpointing) in
-            Iterators.product(backends, topologies, sizes, float_types, dynamics_names, advections, closures, microphysics_schemes, checkpointings)
+    for (backend_name, topo_name, (Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name, checkpointing, kernels) in
+            Iterators.product(backends, topologies, sizes, float_types, dynamics_names, advections, closures, microphysics_schemes, checkpointings, kernel_modes)
+
+        # Vanilla, the simulation and the tendency modes (which sweep raise themselves) run once,
+        # not per kernel mode
+        reactant_stepping = backend_name == "reactant" && mode == "benchmark"
+        !reactant_stepping && kernels != first(kernel_modes) && continue
 
         # Set floating point precision so constructors pick up the right default
         Oceananigans.defaults.FloatType = FT
@@ -455,9 +471,12 @@ function run_benchmarks(args)
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
         ft_str = FT == Float32 ? "F32" : FT == Float64 ? "F64" : "BF16"
-        # Only kernel AD shows in the name, so the existing raising names stay as they are
-        ad_kernels_suffix = args["ad_kernels"] == "raise" ? "" : "_$(args["ad_kernels"])"
-        mode_suffix = args["ad"] ? "_AD_$(checkpointing_label(checkpointing))$(ad_kernels_suffix)" : ""
+        mode_suffix = args["ad"] ? "_AD_$(checkpointing_label(checkpointing))" : ""
+        # Only non-raising kernel modes show in the name and the backend label, so the existing
+        # raising names stay as they are
+        raising = !reactant_stepping || kernels == "raise"
+        kernels_suffix = raising ? "" : "_$(kernels)"
+        backend_label = raising ? backend_name : kernels == "noraise" ? "reactant raise=false" : "reactant $kernels"
 
         # Tendency modes time a tendency evaluation with no Simulation.
         # "scalar_tendency" uses the bare scalar WENO kernel (no model);
@@ -525,7 +544,7 @@ function run_benchmarks(args)
         # Only non-default grids and substep counts show in the name, so the existing names stay as they are
         grid_suffix = grid_type == "rectilinear" ? "" : "_LatLon"
         substeps_suffix = dyn_name == "compressible_splitexplicit" && args["substeps"] != 12 ? "_N$(args["substeps"])" : ""
-        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)$(substeps_suffix)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)$(grid_suffix)_$(backend_name)$(mode_suffix)"
+        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)$(substeps_suffix)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)$(grid_suffix)_$(backend_name)$(mode_suffix)$(kernels_suffix)"
 
         println("\n", "-" ^ 70)
         println("Running: $name")
@@ -568,9 +587,9 @@ function run_benchmarks(args)
                                     closure=cls_name,
                                     dynamics=dyn_name,
                                     microphysics=micro_name,
-                                    backend=backend_name,
+                                    backend=backend_label,
                                     ad=args["ad"],
-                                    ad_kernels=args["ad_kernels"],
+                                    kernels,
                                     checkpointing,
                                     )
         elseif mode == "simulate"
