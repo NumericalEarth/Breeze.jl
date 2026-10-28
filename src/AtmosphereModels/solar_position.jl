@@ -98,7 +98,8 @@ FixedCosineZenith(cos_zenith = 0.5)
 ```
 """
 struct FixedCosineZenith{FT} <: AbstractSolarPosition
-    cos_zenith :: FT # scalar or (Nx, Ny) array; between 0 and 1 above the horizon
+    "Cosine of the solar zenith angle. Should satisfy ``0 ≤ \\cos(θ_z) ≤ 1`` for the sun above the horizon."
+    cos_zenith :: FT
 end
 
 """
@@ -249,17 +250,7 @@ initialize_cos_zenith!(cos_zenith, ::ApparentSolarPosition) = nothing
 initialize_cos_zenith!(cos_zenith, ::DiurnalSolarPosition) = nothing
 
 function initialize_cos_zenith!(cos_zenith, sp::FixedCosineZenith)
-    fill_columns!(cos_zenith, sp.cos_zenith)
-    return nothing
-end
-
-# A per-column array (length Nc, column index i + (j - 1) Nx) from a scalar or an (Nx, Ny) array
-fill_columns!(column_array, value::Number) = (column_array .= convert(eltype(column_array), value); nothing)
-
-function fill_columns!(column_array, values::AbstractArray)
-    length(values) == length(column_array) ||
-        throw(ArgumentError("expected $(length(column_array)) per-column values (one per (i, j)), got $(length(values))"))
-    copyto!(column_array, convert.(eltype(column_array), vec(values)))
+    cos_zenith .= convert(eltype(cos_zenith), sp.cos_zenith)
     return nothing
 end
 

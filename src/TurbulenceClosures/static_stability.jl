@@ -73,14 +73,18 @@ end
     return Tᵢ, p, ρ, q
 end
 
-@inline function saturation_specific_humidityᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
-    Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
+# The anelastic reference density normalizes prognostics but does not give their
+# vapor partial pressure. Saturation requires the local density from the moist EOS.
+@inline function local_saturation_specific_humidity(i, j, k, buoyancy, Tᵢ, q)
     constants = buoyancy.thermodynamic_constants
-    # The anelastic reference density normalizes prognostics but does not give their
-    # vapor partial pressure. Saturation requires the local density from the moist EOS.
     ρᵐ = gas_phase_density(i, j, k, buoyancy.dynamics, Tᵢ, q, constants)
     equilibrium = microphysics_phase_equilibrium(buoyancy.microphysics)
     return saturation_specific_humidity(Tᵢ, ρᵐ, constants, equilibrium)
+end
+
+@inline function saturation_specific_humidityᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
+    Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
+    return local_saturation_specific_humidity(i, j, k, buoyancy, Tᵢ, q)
 end
 
 @inline function nonprecipitating_waterᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
@@ -91,8 +95,8 @@ end
 
 # Mixing ratios, per unit mass of dry air: qᵈ excludes all water, including rain.
 @inline function saturation_mixing_ratioᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
-    qˢ = saturation_specific_humidityᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
     Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
+    qˢ = local_saturation_specific_humidity(i, j, k, buoyancy, Tᵢ, q)
     return qˢ / (1 - q.vapor - q.liquid - q.ice)
 end
 

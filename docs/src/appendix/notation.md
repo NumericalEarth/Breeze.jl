@@ -190,7 +190,6 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before capping at the surface length |
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
 | ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |
-| ``p⁻, p⁺`` | `p⁻`, `p⁺` | | Rational stability exponents, one for the calibrated defaults |
 | ``ℂᵂu★, ℂᵂʷ`` | `ℂᵂu★`, `ℂᵂʷ` | | Friction-velocity and convective-velocity surface TKE flux coefficients |
 | ``u★³, wΔ³`` | `u★³`, `wΔ³` | | Cubed surface friction velocity and ``Δz₁ max(Jᵇ,0)``, respectively |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |

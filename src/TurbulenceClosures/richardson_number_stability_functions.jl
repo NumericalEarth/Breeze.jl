@@ -39,18 +39,16 @@ struct RationalStabilityFunction{FT}
     ℂᴰ⁺ :: FT # dissipation, stable limit
     Ri⁻ :: FT # unstable transition scale: the |Ri| at which every function is halfway from C⁰ to C⁻
     Ri⁺ :: FT # stable transition scale: the Ri at which every function is halfway from C⁰ to C⁺
-    p⁻ :: FT # unstable exponent, fixed at one for calibration
-    p⁺ :: FT # stable exponent, fixed at one for calibration
 end
 
 """
 $(TYPEDSIGNATURES)
 
 Construct rational stability functions for momentum, tracers, TKE, and dissipation:
-`S(Ri) = C⁰ + (C± - C⁰) xᵖ / (1 + xᵖ)`, where `x = |Ri| / Ri±`.
+`S(Ri) = C⁰ + (C± - C⁰) x / (1 + x)`, where `x = |Ri| / Ri±`.
 Each function has unstable, neutral, and stable endpoints; the four functions share
-transition scales `Ri⁻`, `Ri⁺` and exponents `p⁻`, `p⁺`. All coefficients must be positive.
-The default exponents are one, giving continuous functions with a kink at neutral.
+transition scales `Ri⁻`, `Ri⁺`. All coefficients must be positive.
+The functions are continuous, with a kink at neutral.
 Mixed integer and float arguments are promoted to a single float type.
 
 Defaults are the provisional atmospheric LES fit described in the turbulence-closure
@@ -69,8 +67,7 @@ function RationalStabilityFunction(; ℂᵘ⁻ = 0.36113018152281917, ℂᵘ⁰ 
                                      ℂᶜ⁻ = 0.08170851244564359, ℂᶜ⁰ = 0.19872163735761372, ℂᶜ⁺ = 0.532550451554028,
                                      ℂᵉ⁻ = 1.9176239082347815, ℂᵉ⁰ = 0.00731292096489522, ℂᵉ⁺ = 0.02299192764300173,
                                      ℂᴰ⁻ = 0.005407068485856925, ℂᴰ⁰ = 0.029182354585815418, ℂᴰ⁺ = 0.8022301180336915,
-                                     Ri⁻ = 12.669701017862883, Ri⁺ = 0.0501147186437052,
-                                     p⁻ = 1, p⁺ = 1)
+                                     Ri⁻ = 12.669701017862883, Ri⁺ = 0.0501147186437052)
 
     endpoints = (ℂᵘ⁻, ℂᵘ⁰, ℂᵘ⁺, ℂᶜ⁻, ℂᶜ⁰, ℂᶜ⁺, ℂᵉ⁻, ℂᵉ⁰, ℂᵉ⁺, ℂᴰ⁻, ℂᴰ⁰, ℂᴰ⁺)
 
@@ -82,11 +79,7 @@ function RationalStabilityFunction(; ℂᵘ⁻ = 0.36113018152281917, ℂᵘ⁰ 
         throw(ArgumentError("The transition scales of RationalStabilityFunction must be positive, but " *
                             "Ri⁻ = $Ri⁻ and Ri⁺ = $Ri⁺"))
 
-    p⁻ > 0 && p⁺ > 0 ||
-        throw(ArgumentError("The exponents of RationalStabilityFunction must be positive, but " *
-                            "p⁻ = $p⁻ and p⁺ = $p⁺"))
-
-    return RationalStabilityFunction(promote(endpoints..., Ri⁻, Ri⁺, p⁻, p⁺)...)
+    return RationalStabilityFunction(promote(endpoints..., Ri⁻, Ri⁺)...)
 end
 
 @inline convert_eltype(::Type{FT}, sf::RationalStabilityFunction) where FT =
@@ -102,8 +95,7 @@ function show_stability_function_lines(io::IO, sf::RationalStabilityFunction, pr
     print(io, prefix, "├── Ri → -∞ (ℂᵘ⁻, ℂᶜ⁻, ℂᵉ⁻, ℂᴰ⁻): ", stability_endpoint_summary(sf.ℂᵘ⁻, sf.ℂᶜ⁻, sf.ℂᵉ⁻, sf.ℂᴰ⁻), '\n',
               prefix, "├── Ri = 0  (ℂᵘ⁰, ℂᶜ⁰, ℂᵉ⁰, ℂᴰ⁰): ", stability_endpoint_summary(sf.ℂᵘ⁰, sf.ℂᶜ⁰, sf.ℂᵉ⁰, sf.ℂᴰ⁰), '\n',
               prefix, "├── Ri → ∞  (ℂᵘ⁺, ℂᶜ⁺, ℂᵉ⁺, ℂᴰ⁺): ", stability_endpoint_summary(sf.ℂᵘ⁺, sf.ℂᶜ⁺, sf.ℂᵉ⁺, sf.ℂᴰ⁺), '\n',
-              prefix, "├── transition scales: Ri⁻ = ", prettysummary(sf.Ri⁻), ", Ri⁺ = ", prettysummary(sf.Ri⁺), '\n',
-              prefix, "└── exponents: p⁻ = ", prettysummary(sf.p⁻), ", p⁺ = ", prettysummary(sf.p⁺))
+              prefix, "└── transition scales: Ri⁻ = ", prettysummary(sf.Ri⁻), ", Ri⁺ = ", prettysummary(sf.Ri⁺))
     return nothing
 end
 
@@ -113,22 +105,21 @@ function Base.show(io::IO, sf::RationalStabilityFunction)
 end
 
 # The reciprocal shape avoids Inf/Inf at infinite Ri and gives zero at neutral.
-@inline function rational_stability(Ri, C⁻, C⁰, C⁺, Ri⁻, Ri⁺, p⁻, p⁺)
+@inline function rational_stability(Ri, C⁻, C⁰, C⁺, Ri⁻, Ri⁺)
     stable = Ri ≥ 0
     Cᵇ = ifelse(stable, C⁺, C⁻)
     Riᵇ = ifelse(stable, Ri⁺, Ri⁻)
-    p = ifelse(stable, p⁺, p⁻)
-    shape = 1 / (1 + (Riᵇ / abs(Ri))^p)
+    shape = 1 / (1 + Riᵇ / abs(Ri))
     return C⁰ + (Cᵇ - C⁰) * shape
 end
 
-@inline momentum_stability_function(sf::RationalStabilityFunction, Ri) = rational_stability(Ri, sf.ℂᵘ⁻, sf.ℂᵘ⁰, sf.ℂᵘ⁺, sf.Ri⁻, sf.Ri⁺, sf.p⁻, sf.p⁺)
+@inline momentum_stability_function(sf::RationalStabilityFunction, Ri) = rational_stability(Ri, sf.ℂᵘ⁻, sf.ℂᵘ⁰, sf.ℂᵘ⁺, sf.Ri⁻, sf.Ri⁺)
 
-@inline tracer_stability_function(sf::RationalStabilityFunction, Ri) = rational_stability(Ri, sf.ℂᶜ⁻, sf.ℂᶜ⁰, sf.ℂᶜ⁺, sf.Ri⁻, sf.Ri⁺, sf.p⁻, sf.p⁺)
+@inline tracer_stability_function(sf::RationalStabilityFunction, Ri) = rational_stability(Ri, sf.ℂᶜ⁻, sf.ℂᶜ⁰, sf.ℂᶜ⁺, sf.Ri⁻, sf.Ri⁺)
 
-@inline tke_stability_function(sf::RationalStabilityFunction, Ri) = rational_stability(Ri, sf.ℂᵉ⁻, sf.ℂᵉ⁰, sf.ℂᵉ⁺, sf.Ri⁻, sf.Ri⁺, sf.p⁻, sf.p⁺)
+@inline tke_stability_function(sf::RationalStabilityFunction, Ri) = rational_stability(Ri, sf.ℂᵉ⁻, sf.ℂᵉ⁰, sf.ℂᵉ⁺, sf.Ri⁻, sf.Ri⁺)
 
-@inline dissipation_stability_function(sf::RationalStabilityFunction, Ri) = rational_stability(Ri, sf.ℂᴰ⁻, sf.ℂᴰ⁰, sf.ℂᴰ⁺, sf.Ri⁻, sf.Ri⁺, sf.p⁻, sf.p⁺)
+@inline dissipation_stability_function(sf::RationalStabilityFunction, Ri) = rational_stability(Ri, sf.ℂᴰ⁻, sf.ℂᴰ⁰, sf.ℂᴰ⁺, sf.Ri⁻, sf.Ri⁺)
 
 #####
 ##### Evaluation on the grid

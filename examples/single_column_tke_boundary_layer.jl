@@ -269,7 +269,7 @@ fig
 # the California stratocumulus deck out into the trade cumulus — each forced by a global climate
 # model's large-scale state for four months of the year and two climates, and published the
 # library (CC0, [doi:10.22002/D1.20052](https://doi.org/10.22002/D1.20052)). The CNRM-CM6-1 slice of
-# it, reduced to what a single column needs (see `validation/cloud_les_library`), is the
+# it, reduced to what a single column needs, is the
 # `shen_et_al_2022_les_profiles` artifact: for each member the large-scale forcing the LES saw, its radiative
 # heating, its surface fluxes, its initial and time-mean profiles, and the fluxes and TKE budget it
 # produced.

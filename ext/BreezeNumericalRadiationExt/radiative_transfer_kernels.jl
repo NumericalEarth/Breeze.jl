@@ -69,9 +69,6 @@ function solve_columns!(rtm::EcCKDRadiativeTransferModel, state, batch_size)
     return nothing
 end
 
-@inline solar_constant_at(solar_constant::Number, i, j) = solar_constant
-@inline solar_constant_at(solar_constant::AbstractArray, i, j) = @inbounds solar_constant[i, j]
-
 @kernel function _column_radiative_fluxes!(upwelling_longwave, downwelling_longwave,
                                            upwelling_shortwave, downwelling_shortwave,
                                            workspace, state, gas_model, longwave_cloud, shortwave_cloud,
@@ -115,7 +112,7 @@ end
     shortwave = LayerOptics(Shortwave(), gas_model, workspace, mole_fractions, shortwave_cloud, liquid_radius, ice_radius, c)
 
     streaming_shortwave_fluxes!(ℐ_sw_up, ℐ_sw_dn,
-                                shortwave, μ₀, solar_constant_at(solar_constant, i, j) * max(μ₀, 0), α_direct, α_diffuse,
+                                shortwave, μ₀, solar_constant * max(μ₀, 0), α_direct, α_diffuse,
                                 gas_model.shortwave_weights, length(gas_model.shortwave_weights), N,
                                 shortwave_scratch(c, workspace))
 end
