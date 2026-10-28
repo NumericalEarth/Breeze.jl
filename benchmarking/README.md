@@ -97,6 +97,12 @@ also appended to the benchmark name (`..._reactant_AD_periodic_4`). `Time/Step`
 is the wall time of the combined forward+backward program divided by
 `--time_steps`.
 
+### Kernel profiling
+
+`kernel_profiling/profile_kernels.jl` takes the same arguments and reports the
+GPU time of each kernel of the vanilla time step; see
+[`kernel_profiling/README.md`](kernel_profiling/README.md).
+
 ### Simulate Mode
 
 Full simulations that run for a specified duration and save output files.
