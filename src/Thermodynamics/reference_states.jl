@@ -1233,7 +1233,7 @@ Keyword Arguments
 """
 function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)); kw...)
     ref = allocate_exner_reference_state(grid, constants; kw...)
-    initialize_on_construction!(architecture(grid), ref, grid, constants)
+    initialize_on_construction!(architecture(grid), Oceananigans.initialize!, ref, grid, constants)
     return ref
 end
 
@@ -1338,7 +1338,7 @@ function allocate_exner_reference_state(grid, constants;
             fill_halo_regions!(ρᵣ)
         else
             # 1D reference: single column, broadcast to all (i,j). The unified
-            # kernel handles both dry (qᵛ = ZeroField) and moist cases via the
+            # kernel handles both dry (qᵛ = 0) and moist cases via the
             # moist gas constants Rᵐ, cᵖᵐ, κᵐ — these reduce to Rᵈ, cᵖᵈ, κ
             # when qᵛ = 0.
             #
@@ -1356,13 +1356,10 @@ function allocate_exner_reference_state(grid, constants;
             # θ at the bottom face, which is where the bottom boundary values below live.
             θˢ = convert(FT, evaluate_profile(potential_temperature, zˢ))
 
-            qᵛᵣ = if isnothing(vapor_mass_fraction)
-                ZeroField(FT)
-            else
-                qf = Field{Nothing, Nothing, Center}(grid)
-                set!(qf, vapor_mass_fraction)
-                qf
-            end
+            # A field even when dry: `set_to_mean!` stores a reset's moisture in it, and `initialize!`
+            # integrates the column from it
+            qᵛᵣ = Field{Nothing, Nothing, Center}(grid)
+            set!(qᵛᵣ, something(vapor_mass_fraction, 0))
             qᵛ_surface = if isnothing(vapor_mass_fraction)
                 zero(FT)
             else
@@ -1390,7 +1387,7 @@ end
 
 const ColumnExnerReferenceState = ExnerReferenceState{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any,
                                                       <:Field{Nothing, Nothing, Center},
-                                                      <:Union{ZeroField, Field{Nothing, Nothing, Center}}}
+                                                      <:Field{Nothing, Nothing, Center}}
 
 """
 $(TYPEDSIGNATURES)

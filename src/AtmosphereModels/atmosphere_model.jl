@@ -391,7 +391,9 @@ function AtmosphereModel(grid;
     # so re-seeding there would overwrite a user-supplied aerosol reservoir.
     set_default_aerosol_number!(model)
 
-    initialize_on_construction!(arch, model)
+    # The dynamics state (reference column, seeded pressure) only: the boundary-condition state reads a
+    # density, which `set!` supplies, so `initialize!(model)` sets it up after `set!`
+    initialize_on_construction!(arch, initialize_dynamics!, model.dynamics, model.grid, model.thermodynamic_constants)
 
     return model
 end
