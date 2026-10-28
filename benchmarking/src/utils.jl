@@ -416,13 +416,17 @@ const EXCLUDED_PASSES = [
 """
     benchmark_compile_options(; raise = true)
 
-The `Reactant.CompileOptions` of every benchmark compile: kernels raised (with
-`raise_first`) or not as `raise` says, `sync = true`, and the Enzyme-JAX patterns in
-`EXCLUDED_PASSES` left out. `@compile compile_options = …` ignores its other keyword
-options, so `raise`, `raise_first` and `sync` are set here too.
+The `Reactant.CompileOptions` of every benchmark compile: `sync = true`, the
+Enzyme-JAX patterns in `EXCLUDED_PASSES` left out, and the kernels raised to
+StableHLO (`raise = true`, `raise_first = true`) or kept as kernel calls
+(`raise = false`), as the `raise` argument says. `@compile compile_options = …`
+ignores its other keyword options, so `raise`, `raise_first` and `sync` are set here too.
 """
-benchmark_compile_options(; raise = true) =
-    Reactant.CompileOptions(; raise, raise_first = raise, sync = true, excluded_passes = EXCLUDED_PASSES)
+benchmark_compile_options(; raise::Bool = true) =
+    Reactant.CompileOptions(; raise = raise,
+                              raise_first = raise,
+                              sync = true,
+                              excluded_passes = EXCLUDED_PASSES)
 
 """
     timed_reactant_compile(compile)
