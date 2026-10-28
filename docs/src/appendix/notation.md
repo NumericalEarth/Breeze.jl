@@ -44,6 +44,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\rho``                            | `ρ`    | `AM.density`                        | Total air density, ``ρ = ρᵈ + ρᵗ`` (diagnosed on the compressible core); the reference density ``ρ = pᵣ / Rᵐ T`` on the anelastic core |
 | ``ρᵈ``                              | `ρᵈ`   | `AM.dynamics.dry_density`           | Dry-air density; the prognostic coupling density of [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics) (total ``ρ = ρᵈ + ρᵗ``) |
 | ``ρᵗ``                              | `ρᵗ`   |                                     | Total condensate density, ``ρᵗ = ρqᵛᵉ + Σ ρqᶜ`` (vapor/equilibrium moisture plus all condensed species); diagnosed via `total_condensate_density`, summed over [`condensate_field_names`](@ref Breeze.AtmosphereModels.condensate_field_names) |
+| ``ρᵐ``                              | `ρᵐ`   | `density(𝒰, constants)`             | Moist-air density from the equation of state, ``ρᵐ = p / (Rᵐ T)``, that the mass fractions and the saturation specific humidity ``qᵛ⁺ = pᵛ⁺ / (ρᵐ Rᵛ T)`` are referenced to. Equal to ``ρ`` on the compressible core; on the anelastic core ``ρᵐ = pᵣ / (Rᵐ T)`` differs from the dry reference density ``ρᵣ`` that weights the tendencies |
 | ``\alpha``                          | `α`    |                                     | Specific volume, ``α = 1/ρ``                                                   |
 | ``\boldsymbol{u} = (u,v,w)``        | `u, v, w` | `AM.velocities`                  | Velocity components in (x, y, z) or (east, north, up)                          |
 | ``\boldsymbol{ρu} = (ρu, ρv, ρw)``  | `ρu, ρv, ρw` | `AM.momentum`                 | Momentum components                                                            |
@@ -57,6 +58,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρᵡ``                              | `ρᵡ`   | `thermodynamic_density(formulation)` | Thermodynamic density: the generic coupling-weighted prognostic thermodynamic variable, ``ρᵡ = ρᵈ χ`` — concretely ``ρθ`` for the potential-temperature formulation or ``ρs`` for static energy. The intensive variable is recovered as ``χ = ρᵡ / ρᵈ`` |
 | ``T``                               | `T`    | `AM.temperature`                    | Temperature                                                                    |
 | ``T⁺``                              | `T⁺`   | `DewpointTemperature(model)`        | Dewpoint temperature                                                           |
+| ``Tᵛ``                              | `Tᵛ`   | `HydrostaticSounding.virtual_temperature` | Virtual temperature, ``Tᵛ = Rᵐ T / Rᵈ``: the temperature at which dry air has the moist air's density at the same pressure (condensate counted as loading) |
 | ``p``                               | `p`    | `AM.pressure`                       | Pressure                                                                       |
 | ``b``                               | `b`    |                                     | Buoyancy                                                                       |
 | ``q^{ve}``                           | `qᵛᵉ`  |                                     | Scheme-dependent specific moisture: vapor (non-equilibrium) or equilibrium moisture (saturation adjustment) |
@@ -188,6 +190,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before capping at the surface length |
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
 | ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |
+| ``ℂᵂu★, ℂᵂʷ`` | `ℂᵂu★`, `ℂᵂʷ` | | Friction-velocity and convective-velocity surface TKE flux coefficients |
+| ``u★³, wΔ³`` | `u★³`, `wΔ³` | | Cubed surface friction velocity and ``Δz₁ max(Jᵇ,0)``, respectively |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
 | ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
 | ``h^{bl}``                          | `hᵇˡ`  |                                     | Boundary-layer depth, m; a diagnostic (the height of the capping inversion in convective conditions) |

@@ -171,9 +171,11 @@ function AtmosphereModel(grid;
 
     # Validate that the microphysics scheme is compatible with the thermodynamic constants
     validate_microphysics(microphysics, thermodynamic_constants)
+    validate_microphysics_architecture(microphysics, grid.architecture)
 
-    # Validate that the radiation's solar position can read the clock
-    validate_radiation(radiation, clock)
+    # Validate that the radiation's solar position can read the clock, and that its schedule
+    # can be evaluated on this architecture (before anything is traced)
+    validate_radiation(radiation, clock, grid.architecture)
 
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
@@ -342,7 +344,8 @@ function AtmosphereModel(grid;
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, coupling_density, mass_density,
                                        velocities, dynamics, formulation, microphysics,
-                                       specific_prognostic_moisture)
+                                       specific_prognostic_moisture, microphysical_fields,
+                                       thermodynamic_constants)
 
     # Fill the closure's tracer-indexed diffusivities. For a per-column *array* of closures,
     # `materialize_closure` (extended in `SingleColumnMode`) maps over the array and moves it to the
@@ -613,7 +616,8 @@ end
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture)
+                                  specific_prognostic_moisture, microphysical_fields,
+                                  thermodynamic_constants)
     forcings_type = typeof(user_forcings)
     msg = string("AtmosphereModel forcing must be a NamedTuple, got $forcings_type")
     throw(ArgumentError(msg))
@@ -623,7 +627,8 @@ end
 function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture)
+                                  specific_prognostic_moisture, microphysical_fields,
+                                  thermodynamic_constants)
     names = keys(prognostic_fields)
     return NamedTuple{names}(Returns(zero(eltype(prognostic_fields[name]))) for name in names)
 end
@@ -631,7 +636,8 @@ end
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture)
+                                  specific_prognostic_moisture, microphysical_fields,
+                                  thermodynamic_constants)
 
     # `ρqᵗ` (total moisture) is the scheme-agnostic water key. A water source enters the
     # prognostic moisture density unconverted whatever the scheme calls it, so — unlike `ρE`,
@@ -685,12 +691,19 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     # Keep `density` as the coupling-density compatibility entry for other forcing
     # materializers; SpecificForcing selects between the two explicit carriers by target.
+    # The moisture state and thermodynamic constants let forcings that convert between
+    # thermodynamic variables (e.g. `TemperatureForcing`) form the same local moisture mass
+    # fractions as the tendency kernels.
     forcing_context = (; coriolis,
                          density=coupling_density,
                          coupling_density,
                          total_density=mass_density,
                          coupling_density_names,
-                         specific_fields)
+                         specific_fields,
+                         microphysics,
+                         microphysical_fields,
+                         specific_prognostic_moisture,
+                         thermodynamic_constants)
 
     materialized = Tuple(
         assemble_field_forcing(n, f, user_forcings, model_names, forcing_context)
