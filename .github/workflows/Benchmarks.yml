@@ -205,7 +205,9 @@ jobs:
         run: |
           ls -l reactant_jll_products
           mkdir -p reactant_jll
-          tar -xf reactant_jll_products/Reactant.v*.tar.* -C reactant_jll
+          # The image has no xz; Pkg unpacks the .tar.xz with the p7zip that ships with Julia
+          julia --startup-file=no -e 'using Pkg; Pkg.PlatformEngines.unpack(ARGS[1], ARGS[2])' \
+              reactant_jll_products/Reactant.v*.tar.* reactant_jll
           lib="${GITHUB_WORKSPACE}/reactant_jll/lib/libReactantExtra.so"
           ls -l "${lib}"
           julia --startup-file=no -e '
