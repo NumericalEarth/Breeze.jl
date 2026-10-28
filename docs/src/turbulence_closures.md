@@ -125,6 +125,24 @@ number ``Ri^\dagger = ℂᵘ / (ℂᶜ + ℂᴰ)``. Their defaults, ``ℂᵘ = 0
 [Nakanishi and Niino (2009)](@cite NakanishiNiino2009), giving ``κ = 0.40``, ``Pr = 0.74`` and
 ``Ri^\dagger = 0.25``.
 
+### Surface TKE flux
+
+The calibrated closure also assumes a surface flux of TKE density,
+``ρ₀ (ℂᵂu★ u★³ + ℂᵂʷ wΔ³)`` with ``wΔ³ = Δz₁ \max(Jᵇ, 0)``, which the closure does not add by itself.
+[`tke_surface_flux`](@ref) computes it for use in a boundary condition:
+
+```jldoctest
+using Breeze, Oceananigans
+
+flux = tke_surface_flux(1.2, 0.3^3, 20 * 1e-3);
+tke_bc = FieldBoundaryConditions(bottom=FluxBoundaryCondition(flux));
+boundary_conditions = (; ρe=tke_bc);
+TKEBasedTurbulenceClosure().mixing_length.ℂⁱ
+
+# output
+1.777871783491512
+```
+
 ### Numerics
 
 The diffusivities are computed at the cell interfaces where the fluxes live, from the stored mixing

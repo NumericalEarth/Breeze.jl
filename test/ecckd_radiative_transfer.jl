@@ -377,6 +377,72 @@ previous_float_type = Oceananigans.defaults.FloatType
         end
     end
 
+    @testset "Per-column solar constants [$(FT)]" for FT in test_float_types()
+        Oceananigans.defaults.FloatType = FT
+        Nz = 8
+        grid = RectilinearGrid(default_arch, FT; size = (2, 1, Nz), x = (0, 2), y = (0, 1), z = (0, 3kilometers),
+                               topology = (Periodic, Periodic, Bounded))
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        # Identical columns, the second lit by half the sunlight
+        solar_constant = reshape(FT[1361, 680.5], 2, 1)
+        radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                           surface_temperature = 300, surface_albedo = 0.1, solar_constant,
+                                           solar_position = FixedCosineZenith(0.5))
+        @test radiation.shortwave_solver.solar_constant isa AbstractMatrix
+        model = AtmosphereModel(grid; dynamics, formulation = :LiquidIcePotentialTemperature, radiation)
+        set!(model; θ = (x, y, z) -> 300 + 0.01 * z / 1000, qᵗ = (x, y, z) -> 0.015 * exp(-z / 2500))
+
+        ℐ_lw_up₁, ℐ_lw_dn₁, ℐ_sw_up₁, ℐ_sw_dn₁, _ = column_fluxes(radiation, 1, 1)
+        ℐ_lw_up₂, ℐ_lw_dn₂, ℐ_sw_up₂, ℐ_sw_dn₂, _ = column_fluxes(radiation, 2, 1)
+        @test ℐ_lw_up₁ == ℐ_lw_up₂ && ℐ_lw_dn₁ == ℐ_lw_dn₂
+        @test ℐ_sw_dn₂ ≈ ℐ_sw_dn₁ / 2
+        @test ℐ_sw_up₂ ≈ ℐ_sw_up₁ / 2
+
+        # Column 1 is the model with the scalar solar constant
+        scalar = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                        surface_temperature = 300, surface_albedo = 0.1, solar_constant = 1361,
+                                        solar_position = FixedCosineZenith(0.5))
+        scalar_model = AtmosphereModel(grid; dynamics, formulation = :LiquidIcePotentialTemperature, radiation = scalar)
+        set!(scalar_model; θ = (x, y, z) -> 300 + 0.01 * z / 1000, qᵗ = (x, y, z) -> 0.015 * exp(-z / 2500))
+        @test column_fluxes(scalar, 1, 1)[4] == ℐ_sw_dn₁
+
+        @test_throws ArgumentError RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                                          surface_temperature = 300, surface_albedo = 0.1,
+                                                          solar_constant = FT[1361, 1361, 1361])
+    end
+
+    @testset "Per-column fixed sun [$(FT)]" for FT in test_float_types()
+        # Each column of an ensemble carries its own cos(zenith) and solar constant (a GCM-forced case
+        # library: every column a place and season, with the TOA flux of its own case), and equals the
+        # model with that column's sun as scalars
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(default_arch, FT; size = (2, 1, 8), x = (0, 2), y = (0, 1), z = (0, 3kilometers),
+                               topology = (Periodic, Periodic, Bounded))
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        function shortwave(solar_constant, cos_zenith)
+            radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                               surface_temperature = 300, surface_albedo = 0.1, solar_constant,
+                                               solar_position = FixedCosineZenith(cos_zenith),
+                                               overlying_atmosphere = nothing) # the grid top is the top of the atmosphere
+            model = AtmosphereModel(grid; dynamics, radiation)
+            set!(model; θ = (x, y, z) -> 300 + 0.01 * z / 1000, qᵗ = (x, y, z) -> 0.015 * exp(-z / 2500))
+            return column_fluxes(radiation, 1, 1)[4], column_fluxes(radiation, 2, 1)[4]
+        end
+
+        S₀, μ₀ = reshape(FT[1361, 900], 2, 1), reshape(FT[0.6, 0.25], 2, 1)
+        ℐ₁, ℐ₂ = shortwave(S₀, μ₀)
+        @test ℐ₁ == shortwave(S₀[1], μ₀[1])[1]
+        @test ℐ₂ == shortwave(S₀[2], μ₀[2])[2]
+        @test ℐ₁[end] ≈ -S₀[1] * μ₀[1]
+        @test ℐ₂[end] ≈ -S₀[2] * μ₀[2]
+    end
+
     @testset "Allocation scaling" begin
         # The update allocates only the fixed overhead of its kernel launches, not per column:
         # 1 and 64 columns allocate the same, within 1 KiB

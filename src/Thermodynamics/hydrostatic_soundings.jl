@@ -292,7 +292,7 @@ function sounding_reference_state(grid, constants, sounding, pˢᵗ, discrete_hy
     profile(name) = FT[getproperty(columns[i, j], name)[k] for i in 1:Nxᶠ, j in 1:Nyᶠ, k in 1:Nz]
 
     # As for the other references: one profile shared by every column takes its bottom-face anchors as
-    # boundary values, while per-column profiles keep default boundary conditions.
+    # boundary values, while per-column profiles (as `profile_reference_state`) keep default boundary conditions.
     reference_field(surface) = sounding isa AbstractArray ? CenterField(grid) :
         Field{LX, LY, Center}(grid, boundary_conditions=FieldBoundaryConditions(grid, loc,
                               bottom=ValueBoundaryCondition(surface_boundary_value(surface))))

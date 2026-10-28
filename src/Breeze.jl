@@ -240,7 +240,7 @@ export
     TKEBasedTurbulenceClosure, AbstractMixingLength, LocalMinimumMixingLength, IntegralMixingLength,
     GradientLimitedMixingLength, ConstantStabilityFunctions,
     RationalStabilityFunction,
-    DryStaticStability, MoistStaticStability,
+    tke_surface_flux, DryStaticStability, MoistStaticStability,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
