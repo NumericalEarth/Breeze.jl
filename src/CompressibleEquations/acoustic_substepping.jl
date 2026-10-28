@@ -1065,14 +1065,20 @@ const USE_FUSED_ACOUSTIC_COLUMN = Ref(false)
 
 # Opt-in, takes precedence over `USE_FUSED_ACOUSTIC_COLUMN[]`: the tiled (shared-memory, k-parallel)
 # column kernel `_tiled_acoustic_column_substep!` where a tile fits (else the untiled/split choice above).
-const USE_TILED_ACOUSTIC_COLUMN = Ref(false)
+const USE_TILED_ACOUSTIC_COLUMN = Ref(true)
+
+# Tiles narrower than this are slower than the split sequence: on the H100 the tiled column ran
+# 1.056× at 1800×1080×50 (T = 24) but 0.837× at 960²×250, where only T = 8 fits in shared memory.
+const MINIMUM_ACOUSTIC_COLUMN_TILE = Ref(16)
 
 struct TiledAcousticColumn{T, K} end
+
+tile_width(::TiledAcousticColumn{T}) where T = T
 
 function acoustic_column_path(grid::RectilinearGrid, ::CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing}, advection)
     if USE_TILED_ACOUSTIC_COLUMN[]
         tiled = tiled_acoustic_column_layout(grid)
-        isnothing(tiled) || return tiled
+        isnothing(tiled) || tile_width(tiled) < MINIMUM_ACOUSTIC_COLUMN_TILE[] || return tiled
     end
     return USE_FUSED_ACOUSTIC_COLUMN[] ? FusedAcousticColumn() : SplitAcousticColumn()
 end
