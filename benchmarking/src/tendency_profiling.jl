@@ -68,7 +68,7 @@ function benchmark_tendency(tendency!, args, grid;
         # is the mean over `nrepeat`.
         verbose && @info "  Compiling tendency with Reactant (raise=$raise)..."
         compiled!, compile_timings = timed_reactant_compile() do
-            Reactant.@compile compile_options=benchmark_compile_options(; raise) tendency!(args...)
+            Reactant.@compile compile_options=benchmark_compile_options(; raise = raise) tendency!(args...)
         end
         # `profile_dir` (when set) directs the xprof trace files there; when
         # `nothing`, the profiler uses its default scratch directory.
