@@ -1063,8 +1063,19 @@ acoustic_column_path(grid, dynamics, advection) = SplitAcousticColumn()
 # 1800×1080×50 (0.95×) and 960²×250 (0.92×), so it is opt-in.
 const USE_FUSED_ACOUSTIC_COLUMN = Ref(false)
 
-acoustic_column_path(::RectilinearGrid, ::CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing}, advection) =
-    USE_FUSED_ACOUSTIC_COLUMN[] ? FusedAcousticColumn() : SplitAcousticColumn()
+# Opt-in, takes precedence over `USE_FUSED_ACOUSTIC_COLUMN[]`: the tiled (shared-memory, k-parallel)
+# column kernel `_tiled_acoustic_column_substep!` where a tile fits (else the untiled/split choice above).
+const USE_TILED_ACOUSTIC_COLUMN = Ref(false)
+
+struct TiledAcousticColumn{T, K} end
+
+function acoustic_column_path(grid::RectilinearGrid, ::CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing}, advection)
+    if USE_TILED_ACOUSTIC_COLUMN[]
+        tiled = tiled_acoustic_column_layout(grid)
+        isnothing(tiled) || return tiled
+    end
+    return USE_FUSED_ACOUSTIC_COLUMN[] ? FusedAcousticColumn() : SplitAcousticColumn()
+end
 acoustic_column_path(::RectilinearGrid, ::CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
                      ::AdaptiveImplicitVerticalAdvection) = SplitAcousticColumn()
 
@@ -1163,6 +1174,152 @@ end
             post_solve_recovery!(i, j, k, ρ′, ρθ′, ρw′, ρu′, ρv′, ρ′★, ρθ′★, avg, grid, dynamics, δτᵐ⁺, θᴸ)
         end
     end
+end
+
+#####
+##### Tiled fused acoustic column substep (opt-in, `USE_TILED_ACOUSTIC_COLUMN[]`)
+#####
+#
+# Port of the handoff's FC1 (masonlee, "intermediates in shared memory") onto this base. One launch,
+# workgroup (T, 1, K) over (Nx, Ny, K): T columns per workgroup, K threads per column. Thread (li, lk)
+# owns levels lk, lk+K, … in the k-parallel phases; a single thread per column does the serial sweep.
+#
+#   A. predictors of every level into the shared tile (P, Pθ) and the (ρθ)′ stash to global; the lid
+#      face (ρw)′[Nz+1] into ϕ[Nz+1] (read by the recovery at k = Nz);
+#   B. the rhs of faces 1…Nz into ϕ (`vertical_rhs` with the predictors from the tile, ρ′, (ρθ)′,
+#      the old (ρw)′ from global — nothing global is written before D);
+#   C. the forward Thomas sweep (coefficients from `get_coefficient`, as in the untiled kernel; t into
+#      the tile) and back substitution in place in ϕ, one thread per column;
+#   D. (ρw)′ ← ϕ (faces 1…Nz) to global, and the recovery of every level from the tile.
+#
+# Every stored value is the same expression on the same inputs as the split/untiled paths; FT values
+# round-trip exactly through shared memory (tier A). The global predictor and rhs fields are not used.
+# Shared memory: (4Nz + 1)·T·sizeof(FT) within the 48 KiB static limit.
+
+const tiled_acoustic_column_widths = (32, 24, 16, 8)
+const tiled_acoustic_column_shared_bytes = 48 * 1024
+
+function tiled_acoustic_column_layout(grid)
+    Nx, Ny, Nz = size(grid)
+    FT = eltype(grid)
+    for T in tiled_acoustic_column_widths
+        fits = (4Nz + 1) * T * sizeof(FT) ≤ tiled_acoustic_column_shared_bytes
+        if (Nx % T == 0) & fits
+            K = min(Nz, clamp(128 ÷ T, 4, 16))
+            return TiledAcousticColumn{T, K}()
+        end
+    end
+    return nothing
+end
+
+# A thread's column of a workgroup tile, indexed like the field it stands in for: (i, j, k) ↦ tile[li, k].
+# Level 0 (read only by the discarded k = 1 boundary rows of `vertical_rhs`) maps to level 1.
+struct TileColumn{A, I}
+    tile :: A
+    li :: I
+end
+
+@inline Base.getindex(c::TileColumn, i, j, k) = @inbounds c.tile[c.li, max(k, 1)]
+@inline Base.setindex!(c::TileColumn, v, i, j, k) = @inbounds c.tile[c.li, k] = v
+
+@kernel function _tiled_acoustic_column_substep!(ρw′, ρ′, ρθ′, ρu′, ρv′, ρθ′ˢ⁻, avg,
+                                                 a, b, c, p, grid, dynamics,
+                                                 Δτ, δτᵐ⁺, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ,
+                                                 Πᴸ, γRᵐᴸ, g, dᵐ⁺, dˢ⁻, fw, Gˢρw, sponge,
+                                                 ::Val{T}, ::Val{K}, ::Val{Nz}) where {T, K, Nz}
+    P  = @localmem eltype(ρw′) (T, Nz)
+    Pθ = @localmem eltype(ρw′) (T, Nz)
+    ϕ  = @localmem eltype(ρw′) (T, Nz + 1)
+    tˢ = @localmem eltype(ρw′) (T, Nz)
+
+    # Each segment between barriers recomputes its indices and tile views (KernelAbstractions' CPU
+    # backend runs every segment as its own loop over the workgroup's items).
+
+    # A. Predictors
+    i, j, _ = @index(Global, NTuple)
+    li, _, lk = @index(Local, NTuple)
+    ρ′★  = TileColumn(P, li)
+    ρθ′★ = TileColumn(Pθ, li)
+    k = lk
+    while k ≤ Nz
+        build_predictors!(i, j, k, ρ′★, ρθ′★, ρθ′ˢ⁻, ρ′, ρθ′, ρw′, ρu′, ρv′,
+                          grid, dynamics, Δτ, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ)
+        k += K
+    end
+    if lk == 1
+        @inbounds ϕ[li, Nz + 1] = ρw′[i, j, Nz + 1]
+    end
+
+    @synchronize
+
+    # B. rhs of faces 1…Nz
+    i, j, _ = @index(Global, NTuple)
+    li, _, lk = @index(Local, NTuple)
+    ρ′★  = TileColumn(P, li)
+    ρθ′★ = TileColumn(Pθ, li)
+    k = lk
+    while k ≤ Nz
+        @inbounds ϕ[li, k] = vertical_rhs(i, j, k, ρ′★, ρθ′★, ρ′, ρθ′, ρw′, grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
+                                          Πᴸ, γRᵐᴸ, g, dˢ⁻, fw, Gˢρw, sponge)
+        k += K
+    end
+
+    @synchronize
+
+    # C. Thomas sweep in place in ϕ (one thread per column)
+    i, j, _ = @index(Global, NTuple)
+    li, _, lk = @index(Local, NTuple)
+    if lk == 1
+        tiled_column_sweep!(ϕ, tˢ, li, i, j, ρw′, a, b, c, p, grid, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, Val(Nz))
+    end
+
+    @synchronize
+
+    # D. (ρw)′ to global, recovery from the tile
+    i, j, _ = @index(Global, NTuple)
+    li, _, lk = @index(Local, NTuple)
+    ρ′★  = TileColumn(P, li)
+    ρθ′★ = TileColumn(Pθ, li)
+    ϕᶜ   = TileColumn(ϕ, li)
+    k = lk
+    while k ≤ Nz
+        @inbounds ρw′[i, j, k] = ϕ[li, k]
+        post_solve_recovery!(i, j, k, ρ′, ρθ′, ϕᶜ, ρu′, ρv′, ρ′★, ρθ′★, avg, grid, dynamics, δτᵐ⁺, θᴸ)
+        k += K
+    end
+end
+
+# The untiled kernel's sweep with f and the solution in the tile row ϕ[li, :] and t in tˢ[li, :].
+# The keep-old branch reads the old (ρw)′ from global, which is written only after the sweep.
+@inline function tiled_column_sweep!(ϕ, tˢ, li, i, j, ρw′, a, b, c, p, grid, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, ::Val{Nz}) where Nz
+    z = ZDirection()
+    ε = 10 * eps(eltype(ρw′))
+    @inbounds begin
+        β = get_coefficient(i, j, 1, grid, b, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+        ϕᵏ⁻ = ϕ[li, 1] / β
+        ϕ[li, 1] = ϕᵏ⁻
+        k = 2
+        while k ≤ Nz
+            fᵏ = ϕ[li, k]
+            cᵏ⁻¹ = get_coefficient(i, j, k-1, grid, c, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+            bᵏ   = get_coefficient(i, j, k,   grid, b, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+            aᵏ⁻¹ = get_coefficient(i, j, k-1, grid, a, p, z, Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+            tᵏ = cᵏ⁻¹ / β
+            tˢ[li, k] = tᵏ
+            β = bᵏ - masked_multiply(aᵏ⁻¹, tᵏ)
+            definitely_diagonally_dominant = abs(β) > ε
+            ϕ★ = (fᵏ - masked_multiply(aᵏ⁻¹, ϕᵏ⁻)) / β
+            ϕᵏ⁻ = ifelse(definitely_diagonally_dominant, ϕ★, ρw′[i, j, k])
+            ϕ[li, k] = ϕᵏ⁻
+            k += 1
+        end
+        k = Nz - 1
+        while k ≥ 1
+            ϕ[li, k] -= masked_multiply(tˢ[li, k+1], ϕ[li, k+1])
+            k -= 1
+        end
+    end
+    return nothing
 end
 
 #####
@@ -1590,6 +1747,36 @@ function implicit_advection_substep!(model, substepper, advection::AdaptiveImpli
     implicit_step!(substepper.density_potential_temperature_predictor,
                    model.timestepper.implicit_solver, nothing, nothing, nothing,
                    model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    return nothing
+end
+
+function acoustic_column_substep!(::TiledAcousticColumn{T, K}, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻) where {T, K}
+    grid = model.grid
+    arch = architecture(grid)
+    Nx, Ny, Nz = size(grid)
+    Gⁿ = model.timestepper.Gⁿ
+    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
+    solver = substepper.vertical_solver
+
+    column! = _tiled_acoustic_column_substep!(device(arch), (T, 1, K), (Nx, Ny, K))
+    args = (substepper.momentum_perturbation.w,
+            substepper.density_perturbation,
+            substepper.density_potential_temperature_perturbation,
+            substepper.momentum_perturbation.u,
+            substepper.momentum_perturbation.v,
+            substepper.previous_density_potential_temperature_perturbation,
+            substepper.time_averaged_velocities,
+            solver.a, solver.b, solver.c, solver.parameters,
+            grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
+            Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
+            substepper.linearization_potential_temperature,
+            substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
+            g, dᵐ⁺, dˢ⁻, substepper.vertical_momentum_tendency_factor,
+            substepper.slow_vertical_momentum_tendency,
+            substepper.sponge, Val(T), Val(K), Val(Nz))
+    launch_acoustic_column_kernel!(column!, convert_to_device(arch, args)...)
+
+    fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
     return nothing
 end
 
