@@ -47,12 +47,12 @@ steps rather than landing in one.
 When `vapor_excess = DiagnosticVaporExcess()`, dispatch bypasses the adjustment and the
 local state passes through unchanged.
 """
-@inline prognostic_vapor_excess_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants) =
+@inline prognostic_vapor_excess_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ̃, constants) =
     prognostic_vapor_excess_adjustment(p3.process_rates, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
-                                         δqᵛ⁺ˡ, T, ρ, constants)
+                                         δqᵛ⁺ˡ, T, ρ̃, constants)
 
 @inline function prognostic_vapor_excess_adjustment(
-    ::ProcessRate{FT, DiagnosticVaporExcess}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants
+    ::ProcessRate{FT, DiagnosticVaporExcess}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ̃, constants
 ) where FT
     cloud_water_adjustment = zero(qᶜˡ)
     return (; cloud_water_adjustment,
@@ -65,7 +65,7 @@ end
 
 @inline function prognostic_vapor_excess_adjustment(
     parameters::ProcessRate{PFT, PrognosticVaporExcess}, p3,
-    qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants
+    qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ̃, constants
 ) where PFT
     FT = typeof(qᶜˡ)
     τ = max(parameters.sink_limiting_timescale, eps(FT))
@@ -84,7 +84,7 @@ end
                                     zero(FT), cloud_water_adjustment)
     adjusted_temperature = T + cloud_water_adjustment * ℒˡ / cᵖᵈ
     adjusted_saturation = saturation_specific_humidity(
-        adjusted_temperature, ρ, constants, PlanarLiquidSurface())
+        adjusted_temperature, ρ̃, constants, PlanarLiquidSurface())
 
     return (; cloud_water_adjustment,
             rate = cloud_water_adjustment / τ,

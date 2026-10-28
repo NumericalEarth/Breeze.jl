@@ -225,10 +225,16 @@ without grid indexing. It works identically for grid-based LES and parcel models
 # Arguments
 - `microphysics`: The microphysics scheme
 - `name`: Variable name as `Val(:name)` (e.g., `Val(:ρqᶜˡ)`)
-- `ρ`: Local density (scalar)
+- `ρ`: Total density, [`total_density`](@ref), which weights the density-weighted prognostics
+  and their tendencies (scalar). On the anelastic core this is the reference density ``ρᵣ``.
 - `ℳ`: Microphysical state (e.g., `WarmPhaseOneMomentState`)
 - `𝒰`: Thermodynamic state
 - `constants`: Thermodynamic constants
+
+Saturation must not use `ρ`. The saturation specific humidity ``qᵛ⁺ = pᵛ⁺ / (ρ̃ Rᵛ T)`` and the
+supersaturation use the thermodynamic state density ``ρ̃ = `` `density(𝒰, constants)`, as
+[`thermodynamic_state_density`](@ref) returns: ``pᵣ / (Rᵐ T)`` on the anelastic core and the total
+density on the compressible core.
 
 # Returns
 The tendency value (scalar, units depend on variable).

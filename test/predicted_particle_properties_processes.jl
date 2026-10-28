@@ -57,6 +57,7 @@ using Breeze.Thermodynamics:
     StaticEnergyState,
     adjustment_saturation_specific_humidity,
     saturation_specific_humidity,
+    density,
     temperature,
     with_temperature,
     mixture_heat_capacity,
@@ -306,8 +307,20 @@ function actual_final_liquid_ssat_after_p3_step(formulation, rates, qᵛ₀, q�
     end
 
     T₁ = temperature(𝒰₁, constants)
-    qᵛ⁺ˡ₁ = saturation_specific_humidity(T₁, ρ, constants, PlanarLiquidSurface())
+    qᵛ⁺ˡ₁ = saturation_specific_humidity(T₁, density(𝒰₁, constants), constants, PlanarLiquidSurface())
     return qᵛ₁ - qᵛ⁺ˡ₁
+end
+
+# The vapor fraction `δ` above saturation over `surface` at temperature `T` and pressure `P`, with
+# condensate `qˡ`, `qⁱ`. Saturation is evaluated at the thermodynamic state density, which itself
+# depends on the vapor, so iterate to the fixed point.
+function vapor_above_saturation(T, P, qˡ, qⁱ, δ, constants; surface = PlanarLiquidSurface())
+    qᵛ = zero(T)
+    for _ in 1:20
+        ρ̃ = density(T, P, MoistureMassFractions(qᵛ, qˡ, qⁱ), constants)
+        qᵛ = saturation_specific_humidity(T, ρ̃, constants, surface) + δ
+    end
+    return qᵛ
 end
 
 function documented_diagnostic_vapor_excess_semantics()
@@ -1434,9 +1447,9 @@ end
             ρ_correction)
 
         capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
-                                           ρ, constants, transport)
+                                           ρ, ρ, constants, transport)
         refreezing_capacity = PPP.refreezing_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
-                                                      ρ, constants, transport)
+                                                      ρ, ρ, constants, transport)
 
         # Wet growth also warms the collected drops to T₀, with latent heats at T₀.
         ℒᶠʳ₀ = PPP.fusion_latent_heat(constants, T₀)
@@ -1451,9 +1464,9 @@ end
         # The vapor term carries ℒˡ at T₀ for wet growth and ℒⁱ for refreezing.
         Δqv = FT(1e-3)
         drier_capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, qv - Δqv, Ff, ρf,
-                                                 ρ, constants, transport)
+                                                 ρ, ρ, constants, transport)
         drier_refreezing_capacity = PPP.refreezing_capacity(p3, qi, qwi, ni, T, qv - Δqv,
-                                                            Ff, ρf, ρ, constants, transport)
+                                                            Ff, ρf, ρ, ρ, constants, transport)
         vapor_flux = 2 * FT(π) * ventilated_capacitance * transport.Dᵛ * ρ * Δqv * ni
         ℒˡ₀ = PPP.vaporization_latent_heat(constants, T₀)
         ℒⁱ = PPP.sublimation_latent_heat(constants, T)
@@ -1466,7 +1479,7 @@ end
         T_cold = FT(190)
         cold_transport = air_transport_properties(T_cold, P, constants)
         cold_capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T_cold, qv, Ff, ρf,
-                                                ρ, constants, cold_transport)
+                                                ρ, ρ, constants, cold_transport)
         @test ℒᶠʳ₀ + cˡ * (T_cold - T₀) < 0
         @test isfinite(cold_capacity)
         @test cold_capacity > 0
@@ -1513,6 +1526,7 @@ end
             qᵛ,
             qᵛ,
             q,
+            ρ,
             transport.Dᵛ,
             transport.Kᵃ,
             transport.ν,
@@ -1585,6 +1599,7 @@ end
             qᵛ,
             qᵛ,
             q,
+            ρ,
             transport.Dᵛ,
             transport.Kᵃ,
             transport.ν,
@@ -1640,9 +1655,9 @@ end
         qv = ε * e_s0 / max(P - e_s0, FT(1))
 
         refreezing = PPP.refreezing_rate(p3, qi, qwi, ni, T, qv, Ff, ρf,
-                                         ρ, constants, transport)
+                                         ρ, ρ, constants, transport)
         capacity = PPP.refreezing_capacity(p3, qi, qwi, ni, T, qv, Ff, ρf,
-                                           ρ, constants, transport)
+                                           ρ, ρ, constants, transport)
         τ = p3.process_rates.sink_limiting_timescale
 
         # Refreezing should remain active below freezing with liquid-coated ice.
@@ -1997,7 +2012,7 @@ end
         T = FT(230)
         P = FT(70000)
         qᶜˡ = FT(1e-13)
-        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        qᵛ = vapor_above_saturation(T, P, qᶜˡ, zero(FT), zero(FT), constants)
         q = MoistureMassFractions(qᵛ, qᶜˡ, zero(FT))
         𝒰 = with_temperature(StaticEnergyState(zero(FT), q, zero(FT), P), T, constants)
         prescribed_nᶜˡ = cloud.number_concentration / ρ
@@ -2229,7 +2244,7 @@ end
         qⁱ = FT(1e-4)
         qᶠ = FT(1e-5)
         qʷⁱ = FT(0)
-        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-10)
+        qᵛ = vapor_above_saturation(T, P, qᶜˡ + qʳ + qʷⁱ, qⁱ, FT(1e-10), constants)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
 
@@ -2281,11 +2296,13 @@ end
         qʷⁱ = FT(0)
         δqᵛ⁺ˡ = FT(0)
 
-        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-        qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
-        qᵛ = qᵛ⁺ˡ + FT(1e-4)
+        # ρ weights the tendencies; saturation uses the thermodynamic state density ρ̃
+        qᵛ = vapor_above_saturation(T, P, qᶜˡ, qⁱ, FT(1e-4), constants)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ρ̃ = density(𝒰, constants)
+        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ̃, constants, PlanarLiquidSurface())
+        qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ̃, constants, PlanarIceSurface())
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
                                 qᶠ, FT(0), qʷⁱ, δqᵛ⁺ˡ, zero(FT), zero(FT))
 
@@ -2294,8 +2311,8 @@ end
         Tᴳᴹ = T + gm.ε * PPP.vaporization_latent_heat(constants, T) / constants.dry_air.heat_capacity
         qᵛᴳᴹ = qᵛ - gm.ε
         qᶜˡᴳᴹ = qᶜˡ + gm.ε
-        qᵛ⁺ˡᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρ, constants, PlanarLiquidSurface())
-        qᵛ⁺ⁱᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρ, constants, PlanarIceSurface())
+        qᵛ⁺ˡᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρ̃, constants, PlanarLiquidSurface())
+        qᵛ⁺ⁱᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρ̃, constants, PlanarIceSurface())
         qᴳᴹ = MoistureMassFractions(qᵛᴳᴹ, qᶜˡᴳᴹ, qⁱ)
         transportᴳᴹ = air_transport_properties(Tᴳᴹ, P, constants)
         expected_process = expected_reduced_reference_vapor_rates(
@@ -2352,14 +2369,14 @@ end
         process_rates = ProcessRate(FT; vapor_excess = PrognosticVaporExcess())
         p3 = p3_with_process_rates(p3_base, process_rates)
 
-        ρ = FT(1.08)
         T = FT(290)
         P = FT(90000)
         pˢᵗ = FT(100000)
-        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-        qᵛ = qᵛ⁺ˡ / 2
+        qᵛ = vapor_above_saturation(T, P, zero(FT), zero(FT), zero(FT), constants) / 2
         q = MoistureMassFractions(qᵛ, zero(FT), zero(FT))
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ρ = density(𝒰, constants)
+        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
         ℳ = P3MicrophysicalState(zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
                                 zero(FT), zero(FT), zero(FT), qᵛ - qᵛ⁺ˡ, zero(FT), zero(FT))
 

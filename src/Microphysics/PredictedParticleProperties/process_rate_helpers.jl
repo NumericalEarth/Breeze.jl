@@ -29,14 +29,14 @@ GPU-compatible: uses `ifelse` instead of branching.
                   one(typeof(available_mass)))
 end
 
-@inline function p3_ice_saturation_specific_humidity(T, ρ, constants, freezing_temperature, qᵛ⁺ˡ)
-    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+@inline function p3_ice_saturation_specific_humidity(T, ρ̃, constants, freezing_temperature, qᵛ⁺ˡ)
+    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ̃, constants, PlanarIceSurface())
     return ifelse(T >= freezing_temperature, qᵛ⁺ˡ, qᵛ⁺ⁱ)
 end
 
-@inline function p3_ice_saturation_specific_humidity(T, ρ, constants, freezing_temperature)
-    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    return p3_ice_saturation_specific_humidity(T, ρ, constants, freezing_temperature, qᵛ⁺ˡ)
+@inline function p3_ice_saturation_specific_humidity(T, ρ̃, constants, freezing_temperature)
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ̃, constants, PlanarLiquidSurface())
+    return p3_ice_saturation_specific_humidity(T, ρ̃, constants, freezing_temperature, qᵛ⁺ˡ)
 end
 
 @inline function p3_adjustment_ice_saturation_specific_humidity(T, P, qᵗ, constants, freezing_temperature)
@@ -471,8 +471,10 @@ end
 
 # Saturation vapor mass fraction at the melting point T₀. Breeze's qᵛ is a
 # total-air mass fraction (ρᵛ/ρ), so this must use the same basis:
-# q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ). With this convention the diffusion term
-# ℒ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density difference ρᵛ - ρᵛ⁺(T₀).
+# q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ), with ρ the thermodynamic state density
+# (`density(𝒰, constants)`; not the anelastic reference density ρᵣ). With this
+# convention the diffusion term ℒ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density
+# difference ρᵛ - ρᵛ⁺(T₀), up to the ratio of the density that weights it to that one.
 # A dry-air mixing ratio ε e_s0/(P - e_s0) would only be correct against a vapor
 # variable that is itself a dry-air mixing ratio; mixing the two mass bases would
 # bias the melting and refreezing heat balances, so both call sites share this.

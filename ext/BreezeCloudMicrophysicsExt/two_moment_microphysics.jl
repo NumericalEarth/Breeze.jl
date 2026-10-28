@@ -548,7 +548,10 @@ end
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    # Saturation uses the thermodynamic state density; the total density ρ weights the
+    # tendencies (ρᵣ on the anelastic core).
+    ρ̃ = density(𝒰, constants)
+    qᵛ⁺ = saturation_specific_humidity(T, ρ̃, constants, PlanarLiquidSurface())
 
     # ===== Process rates =====
 
@@ -565,7 +568,7 @@ end
     Sᶜᵒⁿᵈ_eff = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
 
     # Rain evaporation (mass and number)
-    evap = rain_evaporation_2m(sb, categories.air, q, max(0, qʳ), ρ, Nʳ, T, constants)
+    evap = rain_evaporation_2m(sb, categories.air, q, max(0, qʳ), ρ, ρ̃, Nʳ, T, constants)
     Sᵉᵛᵃᵖ = max(evap.evap_rate_1, -max(0, qʳ) / τⁿᵘᵐ)
     dNʳ_evap = evap.evap_rate_0
 
@@ -734,10 +737,11 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     velocities⁺ = (; u = ℳ.velocities.u, v = ℳ.velocities.v, w = w⁺)
     ℳ⁺ = WarmPhaseTwoMomentState(ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.nᵃ, velocities⁺)
 
-    # Supersaturation - activation only occurs when air is supersaturated (S > 0)
+    # Supersaturation - activation only occurs when air is supersaturated (𝒮 > 0).
+    # It is evaluated at the thermodynamic state density, not at ρ (ρᵣ on the anelastic core).
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
+    𝒮 = supersaturation(T, density(𝒰, constants), q, constants, PlanarLiquidSurface())
 
     # Target: fraction of available aerosol that should activate
     N★ = aerosol_activated_fraction(aerosol_activation, aps, ρ, ℳ⁺, 𝒰, constants) * Nᵃ⁺
@@ -749,7 +753,7 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     τⁿᵘᶜ = aerosol_activation.nucleation_timescale
 
     # Convert to rate [1/m³/s], zero if subsaturated
-    dNᶜˡ_act = ifelse(S > 0, ΔNᵃᶜᵗ / τⁿᵘᶜ, zero(ρ))
+    dNᶜˡ_act = ifelse(𝒮 > 0, ΔNᵃᶜᵗ / τⁿᵘᶜ, zero(ρ))
 
     return dNᶜˡ_act
 end
@@ -765,9 +769,9 @@ the corresponding mass source term for cloud liquid water.
 
 The activation radius is derived from Köhler theory:
 ```math
-r_{act} = \\frac{2A}{3 S}
+r_{act} = \\frac{2A}{3 𝒮}
 ```
-where ``A = 2σ/(ρ_w R_v T)`` is the curvature parameter and ``S`` is the
+where ``A = 2σ/(ρ_w R_v T)`` is the curvature parameter and ``𝒮`` is the
 instantaneous supersaturation. See eq. 19 in [Abdul-Razzak et al. (1998)](@cite AbdulRazzakGhan1998).
 
 The mass tendency is then:
@@ -801,7 +805,7 @@ Mass tendency for cloud liquid [kg/kg/s]
 
     # Compute activation radius from Köhler theory
     # A = 2σ / (ρw * Rv * T) is the curvature parameter
-    # r_act = 2A / (3S) for the critical radius at supersaturation S
+    # r_act = 2A / (3𝒮) for the critical radius at supersaturation 𝒮
     Rᵛ = vapor_gas_constant(constants)
     ρᴸ = ap.ρ_w  # intrinsic density of liquid water [kg/m³]
     σ = ap.σ     # surface tension [N/m]
@@ -810,12 +814,12 @@ Mass tendency for cloud liquid [kg/kg/s]
 
     # Use instantaneous supersaturation to compute activation radius
     # Following CloudMicrophysics parcel model: use r_nuc as fallback when no activation or no supersaturation
-    S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
+    𝒮 = supersaturation(T, density(𝒰, constants), q, constants, PlanarLiquidSurface())
 
-    # Compute radius: rᵃᶜᵗ = 2A / (3S), capped at 1 μm (1e-6 m)
-    # Use rⁿᵘᶜ as fallback when S is negligible (no supersaturation) or no activation
-    is_activating = (dNᶜˡ_act > eps(FT)) & (S > eps(FT))
-    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(S, eps(FT)))), rⁿᵘᶜ)
+    # Compute radius: rᵃᶜᵗ = 2A / (3𝒮), capped at 1 μm (1e-6 m)
+    # Use rⁿᵘᶜ as fallback when 𝒮 is negligible (no supersaturation) or no activation
+    is_activating = (dNᶜˡ_act > eps(FT)) & (𝒮 > eps(FT))
+    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(𝒮, eps(FT)))), rⁿᵘᶜ)
 
     # Mass of a single activated droplet [kg]
     # m = (4π/3) * r³ * ρᴸ

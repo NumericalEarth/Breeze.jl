@@ -87,7 +87,7 @@ end
                                                 temperature_field)
 
     potential_temperature = formulation.potential_temperature
-    ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (advection/diffusion carrier)
+    ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (weights advection/diffusion of ρθ)
     𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
                                  microphysics, microphysical_fields, specific_prognostic_moisture)
     Π = exner_function(𝒰, constants)

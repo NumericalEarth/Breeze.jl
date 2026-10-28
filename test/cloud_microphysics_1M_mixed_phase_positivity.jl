@@ -85,7 +85,7 @@ end
     # Abundant snow just below freezing: rain is collected on a sub-second timescale.
     ρ, ℳ, 𝒰 = mixed_phase_state(FT, constants; T = 270, qᵛ = 3.5e-3, qᶜˡ = 0, qᶜⁱ = 0, qʳ = 1e-4, qˢⁿ = 8e-3)
     for microphysics in (saturation_adjustment_1M(FT), non_equilibrium_1M(FT))
-        rates = mixed_phase_precipitation_rates(microphysics, ρ, ℳ, 𝒰.moisture_mass_fractions,
+        rates = mixed_phase_precipitation_rates(microphysics, ρ, ρ, ℳ, 𝒰.moisture_mass_fractions,
                                                 temperature(𝒰, constants),
                                                 microphysics.categories.freezing_temperature, constants)
         @test Δt * rates.Sʳˢⁿ > ℳ.qʳ   # the unlimited rate would overdraw rain within one step
@@ -125,7 +125,7 @@ end
 
     for (tendencies, cloud_formation) in zip((mp1m_tendencies, mpne1m_tendencies), cloud_formations)
         microphysics = OneMomentCloudMicrophysics(FT; categories, cloud_formation)
-        rates = mixed_phase_precipitation_rates(microphysics, ρ, ℳ, 𝒰.moisture_mass_fractions,
+        rates = mixed_phase_precipitation_rates(microphysics, ρ, ρ, ℳ, 𝒰.moisture_mass_fractions,
                                                 temperature(𝒰, constants), categories.freezing_temperature, constants)
         @test τⁿᵘᵐ * rates.Sʳˢⁿ > ℳ.qʳ
         G = @inferred tendencies(microphysics, ρ, ℳ, 𝒰, constants)
@@ -181,7 +181,7 @@ end
             ρ, ℳ, 𝒰 = mixed_phase_state(FT, constants; T, qᵛ = 6e-3, qᶜˡ, qᶜⁱ = 0, qʳ = 0, qˢⁿ)
             T = temperature(𝒰, constants)
             Tᶠ = categories.freezing_temperature
-            rates = mixed_phase_precipitation_rates(microphysics, ρ, ℳ, 𝒰.moisture_mass_fractions, T, Tᶠ, constants)
+            rates = mixed_phase_precipitation_rates(microphysics, ρ, ρ, ℳ, 𝒰.moisture_mass_fractions, T, Tᶠ, constants)
             G = @inferred tendencies(microphysics, ρ, ℳ, 𝒰, constants)
             collected = ρ * min(rates.Sᵃᶜᶜˡˢⁿ, ℳ.qᶜˡ / τⁿᵘᵐ)
             ℒf = Breeze.Thermodynamics.ice_latent_heat(T, constants) - Breeze.Thermodynamics.liquid_latent_heat(T, constants)

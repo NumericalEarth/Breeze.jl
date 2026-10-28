@@ -684,7 +684,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
                                    total_energy_density_name)
 
     # Keep `density` as the coupling-density compatibility entry for other forcing
-    # materializers; SpecificForcing selects between the two explicit carriers by target.
+    # materializers; SpecificForcing selects between the two explicit densities by target.
     forcing_context = (; coriolis,
                          density=coupling_density,
                          coupling_density,

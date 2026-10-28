@@ -240,7 +240,7 @@ end
     @test maximum(abs.(Gρθ .- expected)) < eps(FT) * 100
 end
 
-@testset "Specific forcing selects the compressible density carrier [$(FT)]" for FT in test_float_types()
+@testset "Specific forcing selects the compressible weighting density [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch;
                            size = (8, 8, 8), halo = (5, 5, 5),
@@ -275,7 +275,7 @@ end
     @test model.forcing.ρqᵛ.density === ρ
     @test model.forcing.c.density === ρ
 
-    # Make the two carriers observably different and verify the total-density
+    # Make the two densities observably different and verify the total-density
     # multiplier reaches the scalar tendency kernels.
     set!(model, ρ=FT(1.25), qᵛ=FT(0.2), θ=FT(300))
     update_state!(model)

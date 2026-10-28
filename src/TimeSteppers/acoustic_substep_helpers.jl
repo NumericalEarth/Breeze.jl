@@ -171,7 +171,7 @@ acoustic_prognostic_names(model) = tuple(keys(dynamics_prognostic_fields(model.d
 """
 $(TYPEDSIGNATURES)
 
-Freeze the stage-entry advecting velocity and carrier density so `implicit_substep!` sizes
+Freeze the stage-entry advecting velocity and the density that weights it so `implicit_substep!` sizes
 the withheld remainder from the state whose fluxes the slow tendencies split (invariant:
 wᴸ = wᵉ + wⁱ). The full wᴸ is cached, not the clipped wᵉ, which loses the remainder in
 saturated cells. A no-op when the substepper carries no cache.

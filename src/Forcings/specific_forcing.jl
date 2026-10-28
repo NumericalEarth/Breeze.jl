@@ -11,7 +11,7 @@ using Adapt: Adapt
 
 struct SpecificForcing{F, D, L}
     forcing :: F          # materialized inner forcing (kernel callable)
-    density :: D          # target's physical density carrier (ρᵣ, ρᵈ, or total ρ)
+    density :: D          # density that weights the target (ρᵣ, ρᵈ, or total ρ)
     target_location :: L  # (LX, LY, LZ) tuple of instances for the target prognostic field
 end
 
@@ -31,10 +31,10 @@ lives at `Face` in any direction (e.g. ``ρ`` is interpolated to x-Face for `u`-
 via ``ℑxᶠᵃᵃ``, to z-Face for `w` via ``ℑzᵃᵃᶠ``). Under
 [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), `ρ` is the reference
 density `ρᵣ(z)`. Under
-[`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics), the carrier
-depends on the target conservation law: momentum and thermodynamic tendencies use the dry-air
+[`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics), the weighting
+density depends on the target conservation law: momentum and thermodynamic tendencies use the dry-air
 coupling density `ρᵈ`, while moisture, microphysical moments, and user tracers use total density
-`ρ`. The same wrapper handles all carriers.
+`ρ`. The same wrapper handles every weighting density.
 
 Users typically supply specific forcings directly through specific-named keys
 (`u`, `v`, `w`, `θ`, `s`, `qᵉ`, `qᵛ`, …) in the `forcing` `NamedTuple` passed to
