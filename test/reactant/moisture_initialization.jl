@@ -7,6 +7,7 @@ using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Reactant
 using Enzyme
+using Logging: with_logger, NullLogger
 using Test
 
 Reactant.set_default_backend(default_arch isa GPU ? "gpu" : "cpu")
@@ -59,10 +60,12 @@ end
     gradient = @with_stack_size compiled_gradient(model, dmodel, total_water, dtotal_water)
     @test all(isapprox.(Array(interior(gradient)), FT(1); rtol=50eps(FT)))
 
-    # This value changes after compilation. An eager set! rejects it; inside the compiled
-    # program the check cannot raise, and the invalid state's moisture is NaN instead.
+    # This value changes after compilation, so rejection must happen at execution time.
+    # The callback logs the ArgumentError, which Reactant reports as an execution error.
     set!(total_water, FT(0))
     @test_throws ArgumentError initialize_total_water!(model, total_water)
-    compiled(model, total_water)
-    @test all(isnan, Array(interior(model.moisture_density)))
+    # A failed compiled call can consume donated buffers, so run it last.
+    with_logger(NullLogger()) do
+        @test_throws Reactant.XLA.ReactantInternalError compiled(model, total_water)
+    end
 end
