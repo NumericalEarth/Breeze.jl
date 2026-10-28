@@ -25,7 +25,8 @@ Time `tendency!(args...)` on the architecture of `grid`. `args` is the argument
 tuple for `tendency!` — e.g. `(Gc, grid, advection, U, c)` from
 `scalar_tendency_problem`, or `(model,)` from `model_tendency_problem`. On a
 `ReactantState` grid the call is compiled with `Reactant.@compile raise=raise
-raise_first=raise sync=true` (compile time recorded separately, broken down into
+raise_first=raise sync=true`, leaving out the patterns in `EXCLUDED_PASSES` (see
+`benchmark_compile_options`; compile time recorded separately, broken down into
 tracing / MLIR / XLA stages by `timed_reactant_compile`) and profiled via
 `Reactant.Profiler.@timed`. On a vanilla grid it is run eagerly and timed over
 `nrepeat` calls with device synchronization (no Reactant compile). When
@@ -67,7 +68,7 @@ function benchmark_tendency(tendency!, args, grid;
         # is the mean over `nrepeat`.
         verbose && @info "  Compiling tendency with Reactant (raise=$raise)..."
         compiled!, compile_timings = timed_reactant_compile() do
-            Reactant.@compile raise=raise raise_first=raise sync=true tendency!(args...)
+            Reactant.@compile compile_options=benchmark_compile_options(; raise) tendency!(args...)
         end
         # `profile_dir` (when set) directs the xprof trace files there; when
         # `nothing`, the profiler uses its default scratch directory.

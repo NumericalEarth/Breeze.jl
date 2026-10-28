@@ -32,7 +32,8 @@ Run a benchmark by executing `time_steps` time steps of the given model.
 
 If the model lives on a `ReactantState` architecture, the whole stepping loop
 is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
-program with `Reactant.@compile raise=true raise_first=true sync=true` —
+program with `Reactant.@compile raise=true raise_first=true sync=true`, leaving
+out the patterns in `EXCLUDED_PASSES` (see `benchmark_compile_options`) —
 compile time is recorded separately. The compiled program is then executed
 once for warmup and once timed. The vanilla path drives `many_time_steps!`
 directly through eager `time_step!`.
@@ -103,7 +104,7 @@ function benchmark_time_stepping(model;
                 @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true)..."
             end
             compiled_grad!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile raise=true raise_first=true sync=true grad_loss!(
+                Reactant.@compile compile_options=benchmark_compile_options() grad_loss!(
                     model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
             end
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
@@ -112,7 +113,7 @@ function benchmark_time_stepping(model;
                 @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
             end
             compiled_loop!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt_FT, time_steps)
+                Reactant.@compile compile_options=benchmark_compile_options() step_loop!(model, Δt_FT, time_steps)
             end
             invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
         end
@@ -403,6 +404,25 @@ function synchronize_device(::Oceananigans.Architectures.GPU{MetalBackend})
     Metal.synchronize()
     return nothing
 end
+
+# Enzyme-JAX optimization patterns left out of every benchmark compile
+const EXCLUDED_PASSES = [
+    "select_comp_iota_const_simplify",
+    "select_comp_iota_to_dus",
+    "concat_to_pad",
+    "dus_to_dynamic_pad",
+]
+
+"""
+    benchmark_compile_options(; raise = true)
+
+The `Reactant.CompileOptions` of every benchmark compile: kernels raised (with
+`raise_first`) or not as `raise` says, `sync = true`, and the Enzyme-JAX patterns in
+`EXCLUDED_PASSES` left out. `@compile compile_options = …` ignores its other keyword
+options, so `raise`, `raise_first` and `sync` are set here too.
+"""
+benchmark_compile_options(; raise = true) =
+    Reactant.CompileOptions(; raise, raise_first = raise, sync = true, excluded_passes = EXCLUDED_PASSES)
 
 """
     timed_reactant_compile(compile)
