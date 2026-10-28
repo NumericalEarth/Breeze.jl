@@ -1248,6 +1248,16 @@ microphysics_model_update!(microphysics::Nothing, model) = nothing
 """
 $(TYPEDSIGNATURES)
 
+Whether an operator-split microphysics update refreshes halos, diagnostics, and all
+tendencies before returning for a finite positive time step. Such schemes must not
+read the incoming tendencies. The time stepper may omit the preceding tendency pass
+only when no tendency callbacks would be lost. Defaults to `false`.
+"""
+refreshes_state_after_update(microphysics) = false
+
+"""
+$(TYPEDSIGNATURES)
+
 Validate that `microphysics` is compatible with the model's `thermodynamic_constants`.
 
 Defaults to a no-op. Schemes that require a particular thermodynamic formulation (for

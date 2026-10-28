@@ -425,6 +425,9 @@ end
 ##### Main update function - launches GPU kernel
 #####
 
+# The grid-model update below rebuilds all tendencies after changing the state.
+AtmosphereModels.refreshes_state_after_update(::DCMIP2016KM) = true
+
 """
 $(TYPEDSIGNATURES)
 
