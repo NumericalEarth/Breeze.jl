@@ -88,7 +88,7 @@ jobs:
             backend: 'reactant'
             topology: 'PBB'
             # The gradient compile with the closure needs more than the default 30-minute job
-            timeout: 45
+            timeout: 60
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,4,8 --checkpointing_mode binomial --closure TKEBasedTurbulenceClosure'
           # Scalar-tendency kernel sweep (no model): time the bare WENO
           # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
@@ -152,7 +152,7 @@ jobs:
           earlyoom -m 2 -s 100 -r 60 --prefer 'julia'
         background: true
       - name: Run benchmarks
-        timeout-minutes: 45
+        timeout-minutes: ${{ matrix.timeout || 45 }}
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
