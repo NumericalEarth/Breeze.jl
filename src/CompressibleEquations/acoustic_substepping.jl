@@ -910,6 +910,11 @@ function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
     @trace track_numbers=false for _ in 1:Nτ
         acoustic_substep!(model, substepper, stage, advection)
     end
+
+    # Stage-final (ρu)′, (ρv)′ halos, read with horizontal neighbours by the terrain
+    # recovery; the per-substep post-damping fill they replace was otherwise dead.
+    fill_halo_regions!(substepper.momentum_perturbation.u)
+    fill_halo_regions!(substepper.momentum_perturbation.v)
     return nothing
 end
 
@@ -1599,15 +1604,19 @@ function acoustic_substep!(model, substepper, stage, advection)
     # the halo fill, so the boundary cell tracks the prescribed inflow state.
     apply_open_boundary_relaxation!(substepper, model, grid, arch)
 
-    fill_halo_regions!(substepper.density_perturbation)
-    fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+    # One batched fill of the cell-centred perturbations (one launch per side). On the fused
+    # path this includes the (ρθ)′ stash, which only the divergence damping reads.
+    fill_halo_regions!((substepper.density_perturbation,
+                        substepper.density_potential_temperature_perturbation,
+                        stash_halo_fields(path, substepper)...))
 
     # Step E: optional Klemp 2018 post-substep damping (no-op for
     # `NoDivergenceDamping`).
     apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
 
-    fill_halo_regions!(substepper.momentum_perturbation.u)
-    fill_halo_regions!(substepper.momentum_perturbation.v)
+    # No (ρu)′, (ρv)′ halo fill here: nothing reads their halos before the next substep's
+    # Step A overwrites the interior and refills them. The stage-final fill is done once
+    # after the loop (see `acoustic_substep_loop!`).
 
     # The damping kernel also writes the south/west wall face; re-enforce
     # impenetrability so the next substep's divergence and the accumulated
@@ -1708,10 +1717,16 @@ function acoustic_column_substep!(::FusedAcousticColumn, model, substepper, stag
             substepper.slow_vertical_momentum_tendency,
             substepper.sponge)
 
-    # The (ρθ)′ stash is read with horizontal neighbours only by the divergence damping.
-    fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
+    # The (ρθ)′ stash is read with horizontal neighbours only by the divergence damping;
+    # its halo is filled together with ρ′, (ρθ)′ in `acoustic_substep!` (`stash_halo_fields`).
     return nothing
 end
+
+# Fields whose halos `acoustic_substep!` fills in its batched post-column fill.
+# The split path fills the stash itself, before the implicit advection substep.
+stash_halo_fields(::SplitAcousticColumn, substepper) = ()
+stash_halo_fields(::FusedAcousticColumn, substepper) =
+    (substepper.previous_density_potential_temperature_perturbation,)
 
 """
 $(TYPEDSIGNATURES)
