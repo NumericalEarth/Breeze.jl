@@ -71,8 +71,10 @@ the memory/recompute trade-off:
 `kernelad` keeps them as kernel calls and differentiates the kernel bodies
 themselves (`raise=false`, `optimize=:kernelad`). Kernel AD needs
 EnzymeAD/Reactant.jl#3472, which `Project.toml` pins, and a `Reactant_jll`
-with EnzymeAD/Enzyme-JAX#3533's passes, so it is not in CI's matrix yet. It
-is CUDA only. A kernel AD result's name ends in `_kernelad`
+with EnzymeAD/Enzyme-JAX#3533's passes, which no registered version has yet.
+CI's kernel AD job uses the libReactantExtra of that PR's latest "Build
+Reactant_jll" run, set as Reactant_jll's `libReactantExtra_path` preference;
+locally, point that preference at a build of your own. It is CUDA only. A kernel AD result's name ends in `_kernelad`
 (`..._reactant_AD_binomial_4_kernelad`); `--kernels "raise, kernelad"`
 compiles and times both.
 
