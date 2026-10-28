@@ -13,18 +13,6 @@ using RRTMGP
 using NCDatasets
 using NumericalRadiation: NumericalRadiation
 
-# A radiation stub that logs the clock of each update, to count updates under real time stepping
-struct LoggingRadiation{S, F}
-    schedule :: S
-    flux_divergence :: F
-    updates :: Vector{Tuple{Int, Int}}
-end
-
-function Breeze.AtmosphereModels._update_radiation!(radiation::LoggingRadiation, model)
-    push!(radiation.updates, (model.clock.iteration, model.clock.stage))
-    return nothing
-end
-
 # The gray RRTMGP optics and the ecCKD optics of the NumericalRadiation extension share the
 # scheduling machinery of `RadiativeTransferModel`
 const OPTICS = (GrayOptics(), EcCKDOptics())
@@ -71,10 +59,6 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         interior(ℐ_lw_up) .= 0
         interior(flux_div) .= 0
 
-        # During time stepping radiation updates only in the first-stage update_state! of a step,
-        # when the clock is at stage 2; emulate those calls
-        model.clock.stage = 2
-
         # Advance to iteration 1 → should NOT update (next update at iteration 3)
         model.clock.iteration = 1
         model.clock.time = DateTime(2024, 6, 21, 16, 0, 1)
@@ -98,15 +82,6 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
 
         # Verify the flux divergence was also recomputed
         @test any(Array(interior(flux_div)) .!= 0)
-
-        # The other update_state! calls at iteration 3 (later stages, the end of the step, after
-        # an operator-split update) do not update again: once per scheduled iteration
-        for stage in (3, 1)
-            interior(ℐ_lw_up) .= 0
-            model.clock.stage = stage
-            Oceananigans.TimeSteppers.update_state!(model; compute_tendencies=false)
-            @allowscalar @test ℐ_lw_up[1, 1, 1] == 0
-        end
     end
 
     @testset "TimeInterval schedule [$(FT), $(summary(optics))]" for FT in test_float_types(), optics in OPTICS
@@ -150,9 +125,6 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         # Zero out fluxes to detect updates
         interior(ℐ_lw_up) .= 0
         interior(flux_div) .= 0
-
-        # Emulate the first-stage update_state! of each step, where scheduled updates happen
-        model.clock.stage = 2
 
         # Advance by 5 seconds → should NOT update (interval is 10s)
         model.clock.iteration = 1
@@ -229,28 +201,5 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         # All columns should have the same fluxes (uniform ICs, same coordinate)
         lw_array = Array(interior(ℐ_lw_up))
         @test all(lw_array[:, :, 1] .== lw_array[1, 1, 1])
-    end
-
-    # Under real time stepping, scheduled updates happen once per firing iteration, in the
-    # first-stage update_state! of the step (clock at stage 2), with both Breeze time steppers
-    @testset "Updates per firing iteration, $dynamics dynamics" for dynamics in (:anelastic, :compressible)
-        grid = RectilinearGrid(default_arch; size=8, z=(0, 1000), topology=(Flat, Flat, Bounded))
-        constants = ThermodynamicConstants()
-        radiation = LoggingRadiation(IterationInterval(3), CenterField(grid), Tuple{Int, Int}[])
-        model_dynamics = dynamics == :anelastic ?
-            AnelasticDynamics(ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)) :
-            CompressibleDynamics()
-        model = AtmosphereModel(grid; dynamics=model_dynamics, thermodynamic_constants=constants,
-                                advection=nothing, radiation)
-        set!(model; θ = z -> 300 + 0.01 * z)
-        @test !isempty(radiation.updates)
-        @test all(update -> update == (0, 1), radiation.updates) # initialization only
-
-        for _ in 1:7
-            time_step!(model, 0.1)
-        end
-
-        scheduled = filter(update -> first(update) > 0, radiation.updates)
-        @test scheduled == [(3, 2), (6, 2)]
     end
 end

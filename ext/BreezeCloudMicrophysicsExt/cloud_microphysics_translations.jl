@@ -100,10 +100,6 @@ $(TYPEDSIGNATURES)
 
 Compute supersaturation-dependent autoconversion of cloud ice to snow using
 Breeze thermodynamics.
-
-The supersaturation is evaluated at the moist-air density `ρᵐ` that the mass fractions
-are referenced to; the size distribution uses `ρ`, the density that weights the prognostic
-condensate.
 """
 @inline function ice_autoconversion_with_supersaturation(
     option::WithSupersaturation,
@@ -111,7 +107,6 @@ condensate.
     q::MoistureMassFractions{FT},
     qᶜⁱ::FT,
     ρ::FT,
-    ρᵐ::FT,
     T::FT,
     Tᶠ::FT,
     constants,
@@ -119,7 +114,7 @@ condensate.
     (; pdf, mass) = parameters.cloud.ice
     (; me, Δm) = mass
     r_ice_snow = parameters.process_params.snow_autoconversion.r_ice_snow
-    𝒮 = supersaturation(T, ρᵐ, q, constants, PlanarIceSurface())
+    𝒮 = supersaturation(T, ρ, q, constants, PlanarIceSurface())
     G = diffusional_growth_factor_ice(parameters.air_properties, T, constants)
     n₀ = get_n0(pdf)
     λ⁻¹ = lambda_inverse(pdf, mass, qᶜⁱ, ρ)
@@ -174,11 +169,7 @@ that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 - `aps`: Air properties (kinematic viscosity, vapor diffusivity, thermal conductivity)
 - `q`: `MoistureMassFractions` containing vapor, liquid, and ice mass fractions
 - `qʳ`: Rain specific humidity
-- `ρ`: Density that weights the prognostic rain, ``ρqʳ``, used for the size distribution.
-  On the anelastic core this is the reference density ``ρᵣ``.
-- `ρᵐ`: Moist-air density that the mass fractions are referenced to, used for the
-  supersaturation; the density of the thermodynamic state, `density(𝒰, constants)`.
-  On the compressible core ``ρᵐ = ρ``.
+- `ρ`: Air density
 - `T`: Temperature
 - `constants`: Breeze ThermodynamicConstants
 
@@ -192,7 +183,6 @@ Rate of change of rain specific humidity (negative = evaporation)
     q::MoistureMassFractions{FT},
     qʳ::FT,
     ρ::FT,
-    ρᵐ::FT,
     T::FT,
     constants,
 ) where {FT}
@@ -203,7 +193,7 @@ Rate of change of rain specific humidity (negative = evaporation)
     bᵥ = vent.b
 
     # Compute supersaturation (𝒮 < 0 means subsaturated → evaporation)
-    𝒮 = supersaturation(T, ρᵐ, q, constants, PlanarLiquidSurface())
+    𝒮 = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
     G = diffusional_growth_factor(aps, T, constants)
     n₀ = get_n0(pdf, qʳ, ρ)
@@ -251,8 +241,7 @@ for snow that uses Breeze's internal thermodynamics instead of Thermodynamics.jl
 - `aps`: Air properties (kinematic viscosity, vapor diffusivity, thermal conductivity)
 - `q`: `MoistureMassFractions` containing vapor, liquid, and ice mass fractions
 - `qˢⁿ`: Snow specific humidity
-- `ρ`: Density that weights the prognostic snow, used for the size distribution
-- `ρᵐ`: Moist-air density that the mass fractions are referenced to, used for the supersaturation
+- `ρ`: Air density
 - `T`: Temperature
 - `constants`: Breeze ThermodynamicConstants
 
@@ -266,7 +255,6 @@ Rate of change of snow specific humidity (positive = deposition, negative = subl
     q::MoistureMassFractions{FT},
     qˢⁿ::FT,
     ρ::FT,
-    ρᵐ::FT,
     T::FT,
     constants,
 ) where {FT}
@@ -277,7 +265,7 @@ Rate of change of snow specific humidity (positive = deposition, negative = subl
     bᵥ = vent.b
 
     # Supersaturation over ice (𝒮 > 0 → deposition, 𝒮 < 0 → sublimation)
-    𝒮 = supersaturation(T, ρᵐ, q, constants, PlanarIceSurface())
+    𝒮 = supersaturation(T, ρ, q, constants, PlanarIceSurface())
 
     G = diffusional_growth_factor_ice(aps, T, constants)
     n₀ = get_n0(pdf, qˢⁿ, ρ)
@@ -416,7 +404,7 @@ end
 using CloudMicrophysics.Microphysics2M: pdf_rain_parameters, Γ_incl
 
 """
-    rain_evaporation_2m(sb, aps, q, qʳ, ρ, ρᵐ, Nʳ, T, constants)
+    rain_evaporation_2m(sb, aps, q, qʳ, ρ, Nʳ, T, constants)
 
 Compute the two-moment rain evaporation rate returning both number and mass tendencies.
 
@@ -428,8 +416,7 @@ that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 - `aps`: Air properties (kinematic viscosity, vapor diffusivity, thermal conductivity)
 - `q`: `MoistureMassFractions` containing vapor, liquid, and ice mass fractions
 - `qʳ`: Rain specific humidity [kg/kg]
-- `ρ`: Density that weights the prognostic rain [kg/m³], used for the size distribution
-- `ρᵐ`: Moist-air density that the mass fractions are referenced to [kg/m³], used for the supersaturation
+- `ρ`: Air density [kg/m³]
 - `Nʳ`: Rain number concentration [1/m³]
 - `T`: Temperature [K]
 - `constants`: Breeze ThermodynamicConstants
@@ -445,7 +432,6 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
     q::MoistureMassFractions{FT},
     qʳ::FT,
     ρ::FT,
-    ρᵐ::FT,
     Nʳ::FT,
     T::FT,
     constants,
@@ -457,7 +443,7 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
     ρᴸ = pdf_r.ρw
 
     # Compute supersaturation over liquid (negative means subsaturated)
-    𝒮 = supersaturation(T, ρᵐ, q, constants, PlanarLiquidSurface())
+    𝒮 = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
     # Condition: evaporate only when rain exists and air is subsaturated
     evaporating = (Nʳ > ϵ_numerics(FT)) & (𝒮 < zero(FT))
@@ -642,10 +628,8 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
 
-    # Vapor pressure, from the moist-air density the mass fractions are referenced to
-    # (ρ weights the prognostic number and condensate; on the anelastic core it is ρᵣ)
-    ρᵐ = density(𝒰, constants)
-    pᵛ = qᵛ * ρᵐ * Rᵛ * T
+    # Vapor pressure
+    pᵛ = qᵛ * ρ * Rᵛ * T
 
     # Diffusional growth factor G (Eq. 13.28 in Pruppacher & Klett)
     G = diffusional_growth_factor(aps, T, constants) / ρᴸ

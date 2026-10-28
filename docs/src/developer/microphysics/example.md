@@ -78,18 +78,16 @@ end
 ## Computing Tendencies
 
 Tendencies are computed from the microphysical state. Each prognostic variable needs a
-tendency method. The density `ρ` weights the tendencies (on the anelastic core it is the dry
-reference density ``ρᵣ``); saturation is referenced instead to the moist-air density of the
-thermodynamic state, `density(𝒰, constants)`, the density the mass fractions are referenced to:
+tendency method:
 
 ```@example microphysics_example
-using Breeze.Thermodynamics: temperature, density, saturation_specific_humidity,
+using Breeze.Thermodynamics: temperature, saturation_specific_humidity,
                               PlanarLiquidSurface, PlanarIceSurface
 
 # Relaxation toward liquid saturation
 @inline function AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqˡ}, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)
-    q⁺ˡ = saturation_specific_humidity(T, density(𝒰, constants), constants, PlanarLiquidSurface())
+    q⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     τᵛˡ = em.vapor_to_liquid
     return ρ * (ℳ.qᵛ - q⁺ˡ) / τᵛˡ
 end
@@ -97,7 +95,7 @@ end
 # Relaxation toward ice saturation
 @inline function AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqⁱ}, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)
-    q⁺ⁱ = saturation_specific_humidity(T, density(𝒰, constants), constants, PlanarIceSurface())
+    q⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
     τᵛⁱ = em.vapor_to_ice
     return ρ * (ℳ.qᵛ - q⁺ⁱ) / τᵛⁱ
 end

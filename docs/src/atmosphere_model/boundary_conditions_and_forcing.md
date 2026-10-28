@@ -120,27 +120,6 @@ model, ``Δs`` for a static energy model — so the same specification is correc
 [Wall fluxes](@ref "Wall fluxes") for placement on any of the six boundaries, the forms the wall state
 may take, and stability-corrected transfer coefficients.
 
-## Surface fluxes from a time series
-
-Archived fluxes — the sensible and latent heat fluxes of a single-column case, say — are a
-`FieldTimeSeries` of horizontal fields, one value per column, given to `FluxBoundaryCondition`. The
-flux is read at the model time, interpolated linearly between records inside the kernel and held
-at the last record beyond it (`time_indexing = Clamp()`, the default). With `times` a range the
-record lookup is arithmetic, so the same boundary condition also runs under Reactant, whose clock
-is traced:
-
-```@example bcs
-times = 0:600:3600
-Q = FieldTimeSeries{Center, Center, Nothing}(grid, times)
-for (n, t) in enumerate(times)
-    set!(Q[n], x -> 100 + 10 * x / 1e3 + 50 * t / 3600) # W m⁻², varying in x and in time
-end
-
-ρE_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q))
-model = AtmosphereModel(grid; boundary_conditions=(; ρE=ρE_bcs))
-nothing # hide
-```
-
 ## Forcing
 
 Interior sources are supplied under `forcing`, using the same keys. Each also accepts a
@@ -158,18 +137,6 @@ The energy and water interface keys work the same way, with specific aliases ``E
 ```@example bcs
 ∂t_E = -2.0   # radiative cooling, W m⁻³
 model = AtmosphereModel(grid; forcing=(; ρE=Returns(∂t_E)))
-nothing # hide
-```
-
-A prescribed *temperature* tendency, the form in which large-scale and radiative heating are often
-archived, goes under `E` wrapped in [`TemperatureForcing`](@ref). It is converted to an energy
-tendency with the local mixture heat capacity ``cᵖᵐ`` at kernel time, so the temperature changes at
-the prescribed rate in moist and cloudy air as well as dry. Multiplying by the dry heat capacity
-``cᵖᵈ`` instead heats air with 20 g kg⁻¹ of vapor about 1.7% too little:
-
-```@example bcs
-∂t_T = 2 / 86400   # large-scale heating, K s⁻¹
-model = AtmosphereModel(grid; forcing=(; E=TemperatureForcing(Returns(∂t_T))))
 nothing # hide
 ```
 

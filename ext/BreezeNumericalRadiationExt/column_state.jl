@@ -82,7 +82,7 @@ $(TYPEDSIGNATURES)
 Pressure, temperature, molar amounts (mol m⁻²) of dry air, water vapor and ozone, and liquid and
 ice water paths (kg m⁻²) of grid cell `k` of column `(i, j)`.
 
-The gas amounts follow the "dry" convention of the ecCKD tables: the dry-air amount
+The gas amounts follow the "dry" convention of the ecCKD tables: the composite (dry-air) amount
 is the layer's total mass over the dry molar mass, `ρ Δz / mᵈ` (`Δp / (g mᵈ)` for a hydrostatic
 layer), and the water vapor `ρ qᵛ Δz / mᵛ` is counted on top of it, so the ratio of the two is
 the mole fraction the tables are indexed by. NumericalRadiation's CKDMIP and RFMIP validation

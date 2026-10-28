@@ -34,7 +34,7 @@ using .NumericalRadiationExt: column_atmosphere, number_of_layers,
 # The one documented difference is the Rayleigh air amount: the array `optical_properties!`
 # forms the hydrostatic `Δp / (g mᵈ)` of each layer from the interface pressures (with the
 # constants of the column atmosphere, which `column_atmosphere` takes from the model), whereas
-# the kernel uses the dry-air amount, the layer's mass over `mᵈ` (`ρ Δz / mᵈ` in the
+# the kernel uses the composite amount, the layer's mass over `mᵈ` (`ρ Δz / mᵈ` in the
 # grid, `Δp / (g mᵈ)` in the extension). The two agree to rounding and discretization; the
 # reference is patched to the kernel's amount so the discretization does not enter the comparison.
 function array_path_fluxes(rtm, model, i, j)
@@ -54,7 +54,7 @@ function array_path_fluxes(rtm, model, i, j)
     atmosphere = column_atmosphere(rtm, model, i, j)
     optical_properties!(longwave, shortwave, gas_model, atmosphere)
 
-    air = atmosphere.gases.dry_air
+    air = atmosphere.gases.composite
     for k in 1:N, g in 1:Ngˢʷ
         shortwave.rayleigh_optical_depth[g, k] = rayleigh_optical_depth(gas_model, g, air[k])
     end

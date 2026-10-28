@@ -12,54 +12,23 @@ using InteractiveUtils: subtypes
 """
 $(TYPEDSIGNATURES)
 
-Update the radiative fluxes of `rtm` from the current model state when they are due; the
-computation itself is `_update_radiation!(rtm, model)`.
+Update the radiative fluxes from the current model state.
 
-`update_state!` runs several times per time step: after each Runge-Kutta stage, and again after an
-operator-split update such as Kessler microphysics. Radiation is updated
+This function checks the radiation schedule and only updates if the schedule
+returns true. The actual radiation computation is dispatched to `_update_radiation!(rtm, model)`.
 
-- at initialization: by every `update_state!` between steps at iteration 0 (`clock.stage == 1`),
-  that is model construction, `set!` and the preparation of the first step, which all see the
-  initial state;
-- during time stepping: once per iteration `n > 0` at which `rtm.schedule` actuates, by the
-  first-stage `update_state!` of the step that begins at `n` (the clock is then at stage 2 in
-  Breeze's Runge-Kutta steppers). The new fluxes enter from the second stage of that step. Later
-  stages, the end of the step and operator-split updates do not update radiation.
-
-With `schedule = IterationInterval(80)` and `Δt = 7.5` s, the fluxes are computed from the initial
-state and then every 600 s, in the steps that begin at iterations 80, 160, …
-
-Under Reactant the iteration is traced: `BreezeReactantExt` applies the scheduled update with a
-traced conditional, which requires a stateless schedule such as `IterationInterval`, and computes
-the initial fluxes in `Breeze.TimeSteppers.prepare_first_time_step!`
-(also called by `first_time_step!`), which a traced window calls before its loop of `time_step!`.
+Radiation is always computed on the first iteration (iteration 0) to ensure
+valid radiative fluxes before the first time step.
 """
 function update_radiation!(rtm, model)
     isnothing(rtm) && return nothing
-    due = radiation_update_due(rtm.schedule, model.clock, model)
-    conditionally_update_radiation!(due, rtm, model)
+    # Always compute on first iteration, then follow schedule
+    first_iteration = model.clock.iteration == 0
+    if first_iteration || rtm.schedule(model)
+        _update_radiation!(rtm, model)
+    end
     return nothing
 end
-
-function radiation_update_due(schedule, clock, model)
-    initialization = clock.iteration == 0 && clock.stage == 1
-    return initialization || (clock.iteration > 0 && clock.stage == 2 && schedule(model))
-end
-
-function conditionally_update_radiation!(due::Bool, rtm, model)
-    due && _update_radiation!(rtm, model)
-    return nothing
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Return `schedule` if radiation can be updated on it on architecture `arch`, and throw an
-`ArgumentError` otherwise. Every schedule is valid on native architectures; `BreezeReactantExt`
-accepts only `IterationInterval` on `ReactantState`. `AtmosphereModel` validates the schedule of
-its radiation when it is constructed, before anything is traced.
-"""
-validate_schedule(schedule, arch) = schedule
 
 # Fallback: no radiation
 update_radiation!(::Nothing, model) = nothing
@@ -206,10 +175,6 @@ Fields:
   with the ecRad data (`:climate_32x32`, `:climate_64x64`, ...), a `(longwave = path, shortwave = path)`
   pair of ecCKD definition files, or a preloaded `NumericalRadiation` gas optics model
 - `clouds`: [`CloudScatteringTables`](@ref) for all-sky radiation, or `nothing` for clear sky
-- `lookup_search`: the `NumericalRadiation.AbstractLookupSearch` used to bracket the temperature and
-  Planck-source tables of a gas model read from files, or `nothing` for NumericalRadiation's default.
-  `NumericalRadiation.FixedBinarySearch()` has no data-dependent loop exit, which Reactant's
-  while-loop raising needs to differentiate through the gas optics
 
 ```jldoctest
 julia> using Breeze
@@ -225,10 +190,9 @@ EcCKDOptics
 └── clouds: CloudScatteringTables(liquid=:mie_droplet, ice=:baum_general_habit_mixture)
 ```
 """
-struct EcCKDOptics{M, C, S} <: AbstractOptics
+struct EcCKDOptics{M, C} <: AbstractOptics
     gas_model :: M
     clouds :: C
-    lookup_search :: S
 end
 
 """
@@ -236,26 +200,17 @@ $(TYPEDSIGNATURES)
 
 Construct [`EcCKDOptics`](@ref) with the reference `gas_model` (default `:climate_32x32`) and,
 for all-sky radiation, [`CloudScatteringTables`](@ref) as `clouds` (default `nothing`: clear sky).
-`lookup_search` (default `nothing`: NumericalRadiation's default) selects how the gas optics tables
-are bracketed.
 """
-EcCKDOptics(gas_model = :climate_32x32; clouds = nothing, lookup_search = nothing) =
-    EcCKDOptics(gas_model, clouds, lookup_search)
+EcCKDOptics(gas_model = :climate_32x32; clouds = nothing) = EcCKDOptics(gas_model, clouds)
 
 # Selectors and paths are shown as literals; a preloaded gas optics model by its summary
 optics_selector_string(x::Union{Symbol, AbstractString, NamedTuple}) = repr(x)
 optics_selector_string(x) = summary(x)
 
-function Base.show(io::IO, optics::EcCKDOptics)
+Base.show(io::IO, optics::EcCKDOptics) =
     print(io, "EcCKDOptics", "\n",
-          "├── gas_model: ", optics_selector_string(optics.gas_model), "\n")
-    if isnothing(optics.lookup_search)
-        print(io, "└── clouds: ", optics.clouds)
-    else
-        print(io, "├── clouds: ", optics.clouds, "\n",
-                  "└── lookup_search: ", optics.lookup_search)
-    end
-end
+          "├── gas_model: ", optics_selector_string(optics.gas_model), "\n",
+          "└── clouds: ", optics.clouds)
 
 """
 $(TYPEDSIGNATURES)
@@ -352,7 +307,7 @@ RadiativeTransferModel
 * O'Gorman, P. A. and Schneider, T. (2008). The hydrological cycle over a wide range of climates simulated
     with an idealized GCM. Journal of Climate, 21, 3815–3832.
 """
-function RadiativeTransferModel(grid::AbstractGrid, optics, constants=nothing; kw...)
+function RadiativeTransferModel(grid::AbstractGrid, optics, args...; kw...)
     msg = "Unknown optics $(optics). Valid options are $(join(string.(subtypes(AbstractOptics)) .* "()", ", ")).\n" *
           "Make sure RRTMGP.jl is loaded (e.g., `using RRTMGP`)."
     return throw(ArgumentError(msg))
@@ -766,17 +721,9 @@ function assert_bound_surface_temperature(rtm)
     return nothing
 end
 
-# Checked once, when the radiation joins a model, rather than on every radiation update:
-# its schedule must be one the architecture can evaluate (see `validate_schedule`), and its
-# solar position must be able to read the clock
-validate_radiation(::Nothing, clock, arch) = nothing
-validate_radiation(radiation, clock, arch) = validate_schedule(radiation.schedule, arch)
-
-function validate_radiation(radiation::RadiativeTransferModel, clock, arch)
-    validate_schedule(radiation.schedule, arch)
-    validate_solar_position_clock(radiation.solar_position, clock)
-    return nothing
-end
+# Checked once, when the radiation joins a model, rather than on every radiation update
+validate_radiation(radiation, clock) = nothing
+validate_radiation(radiation::RadiativeTransferModel, clock) = validate_solar_position_clock(radiation.solar_position, clock)
 
 #####
 ##### Boundary-face pressure

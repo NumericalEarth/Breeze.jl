@@ -717,14 +717,6 @@ Keyword arguments
   the potential temperature profile. When a constant is provided, closed-form adiabatic
   hydrostatic profiles are used. When a function is provided, the hydrostatic profiles
   are computed by numerical integration of ``∂p/∂z = -g ρ``.
-- `sounding`: A [`HydrostaticSounding`](@ref), or an `(Nx, Ny)` array of them (one per column of a
-  column ensemble), in place of `base_pressure` and `potential_temperature`: the reference is then
-  the sounding's own hydrostatic column, ``pᵣ`` its exactly integrated pressure and ``Tᵣ`` its virtual
-  temperature at the cell centers, and ``ρᵣ = pᵣ / (Rᵈ Tᵣ)`` the density of its (moist) air. This
-  reproduces an observed or modeled column — for example an LES's own reference pressure and
-  density — without converting it to a potential temperature or integrating it on the model grid.
-  It cannot be combined with `base_pressure`, `potential_temperature`, the moisture profiles or
-  `discrete_hydrostatic_balance`.
 - `standard_pressure`: Reference pressure for potential temperature (``pˢᵗ``). By default, 1e5.
 - `discrete_hydrostatic_balance`: If `true`, recompute the reference pressure from the
   reference density using discrete integration, so that `∂z(p_ref) + g * ℑz(ρ_ref) = 0`
@@ -744,9 +736,8 @@ Pass `=0` to allocate an actual `Field` initialized to zero — required for lat
 with [`compute_reference_state!`](@ref) or `set_to_mean!`.
 """
 function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
-                        base_pressure = nothing,
-                        potential_temperature = nothing,
-                        sounding = nothing,
+                        base_pressure = 101325,
+                        potential_temperature = 288,
                         standard_pressure = 1e5,
                         discrete_hydrostatic_balance = false,
                         vapor_mass_fraction = nothing,
@@ -757,19 +748,6 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     reject_renamed_surface_pressure(surface_pressure)
 
     pˢᵗ = convert(eltype(grid), standard_pressure)
-
-    if !isnothing(sounding)
-        validate_sounding_reference(base_pressure, "base_pressure")
-        validate_sounding_reference(potential_temperature, "potential_temperature")
-        validate_sounding_reference(vapor_mass_fraction, "vapor_mass_fraction")
-        validate_sounding_reference(liquid_mass_fraction, "liquid_mass_fraction")
-        validate_sounding_reference(ice_mass_fraction, "ice_mass_fraction")
-        return sounding_reference_state(grid, constants, sounding, pˢᵗ, discrete_hydrostatic_balance)
-    end
-
-    base_pressure = something(base_pressure, 101325)
-    potential_temperature = something(potential_temperature, 288)
-
     return materialize_reference_state(grid, constants, base_pressure, potential_temperature, pˢᵗ,
                                        discrete_hydrostatic_balance,
                                        vapor_mass_fraction, liquid_mass_fraction, ice_mass_fraction)

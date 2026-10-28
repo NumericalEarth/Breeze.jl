@@ -5,8 +5,7 @@ using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
 using Breeze.AtmosphereModels: microphysics_model_update!, bottom_precipitation_flux
-using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient,
-    sedimentation_substeps
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient
 using Breeze.Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
@@ -40,8 +39,7 @@ References: DCMIP2016 Fortran implementation (`kessler.f90` in [DOI: 10.5281/zen
 """
 function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constants, microphysics;
                                              sedimentation_density = ρ,
-                                             dry_air_coupled = false,
-                                             isochoric = false)
+                                             dry_air_coupled = false)
     Nz = length(T)
     FT = eltype(T)
 
@@ -152,12 +150,8 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
             rᶜˡ_new = max(0.0, rᶜˡ[k] - Δrᴾ)
             rʳ_new = max(0.0, rʳ[k] + Δrᴾ + Δr𝕎)
 
-            # Saturation adjustment. The Fortran saturation mixing ratio depends on pressure and
-            # temperature alone (rvs = 3.8 / p exp(...)), so on a fixed-pressure (anelastic) column
-            # it is evaluated at the moist-air density of the air at (p, T), not at the density that
-            # weights the rain. On the compressible core the update is isochoric: saturation is at ρ.
-            ρᵐ = isochoric ? ρ[k] : p[k] / (Rᵐ * T[k])
-            qᵛ⁺ = saturation_specific_humidity(T[k], ρᵐ, constants, PlanarLiquidSurface())
+            # Saturation adjustment
+            qᵛ⁺ = saturation_specific_humidity(T[k], ρ[k], constants, PlanarLiquidSurface())
             rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
             Δrˢᵃᵗ = (rᵛ[k] - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T[k] - T_offset)^2)
 
@@ -270,64 +264,6 @@ end
 
         @test qᵛ_back ≈ qᵛ rtol=1e-10
         @test qˡ_back ≈ qˡ rtol=1e-10
-    end
-
-    # `sedimentation_substeps(Δt, max_Δt, substep_limit)` validates the substep count as a float
-    # before the kernel truncates it to an integer: a count that is not finite, not positive or
-    # above the bound is rejected (`valid = false`, `Nₛ = 1`), never clipped.
-    @testset "Sedimentation substep guard [$FT]" for FT in (Float64, Float32)
-        bound = Breeze.Microphysics.maximum_representable_substeps
-        @test bound == 2^24
-
-        # The eager count `max(1, ceil(Int, Δt / max_Δt))` it replaces, for valid ratios
-        eager_count(Δt, max_Δt) = max(1, ceil(Int, Δt / max_Δt))
-
-        function check_valid(Δt, max_Δt, limit, expected)
-            Nₛ, valid, needed = sedimentation_substeps(FT(Δt), FT(max_Δt), limit)
-            @test valid
-            @test Nₛ isa FT
-            @test Nₛ == needed == expected
-            @test unsafe_trunc(Int, Nₛ) == expected
-        end
-
-        function check_rejected(Δt, max_Δt, limit, expected_needed)
-            Nₛ, valid, needed = sedimentation_substeps(FT(Δt), FT(max_Δt), limit)
-            @test !valid
-            @test Nₛ == 1 # always a safe loop operand
-            @test needed == expected_needed
-        end
-
-        # Eager equivalence below the bound, without and with a static bound
-        for (Δt, max_Δt) in ((30, 40), (30, 30), (30, 29), (30, 7.5), (30, 7.4), (1, 1e-3), (1e-3, 1e3), (10, 3))
-            expected = eager_count(FT(Δt), FT(max_Δt))
-            check_valid(Δt, max_Δt, nothing, expected)
-            check_valid(Δt, max_Δt, Val(expected), expected)
-            check_valid(Δt, max_Δt, Val(expected + 1), expected)
-        end
-
-        # Ratios that are not finite or not positive need `Inf` substeps and are rejected
-        for (Δt, max_Δt) in ((NaN, 1), (1, NaN), (0, 0), (Inf, Inf), (1, 0), (Inf, 1), (-1, 0), (0, 1), (-30, 10), (30, -10))
-            check_rejected(Δt, max_Δt, nothing, FT(Inf))
-            check_rejected(Δt, max_Δt, Val(4), FT(Inf))
-        end
-
-        # Without a static bound: exactly at the representable bound, one below and one above
-        check_valid(bound, 1, nothing, bound)
-        check_valid(bound - 1, 1, nothing, bound - 1)
-        above = nextfloat(FT(bound)) # bound + 1 for Float64; Float32 cannot represent it
-        check_rejected(above, 1, nothing, ceil(above))
-        check_rejected(1e30, 1, nothing, FT(1e30))
-        check_rejected(floatmax(FT), 1, nothing, floatmax(FT))
-        @test sedimentation_substeps(FT(bound) + 1, FT(1), nothing)[2] == (FT == Float32) # bound + 1 rounds to bound in Float32
-
-        # With a static bound N: N and N - 1 run, N + 1 and a fraction above N are rejected
-        N = 8
-        check_valid(N, 1, Val(N), N)
-        check_valid(N - 1, 1, Val(N), N - 1)
-        check_valid(N - 0.5, 1, Val(N), N)
-        check_rejected(N + 1, 1, Val(N), FT(N + 1))
-        check_rejected(N + 0.5, 1, Val(N), FT(N + 1))
-        check_rejected(bound + 4, 1, Val(N), FT(bound + 4))
     end
 end
 
@@ -531,8 +467,7 @@ end
         dcmip2016_klemp_wilhelmson_kessler!(T_ref, qᵛ_ref, qᶜˡ_ref, qʳ_ref,
                                             ρ, p, Δt, z, constants, microphysics;
                                             sedimentation_density = ρᵈ,
-                                            dry_air_coupled = true,
-                                            isochoric = true)
+                                            dry_air_coupled = true)
 
     qᵗ_ref = qᵛ_ref .+ qᶜˡ_ref .+ qʳ_ref
     rᵛ_ref = qᵛ_ref ./ (1 .- qᵗ_ref)

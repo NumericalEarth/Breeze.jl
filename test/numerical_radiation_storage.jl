@@ -22,7 +22,7 @@ Adapt.adapt_storage(::Val{:sizes_in_types}, array::Array) = SizeTypedArray(array
 @testset "Radiation storage with sizes in array types [$FT]" for FT in (Float32, Float64)
     grid = RectilinearGrid(CPU(), FT; size = 4, x = 0, y = 0, z = (0, 3000), topology = (Flat, Flat, Bounded))
     extension = NumericalRadiationExt.materialize_overlying_atmosphere(OverlyingAtmosphereColumn(FT; layers = 3), grid, BackgroundAtmosphere())
-    gas_model = NumericalRadiation.EcCKDTabulatedGasOpticsModel(names = (:H₂O, :CO₂),
+    gas_model = NumericalRadiation.EcCKDTabulatedGasOpticsModel(names = (:h2o, :co2),
                                                                 pressure_grid = FT[10_000, 100_000],
                                                                 temperature_grid = FT[220, 300],
                                                                 longwave_absorption = ones(FT, 2, 2, 2, 2),
