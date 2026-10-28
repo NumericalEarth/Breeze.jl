@@ -271,6 +271,11 @@ formulation_ad = LiquidIcePotentialTemperatureFormulation(temperature_solver = F
 model_ad = AtmosphereModel(grid_ad; formulation = formulation_ad,
                            dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state = nothing))
 
+# On `ReactantState` a model is built uninitialized: its dynamics and boundary-condition state come from
+# `initialize!`, which we compile and run once before setting the initial conditions.
+compiled_initialize! = Reactant.@compile sync = true Oceananigans.initialize!(model_ad)
+compiled_initialize!(model_ad)
+
 # ### Fixed and varying fields
 #
 # In this experiment the initial density pulse and hydrostatic background are

@@ -135,6 +135,17 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 └── microphysics: Nothing
 ```
 
+Initialization
+==============
+
+Construction initializes the dynamics: a compressible model's reference state and seeded pressure.
+`initialize!(model)`, which `run!` calls, also sets up the boundary-condition state, which reads the
+density, so a model stepped with `time_step!` directly should be `initialize!`d after `set!`.
+
+On `ReactantState`, construction initializes nothing. Compile `initialize!` and run it after `set!`
+and before time stepping, `Reactant.@compile sync=true initialize!(model)`, and also before `set!`
+when the initial conditions read the reference state. `initialize!` is idempotent.
+
 References
 ==========
 Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for a moist atmosphere.

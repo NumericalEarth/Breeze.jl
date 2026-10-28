@@ -383,6 +383,20 @@ function run_benchmark_simulation(model;
     return result
 end
 
+"""
+    initialize_on_reactant!(model)
+
+On `ReactantState` a model is built uninitialized (its reference state and seeded pressure come
+from `initialize!`), so compile and run `initialize!(model)` there; elsewhere construction has done it.
+"""
+function initialize_on_reactant!(model)
+    if model.grid.architecture isa ReactantState
+        compiled_initialize! = Reactant.@compile sync=true Oceananigans.initialize!(model)
+        compiled_initialize!(model)
+    end
+    return nothing
+end
+
 #####
 ##### Device synchronization
 #####
