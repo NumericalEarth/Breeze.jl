@@ -54,24 +54,41 @@ end
 
 (τ::CellAdvectionTimescale)(model) = cell_advection_timescale(model, τ.formulation)
 
-# The vertical advecting velocity is Cartesian `w` on height-coordinate grids and the contravariant
-# `w̃` on terrain-following grids (see `advecting_vertical_velocity`). Its magnitude is replaced by
-# the largest vertical transport speed, so Oceananigans' own kernel computes the sedimentation-aware
-# timescale in one reduction with the same topology/Flat handling.
+# Every advected sedimentation velocity counts, so this is the true three-dimensional CFL.
 Advection.cell_advection_timescale(model::AtmosphereModel, ::ThreeDimensionalFormulation) =
-    three_dimensional_timescale(model, sedimentation_velocities(model, is_advected))
-
-function three_dimensional_timescale(model, sedimentation_velocities)
-    u, v, _ = model.velocities
-    w = advecting_vertical_velocity(model.dynamics, model.velocities)
-    wᵗ = maximum_vertical_transport_speed(model.grid, w, sedimentation_velocities)
-    return cell_advection_timescale(model.grid, (u, v, wᵗ))
-end
+    three_dimensional_timescale(model, advected_sedimentation_velocities(model, is_advected))
 
 # A `ZeroField` in the vertical slot makes the `|w|/Δz` term identically zero.
 function Advection.cell_advection_timescale(model::AtmosphereModel, ::HorizontalFormulation)
     u, v, _ = model.velocities
     return cell_advection_timescale(model.grid, (u, v, ZeroField()))
+end
+
+# Automatic default: drop the vertical term exactly when every vertically-advected prognostic uses
+# AIVA. A single explicit prognostic retains the air's vertical CFL constraint.
+function Advection.cell_advection_timescale(model::AtmosphereModel)
+    if all_vertical_advection_is_implicit(model.advection)
+        return cell_advection_timescale(model, HorizontalFormulation())
+    else
+        return three_dimensional_timescale(model, advected_sedimentation_velocities(model, is_explicitly_advected))
+    end
+end
+
+# `nothing` schemes advect nothing (no vertical CFL); every other scheme must be AIVA.
+# Note: `any` follows the three-valued logic and _may_ return `missing` in some cases.  Let's
+# inform the compiler with the `::Bool` annotation that we know we only deal with booleans.
+all_vertical_advection_is_implicit(advection::NamedTuple)::Bool =
+    !any(is_explicitly_advected, values(advection))::Bool
+
+# The vertical advecting velocity is Cartesian `w` on height-coordinate grids and the contravariant
+# `w̃` on terrain-following grids (see `advecting_vertical_velocity`). Its magnitude is replaced by
+# the largest vertical transport speed, so Oceananigans' own kernel computes the sedimentation-aware
+# timescale in one reduction with the same topology/Flat handling.
+function three_dimensional_timescale(model, sedimentation_velocities)
+    u, v, _ = model.velocities
+    w = advecting_vertical_velocity(model.dynamics, model.velocities)
+    wᵗ = maximum_vertical_transport_speed(model.grid, w, sedimentation_velocities)
+    return cell_advection_timescale(model.grid, (u, v, wᵗ))
 end
 
 # Largest vertical transport speed among the air and the given sedimenting prognostics, as a
@@ -97,7 +114,7 @@ end
 # Sedimentation velocities of the sedimenting prognostics whose advection scheme is `advected`
 # (`is_advected` or `is_explicitly_advected`), i.e. the vertical component of
 # `microphysical_velocities` (which carries no horizontal part).
-function sedimentation_velocities(model, advected)
+function advected_sedimentation_velocities(model, advected)
     names = prognostic_field_names(model.microphysics)
     velocities = map(names) do name
         transport = microphysical_velocities(model.microphysics, model.microphysical_fields, Val(name))
@@ -111,19 +128,3 @@ end
 # `is_explicitly_advected` also drops AIVA prognostics, for the wizard (see the header).
 is_advected(scheme) = scheme !== nothing
 is_explicitly_advected(scheme) = is_advected(scheme) && !needs_implicit_solver(scheme)
-
-# Automatic default: drop the vertical term exactly when every vertically-advected prognostic uses
-# AIVA. A single explicit prognostic retains the air's vertical CFL constraint.
-function Advection.cell_advection_timescale(model::AtmosphereModel)
-    if all_vertical_advection_is_implicit(model.advection)
-        return cell_advection_timescale(model, HorizontalFormulation())
-    else
-        return three_dimensional_timescale(model, sedimentation_velocities(model, is_explicitly_advected))
-    end
-end
-
-# `nothing` schemes advect nothing (no vertical CFL); every other scheme must be AIVA.
-# Note: `any` follows the three-valued logic and _may_ return `missing` in some cases.  Let's
-# inform the compiler with the `::Bool` annotation that we know we only deal with booleans.
-all_vertical_advection_is_implicit(advection::NamedTuple)::Bool =
-    !any(is_explicitly_advected, values(advection))::Bool
