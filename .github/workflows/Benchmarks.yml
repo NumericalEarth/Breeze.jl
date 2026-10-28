@@ -87,6 +87,8 @@ jobs:
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
+            # The gradient compile with the closure needs more than the default 30-minute job
+            timeout: 45
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,4,8 --checkpointing_mode binomial --closure TKEBasedTurbulenceClosure'
           # Scalar-tendency kernel sweep (no model): time the bare WENO
           # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
@@ -125,7 +127,7 @@ jobs:
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
         - /usr/local:/host-usr-local
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout || 30 }}
     steps:
       - name: "Check out repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
