@@ -1052,8 +1052,12 @@ struct SplitAcousticColumn end
 struct FusedAcousticColumn end
 
 acoustic_column_path(grid, dynamics, advection) = SplitAcousticColumn()
+# The untiled fused column kernel measured slower than the split sequence on the H100 at
+# 1800×1080×50 (0.95×) and 960²×250 (0.92×), so it is opt-in.
+const USE_FUSED_ACOUSTIC_COLUMN = Ref(false)
+
 acoustic_column_path(::RectilinearGrid, ::CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing}, advection) =
-    FusedAcousticColumn()
+    USE_FUSED_ACOUSTIC_COLUMN[] ? FusedAcousticColumn() : SplitAcousticColumn()
 acoustic_column_path(::RectilinearGrid, ::CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
                      ::AdaptiveImplicitVerticalAdvection) = SplitAcousticColumn()
 
