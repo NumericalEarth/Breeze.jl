@@ -25,13 +25,10 @@ function anelastic_pressure_solver(::Type{FT}, grid::AbstractGrid{FT}, reference
     return FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
 end
 
-# Another float type: solve on copies of the grid and of ρᵣ in that type
-function anelastic_pressure_solver(FT, grid, reference_density)
-    solver_grid = with_number_type(FT, grid)
-    solver_density = Field(Oceananigans.instantiated_location(reference_density), solver_grid)
-    parent(solver_density) .= parent(reference_density)
-    return anelastic_pressure_solver(FT, solver_grid, solver_density)
-end
+# Another float type: solve on a copy of the grid in that type. The coefficient kernels
+# read ρᵣ in the model's precision and promote it, so the solver needs no copy of ρᵣ.
+anelastic_pressure_solver(FT, grid, reference_density) =
+    anelastic_pressure_solver(FT, with_number_type(FT, grid), reference_density)
 
 #####
 ##### Tridiagonal solver coefficients
@@ -88,12 +85,9 @@ end
 end
 
 # The tridiagonal coefficients carry ρᵣ, so they are recomputed whenever ρᵣ changes.
-function AtmosphereModels.update_pressure_solver!(solver::FourierTridiagonalPoissonSolver, dynamics::AnelasticDynamics)
+function AtmosphereModels.update_pressure_solver!(solver::FourierTridiagonalPoissonSolver, ::AnelasticDynamics)
     tridiagonal_solver = solver.batched_tridiagonal_solver
     formulation = solver.tridiagonal_formulation
-
-    # A solver in another float type holds its own copy of ρᵣ; otherwise this copies ρᵣ onto itself
-    parent(formulation.reference_density) .= parent(dynamics.reference_state.density)
 
     Solvers.compute_main_diagonal!(tridiagonal_solver.b, formulation, solver.grid, solver.poisson_eigenvalues...)
     Solvers.compute_lower_diagonal!(tridiagonal_solver.a, formulation, solver.grid)

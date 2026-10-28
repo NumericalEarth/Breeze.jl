@@ -70,8 +70,10 @@ end
     δ = Field(∂x(ρu) + ∂y(ρv) + ∂z(ρw))
     @test maximum(abs, δ) < prod(size(grid)) * eps(Float32)
 
-    # The solver's own copy of ρᵣ follows changes to the reference state
+    # The solver reads ρᵣ itself, so its coefficients follow changes to the reference state
+    @test solver.tridiagonal_formulation.reference_density === model.dynamics.reference_state.density
+    lower_diagonal = Array(solver.batched_tridiagonal_solver.a)
     parent(model.dynamics.reference_state.density) .= 2
     Breeze.AtmosphereModels.update_pressure_solver!(solver, model.dynamics)
-    @test all(Array(parent(solver.tridiagonal_formulation.reference_density)) .== 2)
+    @test Array(solver.batched_tridiagonal_solver.a) ≈ 2 .* lower_diagonal
 end
