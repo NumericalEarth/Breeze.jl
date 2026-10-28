@@ -451,7 +451,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # Total density weights water mass fractions and enters the Kessler air-density corrections.
     # The coupling density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
-    # dynamics, is the dry-air carrier of Kessler mixing ratios. These fields alias for anelastic
+    # dynamics, is the dry-air density Kessler mixing ratios are relative to. These fields alias for anelastic
     # dynamics and are distinct (total and dry density) for compressible dynamics.
     ρ = total_density(model.dynamics)
     ρᵈ = dynamics_density(model.dynamics)
