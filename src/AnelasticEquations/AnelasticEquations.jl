@@ -22,7 +22,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, Field
+using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: set!
