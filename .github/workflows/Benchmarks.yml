@@ -59,8 +59,8 @@ jobs:
             extra_flags: ''
           # Reactant vs vanilla on the AD job's physics: a LatitudeLongitudeGrid
           # with SphericalCoriolis, split-explicit compressible dynamics (12
-          # acoustic substeps), WENO5 and no microphysics, on a PBB grid, at the
-          # AD job's size and a larger one. Uses --simplified to drop the
+          # acoustic substeps), WENO5, the TKE closure and no microphysics, on a
+          # PBB grid, at the AD job's size and a larger one. Uses --simplified to drop the
           # geostrophic forcing and field-dependent surface drag BCs (which do
           # not currently materialize on ReactantState).
           - dynamics: 'compressible_splitexplicit'
@@ -71,7 +71,7 @@ jobs:
             topology: 'PBB'
             # Two Reactant compiles of the split-explicit step
             timeout: 60
-            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude'
+            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude --closure TKEBasedTurbulenceClosure'
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
@@ -244,8 +244,8 @@ jobs:
           for d in all_data:
               base_name = d['name'].split('_')[0]
               advection = d['advection']
-              # Closure is unused for the time being because it's always the
-              # same everywhere in the current setup.
+              # Closure names only the Reactant vs vanilla sweep's series, the one
+              # forward case with a closure.
               closure = d['closure']
               dynamics = d['dynamics']
               ft = d['float_type']
@@ -356,9 +356,9 @@ jobs:
 
               # Reactant vs vanilla sweep: compare backends across grid sizes
               # on the AD job's physics (LatitudeLongitudeGrid, split-explicit
-              # dynamics, WENO5, no microphysics).
+              # dynamics, WENO5, the TKE closure, no microphysics).
               if latlon and advection == 'WENO5':
-                  level_1 = f'{base_name}; LatitudeLongitudeGrid; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+                  level_1 = f'{base_name}; LatitudeLongitudeGrid; Dynamics: {dynamics}; Closure: {closure}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Compare backends'
                   level_3 = f'{gpu}'
                   level_4 = f'{backend} {grid_str}'
