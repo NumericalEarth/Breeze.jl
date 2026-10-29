@@ -547,7 +547,9 @@ end
     return nothing
 end
 
-const STORED_CONDENSATE_CONTENT = Ref(true)
+# Default OFF: at 13 km (job 5321) the five extra stores cost the T/p pass +166 µs per call, more
+# than the −123 µs the sedimentation kernel saves.
+const STORED_CONDENSATE_CONTENT = Ref(false)
 const CONDENSATE_CONTENTS = IdDict{Any, Any}()
 
 function AtmosphereModels.stored_condensate_content(model::AtmosphereModel{<:CompressibleDynamics, <:LiquidIcePotentialTemperatureFormulation})
