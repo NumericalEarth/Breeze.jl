@@ -188,7 +188,7 @@ dry density and the partial densities. Defaults to [`continuity_density`](@ref),
 the total density by ``ρᵣ``, consistent with the reference pressure ``pᵣ``.
 
 Thermodynamic relations of the local state, such as the saturation specific humidity, use
-[`thermodynamic_state_density`](@ref) instead.
+[`mixture_density`](@ref) instead.
 """
 total_density(dynamics) = continuity_density(dynamics)
 
@@ -256,7 +256,7 @@ The default returns [`total_density`](@ref), which is the state density on `Comp
 pressure. This differs from ``total_density = ρᵣ`` wherever ``T`` or ``q`` depart from the
 reference state, and it is the density whose departure from ``ρᵣ`` is the anelastic buoyancy.
 """
-@inline function thermodynamic_state_density(i, j, k, dynamics, T, q, constants)
+@inline function mixture_density(i, j, k, dynamics, T, q, constants)
     return @inbounds total_density(dynamics)[i, j, k]
 end
 

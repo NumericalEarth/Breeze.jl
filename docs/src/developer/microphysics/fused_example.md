@@ -81,9 +81,9 @@ using Breeze.Thermodynamics: temperature, density, saturation_specific_humidity,
 
 @inline function explicit_microphysics_tendencies(em::ExplicitMicrophysics, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)
-    ρ̃ = density(𝒰, constants) # thermodynamic state density; ρ weights the tendencies
-    q⁺ˡ = saturation_specific_humidity(T, ρ̃, constants, PlanarLiquidSurface())
-    q⁺ⁱ = saturation_specific_humidity(T, ρ̃, constants, PlanarIceSurface())
+    ρᵐ = density(𝒰, constants) # mixture density; ρ weights the tendencies
+    q⁺ˡ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
+    q⁺ⁱ = saturation_specific_humidity(T, ρᵐ, constants, PlanarIceSurface())
 
     τᵛˡ = em.vapor_to_liquid
     τᵛⁱ = em.vapor_to_ice

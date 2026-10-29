@@ -548,10 +548,10 @@ end
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
-    # Saturation uses the thermodynamic state density; the total density ρ weights the
+    # Saturation uses the mixture density; the total density ρ weights the
     # tendencies (ρᵣ on the anelastic core).
-    ρ̃ = density(𝒰, constants)
-    qᵛ⁺ = saturation_specific_humidity(T, ρ̃, constants, PlanarLiquidSurface())
+    ρᵐ = density(𝒰, constants)
+    qᵛ⁺ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
 
     # ===== Process rates =====
 
@@ -568,7 +568,7 @@ end
     Sᶜᵒⁿᵈ_eff = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
 
     # Rain evaporation (mass and number)
-    evap = rain_evaporation_2m(sb, categories.air, q, max(0, qʳ), ρ, ρ̃, Nʳ, T, constants)
+    evap = rain_evaporation_2m(sb, categories.air, q, max(0, qʳ), ρ, ρᵐ, Nʳ, T, constants)
     Sᵉᵛᵃᵖ = max(evap.evap_rate_1, -max(0, qʳ) / τⁿᵘᵐ)
     dNʳ_evap = evap.evap_rate_0
 
@@ -738,7 +738,7 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     ℳ⁺ = WarmPhaseTwoMomentState(ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.nᵃ, velocities⁺)
 
     # Supersaturation - activation only occurs when air is supersaturated (𝒮 > 0).
-    # It is evaluated at the thermodynamic state density, not at ρ (ρᵣ on the anelastic core).
+    # It is evaluated at the mixture density, not at ρ (ρᵣ on the anelastic core).
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     𝒮 = supersaturation(T, density(𝒰, constants), q, constants, PlanarLiquidSurface())

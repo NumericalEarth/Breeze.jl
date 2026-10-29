@@ -15,7 +15,7 @@ using Test
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMicrophysics
 
-# Microphysics saturation uses the thermodynamic state density (`thermodynamic_state_density`,
+# Microphysics saturation uses the mixture density (`mixture_density`,
 # pᵣ / (Rᵐ T) on the anelastic core), not the total density ρᵣ that weights the anelastic
 # tendencies. A column of air held exactly at saturation, with no condensate, must therefore
 # neither condense nor evaporate.
@@ -84,9 +84,9 @@ column(f) = Array(interior(f, 1, 1, :))
         # The anelastic reference density is far enough from the local density to matter.
         if dynamics_kind === :anelastic
             pᵣ = column(model.dynamics.reference_state.pressure)
-            ρ̃ = pᵣ ./ (column(model.temperature) .* (dry_air_gas_constant(model.thermodynamic_constants) .* (1 .- qᵛ) .+
+            ρᵐ = pᵣ ./ (column(model.temperature) .* (dry_air_gas_constant(model.thermodynamic_constants) .* (1 .- qᵛ) .+
                                                        vapor_gas_constant(model.thermodynamic_constants) .* qᵛ))
-            @test minimum(ρ ./ ρ̃) > FT(1.02)
+            @test minimum(ρ ./ ρᵐ) > FT(1.02)
         end
 
         # Neither condensation nor evaporation: the condensation rate is measured against the

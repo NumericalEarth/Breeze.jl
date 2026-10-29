@@ -312,13 +312,13 @@ function actual_final_liquid_ssat_after_p3_step(formulation, rates, qᵛ₀, q�
 end
 
 # The vapor fraction `δ` above saturation over `surface` at temperature `T` and pressure `P`, with
-# condensate `qˡ`, `qⁱ`. Saturation is evaluated at the thermodynamic state density, which itself
+# condensate `qˡ`, `qⁱ`. Saturation is evaluated at the mixture density, which itself
 # depends on the vapor, so iterate to the fixed point.
 function vapor_above_saturation(T, P, qˡ, qⁱ, δ, constants; surface = PlanarLiquidSurface())
     qᵛ = zero(T)
     for _ in 1:20
-        ρ̃ = density(T, P, MoistureMassFractions(qᵛ, qˡ, qⁱ), constants)
-        qᵛ = saturation_specific_humidity(T, ρ̃, constants, surface) + δ
+        ρᵐ = density(T, P, MoistureMassFractions(qᵛ, qˡ, qⁱ), constants)
+        qᵛ = saturation_specific_humidity(T, ρᵐ, constants, surface) + δ
     end
     return qᵛ
 end
@@ -2296,13 +2296,13 @@ end
         qʷⁱ = FT(0)
         δqᵛ⁺ˡ = FT(0)
 
-        # ρ weights the tendencies; saturation uses the thermodynamic state density ρ̃
+        # ρ weights the tendencies; saturation uses the mixture density ρᵐ
         qᵛ = vapor_above_saturation(T, P, qᶜˡ, qⁱ, FT(1e-4), constants)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
-        ρ̃ = density(𝒰, constants)
-        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ̃, constants, PlanarLiquidSurface())
-        qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ̃, constants, PlanarIceSurface())
+        ρᵐ = density(𝒰, constants)
+        qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
+        qᵛ⁺ⁱ = saturation_specific_humidity(T, ρᵐ, constants, PlanarIceSurface())
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
                                 qᶠ, FT(0), qʷⁱ, δqᵛ⁺ˡ, zero(FT), zero(FT))
 
@@ -2311,8 +2311,8 @@ end
         Tᴳᴹ = T + gm.ε * PPP.vaporization_latent_heat(constants, T) / constants.dry_air.heat_capacity
         qᵛᴳᴹ = qᵛ - gm.ε
         qᶜˡᴳᴹ = qᶜˡ + gm.ε
-        qᵛ⁺ˡᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρ̃, constants, PlanarLiquidSurface())
-        qᵛ⁺ⁱᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρ̃, constants, PlanarIceSurface())
+        qᵛ⁺ˡᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρᵐ, constants, PlanarLiquidSurface())
+        qᵛ⁺ⁱᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρᵐ, constants, PlanarIceSurface())
         qᴳᴹ = MoistureMassFractions(qᵛᴳᴹ, qᶜˡᴳᴹ, qⁱ)
         transportᴳᴹ = air_transport_properties(Tᴳᴹ, P, constants)
         expected_process = expected_reduced_reference_vapor_rates(

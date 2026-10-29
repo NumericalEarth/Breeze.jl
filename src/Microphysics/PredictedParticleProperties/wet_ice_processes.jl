@@ -157,17 +157,17 @@ balance of an ice particle whose surface is held at `T₀`. Both share the
 conduction and vapor-diffusion terms; see [`wet_growth_capacity`](@ref) and
 [`refreezing_rate`](@ref) for what each freezes. The total density `ρ` weights the vapor
 flux; the freezing-point saturation fraction is evaluated at the thermodynamic state
-density `ρ̃`.
+density `ρᵐ`.
 
 # Returns
 - `(wet_growth, refreezing)` capacities [kg/kg/s], zero when T ≥ T₀
 """
-@inline function freezing_capacities(p3, nⁱ, T, qᵛ, ρ, ρ̃, constants, transport, lookups)
+@inline function freezing_capacities(p3, nⁱ, T, qᵛ, ρ, ρᵐ, constants, transport, lookups)
     FT = typeof(T)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
 
-    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ̃)
+    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρᵐ)
 
     # Ventilation integral (same as deposition/melting)
     ventilated_capacitance = ventilation_from_terms(lookups.ventilation, lookups.enhanced_ventilation,
@@ -225,7 +225,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
 - `ρ`: Total density, weighting the vapor-diffusion flux and the ice lookups [kg/m³]
-- `ρ̃`: Thermodynamic state density, at which the freezing-point
+- `ρᵐ`: Mixture density, at which the freezing-point
   saturation fraction is evaluated [kg/m³]
 - `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
@@ -233,9 +233,9 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 # Returns
 - Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
-@inline wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρ̃, constants, transport,
+@inline wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵐ, constants, transport,
                             lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ)) =
-    first(freezing_capacities(p3, nⁱ, T, qᵛ, ρ, ρ̃, constants, transport, lookups))
+    first(freezing_capacities(p3, nⁱ, T, qᵛ, ρ, ρᵐ, constants, transport, lookups))
 
 """
 $(TYPEDSIGNATURES)
@@ -243,9 +243,9 @@ $(TYPEDSIGNATURES)
 Compute the heat-limited refreezing capacity of the liquid coating on ice.
 See [`refreezing_rate`](@ref).
 """
-@inline refreezing_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρ̃, constants, transport,
+@inline refreezing_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵐ, constants, transport,
                             lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ)) =
-    last(freezing_capacities(p3, nⁱ, T, qᵛ, ρ, ρ̃, constants, transport, lookups))
+    last(freezing_capacities(p3, nⁱ, T, qᵛ, ρ, ρᵐ, constants, transport, lookups))
 
 """
 $(TYPEDSIGNATURES)
@@ -275,7 +275,7 @@ temperature gate here.
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
 - `ρ`: Total density, weighting the vapor-diffusion flux [kg/m³]
-- `ρ̃`: Thermodynamic state density, at which the freezing-point
+- `ρᵐ`: Mixture density, at which the freezing-point
   saturation fraction is evaluated [kg/m³]
 - `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
@@ -283,9 +283,9 @@ temperature gate here.
 # Returns
 - Rate of liquid → ice refreezing [kg/kg/s]
 """
-@inline function refreezing_rate(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρ̃,
+@inline function refreezing_rate(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵐ,
                                  constants, transport)
-    capacity = refreezing_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρ̃, constants, transport)
+    capacity = refreezing_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵐ, constants, transport)
     return refreezing_rate_from_capacity(p3, qʷⁱ, capacity)
 end
 

@@ -36,7 +36,7 @@ struct P3DerivedState{FT, Q, L}
     qᵛ⁺ˡ :: FT      # saturation vapor fraction over liquid
     qᵛ⁺ⁱ :: FT      # saturation vapor fraction over ice
     q :: Q          # MoistureMassFractions of the thermodynamic state
-    ρ̃ :: FT        # thermodynamic state density, at which saturation is evaluated
+    ρᵐ :: FT        # mixture density, at which saturation is evaluated
     # Transport properties
     Dᵛ :: FT       # water vapor diffusivity [m²/s]
     Kᵃ :: FT       # thermal conductivity of air [W/m/K]
@@ -53,8 +53,8 @@ end
     q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
     𝒰₁ = with_moisture(𝒰, q)
     T = temperature(𝒰₁, constants)
-    ρ̃ = density(𝒰₁, constants)
-    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ̃, constants, PlanarLiquidSurface())
+    ρᵐ = density(𝒰₁, constants)
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
     return qᵛ - qᵛ⁺ˡ
 end
 
@@ -330,7 +330,7 @@ end
     coat_evap = ifelse(wet_ice_exchange_active,
                        vapor_rates.coating_evaporation, zero(FT))
 
-    melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, state.ρ̃, constants, transport, state.lookups)
+    melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, T, qᵛ, ρ, state.ρᵐ, constants, transport, state.lookups)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
     complete_melt = ifelse(tracks_liquid_on_ice(p3.process_rates),
@@ -405,7 +405,7 @@ end
     has_hydrometeors = (max(0, qᶜˡ) + max(0, qʳ)) >=
                        parameters.wet_growth_hydrometeor_threshold
     # Wet growth and refreezing share one surface heat balance.
-    qwgrth_raw, qifrz_raw = freezing_capacities(p3, nⁱ, T, qᵛ, ρ, state.ρ̃, constants, transport, lookups)
+    qwgrth_raw, qifrz_raw = freezing_capacities(p3, nⁱ, T, qᵛ, ρ, state.ρᵐ, constants, transport, lookups)
     qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
     total_collection = cloud_rim + rain_rim
@@ -615,15 +615,15 @@ end
     q_base = 𝒰.moisture_mass_fractions
     qᵛ_base = q_base.vapor
 
-    # Saturation uses the thermodynamic state density; the total density ρ weights the
-    # tendencies (ρᵣ on the anelastic core). ρ̃ is held fixed through the vapor-excess
+    # Saturation uses the mixture density; the total density ρ weights the
+    # tendencies (ρᵣ on the anelastic core). ρᵐ is held fixed through the vapor-excess
     # alignment below.
-    ρ̃ = density(𝒰, constants)
-    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ̃, constants, PlanarLiquidSurface())
+    ρᵐ = density(𝒰, constants)
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
     P = air_pressure(𝒰, constants)
 
     vapor_excess_adjustment = prognostic_vapor_excess_adjustment(
-        p3, qᶜˡ, qᵛ_base, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρ̃, constants)
+        p3, qᶜˡ, qᵛ_base, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵐ, constants)
     saturation_alignment_rate = vapor_excess_adjustment.rate
     qᶜˡ = vapor_excess_adjustment.qᶜˡ
     qᵛ = vapor_excess_adjustment.qᵛ
@@ -632,7 +632,7 @@ end
                               q_base.liquid + vapor_excess_adjustment.cloud_water_adjustment,
                               q_base.ice)
     qᵛ⁺ˡ = vapor_excess_adjustment.qᵛ⁺ˡ
-    qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρ̃, constants, T₀, qᵛ⁺ˡ)
+    qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρᵐ, constants, T₀, qᵛ⁺ˡ)
     transport = air_transport_properties(T, P, constants)
 
     cloud = diagnose_cloud_dsd(p3, qᶜˡ, ℳ.nᶜˡ, ρ)
@@ -651,7 +651,7 @@ end
     state = P3DerivedState{FT, typeof(q), typeof(lookups)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
                                                            Fˡ, Nᶜˡ, cloud.nᶜˡ,
                                                            cloud.μᶜˡ, cloud.λᶜˡ,
-                                                           T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q, ρ̃,
+                                                           T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q, ρᵐ,
                                                            transport.Dᵛ, transport.Kᵃ, transport.ν,
                                                            lookups)
 

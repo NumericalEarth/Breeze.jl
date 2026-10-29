@@ -231,9 +231,9 @@ without grid indexing. It works identically for grid-based LES and parcel models
 - `𝒰`: Thermodynamic state
 - `constants`: Thermodynamic constants
 
-Saturation must not use `ρ`. The saturation specific humidity ``qᵛ⁺ = pᵛ⁺ / (ρ̃ Rᵛ T)`` and the
-supersaturation use the thermodynamic state density ``ρ̃ = `` `density(𝒰, constants)`, as
-[`thermodynamic_state_density`](@ref) returns: ``pᵣ / (Rᵐ T)`` on the anelastic core and the total
+Saturation must not use `ρ`. The saturation specific humidity ``qᵛ⁺ = pᵛ⁺ / (ρᵐ Rᵛ T)`` and the
+supersaturation use the mixture density ``ρᵐ = `` `density(𝒰, constants)`, as
+[`mixture_density`](@ref) returns: ``pᵣ / (Rᵐ T)`` on the anelastic core and the total
 density on the compressible core.
 
 # Returns

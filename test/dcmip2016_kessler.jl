@@ -153,10 +153,10 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
 
             # Saturation adjustment. The Fortran saturation mixing ratio depends on pressure and
             # temperature alone (rvs = 3.8 / p exp(...)), so on a fixed-pressure (anelastic) column
-            # it is evaluated at the thermodynamic state density at (p, T), not at the density that
+            # it is evaluated at the mixture density at (p, T), not at the density that
             # weights the rain. On the compressible core the update is isochoric: saturation is at ρ.
-            ρ̃ = isochoric ? ρ[k] : p[k] / (Rᵐ * T[k])
-            qᵛ⁺ = saturation_specific_humidity(T[k], ρ̃, constants, PlanarLiquidSurface())
+            ρᵐ = isochoric ? ρ[k] : p[k] / (Rᵐ * T[k])
+            qᵛ⁺ = saturation_specific_humidity(T[k], ρᵐ, constants, PlanarLiquidSurface())
             rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
             Δrˢᵃᵗ = (rᵛ[k] - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T[k] - T_offset)^2)
 
