@@ -137,7 +137,7 @@ end
                          ρ_correction)
 
 # Bracketed variant: reuse the interpolation indices and skip the log/clamp setup.
-@inline tabulated_fall_speed(table::P3Table4D, prep::PreparedInterpolation, ρ_correction) =
+@inline tabulated_fall_speed(table::P3Table4D, prep::AbstractPreparedInterpolation, ρ_correction) =
     evaluate_at(table, prep) * ρ_correction
 
 # Concrete return struct, so the pair stays one isbits value on the GPU.

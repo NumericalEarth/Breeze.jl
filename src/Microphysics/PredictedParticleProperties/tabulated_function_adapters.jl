@@ -56,7 +56,9 @@ const P3Table4D = Union{TabulatedFunction4D, RimeDensityIndexedTable4D}
 ##### available to tables of any dimension.
 #####
 
-struct PreparedInterpolation{N, FT}
+abstract type AbstractPreparedInterpolation{N, FT} end
+
+struct PreparedInterpolation{N, FT} <: AbstractPreparedInterpolation{N, FT}
     axes :: NTuple{N, Tuple{Int, Int, FT}}
 
     # The default constructor `PreparedInterpolation(axes::NTuple{N, Tuple{Int, Int, FT}})`
@@ -66,7 +68,31 @@ struct PreparedInterpolation{N, FT}
     PreparedInterpolation{N, FT}(axes) where {N, FT} = new{N, FT}(axes)
 end
 
-@inline function prepare_interpolation(f::TabulatedFunction{N}, x::Vararg{Any, N}) where N
+# Ported from Breeze PR #1092 (f5d28714), switch `p3_linear_brackets()`:
+# the bracket is stored as the linear index of the lower corner plus the linear step to the
+# upper neighbour along each axis, rather than as per-axis indices. Every table read at a
+# bracket then costs only integer additions to locate its corners, instead of re-deriving
+# each corner's linear index from the table's runtime size. The weights and their summation
+# order match `Oceananigans.Utils._interpolate`.
+struct LinearPreparedInterpolation{N, FT} <: AbstractPreparedInterpolation{N, FT}
+    "Linear index of the lower corner, counted from zero"
+    offset :: Int32
+    "Linear-index step from the lower to the upper neighbour along each axis (zero where clamped)"
+    steps :: NTuple{N, Int32}
+    "Fractional distance from the lower neighbour along each axis"
+    fractions :: NTuple{N, FT}
+
+    LinearPreparedInterpolation{N, FT}(offset, steps, fractions) where {N, FT} =
+        new{N, FT}(offset, steps, fractions)
+end
+
+@inline prepare_interpolation(f::TabulatedFunction{N}, x::Vararg{Any, N}) where N =
+    switched_prepare_interpolation(Val(p3_linear_brackets()), f, x...)
+
+@inline switched_prepare_interpolation(::Val{false}, f, x...) = prepare_axes_interpolation(f, x...)
+@inline switched_prepare_interpolation(::Val{true}, f, x...) = prepare_linear_interpolation(f, x...)
+
+@inline function prepare_axes_interpolation(f::TabulatedFunction{N}, x::Vararg{Any, N}) where N
     points = size(f.table)
     axes = ntuple(Val(N)) do d
         a, b = f.range[d]
@@ -74,6 +100,62 @@ end
         (i⁻ + 1, min(i⁺ + 1, points[d]), ξ)
     end
     return PreparedInterpolation{N, typeof(axes[1][3])}(axes)
+end
+
+# Column-major strides of an array of size `points`: (1, n₁, n₁n₂, ...).
+@inline column_major_strides(::Tuple{Int}) = (1,)
+@inline column_major_strides(points::Tuple) =
+    (column_major_strides(Base.front(points))..., prod(Base.front(points)))
+
+@inline function prepare_linear_interpolation(f::TabulatedFunction{N}, x::Vararg{Any, N}) where N
+    points = size(f.table)
+    strides = column_major_strides(points)
+    brackets = ntuple(Val(N)) do d
+        a, b = f.range[d]
+        i⁻, i⁺, ξ = interpolator((clamp(x[d], a, b) - a) * f.inverse_Δ[d])
+        (i⁻, min(i⁺, points[d] - 1), ξ)  # neighbours counted from zero
+    end
+    offset = sum(ntuple(d -> brackets[d][1] * strides[d], Val(N))) % Int32
+    steps = ntuple(d -> ((brackets[d][2] - brackets[d][1]) * strides[d]) % Int32, Val(N))
+    fractions = ntuple(d -> brackets[d][3], Val(N))
+    return LinearPreparedInterpolation{N, eltype(fractions)}(offset, steps, fractions)
+end
+
+# Quadrilinear interpolation of `data` about the one-based linear index `o`, with
+# `_interpolate`'s weights summed in `_interpolate`'s order.
+@inline function quadrilinear(data, o, (s₁, s₂, s₃, s₄), (ξ, η, ζ, θ))
+    ϕ₁ = (1 - ξ) * (1 - η) * (1 - ζ)
+    ϕ₂ = (1 - ξ) * (1 - η) *      ζ
+    ϕ₃ = (1 - ξ) *      η  * (1 - ζ)
+    ϕ₄ = (1 - ξ) *      η  *      ζ
+    ϕ₅ =      ξ  * (1 - η) * (1 - ζ)
+    ϕ₆ =      ξ  * (1 - η) *      ζ
+    ϕ₇ =      ξ  *      η  * (1 - ζ)
+    ϕ₈ =      ξ  *      η  *      ζ
+
+    return @inbounds (
+        ϕ₁ * (1 - θ) * data[o]                + ϕ₁ * θ * data[o + s₄] +
+        ϕ₂ * (1 - θ) * data[o + s₃]           + ϕ₂ * θ * data[o + s₃ + s₄] +
+        ϕ₃ * (1 - θ) * data[o + s₂]           + ϕ₃ * θ * data[o + s₂ + s₄] +
+        ϕ₄ * (1 - θ) * data[o + s₂ + s₃]      + ϕ₄ * θ * data[o + s₂ + s₃ + s₄] +
+        ϕ₅ * (1 - θ) * data[o + s₁]           + ϕ₅ * θ * data[o + s₁ + s₄] +
+        ϕ₆ * (1 - θ) * data[o + s₁ + s₃]      + ϕ₆ * θ * data[o + s₁ + s₃ + s₄] +
+        ϕ₇ * (1 - θ) * data[o + s₁ + s₂]      + ϕ₇ * θ * data[o + s₁ + s₂ + s₄] +
+        ϕ₈ * (1 - θ) * data[o + s₁ + s₂ + s₃] + ϕ₈ * θ * data[o + s₁ + s₂ + s₃ + s₄])
+end
+
+@inline function evaluate_at(f::TabulatedFunction{4}, p::LinearPreparedInterpolation{4})
+    o = p.offset + Int32(1)
+    return quadrilinear(f.table, o, p.steps, p.fractions)
+end
+
+# Two quadrilinear interpolations at the neighbouring fifth indices, as `_interpolate` does.
+@inline function evaluate_at(f::TabulatedFunction{5}, p::LinearPreparedInterpolation{5})
+    o = p.offset + Int32(1)
+    s₁, s₂, s₃, s₄, s₅ = p.steps
+    ξ, η, ζ, θ, ψ = p.fractions
+    return (1 - ψ) * quadrilinear(f.table, o,      (s₁, s₂, s₃, s₄), (ξ, η, ζ, θ)) +
+                ψ  * quadrilinear(f.table, o + s₅, (s₁, s₂, s₃, s₄), (ξ, η, ζ, θ))
 end
 
 @inline prepare_interpolation(f::RimeDensityIndexedTable4D, log_m, Fᶠ, Fˡ, ρᶠ) =
@@ -85,8 +167,8 @@ end
 @inline evaluate_at(f::TabulatedFunction, p::PreparedInterpolation) =
     _interpolate(f.table, p.axes...)
 
-@inline evaluate_at(f::RimeDensityIndexedTable4D, p::PreparedInterpolation) =
+@inline evaluate_at(f::RimeDensityIndexedTable4D, p::AbstractPreparedInterpolation) =
     evaluate_at(f.table, p)
 
-@inline evaluate_at(f::RimeDensityIndexedTable5D, p::PreparedInterpolation) =
+@inline evaluate_at(f::RimeDensityIndexedTable5D, p::AbstractPreparedInterpolation) =
     evaluate_at(f.table, p)

@@ -401,7 +401,7 @@ end
 end
 
 # Bulk ice density from Table 1 at the diagnostic-population bracket.
-@inline ice_mean_density(bulk::IceBulk, prep::PreparedInterpolation) =
+@inline ice_mean_density(bulk::IceBulk, prep::AbstractPreparedInterpolation) =
     evaluate_at(bulk.mean_density, prep)
 
 #####

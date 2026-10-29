@@ -197,6 +197,7 @@ include("p3_scheme.jl")
 ##### Tabulation
 #####
 
+include("p3_optimization_switches.jl")
 include("tabulated_function_adapters.jl")
 include("lookup_table_format.jl")
 include("lookup_table_reader.jl")
