@@ -52,10 +52,9 @@ end
 
 function loss(model, θ_init, Δt, Nsteps, checkpointing)
     set!(model; θ=θ_init, ρ=1.0)
-    # NOTE: forward step_loop! uses mincut=true, but the min-cut planner
-    # blows host RAM during AD compile (graph algorithm over the dataflow
-    # graph of one body iteration). Run AD without mincut.
-    @trace checkpointing=checkpointing track_numbers=false for _ in 1:Nsteps
+    # mincut in every traced loop, as in step_loop! and the acoustic substeps: the
+    # reverse pass caches a minimal cut of each loop body's values
+    @trace mincut=true checkpointing=checkpointing track_numbers=false for _ in 1:Nsteps
         time_step!(model, Δt)
     end
     return mean(interior(model.temperature) .^ 2)

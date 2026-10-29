@@ -29,6 +29,7 @@ override_process_params(parameters; overrides...) =
         parameters.precip,
         parameters.air_properties,
         parameters.terminal_velocity,
+        parameters.max_latent_heating_rate,
     )
 
 @testset "MPNE1M suppresses warm cloud-ice growth [$(FT)]" for FT in test_float_types()

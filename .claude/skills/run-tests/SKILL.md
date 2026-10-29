@@ -20,11 +20,11 @@ are most likely affected. Use this mapping:
 | `src/AtmosphereModels/update_*.jl` | `dynamics`, `set_atmosphere_model` |
 | `src/AtmosphereModels/microphysics_interface.jl` | `cloud_microphysics_1M`, `cloud_microphysics_2M`, `saturation_adjustment` |
 | `src/AnelasticEquations/` | `anelastic_pressure_solver_analytic`, `anelastic_pressure_solver_nonhydrostatic`, `dynamics` |
-| `src/CompressibleEquations/` | `acoustic_substepping_components`, `acoustic_substepping_open_boundaries`, `acoustic_substepping_stability`, `dynamics` |
+| `src/CompressibleEquations/` | `acoustic_substepping_components`, `acoustic_substepping_open_boundaries`, `acoustic_substepping_stability`, `dynamics`, `distributed/acoustic_wave` |
 | `src/StaticEnergyFormulations/`, `src/PotentialTemperatureFormulations/` | `dynamics`, `set_atmosphere_model`, `moist_state_conversion` |
 | `src/Thermodynamics/` | `saturation_adjustment`, `unit_tests`, `reference_states` |
 | `src/Solvers.jl` | `solvers`, `saturation_adjustment` |
-| `src/TurbulenceClosures/` | `turbulence_closures`, `vertical_diffusion`, `tke_closure` |
+| `src/TurbulenceClosures/` | `turbulence_closures`, `vertical_diffusion`, `tke_closure`, `tke_physics` |
 | `src/Microphysics/` | `cloud_microphysics_1M`, `cloud_microphysics_2M`, `saturation_adjustment` |
 | `src/Microphysics/` (P3) | `predicted_particle_properties_processes`, `p3_reference_process_routing` |
 | `src/Advection.jl` | `dynamics`, `tracer_dynamics`, `advection_schemes` |
@@ -33,11 +33,11 @@ are most likely affected. Use this mapping:
 | `src/TimeSteppers/` | `dynamics`, `runge_kutta_stage_times`, `acoustic_substepping_stability` |
 | `src/TerrainFollowingDiscretization/` | `terrain_following_metrics`, `terrain_following_reference_state`, `terrain_following_split_explicit` |
 | `src/KinematicDriver/` | `kinematic_driver` |
-| `src/ParcelModels/` | `parcel_dynamics` |
+| `src/ParcelModels/` | `parcel_dynamics`, `parcel_microphysics_coupling` |
 | `src/single_column_mode.jl` | `single_column_mode` |
 | `src/Breeze.jl` (exports) | `quality_assurance` |
 | Docstrings | `doctests` |
-| Radiation (`ext/`) | `gray_radiative_transfer`, `clear_sky_radiative_transfer`, `all_sky_radiative_transfer`, `radiation_scheduling` |
+| Radiation (`ext/`) | `gray_radiative_transfer`, `clear_sky_radiative_transfer`, `all_sky_radiative_transfer`, `ecckd_radiative_transfer`, `radiation_scheduling` |
 
 Every `test/<name>.jl` is a valid `test_args` name; `ls test/` lists them all.
 
