@@ -44,6 +44,7 @@ export
     SingleColumnGrid,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
+    MoistEntropyFormulation,
     VaporEquivalentExponent,
     DryExponent,
     RadiativeTransferModel,
@@ -271,6 +272,9 @@ using .StaticEnergyFormulations: StaticEnergyFormulation
 
 include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
 using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+
+include("MoistEntropyFormulations/MoistEntropyFormulations.jl")
+using .MoistEntropyFormulations: MoistEntropyFormulation
 
 # TerrainFollowingDiscretization (needed by CompressibleEquations for terrain physics)
 include("TerrainFollowingDiscretization/TerrainFollowingDiscretization.jl")

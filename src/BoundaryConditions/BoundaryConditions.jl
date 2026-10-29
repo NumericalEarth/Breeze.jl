@@ -251,8 +251,23 @@ function convert_energy_bcs(bcs, formulation)
     # converted with the Exner exponent of the formulation.
     ρᵡ_bcs = set_sensible_heat_formulation_bcs(ρᵡ_bcs, sensible_heat_flux_formulation(ρᵡ, formulation))
 
+    # A variable that the water carries (moist entropy) also takes a flux from the water fluxes
+    ρᵡ_bcs = add_moisture_flux_contribution(ρᵡ_bcs, ρᵡ, bcs, formulation)
+
     return merge(bcs, NamedTuple{(ρᵡ_name,)}((ρᵡ_bcs,)))
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the boundary conditions `ρᵡ_bcs` of the thermodynamic density named by `ρᵡ` of `formulation`, amended
+with the contribution of the water fluxes among the boundary conditions `bcs` (under the
+moisture key `ρqᵗ` or the moisture density's own name). The default returns `ρᵡ_bcs`
+unchanged: an energy variable referenced to all-vapor water (``θˡⁱ``, ``s``) takes no flux from
+evaporation. A variable whose value per unit water mass is nonzero, such as the moist entropy,
+extends this function.
+"""
+add_moisture_flux_contribution(ρᵡ_bcs, ρᵡ, bcs, formulation) = ρᵡ_bcs
 
 """
 $(TYPEDSIGNATURES)
