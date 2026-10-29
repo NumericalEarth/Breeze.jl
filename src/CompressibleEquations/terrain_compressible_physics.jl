@@ -1097,6 +1097,9 @@ const DENSITY_TENDENCY_IN_PREDICTORS = Ref(true)
 # objectid of the `Gⁿ.ρᵈ` whose computation `update_state!` deferred (0: none pending)
 const PENDING_DRY_DENSITY_TENDENCY = Ref{UInt}(0)
 
+# Stage completions of a deferred tendency: low 32 bits folds (Nτ = 1), high bits deferred launches (Nτ > 1).
+const DRY_DENSITY_TENDENCY_COMPLETIONS = Ref{Int}(0)
+
 struct FoldedDensityTendency{U, V, W}
     ρu :: U
     ρv :: V
@@ -1109,14 +1112,21 @@ Adapt.adapt_structure(to, d::FoldedDensityTendency) =
 @inline slow_density_tendency(i, j, k, grid, d::FoldedDensityTendency) =
     terrain_dry_density_tendency(i, j, k, grid, d.ρu, d.ρv, d.ρw̃)
 
-is_flux_condition(bc) = bc isa Oceananigans.BoundaryConditions.BoundaryCondition{<:Oceananigans.BoundaryConditions.Flux}
+# Whether `compute_flux_bc_tendencies!` adds anything to the field's tendency (mirrors Oceananigans' `compute_x_bcs!`
+# shortcut per direction; the handoff's `adds_flux_boundary_tendencies`). Zero-flux, value, open etc. add nothing.
+function adds_flux_boundary_tendencies(field)
+    NotFluxBC = Oceananigans.BoundaryConditions.NotFluxBC
+    bcs = field.boundary_conditions
+    return !(bcs.west   isa NotFluxBC && bcs.east  isa NotFluxBC) |
+           !(bcs.south  isa NotFluxBC && bcs.north isa NotFluxBC) |
+           !(bcs.bottom isa NotFluxBC && bcs.top   isa NotFluxBC)
+end
 
 function defers_dry_density_tendency(model, callbacks)
     DENSITY_TENDENCY_IN_PREDICTORS[] || return false
     hasproperty(model.timestepper, :substepper) || return false
     any(callback -> callback.callsite isa Oceananigans.TendencyCallsite, callbacks) && return false
-    bcs = model.dynamics.dry_density.boundary_conditions
-    any(is_flux_condition, (bcs.west, bcs.east, bcs.south, bcs.north, bcs.bottom, bcs.top)) && return false
+    adds_flux_boundary_tendencies(model.dynamics.dry_density) && return false
     return true
 end
 
@@ -1138,6 +1148,7 @@ function complete_dry_density_tendency!(model::TerrainCompressibleModel, Nτ)
     Gρ = model.timestepper.Gⁿ.ρᵈ
     PENDING_DRY_DENSITY_TENDENCY[] == objectid(Gρ) || return Gρ
     PENDING_DRY_DENSITY_TENDENCY[] = 0
+    DRY_DENSITY_TENDENCY_COMPLETIONS[] += ifelse(Nτ == 1, 1, 1 << 32)  # (folds, deferred launches), for tests
     Nτ == 1 && return FoldedDensityTendency(model.momentum.ρu, model.momentum.ρv,
                                              model.dynamics.contravariant_vertical_momentum)
     AtmosphereModels.compute_dynamics_tendency!(model)
