@@ -782,9 +782,32 @@ end
 # then uses per-stage Uᴸ as base, collapsing back to ``U_outer + Δevolved`` —
 # preserving the invariant. Auxiliary fields (predictors, divergence/damping
 # workspace) reset to zero; they carry no stage-to-stage history.
-function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
+function initialize_stage_perturbations!(substepper, model, Uᴸ_outer, zero_entry = false)
     grid = model.grid
     arch = architecture(grid)
+
+    # Stage 1: Uᴸ_outer is the parent copy of the stage-entry state, so every rewind
+    # perturbation is x − x = +0 (finite state). Store the literal +0 in the same launch
+    # as the workspaces instead of reading ten fields (bitwise for finite states).
+    if zero_entry
+        launch!(arch, grid, :xyz, _zero_stage_workspaces_and_perturbations!,
+                substepper.previous_density_potential_temperature_perturbation,
+                substepper.density_predictor,
+                substepper.density_potential_temperature_predictor,
+                substepper.time_averaged_velocities.u,
+                substepper.time_averaged_velocities.v,
+                substepper.time_averaged_velocities.w,
+                substepper.density_perturbation,
+                substepper.density_potential_temperature_perturbation,
+                substepper.momentum_perturbation.u,
+                substepper.momentum_perturbation.v,
+                substepper.momentum_perturbation.w)
+
+        fill_halo_regions!(substepper.density_perturbation)
+        fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+        map(fill_halo_regions!, substepper.momentum_perturbation)
+        return nothing
+    end
 
     # Zero the auxiliary workspaces (predictor/damping scratch) and the
     # time-averaged-velocity accumulator slots in one launch. The velocity slots
@@ -831,6 +854,23 @@ end
         d[i, j, k] = 0
         e[i, j, k] = 0
         f[i, j, k] = 0
+    end
+end
+
+@kernel function _zero_stage_workspaces_and_perturbations!(a, b, c, d, e, f, ρ′, ρθ′, ρu′, ρv′, ρw′)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        a[i, j, k] = 0
+        b[i, j, k] = 0
+        c[i, j, k] = 0
+        d[i, j, k] = 0
+        e[i, j, k] = 0
+        f[i, j, k] = 0
+        ρ′[i, j, k] = 0
+        ρθ′[i, j, k] = 0
+        ρu′[i, j, k] = 0
+        ρv′[i, j, k] = 0
+        ρw′[i, j, k] = 0
     end
 end
 
@@ -2065,7 +2105,7 @@ Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on
 `substepper.substep_distribution`.
 """
-function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection = nothing)
+function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection = nothing; zero_entry = false)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -2096,7 +2136,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
     # Initialize perturbations with the SK08 rewind term so the substep
     # effectively starts from U(t) = Uᴸ (the outer-step-start state).
-    initialize_stage_perturbations!(substepper, model, Uᴸ)
+    initialize_stage_perturbations!(substepper, model, Uᴸ, zero_entry)
 
     Gⁿ = model.timestepper.Gⁿ
     ρᵡ_name = thermodynamic_density_name(model.formulation)

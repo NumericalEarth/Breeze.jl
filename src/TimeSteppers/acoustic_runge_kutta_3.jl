@@ -156,7 +156,7 @@ Run one Wicker–Skamarock RK3 stage: complete the slow tendencies built by
 `update_state!`, then execute the linearized-acoustic substep loop, then
 update remaining scalars.
 """
-function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
+function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β; zero_entry = false)
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
@@ -181,7 +181,7 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
-    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection)
+    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection; zero_entry)
 
     # Update remaining scalars (tracers) using WS-RK3, their implicit solves included. It runs
     # before the post-loop solves because it ends by moving the condensate content of the mass
@@ -271,7 +271,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     freeze_linearization_state!(ts.substepper, model)
 
     # Stage 1: U* = Uⁿ + (Δt/3) R(Uⁿ)
-    acoustic_rk3_substep!(model, Δt, β₁)
+    acoustic_rk3_substep!(model, Δt, β₁; zero_entry = true) # U⁰ was just copied from U
 
     tick_stage!(model.clock, β₁ * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
