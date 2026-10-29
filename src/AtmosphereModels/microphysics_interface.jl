@@ -1043,11 +1043,12 @@ end
 # tridiagonal solve applies depends on the solved tracer state, so its content is moved by
 # `implicit_sedimentation_step!` between the tracers' solves and the thermodynamic variable's
 # own, from the fluxes the solves actually applied, and then takes the thermodynamic variable's
-# post-solve (its implicit transport and diffusion on the SSP path; diffusion only on the acoustic
-# path, whose implicit thermodynamic transport runs inside the substep loop). An estimate of that
-# remainder at the pre-solve state
-# would overstate a one-cell loss by the factor 1 + C at implicit Courant number C, precisely in
-# the regime the solve exists for.
+# implicit transport and diffusion. An estimate of that remainder at the pre-solve state would
+# overstate a one-cell loss by the factor 1 + C at implicit Courant number C, precisely in the
+# regime the solve exists for. That is the SSP path. The acoustic path keeps both parts out of
+# its substep loop, whose linearized pressure would read the content as a pressure change: the
+# stage collects them as a tendency and adds them after the loop, where they take only the
+# post-loop diffusion (see `AcousticRungeKutta3` and `sedimentation_tendency_target`).
 
 """
 $(TYPEDSIGNATURES)

@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze, Oceananigans, Test
-using Oceananigans.TimeSteppers: update_state!
+using Oceananigans.TimeSteppers: update_state!, time_step!
 
 const AM = Breeze.AtmosphereModels
 const TH = Breeze.Thermodynamics
@@ -122,5 +122,56 @@ end
         if speed == 0
             @test maximum(abs, data.rate) < tolerance
         end
+    end
+end
+
+# Rain falling through an isothermal, hydrostatically trivial column (no gravity, uniform
+# pressure) moves only latent and sensible heat that the paired content restores, so the
+# temperature must not change. The acoustic substep loop forms its pressure perturbation from
+# (ρθ)′ alone; content that reaches it reads as a spurious pressure change, which drives motion
+# and adiabatic heating and cooling. Under adaptive implicit vertical advection that error
+# concentrated where the fall Courant number crosses the split's CFL target and reached several
+# kelvin in a few minutes, before the stepper kept the content out of the loop (see
+# `remove_sedimentation_content!`).
+function acoustic_sedimentation_column(FT, scheme; fall_speed = 8, Δt = 2, stop_time = 150)
+    Oceananigans.defaults.FloatType = FT
+
+    # 10 m at the surface, stretched by 15 % per level to 1.2 km: at Δt = 2 s the fall Courant
+    # number exceeds 0.5 below about 200 m, so the adaptive split engages near the surface.
+    z = [0.0]
+    while z[end] < 1200
+        push!(z, z[end] + 10 * 1.15^(length(z) - 1))
+    end
+
+    grid = RectilinearGrid(default_arch, FT; size=length(z) - 1, z, topology=(Flat, Flat, Bounded))
+    constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=290)
+    model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants,
+                            microphysics=SedimentationOnly(Val(:liquid), FT(fall_speed), false),
+                            scalar_advection=(; ρqʳ=scheme))
+
+    # The dry density of the reference keeps the gas pressure uniform; the rain only adds mass.
+    set!(model; ρᵈ=model.dynamics.reference_state.density, T=290, qᵛ=FT(0.005),
+         qʳ=z -> ifelse(700 < z < 1000, FT(0.01), FT(0)))
+
+    rain⁰ = sum(sedimentation_column_values(model.microphysical_fields.ρqʳ) .* diff(z))
+    largest_departure = 0.0
+    for _ in 1:round(Int, stop_time / Δt)
+        time_step!(model, FT(Δt))
+        T = sedimentation_column_values(model.temperature)
+        largest_departure = max(largest_departure, maximum(abs, T .- 290))
+    end
+    rain = sum(sedimentation_column_values(model.microphysical_fields.ρqʳ) .* diff(z))
+
+    return (; model, largest_departure, rain_left = rain / rain⁰)
+end
+
+@testset "Sedimentation keeps an isothermal column's temperature on the acoustic stepper [$FT]" for FT in test_float_types()
+    adaptive = UpwindBiased(FT; order=1, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+    for (scheme, Δt) in ((UpwindBiased(FT; order=1), 1), (adaptive, 2), (adaptive, 5))
+        column = acoustic_sedimentation_column(FT, scheme; Δt)
+        @test column.model.timestepper isa Breeze.TimeSteppers.AcousticRungeKutta3
+        @test column.rain_left < 0.2 # most of the rain has fallen out of the column
+        @test column.largest_departure < 0.1
     end
 end

@@ -36,7 +36,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyMod
 
     Gρs = model.timestepper.Gⁿ.ρs
     launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρs, grid, ρs_args)
-    add_sedimentation_tendency!(Gρs, model, tracer_transport_velocity)
+    add_sedimentation_tendency!(sedimentation_tendency_target(model.timestepper, Gρs), model, tracer_transport_velocity)
     return nothing
 end
 

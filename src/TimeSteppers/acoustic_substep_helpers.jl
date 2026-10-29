@@ -20,7 +20,7 @@ using Breeze.AtmosphereModels:
     dynamics_prognostic_fields,
     implicit_advection_velocities,
     implicit_step_scheme,
-    implicit_sedimentation_step!
+    add_implicit_sedimentation_content!
 
 using Breeze.CompressibleEquations: CompressibleDynamics
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
@@ -64,9 +64,9 @@ tracer tendencies from. The next acoustic loop resets and rebuilds `time_average
 (and `freeze_linearization_state!` reseeds it at outer-step start), so the stage cannot read it
 live. The implicit remainder in `scalar_substep!` pairs fluxes with those tendencies: it has to
 split the same velocity the explicit fraction in `Gⁿ` was scaled by (invariant: ⟨w⟩ = wᵉ + wⁱ),
-as does `implicit_sedimentation_step!`. (The condensate sedimentation term of the thermodynamic
-tendency is built in `update_state!` with the same live velocity.) Called after every tendency
-computation the stepper issues, once per stage.
+as does the content of the mass those solves sediment. (The stage forms the explicit condensate
+sedimentation content from this copy too; see `add_explicit_sedimentation_content!`.) Called
+after every tendency computation the stepper issues, once per stage.
 """
 function cache_transport_velocity!(model)
     w_cache = model.timestepper.substepper.time_averaged_vertical_velocity_cache
@@ -104,9 +104,9 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     # Water species and tracers advect as mass fractions of the total density ρ = ρᵈ + Σρˣ
     # (see `scalar_tendency`), so the implicit solve is weighted with the same density; only
     # `update_state!` refreshes `total_density`, so it still holds the value the tendencies were
-    # built with. The vertical velocity is frozen for the same reason (`cache_transport_velocity!`):
-    # the acoustic loop has already overwritten the live time-averaged field with this stage's
-    # average, while `Gⁿ` was scaled by the previous one.
+    # built with. The vertical velocity is the frozen copy `Gⁿ` was scaled by
+    # (`cache_transport_velocity!`), which every acoustic loop leaves intact while it rebuilds
+    # the live time-averaged field.
     ρ = total_density(model.dynamics)
     velocities = tendency_transport_velocities(model)
 
@@ -142,13 +142,12 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
         end
     end
 
-    # The tracers' solves have just moved sedimenting condensate implicitly; move its latent
-    # content with it, from the state the solves produced and with the same frozen velocity
-    # (see `implicit_sedimentation_step!`). The thermodynamic variable's post-loop solve follows
-    # in `implicit_substep!`, so the moved content takes the same closure diffusion as the rest
-    # of the field; its implicit vertical transport ran inside the substep loop, before this
-    # step (a first-order splitting difference).
-    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, Δt_implicit, velocities)
+    # The tracers' solves have just moved sedimenting condensate implicitly. Collect the content
+    # of that mass, from the state the solves produced and with the same frozen velocity, as a
+    # tendency in the stage's sedimentation content, which the stage adds to the thermodynamic
+    # variable after the acoustic loop (see `remove_sedimentation_content!`).
+    isnothing(model.timestepper.implicit_solver) ||
+        add_implicit_sedimentation_content!(model.timestepper.sedimentation_content, model, 1, velocities)
 
     return nothing
 end
@@ -223,10 +222,9 @@ the first-order-upwind remainder of adaptive implicit vertical advection (whose 
 explicit flux the slow tendencies carry through the advection dispatch), plus vertically-implicit
 closure diffusion. Explicit advection schemes contribute no advection coefficients and explicit
 closures no diffusion coefficients, so each combination reduces to the right system. The solve
-runs once per RK stage after the substep loop and after the scalar update, whose
-`implicit_sedimentation_step!` adds to the thermodynamic variable content that takes this
-solve's diffusion too, over the stage interval — the operator split WRF and CM1 use for their
-implicit vertical pieces. Under an adaptive-implicit thermodynamic scheme the advection half of
+runs once per RK stage after the substep loop and after the stage's sedimentation content has been
+added to the thermodynamic variable, so that content takes this solve's diffusion too, over the
+stage interval — the operator split WRF and CM1 use for their implicit vertical pieces. Under an adaptive-implicit thermodynamic scheme the advection half of
 this solve is empty (`postloop_thermodynamic_scheme`): it was applied inside the loop. Continuity takes no implicit solve: the coupling-density tendency is the
 acoustic mass-flux divergence itself, not scalar advection.
 
@@ -234,8 +232,8 @@ The advecting velocity passed to each solve must be the one its slow tendency wa
 so the explicit/implicit velocity split is consistent: the RK stage-entry predictor velocities
 (see `slow_thermodynamic_velocities`), not the
 substepper's time-averaged transport velocities that moisture and tracers use. The one exception,
-on both sides of the split, is the condensate sedimentation term, which pairs with the tracers'
-mass fluxes and reads their velocity.
+on both sides of the split, is the condensate sedimentation content, which pairs with the
+tracers' mass fluxes and reads their velocity.
 """
 # First-order upwind flux of the stage-entry thermodynamic state carried by the implicit
 # half's velocity wⁱ = (1 - s) w, density-weighted like the implicit Center-field

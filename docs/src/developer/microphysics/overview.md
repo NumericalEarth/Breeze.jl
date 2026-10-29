@@ -247,13 +247,18 @@ with: upwind selection and the adaptive implicit split are nonlinear in the velo
 formed at the predictor would not recombine into the mass flux the condensate takes. Under
 adaptive implicit vertical advection `sedimentation_tendency` carries the content of the explicit
 fraction of each mass flux only; between the tracers' implicit solves of a stage and the
-thermodynamic variable's own, the time steppers call `implicit_sedimentation_step!`, which moves
+thermodynamic variable's own, the SSP stepper calls `implicit_sedimentation_step!`, which moves
 the content of the remainder from the first-order fluxes the solves actually applied, at the
 solved state,
 so the heat follows the mass at any fall Courant number and then takes the thermodynamic
-variable's post-solve: its implicit transport and diffusion on the SSP path, diffusion only on the
-acoustic path, whose implicit thermodynamic transport runs inside the substep loop (a first-order
-splitting difference). Rain-out thus leaves latent warming aloft and pre-cools
+variable's implicit transport and diffusion. The acoustic stepper keeps both parts of the content
+out of its substep loop. The loop forms its pressure perturbation from the thermodynamic
+perturbation alone, and content moved with condensate at fixed temperature changes ``ρθˡⁱ``
+without changing the pressure, so fed to the loop it would read as a spurious pressure
+perturbation. Each stage instead collects the explicit content and the implicit remainder's as a
+tendency, adds them after the loop, before the post-loop diffusion solve (a first-order splitting
+difference from the loop's implicit thermodynamic transport), and takes them back out of the
+stage-entry state of the next stage. Rain-out thus leaves latent warming aloft and pre-cools
 the layer that later evaporates the arriving rain, the mechanism that builds cold pools.
 
 ### Bottom Precipitation Flux
