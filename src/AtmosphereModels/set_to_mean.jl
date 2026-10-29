@@ -149,11 +149,11 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
 end
 
 @kernel function _compute_surface_pressure_from_base!(pˢ, grid, θ, qᵛ, p₀, pˢᵗ,
-                                                      Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+                                                      Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
     i, j = @index(Global, NTuple)
     zˢ = znode(i, j, 1, grid, Center(), Center(), Face())
     @inbounds pˢ[i, j, 1] = constant_moist_hydrostatic_pressure(zˢ, p₀, θ[i, j, 1], qᵛ[i, j, 1],
-                                                                pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+                                                                pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
 end
 
 """
@@ -178,7 +178,7 @@ function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, c
     θˢ, qᵛˢ = @allowscalar (θ[1, 1, 1], qᵛ[1, 1, 1])
     zˢ = bottom_face_height(grid)
     pˢ = convert(FT, moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
-                                                ref.standard_pressure, constants))
+                                                ref.standard_pressure, constants, exponent))
 
     set_surface_state!(ref.surface_pressure, pˢ)
     update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, exponent)
@@ -329,13 +329,13 @@ end
 
 HydrostaticallyBalancedDensity(; surface_pressure = nothing) = HydrostaticallyBalancedDensity(surface_pressure)
 
-default_hydrostatic_surface_pressure(model, θ, qᵛ, ref::ExnerReferenceState) = ref.surface_pressure
+default_hydrostatic_surface_pressure(model, θ, qᵛ, ref::ExnerReferenceState, exponent) = ref.surface_pressure
 
 # Without a reference state there is no callable profile to integrate below the domain bottom, so
 # the datum is reduced along the constant-θ layer implied by each column's own lowest cell. That is
 # the only reduction the model state supports here, and it agrees with the profile-integrating
 # `moist_hydrostatic_pressure` used elsewhere whenever θ really is constant.
-function default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state)
+function default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state, exponent)
     grid = model.grid
     arch = architecture(grid)
     dynamics = model.dynamics
@@ -349,7 +349,7 @@ function default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state)
 
     launch!(arch, grid, :xy, _compute_surface_pressure_from_base!,
             pˢ, grid, θ, qᵛ, base_pressure(dynamics), standard_pressure(dynamics),
-            Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+            Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
     fill_halo_regions!(pˢ)
     return pˢ
 end
@@ -431,7 +431,7 @@ function set_potential_temperature_hydrostatically_balanced_density!(
 
     reference_state = dynamics_reference_state(dynamics)
     pˢ = isnothing(spec.surface_pressure) ?
-         default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state) :
+         default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state, exponent) :
          spec.surface_pressure
 
     # Per-column hydrostatic integration → balanced total density.

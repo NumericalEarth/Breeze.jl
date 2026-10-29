@@ -40,7 +40,7 @@ struct DefaultTemperatureSolver end
 Base.summary(::DefaultTemperatureSolver) = "DefaultTemperatureSolver"
 
 """
-    default_temperature_solver(dynamics)
+$(TYPEDSIGNATURES)
 
 Return the default solver for a formulation's temperature inversion given `dynamics`.
 
@@ -48,7 +48,7 @@ The need for an iterative inversion is dictated by the intersection of the dynam
 the thermodynamic formulation: the fallback returns `nothing` (closed-form, no iteration),
 and dynamics whose prognostic closure makes the inversion implicit (e.g.
 `CompressibleDynamics` with `LiquidIcePotentialTemperatureFormulation`, where temperature
-solves `T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ`) extend this function to return an iterative solver.
+solves `cᵖᵐ T = ĉᵖ (ρ Rᵐ T / pˢᵗ)^κ θ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ`) extend this function to return an iterative solver.
 """
 default_temperature_solver(dynamics) = nothing
 

@@ -176,6 +176,40 @@ end
         @test all(isfinite, Array(interior(model.formulation.potential_temperature)))
     end
 
+    # In uniform, saturated air rising at uniform w, advection cancels in the interior and the ρθ
+    # tendency is the expansion source alone, ρᵈ S D ln p / Dt with D ln p / Dt = −g ρ w / p.
+    # The "Expansion source restores the first law" test checks S itself.
+    @testset "Compressible expansion source [$exponent]" for exponent in exponents
+        grid = RectilinearGrid(default_arch; size=(1, 1, 6), x=(0, 100), y=(0, 100), z=(0, 600))
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=300)
+        formulation = LiquidIcePotentialTemperatureFormulation(; exponent)
+        model = AtmosphereModel(grid; dynamics, formulation,
+                                microphysics=SaturationAdjustment(equilibrium=WarmPhaseEquilibrium()))
+        constants = model.thermodynamic_constants
+        g = constants.gravitational_acceleration
+        set!(model; ρ=1.1, θ=295, qᵗ=0.025, w=2)
+        update_state!(model)
+        AM.compute_tendencies!(model)
+
+        qᵛ = Array(interior(AM.specific_humidity(model)))
+        qˡ = Array(interior(AM.liquid_mass_fraction(model)))
+        T = Array(interior(model.temperature))
+        θ = Array(interior(model.formulation.potential_temperature))
+        p = Array(interior(AM.dynamics_pressure(model.dynamics)))
+        ρ = Array(interior(AM.total_density(model.dynamics)))
+        ρᵈ = Array(interior(AM.dynamics_density(model.dynamics)))
+        G = Array(interior(model.timestepper.Gⁿ.ρθ))
+
+        for k in 2:5
+            @test qˡ[1, 1, k] > 0
+            q = TD.MoistureMassFractions(qᵛ[1, 1, k], qˡ[1, 1, k])
+            S = PTF.expansion_work_source(θ[1, 1, k], T[1, 1, k], q, exponent, constants)
+            expected = ρᵈ[1, 1, k] * S * (- g * ρ[1, 1, k] * 2 / p[1, 1, k])
+            @test G[1, 1, k] < 0
+            @test G[1, 1, k] ≈ expected rtol=1e-10
+        end
+    end
+
     # A volumetric heating Q reaches ρᵈ θˡⁱ as (ρᵈ / ρ) Q / (ĉᵖ Π) on the compressible core
     # (NumericalEarth/Breeze.jl#1010)
     @testset "Compressible heating density ratio" begin
