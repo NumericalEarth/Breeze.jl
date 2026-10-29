@@ -12,11 +12,13 @@ function memory_reclaim(arch)
     end
 end
 
-reactant_compile_options() = Reactant.CompileOptions(raise = true,
-                                                     raise_first = true,
-                                                     sync = true,
-                                                     excluded_passes = ["greedy_while_loop_batch_fission",
-                                                                        "while_elementwise_reduction_to_reduce"])
+reactant_compile_options(; raise = true, optimize = true) =
+    Reactant.CompileOptions(raise = raise,
+                            raise_first = raise,
+                            optimization_passes = optimize,
+                            sync = true,
+                            excluded_passes = ["greedy_while_loop_batch_fission",
+                                               "while_elementwise_reduction_to_reduce"])
 
 """
     benchmark_time_stepping(model;
@@ -31,6 +33,7 @@ reactant_compile_options() = Reactant.CompileOptions(raise = true,
                             microphysics::AbstractString = "",
                             backend::AbstractString = "vanilla",
                             ad::Bool = false,
+                            kernels::AbstractString = "raise",
                             checkpointing = true,
                             )
 
@@ -38,15 +41,22 @@ Run a benchmark by executing `time_steps` time steps of the given model.
 
 If the model lives on a `ReactantState` architecture, the whole stepping loop
 is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
-program with `Reactant.@compile` using `reactant_compile_options()` (raising,
-with while-loop batch fission and while elementwise-reduction-to-reduce disabled) — compile time is recorded separately.
-The compiled program is then executed once for warmup and once timed. The vanilla path drives `many_time_steps!`
+program with `Reactant.@compile` using `reactant_compile_options()` (with
+while-loop batch fission and while elementwise-reduction-to-reduce disabled) —
+compile time is recorded separately. `kernels` chooses how the model's kernels
+are compiled: `"raise"` raises them to StableHLO (`raise=true`), `"noraise"`
+keeps them as kernel calls (`raise=false`), and `"kernelad"` keeps them as kernel
+calls through Reactant's kernel AD pipeline (`raise=false`, `optimize=:kernelad`,
+which needs EnzymeAD/Reactant.jl#3472). The compiled program is then executed
+once for warmup and once timed. The vanilla path drives `many_time_steps!`
 directly through eager `time_step!`.
 
 With `ad=true` (Reactant only) the forward+backward pass `grad_loss!` is
 benchmarked instead, using `checkpointing` as the loop checkpointing strategy
 for the reverse pass (`true`, `false`, `Reactant.Periodic(n)`, or
-`Reactant.Binomial(budget)`; see `loss` in timestepping.jl).
+`Reactant.Binomial(budget)`; see `loss` in timestepping.jl). There `kernels`
+is `"raise"`, which differentiates the raised kernels, or `"kernelad"`, which
+differentiates the kernel bodies themselves; `"noraise"` is forward only.
 
 Returns a `BenchmarkResult` containing timing information and system metadata.
 """
@@ -62,6 +72,7 @@ function benchmark_time_stepping(model;
                                  microphysics::AbstractString = "",
                                  backend::AbstractString = "vanilla",
                                  ad::Bool = false,
+                                 kernels::AbstractString = "raise",
                                  checkpointing = true,
                                  )
 
@@ -79,6 +90,8 @@ function benchmark_time_stepping(model;
     checkpointing_str = ad ? checkpointing_label(checkpointing) : ""
 
     ad && !is_reactant && error("AD benchmark requires a Reactant backend (got $backend)")
+    kernels in (ad ? ("raise", "kernelad") : ("raise", "noraise", "kernelad")) ||
+        error("Unknown kernels for $(mode) mode: $kernels. Use $(ad ? "'raise' or 'kernelad'" : "'raise', 'noraise' or 'kernelad'").")
 
     if verbose
         @info "Benchmark: $name"
@@ -86,6 +99,7 @@ function benchmark_time_stepping(model;
         @info "  Backend: $backend"
         @info "  Mode: $mode"
         ad && @info "  Checkpointing: $checkpointing_str"
+        is_reactant && @info "  Kernels: $kernels"
         @info "  Float type: $FT"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
         @info "  Time step: $(Δt_FT) s"
@@ -97,28 +111,39 @@ function benchmark_time_stepping(model;
     # front for Reactant; eager backends compile on first call. For AD we
     # build θ_init / dθ_init on the same grid as `model` and run reverse
     # mode through `loss` — see `grad_loss!` in timestepping.jl.
-    # The compile is broken down into tracing / MLIR / XLA stages by `timed_reactant_compile`
+    # The compile is broken down into tracing / MLIR / XLA stages by `timed_reactant_compile`,
+    # except for kernel AD: Reactant's profiler segfaults collecting its data after a kernel AD
+    # compile, which also hides any error the compile threw, so that compile is only timed whole
     compile_timings = (total = 0.0, tracing = 0.0, mlir = 0.0, xla = 0.0)
+    profile = kernels != "kernelad"
     invoke! = nothing
     if is_reactant
+        # Kernel AD keeps the kernels as kernel calls (and with ad differentiates their
+        # bodies), so like noraise it does not raise them
+        raise = kernels == "raise"
+        optimize = kernels == "kernelad" ? :kernelad : true
         if ad
             θ_init  = CenterField(grid); set!(θ_init,  (args...) -> FT(300.0))
             dθ_init = CenterField(grid); set!(dθ_init, 0)
             dmodel  = Enzyme.make_zero(model)
+            # Kernel AD needs mincut in every traced loop: the time loop here and the
+            # acoustic substep loop inside the time step
+            mincut = kernels == "kernelad"
+            Breeze.CompressibleEquations.ACOUSTIC_SUBSTEP_MINCUT[] = mincut
             if verbose
-                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true)..."
+                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing), mincut=$mincut) with Reactant (raise=$raise, optimize=$optimize)..."
             end
-            compiled_grad!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile compile_options=reactant_compile_options() grad_loss!(
-                    model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
+            compiled_grad!, compile_timings = timed_reactant_compile(; profile) do
+                Reactant.@compile compile_options=reactant_compile_options(; raise, optimize) grad_loss!(
+                    model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing, mincut)
             end
-            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
+            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing, mincut)
         else
             if verbose
-                @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
+                @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=$raise, optimize=$optimize)..."
             end
-            compiled_loop!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile compile_options=reactant_compile_options() step_loop!(model, Δt_FT, time_steps)
+            compiled_loop!, compile_timings = timed_reactant_compile(; profile) do
+                Reactant.@compile compile_options=reactant_compile_options(; raise, optimize) step_loop!(model, Δt_FT, time_steps)
             end
             invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
         end
@@ -411,13 +436,18 @@ function synchronize_device(::Oceananigans.Architectures.GPU{MetalBackend})
 end
 
 """
-    timed_reactant_compile(compile)
+    timed_reactant_compile(compile; profile = true)
 
 Call `compile()`, a thunk wrapping `Reactant.@compile`, and return
 `(compiled, timings)` where `timings` is a `NamedTuple` `(; total, tracing, mlir, xla)`
-of times in seconds.
+of times in seconds. With `profile = false` the compile runs without Reactant's profiler
+and only `total` is measured; the stages are zero.
 """
-function timed_reactant_compile(compile)
+function timed_reactant_compile(compile; profile = true)
+    if !profile
+        total = @elapsed compiled = compile()
+        return compiled, (; total, tracing = 0.0, mlir = 0.0, xla = 0.0)
+    end
     compiled, timings = Reactant.Profiler.profile_compile_timings(compile)
     return compiled, (total   = timings.total_compile_time_μs / 1e6,
                       tracing = timings.tracing_time_μs / 1e6,

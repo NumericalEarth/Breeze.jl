@@ -66,6 +66,18 @@ the memory/recompute trade-off:
 | `auto` (default) | Reactant's default for a static loop, `Periodic(isqrt(time_steps))`, regardless of `--checkpointing_mode`. |
 | `none` | No checkpointing; the whole forward tape is kept. |
 
+`--kernels` chooses how the reverse pass differentiates the model's kernels.
+`raise` (the default) raises them to StableHLO and differentiates that.
+`kernelad` keeps them as kernel calls and differentiates the kernel bodies
+themselves (`raise=false`, `optimize=:kernelad`). Kernel AD needs
+EnzymeAD/Reactant.jl#3472 (CI's kernel AD job adds it at a fixed commit), and a `Reactant_jll`
+with EnzymeAD/Enzyme-JAX#3533's passes, which no registered version has yet.
+CI's kernel AD job uses the libReactantExtra of that PR's latest "Build
+Reactant_jll" run, set as Reactant_jll's `libReactantExtra_path` preference;
+locally, point that preference at a build of your own. It is CUDA only. A kernel AD result's name ends in `_kernelad`
+(`..._reactant_AD_binomial_4_kernelad`); `--kernels "raise, kernelad"`
+compiles and times both.
+
 Use `--simplified` (the geostrophic forcing and surface drag BCs do not
 materialize on `ReactantState`) and `compressible_explicit` dynamics (the
 anelastic pressure solver is not traced). Microphysics is not yet exercised
@@ -143,6 +155,7 @@ julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=2.0 -
 | `--warmup_steps` | `10` | Number of warmup steps (for JIT compilation). Ignored on the `reactant` backend, which warms up with one full execution of the compiled program. |
 | `--ad` | `false` | Benchmark the forward+backward (Enzyme reverse-mode) pass through the stepping loop instead of forward only. Requires `--backend reactant`. |
 | `--checkpoints` | `auto` | AD loop checkpointing (`--ad` only): integer count, `auto`, or `none`. Comma-separated for multiple; see "AD benchmark". |
+| `--kernels` | `raise` | How the Reactant backend compiles the model's kernels: `raise` (to StableHLO), `noraise` (forward only: kept as kernel calls; the name ends in `_noraise`) or `kernelad` (`--ad` only; see "AD benchmark"). Comma-separated for multiple. |
 | `--checkpointing_mode` | `binomial` | Interpretation of an integer `--checkpoints` value: `binomial` (revolve) or `periodic`. |
 
 ### Simulate Mode Arguments

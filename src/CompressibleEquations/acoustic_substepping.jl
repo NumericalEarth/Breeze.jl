@@ -907,6 +907,10 @@ single traced `while` loop under Reactant, so the compiled program holds one cop
 body rather than `Nτ`. Reverse-mode differentiation of that loop caches a minimal cut of its
 values (`mincut`).
 """
+# Whether reverse-mode differentiation of the substep loop under Reactant caches a minimal cut of
+# its values (`@trace mincut`). Read when the loop is traced; off by default. Kernel AD needs it.
+const ACOUSTIC_SUBSTEP_MINCUT = Ref(false)
+
 function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
     @trace mincut=true track_numbers=false for _ in 1:Nτ
         acoustic_substep!(model, substepper, stage, advection)

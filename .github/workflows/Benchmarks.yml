@@ -36,90 +36,37 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - dynamics: 'anelastic'
-            microphysics: 'nothing'
-            grid: '256x256x128, 512x512x256, 768x768x256'
-            advection: 'WENO5, WENO9'
-            backend: 'vanilla'
-            topology: 'PPB'
-            extra_flags: '--warmup_steps 5 --time_steps 150'
-          - dynamics: 'compressible_splitexplicit'
-            microphysics: 'nothing'
-            grid: '512x512x256'
-            advection: 'WENO5'
-            backend: 'vanilla'
-            topology: 'PPB'
-            extra_flags: ''
-          - dynamics: 'anelastic'
-            microphysics: 'MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium'
-            grid: '512x512x256'
-            advection: 'WENO5'
-            backend: 'vanilla'
-            topology: 'PPB'
-            extra_flags: ''
-          # Reactant vs vanilla on the AD job's physics: a LatitudeLongitudeGrid
-          # with SphericalCoriolis, split-explicit compressible dynamics (12
-          # acoustic substeps), WENO5 and no microphysics, on a PBB grid, at the
-          # AD job's size and a larger one. Uses --simplified to drop the
-          # geostrophic forcing and field-dependent surface drag BCs (which do
-          # not currently materialize on ReactantState).
-          - dynamics: 'compressible_splitexplicit'
-            microphysics: 'nothing'
-            grid: '128x128x32, 256x256x128'
-            advection: 'WENO5'
-            backend: 'vanilla, reactant'
-            topology: 'PBB'
-            # Two Reactant compiles of the split-explicit step
-            timeout: 60
-            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude'
-          # AD: forward+backward via Enzyme reverse-mode through the same
-          # @trace checkpointed loop. Reactant-only by construction. No
-          # microphysics in v1 (Enzyme correctness through the 1M scheme is
-          # untested). Small grid to keep the gradient compile bounded. The
-          # loop body is compiled once regardless of Nsteps, so 64 steps cost
-          # little extra compile; --checkpoints sweeps the checkpoint budget of
-          # the binomial (revolve) schedule Enzyme uses for the reverse pass
-          # (each value is a separate compile + run, recorded as its own
-          # result). The model is the regional-forecast configuration: a
-          # LatitudeLongitudeGrid with SphericalCoriolis (the AD default) and
-          # split-explicit compressible dynamics (12 acoustic substeps). To reproduce locally
-          # on CPU see benchmarking/README.md ("AD benchmark").
+          # TEMPORARY: only the kernel AD entry runs; restore the other entries before merging
+          # Kernel AD: the AD job's model and checkpointed loop, differentiating the
+          # kernel bodies themselves (--kernels kernelad, EnzymeAD/Reactant.jl#3472)
+          # instead of the raised kernels. The pipeline's passes come from
+          # EnzymeAD/Enzyme-JAX#3533, which no registered Reactant_jll has yet, so
+          # this entry runs on the libReactantExtra of a "Build Reactant_jll" run on
+          # that PR's branch (`enzyme_jax_branch`; see the steps below), with
+          # Reactant.jl#3472 at a fixed commit (`reactant_rev`); every other entry
+          # keeps the registered Reactant and Reactant_jll. Both sides are force-pushed
+          # often, so `enzyme_jax_run` pins the build to the one `reactant_rev` was
+          # written against (without it, the latest build of the branch is used):
+          # Reactant.jl pb/kernel-ad 2099aba1 with Enzyme-JAX 9f77412c, the first build
+          # of that kernel AD that registers the NVVM passes the CUDA pipeline needs.
+          # `mode` keeps its artifact names apart from the AD job's, and while kernel AD is
+          # experimental its failure does not fail the workflow or block publishing.
+          # The Reactant.jl branch now needs Enzyme-JAX options the registered
+          # Reactant_jll lacks (preserve-xla-funcs), so it must not reach other jobs.
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '128x128x32'
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
-            # The gradient compile needs more than the default 30-minute job
+            mode: 'kernelad'
+            enzyme_jax_branch: 'pb/kernel-ad'
+            enzyme_jax_run: '40917264751'
+            reactant_rev: '2099aba10460a94962cfa1fd8a7ca4c717140c2b'
+            # TEMPORARY: dump every MLIR pass pipeline to find where the compile corrupts the heap
+            dump_mlir: 'mlir_dumps'
             timeout: 60
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial'
-          # Scalar-tendency kernel sweep (no model): time the bare WENO
-          # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
-          # the Reactant-compiled XLA program and the eager vanilla launch.
-          # --mode tendency skips model construction, so there is no
-          # dynamics/microphysics.
-          - dynamics: 'none'
-            microphysics: 'none'
-            grid: '256x256x128'
-            advection: 'WENO5, WENO7, WENO9'
-            backend: 'vanilla, reactant'
-            topology: 'PPB'
-            # `mode` distinguishes the two tendency entries in the artifact names
-            # (their other matrix fields are identical, so without this they
-            # collide and only one set of results survives the publish merge).
-            mode: 'scalar_tendency'
-            extra_flags: '--mode scalar_tendency --float_type=Float32,BFloat16 --time_steps 320'
-          # Full-model tendency: time compute_tendencies! for a compressible
-          # AtmosphereModel across WENO orders, vanilla vs Reactant. --mode
-          # model_tendency builds the model, so dynamics/microphysics are unused.
-          - dynamics: 'none'
-            microphysics: 'none'
-            grid: '256x256x128'
-            advection: 'WENO5, WENO7, WENO9'
-            backend: 'vanilla, reactant'
-            topology: 'PPB'
-            mode: 'model_tendency'
-            extra_flags: '--mode model_tendency --float_type=Float32 --time_steps 320'
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial --kernels kernelad'
     defaults:
       run:
         shell: bash
@@ -131,6 +78,7 @@ jobs:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
         - /usr/local:/host-usr-local
     timeout-minutes: ${{ matrix.timeout || 30 }}
+    continue-on-error: ${{ matrix.mode == 'kernelad' }}
     steps:
       - name: "Check out repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -144,6 +92,79 @@ jobs:
       - name: df after cleanup
         run: |
           df -hT
+      - name: Find the Enzyme-JAX Reactant_jll build
+        # The newest successful "Build Reactant_jll" run on the Enzyme-JAX branch whose
+        # products have not expired (they are kept for a couple of days). The image has
+        # neither curl nor gh, so Julia's Downloads fetches the API.
+        if: ${{ matrix.enzyme_jax_branch }}
+        id: enzyme_jax_build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: 'products-x86_64-linux-gnu-cxx11-gpu_version+13.1-gpu+cuda-mode+opt'
+        run: |
+          github_api() {
+              julia --startup-file=no -e 'using Downloads; Downloads.download(ARGS[1], stdout; headers = ["Authorization" => "Bearer " * ENV["GH_TOKEN"], "Accept" => "application/vnd.github+json"])' "https://api.github.com/repos/EnzymeAD/Enzyme-JAX/$1"
+          }
+          if [[ -n "${{ matrix.enzyme_jax_run }}" ]]; then
+              runs="$(github_api "actions/runs/${{ matrix.enzyme_jax_run }}" | jq -r '"\(.id) \(.head_sha)"')"
+          else
+              runs="$(github_api "actions/workflows/build-reactantjll.yml/runs?branch=${{ matrix.enzyme_jax_branch }}&status=success&per_page=10" | jq -r '.workflow_runs[] | "\(.id) \(.head_sha)"')"
+          fi
+          while read -r run_id sha; do
+              [[ -n "${run_id}" ]] || continue
+              # `+` must be percent-encoded in the query, or it reads as a space
+              if github_api "actions/runs/${run_id}/artifacts?name=${ARTIFACT//+/%2B}" < /dev/null | jq -e '[.artifacts[] | select(.expired | not)] | length > 0' > /dev/null; then
+                  echo "Using Enzyme-JAX run ${run_id} (commit ${sha}) of ${{ matrix.enzyme_jax_branch }}"
+                  echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+                  exit 0
+              fi
+          done <<< "${runs}"
+          echo "No unexpired ${ARTIFACT} on Enzyme-JAX's ${{ matrix.enzyme_jax_branch }}: rerun its Build Reactant_jll workflow" >&2
+          exit 1
+      - name: Download the Enzyme-JAX Reactant_jll build
+        if: ${{ matrix.enzyme_jax_branch }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: 'products-x86_64-linux-gnu-cxx11-gpu_version+13.1-gpu+cuda-mode+opt'
+          repository: EnzymeAD/Enzyme-JAX
+          run-id: ${{ steps.enzyme_jax_build.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: reactant_jll_products
+      - name: Use the Enzyme-JAX libReactantExtra
+        # Unpack the build (lib/libReactantExtra.so with its lib/cuda next to it) and point
+        # Reactant_jll's libReactantExtra at it in the image's @breeze preferences, which
+        # list Reactant_jll; before instantiating, so everything compiles against it
+        if: ${{ matrix.enzyme_jax_branch }}
+        working-directory: .
+        run: |
+          ls -l reactant_jll_products
+          mkdir -p reactant_jll
+          # The image has no xz; Pkg unpacks the .tar.xz with the p7zip that ships with Julia
+          julia --startup-file=no -e 'using Pkg; Pkg.PlatformEngines.unpack(ARGS[1], ARGS[2])' \
+              reactant_jll_products/Reactant.v*.tar.* reactant_jll
+          lib="${GITHUB_WORKSPACE}/reactant_jll/lib/libReactantExtra.so"
+          ls -l "${lib}"
+          julia --startup-file=no -e '
+              using TOML
+              file = "/usr/local/share/julia/environments/breeze/LocalPreferences.toml"
+              preferences = TOML.parsefile(file)
+              preferences["Reactant_jll"]["libReactantExtra_path"] = ARGS[1]
+              open(io -> TOML.print(io, preferences), file, "w")
+              print(read(file, String))' "${lib}"
+      - name: Use Reactant.jl's kernel AD branch
+        # Reactant.jl#3472 at `reactant_rev`, for the entry whose Reactant_jll build matches it
+        if: ${{ matrix.reactant_rev }}
+        shell: julia --color=yes --project {0}
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: |
+          using Pkg
+          # `reactant_rev` fixes Reactant here, and the branch's version can lag the project's
+          # exact Reactant compat, so drop the bound for this entry. `Pkg.compat` checks the
+          # manifest against `[sources]`, so resolve first: the manifest is gitignored
+          Pkg.resolve()
+          Pkg.compat("Reactant", nothing)
+          Pkg.add(url = "https://github.com/EnzymeAD/Reactant.jl", rev = "${{ matrix.reactant_rev }}")
       - name: Instantiate benchmarking environment
         shell: julia --color=yes --project {0}
         run: |
@@ -158,6 +179,7 @@ jobs:
         timeout-minutes: ${{ matrix.timeout || 45 }}
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
+          BREEZE_DUMP_MLIR: ${{ matrix.dump_mlir }}
         run: |
           julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
       - name: Stop earlyoom
@@ -170,8 +192,8 @@ jobs:
           retention-days: 90
           overwrite: false
       - name: "Upload MLIR dumps as artifacts"
-        # Only the tendency / model_tendency matrix entries dump MLIR (Reactant
-        # backend); other entries produce no files and are skipped.
+        # Only the tendency / model_tendency matrix entries and those with `dump_mlir`
+        # dump MLIR (Reactant backend); other entries produce no files and are skipped.
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -272,7 +294,9 @@ jobs:
                   level_1 = f'{base_name}; AD; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
-                  level_4 = f'{grid_str} {checkpointing}'.strip()
+                  # Kernel AD (backend 'reactant kernelad') gets its own line next to raising
+                  kernels = backend.removeprefix('reactant').strip()
+                  level_4 = f'{grid_str} {checkpointing} {kernels}'.strip()
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
