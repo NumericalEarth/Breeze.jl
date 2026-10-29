@@ -78,7 +78,7 @@ end
     ρE = model.formulation.energy_density
     p = model.dynamics.pressure
     ρᵈ = model.dynamics.dry_density
-    @test interior(model.formulation.total_enthalpy) ≈ (interior(ρE) .+ interior(p)) ./ interior(ρᵈ)
+    @test Array(interior(model.formulation.total_enthalpy)) ≈ Array((interior(ρE) .+ interior(p)) ./ interior(ρᵈ))
 end
 
 @testset "Acoustic linearization of the total energy [T₀ = $T₀]" for T₀ in (0, 273.16)
