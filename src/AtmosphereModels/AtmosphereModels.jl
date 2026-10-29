@@ -147,6 +147,43 @@ using Oceananigans.Utils: prettysummary, launch!
 @inline kernel_time_step(arch, grid, Δt) = convert(eltype(grid), Δt)
 
 #####
+##### Halo-fill / launch-count switches (T16 fills unit). Read from ENV when the module is loaded
+##### (`__init__`), not at precompile; set the `Ref`s directly to A/B in one process.
+#####
+
+"`BREEZE_FILLS_TOGETHER` (default true): consecutive independent fills go through one tupled `fill_halo_regions!`."
+const FILLS_TOGETHER = Ref(true)
+"`BREEZE_SKIP_DEAD_FILLS` (default true): leave out halo fills that a later fill in the same pass overwrites unread."
+const SKIP_DEAD_FILLS = Ref(true)
+"`BREEZE_BATCHED_Z_BCS` (default true): the z flux-BC tendencies of every prognostic in one launch."
+const BATCHED_Z_BCS = Ref(true)
+
+env_switch(name, default) = lowercase(get(ENV, name, string(default))) in ("1", "true", "yes", "on")
+
+function __init__()
+    FILLS_TOGETHER[] = env_switch("BREEZE_FILLS_TOGETHER", true)
+    SKIP_DEAD_FILLS[] = env_switch("BREEZE_SKIP_DEAD_FILLS", true)
+    BATCHED_Z_BCS[] = env_switch("BREEZE_BATCHED_Z_BCS", true)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Fill the halos of independent `fields` (no field's boundary condition reads another field of the
+call) with one tupled `fill_halo_regions!`, so Oceananigans fills fields that share location, kernels
+and argument-free conditions with one launch per side. With `FILLS_TOGETHER[] = false`, field by field.
+"""
+function fill_halo_regions_together!(fields::Tuple, args...)
+    if FILLS_TOGETHER[]
+        fill_halo_regions!(fields, args...)
+    else
+        foreach(f -> fill_halo_regions!(f, args...), fields)
+    end
+    return nothing
+end
+
+#####
 ##### Interfaces (define the contract that dynamics implementations must fulfill)
 #####
 

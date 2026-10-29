@@ -1,9 +1,10 @@
 using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
-using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
+using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite, instantiated_location
 using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
-                                       update_boundary_conditions!
+                                       update_boundary_conditions!, compute_z_bottom_bc!, compute_z_top_bc!,
+                                       NotFluxBC
 using Oceananigans.Fields: flattened_unique_values
 using Oceananigans.Grids: topology
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
@@ -541,9 +542,48 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
     # TODO: should we call tracer_density_to_specific!(model) here?
     foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+    if BATCHED_Z_BCS[]
+        # M2 (handoff e9b5747b): every prognostic's z flux-BC contribution in one launch. Each G still
+        # receives x, y, then z, with Oceananigans' per-cell expressions and arguments; fields whose
+        # bottom and top are both non-flux conditions are skipped by type, as `compute_z_bcs!` does.
+        entries = z_flux_bc_entries(values(Gⁿ), values(prognostic_model_fields))
+        isempty(entries) || launch!(arch, model.grid, :xy, _compute_batched_z_bcs!, entries, model.grid,
+                                    Tuple(boundary_condition_args(model)))
+    else
+        foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+    end
 
     return nothing
+end
+
+@inline z_flux_bc_entries(::Tuple, ::Tuple{}) = ()
+
+@inline function z_flux_bc_entries(Gⁿ::Tuple, prognostic::Tuple)
+    rest = z_flux_bc_entries(Base.tail(Gⁿ), Base.tail(prognostic))
+    G = first(Gⁿ)
+    c = first(prognostic)
+    bcs = c.boundary_conditions
+    return z_flux_bc_entry(G, c, bcs.bottom, bcs.top, rest)
+end
+
+@inline z_flux_bc_entry(G, c, bottom, top, rest) = ((G, instantiated_location(G), c, bottom, top), rest...)
+@inline z_flux_bc_entry(G, c, ::NotFluxBC, ::NotFluxBC, rest) = rest
+@inline z_flux_bc_entry(::Nothing, c, bottom, top, rest) = rest
+@inline z_flux_bc_entry(::Nothing, c, ::NotFluxBC, ::NotFluxBC, rest) = rest
+
+# Oceananigans' `_compute_z_bcs!` body for each entry at the same (i, j): bottom, then top.
+@kernel function _compute_batched_z_bcs!(entries, grid, args)
+    i, j = @index(Global, NTuple)
+    compute_batched_z_bcs!(entries, i, j, grid, args)
+end
+
+@inline compute_batched_z_bcs!(::Tuple{}, i, j, grid, args) = nothing
+
+@inline function compute_batched_z_bcs!(entries::Tuple, i, j, grid, args)
+    G, loc, c, bottom, top = first(entries)
+    compute_z_bottom_bc!(G, loc, bottom, i, j, grid, c, args...)
+    compute_z_top_bc!(G, loc, top, i, j, grid, c, args...)
+    return compute_batched_z_bcs!(Base.tail(entries), i, j, grid, args)
 end
 
 #####
