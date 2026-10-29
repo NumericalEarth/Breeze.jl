@@ -304,6 +304,8 @@ AtmosphereModels.ice_mass_fraction(::DCMIP2016KM, model) = nothing
 # Rain sedimentation is applied by the scheme's own column kernel, so no tracer
 # advertises a sedimentation velocity and the generic fallback (`nothing`) stands.
 
+@inline AtmosphereModels.precipitating_mass_fraction(i, j, k, ::DCMIP2016KM, μ) = @inbounds μ.qʳ[i, j, k]
+
 """
 $(TYPEDSIGNATURES)
 
