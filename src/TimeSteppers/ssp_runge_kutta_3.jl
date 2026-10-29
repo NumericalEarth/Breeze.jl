@@ -52,7 +52,7 @@ Fields
 - `Gⁿ`: Tendency fields at current stage
 - `implicit_solver`: Optional implicit solver for diffusion
 - `rounding`: Round-off treatment of the stage updates, [`RoundToNearest`](@ref) or
-  [`StochasticRounding`](@ref)
+  [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding)
 """
 struct SSPRungeKutta3{FT, U0, TG, TI, R} <: AbstractTimeStepper
     α¹ :: FT
@@ -79,7 +79,7 @@ Keyword Arguments
   `prognostic_fields`. Accepting it as a keyword lets callers (e.g. the adiabatic-balance
   twin) alias another stepper's tendency storage instead of allocating fresh fields.
 - `rounding`: Round-off treatment of the stage updates. Default: [`RoundToNearest`](@ref).
-  With [`StochasticRounding`](@ref), each stage is evaluated in increment form,
+  With [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding), each stage is evaluated in increment form,
   ``u^{(m)} = u^{(0)} + α \\left[ (u^{(m-1)} - u^{(0)}) + Δt \\, G \\right]``, and the sum is
   rounded stochastically, so increments below the resolution of ``u`` are not lost on average.
   The vertically-implicit solves and the pressure correction stay round-to-nearest.
@@ -132,7 +132,7 @@ u^{(m)} = (1 - α) u^{(0)} + α \\left[ u^{(m-1)} + Δt \\, G \\right]
 ```
 where ``u^{(0)}`` is stored in the time stepper, ``u^{(m-1)}`` is the current field value,
 and ``G`` is the current tendency. The sum is rounded by the time stepper's round-off treatment
-(see [`StochasticRounding`](@ref)).
+(see [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding)).
 """
 function ssp_rk3_substep!(model, Δt, α)
     grid = model.grid

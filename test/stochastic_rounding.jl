@@ -143,6 +143,10 @@ end
 
 bitwise_equal(a, b) = all(map((x, y) -> isequal(x, y), a, b))
 
+# The model tests below set `Oceananigans.defaults.FloatType`; restore it afterwards so that
+# tests sharing this worker process keep the default precision.
+default_FT = Oceananigans.defaults.FloatType
+
 @testset "Round-off treatment of $(dynamics_kind) time stepping [$FT]" for dynamics_kind in (:anelastic, :compressible),
                                                                            FT in (Float32, Float64)
 
@@ -173,6 +177,8 @@ bitwise_equal(a, b) = all(map((x, y) -> isequal(x, y), a, b))
         scale = max(1, maximum(abs, nearest[name]))
         @test maximum(abs, stochastic[name] .- nearest[name]) < 1000 * eps(FT) * scale
     end
+
+    Oceananigans.defaults.FloatType = default_FT
 end
 
 #####
@@ -207,6 +213,10 @@ end
     @info "Mean temperature change over $(Nsteps) steps of $(Δt) s" exact nearest stochastic
 
     @test exact > 0
-    @test nearest ≈ exact rtol =  0.2
+
+    # Round to nearest loses more than 20% of the heating; stochastic rounding recovers it
+    @test !isapprox(nearest, exact, rtol = 0.2)
     @test stochastic ≈ exact rtol = 0.02
+
+    Oceananigans.defaults.FloatType = default_FT
 end

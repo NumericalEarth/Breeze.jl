@@ -56,7 +56,7 @@ Fields
 - `substepper`: [`AcousticSubstepper`](@ref) for the linearized acoustic
   substep loop.
 - `rounding`: Round-off treatment of the final stage's update, [`RoundToNearest`](@ref)
-  or [`StochasticRounding`](@ref).
+  or [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding).
 
 References
 ==========
@@ -85,7 +85,7 @@ allocating fresh fields (used by the native-stepper adiabatic-balance twin).
 
 `rounding` sets the round-off treatment of the step's final update (default:
 [`RoundToNearest`](@ref)). Every Wicker–Skamarock stage restarts from ``Uⁿ``, so only the third
-stage's rounding reaches ``Uⁿ⁺¹``: with [`StochasticRounding`](@ref), the recovery of the acoustic
+stage's rounding reaches ``Uⁿ⁺¹``: with [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding), the recovery of the acoustic
 prognostics from their stage-entry values plus the accumulated perturbations, and the update
 ``u⁰ + Δt G`` of the other scalars, are rounded stochastically in the third stage. The
 perturbations themselves, the first two stages, and the vertically-implicit solves stay
