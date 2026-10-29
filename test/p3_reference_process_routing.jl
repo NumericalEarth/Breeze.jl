@@ -45,7 +45,7 @@ function routing_thermodynamic_state(air_temperature, pressure, vapor,
 end
 
 # Liquid saturation vapor fraction of the air at `air_temperature` and `pressure` with condensate
-# `liquid`, `ice`: saturation uses that state's mixture density, which depends on
+# `liquid`, `ice`: saturation uses that state's thermodynamic state density, which depends on
 # the vapor, so iterate to the fixed point.
 function saturated_vapor(air_temperature, pressure, liquid, ice, constants)
     vapor = zero(air_temperature)

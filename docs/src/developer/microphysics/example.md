@@ -79,7 +79,7 @@ end
 
 Tendencies are computed from the microphysical state. Each prognostic variable needs a
 tendency method. The total density `ρ` weights the tendencies (on the anelastic core it is the
-reference density ``ρᵣ``); saturation uses instead the mixture density,
+reference density ``ρᵣ``); saturation uses instead the thermodynamic state density,
 `density(𝒰, constants)`:
 
 ```@example microphysics_example

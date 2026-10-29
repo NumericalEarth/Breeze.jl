@@ -29,14 +29,14 @@ GPU-compatible: uses `ifelse` instead of branching.
                   one(typeof(available_mass)))
 end
 
-@inline function p3_ice_saturation_specific_humidity(T, ρᵐ, constants, freezing_temperature, qᵛ⁺ˡ)
-    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρᵐ, constants, PlanarIceSurface())
+@inline function p3_ice_saturation_specific_humidity(T, ρᵗʰ, constants, freezing_temperature, qᵛ⁺ˡ)
+    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarIceSurface())
     return ifelse(T >= freezing_temperature, qᵛ⁺ˡ, qᵛ⁺ⁱ)
 end
 
-@inline function p3_ice_saturation_specific_humidity(T, ρᵐ, constants, freezing_temperature)
-    qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
-    return p3_ice_saturation_specific_humidity(T, ρᵐ, constants, freezing_temperature, qᵛ⁺ˡ)
+@inline function p3_ice_saturation_specific_humidity(T, ρᵗʰ, constants, freezing_temperature)
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
+    return p3_ice_saturation_specific_humidity(T, ρᵗʰ, constants, freezing_temperature, qᵛ⁺ˡ)
 end
 
 @inline function p3_adjustment_ice_saturation_specific_humidity(T, P, qᵗ, constants, freezing_temperature)
@@ -471,7 +471,7 @@ end
 
 # Saturation vapor mass fraction at the melting point T₀. Breeze's qᵛ is a
 # total-air mass fraction (ρᵛ/ρ), so this must use the same basis:
-# q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ), with ρ the mixture density
+# q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ), with ρ the thermodynamic state density
 # (`density(𝒰, constants)`; not the anelastic reference density ρᵣ). With this
 # convention the diffusion term ℒ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density
 # difference ρᵛ - ρᵛ⁺(T₀), up to the ratio of the density that weights it to that one.

@@ -78,8 +78,8 @@ end
 # standalone form above floors it at zero; the coordinates agree for `nⁱ ≥ number_scale`, and
 # below it the melt rate `nⁱ₊ × dm/dt` is negligible.
 # The total density `ρ` weights the vapor-diffusion heat flux; the freezing-point saturation
-# fraction is evaluated at the mixture density `ρᵐ`.
-@inline function ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵐ, constants, transport,
+# fraction is evaluated at the thermodynamic state density `ρᵗʰ`.
+@inline function ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport,
                                         ρ_correction, prep)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
@@ -101,7 +101,7 @@ end
     Dᵛ = transport.Dᵛ       # Diffusivity of water vapor [m²/s]
     ν  = transport.ν        # Kinematic viscosity [m²/s]
 
-    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρᵐ)
+    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρᵗʰ)
 
     # Use the dry-ice PSD ventilation tables (small + large) for melting. The total
     # Ventilation/VentilationEnhanced tables use the wet-ice PSD and are not
@@ -188,10 +188,10 @@ Requires tabulated small/large ice ventilation integrals.
 end
 
 # Shared-lookup variant used by `p3_phase1_rates`.
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵐ, constants, transport,
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport,
                                    lookups::P3IceLookups)
     total_melt, small, large =
-        ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵐ, constants, transport,
+        ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport,
                                lookups.ρ_correction, lookups.prep)
     return partition_melting(total_melt, small, large)
 end

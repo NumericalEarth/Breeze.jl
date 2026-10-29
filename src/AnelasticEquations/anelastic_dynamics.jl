@@ -128,7 +128,7 @@ AtmosphereModels.continuity_density(dynamics::AnelasticDynamics) = dynamics.refe
 # The total density ρᵣ(z) is the reference state's, not the local state's, so evaluate the
 # equation of state at the reference pressure with the local temperature and moisture:
 # ρ = pᵣ(z) / (Rᵐ(q) T). This is also the density in the anelastic buoyancy.
-@inline function AtmosphereModels.mixture_density(i, j, k, dynamics::AnelasticDynamics, T, q, constants)
+@inline function AtmosphereModels.thermodynamic_state_density(i, j, k, dynamics::AnelasticDynamics, T, q, constants)
     @inbounds p = dynamics.reference_state.pressure[i, j, k]
     return density(T, p, q, constants)
 end
