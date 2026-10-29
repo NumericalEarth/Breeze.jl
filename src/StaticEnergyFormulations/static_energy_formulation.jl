@@ -131,3 +131,6 @@ function Base.show(io::IO, formulation::StaticEnergyFormulation)
         print(io, "└── specific_energy: ", prettysummary(formulation.specific_energy))
     end
 end
+
+AtmosphereModels.formulation_halo_fields(formulation::StaticEnergyFormulation) =
+    (formulation.specific_energy,)

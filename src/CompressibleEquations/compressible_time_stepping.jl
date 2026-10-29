@@ -412,9 +412,7 @@ function AtmosphereModels.compute_auxiliary_state_variables!(model::Compressible
     dynamics = model.dynamics
 
     bc_args = AtmosphereModels.kernel_boundary_condition_args(model)
-    fill_halo_regions!(dynamics.dry_density, bc_args...)
-    fill_halo_regions!(model.momentum, bc_args...)
-    fill_halo_regions!(prognostic_fields(model.formulation))
+    fill_fused_auxiliary_inputs!(model, bc_args)
 
     # Face-extended launch (as in compute_velocities!); centre work is masked to the interior.
     Nx, Ny, Nz = size(grid)
@@ -434,12 +432,46 @@ function AtmosphereModels.compute_auxiliary_state_variables!(model::Compressible
             stored_energy_denominator(model))
 
     foreach(Oceananigans.ImmersedBoundaries.mask_immersed_field!, model.velocities)
+    fill_fused_auxiliary_outputs!(model, bc_args, AtmosphereModels.formulation_halo_fields(model.formulation))
+
+    return nothing
+end
+
+# P4a (handoff 5168bc80) / E19 call sites (78549356): the fills of the fused pass's inputs and outputs
+# as one tupled fill each, so Oceananigans fills fields with the same location, kernels and
+# argument-free conditions with one launch per side. No condition among them reads another field of
+# the call, so the order between fields is free.
+function fill_fused_auxiliary_inputs!(model, bc_args)
+    fields = (model.dynamics.dry_density, values(model.momentum)..., values(prognostic_fields(model.formulation))...)
+    if AtmosphereModels.FILLS_TOGETHER[]
+        fill_halo_regions!(fields, bc_args...)
+    else
+        fill_halo_regions!(model.dynamics.dry_density, bc_args...)
+        fill_halo_regions!(model.momentum, bc_args...)
+        fill_halo_regions!(prognostic_fields(model.formulation))
+    end
+    return nothing
+end
+
+function fill_fused_auxiliary_outputs!(model, bc_args, formulation_fields)
+    if AtmosphereModels.FILLS_TOGETHER[]
+        # Same arguments as the fills in sequence: the microphysical fields take the boundary-condition
+        # arguments, the others none.
+        fill_halo_regions!(model.microphysical_fields, bc_args...)
+        fields = (values(model.velocities)..., formulation_fields..., model.temperature, model.dynamics.pressure)
+        fill_halo_regions!(fields)
+    else
+        fill_fused_auxiliary_outputs!(model, bc_args, nothing)
+    end
+    return nothing
+end
+
+function fill_fused_auxiliary_outputs!(model, bc_args, ::Nothing)
     fill_halo_regions!(model.velocities)
     fill_halo_regions!(model.microphysical_fields, bc_args...)
     fill_halo_regions!(model.formulation)
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(dynamics.pressure)
-
+    fill_halo_regions!(model.dynamics.pressure)
     return nothing
 end
 

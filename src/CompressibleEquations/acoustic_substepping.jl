@@ -417,9 +417,9 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
             model.microphysical_fields,
             constants)
 
-    fill_halo_regions!(substepper.linearization_exner)
-    fill_halo_regions!(substepper.linearization_potential_temperature)
-    fill_halo_regions!(substepper.linearization_gamma_R_mixture)
+    AtmosphereModels.fill_halo_regions_together!((substepper.linearization_exner,
+                                                  substepper.linearization_potential_temperature,
+                                                  substepper.linearization_gamma_R_mixture))
 
     return nothing
 end
@@ -949,9 +949,9 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer, zero_ent
                 substepper.momentum_perturbation.v,
                 substepper.momentum_perturbation.w)
 
-        fill_halo_regions!(substepper.density_perturbation)
-        fill_halo_regions!(substepper.density_potential_temperature_perturbation)
-        map(fill_halo_regions!, substepper.momentum_perturbation)
+        AtmosphereModels.fill_halo_regions_together!((substepper.density_perturbation,
+                                                      substepper.density_potential_temperature_perturbation,
+                                                      values(substepper.momentum_perturbation)...))
         return nothing
     end
 
@@ -983,9 +983,9 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer, zero_ent
     # ρw is dispatched: terrain models initialize the contravariant ρw̃ instead.
     initialize_vertical_momentum_perturbation!(substepper, model, Uᴸ_outer)
 
-    fill_halo_regions!(substepper.density_perturbation)
-    fill_halo_regions!(substepper.density_potential_temperature_perturbation)
-    map(fill_halo_regions!, substepper.momentum_perturbation)
+    AtmosphereModels.fill_halo_regions_together!((substepper.density_perturbation,
+                                                  substepper.density_potential_temperature_perturbation,
+                                                  values(substepper.momentum_perturbation)...))
 
     return nothing
 end

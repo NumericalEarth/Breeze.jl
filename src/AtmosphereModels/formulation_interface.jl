@@ -238,3 +238,7 @@ function liquid_ice_potential_temperature end
 Return the liquid-ice potential temperature density field for the given model.
 """
 function liquid_ice_potential_temperature_density end
+
+# The fields `fill_halo_regions!(formulation)` fills, so they can join a tupled fill
+# (`fill_halo_regions_together!`); `nothing` keeps the formulation's own fill.
+formulation_halo_fields(formulation) = nothing

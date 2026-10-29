@@ -188,3 +188,6 @@ function Base.show(io::IO, formulation::LiquidIcePotentialTemperatureFormulation
     end
     print(io, "└── temperature_solver: ", summary(formulation.temperature_solver))
 end
+
+AtmosphereModels.formulation_halo_fields(formulation::LiquidIcePotentialTemperatureFormulation) =
+    (formulation.potential_temperature,)
