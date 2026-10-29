@@ -14,12 +14,12 @@ end
 
 # Enzyme-JAX optimization patterns left out of every benchmark compile
 const EXCLUDED_PASSES = [
+    # The AD compile runs out of host memory (#1151; EnzymeAD/Reactant.jl#3573),
+    # fix in progress in EnzymeAD/Enzyme-JAX#3733
     "greedy_while_loop_batch_fission",
+    # The AD benchmark fails without it (#1151); EnzymeAD/Enzyme-JAX#3733 may fix it
     "while_elementwise_reduction_to_reduce",
-    "select_comp_iota_const_simplify",
     "select_comp_iota_to_dus",
-    "concat_to_pad",
-    "dus_to_dynamic_pad",
 ]
 
 """
