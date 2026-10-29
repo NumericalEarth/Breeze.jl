@@ -143,10 +143,21 @@ function launch_parent_kernel!(kernel, c, ρ)
     return nothing
 end
 
+# The linear-index kernels are valid only when the density's parent array has the tracer's
+# parent shape (e.g. CompressibleDynamics, whose density is a full 3D CenterField). Anelastic
+# dynamics has a reference density with parent size (1, 1, Nz+2Hz) that must be broadcast;
+# indexing it linearly reads out of bounds (NaN tracers, task 13).
+same_parent_shape(c, ρ) = size(parent(c)) == size(parent(ρ))
+
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
     for ρc in tracers
-        launch_parent_kernel!(_tracer_density_to_specific!, ρc, density)
+        if same_parent_shape(ρc, density)
+            launch_parent_kernel!(_tracer_density_to_specific!, ρc, density)
+        else
+            ρ = parent(density)
+            parent(ρc) .= ifelse.(ρ .== 0, 0, parent(ρc) ./ ρ)
+        end
     end
     return nothing
 end
@@ -154,7 +165,11 @@ end
 function tracer_specific_to_density!(tracers, density)
     # TODO: do all tracers a single kernel
     for c in tracers
-        launch_parent_kernel!(_tracer_specific_to_density!, c, density)
+        if same_parent_shape(c, density)
+            launch_parent_kernel!(_tracer_specific_to_density!, c, density)
+        else
+            parent(c) .*= parent(density)
+        end
     end
     return nothing
 end
