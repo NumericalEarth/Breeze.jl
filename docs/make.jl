@@ -52,9 +52,9 @@ examples = [
     Example("Single-column boundary layer with a prognostic-TKE closure", "single_column_tke_boundary_layer"; build_always=true, gpu=false),
     Example("Single-column ensemble", "single_column_ensemble"; build_always=true, gpu=false),
     Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
-    Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
+    Example("Rising dry and cloudy parcels", "rising_parcels"; build_always=true, gpu=false),
     Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
-    Example("Cloud formation in prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
+    Example("P3 microphysics in a prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
     Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
     Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
     Example("Tropical cyclone world", "tropical_cyclone_world"; build_always=false, gpu=true),
@@ -191,7 +191,9 @@ makedocs(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB
         size_threshold = 2 ^ 20, # 1 MiB
-        size_threshold_ignore = ["api.md"], # auto-generated, grows with the docstring count
+        # api.md is auto-generated and grows with the docstring count; the single-column closure
+        # example carries five figures, two of them 83-member heatmaps
+        size_threshold_ignore = ["api.md", "literated/single_column_tke_boundary_layer.md"],
         prettyurls = get(ENV, "CI", "false") == "true",
     ),
     pages=[
