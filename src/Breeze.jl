@@ -10,6 +10,7 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
+    HydrostaticSounding,
     ExnerReferenceState,
     compute_reference_state!,
     set_to_mean!,
@@ -158,9 +159,11 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
     SpecificForcing,
+    TemperatureForcing,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
+    piecewise_linear_regrid!,
     TerrainFollowingVerticalDiscretization,
     LinearDecay,
     TwoLevelDecay,

@@ -31,7 +31,8 @@ end
 
 @testset "Reactant total-water initialization [$FT]" for FT in test_float_types()
     grid = RectilinearGrid(ReactantState(), FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
-    microphysics = DCMIP2016KesslerMicrophysics(FT)
+    # Reactant requires a static sedimentation substep bound; this test never steps
+    microphysics = DCMIP2016KesslerMicrophysics(FT; maximum_sedimentation_substeps=1)
     thermodynamic_constants = ThermodynamicConstants(FT; saturation_vapor_pressure=TetensFormula(FT))
     model = AtmosphereModel(grid; microphysics, thermodynamic_constants, dynamics=CompressibleDynamics())
     total_water = CenterField(grid)
