@@ -25,7 +25,7 @@ using Oceananigans: architecture
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.Fields: Field, ZeroField, interior, set!
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶜ
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶜ, ∂zᶜᶜᶜ, Δz⁻¹ᶜᶜᶠ, ∂x_zᶠᶜᶜ, ∂y_zᶜᶠᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!, NormalFlowBoundaryCondition, FieldBoundaryConditions
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
@@ -281,12 +281,33 @@ end
 function initialize_vertical_momentum_perturbation!(substepper, model::TerrainCompressibleModel, Uᴸ_outer)
     grid = model.grid
     arch = architecture(grid)
-    launch!(arch, grid, :xyz, _initialize_terrain_vertical_momentum_perturbation!,
-            substepper.momentum_perturbation.w,
-            Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
-            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
-            grid)
+    if LOAD_STAGE_CONTRAVARIANT_MOMENTUM[]
+        # The stage-entry ρw̃ is the one `update_state!` stored (port of handoff N11 84d73a82).
+        launch!(arch, grid, :xyz, _initialize_terrain_vertical_momentum_perturbation_loaded!,
+                substepper.momentum_perturbation.w,
+                Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
+                model.dynamics.contravariant_vertical_momentum,
+                grid)
+    else
+        launch!(arch, grid, :xyz, _initialize_terrain_vertical_momentum_perturbation!,
+                substepper.momentum_perturbation.w,
+                Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
+                model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
+                grid)
+    end
     return nothing
+end
+
+stage_transport_vertical_momentum(model::TerrainCompressibleModel) =
+    LOAD_STAGE_CONTRAVARIANT_MOMENTUM[] ? (model.dynamics.contravariant_vertical_momentum, nothing) :
+                                          (model.momentum.ρw, model.dynamics)
+
+@kernel function _initialize_terrain_vertical_momentum_perturbation_loaded!(ρw̃′, ρu_outer, ρv_outer, ρw_outer,
+                                                                            ρw̃_stage, grid)
+    i, j, k = @index(Global, NTuple)
+    ρw̃_outer = terrain_vertical_transport_momentum(i, j, k, grid,
+                                                    ρu_outer, ρv_outer, ρw_outer)
+    @inbounds ρw̃′[i, j, k] = ρw̃_outer - ρw̃_stage[i, j, k]
 end
 
 @kernel function _initialize_terrain_vertical_momentum_perturbation!(ρw̃′,
@@ -399,6 +420,203 @@ end
     return ∂z_p′ - correction
 end
 
+#####
+##### Stored horizontal pressure gradients (`TerrainPressureGradients`; port of handoff N3 5255302b)
+#####
+
+stored_pressure_gradients(grid::TerrainFollowingGrid) = TerrainPressureGradients(grid)
+
+# slopeₓ ℑ(∂x ϕ) + slopeᵧ ℑ(∂y ϕ) at a w-point from stored u- and v-face gradients: the expression of
+# `terrain_horizontal_linearized_pressure_gradient_correction` with each gradient evaluation replaced by
+# a load (Oceananigans' array and function interpolations are the same `FT(0.5) * (a + b)`).
+@inline function stored_horizontal_gradient_correction(i, j, k, grid, ∂xϕ, ∂yϕ)
+    slope_x = terrain_slope_x_ccf(i, j, k, grid)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid)
+    ∂xϕ_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ∂xϕ)
+    ∂yϕ_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ∂yϕ)
+    return slope_x * ∂xϕ_ccf + slope_y * ∂yϕ_ccf
+end
+
+@inline function ∇ᶻp′ˢ⁻(P::TerrainPressureGradients, i, j, k, grid,
+                        dynamics::TerrainCompressibleDynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+    correction = stored_horizontal_gradient_correction(i, j, k, grid, P.perturbation_x, P.perturbation_y)
+    return ∂z_p′ - correction
+end
+
+# ∂pᴸ loaded from the per-stage store, ∂p′ evaluated and stored for the vertical rhs of this substep.
+@inline function horizontal_pressure_gradients!(P::TerrainPressureGradients, i, j, k, grid,
+                                                dynamics::TerrainCompressibleDynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    ∂x_p′ = ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    ∂y_p′ = ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    @inbounds begin
+        P.perturbation_x[i, j, k] = ∂x_p′
+        P.perturbation_y[i, j, k] = ∂y_p′
+    end
+    store_last_face_perturbation_gradients!(P, i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    @inbounds begin
+        ∂x_p = P.linearization_x[i, j, k] + ∂x_p′
+        ∂y_p = P.linearization_y[i, j, k] + ∂y_p′
+    end
+    return ∂x_p, ∂y_p
+end
+
+# The rhs interpolation at i = Nx (j = Ny) reads face Nx+1 (Ny+1), outside the explicit step's range:
+# the last cell's thread evaluates it too (predicated, so only those warps pay).
+@inline function store_last_face_perturbation_gradients!(P, i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    Nx, Ny = size(grid, 1), size(grid, 2)
+    if has_last_face(topology(grid, 1)) & (i == Nx)
+        @inbounds P.perturbation_x[Nx + 1, j, k] = ∇ˣp′(Nx + 1, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    end
+    if has_last_face(topology(grid, 2)) & (j == Ny)
+        @inbounds P.perturbation_y[i, Ny + 1, k] = ∇ʸp′(i, Ny + 1, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    end
+    return nothing
+end
+
+#####
+##### The vertical rhs carried up the column (`_build_vertical_rhs_carried!`, port of handoff bc1c3e6e)
+#####
+##### ∇ᶻp′((ρθ)′★) at face k = Dz(i, j, k) − [slopeₓ ½(Fx(k−1) + Fx(k)) + slopeᵧ ½(Fy(k−1) + Fy(k))] with
+##### p★ = γRᵐᴸ Πᴸ (ρθ)′★, Dz(c, f) = (p★(c, f) − p★(c, f − 1)) Δz⁻¹ᶜᶜᶠ(c, f), Fx(k) = ½(∇ˣ(i) + ∇ˣ(i + 1)) and
+##### ∇ˣ(i′) = (p★(i′) − p★(i′ − 1)) Δx⁻¹ − ∂x_z ½(Ax(k) + Ax(k + 1)), Ax(f) = ½(Dz(i′ − 1, f) + Dz(i′, f))
+##### (`terrain_amg_operators.jl`, Oceananigans' `FT(0.5) * (a + b)` interpolations). Per face the sweep evaluates
+##### p★ and Dz of the five columns at the next level, the gradients of level k, and carries the rest.
+
+carries_column_stencils(grid) = (topology(grid, 1) !== Flat) & (topology(grid, 2) !== Flat)
+
+carries_vertical_rhs(dynamics::TerrainCompressibleDynamics, ::TerrainPressureGradients, grid) =
+    (dynamics.terrain_metrics.pressure_gradient_stencil isa SlopeOutsideInterpolation) & carries_column_stencils(grid)
+
+@inline function five_column_differences(i, j, f, grid, p⁻, ρθ′★, Πᴸ, γRᵐᴸ)
+    pW⁻, pC⁻, pE⁻, pS⁻, pN⁻ = p⁻
+    pW = δpᴸ(i - 1, j, f, grid, ρθ′★, Πᴸ, γRᵐᴸ)
+    pC = δpᴸ(i,     j, f, grid, ρθ′★, Πᴸ, γRᵐᴸ)
+    pE = δpᴸ(i + 1, j, f, grid, ρθ′★, Πᴸ, γRᵐᴸ)
+    pS = δpᴸ(i, j - 1, f, grid, ρθ′★, Πᴸ, γRᵐᴸ)
+    pN = δpᴸ(i, j + 1, f, grid, ρθ′★, Πᴸ, γRᵐᴸ)
+    DW = (pW - pW⁻) * Δz⁻¹ᶜᶜᶠ(i - 1, j, f, grid)
+    DC = (pC - pC⁻) * Δz⁻¹ᶜᶜᶠ(i,     j, f, grid)
+    DE = (pE - pE⁻) * Δz⁻¹ᶜᶜᶠ(i + 1, j, f, grid)
+    DS = (pS - pS⁻) * Δz⁻¹ᶜᶜᶠ(i, j - 1, f, grid)
+    DN = (pN - pN⁻) * Δz⁻¹ᶜᶜᶠ(i, j + 1, f, grid)
+    return (pW, pC, pE, pS, pN), (DW, DC, DE, DS, DN)
+end
+
+@inline function face_difference_averages(grid, D)
+    FT = eltype(grid)
+    DW, DC, DE, DS, DN = D
+    return (FT(0.5) * (DW + DC), FT(0.5) * (DC + DE), FT(0.5) * (DS + DC), FT(0.5) * (DC + DN))
+end
+
+@inline function centered_gradient_averages(i, j, k, grid, p, A, A⁺)
+    FT = eltype(grid)
+    pW, pC, pE, pS, pN = p
+    AxW, AxE, AyS, AyN = A
+    AxW⁺, AxE⁺, AyS⁺, AyN⁺ = A⁺
+    ∇xW = (pC - pW) * Δx⁻¹ᶠᶜᶜ(i,     j, k, grid) - ∂x_zᶠᶜᶜ(i,     j, k, grid) * (FT(0.5) * (AxW + AxW⁺))
+    ∇xE = (pE - pC) * Δx⁻¹ᶠᶜᶜ(i + 1, j, k, grid) - ∂x_zᶠᶜᶜ(i + 1, j, k, grid) * (FT(0.5) * (AxE + AxE⁺))
+    ∇yS = (pC - pS) * Δy⁻¹ᶜᶠᶜ(i, j,     k, grid) - ∂y_zᶜᶠᶜ(i, j,     k, grid) * (FT(0.5) * (AyS + AyS⁺))
+    ∇yN = (pN - pC) * Δy⁻¹ᶜᶠᶜ(i, j + 1, k, grid) - ∂y_zᶜᶠᶜ(i, j + 1, k, grid) * (FT(0.5) * (AyN + AyN⁺))
+    return FT(0.5) * (∇xW + ∇xE), FT(0.5) * (∇yS + ∇yN)
+end
+
+# The carried values at the start of face 2 (levels 0, 1, 2 of p★, as the 3-D kernel's face 2 reads them).
+@inline function carried_vertical_rhs_state(r, i, j)
+    grid = r.grid
+    FT = eltype(grid)
+    P = r.P
+    @inbounds begin
+        z = zero(FT)
+        p₀, _  = five_column_differences(i, j, 0, grid, (z, z, z, z, z), r.ρθ′★, r.Πᴸ, r.γRᵐᴸ)
+        p₁, D₁ = five_column_differences(i, j, 1, grid, p₀, r.ρθ′★, r.Πᴸ, r.γRᵐᴸ)
+        p₂, D₂ = five_column_differences(i, j, 2, grid, p₁, r.ρθ′★, r.Πᴸ, r.γRᵐᴸ)
+        A₁ = face_difference_averages(grid, D₁)
+        A₂ = face_difference_averages(grid, D₂)
+        Fx₁, Fy₁ = centered_gradient_averages(i, j, 1, grid, p₁, A₁, A₂)
+        pˢ₁ = δpᴸ(i, j, 1, grid, r.ρθ′, r.Πᴸ, r.γRᵐᴸ)
+        SX₁ = FT(0.5) * (P.perturbation_x[i, j, 1] + P.perturbation_x[i + 1, j, 1])
+        SY₁ = FT(0.5) * (P.perturbation_y[i, j, 1] + P.perturbation_y[i, j + 1, 1])
+        return (p = p₂, A = A₂, DzC = D₂[2], Fx = Fx₁, Fy = Fy₁, pˢ = pˢ₁, SX = SX₁, SY = SY₁,
+                ρ★ = r.ρ′★[i, j, 1], ρˢ = r.ρ′[i, j, 1])
+    end
+end
+
+# rhs(k) — the value `vertical_rhs` returns — and the carried values at the start of face k + 1.
+@inline function carried_vertical_rhs(r, state, i, j, k)
+    grid = r.grid
+    FT = eltype(grid)
+    P = r.P
+    Δτ, δτᵐ⁺, δτˢ⁻ = r.Δτ, r.δτᵐ⁺, r.δτˢ⁻
+    @inbounds begin
+        p⁺, D⁺ = five_column_differences(i, j, k + 1, grid, state.p, r.ρθ′★, r.Πᴸ, r.γRᵐᴸ)
+        A⁺ = face_difference_averages(grid, D⁺)
+        Fx, Fy = centered_gradient_averages(i, j, k, grid, state.p, state.A, A⁺)
+
+        slope_x = terrain_slope_x_ccf(i, j, k, grid)
+        slope_y = terrain_slope_y_ccf(i, j, k, grid)
+
+        # ∇ᶻp′ of (ρθ)′★
+        ∂x_p′_ccf = FT(0.5) * (state.Fx + Fx)
+        ∂y_p′_ccf = FT(0.5) * (state.Fy + Fy)
+        correction = slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
+        ∂r_p′★ = state.DzC - correction
+
+        # ∇ᶻp′ˢ⁻ of the old (ρθ)′ with the stored perturbation gradients
+        pˢ = δpᴸ(i, j, k, grid, r.ρθ′, r.Πᴸ, r.γRᵐᴸ)
+        ∂z_pˢ = (pˢ - state.pˢ) * Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
+        SX = FT(0.5) * (P.perturbation_x[i, j, k] + P.perturbation_x[i + 1, j, k])
+        SY = FT(0.5) * (P.perturbation_y[i, j, k] + P.perturbation_y[i, j + 1, k])
+        stored = slope_x * (FT(0.5) * (state.SX + SX)) + slope_y * (FT(0.5) * (state.SY + SY))
+        ∂r_p′ˢ⁻ = ∂z_pˢ - stored
+
+        Gρwᵖ = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★
+
+        ρ★ = r.ρ′★[i, j, k]
+        ρˢ = r.ρ′[i, j, k]
+        ρ′ᶜᶜᶠ★  = FT(0.5) * (state.ρ★ + ρ★)
+        ρ′ᶜᶜᶠˢ⁻ = FT(0.5) * (state.ρˢ + ρˢ)
+        Gρwᵇ = r.g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★)
+
+        ∂z²_ρw′ˢ⁻ = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, r.ρw′)
+        Gρwᵈ = - r.dˢ⁻ * ∂z²_ρw′ˢ⁻
+
+        Gρwˢ = sponge_rhs(i, j, k, grid, r.sponge, δτˢ⁻, r.ρw′)
+
+        rhs = r.ρw′[i, j, k] + Δτ * r.fw * r.Gˢρw[i, j, k] - Gρwᵖ - Gρwᵇ - Gρwᵈ - Gρwˢ
+
+        next = (; p = p⁺, A = A⁺, DzC = D⁺[2], Fx, Fy, pˢ, SX, SY, ρ★, ρˢ)
+        return rhs, next
+    end
+end
+
+@inline has_last_face(::Type{Flat}) = false
+@inline has_last_face(direction_topology) = true
+
+interpolated_face_indices(::Type{Flat}, N) = 1:1
+interpolated_face_indices(direction_topology, N) = 1:N+1
+
+# Store this stage's frozen ∂x pᴸ, ∂y pᴸ over every face the assembly and the explicit steps read
+# (levels 0:Nz: the assembly's ℑzᵃᵃᶠ at k = 1 reads level 0). The extra v-face column i = Nx+1 and
+# u-face row j = Ny+1 land in halos nothing reads.
+function store_linearization_pressure_gradients!(P::TerrainPressureGradients, model)
+    grid = model.grid
+    Nx, Ny, Nz = size(grid)
+    TX, TY, _ = topology(grid)
+    indices = KernelParameters(interpolated_face_indices(TX, Nx), interpolated_face_indices(TY, Ny), 0:Nz)
+    launch!(architecture(grid), grid, indices, _store_linearization_pressure_gradients!,
+            P.linearization_x, P.linearization_y, grid, model.dynamics)
+    return nothing
+end
+
+@kernel function _store_linearization_pressure_gradients!(∂x_pᴸ, ∂y_pᴸ, grid, dynamics)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ∂x_pᴸ[i, j, k] = AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
+        ∂y_pᴸ[i, j, k] = AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
+    end
+end
+
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeOutsideInterpolation,
                                                         ρθ′, Πᴸ, γRᵐᴸ)
@@ -498,16 +716,55 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
         β_stage == 1 ? substepper.final_stage_vertical_pressure_tendency_factor :
         substepper.vertical_pressure_tendency_factor
 
-    launch!(arch, grid, :xyz, _assemble_terrain_slow_vertical_momentum_tendency!,
-            substepper.slow_vertical_momentum_tendency,
-            Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
-            dynamics.pressure,
-            dynamics.total_density,
-            reference_pressure_field(dynamics.reference_state),
-            reference_density_field(dynamics.reference_state),
-            grid, dynamics, g, vertical_pressure_tendency_factor)
+    pressure_gradients = active_pressure_gradients(substepper)
+    if isnothing(pressure_gradients)
+        launch!(arch, grid, :xyz, _assemble_terrain_slow_vertical_momentum_tendency!,
+                substepper.slow_vertical_momentum_tendency,
+                Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
+                dynamics.pressure,
+                dynamics.total_density,
+                reference_pressure_field(dynamics.reference_state),
+                reference_density_field(dynamics.reference_state),
+                grid, dynamics, g, vertical_pressure_tendency_factor)
+    else
+        # The frozen ∂x pᴸ, ∂y pᴸ of this stage, read below and by every explicit step of the stage.
+        store_linearization_pressure_gradients!(pressure_gradients, model)
+        launch!(arch, grid, :xyz, _assemble_terrain_slow_vertical_momentum_tendency_stored!,
+                substepper.slow_vertical_momentum_tendency,
+                Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
+                dynamics.pressure,
+                dynamics.total_density,
+                reference_pressure_field(dynamics.reference_state),
+                reference_density_field(dynamics.reference_state),
+                pressure_gradients.linearization_x, pressure_gradients.linearization_y,
+                grid, g, vertical_pressure_tendency_factor)
+    end
 
     return nothing
+end
+
+@kernel function _assemble_terrain_slow_vertical_momentum_tendency_stored!(Gˢρw̃,
+                                                                           Gⁿρu, Gⁿρv, Gⁿρw,
+                                                                           pᴸ, ρᴸ, pᵣ, ρᵣ, ∂x_pᴸ, ∂y_pᴸ,
+                                                                           grid::TerrainFollowingGrid, g,
+                                                                           vertical_pressure_tendency_factor)
+    i, j, k = @index(Global, NTuple)
+
+    slope_x = terrain_slope_x_ccf(i, j, k, grid)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid)
+    Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, Gⁿρu)
+    Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, Gⁿρv)
+
+    ∂z_p′ = terrain_vertical_pressure_gradient(i, j, k, grid, pᴸ, pᵣ)
+    ρ′ᶜᶜᶠ = terrain_vertical_buoyancy_density(i, j, k, grid, ρᴸ, ρᵣ)
+    horizontal_slow_tendency = slope_x * Gⁿρu_ccf + slope_y * Gⁿρv_ccf
+    horizontal_pressure_gradient = stored_horizontal_gradient_correction(i, j, k, grid, ∂x_pᴸ, ∂y_pᴸ)
+
+    @inbounds Gˢρw̃[i, j, k] = (Gⁿρw[i, j, k] -
+                                horizontal_slow_tendency -
+                                vertical_pressure_tendency_factor * ∂z_p′ +
+                                horizontal_pressure_gradient -
+                                g * ρ′ᶜᶜᶠ) * (k > 1)
 end
 
 @kernel function _assemble_terrain_slow_vertical_momentum_tendency!(Gˢρw̃,

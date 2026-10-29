@@ -87,9 +87,18 @@ include("compressible_time_stepping.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
 
+# Switches read from the environment at load (not frozen at precompile time).
+switch_from_env(name, default) = lowercase(get(ENV, name, string(default))) != "false"
+
 function __init__()
     STORED_ENERGY_DENOMINATOR[] = lowercase(get(ENV, "BREEZE_STORED_ENERGY_DENOMINATOR", "true")) != "false"
     TERRAIN_FUSED_AUXILIARY[] = lowercase(get(ENV, "BREEZE_TERRAIN_FUSED_AUXILIARY", "true")) != "false"
+    STORED_TERRAIN_PRESSURE_GRADIENTS[] = switch_from_env("BREEZE_STORED_TERRAIN_PRESSURE_GRADIENTS", true)
+    STORED_TERRAIN_PRESSURE_GRADIENTS[] || @info "Stored terrain pressure gradients off (environment)"
+    CARRIED_VERTICAL_RHS[] = switch_from_env("BREEZE_CARRIED_VERTICAL_RHS", true)
+    CARRIED_VERTICAL_RHS[] || @info "Carried vertical rhs off (environment)"
+    LOAD_STAGE_CONTRAVARIANT_MOMENTUM[] = switch_from_env("BREEZE_LOAD_STAGE_CONTRAVARIANT_MOMENTUM", true)
+    LOAD_STAGE_CONTRAVARIANT_MOMENTUM[] || @info "Stage contravariant momentum load off (environment)"
     return nothing
 end
 

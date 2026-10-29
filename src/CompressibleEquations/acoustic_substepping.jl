@@ -94,7 +94,7 @@ Fields:
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
   tendency's condensate sedimentation term (see `cache_transport_velocity!`).
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC, PG}
     substeps :: N
     acoustic_cfl :: FT
     minimum_horizontal_spacing :: FT
@@ -137,7 +137,49 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
     density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
     time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w the moisture and tracer tendencies were built with
+    pressure_gradients :: PG                      # `TerrainPressureGradients` on terrain-following grids, else `nothing`
 end
+
+"""
+$(TYPEDEF)
+
+Horizontal pressure gradients stored on terrain-following grids (port of handoff N3 5255302b). There
+each gradient is a chain-rule derivative, and without the store several kernels evaluate the same
+values again from unchanged inputs:
+
+- `linearization_x`, `linearization_y`: the frozen ∂x pᴸ, ∂y pᴸ, stored once per stage at the start of
+  `assemble_slow_vertical_momentum_tendency!` over u-faces `1:Nx+1` × `1:Ny`, v-faces `1:Nx` × `1:Ny+1`
+  (one face in a `Flat` direction) and levels `0:Nz`; the slow ρw̃ assembly interpolates them and every
+  explicit step of the stage loads them.
+- `perturbation_x`, `perturbation_y`: ∂x p′, ∂y p′ of p′ = γRᵐᴸ Πᴸ (ρθ)′ at the substep's old (ρθ)′,
+  stored by the explicit step (its faces plus the last face `Nx+1` / `Ny+1`) and interpolated by the
+  vertical rhs of the same substep (nothing writes (ρθ)′, Πᴸ, γRᵐᴸ or their halos in between).
+
+Each stored value is the grid-float result of the expression it replaces, so the results are bitwise
+those of the in-place evaluation. Switch: `STORED_TERRAIN_PRESSURE_GRADIENTS[]`
+(`BREEZE_STORED_TERRAIN_PRESSURE_GRADIENTS=false` at load turns it off).
+"""
+struct TerrainPressureGradients{X, Y}
+    linearization_x :: X
+    linearization_y :: Y
+    perturbation_x :: X
+    perturbation_y :: Y
+end
+
+TerrainPressureGradients(grid) = TerrainPressureGradients(XFaceField(grid), YFaceField(grid),
+                                                          XFaceField(grid), YFaceField(grid))
+
+Adapt.adapt_structure(to, P::TerrainPressureGradients) =
+    TerrainPressureGradients(adapt(to, P.linearization_x), adapt(to, P.linearization_y),
+                             adapt(to, P.perturbation_x), adapt(to, P.perturbation_y))
+
+# `TerrainPressureGradients` on terrain-following grids (method in terrain_compressible_physics.jl).
+stored_pressure_gradients(grid) = nothing
+
+const STORED_TERRAIN_PRESSURE_GRADIENTS = Ref(true)
+
+# The substepper's stored gradients if the switch is on, else `nothing` (evaluate in place).
+active_pressure_gradients(substepper) = STORED_TERRAIN_PRESSURE_GRADIENTS[] ? substepper.pressure_gradients : nothing
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
     AcousticSubstepper(a.substeps,
@@ -167,7 +209,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.vertical_solver),
                        adapt(to, a.vertical_velocity_cache),
                        adapt(to, a.density_cache),
-                       adapt(to, a.time_averaged_vertical_velocity_cache))
+                       adapt(to, a.time_averaged_vertical_velocity_cache),
+                       adapt(to, a.pressure_gradients))
 
 #####
 ##### Section 2 — Constructor
@@ -271,7 +314,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               vertical_solver,
                               vertical_velocity_cache,
                               density_cache,
-                              time_averaged_vertical_velocity_cache)
+                              time_averaged_vertical_velocity_cache,
+                              stored_pressure_gradients(grid))
 end
 
 #####
@@ -916,17 +960,12 @@ end
 # `Gⁿρu` (SlowDynamics) carries non-pressure slow terms with PGF zeroed;
 # we reinstate the frozen large-step PGF here (MPAS keeps it in `tend_u_euler`).
 @kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Πᴸ,
-                                            Gⁿρu, Gⁿρv, γRᵐᴸ)
+                                            Gⁿρu, Gⁿρv, γRᵐᴸ, pressure_gradients)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ∂x_pᴸ  = AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
-        ∂x_p′  = ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
-        ∂y_pᴸ  = AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
-        ∂y_p′  = ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
-
-        ∂x_p = ∂x_pᴸ + ∂x_p′
-        ∂y_p = ∂y_pᴸ + ∂y_p′
+        ∂x_p, ∂y_p = horizontal_pressure_gradients!(pressure_gradients, i, j, k, grid, dynamics,
+                                                    ρθ′, Πᴸ, γRᵐᴸ)
 
         ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - ∂x_p)
         ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - ∂y_p)
@@ -938,6 +977,19 @@ end
 @inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) = ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 @inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) = ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 @inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+
+# The explicit step's total gradients, evaluated in place. The `TerrainPressureGradients` method
+# (loads ∂pᴸ, stores ∂p′) is in terrain_compressible_physics.jl.
+@inline function horizontal_pressure_gradients!(::Nothing, i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    ∂x_pᴸ  = AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
+    ∂x_p′  = ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    ∂y_pᴸ  = AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
+    ∂y_p′  = ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    return ∂x_pᴸ + ∂x_p′, ∂y_pᴸ + ∂y_p′
+end
+
+# The vertical rhs's ∇ᶻp′ of the old (ρθ)′, evaluated in place (stored method in terrain file).
+@inline ∇ᶻp′ˢ⁻(::Nothing, i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
 
 """
 $(TYPEDSIGNATURES)
@@ -1009,21 +1061,53 @@ end
 # top face Nz+1 lives outside the solver (impenetrability w(top) = 0).
 @kernel function _build_vertical_rhs!(ρw′_rhs, ρ′★, ρθ′★, ρ′, ρθ′, ρw′,
                                       grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻, Πᴸ, γRᵐᴸ, g, dˢ⁻,
-                                      fw, Gˢρw, sponge)
+                                      fw, Gˢρw, sponge, pressure_gradients)
     i, j, k = @index(Global, NTuple)
     @inbounds ρw′_rhs[i, j, k] = vertical_rhs(i, j, k, ρ′★, ρθ′★, ρ′, ρθ′, ρw′,
                                               grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻, Πᴸ, γRᵐᴸ, g, dˢ⁻,
-                                              fw, Gˢρw, sponge)
+                                              fw, Gˢρw, sponge, pressure_gradients)
+end
+
+#####
+##### The vertical rhs as a column launch with its vertical stencil carried (port of handoff bc1c3e6e, D3 S1′)
+#####
+##### On terrain-following grids each face of `_build_vertical_rhs!` evaluates eight chain-rule gradients of
+##### Cᴸ(ρθ)′★ over 24 vertical differences, each evaluated by four faces. `_build_vertical_rhs_carried!` walks
+##### each column upward and evaluates per face only what the face below has not (`carried_vertical_rhs`,
+##### terrain_compressible_physics.jl): the same expressions on the same operands, so the same bits.
+
+"""
+Whether the split substep builds the (ρw)′ rhs with the column launch `_build_vertical_rhs_carried!` where the
+dynamics has a carried form (`carries_vertical_rhs`; default `true`, `BREEZE_CARRIED_VERTICAL_RHS=false` at load
+turns it off). Needs the stored terrain pressure gradients. Bitwise identical either way.
+"""
+const CARRIED_VERTICAL_RHS = Ref(true)
+
+carries_vertical_rhs(dynamics, pressure_gradients, grid) = false
+
+# Faces 1 and Nz + 1 hold zero, as `_build_vertical_rhs!` stores them; faces 2…Nz the carried rhs.
+@kernel function _build_vertical_rhs_carried!(f, rhs)
+    i, j = @index(Global, NTuple)
+    Nz = size(rhs.grid, 3)
+    @inbounds begin
+        state = carried_vertical_rhs_state(rhs, i, j)
+        f[i, j, 1] = zero(eltype(f))
+        for k = 2:Nz
+            rᵏ, state = carried_vertical_rhs(rhs, state, i, j, k)
+            f[i, j, k] = rᵏ
+        end
+        f[i, j, Nz + 1] = zero(eltype(f))
+    end
 end
 
 @inline function vertical_rhs(i, j, k, ρ′★, ρθ′★, ρ′, ρθ′, ρw′,
                               grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻, Πᴸ, γRᵐᴸ, g, dˢ⁻,
-                              fw, Gˢρw, sponge)
+                              fw, Gˢρw, sponge, pressure_gradients = nothing)
     Nz = size(grid, 3)
 
     @inbounds begin
         ∂r_p′★  = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′★, Πᴸ, γRᵐᴸ)
-        ∂r_p′ˢ⁻ = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′,  Πᴸ, γRᵐᴸ)
+        ∂r_p′ˢ⁻ = ∇ᶻp′ˢ⁻(pressure_gradients, i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
         Gρwᵖ = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★ # pressure gradient
 
         ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
@@ -1701,13 +1785,14 @@ function finalize_time_averaged_velocity!(substepper, model, Nτ, peeled = false
     # `model.dynamics.dry_density` and `model.momentum.*` are still the
     # stage-entry (Uᴸ) values here — the substep loop only touched
     # substepper-owned perturbation fields. They serve as ρᴸ and ρu/v/wᴸ.
+    ρw_stage, transport_dynamics = stage_transport_vertical_momentum(model)
     launch!(arch, grid, :xyz, _finalize_time_averaged_velocity!,
             substepper.time_averaged_velocities.u,
             substepper.time_averaged_velocities.v,
             substepper.time_averaged_velocities.w,
-            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
+            model.momentum.ρu, model.momentum.ρv, ρw_stage,
             model.dynamics.dry_density,
-            grid, model.dynamics, inv_Nτ,
+            grid, transport_dynamics, inv_Nτ,
             peeled ? substepper.momentum_perturbation : nothing)
 
     map(fill_halo_regions!, substepper.time_averaged_velocities)
@@ -1747,6 +1832,18 @@ end
 
 @inline transport_ρw(i, j, k, grid, dynamics, ρu_stage, ρv_stage, ρw_stage) =
     @inbounds ρw_stage[i, j, k]
+
+"""
+Whether terrain-following stages load the stage-entry contravariant momentum ρw̃ that `update_state!` stored
+(`_compute_contravariant_velocity!`, the same expression on the same momenta and halos) instead of recomputing it
+in the perturbation initialization and the transport-velocity finalization (port of handoff N11 84d73a82). Default
+`true`; `BREEZE_LOAD_STAGE_CONTRAVARIANT_MOMENTUM=false` at load turns it off. Bitwise identical either way.
+"""
+const LOAD_STAGE_CONTRAVARIANT_MOMENTUM = Ref(true)
+
+# The finalization's stage-entry vertical transport momentum and the dynamics `transport_ρw` dispatches on:
+# (ρw, dynamics) evaluates in place; the terrain method returns (stored ρw̃, nothing), which `transport_ρw` loads.
+stage_transport_vertical_momentum(model) = (model.momentum.ρw, model.dynamics)
 
 #####
 ##### Section 11 — Full-state recovery at stage end
@@ -1966,7 +2063,8 @@ function acoustic_substep!(model, substepper, stage, advection,
             grid, model.dynamics, Δτ,
             substepper.density_potential_temperature_perturbation,
             substepper.linearization_exner,
-            Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture)
+            Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
+            active_pressure_gradients(substepper))
 
     fill_halo_regions!(substepper.momentum_perturbation.u)
     fill_halo_regions!(substepper.momentum_perturbation.v)
@@ -2045,19 +2143,35 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
     # solve and recovery substitution see a transport-consistent ρθ′★ (issue #897).
     implicit_advection_substep!(model, substepper, advection, Δτ)
 
-    launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
-            _build_vertical_rhs!,
-            substepper.vertical_solver_source_term,
-            substepper.density_predictor,
-            substepper.density_potential_temperature_predictor,
-            substepper.density_perturbation,
-            substepper.density_potential_temperature_perturbation,
-            substepper.momentum_perturbation.w,
-            grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
-            substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
-            g, dˢ⁻, substepper.vertical_momentum_tendency_factor,
-            substepper.slow_vertical_momentum_tendency,
-            substepper.sponge)
+    pressure_gradients = active_pressure_gradients(substepper)
+    if CARRIED_VERTICAL_RHS[] & carries_vertical_rhs(model.dynamics, pressure_gradients, grid)
+        # One thread per column, the vertical stencil carried from level to level (handoff bc1c3e6e).
+        rhs = (; ρ′★ = substepper.density_predictor,
+                 ρθ′★ = substepper.density_potential_temperature_predictor,
+                 ρ′ = substepper.density_perturbation,
+                 ρθ′ = substepper.density_potential_temperature_perturbation,
+                 ρw′ = substepper.momentum_perturbation.w,
+                 grid, Δτ, δτᵐ⁺, δτˢ⁻,
+                 Πᴸ = substepper.linearization_exner, γRᵐᴸ = substepper.linearization_gamma_R_mixture,
+                 g, dˢ⁻, fw = substepper.vertical_momentum_tendency_factor,
+                 Gˢρw = substepper.slow_vertical_momentum_tendency,
+                 sponge = substepper.sponge, P = pressure_gradients)
+        launch!(arch, grid, :xy, _build_vertical_rhs_carried!, substepper.vertical_solver_source_term, rhs)
+    else
+        launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
+                _build_vertical_rhs!,
+                substepper.vertical_solver_source_term,
+                substepper.density_predictor,
+                substepper.density_potential_temperature_predictor,
+                substepper.density_perturbation,
+                substepper.density_potential_temperature_perturbation,
+                substepper.momentum_perturbation.w,
+                grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
+                substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
+                g, dˢ⁻, substepper.vertical_momentum_tendency_factor,
+                substepper.slow_vertical_momentum_tendency,
+                substepper.sponge, pressure_gradients)
+    end
 
     # Step C: implicit tridiag solve for (ρw)′ with implicit-half δτᵐ⁺
     # and (when active) implicit vertical damping prefactor `dᵐ⁺`.
