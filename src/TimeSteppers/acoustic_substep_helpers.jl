@@ -20,7 +20,7 @@ using Breeze.AtmosphereModels:
     dynamics_prognostic_fields,
     implicit_advection_velocities,
     implicit_step_scheme,
-    add_implicit_sedimentation_content!
+    add_implicit_sedimentation_tendency_parts!
 
 using Breeze.CompressibleEquations: CompressibleDynamics
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
@@ -142,12 +142,14 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
         end
     end
 
-    # The tracers' solves have just moved sedimenting condensate implicitly. Collect the content
-    # of that mass, from the state the solves produced and with the same frozen velocity, as a
-    # tendency in the stage's sedimentation content, which the stage adds to the thermodynamic
-    # variable after the acoustic loop (see `remove_sedimentation_content!`).
+    # The tracers' solves have just moved sedimenting condensate implicitly. Move the content of
+    # that mass, from the state the solves produced and with the same frozen velocity, in its two
+    # parts: the sensible heat into the slow tendency the acoustic loop integrates, the composition
+    # content into the stage's sedimentation content, which bypasses the loop (see
+    # `remove_sedimentation_content!`).
     isnothing(model.timestepper.implicit_solver) ||
-        add_implicit_sedimentation_content!(model.timestepper.sedimentation_content, model, 1, velocities)
+        add_implicit_sedimentation_tendency_parts!(Gⁿ[thermodynamic_density_name(model.formulation)],
+                                                   model.timestepper.sedimentation_content, model, velocities)
 
     return nothing
 end
@@ -222,9 +224,10 @@ the first-order-upwind remainder of adaptive implicit vertical advection (whose 
 explicit flux the slow tendencies carry through the advection dispatch), plus vertically-implicit
 closure diffusion. Explicit advection schemes contribute no advection coefficients and explicit
 closures no diffusion coefficients, so each combination reduces to the right system. The solve
-runs once per RK stage after the substep loop and after the stage's sedimentation content has been
-added to the thermodynamic variable, so that content takes this solve's diffusion too, over the
-stage interval — the operator split WRF and CM1 use for their implicit vertical pieces. Under an adaptive-implicit thermodynamic scheme the advection half of
+runs once per RK stage after the substep loop, over the stage interval — the operator split WRF
+and CM1 use for their implicit vertical pieces. The stage's sedimentation composition content is
+solved with the same thermodynamic operator separately and added afterwards
+(`apply_sedimentation_content!`). Under an adaptive-implicit thermodynamic scheme the advection half of
 this solve is empty (`postloop_thermodynamic_scheme`): it was applied inside the loop. Continuity takes no implicit solve: the coupling-density tendency is the
 acoustic mass-flux divergence itself, not scalar advection.
 
@@ -320,8 +323,27 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
     end
 
     θ_name = thermodynamic_density_name(model.formulation)
+    thermodynamic_implicit_step!(prognostic[θ_name], model, implicit_solver, Δt_stage)
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply the thermodynamic variable's post-loop vertically-implicit solve over `Δt_stage` to `φ`:
+the thermodynamic variable itself, or the stage's sedimentation composition content, which
+must take the same operator before it is added to the variable (see
+`apply_sedimentation_content!`). A no-op without an implicit solver.
+"""
+function thermodynamic_implicit_step!(φ, model, implicit_solver, Δt_stage)
+    # The advective half is weighted with the frozen stage-entry (w, ρᵈ), the diffusive half with
+    # the live coupling density (see `implicit_substep!`).
+    w, ρᵈ = advecting_state(model)
+    diffusion_density = dynamics_density(model.dynamics)
+    θ_name = thermodynamic_density_name(model.formulation)
     θ_advection = field_advection_scheme(model.advection, θ_name)
-    implicit_step!(prognostic[θ_name],
+    implicit_step!(φ,
                    implicit_solver,
                    model.closure,
                    model.closure_fields,
@@ -332,6 +354,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                    postloop_thermodynamic_scheme(θ_advection, diffusion_density),
                    merge(slow_thermodynamic_velocities(model), (; w)),
                    ρᵈ)
-
     return nothing
 end
+
+thermodynamic_implicit_step!(φ, model, ::Nothing, Δt_stage) = nothing

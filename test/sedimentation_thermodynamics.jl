@@ -125,15 +125,14 @@ end
     end
 end
 
-# Rain falling through an isothermal, hydrostatically trivial column (no gravity, uniform
-# pressure) moves only latent and sensible heat that the paired content restores, so the
-# temperature must not change. The acoustic substep loop forms its pressure perturbation from
-# (ρθ)′ alone; content that reaches it reads as a spurious pressure change, which drives motion
-# and adiabatic heating and cooling. Under adaptive implicit vertical advection that error
-# concentrated where the fall Courant number crosses the split's CFL target and reached several
-# kelvin in a few minutes, before the stepper kept the content out of the loop (see
-# `remove_sedimentation_content!`).
-function acoustic_sedimentation_column(FT, scheme; fall_speed = 8, Δt = 2, stop_time = 150)
+# Rain falling through a column without gravity at uniform pressure. The acoustic substep loop
+# forms its pressure perturbation from (ρθ)′ alone, so the composition content the rain moves,
+# which changes ρθˡⁱ at fixed temperature and pressure, must not reach it (see
+# `remove_sedimentation_content!`). Under adaptive implicit vertical advection it once did, and
+# the spurious pressure drove motion and adiabatic heating and cooling of several kelvin in a few
+# minutes, concentrated where the fall Courant number crosses the split's CFL target.
+function acoustic_sedimentation_column(FT, scheme; fall_speed = 8, Δt = 2, stop_time = 150,
+                                       temperature = z -> 290)
     Oceananigans.defaults.FloatType = FT
 
     # 10 m at the surface, stretched by 15 % per level to 1.2 km: at Δt = 2 s the fall Courant
@@ -150,28 +149,61 @@ function acoustic_sedimentation_column(FT, scheme; fall_speed = 8, Δt = 2, stop
                             microphysics=SedimentationOnly(Val(:liquid), FT(fall_speed), false),
                             scalar_advection=(; ρqʳ=scheme))
 
-    # The dry density of the reference keeps the gas pressure uniform; the rain only adds mass.
-    set!(model; ρᵈ=model.dynamics.reference_state.density, T=290, qᵛ=FT(0.005),
-         qʳ=z -> ifelse(700 < z < 1000, FT(0.01), FT(0)))
+    # The gas pressure p₀ = (ρᵈ Rᵈ + ρᵛ Rᵛ) T is uniform, with vapor a fixed fraction ε of the dry
+    # air by density. The rain only adds mass, so the vapor's fraction of the total mass falls
+    # where the rain is: qᵛ = ε (1 − qʳ) / (1 + ε).
+    p₀, ε = 1e5, 0.005
+    Rᵈ, Rᵛ = TH.dry_air_gas_constant(constants), TH.vapor_gas_constant(constants)
+    rain(z) = ifelse(700 < z < 1000, 0.01, 0.0)
+    set!(model; ρᵈ = z -> p₀ / ((Rᵈ + ε * Rᵛ) * temperature(z)), T = temperature,
+         qᵛ = z -> ε * (1 - rain(z)) / (1 + ε), qʳ = rain)
 
+    p = sedimentation_column_values(model.dynamics.pressure)
+    T⁰ = sedimentation_column_values(model.temperature)
     rain⁰ = sum(sedimentation_column_values(model.microphysical_fields.ρqʳ) .* diff(z))
     largest_departure = 0.0
     for _ in 1:round(Int, stop_time / Δt)
         time_step!(model, FT(Δt))
         T = sedimentation_column_values(model.temperature)
-        largest_departure = max(largest_departure, maximum(abs, T .- 290))
+        largest_departure = max(largest_departure, maximum(abs, T .- T⁰))
     end
     rain = sum(sedimentation_column_values(model.microphysical_fields.ρqʳ) .* diff(z))
 
-    return (; model, largest_departure, rain_left = rain / rain⁰)
+    return (; model, pressure_spread = (maximum(p) - minimum(p)) / maximum(p), largest_departure,
+              rain_left = rain / rain⁰, temperature = sedimentation_column_values(model.temperature), T⁰)
 end
 
 @testset "Sedimentation keeps an isothermal column's temperature on the acoustic stepper [$FT]" for FT in test_float_types()
     adaptive = UpwindBiased(FT; order=1, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+
+    # The fixture starts at rest and stays there while nothing falls.
+    resting = acoustic_sedimentation_column(FT, adaptive; fall_speed = 0)
+    @test resting.pressure_spread < 10eps(FT)
+    @test resting.largest_departure < 1e-6
+
+    # An isothermal column moves no sensible heat, so the temperature must not change.
     for (scheme, Δt) in ((UpwindBiased(FT; order=1), 1), (adaptive, 2), (adaptive, 5))
         column = acoustic_sedimentation_column(FT, scheme; Δt)
         @test column.model.timestepper isa Breeze.TimeSteppers.AcousticRungeKutta3
+        @test column.pressure_spread < 10eps(FT)
         @test column.rain_left < 0.2 # most of the rain has fallen out of the column
-        @test column.largest_departure < 0.1
+        @test column.largest_departure < 0.05
+    end
+end
+
+# Through a column cooling with height, the falling rain carries its sensible heat down, a real
+# heating that changes the pressure. It joins the slow tendency the substep loop integrates while
+# only the composition content bypasses the loop, so at any time step the adaptive split reaches
+# the temperature an explicit run reaches at a small one.
+@testset "Sedimenting rain carries its sensible heat at any time step on the acoustic stepper [$FT]" for FT in test_float_types()
+    adaptive = UpwindBiased(FT; order=1, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+    cooling_with_height(z) = 300 - z / 100
+    reference = acoustic_sedimentation_column(FT, UpwindBiased(FT; order=1); Δt = 0.5, temperature = cooling_with_height)
+    signal = maximum(abs, reference.temperature .- reference.T⁰)
+    @test reference.pressure_spread < 10eps(FT)
+    @test signal > 0.1
+    for Δt in (2, 5)
+        column = acoustic_sedimentation_column(FT, adaptive; Δt, temperature = cooling_with_height)
+        @test maximum(abs, column.temperature .- reference.temperature) < signal / 5
     end
 end

@@ -251,13 +251,14 @@ thermodynamic variable's own, the SSP stepper calls `implicit_sedimentation_step
 the content of the remainder from the first-order fluxes the solves actually applied, at the
 solved state,
 so the heat follows the mass at any fall Courant number and then takes the thermodynamic
-variable's implicit transport and diffusion. The acoustic stepper keeps both parts of the content
-out of its substep loop. The loop forms its pressure perturbation from the thermodynamic
-perturbation alone, and content moved with condensate at fixed temperature changes ``ρθˡⁱ``
-without changing the pressure, so fed to the loop it would read as a spurious pressure
-perturbation. Each stage instead collects the explicit content and the implicit remainder's as a
-tendency, adds them after the loop, before the post-loop diffusion solve (a first-order splitting
-difference from the loop's implicit thermodynamic transport), and takes them back out of the
+variable's implicit transport and diffusion. The acoustic stepper splits the content, explicit
+and implicit, in two. Its substep loop forms the pressure perturbation from the thermodynamic
+perturbation alone. The sensible heat the arriving mass brings is a real heating, so it joins the
+slow tendency the loop integrates. The composition content changes ``ρθˡⁱ`` at fixed temperature
+and so leaves the pressure alone; fed to the loop it would read as a spurious pressure
+perturbation. Each stage therefore collects it separately, takes it through the thermodynamic
+variable's post-loop solve, adds it after that solve (a first-order splitting difference from the
+loop's implicit thermodynamic transport), and takes exactly that increment back out of the
 stage-entry state of the next stage. Rain-out thus leaves latent warming aloft and pre-cools
 the layer that later evaporates the arriving rain, the mechanism that builds cold pools.
 

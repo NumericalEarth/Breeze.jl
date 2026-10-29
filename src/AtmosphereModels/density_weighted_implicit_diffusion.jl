@@ -263,15 +263,15 @@ end
 ##### rest of φ. The SSP stepper therefore orders a stage: the tracers' solves, this step, the
 ##### thermodynamic variable's solve.
 #####
-##### The acoustic stepper keeps every sedimentation content, explicit and implicit, out of its
-##### substep loop. The loop's linearized pressure reads any change of ρθ as a change of pressure,
-##### but content moved with condensate at fixed temperature changes ρθˡⁱ and leaves the pressure
-##### alone. So the stage collects both parts as a tendency, the implicit one through
-##### `add_implicit_sedimentation_content!`, and adds them after the loop, before the thermodynamic
-##### variable's post-loop solve (see `AcousticRungeKutta3`). There the content takes only that
-##### solve's diffusion, not the implicit transport the loop applied to the rest of φ: a
-##### first-order splitting difference. The mass the content follows is still the mass the
-##### tracers' solves moved.
+##### The acoustic stepper splits the content its sedimentation moves, explicit and implicit, in
+##### two (`add_sedimentation_tendency_parts!`). The substep loop's linearized pressure reads any
+##### change of ρθ as a change of pressure. The sensible heat the arriving mass brings is one, so it
+##### joins the slow tendency the loop integrates. The composition content, which changes ρθˡⁱ at
+##### fixed temperature and so leaves the pressure alone, bypasses the loop: the stage collects it,
+##### solves it with the thermodynamic variable's post-loop operator, and adds it after that solve
+##### (see `AcousticRungeKutta3`). It thus takes the post-loop diffusion but not the implicit
+##### transport the loop applied to the rest of φ: a first-order splitting difference. The mass the
+##### content follows is still the mass the tracers' solves moved.
 #####
 
 @inline function implicit_sedimentation_mass_fluxes(i, j, k, grid, advection::AIVA, wᵗ, wˢ, ρq, ρ)
@@ -316,32 +316,20 @@ whose vertical component the tracers' solves split, `Δt` the interval they solv
 `formulation` selects the [`condensate_content`](@ref) methods, defaulting to the model's.
 The SSP stepper calls this between the tracers' solves of a stage and the thermodynamic
 variable's solve, so the moved content takes the same implicit transport and diffusion as the
-rest of the field. The acoustic stepper collects the same content as a tendency instead
-([`add_implicit_sedimentation_content!`](@ref)) and applies it after its substep loop (see the
-note above). A no-op when no condensate is advected adaptively implicitly.
+rest of the field. The acoustic stepper splits the same content in two instead
+([`add_implicit_sedimentation_tendency_parts!`](@ref); see the note above). A no-op when no
+condensate is advected adaptively implicitly.
 
 For potential temperature this is a derivative-times-increment update, not an exact finite
 thermal-energy reconstruction. Matching the implicit mass flux alone does not remove that
 finite-step error.
 """
-implicit_sedimentation_step!(model, Δt, velocities, formulation = model.formulation) =
-    add_implicit_sedimentation_content!(thermodynamic_density(model.formulation), model, Δt, velocities, formulation)
-
-"""
-$(TYPEDSIGNATURES)
-
-Add to `φ` `Δt` times the sedimentation content tendency of the first-order remainder that the
-adaptive implicit vertical solves applied to the tracers, at the solved state. With `φ` the
-[`thermodynamic_density`](@ref) this is [`implicit_sedimentation_step!`](@ref); with `Δt = 1`
-it adds the tendency itself, which `AcousticRungeKutta3` collects in its stage sedimentation
-content. The remaining arguments are those of [`implicit_sedimentation_step!`](@ref). A no-op
-when no condensate is advected adaptively implicitly.
-"""
-function add_implicit_sedimentation_content!(φ, model, Δt, velocities, formulation = model.formulation)
+function implicit_sedimentation_step!(model, Δt, velocities, formulation = model.formulation)
     condensates = values(model.sedimentation)
     implicit_sedimentation(condensates) || return nothing
     grid = model.grid
     arch = grid.architecture
+    φ = thermodynamic_density(model.formulation)
     launch!(arch, grid, :xyz, _implicit_sedimentation_step!,
             φ, grid, kernel_time_step(arch, grid, Δt), condensates, velocities.w,
             formulation, model.dynamics, model.thermodynamic_constants, model.microphysics,
@@ -382,6 +370,60 @@ condensate [`sedimentation_tendency`](@ref) to: the slow tendency `G` itself by 
 `AcousticRungeKutta3`).
 """
 sedimentation_tendency_target(timestepper, G) = G
+
+"""
+$(TYPEDSIGNATURES)
+
+Add the explicit condensate sedimentation tendency of the thermodynamic variable in its two parts
+(see [`sedimentation_tendency`](@ref)): the sensible heat the arriving mass brings to `G`, and the
+composition content, the change at fixed temperature, to `C`. The arguments are otherwise
+those of [`add_sedimentation_tendency!`](@ref). `AcousticRungeKutta3` integrates `G` in its
+substep loop and moves `C` outside it. A no-op when no condensate sediments.
+"""
+function add_sedimentation_tendency_parts!(G, C, model, tracer_transport_velocity)
+    condensates = values(model.sedimentation)
+    isempty(condensates) && return nothing
+    grid = model.grid
+    launch!(grid.architecture, grid, :xyz, _add_sedimentation_tendency_parts!,
+            G, C, grid, condensates, tracer_transport_velocity, explicit_condensate_mass_fluxes,
+            model.formulation, model.dynamics, model.thermodynamic_constants, model.microphysics,
+            model.microphysical_fields, specific_prognostic_moisture(model), model.temperature)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Like [`add_sedimentation_tendency_parts!`](@ref), for the first-order remainder that the adaptive
+implicit vertical solves have just applied to the tracers, at the solved state (the tendency
+[`implicit_sedimentation_step!`](@ref) integrates). `velocities` are the transport velocities whose
+vertical component the solves split. A no-op when no condensate is advected adaptively
+implicitly.
+"""
+function add_implicit_sedimentation_tendency_parts!(G, C, model, velocities)
+    condensates = values(model.sedimentation)
+    implicit_sedimentation(condensates) || return nothing
+    grid = model.grid
+    formulation = model.formulation
+    launch!(grid.architecture, grid, :xyz, _add_sedimentation_tendency_parts!,
+            G, C, grid, condensates, velocities.w, implicit_condensate_mass_fluxes,
+            formulation, model.dynamics, model.thermodynamic_constants, model.microphysics,
+            model.microphysical_fields, specific_prognostic_moisture(model),
+            content_temperature(formulation, model.temperature))
+    return nothing
+end
+
+@kernel function _add_sedimentation_tendency_parts!(G, C, grid, condensates, wᵗ, mass_fluxes, formulation, dynamics,
+                                                    constants, microphysics, microphysical_fields,
+                                                    specific_prognostic_moisture, temperature)
+    i, j, k = @index(Global, NTuple)
+    composition, sensible = sedimentation_content_tendency_parts(i, j, k, grid, condensates, wᵗ, mass_fluxes,
+                                                                 formulation, dynamics, constants, microphysics,
+                                                                 microphysical_fields, specific_prognostic_moisture,
+                                                                 temperature)
+    @inbounds G[i, j, k] += sensible
+    @inbounds C[i, j, k] += composition
+end
 
 @kernel function _add_sedimentation_tendency!(G, grid, condensates, wᵗ, formulation, dynamics, constants,
                                               microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
