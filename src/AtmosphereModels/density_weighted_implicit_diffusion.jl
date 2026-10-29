@@ -348,8 +348,17 @@ function add_sedimentation_tendency!(G, model, tracer_transport_velocity)
     launch!(grid.architecture, grid, :xyz, _add_sedimentation_tendency!,
             G, grid, condensates, tracer_transport_velocity, model.formulation, model.dynamics,
             model.thermodynamic_constants, model.microphysics, model.microphysical_fields,
-            specific_prognostic_moisture(model), model.temperature)
+            specific_prognostic_moisture(model), explicit_content_source(model))
     return nothing
+end
+
+# T17-mp1m: the condensate contents stored by the temperature-and-pressure pass of the same
+# `update_state!` (a `(; χˡ, χⁱ, hˡ, hⁱ, ∂φ∂h)` of fields), or `nothing`. Extended where stored.
+stored_condensate_content(model) = nothing
+
+function explicit_content_source(model)
+    content = stored_condensate_content(model)
+    return isnothing(content) ? model.temperature : content
 end
 
 @kernel function _add_sedimentation_tendency!(G, grid, condensates, wᵗ, formulation, dynamics, constants,

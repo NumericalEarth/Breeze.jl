@@ -531,7 +531,32 @@ function PotentialTemperatureFormulations.energy_source_denominator_field(model:
     return get!(() -> CenterField(model.grid), ENERGY_SOURCE_DENOMINATORS, model.temperature)
 end
 
-stored_energy_denominator(model) = PotentialTemperatureFormulations.energy_source_denominator_field(model)
+# T17-mp1m: with stored condensate content, the slot carries (denominator, content); both are
+# stored from the (q, T) of `compute_temperature_and_pressure_at!`.
+function stored_energy_denominator(model)
+    denominator = PotentialTemperatureFormulations.energy_source_denominator_field(model)
+    content = AtmosphereModels.stored_condensate_content(model)
+    return isnothing(content) ? denominator : (denominator, content)
+end
+
+@inline function store_energy_source_denominator!(stores::Tuple, i, j, k, formulation::LiquidIcePotentialTemperatureFormulation,
+                                                  dynamics, ρᵈ, ρ, q, T, constants)
+    denominator, content = stores
+    store_energy_source_denominator!(denominator, i, j, k, formulation, dynamics, ρᵈ, ρ, q, T, constants)
+    PotentialTemperatureFormulations.store_condensate_content!(content, i, j, k, formulation, dynamics, q, T, constants)
+    return nothing
+end
+
+const STORED_CONDENSATE_CONTENT = Ref(true)
+const CONDENSATE_CONTENTS = IdDict{Any, Any}()
+
+function AtmosphereModels.stored_condensate_content(model::AtmosphereModel{<:CompressibleDynamics, <:LiquidIcePotentialTemperatureFormulation})
+    (STORED_CONDENSATE_CONTENT[] && !isempty(values(model.sedimentation))) || return nothing
+    return get!(CONDENSATE_CONTENTS, model.temperature) do
+        g = model.grid
+        (; χˡ = CenterField(g), χⁱ = CenterField(g), hˡ = CenterField(g), hⁱ = CenterField(g), ∂φ∂h = CenterField(g))
+    end
+end
 
 # T17-mp1m: the MP1M kernel rebuilds 𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ, solver) with
 # θ = potential_temperature[i, j, k] (stored by the auxiliary pass as ρθ / ρᵈ, the θ the

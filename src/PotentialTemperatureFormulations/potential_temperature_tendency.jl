@@ -203,6 +203,39 @@ end
                                                     𝒰.potential_temperature, T)
 end
 
+# T17-mp1m: the content stored per cell by the temperature-and-pressure pass from the same
+# (q, θ, T) the method above reads, by the same `potential_temperature_condensate_content`.
+const StoredCondensateContent = NamedTuple{(:χˡ, :χⁱ, :hˡ, :hⁱ, :∂φ∂h)}
+
+@inline function AtmosphereModels.condensate_content(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
+                                                     dynamics, constants, microphysics, microphysical_fields,
+                                                     specific_prognostic_moisture, c::StoredCondensateContent)
+    @inbounds begin
+        χˡ = c.χˡ[i, j, k]
+        χⁱ = c.χⁱ[i, j, k]
+        hˡ = c.hˡ[i, j, k]
+        hⁱ = c.hⁱ[i, j, k]
+        ∂φ∂h = c.∂φ∂h[i, j, k]
+    end
+    return (; χ = (χˡ, χⁱ), h = (hˡ, hⁱ), ∂φ∂h)
+end
+
+@inline store_condensate_content!(::Nothing, i, j, k, formulation, dynamics, q, T, constants) = nothing
+
+@inline function store_condensate_content!(c, i, j, k, formulation::LiquidIcePotentialTemperatureFormulation,
+                                           dynamics, q, T, constants)
+    @inbounds θ = formulation.potential_temperature[i, j, k]
+    content = potential_temperature_condensate_content(dynamics, constants, q, θ, T)
+    @inbounds begin
+        c.χˡ[i, j, k] = content.χ[1]
+        c.χⁱ[i, j, k] = content.χ[2]
+        c.hˡ[i, j, k] = content.h[1]
+        c.hⁱ[i, j, k] = content.h[2]
+        c.∂φ∂h[i, j, k] = content.∂φ∂h
+    end
+    return nothing
+end
+
 # The content, transported enthalpies and thermal response of a cell with mass fractions `q`,
 # potential temperature `θ` and temperature `T`, with Π = (T − D) / θ
 @inline function potential_temperature_condensate_content(dynamics, constants, q, θ, T)
