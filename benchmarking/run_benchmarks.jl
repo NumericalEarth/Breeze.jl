@@ -38,6 +38,26 @@ using Reactant: Reactant
 using Oceananigans.Architectures: ReactantState
 using CUDA: CUDABackend
 using AMDGPU: ROCBackend
+
+# TEMPORARY, for the kernel AD heap corruption: remove before merging. BREEZE_DUMP_MLIR=<dir> dumps
+# the input and output of every MLIR pass pipeline there. Reactant's kernel AD pipeline also
+# serializes the GPU kernels to binaries, where NVPTX aborts the process on an invalid symbol name,
+# so it is split just before `enzymexla-gpu-module-to-binary`: the module handed to it is dumped
+# (as `post_<key>_before_binary_pm`) before the abort.
+if !isempty(get(ENV, "BREEZE_DUMP_MLIR", ""))
+    Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(ENV["BREEZE_DUMP_MLIR"])
+    Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+
+    function Reactant.Compiler.run_pass_pipeline!(mod::Reactant.MLIR.IR.Module, pipeline::String, key::String;
+                                                  enable_verifier=true)
+        run!(p, k) = invoke(Reactant.Compiler.run_pass_pipeline!, Tuple{Any, Any, Any}, mod, p, k; enable_verifier)
+        split_at = findfirst(",enzymexla-gpu-module-to-binary", pipeline)
+        isnothing(split_at) && return run!(pipeline, key)
+        @info "Splitting the $key pass pipeline before enzymexla-gpu-module-to-binary"
+        run!(pipeline[1:first(split_at)-1], key * "_before_binary")
+        return run!(pipeline[first(split_at)+1:end], key * "_binary")
+    end
+end
 using Metal: MetalBackend
 
 # Load CloudMicrophysics extension for OneMomentCloudMicrophysics

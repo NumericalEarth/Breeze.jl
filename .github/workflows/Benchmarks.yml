@@ -63,6 +63,8 @@ jobs:
             enzyme_jax_branch: 'pb/kernel-ad'
             enzyme_jax_run: '40917264751'
             reactant_rev: '2099aba10460a94962cfa1fd8a7ca4c717140c2b'
+            # TEMPORARY: dump every MLIR pass pipeline to find where the compile corrupts the heap
+            dump_mlir: 'mlir_dumps'
             timeout: 60
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial --kernels kernelad'
     defaults:
@@ -177,6 +179,7 @@ jobs:
         timeout-minutes: ${{ matrix.timeout || 45 }}
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
+          BREEZE_DUMP_MLIR: ${{ matrix.dump_mlir }}
         run: |
           julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
       - name: Stop earlyoom
@@ -189,8 +192,8 @@ jobs:
           retention-days: 90
           overwrite: false
       - name: "Upload MLIR dumps as artifacts"
-        # Only the tendency / model_tendency matrix entries dump MLIR (Reactant
-        # backend); other entries produce no files and are skipped.
+        # Only the tendency / model_tendency matrix entries and those with `dump_mlir`
+        # dump MLIR (Reactant backend); other entries produce no files and are skipped.
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
