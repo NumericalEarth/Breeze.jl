@@ -1045,3 +1045,14 @@ end
         @test adapt(nothing, ref) isa Breeze.Thermodynamics.ReferenceState
     end
 end
+
+@testset "moist_hydrostatic_pressure of a constant profile is the closed form [$(FT)]" for FT in test_float_types()
+    constants = ThermodynamicConstants(FT)
+    p₀, pˢᵗ, θ = FT(101325), FT(1e5), FT(300)
+
+    for z in FT.((0, 750, 4000)), qᵛ in FT.((0, 0.012))
+        closed_form = moist_hydrostatic_pressure(z, p₀, θ, qᵛ, pˢᵗ, constants)
+        integrated = moist_hydrostatic_pressure(z, p₀, height -> θ, height -> qᵛ, pˢᵗ, constants)
+        @test closed_form ≈ integrated rtol = 10 * sqrt(eps(FT))
+    end
+end
