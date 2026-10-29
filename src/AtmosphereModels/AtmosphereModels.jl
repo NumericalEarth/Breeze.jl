@@ -164,6 +164,7 @@ function __init__()
     FILLS_TOGETHER[] = env_switch("BREEZE_FILLS_TOGETHER", true)
     SKIP_DEAD_FILLS[] = env_switch("BREEZE_SKIP_DEAD_FILLS", true)
     BATCHED_Z_BCS[] = env_switch("BREEZE_BATCHED_Z_BCS", true)
+    COLUMN_SEDIMENTATION[] = env_switch("BREEZE_COLUMN_SEDIMENTATION", true)  # density_weighted_implicit_diffusion.jl
     read_kernel_argument_cache_switches!()  # kernel_arguments.jl
     return nothing
 end

@@ -1132,6 +1132,12 @@ core) turns it into the change of the coupling-weighted prognostic.
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     c⁺ = condensate_content(i, j, min(k + 1, grid.Nz), grid, formulation, dynamics, constants,
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
+    return sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, dynamics, c⁻, c⁰, c⁺)
+end
+
+# The tendency from the contents `c⁻, c⁰, c⁺` of the cells below, at and above k (clamped as above).
+# T20-mp1m: the column kernel carries them up the column and computes each cell's content once.
+@inline function sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, dynamics, c⁻, c⁰, c⁺)
     ρ = total_density(dynamics)
     ρᵈ = dynamics_density(dynamics)
     Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)

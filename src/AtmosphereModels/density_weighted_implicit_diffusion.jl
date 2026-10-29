@@ -345,11 +345,40 @@ function add_sedimentation_tendency!(G, model, tracer_transport_velocity)
     condensates = values(model.sedimentation)
     isempty(condensates) && return nothing
     grid = model.grid
-    launch!(grid.architecture, grid, :xyz, _add_sedimentation_tendency!,
+    kernel, range = COLUMN_SEDIMENTATION[] ? (_add_sedimentation_tendency_column!, :xy) :
+                                             (_add_sedimentation_tendency!, :xyz)
+    launch!(grid.architecture, grid, range, kernel,
             G, grid, condensates, tracer_transport_velocity, model.formulation, model.dynamics,
             model.thermodynamic_constants, model.microphysics, model.microphysical_fields,
             specific_prognostic_moisture(model), explicit_content_source(model))
     return nothing
+end
+
+# T20-mp1m: `BREEZE_COLUMN_SEDIMENTATION` (default true, read in `__init__`, consulted at every launch):
+# the explicit sedimentation tendency runs one thread per column, carrying the condensate contents of
+# cells k − 1, k, k + 1 up the column, so each cell's content (a `log` and the composition algebra) is
+# evaluated once instead of three times. Same `condensate_content` on the same inputs and the same
+# `sedimentation_content_tendency`, so the result is identical; `false` restores the pointwise kernel.
+const COLUMN_SEDIMENTATION = Ref(true)
+
+@kernel function _add_sedimentation_tendency_column!(G, grid, condensates, wᵗ, formulation, dynamics, constants,
+                                                     microphysics, microphysical_fields, specific_prognostic_moisture,
+                                                     temperature)
+    i, j = @index(Global, NTuple)
+    Nz = grid.Nz
+    c⁰ = condensate_content(i, j, 1, grid, formulation, dynamics, constants,
+                            microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
+    c⁻ = c⁰
+    for k in 1:Nz
+        k⁺ = min(k + 1, Nz)
+        c⁺ = condensate_content(i, j, k⁺, grid, formulation, dynamics, constants,
+                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
+        @inbounds G[i, j, k] += sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ,
+                                                              explicit_condensate_mass_fluxes, dynamics,
+                                                              c⁻, c⁰, c⁺)
+        c⁻ = c⁰
+        c⁰ = c⁺
+    end
 end
 
 # T17-mp1m: the condensate contents stored by the temperature-and-pressure pass of the same
