@@ -207,6 +207,6 @@ end
     @info "Mean temperature change over $(Nsteps) steps of $(Δt) s" exact nearest stochastic
 
     @test exact > 0
-    @test abs(nearest - exact) > 0.2 * exact
-    @test abs(stochastic - exact) < 0.02 * exact
+    @test nearest ≈ exact rtol =  0.2
+    @test stochastic ≈ exact rtol = 0.02
 end
