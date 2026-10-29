@@ -333,10 +333,27 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.microphysical_fields,
             model.moisture_density)
 
+    fill_thermodynamic_auxiliaries!(model, formulation_halo_fields(model.formulation))
+
+    return nothing
+end
+
+# E19/P4a call site: T and the formulation's diagnostic field in one tupled fill, then the
+# microphysical fields (the only ones taking the boundary-condition arguments).
+function fill_thermodynamic_auxiliaries!(model, formulation_fields)
+    if FILLS_TOGETHER[]
+        fill_halo_regions!((model.temperature, formulation_fields...))
+        fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
+    else
+        fill_thermodynamic_auxiliaries!(model, nothing)
+    end
+    return nothing
+end
+
+function fill_thermodynamic_auxiliaries!(model, ::Nothing)
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(model.microphysical_fields, kernel_boundary_condition_args(model)...)
     fill_halo_regions!(model.formulation)
-
     return nothing
 end
 

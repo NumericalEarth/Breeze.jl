@@ -976,8 +976,7 @@ function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleMod
     dynamics = model.dynamics
 
     # Ensure halos are filled
-    fill_halo_regions!(dynamics.dry_density)
-    fill_halo_regions!(prognostic_fields(model.formulation))
+    AtmosphereModels.fill_halo_regions_together!((dynamics.dry_density, values(prognostic_fields(model.formulation))...))
 
     # Compute temperature and pressure (same as non-terrain CompressibleModel)
     launch!(arch, grid, :xyz,
@@ -995,8 +994,7 @@ function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleMod
             model.thermodynamic_constants,
             stored_energy_denominator(model))
 
-    fill_halo_regions!(model.temperature)
-    fill_halo_regions!(dynamics.pressure)
+    AtmosphereModels.fill_halo_regions_together!((model.temperature, dynamics.pressure))
 
     return nothing
 end
