@@ -829,7 +829,7 @@ end
         @test column(model.microphysical_fields.ρqʳ) ≈ ρᵈ .* rʳ_ref rtol=rtol
         @test column(model.formulation.potential_temperature_density) ≈ ρᵈ .* θˡⁱ_ref rtol=rtol
         @test column(model.moisture_density) == zeros(FT, Nz)
-        precipitation_flux = Array(interior(compute!(surface_precipitation_flux(model))))
+        precipitation_flux = Array(interior(compute!(bottom_precipitation_flux(model))))
         @test all(≈(surface_mass_flux_legacy; rtol), precipitation_flux)
         @test surface_mass_flux_legacy > 0
         @test sum(rʳ_ref .* ρᵈ) < sum(qʳ .* ρ) # rain actually left through the surface

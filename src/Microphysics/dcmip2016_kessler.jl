@@ -5,6 +5,7 @@ using ..Thermodynamics:
     PlanarLiquidSurface,
     StaticEnergyState,
     density,
+    liquid_latent_heat,
     mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity,
@@ -127,7 +128,7 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
   cell, which only loses rain through its bottom face. Vapor and cloud partial densities are not
   touched by sedimentation. The update is subcycled to satisfy `substep_cfl` on every cell's
   thickness (the DCMIP2016 Fortran uses the distance between levels and a half cell at the top).
-- **Surface precipitation.** `surface_precipitation_flux` is the substep-mean bottom-face flux
+- **Surface precipitation.** `bottom_precipitation_flux` is the substep-mean bottom-face flux
   `(ρqʳ 𝕎ʳ)₁`, exactly the water removed from the column; `precipitation_rate` is that flux per
   unit of the final surface density.
 - **Negative inputs.** Negative water partial densities handed to the kernel (for example by
@@ -611,7 +612,8 @@ For a `LiquidIcePotentialTemperatureState`,
 and ``∂T/∂rˡ = (1 - qᵗ) ∂T/∂qˡ``. The leading term is ``ℒˡᵣ / cᵖᵐ``; the DCMIP2016 Fortran uses
 ``ℒˡᵣ / cᵖᵈ``, which differs by the moist heat capacity and neglects the composition dependence of
 the Exner function. For a `StaticEnergyState`,
-``T = (s - g z + ℒˡᵣ qˡ) / cᵖᵐ`` gives ``∂T/∂qˡ = (ℒˡᵣ - T (cˡ - cᵖᵛ)) / cᵖᵐ``.
+``T = (s - g z + ℒˡ₀ qˡ) / cᵖᵐ``, with the latent-heat intercept ``ℒˡ₀`` at zero kelvin, gives
+``∂T/∂qˡ = (ℒˡ₀ - T (cˡ - cᵖᵛ)) / cᵖᵐ = ℒˡ(T) / cᵖᵐ``.
 """
 @inline function phase_change_temperature_slope(𝒰::LiquidIcePotentialTemperatureState, constants)
     q = 𝒰.moisture_mass_fractions
@@ -636,12 +638,10 @@ end
 @inline function phase_change_temperature_slope(𝒰::StaticEnergyState, constants)
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    cᵖᵛ = constants.vapor.heat_capacity
-    cˡ = constants.liquid.heat_capacity
-    ℒˡᵣ = constants.liquid.reference_latent_heat
     T = temperature(𝒰, constants)
+    ℒˡ = liquid_latent_heat(T, constants)
     qᵗ = total_specific_moisture(q)
-    ∂T∂qˡ = (ℒˡᵣ - T * (cˡ - cᵖᵛ)) / cᵖᵐ
+    ∂T∂qˡ = ℒˡ / cᵖᵐ
     return ∂T∂qˡ * (1 - qᵗ)
 end
 
@@ -916,7 +916,7 @@ end
     end
 
     # Surface precipitation rate: the substep-mean surface mass flux per unit of the final
-    # surface density, so that `surface_precipitation_flux` (ρ × rate) recovers the flux exactly.
+    # surface density, so that `bottom_precipitation_flux` (ρ × rate) recovers the flux exactly.
     @inbounds begin
         ρᵗ₁ = ρqᵛ[i, j, 1] + μ.ρqᶜˡ[i, j, 1] + μ.ρqʳ[i, j, 1]
         final_surface_density = ifelse(dry_air_coupled, coupling_density[i, j, 1] + ρᵗ₁, density[i, j, 1])

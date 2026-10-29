@@ -4,7 +4,7 @@ using Breeze
 using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
-using Breeze.AtmosphereModels: microphysics_model_update!, surface_precipitation_flux, standard_pressure
+using Breeze.AtmosphereModels: microphysics_model_update!, bottom_precipitation_flux, standard_pressure
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, phase_change_temperature_slope
 using Breeze.Thermodynamics:
     LiquidIcePotentialTemperatureState,
@@ -97,7 +97,7 @@ water_densities(model) = (column(model.moisture_density),
 
 rain_inventory(model, Δz) = sum(column(model.microphysical_fields.ρqʳ) .* Δz)
 water_inventory(model, Δz) = sum(sum(water_densities(model)) .* Δz)
-surface_flux(model) = first(Array(interior(compute!(surface_precipitation_flux(model)))))
+surface_flux(model) = first(Array(interior(compute!(bottom_precipitation_flux(model)))))
 
 saturation_profile(model) = begin
     ρ = column(model.dynamics.reference_state.density)
