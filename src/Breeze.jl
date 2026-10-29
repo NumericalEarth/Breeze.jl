@@ -327,7 +327,9 @@ include("kernel_launch_configurations.jl")
 const kernel_launch_entries = Ref(0)
 
 function __init__()
-    kernel_launch_entries[] = define_kernel_launch_configurations!()
+    # Not while another package precompiles (evaluation into a closed module is refused then); entries are only read at run time.
+    generating_output = ccall(:jl_generating_output, Cint, ()) == 1
+    generating_output || (kernel_launch_entries[] = define_kernel_launch_configurations!())
     return nothing
 end
 
