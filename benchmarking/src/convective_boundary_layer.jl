@@ -197,6 +197,9 @@ function convective_boundary_layer(arch = CPU();
         )
     end
 
+    # The initial density reads the reference state, which on ReactantState `initialize!` builds
+    initialize_on_reactant!(model)
+
     # Set initial conditions: the background profile plus random perturbations ±0.25 K in the
     # lowest 400 m
     δθ = 0.25       # K, perturbation amplitude

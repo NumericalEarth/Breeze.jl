@@ -17,7 +17,7 @@ using Adapt: adapt
 #####
 
 using Breeze: ReferenceState, AnelasticDynamics, total_density
-using Breeze.AtmosphereModels: materialize_dynamics, default_dynamics
+using Breeze.AtmosphereModels: materialize_dynamics, initialize_dynamics!, default_dynamics
 using Breeze.AtmosphereModels: dynamics_pressure, pressure_anomaly, total_pressure
 using Breeze.AtmosphereModels: dynamics_density
 
@@ -107,18 +107,21 @@ using Breeze.Thermodynamics: pressure_balanced_density
         @test total_density(dynamics) === dynamics.total_density
     end
 
-    @testset "materialize_dynamics seeds pressure" begin
+    @testset "initialize_dynamics! seeds pressure" begin
         base_pressure = FT(100000)
         constants = ThermodynamicConstants(FT)
 
         dynamics_stub = CompressibleDynamics(; base_pressure, reference_state=nothing)
         dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
+        initialize_dynamics!(dynamics, grid, constants)
         @test all(Array(interior(dynamics.pressure)) .== base_pressure)
 
         automatic_stub = CompressibleDynamics(; base_pressure)
         automatic_dynamics = materialize_dynamics(automatic_stub, grid, NamedTuple(), constants)
+        initialize_dynamics!(automatic_dynamics, grid, constants)
         pressure = Array(interior(automatic_dynamics.pressure))
         reference_pressure = Array(interior(automatic_dynamics.reference_state.pressure))
+        @test all(reference_pressure .> 0)
         @test all(pressure .== reference_pressure)
     end
 end

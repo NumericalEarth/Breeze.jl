@@ -35,6 +35,7 @@ function model_tendency_problem(arch;
     grid = RectilinearGrid(arch; size=(Nx, Ny, Nz), extent=(1e3, 1e3, 1e3), halo=(h, h, h), topology)
 
     model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), advection=WENO(float_type; order))
+    initialize_on_reactant!(model)
 
     # `set!` runs update_state! (compute_tendencies=false), so the diagnostic
     # state is fresh before tendencies are computed. Values are irrelevant to

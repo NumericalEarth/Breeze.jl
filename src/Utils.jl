@@ -11,12 +11,21 @@ export sum_properties,
        chebyshev_gauss_nodes_weights,
        transform_to_diameter,
        jacobian_diameter_transform,
+       initialize_on_construction!,
        @adapt_architecture
 
 using Adapt: Adapt
 using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: on_architecture
+
+"""
+    initialize_on_construction!(arch, initialize!, args...)
+
+Run `initialize!(args...)` when an object is constructed on `arch`. On `ReactantState` (BreezeReactantExt)
+construction skips it: the initialization is compiled and run by the user, `Reactant.@compile initialize!(model)`.
+"""
+initialize_on_construction!(arch, initialize!, args...) = initialize!(args...)
 
 #####
 ##### Sums of selected properties

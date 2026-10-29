@@ -184,7 +184,7 @@ export
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
-                    CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
+                    CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock, initialize!,
                     ConstantCartesianCoriolis, Distributed, DynamicSmagorinsky,
                     ExponentialDiscretization, FPlane, Face, Field, FieldBoundaryConditions,
                     FieldDataset, FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing,
@@ -240,7 +240,7 @@ export
     DryStaticStability, MoistStaticStability,
     LagrangianParticles,
     conjure_time_step_wizard!,
-    time_step!, Simulation, run!, Callback, add_callback!, iteration,
+    time_step!, initialize!, Simulation, run!, Callback, add_callback!, iteration,
     NetCDFWriter, JLD2Writer, Checkpointer,
     TimeInterval, IterationInterval, WallTimeInterval, AveragedTimeInterval, SpecifiedTimes,
     FieldTimeSeries, FieldDataset, InMemory, OnDisk,
