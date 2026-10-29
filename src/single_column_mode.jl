@@ -25,6 +25,7 @@ using Oceananigans.Grids: AbstractGrid, Flat, Bounded
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.TurbulenceClosures: AbstractTurbulenceClosure, getclosure
 using Oceananigans.Utils: with_tracers
+using GPUArraysCore: @allowscalar
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 using Breeze.AnelasticEquations: AnelasticDynamics
@@ -69,9 +70,18 @@ end
 #
 # `minimum(field)` builds a reduced field, which cannot be constructed on a forest of columns (the horizontal
 # data size and the reduced location disagree), so `set!` of a total moisture would fail on an ensemble.
+# The interior is reduced in place into a one-element array instead, as Oceananigans' field reductions
+# do: Reactant's concrete arrays reduce along dimensions natively but cannot be iterated, so
+# `minimum(interior(field))` would fall back to scalar indexing on them.
 # TODO: reduce fields over `Flat` dimensions of size greater than one in Oceananigans, then drop this.
 
-AtmosphereModels.interior_minimum(field::AbstractField{<:Any, <:Any, <:Any, <:SingleColumnGrid}) = minimum(interior(field))
+function AtmosphereModels.interior_minimum(field::AbstractField{<:Any, <:Any, <:Any, <:SingleColumnGrid})
+    data = interior(field)
+    reduced = view(similar(parent(field), 1, 1, 1), 1:1, 1:1, 1:1)
+    map!(identity, reduced, view(data, 1:1, 1:1, 1:1))
+    minimum!(identity, reduced, data; init=false)
+    return @allowscalar reduced[1, 1, 1]
+end
 
 #####
 ##### Per-column closures
