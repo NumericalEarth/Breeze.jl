@@ -18,6 +18,7 @@ complete formulation with all required fields.
 Valid symbols:
 - `:LiquidIcePotentialTemperature`, `:θ`, `:ρθ`, `:PotentialTemperature` → `LiquidIcePotentialTemperatureFormulation`
 - `:StaticEnergy`, `:s`, `:ρs` → `StaticEnergyFormulation`
+- `:TotalEnergy`, `:E`, `:ρE` → `TotalEnergyFormulation` (compressible dynamics only)
 """
 function materialize_formulation end
 
@@ -203,6 +204,21 @@ sedimentation term pairs its content fluxes with (see
 the thermodynamic variable with a velocity its tracers do not share.
 """
 function compute_thermodynamic_tendency! end
+
+#####
+##### Vertically implicit solve of the thermodynamic variable
+#####
+
+"""
+    implicit_thermodynamic_solve!(solve!, formulation, model)
+
+Apply the vertically implicit solve `solve!(field)` (closure diffusion and the implicit part of
+adaptive implicit vertical advection) to the thermodynamic variable of `formulation`. By default the
+solve acts on the prognostic [`thermodynamic_density`](@ref) itself. A formulation whose prognostic
+variable is not the quantity its closure diffuses (total energy, which diffuses static energy)
+extends this to solve for that quantity and add the increment to its prognostic variable.
+"""
+implicit_thermodynamic_solve!(solve!, formulation, model) = solve!(thermodynamic_density(formulation))
 
 #####
 ##### Set thermodynamic variable interface

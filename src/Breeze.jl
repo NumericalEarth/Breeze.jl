@@ -44,6 +44,7 @@ export
     SingleColumnGrid,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
+    TotalEnergyFormulation,
     VaporEquivalentExponent,
     DryExponent,
     RadiativeTransferModel,
@@ -310,6 +311,11 @@ using .Advection
 
 include("Forcings/Forcings.jl")
 using .Forcings
+
+# Total energy is supported by the compressible dynamics only, and extends its acoustic
+# linearization, the microphysics' saturation adjustment and the time steppers' implicit solve.
+include("TotalEnergyFormulations/TotalEnergyFormulations.jl")
+using .TotalEnergyFormulations: TotalEnergyFormulation
 
 include("VerticalGrids.jl")
 using .VerticalGrids

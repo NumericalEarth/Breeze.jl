@@ -679,9 +679,11 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # user tracers are total-air mass fractions and therefore use total density. So does the
     # :ρE energy-forcing key: a specific heating Ė becomes the volumetric ρ Ė, the same units as
     # a ρE forcing and the radiative flux divergence, which the formulations then convert.
+    # A prognostic total energy ρE is weighted by the total density, like the energy key it shares.
+    coupling_thermodynamic_names = ρᵡ_name === total_energy_density_name ? () : (ρᵡ_name,)
     coupling_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
                                    prognostic_momentum_field_names(dynamics)...,
-                                   ρᵡ_name)
+                                   coupling_thermodynamic_names...)
 
     # Keep `density` as the coupling-density compatibility entry for other forcing
     # materializers; SpecificForcing selects between the two explicit carriers by target.

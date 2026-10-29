@@ -12,6 +12,11 @@ PotentialTemperatureFlux() = PotentialTemperatureFlux(VaporEquivalentExponent())
 
 struct StaticEnergyFlux end
 
+# The total-energy formulation forms the static-energy difference from the near-wall temperature,
+# since it carries no prognostic static energy. The flux is the sensible part of the energy input;
+# the enthalpy of the water crossing the wall is added separately (see `VaporEnthalpyFluxFunction`).
+struct TotalEnergyFlux end
+
 struct BulkSensibleHeatFluxFunction{S, C, G, T, SP, TC, F, FV, FS, M}
     side :: S                  # Set during materialization (nothing pre-materialize)
     coefficient :: C
@@ -40,6 +45,7 @@ value of the thermodynamic variable appropriate to the formulation:
 
 - For `LiquidIcePotentialTemperatureFormulation`: ``Δϕ = θ - θˢ`` (potential temperature flux).
 - For `StaticEnergyFormulation`: ``Δϕ = s - sˢ`` (static energy flux).
+- For `TotalEnergyFormulation`: ``Δϕ = s - sˢ``, with ``s`` formed from the near-wall temperature.
 
 The wall value uses the atmospheric vapor, liquid, and ice fractions at the sampling
 point, the wall temperature ``Tˢ``, and the wall pressure and height. This holds
@@ -139,6 +145,15 @@ end
 @inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::StaticEnergyFlux, bf, Tˢ, fields, pˢ, ::Nothing)
     s = @inbounds fields.s[i, j, k]
     return s - wall_static_energy(i, j, k, grid, side, bf, Tˢ, fields, pˢ)
+end
+
+@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::TotalEnergyFlux, bf, Tˢ, fields, pˢ, ::Nothing)
+    constants = bf.thermodynamic_constants
+    q = wall_moisture_fractions(i, j, k, grid, bf.microphysics, fields)
+    T = @inbounds fields.T[i, j, k]
+    z = znode(i, j, k, grid, Center(), Center(), Center())
+    𝒰 = with_temperature(StaticEnergyState(zero(T), q, z, pˢ), T, constants)
+    return 𝒰.static_energy - wall_static_energy(i, j, k, grid, side, bf, Tˢ, fields, pˢ)
 end
 
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, ℓ::Integer, m::Integer,

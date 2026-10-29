@@ -1,0 +1,238 @@
+#####
+##### TotalEnergyFormulation
+#####
+
+"""
+$(TYPEDEF)
+
+`TotalEnergyFormulation` evolves the total energy density ``ρE`` as the prognostic thermodynamic
+variable, with ``ρ`` the total (dry air plus water) density and
+
+```math
+E = 𝓊 + K + g z , \\qquad 𝓊 = cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ ,
+```
+
+the internal, kinetic and potential energy per unit mass. The internal energy is measured from
+liquid water at zero kelvin with constant heat capacities, ``cᵛᵐ = qᵈ cᵛᵈ + qᵛ cᵛᵛ + qˡ cˡ + qⁱ cⁱ``,
+and ``ℒˡ₀``, ``ℒⁱ₀`` are the latent heats extrapolated to zero kelvin. The kinetic energy ``K`` is
+formed at cell centers from the staggered velocities (see [`kinetic_energyᶜᶜᶜ`](@ref)).
+
+The energy equation is in conservation form,
+
+```math
+∂ₜ(ρE) + ∇ ⋅ \\left[ ρᵈ 𝐮 Ĥ + ρᵈ 𝐉ˢ + \\sum_x (hˣ + g z) 𝐉ˣ \\right] = ρQ , \\qquad Ĥ = \\frac{ρE + p}{ρᵈ} ,
+```
+
+with the dry-air momentum ``ρᵈ𝐮`` the carrier of the total enthalpy per unit dry mass ``Ĥ``
+(the pressure work is inside the flux), ``𝐉ˢ`` the subgrid flux of the static energy
+``ŝ = cᵖᵐ T + g z + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ``, ``𝐉ˣ`` the sedimentation flux of condensate ``x``
+carrying its enthalpy ``hˣ`` and potential energy, and ``Q`` the radiative and imposed heating.
+Phase changes, expansion and dissipation exchange energy within ``E`` and need no source:
+``∫ρE`` changes only through the domain boundaries. The temperature is recovered in closed form,
+``T = (E - K - g z - ℒˡ₀ qᵛ - (ℒˡ₀ - ℒⁱ₀) qⁱ) / cᵛᵐ``, and the pressure from ``p = ρ Rᵐ T``.
+This is the formulation of [Satoh (2003)](@cite Satoh2003).
+
+Energy inputs supplied under the energy key `ρE` (boundary fluxes, forcings) apply directly,
+and water crossing a wall adds its enthalpy ``cᵖᵛ T₁ + ℒˡ₀`` per unit mass. The formulation is
+supported by `CompressibleDynamics` only. `formulation = :TotalEnergy` (or `:E`, `:ρE`) selects it.
+
+```jldoctest
+using Breeze
+
+TotalEnergyFormulation()
+
+# output
+TotalEnergyFormulation
+```
+"""
+struct TotalEnergyFormulation{E, U, H, S, X}
+    energy_density :: E           # ρE (prognostic)
+    internal_energy :: U          # 𝓊 = ρE / ρ - K - g z (diagnostic)
+    total_enthalpy :: H           # Ĥ = (ρE + p) / ρᵈ (diagnostic, advected)
+    static_energy :: S            # ŝ = cᵖᵐ T + g z + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ (diagnostic, diffused)
+    diffusion_workspace :: X      # ρᵈ ŝ, the variable of the vertically implicit diffusion solve
+end
+
+TotalEnergyFormulation() = TotalEnergyFormulation(nothing, nothing, nothing, nothing, nothing)
+
+Adapt.adapt_structure(to, formulation::TotalEnergyFormulation) =
+    TotalEnergyFormulation(adapt(to, formulation.energy_density),
+                           adapt(to, formulation.internal_energy),
+                           adapt(to, formulation.total_enthalpy),
+                           adapt(to, formulation.static_energy),
+                           adapt(to, formulation.diffusion_workspace))
+
+function BoundaryConditions.fill_halo_regions!(formulation::TotalEnergyFormulation)
+    fill_halo_regions!(formulation.total_enthalpy)
+    fill_halo_regions!(formulation.static_energy)
+    return nothing
+end
+
+#####
+##### Kinetic energy at cell centers
+#####
+
+@inline ϕ²(i, j, k, grid, ϕ) = @inbounds ϕ[i, j, k]^2
+
+# The mean of u² over the two faces of a cell, or u² itself in a Flat direction (no second face).
+@inline x_mean_square(i, j, k, grid, u) = ℑxᶜᵃᵃ(i, j, k, grid, ϕ², u)
+@inline x_mean_square(i, j, k, grid::XFlatGrid, u) = ϕ²(i, j, k, grid, u)
+@inline y_mean_square(i, j, k, grid, v) = ℑyᵃᶜᵃ(i, j, k, grid, ϕ², v)
+@inline y_mean_square(i, j, k, grid::YFlatGrid, v) = ϕ²(i, j, k, grid, v)
+@inline z_mean_square(i, j, k, grid, w) = ℑzᵃᵃᶜ(i, j, k, grid, ϕ², w)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the kinetic energy per unit mass at the center of cell `(i, j, k)` from the staggered
+velocity components `u`, `v`, `w`,
+
+```math
+K = \\frac{1}{4} \\left[ (u²ᵢ + u²ᵢ₊₁) + (v²ⱼ + v²ⱼ₊₁) + (w²ₖ + w²ₖ₊₁) \\right] ,
+```
+
+the mean of each squared component over the two faces of the cell. This is the kinetic energy the
+total energy ``E = 𝓊 + K + g z`` of `TotalEnergyFormulation` contains, everywhere it is formed.
+"""
+@inline kinetic_energyᶜᶜᶜ(i, j, k, grid, u, v, w) =
+    (x_mean_square(i, j, k, grid, u) + y_mean_square(i, j, k, grid, v) + z_mean_square(i, j, k, grid, w)) / 2
+
+@inline kinetic_energyᶜᶜᶜ(i, j, k, grid, velocities) =
+    kinetic_energyᶜᶜᶜ(i, j, k, grid, velocities.u, velocities.v, velocities.w)
+
+#####
+##### Field naming interface
+#####
+
+const TotalEnergyNames = Union{Val{:TotalEnergy}, Val{:E}, Val{:ρE}}
+
+AtmosphereModels.prognostic_thermodynamic_field_names(::TotalEnergyFormulation) = tuple(:ρE)
+AtmosphereModels.additional_thermodynamic_field_names(::TotalEnergyFormulation) = (:𝓊, :Ĥ, :ŝ)
+AtmosphereModels.thermodynamic_density_name(::TotalEnergyFormulation) = :ρE
+AtmosphereModels.thermodynamic_density(formulation::TotalEnergyFormulation) = formulation.energy_density
+AtmosphereModels.with_thermodynamic_density(f::TotalEnergyFormulation, ρE) =
+    TotalEnergyFormulation(ρE, f.internal_energy, f.total_enthalpy, f.static_energy, f.diffusion_workspace)
+
+AtmosphereModels.prognostic_thermodynamic_field_names(::TotalEnergyNames) = tuple(:ρE)
+AtmosphereModels.additional_thermodynamic_field_names(::TotalEnergyNames) = (:𝓊, :Ĥ, :ŝ)
+AtmosphereModels.thermodynamic_density_name(::TotalEnergyNames) = :ρE
+
+Oceananigans.fields(formulation::TotalEnergyFormulation) =
+    (; 𝓊 = formulation.internal_energy, Ĥ = formulation.total_enthalpy, ŝ = formulation.static_energy)
+
+Oceananigans.prognostic_fields(formulation::TotalEnergyFormulation) = (; ρE = formulation.energy_density)
+
+# The total enthalpy per unit dry mass is what the advection scheme reconstructs.
+AtmosphereModels.specific_thermodynamic_field(formulation::TotalEnergyFormulation) = formulation.total_enthalpy
+
+#####
+##### Materialization
+#####
+
+AtmosphereModels.materialize_formulation(::TotalEnergyNames, dynamics, grid, boundary_conditions) =
+    materialize_formulation(TotalEnergyFormulation(), dynamics, grid, boundary_conditions)
+
+AtmosphereModels.materialize_formulation(::TotalEnergyFormulation, dynamics, grid, boundary_conditions) =
+    throw(ArgumentError("TotalEnergyFormulation is supported only by CompressibleDynamics, " *
+                        "not by $(summary(dynamics)). Use formulation = :StaticEnergy for the " *
+                        "conservative energy variable of the anelastic equations."))
+
+function AtmosphereModels.materialize_formulation(::TotalEnergyFormulation, dynamics::CompressibleDynamics,
+                                                  grid, boundary_conditions)
+    energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρE)
+    internal_energy = CenterField(grid)
+    total_enthalpy = CenterField(grid)
+    static_energy = CenterField(grid)
+    diffusion_workspace = CenterField(grid)
+    return TotalEnergyFormulation(energy_density, internal_energy, total_enthalpy, static_energy, diffusion_workspace)
+end
+
+#####
+##### Auxiliary variable computation
+#####
+
+# The internal energy needs the velocities, which the per-cell hook does not receive, so it is
+# computed by the model-level method below, before the thermodynamic state is diagnosed.
+AtmosphereModels.compute_auxiliary_thermodynamic_variables!(::TotalEnergyFormulation, dynamics, i, j, k, grid) = nothing
+
+const TotalEnergyModel = AtmosphereModel{<:Any, <:TotalEnergyFormulation}
+
+function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(model::TotalEnergyModel)
+    grid = model.grid
+    formulation = model.formulation
+    g = model.thermodynamic_constants.gravitational_acceleration
+    launch!(grid.architecture, grid, :xyz, _compute_internal_energy!,
+            formulation.internal_energy, grid, formulation.energy_density,
+            total_density(model.dynamics), model.velocities, g)
+
+    # Then diagnose the temperature (with any saturation adjustment) as for every formulation
+    return invoke(AtmosphereModels.compute_auxiliary_thermodynamic_variables!, Tuple{AtmosphereModel}, model)
+end
+
+@kernel function _compute_internal_energy!(𝓊, grid, ρE, ρ, velocities, g)
+    i, j, k = @index(Global, NTuple)
+    K = kinetic_energyᶜᶜᶜ(i, j, k, grid, velocities)
+    z = znode(i, j, k, grid, c, c, c)
+    @inbounds 𝓊[i, j, k] = ρE[i, j, k] / ρ[i, j, k] - K - g * z
+end
+
+#####
+##### Thermodynamic state diagnosis
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Build an `InternalEnergyDensityState` at grid point `(i, j, k)` from the internal energy of the
+`formulation`, the total density of the `dynamics`, and the moisture mass fractions `q`.
+"""
+@inline function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid, formulation::TotalEnergyFormulation,
+                                                               dynamics, q)
+    𝓊 = @inbounds formulation.internal_energy[i, j, k]
+    ρ = @inbounds total_density(dynamics)[i, j, k]
+    return InternalEnergyDensityState(𝓊, q, ρ)
+end
+
+#####
+##### Prognostic field collection
+#####
+
+function AtmosphereModels.collect_prognostic_fields(formulation::TotalEnergyFormulation,
+                                                    dynamics,
+                                                    momentum,
+                                                    moisture_density,
+                                                    moisture_name,
+                                                    microphysical_fields,
+                                                    tracers)
+    ρE = formulation.energy_density
+    thermodynamic_variables = merge((ρE=ρE,), NamedTuple{(moisture_name,)}((moisture_density,)))
+    dynamics_fields = dynamics_prognostic_fields(dynamics)
+    return merge(dynamics_fields, momentum, thermodynamic_variables, microphysical_fields, tracers)
+end
+
+#####
+##### Saturation adjustment at fixed internal energy and density
+#####
+
+@inline Microphysics.saturation_adjustment_specific_humidity(T, 𝒰::InternalEnergyDensityState, constants, equilibrium) =
+    saturation_specific_humidity(T, 𝒰.density, constants, equilibrium)
+
+@inline Microphysics.saturation_adjustment_residual(T, 𝒰::InternalEnergyDensityState, constants) =
+    T - temperature(𝒰, constants)
+
+#####
+##### Show methods
+#####
+
+Base.summary(::TotalEnergyFormulation) = "TotalEnergyFormulation"
+
+function Base.show(io::IO, formulation::TotalEnergyFormulation)
+    print(io, summary(formulation))
+    if formulation.energy_density !== nothing
+        print(io, '\n')
+        print(io, "├── energy_density: ", prettysummary(formulation.energy_density), '\n')
+        print(io, "├── internal_energy: ", prettysummary(formulation.internal_energy), '\n')
+        print(io, "├── total_enthalpy: ", prettysummary(formulation.total_enthalpy), '\n')
+        print(io, "└── static_energy: ", prettysummary(formulation.static_energy))
+    end
+end
