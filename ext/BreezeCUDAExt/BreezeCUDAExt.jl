@@ -3,8 +3,7 @@ module BreezeCUDAExt
 using Breeze.Utils: Utils
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: GPU, convert_to_device
-using CUDA: CUDA
-using CUDA.CUDAKernels: CUDABackend
+using CUDA: CUDA, CUDABackend
 using KernelAbstractions: KernelAbstractions as KA
 
 #####
