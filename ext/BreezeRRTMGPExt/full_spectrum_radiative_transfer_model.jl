@@ -7,19 +7,15 @@
 # output fields and the radiation update) is built here once.
 
 using Oceananigans.Utils: launch!
-using Oceananigans.Operators: ℑzᵃᵃᶠ
-using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
-using Oceananigans.Grids: AbstractGrid, Center, Face
-using Oceananigans.Fields: ConstantField
+using Oceananigans.Grids: xnode
+using Oceananigans.Grids: AbstractGrid, Center, Flat
 
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiation, specific_humidity,
+using Breeze.AtmosphereModels: AtmosphereModels,
                                BackgroundAtmosphere, materialize_background_atmosphere,
                                RadiativeTransferModel,
                                AbstractSolarPosition, ApparentSolarPosition,
                                DiurnalSolarPosition, FixedCosineZenith
-using Breeze.Thermodynamics: ThermodynamicConstants
 
-using Dates: AbstractDateTime, Millisecond
 using KernelAbstractions: @kernel, @index
 
 using RRTMGP: RRTMGPSolver, lookup_tables
@@ -240,10 +236,14 @@ function _set_longitude_from_grid!(rrtmgp_λ, grid)
     return nothing
 end
 
+# A grid that is Flat in x — a single column or a column ensemble — has no longitude; the value is only
+# used to place the sun, which such grids specify through `solar_position` instead
+_set_longitude_from_grid!(rrtmgp_λ, ::AbstractGrid{<:Any, <:Flat}) = (fill!(rrtmgp_λ, 0); nothing)
+
 @kernel function _set_longitude_from_grid_kernel!(rrtmgp_λ, grid)
     i, j = @index(Global, NTuple)
     λ = xnode(i, j, 1, grid, Center(), Center(), Center())
-    c = rrtmgp_column_index(i, j, grid.Nx)
+    c = column_index(i, j, grid.Nx)
     @inbounds rrtmgp_λ[c] = λ
 end
 
@@ -276,7 +276,7 @@ function AtmosphereModels._update_radiation!(rtm::FullSpectrumRadiativeTransferM
                                rtm.ice_effective_radius)
 
     # Update solar zenith angle from the solar_position specification
-    update_solar_zenith_angle!(solver.sws, rtm.solar_position, grid, clock)
+    update_cos_zenith!(solver.sws.bcs.cos_zenith, rtm.solar_position, grid, clock)
 
     # Longwave and shortwave, one batch of columns at a time; night columns (`cos_zenith ≤ 0`)
     # get zero fluxes, which RRTMGP handles internally.

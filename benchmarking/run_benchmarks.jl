@@ -38,6 +38,9 @@ using Reactant: Reactant
 using Oceananigans.Architectures: ReactantState
 using CUDA: CUDABackend
 using AMDGPU: ROCBackend
+
+# `--profile_kernels`: per-kernel GPU times of the vanilla cases, after every case is timed
+include(joinpath(@__DIR__, "kernel_profiling", "kernel_profiling.jl"))
 using Metal: MetalBackend
 
 # Load CloudMicrophysics extension for OneMomentCloudMicrophysics
@@ -115,6 +118,18 @@ function parse_commandline()
             arg_type = String
             default = "anelastic"
 
+        "--substeps"
+            help = "Acoustic substeps per time step for compressible_splitexplicit dynamics."
+            arg_type = Int
+            default = 12
+
+        "--grid_type"
+            help = "Grid for the convective boundary layer: rectilinear, or latitude_longitude (the same box " *
+                   "on a LatitudeLongitudeGrid, with SphericalCoriolis). Defaults to latitude_longitude " *
+                   "with --ad and to rectilinear otherwise."
+            arg_type = String
+            default = ""
+
         "--closure"
             help = "Turbulence closure: nothing, SmagorinskyLilly, DynamicSmagorinsky. " *
                    "Multiple closures can be specified as comma-separated list."
@@ -150,6 +165,13 @@ function parse_commandline()
                    "Multiple values can be specified as comma-separated list; each is a separate compile."
             arg_type = String
             default = "auto"
+
+        "--profile_kernels"
+            help = "After every case is timed and saved, profile the GPU kernels of each vanilla " *
+                   "time-stepping case with CUDA.@profile, in the same process so no kernel is " *
+                   "recompiled; writes kernel_profile.json and kernel_profile.md (benchmark mode, " *
+                   "--device GPU, without --ad)."
+            action = :store_true
 
         "--checkpointing_mode"
             help = "How an integer --checkpoints value is interpreted (--ad only): 'binomial' " *
@@ -315,13 +337,13 @@ end
 make_closure(name, FT) = name == "nothing" ? nothing : (@eval $(Symbol(name)))(FT)
 
 # Dynamics: "anelastic", "compressible_explicit", "compressible_splitexplicit"
-function make_dynamics(name::AbstractString, FT::Type)
+function make_dynamics(name::AbstractString, FT::Type; substeps = 12)
     if name == "anelastic"
         return nothing  # sentinel; convective_boundary_layer handles anelastic by default
     elseif name == "compressible_explicit"
         return CompressibleDynamics(ExplicitTimeStepping())
     elseif name == "compressible_splitexplicit"
-        return CompressibleDynamics(SplitExplicitTimeDiscretization(FT; substeps=12))
+        return CompressibleDynamics(SplitExplicitTimeDiscretization(FT; substeps))
     else
         error("Unknown dynamics: $name. Use anelastic, compressible_explicit, or compressible_splitexplicit.")
     end
@@ -366,7 +388,7 @@ end
 ##### Main benchmarking logic
 #####
 
-function run_benchmarks(args)
+function run_benchmarks(args; kernel_cases = [])
     mode = args["mode"]
     device = args["device"]
     configuration = args["configuration"]
@@ -384,6 +406,7 @@ function run_benchmarks(args)
     # Mode-specific parameters
     Δt = args["dt"]
     time_steps = args["time_steps"]
+    grid_type = isempty(args["grid_type"]) ? (args["ad"] ? "latitude_longitude" : "rectilinear") : args["grid_type"]
     warmup_steps = args["warmup_steps"]
     stop_time = args["stop_time"] * 3600  # Convert hours to seconds
     output_interval = args["output_interval"] * 60  # Convert minutes to seconds
@@ -499,7 +522,10 @@ function run_benchmarks(args)
             continue
         end
 
-        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)_$(backend_name)$(mode_suffix)"
+        # Only non-default grids and substep counts show in the name, so the existing names stay as they are
+        grid_suffix = grid_type == "rectilinear" ? "" : "_LatLon"
+        substeps_suffix = dyn_name == "compressible_splitexplicit" && args["substeps"] != 12 ? "_N$(args["substeps"])" : ""
+        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)$(substeps_suffix)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)$(grid_suffix)_$(backend_name)$(mode_suffix)"
 
         println("\n", "-" ^ 70)
         println("Running: $name")
@@ -508,26 +534,26 @@ function run_benchmarks(args)
         # Create arch (backend-aware) and schemes
         arch = make_backend_arch(backend_name, device)
         topology = make_topology(topo_name)
-        dynamics = make_dynamics(dyn_name, FT)
+        dynamics = make_dynamics(dyn_name, FT; substeps = args["substeps"])
         advection = make_advection(adv_name, FT)
         closure = make_closure(cls_name, FT)
         microphysics = make_microphysics(micro_name, FT)
 
-        # Create model based on configuration
-        model = if configuration == "convective_boundary_layer"
-            convective_boundary_layer(arch;
-                                      Nx, Ny, Nz,
-                                      float_type = FT,
-                                      dynamics,
-                                      advection,
-                                      closure,
-                                      microphysics,
-                                      topology,
-                                      simplified = args["simplified"],
-                                      )
-        else
-            error("Unknown configuration: $configuration")
-        end
+        # Create model based on configuration, through a function so that --profile_kernels
+        # can rebuild it once every case is timed
+        configuration == "convective_boundary_layer" || error("Unknown configuration: $configuration")
+        build_model = () -> convective_boundary_layer(arch;
+                                                      Nx, Ny, Nz,
+                                                      float_type = FT,
+                                                      dynamics,
+                                                      advection,
+                                                      closure,
+                                                      microphysics,
+                                                      topology,
+                                                      grid_type = Symbol(grid_type),
+                                                      simplified = args["simplified"],
+                                                      )
+        model = build_model()
 
         # Run based on mode
         result = if mode == "benchmark"
@@ -562,6 +588,13 @@ function run_benchmarks(args)
             error("Unknown mode: $mode. Use 'benchmark', 'simulate', 'scalar_tendency', or 'model_tendency'.")
         end
         push!(results, result)
+
+        # Profiled by `main` once every case is timed and saved; see kernel_profiling/
+        if args["profile_kernels"] && mode == "benchmark" && backend_name == "vanilla" && device == "GPU" && !args["ad"]
+            push!(kernel_cases, (; name, build_model, float_type = FT, Δt, warmup_steps, time_steps,
+                                 advection = adv_name, closure = cls_name, dynamics = dyn_name,
+                                 microphysics = micro_name))
+        end
     end
 
     return results
@@ -573,7 +606,8 @@ end
 
 function main()
     args = parse_commandline()
-    results = run_benchmarks(args)
+    kernel_cases = []
+    results = run_benchmarks(args; kernel_cases)
 
     #####
     ##### Summary table
@@ -636,6 +670,19 @@ function main()
         md_file = replace(output_file, ".json" => ".md")
         generate_markdown_report(md_file, JSON.parse(read(output_file)))
         println("Markdown report saved to: $md_file")
+    end
+
+    #####
+    ##### Kernel profiles, once every case is timed and saved
+    #####
+
+    if !isempty(kernel_cases)
+        try
+            write_kernel_profiles(profile_kernels(kernel_cases))
+        catch err
+            # A profiler failure must not fail the run, whose results above are already saved
+            @error "Kernel profiling failed" exception = (err, catch_backtrace())
+        end
     end
 
     println("Benchmarks completed at ", now(UTC), "Z")

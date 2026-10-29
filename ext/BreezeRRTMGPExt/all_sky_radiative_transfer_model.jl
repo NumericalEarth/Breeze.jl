@@ -119,7 +119,7 @@ end
                                              liquid_effective_radius, ice_effective_radius)
     i, j, k = @index(Global, NTuple)
 
-    c = rrtmgp_column_index(i, j, grid.Nx)
+    c = column_index(i, j, grid.Nx)
 
     FT = eltype(total_density)
     kg_to_g = convert(FT, 1000)

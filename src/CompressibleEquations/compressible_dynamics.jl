@@ -438,7 +438,6 @@ without_sponge(td::SplitExplicitTimeDiscretization) =
                                     td.vertical_momentum_tendency_factor,
                                     td.vertical_pressure_tendency_factor,
                                     td.final_stage_vertical_pressure_tendency_factor,
-                                    td.apply_first_substep_pressure_gradient,
                                     td.damping,
                                     nothing,
                                     td.substep_distribution,
@@ -477,8 +476,8 @@ end
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
     D = (constants.liquid.reference_latent_heat * q.liquid + constants.ice.reference_latent_heat * q.ice) / cᵖᵐ
-    hˡ = constants.liquid.heat_capacity * T - constants.liquid.reference_latent_heat
-    hⁱ = constants.ice.heat_capacity * T - constants.ice.reference_latent_heat
+    hˡ = constants.liquid.heat_capacity * T - absolute_zero_latent_heat(constants, constants.liquid)
+    hⁱ = constants.ice.heat_capacity * T - absolute_zero_latent_heat(constants, constants.ice)
     β = (1 - Rᵐ / cᵖᵐ * (1 - D / T)) / ((cᵖᵐ - Rᵐ) * Π)
     return (hˡ, hⁱ), β
 end
