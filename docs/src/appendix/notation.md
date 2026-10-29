@@ -129,6 +129,13 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\rho^L``                          | `ρᴸ`   | `TC.liquid.density`                 | Intrinsic density of liquid water                                                        |
 | ``\rho^I``                          | `ρᴵ`   | `TC.ice.density`                    | Intrinsic density of ice                                                                 |
 | ``cᵖᵐ``                             | `cᵖᵐ`  | `mixture_heat_capacity(q, constants)` | Mixture heat capacity at constant pressure                                   |
+| ``cᵛᵐ``                             | `cᵛᵐ`  | `mixture_isochoric_heat_capacity(q, constants)` | Mixture heat capacity at constant volume, ``cᵖᵐ - Rᵐ``           |
+| ``η``                               | `η`    | `AM.formulation.specific_entropy`   | Moist specific entropy (liquid zero at the triple point), J/(kg K)             |
+| ``ρη``                              | `ρη`   | `AM.formulation.entropy_density`    | Moist entropy density (prognostic of `MoistEntropyFormulation`)                |
+| ``ηˣ``                              | `ηˣ`   |                                     | Partial specific entropy of constituent ``x`` (``ηᵈ``, ``ηᵛ``, ``ηˡ``, ``ηⁱ``)        |
+| ``\mathscr{G}^x``                   | `𝒢ˣ`   |                                     | Specific Gibbs function ``hˣ - T ηˣ`` of constituent ``x``                      |
+| ``b``                               | `b`    | `water_entropy_offset`              | Entropy offset per unit water mass of `MoistEntropyFormulation`                |
+| ``𝓊``                               | `𝓊`    |                                     | Specific internal energy, ``cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ``                   |
 | ``\hat{c}ᵖ``                        | `ĉᵖ`   | `vapor_equivalent_heat_capacity(q, constants)` | Vapor-equivalent heat capacity, ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ``: the heat capacity if all water were vapor; unchanged by phase change |
 | ``\hat{R}``                         | `R̂`    | `vapor_equivalent_gas_constant(q, constants)` | Vapor-equivalent gas constant, ``R̂ = qᵈ Rᵈ + qᵗ Rᵛ``; equals ``Rᵐ`` in unsaturated air |
 | ``\hat{κ}``                         | `κ̂`    | `exner_exponent(VaporEquivalentExponent(), q, constants)` | Vapor-equivalent Exner exponent, ``κ̂ = R̂ / ĉᵖ`` (the default exponent of ``θˡⁱ``); ``κᵈ = Rᵈ / cᵖᵈ`` is the `DryExponent`. Distinct from the von Kármán constant ``κ`` |

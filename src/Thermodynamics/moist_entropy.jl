@@ -119,7 +119,7 @@ q = MoistureMassFractions(0.015, 0.001, 0.0)
 round(η, digits=3)
 
 # output
--1209.766
+-1220.75
 ```
 """
 @inline function moist_entropy(T, ρ, q::MoistureMassFractions, constants)

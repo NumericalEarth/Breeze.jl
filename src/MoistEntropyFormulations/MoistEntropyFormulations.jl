@@ -21,7 +21,7 @@ using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Operators: ℑzᵃᵃᶠ, V⁻¹ᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, set_thermodynamic_variable!,
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
     dynamics_density, total_density, standard_pressure, dynamics_prognostic_fields,
     grid_moisture_fractions, div_ρUc, c_div_ρU, ∇_dot_Jᶜ, AtmosphereModelBuoyancy,
     add_sedimentation_tendency!, explicit_condensate_mass_fluxes, radiation_flux_divergence,
@@ -29,14 +29,14 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, set_thermodyna
     prognostic_field_names, grid_microphysical_state, microphysical_tendencies,
     condensate_liquid_fraction
 using Breeze.AtmosphereModels.Diagnostics: Diagnostics
-using Breeze.Thermodynamics: MoistEntropyState, LiquidIceDensityState, MoistureMassFractions,
+using Breeze.Thermodynamics: MoistEntropyState, LiquidIceDensityState,
     moist_entropy, temperature, vapor_entropy, liquid_entropy, ice_entropy,
     vapor_liquid_gibbs_difference, ice_liquid_gibbs_difference, VaporEquivalentExponent,
     mixture_heat_capacity, total_specific_moisture
 using Breeze.Solvers: NewtonSolver
 using Breeze.BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions,
     BulkSensibleHeatFluxFunction, BulkSensibleHeatFluxBoundaryCondition,
-    BulkVaporFluxBoundaryCondition, wall_moisture_fractions, wall_height, near_wall_indices,
+    wall_moisture_fractions, wall_height, near_wall_indices,
     materialize_atmosphere_boundary_condition, map_field_boundary_conditions, boundary_sides
 
 using Oceananigans.Fields: set!
