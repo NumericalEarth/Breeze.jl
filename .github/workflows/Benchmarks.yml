@@ -36,64 +36,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - dynamics: 'anelastic'
-            microphysics: 'nothing'
-            grid: '256x256x128, 512x512x256, 768x768x256'
-            advection: 'WENO5, WENO9'
-            backend: 'vanilla'
-            topology: 'PPB'
-            extra_flags: '--warmup_steps 5 --time_steps 150'
-          - dynamics: 'compressible_splitexplicit'
-            microphysics: 'nothing'
-            grid: '512x512x256'
-            advection: 'WENO5'
-            backend: 'vanilla'
-            topology: 'PPB'
-            extra_flags: ''
-          - dynamics: 'anelastic'
-            microphysics: 'MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium'
-            grid: '512x512x256'
-            advection: 'WENO5'
-            backend: 'vanilla'
-            topology: 'PPB'
-            extra_flags: ''
-          # Reactant vs vanilla on the AD job's physics: a LatitudeLongitudeGrid
-          # with SphericalCoriolis, split-explicit compressible dynamics (12
-          # acoustic substeps), WENO5 and no microphysics, on a PBB grid, at the
-          # AD job's size and a larger one. Uses --simplified to drop the
-          # geostrophic forcing and field-dependent surface drag BCs (which do
-          # not currently materialize on ReactantState). Reactant runs with its
-          # kernels raised to StableHLO and unraised (kept as kernel calls).
-          - dynamics: 'compressible_splitexplicit'
-            microphysics: 'nothing'
-            grid: '128x128x32, 256x256x128'
-            advection: 'WENO5'
-            backend: 'vanilla, reactant'
-            topology: 'PBB'
-            # Four Reactant compiles of the split-explicit step (two sizes, raised and unraised)
-            timeout: 60
-            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude --kernels "raise, noraise"'
-          # AD: forward+backward via Enzyme reverse-mode through the same
-          # @trace checkpointed loop. Reactant-only by construction. No
-          # microphysics in v1 (Enzyme correctness through the 1M scheme is
-          # untested). Small grid to keep the gradient compile bounded. The
-          # loop body is compiled once regardless of Nsteps, so 64 steps cost
-          # little extra compile; --checkpoints sweeps the checkpoint budget of
-          # the binomial (revolve) schedule Enzyme uses for the reverse pass
-          # (each value is a separate compile + run, recorded as its own
-          # result). The model is the regional-forecast configuration: a
-          # LatitudeLongitudeGrid with SphericalCoriolis (the AD default) and
-          # split-explicit compressible dynamics (12 acoustic substeps). To reproduce locally
-          # on CPU see benchmarking/README.md ("AD benchmark").
-          - dynamics: 'compressible_splitexplicit'
-            microphysics: 'nothing'
-            grid: '128x128x32'
-            advection: 'WENO5'
-            backend: 'reactant'
-            topology: 'PBB'
-            # The gradient compile needs more than the default 30-minute job
-            timeout: 60
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial'
+          # TEMPORARY: only the kernel AD entry runs; restore the other entries before merging
           # Kernel AD: the AD job's model and checkpointed loop, differentiating the
           # kernel bodies themselves (--kernels kernelad, EnzymeAD/Reactant.jl#3472)
           # instead of the raised kernels. The pipeline's passes come from
@@ -117,33 +60,6 @@ jobs:
             reactant_rev: '72794878b8f88eae5ecb087c3002b9c660f9f6f0'
             timeout: 60
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial --kernels kernelad'
-          # Scalar-tendency kernel sweep (no model): time the bare WENO
-          # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
-          # the Reactant-compiled XLA program and the eager vanilla launch.
-          # --mode tendency skips model construction, so there is no
-          # dynamics/microphysics.
-          - dynamics: 'none'
-            microphysics: 'none'
-            grid: '256x256x128'
-            advection: 'WENO5, WENO7, WENO9'
-            backend: 'vanilla, reactant'
-            topology: 'PPB'
-            # `mode` distinguishes the two tendency entries in the artifact names
-            # (their other matrix fields are identical, so without this they
-            # collide and only one set of results survives the publish merge).
-            mode: 'scalar_tendency'
-            extra_flags: '--mode scalar_tendency --float_type=Float32,BFloat16 --time_steps 320'
-          # Full-model tendency: time compute_tendencies! for a compressible
-          # AtmosphereModel across WENO orders, vanilla vs Reactant. --mode
-          # model_tendency builds the model, so dynamics/microphysics are unused.
-          - dynamics: 'none'
-            microphysics: 'none'
-            grid: '256x256x128'
-            advection: 'WENO5, WENO7, WENO9'
-            backend: 'vanilla, reactant'
-            topology: 'PPB'
-            mode: 'model_tendency'
-            extra_flags: '--mode model_tendency --float_type=Float32 --time_steps 320'
     defaults:
       run:
         shell: bash
