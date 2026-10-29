@@ -325,8 +325,41 @@ Adapt.adapt_structure(to, e::BoundsPreservingEdges) =
 # Host-side per-scheme state.
 mutable struct EdgeCacheState{E}
     edges :: Union{Nothing, E}  # nothing once the limiter array is finalized
-    active :: Bool   # true once the limiter pass of this stage wrote the cache
+    active :: Bool     # true once the limiter pass of this stage wrote the cache
+    candidate :: Bool  # the scalar has been +0 in every entry at every scan so far (zero-scalar skip)
+    zero :: Bool       # this stage's scan found it +0 everywhere: transport is +0, no limiter pass
 end
+
+#####
+##### Whole-field zero-scalar skip (handoff T2, #201–#203/#227, in whole-field form)
+#####
+#
+# While a scalar's specific field holds +0 in every entry of its parent array (halos included) and has
+# done so at every scan since the model was built, its limiter pass is skipped and its tendency launch
+# receives `ZeroTransport`, whose `div_ρUc` is the literal +0. That is the full path's bits for finite
+# density and velocities: every rescaled reconstruction is θ(±0) + (+0) = +0, every upwind product
+# ((u + |u|)(+0) + (u − |u|)(+0))/2 = +0, ρA(+0) = +0, and V⁻¹(+0 − +0 + …) = +0. The rest of the
+# tendency (closure, forcing) is evaluated as before. θ is never written while skipped, and the full
+# pass would write +0 into exactly the entries it writes (min(|1/ε|, |0/(−ε)|, 1) = +0; Flux halo fill
+# copies it), so θ stays bitwise equal to its zero initialization, and θ's other consumers (sedimentation
+# mass fluxes, bottom precipitation flux) see the same θ. The first scan that finds any entry whose bits
+# are not +0 retires the scalar for good (no re-arm), and from then on the full pass runs, so the state
+# when the field becomes nonzero is bitwise the full path's. Non-finite ρ or velocities at a zero cell
+# would give NaN on the full path and +0 here (tier A for finite states, as in the handoff).
+# Switch: `BREEZE_ZERO_SCALAR_SKIP=false`. Cost: one reduction and one device→host read per candidate
+# scalar per stage, none once every scalar is retired.
+
+const ZERO_SCALAR_SKIP = Ref(get(ENV, "BREEZE_ZERO_SCALAR_SKIP", "true") != "false")
+const ZERO_SCALAR_SKIPS = Ref(0)
+
+struct ZeroTransport end
+
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, ::ZeroTransport, ρ, U, c) = zero(grid)
+
+@inline is_plus_zero(x::Float32) = reinterpret(UInt32, x) == 0x00000000
+@inline is_plus_zero(x::Float64) = reinterpret(UInt64, x) == 0x0000000000000000
+
+all_plus_zero(c) = mapreduce(is_plus_zero, &, parent(c); init=true)
 
 const EDGE_CACHE_STATES = Dict{UInt, Any}()
 const EDGE_CACHE_LOCK = ReentrantLock()
@@ -354,7 +387,8 @@ function new_edge_cache_state(scheme, grid)
     θ = scheme.bounds.limiter
     key = limiter_key(θ)
     make() = similar(θ.data)  # same axes as θ: x faces up to Nx + 2, z faces up to Nz + 1
-    state = EdgeCacheState(BoundsPreservingEdges(make(), make(), make(), make(), make(), make()), false)
+    state = EdgeCacheState(BoundsPreservingEdges(make(), make(), make(), make(), make(), make()), false,
+                           ZERO_SCALAR_SKIP[], false)
     lock(EDGE_CACHE_LOCK) do
         EDGE_CACHE_STATES[key] = state
     end
@@ -371,6 +405,14 @@ function Oceananigans.Advection.update_advection!(scheme::ExplicitBoundsPreservi
     if isnothing(state) || isnothing(state.edges)
         state = new_edge_cache_state(scheme, grid)
     end
+    if state.candidate && all_plus_zero(c)
+        state.zero = true
+        state.active = false
+        ZERO_SCALAR_SKIPS[] += 1
+        return nothing
+    end
+    state.candidate = false
+    state.zero = false
     update_edge_cache!(state, scheme, grid, c)
     return nothing
 end
@@ -429,7 +471,9 @@ Adapt.adapt_structure(to, a::EdgeCachedAdvection) = EdgeCachedAdvection(Adapt.ad
 
 function AtmosphereModels.tendency_advection(scheme::ExplicitBoundsPreservingWENO)
     state = edge_cache_state(scheme)
-    (isnothing(state) || isnothing(state.edges) || !state.active) && return scheme
+    isnothing(state) && return scheme
+    state.zero && return ZeroTransport()
+    (isnothing(state.edges) || !state.active) && return scheme
     return EdgeCachedAdvection(state.edges)
 end
 
