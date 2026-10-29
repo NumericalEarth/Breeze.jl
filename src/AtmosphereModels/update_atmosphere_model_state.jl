@@ -343,7 +343,7 @@ end
 function fill_thermodynamic_auxiliaries!(model, formulation_fields)
     if FILLS_TOGETHER[]
         fill_halo_regions!((model.temperature, formulation_fields...))
-        fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
+        fill_halo_regions!(model.microphysical_fields, kernel_boundary_condition_args(model)...)
     else
         fill_thermodynamic_auxiliaries!(model, nothing)
     end
@@ -565,7 +565,7 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
         # bottom and top are both non-flux conditions are skipped by type, as `compute_z_bcs!` does.
         entries = z_flux_bc_entries(values(Gⁿ), values(prognostic_model_fields))
         isempty(entries) || launch!(arch, model.grid, :xy, _compute_batched_z_bcs!, entries, model.grid,
-                                    Tuple(boundary_condition_args(model)))
+                                    Tuple(kernel_boundary_condition_args(model)))
     else
         foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     end
