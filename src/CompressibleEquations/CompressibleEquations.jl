@@ -120,6 +120,8 @@ function __init__()
     VELOCITY_PASS_CONTRAVARIANT[] = switch_from_env("BREEZE_VELOCITY_PASS_CONTRAVARIANT", true)
     VELOCITY_PASS_CONTRAVARIANT[] || @info "Contravariant pair in the velocity launch off (environment)"
     DENSITY_TENDENCY_IN_PREDICTORS[] = switch_from_env("BREEZE_DENSITY_TENDENCY_IN_PREDICTORS", true)
+    FRAME_ONLY_TRANSPORT_SEED[] = switch_from_env("BREEZE_FRAME_ONLY_TRANSPORT_SEED", true)
+    FRAME_ONLY_TRANSPORT_SEED[] || @info "Frame-only transport seed off (environment)"
     DENSITY_TENDENCY_IN_PREDICTORS[] || @info "Dry-density tendency in the predictors off (environment)"
     return nothing
 end

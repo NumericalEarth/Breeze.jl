@@ -340,8 +340,54 @@ function freeze_linearization_state!(substepper::AcousticSubstepper, model)
     # substep loop), so the outer-step refresh is unread. `NO_STEP_LINEARIZATION_REFRESH[] = false`
     # (`BREEZE_NO_STEP_LINEARIZATION_REFRESH=false` at load) restores it.
     NO_STEP_LINEARIZATION_REFRESH[] || refresh_linearization_basic_state!(substepper, model)
-    seed_time_averaged_velocities!(substepper, model)
+    if FRAME_ONLY_TRANSPORT_SEED[]
+        seed_time_averaged_velocity_frames!(substepper, model)
+    else
+        seed_time_averaged_velocities!(substepper, model)
+    end
     return nothing
+end
+
+"""
+Whether the outer-step seed of the time-averaged transport velocity copies only the parent entries outside
+1:Nx × 1:Ny × 1:Nz (D3 C2, handoff ca97d15b; `true` by default, `BREEZE_FRAME_ONLY_TRANSPORT_SEED=false` at load:
+three whole-parent device copies). Stage 1 (`zero_entry`, the only stage after this seed) zeroes the interior in
+`initialize_stage_perturbations!` before any reader (prepare, advecting-state cache, flux and closure tendencies
+read `model.velocities`, not the seed), so only the frame is ever read from the seed.
+"""
+const FRAME_ONLY_TRANSPORT_SEED = Ref(true)
+
+function seed_time_averaged_velocity_frames!(substepper, model)
+    grid = model.grid
+    arch = architecture(grid)
+    Nx, Ny, Nz = size(grid)
+    for (avg, src) in zip(substepper.time_averaged_velocities, outer_step_start_transport_velocities(model))
+        dst = avg.data
+        launch!(arch, grid, KernelParameters(size(parent(dst))[1:2], (0, 0)), _copy_outside_interior!,
+                dst, src.data, Nx, Ny, Nz)
+    end
+    return nothing
+end
+
+@kernel function _copy_outside_interior!(dst, src, Nx, Ny, Nz)
+    p, q = @index(Global, NTuple)
+    i = p + dst.offsets[1]
+    j = q + dst.offsets[2]
+    k₀ = 1 + dst.offsets[3]
+    k₁ = size(parent(dst), 3) + dst.offsets[3]
+    interior_column = (1 ≤ i ≤ Nx) & (1 ≤ j ≤ Ny)
+    @inbounds if interior_column
+        for k in k₀:0
+            dst[i, j, k] = src[i, j, k]
+        end
+        for k in Nz+1:k₁
+            dst[i, j, k] = src[i, j, k]
+        end
+    else
+        for k in k₀:k₁
+            dst[i, j, k] = src[i, j, k]
+        end
+    end
 end
 
 const NO_STEP_LINEARIZATION_REFRESH = Ref(true)
