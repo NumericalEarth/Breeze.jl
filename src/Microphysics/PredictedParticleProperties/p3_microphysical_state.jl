@@ -791,9 +791,53 @@ end
 # The caller supplies `ℳ` rather than a grid and velocities: `update_microphysical_auxiliaries!`
 # has already built the state for this cell, so rebuilding it here would repeat the whole
 # `grid_microphysical_state` read for nothing.
-@inline function p3_compute_fall_speeds!(μ, i, j, k, p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+@inline p3_compute_fall_speeds!(μ, i, j, k, p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) =
+    p3_compute_fall_speeds!(Val(p3_species_fall_speeds()), μ, i, j, k, p3, ρ, ℳ, 𝒰, constants)
+
+@inline function p3_compute_fall_speeds!(::Val{false}, μ, i, j, k, p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     properties = p3_fall_speed_properties(p3, ρ, ℳ, 𝒰, constants)
     result = p3_fall_speed_compute(p3, ρ, ℳ, properties, constants)
+    return write_p3_fall_speeds!(μ, i, j, k, p3, result)
+end
+
+# Ported from Breeze PR #1092 (f5d28714), switch `p3_species_fall_speeds()`.
+# Each species' fall speeds are gated to zero below its own mass floor, so they are diagnosed
+# only where that species is present: the λ-limiter and fall-speed table reads are skipped
+# outside ice, the cloud size distribution outside cloud. Each guard below is the gate of the
+# speed it skips, evaluated on the same quantity (for ice, the floored total ice mass of
+# `p3_ice_moments`), so the result is the same as `p3_fall_speed_compute` at
+# `p3_fall_speed_properties`. The branches are deliberate: clear air, warm rain, and
+# ice-only anvil are each spatially coherent, so warps take them together.
+@inline function p3_compute_fall_speeds!(::Val{true}, μ, i, j, k, p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    FT = typeof(ρ)
+    qsmall = p3.minimum_mass_mixing_ratio
+
+    cloud = if ℳ.qᶜˡ ≥ qsmall
+        cloud_dsd = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
+        ν = air_kinematic_viscosity(temperature(𝒰, constants), air_pressure(𝒰, constants), constants)
+        cloud_terminal_velocities(p3, ℳ.qᶜˡ, ρ, ν, cloud_dsd.μᶜˡ, cloud_dsd.λᶜˡ, constants)
+    else
+        CloudTerminalVelocities{FT}(0, 0)
+    end
+
+    rain = if max(0, ℳ.qʳ) ≥ qsmall
+        rain_terminal_velocities(p3, ℳ.qʳ, ℳ.nʳ, ρ)
+    else
+        RainTerminalVelocities{FT}(0, 0)
+    end
+
+    mass_scale = FT(p3.process_rates.floors.mass_scale)
+    qⁱ_floored = max(total_ice_mass(ℳ.qⁱ, active_liquid_on_ice(p3, ℳ.qʷⁱ)), mass_scale)
+    ice = if max(0, qⁱ_floored) ≥ qsmall
+        props = p3_core_ice_properties(p3, ρ, ℳ)
+        ice_terminal_velocities(p3, props.qⁱ_total, props.nⁱ, props.Fᶠ, props.ρᶠ, ρ; Fˡ = props.Fˡ)
+    else
+        IceTerminalVelocities{FT}(0, 0)
+    end
+
+    result = P3FallSpeedResult{FT}(cloud.mass_weighted, cloud.number_weighted,
+                                   rain.mass_weighted, rain.number_weighted,
+                                   ice.mass_weighted, ice.number_weighted)
     return write_p3_fall_speeds!(μ, i, j, k, p3, result)
 end
 
