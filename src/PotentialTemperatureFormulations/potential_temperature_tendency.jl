@@ -92,7 +92,7 @@ end
                                  microphysics, microphysical_fields, specific_prognostic_moisture)
     Π = exner_function(𝒰, constants)
     cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
-    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
 
     FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
     div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
