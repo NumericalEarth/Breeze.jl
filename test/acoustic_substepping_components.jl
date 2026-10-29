@@ -134,13 +134,13 @@ end
     direction = ZDirection()
 
     code_diag(k) = get_coefficient(2, 2, k, grid, AcousticTridiagDiagonal(), nothing, direction,
-                                   Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+                                   Πᴸ, θᴸ, γRᵐᴸ, nothing, g, δτᵐ⁺, dᵐ⁺, nothing)
     code_upper(k) = get_coefficient(2, 2, k, grid, AcousticTridiagUpper(), nothing, direction,
-                                    Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+                                    Πᴸ, θᴸ, γRᵐᴸ, nothing, g, δτᵐ⁺, dᵐ⁺, nothing)
     # Oceananigans' Press-indexed tridiagonal solver asks the lower
     # diagonal for row k as `a[k - 1]`.
     code_lower_for_row(k) = get_coefficient(2, 2, k - 1, grid, AcousticTridiagLower(), nothing, direction,
-                                            Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+                                            Πᴸ, θᴸ, γRᵐᴸ, nothing, g, δτᵐ⁺, dᵐ⁺, nothing)
 
     expected_lower(k) = - δτᵐ⁺^2 * C(k - 1) * θ_face(k - 1) / Δz^2 +
                          δτᵐ⁺^2 * g / (2Δz) -
