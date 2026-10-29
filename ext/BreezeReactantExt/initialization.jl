@@ -1,20 +1,13 @@
-using Breeze.AtmosphereModels: AtmosphereModels
+using Breeze.AtmosphereModels: AtmosphereModels, specific_prognostic_moisture
 using Reactant: TracedRNumber
-using Reactant.Ops: julia_callback
 
-# Runtime callbacks are closure `cfunction`s, which need LLVM trampolines. Julia provides
-# them on x86 but not, for example, on Apple silicon.
-const runtime_callbacks_supported = Sys.ARCH in (:x86_64, :i686)
-
-# The reduction is part of the compiled program, so its Boolean cannot be inspected
-# while tracing. Check it in a runtime callback instead. Only the Boolean crosses
-# into Julia; the moisture fields stay on the device, and the check has no derivative.
-# Where runtime callbacks are unavailable, skip the check rather than fail to compile.
-function AtmosphereModels.validate_total_moisture(valid::TracedRNumber{Bool})
-    if runtime_callbacks_supported
-        julia_callback(AtmosphereModels.validate_total_moisture, (), valid; has_side_effect=true)
-    else
-        @warn "Skipping the traced total moisture check: runtime callbacks are unavailable on $(Sys.ARCH)." maxlog=1
+# Inside a compiled program the check's Boolean is a device value: it can neither be
+# inspected while tracing nor raise at execution time. Mark an invalid state by setting
+# its moisture to NaN through a select, which keeps the program differentiable.
+function AtmosphereModels.reject_invalid_moisture!(model, valid::TracedRNumber{Bool})
+    FT = eltype(model.grid)
+    for field in (model.moisture_density, specific_prognostic_moisture(model))
+        parent(field) .= ifelse.(valid, parent(field), convert(FT, NaN))
     end
     return nothing
 end

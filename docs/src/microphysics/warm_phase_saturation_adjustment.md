@@ -19,11 +19,12 @@ With warm-phase microphysics, the moist static energy ``s`` is related to temper
 height ``z``, and liquid mass fraction ``qˡ`` by
 
 ```math
-s ≡ cᵖᵐ \, T + g z - ℒˡᵣ qˡ ,
+s ≡ cᵖᵐ \, T + g z - ℒˡ₀ qˡ ,
 ```
 
 where ``cᵖᵐ`` is the mixture heat capacity, ``g`` is gravitational acceleration,
-and ``ℒˡᵣ`` is the latent heat at the energy reference temperature.
+and ``ℒˡ₀`` is the latent-heat intercept extrapolated to zero kelvin,
+``ℒˡ₀ = ℒˡᵣ − (cᵖᵛ − cˡ) Tᵣ``.
 
 ## Equilibrium expressions for moist static energy and saturation specific humidity
 
@@ -76,7 +77,7 @@ This expression can also be found in paper by [Pressel2015](@citet), equation (3
 We compute the saturation adjustment temperature by solving the nonlinear algebraic equation
 
 ```math
-0 = r(T) ≡ T - \frac{1}{cᵖᵐ} \left [ s - g z + ℒˡᵣ \max(0, qᵗ - qᵛ⁺) \right ] \,
+0 = r(T) ≡ T - \frac{1}{cᵖᵐ} \left [ s - g z + ℒˡ₀ \max(0, qᵗ - qᵛ⁺) \right ] \,
 ```
 
 where ``r`` is the "residual", using a secant method.
@@ -130,8 +131,8 @@ q = MoistureMassFractions(qᵛ⁺, qˡ)
 cᵖᵐ = mixture_heat_capacity(q, thermo)
 g = thermo.gravitational_acceleration
 z = 0.0
-ℒˡᵣ = thermo.liquid.reference_latent_heat
-s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
+ℒˡ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(thermo, thermo.liquid)
+s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ
 ```
 
 Moist static energy has units ``\mathrm{m^2 / s^2}``, or ``\mathrm{J} / \mathrm{kg}``.
@@ -157,7 +158,8 @@ T₁ = (s - g * z) / cᵖᵐ₁
 ```
 
 The difference between ``T₁`` and the solution ``T_\mathrm{eq}`` is
-``T_\mathrm{eq} - T₁ = ℒˡᵣ qˡ / cᵖᵐ`` and is therefore strictly positive.
+``T_\mathrm{eq} - T₁ = ℒˡ(T₁) qˡ / cᵖᵐ``, with ``qˡ`` and ``cᵖᵐ`` evaluated at equilibrium,
+and is therefore strictly positive.
 In other words, ``T₁`` represents a lower bound.
 
 To generate a second guess for the secant solver, we start by estimating
@@ -171,11 +173,14 @@ qˡ₁ = qᵗ - qᵛ⁺₂
 In general, this represents an _overestimate_ of the liquid mass fraction,
 because ``qᵛ⁺₂`` is underestimated by the too-low temperature ``T₁``.
 We thus increment the first guess by half of the difference implied by the
-estimate ``qˡ₁``,
+estimate ``qˡ₁``. The solver approximates the latent heat by its reference value ``ℒˡᵣ``
+rather than ``ℒˡ(T₁)``; the estimate only seeds the secant iteration, so this does not
+affect the converged temperature,
 
 ```@example  microphysics
 q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₁)
 cᵖᵐ₂ = mixture_heat_capacity(q₂, thermo)
+ℒˡᵣ = thermo.liquid.reference_latent_heat
 ΔT = ℒˡᵣ * qˡ₁ / cᵖᵐ₂
 T₂ = T₁ + ΔT / 2
 ```

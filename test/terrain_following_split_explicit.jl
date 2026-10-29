@@ -495,16 +495,10 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         @test isfinite(maximum(abs, interior(model.dynamics.dry_density)))
     end
 
-    @testset "Acoustic substep gates terrain ρw̃ slope correction [$(nameof(typeof(formulation)))]" for formulation in TERRAIN_FORMULATIONS
+    @testset "Acoustic substep applies terrain ρw̃ slope correction [$(nameof(typeof(formulation)))]" for formulation in TERRAIN_FORMULATIONS
         # The contravariant vertical-momentum perturbation ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv
         # carries a horizontal slope correction slopeₓ·∂ₓ(Cᴸ(ρθ)′) in its acoustic
-        # pressure-gradient force. Because ρw̃ and ρu are tied by that relation, the
-        # correction must respect the SAME MPAS first-small-step gate that
-        # `_explicit_horizontal_step!` applies to ρu's perturbation PGF — otherwise the
-        # two are out of phase on substep 1 of a multi-substep stage. The gate factor
-        # therefore scales ONLY the horizontal slope correction inside
-        # `∇ᶻp′`; the vertical ∂z(Cᴸ(ρθ)′) part is always
-        # applied (the vertical acoustic mode is solved implicitly every substep).
+        # pressure-gradient force, so `∇ᶻp′` is the vertical ∂z(Cᴸ(ρθ)′) minus that correction.
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
 
@@ -541,18 +535,12 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
             correction = terrain_horizontal_linearized_pressure_gradient_correction(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ)
 
-            z_gated = ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 0.0)
-            z_full  = ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 1.0)
-
-            # Gate off ⇒ pure vertical gradient, no horizontal slope correction.
-            @test z_gated == ∂z_p′
-            # Gate on ⇒ vertical gradient minus the full horizontal slope correction.
-            @test z_full == ∂z_p′ - correction
+            @test ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ) == ∂z_p′ - correction
 
             correction_seen = correction_seen || (abs(correction) > 1e-10)
         end
 
-        # The gate is meaningful: the slope correction is genuinely nonzero over the mountain.
+        # The slope correction is genuinely nonzero over the mountain.
         @test correction_seen
     end
 
