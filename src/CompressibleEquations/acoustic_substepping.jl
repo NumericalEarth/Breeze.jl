@@ -949,15 +949,23 @@ single traced `while` loop under Reactant, so the compiled program holds one cop
 body rather than `Nτ`.
 """
 function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
-    @trace track_numbers=false for _ in 1:Nτ
+    # Without divergence damping nothing changes the momentum perturbations after the last
+    # substep's post-solve recovery, so that substep stores no transport accumulators: the
+    # finalization reads `accumulator + perturbation` (the very sum the recovery would store).
+    # The tiled column kernel always accumulates, so it is never peeled.
+    peel = substepper.damping isa NoDivergenceDamping &&
+           !(acoustic_column_path(model.grid, model.dynamics, advection) isa TiledAcousticColumn)
+    Nloop = peel ? Nτ - 1 : Nτ
+    @trace track_numbers=false for _ in 1:Nloop
         acoustic_substep!(model, substepper, stage, advection)
     end
+    peel && acoustic_substep!(model, substepper, stage, advection, nothing)
 
     # Stage-final (ρu)′, (ρv)′ halos, read with horizontal neighbours by the terrain
     # recovery; the per-substep post-damping fill they replace was otherwise dead.
     fill_halo_regions!(substepper.momentum_perturbation.u)
     fill_halo_regions!(substepper.momentum_perturbation.v)
-    return nothing
+    return peel
 end
 
 # Build per-column predictors `ρ′★`, `ρθ′★` (cell centers) AND
@@ -1064,12 +1072,21 @@ end
     @inbounds begin
         ρ′[i, j, k]  = ρ′★[i, j, k]  - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
         ρθ′[i, j, k] = ρθ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
+        accumulate_transport!(avg, i, j, k, ρu′, ρv′, ρw′)
+    end
+    return nothing
+end
+
+@inline function accumulate_transport!(avg, i, j, k, ρu′, ρv′, ρw′)
+    @inbounds begin
         avg.u[i, j, k] += ρu′[i, j, k]
         avg.v[i, j, k] += ρv′[i, j, k]
         avg.w[i, j, k] += ρw′[i, j, k]
     end
     return nothing
 end
+
+@inline accumulate_transport!(::Nothing, i, j, k, ρu′, ρv′, ρw′) = nothing
 
 #####
 ##### Fused acoustic column substep (flat RectilinearGrid only)
@@ -1675,7 +1692,7 @@ end
 #####
 
 
-function finalize_time_averaged_velocity!(substepper, model, Nτ)
+function finalize_time_averaged_velocity!(substepper, model, Nτ, peeled = false)
     grid = model.grid
     arch = architecture(grid)
     FT   = eltype(grid)
@@ -1690,7 +1707,8 @@ function finalize_time_averaged_velocity!(substepper, model, Nτ)
             substepper.time_averaged_velocities.w,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
             model.dynamics.dry_density,
-            grid, model.dynamics, inv_Nτ)
+            grid, model.dynamics, inv_Nτ,
+            peeled ? substepper.momentum_perturbation : nothing)
 
     map(fill_halo_regions!, substepper.time_averaged_velocities)
 
@@ -1699,15 +1717,15 @@ end
 
 @kernel function _finalize_time_averaged_velocity!(u_avg, v_avg, w_avg,
                                                    ρu_stage, ρv_stage, ρw_stage,
-                                                   ρᴸ, grid, dynamics, inv_Nτ)
+                                                   ρᴸ, grid, dynamics, inv_Nτ, last)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ρu_total = ρu_stage[i, j, k] + u_avg[i, j, k] * inv_Nτ
-        ρv_total = ρv_stage[i, j, k] + v_avg[i, j, k] * inv_Nτ
+        ρu_total = ρu_stage[i, j, k] + transport_sum(u_avg, last, :u, i, j, k) * inv_Nτ
+        ρv_total = ρv_stage[i, j, k] + transport_sum(v_avg, last, :v, i, j, k) * inv_Nτ
         ρw_total = transport_ρw(i, j, k, grid, dynamics,
                                                               ρu_stage, ρv_stage, ρw_stage) +
-                   w_avg[i, j, k] * inv_Nτ
+                   transport_sum(w_avg, last, :w, i, j, k) * inv_Nτ
 
         ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρᴸ)
         ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρᴸ)
@@ -1721,6 +1739,11 @@ end
         w_avg[i, j, k] = ρw_total / ρ̂ᶜᶜᶠ * (k > 1)
     end
 end
+
+# Transport sum at stage end: the accumulator, plus the last substep's perturbation when that
+# substep was peeled (same operands and order as `accumulate_transport!`).
+@inline transport_sum(avg, ::Nothing, name, i, j, k) = @inbounds avg[i, j, k]
+@inline transport_sum(avg, last, name, i, j, k) = @inbounds avg[i, j, k] + getproperty(last, name)[i, j, k]
 
 @inline transport_ρw(i, j, k, grid, dynamics, ρu_stage, ρv_stage, ρw_stage) =
     @inbounds ρw_stage[i, j, k]
@@ -1884,7 +1907,8 @@ function implicit_advection_substep!(model, substepper, advection::AdaptiveImpli
     return nothing
 end
 
-function acoustic_column_substep!(::TiledAcousticColumn{T, K}, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻) where {T, K}
+function acoustic_column_substep!(::TiledAcousticColumn{T, K}, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻,
+                                 accumulators = substepper.time_averaged_velocities) where {T, K}
     grid = model.grid
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -1924,7 +1948,8 @@ the Crank–Nicolson weights `δτᵐ⁺` and `δτˢ⁻`, and the slow thermody
 Everything is passed explicitly so that the loop calling this can be traced by Reactant with
 no captured state; see [`acoustic_substep_loop!`](@ref).
 """
-function acoustic_substep!(model, substepper, stage, advection)
+function acoustic_substep!(model, substepper, stage, advection,
+                           accumulators = substepper.time_averaged_velocities)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -1964,7 +1989,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     # Steps B–D: predictors, (ρw)′ tridiag rhs + solve, post-solve recovery. Fused into one
     # column launch on flat RectilinearGrids (see `_fused_acoustic_column_substep!`).
     path = acoustic_column_path(grid, model.dynamics, advection)
-    acoustic_column_substep!(path, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻)
+    acoustic_column_substep!(path, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻, accumulators)
 
     # Per-substep open-boundary enforcement (issue #738): relax the outermost
     # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
@@ -1993,7 +2018,8 @@ function acoustic_substep!(model, substepper, stage, advection)
     return nothing
 end
 
-function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻)
+function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻,
+                                 accumulators = substepper.time_averaged_velocities)
     grid = model.grid
     arch = architecture(grid)
     Gⁿ = model.timestepper.Gⁿ
@@ -2052,13 +2078,14 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
             substepper.momentum_perturbation.v,
             substepper.density_predictor,
             substepper.density_potential_temperature_predictor,
-            substepper.time_averaged_velocities,
+            accumulators,
             grid, model.dynamics, δτᵐ⁺,
             substepper.linearization_potential_temperature)
     return nothing
 end
 
-function acoustic_column_substep!(::FusedAcousticColumn, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻)
+function acoustic_column_substep!(::FusedAcousticColumn, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻,
+                                 accumulators = substepper.time_averaged_velocities)
     grid = model.grid
     arch = architecture(grid)
     Gⁿ = model.timestepper.Gⁿ
@@ -2074,7 +2101,7 @@ function acoustic_column_substep!(::FusedAcousticColumn, model, substepper, stag
             substepper.density_predictor,
             substepper.density_potential_temperature_predictor,
             substepper.previous_density_potential_temperature_perturbation,
-            substepper.time_averaged_velocities,
+            accumulators,
             solver.a, solver.b, solver.c, solver.parameters, solver.t,
             grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
             Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
@@ -2145,7 +2172,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
     factors = stage_factors(acoustic_column_path(grid, model.dynamics, advection), substepper)
     factorize_stage!(factors, model, substepper, δτᵐ⁺)
-    acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
+    peeled = acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a
     # time-averaged velocity field. Read by `update_state!` through
@@ -2153,7 +2180,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Done BEFORE `_recover_full_state!` so we read the stage-entry
     # `model.momentum.*` (substep loop hasn't touched it) and stage-entry
     # `model.dynamics.dry_density` as the Uᴸ_stage reference.
-    finalize_time_averaged_velocity!(substepper, model, Nτ)
+    finalize_time_averaged_velocity!(substepper, model, Nτ, peeled)
 
     # Stage-end: recover the full prognostic state in-place. `model.dynamics.dry_density`,
     # `ρᵡ`, and `model.momentum.*` are still the stage-entry Uᴸ values here
