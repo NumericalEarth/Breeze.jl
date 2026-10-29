@@ -160,6 +160,7 @@ include("formulation_interface.jl")
 #####
 
 include("atmosphere_model.jl")
+include("kernel_arguments.jl")
 
 #####
 ##### Remaining AtmosphereModel components

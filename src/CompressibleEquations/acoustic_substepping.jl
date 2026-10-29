@@ -2000,7 +2000,7 @@ function implicit_advection_substep!(model, substepper, advection::AdaptiveImpli
     ρᵈ = substepper.density_cache
     implicit_step!(substepper.density_potential_temperature_predictor,
                    model.timestepper.implicit_solver, nothing, nothing, nothing,
-                   model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+                   model.clock, AtmosphereModels.kernel_fields(model), Δτ, advection, (; w), ρᵈ)
     return nothing
 end
 
@@ -2318,9 +2318,9 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
     # Thread clock + model fields so time-dependent Open BCs on the recovered
     # prognostic state dispatch correctly in `getbc` (see #717).
-    fill_halo_regions!(model.dynamics.dry_density, boundary_condition_args(model)...)
-    fill_halo_regions!(ρᵡ, boundary_condition_args(model)...)
-    fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
+    fill_halo_regions!(model.dynamics.dry_density, AtmosphereModels.kernel_boundary_condition_args(model)...)
+    fill_halo_regions!(ρᵡ, AtmosphereModels.kernel_boundary_condition_args(model)...)
+    fill_halo_regions!(model.momentum, AtmosphereModels.kernel_boundary_condition_args(model)...)
     AtmosphereModels.compute_velocities!(model)
 
     return nothing

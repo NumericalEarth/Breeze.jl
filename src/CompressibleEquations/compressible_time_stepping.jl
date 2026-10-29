@@ -411,7 +411,7 @@ function AtmosphereModels.compute_auxiliary_state_variables!(model::Compressible
     arch = grid.architecture
     dynamics = model.dynamics
 
-    bc_args = Oceananigans.Models.boundary_condition_args(model)
+    bc_args = AtmosphereModels.kernel_boundary_condition_args(model)
     fill_halo_regions!(dynamics.dry_density, bc_args...)
     fill_halo_regions!(model.momentum, bc_args...)
     fill_halo_regions!(prognostic_fields(model.formulation))

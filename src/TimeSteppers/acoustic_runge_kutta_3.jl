@@ -255,6 +255,8 @@ linearized acoustic substepping.
 """
 function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, Δt; callbacks=[])
 
+    end_kernel_argument_epoch!()
+
     maybe_prepare_first_time_step!(model, Δt, callbacks)
 
     ts = model.timestepper

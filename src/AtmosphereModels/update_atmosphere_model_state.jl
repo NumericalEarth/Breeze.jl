@@ -50,8 +50,9 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[];
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
+    end_kernel_argument_epoch!()
 
-    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
+    fill_halo_regions!(prognostic_fields(model), kernel_boundary_condition_args(model)..., async=true)
     compute_auxiliary_variables!(model; compute_closure_fields)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
@@ -196,8 +197,8 @@ function compute_velocities!(model::AtmosphereModel)
     # (recomputed just below), so momentum BCs with velocity `field_dependencies`
     # would see last-stage values.
     density = dynamics_density(model.dynamics)
-    fill_halo_regions!(density, boundary_condition_args(model)...)
-    fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
+    fill_halo_regions!(density, kernel_boundary_condition_args(model)...)
+    fill_halo_regions!(model.momentum, kernel_boundary_condition_args(model)...)
 
     # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
     # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
@@ -332,7 +333,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
+    fill_halo_regions!(model.microphysical_fields, kernel_boundary_condition_args(model)...)
     fill_halo_regions!(model.formulation)
 
     return nothing
@@ -398,7 +399,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     grid = model.grid
     arch = grid.architecture
 
-    model_fields = fields(model)
+    model_fields = kernel_fields(model)
 
     # The sedimentation velocities the scalar kernels below read are established by
     # `update_microphysical_auxiliaries!` in `compute_auxiliary_variables!`, so they are
@@ -533,7 +534,7 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
 
     # Compute boundary flux contributions
     prognostic_model_fields = prognostic_fields(model)
-    args = (arch, boundary_condition_args(model)...)
+    args = (arch, kernel_boundary_condition_args(model)...)
     field_indices = 1:length(prognostic_model_fields)
     Gⁿ = model.timestepper.Gⁿ
 

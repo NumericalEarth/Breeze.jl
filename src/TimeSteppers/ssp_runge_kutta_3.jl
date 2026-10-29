@@ -176,7 +176,7 @@ function implicit_stage_step!(model, name, u, Δt)
                    model.closure_fields,
                    field_index,
                    model.clock,
-                   fields(model),
+                   kernel_fields(model),
                    Δt,
                    implicit_step_scheme(advection),
                    implicit_advection_velocities(model.dynamics, model.velocities, name,

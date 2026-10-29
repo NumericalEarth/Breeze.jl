@@ -17,7 +17,7 @@ using Oceananigans: Oceananigans
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  update_state!, maybe_prepare_first_time_step!, reconcile_state!
-using Breeze.AtmosphereModels: kernel_time_step
+using Breeze.AtmosphereModels: kernel_time_step, kernel_fields, end_kernel_argument_epoch!
 
 include("ssp_runge_kutta_3.jl")
 include("acoustic_substep_helpers.jl")
