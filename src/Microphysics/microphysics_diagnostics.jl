@@ -21,6 +21,7 @@ using ..AtmosphereModels.Diagnostics:
 
 # Extend microphysics_phase_equilibrium for SaturationAdjustment
 @inline Diagnostics.microphysics_phase_equilibrium(μ::SaturationAdjustment) = μ.equilibrium
+@inline Diagnostics.microphysics_phase_equilibrium(μ::BulkMicrophysics) = microphysics_phase_equilibrium(μ.cloud_formation)
 
 const C = Center
 

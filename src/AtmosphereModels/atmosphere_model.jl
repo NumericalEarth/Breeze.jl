@@ -245,7 +245,7 @@ function AtmosphereModel(grid;
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize dynamics and formulation
-    dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics)
+    dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics, formulation)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
     # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3

@@ -51,14 +51,18 @@ where ``\phi`` is a nonhydrostatic pressure correction potential defined by the 
 Breeze advances a conservative moist static energy density
 
 ```math
-ρᵣ s ≡ ρᵣ \left ( c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i \right ),
+ρᵣ s ≡ ρᵣ \left ( c^{pm} T + g z - \mathscr{L}^l_0 q^l - \mathscr{L}^i_0 q^i \right ),
 ```
 
 where ``c^{p m}`` is the mixture heat capacity, ``T`` is temperature, ``g`` is gravitational acceleration,
 ``z`` is height,
-``\mathscr{L}^l_r`` is the latent heat of condensation (vapor to liquid) at the energy reference temperature,
+``\mathscr{L}^l_0 = \mathscr{L}^l_r - (c^{pv} - c^l) T_r`` is the latent heat of condensation (vapor to liquid)
+extrapolated to absolute zero,
 and
-``\mathscr{L}^i_r`` is the latent heat of deposition (vapor to ice) at the energy reference temperature.
+``\mathscr{L}^i_0 = \mathscr{L}^i_r - (c^{pv} - c^i) T_r`` is the latent heat of deposition (vapor to ice)
+extrapolated to absolute zero, with ``\mathscr{L}^x_r`` the latent heat at the energy reference temperature ``T_r``.
+Because ``c^{pm} T`` measures sensible enthalpy from absolute zero, the latent terms are referenced there too,
+so a phase change at fixed ``s`` releases the temperature-dependent latent heat ``\mathscr{L}^x(T)``.
 
 According to [Pauluis2008](@citet), the moist static energy obeys
 
@@ -75,7 +79,7 @@ applies at the combined resolved and terminal velocity, minus the flux at the re
 velocity alone, so the energy moves exactly with the mass — by thermodynamic phase, and
 transports ``∂s/∂q^x`` per unit falling mass of phase ``x``, evaluated at fixed temperature
 with the dry mass fraction ``q^d = 1 - q^v - q^l - q^i`` taking up the departed mass:
-``(c^l - c^{pd}) T - \mathscr{L}^l_r`` for liquid and ``(c^i - c^{pd}) T - \mathscr{L}^i_r``
+``(c^l - c^{pd}) T - \mathscr{L}^l_0`` for liquid and ``(c^i - c^{pd}) T - \mathscr{L}^i_0``
 for ice, the latent deficit plus the sensible heat of the condensate relative to the dry air
 that replaces it, taken in the cell each flux drains. The cell the condensate leaves therefore
 keeps its temperature, the cell it arrives in gains the sensible heat carried from another

@@ -34,12 +34,12 @@ Moist static energy is a conserved quantity in adiabatic, frictionless flow that
 combines sensible heat, gravitational potential energy, and latent heat:
 
 ```math
-s = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ
+s = cᵖᵐ T + g z - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ
 ```
 
 where ``cᵖᵐ`` is the moist air heat capacity, ``T`` is temperature,
 ``g`` is gravitational acceleration, ``z`` is height, and
-``ℒˡᵣ qˡ + ℒⁱᵣ qⁱ`` is the latent heat content of condensate.
+``ℒˡ₀ qˡ + ℒⁱ₀ qⁱ`` uses latent-heat offsets extrapolated to zero kelvin.
 
 This is the prognostic thermodynamic variable used in `StaticEnergyThermodynamics`.
 
@@ -106,13 +106,13 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     g = d.thermodynamic_constants.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
 
-    ℒˡᵣ = d.thermodynamic_constants.liquid.reference_latent_heat
-    ℒⁱᵣ = d.thermodynamic_constants.ice.reference_latent_heat
+    ℒˡ₀ = Thermodynamics.absolute_zero_latent_heat(d.thermodynamic_constants, d.thermodynamic_constants.liquid)
+    ℒⁱ₀ = Thermodynamics.absolute_zero_latent_heat(d.thermodynamic_constants, d.thermodynamic_constants.ice)
     qˡ = q.liquid
     qⁱ = q.ice
 
     # Moist static energy
-    s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ - ℒⁱ₀ * qⁱ
 
     if d.flavor isa Specific
         return s

@@ -11,8 +11,12 @@ Moist static energy is a conserved quantity in adiabatic, frictionless flow that
 sensible heat, gravitational potential energy, and latent heat:
 
 ```math
-s = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ
+s = cᵖᵐ T + g z - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ
 ```
+
+Here ``ℒˡ₀ = ℒˡᵣ − (cᵖᵛ − cˡ) Tᵣ`` and ``ℒⁱ₀ = ℒⁱᵣ − (cᵖᵛ − cⁱ) Tᵣ`` are the latent heats
+of condensation and deposition extrapolated to zero kelvin. Pairing the reference latent heats
+``ℒᵣ`` with ``cᵖᵐ T`` would give incorrect phase-change heating.
 
 The energy density equation includes a buoyancy flux term following [Pauluis2008](@citet).
 """

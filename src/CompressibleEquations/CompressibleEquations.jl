@@ -65,7 +65,7 @@ using Oceananigans.Utils: prettysummary, launch!, KernelParameters, @apply_regio
 
 using Breeze.Utils: @regional
 using Breeze.Solvers: NewtonSolver
-using Breeze.Thermodynamics: mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, MoistureMassFractions,
+using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, MoistureMassFractions,
                              reject_renamed_surface_pressure,
                              vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState
 

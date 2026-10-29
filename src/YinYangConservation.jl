@@ -117,7 +117,8 @@ function flux_divergence(model, name)
         U = transport_velocities(model)
     end
 
-    buoyancy = AtmosphereModelBuoyancy(model.dynamics, model.formulation, model.thermodynamic_constants)
+    buoyancy = AtmosphereModelBuoyancy(model.dynamics, model.formulation, model.thermodynamic_constants,
+                                       model.microphysics, model.microphysical_fields)
     args = (field_advection_scheme(model.advection, name), ρ, U, specific_scalar_fields(model)[name],
             model.closure, model.closure_fields, closure_scalar_index(model, name), model.clock, fields(model), buoyancy)
     return KernelFunctionOperation{Center, Center, Center}(horizontal_flux_divergence, grid, args...)

@@ -15,20 +15,27 @@ AtmosphereModels.default_dynamics(::MultiRegionGrids, constants) =
 AtmosphereModels.materialize_dynamics(::AnelasticDynamics, ::MultiRegionGrids, boundary_conditions, thermodynamic_constants) =
     throw(ArgumentError("AnelasticDynamics is not supported on a MultiRegionGrid."))
 
-function AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, grid)
-    reference_density = dynamics.reference_state.density
+AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, grid) =
+    anelastic_pressure_solver(dynamics.pressure_solver_float_type, pressure_solver_grid(grid),
+                              dynamics.reference_state.density)
+
+# The solver is exact on a grid without an immersed boundary.
+pressure_solver_grid(grid) = grid
+
+# With an immersed boundary we use an approximate solver on the underlying grid,
+# which produces a divergent velocity field near terrain.
+pressure_solver_grid(grid::ImmersedBoundaryGrid) = grid.underlying_grid
+
+# The grid is already in the solver's float type
+function anelastic_pressure_solver(::Type{FT}, grid::AbstractGrid{FT}, reference_density) where FT
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
-
-    solver = if grid isa Oceananigans.ImmersedBoundaries.ImmersedBoundaryGrid
-        # With this method, we are using an approximate solver that
-        # will produce a divergent velocity field near terrain.
-        FourierTridiagonalPoissonSolver(grid.underlying_grid; tridiagonal_formulation)
-    else # the solver is exact
-        FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
-    end
-
-    return solver
+    return FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
 end
+
+# Another float type: solve on a copy of the grid in that type. The coefficient kernels
+# read ρᵣ in the model's precision and promote it, so the solver needs no copy of ρᵣ.
+anelastic_pressure_solver(FT, grid, reference_density) =
+    anelastic_pressure_solver(FT, with_number_type(FT, grid), reference_density)
 
 #####
 ##### Tridiagonal solver coefficients
@@ -88,6 +95,7 @@ end
 function AtmosphereModels.update_pressure_solver!(solver::FourierTridiagonalPoissonSolver, ::AnelasticDynamics)
     tridiagonal_solver = solver.batched_tridiagonal_solver
     formulation = solver.tridiagonal_formulation
+
     Solvers.compute_main_diagonal!(tridiagonal_solver.b, formulation, solver.grid, solver.poisson_eigenvalues...)
     Solvers.compute_lower_diagonal!(tridiagonal_solver.a, formulation, solver.grid)
     return nothing
