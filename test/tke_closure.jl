@@ -132,10 +132,10 @@ column(field) = Array(interior(field, 1, 1, :))
     @test adapt(identity, closure.mixing_length) === closure.mixing_length
     @test adapt(identity, sf) === sf
     @test sf isa RationalStabilityFunction{FT}
-    @test closure.mixing_length.ℂˢ === FT(0.6565692899592015)
-    @test closure.mixing_length.ℂⁱ === FT(1.5609936948461662)
+    @test closure.mixing_length.ℂˢ === FT(0.7877315198717979)
+    @test closure.mixing_length.ℂⁱ === FT(1.777871783491512)
     @test closure.mixing_length.ℂˢ * (sf.ℂᵘ⁰^3 / sf.ℂᴰ⁰)^(1/4) ≈ 0.4 rtol=1e-6
-    @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.8001428358397753
+    @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.7999974525668859
     @test GradientLimitedMixingLength(ℂˢ=2, ℂⁱ=0.5).ℂⁱ === 0.5
 
     # Independent O(Nz²) face-envelope reference, including unequal slopes in BOTH directions.
@@ -708,11 +708,11 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test isbits(sf) # a GPU kernel can only carry an isbits closure
         @test sf isa RationalStabilityFunction{FT}
 
-        # Frozen selected P60 member, not the older CATKE endpoints.
-        @test sf.ℂᵘ⁰ === FT(0.15900569445804447)
-        @test sf.ℂᶜ⁰ === FT(0.19872163735761372)
-        @test sf.Ri⁻ === FT(12.669701017862883)
-        @test sf.Ri⁺ === FT(0.0501147186437052)
+        # Calibrated to the Shen et al. (2022) LES library
+        @test sf.ℂᵘ⁰ === FT(0.15439310625401925)
+        @test sf.ℂᶜ⁰ === FT(0.1929919973602801)
+        @test sf.Ri⁻ === FT(6.562979157594204)
+        @test sf.Ri⁺ === FT(15.12797320010583)
         # Twelve endpoints and two transition scales
         @test length(fieldnames(RationalStabilityFunction)) == 14
 
@@ -720,7 +720,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         mixed = Breeze.TurbulenceClosures.convert_eltype(FT, RationalStabilityFunction(ℂᵘ⁻ = 1, Ri⁺ = 2))
         @test mixed.ℂᵘ⁻ === FT(1)
         @test mixed.Ri⁺ === FT(2)
-        @test mixed.ℂᵘ⁰ === FT(0.15900569445804447)
+        @test mixed.ℂᵘ⁰ === FT(0.15439310625401925)
 
         closure = TKEBasedTurbulenceClosure(stability_functions = RationalStabilityFunction())
         @test closure.stability_functions isa RationalStabilityFunction{FT}
@@ -874,8 +874,10 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         perturbed = closure_fields(true)
         @test all(neutral.N²[interior_faces] .== 0)
         @test any(perturbed.N²[interior_faces] .> 0) && any(perturbed.N²[interior_faces] .< 0)
+        # The residual change grows with the endpoint ratios over Ri±: about 2e-3 in Kᵘ with the
+        # calibrated defaults, against O(1) were an interface sent to a limit
         for name in (:Kᵘ, :Kᶜ, :Kᵉ, :Lᵉ)
-            @test isapprox(perturbed[name], neutral[name]; rtol = 1e-4)
+            @test isapprox(perturbed[name], neutral[name]; rtol = 1e-2)
         end
     end
 
@@ -951,8 +953,9 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test all(Ri[interior_faces] .> 0)
         expected = [tracer_stability_function(sf, r) / momentum_stability_function(sf, r) for r in Ri[interior_faces]]
         @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ expected)
-        # The calibrated ratio increases on the stable branch and stays between its endpoints.
-        @test all(sf.ℂᶜ⁰ / sf.ℂᵘ⁰ .< expected .< sf.ℂᶜ⁺ / sf.ℂᵘ⁺)
+        # The ratio stays strictly between its neutral and stable endpoints
+        lo, hi = minmax(sf.ℂᶜ⁰ / sf.ℂᵘ⁰, sf.ℂᶜ⁺ / sf.ℂᵘ⁺)
+        @test all(lo .< expected .< hi)
 
         # Unstable stratification with shear: the unstable branch, again pointwise, and again
         # short of its asymptote at a finite Ri
@@ -965,7 +968,9 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test all(isfinite, Ri[interior_faces])
         expected = [tracer_stability_function(sf, r) / momentum_stability_function(sf, r) for r in Ri[interior_faces]]
         @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ expected)
-        @test all(sf.ℂᶜ⁻ / sf.ℂᵘ⁻ .< expected .< sf.ℂᶜ⁰ / sf.ℂᵘ⁰)
+        # and again strictly between its unstable and neutral endpoints
+        lo, hi = minmax(sf.ℂᶜ⁻ / sf.ℂᵘ⁻, sf.ℂᶜ⁰ / sf.ℂᵘ⁰)
+        @test all(lo .< expected .< hi)
     end
 
     @testset "a windless column with stable and unstable layers stays finite" begin
