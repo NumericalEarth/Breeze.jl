@@ -45,7 +45,9 @@ program with `Reactant.@compile` using `reactant_compile_options()` (with
 while-loop batch fission and while elementwise-reduction-to-reduce disabled) —
 compile time is recorded separately. `kernels` chooses how the model's kernels
 are compiled: `"raise"` raises them to StableHLO (`raise=true`), `"noraise"`
-keeps them as kernel calls (`raise=false`). The compiled program is then executed
+keeps them as kernel calls (`raise=false`), and `"kernelad"` keeps them as kernel
+calls through Reactant's kernel AD pipeline (`raise=false`, `optimize=:kernelad`,
+which needs EnzymeAD/Reactant.jl#3472). The compiled program is then executed
 once for warmup and once timed. The vanilla path drives `many_time_steps!`
 directly through eager `time_step!`.
 
@@ -54,8 +56,7 @@ benchmarked instead, using `checkpointing` as the loop checkpointing strategy
 for the reverse pass (`true`, `false`, `Reactant.Periodic(n)`, or
 `Reactant.Binomial(budget)`; see `loss` in timestepping.jl). There `kernels`
 is `"raise"`, which differentiates the raised kernels, or `"kernelad"`, which
-differentiates the kernel bodies themselves (`raise=false`,
-`optimize=:kernelad`, which needs EnzymeAD/Reactant.jl#3472).
+differentiates the kernel bodies themselves; `"noraise"` is forward only.
 
 Returns a `BenchmarkResult` containing timing information and system metadata.
 """
@@ -89,8 +90,8 @@ function benchmark_time_stepping(model;
     checkpointing_str = ad ? checkpointing_label(checkpointing) : ""
 
     ad && !is_reactant && error("AD benchmark requires a Reactant backend (got $backend)")
-    kernels in (ad ? ("raise", "kernelad") : ("raise", "noraise")) ||
-        error("Unknown kernels for $(mode) mode: $kernels. Use $(ad ? "'raise' or 'kernelad'" : "'raise' or 'noraise'").")
+    kernels in (ad ? ("raise", "kernelad") : ("raise", "noraise", "kernelad")) ||
+        error("Unknown kernels for $(mode) mode: $kernels. Use $(ad ? "'raise' or 'kernelad'" : "'raise', 'noraise' or 'kernelad'").")
 
     if verbose
         @info "Benchmark: $name"
@@ -114,8 +115,8 @@ function benchmark_time_stepping(model;
     compile_timings = (total = 0.0, tracing = 0.0, mlir = 0.0, xla = 0.0)
     invoke! = nothing
     if is_reactant
-        # Kernel AD keeps the kernels as kernel calls and differentiates their bodies, so
-        # like noraise it does not raise them
+        # Kernel AD keeps the kernels as kernel calls (and with ad differentiates their
+        # bodies), so like noraise it does not raise them
         raise = kernels == "raise"
         optimize = kernels == "kernelad" ? :kernelad : true
         if ad
@@ -136,10 +137,10 @@ function benchmark_time_stepping(model;
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing, mincut)
         else
             if verbose
-                @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=$raise)..."
+                @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=$raise, optimize=$optimize)..."
             end
             compiled_loop!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile compile_options=reactant_compile_options(; raise) step_loop!(model, Δt_FT, time_steps)
+                Reactant.@compile compile_options=reactant_compile_options(; raise, optimize) step_loop!(model, Δt_FT, time_steps)
             end
             invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
         end

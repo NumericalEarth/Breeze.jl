@@ -165,9 +165,9 @@ function parse_commandline()
 
         "--kernels"
             help = "How the Reactant backend compiles the model's kernels: 'raise' (raise them to StableHLO, " *
-                   "the default), 'noraise' (forward only: keep them as kernel calls) or 'kernelad' (--ad only: " *
-                   "differentiate the kernel bodies themselves with Reactant's optimize=:kernelad, from " *
-                   "EnzymeAD/Reactant.jl#3472). Comma-separated for multiple; each is a separate compile."
+                   "the default), 'noraise' (forward only: keep them as kernel calls) or 'kernelad' (keep them as " *
+                   "kernel calls through Reactant's optimize=:kernelad pipeline, from EnzymeAD/Reactant.jl#3472; " *
+                   "with --ad it differentiates the kernel bodies themselves). Comma-separated for multiple; each is a separate compile."
             arg_type = String
             default = "raise"
 
@@ -419,13 +419,12 @@ function run_benchmarks(args)
     end
 
     # Kernel modes only apply to the Reactant time-stepping benchmark; Enzyme differentiates
-    # unraised kernels only through kernelad, and kernelad is a differentiation pipeline.
+    # unraised kernels only through kernelad, so noraise is forward only. kernelad runs in both.
     kernel_modes = parse_list(args["kernels"])
     for kernels in kernel_modes
         kernels in ("raise", "noraise", "kernelad") ||
             error("Unknown --kernels value: $kernels. Use 'raise', 'noraise' or 'kernelad'.")
         args["ad"] && kernels == "noraise" && error("--kernels noraise is forward only; use kernelad with --ad")
-        !args["ad"] && kernels == "kernelad" && error("--kernels kernelad needs --ad")
     end
 
     results = []
