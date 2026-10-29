@@ -433,7 +433,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
         Val(2),
         Val(moist_name),
         model.forcing[moist_name],
-        model.advection[moist_name],
+        tendency_advection(model.advection[moist_name]),
         common_args...)
 
     Gρqᵛᵉ = getproperty(model.timestepper.Gⁿ, moist_name)
@@ -457,7 +457,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
             Val(i + 2),
             Val(name),
             model.forcing[name],
-            model.advection[name],
+            tendency_advection(model.advection[name]),
             common_args...)
 
         Gρc = getproperty(model.timestepper.Gⁿ, name)

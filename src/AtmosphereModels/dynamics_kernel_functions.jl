@@ -10,6 +10,11 @@ using Oceananigans.Utils: sum_of_velocities
 @inline div_ρUc(i, j, k, grid, args...) = zero(grid)
 @inline c_div_ρU(i, j, k, grid, args...) = zero(grid)
 
+# The advection argument a scalar tendency launch passes to `div_ρUc`: the scheme itself unless the
+# `Advection` module substitutes a form that reads state the limiter pass left for this stage
+# (the bounds-preserving edge cache). Host-side, evaluated at launch.
+tendency_advection(scheme) = scheme
+
 # Split-explicit substepping zeros the vertical PGF and buoyancy from the explicit
 # tendency; the fast substep loop re-applies them from the linearized perturbation
 # formulas. Other time discretizations (e.g. ExplicitTimeStepping) fall through to
