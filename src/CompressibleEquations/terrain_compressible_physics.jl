@@ -668,10 +668,77 @@ function store_linearization_pressure_gradients!(P::TerrainPressureGradients, mo
     grid = model.grid
     Nx, Ny, Nz = size(grid)
     TX, TY, _ = topology(grid)
-    indices = KernelParameters(interpolated_face_indices(TX, Nx), interpolated_face_indices(TY, Ny), 0:Nz)
-    launch!(architecture(grid), grid, indices, _store_linearization_pressure_gradients!,
-            P.linearization_x, P.linearization_y, grid, model.dynamics)
+    if CARRIED_LINEARIZATION_GRADIENTS[] & carries_vertical_rhs(model.dynamics, P, grid)
+        # one thread per face column (i, j) of the same range, levels 0:Nz carried (S7)
+        launch!(architecture(grid), grid, KernelParameters(1:Nx+1, 1:Ny+1), _store_linearization_pressure_gradients_carried!,
+                P.linearization_x, P.linearization_y, grid, model.dynamics)
+    else
+        indices = KernelParameters(interpolated_face_indices(TX, Nx), interpolated_face_indices(TY, Ny), 0:Nz)
+        launch!(architecture(grid), grid, indices, _store_linearization_pressure_gradients!,
+                P.linearization_x, P.linearization_y, grid, model.dynamics)
+    end
     return nothing
+end
+
+#####
+##### D3 S7 (handoff 513ceeee, store part): the per-stage ∂x pᴸ, ∂y pᴸ store as a column launch with the vertical
+##### stencil carried. ∂xᶠᶜᶜ(q) at (i, k) = (q(i) − q(i − 1))·Δx⁻¹ᶠᶜᶜ − ∂x_zᶠᶜᶜ·½(Ax(k) + Ax(k + 1)),
+##### Ax(f) = ½(Dz(i − 1, f) + Dz(i, f)), Dz(c, f) = (q(c, f) − q(c, f − 1))·Δz⁻¹ᶜᶜᶠ(c, f) (`terrain_amg_operators.jl`),
+##### and ∂yᶜᶠᶜ likewise with the columns (i, j − 1), (i, j). Per level the three columns W, C, S are evaluated at the
+##### next level; the face-k averages and level-k values come from the level below. Same expressions, same operands.
+##### Applies where the carried vertical rhs does (`carries_vertical_rhs`: SlopeOutsideInterpolation, no Flat).
+#####
+
+"""
+Whether the per-stage store of ∂x pᴸ, ∂y pᴸ runs as the carried column launch (`true` by default;
+`BREEZE_CARRIED_LINEARIZATION_GRADIENTS=false` at load: the 3-D launch). Bitwise identical.
+"""
+const CARRIED_LINEARIZATION_GRADIENTS = Ref(true)
+
+@inline function three_column_face_averages(i, j, f, grid, q⁻, q, a, b)
+    FT = eltype(grid)
+    qW⁻, qC⁻, qS⁻ = q⁻
+    qW = q(i - 1, j, f, grid, a, b)
+    qC = q(i,     j, f, grid, a, b)
+    qS = q(i, j - 1, f, grid, a, b)
+    DW = (qW - qW⁻) * Δz⁻¹ᶜᶜᶠ(i - 1, j, f, grid)
+    DC = (qC - qC⁻) * Δz⁻¹ᶜᶜᶠ(i,     j, f, grid)
+    DS = (qS - qS⁻) * Δz⁻¹ᶜᶜᶠ(i, j - 1, f, grid)
+    return (qW, qC, qS), (FT(0.5) * (DW + DC), FT(0.5) * (DS + DC))
+end
+
+@inline function carried_face_gradients(i, j, k, grid, v, A, A⁺)
+    FT = eltype(grid)
+    qW, qC, qS = v
+    Ax, Ay = A
+    Ax⁺, Ay⁺ = A⁺
+    ∂x_q = (qC - qW) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid) - ∂x_zᶠᶜᶜ(i, j, k, grid) * (FT(0.5) * (Ax + Ax⁺))
+    ∂y_q = (qC - qS) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid) - ∂y_zᶜᶠᶜ(i, j, k, grid) * (FT(0.5) * (Ay + Ay⁺))
+    return ∂x_q, ∂y_q
+end
+
+# The pressure `x_pressure_gradient` differentiates with the SlopeOutsideInterpolation stencil: p − pᵣ, or p.
+@inline linearization_pressure(i, j, k, grid, p, pᵣ) = perturbation_pressure(i, j, k, grid, p, pᵣ)
+@inline linearization_pressure(i, j, k, grid, p, ::Nothing) = @inbounds p[i, j, k]
+
+@kernel function _store_linearization_pressure_gradients_carried!(∂x_pᴸ, ∂y_pᴸ, grid, dynamics)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    FT = eltype(grid)
+    p = dynamics.pressure
+    pᵣ = reference_pressure_field(dynamics.reference_state)
+    z = zero(FT)
+    @inbounds begin
+        v₋, _ = three_column_face_averages(i, j, -1, grid, (z, z, z), linearization_pressure, p, pᵣ)  # (averages unused)
+        v, A = three_column_face_averages(i, j, 0, grid, v₋, linearization_pressure, p, pᵣ)            # level 0, face 0
+        for k = 0:Nz
+            v⁺, A⁺ = three_column_face_averages(i, j, k + 1, grid, v, linearization_pressure, p, pᵣ)
+            ∂x_q, ∂y_q = carried_face_gradients(i, j, k, grid, v, A, A⁺)
+            ∂x_pᴸ[i, j, k] = ∂x_q
+            ∂y_pᴸ[i, j, k] = ∂y_q
+            v, A = v⁺, A⁺
+        end
+    end
 end
 
 @kernel function _store_linearization_pressure_gradients!(∂x_pᴸ, ∂y_pᴸ, grid, dynamics)

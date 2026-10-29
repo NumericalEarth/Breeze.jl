@@ -53,6 +53,7 @@ const x_contiguous_kernel_names = (
     # ours (T17 acpert): the one-launch stage initialization, as the handoff kernel it stands in for
     (CompressibleEquations, :_initialize_stage_accumulators_and_perturbations!),
     (CompressibleEquations, :_build_vertical_rhs_carried!),
+    (CompressibleEquations, :_store_linearization_pressure_gradients_carried!),
     (CompressibleEquations, :_assemble_terrain_slow_vertical_momentum_tendency!),
     (CompressibleEquations, :_explicit_horizontal_step!),
     (CompressibleEquations, :_post_solve_recovery!),
@@ -146,6 +147,7 @@ const static_shape_kernel_names = (
     (CompressibleEquations, :_compute_terrain_fused_thermodynamics!),
     (CompressibleEquations, :_compute_forwarded_terrain_fused_thermodynamics!),
     (CompressibleEquations, :_build_vertical_rhs_carried!),
+    (CompressibleEquations, :_store_linearization_pressure_gradients_carried!),
     (CompressibleEquations, :_assemble_terrain_slow_vertical_momentum_tendency_stored!),
     (CompressibleEquations, :_store_linearization_pressure_gradients!),
     (CompressibleEquations, :_assemble_terrain_slow_vertical_momentum_tendency!),
