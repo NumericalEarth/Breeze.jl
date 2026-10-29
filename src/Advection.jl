@@ -23,20 +23,6 @@ using Oceananigans.Advection:
     vertical_scheme,
     WENO
 
-using Oceananigans: Oceananigans
-using Oceananigans.Advection:
-    _biased_interpolate_xᶠᵃᵃ,
-    _biased_interpolate_yᵃᶠᵃ,
-    bounds_preserving_limiter
-using Oceananigans.Architectures: architecture, CPU, GPU
-using Oceananigans.BoundaryConditions: FBC, fill_bottom_and_top_halo!
-using Oceananigans.Fields: AbstractField
-using Oceananigans.Grids: Bounded, Flat, topology, horizontally_extended_interior_kernel_parameters
-using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
-using Oceananigans.Operators: Axᶠᶜᶜ, Ayᶜᶠᶜ
-using Oceananigans.Utils: ExplicitTimeDiscretization, launch!
-using KernelAbstractions: @index, @kernel
-
 using Adapt: Adapt
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: Field, ZeroField
@@ -50,8 +36,7 @@ using ..AtmosphereModels:
     AtmosphereModels,
     div_ρUc,
     total_density,
-    transport_velocities,
-    AtmosphereModel
+    transport_velocities
 
 const AIVA = AdaptiveImplicitVerticalAdvection
 
@@ -280,177 +265,6 @@ function AtmosphereModels.bottom_precipitation_flux(model, microphysics)
                                                                  total_density(model.dynamics),
                                                                  transport_velocities(model).w)
     return Field(operation)
-end
-
-
-#####
-##### Bounds-preserving WENO edge cache (port of the handoff's R3-T4/B1 idea onto Oceananigans' limiter field)
-#####
-#
-# Oceananigans' bounds-preserving WENO computes, per cell, the six one-sided face reconstructions in the
-# limiter pass (to form θ) and then recomputes all twelve reconstructions a cell's flux divergence needs
-# in the tendency kernel, each rescaled by the θ of its donor cell. With the edge cache, the limiter pass
-# stores the six *rescaled* reconstructions each cell donates, θᵢ (ĉ − cᵢ) + cᵢ, at the faces they belong
-# to, and the scalar tendency only loads them. The rescaled values are formed by the same operations in
-# the same order as `rescaled_reconstruction` in Oceananigans, from the same reconstruction calls, with
-# θᵢ from Oceananigans' own `bounds_preserving_limiter`; the flux and divergence are Oceananigans'/Breeze's
-# expressions verbatim. The pass runs on the limiter's range (interior plus the first horizontal halo
-# layer), so the horizontal boundary faces are written by the halo cells exactly as their θ was formed;
-# the vertical boundary faces (whose donor is the halo cell k = 0 or Nz + 1, with θ from the limiter
-# field's `Flux` halo fill, θ[0] = θ[1], θ[Nz+1] = θ[Nz]) are written by the cells k = 1 and k = Nz.
-# θ itself is still written and its vertical halos filled, so every other consumer (sedimentation
-# mass fluxes, the bottom precipitation flux) is unchanged.
-#
-# The cache is held per scheme, in a host-side registry keyed by the limiter array (released when that
-# array is finalized), so no model or scheme type changes. Switch: `BREEZE_EDGE_CACHE=false`.
-
-const EDGE_CACHE = Ref(get(ENV, "BREEZE_EDGE_CACHE", "true") != "false")
-
-const ExplicitBoundsPreservingWENO =
-    WENO{<:Any, <:Any, <:Any, <:ExplicitTimeDiscretization, <:BoundsPreservation}
-
-struct BoundsPreservingEdges{A}
-    xᴸ :: A
-    xᴿ :: A
-    yᴸ :: A
-    yᴿ :: A
-    zᴸ :: A
-    zᴿ :: A
-end
-
-Adapt.adapt_structure(to, e::BoundsPreservingEdges) =
-    BoundsPreservingEdges(Adapt.adapt(to, e.xᴸ), Adapt.adapt(to, e.xᴿ), Adapt.adapt(to, e.yᴸ),
-                          Adapt.adapt(to, e.yᴿ), Adapt.adapt(to, e.zᴸ), Adapt.adapt(to, e.zᴿ))
-
-# Host-side per-scheme state.
-mutable struct EdgeCacheState{E}
-    edges :: Union{Nothing, E}  # nothing once the limiter array is finalized
-    active :: Bool   # true once the limiter pass of this stage wrote the cache
-end
-
-const EDGE_CACHE_STATES = Dict{UInt, Any}()
-const EDGE_CACHE_LOCK = ReentrantLock()
-
-limiter_key(θ) = objectid(parent(θ))
-
-edge_cache_state(scheme) = lock(() -> get(EDGE_CACHE_STATES, limiter_key(scheme.bounds.limiter), nothing), EDGE_CACHE_LOCK)
-
-edge_cache_eligible(scheme, grid) = false
-
-function edge_cache_eligible(scheme::ExplicitBoundsPreservingWENO, grid)
-    EDGE_CACHE[] || return false
-    grid isa ImmersedBoundaryGrid && return false
-    arch = architecture(grid)
-    (arch isa CPU || arch isa GPU) || return false
-    TX, TY, TZ = topology(grid)
-    (TX === Flat || TY === Flat || TZ !== Bounded) && return false
-    θ = scheme.bounds.limiter
-    θ isa Field || return false
-    bcs = θ.boundary_conditions
-    return bcs.bottom isa FBC && bcs.top isa FBC
-end
-
-function new_edge_cache_state(scheme, grid)
-    θ = scheme.bounds.limiter
-    key = limiter_key(θ)
-    make() = similar(θ.data)  # same axes as θ: x faces up to Nx + 2, z faces up to Nz + 1
-    state = EdgeCacheState(BoundsPreservingEdges(make(), make(), make(), make(), make(), make()), false)
-    lock(EDGE_CACHE_LOCK) do
-        EDGE_CACHE_STATES[key] = state
-    end
-    finalizer(_ -> (state.edges = nothing; nothing), parent(θ))
-    return state
-end
-
-# The limiter pass of an AtmosphereModel scalar. Falls back to Oceananigans' pass when ineligible.
-function Oceananigans.Advection.update_advection!(scheme::ExplicitBoundsPreservingWENO, model::AtmosphereModel, c::AbstractField)
-    grid = model.grid
-    edge_cache_eligible(scheme, grid) ||
-        return Oceananigans.Advection.update_bounds_preserving_limiter!(scheme, grid, c)
-    state = edge_cache_state(scheme)
-    if isnothing(state) || isnothing(state.edges)
-        state = new_edge_cache_state(scheme, grid)
-    end
-    update_edge_cache!(state, scheme, grid, c)
-    return nothing
-end
-
-function update_edge_cache!(state, scheme, grid, c)
-    θ = scheme.bounds.limiter
-    parameters = horizontally_extended_interior_kernel_parameters(grid)
-    launch!(architecture(grid), grid, parameters, _compute_bounds_preserving_edges!, state.edges, θ, grid, scheme, c)
-    fill_bottom_and_top_halo!(θ.data, θ.boundary_conditions, θ.indices, (Center(), Center(), Center()), grid)
-    state.active = true
-    return nothing
-end
-
-@inline rescaled_edge(ĉ, θᵢ, cᵢ) = θᵢ * (ĉ - cᵢ) + cᵢ
-
-@kernel function _compute_bounds_preserving_edges!(edges, θ, grid, scheme, c)
-    i, j, k = @index(Global, NTuple)
-    θᵢ = bounds_preserving_limiter(i, j, k, grid, scheme, c)
-
-    cˣ⁻ = _biased_interpolate_xᶠᵃᵃ(i,   j, k, grid, scheme, RightBias, c)
-    cˣ⁺ = _biased_interpolate_xᶠᵃᵃ(i+1, j, k, grid, scheme, LeftBias,  c)
-    cʸ⁻ = _biased_interpolate_yᵃᶠᵃ(i, j,   k, grid, scheme, RightBias, c)
-    cʸ⁺ = _biased_interpolate_yᵃᶠᵃ(i, j+1, k, grid, scheme, LeftBias,  c)
-    cᶻ⁻ = _biased_interpolate_zᵃᵃᶠ(i, j, k,   grid, scheme, RightBias, c)
-    cᶻ⁺ = _biased_interpolate_zᵃᵃᶠ(i, j, k+1, grid, scheme, LeftBias,  c)
-
-    @inbounds begin
-        cᵢ = c[i, j, k]
-        θ[i, j, k] = θᵢ
-        edges.xᴿ[i,   j, k] = rescaled_edge(cˣ⁻, θᵢ, cᵢ)
-        edges.xᴸ[i+1, j, k] = rescaled_edge(cˣ⁺, θᵢ, cᵢ)
-        edges.yᴿ[i, j,   k] = rescaled_edge(cʸ⁻, θᵢ, cᵢ)
-        edges.yᴸ[i, j+1, k] = rescaled_edge(cʸ⁺, θᵢ, cᵢ)
-        edges.zᴿ[i, j, k  ] = rescaled_edge(cᶻ⁻, θᵢ, cᵢ)
-        edges.zᴸ[i, j, k+1] = rescaled_edge(cᶻ⁺, θᵢ, cᵢ)
-    end
-
-    # Vertical boundary faces: donors are the halo cells, whose θ the `Flux` fill sets to θ[1] / θ[Nz].
-    Nz = size(grid, 3)
-    if k == 1
-        ĉᴸ = _biased_interpolate_zᵃᵃᶠ(i, j, 1, grid, scheme, LeftBias, c)
-        @inbounds edges.zᴸ[i, j, 1] = rescaled_edge(ĉᴸ, θᵢ, c[i, j, 0])
-    end
-    if k == Nz
-        ĉᴿ = _biased_interpolate_zᵃᵃᶠ(i, j, Nz+1, grid, scheme, RightBias, c)
-        @inbounds edges.zᴿ[i, j, Nz+1] = rescaled_edge(ĉᴿ, θᵢ, c[i, j, Nz+1])
-    end
-end
-
-# What the scalar tendency launch receives in place of the scheme when the cache is current.
-struct EdgeCachedAdvection{E}
-    edges :: E
-end
-
-Adapt.adapt_structure(to, a::EdgeCachedAdvection) = EdgeCachedAdvection(Adapt.adapt(to, a.edges))
-
-function AtmosphereModels.tendency_advection(scheme::ExplicitBoundsPreservingWENO)
-    state = edge_cache_state(scheme)
-    (isnothing(state) || isnothing(state.edges) || !state.active) && return scheme
-    return EdgeCachedAdvection(state.edges)
-end
-
-@inline AtmosphereModels.div_ρUc(i, j, k, grid, ::EdgeCachedAdvection, ρ, U, ::ZeroField) = zero(grid)
-
-# Breeze's bounded `div_ρUc` with the face states loaded instead of reconstructed: same products, same order.
-@inline function AtmosphereModels.div_ρUc(i, j, k, grid, a::EdgeCachedAdvection, ρ, U, c)
-    e = a.edges
-    u, v, w = U.u, U.v, U.w
-    @inbounds begin
-        Ax⁺ = ℑxᶠᵃᵃ(i+1, j, k, grid, ρ) * Axᶠᶜᶜ(i+1, j, k, grid) * upwind_biased_product(u[i+1, j, k], e.xᴸ[i+1, j, k], e.xᴿ[i+1, j, k])
-        Ax⁻ = ℑxᶠᵃᵃ(i,   j, k, grid, ρ) * Axᶠᶜᶜ(i,   j, k, grid) * upwind_biased_product(u[i,   j, k], e.xᴸ[i,   j, k], e.xᴿ[i,   j, k])
-        Ay⁺ = ℑyᵃᶠᵃ(i, j+1, k, grid, ρ) * Ayᶜᶠᶜ(i, j+1, k, grid) * upwind_biased_product(v[i, j+1, k], e.yᴸ[i, j+1, k], e.yᴿ[i, j+1, k])
-        Ay⁻ = ℑyᵃᶠᵃ(i, j,   k, grid, ρ) * Ayᶜᶠᶜ(i, j,   k, grid) * upwind_biased_product(v[i, j,   k], e.yᴸ[i, j,   k], e.yᴿ[i, j,   k])
-        Az⁺ = ℑzᵃᵃᶠ(i, j, k+1, grid, ρ) * Azᶜᶜᶠ(i, j, k+1, grid) * upwind_biased_product(w[i, j, k+1], e.zᴸ[i, j, k+1], e.zᴿ[i, j, k+1])
-        Az⁻ = ℑzᵃᵃᶠ(i, j, k,   grid, ρ) * Azᶜᶜᶠ(i, j, k,   grid) * upwind_biased_product(w[i, j, k],   e.zᴸ[i, j, k],   e.zᴿ[i, j, k])
-    end
-    div_x = Ax⁺ - Ax⁻
-    div_y = Ay⁺ - Ay⁻
-    div_z = Az⁺ - Az⁻
-    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
 end
 
 end # module
