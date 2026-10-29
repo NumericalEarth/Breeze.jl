@@ -1063,11 +1063,12 @@ end
         @test :ρθ ∈ keys(result)
         @test :ρE ∉ keys(result)
 
-        # Static energy carries the energy flux itself, so `ρE` lands on `ρs` unconverted
+        # `ρE` lands on `ρs` wrapped to scale the energy flux by ρᵈ / ρ
         result = convert_energy_bcs(bcs, :StaticEnergy)
         @test :ρs ∈ keys(result)
         @test :ρE ∉ keys(result)
-        @test result.ρs.bottom.condition == FT(100)
+        @test result.ρs.bottom.condition isa Breeze.BoundaryConditions.StaticEnergyFluxBoundaryConditionFunction
+        @test result.ρs.bottom.condition.condition == FT(100)
     end
 
     @testset "theta_to_energy_bcs correctly converts BCs [$FT]" begin
@@ -1235,6 +1236,28 @@ end
     Jᶿ = Array(interior(Field(BoundaryConditionOperation(ρθ, :bottom, model))))[:, :, 1]
     @test all(ρᵈ ./ ρ .≈ FT(0.8))
     @test Jᶿ ≈ @. ρᵈ / ρ * 𝒬ᵀ / (ĉᵖ * Π)
+end
+
+@testset "Energy flux on ρs scales by ρᵈ / ρ [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    using Breeze.BoundaryConditions: StaticEnergyFluxBoundaryConditionFunction
+    using Oceananigans.BoundaryConditions: getbc, Top
+
+    # ρs = ρᵈ s gains (ρᵈ / ρ) 𝒬ᵀ from an enthalpy flux, as for ρθ. StaticEnergyFormulation does not
+    # yet run on CompressibleDynamics, so the conversion is checked directly with ρᵈ / ρ = 0.8.
+    grid = RectilinearGrid(default_arch; size=(1, 1, 4), extent=(1, 1, 1))
+    𝒬ᵀ = FT(1000)
+    ρᵈ = fill(FT(1), 1, 1, 4)
+    ρ = fill(FT(1.25), 1, 1, 4)
+    clock = Clock(time=zero(FT))
+
+    for (side, k) in ((Bottom(), 1), (Top(), 4))
+        sf = StaticEnergyFluxBoundaryConditionFunction(𝒬ᵀ, side, ρᵈ)
+        @test getbc(sf, 1, 1, grid, clock, (;), (; ρ)) ≈ FT(0.8) * 𝒬ᵀ
+        # With no captured density (compressible) the dry density is read from the model fields
+        sf = StaticEnergyFluxBoundaryConditionFunction(𝒬ᵀ, side, nothing)
+        @test getbc(sf, 1, 1, grid, clock, (; ρᵈ), (; ρ)) ≈ FT(0.8) * 𝒬ᵀ
+    end
 end
 
 @testset "ThetaFluxBC getbc coverage [$FT]" for FT in test_float_types()

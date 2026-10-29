@@ -168,7 +168,8 @@ end
         parameters.cloud,
         parameters.precip,
         parameters.air_properties,
-        parameters.terminal_velocity)
+        parameters.terminal_velocity,
+        parameters.max_latent_heating_rate)
     categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
     no_formation = ConstantRateCondensateFormation(zero(FT))
     cloud_formations = (saturation_adjustment_1M(FT).cloud_formation,

@@ -51,7 +51,7 @@ transition scales `Ri⁻`, `Ri⁺`. All coefficients must be positive.
 The functions are continuous, with a kink at neutral.
 Mixed integer and float arguments are promoted to a single float type.
 
-Defaults are the provisional atmospheric LES fit described in the turbulence-closure
+Defaults are calibrated to the Shen et al. (2022) LES library, as described in the turbulence-closure
 manual; use `TKEBasedTurbulenceClosure()` for its paired mixing-length coefficients.
 
 ```jldoctest
@@ -60,14 +60,14 @@ using Breeze
 RationalStabilityFunction().Ri⁺
 
 # output
-0.0501147186437052
+15.12797320010583
 ```
 """
-function RationalStabilityFunction(; ℂᵘ⁻ = 0.36113018152281917, ℂᵘ⁰ = 0.15900569445804447, ℂᵘ⁺ = 0.010956324667755535,
-                                     ℂᶜ⁻ = 0.08170851244564359, ℂᶜ⁰ = 0.19872163735761372, ℂᶜ⁺ = 0.532550451554028,
-                                     ℂᵉ⁻ = 1.9176239082347815, ℂᵉ⁰ = 0.00731292096489522, ℂᵉ⁺ = 0.02299192764300173,
-                                     ℂᴰ⁻ = 0.005407068485856925, ℂᴰ⁰ = 0.029182354585815418, ℂᴰ⁺ = 0.8022301180336915,
-                                     Ri⁻ = 12.669701017862883, Ri⁺ = 0.0501147186437052)
+function RationalStabilityFunction(; ℂᵘ⁻ = 1.1960500785675194, ℂᵘ⁰ = 0.15439310625401925, ℂᵘ⁺ = 1.0096744642432665,
+                                     ℂᶜ⁻ = 2.075340382068647, ℂᶜ⁰ = 0.1929919973602801, ℂᶜ⁺ = 0.2765103939865155,
+                                     ℂᵉ⁻ = 312.08023980290073, ℂᵉ⁰ = 0.07346835007570773, ℂᵉ⁺ = 16.44560801745103,
+                                     ℂᴰ⁻ = 2.594967714500517, ℂᴰ⁰ = 0.055354972995243425, ℂᴰ⁺ = 0.05068986128741995,
+                                     Ri⁻ = 6.562979157594204, Ri⁺ = 15.12797320010583)
 
     endpoints = (ℂᵘ⁻, ℂᵘ⁰, ℂᵘ⁺, ℂᶜ⁻, ℂᶜ⁰, ℂᶜ⁺, ℂᵉ⁻, ℂᵉ⁰, ℂᵉ⁺, ℂᴰ⁻, ℂᴰ⁰, ℂᴰ⁺)
 

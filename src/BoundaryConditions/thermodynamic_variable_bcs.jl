@@ -68,13 +68,57 @@ function Base.summary(ef::EnergyFluxBoundaryConditionFunction)
     return string("EnergyFluxBoundaryConditionFunction(", cond_str, ")")
 end
 
-# Type aliases for dispatch on boundary side
-const BottomEnergyFluxBC = EnergyFluxBoundaryConditionFunction{<:Any, <:Bottom}
-const TopEnergyFluxBC    = EnergyFluxBoundaryConditionFunction{<:Any, <:Top}
-const WestEnergyFluxBC   = EnergyFluxBoundaryConditionFunction{<:Any, <:West}
-const EastEnergyFluxBC   = EnergyFluxBoundaryConditionFunction{<:Any, <:East}
-const SouthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:South}
-const NorthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:North}
+
+#####
+##### StaticEnergyFluxBoundaryConditionFunction: converts energy flux → static energy density flux
+##### Used when: user specifies ρE BCs but prognostic variable is ρs
+#####
+
+"""
+    StaticEnergyFluxBoundaryConditionFunction
+
+A wrapper for boundary conditions that converts an energy flux to a flux of ``ρs = ρᵈ s``
+for use with `StaticEnergyFormulation`.
+
+Static energy is an energy per unit mass, so an enthalpy flux ``𝒬ᵀ`` changes ``s`` at
+``-(1/ρ) ∇⋅𝒬ᵀ`` and ``ρs`` at
+
+```math
+Jˢ = (ρᵈ / ρ) 𝒬ᵀ ,
+```
+
+as for the interior heating. ``ρᵈ = ρ`` on anelastic dynamics, where the conversion is the identity.
+"""
+struct StaticEnergyFluxBoundaryConditionFunction{C, S, D}
+    condition :: C
+    side :: S
+    density :: D
+end
+
+Adapt.adapt_structure(to, sf::StaticEnergyFluxBoundaryConditionFunction) =
+    StaticEnergyFluxBoundaryConditionFunction(Adapt.adapt(to, sf.condition),
+                                              Adapt.adapt(to, sf.side),
+                                              Adapt.adapt(to, sf.density))
+
+function Base.summary(sf::StaticEnergyFluxBoundaryConditionFunction)
+    cond = sf.condition
+    cond_str = cond isa Number ? string(cond) : summary(cond)
+    return string("StaticEnergyFluxBoundaryConditionFunction(", cond_str, ")")
+end
+
+StaticEnergyFluxBoundaryCondition(flux) =
+    BoundaryCondition(Flux(), StaticEnergyFluxBoundaryConditionFunction(flux, nothing, nothing))
+
+# Type aliases for dispatch on boundary side, shared by both energy-flux wrappers
+const EnergyFluxFunction{S} = Union{EnergyFluxBoundaryConditionFunction{<:Any, S},
+                                    StaticEnergyFluxBoundaryConditionFunction{<:Any, S}}
+
+const BottomEnergyFluxBC = EnergyFluxFunction{<:Bottom}
+const TopEnergyFluxBC    = EnergyFluxFunction{<:Top}
+const WestEnergyFluxBC   = EnergyFluxFunction{<:West}
+const EastEnergyFluxBC   = EnergyFluxFunction{<:East}
+const SouthEnergyFluxBC  = EnergyFluxFunction{<:South}
+const NorthEnergyFluxBC  = EnergyFluxFunction{<:North}
 
 # Near-surface density for the energy→θ flux conversion. The energy BC materializes
 # *before* the dynamics allocates its density (issue #777): for `AnelasticDynamics`
@@ -107,46 +151,56 @@ end
     return ρᵈ / ρ * 𝒬ᵀ / (ĉᵖ * Π)
 end
 
+@inline convert_energy_flux(i, j, k, grid, ef::EnergyFluxBoundaryConditionFunction, 𝒬ᵀ, fields, dynamics_fields) =
+    𝒬ᵀ_to_Jᶿ(i, j, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
+
+# Convert energy flux to static energy density flux: Jˢ = (ρᵈ / ρ) 𝒬ᵀ
+@inline function convert_energy_flux(i, j, k, grid, sf::StaticEnergyFluxBoundaryConditionFunction, 𝒬ᵀ, fields, dynamics_fields)
+    ρᵈ = _energy_flux_density(sf.density, fields, i, j, k)
+    ρ = @inbounds dynamics_fields.ρ[i, j, k]
+    return ρᵈ / ρ * 𝒬ᵀ
+end
+
 # getbc for bottom boundary (k = 1)
 @inline function OceananigansBC.getbc(ef::BottomEnergyFluxBC, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     𝒬ᵀ = OceananigansBC.getbc(ef.condition, i, j, grid, clock, fields, dynamics_fields)
-    return 𝒬ᵀ_to_Jᶿ(i, j, 1, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
+    return convert_energy_flux(i, j, 1, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 # getbc for top boundary (k = Nz)
 @inline function OceananigansBC.getbc(ef::TopEnergyFluxBC, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     𝒬ᵀ = OceananigansBC.getbc(ef.condition, i, j, grid, clock, fields, dynamics_fields)
-    return 𝒬ᵀ_to_Jᶿ(i, j, grid.Nz, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
+    return convert_energy_flux(i, j, grid.Nz, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 # getbc for west boundary (i = 1)
 @inline function OceananigansBC.getbc(ef::WestEnergyFluxBC, j::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     𝒬ᵀ = OceananigansBC.getbc(ef.condition, j, k, grid, clock, fields, dynamics_fields)
-    return 𝒬ᵀ_to_Jᶿ(1, j, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
+    return convert_energy_flux(1, j, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 # getbc for east boundary (i = Nx)
 @inline function OceananigansBC.getbc(ef::EastEnergyFluxBC, j::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     𝒬ᵀ = OceananigansBC.getbc(ef.condition, j, k, grid, clock, fields, dynamics_fields)
-    return 𝒬ᵀ_to_Jᶿ(grid.Nx, j, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
+    return convert_energy_flux(grid.Nx, j, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 # getbc for south boundary (j = 1)
 @inline function OceananigansBC.getbc(ef::SouthEnergyFluxBC, i::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     𝒬ᵀ = OceananigansBC.getbc(ef.condition, i, k, grid, clock, fields, dynamics_fields)
-    return 𝒬ᵀ_to_Jᶿ(i, 1, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
+    return convert_energy_flux(i, 1, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 # getbc for north boundary (j = Ny)
 @inline function OceananigansBC.getbc(ef::NorthEnergyFluxBC, i::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields, dynamics_fields)
     𝒬ᵀ = OceananigansBC.getbc(ef.condition, i, k, grid, clock, fields, dynamics_fields)
-    return 𝒬ᵀ_to_Jᶿ(i, grid.Ny, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
+    return convert_energy_flux(i, grid.Ny, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
 end
 
 const EnergyFluxBCType = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction}
@@ -335,6 +389,14 @@ theta_to_energy_bc(bc::BoundaryCondition{<:Flux}, exponent) = ThetaFluxBoundaryC
 theta_to_energy_bcs(fbcs::FieldBoundaryConditions, exponent=VaporEquivalentExponent()) =
     map_field_boundary_conditions(theta_to_energy_bc, fbcs, exponent)
 
+# Convert ρE BCs → ρs BCs (for StaticEnergyFormulation)
+energy_to_static_energy_bc(bc) = bc
+energy_to_static_energy_bc(bc::BulkSensibleHeatFluxBoundaryCondition) = bc
+energy_to_static_energy_bc(bc::BoundaryCondition{<:Flux}) = StaticEnergyFluxBoundaryCondition(bc.condition)
+
+energy_to_static_energy_bcs(fbcs::FieldBoundaryConditions) =
+    map_field_boundary_conditions(energy_to_static_energy_bc, fbcs)
+
 #####
 ##### Strip surface fluxes for adiabatic initialization
 #####
@@ -365,6 +427,16 @@ function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC
     new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density, pˢᵗ,
                                                  ef.exner_exponent)
     return BoundaryCondition(Flux(), new_ef)
+end
+
+const UnregularizedStaticEnergyFluxBC =
+    BoundaryCondition{<:Flux, <:StaticEnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
+
+function materialize_atmosphere_boundary_condition(bc::UnregularizedStaticEnergyFluxBC,
+                                                   side, loc, grid, dynamics, microphysics, constants)
+    density = dynamics_density(dynamics)
+    new_sf = StaticEnergyFluxBoundaryConditionFunction(bc.condition.condition, side, density)
+    return BoundaryCondition(Flux(), new_sf)
 end
 
 # Materialize ThetaFluxBoundaryCondition: populate side, microphysics, and thermodynamic_constants

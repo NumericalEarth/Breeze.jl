@@ -656,3 +656,10 @@ $(TYPEDSIGNATURES)
 Return the standard pressure for potential temperature diagnostics.
 """
 AtmosphereModels.Diagnostics.dynamics_standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
+
+# The compressible core closes the thermodynamics through `temperature_and_pressure`, which only
+# inverts liquid-ice potential temperature. Reject static energy at construction rather than with a
+# `MethodError` on the first state update.
+AtmosphereModels.materialize_formulation(::Val{:StaticEnergy}, ::CompressibleDynamics, grid, boundary_conditions) =
+    throw(ArgumentError("CompressibleDynamics does not yet support formulation=:StaticEnergy; " *
+                        "use formulation=:LiquidIcePotentialTemperature"))
