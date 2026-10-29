@@ -77,8 +77,8 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
                     qˡ₂ = qᵗ₂ - qᵛ⁺₂
                     q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₂)
                     cᵖᵐ = mixture_heat_capacity(q₂, constants)
-                    ℒˡᵣ = constants.liquid.reference_latent_heat
-                    s₂ = cᵖᵐ * T₂ + g * z - ℒˡᵣ * qˡ₂
+                    ℒˡ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid)
+                    s₂ = cᵖᵐ * T₂ + g * z - ℒˡ₀ * qˡ₂
 
                     𝒰₂ = StaticEnergyState(s₂, q₂, z, pᵣ)
                     T★ = compute_temperature(𝒰₂, microphysics, constants)
@@ -108,8 +108,8 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
 
     constants = ThermodynamicConstants(FT)
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
+    ℒˡ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.ice)
     g = constants.gravitational_acceleration
     z = zero(FT)
 
@@ -156,7 +156,7 @@ end
             qˡ = qᵗ - qᵛ⁺
             q = MoistureMassFractions(qᵛ⁺, qˡ)
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            s = cᵖᵐ * T_warm + g * z - ℒˡᵣ * qˡ
+            s = cᵖᵐ * T_warm + g * z - ℒˡ₀ * qˡ
 
             𝒰 = StaticEnergyState(s, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, constants)
@@ -184,7 +184,7 @@ end
             qⁱ = qᵗ - qᵛ⁺
             q = MoistureMassFractions(qᵛ⁺, zero(FT), qⁱ)
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            s = cᵖᵐ * T_cold + g * z - ℒⁱᵣ * qⁱ
+            s = cᵖᵐ * T_cold + g * z - ℒⁱ₀ * qⁱ
 
             𝒰 = StaticEnergyState(s, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, constants)
@@ -219,7 +219,7 @@ end
             @test q.vapor + q.liquid + q.ice ≈ qᵗ
 
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+            s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ - ℒⁱ₀ * qⁱ
 
             𝒰_unadjusted = StaticEnergyState(s, MoistureMassFractions(qᵗ), z, pᵣ)
             T★ = compute_temperature(𝒰_unadjusted, microphysics, constants)

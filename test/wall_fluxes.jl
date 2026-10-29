@@ -8,7 +8,8 @@ using Breeze.BoundaryConditions: BulkDrag, BulkSensibleHeatFlux, BulkVaporFlux, 
                                  tangential_speed², bulk_coefficient, neutral_coefficient_10m,
                                  surface_layer_state, wall_air_pressure
 using Breeze.Thermodynamics: surface_density, saturation_specific_humidity, PlanarLiquidSurface,
-                             potential_temperature_from_temperature, MoistureMassFractions
+                             potential_temperature_from_temperature, MoistureMassFractions,
+                             absolute_zero_latent_heat
 using CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -442,9 +443,13 @@ end
         function neutral_energy(z, vapor_offset, pressure=p₀)
             q = MoistureMassFractions(qᵛ(z) + vapor_offset, qᶜˡ + qʳ)
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            L = constants.liquid.reference_latent_heat * q.liquid
             Π = (pressure / pˢᵗ)^(mixture_gas_constant(q, constants) / cᵖᵐ)
-            return formulation === :StaticEnergy ? cᵖᵐ * T₀ - L : (T₀ - L / cᵖᵐ) / Π
+            # Static energy references latent heat to absolute zero; θˡⁱ uses the reference latent heat.
+            if formulation === :StaticEnergy
+                return cᵖᵐ * T₀ - absolute_zero_latent_heat(constants, constants.liquid) * q.liquid
+            else
+                return (T₀ - constants.liquid.reference_latent_heat * q.liquid / cᵖᵐ) / Π
+            end
         end
 
         # Evaluate the analytical wall difference at the sampling points, including

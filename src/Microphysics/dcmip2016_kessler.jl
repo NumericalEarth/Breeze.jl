@@ -2,6 +2,7 @@ using ..Thermodynamics:
     MoistureMassFractions,
     MoistureMixingRatio,
     PlanarLiquidSurface,
+    density,
     mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity,
@@ -302,6 +303,8 @@ AtmosphereModels.ice_mass_fraction(::DCMIP2016KM, model) = nothing
 
 # Rain sedimentation is applied by the scheme's own column kernel, so no tracer
 # advertises a sedimentation velocity and the generic fallback (`nothing`) stands.
+
+@inline AtmosphereModels.precipitating_mass_fraction(i, j, k, ::DCMIP2016KM, μ) = @inbounds μ.qʳ[i, j, k]
 
 """
 $(TYPEDSIGNATURES)
@@ -917,20 +920,22 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     state = model.dynamics.state
     constants = model.thermodynamic_constants
 
-    # Extract parcel state
-    ρ = state.ρ
+    # Extract parcel state. The stored prognostics are weighted by the environmental
+    # density `ρᵉ`; the microphysical rates use the parcel's own density `ρ`.
+    ρᵉ = state.ρ
     𝒰 = state.𝒰
     μ = state.μ
+    ρ = density(𝒰, constants)
 
     # Get pressure at parcel height (interpolate from environmental profile)
     p_parcel = interpolate(state.z, model.dynamics.pressure)
 
     # Convert mass fractions → mixing ratios (shared helper).
     # Parcel model stores total moisture in qᵗ; compute vapor by subtracting condensate.
-    qᶜˡ_s = max(0, μ.ρqᶜˡ / ρ)
-    qʳ_s = max(0, μ.ρqʳ / ρ)
+    qᶜˡ_s = max(0, μ.ρqᶜˡ / ρᵉ)
+    qʳ_s = max(0, μ.ρqʳ / ρᵉ)
     qᵛ_s = max(0, state.qᵗ - qᶜˡ_s - qʳ_s)
-    rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ_s, μ.ρqᶜˡ, μ.ρqʳ, ρ)
+    rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ_s, μ.ρqᶜˡ, μ.ρqʳ, ρᵉ)
 
     # Temperature from thermodynamic state
     T = temperature(𝒰, constants)
@@ -948,9 +953,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     _, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
     # Update parcel state (parcel model stores total moisture in qᵗ)
-    state.μ = (; ρqᶜˡ = ρ * qᶜˡ, ρqʳ = ρ * qʳ)
+    state.μ = (; ρqᶜˡ = ρᵉ * qᶜˡ, ρqʳ = ρᵉ * qʳ)
     state.qᵗ = qᵗ
-    state.ρqᵗ = ρ * qᵗ
+    state.ρqᵗ = ρᵉ * qᵗ
 
     # Update thermodynamic state with new moisture fractions.
     # The parcel's thermodynamic variable is conserved; latent heating is implicit.
