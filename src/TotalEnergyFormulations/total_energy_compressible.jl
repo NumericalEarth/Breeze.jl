@@ -2,7 +2,7 @@
 ##### Compressible dynamics with a prognostic total energy
 #####
 
-const CompressibleTotalEnergyModel = AtmosphereModel{<:CompressibleDynamics, <:TotalEnergyFormulation}
+const CompressibleTotalEnergyModel = AtmosphereModel{<:FlatCompressibleDynamics, <:TotalEnergyFormulation}
 
 """
 $(TYPEDSIGNATURES)

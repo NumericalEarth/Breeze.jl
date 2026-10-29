@@ -137,7 +137,14 @@ AtmosphereModels.materialize_formulation(::TotalEnergyFormulation, dynamics, gri
                         "not by $(summary(dynamics)). Use formulation = :StaticEnergy for the " *
                         "conservative energy variable of the anelastic equations."))
 
-function AtmosphereModels.materialize_formulation(::TotalEnergyFormulation, dynamics::CompressibleDynamics,
+# Compressible dynamics without terrain metrics. The terrain-following core diagnoses its
+# contravariant velocity alongside temperature and pressure, which this formulation does not yet do.
+const FlatCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing}
+
+AtmosphereModels.materialize_formulation(::TotalEnergyFormulation, dynamics::CompressibleDynamics, grid, boundary_conditions) =
+    throw(ArgumentError("TotalEnergyFormulation is not yet supported on terrain-following grids."))
+
+function AtmosphereModels.materialize_formulation(::TotalEnergyFormulation, dynamics::FlatCompressibleDynamics,
                                                   grid, boundary_conditions)
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρE)
     internal_energy = CenterField(grid)

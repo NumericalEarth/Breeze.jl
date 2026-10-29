@@ -23,7 +23,7 @@ using Oceananigans.Grids: XFlatGrid, YFlatGrid
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ, V⁻¹ᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
-using Breeze.Thermodynamics: InternalEnergyDensityState, LiquidIceDensityState, MoistureMassFractions,
+using Breeze.Thermodynamics: InternalEnergyDensityState, LiquidIceDensityState,
     VaporEquivalentExponent, temperature, with_temperature,
     mixture_heat_capacity, mixture_gas_constant, mixture_isochoric_heat_capacity,
     liquid_referenced_latent_energy, absolute_zero_latent_heat, dry_air_gas_constant,
@@ -34,9 +34,9 @@ using Breeze.Solvers: NewtonSolver
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, AtmosphereModelBuoyancy,
     dynamics_density, total_density, standard_pressure, dynamics_prognostic_fields,
     grid_moisture_fractions, specific_prognostic_moisture, div_ρUc, ∇_dot_Jᶜ,
-    radiation_flux_divergence, materialize_formulation, set_thermodynamic_variable!,
+    radiation_flux_divergence, materialize_formulation,
     explicit_condensate_mass_fluxes, implicit_condensate_mass_fluxes, implicit_sedimentation,
-    kernel_time_step, field_advection_scheme
+    kernel_time_step, compute_velocities!
 
 using Breeze.AtmosphereModels.Diagnostics: Diagnostics
 

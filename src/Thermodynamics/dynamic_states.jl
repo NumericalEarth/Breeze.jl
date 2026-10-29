@@ -511,7 +511,7 @@ the total-energy formulation diagnoses, with ``𝓊 = E - K - g z`` the total en
 less its kinetic and potential parts.
 
 ```jldoctest
-using Breeze.Thermodynamics: InternalEnergyDensityState, MoistureMassFractions
+using Breeze.Thermodynamics: InternalEnergyDensityState, MoistureMassFractions, with_temperature, temperature
 
 constants = ThermodynamicConstants()
 q = MoistureMassFractions(0.012, 0.001, 0.0)

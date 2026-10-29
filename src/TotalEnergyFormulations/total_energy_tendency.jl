@@ -277,7 +277,10 @@ end
 
 function set_energy_density_from_temperature!(model)
     grid = model.grid
-    fill_halo_regions!(model.velocities)
+
+    # The kinetic energy is that of the velocities `update_state!` will diagnose from the momentum,
+    # with the wall-normal velocity held at zero on impenetrable walls.
+    compute_velocities!(model)
     launch!(grid.architecture, grid, :xyz, _energy_density_from_temperature!,
             model.formulation.energy_density, grid, model.temperature, specific_prognostic_moisture(model),
             model.dynamics, model.microphysics, model.microphysical_fields, model.velocities,
