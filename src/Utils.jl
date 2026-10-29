@@ -214,4 +214,43 @@ macro adapt_architecture(T)
     end)
 end
 
+#####
+##### Register-capped launches (handoff 582e072d, e490c5ed, fc4445df; CUDA method in BreezeCUDAExt)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Launch the KernelAbstractions kernel object `kernel!(args...; ndrange)`, on CUDA devices with at most `maxregs`
+registers per thread when `maxregs > 0` (`BreezeCUDAExt`); elsewhere, or with `maxregs = 0`, as is.
+"""
+launch_with_maxregs!(arch, kernel!, maxregs, args...; ndrange) = (kernel!(args...; ndrange); nothing)
+
+"""
+Whether `launch_with_maxregs!` on CUDA compiles once per kernel and argument types and launches without
+re-converting (bit-identical; host cost only). `BREEZE_CACHED_MAXREGS_LAUNCH=false` at load turns it off.
+"""
+const CACHED_MAXREGS_LAUNCH = Ref(true)
+
+"""
+Whether register caps (`launch_with_maxregs!` and the table entries `kernel_launch_maxregs` of
+`kernel_launch_configurations.jl`) apply. `BREEZE_LAUNCH_MAXREGS=false` at load ignores them all.
+"""
+const LAUNCH_MAXREGS = Ref(true)
+
+"""
+Whether Breeze's per-kernel launch table (`kernel_launch_configurations.jl`: workgroups, k-tiles, register caps,
+static shapes) applies. `BREEZE_KERNEL_LAUNCH_TABLE=false` at load makes every entry return the fallback.
+"""
+const KERNEL_LAUNCH_TABLE = Ref(true)
+
+env_switch(name, default) = lowercase(get(ENV, name, string(default))) != "false"
+
+function __init__()
+    CACHED_MAXREGS_LAUNCH[] = env_switch("BREEZE_CACHED_MAXREGS_LAUNCH", true)
+    LAUNCH_MAXREGS[] = env_switch("BREEZE_LAUNCH_MAXREGS", true)
+    KERNEL_LAUNCH_TABLE[] = env_switch("BREEZE_KERNEL_LAUNCH_TABLE", true)
+    return nothing
+end
+
 end # module Utils
