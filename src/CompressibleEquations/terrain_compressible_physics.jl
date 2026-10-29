@@ -1000,10 +1000,69 @@ function AtmosphereModels.reset_reference_state!(model::TerrainCompressibleModel
     return nothing
 end
 
-# Terrain models keep the unfused sequence (their auxiliary dynamics also builds w̃ and ρw̃).
+# Terrain models keep the velocity pass separate (their auxiliary dynamics also builds w̃ and ρw̃).
+# C7 (handoff 3af9cbdb, T/p/auxiliary part): the auxiliary thermodynamics and the temperature-and-pressure
+# inversion in one launch (`TERRAIN_FUSED_AUXILIARY`, `BREEZE_TERRAIN_FUSED_AUXILIARY=false` at load: two launches).
+const TERRAIN_FUSED_AUXILIARY = Ref(true)
+
 function AtmosphereModels.compute_auxiliary_state_variables!(model::TerrainCompressibleModel)
     AtmosphereModels.compute_velocities!(model)
-    AtmosphereModels.compute_auxiliary_thermodynamic_variables!(model)
-    AtmosphereModels.compute_auxiliary_dynamics_variables!(model)
+    if TERRAIN_FUSED_AUXILIARY[]
+        compute_terrain_fused_thermodynamics!(model)
+        compute_contravariant_velocity!(model)
+    else
+        AtmosphereModels.compute_auxiliary_thermodynamic_variables!(model)
+        AtmosphereModels.compute_auxiliary_dynamics_variables!(model)
+    end
     return nothing
+end
+
+# The T/p inversion reads only cell (i, j, k), whose auxiliaries the same thread has just written, so every
+# interior value equals the two-launch sequence's; the halo fills of both passes follow, in their order, without
+# the fill of the provisional temperature (overwritten by the final fill in the two-launch sequence too).
+function compute_terrain_fused_thermodynamics!(model::TerrainCompressibleModel)
+    grid = model.grid
+    arch = architecture(grid)
+    dynamics = model.dynamics
+
+    fill_halo_regions!(dynamics.dry_density)
+    fill_halo_regions!(prognostic_fields(model.formulation))
+
+    launch!(arch, grid, :xyz,
+            _compute_terrain_fused_thermodynamics!,
+            model.temperature,
+            dynamics.pressure,
+            dynamics.dry_density,
+            dynamics.total_density,
+            specific_prognostic_moisture(model),
+            model.formulation,
+            dynamics,
+            grid,
+            model.thermodynamic_constants,
+            model.microphysics,
+            model.microphysical_fields,
+            model.moisture_density,
+            stored_energy_denominator(model))
+
+    fill_halo_regions!(model.microphysical_fields, Oceananigans.Models.boundary_condition_args(model)...)
+    fill_halo_regions!(model.formulation)
+    fill_halo_regions!(model.temperature)
+    fill_halo_regions!(dynamics.pressure)
+
+    return nothing
+end
+
+@kernel function _compute_terrain_fused_thermodynamics!(temperature_field, pressure_field,
+                                                        dry_density, total_density, specific_prognostic_moisture,
+                                                        formulation, dynamics, grid, constants,
+                                                        microphysics, microphysical_fields, moisture_density,
+                                                        denominator)
+    i, j, k = @index(Global, NTuple)
+    AtmosphereModels.auxiliary_thermodynamics_at!(i, j, k, grid, specific_prognostic_moisture,
+                                                  formulation, dynamics, constants, microphysics,
+                                                  microphysical_fields, moisture_density)
+    compute_temperature_and_pressure_at!(i, j, k, temperature_field, pressure_field,
+                                         dry_density, total_density, formulation, dynamics,
+                                         specific_prognostic_moisture, grid, microphysics,
+                                         microphysical_fields, constants, denominator)
 end

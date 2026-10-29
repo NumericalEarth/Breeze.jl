@@ -89,6 +89,7 @@ include("terrain_compressible_physics.jl")
 
 function __init__()
     STORED_ENERGY_DENOMINATOR[] = lowercase(get(ENV, "BREEZE_STORED_ENERGY_DENOMINATOR", "true")) != "false"
+    TERRAIN_FUSED_AUXILIARY[] = lowercase(get(ENV, "BREEZE_TERRAIN_FUSED_AUXILIARY", "true")) != "false"
     return nothing
 end
 
