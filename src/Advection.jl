@@ -178,6 +178,12 @@ Whether the edges pass returns θ = 1 without its two divisions where both quoti
 """
 const LIMITER_THETA_SHORTCUT = Ref(true)
 
+"""
+Whether the edges pass is launched k-first in (32, 1, 4) blocks on GPUs (handoff `edges_order`; `true` by default,
+`BREEZE_EDGES_KFIRST` at load; consulted at every launch). `false`: an `:xyz`-ordered launch of the extended range.
+"""
+const EDGES_KFIRST = Ref(true)
+
 env_switch(name, default) = lowercase(get(ENV, name, default)) in ("1", "true")
 
 function __init__()
@@ -185,6 +191,7 @@ function __init__()
     EDGE_CACHE_ON_CPU[] = env_switch("BREEZE_EDGE_CACHE_CPU", "false")
     ZERO_SAFE_LIMITER[] = env_switch("BREEZE_ZERO_SAFE_LIMITER", "true")
     LIMITER_THETA_SHORTCUT[] = env_switch("BREEZE_LIMITER_THETA_SHORTCUT", "true")
+    EDGES_KFIRST[] = env_switch("BREEZE_EDGES_KFIRST", "true")
     return nothing
 end
 
@@ -334,14 +341,54 @@ end
 function Oceananigans.Advection.update_bounds_preserving_limiter!(scheme::EdgeCachedBoundsPreservingWENO, grid, c)
     isnothing(c) && return nothing
     edges = scheme.bounds.limiter
-    parameters = horizontally_extended_interior_kernel_parameters(grid)
-    launch!(architecture(grid), grid, parameters, _compute_bounds_preserving_edges!, edges, grid, scheme, c)
+    arch = architecture(grid)
+    if arch isa Architectures.GPU && EDGES_KFIRST[]
+        launch_kfirst_edges!(arch, grid, edges, scheme, c)
+    else
+        parameters = horizontally_extended_interior_kernel_parameters(grid)
+        launch!(arch, grid, parameters, _compute_bounds_preserving_edges!, edges, grid, scheme, c)
+    end
     return nothing
 end
 
 @kernel function _compute_bounds_preserving_edges!(edges, grid, scheme, c)
     i, j, k = @index(Global, NTuple)
     bounds_preserving_edges!(edges, i, j, k, grid, scheme, c)
+end
+
+# The k-first launch (handoff `_kfirst_pointwise!` with `edges_order`): blocks of Wx × Wy × Wz threads, the blocks of
+# one tile column run back to back (k fastest). S = (Wx, Wy, Wz, Ex, Ey, Nz), with Ex × Ey the extended horizontal
+# range (indices 0:Nx+1, 0:Ny+1). Every thread runs the same per-cell operation as the `:xyz` kernel.
+@inline function kfirst_decode(::Val{S}, l, g) where S
+    Wx, Wy, Wz, Ex, Ey, Nz = S
+    nbx = cld(Ex, Wx); nbz = cld(Nz, Wz)
+    l0 = l - 1
+    li = l0 % Wx; lj = (l0 ÷ Wx) % Wy; lk = l0 ÷ (Wx * Wy)
+    g0 = g - 1
+    bk = g0 % nbz; r = g0 ÷ nbz; bi = r % nbx; bj = r ÷ nbx
+    return (bi * Wx + li + 1, bj * Wy + lj + 1, bk * Wz + lk + 1)
+end
+
+@kernel function _kfirst_bounds_preserving_edges!(::Val{S}, edges, grid, scheme, c) where S
+    l = @index(Local, Linear)
+    g = @index(Group, Linear)
+    i, j, k = kfirst_decode(Val(S), l, g)
+    if (i <= S[4]) & (j <= S[5]) & (k <= S[6])
+        bounds_preserving_edges!(edges, i - 1, j - 1, k, grid, scheme, c)
+    end
+end
+
+const kfirst_edges_tile = (32, 1, 4)
+
+function launch_kfirst_edges!(arch, grid, edges, scheme, c)
+    Nx, Ny, Nz = size(grid)
+    Wx, Wy, Wz = kfirst_edges_tile
+    S = (Wx, Wy, Wz, Nx + 2, Ny + 2, Nz)
+    threads = Wx * Wy * Wz
+    blocks = cld(Nx + 2, Wx) * cld(Ny + 2, Wy) * cld(Nz, Wz)
+    loop! = _kfirst_bounds_preserving_edges!(device(arch), StaticSize((threads,)), StaticSize((threads * blocks,)))
+    loop!(Val(S), edges, grid, scheme, c)
+    return nothing
 end
 
 @inline rescaled_edge(ĉ, θᵢ, cᵢ) = θᵢ * (ĉ - cᵢ) + cᵢ
