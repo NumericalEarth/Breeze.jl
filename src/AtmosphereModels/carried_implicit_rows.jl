@@ -183,13 +183,36 @@ Scalars with the same key, no implicit advection and no implicit-explicit bounda
 """
 shared_implicit_rows_key(closure, closure_fields, id) = nothing
 
-@kernel function _multiple_right_hand_side_solve!(ϕs, t, grid, p, args)
+@kernel function _multiple_right_hand_side_solve!(ϕs, rhs, t, grid, p, args)
     i, j = @index(Global, NTuple)
-    multiple_right_hand_side_sweep!(i, j, size(grid, 3), ϕs, t, grid, p, args)
+    multiple_right_hand_side_sweep!(i, j, size(grid, 3), ϕs, rhs, t, grid, p, args)
 end
 
+# Where the right-hand sides come from. In place: each ϕ is its own right-hand side (as `implicit_step!` does it).
+# Folded RK3 (handoff C6 e97db3f8, tier A): the right-hand side is `u⁰ + Δt G`, the value `_rk3_substep!` stores,
+# formed on load; where the sweep keeps the right-hand side (β ≈ 0) it stores that value, which is what the in-place
+# solve's `ϕ[i, j, k]` held.
+struct InPlaceRightHandSides end
+
+struct FoldedRK3RightHandSides{U, G, T}
+    ϕ⁰s :: U
+    Gs :: G
+    Δt :: T
+end
+
+Adapt.adapt_structure(to, s::FoldedRK3RightHandSides) =
+    FoldedRK3RightHandSides(Adapt.adapt(to, s.ϕ⁰s), Adapt.adapt(to, s.Gs), s.Δt)
+
+@inline right_hand_side_values(ϕs, ::InPlaceRightHandSides, i, j, k) = level_values(ϕs, i, j, k)
+@inline right_hand_side_values(ϕs, s::FoldedRK3RightHandSides, i, j, k) = rk3_values(ϕs, s.ϕ⁰s, s.Gs, s.Δt, i, j, k)
+
+@inline rk3_values(::Tuple{}, ::Tuple{}, ::Tuple{}, Δt, i, j, k) = ()
+@inline rk3_values(ϕs, ϕ⁰s, Gs, Δt, i, j, k) =
+    (convert(eltype(first(ϕs)), @inbounds(first(ϕ⁰s)[i, j, k]) + Δt * @inbounds(first(Gs)[i, j, k])),
+     rk3_values(Base.tail(ϕs), Base.tail(ϕ⁰s), Base.tail(Gs), Δt, i, j, k)...)
+
 # Each ϕ is its own right-hand side (an in-place solve, as `implicit_step!` does it).
-@inline function multiple_right_hand_side_sweep!(i, j, Nz, ϕs, t, grid, p, args::CarriedRowArguments)
+@inline function multiple_right_hand_side_sweep!(i, j, Nz, ϕs, rhs, t, grid, p, args::CarriedRowArguments)
     FT = eltype(first(ϕs))
     TT = eltype(t)
     ε = 10 * eps(float_eltype(first(ϕs)))
@@ -204,11 +227,11 @@ end
         Puᵏ, Plᵏ, Dᵏ, S = carried_diffusion_row(i, j, 1, grid, ℓz, S, closure_ij, K, id, ℓx, ℓy, Δt, clk, fields, ρ_diff)
 
         β = carried_diagonal(i, j, 1, grid, Puᵏ, Plᵏ, Dᵏ, args)
-        ϕᵏ⁻¹ = first_level_solutions!(ϕs, i, j, β, FT)
-        fᵏ = level_values(ϕs, i, j, min(2, Nz))
+        ϕᵏ⁻¹ = first_level_solutions!(ϕs, right_hand_side_values(ϕs, rhs, i, j, 1), i, j, β, FT)
+        fᵏ = right_hand_side_values(ϕs, rhs, i, j, min(2, Nz))
 
         for k = 2:Nz
-            fᵏ⁺¹ = level_values(ϕs, i, j, ifelse(k < Nz, k+1, k))
+            fᵏ⁺¹ = right_hand_side_values(ϕs, rhs, i, j, ifelse(k < Nz, k+1, k))
 
             Puᵏ⁻¹ = Puᵏ
             Dᵏ⁻¹  = Dᵏ
@@ -221,7 +244,7 @@ end
             tᵏ = convert(TT, cᵏ⁻¹ / β)
             t[i, j, k] = tᵏ
             β = bᵏ - masked_multiply(aᵏ⁻¹, tᵏ)
-            ϕᵏ⁻¹ = forward_solutions!(ϕs, fᵏ, ϕᵏ⁻¹, i, j, k, aᵏ⁻¹, β, ε, FT)
+            ϕᵏ⁻¹ = forward_solutions!(ϕs, rhs, fᵏ, ϕᵏ⁻¹, i, j, k, aᵏ⁻¹, β, ε, FT)
             fᵏ = fᵏ⁺¹
         end
 
@@ -235,33 +258,42 @@ end
 @inline level_values(::Tuple{}, i, j, k) = ()
 @inline level_values(ϕs, i, j, k) = (@inbounds(first(ϕs)[i, j, k]), level_values(Base.tail(ϕs), i, j, k)...)
 
-@inline first_level_solutions!(::Tuple{}, i, j, β, FT) = ()
-@inline first_level_solutions!(ϕs, i, j, β, FT) =
-    (first_level_solution!(first(ϕs), i, j, β, FT), first_level_solutions!(Base.tail(ϕs), i, j, β, FT)...)
+@inline first_level_solutions!(::Tuple{}, ::Tuple{}, i, j, β, FT) = ()
+@inline first_level_solutions!(ϕs, fs, i, j, β, FT) =
+    (first_level_solution!(first(ϕs), first(fs), i, j, β, FT), first_level_solutions!(Base.tail(ϕs), Base.tail(fs), i, j, β, FT)...)
 
-@inline function first_level_solution!(ϕ, i, j, β, FT)
-    ϕ₁ = convert(FT, @inbounds(ϕ[i, j, 1]) / β)
+@inline function first_level_solution!(ϕ, f₁, i, j, β, FT)
+    ϕ₁ = convert(FT, f₁ / β)
     @inbounds ϕ[i, j, 1] = ϕ₁
     return ϕ₁
 end
 
+# The value the sweep keeps where β ≈ 0: the in-place solve's ϕ[k]; the folded update's stored right-hand side.
+@inline kept_value!(ϕ, ::InPlaceRightHandSides, f, i, j, k, FT) = @inbounds ϕ[i, j, k]
+
+@inline function kept_value!(ϕ, ::FoldedRK3RightHandSides, f, i, j, k, FT)
+    ϕᵏ = convert(FT, f)
+    @inbounds ϕ[i, j, k] = ϕᵏ
+    return ϕᵏ
+end
+
 # Row k of the forward sweep for one right-hand side, as the single-RHS sweep does it.
-@inline function forward_solution!(ϕ, f, ϕ⁻, i, j, k, aᵏ⁻¹, β, ε, FT)
+@inline function forward_solution!(ϕ, rhs, f, ϕ⁻, i, j, k, aᵏ⁻¹, β, ε, FT)
     definitely_diagonally_dominant = abs(β) > ε
     ϕ★ = (f - masked_multiply(aᵏ⁻¹, ϕ⁻)) / β
     @inbounds if definitely_diagonally_dominant
         ϕᵏ = convert(FT, ϕ★)
         ϕ[i, j, k] = ϕᵏ
     else
-        ϕᵏ = ϕ[i, j, k]
+        ϕᵏ = kept_value!(ϕ, rhs, f, i, j, k, FT)
     end
     return ϕᵏ
 end
 
-@inline forward_solutions!(::Tuple{}, ::Tuple{}, ::Tuple{}, i, j, k, aᵏ⁻¹, β, ε, FT) = ()
-@inline forward_solutions!(ϕs, fs, ϕ⁻s, i, j, k, aᵏ⁻¹, β, ε, FT) =
-    (forward_solution!(first(ϕs), first(fs), first(ϕ⁻s), i, j, k, aᵏ⁻¹, β, ε, FT),
-     forward_solutions!(Base.tail(ϕs), Base.tail(fs), Base.tail(ϕ⁻s), i, j, k, aᵏ⁻¹, β, ε, FT)...)
+@inline forward_solutions!(::Tuple{}, rhs, ::Tuple{}, ::Tuple{}, i, j, k, aᵏ⁻¹, β, ε, FT) = ()
+@inline forward_solutions!(ϕs, rhs, fs, ϕ⁻s, i, j, k, aᵏ⁻¹, β, ε, FT) =
+    (forward_solution!(first(ϕs), rhs, first(fs), first(ϕ⁻s), i, j, k, aᵏ⁻¹, β, ε, FT),
+     forward_solutions!(Base.tail(ϕs), rhs, Base.tail(fs), Base.tail(ϕ⁻s), i, j, k, aᵏ⁻¹, β, ε, FT)...)
 
 @inline back_substitutions!(::Tuple{}, ::Tuple{}, t, i, j, Nz) = nothing
 @inline function back_substitutions!(ϕs, ϕᴺs, t, i, j, Nz)
@@ -277,7 +309,8 @@ $(TYPEDSIGNATURES)
 rows agree, see [`shared_implicit_rows_key`](@ref)).
 """
 function multiple_right_hand_side_implicit_step!(ϕs::Tuple, solver, closure, closure_fields, id, clock, model_fields,
-                                                 Δt, advection, velocities, density)
+                                                 Δt, advection, velocities, density;
+                                                 right_hand_sides = InPlaceRightHandSides())
     ϕ = first(ϕs)
     vi_closure, vi_closure_fields = Oceananigans.TurbulenceClosures.vertically_implicit_closures(closure, closure_fields)
     bcs = ϕ.boundary_conditions
@@ -287,6 +320,25 @@ function multiple_right_hand_side_implicit_step!(ϕs::Tuple, solver, closure, cl
             advection, w, density, bcs.top, bcs.bottom, bcs.immersed, ϕ)
     args isa CarriedRowArguments || throw(ArgumentError("multiple right-hand sides need carried rows"))
     grid = solver.grid
-    launch!(grid.architecture, grid, :xy, _multiple_right_hand_side_solve!, ϕs, solver.t, grid, solver.parameters, args)
+    arch = grid.architecture
+    if shared_scratch_available() && Solvers.shared_thomas_scratch(arch, grid, solver.t)
+        Solvers.launch_shared_column_solve!(_multiple_right_hand_side_shared_solve!, arch, grid,
+                                            (ϕs, right_hand_sides, solver.t, grid, solver.parameters, args))
+    else
+        launch!(arch, grid, :xy, _multiple_right_hand_side_solve!, ϕs, right_hand_sides, solver.t, grid,
+                solver.parameters, args)
+    end
     return nothing
+end
+
+# The multi-right-hand-side sweep with its Thomas scratch in the block's shared memory (handoff P01 42166bec; see
+# Oceananigans' `SharedColumnScratch`): the same stored values, so the same bits; the global `t` is not written.
+shared_scratch_available() = isdefined(Solvers, :SharedColumnScratch)
+
+@kernel function _multiple_right_hand_side_shared_solve!(ϕs, rhs, t, grid, p, args, ::Val{Nz}) where Nz
+    i, j = @index(Global, NTuple)
+    column = @index(Local, Linear)
+    TT = @uniform eltype(t)
+    scratch = @localmem TT (64, Nz)
+    multiple_right_hand_side_sweep!(i, j, Nz, ϕs, rhs, Solvers.SharedColumnScratch(scratch, column), grid, p, args)
 end

@@ -22,6 +22,9 @@ using Breeze.AtmosphereModels:
     implicit_step_scheme,
     implicit_sedimentation_step!,
     multiple_right_hand_side_implicit_step!,
+    FoldedRK3RightHandSides,
+    InPlaceRightHandSides,
+    FOLDED_RK3_SOLVES,
     shared_implicit_rows_key
 
 using Oceananigans.BoundaryConditions: needs_implicit_solver
@@ -142,11 +145,12 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     velocities = tendency_transport_velocities(model)
     solver = model.timestepper.implicit_solver
     batched = shared_row_scalar_names(model, solver, acoustic_names)
+    folded = FOLDED_RK3_SOLVES[] && kernel! === _rk3_substep! && length(batched) > 1
 
     for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
         name ∈ acoustic_names && continue
 
-        launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
+        folded && name ∈ batched || launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
 
         field_index = closure_scalar_index(model, name)
         advection = field_advection_scheme(model.advection, name)
@@ -179,6 +183,10 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     # only its own field, so the order of independent updates and solves changes no value).
     if length(batched) > 1
         name₁ = first(batched)
+        # Folded: the group's `u⁰ + Δt G` is formed inside the solve instead of by `_rk3_substep!` (bitwise the same).
+        right_hand_sides = folded ?
+            FoldedRK3RightHandSides(map(name -> U⁰[name], batched), map(name -> Gⁿ[name], batched), first(kernel_args)) :
+            InPlaceRightHandSides()
         multiple_right_hand_side_implicit_step!(map(name -> prognostic[name], batched),
                                                 solver,
                                                 model.closure,
@@ -190,7 +198,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
                                                 implicit_step_scheme(field_advection_scheme(model.advection, name₁)),
                                                 implicit_advection_velocities(model.dynamics, velocities, name₁,
                                                                               model.microphysics, model.microphysical_fields),
-                                                ρ)
+                                                ρ; right_hand_sides)
     end
 
     # The tracers' solves have just moved sedimenting condensate implicitly; move its latent

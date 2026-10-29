@@ -129,7 +129,7 @@ export
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
-using KernelAbstractions: @kernel, @index, get_backend
+using KernelAbstractions: @kernel, @index, @localmem, @uniform, get_backend
 
 using Oceananigans: Oceananigans, Center, Face, CenterField, fields
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
@@ -153,6 +153,8 @@ using Oceananigans.Utils: prettysummary, launch!
 
 "`BREEZE_FILLS_TOGETHER` (default true): consecutive independent fills go through one tupled `fill_halo_regions!`."
 const FILLS_TOGETHER = Ref(true)
+# Handoff C6 (e97db3f8): the scalar RK3 update of the multi-right-hand-side group formed inside its solve.
+const FOLDED_RK3_SOLVES = Ref(true)
 "`BREEZE_SKIP_DEAD_FILLS` (default true): leave out halo fills that a later fill in the same pass overwrites unread."
 const SKIP_DEAD_FILLS = Ref(true)
 "`BREEZE_BATCHED_Z_BCS` (default true): the z flux-BC tendencies of every prognostic in one launch."
@@ -169,6 +171,7 @@ function __init__()
     COLUMN_SEDIMENTATION[] = env_switch("BREEZE_COLUMN_SEDIMENTATION", false)  # density_weighted_implicit_diffusion.jl
     CELLWISE_MOISTURE_CORRECTION[] = env_switch("BREEZE_CELLWISE_MOISTURE_CORRECTION", true)
     read_kernel_argument_cache_switches!()  # kernel_arguments.jl
+    FOLDED_RK3_SOLVES[] = env_switch("BREEZE_FOLDED_RK3_SOLVES", true)
     return nothing
 end
 
