@@ -462,6 +462,7 @@ for arch in arches
                 substepper.momentum_perturbation.w,
                 grid, model.dynamics, Δτ, ω * Δτ, (1 - ω) * Δτ,
                 substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
+                substepper.linearization_density_weight,
                 FT(model.thermodynamic_constants.gravitational_acceleration), dˢ⁻,
                 substepper.vertical_momentum_tendency_factor,
                 substepper.slow_vertical_momentum_tendency,
