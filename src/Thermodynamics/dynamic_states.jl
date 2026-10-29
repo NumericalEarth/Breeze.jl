@@ -261,11 +261,15 @@ end
 end
 
 # Exner function at the diagnosed (actual) pressure p = ρRᵐT: Π = (p/pˢᵗ)^κ.
-@inline function exner_function(𝒰::LiquidIceDensityState, constants::ThermodynamicConstants)
+@inline exner_function(𝒰::LiquidIceDensityState, constants::ThermodynamicConstants) =
+    exner_function_at_temperature(𝒰, temperature(𝒰, constants), constants)
+
+# The same Exner function with the temperature of `𝒰` given (a stored inversion of the same state).
+@inline function exner_function_at_temperature(𝒰::LiquidIceDensityState, T, constants::ThermodynamicConstants)
     q   = 𝒰.moisture_mass_fractions
     Rᵐ  = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    p   = 𝒰.density * Rᵐ * temperature(𝒰, constants)
+    p   = 𝒰.density * Rᵐ * T
     return (p / 𝒰.standard_pressure)^(Rᵐ / cᵖᵐ)
 end
 

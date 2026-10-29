@@ -29,7 +29,8 @@ using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
     DefaultTemperatureSolver, default_temperature_solver
 using Breeze.Solvers: materialize_solver
 using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, StaticEnergyState, with_temperature,
-    exner_function, mixture_heat_capacity, mixture_gas_constant
+    exner_function, mixture_heat_capacity, mixture_gas_constant,
+    LiquidIceDensityState, exner_function_at_temperature
 
 # The lowercase c is a singleton instance of Center
 const c = Center()
@@ -42,6 +43,11 @@ include("potential_temperature_tendency.jl")
 @kernel function compute_potential_temperature_tendency!(Gρθ, grid, args)
     i, j, k = @index(Global, NTuple)
     @inbounds Gρθ[i, j, k] = potential_temperature_tendency(i, j, k, grid, args...)
+end
+
+function __init__()
+    STORED_EXNER_TEMPERATURE[] = lowercase(get(ENV, "BREEZE_STORED_EXNER_TEMPERATURE", "true")) != "false"
+    return nothing
 end
 
 end # module

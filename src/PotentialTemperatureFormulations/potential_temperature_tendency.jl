@@ -59,13 +59,25 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemper
         model.advection.ρθ,
         radiation_flux_divergence(model.radiation),
         common_args...,
-        model.temperature)
+        exner_temperature_source(model))
 
     Gρθ = model.timestepper.Gⁿ.ρθ
     launch!(arch, grid, :xyz, compute_potential_temperature_tendency!, Gρθ, grid, ρθ_args)
     add_sedimentation_tendency!(Gρθ, model, tracer_transport_velocity)
     return nothing
 end
+
+# N1 (handoff 456057d0): the energy source's Exner function at the temperature the auxiliary pass of
+# the same `update_state!` stored from the same (θ, q, ρ), instead of a per-cell Newton inversion.
+# `BREEZE_STORED_EXNER_TEMPERATURE=false` (read at module load) restores the inversion.
+const STORED_EXNER_TEMPERATURE = Ref(true)
+
+exner_temperature_source(model) = STORED_EXNER_TEMPERATURE[] ? model.temperature : nothing
+
+@inline tendency_exner_function(𝒰, i, j, k, temperature_field, constants) = exner_function(𝒰, constants)
+@inline tendency_exner_function(𝒰::LiquidIceDensityState, i, j, k, ::Nothing, constants) = exner_function(𝒰, constants)
+@inline tendency_exner_function(𝒰::LiquidIceDensityState, i, j, k, temperature_field, constants) =
+    exner_function_at_temperature(𝒰, @inbounds(temperature_field[i, j, k]), constants)
 
 @inline function potential_temperature_tendency(i, j, k, grid,
                                                 id,
@@ -90,7 +102,7 @@ end
     ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (advection/diffusion carrier)
     𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
                                  microphysics, microphysical_fields, specific_prognostic_moisture)
-    Π = exner_function(𝒰, constants)
+    Π = tendency_exner_function(𝒰, i, j, k, temperature_field, constants)
     cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
