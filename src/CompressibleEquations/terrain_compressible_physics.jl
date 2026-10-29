@@ -310,6 +310,29 @@ stage_transport_vertical_momentum(model::TerrainCompressibleModel) =
     @inbounds ρw̃′[i, j, k] = ρw̃_outer - ρw̃_stage[i, j, k]
 end
 
+# The fused stage initialization's ρw̃′ rewind: the expression of `_initialize_terrain_vertical_momentum_perturbation_loaded!`.
+struct TerrainVerticalRewind{U, V, W, S, G}
+    ρu_outer :: U
+    ρv_outer :: V
+    ρw_outer :: W
+    ρw̃_stage :: S
+    grid :: G
+end
+
+Adapt.adapt_structure(to, r::TerrainVerticalRewind) =
+    TerrainVerticalRewind(adapt(to, r.ρu_outer), adapt(to, r.ρv_outer), adapt(to, r.ρw_outer),
+                          adapt(to, r.ρw̃_stage), adapt(to, r.grid))
+
+@inline function rewind_value(r::TerrainVerticalRewind, i, j, k)
+    ρw̃_outer = terrain_vertical_transport_momentum(i, j, k, r.grid, r.ρu_outer, r.ρv_outer, r.ρw_outer)
+    return @inbounds ρw̃_outer - r.ρw̃_stage[i, j, k]
+end
+
+vertical_momentum_rewind(model::TerrainCompressibleModel, Uᴸ_outer) =
+    LOAD_STAGE_CONTRAVARIANT_MOMENTUM[] ?
+        TerrainVerticalRewind(Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
+                              model.dynamics.contravariant_vertical_momentum, model.grid) : nothing
+
 @kernel function _initialize_terrain_vertical_momentum_perturbation!(ρw̃′,
                                                                      ρu_outer, ρv_outer, ρw_outer,
                                                                      ρu_stage, ρv_stage, ρw_stage,

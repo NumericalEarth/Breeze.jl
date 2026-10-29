@@ -889,9 +889,48 @@ end
 # then uses per-stage Uᴸ as base, collapsing back to ``U_outer + Δevolved`` —
 # preserving the invariant. Auxiliary fields (predictors, divergence/damping
 # workspace) reset to zero; they carry no stage-to-stage history.
-function initialize_stage_perturbations!(substepper, model, Uᴸ_outer, zero_entry = false)
+function initialize_stage_perturbations!(substepper, model, Uᴸ_outer, zero_entry = false, path = nothing)
     grid = model.grid
     arch = architecture(grid)
+
+    # Split column path (A2-bce c/e in spirit, handoff a38e2578): one launch, without the dead workspace zeros.
+    if FUSED_STAGE_INITIALIZATION[] && path isa SplitAcousticColumn
+        rewind = vertical_momentum_rewind(model, Uᴸ_outer)
+        if zero_entry
+            launch!(arch, grid, :xyz, _zero_stage_accumulators_and_perturbations!,
+                    substepper.time_averaged_velocities.u,
+                    substepper.time_averaged_velocities.v,
+                    substepper.time_averaged_velocities.w,
+                    substepper.density_perturbation,
+                    substepper.density_potential_temperature_perturbation,
+                    substepper.momentum_perturbation.u,
+                    substepper.momentum_perturbation.v,
+                    substepper.momentum_perturbation.w)
+            fill_halo_regions!(substepper.density_perturbation)
+            fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+            map(fill_halo_regions!, substepper.momentum_perturbation)
+            return nothing
+        elseif !isnothing(rewind)
+            ρᵡ = thermodynamic_density(model.formulation)
+            ρᵡ_name = thermodynamic_density_name(model.formulation)
+            launch!(arch, grid, :xyz, _initialize_stage_accumulators_and_perturbations!,
+                    substepper.time_averaged_velocities.u,
+                    substepper.time_averaged_velocities.v,
+                    substepper.time_averaged_velocities.w,
+                    substepper.density_perturbation,
+                    substepper.density_potential_temperature_perturbation,
+                    substepper.momentum_perturbation.u,
+                    substepper.momentum_perturbation.v,
+                    substepper.momentum_perturbation.w,
+                    Uᴸ_outer.ρᵈ, Uᴸ_outer[ρᵡ_name], Uᴸ_outer.ρu, Uᴸ_outer.ρv,
+                    model.dynamics.dry_density, ρᵡ, model.momentum.ρu, model.momentum.ρv,
+                    rewind)
+            fill_halo_regions!(substepper.density_perturbation)
+            fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+            map(fill_halo_regions!, substepper.momentum_perturbation)
+            return nothing
+        end
+    end
 
     # Stage 1: Uᴸ_outer is the parent copy of the stage-entry state, so every rewind
     # perturbation is x − x = +0 (finite state). Store the literal +0 in the same launch
@@ -949,6 +988,57 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer, zero_ent
     map(fill_halo_regions!, substepper.momentum_perturbation)
 
     return nothing
+end
+
+"""
+Whether the split column path initializes a stage in one launch: the transport accumulators zeroed and the five
+perturbations rewound (or zeroed in stage 1), without zeroing the predictors and the (ρθ)′ stash, which
+`_build_predictors!` overwrites over the whole interior before any read (their halos are never written by the zeroing).
+Default `true`; `BREEZE_FUSED_STAGE_INITIALIZATION=false` at load turns it off.
+"""
+const FUSED_STAGE_INITIALIZATION = Ref(true)
+
+# The rewind of the vertical momentum perturbation, evaluated per cell: ρw⁰ − ρw; terrain models (with the loaded
+# stage-entry ρw̃) override it, and return `nothing` where the rewind needs its own launch.
+struct VerticalRewind{O, S}
+    outer :: O
+    stage :: S
+end
+
+Adapt.adapt_structure(to, r::VerticalRewind) = VerticalRewind(adapt(to, r.outer), adapt(to, r.stage))
+
+@inline rewind_value(r::VerticalRewind, i, j, k) = @inbounds r.outer[i, j, k] - r.stage[i, j, k]
+
+vertical_momentum_rewind(model, Uᴸ_outer) = VerticalRewind(Uᴸ_outer.ρw, model.momentum.ρw)
+
+@kernel function _zero_stage_accumulators_and_perturbations!(u_avg, v_avg, w_avg, ρ′, ρθ′, ρu′, ρv′, ρw′)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        u_avg[i, j, k] = 0
+        v_avg[i, j, k] = 0
+        w_avg[i, j, k] = 0
+        ρ′[i, j, k] = 0
+        ρθ′[i, j, k] = 0
+        ρu′[i, j, k] = 0
+        ρv′[i, j, k] = 0
+        ρw′[i, j, k] = 0
+    end
+end
+
+@kernel function _initialize_stage_accumulators_and_perturbations!(u_avg, v_avg, w_avg, ρ′, ρθ′, ρu′, ρv′, ρw′,
+                                                                   ρ_outer, ρθ_outer, ρu_outer, ρv_outer,
+                                                                   ρ_stage, ρθ_stage, ρu_stage, ρv_stage, rewind)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        u_avg[i, j, k] = 0
+        v_avg[i, j, k] = 0
+        w_avg[i, j, k] = 0
+        ρ′[i, j, k]  = ρ_outer[i, j, k]  - ρ_stage[i, j, k]
+        ρθ′[i, j, k] = ρθ_outer[i, j, k] - ρθ_stage[i, j, k]
+        ρu′[i, j, k] = ρu_outer[i, j, k] - ρu_stage[i, j, k]
+        ρv′[i, j, k] = ρv_outer[i, j, k] - ρv_stage[i, j, k]
+        ρw′[i, j, k] = rewind_value(rewind, i, j, k)
+    end
 end
 
 # Zero the six stage-start workspace/accumulator fields in one launch.
@@ -2433,7 +2523,8 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
     # Initialize perturbations with the SK08 rewind term so the substep
     # effectively starts from U(t) = Uᴸ (the outer-step-start state).
-    initialize_stage_perturbations!(substepper, model, Uᴸ, zero_entry)
+    initialize_stage_perturbations!(substepper, model, Uᴸ, zero_entry,
+                                    acoustic_column_path(grid, model.dynamics, advection))
 
     Gⁿ = model.timestepper.Gⁿ
     ρᵡ_name = thermodynamic_density_name(model.formulation)

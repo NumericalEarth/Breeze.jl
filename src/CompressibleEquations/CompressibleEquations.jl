@@ -101,6 +101,8 @@ function __init__()
     LOAD_STAGE_CONTRAVARIANT_MOMENTUM[] || @info "Stage contravariant momentum load off (environment)"
     FOLDED_LAST_SUBSTEP_RECOVERY[] = switch_from_env("BREEZE_FOLDED_LAST_SUBSTEP_RECOVERY", true)
     FOLDED_LAST_SUBSTEP_RECOVERY[] || @info "Folded last-substep recovery off (environment)"
+    FUSED_STAGE_INITIALIZATION[] = switch_from_env("BREEZE_FUSED_STAGE_INITIALIZATION", true)
+    FUSED_STAGE_INITIALIZATION[] || @info "Fused stage initialization off (environment)"
     NO_STEP_LINEARIZATION_REFRESH[] = switch_from_env("BREEZE_NO_STEP_LINEARIZATION_REFRESH", true)
     NO_STEP_LINEARIZATION_REFRESH[] || @info "Outer-step linearization refresh on (environment)"
     FOLDED_LINEARIZATION[] = switch_from_env("BREEZE_FOLDED_LINEARIZATION", true)
