@@ -176,6 +176,8 @@ export
     SSPRungeKutta3,
     AcousticRungeKutta3,
     AcousticSubstepper,
+    RoundToNearest,
+    StochasticRounding,
 
     # ParcelDynamics
     ParcelDynamics,
@@ -254,6 +256,9 @@ using .Utils
 
 include("Solvers.jl")
 using .Solvers
+
+include("RoundingTreatments.jl")
+using .RoundingTreatments
 
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
