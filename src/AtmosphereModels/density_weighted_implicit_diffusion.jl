@@ -354,12 +354,13 @@ function add_sedimentation_tendency!(G, model, tracer_transport_velocity)
     return nothing
 end
 
-# T20-mp1m: `BREEZE_COLUMN_SEDIMENTATION` (default true, read in `__init__`, consulted at every launch):
+# T20-mp1m: `BREEZE_COLUMN_SEDIMENTATION` (default false, read in `__init__`, consulted at every launch):
 # the explicit sedimentation tendency runs one thread per column, carrying the condensate contents of
 # cells k − 1, k, k + 1 up the column, so each cell's content (a `log` and the composition algebra) is
 # evaluated once instead of three times. Same `condensate_content` on the same inputs and the same
-# `sedimentation_content_tendency`, so the result is identical; `false` restores the pointwise kernel.
-const COLUMN_SEDIMENTATION = Ref(true)
+# `sedimentation_content_tendency`, so the result is identical. Default off: at 13 km dt 15 (job 5431) the
+# column kernel takes 1.24 ms/step against 0.73 for the pointwise one (107 vs 48 registers, Nx·Ny threads).
+const COLUMN_SEDIMENTATION = Ref(false)
 
 @kernel function _add_sedimentation_tendency_column!(G, grid, condensates, wᵗ, formulation, dynamics, constants,
                                                      microphysics, microphysical_fields, specific_prognostic_moisture,
