@@ -129,7 +129,7 @@ export
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
-using KernelAbstractions: @kernel, @index
+using KernelAbstractions: @kernel, @index, get_backend
 
 using Oceananigans: Oceananigans, Center, Face, CenterField, fields
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!

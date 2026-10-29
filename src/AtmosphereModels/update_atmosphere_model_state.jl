@@ -125,11 +125,28 @@ end
     return NamedTuple{names}(everything)
 end
 
+# Linear-index kernels over the parent arrays (halos included): the same arithmetic as the
+# broadcasts they replace, without the cartesian-index broadcast path.
+@kernel function _tracer_density_to_specific!(c, ρ)
+    n = @index(Global, Linear)
+    @inbounds c[n] = ifelse(ρ[n] == 0, 0, c[n] / ρ[n])
+end
+
+@kernel function _tracer_specific_to_density!(c, ρ)
+    n = @index(Global, Linear)
+    @inbounds c[n] *= ρ[n]
+end
+
+function launch_parent_kernel!(kernel, c, ρ)
+    a = parent(c)
+    kernel(get_backend(a), 256)(a, parent(ρ); ndrange = length(a))
+    return nothing
+end
+
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
-    ρ = parent(density)
     for ρc in tracers
-        parent(ρc) .= ifelse.(ρ .== 0, 0, parent(ρc) ./ ρ)
+        launch_parent_kernel!(_tracer_density_to_specific!, ρc, density)
     end
     return nothing
 end
@@ -137,7 +154,7 @@ end
 function tracer_specific_to_density!(tracers, density)
     # TODO: do all tracers a single kernel
     for c in tracers
-        parent(c) .*= parent(density)
+        launch_parent_kernel!(_tracer_specific_to_density!, c, density)
     end
     return nothing
 end
