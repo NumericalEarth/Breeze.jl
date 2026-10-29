@@ -166,11 +166,25 @@ face-consistent and the cache is bit-identical.
 """
 const EDGE_CACHE_ON_CPU = Ref(false)
 
+"""
+Whether the edges pass computes θᵐⁱⁿ without dividing a zero numerator (ED-1, `ZeroSafeLimiterQuotient`; `true` by
+default, `BREEZE_ZERO_SAFE_LIMITER` at load; consulted when a model is built).
+"""
+const ZERO_SAFE_LIMITER = Ref(true)
+
+"""
+Whether the edges pass returns θ = 1 without its two divisions where both quotients are at least 1 (ED-2,
+`ShortcutLimiterQuotient`; `true` by default, `BREEZE_LIMITER_THETA_SHORTCUT` at load; consulted when a model is built).
+"""
+const LIMITER_THETA_SHORTCUT = Ref(true)
+
 env_switch(name, default) = lowercase(get(ENV, name, default)) in ("1", "true")
 
 function __init__()
     BOUNDS_PRESERVING_EDGE_CACHE[] = env_switch("BREEZE_EDGE_CACHE", "true")
     EDGE_CACHE_ON_CPU[] = env_switch("BREEZE_EDGE_CACHE_CPU", "false")
+    ZERO_SAFE_LIMITER[] = env_switch("BREEZE_ZERO_SAFE_LIMITER", "true")
+    LIMITER_THETA_SHORTCUT[] = env_switch("BREEZE_LIMITER_THETA_SHORTCUT", "true")
     return nothing
 end
 
@@ -181,7 +195,41 @@ $(TYPEDEF)
 """
 struct IEEELimiterQuotient end
 
-limiter_quotient() = IEEELimiterQuotient()
+"""
+$(TYPEDEF)
+
+θ quotients of the edges pass without the division of a zero numerator (ED-1). A Float32 IEEE division whose dividend
+is zero leaves the GPU's fast division path for its slow-path subroutine, which the pass takes wherever a scalar and
+its lower bound are both zero. See [`zero_safe_quotient`](@ref).
+"""
+struct ZeroSafeLimiterQuotient end
+
+"""
+$(TYPEDEF)
+
+θ of the edges pass without division where it is 1 (ED-2): where |n₁| ≥ |d₁| and |n₂| ≥ |d₂| with 0 < |d| < ∞ both
+IEEE quotients |n / d| are at least 1 (rounding to nearest is monotone and keeps the representable 1), so
+`min(…, …, 1)` is exactly 1; everything else (limiting cells, NaN, infinite or zero operands) takes the flavour `Q`.
+"""
+struct ShortcutLimiterQuotient{Q} end
+
+function limiter_quotient()
+    quotient = ZERO_SAFE_LIMITER[] ? ZeroSafeLimiterQuotient() : IEEELimiterQuotient()
+    return LIMITER_THETA_SHORTCUT[] ? ShortcutLimiterQuotient{typeof(quotient)}() : quotient
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+`n / d` with the IEEE result for every `n` and `d`, without dividing a zero `n` by a non-zero, non-NaN `d`: there the
+quotient is the zero whose sign is the exclusive or of the operands' signs (`flipsign(n, d)`), also for `d = ±Inf`;
+`0 / 0`, `0 / NaN` and every non-zero `n` keep the division.
+"""
+@inline function zero_safe_quotient(n, d)
+    z = iszero(n) & !iszero(d) & !isnan(d)
+    q = ifelse(z, one(n), n) / d
+    return ifelse(z, flipsign(n, d), q)
+end
 
 # θ = min(|(cᵐᵃˣ − cᵢ) / (M − cᵢ + ε₂)|, |(cᵐⁱⁿ − cᵢ) / (m − cᵢ − ε₂)|, 1), the expressions of
 # `bounds_preserving_limiter` in its statement order (fd03ec02)
@@ -189,6 +237,25 @@ limiter_quotient() = IEEELimiterQuotient()
     θᵐᵃˣ = abs((cᵐᵃˣ - cᵢ) / (M - cᵢ + ε₂))
     θᵐⁱⁿ = abs((cᵐⁱⁿ - cᵢ) / (m - cᵢ - ε₂))
     return min(θᵐᵃˣ, θᵐⁱⁿ, one(cᵢ))
+end
+
+@inline function limiter_theta(cᵢ, cᵐⁱⁿ, cᵐᵃˣ, m, M, ε₂, ::ZeroSafeLimiterQuotient)
+    θᵐᵃˣ = abs((cᵐᵃˣ - cᵢ) / (M - cᵢ + ε₂))
+    θᵐⁱⁿ = abs(zero_safe_quotient(cᵐⁱⁿ - cᵢ, m - cᵢ - ε₂))
+    return min(θᵐᵃˣ, θᵐⁱⁿ, one(cᵢ))
+end
+
+# A branch, not an `ifelse` (which would evaluate both divisions): it is uniform over the warps of unlimited regions.
+@inline function limiter_theta(cᵢ, cᵐⁱⁿ, cᵐᵃˣ, m, M, ε₂, ::ShortcutLimiterQuotient{Q}) where Q
+    n₁ = cᵐᵃˣ - cᵢ
+    d₁ = M - cᵢ + ε₂
+    n₂ = cᵐⁱⁿ - cᵢ
+    d₂ = m - cᵢ - ε₂
+    if (abs(n₁) >= abs(d₁)) & (abs(n₂) >= abs(d₂)) & (0 < abs(d₁) < Inf) & (0 < abs(d₂) < Inf)
+        return one(cᵢ)
+    else
+        return limiter_theta(cᵢ, cᵐⁱⁿ, cᵐᵃˣ, m, M, ε₂, Q())
+    end
 end
 
 """
