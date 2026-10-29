@@ -213,7 +213,10 @@ cloud/precipitation fraction framework is handled separately.
 
     cloud_relaxation = cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, transport.Dᵛ,
                                                           μᶜˡ, λᶜˡ, nᶜˡ_bounded)
-    rain_relaxation = rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport)
+    # Process-group guard (PR #1092): the coefficient is gated on its own species.
+    qsmall = p3.minimum_mass_mixing_ratio
+    rain_relaxation = run_process_group(max(0, qʳ) >= qsmall) ?
+                      rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport) : zero(FT)
     # `qⁱ` is the dry ice mass; `qⁱ_total` and `Fˡ` gate the relaxation and tiny-mass overrides.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = lookups.Fˡ
@@ -223,8 +226,10 @@ cloud/precipitation fraction framework is handled separately.
     # so evaluate the coefficient — which carries a `density()` and a
     # ventilation-table lookup — once.
     ice_relaxation_active = qⁱ_total >= p3.minimum_mass_mixing_ratio
-    ice_relaxation = ice_vapor_relaxation_coefficient(p3, nⁱ, T, P, ρ, constants, transport, q,
-                                                      lookups)
+    # Process-group guard (PR #1092): only consumed where `ice_relaxation_active`.
+    ice_relaxation = run_process_group(ice_relaxation_active) ?
+                     ice_vapor_relaxation_coefficient(p3, nⁱ, T, P, ρ, constants, transport, q,
+                                                      lookups) : zero(FT)
     dry_ice_relaxation = ifelse(
         ice_relaxation_active & (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold),
         ice_relaxation, zero(FT))

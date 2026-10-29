@@ -60,3 +60,6 @@ function __init__()
     set_p3_optimization_switches!(; values...)
     return nothing
 end
+
+# A process group guarded by `condition` runs when the guards are off or the condition holds.
+@inline run_process_group(condition) = !p3_process_guards() | condition
