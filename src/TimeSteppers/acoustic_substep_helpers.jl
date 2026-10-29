@@ -355,6 +355,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
     # reconstructs u and θ from the prognostic the acoustic loop has just advanced, and unlike the
     # advective split it has no explicit fraction to pair with the frozen state.
     diffusion_density = dynamics_density(model.dynamics)
+    Δt_implicit = implicit_solve_time_step(model.grid, Δt_stage)
 
     prognostic = prognostic_fields(model)
     momentum_advection = model.advection.momentum
@@ -366,7 +367,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                        nothing,
                        model.clock,
                        fields(model),
-                       Δt_stage,
+                       Δt_implicit,
                        implicit_step_scheme(momentum_advection, diffusion_density),
                        (; w),
                        ρᵈ)
@@ -381,7 +382,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                    closure_scalar_index(model, θ_name),
                    model.clock,
                    fields(model),
-                   Δt_stage,
+                   Δt_implicit,
                    postloop_thermodynamic_scheme(θ_advection, diffusion_density),
                    merge(slow_thermodynamic_velocities(model), (; w)),
                    ρᵈ)
