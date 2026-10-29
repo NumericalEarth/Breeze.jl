@@ -794,6 +794,23 @@ end
             @test maximum(abs, residual ./ (g .* ρ[:, :, 2:end])) < 1e-10
         end
 
+        # set_to_mean! must also integrate with the formulation's Exner exponent, so the reference
+        # it recomputes from a balanced, horizontally uniform state reproduces that state.
+        for exponent in (VaporEquivalentExponent(), DryExponent())
+            mean_model = AtmosphereModel(balance_grid;
+                                         thermodynamic_constants = constants,
+                                         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                                                         reference_potential_temperature=θ),
+                                         formulation = LiquidIcePotentialTemperatureFormulation(; exponent))
+            set!(mean_model; θˡⁱ=θ, qᵗ, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀),
+                 enforce_mass_conservation=false)
+
+            reference = Breeze.AtmosphereModels.dynamics_reference_state(mean_model.dynamics)
+            set_to_mean!(reference, mean_model)
+            @test reference.pressure ≈ mean_model.dynamics.pressure rtol=sqrt(eps(FT))
+            @test reference.density  ≈ total_density(mean_model.dynamics) rtol=sqrt(eps(FT))
+        end
+
         if default_arch isa CPU
             allocation_grid = RectilinearGrid(CPU();
                                                size = (16, 16, 16),

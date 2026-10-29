@@ -269,12 +269,13 @@ function convert_moisture_bcs(bcs, microphysics)
     return merge(bcs, NamedTuple{(ρq_name,)}((ρq_bcs,)))
 end
 
-# ρθ: an energy flux 𝒬ᵀ enters as the potential temperature flux Jᶿ = 𝒬ᵀ / (ĉᵖ Π), applied by
+# ρθ: an energy flux 𝒬ᵀ enters as the potential temperature flux Jᶿ = (ρᵈ / ρ) 𝒬ᵀ / (ĉᵖ Π), applied by
 # `EnergyFluxBoundaryCondition` (the Exner exponent is set by `set_sensible_heat_formulation_bcs`).
 energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρθ}) = energy_to_theta_bcs(ρE_bcs)
 
-# ρs: static energy is an energy per unit mass, so an energy flux needs no conversion.
-energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρs}) = ρE_bcs
+# ρs = ρᵈ s: static energy is an energy per unit mass, so an energy flux 𝒬ᵀ enters as
+# Jˢ = (ρᵈ / ρ) 𝒬ᵀ, applied by `StaticEnergyFluxBoundaryCondition` (the identity on anelastic).
+energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρs}) = energy_to_static_energy_bcs(ρE_bcs)
 
 # A new thermodynamic formulation must say how an energy flux enters its prognostic variable.
 energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{ρᵡ_name}) where ρᵡ_name =

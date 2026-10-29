@@ -2,8 +2,7 @@ using ..Thermodynamics: Thermodynamics, ReferenceState, ExnerReferenceState, com
                         _compute_exner_reference!, _compute_exner_reference_3d!,
                         bottom_face_height, constant_moist_hydrostatic_pressure,
                         is_column_reference, moist_hydrostatic_pressure, dry_air_gas_constant,
-                        set_surface_state!, surface_reference_density, vapor_gas_constant,
-                        VaporEquivalentExponent
+                        set_surface_state!, surface_reference_density, vapor_gas_constant
 using Oceananigans: CenterField
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Architectures: architecture
@@ -169,7 +168,7 @@ state. `set_to_mean!` is only reached on a height-coordinate grid, whose bottom 
 level, so a horizontally uniform reduction is exact; terrain-following resets go through
 `reset_reference_state!`, which reduces the datum per column along the terrain.
 """
-function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, constants)
+function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, constants, exponent)
     FT  = eltype(ref)
     Rᵈ  = dry_air_gas_constant(constants)
     Rᵛ  = vapor_gas_constant(constants)
@@ -182,15 +181,15 @@ function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, c
                                                 ref.standard_pressure, constants))
 
     set_surface_state!(ref.surface_pressure, pˢ)
-    update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, exponent)
     return nothing
 end
 
-function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, exponent)
     # The 3D and terrain-following forms carry no bottom boundary value on `density`, so there is
     # nothing to keep in sync.
     isnothing(ref.surface_density) && return nothing
-    ρˢ = surface_reference_density(pˢ, θˢ, qᵛˢ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    ρˢ = surface_reference_density(pˢ, θˢ, qᵛˢ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, exponent)
     set_surface_state!(ref.surface_density, convert(eltype(ref), ρˢ))
     return nothing
 end
@@ -229,7 +228,10 @@ function set_to_mean!(ref::ExnerReferenceState, model)
     cᵖᵛ = constants.vapor.heat_capacity
     g   = constants.gravitational_acceleration
 
-    update_exner_surface_state!(ref, θ̄, q̄ᵛ, grid, constants)
+    # Integrate with the Exner exponent the model inverts θˡⁱ with, so the reset reference
+    # matches the mean state for `DryExponent` as well.
+    exponent = liquid_ice_exner_exponent(model.formulation)
+    update_exner_surface_state!(ref, θ̄, q̄ᵛ, grid, constants, exponent)
 
     # A 3D reference on a height-coordinate grid has a horizontally uniform mean profile but
     # per-column fields, so each column is integrated from the (uniform) bottom-face anchor.
@@ -238,7 +240,7 @@ function set_to_mean!(ref::ExnerReferenceState, model)
 
     launch!(arch, grid, worksize, kernel!,
             ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
-            ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, VaporEquivalentExponent())
+            ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
 
     fill_halo_regions!(ref.exner_function)
     fill_halo_regions!(ref.pressure)

@@ -1062,11 +1062,13 @@ end
 end
 
 # The bottom-face density implied by a bottom-face pressure and the moist state there,
-# ρˢ = pˢ / (Rᵐ θˢ Πˢ). Shared by the `ExnerReferenceState` constructor and by `set_to_mean!`, so a
-# reset lands on the same boundary value the constructor would have produced.
-@inline function surface_reference_density(pˢ, θˢ, qᵛˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    Rᵐ, _, κᵐ = moist_reference_constants(qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    Πˢ = (pˢ / pˢᵗ)^κᵐ
+# ρˢ = pˢ / (Rᵐ θˢ Πˢ), with Πˢ defined by the Exner `exponent` as in `_compute_exner_column!`.
+# Shared by the `ExnerReferenceState` constructor and by `set_to_mean!`, so a reset lands on the
+# same boundary value the constructor would have produced.
+@inline function surface_reference_density(pˢ, θˢ, qᵛˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, exponent)
+    Rᵐ, cᵖᵐ, κᵐ = moist_reference_constants(qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    κ, _ = column_exner_exponent(exponent, Rᵐ, cᵖᵐ, κᵐ, Rᵈ, cᵖᵈ)
+    Πˢ = (pˢ / pˢᵗ)^κ
     return pˢ / (Rᵐ * θˢ * Πˢ)
 end
 
@@ -1204,6 +1206,9 @@ and the 3D path (`θ₀(x, y, z)`); `vapor_mass_fraction` is supported in both.
 When provided, the level-local moist gas constants ``Rᵐ = (1-qᵛ)Rᵈ + qᵛRᵛ``,
 ``cᵖᵐ = (1-qᵛ)cᵖᵈ + qᵛcᵖᵛ`` are used; the dry case is recovered exactly
 when ``qᵛ ≡ 0``.
+The column is integrated with the vapor-equivalent Exner exponent ``κᵐ = Rᵐ/cᵖᵐ``. A model
+evolving ``θˡⁱ`` with `DryExponent` inverts the same ``θ₀`` to a slightly different temperature;
+`set_to_mean!` recomputes the reference with the model's exponent.
 
 **Isothermal** (`reference_temperature`): Constant T₀ (MPAS baroclinic wave
 convention). Uses the analytic isothermal solution:
@@ -1347,7 +1352,7 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
                 convert(FT, evaluate_profile(vapor_mass_fraction, zˢ))
             end
             ρˢ = surface_state_field(grid, surface_reference_density(pˢ_value, θˢ, qᵛ_surface, pˢᵗ,
-                                                                    Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ))
+                                                                    Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, VaporEquivalentExponent()))
 
             p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(pˢ)))
             pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
