@@ -221,7 +221,10 @@ end
     γ   = cᵖᵐ / (cᵖᵐ - Rᵐ)
     ℒˡᵣ = constants.liquid.reference_latent_heat
     ℒⁱᵣ = constants.ice.reference_latent_heat
-    L   = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
+    # The latent shift is exactly zero for a state without condensate (every all-vapor first guess of the
+    # saturation adjustment, clear air): `zero_numerator_quotient` is the same quotient, bit for bit, without
+    # the divider's slow path for a zero numerator.
+    L   = zero_numerator_quotient(ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice, cᵖᵐ)
 
     T₁ = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L     # dry closed form + latent shift (the non-iterated guess)
 
@@ -240,7 +243,9 @@ end
     iter = 0
     while abs(ΔT) > max(solver.abstol, solver.reltol * T) && iter < solver.maxiter
         Φ  = (ρ * Rᵐ * T / pˢᵗ)^κ * θ          # = T − L at the root
-        ΔT = -(T - Φ - L) / (1 - κ * Φ / T)
+        # Without condensate the closed form is the root to rounding, so the residual T − Φ − L is exactly
+        # zero in most cells: the same quotient, with the zero kept out of the divider.
+        ΔT = zero_numerator_quotient(-(T - Φ - L), 1 - κ * Φ / T)
         T += ΔT
         iter += 1
     end
@@ -250,7 +255,7 @@ end
 @inline function solve_temperature(solver::FixedIterations, T, θ, ρ, Rᵐ, pˢᵗ, κ, L)
     for _ in 1:solver.iterations               # fixed trip count → unrolls (Reactant/Enzyme-safe)
         Φ = (ρ * Rᵐ * T / pˢᵗ)^κ * θ
-        T += -(T - Φ - L) / (1 - κ * Φ / T)
+        T += zero_numerator_quotient(-(T - Φ - L), 1 - κ * Φ / T)
     end
     return T
 end

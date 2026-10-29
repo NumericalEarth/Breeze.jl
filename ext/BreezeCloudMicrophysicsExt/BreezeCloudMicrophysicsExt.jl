@@ -60,6 +60,7 @@ using Breeze.Thermodynamics:
     mixture_heat_capacity
 
 using Breeze: Microphysics
+using Breeze.Utils: zero_numerator_quotient
 
 using Breeze.Microphysics:
     center_field_tuple,

@@ -268,7 +268,9 @@ end
     Tᶠ,
     constants,
 )
-    return ice_autoconversion_with_supersaturation(
+    return gated_rate(
+        ice_autoconversion_with_supersaturation,
+        present(qᶜⁱ),
         option,
         parameters,
         q,
@@ -294,14 +296,14 @@ end
 
 @inline function cloud_precipitation_accretion(option, cloud, precipitation, velocity, qᶜ, qᵖ, ρ)
     E = convert(typeof(ρ), option.e)
-    return accretion(cloud, precipitation, velocity, E, qᶜ, qᵖ, ρ)
+    return gated_rate(accretion, present(qᶜ, qᵖ), cloud, precipitation, velocity, E, qᶜ, qᵖ, ρ)
 end
 
 @inline rain_sink_accretion(::Nothing, rain, cloud_ice, velocity, qᶜⁱ, qʳ, ρ) = 0
 
 @inline function rain_sink_accretion(option, rain, cloud_ice, velocity, qᶜⁱ, qʳ, ρ)
     E = convert(typeof(ρ), option.e)
-    return accretion_rain_sink(rain, cloud_ice, velocity, E, qᶜⁱ, qʳ, ρ)
+    return gated_rate(accretion_rain_sink, present(qᶜⁱ, qʳ), rain, cloud_ice, velocity, E, qᶜⁱ, qʳ, ρ)
 end
 
 @inline function rain_snow_accretion(
@@ -330,7 +332,9 @@ end
     FT = typeof(ρ)
     E = convert(FT, option.e)
     velocity_dispersion = convert(FT, option.coeff_disp)
-    return accretion_snow_rain(
+    return gated_rate(
+        accretion_snow_rain,
+        present(q₁, q₂),
         precipitation₁,
         precipitation₂,
         velocity₁,
@@ -346,7 +350,7 @@ end
 @inline rain_evaporation_rate(::Nothing, rain, velocity, air, q, qʳ, ρ, T, constants) = 0
 
 @inline function rain_evaporation_rate(option, rain, velocity, air, q, qʳ, ρ, T, constants)
-    return rain_evaporation(rain, velocity, air, q, qʳ, ρ, T, constants)
+    return gated_rate(rain_evaporation, present(qʳ), rain, velocity, air, q, qʳ, ρ, T, constants)
 end
 
 @inline function snow_deposition_sublimation_rate(
@@ -364,7 +368,7 @@ end
 end
 
 @inline function snow_deposition_sublimation_rate(option, snow, velocity, air, q, qˢⁿ, ρ, T, constants)
-    return snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, T, constants)
+    return gated_rate(snow_sublimation_deposition, present(qˢⁿ), snow, velocity, air, q, qˢⁿ, ρ, T, constants)
 end
 
 @inline function snow_deposition_sublimation_rate(
@@ -378,13 +382,13 @@ end
     T,
     constants,
 )
-    return min(0, snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, T, constants))
+    return min(0, gated_rate(snow_sublimation_deposition, present(qˢⁿ), snow, velocity, air, q, qˢⁿ, ρ, T, constants))
 end
 
 @inline snow_melt_rate(::Nothing, snow, velocity, air, qˢⁿ, ρ, T, Tᶠ, constants) = 0
 
 @inline function snow_melt_rate(option, snow, velocity, air, qˢⁿ, ρ, T, Tᶠ, constants)
-    return snow_melting(snow, velocity, air, qˢⁿ, ρ, T, Tᶠ, constants)
+    return gated_rate(snow_melting, present(qˢⁿ), snow, velocity, air, qˢⁿ, ρ, T, Tᶠ, constants)
 end
 
 @inline function cloud_ice_melt_rate(::Nothing, cloud_ice, air, qᶜⁱ, ρ, T, Tᶠ, constants)
@@ -476,9 +480,13 @@ const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
 # Warm-phase saturation adjustment: cloud liquid from thermodynamic state, rain from prognostic
 # The velocities argument is required for interface compatibility but not used by one-moment schemes.
+#
+# The mixing ratios of rain and snow, here and in `grid_moisture_fractions`, are `zero_numerator_quotient(ρq, ρ)`:
+# the quotient ρq / ρ, bit for bit, without the divider's slow path where the hydrometeor is absent (ρq = ±0),
+# which is most of the domain — and all of it for a hydrometeor that has no source.
 @inline function AM.microphysical_state(bμp::WP1M, ρ, μ, 𝒰, velocities)
     q = 𝒰.moisture_mass_fractions
-    qʳ = μ.ρqʳ / ρ
+    qʳ = zero_numerator_quotient(μ.ρqʳ, ρ)
     qᶜˡ = max(zero(qʳ), q.liquid - qʳ)  # cloud liquid = total liquid - rain
     return WarmPhaseOneMomentState(qᶜˡ, qʳ)
 end
@@ -486,15 +494,15 @@ end
 # Warm-phase non-equilibrium: all from prognostic μ
 @inline function AM.microphysical_state(bμp::WPNE1M, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
-    qʳ = μ.ρqʳ / ρ
+    qʳ = zero_numerator_quotient(μ.ρqʳ, ρ)
     return WarmPhaseOneMomentState(qᶜˡ, qʳ)
 end
 
 # Mixed-phase saturation adjustment: cloud condensate from thermodynamic state
 @inline function AM.microphysical_state(bμp::MP1M, ρ, μ, 𝒰, velocities)
     q = 𝒰.moisture_mass_fractions
-    qʳ = μ.ρqʳ / ρ
-    qˢⁿ = μ.ρqˢⁿ / ρ
+    qʳ = zero_numerator_quotient(μ.ρqʳ, ρ)
+    qˢⁿ = zero_numerator_quotient(μ.ρqˢⁿ, ρ)
     qᶜˡ = max(zero(qʳ), q.liquid - qʳ)  # cloud liquid = total liquid - rain
     qᶜⁱ = max(zero(qˢⁿ), q.ice - qˢⁿ)     # cloud ice = total ice - snow
     return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
@@ -504,8 +512,8 @@ end
 @inline function AM.microphysical_state(bμp::MPNE1M, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
     qᶜⁱ = μ.ρqᶜⁱ / ρ
-    qʳ = μ.ρqʳ / ρ
-    qˢⁿ = μ.ρqˢⁿ / ρ
+    qʳ = zero_numerator_quotient(μ.ρqʳ, ρ)
+    qˢⁿ = zero_numerator_quotient(μ.ρqˢⁿ, ρ)
     return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
 end
 
@@ -609,6 +617,24 @@ const HardwareFloat = Union{Float32, Float64}
 end
 
 @inline precipitation_terminal_velocity(precip, vel, ρ, q) = terminal_velocity(precip, vel, ρ, q)
+
+# Presence gates for the 1M process rates (P-L1 pattern applied to `mixed_phase_precipitation_rates`).
+# Every gated rate ends in `ifelse(cond, rate, zero(rate))` where `cond` contains `q > ϵ_numerics(q)` as a
+# conjunct for each species passed here. `present` is that conjunct; it branches only for Float32/Float64
+# (P-L1b): any other number type takes the library's select untouched (`present` is the constant `true`).
+@inline present(q::HardwareFloat) = q > CloudMicrophysics.Utilities.ϵ_numerics(q)
+@inline present(q) = true
+@inline present(q₁::FT, q₂::FT) where FT<:HardwareFloat = present(q₁) & present(q₂)
+@inline present(q₁, q₂) = true
+
+# `f(args...)` where `open`, else the zero the library's select returns (+0 in the library's result type).
+@inline function gated_rate(f::F, open, args...) where F
+    if open
+        return f(args...)
+    else
+        return zero(Base.promote_op(f, map(typeof, args)...))
+    end
+end
 
 #####
 ##### update_microphysical_auxiliaries! for one-moment schemes
@@ -779,7 +805,7 @@ end
 # maybe_adjust_thermodynamic_state will then adjust to equilibrium for the current state.
 @inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵉ, μ)
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
-    qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
+    qʳ  = @inbounds zero_numerator_quotient(μ.ρqʳ[i, j, k], ρ)
     qˡ = qᶜˡ + qʳ
     qᵛ = qᵉ - qᶜˡ
     return MoistureMassFractions(qᵛ, qˡ)
@@ -788,7 +814,7 @@ end
 # Warm-phase non-equilibrium: prognostic stores true vapor; construct fractions directly.
 @inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::WPNE1M, ρ, qᵛ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
-    qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
+    qʳ  = @inbounds zero_numerator_quotient(μ.ρqʳ[i, j, k], ρ)
     qˡ = qᶜˡ + qʳ
     return MoistureMassFractions(qᵛ, qˡ)
 end
@@ -797,8 +823,8 @@ end
 @inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵉ, μ)
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
     qᶜⁱ = @inbounds μ.qᶜⁱ[i, j, k]
-    qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
-    qˢⁿ = @inbounds μ.ρqˢⁿ[i, j, k] / ρ
+    qʳ  = @inbounds zero_numerator_quotient(μ.ρqʳ[i, j, k], ρ)
+    qˢⁿ = @inbounds zero_numerator_quotient(μ.ρqˢⁿ[i, j, k], ρ)
     qˡ = qᶜˡ + qʳ
     qⁱ = qᶜⁱ + qˢⁿ
     qᵛ = qᵉ - qᶜˡ - qᶜⁱ
@@ -808,9 +834,9 @@ end
 # Mixed-phase non-equilibrium: prognostic stores true vapor; construct fractions directly.
 @inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::MPNE1M, ρ, qᵛ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
-    qʳ  = @inbounds μ.ρqʳ[i, j, k]  / ρ
+    qʳ  = @inbounds zero_numerator_quotient(μ.ρqʳ[i, j, k], ρ)
     qᶜⁱ = @inbounds μ.ρqᶜⁱ[i, j, k] / ρ
-    qˢⁿ = @inbounds μ.ρqˢⁿ[i, j, k] / ρ
+    qˢⁿ = @inbounds zero_numerator_quotient(μ.ρqˢⁿ[i, j, k], ρ)
     qˡ = qᶜˡ + qʳ
     qⁱ = qᶜⁱ + qˢⁿ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)

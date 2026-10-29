@@ -8,6 +8,7 @@ module Utils
 
 export sum_properties,
        safe_divide,
+       zero_numerator_quotient,
        chebyshev_gauss_nodes_weights,
        transform_to_diameter,
        jacobian_diameter_transform,
@@ -65,6 +66,54 @@ safe_divide(1.0, 0.0, -1.0)
 ```
 """
 @inline safe_divide(a, b, default) = ifelse(iszero(b), default, a / b)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `a / b`, bit for bit, formed so that a zero numerator does not reach the divider.
+
+On a GPU a single-precision division is a reciprocal, a few fused multiply-adds and a check of the operands;
+a zero numerator (like an infinite or a denormal one) fails the check, and a subroutine of some forty
+instructions then runs for the whole warp. Where the numerator is a field that is exactly zero in most cells —
+the mass of a hydrometeor that is absent, the latent shift of an unsaturated state — that subroutine can be a
+tenth of a kernel. Here the divider is given `1` in place of the zero and the zero is restored by a product:
+
+| `a`                  | `b`                         | result                                           |
+|:---------------------|:----------------------------|:-------------------------------------------------|
+| `±0`                 | normal, either sign         | `a * (1 / b)`: a zero with the sign of `a / b`   |
+| `±0`                 | `±Inf`                      | `a * (±0)`: a zero with the sign of `a / b`      |
+| `±0`                 | `±0`, denormal or `NaN`     | `a / b` itself                                   |
+| non-zero, `±Inf`, `NaN` | anything                 | `a / b` itself                                   |
+
+In the first two rows `1 / b` is finite (`|1 / b| ≤ 1 / floatmin < floatmax`) and, for a finite `b`, not zero
+(`1 / floatmax` is above the smallest denormal), so the product of the zero `a` with it is a zero whose sign is
+`sign(a) ⊻ sign(b)` — the IEEE quotient `a / b`. Both are exact, so nothing is rounded; a fused multiply-add
+that absorbed the product into a following addition would add the same exact zero. A denormal `b` is left to
+the divider because `1 / b` would overflow and `0 * Inf` is `NaN`, where `0 / b` is `0`.
+
+Branchless: two comparisons, two selects and a product (seven instructions) at a site whose numerator is not
+zero, so it belongs only where the numerator is zero in most cells. A select around the division
+(`ifelse(a == 0, a, a / b)`) does not help — the division is still evaluated with the zero — and the compiler
+rewrites `ifelse(z, a, ifelse(z, 1, a) / b)` into `a / ifelse(z, 1, b)`, which puts the zero back in the divider;
+the product cannot be simplified away without knowing the sign of the zero.
+
+For any other number type (dual numbers, traced numbers) the quotient is formed as it is written.
+
+```jldoctest
+using Breeze.Utils: zero_numerator_quotient
+zero_numerator_quotient(-0.0f0, 2.0f0), zero_numerator_quotient(0.0f0, -2.0f0), zero_numerator_quotient(3.0f0, 2.0f0)
+
+# output
+(-0.0f0, -0.0f0, 1.5f0)
+```
+"""
+@inline function zero_numerator_quotient(a::FT, b::FT) where FT <: Union{Float32, Float64}
+    z = (a == 0) & (abs(b) ≥ floatmin(FT))   # a zero numerator over a normal or infinite denominator
+    q = ifelse(z, one(FT), a) / b            # the divider sees 1 in place of the zero
+    return ifelse(z, a * q, q)               # ±0 × (1 / b): the zero of a / b, sign included
+end
+
+@inline zero_numerator_quotient(a, b) = a / b
 
 #####
 ##### Chebyshev–Gauss quadrature
