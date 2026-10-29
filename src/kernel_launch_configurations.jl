@@ -50,6 +50,8 @@ const x_contiguous_kernel_names = (
     (CompressibleEquations, :_solve_acoustic_tridiagonal!),
     (CompressibleEquations, :_initialize_stage_perturbations!),
     (CompressibleEquations, :_initialize_scalar_and_vertical_perturbations!),
+    # ours (T17 acpert): the one-launch stage initialization, as the handoff kernel it stands in for
+    (CompressibleEquations, :_initialize_stage_accumulators_and_perturbations!),
     (CompressibleEquations, :_build_vertical_rhs_carried!),
     (CompressibleEquations, :_assemble_terrain_slow_vertical_momentum_tendency!),
     (CompressibleEquations, :_explicit_horizontal_step!),
