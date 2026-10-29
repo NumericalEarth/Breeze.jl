@@ -1074,13 +1074,99 @@ function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
     @trace track_numbers=false for _ in 1:Nloop
         acoustic_substep!(model, substepper, stage, advection)
     end
-    peel && acoustic_substep!(model, substepper, stage, advection, nothing)
+    folded = peel && folds_last_substep_recovery(model, advection)
+    peel && acoustic_substep!(model, substepper, stage, advection, folded ? FoldedRecovery() : nothing)
 
     # Stage-final (ρu)′, (ρv)′ halos, read with horizontal neighbours by the terrain
     # recovery; the per-substep post-damping fill they replace was otherwise dead.
     fill_halo_regions!(substepper.momentum_perturbation.u)
     fill_halo_regions!(substepper.momentum_perturbation.v)
-    return peel
+    return peel, folded
+end
+
+#####
+##### The last substep's post-solve recovery in the stage-end recovery (port of handoff A2-bce a38e2578, part b)
+#####
+
+# Marker passed as the accumulators of a peeled last substep whose post-solve recovery is folded.
+struct FoldedRecovery end
+
+"""
+Whether a peeled last substep (no divergence damping, so the momentum perturbations do not change after its
+solve) ends after its solve, with its post-solve recovery of ρ′ and (ρθ)′ and the open-boundary relaxation of
+their rim cells evaluated in registers by the stage-end recovery (`_recover_full_state_after_solve!`), the only
+other reader before the next stage reinitializes them. Split column path only. Default `true`;
+`BREEZE_FOLDED_LAST_SUBSTEP_RECOVERY=false` at load turns it off.
+"""
+const FOLDED_LAST_SUBSTEP_RECOVERY = Ref(true)
+
+folds_last_substep_recovery(model, advection) =
+    FOLDED_LAST_SUBSTEP_RECOVERY[] && acoustic_column_path(model.grid, model.dynamics, advection) isa SplitAcousticColumn
+
+# The open lateral sides `apply_open_boundary_relaxation!` relaxes, with the factor; `nothing` without one.
+function open_boundary_rim(substepper, model, grid)
+    bcs_u = model.momentum.ρu.boundary_conditions
+    bcs_v = model.momentum.ρv.boundary_conditions
+    west, east = is_active_open_bc(bcs_u.west), is_active_open_bc(bcs_u.east)
+    south, north = is_active_open_bc(bcs_v.south), is_active_open_bc(bcs_v.north)
+    (west | east | south | north) || return nothing
+    Nx, Ny, _ = size(grid)
+    return (; west, east, south, north, Nx, Ny, α = substepper.open_boundary_relaxation)
+end
+
+# `c′ += α * ((cᴸ[halo] − cᴸ[boundary]) / 2 − c′)` of `_relax_open_boundary_x!` / `_y!`, rounded to the field type
+# as the store would.
+@inline relaxed_perturbation(c′::T, cᴴ, cᴮ, α) where T = convert(T, c′ + α * ((cᴴ - cᴮ) / 2 - c′))
+
+@inline relax_rim_perturbations(::Nothing, i, j, k, ρ′, ρθ′, ρᴸ, ρθᴸ) = (ρ′, ρθ′)
+
+# West, east (the x launches), then south, north (the y launches), as `apply_open_boundary_relaxation!` orders them.
+@inline function relax_rim_perturbations(rim, i, j, k, ρ′, ρθ′, ρᴸ, ρθᴸ)
+    @inbounds begin
+        if rim.west & (i == 1)
+            ρ′  = relaxed_perturbation(ρ′,  ρᴸ[0, j, k],  ρᴸ[1, j, k],  rim.α)
+            ρθ′ = relaxed_perturbation(ρθ′, ρθᴸ[0, j, k], ρθᴸ[1, j, k], rim.α)
+        end
+        if rim.east & (i == rim.Nx)
+            ρ′  = relaxed_perturbation(ρ′,  ρᴸ[rim.Nx + 1, j, k],  ρᴸ[rim.Nx, j, k],  rim.α)
+            ρθ′ = relaxed_perturbation(ρθ′, ρθᴸ[rim.Nx + 1, j, k], ρθᴸ[rim.Nx, j, k], rim.α)
+        end
+        if rim.south & (j == 1)
+            ρ′  = relaxed_perturbation(ρ′,  ρᴸ[i, 0, k],  ρᴸ[i, 1, k],  rim.α)
+            ρθ′ = relaxed_perturbation(ρθ′, ρθᴸ[i, 0, k], ρθᴸ[i, 1, k], rim.α)
+        end
+        if rim.north & (j == rim.Ny)
+            ρ′  = relaxed_perturbation(ρ′,  ρᴸ[i, rim.Ny + 1, k],  ρᴸ[i, rim.Ny, k],  rim.α)
+            ρθ′ = relaxed_perturbation(ρθ′, ρθᴸ[i, rim.Ny + 1, k], ρθᴸ[i, rim.Ny, k], rim.α)
+        end
+    end
+    return ρ′, ρθ′
+end
+
+# The two expressions of `post_solve_recovery!` (rounded to the perturbation field type, as stored), the rim
+# relaxation, then the sums of `_recover_full_state!`. Reads at other cells only arrays it does not write.
+@kernel function _recover_full_state_after_solve!(ρ, ρθ, m, ρw′, ρu′, ρv′, ρ′★, ρθ′★, T′,
+                                                  ρᴸ, ρuᴸ, ρvᴸ, ρwᴸ, ρθᴸ,
+                                                  grid, dynamics, δτᵐ⁺, θᴸ, rim)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρ′ⁿ  = convert(T′, ρ′★[i, j, k]  - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′))
+        ρθ′ⁿ = convert(T′, ρθ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′))
+        ρ′ⁿ, ρθ′ⁿ = relax_rim_perturbations(rim, i, j, k, ρ′ⁿ, ρθ′ⁿ, ρᴸ, ρθᴸ)
+
+        ρᵐ⁺  = ρᴸ[i, j, k]  + ρ′ⁿ
+        ρθᵐ⁺ = ρθᴸ[i, j, k] + ρθ′ⁿ
+        ρuᵐ⁺ = ρuᴸ[i, j, k] + ρu′[i, j, k]
+        ρvᵐ⁺ = ρvᴸ[i, j, k] + ρv′[i, j, k]
+        ρwᵐ⁺ = acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρwᴸ[i, j, k], ρu′, ρv′, ρw′)
+
+        ρ[i, j, k]  = ρᵐ⁺
+        ρθ[i, j, k] = ρθᵐ⁺
+
+        m.ρu[i, j, k] = ρuᵐ⁺
+        m.ρv[i, j, k] = ρvᵐ⁺
+        m.ρw[i, j, k] = ρwᵐ⁺
+    end
 end
 
 # Build per-column predictors `ρ′★`, `ρθ′★` (cell centers) AND
@@ -2152,6 +2238,12 @@ function acoustic_substep!(model, substepper, stage, advection,
     path = acoustic_column_path(grid, model.dynamics, advection)
     acoustic_column_substep!(path, model, substepper, stage, advection, g, dᵐ⁺, dˢ⁻, accumulators)
 
+    # A last substep whose post-solve recovery and open-boundary relaxation the stage-end recovery
+    # performs (`FoldedRecovery`) ends after its solve: nothing below has another reader (the
+    # perturbation refill is unread after a last substep, there is no damping, and the wall
+    # enforcement rewrites the +0 the one after the explicit step left).
+    accumulators isa FoldedRecovery && return nothing
+
     # Per-substep open-boundary enforcement (issue #738): relax the outermost
     # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
     # the halo fill, so the boundary cell tracks the prescribed inflow state.
@@ -2246,7 +2338,8 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
            substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺,
            substepper.sponge)
 
-    # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′
+    # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′ (in the stage-end recovery for a folded last substep)
+    accumulators isa FoldedRecovery && return nothing
     launch!(arch, grid, :xyz, _post_solve_recovery!,
             substepper.density_perturbation,
             substepper.density_potential_temperature_perturbation,
@@ -2349,7 +2442,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
     factors = stage_factors(acoustic_column_path(grid, model.dynamics, advection), substepper)
     factorize_stage!(factors, model, substepper, δτᵐ⁺)
-    peeled = acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
+    peeled, folded = acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a
     # time-averaged velocity field. Read by `update_state!` through
@@ -2366,18 +2459,36 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # same fields; per-thread read-before-write makes this aliasing safe
     # because all reads are local to the same grid point.
     ρᵡ = thermodynamic_density(model.formulation)
-    launch!(arch, grid, :xyz, _recover_full_state!,
-            model.dynamics.dry_density, ρᵡ,
-            model.momentum,
-            substepper.density_perturbation,
-            substepper.density_potential_temperature_perturbation,
-            substepper.momentum_perturbation.u,
-            substepper.momentum_perturbation.v,
-            substepper.momentum_perturbation.w,
-            model.dynamics.dry_density,
-            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
-            ρᵡ,
-            grid, model.dynamics)
+    if folded
+        launch!(arch, grid, :xyz, _recover_full_state_after_solve!,
+                model.dynamics.dry_density, ρᵡ,
+                model.momentum,
+                substepper.momentum_perturbation.w,
+                substepper.momentum_perturbation.u,
+                substepper.momentum_perturbation.v,
+                substepper.density_predictor,
+                substepper.density_potential_temperature_predictor,
+                eltype(substepper.density_perturbation),
+                model.dynamics.dry_density,
+                model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
+                ρᵡ,
+                grid, model.dynamics, δτᵐ⁺,
+                substepper.linearization_potential_temperature,
+                open_boundary_rim(substepper, model, grid))
+    else
+        launch!(arch, grid, :xyz, _recover_full_state!,
+                model.dynamics.dry_density, ρᵡ,
+                model.momentum,
+                substepper.density_perturbation,
+                substepper.density_potential_temperature_perturbation,
+                substepper.momentum_perturbation.u,
+                substepper.momentum_perturbation.v,
+                substepper.momentum_perturbation.w,
+                model.dynamics.dry_density,
+                model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
+                ρᵡ,
+                grid, model.dynamics)
+    end
 
     # Thread clock + model fields so time-dependent Open BCs on the recovered
     # prognostic state dispatch correctly in `getbc` (see #717).
