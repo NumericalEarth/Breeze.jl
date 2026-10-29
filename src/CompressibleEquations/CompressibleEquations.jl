@@ -93,6 +93,8 @@ switch_from_env(name, default) = lowercase(get(ENV, name, string(default))) != "
 function __init__()
     STORED_ENERGY_DENOMINATOR[] = lowercase(get(ENV, "BREEZE_STORED_ENERGY_DENOMINATOR", "true")) != "false"
     TERRAIN_FUSED_AUXILIARY[] = lowercase(get(ENV, "BREEZE_TERRAIN_FUSED_AUXILIARY", "true")) != "false"
+    STORED_MICROPHYSICS_TEMPERATURE[] = switch_from_env("BREEZE_STORED_MICROPHYSICS_TEMPERATURE", true)
+    STORED_MICROPHYSICS_TEMPERATURE[] || @info "Stored microphysics temperature off (environment)"
     STORED_TERRAIN_PRESSURE_GRADIENTS[] = switch_from_env("BREEZE_STORED_TERRAIN_PRESSURE_GRADIENTS", true)
     STORED_TERRAIN_PRESSURE_GRADIENTS[] || @info "Stored terrain pressure gradients off (environment)"
     CARRIED_VERTICAL_RHS[] = switch_from_env("BREEZE_CARRIED_VERTICAL_RHS", true)

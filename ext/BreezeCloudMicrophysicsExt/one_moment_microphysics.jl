@@ -1351,16 +1351,19 @@ end
 # `donor_limiter`, which keeps every reservoir non-negative without breaking conservation.
 #####
 
-@inline function mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+@inline mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants) =
+    mp1m_tendencies(bμp, ρ, ℳ, 𝒰.moisture_mass_fractions, temperature(𝒰, constants), constants)
+
+# The bundle at moisture mass fractions `q` and temperature `T` (T17-mp1m: `T` may be the stored
+# field value, which is the same `temperature(𝒰)`; see `stored_microphysics_temperature`).
+@inline function mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, q, T, constants)
     categories = bμp.categories
     qᶜˡ = ℳ.qᶜˡ
     qᶜⁱ = ℳ.qᶜⁱ
     qʳ = ℳ.qʳ
     qˢⁿ = ℳ.qˢⁿ
 
-    T = temperature(𝒰, constants)
     Tᶠ = categories.freezing_temperature
-    q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
     (; Sᵉᵛᵃᵖ, Sˢᵘᵇˡ, Sᵐᵉˡᵗ, Sᵃᶜⁿᵛ, Sᵃᶜᶜ, Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜˡˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵃᶜᶜʳⁱ, Sʳˢⁿ, Sˢⁿʳ) =
@@ -1427,7 +1430,8 @@ end
 
 # Fused kernel: evaluate the MP1M bundle once per cell and write all three tendencies.
 @kernel function _compute_mp1m_tendencies!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, grid, microphysics, dynamics, formulation,
-                                           constants, specific_prognostic_moisture, microphysical_fields)
+                                           constants, specific_prognostic_moisture, microphysical_fields,
+                                           temperature_field)
     i, j, k = @index(Global, NTuple)
 
     ρ_field = AM.total_density(dynamics)
@@ -1435,10 +1439,11 @@ end
     @inbounds qᵉ = specific_prognostic_moisture[i, j, k]
 
     q = AM.grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵉ, microphysical_fields)
-    𝒰 = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
-    ℳ = AM.microphysical_state(microphysics, ρ, microphysical_fields_at(microphysical_fields, i, j, k), 𝒰, nothing)
+    T = mp1m_temperature(i, j, k, grid, formulation, dynamics, q, constants, temperature_field)
+    # microphysical_state(::MP1M) reads only 𝒰.moisture_mass_fractions
+    ℳ = AM.microphysical_state(microphysics, ρ, microphysical_fields_at(microphysical_fields, i, j, k), (; moisture_mass_fractions = q), nothing)
 
-    G = mp1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
+    G = mp1m_tendencies(microphysics, ρ, ℳ, q, T, constants)
 
     @inbounds Gρqᵉ[i, j, k]  += G.ρqᵉ
     @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
@@ -1447,12 +1452,18 @@ end
 
 @inline microphysical_fields_at(μ, i, j, k) = @inbounds (; ρqʳ = μ.ρqʳ[i, j, k], ρqˢⁿ = μ.ρqˢⁿ[i, j, k])
 
+@inline mp1m_temperature(i, j, k, grid, formulation, dynamics, q, constants, ::Nothing) =
+    temperature(AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q), constants)
+
+@inline mp1m_temperature(i, j, k, grid, formulation, dynamics, q, constants, temperature_field) =
+    @inbounds temperature_field[i, j, k]
+
 function AM.compute_microphysical_tendencies!(microphysics::MP1M, model)
     grid = model.grid
     G = model.timestepper.Gⁿ
     launch!(grid.architecture, grid, :xyz, _compute_mp1m_tendencies!,
             G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
-            model.microphysical_fields)
+            model.microphysical_fields, AM.stored_microphysics_temperature(model))
     return nothing
 end

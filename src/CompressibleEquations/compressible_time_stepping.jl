@@ -533,6 +533,15 @@ end
 
 stored_energy_denominator(model) = PotentialTemperatureFormulations.energy_source_denominator_field(model)
 
+# T17-mp1m: the MP1M kernel rebuilds 𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ, solver) with
+# θ = potential_temperature[i, j, k] (stored by the auxiliary pass as ρθ / ρᵈ, the θ the
+# inversion above forms), q = grid_moisture_fractions(…, ρ, qᵛᵉ, μ) and ρ = total_density, then
+# calls temperature(𝒰): the expression `temperature_and_pressure` stored in model.temperature.
+const STORED_MICROPHYSICS_TEMPERATURE = Ref(true)
+
+AtmosphereModels.stored_microphysics_temperature(model::AtmosphereModel{<:CompressibleDynamics, <:LiquidIcePotentialTemperatureFormulation}) =
+    STORED_MICROPHYSICS_TEMPERATURE[] ? model.temperature : nothing
+
 # Dispatch on formulation type for the coupled temperature-pressure computation
 
 @inline function temperature_and_pressure(i, j, k, grid,

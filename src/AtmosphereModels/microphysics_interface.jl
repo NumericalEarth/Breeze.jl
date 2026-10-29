@@ -294,6 +294,12 @@ compute_microphysical_tendencies!(model) =
 # No microphysics: nothing to add.
 compute_microphysical_tendencies!(::Nothing, model) = nothing
 
+# T17-mp1m: the temperature field a fused microphysics kernel may read in place of
+# `temperature(𝒰)`, or `nothing` (rediagnose per cell). Extended (CompressibleEquations) only where
+# the auxiliary pass of the same `update_state!` stores exactly `temperature(𝒰)` of the state the
+# kernel rebuilds (same θ, q, ρ, solver).
+stored_microphysics_temperature(model) = nothing
+
 # Default fused per-tracer kernel: ℳ and 𝒰 built once per cell, contributions
 # accumulated into each G field via `+=`.
 function compute_microphysical_tendencies!(microphysics, model)
