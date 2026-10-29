@@ -119,6 +119,8 @@ function __init__()
     FUSED_TOTAL_DENSITY[] || @info "Total density in the fused thermodynamics pass off (environment)"
     VELOCITY_PASS_CONTRAVARIANT[] = switch_from_env("BREEZE_VELOCITY_PASS_CONTRAVARIANT", true)
     VELOCITY_PASS_CONTRAVARIANT[] || @info "Contravariant pair in the velocity launch off (environment)"
+    DENSITY_TENDENCY_IN_PREDICTORS[] = switch_from_env("BREEZE_DENSITY_TENDENCY_IN_PREDICTORS", true)
+    DENSITY_TENDENCY_IN_PREDICTORS[] || @info "Dry-density tendency in the predictors off (environment)"
     return nothing
 end
 

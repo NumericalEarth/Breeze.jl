@@ -1005,7 +1005,76 @@ end
 @kernel function _compute_terrain_density_tendency!(Gρ, grid, momentum, ρw̃)
     i, j, k = @index(Global, NTuple)
     # Use ρw̃ (contravariant momentum) for vertical transport instead of ρw
-    @inbounds Gρ[i, j, k] = - divᶜᶜᶜ(i, j, k, grid, momentum.ρu, momentum.ρv, ρw̃)
+    @inbounds Gρ[i, j, k] = terrain_dry_density_tendency(i, j, k, grid, momentum.ρu, momentum.ρv, ρw̃)
+end
+
+@inline terrain_dry_density_tendency(i, j, k, grid, ρu, ρv, ρw̃) = - divᶜᶜᶜ(i, j, k, grid, ρu, ρv, ρw̃)
+
+#####
+##### Dry-density tendency in the predictors (port of handoff 117fc4c7, K2 campaign 3)
+#####
+##### Gⁿ.ρᵈ = −∇·(ρu, ρv, ρw̃) of the stage-entry momenta; its only reader is the acoustic predictors. On an
+##### acoustic stepper, `update_state!` defers it (no TendencyCallsite callback, no flux condition on ρᵈ) and the
+##### stage completes it: with one substep the predictors evaluate the expression (no launch, no store/load);
+##### with several, the launch runs at the start of the substep loop. Between the two places nothing writes
+##### ρu, ρv, ρw̃ (the stage start writes only stepper fields and U⁰, the end-of-step microphysics update
+##### re-runs `update_state!`, which defers again), so the bits are the launch's.
+#####
+
+"""
+Whether the terrain dry-density tendency is deferred to the acoustic stage and, in stages with one substep,
+evaluated inside the predictors (`true` by default; `BREEZE_DENSITY_TENDENCY_IN_PREDICTORS=false` at load).
+"""
+const DENSITY_TENDENCY_IN_PREDICTORS = Ref(true)
+
+# objectid of the `Gⁿ.ρᵈ` whose computation `update_state!` deferred (0: none pending)
+const PENDING_DRY_DENSITY_TENDENCY = Ref{UInt}(0)
+
+struct FoldedDensityTendency{U, V, W}
+    ρu :: U
+    ρv :: V
+    ρw̃ :: W
+end
+
+Adapt.adapt_structure(to, d::FoldedDensityTendency) =
+    FoldedDensityTendency(adapt(to, d.ρu), adapt(to, d.ρv), adapt(to, d.ρw̃))
+
+@inline slow_density_tendency(i, j, k, grid, d::FoldedDensityTendency) =
+    terrain_dry_density_tendency(i, j, k, grid, d.ρu, d.ρv, d.ρw̃)
+
+is_flux_condition(bc) = bc isa Oceananigans.BoundaryConditions.BoundaryCondition{<:Oceananigans.BoundaryConditions.Flux}
+
+function defers_dry_density_tendency(model, callbacks)
+    DENSITY_TENDENCY_IN_PREDICTORS[] || return false
+    hasproperty(model.timestepper, :substepper) || return false
+    any(callback -> callback.callsite isa Oceananigans.TendencyCallsite, callbacks) && return false
+    bcs = model.dynamics.dry_density.boundary_conditions
+    any(is_flux_condition, (bcs.west, bcs.east, bcs.south, bcs.north, bcs.bottom, bcs.top)) && return false
+    return true
+end
+
+function AtmosphereModels.compute_dynamics_tendency!(model::TerrainCompressibleModel, callbacks)
+    Gρ = model.timestepper.Gⁿ.ρᵈ
+    if defers_dry_density_tendency(model, callbacks)
+        PENDING_DRY_DENSITY_TENDENCY[] = objectid(Gρ)
+    else
+        PENDING_DRY_DENSITY_TENDENCY[] = 0
+        AtmosphereModels.compute_dynamics_tendency!(model)
+    end
+    return nothing
+end
+
+# The tendency the predictors of a stage with `Nτ` substeps read.
+complete_dry_density_tendency!(model, Nτ) = model.timestepper.Gⁿ.ρᵈ
+
+function complete_dry_density_tendency!(model::TerrainCompressibleModel, Nτ)
+    Gρ = model.timestepper.Gⁿ.ρᵈ
+    PENDING_DRY_DENSITY_TENDENCY[] == objectid(Gρ) || return Gρ
+    PENDING_DRY_DENSITY_TENDENCY[] = 0
+    Nτ == 1 && return FoldedDensityTendency(model.momentum.ρu, model.momentum.ρv,
+                                             model.dynamics.contravariant_vertical_momentum)
+    AtmosphereModels.compute_dynamics_tendency!(model)
+    return Gρ
 end
 
 #####

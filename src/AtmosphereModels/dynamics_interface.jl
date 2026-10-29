@@ -531,6 +531,9 @@ For compressible dynamics, this computes the density tendency from the continuit
 """
 compute_dynamics_tendency!(model) = nothing  # default: no dynamics-specific tendencies
 
+# Called by `compute_tendencies!` with its callbacks; dynamics may defer the tendency to the stepper that reads it.
+compute_dynamics_tendency!(model, callbacks) = compute_dynamics_tendency!(model)
+
 #####
 ##### Transport velocity/momentum interface (for terrain-following coordinates)
 #####

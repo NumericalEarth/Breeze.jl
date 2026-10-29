@@ -523,7 +523,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
     #####
 
-    compute_dynamics_tendency!(model)
+    compute_dynamics_tendency!(model, callbacks)
 
     for callback in callbacks
         callback.callsite isa TendencyCallsite && callback(model)

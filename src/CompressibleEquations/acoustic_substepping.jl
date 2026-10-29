@@ -1286,13 +1286,17 @@ end
         ∇ʰ_θM = V⁻¹ * (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) + δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′))
 
         ρ′★[i, j, k] = ρ′[i, j, k] +
-            Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) - δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
+            Δτ * (slow_density_tendency(i, j, k, grid, Gˢρ) - ∇ʰ_M) - δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
 
         ρθ′★[i, j, k] = ρθ′[i, j, k] +
             Δτ * (fθ * Gˢρᵡ[i, j, k] - ∇ʰ_θM) - δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
     end
     return nothing
 end
+
+# The slow dry-density tendency the predictors read: the stored `Gⁿ.ρᵈ`, or (handoff 117fc4c7, stages with one
+# substep) its expression evaluated here on the same stage-entry operands (`FoldedDensityTendency`).
+@inline slow_density_tendency(i, j, k, grid, Gˢρ) = @inbounds Gˢρ[i, j, k]
 
 # Face-level RHS for `(ρw)′ᵐ⁺`: split weights δτᵐ⁺ (predictor) and δτˢ⁻ (old-step) per
 # derivation (15). `dˢ⁻ = (1−ω) α Δz²` is the explicit half of the implicit vertical
@@ -2262,7 +2266,7 @@ function acoustic_column_substep!(::TiledAcousticColumn{T, K}, model, substepper
             substepper.time_averaged_velocities,
             solver.a, solver.b, solver.c, solver.parameters,
             grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
-            Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
+            stage.Gˢρ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
             substepper.linearization_potential_temperature,
             substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
             g, dᵐ⁺, dˢ⁻, substepper.vertical_momentum_tendency_factor,
@@ -2379,7 +2383,7 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
             substepper.momentum_perturbation.w,
             substepper.momentum_perturbation.u, substepper.momentum_perturbation.v,
             grid, model.dynamics, Δτ, δτˢ⁻,
-            Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
+            stage.Gˢρ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
             substepper.linearization_potential_temperature)
     fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
@@ -2464,7 +2468,7 @@ function acoustic_column_substep!(::FusedAcousticColumn, model, substepper, stag
             accumulators,
             solver.a, solver.b, solver.c, solver.parameters, solver.t,
             grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
-            Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
+            stage.Gˢρ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
             substepper.linearization_potential_temperature,
             substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
             g, dᵐ⁺, dˢ⁻, substepper.vertical_momentum_tendency_factor,
@@ -2530,7 +2534,10 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
-    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
+    # The slow dry-density tendency: `Gⁿ.ρᵈ`, completed here if `update_state!` deferred it (117fc4c7)
+    Gˢρ = complete_dry_density_tendency!(model, Nτ)
+
+    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, Gˢρ)
     factors = stage_factors(acoustic_column_path(grid, model.dynamics, advection), substepper)
     factorize_stage!(factors, model, substepper, δτᵐ⁺)
     peeled, folded = acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
