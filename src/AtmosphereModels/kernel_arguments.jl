@@ -28,7 +28,8 @@ const kernel_argument_epoch = Ref(0)
 
 # The switches at load, from the environment: `BREEZE_KERNEL_ARGUMENT_CACHE=false`,
 # `BREEZE_CHECK_KERNEL_ARGUMENT_CACHE=true`.
-function __init__()
+# Called from `AtmosphereModels.__init__` (one `__init__` per module).
+function read_kernel_argument_cache_switches!()
     KERNEL_ARGUMENT_CACHE[] = lowercase(get(ENV, "BREEZE_KERNEL_ARGUMENT_CACHE", "true")) != "false"
     CHECK_KERNEL_ARGUMENT_CACHE[] = lowercase(get(ENV, "BREEZE_CHECK_KERNEL_ARGUMENT_CACHE", "false")) == "true"
     return nothing
