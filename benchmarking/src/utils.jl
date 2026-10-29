@@ -15,7 +15,8 @@ end
 reactant_compile_options() = Reactant.CompileOptions(raise = true,
                                                      raise_first = true,
                                                      sync = true,
-                                                     excluded_passes = ["greedy_while_loop_batch_fission"])
+                                                     excluded_passes = ["greedy_while_loop_batch_fission",
+                                                                        "while_elementwise_reduction_to_reduce"])
 
 """
     benchmark_time_stepping(model;
@@ -38,7 +39,7 @@ Run a benchmark by executing `time_steps` time steps of the given model.
 If the model lives on a `ReactantState` architecture, the whole stepping loop
 is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
 program with `Reactant.@compile` using `reactant_compile_options()` (raising,
-with while-loop auto batching disabled) — compile time is recorded separately.
+with while-loop batch fission and while elementwise-reduction-to-reduce disabled) — compile time is recorded separately.
 The compiled program is then executed once for warmup and once timed. The vanilla path drives `many_time_steps!`
 directly through eager `time_step!`.
 
