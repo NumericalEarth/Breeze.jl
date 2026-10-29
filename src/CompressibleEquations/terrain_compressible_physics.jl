@@ -1301,7 +1301,7 @@ function compute_terrain_fused_thermodynamics!(model::TerrainCompressibleModel)
             model.moisture_density,
             stored_energy_denominator(model))
 
-    fill_halo_regions!(model.microphysical_fields, Oceananigans.Models.boundary_condition_args(model)...)
+    fill_halo_regions!(model.microphysical_fields, AtmosphereModels.kernel_boundary_condition_args(model)...)
     fill_halo_regions!(model.formulation)
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(dynamics.pressure)
