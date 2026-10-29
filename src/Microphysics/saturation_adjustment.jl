@@ -262,6 +262,80 @@ the state's total water, heat capacity, gas constant, and latent energy.
     return adjust_state(𝒰₀, T★, constants, equilibrium, precipitation)
 end
 
+#####
+##### P07 (port of handoff 2541e95b, tier A): the state of the last secant residual returned with the root
+#####
+##### `adjust_thermodynamic_state` ends with `adjust_state(𝒰₀, T★, …)` at the secant's root T★, the state its last
+##### residual has just evaluated at the same T★ (and its first residual re-evaluates the first saturated estimate).
+##### `forwarded_adjust_thermodynamic_state` keeps both, statement for statement otherwise: the same bits.
+#####
+
+# `secant_solve` (Breeze.Solvers), statement for statement, returning the state the last residual evaluated.
+@inline function secant_partition(residual_and_state, solver::SecantSolver, x₁, x₂, scale, r₁)
+    r₂, 𝒰₂ = residual_and_state(x₂)
+    iter = 0
+    while abs(r₂) > max(solver.abstol, solver.reltol * abs(scale)) && iter < solver.maxiter
+        ΔxΔr = (x₂ - x₁) / (r₂ - r₁)
+        valid_step = isfinite(ΔxΔr)
+        ΔxΔr = ifelse(valid_step, ΔxΔr, zero(ΔxΔr))
+
+        x₁, r₁ = x₂, r₂
+        x₂ -= r₂ * ΔxΔr
+        r₂, 𝒰₂ = residual_and_state(x₂)
+        r₂ = ifelse(valid_step, r₂, zero(r₂))
+        iter += 1
+    end
+    return 𝒰₂
+end
+
+# Any other solver: the root, then the state at it.
+@inline function secant_partition(residual_and_state, solver, x₁, x₂, scale, r₁)
+    @inline residual(T) = first(residual_and_state(T))
+    T★ = secant_solve(residual, solver, x₁, x₂, scale)
+    return last(residual_and_state(T★))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+[`adjust_thermodynamic_state`](@ref) returning the state of the secant's last residual instead of evaluating it
+again at the root: bit for bit the same state.
+"""
+@inline function forwarded_adjust_thermodynamic_state(𝒰₀::ATS, microphysics::SA, constants, precipitation=(0, 0))
+    FT = eltype(𝒰₀)
+    is_absolute_zero(𝒰₀) && return 𝒰₀
+
+    qᵗ = total_specific_moisture(𝒰₀)
+    qʳ, qˢⁿ = precipitation
+    qᵉ = qᵗ - qʳ - qˢⁿ
+    q₁ = MoistureMassFractions(qᵉ, oftype(qᵗ, qʳ), oftype(qᵗ, qˢⁿ))
+    𝒰ᵛ = with_moisture(𝒰₀, q₁)
+    T₁ = temperature(𝒰ᵛ, constants)
+
+    equilibrium = microphysics.equilibrium
+    qᵛ⁺₁ = saturation_specific_humidity(T₁, density(𝒰ᵛ, constants), constants, equilibrium)
+    qᵉ ≤ qᵛ⁺₁ && return 𝒰ᵛ
+
+    𝒰₁ = adjust_state(𝒰₀, T₁, constants, equilibrium, precipitation)
+
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    q̃₁ = 𝒰₁.moisture_mass_fractions
+    qˡ₁ = q̃₁.liquid - qʳ
+    qⁱ₁ = q̃₁.ice - qˢⁿ
+    cᵖᵐ = mixture_heat_capacity(q̃₁, constants)
+    ΔT = (ℒˡᵣ * qˡ₁ + ℒⁱᵣ * qⁱ₁) / cᵖᵐ
+    ϵT = convert(FT, 0.01)
+    T₂ = T₁ + max(ϵT, ΔT / 2)
+
+    @inline function residual_and_state(T)
+        𝒰 = adjust_state(𝒰₀, T, constants, equilibrium, precipitation)
+        return saturation_adjustment_residual(T, 𝒰, constants), 𝒰
+    end
+    r₁ = saturation_adjustment_residual(T₁, 𝒰₁, constants)   # the secant's residual(T₁)
+    return secant_partition(residual_and_state, microphysics.solver, T₁, T₂, T₂, r₁)
+end
+
 """
 $(TYPEDSIGNATURES)
 

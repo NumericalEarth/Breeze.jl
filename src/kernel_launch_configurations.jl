@@ -144,6 +144,7 @@ const static_shape_kernel_names = (
     (CompressibleEquations, :_compute_terrain_density_tendency!),
     (CompressibleEquations, :_compute_adjusted_compressible_thermodynamics!),
     (CompressibleEquations, :_compute_terrain_fused_thermodynamics!),
+    (CompressibleEquations, :_compute_forwarded_terrain_fused_thermodynamics!),
     (CompressibleEquations, :_build_vertical_rhs_carried!),
     (CompressibleEquations, :_assemble_terrain_slow_vertical_momentum_tendency_stored!),
     (CompressibleEquations, :_store_linearization_pressure_gradients!),

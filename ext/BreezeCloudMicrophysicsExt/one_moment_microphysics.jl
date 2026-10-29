@@ -842,6 +842,13 @@ end
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
+# T1 (handoff 88c924ae / e893836c): 1M saturation adjustment reads its prognostics at (i, j, k) only and writes only
+# auxiliaries, so the fused thermodynamics pass may hold them as cell values; the auxiliaries
+# `grid_moisture_fractions` reads back are the values of the state they are stored from.
+CompressibleEquations.forwards_fused_pass(::Union{WP1M, MP1M}) = true
+@inline CompressibleEquations.stored_auxiliary_values(::MP1M, ℳ, 𝒰) = (; qᶜˡ = ℳ.qᶜˡ, qᶜⁱ = ℳ.qᶜⁱ)
+@inline CompressibleEquations.stored_auxiliary_values(::WP1M, ℳ, 𝒰) = (; qᶜˡ = ℳ.qᶜˡ)
+
 #####
 ##### Thermodynamic state adjustment
 #####
@@ -860,6 +867,19 @@ end
     q₁ = MoistureMassFractions(qᵉ, qʳ, qˢⁿ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
     return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants, (qʳ, qˢⁿ))
+end
+
+# P07 (handoff 2541e95b): the same with the state of the last secant residual forwarded.
+CompressibleEquations.forwards_secant_partition(::Union{WP1M, MP1M}) = true
+
+@inline function AM.maybe_adjust_thermodynamic_state(𝒰₀, a::CompressibleEquations.ForwardedPartition{<:Union{WP1M, MP1M}},
+                                                     qᵉ, constants, μ, ρ)
+    bμp = a.microphysics
+    qʳ = μ.ρqʳ / ρ
+    qˢⁿ = snow_mass_fraction(bμp, μ, ρ)
+    q₁ = MoistureMassFractions(qᵉ, qʳ, qˢⁿ)
+    𝒰₁ = with_moisture(𝒰₀, q₁)
+    return Microphysics.forwarded_adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants, (qʳ, qˢⁿ))
 end
 
 #####

@@ -1307,8 +1307,12 @@ function compute_terrain_fused_thermodynamics!(model::TerrainCompressibleModel)
     fill_halo_regions!(dynamics.dry_density)
     fill_halo_regions!(prognostic_fields(model.formulation))
 
+    kernel! = fused_thermodynamics_kernel(model)
+    forwarded = kernel! === _compute_forwarded_terrain_fused_thermodynamics!
+    extra = forwarded ? (fused_pass_adjustment(model.microphysics), fused_pass_density_source(model)) : ()
+
     launch!(arch, grid, :xyz,
-            _compute_terrain_fused_thermodynamics!,
+            kernel!,
             model.temperature,
             dynamics.pressure,
             dynamics.dry_density,
@@ -1322,7 +1326,9 @@ function compute_terrain_fused_thermodynamics!(model::TerrainCompressibleModel)
             model.microphysical_fields,
             model.moisture_density,
             stored_energy_denominator(model),
-            lin)
+            lin, extra...)
+
+    complete_fused_pass_total_density!(model)
 
     fill_halo_regions!(model.microphysical_fields, AtmosphereModels.kernel_boundary_condition_args(model)...)
     fill_halo_regions!(model.formulation)
@@ -1352,4 +1358,169 @@ linearization_in_auxiliary_pass(model::TerrainCompressibleModel) =
                                          microphysical_fields, constants, denominator)
     store_folded_linearization_at!(i, j, k, lin, pressure_field, dry_density, total_density,
                                    specific_prognostic_moisture, grid, microphysics, microphysical_fields, constants)
+end
+
+#####
+##### T1 (port of handoff 88c924ae, tier A): the fused pass with its cell's fields read once
+#####
+##### `_compute_terrain_fused_thermodynamics!` reads ρᵈ, ρθ, ρ, ρqᵉ and the prognostic microphysical densities at its
+##### cell several times — after its own stores to θ, qᵉ and the microphysical auxiliaries, which the compiler cannot
+##### prove do not alias them — recomputes θ = ρθ/ρᵈ, qʳ, qˢⁿ and the moisture fractions from the reloads, and (in
+##### `auxiliary_thermodynamics_at!`) inverts θˡⁱ once more for a temperature the fused kernel discards. The forwarded
+##### kernel evaluates the same functions in the same order on register values (`CellValue` in place of a field read at
+##### the cell; the stored auxiliaries from the microphysical state they were stored from, `stored_auxiliary_values`),
+##### so every output is the same bits. Only for microphysics whose fields are read at (i, j, k) only and whose
+##### prognostics are not written by the pass (`forwards_fused_pass`, true for 1M saturation adjustment, set in
+##### BreezeCloudMicrophysicsExt). `BREEZE_FORWARDED_FUSED_THERMODYNAMICS=false` at load: the original kernel.
+#####
+
+const FORWARDED_FUSED_THERMODYNAMICS = Ref(true)
+
+"""
+A register in place of a field that a kernel reads at its own cell only: `c[i, j, k]` is the value it holds.
+"""
+struct CellValue{T}
+    value :: T
+end
+
+@inline Base.getindex(c::CellValue, i, j, k) = c.value
+@inline Base.eltype(::Type{CellValue{T}}) where T = T
+
+"Whether the fused pass may hold `microphysics`' prognostic fields as cell values (see `CellValue`)."
+forwards_fused_pass(microphysics) = false
+
+"""
+The auxiliary fields of `microphysics` that `grid_moisture_fractions` reads, as the values `update_microphysical_fields!`
+has just stored at the cell from the microphysical state `ℳ` (a NamedTuple of names and values), or `nothing`.
+"""
+@inline stored_auxiliary_values(microphysics, ℳ, 𝒰) = nothing
+
+@inline cell_prognostics(μ, ::Tuple{}, i, j, k) = μ
+@inline function cell_prognostics(μ, names::Tuple, i, j, k)
+    name = first(names)
+    value = @inbounds getproperty(μ, name)[i, j, k]
+    return cell_prognostics(merge(μ, NamedTuple{(name,)}((CellValue(value),))), Base.tail(names), i, j, k)
+end
+
+@inline with_stored_auxiliaries(μ, ::Nothing) = μ
+@inline with_stored_auxiliaries(μ, ::NamedTuple{()}) = μ
+@inline function with_stored_auxiliaries(μ, values::NamedTuple{names}) where names
+    name = first(names)
+    value = CellValue(convert(eltype(getproperty(μ, name)), first(values)))
+    return with_stored_auxiliaries(merge(μ, NamedTuple{(name,)}((value,))), Base.tail(values))
+end
+
+@inline forwarded_formulation(f::LiquidIcePotentialTemperatureFormulation, ρθ) =
+    LiquidIcePotentialTemperatureFormulation(CellValue(ρθ), f.potential_temperature, f.temperature_solver)
+
+@inline forwarded_linearization(::Nothing, ρθ) = nothing
+@inline forwarded_linearization(lin, ρθ) = merge(lin, (; ρθ = CellValue(ρθ)))
+
+# The cell's total density: the stored field (F6 off), or diagnosed and stored here (`DiagnosedTotalDensity`, F6).
+@inline forwarded_total_density!(::Nothing, i, j, k, total_density, microphysics, ρᵈ, ρqᵉ, μ) =
+    @inbounds total_density[i, j, k]
+
+#####
+##### P07 (port of handoff 2541e95b, tier A): the forwarded pass's saturation adjustment returns the state of its last
+##### secant residual (`Microphysics.forwarded_adjust_thermodynamic_state`). The microphysics is handed to the
+##### adjustment wrapped in `ForwardedPartition` (method in BreezeCloudMicrophysicsExt for 1M saturation adjustment);
+##### `BREEZE_FORWARDED_PARTITION=false` at load: the original adjustment.
+#####
+
+const FORWARDED_PARTITION = Ref(true)
+
+"""
+$(TYPEDEF)
+
+The adjustment argument of the forwarded fused pass: `microphysics`, whose saturation adjustment returns the state of
+its last secant residual instead of evaluating it again at the root.
+"""
+struct ForwardedPartition{M}
+    microphysics :: M
+end
+
+Adapt.adapt_structure(to, a::ForwardedPartition) = ForwardedPartition(adapt(to, a.microphysics))
+
+"Whether `microphysics` has a forwarded-partition adjustment (`ForwardedPartition`)."
+forwards_secant_partition(microphysics) = false
+
+fused_pass_adjustment(microphysics) =
+    FORWARDED_PARTITION[] && forwards_secant_partition(microphysics) ? ForwardedPartition(microphysics) : microphysics
+#####
+##### F6 (port of handoff 95077e10, tier A): the forwarded fused pass diagnoses and stores the total density with
+##### `_compute_total_density!`'s expression on its cell values; `update_state!` skips `compute_total_density!` and
+##### the tracer conversion, which follow the pass (ρ halo fill, conversion, tracer halo refill).
+##### `BREEZE_FUSED_TOTAL_DENSITY=false` at load: the separate launch.
+#####
+
+const FUSED_TOTAL_DENSITY = Ref(true)
+
+struct DiagnosedTotalDensity end
+
+@inline function forwarded_total_density!(::DiagnosedTotalDensity, i, j, k, total_density, microphysics, ρᵈ, ρqᵉ, μ)
+    ρ = convert(eltype(total_density),
+                AtmosphereModels.total_density(i, j, k, CellValue(ρᵈ), microphysics, CellValue(ρqᵉ), μ))
+    @inbounds total_density[i, j, k] = ρ
+    return ρ
+end
+
+AtmosphereModels.diagnoses_total_density_in_auxiliary_pass(model::TerrainCompressibleModel) =
+    FUSED_TOTAL_DENSITY[] & TERRAIN_FUSED_AUXILIARY[] &&
+    fused_thermodynamics_kernel(model) === _compute_forwarded_terrain_fused_thermodynamics!
+
+fused_pass_density_source(model) =
+    AtmosphereModels.diagnoses_total_density_in_auxiliary_pass(model) ? DiagnosedTotalDensity() : nothing
+
+function complete_fused_pass_total_density!(model)
+    AtmosphereModels.diagnoses_total_density_in_auxiliary_pass(model) || return nothing
+    fill_halo_regions!(model.dynamics.total_density)
+    AtmosphereModels.tracer_density_to_specific!(model)
+    isempty(model.tracers) || fill_halo_regions!(model.tracers, AtmosphereModels.kernel_boundary_condition_args(model)...)
+    return nothing
+end
+
+fused_thermodynamics_kernel(model) = _compute_terrain_fused_thermodynamics!
+
+function fused_thermodynamics_kernel(model::AtmosphereModel{<:Any, <:LiquidIcePotentialTemperatureFormulation})
+    forwarded = FORWARDED_FUSED_THERMODYNAMICS[] && forwards_fused_pass(model.microphysics)
+    return forwarded ? _compute_forwarded_terrain_fused_thermodynamics! : _compute_terrain_fused_thermodynamics!
+end
+
+@kernel function _compute_forwarded_terrain_fused_thermodynamics!(temperature_field, pressure_field,
+                                                                  dry_density, total_density, specific_prognostic_moisture,
+                                                                  formulation, dynamics, grid, constants,
+                                                                  microphysics, microphysical_fields, moisture_density,
+                                                                  denominator, lin, adjustment, density_source)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρᵈ  = dry_density[i, j, k]                         # = dynamics_density(dynamics)
+        ρθ  = formulation.potential_temperature_density[i, j, k]
+        ρqᵉ = moisture_density[i, j, k]
+    end
+    μ = cell_prognostics(microphysical_fields, AtmosphereModels.prognostic_field_names(microphysics), i, j, k)
+    ρ = forwarded_total_density!(density_source, i, j, k, total_density, microphysics, ρᵈ, ρqᵉ, μ)
+
+    # auxiliary_thermodynamics_at!
+    θ = ρθ / ρᵈ
+    @inbounds formulation.potential_temperature[i, j, k] = θ
+    qᵛᵉ = ρqᵉ / ρ
+    @inbounds specific_prognostic_moisture[i, j, k] = qᵛᵉ
+    q₀ = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, μ)
+    𝒰₀ = LiquidIceDensityState(θ, q₀, standard_pressure(dynamics), ρ, formulation.temperature_solver)
+    μᵖ = AtmosphereModels.extract_microphysical_prognostics(i, j, k, microphysics, μ)
+    𝒰₁ = AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, adjustment, qᵛᵉ, constants, μᵖ, ρ)
+    AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, microphysics, ρ, 𝒰₁, constants)
+
+    zero_velocities = (; u = zero(ρ), v = zero(ρ), w = zero(ρ))
+    ℳ = AtmosphereModels.grid_microphysical_state(i, j, k, grid, microphysics, μ, ρ, 𝒰₁, zero_velocities)
+    μ₁ = with_stored_auxiliaries(μ, stored_auxiliary_values(microphysics, ℳ, 𝒰₁))
+
+    # compute_temperature_and_pressure_at! and store_folded_linearization_at! on the cell values
+    f₁ = forwarded_formulation(formulation, ρθ)
+    T, p = compute_temperature_and_pressure_at!(i, j, k, temperature_field, pressure_field,
+                                                CellValue(ρᵈ), CellValue(ρ), f₁, dynamics,
+                                                CellValue(qᵛᵉ), grid, microphysics, μ₁, constants, denominator)
+    pˢ = convert(eltype(pressure_field), p)
+    store_folded_linearization_at!(i, j, k, forwarded_linearization(lin, ρθ), CellValue(pˢ), CellValue(ρᵈ),
+                                   CellValue(ρ), CellValue(qᵛᵉ), grid, microphysics, μ₁, constants)
 end

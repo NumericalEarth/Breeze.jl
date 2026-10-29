@@ -539,6 +539,7 @@ end
     end
 
     store_energy_source_denominator!(denominator, i, j, k, formulation, dynamics, ρᵈ, ρ, q, T, constants)
+    return T, p
 end
 
 # P-L6: cᵖᵐ Π of the ρθ tendency's energy source, from the state the tendency rebuilds

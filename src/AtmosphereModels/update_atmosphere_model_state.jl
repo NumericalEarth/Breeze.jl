@@ -47,8 +47,11 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[];
                                     compute_tendencies = true,
                                     compute_closure_fields = true)
     fix_negative_moisture!(model)  # fix negative moisture from advection
-    compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
-    tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
+    # F6: a model whose auxiliary pass diagnoses ρ does both there (`diagnoses_total_density_in_auxiliary_pass`)
+    if !diagnoses_total_density_in_auxiliary_pass(model)
+        compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
+        tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
+    end
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
     end_kernel_argument_epoch!()
@@ -100,6 +103,13 @@ tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, 
 # Diagnose the total air density ρ = ρᵈ + Σρˣ. No-op unless the dynamics carries a distinct
 # total-density field (CompressibleDynamics overrides this); anelastic aliases dynamics_density.
 compute_total_density!(model) = nothing
+
+"""
+Whether `compute_auxiliary_variables!` diagnoses the total density (and then converts the tracers to specific form)
+in its thermodynamics pass, so `update_state!` skips `compute_total_density!` and `tracer_density_to_specific!`
+(F6, handoff 95077e10). False unless a dynamics says otherwise.
+"""
+diagnoses_total_density_in_auxiliary_pass(model) = false
 
 # Breeze's advection container is keyed by prognostic name rather than Oceananigans'
 # `(momentum, tracers...)`, so pair each scheme with the specific field it reconstructs.

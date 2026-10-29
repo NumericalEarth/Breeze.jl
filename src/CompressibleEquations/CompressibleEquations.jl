@@ -111,6 +111,12 @@ function __init__()
     NO_STEP_LINEARIZATION_REFRESH[] || @info "Outer-step linearization refresh on (environment)"
     FOLDED_LINEARIZATION[] = switch_from_env("BREEZE_FOLDED_LINEARIZATION", true)
     FOLDED_LINEARIZATION[] || @info "Linearization folded into the auxiliary pass off (environment)"
+    FORWARDED_FUSED_THERMODYNAMICS[] = switch_from_env("BREEZE_FORWARDED_FUSED_THERMODYNAMICS", true)
+    FORWARDED_FUSED_THERMODYNAMICS[] || @info "Forwarded fused thermodynamics pass off (environment)"
+    FORWARDED_PARTITION[] = switch_from_env("BREEZE_FORWARDED_PARTITION", true)
+    FORWARDED_PARTITION[] || @info "Forwarded secant partition off (environment)"
+    FUSED_TOTAL_DENSITY[] = switch_from_env("BREEZE_FUSED_TOTAL_DENSITY", true)
+    FUSED_TOTAL_DENSITY[] || @info "Total density in the fused thermodynamics pass off (environment)"
     return nothing
 end
 
