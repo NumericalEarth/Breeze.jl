@@ -205,7 +205,7 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
 
     # Fields weighted by the total density are mass fractions (moisture, microphysical moments,
     # tracers), which must not be brought in negative through an inflow boundary
-    mass_fraction = Symbol(:ρ, name) ∉ context.coupling_density_names
+    mass_fraction = Symbol(:ρ, name) ∉ context.continuity_density_names
     inflow_lower_bound = mass_fraction ? 0 : nothing
 
     return SubsidenceForcing(wˢ, averaged_field, forcing.advection, inflow_lower_bound)
