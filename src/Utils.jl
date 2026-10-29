@@ -244,9 +244,20 @@ static shapes) applies. `BREEZE_KERNEL_LAUNCH_TABLE=false` at load makes every e
 """
 const KERNEL_LAUNCH_TABLE = Ref(true)
 
+"""
+The groups of size-keyed static-shape entries (`kernel_launch_configurations.jl`): `:scalar_transports`,
+`:ktiled_gains`, `:recovery`, `:misc`, each `true` by default; `BREEZE_STATIC_SHAPES_<GROUP>=false` at load turns a
+group off, `BREEZE_STATIC_SHAPES_GROUPS=false` all of them. Read at every launch of those kernels.
+"""
+const STATIC_SHAPES_GROUPS = Dict{Symbol, Bool}(:scalar_transports => true, :ktiled_gains => true, :recovery => true, :misc => true)
+
 env_switch(name, default) = lowercase(get(ENV, name, string(default))) != "false"
 
 function __init__()
+    all_groups = env_switch("BREEZE_STATIC_SHAPES_GROUPS", true)
+    for group in keys(STATIC_SHAPES_GROUPS)
+        STATIC_SHAPES_GROUPS[group] = all_groups && env_switch("BREEZE_STATIC_SHAPES_" * uppercase(string(group)), true)
+    end
     CACHED_MAXREGS_LAUNCH[] = env_switch("BREEZE_CACHED_MAXREGS_LAUNCH", true)
     LAUNCH_MAXREGS[] = env_switch("BREEZE_LAUNCH_MAXREGS", true)
     KERNEL_LAUNCH_TABLE[] = env_switch("BREEZE_KERNEL_LAUNCH_TABLE", true)

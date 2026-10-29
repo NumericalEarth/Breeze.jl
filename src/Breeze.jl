@@ -320,4 +320,15 @@ using .VerticalGrids
 include("single_column_mode.jl")
 using .SingleColumnMode: SingleColumnMode, SingleColumnGrid
 
+# Launch configuration (workgroup, register cap, static shapes) of some of the kernels above, where Oceananigans'
+# launch takes one; the entries are defined at load (switches in `Utils.__init__`).
+include("kernel_launch_configurations.jl")
+
+const kernel_launch_entries = Ref(0)
+
+function __init__()
+    kernel_launch_entries[] = define_kernel_launch_configurations!()
+    return nothing
+end
+
 end # module Breeze
