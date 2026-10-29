@@ -204,17 +204,11 @@ end
         Puᵏ, Plᵏ, Dᵏ, S = carried_diffusion_row(i, j, 1, grid, ℓz, S, closure_ij, K, id, ℓx, ℓy, Δt, clk, fields, ρ_diff)
 
         β = carried_diagonal(i, j, 1, grid, Puᵏ, Plᵏ, Dᵏ, args)
-        ϕᵏ⁻¹ = map(ϕs) do ϕ
-            ϕ₁ = convert(FT, ϕ[i, j, 1] / β)
-            ϕ[i, j, 1] = ϕ₁
-            ϕ₁
-        end
-
-        fᵏ = map(ϕ -> ϕ[i, j, min(2, Nz)], ϕs)
+        ϕᵏ⁻¹ = first_level_solutions!(ϕs, i, j, β, FT)
+        fᵏ = level_values(ϕs, i, j, min(2, Nz))
 
         for k = 2:Nz
-            kᵃ = ifelse(k < Nz, k+1, k)
-            fᵏ⁺¹ = map(ϕ -> ϕ[i, j, kᵃ], ϕs)
+            fᵏ⁺¹ = level_values(ϕs, i, j, ifelse(k < Nz, k+1, k))
 
             Puᵏ⁻¹ = Puᵏ
             Dᵏ⁻¹  = Dᵏ
@@ -227,26 +221,52 @@ end
             tᵏ = convert(TT, cᵏ⁻¹ / β)
             t[i, j, k] = tᵏ
             β = bᵏ - masked_multiply(aᵏ⁻¹, tᵏ)
-            definitely_diagonally_dominant = abs(β) > ε
-
-            ϕᵏ⁻¹ = map(ϕs, fᵏ, ϕᵏ⁻¹) do ϕ, f, ϕ⁻
-                ϕ★ = (f - masked_multiply(aᵏ⁻¹, ϕ⁻)) / β
-                if definitely_diagonally_dominant
-                    ϕᵏ = convert(FT, ϕ★)
-                    ϕ[i, j, k] = ϕᵏ
-                else
-                    ϕᵏ = ϕ[i, j, k]
-                end
-                ϕᵏ
-            end
-
+            ϕᵏ⁻¹ = forward_solutions!(ϕs, fᵏ, ϕᵏ⁻¹, i, j, k, aᵏ⁻¹, β, ε, FT)
             fᵏ = fᵏ⁺¹
         end
 
-        map((ϕ, ϕᴺ) -> back_substitute_z!(ϕ, t, i, j, Nz, ϕᴺ), ϕs, ϕᵏ⁻¹)
+        back_substitutions!(ϕs, ϕᵏ⁻¹, t, i, j, Nz)
     end
 
     return nothing
+end
+
+# Helpers with every value passed as an argument: a closure over the sweep's reassigned β would be boxed on the GPU.
+@inline level_values(::Tuple{}, i, j, k) = ()
+@inline level_values(ϕs, i, j, k) = (@inbounds(first(ϕs)[i, j, k]), level_values(Base.tail(ϕs), i, j, k)...)
+
+@inline first_level_solutions!(::Tuple{}, i, j, β, FT) = ()
+@inline first_level_solutions!(ϕs, i, j, β, FT) =
+    (first_level_solution!(first(ϕs), i, j, β, FT), first_level_solutions!(Base.tail(ϕs), i, j, β, FT)...)
+
+@inline function first_level_solution!(ϕ, i, j, β, FT)
+    ϕ₁ = convert(FT, @inbounds(ϕ[i, j, 1]) / β)
+    @inbounds ϕ[i, j, 1] = ϕ₁
+    return ϕ₁
+end
+
+# Row k of the forward sweep for one right-hand side, as the single-RHS sweep does it.
+@inline function forward_solution!(ϕ, f, ϕ⁻, i, j, k, aᵏ⁻¹, β, ε, FT)
+    definitely_diagonally_dominant = abs(β) > ε
+    ϕ★ = (f - masked_multiply(aᵏ⁻¹, ϕ⁻)) / β
+    @inbounds if definitely_diagonally_dominant
+        ϕᵏ = convert(FT, ϕ★)
+        ϕ[i, j, k] = ϕᵏ
+    else
+        ϕᵏ = ϕ[i, j, k]
+    end
+    return ϕᵏ
+end
+
+@inline forward_solutions!(::Tuple{}, ::Tuple{}, ::Tuple{}, i, j, k, aᵏ⁻¹, β, ε, FT) = ()
+@inline forward_solutions!(ϕs, fs, ϕ⁻s, i, j, k, aᵏ⁻¹, β, ε, FT) =
+    (forward_solution!(first(ϕs), first(fs), first(ϕ⁻s), i, j, k, aᵏ⁻¹, β, ε, FT),
+     forward_solutions!(Base.tail(ϕs), Base.tail(fs), Base.tail(ϕ⁻s), i, j, k, aᵏ⁻¹, β, ε, FT)...)
+
+@inline back_substitutions!(::Tuple{}, ::Tuple{}, t, i, j, Nz) = nothing
+@inline function back_substitutions!(ϕs, ϕᴺs, t, i, j, Nz)
+    back_substitute_z!(first(ϕs), t, i, j, Nz, first(ϕᴺs))
+    return back_substitutions!(Base.tail(ϕs), Base.tail(ϕᴺs), t, i, j, Nz)
 end
 
 """
