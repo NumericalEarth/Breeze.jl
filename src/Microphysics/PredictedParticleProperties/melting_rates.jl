@@ -236,9 +236,14 @@ Number of melted particles equals number of rain drops produced.
     qⁱ₊ = max(0, qⁱ)
     nⁱ₊ = max(0, nⁱ)
 
-    # |∂nⁱ/∂t| = (nⁱ/qⁱ) × ∂qⁱ_melt/∂t (positive magnitude)
+    # |∂nⁱ/∂t| = nⁱ × (∂qⁱ_melt/∂t) / qⁱ (positive magnitude)
     # Sign convention: returns positive; caller subtracts in tendency assembly.
-    ratio = safe_divide(nⁱ₊, qⁱ₊, zero(FT))
+    #
+    # Form the melted fraction before multiplying by nⁱ. The ratio nⁱ/qⁱ overflows when qⁱ
+    # is subnormal (reachable in Float32 as melting drains the dry ice), and Inf × 0 = NaN
+    # when nothing melts. The melt rate is limited to qⁱ / sink_limiting_timescale, so the
+    # fraction stays bounded.
+    melted_fraction = safe_divide(qⁱ_melt_rate, qⁱ₊, zero(FT))
 
-    return ratio * qⁱ_melt_rate
+    return nⁱ₊ * melted_fraction
 end
