@@ -23,10 +23,11 @@ dividing by the vapor-equivalent heat capacity ``ĉᵖ`` and the Exner function 
 
 The relationship is:
 ```math
-Jᶿ = 𝒬ᵀ / (ĉᵖ Π)
+Jᶿ = (ρᵈ / ρ) 𝒬ᵀ / (ĉᵖ Π)
 ```
 
-where ``𝒬ᵀ`` is the energy flux and ``Jᶿ`` is the potential temperature flux. At fixed moisture
+where ``𝒬ᵀ`` is the energy flux, ``Jᶿ`` is the flux of ``ρθ = ρᵈ θ``, and ``ρᵈ / ρ`` (unity for
+anelastic dynamics) converts a change of enthalpy per unit total mass into one carried by the dry air. At fixed moisture
 and pressure ``ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ`` gives ``ĉᵖ Π δθ = cᵖᵐ δT``, so an enthalpy
 input ``𝒬ᵀ = ρ cᵖᵐ \\overline{w'T'}`` reaches ``θ`` as ``Jᶿ = 𝒬ᵀ / (ĉᵖ Π)``. The condensate term
 cancels, so the conversion holds saturated as well as dry. This is the same conversion the ``ρE``
@@ -94,14 +95,16 @@ const NorthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:North}
     return exner_function(𝒰, ef.thermodynamic_constants)
 end
 
-# Convert energy flux to potential temperature flux: Jᶿ = 𝒬ᵀ / (ĉᵖ Π)
+# Convert energy flux to potential temperature flux: Jᶿ = (ρᵈ / ρ) 𝒬ᵀ / (ĉᵖ Π). An enthalpy flux
+# changes h at -(1/ρ) ∇⋅𝒬ᵀ, so ρθ = ρᵈ θ at (ρᵈ / ρ), as for the interior heating; ρᵈ = ρ on anelastic.
 @inline function 𝒬ᵀ_to_Jᶿ(i, j, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
     qᵛ = @inbounds fields.qᵛ[i, j, k]
-    ρ = _energy_flux_density(ef.density, fields, i, j, k)
+    ρᵈ = _energy_flux_density(ef.density, fields, i, j, k)
+    ρ = @inbounds dynamics_fields.ρ[i, j, k]
     q = grid_moisture_fractions(i, j, k, grid, ef.microphysics, ρ, qᵛ, fields)
     ĉᵖ = vapor_equivalent_heat_capacity(q, ef.thermodynamic_constants)
     Π = exner_function(i, j, k, grid, ef, q, dynamics_fields)
-    return 𝒬ᵀ / (ĉᵖ * Π)
+    return ρᵈ / ρ * 𝒬ᵀ / (ĉᵖ * Π)
 end
 
 # getbc for bottom boundary (k = 1)
@@ -149,13 +152,13 @@ end
 const EnergyFluxBCType = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction}
 
 """
-    EnergyFluxBoundaryCondition(flux, exponent=VaporEquivalentExponent())
+$(TYPEDSIGNATURES)
 
 Create a boundary condition that wraps an energy flux and converts it to a potential
 temperature flux for use with `LiquidIcePotentialTemperatureFormulation`.
 
 The energy flux is divided by the vapor-equivalent heat capacity ``ĉᵖ`` and the Exner function
-``Π`` to obtain the potential temperature flux: ``Jᶿ = 𝒬ᵀ / (ĉᵖ Π)``. The model constructor
+``Π``, and by ``ρ / ρᵈ``, to obtain the potential temperature flux: ``Jᶿ = (ρᵈ / ρ) 𝒬ᵀ / (ĉᵖ Π)``. The model constructor
 replaces `exponent` with the Exner exponent of its formulation.
 """
 function EnergyFluxBoundaryCondition(flux, exponent=VaporEquivalentExponent())
@@ -223,14 +226,15 @@ const EastThetaFluxBC   = ThetaFluxBoundaryConditionFunction{<:Any, <:East}
 const SouthThetaFluxBC  = ThetaFluxBoundaryConditionFunction{<:Any, <:South}
 const NorthThetaFluxBC  = ThetaFluxBoundaryConditionFunction{<:Any, <:North}
 
-# Convert potential temperature flux to energy flux: 𝒬ᵀ = Jᶿ ĉᵖ Π
+# Convert potential temperature flux to energy flux: 𝒬ᵀ = (ρ / ρᵈ) Jᶿ ĉᵖ Π, the inverse of 𝒬ᵀ_to_Jᶿ
 @inline function Jᶿ_to_𝒬ᵀ(i, j, k, grid, tf, Jᶿ, fields, dynamics_fields)
     qᵛ = @inbounds fields.qᵛ[i, j, k]
-    ρ = @inbounds tf.density[i, j, k]
+    ρᵈ = @inbounds tf.density[i, j, k]
+    ρ = @inbounds dynamics_fields.ρ[i, j, k]
     q = grid_moisture_fractions(i, j, k, grid, tf.microphysics, ρ, qᵛ, fields)
     ĉᵖ = vapor_equivalent_heat_capacity(q, tf.thermodynamic_constants)
     Π = exner_function(i, j, k, grid, tf, q, dynamics_fields)
-    return Jᶿ * ĉᵖ * Π
+    return ρ / ρᵈ * Jᶿ * ĉᵖ * Π
 end
 
 # getbc for bottom boundary (k = 1)
@@ -278,14 +282,14 @@ end
 const ThetaFluxBCType = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction}
 
 """
-    ThetaFluxBoundaryCondition(flux, exponent=VaporEquivalentExponent())
+$(TYPEDSIGNATURES)
 
 Create a boundary condition that wraps a potential temperature flux and converts it to
 an energy flux for use with diagnostic energy density fields.
 
 The potential temperature flux is multiplied by the vapor-equivalent heat capacity ``ĉᵖ`` and
 the Exner function ``Π``, with Exner exponent `exponent`, to obtain the energy flux:
-``𝒬ᵀ = Jᶿ ĉᵖ Π``.
+``𝒬ᵀ = (ρ / ρᵈ) Jᶿ ĉᵖ Π``.
 """
 function ThetaFluxBoundaryCondition(flux, exponent=VaporEquivalentExponent())
     tf = ThetaFluxBoundaryConditionFunction(flux, nothing, nothing, nothing, exponent)

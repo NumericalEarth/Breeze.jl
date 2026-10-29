@@ -1204,6 +1204,39 @@ end
 
 end
 
+@testset "Compressible energy flux heats the dry-coupled ρθ like interior heating [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    using Oceananigans.Models: BoundaryConditionOperation
+    using Breeze.Thermodynamics: vapor_equivalent_heat_capacity
+
+    # An enthalpy flux changes h at -(1/ρ) ∇⋅𝒬ᵀ, so ρθ = ρᵈ θ gains (ρᵈ / ρ) 𝒬ᵀ / (ĉᵖ Π), the same
+    # ρᵈ / ρ the interior ρE forcing and radiative heating take. qᵛ = 0.2 makes ρᵈ / ρ = 0.8 visible.
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 1000),
+                           topology=(Periodic, Periodic, Bounded))
+
+    𝒬ᵀ = FT(1000)
+    qᵛ₀ = FT(0.2)
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); base_pressure=FT(1e5), standard_pressure=FT(1e5))
+    model = AtmosphereModel(grid; dynamics,
+                            boundary_conditions=(; ρE=FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬ᵀ))))
+    set!(model; ρ=FT(1.25), qᵛ=qᵛ₀, θ=FT(300))
+    update_state!(model)
+
+    q = MoistureMassFractions(qᵛ₀)
+    constants = model.thermodynamic_constants
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    pˢᵗ = standard_pressure(model.dynamics)
+    p = Array(interior(dynamics_pressure(model.dynamics)))[:, :, 1]
+    ρ = Array(interior(total_density(model.dynamics)))[:, :, 1]
+    ρᵈ = Array(interior(dynamics_density(model.dynamics)))[:, :, 1]
+    Π = [exner_function(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, pᵢⱼ), constants) for pᵢⱼ in p]
+
+    ρθ = thermodynamic_density(model.formulation)
+    Jᶿ = Array(interior(Field(BoundaryConditionOperation(ρθ, :bottom, model))))[:, :, 1]
+    @test all(ρᵈ ./ ρ .≈ FT(0.8))
+    @test Jᶿ ≈ @. ρᵈ / ρ * 𝒬ᵀ / (ĉᵖ * Π)
+end
+
 @testset "ThetaFluxBC getbc coverage [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     using Oceananigans.Models: BoundaryConditionOperation

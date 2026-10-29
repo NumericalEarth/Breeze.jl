@@ -107,11 +107,11 @@ using Breeze
 using Breeze.Thermodynamics: exner_exponent, MoistureMassFractions
 
 constants = ThermodynamicConstants()
-q = MoistureMassFractions(0.0, 0.0, 0.0)
-exner_exponent(VaporEquivalentExponent(), q, constants) == exner_exponent(DryExponent(), q, constants)
+q = MoistureMassFractions(0.012, 0.0, 0.0)
+exner_exponent(VaporEquivalentExponent(), q, constants), exner_exponent(DryExponent(), q, constants)
 
 # output
-true
+(0.2847851886054834, 0.2855746334945912)
 ```
 """
 @inline exner_exponent(::VaporEquivalentExponent, q, constants) =

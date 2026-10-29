@@ -416,10 +416,10 @@ using Breeze.Thermodynamics: vapor_equivalent_heat_capacity, mixture_heat_capaci
 constants = ThermodynamicConstants()
 vapor = MoistureMassFractions(0.012, 0.0, 0.0)
 cloud = MoistureMassFractions(0.010, 0.002, 0.0)
-vapor_equivalent_heat_capacity(vapor, constants) == vapor_equivalent_heat_capacity(cloud, constants)
+vapor_equivalent_heat_capacity(vapor, constants), vapor_equivalent_heat_capacity(cloud, constants)
 
 # output
-true
+(1015.14, 1015.14)
 ```
 """
 @inline function vapor_equivalent_heat_capacity(q::MMF, constants::TC)
