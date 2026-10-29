@@ -159,10 +159,10 @@ const BOUNDS_PRESERVING_EDGE_CACHE = Ref(true)
 Whether the edge cache is also built on non-GPU architectures (`false` by default; `BREEZE_EDGE_CACHE_CPU=true` at load;
 consulted when a model is built). On x86 CPUs Oceananigans' uncached bounded flux is not face-consistent at the bit
 level: the `@muladd` (contract-flagged) WENO arithmetic is fused differently at the different code positions where the
-two cells sharing a face reconstruct it (probe `benchmarks/gcp_t17scalar_face_consistency.jl`, job 5336: 37 of 1656
-faces in Float32, 38 in Float64, differ between the two cells). A cache evaluates each face once, so it cannot
-reproduce those bits; CPU models therefore keep Oceananigans' path, bit for bit. On GPUs the uncached path is
-face-consistent and the cache is bit-identical.
+two cells sharing a face reconstruct it (probe `benchmarks/gcp_t17scalar_face_consistency.jl`, jobs 5336 and 5340:
+28 to 44 of 1656 faces differ between the two cells, Float32 and Float64). A cache evaluates each face once, so it
+cannot reproduce those bits; CPU models therefore keep Oceananigans' path, bit for bit. On GPUs the uncached path is
+face-consistent (0 of 1656) and the cached faces equal it (0 of 1656).
 """
 const EDGE_CACHE_ON_CPU = Ref(false)
 
