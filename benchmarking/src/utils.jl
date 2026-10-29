@@ -111,8 +111,11 @@ function benchmark_time_stepping(model;
     # front for Reactant; eager backends compile on first call. For AD we
     # build θ_init / dθ_init on the same grid as `model` and run reverse
     # mode through `loss` — see `grad_loss!` in timestepping.jl.
-    # The compile is broken down into tracing / MLIR / XLA stages by `timed_reactant_compile`
+    # The compile is broken down into tracing / MLIR / XLA stages by `timed_reactant_compile`,
+    # except for kernel AD: Reactant's profiler segfaults collecting its data after a kernel AD
+    # compile, which also hides any error the compile threw, so that compile is only timed whole
     compile_timings = (total = 0.0, tracing = 0.0, mlir = 0.0, xla = 0.0)
+    profile = kernels != "kernelad"
     invoke! = nothing
     if is_reactant
         # Kernel AD keeps the kernels as kernel calls (and with ad differentiates their
@@ -130,7 +133,7 @@ function benchmark_time_stepping(model;
             if verbose
                 @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing), mincut=$mincut) with Reactant (raise=$raise, optimize=$optimize)..."
             end
-            compiled_grad!, compile_timings = timed_reactant_compile() do
+            compiled_grad!, compile_timings = timed_reactant_compile(; profile) do
                 Reactant.@compile compile_options=reactant_compile_options(; raise, optimize) grad_loss!(
                     model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing, mincut)
             end
@@ -139,7 +142,7 @@ function benchmark_time_stepping(model;
             if verbose
                 @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=$raise, optimize=$optimize)..."
             end
-            compiled_loop!, compile_timings = timed_reactant_compile() do
+            compiled_loop!, compile_timings = timed_reactant_compile(; profile) do
                 Reactant.@compile compile_options=reactant_compile_options(; raise, optimize) step_loop!(model, Δt_FT, time_steps)
             end
             invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
@@ -433,13 +436,18 @@ function synchronize_device(::Oceananigans.Architectures.GPU{MetalBackend})
 end
 
 """
-    timed_reactant_compile(compile)
+    timed_reactant_compile(compile; profile = true)
 
 Call `compile()`, a thunk wrapping `Reactant.@compile`, and return
 `(compiled, timings)` where `timings` is a `NamedTuple` `(; total, tracing, mlir, xla)`
-of times in seconds.
+of times in seconds. With `profile = false` the compile runs without Reactant's profiler
+and only `total` is measured; the stages are zero.
 """
-function timed_reactant_compile(compile)
+function timed_reactant_compile(compile; profile = true)
+    if !profile
+        total = @elapsed compiled = compile()
+        return compiled, (; total, tracing = 0.0, mlir = 0.0, xla = 0.0)
+    end
     compiled, timings = Reactant.Profiler.profile_compile_timings(compile)
     return compiled, (total   = timings.total_compile_time_μs / 1e6,
                       tracing = timings.tracing_time_μs / 1e6,
