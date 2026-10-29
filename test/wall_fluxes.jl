@@ -8,7 +8,9 @@ using Breeze.BoundaryConditions: BulkDrag, BulkSensibleHeatFlux, BulkVaporFlux, 
                                  tangential_speed², bulk_coefficient, neutral_coefficient_10m,
                                  surface_layer_state, wall_air_pressure
 using Breeze.Thermodynamics: surface_density, saturation_specific_humidity, PlanarLiquidSurface,
-                             potential_temperature_from_temperature
+                             potential_temperature_from_temperature, MoistureMassFractions,
+                             absolute_zero_latent_heat
+using CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans: prognostic_fields
@@ -17,6 +19,8 @@ using Oceananigans.Grids: xnode, ynode, znode, XDirection, YDirection, ZDirectio
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models: boundary_condition_args
 using Test
+
+const CloudMicrophysicsExtension = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 
 #####
 ##### Bulk fluxes on the six walls of a closed box
@@ -48,9 +52,12 @@ near_wall_cell(side, i, j, k, Nx, Ny, Nz) = (side === :west   ? (1, j, k) :
 wall_temperatures(FT) = (west=FT(295), east=FT(285), south=FT(287), north=FT(288), bottom=FT(299), top=FT(280))
 wall_humidities(FT)   = (west=FT(0.78), east=FT(0.78), south=FT(0.78), north=FT(0.78), bottom=FT(1), top=FT(1))
 
+closed_box_grid(FT; Nx=4, Ny=4, Nz=4) =
+    RectilinearGrid(default_arch, FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z=(0, 1),
+                    topology=(Bounded, Bounded, Bounded))
+
 function closed_box_model(FT; formulation=:LiquidIcePotentialTemperature, coefficient=FT(2e-3), Nx=4, Ny=4, Nz=4)
-    grid = RectilinearGrid(default_arch, FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z=(0, 1),
-                           topology=(Bounded, Bounded, Bounded))
+    grid = closed_box_grid(FT; Nx, Ny, Nz)
 
     Tˢ = wall_temperatures(FT)
     ℋˢ = wall_humidities(FT)
@@ -133,7 +140,9 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
             pˢ = wall_pressure(model, side, i, j, k)
             pˢᵗ = bc.condition.standard_pressure
             ρˢ = surface_density(pˢ, Tˢ[side], constants)
-            θ₀ = potential_temperature_from_temperature(Tˢ[side], pˢ, pˢᵗ, constants)
+            # Hold the atmospheric composition fixed when forming the wall value.
+            qᵛ = @allowscalar fields.qᵛ[i, j, k]
+            θ₀ = potential_temperature_from_temperature(Tˢ[side], pˢ, pˢᵗ, constants, qᵛ)
             θ = @allowscalar fields.θ[i, j, k]
             expected = sign * ρˢ * C * Ũ * (θ - θ₀)
             @test evaluate_bc(model, prognostic_fields(model).ρθ, side, probe...) ≈ expected rtol=100 * eps(FT)
@@ -175,8 +184,8 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
     end
 
     @testset "Wall fluxes heat and moisten the near-wall cells with the right sign" begin
-        model = closed_box_model(FT; coefficient=C)
-        Nx, Ny, Nz = size(model.grid)
+        grid = closed_box_grid(FT)
+        Nx, Ny, Nz = size(grid)
         # At rest the drag vanishes, so give the walls a gust to move heat and vapor. The gust
         # and the time step are large enough that the change in a near-wall cell is well above
         # the roundoff of the cell's ρθ in single precision.
@@ -185,7 +194,7 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
                                           surface_relative_humidity=ℋˢ[side])
         boundary_conditions = (; ρθ = FieldBoundaryConditions(; (side => gusty(side) for side in sides)...),
                                  ρqᵛ = FieldBoundaryConditions(; (side => gusty_vapor(side) for side in sides)...))
-        model = AtmosphereModel(model.grid; boundary_conditions, advection=WENO(order=3))
+        model = AtmosphereModel(grid; boundary_conditions, advection=WENO(order=3))
         set!(model; θ=θᵢ, ℋ=FT(0.3))
         ρθ⁰ = Array(interior(prognostic_fields(model).ρθ))
         ρqᵛ⁰ = Array(interior(prognostic_fields(model).ρqᵛ))
@@ -235,10 +244,11 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
                 x, y, z = @allowscalar (xnode(i, j, k, grid, Center(), Center(), Center()),
                                         ynode(i, j, k, grid, Center(), Center(), Center()),
                                         znode(i, j, k, grid, Center(), Center(), Center()))
-                Tˢⁱʲᵏ = side === :west ? T_wall(y, z, t) : side === :bottom ? T_wall(x, y, t) : T_wall(x, z, t)
+                Tˢⁱʲᵏ = side === :west ? T_wall(y, z, clock.time) : side === :bottom ? T_wall(x, y, clock.time) : T_wall(x, z, clock.time)
                 pˢ = wall_pressure(model, side, i, j, k)
                 ρˢ = surface_density(pˢ, Tˢⁱʲᵏ, constants)
-                θ₀ = potential_temperature_from_temperature(Tˢⁱʲᵏ, pˢ, bc.condition.standard_pressure, constants)
+                qᵛ = @allowscalar fields.qᵛ[i, j, k]
+                θ₀ = potential_temperature_from_temperature(Tˢⁱʲᵏ, pˢ, bc.condition.standard_pressure, constants, qᵛ)
                 θ = @allowscalar fields.θ[i, j, k]
                 expected = outward_sign(side) * ρˢ * C * FT(1) * (θ - θ₀)   # at rest: Ũ = gustiness
                 @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, j, k) ≈ expected rtol=100 * eps(FT)
@@ -263,7 +273,8 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
             Tˢⁱᵏ = T_wall(x)
             pˢ = wall_pressure(model, side, i, 1, k)
             ρˢ = surface_density(pˢ, Tˢⁱᵏ, constants)
-            θ₀ = potential_temperature_from_temperature(Tˢⁱᵏ, pˢ, bc.condition.standard_pressure, constants)
+            qᵛ = @allowscalar fields.qᵛ[i, 1, k]
+            θ₀ = potential_temperature_from_temperature(Tˢⁱᵏ, pˢ, bc.condition.standard_pressure, constants, qᵛ)
             θ = @allowscalar fields.θ[i, 1, k]
             expected = outward_sign(side) * ρˢ * C * FT(1) * (θ - θ₀)
             @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, 1, k) ≈ expected rtol=100 * eps(FT)
@@ -292,7 +303,8 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
                                   side === :south ? T_fields.south[i, 1, k] : T_fields.top[i, j, 1])
             pˢ = wall_pressure(model, side, i, j, k)
             ρˢ = surface_density(pˢ, Tˢⁱʲᵏ, constants)
-            θ₀ = potential_temperature_from_temperature(Tˢⁱʲᵏ, pˢ, bc.condition.standard_pressure, constants)
+            qᵛ = @allowscalar fields.qᵛ[i, j, k]
+            θ₀ = potential_temperature_from_temperature(Tˢⁱʲᵏ, pˢ, bc.condition.standard_pressure, constants, qᵛ)
             θ = @allowscalar fields.θ[i, j, k]
             expected = outward_sign(side) * ρˢ * C * FT(1) * (θ - θ₀)
             @test evaluate_bc(model, prognostic_fields(model).ρθ, side, i, j, k) ≈ expected rtol=100 * eps(FT)
@@ -401,4 +413,178 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
     end
 
     Oceananigans.defaults.FloatType = old_FT
+end
+
+@testset "Sensible heat holds moisture composition fixed [$FT]" for FT in test_float_types()
+    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
+    @testset "$formulation, compressible=$(!isnothing(dynamics)), filtered=$filtered" for
+        formulation in (:LiquidIcePotentialTemperature, :StaticEnergy),
+        dynamics in (formulation === :StaticEnergy ? (nothing,) : (nothing, CompressibleDynamics())),
+        filtered in (false, true)
+        fv = filtered ? FilteredSurfaceVelocities(grid; height=FT(75), filter_timescale=FT(10)) : nothing
+        C, T₀ = FT(0.002), FT(290)
+        heat = BulkSensibleHeatFlux(coefficient=C, gustiness=one(FT), surface_temperature=T₀, filtered_velocities=fv)
+        microphysics = CloudMicrophysicsExtension.OneMomentCloudMicrophysics(FT)
+        model = AtmosphereModel(grid; dynamics, formulation, microphysics,
+                                boundary_conditions=(ρE=FieldBoundaryConditions(bottom=heat),))
+        density_input = isnothing(dynamics) ? (;) : (ρ=one(FT),)
+        energy_name = formulation === :StaticEnergy ? :s : :θ
+        density_name = formulation === :StaticEnergy ? :ρs : :ρθ
+        energy_field = prognostic_fields(model)[density_name]
+        bf = energy_field.boundary_conditions.bottom.condition
+        constants = model.thermodynamic_constants
+        # Anelastic pressure is fixed; compressible pressure responds to the state we set.
+        p₀ = isnothing(dynamics) ? wall_pressure(model, :bottom, 1, 1, 1) : FT(1e5)
+        pˢᵗ = bf.standard_pressure
+        ρ₀ = surface_density(p₀, T₀, constants)
+        qᶜˡ, qʳ = FT(0.001), FT(0.002)
+        qᵛ(z) = FT(0.005) + FT(1e-4) * z
+
+        function neutral_energy(z, vapor_offset, pressure=p₀)
+            q = MoistureMassFractions(qᵛ(z) + vapor_offset, qᶜˡ + qʳ)
+            cᵖᵐ = mixture_heat_capacity(q, constants)
+            Π = (pressure / pˢᵗ)^(mixture_gas_constant(q, constants) / cᵖᵐ)
+            # Static energy references latent heat to absolute zero; θˡⁱ uses the reference latent heat.
+            if formulation === :StaticEnergy
+                return cᵖᵐ * T₀ - absolute_zero_latent_heat(constants, constants.liquid) * q.liquid
+            else
+                return (T₀ - constants.liquid.reference_latent_heat * q.liquid / cᵖᵐ) / Π
+            end
+        end
+
+        # Evaluate the analytical wall difference at the sampling points, including
+        # interpolation to the filter height. The wall pressure always comes from
+        # the bottom cell, even when the atmospheric composition is sampled higher up.
+        function sampled_difference(vapor_offset, deficit, pressure)
+            difference(z) = neutral_energy(z, vapor_offset) - deficit - neutral_energy(z, vapor_offset, pressure)
+            return filtered ? (difference(FT(62.5)) + difference(FT(87.5))) / 2 : difference(FT(12.5))
+        end
+
+        tolerance = 50eps(FT) * ρ₀ * C * abs(neutral_energy(FT(75), zero(FT)))
+        energy = NamedTuple{(energy_name,)}((z -> neutral_energy(z, zero(FT)),))
+        set!(model; density_input..., energy..., qᵛ, qᶜˡ, qʳ)
+        Oceananigans.initialize!(model)
+        pˢ = wall_pressure(model, :bottom, 1, 1, 1)
+        Δϕ = sampled_difference(zero(FT), zero(FT), pˢ)
+        expected = -surface_density(pˢ, T₀, constants) * C * Δϕ
+        @test evaluate_bc(model, energy_field, :bottom, 1, 1, 1) ≈ expected atol=tolerance
+
+        # At fixed pressure the first humidity change leaves the heat flux zero and
+        # the energy deficit then heats the air. Compressible cases also exercise
+        # the live pressure in the moist Exner function and in the filtered difference.
+        energy_deficit = formulation === :StaticEnergy ? constants.dry_air.heat_capacity : one(FT)
+        for deficit in (zero(FT), energy_deficit)
+            energy = NamedTuple{(energy_name,)}((z -> neutral_energy(z, FT(0.005)) - deficit,))
+            model.clock.last_Δt = FT(2)
+            model.clock.iteration += 1
+            set!(model; density_input..., energy..., qᵛ=z -> qᵛ(z) + FT(0.005), qᶜˡ, qʳ)
+            pressure = wall_pressure(model, :bottom, 1, 1, 1)
+            current_difference = sampled_difference(FT(0.005), deficit, pressure)
+            fraction = filtered ? FT(2) / FT(12) : one(FT)
+            Δϕ = (1 - fraction) * Δϕ + fraction * current_difference
+            expected = -surface_density(pressure, T₀, constants) * C * Δϕ
+            @test evaluate_bc(model, energy_field, :bottom, 1, 1, 1) ≈ expected atol=tolerance
+        end
+    end
+end
+
+@testset "Unfiltered surface sampling responds to wall temperature [$FT]" for FT in test_float_types()
+    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
+    @testset "$formulation" for formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
+        C = FT(0.002)
+        # Capture values, not the type `FT`: a captured `Type` is not isbits on Julia 1.11,
+        # so the closure could not be passed to GPU kernels.
+        T₀, ΔT, period = FT(290), FT(10), FT(20)
+        T_wall(t) = T₀ + ΔT * sinpi(t / period)
+        heat = BulkSensibleHeatFlux(coefficient=C, surface_temperature=T_wall)
+        model = AtmosphereModel(grid; formulation, microphysics=nothing,
+                                boundary_conditions=(ρE=FieldBoundaryConditions(bottom=heat),))
+        energy_name = formulation === :StaticEnergy ? :s : :θ
+        density_name = formulation === :StaticEnergy ? :ρs : :ρθ
+        energy_field = prognostic_fields(model)[density_name]
+        bf = energy_field.boundary_conditions.bottom.condition
+        constants = model.thermodynamic_constants
+        qᵛ = FT(0.01)
+        q = MoistureMassFractions(qᵛ)
+        cᵖᵐ = mixture_heat_capacity(q, constants)
+        Π₀ = (wall_pressure(model, :bottom, 1, 1, 1) / bf.standard_pressure)^(mixture_gas_constant(q, constants) / cᵖᵐ)
+        conversion = formulation === :StaticEnergy ? cᵖᵐ : inv(Π₀)
+        energy₀ = conversion * T_wall(zero(FT))
+        energy = NamedTuple{(energy_name,)}((energy₀,))
+        set!(model; energy..., qᵗ=qᵛ, u=one(FT))
+        Oceananigans.initialize!(model)
+        ρ₀ = surface_density(wall_pressure(model, :bottom, 1, 1, 1), T_wall(zero(FT)), constants)
+        @test abs(evaluate_bc(model, energy_field, :bottom, 1, 1, 1)) ≤ 50eps(FT) * ρ₀ * C * abs(energy₀)
+
+        # A warmer wall heats the air; a colder wall reverses the flux. Changes in
+        # wind must also reach the bulk flux.
+        for (time, speed) in ((FT(10), FT(2)), (FT(30), FT(4)))
+            model.clock.last_Δt = time - model.clock.time
+            model.clock.time = time
+            model.clock.iteration += 1
+            set!(model; u=speed)
+            ρ₀ = surface_density(wall_pressure(model, :bottom, 1, 1, 1), T_wall(time), constants)
+            expected = ρ₀ * C * speed * conversion * (T_wall(time) - T_wall(zero(FT)))
+            @test evaluate_bc(model, energy_field, :bottom, 1, 1, 1) ≈ expected rtol=50eps(FT)
+        end
+    end
+end
+
+@testset "Wall composition uses the model's total density [$FT]" for FT in test_float_types()
+    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
+    heat = BulkSensibleHeatFlux(coefficient=FT(0.002), surface_temperature=FT(290))
+    microphysics = CloudMicrophysicsExtension.OneMomentCloudMicrophysics(FT)
+
+    # Subsaturated air carrying rain: the wall composition recovers the rain mass fraction only
+    # if the density-weighted rain is divided by the model's total density.
+    qᵗ = FT(0.005)
+    qʳ = FT(1e-3)
+    for (dynamics, density_input) in ((nothing, (;)), (CompressibleDynamics(), (; ρ=one(FT))))
+        model = AtmosphereModel(grid; dynamics, microphysics,
+                                boundary_conditions=(ρE=FieldBoundaryConditions(bottom=heat),))
+        set!(model; density_input..., θ=FT(300), qᵗ, qʳ)
+        bf = prognostic_fields(model).ρθ.boundary_conditions.bottom.condition
+        q = @allowscalar Breeze.BoundaryConditions.wall_moisture_fractions(1, 1, 1, grid, bf.microphysics,
+                                                                           surface_layer_state(model))
+        @test q.liquid ≈ qʳ rtol=10eps(FT)
+        @test q.vapor + q.liquid + q.ice ≈ qᵗ rtol=10eps(FT)
+    end
+end
+
+@testset "Vapor flux filters the complete wall difference [$FT]" for FT in test_float_types()
+    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
+    τ = FT(10)
+    fv = FilteredSurfaceVelocities(grid; filter_timescale=τ)
+    C = FT(0.002)
+    T₀, ΔT, period = FT(290), FT(10), FT(20)
+    T_wall(t) = T₀ + ΔT * sinpi(t / period)
+    vapor = BulkVaporFlux(coefficient=C, gustiness=one(FT), surface_temperature=T_wall, filtered_velocities=fv)
+    model = AtmosphereModel(grid; microphysics=nothing,
+                            boundary_conditions=(ρqᵗ=FieldBoundaryConditions(bottom=vapor),))
+    moisture_field = prognostic_fields(model).ρqᵛ
+    bf = moisture_field.boundary_conditions.bottom.condition
+    constants = model.thermodynamic_constants
+    p₀ = wall_pressure(model, :bottom, 1, 1, 1)
+    wall_humidity(t) = saturation_specific_humidity(T_wall(t), surface_density(p₀, T_wall(t), constants),
+                                                    constants, PlanarLiquidSurface())
+
+    # Air in equilibrium with the initial wall: no vapor flux.
+    qᵛ = wall_humidity(zero(FT))
+    set!(model; θ=FT(300), qᵗ=qᵛ)
+    Oceananigans.initialize!(model)
+    ρ₀ = surface_density(p₀, T_wall(zero(FT)), constants)
+    @test abs(evaluate_bc(model, moisture_field, :bottom, 1, 1, 1)) ≤ 50eps(FT) * ρ₀ * C * qᵛ
+
+    # The wall warms while the air is unchanged. The whole difference qᵛ - q₀ is filtered, so
+    # the flux approaches the new wall humidity by the filter fraction Δt / (Δt + τ) rather
+    # than jumping to it, exactly as the sensible heat flux does.
+    Δt, time = FT(2), FT(10)
+    model.clock.last_Δt = Δt
+    model.clock.time = time
+    model.clock.iteration += 1
+    set!(model; qᵗ=qᵛ)
+    ρ₀ = surface_density(p₀, T_wall(time), constants)
+    fraction = Δt / (Δt + τ)
+    expected = ρ₀ * C * (wall_humidity(time) - qᵛ) * fraction
+    @test evaluate_bc(model, moisture_field, :bottom, 1, 1, 1) ≈ expected rtol=100eps(FT)
 end

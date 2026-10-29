@@ -1,0 +1,68 @@
+include(joinpath(dirname(@__DIR__), "setup.jl"))
+
+using Breeze
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
+using Breeze.AtmosphereModels: specific_prognostic_moisture
+using Breeze.Thermodynamics: TetensFormula
+using Oceananigans
+using Oceananigans.Architectures: ReactantState
+using Reactant
+using Enzyme
+using Test
+
+Reactant.set_default_backend(default_arch isa GPU ? "gpu" : "cpu")
+
+function initialize_total_water!(model, total_water)
+    FT = eltype(model.grid)
+    set!(model; ρ=FT(1), θ=FT(300), qᵗ=total_water, qᶜˡ=FT(0.001), qʳ=FT(0.002))
+    return nothing
+end
+
+function initialized_water_mass(model, total_water)
+    initialize_total_water!(model, total_water)
+    return sum(interior(model.moisture_density))
+end
+
+function initialization_gradient!(model, dmodel, total_water, dtotal_water)
+    Enzyme.autodiff(Enzyme.ReverseWithPrimal, initialized_water_mass, Enzyme.Active,
+                    Enzyme.Duplicated(model, dmodel), Enzyme.Duplicated(total_water, dtotal_water))
+    return dtotal_water
+end
+
+@testset "Reactant total-water initialization [$FT]" for FT in test_float_types()
+    grid = RectilinearGrid(ReactantState(), FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
+    microphysics = DCMIP2016KesslerMicrophysics(FT)
+    thermodynamic_constants = ThermodynamicConstants(FT; saturation_vapor_pressure=TetensFormula(FT))
+    model = AtmosphereModel(grid; microphysics, thermodynamic_constants, dynamics=CompressibleDynamics())
+    total_water = CenterField(grid)
+    set!(total_water, FT(0.01))
+
+    initialize_total_water!(model, total_water)
+    @test all(isapprox.(Array(interior(model.moisture_density)), FT(0.007); rtol=20eps(FT)))
+
+    # The same compiled initializer must read the current input values at each call.
+    compiled = @with_stack_size Reactant.@compile sync=true initialize_total_water!(model, total_water)
+    for water in FT.((0.01, 0.02))
+        set!(total_water, water)
+        compiled(model, total_water)
+        vapor = Array(interior(model.moisture_density))
+        @test all(isapprox.(vapor, water - FT(0.003); rtol=20eps(FT)))
+        @test all(isapprox.(Array(interior(model.dynamics.total_density)), FT(1); rtol=20eps(FT)))
+    end
+
+    # The moisture check must not prevent differentiation through initialization.
+    dmodel = Enzyme.make_zero(model)
+    dtotal_water = CenterField(grid)
+    compiled_gradient = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true initialization_gradient!(
+        model, dmodel, total_water, dtotal_water)
+    gradient = @with_stack_size compiled_gradient(model, dmodel, total_water, dtotal_water)
+    @test all(isapprox.(Array(interior(gradient)), FT(1); rtol=50eps(FT)))
+
+    # This value changes after compilation. The eager call raises; the compiled call
+    # cannot, so it marks the invalid state's moisture as NaN instead.
+    set!(total_water, FT(0))
+    @test_throws ArgumentError initialize_total_water!(model, total_water)
+    compiled(model, total_water)
+    @test all(isnan, Array(interior(model.moisture_density)))
+    @test all(isnan, Array(interior(specific_prognostic_moisture(model))))
+end

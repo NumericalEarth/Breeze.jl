@@ -50,6 +50,10 @@ export
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
+    EcCKDOptics,
+    CloudScatteringTables,
+    OverlyingAtmosphereColumn,
+    standard_atmosphere_temperature,
     AbstractSolarPosition,
     ApparentSolarPosition,
     DiurnalSolarPosition,
@@ -86,7 +90,7 @@ export
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
-    surface_precipitation_flux,
+    bottom_precipitation_flux,
     total_pressure,
     specific_humidity,
     moisture_prognostic_name,
@@ -135,6 +139,10 @@ export
     ConstantRateCondensateFormation,
     P3Microphysics,
     PredictedParticlePropertiesMicrophysics,
+    DiagnosticVaporExcess,
+    PrognosticVaporExcess,
+    PrognosticLiquidFraction,
+    NoLiquidFraction,
 
     # BoundaryConditions
     BulkDrag,
@@ -228,7 +236,10 @@ export
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
-    TKEBasedTurbulenceClosure, TKEMixingLength, ConstantStabilityFunctions,
+    TKEBasedTurbulenceClosure, AbstractMixingLength, LocalMinimumMixingLength, IntegralMixingLength,
+    GradientLimitedMixingLength, ConstantStabilityFunctions,
+    RationalStabilityFunction,
+    DryStaticStability, MoistStaticStability,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
@@ -249,6 +260,10 @@ using .Thermodynamics
 
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
+
+# Solar geometry, needed by the radiation interface in AtmosphereModels
+include("CelestialMechanics/CelestialMechanics.jl")
+using .CelestialMechanics
 
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
@@ -299,9 +314,6 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
-
-include("CelestialMechanics/CelestialMechanics.jl")
-using .CelestialMechanics
 
 include("Forcings/Forcings.jl")
 using .Forcings

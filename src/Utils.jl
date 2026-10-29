@@ -1,12 +1,13 @@
 """
-Small, scheme-independent helpers shared across Breeze: guarded arithmetic, the
+Small, scheme-independent helpers shared across Breeze: property sums, guarded arithmetic, the
 Chebyshev–Gauss quadrature used to tabulate size-distribution integrals, and the
 `@adapt_architecture` macro that generates architecture-transfer methods for
 container structs.
 """
 module Utils
 
-export safe_divide,
+export sum_properties,
+       safe_divide,
        chebyshev_gauss_nodes_weights,
        transform_to_diameter,
        jacobian_diameter_transform,
@@ -16,6 +17,34 @@ using Adapt: Adapt
 using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: on_architecture
+
+#####
+##### Sums of selected properties
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the sum of the properties of `object` selected by the nonempty tuple `names`.
+Properties may be scalars, fields, or other values supporting `+`.
+
+A single selected property is returned unchanged. No scalar zero is added, so the
+sum also supports lazy field expressions. Callers handle empty selections.
+
+```jldoctest
+using Breeze.Utils: sum_properties
+sum_properties((a=1, b=2, c=4), (:a, :c))
+
+# output
+5
+```
+"""
+@inline sum_properties(object, names::Tuple{Symbol}) = getproperty(object, first(names))
+
+@inline function sum_properties(object, names::Tuple{Symbol, Vararg})
+    value = getproperty(object, first(names))
+    return value + sum_properties(object, Base.tail(names))
+end
 
 #####
 ##### Guarded arithmetic

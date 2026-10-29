@@ -24,8 +24,6 @@ using Breeze.CompressibleEquations: AcousticSubstepper,
                                     AcousticTridiagUpper,
                                     freeze_linearization_state!,
                                     assemble_slow_vertical_momentum_tendency!
-using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
-                           compute_slow_scalar_tendencies!
 
 using Oceananigans
 using Oceananigans.Grids: ZDirection
@@ -362,8 +360,6 @@ end
         update_state!(model)
 
         freeze_linearization_state!(sub, model)
-        compute_slow_momentum_tendencies!(model)
-        compute_slow_scalar_tendencies!(model)
         assemble_slow_vertical_momentum_tendency!(sub, model)
 
         Gˢρw = Array(interior(sub.slow_vertical_momentum_tendency))
@@ -411,8 +407,6 @@ end
         update_state!(model)
 
         freeze_linearization_state!(sub, model)
-        compute_slow_momentum_tendencies!(model)
-        compute_slow_scalar_tendencies!(model)
         assemble_slow_vertical_momentum_tendency!(sub, model)
 
         Gˢρw = Array(interior(sub.slow_vertical_momentum_tendency))

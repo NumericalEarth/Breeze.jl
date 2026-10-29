@@ -49,6 +49,11 @@ end
         shown_forced_model = sprint(show, forced_model)
 
         @test occursin("forcing: ρu=>SpecificForcing, ρv=>SpecificForcing", shown_forced_model)
+
+        @testset "kernel functions are inferred" begin
+            test_kernel_functions_inferred(model)
+            test_kernel_functions_inferred(forced_model)
+        end
     end
 
     @testset "Basic tests for set!" begin
@@ -71,10 +76,11 @@ end
             # Check that interpolating to the first face (k=1) recovers surface values
             # Note: surface_density correctly converts potential temperature to temperature using the Exner function
             ρ₀ = surface_density(reference_state)
-            for i = 1:Nx, j = 1:Ny
-                @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
-                @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
-            end
+            # On an ordinary 3D grid the reference profiles are reduced
+            # `(Nothing, Nothing, Center)` fields, so every horizontal index reads the same
+            # column: checking one (i, j) covers the whole horizontal extent.
+            @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, reference_state.pressure)
+            @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, reference_state.density)
 
             dynamics = AnelasticDynamics(reference_state)
             model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation)
@@ -127,6 +133,8 @@ end
 
     @test isfinite(qᵛ⁺k)
     @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
+
+    test_kernel_functions_inferred(model)
 end
 
 @testset "AtmosphereModel with TetensFormula [$(FT)]" for FT in test_float_types()

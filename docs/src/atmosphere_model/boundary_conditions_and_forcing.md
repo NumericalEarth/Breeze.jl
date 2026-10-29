@@ -77,10 +77,11 @@ nothing # hide
 
 Breeze converts the input as the receiving variable requires. Static energy is itself an energy
 per unit mass, so an energy flux reaches ``ρs`` unchanged; for ``ρθ`` it is divided by the local
-mixture heat capacity ``cᵖᵐ`` (and additionally by the Exner function ``Π`` for an interior
-forcing, which is applied to a potential temperature rather than a temperature). Water needs no
-conversion under either scheme: water added to the prognostic moisture is water added to
-``qᵗ``.
+mixture heat capacity ``cᵖᵐ`` and by the Exner function ``Π``, because it is applied to a
+potential temperature rather than a temperature. A flux and a forcing take the same conversion:
+``T = Π θ`` at fixed moisture gives ``δT = Π δθ``, so with ``𝒬 = ρ cᵖᵐ \overline{w'T'}`` the flux
+that reaches ``ρθ`` is ``ρ \overline{w'T'} / Π``. Water needs no conversion under either scheme: water
+added to the prognostic moisture is water added to ``qᵗ``.
 
 The interface key is *not* a field, and does not appear in the model:
 

@@ -192,11 +192,11 @@ single setting in Breeze.
     closure is not implemented.
 
 !!! note "Prescribed vs. prognostic droplet number"
-    By default Breeze takes cloud droplet number from a scheme constant,
-    `cloud.number_concentration`. Passing
-    `aerosol = AerosolActivation(AerosolMode())` switches on the prognostic
-    path, which adds ``ρn^{cl}`` and an unactivated-aerosol reservoir
-    ``ρn^a`` to the prognostic set.
+    The default droplet concentration is `cloud.number_concentration`.
+    `aerosol = AerosolActivation(AerosolMode())` makes droplet number prognostic.
+    Setting `prognostic=true` in
+    [`AerosolActivation`](@ref Breeze.Microphysics.PredictedParticleProperties.AerosolActivation)
+    also tracks aerosol depletion.
 
 ### Prognostic Variables
 
@@ -207,15 +207,13 @@ neither allocates nor advects it.
 **Cloud liquid** (1–2 variables):
 
 - ``ρq^{cl}``: Cloud droplet mass concentration [kg/m³].
-- ``ρn^{cl}``: Cloud droplet number concentration [1/m³], prognostic only when aerosol
-  activation is enabled. Otherwise droplet number is the scheme parameter
-  `cloud.number_concentration` and this field does not exist.
+- ``ρn^{cl}``: Cloud droplet number concentration [1/m³], allocated with
+  [`AerosolActivation`](@ref Breeze.Microphysics.PredictedParticleProperties.AerosolActivation).
 
 **Aerosol** (0–1 variables):
 
-- ``ρn^a``: Unactivated aerosol number concentration [1/m³], allocated together
-  with ``ρn^{cl}`` when `aerosol isa AerosolActivation`. Each activated droplet
-  removes one unit from this reservoir.
+- ``ρn^a``: Unactivated aerosol number concentration [1/m³], allocated when
+  `aerosol isa AerosolActivation` and `prognostic=true`, and depleted by activation.
 
 **Rain** (2 variables):
 
@@ -230,23 +228,33 @@ neither allocates nor advects it.
 - ``ρb^f``: Rime volume concentration [m³/m³].
 - ``ρq^{wi}``: Liquid water on ice [kg/m³].
 
-**Supersaturation prognostic** (0–1 variables):
+**Vapor-excess prognostic** (0–1 variables):
 
-- ``ρs^{v+l}``: Liquid supersaturation density [kg/m³]
+- ``ρδq^{v+l}``: Density-weighted vapor excess over liquid [kg/m³]
   ([Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008)).
-  Breeze exposes a `predict_supersaturation` flag on `ProcessRate`,
-  defaulting to `false`. When `false`, the field is not allocated and is
+  Breeze selects the treatment with the `vapor_excess` keyword of `ProcessRate`
+  and `P3Microphysics`, defaulting to `DiagnosticVaporExcess()`.
+  With `DiagnosticVaporExcess()`, the field is not allocated and is
   absent from `prognostic_field_names`; diagnostics that need local saturation use
-  ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008)
+  ``q^v - q^{v+l}(T)`` directly. With `PrognosticVaporExcess()`, the bounded G&M (2008)
   adjustment fires before the M&G rates, shifting the local ``q^v``,
   ``q^{cl}``, and ``T`` (and thus ``q^{v+l}(T)``) so that
-  ``q^v - q^{v+l}`` matches the advected ``s^l``. The M&G semi-analytic
-  rates then run on this post-G&M state — the "diagnostic supersaturation"
+  ``q^v - q^{v+l}`` matches the advected ``δq^{v+l}``. The M&G semi-analytic
+  rates then run on this post-G&M state — the "diagnostic vapor excess"
   they see is ``q^v_{\text{post-GM}} - q^{v+l}(T_{\text{post-GM}})``, not the
-  host's ``s^l`` field. The G&M adjustment and the end-of-step
-  ``s^l`` reset both relax over `sink_limiting_timescale`, so they land
+  host's ``δq^{v+l}`` field. The G&M adjustment and the end-of-step
+  ``δq^{v+l}`` reset both relax over `sink_limiting_timescale`, so they land
   exactly when the host integrates with
-  ``\Delta t = \text{sink\_limiting\_timescale}``.
+  ``\Delta t = \text{sink\_limiting\_timescale}``. The ``δq^{v+l}`` tendency
+  also carries the external forcing ``-∂_t q^{v+l}`` that drives diffusional growth
+  (see [Vapor Deposition and Sublimation](@ref p3_deposition) below), as in
+  [Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008). Adiabatic cooling
+  therefore changes the prognostic and the host's ``q^v - q^{v+l}`` alike, and the G&M
+  adjustment corrects only what the forcing omits, such as transport errors and
+  radiative cooling. Without that term the prognostic would see only the
+  phase-change sink, and the host's vapor excess would grow until the G&M
+  relaxation balanced the forcing, at about the forcing times
+  `sink_limiting_timescale`.
 
 From these, diagnostic properties are computed:
 
@@ -339,8 +347,9 @@ the appendix: ``q^{v+l}`` and ``q^{v+i}`` are the saturation mass fractions over
 planar liquid and ice, and ``p^{v+}`` the saturation vapor pressure. Departures
 from saturation get their own symbols: ``\mathscr{S}^l`` and ``\mathscr{S}^i``
 (`𝒮`) are the supersaturation ratios ``p^v / p^{v+} - 1``, and
-``s^{v+l} = q^v - q^{v+l}`` is the liquid supersaturation in mass-fraction form,
-which is what the optional prognostic ``ρs^{v+l}`` (`ρsᵛ⁺ˡ`) carries. Nothing in these
+``δq^{v+l} = q^v - q^{v+l}`` and ``δq^{v+i} = q^v - q^{v+i}`` are the vapor excesses
+over liquid and ice in mass-fraction form. The optional prognostic ``ρδq^{v+l}``
+(`ρδqᵛ⁺ˡ`) carries the excess over liquid. Nothing in these
 pages spells "sat" or "s" as a subscript to mean saturation.
 
 **Free parameters are ``\mathbb{C}``.** Empirically fitted constants do not each
@@ -382,8 +391,8 @@ maximum to eleven. See [Prognostic Variables and Tendencies](@ref p3_prognostics
 | ``ρb^f``    | `ρbᶠ`  | Rime volume density [m³/m³] |
 | ``ρq^{wi}`` | `ρqʷⁱ` | Liquid coating on ice, mass density [kg/m³] |
 | ``ρq^v``    | `ρqᵛ`  | Water vapor density [kg/m³]; the host-coupled moisture variable |
-| ``ρs^{v+l}`` | `ρsᵛ⁺ˡ` | Liquid supersaturation density [kg/m³]; only with `predict_supersaturation` |
-| ``ρn^a``    | `ρnᵃ`  | Unactivated aerosol number density [m⁻³]; only with aerosol activation |
+| ``ρδq^{v+l}`` | `ρδqᵛ⁺ˡ` | Density-weighted vapor excess over liquid [kg/m³]; only with `vapor_excess = PrognosticVaporExcess()` |
+| ``ρn^a``    | `ρnᵃ`  | Unactivated aerosol number density [m⁻³]; only with aerosol activation and `prognostic=true` |
 
 ### Size Distribution
 
@@ -393,7 +402,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | ----------- | ---- | ------------- | ----------- |
 | ``N'(D)``   |      |               | Number concentration per unit diameter, ``N'(D) = N_0 D^μ e^{-λD}`` [m⁻⁴] |
 | ``N_0``     | `N₀` |               | Intercept of the gamma distribution [m⁻⁴⁻μ]; a scale factor, not a concentration. Species-labelled as `Nʳ₀` where the rate needs the rain PSD explicitly |
-| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `CloudDroplets.shape_parameter`, `shape` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}`` by the Liu-Daum relation configured in `CloudDroplets.shape` — once at construction for the prescribed number, and per cell for the prognostic one. ``μ^r = 0`` is structural rather than stored: it is baked into `rain_slope_parameter` and the exponential quadrature kernel, and `RainDrops` has no shape field |
+| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `CloudDroplets.shape` | Shape parameter [-]; process rates diagnose ``μ^{cl}`` from the local ``N^{cl}`` using the Liu-Daum relation configured in `CloudDroplets.shape`, for both prescribed and prognostic droplet number. `CloudDroplets.shape_parameter` stores only a reference value. ``μ^r = 0`` is structural rather than stored: it is baked into `rain_slope_parameter` and the exponential quadrature kernel, and `RainDrops` has no shape field |
 | ``μ^i``     | `μⁱ` | | On-demand ice shape diagnostic [-] read from the Table 1 closure column; not a process-table coordinate |
 | ``λ^{cl}``, ``λ^r`` | `λᶜˡ`, `λʳ` | | Slope parameter [1/m] |
 | ``λ^i``     |      | `IceLambdaLimiter` | Ice slope parameter [1/m], bounded by the mean-size limiter |
@@ -407,7 +416,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | ----------- | ---- | ------------- | ----------- |
 | ``F^f``     | `Fᶠ` | | Rime mass fraction of dry ice [-], ``F^f = ρq^f / ρq^i`` |
 | ``F^l``     | `Fˡ` | | Liquid fraction of total ice mass [-], ``F^l = ρq^{wi}/(ρq^i + ρq^{wi})`` |
-| ``ρ^f``     | `ρᶠ` | `IceParticles.minimum_rime_density`, `maximum_rime_density` | Rime density [kg/m³], ``ρ^f = ρq^f / ρb^f``, bounded to [50, 900] |
+| ``ρ^f``     | `ρᶠ` | `ProcessRate.minimum_rime_density`, `maximum_rime_density` | Rime density [kg/m³], ``ρ^f = ρq^f / ρb^f``, bounded to [50, 900] |
 | ``ρ^{gr}``  |      | | Graupel density [kg/m³], ``ρ^{gr} = F^f ρ^f + (1-F^f) ρ^d`` |
 | ``ρ^i``     |      | | Bulk ice density [kg/m³], 900, used by the mass–diameter relations |
 | ``ρ^i_\text{pure}`` | | `ProcessRate.pure_ice_density` | Density of solid ice [kg/m³], 917, used for reflectivity and melt densification |
@@ -425,7 +434,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | math symbol | code | property name | description |
 | ----------- | ---- | ------------- | ----------- |
 | ``\mathbb{W}^m``, ``\mathbb{W}^n`` | | | Mass- and number-weighted mean fall speeds, positive downward [m/s]. With a species label the mass-weighted mean drops the ``m``, so ``\mathbb{W}^{cl}`` (`𝕎ᶜˡ`) is mass-weighted and ``\mathbb{W}^{ncl}`` (`𝕎ⁿᶜˡ`) number-weighted; a single-particle fall speed always carries its argument, ``\mathbb{W}^{cl}(D)`` |
-| ``\mathcal{K}`` | | | A PSD-integrated collection kernel, ``\int A(D) \mathbb{W}(D) N'(D)\,dD`` |
+| ``\mathcal{K}^{ci}`` | | | Number-normalized cloud-collection kernel, ``\int A(D) \mathbb{W}(D) N'(D)\,dD / \int N'(D)\,dD`` [m³/s] |
 | ``E^{ci}`` | `Eᶜⁱ` | `cloud_ice_collection_efficiency` | Ice–cloud droplet collection efficiency [-] |
 | ``E^{ri}`` | `Eʳⁱ` | `rain_ice_collection_efficiency` | Ice–rain collection efficiency [-] |
 | ``E^{ii}(T)`` | | | Ice–ice aggregation efficiency [-], a function of temperature and ``F^f`` |
@@ -527,9 +536,9 @@ and passed to every rate that needs them.
 Thermodynamic constants keep their appendix symbols — ``\mathcal{L}^l`` and
 ``\mathcal{L}^i`` for the latent heats of condensation and deposition, ``c^{pd}``
 for the dry-air heat capacity, ``R^v`` for the vapor gas constant. The one
-addition is ``\mathcal{L}^\text{fus} = \mathcal{L}^i - \mathcal{L}^l``, the latent
-heat of fusion, which the melting and wet-growth heat balances need. It is *not*
-written ``\mathcal{L}^f``, since `f` labels rime here.
+addition is ``\mathcal{L}^{fr} = \mathcal{L}^i - \mathcal{L}^l``, the latent
+heat of fusion, which the melting and wet-growth heat balances need. Its superscript
+`fr` abbreviates freezing, since `f` already labels rime (``q^f``, ``b^f``).
 
 ### Process Rates
 
@@ -713,12 +722,13 @@ A(D) = \mathbb{C}_{A,1} D^{\mathbb{C}_{A,2}}
 ```
 
 with the exponent ``\mathbb{C}_{A,2} = 1.88`` and the coefficient
-``\mathbb{C}_{A,1} ≈ 0.1318`` m``^{0.12}``. Both are the empirical values of
+``\mathbb{C}_{A,1} ≈ 0.1315`` m``^{0.12}``. Both are the empirical values of
 [Mitchell1996powerlaws](@citet) for aggregates of side planes, bullets,
 and columns and assemblages of planar polycrystals, as adopted by
 [Morrison2015parameterization](@citet). Mitchell (1996) quotes the coefficient in
-cgs as ``0.2285`` cm``^{0.12}``; Breeze converts in place by multiplying with
-``100^{\mathbb{C}_{A,2}-2}``.
+cgs as ``0.2285`` cm``^{0.12}``, which the table generator converts to SI by
+multiplying with ``100^{\mathbb{C}_{A,2}-2}``. Breeze itself never evaluates the
+relation, so no such coefficient appears in its source.
 
 **Graupel**:
 
@@ -746,12 +756,13 @@ with ``A^{ur} = \mathbb{C}_{A,1} D^{\mathbb{C}_{A,2}}``, ``A^{gr} = \frac{π}{4}
 The official P3 code computes terminal velocity using the
 [Mitchell and Heymsfield (2005)](@cite MitchellHeymsfield2005) Best-number drag formulation with the
 regime-dependent ``m(D)`` and ``A(D)`` relationships. The resulting fall speeds
-are stored in lookup tables and include the air-density correction
-``(ρ₀/ρ)^{0.54}`` following [Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007).
+are stored in lookup tables at a reference air density. Breeze reads these tables
+and applies the air-density correction ``(ρ₀/ρ)^{0.54}`` at runtime, following
+[Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007).
 
-Breeze implements this full Best-number formulation directly in the quadrature routines,
-ensuring consistency with the lookup tables. For mixed-phase particles, the velocity
-interpolates between the ice and rain fall speeds based on liquid fraction.
+For mixed-phase particles, the table generator interpolates between the ice and rain
+fall speeds based on liquid fraction. Breeze interpolates the resulting tabulated
+bulk velocities using liquid fraction as one of the lookup coordinates.
 
 ### Particle Density
 
@@ -1296,7 +1307,7 @@ four-regime Gunn-Kinzer/Beard fit,
 
 where ``\hat{m} = m(D)/(1\,\text{g})`` is the drop mass in grams, evaluated at the
 ``997`` kg m⁻³ water density the fit was derived with. The first branch is the
-Stokes-drag regime below ``D \approx 100`` μm and the last is the terminal-velocity
+Stokes-drag regime below ``D \approx 134`` μm and the last is the terminal-velocity
 plateau above ``D \approx 3.5`` mm. All ten coefficients live in `RainFallSpeed`
 (see [Empirical Warm-Phase Coefficients](@ref p3_warm_phase_coefficients)), and the same
 configured law feeds all three startup rain integrals: the mass-weighted velocity, the
@@ -1407,19 +1418,21 @@ Mass-weighted particle density:
 
 #### Reflectivity
 
-Radar reflectivity factor. The pure ``D^6`` closed form
+For liquid spheres, the sixth moment of a gamma PSD has the closed form
 
 ```math
-Z_\text{mono} = \int_0^∞ D^6 N'(D)\, dD = N₀ \frac{Γ(μ + 7)}{λ^{μ+7}}
+Z = \int_0^∞ D^6 N'(D)\, dD = N₀ \frac{Γ(μ + 7)}{λ^{μ+7}}.
 ```
 
-applies only to a single power-law mass regime. In P3 the tabulated
-reflectivity column integrates the equal-volume ``D_\text{eq}^6`` over the
-full piecewise ``m(D)`` (i.e. ``(6/(π\, ρ_i^*))^2 m(D)^2`` per particle,
-with ``ρ_i^* = 917`` kg/m³); for partially melted particles it switches to
-a Rayleigh–Mie wet-ice mixing rule. The
-runtime ``Z_i`` is recomputed via the active hybrid path
-``Z^i = G(μ^i)\, M_3^2 / n^i`` rather than from this monomial closed form.
+The P3 table stores equivalent radar reflectivity per particle. For dry ice,
+the generator integrates ``0.1892\,D_\text{eq}^6`` over the number-normalized PSD,
+where ``D_\text{eq}^6 = (6m(D)/(π\,ρ_i^*))^2`` and ``ρ_i^* = 917`` kg/m³.
+Partially melted particles use the generator's wet-ice scattering calculation;
+the fully liquid limit uses ``D^6``. Multiplying the table value by ice number
+density gives the volume-integrated reflectivity.
+
+Breeze exposes this diagnostic table as `p3.ice.bulk.reflectivity`; it does not
+evolve a reflectivity prognostic.
 
 ### Collection Integrals
 
@@ -1452,9 +1465,12 @@ integral over both distributions and needs the rain slope parameter as an extra
 table coordinate:
 
 ```math
-\mathcal{K}^{ri} = \int_0^∞ \!\! \int_0^∞ \frac{π}{4} (D^i + D^r)^2\, |\mathbb{W}(D^i) - \mathbb{W}(D^r)|\,
-                   N^{i\prime}(D^i)\, N^{r\prime}(D^r)\, dD^r\, dD^i .
+\mathcal{K}^{ri} = \int_0^∞ \!\! \int_0^∞ \left(\sqrt{A(D^i)} + \sqrt{π/4}\, D^r\right)^2 |\mathbb{W}(D^i) - \mathbb{W}(D^r)|\,
+                   N^{i\prime}(D^i)\, N^{r\prime}(D^r)\, dD^r\, dD^i ,
 ```
+
+where ``A(D^i)`` is the ice projected area; for spherical ice the cross section reduces
+to ``\frac{π}{4} (D^i + D^r)^2``.
 
 The mass and number forms (table columns `f1pr08`, `f1pr07`) are stored as
 ``\log_{10}`` values and exponentiated at runtime.
@@ -1544,7 +1560,8 @@ The bulk of the implementation lives in:
   (cloud / rain / ice / coated-ice condensation, evaporation, deposition, sublimation).
 - `rain_process_rates.jl` and `warm_rain_schemes.jl` — warm-rain rates and the
   KK2000 scheme selector.
-- `ccn_activation_rates.jl` and `aerosol_activation.jl` — prognostic droplet activation.
+- `cloud_droplet_activation_rates.jl` and `aerosol_activation.jl`: droplet activation
+  with prescribed number or aerosol-based prediction.
 - `ice_nucleation_rates.jl` — Cooper deposition nucleation, immersion freezing,
   homogeneous freezing, Hallett–Mossop splintering.
 - `melting_rates.jl` — heat-balance melting (with optional Fˡ split).
@@ -1876,41 +1893,56 @@ exists, the local air temperature is used. With more than one ice category
 the 250 μm threshold and correspondingly keeps the cloud-riming branch enabled
 (`splintering_cloud_riming_scale = 1`).
 
-### Droplet Activation (CCN)
+### Cloud Droplet Activation
 
-Cloud droplet number is prognostic when CCN activation is enabled. Aerosol
-activation follows the equilibrium Köhler-theory approach of
+Cloud condensation nuclei (CCN) are aerosol particles on which cloud droplets form.
+With `aerosol = nothing`, P3 supplies missing seed mass for the prescribed
+`cloud.number_concentration`, limited by supersaturation.
+
+[`AerosolActivation`](@ref) predicts droplet number from the equilibrium Köhler theory of
 [Morrison and Grabowski (2007)](@cite MorrisonGrabowski2007), with
 multi-mode lognormal aerosol distributions and a ``\sigma_g`` width parameter.
 The activated number of each mode is:
 
 ```math
-n_\text{acti} = n^a_\text{tot}\,\frac{1}{2}\left[1 - \text{erf}\!\left(\frac{2\,\ln(\mathscr{S}_m/\mathscr{S}^l)}{4.242\,\ln σ_g}\right)\right],
+n_{\text{acti},m} = n^a_m\,\frac{1}{2}\left[1 - \text{erf}\!\left(\frac{2\,\ln(\mathscr{S}_m/\mathscr{S}^l)}{4.242\,\ln σ_g}\right)\right],
 \qquad
 \mathscr{S}_m = \frac{2}{\sqrt{β_\text{acti}}}\left(\frac{A_\text{acti}}{3\, r_m}\right)^{3/2},
 ```
 
-where ``\mathscr{S}_m`` is the mode's critical supersaturation (a function of aerosol
-size and solute activity, with the Kelvin parameter
+where ``n^a_m`` is the mode's own number, ``\mathscr{S}_m`` is its critical
+supersaturation (a function of aerosol size and solute activity, with the Kelvin parameter
 ``A_\text{acti} = 2 M_w σ_v / (ρ_w R T)``), and ``\mathscr{S}^l`` is the environmental
-supersaturation. The per-mode counts are summed and capped at the total aerosol
-number.
+supersaturation. The per-mode counts are summed and capped at the total aerosol number,
+``n_\text{acti} = \min(\sum_m n_{\text{acti},m},\, n^a_\text{tot})``, giving the equilibrium
+count activation relaxes ``n^{cl}`` toward.
 
-Breeze then tracks the unactivated pool explicitly, so activation cannot exceed
-what remains in it:
+Both settings for `prognostic` use the same activation rate,
 
 ```math
 \dot{n}_\text{acti} = \frac{\max\!\big(0,\; \min(n_\text{acti}(\mathscr{S}^l),\, n^{cl} + n^a) - n^{cl}\big)}{\mathbb{C}_{\mathrm{form},4}},
 ```
 
-with ``\mathbb{C}_{\mathrm{form},4}`` = `aerosol.activation_timescale` (default
-1 s), separate from the Cooper ``\mathbb{C}_{\mathrm{nucl},4} = 10`` s. The same
-rate depletes ``ρn^a``, which
-prevents the spurious re-activation that occurs when ``\mathscr{S}^l`` rebounds after
-autoconversion or partial evaporation has drained ``n^{cl}``. Activation is gated
-on ``\mathscr{S}^l > \mathbb{C}_{\mathrm{form},3}`` (default ``10^{-6}``), and
-the mass source is ``\dot{n}_\text{acti}`` times the mass of a droplet with
-radius ``\mathbb{C}_{\mathrm{form},2}`` (default 1 μm).
+where ``\mathbb{C}_{\mathrm{form},4}`` = `aerosol.activation_timescale` (default 1 s). The
+inner ``\min`` caps the target at ``n^{cl} + n^a``, the most droplets the cell could have:
+those already formed plus the aerosol still available. Only ``n^a`` differs.
+
+With `prognostic=true`, ``n^a`` is a reservoir the same rate draws down, so the cap
+tightens as it empties and activation stops once it is gone. This prevents spurious
+re-activation when ``\mathscr{S}^l`` rebounds after autoconversion or partial evaporation
+has drained ``n^{cl}``.
+
+With `prognostic=false` (default), ``n^a`` stays at ``n^a_\text{tot}``. Since
+``n_\text{acti}`` is already capped there and ``n^{cl} \ge 0``, the ``\min`` always selects
+``n_\text{acti}`` and the rate reduces to a plain relaxation,
+
+```math
+\dot{n}_\text{acti} = \frac{\max\big(0,\; n_\text{acti}(\mathscr{S}^l) - n^{cl}\big)}{\mathbb{C}_{\mathrm{form},4}}.
+```
+
+Activation requires ``\mathscr{S}^l > \mathbb{C}_{\mathrm{form},3}`` (default ``10^{-6}``).
+The mass source is ``\dot{n}_\text{acti}`` times the mass of a droplet with radius
+``\mathbb{C}_{\mathrm{form},2}`` (default 1 μm).
 
 Aerosol distributions are specified **per unit mass of air**: `AerosolMode`'s
 `number_mixing_ratio` is in kg⁻¹, as are ``n^{cl}`` and ``n^a``; the prognostic
@@ -1927,11 +1959,12 @@ Ice particles collect cloud droplets at ``T \le T_0``:
 \dot{q}^{cl}_\text{rime} = ρ\, E^{ci}\, ρ_\text{corr}\, \mathcal{K}^{ci}\, q^{cl}\, n^i,
 ```
 
-where ``\mathcal{K}^{ci}`` is the PSD-integrated cloud-collection kernel
-``\int A(D)\, \mathbb{W}(D)\, N'(D)\, dD``, read from the ice lookup table. ``E^{ci} = 0.5``,
+where ``\mathcal{K}^{ci}`` is the number-normalized cloud-collection kernel
+``\int A(D)\, \mathbb{W}(D)\, N'(D)\, dD / \int N'(D)\, dD`` [m³/s],
+read from the ice lookup table. ``E^{ci} = 0.5``,
 ``ρ_\text{corr} = (ρ_s/ρ)^{0.54}`` is the air-density fall-speed correction.
 Cloud number is collected proportionally:
-``\dot{n}^{cl}_\text{rime} = ρ\, E^{ci}\, ρ_\text{corr}\, \mathcal{K}^{ci}\, N^{cl}\, n^i``.
+``\dot{n}^{cl}_\text{rime} = E^{ci}\, ρ_\text{corr}\, \mathcal{K}^{ci}\, N^{cl}\, n^i``.
 
 The rime volume increases as ``\dot{b}^f = \dot{q}^{cl}_\text{rime} / ρ^f``, with the
 rime density ``ρ^f`` computed from the Cober–List parameterization
@@ -1998,7 +2031,7 @@ at `maximum_aggregation_rime_fraction` (0.9).
     The single-category aggregation kernel above is fully wired. Breeze has
     no inter-category collection kernel, since it runs a single ice category.
 
-### Vapor Deposition and Sublimation
+### [Vapor Deposition and Sublimation](@id p3_deposition)
 
 P3's deposition step uses a coupled semi-analytic vapor balance
 (`coupled_saturation_adjustment_rates`): cloud, rain, dry ice, and
@@ -2021,19 +2054,26 @@ The dry-ice deposition rate is then
 
 ```math
 \dot{q}_\text{dep} = \left[\frac{A\,ε^i}{X}
-                        + \frac{(s^l - A/X)\,ε^i}{X\,τ_\text{sink}}\,
+                        + \frac{(δq^{v+l} - A/X)\,ε^i}{X\,τ_\text{sink}}\,
                               \left(1 - e^{-X\,τ_\text{sink}}\right)\right]
                       \frac{1}{ξ^i}
                       + \frac{(q^{v+l}-q^{v+i})\,ε^i}{ξ^i},
 \qquad ξ^i = 1 + \frac{\mathcal{L}^i}{c^{pd}}\frac{dq^{v+i}}{dT},
 ```
 
-where ``s^l = q^v - q^{v+l}`` is the supersaturation with respect to liquid and
+where ``δq^{v+l} = q^v - q^{v+l}`` is the vapor excess over liquid and
 ``A`` sums two contributions: the Bergeron offset, and the external change in
-liquid-relative supersaturation ``∂_t q^v - (dq^{v+l}/dT)\, ∂_t T``. Breeze
-retains the Bergeron offset in full, and approximates the external part with
-adiabatic cooling alone, ``∂_t T = -g\, w / cᵖᵐ`` and ``∂_t q^v = 0``, where
-``w`` is the resolved (or parcel) vertical velocity. Resolved transport,
+the vapor excess over liquid at fixed vapor,
+
+```math
+-∂_t q^{v+l} = -\frac{dq^{v+l}}{dT} ∂_t T + q^{v+l} \frac{∂_t p}{p} ,
+```
+
+since ``q^{v+l} ∝ 1/p`` at fixed temperature and composition. Breeze retains the
+Bergeron offset in full, and drives the external part with hydrostatic adiabatic
+expansion, ``∂_t T = -g\, w / cᵖᵐ`` and ``∂_t p = -ρ g\, w``, where ``w`` is the
+resolved (or parcel) vertical velocity; in ascent the pressure term offsets about a
+fifth of the cooling term. Resolved transport,
 turbulent mixing, radiation, and user forcing therefore do not enter this
 driver, even though they do act on the host thermodynamic equation. Supplying
 the complete external tendency here remains a possible future improvement.
@@ -2062,7 +2102,7 @@ default). Sublimation is additionally capped at ``q^i/τ_\text{sink}``, the dry-
 mass per unit time, and deposition at ``q^v/τ_\text{sink}``.
 
 !!! note "SCF=1 limit"
-    Breeze evaluates ``s^l`` and the saturation-adjustment caps without an
+    Breeze evaluates ``δq^{v+l}`` and the saturation-adjustment caps without an
     SCF / SPF weighting; the in-cloud and clear-sky vapor fields collapse
     to the grid-mean ``q^v`` (i.e. the `SCF = SPF = 1` limit).
 
@@ -2074,7 +2114,7 @@ following the simplified diffusion approximation in
 appendix C, section i:
 
 ```math
-\frac{dm}{dt} = -\frac{2π\, \mathcal{C}}{\mathcal{L}^\text{fus}}\,
+\frac{dm}{dt} = -\frac{2π\, \mathcal{C}}{\mathcal{L}^{fr}}\,
                 \big[K^a\,(T - T_0) + ρ\, \mathcal{L}^l\, D^v\, (q^v - q^{v+l}(T_0))\big]\, f_v,
 ```
 
@@ -2115,7 +2155,7 @@ once over `refreezing_timescale`:
 | High liquid fraction | ``F^l >`` `complete_melting_liquid_fraction` (0.99) | "complete melting" diagnostic |
 | Tiny warm ice | ``T \ge T_0`` and ``q^i + q^{wi} <`` `tiny_ice_to_rain_threshold` | tiny-warm-ice clip |
 
-The first two require `liquid_fraction_active`. When any fires, the dry mass and
+The first two require `liquid_fraction = PrognosticLiquidFraction()`. When any fires, the dry mass and
 number go to rain as complete melting, the coating is shed to rain, and every
 process that needs the clipped particle — deposition, coating exchange,
 aggregation, riming, wet growth, splintering, above-freezing collection, the
@@ -2139,15 +2179,18 @@ added to the refreezing rate rather than left as a vanishing ``q^{wi}``.
 When the latent-heat release rate from collection exceeds what conduction
 plus evaporative cooling can dissipate, ice enters wet growth.
 
-The wet-growth capacity rate (Musil 1970):
+The wet-growth capacity rate is the ventilated heat balance of a particle whose
+surface is at ``T_0`` ([Musil (1970)](@cite Musil1970), Eq. (A9), as in P3 v4):
 
 ```math
-\dot{q}_\text{wet} = \big[K^a\,(T_0 - T) + 2π\,ρ\,\mathcal{L}^i\,D^v\,(q^{v+l}(T_0) - q^v_\text{cld})/\mathcal{L}^\text{fus}\big]\, f_v\, n^i,
+\dot{q}_\text{wet} = 2π\, f_v\, n^i\, \frac{K^a\,(T_0 - T) + ρ\,\mathcal{L}^l_0\,D^v\,(q^{v+l}(T_0) - q^v_\text{cld})}{\mathcal{L}^{fr}_0 + c^l\,(T - T_0)},
 ```
 
-where the ``2π`` factor multiplies *only* the latent (vapor-diffusion) term;
-the sensible-conduction term ``K^a (T_0-T)`` carries no ``2π``. The same
-asymmetry appears in the refreezing rate below.
+where ``f_v`` is the ventilated capacitance integral (stored as `capm`, twice the
+physical capacitance, hence ``2π`` rather than ``4π``). Collected drops are warmed
+from ``T`` to ``T_0`` before freezing at a wet surface, so the latent heats are taken
+at ``T_0``, and ``T`` in the warming term is floored at
+`homogeneous_freezing_temperature`.
 
 Wet growth fires when the total collection
 ``\dot{q}^{cl}_\text{rime} + \dot{q}^{r}_\text{rime}``
@@ -2173,12 +2216,13 @@ The existing rime is simultaneously soaked to maximum density over
 
 With liquid fraction active, *all* collection becomes liquid coating, the riming
 rates are zeroed, and no densification flag is set. Refreezing then transfers
-``q^{wi}`` back to rime when ``T < T_0``, using the same ventilated heat balance
-as the wet-growth capacity:
+``q^{wi}`` back to rime when ``T < T_0``, using the same conduction and vapor
+terms as the wet-growth capacity. The coating is already at ``T_0``, so there is no
+warming term ([Cholette et al. (2019)](@cite Cholette2019parameterization), Eq. (A5)):
 
 ```math
-\dot{q}_\text{refr} = n^i\, \max\!\big(0,\; \mathcal{C} f_v [K^a (T_0 - T)
-                      + 2π\, ρ\, \mathcal{L}^i D^v (q^{v+l}(T_0) - q^v)/\mathcal{L}^\text{fus}]\big),
+\dot{q}_\text{refr} = n^i\, \max\!\big(0,\; \frac{2π}{\mathcal{L}^{fr}} \mathcal{C} f_v [K^a (T_0 - T)
+                      + ρ\, \mathcal{L}^i D^v (q^{v+l}(T_0) - q^v)]\big),
 ```
 
 bounded by ``q^{wi} / τ_\text{sink}``, where Breeze uses the fixed
@@ -2191,7 +2235,7 @@ Shedding is computed from a tabulated PSD integral over particles with
 ``D \ge 9`` mm (the Rasmussen et al. 2011 threshold):
 
 ```math
-\dot{q}_\text{shed} = F^f\, \mathcal{I}_\text{shed}(\bar{m}, F^f, F^l, ρ^f, μ^i)\,
+\dot{q}_\text{shed} = F^f\, \mathcal{I}_\text{shed}(\bar{m}, F^f, F^l, ρ^f)\,
                       n^i\, F^l,
 ```
 
@@ -2204,7 +2248,7 @@ carried separately from the `shed_drop_mass` used by cloud and wet-growth
 shedding so the two paths stay independently tunable, but defaults to the same
 1 mm drop.
 
-Shedding is gated off entirely when `liquid_fraction_active = false`. In that
+Shedding is gated off entirely with `liquid_fraction = NoLiquidFraction()`. In that
 configuration any coating left on the state (from a restart, say) is drained to
 rain over `sink_limiting_timescale` instead, so ``q^{wi}`` cannot strand water.
 
@@ -2225,14 +2269,24 @@ liquid is tracked explicitly in ``q^{wi}``.
 After all liquid- and ice-phase rates are assembled, Breeze applies four caps:
 
 - Liquid condensation against
-  ``\max(0,\, q^v - q^{v+l})/(1 + (\mathcal{L}^l)^2 q^{v+l}/(c^{pd} R^v T^2))``.
+  ``\max(0,\, q^v - q^{v+l} + A^l τ_\text{sink})/(1 + (\mathcal{L}^l)^2 q^{v+l}/(c^{pd} R^v T^2))``.
 - Liquid evaporation against
-  ``\max(0,\, q^{v+l} - q^v)/(\dots)``, plus a hard zero when supersaturated.
+  ``\max(0,\, q^{v+l} - q^v - A^l τ_\text{sink})/(\dots)``, plus a hard zero when supersaturated.
 - Ice deposition against
-  ``\max(0,\, q^{v*} - q^{v+i*})/(1 + (\mathcal{L}^i)^2 q^{v+i*}/(c^{pd} R^v {T^*}^2))``,
+  ``\max(0,\, q^{v*} - q^{v+i*} + A^i τ_\text{sink})/(1 + (\mathcal{L}^i)^2 q^{v+i*}/(c^{pd} R^v {T^*}^2))``,
   where ``T^* = T + \text{net liquid}\,\cdot\, \mathcal{L}^l / c^{pd} \cdot Δt`` and
   the saturation field is recomputed at ``T^*``.
 - Ice sublimation against the negative analog.
+
+Here ``A^l = -∂_t q^{v+l}`` and ``A^i = -∂_t q^{v+i}`` are the external forcings of the
+vapor excess over liquid and ice from adiabatic cooling and expansion (see
+[Vapor Deposition and Sublimation](@ref p3_deposition)), and
+``τ_\text{sink}`` is `sink_limiting_timescale`. The forcing counts as available because
+the growth rates include it while the current state does not yet carry the cooling over
+the limiter interval. Without it the condensation cap binds in steady ascent and holds
+the vapor excess near ``A^l τ_\text{sink}``, about 1% for a 2 m/s updraft with the default
+10 s, rather than where diffusional growth balances the forcing (about 0.15% for the
+rising-parcel example).
 
 These caps follow the saturation-adjustment limits in
 [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization)
@@ -2287,7 +2341,7 @@ tendency. The relevant latent heats at standard conditions are:
 
 - ``\mathcal{L}^l \approx 2.5 \times 10^6`` J/kg (vaporization)
 - ``\mathcal{L}^i \approx 2.83 \times 10^6`` J/kg (sublimation)
-- ``\mathcal{L}^\text{fus} \approx 3.34 \times 10^5`` J/kg (fusion)
+- ``\mathcal{L}^{fr} \approx 3.34 \times 10^5`` J/kg (fusion)
 
 ### Process Summary
 
@@ -2308,9 +2362,9 @@ tendency. The relevant latent heats at standard conditions are:
 | Aggregation | ``n^i`` | ``E^{ii}(T)``, ``E^{ii}_\text{fact}(F^f)`` | [Morrison2015parameterization](@cite) |
 | Hallett–Mossop | ``n^i`` | 250 μm threshold; ``-8°``C to ``-3°``C | [Morrison2015parameterization](@cite) |
 | Melting | ``q^i \to q^{wi} \text{ or } q^r`` | Lookup-split by ``D_\text{crit}`` | [MilbrandtEtAl2025liquidfraction](@cite) |
-| Wet growth | ``q^i, q^{wi}`` | Musil 1970 | [Morrison2015parameterization](@cite) |
+| Wet growth | ``q^i, q^{wi}`` | Musil 1970 | [Musil1970](@cite) |
 | Shedding | ``q^{wi} \to q^r`` | Tabulated PSD integral, ``D \ge 9`` mm | [MilbrandtEtAl2025liquidfraction](@cite) |
-| Refreezing | ``q^{wi} \to q^f`` | Wet-growth form, ``T < T_0`` | [MilbrandtEtAl2025liquidfraction](@cite) |
+| Refreezing | ``q^{wi} \to q^f`` | Coating heat balance, ``T < T_0`` | [Cholette2019parameterization](@cite) |
 | Whole-particle clipping | all ice fields ``\to q^r`` | ``F^l > 0.99``, warm fully-liquid, tiny warm ice | [MilbrandtEtAl2025liquidfraction](@cite) |
 | Sedimentation | Cloud, rain, all ice fields | Tabulated; delegated to Oceananigans | [MilbrandtYau2005](@cite) |
 
@@ -2338,9 +2392,9 @@ P3 tracks eight prognostic densities by default,
 that is, the cloud liquid mass, the rain mass and number, the dry ice mass and
 number, the rime mass and rime volume, and the liquid coating on ice — alongside
 the host's vapor density ``ρq^v``. Three more appear when the corresponding option
-is enabled: the cloud droplet number ``ρn^{cl}`` and unactivated aerosol number
-``ρn^a`` with aerosol activation, and the supersaturation ``ρs^{v+l}`` with predicted
-supersaturation. Together they describe the complete microphysical state.
+is enabled: the cloud droplet number ``ρn^{cl}`` with aerosol activation, the
+unactivated aerosol number ``ρn^a`` when that activation also sets `prognostic`,
+and the vapor excess over liquid ``ρδq^{v+l}`` with prognostic vapor excess. Together they describe the complete microphysical state.
 
 This section documents each variable, its physical meaning, and the source-term
 assembly used in `tendency_ρ*` (`prognostic_tendencies.jl`) to build the
@@ -2377,12 +2431,10 @@ appear as gains; their negative branches contribute as losses elsewhere.
 | ``ρn^{cl}`` | Cloud droplet number density | m⁻³ | Number of cloud droplets per unit volume |
 | ``ρn^a`` | Unactivated aerosol number density | m⁻³ | Aerosol not yet activated into droplets |
 
-``ρn^{cl}`` and ``ρn^a`` are prognostic only when the optional aerosol-activation path
-(`AerosolActivation` in `aerosol_activation.jl`) is enabled, where CCN-activation source
-terms drive them. Otherwise droplet number is
-the scheme parameter `cloud.number_concentration`, which defaults to
+[`AerosolActivation`](@ref) makes ``ρn^{cl}`` prognostic; `prognostic=true` also carries
+``ρn^a``. With `aerosol = nothing`, droplet concentration is prescribed by
+`cloud.number_concentration`, which defaults to
 ``200 \times 10^6`` m⁻³ (200 cm⁻³); marine air is closer to ``\sim 50`` cm⁻³.
-Every rate reads that constant, and neither field is allocated or advected.
 
 #### Rain
 
@@ -2409,7 +2461,7 @@ mass / number ratio. Breeze runs with ``μ^r = 0``.
 | Symbol | Name | Units | Description |
 |--------|------|-------|-------------|
 | ``ρq^v`` | Water vapor density | kg/m³ | The host-coupled moisture variable |
-| ``ρs^{v+l}`` | Supersaturation density, ``s^{v+l} = q^v - q^{v+l}`` | kg/m³ | Predicted-supersaturation path, controlled by the `predict_supersaturation` flag, which defaults to `false`. When `false`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008) adjustment is active. |
+| ``ρδq^{v+l}`` | Density-weighted vapor excess over liquid, ``δq^{v+l} = q^v - q^{v+l}`` | kg/m³ | Prognostic vapor-excess path, selected by the `vapor_excess` keyword, which defaults to `DiagnosticVaporExcess()`. With `DiagnosticVaporExcess()`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v+l}(T)`` directly. With `PrognosticVaporExcess()`, the bounded G&M (2008) adjustment is active. |
 
 ### Derived Quantities
 
@@ -2479,8 +2531,8 @@ G_{ρq^{cl}}
 
 | Term | Meaning |
 |------|--------|
-| ``\dot{q}^{cl}_\text{cond}`` | Condensation (positive) / evaporation (negative) — bidirectional. Includes the G&M alignment when `predict_supersaturation = true`. |
-| ``\dot{q}_\text{acti}`` | CCN-activation mass source (when prognostic ``N^{cl}`` enabled). |
+| ``\dot{q}^{cl}_\text{cond}`` | Condensation (positive) / evaporation (negative) — bidirectional. Includes the G&M alignment when `vapor_excess = PrognosticVaporExcess()`. |
+| ``\dot{q}_\text{acti}`` | CCN-activation mass source; present in both the prescribed and the aerosol-activation paths. |
 | ``\dot{q}_\text{auto}`` | Autoconversion to rain. |
 | ``\dot{q}_\text{accr}`` | Accretion by rain. |
 | ``\dot{q}^{cl}_\text{rime}`` | Cloud riming by ice. |
@@ -2491,7 +2543,7 @@ G_{ρq^{cl}}
 | ``\dot{q}_\text{wsh}`` | Wet-growth excess cloud collection shed to rain (non-liquid-fraction branch). |
 
 ``\dot{q}^{cl}_\text{wet}`` and ``\dot{q}_\text{wsh}`` are mutually exclusive: exactly one of the
-two branches is active for a given `liquid_fraction_active` setting.
+two branches is active for a given `liquid_fraction` setting.
 
 #### Cloud Number Tendency
 
@@ -2700,7 +2752,7 @@ evaporation / sublimation branches through their negative values.
 G_{ρn^a} = -\rho\,\dot{n}_\text{acti},
 ```
 
-one aerosol removed per activated droplet; zero in the prescribed-``N^{cl}`` path.
+Each activated droplet removes one aerosol from a prognostic reservoir.
 
 ### Sedimentation
 
@@ -2724,7 +2776,7 @@ fall speed needs, and what leaves them defined immediately after a `set!`.
 | ``ρb^f`` | ``\mathbb{W}^i`` | ``\mathcal{F}_{ρb^f} = -\mathbb{W}^i ρb^f`` |
 | ``ρq^{wi}`` | ``\mathbb{W}^i`` | ``\mathcal{F}_{ρq^{wi}} = -\mathbb{W}^i ρq^{wi}`` |
 
-``ρs^{v+l}`` and ``ρn^a`` do not sediment. Cloud droplets do: cloud mass and
+``ρδq^{v+l}`` and ``ρn^a`` do not sediment. Cloud droplets do: cloud mass and
 number settle with DSD-integrated Stokes velocities. Here ``\mathbb{W}`` is the
 positive-downward speed; the z-face source fields are signed vertical advecting
 velocities ``w=-\mathbb{W}``.
@@ -2761,18 +2813,16 @@ prognostic_field_names(microphysics)
 (:ρqᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ)
 ```
 
-``ρnᶜˡ`` and ``ρnᵃ`` appear only when `aerosol`
-is an `AerosolActivation`: the default prescribed-Nᶜˡ path takes droplet number
-from `cloud.number_concentration`, so neither field is allocated or advected there. ``ρsᵛ⁺ˡ`` appears only when
-`predict_supersaturation = true`.
+[`AerosolActivation`](@ref) adds ``ρnᶜˡ``; `prognostic=true` also adds ``ρnᵃ``.
+`vapor_excess = PrognosticVaporExcess()` adds ``ρδqᵛ⁺ˡ``.
 
 P3's aerosol distribution is specified **per unit mass of air**: `AerosolMode.number_mixing_ratio`
 is in kg⁻¹, and so are the activated numbers it produces and the ``n^{cl}`` and ``n^a`` that the
 activation cap compares them against. The prognostic reservoir ``ρn^a`` therefore holds the
 ``ρ``-weighted count in m⁻³.
 
-Nothing needs to be initialized by hand. `AtmosphereModel` construction and every `set!` write
-``ρn^a`` from [`initial_aerosol_number_density`](@ref Breeze.AtmosphereModels.initial_aerosol_number_density), which for P3 is the air density times
+When the reservoir is prognostic, nothing needs to be initialized by hand: `AtmosphereModel`
+construction and every `set!` write ``ρn^a`` from [`initial_aerosol_number_density`](@ref Breeze.AtmosphereModels.initial_aerosol_number_density), which for P3 is the air density times
 `AerosolMode.number_mixing_ratio` summed over all modes, so a multi-mode population is seeded from
 its own parameters. Because that weighting needs a density, the value is written against whichever
 density is established at the time: the reference density for anelastic dynamics, a prescribed
@@ -2845,7 +2895,7 @@ sinks against the donor reservoirs available over `sink_limiting_timescale`.
 Thus, for a single forward update no longer than that interval, limited P3 sinks
 alone cannot make the corresponding mass or number reservoirs negative. This is
 not an unconditional positivity guarantee for an arbitrary host timestep or RK
-stage. The optional ``ρs^{v+l}`` prognostic is also excluded: subsaturation is
+stage. The optional ``ρδq^{v+l}`` prognostic is also excluded: subsaturation is
 legitimately negative. Breeze does not implement a post-step "return small mass
 to vapor" cleanup, because that requires state mutation with a paired ``θ``
 correction.
@@ -2868,7 +2918,7 @@ rates see the state. The default `SpeciesBorrowing`:
   ``ρq^i``: it is real water, and the whole-particle clip already sheds it to
   rain when the dry ice is gone;
 - clamps the remaining non-water fields (number moments, rime properties,
-  aerosol count). ``ρs^{v+l}`` is excluded, since subsaturation is
+  aerosol count). ``ρδq^{v+l}`` is excluded, since subsaturation is
   legitimately negative.
 
 Passing `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())` additionally

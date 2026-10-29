@@ -4,8 +4,7 @@
 
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: Δzᶜᶜᶜ
-using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
-using Oceananigans.Grids: AbstractGrid, Center, Face
+using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Fields: ConstantField
 
 using Breeze.AtmosphereModels:
@@ -27,10 +26,9 @@ using Breeze.AtmosphereModels:
 
 using Breeze.Thermodynamics: ThermodynamicConstants
 
-using Dates: AbstractDateTime, Millisecond
 using KernelAbstractions: @kernel, @index
 
-using RRTMGP: AllSkyRadiation, RRTMGPSolver, lookup_tables, update_lw_fluxes!, update_sw_fluxes!
+using RRTMGP: AllSkyRadiation, RRTMGPSolver, lookup_tables
 using RRTMGP.AtmosphericStates: AtmosphericState, CloudState, MaxRandomOverlap
 using RRTMGP.BCs: LwBCs, SwBCs
 
@@ -70,6 +68,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `liquid_effective_radius`: Model for cloud liquid effective radius in meters (default: `ConstantRadiusParticles(10e-6)`)
 - `ice_effective_radius`: Model for cloud ice effective radius in meters (default: `ConstantRadiusParticles(30e-6)`)
 - `ice_roughness`: Ice crystal roughness for cloud optics (1=smooth, 2=medium, 3=rough; default: 2)
+$(column_batches_docstring)
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::AllSkyOptics,
@@ -85,13 +84,11 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  schedule = IterationInterval(1),
                                                  liquid_effective_radius = ConstantRadiusParticles(10e-6),
                                                  ice_effective_radius = ConstantRadiusParticles(30e-6),
-                                                 ice_roughness = 2)
+                                                 ice_roughness = 2,
+                                                 column_batches = nothing)
 
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)
-
-    error_msg = "Must either provide surface_albedo or *both* of
-                 direct_surface_albedo and diffuse_surface_albedo"
 
     solar_position = maybe_infer_solar_position(solar_position, grid)
 
@@ -101,21 +98,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # Materialize background atmosphere (converts O₃ functions to fields)
     background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
-    if !isnothing(surface_albedo)
-        if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)
-            throw(ArgumentError(error_msg))
-        end
-
-        surface_albedo = materialize_surface_property(surface_albedo, grid, solar_position)
-        diffuse_surface_albedo = surface_albedo
-        direct_surface_albedo = surface_albedo
-
-    elseif !isnothing(diffuse_surface_albedo) && !isnothing(direct_surface_albedo)
-        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid, solar_position)
-        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid, solar_position)
-    else
-        throw(ArgumentError(error_msg))
-    end
+    direct_surface_albedo, diffuse_surface_albedo =
+        resolve_surface_albedos(surface_albedo, direct_surface_albedo, diffuse_surface_albedo, grid, solar_position)
 
     surface_emissivity = materialize_surface_property(surface_emissivity, grid, solar_position)
 
@@ -123,10 +107,10 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     Nx, Ny, Nz = size(grid)
     Nc = Nx * Ny
 
-    # RRTMGP grid + context
+    # RRTMGP grid + context. `grid_params` sizes the solver workspace (one batch), not the state.
     context = rrtmgp_context(arch)
     ArrayType = ClimaComms.array_type(context.device)
-    grid_params = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
+    grid_params = rrtmgp_grid_params(FT, context, grid, column_batches)
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
     # AllSkyRadiation(aerosol_radiation, reset_rng_seed)
@@ -150,7 +134,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     Nband_sw = luts.nbnd_sw
     Ngas = luts.ngas_sw
 
-    # Atmospheric state arrays
+    # Atmospheric state arrays, sized for the whole domain: each batch solves a `view` of them.
     rrtmgp_λ = ArrayType{FT}(undef, Nc)
     rrtmgp_φ = ArrayType{FT}(undef, Nc)
     rrtmgp_layerdata = ArrayType{FT}(undef, 4, Nz, Nc)
@@ -253,6 +237,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   flux_divergence,
                                   liquid_eff_radius,
                                   ice_eff_radius,
+                                  column_batches,
                                   schedule)
 end
 
@@ -284,16 +269,11 @@ function AtmosphereModels._update_radiation!(rtm::AllSkyRadiativeTransferModel, 
                                rtm.ice_effective_radius)
 
     # Update solar zenith angle from the solar_position specification
-    update_solar_zenith_angle!(solver.sws, rtm.solar_position, grid, clock)
+    update_cos_zenith!(solver.sws.bcs.cos_zenith, rtm.solar_position, grid, clock)
 
-    # Longwave
-    update_lw_fluxes!(solver)
-
-    # Shortwave: we always call the solver; columns with `cos_zenith ≤ 0`
-    # get zero fluxes (RRTMGP zeroes night columns internally).
-    update_sw_fluxes!(solver)
-
-    copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
+    # Longwave and shortwave, one batch of columns at a time; night columns (`cos_zenith ≤ 0`)
+    # get zero fluxes, which RRTMGP handles internally.
+    solve_radiation_batches!(rtm, solver, grid)
 
     # Compute radiation flux divergence
     compute_radiation_flux_divergence!(rtm, grid)
@@ -327,7 +307,7 @@ end
                                              liquid_effective_radius, ice_effective_radius)
     i, j, k = @index(Global, NTuple)
 
-    c = rrtmgp_column_index(i, j, grid.Nx)
+    c = column_index(i, j, grid.Nx)
 
     FT = eltype(total_density)
     kg_to_g = convert(FT, 1000)

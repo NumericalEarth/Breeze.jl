@@ -343,24 +343,11 @@ Within each substep of size ``Δτ``, the perturbation update has two phases.
 \end{aligned}
 ```
 
-For the first substep of a multi-substep RK stage, Breeze follows the MPAS
-forward-backward sequence and omits only the *acoustic perturbation* pressure
-gradient:
-
-```math
-(ρu)'_{τ+Δτ} = (ρu)'_τ + Δτ \left[ G^s_{ρu} - ∂_x p^L \right], \qquad
-(ρv)'_{τ+Δτ} = (ρv)'_τ + Δτ \left[ G^s_{ρv} - ∂_y p^L \right].
-```
-
-The perturbation pressure-gradient term ``∇(C^L (ρθ)')`` is applied on subsequent
-substeps, after the mass and thermodynamic perturbations have been advanced
-once. If a stage has only one acoustic substep, the perturbation pressure
-gradient is applied immediately so the stage still includes the fast force.
-The frozen ``∇p^L`` term is applied on every substep because the slow tendency
-mode excludes pressure gradients. This matches MPAS's split: the first small
-step skips the perturbation pressure gradient inside `atm_advance_acoustic_step`,
-while the large-step pressure-gradient tendency is already present in
-`tend_u_euler`.
+Both the frozen ``∇p^L`` term and the perturbation pressure gradient ``∇(C^L (ρθ)')``
+are applied on every substep, including the first. The frozen term appears here because
+the slow tendency mode excludes pressure gradients. The perturbation pressure gradient is
+needed on the first substep because each stage's perturbations are initialized with the
+rewind term ``U^n - U^L``, which is nonzero in stages 2 and 3.
 
 **Vertical implicit solve — column tridiag in the acoustic vertical momentum.** The
 vertical-momentum, density, and ``ρθ`` perturbations are coupled through the vertical pressure gradient, the vertical
