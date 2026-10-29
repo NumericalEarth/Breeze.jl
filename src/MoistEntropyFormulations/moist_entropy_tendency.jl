@@ -7,7 +7,20 @@ const MoistEntropyModel = AtmosphereModel{<:Any, <:MoistEntropyFormulation}
 AtmosphereModels.liquid_ice_potential_temperature(model::MoistEntropyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :specific)
 AtmosphereModels.liquid_ice_potential_temperature_density(model::MoistEntropyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :density)
 AtmosphereModels.static_energy(model::MoistEntropyModel) = Diagnostics.StaticEnergy(model, :specific)
-AtmosphereModels.static_energy_density(model::MoistEntropyModel) = Diagnostics.StaticEnergy(model, :density)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the static energy density as a `Field` whose boundary conditions are the energy fluxes
+`𝒬ᵀ` carried inside the entropy fluxes of `ρη` (see `EntropyFluxBoundaryConditionFunction`), so
+that `BoundaryConditionOperation` extracts the sensible heat flux. The vapor flux's part is not
+included: it is the boundary condition of the moisture density.
+"""
+function AtmosphereModels.static_energy_density(model::MoistEntropyModel)
+    ρη_bcs = model.formulation.entropy_density.boundary_conditions
+    ρs_bcs = map_field_boundary_conditions(entropy_to_energy_bc, ρη_bcs)
+    return Field(Diagnostics.StaticEnergy(model, :density); boundary_conditions=ρs_bcs)
+end
 
 #####
 ##### Tendency computation

@@ -169,3 +169,9 @@ end
 materialize_wall_flux(::Nothing, args...) = nothing
 materialize_wall_flux(flux, args...) =
     materialize_atmosphere_boundary_condition(BoundaryCondition(Flux(), flux), args...).condition
+
+# The energy flux 𝒬ᵀ inside an entropy flux, for the diagnostic static energy density
+entropy_to_energy_bc(bc) = bc
+entropy_to_energy_bc(bc::EntropyFluxBoundaryCondition) = energy_flux_bc(bc.condition.energy_flux)
+energy_flux_bc(::Nothing) = BoundaryCondition(Flux(), nothing)
+energy_flux_bc(flux) = BoundaryCondition(Flux(), flux)

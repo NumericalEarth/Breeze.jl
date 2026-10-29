@@ -14,7 +14,7 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, Center, Face, znode
+using Oceananigans: Oceananigans, CenterField, Center, Face, Field, znode
 using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC, fill_halo_regions!,
                                        BoundaryCondition, Flux, FieldBoundaryConditions, Bottom
 using Oceananigans.Grids: AbstractGrid
