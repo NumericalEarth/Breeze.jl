@@ -64,6 +64,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemper
     Gρθ = model.timestepper.Gⁿ.ρθ
     launch!(arch, grid, :xyz, compute_potential_temperature_tendency!, Gρθ, grid, ρθ_args)
     add_sedimentation_tendency!(Gρθ, model, tracer_transport_velocity)
+    add_dissipative_heating!(Gρθ, model, model.formulation.dissipative_heating)
     return nothing
 end
 
@@ -166,6 +167,199 @@ end
     wᶜ = ℑzᵃᵃᶜ(i, j, k, grid, w)
     return - g * ρ * wᶜ / p
 end
+
+#####
+##### Subgrid dissipative heating
+#####
+#
+# With `dissipative_heating`, the resolved kinetic energy the turbulence closure removes,
+# ρε = − 𝒯ᵢⱼ ∂ⱼuᵢ (`subgrid_dissipation`, evaluated with the stress density the momentum
+# equations use), heats the air through the heating path of the other energy sources,
+# (ρᵈ / ρ) ρε ∂θˡⁱ/∂h. It runs in a kernel of its own so that the ρθ tendency kernel is unchanged
+# when the option is off.
+
+add_dissipative_heating!(Gρθ, model, ::Nothing) = nothing
+
+function add_dissipative_heating!(Gρθ, model, ::SubgridDissipativeHeating)
+    isnothing(model.closure) && return nothing
+    grid = model.grid
+    launch!(grid.architecture, grid, :xyz, _add_dissipative_heating!, Gρθ, grid,
+            model.formulation, model.dynamics, model.thermodynamic_constants, model.microphysics,
+            model.microphysical_fields, specific_prognostic_moisture(model), model.temperature,
+            model.closure, model.closure_fields, model.clock, fields(model))
+    return nothing
+end
+
+@kernel function _add_dissipative_heating!(Gρθ, grid, formulation, dynamics, constants, microphysics,
+                                           microphysical_fields, specific_prognostic_moisture, temperature,
+                                           closure, closure_fields, clock, model_fields)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρθ[i, j, k] += dissipative_heating_tendency(i, j, k, grid, formulation, dynamics, constants,
+                                                           microphysics, microphysical_fields,
+                                                           specific_prognostic_moisture, temperature,
+                                                           closure, closure_fields, clock, model_fields)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the ``ρθ`` tendency at cell `(i, j, k)` from heating the air by the kinetic energy the
+turbulence `closure` dissipates: ``(ρᵈ / ρ) ρε / (ĉᵖ Π)`` with
+``ρε = - 𝒯ᵢⱼ ∂ⱼ uᵢ`` from [`subgrid_dissipation`](@ref Breeze.AtmosphereModels.subgrid_dissipation).
+"""
+@inline function dissipative_heating_tendency(i, j, k, grid, formulation, dynamics, constants,
+                                              microphysics, microphysical_fields, specific_prognostic_moisture,
+                                              temperature, closure, closure_fields, clock, model_fields)
+    ρ_field = dynamics_density(dynamics)
+    @inbounds begin
+        ρᵈ = ρ_field[i, j, k]
+        ρ = total_density(dynamics)[i, j, k]
+        qᵛᵉ = specific_prognostic_moisture[i, j, k]
+        θ = formulation.potential_temperature[i, j, k]
+        T = temperature[i, j, k]
+    end
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    ∂θ∂h = potential_temperature_heating_response(θ, liquid_ice_enthalpy(T, q, constants))
+    ρε = subgrid_dissipation(i, j, k, grid, ρ_field, closure, closure_fields, clock, model_fields)
+    return ρᵈ / ρ * ρε * ∂θ∂h
+end
+
+#####
+##### Fixed-volume phase change (compressible core)
+#####
+#
+# Microphysics converts water between its phases at fixed density. Holding θˡⁱ fixed through the
+# conversion conserves the enthalpy at fixed pressure, which on the compressible core, where the
+# pressure p = T (ρᵈ Rᵈ + ρqᵛ Rᵛ) is diagnosed from the densities, costs the expansion work that a
+# fixed-pressure conversion would do. The internal energy
+#
+#   ρ𝓊 = (ρᵈ cᵛᵈ + ρqᵛ cᵛᵛ + ρqˡ cˡ + ρqⁱ cⁱ) T + ℒˡ₀ ρqᵛ + (ℒˡ₀ − ℒⁱ₀) ρqⁱ
+#
+# is a function of the prognostic densities ψ = (ρᵈ, Θ = ρᵈ θˡⁱ, ρqᵛ, ρqˡ, ρqⁱ) through the
+# temperature, which solves G(T, ψ) = ln(ρH) − ln(ρĉᵖ) − κ ln(p / pˢᵗ) − ln Θ + ln ρᵈ = 0. Its
+# fixed-volume Jacobians are 𝒥_ψ = ∂(ρ𝓊)/∂ψ = ρcᵛᵐ ∂T/∂ψ + e_ψ, with ∂T/∂ψ = − G_ψ / G_T and
+# e_ψ the explicit dependence at fixed T. Conserving ρ𝓊 through the microphysical tendencies Ṡ_q
+# of the water densities requires
+#
+#   ρθ̇ = − Σ_q 𝒥_q Ṡ_q / 𝒥_Θ = (Θ / ρ) Σ_q (ρG_q − e_q G_T / cᵛᵐ) Ṡ_q ,
+#
+# with G_T = cᵖᵐ / H − κ / T, cᵛᵐ = cᵖᵐ − Rᵐ, and, per unit total density,
+#
+#   ρG_qᵛ = cᵖᵛ T / H − κ Rᵛ / Rᵐ + B ,   e_qᵛ = cᵛᵛ T + ℒˡ₀ ,
+#   ρG_qˡ = (cˡ T − ℒˡ₀) / H + B ,        e_qˡ = cˡ T ,
+#   ρG_qⁱ = (cⁱ T − ℒⁱ₀) / H + B ,        e_qⁱ = cⁱ T + ℒˡ₀ − ℒⁱ₀ ,
+#
+# where B = − cᵖᵛ / ĉᵖ − (∂κ/∂qᵗ) ln(p / pˢᵗ) is common to every water species (zero ∂κ/∂qᵗ for
+# `DryExponent`, (Rᵛ − κ cᵖᵛ) / ĉᵖ for `VaporEquivalentExponent`) and cancels for a conversion
+# that conserves the total water. The source is a cell-local function of the state and the
+# microphysical tendencies, with no fluxes. It is formed without storing the microphysical
+# tendencies: `begin_phase_change_source!` subtracts Σ_q W_q G_q from the ρθ tendency before the
+# microphysics adds its tendencies to the water tendencies G_q, and `finish_phase_change_source!`
+# adds it back after, so the two leave Σ_q W_q Ṡ_q.
+
+AtmosphereModels.begin_phase_change_source!(formulation::LiquidIcePotentialTemperatureFormulation, model) =
+    accumulate_phase_change_source!(formulation.fixed_volume_phase_change, model, -1)
+
+AtmosphereModels.finish_phase_change_source!(formulation::LiquidIcePotentialTemperatureFormulation, model) =
+    accumulate_phase_change_source!(formulation.fixed_volume_phase_change, model, +1)
+
+accumulate_phase_change_source!(::Nothing, model, sign) = nothing
+
+function accumulate_phase_change_source!(::FixedVolumePhaseChange, model, sign)
+    microphysics = model.microphysics
+    isnothing(microphysics) && return nothing
+    moisture_prognostic_name(microphysics) === :ρqᵛ ||
+        throw(ArgumentError("fixed_volume_phase_change needs a microphysics scheme whose prognostic moisture " *
+                            "is the vapor density ρqᵛ (non-equilibrium cloud formation), got " *
+                            "$(moisture_prognostic_name(microphysics))"))
+
+    G = model.timestepper.Gⁿ
+    condensates = map(condensate_field_names(microphysics)) do name
+        f = condensate_liquid_fraction(microphysics, Val(name))
+        isnothing(f) && throw(ArgumentError("fixed_volume_phase_change: condensate $name declares no " *
+                                            "condensate_liquid_fraction"))
+        (getproperty(G, name), f)
+    end
+
+    grid = model.grid
+    launch!(grid.architecture, grid, :xyz, _accumulate_phase_change_source!, G.ρθ, sign, grid, G.ρqᵛ,
+            condensates, model.formulation, model.dynamics, model.thermodynamic_constants, microphysics,
+            model.microphysical_fields, specific_prognostic_moisture(model), model.temperature)
+    return nothing
+end
+
+@kernel function _accumulate_phase_change_source!(Gρθ, sign, grid, Gρqᵛ, condensates, formulation, dynamics,
+                                                  constants, microphysics, microphysical_fields,
+                                                  specific_prognostic_moisture, temperature)
+    i, j, k = @index(Global, NTuple)
+    Wᵛ, Wˡ, Wⁱ = grid_phase_change_weights(i, j, k, grid, formulation, dynamics, constants, microphysics,
+                                           microphysical_fields, specific_prognostic_moisture, temperature)
+    @inbounds S = Wᵛ * Gρqᵛ[i, j, k] + condensate_phase_change_source(i, j, k, condensates, Wˡ, Wⁱ)
+    @inbounds Gρθ[i, j, k] += sign * S
+end
+
+@inline condensate_phase_change_source(i, j, k, ::Tuple{}, Wˡ, Wⁱ) = 0
+
+@inline function condensate_phase_change_source(i, j, k, condensates::Tuple, Wˡ, Wⁱ)
+    G, f = first(condensates)
+    @inbounds S = (f * Wˡ + (1 - f) * Wⁱ) * G[i, j, k]
+    return S + condensate_phase_change_source(i, j, k, Base.tail(condensates), Wˡ, Wⁱ)
+end
+
+# The weights W at cell (i, j, k), from the stored temperature and the prognostic state
+@inline function grid_phase_change_weights(i, j, k, grid, formulation, dynamics, constants, microphysics,
+                                           microphysical_fields, specific_prognostic_moisture, temperature)
+    @inbounds begin
+        ρ = total_density(dynamics)[i, j, k]
+        ρᵈ = dynamics_density(dynamics)[i, j, k]
+        qᵛᵉ = specific_prognostic_moisture[i, j, k]
+        θ = formulation.potential_temperature[i, j, k]
+        T = temperature[i, j, k]
+    end
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    pˢᵗ = standard_pressure(dynamics)
+    return fixed_volume_phase_change_weights(T, q, ρ, ρᵈ / ρ * θ, pˢᵗ, formulation.exponent, constants)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the weights `(Wᵛ, Wˡ, Wⁱ)` of the fixed-volume phase-change source,
+``ρθ̇ = Wᵛ Ṡᵛ + Wˡ Ṡˡ + Wⁱ Ṡⁱ = - Σ_q 𝒥_q Ṡ_q / 𝒥_Θ``, given the temperature `T`, the mass fractions
+`q`, the total density `ρ`, the ratio `Θ_ρ = Θ / ρ = qᵈ θˡⁱ` of the prognostic ``Θ = ρᵈ θˡⁱ`` to the
+total density, the standard pressure `pˢᵗ` and the Exner `exponent`. ``Ṡ`` are the tendencies of the vapor, liquid and ice
+densities, and ``𝒥_ψ = ∂(ρ𝓊)/∂ψ`` the Jacobians of the internal energy density at fixed volume.
+"""
+@inline function fixed_volume_phase_change_weights(T, q, ρ, Θ_ρ, pˢᵗ, exponent, constants)
+    cᵖᵛ = constants.vapor.heat_capacity
+    cˡ = constants.liquid.heat_capacity
+    cⁱ = constants.ice.heat_capacity
+    Rᵛ = vapor_gas_constant(constants)
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
+
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    cᵛᵐ = cᵖᵐ - Rᵐ
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    κ = exner_exponent(exponent, q, constants)
+    H = liquid_ice_enthalpy(T, q, constants)
+
+    # The pressure of the equation of state the Jacobians differentiate, p = ρ Rᵐ T
+    ln_p = log(ρ * Rᵐ * T / pˢᵗ)
+    B = - cᵖᵛ / ĉᵖ - exponent_composition_derivative(exponent, κ, cᵖᵛ, Rᵛ, ĉᵖ) * ln_p
+
+    G_T = cᵖᵐ / H - κ / T
+    a = G_T / cᵛᵐ
+    Wᵛ = Θ_ρ * (cᵖᵛ * T / H - κ * Rᵛ / Rᵐ + B - a * ((cᵖᵛ - Rᵛ) * T + ℒˡ₀))
+    Wˡ = Θ_ρ * ((cˡ * T - ℒˡ₀) / H + B - a * cˡ * T)
+    Wⁱ = Θ_ρ * ((cⁱ * T - ℒⁱ₀) / H + B - a * (cⁱ * T + ℒˡ₀ - ℒⁱ₀))
+    return Wᵛ, Wˡ, Wⁱ
+end
+
+# ∂κ/∂qᵗ at fixed qᵈ + qᵗ = 1: (Rᵛ − κ cᵖᵛ) / ĉᵖ for κ̂ = R̂ / ĉᵖ, zero for the dry exponent
+@inline exponent_composition_derivative(::DryExponent, κ, cᵖᵛ, Rᵛ, ĉᵖ) = 0
+@inline exponent_composition_derivative(::VaporEquivalentExponent, κ, cᵖᵛ, Rᵛ, ĉᵖ) = (Rᵛ - κ * cᵖᵛ) / ĉᵖ
 
 #####
 ##### Condensate content of ρθ for its sedimentation tendency

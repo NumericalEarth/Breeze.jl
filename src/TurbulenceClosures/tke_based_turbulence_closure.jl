@@ -290,6 +290,13 @@ end
 """Either a single `TKEBasedTurbulenceClosure` or an ensemble array of them."""
 const FlavorOfTKEClosure{TD} = Union{TKEBasedTurbulenceClosure{TD}, TKEClosureArray{TD}} where TD
 
+# The resolved kinetic energy a TKE closure removes is shear production of its subgrid TKE, not
+# heat; the heating belongs to the TKE dissipation ρε = ρ Sᴰ e^{3/2} / ℓ (`dissipationᶜᶜᶜ`).
+# TODO: return that dissipation here so that `dissipative_heating` applies to TKE closures too.
+# Until then the option adds nothing for them.
+@inline AtmosphereModels.subgrid_dissipation(i, j, k, grid, ρ, ::TKEBasedTurbulenceClosure, closure_fields,
+                                             clock, model_fields) = zero(grid)
+
 function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::SF, static_stability::SS,
                                        maximum_viscosity::FT, maximum_tracer_diffusivity::FT,
                                        maximum_tke_diffusivity::FT, minimum_tke::FT,

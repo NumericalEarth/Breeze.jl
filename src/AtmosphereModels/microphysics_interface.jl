@@ -29,6 +29,7 @@ using Breeze.Utils: sum_properties
 using Oceananigans.BoundaryConditions: BoundaryCondition, NormalFlow
 using Oceananigans.Fields: set!, ZeroField, ZFaceField
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ, V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ
+using Oceananigans.Grids: znode
 
 #####
 ##### MicrophysicalState abstraction
@@ -1106,6 +1107,11 @@ conservative thermodynamic face flux. Continuity advances `ρᵈ` without a sedi
 every core, so the content moved per unit total mass is the change of the specific variable, and
 the cell's ratio `ρᵈ / ρ` (one on the anelastic core, the dry mass fraction on the compressible
 core) turns it into the change of the coupling-weighted prognostic.
+
+When the formulation applies [`PrecipitationDragHeating`](@ref) (see [`precipitation_heating`](@ref)),
+the content each flux delivers also includes `(∂φ/∂h) g (zᶠ - zᶜ)`, the potential energy between
+the face and the cell center, so that the condensate heats each cell it falls through by `g Δz`
+per unit mass.
 """
 @inline sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature) =
@@ -1132,7 +1138,8 @@ core) turns it into the change of the coupling-weighted prognostic.
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     ρ = total_density(dynamics)
     ρᵈ = dynamics_density(dynamics)
-    Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
+    δ = drag_heating_contents(precipitation_heating(formulation), i, j, k, grid, c⁰.∂φ∂h, constants)
+    Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺, δ)
     ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
     ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
     @inbounds coupling_fraction = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
@@ -1155,22 +1162,48 @@ end
 # below). Constituents are binned by their liquid fraction, so P3's liquid on ice contributes
 # its ice-speed flux to the liquid content, and a fraction in between blends the two
 # (`liquid_fraction_content`).
-@inline condensate_content_fluxes(i, j, k, grid, ::Tuple{}, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺) = (zero(grid), zero(grid))
+@inline condensate_content_fluxes(i, j, k, grid, ::Tuple{}, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺, δ) = (zero(grid), zero(grid))
 
-@inline function condensate_content_fluxes(i, j, k, grid, condensates::Tuple, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
+@inline function condensate_content_fluxes(i, j, k, grid, condensates::Tuple, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺, δ)
     condensate = first(condensates)
     w = condensate.velocity
     f = condensate.liquid_fraction
     F⁻, F⁺ = mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ)
     χ = liquid_fraction_content(f, c⁰.χ)
+    χ⁻ = with_drag_heating(χ, δ[1])
+    χ⁺ = with_drag_heating(χ, δ[2])
     h⁻ = liquid_fraction_content(f, c⁻.h)
     h⁰ = liquid_fraction_content(f, c⁰.h)
     h⁺ = liquid_fraction_content(f, c⁺.h)
-    Φ⁻ = condensate_content_flux(i, j, k,     wᵗ, w, F⁻, χ, c⁰.∂φ∂h, h⁰, h⁻, h⁰)
-    Φ⁺ = condensate_content_flux(i, j, k + 1, wᵗ, w, F⁺, χ, c⁰.∂φ∂h, h⁰, h⁰, h⁺)
-    rest⁻, rest⁺ = condensate_content_fluxes(i, j, k, grid, Base.tail(condensates), wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
+    Φ⁻ = condensate_content_flux(i, j, k,     wᵗ, w, F⁻, χ⁻, c⁰.∂φ∂h, h⁰, h⁻, h⁰)
+    Φ⁺ = condensate_content_flux(i, j, k + 1, wᵗ, w, F⁺, χ⁺, c⁰.∂φ∂h, h⁰, h⁰, h⁺)
+    rest⁻, rest⁺ = condensate_content_fluxes(i, j, k, grid, Base.tail(condensates), wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺, δ)
     return Φ⁻ + rest⁻, Φ⁺ + rest⁺
 end
+
+# Precipitation drag heating (`PrecipitationDragHeating`). Condensate falling relative to the air
+# loses the potential energy g Δz per unit mass, which its drag delivers to the air it falls
+# through. Each unit of mass crossing face k of cell k′ is credited the potential energy between
+# the face and the cell center, g (zᶠ − zᶜ), converted to the specific thermodynamic variable by
+# the cell's heating response ∂φ/∂h: a mass entering through the top face brings g (zᶠ⁺ − zᶜ),
+# and one leaving through the bottom face removes g (zᶠ⁻ − zᶜ) < 0, so the cell gains g Δz per
+# unit mass that falls through it. Added to the content χ, the credit multiplies the
+# sedimentation part of the mass flux, Fᵂ − Fᵗ, exactly as g z_face does in a total-energy flux
+# (eˣ = hˣ + g z_face): over a column the heating telescopes to the potential energy the
+# condensate loses, g z_face vanishing at the surface. `nothing` adds no credit and leaves the
+# content unchanged.
+@inline drag_heating_contents(::Nothing, i, j, k, grid, ∂φ∂h, constants) = (nothing, nothing)
+
+@inline function drag_heating_contents(::PrecipitationDragHeating, i, j, k, grid, ∂φ∂h, constants)
+    g = constants.gravitational_acceleration
+    zᶜ = znode(i, j, k, grid, Center(), Center(), Center())
+    z⁻ = znode(i, j, k, grid, Center(), Center(), Face())
+    z⁺ = znode(i, j, k + 1, grid, Center(), Center(), Face())
+    return ∂φ∂h * g * (z⁻ - zᶜ), ∂φ∂h * g * (z⁺ - zᶜ)
+end
+
+@inline with_drag_heating(χ, ::Nothing) = χ
+@inline with_drag_heating(χ, δ) = χ + δ
 
 # Content flux of one condensate through face k from its mass fluxes `F = (F(W), F(wᵗ))`, each
 # delivering the cell's content χ plus its conversion ∂φ/∂h of the enthalpy brought from the cell
