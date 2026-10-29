@@ -1,11 +1,13 @@
-using Breeze.AtmosphereModels: AtmosphereModels
+using Breeze.AtmosphereModels: AtmosphereModels, specific_prognostic_moisture
 using Reactant: TracedRNumber
-using Reactant.Ops: julia_callback
 
-# The reduction is part of the compiled program, so its Boolean cannot be inspected
-# while tracing. Check it in a runtime callback instead. Only the Boolean crosses
-# into Julia; the moisture fields stay on the device, and the check has no derivative.
-function AtmosphereModels.validate_total_moisture(valid::TracedRNumber{Bool})
-    julia_callback(AtmosphereModels.validate_total_moisture, (), valid; has_side_effect=true)
+# Inside a compiled program the check's Boolean is a device value: it can neither be
+# inspected while tracing nor raise at execution time. Mark an invalid state by setting
+# its moisture to NaN through a select, which keeps the program differentiable.
+function AtmosphereModels.reject_invalid_moisture!(model, valid::TracedRNumber{Bool})
+    FT = eltype(model.grid)
+    for field in (model.moisture_density, specific_prognostic_moisture(model))
+        parent(field) .= ifelse.(valid, parent(field), convert(FT, NaN))
+    end
     return nothing
 end

@@ -88,7 +88,7 @@ end
 
     potential_temperature = formulation.potential_temperature
     ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (advection/diffusion carrier)
-    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
 
     @inbounds begin
         ρᵈ = ρ_field[i, j, k]

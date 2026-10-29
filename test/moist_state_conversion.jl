@@ -272,7 +272,7 @@ end
     # Non-equilibrium: the carried cloud and rain enter the initial static energy, so the
     # parcel starts at the environmental temperature with that condensate.
     microphysics = OneMomentCloudMicrophysics(FT)
-    model = AtmosphereModel(grid; dynamics=ParcelDynamics(FT), microphysics)
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(FT), microphysics, formulation=:StaticEnergy)
     constants = model.thermodynamic_constants
     qᵗ = FT(0.01)
     set!(model; T, p, ρ, qᵗ, z)
@@ -290,7 +290,7 @@ end
     # the supersaturated remainder is then equilibrated at fixed static energy, as at every substep.
     adjustment = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
     microphysics = OneMomentCloudMicrophysics(FT; cloud_formation=adjustment)
-    model = AtmosphereModel(grid; dynamics=ParcelDynamics(FT), microphysics)
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(FT), microphysics, formulation=:StaticEnergy)
     constants = model.thermodynamic_constants
     qᵗ = FT(0.012)
     set!(model; T, p, ρ, qᵗ, z)

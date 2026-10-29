@@ -67,7 +67,7 @@ end
                           velocities.w, dynamics, temperature_field, specific_prognostic_moisture,
                           microphysics, microphysical_fields, constants)
 
-    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
 
     @inbounds begin
         ρᵈ = ρ_field[i, j, k]

@@ -51,6 +51,10 @@ export
     P3MicrophysicalState,
     ProcessRate,
     NumericalFloors,
+    DiagnosticVaporExcess,
+    PrognosticVaporExcess,
+    PrognosticLiquidFraction,
+    NoLiquidFraction,
 
     # Ice properties
     IceParticles,
