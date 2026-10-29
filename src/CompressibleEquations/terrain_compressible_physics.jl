@@ -198,17 +198,18 @@ to the terrain-following coordinate surfaces:
                     - \\left(\\frac{\\partial z}{\\partial y}\\right)_r v
 ```
 """
-function compute_contravariant_velocity!(model::TerrainCompressibleModel)
+function compute_contravariant_velocity!(model::TerrainCompressibleModel; interior = true)
     grid = model.grid
     arch = architecture(grid)
     dynamics = model.dynamics
     w̃ = dynamics.contravariant_vertical_velocity
     ρw̃ = dynamics.contravariant_vertical_momentum
 
-    launch!(arch, grid, :xyz,
-            _compute_contravariant_velocity!,
-            w̃, ρw̃,
-            grid, model.momentum, dynamics.dry_density)
+    # `interior = false`: the velocity launch of this update stored the interior (N10), only the fills are left.
+    interior && launch!(arch, grid, :xyz,
+                        _compute_contravariant_velocity!,
+                        w̃, ρw̃,
+                        grid, model.momentum, dynamics.dry_density)
 
     # The terrain kinematic BC (w̃ = 0 at the surface) is enforced declaratively:
     # `ρw` carries a NormalFlow bottom BC ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv (see
@@ -224,7 +225,51 @@ end
 
 @kernel function _compute_contravariant_velocity!(w̃, ρw̃, grid, momentum, density)
     i, j, k = @index(Global, NTuple)
+    w̃_ijk, ρw̃_ijk = contravariant_vertical_transport(i, j, k, grid, momentum, density)
+    @inbounds begin
+        w̃[i, j, k] = w̃_ijk
+        ρw̃[i, j, k] = ρw̃_ijk
+    end
+end
 
+#####
+##### N10 (handoff 08bcc1cf): the contravariant pair stored by the velocity launch
+#####
+##### The velocity launch reads the same ρu, ρv, ρw and ρᵈ. Between it and the contravariant launch only halos
+##### are filled (ρᵈ and the thermodynamic prognostics again, by the fused thermodynamics pass); the contravariant
+##### stencil reads ρᵈ at (i, j, k − 1 … k) for interior i, j only: interior cells and the bottom halo row,
+##### which the second fill rewrites from the same interior with the same (non-lateral) bottom condition.
+#####
+
+"""
+Whether the terrain velocity launch also stores the contravariant w̃ and ρw̃ (N10, handoff 08bcc1cf; `true` by
+default, `BREEZE_VELOCITY_PASS_CONTRAVARIANT=false` at load: separate launch). Read at every update.
+"""
+const VELOCITY_PASS_CONTRAVARIANT = Ref(true)
+
+struct ContravariantVerticalTransport{W, M}
+    velocity :: W
+    momentum :: M
+end
+
+Adapt.adapt_structure(to, c::ContravariantVerticalTransport) =
+    ContravariantVerticalTransport(adapt(to, c.velocity), adapt(to, c.momentum))
+
+# The velocity launch covers the Bounded boundary faces too; the pair is stored over 1:Nx × 1:Ny × 1:Nz only.
+@inline function AtmosphereModels.compute_velocity_pass_auxiliaries!(i, j, k, c::ContravariantVerticalTransport,
+                                                                     grid, dynamics, ρu, ρv, ρw)
+    Nx, Ny, Nz = size(grid)
+    if (i ≤ Nx) & (j ≤ Ny) & (k ≤ Nz)
+        w̃_ijk, ρw̃_ijk = contravariant_vertical_transport(i, j, k, grid, (; ρu, ρv, ρw), dynamics.dry_density)
+        @inbounds begin
+            c.velocity[i, j, k] = w̃_ijk
+            c.momentum[i, j, k] = ρw̃_ijk
+        end
+    end
+    return nothing
+end
+
+@inline function contravariant_vertical_transport(i, j, k, grid, momentum, density)
     # Terrain slopes (∂z/∂x, ∂z/∂y)_r at (Center, Center, Face), from the grid
     # operator (which carries the formulation decay).
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
@@ -243,10 +288,7 @@ end
     ρ_ccf = ℑzᵃᵃᶠ(i, j, k, grid, density)
     w̃_ijk = ρw̃_ijk / ρ_ccf
 
-    @inbounds begin
-        w̃[i, j, k] = w̃_ijk
-        ρw̃[i, j, k] = ρw̃_ijk
-    end
+    return w̃_ijk, ρw̃_ijk
 end
 
 #####
@@ -1284,10 +1326,14 @@ end
 const TERRAIN_FUSED_AUXILIARY = Ref(true)
 
 function AtmosphereModels.compute_auxiliary_state_variables!(model::TerrainCompressibleModel)
-    AtmosphereModels.compute_velocities!(model)
+    fold = TERRAIN_FUSED_AUXILIARY[] & VELOCITY_PASS_CONTRAVARIANT[]
+    dynamics = model.dynamics
+    auxiliaries = fold ? ContravariantVerticalTransport(dynamics.contravariant_vertical_velocity,
+                                                        dynamics.contravariant_vertical_momentum) : nothing
+    AtmosphereModels.compute_velocities!(model, auxiliaries)
     if TERRAIN_FUSED_AUXILIARY[]
         compute_terrain_fused_thermodynamics!(model)
-        compute_contravariant_velocity!(model)
+        compute_contravariant_velocity!(model; interior = !fold)
     else
         AtmosphereModels.compute_auxiliary_thermodynamic_variables!(model)
         AtmosphereModels.compute_auxiliary_dynamics_variables!(model)

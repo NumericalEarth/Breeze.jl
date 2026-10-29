@@ -117,6 +117,8 @@ function __init__()
     FORWARDED_PARTITION[] || @info "Forwarded secant partition off (environment)"
     FUSED_TOTAL_DENSITY[] = switch_from_env("BREEZE_FUSED_TOTAL_DENSITY", true)
     FUSED_TOTAL_DENSITY[] || @info "Total density in the fused thermodynamics pass off (environment)"
+    VELOCITY_PASS_CONTRAVARIANT[] = switch_from_env("BREEZE_VELOCITY_PASS_CONTRAVARIANT", true)
+    VELOCITY_PASS_CONTRAVARIANT[] || @info "Contravariant pair in the velocity launch off (environment)"
     return nothing
 end
 

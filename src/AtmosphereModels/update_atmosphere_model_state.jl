@@ -195,7 +195,7 @@ $(TYPEDSIGNATURES)
 
 Compute velocities from momentum: `u = ρu / ρ` for each velocity component.
 """
-function compute_velocities!(model::AtmosphereModel)
+function compute_velocities!(model::AtmosphereModel, auxiliaries = nothing)
     grid = model.grid
     arch = grid.architecture
 
@@ -222,7 +222,7 @@ function compute_velocities!(model::AtmosphereModel)
             _compute_velocities!,
             model.velocities.u, model.velocities.v, model.velocities.w,
             model.momentum.ρu,   model.momentum.ρv,   model.momentum.ρw,
-            grid, model.dynamics)
+            grid, model.dynamics, auxiliaries)
 
     foreach(mask_immersed_field!, model.velocities)
     fill_halo_regions!(model.velocities)
@@ -367,13 +367,18 @@ function fill_thermodynamic_auxiliaries!(model, ::Nothing)
     return nothing
 end
 
-@kernel function _compute_velocities!(u, v, w, ρu, ρv, ρw, grid, dynamics)
+@kernel function _compute_velocities!(u, v, w, ρu, ρv, ρw, grid, dynamics, auxiliaries)
     i, j, k = @index(Global, NTuple)
     ρ = dynamics_density(dynamics)
     @inbounds u[i, j, k] = ρu[i, j, k] / ℑxᶠᵃᵃ(i, j, k, grid, ρ)
     @inbounds v[i, j, k] = ρv[i, j, k] / ℑyᵃᶠᵃ(i, j, k, grid, ρ)
     @inbounds w[i, j, k] = ρw[i, j, k] / ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+    compute_velocity_pass_auxiliaries!(i, j, k, auxiliaries, grid, dynamics, ρu, ρv, ρw)
 end
+
+# N10 (handoff 08bcc1cf): auxiliary dynamics variables the velocity launch also stores from its own inputs
+# (`nothing`: none; the terrain contravariant pair, see CompressibleEquations).
+@inline compute_velocity_pass_auxiliaries!(i, j, k, ::Nothing, grid, dynamics, ρu, ρv, ρw) = nothing
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
                                                              specific_prognostic_moisture,
