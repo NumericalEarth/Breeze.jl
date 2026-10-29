@@ -12,6 +12,31 @@ function memory_reclaim(arch)
     end
 end
 
+# Enzyme-JAX optimization patterns left out of every benchmark compile
+const EXCLUDED_PASSES = [
+    "greedy_while_loop_batch_fission",
+    "while_elementwise_reduction_to_reduce",
+    "select_comp_iota_const_simplify",
+    "select_comp_iota_to_dus",
+    "concat_to_pad",
+    "dus_to_dynamic_pad",
+]
+
+"""
+    reactant_compile_options(; raise = true)
+
+The `Reactant.CompileOptions` of every benchmark compile: `sync = true`, the
+Enzyme-JAX patterns in `EXCLUDED_PASSES` left out, and the kernels raised to
+StableHLO (`raise = true`, `raise_first = true`) or kept as kernel calls
+(`raise = false`), as the `raise` argument says. `@compile compile_options = …`
+ignores its other keyword options, so `raise`, `raise_first` and `sync` are set here too.
+"""
+reactant_compile_options(; raise::Bool = true) =
+    Reactant.CompileOptions(; raise = raise,
+                              raise_first = raise,
+                              sync = true,
+                              excluded_passes = EXCLUDED_PASSES)
+
 """
     benchmark_time_stepping(model;
                             time_steps = 100,
@@ -32,10 +57,9 @@ Run a benchmark by executing `time_steps` time steps of the given model.
 
 If the model lives on a `ReactantState` architecture, the whole stepping loop
 is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
-program with `Reactant.@compile raise=true raise_first=true sync=true`, leaving
-out the patterns in `EXCLUDED_PASSES` (see `benchmark_compile_options`) —
-compile time is recorded separately. The compiled program is then executed
-once for warmup and once timed. The vanilla path drives `many_time_steps!`
+program with `Reactant.@compile` using `reactant_compile_options()` (raising,
+with the patterns in `EXCLUDED_PASSES` left out) — compile time is recorded separately.
+The compiled program is then executed once for warmup and once timed. The vanilla path drives `many_time_steps!`
 directly through eager `time_step!`.
 
 With `ad=true` (Reactant only) the forward+backward pass `grad_loss!` is
@@ -104,7 +128,7 @@ function benchmark_time_stepping(model;
                 @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true)..."
             end
             compiled_grad!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile compile_options=benchmark_compile_options() grad_loss!(
+                Reactant.@compile compile_options=reactant_compile_options() grad_loss!(
                     model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
             end
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
@@ -113,7 +137,7 @@ function benchmark_time_stepping(model;
                 @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
             end
             compiled_loop!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile compile_options=benchmark_compile_options() step_loop!(model, Δt_FT, time_steps)
+                Reactant.@compile compile_options=reactant_compile_options() step_loop!(model, Δt_FT, time_steps)
             end
             invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
         end
@@ -404,26 +428,6 @@ function synchronize_device(::Oceananigans.Architectures.GPU{MetalBackend})
     Metal.synchronize()
     return nothing
 end
-
-# Enzyme-JAX optimization patterns left out of every benchmark compile
-const EXCLUDED_PASSES = [
-    "select_comp_iota_to_dus",
-]
-
-"""
-    benchmark_compile_options(; raise = true)
-
-The `Reactant.CompileOptions` of every benchmark compile: `sync = true`, the
-Enzyme-JAX patterns in `EXCLUDED_PASSES` left out, and the kernels raised to
-StableHLO (`raise = true`, `raise_first = true`) or kept as kernel calls
-(`raise = false`), as the `raise` argument says. `@compile compile_options = …`
-ignores its other keyword options, so `raise`, `raise_first` and `sync` are set here too.
-"""
-benchmark_compile_options(; raise::Bool = true) =
-    Reactant.CompileOptions(; raise = raise,
-                              raise_first = raise,
-                              sync = true,
-                              excluded_passes = EXCLUDED_PASSES)
 
 """
     timed_reactant_compile(compile)
