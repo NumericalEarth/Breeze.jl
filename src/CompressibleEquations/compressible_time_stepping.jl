@@ -390,7 +390,8 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
             grid,
             model.microphysics,
             model.microphysical_fields,
-            model.thermodynamic_constants)
+            model.thermodynamic_constants,
+            stored_energy_denominator(model))
 
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(dynamics.pressure)
@@ -429,7 +430,8 @@ function AtmosphereModels.compute_auxiliary_state_variables!(model::Compressible
             model.formulation, dynamics, grid,
             model.thermodynamic_constants,
             model.microphysics, model.microphysical_fields,
-            model.moisture_density)
+            model.moisture_density,
+            stored_energy_denominator(model))
 
     foreach(Oceananigans.ImmersedBoundaries.mask_immersed_field!, model.velocities)
     fill_halo_regions!(model.velocities)
@@ -444,7 +446,8 @@ end
 @kernel function _compute_fused_auxiliary_variables!(velocities, momentum, temperature_field, pressure_field,
                                                      dry_density, total_density, specific_prognostic_moisture,
                                                      formulation, dynamics, grid, constants,
-                                                     microphysics, microphysical_fields, moisture_density)
+                                                     microphysics, microphysical_fields, moisture_density,
+                                                     denominator)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -465,25 +468,26 @@ end
         compute_temperature_and_pressure_at!(i, j, k, temperature_field, pressure_field,
                                              dry_density, total_density, formulation, dynamics,
                                              specific_prognostic_moisture, grid, microphysics,
-                                             microphysical_fields, constants)
+                                             microphysical_fields, constants, denominator)
     end
 end
 
 @kernel function _compute_temperature_and_pressure!(temperature_field, pressure_field,
                                                     dry_density, total_density, formulation, dynamics,
                                                     specific_prognostic_moisture, grid, microphysics,
-                                                    microphysical_fields, constants)
+                                                    microphysical_fields, constants, denominator)
     i, j, k = @index(Global, NTuple)
     compute_temperature_and_pressure_at!(i, j, k, temperature_field, pressure_field,
                                          dry_density, total_density, formulation, dynamics,
                                          specific_prognostic_moisture, grid, microphysics,
-                                         microphysical_fields, constants)
+                                         microphysical_fields, constants, denominator)
 end
 
 @inline function compute_temperature_and_pressure_at!(i, j, k, temperature_field, pressure_field,
                                                     dry_density, total_density, formulation, dynamics,
                                                     specific_prognostic_moisture, grid, microphysics,
-                                                    microphysical_fields, constants)
+                                                    microphysical_fields, constants,
+                                                    denominator = nothing)
     @inbounds begin
         ρᵈ = dry_density[i, j, k]    # coupling density (recovers θ = ρθ/ρᵈ)
         ρ  = total_density[i, j, k]  # total air density (mass fractions, EOS, inversion)
@@ -501,7 +505,33 @@ end
         temperature_field[i, j, k] = T
         pressure_field[i, j, k] = p
     end
+
+    store_energy_source_denominator!(denominator, i, j, k, formulation, dynamics, ρᵈ, ρ, q, T, constants)
 end
+
+# P-L6: cᵖᵐ Π of the ρθ tendency's energy source, from the state the tendency rebuilds
+# (θ = ρθ / ρᵈ, q, ρ) at the temperature just stored.
+@inline store_energy_source_denominator!(::Nothing, args...) = nothing
+
+@inline function store_energy_source_denominator!(denominator, i, j, k,
+                                                  formulation::LiquidIcePotentialTemperatureFormulation,
+                                                  dynamics, ρᵈ, ρ, q, T, constants)
+    θ = @inbounds formulation.potential_temperature_density[i, j, k] / ρᵈ
+    𝒰 = LiquidIceDensityState(θ, q, standard_pressure(dynamics), ρ, formulation.temperature_solver)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    @inbounds denominator[i, j, k] = cᵖᵐ * exner_function_at_temperature(𝒰, T, constants)
+    return nothing
+end
+
+const ENERGY_SOURCE_DENOMINATORS = IdDict{Any, Any}()
+const STORED_ENERGY_DENOMINATOR = Ref(true)
+
+function PotentialTemperatureFormulations.energy_source_denominator_field(model::AtmosphereModel{<:CompressibleDynamics, <:LiquidIcePotentialTemperatureFormulation})
+    STORED_ENERGY_DENOMINATOR[] || return nothing
+    return get!(() -> CenterField(model.grid), ENERGY_SOURCE_DENOMINATORS, model.temperature)
+end
+
+stored_energy_denominator(model) = PotentialTemperatureFormulations.energy_source_denominator_field(model)
 
 # Dispatch on formulation type for the coupled temperature-pressure computation
 

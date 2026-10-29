@@ -72,7 +72,22 @@ end
 # `BREEZE_STORED_EXNER_TEMPERATURE=false` (read at module load) restores the inversion.
 const STORED_EXNER_TEMPERATURE = Ref(true)
 
-exner_temperature_source(model) = STORED_EXNER_TEMPERATURE[] ? model.temperature : nothing
+# P-L6 (handoff f42750b8): cᵖᵐ Π stored by the temperature-and-pressure pass of the same update
+# (`energy_source_denominator_field`, extended by CompressibleEquations; `nothing` elsewhere or when
+# `BREEZE_STORED_ENERGY_DENOMINATOR=false`).
+struct StoredEnergySourceDenominator{D}
+    denominator :: D
+end
+
+Adapt.adapt_structure(to, s::StoredEnergySourceDenominator) = StoredEnergySourceDenominator(adapt(to, s.denominator))
+
+energy_source_denominator_field(model) = nothing
+
+function exner_temperature_source(model)
+    denominator = energy_source_denominator_field(model)
+    isnothing(denominator) || return StoredEnergySourceDenominator(denominator)
+    return STORED_EXNER_TEMPERATURE[] ? model.temperature : nothing
+end
 
 @inline tendency_exner_function(𝒰, i, j, k, temperature_field, constants) = exner_function(𝒰, constants)
 @inline tendency_exner_function(𝒰::LiquidIceDensityState, i, j, k, ::Nothing, constants) = exner_function(𝒰, constants)
@@ -100,10 +115,8 @@ exner_temperature_source(model) = STORED_EXNER_TEMPERATURE[] ? model.temperature
 
     potential_temperature = formulation.potential_temperature
     ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (advection/diffusion carrier)
-    𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
-                                 microphysics, microphysical_fields, specific_prognostic_moisture)
-    Π = tendency_exner_function(𝒰, i, j, k, temperature_field, constants)
-    cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
+    cᵖᵐΠ = energy_source_denominator(temperature_field, i, j, k, grid, formulation, dynamics,
+                                     microphysics, microphysical_fields, specific_prognostic_moisture, constants)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
     FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
@@ -113,9 +126,21 @@ exner_temperature_source(model) = STORED_EXNER_TEMPERATURE[] ? model.temperature
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
-             + (FρE + div_ℐ) / (cᵖᵐ * Π)
+             + (FρE + div_ℐ) / cᵖᵐΠ
     )
 end
+
+@inline function energy_source_denominator(source, i, j, k, grid, formulation, dynamics,
+                                           microphysics, microphysical_fields, specific_prognostic_moisture, constants)
+    𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
+                                 microphysics, microphysical_fields, specific_prognostic_moisture)
+    Π = tendency_exner_function(𝒰, i, j, k, source, constants)
+    cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
+    return cᵖᵐ * Π
+end
+
+@inline energy_source_denominator(source::StoredEnergySourceDenominator, i, j, k, args...) =
+    @inbounds source.denominator[i, j, k]
 
 # Thermodynamic state at cell (i, j, k) from the prognostic fields: the total density (mass
 # fractions), the prognostic moisture, and the microphysical state.

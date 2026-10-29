@@ -712,7 +712,8 @@ function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleMod
             grid,
             model.microphysics,
             model.microphysical_fields,
-            model.thermodynamic_constants)
+            model.thermodynamic_constants,
+            stored_energy_denominator(model))
 
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(dynamics.pressure)

@@ -66,7 +66,7 @@ using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 using Breeze.Solvers: NewtonSolver
 using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, MoistureMassFractions,
                              reject_renamed_surface_pressure,
-                             vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState
+                             vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState, exner_function_at_temperature
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                base_pressure, standard_pressure, thermodynamic_density,
@@ -86,5 +86,10 @@ include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
+
+function __init__()
+    STORED_ENERGY_DENOMINATOR[] = lowercase(get(ENV, "BREEZE_STORED_ENERGY_DENOMINATOR", "true")) != "false"
+    return nothing
+end
 
 end # module
