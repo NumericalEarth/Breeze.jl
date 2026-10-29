@@ -98,11 +98,11 @@ end
 # transport velocity wᵗ, with the condensate's own advection scheme, exactly the mass the tracer
 # tendency moves (`sedimentation_mass_fluxes`) — and
 #
-#   eˣ = hˣ(T_up) + g z_face,   hˡ = cˡ T,   hⁱ = cⁱ T + ℒˡ₀ − ℒⁱ₀,
+#   eˣ = hˣ(T_up) + g z_face,   hˡ = cˡ (T − T₀),   hⁱ = cⁱ T − cˡ T₀ + ℒˡ₀ − ℒⁱ₀,
 #
 # taken from the cell the flux drains (upwind of its velocity) at the height of the face. The
 # tendency is the divergence of that flux, so ∫ρE changes only by what leaves through the bottom:
-# cˡ T₁ (or cⁱ T₁ + ℒˡ₀ − ℒⁱ₀) per unit precipitated mass, since g z = 0 at the surface. A cell the
+# cˡ (T₁ − T₀) (or cⁱ T₁ − cˡ T₀ + ℒˡ₀ − ℒⁱ₀) per unit precipitated mass, with T₀ the energy origin, since g z = 0 at the surface. A cell the
 # condensate passes through gains g Δz per unit mass, the frictional dissipation of the fall.
 
 function add_total_energy_sedimentation_tendency!(GρE, model, tracer_transport_velocity)
@@ -111,51 +111,52 @@ function add_total_energy_sedimentation_tendency!(GρE, model, tracer_transport_
     grid = model.grid
     launch!(grid.architecture, grid, :xyz, _add_total_energy_sedimentation_tendency!,
             GρE, grid, condensates, tracer_transport_velocity, explicit_condensate_mass_fluxes,
-            total_density(model.dynamics), model.temperature, model.thermodynamic_constants)
+            total_density(model.dynamics), model.temperature, model.formulation.reference_temperature,
+            model.thermodynamic_constants)
     return nothing
 end
 
-@kernel function _add_total_energy_sedimentation_tendency!(GρE, grid, condensates, wᵗ, mass_fluxes, ρ, T, constants)
+@kernel function _add_total_energy_sedimentation_tendency!(GρE, grid, condensates, wᵗ, mass_fluxes, ρ, T, T₀, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds GρE[i, j, k] += total_energy_sedimentation_tendency(i, j, k, grid, condensates, wᵗ,
-                                                                   mass_fluxes, ρ, T, constants)
+                                                                   mass_fluxes, ρ, T, T₀, constants)
 end
 
-@inline function total_energy_sedimentation_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, T, constants)
-    Φ⁻, Φ⁺ = condensate_energy_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, T, constants)
+@inline function total_energy_sedimentation_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, T, T₀, constants)
+    Φ⁻, Φ⁺ = condensate_energy_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, T, T₀, constants)
     ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
     ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
     return - V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻)
 end
 
-@inline condensate_energy_fluxes(i, j, k, grid, ::Tuple{}, wᵗ, mass_fluxes, ρ, T, constants) = (zero(grid), zero(grid))
+@inline condensate_energy_fluxes(i, j, k, grid, ::Tuple{}, wᵗ, mass_fluxes, ρ, T, T₀, constants) = (zero(grid), zero(grid))
 
-@inline function condensate_energy_fluxes(i, j, k, grid, condensates::Tuple, wᵗ, mass_fluxes, ρ, T, constants)
+@inline function condensate_energy_fluxes(i, j, k, grid, condensates::Tuple, wᵗ, mass_fluxes, ρ, T, T₀, constants)
     condensate = first(condensates)
     F⁻, F⁺ = mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ)
     f = condensate.liquid_fraction
-    Φ⁻ = condensate_energy_flux(i, j, k,     grid, wᵗ, condensate.velocity, F⁻, f, T, constants)
-    Φ⁺ = condensate_energy_flux(i, j, k + 1, grid, wᵗ, condensate.velocity, F⁺, f, T, constants)
-    rest⁻, rest⁺ = condensate_energy_fluxes(i, j, k, grid, Base.tail(condensates), wᵗ, mass_fluxes, ρ, T, constants)
+    Φ⁻ = condensate_energy_flux(i, j, k,     grid, wᵗ, condensate.velocity, F⁻, f, T, T₀, constants)
+    Φ⁺ = condensate_energy_flux(i, j, k + 1, grid, wᵗ, condensate.velocity, F⁺, f, T, T₀, constants)
+    rest⁻, rest⁺ = condensate_energy_fluxes(i, j, k, grid, Base.tail(condensates), wᵗ, mass_fluxes, ρ, T, T₀, constants)
     return Φ⁻ + rest⁻, Φ⁺ + rest⁺
 end
 
 # The energy carried through face k by the mass fluxes F = (F(W), F(wᵗ)) of a condensate with
 # liquid fraction f: the sedimentation part of the flux, each mass flux with the energy of the cell
 # it drains.
-@inline function condensate_energy_flux(i, j, k, grid, wᵗ, w, F, f, T, constants)
+@inline function condensate_energy_flux(i, j, k, grid, wᵗ, w, F, f, T, T₀, constants)
     Fᵂ, Fᵗ = F
     @inbounds wᵗₖ = wᵗ[i, j, k]
     @inbounds Wₖ = wᵗₖ + w[i, j, k]
     z = znode(i, j, k, grid, c, c, Face())
-    eᵂ = falling_condensate_energy(i, j, k, Wₖ, f, T, z, constants)
-    eᵗ = falling_condensate_energy(i, j, k, wᵗₖ, f, T, z, constants)
+    eᵂ = falling_condensate_energy(i, j, k, Wₖ, f, T, T₀, z, constants)
+    eᵗ = falling_condensate_energy(i, j, k, wᵗₖ, f, T, T₀, z, constants)
     return eᵂ * Fᵂ - eᵗ * Fᵗ
 end
 
 # Enthalpy plus potential energy per unit mass of condensate crossing face k at velocity w, with
 # the temperature of the cell below the face for an upward velocity and above it otherwise.
-@inline function falling_condensate_energy(i, j, k, w, f, T, z, constants)
+@inline function falling_condensate_energy(i, j, k, w, f, T, T₀, z, constants)
     k_upwind = ifelse(w > 0, k - 1, k)
     @inbounds T_upwind = T[i, j, k_upwind]
     cˡ = constants.liquid.heat_capacity
@@ -165,7 +166,7 @@ end
     hˡ = cˡ * T_upwind
     hⁱ = cⁱ * T_upwind + ℒˡ₀ - ℒⁱ₀
     g = constants.gravitational_acceleration
-    return f * hˡ + (1 - f) * hⁱ + g * z
+    return f * hˡ + (1 - f) * hⁱ - cˡ * T₀ + g * z
 end
 
 # The remainder of the sedimentation flux that the adaptive implicit solve applies to the condensate
@@ -178,14 +179,14 @@ function AtmosphereModels.implicit_sedimentation_step!(model, Δt, velocities, f
     launch!(arch, grid, :xyz, _implicit_total_energy_sedimentation_step!,
             formulation.energy_density, grid, kernel_time_step(arch, grid, Δt), condensates, velocities.w,
             implicit_condensate_mass_fluxes, total_density(model.dynamics), model.temperature,
-            model.thermodynamic_constants)
+            formulation.reference_temperature, model.thermodynamic_constants)
     return nothing
 end
 
-@kernel function _implicit_total_energy_sedimentation_step!(ρE, grid, Δt, condensates, wᵗ, mass_fluxes, ρ, T, constants)
+@kernel function _implicit_total_energy_sedimentation_step!(ρE, grid, Δt, condensates, wᵗ, mass_fluxes, ρ, T, T₀, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds ρE[i, j, k] += Δt * total_energy_sedimentation_tendency(i, j, k, grid, condensates, wᵗ,
-                                                                      mass_fluxes, ρ, T, constants)
+                                                                      mass_fluxes, ρ, T, T₀, constants)
 end
 
 #####
@@ -233,7 +234,8 @@ AtmosphereModels.set_thermodynamic_variable!(model::TotalEnergyModel, ::Val{:ρE
 $(TYPEDSIGNATURES)
 
 Set the total energy density from the temperature ``T``, the moisture, the total density and the
-velocities: ``ρE = ρ (cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ + K + g z)``. `set!` applies the velocities
+velocities: ``ρE = ρ (cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ + K + g z) - T₀ (ρᵈ cᵖᵈ + ρqᵗ cˡ)``, with ``T₀`` the
+energy origin of the formulation. `set!` applies the velocities
 before the temperature, so that the kinetic energy is included; setting the velocities in a later
 call to `set!` leaves ``ρE`` unchanged and so changes the temperature.
 """
@@ -284,13 +286,13 @@ function set_energy_density_from_temperature!(model)
     launch!(grid.architecture, grid, :xyz, _energy_density_from_temperature!,
             model.formulation.energy_density, grid, model.temperature, specific_prognostic_moisture(model),
             model.dynamics, model.microphysics, model.microphysical_fields, model.velocities,
-            model.thermodynamic_constants)
+            model.formulation.reference_temperature, model.thermodynamic_constants)
     return nothing
 end
 
 @kernel function _energy_density_from_temperature!(ρE, grid, temperature_field, specific_prognostic_moisture,
                                                    dynamics, microphysics, microphysical_fields, velocities,
-                                                   constants)
+                                                   T₀, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         ρ = total_density(dynamics)[i, j, k]
@@ -302,5 +304,6 @@ end
     K = kinetic_energyᶜᶜᶜ(i, j, k, grid, velocities)
     g = constants.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
-    @inbounds ρE[i, j, k] = ρ * (𝒰.internal_energy + K + g * z)
+    @inbounds ρᵈ = dynamics_density(dynamics)[i, j, k]
+    @inbounds ρE[i, j, k] = ρ * (𝒰.internal_energy + K + g * z) - energy_origin_offset(T₀, ρᵈ, ρ, constants)
 end

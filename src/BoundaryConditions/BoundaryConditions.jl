@@ -30,7 +30,7 @@ using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_de
                           standard_pressure, default_drag_surface_temperature,
                           moisture_specific_name, thermodynamic_density_name,
                           total_energy_density_name, moisture_prognostic_name,
-                          total_moisture_density_name, liquid_ice_exner_exponent
+                          total_moisture_density_name, liquid_ice_exner_exponent, reference_temperature
 using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
                                       virtual_potential_temperature
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
@@ -160,7 +160,7 @@ function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(bound
 
     # Water crossing a wall carries its enthalpy into a total-energy variable (a no-op otherwise)
     return couple_vapor_enthalpy_bcs(NamedTuple(materialized), Val(thermodynamic_density_name(formulation)),
-                                     microphysics, thermodynamic_constants)
+                                     formulation, microphysics, thermodynamic_constants)
 end
 
 #####

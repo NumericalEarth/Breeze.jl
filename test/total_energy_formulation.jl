@@ -3,7 +3,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze: BulkSensibleHeatFlux, BulkVaporFlux, BulkDrag, PolynomialCoefficient
 using Breeze.Thermodynamics: InternalEnergyDensityState, MoistureMassFractions, temperature, with_temperature,
-                             mixture_gas_constant, mixture_isochoric_heat_capacity, liquid_referenced_latent_energy,
+                             mixture_gas_constant, mixture_heat_capacity, mixture_isochoric_heat_capacity,
+                             liquid_referenced_latent_energy,
                              absolute_zero_latent_heat
 using Breeze.CompressibleEquations: acoustic_linearization
 using Breeze.TotalEnergyFormulations: kinetic_energyᶜᶜᶜ
@@ -80,10 +81,11 @@ end
     @test interior(model.formulation.total_enthalpy) ≈ (interior(ρE) .+ interior(p)) ./ interior(ρᵈ)
 end
 
-@testset "Acoustic linearization of the total energy" begin
+@testset "Acoustic linearization of the total energy [T₀ = $T₀]" for T₀ in (0, 273.16)
     FT = Float64
     grid = RectilinearGrid(CPU(); size=(6, 6, 8), x=(0, 2e3), y=(0, 2e3), z=(0, 4e3), halo=(5, 5, 5))
-    model = AtmosphereModel(grid; dynamics=compressible_dynamics(), formulation=:TotalEnergy,
+    model = AtmosphereModel(grid; dynamics=compressible_dynamics(),
+                            formulation=TotalEnergyFormulation(reference_temperature=T₀),
                             microphysics=one_moment_microphysics(FT))
     ref = model.dynamics.reference_state
     set!(model; θ=300, qᵗ=0.012, qᶜˡ=1e-3, u=15, v=-7, w=2, ρ=ref.density)
@@ -94,7 +96,7 @@ end
                                      model.microphysics, model.microphysical_fields,
                                      Breeze.specific_prognostic_moisture(model), model.velocities)
 
-    # Pressure as a function of (ρᵈ, ρE) at fixed momentum and water densities
+    # Pressure as a function of (ρᵈ, ρE) at fixed momentum and water per unit dry mass
     ρ₀ = model.dynamics.total_density[i, j, k]
     ρᵈ₀ = model.dynamics.dry_density[i, j, k]
     ρE₀ = model.formulation.energy_density[i, j, k]
@@ -107,10 +109,13 @@ end
     m² = 2 * K₀ * ρᵈ₀^2 # |ρᵈ𝐮|²
     gz = constants.gravitational_acceleration * znode(i, j, k, grid, Center(), Center(), Center())
 
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cˡ = constants.liquid.heat_capacity
     function pressure(ρᵈ, ρE)
-        ρ = ρᵈ + ρw
-        q = MoistureMassFractions(ρq[1] / ρ, ρq[2] / ρ, ρq[3] / ρ)
-        𝓊 = ρE / ρ - m² / (2ρᵈ^2) - gz
+        r = ρᵈ / ρᵈ₀ # the water moves with the dry air
+        ρ = ρᵈ + r * ρw
+        q = MoistureMassFractions(r * ρq[1] / ρ, r * ρq[2] / ρ, r * ρq[3] / ρ)
+        𝓊 = (ρE + T₀ * (ρᵈ * cᵖᵈ + r * ρw * cˡ)) / ρ - m² / (2ρᵈ^2) - gz
         T = temperature(InternalEnergyDensityState(𝓊, q, ρ), constants)
         return ρ * mixture_gas_constant(q, constants) * T
     end
@@ -123,13 +128,21 @@ end
     @test C ≈ ∂p∂ρE rtol=1e-7
     @test C * E ≈ ∂p∂ρᵈ rtol=1e-6
     @test χ̂ ≈ (ρE₀ + model.dynamics.pressure[i, j, k]) / ρᵈ₀
+
+    # C (Ĥ + E) is the squared sound speed per unit dry mass, whatever the origin
+    p₀ = model.dynamics.pressure[i, j, k]
+    T = model.temperature[i, j, k]
+    γᵐRᵐT = C * mixture_heat_capacity(q₀, constants) * T # (Rᵐ / cᵛᵐ) cᵖᵐ T
+    @test C * (χ̂ + E) ≈ (γᵐRᵐT + 2C * K₀) * ρ₀ / ρᵈ₀ rtol=1e-12
 end
 
-@testset "Closed box conserves energy, dry mass and water [$FT]" for FT in test_float_types()
+@testset "Closed box conserves energy, dry mass and water [$FT, T₀ = $T₀]" for FT in test_float_types(), T₀ in (0, 273.16)
     grid = RectilinearGrid(default_arch, FT; size=(16, 16, 24), x=(0, 4e3), y=(0, 4e3), z=(0, 6e3), halo=(5, 5, 5))
     closure = SmagorinskyLilly(VerticallyImplicitTimeDiscretization(); C=0.2)
-    model = AtmosphereModel(grid; dynamics=compressible_dynamics(), formulation=:TotalEnergy, closure,
+    model = AtmosphereModel(grid; dynamics=compressible_dynamics(), closure,
+                            formulation=TotalEnergyFormulation(reference_temperature=T₀),
                             microphysics=one_moment_microphysics(FT), advection=WENO(order=5))
+    @test reference_temperature(model.formulation) == T₀
 
     ref = model.dynamics.reference_state
     θᵢ(x, y, z) = 300 + 2 * exp(-((x - 2e3)^2 + (y - 2e3)^2 + (z - 1.5e3)^2) / 600^2)
@@ -158,14 +171,42 @@ end
     @test !any(isnan, parent(ρE))
 end
 
-@testset "Wall fluxes carry the enthalpy of the evaporated water" begin
+@testset "The energy origin does not change the solution" begin
+    grid = RectilinearGrid(default_arch; size=(16, 16, 24), x=(0, 4e3), y=(0, 4e3), z=(0, 6e3), halo=(5, 5, 5))
+    closure = SmagorinskyLilly(VerticallyImplicitTimeDiscretization(); C=0.2)
+    θᵢ(x, y, z) = 300 + 2 * exp(-((x - 2e3)^2 + (y - 2e3)^2 + (z - 1.5e3)^2) / 600^2)
+    qᵢ(x, y, z) = 0.016 * exp(-z / 2500)
+    qʳᵢ(x, y, z) = 1e-3 * exp(-((x - 2e3)^2 + (y - 2e3)^2 + (z - 4.5e3)^2) / 500^2)
+
+    temperatures = map((0, 273.16)) do T₀
+        model = AtmosphereModel(grid; dynamics=compressible_dynamics(), closure,
+                                formulation=TotalEnergyFormulation(reference_temperature=T₀),
+                                microphysics=one_moment_microphysics(Float64), advection=WENO(order=5))
+        set!(model; θ=θᵢ, qᵗ=qᵢ, qʳ=qʳᵢ, u=1, v=-0.5, ρ=model.dynamics.reference_state.density)
+        T⁰ = Array(interior(model.temperature))
+        simulation = Simulation(model; Δt=2, stop_iteration=20, verbose=false)
+        run!(simulation)
+        (T⁰, Array(interior(model.temperature)))
+    end
+
+    (T⁰₀, T₀), (T⁰₁, T₁) = temperatures
+    @test maximum(abs, T⁰₀ .- T⁰₁) / 300 < 1e-12 # the initial state is identical
+    # WENO reconstructs the shifted Ĥ, and the water moves with its own velocity and density, so the
+    # solutions differ by the transport of the origin offset T₀ (qᵈ cᵖᵈ + qᵗ cˡ): small, not round-off
+    difference = maximum(abs, T₀ .- T₁)
+    @info "Energy origin: max |T(T₀ = 0) - T(T₀ = 273.16)| after 20 steps = $difference K"
+    @test difference < 0.1
+end
+
+@testset "Wall fluxes carry the enthalpy of the evaporated water [T₀ = $T₀]" for T₀ in (0, 273.16)
     grid = RectilinearGrid(default_arch; size=(8, 8, 16), x=(0, 4e3), y=(0, 4e3), z=(0, 4e3), halo=(5, 5, 5))
     coefficient = PolynomialCoefficient(roughness_length=1.5e-4)
     Tˢ = 302
     boundary_conditions = (ρE = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(; coefficient, gustiness=1, surface_temperature=Tˢ)),
                            ρqᵗ = FieldBoundaryConditions(bottom=BulkVaporFlux(; coefficient, gustiness=1, surface_temperature=Tˢ)),
                            ρu = FieldBoundaryConditions(bottom=BulkDrag(; coefficient, gustiness=1, surface_temperature=Tˢ)))
-    model = AtmosphereModel(grid; dynamics=compressible_dynamics(), formulation=:TotalEnergy, boundary_conditions,
+    model = AtmosphereModel(grid; dynamics=compressible_dynamics(), boundary_conditions,
+                            formulation=TotalEnergyFormulation(reference_temperature=T₀),
                             closure=SmagorinskyLilly(), advection=WENO(order=5))
     ref = model.dynamics.reference_state
     set!(model; θ=(x, y, z) -> 300 + 0.01 * sin(2π * x / 4e3), qᵗ=(x, y, z) -> 0.012 * exp(-z / 2e3), u=3, ρ=ref.density)
@@ -178,7 +219,8 @@ end
     𝒬ᵀ = Field(BoundaryConditionOperation(static_energy_density(model), :bottom, model))
     Jᵛ = Field(BoundaryConditionOperation(model.moisture_density, :bottom, model))
     T₁ = Array(interior(model.temperature, :, :, 1:1))
-    expected = Array(interior(𝒬ᵀ)) .+ Array(interior(Jᵛ)) .* (cᵖᵛ .* T₁ .+ ℒˡ₀)
+    cˡ = constants.liquid.heat_capacity
+    expected = Array(interior(𝒬ᵀ)) .+ Array(interior(Jᵛ)) .* (cᵖᵛ .* T₁ .+ ℒˡ₀ .- cˡ * T₀)
     @test Array(interior(𝒬ᴱ)) ≈ expected rtol=1e-14
     @test minimum(interior(Jᵛ)) > 0 # evaporating
 

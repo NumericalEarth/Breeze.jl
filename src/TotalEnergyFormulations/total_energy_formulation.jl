@@ -32,6 +32,19 @@ Phase changes, expansion and dissipation exchange energy within ``E`` and need n
 ``T = (E - K - g z - ℒˡ₀ qᵛ - (ℒˡ₀ - ℒⁱ₀) qⁱ) / cᵛᵐ``, and the pressure from ``p = ρ Rᵐ T``.
 This is the formulation of [Satoh (2003)](@cite Satoh2003).
 
+The origin of the energy is set by `reference_temperature` ``T₀``: liquid water has zero internal
+energy and dry air zero enthalpy at ``T₀``, which shifts every water phase uniformly by ``cˡ T₀``
+and dry air by ``cᵖᵈ T₀``,
+
+```math
+ρE_{T₀} = ρE_{0} - T₀ (ρᵈ cᵖᵈ + ρqᵗ cˡ) .
+```
+
+The latent heats are unchanged, and since dry mass and water are conserved so is ``∫ρE`` for any
+``T₀``. With ``T₀ ≈ 273 K`` (the convention of ClimaAtmos) ``E`` is several times smaller in
+magnitude, which reduces round-off; ``T₀ = 0`` (the default) is the origin of the stored-energy
+budget written above.
+
 Energy inputs supplied under the energy key `ρE` (boundary fluxes, forcings) apply directly,
 and water crossing a wall adds its enthalpy ``cᵖᵛ T₁ + ℒˡ₀`` per unit mass. The formulation is
 supported by `CompressibleDynamics` only. `formulation = :TotalEnergy` (or `:E`, `:ρE`) selects it.
@@ -39,28 +52,58 @@ supported by `CompressibleDynamics` only. `formulation = :TotalEnergy` (or `:E`,
 ```jldoctest
 using Breeze
 
-TotalEnergyFormulation()
+TotalEnergyFormulation(reference_temperature = 273.16)
 
 # output
 TotalEnergyFormulation
+└── reference_temperature: 273.16
 ```
 """
-struct TotalEnergyFormulation{E, U, H, S, X}
+struct TotalEnergyFormulation{E, U, H, S, X, T}
     energy_density :: E           # ρE (prognostic)
-    internal_energy :: U          # 𝓊 = ρE / ρ - K - g z (diagnostic)
+    internal_energy :: U          # 𝓊 = ρE / ρ - K - g z + T₀ (qᵈ cᵖᵈ + qᵗ cˡ), from liquid water at 0 K (diagnostic)
     total_enthalpy :: H           # Ĥ = (ρE + p) / ρᵈ (diagnostic, advected)
-    static_energy :: S            # ŝ = cᵖᵐ T + g z + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ (diagnostic, diffused)
+    static_energy :: S            # ŝ - T₀ (qᵈ cᵖᵈ + qᵗ cˡ) (diagnostic, diffused)
     diffusion_workspace :: X      # ρᵈ ŝ, the variable of the vertically implicit diffusion solve
+    reference_temperature :: T    # T₀, the energy origin
 end
 
-TotalEnergyFormulation() = TotalEnergyFormulation(nothing, nothing, nothing, nothing, nothing)
+"""
+$(TYPEDSIGNATURES)
+
+Return a `TotalEnergyFormulation` whose energy origin is `reference_temperature` ``T₀``: liquid
+water has zero internal energy and dry air zero enthalpy at ``T₀`` (default `0`).
+"""
+TotalEnergyFormulation(; reference_temperature = 0) =
+    TotalEnergyFormulation(nothing, nothing, nothing, nothing, nothing, reference_temperature)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the temperature ``T₀`` that sets the energy origin of `formulation`: liquid water has zero
+internal energy and dry air zero enthalpy at ``T₀``. The stored energy of a `TotalEnergyFormulation`
+model is ``ρE = ρE_{0} - T₀ (ρᵈ cᵖᵈ + ρqᵗ cˡ)`` with ``ρE_{0}`` measured from liquid water at zero kelvin.
+"""
+AtmosphereModels.reference_temperature(formulation::TotalEnergyFormulation) = formulation.reference_temperature
+AtmosphereModels.reference_temperature(::Val) = 0
+
+"""
+$(TYPEDSIGNATURES)
+
+The energy per unit volume by which the origin ``T₀`` lowers the stored energy,
+``T₀ (ρᵈ cᵖᵈ + ρqᵗ cˡ)`` with ``ρqᵗ = ρ - ρᵈ`` the total water density. It depends on the
+composition through the total water only, so a phase change leaves it unchanged.
+"""
+@inline energy_origin_offset(T₀, ρᵈ, ρ, constants) =
+    T₀ * (ρᵈ * constants.dry_air.heat_capacity + (ρ - ρᵈ) * constants.liquid.heat_capacity)
 
 Adapt.adapt_structure(to, formulation::TotalEnergyFormulation) =
     TotalEnergyFormulation(adapt(to, formulation.energy_density),
                            adapt(to, formulation.internal_energy),
                            adapt(to, formulation.total_enthalpy),
                            adapt(to, formulation.static_energy),
-                           adapt(to, formulation.diffusion_workspace))
+                           adapt(to, formulation.diffusion_workspace),
+                           formulation.reference_temperature)
 
 function BoundaryConditions.fill_halo_regions!(formulation::TotalEnergyFormulation)
     fill_halo_regions!(formulation.total_enthalpy)
@@ -111,7 +154,8 @@ AtmosphereModels.additional_thermodynamic_field_names(::TotalEnergyFormulation) 
 AtmosphereModels.thermodynamic_density_name(::TotalEnergyFormulation) = :ρE
 AtmosphereModels.thermodynamic_density(formulation::TotalEnergyFormulation) = formulation.energy_density
 AtmosphereModels.with_thermodynamic_density(f::TotalEnergyFormulation, ρE) =
-    TotalEnergyFormulation(ρE, f.internal_energy, f.total_enthalpy, f.static_energy, f.diffusion_workspace)
+    TotalEnergyFormulation(ρE, f.internal_energy, f.total_enthalpy, f.static_energy, f.diffusion_workspace,
+                           f.reference_temperature)
 
 AtmosphereModels.prognostic_thermodynamic_field_names(::TotalEnergyNames) = tuple(:ρE)
 AtmosphereModels.additional_thermodynamic_field_names(::TotalEnergyNames) = (:𝓊, :Ĥ, :ŝ)
@@ -144,14 +188,16 @@ const FlatCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any
 AtmosphereModels.materialize_formulation(::TotalEnergyFormulation, dynamics::CompressibleDynamics, grid, boundary_conditions) =
     throw(ArgumentError("TotalEnergyFormulation is not yet supported on terrain-following grids."))
 
-function AtmosphereModels.materialize_formulation(::TotalEnergyFormulation, dynamics::FlatCompressibleDynamics,
+function AtmosphereModels.materialize_formulation(formulation::TotalEnergyFormulation, dynamics::FlatCompressibleDynamics,
                                                   grid, boundary_conditions)
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρE)
     internal_energy = CenterField(grid)
     total_enthalpy = CenterField(grid)
     static_energy = CenterField(grid)
     diffusion_workspace = CenterField(grid)
-    return TotalEnergyFormulation(energy_density, internal_energy, total_enthalpy, static_energy, diffusion_workspace)
+    T₀ = convert(eltype(grid), formulation.reference_temperature)
+    return TotalEnergyFormulation(energy_density, internal_energy, total_enthalpy, static_energy,
+                                  diffusion_workspace, T₀)
 end
 
 #####
@@ -167,20 +213,25 @@ const TotalEnergyModel = AtmosphereModel{<:Any, <:TotalEnergyFormulation}
 function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(model::TotalEnergyModel)
     grid = model.grid
     formulation = model.formulation
-    g = model.thermodynamic_constants.gravitational_acceleration
     launch!(grid.architecture, grid, :xyz, _compute_internal_energy!,
-            formulation.internal_energy, grid, formulation.energy_density,
-            total_density(model.dynamics), model.velocities, g)
+            formulation.internal_energy, grid, formulation.energy_density, total_density(model.dynamics),
+            dynamics_density(model.dynamics), model.velocities, formulation.reference_temperature,
+            model.thermodynamic_constants)
 
     # Then diagnose the temperature (with any saturation adjustment) as for every formulation
     return invoke(AtmosphereModels.compute_auxiliary_thermodynamic_variables!, Tuple{AtmosphereModel}, model)
 end
 
-@kernel function _compute_internal_energy!(𝓊, grid, ρE, ρ, velocities, g)
+@kernel function _compute_internal_energy!(𝓊, grid, ρE, ρ, ρᵈ, velocities, T₀, constants)
     i, j, k = @index(Global, NTuple)
     K = kinetic_energyᶜᶜᶜ(i, j, k, grid, velocities)
     z = znode(i, j, k, grid, c, c, c)
-    @inbounds 𝓊[i, j, k] = ρE[i, j, k] / ρ[i, j, k] - K - g * z
+    g = constants.gravitational_acceleration
+    @inbounds begin
+        ρᵢ = ρ[i, j, k]
+        ρE₀ = ρE[i, j, k] + energy_origin_offset(T₀, ρᵈ[i, j, k], ρᵢ, constants)
+        𝓊[i, j, k] = ρE₀ / ρᵢ - K - g * z
+    end
 end
 
 #####
@@ -191,7 +242,8 @@ end
 $(TYPEDSIGNATURES)
 
 Build an `InternalEnergyDensityState` at grid point `(i, j, k)` from the internal energy of the
-`formulation`, the total density of the `dynamics`, and the moisture mass fractions `q`.
+`formulation` (measured from liquid water at zero kelvin, whatever the formulation's origin),
+the total density of the `dynamics`, and the moisture mass fractions `q`.
 """
 @inline function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid, formulation::TotalEnergyFormulation,
                                                                dynamics, q)
@@ -234,12 +286,12 @@ end
 Base.summary(::TotalEnergyFormulation) = "TotalEnergyFormulation"
 
 function Base.show(io::IO, formulation::TotalEnergyFormulation)
-    print(io, summary(formulation))
+    print(io, summary(formulation), '\n')
     if formulation.energy_density !== nothing
-        print(io, '\n')
         print(io, "├── energy_density: ", prettysummary(formulation.energy_density), '\n')
         print(io, "├── internal_energy: ", prettysummary(formulation.internal_energy), '\n')
         print(io, "├── total_enthalpy: ", prettysummary(formulation.total_enthalpy), '\n')
-        print(io, "└── static_energy: ", prettysummary(formulation.static_energy))
+        print(io, "├── static_energy: ", prettysummary(formulation.static_energy), '\n')
     end
+    print(io, "└── reference_temperature: ", prettysummary(formulation.reference_temperature))
 end

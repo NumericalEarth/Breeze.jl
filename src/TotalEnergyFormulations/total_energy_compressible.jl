@@ -9,7 +9,8 @@ $(TYPEDSIGNATURES)
 
 Diagnose temperature, pressure, the advected total enthalpy per unit dry mass
 ``Ĥ = (ρE + p) / ρᵈ`` and the diffused static energy ``ŝ = cᵖᵐ T + g z + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ``
-of a compressible total-energy model. The temperature is the closed form
+of a compressible total-energy model, both measured from the formulation's energy origin ``T₀``
+(``ŝ`` less ``T₀ (qᵈ cᵖᵈ + qᵗ cˡ)``). The temperature is the closed form
 ``T = (𝓊 - ℒˡ₀ qᵛ - (ℒˡ₀ - ℒⁱ₀) qⁱ) / cᵛᵐ`` at the moisture mass fractions left by any saturation
 adjustment, and the pressure ``p = ρ Rᵐ T``.
 """
@@ -49,7 +50,8 @@ end
 
     g = constants.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
-    ŝ = mixture_heat_capacity(q, constants) * T + g * z + liquid_referenced_latent_energy(q, constants)
+    ŝ₀ = mixture_heat_capacity(q, constants) * T + g * z + liquid_referenced_latent_energy(q, constants)
+    ŝ = ŝ₀ - energy_origin_offset(formulation.reference_temperature, ρᵈ, ρ, constants) / ρ
 
     @inbounds begin
         temperature_field[i, j, k] = T
@@ -63,47 +65,52 @@ end
 ##### Acoustic linearization
 #####
 #
-# With the dry density ρᵈ, the momentum 𝐦 = ρᵈ𝐮 and the water densities ρˣ held fixed, as in the
-# acoustic loop, the pressure p = ρRᵐT closes on ρE through
+# With the momentum 𝐦 = ρᵈ𝐮 held fixed, as in the acoustic loop, the pressure p = ρRᵐT closes on
+# ρE through
 #
-#   ρE = ρcᵛᵐ T + Λ + ρK + ρ g z,   Λ = ℒˡ₀ ρqᵛ + (ℒˡ₀ − ℒⁱ₀) ρqⁱ,   K = |𝐦|² / (2ρᵈ²),
+#   ρE = ρcᵛᵐ T + Λ + ρK + ρ g z − T₀ (ρᵈ cᵖᵈ + ρqᵗ cˡ),   Λ = ℒˡ₀ ρqᵛ + (ℒˡ₀ − ℒⁱ₀) ρqⁱ,   K = |𝐦|² / (2ρᵈ²),
 #
-# with ρ = ρᵈ + Σρˣ, ρRᵐ = ρᵈRᵈ + ρqᵛRᵛ and ρcᵛᵐ = ρᵈcᵛᵈ + Σ ρˣ cᵛˣ. So p = C (ρE − ρK − ρgz − Λ) with
+# with ρ = ρᵈ + ρqᵗ, ρRᵐ = ρᵈRᵈ + ρqᵛRᵛ and ρcᵛᵐ = ρᵈcᵛᵈ + Σ ρqˣ cᵛˣ. So
 #
-#   C = ∂p/∂(ρE) = Rᵐ / cᵛᵐ ,
+#   C = ∂p/∂(ρE) = Rᵐ / cᵛᵐ .
 #
-# and, since ∂(ρK)/∂ρᵈ = K − 2ρK/ρᵈ at fixed momentum (the velocity falls as ρᵈ grows) and
-# ∂(ρgz)/∂ρᵈ = gz,
+# The perturbation mass flux of the loop moves the water with the dry air: the tracers' update applies
+# the loop's mean mass flux to them, while (ρE)′ is carried by χ̂ = Ĥ = (ρE + p)/ρᵈ, which includes the
+# water's energy. E is therefore the derivative of p along that motion, at fixed water per unit dry
+# mass, δρqˣ = (ρqˣ/ρᵈ) δρᵈ. Since ∂(ρK)/∂ρᵈ = K − 2ρK/ρᵈ at fixed momentum, the derivative is
 #
-#   ∂p/∂ρᵈ = Rᵈ T − C cᵛᵈ T + C [K (2ρ/ρᵈ − 1) − g z] ,
-#   E = (∂p/∂ρᵈ) / C = (Rᵈ cᵛᵐ / Rᵐ − cᵛᵈ) T + K (2ρ/ρᵈ − 1) − g z .
+#   ∂p/∂ρᵈ|_{qˣ/qᵈ} = C (ρ/ρᵈ) [K − g z − ℒˡ₀ qᵛ − (ℒˡ₀ − ℒⁱ₀) qⁱ + T₀ (qᵈ cᵖᵈ + qᵗ cˡ)] ,
 #
-# The perturbation of ρE is carried by the dry-mass flux with χ̂ = Ĥ = (ρE + p)/ρᵈ. In dry air at
-# rest C (Ĥ + E) = (Rᵈ/cᵛᵈ) cᵖᵈ T = γRᵈT, the squared sound speed, as for ρθ.
+# the temperature terms cancelling exactly (ρRᵐ/C = ρcᵛᵐ), so that
+#
+#   E = (ρ/ρᵈ) [K − g z − ℒˡ₀ qᵛ − (ℒˡ₀ − ℒⁱ₀) qⁱ + T₀ (qᵈ cᵖᵈ + qᵗ cˡ)] ,
+#   C (Ĥ + E) = (γᵐ Rᵐ T + 2 C K) / qᵈ ,
+#
+# the squared sound speed of moist air at frozen composition per unit dry mass (plus a kinetic term of
+# order the Mach number squared), independent of the energy origin T₀. Holding the water densities
+# fixed instead would add the latent energy the flux of Ĥ carries, about ℒˡ₀ qᵛ, to the pressure
+# response without the water that carries it, raising the sound speed of moist air by ~10%, and would
+# make the loop depend on T₀.
 
 @inline function CompressibleEquations.acoustic_linearization(i, j, k, grid, formulation::TotalEnergyFormulation,
                                                               dynamics, constants, microphysics, μ, qᵛ, velocities)
     @inbounds begin
         ρ = dynamics.total_density[i, j, k]
         ρᵈ = dynamics.dry_density[i, j, k]
-        p = dynamics.pressure[i, j, k]
         qᵛᵉ = qᵛ[i, j, k]
         Ĥ = formulation.total_enthalpy[i, j, k]
     end
 
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, μ)
-    Rᵐ = mixture_gas_constant(q, constants)
-    cᵛᵐ = mixture_isochoric_heat_capacity(q, constants)
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵛᵈ = constants.dry_air.heat_capacity - Rᵈ
-    T = p / (ρ * Rᵐ)
+    C = mixture_gas_constant(q, constants) / mixture_isochoric_heat_capacity(q, constants)
 
     K = kinetic_energyᶜᶜᶜ(i, j, k, grid, velocities)
     g = constants.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
+    T₀ = formulation.reference_temperature
+    offset = energy_origin_offset(T₀, ρᵈ, ρ, constants) / ρ
 
-    C = Rᵐ / cᵛᵐ
-    E = (Rᵈ * cᵛᵐ / Rᵐ - cᵛᵈ) * T + K * (2ρ / ρᵈ - 1) - g * z
+    E = ρ / ρᵈ * (K - g * z - liquid_referenced_latent_energy(q, constants) + offset)
 
     return C, Ĥ, E
 end

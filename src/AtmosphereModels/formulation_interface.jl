@@ -206,6 +206,21 @@ the thermodynamic variable with a velocity its tracers do not share.
 function compute_thermodynamic_tendency! end
 
 #####
+##### Energy origin
+#####
+
+"""
+    reference_temperature(formulation)
+
+Return the temperature ``T₀`` that sets the origin of the energy a total-energy `formulation`
+evolves: liquid water has zero internal energy and dry air zero enthalpy at ``T₀``. Accepts a
+formulation struct or its `Symbol`.
+"""
+function reference_temperature end
+
+reference_temperature(formulation::Symbol) = reference_temperature(Val(formulation))
+
+#####
 ##### Vertically implicit solve of the thermodynamic variable
 #####
 

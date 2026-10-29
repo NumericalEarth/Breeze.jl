@@ -90,6 +90,7 @@ export
     static_energy,
     total_energy,
     total_energy_density_name,
+    reference_temperature,
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,

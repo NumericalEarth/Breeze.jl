@@ -26,7 +26,7 @@ using Oceananigans.Utils: prettysummary, launch!
 using Breeze.Thermodynamics: InternalEnergyDensityState, LiquidIceDensityState,
     VaporEquivalentExponent, temperature, with_temperature,
     mixture_heat_capacity, mixture_gas_constant, mixture_isochoric_heat_capacity,
-    liquid_referenced_latent_energy, absolute_zero_latent_heat, dry_air_gas_constant,
+    liquid_referenced_latent_energy, absolute_zero_latent_heat,
     saturation_specific_humidity
 
 using Breeze.Solvers: NewtonSolver
