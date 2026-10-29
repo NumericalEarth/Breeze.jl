@@ -139,6 +139,10 @@ References
 Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for a moist atmosphere.
   Journal of the Atmospheric Sciences 65, 2719–2729.
 """
+# The materialized advection schemes `advection` with any reconstruction cache the `Advection` module substitutes
+# (the bounds-preserving WENO edge cache); `advection` itself by default.
+with_reconstruction_caches(advection, grid) = advection
+
 function AtmosphereModel(grid;
                          clock = Clock(grid),
                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
@@ -278,6 +282,7 @@ function AtmosphereModel(grid;
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
+    materialized_advection = with_reconstruction_caches(materialized_advection, grid)
 
     # Microphysical fields, including a prognostic aerosol reservoir `ρnᵃ`, start at zero. `ρnᵃ`
     # holds a ρ-weighted count, so it is filled in by `set_default_aerosol_number!` at the end of
