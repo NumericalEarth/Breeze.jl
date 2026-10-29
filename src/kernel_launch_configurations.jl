@@ -155,6 +155,7 @@ const static_shape_kernel_names = (
     (Advection, :_x_momentum_bounded_face_fluxes!),
     (Advection, :_y_momentum_bounded_face_fluxes!),
     (Advection, :_z_momentum_bounded_face_fluxes!),
+    (Advection, :_kfirst_bounds_preserving_edges!),
 )
 
 const grouped_static_shape_kernel_names = (

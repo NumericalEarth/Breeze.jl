@@ -28,13 +28,14 @@ using Oceananigans.Advection:
 
 using Oceananigans: Oceananigans
 using Oceananigans.AbstractOperations: KernelFunctionOperation
-using Oceananigans.Architectures: Architectures, architecture, on_architecture, device
+using Oceananigans.Architectures: Architectures, architecture, on_architecture, device, convert_to_device
 using Oceananigans.BoundaryConditions: BoundaryCondition, Flux
 using Oceananigans.Fields: Field, ZeroField, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Grids: Center, Periodic, Bounded, topology, horizontally_extended_interior_kernel_parameters
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ
-using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization, ExplicitTimeDiscretization, launch!
+using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization, ExplicitTimeDiscretization, launch!,
+                         launch_configured_kernel!
 using Oceananigans.TimeSteppers: time_discretization
 
 using Adapt: Adapt
@@ -387,7 +388,8 @@ function launch_kfirst_edges!(arch, grid, edges, scheme, c)
     threads = Wx * Wy * Wz
     blocks = cld(Nx + 2, Wx) * cld(Ny + 2, Wy) * cld(Nz, Wz)
     loop! = _kfirst_bounds_preserving_edges!(device(arch), StaticSize((threads,)), StaticSize((threads * blocks,)))
-    loop!(Val(S), edges, grid, scheme, c)
+    # T16 cached launch path (as the handoff's `_kfirst_pointwise!` edges launch)
+    launch_configured_kernel!(loop!, Val(S), convert_to_device(arch, (edges, grid, scheme, c))...)
     return nothing
 end
 
