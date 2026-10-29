@@ -20,7 +20,12 @@ using Breeze.AtmosphereModels:
     dynamics_prognostic_fields,
     implicit_advection_velocities,
     implicit_step_scheme,
-    implicit_sedimentation_step!
+    implicit_sedimentation_step!,
+    multiple_right_hand_side_implicit_step!,
+    shared_implicit_rows_key
+
+using Oceananigans.BoundaryConditions: needs_implicit_solver
+using Oceananigans.Grids: Center
 
 using Breeze.CompressibleEquations: CompressibleDynamics
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
@@ -85,6 +90,32 @@ horizontal velocity, and condensate sediments vertically.
 tendency_transport_velocities(model) =
     merge(transport_velocities(model), (; w = model.timestepper.substepper.time_averaged_vertical_velocity_cache))
 
+# The non-acoustic scalars solved in one launch (`multiple_right_hand_side_implicit_step!`): the largest set of at least
+# two cell-centred scalars whose implicit rows are identical. Same `shared_implicit_rows_key`, no implicit advection
+# and no implicit-explicit boundary flux; and the scalars' solves use the same density, Δt and closure. Empty otherwise.
+shared_row_scalar_names(model, ::Nothing, acoustic_names) = ()
+
+function shared_row_scalar_names(model, solver, acoustic_names)
+    prognostic = prognostic_fields(model)
+    keyed = []
+    for name in keys(prognostic)
+        name ∈ acoustic_names && continue
+        u = prognostic[name]
+        Oceananigans.Fields.location(u) == (Center, Center, Center) || continue
+        needs_implicit_solver(field_advection_scheme(model.advection, name)) && continue
+        needs_implicit_solver(u.boundary_conditions) && continue
+        key = shared_implicit_rows_key(model.closure, model.closure_fields, closure_scalar_index(model, name))
+        isnothing(key) && continue
+        push!(keyed, (name, key))
+    end
+    best = ()
+    for (_, key) in keyed
+        group = Tuple(n for (n, k) in keyed if k === key)
+        length(group) > length(best) && (best = group)
+    end
+    return length(best) > 1 ? best : ()
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -109,6 +140,8 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     # average, while `Gⁿ` was scaled by the previous one.
     ρ = total_density(model.dynamics)
     velocities = tendency_transport_velocities(model)
+    solver = model.timestepper.implicit_solver
+    batched = shared_row_scalar_names(model, solver, acoustic_names)
 
     for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
         name ∈ acoustic_names && continue
@@ -120,7 +153,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
 
         # Guarded on the solver rather than on `needs_implicit_solver(advection)`; see the note in
         # ssp_runge_kutta_3.jl for why that predicate would drop the mass-flux weighting.
-        if !isnothing(model.timestepper.implicit_solver)
+        if !isnothing(solver) && name ∉ batched
             # The explicit tendency advected this species with the full transport velocity —
             # dynamical plus microphysical (terminal) — so the implicit half must split the
             # same combined velocity, or precipitating species lose the withheld fraction of
@@ -140,6 +173,24 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
                                                          model.microphysics, model.microphysical_fields),
                            ρ)
         end
+    end
+
+    # The scalars whose rows are identical are solved together, after all their explicit updates (each solve reads
+    # only its own field, so the order of independent updates and solves changes no value).
+    if length(batched) > 1
+        name₁ = first(batched)
+        multiple_right_hand_side_implicit_step!(map(name -> prognostic[name], batched),
+                                                solver,
+                                                model.closure,
+                                                model.closure_fields,
+                                                closure_scalar_index(model, name₁),
+                                                model.clock,
+                                                fields(model),
+                                                Δt_implicit,
+                                                implicit_step_scheme(field_advection_scheme(model.advection, name₁)),
+                                                implicit_advection_velocities(model.dynamics, velocities, name₁,
+                                                                              model.microphysics, model.microphysical_fields),
+                                                ρ)
     end
 
     # The tracers' solves have just moved sedimenting condensate implicitly; move its latent

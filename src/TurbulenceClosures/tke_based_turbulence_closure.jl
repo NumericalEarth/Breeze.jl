@@ -543,3 +543,10 @@ end
 # but this may change in the future if the closure becomes dependent on the previous state.
 Oceananigans.prognostic_state(::TKEClosureFields) = nothing
 Oceananigans.restore_prognostic_state!(closure_fields::TKEClosureFields, ::Nothing) = closure_fields
+
+# Every closure scalar but TKE diffuses with `Kᶜ` and has no linear coefficient: their implicit rows are one set.
+@inline function AtmosphereModels.shared_implicit_rows_key(::TKEBasedTurbulenceClosure{<:VerticallyImplicitTimeDiscretization},
+                                                           fields::TKEClosureFields, ::Val{id}) where id
+    L = fields.tupled_implicit_linear_coefficients[id]
+    return L isa ZeroField ? fields.tupled_tracer_diffusivities[id] : nothing
+end

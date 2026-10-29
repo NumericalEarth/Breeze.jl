@@ -164,3 +164,109 @@ end
 
     return nothing
 end
+
+#####
+##### Several right-hand sides through one set of rows
+#####
+##### Cell-centred scalars whose rows are identical (the same diffusivity array, no linear coefficient, no implicit
+##### advection, no implicit-explicit boundary flux: see `shared_implicit_rows_key`) are solved in one launch. The
+##### rows, β and t are formed once per column; each right-hand side takes the arithmetic of the single-RHS sweep
+##### above (same β and t sequence, same operations, same order), so each solution has the bits of its own solve.
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+An object that identifies the diffusion rows of the closure scalar `id` (compared with `===`), or `nothing` when
+they must be solved on their own: when they carry a linear coefficient, or the closure does not opt in.
+Scalars with the same key, no implicit advection and no implicit-explicit boundary flux share every row.
+"""
+shared_implicit_rows_key(closure, closure_fields, id) = nothing
+
+@kernel function _multiple_right_hand_side_solve!(ϕs, t, grid, p, args)
+    i, j = @index(Global, NTuple)
+    multiple_right_hand_side_sweep!(i, j, size(grid, 3), ϕs, t, grid, p, args)
+end
+
+# Each ϕ is its own right-hand side (an in-place solve, as `implicit_step!` does it).
+@inline function multiple_right_hand_side_sweep!(i, j, Nz, ϕs, t, grid, p, args::CarriedRowArguments)
+    FT = eltype(first(ϕs))
+    TT = eltype(t)
+    ε = 10 * eps(float_eltype(first(ϕs)))
+
+    clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, operator, w, ρ = args
+    scheme = operator.scheme
+    ρ_diff = weighting_density(operator.density, ρ)
+    closure_ij = getclosure(i, j, clo)
+
+    @inbounds begin
+        S = carried_initial_state(i, j, grid, ℓz, closure_ij, K, id, ℓx, ℓy, clk, fields, ρ_diff)
+        Puᵏ, Plᵏ, Dᵏ, S = carried_diffusion_row(i, j, 1, grid, ℓz, S, closure_ij, K, id, ℓx, ℓy, Δt, clk, fields, ρ_diff)
+
+        β = carried_diagonal(i, j, 1, grid, Puᵏ, Plᵏ, Dᵏ, args)
+        ϕᵏ⁻¹ = map(ϕs) do ϕ
+            ϕ₁ = convert(FT, ϕ[i, j, 1] / β)
+            ϕ[i, j, 1] = ϕ₁
+            ϕ₁
+        end
+
+        fᵏ = map(ϕ -> ϕ[i, j, min(2, Nz)], ϕs)
+
+        for k = 2:Nz
+            kᵃ = ifelse(k < Nz, k+1, k)
+            fᵏ⁺¹ = map(ϕ -> ϕ[i, j, kᵃ], ϕs)
+
+            Puᵏ⁻¹ = Puᵏ
+            Dᵏ⁻¹  = Dᵏ
+            Puᵏ, Plᵏ, Dᵏ, S = carried_diffusion_row(i, j, k, grid, ℓz, S, closure_ij, K, id, ℓx, ℓy, Δt, clk, fields, ρ_diff)
+
+            cᵏ⁻¹ = Puᵏ⁻¹ / Dᵏ + density_weighted_advection_upper_diagonal(i, j, k-1, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+            bᵏ   = carried_diagonal(i, j, k, grid, Puᵏ, Plᵏ, Dᵏ, args)
+            aᵏ⁻¹ = Plᵏ / Dᵏ⁻¹ + density_weighted_advection_lower_diagonal(i, j, k-1, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+
+            tᵏ = convert(TT, cᵏ⁻¹ / β)
+            t[i, j, k] = tᵏ
+            β = bᵏ - masked_multiply(aᵏ⁻¹, tᵏ)
+            definitely_diagonally_dominant = abs(β) > ε
+
+            ϕᵏ⁻¹ = map(ϕs, fᵏ, ϕᵏ⁻¹) do ϕ, f, ϕ⁻
+                ϕ★ = (f - masked_multiply(aᵏ⁻¹, ϕ⁻)) / β
+                if definitely_diagonally_dominant
+                    ϕᵏ = convert(FT, ϕ★)
+                    ϕ[i, j, k] = ϕᵏ
+                else
+                    ϕᵏ = ϕ[i, j, k]
+                end
+                ϕᵏ
+            end
+
+            fᵏ = fᵏ⁺¹
+        end
+
+        map((ϕ, ϕᴺ) -> back_substitute_z!(ϕ, t, i, j, Nz, ϕᴺ), ϕs, ϕᵏ⁻¹)
+    end
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+`implicit_step!` for each field of `ϕs`, in one launch, when their rows are identical: the arguments are those of
+`implicit_step!` for the first field, whose boundary conditions and scheme stand for all (the caller checks that the
+rows agree, see [`shared_implicit_rows_key`](@ref)).
+"""
+function multiple_right_hand_side_implicit_step!(ϕs::Tuple, solver, closure, closure_fields, id, clock, model_fields,
+                                                 Δt, advection, velocities, density)
+    ϕ = first(ϕs)
+    vi_closure, vi_closure_fields = Oceananigans.TurbulenceClosures.vertically_implicit_closures(closure, closure_fields)
+    bcs = ϕ.boundary_conditions
+    LX, LY, LZ = Oceananigans.Fields.location(ϕ)
+    w = isnothing(velocities) ? nothing : velocities.w
+    args = (vi_closure, vi_closure_fields, id, LX(), LY(), LZ(), Δt, clock, model_fields,
+            advection, w, density, bcs.top, bcs.bottom, bcs.immersed, ϕ)
+    args isa CarriedRowArguments || throw(ArgumentError("multiple right-hand sides need carried rows"))
+    grid = solver.grid
+    launch!(grid.architecture, grid, :xy, _multiple_right_hand_side_solve!, ϕs, solver.t, grid, solver.parameters, args)
+    return nothing
+end
