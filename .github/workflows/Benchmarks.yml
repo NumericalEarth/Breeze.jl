@@ -41,11 +41,15 @@ jobs:
           # kernel bodies themselves (--kernels kernelad, EnzymeAD/Reactant.jl#3472)
           # instead of the raised kernels. The pipeline's passes come from
           # EnzymeAD/Enzyme-JAX#3533, which no registered Reactant_jll has yet, so
-          # this entry runs on the libReactantExtra of the latest "Build Reactant_jll"
-          # run on that PR's branch (`enzyme_jax_branch`; see the steps below),
-          # with Reactant.jl#3472 at a fixed commit (`reactant_rev`); every other
-          # entry keeps the registered Reactant and Reactant_jll. `mode` keeps its
-          # artifact names apart from the AD job's, and while kernel AD is
+          # this entry runs on the libReactantExtra of a "Build Reactant_jll" run on
+          # that PR's branch (`enzyme_jax_branch`; see the steps below), with
+          # Reactant.jl#3472 at a fixed commit (`reactant_rev`); every other entry
+          # keeps the registered Reactant and Reactant_jll. Both sides are force-pushed
+          # often, so `enzyme_jax_run` pins the build to the one `reactant_rev` was
+          # written against (without it, the latest build of the branch is used):
+          # Reactant.jl pb/kernel-ad 2099aba1 with Enzyme-JAX 9f77412c, the first build
+          # of that kernel AD that registers the NVVM passes the CUDA pipeline needs.
+          # `mode` keeps its artifact names apart from the AD job's, and while kernel AD is
           # experimental its failure does not fail the workflow or block publishing.
           # The Reactant.jl branch now needs Enzyme-JAX options the registered
           # Reactant_jll lacks (preserve-xla-funcs), so it must not reach other jobs.
@@ -57,7 +61,8 @@ jobs:
             topology: 'PBB'
             mode: 'kernelad'
             enzyme_jax_branch: 'pb/kernel-ad'
-            reactant_rev: '72794878b8f88eae5ecb087c3002b9c660f9f6f0'
+            enzyme_jax_run: '40917264751'
+            reactant_rev: '2099aba10460a94962cfa1fd8a7ca4c717140c2b'
             timeout: 60
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial --kernels kernelad'
     defaults:
@@ -98,7 +103,11 @@ jobs:
           github_api() {
               julia --startup-file=no -e 'using Downloads; Downloads.download(ARGS[1], stdout; headers = ["Authorization" => "Bearer " * ENV["GH_TOKEN"], "Accept" => "application/vnd.github+json"])' "https://api.github.com/repos/EnzymeAD/Enzyme-JAX/$1"
           }
-          runs="$(github_api "actions/workflows/build-reactantjll.yml/runs?branch=${{ matrix.enzyme_jax_branch }}&status=success&per_page=10" | jq -r '.workflow_runs[] | "\(.id) \(.head_sha)"')"
+          if [[ -n "${{ matrix.enzyme_jax_run }}" ]]; then
+              runs="$(github_api "actions/runs/${{ matrix.enzyme_jax_run }}" | jq -r '"\(.id) \(.head_sha)"')"
+          else
+              runs="$(github_api "actions/workflows/build-reactantjll.yml/runs?branch=${{ matrix.enzyme_jax_branch }}&status=success&per_page=10" | jq -r '.workflow_runs[] | "\(.id) \(.head_sha)"')"
+          fi
           while read -r run_id sha; do
               [[ -n "${run_id}" ]] || continue
               # `+` must be percent-encoded in the query, or it reads as a space
