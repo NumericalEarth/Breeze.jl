@@ -12,6 +12,14 @@ function memory_reclaim(arch)
     end
 end
 
+reactant_compile_options(; raise = true, optimize = true) =
+    Reactant.CompileOptions(raise = raise,
+                            raise_first = raise,
+                            optimization_passes = optimize,
+                            sync = true,
+                            excluded_passes = ["greedy_while_loop_batch_fission",
+                                               "while_elementwise_reduction_to_reduce"])
+
 """
     benchmark_time_stepping(model;
                             time_steps = 100,
@@ -33,7 +41,8 @@ Run a benchmark by executing `time_steps` time steps of the given model.
 
 If the model lives on a `ReactantState` architecture, the whole stepping loop
 is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
-program with `Reactant.@compile sync=true` —
+program with `Reactant.@compile` using `reactant_compile_options()` (with
+while-loop batch fission and while elementwise-reduction-to-reduce disabled) —
 compile time is recorded separately. `kernels` chooses how the model's kernels
 are compiled: `"raise"` raises them to StableHLO (`raise=true`), `"noraise"`
 keeps them as kernel calls (`raise=false`). The compiled program is then executed
@@ -121,7 +130,7 @@ function benchmark_time_stepping(model;
                 @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing), mincut=$mincut) with Reactant (raise=$raise, optimize=$optimize)..."
             end
             compiled_grad!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile raise=raise raise_first=raise optimize=optimize sync=true grad_loss!(
+                Reactant.@compile compile_options=reactant_compile_options(; raise, optimize) grad_loss!(
                     model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing, mincut)
             end
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing, mincut)
@@ -130,7 +139,7 @@ function benchmark_time_stepping(model;
                 @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=$raise)..."
             end
             compiled_loop!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile raise=raise raise_first=raise sync=true step_loop!(model, Δt_FT, time_steps)
+                Reactant.@compile compile_options=reactant_compile_options(; raise) step_loop!(model, Δt_FT, time_steps)
             end
             invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
         end
