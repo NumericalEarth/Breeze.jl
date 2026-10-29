@@ -149,7 +149,9 @@ jobs:
         run: |
           using Pkg
           # `reactant_rev` fixes Reactant here, and the branch's version can lag the project's
-          # exact Reactant compat, so drop the bound for this entry
+          # exact Reactant compat, so drop the bound for this entry. `Pkg.compat` writes the
+          # manifest too, and the benchmarking environment has none yet
+          touch("Manifest.toml")
           Pkg.compat("Reactant", nothing)
           Pkg.add(url = "https://github.com/EnzymeAD/Reactant.jl", rev = "${{ matrix.reactant_rev }}")
       - name: Instantiate benchmarking environment
