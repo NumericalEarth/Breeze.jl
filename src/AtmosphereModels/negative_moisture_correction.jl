@@ -191,12 +191,45 @@ function fix_negative_moisture!(microphysics, model)
     number_mass_pairs = correction_number_mass_pairs(microphysics, model.microphysical_fields)
     number_fields = correction_number_fields(microphysics, model.microphysical_fields)
 
-    launch!(arch, grid, :xy,
-            _fix_negative_moisture_column!,
-            correction,
-            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+    if CELLWISE_MOISTURE_CORRECTION[]
+        # Species borrowing and the number repairs touch one cell at a time, so they run
+        # over every cell; only vertical borrowing has to walk a column. Each cell sees the
+        # same operations in the same order as in the column kernel.
+        launch!(arch, grid, :xyz,
+                _fix_negative_moisture_cell!,
+                correction,
+                moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀)
+        launch_vertical_borrowing!(arch, grid, correction, ρqᵛᵉ, ρ₀)
+    else
+        launch!(arch, grid, :xy,
+                _fix_negative_moisture_column!,
+                correction,
+                moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+    end
 
     return nothing
+end
+
+#####
+##### Cell-wise kernel (PR #1092 f5d28714): species borrowing and number repairs
+#####
+
+@kernel function _fix_negative_moisture_cell!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ρ = ρ₀[i, j, k]
+    apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, correction)
+    zero_orphaned_numbers!(i, j, k, number_mass_pairs)
+    clamp_negative_numbers!(i, j, k, number_fields)
+end
+
+launch_vertical_borrowing!(arch, grid, ::SpeciesBorrowing{Nothing}, ρqᵛᵉ, ρ₀) = nothing
+
+launch_vertical_borrowing!(arch, grid, correction, ρqᵛᵉ, ρ₀) =
+    launch!(arch, grid, :xy, _vertical_borrowing_column!, correction, ρqᵛᵉ, ρ₀, grid)
+
+@kernel function _vertical_borrowing_column!(correction, ρqᵛᵉ, ρ₀, grid)
+    i, j = @index(Global, NTuple)
+    apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction, ρ₀)
 end
 
 #####

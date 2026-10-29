@@ -157,6 +157,8 @@ const FILLS_TOGETHER = Ref(true)
 const SKIP_DEAD_FILLS = Ref(true)
 "`BREEZE_BATCHED_Z_BCS` (default true): the z flux-BC tendencies of every prognostic in one launch."
 const BATCHED_Z_BCS = Ref(true)
+"`BREEZE_CELLWISE_MOISTURE_CORRECTION` (default true): species borrowing and number repairs over every cell (PR #1092); only vertical borrowing walks a column."
+const CELLWISE_MOISTURE_CORRECTION = Ref(true)
 
 env_switch(name, default) = lowercase(get(ENV, name, string(default))) in ("1", "true", "yes", "on")
 
@@ -165,6 +167,7 @@ function __init__()
     SKIP_DEAD_FILLS[] = env_switch("BREEZE_SKIP_DEAD_FILLS", true)
     BATCHED_Z_BCS[] = env_switch("BREEZE_BATCHED_Z_BCS", true)
     COLUMN_SEDIMENTATION[] = env_switch("BREEZE_COLUMN_SEDIMENTATION", false)  # density_weighted_implicit_diffusion.jl
+    CELLWISE_MOISTURE_CORRECTION[] = env_switch("BREEZE_CELLWISE_MOISTURE_CORRECTION", true)
     read_kernel_argument_cache_switches!()  # kernel_arguments.jl
     return nothing
 end
