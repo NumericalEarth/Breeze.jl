@@ -99,6 +99,8 @@ function __init__()
     CARRIED_VERTICAL_RHS[] || @info "Carried vertical rhs off (environment)"
     LOAD_STAGE_CONTRAVARIANT_MOMENTUM[] = switch_from_env("BREEZE_LOAD_STAGE_CONTRAVARIANT_MOMENTUM", true)
     LOAD_STAGE_CONTRAVARIANT_MOMENTUM[] || @info "Stage contravariant momentum load off (environment)"
+    NO_STEP_LINEARIZATION_REFRESH[] = switch_from_env("BREEZE_NO_STEP_LINEARIZATION_REFRESH", true)
+    NO_STEP_LINEARIZATION_REFRESH[] || @info "Outer-step linearization refresh on (environment)"
     return nothing
 end
 

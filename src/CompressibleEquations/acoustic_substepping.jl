@@ -335,10 +335,16 @@ After this call:
   - `linearization_potential_temperature` = θᴸ = ρθᴸ/ρᴸ derived from `model.dynamics.dry_density` + ρθ
 """
 function freeze_linearization_state!(substepper::AcousticSubstepper, model)
-    refresh_linearization_basic_state!(substepper, model)
+    # E6 (handoff b97a17ee): stage 1's `prepare_acoustic_cache!` refreshes the same quantities from the
+    # same, unchanged outer-step-start state before any substep reads them (every reader is inside the
+    # substep loop), so the outer-step refresh is unread. `NO_STEP_LINEARIZATION_REFRESH[] = false`
+    # (`BREEZE_NO_STEP_LINEARIZATION_REFRESH=false` at load) restores it.
+    NO_STEP_LINEARIZATION_REFRESH[] || refresh_linearization_basic_state!(substepper, model)
     seed_time_averaged_velocities!(substepper, model)
     return nothing
 end
+
+const NO_STEP_LINEARIZATION_REFRESH = Ref(true)
 
 """
 $(TYPEDSIGNATURES)
