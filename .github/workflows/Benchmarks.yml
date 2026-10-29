@@ -148,6 +148,9 @@ jobs:
           JULIA_PKG_PRECOMPILE_AUTO: '0'
         run: |
           using Pkg
+          # `reactant_rev` fixes Reactant here, and the branch's version can lag the project's
+          # exact Reactant compat, so drop the bound for this entry
+          Pkg.compat("Reactant", nothing)
           Pkg.add(url = "https://github.com/EnzymeAD/Reactant.jl", rev = "${{ matrix.reactant_rev }}")
       - name: Instantiate benchmarking environment
         shell: julia --color=yes --project {0}
