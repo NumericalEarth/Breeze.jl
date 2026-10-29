@@ -426,6 +426,10 @@ end
 
 @kernel function _compute_linearization_exner_and_theta!(Π, θ, p, ρ, ρθ, pˢᵗ, κ)
     i, j, k = @index(Global, NTuple)
+    linearization_exner_and_theta_at!(i, j, k, Π, θ, p, ρ, ρθ, pˢᵗ, κ)
+end
+
+@inline function linearization_exner_and_theta_at!(i, j, k, Π, θ, p, ρ, ρθ, pˢᵗ, κ)
     @inbounds begin
         Π[i, j, k] = (p[i, j, k] / pˢᵗ)^κ
         ρ̂ = ifelse(ρ[i, j, k] == 0, one(eltype(ρ)), ρ[i, j, k])
@@ -444,6 +448,10 @@ end
 # and γᵐRᵐ collapses to γᵈRᵈ exactly.
 @kernel function _compute_linearization_mixture_eos!(γRᵐ, grid, microphysics, ρ, qᵛ, μ, constants)
     i, j, k = @index(Global, NTuple)
+    linearization_mixture_eos_at!(i, j, k, γRᵐ, grid, microphysics, ρ, qᵛ, μ, constants)
+end
+
+@inline function linearization_mixture_eos_at!(i, j, k, γRᵐ, grid, microphysics, ρ, qᵛ, μ, constants)
     @inbounds begin
         ρᵢ  = ρ[i, j, k]
         qᵛᵢ = qᵛ[i, j, k]
@@ -467,6 +475,55 @@ end
         # so qᵛ = qˡ = qⁱ = 0 reproduces the dry γᵈRᵈ to bit-identical precision.
         γRᵐ[i, j, k] = cᵖᵐ * Rᵐ / cᵛᵐ
     end
+    return nothing
+end
+
+#####
+##### Linearization folded into the auxiliary pass (handoff E5 64b0409d / C7 in spirit)
+#####
+# Every reader of Πᴸ, θᴸ, γᵐRᵐᴸ is inside the substep loop, and the stage-entry state the stage refresh reads
+# (p, ρᵈ, ρθ, ρ, qᵛ, μ) is the one the preceding `update_state!` left: between it and `prepare_acoustic_cache!` only
+# `cache_transport_velocity!` (and, at outer-step start, `store_initial_state!`, the transport seed, and the
+# operator-split microphysics update, which ends in its own `update_state!`) run. Where the dynamics' auxiliary
+# pass stores the three fields with the same per-cell expressions on the same inputs (terrain fused pass, switch
+# `FOLDED_LINEARIZATION`, `BREEZE_FOLDED_LINEARIZATION=false` at load turns it off), the stage refresh is skipped.
+const FOLDED_LINEARIZATION = Ref(true)
+
+linearization_in_auxiliary_pass(model) = false
+
+# The arguments of the folded store, or `nothing` when the model has no acoustic substepper.
+folded_linearization_target(model) = folded_linearization_target(model, model.timestepper)
+folded_linearization_target(model, timestepper) =
+    hasproperty(timestepper, :substepper) ? folded_linearization_target(model, timestepper.substepper) : nothing
+folded_linearization_target(model, ::Nothing) = nothing
+
+function folded_linearization_target(model, substepper::AcousticSubstepper)
+    FT  = eltype(model.grid)
+    constants = model.thermodynamic_constants
+    κ   = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    pˢᵗ = convert(FT, model.dynamics.standard_pressure)
+    return (Π = substepper.linearization_exner,
+            θ = substepper.linearization_potential_temperature,
+            γRᵐ = substepper.linearization_gamma_R_mixture,
+            ρθ = thermodynamic_density(model.formulation),
+            pˢᵗ = pˢᵗ, κ = κ)
+end
+
+fill_folded_linearization_halos!(::Nothing) = nothing
+
+function fill_folded_linearization_halos!(lin)
+    fill_halo_regions!(lin.Π)
+    fill_halo_regions!(lin.θ)
+    fill_halo_regions!(lin.γRᵐ)
+    return nothing
+end
+
+@inline store_folded_linearization_at!(i, j, k, ::Nothing, p, ρᵈ, ρ, qᵛ, grid, microphysics, μ, constants) = nothing
+
+@inline function store_folded_linearization_at!(i, j, k, lin, p, ρᵈ, ρ, qᵛ, grid, microphysics, μ, constants)
+    linearization_exner_and_theta_at!(i, j, k, lin.Π, lin.θ, p, ρᵈ, lin.ρθ, lin.pˢᵗ, lin.κ)
+    linearization_mixture_eos_at!(i, j, k, lin.γRᵐ, grid, microphysics, ρ, qᵛ, μ, constants)
+    return nothing
 end
 
 """
@@ -481,7 +538,7 @@ the WS-RK3 invariant by setting ``(ρ)′_\\mathrm{init} = Uᴸ_\\mathrm{outer} 
 (zero for stage 1; nonzero for stages 2 and 3).
 """
 prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
-    refresh_linearization_basic_state!(substepper, model)
+    linearization_in_auxiliary_pass(model) ? nothing : refresh_linearization_basic_state!(substepper, model)
 
 #####
 ##### Section 4 — Adaptive substep computation (acoustic CFL)

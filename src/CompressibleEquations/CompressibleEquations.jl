@@ -101,6 +101,8 @@ function __init__()
     LOAD_STAGE_CONTRAVARIANT_MOMENTUM[] || @info "Stage contravariant momentum load off (environment)"
     NO_STEP_LINEARIZATION_REFRESH[] = switch_from_env("BREEZE_NO_STEP_LINEARIZATION_REFRESH", true)
     NO_STEP_LINEARIZATION_REFRESH[] || @info "Outer-step linearization refresh on (environment)"
+    FOLDED_LINEARIZATION[] = switch_from_env("BREEZE_FOLDED_LINEARIZATION", true)
+    FOLDED_LINEARIZATION[] || @info "Linearization folded into the auxiliary pass off (environment)"
     return nothing
 end
 

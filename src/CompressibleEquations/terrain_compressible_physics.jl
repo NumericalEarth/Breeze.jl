@@ -1281,6 +1281,7 @@ function compute_terrain_fused_thermodynamics!(model::TerrainCompressibleModel)
     grid = model.grid
     arch = architecture(grid)
     dynamics = model.dynamics
+    lin = FOLDED_LINEARIZATION[] ? folded_linearization_target(model) : nothing
 
     fill_halo_regions!(dynamics.dry_density)
     fill_halo_regions!(prognostic_fields(model.formulation))
@@ -1299,21 +1300,27 @@ function compute_terrain_fused_thermodynamics!(model::TerrainCompressibleModel)
             model.microphysics,
             model.microphysical_fields,
             model.moisture_density,
-            stored_energy_denominator(model))
+            stored_energy_denominator(model),
+            lin)
 
     fill_halo_regions!(model.microphysical_fields, AtmosphereModels.kernel_boundary_condition_args(model)...)
     fill_halo_regions!(model.formulation)
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(dynamics.pressure)
+    fill_folded_linearization_halos!(lin)
 
     return nothing
 end
+
+# The fused pass stores Πᴸ, θᴸ, γᵐRᵐᴸ of the acoustic substepper (see `FOLDED_LINEARIZATION`).
+linearization_in_auxiliary_pass(model::TerrainCompressibleModel) =
+    FOLDED_LINEARIZATION[] & TERRAIN_FUSED_AUXILIARY[] && !isnothing(folded_linearization_target(model))
 
 @kernel function _compute_terrain_fused_thermodynamics!(temperature_field, pressure_field,
                                                         dry_density, total_density, specific_prognostic_moisture,
                                                         formulation, dynamics, grid, constants,
                                                         microphysics, microphysical_fields, moisture_density,
-                                                        denominator)
+                                                        denominator, lin)
     i, j, k = @index(Global, NTuple)
     AtmosphereModels.auxiliary_thermodynamics_at!(i, j, k, grid, specific_prognostic_moisture,
                                                   formulation, dynamics, constants, microphysics,
@@ -1322,4 +1329,6 @@ end
                                          dry_density, total_density, formulation, dynamics,
                                          specific_prognostic_moisture, grid, microphysics,
                                          microphysical_fields, constants, denominator)
+    store_folded_linearization_at!(i, j, k, lin, pressure_field, dry_density, total_density,
+                                   specific_prognostic_moisture, grid, microphysics, microphysical_fields, constants)
 end
