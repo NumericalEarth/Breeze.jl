@@ -904,14 +904,15 @@ Run the `Nτ` acoustic substeps of one RK3 stage by calling [`acoustic_substep!`
 
 The substeps run under `ReactantCore.@trace`, which is a plain loop on ordinary arrays and a
 single traced `while` loop under Reactant, so the compiled program holds one copy of the substep
-body rather than `Nτ`.
+body rather than `Nτ`. Reverse-mode differentiation of that loop caches a minimal cut of its
+values (`mincut`).
 """
 # Whether reverse-mode differentiation of the substep loop under Reactant caches a minimal cut of
 # its values (`@trace mincut`). Read when the loop is traced; off by default. Kernel AD needs it.
 const ACOUSTIC_SUBSTEP_MINCUT = Ref(false)
 
 function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
-    @trace mincut=ACOUSTIC_SUBSTEP_MINCUT[] track_numbers=false for _ in 1:Nτ
+    @trace mincut=true track_numbers=false for _ in 1:Nτ
         acoustic_substep!(model, substepper, stage, advection)
     end
     return nothing
