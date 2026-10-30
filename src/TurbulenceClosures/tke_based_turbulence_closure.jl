@@ -310,9 +310,9 @@ $(TYPEDSIGNATURES)
 
 Construct a [`TKEBasedTurbulenceClosure`](@ref) with the given time discretization (default
 `VerticallyImplicitTimeDiscretization()`), float type, mixing length, stability functions, static
-stability and numerical parameters. The defaults use the selected provisional-60 LES fit with
-rational stability functions, wall coefficient 0.6565692899592015 and interior slope
-1.5609936948461662. Reproducing that fit also requires an explicitly supplied surface TKE flux
+stability and numerical parameters. The defaults are calibrated to the Shen et al. (2022) LES library:
+rational stability functions, wall coefficient 0.7877315198717979 and interior slope
+1.777871783491512. Reproducing that calibration also requires an explicitly supplied surface TKE flux
 boundary condition with the coefficients of [`tke_surface_flux`](@ref); it is not installed
 implicitly by the closure constructor.
 
@@ -335,7 +335,7 @@ TKEBasedTurbulenceClosure().minimum_shear_squared
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                    FT = Oceananigans.defaults.FloatType;
-                                   mixing_length = GradientLimitedMixingLength(ℂˢ = 0.6565692899592015, ℂⁱ = 1.5609936948461662),
+                                   mixing_length = GradientLimitedMixingLength(ℂˢ = 0.7877315198717979, ℂⁱ = 1.777871783491512),
                                    stability_functions = RationalStabilityFunction(),
                                    static_stability = MoistStaticStability(),
                                    maximum_viscosity = Inf,

@@ -1332,6 +1332,35 @@ end
 
     end
 
+    @testset "ice_melting_number_rate with subnormal dry ice" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+
+        # nⁱ / qⁱ overflows Float32 for subnormal qⁱ; with no melting this used to give Inf × 0 = NaN
+        @test PPP.ice_melting_number_rate(1f-44, 1f0, 0f0) == 0
+        @test PPP.ice_melting_number_rate(1f-39, 1f3, 0f0) == 0
+        @test PPP.ice_melting_number_rate(0f0, 1f3, 0f0) == 0
+
+        # Melting at the sink limit removes the number at the same fractional rate as the mass
+        @test PPP.ice_melting_number_rate(1f-4, 1f4, 1f-5) ≈ 1f3
+        @test isfinite(PPP.ice_melting_number_rate(1f-39, 1f3, 1f-40))
+
+        # Full tendency bundle in a melting-layer remnant: subnormal dry ice, a liquid coating below
+        # the whole-particle clip, and leftover ice number. ρnʳ and ρnⁱ used to be NaN here.
+        FT = Float32
+        constants = ThermodynamicConstants(FT)
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        P = FT(6e4)
+        for T in (FT(265), FT(270), FT(274)), qⁱ in (FT(1e-39), FT(1e-44)), qʷⁱ in (FT(1e-16), FT(5e-15))
+            ρ = P / (dry_air_gas_constant(constants) * T)
+            qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+            q = MoistureMassFractions(qᵛ, qʷⁱ, qⁱ)
+            𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), P), T, constants)
+            ℳ = P3MicrophysicalState(FT(0), p3.cloud.number_concentration / ρ, FT(0), FT(0),
+                                     qⁱ, FT(1e3), FT(0), FT(0), qʷⁱ, FT(0), FT(0), FT(0))
+            @test all(isfinite, bundled_p3_tendencies(p3, ρ, ℳ, 𝒰, constants))
+        end
+    end
+
     @testset "ice_melting_rates partitioning" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64

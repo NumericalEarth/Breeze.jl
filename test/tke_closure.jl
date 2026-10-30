@@ -132,10 +132,10 @@ column(field) = Array(interior(field, 1, 1, :))
     @test adapt(identity, closure.mixing_length) === closure.mixing_length
     @test adapt(identity, sf) === sf
     @test sf isa RationalStabilityFunction{FT}
-    @test closure.mixing_length.ℂˢ === FT(0.6565692899592015)
-    @test closure.mixing_length.ℂⁱ === FT(1.5609936948461662)
+    @test closure.mixing_length.ℂˢ === FT(0.7877315198717979)
+    @test closure.mixing_length.ℂⁱ === FT(1.777871783491512)
     @test closure.mixing_length.ℂˢ * (sf.ℂᵘ⁰^3 / sf.ℂᴰ⁰)^(1/4) ≈ 0.4 rtol=1e-6
-    @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.8001428358397753
+    @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.7999974525668859
     @test tke_surface_flux(FT(1), FT(1), FT(0)) === FT(0.01002182909933591)
     @test tke_surface_flux(FT(1), FT(0), FT(1)) === FT(0.013669219822302736)
     @test tke_surface_flux(FT(2), FT(3), FT(4)) ≈ FT(2) * (FT(3) * FT(0.01002182909933591) + FT(4) * FT(0.013669219822302736))
@@ -802,23 +802,19 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test isbits(sf) # a GPU kernel can only carry an isbits closure
         @test sf isa RationalStabilityFunction{FT}
 
-        # Frozen selected P60 member, not the older CATKE endpoints.
-        @test sf.ℂᵘ⁰ === FT(0.15900569445804447)
-        @test sf.ℂᶜ⁰ === FT(0.19872163735761372)
-        @test sf.Ri⁻ === FT(12.669701017862883)
-        @test sf.Ri⁺ === FT(0.0501147186437052)
-        @test sf.p⁻ === FT(1)
-        @test sf.p⁺ === FT(1)
-
-        # Fourteen free stability coefficients with the exponents fixed, sixteen fields in all
-        @test length(fieldnames(RationalStabilityFunction)) == 16
+        # Calibrated to the Shen et al. (2022) LES library
+        @test sf.ℂᵘ⁰ === FT(0.15439310625401925)
+        @test sf.ℂᶜ⁰ === FT(0.1929919973602801)
+        @test sf.Ri⁻ === FT(6.562979157594204)
+        @test sf.Ri⁺ === FT(15.12797320010583)
+        # Twelve endpoints and two transition scales
+        @test length(fieldnames(RationalStabilityFunction)) == 14
 
         # Mixed integer and float keyword arguments are promoted, as elsewhere in the closure
-        mixed = Breeze.TurbulenceClosures.convert_eltype(FT, RationalStabilityFunction(ℂᵘ⁻ = 1, Ri⁺ = 2, p⁺ = 3))
+        mixed = Breeze.TurbulenceClosures.convert_eltype(FT, RationalStabilityFunction(ℂᵘ⁻ = 1, Ri⁺ = 2))
         @test mixed.ℂᵘ⁻ === FT(1)
         @test mixed.Ri⁺ === FT(2)
-        @test mixed.p⁺ === FT(3)
-        @test mixed.ℂᵘ⁰ === FT(0.15900569445804447)
+        @test mixed.ℂᵘ⁰ === FT(0.15439310625401925)
 
         closure = TKEBasedTurbulenceClosure(stability_functions = RationalStabilityFunction())
         @test closure.stability_functions isa RationalStabilityFunction{FT}
@@ -831,22 +827,19 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         str = sprint(show, closure)
         @test occursin("RationalStabilityFunction", str)
         @test occursin("transition scales", str)
-        @test occursin("exponents", str)
         @test occursin("Ri → -∞", sprint(show, sf))
 
-        # Every endpoint, both scales and both exponents must be positive
+        # Every endpoint and both scales must be positive
         @test_throws ArgumentError RationalStabilityFunction(ℂᵘ⁰ = 0)
         @test_throws ArgumentError RationalStabilityFunction(ℂᴰ⁺ = -1)
         @test_throws ArgumentError RationalStabilityFunction(ℂᵉ⁻ = NaN)
         @test_throws ArgumentError RationalStabilityFunction(Ri⁻ = 0)
         @test_throws ArgumentError RationalStabilityFunction(Ri⁺ = -0.5)
-        @test_throws ArgumentError RationalStabilityFunction(p⁻ = 0)
-        @test_throws ArgumentError RationalStabilityFunction(p⁺ = -2)
     end
 
     @testset "the rational shape and its limits" begin
         C⁻, C⁰, C⁺, Ri⁻, Ri⁺ = FT.((1, 2, 5, 0.5, 2))
-        S(Ri) = rational_stability(FT(Ri), C⁻, C⁰, C⁺, Ri⁻, Ri⁺, one(FT), one(FT))
+        S(Ri) = rational_stability(FT(Ri), C⁻, C⁰, C⁺, Ri⁻, Ri⁺)
 
         # The three endpoints, exactly: neutral at Ri = 0 and the two asymptotes at ±∞
         @test S(0) === C⁰
@@ -862,16 +855,16 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test S(9Ri⁺) ≈ C⁰ + 9 * (C⁺ - C⁰) / 10
         @test S(-9Ri⁻) ≈ C⁰ + 9 * (C⁻ - C⁰) / 10
 
-        # p = 1 is the closed form S = C⁰ + (C - C⁰) |Ri| / (|Ri| + Ri^±)
+        # The closed form S = C⁰ + (C - C⁰) |Ri| / (|Ri| + Ri^±)
         for Ri in FT.((0.01, 0.3, 1, 7, 250))
             @test S(Ri) ≈ C⁰ + (C⁺ - C⁰) * Ri / (Ri + Ri⁺)
             @test S(-Ri) ≈ C⁰ + (C⁻ - C⁰) * Ri / (Ri + Ri⁻)
         end
 
-        # The two branches are independent: the stable scale and exponent do not touch Ri < 0
-        wider = rational_stability(FT(-1), C⁻, C⁰, C⁺, Ri⁻, 100Ri⁺, one(FT), FT(4))
+        # The two branches are independent: the stable scale does not touch Ri < 0
+        wider = rational_stability(FT(-1), C⁻, C⁰, C⁺, Ri⁻, 100Ri⁺)
         @test wider ≈ S(-1)
-        narrower = rational_stability(FT(1), C⁻, C⁰, C⁺, 100Ri⁻, Ri⁺, FT(4), one(FT))
+        narrower = rational_stability(FT(1), C⁻, C⁰, C⁺, 100Ri⁻, Ri⁺)
         @test narrower ≈ S(1)
 
         # Monotone in |Ri| on each branch, and bounded by the endpoints it travels between
@@ -893,22 +886,6 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test S(-floatmax(FT)) ≈ C⁻
         @test S(nextfloat(zero(FT))) ≈ C⁰
         @test S(-nextfloat(zero(FT))) ≈ C⁰
-
-        # Exponents other than one keep the endpoints and the halfway point, and only sharpen
-        # or flatten the transition around the scale
-        for p in FT.((0.5, 1, 2, 4))
-            Sᵖ(Ri) = rational_stability(FT(Ri), C⁻, C⁰, C⁺, Ri⁻, Ri⁺, p, p)
-            @test Sᵖ(0) === C⁰
-            @test Sᵖ(Inf) === C⁺
-            @test Sᵖ(-Inf) === C⁻
-            @test Sᵖ(Ri⁺) ≈ (C⁰ + C⁺) / 2
-            @test Sᵖ(-Ri⁻) ≈ (C⁰ + C⁻) / 2
-            @test all(isfinite, Sᵖ.(extremes))
-        end
-        # Sharper: at p = 4 the function is closer to C⁰ below the scale and closer to C⁺ above it
-        sharp(Ri) = rational_stability(FT(Ri), C⁻, C⁰, C⁺, Ri⁻, Ri⁺, FT(4), FT(4))
-        @test sharp(Ri⁺ / 2) < S(Ri⁺ / 2)
-        @test sharp(2Ri⁺) > S(2Ri⁺)
     end
 
     @testset "the shear floor makes the Richardson number continuous" begin
@@ -991,8 +968,10 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         perturbed = closure_fields(true)
         @test all(neutral.N²[interior_faces] .== 0)
         @test any(perturbed.N²[interior_faces] .> 0) && any(perturbed.N²[interior_faces] .< 0)
+        # The residual change grows with the endpoint ratios over Ri±: about 2e-3 in Kᵘ with the
+        # calibrated defaults, against O(1) were an interface sent to a limit
         for name in (:Kᵘ, :Kᶜ, :Kᵉ, :Lᵉ)
-            @test isapprox(perturbed[name], neutral[name]; rtol = 1e-4)
+            @test isapprox(perturbed[name], neutral[name]; rtol = 1e-2)
         end
     end
 
@@ -1000,7 +979,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         # Three coinciding endpoints give that constant at every Richardson number, with no limit
         # to take: the term multiplying the shape factor is identically zero
         C = FT(0.37)
-        S(Ri) = rational_stability(FT(Ri), C, C, C, FT(0.764), FT(0.764), one(FT), one(FT))
+        S(Ri) = rational_stability(FT(Ri), C, C, C, FT(0.764), FT(0.764))
         Ris = FT.((-Inf, -1e30, -3, -0.1, 0, 0.1, 3, 1e30, Inf, floatmax(FT), -floatmax(FT)))
         @test all(S.(Ris) .=== C)
 
@@ -1068,8 +1047,9 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test all(Ri[interior_faces] .> 0)
         expected = [tracer_stability_function(sf, r) / momentum_stability_function(sf, r) for r in Ri[interior_faces]]
         @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ expected)
-        # The calibrated ratio increases on the stable branch and stays between its endpoints.
-        @test all(sf.ℂᶜ⁰ / sf.ℂᵘ⁰ .< expected .< sf.ℂᶜ⁺ / sf.ℂᵘ⁺)
+        # The ratio stays strictly between its neutral and stable endpoints
+        lo, hi = minmax(sf.ℂᶜ⁰ / sf.ℂᵘ⁰, sf.ℂᶜ⁺ / sf.ℂᵘ⁺)
+        @test all(lo .< expected .< hi)
 
         # Unstable stratification with shear: the unstable branch, again pointwise, and again
         # short of its asymptote at a finite Ri
@@ -1082,7 +1062,9 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test all(isfinite, Ri[interior_faces])
         expected = [tracer_stability_function(sf, r) / momentum_stability_function(sf, r) for r in Ri[interior_faces]]
         @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ expected)
-        @test all(sf.ℂᶜ⁻ / sf.ℂᵘ⁻ .< expected .< sf.ℂᶜ⁰ / sf.ℂᵘ⁰)
+        # and again strictly between its unstable and neutral endpoints
+        lo, hi = minmax(sf.ℂᶜ⁻ / sf.ℂᵘ⁻, sf.ℂᶜ⁰ / sf.ℂᵘ⁰)
+        @test all(lo .< expected .< hi)
     end
 
     @testset "a windless column with stable and unstable layers stays finite" begin
