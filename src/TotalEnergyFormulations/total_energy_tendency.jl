@@ -79,7 +79,7 @@ end
                                        model_fields)
 
     ρᵈ = dynamics_density(dynamics)
-    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρᵈ, velocities, formulation.total_enthalpy)
              - ∇_dot_Jᶜ(i, j, k, grid, ρᵈ, closure, closure_fields, id, formulation.static_energy,

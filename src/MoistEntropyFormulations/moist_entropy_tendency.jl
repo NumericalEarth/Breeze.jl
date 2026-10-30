@@ -91,7 +91,7 @@ microphysical tendencies of the vapor (``Ṡᵛ``) and ice (``Ṡⁱ``, cloud ic
 
     η = formulation.specific_entropy
     ρ_field = total_density(dynamics) # η is per unit total mass, carried like the water
-    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
 
     @inbounds T = temperature_field[i, j, k]
 
