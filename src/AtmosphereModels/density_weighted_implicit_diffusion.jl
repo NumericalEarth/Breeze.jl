@@ -200,7 +200,73 @@ end
 end
 
 #####
-##### get_coefficient seam: density-weighted diffusion + implicit advection, at both z-locations
+##### Closure-supplied implicit coefficients
+#####
+##### A closure whose vertical transport is not a diffusivity, such as the compensating (return-flow)
+##### subsidence of a mass-flux closure, which is upwind advection by a velocity the closure diagnoses,
+##### contributes its own tridiagonal coefficients here. They are added to the density-weighted
+##### diffusion and implicit-advection coefficients of every row, so they may be asymmetric. The
+##### default is zero, and since every row already sums the diffusion part with a `zero(grid)`
+##### advection part for non-adaptive schemes, adding one more `zero(grid)` leaves every existing
+##### coefficient, signed zeros included, bitwise unchanged.
+#####
+##### TODO: this belongs in Oceananigans' `vertically_implicit_diffusion_solver.jl` as a generic
+##### `implicit_vertical_flux_coefficients(closure, K, id)`, so that any closure could add a
+##### non-diffusive linear operator to the vertically implicit solve.
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+The coefficient of ``q_{k+1}`` in row `k` of the vertically implicit solve of the prognostic `q`
+contributed by `closure` with fields `closure_fields`, for the closure scalar `id` (a `Val` index
+into the closure's scalar names, or `nothing` for momentum) at the vertical location `ℓz`.
+`Δt` is the interval of the solve, and `ρ` the density that reconstructs the specific value
+``c = q / ρ`` of the field being solved for. The coefficient multiplies `q` (the density-weighted
+prognostic), already includes `Δt`, and is added to the coefficient of the vertically implicit
+diffusion and advection. The default is zero; tuples of closures sum their members'.
+
+A closure that extends this is responsible for its own boundary rows: the solver evaluates the
+upper diagonal for `k = 1, …, Nz - 1`. To conserve the column, the diagonal contribution of every
+row must balance the off-diagonal contributions of the other rows that couple the same `q`.
+"""
+@inline closure_implicit_upper_diagonal(i, j, k, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) =
+    zero(grid)
+
+"""
+$(TYPEDSIGNATURES)
+
+The coefficient of ``q_{k′}`` in row `k′ + 1` of the vertically implicit solve contributed by
+`closure`, with `k′ = 1, …, Nz - 1` (the `LinearAlgebra.Tridiagonal` convention, as in
+Oceananigans' `ivd_lower_diagonal`). The arguments and conventions are those of
+[`closure_implicit_upper_diagonal`](@ref). The default is zero.
+"""
+@inline closure_implicit_lower_diagonal(i, j, k′, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) =
+    zero(grid)
+
+"""
+$(TYPEDSIGNATURES)
+
+The contribution of `closure` to the coefficient of ``q_k`` in row `k` of the vertically implicit
+solve, excluding the identity. The arguments and conventions are those of
+[`closure_implicit_upper_diagonal`](@ref). The default is zero.
+"""
+@inline closure_implicit_diagonal(i, j, k, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) =
+    zero(grid)
+
+for coefficient in (:closure_implicit_upper_diagonal, :closure_implicit_lower_diagonal, :closure_implicit_diagonal)
+    @eval begin
+        @inline $coefficient(i, j, k, grid, ::Tuple{}, ::Tuple{}, args...) = zero(grid)
+
+        @inline $coefficient(i, j, k, grid, closures::Tuple, closure_fields::Tuple, args...) =
+            $coefficient(i, j, k, grid, first(closures), first(closure_fields), args...) +
+            $coefficient(i, j, k, grid, Base.tail(closures), Base.tail(closure_fields), args...)
+    end
+end
+
+#####
+##### get_coefficient seam: density-weighted diffusion + implicit advection + closure-supplied
+##### coefficients, at both z-locations
 #####
 ##### Oceananigans ≥ 0.110.20 appends the field's top, bottom and immersed boundary conditions after
 ##### `(advection, w, density)`, and its own fallbacks absorb them with `args...`. A method that
@@ -215,7 +281,8 @@ end
     ρ_diff = weighting_density(operator.density, ρ)
     du_diff = density_weighted_ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ_diff)
     du_adv  = density_weighted_advection_upper_diagonal(i, j, k, grid, operator.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
-    return du_diff + du_adv
+    du_clo  = closure_implicit_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ_diff)
+    return du_diff + du_adv + du_clo
 end
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionLowerDiagonal, p, ::ZDirection,
@@ -224,7 +291,8 @@ end
     ρ_diff = weighting_density(operator.density, ρ)
     dl_diff = density_weighted_ivd_lower_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ_diff)
     dl_adv  = density_weighted_advection_lower_diagonal(i, j, k, grid, operator.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
-    return dl_diff + dl_adv
+    dl_clo  = closure_implicit_lower_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ_diff)
+    return dl_diff + dl_adv + dl_clo
 end
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionDiagonal, p, ::ZDirection,
@@ -235,7 +303,8 @@ end
     d_diff = density_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ_diff)
     d_adv  = density_weighted_advection_diagonal(i, j, k, grid, operator.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
     d_bc   = boundary_flux_diagonal(i, j, k, grid, ℓx, ℓy, ℓz, Δt, clk, fields, top_bc, bottom_bc, immersed_bc, ϕ)
-    return d_diff + d_adv + d_bc
+    d_clo  = closure_implicit_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ_diff)
+    return d_diff + d_adv + d_bc + d_clo
 end
 
 #####
