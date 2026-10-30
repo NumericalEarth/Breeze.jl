@@ -247,11 +247,12 @@ end
     @test autoconversion(default, 10) == autoconversion(default, 0)
     @test autoconversion(default, -10) == autoconversion(default, 0)
 
-    # Velocity-dependent parameters: quiescent rate at rest, faster in up- and downdrafts
+    # Velocity-dependent parameters: quiescent rate at rest and in downdrafts, faster in updrafts
+    # (CloudMicrophysics blends with w₊ = max(w, 0))
     @test autoconversion(convective, 0) == autoconversion(default, 0)
     @test autoconversion(convective, w₀) > autoconversion(convective, 0)
     @test autoconversion(convective, 10w₀) > autoconversion(convective, w₀)
-    @test autoconversion(convective, -w₀) == autoconversion(convective, w₀)
+    @test autoconversion(convective, -w₀) == autoconversion(convective, 0)
 end
 
 function autoconversion_test_model(::Type{FT}, cloud_formation, parameters) where FT
