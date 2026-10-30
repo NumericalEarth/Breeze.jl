@@ -7,12 +7,14 @@
 # CASE:
 # - wbf:       uniform cloud saturated over liquid (supersaturated over ice by 16%), droplets and ice crystals
 #              everywhere. Ice grows at the expense of the droplets.
-# - fragments: the lower half of the box is cloud saturated over liquid, the upper half clear air at 85% relative
-#              humidity over ice, with an interface of a few cells. Small ice fragments (secondary ice) are spread
-#              through the box. In the parcel the box is mixed instantly; in the DNS fragments in clear air
+# - fragments: the lower half of the box is cloud saturated over liquid (100 cm⁻³ droplets of 10 μm), the upper
+#              half clear air at 70% relative humidity over ice, with an interface of a few cells. Small ice fragments
+#              (secondary ice, 0.3 to 5 μm, log-uniform) are spread through the box. The mixed box is supersaturated
+#              over ice once the droplets have evaporated. In the parcel the box is mixed instantly; in the DNS fragments in clear air
 #              sublimate unless turbulence mixes them into cloud first.
 #
-# Environment: OUTPUT_DIR (default validation/ice_dns/output), ARCH (GPU or CPU).
+# Environment: OUTPUT_DIR (default validation/ice_dns/output), ARCH (GPU or CPU), SELF (1: correct particle growth
+# for the particle's own sink in its cell, default; 0: do not), LABEL (suffix of the output names).
 
 using Breeze
 using Breeze.Thermodynamics: saturation_vapor_pressure, vapor_gas_constant, dry_air_gas_constant, mixture_gas_constant,
@@ -59,11 +61,12 @@ function initial_particles(case; rng = Xoshiro(1))
                     r = 8e-6 .+ 1e-6 .* randn(rng, Nd), rᵈ = fill(5e-8, Nd), κ = fill(0.6, Nd))
         ice = (x = L .* rand(rng, Ni), y = L .* rand(rng, Ni), z = L .* rand(rng, Ni), r = fill(10e-6, Ni))
     else # fragments
-        Nd = round(Int, 50e6 * V / 2) # 50 cm⁻³ in the cloudy half
-        Ni = round(Int, 5e6 * V)      # 5 cm⁻³ fragments
+        Nd = round(Int, 100e6 * V / 2) # 100 cm⁻³ in the cloudy half
+        Ni = round(Int, 10e6 * V)      # 10 cm⁻³ fragments
         droplets = (x = L .* rand(rng, Nd), y = L .* rand(rng, Nd), z = L / 2 .* rand(rng, Nd),
-                    r = 8e-6 .+ 1e-6 .* randn(rng, Nd), rᵈ = fill(5e-8, Nd), κ = fill(0.6, Nd))
-        ice = (x = L .* rand(rng, Ni), y = L .* rand(rng, Ni), z = L .* rand(rng, Ni), r = 2e-6 .+ 3e-6 .* rand(rng, Ni))
+                    r = 10e-6 .+ 1e-6 .* randn(rng, Nd), rᵈ = fill(5e-8, Nd), κ = fill(0.6, Nd))
+        ice = (x = L .* rand(rng, Ni), y = L .* rand(rng, Ni), z = L .* rand(rng, Ni),
+               r = 0.3e-6 .* exp.(log(5 / 0.3) .* rand(rng, Ni)))
     end
     return droplets, ice
 end
@@ -73,7 +76,7 @@ function initial_saturation_ratio(case, z, constants)
     case == :wbf && return saturation_vapor_pressure(T₀, constants, PlanarLiquidSurface()) /
                            saturation_vapor_pressure(T₀, constants, PlanarIceSurface())
     cloudy = saturation_vapor_pressure(T₀, constants, PlanarLiquidSurface()) / saturation_vapor_pressure(T₀, constants, PlanarIceSurface())
-    clear = 0.85
+    clear = 0.7
     δ = 2 * L / 128 # interfaces at z = L/2 and z = 0 (≡ L)
     upper = (1 + tanh((z - L / 2) / δ)) / 2 * (1 - tanh((z - L) / δ)) / 2 + (1 - tanh(z / δ)) / 2
     return cloudy + (clear - cloudy) * clamp(upper, 0, 1)
@@ -83,11 +86,11 @@ end
 ##### Well-mixed parcel with the same particles
 #####
 
-struct Parcel
+struct Parcel{D, I}
     T :: Base.RefValue{Float64}
     qᵛ :: Base.RefValue{Float64}
-    droplets
-    ice
+    droplets :: D
+    ice :: I
     ρ :: Float64
     V :: Float64
 end
@@ -122,8 +125,8 @@ end
 ##### Run
 #####
 
-function run_case(case, M; stop_time = 10.0, arch = GPU(), output_dir)
-    label = @sprintf("%s_M%d", case, M)
+function run_case(case, M; stop_time = 10.0, arch = GPU(), output_dir, self_interaction = DiffusiveSelfInteraction(), suffix = "")
+    label = @sprintf("%s_M%d%s", case, M, suffix)
     grid = RectilinearGrid(arch; size=(M, M, M), halo=(3, 3, 3), x=(0, L), y=(0, L), z=(0, L),
                            topology=(Periodic, Periodic, Periodic))
 
@@ -131,7 +134,7 @@ function run_case(case, M; stop_time = 10.0, arch = GPU(), output_dir)
     droplet_physics = DropletPhysicsParameters(Float64; terminal_velocity=StokesTerminalVelocity())
     ice_physics = IcePhysicsParameters(Float64)
     microphysics = LagrangianMicrophysics(; physics=droplet_physics, ice_physics, droplets, ice,
-                                          self_interaction=DiffusiveSelfInteraction())
+                                          self_interaction)
     dynamics = BoussinesqDynamics(grid; pressure=p₀, temperature=T₀)
     closure = ScalarDiffusivity(; ν, κ=(ρθ=κᵀ, ρqᵛ=κᵛ))
     forcing = ConstantPowerBandForcing(grid; energy_injection_rate=ε_forcing)
@@ -160,7 +163,7 @@ function run_case(case, M; stop_time = 10.0, arch = GPU(), output_dir)
     rows = Dict{String, Vector{Float64}}()
     record(key, value) = push!(get!(rows, key, Float64[]), value)
     snapshots = Dict{Float64, Any}()
-    snapshot_times = case == :wbf ? [0.0, 2.0, stop_time] : [0.0, 0.5, 1.0, 2.0, 5.0, stop_time]
+    snapshot_times = case == :wbf ? [0.0, 2.0, stop_time] : [0.0, 0.25, 0.5, 1.0, 2.0, 5.0, stop_time]
 
     cell(ξ) = clamp(floor(Int, ξ / (L / M)) + 1, 1, M)
 
@@ -220,9 +223,9 @@ function run_case(case, M; stop_time = 10.0, arch = GPU(), output_dir)
     wizard = TimeStepWizard(; cfl, max_change=1.1, diffusive_cfl=0.2, max_Δt)
     simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(5))
 
-    # The parcel advances with the same time steps as the DNS
+    # The parcel advances with implicit steps of 0.01 s (each a small fraction of the phase relaxation times)
     last_time = Ref(0.0)
-    simulation.callbacks[:parcel] = Callback(IterationInterval(1)) do sim
+    simulation.callbacks[:parcel] = Callback(TimeInterval(0.01)) do sim
         Δtᵖ = sim.model.clock.time - last_time[]
         Δtᵖ > 0 && parcel_step!(parcel, Δtᵖ, constants, droplet_physics, ice_physics)
         last_time[] = sim.model.clock.time
@@ -248,7 +251,7 @@ function run_case(case, M; stop_time = 10.0, arch = GPU(), output_dir)
         writedlm(io, hcat((rows[k] for k in keys_sorted)...), ',')
     end
     for (τ, s) in snapshots
-        prefix = joinpath(output_dir, @sprintf("ice_dns_%s_t%.1f", label, τ))
+        prefix = joinpath(output_dir, @sprintf("ice_dns_%s_t%.2f", label, τ))
         writedlm(prefix * "_S.txt", s.S)
         writedlm(prefix * "_Si.txt", s.Si)
         writedlm(prefix * "_ice_slab.txt", s.ice)
@@ -266,5 +269,6 @@ if abspath(PROGRAM_FILE) == @__FILE__
     stop_time = length(ARGS) ≥ 3 ? parse(Float64, ARGS[3]) : 10.0
     arch = get(ENV, "ARCH", "GPU") == "GPU" ? GPU() : CPU()
     output_dir = get(ENV, "OUTPUT_DIR", joinpath(@__DIR__, "output"))
-    run_case(case, M; stop_time, arch, output_dir)
+    self_interaction = get(ENV, "SELF", "1") == "1" ? DiffusiveSelfInteraction() : nothing
+    run_case(case, M; stop_time, arch, output_dir, self_interaction, suffix = get(ENV, "LABEL", ""))
 end

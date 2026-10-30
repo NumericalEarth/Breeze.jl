@@ -17,7 +17,7 @@ function read_timeseries(label)
     return Dict(String(h) => data[:, n] for (n, h) in enumerate(vec(header)))
 end
 
-snapshot(label, t, name) = readdlm(joinpath(output_dir, @sprintf("ice_dns_%s_t%.1f_%s.txt", label, t, name)))
+snapshot(label, t, name) = readdlm(joinpath(output_dir, @sprintf("ice_dns_%s_t%.2f_%s.txt", label, t, name)))
 save_figure(fig, name) = (save(joinpath(figure_dir, name), fig; px_per_unit=2); @info "saved" joinpath(figure_dir, name))
 
 const dns_color = :royalblue
@@ -122,10 +122,10 @@ end
 ##### Fragments: survival
 #####
 
-function survival_figure(label)
+function survival_figure(label, t_final)
     ts = read_timeseries(label)
     t = ts["time"]
-    fig = Figure(size=(1100, 420))
+    fig = Figure(size=(1500, 420))
     ax1 = Axis(fig[1, 1]; xlabel="t (s)", ylabel="fraction of fragments surviving", title="secondary-ice fragment survival")
     lines!(ax1, t, ts["ice_surviving"]; color=dns_color, label="DNS, all")
     lines!(ax1, t, ts["ice_surviving_clear"]; color=dns_color, linestyle=:dot, label="DNS, starting in clear air")
@@ -136,6 +136,22 @@ function survival_figure(label)
     lines!(ax2, t, 1e6 .* ts["ice_radius_mean"]; color=dns_color, label="DNS")
     lines!(ax2, t, 1e6 .* ts["parcel_ice_radius_mean"]; color=parcel_color, linestyle=:dash, label="parcel")
     axislegend(ax2; position=:lt)
+
+    # Survival by initial radius
+    data = snapshot(label, t_final, "ice_radius")
+    rⁱ, rⁱᵖ, rⁱ₀, clear = data[:, 1], data[:, 2], data[:, 4], data[:, 5] .> 0
+    edges = exp.(range(log(minimum(rⁱ₀)), log(maximum(rⁱ₀)) + 1e-9, length=13))
+    centers = sqrt.(edges[1:end-1] .* edges[2:end])
+    fraction(r, selection) = [let in_bin = selection .& (edges[b] .≤ rⁱ₀ .< edges[b+1])
+                                  count(in_bin .& (r .> 0)) / max(1, count(in_bin)) end for b in 1:length(centers)]
+    everywhere = trues(length(rⁱ₀))
+    ax3 = Axis(fig[1, 3]; xlabel="initial radius (μm)", ylabel=@sprintf("fraction surviving at t = %.0f s", t_final),
+               xscale=log10, title="survival by initial size")
+    scatterlines!(ax3, 1e6 .* centers, fraction(rⁱ, everywhere); color=dns_color, label="DNS, all")
+    scatterlines!(ax3, 1e6 .* centers, fraction(rⁱ, clear); color=dns_color, linestyle=:dot, label="DNS, starting in clear air")
+    scatterlines!(ax3, 1e6 .* centers, fraction(rⁱ, .!clear); color=:green, linestyle=:dash, label="DNS, starting in cloud")
+    scatterlines!(ax3, 1e6 .* centers, fraction(rⁱᵖ, everywhere); color=parcel_color, linestyle=:dash, label="parcel")
+    axislegend(ax3; position=:rb)
     return fig
 end
 
@@ -164,7 +180,7 @@ if isfile(joinpath(output_dir, "ice_dns_$(labels.fragments)_timeseries.csv"))
     save_figure(fig, "ice_dns_fragments_timeseries.png")
     t_final = round(ts["time"][end], digits=1)
     save_figure(size_distribution_figure(labels.fragments, "Fragments", t_final), "ice_dns_fragments_size_distribution.png")
-    save_figure(slice_figure(labels.fragments, [0.0, 1.0, 2.0, t_final]), "ice_dns_fragments_slice.png")
-    save_figure(survival_figure(labels.fragments), "ice_dns_fragments_survival.png")
+    save_figure(slice_figure(labels.fragments, [0.0, 0.25, 0.5, t_final]), "ice_dns_fragments_slice.png")
+    save_figure(survival_figure(labels.fragments, t_final), "ice_dns_fragments_survival.png")
     save_figure(growth_scatter_figure(labels.fragments, "Fragments", t_final), "ice_dns_fragments_growth_scatter.png")
 end
