@@ -350,8 +350,9 @@ end
     𝒰₃ = with_moisture(𝒰, q₃)
     Π₃ = exner_function(𝒰₃, constants)
     cᵖᵐ = mixture_heat_capacity(q₃, constants)
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    θ₃ = (T₃ - ℒˡᵣ / cᵖᵐ * qˡ) / Π₃
+    ĉᵖ = Breeze.Thermodynamics.vapor_equivalent_heat_capacity(q₃, constants)
+    ℒˡ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid)
+    θ₃ = (cᵖᵐ * T₃ - ℒˡ₀ * qˡ) / (ĉᵖ * Π₃)
     𝒰₃ = LiquidIcePotentialTemperatureState(θ₃, q₃, p₀, pᵣ)
 
     T₃_solve = compute_boussinesq_adjustment_temperature(𝒰₃, constants)

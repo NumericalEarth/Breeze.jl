@@ -766,7 +766,7 @@ qᵛ⁺ = \frac{ϵᵈᵛ \, (1 - qᵗ) \, pᵛ⁺(T)}{p - pᵛ⁺(T)} ,
 
 which is equation (37) of [Pressel2015](@citet) and the saturated branch of [`equilibrium_saturation_specific_humidity`](@ref Breeze.Thermodynamics.equilibrium_saturation_specific_humidity). When the air is unsaturated (``qᵗ < qᵛ⁺``), `equilibrium_saturation_specific_humidity` falls back to the original density-based formula with ``ρ`` computed using ``Rᵐ = (1 - qᵗ) Rᵈ + qᵗ Rᵛ``.
 
-## Moist static energy
+## [Moist static energy](@id moist-static-energy)
 
 For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE),
 
@@ -798,4 +798,437 @@ per unit mass changing phase.
     ``s`` and ``s̃`` are not the same (``s̃ = s + ℒˡ₀ qᵗ``), but they obey the same conservation
     equation provided that total moisture fraction is conserved, or that ``\mathrm{D}qᵗ / \mathrm{D}t = 0``.
 
-## Liquid-ice potential temperature
+## [Liquid-ice potential temperature](@id liquid-ice-potential-temperature)
+
+Breeze's default thermodynamic formulation, [`LiquidIcePotentialTemperatureFormulation`](@ref),
+advances the liquid-ice potential temperature density ``ρθ``, where ``θ`` is shorthand for ``θˡⁱ``.
+The liquid-ice potential temperature is defined from the moist enthalpy so that it is _exactly_
+invariant under any phase change at fixed pressure, and so that it reduces to the ordinary potential
+temperature ``T / Π`` wherever there is no condensate.
+The price of the first property is that ``θˡⁱ`` is not exactly conserved when _cloudy_ air expands:
+its prognostic equation carries an explicit expansion source, proportional to the condensate.
+This section derives the definition, its closed-form inversion for temperature, and every term of
+its prognostic equation from the first law of thermodynamics, starting from the moist enthalpy.
+
+### Moist enthalpy and Kirchhoff's law
+
+With constant heat capacities and liquid water at absolute zero as the origin of enthalpy,
+the specific enthalpies of the four constituents of moist air are
+
+```math
+hᵈ = cᵖᵈ T , \qquad hᵛ = cᵖᵛ T + ℒˡ₀ , \qquad hˡ = cˡ T , \qquad hⁱ = cⁱ T + ℒˡ₀ - ℒⁱ₀ ,
+```
+
+where ``ℒˡ₀`` and ``ℒⁱ₀`` are the latent heats of condensation and deposition extrapolated to
+absolute zero, ``ℒ^β_0 = ℒ^β_r - Δc^β T_r``, as in the section on
+[temperature-dependent latent heat](@ref "Temperature-dependent latent heat") above.
+The enthalpy differences between vapor and the condensed phases,
+
+```math
+hᵛ - hˡ = ℒˡ₀ + (cᵖᵛ - cˡ) T = ℒˡ(T) , \qquad hᵛ - hⁱ = ℒⁱ₀ + (cᵖᵛ - cⁱ) T = ℒⁱ(T) ,
+```
+
+are the temperature-dependent latent heats of Kirchhoff's law — the same ``ℒ^β(T)`` that
+Breeze integrates in the Clausius–Clapeyron relation. The specific enthalpy of moist air is the
+mass-weighted sum over the constituents ``β ∈ \{d, v, l, i\}``,
+
+```math
+h = \sum_β q^β h^β = cᵖᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ ,
+```
+
+so that ``∂h / ∂T = cᵖᵐ`` at fixed composition, and ``h`` does not depend on pressure
+because the gases are ideal and the condensate is incompressible.
+
+The first law in enthalpy form, per unit volume, reads
+
+```math
+ρ \frac{\mathrm{D} h}{\mathrm{D} t} = \frac{\mathrm{D} p}{\mathrm{D} t} + ρ (Q + ε)
+- \boldsymbol{\nabla \cdot} \Big( \boldsymbol{J}_q + \sum_β h^β \boldsymbol{J}^β \Big) ,
+```
+
+where ``Q`` is the heating per unit mass (for radiation, ``ρ Q = Q_{\mathscr{I}}`` of the
+[radiative transfer](@ref "Radiative Transfer") section), ``ε`` is the dissipation of kinetic
+energy into heat, ``\boldsymbol{J}_q`` is the sensible heat flux (conduction and its subgrid
+counterpart), and ``\boldsymbol{J}^β`` is the flux of constituent ``β`` relative to the
+barycentric motion — subgrid transport and the fall of condensate — with
+``\sum_β \boldsymbol{J}^β = 0``. Two consequences of this equation are the yardsticks for
+everything that follows: in adiabatic expansion at fixed composition,
+``\mathrm{d} h = \mathrm{d} p / ρ = Rᵐ T \, \mathrm{d} \ln p``, and in a phase change at fixed
+pressure, ``\mathrm{d} h = 0``, whether or not the change is reversible.
+
+Because total water is unchanged by a phase change, it is convenient to subtract ``ℒˡ₀ qᵗ``
+from the enthalpy and work with
+
+```math
+H ≡ h - ℒˡ₀ qᵗ = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ ,
+```
+
+which is the [moist static energy](@ref moist-static-energy) without its geopotential,
+``s = H + g z``. ``H`` changes exactly when ``h`` does in every process that conserves ``qᵗ``,
+and it is invariant under every phase change at fixed pressure.
+
+### Vapor-equivalent properties
+
+A phase change moves mass between ``qᵛ``, ``qˡ`` and ``qⁱ``, so it changes ``cᵖᵐ`` and ``Rᵐ``.
+The _vapor-equivalent_ heat capacity and gas constant — the values the parcel would have
+if all of its water were vapor — do not:
+
+```math
+\hat{c}ᵖ ≡ qᵈ cᵖᵈ + qᵗ cᵖᵛ , \qquad \hat{R} ≡ qᵈ Rᵈ + qᵗ Rᵛ , \qquad
+\hat{κ} ≡ \frac{\hat{R}}{\hat{c}ᵖ} , \qquad \hat{Π} ≡ \left( \frac{p}{pˢᵗ} \right)^{\hat{κ}} .
+```
+
+Throughout the documentation a hat marks such a vapor-equivalent quantity; it depends on the
+composition only through ``qᵗ``, and equals the actual mixture value wherever there is no condensate.
+The actual mixture properties are the vapor-equivalent ones plus condensate corrections,
+
+```math
+cᵖᵐ = \hat{c}ᵖ + (cˡ - cᵖᵛ) qˡ + (cⁱ - cᵖᵛ) qⁱ , \qquad Rᵐ = \hat{R} - Rᵛ (qˡ + qⁱ) ,
+```
+
+and substituting the first of these into ``H`` together with Kirchhoff's law gives
+
+```math
+H = \hat{c}ᵖ T - ℒˡ(T) \, qˡ - ℒⁱ(T) \, qⁱ .
+```
+
+### Definition and inversion
+
+The liquid-ice potential temperature is the enthalpy ``H``, measured in temperature units
+with the vapor-equivalent heat capacity, and referred to the standard pressure with the
+vapor-equivalent Exner function:
+
+```math
+θˡⁱ ≡ \frac{H}{\hat{c}ᵖ \hat{Π}}
+    = \frac{1}{\hat{Π}} \left[ T - \frac{ℒˡ(T) \, qˡ + ℒⁱ(T) \, qⁱ}{\hat{c}ᵖ} \right] .
+```
+
+The second form is the familiar linear liquid-ice potential temperature with the latent heats
+evaluated at the actual temperature and divided by ``\hat{c}ᵖ``. The two ingredients only work
+together: the numerator ``H`` is invariant under every phase change at fixed pressure, and the
+denominator ``\hat{c}ᵖ \hat{Π}`` depends only on ``qᵗ`` and ``p``, so the ratio is invariant too.
+
+Inverting the definition for temperature is a closed-form operation, since
+``\hat{c}ᵖ \hat{Π} θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ`` is linear in ``T``:
+
+```math
+T = \frac{\hat{c}ᵖ \hat{Π} \, θˡⁱ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ}{cᵖᵐ} .
+```
+
+On the anelastic core the pressure in ``\hat{Π}`` is the reference pressure ``pᵣ(z)``, and the
+inversion costs one power. On the compressible core the pressure is itself diagnosed from density
+and temperature, ``p = ρ Rᵐ T``, so the same relation is implicit in ``T`` and is solved
+iteratively; see the `temperature_solver` keyword of
+[`LiquidIcePotentialTemperatureFormulation`](@ref).
+
+In clear air ``H = cᵖᵐ T`` and ``\hat{c}ᵖ = cᵖᵐ``, so ``θˡⁱ = T / \hat{Π}`` is the potential
+temperature of unsaturated moist air with the exact exponent ``Rᵐ / cᵖᵐ`` for its composition.
+In cloudy air ``θˡⁱ`` has an equally concrete meaning. Evaporate all of a parcel's condensate at
+fixed pressure and fixed enthalpy: its temperature becomes ``T' = H / \hat{c}ᵖ``, because clear
+air with the same ``qᵗ`` has ``h = \hat{c}ᵖ T' + ℒˡ₀ qᵗ``. Then bring it to the standard pressure
+along its (now condensate-free) adiabat: its potential temperature is ``T' / \hat{Π} = θˡⁱ``.
+The liquid-ice potential temperature is therefore the potential temperature the parcel would
+have if its condensate were evaporated isobarically, _computed exactly_ rather than to first
+order in the condensate.
+
+!!! note "Relation to other liquid-water potential temperatures"
+    The exponential liquid-water potential temperature of [Betts (1973)](@cite Betts1973),
+    ``θ_l = (T / Π) \exp[-ℒ qˡ / (cᵖ T)]``, and the linear ice-liquid water potential temperature
+    of [Tripoli and Cotton (1981)](@cite TripoliCotton1981),
+    ``θ_{il} = (T / Π) [1 - ℒ qˡ / (cᵖ T)]``, are first-order approximations of the same
+    quantity: expanding ``T' = T - (ℒˡ qˡ + ℒⁱ qⁱ) / \hat{c}ᵖ`` in the condensate recovers them,
+    up to the constant latent heats and the dry exponent ``Rᵈ / cᵖᵈ`` that those authors use.
+    [Bryan and Fritsch (2004)](@cite BryanFritsch2004) showed that the omitted specific heats of
+    water give such approximations a cold bias; evaluating the latent heats at ``T`` through
+    Kirchhoff's law, dividing by ``\hat{c}ᵖ`` rather than ``cᵖᵐ``, and using an Exner exponent
+    that depends on total water only are exactly the three choices that make ``θˡⁱ`` invariant
+    under isobaric phase change, at every temperature, in or out of equilibrium.
+
+    Breeze's previous definition, ``θ = (T - D) / Π`` with ``D = (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ`` and
+    ``Π = (p / pˢᵗ)^{Rᵐ / cᵖᵐ}``, differed in all three choices. Its exponent changed during a
+    phase change, so that condensation at fixed ``θ`` and ``p`` released more heat than
+    ``ℒˡ(T)`` — by several percent in the upper troposphere — and it carried no expansion
+    source, so that rising cloudy air cooled by only ``(T - D) / T`` of the adiabatic rate.
+    The second defect dominated: in a radiative-convective equilibrium large-eddy simulation
+    it created energy at more than 20 W m⁻², which the present definition with its expansion
+    source reduces to about 2 W m⁻², the remainder being numerical and subgrid mixing.
+    The two definitions coincide in clear air and differ by a few tenths of a kelvin per gram
+    per kilogram of condensate in cloud.
+
+### The prognostic equation of a thermodynamic state function
+
+Every thermodynamic formulation in Breeze advances some function ``χ(T, p, q)`` of the
+temperature, the pressure and the water mass fractions ``q = (qᵛ, qˡ, qⁱ)``, in place of the
+temperature itself. Its prognostic equation follows from the first law and the water budgets,
+and every source it needs is a partial derivative of its definition. The derivation below is
+written once for a general ``χ``; the liquid-ice potential temperature is then a special case.
+
+Each water constituent ``β ∈ \{v, l, i\}`` obeys
+
+```math
+ρ \frac{\mathrm{D} q^β}{\mathrm{D} t} = - \boldsymbol{\nabla \cdot} \boldsymbol{J}^β + ρ \dot{S}^β ,
+\qquad \dot{S}^v + \dot{S}^l + \dot{S}^i = 0 ,
+```
+
+where ``\dot{S}^β`` is the net rate at which phase changes produce constituent ``β``,
+and dry air carries the balancing relative flux ``\boldsymbol{J}^d = -(\boldsymbol{J}^v + \boldsymbol{J}^l + \boldsymbol{J}^i)``.
+At fixed pressure, ``\mathrm{d} h = cᵖᵐ \, \mathrm{d} T + \sum_β (h^β - hᵈ) \, \mathrm{d} q^β``
+with the sum over the water constituents, since the dry-air mass fraction takes up whatever the
+water constituents give away. Substituting the enthalpy and water equations and using
+``\sum_β \boldsymbol{J}^β = 0`` and ``\dot{S}^v = -\dot{S}^l - \dot{S}^i`` gives the
+temperature equation
+
+```math
+ρ cᵖᵐ \frac{\mathrm{D} T}{\mathrm{D} t} =
+\underbrace{\frac{\mathrm{D} p}{\mathrm{D} t}}_{\text{expansion}}
++ \underbrace{ρ \big( ℒˡ \dot{S}^l + ℒⁱ \dot{S}^i \big)}_{\text{phase change}}
++ \underbrace{ρ (Q + ε)}_{\text{heating}}
+- \underbrace{\boldsymbol{\nabla \cdot} \boldsymbol{J}_q - \sum_β (c^β - cᵖᵈ) \, \boldsymbol{J}^β \boldsymbol{\cdot \nabla} T}_{\text{conduction and heat carried by moving water}} ,
+```
+
+where ``c^β`` is ``cᵖᵛ``, ``cˡ`` or ``cⁱ``. The last term arises because the enthalpy that a
+relative flux carries, ``(h^β - hᵈ) \boldsymbol{J}^β``, is not simply ``h^β - hᵈ`` times the
+mass it moves when the temperature varies along the flux.
+
+Now let ``χ(T, p, q)`` be any thermodynamic state function. By the chain rule, with each
+partial derivative holding the other two of ``(T, p, q)`` fixed and ``∂ / ∂q^β`` exchanging
+constituent ``β`` with dry air,
+
+```math
+ρ \frac{\mathrm{D} χ}{\mathrm{D} t} = \frac{∂χ}{∂T} ρ \frac{\mathrm{D} T}{\mathrm{D} t}
++ ρ \frac{∂χ}{∂ p} \frac{\mathrm{D} p}{\mathrm{D} t}
++ \sum_β \frac{∂χ}{∂q^β} ρ \frac{\mathrm{D} q^β}{\mathrm{D} t} .
+```
+
+Substituting the temperature and water equations, writing
+``\mathrm{D} p / \mathrm{D} t = p \, \mathrm{D} \ln p / \mathrm{D} t`` and using ``p / ρ = Rᵐ T``,
+each group of terms collects into the derivative of ``χ`` along the process that drives it:
+
+```math
+ρ \frac{\mathrm{D} χ}{\mathrm{D} t} =
+ρ \, \mathcal{E}_χ \frac{\mathrm{D} \ln p}{\mathrm{D} t}
++ ρ \sum_β \mathcal{P}^β_χ \dot{S}^β
++ χ_h \Big[ ρ (Q + ε) - \boldsymbol{\nabla \cdot} \boldsymbol{J}_q - \sum_β (c^β - cᵖᵈ) \, \boldsymbol{J}^β \boldsymbol{\cdot \nabla} T \Big]
+- \sum_β χ_{q^β} \boldsymbol{\nabla \cdot} \boldsymbol{J}^β ,
+```
+
+with four coefficients, each a derivative of the definition of ``χ``:
+
+| coefficient | definition | in terms of ``χ(T, p, q)`` | meaning |
+|:---|:---|:---|:---|
+| heating, ``χ_h`` | ``(∂χ / ∂h)_{p, q}`` | ``\dfrac{1}{cᵖᵐ} \dfrac{∂χ}{∂T}`` | change per joule added at fixed pressure and composition |
+| expansion, ``\mathcal{E}_χ`` | ``(∂χ / ∂\ln p)_{η, q}`` | ``\dfrac{Rᵐ T}{cᵖᵐ} \dfrac{∂χ}{∂T} + \dfrac{∂χ}{∂ \ln p}`` | change along an adiabat at fixed composition |
+| phase change, ``\mathcal{P}^β_χ`` | ``(∂χ / ∂q^β)_{h, p}`` | ``\dfrac{∂χ}{∂q^β} - χ_h (h^β - hᵈ)`` | change per unit ``β`` formed at fixed enthalpy and pressure |
+| composition, ``χ_{q^β}`` | ``(∂χ / ∂q^β)_{T, p}`` | ``\dfrac{∂χ}{∂q^β}`` | change per unit ``β`` exchanged for dry air at fixed ``T`` and ``p`` |
+
+The expansion coefficient is a derivative at fixed entropy ``η`` because, at fixed composition,
+``T \, \mathrm{d} η = cᵖᵐ \, \mathrm{d} T - Rᵐ T \, \mathrm{d} \ln p``, so that
+``(∂T / ∂\ln p)_{η, q} = Rᵐ T / cᵖᵐ``; the phase-change coefficient is a derivative at fixed
+enthalpy because ``0 = cᵖᵐ \, \mathrm{d} T + (h^β - hᵈ) \, \mathrm{d} q^β`` there.
+A conversion of constituent ``β`` into ``γ`` at rate ``C`` contributes
+``(\mathcal{P}^γ_χ - \mathcal{P}^β_χ) C``, so ``χ`` needs no phase-change source exactly when
+all of its ``\mathcal{P}^β_χ`` are equal, and no expansion source exactly when ``\mathcal{E}_χ = 0``.
+
+No choice of ``χ`` achieves both. Invariance under adiabatic expansion at fixed composition
+requires ``χ`` to be a function of the mixture potential temperature ``T (pˢᵗ / p)^{Rᵐ / cᵖᵐ}``
+and ``q``; invariance under isobaric phase change requires it to be a function of ``H``, ``p``
+and ``qᵗ``; and no function is both. Every formulation therefore computes at least one explicit
+source, and the choice of ``χ`` decides which. The cost of omitting a term ``X`` from the right
+side is an energy error: ``χ`` is then wrong by ``X \, \mathrm{d} t``, which at fixed pressure
+and composition is an enthalpy error of ``X \, \mathrm{d} t / χ_h``, or ``ρ X / χ_h`` per unit
+volume and time.
+
+### The equation for the liquid-ice potential temperature
+
+For ``χ = θˡⁱ = H / (\hat{c}ᵖ \hat{Π})``, the derivatives are ``∂χ / ∂T = cᵖᵐ / (\hat{c}ᵖ \hat{Π})``
+and ``∂χ / ∂\ln p = - \hat{κ} χ``, so the four coefficients are
+
+```math
+χ_h = \frac{1}{\hat{c}ᵖ \hat{Π}} , \qquad
+\mathcal{E}_θ = \frac{Rᵐ T - \hat{R} \hat{Π} θˡⁱ}{\hat{c}ᵖ \hat{Π}}
+= \frac{\hat{κ} \big( ℒˡ qˡ + ℒⁱ qⁱ \big) - Rᵛ (qˡ + qⁱ) \, T}{\hat{c}ᵖ \hat{Π}} , \qquad
+\mathcal{P}^v_θ = \mathcal{P}^l_θ = \mathcal{P}^i_θ ,
+```
+
+together with the composition derivatives ``χ_{q^β}`` evaluated below for sedimentation.
+The second form of ``\mathcal{E}_θ`` follows from ``\hat{R} \hat{Π} θˡⁱ = \hat{κ} H`` and the
+vapor-equivalent decompositions of ``H`` and ``Rᵐ``. Both of its terms are proportional to the
+condensate: the expansion source vanishes in clear air, where ``θˡⁱ`` is exactly conserved, and
+in cloud it is about ``6 × 10^5 \, qˡ`` J kg⁻¹ per unit ``\ln p`` — between one and two percent
+of the adiabatic cooling ``Rᵐ T \, \mathrm{d} \ln p`` for 2 g kg⁻¹ of liquid — which is exactly
+the expansion work that the linearized definitions get wrong.
+
+The equality of the phase-change coefficients is immediate from the definition rather than
+from the formula in the table: a phase change at fixed pressure holds ``p`` and ``qᵗ`` fixed,
+hence ``\hat{c}ᵖ \hat{Π}``, and it holds ``H`` fixed by the first law, hence ``θˡⁱ``.
+This is exact for condensation, evaporation, deposition, sublimation, freezing and melting,
+at every temperature, in equilibrium or not. Microphysics schemes therefore never add a
+tendency to ``ρθ``: they act on the temperature at fixed ``θˡⁱ``, and the temperature after
+any microphysical step satisfies ``cᵖᵐ \, \mathrm{d} T = ℒ^β(T) \, \mathrm{d} q^β`` automatically.
+
+Collecting the terms, the prognostic equation for the density-weighted variable is
+
+```math
+∂_t (ρ θˡⁱ) + \boldsymbol{\nabla \cdot} (ρ θˡⁱ \boldsymbol{u}) =
+\underbrace{ρ \, \mathcal{E}_θ \frac{\mathrm{D} \ln p}{\mathrm{D} t}}_{\text{expansion}}
++ \underbrace{\frac{ρ Q}{\hat{c}ᵖ \hat{Π}}}_{\text{heating}}
+- \boldsymbol{\nabla \cdot} \boldsymbol{J}_θ
++ \underbrace{\mathcal{C}_{sed}}_{\text{sedimentation}}
++ \underbrace{0}_{\text{phase change}} ,
+```
+
+where ``\boldsymbol{J}_θ`` is the subgrid flux of ``θˡⁱ`` that stands in for the conduction and
+water-flux terms (see [What remains unconserved](@ref theta-li-unconserved)), and the
+sedimentation term is given below.
+
+### The expansion source on the two dynamical cores
+
+The expansion source needs the material derivative of the pressure, which the two dynamical
+cores supply differently.
+
+On the anelastic core the thermodynamic pressure is the hydrostatic reference pressure
+``pᵣ(z)``, so its material derivative is exact and local:
+
+```math
+\frac{\mathrm{D} \ln pᵣ}{\mathrm{D} t} = w \, ∂_z \ln pᵣ = - \frac{g ρᵣ w}{pᵣ} .
+```
+
+The source is then ``- ρᵣ \mathcal{E}_θ \, g ρᵣ w / pᵣ``: proportional to the vertical velocity,
+with a coefficient that depends only on the cell's own state. The ``Rᵐ T / pᵣ`` inside
+``\mathcal{E}_θ`` is the actual specific volume, the same one that the
+[anelastic buoyancy](@ref Anelastic-section) uses, which is what makes the sum of kinetic,
+potential and internal energy conserved in the sense of [Pauluis (2008)](@cite Pauluis2008).
+
+On the compressible core the pressure is prognostic in effect, and its exact material
+derivative follows from the equation of state ``p = ρ Rᵐ T``, the continuity equation and the
+temperature equation:
+
+```math
+\frac{\mathrm{D} \ln p}{\mathrm{D} t} = \frac{cᵖᵐ}{cᵛᵐ} \left[ - \boldsymbol{\nabla \cdot u}
++ \frac{\mathrm{D} \ln Rᵐ}{\mathrm{D} t} + \frac{Q^{\star}}{cᵖᵐ T} \right] , \qquad cᵛᵐ ≡ cᵖᵐ - Rᵐ ,
+```
+
+where ``Q^{\star}`` collects every diabatic term of the temperature equation per unit mass:
+heating, latent heating, and the flux terms. This includes acoustic compression. Breeze does not
+evaluate it; the expansion source on the compressible core uses the hydrostatic estimate
+
+```math
+\frac{\mathrm{D} \ln p}{\mathrm{D} t} ≈ - \frac{g ρ w}{p} ,
+```
+
+which drops the local pressure tendency and its horizontal advection. The alternative of keeping
+only the adiabatic part of the exact tendency, ``-(cᵖᵐ / cᵛᵐ) \boldsymbol{\nabla \cdot u}``, is
+not better: heating also makes air expand, and that expansion is already accounted for, because
+heating is applied through the isobaric coefficient ``χ_h = (∂χ / ∂h)_p``, which includes the
+work done during isobaric expansion. Charging the heating-driven divergence to the adiabatic
+term as well would count it twice, which the ``Q^{\star}`` and ``\mathrm{D} \ln Rᵐ / \mathrm{D} t``
+terms of the exact tendency are there to subtract back out. A variable with
+``\mathcal{E}_χ = 0`` — the mixture potential temperature, the moist entropy — or a total
+energy formulation avoids the pressure tendency on this core altogether.
+
+### Heating, boundary fluxes and sedimentation
+
+Heating at fixed composition changes ``H`` by ``Q`` per unit mass, so it changes ``θˡⁱ`` by
+``Q / (\hat{c}ᵖ \hat{Π})``. The radiative heating ``Q_{\mathscr{I}}`` in W m⁻³, an interior
+forcing supplied under the `ρE` key, and an energy flux in W m⁻² supplied as a boundary
+condition under `ρE` are all converted to the ``ρθ`` tendency or flux by the same factor
+``1 / (\hat{c}ᵖ \hat{Π})``; see [Boundary conditions and forcing](@ref interface-keys).
+Water fluxes need no conversion. Adding vapor at fixed ``θˡⁱ`` and fixed pressure changes the
+enthalpy by ``θˡⁱ ∂(\hat{c}ᵖ \hat{Π}) / ∂qᵗ + ℒˡ₀`` per unit mass, which at ``p = pˢᵗ``, where
+``\hat{Π} = 1`` and ``θˡⁱ = T`` in clear air, is exactly ``(cᵖᵛ - cᵖᵈ) T + ℒˡ₀ = hᵛ - hᵈ``: an
+evaporative surface flux delivers the enthalpy of the vapor relative to the dry air it displaces.
+
+When condensate falls, the thermodynamic variable must account for the enthalpy that leaves
+with it and arrives from the cell above; the mechanism is described in the
+[microphysics developer documentation](@ref "Sedimentation of the thermodynamic variables").
+The content it requires is the change of ``θˡⁱ`` per unit departing mass of phase ``β`` at
+fixed temperature and pressure, along the composition increment ``Δq`` that the dynamics
+prescribes (condensate out and dry air in on the anelastic core). Differentiating
+``\hat{c}ᵖ \hat{Π} θˡⁱ = H`` along that increment,
+
+```math
+χ^β = \frac{ΔH|_T - θˡⁱ \, Δ(\hat{c}ᵖ \hat{Π})}{\hat{c}ᵖ \hat{Π}} , \qquad
+ΔH|_T = T \, Δcᵖᵐ - ℒˡ₀ Δqˡ - ℒⁱ₀ Δqⁱ , \qquad
+Δ(\hat{c}ᵖ \hat{Π}) = \hat{Π} \left[ Δ\hat{c}ᵖ + \hat{c}ᵖ \ln \frac{p}{pˢᵗ} \, Δ\hat{κ} \right] ,
+```
+
+with ``Δ\hat{c}ᵖ = (cᵖᵛ - cᵖᵈ) Δqᵗ`` and
+``Δ\hat{κ} = \hat{κ} \big[ (Rᵛ - Rᵈ) / \hat{R} - (cᵖᵛ - cᵖᵈ) / \hat{c}ᵖ \big] Δqᵗ``.
+For liquid replaced by dry air, ``ΔH|_T = (cˡ - cᵖᵈ) T - ℒˡ₀`` is the same content that the
+static energy transports, and ``χ^l ≈ - ℒˡ(T) / (\hat{c}ᵖ \hat{Π})`` to leading order.
+The accompanying thermal response is ``∂θˡⁱ / ∂h = 1 / (\hat{c}ᵖ \hat{Π})``. Because this
+Jacobian varies with the Exner function, the sedimentation tendency of ``ρθ`` is a cell-local
+response rather than the divergence of a conservative flux: energy is consistent, but ``∫ρθ``
+is not conserved by precipitation, nor should it be, since heat released at one pressure is
+absorbed at another.
+
+### Choosing the Exner exponent
+
+The derivation above holds for any exponent ``κ`` that depends on the composition at most
+through ``qᵗ``, with ``\hat{Π}`` replaced by ``Π = (p / pˢᵗ)^κ`` and
+``\mathcal{E}_θ = (Rᵐ T - κ \hat{c}ᵖ Π θˡⁱ) / (\hat{c}ᵖ Π)``.
+Phase change remains exact, since neither ``\hat{c}ᵖ`` nor ``Π`` changes, and expansion remains
+exact as long as the source is applied. [`LiquidIcePotentialTemperatureFormulation`](@ref)
+offers two choices through its `exner_exponent` keyword:
+
+- `VaporEquivalentExponent()` (the default), ``κ = \hat{κ}``. The expansion source vanishes in
+  clear air, so unsaturated moist ascent conserves ``θˡⁱ`` exactly, and only cloudy air carries
+  a source. The inversion for temperature costs one power per cell, since ``\hat{κ}`` varies
+  with ``qᵗ``.
+
+- `DryExponent()`, ``κ = κᵈ = Rᵈ / cᵖᵈ``. On the anelastic core ``Πᵈ(z) = (pᵣ / pˢᵗ)^{κᵈ}`` is
+  then a function of height alone, which can be computed once per level, and the inversion
+  needs no transcendental function. The expansion source becomes
+
+  ```math
+  \mathcal{E}_θ = \frac{(Rᵐ - κᵈ cᵖᵐ) \, T + κᵈ (ℒˡ₀ qˡ + ℒⁱ₀ qⁱ)}{\hat{c}ᵖ Πᵈ} ,
+  ```
+
+  whose first term no longer vanishes in clear air, where it reduces to
+  ``(Rᵐ - κᵈ cᵖᵐ) T = qᵛ (Rᵛ - κᵈ cᵖᵛ) T ≈ -0.23 \, qᵛ Rᵈ T``: about 0.4% of the adiabatic
+  cooling at 15 g kg⁻¹ of vapor. This
+  is the exponent of Betts, Tripoli and Cotton, and most cloud models, which omit the
+  corresponding source; with the source applied it is as exact as the vapor-equivalent
+  exponent, at the price of a source that acts everywhere.
+
+### [What remains unconserved](@id theta-li-unconserved)
+
+With the exact definition and the expansion source, resolved adiabatic motion, phase change,
+heating and sedimentation are all energetically consistent in the continuum. Three things
+are not.
+
+- **Isobaric mixing.** Physical mixing at one pressure conserves the mass-weighted enthalpy
+  and total water. Since ``h = \hat{c}ᵖ \hat{Π} θˡⁱ + ℒˡ₀ qᵗ`` is bilinear in ``(θˡⁱ, qᵗ)``
+  through ``\hat{c}ᵖ \hat{Π}``, mixing ``θˡⁱ`` as a conserved scalar errs by
+  ``-\tfrac{1}{4} Δ(\hat{c}ᵖ \hat{Π}) Δθˡⁱ`` per equal-mass mixing event: of order 10 J kg⁻¹
+  for a cloudy parcel mixing with clear air, and zero for parcels of equal composition.
+  This is negligible.
+
+- **Mixing between pressure levels.** Numerical mixing by the advection scheme and subgrid
+  mixing by the closure both move ``θˡⁱ`` down its gradient between levels. Physically, such
+  an exchange is an isentropic displacement followed by isobaric mixing, and in a stable layer
+  the displacement costs kinetic energy. Mixing ``θˡⁱ`` reaches approximately the right final
+  thermodynamic state but spends no kinetic energy on it, so the potential energy it creates
+  appears from nothing. Since ``ρ \, \mathrm{D} H / \mathrm{D} t = - \hat{c}ᵖ \hat{Π} \, \boldsymbol{\nabla \cdot} \boldsymbol{J}_θ``
+  for a flux of ``θˡⁱ``, the subgrid flux conserves ``∫ ρ H`` only with the additional exchange
+  term
+
+  ```math
+  - \frac{\boldsymbol{J}_θ \boldsymbol{\cdot \nabla} (\hat{c}ᵖ \hat{Π})}{\hat{c}ᵖ \hat{Π}}
+  ```
+
+  in the ``ρθ`` tendency, which an explicit closure could supply (a TKE closure already
+  represents the kinetic energy that the exchange consumes through its buoyancy flux).
+  Breeze does not apply it, and the implicit mixing of the advection scheme cannot be
+  corrected this way at all. In the radiative-convective equilibrium simulation mentioned
+  above, numerical mixing of ``θˡⁱ`` creates about 3 W m⁻² and subgrid mixing about 0.5 W m⁻².
+
+- **Dissipative heating.** Breeze omits ``ε`` in every formulation: the kinetic energy that the
+  advection scheme and the closure dissipate is not returned as heat. In a statistically steady
+  state this loses the buoyancy work, 1–2 W m⁻² in the same simulation, from every
+  thermodynamic variable alike.
+
+Discretely, the expansion source uses a cell-centered vertical velocity while advection is in
+flux form, so the two do not cancel to machine precision in a closed domain; in a closed
+convecting box the remaining imbalance is about one percent of what the previous definition
+created.

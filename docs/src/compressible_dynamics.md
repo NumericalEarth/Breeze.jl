@@ -15,7 +15,7 @@ thermodynamic variable ``χ`` (see [Governing equations](@ref Dycore-section)), 
 \begin{aligned}
 &\text{Mass:} && ∂_t ρ + ∇·(ρ \boldsymbol{u}) = 0 ,\\
 &\text{Momentum:} && ∂_t(ρ \boldsymbol{u}) + ∇·(ρ \boldsymbol{u} \boldsymbol{u}) + ∇ p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + ∇·\boldsymbol{\mathcal{T}} ,\\
-&\text{Thermodynamic:} && ∂_t χ + ∇·(χ \boldsymbol{u}) = Π \, ∇·\boldsymbol{u} + S_χ ,\\
+&\text{Thermodynamic:} && ∂_t ρᵡ + ∇·(ρᵡ \boldsymbol{u}) = ρᵈ \, \mathcal{E}_χ \frac{\mathrm{D} \ln p}{\mathrm{D} t} + S_χ ,\\
 &\text{Moisture:} && ∂_t(ρ q^t) + ∇·(ρ q^t \boldsymbol{u}) = S_q .
 \end{aligned}
 ```
@@ -26,9 +26,14 @@ Pressure is closed by the moist ideal gas law
 p = ρ R^m T ,
 ```
 
-where ``R^m`` is the mixture gas constant. For the potential-temperature thermodynamics the
-prognostic is ``χ = ρ θ`` and ``Π = 0``; for static-energy thermodynamics ``χ = ρ s`` and ``Π``
-encodes pressure work.
+where ``R^m`` is the mixture gas constant. The thermodynamic prognostic ``ρᵡ = ρᵈ χ`` is weighted
+by the dry-air density, and ``\mathcal{E}_χ = (∂χ / ∂\ln p)_{η, q}`` is the expansion coefficient
+of the state function ``χ`` (see [Governing equations](@ref Dycore-section)). For the liquid-ice
+potential temperature, ``χ = θˡⁱ``, the expansion source is proportional to the condensate and
+the pressure tendency is approximated hydrostatically, ``\mathrm{D} \ln p / \mathrm{D} t ≈ - g ρ w / p``;
+the exact tendency, and why its adiabatic part alone would not be a better estimate, are discussed
+in [The expansion source on the two dynamical cores](@ref "The expansion source on the two dynamical cores").
+For static energy, ``χ = s``, the source encodes the pressure work.
 
 ## Time integration options
 
