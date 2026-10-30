@@ -8,6 +8,7 @@ export div_ρUc,
        UnsplitVerticalAdvection,
        CornerVorticityPairing,
        UpwindVorticityPairing,
+       GradientFormUpwinding,
        AveragedVorticityPairing
 
 using Oceananigans.Advection:

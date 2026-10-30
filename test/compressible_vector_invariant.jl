@@ -162,6 +162,7 @@ averaged_centered_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_sc
 weno_divergence() = CompressibleVectorInvariant(divergence_scheme = WENO(order = 5))
 weno_kinetic_energy() = CompressibleVectorInvariant(kinetic_energy_gradient_scheme = WENO(order = 5))
 weno_vertical() = CompressibleVectorInvariant(vertical_advection_scheme = WENO(order = 5))
+gradient_form_kinetic_energy() = CompressibleVectorInvariant(kinetic_energy_gradient_scheme = GradientFormUpwinding(WENO(order = 5)))
 flux_form() = Centered(order = 2)
 
 @testset "CompressibleVectorInvariant [$(FT)]" for FT in test_float_types()
@@ -181,6 +182,8 @@ flux_form() = Centered(order = 2)
             weno = CompressibleWENOVectorInvariant()
             @test weno.vorticity_scheme isa WENO{5}
             @test weno.divergence_scheme isa WENO{3}
+            @test weno.kinetic_energy_gradient_scheme isa EnergyConserving
+            @test CompressibleWENOVectorInvariant(kinetic_energy_gradient_order = 5).kinetic_energy_gradient_scheme isa WENO{3}
             @test weno.vorticity_pairing isa UpwindVorticityPairing
             @test weno.centered_vorticity_scheme isa Centered{5}
             @test isnothing(scheme.centered_vorticity_scheme)
@@ -220,7 +223,7 @@ flux_form() = Centered(order = 2)
                 # Reconstruction of the self-transported kinetic energy gradient and divergence, and of
                 # the vertical fluxes, breaks the identity: on these random (grid-scale) fields the
                 # production is a sizeable fraction of the work done, and it is not zero.
-                for scheme in (weno_divergence(), weno_kinetic_energy(), weno_vertical())
+                for scheme in (weno_divergence(), weno_kinetic_energy(), weno_vertical(), gradient_form_kinetic_energy())
                     P = kinetic_energy_production(model, scheme)
                     @test roundoff < abs(P) < 1
                 end
@@ -310,7 +313,7 @@ flux_form() = Centered(order = 2)
                  ("LatitudeLongitudeGrid", latitude_longitude_grid(default_arch, FT, (24, 12, 6))))
 
             spherical = grid isa LatitudeLongitudeGrid
-            for scheme in (centered(), centered(4), unsplit(), CompressibleWENOVectorInvariant())
+            for scheme in (centered(), centered(4), unsplit(), CompressibleWENOVectorInvariant(), gradient_form_kinetic_energy())
                 coriolis = spherical ? SphericalCoriolis() : FPlane(f = 1e-4)
                 model = compressible_model(grid, scheme; coriolis, time_discretization = SplitExplicitTimeDiscretization())
                 set!(model; θ = 300, ρ = model.dynamics.reference_state.density)

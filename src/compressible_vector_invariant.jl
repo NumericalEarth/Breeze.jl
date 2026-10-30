@@ -132,6 +132,28 @@ flow (Hollingsworth et al. 1983); kept for reference and analysis.
 struct AveragedVorticityPairing end
 
 #####
+##### Gradient-form upwinding of the kinetic energy gradient
+#####
+
+"""
+$(TYPEDEF)
+
+Upwinding of the kinetic energy gradient that keeps it a discrete gradient: the kinetic energy of
+each cell is reconstructed from the face kinetic energies with the upwind-biased `scheme`, biased
+by the cell's own velocity, and the momentum equations carry `ρ ∇K` of that cell value. Unlike the
+upwinded differences of `OnlySelfUpwinding`, the result has no discrete curl, so it cannot inject
+vorticity at interfaces where the velocities are interpolated (the Yin-Yang overlap).
+"""
+struct GradientFormUpwinding{S}
+    scheme :: S
+end
+
+Base.summary(g::GradientFormUpwinding) = string("GradientFormUpwinding(", summary(g.scheme), ")")
+Adapt.adapt_structure(to, g::GradientFormUpwinding) = GradientFormUpwinding(Adapt.adapt(to, g.scheme))
+Architectures.on_architecture(to, g::GradientFormUpwinding) = GradientFormUpwinding(on_architecture(to, g.scheme))
+Oceananigans.Advection.materialize_advection(g::GradientFormUpwinding, grid) = GradientFormUpwinding(materialize_advection(g.scheme, grid))
+
+#####
 ##### The scheme
 #####
 
@@ -175,6 +197,7 @@ const CVI = CompressibleVectorInvariant
 const CenteredVorticity = CVI{<:Any, <:Any, <:EnergyConserving}
 const CenteredKineticEnergy = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:EnergyConserving}
 const ReconstructedKineticEnergy = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:AbstractAdvectionScheme}
+const GradientUpwindedKineticEnergy = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:GradientFormUpwinding}
 const CenteredDivergence = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:EnergyConserving}
 const ReconstructedDivergence = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:AbstractAdvectionScheme}
 const SplitCVI = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:SplitVerticalAdvection}
@@ -196,6 +219,7 @@ centered_counterpart(::AbstractAdvectionScheme{B}, FT) where B = Centered(FT; or
 
 reconstruction_buffer(::EnergyConserving) = 0
 reconstruction_buffer(::AbstractAdvectionScheme{B}) where B = B
+reconstruction_buffer(g::GradientFormUpwinding) = reconstruction_buffer(g.scheme)
 
 """
 $(TYPEDSIGNATURES)
@@ -226,8 +250,10 @@ Keyword arguments
 - `vertical_advection_scheme`: Reconstruction of the vertical flux of horizontal momentum and of the
   horizontal fluxes of vertical momentum. Default: `EnergyConserving()` (centered).
 
-- `kinetic_energy_gradient_scheme`: Reconstruction of the self-transported part of the kinetic energy
-  gradient (`δx(u²/2)` in the `u` equation, and so on). Default: `EnergyConserving()`.
+- `kinetic_energy_gradient_scheme`: `EnergyConserving()` (default, the exact discrete gradient of the
+  cell kinetic energy), an upwind scheme (reconstruction of the self-transported differences
+  `δx(u²/2)`, as `WENOVectorInvariant`), or `GradientFormUpwinding(scheme)` (the gradient of a cell
+  kinetic energy reconstructed with `scheme`, which stays curl-free).
 
 - `divergence_scheme`: Reconstruction of the self-transported part of the mass-flux divergence
   (`δx(ρu)` in the `u` equation, and so on). Default: `EnergyConserving()`.
@@ -306,11 +332,16 @@ nothing_to_default(user_value; default) = isnothing(user_value) ? default : user
 """
 $(TYPEDSIGNATURES)
 
-Return a [`CompressibleVectorInvariant`](@ref) scheme whose relative vorticity, vertical fluxes,
-kinetic energy gradient, and mass-flux divergence are reconstructed with weighted essentially
-non-oscillatory (`WENO`) schemes of the given orders. `order` sets every order at once; the
-specific orders override it. Pass `order = nothing` (the default) to use the defaults 9 for the
-vorticity and 5 for the other terms. Remaining keyword arguments are passed to `WENO`.
+Return a [`CompressibleVectorInvariant`](@ref) scheme whose relative vorticity, vertical fluxes
+and mass-flux divergence are reconstructed with weighted essentially non-oscillatory (`WENO`)
+schemes of the given orders, while the kinetic energy gradient stays the exact discrete gradient
+(`EnergyConserving()`): an upwinded kinetic energy gradient is not curl-free and injects vorticity
+wherever the velocities are interpolated rather than integrated, as in the overlap of a Yin-Yang
+grid, and the self-upwinded vorticity, vertical fluxes and divergence already damp the grid scale.
+`order` sets every order at once; the specific orders override it. Pass `order = nothing` (the
+default) to use the defaults 9 for the vorticity and 5 for the other terms, and
+`kinetic_energy_gradient_order` to upwind the kinetic energy gradient too. Remaining keyword
+arguments are passed to `WENO`.
 
 The grid halo must hold the stencils: `(vorticity_order + 1) ÷ 2 + 1` points horizontally and
 `(kinetic_energy_gradient_order + 1) ÷ 2 + 1` points vertically with the defaults, that is a halo
@@ -328,7 +359,7 @@ CompressibleWENOVectorInvariant{6, Float64}(vorticity_order=9, vertical_order=5)
 ├── vorticity_stencil: Oceananigans.Advection.VelocityStencil
 ├── vorticity_pairing: UpwindVorticityPairing
 ├── vertical_advection_scheme: WENO{3, Float64, Nothing}(order=5)
-├── kinetic_energy_gradient_scheme: WENO{3, Float64, Nothing}(order=5)
+├── kinetic_energy_gradient_scheme: EnergyConserving
 ├── divergence_scheme: WENO{3, Float64, Nothing}(order=5)
 └── core_scheme: Centered(order=4)
 ```
@@ -348,15 +379,15 @@ function CompressibleWENOVectorInvariant(FT::DataType = Oceananigans.defaults.Fl
     default_vorticity_order = isnothing(order) ? 9 : order
     default_order = isnothing(order) ? 5 : order
 
-    vorticity_order               = nothing_to_default(vorticity_order; default=default_vorticity_order)
-    vertical_order                = nothing_to_default(vertical_order; default=default_order)
-    divergence_order              = nothing_to_default(divergence_order; default=default_order)
-    kinetic_energy_gradient_order = nothing_to_default(kinetic_energy_gradient_order; default=default_order)
+    vorticity_order  = nothing_to_default(vorticity_order; default=default_vorticity_order)
+    vertical_order   = nothing_to_default(vertical_order; default=default_order)
+    divergence_order = nothing_to_default(divergence_order; default=default_order)
 
     vorticity_scheme               = WENO(FT; order=vorticity_order, minimum_buffer_upwind_order, weno_kw...)
     vertical_advection_scheme      = WENO(FT; order=vertical_order, minimum_buffer_upwind_order, weno_kw...)
-    kinetic_energy_gradient_scheme = WENO(FT; order=kinetic_energy_gradient_order, minimum_buffer_upwind_order, weno_kw...)
     divergence_scheme              = WENO(FT; order=divergence_order, minimum_buffer_upwind_order, weno_kw...)
+    kinetic_energy_gradient_scheme = isnothing(kinetic_energy_gradient_order) ? EnergyConserving(FT) :
+                                     WENO(FT; order=kinetic_energy_gradient_order, minimum_buffer_upwind_order, weno_kw...)
 
     return CompressibleVectorInvariant(FT; vorticity_scheme, vorticity_stencil, vertical_advection_scheme,
                                        kinetic_energy_gradient_scheme, divergence_scheme, vorticity_pairing, core_order)
@@ -677,6 +708,33 @@ end
     δKᵘ = δyᵃᶠᵃ(i, j, k, grid, u_kinetic_energyᶜᶜᶜ, scheme, u, v)
     return ℑyᵃᶠᵃ(i, j, k, grid, ρ) * Ayᶜᶠᶜ(i, j, k, grid) * V⁻¹ᶜᶠᶜ(i, j, k, grid) * (δKᵛ + δKᵘ)
 end
+
+# Gradient form: the cell kinetic energy reconstructed from the face kinetic energies with the
+# upwind-biased scheme, biased by the cell velocity, then differenced exactly
+@inline function upwinded_kinetic_energyᶜᶜᶜ(i, j, k, grid, scheme, vf, u, v, w)
+    g = scheme.kinetic_energy_gradient_scheme.scheme
+    û = ℑxᶜᵃᵃ(i, j, k, grid, u)
+    v̂ = ℑyᵃᶜᵃ(i, j, k, grid, v)
+    Kᵘ = _biased_interpolate_xᶜᵃᵃ(i, j, k, grid, g, bias(û), Vu²ᶠᶜᶜ, DefaultStencil(), u)
+    Kᵛ = _biased_interpolate_yᵃᶜᵃ(i, j, k, grid, g, bias(v̂), Vv²ᶜᶠᶜ, DefaultStencil(), v)
+    return (Kᵘ + Kᵛ) / (2 * Vᶜᶜᶜ(i, j, k, grid)) + vertical_kinetic_energyᶜᶜᶜ(i, j, k, grid, vf, w)
+end
+
+@inline vertical_kinetic_energyᶜᶜᶜ(i, j, k, grid, ::SplitVerticalAdvection, w) = zero(grid)
+@inline vertical_kinetic_energyᶜᶜᶜ(i, j, k, grid, ::UnsplitVerticalAdvection, w) = w_kinetic_energyᶜᶜᶜ(i, j, k, grid, w)
+
+@inline x_kinetic_energy_gradient(i, j, k, grid, scheme::GradientUpwindedKineticEnergy, vf, ρ, u, v, w) =
+    ℑxᶠᵃᵃ(i, j, k, grid, ρ) * Axᶠᶜᶜ(i, j, k, grid) * V⁻¹ᶠᶜᶜ(i, j, k, grid) * δxᶠᵃᵃ(i, j, k, grid, upwinded_kinetic_energyᶜᶜᶜ, scheme, vf, u, v, w)
+
+@inline y_kinetic_energy_gradient(i, j, k, grid, scheme::GradientUpwindedKineticEnergy, vf, ρ, u, v, w) =
+    ℑyᵃᶠᵃ(i, j, k, grid, ρ) * Ayᶜᶠᶜ(i, j, k, grid) * V⁻¹ᶜᶠᶜ(i, j, k, grid) * δyᵃᶠᵃ(i, j, k, grid, upwinded_kinetic_energyᶜᶜᶜ, scheme, vf, u, v, w)
+
+@inline z_kinetic_energy_gradient(i, j, k, grid, scheme::GradientUpwindedKineticEnergy, vf, ρ, u, v, w) =
+    z_kinetic_energy_gradient(i, j, k, grid, scheme, vf, scheme.vertical_formulation, ρ, u, v, w)
+
+# the w equation keeps its centered vertical kinetic energy gradient under the gradient form
+@inline z_kinetic_energy_gradient(i, j, k, grid, scheme::GradientUpwindedKineticEnergy, vf, ::SplitVerticalAdvection, ρ, u, v, w) =
+    ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Azᶜᶜᶠ(i, j, k, grid) * V⁻¹ᶜᶜᶠ(i, j, k, grid) * δzᵃᵃᶠ(i, j, k, grid, z_kinetic_energyᶜᶜᶜ, vf, scheme, u, v, w)
 
 #####
 ##### Mass-flux divergence term, u ∇·𝐔
