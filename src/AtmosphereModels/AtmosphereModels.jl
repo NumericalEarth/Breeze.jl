@@ -175,6 +175,7 @@ function __init__()
     read_kernel_argument_cache_switches!()  # kernel_arguments.jl
     FOLDED_RK3_SOLVES[] = env_switch("BREEZE_FOLDED_RK3_SOLVES", true)
     STABLE_SCALAR_LAUNCH[] = env_switch("BREEZE_STABLE_SCALAR_LAUNCH", true)
+    FUSED_MICROPHYSICS_SEDIMENTATION[] = env_switch("BREEZE_FUSED_MICROPHYSICS_SEDIMENTATION", true)  # density_weighted_implicit_diffusion.jl
     return nothing
 end
 

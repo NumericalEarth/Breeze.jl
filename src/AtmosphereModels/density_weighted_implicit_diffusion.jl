@@ -344,6 +344,7 @@ there. A no-op when no condensate sediments.
 function add_sedimentation_tendency!(G, model, tracer_transport_velocity)
     condensates = values(model.sedimentation)
     isempty(condensates) && return nothing
+    fuses_sedimentation(model.microphysics) && return nothing  # added by the fused microphysics kernel
     grid = model.grid
     kernel, range = COLUMN_SEDIMENTATION[] ? (_add_sedimentation_tendency_column!, :xy) :
                                              (_add_sedimentation_tendency!, :xyz)
@@ -361,6 +362,22 @@ end
 # `sedimentation_content_tendency`, so the result is identical. Default off: at 13 km dt 15 (job 5431) the
 # column kernel takes 1.24 ms/step against 0.73 for the pointwise one (107 vs 48 registers, Nx·Ny threads).
 const COLUMN_SEDIMENTATION = Ref(false)
+
+# T22-mp1mfuse: `BREEZE_FUSED_MICROPHYSICS_SEDIMENTATION` (default true, read in `__init__`): a scheme whose
+# `fuses_sedimentation` is true adds the explicit pointwise sedimentation tendency of the thermodynamic
+# variable inside its fused microphysics kernel, and `add_sedimentation_tendency!` launches nothing. The
+# microphysics kernel runs after the moisture and tracer tendencies; nothing in between reads or writes
+# the thermodynamic tendency or the sedimentation inputs, and the fused kernel adds the same
+# `sedimentation_tendency` to it, so the result is bitwise identical.
+const FUSED_MICROPHYSICS_SEDIMENTATION = Ref(true)
+
+fuses_sedimentation(microphysics) = false
+
+# The arguments of `_add_sedimentation_tendency!` after the grid, as `add_sedimentation_tendency!` passes them.
+sedimentation_tendency_arguments(model) =
+    (values(model.sedimentation), transport_velocities(model).w, model.formulation, model.dynamics,
+     model.thermodynamic_constants, model.microphysics, model.microphysical_fields,
+     specific_prognostic_moisture(model), explicit_content_source(model))
 
 @kernel function _add_sedimentation_tendency_column!(G, grid, condensates, wᵗ, formulation, dynamics, constants,
                                                      microphysics, microphysical_fields, specific_prognostic_moisture,

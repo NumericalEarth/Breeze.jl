@@ -1453,7 +1453,13 @@ end
                                            constants, specific_prognostic_moisture, microphysical_fields,
                                            temperature_field)
     i, j, k = @index(Global, NTuple)
+    add_mp1m_tendencies!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, i, j, k, grid, microphysics, dynamics, formulation, constants,
+                         specific_prognostic_moisture, microphysical_fields, temperature_field)
+end
 
+@inline function add_mp1m_tendencies!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, i, j, k, grid, microphysics, dynamics, formulation,
+                                      constants, specific_prognostic_moisture, microphysical_fields,
+                                      temperature_field)
     ρ_field = AM.total_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     @inbounds qᵉ = specific_prognostic_moisture[i, j, k]
@@ -1468,6 +1474,19 @@ end
     @inbounds Gρqᵉ[i, j, k]  += G.ρqᵉ
     @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
     @inbounds Gρqˢⁿ[i, j, k] += G.ρqˢⁿ
+    return nothing
+end
+
+# T22-mp1mfuse (`BREEZE_FUSED_MICROPHYSICS_SEDIMENTATION`): the same, plus the explicit pointwise
+# sedimentation tendency of the thermodynamic variable that `_add_sedimentation_tendency!` would add.
+@kernel function _compute_mp1m_tendencies_and_sedimentation!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, Gφ, grid, microphysics, dynamics,
+                                                             formulation, constants, specific_prognostic_moisture,
+                                                             microphysical_fields, temperature_field,
+                                                             sedimentation_arguments)
+    i, j, k = @index(Global, NTuple)
+    add_mp1m_tendencies!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, i, j, k, grid, microphysics, dynamics, formulation, constants,
+                         specific_prognostic_moisture, microphysical_fields, temperature_field)
+    @inbounds Gφ[i, j, k] += AM.sedimentation_tendency(i, j, k, grid, sedimentation_arguments...)
 end
 
 @inline microphysical_fields_at(μ, i, j, k) = @inbounds (; ρqʳ = μ.ρqʳ[i, j, k], ρqˢⁿ = μ.ρqˢⁿ[i, j, k])
@@ -1478,9 +1497,20 @@ end
 @inline mp1m_temperature(i, j, k, grid, formulation, dynamics, q, constants, temperature_field) =
     @inbounds temperature_field[i, j, k]
 
+AM.fuses_sedimentation(::MP1M) = AM.FUSED_MICROPHYSICS_SEDIMENTATION[] && !AM.COLUMN_SEDIMENTATION[]
+
 function AM.compute_microphysical_tendencies!(microphysics::MP1M, model)
     grid = model.grid
     G = model.timestepper.Gⁿ
+    if AM.fuses_sedimentation(microphysics) && !isempty(model.sedimentation)
+        Gφ = getproperty(G, AM.thermodynamic_density_name(model.formulation))
+        launch!(grid.architecture, grid, :xyz, _compute_mp1m_tendencies_and_sedimentation!,
+                G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ, Gφ, grid, microphysics, model.dynamics, model.formulation,
+                model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
+                model.microphysical_fields, AM.stored_microphysics_temperature(model),
+                AM.sedimentation_tendency_arguments(model))
+        return nothing
+    end
     launch!(grid.architecture, grid, :xyz, _compute_mp1m_tendencies!,
             G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
