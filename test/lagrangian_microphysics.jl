@@ -157,6 +157,7 @@ end
     @test eltype(model.formulation.potential_temperature) == Float64
     @test eltype(model.moisture_density) == Float64
     @test eltype(model.microphysical_fields.qᵛ) == Float64
+    @test eltype(model.timestepper.U⁰.ρθ) == Float64
     @test eltype(model.temperature) == Float32
     @test eltype(model.velocities.u) == Float32
 
