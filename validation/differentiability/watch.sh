@@ -10,6 +10,7 @@ while kill -0 $pid 2>/dev/null; do
     if [ $rss -gt $MAXKB ] || [ $((SECONDS - start)) -gt $MAXSEC ]; then
         echo "WATCHDOG: killed at $((SECONDS - start)) s, RSS $((rss / 1000)) MB"; pkill -9 -P $pid; kill -9 $pid
     fi
+    [ -n "$PEEK_AT" ] && [ $((SECONDS - start)) -eq $PEEK_AT ] && kill -USR1 $pid && echo "[watch] sent SIGUSR1 (profile peek)"
     [ $(( (SECONDS - start) % 60 )) -eq 0 ] && echo "  [watch] t=$((SECONDS - start)) s RSS=$((rss / 1000)) MB"
     sleep 1
 done

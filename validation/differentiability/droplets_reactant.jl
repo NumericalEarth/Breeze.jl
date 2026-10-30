@@ -28,14 +28,23 @@ Nd = length(ARGS) ≥ 2 ? parse(Int, ARGS[2]) : 100
 const PM = Breeze.ParticleMicrophysics
 
 T₀, p₀, L = 282.0, 85000.0, 0.02
+fixed = get(ENV, "FIXED", "0")
+physics = fixed == "0" ? DropletPhysicsParameters(Float64) :
+          DropletPhysicsParameters(Float64; solver=Breeze.Solvers.FixedIterations(parse(Int, fixed)))
+println("droplet solver: ", summary(physics.solver))
+
 function droplet_box(arch; Nd=100, M=8, droplets_on=true)
-    grid = RectilinearGrid(arch; size=(M, M, M), x=(0, L), y=(0, L), z=(0, L), topology=(Periodic, Periodic, Periodic))
-    dynamics = BoussinesqDynamics(grid; pressure=p₀, temperature=T₀)
+    # DYNAMICS=compressible avoids the eager Boussinesq pressure-solver kernel compile at construction,
+    # whose MLIR optimization exhausts memory on ReactantState (see REACTANT_DYNAMIC_PARTICLES.md)
+    compressible = get(ENV, "DYNAMICS", "boussinesq") == "compressible"
+    topology = compressible ? (Periodic, Periodic, Bounded) : (Periodic, Periodic, Periodic)
+    grid = RectilinearGrid(arch; size=(M, M, M), x=(0, L), y=(0, L), z=(0, L), topology)
+    dynamics = compressible ? CompressibleDynamics() : BoussinesqDynamics(grid; pressure=p₀, temperature=T₀)
     rng = Xoshiro(1)
     droplets = (x = L .* rand(rng, Nd), y = L .* rand(rng, Nd), z = L .* rand(rng, Nd),
                 r = 5e-6 .+ 5e-6 .* rand(rng, Nd), rᵈ = fill(5e-8, Nd), κ = fill(0.6, Nd))
     closure = ScalarDiffusivity(; ν=1.6e-5, κ=(ρθ=2.22e-5, ρqᵛ=2.55e-5))
-    microphysics = droplets_on ? LagrangianMicrophysics(; droplets) : nothing
+    microphysics = droplets_on ? LagrangianMicrophysics(; droplets, physics) : nothing
     return AtmosphereModel(grid; dynamics, closure, microphysics)
 end
 
@@ -63,6 +72,25 @@ function advect!(model, Δt)
     return nothing
 end
 
+# Single-droplet physics in a bare kernel over particle arrays (no grid)
+const KA = Oceananigans.Architectures.KA
+KA.@kernel function _rate!(Φ, r, rᵈ, κ, T, p, 𝒮, constants, physics)
+    n = KA.@index(Global)
+    @inbounds Φ[n] = PM.diffusional_growth_rate(r[n], rᵈ[n], κ[n], 𝒮, 1.0, T, p, constants, physics)
+end
+KA.@kernel function _growth!(r, rᵈ, κ, T, p, 𝒮, Δt, constants, physics)
+    n = KA.@index(Global)
+    @inbounds r[n] = PM.condensational_growth_step(r[n], rᵈ[n], κ[n], 𝒮, 1.0, T, p, Δt, constants, physics).radius
+end
+function rate!(Φ, r, rᵈ, κ)
+    _rate!(KA.get_backend(r))(Φ, r, rᵈ, κ, T₀, p₀, 0.01, ThermodynamicConstants(Float64), physics; ndrange=length(r))
+    return nothing
+end
+function growth!(r, rᵈ, κ)
+    _growth!(KA.get_backend(r))(r, rᵈ, κ, T₀, p₀, 0.01, 0.01, ThermodynamicConstants(Float64), physics; ndrange=length(r))
+    return nothing
+end
+
 function hlo_stats(f, args...)
     t = @elapsed hlo = repr(Reactant.@code_hlo optimize=false f(args...))
     ops = [m.match for m in eachmatch(r"(stablehlo|enzymexla|func|llvm|scf|affine|arith|memref)\.[a-z_\.]+", hlo)]
@@ -72,7 +100,9 @@ function hlo_stats(f, args...)
 end
 
 function run_level(f, args...; raise=false)
+    println("tracing ", f); flush(stdout)
     hlo_stats(f, args...)
+    flush(stdout)
     GC.gc()
     t = @elapsed compiled = Reactant.@compile raise=raise f(args...)
     @printf("compiled %s in %.1f s (raise=%s), Sys.maxrss = %.2f GB\n", f, t, raise, Sys.maxrss() / 1e9)
@@ -80,8 +110,19 @@ function run_level(f, args...; raise=false)
     println("ran ", f)
 end
 
+if level in ("rate", "growth")
+    rng = Xoshiro(1)
+    r, rᵈ, κ = Reactant.to_rarray.((5e-6 .+ 5e-6 .* rand(rng, Nd), fill(5e-8, Nd), fill(0.6, Nd)))
+    try
+        level == "rate" ? run_level(rate!, similar(r), r, rᵈ, κ) : run_level(growth!, r, rᵈ, κ)
+    catch err
+        println("FAILED ", level, ": ", first(sprint(showerror, err), 3000))
+    end
+    exit()
+end
+
 t = @elapsed model = droplet_box(ReactantState(); Nd, droplets_on = level != "step0")
-@printf("built model (Nd = %d) in %.1f s\n", Nd, t)
+@printf("built model (Nd = %d) in %.1f s\n", Nd, t); flush(stdout)
 level == "build" && exit()
 println(summary(model.microphysics))
 
