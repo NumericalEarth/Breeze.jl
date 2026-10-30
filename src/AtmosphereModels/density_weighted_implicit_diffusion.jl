@@ -344,6 +344,7 @@ there. A no-op when no condensate sediments.
 function add_sedimentation_tendency!(G, model, tracer_transport_velocity)
     condensates = values(model.sedimentation)
     isempty(condensates) && return nothing
+    split_sedimentation_active() && return nothing  # moved by split_sedimentation_step!
     grid = model.grid
     kernel, range = COLUMN_SEDIMENTATION[] ? (_add_sedimentation_tendency_column!, :xy) :
                                              (_add_sedimentation_tendency!, :xyz)

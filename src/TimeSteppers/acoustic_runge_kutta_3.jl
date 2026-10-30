@@ -296,6 +296,10 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
+    # T21-precip: operator-split column sedimentation over the full Δt (no-op unless switched on);
+    # the update_state! below refreshes the diagnostics from the sedimented state.
+    AtmosphereModels.split_sedimentation_step!(model, Δt)
+
     # Kessler reads diagnostics, then rebuilds tendencies after updating its prognostics.
     # Preserve the preceding pass when Kessler will return early or a callback needs it:
     # its internal update_state! does not forward the time-stepper's callbacks.
