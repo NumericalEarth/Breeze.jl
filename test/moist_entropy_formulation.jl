@@ -11,7 +11,8 @@ using Breeze.Thermodynamics: MoistureMassFractions, MoistEntropyState, moist_ent
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using Oceananigans
-using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition, fill_halo_regions!
+using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.TimeSteppers: update_state!
 using Test
 
@@ -207,4 +208,64 @@ end
 
     @test maximum(abs, interior(model.velocities.w)) > 0.1
     @test abs(∫ρη₁ - ∫ρη₀) / abs(∫ρη₀) < 1e-12
+end
+
+# The acoustic divergence damping uses the change of p′/Cᴸ = (ρχ)′ + Eᴸρ′ over a substep, scaled by
+# χ̂ᴸ + Eᴸ = c²/Cᴸ, as its proxy for the mass divergence. In dry air that proxy is the same for ρθ, ρη
+# and ρE. Dividing by χ̂ᴸ = ρη/ρᵈ alone, which is negative and shrinks in magnitude with height,
+# flipped the sign of the proxy's (ρw)′ ∂z χ̂ᴸ part and drove a slow gravity-wave instability in
+# the stratosphere of compressible ρη simulations.
+@testset "Divergence damping of ρη and ρE matches ρθ in dry stratified air" begin
+    T₀ = 230.0
+    g = 9.80665
+    θ̄(z) = T₀ * exp(g * z / (1005 * T₀))
+    Nx, Nz = 16, 40
+    grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5), x=(0, 64e3), z=(0, 30e3),
+                           topology=(Periodic, Flat, Bounded))
+    constants = ThermodynamicConstants(Float64)
+    Rᵈ = dry_air_gas_constant(constants)
+    Δτ = 1.0
+
+    function damping_response(formulation)
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = θ̄,
+                                        base_pressure = 1e5, standard_pressure = 1e5)
+        model = AtmosphereModel(grid; dynamics, formulation, thermodynamic_constants = constants)
+        reference = model.dynamics.reference_state
+        parent(model.dynamics.dry_density) .= parent(reference.density)
+        Breeze.AtmosphereModels.compute_total_density!(model)
+        T = CenterField(grid)
+        parent(T) .= parent(reference.pressure) ./ (Rᵈ .* parent(reference.density))
+        Breeze.AtmosphereModels.set_thermodynamic_variable!(model, Val(:T), T)
+        update_state!(model)
+
+        substepper = model.timestepper.substepper
+        Breeze.CompressibleEquations.refresh_linearization_basic_state!(substepper, model)
+        χ̂ = interior(substepper.linearization_potential_temperature, :, 1, :)
+
+        # One substep of a vertical mass flux (ρw)′ = sin(2πx/Lx) uniform in z: ρ′ is zero in the
+        # interior and (ρχ)′ = −Δτ ∂z(χ̂ (ρw)′) is its advection of the basic-state χ̂.
+        x = xnodes(grid, Center())
+        Δz = [Δzᶜᶜᶜ(1, 1, k, grid) for k in 1:Nz]
+        M = [sin(2π * x[i] / 64e3) * (1 < k < Nz + 1) for i in 1:Nx, k in 1:Nz+1]
+        χ̂ᶠ = [(χ̂[i, max(k - 1, 1)] + χ̂[i, min(k, Nz)]) / 2 for i in 1:Nx, k in 1:Nz+1]
+        interior(substepper.density_perturbation, :, 1, :) .= [-Δτ * (M[i, k+1] - M[i, k]) / Δz[k] for i in 1:Nx, k in 1:Nz]
+        interior(substepper.density_potential_temperature_perturbation, :, 1, :) .=
+            [-Δτ * (χ̂ᶠ[i, k+1] * M[i, k+1] - χ̂ᶠ[i, k] * M[i, k]) / Δz[k] for i in 1:Nx, k in 1:Nz]
+        fill!(substepper.previous_density_potential_temperature_perturbation, 0)
+        fill!(substepper.momentum_perturbation.u, 0)
+        fill_halo_regions!(substepper.density_perturbation)
+        fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+        fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
+
+        Breeze.CompressibleEquations.apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
+        return interior(substepper.momentum_perturbation.u, :, 1, 2:Nz-1)
+    end
+
+    Δρu_θ = damping_response(:LiquidIcePotentialTemperature)
+    Δρu_η = damping_response(:MoistEntropy)
+    Δρu_E = damping_response(:TotalEnergy)
+
+    @test maximum(abs, Δρu_θ) > 0
+    @test maximum(abs, Δρu_η - Δρu_θ) < 0.02 * maximum(abs, Δρu_θ)
+    @test maximum(abs, Δρu_E - Δρu_θ) < 0.02 * maximum(abs, Δρu_θ)
 end
