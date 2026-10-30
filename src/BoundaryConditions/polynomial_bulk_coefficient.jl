@@ -246,13 +246,17 @@ Map bulk Richardson number ``Riᴮ`` to the Monin-Obukhov stability parameter
                   ifelse(Riᴮ ≤ mapping.strongly_stable_transition, ζʷ, ζˢ))
 end
 
-# Unstable regime (Riᴮ < 0), Li et al. (2010) Eq. 12
+# Unstable regime (Riᴮ < 0), Li et al. (2010) Eq. 12. The fit is a parabola in Riᴮ that is monotonic
+# only above its vertex Riᴮ = -B / 2A: below it ζ turns back towards zero and, for Riᴮ < -B / A, becomes
+# positive, so that light winds over a warm surface (free convection, Riᴮ ≪ 0) would be treated as strongly
+# stable and the transfer coefficients would collapse to zero. ζ is held at its vertex value beyond it.
 @inline function unstable_bulk_to_flux_richardson_number(Riᴮ, α, β, mapping)
     A = mapping.aᵘ₁₁ * α
     B = (mapping.bᵘ₁₁ * β + mapping.bᵘ₁₂) * α^2 +
         (mapping.aᵘ₂₁ * β + mapping.aᵘ₂₂) * α +
         (mapping.bᵘ₃₁ * β^2 + mapping.bᵘ₃₂ * β + mapping.bᵘ₃₃)
-    return A * Riᴮ^2 + B * Riᴮ
+    Ri = max(Riᴮ, - B / (2A))
+    return A * Ri^2 + B * Ri
 end
 
 # Weakly stable regime (0 ≤ Riᴮ ≤ Ri*), Li et al. (2010) Eq. 14
