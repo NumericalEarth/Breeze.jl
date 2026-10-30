@@ -53,6 +53,10 @@ end
 # of many independent columns.
 interior_minimum(field) = minimum(field)
 
+# The smallest value of an array of interior data; extensions specialize it for arrays that cannot be reduced in
+# place (see `BreezeReactantExt`).
+data_minimum(data) = minimum(data)
+
 function total_moisture_covers_condensates(total_moisture_density, condensate_density, validation_field)
     margin = KernelFunctionOperation{Center, Center, Center}(total_moisture_validation_margin,
                                                             validation_field.grid,
