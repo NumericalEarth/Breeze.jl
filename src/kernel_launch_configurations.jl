@@ -257,5 +257,15 @@ function define_kernel_launch_configurations!()
         n += 1
     end
 
+    # T22 p3kernel: workgroup of the P3 tendency kernel, `BREEZE_P3_WORKGROUP=<nx>,<ny>` at load (default empty =
+    # launch table default). Pointwise kernel, so only the thread-to-cell mapping changes (tier A).
+    p3_wg = strip(get(ENV, "BREEZE_P3_WORKGROUP", ""))
+    if !isempty(p3_wg)
+        wg = Tuple(parse.(Int, split(p3_wg, ',')))
+        F = kernel_function_type(Microphysics.PredictedParticleProperties._p3_add_tendencies_kernel!)
+        @eval $UT.kernel_launch_workgroup(::$F, ::Val{D}) where D = replaces_default(D) ? $wg : D
+        n += 1
+    end
+
     return n
 end
