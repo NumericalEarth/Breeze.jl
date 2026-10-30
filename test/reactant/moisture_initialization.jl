@@ -34,7 +34,12 @@ end
     # Reactant requires a static sedimentation substep bound; this test never steps
     microphysics = DCMIP2016KesslerMicrophysics(FT; maximum_sedimentation_substeps=1)
     thermodynamic_constants = ThermodynamicConstants(FT; saturation_vapor_pressure=TetensFormula(FT))
-    model = AtmosphereModel(grid; microphysics, thermodynamic_constants, dynamics=CompressibleDynamics())
+    # The gradient differentiates through the θˡⁱ → T inversion. With the default early-exit
+    # NewtonSolver, XLA fuses the differentiated iterations with the moisture check into a GPU kernel
+    # that never finishes (Julia 1.13), so use the fixed-trip solver recommended for Reactant runs.
+    formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver=FixedIterations(2))
+    model = AtmosphereModel(grid; microphysics, thermodynamic_constants, formulation,
+                            dynamics=CompressibleDynamics())
     total_water = CenterField(grid)
     set!(total_water, FT(0.01))
 
