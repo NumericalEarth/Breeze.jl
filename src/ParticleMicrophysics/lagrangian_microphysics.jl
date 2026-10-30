@@ -39,7 +39,7 @@ struct Droplet{FT}
 end
 
 """
-    DiffusiveSelfInteraction()
+    DiffusiveSelfInteraction(; grid_translation = true)
 
 Correct the condensational growth of each droplet for its own sink in the cell it samples.
 
@@ -64,20 +64,29 @@ Laplacian's modes k, where Pₖ is the time stepper's amplification factor for d
 Δt. This is g - κΔt / (2V) + …, for a cell of volume V, and is evaluated for the current Δt from
 a histogram of the Laplacian's eigenvalues that is computed once.
 
+A droplet that moves through the grid, with the air or by settling, samples less of its own perturbation:
+its sink is deposited in the cell that contains it and is then advected and diffused by the model, while the
+droplet's position in the cell it later samples is shifted by its displacement relative to the grid. For a
+droplet that moves by c_d = |U_d| Δt / Δ_d cells per time step in direction d, the cell value g is multiplied by
+Π_d r_d(c_d), where r_d is computed from the Fourier modes of the grid's diffusion operator, the modified
+wavenumber of the advection scheme of `ρqᵛ` and `ρθ`, and the droplet's sub-cell position, and tabulated
+whenever κΔt / Δ² changes by more than 5%. The product falls to about 1/2 when |U| Δ / κ ≫ 1, so that a
+correction for droplets at rest overcorrects droplets carried through the grid by turbulence.
+With `grid_translation = false`, droplets are corrected as if they were at rest relative to the grid.
+
 The correction requires a regular `RectilinearGrid` and a `ScalarDiffusivity` closure with constant
-diffusivities for `ρθ` and `ρqᵛ`. Otherwise it is not applied. It neglects transport of the
-droplet's own perturbation away from its cell by the flow and by settling, which shortens its
-lifetime when the grid-scale strain rate or the settling speed exceed the cell's diffusive rate
-κ / Δ² (or κ / Δ).
+diffusivities for `ρθ` and `ρqᵛ`. Otherwise it is not applied.
 """
-struct DiffusiveSelfInteraction{G, E, F, A}
+struct DiffusiveSelfInteraction{G, E, F, A, T}
      greens_function :: G # cell value g of the Green's function of -∇² (1/m)
          eigenvalues :: E # mean eigenvalue of -∇² in each bin of a histogram of the nonzero modes
       mode_fractions :: F # fraction of all modes in each bin
        amplification :: A # amplification factor of the time stepper for diffusion
+         translation :: T # tables of the reduction for droplets that move through the grid
 end
 
-DiffusiveSelfInteraction() = DiffusiveSelfInteraction(nothing, nothing, nothing, nothing)
+DiffusiveSelfInteraction(; grid_translation = true) =
+    DiffusiveSelfInteraction(nothing, nothing, nothing, nothing, grid_translation)
 
 # Only the parameters computed by `self_interaction_parameters` enter kernels
 Adapt.adapt_structure(to, ::DiffusiveSelfInteraction) = nothing
@@ -165,11 +174,154 @@ AtmosphereModels.materialize_microphysics(μ::LagrangianMicrophysics{<:Any, <:An
 materialize_self_interaction(::Nothing, grid, timestepper) = nothing
 materialize_self_interaction(s::DiffusiveSelfInteraction{<:Number}, grid, timestepper) = s
 
-function materialize_self_interaction(::DiffusiveSelfInteraction{Nothing}, grid, timestepper)
+function materialize_self_interaction(s::DiffusiveSelfInteraction{Nothing}, grid, timestepper)
     spectrum = laplacian_spectrum(grid)
     isnothing(spectrum) && return nothing
+    translation = s.translation ? GridTranslationTable(grid) : nothing
     return DiffusiveSelfInteraction(spectrum.greens_function, spectrum.eigenvalues, spectrum.mode_fractions,
-                                    diffusion_amplification(timestepper))
+                                    diffusion_amplification(timestepper), translation)
+end
+
+#####
+##### Droplets that move through the grid
+#####
+
+# A droplet deposits its sink in the cell that contains it at the end of every time step, and the deposit is then
+# advected and diffused by the model. The droplet samples the cell that contains it after the following steps.
+# Each deposit is a sum of the grid's Fourier modes; over n steps a mode is advected and diffused by the
+# time stepper, while the droplet is displaced by nc cells (c = |U| Δt / Δ). Averaged over the droplet's position
+# in its cell at the time of the deposit, the sampled cell is offset from the deposit cell by o = ⌊nc⌋ cells with
+# probability 1 - f, and by o + 1 with probability f, where f = nc - o. In one direction, with diffusion number
+# z = κ Δt / Δ², the sampled fraction of a deposit of age n is
+#
+#     S(n, c) = (1/N) Σₖ exp(-z λₖ n) [(1 - f) cos(k o - k̃ c n) + f cos(k (o + 1) - k̃ c n)],
+#
+# where λₖ = 2 - 2 cos k and k̃ is the modified wavenumber of the advection scheme. This treats the amplification
+# factor of the time stepper as exp(-z λ n - i k̃ c n), which separates over directions. The cell value of the
+# droplet's own perturbation, relative to that of a droplet at rest, is close to the product over directions
+#
+#     r_d(c) = Σₙ [S_d(n, c) Π_{e ≠ d} S_e(n, 0) - 1 / N] / Σₙ [Π_e S_e(n, 0) - 1 / N],
+#
+# within 0.03 of the full three-dimensional sum in tests with uniform flow (validation/ncar_dns, D11).
+
+# The modified wavenumber k̃Δ of the advective derivative of `scheme` for the wavenumber kΔ. Centered schemes of
+# order 2, 4 and 6 have no dissipation; other schemes are treated as exact (k̃ = k).
+# TODO: include the dissipation of upwind-biased schemes (a complex k̃).
+modified_wavenumber(scheme, k) = k
+modified_wavenumber(::Centered{1}, k) = sin(k)
+modified_wavenumber(::Centered{2}, k) = (8 * sin(k) - sin(2k)) / 6
+modified_wavenumber(::Centered{3}, k) = (45 * sin(k) - 9 * sin(2k) + sin(3k)) / 30
+
+# The sampled fraction S(n, c) of a deposit of age n (in time steps) on a periodic lattice of N cells.
+# The terms of k and -k are equal.
+function sampled_deposit_fraction(N, z, c, n, scheme)
+    m = c * n
+    o = floor(m)
+    f = m - o
+    S = 0.0
+    for j in 0:N÷2
+        k = 2π * j / N
+        k̃ = modified_wavenumber(scheme, k)
+        multiplicity = (j == 0 || 2j == N) ? 1 : 2
+        S += multiplicity * exp(-z * (2 - 2cos(k)) * n) * ((1 - f) * cos(k * o - k̃ * m) + f * cos(k * (o + 1) - k̃ * m))
+    end
+    return S / N
+end
+
+# Ages (in time steps) and weights of the sums over n: every step up to n₀, then Q logarithmically spaced intervals
+# up to a diffusive time of 30 cells², each sampled at P points
+function deposit_ages(z; n₀ = 32, Q = 24, P = 3)
+    ages = collect(1.0:n₀)
+    weights = ones(n₀)
+    edges = exp.(range(log(n₀ + 0.5), log(n₀ + 0.5 + 30 / z), length = Q + 1))
+    for q in 1:Q
+        a, b = edges[q], edges[q + 1]
+        for p in 1:P
+            push!(ages, a + (p - 1/2) * (b - a) / P)
+            push!(weights, (b - a) / P)
+        end
+    end
+    return ages, weights
+end
+
+# Courant numbers c = |U| Δt / Δ of the table, quadratically spaced up to 1
+const translation_courant_numbers = Tuple(range(0, 1, length = 33) .^ 2)
+const translation_table_size = length(translation_courant_numbers)
+
+# Tables of the factors r_d(c) by which the cell value of a droplet's own perturbation is reduced when the droplet
+# moves by c cells per time step in direction d, for vapor and for heat, at the diffusion numbers for which they
+# were last computed
+mutable struct GridTranslationTable{T, H}
+                  table :: T # factors r_d(c) on the architecture of the grid, (c, d, vapor or heat)
+                   host :: H # the same, on the CPU
+    diffusion_numbers :: NTuple{2, Float64} # κᵛ Δt / Δx² and κᵀ Δt / Δx² of the table
+end
+
+function GridTranslationTable(grid)
+    FT = eltype(grid)
+    host = ones(FT, translation_table_size, 3, 2)
+    table = on_architecture(architecture(grid), host)
+    return GridTranslationTable(table, host, (NaN, NaN))
+end
+
+# Lattices of at most 32 cells in each direction suffice: the droplet's own perturbation is local
+surrogate_lattice_size(N) = min(N, 32)
+
+function compute_translation_factors!(factors, κ, Δt, spacings, sizes, scheme)
+    z = ntuple(d -> κ * Δt / spacings[d]^2, 3)
+    N = map(surrogate_lattice_size, sizes)
+    ages, weights = deposit_ages(minimum(z))
+    S⁰ = [sampled_deposit_fraction(N[d], z[d], 0.0, n, scheme) for n in ages, d in 1:3]
+    mean_mode = 1 / prod(N)
+    at_rest = sum(weights[a] * (S⁰[a, 1] * S⁰[a, 2] * S⁰[a, 3] - mean_mode) for a in eachindex(ages))
+    for d in 1:3, (i, c) in enumerate(translation_courant_numbers)
+        moving = zero(at_rest)
+        for a in eachindex(ages)
+            others = prod(S⁰[a, e] for e in 1:3 if e != d)
+            moving += weights[a] * (sampled_deposit_fraction(N[d], z[d], c, ages[a], scheme) * others - mean_mode)
+        end
+        factors[i, d] = moving / at_rest
+    end
+    return factors
+end
+
+# Recompute the tables when the diffusion numbers change by more than 5%
+function update_translation_table!(t::GridTranslationTable, κ, Δt, grid, schemes)
+    spacings = (Float64(grid.Δxᶜᵃᵃ), Float64(grid.Δyᵃᶜᵃ), Float64(grid.z.Δᵃᵃᶜ))
+    z = (κ.κᵛ * Δt / spacings[1]^2, κ.κᵀ * Δt / spacings[1]^2)
+    current = all(abs(z[i] - t.diffusion_numbers[i]) ≤ 0.05 * z[i] for i in 1:2)
+    current && return nothing
+    compute_translation_factors!(view(t.host, :, :, 1), κ.κᵛ, Δt, spacings, size(grid), schemes.vapor)
+    compute_translation_factors!(view(t.host, :, :, 2), κ.κᵀ, Δt, spacings, size(grid), schemes.heat)
+    copyto!(t.table, t.host)
+    t.diffusion_numbers = z
+    return nothing
+end
+
+update_translation_table!(::Nothing, κ, Δt, grid, schemes) = nothing
+
+# The factor r(c) interpolated from the table
+@inline function translation_factor(table, c, d, field)
+    ξ = sqrt(min(c, 1)) * (translation_table_size - 1)
+    i = min(floor(Int, ξ), translation_table_size - 2)
+    w = ξ - i
+    @inbounds return (1 - w) * table[i + 1, d, field] + w * table[i + 2, d, field]
+end
+
+# The self-interaction parameters of a droplet that moves at velocity U relative to the grid
+@inline moving_self_interaction(s, U) = s # without grid translation
+
+@inline function moving_self_interaction(s::NamedTuple{(:vapor_greens_function, :thermal_greens_function,
+                                                        :vapor_diffusivity, :thermal_diffusivity,
+                                                        :translation, :courant_scales)}, U)
+    c₁ = abs(U[1]) * s.courant_scales[1]
+    c₂ = abs(U[2]) * s.courant_scales[2]
+    c₃ = abs(U[3]) * s.courant_scales[3]
+    t = s.translation
+    rᵛ = translation_factor(t, c₁, 1, 1) * translation_factor(t, c₂, 2, 1) * translation_factor(t, c₃, 3, 1)
+    rᵀ = translation_factor(t, c₁, 1, 2) * translation_factor(t, c₂, 2, 2) * translation_factor(t, c₃, 3, 2)
+    return (vapor_greens_function = rᵛ * s.vapor_greens_function, thermal_greens_function = rᵀ * s.thermal_greens_function,
+            vapor_diffusivity = s.vapor_diffusivity, thermal_diffusivity = s.thermal_diffusivity)
 end
 
 #####
@@ -287,8 +439,26 @@ function self_interaction_parameters(s::DiffusiveSelfInteraction, closure, grid,
     V = Float64(Vᶜᶜᶜ(1, 1, 1, grid))
     gᵛ = effective_greens_function(s, Float64(κ.κᵛ * Δt), V)
     gᵀ = effective_greens_function(s, Float64(κ.κᵀ * Δt), V)
-    return (vapor_greens_function = convert(FT, gᵛ), thermal_greens_function = convert(FT, gᵀ),
-            vapor_diffusivity = convert(FT, κ.κᵛ), thermal_diffusivity = convert(FT, κ.κᵀ))
+    parameters = (vapor_greens_function = convert(FT, gᵛ), thermal_greens_function = convert(FT, gᵀ),
+                  vapor_diffusivity = convert(FT, κ.κᵛ), thermal_diffusivity = convert(FT, κ.κᵀ))
+    return with_translation(parameters, s.translation, grid, Δt)
+end
+
+with_translation(parameters, ::Nothing, grid, Δt) = parameters
+
+function with_translation(parameters, translation, grid, Δt)
+    FT = eltype(grid)
+    courant_scales = convert.(FT, (Δt / grid.Δxᶜᵃᵃ, Δt / grid.Δyᵃᶜᵃ, Δt / grid.z.Δᵃᵃᶜ))
+    return merge(parameters, (translation = translation.table, courant_scales))
+end
+
+update_self_interaction!(self_interaction, closure, grid, Δt, advection) = nothing
+
+function update_self_interaction!(s::DiffusiveSelfInteraction, closure, grid, Δt, advection)
+    κ = molecular_diffusivities(closure)
+    isnothing(κ) && return nothing
+    schemes = (vapor = advection.ρqᵛ, heat = advection.ρθ)
+    return update_translation_table!(s.translation, κ, Float64(Δt), grid, schemes)
 end
 
 initial_droplets(::Nothing, FT) = (x = FT[], y = FT[], z = FT[], r = FT[], rᵈ = FT[], κ = FT[])
@@ -367,7 +537,8 @@ end
     atomic_add!(qˡ, halo, i, j, k, m / (ρᵢ * Vᶜᶜᶜ(i, j, k, grid)))
 end
 
-@kernel function _condense_droplets!(C, halo, droplets, grid, Δt, T, ρ, ρqᵛ, p, constants, physics, self_interaction)
+@kernel function _condense_droplets!(C, halo, droplets, grid, Δt, T, ρ, ρqᵛ, p, velocities, constants, physics,
+                                     self_interaction)
     n = @index(Global)
     @inbounds begin
         X = (droplets.x[n], droplets.y[n], droplets.z[n])
@@ -391,7 +562,11 @@ end
     ρᵗ = pᵢ / (mixture_gas_constant(q, constants) * Tᵢ)
     𝒮 = supersaturation(Tᵢ, ρᵗ, q, constants, PlanarLiquidSurface())
     fᵛ = ventilation_factor(r, 𝕎, Tᵢ, pᵢ, constants, physics)
-    step = condensational_growth_step(r, rᵈ, κ, 𝒮, fᵛ, Tᵢ, pᵢ, Δt, constants, physics, self_interaction)
+
+    # The droplet's velocity relative to the grid: the air velocity in its cell, less its terminal velocity
+    U = (ℑxᶜᵃᵃ(i, j, k, grid, velocities.u), ℑyᵃᶜᵃ(i, j, k, grid, velocities.v), ℑzᵃᵃᶜ(i, j, k, grid, velocities.w) - 𝕎)
+    droplet_self_interaction = moving_self_interaction(self_interaction, U)
+    step = condensational_growth_step(r, rᵈ, κ, 𝒮, fᵛ, Tᵢ, pᵢ, Δt, constants, physics, droplet_self_interaction)
     r⁺ = step.radius
 
     @inbounds begin
@@ -454,9 +629,11 @@ function AtmosphereModels.microphysics_model_update!(μ::LagrangianMicrophysics,
     # Condensation at the supersaturation of each droplet's cell, without the droplet's own sink
     fill!(parent(C), 0)
     kernel_Δt = kernel_time_step(arch, grid, Δt)
+    update_self_interaction!(μ.self_interaction, model.closure, grid, Δt, model.advection)
     self_interaction = self_interaction_parameters(μ.self_interaction, model.closure, grid, Δt)
     Nd > 0 && launch!(arch, grid, KernelParameters(1:Nd), _condense_droplets!,
-                      parent(C), halo, droplets, grid, kernel_Δt, T, ρ, ρqᵛ, p, constants, μ.physics, self_interaction)
+                      parent(C), halo, droplets, grid, kernel_Δt, T, ρ, ρqᵛ, p, model.velocities, constants, μ.physics,
+                      self_interaction)
     launch!(arch, grid, :xyz, _apply_condensation!, ρθ, ρqᵛ, C, T, ρ, p, pˢᵗ, constants)
 
     # Diagnose the liquid mass fraction of the droplets in each cell
