@@ -157,6 +157,12 @@ using GPUArraysCore: @allowscalar
         # Monotonicity: more unstable → more negative ζ
         @test bulk_to_flux_richardson_number(-1.0, α, β, mapping) < bulk_to_flux_richardson_number(-0.5, α, β, mapping)
 
+        # Free convection (light wind, Riᴮ ≪ 0) stays unstable: the quadratic fit is held at its vertex
+        # rather than turning back through zero to stable ζ
+        ζ_free = [bulk_to_flux_richardson_number(Riᴮ, α, β, mapping) for Riᴮ in (-10.0, -50.0, -500.0)]
+        @test all(ζ_free .< bulk_to_flux_richardson_number(-1.0, α, β, mapping))
+        @test issorted(ζ_free; rev=true) || all(ζ_free .≈ ζ_free[end])
+
         # Monotonicity: more stable → more positive ζ
         @test bulk_to_flux_richardson_number(0.5, α, β, mapping) > bulk_to_flux_richardson_number(0.1, α, β, mapping)
 
