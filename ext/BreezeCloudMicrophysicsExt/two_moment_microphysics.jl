@@ -550,10 +550,7 @@ end
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
-    # Saturation is referenced to the moist-air density of the state, the density the mass
-    # fractions are referenced to; ρ weights the tendencies (ρᵣ on the anelastic core).
-    ρᵐ = density(𝒰, constants)
-    qᵛ⁺ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
 
     # ===== Process rates =====
 
@@ -570,7 +567,7 @@ end
     Sᶜᵒⁿᵈ_eff = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
 
     # Rain evaporation (mass and number)
-    evap = rain_evaporation_2m(sb, categories.air, q, max(0, qʳ), ρ, ρᵐ, Nʳ, T, constants)
+    evap = rain_evaporation_2m(sb, categories.air, q, max(0, qʳ), ρ, Nʳ, T, constants)
     Sᵉᵛᵃᵖ = max(evap.evap_rate_1, -max(0, qʳ) / τⁿᵘᵐ)
     dNʳ_evap = evap.evap_rate_0
 
@@ -739,11 +736,10 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     velocities⁺ = (; u = ℳ.velocities.u, v = ℳ.velocities.v, w = w⁺)
     ℳ⁺ = WarmPhaseTwoMomentState(ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.nᵃ, velocities⁺)
 
-    # Supersaturation - activation only occurs when air is supersaturated (S > 0).
-    # It is evaluated at the moist-air density of the state, not at ρ (ρᵣ on the anelastic core).
+    # Supersaturation - activation only occurs when air is supersaturated (S > 0)
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    S = supersaturation(T, density(𝒰, constants), q, constants, PlanarLiquidSurface())
+    S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
     # Target: fraction of available aerosol that should activate
     N★ = aerosol_activated_fraction(aerosol_activation, aps, ρ, ℳ⁺, 𝒰, constants) * Nᵃ⁺
@@ -816,7 +812,7 @@ Mass tendency for cloud liquid [kg/kg/s]
 
     # Use instantaneous supersaturation to compute activation radius
     # Following CloudMicrophysics parcel model: use r_nuc as fallback when no activation or no supersaturation
-    S = supersaturation(T, density(𝒰, constants), q, constants, PlanarLiquidSurface())
+    S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
     # Compute radius: rᵃᶜᵗ = 2A / (3S), capped at 1 μm (1e-6 m)
     # Use rⁿᵘᶜ as fallback when S is negligible (no supersaturation) or no activation

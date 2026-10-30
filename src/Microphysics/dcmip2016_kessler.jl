@@ -15,7 +15,6 @@ using ..Thermodynamics:
 using ..AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
-    gas_phase_density,
     kernel_time_step,
     standard_pressure,
     total_density
@@ -492,7 +491,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     substep_limit = sedimentation_substep_limit(arch, microphysics)
 
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, kernel_Δt, substep_limit, model.dynamics, ρ, ρᵈ, dry_air_coupled,
+            microphysics, grid, Nz, kernel_Δt, substep_limit, ρ, ρᵈ, dry_air_coupled,
             p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
@@ -528,14 +527,9 @@ rain evaporation, and condensation.
 
 `Δr𝕎` is the sedimentation flux divergence (zero for parcel models).
 
-`ρ` is the density that weights the rain in the evaporation rate (KW eq. 2.14); `ρᵐ` is the
-moist-air density that the mass fractions are referenced to, at which the saturation specific
-humidity is evaluated. They coincide on the compressible core; on the anelastic core `ρ` is the
-dry reference density ``ρᵣ`` and `ρᵐ = pᵣ / (Rᵐ T)`.
-
 Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
 """
-@inline function step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, ρᵐ, p, Δt,
+@inline function step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, p, Δt,
                                            microphysics, constants, f₅, δT, FT)
     surface = PlanarLiquidSurface()
     Cᵨ     = microphysics.density_scale
@@ -551,8 +545,8 @@ Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
     rᶜˡ = max(0, rᶜˡ - Δrᴾ)
     rʳ = max(0, rʳ + Δrᴾ + Δr𝕎)
 
-    # Saturation specific humidity, referenced to the moist-air density
-    qᵛ⁺ = saturation_specific_humidity(T, ρᵐ, constants, surface)
+    # Saturation specific humidity
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, surface)
     rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
 
     # Saturation adjustment
@@ -671,7 +665,7 @@ the ratio is not finite and positive. An invalid step is not clipped: the kernel
     return Nₛ, valid, needed
 end
 
-@kernel function _microphysical_update!(microphysics, grid, Nz, Δt, substep_limit, dynamics,
+@kernel function _microphysical_update!(microphysics, grid, Nz, Δt, substep_limit,
                                         density, coupling_density, dry_air_coupled,
                                         pressure, pˢᵗ, constants,
                                         θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
@@ -793,7 +787,6 @@ end
                 qˡ = q.liquid
                 Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
                 Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
-                ρᵐ = gas_phase_density(i, j, k, dynamics, Tᵏ, q, constants)
 
                 # Rain sedimentation flux (upstream differencing)
                 ρᵏ = Cᵨ * coupling_density[i, j, k]
@@ -807,7 +800,7 @@ end
                 zᵏ = zᵏ⁺¹
 
                 # Core microphysics step
-                rᵛ⁺, rᶜˡ⁺, rʳ⁺, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, ρᵐ, p, Δtₛ,
+                rᵛ⁺, rᶜˡ⁺, rʳ⁺, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
                                                                 microphysics, constants, f₅, δT, FT)
 
                 μ.qᵛ[i, j, k]  = ifelse(active, rᵛ⁺, rᵛ)
@@ -853,7 +846,6 @@ end
             qˡ = q.liquid
             Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
             Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
-            ρᵐ = gas_phase_density(i, j, k, dynamics, Tᵏ, q, constants)
 
             # Rain sedimentation flux at top boundary
             𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
@@ -863,7 +855,7 @@ end
             Δr𝕎 = -Δtₛ * rʳ * 𝕎ʳᵏ / Δz_half
 
             # Core microphysics step (shared with ParcelModel)
-            rᵛ⁺, rᶜˡ⁺, rʳ⁺, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, ρᵐ, p, Δtₛ,
+            rᵛ⁺, rᶜˡ⁺, rʳ⁺, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
                                                             microphysics, constants, f₅, δT, FT)
 
             μ.qᵛ[i, j, k]  = ifelse(active, rᵛ⁺, rᵛ)
@@ -1013,12 +1005,8 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
     FT = typeof(ρ)
 
-    # The parcel saturates at its own density, p / (Rᵐ T); ρ is the environmental density
-    # that weights the parcel's prognostics.
-    ρᵐ = density(𝒰, constants)
-
     # Core microphysics step (no sedimentation for parcel: Δr𝕎 = 0)
-    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, ρᵐ, p_parcel, Δt,
+    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, p_parcel, Δt,
                                                microphysics, constants, f₅, δT, FT)
 
     # Convert mixing ratios → mass fractions (shared helper)

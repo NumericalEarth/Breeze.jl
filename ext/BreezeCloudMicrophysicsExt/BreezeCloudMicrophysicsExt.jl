@@ -48,7 +48,6 @@ using Breeze.Thermodynamics:
     with_moisture,
     temperature,
     air_pressure,
-    density,
     PlanarLiquidSurface,
     PlanarIceSurface,
     saturation_vapor_pressure,

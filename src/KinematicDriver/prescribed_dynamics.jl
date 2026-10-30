@@ -150,15 +150,6 @@ AtmosphereModels.surface_pressure(d::PrescribedDynamics) = d.surface_pressure
 AtmosphereModels.base_pressure(d::PrescribedDynamics) = d.base_pressure
 AtmosphereModels.standard_pressure(d::PrescribedDynamics) = d.standard_pressure
 
-# As on the anelastic core, the prescribed density carries the mass fractions but is not the local
-# moist density they are referenced to (it is the dry reference profile when built from a
-# `ReferenceState`). Rediagnose that at the prescribed pressure, ρ = p / (Rᵐ T): the density the
-# microphysics saturates at, `density(𝒰, constants)`.
-@inline function AtmosphereModels.gas_phase_density(i, j, k, dynamics::PrescribedDynamics, T, q, constants)
-    @inbounds p = dynamics.pressure[i, j, k]
-    return density(T, p, q, constants)
-end
-
 #####
 ##### Materialization
 #####
