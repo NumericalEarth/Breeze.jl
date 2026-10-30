@@ -12,10 +12,9 @@ than noise. The treatments here decide how that sum is rounded:
   in expectation. Needs no extra storage; the random numbers come from a counter-based hash.
 
 A new treatment subtypes [`AbstractRoundingTreatment`](@ref) and extends [`rounded_add`](@ref).
-Deterministic compensated summation (the one-field "carry in the increment" of
-[issue #1122](https://github.com/NumericalEarth/Breeze.jl/issues/1122)) would also need a
-persistent field per prognostic in the time stepper, zeroed by `set!` and saved by
-`prognostic_state` for checkpointing; that is left for later.
+Deterministic compensated summation, which carries the lost part of each increment to the next
+step, would also need a persistent field per prognostic in the time stepper, zeroed by `set!` and
+saved by `prognostic_state` for checkpointing; that is left for later.
 """
 module RoundingTreatments
 

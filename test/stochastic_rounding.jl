@@ -215,7 +215,7 @@ end
     @test exact > 0
 
     # Round to nearest loses more than 20% of the heating; stochastic rounding recovers it
-    @test !isapprox(nearest, exact, rtol = 0.2)
+    @test nearest ≉ exact rtol = 0.2
     @test stochastic ≈ exact rtol = 0.02
 
     Oceananigans.defaults.FloatType = default_FT
