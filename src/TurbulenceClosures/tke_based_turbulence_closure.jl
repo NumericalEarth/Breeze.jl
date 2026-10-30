@@ -65,7 +65,8 @@ steady state, where ``ℓ = \\sqrt{e} / N``, the gradient Richardson number is
 
 The defaults are the Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009)
 re-expressed for this normalization of the mixing length (``κ = 0.4``, ``e/u_\\star² = 4.2``,
-``Pr = 0.74``, ``Ri^\\dagger = 0.25``); they are placeholders for calibration.
+``Pr = 0.74``, ``Ri^\\dagger = 0.25``); they are placeholders for calibration. The conversion from
+the normalization ``ℓ = \\min(z, Cᴺ \\sqrt{e} / N)`` is [`absorb_stratification_coefficient`](@ref).
 
 Fields
 ======
@@ -123,9 +124,8 @@ energy is spent against buoyancy — infinite where ``N² ≤ 0``. Each formulat
 ``ℂˢ``; the gradient-limited form also carries an independent interior slope ``ℂⁱ``.
 The penetration depth carries no coefficient. The standalone default ``ℂˢ = 1.316`` is the reciprocal of
 Deardorff's coefficient ``0.76`` of the stratification length ([Deardorff 1980](@cite Deardorff1980)),
-which the equivalent normalization ``ℓ = \\min(z, 0.76 \\sqrt{e} / N)`` carries on ``ℓᵇ`` instead,
-with the diffusivity coefficients multiplied by 0.76 and the dissipation coefficient divided by it.
-In a neutral surface layer every formulation gives
+which the equivalent normalization ``ℓ = \\min(z, 0.76 \\sqrt{e} / N)`` carries on ``ℓᵇ`` instead; see
+[`absorb_stratification_coefficient`](@ref). In a neutral surface layer every formulation gives
 ``ℓ = ℂˢ z`` and in uniformly stratified air every formulation gives ``ℓ = ℓᵇ``; they differ in what
 else bounds ``ℓ``. The formulations are [`LocalMinimumMixingLength`](@ref),
 [`IntegralMixingLength`](@ref) and the default [`GradientLimitedMixingLength`](@ref).
@@ -194,7 +194,8 @@ change the neutral wall length ``ℂˢ z``. The domain top is not an obstacle.
 With equal slopes this recovers the original gradient-limited formulation
 ([Gaspar et al. 1990](@cite Gaspar1990)).
 
-The defaults, `ℂˢ = 1.316` and `ℂⁱ = ℂˢ`, are the original formulation;
+The standalone constructor retains `ℂˢ = 1.316` and `ℂⁱ = ℂˢ` for compatibility:
+a single positional coefficient or a lone `ℂˢ` keyword still sets both slopes.
 [`TKEBasedTurbulenceClosure`](@ref) supplies the calibrated pair instead.
 """
 Base.@kwdef struct GradientLimitedMixingLength{FT} <: AbstractMixingLength
@@ -202,6 +203,8 @@ Base.@kwdef struct GradientLimitedMixingLength{FT} <: AbstractMixingLength
     ℂⁱ :: FT = ℂˢ    # interior envelope slope; equal slopes recover the original formulation
 end
 
+GradientLimitedMixingLength(ℂˢ) = GradientLimitedMixingLength(ℂˢ, ℂˢ)
+GradientLimitedMixingLength{FT}(ℂˢ) where FT = GradientLimitedMixingLength{FT}(ℂˢ, ℂˢ)
 GradientLimitedMixingLength(ℂˢ, ℂⁱ) = GradientLimitedMixingLength(promote(ℂˢ, ℂⁱ)...)
 
 # Coefficients may be traced scalars when a shared closure is differentiated.
@@ -309,7 +312,9 @@ Construct a [`TKEBasedTurbulenceClosure`](@ref) with the given time discretizati
 `VerticallyImplicitTimeDiscretization()`), float type, mixing length, stability functions, static
 stability and numerical parameters. The defaults are calibrated to the Shen et al. (2022) LES library:
 rational stability functions, wall coefficient 0.7877315198717979 and interior slope
-1.777871783491512.
+1.777871783491512. Reproducing that calibration also requires an explicitly supplied surface TKE flux
+boundary condition with the coefficients of [`tke_surface_flux`](@ref); it is not installed
+implicitly by the closure constructor.
 
 `minimum_shear_squared` (default `1e-10` s⁻²) is the floor ``S²ᵐⁱⁿ > 0`` added to the squared
 shear in the Richardson number of [`RationalStabilityFunction`](@ref),
@@ -364,10 +369,68 @@ end
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
     TKEBasedTurbulenceClosure(VerticallyImplicitTimeDiscretization(), FT; kw...)
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the upward surface flux of TKE density, ``ρ (ℂᵂu★ u★³ + ℂᵂʷ wΔ³)``.
+The inputs are lowest-cell-center reference density, the cube of friction velocity, and the convective
+velocity cubed ``wΔ³ = Δz₁ max(Jᵇ, 0)``, with surface buoyancy flux ``Jᵇ`` and
+first-cell thickness ``Δz₁``. Use the LES-prescribed time series when reproducing a
+calibration case. The default coefficients accompany the selected provisional-60 fit
+in [`TKEBasedTurbulenceClosure`](@ref).
+
+The optional coefficients are positional arguments so this helper can be called in kernels.
+This scalar helper does not install a boundary condition. Supply its value through
+a bottom `FluxBoundaryCondition` on `ρe`, with the case's time-dependent inputs.
+
+```jldoctest
+using Breeze
+
+tke_surface_flux(1.0, 0.0, 0.0)
+
+# output
+0.0
+```
+"""
+@inline function tke_surface_flux(ρ, u★³, wΔ³,
+                                  ℂᵂu★ = oftype(float(u★³), 0.01002182909933591),
+                                  ℂᵂʷ = oftype(float(wΔ³), 0.013669219822302736))
+    return ρ * (ℂᵂu★ * u★³ + ℂᵂʷ * wΔ³)
+end
+
 @inline convert_eltype(::Type{FT}, sf::ConstantStabilityFunctions) where FT =
     ConstantStabilityFunctions{FT}(convert(FT, sf.ℂᵘ), convert(FT, sf.ℂᶜ), convert(FT, sf.ℂᵉ), convert(FT, sf.ℂᴰ))
 @inline convert_eltype(::Type{FT}, ss::DryStaticStability) where FT = ss
 @inline convert_eltype(::Type{FT}, ss::MoistStaticStability) where FT = ss
+
+"""
+$(TYPEDSIGNATURES)
+
+Convert the parameters of the normalization ``ℓ = \\min(z, Cᴺ \\sqrt{e} / N)`` — a coefficient
+``Cᴺ`` on the stratification length and none on the wall distance — to the present
+``ℓ = \\min(ℂˢ z, \\sqrt{e} / N)``, returning the equivalent [`LocalMinimumMixingLength`](@ref) and
+[`ConstantStabilityFunctions`](@ref). The two lengths differ by the factor ``Cᴺ`` everywhere, so
+the diffusivities and the dissipation rate are unchanged when ``ℂˢ = 1 / Cᴺ``, the diffusivity
+coefficients are multiplied by ``Cᴺ`` and the dissipation coefficient is divided by it.
+
+```jldoctest
+using Breeze
+using Breeze.TurbulenceClosures: absorb_stratification_coefficient
+
+mixing_length, stability_functions =
+    absorb_stratification_coefficient(0.76, ConstantStabilityFunctions(ℂᵘ=0.196, ℂᶜ=0.265, ℂᵉ=0.392, ℂᴰ=0.295))
+
+mixing_length
+
+# output
+LocalMinimumMixingLength{Float64} (ℂˢ = 1.31579)
+```
+"""
+function absorb_stratification_coefficient(Cᴺ, sf::ConstantStabilityFunctions)
+    mixing_length = LocalMinimumMixingLength(ℂˢ = 1 / Cᴺ)
+    stability_functions = ConstantStabilityFunctions(ℂᵘ = Cᴺ * sf.ℂᵘ, ℂᶜ = Cᴺ * sf.ℂᶜ, ℂᵉ = Cᴺ * sf.ℂᵉ, ℂᴰ = sf.ℂᴰ / Cᴺ)
+    return mixing_length, stability_functions
+end
 
 #####
 ##### Tracer wiring

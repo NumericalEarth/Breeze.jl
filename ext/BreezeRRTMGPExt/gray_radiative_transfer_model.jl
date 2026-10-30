@@ -8,9 +8,8 @@
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Grids: ynode, znodes
-using Oceananigans.Grids: AbstractGrid, Center, Face
-using Oceananigans.Fields: ConstantField
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiation, RadiativeTransferModel,
+using Oceananigans.Grids: AbstractGrid, Center, Face, Flat
+using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel,
                                AbstractSolarPosition, ApparentSolarPosition,
                                DiurnalSolarPosition, FixedCosineZenith
 
@@ -38,7 +37,7 @@ Construct a gray atmosphere radiative transfer model for the given grid.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
-- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
+- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361), a scalar or an `(Nx, Ny)` array of per-column values
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::GrayOptics,
@@ -58,13 +57,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     solar_position = maybe_infer_solar_position(solar_position, grid)
 
-    validate_surface_fractions(; surface_emissivity, surface_albedo,
-                                 direct_surface_albedo, diffuse_surface_albedo)
-
-    direct_surface_albedo, diffuse_surface_albedo =
-        resolve_surface_albedos(surface_albedo, direct_surface_albedo, diffuse_surface_albedo, grid, solar_position)
-
-    surface_emissivity = materialize_surface_property(surface_emissivity, grid, solar_position)
+    surface_radiation = materialize_surface_radiation(grid, solar_position;
+                                                      surface_temperature, surface_emissivity, surface_albedo,
+                                                      direct_surface_albedo, diffuse_surface_albedo)
 
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -108,16 +103,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     rrtmgp_αb₀ = ArrayType{FT}(undef, 1, Nc)
     rrtmgp_αw₀ = ArrayType{FT}(undef, 1, Nc)
 
-    rrtmgp_ℐ₀ .= convert(FT, solar_constant)  # Top-of-atmosphere solar flux
+    fill_columns!(rrtmgp_ℐ₀, solar_constant)  # Top-of-atmosphere solar flux, a scalar or per column
 
-    surface_emissivity = constant_field_property(surface_emissivity, FT)
-    direct_surface_albedo = constant_field_property(direct_surface_albedo, FT)
-    diffuse_surface_albedo = constant_field_property(diffuse_surface_albedo, FT)
-
-    if surface_temperature isa Number
-        surface_temperature = ConstantField(convert(FT, surface_temperature))
-        rrtmgp_T₀ .= surface_temperature.constant
-    end
+    initialize_surface_temperature!(rrtmgp_T₀, surface_radiation.surface_temperature)
 
     rrtmgp_grid = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
 
@@ -150,15 +138,12 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     downwelling_shortwave_flux = ZFaceField(grid)  # Direct beam only
     flux_divergence = CenterField(grid)
 
-    surface_radiation = SurfaceRadiation(surface_temperature, surface_emissivity,
-                                         direct_surface_albedo, diffuse_surface_albedo)
-
     update_rrtmgp_surface_boundary_conditions!(longwave_solver.bcs.sfc_emis,
                                                shortwave_solver.bcs.sfc_alb_direct,
                                                shortwave_solver.bcs.sfc_alb_diffuse,
                                                surface_radiation, grid)
 
-    return RadiativeTransferModel(convert(FT, solar_constant),
+    return RadiativeTransferModel(materialize_solar_constant(solar_constant, FT),
                                   solar_position,
                                   surface_radiation,
                                   nothing,  # background_atmosphere = nothing for gray
@@ -219,6 +204,14 @@ _set_latitude_from_grid!(rrtmgp_latitude, ::AbstractGrid{<:Any, <:Any, <:Flat}) 
     c = column_index(i, j, grid.Nx)
     @inbounds rrtmgp_latitude[c] = φ
 end
+
+#####
+##### Solar constant materialization
+#####
+
+# The solar constant as stored: a grid-eltype scalar, or the user's (Nx, Ny) array as is
+materialize_solar_constant(solar_constant::Number, FT) = convert(FT, solar_constant)
+materialize_solar_constant(solar_constant::AbstractArray, FT) = solar_constant
 
 #####
 ##### Update radiation fluxes from model state

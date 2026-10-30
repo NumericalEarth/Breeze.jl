@@ -75,6 +75,23 @@ thermodynamic_name(model) = :ρθ ∈ keys(prognostic_fields(model)) ? :ρθ : :
         @test size(interior(model.dynamics.reference_state.density)) == (N₁, N₂, Nz)
     end
 
+    @testset "Column ensemble sets a per-column total moisture" begin
+        N₁, N₂ = 3, 2
+        grid = RectilinearGrid(arch, FT; size = ColumnEnsembleSize(Nz=Nz, ensemble=(N₁, N₂), Hz=3),
+                               z = (0, 2000), topology = (Flat, Flat, Bounded))
+        reference_state = ReferenceState(grid, scm_constants; base_pressure=101325, potential_temperature=290)
+        microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+        model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics,
+                                closure = VerticalScalarDiffusivity(ν=1.0, κ=1.0))
+
+        qᵗ = FT[0.002i + 0.001j for i in 1:N₁, j in 1:N₂, k in 1:Nz]
+        set!(model; θ = 290, qᵗ)
+        @test Array(interior(model.microphysical_fields.qᵉ)) ≈ qᵗ
+
+        # The validation still rejects a negative total moisture
+        @test_throws ArgumentError set!(model; θ = 290, qᵗ = -qᵗ)
+    end
+
     @testset "Column ensemble reproduces independent single columns" begin
         N₁, N₂ = 3, 2
         amp(i, j) = FT(0.002) * (i + N₁ * (j - 1))  # distinct θ-gradient amplitude per column
@@ -232,4 +249,33 @@ thermodynamic_name(model) = :ρθ ∈ keys(prognostic_fields(model)) ? :ρθ : :
         # No regression: on a non-ensemble grid the reference profile stays reduced (1×1×Nz).
         @test size(interior(reference_state.density)) == (1, 1, Nz)
     end
+end
+
+@testset "Per-column reference potential-temperature profiles [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    arch = default_arch
+    N₁, N₂, Nz = 3, 2, 40
+    grid = RectilinearGrid(arch, FT; size = ColumnEnsembleSize(Nz=Nz, ensemble=(N₁, N₂), Hz=3), z = (0, 20_000), topology = (Flat, Flat, Bounded))
+    p₀ = FT[100000 + 500i + 1000j for i in 1:N₁, j in 1:N₂]
+    θ₀ = FT[290 + 2i + 3j for i in 1:N₁, j in 1:N₂]
+    constants = ThermodynamicConstants(FT)
+
+    # Constant profiles per column reproduce the adiabatic per-column reference
+    adiabatic = ReferenceState(grid, constants; base_pressure = p₀, potential_temperature = θ₀)
+    profiles = FT[θ₀[i, j] for i in 1:N₁, j in 1:N₂, k in 1:Nz]
+    from_profiles = ReferenceState(grid, constants; base_pressure = p₀, potential_temperature = profiles)
+    @test Array(interior(from_profiles.pressure)) ≈ Array(interior(adiabatic.pressure)) rtol = 1e-6
+    @test Array(interior(from_profiles.density)) ≈ Array(interior(adiabatic.density)) rtol = 1e-6
+    @test Array(interior(from_profiles.temperature)) ≈ Array(interior(adiabatic.temperature)) rtol = 1e-6
+
+    # A stratified profile: pressure stays positive and hydrostatic to the top, unlike an isentrope from 300 K
+    zc = Array(znodes(grid, Center()))
+    stratified = FT[θ₀[i, j] + 3e-3 * zc[k] + (zc[k] > 12_000 ? 2e-2 * (zc[k] - 12_000) : 0) for i in 1:N₁, j in 1:N₂, k in 1:Nz]
+    ref = ReferenceState(grid, constants; base_pressure = p₀, potential_temperature = stratified)
+    p = Array(interior(ref.pressure))[1, 1, :]; ρ = Array(interior(ref.density))[1, 1, :]
+    @test all(p .> 0) && p[end] > 2000
+    g = constants.gravitational_acceleration
+    dpdz = diff(p) ./ diff(zc); ρ_mid = (ρ[1:end-1] .+ ρ[2:end]) ./ 2
+    @test maximum(abs.(dpdz .+ g .* ρ_mid) ./ (g .* ρ_mid)) < 0.02
+    @test_throws ArgumentError ReferenceState(grid, constants; base_pressure = p₀, potential_temperature = profiles[:, :, 1:Nz-1])
 end

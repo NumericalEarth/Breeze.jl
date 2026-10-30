@@ -59,6 +59,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρᵡ``                              | `ρᵡ`   | `thermodynamic_density(formulation)` | Thermodynamic density: the generic continuity-density-weighted prognostic thermodynamic variable, ``ρᵡ = ρᵈ χ`` — concretely ``ρθ`` for the potential-temperature formulation or ``ρs`` for static energy. The intensive variable is recovered as ``χ = ρᵡ / ρᵈ`` |
 | ``T``                               | `T`    | `AM.temperature`                    | Temperature                                                                    |
 | ``T⁺``                              | `T⁺`   | `DewpointTemperature(model)`        | Dewpoint temperature                                                           |
+| ``Tᵛ``                              | `Tᵛ`   | `HydrostaticSounding.virtual_temperature` | Virtual temperature, ``Tᵛ = Rᵐ T / Rᵈ``: the temperature at which dry air has the moist air's density at the same pressure (condensate counted as loading) |
 | ``p``                               | `p`    | `AM.pressure`                       | Pressure                                                                       |
 | ``b``                               | `b`    |                                     | Buoyancy                                                                       |
 | ``q^{ve}``                           | `qᵛᵉ`  |                                     | Scheme-dependent specific moisture: vapor (non-equilibrium) or equilibrium moisture (saturation adjustment) |
@@ -190,6 +191,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before capping at the surface length |
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
 | ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |
+| ``ℂᵂu★, ℂᵂʷ`` | `ℂᵂu★`, `ℂᵂʷ` | | Friction-velocity and convective-velocity surface TKE flux coefficients |
+| ``u★³, wΔ³`` | `u★³`, `wΔ³` | | Cubed surface friction velocity and ``Δz₁ max(Jᵇ,0)``, respectively |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
 | ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
 | ``h^{bl}``                          | `hᵇˡ`  |                                     | Boundary-layer depth, m; a diagnostic (the height of the capping inversion in convective conditions) |
