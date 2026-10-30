@@ -245,7 +245,7 @@ time_discretization = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5,
 
 dynamics = CompressibleDynamics(time_discretization;
                                 slope_stencil = SlopeInsideInterpolation(),
-                                surface_pressure = p₀,
+                                base_pressure = p₀,
                                 reference_potential_temperature = potential_temperature_profile)
 
 model = AtmosphereModel(grid; dynamics, advection = WENO(order=9))
@@ -322,7 +322,7 @@ outputs = (; w, contravariant_w)
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
                                               filename,
                                               schedule = TimeInterval(2minutes),
-                                              overwrite_existing = true)
+                                              overwrite_files = true)
 
 run!(simulation)
 

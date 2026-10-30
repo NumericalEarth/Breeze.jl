@@ -77,11 +77,13 @@ end
 ##### Process-rate tendencies
 #####
 ##### "The P3 tendencies" are the tendencies of P3's own microphysical prognostics
-##### (ρqᵛ, ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ, and the optional ρnᶜˡ/ρnᵃ/ρsᵛ⁺ˡ).
+##### (ρqᵛ, ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ, and the optional ρnᶜˡ/ρnᵃ/ρδqᵛ⁺ˡ).
 ##### They are computed *jointly*: the coupled donor-budget limiters see every species at
 ##### once, so one kernel evaluates all of them per cell and adds each straight into `Gⁿ`.
-##### The evaluation is fully inlined; `compute_p3_process_rates` brackets Table 1 once per
-##### cell (`P3IceLookups`) and every ice integral is read at that bracket.
+##### The evaluation is fully inlined. Table 1 is bracketed twice per cell: once at the
+##### diagnostic ice population (`p3_ice_moments`) and once at the bounded population
+##### (`P3IceLookups`, inside `compute_p3_process_rates`). Each ice integral is read at
+##### whichever bracket matches the population it belongs to.
 #####
 
 @kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
@@ -95,11 +97,11 @@ end
         𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
         𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
 
-        # Approximate the resolved diffusional-growth driver with adiabatic
-        # cooling from the local vertical velocity. External vapor forcing is
+        # Approximate the resolved diffusional-growth driver with hydrostatic adiabatic
+        # expansion from the local vertical velocity. External vapor forcing is
         # intentionally neglected.
         temperature_tendency = p3_adiabatic_temperature_tendency(ℳ, 𝒰, constants)
-        vapor_tendency = zero(temperature_tendency)
+        pressure_tendency = p3_adiabatic_pressure_tendency(ρ, ℳ, constants)
 
         surface_temperature = μ.surface_temperature[i, j, 1]
     end
@@ -107,8 +109,8 @@ end
     properties = p3_process_properties(p3, ρ, ℳ)
     result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
                                  surface_temperature, temperature_tendency,
-                                 vapor_tendency)
-    add_p3_tendencies!(G, i, j, k, p3, result)
+                                 pressure_tendency)
+    add_p3_tendencies!(G, i, j, k, grid, p3, result)
 end
 
 #####
@@ -127,13 +129,14 @@ end
 @inline p3_tendency_fields(G, p3::P3) =
     merge((; G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnʳ, G.ρqⁱ, G.ρnⁱ, G.ρqᶠ, G.ρbᶠ, G.ρqʷⁱ),
           p3_aerosol_tendency_fields(G, p3.aerosol),
-          p3_supersaturation_tendency_fields(G, p3.process_rates))
+          p3_vapor_excess_tendency_fields(G, p3.process_rates))
 
 @inline p3_aerosol_tendency_fields(G, ::Nothing) = (;)
-@inline p3_aerosol_tendency_fields(G, _) = (; G.ρnᶜˡ, G.ρnᵃ)
+@inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, false}) = (; G.ρnᶜˡ)
+@inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, true}) = (; G.ρnᶜˡ, G.ρnᵃ)
 
-@inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, false}) where FT = (;)
-@inline p3_supersaturation_tendency_fields(G, ::ProcessRate{FT, true}) where FT = (; G.ρsᵛ⁺ˡ)
+@inline p3_vapor_excess_tendency_fields(G, ::ProcessRate{FT, DiagnosticVaporExcess}) where FT = (;)
+@inline p3_vapor_excess_tendency_fields(G, ::ProcessRate{FT, PrognosticVaporExcess}) where FT = (; G.ρδqᵛ⁺ˡ)
 
 function AM.compute_microphysical_tendencies!(p3::P3, model)
     grid = model.grid

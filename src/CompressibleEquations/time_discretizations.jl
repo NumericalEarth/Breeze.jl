@@ -288,10 +288,7 @@ fractions ``β = (1/3, 1/2, 1)``. Within each stage, an inner substep loop
 evolves linearized acoustic perturbations about each RK stage-entry
 state. The vertically implicit solve uses an off-centered Crank-Nicolson
 scheme with off-centering parameter ``\\omega`` (default 0.65; ``\\omega = 0.5``
-is classic centered CN). In multi-substep stages, the first acoustic
-substep includes the frozen stage-entry horizontal pressure gradient but
-skips the acoustic perturbation pressure gradient, which is applied on
-subsequent substeps following the MPAS forward-backward sequencing.
+is classic centered CN).
 
 The substep distribution across stages is selectable via the
 [`AcousticSubstepDistribution`](@ref) interface.
@@ -304,7 +301,7 @@ Fields
   step (see `acoustic_cfl`).
 - `acoustic_cfl`: Target horizontal acoustic Courant number used by the
   adaptive substep count when `substeps === nothing`. The substep count
-  is ``N \\approx \\lceil \\Delta t \\, \\mathbb{C}^{ac} /
+  is ``N \\approx \\lceil \\Delta t \\, c^{ac} /
   (\\mathrm{acoustic\\_cfl} \\cdot \\Delta x_\\min) \\rceil``, so smaller
   values give more substeps. Default `0.5` (the ERF/WRF target —
   equivalent to the conventional safety factor of `2`). Ignored when
@@ -542,7 +539,6 @@ struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistri
     vertical_momentum_tendency_factor :: FT
     vertical_pressure_tendency_factor :: FT
     final_stage_vertical_pressure_tendency_factor :: FT
-    apply_first_substep_pressure_gradient :: Bool
     damping :: D
     sponge :: US
     substep_distribution :: AD
@@ -557,7 +553,6 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          vertical_momentum_tendency_factor = FT(1),
                                          vertical_pressure_tendency_factor = FT(1),
                                          final_stage_vertical_pressure_tendency_factor = FT(1),
-                                         apply_first_substep_pressure_gradient = false,
                                          damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
                                          substep_distribution = ProportionalSubsteps(),
@@ -583,7 +578,6 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
         convert(FT, vertical_momentum_tendency_factor),
         convert(FT, vertical_pressure_tendency_factor),
         convert(FT, final_stage_vertical_pressure_tendency_factor),
-        Bool(apply_first_substep_pressure_gradient),
         convert_acoustic_parameter(FT, damping),
         convert_acoustic_parameter(FT, sponge),
         substep_distribution,

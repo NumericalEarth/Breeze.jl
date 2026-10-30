@@ -6,25 +6,30 @@
 
 """
     materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                    dynamics, microphysics, surface_pressure, thermodynamic_constants,
-                                                    microphysical_fields, specific_prognostic_moisture, temperature)
+                                                    dynamics, microphysics, thermodynamic_constants)
 
 Regularize boundary conditions for an `AtmosphereModel`. This function is extended
 by the `BoundaryConditions` module to provide atmosphere-specific boundary condition handling.
 
-If `formulation` is `:LiquidIcePotentialTemperature` and `ρs` boundary conditions are provided,
-they are automatically converted to `ρθ` boundary conditions by wrapping flux BCs in
-`EnergyFluxBoundaryCondition`, which divides by the local mixture heat capacity.
+Boundary conditions supplied under the energy key `ρE` (see
+[`total_energy_density_name`](@ref)) are routed onto the prognostic thermodynamic variable of
+`formulation`: for `:LiquidIcePotentialTemperature` they become `ρθ` boundary conditions,
+with flux BCs wrapped in `EnergyFluxBoundaryCondition` to divide by the local mixture heat
+capacity; for `:StaticEnergy` they pass through onto `ρs` unconverted.
 
-The `dynamics` argument provides access to the reference state for boundary conditions
-that require it, such as `VirtualPotentialTemperature` diagnostics.
+Conditions supplied under the moisture key `ρqᵗ` (see [`total_moisture_density_name`](@ref))
+are likewise routed onto the moisture density that `microphysics` evolves — `ρqᵛ` or `ρqᵉ`,
+depending on the scheme — without conversion, since water entering the prognostic moisture is
+water entering ``qᵗ`` under any of them.
+
+The `dynamics` argument provides the standard pressure that boundary conditions need at
+materialization time.
 
 The `microphysics` argument specifies the microphysics scheme used to compute moisture
 fractions for mixture heat capacity and virtual potential temperature calculations.
 
-The `microphysical_fields`, `specific_prognostic_moisture`, and `temperature` arguments are pre-created
-fields used to construct the `VirtualPotentialTemperature` diagnostic for stability-dependent
-boundary conditions.
+Nothing about the model state is captured here: surface fluxes read the pressure, density,
+temperature and moisture they need from the model field tuple at evaluation time.
 """
 function materialize_atmosphere_model_boundary_conditions end
 

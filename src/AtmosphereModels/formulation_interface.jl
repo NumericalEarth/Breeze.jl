@@ -98,6 +98,25 @@ function specific_thermodynamic_field end
 thermodynamic_density_name(formulation::Symbol) = thermodynamic_density_name(Val(formulation))
 
 """
+    total_energy_density_name
+
+The key under which an *energy* input — a surface heat flux, a diabatic heating rate — is
+supplied to `AtmosphereModel`, `:ρE`, along with its specific alias `:E` for forcings.
+
+``E`` denotes total energy (`total_energy`), so the key names the physical input without
+committing to the variable that carries it: a `boundary_conditions` or `forcing` entry keyed
+`ρE` is routed onto whichever thermodynamic density the formulation evolves (see
+[`thermodynamic_density_name`](@ref)), converted as that variable requires — divided by
+``cᵖᵐ Π`` for ``ρθ``, whether it arrives as a flux or as a forcing, and passed through
+unconverted for ``ρs``, which is itself an energy per unit mass.
+
+``s`` names static energy specifically and ``e`` is reserved for turbulent kinetic energy, so
+neither doubles as the energy key: `ρs` is a valid key only when static energy *is* the
+prognostic thermodynamic variable.
+"""
+const total_energy_density_name = :ρE
+
+"""
     thermodynamic_density(formulation)
 
 Return the thermodynamic density field for the given formulation — the prognostic
@@ -159,9 +178,14 @@ function diagnose_thermodynamic_state end
 #####
 
 """
-    compute_thermodynamic_tendency!(model, common_args)
+    compute_thermodynamic_tendency!(model, common_args, tracer_transport_velocity)
 
 Compute the thermodynamic tendency. Dispatches on the thermodynamic formulation type.
+`common_args` are the arguments the scalar tendencies share, and `tracer_transport_velocity` the
+vertical velocity the moisture and tracer tendencies were built with, which the condensate
+sedimentation term pairs its content fluxes with (see
+[`sedimentation_tendency`](@ref)). The two need not agree: a time stepper may advect
+the thermodynamic variable with a velocity its tracers do not share.
 """
 function compute_thermodynamic_tendency! end
 

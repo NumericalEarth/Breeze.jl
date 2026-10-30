@@ -286,7 +286,7 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
     θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                    surface_pressure = pb,
+                                    base_pressure = pb,
                                     reference_potential_temperature = θᵣ)
 
     microphysics = InstantaneousPrecipitation(equilibrium = WarmPhaseEquilibrium())
@@ -302,11 +302,11 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
     Uᵍ = 1.0
     ρu_bcs  = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ, surface_temperature = Ts))
     ρv_bcs  = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ, surface_temperature = Ts))
-    ρs_bcs  = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient = Cᵀ, gustiness = Uᵍ,
+    ρE_bcs  = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient = Cᵀ, gustiness = Uᵍ,
                                                                     surface_temperature = Ts))
-    ρqᵛ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = Cᵀ, gustiness = Uᵍ,
+    ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = Cᵀ, gustiness = Uᵍ,
                                                              surface_temperature = Ts))
-    boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρs = ρs_bcs, ρqᵛ = ρqᵛ_bcs)
+    boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρE = ρE_bcs, ρqᵗ = ρqᵗ_bcs)
 
     model = AtmosphereModel(grid; dynamics, coriolis, microphysics, closure, boundary_conditions,
                             thermodynamic_constants = constants,
@@ -359,14 +359,14 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
     simulation.output_writers[:psfc] = JLD2Writer(model, (; p = pᵈ);
         filename = "$(output_prefix)_psfc.jld2",
         indices = (:, :, 1),
-        schedule = TimeInterval(output_interval), overwrite_existing = true)
+        schedule = TimeInterval(output_interval), overwrite_files = true)
     if save_fields
         u, v, w = model.velocities
         speed = @at (Center, Center, Center) sqrt(u^2 + v^2)
         w_c   = @at (Center, Center, Center) w
         simulation.output_writers[:speed] = JLD2Writer(model, (; speed, w = w_c);
             filename = "$(output_prefix)_speed.jld2",
-            schedule = TimeInterval(output_interval), overwrite_existing = true)
+            schedule = TimeInterval(output_interval), overwrite_files = true)
     end
 
     @info "Configured DCMIP2016 TC: $(Nλ)×$(Nφ)×$(Nz) ($(resolution)° band $(φ_south)–$(φ_north)°), WENO$(advection_order)"

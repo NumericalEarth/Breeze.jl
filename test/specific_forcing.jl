@@ -126,8 +126,7 @@ end
     F_specific_profile(z) = FT(-1e-5) * (1 + z / 100)
 
     # Path A: manual ρᵣ multiply, supplied under :ρθ (the pre-change idiom)
-    model_A = AtmosphereModel(grid; forcing = (; ρθ = (x, y, z, t) -> 0))  # placeholder
-    ρᵣ = model_A.dynamics.reference_state.density
+    ρᵣ = ReferenceState(grid).density
     F_density_field = Field{Nothing, Nothing, Center}(grid)
     set!(F_density_field, z -> F_specific_profile(z))
     set!(F_density_field, ρᵣ * F_density_field)
@@ -224,7 +223,7 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
                                                                     damping = NoDivergenceDamping());
                                     reference_potential_temperature = FT(300),
-                                    surface_pressure = FT(1e5),
+                                    base_pressure = FT(1e5),
                                     standard_pressure = FT(1e5))
 
     F_θ = FT(-1e-5)
@@ -251,7 +250,7 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
                                                                     damping = NoDivergenceDamping());
                                     reference_potential_temperature = FT(300),
-                                    surface_pressure = FT(1e5),
+                                    base_pressure = FT(1e5),
                                     standard_pressure = FT(1e5))
 
     F = FT(1e-5)
@@ -260,7 +259,7 @@ end
                             tracers = :c,
                             forcing = (; u=Returns(F),
                                          θ=Returns(F),
-                                         s=Returns(zero(FT)),
+                                         E=Returns(zero(FT)),
                                          qᵛ=Returns(F),
                                          c=Returns(F)))
 
@@ -272,7 +271,7 @@ end
     # conserved variables; moisture and passive tracers carry total-air fractions.
     @test model.forcing.ρu.density === ρᵈ
     @test model.forcing.ρθ.density === ρᵈ
-    @test model.forcing.ρs.density === ρᵈ
+    @test model.forcing.ρE.density === ρᵈ
     @test model.forcing.ρqᵛ.density === ρ
     @test model.forcing.c.density === ρ
 

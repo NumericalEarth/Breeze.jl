@@ -185,7 +185,7 @@ struct FourCategories{L, I, R, S, C, V, A}
     snow :: S
     collisions :: C
     hydrometeor_velocities :: V
-    air_properties :: A
+    air :: A
 end
 
 FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities) =
@@ -230,8 +230,14 @@ AtmosphereModels.moisture_prognostic_name(::NonEquilibriumCloudFormation) = :ρq
 const NCBM = BulkMicrophysics{<:Any, Nothing}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
-maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵛ, constants) =
-    AtmosphereModels.adjust_thermodynamic_state(𝒰₀, bμp.cloud_formation, constants)
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵛ, constants) =
+    AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp.cloud_formation, qᵛ, constants)
+
+@inline AtmosphereModels.microphysical_velocities(bμp::NCBM, μ, name) =
+    AtmosphereModels.microphysical_velocities(bμp.cloud_formation, μ, name)
+
+@inline AtmosphereModels.microphysical_tendency(bμp::NCBM, name, ρ, ℳ, 𝒰, constants) =
+    AtmosphereModels.microphysical_tendency(bμp.cloud_formation, name, ρ, ℳ, 𝒰, constants)
 
 AtmosphereModels.prognostic_field_names(::NPBM) = tuple()
 AtmosphereModels.materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)

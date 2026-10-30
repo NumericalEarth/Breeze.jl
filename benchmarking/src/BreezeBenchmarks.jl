@@ -11,6 +11,7 @@ export
     benchmark_time_stepping,
     benchmark_tendency,
     run_benchmark_simulation,
+    checkpointing_label,
     BenchmarkResult,
     SimulationResult,
     BenchmarkMetadata

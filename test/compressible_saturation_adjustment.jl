@@ -7,14 +7,18 @@ using Test
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
     MoistureMassFractions,
+    AbstractReferencePressureState,
     LiquidIceDensityState,
+    LiquidIcePotentialTemperatureState,
+    StaticEnergyState,
     temperature,
     with_temperature,
     mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity
 
-using Breeze.Microphysics: SaturationAdjustment, adjust_thermodynamic_state, WarmPhaseEquilibrium
+using Breeze.Microphysics: SaturationAdjustment, adjust_state, adjust_thermodynamic_state, WarmPhaseEquilibrium,
+                           saturation_adjustment_specific_humidity
 using Oceananigans.TimeSteppers: update_state!
 
 @testset "Compressible density reconciliation modes" begin
@@ -83,6 +87,18 @@ end
         @test 𝒰dry.moisture_mass_fractions.liquid == 0
     end
 
+    # NumericalEarth/Breeze.jl#859: `adjust_state` serves every state, so the only method that
+    # reads `reference_pressure` is the saturation specific humidity of reference-pressure states.
+    # The density-closed state, which has no `reference_pressure`, must select its own method.
+    @testset "the reference-pressure saturation path excludes the density state" begin
+        argument_types(𝒮) = Tuple{FT, 𝒮, typeof(constants), WarmPhaseEquilibrium}
+        state_type(𝒮) = which(saturation_adjustment_specific_humidity, argument_types(𝒮)).sig.parameters[3]
+        @test state_type(LiquidIceDensityState) === LiquidIceDensityState
+        @test state_type(LiquidIcePotentialTemperatureState) === AbstractReferencePressureState
+        @test state_type(StaticEnergyState) === AbstractReferencePressureState
+        @test hasmethod(adjust_state, Tuple{LiquidIceDensityState, FT, typeof(constants), WarmPhaseEquilibrium})
+    end
+
     @testset "fixes the κ·ΔL temperature inconsistency" begin
         θ = FT(300); ρ = FT(1)
         q = MoistureMassFractions(FT(0.018), FT(0.005), FT(0))
@@ -130,7 +146,7 @@ end
     constants = ThermodynamicConstants(Float64)
     θref(z) = 300.0 * exp(9.80616 * z / (1005 * 300.0))
     dyn = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                               surface_pressure = 1e5, standard_pressure = 1e5,
+                               base_pressure = 1e5, standard_pressure = 1e5,
                                reference_potential_temperature = θref)
     model = AtmosphereModel(grid; dynamics = dyn,
                             microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
@@ -154,6 +170,8 @@ end
         @test qᵛ[I] ≈ saturation_specific_humidity(T[I], ρ[I], constants, eq)  atol = 1e-4
     end
 
+    test_kernel_functions_inferred(model)
+
     time_step!(model, 1e-3)
     @test all(isfinite, interior(model.temperature))
 end
@@ -173,7 +191,7 @@ end
 
     make_model() = AtmosphereModel(grid;
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        surface_pressure = 1e5, standard_pressure = 1e5,
+                                        base_pressure = 1e5, standard_pressure = 1e5,
                                         reference_potential_temperature = z -> 300.0),
         microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
         thermodynamic_constants = constants,

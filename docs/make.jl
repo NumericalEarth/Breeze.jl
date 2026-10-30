@@ -1,5 +1,7 @@
 using Breeze
 using RRTMGP, CloudMicrophysics # to load Breeze extensions
+using NumericalRadiation: NumericalRadiation # qualified: NumericalRadiation also exports a ThermodynamicConstants
+using NCDatasets # for the RRTMGP and ecCKD lookup tables
 using Documenter
 using DocumenterCitations
 using Pkg.Artifacts: ensure_artifact_installed
@@ -39,6 +41,8 @@ examples = [
     Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
     Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
     Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz"; build_always=true, gpu=false),
+    Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=true),
+    Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
     Example("Shallow cumulus convection (BOMEX)", "bomex"; build_always=true, gpu=true),
     Example("Precipitating shallow cumulus (RICO)", "rico"; build_always=false, gpu=true),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature"; build_always=true, gpu=false),
@@ -48,15 +52,13 @@ examples = [
     Example("Single-column boundary layer with a prognostic-TKE closure", "single_column_tke_boundary_layer"; build_always=true, gpu=false),
     Example("Single-column ensemble", "single_column_ensemble"; build_always=true, gpu=false),
     Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
-    Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
+    Example("Rising dry and cloudy parcels", "rising_parcels"; build_always=true, gpu=false),
     Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
-    Example("Cloud formation in prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
+    Example("P3 microphysics in a prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
     Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
     Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
-    Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=true),
     Example("Tropical cyclone world", "tropical_cyclone_world"; build_always=false, gpu=true),
     Example("Tropical cyclone with stratiform rainband heating (YD19)", "tropical_cyclone_with_rainband"; build_always=false, gpu=true),
-    Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
 ]
 
 # Filter out long-running example if necessary
@@ -68,6 +70,7 @@ example_pages = ["Overview" => joinpath("literated", "index.md");
 # concurrent downloads, or examples and doctests not liking the extra messages
 # printed to screen during the download.
 ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
+ensure_artifact_installed("ecrad_data", joinpath(pkgdir(NumericalRadiation), "Artifacts.toml"))
 
 # Use a different semaphore for CPU and GPU examples, but will keep the maximum
 # of concurrent tasks running at all time to the number of threads.  This is
@@ -89,8 +92,9 @@ end
 modules = Module[]
 BreezeRRTMGPExt = isdefined(Base, :get_extension) ? Base.get_extension(Breeze, :BreezeRRTMGPExt) : Breeze.BreezeRRTMGPExt
 BreezeCloudMicrophysicsExt = isdefined(Base, :get_extension) ? Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt) : Breeze.BreezeCloudMicrophysicsExt
+BreezeNumericalRadiationExt = isdefined(Base, :get_extension) ? Base.get_extension(Breeze, :BreezeNumericalRadiationExt) : Breeze.BreezeNumericalRadiationExt
 
-for m in [Breeze, BreezeRRTMGPExt, BreezeCloudMicrophysicsExt]
+for m in [Breeze, BreezeRRTMGPExt, BreezeCloudMicrophysicsExt, BreezeNumericalRadiationExt]
     if !isnothing(m)
         push!(modules, m)
     end
@@ -124,7 +128,7 @@ end
 
 function write_api_md()
     modules = get_submodules(Breeze)
-    append!(modules, [BreezeRRTMGPExt, BreezeCloudMicrophysicsExt])
+    append!(modules, [BreezeRRTMGPExt, BreezeCloudMicrophysicsExt, BreezeNumericalRadiationExt])
     io = IOBuffer()
 
     println(io, """
@@ -187,14 +191,17 @@ makedocs(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB
         size_threshold = 2 ^ 20, # 1 MiB
-        size_threshold_ignore = ["api.md"], # auto-generated, grows with the docstring count
+        # api.md is auto-generated and grows with the docstring count; the single-column closure
+        # example carries five figures, two of them 83-member heatmaps
+        size_threshold_ignore = ["api.md", "literated/single_column_tke_boundary_layer.md"],
         prettyurls = get(ENV, "CI", "false") == "true",
     ),
     pages=[
         "Home" => "index.md",
         "Examples" => example_pages,
         "Thermodynamics" => "thermodynamics.md",
-        "AtmosphereModel" => Any[
+        "AtmosphereModel documentation" => Any[
+            "Boundary conditions and forcing" => "atmosphere_model/boundary_conditions_and_forcing.md",
             "Diagnostics" => "atmosphere_model/diagnostics.md",
             "Lagrangian particles" => "atmosphere_model/lagrangian_particles.md",
             "Wall fluxes" => "atmosphere_model/wall_fluxes.md",

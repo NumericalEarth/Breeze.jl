@@ -16,7 +16,7 @@ struct CloudTerminalVelocities{FT}
     number_weighted :: FT
 end
 
-# Stokes-regime cloud-droplet fall speed, `v(D) = a_cn D²`, with
+# Stokes-regime cloud-droplet fall speed, `𝕎(D) = a_cn D²`, with
 # `a_cn = g ρʷ / (18 η)` and exponent 2, so the PSD-weighted moments follow from
 # Γ(μᶜˡ+b+4)/Γ(μᶜˡ+4) = (μᶜˡ+5)(μᶜˡ+4) for mass and
 # Γ(μᶜˡ+b+1)/Γ(μᶜˡ+1) = (μᶜˡ+2)(μᶜˡ+1) for number.
@@ -63,15 +63,15 @@ table lookups.
     parameters = p3.process_rates
     ρ₀ = parameters.reference_air_density
 
-    qʳ_eff = max(0, qʳ)
+    qʳ₊ = max(0, qʳ)
     ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
     # Same λʳ the process rates use.
-    log_slope = log10(rain_slope_parameter(qʳ_eff, nʳ, parameters))
+    log_slope = log10(rain_slope_parameter(qʳ₊, nʳ, parameters))
 
     mass_weighted_velocity = p3.rain.velocity_mass(log_slope) * ρ_correction
     number_weighted_velocity = p3.rain.velocity_number(log_slope) * ρ_correction
-    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+    active = qʳ₊ >= p3.minimum_mass_mixing_ratio
 
     return RainTerminalVelocities{FT}(ifelse(active, mass_weighted_velocity, zero(FT)),
                                       ifelse(active, number_weighted_velocity, zero(FT)))
@@ -106,27 +106,27 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
     ρ₀ = fs.reference_air_density
 
-    qⁱ_eff = max(0, qⁱ)
-    nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
+    qⁱ₊ = max(0, qⁱ)
+    nⁱ₊ = max(nⁱ, p3.minimum_number_mixing_ratio)
 
     # Mean ice particle mass
-    m̄ = qⁱ_eff / nⁱ_eff
+    m̄ = qⁱ₊ / nⁱ₊
 
     ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
-    # m9: no velocity clamping is applied; the table bounds are sufficient.
+    # No velocity clamping is applied; the table bounds are sufficient.
     velocity = tabulated_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ,
                                     ρᶠ, ρ_correction, parameters)
-    active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
+    active = qⁱ₊ >= p3.minimum_mass_mixing_ratio
     return ifelse(active, velocity, zero(FT))
 end
 
 @inline function ice_terminal_velocity_mass_weighted(p3, qⁱ, lookups::P3IceLookups)
     FT = typeof(qⁱ)
-    qⁱ_eff = max(0, qⁱ)
+    qⁱ₊ = max(0, qⁱ)
     velocity = tabulated_fall_speed(p3.ice.fall_speed.mass_weighted, lookups.prep,
                                     lookups.ρ_correction)
-    active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
+    active = qⁱ₊ >= p3.minimum_mass_mixing_ratio
     return ifelse(active, velocity, zero(FT))
 end
 
@@ -139,6 +139,12 @@ end
 # Bracketed variant: reuse the interpolation indices and skip the log/clamp setup.
 @inline tabulated_fall_speed(table::P3Table4D, prep::PreparedInterpolation, ρ_correction) =
     evaluate_at(table, prep) * ρ_correction
+
+# Concrete return struct, so the pair stays one isbits value on the GPU.
+struct IceTerminalVelocities{FT}
+    mass_weighted :: FT
+    number_weighted :: FT
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -164,15 +170,9 @@ speed framework.
 - `Fˡ`: Liquid fraction (optional, for tabulated lookup)
 
 # Returns
-- `NamedTuple` with fields `mass_weighted`, `number_weighted` [m/s]
+- `IceTerminalVelocities` with fields `mass_weighted`, `number_weighted` [m/s]
   (both positive downward)
 """
-# Concrete return struct, so the pair stays one isbits value on the GPU.
-struct IceTerminalVelocities{FT}
-    mass_weighted :: FT
-    number_weighted :: FT
-end
-
 @inline function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     parameters = p3.process_rates
@@ -181,15 +181,15 @@ end
     ρ₀ = fs.reference_air_density
 
     # --- Shared computation (done once instead of twice) ---
-    qⁱ_eff = max(0, qⁱ)
-    nⁱ_eff = max(nⁱ, p3.minimum_number_mixing_ratio)
-    m̄ = qⁱ_eff / nⁱ_eff
+    qⁱ₊ = max(0, qⁱ)
+    nⁱ₊ = max(nⁱ, p3.minimum_number_mixing_ratio)
+    m̄ = qⁱ₊ / nⁱ₊
 
     ρ_correction = ice_air_density_correction(parameters, ρ₀, ρ)
 
     velocities = fused_fall_speeds(fs.mass_weighted, fs.number_weighted,
                                     m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, parameters)
-    active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
+    active = qⁱ₊ >= p3.minimum_mass_mixing_ratio
     return IceTerminalVelocities{FT}(
         ifelse(active, velocities.mass_weighted, zero(FT)),
         ifelse(active, velocities.number_weighted, zero(FT)),

@@ -1,8 +1,14 @@
 abstract type AbstractThermodynamicState{FT} end
 
+# States closed on a reference pressure: they carry a `reference_pressure` field, and their density
+# is diagnosed from it. Code that reads `𝒰.reference_pressure` dispatches on this type, not on
+# `AbstractThermodynamicState` — the density-closed `LiquidIceDensityState` (below) carries ρ
+# instead. See NumericalEarth/Breeze.jl#859.
+abstract type AbstractReferencePressureState{FT} <: AbstractThermodynamicState{FT} end
+
 @inline Base.eltype(::AbstractThermodynamicState{FT}) where FT = FT
 
-@inline function density(𝒰::AbstractThermodynamicState, constants)
+@inline function density(𝒰::AbstractReferencePressureState, constants)
     pᵣ = 𝒰.reference_pressure
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
@@ -18,7 +24,7 @@ States closed on a reference pressure — `LiquidIcePotentialTemperatureState` a
 `StaticEnergyState` — carry it directly. `LiquidIceDensityState` is closed on the
 density instead, so its pressure is diagnosed from the ideal gas law, `p = ρ Rᵐ T`.
 """
-@inline air_pressure(𝒰::AbstractThermodynamicState, constants) = 𝒰.reference_pressure
+@inline air_pressure(𝒰::AbstractReferencePressureState, constants) = 𝒰.reference_pressure
 
 @inline function saturation_specific_humidity(𝒰::AbstractThermodynamicState, constants, equil)
     T = temperature(𝒰, constants)
@@ -30,7 +36,7 @@ end
 ##### Liquid-ice potential temperature state
 #####
 
-struct LiquidIcePotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
+struct LiquidIcePotentialTemperatureState{FT} <: AbstractReferencePressureState{FT}
     potential_temperature :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
     standard_pressure :: FT # pˢᵗ: reference pressure for potential temperature
@@ -71,10 +77,8 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute temperature from potential temperature and pressure.
-
-This is a convenience function that constructs a `LiquidIcePotentialTemperatureState`
-with no condensate and computes temperature using the standard thermodynamic relations.
+Compute temperature from liquid-ice potential temperature and pressure using the
+mixture gas constant and heat capacity.
 
 # Arguments
 - `θ`: Potential temperature [K]
@@ -83,18 +87,19 @@ with no condensate and computes temperature using the standard thermodynamic rel
 
 # Additional Arguments
 - `pˢᵗ`: Standard pressure for potential temperature definition [Pa]
-- `qᵛ`: Specific humidity [kg/kg]
+- `q`: Vapor specific humidity [kg/kg] or `MoistureMassFractions` containing the
+  vapor, total liquid (cloud + rain), and total ice (cloud + snow) mass fractions.
+  Defaults to dry air.
 """
-@inline function temperature_from_potential_temperature(θ, p, pˢᵗ, constants, qᵛ)
-    FT = promote_type(typeof(θ), typeof(p), typeof(qᵛ))
-    θ = convert(FT, θ)
-    p = convert(FT, p)
-    pˢᵗ = convert(FT, pˢᵗ)
-    qᵛ = convert(FT, qᵛ)
-    q = MoistureMassFractions(qᵛ)  # vapor only, no condensate
-    𝒰 = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, p)
+@inline function temperature_from_potential_temperature(θ, p, pˢᵗ, constants, q::MoistureMassFractions)
+    FT = promote_type(typeof(θ), typeof(p), typeof(q.vapor))
+    𝒰 = LiquidIcePotentialTemperatureState(convert(FT, θ), MoistureMassFractions{FT}(q),
+                                           convert(FT, pˢᵗ), convert(FT, p))
     return temperature(𝒰, constants)
 end
+
+@inline temperature_from_potential_temperature(θ, p, pˢᵗ, constants, qᵛ) =
+    temperature_from_potential_temperature(θ, p, pˢᵗ, constants, MoistureMassFractions(qᵛ))
 
 @inline temperature_from_potential_temperature(θ, p, pˢᵗ, constants) =
     temperature_from_potential_temperature(θ, p, pˢᵗ, constants, zero(θ))
@@ -105,10 +110,8 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute potential temperature from temperature and pressure.
-
-This is a convenience function that constructs a `LiquidIcePotentialTemperatureState`
-with no condensate and computes potential temperature using the standard thermodynamic relations.
+Compute liquid-ice potential temperature from temperature and pressure using the
+mixture gas constant and heat capacity.
 
 # Arguments
 - `T`: Temperature [K]
@@ -117,19 +120,21 @@ with no condensate and computes potential temperature using the standard thermod
 
 # Additional Arguments
 - `pˢᵗ`: Standard pressure for potential temperature definition [Pa]
-- `qᵛ`: Specific humidity [kg/kg]
+- `q`: Vapor specific humidity [kg/kg] or `MoistureMassFractions` containing the
+  vapor, total liquid (cloud + rain), and total ice (cloud + snow) mass fractions.
+  Defaults to dry air.
 """
-@inline function potential_temperature_from_temperature(T, p, pˢᵗ, constants, qᵛ)
-    FT = promote_type(typeof(T), typeof(p), typeof(qᵛ))
+@inline function potential_temperature_from_temperature(T, p, pˢᵗ, constants, q::MoistureMassFractions)
+    FT = promote_type(typeof(T), typeof(p), typeof(q.vapor))
     T = convert(FT, T)
-    p = convert(FT, p)
-    pˢᵗ = convert(FT, pˢᵗ)
-    qᵛ = convert(FT, qᵛ)
-    q = MoistureMassFractions(qᵛ)  # vapor only, no condensate
-    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, p)
+    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), MoistureMassFractions{FT}(q),
+                                            convert(FT, pˢᵗ), convert(FT, p))
     𝒰₁ = with_temperature(𝒰₀, T, constants)
     return 𝒰₁.potential_temperature
 end
+
+@inline potential_temperature_from_temperature(T, p, pˢᵗ, constants, qᵛ) =
+    potential_temperature_from_temperature(T, p, pˢᵗ, constants, MoistureMassFractions(qᵛ))
 
 @inline potential_temperature_from_temperature(T, p, pˢᵗ, constants) =
     potential_temperature_from_temperature(T, p, pˢᵗ, constants, zero(T))
@@ -149,13 +154,6 @@ end
     θ = (T - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ) / Π
 
     return LiquidIcePotentialTemperatureState(θ, q, 𝒰.standard_pressure, 𝒰.reference_pressure)
-end
-
-@inline function density(𝒰::LiquidIcePotentialTemperatureState, constants)
-    pᵣ = 𝒰.reference_pressure
-    T = temperature(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    return density(T, pᵣ, q, constants)
 end
 
 #####
@@ -285,7 +283,7 @@ end
 ##### Moist static energy state (for microphysics interfaces)
 #####
 
-struct StaticEnergyState{FT} <: AbstractThermodynamicState{FT}
+struct StaticEnergyState{FT} <: AbstractReferencePressureState{FT}
     static_energy :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
     height :: FT
@@ -306,13 +304,15 @@ end
     g = constants.gravitational_acceleration
     z = 𝒰.height
 
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
     qˡ = q.liquid
     qⁱ = q.ice
 
-    # s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
-    return (s - g * z + ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
+    # With composition-dependent heat capacity, the latent offsets are at T = 0.
+    # This makes phase exchange release ℒ(T), including the heat-capacity correction.
+    # s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ - ℒⁱ₀ * qⁱ
+    return (s - g * z + ℒˡ₀ * qˡ + ℒⁱ₀ * qⁱ) / cᵖᵐ
 end
 
 @inline function with_temperature(𝒰::StaticEnergyState, T, constants)
@@ -320,12 +320,12 @@ end
     cᵖᵐ = mixture_heat_capacity(q, constants)
     g = constants.gravitational_acceleration
     z = 𝒰.height
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
     qˡ = q.liquid
     qⁱ = q.ice
 
-    s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ - ℒⁱ₀ * qⁱ
 
     return StaticEnergyState(s, q, z, 𝒰.reference_pressure)
 end

@@ -14,7 +14,8 @@ using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, ma
                                 compute_closure_tendencies!,
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
-                                implicit_step_scheme
+                                implicit_step_scheme, implicit_sedimentation_step!,
+                                thermodynamic_density_name
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -121,6 +122,7 @@ function ssp_rk3_substep!(model, Δt, α)
 
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
+    thermodynamic_name = thermodynamic_density_name(model.formulation)
 
     for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, kernel_Δt, α)
@@ -131,31 +133,55 @@ function ssp_rk3_substep!(model, Δt, α)
         # scalars with their position in the closure's scalar names (see `closure_scalar_index`).
         skip_vertical_diffusion(model, name) && continue
 
-        field_index = closure_scalar_index(model, name)
-        advection = field_advection_scheme(model.advection, name)
+        # The thermodynamic variable's solve waits for the tracers' solves (see below).
+        name === thermodynamic_name && continue
 
-        # The implicit solve must carry the reference density whenever it runs at all: the
-        # diffusion half is mass-flux weighted for the z-Center prognostics, and adaptive implicit
-        # vertical advection adds a density-weighted advection contribution on top.
-        #
-        # The guard is on the *solver*, not on `needs_implicit_solver(advection)`: that predicate
-        # is false for `advection = nothing` and for ordinary WENO, so keying on it would drop the
-        # density — and hence the mass-flux weighting — for every vertically-implicit closure
-        # without adaptive-implicit advection, the single-column configuration included.
-        if !isnothing(model.timestepper.implicit_solver)
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           α * Δt,
-                           implicit_step_scheme(advection),
-                           implicit_advection_velocities(model.dynamics, model.velocities, name),
-                           implicit_advection_density(model.dynamics, model.formulation, name))
-        end
+        implicit_stage_step!(model, name, u, α * Δt)
     end
+
+    # The tracers' solves have just moved sedimenting condensate implicitly. Move its content
+    # with it, from the state the solves produced, and only then solve the thermodynamic
+    # variable, so the moved content takes the same transport and diffusion as the rest of the
+    # field (see `implicit_sedimentation_step!`).
+    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, α * Δt, model.velocities)
+    implicit_stage_step!(model, thermodynamic_name, prognostic[thermodynamic_name], α * Δt)
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply the vertically-implicit solve of the prognostic `u` named `name` over `Δt`: the
+first-order upwind remainder of adaptive implicit vertical advection and the vertically-implicit
+closure diffusion, in one tridiagonal system. A no-op when the time stepper has no implicit solver.
+"""
+function implicit_stage_step!(model, name, u, Δt)
+    # The implicit solve must carry the reference density whenever it runs at all: the
+    # diffusion half is mass-flux weighted for the z-Center prognostics, and adaptive implicit
+    # vertical advection adds a density-weighted advection contribution on top.
+    #
+    # The guard is on the *solver*, not on `needs_implicit_solver(advection)`: that predicate
+    # is false for `advection = nothing` and for ordinary WENO, so keying on it would drop the
+    # density, and hence the mass-flux weighting, for every vertically-implicit closure
+    # without adaptive-implicit advection, the single-column configuration included.
+    isnothing(model.timestepper.implicit_solver) && return nothing
+
+    field_index = closure_scalar_index(model, name)
+    advection = field_advection_scheme(model.advection, name)
+
+    implicit_step!(u,
+                   model.timestepper.implicit_solver,
+                   model.closure,
+                   model.closure_fields,
+                   field_index,
+                   model.clock,
+                   fields(model),
+                   Δt,
+                   implicit_step_scheme(advection),
+                   implicit_advection_velocities(model.dynamics, model.velocities, name,
+                                                 model.microphysics, model.microphysical_fields),
+                   implicit_advection_density(model.dynamics, model.formulation, name))
 
     return nothing
 end
@@ -201,6 +227,10 @@ u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt \\, G(
 ```
 
 where ``G`` above is the right-hand-side, e.g., ``∂u/∂t = G(u)``.
+
+The tendencies are evaluated at the Butcher abscissae ``c = (0, 1, 1/2)``: ``u^{(2)}``
+approximates the solution at the *midpoint* of the step, so the clock steps back by ``Δt/2``
+after the second stage. This keeps third-order accuracy for a time-dependent right-hand side.
 """
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}, Δt; callbacks=[])
 
@@ -211,6 +241,14 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     α¹ = ts.α¹
     α² = ts.α²
     α³ = ts.α³
+
+    # Stage abscissae: a Shu-Osher stage u^(m) = (1 - α) u^(0) + α (u^(m-1) + Δt G) has
+    # Butcher row sum cₘ = αₘ (cₘ₋₁ + 1), so u^(1) sits at tⁿ + Δt but u^(2) sits at
+    # tⁿ + Δt/2. Evaluating G(u^(2)) at tⁿ + Δt instead breaks the order conditions
+    # (Σbᵢcᵢ = 5/6 ≠ 1/2) and leaves `clock.stage` stuck at 2, so per-stage work keyed on
+    # `(iteration, stage)`, such as the filtered surface state, skips the third stage.
+    c¹ = α¹              # = 1
+    c² = α² * (c¹ + 1)   # = 1/2
 
     # Compute the next time step a priori to reduce floating point error accumulation
     tⁿ⁺¹ = model.clock.time + Δt
@@ -229,7 +267,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     compute_pressure_correction!(model, Δt)
     make_pressure_correction!(model, Δt)
 
-    tick_stage!(model.clock, Δt)
+    tick_stage!(model.clock, c¹ * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
 
     #
@@ -243,7 +281,8 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     compute_pressure_correction!(model, α² * Δt)
     make_pressure_correction!(model, α² * Δt)
 
-    # Don't tick - still at t + Δt for time-dependent forcing
+    # Back to tⁿ + Δt/2, the abscissa of u^(2); `corrected_Δt` below restores the Δt/2.
+    tick_stage!(model.clock, (c² - c¹) * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
 
     #

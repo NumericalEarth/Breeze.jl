@@ -41,6 +41,9 @@ from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 - `microphysics`: Microphysics (default: `nothing`)
 - `topology`: Grid topology tuple (default: `(Periodic, Periodic, Bounded)`).
   Pass `(Periodic, Bounded, Bounded)` for a PBB grid.
+- `grid_type`: `:rectilinear` (default) or `:latitude_longitude`, the same 12 km × 12 km box
+  on a `LatitudeLongitudeGrid` centred at the case's latitude, with `SphericalCoriolis`
+  in place of the f-plane.
 - `simplified`: When `true`, omit the geostrophic body forcing and the
   field-dependent surface-drag boundary conditions (default `false`). These
   currently do not materialize on `ReactantState`, so set this `true` for a
@@ -63,6 +66,7 @@ function convective_boundary_layer(arch = CPU();
                                    closure = nothing,
                                    microphysics = nothing,
                                    topology = (Periodic, Periodic, Bounded),
+                                   grid_type = :rectilinear,
                                    simplified = false,
                                    )
 
@@ -74,14 +78,33 @@ function convective_boundary_layer(arch = CPU();
     Ly = 12kilometers
     Lz = 3kilometers
 
-    grid = RectilinearGrid(arch;
-        size = (Nx, Ny, Nz),
-        x = (0, Lx),
-        y = (0, Ly),
-        z = (0, Lz),
-        halo = (5, 5, 5),
-        topology = topology
-    )
+    latitude = 33.5
+
+    grid = if grid_type == :rectilinear
+        RectilinearGrid(arch;
+            size = (Nx, Ny, Nz),
+            x = (0, Lx),
+            y = (0, Ly),
+            z = (0, Lz),
+            halo = (5, 5, 5),
+            topology = topology
+        )
+    elseif grid_type == :latitude_longitude
+        # The same box in degrees, centred at `latitude`
+        R = Oceananigans.defaults.planet_radius
+        Δφ = rad2deg(Ly / R)
+        Δλ = rad2deg(Lx / (R * cosd(latitude)))
+        LatitudeLongitudeGrid(arch;
+            size = (Nx, Ny, Nz),
+            longitude = (0, Δλ),
+            latitude = (latitude - Δφ / 2, latitude + Δφ / 2),
+            z = (0, Lz),
+            halo = (5, 5, 5),
+            topology = topology
+        )
+    else
+        error("Unknown grid_type: $grid_type. Use :rectilinear or :latitude_longitude.")
+    end
 
     # Reference state
     # Surface pressure: standard atmosphere
@@ -89,30 +112,37 @@ function convective_boundary_layer(arch = CPU();
     p₀ = 101325  # Pa
     θ₀ = 309     # K
 
+    # Background potential temperature profile:
+    #   θ = θ₀ for z ≤ 600 m
+    #   θ = θ₀ + 0.004 * (z - 600) for z > 600 m
+    z_inv = 600.0   # m, inversion height
+    Γ = 0.004       # K/m, lapse rate above inversion
+    θ̄(z) = θ₀ + max(0, z - z_inv) * Γ
+
     constants = ThermodynamicConstants()
 
     # Build dynamics formulation
     if isnothing(dynamics)
         # Default: anelastic dynamics with reference state
         reference_state = ReferenceState(grid, constants;
-            surface_pressure = p₀,
+            base_pressure = p₀,
             potential_temperature = θ₀
         )
-        dynamics = AnelasticDynamics(reference_state)
+        # TODO: drop pressure_solver_float_type once a Float64 solve fits on the benchmark GPU
+        dynamics = AnelasticDynamics(reference_state; pressure_solver_float_type = float_type)
     elseif dynamics isa CompressibleDynamics
-        # CompressibleDynamics is passed in pre-constructed;
-        # set reference_potential_temperature for acoustic substepping if not already set
+        # CompressibleDynamics is passed in pre-constructed. Rebuild it on a hydrostatic
+        # reference state of the background profile, which also supplies the initial density.
         dynamics = CompressibleDynamics(dynamics.time_discretization;
-            surface_pressure = p₀,
-            reference_potential_temperature = θ₀
+            base_pressure = p₀,
+            reference_potential_temperature = θ̄
         )
     end
 
     # Coriolis parameter for latitude 33.5° N
     # f = 2Ω sin(φ) where Ω = 7.2921 × 10⁻⁵ s⁻¹
-    latitude = 33.5
     f = 2 * 7.2921e-5 * sind(latitude)  # ≈ 8.0 × 10⁻⁵ s⁻¹
-    coriolis = FPlane(; f)
+    coriolis = grid isa LatitudeLongitudeGrid ? SphericalCoriolis() : FPlane(; f)
 
     # Geostrophic wind: (Uᵍ, Vᵍ) = (9, 0) m/s
     Uᵍ = 9.0  # m/s
@@ -167,21 +197,30 @@ function convective_boundary_layer(arch = CPU();
         )
     end
 
-    # Set initial conditions
-    # Potential temperature profile:
-    #   θ = θ₀ for z ≤ 600 m
-    #   θ = θ₀ + 0.004 * (z - 600) for z > 600 m
-    # Plus random perturbations ±0.25 K in lowest 400 m
-    z_inv = 600.0   # m, inversion height
-    Γ = 0.004       # K/m, lapse rate above inversion
+    # Set initial conditions: the background profile plus random perturbations ±0.25 K in the
+    # lowest 400 m
     δθ = 0.25       # K, perturbation amplitude
     z_pert = 400.0  # m, depth of perturbations
 
-    θᵢ(x, y, z) = θ₀ + max(0, z - z_inv) * Γ + δθ * (2 * rand() - 1) * (z < z_pert)
+    θᵢ(x, y, z) = θ̄(z) + δθ * (2 * rand() - 1) * (z < z_pert)
     uᵢ(x, y, z) = Uᵍ
     vᵢ(x, y, z) = Vᵍ
 
-    set!(model, θ = θᵢ, u = uᵢ, v = vᵢ)
+    if model.dynamics isa CompressibleDynamics
+        # A compressible model needs its density too; without it every prognostic field starts
+        # at zero. Rescale the hydrostatic reference density by θ̄ / θ so that ρθ, and hence the
+        # pressure, matches the reference state and the perturbations seed no acoustic pulse
+        # (as in examples/splitting_supercell.jl).
+        θ = CenterField(grid)
+        set!(θ, θᵢ)
+        θ̄_field = CenterField(grid)
+        set!(θ̄_field, (x, y, z) -> θ̄(z))
+        ρ = CenterField(grid)
+        set!(ρ, model.dynamics.reference_state.density * θ̄_field / θ)
+        set!(model, θ = θ, u = uᵢ, v = vᵢ, ρ = ρ)
+    else
+        set!(model, θ = θᵢ, u = uᵢ, v = vᵢ)
+    end
 
     return model
 end

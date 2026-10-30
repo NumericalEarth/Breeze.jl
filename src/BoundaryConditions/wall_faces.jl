@@ -42,7 +42,7 @@ wall_normal_direction(::HorizontalWall) = ZDirection()
 @inline wall_value(ℓ, m, grid, ::XNormalWall,    field::AbstractArray, clock) = @inbounds field[1, ℓ, m]
 @inline wall_value(ℓ, m, grid, ::YNormalWall,    field::AbstractArray, clock) = @inbounds field[ℓ, 1, m]
 
-# A function is evaluated at the centre of the wall face with the non-`Flat` coordinates of the
+# A function is evaluated at the center of the wall face with the non-`Flat` coordinates of the
 # wall followed by the time, as Oceananigans evaluates boundary-condition and forcing functions:
 # `f(x, y, t)` on the bottom and top, `f(y, z, t)` on the west and east, `f(x, z, t)` on the
 # south and north, with the coordinate of a `Flat` direction dropped (`node` does that)
@@ -50,22 +50,54 @@ wall_normal_direction(::HorizontalWall) = ZDirection()
 @inline wall_value(ℓ, m, grid, ::XNormalWall,    f::Function, clock) = f(node(1, ℓ, m, grid, nothing, Center(), Center())..., clock.time)
 @inline wall_value(ℓ, m, grid, ::YNormalWall,    f::Function, clock) = f(node(ℓ, 1, m, grid, Center(), nothing, Center())..., clock.time)
 
-# Wall-normal distance from the wall to the near-wall cell centre: the height of the
-# first cell centre for the bottom wall, and half the cell width otherwise
-@inline wall_distance(i, j, k, grid, ::Bottom) = znode(i, j, k, grid, Center(), Center(), Center())
-@inline wall_distance(i, j, k, grid, ::Top) = Δzᶜᶜᶜ(i, j, k, grid) / 2
-@inline wall_distance(i, j, k, grid, ::XNormalWall) = Δxᶜᶜᶜ(i, j, k, grid) / 2
-@inline wall_distance(i, j, k, grid, ::YNormalWall) = Δyᶜᶜᶜ(i, j, k, grid) / 2
+# Wall-normal distance from the wall to the near-wall cell center
+@inline wall_distance(i, j, k, grid, ::HorizontalWall) = Δzᶜᶜᶜ(i, j, k, grid) / 2
+@inline wall_distance(i, j, k, grid, ::XNormalWall)    = Δxᶜᶜᶜ(i, j, k, grid) / 2
+@inline wall_distance(i, j, k, grid, ::YNormalWall)    = Δyᶜᶜᶜ(i, j, k, grid) / 2
 
 # Height of the wall next to the near-wall cell, for the potential energy in the static energy
-@inline wall_height(i, j, k, grid, ::Bottom) = znode(i, j, k,     grid, Center(), Center(), Face())
-@inline wall_height(i, j, k, grid, ::Top) = znode(i, j, k + 1, grid, Center(), Center(), Face())
+@inline wall_height(i, j, k, grid, ::Bottom)       = znode(i, j, k,     grid, Center(), Center(), Face())
+@inline wall_height(i, j, k, grid, ::Top)          = znode(i, j, k + 1, grid, Center(), Center(), Face())
 @inline wall_height(i, j, k, grid, ::VerticalWall) = znode(i, j, k,     grid, Center(), Center(), Center())
 
 # Buoyancy stabilizes or destabilizes a surface layer on a horizontal wall only, and the
 # bulk Richardson number changes sign under the top wall (cold above warm is unstable)
 @inline stability_sign(::Bottom) = 1
 @inline stability_sign(::Top) = -1
+
+#####
+##### Air pressure at the wall
+#####
+##### The wall pressure is diagnosed from the live thermodynamic pressure and density in the
+##### near-wall cell rather than stored, so that it follows both terrain and the evolving state.
+##### On a horizontal wall it is extrapolated half a cell along the local hydrostatic scale
+##### height; on a vertical wall the wall and the cell center sit at the same height, so the
+##### cell-center pressure is used as it is.
+#####
+
+@inline wall_air_pressureᶜᶜᶜ(i, j, k, grid, ::Bottom, fields, constants) =
+    surface_pressure_from_cell_center(i, j, k, grid, fields.p, fields.ρ,
+                                      constants.gravitational_acceleration) # extrapolate downward
+
+@inline wall_air_pressureᶜᶜᶜ(i, j, k, grid, ::Top, fields, constants) =
+    surface_pressure_from_cell_center(i, j, k, grid, fields.p, fields.ρ,
+                                      -constants.gravitational_acceleration) # extrapolate upward
+
+@inline wall_air_pressureᶜᶜᶜ(i, j, k, grid, ::VerticalWall, fields, constants) = @inbounds fields.p[i, j, k]
+
+# A scalar flux is evaluated at the cell center; a momentum flux at the face of the component it
+# acts on, so the pressure that sets ρˢ there is interpolated to that face.
+@inline wall_air_pressure(i, j, k, grid, side, ::Nothing, fields, constants) =
+    wall_air_pressureᶜᶜᶜ(i, j, k, grid, side, fields, constants)
+
+@inline wall_air_pressure(i, j, k, grid, side, ::XDirection, fields, constants) =
+    ℑxᶠᵃᵃ(i, j, k, grid, wall_air_pressureᶜᶜᶜ, side, fields, constants)
+
+@inline wall_air_pressure(i, j, k, grid, side, ::YDirection, fields, constants) =
+    ℑyᵃᶠᵃ(i, j, k, grid, wall_air_pressureᶜᶜᶜ, side, fields, constants)
+
+@inline wall_air_pressure(i, j, k, grid, side, ::ZDirection, fields, constants) =
+    ℑzᵃᵃᶠ(i, j, k, grid, wall_air_pressureᶜᶜᶜ, side, fields, constants)
 
 #####
 ##### Tangential wind at the near-wall cell

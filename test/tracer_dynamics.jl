@@ -21,3 +21,19 @@ using Test
         false
     end
 end
+
+@testset "Tracer halos stay finite where the total density is zero [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000),
+                           halo=(5, 5, 5), topology=(Bounded, Bounded, Bounded))
+    model = AtmosphereModel(grid; tracers=(:a,))
+    set!(model; u = 1)
+    set!(model.tracers.a, 1)
+
+    ρ = Array(parent(Breeze.AtmosphereModels.total_density(model.dynamics)))
+    @test any(iszero, ρ)   # the outer halo a mirror fill cannot reach
+
+    time_step!(model, 1)
+    @test !any(isnan, Array(parent(model.tracers.a)))
+    @test all(isfinite, Array(interior(model.tracers.a)))
+end

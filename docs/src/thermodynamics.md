@@ -270,14 +270,14 @@ using CairoMakie
 
 grid = RectilinearGrid(size=160, z=(0, 12_000), topology=(Flat, Flat, Bounded))
 thermo = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermo, surface_pressure=101325, potential_temperature=288)
+reference_state = ReferenceState(grid, thermo, base_pressure=101325, potential_temperature=288)
 
 pᵣ = reference_state.pressure
 ρᵣ = reference_state.density
 
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
-p₀ = reference_state.surface_pressure
+p₀ = reference_state.base_pressure
 θ₀ = reference_state.potential_temperature
 g = thermo.gravitational_acceleration
 
@@ -771,19 +771,31 @@ which is equation (37) of [Pressel2015](@citet) and the saturated branch of [`eq
 For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE),
 
 ```math
-s ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qˡ - Lⁱᵣ qⁱ .
+s ≡ cᵖᵐ \, T + g z - ℒˡ₀ \, qˡ - ℒⁱ₀ qⁱ ,
 ```
+
+where ``ℒˡ₀`` and ``ℒⁱ₀`` are the latent heats of condensation and deposition extrapolated
+to absolute zero, ``ℒ^β_0 = ℒ^β_r - \Delta c^β T_r``, as derived above.
+Because ``cᵖᵐ T`` measures the sensible enthalpy of every constituent from absolute zero,
+the latent terms are referenced there too. The enthalpy of vapor then exceeds that of
+condensate ``β`` by exactly ``ℒ^β(T)``, so a phase change at fixed ``s`` releases the
+temperature-dependent latent heat: condensing a mass fraction ``δ`` of vapor warms the air
+by ``δ ℒˡ(T) / cᵖᵐ``, with ``cᵖᵐ`` evaluated after the change. Pairing ``cᵖᵐ T`` with
+the reference latent heats ``ℒ^β_r`` instead would misstate that heating by ``\Delta c^β T_r``
+per unit mass changing phase.
 
 !!! note "The alternative 'frozen moist static energy' variable"
 
-    An alternative, physically equivalent, definition of moist static energy used in atmospheric
-    models such as the Global System for Atmospheric Modeling (GSAM) [Khairoutdinov2022](@cite) is
+    An alternative, physically equivalent, definition of moist static energy of the kind used in
+    atmospheric models such as the Global System for Atmospheric Modeling (GSAM) [Khairoutdinov2022](@cite),
+    written here with Breeze's latent heats, is
 
     ```math
-    s̃ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵛ - Lᶠᵣ qⁱ .
+    s̃ ≡ cᵖᵐ \, T + g z + ℒˡ₀ \, qᵛ - ℒᶠ₀ qⁱ ,
     ```
 
-    ``s`` and ``s̃`` are not the same, but they obey the same conservation equation provided
-    that total moisture fraction is conserved, or that ``\mathrm{D}qᵗ / \mathrm{D}t = 0``.
+    where ``ℒᶠ₀ = ℒⁱ₀ - ℒˡ₀`` is the latent heat of fusion extrapolated to absolute zero.
+    ``s`` and ``s̃`` are not the same (``s̃ = s + ℒˡ₀ qᵗ``), but they obey the same conservation
+    equation provided that total moisture fraction is conserved, or that ``\mathrm{D}qᵗ / \mathrm{D}t = 0``.
 
 ## Liquid-ice potential temperature

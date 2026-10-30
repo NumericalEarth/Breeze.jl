@@ -11,12 +11,14 @@
 # at night. This creates a strong diurnal contrast — afternoon thunderstorms
 # that die at sunset and don't return until the next morning.
 #
-# Interactive all-sky RRTMGP radiation computes spectrally-resolved shortwave
-# and longwave fluxes. Saturation-adjustment microphysics diagnoses cloud liquid
-# water that feeds back on the radiation. A stretched vertical grid resolves the
-# cloud layer (100 m spacing below 3 km) while extending to 25 km for a
-# realistic atmospheric column. A stratospheric sponge layer above 8 km prevents
-# spurious temperature drift in the coarse upper cells.
+# Interactive all-sky radiation with the ecCKD gas optics of NumericalRadiation.jl
+# computes spectrally-resolved shortwave and longwave fluxes, with cloud
+# scattering tables mapped onto the same spectral g-points. Saturation-adjustment
+# microphysics diagnoses cloud liquid water that feeds back on the radiation.
+# A stretched vertical grid resolves the cloud layer (100 m spacing below 3 km)
+# while extending to 15 km, and the radiation model continues the column above
+# the grid top through a standard-atmosphere stratosphere to 65 km. A sponge
+# layer above 8 km prevents spurious temperature drift in the coarse upper cells.
 
 using Breeze
 using Oceananigans
@@ -25,8 +27,8 @@ using Dates: DateTime
 using Printf, Random, Statistics
 using CairoMakie
 
-using NCDatasets  # Required for RRTMGP lookup tables
-using RRTMGP
+using NCDatasets  # Required for the ecCKD lookup tables
+using NumericalRadiation: NumericalRadiation
 using CUDA
 
 Random.seed!(2025)
@@ -38,9 +40,9 @@ end
 #
 # We use a 2D vertical slice (x-z) that is periodic in x and bounded in z.
 # The vertical grid is stretched: fine 100 m cells resolve the cloud layer below
-# 3 km, then a smooth transition to 1 km cells carries the column up to 25 km.
-# This gives RRTMGP a realistic atmospheric column (including the stratosphere)
-# while keeping the total cell count modest.
+# 3 km, then a smooth transition to 1 km cells carries the column up to 15 km.
+# The radiation model's [`OverlyingAtmosphereColumn`](@ref) adds the stratosphere above
+# the grid top, so the total cell count stays modest.
 
 Nx = 128
 Lx = 12800   # 12.8 km
@@ -69,7 +71,7 @@ p₀ = 101325  # Surface pressure [Pa]
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
-                                 surface_pressure = p₀,
+                                 base_pressure = p₀,
                                  potential_temperature = θ₀,
                                  vapor_mass_fraction = 0)
 
@@ -77,17 +79,20 @@ dynamics = AnelasticDynamics(reference_state)
 
 # ## Background atmosphere
 #
-# RRTMGP requires trace gas concentrations to compute spectral absorption and
-# emission. We specify well-mixed greenhouse gas concentrations and a tropical
-# ozone profile that transitions from low tropospheric values to a stratospheric
-# peak near 25 km.
+# The ecCKD gas optics require trace gas concentrations to compute spectral
+# absorption and emission. We specify well-mixed greenhouse gas concentrations
+# and a tropical ozone profile that transitions from low tropospheric values to
+# a stratospheric peak near 25 km. The peak lies above the 15 km grid top, but
+# the radiation model evaluates the ozone profile in its overlying atmosphere too,
+# so the stratospheric ozone still absorbs sunlight before it reaches the grid.
 
 @inline function tropical_ozone(z)
-    troposphere_O₃ = 30e-9 * (1 + 0.5 * z / 10_000)
-    zˢᵗ = 25e3
-    Hˢᵗ = 5e3
-    stratosphere_O₃ = 8e-6 * exp(-((z - zˢᵗ) / Hˢᵗ)^2)
-    χˢᵗ = 1 / (1 + exp(-(z - 15e3) / 2))
+    FT = float(typeof(z))   # in the grid's precision, which the radiation kernels evaluate it in
+    troposphere_O₃ = FT(30e-9) * (1 + FT(0.5) * z / 10_000)
+    zˢᵗ = FT(25e3)
+    Hˢᵗ = FT(5e3)
+    stratosphere_O₃ = FT(8e-6) * exp(-((z - zˢᵗ) / Hˢᵗ)^2)
+    χˢᵗ = 1 / (1 + exp(-(z - FT(15e3)) / 2))
     return troposphere_O₃ * (1 - χˢᵗ) + stratosphere_O₃ * χˢᵗ
 end
 
@@ -109,7 +114,7 @@ background_atmosphere = BackgroundAtmosphere(
 # We start at midnight (t = 0), so the surface starts cold (290 K), warms
 # through the morning, peaks at t = 14 h (2 pm local), and cools at night.
 # A `Field` stores the surface temperature and a callback updates it each
-# time step, keeping both the bulk fluxes and RRTMGP in sync.
+# time step, keeping both the bulk fluxes and the radiation in sync.
 
 T̄ₛ = 300   # Mean surface temperature [K]
 ΔTₛ = 20   # Diurnal amplitude [K]
@@ -125,7 +130,9 @@ set!(Tₛ, T̄ₛ - ΔTₛ)  # Start at midnight minimum
 
 latitude = 15 # 15°N
 
-radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
+optics = EcCKDOptics(clouds = CloudScatteringTables())
+
+radiation = RadiativeTransferModel(grid, optics, constants;
                                    surface_temperature = Tₛ,
                                    surface_albedo = 0.20,
                                    surface_emissivity = 0.95,
@@ -164,16 +171,16 @@ microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 # ## Stratospheric sponge
 #
-# The domain extends to 25 km, but the initial stratosphere isn't in radiative
-# equilibrium: ozone absorbs shortwave radiation and the coarse upper cells
-# respond strongly. A Newtonian relaxation of temperature toward the initial
-# profile above 8 km keeps the stratosphere anchored without affecting the
-# tropospheric dynamics. We apply this as an energy forcing on `ρs`, which
+# The domain extends to 15 km, but the initial upper troposphere and lower
+# stratosphere aren't in radiative equilibrium: ozone absorbs shortwave
+# radiation and the coarse upper cells respond strongly. A Newtonian
+# relaxation of temperature toward the initial profile above 8 km keeps the
+# upper cells anchored without affecting the tropospheric dynamics. We apply this as an energy forcing on `ρE`, which
 # Breeze automatically converts to a `ρθ` tendency.
 
 Tᵣ = reference_state.temperature
 ρᵣ = reference_state.density
-cᵖᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass  # J/(kg·K)
+cᵖᵈ = constants.dry_air.heat_capacity  # J/(kg·K)
 τ_sponge = 6hours
 
 @inline function stratospheric_relaxation(i, j, k, grid, clock, model_fields, p)
@@ -186,10 +193,12 @@ cᵖᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass  # J/(k
     return ρ * p.cᵖᵈ * ∂T∂t
 end
 
+# The parameters take the grid's float type, as the kernels compute in it
+FT = eltype(grid)
 sponge = Forcing(stratospheric_relaxation; discrete_form=true,
-                 parameters=(; Tᵣ, ρᵣ, cᵖᵈ, τ=τ_sponge))
+                 parameters=(; Tᵣ, ρᵣ, cᵖᵈ=convert(FT, cᵖᵈ), τ=convert(FT, τ_sponge)))
 
-forcing = (; ρs=sponge)
+forcing = (; ρE=sponge)
 
 # ## Model assembly
 
@@ -200,7 +209,7 @@ weno_order = 5
 momentum_advection = WENO(order=weno_order)
 
 scalar_advection = (ρθ  = WENO(order=weno_order),
-                    ρqᵗ = WENO(order=weno_order, bounds=(0, 1)))
+                    ρqᵉ = WENO(order=weno_order, bounds=(0, 1)))
 
 model = AtmosphereModel(grid; dynamics, microphysics, radiation, forcing,
                         momentum_advection, scalar_advection,
@@ -250,7 +259,7 @@ u, w = model.velocities.u, model.velocities.w
 qˡ = model.microphysical_fields.qˡ
 
 @info "Diurnal Radiative Convection (2D)"
-@info "Grid: $(Nx) × $(Nz) (stretched), domain: $(Lx/1000) km × 25 km"
+@info "Grid: $(Nx) × $(Nz) (stretched), domain: $(Lx/1000) km × 15 km"
 @info "Initial T range: $(minimum(T)) – $(maximum(T)) K"
 @info "Initial qᵗ range: $(minimum(qᵗ)*1000) – $(maximum(qᵗ)*1000) g/kg"
 
@@ -323,13 +332,13 @@ slices_filename = filename * "_slices.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   filename = averages_filename,
                                                   schedule = AveragedTimeInterval(1hour),
-                                                  overwrite_existing = true)
+                                                  overwrite_files = true)
 
 slice_outputs = (; w, qᵛ, T)
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = slices_filename,
                                                 schedule = TimeInterval(10minutes),
-                                                overwrite_existing = true)
+                                                overwrite_files = true)
 
 @info "Starting simulation..."
 run!(simulation)
