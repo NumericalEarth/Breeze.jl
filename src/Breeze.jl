@@ -230,6 +230,7 @@ export
     ImmersedBoundaryGrid, GridFittedBottom, PartialCellBottom, ImmersedBoundaryCondition,
     Distributed, Partition,
     Centered, UpwindBiased, WENO, FluxFormAdvection,
+    CompressibleVectorInvariant, CompressibleWENOVectorInvariant, SplitVerticalAdvection, UnsplitVerticalAdvection,
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
     NormalFlowBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     BoundaryConditionOperation,
