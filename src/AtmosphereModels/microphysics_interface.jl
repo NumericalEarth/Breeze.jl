@@ -1265,6 +1265,16 @@ microphysics_model_update!(microphysics::Nothing, model) = nothing
 """
 $(TYPEDSIGNATURES)
 
+Return `true` if [`microphysics_model_update!`](@ref) for `microphysics` always ends by refreshing the
+model state with `update_state!`, including the tendencies. Time-steppers then skip computing
+tendencies in the `update_state!` that precedes `microphysics_model_update!`, because they would be
+overwritten. Defaults to `false`.
+"""
+microphysics_model_update_refreshes_state(microphysics) = false
+
+"""
+$(TYPEDSIGNATURES)
+
 Validate that `microphysics` is compatible with the model's `thermodynamic_constants`.
 
 Defaults to a no-op. Schemes that require a particular thermodynamic formulation (for

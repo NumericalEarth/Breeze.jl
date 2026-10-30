@@ -86,6 +86,7 @@ Adapt.adapt_structure(to, ::DiffusiveSelfInteraction) = nothing
     LagrangianMicrophysics(FT = Oceananigans.defaults.FloatType;
                            physics = DropletPhysicsParameters(FT),
                            self_interaction = DiffusiveSelfInteraction(),
+                           sorting = nothing,
                            droplets = nothing)
 
 Return Lagrangian microphysics in which every cloud droplet is a Lagrangian particle.
@@ -95,18 +96,22 @@ and the terminal velocity of droplets. `self_interaction` corrects droplet growt
 sink in the cell it samples ([`DiffusiveSelfInteraction`](@ref)), or is `nothing` for no correction.
 `droplets` is a `NamedTuple` of vectors with the initial
 positions `x`, `y`, `z`, wet radii `r`, dry radii `rᵈ`, and hygroscopicities `κ` of the droplets,
-or `nothing` for no droplets. The droplets are allocated on the architecture of the grid
+or `nothing` for no droplets. `sorting` is an algorithm for sorting the droplets by grid cell once per
+time step (`CountingSort()` or `ComparisonSort()` from Oceananigans), which keeps the memory accesses of
+droplets in the same cell together, or `nothing` (the default) to keep the droplets in their initial order.
+The droplets are allocated on the architecture of the grid
 when the model is built, and can be accessed with `model.microphysics.droplets`.
 """
-struct LagrangianMicrophysics{P, S, D}
+struct LagrangianMicrophysics{P, S, O, D}
              physics :: P
     self_interaction :: S
+             sorting :: O
             droplets :: D
 end
 
 LagrangianMicrophysics(FT = Oceananigans.defaults.FloatType; physics = DropletPhysicsParameters(FT),
-                       self_interaction = DiffusiveSelfInteraction(), droplets = nothing) =
-    LagrangianMicrophysics(physics, self_interaction, droplets)
+                       self_interaction = DiffusiveSelfInteraction(), sorting = nothing, droplets = nothing) =
+    LagrangianMicrophysics(physics, self_interaction, sorting, droplets)
 
 Base.summary(::LagrangianMicrophysics) = "LagrangianMicrophysics"
 
@@ -127,7 +132,7 @@ droplet_summary(droplets::NamedTuple) = string(length(droplets.x), " droplets (n
 
 # The droplets are not used inside kernels, where only the physics parameters are needed
 Adapt.adapt_structure(to, μ::LagrangianMicrophysics) =
-    LagrangianMicrophysics(adapt(to, μ.physics), adapt(to, μ.self_interaction), nothing)
+    LagrangianMicrophysics(adapt(to, μ.physics), adapt(to, μ.self_interaction), nothing, nothing)
 
 # Droplets are moved to the architecture of the grid when the model is built
 Architectures.on_architecture(arch, μ::LagrangianMicrophysics) = μ
@@ -147,15 +152,15 @@ function AtmosphereModels.materialize_microphysics(μ::LagrangianMicrophysics, g
 
     components = map(c -> on_architecture(arch, convert(Vector{FT}, c)), components)
     properties = StructArray{Droplet{FT}}(components)
-    droplets = LagrangianParticles(properties)
+    droplets = LagrangianParticles(properties; sorting = μ.sorting)
     droplets = materialize_lagrangian_particles(droplets, timestepper)
 
     self_interaction = materialize_self_interaction(μ.self_interaction, grid, timestepper)
 
-    return LagrangianMicrophysics(μ.physics, self_interaction, droplets)
+    return LagrangianMicrophysics(μ.physics, self_interaction, μ.sorting, droplets)
 end
 
-AtmosphereModels.materialize_microphysics(μ::LagrangianMicrophysics{<:Any, <:Any, <:LagrangianParticles}, grid, timestepper) = μ
+AtmosphereModels.materialize_microphysics(μ::LagrangianMicrophysics{<:Any, <:Any, <:Any, <:LagrangianParticles}, grid, timestepper) = μ
 
 materialize_self_interaction(::Nothing, grid, timestepper) = nothing
 materialize_self_interaction(s::DiffusiveSelfInteraction{<:Number}, grid, timestepper) = s
@@ -422,9 +427,12 @@ validate_formulation(formulation) =
     throw(ArgumentError("LagrangianMicrophysics requires the liquid-ice potential temperature formulation, " *
                         "but the model uses $(summary(formulation))."))
 
+# The update always ends with `update_state!`, so time-steppers need not compute tendencies before it
+AtmosphereModels.microphysics_model_update_refreshes_state(::LagrangianMicrophysics) = true
+
 function AtmosphereModels.microphysics_model_update!(μ::LagrangianMicrophysics, model)
     Δt = model.clock.last_Δt
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return update_state!(model)
     validate_formulation(model.formulation)
 
     grid = model.grid

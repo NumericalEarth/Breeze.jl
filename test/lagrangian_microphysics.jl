@@ -11,7 +11,7 @@ using Test
 # Deterministic quasi-random numbers in [0, 1)
 quasirandom(n, k=1) = mod(n * sqrt(2 + k), 1)
 
-function droplet_box_model(arch, FT; Nd = 200, saturation_ratio = 1.005, frame_vertical_velocity = nothing)
+function droplet_box_model(arch, FT; Nd = 200, saturation_ratio = 1.005, frame_vertical_velocity = nothing, sorting = nothing)
     L = FT(0.02)
     grid = RectilinearGrid(arch, FT; size=(6, 6, 6), x=(0, L), y=(0, L), z=(0, L),
                            topology=(Periodic, Periodic, Periodic))
@@ -20,7 +20,7 @@ function droplet_box_model(arch, FT; Nd = 200, saturation_ratio = 1.005, frame_v
     n = 1:Nd
     droplets = (x = L .* quasirandom.(n, 1), y = L .* quasirandom.(n, 2), z = L .* quasirandom.(n, 3),
                 r = fill(5e-6, Nd), rᵈ = fill(5e-8, Nd), κ = fill(0.6, Nd))
-    microphysics = LagrangianMicrophysics(FT; droplets)
+    microphysics = LagrangianMicrophysics(FT; droplets, sorting)
     model = AtmosphereModel(grid; dynamics, microphysics)
 
     # Vapor mass fraction with vapor pressure pᵛ = saturation_ratio * pᵛ⁺ at p = 90000 Pa
@@ -108,6 +108,16 @@ end
     ΔT_dry = - g * 2 * FT(0.1) / cᵖᵐ
     ΔT_latent = liquid_latent_heat(T₀, constants) * (liquid₁ - liquid₀) / (cᵖᵐ * air_mass)
     @test mean(model.temperature) - T₀ ≈ ΔT_dry + ΔT_latent rtol = FT == Float64 ? 1e-3 : 1e-2
+
+    # Sorting droplets by cell reorders them but does not change their evolution
+    unsorted = droplet_box_model(default_arch, FT)
+    sorted = droplet_box_model(default_arch, FT; sorting = CountingSort())
+    for _ in 1:5
+        time_step!(unsorted, 1e-2)
+        time_step!(sorted, 1e-2)
+    end
+    @test sort(Array(sorted.microphysics.droplets.properties.r)) ≈ sort(Array(unsorted.microphysics.droplets.properties.r))
+    @test Array(interior(sorted.moisture_density)) ≈ Array(interior(unsorted.moisture_density))
 end
 
 @testset "Lattice Green's function of the second-order Laplacian" begin

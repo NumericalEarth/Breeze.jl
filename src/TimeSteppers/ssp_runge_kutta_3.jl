@@ -10,7 +10,8 @@ using Oceananigans.TimeSteppers:
     implicit_step!
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
-                                microphysics_model_update!, field_advection_scheme,
+                                microphysics_model_update!, microphysics_model_update_refreshes_state,
+                                field_advection_scheme,
                                 compute_closure_tendencies!,
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
@@ -309,7 +310,9 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    update_state!(model, callbacks; compute_tendencies = true)
+    # Tendencies are skipped if the microphysics update below recomputes them anyway
+    compute_tendencies = !microphysics_model_update_refreshes_state(model.microphysics)
+    update_state!(model, callbacks; compute_tendencies)
 
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
