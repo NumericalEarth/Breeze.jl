@@ -1,4 +1,5 @@
-using Breeze.Thermodynamics: MoistureMassFractions, dry_air_gas_constant, vapor_gas_constant, absolute_zero_latent_heat
+using Breeze.Thermodynamics: MoistureMassFractions, dry_air_gas_constant, vapor_gas_constant, absolute_zero_latent_heat,
+                             VaporEquivalentExponent
 
 #####
 ##### Dynamics Interface
@@ -225,14 +226,8 @@ keeps its temperature.
     dry_air_increment(Δq) * constants.dry_air.heat_capacity + Δq.vapor * constants.vapor.heat_capacity +
     Δq.liquid * constants.liquid.heat_capacity + Δq.ice * constants.ice.heat_capacity
 
-@inline gas_constant_increment(Δq, constants) =
-    dry_air_increment(Δq) * dry_air_gas_constant(constants) + Δq.vapor * vapor_gas_constant(constants)
-
-@inline latent_heat_increment(Δq, constants) =
-    Δq.liquid * constants.liquid.reference_latent_heat + Δq.ice * constants.ice.reference_latent_heat
-
 # The enthalpy of the mixture per unit mass changes along Δq at fixed temperature by
-# Δcᵖ T − ΔΛ₀, using zero-kelvin latent offsets: the enthalpy of the condensate
+# Δcᵖ T − ΔHᶜ, using zero-kelvin latent offsets: the enthalpy of the condensate
 # relative to what its mass gives way to
 @inline enthalpy_increment(Δq, constants, T) =
     heat_capacity_increment(Δq, constants) * T -

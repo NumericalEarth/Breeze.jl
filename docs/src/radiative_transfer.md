@@ -479,8 +479,9 @@ Despite its historical name, `radiation.flux_divergence` stores ``Q_{\mathscr{I}
 minus the vertical derivative of the signed flux sum, evaluated at cell centers
 from the two bounding cell faces. The static-energy formulation adds this W/m³
 source directly to its energy-density tendency. The liquid-ice potential-temperature
-formulation adds ``Q_{\mathscr{I}} / (cᵖᵐ Π)`` to its potential-temperature-density
-tendency. Omitting the upwelling shortwave would bias either tendency wherever
+formulation adds ``Q_{\mathscr{I}} / (\hat{c}ᵖ \hat{Π})`` to its potential-temperature-density
+tendency, with the vapor-equivalent heat capacity ``\hat{c}ᵖ`` and Exner function ``\hat{Π}``
+(see [Liquid-ice potential temperature](@ref liquid-ice-potential-temperature)). Omitting the upwelling shortwave would bias either tendency wherever
 shortwave radiation scatters or reflects.
 
 ## Architecture Support

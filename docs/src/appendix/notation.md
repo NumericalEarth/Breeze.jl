@@ -59,7 +59,6 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρᵡ``                              | `ρᵡ`   | `thermodynamic_density(formulation)` | Thermodynamic density: the generic continuity-density-weighted prognostic thermodynamic variable, ``ρᵡ = ρᵈ χ`` — concretely ``ρθ`` for the potential-temperature formulation or ``ρs`` for static energy. The intensive variable is recovered as ``χ = ρᵡ / ρᵈ`` |
 | ``T``                               | `T`    | `AM.temperature`                    | Temperature                                                                    |
 | ``T⁺``                              | `T⁺`   | `DewpointTemperature(model)`        | Dewpoint temperature                                                           |
-| ``Tᵛ``                              | `Tᵛ`   | `HydrostaticSounding.virtual_temperature` | Virtual temperature, ``Tᵛ = Rᵐ T / Rᵈ``: the temperature at which dry air has the moist air's density at the same pressure (condensate counted as loading) |
 | ``p``                               | `p`    | `AM.pressure`                       | Pressure                                                                       |
 | ``b``                               | `b`    |                                     | Buoyancy                                                                       |
 | ``q^{ve}``                           | `qᵛᵉ`  |                                     | Scheme-dependent specific moisture: vapor (non-equilibrium) or equilibrium moisture (saturation adjustment) |
@@ -136,10 +135,14 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\rho^L``                          | `ρᴸ`   | `TC.liquid.density`                 | Intrinsic density of liquid water                                                        |
 | ``\rho^I``                          | `ρᴵ`   | `TC.ice.density`                    | Intrinsic density of ice                                                                 |
 | ``cᵖᵐ``                             | `cᵖᵐ`  | `mixture_heat_capacity(q, constants)` | Mixture heat capacity at constant pressure                                   |
+| ``\hat{c}ᵖ``                        | `ĉᵖ`   | `vapor_equivalent_heat_capacity(q, constants)` | Vapor-equivalent heat capacity, ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ``: the heat capacity if all water were vapor; unchanged by phase change |
+| ``\hat{R}``                         | `R̂`    | `vapor_equivalent_gas_constant(q, constants)` | Vapor-equivalent gas constant, ``R̂ = qᵈ Rᵈ + qᵗ Rᵛ``; equals ``Rᵐ`` in unsaturated air |
+| ``\hat{κ}``                         | `κ̂`    | `exner_exponent(VaporEquivalentExponent(), q, constants)` | Vapor-equivalent Exner exponent, ``κ̂ = R̂ / ĉᵖ`` (the default exponent of ``θˡⁱ``); ``κᵈ = Rᵈ / cᵖᵈ`` is the `DryExponent`. In code, `κ̂` also names the exponent choice (`VaporEquivalentExponent()` or `DryExponent()`) passed to functions. Distinct from the von Kármán constant ``κ`` |
 | ``Tᵣ``                              | `Tᵣ`   | `TC.energy_reference_temperature`   | Reference temperature for internal energy relations and latent heat            |
 | ``\mathcal{L}^l_r``                 | `ℒˡᵣ`  | `TC.liquid.reference_latent_heat`   | Latent heat of condensation at the energy reference temperature                |
 | ``\mathcal{L}^i_r``                 | `ℒⁱᵣ`  | `TC.ice.reference_latent_heat`      | Latent heat of deposition at the energy reference temperature                  |
 | ``ℒˡ₀, ℒⁱ₀``                       | `ℒˡ₀`, `ℒⁱ₀` | `absolute_zero_latent_heat(TC, phase)` | Latent-heat intercepts at zero kelvin, used with absolute-temperature sensible energy |
+| ``H^c``                             | `Hᶜ`   | `condensate_latent_energy(q, TC)`   | Latent energy of the condensate, ``Hᶜ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ``, so that ``H = cᵖᵐ T - Hᶜ`` |
 | ``\mathcal{L}^l(T)``                | `ℒˡ`   | `liquid_latent_heat(T, constants)`  | Temperature-dependent latent heat of condensation                              |
 | ``\mathcal{L}^i(T)``                | `ℒⁱ`   | `ice_latent_heat(T, constants)`     | Temperature-dependent latent heat of deposition                                |
 | ``\mathcal{L}^{fr}(T)``              | `ℒᶠʳ`  | `fusion_latent_heat(constants, T)`  | Temperature-dependent latent heat of fusion (freezing), ``ℒᶠʳ = ℒⁱ - ℒˡ``; the superscript `fr` abbreviates freezing, since `f` labels rime (`qᶠ`, `bᶠ`) |
@@ -150,10 +153,12 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρᵣ``                              | `ρᵣ`   | `RS.density`                        | Density of a dry reference state for the anelastic formulation                 |
 | ``αᵣ``                              | `αᵣ`   |                                     | Specific volume of a dry reference state, ``αᵣ = Rᵈ θ₀ / pᵣ``                  |
 | ``pᵣ``                              | `pᵣ`   | `RS.pressure`                       | Pressure of a dry adiabatic reference pressure for the anelastic formulation   |
-| ``\Pi``                             | `Π`    |                                     | Exner function, ``Π = (pᵣ / pˢᵗ)^{Rᵐ / cᵖᵐ}``                                  |
+| ``\Pi``                             | `Π`    | `exner_function(𝒰, constants)`      | Exner function of the liquid-ice potential temperature, ``Π = (p / pˢᵗ)^κ``, with ``κ = κ̂`` (`VaporEquivalentExponent`, default) or ``κᵈ`` (`DryExponent`); ``p = pᵣ`` on the anelastic core |
+| ``\hat{Π}``                         | `Π̂`    |                                     | Vapor-equivalent Exner function, ``Π̂ = (p / pˢᵗ)^{κ̂}`` |
 | ``θᵛ``                              | `θᵛ`   |                                     | Virtual potential temperature                                                  |
 | ``θᵉ``                              | `θᵉ`   |                                     | Equivalent potential temperature                                               |
-| ``θˡⁱ``                             | `θˡⁱ`  |                                     | Liquid-ice potential temperature                                               |
+| ``θˡⁱ``                             | `θˡⁱ`  | `LiquidIcePotentialTemperature(model)` | Liquid-ice potential temperature, ``θˡⁱ = H / (ĉᵖ Π)``; ``θˡⁱ = T / Π`` in unsaturated air |
+| ``H``                               | `H`    |                                     | Liquid-ice enthalpy, ``H = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ = ĉᵖ Π θˡⁱ``; invariant under phase change at fixed ``p`` and ``qᵗ`` |
 | ``θᵇ``                              | `θᵇ`   |                                     | Stability-equivalent potential temperature (for moist Brunt-Väisälä)           |
 | ``θ``                               | `θ`    |                                     | Shorthand for liquid-ice potential temperature (used in `set!`) |
 | ``\Delta t``                        | `Δt`   | `Simulation.Δt`                     | Time step.                                                                     |
@@ -165,7 +170,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{Q}^T``                   | `𝒬ᵀ`   |                                     | Surface sensible heat flux, ``\mathcal{Q}^T = cᵖᵐ Jᵀ``                         |
 | ``\mathcal{Q}^v``                   | `𝒬ᵛ`   |                                     | Surface latent heat flux, ``\mathcal{Q}^v = \mathcal{L}^l Jᵛ``                 |
 | ``Jᵀ``                              | `Jᵀ`   |                                     | Surface temperature flux, kg K/m²s                                             |
-| ``Jᶿ``                              | `Jᶿ`   |                                     | Surface potential-temperature flux, ``Jᶿ = Jᵀ / Π``, kg K/m²s                  |
+| ``Jᶿ``                              | `Jᶿ`   |                                     | Surface potential-temperature flux, ``Jᶿ = 𝒬ᵀ / (ĉᵖ Π)``, kg K/m²s            |
 | ``Jᵛ``                              | `Jᵛ`   |                                     | Surface moisture flux, kg/m²s                                                  |
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
@@ -191,8 +196,6 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before capping at the surface length |
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
 | ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |
-| ``ℂᵂu★, ℂᵂʷ`` | `ℂᵂu★`, `ℂᵂʷ` | | Friction-velocity and convective-velocity surface TKE flux coefficients |
-| ``u★³, wΔ³`` | `u★³`, `wΔ³` | | Cubed surface friction velocity and ``Δz₁ max(Jᵇ,0)``, respectively |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
 | ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
 | ``h^{bl}``                          | `hᵇˡ`  |                                     | Boundary-layer depth, m; a diagnostic (the height of the capping inversion in convective conditions) |

@@ -312,9 +312,7 @@ Construct a [`TKEBasedTurbulenceClosure`](@ref) with the given time discretizati
 `VerticallyImplicitTimeDiscretization()`), float type, mixing length, stability functions, static
 stability and numerical parameters. The defaults are calibrated to the Shen et al. (2022) LES library:
 rational stability functions, wall coefficient 0.7877315198717979 and interior slope
-1.777871783491512. Reproducing that calibration also requires an explicitly supplied surface TKE flux
-boundary condition with the coefficients of [`tke_surface_flux`](@ref); it is not installed
-implicitly by the closure constructor.
+1.777871783491512.
 
 `minimum_shear_squared` (default `1e-10` s⁻²) is the floor ``S²ᵐⁱⁿ > 0`` added to the squared
 shear in the Richardson number of [`RationalStabilityFunction`](@ref),
@@ -368,35 +366,6 @@ end
 
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
     TKEBasedTurbulenceClosure(VerticallyImplicitTimeDiscretization(), FT; kw...)
-
-"""
-$(TYPEDSIGNATURES)
-
-Return the upward surface flux of TKE density, ``ρ (ℂᵂu★ u★³ + ℂᵂʷ wΔ³)``.
-The inputs are lowest-cell-center reference density, the cube of friction velocity, and the convective
-velocity cubed ``wΔ³ = Δz₁ max(Jᵇ, 0)``, with surface buoyancy flux ``Jᵇ`` and
-first-cell thickness ``Δz₁``. Use the LES-prescribed time series when reproducing a
-calibration case. The default coefficients accompany the selected provisional-60 fit
-in [`TKEBasedTurbulenceClosure`](@ref).
-
-The optional coefficients are positional arguments so this helper can be called in kernels.
-This scalar helper does not install a boundary condition. Supply its value through
-a bottom `FluxBoundaryCondition` on `ρe`, with the case's time-dependent inputs.
-
-```jldoctest
-using Breeze
-
-tke_surface_flux(1.0, 0.0, 0.0)
-
-# output
-0.0
-```
-"""
-@inline function tke_surface_flux(ρ, u★³, wΔ³,
-                                  ℂᵂu★ = oftype(float(u★³), 0.01002182909933591),
-                                  ℂᵂʷ = oftype(float(wΔ³), 0.013669219822302736))
-    return ρ * (ℂᵂu★ * u★³ + ℂᵂʷ * wΔ³)
-end
 
 @inline convert_eltype(::Type{FT}, sf::ConstantStabilityFunctions) where FT =
     ConstantStabilityFunctions{FT}(convert(FT, sf.ℂᵘ), convert(FT, sf.ℂᶜ), convert(FT, sf.ℂᵉ), convert(FT, sf.ℂᴰ))

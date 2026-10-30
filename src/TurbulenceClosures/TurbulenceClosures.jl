@@ -7,7 +7,6 @@ export TKEBasedTurbulenceClosure,
        GradientLimitedMixingLength,
        ConstantStabilityFunctions,
        RationalStabilityFunction,
-       tke_surface_flux,
        DryStaticStability,
        MoistStaticStability
 

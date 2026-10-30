@@ -229,7 +229,9 @@ with the condensate and every mass fraction renormalizes. The content of `ρs` i
 change along that increment, ``Δcᵖ T - ΔΛ`` (``(cˣ - cᵖᵈ) T - ℒˣᵣ`` against dry air,
 ``hˣ - (s - g z)`` against the mixture); with ``∂s/∂h = 1`` the sum collapses to the negative divergence of
 a face flux and ``∫ρs`` is conserved. For `ρθ` the content is ``∂θˡⁱ/∂qˣ`` along the same
-composition change (to leading order ``-ℒˣᵣ / (cᵖᵐ Π)``) with ``∂θˡⁱ/∂h = 1 / (cᵖᵐ Π)`` at
+composition change (to leading order ``-ℒˣ(T) / (\hat{c}ᵖ \hat{Π})``; the exact content is derived
+in [Liquid-ice potential temperature](@ref liquid-ice-potential-temperature)) with
+``∂θˡⁱ/∂h = 1 / (\hat{c}ᵖ \hat{Π})`` at
 prescribed pressure (the anelastic core) or the fixed-gas-density response ``β_cv`` on the
 compressible core (`sedimentation_thermal_response`), and must not collapse: that Jacobian
 varies with the Exner function,

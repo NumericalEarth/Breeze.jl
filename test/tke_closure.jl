@@ -136,10 +136,6 @@ column(field) = Array(interior(field, 1, 1, :))
     @test closure.mixing_length.ℂⁱ === FT(1.777871783491512)
     @test closure.mixing_length.ℂˢ * (sf.ℂᵘ⁰^3 / sf.ℂᴰ⁰)^(1/4) ≈ 0.4 rtol=1e-6
     @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.7999974525668859
-    @test tke_surface_flux(FT(1), FT(1), FT(0)) === FT(0.01002182909933591)
-    @test tke_surface_flux(FT(1), FT(0), FT(1)) === FT(0.013669219822302736)
-    @test tke_surface_flux(FT(2), FT(3), FT(4)) ≈ FT(2) * (FT(3) * FT(0.01002182909933591) + FT(4) * FT(0.013669219822302736))
-    @test @inferred(tke_surface_flux(FT(2), FT(3), FT(4), FT(0.5), FT(0.25))) === FT(5)
     @test GradientLimitedMixingLength(2).ℂⁱ == 2
     @test GradientLimitedMixingLength{FT}(2).ℂⁱ === FT(2)
     @test GradientLimitedMixingLength(ℂˢ=2, ℂⁱ=0.5).ℂⁱ === 0.5

@@ -9,6 +9,8 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        MoistureMassFractions, MoistureMixingRatio,
        vapor_gas_constant, dry_air_gas_constant,
        mixture_gas_constant, mixture_heat_capacity,
+       vapor_equivalent_gas_constant, vapor_equivalent_heat_capacity,
+       VaporEquivalentExponent, DryExponent,
        total_mixing_ratio, total_specific_moisture,
        liquid_latent_heat, ice_latent_heat,
        saturation_vapor_pressure, saturation_specific_humidity, supersaturation,
@@ -23,9 +25,7 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
        # Phase equilibrium types
        AbstractPhaseEquilibrium, WarmPhaseEquilibrium, MixedPhaseEquilibrium,
-       equilibrated_surface,
-       # Tabulated hydrostatic columns
-       HydrostaticSounding, sounding_pressure, sounding_virtual_temperature, virtual_temperature
+       equilibrated_surface
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Oceananigans: Oceananigans
@@ -38,7 +38,6 @@ include("clausius_clapeyron.jl")
 include("tetens_formula.jl")
 include("flatau_polynomial.jl")
 include("reference_states.jl")
-include("hydrostatic_soundings.jl")
 include("dynamic_states.jl")
 
 end # module
