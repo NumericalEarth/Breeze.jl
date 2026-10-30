@@ -326,6 +326,12 @@ for arch in arches
                                         x=(0, 100kilometers), z=(0, 10kilometers),
                                         topology=(Periodic, Flat, Bounded))
             @test minimum_horizontal_spacing(flat_grid) == 1000
+
+            # A single column measures the substep count against a multiple of its vertical spacing,
+            # rather than getting one substep per stage
+            column_grid = RectilinearGrid(arch; size=40, halo=5, z=(0, 4kilometers), topology=(Flat, Flat, Bounded))
+            @test minimum_horizontal_spacing(column_grid) == 8 * 100
+            @test compute_acoustic_substeps(column_grid, 5, constants, ν) > 1
         end
         Oceananigans.defaults.FloatType = old_FT
     end

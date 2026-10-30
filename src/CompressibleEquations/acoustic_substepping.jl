@@ -566,14 +566,29 @@ The smallest horizontal spacing of `grid`, in the grid's float type: the length 
 Courant number of [`compute_acoustic_substeps`](@ref) is measured against. A `Flat` direction
 has no spacing and drops out of the minimum. On a GPU this is a reduction over the grid, so the
 substepper evaluates it once when it is built rather than at every stage.
+
+A single column (`Flat` in both horizontal directions) has no horizontal acoustic Courant number,
+and the rule above would give one substep per RK stage. The vertical solve is implicit, but the
+stage-frozen linearization is not accurate at any vertical Courant number: a moist column with the
+total-energy formulation is unstable at rest for vertical acoustic Courant numbers ``c Δτ / Δz`` of
+about 8 and above. A column therefore uses [`column_acoustic_spacing_factor`](@ref) times its smallest
+vertical spacing, which at the default `acoustic_cfl = 0.5` holds the vertical acoustic Courant
+number near 4.
 """
 function minimum_horizontal_spacing(grid)
     FT = eltype(grid)
     TX, TY, _ = topology(grid)
     Δx = TX === Flat ? typemax(FT) : minimum_xspacing(grid)
     Δy = TY === Flat ? typemax(FT) : minimum_yspacing(grid)
-    return min(Δx, Δy)
+    column = TX === Flat && TY === Flat
+    return column ? convert(FT, column_acoustic_spacing_factor * minimum_zspacing(grid)) : min(Δx, Δy)
 end
+
+"""
+The multiple of the smallest vertical spacing that a single column, which has no horizontal spacing,
+measures its adaptive acoustic substep count against (see [`minimum_horizontal_spacing`](@ref)).
+"""
+const column_acoustic_spacing_factor = 8
 
 @inline acoustic_substeps(N::Int, Δx_min, Δt, constants, acoustic_cfl) = N
 @inline acoustic_substeps(::Nothing, Δx_min, Δt, constants, acoustic_cfl) =
