@@ -185,6 +185,7 @@ export
     SubsidenceForcing,
     ConstantPowerBandForcing,
     StochasticBandForcing,
+    AdiabaticBackgroundForcing,
     SpecificForcing,
 
     # Grid utilities

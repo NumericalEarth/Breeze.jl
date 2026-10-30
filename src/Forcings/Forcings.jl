@@ -6,7 +6,8 @@ export
     GeostrophicForcing,
     SpecificForcing,
     ConstantPowerBandForcing,
-    StochasticBandForcing
+    StochasticBandForcing,
+    AdiabaticBackgroundForcing
 
 using DocStringExtensions: TYPEDSIGNATURES
 
@@ -21,6 +22,7 @@ include("geostrophic_forcings.jl")
 include("subsidence_forcing.jl")
 include("specific_forcing.jl")
 include("band_forcings.jl")
+include("adiabatic_background_forcing.jl")
 
 #####
 ##### Extension of materialize_forcing with context argument
