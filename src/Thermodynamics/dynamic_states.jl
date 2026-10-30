@@ -43,6 +43,14 @@ struct LiquidIcePotentialTemperatureState{FT} <: AbstractReferencePressureState{
     reference_pressure :: FT
 end
 
+# Promote mixed float types, for example double-precision potential temperature and moisture on a
+# single-precision grid (see the `thermodynamic_float_type` keyword argument of `AtmosphereModel`)
+@inline function LiquidIcePotentialTemperatureState(θ, q::MoistureMassFractions, pˢᵗ, pᵣ)
+    FT = promote_type(typeof(θ), typeof(q.vapor), typeof(pˢᵗ), typeof(pᵣ))
+    return LiquidIcePotentialTemperatureState{FT}(convert(FT, θ), MoistureMassFractions{FT}(q),
+                                                  convert(FT, pˢᵗ), convert(FT, pᵣ))
+end
+
 @inline is_absolute_zero(𝒰::LiquidIcePotentialTemperatureState) = 𝒰.potential_temperature == 0
 
 @inline function exner_function(𝒰::LiquidIcePotentialTemperatureState, constants::ThermodynamicConstants)
