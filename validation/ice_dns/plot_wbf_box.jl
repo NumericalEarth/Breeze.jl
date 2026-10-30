@@ -77,7 +77,7 @@ function size_distribution_figure(label, title, t_final)
     axislegend(ax1; position=:rt)
 
     ax2 = Axis(fig[1, 2]; xlabel="r² - r₀² (μm²), DNS", ylabel="count",
-               title=@sprintf("growth spread: σ/mean = %.3f (DNS), %.3f (parcel)",
+               title=@sprintf("growth spread of r²: σ/mean = %.2e (DNS), %.2e (parcel)",
                               std((rⁱ.^2 .- rⁱ₀.^2)[alive]) / abs(mean((rⁱ.^2 .- rⁱ₀.^2)[alive])),
                               std((rⁱᵖ.^2 .- rⁱ₀.^2)[aliveᵖ]) / abs(mean((rⁱᵖ.^2 .- rⁱ₀.^2)[aliveᵖ]))))
     hist!(ax2, 1e12 .* (rⁱ.^2 .- rⁱ₀.^2)[alive]; bins=50, color=(dns_color, 0.6), label="DNS")
@@ -96,10 +96,12 @@ function slice_figure(label, times; L = 0.064)
     for (n, t) in enumerate(times)
         for (row, name, symbol, colormap) in ((1, "S", "𝒮", :balance), (2, "Si", "𝒮ⁱ", :balance))
             field = 100 .* snapshot(label, t, name)
-            limit = row == 1 ? max(0.05, maximum(abs, field)) : maximum(abs, field)
+            # Deviations from the slice mean, which differs between 𝒮 and 𝒮ⁱ by ≈ 16%
+            center = mean(field)
+            limit = max(0.01, maximum(abs, field .- center))
             ax = Axis(fig[row, n]; aspect=1, xlabel="x (cm)", ylabel="z (cm)",
-                      title=@sprintf("%s (%%), t = %.1f s", symbol, t))
-            hm = heatmap!(ax, x, x, field; colormap, colorrange=(-limit, limit))
+                      title=@sprintf("%s - %.2f%% (%%), t = %.2f s", symbol, center, t))
+            hm = heatmap!(ax, x, x, field .- center; colormap, colorrange=(-limit, limit))
             d = snapshot(label, t, "droplet_slab")
             if !isempty(d)
                 live = d[:, 3] .> 1e-6
