@@ -475,6 +475,10 @@ volume. It defaults to all prognostic fields; schemes with prognostic number con
 condensate_field_names(microphysics) = prognostic_field_names(microphysics)
 condensate_field_names(::Nothing) = tuple()
 
+# Precipitating water is part of the thermodynamic moisture bundle, but does not
+# equilibrate as cloud condensate during a saturated parcel displacement.
+@inline precipitating_mass_fraction(i, j, k, microphysics, microphysical_fields) = 0
+
 
 """
 $(TYPEDSIGNATURES)
@@ -1008,7 +1012,7 @@ end
 #####
 #
 # The thermodynamic variables carry a condensate part — the deficit −(ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / (cᵖᵐ Π)
-# of θˡⁱ, the content qˡ (cˡ T − ℒˡᵣ) + qⁱ (cⁱ T − ℒⁱᵣ) of s — and when condensate falls, that
+# of θˡⁱ, the content qˡ (cˡ T − ℒˡ₀) + qⁱ (cⁱ T − ℒⁱ₀) of s — and when condensate falls, that
 # part must fall with it. Rain-out then leaves the latent warming from forming the rain aloft
 # and pre-cools the layer that later evaporates it, the mechanism that drives cold pools.
 #

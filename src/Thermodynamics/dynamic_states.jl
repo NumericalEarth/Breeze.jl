@@ -304,13 +304,15 @@ end
     g = constants.gravitational_acceleration
     z = 𝒰.height
 
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
     qˡ = q.liquid
     qⁱ = q.ice
 
-    # s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
-    return (s - g * z + ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
+    # With composition-dependent heat capacity, the latent offsets are at T = 0.
+    # This makes phase exchange release ℒ(T), including the heat-capacity correction.
+    # s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ - ℒⁱ₀ * qⁱ
+    return (s - g * z + ℒˡ₀ * qˡ + ℒⁱ₀ * qⁱ) / cᵖᵐ
 end
 
 @inline function with_temperature(𝒰::StaticEnergyState, T, constants)
@@ -318,12 +320,12 @@ end
     cᵖᵐ = mixture_heat_capacity(q, constants)
     g = constants.gravitational_acceleration
     z = 𝒰.height
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
     qˡ = q.liquid
     qⁱ = q.ice
 
-    s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ - ℒⁱ₀ * qⁱ
 
     return StaticEnergyState(s, q, z, 𝒰.reference_pressure)
 end

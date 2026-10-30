@@ -119,6 +119,7 @@ function one_moment_parameters(τ_relax)
         parameters.precip,
         parameters.air_properties,
         parameters.terminal_velocity,
+        parameters.max_latent_heating_rate,
     )
 end
 

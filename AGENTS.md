@@ -77,26 +77,43 @@ and interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 
 ```
 src/
-├── Breeze.jl                  # Main module, exports
-├── Thermodynamics/            # Thermodynamic states & equations
-├── AtmosphereModels/          # Core atmosphere model logic
-├── Microphysics/              # Cloud microphysics
-├── TurbulenceClosures/        # Including those ported from Oceananigans
-├── Advection.jl               # Advection operators for anelastic models
-├── CompressibleEquations/     # Compressible dynamics
-├── AnelasticEquations/        # Anelastic dynamics
-├── ParcelModels/              # Parcel model dynamics
-└── MoistAirBuoyancies.jl      # Legacy buoyancy for Oceananigans.NonhydrostaticModel
+├── Breeze.jl                         # Main module, exports
+├── Thermodynamics/                   # Thermodynamic constants, states, reference states
+├── AtmosphereModels/                 # Core atmosphere model logic and diagnostics
+├── StaticEnergyFormulations/         # Static energy thermodynamic formulation (prognostic ρs)
+├── PotentialTemperatureFormulations/ # Liquid-ice potential temperature formulation (prognostic ρθ)
+├── AnelasticEquations/               # Anelastic dynamics
+├── CompressibleEquations/            # Fully compressible dynamics, acoustic substepping
+├── KinematicDriver/                  # Prescribed (kinematic) dynamics
+├── TerrainFollowingDiscretization/   # Terrain-following vertical coordinates
+├── TimeSteppers/                     # Time stepping schemes for AtmosphereModel
+├── Microphysics/                     # Cloud microphysics
+├── TurbulenceClosures/               # Including those ported from Oceananigans
+├── BoundaryConditions/               # Bulk surface fluxes, drag, energy-flux BCs
+├── Forcings/                         # Forcing types (subsidence, geostrophic, ...)
+├── CelestialMechanics/               # Solar zenith angle and solar geometry
+├── ParcelModels/                     # Parcel model dynamics
+├── Advection.jl                      # Advection operators for anelastic models
+├── Solvers.jl                        # Scalar nonlinear solvers (temperature inversion, saturation adjustment)
+├── VerticalGrids.jl                  # Stretched vertical discretizations
+├── single_column_mode.jl             # Single-column and column-forest mode
+├── Utils.jl                          # Small shared helpers
+└── MoistAirBuoyancies.jl             # Legacy buoyancy for Oceananigans.NonhydrostaticModel
 ```
 
 ## Breeze Formulations
 
-Breeze uses "formulations" for different equation sets. Currently `AnelasticDynamics` in conservation
-form (all prognostics are densities) with two thermodynamic formulations:
-  - `LiquidIcePotentialTemperatureThermodynamics` — prognostic `ρθ`
-  - `StaticEnergyThermodynamics` — prognostic `ρs`
+Breeze separates the dynamics from the thermodynamic formulation. All prognostics are densities
+(conservation form). Dynamics (`dynamics` keyword of `AtmosphereModel`):
+  - `AnelasticDynamics` — anelastic equations
+  - `CompressibleDynamics` — fully compressible equations with acoustic substepping
+  - `PrescribedDynamics` — kinematic driver with prescribed density
 
-Planned: fully compressible formulation, `EntropyThermodynamics` (prognostic `ρη`).
+Thermodynamic formulations (`formulation` keyword):
+  - `LiquidIcePotentialTemperatureFormulation` (`:LiquidIcePotentialTemperature`, default) — prognostic `ρθ`
+  - `StaticEnergyFormulation` (`:StaticEnergy`) — prognostic `ρs`
+
+Planned: an entropy formulation (prognostic `ρη`).
 
 Energy and water inputs are keyed agnostically, so a setup does not name a variable whose
 spelling depends on the formulation or the microphysics:
