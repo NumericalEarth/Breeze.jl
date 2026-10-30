@@ -152,12 +152,13 @@ end
 ##### Schemes
 #####
 
-centered() = CompressibleVectorInvariant()
-unsplit() = CompressibleVectorInvariant(vertical_formulation = UnsplitVerticalAdvection())
-weno_vorticity() = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9))
-averaged_weno_vorticity() = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9), vorticity_pairing = AveragedVorticityPairing())
-corner_weno_vorticity() = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9), vorticity_pairing = CornerVorticityPairing())
-averaged_centered_vorticity() = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 2), vorticity_pairing = AveragedVorticityPairing())
+# `core` is the order of the centered core; the two-point core (2) is exact next to closed walls too
+centered(core = 2) = CompressibleVectorInvariant(core_order = core)
+unsplit(core = 2) = CompressibleVectorInvariant(vertical_formulation = UnsplitVerticalAdvection(), core_order = core)
+weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9), core_order = core)
+averaged_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 7), vorticity_pairing = AveragedVorticityPairing(), core_order = core)
+corner_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 7), vorticity_pairing = CornerVorticityPairing(), core_order = core)
+averaged_centered_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 2), vorticity_pairing = AveragedVorticityPairing(), core_order = core)
 weno_divergence() = CompressibleVectorInvariant(divergence_scheme = WENO(order = 5))
 weno_kinetic_energy() = CompressibleVectorInvariant(kinetic_energy_gradient_scheme = WENO(order = 5))
 weno_vertical() = CompressibleVectorInvariant(vertical_advection_scheme = WENO(order = 5))
@@ -173,6 +174,8 @@ flux_form() = Centered(order = 2)
             scheme = CompressibleVectorInvariant()
             @test scheme.vorticity_scheme isa EnergyConserving
             @test scheme.vertical_formulation isa SplitVerticalAdvection
+            @test scheme.core_scheme isa Centered{2}
+            @test CompressibleVectorInvariant(core_order = 2).core_scheme isa Centered{1}
             @test halo_size(rectilinear_grid(CPU(), FT, (8, 8, 8))) == (6, 6, 4)
 
             weno = CompressibleWENOVectorInvariant()
@@ -182,6 +185,8 @@ flux_form() = Centered(order = 2)
             @test weno.centered_vorticity_scheme isa Centered{5}
             @test isnothing(scheme.centered_vorticity_scheme)
             @test Oceananigans.Grids.required_halo_size_x(weno) == 6
+            @test Oceananigans.Grids.required_halo_size_x(averaged_weno_vorticity(4)) == 6  # WENO(7) with the fourth-order core
+            @test Oceananigans.Grids.required_halo_size_x(CompressibleWENOVectorInvariant(vorticity_pairing = AveragedVorticityPairing())) == 7
             @test Oceananigans.Grids.required_halo_size_z(weno) == 4
 
             weno5 = CompressibleWENOVectorInvariant(order = 5)
@@ -201,8 +206,11 @@ flux_form() = Centered(order = 2)
 
                 # Exact (to roundoff) for the centered schemes in both vertical formulations, and for an
                 # upwind-biased vorticity, whose symmetric pairings do no work for any reconstruction.
-                for scheme in (centered(), unsplit(), weno_vorticity(), corner_weno_vorticity(), averaged_weno_vorticity(), averaged_centered_vorticity())
-                    @test abs(kinetic_energy_production(model, scheme)) < roundoff
+                # The fourth-order core relies on the transposition of its interpolations, which the
+                # reduced-order stencils next to closed walls break, so it is exact on the periodic grid only.
+                cores = name == "rectilinear" ? (2, 4) : (2,)
+                for core in cores, build in (centered, unsplit, weno_vorticity, corner_weno_vorticity, averaged_weno_vorticity, averaged_centered_vorticity)
+                    @test abs(kinetic_energy_production(model, build(core))) < roundoff
                 end
 
                 # The flux form conserves the same energy only on a uniform grid; here the vertical
@@ -240,9 +248,9 @@ flux_form() = Centered(order = 2)
             grid = rectilinear_grid(default_arch, FT, (16, 12, 6))
             model = compressible_model(grid, centered())
             set_random_state!(model)
-            for pairing in (UpwindVorticityPairing(), CornerVorticityPairing())
-                corner = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 4), vorticity_pairing = pairing)
-                @test relative_difference(model, corner, centered()) < roundoff
+            for pairing in (UpwindVorticityPairing(), CornerVorticityPairing()), core in (2, 4)
+                corner = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 4), vorticity_pairing = pairing, core_order = core)
+                @test relative_difference(model, corner, centered(core)) < roundoff
             end
             @test relative_difference(model, averaged_centered_vorticity(), centered()) > 1e-3
         end
@@ -302,7 +310,7 @@ flux_form() = Centered(order = 2)
                  ("LatitudeLongitudeGrid", latitude_longitude_grid(default_arch, FT, (24, 12, 6))))
 
             spherical = grid isa LatitudeLongitudeGrid
-            for scheme in (centered(), unsplit(), CompressibleWENOVectorInvariant())
+            for scheme in (centered(), centered(4), unsplit(), CompressibleWENOVectorInvariant())
                 coriolis = spherical ? SphericalCoriolis() : FPlane(f = 1e-4)
                 model = compressible_model(grid, scheme; coriolis, time_discretization = SplitExplicitTimeDiscretization())
                 set!(model; θ = 300, ρ = model.dynamics.reference_state.density)
