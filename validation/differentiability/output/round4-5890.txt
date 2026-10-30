@@ -1,0 +1,35 @@
+######## build compressible_ppb
+[   1.0 s, maxrss 2.2 GB] grid
+[   1.4 s, maxrss 2.3 GB] dynamics CompressibleDynamics{ExplicitTimeStepping}
+[ 111.6 s, maxrss 2.7 GB] model built
+[watch] done: wall 129 s, peak RSS 2681 MB
+######## build boussinesq_ppb
+[   1.0 s, maxrss 2.2 GB] grid
+[  78.5 s, maxrss 2.7 GB] dynamics BoussinesqDynamics(pᵣ=85000.0, Tᵣ=282.0, ρᵣ=1.05023)
+WATCHDOG: killed at 204 s, RSS 31723 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 15: 331734 Killed                  "$@"
+[watch] done: wall 206 s, peak RSS 31723 MB
+######## build boussinesq_ppp
+[   0.9 s, maxrss 2.2 GB] grid
+[  76.7 s, maxrss 2.7 GB] dynamics BoussinesqDynamics(pᵣ=85000.0, Tᵣ=282.0, ρᵣ=1.05023)
+WATCHDOG: killed at 171 s, RSS 30937 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 15: 333167 Killed                  "$@"
+[watch] done: wall 173 s, peak RSS 30937 MB
+######## build anelastic_ppp
+[   0.9 s, maxrss 2.2 GB] grid
+ERROR: LoadError: ArgumentError: `surface_pressure` was renamed to `base_pressure`: the reference pressure at z = 0, which is the datum the hydrostatic profiles are anchored to. `surface_pressure` now names the reference pressure at a column's bottom face — the ground — which is derived rather than prescribed, so passing 85000.0 here would not mean what it used to.
+Stacktrace:
+ [1] reject_renamed_surface_pressure(surface_pressure::Float64)
+   @ Breeze.Thermodynamics ~/Breeze-droplet-tasks/src/Thermodynamics/reference_states.jl:274
+ [2] ReferenceState(grid::RectilinearGrid{Float64, Periodic, Periodic, Periodic, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, Float64, Float64},
+   @ Breeze.Thermodynamics ~/Breeze-droplet-tasks/src/Thermodynamics/reference_states.jl:748
+ [3] top-level scope
+   @ ~/Breeze-droplet-tasks/validation/differentiability/build_bisect.jl:21
+ [4] include(mod::Module, _path::String)
+   @ Base ./Base.jl:306
+ [5] exec_options(opts::Base.JLOptions)
+   @ Base ./client.jl:317
+ [6] _start()
+   @ Base ./client.jl:550
+in expression starting at /home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/build_bisect.jl:18
+[watch] done: wall 20 s, peak RSS 2311 MB

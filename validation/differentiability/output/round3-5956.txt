@@ -1,0 +1,74 @@
+######## droplets build Nd=100 FIXED=0
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+built model (Nd = 100) in 172.5 s
+[watch] done: wall 208 s, peak RSS 3325 MB
+######## droplets condense Nd=100 FIXED=0
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+built model (Nd = 100) in 170.3 s
+LagrangianMicrophysics
+tracing condense!
+FAILED condense: This function is not intended for use on the CPU
+  _launch! at kernel_launching.jl:348 [inlined]
+  #launch!#11 at kernel_launching.jl:331 [inlined]
+  launch! at kernel_launching.jl:331 [inlined]
+  condense! at droplets_reactant.jl:58
+  hlo_stats(::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{
+  run_level(::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{
+  kwcall(::@NamedTuple{raise::Bool}, ::typeof(run_level), ::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, Of
+  top-level scope at droplets_reactant.jl:133
+[watch] done: wall 209 s, peak RSS 3335 MB
+######## droplets update Nd=100 FIXED=0
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+built model (Nd = 100) in 173.0 s
+LagrangianMicrophysics
+tracing update!
+FAILED update: TypeError: non-boolean (Reactant.TracedRNumber{Bool}) used in boolean context
+  microphysics_model_update! at lagrangian_microphysics.jl:435
+  update! at droplets_reactant.jl:66
+  hlo_stats(::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{
+  run_level(::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{
+  kwcall(::@NamedTuple{raise::Bool}, ::typeof(run_level), ::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, Of
+  top-level scope at droplets_reactant.jl:135
+[watch] done: wall 213 s, peak RSS 3352 MB
+######## droplets advect Nd=100 FIXED=0
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+built model (Nd = 100) in 170.6 s
+LagrangianMicrophysics
+tracing advect!
+FAILED advect: This function is not intended for use on the CPU
+  _launch! at kernel_launching.jl:348 [inlined]
+  #launch!#11 at kernel_launching.jl:331 [inlined]
+  launch! at kernel_launching.jl:331 [inlined]
+  advect_lagrangian_particles! at lagrangian_particle_advection.jl:225
+  advect! at droplets_reactant.jl:71
+  hlo_stats(::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{
+  run_level(::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{
+  kwcall(::@NamedTuple{raise::Bool}, ::typeof(run_level), ::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, Of
+  top-level scope at droplets_reactant.jl:137
+[watch] done: wall 210 s, peak RSS 3357 MB
+######## droplets step Nd=100 FIXED=0
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+built model (Nd = 100) in 170.8 s
+LagrangianMicrophysics
+tracing time_step!
+FAILED step: MethodError: no method matching resize!(::Reactant.TracedRArray{Float64, 1}, ::Int64)
+The function `resize!` exists, but no method is defined for this combination of argument types.
+Closest candidates are:
+  resize!(!Matched::Compiler.IncrementalCompact, ::Int64)
+   @ Base ../usr/share/julia/Compiler/src/ssair/ir.jl:1739
+  resize!(!Matched::Compiler.DFSTree, ::Integer)
+   @ Base ../usr/share/julia/Compiler/src/ssair/domtree.jl:113
+  resize!(!Matched::Compiler.InstructionStream, ::Any)
+   @ Base ../usr/share/julia/Compiler/src/ssair/ir.jl:291
+  ...
+  resize_particle_time_stepper! at lagrangian_particle_time_stepping.jl:112
+  begin_lagrangian_particle_step! at lagrangian_particle_time_stepping.jl:280
+  advance_lagrangian_particles! at lagrangian_particle_time_stepping.jl:301
+  substep_lagrangian_particles! at lagrangian_particle_time_stepping.jl:385
+  substep_lagrangian_particles! at atmosphere_model.jl:865
+  #time_step!#2 at ssp_runge_kutta_3.jl:265
+  hlo_stats(::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{
+  run_level(::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{
+  kwcall(::@NamedTuple{raise::Bool}, ::typeof(run_level), ::Function, ::AtmosphereModel{CompressibleDynamics{ExplicitTimeStepping, Field{Center, Center, Center, Nothing, RectilinearGrid{Float64, Periodic, Periodic, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, Of
+  top-level scope at droplets_reactant.jl:139
+[watch] done: wall 225 s, peak RSS 3406 MB

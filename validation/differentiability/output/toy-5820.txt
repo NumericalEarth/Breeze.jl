@@ -1,0 +1,43 @@
+######## parts r
+=== (a) Reactant, array ops (backend = cpu)
+compile 67.5 s; J = 8.697062 (CPU: 8.697062)
+Reactant expected-value dJ/dλ                                  AD =  1.5324800000e+00  FD =  1.5324800007e+00  rel.err = 4.42e-10
+Reactant expected-value dJ/dg                                  AD =  7.0509440000e+00  FD =  7.0509439976e+00  rel.err = 3.47e-10
+compile 2.2 s; J = 8.697062 (CPU: 8.697062)
+Reactant expected-value + compaction dJ/dλ                     AD =  1.5324800000e+00  FD =  1.5324800007e+00  rel.err = 4.42e-10
+Reactant expected-value + compaction dJ/dg                     AD =  7.0509440000e+00  FD =  7.0509439976e+00  rel.err = 3.47e-10
+compile 2.0 s; J = 9.840000 (CPU: 9.250000)
+Reactant stochastic dJ/dλ                                      AD =  0.0000000000e+00  FD =  0.0000000000e+00  rel.err = 0.00e+00
+Reactant stochastic dJ/dg                                      AD =  7.7600000000e+00  FD =  7.4799999981e+00  rel.err = 3.74e-02
+compile 1.3 s; J = 10.200000 (CPU: 10.200000)
+Reactant stochastic + compaction dJ/dλ                         AD =  0.0000000000e+00  FD =  0.0000000000e+00  rel.err = 0.00e+00
+Reactant stochastic + compaction dJ/dg                         AD =  8.1200000000e+00  FD =  8.1199999977e+00  rel.err = 2.80e-10
+StableHLO of loss (unrolled 5 steps): 210 lines; ops: stablehlo.add stablehlo.broadcast_in_dim stablehlo.clamp stablehlo.compare stablehlo.constant stablehlo.convert stablehlo.dot_general stablehlo.gather stablehlo.multiply stablehlo.reduce stablehlo.reduce_window stablehlo.remainder stablehlo.reshape stablehlo.return stablehlo.round_nearest_even stablehlo.select stablehlo.sort stablehlo.subtract
+[watch] done: wall 121 s, peak RSS 2655 MB
+######## parts w
+=== (a') Reactant, @trace loop with runtime trip count
+traced loop J(n=5) = 8.697062, J(n=3) = 7.980826 (CPU n=5: 8.697062)
+contains stablehlo.while: true; HLO lines: 68
+FAILED traced loop reverse: module @reactant_grad_theta attributes {mhlo.num_partitions = 1 : i64, mhlo.num_replicas = 1 : i64} {
+  func.func @main(%arg0: tensor<2xf64>, %arg1: tensor<2xf64> {tf.aliasing_output = 0 : i32}, %arg2: tensor<256xf64> {tf.aliasing_output = 1 : i32}, %arg3: tensor<256xf64> {tf.aliasing_output = 2 : i32}, %arg4: tensor<256xf64> {tf.aliasing_output = 3 : i32}, %arg5: tensor<256xf64>, %arg6: tensor<i64>) -> (tensor<2xf64>, tensor<256xf64>, tensor<256xf64>, tensor<256xf64>) {
+[watch] done: wall 105 s, peak RSS 2606 MB
+######## parts k
+=== (b) KernelAbstractions kernels, plain Enzyme on CPU
+KA J = 8.697062 (array version 8.697062)
+KA+Enzyme CPU dJ/dλ                                            AD =  1.5324800000e+00  FD =  1.5324800007e+00  rel.err = 4.42e-10
+KA+Enzyme CPU dJ/dg                                            AD =  7.0509440000e+00  FD =  7.0509439976e+00  rel.err = 3.47e-10
+=== (a) KernelAbstractions kernels inside Reactant (raise=true, raise_first=true)
+Reactant KA J = 8.697062
+KA+Reactant (raised) dJ/dλ                                     AD =  1.5324800000e+00  FD =  1.5324800007e+00  rel.err = 4.42e-10
+KA+Reactant (raised) dJ/dg                                     AD =  7.0509440000e+00  FD =  7.0509439976e+00  rel.err = 3.47e-10
+[watch] done: wall 220 s, peak RSS 3001 MB
+######## parts g
+=== (b) KernelAbstractions kernels on CUDA with plain Enzyme
+WATCHDOG: killed at 1801 s, RSS 9276 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 15: 303271 Killed                  "$@"
+[watch] done: wall 1802 s, peak RSS 9276 MB
+######## parts W
+tracing data-dependent while
+WATCHDOG: killed at 598 s, RSS 60147 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 15: 314757 Killed                  "$@"
+[watch] done: wall 601 s, peak RSS 60147 MB

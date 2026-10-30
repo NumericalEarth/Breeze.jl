@@ -1,0 +1,19 @@
+######## droplets build Nd=100 FIXED=0
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+WATCHDOG: killed at 199 s, RSS 40210 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 15: 327989 Killed                  "$@"
+[watch] done: wall 201 s, peak RSS 40210 MB
+######## droplets rate Nd=100 FIXED=0
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+tracing rate!
+trace 76.3 s, unoptimized MLIR: 650 lines, 1145 ops; top: llvm.ptr×330, llvm.struct×99, llvm.mlir.constant×83, llvm.store×73, llvm.extractvalue×55, llvm.getelementptr×53, llvm.func×47, llvm.load×42
+compiled rate! in 1.6 s (raise=false), Sys.maxrss = 2.82 GB
+ran rate!
+[watch] done: wall 107 s, peak RSS 2745 MB
+######## droplets growth Nd=100 FIXED=0
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+tracing growth!
+trace 76.6 s, unoptimized MLIR: 1078 lines, 1754 ops; top: llvm.ptr×458, llvm.mlir.constant×123, llvm.fmul×114, llvm.struct×101, llvm.store×91, llvm.getelementptr×86, llvm.load×68, llvm.fdiv×59
+compiled growth! in 1.7 s (raise=false), Sys.maxrss = 2.82 GB
+ran growth!
+[watch] done: wall 108 s, peak RSS 2752 MB

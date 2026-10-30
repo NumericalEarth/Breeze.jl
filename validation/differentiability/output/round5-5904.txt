@@ -1,0 +1,147 @@
+######## build boussinesq_ppp with profile peek
+[ Info: Oceananigans will use 2 threads
+[   0.9 s, maxrss 2.2 GB] grid
+[  76.6 s, maxrss 2.6 GB] dynamics BoussinesqDynamics(pᵣ=85000.0, Tᵣ=282.0, ρᵣ=1.05023)
+[watch] sent SIGUSR1 (profile peek)
+======================================================================================
+Information request received. A stacktrace will print followed by a 1.0 second profile
+======================================================================================
+cmd: /home/greg_aeolus_earth/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/bin/julia 334822 running 2 of 4
+signal (10): User defined signal 1
+pthread_cond_wait at /lib64/libpthread.so.0 (unknown line)
+uv_cond_wait at /workspace/srcdir/libuv/src/unix/thread.c:822
+jl_parallel_gc_threadfun at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/gc-stock.c:3640
+start_thread at /lib64/libpthread.so.0 (unknown line)
+clone at /lib64/libc.so.6 (unknown line)
+unknown function (ip: (nil)) at (unknown file)
+pthread_cond_wait at /lib64/libpthread.so.0 (unknown line)
+uv_cond_wait at /workspace/srcdir/libuv/src/unix/thread.c:822
+ijl_task_get_next at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/scheduler.c:523
+poptask at ./task.jl:1216
+wait at ./task.jl:1228
+task_done_hook at ./task.jl:868
+jfptr_task_done_hook_59905.1 at /home/greg_aeolus_earth/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/lib/julia/sys.so (unknown line)
+jl_apply at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/julia.h:2391 [inlined]
+jl_finish_task at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/task.c:341
+jl_threadfun at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/scheduler.c:122
+start_thread at /lib64/libpthread.so.0 (unknown line)
+clone at /lib64/libc.so.6 (unknown line)
+unknown function (ip: (nil)) at (unknown file)
+pthread_cond_wait at /lib64/libpthread.so.0 (unknown line)
+uv_cond_wait at /workspace/srcdir/libuv/src/unix/thread.c:822
+ijl_task_get_next at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/scheduler.c:523
+poptask at ./task.jl:1216
+wait at ./task.jl:1228
+#wait#398 at ./condition.jl:141
+wait at ./condition.jl:136 [inlined]
+_trywait at ./asyncevent.jl:185
+profile_printing_listener at ./Base.jl:332
+#start_profile_listener##0 at ./Base.jl:352
+jfptr_YY.start_profile_listenerYY.YY.0_16003.1 at /home/greg_aeolus_earth/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/lib/julia/sys.so (unknown line)
+jl_apply at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/julia.h:2391 [inlined]
+start_task at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/task.c:1252
+unknown function (ip: (nil)) at (unknown file)
+_ZN4mlir6detail4walkINS_15ForwardIteratorEEENS_10WalkResultEPNS_9OperationEN4llvm12function_refIFS3_S5_EEENS_9WalkOrderE at /home/greg_aeolus_earth/.julia/artifacts/a8c507ad2f3b103faf20f153b1e16eeb085b01fe/lib/libReactantExtra.so (unknown line)
+_ZN4mlir6detail4walkINS_15ForwardIteratorEEENS_10WalkResultEPNS_9OperationEN4llvm12function_refIFS3_S5_EEENS_9WalkOrderE at /home/greg_aeolus_earth/.julia/artifacts/a8c507ad2f3b103faf20f153b1e16eeb085b01fe/lib/libReactantExtra.so (unknown line)
+_ZN4mlir6detail4walkINS_15ForwardIteratorEEENS_10WalkResultEPNS_9OperationEN4llvm12function_refIFS3_S5_EEENS_9WalkOrderE at /home/greg_aeolus_earth/.julia/artifacts/a8c507ad2f3b103faf20f153b1e16eeb085b01fe/lib/libReactantExtra.so (unknown line)
+_ZN4mlir6detail4walkINS_15ForwardIteratorEEENS_10WalkResultEPNS_9OperationEN4llvm12function_refIFS3_S5_EEENS_9WalkOrderE at /home/greg_aeolus_earth/.julia/artifacts/a8c507ad2f3b103faf20f153b1e16eeb085b01fe/lib/libReactantExtra.so (unknown line)
+_ZN4mlir9transform16TransformDialect24verifyOperationAttributeEPNS_9OperationENS_14NamedAttributeE at /home/greg_aeolus_earth/.julia/artifacts/a8c507ad2f3b103faf20f153b1e16eeb085b01fe/lib/libReactantExtra.so (unknown line)
+_ZN12_GLOBAL__N_117OperationVerifier20verifyOpAndDominanceERN4mlir9OperationE at /home/greg_aeolus_earth/.julia/artifacts/a8c507ad2f3b103faf20f153b1e16eeb085b01fe/lib/libReactantExtra.so (unknown line)
+_ZN4mlir6verifyEPNS_9OperationEb at /home/greg_aeolus_earth/.julia/artifacts/a8c507ad2f3b103faf20f153b1e16eeb085b01fe/lib/libReactantExtra.so (unknown line)
+_ZN4mlir6detail17OpToOpPassAdaptor3runEPNS_4PassEPNS_9OperationENS_15AnalysisManagerEbj at /home/greg_aeolus_earth/.julia/artifacts/a8c507ad2f3b103faf20f153b1e16eeb085b01fe/lib/libReactantExtra.so (unknown line)
+_ZN4mlir11PassManager3runEPNS_9OperationE at /home/greg_aeolus_earth/.julia/artifacts/a8c507ad2f3b103faf20f153b1e16eeb085b01fe/lib/libReactantExtra.so (unknown line)
+mlirPassManagerRunOnOp at /home/greg_aeolus_earth/.julia/artifacts/a8c507ad2f3b103faf20f153b1e16eeb085b01fe/lib/libReactantExtra.so (unknown line)
+mlirPassManagerRunOnOp at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/mlir/libMLIR_h.jl:13693 [inlined]
+run! at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/mlir/IR/Pass.jl:188
+run! at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/OptimizationPasses.jl:212
+#run_pass_pipeline!#25 at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/OptimizationPasses.jl:233
+run_pass_pipeline! at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/OptimizationPasses.jl:222 [inlined]
+#compile_mlir!#46 at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/Compiler.jl:465
+compile_mlir! at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/Compiler.jl:239 [inlined]
+compile_mlir! at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/Compiler.jl:239
+macro expansion at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/Compiler.jl:1301 [inlined]
+#compile_xla#77 at /home/greg_aeolus_earth/.julia/packages/ReactantCore/hVTWN/src/ReactantCore.jl:175
+compile_xla at /home/greg_aeolus_earth/.julia/packages/ReactantCore/hVTWN/src/ReactantCore.jl:173 [inlined]
+#compile#79 at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/Compiler.jl:1397
+compile at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/Compiler.jl:1394
+unknown function (ip: 0x14bb366cf958) at (unknown file)
+macro expansion at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/Macros.jl:299 [inlined]
+macro expansion at /home/greg_aeolus_earth/.julia/packages/LLVM/JGisQ/src/base.jl:143 [inlined]
+macro expansion at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/src/compiler/Macros.jl:298 [inlined]
+#_#1 at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/ext/ReactantKernelAbstractionsExt.jl:115
+Kernel at /home/greg_aeolus_earth/.julia/packages/Reactant/G3c8S/ext/ReactantKernelAbstractionsExt.jl:111 [inlined]
+#_launch!#17 at /home/greg_aeolus_earth/Oceananigans-particle-rk3-0114/src/Utils/kernel_launching.jl:362 [inlined]
+_launch! at /home/greg_aeolus_earth/Oceananigans-particle-rk3-0114/src/Utils/kernel_launching.jl:348 [inlined]
+#launch!#15 at /home/greg_aeolus_earth/Oceananigans-particle-rk3-0114/src/Utils/kernel_launching.jl:344 [inlined]
+launch! at /home/greg_aeolus_earth/Oceananigans-particle-rk3-0114/src/Utils/kernel_launching.jl:344 [inlined]
+solve_for_anelastic_pressure! at /home/greg_aeolus_earth/Breeze-droplet-tasks/src/AnelasticEquations/boussinesq_dynamics.jl:146
+compute_pressure_correction! at /home/greg_aeolus_earth/Breeze-droplet-tasks/src/AnelasticEquations/anelastic_time_stepping.jl:35
+enforce_mass_conservation! at /home/greg_aeolus_earth/Breeze-droplet-tasks/src/AtmosphereModels/set_atmosphere_model.jl:146
+#set!#50 at /home/greg_aeolus_earth/Breeze-droplet-tasks/src/AtmosphereModels/set_atmosphere_model.jl:452
+set! at /home/greg_aeolus_earth/Breeze-droplet-tasks/src/AtmosphereModels/set_atmosphere_model.jl:222 [inlined]
+initialize_model_thermodynamics! at /home/greg_aeolus_earth/Breeze-droplet-tasks/src/AnelasticEquations/anelastic_time_stepping.jl:17
+unknown function (ip: 0x14bb367bea42) at (unknown file)
+#AtmosphereModel#7 at /home/greg_aeolus_earth/Breeze-droplet-tasks/src/AtmosphereModels/atmosphere_model.jl:384
+AtmosphereModel at /home/greg_aeolus_earth/Breeze-droplet-tasks/src/AtmosphereModels/atmosphere_model.jl:143
+unknown function (ip: 0x14bb3678aee0) at (unknown file)
+jl_apply at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/julia.h:2391 [inlined]
+do_call at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/interpreter.c:123
+eval_value at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/interpreter.c:243
+eval_stmt_value at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/interpreter.c:194 [inlined]
+eval_body at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/interpreter.c:707
+jl_interpret_toplevel_thunk at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/interpreter.c:898
+jl_toplevel_eval_flex at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/toplevel.c:1035
+jl_toplevel_eval_flex at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/toplevel.c:975
+ijl_toplevel_eval at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/toplevel.c:1047
+ijl_toplevel_eval_in at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/toplevel.c:1092
+eval at ./boot.jl:489
+include_string at ./loading.jl:2874
+_include at ./loading.jl:2934
+include at ./Base.jl:306
+exec_options at ./client.jl:317
+_start at ./client.jl:550
+jfptr__start_63319.1 at /home/greg_aeolus_earth/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/lib/julia/sys.so (unknown line)
+jl_apply at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/julia.h:2391 [inlined]
+true_main at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/jlapi.c:971
+jl_repl_entrypoint at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/src/jlapi.c:1139
+main at /cache/build/builder-amdci5-4/julialang/julia-release-1-dot-12/cli/loader_exe.c:58
+__libc_start_main at /lib64/libc.so.6 (unknown line)
+unknown function (ip: 0x4010b8) at /workspace/srcdir/glibc-2.17/csu/../sysdeps/x86_64/start.S
+unknown function (ip: (nil)) at (unknown file)
+==============================================================
+Profile collected. A report will print at the next yield point
+==============================================================
+WATCHDOG: killed at 170 s, RSS 31139 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 16: 334822 Killed                  "$@"
+[watch] done: wall 172 s, peak RSS 31139 MB
+######## build anelastic_ppp
+  [2] validate_boundary_conditions(loc::Tuple{Nothing, Nothing, Center}, grid::RectilinearGrid{Float64, Periodic, Periodic, Periodic, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.
+    @ Oceananigans.Fields ~/Oceananigans-particle-rk3-0114/src/Fields/field.jl:76
+  [3] #apply_regionally!#46
+    @ ~/Oceananigans-particle-rk3-0114/src/Utils/multi_region_transformation.jl:85 [inlined]
+  [4] apply_regionally!
+    @ ~/Oceananigans-particle-rk3-0114/src/Utils/multi_region_transformation.jl:81 [inlined]
+  [5] macro expansion
+    @ ~/Oceananigans-particle-rk3-0114/src/Utils/multi_region_transformation.jl:164 [inlined]
+  [6] Field
+    @ ~/Oceananigans-particle-rk3-0114/src/Fields/field.jl:104 [inlined]
+  [7] #Field#13
+    @ ~/Oceananigans-particle-rk3-0114/src/Fields/field.jl:187 [inlined]
+  [8] #_#12
+    @ ~/Oceananigans-particle-rk3-0114/src/Fields/field.jl:175 [inlined]
+  [9] Field
+    @ ~/Oceananigans-particle-rk3-0114/src/Fields/field.jl:171 [inlined]
+ [10] materialize_reference_state(grid::RectilinearGrid{Float64, Periodic, Periodic, Periodic, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, Float
+    @ Breeze.Thermodynamics ~/Breeze-droplet-tasks/src/Thermodynamics/reference_states.jl:786
+ [11] #ReferenceState#24
+    @ ~/Breeze-droplet-tasks/src/Thermodynamics/reference_states.jl:751 [inlined]
+ [12] top-level scope
+    @ ~/Breeze-droplet-tasks/validation/differentiability/build_bisect.jl:21
+ [13] include(mod::Module, _path::String)
+    @ Base ./Base.jl:306
+ [14] exec_options(opts::Base.JLOptions)
+    @ Base ./client.jl:317
+ [15] _start()
+    @ Base ./client.jl:550
+in expression starting at /home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/build_bisect.jl:18
+[watch] done: wall 101 s, peak RSS 2777 MB

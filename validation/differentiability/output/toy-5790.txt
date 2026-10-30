@@ -1,0 +1,78 @@
+=== (b) plain Enzyme, CPU Arrays
+expected-value: J = 8.697062, active = 0
+Enzyme expected-value dJ/dλ                                    AD =  1.5324800000e+00  FD =  1.5324800007e+00  rel.err = 4.42e-10
+Enzyme expected-value dJ/dg                                    AD =  7.0509440000e+00  FD =  7.0509439976e+00  rel.err = 3.47e-10
+expected-value + compaction: J = 8.697062, active = 0
+Enzyme expected-value + compaction dJ/dλ                       AD =  1.5324800000e+00  FD =  1.5324800007e+00  rel.err = 4.42e-10
+Enzyme expected-value + compaction dJ/dg                       AD =  7.0509440000e+00  FD =  7.0509439976e+00  rel.err = 3.47e-10
+stochastic: J = 9.250000, active = 0
+Enzyme stochastic dJ/dλ                                        AD =  0.0000000000e+00  FD =  0.0000000000e+00  rel.err = 0.00e+00
+Enzyme stochastic dJ/dg                                        AD =  7.4800000000e+00  FD =  7.4799999981e+00  rel.err = 2.59e-10
+stochastic + compaction: J = 10.200000, active = 0
+Enzyme stochastic + compaction dJ/dλ                           AD =  0.0000000000e+00  FD =  0.0000000000e+00  rel.err = 0.00e+00
+Enzyme stochastic + compaction dJ/dg                           AD =  8.1200000000e+00  FD =  8.1199999977e+00  rel.err = 2.80e-10
+stochastic FD dJ/dλ with h = 1e-06:  0.000000e+00
+stochastic FD dJ/dλ with h = 1e-03:  0.000000e+00
+stochastic FD dJ/dλ with h = 1e-01:  0.000000e+00
+E[J_stochastic] (2000 samples) = 8.7321, J_expected = 8.6971 (not equal: the mean-field closure is not exact through removal/nonlinearity)
+dE[J_stochastic]/dλ by FD on 2000 CRN samples, h=0.2: 1.6113
+=== (a) Reactant, array ops (backend = cpu)
+FAILED reactant expected-value: Scalar indexing is disallowed.
+Invocation of getindex(::TracedRArray, ::Vararg{Int, N}) resulted in scalar indexing of a GPU array.
+This is typically caused by calling an iterating implementation of a method.
+Such implementations *do not* execute on the GPU, but very slowly on the CPU,
+and therefore should be avoided.
+to enable scalar iteration globally or for the operations in question.
+FAILED reactant expected-value + compaction: Scalar indexing is disallowed.
+Invocation of getindex(::TracedRArray, ::Vararg{Int, N}) resulted in scalar indexing of a GPU array.
+This is typically caused by calling an iterating implementation of a method.
+Such implementations *do not* execute on the GPU, but very slowly on the CPU,
+and therefore should be avoided.
+to enable scalar iteration globally or for the operations in question.
+FAILED reactant stochastic: Scalar indexing is disallowed.
+Invocation of getindex(::TracedRArray, ::Vararg{Int, N}) resulted in scalar indexing of a GPU array.
+This is typically caused by calling an iterating implementation of a method.
+Such implementations *do not* execute on the GPU, but very slowly on the CPU,
+and therefore should be avoided.
+to enable scalar iteration globally or for the operations in question.
+FAILED reactant stochastic + compaction: Scalar indexing is disallowed.
+Invocation of getindex(::TracedRArray, ::Vararg{Int, N}) resulted in scalar indexing of a GPU array.
+This is typically caused by calling an iterating implementation of a method.
+Such implementations *do not* execute on the GPU, but very slowly on the CPU,
+and therefore should be avoided.
+to enable scalar iteration globally or for the operations in question.
+StableHLO of loss (unrolled 5 steps): 210 lines; ops: stablehlo.add stablehlo.broadcast_in_dim stablehlo.clamp stablehlo.compare stablehlo.constant stablehlo.convert stablehlo.dot_general stablehlo.gather stablehlo.multiply stablehlo.reduce stablehlo.reduce_window stablehlo.remainder stablehlo.reshape stablehlo.return stablehlo.round_nearest_even stablehlo.select stablehlo.sort stablehlo.subtract
+=== (a') Reactant, @trace loop with runtime trip count
+traced loop J(n=5) = 8.697062, J(n=3) = 7.980826 (CPU n=5: 8.697062)
+contains stablehlo.while: true; HLO lines: 68
+FAILED traced loop reverse: Scalar indexing is disallowed.
+Invocation of getindex(::TracedRArray, ::Vararg{Int, N}) resulted in scalar indexing of a GPU array.
+This is typically caused by calling an iterating implementation of a method.
+Such implementations *do not* execute on the GPU, but very slowly on the CPU,
+and therefore should be avoided.
+to enable scalar iteration globally or for the operations in question.
+Command terminated by signal 9
+	Command being timed: "/home/greg_aeolus_earth/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/bin/julia --startup-file=no --project=. /home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/toy_particle_spawning.jl erwkg"
+	User time (seconds): 805.08
+	System time (seconds): 56.87
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 14:29.23
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 84842240
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 1
+	Minor (reclaiming a frame) page faults: 23598837
+	Voluntary context switches: 16086
+	Involuntary context switches: 3847
+	Swaps: 0
+	File system inputs: 170048
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+[2026-10-30T10:26:42.295] error: Detected 1 oom_kill event in StepId=5790.batch. Some of the step tasks have been OOM Killed.

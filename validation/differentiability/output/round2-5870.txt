@@ -1,0 +1,64 @@
+######## toy V (while reproducers)
+tracing while: trivial data-dependent
+  traced in 46.0 s, 41 lines, maxrss 2.6 GB
+  result 264.0
+tracing while: integer counter
+  traced in 3.0 s, 36 lines, maxrss 2.6 GB
+  result 1544.0
+tracing while: particle step, integer counter
+  traced in 23.2 s, 299 lines, maxrss 2.7 GB
+  result 0.588
+tracing while: particle step, data-dependent
+  traced in 2.5 s, 304 lines, maxrss 2.7 GB
+  result 0.588
+[watch] done: wall 110 s, peak RSS 2608 MB
+######## toy r with unique sort keys
+=== (a) Reactant, array ops (backend = cpu)
+compile 69.8 s; J = 8.697062 (CPU: 8.697062)
+Reactant expected-value dJ/dλ                                  AD =  1.5324800000e+00  FD =  1.5324800007e+00  rel.err = 4.42e-10
+Reactant expected-value dJ/dg                                  AD =  7.0509440000e+00  FD =  7.0509439976e+00  rel.err = 3.47e-10
+compile 2.2 s; J = 8.697062 (CPU: 8.697062)
+Reactant expected-value + compaction dJ/dλ                     AD =  1.5324800000e+00  FD =  1.5324800007e+00  rel.err = 4.42e-10
+Reactant expected-value + compaction dJ/dg                     AD =  7.0509440000e+00  FD =  7.0509439976e+00  rel.err = 3.47e-10
+compile 2.2 s; J = 9.250000 (CPU: 9.250000)
+Reactant stochastic dJ/dλ                                      AD =  0.0000000000e+00  FD =  0.0000000000e+00  rel.err = 0.00e+00
+Reactant stochastic dJ/dg                                      AD =  7.4800000000e+00  FD =  7.4799999981e+00  rel.err = 2.59e-10
+compile 1.4 s; J = 10.200000 (CPU: 10.200000)
+Reactant stochastic + compaction dJ/dλ                         AD =  0.0000000000e+00  FD =  0.0000000000e+00  rel.err = 0.00e+00
+Reactant stochastic + compaction dJ/dg                         AD =  8.1200000000e+00  FD =  8.1199999977e+00  rel.err = 2.80e-10
+StableHLO of loss (unrolled 5 steps): 222 lines; ops: stablehlo.add stablehlo.broadcast_in_dim stablehlo.clamp stablehlo.compare stablehlo.constant stablehlo.convert stablehlo.dot_general stablehlo.gather stablehlo.multiply stablehlo.reduce stablehlo.reduce_window stablehlo.remainder stablehlo.reshape stablehlo.return stablehlo.round_nearest_even stablehlo.select stablehlo.sort stablehlo.subtract
+[watch] done: wall 117 s, peak RSS 2636 MB
+######## toy w (traced for, runtime trip count)
+=== (a') Reactant, @trace loop with runtime trip count
+traced loop J(n=5) = 8.697062, J(n=3) = 7.980826 (CPU n=5: 8.697062)
+contains stablehlo.while: true; HLO lines: 68
+FAILED traced loop reverse: module @reactant_grad_theta attributes {mhlo.num_partitions = 1 : i64, mhlo.num_replicas = 1 : i64} {
+  ... 56xf64>
+    return %27, %16#3, %16#2, %16#1 : tensor<2xf64>, tensor<256xf64>, tensor<256xf64>, tensor<256xf64>
+UNKNOWN: <unknown>:0: error: 'stablehlo.dynamic_pad' op can't be translated to XLA HLO
+<unknown>:0: note: see current operation: %24 = "stablehlo.dynamic_pad"(%2, %12, %6, %23, %6) : (tensor<0x256xf64>, tensor<f64>, tensor<2xi64>, tensor<2xi64>, tensor<2xi64>) -> tensor<?x256xf64>
+Attempted to perform automatic differentation of a loop with non-statically known bounds. Try using `checkpointing=Reactant.Binomial(budget)` where `budget` is an integer specifying the maximum number of checkpoints Reactant is able to take during the augmented primal computation.
+[watch] done: wall 106 s, peak RSS 2665 MB
+######## droplets condense
+WATCHDOG: killed at 207 s, RSS 60622 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 15: 320891 Killed                  "$@"
+[watch] done: wall 210 s, peak RSS 60622 MB
+######## droplets update
+WATCHDOG: killed at 202 s, RSS 61336 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 15: 322316 Killed                  "$@"
+[watch] done: wall 205 s, peak RSS 61336 MB
+######## droplets advect
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+WATCHDOG: killed at 212 s, RSS 61030 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 15: 323663 Killed                  "$@"
+[watch] done: wall 215 s, peak RSS 61030 MB
+######## droplets step0
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+WATCHDOG: killed at 205 s, RSS 61102 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 15: 325121 Killed                  "$@"
+[watch] done: wall 208 s, peak RSS 61102 MB
+######## droplets step
+droplet solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+WATCHDOG: killed at 215 s, RSS 61140 MB
+/home/greg_aeolus_earth/Breeze-droplet-tasks/validation/differentiability/watch.sh: line 15: 326499 Killed                  "$@"
+[watch] done: wall 218 s, peak RSS 61140 MB
