@@ -1187,6 +1187,21 @@ const FOLDED_DIVERGENCE_DAMPING = Ref(true)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
+        u, v = damped_momentum_perturbations(damping, i, j, k, grid, ρu′, ρv′, ρθ′)
+
+        ∂x_p, ∂y_p = horizontal_pressure_gradients!(pressure_gradients, i, j, k, grid, dynamics,
+                                                    ρθ′, Πᴸ, γRᵐᴸ)
+
+        ρu′[i, j, k] = u + Δτ * (Gⁿρu[i, j, k] - ∂x_p)
+        ρv′[i, j, k] = v + Δτ * (Gⁿρv[i, j, k] - ∂y_p)
+    end
+end
+
+# (ρu)′, (ρv)′ after the deferred damping and wall re-enforcement, rounded as their stores were; without one, loaded.
+@inline damped_momentum_perturbations(::Nothing, i, j, k, grid, ρu′, ρv′, ρθ′) = @inbounds (ρu′[i, j, k], ρv′[i, j, k])
+
+@inline function damped_momentum_perturbations(damping, i, j, k, grid, ρu′, ρv′, ρθ′)
+    @inbounds begin
         ρθ′ˢ⁻ = damping.ρθ′ˢ⁻
         θᴸ = damping.θᴸ
         Tu = eltype(ρu′)
@@ -1204,13 +1219,8 @@ const FOLDED_DIVERGENCE_DAMPING = Ref(true)
 
         u = ifelse(damping.west_wall & (i == 1), convert(Tu, 0), u)
         v = ifelse(damping.south_wall & (j == 1), convert(Tv, 0), v)
-
-        ∂x_p, ∂y_p = horizontal_pressure_gradients!(pressure_gradients, i, j, k, grid, dynamics,
-                                                    ρθ′, Πᴸ, γRᵐᴸ)
-
-        ρu′[i, j, k] = u + Δτ * (Gⁿρu[i, j, k] - ∂x_p)
-        ρv′[i, j, k] = v + Δτ * (Gⁿρv[i, j, k] - ∂y_p)
     end
+    return u, v
 end
 
 # The deferred damping's operands, as `apply_divergence_damping!(::ThermalDivergenceDamping, …)` passes them.
@@ -2516,7 +2526,19 @@ function acoustic_substep!(model, substepper, stage, advection,
     (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
 
     # Step A: explicit horizontal forward of (ρu)′, (ρv)′ (after the previous substep's damping when it is pending).
-    if pending_damping
+    pressure_gradients = active_pressure_gradients(substepper)
+    if CARRIED_EXPLICIT_STEP[] & carries_vertical_rhs(model.dynamics, pressure_gradients, grid)
+        # one thread per column, the vertical stencil of ∂x p′, ∂y p′ carried (handoff S6 513ceeee; T22 acoustic C)
+        damping = pending_damping ? folded_damping_operands(substepper.damping, substepper, model, Δτ) : nothing
+        launch!(arch, grid, :xy, _carried_explicit_horizontal_step!,
+                substepper.momentum_perturbation.u,
+                substepper.momentum_perturbation.v,
+                grid, model.dynamics, Δτ,
+                substepper.density_potential_temperature_perturbation,
+                substepper.linearization_exner,
+                Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
+                pressure_gradients, damping)
+    elseif pending_damping
         launch!(arch, grid, :xyz, _damped_explicit_horizontal_step!,
                 substepper.momentum_perturbation.u,
                 substepper.momentum_perturbation.v,

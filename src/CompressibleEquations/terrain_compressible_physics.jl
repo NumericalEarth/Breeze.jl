@@ -695,12 +695,52 @@ Whether the per-stage store of ∂x pᴸ, ∂y pᴸ runs as the carried column l
 """
 const CARRIED_LINEARIZATION_GRADIENTS = Ref(true)
 
-@inline function three_column_face_averages(i, j, f, grid, q⁻, q, a, b)
+#####
+##### T22 acoustic C (handoff S6 513ceeee, explicit-step part): the explicit horizontal step as a column launch with the
+##### vertical stencil of ∂x p′, ∂y p′ carried, as S7 carries ∂x pᴸ, ∂y pᴸ: per level the three columns W, C, S of
+##### p′ = γRᵐᴸ Πᴸ (ρθ)′ are evaluated at the next level and the face averages of level k come from the level below.
+##### Same expressions on the same operands as `∇ˣp′`, `∇ʸp′` (∂xᶠᶜᶜ / ∂yᶜᶠᶜ on the terrain grid), so the stored
+##### perturbation gradients and (ρu)′, (ρv)′ have the same bits. The last-face stores (i = Nx, j = Ny) and the
+##### folded damping (B) are evaluated per level exactly as in the 3-D kernels. Applies where S1′/S7 do.
+##### `BREEZE_CARRIED_EXPLICIT_STEP=false` at load restores the 3-D launch.
+#####
+
+const CARRIED_EXPLICIT_STEP = Ref(true)
+
+@kernel function _carried_explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Πᴸ,
+                                                    Gⁿρu, Gⁿρv, γRᵐᴸ, P, damping)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    FT = eltype(grid)
+    z = zero(FT)
+    @inbounds begin
+        v₀, _ = three_column_face_averages(i, j, 0, grid, (z, z, z), δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)  # (averages unused)
+        v, A = three_column_face_averages(i, j, 1, grid, v₀, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)          # level 1, face 1
+        for k = 1:Nz
+            v⁺, A⁺ = three_column_face_averages(i, j, k + 1, grid, v, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+            ∂x_p′, ∂y_p′ = carried_face_gradients(i, j, k, grid, v, A, A⁺)
+
+            u, w = damped_momentum_perturbations(damping, i, j, k, grid, ρu′, ρv′, ρθ′)
+
+            P.perturbation_x[i, j, k] = ∂x_p′
+            P.perturbation_y[i, j, k] = ∂y_p′
+            store_last_face_perturbation_gradients!(P, i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+            ∂x_p = P.linearization_x[i, j, k] + ∂x_p′
+            ∂y_p = P.linearization_y[i, j, k] + ∂y_p′
+
+            ρu′[i, j, k] = u + Δτ * (Gⁿρu[i, j, k] - ∂x_p)
+            ρv′[i, j, k] = w + Δτ * (Gⁿρv[i, j, k] - ∂y_p)
+            v, A = v⁺, A⁺
+        end
+    end
+end
+
+@inline function three_column_face_averages(i, j, f, grid, q⁻, q, args...)
     FT = eltype(grid)
     qW⁻, qC⁻, qS⁻ = q⁻
-    qW = q(i - 1, j, f, grid, a, b)
-    qC = q(i,     j, f, grid, a, b)
-    qS = q(i, j - 1, f, grid, a, b)
+    qW = q(i - 1, j, f, grid, args...)
+    qC = q(i,     j, f, grid, args...)
+    qS = q(i, j - 1, f, grid, args...)
     DW = (qW - qW⁻) * Δz⁻¹ᶜᶜᶠ(i - 1, j, f, grid)
     DC = (qC - qC⁻) * Δz⁻¹ᶜᶜᶠ(i,     j, f, grid)
     DS = (qS - qS⁻) * Δz⁻¹ᶜᶜᶠ(i, j - 1, f, grid)
