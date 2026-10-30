@@ -1,4 +1,5 @@
 # Droplet box of test/lagrangian_microphysics.jl with precision options
+using Breeze.Thermodynamics: saturation_vapor_pressure, vapor_gas_constant, dry_air_gas_constant, PlanarLiquidSurface
 quasirandom(n, k=1) = mod(n * sqrt(2 + k), 1)
 function box(FT; thermodynamic_float_type=FT, self_interaction=DiffusiveSelfInteraction(), velocity=true)
     L = FT(0.02); Nd = 200
