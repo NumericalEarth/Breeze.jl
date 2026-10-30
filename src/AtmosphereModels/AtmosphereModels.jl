@@ -159,6 +159,8 @@ const SKIP_DEAD_FILLS = Ref(true)
 const BATCHED_Z_BCS = Ref(true)
 "`BREEZE_CELLWISE_MOISTURE_CORRECTION` (default true): species borrowing and number repairs over every cell (PR #1092); only vertical borrowing walks a column."
 const CELLWISE_MOISTURE_CORRECTION = Ref(true)
+"`BREEZE_PRECIPITATION_SINK_LIMIT` (default false, answer-changing): MixedPhase 1M donor limiter and negative-precipitation relaxation use τ = max(τⁿᵘᵐ = 10 s, Δt), so no donor loses more than its content per step."
+const PRECIPITATION_SINK_LIMIT = Ref(false)
 
 env_switch(name, default) = lowercase(get(ENV, name, string(default))) in ("1", "true", "yes", "on")
 
@@ -170,6 +172,7 @@ function __init__()
     CELLWISE_MOISTURE_CORRECTION[] = env_switch("BREEZE_CELLWISE_MOISTURE_CORRECTION", true)
     SEDIMENTATION_SUBSTEP[] = env_switch("BREEZE_SEDIMENTATION_SUBSTEP", false)  # split_sedimentation.jl (answer-changing)
     SEDIMENTATION_IMPLICIT[] = env_switch("BREEZE_SEDIMENTATION_IMPLICIT", false)  # split_sedimentation.jl (answer-changing)
+    PRECIPITATION_SINK_LIMIT[] = env_switch("BREEZE_PRECIPITATION_SINK_LIMIT", false)  # MP1M τ = max(τⁿᵘᵐ, Δt) (answer-changing)
     read_kernel_argument_cache_switches!()  # kernel_arguments.jl
     return nothing
 end
