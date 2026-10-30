@@ -39,6 +39,20 @@ struct Droplet{FT}
 end
 
 """
+    IceParticle{FT}
+
+An ice particle with position `(x, y, z)`, equivalent-volume radius `r` (zero once the particle has
+sublimated completely), and terminal velocity `𝕎` (positive downwards).
+"""
+struct IceParticle{FT}
+    x :: FT
+    y :: FT
+    z :: FT
+    r :: FT
+    𝕎 :: FT
+end
+
+"""
     DiffusiveSelfInteraction()
 
 Correct the condensational growth of each droplet for its own sink in the cell it samples.
@@ -87,7 +101,9 @@ Adapt.adapt_structure(to, ::DiffusiveSelfInteraction) = nothing
                            physics = DropletPhysicsParameters(FT),
                            self_interaction = DiffusiveSelfInteraction(),
                            sorting = nothing,
-                           droplets = nothing)
+                           droplets = nothing,
+                           ice_physics = IcePhysicsParameters(FT),
+                           ice = nothing)
 
 Return Lagrangian microphysics in which every cloud droplet is a Lagrangian particle.
 
@@ -101,25 +117,41 @@ time step (`CountingSort()` or `ComparisonSort()` from Oceananigans), which keep
 droplets in the same cell together, or `nothing` (the default) to keep the droplets in their initial order.
 The droplets are allocated on the architecture of the grid
 when the model is built, and can be accessed with `model.microphysics.droplets`.
+
+`ice` is a `NamedTuple` of vectors with the initial positions `x`, `y`, `z` and equivalent-volume
+radii `r` of ice particles, or `nothing` (the default) for no ice. Ice particles grow by vapor deposition
+and shrink by sublimation according to `ice_physics` ([`IcePhysicsParameters`](@ref)), exchange vapor
+and the latent heat of sublimation with the cell that contains them, and fall at their terminal velocity.
+They are accessed with `model.microphysics.ice`.
 """
-struct LagrangianMicrophysics{P, S, O, D}
+struct LagrangianMicrophysics{P, S, O, D, IP, I}
              physics :: P
     self_interaction :: S
              sorting :: O
             droplets :: D
+         ice_physics :: IP
+                 ice :: I
 end
 
 LagrangianMicrophysics(FT = Oceananigans.defaults.FloatType; physics = DropletPhysicsParameters(FT),
-                       self_interaction = DiffusiveSelfInteraction(), sorting = nothing, droplets = nothing) =
-    LagrangianMicrophysics(physics, self_interaction, sorting, droplets)
+                       self_interaction = DiffusiveSelfInteraction(), sorting = nothing, droplets = nothing,
+                       ice_physics = IcePhysicsParameters(FT), ice = nothing) =
+    LagrangianMicrophysics(physics, self_interaction, sorting, droplets, ice_physics, ice)
+
+const IceLagrangianMicrophysics = LagrangianMicrophysics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Union{NamedTuple, LagrangianParticles}}
 
 Base.summary(::LagrangianMicrophysics) = "LagrangianMicrophysics"
 
 function Base.show(io::IO, μ::LagrangianMicrophysics)
     print(io, summary(μ), '\n',
               "├── self_interaction: ", self_interaction_summary(μ.self_interaction), '\n',
-              "└── droplets: ", droplet_summary(μ.droplets))
+              "├── droplets: ", droplet_summary(μ.droplets), '\n',
+              "└── ice: ", ice_summary(μ.ice))
 end
+
+ice_summary(::Nothing) = "none"
+ice_summary(ice::LagrangianParticles) = string(length(ice), " ice particles")
+ice_summary(ice::NamedTuple) = string(length(ice.x), " ice particles (not materialized)")
 
 self_interaction_summary(::Nothing) = "nothing"
 self_interaction_summary(::DiffusiveSelfInteraction{Nothing}) = "DiffusiveSelfInteraction()"
@@ -132,7 +164,8 @@ droplet_summary(droplets::NamedTuple) = string(length(droplets.x), " droplets (n
 
 # The droplets are not used inside kernels, where only the physics parameters are needed
 Adapt.adapt_structure(to, μ::LagrangianMicrophysics) =
-    LagrangianMicrophysics(adapt(to, μ.physics), adapt(to, μ.self_interaction), nothing, nothing)
+    LagrangianMicrophysics(adapt(to, μ.physics), adapt(to, μ.self_interaction), nothing, nothing,
+                           adapt(to, μ.ice_physics), nothing)
 
 # Droplets are moved to the architecture of the grid when the model is built
 Architectures.on_architecture(arch, μ::LagrangianMicrophysics) = μ
@@ -156,11 +189,24 @@ function AtmosphereModels.materialize_microphysics(μ::LagrangianMicrophysics, g
     droplets = materialize_lagrangian_particles(droplets, timestepper)
 
     self_interaction = materialize_self_interaction(μ.self_interaction, grid, timestepper)
+    ice = materialize_ice(μ.ice, grid, timestepper, μ.sorting)
 
-    return LagrangianMicrophysics(μ.physics, self_interaction, μ.sorting, droplets)
+    return LagrangianMicrophysics(μ.physics, self_interaction, μ.sorting, droplets, μ.ice_physics, ice)
 end
 
 AtmosphereModels.materialize_microphysics(μ::LagrangianMicrophysics{<:Any, <:Any, <:Any, <:LagrangianParticles}, grid, timestepper) = μ
+
+materialize_ice(::Nothing, grid, timestepper, sorting) = nothing
+
+function materialize_ice(ice::NamedTuple, grid, timestepper, sorting)
+    FT = eltype(grid)
+    arch = architecture(grid)
+    Ni = length(ice.x)
+    components = (x = ice.x, y = ice.y, z = ice.z, r = ice.r, 𝕎 = zeros(FT, Ni))
+    components = map(c -> on_architecture(arch, convert(Vector{FT}, c)), components)
+    particles = LagrangianParticles(StructArray{IceParticle{FT}}(components); sorting)
+    return materialize_lagrangian_particles(particles, timestepper)
+end
 
 materialize_self_interaction(::Nothing, grid, timestepper) = nothing
 materialize_self_interaction(s::DiffusiveSelfInteraction{<:Number}, grid, timestepper) = s
@@ -295,10 +341,14 @@ initial_droplets(::Nothing, FT) = (x = FT[], y = FT[], z = FT[], r = FT[], rᵈ 
 initial_droplets(droplets::NamedTuple, FT) = droplets
 
 AtmosphereModels.microphysics_particles(μ::LagrangianMicrophysics) = μ.droplets
+AtmosphereModels.microphysics_particles(μ::IceLagrangianMicrophysics) = (μ.droplets, μ.ice)
 
 # Droplets fall relative to the air at their terminal velocity
 @inline LagrangianParticleTracking.particle_w_velocity(droplets::AbstractVector{<:Droplet}, p, w) =
     @inbounds w - droplets.𝕎[p]
+
+@inline LagrangianParticleTracking.particle_w_velocity(ice::AbstractVector{<:IceParticle}, p, w) =
+    @inbounds w - ice.𝕎[p]
 
 #####
 ##### Microphysics interface
@@ -318,6 +368,12 @@ in each cell during the most recent time step.
 AtmosphereModels.materialize_microphysical_fields(::LagrangianMicrophysics, grid, boundary_conditions) =
     (qᵛ = CenterField(grid), qˡ = CenterField(grid), C = CenterField(grid))
 
+# With ice: the ice mass fraction `qⁱ` of the ice particles in each cell and the mass density `D`
+# of vapor deposited in each cell during the most recent time step
+AtmosphereModels.materialize_microphysical_fields(::IceLagrangianMicrophysics, grid, boundary_conditions) =
+    (qᵛ = CenterField(grid), qˡ = CenterField(grid), C = CenterField(grid),
+     qⁱ = CenterField(grid), D = CenterField(grid))
+
 @inline AtmosphereModels.microphysical_tendency(::LagrangianMicrophysics, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 @inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::LagrangianMicrophysics, qᵛ, constants) = 𝒰
 
@@ -332,6 +388,7 @@ end
 
 AtmosphereModels.liquid_mass_fraction(::LagrangianMicrophysics, model) = model.microphysical_fields.qˡ
 AtmosphereModels.ice_mass_fraction(::LagrangianMicrophysics, model) = nothing
+AtmosphereModels.ice_mass_fraction(::IceLagrangianMicrophysics, model) = model.microphysical_fields.qⁱ
 
 #####
 ##### Coupling droplets and air
@@ -402,19 +459,65 @@ end
     atomic_add!(C, halo, i, j, k, step.condensed_mass / Vᶜᶜᶜ(i, j, k, grid))
 end
 
-# Remove the condensed mass density C from the vapor, and warm the air at constant pressure
-# by the latent heat released, cᵖᵐ ΔT = ℒˡ C / ρ.
-@kernel function _apply_condensation!(ρθ, ρqᵛ, C, T, ρ, p, pˢᵗ, constants)
+@kernel function _deposit_ice_mass!(qⁱ, halo, ice, grid, ρ, physics)
+    p = @index(Global)
+    @inbounds X = (ice.x[p], ice.y[p], ice.z[p])
+    @inbounds r = ice.r[p]
+    i, j, k = droplet_cell(X, grid)
+    m = ice_particle_mass(r, physics)
+    @inbounds ρᵢ = ρ[i, j, k]
+    atomic_add!(qⁱ, halo, i, j, k, m / (ρᵢ * Vᶜᶜᶜ(i, j, k, grid)))
+end
+
+@kernel function _deposit_vapor_on_ice!(D, halo, ice, grid, Δt, T, ρ, ρqᵛ, p, constants, physics, self_interaction)
+    n = @index(Global)
+    @inbounds begin
+        X = (ice.x[n], ice.y[n], ice.z[n])
+        r = ice.r[n]
+        𝕎 = ice.𝕎[n]
+    end
+
+    i, j, k = droplet_cell(X, grid)
+
+    @inbounds begin
+        Tᵢ = T[i, j, k]
+        ρᵢ = ρ[i, j, k]
+        pᵢ = p[i, j, k]
+        q = MoistureMassFractions(ρqᵛ[i, j, k] / ρᵢ)
+    end
+
+    ρᵗ = pᵢ / (mixture_gas_constant(q, constants) * Tᵢ)
+    𝒮ⁱ = supersaturation(Tᵢ, ρᵗ, q, constants, PlanarIceSurface())
+    fᵛ = ventilation_factor(physics.capacitance_ratio * r, 𝕎, Tᵢ, pᵢ, constants, physics)
+    step = depositional_growth_step(r, 𝒮ⁱ, fᵛ, Tᵢ, pᵢ, Δt, constants, physics, self_interaction)
+    r⁺ = step.radius
+
+    @inbounds begin
+        ice.r[n] = r⁺
+        ice.𝕎[n] = ice_terminal_velocity(r⁺, Tᵢ, pᵢ, constants, physics)
+    end
+
+    atomic_add!(D, halo, i, j, k, step.deposited_mass / Vᶜᶜᶜ(i, j, k, grid))
+end
+
+@inline deposited_vapor(::Nothing, i, j, k) = 0
+@inline deposited_vapor(D, i, j, k) = @inbounds D[i, j, k]
+
+# Remove the condensed and deposited mass densities C and D from the vapor, and warm the air at constant
+# pressure by the latent heat released, cᵖᵐ ΔT = (ℒˡ C + ℒⁱ D) / ρ.
+@kernel function _apply_condensation!(ρθ, ρqᵛ, C, D, T, ρ, p, pˢᵗ, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         Cᵢ = C[i, j, k]
+        Dᵢ = deposited_vapor(D, i, j, k)
         ρᵢ = ρ[i, j, k]
         Tᵢ = T[i, j, k]
-        ρqᵛ⁺ = ρqᵛ[i, j, k] - Cᵢ
+        ρqᵛ⁺ = ρqᵛ[i, j, k] - Cᵢ - Dᵢ
         q⁺ = MoistureMassFractions(ρqᵛ⁺ / ρᵢ)
         ℒˡ = liquid_latent_heat(Tᵢ, constants)
+        ℒⁱ = ice_latent_heat(Tᵢ, constants)
         cᵖᵐ = mixture_heat_capacity(q⁺, constants)
-        T⁺ = Tᵢ + ℒˡ * Cᵢ / (ρᵢ * cᵖᵐ)
+        T⁺ = Tᵢ + (ℒˡ * Cᵢ + ℒⁱ * Dᵢ) / (ρᵢ * cᵖᵐ)
         θ⁺ = potential_temperature_from_temperature(T⁺, p[i, j, k], pˢᵗ, constants, q⁺)
         ρqᵛ[i, j, k] = ρqᵛ⁺
         ρθ[i, j, k] = ρᵢ * θ⁺
@@ -457,15 +560,57 @@ function AtmosphereModels.microphysics_model_update!(μ::LagrangianMicrophysics,
     self_interaction = self_interaction_parameters(μ.self_interaction, model.closure, grid, Δt)
     Nd > 0 && launch!(arch, grid, KernelParameters(1:Nd), _condense_droplets!,
                       parent(C), halo, droplets, grid, kernel_Δt, T, ρ, ρqᵛ, p, constants, μ.physics, self_interaction)
-    launch!(arch, grid, :xyz, _apply_condensation!, ρθ, ρqᵛ, C, T, ρ, p, pˢᵗ, constants)
+    D = deposit_vapor_on_ice!(μ, model, kernel_Δt, self_interaction)
+    launch!(arch, grid, :xyz, _apply_condensation!, ρθ, ρqᵛ, C, D, T, ρ, p, pˢᵗ, constants)
 
     # Diagnose the liquid mass fraction of the droplets in each cell
     fill!(parent(qˡ), 0)
     Nd > 0 && launch!(arch, grid, KernelParameters(1:Nd), _deposit_droplet_liquid!,
                       parent(qˡ), halo, droplets, grid, ρ, constants)
 
+    diagnose_ice_mass_fraction!(μ, model)
+
     # Refill halos and recompute diagnostics so the post-update state is consistent for the next step
     update_state!(model)
 
+    return nothing
+end
+
+#####
+##### Ice deposition and sublimation
+#####
+
+deposit_vapor_on_ice!(μ::LagrangianMicrophysics, model, Δt, self_interaction) = nothing
+diagnose_ice_mass_fraction!(μ::LagrangianMicrophysics, model) = nothing
+
+# Deposition at the supersaturation over ice of each particle's cell, from the same state as the
+# condensation on droplets, so that both see the vapor and temperature before either is applied.
+# Returns the deposited mass density `D`.
+function deposit_vapor_on_ice!(μ::IceLagrangianMicrophysics, model, Δt, self_interaction)
+    grid = model.grid
+    arch = architecture(grid)
+    ice = μ.ice.properties
+    D = model.microphysical_fields.D
+    fill!(parent(D), 0)
+    Ni = length(ice)
+    Ni > 0 && launch!(arch, grid, KernelParameters(1:Ni), _deposit_vapor_on_ice!,
+                      parent(D), halo_size(grid), ice, grid, Δt, model.temperature,
+                      dynamics_density(model.dynamics), model.moisture_density,
+                      dynamics_pressure(model.dynamics), model.thermodynamic_constants, μ.ice_physics,
+                      ice_self_interaction(self_interaction))
+    return D
+end
+
+# The self-interaction parameters of the grid apply to ice with the capacitance in place of the radius
+ice_self_interaction(self_interaction) = self_interaction
+
+function diagnose_ice_mass_fraction!(μ::IceLagrangianMicrophysics, model)
+    grid = model.grid
+    ice = μ.ice.properties
+    qⁱ = model.microphysical_fields.qⁱ
+    fill!(parent(qⁱ), 0)
+    Ni = length(ice)
+    Ni > 0 && launch!(architecture(grid), grid, KernelParameters(1:Ni), _deposit_ice_mass!,
+                      parent(qⁱ), halo_size(grid), ice, grid, dynamics_density(model.dynamics), μ.ice_physics)
     return nothing
 end

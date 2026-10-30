@@ -10,9 +10,11 @@ export
     LagrangianMicrophysics,
     DiffusiveSelfInteraction,
     Droplet,
+    IceParticle,
 
     # Parameters and component models
     DropletPhysicsParameters,
+    IcePhysicsParameters,
     PowerLawVaporDiffusivity,
     LinearThermalConductivity,
     SutherlandViscosity,
@@ -47,9 +49,17 @@ export
     drag_correction,
     droplet_response_time,
     exponential_drag_step,
-    droplet_terminal_velocity
+    droplet_terminal_velocity,
+
+    # Ice deposition and sublimation
+    spheroid_capacitance_ratio,
+    depositional_growth_rate,
+    depositional_growth_step,
+    ice_particle_mass,
+    ice_terminal_velocity
 
 include("droplet_physics.jl")
+include("ice_physics.jl")
 
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index, @atomic

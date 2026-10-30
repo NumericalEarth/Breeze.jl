@@ -856,13 +856,22 @@ Models.boundary_condition_args(model::AtmosphereModel) =
 # Particles of particle-based microphysics are advanced together with `model.particles`
 function TimeSteppers.step_lagrangian_particles!(model::AtmosphereModel, Δt)
     step_lagrangian_particles!(model.particles, model, Δt)
-    step_lagrangian_particles!(microphysics_particles(model.microphysics), model, Δt)
+    step_microphysics_particles!(microphysics_particles(model.microphysics), model, Δt)
     return nothing
 end
 
+# Particle-based microphysics may carry several particle species, as a tuple of `LagrangianParticles`
+step_microphysics_particles!(particles, model, Δt) = step_lagrangian_particles!(particles, model, Δt)
+step_microphysics_particles!(particles::Tuple, model, Δt) =
+    foreach(species -> step_lagrangian_particles!(species, model, Δt), particles)
+
+substep_microphysics_particles!(particles, model, Δt, stage) = substep_lagrangian_particles!(particles, model, Δt, stage)
+substep_microphysics_particles!(particles::Tuple, model, Δt, stage) =
+    foreach(species -> substep_lagrangian_particles!(species, model, Δt, stage), particles)
+
 function TimeSteppers.substep_lagrangian_particles!(model::AtmosphereModel, Δt, stage)
     substep_lagrangian_particles!(model.particles, model, Δt, stage)
-    substep_lagrangian_particles!(microphysics_particles(model.microphysics), model, Δt, stage)
+    substep_microphysics_particles!(microphysics_particles(model.microphysics), model, Δt, stage)
     return nothing
 end
 
