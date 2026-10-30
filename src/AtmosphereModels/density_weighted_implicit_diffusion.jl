@@ -200,19 +200,39 @@ end
 end
 
 #####
-##### Closure-supplied implicit coefficients
+##### Closure-supplied implicit vertical transport
 #####
 ##### A closure whose vertical transport is not a diffusivity, such as the compensating (return-flow)
 ##### subsidence of a mass-flux closure, which is upwind advection by a velocity the closure diagnoses,
-##### contributes its own tridiagonal coefficients here. They are added to the density-weighted
-##### diffusion and implicit-advection coefficients of every row, so they may be asymmetric. The
-##### default is zero, and since every row already sums the diffusion part with a `zero(grid)`
-##### advection part for non-adaptive schemes, adding one more `zero(grid)` leaves every existing
-##### coefficient, signed zeros included, bitwise unchanged.
+##### adds its own tridiagonal coefficients to the solve. As in Oceananigans'
+##### `vertically_implicit_diffusion_solver.jl`, where
 #####
-##### TODO: this belongs in Oceananigans' `vertically_implicit_diffusion_solver.jl` as a generic
-##### `implicit_vertical_flux_coefficients(closure, K, id)`, so that any closure could add a
-##### non-diffusive linear operator to the vertically implicit solve.
+#####   ivd_diagonal(k) = 1 - Δt * implicit_linear_coefficient(k) - ivd_upper_diagonal(k) - ivd_lower_diagonal(k - 1),
+#####
+##### the closure supplies an upper off-diagonal, a lower off-diagonal and a linear coefficient, and
+##### its diagonal contribution is derived:
+#####
+#####   d_closure(k) = - Δt * λ(k) - du(k) - dl(k - 1).
+#####
+##### With λ = 0 the rows sum to one, so a constant `q` is preserved, but that is the *advective* form
+##### `∂t q = - ŵ ∂z q`. For a divergent velocity the flux form `∂t q = - ∂z(ŵ q)` differs from it by
+##### `- q ∂z ŵ`, and only the flux form conserves the column. So a closure that transports in flux
+##### form must return λ = - ∂z ŵ, discretized consistently with its off-diagonals (see
+##### `closure_implicit_linear_coefficient`). The defaults are zero; the off-diagonals then add `+0`
+##### where the advection part already adds `zero(grid)`, and the diagonal adds `-0`, which is an
+##### exact identity, so every existing coefficient is bitwise unchanged.
+#####
+##### A closure may instead supply its diagonal directly by extending `closure_implicit_diagonal`, whose
+##### default is the derived diagonal above; it is then responsible for conserving the column itself.
+#####
+##### TODO: move `closure_implicit_upper_diagonal`, `closure_implicit_lower_diagonal` and
+##### `closure_implicit_linear_coefficient` into Oceananigans' `vertically_implicit_diffusion_solver.jl`,
+##### next to `implicit_linear_coefficient` (which already plays the role of the third), as generic
+##### non-diffusive off-diagonal hooks summed over closure tuples in `closure_tuples.jl` and folded into
+##### `ivd_upper_diagonal`, `ivd_lower_diagonal` and `ivd_diagonal` with the same derived diagonal.
+##### Breeze would then keep only the density weighting below (the `ρ` passed to the hooks, and the
+##### per-column `ρᶜ` factors of the diffusive part), and these three functions and the tuple
+##### recursion could be deleted here.
 #####
 
 """
@@ -223,12 +243,13 @@ contributed by `closure` with fields `closure_fields`, for the closure scalar `i
 into the closure's scalar names, or `nothing` for momentum) at the vertical location `ℓz`.
 `Δt` is the interval of the solve, and `ρ` the density that reconstructs the specific value
 ``c = q / ρ`` of the field being solved for. The coefficient multiplies `q` (the density-weighted
-prognostic), already includes `Δt`, and is added to the coefficient of the vertically implicit
+prognostic), already includes `Δt`, and is added to the coefficients of the vertically implicit
 diffusion and advection. The default is zero; tuples of closures sum their members'.
 
-A closure that extends this is responsible for its own boundary rows: the solver evaluates the
-upper diagonal for `k = 1, …, Nz - 1`. To conserve the column, the diagonal contribution of every
-row must balance the off-diagonal contributions of the other rows that couple the same `q`.
+The closure's contribution to the diagonal is not supplied separately: it is derived as
+``-Δt λₖ - du_k - dl_{k-1}``, as in Oceananigans' `ivd_diagonal`, with `λ` from
+[`closure_implicit_linear_coefficient`](@ref). The solver also evaluates this function at
+`k = Nz` for the diagonal, so a closure must return zero across the top boundary face.
 """
 @inline closure_implicit_upper_diagonal(i, j, k, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) =
     zero(grid)
@@ -237,9 +258,10 @@ row must balance the off-diagonal contributions of the other rows that couple th
 $(TYPEDSIGNATURES)
 
 The coefficient of ``q_{k′}`` in row `k′ + 1` of the vertically implicit solve contributed by
-`closure`, with `k′ = 1, …, Nz - 1` (the `LinearAlgebra.Tridiagonal` convention, as in
-Oceananigans' `ivd_lower_diagonal`). The arguments and conventions are those of
-[`closure_implicit_upper_diagonal`](@ref). The default is zero.
+`closure` (the `LinearAlgebra.Tridiagonal` convention, as in Oceananigans' `ivd_lower_diagonal`).
+The arguments and conventions are those of [`closure_implicit_upper_diagonal`](@ref). The solver
+also evaluates this function at `k′ = 0` for the diagonal of row 1, so a closure must return zero
+across the bottom boundary face. The default is zero.
 """
 @inline closure_implicit_lower_diagonal(i, j, k′, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) =
     zero(grid)
@@ -247,16 +269,60 @@ Oceananigans' `ivd_lower_diagonal`). The arguments and conventions are those of
 """
 $(TYPEDSIGNATURES)
 
-The contribution of `closure` to the coefficient of ``q_k`` in row `k` of the vertically implicit
-solve, excluding the identity. The arguments and conventions are those of
-[`closure_implicit_upper_diagonal`](@ref). The default is zero.
+The linear coefficient `λ` of row `k` contributed by `closure`, the Breeze analogue of
+Oceananigans' `implicit_linear_coefficient` for the closure-supplied transport: the solve treats
+``∂t q = λ q`` implicitly, and the closure's diagonal is ``-Δt λₖ - du_k - dl_{k-1}`` with the
+off-diagonals of [`closure_implicit_upper_diagonal`](@ref) and
+[`closure_implicit_lower_diagonal`](@ref). Unlike those, `λ` excludes `Δt`. The default is zero.
+
+With `λ = 0` the derived diagonal makes every row sum to one, which is the advective form: it
+preserves a constant `q` but, for a velocity that varies with height (a mass-flux return flow, for
+instance), it does not conserve the column. Conservation of the flux form requires `λ` to be minus
+the discrete divergence of the closure's velocity in the density-weighted sense used here. For
+first-order upwind transport by a face velocity `w` with flux
+``Fₖ = ρᶠₖ [max(wₖ, 0) qₖ₋₁ / ρᶜₖ₋₁ + min(wₖ, 0) qₖ / ρᶜₖ]``, the effective velocity of `q` across
+face `k` is ``ŵₖ = ρᶠₖ wₖ / ρᶜ_{upwind}``, and
+
+```
+λₖ = - (ŵ⁻ₖ₊₁ - ŵ⁺ₖ) / Δzᶜₖ,
+ŵ⁻ₖ₊₁ = ρᶠₖ₊₁ [max(wₖ₊₁, 0) / ρᶜₖ + min(wₖ₊₁, 0) / ρᶜₖ₊₁],
+ŵ⁺ₖ   = ρᶠₖ   [max(wₖ,   0) / ρᶜₖ₋₁ + min(wₖ, 0) / ρᶜₖ],
+```
+
+with `w` zero on the boundary faces: that is, `λ = -∂ŵ/∂z`, which reduces to `-∂w/∂z` for
+uniform density. Each column of the resulting matrix then sums to one with `Δz` weights, so
+``∑ₖ qₖ Δzᶜₖ`` is conserved exactly.
 """
-@inline closure_implicit_diagonal(i, j, k, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) =
+@inline closure_implicit_linear_coefficient(i, j, k, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) =
     zero(grid)
 
-for coefficient in (:closure_implicit_upper_diagonal, :closure_implicit_lower_diagonal, :closure_implicit_diagonal)
+"""
+$(TYPEDSIGNATURES)
+
+The contribution of `closure` to the coefficient of ``q_k`` in row `k` of the vertically implicit
+solve, excluding the identity. The arguments and conventions are those of
+[`closure_implicit_upper_diagonal`](@ref). The default is derived from the closure's
+off-diagonals and linear coefficient, ``-Δt λₖ - du_k - dl_{k-1}``, as in Oceananigans'
+`ivd_diagonal`, which is zero when those are. A closure that extends this supplies its diagonal
+directly and is responsible for conserving the column: the diagonal contribution of every row
+must balance the off-diagonal contributions of the other rows that couple the same `q`.
+"""
+@inline function closure_implicit_diagonal(i, j, k, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ)
+    λ  = closure_implicit_linear_coefficient(i, j, k,   grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ)
+    du = closure_implicit_upper_diagonal(i, j, k,       grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ)
+    dl = closure_implicit_lower_diagonal(i, j, k - 1,   grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ)
+    return - Δt * λ - du - dl
+end
+
+# The empty tuple ends each sum with the identity of addition: `+0` for the off-diagonals and the
+# linear coefficient, and `-0` for the diagonal, so that a tuple of closures that do not extend the
+# hooks returns the same `-0` as its members' derived diagonal.
+for (coefficient, empty) in ((:closure_implicit_upper_diagonal, :(zero(grid))),
+                             (:closure_implicit_lower_diagonal, :(zero(grid))),
+                             (:closure_implicit_linear_coefficient, :(zero(grid))),
+                             (:closure_implicit_diagonal, :(-zero(grid))))
     @eval begin
-        @inline $coefficient(i, j, k, grid, ::Tuple{}, ::Tuple{}, args...) = zero(grid)
+        @inline $coefficient(i, j, k, grid, ::Tuple{}, ::Tuple{}, args...) = $empty
 
         @inline $coefficient(i, j, k, grid, closures::Tuple, closure_fields::Tuple, args...) =
             $coefficient(i, j, k, grid, first(closures), first(closure_fields), args...) +
