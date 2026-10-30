@@ -30,16 +30,17 @@ end
 # ΔΘ = (ρᵈ / ρ) Q Δt / (ĉᵖ Π) = (ρᵈ / ρ) (θ / H) Q Δt
 function heating_from_theta(model, ΔΘ)
     constants = model.thermodynamic_constants
-    ρ = column_values(AM.total_density(model.dynamics))
-    ρᵈ = column_values(AM.dynamics_density(model.dynamics))
-    θ = column_values(model.formulation.potential_temperature)
-    T = column_values(model.temperature)
-    qᵛ = column_values(AM.specific_humidity(model))
+    values(f) = Float64.(Array(interior(f)))  # reference fields are reduced in x and y; broadcast them
+    ρ = values(AM.total_density(model.dynamics))
+    ρᵈ = values(AM.dynamics_density(model.dynamics))
+    θ = values(model.formulation.potential_temperature)
+    T = values(model.temperature)
+    qᵛ = values(AM.specific_humidity(model))
     qˡ_field = AM.liquid_mass_fraction(model)
-    qˡ = isnothing(qˡ_field) ? zero(T) : column_values(qˡ_field)
-    H = [TD.mixture_heat_capacity(TD.MoistureMassFractions(qᵛ[k], qˡ[k], 0.0), constants) * T[k] -
-         TD.absolute_zero_latent_heat(constants, constants.liquid) * qˡ[k] for k in eachindex(T)]
-    return ρ ./ ρᵈ .* H ./ θ .* ΔΘ
+    qˡ = isnothing(qˡ_field) ? zero(T) : values(qˡ_field)
+    ℒˡ₀ = TD.absolute_zero_latent_heat(constants, constants.liquid)
+    H = TD.mixture_heat_capacity.(TD.MoistureMassFractions.(qᵛ, qˡ, 0.0), Ref(constants)) .* T .- ℒˡ₀ .* qˡ
+    return vec(ρ ./ ρᵈ .* H ./ θ) .* ΔΘ
 end
 
 @testset "Energy-closing source options" begin
