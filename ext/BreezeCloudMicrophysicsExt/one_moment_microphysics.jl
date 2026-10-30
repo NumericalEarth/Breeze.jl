@@ -926,10 +926,10 @@ const τⁿᵘᵐ = 10  # seconds
 
 # Fraction of a donor's process rates that can be honoured without draining more than
 # its content `q` over τⁿᵘᵐ: 1 when the summed sink rate `ΣS` fits, `q⁺ / (τⁿᵘᵐ ΣS)` otherwise.
-@inline function donor_limiter(q, ΣS)
+@inline function donor_limiter(q, ΣS, τ = τⁿᵘᵐ)
     q⁺ = max(0, q)
     # Disabled processes return integer zeros; retain the moisture precision for zero demand.
-    demand = oftype(q, τⁿᵘᵐ) * ΣS
+    demand = oftype(q, τ) * ΣS
     # Protect the eagerly evaluated quotient at zero demand without flooring positive demand.
     denominator = ifelse(iszero(demand), one(demand), demand)
     return ifelse(demand > q⁺, q⁺ / denominator, one(demand))
@@ -1376,7 +1376,10 @@ end
 
 # The bundle at moisture mass fractions `q` and temperature `T` (T17-mp1m: `T` may be the stored
 # field value, which is the same `temperature(𝒰)`; see `stored_microphysics_temperature`).
-@inline function mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, q, T, constants)
+# `τ`: the donor-limiter and negative-relaxation timescale, τⁿᵘᵐ by default. T21-precip
+# (`BREEZE_PRECIPITATION_SINK_LIMIT`, answer-changing) passes max(τⁿᵘᵐ, Δt), which limits every
+# donor's summed sinks to content/Δt, i.e. scales each sink by min(1, q / (ΣS Δt)).
+@inline function mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, q, T, constants, τ = τⁿᵘᵐ)
     categories = bμp.categories
     qᶜˡ = ℳ.qᶜˡ
     qᶜⁱ = ℳ.qᶜⁱ
@@ -1397,16 +1400,16 @@ end
     Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
     Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)
 
-    fᵛ  = donor_limiter(qᵛ,  Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺)
-    fᶜˡ = donor_limiter(qᶜˡ, Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ)
-    fᶜⁱ = donor_limiter(qᶜⁱ, Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ)
-    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
+    fᵛ  = donor_limiter(qᵛ,  Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺, τ)
+    fᶜˡ = donor_limiter(qᶜˡ, Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ, τ)
+    fᶜⁱ = donor_limiter(qᶜⁱ, Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ, τ)
+    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ, τ)
 
     # Collected liquid supplies heat for the melt rate α Sᵃᶜᶜˡˢⁿ. Limit collection before
     # computing this melt demand, then cap all snow sinks against the available snow.
     Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
     Sˢⁿʷ = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
-    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
+    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ, τ)
 
     Sᵉᵛᵃᵖ = fᵛ * Sᵉᵛᵃᵖ⁺ + fʳ * Sᵉᵛᵃᵖ⁻
     Sˢᵘᵇˡ = fᵛ * Sˢᵘᵇˡ⁺ + fˢⁿ * Sˢᵘᵇˡ⁻
@@ -1426,8 +1429,8 @@ end
                      - ifelse(is_warm, αSᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T)))
 
     # Negative precipitation (from transport) relaxes back toward zero, drawing on ρqᵉ.
-    ρqʳ  = ifelse(qʳ  ≥ 0, ρqʳ_phys,  -ρ * qʳ  / τⁿᵘᵐ)
-    ρqˢⁿ = ifelse(qˢⁿ ≥ 0, ρqˢⁿ_phys, -ρ * qˢⁿ / τⁿᵘᵐ)
+    ρqʳ  = ifelse(qʳ  ≥ 0, ρqʳ_phys,  -ρ * qʳ  / τ)
+    ρqˢⁿ = ifelse(qˢⁿ ≥ 0, ρqˢⁿ_phys, -ρ * qˢⁿ / τ)
     ρqᵉ  = -ρqʳ - ρqˢⁿ
 
     return (; ρqᵉ, ρqʳ, ρqˢⁿ)
@@ -1451,7 +1454,7 @@ end
 # Fused kernel: evaluate the MP1M bundle once per cell and write all three tendencies.
 @kernel function _compute_mp1m_tendencies!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, grid, microphysics, dynamics, formulation,
                                            constants, specific_prognostic_moisture, microphysical_fields,
-                                           temperature_field)
+                                           temperature_field, τ)
     i, j, k = @index(Global, NTuple)
 
     ρ_field = AM.total_density(dynamics)
@@ -1463,7 +1466,7 @@ end
     # microphysical_state(::MP1M) reads only 𝒰.moisture_mass_fractions
     ℳ = AM.microphysical_state(microphysics, ρ, microphysical_fields_at(microphysical_fields, i, j, k), (; moisture_mass_fractions = q), nothing)
 
-    G = mp1m_tendencies(microphysics, ρ, ℳ, q, T, constants)
+    G = mp1m_tendencies(microphysics, ρ, ℳ, q, T, constants, τ)
 
     @inbounds Gρqᵉ[i, j, k]  += G.ρqᵉ
     @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
@@ -1484,6 +1487,15 @@ function AM.compute_microphysical_tendencies!(microphysics::MP1M, model)
     launch!(grid.architecture, grid, :xyz, _compute_mp1m_tendencies!,
             G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
-            model.microphysical_fields, AM.stored_microphysics_temperature(model))
+            model.microphysical_fields, AM.stored_microphysics_temperature(model),
+            mp1m_sink_timescale(grid, model.clock))
     return nothing
+end
+
+# Off: the literal τⁿᵘᵐ (bitwise unchanged). On: max(τⁿᵘᵐ, last outer Δt) once a step has been taken.
+function mp1m_sink_timescale(grid, clock)
+    AM.PRECIPITATION_SINK_LIMIT[] || return τⁿᵘᵐ
+    Δt = clock.last_Δt
+    FT = eltype(grid)
+    return isfinite(Δt) && Δt > 0 ? FT(max(τⁿᵘᵐ, Δt)) : FT(τⁿᵘᵐ)
 end
