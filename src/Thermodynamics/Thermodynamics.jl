@@ -23,9 +23,7 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
        # Phase equilibrium types
        AbstractPhaseEquilibrium, WarmPhaseEquilibrium, MixedPhaseEquilibrium,
-       equilibrated_surface,
-       # Tabulated hydrostatic columns
-       HydrostaticSounding, sounding_pressure, sounding_virtual_temperature, virtual_temperature
+       equilibrated_surface
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Oceananigans: Oceananigans
@@ -38,7 +36,6 @@ include("clausius_clapeyron.jl")
 include("tetens_formula.jl")
 include("flatau_polynomial.jl")
 include("reference_states.jl")
-include("hydrostatic_soundings.jl")
 include("dynamic_states.jl")
 
 end # module

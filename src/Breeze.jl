@@ -10,7 +10,6 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
-    HydrostaticSounding,
     ExnerReferenceState,
     compute_reference_state!,
     set_to_mean!,
@@ -163,7 +162,6 @@ export
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
-    piecewise_linear_regrid!,
     TerrainFollowingVerticalDiscretization,
     LinearDecay,
     TwoLevelDecay,
@@ -240,7 +238,7 @@ export
     TKEBasedTurbulenceClosure, AbstractMixingLength, LocalMinimumMixingLength, IntegralMixingLength,
     GradientLimitedMixingLength, ConstantStabilityFunctions,
     RationalStabilityFunction,
-    tke_surface_flux, DryStaticStability, MoistStaticStability,
+    DryStaticStability, MoistStaticStability,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
