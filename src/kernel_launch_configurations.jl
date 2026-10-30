@@ -113,6 +113,7 @@ const k_tiled_kernel_names = (
     (Utils, :_compute_tendency!) => (32, 1, 4),
     (AtmosphereModels, :compute_z_momentum_tendency!) => (32, 1, 4),
     (AtmosphereModels, :compute_scalar_tendency!) => (32, 1, 4),
+    (AtmosphereModels, :compute_scalar_tendencies!) => (32, 1, 4),
     (Advection, :_x_momentum_bounded_face_fluxes!) => (32, 1, 4),
     (Advection, :_y_momentum_bounded_face_fluxes!) => (32, 1, 4),
     (Advection, :_z_momentum_bounded_face_fluxes!) => (32, 1, 4),

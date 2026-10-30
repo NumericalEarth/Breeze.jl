@@ -155,6 +155,8 @@ using Oceananigans.Utils: prettysummary, launch!
 const FILLS_TOGETHER = Ref(true)
 # Handoff C6 (e97db3f8): the scalar RK3 update of the multi-right-hand-side group formed inside its solve.
 const FOLDED_RK3_SOLVES = Ref(true)
+"`BREEZE_BATCHED_SCALAR_TENDENCIES` (default true): the moisture and every tracer tendency in one launch (T22 scalars)."
+const BATCHED_SCALAR_TENDENCIES = Ref(true)
 "`BREEZE_SKIP_DEAD_FILLS` (default true): leave out halo fills that a later fill in the same pass overwrites unread."
 const SKIP_DEAD_FILLS = Ref(true)
 "`BREEZE_BATCHED_Z_BCS` (default true): the z flux-BC tendencies of every prognostic in one launch."
@@ -172,6 +174,7 @@ function __init__()
     CELLWISE_MOISTURE_CORRECTION[] = env_switch("BREEZE_CELLWISE_MOISTURE_CORRECTION", true)
     read_kernel_argument_cache_switches!()  # kernel_arguments.jl
     FOLDED_RK3_SOLVES[] = env_switch("BREEZE_FOLDED_RK3_SOLVES", true)
+    BATCHED_SCALAR_TENDENCIES[] = env_switch("BREEZE_BATCHED_SCALAR_TENDENCIES", true)
     return nothing
 end
 
