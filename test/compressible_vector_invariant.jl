@@ -156,6 +156,7 @@ centered() = CompressibleVectorInvariant()
 unsplit() = CompressibleVectorInvariant(vertical_formulation = UnsplitVerticalAdvection())
 weno_vorticity() = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9))
 averaged_weno_vorticity() = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9), vorticity_pairing = AveragedVorticityPairing())
+corner_weno_vorticity() = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9), vorticity_pairing = CornerVorticityPairing())
 averaged_centered_vorticity() = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 2), vorticity_pairing = AveragedVorticityPairing())
 weno_divergence() = CompressibleVectorInvariant(divergence_scheme = WENO(order = 5))
 weno_kinetic_energy() = CompressibleVectorInvariant(kinetic_energy_gradient_scheme = WENO(order = 5))
@@ -177,7 +178,7 @@ flux_form() = Centered(order = 2)
             weno = CompressibleWENOVectorInvariant()
             @test weno.vorticity_scheme isa WENO{5}
             @test weno.divergence_scheme isa WENO{3}
-            @test weno.vorticity_pairing isa CornerVorticityPairing
+            @test weno.vorticity_pairing isa UpwindVorticityPairing
             @test weno.centered_vorticity_scheme isa Centered{5}
             @test isnothing(scheme.centered_vorticity_scheme)
             @test Oceananigans.Grids.required_halo_size_x(weno) == 6
@@ -200,7 +201,7 @@ flux_form() = Centered(order = 2)
 
                 # Exact (to roundoff) for the centered schemes in both vertical formulations, and for an
                 # upwind-biased vorticity, whose symmetric pairings do no work for any reconstruction.
-                for scheme in (centered(), unsplit(), weno_vorticity(), averaged_weno_vorticity(), averaged_centered_vorticity())
+                for scheme in (centered(), unsplit(), weno_vorticity(), corner_weno_vorticity(), averaged_weno_vorticity(), averaged_centered_vorticity())
                     @test abs(kinetic_energy_production(model, scheme)) < roundoff
                 end
 
@@ -239,8 +240,10 @@ flux_form() = Centered(order = 2)
             grid = rectilinear_grid(default_arch, FT, (16, 12, 6))
             model = compressible_model(grid, centered())
             set_random_state!(model)
-            corner = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 4))
-            @test relative_difference(model, corner, centered()) < roundoff
+            for pairing in (UpwindVorticityPairing(), CornerVorticityPairing())
+                corner = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 4), vorticity_pairing = pairing)
+                @test relative_difference(model, corner, centered()) < roundoff
+            end
             @test relative_difference(model, averaged_centered_vorticity(), centered()) > 1e-3
         end
 
