@@ -498,7 +498,8 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
                                                  for name in prognostic_field_names(model.microphysics))
 
     scalars = merge(prognostic_microphysical_fields, model.tracers)
-    for (i, name) in enumerate(keys(scalars))
+    STABLE_SCALAR_LAUNCH[] && launch_scalar_tendencies!(model, grid, scalars, common_args, Val(1))
+    STABLE_SCALAR_LAUNCH[] || for (i, name) in enumerate(keys(scalars))
         ρc = scalars[name]
 
         scalar_args = (
@@ -646,3 +647,15 @@ end
 
 compute_closure_tendencies!(Gⁿ, closure_fields::Tuple, closures::Tuple, model) =
     throw(ArgumentError("The numbers of closures and closure fields must match."))
+
+# T22 (`BREEZE_STABLE_SCALAR_LAUNCH`): the scalar tendency launches of `compute_tendencies!`, unrolled over
+# the scalars' names by recursion on the static index n, so every `launch!` is statically dispatched.
+# Same order, kernels and arguments as the runtime loop.
+function launch_scalar_tendencies!(model, grid, scalars::NamedTuple{names}, common_args, ::Val{n}) where {names, n}
+    n > length(names) && return nothing
+    name = names[n]
+    scalar_args = (scalars[name], Val(n + 2), Val(name), model.forcing[name], model.advection[name], common_args...)
+    Gρc = getproperty(model.timestepper.Gⁿ, name)
+    launch!(grid.architecture, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
+    return launch_scalar_tendencies!(model, grid, scalars, common_args, Val(n + 1))
+end

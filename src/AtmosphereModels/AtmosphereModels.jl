@@ -161,6 +161,8 @@ const SKIP_DEAD_FILLS = Ref(true)
 const BATCHED_Z_BCS = Ref(true)
 "`BREEZE_CELLWISE_MOISTURE_CORRECTION` (default true): species borrowing and number repairs over every cell (PR #1092); only vertical borrowing walks a column."
 const CELLWISE_MOISTURE_CORRECTION = Ref(true)
+"`BREEZE_STABLE_SCALAR_LAUNCH` (default true): the scalar tendency launches unrolled over the scalars' names (type stable), instead of a runtime loop that dispatches every launch dynamically. Same kernels and arguments."
+const STABLE_SCALAR_LAUNCH = Ref(true)
 
 env_switch(name, default) = lowercase(get(ENV, name, string(default))) in ("1", "true", "yes", "on")
 
@@ -172,6 +174,7 @@ function __init__()
     CELLWISE_MOISTURE_CORRECTION[] = env_switch("BREEZE_CELLWISE_MOISTURE_CORRECTION", true)
     read_kernel_argument_cache_switches!()  # kernel_arguments.jl
     FOLDED_RK3_SOLVES[] = env_switch("BREEZE_FOLDED_RK3_SOLVES", true)
+    STABLE_SCALAR_LAUNCH[] = env_switch("BREEZE_STABLE_SCALAR_LAUNCH", true)
     return nothing
 end
 
