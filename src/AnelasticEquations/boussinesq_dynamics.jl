@@ -79,6 +79,9 @@ function AtmosphereModels.advance_dynamics_state!(dynamics::BoussinesqDynamics, 
     return nothing
 end
 
+AtmosphereModels.synchronize_dynamics_state!(dynamics::BoussinesqDynamics, model) =
+    synchronize_frame!(dynamics.reference_state.frame, model.clock.time)
+
 validate_reference_frame(frame, formulation) = nothing
 validate_reference_frame(::MovingFrame, ::LiquidIcePotentialTemperatureFormulation) = nothing
 

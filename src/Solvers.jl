@@ -22,7 +22,7 @@ The drivers [`newton_solve`](@ref) and [`secant_solve`](@ref) implement the iter
 once, so every algorithm shares the same loop logic and the same solver vocabulary.
 [`bracketed_newton_solve`](@ref) is a safeguarded Newton–bisection variant for residuals
 with a known sign-changing bracket (for example, droplet growth in
-`Breeze.LagrangianMicrophysics`).
+`Breeze.ParticleMicrophysics`).
 
 ## Tolerance conventions
 

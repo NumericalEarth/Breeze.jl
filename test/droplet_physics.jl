@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.LagrangianMicrophysics: curvature_coefficient, droplet_water_mass, ventilation_factor,
+using Breeze.ParticleMicrophysics: curvature_coefficient, droplet_water_mass, ventilation_factor,
                                      drag_correction, vapor_diffusivity, thermal_conductivity,
                                      dynamic_viscosity
 using Breeze.Thermodynamics: saturation_vapor_pressure, liquid_latent_heat, vapor_gas_constant,

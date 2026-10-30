@@ -158,6 +158,28 @@ end
         @test mean(model.temperature) - T₀ > - g * 2 * model.clock.time / cᵖᵈ
     end
 
+    @testset "A moving frame advances only when the model is time stepped" begin
+        dynamics = BoussinesqDynamics(grid; temperature=290, frame_vertical_velocity=2)
+        model = AtmosphereModel(grid; dynamics)
+        frame = model.dynamics.reference_state.frame
+        p₀ = frame.pressure
+
+        # Setting the state at a later time does not move the frame
+        set!(model; time=100, θ=300)
+        @test frame.pressure == p₀
+        @test frame.time == 100
+
+        # Neither does changing the clock by hand before a simulation starts
+        model.clock.time = 200
+        Δt = FT(0.1)
+        simulation = Simulation(model; Δt, stop_iteration=1, verbose=false)
+        run!(simulation)
+
+        Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
+        @test frame.time ≈ 200 + Δt
+        @test frame.pressure - p₀ ≈ - p₀ * g * 2 * Δt / (Rᵈ * frame.temperature) rtol=1e-2
+    end
+
     @testset "Moving frames require the potential temperature formulation" begin
         dynamics = BoussinesqDynamics(grid; frame_vertical_velocity=2)
         @test_throws ArgumentError AtmosphereModel(grid; dynamics, formulation=:StaticEnergy)

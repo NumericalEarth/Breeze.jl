@@ -140,7 +140,10 @@ export
     P3Microphysics,
     PredictedParticlePropertiesMicrophysics,
 
-    # LagrangianMicrophysics
+    # ParticleMicrophysics
+    LagrangianMicrophysics,
+    DiffusiveSelfInteraction,
+    Droplet,
     DropletPhysicsParameters,
     PowerLawVaporDiffusivity,
     LinearThermalConductivity,
@@ -329,8 +332,8 @@ using .ParcelModels
 include("Microphysics/Microphysics.jl")
 using .Microphysics
 
-include("LagrangianMicrophysics/LagrangianMicrophysics.jl")
-using .LagrangianMicrophysics
+include("ParticleMicrophysics/ParticleMicrophysics.jl")
+using .ParticleMicrophysics
 
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures

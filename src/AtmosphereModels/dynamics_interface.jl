@@ -606,6 +606,16 @@ advance_dynamics_state!(dynamics, model) = nothing  # default: no-op
 """
 $(TYPEDSIGNATURES)
 
+Declare the time-dependent dynamics state, such as the pressure of a moving reference frame,
+to hold at the current time of `model` without advancing it. Called when the model state is set
+and when a simulation starts, so that the state advances only when the model is time stepped,
+and not when the clock is changed by hand.
+"""
+synchronize_dynamics_state!(dynamics, model) = nothing  # default: no-op
+
+"""
+$(TYPEDSIGNATURES)
+
 Return the reference frame of `dynamics`, or `nothing` if the dynamics has no moving reference frame.
 """
 reference_frame(dynamics) = nothing

@@ -38,7 +38,7 @@ using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, BoussinesqReferenceState, ThermodynamicConstants,
                              MoistureMassFractions, mixture_gas_constant, surface_temperature_value, density,
-                             MovingFrame, advance_frame!, frame_summary, reference_value
+                             MovingFrame, advance_frame!, synchronize_frame!, frame_summary, reference_value
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_pressure, pressure_anomaly,
                                 kernel_time_step, specific_humidity, liquid_mass_fraction, ice_mass_fraction
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation

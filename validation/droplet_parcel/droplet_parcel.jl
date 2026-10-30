@@ -3,7 +3,7 @@
 # Rung L0 of the Breeze vs. NCAR parcel-DNS comparison: a closed, adiabatic parcel rising at
 # U = 2 m/s for 600 s from T = 284.3 K, p = 93850 Pa and a supersaturation of -14.39%, carrying the
 # 39-bin, three-mode marine aerosol of `activation.F90` (ammonium sulfate, 111.8 particles per
-# "parcel"), one superdroplet per bin. Droplets grow with `Breeze.LagrangianMicrophysics`'
+# "parcel"), one superdroplet per bin. Droplets grow with `Breeze.ParticleMicrophysics`'
 # implicit condensational growth step; the parcel thermodynamics is integrated here.
 #
 # Runs:
@@ -18,7 +18,7 @@ using Breeze
 using Breeze.Thermodynamics: PlanarLiquidSurface, MoistureMassFractions, liquid_latent_heat,
                              mixture_gas_constant, mixture_heat_capacity, supersaturation,
                              dry_air_gas_constant, vapor_gas_constant, saturation_vapor_pressure
-using Breeze.LagrangianMicrophysics: LagrangianMicrophysics, ventilation_factor, droplet_water_mass
+using Breeze.ParticleMicrophysics: ParticleMicrophysics, ventilation_factor, droplet_water_mass
 using CairoMakie
 using Printf
 
@@ -27,7 +27,7 @@ const output_directory = joinpath(@__DIR__, "output")
 mkpath(output_directory)
 
 #####
-##### NCAR-specific formulas (activation.F90) as Breeze/LagrangianMicrophysics extensions
+##### NCAR-specific formulas (activation.F90) as Breeze.ParticleMicrophysics extensions
 #####
 
 struct NCARSaturationVaporPressure end
@@ -38,8 +38,8 @@ Breeze.Thermodynamics.saturation_vapor_pressure(T, ::NCARConstants, ::PlanarLiqu
 
 struct NCARVaporDiffusivity end
 struct NCARThermalConductivity end
-LagrangianMicrophysics.vapor_diffusivity(::NCARVaporDiffusivity, T, p) = 1e-5 * (0.015T - 1.9)
-LagrangianMicrophysics.thermal_conductivity(::NCARThermalConductivity, T, p) = 1.5e-11T^3 - 4.8e-8T^2 + 1e-4T - 3.9e-4
+ParticleMicrophysics.vapor_diffusivity(::NCARVaporDiffusivity, T, p) = 1e-5 * (0.015T - 1.9)
+ParticleMicrophysics.thermal_conductivity(::NCARThermalConductivity, T, p) = 1.5e-11T^3 - 4.8e-8T^2 + 1e-4T - 3.9e-4
 
 const ℛ = 8.314462618
 const ncar_Rᵈ = 287.0

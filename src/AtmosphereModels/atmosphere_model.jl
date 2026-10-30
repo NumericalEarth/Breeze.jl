@@ -326,6 +326,7 @@ function AtmosphereModel(grid;
 
     # Allocate the per-particle storage that the time stepper needs to advance particles
     particles = materialize_lagrangian_particles(particles, timestepper)
+    microphysics = materialize_microphysics(microphysics, grid, timestepper)
     pressure_solver = dynamics_pressure_solver(dynamics, grid)
 
     moisture_specific = moisture_specific_name(microphysics)
@@ -839,11 +840,18 @@ Models.boundary_condition_args(model::AtmosphereModel) =
 # current when the time steppers advect particles at the beginning of each stage.
 @inline Models.total_velocities(model::AtmosphereModel) = model.velocities
 
-TimeSteppers.step_lagrangian_particles!(model::AtmosphereModel, Δt) =
+# Particles of particle-based microphysics are advanced together with `model.particles`
+function TimeSteppers.step_lagrangian_particles!(model::AtmosphereModel, Δt)
     step_lagrangian_particles!(model.particles, model, Δt)
+    step_lagrangian_particles!(microphysics_particles(model.microphysics), model, Δt)
+    return nothing
+end
 
-TimeSteppers.substep_lagrangian_particles!(model::AtmosphereModel, Δt, stage) =
+function TimeSteppers.substep_lagrangian_particles!(model::AtmosphereModel, Δt, stage)
     substep_lagrangian_particles!(model.particles, model, Δt, stage)
+    substep_lagrangian_particles!(microphysics_particles(model.microphysics), model, Δt, stage)
+    return nothing
+end
 
 function total_energy(model)
     u, v, w = model.velocities

@@ -156,5 +156,8 @@ end
 
 function Oceananigans.initialize!(model::AtmosphereModels.AtmosphereModel)
     initialize_boundary_conditions!(AtmosphereModels.prognostic_fields(model), model)
+
+    # A simulation starts from the state at the current time, even if the clock was changed by hand
+    AtmosphereModels.synchronize_dynamics_state!(model.dynamics, model)
     return nothing
 end

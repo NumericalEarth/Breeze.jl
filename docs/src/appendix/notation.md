@@ -209,7 +209,7 @@ The following table also uses a few conventions that suffuse the source code and
 
 ## [Lagrangian droplet notation](@id lagrangian_droplet_notation)
 
-The per-droplet physics of `Breeze.LagrangianMicrophysics` uses the scoped notation below.
+The per-droplet physics of `Breeze.ParticleMicrophysics` uses the scoped notation below.
 Following the convention above, letters reserved in the main table take a local meaning here:
 ``κ`` is the hygroscopicity (not the von Kármán constant), ``r`` the droplet radius (not the
 terrain-following coordinate), and ``z`` a volume ratio (not height).

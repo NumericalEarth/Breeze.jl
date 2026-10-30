@@ -225,6 +225,9 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         model.clock.time = time
     end
 
+    # The state is set at the current time, so a moving reference frame is not advanced to it
+    synchronize_dynamics_state!(model.dynamics, model)
+
     names = collect(keys(kw))
     # Density-input mode for compressible dynamics (no-op flags otherwise):
     #   `:ρ`  — TOTAL density ρ. Written into the dry-density field as a placeholder so the moisture

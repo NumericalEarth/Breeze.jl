@@ -483,6 +483,23 @@ materialize_microphysical_fields(microphysics::Nothing, grid, boundary_condition
 """
 $(TYPEDSIGNATURES)
 
+Return `microphysics` with any state that depends on the `grid` and the model's `timestepper`
+allocated, such as the Lagrangian particles of particle-based microphysics.
+Called by the `AtmosphereModel` constructor after the time stepper is built. Returns `microphysics` by default.
+"""
+materialize_microphysics(microphysics, grid, timestepper) = microphysics
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the Lagrangian particles of particle-based `microphysics`, which are advanced with the
+time-stepping scheme of the model, or `nothing` (the default).
+"""
+microphysics_particles(microphysics) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Return the aerosol population stored in a microphysics scheme's native units.
 
 The units are the scheme's own: a volumetric distribution returns [m⁻³], while a

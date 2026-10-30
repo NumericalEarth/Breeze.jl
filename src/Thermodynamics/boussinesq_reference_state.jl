@@ -224,6 +224,19 @@ end
 
 advance_frame!(::Nothing, time, constants) = nothing
 
+"""
+$(TYPEDSIGNATURES)
+
+Set the time of a moving `frame` to `time` without changing its pressure, so that the current
+pressure becomes the pressure at `time`.
+"""
+function synchronize_frame!(frame::MovingFrame, time)
+    frame.time = time
+    return nothing
+end
+
+synchronize_frame!(::Nothing, time) = nothing
+
 Oceananigans.prognostic_state(frame::MovingFrame) = (time = frame.time,
                                                      pressure = frame.pressure,
                                                      temperature = frame.temperature,

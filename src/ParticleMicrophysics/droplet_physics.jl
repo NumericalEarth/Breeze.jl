@@ -875,8 +875,9 @@ end
 end
 
 # Radius-independent coefficients of the growth law at fixed T and p:
-# Fᵛ = Cᵛ ψᵛ(r), Fᵀ = Cᵀ ψᵀ(r) with Cᵛ = ρᴸ Rᵛ T / (Dᵛ pᵛ⁺), Cᵀ = (ℒˡ / (Rᵛ T) - 1) ℒˡ ρᴸ / (Kᵀ T).
-@inline function diffusional_growth_coefficients(T, p, constants, parameters)
+# Fᵛ = Cᵛ ψᵛ(r), Fᵀ = Cᵀ ψᵀ(r) with Cᵛ = ρᴸ Rᵛ T / (Dᵛ pᵛ⁺), Cᵀ = (ℒˡ / (Rᵛ T) - 1) ℒˡ ρᴸ / (Kᵀ T),
+# and the self-interaction coefficient Cᴳ (zero without a self-interaction correction).
+@inline function diffusional_growth_coefficients(T, p, constants, parameters, self_interaction=nothing)
     Rᵛ = vapor_gas_constant(constants)
     Rᵈ = dry_air_gas_constant(constants)
     ρᴸ = constants.liquid.density
@@ -891,18 +892,44 @@ end
     Cᵀ = (ℒˡ / (Rᵛ * T) - 1) * ℒˡ * ρᴸ / (Kᵀ * T)
     ℓᵛ, ℓᵀ = kinetic_lengths(parameters.kinetic_correction, Dᵛ, Kᵀ, ρ, cᵖᵈ, Rᵛ, Rᵈ, T)
     A = curvature_coefficient(T, constants, parameters)
+    Cᴳ = self_interaction_coefficient(self_interaction, T, ρ, ℒˡ, pᵛ⁺, ρᴸ, Rᵛ, cᵖᵈ)
 
-    return (; A, Cᵛ, Cᵀ, ℓᵛ, ℓᵀ)
+    return (; A, Cᵛ, Cᵀ, ℓᵛ, ℓᵀ, Cᴳ)
 end
 
-# Φ = r dr/dt = fᵛ G(r) (𝒮 - 𝒮ᵉ(r)) with G = 1 / (Cᵛ ψᵛ + Cᵀ ψᵀ), and ∂Φ/∂r.
+@inline self_interaction_coefficient(::Nothing, T, ρ, ℒˡ, pᵛ⁺, ρᴸ, Rᵛ, cᵖᵈ) = zero(T)
+
+# A droplet that samples the cell into which it deposits its condensation sees, besides the ambient state,
+# its own vapor deficit and latent heating in that cell. For a point sink ṁ in a cell of a grid with
+# vapor and heat diffusivities κᵛ and κᵀ, the quasi-steady perturbations of the cell are
+# δρᵛ = - gᵛ ṁ / κᵛ and δT = gᵀ ℒˡ ṁ / (ρ cᵖᵈ κᵀ), where gᵛ and gᵀ are cell values of the discrete Green's
+# function of -∇² (see `DiffusiveSelfInteraction`). With ṁ = 4π ρᴸ r Φ, the cell supersaturation is
+# 𝒮 = 𝒮ᵃ - Cᴳ r Φ, with 𝒮ᵃ the ambient supersaturation and Cᴳ = 4π (gᵛ C̃ᵛ + gᵀ C̃ᵀ), where C̃ᵛ and C̃ᵀ
+# are Cᵛ and Cᵀ evaluated with the grid diffusivities κᵛ and ρ cᵖᵈ κᵀ.
+@inline function self_interaction_coefficient(self_interaction, T, ρ, ℒˡ, pᵛ⁺, ρᴸ, Rᵛ, cᵖᵈ)
+    gᵛ = self_interaction.vapor_greens_function
+    gᵀ = self_interaction.thermal_greens_function
+    κᵛ = self_interaction.vapor_diffusivity
+    κᵀ = self_interaction.thermal_diffusivity
+    C̃ᵛ = ρᴸ * Rᵛ * T / (κᵛ * pᵛ⁺)
+    C̃ᵀ = (ℒˡ / (Rᵛ * T) - 1) * ℒˡ * ρᴸ / (ρ * cᵖᵈ * κᵀ * T)
+    return 4π * (gᵛ * C̃ᵛ + gᵀ * C̃ᵀ)
+end
+
+# Φ = r dr/dt = fᵛ G(r) (𝒮 - 𝒮ᵉ(r)) with G = 1 / (Cᵛ ψᵛ + Cᵀ ψᵀ - fᵛ Cᴳ r), and ∂Φ/∂r.
+# Solving 𝒮 = 𝒮ᵃ - Cᴳ r Φ for the ambient supersaturation 𝒮ᵃ removes the droplet's own sink from the
+# cell value 𝒮 it samples: the resistance to growth extends from r to the effective radius 1 / (4π g)
+# of the cell, rather than to infinity. The self-interaction term is limited to half of the resistance.
 @inline function growth_rate_and_derivative(r, rᵈ, κ, 𝒮, fᵛ, coefficients, parameters)
-    (; A, Cᵛ, Cᵀ, ℓᵛ, ℓᵀ) = coefficients
+    (; A, Cᵛ, Cᵀ, ℓᵛ, ℓᵀ, Cᴳ) = coefficients
     correction = parameters.kinetic_correction
     ψᵛ, ∂ψᵛ, _ = vapor_kinetic_factor(correction, r, ℓᵛ)
     ψᵀ, ∂ψᵀ, _ = thermal_kinetic_factor(correction, r, ℓᵀ)
-    G = 1 / (Cᵛ * ψᵛ + Cᵀ * ψᵀ)
-    ∂G = - G^2 * (Cᵛ * ∂ψᵛ + Cᵀ * ∂ψᵀ)
+    R = Cᵛ * ψᵛ + Cᵀ * ψᵀ
+    ∂R = Cᵛ * ∂ψᵛ + Cᵀ * ∂ψᵀ
+    unlimited = R - fᵛ * Cᴳ * r > R / 2
+    G = 1 / ifelse(unlimited, R - fᵛ * Cᴳ * r, R / 2)
+    ∂G = - G^2 * ifelse(unlimited, ∂R - fᵛ * Cᴳ, ∂R / 2)
     𝒮ᵉ, ∂𝒮ᵉ = equilibrium_supersaturation_and_derivative(parameters.solution_activity, r, rᵈ, κ, A)
     Φ = fᵛ * G * (𝒮 - 𝒮ᵉ)
     ∂Φ = fᵛ * (∂G * (𝒮 - 𝒮ᵉ) - G * ∂𝒮ᵉ)
@@ -927,9 +954,14 @@ where ``𝒮ᵉ`` is the [`equilibrium_supersaturation`](@ref), ``ℒˡ(T)`` the
 condensation, ``pᵛ⁺(T)`` the saturation vapor pressure over a planar liquid surface, and
 ``D̃ᵛ = Dᵛ / ψᵛ(r)`` and ``K̃ᵀ = Kᵀ / ψᵀ(r)`` the vapor diffusivity and thermal conductivity
 with the gas-kinetic corrections of `parameters.kinetic_correction`.
+
+If `self_interaction` is given (a named tuple with the `vapor_greens_function` and `thermal_greens_function`
+of the grid and its `vapor_diffusivity` and `thermal_diffusivity`), `𝒮` is the supersaturation of the cell into which the droplet
+deposits its own condensation, and the growth rate is corrected for the droplet's own vapor deficit and
+latent heating in that cell (see [`LagrangianMicrophysics`](@ref)).
 """
-@inline function diffusional_growth_rate(r, rᵈ, κ, 𝒮, fᵛ, T, p, constants, parameters)
-    coefficients = diffusional_growth_coefficients(T, p, constants, parameters)
+@inline function diffusional_growth_rate(r, rᵈ, κ, 𝒮, fᵛ, T, p, constants, parameters, self_interaction=nothing)
+    coefficients = diffusional_growth_coefficients(T, p, constants, parameters, self_interaction)
     Φ, _, _ = growth_rate_and_derivative(r, rᵈ, κ, 𝒮, fᵛ, coefficients, parameters)
     return Φ
 end
@@ -946,6 +978,9 @@ discretization of the growth law ``d(r^2)/dt = 2 Φ(r)``, ``Φ = r \\, dr/dt``
 ```math
 r_{n+1}^2 = r_n^2 + 2 Δt \\, Φ(r_{n+1}) .
 ```
+
+The optional `self_interaction` corrects the growth rate for the droplet's own sink in the cell whose
+supersaturation is `𝒮` (see [`diffusional_growth_rate`](@ref)).
 
 Returns the named tuple `(radius, condensed_mass)`, where `condensed_mass` is the mass of
 water condensed on the droplet during the step (negative for evaporation),
@@ -985,12 +1020,12 @@ round(step.radius, sigdigits=4), round(step.condensed_mass, sigdigits=3)
 (1.33e-6, 5.66e-15)
 ```
 """
-@inline function condensational_growth_step(r, rᵈ, κ, 𝒮, fᵛ, T, p, Δt, constants, parameters)
+@inline function condensational_growth_step(r, rᵈ, κ, 𝒮, fᵛ, T, p, Δt, constants, parameters, self_interaction=nothing)
     activity = parameters.solution_activity
     correction = parameters.kinetic_correction
     solver = parameters.solver
-    coefficients = diffusional_growth_coefficients(T, p, constants, parameters)
-    (; A, Cᵛ, Cᵀ, ℓᵛ, ℓᵀ) = coefficients
+    coefficients = diffusional_growth_coefficients(T, p, constants, parameters, self_interaction)
+    (; A, Cᵛ, Cᵀ, ℓᵛ, ℓᵀ, Cᴳ) = coefficients
 
     r⁰ = max(r, rᵈ)
     x⁰ = r⁰^2
@@ -1005,7 +1040,7 @@ round(step.radius, sigdigits=4), round(step.condensed_mass, sigdigits=3)
     # Growth bracket (i): bound on the growth over Δt
     _, _, ψᵛᵇ = vapor_kinetic_factor(correction, r⁰, ℓᵛ)
     _, _, ψᵀᵇ = thermal_kinetic_factor(correction, r⁰, ℓᵀ)
-    Gᵇ = 1 / (Cᵛ * ψᵛᵇ + Cᵀ * ψᵀᵇ)
+    Gᵇ = ifelse(Cᴳ > 0, 2, 1) / (Cᵛ * ψᵛᵇ + Cᵀ * ψᵀᵇ) # the self-interaction at most halves the resistance
     ζᵇ = 2 * Δt * fᵛ * Gᵇ * (𝒮 - min(𝒮ᵉ⁰, 0)) / x⁰
 
     # Growth bracket (ii): the Köhler barrier for haze droplets

@@ -5,7 +5,7 @@ closed adiabatic parcel rising at U = 2 m/s for 600 s from T = 284.3 K, p = 9385
 supersaturation of −14.39%, carrying the 39-bin, three-mode marine aerosol of the NCAR parcel
 model `activation.F90` (Chen et al. 2020; ammonium sulfate, 111.8 particles per parcel).
 Each aerosol bin is one superdroplet with a multiplicity. Droplets grow with
-`Breeze.LagrangianMicrophysics.condensational_growth_step` (implicit, Δt = 0.01 s unless noted);
+`Breeze.ParticleMicrophysics.condensational_growth_step` (implicit, Δt = 0.01 s unless noted);
 the parcel thermodynamics is integrated in the script.
 
 ## Running
