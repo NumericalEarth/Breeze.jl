@@ -18,7 +18,10 @@ using Breeze.Thermodynamics: temperature
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, MixedPhaseOneMomentState,
                                    mp1m_tendencies, mpne1m_tendencies, mixed_phase_precipitation_rates,
-                                   donor_limiter, τⁿᵘᵐ
+                                   donor_limiter, one_moment_cloud_microphysics_categories
+
+# Default numerical limiter timescale of the one-moment categories
+const τⁿᵘᵐ = 10
 
 function mixed_phase_state(FT, constants; T, qᵛ, qᶜˡ, qᶜⁱ, qʳ, qˢⁿ, p = 90000)
     q = MoistureMassFractions(FT(qᵛ), FT(qᶜˡ + qʳ), FT(qᶜⁱ + qˢⁿ))
@@ -95,21 +98,22 @@ end
         @test G.ρqˢⁿ > 0
     end
 
-    @test donor_limiter(FT(1e-3), FT(1e-6)) == 1                       # demand fits: untouched
-    @test donor_limiter(FT(1e-4), FT(1e-4)) ≈ FT(1e-4) / (τⁿᵘᵐ * FT(1e-4))
-    @test donor_limiter(FT(-1e-6), FT(1e-4)) == 0                      # empty donor gives nothing
-    @test donor_limiter(zero(FT), zero(FT)) == 1
+    @test donor_limiter(FT(1e-3), FT(1e-6), FT(τⁿᵘᵐ)) == 1                       # demand fits: untouched
+    @test donor_limiter(FT(1e-4), FT(1e-4), FT(τⁿᵘᵐ)) ≈ FT(1e-4) / (τⁿᵘᵐ * FT(1e-4))
+    @test donor_limiter(FT(-1e-6), FT(1e-4), FT(τⁿᵘᵐ)) == 0                      # empty donor gives nothing
+    @test donor_limiter(zero(FT), zero(FT), FT(τⁿᵘᵐ)) == 1
 end
 
 @testset "Donor limiter preserves trace process rates [$FT]" for FT in all_float_types()
+    τ = FT(τⁿᵘᵐ)
     for (q, ΣS) in ((1e-3, 2e-4), (1e-9, 2e-10), (1e-20, 2e-21))
-        @test @inferred(donor_limiter(FT(q), FT(ΣS))) ≈ FT(0.5)
-        @test @inferred(donor_limiter(FT(q), FT(ΣS / 4))) === one(FT)
-        @test @inferred(donor_limiter(zero(FT), FT(ΣS))) === zero(FT)
+        @test @inferred(donor_limiter(FT(q), FT(ΣS), τ)) ≈ FT(0.5)
+        @test @inferred(donor_limiter(FT(q), FT(ΣS / 4), τ)) === one(FT)
+        @test @inferred(donor_limiter(zero(FT), FT(ΣS), τ)) === zero(FT)
     end
 
     for q in (zero(FT), FT(1e-9), FT(-1e-9))
-        @test @inferred(donor_limiter(q, zero(FT))) === one(FT)
+        @test @inferred(donor_limiter(q, zero(FT), τ)) === one(FT)
     end
 end
 
@@ -143,7 +147,7 @@ end
     ρ, ℳ, 𝒰 = mixed_phase_state(FT, constants; T = 270, qᵛ = 3.5e-3, qᶜˡ = 0, qᶜⁱ = 0, qʳ = 1e-4, qˢⁿ = 8e-3)
 
     for q in (zero(FT), FT(1e-3), FT(-1e-6))
-        @test @inferred(donor_limiter(q, 0)) === one(FT)
+        @test @inferred(donor_limiter(q, 0, categories.τⁿᵘᵐ)) === one(FT)
     end
 
     for (tendencies, cloud_formation) in ((mp1m_tendencies, saturation_adjustment_1M(FT).cloud_formation),
@@ -221,4 +225,68 @@ end
         @test maximum(ρqˢⁿ) > 0
         @test minimum(ρqʳ) ≥ -sqrt(eps(FT))
     end
+end
+
+@testset "One-moment limiter timescale τⁿᵘᵐ [$FT]" for FT in test_float_types()
+    constants = ThermodynamicConstants(FT)
+
+    # The default is 10 s, stored in the float type of the categories
+    @test one_moment_cloud_microphysics_categories(FT).τⁿᵘᵐ === FT(10)
+    @test saturation_adjustment_1M(FT).categories.τⁿᵘᵐ === FT(10)
+    @test one_moment_cloud_microphysics_categories(FT; τⁿᵘᵐ = 120).τⁿᵘᵐ === FT(120)
+
+    # Isolate rain-to-snow collection, which is donor-limited at qʳ / τⁿᵘᵐ
+    parameters = Microphysics1MParams(FT; rain_condensation_evaporation=nothing, snow_deposition_sublimation=nothing)
+    no_formation = ConstantRateCondensateFormation(zero(FT))
+    cloud_formations = (saturation_adjustment_1M(FT).cloud_formation,
+                        NonEquilibriumCloudFormation(no_formation, no_formation))
+    ρ, ℳ, 𝒰 = mixed_phase_state(FT, constants; T = 270, qᵛ = 3.5e-3, qᶜˡ = 0, qᶜⁱ = 0, qʳ = 1e-9, qˢⁿ = 8e-3)
+
+    for (tendencies, cloud_formation) in zip((mp1m_tendencies, mpne1m_tendencies), cloud_formations)
+        default = OneMomentCloudMicrophysics(FT; cloud_formation,
+                                             categories = one_moment_cloud_microphysics_categories(FT; parameters))
+        explicit = OneMomentCloudMicrophysics(FT; cloud_formation,
+                                              categories = one_moment_cloud_microphysics_categories(FT; parameters, τⁿᵘᵐ = 10))
+        @test tendencies(default, ρ, ℳ, 𝒰, constants) === tendencies(explicit, ρ, ℳ, 𝒰, constants)
+
+        for τ in (60, 600)
+            slow = OneMomentCloudMicrophysics(FT; cloud_formation,
+                                              categories = one_moment_cloud_microphysics_categories(FT; parameters, τⁿᵘᵐ = τ))
+            G = @inferred tendencies(slow, ρ, ℳ, 𝒰, constants)
+            collected = ρ * ℳ.qʳ / τ
+            @test -G.ρqʳ ≈ collected
+            @test G.ρqˢⁿ ≈ collected
+            # A step as long as τⁿᵘᵐ drains rain exactly to zero, never below
+            @test ρ * ℳ.qʳ + FT(τ) * G.ρqʳ ≥ -10eps(FT) * ρ * ℳ.qʳ
+        end
+    end
+
+    # Negative rain relaxes back toward zero over τⁿᵘᵐ
+    ρ, ℳ, 𝒰 = mixed_phase_state(FT, constants; T = 270, qᵛ = 3.5e-3, qᶜˡ = 0, qᶜⁱ = 0, qʳ = -1e-6, qˢⁿ = 0)
+    for τ in (10, 120)
+        microphysics = OneMomentCloudMicrophysics(FT; cloud_formation = cloud_formations[1],
+                                                  categories = one_moment_cloud_microphysics_categories(FT; τⁿᵘᵐ = τ))
+        @test mp1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants).ρqʳ ≈ -ρ * ℳ.qʳ / τ
+    end
+
+    # Large time steps keep rain non-negative when τⁿᵘᵐ ≥ Δt. Coarse layers keep the rain
+    # sedimentation CFL (≈ 4 m/s × Δt / Δz) below one, so negative rain cannot come from transport.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (2, 2, 2), x = (0, 1_000), y = (0, 1_000), z = (0, 2_000))
+    reference_state = ReferenceState(grid, ThermodynamicConstants(), base_pressure = 101325, potential_temperature = 255)
+    dynamics = AnelasticDynamics(reference_state)
+    Δt = 120
+    categories = one_moment_cloud_microphysics_categories(FT; τⁿᵘᵐ = Δt)
+    microphysics = OneMomentCloudMicrophysics(FT; categories,
+                                              cloud_formation = SaturationAdjustment(FT; equilibrium = MixedPhaseEquilibrium(FT)))
+    model = AtmosphereModel(grid; dynamics, microphysics)
+    set!(model; θ = 255, qᵗ = 0.004)
+    for _ in 1:10
+        time_step!(model, Δt)
+    end
+    ρqˢⁿ = Array(interior(model.microphysical_fields.ρqˢⁿ))
+    ρqʳ = Array(interior(model.microphysical_fields.ρqʳ))
+    @test all(isfinite, ρqˢⁿ)
+    @test maximum(ρqˢⁿ) > 0
+    @test minimum(ρqʳ) ≥ -sqrt(eps(FT))
 end

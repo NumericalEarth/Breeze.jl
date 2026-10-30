@@ -75,6 +75,7 @@ struct OneMomentCloudMicrophysicsCategories{P, V, FT}
     parameters :: P
     hydrometeor_velocities :: V
     freezing_temperature :: FT
+    τⁿᵘᵐ :: FT
 end
 
 struct TemperatureDependentIceFormation{FT, F} <: AbstractCondensateFormation
@@ -95,12 +96,16 @@ Return one-moment categories backed by CloudMicrophysics' unified
   so the two containers cannot diverge.
 - `freezing_temperature`: Temperature used to route melting and freezing
   processes. Defaults to CloudMicrophysics' standard value, 273.15 K.
+- `τⁿᵘᵐ`: Timescale [s] for limiting sinks and relaxing negative values: a donor
+  reservoir loses at most its content over `τⁿᵘᵐ`. Must satisfy `τⁿᵘᵐ ≥ Δt` to
+  prevent reservoir overdraw within one time step. Default: 10 seconds.
 """
 function one_moment_cloud_microphysics_categories(
     FT::DataType = Oceananigans.defaults.FloatType;
     parameters = Microphysics1MParams(FT),
     hydrometeor_velocities = TerminalVelocityParams(FT),
-    freezing_temperature = FT(273.15))
+    freezing_temperature = FT(273.15),
+    τⁿᵘᵐ = FT(10))
 
     # CloudMicrophysics owns the Blk1M rain and snow velocities. Retain Breeze's
     # aggregate velocity container for cloud condensate sedimentation, but make
@@ -110,8 +115,9 @@ function one_moment_cloud_microphysics_categories(
         hydrometeor_velocities.chen2022,
         blk1m = parameters.terminal_velocity)
     freezing_temperature = convert(FT, freezing_temperature)
+    τⁿᵘᵐ = convert(FT, τⁿᵘᵐ)
 
-    return OneMomentCloudMicrophysicsCategories(parameters, hydrometeor_velocities, freezing_temperature)
+    return OneMomentCloudMicrophysicsCategories(parameters, hydrometeor_velocities, freezing_temperature, τⁿᵘᵐ)
 end
 
 const CM1MCategories = OneMomentCloudMicrophysicsCategories{<:Microphysics1MParams, <:TerminalVelocityParams}
@@ -869,12 +875,12 @@ end
 # The non-equilibrium and mixed-phase schemes evaluate these processes in their tendency bundles below.
 #####
 
-# Numerical timescale for limiting negative-value relaxation
-const τⁿᵘᵐ = 10  # seconds
+# Sinks and negative-value relaxation are limited over the numerical timescale
+# `categories.τⁿᵘᵐ` (default 10 s; see `one_moment_cloud_microphysics_categories`).
 
 # Fraction of a donor's process rates that can be honoured without draining more than
 # its content `q` over τⁿᵘᵐ: 1 when the summed sink rate `ΣS` fits, `q⁺ / (τⁿᵘᵐ ΣS)` otherwise.
-@inline function donor_limiter(q, ΣS)
+@inline function donor_limiter(q, ΣS, τⁿᵘᵐ)
     q⁺ = max(0, q)
     # Disabled processes return integer zeros; retain the moisture precision for zero demand.
     demand = oftype(q, τⁿᵘᵐ) * ΣS
@@ -886,6 +892,7 @@ end
 # State-based rain tendency for WP1M
 @inline function AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
     processes = parameters.processes
     process_params = parameters.process_params
@@ -960,6 +967,7 @@ end
 
 @inline function wpne1m_tendencies(bμp::WPNE1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
     processes = parameters.processes
     process_params = parameters.process_params
@@ -1129,6 +1137,7 @@ end
 
 @inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
     processes = parameters.processes
     cloud_ice = parameters.cloud.ice
@@ -1187,16 +1196,16 @@ end
     Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
     Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)                       # cold: rain → snow
 
-    fᵛ  = donor_limiter(qᵛ,  Sᶜᵒⁿᵈ⁺ + Sᵈᵉᵖ⁺ + Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺)
-    fᶜˡ = donor_limiter(qᶜˡ, -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ)
-    fᶜⁱ = donor_limiter(qᶜⁱ, -Sᵈᵉᵖ⁻ + Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵐᵉˡᵗᶜⁱ)
-    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
+    fᵛ  = donor_limiter(qᵛ,  Sᶜᵒⁿᵈ⁺ + Sᵈᵉᵖ⁺ + Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺, τⁿᵘᵐ)
+    fᶜˡ = donor_limiter(qᶜˡ, -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ, τⁿᵘᵐ)
+    fᶜⁱ = donor_limiter(qᶜⁱ, -Sᵈᵉᵖ⁻ + Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵐᵉˡᵗᶜⁱ, τⁿᵘᵐ)
+    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ, τⁿᵘᵐ)
 
     # Collected liquid supplies heat for the melt rate α Sᵃᶜᶜˡˢⁿ. Limit collection before
     # computing this melt demand, then cap all snow sinks against the available snow.
     Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
     Sˢⁿʷ = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
-    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
+    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ, τⁿᵘᵐ)
 
     Sᶜᵒⁿᵈ = fᵛ * Sᶜᵒⁿᵈ⁺ + fᶜˡ * Sᶜᵒⁿᵈ⁻
     Sᵈᵉᵖ  = fᵛ * Sᵈᵉᵖ⁺  + fᶜⁱ * Sᵈᵉᵖ⁻
@@ -1334,6 +1343,7 @@ end
 
 @inline function mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
     qᶜˡ = ℳ.qᶜˡ
     qᶜⁱ = ℳ.qᶜⁱ
     qʳ = ℳ.qʳ
@@ -1356,16 +1366,16 @@ end
     Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
     Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)
 
-    fᵛ  = donor_limiter(qᵛ,  Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺)
-    fᶜˡ = donor_limiter(qᶜˡ, Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ)
-    fᶜⁱ = donor_limiter(qᶜⁱ, Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ)
-    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
+    fᵛ  = donor_limiter(qᵛ,  Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺, τⁿᵘᵐ)
+    fᶜˡ = donor_limiter(qᶜˡ, Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ, τⁿᵘᵐ)
+    fᶜⁱ = donor_limiter(qᶜⁱ, Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ, τⁿᵘᵐ)
+    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ, τⁿᵘᵐ)
 
     # Collected liquid supplies heat for the melt rate α Sᵃᶜᶜˡˢⁿ. Limit collection before
     # computing this melt demand, then cap all snow sinks against the available snow.
     Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
     Sˢⁿʷ = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
-    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
+    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ, τⁿᵘᵐ)
 
     Sᵉᵛᵃᵖ = fᵛ * Sᵉᵛᵃᵖ⁺ + fʳ * Sᵉᵛᵃᵖ⁻
     Sˢᵘᵇˡ = fᵛ * Sˢᵘᵇˡ⁺ + fˢⁿ * Sˢᵘᵇˡ⁻
