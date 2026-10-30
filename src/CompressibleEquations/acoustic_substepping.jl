@@ -1487,6 +1487,11 @@ end
 
 const FUSED_CARRIED_COLUMN_SOLVE = Ref(true)
 
+# `BREEZE_FUSED_COLUMN_RECOVERY` (default false): also run the post-solve recovery in the column launch.
+# One thread per column serializes the recovery's Nz independent levels; as its own 3-D launch it is
+# faster at 3 km (same bits either way).
+const FUSED_COLUMN_RECOVERY = Ref(false)
+
 using Oceananigans.Solvers: SharedColumnScratch, shared_thomas_scratch, back_substitute_z!, shared_column_count,
                             shared_column_workgroup
 
@@ -2645,6 +2650,7 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
     implicit_advection_substep!(model, substepper, advection, Δτ)
 
     pressure_gradients = active_pressure_gradients(substepper)
+    solved = false
     if CARRIED_VERTICAL_RHS[] & carries_vertical_rhs(model.dynamics, pressure_gradients, grid)
         # One thread per column, the vertical stencil carried from level to level (handoff bc1c3e6e).
         rhs = (; ρ′★ = substepper.density_predictor,
@@ -2661,7 +2667,8 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
             # rhs, solve and post-solve recovery in one column launch (T22 acoustic A)
             coefficient_args = (substepper.linearization_exner, substepper.linearization_potential_temperature,
                                 substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺, substepper.sponge)
-            recovery = accumulators isa FoldedRecovery ? nothing :
+            fuse_recovery = FUSED_COLUMN_RECOVERY[] & !(accumulators isa FoldedRecovery)
+            recovery = !fuse_recovery ? nothing :
                 (; ρ′ = substepper.density_perturbation,
                    ρθ′ = substepper.density_potential_temperature_perturbation,
                    ρu′ = substepper.momentum_perturbation.u, ρv′ = substepper.momentum_perturbation.v,
@@ -2670,9 +2677,11 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
                    θᴸ = substepper.linearization_potential_temperature)
             launch_carried_column_solve!(arch, grid, substepper.vertical_solver,
                                          eltype(substepper.vertical_solver_source_term), rhs, coefficient_args, recovery)
-            return nothing
+            fuse_recovery && return nothing
+            solved = true
+        else
+            launch!(arch, grid, :xy, _build_vertical_rhs_carried!, substepper.vertical_solver_source_term, rhs)
         end
-        launch!(arch, grid, :xy, _build_vertical_rhs_carried!, substepper.vertical_solver_source_term, rhs)
     else
         launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
                 _build_vertical_rhs!,
@@ -2693,11 +2702,11 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
     # and (when active) implicit vertical damping prefactor `dᵐ⁺`.
     # `sponge` may add an implicit Rayleigh contribution on the
     # diagonal in a layer below the lid.
-    solve!(substepper.momentum_perturbation.w, substepper.vertical_solver,
-           substepper.vertical_solver_source_term,
-           substepper.linearization_exner, substepper.linearization_potential_temperature,
-           substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺,
-           substepper.sponge)
+    solved || solve!(substepper.momentum_perturbation.w, substepper.vertical_solver,
+                     substepper.vertical_solver_source_term,
+                     substepper.linearization_exner, substepper.linearization_potential_temperature,
+                     substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺,
+                     substepper.sponge)
 
     # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′ (in the stage-end recovery for a folded last substep)
     accumulators isa FoldedRecovery && return nothing
