@@ -512,7 +512,12 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     if BATCHED_SCALAR_TENDENCIES[]
         # T22 scalars: one launch; every tendency is the expression of `compute_scalar_tendency!`, unchanged.
-        launch!(arch, grid, :xyz, compute_scalar_tendencies!, (Gρqᵛᵉ, Gρcs...), grid, (ρq_args, scalar_argss...))
+        # The arguments shared by every scalar are passed once, so that many scalars (P3) stay under the
+        # kernel parameter limit.
+        Nᶜ = length(common_args)
+        own_args(args) = args[1:length(args)-Nᶜ]
+        launch!(arch, grid, :xyz, compute_scalar_tendencies!, (Gρqᵛᵉ, Gρcs...), grid,
+                map(own_args, (ρq_args, scalar_argss...)), common_args)
     else
         launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵛᵉ, grid, ρq_args)
         for n in eachindex(scalar_argss)
@@ -546,9 +551,9 @@ end
 end
 
 # Several scalar tendencies per thread: all evaluated before any store, so their common loads may be shared.
-@kernel function compute_scalar_tendencies!(Gs, grid, argss)
+@kernel function compute_scalar_tendencies!(Gs, grid, argss, common_args)
     i, j, k = @index(Global, NTuple)
-    tendencies = map(args -> scalar_tendency(i, j, k, grid, args...), argss)
+    tendencies = map(args -> scalar_tendency(i, j, k, grid, args..., common_args...), argss)
     store_scalar_tendencies!(Gs, tendencies, i, j, k)
 end
 
