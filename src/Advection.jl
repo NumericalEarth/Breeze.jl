@@ -185,6 +185,13 @@ Whether the edges pass is launched k-first in (32, 1, 4) blocks on GPUs (handoff
 """
 const EDGES_KFIRST = Ref(true)
 
+"""
+Whether the k-first edges passes of all edge-cached schemes of a model run as one launch, each thread forming the
+edges of every scheme at its cell in turn (T22 scalars; `true` by default, `BREEZE_BATCHED_EDGES` at load; consulted
+at every launch, GPU k-first only). The per-cell arithmetic is `bounds_preserving_edges!`, unchanged.
+"""
+const BATCHED_EDGES = Ref(true)
+
 env_switch(name, default) = lowercase(get(ENV, name, default)) in ("1", "true")
 
 function __init__()
@@ -193,6 +200,7 @@ function __init__()
     ZERO_SAFE_LIMITER[] = env_switch("BREEZE_ZERO_SAFE_LIMITER", "true")
     LIMITER_THETA_SHORTCUT[] = env_switch("BREEZE_LIMITER_THETA_SHORTCUT", "true")
     EDGES_KFIRST[] = env_switch("BREEZE_EDGES_KFIRST", "true")
+    BATCHED_EDGES[] = env_switch("BREEZE_BATCHED_EDGES", "true")
     return nothing
 end
 
@@ -339,8 +347,11 @@ function AtmosphereModels.with_reconstruction_caches(advection::NamedTuple, grid
 end
 
 # The edges pass replaces Oceananigans' limiter pass and its halo fill (θ is not stored).
+batches_edges(grid) = (architecture(grid) isa Architectures.GPU) & EDGES_KFIRST[] & BATCHED_EDGES[]
+
 function Oceananigans.Advection.update_bounds_preserving_limiter!(scheme::EdgeCachedBoundsPreservingWENO, grid, c)
     isnothing(c) && return nothing
+    batches_edges(grid) && return nothing  # AtmosphereModels.update_reconstruction_caches! runs the pass
     edges = scheme.bounds.limiter
     arch = architecture(grid)
     if arch isa Architectures.GPU && EDGES_KFIRST[]
@@ -391,6 +402,48 @@ function launch_kfirst_edges!(arch, grid, edges, scheme, c)
     # T16 cached launch path (as the handoff's `_kfirst_pointwise!` edges launch)
     launch_configured_kernel!(loop!, Val(S), convert_to_device(arch, (edges, grid, scheme, c))...)
     return nothing
+end
+
+##### Batched edges (T22 scalars): one k-first launch for every edge-cached scheme, in scheme order per thread.
+
+# The (edges, scheme, c) triples of the edge-cached schemes whose field is not `nothing`, in order.
+@inline edge_passes(::Tuple{}, ::Tuple{}) = ()
+@inline edge_passes(schemes::Tuple, fields::Tuple) =
+    (edge_pass(first(schemes), first(fields))..., edge_passes(Base.tail(schemes), Base.tail(fields))...)
+@inline edge_pass(scheme, c) = ()
+@inline edge_pass(scheme::EdgeCachedBoundsPreservingWENO, ::Nothing) = ()
+@inline edge_pass(scheme::EdgeCachedBoundsPreservingWENO, c) = ((scheme.bounds.limiter, scheme, c),)
+
+function AtmosphereModels.update_reconstruction_caches!(schemes::Tuple, fields::Tuple, grid)
+    batches_edges(grid) || return nothing
+    passes = edge_passes(schemes, fields)
+    isempty(passes) && return nothing
+    arch = architecture(grid)
+    Nx, Ny, Nz = size(grid)
+    Wx, Wy, Wz = kfirst_edges_tile
+    S = (Wx, Wy, Wz, Nx + 2, Ny + 2, Nz)
+    threads = Wx * Wy * Wz
+    blocks = cld(Nx + 2, Wx) * cld(Ny + 2, Wy) * cld(Nz, Wz)
+    loop! = _kfirst_batched_bounds_preserving_edges!(device(arch), StaticSize((threads,)), StaticSize((threads * blocks,)))
+    launch_configured_kernel!(loop!, Val(S), convert_to_device(arch, (grid, passes))...)
+    return nothing
+end
+
+@kernel function _kfirst_batched_bounds_preserving_edges!(::Val{S}, grid, passes) where S
+    l = @index(Local, Linear)
+    g = @index(Group, Linear)
+    i, j, k = kfirst_decode(Val(S), l, g)
+    if (i <= S[4]) & (j <= S[5]) & (k <= S[6])
+        batched_edges!(passes, i - 1, j - 1, k, grid)
+    end
+end
+
+@inline batched_edges!(::Tuple{}, i, j, k, grid) = nothing
+
+@inline function batched_edges!(passes, i, j, k, grid)
+    edges, scheme, c = first(passes)
+    bounds_preserving_edges!(edges, i, j, k, grid, scheme, c)
+    return batched_edges!(Base.tail(passes), i, j, k, grid)
 end
 
 @inline rescaled_edge(ĉ, θᵢ, cᵢ) = θᵢ * (ĉ - cᵢ) + cᵢ

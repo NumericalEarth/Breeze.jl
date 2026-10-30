@@ -115,8 +115,13 @@ diagnoses_total_density_in_auxiliary_pass(model) = false
 # `(momentum, tracers...)`, so pair each scheme with the specific field it reconstructs.
 function Oceananigans.Advection.update_advection!(advection::NamedTuple, model::AtmosphereModel)
     fields = reconstructed_fields(model, advection)
-    return update_each_advection!(values(advection), values(fields), model)
+    update_each_advection!(values(advection), values(fields), model)
+    return update_reconstruction_caches!(values(advection), values(fields), model.grid)
 end
+
+# Refresh, all in one pass, the reconstruction caches whose per-scheme refresh `update_advection!` deferred
+# (Breeze.Advection's batched edges pass); nothing by default.
+update_reconstruction_caches!(schemes, fields, grid) = nothing
 
 @inline update_each_advection!(::Tuple{}, ::Tuple{}, model) = nothing
 
