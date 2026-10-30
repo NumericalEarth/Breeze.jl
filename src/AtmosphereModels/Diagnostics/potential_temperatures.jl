@@ -21,11 +21,11 @@ struct VirtualDensity <: AbstractVirtualFlavor end
 # Liquid-ice potential temperature flavors
 abstract type AbstractLiquidIceFlavor end
 struct SpecificLiquidIce{E} <: AbstractLiquidIceFlavor
-    exponent :: E # Exner exponent that defines θˡⁱ
+    exner_exponent :: E # Exner exponent that defines θˡⁱ
 end
 
 struct LiquidIceDensity{E} <: AbstractLiquidIceFlavor
-    exponent :: E
+    exner_exponent :: E
 end
 
 # Equivalent potential temperature flavors
@@ -346,12 +346,12 @@ Field(θˡⁱ)
 """
 function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
 
-    exponent = liquid_ice_exner_exponent(model.formulation)
+    κ̂ = liquid_ice_exner_exponent(model.formulation)
 
     flavor = if flavor_symbol === :specific
-        SpecificLiquidIce(exponent)
+        SpecificLiquidIce(κ̂)
     elseif flavor_symbol === :density
-        LiquidIceDensity(exponent)
+        LiquidIceDensity(κ̂)
     else
         msg = "`flavor` must be :specific or :density, received :$flavor_symbol"
         throw(ArgumentError(msg))
@@ -534,7 +534,7 @@ end
 #####
 
 @inline liquid_ice_potential_temperature(flavor::AbstractLiquidIceFlavor, T, p, pˢᵗ, q, constants) =
-    Thermodynamics.potential_temperature_from_temperature(T, p, pˢᵗ, constants, q, flavor.exponent)
+    Thermodynamics.potential_temperature_from_temperature(T, p, pˢᵗ, constants, q, flavor.exner_exponent)
 
 function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin

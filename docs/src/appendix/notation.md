@@ -135,12 +135,12 @@ The following table also uses a few conventions that suffuse the source code and
 | ``cᵖᵐ``                             | `cᵖᵐ`  | `mixture_heat_capacity(q, constants)` | Mixture heat capacity at constant pressure                                   |
 | ``\hat{c}ᵖ``                        | `ĉᵖ`   | `vapor_equivalent_heat_capacity(q, constants)` | Vapor-equivalent heat capacity, ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ``: the heat capacity if all water were vapor; unchanged by phase change |
 | ``\hat{R}``                         | `R̂`    | `vapor_equivalent_gas_constant(q, constants)` | Vapor-equivalent gas constant, ``R̂ = qᵈ Rᵈ + qᵗ Rᵛ``; equals ``Rᵐ`` in unsaturated air |
-| ``\hat{κ}``                         | `κ̂`    | `exner_exponent(VaporEquivalentExponent(), q, constants)` | Vapor-equivalent Exner exponent, ``κ̂ = R̂ / ĉᵖ`` (the default exponent of ``θˡⁱ``); ``κᵈ = Rᵈ / cᵖᵈ`` is the `DryExponent`. Distinct from the von Kármán constant ``κ`` |
+| ``\hat{κ}``                         | `κ̂`    | `exner_exponent(VaporEquivalentExponent(), q, constants)` | Vapor-equivalent Exner exponent, ``κ̂ = R̂ / ĉᵖ`` (the default exponent of ``θˡⁱ``); ``κᵈ = Rᵈ / cᵖᵈ`` is the `DryExponent`. In code, `κ̂` also names the exponent choice (`VaporEquivalentExponent()` or `DryExponent()`) passed to functions. Distinct from the von Kármán constant ``κ`` |
 | ``Tᵣ``                              | `Tᵣ`   | `TC.energy_reference_temperature`   | Reference temperature for internal energy relations and latent heat            |
 | ``\mathcal{L}^l_r``                 | `ℒˡᵣ`  | `TC.liquid.reference_latent_heat`   | Latent heat of condensation at the energy reference temperature                |
 | ``\mathcal{L}^i_r``                 | `ℒⁱᵣ`  | `TC.ice.reference_latent_heat`      | Latent heat of deposition at the energy reference temperature                  |
 | ``ℒˡ₀, ℒⁱ₀``                       | `ℒˡ₀`, `ℒⁱ₀` | `absolute_zero_latent_heat(TC, phase)` | Latent-heat intercepts at zero kelvin, used with absolute-temperature sensible energy |
-| ``Λ₀``                              | `Λ₀`   | `condensate_latent_energy(q, TC)`   | Latent energy of the condensate, ``Λ₀ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ``, so that ``H = cᵖᵐ T - Λ₀`` |
+| ``H^c``                             | `Hᶜ`   | `condensate_latent_energy(q, TC)`   | Latent energy of the condensate, ``Hᶜ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ``, so that ``H = cᵖᵐ T - Hᶜ`` |
 | ``\mathcal{L}^l(T)``                | `ℒˡ`   | `liquid_latent_heat(T, constants)`  | Temperature-dependent latent heat of condensation                              |
 | ``\mathcal{L}^i(T)``                | `ℒⁱ`   | `ice_latent_heat(T, constants)`     | Temperature-dependent latent heat of deposition                                |
 | ``\mathcal{L}^{fr}(T)``              | `ℒᶠʳ`  | `fusion_latent_heat(constants, T)`  | Temperature-dependent latent heat of fusion (freezing), ``ℒᶠʳ = ℒⁱ - ℒˡ``; the superscript `fr` abbreviates freezing, since `f` labels rime (`qᶠ`, `bᶠ`) |

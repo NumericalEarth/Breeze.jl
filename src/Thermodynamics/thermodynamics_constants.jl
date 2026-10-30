@@ -394,34 +394,9 @@ The liquid and ice phases are assumed to be incompressible.
     return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cˡ + qⁱ * cⁱ
 end
 
-"""
-$(TYPEDSIGNATURES)
-
-Return the vapor-equivalent heat capacity of a moist air parcel with mass fractions `q`:
-the heat capacity at constant pressure the parcel would have if all of its water were vapor,
-
-```math
-ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ ,
-```
-
-where ``qᵈ = 1 - qᵗ`` is the dry-air mass fraction and ``qᵗ = qᵛ + qˡ + qⁱ`` the total moisture
-fraction. Unlike the mixture heat capacity [`mixture_heat_capacity`](@ref), ``ĉᵖ`` does not change
-when water changes phase. It normalizes the liquid-ice potential temperature ``θˡⁱ``.
-
-# Example
-
-```jldoctest
-using Breeze.Thermodynamics: vapor_equivalent_heat_capacity, mixture_heat_capacity, MoistureMassFractions
-
-constants = ThermodynamicConstants()
-vapor = MoistureMassFractions(0.012, 0.0, 0.0)
-cloud = MoistureMassFractions(0.010, 0.002, 0.0)
-vapor_equivalent_heat_capacity(vapor, constants), vapor_equivalent_heat_capacity(cloud, constants)
-
-# output
-(1015.14, 1015.14)
-```
-"""
+# The vapor-equivalent heat capacity ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ, with qᵈ = 1 - qᵗ: the heat capacity at constant
+# pressure a parcel would have if all of its water were vapor. Unlike `mixture_heat_capacity`, ĉᵖ does
+# not change when water changes phase. It normalizes the liquid-ice potential temperature θˡⁱ.
 @inline function vapor_equivalent_heat_capacity(q::MMF, constants::TC)
     qᵗ = total_specific_moisture(q)
     qᵈ = 1 - qᵗ
@@ -430,20 +405,9 @@ vapor_equivalent_heat_capacity(vapor, constants), vapor_equivalent_heat_capacity
     return qᵈ * cᵖᵈ + qᵗ * cᵖᵛ
 end
 
-"""
-$(TYPEDSIGNATURES)
-
-Return the vapor-equivalent gas constant of a moist air parcel with mass fractions `q`:
-the gas constant the parcel would have if all of its water were vapor,
-
-```math
-R̂ = qᵈ Rᵈ + qᵗ Rᵛ ,
-```
-
-where ``qᵈ = 1 - qᵗ`` and ``qᵗ = qᵛ + qˡ + qⁱ``. In unsaturated air ``R̂`` equals the mixture gas
-constant [`mixture_gas_constant`](@ref). The ratio ``κ̂ = R̂ / ĉᵖ`` is the exponent of the
-[`VaporEquivalentExponent`](@ref) Exner function.
-"""
+# The vapor-equivalent gas constant R̂ = qᵈ Rᵈ + qᵗ Rᵛ: the gas constant a parcel would have if all of its
+# water were vapor. It equals `mixture_gas_constant` in unsaturated air, and κ̂ = R̂ / ĉᵖ is the exponent
+# of the `VaporEquivalentExponent` Exner function.
 @inline function vapor_equivalent_gas_constant(q::MMF, constants::TC)
     qᵗ = total_specific_moisture(q)
     qᵈ = 1 - qᵗ

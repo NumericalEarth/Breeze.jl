@@ -86,7 +86,7 @@ end
 ##### Fixed-volume phase change: microphysics alone conserves ρ𝓊 in a closed box
 #####
 
-function closed_box_internal_energy_change(fixed_volume_phase_change; exponent = VaporEquivalentExponent())
+function closed_box_internal_energy_change(fixed_volume_phase_change; κ̂ = VaporEquivalentExponent())
     FT = Float64
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1e3), y=(0, 1e3), z=(0, 1e3))
     constants = ThermodynamicConstants(FT)
@@ -95,7 +95,7 @@ function closed_box_internal_energy_change(fixed_volume_phase_change; exponent =
                                               precipitation_boundary_condition = ImpenetrableBoundaryCondition())
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 7e4,
                                     reference_potential_temperature = z -> 290.0)
-    formulation = LiquidIcePotentialTemperatureFormulation(; exponent, fixed_volume_phase_change)
+    formulation = LiquidIcePotentialTemperatureFormulation(; exner_exponent = κ̂, fixed_volume_phase_change)
     model = AtmosphereModel(grid; dynamics, formulation, microphysics, thermodynamic_constants = constants)
 
     # A supersaturated, mixed-phase state below freezing: condensation, deposition, autoconversion,
@@ -125,16 +125,16 @@ function closed_box_internal_energy_change(fixed_volume_phase_change; exponent =
 end
 
 # The Jacobian test below covers both exponents; the closed box runs the default one only
-@testset "Fixed-volume phase change conserves internal energy [$exponent]" for exponent in (VaporEquivalentExponent(),)
-    δ_off, Δqⁱ = closed_box_internal_energy_change(false; exponent)
-    δ_on, _ = closed_box_internal_energy_change(true; exponent)
-    @info "Closed box: relative change of ∫ρ𝓊 over 300 s" exponent δ_off δ_on
+@testset "Fixed-volume phase change conserves internal energy [$κ̂]" for κ̂ in (VaporEquivalentExponent(),)
+    δ_off, Δqⁱ = closed_box_internal_energy_change(false; κ̂)
+    δ_on, _ = closed_box_internal_energy_change(true; κ̂)
+    @info "Closed box: relative change of ∫ρ𝓊 over 300 s" κ̂ δ_off δ_on
     @test Δqⁱ > 1e-3          # substantial phase change happened
     @test abs(δ_off) > 1e-5   # phase change at fixed θˡⁱ does not conserve ρ𝓊 at fixed volume
     @test abs(δ_on) < 1e-7
 end
 
-@testset "Fixed-volume weights match the Jacobians of ρ𝓊 [$exponent]" for exponent in (VaporEquivalentExponent(), DryExponent())
+@testset "Fixed-volume weights match the Jacobians of ρ𝓊 [$κ̂]" for κ̂ in (VaporEquivalentExponent(), DryExponent())
     # ρ𝓊(ρᵈ, Θ, ρqᵛ, ρqˡ, ρqⁱ) at fixed volume, through the Newton inversion of θˡⁱ = Θ / ρᵈ at p = ρ Rᵐ T
     constants = ThermodynamicConstants(Float64)
     pˢᵗ = 1e5
@@ -143,7 +143,7 @@ end
         ρ = ρᵈ + ρqᵛ + ρqˡ + ρqⁱ
         q = TD.MoistureMassFractions(ρqᵛ / ρ, ρqˡ / ρ, ρqⁱ / ρ)
         solver = NewtonSolver(Float64; abstol = 1e-12, maxiter = 50)
-        𝒰 = TD.LiquidIceDensityState(Θ / ρᵈ, q, pˢᵗ, ρ, solver, exponent)
+        𝒰 = TD.LiquidIceDensityState(Θ / ρᵈ, q, pˢᵗ, ρ, solver, κ̂)
         return TD.temperature(𝒰, constants), q, ρ
     end
     function internal_energy_density(ψ)
@@ -155,7 +155,7 @@ end
     q₀ = TD.MoistureMassFractions(0.004, 0.001, 0.0006)
     ρ = ρᵈ / (1 - 0.004 - 0.001 - 0.0006)
     p = ρ * TD.mixture_gas_constant(q₀, constants) * T₀
-    𝒰 = TD.with_temperature(TD.LiquidIcePotentialTemperatureState(0.0, q₀, pˢᵗ, p, exponent), T₀, constants)
+    𝒰 = TD.with_temperature(TD.LiquidIcePotentialTemperatureState(0.0, q₀, pˢᵗ, p, κ̂), T₀, constants)
     ψ = [ρᵈ, ρᵈ * 𝒰.potential_temperature, ρ * q₀.vapor, ρ * q₀.liquid, ρ * q₀.ice]
     T, q, _ = temperature_and_fractions(ψ)
     @test T ≈ T₀ rtol=1e-10
@@ -168,7 +168,7 @@ end
     end
     𝒥 = [jacobian(n) for n in 1:5]
 
-    W = PTF.fixed_volume_phase_change_weights(T, q, ρ, ψ[2] / ρ, pˢᵗ, exponent, constants)
+    W = PTF.fixed_volume_phase_change_weights(T, q, ρ, ψ[2] / ρ, pˢᵗ, κ̂, constants)
     @test W[1] ≈ - 𝒥[3] / 𝒥[2] rtol=1e-6
     @test W[2] ≈ - 𝒥[4] / 𝒥[2] rtol=1e-6
     @test W[3] ≈ - 𝒥[5] / 𝒥[2] rtol=1e-6

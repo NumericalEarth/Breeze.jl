@@ -82,9 +82,7 @@ end
              - buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              + ρs_forcing(i, j, k, grid, clock, model_fields)
-             # a volumetric heating Q (note: ρs and ρE forcings are mutually exclusive) changes s
-             # at Q / ρ, so ρᵈ s at (ρᵈ / ρ) Q
-             + ρᵈ / ρ * (FρE + div_ℐ))
+             + ρᵈ / ρ * (FρE + div_ℐ)) # a volumetric heating Q changes s at Q / ρ, so ρᵈ s at (ρᵈ / ρ) Q (ρs and ρE forcings are mutually exclusive)
 end
 
 #####
@@ -95,10 +93,10 @@ end
 # composition increment Δqˣ of `sedimentation_composition_increment`: q̂ˣ − q̂ᵈ on the anelastic
 # core, whose total density is fixed, q̂ˣ − q on the compressible core, whose total density falls
 # with the condensate. Losing condensate at this content leaves the temperature unchanged on
-# either core. From s = cᵖᵐ T + g z − Λ₀, Λ₀ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ with the latent heats extrapolated
-# to zero kelvin (`absolute_zero_latent_heat`), and Δcᵖ and ΔΛ₀ the changes of cᵖᵐ and Λ₀ along Δqˣ,
+# either core. From s = cᵖᵐ T + g z − Hᶜ, Hᶜ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ with the latent heats extrapolated
+# to zero kelvin (`absolute_zero_latent_heat`), and Δcᵖ and ΔHᶜ the changes of cᵖᵐ and Hᶜ along Δqˣ,
 #
-#   χˣ = Δcᵖ T − ΔΛ₀ ,
+#   χˣ = Δcᵖ T − ΔHᶜ ,
 #
 # the enthalpy of the condensate relative to what its mass gives way to: hˣ − hᵈ against dry
 # air, hˣ − (s − g z) against the mixture. The geopotential is independent of the composition and
