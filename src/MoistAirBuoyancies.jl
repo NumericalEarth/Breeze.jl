@@ -152,9 +152,9 @@ end
 #####
 
 # Solve
-# θ = T/Π ( 1 - ℒ qˡ / (cᵖᵐ T))
+# ĉᵖ Π θ = cᵖᵐ T - ℒˡ₀ qˡ
 # for temperature T with qˡ = max(0, q - qᵛ⁺).
-# root of: f(T) = T - Π θ - ℒ qˡ / cᵖᵐ
+# root of: f(T) = T - (ĉᵖ Π θ + ℒˡ₀ qˡ) / cᵖᵐ
 
 """
 $(TYPEDSIGNATURES)
@@ -167,17 +167,17 @@ at the given conditions and affiliated with theromdynamic constants `constants`.
 The saturation equilibrium temperature satisfies the nonlinear relation
 
 ```math
-θ = [1 - ℒˡᵣ qˡ / (cᵖᵐ T)] T / Π ,
+ĉᵖ Π θ = cᵖᵐ T - ℒˡ₀ qˡ ,
 ```
 
-with ``ℒˡᵣ`` the latent heat at the reference temperature ``Tᵣ``, ``cᵖᵐ`` the mixture
-specific heat, ``Π`` the Exner function, ``qˡ = \\max(0, qᵗ - qᵛ⁺)``
-the condensate specific humidity, ``qᵗ`` is the
+with ``ℒˡ₀`` the latent heat of condensation extrapolated to absolute zero, ``cᵖᵐ`` the mixture
+heat capacity, ``ĉᵖ`` the vapor-equivalent heat capacity, ``Π`` the Exner function,
+``qˡ = \\max(0, qᵗ - qᵛ⁺)`` the condensate specific humidity, ``qᵗ`` is the
 total specific humidity, and ``qᵛ⁺`` is the saturation specific humidity.
 
 The saturation equilibrium temperature is thus obtained by solving ``r(T) = 0``, where
 ```math
-r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
+r(T) ≡ T - (ĉᵖ Π θ + ℒˡ₀ qˡ) / cᵖᵐ .
 ```
 
 Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
@@ -237,15 +237,9 @@ end
     return with_moisture(𝒰₀, q₁)
 end
 
-@inline function saturation_adjustment_residual(T, 𝒰::LiquidIcePotentialTemperatureState, constants::ThermodynamicConstants)
-    Π = exner_function(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    qˡ = q.liquid
-    θ = 𝒰.potential_temperature
-    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ
-end
+# The residual of the state's own inversion, T = (ĉᵖ Π θ + ℒˡ₀ qˡ) / cᵖᵐ
+@inline saturation_adjustment_residual(T, 𝒰::LiquidIcePotentialTemperatureState, constants::ThermodynamicConstants) =
+    T - Thermodynamics.temperature(𝒰, constants)
 
 #####
 ##### Diagnostics

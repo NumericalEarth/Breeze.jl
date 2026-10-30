@@ -472,15 +472,19 @@ AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_
 end
 
 # Isolated sedimentation holds gas partial densities fixed: dp/p = dT/T and
-# ρ cᵛᵐ dT/dt = Q_h - Σ hˣ rˣ. Thus dθ/dT = [1 - κ(1 - D/T)] / Π.
+# ρ cᵛᵐ dT/dt = Q_h - Σ hˣ rˣ. With ĉᵖ Π θ = cᵖᵐ T − Hᶜ and Π = (p / pˢᵗ)^κ,
+# dθ/dT = cᵖᵐ [1 - κ(1 - Hᶜ / (cᵖᵐ T))] / (ĉᵖ Π).
 # Only phase enthalpy crosses a face; mixture subtraction belongs in the local χ.
-@inline function PotentialTemperatureFormulations.sedimentation_thermal_response(::CompressibleDynamics, q, constants, T, Π)
+@inline function PotentialTemperatureFormulations.sedimentation_thermal_response(::CompressibleDynamics, κ̂,
+                                                                                q, constants, T, Π)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
-    D = (constants.liquid.reference_latent_heat * q.liquid + constants.ice.reference_latent_heat * q.ice) / cᵖᵐ
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    κ = exner_exponent(κ̂, q, constants)
+    Hᶜ = condensate_latent_energy(q, constants)
     hˡ = constants.liquid.heat_capacity * T - absolute_zero_latent_heat(constants, constants.liquid)
     hⁱ = constants.ice.heat_capacity * T - absolute_zero_latent_heat(constants, constants.ice)
-    β = (1 - Rᵐ / cᵖᵐ * (1 - D / T)) / ((cᵖᵐ - Rᵐ) * Π)
+    β = cᵖᵐ * (1 - κ * (1 - Hᶜ / (cᵖᵐ * T))) / (ĉᵖ * (cᵖᵐ - Rᵐ) * Π)
     return (hˡ, hⁱ), β
 end
 
@@ -661,3 +665,10 @@ $(TYPEDSIGNATURES)
 Return the standard pressure for potential temperature diagnostics.
 """
 AtmosphereModels.Diagnostics.dynamics_standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
+
+# The compressible core closes the thermodynamics through `temperature_and_pressure`, which only
+# inverts liquid-ice potential temperature. Reject static energy at construction rather than with a
+# `MethodError` on the first state update.
+AtmosphereModels.materialize_formulation(::Val{:StaticEnergy}, ::CompressibleDynamics, grid, boundary_conditions) =
+    throw(ArgumentError("CompressibleDynamics does not yet support formulation=:StaticEnergy; " *
+                        "use formulation=:LiquidIcePotentialTemperature"))
