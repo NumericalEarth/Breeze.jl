@@ -68,6 +68,11 @@ function open_boundary_model(grid)
     return model
 end
 
+# TODO: on Julia 1.11 for x86_64, LLVM's instruction scheduler takes about 40 minutes to compile the moist
+# multi-region model below (the constructor of its `AtmosphereModel` alone takes minutes) and overflows the
+# stack of the CI test worker. Julia 1.11 on aarch64 and Julia ≥ 1.12 compile it in a minute or two.
+compiles_moist_multi_region_model() = VERSION ≥ v"1.12" || Sys.ARCH !== :x86_64
+
 function step_both!(single, multi, Δt, N)
     for _ in 1:N
         time_step!(single, Δt)
@@ -112,6 +117,7 @@ end
             @test maximum(abs, single.momentum.ρw) > 0
         end
 
+        compiles_moist_multi_region_model() &&
         @testset "Moist acoustic RK3 with TKE closure and Held–Suarez forcing vs single grid" begin
             single = moist_acoustic_model(grid)
             multi = moist_acoustic_model(xpartitioned_grid)
