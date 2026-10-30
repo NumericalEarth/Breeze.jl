@@ -1,34 +1,42 @@
 #####
-##### Enthalpy of the water crossing a wall, for a prognostic total energy
+##### Enthalpy of the water crossing a wall, for a prognostic energy
 #####
-##### A water flux through a wall carries its enthalpy. Potential temperature and static energy are
-##### intensive variables that the vapor leaves nearly unchanged at fixed temperature, so their
-##### boundary conditions ignore it; a prognostic total energy density ρE must receive it. At a wall
-##### where the moisture density carries a flux Jᵛ, the flux of ρE is
+##### A water flux through a wall carries its enthalpy. Potential temperature is an intensive variable
+##### that the vapor leaves unchanged at fixed temperature, so its boundary conditions ignore it; an
+##### energy density must receive it. At a wall where the moisture density carries a flux Jᵛ, the flux
+##### of the energy density is
 #####
-#####   𝒬ᴱ = 𝒬ᵀ + Jᵛ hᵛ(T₁),   hᵛ(T) = cᵖᵛ T + ℒˡ₀ − cˡ T₀,
+#####   𝒬ᴱ = 𝒬ᵀ + Jᵛ hᵛ(T₁),   hᵛ(T) = cᵛ T + ℓᵛ,
 #####
 ##### with 𝒬ᵀ the sensible (or any user-supplied) energy flux, T₁ the temperature of the wall-adjacent
-##### cell, ℒˡ₀ the latent heat of condensation extrapolated to zero kelvin, and T₀ the energy origin
-##### of the formulation (liquid water has zero internal energy at T₀), so that hᵛ is measured from
-##### the same origin as the total energy.
+##### cell, and (cᵛ, ℓᵛ) set by the energy variable:
 #####
+#####   ρE (total energy):          cᵛ = cᵖᵛ,         ℓᵛ = ℒˡ₀ − cˡ T₀
+#####       the enthalpy of vapor measured from the energy origin T₀ of the formulation (liquid water
+#####       has zero internal energy at T₀), with ℒˡ₀ the latent heat extrapolated to zero kelvin;
+#####   ρs (moist static energy):   cᵛ = cᵖᵛ − cᵖᵈ,   ℓᵛ = 0
+#####       s = cᵖᵐ T + g z − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ carries no latent energy on the vapor, and on the
+#####       anelastic core the vapor displaces dry air at fixed density, so evaporating Jᵛ at T₁ changes
+#####       ρs by (cᵖᵛ − cᵖᵈ) T₁ Jᵛ. Without it the evaporated vapor would cool the wall-adjacent cell.
 
 """
 $(TYPEDEF)
 
-The flux of a total energy density through a wall: the energy flux `energy` (the boundary
-condition supplied for `ρE`, or `nothing`) plus the enthalpy `cᵖᵛ T₁ + ℒˡ₀ - cˡ T₀` of the water
-flux `vapor` (the moisture density's boundary condition on the same wall), with `T₁` the temperature
-of the wall-adjacent cell and `T₀` the energy origin of the formulation. Built by the `AtmosphereModel` constructor for `TotalEnergyFormulation`;
-the moisture density keeps its own boundary condition, and `vapor` evaluates the same condition.
+The flux of an energy density through a wall: the energy flux `energy` (the boundary condition
+supplied for the energy, or `nothing`) plus the enthalpy `heat_capacity × T₁ + enthalpy_offset` of
+the water flux `vapor` (the moisture density's boundary condition on the same wall), with `T₁` the
+temperature of the wall-adjacent cell. For `TotalEnergyFormulation` that enthalpy is
+`cᵖᵛ T₁ + ℒˡ₀ - cˡ T₀`, with `T₀` the energy origin; for `StaticEnergyFormulation` it is
+`(cᵖᵛ - cᵖᵈ) T₁`. Built by the `AtmosphereModel` constructor; the moisture density keeps its own
+boundary condition, and `vapor` evaluates the same condition.
 """
 struct VaporEnthalpyFluxFunction{E, V, S, TC, T}
     energy :: E
     vapor :: V
     side :: S
     thermodynamic_constants :: TC
-    reference_temperature :: T
+    heat_capacity :: T      # cᵛ in hᵛ = cᵛ T₁ + ℓᵛ
+    enthalpy_offset :: T    # ℓᵛ
 end
 
 Adapt.adapt_structure(to, vf::VaporEnthalpyFluxFunction) =
@@ -36,7 +44,8 @@ Adapt.adapt_structure(to, vf::VaporEnthalpyFluxFunction) =
                               Adapt.adapt(to, vf.vapor),
                               Adapt.adapt(to, vf.side),
                               Adapt.adapt(to, vf.thermodynamic_constants),
-                              vf.reference_temperature)
+                              vf.heat_capacity,
+                              vf.enthalpy_offset)
 
 Base.summary(vf::VaporEnthalpyFluxFunction) =
     string("VaporEnthalpyFluxFunction(", flux_condition_summary(vf.energy), " + hᵛ × ",
@@ -58,11 +67,7 @@ const VaporEnthalpyFluxBoundaryCondition = BoundaryCondition{<:Flux, <:VaporEnth
     Jᵛ = OceananigansBC.getbc(vf.vapor, ℓ, m, grid, clock, model_fields, dynamics_fields)
     i, j, k = near_wall_indices(ℓ, m, grid, vf.side)
     T₁ = @inbounds model_fields.T[i, j, k]
-    constants = vf.thermodynamic_constants
-    cᵖᵛ = constants.vapor.heat_capacity
-    cˡ = constants.liquid.heat_capacity
-    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
-    return 𝒬ᵀ + Jᵛ * (cᵖᵛ * T₁ + ℒˡ₀ - cˡ * vf.reference_temperature)
+    return 𝒬ᵀ + Jᵛ * (vf.heat_capacity * T₁ + vf.enthalpy_offset)
 end
 
 # The bulk sensible-heat flux inside the wrapper keeps its own filtered state. The water flux is the
@@ -99,36 +104,52 @@ energy_boundary_conditions(fbcs::FieldBoundaryConditions) =
 ##### Coupling the moisture flux into the energy flux
 #####
 
-# Only a prognostic total energy takes the enthalpy of the water crossing a wall.
+# Only an energy density (ρE or ρs) takes the enthalpy of the water crossing a wall.
 couple_vapor_enthalpy_bcs(bcs, ρᵡ, formulation, microphysics, constants) = bcs
 
-function couple_vapor_enthalpy_bcs(bcs, ::Val{:ρE}, formulation, microphysics, constants)
+# hᵛ = cᵛ T₁ + ℓᵛ: (cᵛ, ℓᵛ) for each energy density; see the header of this file
+function vapor_enthalpy_coefficients(::Val{:ρE}, formulation, constants)
+    FT = typeof(constants.liquid.heat_capacity)
+    T₀ = convert(FT, reference_temperature(formulation))
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    return constants.vapor.heat_capacity, convert(FT, ℒˡ₀ - constants.liquid.heat_capacity * T₀)
+end
+
+function vapor_enthalpy_coefficients(::Val{:ρs}, formulation, constants)
+    cᵖᵛ = constants.vapor.heat_capacity
+    return cᵖᵛ - constants.dry_air.heat_capacity, zero(cᵖᵛ)
+end
+
+const VaporEnthalpyCoupledName = Union{Val{:ρE}, Val{:ρs}}
+
+function couple_vapor_enthalpy_bcs(bcs, ρᵡ::VaporEnthalpyCoupledName, formulation, microphysics, constants)
+    name = ρᵡ isa Val{:ρE} ? total_energy_density_name : :ρs
     ρq_name = moisture_prognostic_name(microphysics)
     ρq_bcs = get(bcs, ρq_name, nothing)
-    ρE_bcs = get(bcs, total_energy_density_name, nothing)
+    ρE_bcs = get(bcs, name, nothing)
     ρq_bcs isa FieldBoundaryConditions && ρE_bcs isa FieldBoundaryConditions || return bcs
 
-    T₀ = convert(typeof(constants.liquid.heat_capacity), reference_temperature(formulation))
+    cᵛ, ℓᵛ = vapor_enthalpy_coefficients(ρᵡ, formulation, constants)
     sides = (west = West(), east = East(), south = South(), north = North(), bottom = Bottom(), top = Top())
-    coupled = NamedTuple(name => couple_vapor_enthalpy(getproperty(ρE_bcs, name), getproperty(ρq_bcs, name),
-                                                       side, constants, T₀)
-                         for (name, side) in pairs(sides))
+    coupled = NamedTuple(side_name => couple_vapor_enthalpy(getproperty(ρE_bcs, side_name), getproperty(ρq_bcs, side_name),
+                                                            side, constants, cᵛ, ℓᵛ)
+                         for (side_name, side) in pairs(sides))
 
     coupled_ρE_bcs = FieldBoundaryConditions(; coupled..., immersed = ρE_bcs.immersed)
-    return merge(bcs, NamedTuple{(total_energy_density_name,)}((coupled_ρE_bcs,)))
+    return merge(bcs, NamedTuple{(name,)}((coupled_ρE_bcs,)))
 end
 
 # No water flux through this wall: the energy condition stands.
-couple_vapor_enthalpy(ρE_bc, ρq_bc, side, constants, T₀) = ρE_bc
+couple_vapor_enthalpy(ρE_bc, ρq_bc, side, constants, cᵛ, ℓᵛ) = ρE_bc
 
-couple_vapor_enthalpy(ρE_bc, ρq_bc::BoundaryCondition{<:Flux}, side, constants, T₀) =
-    couple_vapor_enthalpy(ρE_bc, ρq_bc, ρq_bc.condition, side, constants, T₀)
+couple_vapor_enthalpy(ρE_bc, ρq_bc::BoundaryCondition{<:Flux}, side, constants, cᵛ, ℓᵛ) =
+    couple_vapor_enthalpy(ρE_bc, ρq_bc, ρq_bc.condition, side, constants, cᵛ, ℓᵛ)
 
-couple_vapor_enthalpy(ρE_bc, ρq_bc, ::Nothing, side, constants, T₀) = ρE_bc
+couple_vapor_enthalpy(ρE_bc, ρq_bc, ::Nothing, side, constants, cᵛ, ℓᵛ) = ρE_bc
 
-function couple_vapor_enthalpy(ρE_bc, ρq_bc, vapor_condition, side, constants, T₀)
+function couple_vapor_enthalpy(ρE_bc, ρq_bc, vapor_condition, side, constants, cᵛ, ℓᵛ)
     energy = energy_flux_condition(ρE_bc)
-    vf = VaporEnthalpyFluxFunction(energy, vapor_condition, side, constants, T₀)
+    vf = VaporEnthalpyFluxFunction(energy, vapor_condition, side, constants, cᵛ, ℓᵛ)
     return BoundaryCondition(Flux(), vf)
 end
 

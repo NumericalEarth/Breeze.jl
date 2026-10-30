@@ -15,7 +15,7 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, Center, znode
+using Oceananigans: Oceananigans, CenterField, Center, Field, znode
 using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
 using Oceananigans.Operators: ℑzᵃᵃᶜ
 using Oceananigans.Utils: prettysummary, launch!
@@ -29,6 +29,7 @@ using Breeze.AtmosphereModels: AtmosphereModels,
     AtmosphereModelBuoyancy,
     radiation_flux_divergence
 
+using Breeze.BoundaryConditions: energy_boundary_conditions
 using Breeze.Thermodynamics: StaticEnergyState, LiquidIcePotentialTemperatureState, with_temperature
 
 # The lowercase c is a singleton instance of Center

@@ -267,7 +267,8 @@ For `LiquidIcePotentialTemperatureFormulation`, returns a `Field` with boundary 
 that convert potential temperature fluxes to energy fluxes. This allows users to use
 `BoundaryConditionOperation` to extract energy flux values from the model.
 
-For `StaticEnergyFormulation`, returns the prognostic energy density field directly.
+For `StaticEnergyFormulation`, returns the prognostic energy density field, with boundary conditions
+that omit the enthalpy of the vapor crossing the walls (the sensible heat flux alone).
 """
 function static_energy_density end
 
