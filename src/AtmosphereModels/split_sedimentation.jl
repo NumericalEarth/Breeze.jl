@@ -94,6 +94,14 @@ function split_sedimentation_step!(model, Δt)
                 model.thermodynamic_constants, model.microphysics, model.microphysical_fields,
                 specific_prognostic_moisture(model), temperature)
     end
+    # Sedimenting prognostics that carry no condensate content (P3 number, rime volume, ...): mass only.
+    names = Tuple(n for n in prognostic_field_names(model.microphysics) if !haskey(model.sedimentation, n))
+    for name in names
+        w = sedimentation_velocity(model.microphysics, model.microphysical_fields, Val(name))
+        isnothing(w) && continue
+        launch!(arch, grid, :xy, _split_sedimentation_column!, F, getproperty(model.microphysical_fields, name), w, ρ, grid,
+                kernel_time_step(arch, grid, Δt), mode, FT(SEDIMENTATION_CFL), SEDIMENTATION_MAX_SUBSTEPS)
+    end
     return nothing
 end
 
