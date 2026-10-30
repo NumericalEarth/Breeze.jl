@@ -71,7 +71,8 @@ end
 # data size and the reduced location disagree), so `set!` of a total moisture would fail on an ensemble.
 # TODO: reduce fields over `Flat` dimensions of size greater than one in Oceananigans, then drop this.
 
-AtmosphereModels.interior_minimum(field::AbstractField{<:Any, <:Any, <:Any, <:SingleColumnGrid}) = minimum(interior(field))
+AtmosphereModels.interior_minimum(field::AbstractField{<:Any, <:Any, <:Any, <:SingleColumnGrid}) =
+    AtmosphereModels.data_minimum(interior(field))
 
 #####
 ##### Per-column closures
