@@ -19,7 +19,7 @@ for (FT, TF) in ((Float64, Float64), (Float32, Float64), (Float32, Float32))
         c64 = ThermodynamicConstants(Float64)
         expected = [ρ * potential_temperature_increment(T₀[i], liquid_latent_heat(T₀[i], c64) * C[i] /
                     (ρ * mixture_heat_capacity(MoistureMassFractions(ρq₀[i] / ρ - C[i] / ρ), c64)), p, 1e5, ρq₀[i] / ρ, -C[i] / ρ, c64)
-                    for i in eachindex(C)]
+                    for i in CartesianIndices(C)]
         @info @sprintf("%s/%s step %d: ΣΔρθ = %.6e, expected from C %.6e (ratio %.5f); ΣΔρqᵛ = %.6e, -ΣC = %.6e, max|Δρθ-exp| = %.2e",
                        FT, TF, n, sum(ρθ₁ .- ρθ₀), sum(expected), sum(ρθ₁ .- ρθ₀) / sum(expected), sum(ρq₁ .- ρq₀), -sum(C),
                        maximum(abs, ρθ₁ .- ρθ₀ .- expected))
