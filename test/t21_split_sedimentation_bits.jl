@@ -12,7 +12,8 @@ const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrop
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics
 const AMs = Breeze.AtmosphereModels
 
-arch = get(ARGS, 1, "CPU") == "GPU" ? (Base.require(Base.PkgId(UUID("052768ef-5323-5732-b1bb-66c8b64840ba"), "CUDA")); GPU()) : CPU()
+get(ARGS, 1, "CPU") == "GPU" && @eval using CUDA
+arch = get(ARGS, 1, "CPU") == "GPU" ? Base.invokelatest(GPU) : CPU()
 
 function build(FT, scheme)
     Oceananigans.defaults.FloatType = FT
