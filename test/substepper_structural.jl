@@ -99,10 +99,10 @@ end
     dᵐ⁺ = 0.0   # implicit-vertical-damping factor; zero for this test
     b₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagDiagonal(),
                                        nothing, ZDirection(),
-                                       Π⁰, θ⁰, γRᵐ⁰, g, δτ_new, dᵐ⁺, nothing)
+                                       Π⁰, θ⁰, γRᵐ⁰, sub.linearization_density_weight, g, δτ_new, dᵐ⁺, nothing)
     c₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagUpper(),
                                        nothing, ZDirection(),
-                                       Π⁰, θ⁰, γRᵐ⁰, g, δτ_new, dᵐ⁺, nothing)
+                                       Π⁰, θ⁰, γRᵐ⁰, sub.linearization_density_weight, g, δτ_new, dᵐ⁺, nothing)
 
     @test b₁ == 1.0
     @test c₁ == 0.0
