@@ -49,14 +49,13 @@ const CPD_STR = 1005.0
 @inline mass_flux_y(i, j, k, grid, ρ, v) = ℑyᵃᶠᵃ(i, j, k, grid, ρ) * @inbounds v[i, j, k]
 @inline mass_flux_z(i, j, k, grid, ρ, w) = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * @inbounds w[i, j, k]
 
-function _build_str_model(arch; ω = 0.55, substeps = nothing)
+function _build_str_model(arch; ω = 0.55, substeps = nothing, damping = NoDivergenceDamping())
     grid = RectilinearGrid(arch;
                            size = (8, 8, NZ_STR), halo = (5, 5, 5),
                            x = (0, 100e3), y = (0, 100e3), z = (0, Lz_STR),
                            topology = (Periodic, Periodic, Bounded))
     constants = ThermodynamicConstants(eltype(grid))
-    td = SplitExplicitTimeDiscretization(; forward_weight = ω, substeps,
-                                           damping = NoDivergenceDamping())
+    td = SplitExplicitTimeDiscretization(; forward_weight = ω, substeps, damping)
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = θ_iso_str,
                                base_pressure = 1e5,
@@ -608,8 +607,9 @@ function stage_mass_flux_residual(model, ρᵈᴸ, ρᵈ⁰, β, Δt)
     return maximum(abs, residual), maximum(abs, Δρᵈ)
 end
 
-@testset "S10 — Transport-average mass flux matches the dry-density update (ω = 0.65)" begin
-    model = _build_str_model(default_arch; ω = 0.65, substeps = 6)
+@testset "S10 — Transport-average mass flux matches the dry-density update (default ω = 0.65, $(nameof(typeof(damping))))" for damping in
+        (NoDivergenceDamping(), ThermalDivergenceDamping(; coefficient = 0.1))
+    model = _build_str_model(default_arch; ω = 0.65, substeps = 6, damping)
     _set_str_rest!(model)
 
     ρθ_field = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)

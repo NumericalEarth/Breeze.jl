@@ -1219,11 +1219,13 @@ end
 #####   ⟨u⟩  ≈ ⟨ρu⟩ / ρᴸ_face
 #####
 ##### ρ′ sees the off-centered vertical flux (1 − ω)(ρw)′(n−1) + ω(ρw)′(n), so ⟨ρw⟩ must too.
-##### `solve!` is the only writer of (ρw)′ inside the loop, so the sum of that flux over n = 1…Nτ telescopes onto the raw accumulation:
+##### `solve!` is the only writer of (ρw)′ inside the loop, so the sum of that flux over
+##### n = 1…Nτ telescopes onto the raw accumulation:
 #####
 #####   ∑ₙ [(1 − ω)(ρw)′(n−1) + ω(ρw)′(n)] = ∑ₙ (ρw)′(n) − (1 − ω)[(ρw)′(Nτ) − (ρw)′(0)]
 #####
-##### The rewind (ρw)′(0) is zero in stage 1 but not in stages 2–3, so it is recomputed from Uᴸ_outer.
+##### The rewind (ρw)′(0) is zero in stage 1 but not in stages 2–3, so it is recomputed
+##### from Uᴸ_outer.
 #####
 ##### `model.momentum.*` and `model.dynamics.dry_density` are still the stage-entry
 ##### (Uᴸ_stage) values here. Dividing by ρᴸ ignores ρ's variation over the
@@ -1236,7 +1238,7 @@ function finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ_outer)
     arch = architecture(grid)
     FT   = eltype(grid)
     inv_Nτ = one(FT) / FT(Nτ)
-    ωˢ⁻ = 1 - FT(substepper.forward_weight)
+    ωˢ⁻ = 1 - substepper.forward_weight
 
     # `model.dynamics.dry_density` and `model.momentum.*` are still the
     # stage-entry (Uᴸ) values here — the substep loop only touched
