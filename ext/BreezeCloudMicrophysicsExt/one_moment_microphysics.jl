@@ -1028,6 +1028,12 @@ end
     return wpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 end
 
+# Evaluate the bundle once for a request for several names (the moist entropy source, parcel models).
+@inline function AM.microphysical_tendencies(bμp::WPNE1M, names::Tuple, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+    G = wpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants)
+    return map(name -> getproperty(G, name), names)
+end
+
 #####
 ##### Precipitation process rates shared by the mixed-phase 1M schemes
 #####
@@ -1242,6 +1248,12 @@ end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqˢⁿ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqˢⁿ
+end
+
+# Evaluate the bundle once for a request for several names (the moist entropy source, parcel models).
+@inline function AM.microphysical_tendencies(bμp::MPNE1M, names::Tuple, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+    G = mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants)
+    return map(name -> getproperty(G, name), names)
 end
 
 #####

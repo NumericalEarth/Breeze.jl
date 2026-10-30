@@ -67,12 +67,14 @@ using Breeze.Solvers: NewtonSolver
 using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, MoistureMassFractions,
                              vapor_equivalent_heat_capacity, condensate_latent_energy, exner_exponent,
                              reject_renamed_surface_pressure,
-                             vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState
+                             vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState,
+                             temperature_from_moist_entropy, vapor_entropy, liquid_entropy, ice_entropy
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                base_pressure, standard_pressure, thermodynamic_density,
                                thermodynamic_density_name, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
+using Breeze.MoistEntropyFormulations: MoistEntropyFormulations, MoistEntropyFormulation
 
 using ReactantCore: @trace
 
@@ -87,5 +89,6 @@ include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
+include("moist_entropy_compressible.jl")
 
 end # module
