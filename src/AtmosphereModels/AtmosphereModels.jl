@@ -170,6 +170,7 @@ function __init__()
     BATCHED_Z_BCS[] = env_switch("BREEZE_BATCHED_Z_BCS", true)
     COLUMN_SEDIMENTATION[] = env_switch("BREEZE_COLUMN_SEDIMENTATION", false)  # density_weighted_implicit_diffusion.jl
     CELLWISE_MOISTURE_CORRECTION[] = env_switch("BREEZE_CELLWISE_MOISTURE_CORRECTION", true)
+    SEDIMENTATION_SUBSTEP[] = env_switch("BREEZE_SEDIMENTATION_SUBSTEP", false)  # split_sedimentation.jl (answer-changing)
     read_kernel_argument_cache_switches!()  # kernel_arguments.jl
     FOLDED_RK3_SOLVES[] = env_switch("BREEZE_FOLDED_RK3_SOLVES", true)
     return nothing
@@ -217,6 +218,7 @@ include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("implicit_vertical_advection.jl")
 include("density_weighted_implicit_diffusion.jl")
+include("split_sedimentation.jl")
 include("carried_implicit_rows.jl")
 include("cell_advection_timescale.jl")
 include("negative_moisture_correction.jl")

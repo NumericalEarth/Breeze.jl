@@ -461,7 +461,8 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
         model_fields)
 
     advecting_velocities = transport_velocities(model)
-    common_args = tendency_args(advecting_velocities)
+    # T21-precip: under split sedimentation the scalars advect with the air velocity only.
+    common_args = Base.setindex(tendency_args(advecting_velocities), scalar_tendency_microphysics(model.microphysics), 6)
 
     #####
     ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
