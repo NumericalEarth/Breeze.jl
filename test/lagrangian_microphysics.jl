@@ -5,7 +5,7 @@ using Breeze.ParticleMicrophysics: droplet_water_mass, diffusional_growth_rate, 
                                    potential_temperature_increment
 using Breeze.Thermodynamics: saturation_vapor_pressure, vapor_gas_constant, dry_air_gas_constant, liquid_latent_heat,
                              mixture_heat_capacity, reference_value, MoistureMassFractions, PlanarLiquidSurface,
-                             potential_temperature_from_temperature
+                             potential_temperature_from_temperature, temperature_from_potential_temperature
 using Oceananigans
 using Statistics: mean
 using Test
@@ -13,8 +13,10 @@ using Test
 # Deterministic quasi-random numbers in [0, 1)
 quasirandom(n, k=1) = mod(n * sqrt(2 + k), 1)
 
+# Single-precision droplet boxes keep θ and qᵛ in double precision: their per-step increments are comparable
+# to the single-precision spacing of θ ≈ 281 K and qᵛ ≈ 10⁻² (see the test "in single precision" below).
 function droplet_box_model(arch, FT; Nd = 200, saturation_ratio = 1.005, frame_vertical_velocity = nothing, sorting = nothing,
-                           thermodynamic_float_type = FT)
+                           thermodynamic_float_type = Float64)
     L = FT(0.02)
     grid = RectilinearGrid(arch, FT; size=(6, 6, 6), x=(0, L), y=(0, L), z=(0, L),
                            topology=(Periodic, Periodic, Periodic))
@@ -37,6 +39,17 @@ function droplet_box_model(arch, FT; Nd = 200, saturation_ratio = 1.005, frame_v
     return model
 end
 
+# The mean temperature, computed from θ and qᵛ in their own precision rather than from the temperature field,
+# which on a single-precision grid resolves the latent heating of a few steps only to within 3 × 10⁻⁵ K
+function mean_temperature(model)
+    θ = Array{Float64}(interior(model.formulation.potential_temperature))
+    qᵛ = Array{Float64}(interior(model.microphysical_fields.qᵛ))
+    p = Float64(reference_value(model.dynamics.reference_state.pressure))
+    pˢᵗ = Float64(model.dynamics.reference_state.standard_pressure)
+    constants = model.thermodynamic_constants
+    return mean(temperature_from_potential_temperature.(θ, p, pˢᵗ, Ref(constants), qᵛ))
+end
+
 function water_masses(model)
     grid = model.grid
     V = prod(size(grid)) * minimum_xspacing(grid) * minimum_yspacing(grid) * minimum_zspacing(grid)
@@ -57,7 +70,7 @@ end
     # Supersaturated air: droplets grow, vapor is depleted, and total water is conserved
     vapor₀, liquid₀ = water_masses(model)
     r₀ = Array(model.microphysics.droplets.properties.r)
-    T₀ = mean(model.temperature)
+    T₀ = mean_temperature(model)
     for _ in 1:10
         time_step!(model, 1e-2)
     end
@@ -75,7 +88,7 @@ end
     air_mass = ρ * prod(size(grid)) * minimum_xspacing(grid) * minimum_yspacing(grid) * minimum_zspacing(grid)
     q = MoistureMassFractions(mean(model.microphysical_fields.qᵛ))
     ΔT = liquid_latent_heat(T₀, constants) * (liquid₁ - liquid₀) / (mixture_heat_capacity(q, constants) * air_mass)
-    @test mean(model.temperature) - T₀ ≈ ΔT rtol = FT == Float64 ? 1e-3 : 1e-2
+    @test mean_temperature(model) - T₀ ≈ ΔT rtol = FT == Float64 ? 1e-3 : 1e-2
 
     # The liquid mass fraction of the droplets is diagnosed on the grid
     @test sum(Array(interior(model.microphysical_fields.qˡ))) * air_mass / prod(size(grid)) ≈ liquid₁ rtol = sqrt(eps(FT))
@@ -98,7 +111,7 @@ end
 
     # A rising frame cools the air and raises the supersaturation, at a rate reduced by latent heating
     model = droplet_box_model(default_arch, FT; saturation_ratio = 1.001, frame_vertical_velocity = 2)
-    T₀ = mean(model.temperature)
+    T₀ = mean_temperature(model)
     vapor₀, liquid₀ = water_masses(model)
     for _ in 1:10
         time_step!(model, 1e-2)
@@ -110,7 +123,7 @@ end
     g = constants.gravitational_acceleration
     ΔT_dry = - g * 2 * FT(0.1) / cᵖᵐ
     ΔT_latent = liquid_latent_heat(T₀, constants) * (liquid₁ - liquid₀) / (cᵖᵐ * air_mass)
-    @test mean(model.temperature) - T₀ ≈ ΔT_dry + ΔT_latent rtol = FT == Float64 ? 1e-3 : 1e-2
+    @test mean_temperature(model) - T₀ ≈ ΔT_dry + ΔT_latent rtol = FT == Float64 ? 1e-3 : 1e-2
 
     # Sorting droplets by cell reorders them but does not change their evolution
     unsorted = droplet_box_model(default_arch, FT)
@@ -138,7 +151,8 @@ end
     @test Δθ³² ≈ Δθ rtol = 1e-5
 
     # The moving frame is kept in Float64 and read in the float type of the grid
-    models = Dict(FT => droplet_box_model(default_arch, FT; saturation_ratio = 1.001, frame_vertical_velocity = 2)
+    models = Dict(FT => droplet_box_model(default_arch, FT; saturation_ratio = 1.001, frame_vertical_velocity = 2,
+                                         thermodynamic_float_type = FT)
                   for FT in (Float32, Float64))
     frame = models[Float32].dynamics.reference_state.frame
     @test frame.pressure isa Float64
@@ -168,10 +182,24 @@ end
         time_step!(model, 1e-2)
         time_step!(reference, 1e-2)
     end
-    # The warming of the air by condensation agrees with double precision to single-precision accuracy of the increment
+    # The warming of the air by condensation agrees with double precision. The remaining difference comes from
+    # rounding the radii of the (identical) droplets to single precision: the spacing of r = 5 μm is 0.05 % of its
+    # per-step growth here, and the rounding errors of identical droplets are correlated.
     Δθ = mean(model.formulation.potential_temperature) - θ₀
     Δθʳ = mean(reference.formulation.potential_temperature) - θ₀ʳ
-    @test Δθ ≈ Δθʳ rtol = 1e-3
+    @test Δθ ≈ Δθʳ rtol = 5e-3
+
+    # In single precision, θ is stored with a spacing of 3 × 10⁻⁵ K, comparable to the warming in a step,
+    # so that the warming of a single precision model is in error by a fraction of that spacing per step
+    single = droplet_box_model(default_arch, Float32; thermodynamic_float_type = Float32)
+    reference = droplet_box_model(default_arch, Float64)
+    θ₀ = mean(Float64, interior(single.formulation.potential_temperature))
+    θ₀ʳ = mean(reference.formulation.potential_temperature)
+    time_step!(single, 1e-2)
+    time_step!(reference, 1e-2)
+    Δθ = mean(Float64, interior(single.formulation.potential_temperature)) - θ₀
+    Δθʳ = mean(reference.formulation.potential_temperature) - θ₀ʳ
+    @test abs(Δθ - Δθʳ) < eps(281f0)
 end
 
 @testset "Lattice Green's function of the second-order Laplacian" begin
