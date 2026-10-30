@@ -633,7 +633,18 @@ function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
     return NamedTuple{names}(Returns(zero(eltype(prognostic_fields[name]))) for name in names)
 end
 
-function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
+# Combine the forcings contributed by the dynamics with the user's forcings on the same keys
+function add_dynamics_forcing(user_forcings, dynamics, formulation, microphysics)
+    thermodynamic_name = specific_name_of(thermodynamic_density_name(formulation))
+    moisture_name = moisture_specific_name(microphysics)
+    extra_forcings = dynamics_forcing(dynamics, thermodynamic_name, moisture_name)
+    names = Tuple(unique((keys(user_forcings)..., keys(extra_forcings)...)))
+    combined = Tuple(combine_forcing_values(get(user_forcings, name, nothing), get(extra_forcings, name, nothing))
+                     for name in names)
+    return NamedTuple{names}(combined)
+end
+
+function atmosphere_model_forcing(supplied_forcings::NamedTuple, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
@@ -642,7 +653,9 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # prognostic moisture density unconverted whatever the scheme calls it, so — unlike `ρE`,
     # which the tendency kernels read separately in order to convert it — routing it is a pure
     # re-key onto that name, done before anything else looks at the forcing keys.
-    user_forcings = route_moisture_forcing(user_forcings, microphysics)
+    # Forcings contributed by the dynamics (such as `AdiabaticExpansion`) are then combined with the user's.
+    routed_forcings = route_moisture_forcing(supplied_forcings, microphysics)
+    user_forcings = add_dynamics_forcing(routed_forcings, dynamics, formulation, microphysics)
     user_forcing_names = keys(user_forcings)
 
     # `ρE` (total energy) is the formulation-agnostic energy key: a forcing supplied under it

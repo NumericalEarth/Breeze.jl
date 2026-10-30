@@ -2,9 +2,10 @@
 ##### AnelasticDynamics definition
 #####
 
-struct AnelasticDynamics{R, P}
+struct AnelasticDynamics{R, P, A}
     reference_state :: R
     pressure_anomaly :: P
+    adiabatic_expansion :: A
 end
 
 """
@@ -12,11 +13,12 @@ $(TYPEDSIGNATURES)
 
 Return `AnelasticDynamics` representing incompressible fluid dynamics expanded about `reference_state`.
 """
-AnelasticDynamics(reference_state) = AnelasticDynamics(reference_state, nothing)
+AnelasticDynamics(reference_state) = AnelasticDynamics(reference_state, nothing, nothing)
 
 Adapt.adapt_structure(to, dynamics::AnelasticDynamics) =
     AnelasticDynamics(adapt(to, dynamics.reference_state),
-                      adapt(to, dynamics.pressure_anomaly))
+                      adapt(to, dynamics.pressure_anomaly),
+                      nothing)
 
 #####
 ##### Default dynamics and materialization
@@ -40,7 +42,8 @@ Materialize a stub `AnelasticDynamics` into a full dynamics object with the pres
 """
 function AtmosphereModels.materialize_dynamics(dynamics::AnelasticDynamics, grid, boundary_conditions, thermodynamic_constants)
     pressure_anomaly = CenterField(grid)
-    return AnelasticDynamics(dynamics.reference_state, pressure_anomaly)
+    adiabatic_expansion = materialize_adiabatic_expansion(dynamics.adiabatic_expansion, eltype(grid))
+    return AnelasticDynamics(dynamics.reference_state, pressure_anomaly, adiabatic_expansion)
 end
 
 #####

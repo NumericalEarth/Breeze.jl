@@ -28,7 +28,13 @@ const BoussinesqDynamics = AnelasticDynamics{<:BoussinesqReferenceState}
 $(TYPEDSIGNATURES)
 
 Return [`BoussinesqDynamics`](@ref) on `grid`, expanded about a [`BoussinesqReferenceState`](@ref)
-constructed from `constants` and `reference_state_kwargs`, such as `pressure` and `temperature`.
+constructed from `constants`, `frame_vertical_velocity`, and `reference_state_kwargs`, such as
+`pressure` and `temperature`.
+
+`adiabatic_expansion` represents the expansion of air displaced vertically relative to the frame
+(see [`AdiabaticExpansion`](@ref)). It defaults to `AdiabaticExpansion()` when the frame moves,
+that is, when `frame_vertical_velocity` is set (including to zero), and to `nothing` otherwise.
+Set `adiabatic_expansion = nothing` to disable it.
 
 Examples
 ========
@@ -43,15 +49,23 @@ BoussinesqDynamics(pᵣ=101325.0, Tᵣ=290.0, ρᵣ=1.2174)
 └── pressure_anomaly: not materialized
 ```
 """
-BoussinesqDynamics(grid, constants=ThermodynamicConstants(eltype(grid)); reference_state_kwargs...) =
-    AnelasticDynamics(BoussinesqReferenceState(grid, constants; reference_state_kwargs...))
+function BoussinesqDynamics(grid, constants=ThermodynamicConstants(eltype(grid));
+                            frame_vertical_velocity = nothing,
+                            adiabatic_expansion = default_adiabatic_expansion(frame_vertical_velocity),
+                            reference_state_kwargs...)
+
+    reference_state = BoussinesqReferenceState(grid, constants; frame_vertical_velocity, reference_state_kwargs...)
+    validate_adiabatic_expansion(adiabatic_expansion, reference_state.frame)
+    return AnelasticDynamics(reference_state, nothing, adiabatic_expansion)
+end
 
 function Base.summary(dynamics::BoussinesqDynamics)
     ref = dynamics.reference_state
     return string("BoussinesqDynamics(pᵣ=", prettysummary(reference_value(ref.pressure)),
                   ", Tᵣ=", prettysummary(reference_value(ref.temperature)),
                   ", ρᵣ=", prettysummary(reference_value(ref.density)),
-                  frame_summary(ref.frame), ")")
+                  frame_summary(ref.frame),
+                  expansion_summary(dynamics.adiabatic_expansion), ")")
 end
 
 const BoussinesqModel = AtmosphereModel{<:BoussinesqDynamics}

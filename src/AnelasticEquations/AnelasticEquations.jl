@@ -17,6 +17,7 @@ export
     AnelasticDynamics,
     AnelasticModel,
     BoussinesqDynamics,
+    AdiabaticExpansion,
     solve_for_anelastic_pressure!
 
 using DocStringExtensions: TYPEDSIGNATURES
@@ -31,14 +32,16 @@ using Oceananigans.Fields: set!
 using Oceananigans.Grids: AbstractGrid, Periodic, ZDirection, inactive_cell
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
-using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
+using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 using Oceananigans.Solvers: Solvers, solve!, FFTBasedPoissonSolver, FourierTridiagonalPoissonSolver,
                            AbstractHomogeneousNeumannFormulation
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, BoussinesqReferenceState, ThermodynamicConstants,
                              MoistureMassFractions, mixture_gas_constant, surface_temperature_value, density,
-                             MovingFrame, advance_frame!, synchronize_frame!, frame_summary, reference_value
+                             MovingFrame, advance_frame!, synchronize_frame!, frame_summary, reference_value,
+                             PlanarLiquidSurface, potential_temperature_from_temperature, supersaturation,
+                             mixture_heat_capacity, liquid_latent_heat
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_pressure, pressure_anomaly,
                                 kernel_time_step, specific_humidity, liquid_mass_fraction, ice_mass_fraction
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
@@ -49,6 +52,7 @@ using Breeze.AtmosphereModels: grid_moisture_fractions
 include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")
 include("anelastic_buoyancy.jl")
+include("adiabatic_expansion.jl")
 include("boussinesq_dynamics.jl")
 
 # Define type alias after AnelasticDynamics is defined

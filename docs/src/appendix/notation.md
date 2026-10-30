@@ -109,8 +109,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``pᵛ⁺``                             | `pᵛ⁺`  |                                     | Saturation vapor pressure                                                      |
 | ``\mathscr{H}``                     | `ℋ`    | `RelativeHumidity(model)`           | Relative humidity, ``ℋ = pᵛ / pᵛ⁺``                                            |
 | ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``                                          |
-| ``Gᶿ``, ``Gᵛ``                      | `Gᶿ`, `Gᵛ` | `AdiabaticBackgroundForcing`    | Uniform background vertical gradients of ``θ`` and ``qᵛ`` in a vertically periodic (rising-frame) box |
-| ``A₁``                              | `A₁`   | `AdiabaticBackgroundForcing`        | Adiabatic supersaturation source per unit displacement, ``A₁ = -∂𝒮/∂p \, ρ̄ g`` |
+| ``Gᶿ``, ``Gᵛ``                      | `Gᶿ`, `Gᵛ` | `AdiabaticExpansion`            | Uniform moist-adiabatic background vertical gradients of ``θ`` and ``qᵛ`` relative to a Boussinesq moving frame |
+| ``A₁``                              | `A₁`   | `AdiabaticExpansion`                | Adiabatic supersaturation source per unit displacement, ``A₁ = -∂𝒮/∂p \, ρ̄ g`` |
 | ``ξ``                               | `ξ`    | `psychrometric_correction`           | Psychrometric correction, ``ξ = 1 + ℒ² qᵛ⁺ / (cᵖ Rᵛ T²)``; ``ξˡ`` and ``ξⁱ`` name the liquid and ice phase |
 | ``δqˡ``, ``δqⁱ``                    | `δqˡ`, `δqⁱ` |                               | Saturation-adjustment increments, ``δq = (qᵛ - qᵛ⁺) / ξ`` for the liquid and ice phase |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |

@@ -158,6 +158,12 @@ The reference temperature and moisture mass fractions follow the domain mean, so
 dynamics = BoussinesqDynamics(grid; pressure=9e4, temperature=285, frame_vertical_velocity=2)
 ```
 
+The uniform reference pressure means that air displaced by ``w′`` relative to the frame does not expand on its own.
+A moving frame therefore carries [`AdiabaticExpansion`](@ref) by default, which adds the sources ``-Gᶿ w′`` and ``-Gᵛ w′``
+to potential temperature and vapor, where ``Gᶿ`` and ``Gᵛ`` are the gradients of a saturated moist-adiabatic background
+evaluated from the frame state, so that every parcel's supersaturation responds to its displacement at the adiabatic-parcel rate.
+Pass `adiabatic_expansion = nothing` to disable it.
+
 ### Forcing homogeneous isotropic turbulence
 
 Direct numerical simulations of homogeneous isotropic turbulence in a triply-periodic domain sustain
