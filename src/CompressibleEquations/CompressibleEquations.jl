@@ -127,6 +127,8 @@ function __init__()
     DENSITY_TENDENCY_IN_PREDICTORS[] || @info "Dry-density tendency in the predictors off (environment)"
     FUSED_CARRIED_COLUMN_SOLVE[] = switch_from_env("BREEZE_FUSED_CARRIED_COLUMN_SOLVE", true)
     FUSED_CARRIED_COLUMN_SOLVE[] || @info "Fused carried rhs + column solve + recovery off (environment)"
+    FOLDED_DIVERGENCE_DAMPING[] = switch_from_env("BREEZE_FOLDED_DIVERGENCE_DAMPING", true)
+    FOLDED_DIVERGENCE_DAMPING[] || @info "Divergence damping folded into the next explicit step off (environment)"
     return nothing
 end
 

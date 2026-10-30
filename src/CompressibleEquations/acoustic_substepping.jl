@@ -1171,7 +1171,69 @@ end
     end
 end
 
-@inline δpᴸ(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ) = @inbounds γRᵐᴸ[i, j, k] * Πᴸ[i, j, k] * ρθ′[i, j, k]
+#####
+##### T22 acoustic B: the previous substep's thermal divergence damping (and the wall re-enforcement after it) in
+##### this substep's explicit step. Between them nothing else writes (ρu)′, (ρv)′ or reads them, and nothing writes
+##### (ρθ)′, its stash or their halos (filled before the damping). The damping update is rounded to the field type as
+##### its store did, the wall face takes +0 as `_zero_x_wall_face!` stores it, then the explicit update. Same bits.
+##### Not for a stage's first substep (its predecessor's damping is in another stage) nor its last (no successor).
+##### `BREEZE_FOLDED_DIVERGENCE_DAMPING=false` at load restores the separate damping launch.
+#####
+
+const FOLDED_DIVERGENCE_DAMPING = Ref(true)
+
+@kernel function _damped_explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Πᴸ,
+                                                   Gⁿρu, Gⁿρv, γRᵐᴸ, pressure_gradients, damping)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        ρθ′ˢ⁻ = damping.ρθ′ˢ⁻
+        θᴸ = damping.θᴸ
+        Tu = eltype(ρu′)
+        Tv = eltype(ρv′)
+
+        ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
+        θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+        γˣ = κˣ(i, j, k, grid, damping.x_scale, damping.Δτ)
+        u = convert(Tu, ρu′[i, j, k] - γˣ * ∂x_div / θᴸᶠᶜᶜ)
+
+        ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
+        θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+        γʸ = κʸ(i, j, k, grid, damping.y_scale, damping.Δτ)
+        v = convert(Tv, ρv′[i, j, k] - γʸ * ∂y_div / θᴸᶜᶠᶜ)
+
+        u = ifelse(damping.west_wall & (i == 1), convert(Tu, 0), u)
+        v = ifelse(damping.south_wall & (j == 1), convert(Tv, 0), v)
+
+        ∂x_p, ∂y_p = horizontal_pressure_gradients!(pressure_gradients, i, j, k, grid, dynamics,
+                                                    ρθ′, Πᴸ, γRᵐᴸ)
+
+        ρu′[i, j, k] = u + Δτ * (Gⁿρu[i, j, k] - ∂x_p)
+        ρv′[i, j, k] = v + Δτ * (Gⁿρv[i, j, k] - ∂y_p)
+    end
+end
+
+# The deferred damping's operands, as `apply_divergence_damping!(::ThermalDivergenceDamping, …)` passes them.
+function folded_damping_operands(damping::ThermalDivergenceDamping, substepper, model, Δτ)
+    grid = model.grid
+    FT = eltype(grid)
+    α = damping.coefficient
+    TX, TY, _ = topology(grid)
+    x_scale = TX === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
+    y_scale = TY === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
+    bcs_u = model.momentum.ρu.boundary_conditions
+    bcs_v = model.momentum.ρv.boundary_conditions
+    west_wall = (TX === Bounded) && is_impenetrable_wall(bcs_u.west)
+    south_wall = (TY === Bounded) && is_impenetrable_wall(bcs_v.south)
+    return (; ρθ′ˢ⁻ = substepper.previous_density_potential_temperature_perturbation,
+              θᴸ = substepper.linearization_potential_temperature,
+              Δτ = convert(FT, Δτ), x_scale, y_scale, west_wall, south_wall)
+end
+
+folds_divergence_damping(damping) = false
+folds_divergence_damping(::ThermalDivergenceDamping) = FOLDED_DIVERGENCE_DAMPING[]
+
+@inline δpᴸ(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ) =@inbounds γRᵐᴸ[i, j, k] * Πᴸ[i, j, k] * ρθ′[i, j, k]
 
 @inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) = ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 @inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) = ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
@@ -1207,8 +1269,17 @@ function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
     peel = substepper.damping isa NoDivergenceDamping &&
            !(acoustic_column_path(model.grid, model.dynamics, advection) isa TiledAcousticColumn)
     Nloop = peel ? Nτ - 1 : Nτ
-    @trace track_numbers=false for _ in 1:Nloop
-        acoustic_substep!(model, substepper, stage, advection)
+    if folds_divergence_damping(substepper.damping) & (Nloop > 1)
+        # T22 acoustic B: substep n's damping runs inside substep n + 1's explicit step (not across the stage end).
+        acoustic_substep!(model, substepper, stage, advection, substepper.time_averaged_velocities, false, true)
+        @trace track_numbers=false for _ in 2:Nloop-1
+            acoustic_substep!(model, substepper, stage, advection, substepper.time_averaged_velocities, true, true)
+        end
+        acoustic_substep!(model, substepper, stage, advection, substepper.time_averaged_velocities, true, false)
+    else
+        @trace track_numbers=false for _ in 1:Nloop
+            acoustic_substep!(model, substepper, stage, advection)
+        end
     end
     folded = peel && folds_last_substep_recovery(model, advection)
     peel && acoustic_substep!(model, substepper, stage, advection, folded ? FoldedRecovery() : nothing)
@@ -2433,7 +2504,8 @@ Everything is passed explicitly so that the loop calling this can be traced by R
 no captured state; see [`acoustic_substep_loop!`](@ref).
 """
 function acoustic_substep!(model, substepper, stage, advection,
-                           accumulators = substepper.time_averaged_velocities)
+                           accumulators = substepper.time_averaged_velocities,
+                           pending_damping = false, defer_damping = false)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -2443,15 +2515,27 @@ function acoustic_substep!(model, substepper, stage, advection,
     Gⁿ = model.timestepper.Gⁿ
     (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
 
-    # Step A: explicit horizontal forward of (ρu)′, (ρv)′.
-    launch!(arch, grid, :xyz, _explicit_horizontal_step!,
-            substepper.momentum_perturbation.u,
-            substepper.momentum_perturbation.v,
-            grid, model.dynamics, Δτ,
-            substepper.density_potential_temperature_perturbation,
-            substepper.linearization_exner,
-            Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
-            active_pressure_gradients(substepper))
+    # Step A: explicit horizontal forward of (ρu)′, (ρv)′ (after the previous substep's damping when it is pending).
+    if pending_damping
+        launch!(arch, grid, :xyz, _damped_explicit_horizontal_step!,
+                substepper.momentum_perturbation.u,
+                substepper.momentum_perturbation.v,
+                grid, model.dynamics, Δτ,
+                substepper.density_potential_temperature_perturbation,
+                substepper.linearization_exner,
+                Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
+                active_pressure_gradients(substepper),
+                folded_damping_operands(substepper.damping, substepper, model, Δτ))
+    else
+        launch!(arch, grid, :xyz, _explicit_horizontal_step!,
+                substepper.momentum_perturbation.u,
+                substepper.momentum_perturbation.v,
+                grid, model.dynamics, Δτ,
+                substepper.density_potential_temperature_perturbation,
+                substepper.linearization_exner,
+                Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
+                active_pressure_gradients(substepper))
+    end
 
     fill_halo_regions!(substepper.momentum_perturbation.u)
     fill_halo_regions!(substepper.momentum_perturbation.v)
@@ -2494,7 +2578,9 @@ function acoustic_substep!(model, substepper, stage, advection,
                         stash_halo_fields(path, substepper)...))
 
     # Step E: optional Klemp 2018 post-substep damping (no-op for
-    # `NoDivergenceDamping`).
+    # `NoDivergenceDamping`). Deferred into the next substep's explicit step, with the wall
+    # re-enforcement below, when `defer_damping` (T22 acoustic B).
+    defer_damping && return nothing
     apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
 
     # No (ρu)′, (ρv)′ halo fill here: nothing reads their halos before the next substep's
