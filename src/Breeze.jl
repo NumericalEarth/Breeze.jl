@@ -231,6 +231,7 @@ export
     Distributed, Partition,
     Centered, UpwindBiased, WENO, FluxFormAdvection,
     CompressibleVectorInvariant, CompressibleWENOVectorInvariant, SplitVerticalAdvection, UnsplitVerticalAdvection,
+    CornerVorticityPairing, AveragedVorticityPairing,
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
     NormalFlowBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     BoundaryConditionOperation,

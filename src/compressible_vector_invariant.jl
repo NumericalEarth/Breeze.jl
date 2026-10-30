@@ -30,7 +30,6 @@ using Oceananigans.Advection:
     FunctionStencil,
     DefaultStencil,
     VelocityStencil,
-    adapt_advection_order,
     bias,
     divergence_smoothness,
     materialize_advection,
@@ -43,7 +42,9 @@ using Oceananigans.Advection:
     _biased_interpolate_yᵃᶜᵃ,
     _biased_interpolate_zᵃᵃᶠ,
     _symmetric_interpolate_xᶠᵃᵃ,
+    _symmetric_interpolate_xᶜᵃᵃ,
     _symmetric_interpolate_yᵃᶠᵃ,
+    _symmetric_interpolate_yᵃᶜᵃ,
     _symmetric_interpolate_zᵃᵃᶠ
 
 using Oceananigans.Architectures: Architectures, on_architecture
@@ -89,30 +90,64 @@ mass-flux divergence terms. Supported with centered (`EnergyConserving`) sub-sch
 struct UnsplitVerticalAdvection end
 
 #####
+##### Vorticity pairings
+#####
+
+"""
+$(TYPEDEF)
+
+Pairing of a reconstructed vorticity in which each (u, v) pair takes the vorticity at the corner it
+shares, corrected by the deviations of the reconstructions from their centered counterparts,
+`ζ_q + wʸ ℑʸ(Rʸζ − Cʸζ) + wˣ ℑˣ(Rˣζ − Cˣζ)`, each weighted by the share `wˣ = u²/(u² + v²)` of the
+corner's transport along the reconstruction. Its linearization about a sheared flow is that of the
+corner vorticity, so the pairing is free of the Hollingsworth instability of the averaged vorticity,
+and an upwind-biased reconstruction enters only through its odd (dissipative) and nonlinear parts,
+multiplied by the transport that biases it.
+"""
+struct CornerVorticityPairing end
+
+"""
+$(TYPEDEF)
+
+Pairing of a reconstructed vorticity in which each (u, v) pair takes the mean of the vorticity
+reconstructed at the u point along y and at the v point along x, as `EnergyConservingUpwinding`
+does for `VectorInvariant`. Energy-neutral, but the averaging of the vorticity across the pair
+leaves a non-cancellation with the kinetic energy gradient in the linearization about a sheared
+flow (Hollingsworth et al. 1983); kept for reference and analysis.
+"""
+struct AveragedVorticityPairing end
+
+#####
 ##### The scheme
 #####
 
-struct CompressibleVectorInvariant{N, FT, Z, ZS, V, K, D, VF} <: AbstractAdvectionScheme{N, FT, ExplicitTimeDiscretization}
+struct CompressibleVectorInvariant{N, FT, Z, ZS, V, K, D, VF, P, C} <: AbstractAdvectionScheme{N, FT, ExplicitTimeDiscretization}
     vorticity_scheme               :: Z
     vorticity_stencil              :: ZS
     vertical_advection_scheme      :: V
     kinetic_energy_gradient_scheme :: K
     divergence_scheme              :: D
     vertical_formulation           :: VF
+    vorticity_pairing              :: P
+    centered_vorticity_scheme      :: C  # the centered counterpart of `vorticity_scheme` the corner pairing subtracts
 
     function CompressibleVectorInvariant{N, FT}(vorticity_scheme::Z,
                                                 vorticity_stencil::ZS,
                                                 vertical_advection_scheme::V,
                                                 kinetic_energy_gradient_scheme::K,
                                                 divergence_scheme::D,
-                                                vertical_formulation::VF) where {N, FT, Z, ZS, V, K, D, VF}
+                                                vertical_formulation::VF,
+                                                vorticity_pairing::P,
+                                                centered_vorticity_scheme::C) where {N, FT, Z, ZS, V, K, D, VF, P, C}
 
-        return new{N, FT, Z, ZS, V, K, D, VF}(vorticity_scheme,
-                                              vorticity_stencil,
-                                              vertical_advection_scheme,
-                                              kinetic_energy_gradient_scheme,
-                                              divergence_scheme,
-                                              vertical_formulation)
+        return new{N, FT, Z, ZS, V, K, D, VF, P, C}(vorticity_scheme,
+                                                    vorticity_stencil,
+                                                    vertical_advection_scheme,
+                                                    kinetic_energy_gradient_scheme,
+                                                    divergence_scheme,
+                                                    vertical_formulation,
+                                                    vorticity_pairing,
+                                                    centered_vorticity_scheme)
     end
 end
 
@@ -121,13 +156,18 @@ const CVI = CompressibleVectorInvariant
 # Sub-scheme selection: `EnergyConserving` is the centered, exactly energy-conserving form of each term;
 # any other advection scheme reconstructs the term with that scheme (upwind-biased or centered of higher order).
 const CenteredVorticity = CVI{<:Any, <:Any, <:EnergyConserving}
-const ReconstructedVorticity = CVI{<:Any, <:Any, <:AbstractAdvectionScheme}
 const CenteredKineticEnergy = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:EnergyConserving}
 const ReconstructedKineticEnergy = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:AbstractAdvectionScheme}
 const CenteredDivergence = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:EnergyConserving}
 const ReconstructedDivergence = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:AbstractAdvectionScheme}
 const SplitCVI = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:SplitVerticalAdvection}
 const UnsplitCVI = CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:UnsplitVerticalAdvection}
+const CornerPairedVorticity = CVI{<:Any, <:Any, <:AbstractAdvectionScheme, <:Any, <:Any, <:Any, <:Any, <:Any, <:CornerVorticityPairing}
+const AveragedPairedVorticity = CVI{<:Any, <:Any, <:AbstractAdvectionScheme, <:Any, <:Any, <:Any, <:Any, <:Any, <:AveragedVorticityPairing}
+
+# The centered scheme whose stencil is the symmetric part of the linearized reconstruction
+centered_counterpart(::EnergyConserving, FT) = nothing
+centered_counterpart(::AbstractAdvectionScheme{B}, FT) where B = Centered(FT; order = 2B)
 
 reconstruction_buffer(::EnergyConserving) = 0
 reconstruction_buffer(::AbstractAdvectionScheme{B}) where B = B
@@ -169,6 +209,11 @@ Keyword arguments
 
 - `vertical_formulation`: `SplitVerticalAdvection()` (default) or `UnsplitVerticalAdvection()`.
 
+- `vorticity_pairing`: How a reconstructed vorticity is shared between the `u` and `v` equations:
+  `CornerVorticityPairing()` (default), which is free of the Hollingsworth instability, or
+  `AveragedVorticityPairing()`, the pairing of Oceananigans' `EnergyConservingUpwinding`, which is not.
+  Both conserve energy exactly.
+
 Example
 =======
 
@@ -189,13 +234,17 @@ function CompressibleVectorInvariant(FT::DataType = Oceananigans.defaults.FloatT
                                      vertical_advection_scheme = EnergyConserving(FT),
                                      kinetic_energy_gradient_scheme = EnergyConserving(FT),
                                      divergence_scheme = EnergyConserving(FT),
-                                     vertical_formulation = SplitVerticalAdvection())
+                                     vertical_formulation = SplitVerticalAdvection(),
+                                     vorticity_pairing = CornerVorticityPairing())
 
     if vertical_formulation isa UnsplitVerticalAdvection
         all(s -> s isa EnergyConserving, (vorticity_scheme, vertical_advection_scheme,
                                           kinetic_energy_gradient_scheme, divergence_scheme)) ||
             throw(ArgumentError("UnsplitVerticalAdvection supports only EnergyConserving sub-schemes."))
     end
+
+    # The centered vorticity has nothing to pair but its corner value
+    vorticity_pairing = vorticity_scheme isa EnergyConserving ? CornerVorticityPairing() : vorticity_pairing
 
     N = max(1,
             reconstruction_buffer(vorticity_scheme) + 1,
@@ -208,7 +257,9 @@ function CompressibleVectorInvariant(FT::DataType = Oceananigans.defaults.FloatT
                                               vertical_advection_scheme,
                                               kinetic_energy_gradient_scheme,
                                               divergence_scheme,
-                                              vertical_formulation)
+                                              vertical_formulation,
+                                              vorticity_pairing,
+                                              centered_counterpart(vorticity_scheme, FT))
 end
 
 nothing_to_default(user_value; default) = isnothing(user_value) ? default : user_value
@@ -236,6 +287,7 @@ julia> CompressibleWENOVectorInvariant()
 CompressibleWENOVectorInvariant{6, Float64}(vorticity_order=9, vertical_order=5)
 ├── vorticity_scheme: WENO{5, Float64, Nothing}(order=9)
 ├── vorticity_stencil: Oceananigans.Advection.VelocityStencil
+├── vorticity_pairing: CornerVorticityPairing
 ├── vertical_advection_scheme: WENO{3, Float64, Nothing}(order=5)
 ├── kinetic_energy_gradient_scheme: WENO{3, Float64, Nothing}(order=5)
 └── divergence_scheme: WENO{3, Float64, Nothing}(order=5)
@@ -248,6 +300,7 @@ function CompressibleWENOVectorInvariant(FT::DataType = Oceananigans.defaults.Fl
                                          divergence_order = nothing,
                                          kinetic_energy_gradient_order = nothing,
                                          vorticity_stencil = VelocityStencil(),
+                                         vorticity_pairing = CornerVorticityPairing(),
                                          minimum_buffer_upwind_order = 1,
                                          weno_kw...)
 
@@ -265,7 +318,7 @@ function CompressibleWENOVectorInvariant(FT::DataType = Oceananigans.defaults.Fl
     divergence_scheme              = WENO(FT; order=divergence_order, minimum_buffer_upwind_order, weno_kw...)
 
     return CompressibleVectorInvariant(FT; vorticity_scheme, vorticity_stencil, vertical_advection_scheme,
-                                       kinetic_energy_gradient_scheme, divergence_scheme)
+                                       kinetic_energy_gradient_scheme, divergence_scheme, vorticity_pairing)
 end
 
 const CompressibleWENOVectorInvariantScheme{N} = CVI{<:Any, <:Any, <:WENO{N}} where N
@@ -288,7 +341,9 @@ Adapt.adapt_structure(to, scheme::CVI{N, FT}) where {N, FT} =
                                        Adapt.adapt(to, scheme.vertical_advection_scheme),
                                        Adapt.adapt(to, scheme.kinetic_energy_gradient_scheme),
                                        Adapt.adapt(to, scheme.divergence_scheme),
-                                       scheme.vertical_formulation)
+                                       scheme.vertical_formulation,
+                                       scheme.vorticity_pairing,
+                                       scheme.centered_vorticity_scheme)
 
 Architectures.on_architecture(to, scheme::CVI{N, FT}) where {N, FT} =
     CompressibleVectorInvariant{N, FT}(on_architecture(to, scheme.vorticity_scheme),
@@ -296,7 +351,9 @@ Architectures.on_architecture(to, scheme::CVI{N, FT}) where {N, FT} =
                                        on_architecture(to, scheme.vertical_advection_scheme),
                                        on_architecture(to, scheme.kinetic_energy_gradient_scheme),
                                        on_architecture(to, scheme.divergence_scheme),
-                                       scheme.vertical_formulation)
+                                       scheme.vertical_formulation,
+                                       scheme.vorticity_pairing,
+                                       scheme.centered_vorticity_scheme)
 
 # The sub-schemes may defer settings (such as WENO weight computation) until the grid is known.
 Oceananigans.Advection.materialize_advection(scheme::CVI{N, FT}, grid) where {N, FT} =
@@ -305,7 +362,9 @@ Oceananigans.Advection.materialize_advection(scheme::CVI{N, FT}, grid) where {N,
                                        materialize_advection(scheme.vertical_advection_scheme, grid),
                                        materialize_advection(scheme.kinetic_energy_gradient_scheme, grid),
                                        materialize_advection(scheme.divergence_scheme, grid),
-                                       scheme.vertical_formulation)
+                                       scheme.vertical_formulation,
+                                       scheme.vorticity_pairing,
+                                       scheme.centered_vorticity_scheme)
 
 # The scheme has no per-direction order to adapt to a small grid.
 Oceananigans.Advection.adapt_advection_order(scheme::CVI, grid::AbstractGrid) = scheme
@@ -325,6 +384,9 @@ function Base.show(io::IO, scheme::CVI)
     print(io, "├── vorticity_scheme: ", summary(scheme.vorticity_scheme), '\n')
     if scheme.vorticity_scheme isa WENO
         print(io, "├── vorticity_stencil: ", summary(scheme.vorticity_stencil), '\n')
+    end
+    if !(scheme.vorticity_scheme isa EnergyConserving)
+        print(io, "├── vorticity_pairing: ", nameof(typeof(scheme.vorticity_pairing)), '\n')
     end
     print(io, "├── vertical_advection_scheme: ", summary(scheme.vertical_advection_scheme), '\n')
     print(io, "├── kinetic_energy_gradient_scheme: ", summary(scheme.kinetic_energy_gradient_scheme), '\n')
@@ -394,14 +456,23 @@ end
 ##### reconstructed at the u point along y (biased by v) and at the v point along x (biased by u).
 #####
 
-@inline ρζ_ℑx_Δx_vᶠᶠᶜ(i, j, k, grid, ρ, u, v) = ρζᶠᶠᶜ(i, j, k, grid, ρ, u, v) * ℑxᶠᵃᵃ(i, j, k, grid, Δx_qᶜᶠᶜ, v)
-@inline ρζ_ℑy_Δy_uᶠᶠᶜ(i, j, k, grid, ρ, u, v) = ρζᶠᶠᶜ(i, j, k, grid, ρ, u, v) * ℑyᵃᶠᵃ(i, j, k, grid, Δy_qᶠᶜᶜ, u)
+# The vorticity a corner lends to its pairs: the corner vorticity itself for the centered scheme
+# (the second method disambiguates against the corner pairing of a reconstructed vorticity)
+@inline pair_vorticityᶠᶠᶜ(i, j, k, grid, ::CenteredVorticity, u, v) = ζ₃ᶠᶠᶜ(i, j, k, grid, u, v)
+@inline pair_vorticityᶠᶠᶜ(i, j, k, grid, ::CVI{<:Any, <:Any, <:EnergyConserving, <:Any, <:Any, <:Any, <:Any, <:Any, <:CornerVorticityPairing}, u, v) =
+    ζ₃ᶠᶠᶜ(i, j, k, grid, u, v)
 
-@inline x_lamb_term(i, j, k, grid, ::CenteredVorticity, ρ, u, v) =
-    + Axᶠᶜᶜ(i, j, k, grid) * V⁻¹ᶠᶜᶜ(i, j, k, grid) * ℑyᵃᶜᵃ(i, j, k, grid, ρζ_ℑx_Δx_vᶠᶠᶜ, ρ, u, v)
+@inline ρζ_ℑx_Δx_vᶠᶠᶜ(i, j, k, grid, scheme, ρ, u, v) =
+    ℑxyᶠᶠᵃ(i, j, k, grid, ρ) * pair_vorticityᶠᶠᶜ(i, j, k, grid, scheme, u, v) * ℑxᶠᵃᵃ(i, j, k, grid, Δx_qᶜᶠᶜ, v)
 
-@inline y_lamb_term(i, j, k, grid, ::CenteredVorticity, ρ, u, v) =
-    - Ayᶜᶠᶜ(i, j, k, grid) * V⁻¹ᶜᶠᶜ(i, j, k, grid) * ℑxᶜᵃᵃ(i, j, k, grid, ρζ_ℑy_Δy_uᶠᶠᶜ, ρ, u, v)
+@inline ρζ_ℑy_Δy_uᶠᶠᶜ(i, j, k, grid, scheme, ρ, u, v) =
+    ℑxyᶠᶠᵃ(i, j, k, grid, ρ) * pair_vorticityᶠᶠᶜ(i, j, k, grid, scheme, u, v) * ℑyᵃᶠᵃ(i, j, k, grid, Δy_qᶠᶜᶜ, u)
+
+@inline x_lamb_term(i, j, k, grid, scheme::CVI, ρ, u, v) =
+    + Axᶠᶜᶜ(i, j, k, grid) * V⁻¹ᶠᶜᶜ(i, j, k, grid) * ℑyᵃᶜᵃ(i, j, k, grid, ρζ_ℑx_Δx_vᶠᶠᶜ, scheme, ρ, u, v)
+
+@inline y_lamb_term(i, j, k, grid, scheme::CVI, ρ, u, v) =
+    - Ayᶜᶠᶜ(i, j, k, grid) * V⁻¹ᶜᶠᶜ(i, j, k, grid) * ℑxᶜᵃᵃ(i, j, k, grid, ρζ_ℑy_Δy_uᶠᶠᶜ, scheme, ρ, u, v)
 
 @inline function reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, u, v)
     v̂ = ℑxy_Δx_vᶠᶜᶜ(i, j, k, grid, v)
@@ -422,14 +493,43 @@ end
 @inline ρ_ℑx_Δx_v_ζᶠᶠᶜ(i, j, k, grid, scheme, ρ, u, v) = ℑxyᶠᶠᵃ(i, j, k, grid, ρ) * ℑxᶠᵃᵃ(i, j, k, grid, Δx_v_ζᶜᶠᶜ, scheme, u, v)
 @inline ρ_ℑy_Δy_u_ζᶠᶠᶜ(i, j, k, grid, scheme, ρ, u, v) = ℑxyᶠᶠᵃ(i, j, k, grid, ρ) * ℑyᵃᶠᵃ(i, j, k, grid, Δy_u_ζᶠᶜᶜ, scheme, u, v)
 
-@inline function x_lamb_term(i, j, k, grid, scheme::ReconstructedVorticity, ρ, u, v)
+# Corner pairing: the corner vorticity plus the deviations of the reconstructions at the velocity points
+# from their centered counterparts, averaged back to the corner. The deviations carry the odd
+# (dissipative) and nonlinear parts of an upwind-biased reconstruction, and vanish for a centered one.
+# Each deviation is weighted by the share of the corner's transport in its direction, u²/(u² + v²) for
+# the reconstruction along x biased by u, so that a pair multiplies each deviation by (the magnitude of)
+# the velocity that biased it, as the unpaired upwinding does, while the pairing stays symmetric.
+@inline function x_deviation_weightᶠᶠᶜ(i, j, k, grid, u, v)
+    û² = ℑyᵃᶠᵃ(i, j, k, grid, u)^2
+    v̂² = ℑxᶠᵃᵃ(i, j, k, grid, v)^2
+    s = û² + v̂²
+    return ifelse(s > 0, û² / s, oftype(s, 0.5))
+end
+
+@inline y_deviation_weightᶠᶠᶜ(i, j, k, grid, u, v) = 1 - x_deviation_weightᶠᶠᶜ(i, j, k, grid, u, v)
+
+@inline y_vorticity_deviationᶠᶜᶜ(i, j, k, grid, scheme, u, v) =
+    reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, u, v) -
+    _symmetric_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme.centered_vorticity_scheme, ζ₃ᶠᶠᶜ, u, v)
+
+@inline x_vorticity_deviationᶜᶠᶜ(i, j, k, grid, scheme, u, v) =
+    reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, u, v) -
+    _symmetric_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme.centered_vorticity_scheme, ζ₃ᶠᶠᶜ, u, v)
+
+@inline pair_vorticityᶠᶠᶜ(i, j, k, grid, scheme::CornerPairedVorticity, u, v) =
+    ζ₃ᶠᶠᶜ(i, j, k, grid, u, v) +
+    y_deviation_weightᶠᶠᶜ(i, j, k, grid, u, v) * ℑyᵃᶠᵃ(i, j, k, grid, y_vorticity_deviationᶠᶜᶜ, scheme, u, v) +
+    x_deviation_weightᶠᶠᶜ(i, j, k, grid, u, v) * ℑxᶠᵃᵃ(i, j, k, grid, x_vorticity_deviationᶜᶠᶜ, scheme, u, v)
+
+# Averaged pairing: each pair takes ½(ζᵘ + ζᵛ) of the reconstructions at its two points
+@inline function x_lamb_term(i, j, k, grid, scheme::AveragedPairedVorticity, ρ, u, v)
     ζᵘ = reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, u, v)
     ρv_ζᵘ = ζᵘ * ℑyᵃᶜᵃ(i, j, k, grid, ρ_ℑx_Δx_vᶠᶠᶜ, ρ, v)
     ρv_ζᵛ = ℑyᵃᶜᵃ(i, j, k, grid, ρ_ℑx_Δx_v_ζᶠᶠᶜ, scheme, ρ, u, v)
     return + Axᶠᶜᶜ(i, j, k, grid) * V⁻¹ᶠᶜᶜ(i, j, k, grid) * (ρv_ζᵘ + ρv_ζᵛ) / 2
 end
 
-@inline function y_lamb_term(i, j, k, grid, scheme::ReconstructedVorticity, ρ, u, v)
+@inline function y_lamb_term(i, j, k, grid, scheme::AveragedPairedVorticity, ρ, u, v)
     ζᵛ = reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, u, v)
     ρu_ζᵛ = ζᵛ * ℑxᶜᵃᵃ(i, j, k, grid, ρ_ℑy_Δy_uᶠᶠᶜ, ρ, u)
     ρu_ζᵘ = ℑxᶜᵃᵃ(i, j, k, grid, ρ_ℑy_Δy_u_ζᶠᶠᶜ, scheme, ρ, u, v)

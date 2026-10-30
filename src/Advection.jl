@@ -5,7 +5,9 @@ export div_ρUc,
        CompressibleVectorInvariant,
        CompressibleWENOVectorInvariant,
        SplitVerticalAdvection,
-       UnsplitVerticalAdvection
+       UnsplitVerticalAdvection,
+       CornerVorticityPairing,
+       AveragedVorticityPairing
 
 using Oceananigans.Advection:
     _advective_tracer_flux_x,
