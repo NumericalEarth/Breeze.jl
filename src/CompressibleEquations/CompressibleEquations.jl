@@ -109,6 +109,8 @@ function __init__()
     FUSED_STAGE_INITIALIZATION[] || @info "Fused stage initialization off (environment)"
     NO_STEP_LINEARIZATION_REFRESH[] = switch_from_env("BREEZE_NO_STEP_LINEARIZATION_REFRESH", true)
     NO_STEP_LINEARIZATION_REFRESH[] || @info "Outer-step linearization refresh on (environment)"
+    SPONGE_FULL_FIELD[] = switch_from_env("BREEZE_SPONGE_FULL_FIELD", true)
+    SPONGE_FULL_FIELD[] || @info "Upper sponge damps the acoustic perturbation only (environment, pre-T21 path)"
     FOLDED_LINEARIZATION[] = switch_from_env("BREEZE_FOLDED_LINEARIZATION", true)
     FOLDED_LINEARIZATION[] || @info "Linearization folded into the auxiliary pass off (environment)"
     FORWARDED_FUSED_THERMODYNAMICS[] = switch_from_env("BREEZE_FORWARDED_FUSED_THERMODYNAMICS", true)

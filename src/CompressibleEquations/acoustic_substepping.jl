@@ -768,6 +768,34 @@ end
     return abs(δτᵐ⁺) * sponge.damping_rate * sponge.ramp(z, grid.Lz, sponge.depth)
 end
 
+# T21: the substep unknown is (ρw)′ = ρw − ρwᴸ (ρwᴸ = stage-entry state; the SK08 rewind makes
+# (ρw)′₀ = ρwⁿ − ρwᴸ). The terms above damp only (ρw)′, i.e. relax ρw toward the stage-entry ρwᴸ,
+# not toward zero: a pure Rayleigh decay ∂t ρw = −r ρw is not damped at all (stage 1 starts from
+# (ρw)′ = 0, so every stage returns ρwⁿ). The CN operator on the FULL field,
+#   (1 + ωΔτ r)(ρwᴸ + (ρw)′ₙ) = (1 − (1−ω)Δτ r)(ρwᴸ + (ρw)′ₒ),
+# needs the extra constant RHS term −Δτ r ρwᴸ, added here once per stage to Gˢρw (divided by
+# the factor `fw` that multiplies Gˢρw in `vertical_rhs`). Switch BREEZE_SPONGE_FULL_FIELD
+# (default on; false = pre-T21 perturbation-only path).
+const SPONGE_FULL_FIELD = Ref(true)
+
+add_sponge_base_state_damping!(substepper, model, ::Nothing) = nothing
+
+function add_sponge_base_state_damping!(substepper, model, sponge::UpperSponge)
+    SPONGE_FULL_FIELD[] || return nothing
+    fw = substepper.vertical_momentum_tendency_factor
+    iszero(fw) && return nothing
+    grid = model.grid
+    launch!(architecture(grid), grid, :xyz, _add_sponge_base_state_damping!,
+            substepper.slow_vertical_momentum_tendency, model.momentum.ρw, grid, sponge, inv(fw))
+    return nothing
+end
+
+@kernel function _add_sponge_base_state_damping!(Gˢρw, ρwᴸ, grid, sponge, fw⁻¹)
+    i, j, k = @index(Global, NTuple)
+    z = rnode(i, j, k, grid, Center(), Center(), Face())
+    @inbounds Gˢρw[i, j, k] -= fw⁻¹ * sponge.damping_rate * sponge.ramp(z, grid.Lz, sponge.depth) * ρwᴸ[i, j, k] * (k > 1)
+end
+
 @inline sponge_rhs(i, j, k, grid, ::Nothing, δτˢ⁻, ρw_old) = zero(grid)
 
 @inline function sponge_rhs(i, j, k, grid, sponge::UpperSponge, δτˢ⁻, ρw_old)
@@ -2570,6 +2598,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     #   Gˢρw = Gⁿρw − ∂z pᴸ − g ρᴸ                     (no reference state)
     # which the per-substep linearized acoustic forces add to.
     assemble_slow_vertical_momentum_tendency!(substepper, model, β_stage)
+    add_sponge_base_state_damping!(substepper, model, substepper.sponge)
 
     # Initialize perturbations with the SK08 rewind term so the substep
     # effectively starts from U(t) = Uᴸ (the outer-step-start state).
