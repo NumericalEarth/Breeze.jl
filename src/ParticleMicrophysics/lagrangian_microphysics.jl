@@ -578,22 +578,54 @@ end
 end
 
 # Remove the condensed mass density C from the vapor, and warm the air at constant pressure
-# by the latent heat released, cᵖᵐ ΔT = ℒˡ C / ρ.
+# by the latent heat released, cᵖᵐ ΔT = ℒˡ C / ρ. Both prognostic variables are updated by increments,
+# ρθ ← ρθ + ρ Δθ, with Δθ computed without cancellation (see `potential_temperature_increment`),
+# rather than by recomputing θ from the updated temperature: a per-step latent heating of order 10⁻⁵ K
+# is comparable to the single-precision spacing of θ ≈ 300 K, so the difference of two potential
+# temperatures would be rounded to a multiple of that spacing.
 @kernel function _apply_condensation!(ρθ, ρqᵛ, C, T, ρ, p, pˢᵗ, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         Cᵢ = C[i, j, k]
         ρᵢ = ρ[i, j, k]
         Tᵢ = T[i, j, k]
-        ρqᵛ⁺ = ρqᵛ[i, j, k] - Cᵢ
-        q⁺ = MoistureMassFractions(ρqᵛ⁺ / ρᵢ)
-        ℒˡ = liquid_latent_heat(Tᵢ, constants)
-        cᵖᵐ = mixture_heat_capacity(q⁺, constants)
-        T⁺ = Tᵢ + ℒˡ * Cᵢ / (ρᵢ * cᵖᵐ)
-        θ⁺ = potential_temperature_from_temperature(T⁺, p[i, j, k], pˢᵗ, constants, q⁺)
-        ρqᵛ[i, j, k] = ρqᵛ⁺
-        ρθ[i, j, k] = ρᵢ * θ⁺
+        pᵢ = p[i, j, k]
+        qᵛ = ρqᵛ[i, j, k] / ρᵢ
     end
+    Δqᵛ = - Cᵢ / ρᵢ
+    q⁺ = MoistureMassFractions(qᵛ + Δqᵛ)
+    ℒˡ = liquid_latent_heat(Tᵢ, constants)
+    cᵖᵐ = mixture_heat_capacity(q⁺, constants)
+    ΔT = ℒˡ * Cᵢ / (ρᵢ * cᵖᵐ)
+    Δθ = potential_temperature_increment(Tᵢ, ΔT, pᵢ, pˢᵗ, qᵛ, Δqᵛ, constants)
+    @inbounds begin
+        ρqᵛ[i, j, k] -= Cᵢ
+        ρθ[i, j, k] += ρᵢ * Δθ
+    end
+end
+
+# The change Δθ = θ⁺ - θ of the potential temperature θ = T / Π of air without condensate, with
+# Π = (p / pˢᵗ)^κ and κ = Rᵐ / cᵖᵐ, when its temperature changes by ΔT and its vapor mass fraction by Δqᵛ
+# at constant pressure:
+#
+#   Δθ = ΔT / Π⁺ + θ expm1(- Δκ log(p / pˢᵗ)) ,  Δκ = Δqᵛ ((Rᵛ - Rᵈ) cᵖᵐ - Rᵐ (cᵖᵛ - cᵖᵈ)) / (cᵖᵐ cᵖᵐ⁺) ,
+#
+# which is free of the cancellation in (T + ΔT) / Π⁺ - T / Π.
+@inline function potential_temperature_increment(T, ΔT, p, pˢᵗ, qᵛ, Δqᵛ, constants)
+    q = MoistureMassFractions(qᵛ)
+    q⁺ = MoistureMassFractions(qᵛ + Δqᵛ)
+    Rᵐ = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    cᵖᵐ⁺ = mixture_heat_capacity(q⁺, constants)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    Δcᵖ = constants.vapor.heat_capacity - constants.dry_air.heat_capacity
+    Δκ = Δqᵛ * ((Rᵛ - Rᵈ) * cᵖᵐ - Rᵐ * Δcᵖ) / (cᵖᵐ * cᵖᵐ⁺)
+    log_p = log(p / pˢᵗ)
+    Π = exp(Rᵐ / cᵖᵐ * log_p)
+    Π⁺ = Π * exp(Δκ * log_p)
+    θ = T / Π
+    return ΔT / Π⁺ + θ * expm1(- Δκ * log_p)
 end
 
 validate_formulation(::LiquidIcePotentialTemperatureFormulation) = nothing

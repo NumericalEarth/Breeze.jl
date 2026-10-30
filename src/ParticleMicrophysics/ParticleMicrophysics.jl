@@ -68,8 +68,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, dynamics_density, dynamics_pres
                                 standard_pressure, kernel_time_step
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 using Breeze.TimeSteppers: AcousticRungeKutta3, SSPRungeKutta3
-using Breeze.Thermodynamics: MoistureMassFractions, liquid_latent_heat, mixture_gas_constant, mixture_heat_capacity,
-                           potential_temperature_from_temperature, supersaturation
+using Breeze.Thermodynamics: MoistureMassFractions, mixture_gas_constant, mixture_heat_capacity, supersaturation
 
 include("lagrangian_microphysics.jl")
 
