@@ -167,7 +167,7 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
             # temperature alone (rvs = 3.8 / p exp(...)), so on a fixed-pressure (anelastic) column
             # it is evaluated at the thermodynamic state density at (p, T), not at the density that
             # weights the rain. On the compressible core the update is isochoric: saturation is at ρ.
-            ρᵗʰ = isochoric ? ρ[k] : p[k] / (Rᵐ * T[k])
+            ρᵗʰ = isochoric ? ρ[k] : p[k] / (mixture_gas_constant(q, constants) * T[k])
             qᵛ⁺ = saturation_specific_humidity(T[k], ρᵗʰ, constants, PlanarLiquidSurface())
             rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
             Δrˢᵃᵗ = (rᵛ[k] - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T[k] - T_offset)^2)
