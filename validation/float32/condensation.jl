@@ -146,6 +146,22 @@ function record!(state, model)
     push!(rows.kinetic_energy, sum(mean(Array(interior(u)) .^ 2) for u in model.velocities) / 2)
     push!(rows.droplets, length(r))
 
+    # Per-step condensation increments of θ and qᵛ, relative to the spacing of the stored values
+    C = Array(interior(model.microphysical_fields.C))
+    Π = T̄ / mean(model.formulation.potential_temperature)
+    Δθ = ℒ_ncar .* abs.(C) ./ (ρᵃ * cᵖ_ncar * Π)
+    Δq = abs.(C) ./ ρᵃ
+    active = C .!= 0
+    θ̄ = T̄ / Π
+    ρθ_type = eltype(model.formulation.potential_temperature_density)
+    ρq_type = eltype(model.moisture_density)
+    push!(rows.time_step, model.clock.last_Δt)
+    push!(rows.condensing_cells, count(active) / length(C))
+    push!(rows.theta_increment, any(active) ? mean(Δθ[active]) : 0.0)
+    push!(rows.vapor_increment, any(active) ? mean(Δq[active]) : 0.0)
+    push!(rows.theta_spacing, Float64(eps(ρθ_type(ρᵃ * θ̄))) / ρᵃ)
+    push!(rows.vapor_spacing, Float64(eps(ρq_type(ρᵃ * q̄ᵛ))) / ρᵃ)
+
     push!(dsd.time, model.clock.time)
     push!(dsd.counts, dsd_counts(r))
 
@@ -189,7 +205,7 @@ end
 
 function run_l3(ncar_dir, seed, M; arch, stop_time=10.0, cfl=0.3, max_Δt=1e-3, output_interval=0.02,
                 output_dir, suffix="", lapse=:none, self_interaction=DiffusiveSelfInteraction(), quiescent=false,
-                uniform_velocity=(0.0, 0.0, 0.0), FT=Float64)
+                uniform_velocity=(0.0, 0.0, 0.0), FT=Float64, thermodynamic_float_type=nothing)
     label = @sprintf("s%d_M%d%s", seed, M, suffix)
     case = joinpath(ncar_dir, "cond_s$(seed)_a")
     zk = read_zk(joinpath(case, "Zk.in.ncf"))
@@ -227,8 +243,9 @@ function run_l3(ncar_dir, seed, M; arch, stop_time=10.0, cfl=0.3, max_Δt=1e-3, 
     forcings = quiescent ? NamedTuple() : (u=forcing, v=forcing, w=forcing)
     forcings = lapse === :none ? forcings : merge(forcings, background_forcings(background, ρᵃ))
 
+    precision = thermodynamic_float_type === nothing ? (;) : (; thermodynamic_float_type)
     model = AtmosphereModel(grid; dynamics, microphysics, thermodynamic_constants=constants, closure,
-                            advection=Centered(order=4), forcing=forcings)
+                            advection=Centered(order=4), forcing=forcings, precision...)
 
     # Initial flow, temperature and vapor perturbations from the NCAR spectral fields
     u₀, v₀, w₀ = staggered_velocities(zk, M)
@@ -249,7 +266,9 @@ function run_l3(ncar_dir, seed, M; arch, stop_time=10.0, cfl=0.3, max_Δt=1e-3, 
                      droplet_mean_supersaturation=Float64[], droplet_std_supersaturation=Float64[],
                      liquid_water_content=Float64[], mean_radius=Float64[], std_radius=Float64[],
                      mean_radius_cubed=Float64[], std_temperature=Float64[], std_vapor=Float64[],
-                     kinetic_energy=Float64[], droplets=Int[]),
+                     kinetic_energy=Float64[], droplets=Int[], time_step=Float64[], condensing_cells=Float64[],
+                     theta_increment=Float64[], vapor_increment=Float64[], theta_spacing=Float64[],
+                     vapor_spacing=Float64[]),
              dsd = (time=Float64[], counts=Vector{Int}[]),
              pdfs = NamedTuple[], pdf_times = d.time .+ [0.0, 1.0, 2.0, 5.0, 10.0], pdf_index = Ref(1),
              constants, L, M, ρᵃ)
@@ -301,6 +320,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     output_interval = parse(Float64, get(ENV, "OUTPUT_INTERVAL", "0.02"))
     output_dir = get(ENV, "OUTPUT_DIR", joinpath(@__DIR__, "output", "l3"))
     FT = get(ENV, "FLOAT", "Float64") == "Float32" ? Float32 : Float64
+    thermodynamic_float_type = Dict("" => nothing, "Float64" => Float64, "Float32" => Float32)[get(ENV, "THERMO_FLOAT", "")]
     suffix = get(ENV, "LABEL", "")
     lapse = background_kind(get(ENV, "LAPSE", "none"))
     self = get(ENV, "SELF", "1")
@@ -312,6 +332,6 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     for (seed, M) in runs
         run_l3(ncar_dir, seed, M; arch, stop_time, cfl, max_Δt, output_interval, output_dir, suffix, lapse, self_interaction, quiescent,
-               uniform_velocity, FT)
+               uniform_velocity, FT, thermodynamic_float_type)
     end
 end
