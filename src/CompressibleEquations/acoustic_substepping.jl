@@ -1021,12 +1021,13 @@ end
 #
 # See derivation in the split-explicit derivation in `docs/src/compressible_dynamics.md`.
 @kernel function _build_predictors!(ρ′★, ρθ′★, ρθ′ˢ⁻, ρ′, ρθ′, ρw′, ρu′, ρv′,
-                                    grid, dynamics, Δτ, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ)
+                                    grid, dynamics, Δτ, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ, Eᴸ)
 
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ρθ′ˢ⁻[i, j, k] = ρθ′[i, j, k] # stash old (ρθ)′ for the divergence damping
+        # Stash the old (ρχ)′ + Eᴸρ′ = p′/Cᴸ ((ρθ)′ for ρθ) for the divergence damping
+        ρθ′ˢ⁻[i, j, k] = pressure_perturbation_argument(ρθ′, ρ′, Eᴸ)[i, j, k]
 
         V⁻¹ = V⁻¹ᶜᶜᶜ(i, j, k, grid)
         ∇ʰ_M  = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
@@ -1174,14 +1175,22 @@ function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper
             substepper.momentum_perturbation.u,
             substepper.momentum_perturbation.v,
             substepper.density_potential_temperature_perturbation,
+            substepper.density_perturbation,
             substepper.previous_density_potential_temperature_perturbation,
             substepper.linearization_potential_temperature,
+            substepper.linearization_density_weight,
             grid, convert(FT, Δτ), x_damping_scale, y_damping_scale)
 
     return nothing
 end
 
-@inline dρθ′(i, j, k, grid, ρθ′, ρθ′ˢ⁻) = @inbounds ρθ′[i, j, k] - ρθ′ˢ⁻[i, j, k]
+# Change of (ρχ)′ + Eᴸρ′ = p′/Cᴸ over the substep ((ρθ)′ for ρθ, Eᴸ = nothing)
+@inline dρθ′(i, j, k, grid, ρθ′, ρ′, ρθ′ˢ⁻, Eᴸ) =
+    @inbounds pressure_perturbation_argument(ρθ′, ρ′, Eᴸ)[i, j, k] - ρθ′ˢ⁻[i, j, k]
+
+# χ̂ᴸ + Eᴸ = c²/Cᴸ, the factor relating the change of (ρχ)′ + Eᴸρ′ to the mass divergence
+# (θᴸ for ρθ). See `_thermal_divergence_damping!`.
+@inline divergence_weight(i, j, k, grid, χ̂ᴸ, Eᴸ) = @inbounds χ̂ᴸ[i, j, k] + density_weight(i, j, k, Eᴸ)
 
 struct NoHorizontalDampingScale end
 
@@ -1245,18 +1254,29 @@ end
 # diffusivity γ = α length_scale² / Δτ for backwards-compatible tuning.
 # The vertical component lives in the column tridiag (it's a Laplacian on
 # (ρw)′ folded into the implicit acoustic solve), not here.
-@kernel function _thermal_divergence_damping!(ρu′, ρv′, ρθ′, ρθ′ˢ⁻, θᴸ, grid, Δτ,
+#
+# For a general thermodynamic variable ρχ (ρη, ρE), (ρθ)′ is replaced by p′/Cᴸ = (ρχ)′ + Eᴸρ′ and
+# θᴸ by χ̂ᴸ + Eᴸ = c²/Cᴸ: the proxy is the pressure tendency over c²,
+#   D = Δ[(ρχ)′ + Eᴸρ′] / (χ̂ᴸ + Eᴸ) = −Δτ [∇·(ρ𝐮)′ + (ρ𝐮)′·∇χ̂ᴸ / (χ̂ᴸ + Eᴸ)] ,
+# which for dry air is the same D for ρθ and ρη, since dη = cᵖ dθ/θ, and for ρE in hydrostatic
+# balance, where dĤ = cᵖT dθ/θ.
+# Dividing by χ̂ᴸ alone is wrong for ρη: χ̂ = ρη/ρᵈ is negative (entropy is referenced to the
+# triple point) and its magnitude falls with height, so the advective part of D,
+# (ρw)′ ∂z χ̂ᴸ / χ̂ᴸ, has the opposite sign to θ's (ρw)′ ∂z ln θᴸ. That turns the damping's
+# coupling of w into the horizontal momentum into a source of gravity-wave energy wherever
+# ∂z(∂z χ̂ᴸ/χ̂ᴸ) < 0, as in the stratosphere, and drove a slow gravity-wave instability there.
+@kernel function _thermal_divergence_damping!(ρu′, ρv′, ρθ′, ρ′, ρθ′ˢ⁻, θᴸ, Eᴸ, grid, Δτ,
                                               x_damping_scale, y_damping_scale)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
-        θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+        ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρ′, ρθ′ˢ⁻, Eᴸ)
+        θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, divergence_weight, θᴸ, Eᴸ)
         γˣ = κˣ(i, j, k, grid, x_damping_scale, Δτ)
         ρu′[i, j, k] -= γˣ * ∂x_div / θᴸᶠᶜᶜ
 
-        ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
-        θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+        ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρ′, ρθ′ˢ⁻, Eᴸ)
+        θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, divergence_weight, θᴸ, Eᴸ)
         γʸ = κʸ(i, j, k, grid, y_damping_scale, Δτ)
         ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ
     end
@@ -1283,26 +1303,35 @@ function apply_divergence_damping!(damping::DirectDivergenceDamping, substepper,
     ρu′ = substepper.momentum_perturbation.u
     ρv′ = substepper.momentum_perturbation.v
 
-    launch!(arch, grid, :xyz, _compute_horizontal_theta_flux_divergence!, δ, grid, θᴸ, ρu′, ρv′)
+    Eᴸ  = substepper.linearization_density_weight
+
+    launch!(arch, grid, :xyz, _compute_horizontal_theta_flux_divergence!, δ, grid, θᴸ, Eᴸ, ρu′, ρv′)
     fill_halo_regions!(δ)
-    launch!(arch, grid, :xyz, _apply_direct_divergence_damping!, ρu′, ρv′, grid, δ, θᴸ, α)
+    launch!(arch, grid, :xyz, _apply_direct_divergence_damping!, ρu′, ρv′, grid, δ, θᴸ, Eᴸ, α)
 
     return nothing
 end
 
 # δ = ∇ʰ·(θᴸ(ρ𝐮)′): area-weighted horizontal Θ-flux divergence, using the same flux-form (θFˣ, θFʸ)
 # `build_predictors!` uses for ∇ʰ_θM (so the damped divergence matches the one in the Θ equation).
-@kernel function _compute_horizontal_theta_flux_divergence!(δ, grid, θᴸ, ρu′, ρv′)
+# For a general ρχ, δ = ∇ʰ·(χ̂ᴸ(ρ𝐮)′) + Eᴸ ∇ʰ·(ρ𝐮)′, the horizontal part of the tendency of
+# (ρχ)′ + Eᴸρ′ = p′/Cᴸ, scaled below by χ̂ᴸ + Eᴸ (see `_thermal_divergence_damping!`).
+@kernel function _compute_horizontal_theta_flux_divergence!(δ, grid, θᴸ, Eᴸ, ρu′, ρv′)
     i, j, k = @index(Global, NTuple)
     @inbounds δ[i, j, k] = (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) +
-                            δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
+                            δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹ᶜᶜᶜ(i, j, k, grid) +
+                           density_weighted_horizontal_divergence(i, j, k, grid, Eᴸ, ρu′, ρv′)
 end
 
-@kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α)
+@inline density_weighted_horizontal_divergence(i, j, k, grid, ::Nothing, ρu′, ρv′) = 0
+@inline density_weighted_horizontal_divergence(i, j, k, grid, Eᴸ, ρu′, ρv′) =
+    @inbounds Eᴸ[i, j, k] * div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
+
+@kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, Eᴸ, α)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, divergence_weight, θᴸ, Eᴸ)
+        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, divergence_weight, θᴸ, Eᴸ)
     end
 end
 
@@ -1593,7 +1622,8 @@ function acoustic_substep!(model, substepper, stage, advection)
             substepper.momentum_perturbation.u, substepper.momentum_perturbation.v,
             grid, model.dynamics, Δτ, δτˢ⁻,
             Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
-            substepper.linearization_potential_temperature)
+            substepper.linearization_potential_temperature,
+            substepper.linearization_density_weight)
     fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
     # Implicit half of the IMEX vertical-advection split for the thermodynamic

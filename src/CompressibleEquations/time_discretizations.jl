@@ -160,6 +160,17 @@ extra kernel pass. Building the correction from `D` reuses the
 substep's already-resident `(ρθ)′` snapshots — that's the algorithmic
 choice this damping is named for.
 
+For a thermodynamic variable ``ρχ`` other than ``ρθ`` (``ρη``, ``ρE``), whose pressure perturbation
+is ``p' = C^L[(ρχ)' + E^L ρ']``, the proxy is the pressure tendency over the squared sound speed,
+
+```math
+D \\equiv \\frac{Δ[(ρχ)' + E^L ρ']}{χ̂^L + E^L} ,
+```
+
+with ``χ̂^L`` the value per unit dry mass carried by the flux of ``ρχ`` and
+``C^L(χ̂^L + E^L) = c²``. In dry air this is the same ``D`` for ``ρθ`` and ``ρη``, and for
+``ρE`` in hydrostatic balance.
+
 Used by
 [Klemp, Skamarock & Ha (2018)](@cite KlempSkamarockHa2018) /
 [Skamarock & Klemp (1992)](@cite SkamarockKlemp1992) /
