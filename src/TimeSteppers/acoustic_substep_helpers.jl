@@ -3,7 +3,11 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: prognostic_fields, fields, architecture
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection, vertical_scheme,
                               implicit_vertical_velocityᶜᶜᶠ
+using Oceananigans.BoundaryConditions: needs_implicit_solver
+using Oceananigans.Fields: location
 using Oceananigans.Operators: Azᶜᶜᶠ, δzᵃᵃᶜ, V⁻¹ᶜᶜᶜ, ℑzᵃᵃᶠ
+using Oceananigans.Solvers: solve!
+using Oceananigans.TurbulenceClosures: vertically_implicit_closures
 using Oceananigans.Utils: launch!, KernelParameters
 
 using Oceananigans.TimeSteppers: implicit_step!
@@ -225,11 +229,12 @@ explicit flux the slow tendencies carry through the advection dispatch), plus ve
 closure diffusion. Explicit advection schemes contribute no advection coefficients and explicit
 closures no diffusion coefficients, so each combination reduces to the right system. The solve
 runs once per RK stage after the substep loop, over the stage interval — the operator split WRF
-and CM1 use for their implicit vertical pieces. The stage's sedimentation composition content is
-solved with the same thermodynamic operator separately and added afterwards
-(`apply_sedimentation_content!`). Under an adaptive-implicit thermodynamic scheme the advection half of
-this solve is empty (`postloop_thermodynamic_scheme`): it was applied inside the loop. Continuity takes no implicit solve: the coupling-density tendency is the
-acoustic mass-flux divergence itself, not scalar advection.
+and CM1 use for their implicit vertical pieces. The stage's sedimentation composition content
+takes the thermodynamic variable's operator in a solve of its own and is added afterwards
+(`apply_sedimentation_content!`). Under an adaptive-implicit
+thermodynamic scheme the advection half of this solve is empty (`postloop_thermodynamic_scheme`):
+it was applied inside the loop. Continuity takes no implicit solve: the coupling-density tendency
+is the acoustic mass-flux divergence itself, not scalar advection.
 
 The advecting velocity passed to each solve must be the one its slow tendency was built with,
 so the explicit/implicit velocity split is consistent: the RK stage-entry predictor velocities
@@ -322,8 +327,14 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                        ρᵈ)
     end
 
+    # The stage's sedimentation composition content takes the thermodynamic variable's operator
+    # (see `apply_sedimentation_content!`), so both solves read their coefficients from the same
+    # fields: with a frozen copy of the variable when there is content to solve.
+    ts = model.timestepper
+    coefficient_fields = freeze_thermodynamic_density!(ts.frozen_thermodynamic_density, model)
     θ_name = thermodynamic_density_name(model.formulation)
-    thermodynamic_implicit_step!(prognostic[θ_name], model, implicit_solver, Δt_stage)
+    thermodynamic_implicit_step!(ts.sedimentation_content, model, implicit_solver, Δt_stage, coefficient_fields)
+    thermodynamic_implicit_step!(prognostic[θ_name], model, implicit_solver, Δt_stage, coefficient_fields)
 
     return nothing
 end
@@ -331,30 +342,66 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Apply the thermodynamic variable's post-loop vertically-implicit solve over `Δt_stage` to `φ`:
-the thermodynamic variable itself, or the stage's sedimentation composition content, which
-must take the same operator before it is added to the variable (see
-`apply_sedimentation_content!`). A no-op without an implicit solver.
+The fields the thermodynamic variable's post-loop operator reads its coefficients from, after
+copying the variable into `frozen`, which takes its place among them. Oceananigans' tridiagonal
+solve overwrites the field it solves for as it sweeps up each column, while a coefficient, a
+state-dependent diffusivity for one, may read that field through the model fields: below its own
+row it would read swept values, and the variable's solve would not apply the operator the
+sedimentation content's solve does. Without `frozen` (no condensate sediments), the model fields.
 """
-function thermodynamic_implicit_step!(φ, model, implicit_solver, Δt_stage)
+freeze_thermodynamic_density!(::Nothing, model) = fields(model)
+
+function freeze_thermodynamic_density!(frozen, model)
+    θ_name = thermodynamic_density_name(model.formulation)
+    θ = prognostic_fields(model)[θ_name]
+    parent(frozen) .= parent(θ)
+    return merge(fields(model), NamedTuple{(θ_name,)}((frozen,)))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply the thermodynamic variable's post-loop vertically-implicit solve over `Δt_stage` to `φ`:
+the variable itself, or the stage's sedimentation composition content, which must take the same
+operator before it is added to the variable (see `apply_sedimentation_content!`). The operator is
+the variable's whichever field is solved, the implicit part of its boundary fluxes included: that
+part reads the variable's boundary conditions and boundary values. Its coefficients read
+`coefficient_fields` (see `freeze_thermodynamic_density!`), the variable's boundary values among
+them. A no-op when nothing about the variable is vertically implicit.
+"""
+function thermodynamic_implicit_step!(φ, model, implicit_solver, Δt_stage, coefficient_fields)
     # The advective half is weighted with the frozen stage-entry (w, ρᵈ), the diffusive half with
     # the live coupling density (see `implicit_substep!`).
     w, ρᵈ = advecting_state(model)
     diffusion_density = dynamics_density(model.dynamics)
     θ_name = thermodynamic_density_name(model.formulation)
+    θ = prognostic_fields(model)[θ_name]
     θ_advection = field_advection_scheme(model.advection, θ_name)
-    implicit_step!(φ,
-                   implicit_solver,
-                   model.closure,
-                   model.closure_fields,
-                   closure_scalar_index(model, θ_name),
-                   model.clock,
-                   fields(model),
-                   Δt_stage,
-                   postloop_thermodynamic_scheme(θ_advection, diffusion_density),
-                   merge(slow_thermodynamic_velocities(model), (; w)),
-                   ρᵈ)
+    scheme = postloop_thermodynamic_scheme(θ_advection, diffusion_density)
+
+    # Oceananigans' `implicit_step!(φ, ...)`, with the boundary conditions and boundary values of
+    # the thermodynamic variable in place of φ's, and with the fields its coefficients read given.
+    # TODO: upstream to Oceananigans as `implicit_step!` arguments naming the field whose boundary
+    # conditions and boundary values form the operator, defaulting to the solved field, and the
+    # fields the coefficients read. Oceananigans' own solves read the live fields, so for any field
+    # a coefficient that reads it below its own row reads values the sweep has overwritten. Until
+    # then this body mirrors `Oceananigans.TurbulenceClosures.implicit_step!` and must track it.
+    closure, closure_fields = vertically_implicit_closures(model.closure, model.closure_fields)
+    if closure === ()
+        closure, closure_fields = nothing, nothing
+    end
+
+    bcs = θ.boundary_conditions
+    isnothing(closure) && !needs_implicit_solver(scheme) && !needs_implicit_solver(bcs) && return nothing
+
+    LX, LY, LZ = location(θ)
+    solve!(φ, implicit_solver, φ,
+           closure, closure_fields, closure_scalar_index(model, θ_name),
+           LX(), LY(), LZ(), Δt_stage, model.clock, coefficient_fields,
+           scheme, w, ρᵈ, bcs.top, bcs.bottom, bcs.immersed, coefficient_fields[θ_name])
+
     return nothing
 end
 
-thermodynamic_implicit_step!(φ, model, ::Nothing, Δt_stage) = nothing
+# No condensate sediments.
+thermodynamic_implicit_step!(::Nothing, model, implicit_solver, Δt_stage, coefficient_fields) = nothing

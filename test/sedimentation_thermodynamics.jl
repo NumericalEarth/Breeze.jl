@@ -176,10 +176,10 @@ end
 @testset "Sedimentation keeps an isothermal column's temperature on the acoustic stepper [$FT]" for FT in test_float_types()
     adaptive = UpwindBiased(FT; order=1, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
 
-    # The fixture starts at rest and stays there while nothing falls.
+    # The fixture starts at rest and stays there, to roundoff, while nothing falls.
     resting = acoustic_sedimentation_column(FT, adaptive; fall_speed = 0)
     @test resting.pressure_spread < 10eps(FT)
-    @test resting.largest_departure < 1e-6
+    @test resting.largest_departure < 100eps(FT) * maximum(resting.T⁰)
 
     # An isothermal column moves no sensible heat, so the temperature must not change.
     for (scheme, Δt) in ((UpwindBiased(FT; order=1), 1), (adaptive, 2), (adaptive, 5))
@@ -188,6 +188,48 @@ end
         @test column.pressure_spread < 10eps(FT)
         @test column.rain_left < 0.2 # most of the rain has fallen out of the column
         @test column.largest_departure < 0.05
+    end
+end
+
+# The composition content takes the thermodynamic variable's post-loop solve on its own, so it
+# must take the variable's operator in full: the implicit part of a boundary flux, which reads the
+# variable's boundary conditions and boundary values, and coefficients that read the variable,
+# here from the cells on both sides of each face, which the variable's own solve overwrites as it
+# sweeps up the column. A content proportional to the variable, s ρθ, then adds s A⁻¹ρθ, where
+# A⁻¹ρθ is what the variable's own solve gives, so the increment δ and the result
+# ρθ¹ = A⁻¹ρθ + δ satisfy δ = s (ρθ¹ − δ).
+@inline diffusivity_of_ρθ(i, j, k, grid, ℓx, ℓy, ℓz, clock, fields) =
+    @inbounds ((fields.ρθ[i, j, k-1] + fields.ρθ[i, j, k]) / 600)^4 / 2
+
+@testset "The sedimentation content takes the thermodynamic variable's post-loop operator [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 4), topology=(Flat, Flat, Bounded))
+    constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=290)
+    adaptive = UpwindBiased(FT; order=1, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+
+    # An implicit flux −ρθ through the bottom halves the bottom cell over Δt = Δz = 1.
+    boundary_conditions = (; ρθ=FieldBoundaryConditions(bottom=IMEXFluxBoundaryCondition(0, -1)))
+    state_dependent = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ=diffusivity_of_ρθ, discrete_form=true)
+    s = FT(0.3)
+
+    for closure in (nothing, state_dependent)
+        model = AtmosphereModel(grid; dynamics, closure, boundary_conditions, thermodynamic_constants=constants,
+                                microphysics=SedimentationOnly(Val(:liquid), FT(1), false),
+                                scalar_advection=(; ρqʳ=adaptive))
+        set!(model; ρᵈ=1.2, T=290, qᵛ=0.005, qʳ=z -> ifelse(z > 2, 0.001, 0.0))
+        update_state!(model)
+        Breeze.TimeSteppers.cache_advecting_state!(model)
+
+        ρθ = AM.thermodynamic_density(model.formulation)
+        content = model.timestepper.sedimentation_content
+        interior(content) .= s .* interior(ρθ)
+        Breeze.TimeSteppers.implicit_substep!(model, FT(1))
+        Breeze.TimeSteppers.apply_sedimentation_content!(model, FT(1))
+
+        δ = Array(interior(content, 1, 1, :))
+        ρθ¹ = Array(interior(ρθ, 1, 1, :))
+        @test δ ≈ s .* (ρθ¹ .- δ) rtol=100eps(FT)
     end
 end
 
