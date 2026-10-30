@@ -509,7 +509,9 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     end
     Gρcs = map(name -> getproperty(model.timestepper.Gⁿ, name), names)
 
-    if BATCHED_SCALAR_TENDENCIES[]
+    # GPU only: on x86 CPUs the contract-flagged WENO arithmetic fuses differently inside the batched kernel (job 5996:
+    # CPU arms differ, GPU arms bitwise), as with the uncached bounded flux (see Breeze.Advection.EDGE_CACHE_ON_CPU).
+    if BATCHED_SCALAR_TENDENCIES[] && arch isa Oceananigans.Architectures.GPU
         # T22 scalars: one launch; every tendency is the expression of `compute_scalar_tendency!`, unchanged.
         launch!(arch, grid, :xyz, compute_scalar_tendencies!, (Gρqᵛᵉ, Gρcs...), grid, (ρq_args, scalar_argss...))
     else
