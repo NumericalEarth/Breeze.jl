@@ -79,40 +79,93 @@ function split_sedimentation_step!(model, Δt)
     condensates = values(model.sedimentation)
     isempty(condensates) && return nothing
     grid = model.grid
-    arch = grid.architecture
-    FT = eltype(grid)
     F = split_sedimentation_flux_field(grid)
-    ρ = total_density(model.dynamics)
-    φ = thermodynamic_density(model.formulation)
-    temperature = explicit_content_source(model)
-    zero_w = ZeroField(FT)
-    for condensate in condensates
-        launch!(arch, grid, :xy, _split_sedimentation_column!, F, condensate.density, condensate.velocity, ρ, grid,
-                kernel_time_step(arch, grid, Δt), mode, FT(SEDIMENTATION_CFL), SEDIMENTATION_MAX_SUBSTEPS)
-        launch!(arch, grid, :xyz, _split_sedimentation_content!, φ, grid, kernel_time_step(arch, grid, Δt),
-                (condensate,), zero_w, SplitSedimentationFluxes(F), model.formulation, model.dynamics,
-                model.thermodynamic_constants, model.microphysics, model.microphysical_fields,
-                specific_prognostic_moisture(model), temperature)
-    end
-    # Sedimenting prognostics that carry no condensate content (P3 number, rime volume, ...): mass only.
+    # Function barrier: the cached mass-only tuple is inferred as `Any`.
+    return launch_split_sedimentation!(model, grid, F, kernel_time_step(grid.architecture, grid, Δt), mode,
+                                       condensates, split_mass_only_prognostics(model))
+end
+
+# T21-sedfuse: every sedimenting prognostic of the step in ONE column kernel. Each thread owns a column
+# and runs, in the order of the former per-species launches, the column sedimentation of each condensate
+# followed by its content update of φ over the column, then the mass-only prognostics. Every read of the
+# content update (ρq of all species, θ or the stored contents, T, ρ, F) is column-local and is made after
+# the same writes as with the separate launches, and φ is not read, so the result is bitwise identical.
+function launch_split_sedimentation!(model, grid, F, Δt, mode, condensates, mass_only)
+    FT = eltype(grid)
+    launch!(grid.architecture, grid, :xy, _split_sedimentation!, F, thermodynamic_density(model.formulation), grid, Δt,
+            mode, FT(SEDIMENTATION_CFL), SEDIMENTATION_MAX_SUBSTEPS, total_density(model.dynamics), condensates,
+            mass_only, ZeroField(FT), model.formulation, model.dynamics, model.thermodynamic_constants,
+            model.microphysics, model.microphysical_fields, specific_prognostic_moisture(model),
+            explicit_content_source(model))
+    return nothing
+end
+
+# Sedimenting prognostics that carry no condensate content (P3 number, rime volume, ...), moved for
+# mass only: a tuple of (ρc, wˢ) pairs, built once per microphysical field set (the per-call generator
+# over the names was type unstable).
+const SPLIT_MASS_ONLY = IdDict{Any, Any}()
+
+split_mass_only_prognostics(model) = get!(SPLIT_MASS_ONLY, model.microphysical_fields) do
+    μ = model.microphysical_fields
     names = Tuple(n for n in prognostic_field_names(model.microphysics) if !haskey(model.sedimentation, n))
-    for name in names
-        w = sedimentation_velocity(model.microphysics, model.microphysical_fields, Val(name))
-        isnothing(w) && continue
-        launch!(arch, grid, :xy, _split_sedimentation_column!, F, getproperty(model.microphysical_fields, name), w, ρ, grid,
-                kernel_time_step(arch, grid, Δt), mode, FT(SEDIMENTATION_CFL), SEDIMENTATION_MAX_SUBSTEPS)
+    pairs = Tuple((getproperty(μ, n), sedimentation_velocity(model.microphysics, μ, Val(n))) for n in names)
+    Tuple(p for p in pairs if !isnothing(p[2]))
+end
+
+@kernel function _split_sedimentation!(F, φ, grid, Δt, mode, cfl, max_substeps, ρ, condensates, mass_only, wᵗ,
+                                       formulation, dynamics, constants, microphysics, microphysical_fields,
+                                       specific_prognostic_moisture, temperature)
+    i, j = @index(Global, NTuple)
+    Nz = grid.Nz
+    @inbounds F[i, j, Nz + 1] = zero(eltype(grid))
+    split_condensate_columns!(F, φ, grid, Δt, mode, cfl, max_substeps, ρ, condensates, wᵗ, formulation, dynamics,
+                              constants, microphysics, microphysical_fields, specific_prognostic_moisture,
+                              temperature, i, j, Nz)
+    split_mass_only_columns!(F, grid, Δt, mode, cfl, max_substeps, ρ, mass_only, i, j, Nz)
+end
+
+@inline split_condensate_columns!(F, φ, grid, Δt, mode, cfl, max_substeps, ρ, ::Tuple{}, args...) = nothing
+
+@inline function split_condensate_columns!(F, φ, grid, Δt, mode, cfl, max_substeps, ρ, condensates::Tuple, wᵗ,
+                                           formulation, dynamics, constants, microphysics, microphysical_fields,
+                                           specific_prognostic_moisture, temperature, i, j, Nz)
+    condensate = first(condensates)
+    split_sedimentation_column!(F, condensate.density, condensate.velocity, ρ, grid, Δt, mode, cfl, max_substeps, i, j, Nz)
+    split_content_column!(φ, F, grid, Δt, (condensate,), wᵗ, formulation, dynamics, constants, microphysics,
+                          microphysical_fields, specific_prognostic_moisture, temperature, i, j, Nz)
+    split_condensate_columns!(F, φ, grid, Δt, mode, cfl, max_substeps, ρ, Base.tail(condensates), wᵗ,
+                              formulation, dynamics, constants, microphysics, microphysical_fields,
+                              specific_prognostic_moisture, temperature, i, j, Nz)
+    return nothing
+end
+
+# φ += Δt × the content tendency of `condensates` from the split fluxes in F, up the column, carrying the
+# contents of cells k − 1, k, k + 1 (the clamps of `sedimentation_content_tendency`).
+@inline function split_content_column!(φ, F, grid, Δt, condensates, wᵗ, formulation, dynamics, constants,
+                                       microphysics, microphysical_fields, specific_prognostic_moisture,
+                                       temperature, i, j, Nz)
+    mass_fluxes = SplitSedimentationFluxes(F)
+    c⁰ = condensate_content(i, j, 1, grid, formulation, dynamics, constants,
+                            microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
+    c⁻ = c⁰
+    for k in 1:Nz
+        c⁺ = condensate_content(i, j, min(k + 1, Nz), grid, formulation, dynamics, constants,
+                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
+        tendency = sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, dynamics, c⁻, c⁰, c⁺)
+        @inbounds φ[i, j, k] += Δt * tendency
+        c⁻ = c⁰
+        c⁰ = c⁺
     end
     return nothing
 end
 
-@kernel function _split_sedimentation_content!(φ, grid, Δt, condensates, wᵗ, mass_fluxes, formulation, dynamics,
-                                               constants, microphysics, microphysical_fields,
-                                               specific_prognostic_moisture, temperature)
-    i, j, k = @index(Global, NTuple)
-    tendency = sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, formulation, dynamics,
-                                              constants, microphysics, microphysical_fields,
-                                              specific_prognostic_moisture, temperature)
-    @inbounds φ[i, j, k] += Δt * tendency
+@inline split_mass_only_columns!(F, grid, Δt, mode, cfl, max_substeps, ρ, ::Tuple{}, i, j, Nz) = nothing
+
+@inline function split_mass_only_columns!(F, grid, Δt, mode, cfl, max_substeps, ρ, mass_only::Tuple, i, j, Nz)
+    ρc, w = first(mass_only)
+    split_sedimentation_column!(F, ρc, w, ρ, grid, Δt, mode, cfl, max_substeps, i, j, Nz)
+    split_mass_only_columns!(F, grid, Δt, mode, cfl, max_substeps, ρ, Base.tail(mass_only), i, j, Nz)
+    return nothing
 end
 
 # Fall speed (positive) through face k, the bottom face of cell k, and the Courant number of cell k.
@@ -122,14 +175,6 @@ end
 # Store the step-averaged downward mass flux M̄ [kg m⁻² s⁻¹] of face k as −M̄ Az / ρᶠ.
 @inline split_store_flux!(F, i, j, k, grid, ρ, M̄) =
     @inbounds F[i, j, k] = -M̄ * Azᶜᶜᶠ(i, j, k, grid) / ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-
-@kernel function _split_sedimentation_column!(F, ρq, w, ρ, grid, Δt, mode, cfl, max_substeps)
-    i, j = @index(Global, NTuple)
-    Nz = grid.Nz
-    FT = eltype(grid)
-    @inbounds F[i, j, Nz + 1] = zero(FT)
-    split_sedimentation_column!(F, ρq, w, ρ, grid, Δt, mode, cfl, max_substeps, i, j, Nz)
-end
 
 @inline function split_sedimentation_column!(F, ρq, w, ρ, grid, Δt, ::Val{:substep}, cfl, max_substeps, i, j, Nz)
     FT = eltype(grid)
