@@ -187,10 +187,11 @@ const EDGES_KFIRST = Ref(true)
 
 """
 Whether the k-first edges passes of all edge-cached schemes of a model run as one launch, each thread forming the
-edges of every scheme at its cell in turn (T22 scalars; `true` by default, `BREEZE_BATCHED_EDGES` at load; consulted
+edges of every scheme at its cell in turn (T22 scalars; `false` by default: bitwise but slower, 32.8 -> 35.2 ms/step at 3 km and 2.13 -> 2.30 at
+13 km in job 5996 (40 -> 48 registers); `BREEZE_BATCHED_EDGES` at load; consulted
 at every launch, GPU k-first only). The per-cell arithmetic is `bounds_preserving_edges!`, unchanged.
 """
-const BATCHED_EDGES = Ref(true)
+const BATCHED_EDGES = Ref(false)
 
 env_switch(name, default) = lowercase(get(ENV, name, default)) in ("1", "true")
 
@@ -200,7 +201,7 @@ function __init__()
     ZERO_SAFE_LIMITER[] = env_switch("BREEZE_ZERO_SAFE_LIMITER", "true")
     LIMITER_THETA_SHORTCUT[] = env_switch("BREEZE_LIMITER_THETA_SHORTCUT", "true")
     EDGES_KFIRST[] = env_switch("BREEZE_EDGES_KFIRST", "true")
-    BATCHED_EDGES[] = env_switch("BREEZE_BATCHED_EDGES", "true")
+    BATCHED_EDGES[] = env_switch("BREEZE_BATCHED_EDGES", "false")
     return nothing
 end
 
