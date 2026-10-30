@@ -87,6 +87,7 @@ function SSPRungeKutta3(grid, prognostic_fields;
                         implicit_solver::TI = nothing,
                         cache_advecting_state = false,   # accepted for TimeStepper-call uniformity; unused
                         sedimentation = NamedTuple(),    # accepted for TimeStepper-call uniformity; unused
+                        thermodynamic_variable_implicit = false, # likewise
                         Gⁿ::TG = map(similar, prognostic_fields),
                         U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 

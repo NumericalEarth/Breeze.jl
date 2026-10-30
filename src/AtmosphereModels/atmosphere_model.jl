@@ -304,7 +304,8 @@ function AtmosphereModel(grid;
                                                         prognostic_microphysical_fields,
                                                         tracers)
 
-    implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
+    closure_solver = implicit_diffusion_solver(time_discretization(closure), grid)
+    implicit_solver = closure_solver
 
     # Build a vertical tridiagonal solver for adaptive implicit vertical advection even when the
     # closure is explicit. When both are present, the diffusion and advection diagonals are summed
@@ -314,12 +315,21 @@ function AtmosphereModel(grid;
         implicit_solver = implicit_diffusion_solver(VerticallyImplicitTimeDiscretization(), grid)
     end
 
+    # Whether the thermodynamic variable takes a post-loop implicit solve on the acoustic stepper:
+    # vertically-implicit closure diffusion, or the implicit part of its boundary fluxes. Its
+    # adaptive-implicit vertical advection, if any, is applied inside the substep loop instead
+    # (see `AcousticRungeKutta3`), and a solver that the moisture and tracers alone call for
+    # leaves it explicit.
+    thermodynamic_variable_implicit = !isnothing(implicit_solver) &&
+                                      (!isnothing(closure_solver) ||
+                                       needs_implicit_solver(thermodynamic_density(formulation).boundary_conditions))
+
     # Only pass `dynamics` to time steppers that accept it (Breeze's acoustic and SSP steppers).
     # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
     if timestepper_uses_dynamics(timestepper)
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver,
                                   cache_advecting_state = advection_needs_solver, sedimentation,
-                                  timestepper_kwargs...)
+                                  thermodynamic_variable_implicit, timestepper_kwargs...)
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
     end

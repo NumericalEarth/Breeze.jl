@@ -63,7 +63,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemper
 
     Gρθ = model.timestepper.Gⁿ.ρθ
     launch!(arch, grid, :xyz, compute_potential_temperature_tendency!, Gρθ, grid, ρθ_args)
-    add_sedimentation_tendency!(sedimentation_tendency_target(model.timestepper, Gρθ), model, tracer_transport_velocity)
+    add_sedimentation_tendency!(Gρθ, model, tracer_transport_velocity)
     return nothing
 end
 

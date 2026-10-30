@@ -1,7 +1,8 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze, Oceananigans, Test
-using Oceananigans.TimeSteppers: update_state!, time_step!
+using Oceananigans: fields
+using Oceananigans.TimeSteppers: update_state!, time_step!, implicit_step!
 
 const AM = Breeze.AtmosphereModels
 const TH = Breeze.Thermodynamics
@@ -158,7 +159,8 @@ function acoustic_sedimentation_column(FT, scheme; fall_speed = 8, Δt = 2, stop
     set!(model; ρᵈ = z -> p₀ / ((Rᵈ + ε * Rᵛ) * temperature(z)), T = temperature,
          qᵛ = z -> ε * (1 - rain(z)) / (1 + ε), qʳ = rain)
 
-    p = sedimentation_column_values(model.dynamics.pressure)
+    spread(p) = (maximum(p) - minimum(p)) / maximum(p)
+    p⁰ = sedimentation_column_values(model.dynamics.pressure)
     T⁰ = sedimentation_column_values(model.temperature)
     rain⁰ = sum(sedimentation_column_values(model.microphysical_fields.ρqʳ) .* diff(z))
     largest_departure = 0.0
@@ -169,67 +171,210 @@ function acoustic_sedimentation_column(FT, scheme; fall_speed = 8, Δt = 2, stop
     end
     rain = sum(sedimentation_column_values(model.microphysical_fields.ρqʳ) .* diff(z))
 
-    return (; model, pressure_spread = (maximum(p) - minimum(p)) / maximum(p), largest_departure,
-              rain_left = rain / rain⁰, temperature = sedimentation_column_values(model.temperature), T⁰)
+    # The pressure and the velocity the run leaves, diagnosed by the last step's `update_state!`:
+    # a spurious pressure drives motion, and the motion changes the pressure.
+    p = sedimentation_column_values(model.dynamics.pressure)
+    w = sedimentation_column_values(model.velocities.w)
+
+    return (; model, initial_pressure_spread = spread(p⁰), pressure_spread = spread(p),
+              largest_vertical_velocity = maximum(abs, w), largest_departure, rain_left = rain / rain⁰,
+              temperature = sedimentation_column_values(model.temperature), T⁰)
 end
 
 @testset "Sedimentation keeps an isothermal column's temperature on the acoustic stepper [$FT]" for FT in test_float_types()
     adaptive = UpwindBiased(FT; order=1, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
 
-    # The fixture starts at rest and stays there, to roundoff, while nothing falls.
+    # The fixture starts at rest at a uniform pressure and stays there, to roundoff, while
+    # nothing falls.
     resting = acoustic_sedimentation_column(FT, adaptive; fall_speed = 0)
+    @test resting.initial_pressure_spread < 10eps(FT)
     @test resting.pressure_spread < 10eps(FT)
+    @test resting.largest_vertical_velocity < 100eps(FT)
     @test resting.largest_departure < 100eps(FT) * maximum(resting.T⁰)
 
-    # An isothermal column moves no sensible heat, so the temperature must not change.
+    # An isothermal column moves no sensible heat, so the temperature must not change; the rain
+    # moves no gas, so the pressure must stay uniform and the column at rest. The spurious
+    # pressure moved the column at meters per second; the splitting leaves, in Float64 at Δt = 5,
+    # a departure of 0.02 K, a relative pressure spread of 4e-6 and a velocity of 2e-4 m/s.
     for (scheme, Δt) in ((UpwindBiased(FT; order=1), 1), (adaptive, 2), (adaptive, 5))
         column = acoustic_sedimentation_column(FT, scheme; Δt)
         @test column.model.timestepper isa Breeze.TimeSteppers.AcousticRungeKutta3
-        @test column.pressure_spread < 10eps(FT)
+        @test column.initial_pressure_spread < 10eps(FT)
         @test column.rain_left < 0.2 # most of the rain has fallen out of the column
         @test column.largest_departure < 0.05
+        @test column.pressure_spread < 1e-4
+        @test column.largest_vertical_velocity < 0.01
     end
 end
 
-# The composition content takes the thermodynamic variable's post-loop solve on its own, so it
-# must take the variable's operator in full: the implicit part of a boundary flux, which reads the
-# variable's boundary conditions and boundary values, and coefficients that read the variable,
-# here from the cells on both sides of each face, which the variable's own solve overwrites as it
-# sweeps up the column. A content proportional to the variable, s ρθ, then adds s A⁻¹ρθ, where
-# A⁻¹ρθ is what the variable's own solve gives, so the increment δ and the result
-# ρθ¹ = A⁻¹ρθ + δ satisfy δ = s (ρθ¹ − δ).
+# The thermodynamic variable's post-loop operator in full: the implicit part of a boundary flux,
+# which reads the variable's boundary conditions and boundary values, and coefficients that read
+# the variable, here from the cells on both sides of each face, which the variable's own solve
+# overwrites as it sweeps up the column.
 @inline diffusivity_of_ρθ(i, j, k, grid, ℓx, ℓy, ℓz, clock, fields) =
     @inbounds ((fields.ρθ[i, j, k-1] + fields.ρθ[i, j, k]) / 600)^4 / 2
 
-@testset "The sedimentation content takes the thermodynamic variable's post-loop operator [$FT]" for FT in test_float_types()
+# A four-cell column without gravity for that operator: the closures to try, one of them the
+# state-dependent diffusivity above, and an implicit flux −ρθ through the bottom, which halves the
+# bottom cell over Δt = Δz = 1. The rain's adaptive scheme gives the model its implicit solver.
+function postloop_operator_fixture(FT)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 4), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=290)
     adaptive = UpwindBiased(FT; order=1, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
-
-    # An implicit flux −ρθ through the bottom halves the bottom cell over Δt = Δz = 1.
     boundary_conditions = (; ρθ=FieldBoundaryConditions(bottom=IMEXFluxBoundaryCondition(0, -1)))
     state_dependent = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ=diffusivity_of_ρθ, discrete_form=true)
+    microphysics = SedimentationOnly(Val(:liquid), FT(1), false)
+    return (; grid, constants, dynamics, adaptive, boundary_conditions, microphysics, closures = (nothing, state_dependent))
+end
+
+# A model on that column with rain above 2 m, its state diagnosed and its stage-entry advecting
+# state frozen, as the stage leaves it for the post-loop solves.
+function postloop_model(fixture; temperature = 290, scalar_advection = (; ρqʳ = fixture.adaptive), kwargs...)
+    model = AtmosphereModel(fixture.grid; fixture.dynamics, fixture.microphysics, scalar_advection,
+                            thermodynamic_constants = fixture.constants, kwargs...)
+    set!(model; ρᵈ=1.2, T=temperature, qᵛ=0.005, qʳ=z -> ifelse(z > 2, 0.001, 0.0))
+    update_state!(model)
+    Breeze.TimeSteppers.cache_advecting_state!(model)
+    return model
+end
+
+# Oceananigans' solve of the thermodynamic variable with its post-loop operator, reading the live
+# model fields, over Δt.
+function oceananigans_postloop_solve!(model, Δt)
+    ρθ = AM.thermodynamic_density(model.formulation)
+    w, ρᵈ = Breeze.TimeSteppers.advecting_state(model)
+    scheme = Breeze.TimeSteppers.postloop_thermodynamic_scheme(model.advection.ρθ, AM.dynamics_density(model.dynamics))
+    implicit_step!(ρθ, model.timestepper.implicit_solver, model.closure, model.closure_fields,
+                   AM.closure_scalar_index(model, :ρθ), model.clock, fields(model), Δt, scheme, (; w), ρᵈ)
+    return Array(interior(ρθ, 1, 1, :))
+end
+
+# The composition content takes the thermodynamic variable's post-loop solve on its own, so it
+# must take the variable's operator in full. A content proportional to the variable, s ρθ, then
+# adds s A⁻¹ρθ, where A⁻¹ρθ is what the variable's own solve gives, so the increment δ and the
+# result ρθ¹ = A⁻¹ρθ + δ satisfy δ = s (ρθ¹ − δ).
+@testset "The sedimentation content takes the thermodynamic variable's post-loop operator [$FT]" for FT in test_float_types()
+    fixture = postloop_operator_fixture(FT)
     s = FT(0.3)
 
-    for closure in (nothing, state_dependent)
-        model = AtmosphereModel(grid; dynamics, closure, boundary_conditions, thermodynamic_constants=constants,
-                                microphysics=SedimentationOnly(Val(:liquid), FT(1), false),
-                                scalar_advection=(; ρqʳ=adaptive))
-        set!(model; ρᵈ=1.2, T=290, qᵛ=0.005, qʳ=z -> ifelse(z > 2, 0.001, 0.0))
-        update_state!(model)
-        Breeze.TimeSteppers.cache_advecting_state!(model)
-
+    for closure in fixture.closures
+        model = postloop_model(fixture; closure, fixture.boundary_conditions)
         ρθ = AM.thermodynamic_density(model.formulation)
         content = model.timestepper.sedimentation_content
         interior(content) .= s .* interior(ρθ)
-        Breeze.TimeSteppers.implicit_substep!(model, FT(1))
         Breeze.TimeSteppers.apply_sedimentation_content!(model, FT(1))
+        Breeze.TimeSteppers.implicit_substep!(model, FT(1))
 
         δ = Array(interior(content, 1, 1, :))
         ρθ¹ = Array(interior(ρθ, 1, 1, :))
         @test δ ≈ s .* (ρθ¹ .- δ) rtol=100eps(FT)
+    end
+end
+
+# The content's solve mirrors Oceananigans' `implicit_step!` call for call, with the variable's
+# boundary conditions and boundary value in place of the content's and the frozen variable as the
+# fields the coefficients read, while the variable itself takes Oceananigans' solve with those
+# fields. A content equal to the variable must then solve to what the variable solves to. The
+# thermodynamic scheme is adaptive implicit, so both solves leave the advective half to the loop.
+@testset "The sedimentation content's solve is Oceananigans' implicit_step! of the thermodynamic variable [$FT]" for FT in test_float_types()
+    fixture = postloop_operator_fixture(FT)
+
+    for closure in fixture.closures
+        model = postloop_model(fixture; closure, fixture.boundary_conditions, temperature = z -> 290 - z,
+                               scalar_advection = (; ρθ = fixture.adaptive, ρqʳ = fixture.adaptive))
+        ρθ = AM.thermodynamic_density(model.formulation)
+        content = model.timestepper.sedimentation_content
+        ρθ⁰ = Array(interior(ρθ, 1, 1, :))
+        interior(content) .= interior(ρθ)
+        Breeze.TimeSteppers.implicit_substep!(model, FT(1))
+        ρθ¹ = Array(interior(ρθ, 1, 1, :))
+        @test maximum(abs, ρθ¹ .- ρθ⁰) > 0
+        @test Array(interior(content, 1, 1, :)) == ρθ¹
+    end
+end
+
+# The operator's coefficients read the state the solves advance: the variable with the stage's
+# content in it, not without. A flux −J through the bottom split by Patankar's rule puts
+# λ = −J/ρθ₁ on the bottom cell's diagonal, with ρθ₁ the full bottom value, so the solve leaves
+# ρθ₁² / (ρθ₁ + J Δt/Δz) there. Oceananigans' solve of the full variable reads ρθ₁ live, before
+# its sweep overwrites it, and must agree.
+@testset "The post-loop operator reads the thermodynamic variable with the sedimentation content in it [$FT]" for FT in test_float_types()
+    fixture = postloop_operator_fixture(FT)
+    J = FT(30)
+    model = postloop_model(fixture; closure=nothing,
+                           boundary_conditions = (; ρθ=FieldBoundaryConditions(bottom=IMEXFluxBoundaryCondition(-J))))
+
+    ρθ = AM.thermodynamic_density(model.formulation)
+    content = model.timestepper.sedimentation_content
+    interior(content) .= -FT(0.1) .* interior(ρθ)
+    Breeze.TimeSteppers.apply_sedimentation_content!(model, FT(1))
+    full = Array(interior(ρθ, 1, 1, :))
+    full_with_halos = copy(parent(ρθ))
+    Breeze.TimeSteppers.implicit_substep!(model, FT(1))
+    ρθ¹ = Array(interior(ρθ, 1, 1, :))
+    expected = copy(full)
+    expected[1] = full[1]^2 / (full[1] + J)
+    @test ρθ¹ ≈ expected rtol=100eps(FT)
+    @test !(ρθ¹ ≈ [full[1] / (1 + J / (full[1] / FT(0.9))); full[2:end]])
+
+    parent(ρθ) .= full_with_halos
+    @test oceananigans_postloop_solve!(model, FT(1)) ≈ ρθ¹ rtol=10eps(FT)
+end
+
+# The content comes out of the halos too, so that the reduced variable's halos are the full
+# variable's less the content: a wall value of the variable held against the reduced interior
+# would put the content back into the target the substep loop's open-boundary relaxation reads
+# from the halo, (ρθ[halo] − ρθ[cell]) / 2, and the loop would read it as pressure.
+@testset "Removing the sedimentation content keeps the wall target the open-boundary relaxation reads [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size=(4, 4), x=(0, 4), z=(0, 4), topology=(Bounded, Flat, Bounded))
+    constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=290)
+    boundary_conditions = (; ρθ=FieldBoundaryConditions(west=ValueBoundaryCondition(FT(360))))
+    model = AtmosphereModel(grid; dynamics, boundary_conditions, thermodynamic_constants=constants,
+                            microphysics=SedimentationOnly(Val(:liquid), FT(1), false),
+                            scalar_advection=(; ρqʳ=UpwindBiased(FT; order=1)))
+    set!(model; ρᵈ=1.2, T=290, qᵛ=0.005, qʳ=0.001)
+    update_state!(model)
+
+    ρθ = AM.thermodynamic_density(model.formulation)
+    content = model.timestepper.sedimentation_content
+    c = FT(3)
+    interior(content) .= c
+    @allowscalar begin
+        ρθ_cell⁰ = ρθ[1, 1, 1]
+        target⁰ = (ρθ[0, 1, 1] - ρθ[1, 1, 1]) / 2
+        @test target⁰ == 360 - ρθ_cell⁰
+        Breeze.TimeSteppers.remove_sedimentation_content!(model, 2)
+        @test ρθ[1, 1, 1] == ρθ_cell⁰ - c
+        @test (ρθ[0, 1, 1] - ρθ[1, 1, 1]) / 2 ≈ target⁰ rtol=10eps(FT)
+    end
+    @test all(iszero, Array(parent(content)))
+end
+
+# The copy of the variable that the post-loop solves read is allocated only when there is a
+# post-loop solve to read it: vertically-implicit closure diffusion or an implicit-explicit
+# boundary flux of the variable, not a solver the moisture and tracers alone call for. Without
+# it the stage runs no such solve, and the variable stays as the loop left it.
+@testset "The frozen thermodynamic copy exists only with a post-loop solve of the variable [$FT]" for FT in test_float_types()
+    fixture = postloop_operator_fixture(FT)
+    explicit = ScalarDiffusivity(; κ=1)
+    implicit = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ=1)
+
+    tracers_only = postloop_model(fixture; closure=explicit, temperature = z -> 290 - z)
+    @test !isnothing(tracers_only.timestepper.implicit_solver)
+    @test !isnothing(tracers_only.timestepper.sedimentation_content)
+    @test isnothing(tracers_only.timestepper.frozen_thermodynamic_density)
+    ρθ = AM.thermodynamic_density(tracers_only.formulation)
+    ρθ⁰ = Array(interior(ρθ, 1, 1, :))
+    Breeze.TimeSteppers.implicit_substep!(tracers_only, FT(1))
+    @test Array(interior(ρθ, 1, 1, :)) == ρθ⁰
+
+    for kwargs in ((; closure=implicit), (; closure=explicit, fixture.boundary_conditions))
+        model = postloop_model(fixture; kwargs...)
+        @test !isnothing(model.timestepper.frozen_thermodynamic_density)
     end
 end
 
@@ -242,7 +387,7 @@ end
     cooling_with_height(z) = 300 - z / 100
     reference = acoustic_sedimentation_column(FT, UpwindBiased(FT; order=1); Δt = 0.5, temperature = cooling_with_height)
     signal = maximum(abs, reference.temperature .- reference.T⁰)
-    @test reference.pressure_spread < 10eps(FT)
+    @test reference.initial_pressure_spread < 10eps(FT)
     @test signal > 0.1
     for Δt in (2, 5)
         column = acoustic_sedimentation_column(FT, adaptive; Δt, temperature = cooling_with_height)

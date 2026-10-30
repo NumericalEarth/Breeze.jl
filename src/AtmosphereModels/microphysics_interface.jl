@@ -1045,11 +1045,8 @@ end
 # own, from the fluxes the solves actually applied, and then takes the thermodynamic variable's
 # implicit transport and diffusion. An estimate of that remainder at the pre-solve state would
 # overstate a one-cell loss by the factor 1 + C at implicit Courant number C, precisely in the
-# regime the solve exists for. That is the SSP path. The acoustic path splits the content of
-# both parts: the sensible heat joins the slow tendency its substep loop integrates, while the
-# composition content, which the loop's linearized pressure would read as a pressure change,
-# bypasses the loop and is added after the post-loop solve, having taken that solve itself (see
-# `AcousticRungeKutta3` and `sedimentation_tendency_target`).
+# regime the solve exists for. That is the SSP path; the acoustic stepper splits both parts into
+# their sensible and composition contents and moves them itself (see `AcousticRungeKutta3`).
 
 """
 $(TYPEDSIGNATURES)
@@ -1124,7 +1121,6 @@ brings, heats or cools the cell. `AcousticRungeKutta3` keeps them apart
 # The tendency from the part of each condensate's mass fluxes that `mass_fluxes` selects:
 # `explicit_condensate_mass_fluxes` for the part the tracer tendency applies,
 # `implicit_condensate_mass_fluxes` for the remainder the adaptive implicit solve applied.
-@inline sedimentation_content_tendency(i, j, k, grid, ::Tuple{}, args...) = zero(grid)
 @inline sedimentation_content_tendency(i, j, k, grid, condensates, args...) =
     sum(sedimentation_content_tendency_parts(i, j, k, grid, condensates, args...))
 
