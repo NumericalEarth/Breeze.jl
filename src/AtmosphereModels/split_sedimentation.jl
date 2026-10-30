@@ -24,7 +24,16 @@ const SEDIMENTATION_SUBSTEP = Ref(false)
 const SEDIMENTATION_CFL = 0.9
 const SEDIMENTATION_MAX_SUBSTEPS = 64
 
-split_sedimentation_mode() = SEDIMENTATION_SUBSTEP[] ? Val(:substep) : nothing
+#####
+##### `BREEZE_SEDIMENTATION_IMPLICIT` (answer-changing, default off; takes precedence over SUBSTEP): the
+##### same split, but one backward-Euler first-order upwind step over Δt per column, solved in a single
+##### downward sweep (the matrix is lower bidiagonal): ρqₖⁿ⁺¹ = (ρqₖ + Δt Az₍ₖ₊₁₎ M₍ₖ₊₁₎ⁿ⁺¹ / V) / (1 + Cₖ),
+##### Mₖⁿ⁺¹ = |wˢₖ| ρqₖⁿ⁺¹. Unconditionally stable and positivity preserving; a cell with a negative
+##### total (inflow plus content) sends nothing.
+const SEDIMENTATION_IMPLICIT = Ref(false)
+
+split_sedimentation_mode() = SEDIMENTATION_IMPLICIT[] ? Val(:implicit) :
+                             SEDIMENTATION_SUBSTEP[] ? Val(:substep) : nothing
 split_sedimentation_active() = !isnothing(split_sedimentation_mode())
 
 "Microphysics seen by the scalar tendencies when sedimentation is operator-split: no fall velocity."
@@ -139,6 +148,22 @@ end
     for k in 1:Nz
         @inbounds M̄ = F[i, j, k] / n
         split_store_flux!(F, i, j, k, grid, ρ, M̄)
+    end
+    return nothing
+end
+
+@inline function split_sedimentation_column!(F, ρq, w, ρ, grid, Δt, ::Val{:implicit}, cfl, max_substeps, i, j, Nz)
+    FT = eltype(grid)
+    M_above = zero(FT)
+    for k in Nz:-1:1
+        V⁻¹ = V⁻¹ᶜᶜᶜ(i, j, k, grid)
+        @inbounds x = ρq[i, j, k] + Δt * V⁻¹ * Azᶜᶜᶠ(i, j, k + 1, grid) * M_above
+        C = split_courant(i, j, k, grid, w, Δt)
+        ρqⁿ⁺¹ = ifelse(x > 0, x / (1 + C), x)
+        Mₖ = split_fall_speed(i, j, k, w) * max(ρqⁿ⁺¹, zero(FT))
+        @inbounds ρq[i, j, k] = ρqⁿ⁺¹
+        split_store_flux!(F, i, j, k, grid, ρ, Mₖ)
+        M_above = Mₖ
     end
     return nothing
 end
