@@ -17,36 +17,36 @@ function specific_enthalpy(T, q, constants)
     return TD.mixture_heat_capacity(q, constants) * T + ℒˡ₀ * q.vapor + (ℒˡ₀ - ℒⁱ₀) * q.ice
 end
 
-pressure_state(θ, q, p, exponent) = TD.LiquidIcePotentialTemperatureState(θ, q, oftype(θ, 1e5), p, exponent)
+pressure_state(θ, q, p, κ̂) = TD.LiquidIcePotentialTemperatureState(θ, q, oftype(θ, 1e5), p, κ̂)
 
 @testset "Liquid-ice potential temperature definition" begin
-    @testset "Inversion round trip [$exponent, $FT]" for exponent in exponents, FT in (Float32, Float64)
+    @testset "Inversion round trip [$κ̂, $FT]" for κ̂ in exponents, FT in (Float32, Float64)
         constants = ThermodynamicConstants(FT)
         q = TD.MoistureMassFractions(FT(0.012), FT(0.001), FT(0.0005))
         for p in FT.((101500, 70000, 40000, 30000)), T in FT.((240, 270, 300))
-            𝒰 = @inferred TD.with_temperature(pressure_state(zero(FT), q, p, exponent), T, constants)
-            @test 𝒰.exner_exponent === exponent
+            𝒰 = @inferred TD.with_temperature(pressure_state(zero(FT), q, p, κ̂), T, constants)
+            @test 𝒰.exner_exponent === κ̂
             @test (@inferred TD.temperature(𝒰, constants)) ≈ T rtol=4eps(FT)
 
             # Density-closed state (compressible core): Newton inversion at constant density
             ρ = p / (TD.mixture_gas_constant(q, constants) * T)
             solver = NewtonSolver(FT; abstol=10eps(FT) * T, maxiter=20)
-            𝒰ρ = TD.with_temperature(TD.LiquidIceDensityState(zero(FT), q, FT(1e5), ρ, solver, exponent), T, constants)
-            @test 𝒰ρ.exner_exponent === exponent
+            𝒰ρ = TD.with_temperature(TD.LiquidIceDensityState(zero(FT), q, FT(1e5), ρ, solver, κ̂), T, constants)
+            @test 𝒰ρ.exner_exponent === κ̂
             @test (@inferred TD.temperature(𝒰ρ, constants)) ≈ T rtol=10eps(FT)
             # Both closures define the same θˡⁱ at the same (T, p, q)
             @test 𝒰ρ.potential_temperature ≈ 𝒰.potential_temperature rtol=10eps(FT)
         end
     end
 
-    @testset "Phase change at fixed θˡⁱ, p and qᵗ conserves enthalpy [$exponent]" for exponent in exponents
+    @testset "Phase change at fixed θˡⁱ, p and qᵗ conserves enthalpy [$κ̂]" for κ̂ in exponents
         constants = ThermodynamicConstants(Float64)
         q₀ = TD.MoistureMassFractions(0.01, 0.001, 0.0005)
         δ = 1e-4
         # condensation, deposition, freezing
         transfers = ((-δ, δ, 0.0), (-δ, 0.0, δ), (0.0, -δ, δ))
         for (p, T) in ((100000.0, 300.0), (70000.0, 280.0), (40000.0, 255.0), (30000.0, 240.0))
-            𝒰₀ = TD.with_temperature(pressure_state(0.0, q₀, p, exponent), T, constants)
+            𝒰₀ = TD.with_temperature(pressure_state(0.0, q₀, p, κ̂), T, constants)
             h₀ = specific_enthalpy(T, q₀, constants)
             for (Δqᵛ, Δqˡ, Δqⁱ) in transfers
                 q₁ = TD.MoistureMassFractions(q₀.vapor + Δqᵛ, q₀.liquid + Δqˡ, q₀.ice + Δqⁱ)
@@ -63,15 +63,15 @@ pressure_state(θ, q, p, exponent) = TD.LiquidIcePotentialTemperatureState(θ, q
         end
     end
 
-    @testset "Unsaturated air [$exponent]" for exponent in exponents
+    @testset "Unsaturated air [$κ̂]" for κ̂ in exponents
         constants = ThermodynamicConstants(Float64)
         q = TD.MoistureMassFractions(0.015)
         for p in (100000.0, 50000.0), T in (250.0, 300.0)
-            𝒰 = TD.with_temperature(pressure_state(0.0, q, p, exponent), T, constants)
+            𝒰 = TD.with_temperature(pressure_state(0.0, q, p, κ̂), T, constants)
             Π = TD.exner_function(𝒰, constants)
             @test 𝒰.potential_temperature ≈ T / Π rtol=4eps(Float64)
-            S = PTF.expansion_work_source(𝒰.potential_temperature, T, q, exponent, constants)
-            if exponent isa VaporEquivalentExponent
+            S = PTF.expansion_work_source(𝒰.potential_temperature, T, q, κ̂, constants)
+            if κ̂ isa VaporEquivalentExponent
                 # κ̂ = Rᵐ / cᵖᵐ in unsaturated air: no expansion source
                 @test abs(S) < 1e-12 * T
                 @test Π ≈ (p / 1e5)^(TD.mixture_gas_constant(q, constants) / TD.mixture_heat_capacity(q, constants))
@@ -83,46 +83,46 @@ pressure_state(θ, q, p, exponent) = TD.LiquidIcePotentialTemperatureState(θ, q
         end
     end
 
-    @testset "Expansion source restores the first law [$exponent]" for exponent in exponents
+    @testset "Expansion source restores the first law [$κ̂]" for κ̂ in exponents
         constants = ThermodynamicConstants(Float64)
         q = TD.MoistureMassFractions(0.01, 0.002, 0.0005)
         ε = 1e-5
         for (p, T) in ((100000.0, 295.0), (70000.0, 280.0), (40000.0, 255.0))
-            θ = TD.with_temperature(pressure_state(0.0, q, p, exponent), T, constants).potential_temperature
-            S = PTF.expansion_work_source(θ, T, q, exponent, constants)
+            θ = TD.with_temperature(pressure_state(0.0, q, p, κ̂), T, constants).potential_temperature
+            S = PTF.expansion_work_source(θ, T, q, κ̂, constants)
             # dT along d ln p = ε at fixed composition, with θ changing at S per unit ln p
-            T⁺ = TD.temperature(pressure_state(θ + S * ε, q, p * exp(ε), exponent), constants)
-            T⁻ = TD.temperature(pressure_state(θ - S * ε, q, p * exp(-ε), exponent), constants)
+            T⁺ = TD.temperature(pressure_state(θ + S * ε, q, p * exp(ε), κ̂), constants)
+            T⁻ = TD.temperature(pressure_state(θ - S * ε, q, p * exp(-ε), κ̂), constants)
             cᵖᵐ = TD.mixture_heat_capacity(q, constants)
             Rᵐ = TD.mixture_gas_constant(q, constants)
             @test cᵖᵐ * (T⁺ - T⁻) / 2ε ≈ Rᵐ * T rtol=1e-7
             # Without the source, fixed θˡⁱ cools cloudy air at the wrong rate
-            T⁺₀ = TD.temperature(pressure_state(θ, q, p * exp(ε), exponent), constants)
-            T⁻₀ = TD.temperature(pressure_state(θ, q, p * exp(-ε), exponent), constants)
+            T⁺₀ = TD.temperature(pressure_state(θ, q, p * exp(ε), κ̂), constants)
+            T⁻₀ = TD.temperature(pressure_state(θ, q, p * exp(-ε), κ̂), constants)
             @test !isapprox(cᵖᵐ * (T⁺₀ - T⁻₀) / 2ε, Rᵐ * T; rtol=1e-3)
         end
     end
 
-    @testset "Sedimentation content matches ∂θˡⁱ/∂q [$exponent]" for exponent in exponents
+    @testset "Sedimentation content matches ∂θˡⁱ/∂q [$κ̂]" for κ̂ in exponents
         constants = ThermodynamicConstants(Float64)
         q = TD.MoistureMassFractions(0.01, 0.002, 0.0005)
         compressible = CompressibleDynamics(ExplicitTimeStepping())
         η = 1e-6
         for dynamics in (nothing, compressible), (p, T) in ((100000.0, 295.0), (40000.0, 255.0))
-            θ = TD.with_temperature(pressure_state(0.0, q, p, exponent), T, constants).potential_temperature
-            content = PTF.potential_temperature_condensate_content(dynamics, exponent, constants, q, θ, T)
+            θ = TD.with_temperature(pressure_state(0.0, q, p, κ̂), T, constants).potential_temperature
+            content = PTF.potential_temperature_condensate_content(dynamics, κ̂, constants, q, θ, T)
             for (n, phase) in enumerate((Val(:liquid), Val(:ice)))
                 Δq = AM.sedimentation_composition_increment(dynamics, q, phase)
                 θ_along(s) = TD.with_temperature(pressure_state(0.0, TD.MoistureMassFractions(q.vapor + s * Δq.vapor,
                                                                                                q.liquid + s * Δq.liquid,
                                                                                                q.ice + s * Δq.ice),
-                                                                p, exponent), T, constants).potential_temperature
+                                                                p, κ̂), T, constants).potential_temperature
                 ∂θ∂q = (θ_along(η) - θ_along(-η)) / 2η
                 @test content.χ[n] ≈ ∂θ∂q rtol=1e-7
             end
             # Heating response at fixed pressure and composition on the anelastic core
             if isnothing(dynamics)
-                Π = TD.exner_function(pressure_state(θ, q, p, exponent), constants)
+                Π = TD.exner_function(pressure_state(θ, q, p, κ̂), constants)
                 @test content.∂φ∂h ≈ 1 / (TD.vapor_equivalent_heat_capacity(q, constants) * Π) rtol=1e-12
             end
         end
@@ -130,20 +130,20 @@ pressure_state(θ, q, p, exponent) = TD.LiquidIcePotentialTemperatureState(θ, q
 end
 
 @testset "LiquidIcePotentialTemperatureFormulation exponent" begin
-    @test LiquidIcePotentialTemperatureFormulation().exponent isa VaporEquivalentExponent
-    @test LiquidIcePotentialTemperatureFormulation(exponent=DryExponent()).exponent isa DryExponent
-    @test_throws ArgumentError LiquidIcePotentialTemperatureFormulation(exponent=:dry)
-    @test contains(sprint(show, LiquidIcePotentialTemperatureFormulation(exponent=DryExponent())), "exponent: DryExponent()")
+    @test LiquidIcePotentialTemperatureFormulation().exner_exponent isa VaporEquivalentExponent
+    @test LiquidIcePotentialTemperatureFormulation(exner_exponent=DryExponent()).exner_exponent isa DryExponent
+    @test_throws ArgumentError LiquidIcePotentialTemperatureFormulation(exner_exponent=:dry)
+    @test contains(sprint(show, LiquidIcePotentialTemperatureFormulation(exner_exponent=DryExponent())), "exner_exponent: DryExponent()")
 
-    @testset "Anelastic model [$exponent, $FT]" for exponent in exponents, FT in (Float32, Float64)
+    @testset "Anelastic model [$κ̂, $FT]" for κ̂ in exponents, FT in (Float32, Float64)
         grid = RectilinearGrid(default_arch, FT; size=(2, 2, 8), x=(0, 1000), y=(0, 1000), z=(0, 4000))
-        formulation = LiquidIcePotentialTemperatureFormulation(; exponent)
+        formulation = LiquidIcePotentialTemperatureFormulation(exner_exponent=κ̂)
         ρE_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100)))
         model = AtmosphereModel(grid; formulation, boundary_conditions=(; ρE=ρE_bcs),
                                 microphysics=SaturationAdjustment(equilibrium=WarmPhaseEquilibrium()))
-        @test model.formulation.exponent === exponent
+        @test model.formulation.exner_exponent === κ̂
         @test model.formulation.potential_temperature isa Field
-        @test model.formulation.potential_temperature_density.boundary_conditions.bottom.condition.exner_exponent === exponent
+        @test model.formulation.potential_temperature_density.boundary_conditions.bottom.condition.exner_exponent === κ̂
 
         # Saturated above the lowest kilometer, rising
         set!(model, θ = (x, y, z) -> 300 + 3e-3 * z, qᵗ = 0.02, w = (x, y, z) -> sin(π * z / 4000))
@@ -161,16 +161,16 @@ end
     @testset "Symbol formulation gives the default exponent" begin
         grid = RectilinearGrid(default_arch; size=(1, 1, 4), extent=(1, 1, 1000))
         model = AtmosphereModel(grid; formulation=:LiquidIcePotentialTemperature)
-        @test model.formulation.exponent isa VaporEquivalentExponent
+        @test model.formulation.exner_exponent isa VaporEquivalentExponent
     end
 
-    @testset "Compressible model [$exponent]" for exponent in exponents
+    @testset "Compressible model [$κ̂]" for κ̂ in exponents
         grid = RectilinearGrid(default_arch; size=(2, 2, 8), x=(0, 1000), y=(0, 1000), z=(0, 4000))
         dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=300)
-        formulation = LiquidIcePotentialTemperatureFormulation(; exponent)
+        formulation = LiquidIcePotentialTemperatureFormulation(exner_exponent=κ̂)
         model = AtmosphereModel(grid; dynamics, formulation,
                                 microphysics=SaturationAdjustment(equilibrium=WarmPhaseEquilibrium()))
-        @test model.formulation.exponent === exponent
+        @test model.formulation.exner_exponent === κ̂
         set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.015)
         time_step!(model, 0.1)
         @test all(isfinite, Array(interior(model.formulation.potential_temperature)))
@@ -179,10 +179,10 @@ end
     # In uniform, saturated air rising at uniform w, advection cancels in the interior and the ρθ
     # tendency is the expansion source alone, ρᵈ S D ln p / Dt with D ln p / Dt = −g ρ w / p.
     # The "Expansion source restores the first law" test checks S itself.
-    @testset "Compressible expansion source [$exponent]" for exponent in exponents
+    @testset "Compressible expansion source [$κ̂]" for κ̂ in exponents
         grid = RectilinearGrid(default_arch; size=(1, 1, 6), x=(0, 100), y=(0, 100), z=(0, 600))
         dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=300)
-        formulation = LiquidIcePotentialTemperatureFormulation(; exponent)
+        formulation = LiquidIcePotentialTemperatureFormulation(exner_exponent=κ̂)
         model = AtmosphereModel(grid; dynamics, formulation,
                                 microphysics=SaturationAdjustment(equilibrium=WarmPhaseEquilibrium()))
         constants = model.thermodynamic_constants
@@ -203,7 +203,7 @@ end
         for k in 2:5
             @test qˡ[1, 1, k] > 0
             q = TD.MoistureMassFractions(qᵛ[1, 1, k], qˡ[1, 1, k])
-            S = PTF.expansion_work_source(θ[1, 1, k], T[1, 1, k], q, exponent, constants)
+            S = PTF.expansion_work_source(θ[1, 1, k], T[1, 1, k], q, κ̂, constants)
             expected = ρᵈ[1, 1, k] * S * (- g * ρ[1, 1, k] * 2 / p[1, 1, k])
             @test G[1, 1, k] < 0
             @test G[1, 1, k] ≈ expected rtol=1e-10

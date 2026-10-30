@@ -1169,7 +1169,7 @@ through ``qᵗ``, with ``\hat{Π}`` replaced by ``Π = (p / pˢᵗ)^κ`` and
 ``\mathcal{E}_θ = (Rᵐ T - κ \hat{c}ᵖ Π θˡⁱ) / (\hat{c}ᵖ Π)``.
 Phase change remains exact, since neither ``\hat{c}ᵖ`` nor ``Π`` changes, and expansion remains
 exact as long as the source is applied. [`LiquidIcePotentialTemperatureFormulation`](@ref)
-offers two choices through its `exponent` keyword:
+offers two choices through its `exner_exponent` keyword:
 
 - `VaporEquivalentExponent()` (the default), ``κ = \hat{κ}``. The expansion source vanishes in
   clear air, so unsaturated moist ascent conserves ``θˡⁱ`` exactly, and only cloudy air carries

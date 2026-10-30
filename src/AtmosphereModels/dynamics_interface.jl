@@ -222,7 +222,7 @@ keeps its temperature.
     Δq.liquid * constants.liquid.heat_capacity + Δq.ice * constants.ice.heat_capacity
 
 # The enthalpy of the mixture per unit mass changes along Δq at fixed temperature by
-# Δcᵖ T − ΔΛ₀, using zero-kelvin latent offsets: the enthalpy of the condensate
+# Δcᵖ T − ΔHᶜ, using zero-kelvin latent offsets: the enthalpy of the condensate
 # relative to what its mass gives way to
 @inline enthalpy_increment(Δq, constants, T) =
     heat_capacity_increment(Δq, constants) * T -

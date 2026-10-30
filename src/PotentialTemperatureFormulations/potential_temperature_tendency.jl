@@ -32,7 +32,7 @@ function AtmosphereModels.static_energy_density(model::PotentialTemperatureModel
     ρθ_bcs = ρθ.boundary_conditions
 
     # Convert θ BCs to energy BCs
-    ρs_bcs = theta_to_energy_bcs(ρθ_bcs, model.formulation.exponent)
+    ρs_bcs = theta_to_energy_bcs(ρθ_bcs, model.formulation.exner_exponent)
 
     # Regularize the converted BCs (populate microphysics, constants, side)
     loc = (Center(), Center(), Center())
@@ -104,17 +104,14 @@ end
 
     FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
     div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
-    D_ln_p = pressure_logarithm_tendency(i, j, k, grid, dynamics, constants, model_fields.w)
+    Dt_ln_p = pressure_logarithm_tendency(i, j, k, grid, dynamics, constants, model_fields.w)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
-             # a volumetric heating Q changes h at Q / ρ, so ρᵈ θˡⁱ at (ρᵈ / ρ) Q ∂θˡⁱ/∂h
-             + ρᵈ / ρ * (FρE + div_ℐ) * ∂θ∂h
-             # expansion work: ρᵈ (Rᵐ T − κ ĉᵖ Π θˡⁱ) / (ĉᵖ Π) D ln p / Dt
-             + ρᵈ * expansion_work_source(θ, T, q, formulation.exponent, constants) * D_ln_p
-    )
+             + ρᵈ / ρ * (FρE + div_ℐ) * ∂θ∂h # a volumetric heating Q changes h at Q / ρ, so ρᵈ θˡⁱ at (ρᵈ / ρ) Q ∂θˡⁱ/∂h
+             + ρᵈ * expansion_work_source(θ, T, q, formulation.exner_exponent, constants) * Dt_ln_p) # expansion work ρᵈ (Rᵐ T − κ ĉᵖ Π θˡⁱ) / (ĉᵖ Π) D ln p / Dt
 end
 
 # Thermodynamic state at cell (i, j, k) from the prognostic fields: the total density (mass
@@ -128,8 +125,7 @@ end
 end
 
 # The enthalpy H = cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ = ĉᵖ Π θˡⁱ that defines θˡⁱ
-@inline liquid_ice_enthalpy(T, q, constants) =
-    mixture_heat_capacity(q, constants) * T - condensate_latent_energy(q, constants)
+@inline liquid_ice_enthalpy(T, q, constants) = mixture_heat_capacity(q, constants) * T - condensate_latent_energy(q, constants)
 
 # The heating response ∂θˡⁱ/∂h = 1 / (ĉᵖ Π) at fixed pressure and composition, written θˡⁱ / H so that
 # it is read off the stored temperature without evaluating the Exner function (a power, and a
@@ -150,9 +146,9 @@ end
 # compressible core. On the compressible core the exact rate is
 # D ln p / Dt = (cᵖᵐ / cᵛᵐ) [−∇·u + D ln Rᵐ / Dt + Q / (cᵖᵐ T)], a possible follow-up; the adiabatic
 # divergence form −(cᵖᵐ / cᵛᵐ) ∇·u alone double-counts heating-driven expansion.
-@inline function expansion_work_source(θ, T, q, exponent, constants)
+@inline function expansion_work_source(θ, T, q, κ̂, constants)
     H = liquid_ice_enthalpy(T, q, constants)
-    κ = exner_exponent(exponent, q, constants)
+    κ = exner_exponent(κ̂, q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
     return potential_temperature_heating_response(θ, H) * (Rᵐ * T - κ * H)
 end
@@ -180,7 +176,7 @@ end
 #
 #   χˣ = [ΔH − θˡⁱ Δ(ĉᵖ Π)] / (ĉᵖ Π) ,   Δ(ĉᵖ Π) = Π Δĉᵖ + ĉᵖ Π ln Π Δln κ ,
 #
-# with ΔH = Δcᵖ T − ΔΛ₀ the enthalpy increment (`enthalpy_increment`), Δĉᵖ = (cᵖᵛ − cᵖᵈ) Δqᵗ, and
+# with ΔH = Δcᵖ T − ΔHᶜ the enthalpy increment (`enthalpy_increment`), Δĉᵖ = (cᵖᵛ − cᵖᵈ) Δqᵗ, and
 # Δln κ the change of the exponent's logarithm: zero for `DryExponent`, ΔR̂ / R̂ − Δĉᵖ / ĉᵖ for
 # `VaporEquivalentExponent`. ΔH is the enthalpy the falling condensate carries relative to what its
 # mass gives way to, −ℒˣ₀ / (ĉᵖ Π) to leading order; the other terms account for ĉᵖ and κ changing
@@ -206,7 +202,7 @@ end
     @inbounds θ = formulation.potential_temperature[i, j, k]
     @inbounds T = temperature_field[i, j, k]
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
-    return potential_temperature_condensate_content(dynamics, formulation.exponent, constants, q, θ, T)
+    return potential_temperature_condensate_content(dynamics, formulation.exner_exponent, constants, q, θ, T)
 end
 
 @inline function AtmosphereModels.condensate_content(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
@@ -215,23 +211,23 @@ end
     𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
                                  microphysics, microphysical_fields, specific_prognostic_moisture)
     T = temperature(𝒰, constants)
-    return potential_temperature_condensate_content(dynamics, formulation.exponent, constants,
+    return potential_temperature_condensate_content(dynamics, formulation.exner_exponent, constants,
                                                     𝒰.moisture_mass_fractions, 𝒰.potential_temperature, T)
 end
 
 # The content, transported enthalpies and thermal response of a cell with mass fractions `q`,
 # potential temperature `θ` and temperature `T`, with ĉᵖ Π = H / θ
-@inline function potential_temperature_condensate_content(dynamics, exponent, constants, q, θ, T)
+@inline function potential_temperature_condensate_content(dynamics, κ̂, constants, q, θ, T)
     ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
     H = liquid_ice_enthalpy(T, q, constants)
     Π = H / (ĉᵖ * θ)
 
     Δqˡ = sedimentation_composition_increment(dynamics, q, Val(:liquid))
     Δqⁱ = sedimentation_composition_increment(dynamics, q, Val(:ice))
-    χˡ = potential_temperature_content(Δqˡ, exponent, q, constants, T, θ, ĉᵖ, Π)
-    χⁱ = potential_temperature_content(Δqⁱ, exponent, q, constants, T, θ, ĉᵖ, Π)
+    χˡ = potential_temperature_content(Δqˡ, κ̂, q, constants, T, θ, ĉᵖ, Π)
+    χⁱ = potential_temperature_content(Δqⁱ, κ̂, q, constants, T, θ, ĉᵖ, Π)
 
-    h, ∂θ∂h = sedimentation_thermal_response(dynamics, exponent, q, constants, T, Π)
+    h, ∂θ∂h = sedimentation_thermal_response(dynamics, κ̂, q, constants, T, Π)
     return (; χ = (χˡ, χⁱ), h, ∂φ∂h = ∂θ∂h)
 end
 
@@ -239,11 +235,11 @@ end
 AtmosphereModels.content_temperature(::LiquidIcePotentialTemperatureFormulation, temperature_field) = nothing
 
 # The derivative of θˡⁱ = H / (ĉᵖ Π) along one composition increment at fixed T and p
-@inline function potential_temperature_content(Δq, exponent, q, constants, T, θ, ĉᵖ, Π)
+@inline function potential_temperature_content(Δq, κ̂, q, constants, T, θ, ĉᵖ, Π)
     ΔH = enthalpy_increment(Δq, constants, T)
     Δqᵗ = - dry_air_increment(Δq)
     Δĉᵖ = (constants.vapor.heat_capacity - constants.dry_air.heat_capacity) * Δqᵗ
-    Δ_ĉᵖΠ = Π * (Δĉᵖ + exponent_increment(exponent, q, constants, Δqᵗ, ĉᵖ, Π))
+    Δ_ĉᵖΠ = Π * (Δĉᵖ + exponent_increment(κ̂, q, constants, Δqᵗ, ĉᵖ, Π))
     return (ΔH - θ * Δ_ĉᵖΠ) / (ĉᵖ * Π)
 end
 
@@ -271,7 +267,7 @@ This callback serves the liquid-ice potential-temperature formulation. The compr
 `temperature_and_pressure` diagnosis supports that formulation, not `StaticEnergyFormulation`;
 this sedimentation correction does not add a compressible static-energy diagnosis.
 """
-@inline function sedimentation_thermal_response(dynamics, exponent, q, constants, T, Π)
+@inline function sedimentation_thermal_response(dynamics, κ̂, q, constants, T, Π)
     hˡ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:liquid)), constants, T)
     hⁱ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:ice)), constants, T)
     return (hˡ, hⁱ), 1 / (vapor_equivalent_heat_capacity(q, constants) * Π)
@@ -311,7 +307,7 @@ function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatur
             model.microphysics,
             model.microphysical_fields,
             model.thermodynamic_constants,
-            formulation.exponent)
+            formulation.exner_exponent)
 
     return nothing
 end
@@ -332,7 +328,7 @@ end
                                                      microphysics,
                                                      microphysical_fields,
                                                      constants,
-                                                     exponent)
+                                                     κ̂)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -352,7 +348,7 @@ end
 
     pˢᵗ = standard_pressure(dynamics)
     q₁ = 𝒰s₁.moisture_mass_fractions
-    𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, pˢᵗ, pᵣ, exponent)
+    𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, pˢᵗ, pᵣ, κ̂)
     𝒰θ = with_temperature(𝒰θ, T, constants)
     θ = 𝒰θ.potential_temperature
     @inbounds potential_temperature[i, j, k] = θ
@@ -393,7 +389,7 @@ function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatur
             model.microphysics,
             model.microphysical_fields,
             model.thermodynamic_constants,
-            formulation.exponent)
+            formulation.exner_exponent)
 
     return nothing
 end
@@ -407,7 +403,7 @@ end
                                                           microphysics,
                                                           microphysical_fields,
                                                           constants,
-                                                          exponent)
+                                                          κ̂)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -423,7 +419,7 @@ end
 
     # Convert temperature to potential temperature using the inverse of the T(θ) relation
     pˢᵗ = standard_pressure(dynamics)
-    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, pᵣ, exponent)
+    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, pᵣ, κ̂)
     𝒰₁ = with_temperature(𝒰₀, T, constants)
     θ = 𝒰₁.potential_temperature
 

@@ -370,9 +370,9 @@ end
     g = constants.gravitational_acceleration
     z, p₀, θ, qᵛ, pˢᵗ = FT(2000), FT(101325), FT(300), FT(0.015), FT(1e5)
 
-    anchors = map((VaporEquivalentExponent(), DryExponent())) do exponent
-        integrated = moist_hydrostatic_pressure(z, p₀, θ, qᵛ, pˢᵗ, constants, exponent)
-        closed_form = constant_moist_hydrostatic_pressure(z, p₀, θ, qᵛ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, exponent)
+    anchors = map((VaporEquivalentExponent(), DryExponent())) do κ̂
+        integrated = moist_hydrostatic_pressure(z, p₀, θ, qᵛ, pˢᵗ, constants, κ̂)
+        closed_form = constant_moist_hydrostatic_pressure(z, p₀, θ, qᵛ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
         @test integrated ≈ closed_form rtol=10sqrt(eps(FT))
         closed_form
     end
@@ -804,11 +804,11 @@ end
         g  = constants.gravitational_acceleration
         Δz = 10000 / 40
 
-        for exponent in (VaporEquivalentExponent(), DryExponent())
+        for κ̂ in (VaporEquivalentExponent(), DryExponent())
             balance_model = AtmosphereModel(balance_grid;
                                             thermodynamic_constants = constants,
                                             dynamics = CompressibleDynamics(ExplicitTimeStepping(); base_pressure=p₀),
-                                            formulation = LiquidIcePotentialTemperatureFormulation(; exponent))
+                                            formulation = LiquidIcePotentialTemperatureFormulation(exner_exponent=κ̂))
             set!(balance_model; θˡⁱ=θ, qᵗ, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀),
                  enforce_mass_conservation=false)
 
@@ -820,12 +820,12 @@ end
 
         # set_to_mean! must also integrate with the formulation's Exner exponent, so the reference
         # it recomputes from a balanced, horizontally uniform state reproduces that state.
-        for exponent in (VaporEquivalentExponent(), DryExponent())
+        for κ̂ in (VaporEquivalentExponent(), DryExponent())
             mean_model = AtmosphereModel(balance_grid;
                                          thermodynamic_constants = constants,
                                          dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                                                          reference_potential_temperature=θ),
-                                         formulation = LiquidIcePotentialTemperatureFormulation(; exponent))
+                                         formulation = LiquidIcePotentialTemperatureFormulation(exner_exponent=κ̂))
             set!(mean_model; θˡⁱ=θ, qᵗ, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀),
                  enforce_mass_conservation=false)
 

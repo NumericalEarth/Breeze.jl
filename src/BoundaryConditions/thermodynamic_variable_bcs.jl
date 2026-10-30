@@ -74,21 +74,9 @@ end
 ##### Used when: user specifies ρE BCs but prognostic variable is ρs
 #####
 
-"""
-    StaticEnergyFluxBoundaryConditionFunction
-
-A wrapper for boundary conditions that converts an energy flux to a flux of ``ρs = ρᵈ s``
-for use with `StaticEnergyFormulation`.
-
-Static energy is an energy per unit mass, so an enthalpy flux ``𝒬ᵀ`` changes ``s`` at
-``-(1/ρ) ∇⋅𝒬ᵀ`` and ``ρs`` at
-
-```math
-Jˢ = (ρᵈ / ρ) 𝒬ᵀ ,
-```
-
-as for the interior heating. ``ρᵈ = ρ`` on anelastic dynamics, where the conversion is the identity.
-"""
+# Converts an energy flux to a flux of ρs = ρᵈ s for `StaticEnergyFormulation`. Static energy is per unit
+# mass, so an enthalpy flux 𝒬ᵀ changes s at -(1/ρ) ∇⋅𝒬ᵀ and ρs at Jˢ = (ρᵈ / ρ) 𝒬ᵀ, as for the interior
+# heating. ρᵈ = ρ on anelastic dynamics, where the conversion is the identity.
 struct StaticEnergyFluxBoundaryConditionFunction{C, S, D}
     condition :: C
     side :: S
@@ -213,10 +201,10 @@ temperature flux for use with `LiquidIcePotentialTemperatureFormulation`.
 
 The energy flux is divided by the vapor-equivalent heat capacity ``ĉᵖ`` and the Exner function
 ``Π``, and by ``ρ / ρᵈ``, to obtain the potential temperature flux: ``Jᶿ = (ρᵈ / ρ) 𝒬ᵀ / (ĉᵖ Π)``. The model constructor
-replaces `exponent` with the Exner exponent of its formulation.
+replaces `κ̂` with the Exner exponent of its formulation.
 """
-function EnergyFluxBoundaryCondition(flux, exponent=VaporEquivalentExponent())
-    ef = EnergyFluxBoundaryConditionFunction(flux, nothing, nothing, nothing, nothing, nothing, exponent)
+function EnergyFluxBoundaryCondition(flux, κ̂=VaporEquivalentExponent())
+    ef = EnergyFluxBoundaryConditionFunction(flux, nothing, nothing, nothing, nothing, nothing, κ̂)
     return BoundaryCondition(Flux(), ef)
 end
 
@@ -253,8 +241,8 @@ struct ThetaFluxBoundaryConditionFunction{C, S, M, TC, D, P, E}
 end
 
 ThetaFluxBoundaryConditionFunction(condition, side, microphysics, thermodynamic_constants,
-                                   exponent=VaporEquivalentExponent()) =
-    ThetaFluxBoundaryConditionFunction(condition, side, microphysics, thermodynamic_constants, nothing, nothing, exponent)
+                                   κ̂=VaporEquivalentExponent()) =
+    ThetaFluxBoundaryConditionFunction(condition, side, microphysics, thermodynamic_constants, nothing, nothing, κ̂)
 
 function Adapt.adapt_structure(to, tf::ThetaFluxBoundaryConditionFunction)
     return ThetaFluxBoundaryConditionFunction(Adapt.adapt(to, tf.condition),
@@ -342,11 +330,11 @@ Create a boundary condition that wraps a potential temperature flux and converts
 an energy flux for use with diagnostic energy density fields.
 
 The potential temperature flux is multiplied by the vapor-equivalent heat capacity ``ĉᵖ`` and
-the Exner function ``Π``, with Exner exponent `exponent`, to obtain the energy flux:
+the Exner function ``Π``, with Exner exponent `κ̂`, to obtain the energy flux:
 ``𝒬ᵀ = (ρ / ρᵈ) Jᶿ ĉᵖ Π``.
 """
-function ThetaFluxBoundaryCondition(flux, exponent=VaporEquivalentExponent())
-    tf = ThetaFluxBoundaryConditionFunction(flux, nothing, nothing, nothing, exponent)
+function ThetaFluxBoundaryCondition(flux, κ̂=VaporEquivalentExponent())
+    tf = ThetaFluxBoundaryConditionFunction(flux, nothing, nothing, nothing, κ̂)
     return BoundaryCondition(Flux(), tf)
 end
 
@@ -371,23 +359,23 @@ map_field_boundary_conditions(f, fbcs::FieldBoundaryConditions, args...) =
 
 # Convert ρE BCs → ρθ BCs (for LiquidIcePotentialTemperatureFormulation, whose Exner exponent the
 # θ flux is defined with)
-energy_to_theta_bc(bc, exponent) = bc
-energy_to_theta_bc(bc::BulkSensibleHeatFluxBoundaryCondition, exponent) = bc
-energy_to_theta_bc(bc::BoundaryCondition{<:Flux}, exponent) = EnergyFluxBoundaryCondition(bc.condition, exponent)
+energy_to_theta_bc(bc, κ̂) = bc
+energy_to_theta_bc(bc::BulkSensibleHeatFluxBoundaryCondition, κ̂) = bc
+energy_to_theta_bc(bc::BoundaryCondition{<:Flux}, κ̂) = EnergyFluxBoundaryCondition(bc.condition, κ̂)
 
-energy_to_theta_bcs(fbcs::FieldBoundaryConditions, exponent=VaporEquivalentExponent()) =
-    map_field_boundary_conditions(energy_to_theta_bc, fbcs, exponent)
+energy_to_theta_bcs(fbcs::FieldBoundaryConditions, κ̂=VaporEquivalentExponent()) =
+    map_field_boundary_conditions(energy_to_theta_bc, fbcs, κ̂)
 
 # Convert ρθ BCs → energy-flux BCs (for the diagnostic `static_energy_density` of a
 # PotentialTemperatureFormulation)
-theta_to_energy_bc(bc, exponent) = bc
+theta_to_energy_bc(bc, κ̂) = bc
 # For EnergyFluxBC, extract the original energy flux
-theta_to_energy_bc(bc::EnergyFluxBCType, exponent) = BoundaryCondition(Flux(), bc.condition.condition)
+theta_to_energy_bc(bc::EnergyFluxBCType, κ̂) = BoundaryCondition(Flux(), bc.condition.condition)
 # For regular flux BCs (actual θ fluxes), wrap to multiply by ĉᵖ Π
-theta_to_energy_bc(bc::BoundaryCondition{<:Flux}, exponent) = ThetaFluxBoundaryCondition(bc.condition, exponent)
+theta_to_energy_bc(bc::BoundaryCondition{<:Flux}, κ̂) = ThetaFluxBoundaryCondition(bc.condition, κ̂)
 
-theta_to_energy_bcs(fbcs::FieldBoundaryConditions, exponent=VaporEquivalentExponent()) =
-    map_field_boundary_conditions(theta_to_energy_bc, fbcs, exponent)
+theta_to_energy_bcs(fbcs::FieldBoundaryConditions, κ̂=VaporEquivalentExponent()) =
+    map_field_boundary_conditions(theta_to_energy_bc, fbcs, κ̂)
 
 # Convert ρE BCs → ρs BCs (for StaticEnergyFormulation)
 energy_to_static_energy_bc(bc) = bc
@@ -462,7 +450,7 @@ set_sensible_heat_formulation(bc, formulation) = bc
 function set_sensible_heat_formulation(bc::EnergyFluxBCType, formulation::PotentialTemperatureFlux)
     ef = bc.condition
     new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, ef.side, ef.microphysics, ef.thermodynamic_constants,
-                                                 ef.density, ef.standard_pressure, formulation.exponent)
+                                                 ef.density, ef.standard_pressure, formulation.exner_exponent)
     return BoundaryCondition(Flux(), new_ef)
 end
 
