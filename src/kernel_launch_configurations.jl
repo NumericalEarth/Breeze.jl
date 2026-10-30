@@ -247,5 +247,15 @@ function define_kernel_launch_configurations!()
         end
     end
 
+    # T20 p3: register cap of the P3 tendency kernel, `BREEZE_P3_MAXREGS=<n>` at load (default 0 = no cap). A cap
+    # changes only the register allocation of the same code, so the results are the same bits (tier A, checked by
+    # CRC); it also applies to the fast-math launch.
+    p3_cap = parse(Int, get(ENV, "BREEZE_P3_MAXREGS", "0"))
+    if Utils.LAUNCH_MAXREGS[] && p3_cap > 0
+        F = kernel_function_type(Microphysics.PredictedParticleProperties._p3_add_tendencies_kernel!)
+        @eval $UT.kernel_launch_maxregs(::$F) = $p3_cap
+        n += 1
+    end
+
     return n
 end
