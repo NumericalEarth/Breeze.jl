@@ -25,6 +25,14 @@ validate_momentum_advection(momentum_advection, grid) = momentum_advection
 
 struct DefaultValue end
 
+# Replace the field `name` of the named tuple `fields` with a field of float type FT, if it has another float type
+function with_float_type(fields, name, FT)
+    field = fields[name]
+    eltype(field) == FT && return fields
+    replacement = CenterField(field.grid, FT; boundary_conditions=field.boundary_conditions)
+    return merge(fields, NamedTuple{(name,)}((replacement,)))
+end
+
 const ParticlesOrNothing = Union{Nothing, AbstractLagrangianParticles}
 
 """
@@ -110,6 +118,13 @@ Arguments
      of the model, stage by stage. Default: `nothing`. See the "Lagrangian particles"
      section of the documentation for details, including the treatment on terrain-following grids.
 
+   * `thermodynamic_float_type` is the float type of the thermodynamic and moisture variables:
+     the prognostic densities (`ρθ` or `ρe`, and `ρqᵛ`) and their specific values (`θ` or `e`, and `qᵛ`).
+     Default: `eltype(grid)`. Setting `thermodynamic_float_type = Float64` on a `Float32` grid stores only
+     these four fields in double precision. This avoids rounding away small per-step increments
+     relative to the large mean values of these variables, such as a latent heating of 10⁻⁵ K
+     per step of θ ≈ 300 K, whose single-precision spacing is 3 × 10⁻⁵ K.
+
 Example
 =======
 
@@ -159,7 +174,8 @@ function AtmosphereModel(grid;
                          timestepper = nothing,
                          timestepper_kwargs = NamedTuple(),
                          radiation = nothing,
-                         particles::ParticlesOrNothing = nothing)
+                         particles::ParticlesOrNothing = nothing,
+                         thermodynamic_float_type = eltype(grid))
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
@@ -241,7 +257,8 @@ function AtmosphereModel(grid;
 
     # Materialize dynamics and formulation
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics)
-    formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
+    formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions;
+                                          float_type=thermodynamic_float_type)
 
     # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3
     # (per-substep solve) and with AcousticRungeKutta3 (moisture and tracers via the generic
@@ -286,6 +303,8 @@ function AtmosphereModel(grid;
     # The sedimenting condensates carry each tracer's materialized advection scheme, so the
     # advection schemes must exist first.
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
+    microphysical_fields = with_float_type(microphysical_fields, moisture_specific_name(microphysics),
+                                           thermodynamic_float_type)
     prognostic_microphysical_fields = NamedTuple{prognostic_field_names(microphysics)}(microphysical_fields)
     prognostic_microphysical_fields = TracerFields(prognostic_microphysical_fields, grid, regularized_boundary_conditions)
     microphysical_fields = merge(microphysical_fields, prognostic_microphysical_fields)
@@ -294,7 +313,8 @@ function AtmosphereModel(grid;
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
     if moisture_density isa DefaultValue
-        moisture_density = CenterField(grid, boundary_conditions=regularized_boundary_conditions[moisture_name])
+        moisture_density = CenterField(grid, thermodynamic_float_type;
+                                       boundary_conditions=regularized_boundary_conditions[moisture_name])
     end
 
     prognostic_model_fields = collect_prognostic_fields(formulation,

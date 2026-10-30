@@ -9,7 +9,7 @@
 #SBATCH -o /home/greg_aeolus_earth/float32-env/jobs/l3-%j.out
 set -e
 J=~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/bin/julia
-HERE=/home/greg_aeolus_earth/Breeze-float32/validation/float32
+HERE=${RUN_TREE:-/home/greg_aeolus_earth/Breeze-float32-run}/validation/float32
 export JULIA_NUM_THREADS=8
 nvidia-smi -L
 echo "commit $(git -C $HERE rev-parse HEAD) FLOATS=$FLOATS LABEL=$LABEL"

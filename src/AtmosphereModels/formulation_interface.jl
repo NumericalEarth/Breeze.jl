@@ -10,7 +10,7 @@
 #####
 
 """
-    materialize_formulation(formulation, dynamics, grid, boundary_conditions)
+    materialize_formulation(formulation, dynamics, grid, boundary_conditions; float_type = eltype(grid))
 
 Materialize a thermodynamic formulation from a `Symbol` (or formulation struct) into a
 complete formulation with all required fields.
@@ -21,8 +21,8 @@ Valid symbols:
 """
 function materialize_formulation end
 
-materialize_formulation(formulation_name::Symbol, args...) =
-    materialize_formulation(Val(formulation_name), args...)
+materialize_formulation(formulation_name::Symbol, args...; kw...) =
+    materialize_formulation(Val(formulation_name), args...; kw...)
 
 #####
 ##### Temperature solver interface

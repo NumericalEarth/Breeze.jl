@@ -52,9 +52,10 @@ Oceananigans.prognostic_fields(formulation::StaticEnergyFormulation) = (; ρs=fo
 ##### Materialization
 #####
 
-function AtmosphereModels.materialize_formulation(::Val{:StaticEnergy}, dynamics, grid, boundary_conditions)
-    energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρs)
-    specific_energy = CenterField(grid)  # s = ρs / ρ (diagnostic per-mass energy)
+function AtmosphereModels.materialize_formulation(::Val{:StaticEnergy}, dynamics, grid, boundary_conditions;
+                                                  float_type = eltype(grid))
+    energy_density = CenterField(grid, float_type, boundary_conditions=boundary_conditions.ρs)
+    specific_energy = CenterField(grid, float_type)  # s = ρs / ρ (diagnostic per-mass energy)
     return StaticEnergyFormulation(energy_density, specific_energy)
 end
 

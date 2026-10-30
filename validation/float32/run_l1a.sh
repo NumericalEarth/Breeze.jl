@@ -9,7 +9,7 @@
 #SBATCH -o /home/greg_aeolus_earth/float32-env/jobs/l1a-%j.out
 set -e
 J=~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/bin/julia
-HERE=/home/greg_aeolus_earth/Breeze-float32/validation/float32
+HERE=${RUN_TREE:-/home/greg_aeolus_earth/Breeze-float32-run}/validation/float32
 export JULIA_NUM_THREADS=8 SNAPSHOTS=0 OUTPUT_DIR=$HERE/output/l1a
 nvidia-smi -L
 for F in ${FLOATS:-Float64 Float32}; do

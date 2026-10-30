@@ -1,9 +1,11 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.ParticleMicrophysics: droplet_water_mass, diffusional_growth_rate, ventilation_factor
+using Breeze.ParticleMicrophysics: droplet_water_mass, diffusional_growth_rate, ventilation_factor,
+                                   potential_temperature_increment
 using Breeze.Thermodynamics: saturation_vapor_pressure, vapor_gas_constant, dry_air_gas_constant, liquid_latent_heat,
-                             mixture_heat_capacity, reference_value, MoistureMassFractions, PlanarLiquidSurface
+                             mixture_heat_capacity, reference_value, MoistureMassFractions, PlanarLiquidSurface,
+                             potential_temperature_from_temperature
 using Oceananigans
 using Statistics: mean
 using Test
@@ -11,7 +13,8 @@ using Test
 # Deterministic quasi-random numbers in [0, 1)
 quasirandom(n, k=1) = mod(n * sqrt(2 + k), 1)
 
-function droplet_box_model(arch, FT; Nd = 200, saturation_ratio = 1.005, frame_vertical_velocity = nothing, sorting = nothing)
+function droplet_box_model(arch, FT; Nd = 200, saturation_ratio = 1.005, frame_vertical_velocity = nothing, sorting = nothing,
+                           thermodynamic_float_type = FT)
     L = FT(0.02)
     grid = RectilinearGrid(arch, FT; size=(6, 6, 6), x=(0, L), y=(0, L), z=(0, L),
                            topology=(Periodic, Periodic, Periodic))
@@ -21,7 +24,7 @@ function droplet_box_model(arch, FT; Nd = 200, saturation_ratio = 1.005, frame_v
     droplets = (x = L .* quasirandom.(n, 1), y = L .* quasirandom.(n, 2), z = L .* quasirandom.(n, 3),
                 r = fill(5e-6, Nd), rᵈ = fill(5e-8, Nd), κ = fill(0.6, Nd))
     microphysics = LagrangianMicrophysics(FT; droplets, sorting)
-    model = AtmosphereModel(grid; dynamics, microphysics)
+    model = AtmosphereModel(grid; dynamics, microphysics, thermodynamic_float_type)
 
     # Vapor mass fraction with vapor pressure pᵛ = saturation_ratio * pᵛ⁺ at p = 90000 Pa
     constants = model.thermodynamic_constants
@@ -118,6 +121,56 @@ end
     end
     @test sort(Array(sorted.microphysics.droplets.properties.r)) ≈ sort(Array(unsorted.microphysics.droplets.properties.r))
     @test Array(interior(sorted.moisture_density)) ≈ Array(interior(unsorted.moisture_density))
+end
+
+@testset "LagrangianMicrophysics in single precision" begin
+    # The per-step increments of θ and qᵛ in droplet DNS are comparable to the Float32 spacing of θ ≈ 300 K
+    # and qᵛ ≈ 10⁻² (3 × 10⁻⁵ K and 5 × 10⁻¹⁰), and the per-step change of the frame pressure to Float32 epsilon.
+
+    # The potential temperature increment of condensation is free of cancellation
+    T, ΔT, p, qᵛ, Δqᵛ = 281.3, 2.1e-5, 9.02e4, 7.3e-3, -8.4e-10
+    constants = ThermodynamicConstants(Float64)
+    Δθ = potential_temperature_from_temperature(T + ΔT, p, 1e5, constants, qᵛ + Δqᵛ) -
+         potential_temperature_from_temperature(T, p, 1e5, constants, qᵛ)
+    @test potential_temperature_increment(T, ΔT, p, 1e5, qᵛ, Δqᵛ, constants) ≈ Δθ rtol = 1e-8
+    Δθ³² = potential_temperature_increment(Float32.((T, ΔT, p, 1e5, qᵛ, Δqᵛ))..., ThermodynamicConstants(Float32))
+    @test Δθ³² isa Float32
+    @test Δθ³² ≈ Δθ rtol = 1e-5
+
+    # The moving frame is kept in Float64 and read in the float type of the grid
+    models = Dict(FT => droplet_box_model(default_arch, FT; saturation_ratio = 1.001, frame_vertical_velocity = 2)
+                  for FT in (Float32, Float64))
+    frame = models[Float32].dynamics.reference_state.frame
+    @test frame.pressure isa Float64
+    @test models[Float32].dynamics.reference_state.pressure[1, 1, 1] isa Float32
+    p₀ = frame.pressure
+    for _ in 1:100, FT in (Float32, Float64)
+        time_step!(models[FT], 1e-3)
+    end
+    Δp(model) = model.dynamics.reference_state.frame.pressure - p₀
+    @test Δp(models[Float32]) ≈ Δp(models[Float64]) rtol = 1e-4
+
+    # Double-precision thermodynamic fields on a single-precision grid
+    model = droplet_box_model(default_arch, Float32; thermodynamic_float_type = Float64)
+    @test eltype(model.grid) == Float32
+    @test eltype(model.formulation.potential_temperature_density) == Float64
+    @test eltype(model.formulation.potential_temperature) == Float64
+    @test eltype(model.moisture_density) == Float64
+    @test eltype(model.microphysical_fields.qᵛ) == Float64
+    @test eltype(model.temperature) == Float32
+    @test eltype(model.velocities.u) == Float32
+
+    reference = droplet_box_model(default_arch, Float64)
+    θ₀ = mean(model.formulation.potential_temperature)
+    θ₀ʳ = mean(reference.formulation.potential_temperature)
+    for _ in 1:10
+        time_step!(model, 1e-2)
+        time_step!(reference, 1e-2)
+    end
+    # The warming of the air by condensation agrees with double precision to single-precision accuracy of the increment
+    Δθ = mean(model.formulation.potential_temperature) - θ₀
+    Δθʳ = mean(reference.formulation.potential_temperature) - θ₀ʳ
+    @test Δθ ≈ Δθʳ rtol = 1e-3
 end
 
 @testset "Lattice Green's function of the second-order Laplacian" begin

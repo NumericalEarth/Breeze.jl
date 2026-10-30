@@ -93,13 +93,14 @@ Oceananigans.prognostic_fields(formulation::LiquidIcePotentialTemperatureFormula
 ##### Materialization
 #####
 
-AtmosphereModels.materialize_formulation(::Val{:LiquidIcePotentialTemperature}, dynamics, grid, boundary_conditions) =
-    materialize_formulation(LiquidIcePotentialTemperatureFormulation(), dynamics, grid, boundary_conditions)
+AtmosphereModels.materialize_formulation(::Val{:LiquidIcePotentialTemperature}, dynamics, grid, boundary_conditions;
+                                         float_type = eltype(grid)) =
+    materialize_formulation(LiquidIcePotentialTemperatureFormulation(), dynamics, grid, boundary_conditions; float_type)
 
 function AtmosphereModels.materialize_formulation(formulation::LiquidIcePotentialTemperatureFormulation,
-                                                  dynamics, grid, boundary_conditions)
-    potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
-    potential_temperature = CenterField(grid)  # θ = ρθ / ρ (diagnostic)
+                                                  dynamics, grid, boundary_conditions; float_type = eltype(grid))
+    potential_temperature_density = CenterField(grid, float_type, boundary_conditions=boundary_conditions.ρθ)
+    potential_temperature = CenterField(grid, float_type)  # θ = ρθ / ρ (diagnostic)
     temperature_solver = materialize_temperature_solver(formulation.temperature_solver, dynamics, grid)
     return LiquidIcePotentialTemperatureFormulation(potential_temperature_density,
                                                     potential_temperature,
