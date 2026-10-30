@@ -1389,6 +1389,104 @@ carries_vertical_rhs(dynamics, pressure_gradients, grid) = false
     end
 end
 
+#####
+##### T22 acoustic A: the carried rhs, the (ρw)′ Thomas solve and the post-solve recovery in one column launch
+#####
+##### `_build_vertical_rhs_carried!` stores f, the batched z solve (Oceananigans `solve_batched_tridiagonal_system_z!`)
+##### loads it, and `_post_solve_recovery!` reloads (ρw)′, ρ′★, (ρθ)′★. Every one of the three reads and writes only its
+##### own column of the fields the others write ((ρw)′, f, ρ′, (ρθ)′, the accumulators): the rhs reads its neighbours
+##### only in ρθ′★ and the stored perturbation gradients, which none of them writes. So one thread per column runs them
+##### in sequence. The rhs of face k is formed in the sweep with the same expressions (`carried_vertical_rhs`), rounded
+##### to f's element type as the store did; it reads the OLD (ρw)′ at faces k−1, k, k+1, so the solution of row k−1 is
+##### held in a register and stored only after the rhs of row k is formed. The sweep's operations are those of the
+##### Oceananigans z sweep in the same order and types (t in the same shared scratch when that applies); the back
+##### substitution is Oceananigans' `back_substitute_z!`; then `post_solve_recovery!` over 1…Nz. Same bits (tier A).
+##### `BREEZE_FUSED_CARRIED_COLUMN_SOLVE=false` at load restores the three launches.
+#####
+
+const FUSED_CARRIED_COLUMN_SOLVE = Ref(true)
+
+using Oceananigans.Solvers: SharedColumnScratch, shared_thomas_scratch, back_substitute_z!, shared_column_count,
+                            shared_column_workgroup
+
+@inline function carried_column_solve!(i, j, ϕ, f_type, a, b, c, t, p, rhs, coefficient_args, recovery, ::Val{Nz}) where Nz
+    FT = eltype(ϕ)
+    TT = eltype(t)
+    z = ZDirection()
+    grid = rhs.grid
+    ε = 10 * eps(FT)
+
+    @inbounds begin
+        state = carried_vertical_rhs_state(rhs, i, j)
+        β  = get_coefficient(i, j, 1, grid, b, p, z, coefficient_args...)
+        f₁ = zero(f_type)
+        ϕᵏ⁻¹ = convert(FT, f₁ / β)
+
+        for k = 2:Nz
+            rᵏ, state = carried_vertical_rhs(rhs, state, i, j, k)
+            fᵏ = convert(f_type, rᵏ)
+            ϕ[i, j, k-1] = ϕᵏ⁻¹ # the rhs of row k has read the old (ρw)′[k−1]
+
+            cᵏ⁻¹ = get_coefficient(i, j, k-1, grid, c, p, z, coefficient_args...)
+            bᵏ   = get_coefficient(i, j, k,   grid, b, p, z, coefficient_args...)
+            aᵏ⁻¹ = get_coefficient(i, j, k-1, grid, a, p, z, coefficient_args...)
+
+            tᵏ = convert(TT, cᵏ⁻¹ / β)
+            t[i, j, k] = tᵏ
+            β = bᵏ - masked_multiply(aᵏ⁻¹, tᵏ)
+
+            definitely_diagonally_dominant = abs(β) > ε
+            ϕ★ = (fᵏ - masked_multiply(aᵏ⁻¹, ϕᵏ⁻¹)) / β
+            ϕᵏ⁻¹ = ifelse(definitely_diagonally_dominant, convert(FT, ϕ★), ϕ[i, j, k])
+        end
+        ϕ[i, j, Nz] = ϕᵏ⁻¹
+
+        back_substitute_z!(ϕ, t, i, j, Nz, ϕᵏ⁻¹)
+
+        recover_column!(recovery, i, j, ϕ, grid, Val(Nz))
+    end
+    return nothing
+end
+
+@inline recover_column!(::Nothing, i, j, ρw′, grid, ::Val) = nothing
+
+@inline function recover_column!(r, i, j, ρw′, grid, ::Val{Nz}) where Nz
+    for k = 1:Nz
+        post_solve_recovery!(i, j, k, r.ρ′, r.ρθ′, ρw′, r.ρu′, r.ρv′, r.ρ′★, r.ρθ′★, r.avg, grid, r.dynamics, r.δτᵐ⁺, r.θᴸ)
+    end
+    return nothing
+end
+
+@kernel function _carried_column_solve_shared!(ϕ, f_type, ::Type{TT}, a, b, c, p, rhs, coefficient_args, recovery,
+                                               ::Val{Nz}) where {TT, Nz}
+    i, j = @index(Global, NTuple)
+    column = @index(Local, Linear)
+    scratch = @localmem TT (shared_column_count, Nz)
+    carried_column_solve!(i, j, ϕ, f_type, a, b, c, SharedColumnScratch(scratch, column), p, rhs, coefficient_args,
+                          recovery, Val(Nz))
+end
+
+@kernel function _carried_column_solve_global!(ϕ, f_type, a, b, c, t, p, rhs, coefficient_args, recovery, ::Val{Nz}) where Nz
+    i, j = @index(Global, NTuple)
+    carried_column_solve!(i, j, ϕ, f_type, a, b, c, t, p, rhs, coefficient_args, recovery, Val(Nz))
+end
+
+function launch_carried_column_solve!(arch, grid, solver, f_type, rhs, coefficient_args, recovery)
+    Nx, Ny, Nz = size(grid)
+    ϕ = rhs.ρw′
+    if shared_thomas_scratch(arch, solver.grid, solver.t)
+        loop! = _carried_column_solve_shared!(device(arch), KernelAbstractions.StaticSize(shared_column_workgroup),
+                                              KernelAbstractions.StaticSize((Nx, Ny)))
+        args = (ϕ, f_type, eltype(solver.t), solver.a, solver.b, solver.c, solver.parameters, rhs, coefficient_args,
+                recovery, Val(Nz))
+    else
+        loop!, _ = configure_kernel(arch, grid, :xy, _carried_column_solve_global!)
+        args = (ϕ, f_type, solver.a, solver.b, solver.c, solver.t, solver.parameters, rhs, coefficient_args, recovery, Val(Nz))
+    end
+    loop!(convert_to_device(arch, args)...)
+    return nothing
+end
+
 @inline function vertical_rhs(i, j, k, ρ′★, ρθ′★, ρ′, ρθ′, ρw′,
                               grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻, Πᴸ, γRᵐᴸ, g, dˢ⁻,
                               fw, Gˢρw, sponge, pressure_gradients = nothing)
@@ -2451,6 +2549,21 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
                  g, dˢ⁻, fw = substepper.vertical_momentum_tendency_factor,
                  Gˢρw = substepper.slow_vertical_momentum_tendency,
                  sponge = substepper.sponge, P = pressure_gradients)
+        if FUSED_CARRIED_COLUMN_SOLVE[]
+            # rhs, solve and post-solve recovery in one column launch (T22 acoustic A)
+            coefficient_args = (substepper.linearization_exner, substepper.linearization_potential_temperature,
+                                substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺, substepper.sponge)
+            recovery = accumulators isa FoldedRecovery ? nothing :
+                (; ρ′ = substepper.density_perturbation,
+                   ρθ′ = substepper.density_potential_temperature_perturbation,
+                   ρu′ = substepper.momentum_perturbation.u, ρv′ = substepper.momentum_perturbation.v,
+                   ρ′★ = substepper.density_predictor, ρθ′★ = substepper.density_potential_temperature_predictor,
+                   avg = accumulators, dynamics = model.dynamics, δτᵐ⁺,
+                   θᴸ = substepper.linearization_potential_temperature)
+            launch_carried_column_solve!(arch, grid, substepper.vertical_solver,
+                                         eltype(substepper.vertical_solver_source_term), rhs, coefficient_args, recovery)
+            return nothing
+        end
         launch!(arch, grid, :xy, _build_vertical_rhs_carried!, substepper.vertical_solver_source_term, rhs)
     else
         launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
