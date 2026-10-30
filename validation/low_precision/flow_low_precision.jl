@@ -111,15 +111,15 @@ function run_flow(; eulerian_format = nothing, eulerian_sr = false, round_partic
                 r = (k-1)*Np+1:k*Np
                 ux = CUDA.rand(Float64, Np); uy = CUDA.rand(Float64, Np)
                 vx = view(px, r); vy = view(py, r)
-                vx .= store_position.(vx, mode, f, sr, bits, ux)
-                vy .= store_position.(vy, mode, f, sr, bits, uy)
+                vx .= store_position.(vx, mode, Ref(f), sr, bits, ux)
+                vy .= store_position.(vy, mode, Ref(f), sr, bits, uy)
                 vx .= mod.(vx, L); vy .= mod.(vy, L)
             end
         end
         if eulerian_format !== nothing
             for φ in (sim.model.velocities.u, sim.model.velocities.v)
                 d = interior(φ)
-                d .= quantize.(d, eulerian_format, eulerian_sr, CUDA.rand(Float64, size(d)))
+                d .= quantize.(d, Ref(eulerian_format), eulerian_sr, CUDA.rand(Float64, size(d)))
             end
         end
         return nothing
@@ -157,7 +157,7 @@ function main_flow()
     println("| storage | t | RMS position error [Δ] | ⟨ln R/R₀⟩ (ref) | pairs collapsed to 0 [%] |")
     println("|---|---|---|---|---|")
     for (k, v) in enumerate(particle_variants), t in output_times
-        m = particle_metrics(ref[t], ref, k)
+        m = particle_metrics(ref[t], ref[t], k)
         @printf("| %s | %g | %.3g | %.3f (%.3f) | %.1f |\n", v[1], t, m.rms, m.lnR, m.lnR₀, 100m.collapsed)
     end
     println("\n### Eulerian velocity storage (particles Float64; error of reference-particle trajectories and flow)\n")
@@ -169,7 +169,7 @@ function main_flow()
         @info "Eulerian $label"
         run = run_flow(; eulerian_format = f, eulerian_sr = sr, round_particles = false)
         for t in output_times
-            m = particle_metrics(run[t], ref, 1)
+            m = particle_metrics(run[t], ref[t], 1)
             c = cor(vec(run[t].ζ), vec(ref[t].ζ))
             @printf("| %s | %g | %+.3g | %.6f | %.3g | %.3f |\n", label, t, 100 * (run[t].KE - ref[t].KE) / ref[t].KE, c, m.rms, m.lnR)
         end
