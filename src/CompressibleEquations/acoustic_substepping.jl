@@ -85,8 +85,8 @@ Fields:
   excluded — those are in the fast operator).
 - `vertical_solver_source_term` (z-faces): explicit RHS of the (ρw)′ tridiagonal system.
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
-- `vertical_velocity_cache`, `density_cache`: the stage-entry predictor velocity and its carrier
-  dry density, frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
+- `vertical_velocity_cache`, `density_cache`: the stage-entry predictor velocity and the dry
+  density that weights it, frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
   adaptive-implicit advection.
 - `time_averaged_vertical_velocity_cache`: the acoustic-mean transport velocity the moisture and
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic

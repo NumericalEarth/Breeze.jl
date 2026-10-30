@@ -9,7 +9,7 @@ export
     AdiabaticBalancer,
     HydrostaticallyBalancedDensity,
     # Dynamics interface (dynamics types exported by their respective modules)
-    dynamics_density,
+    continuity_density,
     dynamics_pressure,
     total_density,
     sedimentation_composition_increment,

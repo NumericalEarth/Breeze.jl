@@ -127,7 +127,7 @@ end
 @inline unwrap_density(pd::PrescribedDensity) = pd.density
 @inline unwrap_density(ρ) = ρ  # pass-through for regular fields
 
-@inline AtmosphereModels.dynamics_density(d::PrescribedDynamics) = unwrap_density(d.density)
+@inline AtmosphereModels.continuity_density(d::PrescribedDynamics) = unwrap_density(d.density)
 
 AtmosphereModels.prognostic_momentum_field_names(::PrescribedDynamics) = ()
 AtmosphereModels.additional_dynamics_field_names(::PrescribedDynamics) = ()
@@ -139,7 +139,7 @@ AtmosphereModels.prognostic_dynamics_field_names(::PrescribedDynamics{<:Any, <:P
 AtmosphereModels.prognostic_dynamics_field_names(::PrescribedDynamics) = tuple(:ρ)
 
 AtmosphereModels.dynamics_prognostic_fields(::PrescribedDynamics{<:Any, <:PrescribedDensity}) = NamedTuple()
-AtmosphereModels.dynamics_prognostic_fields(d::PrescribedDynamics) = (; ρ=dynamics_density(d))
+AtmosphereModels.dynamics_prognostic_fields(d::PrescribedDynamics) = (; ρ=continuity_density(d))
 
 # Pressure accessors
 AtmosphereModels.dynamics_pressure_solver(::PrescribedDynamics, grid) = nothing
@@ -149,6 +149,14 @@ AtmosphereModels.total_pressure(d::PrescribedDynamics) = d.pressure
 AtmosphereModels.surface_pressure(d::PrescribedDynamics) = d.surface_pressure
 AtmosphereModels.base_pressure(d::PrescribedDynamics) = d.base_pressure
 AtmosphereModels.standard_pressure(d::PrescribedDynamics) = d.standard_pressure
+
+# As on the anelastic core, the prescribed density is not the local state's (it is the reference
+# profile when built from a `ReferenceState`), so evaluate the equation of state at the
+# prescribed pressure with the local temperature and moisture: ρ = p / (Rᵐ(q) T).
+@inline function AtmosphereModels.thermodynamic_state_density(i, j, k, dynamics::PrescribedDynamics, T, q, constants)
+    @inbounds p = dynamics.pressure[i, j, k]
+    return density(T, p, q, constants)
+end
 
 #####
 ##### Materialization

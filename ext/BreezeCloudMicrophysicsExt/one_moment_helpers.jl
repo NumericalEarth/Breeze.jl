@@ -215,5 +215,6 @@ function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
           "│   ├── ρᵢ:     ", prettysummary(snow.ρᵢ), '\n',
           "│   └── aspr:   ", prettysummary(snow.aspr), '\n',
           "├── freezing_temperature: ", prettysummary(bμp.categories.freezing_temperature), '\n',
+          "├── τⁿᵘᵐ: ", prettysummary(bμp.categories.τⁿᵘᵐ), '\n',
           "└── velocities: ", prettysummary(bμp.categories.hydrometeor_velocities))
 end

@@ -26,7 +26,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze: dynamics_density
+using Breeze: continuity_density
 using Breeze.CompressibleEquations: AcousticSubstepper,
                                     freeze_linearization_state!,
                                     assemble_slow_vertical_momentum_tendency!,
@@ -180,7 +180,7 @@ end
 
     Δp = maximum(abs, interior(model.dynamics.pressure) .- interior(ref.pressure))
     p_scale = maximum(abs, interior(ref.pressure))
-    Δρ = maximum(abs, interior(dynamics_density(model.dynamics)) .- interior(ref.density))
+    Δρ = maximum(abs, interior(continuity_density(model.dynamics)) .- interior(ref.density))
 
     # Contract: Δp ≤ 100 ulp of p, Δρ exactly zero.
     @test Δp <= 100 * eps(Float64) * p_scale

@@ -186,7 +186,7 @@ function fix_negative_moisture!(microphysics, model)
 
     grid = model.grid
     arch = grid.architecture
-    ρ₀ = dynamics_density(model.dynamics)
+    ρ₀ = continuity_density(model.dynamics)
     ρqᵛᵉ = model.moisture_density
     number_mass_pairs = correction_number_mass_pairs(microphysics, model.microphysical_fields)
     number_fields = correction_number_fields(microphysics, model.microphysical_fields)

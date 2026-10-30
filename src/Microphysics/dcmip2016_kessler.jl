@@ -13,8 +13,9 @@ using ..Thermodynamics:
     with_temperature
 
 using ..AtmosphereModels:
-    dynamics_density,
+    continuity_density,
     dynamics_pressure,
+    thermodynamic_state_density,
     kernel_time_step,
     liquid_ice_exner_exponent,
     standard_pressure,
@@ -464,11 +465,11 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     invalid_time_step(Δt) && return nothing
 
     # Total density weights water mass fractions and enters the Kessler air-density corrections.
-    # The coupling density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
-    # dynamics, is the dry-air carrier of Kessler mixing ratios. These fields alias for anelastic
+    # The continuity density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
+    # dynamics, is the dry-air density Kessler mixing ratios are relative to. These fields alias for anelastic
     # dynamics and are distinct (total and dry density) for compressible dynamics.
     ρ = total_density(model.dynamics)
-    ρᵈ = dynamics_density(model.dynamics)
+    ρᵈ = continuity_density(model.dynamics)
     dry_air_coupled = ρ !== ρᵈ
     p = dynamics_pressure(model.dynamics)
 
@@ -493,7 +494,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     substep_limit = sedimentation_substep_limit(arch, microphysics)
 
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, kernel_Δt, substep_limit, ρ, ρᵈ, dry_air_coupled,
+            microphysics, grid, Nz, kernel_Δt, substep_limit, model.dynamics, ρ, ρᵈ, dry_air_coupled,
             p, pˢᵗ, κ̂, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
@@ -529,9 +530,13 @@ rain evaporation, and condensation.
 
 `Δr𝕎` is the sedimentation flux divergence (zero for parcel models).
 
+`ρ` is the total density, which weights the rain in the evaporation rate (KW eq. 2.14); `ρᵗʰ` is
+the thermodynamic state density, at which the saturation specific humidity is evaluated. They coincide on the compressible core; on the anelastic core `ρ` is the
+reference density ``ρᵣ`` and `ρᵗʰ = pᵣ / (Rᵐ T)`.
+
 Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
 """
-@inline function step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, p, Δt,
+@inline function step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, ρᵗʰ, p, Δt,
                                            microphysics, constants, f₅, δT, FT)
     surface = PlanarLiquidSurface()
     Cᵨ     = microphysics.density_scale
@@ -547,8 +552,8 @@ Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
     rᶜˡ = max(0, rᶜˡ - Δrᴾ)
     rʳ = max(0, rʳ + Δrᴾ + Δr𝕎)
 
-    # Saturation specific humidity
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, surface)
+    # Saturation specific humidity, at the thermodynamic state density
+    qᵛ⁺ = saturation_specific_humidity(T, ρᵗʰ, constants, surface)
     rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
 
     # Saturation adjustment
@@ -669,8 +674,8 @@ the ratio is not finite and positive. An invalid step is not clipped: the kernel
     return Nₛ, valid, needed
 end
 
-@kernel function _microphysical_update!(microphysics, grid, Nz, Δt, substep_limit,
-                                        density, coupling_density, dry_air_coupled,
+@kernel function _microphysical_update!(microphysics, grid, Nz, Δt, substep_limit, dynamics,
+                                        density, continuity_density_field, dry_air_coupled,
                                         pressure, pˢᵗ, κ̂, constants,
                                         θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
@@ -761,7 +766,7 @@ end
         # mass-fraction flux (ρʳ = ρqʳ).
         @inbounds begin
             ρ₁ = density[i, j, 1]
-            ρᵈ₁ = coupling_density[i, j, 1]
+            ρᵈ₁ = continuity_density_field[i, j, 1]
             rᵛ₁ = μ.qᵛ[i, j, 1]
             rᶜˡ₁ = μ.qᶜˡ[i, j, 1]
             rʳ₁ = μ.qʳ[i, j, 1]
@@ -786,20 +791,21 @@ end
                 rˡ = rᶜˡ + rʳ
                 q = MoistureMassFractions(MoistureMixingRatio(rᵛ, rˡ))
                 Tᵏ = temperature(LiquidIcePotentialTemperatureState(θˡⁱᵏ, q, pˢᵗ, p, κ̂), constants)
+                ρᵗʰ = thermodynamic_state_density(i, j, k, dynamics, Tᵏ, q, constants)
 
                 # Rain sedimentation flux (upstream differencing)
-                ρᵏ = Cᵨ * coupling_density[i, j, k]
+                ρᵏ = Cᵨ * continuity_density_field[i, j, k]
                 𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
                 zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
                 Δz = zᵏ⁺¹ - zᵏ
-                ρᵏ⁺¹ = Cᵨ * coupling_density[i, j, k+1]
+                ρᵏ⁺¹ = Cᵨ * continuity_density_field[i, j, k+1]
                 rʳᵏ⁺¹ = μ.qʳ[i, j, k+1]
                 𝕎ʳᵏ⁺¹ = μ.𝕎ʳ[i, j, k+1]
                 Δr𝕎 = Δtₛ * (ρᵏ⁺¹ * rʳᵏ⁺¹ * 𝕎ʳᵏ⁺¹ - ρᵏ * rʳ * 𝕎ʳᵏ) / (ρᵏ * Δz)
                 zᵏ = zᵏ⁺¹
 
                 # Core microphysics step
-                rᵛ⁺, rᶜˡ⁺, rʳ⁺, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+                rᵛ⁺, rᶜˡ⁺, rʳ⁺, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, ρᵗʰ, p, Δtₛ,
                                                                 microphysics, constants, f₅, δT, FT)
 
                 μ.qᵛ[i, j, k]  = ifelse(active, rᵛ⁺, rᵛ)
@@ -817,7 +823,7 @@ end
                 θˡⁱ_new = with_temperature(𝒰₀, T, constants).potential_temperature
 
                 θˡⁱ[i, j, k]  = ifelse(active, θˡⁱ_new, θˡⁱᵏ)
-                ρᵈ = coupling_density[i, j, k]
+                ρᵈ = continuity_density_field[i, j, k]
                 ρθˡⁱ[i, j, k] = ifelse(active, ρᵈ * θˡⁱ_new, ρθˡⁱ[i, j, k])
             end
         end
@@ -836,6 +842,7 @@ end
             rˡ = rᶜˡ + rʳ
             q = MoistureMassFractions(MoistureMixingRatio(rᵛ, rˡ))
             Tᵏ = temperature(LiquidIcePotentialTemperatureState(θˡⁱᵏ, q, pˢᵗ, p, κ̂), constants)
+            ρᵗʰ = thermodynamic_state_density(i, j, k, dynamics, Tᵏ, q, constants)
 
             # Rain sedimentation flux at top boundary
             𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
@@ -845,7 +852,7 @@ end
             Δr𝕎 = -Δtₛ * rʳ * 𝕎ʳᵏ / Δz_half
 
             # Core microphysics step (shared with ParcelModel)
-            rᵛ⁺, rᶜˡ⁺, rʳ⁺, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+            rᵛ⁺, rᶜˡ⁺, rʳ⁺, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, ρᵗʰ, p, Δtₛ,
                                                             microphysics, constants, f₅, δT, FT)
 
             μ.qᵛ[i, j, k]  = ifelse(active, rᵛ⁺, rᵛ)
@@ -863,7 +870,7 @@ end
             θˡⁱ_new = with_temperature(𝒰₀, T, constants).potential_temperature
 
             θˡⁱ[i, j, k]  = ifelse(active, θˡⁱ_new, θˡⁱᵏ)
-            ρᵈ = coupling_density[i, j, k]
+            ρᵈ = continuity_density_field[i, j, k]
             ρθˡⁱ[i, j, k] = ifelse(active, ρᵈ * θˡⁱ_new, ρθˡⁱ[i, j, k])
         end
 
@@ -882,7 +889,7 @@ end
     @inbounds begin
         rᵗ₁ = μ.qᵛ[i, j, 1] + μ.qᶜˡ[i, j, 1] + μ.qʳ[i, j, 1]
         final_surface_density = ifelse(dry_air_coupled,
-                                       coupling_density[i, j, 1] * (1 + rᵗ₁),
+                                       continuity_density_field[i, j, 1] * (1 + rᵗ₁),
                                        density[i, j, 1])
         precipitation_rate_field[i, j, 1] = Fˢᵘʳᶠ * inv_Ns / final_surface_density
     end
@@ -894,7 +901,7 @@ end
     for k = 1:Nz
         @inbounds begin
             ρ = density[i, j, k]
-            ρᵈ = coupling_density[i, j, k]
+            ρᵈ = continuity_density_field[i, j, k]
             rᵛ = μ.qᵛ[i, j, k]
             rᶜˡ = μ.qᶜˡ[i, j, k]
             rʳ = μ.qʳ[i, j, k]
@@ -991,8 +998,12 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
     FT = typeof(ρ)
 
+    # The parcel saturates at its thermodynamic state density, p / (Rᵐ T); ρ is the
+    # environmental density that weights the parcel's prognostics.
+    ρᵗʰ = density(𝒰, constants)
+
     # Core microphysics step (no sedimentation for parcel: Δr𝕎 = 0)
-    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, p_parcel, Δt,
+    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, ρᵗʰ, p_parcel, Δt,
                                                microphysics, constants, f₅, δT, FT)
 
     # Convert mixing ratios → mass fractions (shared helper)

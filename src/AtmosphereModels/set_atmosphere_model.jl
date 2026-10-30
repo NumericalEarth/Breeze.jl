@@ -40,7 +40,7 @@ Also updates the corresponding momentum field.
 function set_velocity!(model::AtmosphereModel, name::Symbol, value)
     u = model.velocities[name]
     set!(u, value)
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
     ϕ = model.momentum[Symbol(:ρ, name)]
     set!(ϕ, ρ * u)
     return nothing
@@ -72,7 +72,7 @@ and available to the phase-2 kernels. The two density-input modes need different
   `ρqˣ = ρ·qˣ`.
 - neither: diagnose `ρ = ρᵈ + Σρqˣ` from the existing fields.
 
-No-op by default (single-density formulations like anelastic, where `total_density === dynamics_density`);
+No-op by default (single-density formulations like anelastic, where `total_density === continuity_density`);
 `CompressibleModel` overrides it.
 """
 establish_densities!(model, total_density_given, dry_density_given,
@@ -281,7 +281,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             throw(ArgumentError("set! cannot set both $specific_name and $density_name"))
     end
 
-    # Two-phase application. The thermodynamic variable (coupling-weighted: ρθ = ρᵈθ) and the
+    # Two-phase application. The thermodynamic variable (continuity-density-weighted: ρθ = ρᵈθ) and the
     # kinematic fields (momentum ρu = ρᵈu) read the dry density ρᵈ AND the total density ρ, so they
     # must run *after* `establish_densities!` has made the two mutually consistent. `:ℋ` is deferred
     # with them because it derives moisture from the saturation state, which needs the thermodynamic
@@ -302,7 +302,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
         elseif name ∈ (:ρqᵗ, :ρqᵛ, :ρqᵉ)
             set!(model.moisture_density, value)
-            ρ = dynamics_density(model.dynamics)
+            ρ = continuity_density(model.dynamics)
             qᵛᵉ = specific_prognostic_moisture(model)
             set!(qᵛᵉ, model.moisture_density / ρ)
 
@@ -315,13 +315,13 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             density_name = specific_to_density_weighted(name)
             ρμ = model.microphysical_fields[density_name]
             set!(ρμ, value)
-            ρ = dynamics_density(model.dynamics)
+            ρ = continuity_density(model.dynamics)
             set!(ρμ, ρ * ρμ)
 
         elseif name ∈ (:qᵗ, :qᵛ, :qᵉ)
             qᵛᵉ = specific_prognostic_moisture(model)
             set!(qᵛᵉ, value)
-            ρ = dynamics_density(model.dynamics)
+            ρ = continuity_density(model.dynamics)
             set!(model.moisture_density, ρ * qᵛᵉ)
 
         elseif name ∈ (:u, :v, :w)
@@ -335,7 +335,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             # placeholder (split by `establish_densities!`); for `:ρᵈ` it is the dry density directly.
             # `HydrostaticallyBalancedDensity` is a deferred marker: write a unit placeholder now so
             # the thermodynamic/kinematic sets have a nonzero ρᵈ; it is overwritten balanced later.
-            ρ = dynamics_density(model.dynamics)
+            ρ = continuity_density(model.dynamics)
             set!(ρ, value isa HydrostaticallyBalancedDensity ? one(eltype(model.grid)) : value)
             # Fill halos immediately - needed for velocity→momentum conversion
             fill_halo_regions!(ρ)

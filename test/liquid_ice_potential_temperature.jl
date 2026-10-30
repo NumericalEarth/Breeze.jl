@@ -197,7 +197,7 @@ end
         θ = Array(interior(model.formulation.potential_temperature))
         p = Array(interior(AM.dynamics_pressure(model.dynamics)))
         ρ = Array(interior(AM.total_density(model.dynamics)))
-        ρᵈ = Array(interior(AM.dynamics_density(model.dynamics)))
+        ρᵈ = Array(interior(AM.continuity_density(model.dynamics)))
         G = Array(interior(model.timestepper.Gⁿ.ρθ))
 
         for k in 2:5

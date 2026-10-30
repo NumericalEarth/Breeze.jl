@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, condensate_liquid_fraction,
-                               total_density, dynamics_density, standard_pressure,
+                               total_density, continuity_density, standard_pressure,
                                implicit_advection_velocities, density_weighted_advection_diagonal,
                                implicit_advection_density, implicit_step_scheme, closure_scalar_index,
                                liquid_fraction_content, specific_prognostic_moisture
@@ -577,7 +577,7 @@ end
     ρθₐ⁰ = Array(interior(ρθₐ, 1, 1, :))
     Breeze.AtmosphereModels.implicit_sedimentation_step!(acoustic_model, Δtₐ, acoustic_model.velocities, uniform_content)
     Δρθₐ = Array(interior(ρθₐ, 1, 1, :)) .- ρθₐ⁰
-    qᵈₐ = Array(interior(dynamics_density(acoustic_model.dynamics), 1, 1, :)) ./
+    qᵈₐ = Array(interior(continuity_density(acoustic_model.dynamics), 1, 1, :)) ./
           Array(interior(total_density(acoustic_model.dynamics), 1, 1, :))
     @test Δρθₐ ≈ qᵈₐ .* χ .* Δρqʳₐ
 
@@ -727,7 +727,7 @@ end
     χ = [cₖ.χ[1] for cₖ in c]
     h = [cₖ.h[1] for cₖ in c]
     β = [cₖ.∂φ∂h for cₖ in c]
-    qᵈ = column(dynamics_density(model.dynamics)) ./ column(total_density(model.dynamics))
+    qᵈ = column(continuity_density(model.dynamics)) ./ column(total_density(model.dynamics))
     Sθ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, χ, h, β; coupling = qᵈ)
     tolerance = sqrt(eps(FT)) * maximum(abs.(Sθ_expected))
     @test Sθ ≈ Sθ_expected
@@ -1078,7 +1078,7 @@ end
     qᵛ = column(μ.qᵛ)
     ρ = total_density(model.dynamics)
     ρᶜ = column(ρ)
-    qᵈ = column(dynamics_density(model.dynamics)) ./ ρᶜ
+    qᵈ = column(continuity_density(model.dynamics)) ./ ρᶜ
     ρᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρ)) for k in 1:Nz+1]
     wʳ = [(@allowscalar μ.wʳ[1, 1, k]) for k in 1:Nz+1]
     qʳᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ)) for k in 1:Nz+1]

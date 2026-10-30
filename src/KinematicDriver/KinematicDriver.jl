@@ -33,10 +33,10 @@ using KernelAbstractions: @kernel, @index
 # Import PrescribedVelocityFields from Oceananigans
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_density
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, continuity_density
 using Breeze.Thermodynamics: ReferenceState, column_surface_pressure,
                              surface_boundary_value, surface_pressure_from_cell_center,
-                             surface_state_field
+                             surface_state_field, density
 
 include("prescribed_dynamics.jl")
 

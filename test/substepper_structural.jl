@@ -537,7 +537,7 @@ end
     function residual_max(model)
         ref = model.dynamics.reference_state
         p   = Array(interior(model.dynamics.pressure))
-        ρ   = Array(interior(Breeze.AtmosphereModels.dynamics_density(model.dynamics)))
+        ρ   = Array(interior(Breeze.AtmosphereModels.continuity_density(model.dynamics)))
         p_r = Array(interior(ref.pressure))[1, 1, :]
         ρ_r = Array(interior(ref.density))[1, 1, :]
         Nx, Ny, Nz = size(p)

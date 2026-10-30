@@ -1229,7 +1229,7 @@ end
     pˢᵗ = standard_pressure(model.dynamics)
     p = Array(interior(dynamics_pressure(model.dynamics)))[:, :, 1]
     ρ = Array(interior(total_density(model.dynamics)))[:, :, 1]
-    ρᵈ = Array(interior(dynamics_density(model.dynamics)))[:, :, 1]
+    ρᵈ = Array(interior(continuity_density(model.dynamics)))[:, :, 1]
     Π = [exner_function(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, pᵢⱼ), constants) for pᵢⱼ in p]
 
     ρθ = thermodynamic_density(model.formulation)

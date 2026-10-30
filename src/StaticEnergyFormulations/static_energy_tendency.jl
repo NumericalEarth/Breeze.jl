@@ -60,7 +60,7 @@ end
                                         temperature_field)
 
     specific_energy = formulation.specific_energy
-    ρ_field = dynamics_density(dynamics)
+    ρ_field = continuity_density(dynamics)
 
     # Compute the buoyancy flux term, ρᵣ w b
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, w_buoyancy_forceᶜᶜᶠ,
@@ -125,7 +125,7 @@ AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:ρ
 
 function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:s}, value)
     set!(model.formulation.specific_energy, value)
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
     s = model.formulation.specific_energy
     set!(model.formulation.energy_density, ρ * s)
     return nothing
@@ -170,7 +170,7 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρs = ρᵈs)
+        ρᵈ = continuity_density(dynamics)[i, j, k]  # continuity density ρᵈ (ρs = ρᵈs)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
     end
@@ -243,7 +243,7 @@ end
 
     @inbounds begin
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρs = ρᵈs)
+        ρᵈ = continuity_density(dynamics)[i, j, k]  # continuity density ρᵈ (ρs = ρᵈs)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end

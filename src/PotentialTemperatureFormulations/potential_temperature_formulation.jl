@@ -166,7 +166,7 @@ materialize_temperature_solver(temperature_solver, dynamics, grid) =
 #####
 
 function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(formulation::LiquidIcePotentialTemperatureFormulation, dynamics, i, j, k, grid)
-    ρ = dynamics_density(dynamics)
+    ρ = continuity_density(dynamics)
     @inbounds begin
         ρᵢ = ρ[i, j, k]
         ρθ = formulation.potential_temperature_density[i, j, k]

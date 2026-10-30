@@ -104,7 +104,7 @@ function heating_response(formulation, T, q, p, pˢᵗ; fixed_volume=false)
     return (φ(Float64(T) + δ) - φ(Float64(T) - δ)) / (2δ * capacity)
 end
 
-# Expected sedimentation tendency of the coupling-weighted thermodynamic prognostic in a column
+# Expected sedimentation tendency of the continuity-density-weighted thermodynamic prognostic in a column
 # where every flux is downward (no transport velocity): `Φ[k]` is the sedimentation volume flux
 # per unit density of one phase through face k, `ρᶠ[k]` the total density there, and `χ`, `h`
 # and `β` the content, enthalpy and heating response of that phase per cell. The flux through
@@ -138,7 +138,7 @@ function test_kernel_functions_inferred(model; i=2, j=2, k=2)
     model_fields = Oceananigans.fields(model)
     moist_name = AM.moisture_prognostic_name(microphysics)
 
-    momentum_args = (AM.dynamics_density(dynamics), model.advection.momentum, model.velocities,
+    momentum_args = (AM.continuity_density(dynamics), model.advection.momentum, model.velocities,
                      model.closure, model.closure_fields, AM.advecting_momentum(model),
                      model.coriolis, model.clock, model_fields)
 

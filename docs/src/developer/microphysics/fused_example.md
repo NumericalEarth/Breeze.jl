@@ -76,13 +76,14 @@ In the bundled-rate path we package all three tendencies into one gridless helpe
 the shared intermediates computed exactly once:
 
 ```@example fused_microphysics_example
-using Breeze.Thermodynamics: temperature, saturation_specific_humidity,
+using Breeze.Thermodynamics: temperature, density, saturation_specific_humidity,
                               PlanarLiquidSurface, PlanarIceSurface
 
 @inline function explicit_microphysics_tendencies(em::ExplicitMicrophysics, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)
-    q⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    q⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+    ρᵗʰ = density(𝒰, constants) # thermodynamic state density; ρ weights the tendencies
+    q⁺ˡ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
+    q⁺ⁱ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarIceSurface())
 
     τᵛˡ = em.vapor_to_liquid
     τᵛⁱ = em.vapor_to_ice
@@ -112,7 +113,7 @@ Otherwise the override below is sufficient for `AtmosphereModel`.
 
 !!! warning "Non-public internals"
     The kernel below calls four `Breeze.AtmosphereModels` symbols that are not part of
-    the public API: `dynamics_density`, `grid_moisture_fractions`,
+    the public API: `continuity_density`, `grid_moisture_fractions`,
     `diagnose_thermodynamic_state`, and `specific_prognostic_moisture`. They are stable
     enough to override against today, but the canonical reference is `MPNE1M`'s override
     in `ext/BreezeCloudMicrophysicsExt/one_moment_microphysics.jl` — track it if the
@@ -130,7 +131,7 @@ using KernelAbstractions: @kernel, @index
                                                             microphysical_fields)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field = Breeze.AtmosphereModels.dynamics_density(dynamics)
+    ρ_field = Breeze.AtmosphereModels.continuity_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
 

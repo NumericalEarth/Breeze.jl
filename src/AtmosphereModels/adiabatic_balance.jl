@@ -270,13 +270,13 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
                            NamedTuple{twin_scalar_names}(model.advection[remap(n)] for n in twin_scalar_names))
 
     # Zeroed forcing, keyed exactly as the constructor would for this stripped prognostic set.
-    coupling_density = dynamics_density(twin_dynamics)
+    continuity_density_field = continuity_density(twin_dynamics)
     mass_density = total_density(twin_dynamics)
     twin_model_fields = merge(twin_prognostic, fields(formulation), model.velocities,
                               auxiliary_model_fields(model.temperature),
                               twin_microphysical)
     twin_forcing = atmosphere_model_forcing(NamedTuple(), twin_prognostic, twin_model_fields,
-                                            grid, model.coriolis, coupling_density, mass_density,
+                                            grid, model.coriolis, continuity_density_field, mass_density,
                                             model.velocities, twin_dynamics, formulation,
                                             twin_microphysics, qᵛ, twin_microphysical, constants)
 
