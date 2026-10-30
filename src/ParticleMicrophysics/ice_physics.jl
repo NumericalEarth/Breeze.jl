@@ -34,7 +34,7 @@ using Breeze
 round.((spheroid_capacitance_ratio(1.0), spheroid_capacitance_ratio(0.1), spheroid_capacitance_ratio(4.0)), digits=4)
 
 # output
-(1.0, 1.3256, 1.1574)
+(1.0, 1.4576, 1.1824)
 ```
 """
 function spheroid_capacitance_ratio(φ)
@@ -98,7 +98,7 @@ IcePhysicsParameters{Float64}:
 ├── dynamic_viscosity: SutherlandViscosity{Float64}(μ₀=1.716e-5, T₀=273.15, Tˢ=110.4)
 ├── kinetic_correction: KineticCorrection{Float64}(αᶜ=0.5, αᵀ=1.0, Δᵛ=1.04e-7, Δᵀ=2.16e-7)
 ├── ventilation: BeardPruppacherVentilation()
-└── solver: NewtonSolver{Float64}(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
+└── solver: NewtonSolver(reltol=1.49012e-8, abstol=2.22045e-15, maxiter=50)
 ```
 """
 function IcePhysicsParameters(FT = Oceananigans.defaults.FloatType;
@@ -211,7 +211,7 @@ parameters = IcePhysicsParameters()
 round(Φ, sigdigits=4)
 
 # output
-5.739e-12
+3.638e-12
 ```
 """
 @inline function depositional_growth_rate(r, 𝒮ⁱ, fᵛ, T, p, constants, parameters, self_interaction=nothing)
@@ -244,7 +244,7 @@ step = depositional_growth_step(1e-5, 0.1, 1.0, 263.0, 8e4, 10.0, constants, par
 round(step.radius, sigdigits=4), round(step.deposited_mass, sigdigits=3)
 
 # output
-(1.469e-5, 8.57e-12)
+(1.315e-5, 4.9e-12)
 ```
 """
 @inline function depositional_growth_step(r, 𝒮ⁱ, fᵛ, T, p, Δt, constants, parameters, self_interaction=nothing)

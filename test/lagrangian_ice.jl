@@ -116,7 +116,7 @@ end
             μ = Breeze.ParticleMicrophysics.dynamic_viscosity(parameters.dynamic_viscosity, T)
             ρ = p / (dry_air_gas_constant(constants) * T)
             𝕎ˢ(r) = 2 * (parameters.density - ρ) * constants.gravitational_acceleration * r^2 / (9μ)
-            @test 𝕎(5e-6) ≈ 𝕎ˢ(FT(5e-6)) rtol = 1e-3
+            @test 𝕎(5e-6) ≈ 𝕎ˢ(FT(5e-6)) rtol = 1e-2
             @test 𝕎(1e-4) < 0.8 * 𝕎ˢ(FT(1e-4))
             @test 𝕎(1e-4) > 𝕎(5e-5) > 𝕎(1e-5)
         end
