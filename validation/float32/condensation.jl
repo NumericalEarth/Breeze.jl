@@ -193,6 +193,13 @@ function write_timing(output_dir, label, model, Δt; steps=200)
     per_step = (time_ns() - wall) / 1e9 / steps
     @info @sprintf("%s: %.3f ms per step (no diagnostics), %.1f MiB device memory in use", label, 1e3 * per_step,
                    memory / 2^20)
+    if get(ENV, "PROFILE", "0") == "1" && arch isa GPU
+        profile = CUDA.@profile trace=false for _ in 1:20
+            time_step!(model, Δt)
+        end
+        show(IOContext(stdout, :limit => false), profile)
+        println()
+    end
     open(joinpath(output_dir, "timing.csv"), "a") do io
         println(io, label, ",", eltype(model.grid), ",", per_step, ",", memory)
     end

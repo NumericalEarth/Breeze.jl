@@ -10,8 +10,9 @@
 set -e
 J=~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/bin/julia
 HERE=${RUN_TREE:-/home/greg_aeolus_earth/Breeze-float32-run}/validation/float32
-export JULIA_NUM_THREADS=8 SNAPSHOTS=0 OUTPUT_DIR=$HERE/output/l1a
+export JULIA_NUM_THREADS=8 SNAPSHOTS=0 OUTPUT_DIR=/home/greg_aeolus_earth/Breeze-float32/validation/float32/output/l1a
 nvidia-smi -L
+$J --startup-file=no --project=$HERE -e "using Pkg; Pkg.instantiate()" 2>&1 | tail -2
 for F in ${FLOATS:-Float64 Float32}; do
   FLOAT=$F $J --startup-file=no --project=$HERE $HERE/resolution_runs.jl decay \
     /home/greg_aeolus_earth/ncar-dns/runs/L1b/n32_seed1/Zk10.out.ncf ${1:-64:centered4,128:centered4} 0.4261658353450919 $HERE/ncar_dump_times_20.txt
