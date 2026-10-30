@@ -54,11 +54,12 @@ include("droplet_physics.jl")
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index, @atomic
 
+using Oceananigans.Advection: Centered
 using Oceananigans.Architectures: Architectures, architecture, on_architecture
 using Oceananigans.Fields: CenterField, FractionalIndices
 using Oceananigans.Grids: Bounded, Face, Flat, Periodic, RectilinearGrid, halo_size, topology
 using Oceananigans.Models.LagrangianParticleTracking: LagrangianParticleTracking, LagrangianParticles, StructArray
-using Oceananigans.Operators: Vᶜᶜᶜ
+using Oceananigans.Operators: Vᶜᶜᶜ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ
 using Oceananigans.TimeSteppers: materialize_lagrangian_particles, update_state!
 using Oceananigans.TurbulenceClosures: ScalarDiffusivity, ThreeDimensionalFormulation
 using Oceananigans.Utils: KernelParameters, interpolator, launch!

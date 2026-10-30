@@ -124,7 +124,8 @@ end
 
 # A single droplet in quiescent air with molecular diffusion: once its own vapor deficit and warming of its
 # cell are quasi-steady, it must grow at the rate of the growth law evaluated at the box-mean (ambient) state.
-function single_droplet_growth_error(self_interaction; N = 8, Δt = 1e-3, spin_up = 100)
+function single_droplet_growth_error(self_interaction; N = 8, Δt = 1e-3, spin_up = 100, velocity = (0, 0, 0),
+                                     averaging_steps = 1)
     FT = Float64
     L = N * 5e-4
     grid = RectilinearGrid(CPU(), FT; size=(N, N, N), x=(0, L), y=(0, L), z=(0, L),
@@ -140,7 +141,7 @@ function single_droplet_growth_error(self_interaction; N = 8, Δt = 1e-3, spin_u
     T₀ = 281
     pᵛ = 1.005 * saturation_vapor_pressure(T₀, constants, PlanarLiquidSurface())
     ε = dry_air_gas_constant(constants) / vapor_gas_constant(constants)
-    set!(model; T=T₀, qᵗ=ε * pᵛ / (90000 - (1 - ε) * pᵛ))
+    set!(model; T=T₀, qᵗ=ε * pᵛ / (90000 - (1 - ε) * pᵛ), u=velocity[1], v=velocity[2], w=velocity[3])
 
     for _ in 1:spin_up
         time_step!(model, Δt)
@@ -148,9 +149,11 @@ function single_droplet_growth_error(self_interaction; N = 8, Δt = 1e-3, spin_u
 
     properties = model.microphysics.droplets.properties
     r₀ = Array(properties.r)[1]
-    time_step!(model, Δt)
+    for _ in 1:averaging_steps
+        time_step!(model, Δt)
+    end
     r₁ = Array(properties.r)[1]
-    Φ = (r₁^2 - r₀^2) / 2Δt
+    Φ = (r₁^2 - r₀^2) / (2 * averaging_steps * Δt)
 
     # The growth law at the box-mean state
     T = mean(model.temperature)
@@ -173,4 +176,16 @@ end
     # with g reduced from 0.2527 / Δ by the periodic images and by diffusion during the time step
     @test -0.016 < uncorrected < -0.011
     @test abs(corrected) < 0.05 * abs(uncorrected)
+end
+
+@testset "Self-interaction correction of a droplet that moves through the grid" begin
+    # A droplet carried by uniform flow across the grid at a cell Péclet number |U| Δ / κ ≈ 2 in each direction
+    # samples about half of the perturbation it leaves in its cell at rest, so the correction must be reduced
+    kwargs = (velocity = (0.1, 0.083, 0.117), averaging_steps = 100)
+    uncorrected = single_droplet_growth_error(nothing; kwargs...)
+    stationary = single_droplet_growth_error(DiffusiveSelfInteraction(grid_translation=false); kwargs...)
+    corrected = single_droplet_growth_error(DiffusiveSelfInteraction(); kwargs...)
+    @test uncorrected < 0
+    @test stationary > 0.25 * abs(uncorrected) # the correction for droplets at rest overcorrects
+    @test abs(corrected) < 0.1 * abs(uncorrected)
 end
