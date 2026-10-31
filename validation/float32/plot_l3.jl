@@ -85,6 +85,33 @@ for (n, (inc, spacing, title)) in enumerate(((:theta_increment, :theta_spacing, 
 end
 save("$(prefix)_increments.png", fig)
 
+# Heat and water budgets of the box: with the NCAR constants (cᵖ equal for all components, constant ℒ), the mean
+# potential temperature changes only by latent heating, Δθ̄ = ℒ Δqˡ / (cᵖ Π), and total water q̄ᵛ + qˡ is conserved.
+# Their residuals measure the drift of the stored θ and qᵛ due to rounding.
+function budget_residuals(r)
+    Rᵈ, Rᵛ, cᵖ, ℒ = 287.0, 467.0, 1004.0, 2.477e6
+    qᵛ = r.vapor_mixing_ratio ./ (1 .+ r.vapor_mixing_ratio)
+    κ = (Rᵈ .* (1 .- qᵛ) .+ Rᵛ .* qᵛ) ./ cᵖ
+    Π = (r.pressure ./ 1e5) .^ κ
+    θ = r.temperature ./ Π
+    qˡ = r.liquid_water_content # kg of (wet) droplet mass per kg of air
+    heating = cumsum([0; ℒ .* diff(qˡ) ./ (cᵖ .* (Π[1:end-1] .+ Π[2:end]) ./ 2)])
+    return (heat = θ .- θ[1] .- heating, water = qᵛ .+ qˡ .- qᵛ[1] .- qˡ[1])
+end
+
+fig = Figure(size=(1200, 450))
+ax1 = Axis(fig[1, 1]; xlabel="t (s)", ylabel="θ̄ - θ̄₀ - ∫ ℒ dqˡ / (cᵖ Π)  (mK)", title="heat budget residual")
+ax2 = Axis(fig[1, 2]; xlabel="t (s)", ylabel="q̄ᵛ + qˡ - (q̄ᵛ + qˡ)₀  (10⁻⁹)", title="water budget residual")
+for v in variants, s in seeds
+    haskey(runs, (v, s)) || continue
+    b = budget_residuals(runs[(v, s)])
+    t = runs[(v, s)].time
+    lines!(ax1, t, 1e3 .* b.heat; color=colors[v], linestyle=s == 1 ? :solid : :dash, label=s == first(seeds) ? labels[v] : nothing)
+    lines!(ax2, t, 1e9 .* b.water; color=colors[v], linestyle=s == 1 ? :solid : :dash)
+end
+axislegend(ax1; position=:lt, framevisible=false)
+save("$(prefix)_budgets.png", fig)
+
 # Summary table: final values and plateau averages (t ≥ 2.1 s), mean ± std over seeds
 plateau(r, x) = mean(x[r.time .≥ min(2.1, r.time[end])])
 statistics = [(:liquid_water_content, "LWC (g/kg)", 1e3, :final), (:mean_radius, "r̄ (μm)", 1e6, :final),
@@ -92,8 +119,9 @@ statistics = [(:liquid_water_content, "LWC (g/kg)", 1e3, :final), (:mean_radius,
               (:droplet_mean_supersaturation, "droplet 𝒮 (%)", 100, :plateau),
               (:std_supersaturation, "std 𝒮 (%)", 100, :plateau), (:std_temperature, "std T′ (mK)", 1e3, :plateau)]
 open("$(prefix)_summary.md", "w") do io
-    println(io, "| variant | n | ", join([s[2] * (s[4] == :final ? " end" : " plateau") for s in statistics], " | "), " |")
-    println(io, "|", repeat("---|", length(statistics) + 2))
+    println(io, "| variant | n | ", join([s[2] * (s[4] == :final ? " end" : " plateau") for s in statistics], " | "),
+            " | heat residual end (mK) | water residual end (10⁻⁹) |")
+    println(io, "|", repeat("---|", length(statistics) + 4))
     for v in variants
         rs = [runs[(v, s)] for s in seeds if haskey(runs, (v, s))]
         isempty(rs) && continue
@@ -101,7 +129,9 @@ open("$(prefix)_summary.md", "w") do io
             x = [scale * (kind == :final ? getfield(r, q)[end] : plateau(r, getfield(r, q))) for r in rs]
             length(x) > 1 ? @sprintf("%.5g ± %.2g", mean(x), std(x)) : @sprintf("%.5g", x[1])
         end
-        println(io, "| ", labels[v], " | ", length(rs), " | ", join(cells, " | "), " |")
+        heat = [1e3 * budget_residuals(r).heat[end] for r in rs]
+        water = [1e9 * budget_residuals(r).water[end] for r in rs]
+        println(io, "| ", labels[v], " | ", length(rs), " | ", join(cells, " | "), @sprintf(" | %.3g | %.3g |", mean(heat), mean(water)))
     end
 end
 print(read("$(prefix)_summary.md", String))
