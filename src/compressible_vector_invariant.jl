@@ -117,7 +117,21 @@ it is free of the Hollingsworth instability; and, unlike `CornerVorticityPairing
 not averaged back to the corner, so the upwind dissipation acts on grid-scale (2Δ) vorticity, where
 a two-point average would annihilate it. The default.
 """
-struct UpwindVorticityPairing end
+struct UpwindVorticityPairing{S} end
+
+"""
+$(TYPEDSIGNATURES)
+
+With `self_part = true` the deviation at each velocity point is that of the self part of the
+vorticity only — `∂x v` reconstructed along `x` at the `v` point, `−∂y u` along `y` at the `u` point — so
+that, linearized about a sheared flow, the pairing couples `u` and `v` exactly as the corner vorticity
+does (no residual of the Hollingsworth kind at any wavenumber: §7 of the derivation note). With
+`self_part = false` the deviation is that of the full vorticity, which leaves the odd part of the
+reconstruction as a wavenumber-dependent modification of the Coriolis coupling in the `v` equation.
+"""
+UpwindVorticityPairing(; self_part = false) = UpwindVorticityPairing{self_part}()
+
+Base.summary(::UpwindVorticityPairing{S}) where S = string("UpwindVorticityPairing(self_part=", S, ")")
 
 """
 $(TYPEDEF)
@@ -208,7 +222,7 @@ const AveragedPairedVorticity = CVI{<:Any, <:Any, <:AbstractAdvectionScheme, <:A
 # How far beyond its own stencil a reconstructed vorticity is read by the pairing: the upwind pairing
 # averages the partners' deviations with two-point interpolations (one point), the corner and averaged
 # pairings interpolate them with the core scheme (its buffer).
-pairing_reach(::UpwindVorticityPairing, core_scheme) = 1
+pairing_reach(::UpwindVorticityPairing, core_scheme) = 1  # (both self_part choices)
 pairing_reach(pairing, core_scheme) = reconstruction_buffer(core_scheme)
 pairing_reach(::Nothing, core_scheme) = 1
 
@@ -356,7 +370,7 @@ julia> CompressibleWENOVectorInvariant()
 CompressibleWENOVectorInvariant{6, Float64}(vorticity_order=9, vertical_order=5)
 ├── vorticity_scheme: WENO{5, Float64, Nothing}(order=9)
 ├── vorticity_stencil: Oceananigans.Advection.VelocityStencil
-├── vorticity_pairing: UpwindVorticityPairing
+├── vorticity_pairing: UpwindVorticityPairing(self_part=false)
 ├── vertical_advection_scheme: WENO{3, Float64, Nothing}(order=5)
 ├── kinetic_energy_gradient_scheme: EnergyConserving
 ├── divergence_scheme: WENO{3, Float64, Nothing}(order=5)
@@ -460,7 +474,7 @@ function Base.show(io::IO, scheme::CVI)
         print(io, "├── vorticity_stencil: ", summary(scheme.vorticity_stencil), '\n')
     end
     if !(scheme.vorticity_scheme isa EnergyConserving)
-        print(io, "├── vorticity_pairing: ", nameof(typeof(scheme.vorticity_pairing)), '\n')
+        print(io, "├── vorticity_pairing: ", summary(scheme.vorticity_pairing), '\n')
     end
     print(io, "├── vertical_advection_scheme: ", summary(scheme.vertical_advection_scheme), '\n')
     print(io, "├── kinetic_energy_gradient_scheme: ", summary(scheme.kinetic_energy_gradient_scheme), '\n')
@@ -548,7 +562,6 @@ end
 # has; in the u equation the roles swap. The transposes on the other side of each pair keep the
 # pairing symmetric: the pair (u, v) through corner q weighs ζᵛ_q by [P_x]_{q,v}[ℑʸ]_{q,u} and ζᵘ_q by
 # [ℑˣ]_{q,v}[P_y]_{q,u} on both sides.
-@inline ζᵛᶠᶠᶜ(i, j, k, grid, u, v) = δxᶠᶠᶜ(i, j, k, grid, Δy_qᶜᶠᶜ, v) * Az⁻¹ᶠᶠᶜ(i, j, k, grid)
 @inline ζᵘᶠᶠᶜ(i, j, k, grid, u, v) = δyᶠᶠᶜ(i, j, k, grid, Δx_qᶠᶜᶜ, u) * Az⁻¹ᶠᶠᶜ(i, j, k, grid)
 
 # The corner correction a pairing adds to the corner vorticity (none for the upwind pairing, whose
@@ -577,14 +590,24 @@ end
     - Ayᶜᶠᶜ(i, j, k, grid) * V⁻¹ᶜᶠᶜ(i, j, k, grid) * (Pxᶜᵃᵃ(i, j, k, grid, scheme, ρζᵛ_ℑy_Δy_uᶠᶠᶜ, scheme, ρ, u, v) -
                                                     ℑxᶜᵃᵃ(i, j, k, grid, ρζᵘ_Py_Δy_uᶠᶠᶜ, scheme, ρ, u, v))
 
+# The vorticity a reconstruction acts on: the full vorticity, or (self-part upwind pairing) the part of it
+# that the equation advects itself, ∂x v along x for the v equation and −∂y u along y for the u equation
+@inline negative_ζᵘᶠᶠᶜ(i, j, k, grid, u, v) = - δyᶠᶠᶜ(i, j, k, grid, Δx_qᶠᶜᶜ, u) * Az⁻¹ᶠᶠᶜ(i, j, k, grid)
+@inline ζᵛᶠᶠᶜ(i, j, k, grid, u, v) = δxᶠᶠᶜ(i, j, k, grid, Δy_qᶜᶠᶜ, v) * Az⁻¹ᶠᶠᶜ(i, j, k, grid)
+
+x_reconstructed_vorticity(scheme) = ζ₃ᶠᶠᶜ
+y_reconstructed_vorticity(scheme) = ζ₃ᶠᶠᶜ
+x_reconstructed_vorticity(::CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, UpwindVorticityPairing{true}}) = ζᵛᶠᶠᶜ
+y_reconstructed_vorticity(::CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, UpwindVorticityPairing{true}}) = negative_ζᵘᶠᶠᶜ
+
 @inline function reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, u, v)
     v̂ = ℑxy_Δx_vᶠᶜᶜ(i, j, k, grid, v)
-    return _biased_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(v̂), ζ₃ᶠᶠᶜ, scheme.vorticity_stencil, u, v)
+    return _biased_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(v̂), y_reconstructed_vorticity(scheme), scheme.vorticity_stencil, u, v)
 end
 
 @inline function reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, u, v)
     û = ℑxy_Δy_uᶜᶠᶜ(i, j, k, grid, u)
-    return _biased_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(û), ζ₃ᶠᶠᶜ, scheme.vorticity_stencil, u, v)
+    return _biased_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(û), x_reconstructed_vorticity(scheme), scheme.vorticity_stencil, u, v)
 end
 
 @inline ρ_ℑx_Δx_vᶠᶠᶜ(i, j, k, grid, scheme, ρ, v) = ℑxyᶠᶠᵃ(i, j, k, grid, ρ) * Pxᶠᵃᵃ(i, j, k, grid, scheme, Δx_qᶜᶠᶜ, v)
@@ -613,11 +636,11 @@ end
 
 @inline y_vorticity_deviationᶠᶜᶜ(i, j, k, grid, scheme, u, v) =
     reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, u, v) -
-    _symmetric_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme.centered_vorticity_scheme, ζ₃ᶠᶠᶜ, u, v)
+    _symmetric_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme.centered_vorticity_scheme, y_reconstructed_vorticity(scheme), u, v)
 
 @inline x_vorticity_deviationᶜᶠᶜ(i, j, k, grid, scheme, u, v) =
     reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, u, v) -
-    _symmetric_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme.centered_vorticity_scheme, ζ₃ᶠᶠᶜ, u, v)
+    _symmetric_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme.centered_vorticity_scheme, x_reconstructed_vorticity(scheme), u, v)
 
 @inline corner_correctionᶠᶠᶜ(i, j, k, grid, scheme::CornerPairedVorticity, u, v) =
     - y_deviation_weightᶠᶠᶜ(i, j, k, grid, u, v) * ℑyᵃᶠᵃ(i, j, k, grid, y_vorticity_deviationᶠᶜᶜ, scheme, u, v) -
