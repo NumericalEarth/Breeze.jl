@@ -33,7 +33,7 @@ using Breeze.Solvers: NewtonSolver
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, AtmosphereModelBuoyancy,
     dynamics_density, total_density, standard_pressure, dynamics_prognostic_fields,
-    grid_moisture_fractions, specific_prognostic_moisture, div_ρUc, ∇_dot_Jᶜ,
+    grid_moisture_fractions, prescribed_temperature_moisture_fractions, specific_prognostic_moisture, div_ρUc, ∇_dot_Jᶜ,
     radiation_flux_divergence, materialize_formulation,
     explicit_condensate_mass_fluxes, implicit_condensate_mass_fluxes, implicit_sedimentation,
     kernel_time_step, compute_velocities!

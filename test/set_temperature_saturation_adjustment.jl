@@ -138,12 +138,13 @@ function hydrostatic_equilibrium_column(z, qᵗ, constants, equilibrium)
     return ρ, p
 end
 
-function compressible_saturation_adjustment_model(grid, constants, equilibrium)
+function compressible_saturation_adjustment_model(grid, constants, equilibrium;
+                                                  formulation = LiquidIcePotentialTemperatureFormulation())
     θ₀ = 290.0
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5,
                                     reference_potential_temperature = z -> θ₀)
     microphysics = SaturationAdjustment(eltype(grid); equilibrium)
-    return AtmosphereModel(grid; dynamics, microphysics, thermodynamic_constants = constants,
+    return AtmosphereModel(grid; dynamics, formulation, microphysics, thermodynamic_constants = constants,
                            advection = WENO(order = 5))
 end
 
@@ -173,7 +174,32 @@ end
     end
 end
 
-@testset "A saturated compressible rest state set from T stays near rest" begin
+@testset "set!(model; T, qᵗ, ρ) under saturation adjustment, total energy [$FT, T₀ = $T₀]" for FT in test_float_types(),
+                                                                                              T₀ in (0, 273.16)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (8, 20), halo = (5, 5), x = (0, 800), z = (0, 5e3),
+                           topology = (Periodic, Flat, Bounded))
+    constants = ThermodynamicConstants(FT)
+    z = znodes(grid, Center())
+
+    T_atol = FT == Float64 ? 1e-3 : 5e-1
+    q_atol = FT == Float64 ? 1e-7 : 1e-4
+
+    for equilibrium in (WarmPhaseEquilibrium(), MixedPhaseEquilibrium()), (column, qᵗ) in pairs(set_T_columns)
+        @testset "$(summary(equilibrium)), $column" begin
+            formulation = TotalEnergyFormulation(reference_temperature = T₀)
+            model = compressible_saturation_adjustment_model(grid, constants, equilibrium; formulation)
+            ρ, _ = hydrostatic_equilibrium_column(z, qᵗ, constants, equilibrium)
+            set!(model; T = (x, z) -> set_T_profile(z), qᵗ = FT(qᵗ), ρ = reshape(FT.(ρ), 1, 1, :) .+ zeros(FT, 8, 1, 1))
+
+            max_condensate = check_recovered_temperature(model, FT(qᵗ), equilibrium, FT; T_atol, q_atol)
+            column == :saturated ? (@test max_condensate > 1e-3) : (@test max_condensate == 0)
+        end
+    end
+end
+
+@testset "A saturated compressible rest state set from T stays near rest [$(summary(formulation))]" for formulation in (LiquidIcePotentialTemperatureFormulation(),
+                                                                                                                       TotalEnergyFormulation(reference_temperature = 273.16))
     FT = Float64
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size = (8, 50), halo = (5, 5), x = (0, 800), z = (0, 5e3),
@@ -182,7 +208,7 @@ end
     equilibrium = WarmPhaseEquilibrium()
     qᵗ = set_T_columns.saturated
 
-    model = compressible_saturation_adjustment_model(grid, constants, equilibrium)
+    model = compressible_saturation_adjustment_model(grid, constants, equilibrium; formulation)
     ρ, _ = hydrostatic_equilibrium_column(znodes(grid, Center()), qᵗ, constants, equilibrium)
     set!(model; T = (x, z) -> set_T_profile(z), qᵗ, ρ = reshape(ρ, 1, 1, :) .+ zeros(8, 1, 1))
 

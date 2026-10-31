@@ -238,6 +238,10 @@ velocities: ``ρE = ρ (cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ 
 energy origin of the formulation. `set!` applies the velocities
 before the temperature, so that the kinetic energy is included; setting the velocities in a later
 call to `set!` leaves ``ρE`` unchanged and so changes the temperature.
+
+Under saturation adjustment, the moisture is partitioned at equilibrium at ``T`` (see
+[`prescribed_temperature_moisture_fractions`](@ref Breeze.AtmosphereModels.prescribed_temperature_moisture_fractions)),
+so that the adjustment applied by `update_state!` returns ``T``.
 """
 function AtmosphereModels.set_thermodynamic_variable!(model::TotalEnergyModel, ::Val{:T}, value)
     T = model.temperature # scratch space
@@ -299,7 +303,11 @@ end
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    # Moisture fractions at temperature T. Under saturation adjustment this is the equilibrium
+    # partition at T, so that the latent energy of the condensate is included and the adjustment
+    # in update_state! returns T.
+    q = prescribed_temperature_moisture_fractions(i, j, k, grid, microphysics, dynamics, ρ, qᵛᵉ,
+                                                  microphysical_fields, T, constants)
     𝒰 = with_temperature(InternalEnergyDensityState(zero(T), q, ρ), T, constants)
     K = kinetic_energyᶜᶜᶜ(i, j, k, grid, velocities)
     g = constants.gravitational_acceleration
