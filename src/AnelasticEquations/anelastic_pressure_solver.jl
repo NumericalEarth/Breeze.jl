@@ -98,7 +98,10 @@ end
 ##### Pressure solve
 #####
 
-function solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
+solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt) = solve_anelastic_poisson_equation!(pₙ, solver, ρŨ, Δt)
+
+# Architecture extensions (e.g. BreezeReactantExt) wrap this in `solve_for_anelastic_pressure!`.
+function solve_anelastic_poisson_equation!(pₙ, solver, ρŨ, Δt)
     compute_anelastic_source_term!(solver, ρŨ, Δt)
     fill!(solver.storage, 0)  # workaround for bitwise reproducibility — see Oceananigans #5960
     solve!(pₙ, solver)
