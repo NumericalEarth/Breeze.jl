@@ -102,6 +102,8 @@ function run_weno_tests(scheme_label, scheme)
             # ── Build ──
             @testset "Build" begin
                 model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), advection=scheme)
+                compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+                compiled_initialize!(model)
                 @test model isa AtmosphereModel
                 @test model.dynamics isa CompressibleDynamics
 
@@ -113,6 +115,8 @@ function run_weno_tests(scheme_label, scheme)
 
             # Reconstruct for backward + FD phases
             model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), advection=scheme)
+            compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+            compiled_initialize!(model)
 
             θ_init, dθ_init = make_init_fields(grid)
             dmodel = Enzyme.make_zero(model)

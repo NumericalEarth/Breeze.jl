@@ -1,4 +1,5 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
+using Breeze.Utils: initialize_on_construction!
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
@@ -133,6 +134,17 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── coriolis: Nothing
 └── microphysics: Nothing
 ```
+
+Initialization
+==============
+
+Construction initializes the dynamics: a compressible model's reference state and seeded pressure.
+`initialize!(model)`, which `run!` calls, also sets up the boundary-condition state, which reads the
+density, so a model stepped with `time_step!` directly should be `initialize!`d after `set!`.
+
+On `ReactantState`, construction initializes nothing. Compile `initialize!` and run it after `set!`
+and before time stepping, `Reactant.@compile sync=true initialize!(model)`, and also before `set!`
+when the initial conditions read the reference state. `initialize!` is idempotent.
 
 References
 ==========
@@ -389,6 +401,10 @@ function AtmosphereModel(grid;
     # *default*: `initialize!` runs after `set!`, which is where a user supplies `nᵃ` or `ρnᵃ`,
     # so re-seeding there would overwrite a user-supplied aerosol reservoir.
     set_default_aerosol_number!(model)
+
+    # The dynamics state (reference column, seeded pressure) only: the boundary-condition state reads a
+    # density, which `set!` supplies, so `initialize!(model)` sets it up after `set!`
+    initialize_on_construction!(arch, initialize_dynamics!, model.dynamics, model.grid, model.thermodynamic_constants)
 
     return model
 end

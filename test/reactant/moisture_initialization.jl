@@ -39,6 +39,8 @@ end
     formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver=FixedIterations(2))
     model = AtmosphereModel(grid; microphysics, thermodynamic_constants, formulation,
                             dynamics=CompressibleDynamics())
+    compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+    compiled_initialize!(model)
     total_water = CenterField(grid)
     set!(total_water, FT(0.01))
 

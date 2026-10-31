@@ -255,6 +255,23 @@ The slow vertical momentum tendency uses the *imbalance*
 ``-∂_z(p^L - p_r) - (ρ^L - ρ_r) g`` so that a column in exact discrete balance contributes
 zero buoyancy forcing, no matter how steeply ``ρ_r(z)`` and ``p_r(z)`` vary.
 
+#### Building the reference state on `ReactantState`
+
+The reference state is integrated, and the diagnostic pressure seeded from it, by
+`initialize!(model)`. On CPU and GPU architectures model construction does this. On
+`ReactantState` construction leaves the model uninitialized: the integration is compiled
+and run as a program of its own,
+
+```julia
+compiled_initialize! = Reactant.@compile sync=true initialize!(model)
+compiled_initialize!(model)
+```
+
+before time stepping, and before `set!` when the initial conditions read the reference
+state (for instance a density taken from `model.dynamics.reference_state.density`).
+`initialize!` is idempotent, so running it again after `set!` brings the boundary-condition
+state, which reads the density, up to date.
+
 #### Per-column Newton integration
 
 For a prescribed background ``\bar{θ}(z)`` and optional ``\bar{q}^v(z)``, the level-local
