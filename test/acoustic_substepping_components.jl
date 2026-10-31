@@ -26,11 +26,14 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
-                                    implicit_damping_factors
+                                    implicit_damping_factors, prepare_acoustic_cache!
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
-                               buoyancy_forceᶜᶜᶜ, dynamics_density
-using Breeze.Thermodynamics: ExnerReferenceState, surface_density
+                               buoyancy_forceᶜᶜᶜ, dynamics_density, standard_pressure
+using Breeze.Thermodynamics: ExnerReferenceState, surface_density, LiquidIceDensityState, MoistureMassFractions,
+                             VaporEquivalentExponent, DryExponent, temperature, mixture_gas_constant,
+                             mixture_heat_capacity, dry_air_gas_constant
+using Oceananigans.TimeSteppers: update_state!
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Architectures: architecture
@@ -672,4 +675,76 @@ for arch in arches
         Oceananigans.defaults.FloatType = old_FT
     end
 
+end
+
+#####
+##### The linearized pressure coefficient is the slope of the equation of state
+#####
+
+# The loop's p′ = Cᴸ (ρθ)′ must use the slope ∂p/∂(ρθ) of the equation of state the compressible core
+# closes the thermodynamics with, at fixed dry and water partial densities and for the formulation's
+# Exner exponent: finite differences of the core's own inversion θ → T → p = ρ Rᵐ T, in cells that
+# are dry, moist and cloudy. The mixture γᵐ Rᵐ with the dry exponent, which the cache held before,
+# is low by the vapor mass fraction in unsaturated air; in cloud the condensate terms of the
+# definition of θˡⁱ enter with the opposite sign and leave a smaller mismatch, still far outside
+# the tolerance of the slope.
+@testset "Linearized pressure coefficient is the slope of the equation of state [$FT, $(nameof(typeof(κ̂)))]" for FT in test_float_types(), κ̂ in (VaporEquivalentExponent(), DryExponent())
+    old_FT = Oceananigans.defaults.FloatType
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size = (6, 6, 6), halo = (5, 5, 5),
+                           x = (0, 2e3), y = (0, 2e3), z = (0, 3e3),
+                           topology = (Periodic, Periodic, Bounded))
+    constants = ThermodynamicConstants(FT)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = z -> 300)
+    formulation = LiquidIcePotentialTemperatureFormulation(; exner_exponent = κ̂)
+    model = AtmosphereModel(grid; dynamics, formulation, thermodynamic_constants = constants,
+                            microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()))
+
+    # Dry below 1 km, unsaturated vapor to 2 km, and enough water to condense above.
+    qᵗ(x, y, z) = ifelse(z < 1e3, 0.0, ifelse(z < 2e3, 0.005, 0.03))
+    set!(model; ρ = model.dynamics.reference_state.density, θ = 300, qᵗ)
+    update_state!(model)
+    prepare_acoustic_cache!(model.timestepper.substepper, model)
+
+    Πᴸ   = Array(interior(model.timestepper.substepper.linearization_exner))
+    γRᵐᴸ = Array(interior(model.timestepper.substepper.linearization_gamma_R_mixture))
+    ρᵈ   = Array(interior(model.dynamics.dry_density))
+    ρ    = Array(interior(model.dynamics.total_density))
+    ρθ   = Array(interior(model.formulation.potential_temperature_density))
+    p    = Array(interior(model.dynamics.pressure))
+    qᵛ   = Array(interior(model.microphysical_fields.qᵛ))
+    qˡ   = Array(interior(model.microphysical_fields.qˡ))
+    @test maximum(qˡ) > 1e-4  # the top layer condensed
+    @test minimum(qᵛ) == 0    # the bottom layer is dry
+
+    pˢᵗ = FT(standard_pressure(model.dynamics))
+    Rᵈ  = dry_air_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    κᵈ  = Rᵈ / cᵖᵈ
+    ε    = FT == Float64 ? FT(1e-4) : FT(1e-2)
+    rtol = FT == Float64 ? FT(1e-5) : FT(3e-3)
+    solver = model.formulation.temperature_solver
+
+    for I in CartesianIndices(ρθ)
+        q  = MoistureMassFractions(qᵛ[I], qˡ[I], zero(FT))
+        θ  = ρθ[I] / ρᵈ[I]
+        Rᵐ = mixture_gas_constant(q, constants)
+        pressure(θ′) = ρ[I] * Rᵐ * temperature(LiquidIceDensityState(θ′, q, pˢᵗ, ρ[I], solver, κ̂), constants)
+        slope = (pressure(θ * (1 + ε)) - pressure(θ * (1 - ε))) / (2ε * θ * ρᵈ[I])
+        @test Πᴸ[I] * γRᵐᴸ[I] ≈ slope rtol = rtol
+
+        if qᵛ[I] == 0
+            @test Πᴸ[I] * γRᵐᴸ[I] ≈ cᵖᵈ * Rᵈ / (cᵖᵈ - Rᵈ) * (p[I] / pˢᵗ)^κᵈ rtol = 100eps(FT)
+        elseif FT == Float64
+            cᵖᵐ = mixture_heat_capacity(q, constants)
+            γᵐRᵐΠᵈ = cᵖᵐ * Rᵐ / (cᵖᵐ - Rᵐ) * (p[I] / pˢᵗ)^κᵈ
+            @test !isapprox(γᵐRᵐΠᵈ, slope; rtol = 10rtol)
+            if qˡ[I] == 0
+                @test abs(γᵐRᵐΠᵈ / slope - 1) > qᵛ[I] / 2
+            end
+        end
+    end
+    Oceananigans.defaults.FloatType = old_FT
 end
