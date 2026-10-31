@@ -42,6 +42,7 @@ examples = [
     Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
     Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz"; build_always=true, gpu=false),
     Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=true),
+    Example("Held-Suarez on the Yin-Yang grid", "held_suarez_yin_yang"; build_always=false, gpu=true),
     Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
     Example("Shallow cumulus convection (BOMEX)", "bomex"; build_always=true, gpu=true),
     Example("Precipitating shallow cumulus (RICO)", "rico"; build_always=false, gpu=true),

@@ -422,6 +422,8 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.tupled_tracer_diffusivities),
                      adapt(to, fields.tupled_implicit_linear_coefficients))
 
+@regional TKEClosureFields
+
 BoundaryConditions.fill_halo_regions!(fields::TKEClosureFields, args...; kw...) =
     fill_halo_regions!((fields.Kᵘ, fields.Kᶜ, fields.Kᵉ), args...; kw...)
 
@@ -777,6 +779,11 @@ end
 function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
                                                          closure::FlavorOfTKEClosure,
                                                          model; parameters = :xyz)
+    @apply_regionally launch_compute_tke_closure_fields!(closure_fields, closure, model, parameters)
+    return nothing
+end
+
+function launch_compute_tke_closure_fields!(closure_fields, closure, model, parameters)
     grid = model.grid
     arch = grid.architecture
     tracers = Oceananigans.TurbulenceClosures.buoyancy_tracers(model)
@@ -841,6 +848,11 @@ end
 # Called by the time steppers at the start of every stage, after the flux boundary conditions have
 # been added to the tendencies; the tracers hold their density-weighted values here.
 function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, closure::FlavorOfTKEClosure, model)
+    @apply_regionally launch_add_tke_tendencies!(Gⁿ, closure_fields, closure, model)
+    return nothing
+end
+
+function launch_add_tke_tendencies!(Gⁿ, closure_fields, closure, model)
     grid = model.grid
     arch = grid.architecture
     ρ = AtmosphereModels.total_density(model.dynamics)

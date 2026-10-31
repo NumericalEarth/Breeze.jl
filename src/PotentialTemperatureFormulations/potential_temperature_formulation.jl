@@ -103,6 +103,8 @@ Adapt.adapt_structure(to, formulation::LiquidIcePotentialTemperatureFormulation)
                                              formulation.temperature_solver,
                                              formulation.exner_exponent)
 
+@regional LiquidIcePotentialTemperatureFormulation
+
 function BoundaryConditions.fill_halo_regions!(formulation::LiquidIcePotentialTemperatureFormulation)
     fill_halo_regions!(formulation.potential_temperature)
     return nothing

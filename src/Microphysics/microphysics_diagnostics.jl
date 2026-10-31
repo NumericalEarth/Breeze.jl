@@ -4,6 +4,7 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: Field, Center
 using Oceananigans.Utils: Utils
 
+using Breeze.Utils: @regional
 using Breeze.Thermodynamics:
     vapor_gas_constant,
     saturation_vapor_pressure,
@@ -48,6 +49,8 @@ Adapt.adapt_structure(to, k::RelativeHumidityKernelFunction) =
                                    adapt(to, k.density),
                                    adapt(to, k.dynamics),
                                    adapt(to, k.thermodynamic_constants))
+
+@regional RelativeHumidityKernelFunction
 
 const RelativeHumidityOp = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:RelativeHumidityKernelFunction}
 

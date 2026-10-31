@@ -195,6 +195,8 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.contravariant_vertical_velocity),
                          adapt(to, dynamics.contravariant_vertical_momentum))
 
+@regional CompressibleDynamics
+
 # The compressible θˡⁱ→T inversion is implicit (T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ), so the
 # default temperature solver iterates to convergence. The anelastic inversion is
 # closed-form and uses the generic `nothing` fallback.
@@ -330,14 +332,14 @@ build_reference_state(grid, ::Nothing, ref_spec, base_pressure, standard_pressur
 
 function seed_pressure!(pressure, grid, pressure_reference)
     arch = grid.architecture
-    launch!(arch, grid, :xyz, _seed_pressure_from_field!, pressure, pressure_reference)
+    @apply_regionally launch!(arch, grid, :xyz, _seed_pressure_from_field!, pressure, pressure_reference)
     fill_halo_regions!(pressure)
     return nothing
 end
 
 function seed_pressure!(pressure, grid, pressure_value::Number)
     arch = grid.architecture
-    launch!(arch, grid, :xyz, _seed_pressure_from_value!, pressure, pressure_value)
+    @apply_regionally launch!(arch, grid, :xyz, _seed_pressure_from_value!, pressure, pressure_value)
     fill_halo_regions!(pressure)
     return nothing
 end
@@ -576,6 +578,13 @@ AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =
 
 default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticRungeKutta3
 default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
+
+# The slow tendencies of `SplitExplicitTimeDiscretization` omit the vertical pressure gradient and the
+# buoyancy, which only the acoustic substeps of `AcousticRungeKutta3` integrate
+AtmosphereModels.validate_timestepper(::Val{:AcousticRungeKutta3}, ::CompressibleDynamics{<:SplitExplicitTimeDiscretization}) = nothing
+
+AtmosphereModels.validate_timestepper(::Val{name}, ::CompressibleDynamics{<:SplitExplicitTimeDiscretization}) where name =
+    throw(ArgumentError("CompressibleDynamics(SplitExplicitTimeDiscretization()) requires timestepper = :AcousticRungeKutta3, got :$name."))
 
 #####
 ##### Show methods

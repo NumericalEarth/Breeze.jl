@@ -164,6 +164,7 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
     SpecificForcing,
+    held_suarez_forcings,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
@@ -318,6 +319,10 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
+
+# After the dynamics, time steppers, closures and advection, whose fluxes it evaluates
+include("YinYangConservation.jl")
+using .YinYangConservation
 
 include("Forcings/Forcings.jl")
 using .Forcings

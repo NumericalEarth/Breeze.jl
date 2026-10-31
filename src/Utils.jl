@@ -1,8 +1,8 @@
 """
 Small, scheme-independent helpers shared across Breeze: property sums, guarded arithmetic, the
 Chebyshev–Gauss quadrature used to tabulate size-distribution integrals, and the
-`@adapt_architecture` macro that generates architecture-transfer methods for
-container structs.
+`@adapt_architecture` and `@regional` macros that generate architecture-transfer and
+multi-region access methods for container structs.
 """
 module Utils
 
@@ -11,12 +11,14 @@ export sum_properties,
        chebyshev_gauss_nodes_weights,
        transform_to_diameter,
        jacobian_diameter_transform,
-       @adapt_architecture
+       @adapt_architecture,
+       @regional
 
 using Adapt: Adapt
 using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: on_architecture
+using Oceananigans.Utils: getregion, _getregion
 
 #####
 ##### Sums of selected properties
@@ -163,6 +165,32 @@ macro adapt_architecture(T)
         Adapt.adapt_structure(to, x::$T) = $T($(adapt_args...))
         Oceananigans.Architectures.on_architecture(arch, x::$T) = $T($(on_arch_args...))
     end)
+end
+
+#####
+##### Regional access for container structs on multi-region grids
+#####
+
+# TODO: this macro belongs in Oceananigans.Utils, which writes these methods by hand for each of its containers.
+"""
+    @regional T
+
+Generate `Oceananigans.Utils.getregion` and `_getregion` methods for `T` that rebuild it from the
+regionalized fields, so that a `T` holding fields on a `MultiRegionGrid` can be passed to
+`@apply_regionally`. `T` must be defined when the macro is expanded, and its type parameters must
+be deducible from the arguments of its positional constructor.
+"""
+macro regional(T)
+    fields = fieldnames(getfield(__module__, T))
+
+    # The two methods alternate as in Oceananigans, to keep the recursion through nested containers inferable
+    outer_args = [:(_getregion(getfield(x, $(QuoteNode(f))), r)) for f in fields]
+    inner_args = [:(getregion(getfield(x, $(QuoteNode(f))), r)) for f in fields]
+    T = esc(T)
+    return quote
+        @inline Oceananigans.Utils.getregion(x::$T, r) = $T($(outer_args...))
+        @inline Oceananigans.Utils._getregion(x::$T, r) = $T($(inner_args...))
+    end
 end
 
 end # module Utils

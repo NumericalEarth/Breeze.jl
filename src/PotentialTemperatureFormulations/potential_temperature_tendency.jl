@@ -296,18 +296,18 @@ function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatur
 
     grid = model.grid
     arch = grid.architecture
-    launch!(arch, grid, :xyz,
-            _potential_temperature_from_energy!,
-            formulation.potential_temperature_density,
-            formulation.potential_temperature,
-            grid,
-            s,
-            specific_prognostic_moisture(model),
-            model.dynamics,
-            model.microphysics,
-            model.microphysical_fields,
-            model.thermodynamic_constants,
-            formulation.exner_exponent)
+    @apply_regionally launch!(arch, grid, :xyz,
+                              _potential_temperature_from_energy!,
+                              formulation.potential_temperature_density,
+                              formulation.potential_temperature,
+                              grid,
+                              s,
+                              specific_prognostic_moisture(model),
+                              model.dynamics,
+                              model.microphysics,
+                              model.microphysical_fields,
+                              model.thermodynamic_constants,
+                              formulation.exner_exponent)
 
     return nothing
 end

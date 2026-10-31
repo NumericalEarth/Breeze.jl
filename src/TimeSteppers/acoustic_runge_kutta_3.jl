@@ -113,6 +113,8 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                                                     implicit_solver, substepper)
 end
 
+@regional AcousticRungeKutta3
+
 #####
 ##### Adaptive-implicit vertical advection split time step
 #####
@@ -205,7 +207,7 @@ end
 function scalar_rk3_substep!(model::AtmosphereModel, Δt_stage)
     grid = model.grid
     kernel_Δt = kernel_time_step(grid.architecture, grid, Δt_stage)
-    return scalar_substep!(model, _rk3_substep!, Δt_stage, kernel_Δt)
+    return @apply_regionally scalar_substep!(model, _rk3_substep!, Δt_stage, kernel_Δt)
 end
 
 @kernel function _rk3_substep!(u, u⁰, G, Δt_stage)

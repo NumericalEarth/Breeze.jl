@@ -18,8 +18,9 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, CenterField, Center, znode
 using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
 using Oceananigans.Operators: ℑzᵃᵃᶜ
-using Oceananigans.Utils: prettysummary, launch!
+using Oceananigans.Utils: prettysummary, launch!, @apply_regionally
 
+using Breeze.Utils: @regional
 using Breeze.AtmosphereModels: AtmosphereModels,
     dynamics_density, total_density, dynamics_pressure, standard_pressure, dynamics_prognostic_fields,
     pressure_from_density_temperature,

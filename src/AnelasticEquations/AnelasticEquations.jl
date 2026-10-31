@@ -29,6 +29,7 @@ using Oceananigans.Fields: set!
 using Oceananigans.Grids: AbstractGrid, ZDirection, inactive_cell, with_number_type
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
+using Oceananigans.MultiRegion: MultiRegionGrids
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
 using Oceananigans.Utils: prettysummary, launch!

@@ -278,7 +278,7 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     twin_forcing = atmosphere_model_forcing(NamedTuple(), twin_prognostic, twin_model_fields,
                                             grid, model.coriolis, coupling_density, mass_density,
                                             model.velocities, twin_dynamics, formulation,
-                                            twin_microphysics, qᵛ)
+                                            twin_microphysics, qᵛ, constants)
 
     # closure = nothing: turbulent diffusion is dissipative (irreversible), so it is excluded from the
     # adiabatic excursion. `closure_fields` is carried along but unused when closure is nothing.

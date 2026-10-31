@@ -51,3 +51,23 @@ GPU-compatible kernel functions are critical for Breeze performance.
   and provide a `::Nothing` method for the missing case.
 - A `MethodError` on an unhandled combination is the intended "not implemented" signal;
   don't paper over it with runtime branches.
+
+## Multi-Region Grids
+
+`AtmosphereModel` runs on an Oceananigans `MultiRegionGrid`, which constrains launches and halo
+fills everywhere in `src/`:
+
+- Launch kernels under `@apply_regionally`, on the `launch!` call or on a helper that only
+  launches kernels (kernel parameters from `size(grid)` are then per region). Never call
+  `@apply_regionally` inside a function that runs under it.
+- Never fill halos inside a regional helper: `fill_halo_regions!` acts on the whole
+  multi-region field.
+- Fill horizontal vector components as a pair, `fill_halo_regions!((u, v))`, through
+  `fill_vector_halo_regions!` and `fill_prognostic_halo_regions!`.
+- A multi-region field has no single parent array: use `copy_parent!(a, b)` or a kernel instead
+  of `parent(a) .= ...`.
+- A struct that holds fields and reaches a regional launch (model wrappers, forcings, the kernel
+  functions of `KernelFunctionOperation` diagnostics) declares `@regional T` next to its
+  `Adapt.adapt_structure`.
+- Reductions of a multi-region field combine its regions; on a Yin-Yang grid they count every
+  point of the sphere once.

@@ -28,7 +28,7 @@ using Oceananigans.Architectures: architecture
 using Oceananigans.Fields: interpolate
 using Oceananigans.Grids: Center, znode
 using Oceananigans.TimeSteppers: update_state!
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: launch!, @apply_regionally
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES
@@ -444,7 +444,6 @@ afterwards to restore a consistent model state (halos, diagnostics, and tendenci
 function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model)
     grid = model.grid
     arch = architecture(grid)
-    Nz = grid.Nz
     Δt = model.clock.last_Δt
 
     # Skip microphysics update if timestep is zero, infinite, or invalid
@@ -479,9 +478,10 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     kernel_Δt = kernel_time_step(arch, grid, Δt)
 
-    launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, kernel_Δt, ρ, ρᵈ, dry_air_coupled,
-            p, pˢᵗ, κ̂, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+    Nz = size(grid, 3)
+    @apply_regionally launch!(arch, grid, :xy, _microphysical_update!,
+                              microphysics, grid, Nz, kernel_Δt, ρ, ρᵈ, dry_air_coupled,
+                              p, pˢᵗ, κ̂, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.

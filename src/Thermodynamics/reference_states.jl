@@ -2,10 +2,11 @@ using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
 using Oceananigans.Architectures: architecture, on_architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 using Oceananigans.Fields: AbstractField, CenterField, ZeroField
-using Oceananigans.Grids: znode, Face, topology, Flat
+using Oceananigans.Grids: znode, Face, topology, Flat, Bounded, RectilinearGrid, cpu_face_constructor_z, halo_size
+using Oceananigans.MultiRegion: MultiRegionGrids
 using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: launch!, @apply_regionally
 
 using Adapt: Adapt, adapt
 using GPUArraysCore: @allowscalar
@@ -982,6 +983,8 @@ Adapt.adapt_structure(to, ref::ExnerReferenceState) =
                         adapt(to, ref.density),
                         adapt(to, ref.exner_function))
 
+@regional ExnerReferenceState
+
 Base.eltype(::ExnerReferenceState{FT}) where FT = FT
 
 function Base.summary(ref::ExnerReferenceState)
@@ -1250,7 +1253,6 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     reject_renamed_surface_pressure(surface_pressure)
 
     FT = eltype(grid)
-    arch = architecture(grid)
     p₀ = convert(FT, base_pressure)
     pˢᵗ = convert(FT, standard_pressure)
     Rᵈ = dry_air_gas_constant(constants)
@@ -1259,13 +1261,17 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     cᵖᵛ = constants.vapor.heat_capacity
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
-    Nz = size(grid, 3)
+
+    # A single reference column is built on the column grid and read by every region.
+    column_grid = reference_column_grid(grid)
+    arch = architecture(column_grid)
+    Nz = size(column_grid, 3)
 
     # Height of the domain's bottom face. `base_pressure` is the datum at z = 0, so anything
     # anchored at the bottom face — the column integration, the bottom boundary values, and every
     # downstream consumer of "pressure at the surface" — needs the datum reduced to this height
     # first. Zero, and so a no-op, for the usual domain that starts at the ground.
-    zˢ = bottom_face_height(grid)
+    zˢ = bottom_face_height(column_grid)
 
     if reference_temperature !== nothing
         vapor_mass_fraction === nothing ||
@@ -1280,18 +1286,18 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
         # The isothermal kernel anchors from the z = 0 datum through `znode`, so it already
         # respects the datum; only the bottom-face values need the analytic reduction.
         pˢ_value = convert(FT, p₀ * exp(-g * zˢ / (Rᵈ * T₀)))
-        pˢ = surface_state_field(grid, pˢ_value)
-        ρˢ = surface_state_field(grid, convert(FT, pˢ_value / (Rᵈ * T₀)))
+        pˢ = surface_state_field(column_grid, pˢ_value)
+        ρˢ = surface_state_field(column_grid, convert(FT, pˢ_value / (Rᵈ * T₀)))
 
-        θᵣ = Field{Nothing, Nothing, Center}(grid)
-        πᵣ = Field{Nothing, Nothing, Center}(grid)
-        p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(pˢ)))
-        pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
-        ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(ρˢ)))
-        ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+        θᵣ = Field{Nothing, Nothing, Center}(column_grid)
+        πᵣ = Field{Nothing, Nothing, Center}(column_grid)
+        p_bcs = FieldBoundaryConditions(column_grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(pˢ)))
+        pᵣ = Field{Nothing, Nothing, Center}(column_grid, boundary_conditions=p_bcs)
+        ρ_bcs = FieldBoundaryConditions(column_grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(ρˢ)))
+        ρᵣ = Field{Nothing, Nothing, Center}(column_grid, boundary_conditions=ρ_bcs)
 
-        launch!(arch, grid, tuple(1), _compute_isothermal_reference!,
-                πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, p₀, pˢᵗ, κ, Rᵈ, g, T₀)
+        launch!(arch, column_grid, tuple(1), _compute_isothermal_reference!,
+                πᵣ, pᵣ, ρᵣ, θᵣ, column_grid, Nz, p₀, pˢᵗ, κ, Rᵈ, g, T₀)
     else
         # ── Isentropic base state (constant or z-dependent θ₀) ──
         # Either thermodynamic profile can make the reference horizontally varying.
@@ -1327,8 +1333,8 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
                       qf
                   end
 
-            launch!(arch, grid, :xy, _compute_exner_reference_3d!,
-                    πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, VaporEquivalentExponent())
+            @apply_regionally launch_exner_reference_columns!(πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid,
+                                                              pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, VaporEquivalentExponent())
         else
             # 1D reference: single column, broadcast to all (i,j). The unified
             # kernel handles both dry (qᵛ = ZeroField) and moist cases via the
@@ -1338,33 +1344,33 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
             # The bottom face is a single level, so one reduction of the datum serves every column.
             pˢ_value = convert(FT, moist_hydrostatic_pressure(zˢ, p₀, potential_temperature,
                                                               vapor_mass_fraction, pˢᵗ, constants))
-            pˢ = surface_state_field(grid, pˢ_value)
+            pˢ = surface_state_field(column_grid, pˢ_value)
 
             loc = (nothing, nothing, Center())
-            θᵣ = Field{Nothing, Nothing, Center}(grid)
+            θᵣ = Field{Nothing, Nothing, Center}(column_grid)
             set!(θᵣ, potential_temperature)
             fill_halo_regions!(θᵣ)
 
-            πᵣ = Field{Nothing, Nothing, Center}(grid)
+            πᵣ = Field{Nothing, Nothing, Center}(column_grid)
             # θ at the bottom face, which is where the bottom boundary values below live.
             θˢ = convert(FT, evaluate_profile(potential_temperature, zˢ))
 
-            qᵛᵣ = reference_moisture_field(vapor_mass_fraction, grid)
+            qᵛᵣ = reference_moisture_field(vapor_mass_fraction, column_grid)
             qᵛ_surface = if isnothing(vapor_mass_fraction)
                 zero(FT)
             else
                 convert(FT, evaluate_profile(vapor_mass_fraction, zˢ))
             end
-            ρˢ = surface_state_field(grid, surface_reference_density(pˢ_value, θˢ, qᵛ_surface, pˢᵗ,
-                                                                    Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, VaporEquivalentExponent()))
+            ρˢ = surface_state_field(column_grid, surface_reference_density(pˢ_value, θˢ, qᵛ_surface, pˢᵗ,
+                                                                           Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, VaporEquivalentExponent()))
 
-            p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(pˢ)))
-            pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
-            ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(ρˢ)))
-            ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+            p_bcs = FieldBoundaryConditions(column_grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(pˢ)))
+            pᵣ = Field{Nothing, Nothing, Center}(column_grid, boundary_conditions=p_bcs)
+            ρ_bcs = FieldBoundaryConditions(column_grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(ρˢ)))
+            ρᵣ = Field{Nothing, Nothing, Center}(column_grid, boundary_conditions=ρ_bcs)
 
-            launch!(arch, grid, tuple(1), _compute_exner_reference!,
-                    πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, VaporEquivalentExponent())
+            launch!(arch, column_grid, tuple(1), _compute_exner_reference!,
+                    πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, column_grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, VaporEquivalentExponent())
         end
     end
 
@@ -1403,6 +1409,27 @@ _nargs(f) = maximum(m.nargs for m in methods(f)) - 1  # subtract 1 for the funct
 @kernel function _compute_exner_reference_3d!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
     i, j = @index(Global, NTuple)
     _compute_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
+end
+
+# Integrate the Exner column of every (i, j) of `grid`, which is one region of a multi-region grid
+function launch_exner_reference_columns!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, grid, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
+    Nz = size(grid, 3)
+    launch!(architecture(grid), grid, :xy, _compute_exner_reference_3d!,
+            π₀, pᵣ, ρᵣ, θ₀, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
+    return nothing
+end
+
+# The grid of a single reference column: `grid` itself, or a single-column grid with the vertical coordinate
+# of a multi-region grid, whose regions all read the one column. (A column on a region's own grid would get
+# region-connection boundary conditions.)
+# TODO: Oceananigans should provide this column grid, as `cpu_face_constructor_z` is not public.
+reference_column_grid(grid) = grid
+
+function reference_column_grid(grid::MultiRegionGrids)
+    z = cpu_face_constructor_z(first(grid))
+    Nz = size(grid, 3)
+    Hz = halo_size(grid)[3]
+    return RectilinearGrid(architecture(grid), eltype(grid); size=Nz, z, halo=Hz, topology=(Flat, Flat, Bounded))
 end
 
 # ExnerReferenceState has the same surface_density interface as ReferenceState

@@ -1,5 +1,8 @@
-using Oceananigans.Fields: Fields, set!
+using Oceananigans.Fields: Fields, set!, ZeroField
 using Oceananigans.BoundaryConditions: fill_halo_regions!
+# TODO: Oceananigans should make these public and move them out of the ocean model module
+using Oceananigans.Models.HydrostaticFreeSurfaceModels: intrinsic_coordinate_grid,
+                                                        set_from_extrinsic_velocities!
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.TurbulenceClosures: initialize_closure_fields!
 
@@ -54,6 +57,34 @@ Set the momentum component `name` (`:ρu`, `:ρv`, or `:ρw`) to `value`.
 function set_momentum!(model::AtmosphereModel, name::Symbol, value)
     ρu = getproperty(model.momentum, name)
     set!(ρu, value)
+    return nothing
+end
+
+#####
+##### Horizontal vectors on grids whose intrinsic basis is rotated from (east, north)
+#####
+
+const horizontal_vector_names = (:u, :v, :ρu, :ρv)
+
+# Set the pairs `u`, `v` and `ρu`, `ρv` in `kw` from their geographic (eastward, northward) components,
+# rotated into the basis of the grid, as `set!` does for a `HydrostaticFreeSurfaceModel`. A component of
+# a pair that is not given is zero, because each component of the grid mixes both geographic ones.
+function set_geographic_vectors!(model, kw)
+    if haskey(kw, :u) || haskey(kw, :v)
+        set_from_extrinsic_velocities!(model.velocities, model.grid,
+                                       get(kw, :u, ZeroField()), get(kw, :v, ZeroField()))
+
+        ρ = dynamics_density(model.dynamics)
+        set!(model.momentum.ρu, ρ * model.velocities.u)
+        set!(model.momentum.ρv, ρ * model.velocities.v)
+    end
+
+    if haskey(kw, :ρu) || haskey(kw, :ρv)
+        momentum = (; u = model.momentum.ρu, v = model.momentum.ρv)
+        set_from_extrinsic_velocities!(momentum, model.grid,
+                                       get(kw, :ρu, ZeroField()), get(kw, :ρv, ZeroField()))
+    end
+
     return nothing
 end
 
@@ -178,6 +209,9 @@ Variables are set via keyword arguments. Supported variables include:
 
 **Diagnostic variables** (specific, i.e., per unit mass):
 - `u`, `v`, `w`: velocity components (sets both velocity and momentum)
+- On a grid whose basis is rotated from (east, north), such as a `YinYangGrid`, `u`, `v` and `ρu`, `ρv`
+  are the geographic components, rotated into the basis of the grid, and a missing component of a
+  pair is zero; `intrinsic_velocities = true` takes the components in the basis of the grid instead.
 - `qᵗ`: total specific moisture (sets both specific and density-weighted moisture)
 - `ℋ`: relative humidity (sets total moisture via `qᵗ = ℋ * qᵛ⁺`, where `qᵛ⁺` is the
   saturation specific humidity at the current temperature). Relative humidity is in
@@ -220,12 +254,15 @@ Variables are set via keyword arguments. Supported variables include:
   `CompressibleDynamics` and `AnelasticDynamics`.
 """
 function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true,
-                     compute_reference_state=false, balancer=false, kw...)
+                     compute_reference_state=false, balancer=false, intrinsic_velocities=false, kw...)
     if !isnothing(time)
         model.clock.time = time
     end
 
+    geographic_vectors = !intrinsic_velocities && intrinsic_coordinate_grid(model.grid)
     names = collect(keys(kw))
+    geographic_vectors && filter!(name -> name ∉ horizontal_vector_names, names)
+
     # Density-input mode for compressible dynamics (no-op flags otherwise):
     #   `:ρ`  — TOTAL density ρ. Written into the dry-density field as a placeholder so the moisture
     #           branches weight partial densities by the total (ρqˣ = ρ·qˣ); `establish_densities!`
@@ -421,6 +458,8 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             is_phase_two(name) && apply_set!(name, kw[name])
         end
     end
+
+    geographic_vectors && set_geographic_vectors!(model, kw)
 
     # Explicit `nᵃ`/`ρnᵃ` was applied above through the usual specific/density-weighted paths.
     # Otherwise write the distribution default now that the densities have been reconciled. The

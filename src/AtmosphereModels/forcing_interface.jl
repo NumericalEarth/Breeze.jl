@@ -53,8 +53,9 @@ Materialize a forcing for an `AtmosphereModel` field. This function is extended
 by the `Forcings` module to handle atmosphere-specific forcing types like subsidence
 and geostrophic forcings.
 
-The `context` argument provides additional information needed for materialization,
-such as grid, reference state, and thermodynamic constants.
+The `context` argument is a `NamedTuple` of what forcings may need at materialization time:
+the Coriolis parameter, the coupling and total densities, the dynamics pressure, the
+thermodynamic constants, and the specific fields keyed by name.
 """
 function materialize_atmosphere_model_forcing end
 

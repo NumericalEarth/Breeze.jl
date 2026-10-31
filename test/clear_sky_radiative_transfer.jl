@@ -132,6 +132,23 @@ using RRTMGP
         @test column_heating ≈ ℐ_net[1] - ℐ_net[end] rtol = sqrt(eps(FT))
     end
 
+    @testset "Geographic longitude and latitude on a LatitudeLongitudeGrid [$(FT)]" for FT in test_float_types()
+        Nx, Ny = 3, 4
+        grid = LatitudeLongitudeGrid(default_arch, FT; size=(Nx, Ny, 4),
+                                     longitude=(100, 140), latitude=(10, 50), z=(0, 10kilometers))
+
+        radiation = RadiativeTransferModel(grid, ClearSkyOptics(), ThermodynamicConstants(FT);
+                                           surface_temperature = 300,
+                                           surface_emissivity = 0.98,
+                                           surface_albedo = 0.1)
+
+        # RRTMGP orders the columns with i varying fastest.
+        λ = repeat(Array(λnodes(grid, Center())), Ny)
+        φ = repeat(Array(φnodes(grid, Center())), inner=Nx)
+        @test Array(radiation.atmospheric_state.lon) ≈ λ
+        @test Array(radiation.atmospheric_state.lat) ≈ φ
+    end
+
     @testset "Column batch rows" begin
         resolve_column_batch_rows = Breeze.AtmosphereModels.resolve_column_batch_rows
 
