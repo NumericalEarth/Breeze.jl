@@ -190,6 +190,9 @@ end
 
 const DCMIP2016KM = DCMIP2016KesslerMicrophysics
 
+# The kernel's temperature and potential temperature conversions assume θˡⁱ
+AtmosphereModels.dry_potential_temperature_compatible(::DCMIP2016KM) = false
+
 # The DCMIP2016 Kessler saturation adjustment reads the liquid coefficient and temperature
 # offset of the Tetens formula (see `saturation_adjustment_coefficient` and the kernel), so it
 # requires thermodynamic constants built with a `TetensFormula` saturation vapor pressure. With

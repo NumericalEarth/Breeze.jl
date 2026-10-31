@@ -63,6 +63,9 @@ const IP = InstantaneousPrecipitation
 
 # Prognostic vapor density; no retained condensate fields.
 AtmosphereModels.moisture_prognostic_name(::IP) = :ρqᵛ
+
+# The kernel's temperature and potential temperature conversions assume θˡⁱ
+AtmosphereModels.dry_potential_temperature_compatible(::IP) = false
 AtmosphereModels.prognostic_field_names(::IP) = tuple()
 
 AtmosphereModels.liquid_mass_fraction(::IP, model) = nothing

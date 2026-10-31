@@ -19,6 +19,7 @@ Valid symbols:
 - `:LiquidIcePotentialTemperature`, `:θ`, `:ρθ`, `:PotentialTemperature` → `LiquidIcePotentialTemperatureFormulation`
 - `:StaticEnergy`, `:s`, `:ρs` → `StaticEnergyFormulation`
 - `:TotalEnergy`, `:E`, `:ρE` → `TotalEnergyFormulation` (compressible dynamics only)
+- `:DryPotentialTemperature` → `DryPotentialTemperatureFormulation` (compressible dynamics only)
 """
 function materialize_formulation end
 
@@ -67,6 +68,7 @@ temperature ``θˡⁱ`` of `formulation`. A formulation that does not evolve ``�
 and boundary-flux conversions of ``θˡⁱ`` agree with the definition the formulation evolves.
 """
 liquid_ice_exner_exponent(formulation) = VaporEquivalentExponent()
+liquid_ice_exner_exponent(name::Symbol) = liquid_ice_exner_exponent(Val(name))
 
 #####
 ##### Field naming interface

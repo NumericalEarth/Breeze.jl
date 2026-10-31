@@ -490,6 +490,12 @@ end
 ##### Set thermodynamic variables
 #####
 
+@inline function potential_temperature_from_state(::LiquidIce, T, q, pˢᵗ, p, κ̂, constants)
+    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, p, κ̂)
+    𝒰₁ = with_temperature(𝒰₀, T, constants)
+    return 𝒰₁.potential_temperature
+end
+
 AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:ρθ}, value) =
     set!(model.formulation.potential_temperature_density, value)
 
@@ -529,7 +535,8 @@ function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatur
             model.microphysics,
             model.microphysical_fields,
             model.thermodynamic_constants,
-            formulation.exner_exponent)
+            formulation.exner_exponent,
+            formulation.flavor)
 
     return nothing
 end
@@ -550,7 +557,8 @@ end
                                                      microphysics,
                                                      microphysical_fields,
                                                      constants,
-                                                     κ̂)
+                                                     κ̂,
+                                                     flavor)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -570,9 +578,7 @@ end
 
     pˢᵗ = standard_pressure(dynamics)
     q₁ = 𝒰s₁.moisture_mass_fractions
-    𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, pˢᵗ, pᵣ, κ̂)
-    𝒰θ = with_temperature(𝒰θ, T, constants)
-    θ = 𝒰θ.potential_temperature
+    θ = potential_temperature_from_state(flavor, T, q₁, pˢᵗ, pᵣ, κ̂, constants)
     @inbounds potential_temperature[i, j, k] = θ
     @inbounds potential_temperature_density[i, j, k] = ρᵈ * θ
 end
@@ -611,7 +617,8 @@ function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatur
             model.microphysics,
             model.microphysical_fields,
             model.thermodynamic_constants,
-            formulation.exner_exponent)
+            formulation.exner_exponent,
+            formulation.flavor)
 
     return nothing
 end
@@ -625,7 +632,8 @@ end
                                                           microphysics,
                                                           microphysical_fields,
                                                           constants,
-                                                          κ̂)
+                                                          κ̂,
+                                                          flavor)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -641,9 +649,7 @@ end
 
     # Convert temperature to potential temperature using the inverse of the T(θ) relation
     pˢᵗ = standard_pressure(dynamics)
-    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, pᵣ, κ̂)
-    𝒰₁ = with_temperature(𝒰₀, T, constants)
-    θ = 𝒰₁.potential_temperature
+    θ = potential_temperature_from_state(flavor, T, q, pˢᵗ, pᵣ, κ̂, constants)
 
     @inbounds potential_temperature[i, j, k] = θ
     @inbounds potential_temperature_density[i, j, k] = ρᵈ * θ

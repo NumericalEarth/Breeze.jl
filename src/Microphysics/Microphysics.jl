@@ -18,6 +18,7 @@ export
     DewpointTemperatureField,
     DCMIP2016KesslerMicrophysics,
     InstantaneousPrecipitation,
+    OperatorSplitSaturationAdjustment,
     kessler_terminal_velocity,
     saturation_adjustment_coefficient,
     RelativeHumidity,
@@ -35,6 +36,7 @@ include("bulk_microphysics.jl")
 include("microphysics_diagnostics.jl")
 include("dcmip2016_kessler.jl")
 include("instantaneous_precipitation.jl")
+include("operator_split_saturation_adjustment.jl")
 
 # Both schemes rewrite the potential temperature in an operator-split update, so the moist entropy
 # cannot follow their phase changes.

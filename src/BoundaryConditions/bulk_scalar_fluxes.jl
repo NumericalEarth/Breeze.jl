@@ -4,9 +4,12 @@
 
 # The surface difference a bulk sensible-heat flux forms: in θˡⁱ, defined with the Exner exponent
 # of the formulation, or in static energy.
-struct PotentialTemperatureFlux{E}
+struct PotentialTemperatureFlux{E, C}
     exner_exponent :: E
+    counts_condensate :: C  # Val(true) for θˡⁱ, Val(false) for a θ that is T / Π whatever the condensate
 end
+
+PotentialTemperatureFlux(exner_exponent) = PotentialTemperatureFlux(exner_exponent, Val(true))
 
 struct StaticEnergyFlux end
 
@@ -99,7 +102,13 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 
 # Compute the thermodynamic variable difference at the wall. The model constructor sets the
 # formulation (`set_sensible_heat_formulation_bcs`), so an unset one has no method.
-@inline function wall_potential_temperature(i, j, k, grid, bf, Tˢ, fields, pˢ, κ̂)
+@inline function wall_potential_temperature(i, j, k, grid, bf, Tˢ, fields, pˢ, κ̂, ::Val{false})
+    q = wall_moisture_fractions(i, j, k, grid, bf.microphysics, fields)
+    vapor_only = MoistureMassFractions(q.vapor, zero(q.vapor), zero(q.vapor))
+    return potential_temperature_from_temperature(Tˢ, pˢ, bf.standard_pressure, bf.thermodynamic_constants, vapor_only, κ̂)
+end
+
+@inline function wall_potential_temperature(i, j, k, grid, bf, Tˢ, fields, pˢ, κ̂, ::Val{true})
     pˢᵗ = bf.standard_pressure
     constants = bf.thermodynamic_constants
     q = wall_moisture_fractions(i, j, k, grid, bf.microphysics, fields)
@@ -119,7 +128,7 @@ end
 # No filtered scalar: read from the near-wall cell of the 3D field
 @inline function bulk_sensible_heat_difference(i, j, k, grid, side, flux::PotentialTemperatureFlux, bf, Tˢ, fields, pˢ, ::Nothing)
     θ = @inbounds fields.θ[i, j, k]
-    return θ - wall_potential_temperature(i, j, k, grid, bf, Tˢ, fields, pˢ, flux.exner_exponent)
+    return θ - wall_potential_temperature(i, j, k, grid, bf, Tˢ, fields, pˢ, flux.exner_exponent, flux.counts_condensate)
 end
 
 # The filtered scalar stores the complete thermodynamic difference.

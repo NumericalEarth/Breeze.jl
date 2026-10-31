@@ -95,3 +95,32 @@ it is zero: the kinetic energy it removes feeds the subgrid TKE, whose own dissi
 heating (not yet applied).
 """
 @inline subgrid_dissipation(i, j, k, grid, ρ, closure, closure_fields, clock, model_fields) = zero(grid)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `false` for microphysics that updates the temperature itself (see
+`OperatorSplitSaturationAdjustment`), whose water tendencies therefore carry no phase-change source.
+"""
+phase_change_source_applies(microphysics) = true
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `true` if `microphysics` can drive a potential temperature that is not phase invariant:
+the latent heating comes from its tendencies of the water species, or from an update of the
+thermodynamic variable it makes itself. Schemes with a prognostic vapor density qualify by default;
+diagnostic saturation adjustment, whose moisture prognostic is the equilibrium moisture `ρqᵉ`, does
+not, and operator-split schemes that assume ``θˡⁱ`` extend this function to return `false`.
+"""
+dry_potential_temperature_compatible(microphysics) = moisture_prognostic_name(microphysics) === :ρqᵛ
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `true` if the potential temperature of a wall at temperature `Tˢ` that enters a bulk
+sensible heat flux counts the condensate of the near-wall air, as ``θˡⁱ`` does, and `false`
+if it is simply `Tˢ / Π`.
+"""
+wall_potential_temperature_counts_condensate(formulation) = true
+wall_potential_temperature_counts_condensate(name::Symbol) = wall_potential_temperature_counts_condensate(Val(name))

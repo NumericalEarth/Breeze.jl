@@ -30,7 +30,8 @@ using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_de
                           standard_pressure, default_drag_surface_temperature,
                           moisture_specific_name, thermodynamic_density_name,
                           total_energy_density_name, moisture_prognostic_name,
-                          total_moisture_density_name, liquid_ice_exner_exponent, reference_temperature
+                          total_moisture_density_name, liquid_ice_exner_exponent, reference_temperature,
+                          wall_potential_temperature_counts_condensate
 using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
                                       virtual_potential_temperature
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
@@ -308,7 +309,8 @@ energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{ρᵡ_name}) where ρᵡ_name =
                         "thermodynamic variable $ρᵡ_name. Set boundary conditions on $ρᵡ_name directly."))
 
 # The surface difference Δϕ that a bulk sensible-heat flux forms, per prognostic variable.
-sensible_heat_flux_formulation(::Val{:ρθ}, formulation) = PotentialTemperatureFlux(liquid_ice_exner_exponent(formulation))
+sensible_heat_flux_formulation(::Val{:ρθ}, formulation) =
+    PotentialTemperatureFlux(liquid_ice_exner_exponent(formulation), Val(wall_potential_temperature_counts_condensate(formulation)))
 sensible_heat_flux_formulation(::Val{:ρs}, formulation) = StaticEnergyFlux()
 sensible_heat_flux_formulation(::Val{:ρE}, formulation) = TotalEnergyFlux()
 

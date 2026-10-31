@@ -43,7 +43,7 @@ The moist equation-of-state θˡⁱ→T temperature inversion is controlled by t
 thermodynamic formulation, not the dynamics: see `temperature_solver` on
 `LiquidIcePotentialTemperatureFormulation`.
 """
-struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM}
+struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM, W}
     time_discretization :: TD                  # SplitExplicitTimeDiscretization or ExplicitTimeStepping
     dry_density :: D                           # ρᵈ (prognostic dry-air density)
     total_density :: DT                        # ρ = ρᵈ + Σρˣ (diagnosed; thermo/advection/EOS/buoyancy)
@@ -54,7 +54,24 @@ struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM}
     terrain_metrics :: TM                      # TerrainMetrics for terrain-following coordinates (or Nothing) — the "is terrain?" signal
     contravariant_vertical_velocity :: CV      # w̃ diagnostic field (or Nothing)
     contravariant_vertical_momentum :: CM      # ρw̃ diagnostic field (or Nothing)
+    momentum_force_weighting :: W              # MomentumForceWeighting, or Nothing for unweighted forces
 end
+
+"""
+$(TYPEDEF)
+
+Weight the pressure and gravitational forces on the dry-coupled momentum ``ρu = ρᵈ u`` by the dry
+mass fraction, ``∂ₜ(ρᵈ u) ∋ - qᵈ (∇p + ρ g ẑ)`` with ``qᵈ = ρᵈ / ρ``, since those forces act on the total
+mass ([Skamarock and Klemp (2008)](@cite SkamarockKlemp2008)). Without it (`nothing`) moist air accelerates
+by a factor ``1 / qᵈ`` too much. `DryPotentialTemperatureFormulation` selects it at model construction;
+any other potential temperature can select it with `CompressibleDynamics(; momentum_force_weighting)`,
+for a comparison with the same numerics. It also makes the transport-mean vertical momentum consistent
+with the off-centering of the acoustic loop. It follows NumericalEarth/Breeze.jl#985 and #1104, which
+apply these to every formulation.
+
+TODO: when #985 and #1104 are merged, remove this type: the changes then always apply.
+"""
+struct MomentumForceWeighting end
 
 # Skeleton-only marker stored in the reference-spec slot for the default `reference_state = :auto`
 # with no explicit reference profile: "build a standard-atmosphere reference state". Distinct from
@@ -126,7 +143,8 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               reference_state = :auto,
                               temperature_tolerance = nothing,
                               temperature_maxiter = nothing,
-                              surface_pressure = nothing) where TD
+                              surface_pressure = nothing,
+                              momentum_force_weighting = nothing) where TD
 
     reject_renamed_surface_pressure(surface_pressure)
 
@@ -180,7 +198,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     terrain_metrics_spec = terrain_metrics === nothing ? slope_stencil : terrain_metrics
     return CompressibleDynamics(time_discretization, nothing, nothing, nothing, pˢᵗ, p₀, ref_spec,
                                 terrain_metrics_spec,
-                                nothing, nothing)
+                                nothing, nothing, momentum_force_weighting)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -193,7 +211,8 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.reference_state),
                          adapt(to, dynamics.terrain_metrics),
                          adapt(to, dynamics.contravariant_vertical_velocity),
-                         adapt(to, dynamics.contravariant_vertical_momentum))
+                         adapt(to, dynamics.contravariant_vertical_momentum),
+                         dynamics.momentum_force_weighting)
 
 # The compressible θˡⁱ→T inversion is implicit (T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ), so the
 # default temperature solver iterates to convergence. The anelastic inversion is
@@ -309,7 +328,8 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
                                 standard_pressure, base_pressure, reference_state,
                                 terrain_metrics,
                                 contravariant_vertical_velocity,
-                                contravariant_vertical_momentum)
+                                contravariant_vertical_momentum,
+                                dynamics.momentum_force_weighting)
 end
 
 #####
@@ -423,7 +443,8 @@ with_time_discretization(dynamics::CompressibleDynamics, time_discretization) =
                          dynamics.reference_state,
                          dynamics.terrain_metrics,
                          dynamics.contravariant_vertical_velocity,
-                         dynamics.contravariant_vertical_momentum)
+                         dynamics.contravariant_vertical_momentum,
+                         dynamics.momentum_force_weighting)
 
 """
 $(TYPEDSIGNATURES)
@@ -668,3 +689,49 @@ AtmosphereModels.Diagnostics.dynamics_standard_pressure(dynamics::CompressibleDy
 AtmosphereModels.materialize_formulation(::Val{:StaticEnergy}, ::CompressibleDynamics, grid, boundary_conditions) =
     throw(ArgumentError("CompressibleDynamics does not yet support formulation=:StaticEnergy; " *
                         "use formulation=:LiquidIcePotentialTemperature"))
+
+#####
+##### Force weighting of the dry-coupled momentum
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `dynamics` with its `momentum_force_weighting` replaced. Every field is shared by reference.
+"""
+with_momentum_force_weighting(dynamics::CompressibleDynamics, weighting) =
+    CompressibleDynamics(dynamics.time_discretization,
+                         dynamics.dry_density,
+                         dynamics.total_density,
+                         dynamics.pressure,
+                         dynamics.standard_pressure,
+                         dynamics.base_pressure,
+                         dynamics.reference_state,
+                         dynamics.terrain_metrics,
+                         dynamics.contravariant_vertical_velocity,
+                         dynamics.contravariant_vertical_momentum,
+                         weighting)
+
+# Dry-air mass fraction qᵈ = ρᵈ/ρ at the momentum locations: a ratio of face-interpolated densities,
+# not an interpolated cell-centered ratio, so that qᵈ ⋅ (-g ℑ(ρ)) is exactly -g ℑ(ρᵈ), the same face
+# density that `_compute_velocities!` divides by. Zero total density (masked or unset cells) gives
+# an unweighted force.
+@inline face_mass_fraction(ρᵈ, ρ) = ifelse(ρ == 0, one(ρ), ρᵈ / ifelse(ρ == 0, one(ρ), ρ))
+
+@inline AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, d::CompressibleDynamics) =
+    x_mass_fraction(i, j, k, grid, d.momentum_force_weighting, d)
+@inline AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, d::CompressibleDynamics) =
+    y_mass_fraction(i, j, k, grid, d.momentum_force_weighting, d)
+@inline AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, d::CompressibleDynamics) =
+    z_mass_fraction(i, j, k, grid, d.momentum_force_weighting, d)
+
+@inline x_mass_fraction(i, j, k, grid, ::Nothing, d) = 1
+@inline y_mass_fraction(i, j, k, grid, ::Nothing, d) = 1
+@inline z_mass_fraction(i, j, k, grid, ::Nothing, d) = 1
+
+@inline x_mass_fraction(i, j, k, grid, ::MomentumForceWeighting, d) =
+    face_mass_fraction(ℑxᶠᵃᵃ(i, j, k, grid, d.dry_density), ℑxᶠᵃᵃ(i, j, k, grid, d.total_density))
+@inline y_mass_fraction(i, j, k, grid, ::MomentumForceWeighting, d) =
+    face_mass_fraction(ℑyᵃᶠᵃ(i, j, k, grid, d.dry_density), ℑyᵃᶠᵃ(i, j, k, grid, d.total_density))
+@inline z_mass_fraction(i, j, k, grid, ::MomentumForceWeighting, d) =
+    face_mass_fraction(ℑzᵃᵃᶠ(i, j, k, grid, d.dry_density), ℑzᵃᵃᶠ(i, j, k, grid, d.total_density))

@@ -400,6 +400,53 @@ end
 end
 
 #####
+##### Dry potential temperature state (density-based)
+#####
+
+# θ = T / Π with Π = (p / pˢᵗ)^κᵈ, κᵈ = Rᵈ / cᵖᵈ: the potential temperature of CM1. It does not depend on
+# the condensate, so that phase change at fixed θ releases no heat. With p = ρ Rᵐ T the temperature
+# is closed form, T = θ^γᵈ (ρ Rᵐ / pˢᵗ)^(γᵈ - 1), γᵈ = 1 / (1 - κᵈ).
+struct DryDensityState{FT} <: AbstractThermodynamicState{FT}
+    potential_temperature :: FT
+    moisture_mass_fractions :: MoistureMassFractions{FT}
+    standard_pressure :: FT
+    density :: FT
+end
+
+@inline is_absolute_zero(𝒰::DryDensityState) = 𝒰.potential_temperature == 0
+
+@inline total_specific_moisture(state::DryDensityState) = total_specific_moisture(state.moisture_mass_fractions)
+
+@inline with_moisture(𝒰::DryDensityState{FT}, q::MoistureMassFractions{FT}) where FT =
+    DryDensityState(𝒰.potential_temperature, q, 𝒰.standard_pressure, 𝒰.density)
+
+@inline density(𝒰::DryDensityState, constants) = 𝒰.density
+
+@inline function temperature(𝒰::DryDensityState, constants::ThermodynamicConstants)
+    κ = exner_exponent(DryExponent(), 𝒰.moisture_mass_fractions, constants)
+    γ = 1 / (1 - κ)
+    Rᵐ = mixture_gas_constant(𝒰.moisture_mass_fractions, constants)
+    return 𝒰.potential_temperature^γ * (𝒰.density * Rᵐ / 𝒰.standard_pressure)^(γ - 1)
+end
+
+@inline function air_pressure(𝒰::DryDensityState, constants)
+    Rᵐ = mixture_gas_constant(𝒰.moisture_mass_fractions, constants)
+    return 𝒰.density * Rᵐ * temperature(𝒰, constants)
+end
+
+@inline function exner_function(𝒰::DryDensityState, constants::ThermodynamicConstants)
+    κ = exner_exponent(DryExponent(), 𝒰.moisture_mass_fractions, constants)
+    return (air_pressure(𝒰, constants) / 𝒰.standard_pressure)^κ
+end
+
+@inline function with_temperature(𝒰::DryDensityState, T, constants)
+    q = 𝒰.moisture_mass_fractions
+    κ = exner_exponent(DryExponent(), q, constants)
+    p = 𝒰.density * mixture_gas_constant(q, constants) * T
+    return DryDensityState(T * (𝒰.standard_pressure / p)^κ, q, 𝒰.standard_pressure, 𝒰.density)
+end
+
+#####
 ##### Moist static energy state (for microphysics interfaces)
 #####
 
