@@ -73,6 +73,19 @@ According to [Pauluis2008](@citet), the moist static energy obeys
 with vertical velocity ``w``, buoyancy ``b`` as above, and ``S_s`` including microphysical and external energy sources/sinks.
 The ``ρᵣ w b`` term is the buoyancy flux that links the energy and momentum budgets in the anelastic limit.
 
+A parcel therefore does not conserve ``s`` as it moves: it conserves ``θ``, and its static energy changes by
+``- w \tilde{b}`` with ``\tilde{b} = g (α / αᵣ - 1)``, because the pressure it feels is ``pᵣ(z)`` rather than the
+hydrostatic pressure of its own column. (``\tilde{b}`` agrees with the buoyancy above to first order in ``T - Tᵣ``.)
+Subgrid mixing must respect this, so the eddy flux of a closure with diffusivity ``K`` is
+
+```math
+J^s_z = - ρᵣ K \left ( ∂_z s + \tilde{b} \right ) ,
+```
+
+which in dry air equals ``- ρᵣ K cᵖ Π ∂_z θ`` and vanishes where ``N²`` does. A flux of ``∂_z s`` alone would instead
+relax the column to ``N² = g \tilde{b} / (cᵖ T)``, which is negative wherever ``T < Tᵣ``, so that mixing could never
+remove the instability that drives it. The flux is in conservation form, so it leaves ``∫ ρᵣ s`` unchanged.
+
 When hydrometeors sediment, the condensate part of ``s`` falls with them: Breeze bins each
 sedimenting species' advective sedimentation mass flux — the flux its own advection scheme
 applies at the combined resolved and terminal velocity, minus the flux at the resolved
