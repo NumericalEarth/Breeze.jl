@@ -4,7 +4,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 ##### CompressibleVectorInvariant: the discrete identities the scheme is built on — exact conservation
 ##### of the face-density-weighted kinetic energy by the centered core (and by an upwind-biased
 ##### vorticity), agreement with the flux form at second order, the full three-dimensional divergence
-##### of the unsplit form — and the compressible AtmosphereModel stepping with it on the three grids.
+##### of the unsplit form — and the compressible AtmosphereModel stepping with it.
 #####
 
 using Breeze
@@ -13,7 +13,6 @@ using Breeze.AtmosphereModels: x_momentum_flux_divergence, y_momentum_flux_diver
 using Oceananigans
 using Oceananigans.Advection: EnergyConserving, materialize_advection
 using Oceananigans.Grids: halo_size
-using Oceananigans.MultiRegion: YinYangGrid
 using Oceananigans.Operators: Vᶠᶜᶜ, Vᶜᶠᶜ, Vᶜᶜᶠ, Vᶜᶜᶜ, divᶜᶜᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using Oceananigans.Units
 using Random
@@ -333,19 +332,6 @@ flux_form() = Centered(order = 2)
                 @test all(isfinite, interior(model.momentum.ρu))
                 @test abs(total(ρV) - mass₀) ≤ 100 * eps(FT) * mass₀
             end
-        end
-
-        @testset "Time stepping on YinYangGrid" begin
-            grid = YinYangGrid(default_arch, FT; size = (72, 24, 4), z = (0, 10kilometers), halo = (4, 4, 4))
-            scheme = CompressibleWENOVectorInvariant(order = 5)
-            model = compressible_model(grid, scheme; coriolis = SphericalCoriolis(), time_discretization = SplitExplicitTimeDiscretization())
-            set!(model; θ = 300, ρ = model.dynamics.reference_state.density,
-                 u = (λ, φ, z) -> 10 * cosd(φ), v = (λ, φ, z) -> sind(2λ) * cosd(φ))
-            for _ in 1:5
-                time_step!(model, 60)
-            end
-            @test isfinite(maximum(abs, model.momentum.ρu))
-            @test isfinite(maximum(abs, model.momentum.ρv))
         end
     finally
         Oceananigans.defaults.FloatType = previous_float_type

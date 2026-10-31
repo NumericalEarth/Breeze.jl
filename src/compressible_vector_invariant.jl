@@ -18,7 +18,6 @@
 ##### the model's velocity diagnosis, Σ V ℑρ u²/2, is exactly conserved by the centered scheme
 ##### on any orthogonal grid (stretched spacings included), and so that an upwind-biased
 ##### reconstruction of the relative vorticity still does no work (its pairing is symmetric).
-##### See the derivation note shipped with the scheme for the proofs.
 #####
 
 using Oceananigans.Advection:
