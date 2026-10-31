@@ -103,9 +103,11 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     β₃ = FT(β[3])
 
     # ρθ closes the pressure alone; any other thermodynamic density needs the density weight Eᴸ
-    density_weight = !haskey(prognostic_fields, :ρθ)
+    # (ρη runs its acoustic loop on the adiabatic pressure variable, which does not)
+    pressure_variable_loop = haskey(prognostic_fields, :ρη) && get(ENV, "BREEZE_ETA_PRESSURE_LOOP", "1") == "1"
+    density_weight = !haskey(prognostic_fields, :ρθ) && !pressure_variable_loop
     substepper = AcousticSubstepper(grid, dynamics.time_discretization;
-                                    cache_advecting_state, density_weight,
+                                    cache_advecting_state, density_weight, pressure_variable_loop,
                                     prognostic_momentum = (ρu = prognostic_fields.ρu,
                                                            ρv = prognostic_fields.ρv,
                                                            ρw = prognostic_fields.ρw))

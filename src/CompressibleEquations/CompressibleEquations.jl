@@ -72,7 +72,8 @@ using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, m
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                base_pressure, standard_pressure, thermodynamic_density,
-                               thermodynamic_density_name, specific_prognostic_moisture
+                               thermodynamic_density_name, specific_prognostic_moisture,
+                               condensate_liquid_fraction, moisture_prognostic_name, prognostic_field_names
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.MoistEntropyFormulations: MoistEntropyFormulations, MoistEntropyFormulation
 

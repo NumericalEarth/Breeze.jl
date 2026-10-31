@@ -92,7 +92,7 @@ Fields:
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
   tendency's condensate sedimentation term (see `cache_transport_velocity!`).
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, DW, MP, TAV, GT, TS, WC, DC, TWC}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, DW, MP, TAV, GT, TS, WC, DC, TWC, TL}
     substeps :: N
     acoustic_cfl :: FT
     minimum_horizontal_spacing :: FT
@@ -139,6 +139,10 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, DW, MP, TAV, GT, TS, WC, DC, TWC
     vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
     density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
     time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w the moisture and tracer tendencies were built with
+
+    # `nothing`, or the fields that advance a prognostic ρχ alongside a loop run on the
+    # adiabatic pressure variable (see `AdiabaticPressureLoop`)
+    pressure_variable_loop :: TL
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -170,11 +174,36 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.vertical_solver),
                        adapt(to, a.vertical_velocity_cache),
                        adapt(to, a.density_cache),
-                       adapt(to, a.time_averaged_vertical_velocity_cache))
+                       adapt(to, a.time_averaged_vertical_velocity_cache),
+                       adapt(to, a.pressure_variable_loop))
 
 #####
 ##### Section 2 — Constructor
 #####
+
+"""
+$(TYPEDEF)
+
+Storage for an acoustic loop that runs on the adiabatic pressure variable `Y` of
+`adiabatic_pressure_variable` in place of the prognostic thermodynamic density `ρχ`, and
+advances `ρχ` alongside it with the mass fluxes of the loop.
+
+Fields:
+- `perturbation`: (ρχ)′, the perturbation of the prognostic thermodynamic density.
+- `flux_weight`: χ̂ᴸ, the value per unit dry mass that the flux of ρχ carries.
+- `slow_tendency`: Gᵞ, the rate of change of `Y` from the slow tendencies of ρχ, ρᵈ and the water.
+"""
+struct AdiabaticPressureLoop{P, W, G}
+    perturbation :: P
+    flux_weight :: W
+    slow_tendency :: G
+end
+
+AdiabaticPressureLoop(grid, FT = eltype(grid)) =
+    AdiabaticPressureLoop(CenterField(grid, FT), CenterField(grid, FT), CenterField(grid, eltype(grid)))
+
+Adapt.adapt_structure(to, l::AdiabaticPressureLoop) =
+    AdiabaticPressureLoop(adapt(to, l.perturbation), adapt(to, l.flux_weight), adapt(to, l.slow_tendency))
 
 """
 $(TYPEDSIGNATURES)
@@ -188,7 +217,8 @@ The `prognostic_momentum` kwarg is retained for backwards compatibility but no l
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
                             prognostic_momentum = nothing, substep_floattype = eltype(grid),
-                            cache_advecting_state = false, density_weight = false)
+                            cache_advecting_state = false, density_weight = false,
+                            pressure_variable_loop = false)
     Ns = split_explicit.substeps
     FT = eltype(grid)
     ω = convert(FT, split_explicit.forward_weight)
@@ -255,6 +285,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
     density_cache = cache_advecting_state ? CenterField(grid) : nothing
     time_averaged_vertical_velocity_cache = ZFaceField(grid)
+    loop = pressure_variable_loop ? AdiabaticPressureLoop(grid, substep_floattype) : nothing
 
     return AcousticSubstepper(Ns, acoustic_cfl, Δx_min, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
@@ -278,7 +309,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               vertical_solver,
                               vertical_velocity_cache,
                               density_cache,
-                              time_averaged_vertical_velocity_cache)
+                              time_averaged_vertical_velocity_cache,
+                              loop)
 end
 
 #####
@@ -409,7 +441,10 @@ that the flux of `ρχ` carries with the dry-mass flux `ρᵈu`.
 """
 function acoustic_linearization end
 
-function refresh_linearization_basic_state!(formulation, substepper, model)
+refresh_linearization_basic_state!(formulation, substepper, model) =
+    refresh_general_linearization!(formulation, substepper, model)
+
+function refresh_general_linearization!(formulation, substepper, model)
     grid = model.grid
     arch = architecture(grid)
 
@@ -441,6 +476,61 @@ end
         E[i, j, k] = Eᴸ
         one_field[i, j, k] = 1
     end
+end
+
+#####
+##### Acoustic loop on the adiabatic pressure variable
+#####
+#
+# See `adiabatic_pressure_variable`. Without an `AdiabaticPressureLoop` every function below is a no-op
+# and (ρχ)′ is the loop's thermodynamic perturbation.
+
+@inline loop_slow_tendency(::Nothing, Gρᵡ) = Gρᵡ
+@inline loop_slow_tendency(loop::AdiabaticPressureLoop, Gρᵡ) = loop.slow_tendency
+
+prognostic_thermodynamic_perturbation(substepper) = prognostic_thermodynamic_perturbation(substepper.pressure_variable_loop, substepper)
+prognostic_thermodynamic_perturbation(::Nothing, substepper) = substepper.density_potential_temperature_perturbation
+prognostic_thermodynamic_perturbation(loop::AdiabaticPressureLoop, substepper) = loop.perturbation
+
+initialize_pressure_variable!(::Nothing, substepper, model, Uᴸ_outer) = nothing
+advance_thermodynamic_density_old_side!(::Nothing, args...) = nothing
+advance_thermodynamic_density_new_side!(::Nothing, args...) = nothing
+implicit_thermodynamic_density_substep!(::Nothing, args...) = nothing
+
+# (ρχ)′ is advanced like ρ′: the slow tendency, the horizontal fluxes and the old side of the
+# vertical flux before the vertical solve, the new side after it.
+function advance_thermodynamic_density_old_side!(loop::AdiabaticPressureLoop, substepper, model, Gρᵡ, Δτ, δτˢ⁻)
+    launch!(architecture(model.grid), model.grid, :xyz, _advance_thermodynamic_density_old_side!,
+            loop.perturbation, loop.flux_weight, substepper.momentum_perturbation.u,
+            substepper.momentum_perturbation.v, substepper.momentum_perturbation.w,
+            model.grid, model.dynamics, Δτ, δτˢ⁻, Gρᵡ, substepper.thermodynamic_tendency_factor)
+    return nothing
+end
+
+@kernel function _advance_thermodynamic_density_old_side!(ρχ′, χ̂, ρu′, ρv′, ρw′, grid, dynamics, Δτ, δτˢ⁻, Gρᵡ, fθ)
+    i, j, k = @index(Global, NTuple)
+    ∇ʰ_χ̂M = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, θFˣ, χ̂, ρu′) + δyᵃᶜᵃ(i, j, k, grid, θFʸ, χ̂, ρv′))
+    @inbounds ρχ′[i, j, k] += Δτ * (fθ * Gρᵡ[i, j, k] - ∇ʰ_χ̂M) -
+                              δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, χ̂, dynamics, ρu′, ρv′, ρw′)
+end
+
+function advance_thermodynamic_density_new_side!(loop::AdiabaticPressureLoop, substepper, model, δτᵐ⁺)
+    launch!(architecture(model.grid), model.grid, :xyz, _advance_thermodynamic_density_new_side!,
+            loop.perturbation, loop.flux_weight, substepper.momentum_perturbation.u,
+            substepper.momentum_perturbation.v, substepper.momentum_perturbation.w,
+            model.grid, model.dynamics, δτᵐ⁺)
+    return nothing
+end
+
+@kernel function _advance_thermodynamic_density_new_side!(ρχ′, χ̂, ρu′, ρv′, ρw′, grid, dynamics, δτᵐ⁺)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ρχ′[i, j, k] -= δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, χ̂, dynamics, ρu′, ρv′, ρw′)
+end
+
+function implicit_thermodynamic_density_substep!(loop::AdiabaticPressureLoop, model, Δτ, advection, w, ρᵈ)
+    implicit_step!(loop.perturbation, model.timestepper.implicit_solver, nothing, nothing, nothing,
+                   model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    return nothing
 end
 
 # The argument the pressure-gradient helpers (`δpᴸ`) read as the thermodynamic perturbation: (ρθ)′
@@ -908,6 +998,7 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
             model.dynamics.dry_density, ρᵡ, model.momentum.ρu, model.momentum.ρv)
     # ρw is dispatched: terrain models initialize the contravariant ρw̃ instead.
     initialize_vertical_momentum_perturbation!(substepper, model, Uᴸ_outer)
+    initialize_pressure_variable!(substepper.pressure_variable_loop, substepper, model, Uᴸ_outer)
 
     fill_halo_regions!(substepper.density_perturbation)
     fill_halo_regions!(substepper.density_potential_temperature_perturbation)
@@ -1490,7 +1581,7 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch)
     Nx, Ny, _ = size(grid)
     α   = substepper.open_boundary_relaxation
     ρ′  = substepper.density_perturbation
-    ρθ′ = substepper.density_potential_temperature_perturbation
+    ρθ′ = prognostic_thermodynamic_perturbation(substepper)
     ρᴸ  = model.dynamics.dry_density
     ρθᴸ = thermodynamic_density(model.formulation)
     if is_active_open_bc(bcs_u.west)
@@ -1559,6 +1650,7 @@ function implicit_advection_substep!(model, substepper, advection::AdaptiveImpli
     implicit_step!(substepper.density_potential_temperature_predictor,
                    model.timestepper.implicit_solver, nothing, nothing, nothing,
                    model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    implicit_thermodynamic_density_substep!(substepper.pressure_variable_loop, model, Δτ, advection, w, ρᵈ)
     return nothing
 end
 
@@ -1579,7 +1671,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     g = convert(FT, constants.gravitational_acceleration)
     ω = FT(substepper.forward_weight)
     Gⁿ = model.timestepper.Gⁿ
-    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
+    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, Gρᵡ) = stage
 
     # Step A: explicit horizontal forward of (ρu)′, (ρv)′.
     launch!(arch, grid, :xyz, _explicit_horizontal_step!,
@@ -1626,6 +1718,8 @@ function acoustic_substep!(model, substepper, stage, advection)
             substepper.linearization_density_weight)
     fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
+    advance_thermodynamic_density_old_side!(substepper.pressure_variable_loop, substepper, model, Gρᵡ, Δτ, δτˢ⁻)
+
     # Implicit half of the IMEX vertical-advection split for the thermodynamic
     # perturbation, applied to the predictor between Step B and Step C so the pressure
     # solve and recovery substitution see a transport-consistent ρθ′★ (issue #897).
@@ -1668,6 +1762,8 @@ function acoustic_substep!(model, substepper, stage, advection)
             substepper.time_averaged_velocities,
             grid, model.dynamics, δτᵐ⁺,
             substepper.linearization_potential_temperature)
+
+    advance_thermodynamic_density_new_side!(substepper.pressure_variable_loop, substepper, model, δτᵐ⁺)
 
     # Per-substep open-boundary enforcement (issue #738): relax the outermost
     # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
@@ -1736,7 +1832,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
-    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
+    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ = loop_slow_tendency(substepper.pressure_variable_loop, Gˢρᵡ), Gρᵡ = Gˢρᵡ)
     acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a
@@ -1758,7 +1854,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
             model.dynamics.dry_density, ρᵡ,
             model.momentum,
             substepper.density_perturbation,
-            substepper.density_potential_temperature_perturbation,
+            prognostic_thermodynamic_perturbation(substepper),
             substepper.momentum_perturbation.u,
             substepper.momentum_perturbation.v,
             substepper.momentum_perturbation.w,
