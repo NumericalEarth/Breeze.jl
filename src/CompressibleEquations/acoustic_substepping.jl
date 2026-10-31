@@ -1219,17 +1219,27 @@ end
 #####   ⟨ρu⟩ = ρuᴸ + (1/Nτ) ∑ₙ (ρu)′(n) = model.momentum.ρu + accum/Nτ
 #####   ⟨u⟩  ≈ ⟨ρu⟩ / ρᴸ_face
 #####
+##### ρ′ sees the off-centered vertical flux (1 − ω)(ρw)′(n−1) + ω(ρw)′(n), so ⟨ρw⟩ must too.
+##### `solve!` is the only writer of (ρw)′ inside the loop, so the sum of that flux over
+##### n = 1…Nτ telescopes onto the raw accumulation:
+#####
+#####   ∑ₙ [(1 − ω)(ρw)′(n−1) + ω(ρw)′(n)] = ∑ₙ (ρw)′(n) − (1 − ω)[(ρw)′(Nτ) − (ρw)′(0)]
+#####
+##### The rewind (ρw)′(0) is zero in stage 1 but not in stages 2–3, so it is recomputed
+##### from Uᴸ_outer.
+#####
 ##### `model.momentum.*` and `model.dynamics.dry_density` are still the stage-entry
 ##### (Uᴸ_stage) values here. Dividing by ρᴸ ignores ρ's variation over the
 ##### loop, small for acoustic perturbations.
 #####
 
 
-function finalize_time_averaged_velocity!(substepper, model, Nτ)
+function finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ_outer)
     grid = model.grid
     arch = architecture(grid)
     FT   = eltype(grid)
     inv_Nτ = one(FT) / FT(Nτ)
+    ωˢ⁻ = 1 - substepper.forward_weight
 
     # `model.dynamics.dry_density` and `model.momentum.*` are still the
     # stage-entry (Uᴸ) values here — the substep loop only touched
@@ -1240,7 +1250,9 @@ function finalize_time_averaged_velocity!(substepper, model, Nτ)
             substepper.time_averaged_velocities.w,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
             model.dynamics.dry_density,
-            grid, model.dynamics, inv_Nτ)
+            substepper.momentum_perturbation.w,
+            Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
+            grid, model.dynamics, inv_Nτ, ωˢ⁻)
 
     map(fill_halo_regions!, substepper.time_averaged_velocities)
 
@@ -1249,15 +1261,16 @@ end
 
 @kernel function _finalize_time_averaged_velocity!(u_avg, v_avg, w_avg,
                                                    ρu_stage, ρv_stage, ρw_stage,
-                                                   ρᴸ, grid, dynamics, inv_Nτ)
+                                                   ρᴸ, ρw′, ρu_outer, ρv_outer, ρw_outer,
+                                                   grid, dynamics, inv_Nτ, ωˢ⁻)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
+        ρwᴸ = transport_ρw(i, j, k, grid, dynamics, ρu_stage, ρv_stage, ρw_stage)
+        ρw′⁰ = transport_ρw(i, j, k, grid, dynamics, ρu_outer, ρv_outer, ρw_outer) - ρwᴸ
         ρu_total = ρu_stage[i, j, k] + u_avg[i, j, k] * inv_Nτ
         ρv_total = ρv_stage[i, j, k] + v_avg[i, j, k] * inv_Nτ
-        ρw_total = transport_ρw(i, j, k, grid, dynamics,
-                                                              ρu_stage, ρv_stage, ρw_stage) +
-                   w_avg[i, j, k] * inv_Nτ
+        ρw_total = ρwᴸ + (w_avg[i, j, k] - ωˢ⁻ * (ρw′[i, j, k] - ρw′⁰)) * inv_Nτ
 
         ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρᴸ)
         ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρᴸ)
@@ -1613,7 +1626,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Done BEFORE `_recover_full_state!` so we read the stage-entry
     # `model.momentum.*` (substep loop hasn't touched it) and stage-entry
     # `model.dynamics.dry_density` as the Uᴸ_stage reference.
-    finalize_time_averaged_velocity!(substepper, model, Nτ)
+    finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ)
 
     # Stage-end: recover the full prognostic state in-place. `model.dynamics.dry_density`,
     # `ρᵡ`, and `model.momentum.*` are still the stage-entry Uᴸ values here

@@ -24,12 +24,15 @@ using Breeze.CompressibleEquations: AcousticSubstepper,
                                     AcousticTridiagUpper,
                                     freeze_linearization_state!,
                                     assemble_slow_vertical_momentum_tendency!
+using Breeze.TimeSteppers: acoustic_rk3_substep!, store_initial_state!, cache_transport_velocity!
 
 using Oceananigans
 using Oceananigans.Grids: ZDirection
-using Oceananigans.Operators: Δzᶜᶜᶠ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ
+using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.Operators: Δzᶜᶜᶠ, Δzᶜᶜᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, divᶜᶜᶜ
 using Oceananigans.Solvers: get_coefficient
-using Oceananigans.TimeSteppers: update_state!
+using Oceananigans.TimeSteppers: update_state!, tick_stage!
 
 using GPUArraysCore: @allowscalar
 using Test
@@ -42,14 +45,17 @@ const CPD_STR = 1005.0
 
 θ_iso_str(z) = T₀_STR * exp(G_STR * z / (CPD_STR * T₀_STR))
 
-function _build_str_model(arch; ω = 0.55)
+@inline mass_flux_x(i, j, k, grid, ρ, u) = ℑxᶠᵃᵃ(i, j, k, grid, ρ) * @inbounds u[i, j, k]
+@inline mass_flux_y(i, j, k, grid, ρ, v) = ℑyᵃᶠᵃ(i, j, k, grid, ρ) * @inbounds v[i, j, k]
+@inline mass_flux_z(i, j, k, grid, ρ, w) = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * @inbounds w[i, j, k]
+
+function _build_str_model(arch; ω = 0.55, substeps = nothing, damping = NoDivergenceDamping())
     grid = RectilinearGrid(arch;
                            size = (8, 8, NZ_STR), halo = (5, 5, 5),
                            x = (0, 100e3), y = (0, 100e3), z = (0, Lz_STR),
                            topology = (Periodic, Periodic, Bounded))
     constants = ThermodynamicConstants(eltype(grid))
-    td = SplitExplicitTimeDiscretization(; forward_weight = ω,
-                                           damping = NoDivergenceDamping())
+    td = SplitExplicitTimeDiscretization(; forward_weight = ω, substeps, damping)
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = θ_iso_str,
                                base_pressure = 1e5,
@@ -567,6 +573,81 @@ end
     # **Fixed by SK08-faithful per-stage refresh**: the rewind term keeps
     # the discrete hydrostatic balance preserved across stages.
     @test after <= 1e-9
+end
+
+#####
+##### S10 — The transport-average mass flux matches the dry-density update
+#####
+##### Moisture and tracers are advected with the substepper's time-averaged
+##### velocity ū, so the stage-entry face density ρᵈᴸ times ū must be the mass
+##### flux the substep loop applied to ρᵈ: each stage ends at
+##### ρᵈ = ρᵈ⁰ − β Δt ∇·(ρᵈᴸ ū) to round-off, with ρᵈ⁰ the outer-step start.
+##### With an off-centered vertical flux (ω < 1) this holds only if the average
+##### takes the same (1 − ω, ω) blend of old and new (ρw)′ as the density update.
+##### Stage 2 checks the old-side share: its rewind (ρw)′ is nonzero, whereas
+##### stage 1 starts from (ρw)′ = 0. Six substeps give Nτ ≥ 2 in both stages.
+#####
+
+function stage_mass_flux_residual(model, ρᵈᴸ, ρᵈ⁰, β, Δt)
+    grid = model.grid
+    ū = model.timestepper.substepper.time_averaged_velocities
+    ρu = Field(KernelFunctionOperation{Face, Center, Center}(mass_flux_x, grid, ρᵈᴸ, ū.u))
+    ρv = Field(KernelFunctionOperation{Center, Face, Center}(mass_flux_y, grid, ρᵈᴸ, ū.v))
+    ρw = Field(KernelFunctionOperation{Center, Center, Face}(mass_flux_z, grid, ρᵈᴸ, ū.w))
+    for F in (ρu, ρv, ρw)
+        compute!(F)
+        fill_halo_regions!(F)
+    end
+    ∇ρu = Field(KernelFunctionOperation{Center, Center, Center}(divᶜᶜᶜ, grid, ρu, ρv, ρw))
+    compute!(∇ρu)
+
+    Δρᵈ = Array(interior(model.dynamics.dry_density)) .- Array(interior(ρᵈ⁰))
+    residual = Δρᵈ .+ β * Δt .* Array(interior(∇ρu))
+
+    return maximum(abs, residual), maximum(abs, Δρᵈ)
+end
+
+@testset "S10 — Transport-average mass flux matches the dry-density update (default ω = 0.65, $(nameof(typeof(damping))))" for damping in
+        (NoDivergenceDamping(), ThermalDivergenceDamping(; coefficient = 0.1))
+    model = _build_str_model(default_arch; ω = 0.65, substeps = 6, damping)
+    _set_str_rest!(model)
+
+    ρθ_field = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
+    @allowscalar begin
+        for k in 2:(model.grid.Nz - 1)
+            ρθ_field[3, 4, k] += 1e-1 * sin(2π * k / model.grid.Nz)
+        end
+    end
+    update_state!(model)
+
+    Δt = 20.0
+    time_step!(model, Δt)
+
+    # Stages 1 and 2 of the next outer step, as `time_step!` runs them
+    grid = model.grid
+    ts = model.timestepper
+    ρᵈ = model.dynamics.dry_density
+
+    store_initial_state!(model)
+    freeze_linearization_state!(ts.substepper, model)
+    ρᵈ⁰ = CenterField(grid)
+    parent(ρᵈ⁰) .= parent(ρᵈ)
+    acoustic_rk3_substep!(model, Δt, ts.β₁)
+
+    residual₁, Δρᵈ₁ = stage_mass_flux_residual(model, ρᵈ⁰, ρᵈ⁰, ts.β₁, Δt)
+    @test Δρᵈ₁ > 0
+    @test residual₁ <= 1e-10 * Δρᵈ₁
+
+    tick_stage!(model.clock, ts.β₁ * Δt)
+    update_state!(model; compute_tendencies = true)
+    cache_transport_velocity!(model)
+    ρᵈᴸ = CenterField(grid)
+    parent(ρᵈᴸ) .= parent(ρᵈ)
+    acoustic_rk3_substep!(model, Δt, ts.β₂)
+
+    residual₂, Δρᵈ₂ = stage_mass_flux_residual(model, ρᵈᴸ, ρᵈ⁰, ts.β₂, Δt)
+    @test Δρᵈ₂ > 0
+    @test residual₂ <= 1e-10 * Δρᵈ₂
 end
 
 end  # outer "Substepper structural correctness"
