@@ -30,7 +30,7 @@ using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_de
                           standard_pressure, default_drag_surface_temperature,
                           moisture_specific_name, thermodynamic_density_name,
                           total_energy_density_name, moisture_prognostic_name,
-                          total_moisture_density_name, liquid_ice_exner_exponent
+                          total_moisture_density_name, liquid_ice_exner_exponent, reference_temperature
 using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
                                       virtual_potential_temperature
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
@@ -38,7 +38,7 @@ using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiq
                         VaporEquivalentExponent,
                         LiquidIcePotentialTemperatureState, StaticEnergyState,
                         potential_temperature_from_temperature, surface_pressure_from_cell_center,
-                        with_temperature
+                        with_temperature, absolute_zero_latent_heat
 
 # Extended below with a grid-point method: `exner_function(i, j, k, grid, ef, q, dynamics_fields)`.
 import ..Thermodynamics: exner_function
@@ -58,7 +58,7 @@ using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑ
                               ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
 
 using Adapt: Adapt
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
 #####
 ##### The surface-layer field tuple
@@ -96,6 +96,7 @@ include("polynomial_bulk_coefficient.jl")
 include("bulk_drag.jl")
 include("bulk_scalar_fluxes.jl")
 include("thermodynamic_variable_bcs.jl")
+include("vapor_enthalpy_flux.jl")
 include("update_boundary_conditions.jl")
 
 #####
@@ -156,7 +157,10 @@ function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(bound
         materialized[name] = materialize_atmosphere_field_bcs(fbcs, loc, grid, dynamics, microphysics,
                                                               thermodynamic_constants)
     end
-    return NamedTuple(materialized)
+
+    # Water crossing a wall carries its enthalpy into a total-energy variable (a no-op otherwise)
+    return couple_vapor_enthalpy_bcs(NamedTuple(materialized), Val(thermodynamic_density_name(formulation)),
+                                     formulation, microphysics, thermodynamic_constants)
 end
 
 #####
@@ -243,16 +247,30 @@ field.
 function convert_energy_bcs(bcs, formulation)
     ρᵡ_name = thermodynamic_density_name(formulation)
     ρᵡ = Val(ρᵡ_name)
-    bcs, ρᵡ_bcs = route_interface_bcs(bcs, total_energy_density_name, ρᵡ_name,
-                                      ρE_bcs -> energy_bcs_to_thermodynamic_bcs(ρE_bcs, ρᵡ))
+    bcs, ρᵡ_bcs = route_energy_bcs(bcs, ρᵡ)
 
     # `BulkSensibleHeatFlux` forms its surface difference in the prognostic variable itself,
     # whether it arrived under `ρE` or under that variable's own key; an energy flux on ρθ is
     # converted with the Exner exponent of the formulation.
     ρᵡ_bcs = set_sensible_heat_formulation_bcs(ρᵡ_bcs, sensible_heat_flux_formulation(ρᵡ, formulation))
 
+    # A variable that the water carries (moist entropy) also takes a flux from the water fluxes
+    ρᵡ_bcs = add_moisture_flux_contribution(ρᵡ_bcs, ρᵡ, bcs, formulation)
+
     return merge(bcs, NamedTuple{(ρᵡ_name,)}((ρᵡ_bcs,)))
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the boundary conditions `ρᵡ_bcs` of the thermodynamic density named by `ρᵡ` of `formulation`, amended
+with the contribution of the water fluxes among the boundary conditions `bcs` (under the
+moisture key `ρqᵗ` or the moisture density's own name). The default returns `ρᵡ_bcs`
+unchanged: an energy variable referenced to all-vapor water (``θˡⁱ``, ``s``) takes no flux from
+evaporation. A variable whose value per unit water mass is nonzero, such as the moist entropy,
+extends this function.
+"""
+add_moisture_flux_contribution(ρᵡ_bcs, ρᵡ, bcs, formulation) = ρᵡ_bcs
 
 """
 $(TYPEDSIGNATURES)
@@ -268,6 +286,13 @@ function convert_moisture_bcs(bcs, microphysics)
     bcs, ρq_bcs = route_interface_bcs(bcs, total_moisture_density_name, ρq_name, identity)
     return merge(bcs, NamedTuple{(ρq_name,)}((ρq_bcs,)))
 end
+
+route_energy_bcs(bcs, ρᵡ::Val{ρᵡ_name}) where ρᵡ_name =
+    route_interface_bcs(bcs, total_energy_density_name, ρᵡ_name,
+                        ρE_bcs -> energy_bcs_to_thermodynamic_bcs(ρE_bcs, ρᵡ))
+
+# The energy key names the prognostic variable itself (total energy): nothing to route or convert.
+route_energy_bcs(bcs, ::Val{:ρE}) = (bcs, get(bcs, total_energy_density_name, FieldBoundaryConditions()))
 
 # ρθ: an energy flux 𝒬ᵀ enters as the potential temperature flux Jᶿ = (ρᵈ / ρ) 𝒬ᵀ / (ĉᵖ Π), applied by
 # `EnergyFluxBoundaryCondition` (the Exner exponent is set by `set_sensible_heat_formulation_bcs`).
@@ -285,6 +310,7 @@ energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{ρᵡ_name}) where ρᵡ_name =
 # The surface difference Δϕ that a bulk sensible-heat flux forms, per prognostic variable.
 sensible_heat_flux_formulation(::Val{:ρθ}, formulation) = PotentialTemperatureFlux(liquid_ice_exner_exponent(formulation))
 sensible_heat_flux_formulation(::Val{:ρs}, formulation) = StaticEnergyFlux()
+sensible_heat_flux_formulation(::Val{:ρE}, formulation) = TotalEnergyFlux()
 
 # Materialize FieldBoundaryConditions by walking through each boundary
 function materialize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, dynam, micro, consts)

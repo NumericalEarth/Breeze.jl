@@ -126,13 +126,13 @@ end
     direction = ZDirection()
 
     code_diag(k) = get_coefficient(2, 2, k, grid, AcousticTridiagDiagonal(), nothing, direction,
-                                   Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+                                   Πᴸ, θᴸ, γRᵐᴸ, nothing, g, δτᵐ⁺, dᵐ⁺, nothing)
     code_upper(k) = get_coefficient(2, 2, k, grid, AcousticTridiagUpper(), nothing, direction,
-                                    Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+                                    Πᴸ, θᴸ, γRᵐᴸ, nothing, g, δτᵐ⁺, dᵐ⁺, nothing)
     # Oceananigans' Press-indexed tridiagonal solver asks the lower
     # diagonal for row k as `a[k - 1]`.
     code_lower_for_row(k) = get_coefficient(2, 2, k - 1, grid, AcousticTridiagLower(), nothing, direction,
-                                            Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+                                            Πᴸ, θᴸ, γRᵐᴸ, nothing, g, δτᵐ⁺, dᵐ⁺, nothing)
 
     expected_lower(k) = - δτᵐ⁺^2 * C(k - 1) * θ_face(k - 1) / Δz^2 +
                          δτᵐ⁺^2 * g / (2Δz) -
@@ -454,6 +454,7 @@ for arch in arches
                 substepper.momentum_perturbation.w,
                 grid, model.dynamics, Δτ, ω * Δτ, (1 - ω) * Δτ,
                 substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
+                substepper.linearization_density_weight,
                 FT(model.thermodynamic_constants.gravitational_acceleration), dˢ⁻,
                 substepper.vertical_momentum_tendency_factor,
                 substepper.slow_vertical_momentum_tendency,

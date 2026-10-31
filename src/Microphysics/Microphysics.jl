@@ -38,6 +38,12 @@ include("microphysics_diagnostics.jl")
 include("dcmip2016_kessler.jl")
 include("instantaneous_precipitation.jl")
 
+# Both schemes rewrite the potential temperature in an operator-split update, so the moist entropy
+# cannot follow their phase changes.
+using ..MoistEntropyFormulations: MoistEntropyFormulations
+MoistEntropyFormulations.moist_entropy_compatible(::DCMIP2016KM) = false
+MoistEntropyFormulations.moist_entropy_compatible(::IP) = false
+
 #####
 ##### Predicted Particle Properties (P3) submodule
 #####

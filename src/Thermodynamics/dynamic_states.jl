@@ -442,3 +442,116 @@ end
 
     return StaticEnergyState(s, q, z, 𝒰.reference_pressure)
 end
+
+#####
+##### Internal energy at fixed density (for the total-energy formulation)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the mixture heat capacity at constant volume, ``cᵛᵐ = cᵖᵐ - Rᵐ``, that is
+``cᵛᵐ = qᵈ cᵛᵈ + qᵛ cᵛᵛ + qˡ cˡ + qⁱ cⁱ`` with ``cᵛᵈ = cᵖᵈ - Rᵈ`` and ``cᵛᵛ = cᵖᵛ - Rᵛ``
+(the condensed phases are incompressible).
+
+```jldoctest
+using Breeze.Thermodynamics: mixture_isochoric_heat_capacity, MoistureMassFractions
+
+constants = ThermodynamicConstants()
+mixture_isochoric_heat_capacity(MoistureMassFractions(0.0), constants)
+
+# output
+717.9974933379358
+```
+"""
+@inline mixture_isochoric_heat_capacity(q::MMF, constants) =
+    mixture_heat_capacity(q, constants) - mixture_gas_constant(q, constants)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the latent energy of moist air relative to liquid water at zero kelvin,
+``ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ``, with the latent heats ``ℒˡ₀`` and ``ℒⁱ₀`` extrapolated to absolute
+zero ([`absolute_zero_latent_heat`](@ref)). Vapor carries ``ℒˡ₀`` above liquid water and ice
+``ℒⁱ₀ - ℒˡ₀`` below it, so that the specific internal energy is
+``𝓊 = cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ`` and the specific enthalpy is
+``h = cᵖᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ``.
+
+```jldoctest
+using Breeze.Thermodynamics: liquid_referenced_latent_energy, MoistureMassFractions
+
+constants = ThermodynamicConstants()
+liquid_referenced_latent_energy(MoistureMassFractions(0.01, 0.0, 0.0), constants)
+
+# output
+31375.1265
+```
+"""
+@inline function liquid_referenced_latent_energy(q::MMF, constants)
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
+    return ℒˡ₀ * q.vapor + (ℒˡ₀ - ℒⁱ₀) * q.ice
+end
+
+"""
+$(TYPEDEF)
+
+Thermodynamic state closed on the specific internal energy ``𝓊`` and the density ``ρ``,
+
+```math
+𝓊 = cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ ,
+```
+
+with liquid water at zero kelvin as the origin and constant heat capacities
+(see [`liquid_referenced_latent_energy`](@ref) and [`mixture_isochoric_heat_capacity`](@ref)).
+The temperature is the closed form ``T = (𝓊 - ℒˡ₀ qᵛ - (ℒˡ₀ - ℒⁱ₀) qⁱ) / cᵛᵐ`` and the pressure
+``p = ρ Rᵐ T``. A phase change at fixed ``𝓊`` and ``ρ`` conserves internal energy, so saturation
+adjustment of this state is adjustment at fixed internal energy and density. This is the state
+the total-energy formulation diagnoses, with ``𝓊 = E - K - g z`` the total energy per unit mass
+less its kinetic and potential parts.
+
+```jldoctest
+using Breeze.Thermodynamics: InternalEnergyDensityState, MoistureMassFractions, with_temperature, temperature
+
+constants = ThermodynamicConstants()
+q = MoistureMassFractions(0.012, 0.001, 0.0)
+𝒰 = InternalEnergyDensityState(0.0, q, 1.1)
+𝒰 = with_temperature(𝒰, 290.0, constants)
+temperature(𝒰, constants)
+
+# output
+290.0
+```
+"""
+struct InternalEnergyDensityState{FT} <: AbstractThermodynamicState{FT}
+    internal_energy :: FT
+    moisture_mass_fractions :: MoistureMassFractions{FT}
+    density :: FT
+end
+
+@inline is_absolute_zero(𝒰::InternalEnergyDensityState) = 𝒰.internal_energy == 0
+
+@inline total_specific_moisture(𝒰::InternalEnergyDensityState) =
+    total_specific_moisture(𝒰.moisture_mass_fractions)
+
+@inline with_moisture(𝒰::InternalEnergyDensityState{FT}, q::MoistureMassFractions{FT}) where FT =
+    InternalEnergyDensityState{FT}(𝒰.internal_energy, q, 𝒰.density)
+
+@inline density(𝒰::InternalEnergyDensityState, constants) = 𝒰.density
+
+@inline function temperature(𝒰::InternalEnergyDensityState, constants::ThermodynamicConstants)
+    q = 𝒰.moisture_mass_fractions
+    cᵛᵐ = mixture_isochoric_heat_capacity(q, constants)
+    return (𝒰.internal_energy - liquid_referenced_latent_energy(q, constants)) / cᵛᵐ
+end
+
+@inline function with_temperature(𝒰::InternalEnergyDensityState, T, constants)
+    q = 𝒰.moisture_mass_fractions
+    𝓊 = mixture_isochoric_heat_capacity(q, constants) * T + liquid_referenced_latent_energy(q, constants)
+    return InternalEnergyDensityState(𝓊, q, 𝒰.density)
+end
+
+@inline function air_pressure(𝒰::InternalEnergyDensityState, constants)
+    q = 𝒰.moisture_mass_fractions
+    return 𝒰.density * mixture_gas_constant(q, constants) * temperature(𝒰, constants)
+end
