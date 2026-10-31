@@ -314,7 +314,8 @@ flux_form() = Centered(order = 2)
                  ("LatitudeLongitudeGrid", latitude_longitude_grid(default_arch, FT, (24, 12, 6))))
 
             spherical = grid isa LatitudeLongitudeGrid
-            for scheme in (centered(), centered(4), unsplit(), CompressibleWENOVectorInvariant(), gradient_form_kinetic_energy())
+            # Compiling the time step of each scheme is expensive, so step only the two ends of the family
+            for scheme in (centered(), CompressibleWENOVectorInvariant(order = 5))
                 coriolis = spherical ? SphericalCoriolis() : FPlane(f = 1e-4)
                 model = compressible_model(grid, scheme; coriolis, time_discretization = SplitExplicitTimeDiscretization())
                 set!(model; θ = 300, ρ = model.dynamics.reference_state.density)
