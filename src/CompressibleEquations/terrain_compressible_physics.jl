@@ -920,7 +920,8 @@ terrain_surface_field(host_values, grid) =
         ρᵣ[i, j, 1] = ρ¹
     end
 
-    integrate_exner_column!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, VaporEquivalentExponent())
+    κ̂ = VaporEquivalentExponent()
+    integrate_exner_column!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
 end
 
 """

@@ -438,7 +438,7 @@ end
     # implicit relation cᵖᵐ T = ĉᵖ (ρRᵐT/pˢᵗ)^κ θ + ℒˡ₀qˡ + ℒⁱ₀qⁱ to convergence. This is the same
     # inversion used by the saturation adjustment on the compressible core, so the dynamics and the
     # microphysics carry one self-consistent T (fixes the κ·ΔL split — NumericalEarth/Breeze.jl#765).
-    𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ, formulation.temperature_solver, formulation.exponent)
+    𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ, formulation.temperature_solver, formulation.exner_exponent)
     T = temperature(𝒰, constants)
 
     # Ideal gas law: p = ρ Rᵐ T
@@ -457,5 +457,5 @@ end
     θ = @inbounds formulation.potential_temperature[i, j, k]
     ρ = @inbounds dynamics.total_density[i, j, k]  # total ρ: density-based inversion / true pressure
     pˢᵗ = standard_pressure(dynamics)
-    return LiquidIceDensityState(θ, q, pˢᵗ, ρ, formulation.temperature_solver, formulation.exponent)
+    return LiquidIceDensityState(θ, q, pˢᵗ, ρ, formulation.temperature_solver, formulation.exner_exponent)
 end

@@ -52,8 +52,8 @@ $(TYPEDEF)
 
 The vapor-equivalent Exner exponent ``κ̂ = R̂ / ĉᵖ``. Here ``R̂ = qᵈ Rᵈ + qᵗ Rᵛ`` and
 ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ`` are the gas constant and heat capacity the parcel would have if all of its
-water were vapor (see [`vapor_equivalent_gas_constant`](@ref) and
-[`vapor_equivalent_heat_capacity`](@ref)). With this exponent ``θˡⁱ = T / Π̂`` in unsaturated air,
+water were vapor (see `vapor_equivalent_gas_constant` and
+`vapor_equivalent_heat_capacity`). With this exponent ``θˡⁱ = T / Π̂`` in unsaturated air,
 and dry or moist unsaturated adiabatic motion conserves ``θˡⁱ`` exactly. This is the default.
 
 # Example
@@ -92,12 +92,12 @@ struct DryExponent <: AbstractExnerExponent end
 
 Base.summary(::VaporEquivalentExponent) = "VaporEquivalentExponent()"
 Base.summary(::DryExponent) = "DryExponent()"
-Base.show(io::IO, exponent::AbstractExnerExponent) = print(io, summary(exponent))
+Base.show(io::IO, κ̂::AbstractExnerExponent) = print(io, summary(κ̂))
 
 """
 $(TYPEDSIGNATURES)
 
-Return the value of the Exner exponent `exponent` for moisture mass fractions `q`:
+Return the value ``κ`` of the Exner exponent for moisture mass fractions `q`:
 ``κ̂ = R̂ / ĉᵖ`` for [`VaporEquivalentExponent`](@ref) and ``κᵈ = Rᵈ / cᵖᵈ`` for [`DryExponent`](@ref).
 
 # Example
@@ -182,11 +182,11 @@ end
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
     ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
-    Λ₀ = condensate_latent_energy(q, constants)
+    Hᶜ = condensate_latent_energy(q, constants)
 
-    # ĉᵖ Π θˡⁱ = cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ, arranged so that unsaturated air (ĉᵖ = cᵖᵐ, Λ₀ = 0)
+    # ĉᵖ Π θˡⁱ = cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ, arranged so that unsaturated air (ĉᵖ = cᵖᵐ, Hᶜ = 0)
     # gives exactly T = Π θˡⁱ
-    return Π * θ * (ĉᵖ / cᵖᵐ) + Λ₀ / cᵖᵐ
+    return Π * θ * (ĉᵖ / cᵖᵐ) + Hᶜ / cᵖᵐ
 end
 
 """
@@ -205,13 +205,13 @@ Compute temperature from liquid-ice potential temperature and pressure,
 - `q`: Vapor specific humidity [kg/kg] or `MoistureMassFractions` containing the
   vapor, total liquid (cloud + rain), and total ice (cloud + snow) mass fractions.
   Defaults to dry air.
-- `exponent`: The Exner exponent, [`VaporEquivalentExponent`](@ref) (default) or [`DryExponent`](@ref).
+- `κ̂`: The Exner exponent, [`VaporEquivalentExponent`](@ref) (default) or [`DryExponent`](@ref).
 """
 @inline function temperature_from_potential_temperature(θ, p, pˢᵗ, constants, q::MoistureMassFractions,
-                                                        exponent=VaporEquivalentExponent())
+                                                        κ̂=VaporEquivalentExponent())
     FT = promote_type(typeof(θ), typeof(p), typeof(q.vapor))
     𝒰 = LiquidIcePotentialTemperatureState(convert(FT, θ), MoistureMassFractions{FT}(q),
-                                           convert(FT, pˢᵗ), convert(FT, p), exponent)
+                                           convert(FT, pˢᵗ), convert(FT, p), κ̂)
     return temperature(𝒰, constants)
 end
 
@@ -240,14 +240,14 @@ Compute liquid-ice potential temperature from temperature and pressure,
 - `q`: Vapor specific humidity [kg/kg] or `MoistureMassFractions` containing the
   vapor, total liquid (cloud + rain), and total ice (cloud + snow) mass fractions.
   Defaults to dry air.
-- `exponent`: The Exner exponent, [`VaporEquivalentExponent`](@ref) (default) or [`DryExponent`](@ref).
+- `κ̂`: The Exner exponent, [`VaporEquivalentExponent`](@ref) (default) or [`DryExponent`](@ref).
 """
 @inline function potential_temperature_from_temperature(T, p, pˢᵗ, constants, q::MoistureMassFractions,
-                                                        exponent=VaporEquivalentExponent())
+                                                        κ̂=VaporEquivalentExponent())
     FT = promote_type(typeof(T), typeof(p), typeof(q.vapor))
     T = convert(FT, T)
     𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), MoistureMassFractions{FT}(q),
-                                            convert(FT, pˢᵗ), convert(FT, p), exponent)
+                                            convert(FT, pˢᵗ), convert(FT, p), κ̂)
     𝒰₁ = with_temperature(𝒰₀, T, constants)
     return 𝒰₁.potential_temperature
 end
@@ -266,9 +266,9 @@ end
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
     ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
-    Λ₀ = condensate_latent_energy(q, constants)
+    Hᶜ = condensate_latent_energy(q, constants)
 
-    θ = (T - Λ₀ / cᵖᵐ) * (cᵖᵐ / ĉᵖ) / Π # = (cᵖᵐ T − Λ₀) / (ĉᵖ Π), exactly T / Π in unsaturated air
+    θ = (T - Hᶜ / cᵖᵐ) * (cᵖᵐ / ĉᵖ) / Π # = (cᵖᵐ T − Hᶜ) / (ĉᵖ Π), exactly T / Π in unsaturated air
 
     return LiquidIcePotentialTemperatureState(θ, q, 𝒰.standard_pressure, 𝒰.reference_pressure, 𝒰.exner_exponent)
 end
@@ -392,10 +392,10 @@ end
     Rᵐ  = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     ĉᵖ  = vapor_equivalent_heat_capacity(q, constants)
-    Λ₀  = condensate_latent_energy(q, constants)
+    Hᶜ  = condensate_latent_energy(q, constants)
     κ   = exner_exponent(𝒰.exner_exponent, q, constants)
     p   = ρ * Rᵐ * T
-    θ   = (T - Λ₀ / cᵖᵐ) * (cᵖᵐ / ĉᵖ) * (pˢᵗ / p)^κ
+    θ   = (T - Hᶜ / cᵖᵐ) * (cᵖᵐ / ĉᵖ) * (pˢᵗ / p)^κ
     return LiquidIceDensityState(θ, q, pˢᵗ, ρ, 𝒰.temperature_solver, 𝒰.exner_exponent)
 end
 
@@ -423,12 +423,12 @@ end
 
     g = constants.gravitational_acceleration
     z = 𝒰.height
-    Λ₀ = condensate_latent_energy(q, constants)
+    Hᶜ = condensate_latent_energy(q, constants)
 
     # With composition-dependent heat capacity, the latent offsets are at T = 0.
     # This makes phase exchange release ℒ(T), including the heat-capacity correction.
     # s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ - ℒⁱ₀ * qⁱ
-    return (s - g * z + Λ₀) / cᵖᵐ
+    return (s - g * z + Hᶜ) / cᵖᵐ
 end
 
 @inline function with_temperature(𝒰::StaticEnergyState, T, constants)
@@ -436,9 +436,9 @@ end
     cᵖᵐ = mixture_heat_capacity(q, constants)
     g = constants.gravitational_acceleration
     z = 𝒰.height
-    Λ₀ = condensate_latent_energy(q, constants)
+    Hᶜ = condensate_latent_energy(q, constants)
 
-    s = cᵖᵐ * T + g * z - Λ₀
+    s = cᵖᵐ * T + g * z - Hᶜ
 
     return StaticEnergyState(s, q, z, 𝒰.reference_pressure)
 end
