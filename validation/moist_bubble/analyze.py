@@ -44,7 +44,8 @@ def read_breeze(label, Nx, Nz):
     nf = a.size // (7 * Nx * Nz)
     a = a[: nf * 7 * Nx * Nz].reshape(nf, 7, Nz, Nx)
     frames = []
-    for n in range(nf):
+    # The t = 0 frame is written twice: once by hand, and once by the callback at iteration 0.
+    for n in [0] + list(range(2, nf)):
         f = Frame()
         f.T, f.p, f.rho, f.qv, f.ql, f.u, f.w = [a[n, m] for m in range(7)]
         frames.append(derive(f, es_breeze))

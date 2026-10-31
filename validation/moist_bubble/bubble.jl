@@ -137,6 +137,17 @@ end
 microphysics_for(name) = micro == "equilibrium" ? SaturationAdjustment(Float64; equilibrium = WarmPhaseEquilibrium()) :
                                                    nonequilibrium_microphysics()
 
+# Acoustic-loop sensitivities: ACOUSTIC_CFL, FORWARD_WEIGHT, DAMPING (the thermal divergence damping coefficient)
+function time_discretization()
+    kw = (;)
+    haskey(ENV, "ACOUSTIC_CFL") && (kw = merge(kw, (; acoustic_cfl = parse(Float64, ENV["ACOUSTIC_CFL"]))))
+    haskey(ENV, "FORWARD_WEIGHT") && (kw = merge(kw, (; forward_weight = parse(Float64, ENV["FORWARD_WEIGHT"]))))
+    haskey(ENV, "DAMPING") && (kw = merge(kw, (; damping = ThermalDivergenceDamping(; coefficient = parse(Float64, ENV["DAMPING"])))))
+    return SplitExplicitTimeDiscretization(; kw...)
+end
+
+const run_tag = get(ENV, "TAG", "")
+
 function write_fields(io, s)
     Nx, Nz = size(s.T)
     uᶜ = (s.u[1:Nx, :] .+ s.u[2:Nx+1, :]) ./ 2
@@ -163,7 +174,7 @@ function run_bubble(name, Δ)
     qˡ_ref = interpolator(z, [s.qˡ for s in states])
 
     if is_compressible(name)
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = p₀,
+        dynamics = CompressibleDynamics(time_discretization(); base_pressure = p₀,
                                         reference_potential_temperature = θ_ref, reference_vapor_mass_fraction = qᵛ_ref)
     else
         reference_state = ReferenceState(grid, constants; base_pressure = p₀, potential_temperature = θ_ref,
@@ -202,6 +213,7 @@ function run_bubble(name, Δ)
     label = @sprintf("%s%s_%s_%dm%s", micro, null_run ? "-null" : "", name, round(Int, Δ),
                      micro == "equilibrium" ? "" : @sprintf("_tau%g", τ_relax))
     label = isnothing(Δt_override) ? label : label * @sprintf("_dt%g", Δt_override)
+    label *= run_tag
 
     θₑ_field(s) = θₑ_from_state.(s.T, s.p, s.qv, s.ql)
 
