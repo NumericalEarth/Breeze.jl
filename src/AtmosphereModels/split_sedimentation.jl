@@ -81,8 +81,53 @@ function split_sedimentation_step!(model, Δt)
     grid = model.grid
     F = split_sedimentation_flux_field(grid)
     # Function barrier: the cached mass-only tuple is inferred as `Any`.
+    FUSED_SPLIT_SEDIMENTATION[] || return launch_split_sedimentation_per_species!(model, grid, F, kernel_time_step(grid.architecture, grid, Δt), mode,
+                                                                                  condensates, split_mass_only_prognostics(model))
     return launch_split_sedimentation!(model, grid, F, kernel_time_step(grid.architecture, grid, Δt), mode,
                                        condensates, split_mass_only_prognostics(model))
+end
+
+# `BREEZE_FUSED_SPLIT_SEDIMENTATION` (default false, read in `__init__`; bitwise either way). Default off:
+# at 13 km (job 6053) the fused kernel costs 0.99 ms/step of GPU time against 0.60 for 1M (2.47 against 1.66
+# for P3) and saves only 3 (11) launches per step.
+const FUSED_SPLIT_SEDIMENTATION = Ref(false)
+
+function launch_split_sedimentation_per_species!(model, grid, F, Δt, mode, condensates, mass_only)
+    arch = grid.architecture
+    FT = eltype(grid)
+    ρ = total_density(model.dynamics)
+    φ = thermodynamic_density(model.formulation)
+    zero_w = ZeroField(FT)
+    for condensate in condensates
+        launch!(arch, grid, :xy, _split_sedimentation_column!, F, condensate.density, condensate.velocity, ρ, grid,
+                Δt, mode, FT(SEDIMENTATION_CFL), SEDIMENTATION_MAX_SUBSTEPS)
+        launch!(arch, grid, :xyz, _split_sedimentation_content!, φ, grid, Δt,
+                (condensate,), zero_w, SplitSedimentationFluxes(F), model.formulation, model.dynamics,
+                model.thermodynamic_constants, model.microphysics, model.microphysical_fields,
+                specific_prognostic_moisture(model), explicit_content_source(model))
+    end
+    for (ρc, w) in mass_only
+        launch!(arch, grid, :xy, _split_sedimentation_column!, F, ρc, w, ρ, grid,
+                Δt, mode, FT(SEDIMENTATION_CFL), SEDIMENTATION_MAX_SUBSTEPS)
+    end
+    return nothing
+end
+
+@kernel function _split_sedimentation_content!(φ, grid, Δt, condensates, wᵗ, mass_fluxes, formulation, dynamics,
+                                               constants, microphysics, microphysical_fields,
+                                               specific_prognostic_moisture, temperature)
+    i, j, k = @index(Global, NTuple)
+    tendency = sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, formulation, dynamics,
+                                              constants, microphysics, microphysical_fields,
+                                              specific_prognostic_moisture, temperature)
+    @inbounds φ[i, j, k] += Δt * tendency
+end
+
+@kernel function _split_sedimentation_column!(F, ρq, w, ρ, grid, Δt, mode, cfl, max_substeps)
+    i, j = @index(Global, NTuple)
+    Nz = grid.Nz
+    @inbounds F[i, j, Nz + 1] = zero(eltype(grid))
+    split_sedimentation_column!(F, ρq, w, ρ, grid, Δt, mode, cfl, max_substeps, i, j, Nz)
 end
 
 # T21-sedfuse: every sedimenting prognostic of the step in ONE column kernel. Each thread owns a column

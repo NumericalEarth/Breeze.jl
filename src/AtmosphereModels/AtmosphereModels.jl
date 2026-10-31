@@ -180,6 +180,7 @@ function __init__()
     read_kernel_argument_cache_switches!()  # kernel_arguments.jl
     FOLDED_RK3_SOLVES[] = env_switch("BREEZE_FOLDED_RK3_SOLVES", true)
     BATCHED_SCALAR_TENDENCIES[] = env_switch("BREEZE_BATCHED_SCALAR_TENDENCIES", true)
+    FUSED_SPLIT_SEDIMENTATION[] = env_switch("BREEZE_FUSED_SPLIT_SEDIMENTATION", false)  # split_sedimentation.jl
     return nothing
 end
 
