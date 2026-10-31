@@ -107,7 +107,7 @@ end
 # The closure's ∇_dot_Jᶜ supplies - ρ K ∂z s; this is the remainder, Jᵇ = - ρ K b. It is what makes mixing
 # neutral where N² vanishes. In dry air N² = g (∂z s + b) / (cᵖ T), so a flux of ∂z s alone relaxes the column
 # to N² = g b / (cᵖ T), which is negative wherever T < Tᵣ: mixing can then never remove the instability
-# that drives it, and a TKE closure grows without bound. Jᵇ is a flux, so ∫ρs is unaffected. It is explicit, and
+# that drives it, and a TKE closure sustains turbulence there forever. Jᵇ is a flux, so ∫ρs is unaffected. It is explicit, and
 # its advective-like speed K g / (cᵖ Tᵣ) is 5 mm/s for K = 100 m²/s.
 @inline function Jᵇᶜᶜᶠ(i, j, k, grid, closure, closure_fields, id, clock, model_fields, dynamics, args...)
     K = z_diffusivity(i, j, k, grid, c, c, f, closure, closure_fields, id, clock, model_fields)

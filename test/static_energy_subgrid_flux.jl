@@ -50,18 +50,19 @@ interior_array(field) = Array(interior(field))
 end
 
 @testset "TKE decays in a neutral column colder than the reference state [$FT]" for FT in test_float_types()
-    # Mixing ∂z s alone relaxes this column to N² = g² (T - Tᵣ) / (cᵖ T Tᵣ) < 0, against which the TKE grows
-    # without bound. The potential temperature formulation is the control.
+    # Mixing ∂z s alone relaxes this column to N² = g² (T - Tᵣ) / (cᵖ T Tᵣ) < 0, against which the TKE grows from
+    # 1 m²/s² to a steady ~100 m²/s² within half a day. The potential temperature formulation is the control.
     final_tke = map((:StaticEnergy, :LiquidIcePotentialTemperature)) do formulation
         model = dry_column_model(formulation, TKEBasedTurbulenceClosure(), FT; Δθ=-20)
         ρ = model.dynamics.reference_state.density
-        @allowscalar set!(model.tracers.ρe, ρ[1, 1, 10])
-        for _ in 1:1000
+        set!(model.tracers.ρe, 1)
+        parent(model.tracers.ρe) .*= parent(ρ)
+        for _ in 1:2000
             time_step!(model, 10)
         end
-        maximum(interior_array(model.tracers.ρe))
+        maximum(interior_array(model.tracers.ρe) ./ interior_array(ρ))
     end
-    @test final_tke[1] < 1e-2 * oneunit(FT)
-    @test final_tke[2] < 1e-2 * oneunit(FT)
+    @test final_tke[1] < 1
+    @test final_tke[1] ≈ final_tke[2] rtol=1e-2
     Oceananigans.defaults.FloatType = Float64
 end
