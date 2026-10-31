@@ -27,6 +27,11 @@ seeds = length(ARGS) ≥ 5 ? parse.(Int, split(ARGS[5], ',')) : [1]
 path(v, s) = joinpath(output_dir, "breeze_l3_s$(s)_M$(M)_$(v)_timeseries.csv")
 runs = Dict((v, s) => read_csv(path(v, s)) for v in variants for s in seeds if isfile(path(v, s)))
 
+# Compare at common times: the last output of some runs falls just after the stop time and is not written
+t_end = minimum(r.time[end] for r in values(runs))
+truncate(r) = (n = findlast(r.time .≤ t_end + 1e-6); NamedTuple{keys(r)}(Tuple(x[1:n] for x in values(r))))
+runs = Dict(k => truncate(r) for (k, r) in runs)
+
 quantities = [(:liquid_water_content, "LWC (g kg⁻¹)", 1e3), (:mean_radius, "r̄ (μm)", 1e6),
               (:std_radius, "σᵣ (μm)", 1e6), (:parcel_supersaturation, "parcel 𝒮 (%)", 100),
               (:droplet_mean_supersaturation, "droplet-seen 𝒮 (%)", 100), (:std_supersaturation, "std 𝒮 (%)", 100),
