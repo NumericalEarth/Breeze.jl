@@ -1,7 +1,15 @@
 module Advection
 
 export div_ρUc,
-       bottom_advective_tracer_flux
+       bottom_advective_tracer_flux,
+       CompressibleVectorInvariant,
+       CompressibleWENOVectorInvariant,
+       SplitVerticalAdvection,
+       UnsplitVerticalAdvection,
+       CornerVorticityPairing,
+       UpwindVorticityPairing,
+       GradientFormUpwinding,
+       AveragedVorticityPairing
 
 using Oceananigans.Advection:
     _advective_tracer_flux_x,
@@ -266,5 +274,7 @@ function AtmosphereModels.bottom_precipitation_flux(model, microphysics)
                                                                  transport_velocities(model).w)
     return Field(operation)
 end
+
+include("compressible_vector_invariant.jl")
 
 end # module
