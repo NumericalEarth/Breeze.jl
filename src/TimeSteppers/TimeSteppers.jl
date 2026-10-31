@@ -17,7 +17,8 @@ using Oceananigans: Oceananigans
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  update_state!, maybe_prepare_first_time_step!, reconcile_state!
-using Oceananigans.Fields: Field, instantiated_location
+using Oceananigans: instantiated_location
+using Oceananigans.Fields: Field
 using Breeze.AtmosphereModels: kernel_time_step
 
 # Storage for the state at the start of a time step, with the float type of each prognostic field.
