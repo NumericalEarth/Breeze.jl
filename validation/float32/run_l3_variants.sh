@@ -10,7 +10,7 @@
 #SBATCH -o /home/greg_aeolus_earth/float32-env/jobs/l3v-%j.out
 set -e
 J=~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/bin/julia
-RUN=/home/greg_aeolus_earth/Breeze-float32-run
+RUN=${RUN_TREE:-/home/greg_aeolus_earth/Breeze-float32-run}
 NAIVE=/home/greg_aeolus_earth/Breeze-float32-naive
 export JULIA_NUM_THREADS=8 OUTPUT_DIR=${OUTPUT_DIR:-/home/greg_aeolus_earth/Breeze-float32/validation/float32/output/l3}
 nvidia-smi -L
