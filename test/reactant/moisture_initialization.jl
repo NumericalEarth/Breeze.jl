@@ -2,12 +2,12 @@ include(joinpath(dirname(@__DIR__), "setup.jl"))
 
 using Breeze
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
+using Breeze.AtmosphereModels: specific_prognostic_moisture
 using Breeze.Thermodynamics: TetensFormula
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Reactant
 using Enzyme
-using Logging: with_logger, NullLogger
 using Test
 
 Reactant.set_default_backend(default_arch isa GPU ? "gpu" : "cpu")
@@ -33,7 +33,12 @@ end
     grid = RectilinearGrid(ReactantState(), FT; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
     microphysics = DCMIP2016KesslerMicrophysics(FT)
     thermodynamic_constants = ThermodynamicConstants(FT; saturation_vapor_pressure=TetensFormula(FT))
-    model = AtmosphereModel(grid; microphysics, thermodynamic_constants, dynamics=CompressibleDynamics())
+    # The gradient differentiates through the θˡⁱ → T inversion. With the default early-exit
+    # NewtonSolver, XLA fuses the differentiated iterations with the moisture check into a GPU kernel
+    # that never finishes (Julia 1.13), so use the fixed-trip solver recommended for Reactant runs.
+    formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver=FixedIterations(2))
+    model = AtmosphereModel(grid; microphysics, thermodynamic_constants, formulation,
+                            dynamics=CompressibleDynamics())
     compiled_initialize! = Reactant.@compile sync=true initialize!(model)
     compiled_initialize!(model)
     total_water = CenterField(grid)
@@ -52,7 +57,7 @@ end
         @test all(isapprox.(Array(interior(model.dynamics.total_density)), FT(1); rtol=20eps(FT)))
     end
 
-    # The Boolean runtime check must not prevent differentiation through initialization.
+    # The moisture check must not prevent differentiation through initialization.
     dmodel = Enzyme.make_zero(model)
     dtotal_water = CenterField(grid)
     compiled_gradient = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true initialization_gradient!(
@@ -60,12 +65,11 @@ end
     gradient = @with_stack_size compiled_gradient(model, dmodel, total_water, dtotal_water)
     @test all(isapprox.(Array(interior(gradient)), FT(1); rtol=50eps(FT)))
 
-    # This value changes after compilation, so rejection must happen at execution time.
-    # The callback logs the ArgumentError, which Reactant reports as an execution error.
+    # This value changes after compilation. The eager call raises; the compiled call
+    # cannot, so it marks the invalid state's moisture as NaN instead.
     set!(total_water, FT(0))
     @test_throws ArgumentError initialize_total_water!(model, total_water)
-    # A failed compiled call can consume donated buffers, so run it last.
-    with_logger(NullLogger()) do
-        @test_throws Reactant.XLA.ReactantInternalError compiled(model, total_water)
-    end
+    compiled(model, total_water)
+    @test all(isnan, Array(interior(model.moisture_density)))
+    @test all(isnan, Array(interior(specific_prognostic_moisture(model))))
 end

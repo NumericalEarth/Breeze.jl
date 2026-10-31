@@ -73,11 +73,11 @@ under AD.
 
 ```bash
 # What CI runs (GPU): a latitude-longitude grid and split-explicit dynamics (12 acoustic
-# substeps), 64 steps, sweeping binomial checkpoint budgets of 2, 4 and 8
+# substeps), 64 steps, sweeping binomial checkpoint budgets of 2 and 8
 julia --project run_benchmarks.jl --device GPU --backend reactant --ad --simplified \
     --dynamics compressible_splitexplicit \
     --topology PBB --float_type Float32 \
-    --size 128x128x32 --time_steps 64 --checkpoints 2,4,8 --checkpointing_mode binomial
+    --size 128x128x32 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial
 
 # Local CPU run (no GPU needed). Use a small grid: the gradient compile is
 # the expensive part, and the reverse pass on CPU is slow.
@@ -96,6 +96,13 @@ Each result is recorded with `mode = "ad"` and a `checkpointing` label
 also appended to the benchmark name (`..._reactant_AD_periodic_4`). `Time/Step`
 is the wall time of the combined forward+backward program divided by
 `--time_steps`.
+
+### Kernel profiling
+
+With `--profile_kernels`, once every case is timed and saved, each vanilla
+time-stepping case is profiled with `CUDA.@profile` in the same process, and the
+GPU time of each kernel is written to `kernel_profile.json`; see
+[`kernel_profiling/README.md`](kernel_profiling/README.md).
 
 ### Simulate Mode
 
@@ -143,6 +150,7 @@ julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=2.0 -
 | `--warmup_steps` | `10` | Number of warmup steps (for JIT compilation). Ignored on the `reactant` backend, which warms up with one full execution of the compiled program. |
 | `--ad` | `false` | Benchmark the forward+backward (Enzyme reverse-mode) pass through the stepping loop instead of forward only. Requires `--backend reactant`. |
 | `--checkpoints` | `auto` | AD loop checkpointing (`--ad` only): integer count, `auto`, or `none`. Comma-separated for multiple; see "AD benchmark". |
+| `--profile_kernels` | `false` | Once every case is timed and saved, profile the GPU kernels of each vanilla time-stepping case (`--device GPU`, without `--ad`); see "Kernel profiling". |
 | `--checkpointing_mode` | `binomial` | Interpretation of an integer `--checkpoints` value: `binomial` (revolve) or `periodic`. |
 
 ### Simulate Mode Arguments

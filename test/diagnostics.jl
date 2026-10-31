@@ -5,7 +5,9 @@ using Breeze
 using Breeze.Thermodynamics: dry_air_gas_constant, compute_hydrostatic_reference!,
                              mixture_gas_constant, MoistureMassFractions,
                              surface_pressure_from_cell_center
-using Breeze.AtmosphereModels: dynamics_pressure, standard_pressure, total_density
+using Breeze.AtmosphereModels: dynamics_pressure, standard_pressure, total_density,
+                               density_potential_temperature
+using Oceananigans.TurbulenceClosures: buoyancy_force
 using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
@@ -83,7 +85,9 @@ using GPUArraysCore: @allowscalar
     @test all(interior(θᵇ_density_field) .> 0)
 end
 
-# Regression test for #659 / PR #656: the definition of virtual potential temperature.
+# Regression test for #659 / PR #656: the definition of virtual potential temperature. The buoyancy
+# of the turbulence closures differentiates the density potential temperature, which is the virtual
+# potential temperature wherever there is no condensate, as in this subsaturated column.
 @testset "Virtual potential temperature buoyancy formulation [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
@@ -108,6 +112,7 @@ end
     pᵣ_field = dynamics.reference_state.pressure
 
     θᵥ_diagnostic = Field(VirtualPotentialTemperature(model))
+    buoyancy = buoyancy_force(model)
 
     @allowscalar for k in 1:Nz
         T_k  = T_field[1, 1, k]
@@ -118,8 +123,7 @@ end
         # θᵥ = T (Rᵐ / Rᵈ) (pˢᵗ / pᵣ)^(Rᵈ / cᵖᵈ) — dry exponent
         θᵥ_expected = T_k * (Rᵐ_k / Rᵈ) * (pˢᵗ / pᵣ_k)^(Rᵈ / cᵖᵈ)
 
-        θᵥ_kernel = Breeze.AtmosphereModels.virtual_potential_temperature(
-            1, 1, k, grid, constants, dynamics, T_field, qᵛ_field)
+        θᵥ_kernel = density_potential_temperature(1, 1, k, grid, buoyancy, T_field, qᵛ_field)
 
         @test θᵥ_kernel ≈ θᵥ_expected rtol = 100eps(FT)
         @test θᵥ_diagnostic[1, 1, k] ≈ θᵥ_expected rtol = 100eps(FT)
@@ -212,6 +216,33 @@ end
             end
         end
     end
+end
+
+@testset "Supersaturation diagnostics [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
+    model = AtmosphereModel(grid; microphysics=SaturationAdjustment())
+
+    # Subsaturated air: the supersaturation is negative everywhere, and is exactly one less than
+    # the relative humidity
+    set!(model, θ=300, qᵗ=0.005)
+    𝒮 = Supersaturation(model)
+    @test 𝒮 isa Oceananigans.AbstractOperations.AbstractOperation
+    𝒮_field = SupersaturationField(model)
+    ℋ_field = RelativeHumidityField(model)
+    # Reductions over the field itself, and over floats rather than booleans: `all(f, field)`
+    # builds a Bool reduced field, whose `initarray!` has no method on Julia 1.13
+    @test maximum(abs, 𝒮_field) < Inf   # finite everywhere: a NaN anywhere would fail this
+    @test maximum(𝒮_field) < 0
+    @test maximum(abs, 𝒮_field - ℋ_field + 1) < eps(FT)
+
+    # Moist enough to condense: saturation adjustment pins the supersaturation to zero wherever it
+    # makes condensate, and leaves the rest of the column subsaturated
+    set!(model, θ=300, qᵗ=0.03)
+    𝒮_saturated = SupersaturationField(model)
+    @test maximum(model.microphysical_fields.qˡ) > 0
+    @test abs(maximum(𝒮_saturated)) < FT(1e-3)
+    @test minimum(𝒮_saturated) < 0
 end
 
 @testset "Hydrostatic pressure computation [$(FT)]" for FT in test_float_types()
