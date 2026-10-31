@@ -40,7 +40,7 @@ using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, fill_halo_regions!
 using Oceananigans.BuoyancyFormulations: ∂z_b
 using Oceananigans.Fields: CenterField, ZFaceField, ZeroField
-using Oceananigans.Grids: Center, Face, inactive_cell
+using Oceananigans.Grids: AbstractUnderlyingGrid, Bounded, Center, Face, inactive_cell
 
 using Oceananigans.Operators:
     # Face-centered difference operators with area metrics
@@ -190,6 +190,70 @@ end
           δxᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶠ, 𝒯_wx, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
         + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶠ, 𝒯_wy, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
         + δzᵃᵃᶠ(i, j, k, grid, Az_qᶜᶜᶜ, 𝒯_wz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
+end
+
+#####
+##### Vertically implicit vertical diffusivities: the flux divergences without their identically-zero terms
+#####
+##### For a scalar diffusivity of `VerticalFormulation` stepped with a `VerticallyImplicitTimeDiscretization` (e.g.
+##### `TKEBasedTurbulenceClosure`), every horizontal viscous and diffusive flux is Oceananigans' literal `zero(grid)`,
+##### and on a vertically bounded grid the vertical flux is the literal zero of the implicit part on every interior
+##### face; only the bottom and top faces carry an explicit flux, behind a branch on k. The generic operators above
+##### still multiply each zero by an interpolated density and an area, difference and sum them.
+#####
+##### With densities and areas finite and positive, each dropped term is exactly +0: A·(ρ·(+0)) = +0, δ(+0, +0) = +0.
+##### So the generic bracket `(δx + δy) + δz` is `(+0) + δz`, and on interior levels `δz = +0` too, so the operator is
+##### V⁻¹ · (+0) = +0. The methods below return exactly that. On the bottom and top levels the literal +0 is kept,
+##### because `(+0) + δz` maps a −0 to +0 as the generic sum does. The vertical flux of w is the implicit zero on
+##### every face, so the w operator is +0 at every level.
+#####
+
+const VerticallyImplicitVerticalDiffusivity = AbstractScalarDiffusivity{<:VerticallyImplicitTimeDiscretization, <:VerticalFormulation}
+
+# Non-immersed grids bounded in z (an immersed grid keeps the generic operators and their conditional fluxes).
+const VerticallyBoundedUnderlyingGrid = AbstractUnderlyingGrid{<:Any, <:Any, <:Any, <:Bounded}
+
+# The levels whose cell has a bottom or top face with an explicit vertical flux.
+@inline explicit_vertical_flux_level(k, grid) = (k == 1) | (k == size(grid, 3))
+
+@inline function AtmosphereModels.∂ⱼ_𝒯₁ⱼ(i, j, k, grid::VerticallyBoundedUnderlyingGrid, ρᵣ,
+                                          closure::VerticallyImplicitVerticalDiffusivity,
+                                          closure_fields, clock, model_fields, buoyancy)
+    if explicit_vertical_flux_level(k, grid)
+        disc = time_discretization(closure)
+        return V⁻¹ᶠᶜᶜ(i, j, k, grid) *
+               (zero(grid) + δzᵃᵃᶜ(i, j, k, grid, Az_qᶠᶜᶠ, 𝒯_uz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
+    else
+        return zero(grid)
+    end
+end
+
+@inline function AtmosphereModels.∂ⱼ_𝒯₂ⱼ(i, j, k, grid::VerticallyBoundedUnderlyingGrid, ρᵣ,
+                                          closure::VerticallyImplicitVerticalDiffusivity,
+                                          closure_fields, clock, model_fields, buoyancy)
+    if explicit_vertical_flux_level(k, grid)
+        disc = time_discretization(closure)
+        return V⁻¹ᶜᶠᶜ(i, j, k, grid) *
+               (zero(grid) + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶠᶠ, 𝒯_vz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
+    else
+        return zero(grid)
+    end
+end
+
+@inline AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid::VerticallyBoundedUnderlyingGrid, ρᵣ,
+                                 closure::VerticallyImplicitVerticalDiffusivity,
+                                 closure_fields, clock, model_fields, buoyancy) = zero(grid)
+
+@inline function AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid::VerticallyBoundedUnderlyingGrid, ρᵣ,
+                                           closure::VerticallyImplicitVerticalDiffusivity,
+                                           closure_fields, id, c, clock, model_fields, buoyancy)
+    if explicit_vertical_flux_level(k, grid)
+        disc = time_discretization(closure)
+        return V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+               (zero(grid) + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, Jᶜz, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy))
+    else
+        return zero(grid)
+    end
 end
 
 include("static_stability.jl")
