@@ -1744,6 +1744,17 @@ function launch_acoustic_column_kernel!(kernel!, args...)
     return nothing
 end
 
+# T22 acoustic E: the carried column launches under the same cap (`BREEZE_ACOUSTIC_COLUMN_MAXREGS`, default 0 = `launch!`).
+function launch_carried_column!(arch, grid, kernel, args...)
+    if ACOUSTIC_COLUMN_MAXREGS[] > 0
+        loop!, _ = configure_kernel(arch, grid, :xy, kernel)
+        launch_acoustic_column_kernel!(loop!, convert_to_device(arch, args)...)
+    else
+        launch!(arch, grid, :xy, kernel, args...)
+    end
+    return nothing
+end
+
 function launch_with_register_cap!(cuda, kernel!, maxregs, args)
     ndrange, workgroupsize, iterspace, dynamic = KernelAbstractions.launch_config(kernel!, nothing, nothing)
     ctx = KernelAbstractions.mkcontext(kernel!, ndrange, iterspace)
@@ -2552,7 +2563,7 @@ function acoustic_substep!(model, substepper, stage, advection,
     if CARRIED_EXPLICIT_STEP[] & carries_vertical_rhs(model.dynamics, pressure_gradients, grid)
         # one thread per column, the vertical stencil of ∂x p′, ∂y p′ carried (handoff S6 513ceeee; T22 acoustic C)
         damping = pending_damping ? folded_damping_operands(substepper.damping, substepper, model, Δτ) : nothing
-        launch!(arch, grid, :xy, _carried_explicit_horizontal_step!,
+        launch_carried_column!(arch, grid, _carried_explicit_horizontal_step!,
                 substepper.momentum_perturbation.u,
                 substepper.momentum_perturbation.v,
                 grid, model.dynamics, Δτ,
@@ -2698,7 +2709,7 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
             fuse_recovery && return nothing
             solved = true
         else
-            launch!(arch, grid, :xy, _build_vertical_rhs_carried!, substepper.vertical_solver_source_term, rhs)
+            launch_carried_column!(arch, grid, _build_vertical_rhs_carried!, substepper.vertical_solver_source_term, rhs)
         end
     else
         launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),

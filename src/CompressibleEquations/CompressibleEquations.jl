@@ -129,6 +129,7 @@ function __init__()
     FUSED_CARRIED_COLUMN_SOLVE[] && @info "Fused carried rhs + column solve + recovery on (environment)"
     FUSED_COLUMN_RECOVERY[] = switch_from_env("BREEZE_FUSED_COLUMN_RECOVERY", false)
     FOLDED_DIVERGENCE_DAMPING[] = switch_from_env("BREEZE_FOLDED_DIVERGENCE_DAMPING", true)
+    ACOUSTIC_COLUMN_MAXREGS[] = parse(Int, get(ENV, "BREEZE_ACOUSTIC_COLUMN_MAXREGS", "0"))
     CARRIED_EXPLICIT_STEP[] = switch_from_env("BREEZE_CARRIED_EXPLICIT_STEP", true)
     CARRIED_EXPLICIT_STEP[] || @info "Carried explicit horizontal step off (environment)"
     UNREAD_STASH_SKIP[] = switch_from_env("BREEZE_UNREAD_STASH_SKIP", true)
