@@ -36,4 +36,17 @@ Pkg.test("Breeze")
 
 - Ensure all explicit imports are correct (tests check this automatically)
 - Always add tests for new functionality
-- Make sure test files are actually included / discoverable by `runtests.jl`
+- Every `test/*.jl` file is discovered automatically as a test. Helper files must be removed from
+  the test suite in `test/runtests.jl`, as `setup` is
+- `reactant/` tests run only with `--check-bounds=auto` on Julia older than 1.14
+
+## Distributed (MPI) Tests
+
+Multi-rank tests use a driver/worker split, following Oceananigans.jl's `test/distributed`:
+
+- `test/distributed/<name>.jl` is a normal ParallelTestRunner test (a *driver*), run serially. It
+  launches `mpiexec -n N julia ... test/mpi/<name>.jl <args>` and checks the exit status and a
+  sentinel line.
+- `test/mpi/<name>.jl` is the *worker*, run in lockstep on every rank. `test/mpi/` is excluded from
+  autodiscovery in `test/runtests.jl`. Workers can be run stand-alone:
+  `mpiexec -n 4 julia --project=test test/mpi/acoustic_wave.jl xy`.
