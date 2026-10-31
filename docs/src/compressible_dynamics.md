@@ -96,8 +96,21 @@ refreshed before every RK stage:
 
 ```math
 ρ^L, \quad (ρθ)^L, \quad p^L, \quad
-Π^L = (p^L / p^{st})^κ, \quad θ^L = (ρθ)^L/ρ^L, \quad γ^m R^m\big|_L .
+Π^L = (p^L / p^{st})^{\hat κ}, \quad θ^L = (ρθ)^L/ρ^L, \quad γ^m R^m\big|_L .
 ```
+
+``Π^L`` uses the formulation's Exner exponent ``\hat κ``, and ``γ^m R^m|_L`` is defined so that
+``C^L = γ^m R^m|_L Π^L`` is the slope ``∂p/∂(ρθ)`` of the compressible core's equation of state at
+``U^L``, at fixed dry and water partial densities. With ``p = ρ R^m T`` and the temperature
+inverted from ``c^p_m T = \hat{c}^p Π^L θ^{li} + H^c``, where ``\hat{c}^p`` is the vapor-equivalent
+heat capacity and ``H^c = ℒ^l_0 q^l + ℒ^i_0 q^i`` the condensate latent energy,
+
+```math
+C^L = \frac{ρ}{ρ^d} \, \frac{R^m \hat{c}^p Π^L}{c^p_m (1 - \hat κ) + \hat κ H^c / T} ,
+```
+
+which is ``γ^d R^d Π^L`` in dry air and ``(ρ / ρ^d) γ^m R^m Π^L`` in unsaturated air, the gas
+constant per unit dry mass pairing with the dry-coupled prognostic ``ρθ = ρ^d θ``.
 
 The outer-step-start state ``U^n`` is also stored. Stages 2 and 3 initialize perturbations
 with the rewind term ``U^n - U^L`` so that the full state at the beginning of every
