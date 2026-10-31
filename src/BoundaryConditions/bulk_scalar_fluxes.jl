@@ -57,7 +57,11 @@ thermodynamic formulation.
 # Keyword Arguments
 
 - `coefficient`: The sensible heat transfer coefficient.
-- `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
+- `gustiness`: The gustiness ``Uᵍ`` added to the resolved wind, ``|U| = \\sqrt{u² + v² + Uᵍ²}``,
+               in the flux and in a [`PolynomialCoefficient`](@ref) alike: a number, a
+               [`TKEGustiness`](@ref), or the default [`DefaultGustiness`](@ref), which the
+               model replaces with a `TKEGustiness` under a `TKEBasedTurbulenceClosure` and with
+               `0` otherwise.
 - `surface_temperature`: The wall temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Functions are evaluated at the wall at every time step with the
                          non-`Flat` coordinates of the wall followed by the time, as for
@@ -70,7 +74,7 @@ thermodynamic formulation.
                          with the same parameters (e.g., `height`, `timescale`) as `filtered_velocities`.
                          Filtering is supported on the bottom boundary only.
 """
-function BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
+function BulkSensibleHeatFluxFunction(; coefficient, gustiness=DefaultGustiness(), surface_temperature, filtered_velocities=nothing)
     return BulkSensibleHeatFluxFunction(nothing, coefficient, gustiness, surface_temperature,
                                         nothing, nothing, nothing, filtered_velocities, nothing, nothing)
 end
@@ -89,7 +93,7 @@ Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
 
 Base.summary(bf::BulkSensibleHeatFluxFunction) =
     string("BulkSensibleHeatFluxFunction(coefficient=", bf.coefficient,
-           ", gustiness=", bf.gustiness, ")")
+           ", gustiness=", prettysummary(bf.gustiness), ")")
 
 # Compute the thermodynamic variable difference at the wall. The model constructor sets the
 # formulation (`set_sensible_heat_formulation_bcs`), so an unset one has no method.
@@ -144,13 +148,14 @@ end
     Tˢ = wall_value(ℓ, m, grid, side, bf.surface_temperature, clock)
 
     U² = wall_wind_speed²(i, j, k, grid, side, nothing, fields, bf.filtered_velocities)
-    Ũ = sqrt(U² + bf.gustiness^2)
+    Uᵍ² = gustiness²(i, j, k, grid, bf.gustiness, fields)
+    Ũ = sqrt(U² + Uᵍ²)
 
     constants = bf.thermodynamic_constants
     pˢ = wall_air_pressure(i, j, k, grid, side, nothing, fields, constants)
     ρˢ = surface_density(pˢ, Tˢ, constants)
 
-    Cᵀ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, Tˢ, bf.filtered_velocities, pˢ)
+    Cᵀ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, Tˢ, bf.filtered_velocities, pˢ, Uᵍ²)
 
     Δϕ = bulk_sensible_heat_difference(i, j, k, grid, side, bf.formulation, bf, Tˢ, fields, pˢ, bf.filtered_scalar)
     return outward_flux_sign(side) * ρˢ * Cᵀ * Ũ * Δϕ
@@ -176,7 +181,7 @@ struct BulkVaporFluxFunction{S, C, G, T, H, TC, SF, M, FV, FS}
 end
 
 """
-    BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature,
+    BulkVaporFluxFunction(; coefficient, gustiness=DefaultGustiness(), surface_temperature,
                             surface_relative_humidity=1, moisture_availability=nothing,
                             filtered_velocities=nothing)
 
@@ -204,7 +209,11 @@ moister than the adjacent air.
 # Keyword Arguments
 
 - `coefficient`: The vapor transfer coefficient.
-- `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
+- `gustiness`: The gustiness ``Uᵍ`` added to the resolved wind, ``|U| = \\sqrt{u² + v² + Uᵍ²}``,
+               in the flux and in a [`PolynomialCoefficient`](@ref) alike: a number, a
+               [`TKEGustiness`](@ref), or the default [`DefaultGustiness`](@ref), which the
+               model replaces with a `TKEGustiness` under a `TKEBasedTurbulenceClosure` and with
+               `0` otherwise.
 - `surface_temperature`: The wall temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Used to compute the saturation specific humidity at the wall.
                          Functions take the non-`Flat` coordinates of the wall followed by
@@ -225,7 +234,7 @@ moister than the adjacent air.
                          with the same parameters (e.g., `height`, `timescale`) as `filtered_velocities`.
                          Filtering is supported on the bottom boundary only.
 """
-function BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature,
+function BulkVaporFluxFunction(; coefficient, gustiness=DefaultGustiness(), surface_temperature,
                                  surface_relative_humidity=1, moisture_availability=nothing,
                                  filtered_velocities=nothing)
     isnothing(moisture_availability) || 0 ≤ moisture_availability ≤ 1 ||
@@ -270,9 +279,10 @@ end
     Δq = bulk_vapor_difference(i, j, k, fields, bf.filtered_scalar, qᵛˢ)
 
     U² = wall_wind_speed²(i, j, k, grid, side, nothing, fields, bf.filtered_velocities)
-    Ũ = sqrt(U² + bf.gustiness^2)
+    Uᵍ² = gustiness²(i, j, k, grid, bf.gustiness, fields)
+    Ũ = sqrt(U² + Uᵍ²)
 
-    Cᵛ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, Tˢ, bf.filtered_velocities, pˢ)
+    Cᵛ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, Tˢ, bf.filtered_velocities, pˢ, Uᵍ²)
 
     # Over the wet fraction β of the wall the air in contact with it holds qᵛˢ = ℋˢ qᵛ⁺(Tˢ), and
     # over the dry fraction the humidity of the air itself, so that qᵛ - qˢ = β (qᵛ - qᵛˢ)
@@ -305,7 +315,7 @@ const BulkVaporFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkVaporFlux
 #####
 
 """
-    BulkSensibleHeatFlux(; coefficient, gustiness=0, surface_temperature)
+    BulkSensibleHeatFlux(; coefficient, gustiness=DefaultGustiness(), surface_temperature)
 
 Create a `FluxBoundaryCondition` for wall sensible heat flux, on any of the six boundaries.
 
@@ -341,7 +351,7 @@ end
 
 """
     BulkVaporFlux(; coefficient, surface_temperature, surface_relative_humidity=1,
-                    moisture_availability=nothing, gustiness=0)
+                    moisture_availability=nothing, gustiness=DefaultGustiness())
 
 Create a `FluxBoundaryCondition` for wall moisture flux, on any of the six boundaries.
 

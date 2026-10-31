@@ -329,7 +329,7 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
             wall = walls[side]
             surface_fields = surface_layer_state(model)
             pˢ = wall_pressure(model, side, i, j, k)
-            Cᵂ = @allowscalar bulk_coefficient(i, j, k, grid, wall, coef, surface_fields, Tˢ[side], nothing, pˢ)
+            Cᵂ = @allowscalar bulk_coefficient(i, j, k, grid, wall, coef, surface_fields, Tˢ[side], nothing, pˢ, 0)
             # the neutral log-law value at the wall distance of the near-wall cell
             U = @allowscalar sqrt(tangential_speed²(i, j, k, grid, wall, nothing, fields))
             h = @allowscalar wall_distance(i, j, k, grid, wall)

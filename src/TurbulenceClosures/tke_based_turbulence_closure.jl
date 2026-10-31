@@ -378,6 +378,16 @@ const TKE_NAME = :ρe
 
 Oceananigans.TurbulenceClosures.closure_required_tracers(::FlavorOfTKEClosure) = tuple(TKE_NAME)
 
+# Bulk surface fluxes constructed without a gustiness take theirs from the subgrid TKE
+# next to the wall, in the floating-point type of the closure
+const TKEClosureOf{FT} = TKEBasedTurbulenceClosure{<:Any, <:Any, <:Any, <:Any, FT} where FT
+
+AtmosphereBoundaryConditions.materialize_gustiness(::DefaultGustiness, ::TKEClosureOf{FT}) where FT =
+    TKEGustiness(FT)
+
+AtmosphereBoundaryConditions.materialize_gustiness(::DefaultGustiness, ::AbstractArray{<:TKEClosureOf{FT}}) where FT =
+    TKEGustiness(FT)
+
 function Utils.with_tracers(tracer_names, closure::FlavorOfTKEClosure)
     TKE_NAME ∈ tracer_names ||
         throw(ArgumentError("Tracers must contain :$(TKE_NAME) to represent turbulent kinetic " *

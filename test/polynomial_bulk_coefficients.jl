@@ -157,6 +157,23 @@ using GPUArraysCore: @allowscalar
         # Monotonicity: more unstable → more negative ζ
         @test bulk_to_flux_richardson_number(-1.0, α, β, mapping) < bulk_to_flux_richardson_number(-0.5, α, β, mapping)
 
+        # Free convection (light wind, Riᴮ ≪ 0) stays unstable: the quadratic fit is held at its vertex
+        # rather than turning back through zero to stable ζ
+        ζ_free = [bulk_to_flux_richardson_number(Riᴮ, α, β, mapping) for Riᴮ in (-10.0, -50.0, -500.0)]
+        @test all(ζ_free .< bulk_to_flux_richardson_number(-1.0, α, β, mapping))
+        @test issorted(ζ_free; rev=true) || all(ζ_free .≈ ζ_free[end])
+
+        # At a 37 m first level over the ocean the unstable fit turns back through zero near
+        # Riᴮ ≈ -17, and light winds give Riᴮ ~ -100. Over the whole unstable range ζ is negative,
+        # never increases as Riᴮ decreases, and is constant below the vertex.
+        α₃₇ = log(37 / 1.5e-4)
+        Riᴮ_sweep = range(-200, -1e-3, length=2001)
+        ζ_sweep = [bulk_to_flux_richardson_number(Riᴮ, α₃₇, β, mapping) for Riᴮ in Riᴮ_sweep]
+        @test all(ζ_sweep .< 0)
+        @test issorted(ζ_sweep)
+        @test bulk_to_flux_richardson_number(-60.0, α₃₇, β, mapping) == bulk_to_flux_richardson_number(-200.0, α₃₇, β, mapping)
+        @test bulk_to_flux_richardson_number(-60.0, α₃₇, β, mapping) < bulk_to_flux_richardson_number(-1.0, α₃₇, β, mapping)
+
         # Monotonicity: more stable → more positive ζ
         @test bulk_to_flux_richardson_number(0.5, α, β, mapping) > bulk_to_flux_richardson_number(0.1, α, β, mapping)
 

@@ -408,7 +408,7 @@ AtmosphereModels.adiabatic_scalar_bcs(fbcs::FieldBoundaryConditions) =
 const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
-                                                   side, loc, grid, dynamics, microphysics, constants)
+                                                   side, loc, grid, dynamics, microphysics, constants, closure)
     ef = bc.condition
     density = dynamics_density(dynamics)
     pˢᵗ = convert(eltype(grid), standard_pressure(dynamics))
@@ -421,7 +421,7 @@ const UnregularizedStaticEnergyFluxBC =
     BoundaryCondition{<:Flux, <:StaticEnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedStaticEnergyFluxBC,
-                                                   side, loc, grid, dynamics, microphysics, constants)
+                                                   side, loc, grid, dynamics, microphysics, constants, closure)
     density = dynamics_density(dynamics)
     new_sf = StaticEnergyFluxBoundaryConditionFunction(bc.condition.condition, side, density)
     return BoundaryCondition(Flux(), new_sf)
@@ -431,7 +431,7 @@ end
 const UnregularizedThetaFluxBC = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
-                                                   side, loc, grid, dynamics, microphysics, constants)
+                                                   side, loc, grid, dynamics, microphysics, constants, closure)
     tf = bc.condition
     density = dynamics_density(dynamics)
     pˢᵗ = convert(eltype(grid), standard_pressure(dynamics))

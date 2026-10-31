@@ -37,7 +37,7 @@ function AtmosphereModels.static_energy_density(model::PotentialTemperatureModel
     # Regularize the converted BCs (populate microphysics, constants, side)
     loc = (Center(), Center(), Center())
     ρs_bcs = materialize_atmosphere_field_bcs(ρs_bcs, loc, model.grid, model.dynamics, model.microphysics,
-                                              model.thermodynamic_constants)
+                                              model.thermodynamic_constants, model.closure)
 
     # Create the energy density operation and wrap in a Field with proper BCs
     ρs_op = Diagnostics.StaticEnergy(model, :density)
