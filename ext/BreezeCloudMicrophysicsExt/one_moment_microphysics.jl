@@ -811,6 +811,18 @@ end
     return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants, (qʳ, qˢⁿ))
 end
 
+# Equilibrium partition at a temperature prescribed by `set!`, holding the precipitation fixed as
+# the adjustment above does, so that the adjustment returns the prescribed temperature.
+@inline function AM.prescribed_temperature_moisture_fractions(i, j, k, grid, bμp::Union{WP1M, MP1M}, dynamics,
+                                                              ρ, qᵉ, μ_fields, T, constants)
+    μ = AM.extract_microphysical_prognostics(i, j, k, bμp, μ_fields)
+    qʳ = μ.ρqʳ / ρ
+    qˢⁿ = snow_mass_fraction(bμp, μ, ρ)
+    qᵗ = qᵉ + qʳ + qˢⁿ
+    equilibrium = bμp.cloud_formation.equilibrium
+    return equilibrated_moisture_mass_fractions(i, j, k, grid, dynamics, ρ, T, qᵗ, constants, equilibrium, (qʳ, qˢⁿ))
+end
+
 #####
 ##### Condensation/evaporation for non-equilibrium cloud formation
 #####

@@ -251,6 +251,11 @@ end
     return grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵛ, μ)
 end
 
+@inline function AtmosphereModels.prescribed_temperature_moisture_fractions(i, j, k, grid, bμp::NPBM, dynamics,
+                                                                            ρ, qᵛ, μ, T, constants)
+    return prescribed_temperature_moisture_fractions(i, j, k, grid, bμp.cloud_formation, dynamics, ρ, qᵛ, μ, T, constants)
+end
+
 # Forward state-based moisture_fractions to cloud_formation scheme
 @inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qᵛ)
     return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
