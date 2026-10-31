@@ -40,6 +40,7 @@ Example(title::String, basename::String; build_always::Bool, gpu::Bool) =
 examples = [
     Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
     Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
+    Example("Energy budget of a moist thermal bubble", "moist_bubble_energy_budget"; build_always=true, gpu=false),
     Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz"; build_always=true, gpu=false),
     Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=true),
     Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
