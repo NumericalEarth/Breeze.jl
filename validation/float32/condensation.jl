@@ -182,7 +182,8 @@ end
 
 # Round x to one of the two neighboring Float32 values with probabilities proportional to proximity (u uniform in [0, 1))
 @inline function stochastic_float32(x, u)
-    y = Float32(x, RoundDown)
+    y = Float32(x)
+    y = ifelse(Float64(y) > x, prevfloat(y), y) # round down
     ŷ = nextfloat(y)
     return Float64(ifelse(u < (x - y) / (ŷ - y), ŷ, y))
 end
