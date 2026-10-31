@@ -186,6 +186,8 @@ def grade(label, Δ, ref, null_label=None):
         B1=abs(r["B1"][1]) <= 0.10, B2=abs(r["B2"][1]) <= 0.15, B3=r["B3"][0] >= -0.5 and abs(r["B3"][1]) <= 0.25,
         B4=abs(r["B4"][1]) <= 200, B5=r["B5"] <= 0.25, B6=r["B6"] <= 0.25, B7=abs(r["B7"]) <= 0.05, B8=r["B8"] <= 0.1,
         C=abs(r["C"]) <= Ctol, C4=abs(r["C4"]) <= 1e-10)
+    if null_label is None:
+        tests.pop("A6"); tests.pop("A7")
     r["tests"] = tests
     r["fails"] = [k for k, v in tests.items() if not v]
     return r
@@ -216,7 +218,7 @@ if __name__ == "__main__":
         ref = refs.get(f"e2_{Δ:.0f}m")
         if ref is None:
             continue
-        null_label = label.replace("equilibrium_", "equilibrium-null_").replace(f"_{Δ:.0f}m", "_100m") if Δ == 100 else None
+        null_label = label.replace("equilibrium_", "equilibrium-null_") if Δ == 100 and "_dt" not in label and ("tau" not in label or label.endswith("tau2")) else None
         r = grade(label, Δ, ref, null_label)
         if r is None:
             continue

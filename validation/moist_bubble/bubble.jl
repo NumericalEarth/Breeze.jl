@@ -27,6 +27,7 @@ null_run = get(ENV, "NULL", "0") == "1"
 formulations = parse_list("FORMULATIONS", "C-theta,C-E273,A-theta")
 resolutions = parse.(Float64, parse_list("RESOLUTIONS", "100"))
 stop_time = parse(Float64, get(ENV, "STOP_TIME", "1000"))
+Δt_override = haskey(ENV, "DT") ? parse(Float64, ENV["DT"]) : nothing
 outdir = get(ENV, "RESULTS_DIR", joinpath(@__DIR__, "results"))
 mkpath(outdir)
 
@@ -200,6 +201,7 @@ function run_bubble(name, Δ)
 
     label = @sprintf("%s%s_%s_%dm%s", micro, null_run ? "-null" : "", name, round(Int, Δ),
                      micro == "equilibrium" ? "" : @sprintf("_tau%g", τ_relax))
+    label = isnothing(Δt_override) ? label : label * @sprintf("_dt%g", Δt_override)
 
     θₑ_field(s) = θₑ_from_state.(s.T, s.p, s.qv, s.ql)
 
@@ -227,7 +229,7 @@ function run_bubble(name, Δ)
     @info "$label initial state" checks...
     # Environment θₑ from the model column must be 320 K; the intended column is too by construction
 
-    Δt = Δ / 100
+    Δt = isnothing(Δt_override) ? Δ / 100 : Δt_override
     simulation = Simulation(model; Δt, stop_time, verbose = false)
     Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
