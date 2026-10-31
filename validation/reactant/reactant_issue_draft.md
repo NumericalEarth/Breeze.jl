@@ -14,8 +14,7 @@ generic fallback
 ```
 
 `copy1` returns another `ConcretePJRTArray`, so the same method is called again, forever. Each
-call allocates (and compiles a copy for) a new array; resident memory grows to tens of GB within
-a minute, independent of the array size (2×2×2 behaves like 8×8×8), and the process is
+call allocates a new array; resident memory reached 10 GB within 60 s for a 2×2×2 array in our run, independent of the array size (2×2×2 behaves like 8×8×8), and the process is
 eventually OOM-killed rather than hitting a `StackOverflowError`.
 
 Even if the fallback returned, it would be wrong for in-place plans: `plan * x` would transform a
