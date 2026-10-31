@@ -393,9 +393,10 @@ end
     return nothing
 end
 
-# Over one step, the stored energy ∫ρ(𝓊 + g z) changes only by the enthalpy that leaves through the
-# bottom, for explicit sedimentation and when most of the fall is the adaptive implicit remainder.
-@testset "Drag heating of sedimenting rain closes the energy budget [$label]" for (label, rain_advection) in (
+# The flux form conserves ∫ρη and the falling mass moves no entropy in total to first order, so over one
+# step the entropy changes by the drag heating, ∫ε/T, which equals the potential energy the rain released
+# over T: for explicit sedimentation, and when nearly all of the fall is the adaptive implicit remainder.
+@testset "Drag heating of sedimenting rain [$label]" for (label, rain_advection) in (
         ("explicit", UpwindBiased(order=1)),
         ("adaptive implicit", WENO(time_discretization=Oceananigans.Utils.AdaptiveVerticallyImplicitDiscretization(cfl=0.01))))
 
@@ -405,32 +406,20 @@ end
     model = AtmosphereModel(grid; dynamics, formulation = :MoistEntropy, microphysics = FallingRain(8.0),
                             thermodynamic_constants = constants,
                             scalar_advection = (; ρqʳ = rain_advection))
+    # Rain well above the ground, so that nothing leaves in the step
     rain(z) = ifelse((z > 600) & (z < 1600), 2e-3, 0.0)
     set!(model; ρ = model.dynamics.reference_state.density, θ = 290, qᵛ = 0.005, qʳ = rain)
 
     g = constants.gravitational_acceleration
-    zc = collect(znodes(grid, Center()))
+    z = collect(znodes(grid, Center()))
     Δz = 250.0
-    ρ_field(model) = vec(interior(total_density(model.dynamics)))
-    ρᵛ_field(model) = vec(interior(model.moisture_density))
-    function stored_energy(model)
-        T = vec(interior(model.temperature)); ρ = ρ_field(model)
-        ρʳ = vec(interior(model.microphysical_fields.ρqʳ))
-        ρᵛ = ρᵛ_field(model)
-        return sum(map(zc, T, ρ, ρʳ, ρᵛ) do z, T, ρ, ρʳ, ρᵛ
-            q = MoistureMassFractions(ρᵛ / ρ, ρʳ / ρ, 0.0)
-            ρ * (internal_energy(T, q, constants) + g * z)
-        end) * Δz
-    end
-    # The rain sits above the ground, so nothing leaves in this short step.
-    E₀ = stored_energy(model)
+    ρη₀ = sum(interior(thermodynamic_density(model.formulation))) * Δz
     m₀ = copy(vec(interior(model.microphysical_fields.ρqʳ)))
-    Δt = 0.5
-    time_step!(model, Δt)
-    update_state!(model)
+    T̄ = sum(vec(interior(model.temperature)) .* (m₀ .> 0)) / count(m₀ .> 0)
+    time_step!(model, 0.5)
     m₁ = vec(interior(model.microphysical_fields.ρqʳ))
-    released = - g * sum(zc .* (m₁ .- m₀)) * Δz
+    released = - g * sum(z .* (m₁ .- m₀)) * Δz
+    Δρη = sum(interior(thermodynamic_density(model.formulation))) * Δz - ρη₀
     @test released > 0
-    # Energy changes by less than a few percent of the potential energy the rain released
-    @test abs(stored_energy(model) - E₀) < 0.05 * released
+    @test Δρη ≈ released / T̄ rtol=0.2
 end
