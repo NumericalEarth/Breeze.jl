@@ -41,6 +41,21 @@ moisture state.
                                                     microphysical_fields,
                                                     constants)
 
+    ρᵣ = @inbounds dynamics.reference_state.density[i, j, k]
+    RᵐT, RᵐᵣTᵣ = gas_constant_temperature_products(i, j, k, grid, dynamics, temperature, specific_prognostic_moisture,
+                                                   microphysics, microphysical_fields, constants)
+
+    # Perturbation buoyancy: ρ' = ρ - ρᵣ = ρᵣ (Rᵐᵣ Tᵣ / (Rᵐ T) - 1)
+    g = constants.gravitational_acceleration
+    ρ′ = ρᵣ * (RᵐᵣTᵣ / RᵐT - 1)
+
+    return - g * ρ′
+end
+
+# The products Rᵐ T and Rᵐᵣ Tᵣ of the current and reference states, which at the shared pressure pᵣ are
+# proportional to their specific volumes
+@inline function gas_constant_temperature_products(i, j, k, grid, dynamics, temperature, specific_prognostic_moisture,
+                                                   microphysics, microphysical_fields, constants)
     ref = dynamics.reference_state
 
     @inbounds begin
@@ -48,10 +63,6 @@ moisture state.
         ρᵣ = ref.density[i, j, k]
         Tᵣ = ref.temperature[i, j, k]
         T = temperature[i, j, k]
-    end
-
-    # Reference moisture fractions for Rᵐᵣ
-    @inbounds begin
         qᵛᵣ = ref.vapor_mass_fraction[i, j, k]
         qˡᵣ = ref.liquid_mass_fraction[i, j, k]
         qⁱᵣ = ref.ice_mass_fraction[i, j, k]
@@ -59,14 +70,22 @@ moisture state.
 
     qᵣ = MoistureMassFractions(qᵛᵣ, qˡᵣ, qⁱᵣ)
     Rᵐᵣ = mixture_gas_constant(qᵣ, constants)
-
-    # Current moisture fractions for Rᵐ
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛᵉ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
 
-    # Perturbation buoyancy: ρ' = ρ - ρᵣ = ρᵣ (Rᵐᵣ Tᵣ / (Rᵐ T) - 1)
-    g = constants.gravitational_acceleration
-    ρ′ = ρᵣ * (Rᵐᵣ * Tᵣ / (Rᵐ * T) - 1)
+    return Rᵐ * T, Rᵐᵣ * Tᵣ
+end
 
-    return - g * ρ′
+# A parcel at the reference pressure has Dh/Dt = α Dpᵣ/Dt = - (α / αᵣ) g w, so Ds/Dt = D(h + g z)/Dt = - b w with
+# b = g (α / αᵣ - 1). This is exact, and is what makes ∂z s + b = cᵖ Π ∂z θ in dry air. The buoyancy force above
+# has b = g (1 - αᵣ / α) instead, which differs at second order in T - Tᵣ.
+@inline function AtmosphereModels.parcel_static_energy_buoyancyᶜᶜᶜ(i, j, k, grid, dynamics::AnelasticDynamics,
+                                                                   temperature, specific_prognostic_moisture,
+                                                                   microphysics, microphysical_fields, constants)
+
+    ρᵣ = @inbounds dynamics.reference_state.density[i, j, k]
+    RᵐT, RᵐᵣTᵣ = gas_constant_temperature_products(i, j, k, grid, dynamics, temperature, specific_prognostic_moisture,
+                                                   microphysics, microphysical_fields, constants)
+
+    return ρᵣ * constants.gravitational_acceleration * (RᵐT / RᵐᵣTᵣ - 1)
 end

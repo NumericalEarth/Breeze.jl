@@ -27,6 +27,7 @@ using Oceananigans.Utils: with_tracers
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 using Breeze.AnelasticEquations: AnelasticDynamics
+using Breeze.StaticEnergyFormulations: StaticEnergyFormulations
 
 """
     const SingleColumnGrid
@@ -87,6 +88,9 @@ const ClosureArray = AbstractArray{<:AbstractTurbulenceClosure}
 
 @inline AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid::SingleColumnGrid, ρ, closures::ClosureArray, args...) =
     AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρ, getclosure(i, j, closures), args...)
+
+@inline StaticEnergyFormulations.∇_dot_Jᵇ(i, j, k, grid::SingleColumnGrid, closures::ClosureArray, args...) =
+    StaticEnergyFormulations.∇_dot_Jᵇ(i, j, k, grid, getclosure(i, j, closures), args...)
 
 # A per-column array of closures/rotations must live on the grid architecture so it can be indexed
 # inside GPU kernels. `with_tracers` has no method for a bare array of closures, so we map it over the

@@ -15,16 +15,18 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, Center, Field, znode
+using Oceananigans: Oceananigans, CenterField, Center, Face, Field, znode
 using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
-using Oceananigans.Operators: ℑzᵃᵃᶜ
+using Oceananigans.Grids: peripheral_node
+using Oceananigans.Operators: Az_qᶜᶜᶠ, V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
+using Oceananigans.TurbulenceClosures: AbstractScalarDiffusivity, z_diffusivity
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels,
     dynamics_density, total_density, dynamics_pressure, standard_pressure, dynamics_prognostic_fields,
     pressure_from_density_temperature,
     grid_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
-    c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ,
+    c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ, parcel_static_energy_buoyancyᶜᶜᶜ,
     add_sedimentation_tendency!, sedimentation_composition_increment, enthalpy_increment,
     AtmosphereModelBuoyancy,
     radiation_flux_divergence
@@ -34,6 +36,7 @@ using Breeze.Thermodynamics: StaticEnergyState, LiquidIcePotentialTemperatureSta
 
 # The lowercase c is a singleton instance of Center
 const c = Center()
+const f = Face()
 
 include("static_energy_formulation.jl")
 include("static_energy_tendency.jl")

@@ -50,6 +50,15 @@ Used for the buoyancy flux term in the energy equation.
     return @inbounds ρ_b * w[i, j, k]
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+The term `ρ b` at cell center that a parcel's static energy responds to as it moves, `Ds/Dt = - b w`.
+It enters the subgrid flux of static energy on a core whose thermodynamic pressure is prescribed;
+see the anelastic method. It is zero elsewhere.
+"""
+@inline parcel_static_energy_buoyancyᶜᶜᶜ(i, j, k, grid, dynamics, args...) = zero(grid)
+
 # Default: flux-form `∇·(ρ𝐯⊗u)` plus the explicit curvilinear metric correction.
 @inline x_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics) =
     div_𝐯u(i, j, k, grid, advection, momentum, velocities.u) +

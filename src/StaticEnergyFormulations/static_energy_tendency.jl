@@ -88,9 +88,43 @@ end
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
+             - ∇_dot_Jᵇ(i, j, k, grid, closure, closure_fields, id, clock, model_fields, dynamics, temperature_field,
+                        specific_prognostic_moisture, microphysics, microphysical_fields, constants)
              + ρs_forcing(i, j, k, grid, clock, model_fields)
              + ρᵈ / ρ * (FρE + div_ℐ)) # a volumetric heating Q changes s at Q / ρ, so ρᵈ s at (ρᵈ / ρ) Q (ρs and ρE forcings are mutually exclusive)
 end
+
+#####
+##### Buoyancy part of the subgrid flux of ρs
+#####
+#
+# A parcel on the anelastic core conserves θ, not s: it follows Ds/Dt = - b w (Pauluis 2008), because the
+# pressure it feels is pᵣ(z) and not the hydrostatic pressure of its own column. A parcel displaced by ℓ
+# therefore differs from its new surroundings by s′ = - ℓ (∂z s + b), and the turbulent flux is
+#
+#   Jˢ = - ρ K (∂z s + b) .
+#
+# The closure's ∇_dot_Jᶜ supplies - ρ K ∂z s; this is the remainder, Jᵇ = - ρ K b. It is what makes mixing
+# neutral where N² vanishes. In dry air N² = g (∂z s + b) / (cᵖ T), so a flux of ∂z s alone relaxes the column
+# to N² = g b / (cᵖ T), which is negative wherever T < Tᵣ: mixing can then never remove the instability
+# that drives it, and a TKE closure grows without bound. Jᵇ is a flux, so ∫ρs is unaffected. It is explicit, and
+# its advective-like speed K g / (cᵖ Tᵣ) is 5 mm/s for K = 100 m²/s.
+@inline function Jᵇᶜᶜᶠ(i, j, k, grid, closure, closure_fields, id, clock, model_fields, dynamics, args...)
+    K = z_diffusivity(i, j, k, grid, c, c, f, closure, closure_fields, id, clock, model_fields)
+    ρ_b = ℑzᵃᵃᶠ(i, j, k, grid, parcel_static_energy_buoyancyᶜᶜᶜ, dynamics, args...)
+    return ifelse(peripheral_node(i, j, k, grid, c, c, f), zero(grid), - K * ρ_b)
+end
+
+@inline ∇_dot_Jᵇ(i, j, k, grid, closure, args...) = zero(grid)
+
+@inline ∇_dot_Jᵇ(i, j, k, grid, closure::AbstractScalarDiffusivity, args...) =
+    V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, Jᵇᶜᶜᶠ, closure, args...)
+
+@inline ∇_dot_Jᵇ(i, j, k, grid, closures::Tuple{}, closure_fields, args...) = zero(grid)
+
+@inline ∇_dot_Jᵇ(i, j, k, grid, closures::Tuple, closure_fields, args...) =
+    ∇_dot_Jᵇ(i, j, k, grid, first(closures), first(closure_fields), args...) +
+    ∇_dot_Jᵇ(i, j, k, grid, Base.tail(closures), Base.tail(closure_fields), args...)
 
 #####
 ##### Condensate content of ρs for its sedimentation tendency
