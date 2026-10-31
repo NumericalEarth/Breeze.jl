@@ -515,6 +515,47 @@ offset exceed ``cᵛ T``; for ``ρ η`` they cancel to about one bit, since ``η
 the same order with the triple-point origin. The ``ρ θ`` linearization has no density term and
 no cancellation.
 
+### Dry potential temperature ``θ``: the variable of cloud models
+
+[`DryPotentialTemperatureFormulation`](@ref) evolves ``ρ θ = ρᵈ θ`` with ``θ = T / Π`` and
+``Π = (p / pˢᵗ)^{κᵈ}``, the variable of CM1 ([Bryan and Fritsch, 2002](@cite BryanFritsch2002)) and of most cloud
+models. It is the counterpoint to ``θˡⁱ``: the two share everything except the invariance under
+phase change, which is what the comparison tests. The temperature is closed form,
+``T = θ^{γᵈ} (ρ Rᵐ / pˢᵗ)^{γᵈ - 1}``, and ``θ`` does not depend on the condensate, so that
+condensation at fixed ``θ`` releases no heat: the latent heating is an explicit source, always on.
+
+CM1's `eqtset = 2` closes the equation at fixed volume, with
+
+```math
+\frac{\mathrm{D} θ}{\mathrm{D} t} = - θ \frac{Rᵐ - κᵈ cᵖᵐ}{cᵛᵐ} \boldsymbol{\nabla \cdot u}
++ \frac{1 - κᵈ}{cᵛᵐ Π} Q
+- θ \frac{1 - κᵈ}{cᵛᵐ T} \sum_β e^β \dot{S}^β / ρ - θ κᵈ \frac{Rᵛ}{Rᵐ} \dot{S}^v / ρ ,
+```
+
+with ``eᵛ = cᵛᵛ T + ℒˡ₀``, ``eˡ = cˡ T``, ``eⁱ = cⁱ T + ℒˡ₀ - ℒⁱ₀``. With `IsobaricPressureWork` the same equation
+is written at fixed pressure, with ``1 / (cᵖᵐ Π)`` for the heating, ``- \sum_β h^β \dot{S}^β / (ρ cᵖᵐ Π)`` for the
+phase change and ``θ (κᵐ - κᵈ) \mathrm{D} \ln p / \mathrm{D} t`` for the expansion, where the pressure tendency is
+the hydrostatic estimate of ``θˡⁱ``. The two closures are the same equation if
+``\mathrm{D} \ln p / \mathrm{D} t`` is the total pressure tendency, and pairing the divergence
+with the isobaric coefficients, or the hydrostatic tendency with the isochoric ones, is wrong by the
+expansion that the heating drives.
+
+Following CM1, the acoustic loop of the isochoric closure does not carry the expansion term; it is
+applied after the loop, with the coefficient of the stage-entry state and the divergence of the velocity
+averaged over the loop. The loop uses the pressure coefficient ``γᵐ Rᵐ Π / qᵈ`` so that its
+squared sound speed, under the force ``- qᵈ \boldsymbol{\nabla} p`` on the dry-coupled momentum, is
+``γᵐ Rᵐ T``, CM1's value; since ``θ + θ (Rᵐ - κᵈ cᵖᵐ) / cᵛᵐ = θ γᵐ / γᵈ`` the recovered ``ρ θ`` then gives the same
+pressure through the equation of state, whose derivative is ``γᵈ Rᵐ Π / qᵈ``.
+
+The phase-change source comes from the tendencies of the water species, for non-equilibrium
+schemes, or from [`OperatorSplitSaturationAdjustment`](@ref Breeze.Microphysics.OperatorSplitSaturationAdjustment), a port of CM1's
+`satadj` that is applied once per time step at fixed density and serves ``θˡⁱ`` as well, so that the choice
+of variable can be compared with the microphysics held fixed. Diagnostic
+[`SaturationAdjustment`](@ref Breeze.Microphysics.SaturationAdjustment) cannot serve ``θ``, since re-deriving the condensate from
+``(θ, qᵗ)`` releases no heat. The formulation also weights the pressure and gravitational forces on the
+momentum by ``qᵈ`` (`MomentumForceWeighting`), which the other formulations select through
+`CompressibleDynamics(; momentum_force_weighting)`.
+
 ## [Mixing](@id thermodynamic-formulations-mixing)
 
 Mixing is where the variables differ most sharply, and the reason fits in one formula. Consider

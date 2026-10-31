@@ -168,6 +168,9 @@ The following table also uses a few conventions that suffuse the source code and
 | ``θᵛ``                              | `θᵛ`   |                                     | Virtual potential temperature                                                  |
 | ``θᵉ``                              | `θᵉ`   |                                     | Equivalent potential temperature                                               |
 | ``θˡⁱ``                             | `θˡⁱ`  | `LiquidIcePotentialTemperature(model)` | Liquid-ice potential temperature, ``θˡⁱ = H / (ĉᵖ Π)``; ``θˡⁱ = T / Π`` in unsaturated air |
+| ``θ``                               | `θ`    | `specific_thermodynamic_field(formulation)` | Prognostic potential temperature of a `PotentialTemperatureFormulation`: ``θˡⁱ``, or for `DryPotentialTemperatureFormulation` ``θ = T / Π`` with ``Π = (p / pˢᵗ)^{κᵈ}`` |
+| ``S``                               | `S`    | `divergence_expansion_coefficient(θ, q, constants)` | Coefficient of the velocity divergence in the dry potential temperature equation, ``S = θ (Rᵐ - κᵈ cᵖᵐ) / cᵛᵐ`` (`thterm` in CM1) |
+| ``W^β``                             | `Wᵛ`, `Wˡ`, `Wⁱ` | `phase_change_weights(flavor, …)` | Weights of the phase-change source of ``ρθ``, ``ρθ̇ = Σ_β W^β \dot{S}^β`` |
 | ``H``                               | `H`    |                                     | Liquid-ice enthalpy, ``H = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ = ĉᵖ Π θˡⁱ``; invariant under phase change at fixed ``p`` and ``qᵗ`` |
 | ``θᵇ``                              | `θᵇ`   |                                     | Stability-equivalent potential temperature (for moist Brunt-Väisälä)           |
 | ``𝓊``                               | `𝓊`    |                                     | Specific internal energy, ``𝓊 = cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ``, with ``cᵛᵐ = cᵖᵐ - Rᵐ`` the mixture heat capacity at constant volume |
