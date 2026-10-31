@@ -210,13 +210,13 @@ previous_float_type = Oceananigans.defaults.FloatType
 
         # The column the kernel solves, evaluated on the host by the same accessors
         atmosphere = column_atmosphere(radiation, model, 1, 1)
-        p_lay = atmosphere.pressure_layers
-        T_lay = atmosphere.temperature_layers
-        p_int = atmosphere.pressure_interfaces
-        T_int = atmosphere.temperature_interfaces
-        dry_air_moles = atmosphere.gases.composite
-        water_vapor_moles = atmosphere.gases.h2o
-        ozone_moles = atmosphere.gases.o3
+        p_lay = atmosphere.layer_pressures
+        T_lay = atmosphere.layer_temperatures
+        p_int = atmosphere.interface_pressures
+        T_int = atmosphere.interface_temperatures
+        dry_air_moles = atmosphere.gases.dry_air
+        water_vapor_moles = atmosphere.gases.H₂O
+        ozone_moles = atmosphere.gases.O₃
 
         tight = FT == Float64 ? 1e-12 : 1e-5
         loose = FT == Float64 ? 1e-10 : 1e-4
@@ -241,7 +241,7 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test T_int[N+1] ≈ (3 * T[1] - T[2]) / 2 rtol = tight
         @test T_int[1] == T_lay[1]
 
-        # Column amounts in the dry convention of the ecCKD tables: the composite amount carries
+        # Column amounts in the dry convention of the ecCKD tables: the dry-air amount carries
         # the layer's total mass, `Σ dry_air_moles mᵈ == Σ ρ Δz`, and the vapor is counted on top of it
         Δz = 3kilometers / Nz
         @test sum(dry_air_moles[Nₑ+1:N]) * mᵈ ≈ sum(ρ .* Δz) rtol = tight
@@ -291,10 +291,10 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test T_lay[1] ≈ standard_atmosphere_temperature(zₑ[end]) rtol = 1e-6
 
         # Host round trip: the column atmosphere is on the host and carries the model's constants
-        @test atmosphere.pressure_layers isa Vector{FT}
-        @test length(atmosphere.pressure_layers) == N
-        @test length(atmosphere.pressure_interfaces) == N + 1
-        @test atmosphere.gases.co2 ≈ 420e-6 .* dry_air_moles
+        @test atmosphere.layer_pressures isa Vector{FT}
+        @test length(atmosphere.layer_pressures) == N
+        @test length(atmosphere.interface_pressures) == N + 1
+        @test atmosphere.gases.CO₂ ≈ 420e-6 .* dry_air_moles
         @test atmosphere.surface.temperature == FT(300)
         @test atmosphere.surface.emissivity == FT(0.98)
         @test atmosphere.geometry.cos_zenith == FT(0.5)
@@ -377,6 +377,72 @@ previous_float_type = Oceananigans.defaults.FloatType
         end
     end
 
+    @testset "Per-column solar constants [$(FT)]" for FT in test_float_types()
+        Oceananigans.defaults.FloatType = FT
+        Nz = 8
+        grid = RectilinearGrid(default_arch, FT; size = (2, 1, Nz), x = (0, 2), y = (0, 1), z = (0, 3kilometers),
+                               topology = (Periodic, Periodic, Bounded))
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        # Identical columns, the second lit by half the sunlight
+        solar_constant = reshape(FT[1361, 680.5], 2, 1)
+        radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                           surface_temperature = 300, surface_albedo = 0.1, solar_constant,
+                                           solar_position = FixedCosineZenith(0.5))
+        @test radiation.shortwave_solver.solar_constant isa AbstractMatrix
+        model = AtmosphereModel(grid; dynamics, formulation = :LiquidIcePotentialTemperature, radiation)
+        set!(model; θ = (x, y, z) -> 300 + 0.01 * z / 1000, qᵗ = (x, y, z) -> 0.015 * exp(-z / 2500))
+
+        ℐ_lw_up₁, ℐ_lw_dn₁, ℐ_sw_up₁, ℐ_sw_dn₁, _ = column_fluxes(radiation, 1, 1)
+        ℐ_lw_up₂, ℐ_lw_dn₂, ℐ_sw_up₂, ℐ_sw_dn₂, _ = column_fluxes(radiation, 2, 1)
+        @test ℐ_lw_up₁ == ℐ_lw_up₂ && ℐ_lw_dn₁ == ℐ_lw_dn₂
+        @test ℐ_sw_dn₂ ≈ ℐ_sw_dn₁ / 2
+        @test ℐ_sw_up₂ ≈ ℐ_sw_up₁ / 2
+
+        # Column 1 is the model with the scalar solar constant
+        scalar = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                        surface_temperature = 300, surface_albedo = 0.1, solar_constant = 1361,
+                                        solar_position = FixedCosineZenith(0.5))
+        scalar_model = AtmosphereModel(grid; dynamics, formulation = :LiquidIcePotentialTemperature, radiation = scalar)
+        set!(scalar_model; θ = (x, y, z) -> 300 + 0.01 * z / 1000, qᵗ = (x, y, z) -> 0.015 * exp(-z / 2500))
+        @test column_fluxes(scalar, 1, 1)[4] == ℐ_sw_dn₁
+
+        @test_throws ArgumentError RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                                          surface_temperature = 300, surface_albedo = 0.1,
+                                                          solar_constant = FT[1361, 1361, 1361])
+    end
+
+    @testset "Per-column fixed sun [$(FT)]" for FT in test_float_types()
+        # Each column of an ensemble carries its own cos(zenith) and solar constant (a GCM-forced case
+        # library: every column a place and season, with the TOA flux of its own case), and equals the
+        # model with that column's sun as scalars
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(default_arch, FT; size = (2, 1, 8), x = (0, 2), y = (0, 1), z = (0, 3kilometers),
+                               topology = (Periodic, Periodic, Bounded))
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        function shortwave(solar_constant, cos_zenith)
+            radiation = RadiativeTransferModel(grid, EcCKDOptics(), constants;
+                                               surface_temperature = 300, surface_albedo = 0.1, solar_constant,
+                                               solar_position = FixedCosineZenith(cos_zenith),
+                                               overlying_atmosphere = nothing) # the grid top is the top of the atmosphere
+            model = AtmosphereModel(grid; dynamics, radiation)
+            set!(model; θ = (x, y, z) -> 300 + 0.01 * z / 1000, qᵗ = (x, y, z) -> 0.015 * exp(-z / 2500))
+            return column_fluxes(radiation, 1, 1)[4], column_fluxes(radiation, 2, 1)[4]
+        end
+
+        S₀, μ₀ = reshape(FT[1361, 900], 2, 1), reshape(FT[0.6, 0.25], 2, 1)
+        ℐ₁, ℐ₂ = shortwave(S₀, μ₀)
+        @test ℐ₁ == shortwave(S₀[1], μ₀[1])[1]
+        @test ℐ₂ == shortwave(S₀[2], μ₀[2])[2]
+        @test ℐ₁[end] ≈ -S₀[1] * μ₀[1]
+        @test ℐ₂[end] ≈ -S₀[2] * μ₀[2]
+    end
+
     @testset "Allocation scaling" begin
         # The update allocates only the fixed overhead of its kernel launches, not per column:
         # 1 and 64 columns allocate the same, within 1 KiB
@@ -449,6 +515,8 @@ previous_float_type = Oceananigans.defaults.FloatType
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100
         interior(ℐ_lw_up) .= 0
 
+        # Scheduled updates happen in the first-stage update_state! of a step (clock at stage 2)
+        model.clock.stage = 2
         model.clock.iteration = 1
         Oceananigans.TimeSteppers.update_state!(model; compute_tendencies = false)
         @allowscalar @test ℐ_lw_up[1, 1, 1] == 0
@@ -456,6 +524,40 @@ previous_float_type = Oceananigans.defaults.FloatType
         model.clock.iteration = 3
         Oceananigans.TimeSteppers.update_state!(model; compute_tendencies = false)
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100
+    end
+
+    @testset "Table lookup search" begin
+        Oceananigans.defaults.FloatType = Float64
+        grid = radiation_column_grid(Float64, 8, 3kilometers)
+        constants = ThermodynamicConstants()
+        fixed = NumericalRadiation.FixedBinarySearch()
+
+        optics = EcCKDOptics(clouds = CloudScatteringTables(), lookup_search = fixed)
+        @test optics.lookup_search === fixed
+        @test occursin("└── lookup_search: ", sprint(show, optics))
+        @test !occursin("lookup_search", sprint(show, EcCKDOptics()))
+
+        # The fixed-count search brackets the tables as the default does, so the fluxes are the same
+        fluxes = map((EcCKDOptics(clouds = CloudScatteringTables()), optics)) do optics
+            radiation = RadiativeTransferModel(grid, optics, constants;
+                                               surface_temperature = 300, surface_emissivity = 0.98,
+                                               surface_albedo = 0.1, solar_position = FixedCosineZenith(0.5))
+            column_model(grid, radiation)
+            (; gas_model = radiation.longwave_solver.gas_model,
+               lw_up = Array(interior(radiation.upwelling_longwave_flux)),
+               sw_dn = Array(interior(radiation.downwelling_shortwave_flux)))
+        end
+        default, fixed_search = fluxes
+        @test fixed_search.gas_model.lookup_search isa NumericalRadiation.FixedBinarySearch
+        @test default.gas_model.lookup_search isa NumericalRadiation.BinarySearch
+        @test fixed_search.lw_up == default.lw_up
+        @test fixed_search.sw_dn == default.sw_dn
+
+        # A preloaded gas model carries its own search
+        preloaded = NumericalRadiation.read_reference_ecckd_gas_optics(:climate_32x32; names = NumericalRadiationExt.ECCKD_GAS_NAMES)
+        @test_throws ArgumentError RadiativeTransferModel(grid, EcCKDOptics(preloaded; lookup_search = fixed), constants;
+                                                          surface_temperature = 300, surface_albedo = 0.1,
+                                                          solar_position = FixedCosineZenith(0.5))
     end
 end
 

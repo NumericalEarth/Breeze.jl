@@ -18,19 +18,19 @@ $(TYPEDSIGNATURES)
 The scalar gas amounts (mol m⁻²) of `layer` (a [`layer_state`](@ref)) as a `NamedTuple` keyed by
 `ECCKD_GAS_NAMES`: its dry air, water vapor and ozone, and the well-mixed gases as
 `mole_fractions` times the dry air. The keys are the gas names of the ecCKD tables, which
-NumericalRadiation looks the gases up by; this is the one place Breeze's names are translated to them.
+NumericalRadiation looks the gases up by.
 """
 @inline function layer_gas_amounts(layer, mole_fractions)
     n = layer.dry_air
     χ = mole_fractions
-    return (composite = n,
-            h2o = layer.water_vapor,
-            o3 = layer.ozone,
-            co2 = χ.CO₂ * n,
-            ch4 = χ.CH₄ * n,
-            n2o = χ.N₂O * n,
-            cfc11 = χ.CFC₁₁ * n,
-            cfc12 = χ.CFC₁₂ * n)
+    return (dry_air = n,
+            H₂O = layer.water_vapor,
+            O₃ = layer.ozone,
+            CO₂ = χ.CO₂ * n,
+            CH₄ = χ.CH₄ * n,
+            N₂O = χ.N₂O * n,
+            CFC₁₁ = χ.CFC₁₁ * n,
+            CFC₁₂ = χ.CFC₁₂ * n)
 end
 
 # The gas optics stencil of `layer`, with its H₂O mole fraction guarded as in NumericalRadiation's
@@ -140,7 +140,7 @@ pass's per-layer state in `workspace`. The longwave functor
 returns `(τ, Bₖ, Bₖ₊₁)` at `(g, k)`: the gas absorption optical depth of layer `k` at g point `g`
 plus the cloud absorption of both phases, and the Planck sources at the layer's top and bottom
 interfaces. The shortwave functor returns `(τₐ, τₛ, 𝒢)`: the gas absorption optical depth, the
-Rayleigh scattering of the layer's air (the composite amount, which in the dry convention is the
+Rayleigh scattering of the layer's air (the dry-air amount, which in the dry convention is the
 layer's total mass over `mᵈ`, as in NumericalRadiation's array path), and the scattering of both
 cloud phases folded in.
 
@@ -207,7 +207,7 @@ end
     ice_water_path = stored_water_path(c, k, workspace.ice_water_path)
 
     τₐ = shortwave_optical_depth(gas_model, g, gases, stencil)
-    τₛ = rayleigh_optical_depth(gas_model, g, gases.composite)
+    τₛ = rayleigh_optical_depth(gas_model, g, gases.dry_air)
     𝒢 = zero(τₛ)
 
     τₐ, τₛ, 𝒢 = add_cloud_scattering_layer(τₐ, τₛ, 𝒢, optics.liquid_cloud, g, optics.liquid_bracket, liquid_water_path)

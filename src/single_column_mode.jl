@@ -20,6 +20,7 @@ module SingleColumnMode
 
 export SingleColumnGrid
 
+using Oceananigans.Fields: AbstractField, interior
 using Oceananigans.Grids: AbstractGrid, Flat, Bounded
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.TurbulenceClosures: AbstractTurbulenceClosure, getclosure
@@ -61,6 +62,17 @@ function AtmosphereModels.compute_vertical_momentum_tendency!(::AnelasticSingleC
     fill!(parent(Gρw), 0)
     return nothing
 end
+
+#####
+##### Reductions
+#####
+#
+# `minimum(field)` builds a reduced field, which cannot be constructed on a forest of columns (the horizontal
+# data size and the reduced location disagree), so `set!` of a total moisture would fail on an ensemble.
+# TODO: reduce fields over `Flat` dimensions of size greater than one in Oceananigans, then drop this.
+
+AtmosphereModels.interior_minimum(field::AbstractField{<:Any, <:Any, <:Any, <:SingleColumnGrid}) =
+    AtmosphereModels.data_minimum(interior(field))
 
 #####
 ##### Per-column closures
