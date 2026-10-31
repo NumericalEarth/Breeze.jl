@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.AtmosphereModels: AtmosphereModels as AM
-using Breeze.Thermodynamics: Thermodynamics as TD
+using Breeze.Thermodynamics: Thermodynamics as TD, TetensFormula
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations as PTF, Dry, LiquidIce,
                                                 IsochoricPressureWork, IsobaricPressureWork
 using Breeze.CompressibleEquations: MomentumForceWeighting
