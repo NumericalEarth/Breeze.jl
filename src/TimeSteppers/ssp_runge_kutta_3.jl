@@ -51,14 +51,17 @@ Fields
 - `U⁰`: Storage for state at beginning of time step
 - `Gⁿ`: Tendency fields at current stage
 - `implicit_solver`: Optional implicit solver for diffusion
+- `rounding`: Round-off treatment of the stage updates, [`RoundToNearest`](@ref) or
+  [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding)
 """
-struct SSPRungeKutta3{FT, U0, TG, TI} <: AbstractTimeStepper
+struct SSPRungeKutta3{FT, U0, TG, TI, R} <: AbstractTimeStepper
     α¹ :: FT
     α² :: FT
     α³ :: FT
     U⁰ :: U0
     Gⁿ :: TG
     implicit_solver :: TI
+    rounding :: R
 end
 
 """
@@ -75,6 +78,22 @@ Keyword Arguments
 - `U⁰`: Storage for the state at the beginning of the step. Default: similar to
   `prognostic_fields`. Accepting it as a keyword lets callers (e.g. the adiabatic-balance
   twin) alias another stepper's tendency storage instead of allocating fresh fields.
+- `rounding`: Round-off treatment of the stage updates. Default: [`RoundToNearest`](@ref).
+  With [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding), each stage is evaluated in increment form,
+  ``u^{(m)} = u^{(0)} + α \\left[ (u^{(m-1)} - u^{(0)}) + Δt \\, G \\right]``, and the sum is
+  rounded stochastically, so increments below the resolution of ``u`` are not lost on average.
+  The vertically-implicit solves and the pressure correction stay round-to-nearest.
+
+```jldoctest
+using Oceananigans, Breeze
+
+grid = RectilinearGrid(Float32; size=(4, 4, 4), extent=(1, 1, 1))
+model = AtmosphereModel(grid; timestepper_kwargs = (; rounding = StochasticRounding(seed = 42)))
+model.timestepper.rounding
+
+# output
+StochasticRounding(seed=42)
+```
 
 References
 ==========
@@ -87,7 +106,8 @@ function SSPRungeKutta3(grid, prognostic_fields;
                         implicit_solver::TI = nothing,
                         cache_advecting_state = false,   # accepted for TimeStepper-call uniformity; unused
                         Gⁿ::TG = map(similar, prognostic_fields),
-                        U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
+                        U⁰::U0 = map(similar, prognostic_fields),
+                        rounding::R = RoundToNearest()) where {TI, TG, U0, R}
 
     FT = eltype(grid)
 
@@ -96,7 +116,7 @@ function SSPRungeKutta3(grid, prognostic_fields;
     α² = FT(1//4)
     α³ = FT(2//3)
 
-    return SSPRungeKutta3{FT, U0, TG, TI}(α¹, α², α³, U⁰, Gⁿ, implicit_solver)
+    return SSPRungeKutta3{FT, U0, TG, TI, R}(α¹, α², α³, U⁰, Gⁿ, implicit_solver, rounding)
 end
 
 #####
@@ -111,7 +131,8 @@ Apply an SSP RK3 substep with coefficient ``α``:
 u^{(m)} = (1 - α) u^{(0)} + α \\left[ u^{(m-1)} + Δt \\, G \\right]
 ```
 where ``u^{(0)}`` is stored in the time stepper, ``u^{(m-1)}`` is the current field value,
-and ``G`` is the current tendency.
+and ``G`` is the current tendency. The sum is rounded by the time stepper's round-off treatment
+(see [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding)).
 """
 function ssp_rk3_substep!(model, Δt, α)
     grid = model.grid
@@ -123,9 +144,11 @@ function ssp_rk3_substep!(model, Δt, α)
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
     thermodynamic_name = thermodynamic_density_name(model.formulation)
+    rounding = model.timestepper.rounding
 
-    for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
-        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, kernel_Δt, α)
+    for (field_number, (name, u, u⁰, G)) in enumerate(zip(names, prognostic, U⁰, Gⁿ))
+        key = rounding_key(rounding, model.clock.iteration, model.clock.stage, field_number)
+        launch_ssp_rk3_substep!(rounding, arch, grid, u, u⁰, G, kernel_Δt, α, key)
 
         # Dynamics-specific prognostics (the compressible dry density, the kinematic driver's
         # density) are advanced explicitly and have no diffusivity to apply; momentum and every
@@ -186,11 +209,30 @@ function implicit_stage_step!(model, name, u, Δt)
     return nothing
 end
 
+# Round-to-nearest keeps the original Shu-Osher kernel, so the default is bitwise unchanged.
+launch_ssp_rk3_substep!(::RoundToNearest, arch, grid, u, u⁰, G, Δt, α, key) =
+    launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
+
+launch_ssp_rk3_substep!(rounding, arch, grid, u, u⁰, G, Δt, α, key) =
+    launch!(arch, grid, :xyz, _rounded_ssp_rk3_substep!, u, u⁰, G, Δt, α, rounding, key)
+
 @kernel function _ssp_rk3_substep!(u, u⁰, G, Δt, α)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         # u^(m) = (1 - α) * u^(0) + α * (u^(m-1) + Δt * G)
         u[i, j, k] = (1 - α) * u⁰[i, j, k] + α * (u[i, j, k] + Δt * G[i, j, k])
+    end
+end
+
+# The same stage in increment form, u^(m) = u^(0) + δ with δ = α [(u^(m-1) - u^(0)) + Δt G],
+# so the only rounding that matters, that of u^(0) + δ, is done by `rounded_add`. The difference
+# u^(m-1) - u^(0) is exact (Sterbenz) whenever the two are within a factor of two.
+@kernel function _rounded_ssp_rk3_substep!(u, u⁰, G, Δt, α, rounding, key)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        u⁰ᵢ = u⁰[i, j, k]
+        δ = α * ((u[i, j, k] - u⁰ᵢ) + Δt * G[i, j, k])
+        u[i, j, k] = rounded_add(rounding, u⁰ᵢ, δ, i, j, k, key)
     end
 end
 

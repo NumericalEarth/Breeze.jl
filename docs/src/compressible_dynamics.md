@@ -50,6 +50,11 @@ strategies:
   tendencies (advection, pressure gradient, buoyancy) computed together. The time step is
   bounded by the full 3-D acoustic CFL ``Δt < \min(Δx, Δy, Δz)/c_s``.
 
+Both time steppers accept a round-off treatment for their stage updates, for example
+`timestepper_kwargs = (; rounding = StochasticRounding())`, which removes the bias that
+round-to-nearest introduces for slow tendencies in `Float32`; see
+[Round-off in reduced precision](@ref round-off-section).
+
 ## Split-explicit time integration
 
 Subcycling fast pressure and gravity-wave dynamics inside an outer Runge–Kutta integration is
