@@ -1,6 +1,6 @@
 #!/bin/bash
 # sbatch validation/float32/run_l3_variants.sh RUNS STOP_TIME "VARIANTS"
-# VARIANTS: space-separated names among f64 f32naive f32 f32mixed f32fluct; all runs sequential on one GPU.
+# VARIANTS: space-separated names among f64 f32naive f32 f32mixed f32fluct f32rn f32sr; all runs sequential on one GPU.
 #SBATCH -p gpua100largex4
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
@@ -16,13 +16,15 @@ export JULIA_NUM_THREADS=8 OUTPUT_DIR=${OUTPUT_DIR:-/home/greg_aeolus_earth/Bree
 nvidia-smi -L
 echo "run tree $(git -C $RUN rev-parse HEAD); naive tree $(git -C $NAIVE rev-parse HEAD)"
 for V in ${3:-f64 f32naive f32 f32mixed f32fluct}; do
-  export FLUCTUATION_STORAGE=0
+  export STORAGE_EMULATION=none
   case $V in
     f64)      T=$RUN;   F=Float64; TF="" ;;
     f32naive) T=$NAIVE; F=Float32; TF="" ;;
     f32)      T=$RUN;   F=Float32; TF="" ;;
     f32mixed) T=$RUN;   F=Float32; TF=Float64 ;;
-    f32fluct) T=$RUN;   F=Float32; TF=Float64; export FLUCTUATION_STORAGE=1 ;;
+    f32fluct) T=$RUN;   F=Float32; TF=Float64; export STORAGE_EMULATION=fluct ;;
+    f32rn)    T=$RUN;   F=Float32; TF=Float64; export STORAGE_EMULATION=rn ;;
+    f32sr)    T=$RUN;   F=Float32; TF=Float64; export STORAGE_EMULATION=sr ;;
   esac
   echo "=== variant $V: tree $T FLOAT=$F THERMO_FLOAT=$TF $(date)"
   P=$T/validation/float32

@@ -16,14 +16,15 @@ l1a_rows = [(label = @sprintf("L1a %s³ %s", r[3], r[10]), ms = parse(Float64, r
 
 # L3 rows: label (s<seed>_M<M>_<variant>), FT, seconds per step, bytes; averaged over seeds
 names = Dict("f64" => "Float64", "f32naive" => "Float32 as merged", "f32" => "Float32 + fixes",
-             "f32mixed" => "Float32, Float64 θ qᵛ", "f32fluct" => "Float32, fluct. (emulated)")
+             "f32mixed" => "Float32, Float64 θ qᵛ", "f32fluct" => "Float32, fluct. (emulated)",
+             "f32rn" => "Float32 RN (emulated)", "f32sr" => "Float32 SR (emulated)")
 groups = Dict{Tuple{Int, String}, Vector{Tuple{Float64, Float64}}}()
 for r in eachrow(l3)
     m = match(r"s\d+_M(\d+)_(\w+)", r[1])
     key = (parse(Int, m[1]), m[2])
     push!(get!(groups, key, Tuple{Float64, Float64}[]), (1e3 * parse(Float64, r[3]), parse(Float64, r[4]) / 2^20))
 end
-order = ["f64", "f32naive", "f32", "f32mixed", "f32fluct"]
+order = ["f64", "f32naive", "f32", "f32mixed", "f32fluct", "f32rn", "f32sr"]
 l3_rows = [(label = @sprintf("L3 %d³ %s", M, names[v]), ms = mean(first.(groups[(M, v)])), MiB = mean(last.(groups[(M, v)])))
            for M in sort(unique(first.(keys(groups)))) for v in order if haskey(groups, (M, v))]
 

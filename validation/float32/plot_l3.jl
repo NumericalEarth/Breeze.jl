@@ -13,9 +13,10 @@ function read_csv(path)
 end
 
 const labels = Dict("f64" => "Float64", "f32naive" => "Float32 (as merged)", "f32" => "Float32 + fixes",
-                    "f32mixed" => "Float32, Float64 θ and qᵛ", "f32fluct" => "Float32, fluctuation storage")
+                    "f32mixed" => "Float32, Float64 θ and qᵛ", "f32fluct" => "Float32, fluctuation storage (emulated)", "f32rn" => "Float32 storage RN (emulated)",
+                    "f32sr" => "Float32 storage SR (emulated)")
 const colors = Dict("f64" => :black, "f32naive" => :firebrick, "f32" => :darkorange, "f32mixed" => :royalblue,
-                    "f32fluct" => :seagreen)
+                    "f32fluct" => :seagreen, "f32rn" => :orchid, "f32sr" => :sienna)
 
 output_dir = ARGS[1]
 prefix = ARGS[2]

@@ -180,6 +180,13 @@ function record!(state, model)
     return nothing
 end
 
+# Round x to one of the two neighboring Float32 values with probabilities proportional to proximity (u uniform in [0, 1))
+@inline function stochastic_float32(x, u)
+    y = Float32(x, RoundDown)
+    ŷ = nextfloat(y)
+    return Float64(ifelse(u < (x - y) / (ŷ - y), ŷ, y))
+end
+
 #####
 ##### Cost: time per step without diagnostics, and device memory in use
 #####
@@ -299,15 +306,30 @@ function run_l3(ncar_dir, seed, M; arch, stop_time=10.0, cfl=0.3, max_Δt=1e-3, 
     simulation.callbacks[:record] = Callback(sim -> record!(state, sim.model), TimeInterval(output_interval))
     simulation.callbacks[:background] = Callback(sim -> update_background!(background, sim.model, g_ncar, constants),
                                                  IterationInterval(10))
-    if get(ENV, "FLUCTUATION_STORAGE", "0") == "1"
-        # Emulate storing θ and qᵛ as single-precision fluctuations about their initial means (run with
-        # THERMO_FLOAT=Float64): after every step, round ρθ - ρθ₀ and ρqᵛ - ρqᵛ₀ to Float32
+    emulation = get(ENV, "STORAGE_EMULATION", get(ENV, "FLUCTUATION_STORAGE", "0") == "1" ? "fluct" : "none")
+    if emulation != "none"
+        # Emulate single-precision storage of θ and qᵛ in a model that keeps them in Float64 (THERMO_FLOAT=Float64):
+        # after every step, round ρθ and ρqᵛ to Float32 (rn: to nearest, sr: stochastically) or round their
+        # fluctuations about the initial means to Float32 (fluct)
         ρθ, ρqᵛ = model.formulation.potential_temperature_density, model.moisture_density
         ρθ₀, ρqᵛ₀ = mean(ρθ), mean(ρqᵛ)
         round_fluctuation!(φ, φ₀) = parent(φ) .= φ₀ .+ Float64.(Float32.(parent(φ) .- φ₀))
-        simulation.callbacks[:fluctuation_storage] = Callback(IterationInterval(1)) do sim
-            round_fluctuation!(ρθ, ρθ₀)
-            round_fluctuation!(ρqᵛ, ρqᵛ₀)
+        round_nearest!(φ) = parent(φ) .= Float64.(Float32.(parent(φ)))
+        function round_stochastically!(φ)
+            u = CUDA.rand(Float64, size(parent(φ)))
+            parent(φ) .= stochastic_float32.(parent(φ), u)
+        end
+        simulation.callbacks[:storage_emulation] = Callback(IterationInterval(1)) do sim
+            if emulation == "fluct"
+                round_fluctuation!(ρθ, ρθ₀)
+                round_fluctuation!(ρqᵛ, ρqᵛ₀)
+            elseif emulation == "rn"
+                round_nearest!(ρθ)
+                round_nearest!(ρqᵛ)
+            elseif emulation == "sr"
+                round_stochastically!(ρθ)
+                round_stochastically!(ρqᵛ)
+            end
             update_state!(sim.model)
         end
     end
