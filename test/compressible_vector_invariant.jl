@@ -165,9 +165,8 @@ weno_vertical() = CompressibleVectorInvariant(vertical_advection_scheme = WENO(o
 gradient_form_kinetic_energy() = CompressibleVectorInvariant(kinetic_energy_gradient_scheme = GradientFormUpwinding(WENO(order = 5)))
 flux_form() = Centered(order = 2)
 
-# One float type and low-order reconstructions: compiling these kernels takes about 10 GB
-# and is what limits this test file on the CI runners
-@testset "CompressibleVectorInvariant [$(FT)]" for FT in (Float64,)
+# Low-order reconstructions, because compiling these kernels is what limits this file on the CI runners
+@testset "CompressibleVectorInvariant [$(FT)]" for FT in test_float_types()
     previous_float_type = Oceananigans.defaults.FloatType
     Oceananigans.defaults.FloatType = FT
     roundoff = 1000 * eps(FT)
