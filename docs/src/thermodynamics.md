@@ -1223,12 +1223,72 @@ are not.
   corrected this way at all. In the radiative-convective equilibrium simulation mentioned
   above, numerical mixing of ``θˡⁱ`` creates about 3 W m⁻² and subgrid mixing about 0.5 W m⁻².
 
-- **Dissipative heating.** Breeze omits ``ε`` in every formulation: the kinetic energy that the
-  advection scheme and the closure dissipate is not returned as heat. In a statistically steady
-  state this loses the buoyancy work, 1–2 W m⁻² in the same simulation, from every
-  thermodynamic variable alike.
+- **Dissipative heating.** By default Breeze omits ``ε`` in every formulation: the kinetic
+  energy that the advection scheme and the closure dissipate is not returned as heat. In a
+  statistically steady state this loses the buoyancy work, 1–2 W m⁻² in the same simulation,
+  from every thermodynamic variable alike. The closure's part can be returned with
+  `dissipative_heating = true` (see below); the advection scheme's cannot.
 
 Discretely, the expansion source uses a cell-centered vertical velocity while advection is in
 flux form, so the two do not cancel to machine precision in a closed domain; in a closed
 convecting box the remaining imbalance is about one percent of what the previous definition
 created.
+
+### [Optional energy-closing sources](@id theta-li-energy-sources)
+
+Three further sources close the energy budget of [`LiquidIcePotentialTemperatureFormulation`](@ref)
+more tightly. Each is selected by a keyword argument and is off by default; all three are
+turned on with
+`LiquidIcePotentialTemperatureFormulation(precipitation_heating = true, fixed_volume_phase_change = true, dissipative_heating = true)`.
+
+- **Precipitation drag heating** (`precipitation_heating`). Condensate falling at its terminal
+  velocity ``wˣ`` relative to the air loses potential energy at the rate ``g Σₓ ρqˣ |wˣ|`` per unit
+  volume, which the drag on the falling particles delivers to the air. It enters the ``ρθ``
+  tendency as a heating does, ``(ρᵈ / ρ) Q / (\hat{c}ᵖ \hat{Π})``, and is discretized like the
+  potential-energy part ``g zᶠ`` of the condensate energy flux of a total-energy formulation: each
+  unit of mass that the sedimentation flux carries across a face is credited ``g (zᶠ - zᶜ)``, the
+  potential energy between the face and the center of the cell it enters or leaves. A cell
+  the condensate falls through therefore gains ``g Δz`` per unit mass, and the heating summed over
+  a column equals the potential energy that the falling condensate loses. It applies on both
+  dynamical cores, to explicit and to adaptive implicit sedimentation.
+
+- **Fixed-volume phase change** (`fixed_volume_phase_change`, compressible core only). The
+  microphysics converts water between its phases at fixed density. Holding ``θˡⁱ`` fixed
+  through the conversion conserves the enthalpy at fixed pressure, but on the compressible core
+  the pressure ``p = T (ρᵈ Rᵈ + ρqᵛ Rᵛ)`` is diagnosed from the densities and does not stay
+  fixed, so the expansion work ``p Δα`` that the fixed-pressure conversion assumes is missing.
+  Writing the internal energy density
+  ``ρ𝓊 = (ρᵈ cᵛᵈ + ρqᵛ cᵛᵛ + ρqˡ cˡ + ρqⁱ cⁱ) T + ℒˡ₀ ρqᵛ + (ℒˡ₀ - ℒⁱ₀) ρqⁱ`` as a function of the
+  prognostic densities ``ψ = (ρᵈ, Θ = ρᵈ θˡⁱ, ρqᵛ, ρqˡ, ρqⁱ)`` through the temperature that solves
+  ``θˡⁱ = H / (\hat{c}ᵖ Π)`` with that pressure, the source
+
+  ```math
+  ρ\dot{θ} = - \frac{1}{𝒥_Θ} \sum_q 𝒥_q \dot{S}_q , \qquad 𝒥_ψ = \left( \frac{∂(ρ𝓊)}{∂ψ} \right)_{\text{fixed volume}} ,
+  ```
+
+  with ``\dot{S}_q`` the microphysical tendencies of the water densities, makes every
+  microphysical conversion conserve ``ρ𝓊`` exactly in the limit of small time steps. The
+  Jacobians are evaluated analytically per cell; the source needs no fluxes and no extra fields.
+  It applies to tendency-based microphysics whose prognostic moisture is the vapor density
+  (non-equilibrium cloud formation). On the anelastic core the thermodynamic pressure is the
+  reference pressure ``pᵣ(z)``, phase change at fixed ``θˡⁱ`` is already exact, and the option is
+  ignored.
+
+- **Subgrid dissipative heating** (`dissipative_heating`). The resolved kinetic energy that the
+  turbulence closure removes, ``ρε = - 𝒯ᵢⱼ ∂ⱼ uᵢ`` with ``𝒯`` the closure's own viscous stress,
+  heats the air, entering the ``ρθ`` tendency as a heating does. Each stress component is
+  multiplied by the velocity gradient where the stress is evaluated and interpolated to the cell
+  center, so the domain integral matches the kinetic energy the momentum equations lose. It is
+  defined for closures whose momentum stresses are Oceananigans viscous fluxes —
+  `ScalarDiffusivity`, `SmagorinskyLilly`, `DynamicSmagorinsky` and
+  `AnisotropicMinimumDissipation` — including vertically implicit ones, whose vertical stresses
+  are evaluated explicitly for the heating. It is zero for
+  [`TKEBasedTurbulenceClosure`](@ref Breeze.TurbulenceClosures.TKEBasedTurbulenceClosure), whose
+  resolved kinetic-energy loss feeds the subgrid TKE rather than heat. The work of wall stresses
+  applied by boundary conditions, of momentum forcings such as sponge layers, and of the
+  dissipation by the advection scheme are not included.
+
+Turning on the first two makes the residual of the radiative-convective equilibrium simulation
+mentioned above *larger*, not smaller: their missing energy, about 4 and 2.5 W m⁻², offsets part
+of the mixing errors listed above, which remain. A total-energy formulation avoids all of these
+terms.

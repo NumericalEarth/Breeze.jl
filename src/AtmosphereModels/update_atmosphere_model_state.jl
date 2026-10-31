@@ -423,7 +423,12 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     ##### Fused microphysics tendencies (no-op by default; schemes opt in)
     #####
 
+    # A formulation may form a source from the microphysical tendencies of the water densities
+    # (e.g. the fixed-volume phase-change source of `LiquidIcePotentialTemperatureFormulation` on
+    # the compressible core); the hooks bracket the microphysics so that they see its part alone.
+    begin_phase_change_source!(model.formulation, model)
     compute_microphysical_tendencies!(model)
+    finish_phase_change_source!(model.formulation, model)
 
     #####
     ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
