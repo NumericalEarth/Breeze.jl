@@ -340,6 +340,7 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `compute_microphysical_tendencies!` | — | ✓† | Override for fused bundle schemes |
 | `microphysical_velocities` | — | — | Generic wrapper (don't override) |
 | `grid_moisture_fractions` | — | ✓‡ | Override for saturation adjustment |
+| `prescribed_temperature_moisture_fractions` | — | ✓‡ | Override for saturation adjustment |
 | `maybe_adjust_thermodynamic_state` | ✓‡ | ✓‡ | Override for saturation adjustment |
 
 † Only needed for bundle/fused-kernel schemes (e.g. mixed-phase 1M).
@@ -354,6 +355,7 @@ Saturation adjustment schemes have some additional requirements:
 | Function | Purpose |
 |----------|---------|
 | `grid_moisture_fractions(...)` | Override to read from diagnostic fields |
+| `prescribed_temperature_moisture_fractions(...)` | Equilibrium partition at a temperature prescribed by `set!` |
 | `maybe_adjust_thermodynamic_state(...)` | Perform saturation adjustment |
 
 These are needed because saturation adjustment schemes diagnose cloud condensate from
