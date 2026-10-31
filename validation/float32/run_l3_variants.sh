@@ -16,11 +16,13 @@ export JULIA_NUM_THREADS=8 OUTPUT_DIR=${OUTPUT_DIR:-/home/greg_aeolus_earth/Bree
 nvidia-smi -L
 echo "run tree $(git -C $RUN rev-parse HEAD); naive tree $(git -C $NAIVE rev-parse HEAD)"
 for V in ${3:-f64 f32naive f32 f32mixed}; do
+  export FLUCTUATION_STORAGE=0
   case $V in
     f64)      T=$RUN;   F=Float64; TF="" ;;
     f32naive) T=$NAIVE; F=Float32; TF="" ;;
     f32)      T=$RUN;   F=Float32; TF="" ;;
     f32mixed) T=$RUN;   F=Float32; TF=Float64 ;;
+    f32fluct) T=$RUN;   F=Float32; TF=Float64; export FLUCTUATION_STORAGE=1 ;;
   esac
   echo "=== variant $V: tree $T FLOAT=$F THERMO_FLOAT=$TF $(date)"
   P=$T/validation/float32
