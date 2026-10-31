@@ -12,11 +12,30 @@ function memory_reclaim(arch)
     end
 end
 
-reactant_compile_options() = Reactant.CompileOptions(raise = true,
-                                                     raise_first = true,
-                                                     sync = true,
-                                                     excluded_passes = ["greedy_while_loop_batch_fission",
-                                                                        "while_elementwise_reduction_to_reduce"])
+# Enzyme-JAX optimization patterns left out of every benchmark compile
+const EXCLUDED_PASSES = [
+    # The AD compile runs out of host memory (#1151; EnzymeAD/Reactant.jl#3573),
+    # fix in progress in EnzymeAD/Enzyme-JAX#3733
+    "greedy_while_loop_batch_fission",
+    # The AD benchmark fails without it (#1151); EnzymeAD/Enzyme-JAX#3733 may fix it
+    "while_elementwise_reduction_to_reduce",
+    "select_comp_iota_to_dus",
+]
+
+"""
+    reactant_compile_options(; raise = true)
+
+The `Reactant.CompileOptions` of every benchmark compile: `sync = true`, the
+Enzyme-JAX patterns in `EXCLUDED_PASSES` left out, and the kernels raised to
+StableHLO (`raise = true`, `raise_first = true`) or kept as kernel calls
+(`raise = false`), as the `raise` argument says. `@compile compile_options = …`
+ignores its other keyword options, so `raise`, `raise_first` and `sync` are set here too.
+"""
+reactant_compile_options(; raise::Bool = true) =
+    Reactant.CompileOptions(; raise = raise,
+                              raise_first = raise,
+                              sync = true,
+                              excluded_passes = EXCLUDED_PASSES)
 
 """
     benchmark_time_stepping(model;
@@ -39,7 +58,7 @@ Run a benchmark by executing `time_steps` time steps of the given model.
 If the model lives on a `ReactantState` architecture, the whole stepping loop
 is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
 program with `Reactant.@compile` using `reactant_compile_options()` (raising,
-with while-loop batch fission and while elementwise-reduction-to-reduce disabled) — compile time is recorded separately.
+with the patterns in `EXCLUDED_PASSES` left out) — compile time is recorded separately.
 The compiled program is then executed once for warmup and once timed. The vanilla path drives `many_time_steps!`
 directly through eager `time_step!`.
 
