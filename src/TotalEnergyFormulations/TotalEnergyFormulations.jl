@@ -22,8 +22,8 @@ using Oceananigans.Fields: Field, set!
 using Oceananigans.Grids: XFlatGrid, YFlatGrid
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ
 using Oceananigans.Utils: prettysummary, launch!
-using Oceananigans.TurbulenceClosures: ExplicitTimeDiscretization, VerticallyImplicitTimeDiscretization,
-    time_discretization, _diffusive_flux_z
+using Oceananigans.TimeSteppers: ExplicitTimeDiscretization, VerticallyImplicitTimeDiscretization, time_discretization
+using Oceananigans.TurbulenceClosures: _diffusive_flux_z
 
 using Breeze.Thermodynamics: InternalEnergyDensityState, LiquidIceDensityState,
     VaporEquivalentExponent, temperature, with_temperature,
