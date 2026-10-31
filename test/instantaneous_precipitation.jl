@@ -13,6 +13,9 @@ using Breeze.Thermodynamics:
     with_moisture,
     mixture_gas_constant,
     mixture_heat_capacity,
+    vapor_equivalent_gas_constant,
+    vapor_equivalent_heat_capacity,
+    absolute_zero_latent_heat,
     saturation_specific_humidity
 
 using Breeze.Microphysics:
@@ -33,21 +36,24 @@ using Oceananigans.TimeSteppers: update_state!
 # rain-out with retained latent warming, and density-consistent saturation.
 
 # Reference implementation of the *pre-refactor* large-scale-condensation scalar math: a constant-density θˡⁱ secant
-# (run to tight convergence) plus the closed-form vapor-only rain-out. This is the ground truth the
+# (run to tight convergence) plus the closed-form vapor-only rain-out, written with the exact
+# definition θˡⁱ = (cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ) / (ĉᵖ Π̂), Π̂ = (p / pˢᵗ)^κ̂. This is the ground truth the
 # delegated path must reproduce.
 function reference_ip_update(θ₀, qᵗ, ρ, pˢᵗ, constants, equilibrium)
     ℒˡ = constants.liquid.reference_latent_heat
     ℒⁱ = constants.ice.reference_latent_heat
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
 
     residual(T) = begin
         qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, equilibrium)
         q   = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
         Rᵐ  = mixture_gas_constant(q, constants)
         cᵖᵐ = mixture_heat_capacity(q, constants)
-        κ   = Rᵐ / cᵖᵐ
-        L   = (ℒˡ * q.liquid + ℒⁱ * q.ice) / cᵖᵐ
+        ĉᵖ  = vapor_equivalent_heat_capacity(q, constants)
+        κ̂   = vapor_equivalent_gas_constant(q, constants) / ĉᵖ
         p   = ρ * Rᵐ * T
-        return (T - L) * (pˢᵗ / p)^κ - θ₀, q
+        return (cᵖᵐ * T - ℒˡ₀ * q.liquid - ℒⁱ₀ * q.ice) / ĉᵖ * (pˢᵗ / p)^κ̂ - θ₀, q
     end
 
     Rᵗ  = mixture_gas_constant(MoistureMassFractions(qᵗ), constants)
@@ -164,7 +170,7 @@ end
         ρθ1   = Array(interior(model.formulation.potential_temperature_density))
         ρq1   = Array(interior(model.moisture_density))
         prate = Array(interior(model.microphysical_fields.precipitation_rate))
-        surface_flux = surface_precipitation_flux(model) |> compute!
+        surface_flux = bottom_precipitation_flux(model) |> compute!
         column_integrated_prate = Field(Integral(model.microphysical_fields.precipitation_rate, dims=3)) |> compute!
 
         @test all(isfinite, ρθ1) && all(isfinite, ρq1)

@@ -438,7 +438,6 @@ without_sponge(td::SplitExplicitTimeDiscretization) =
                                     td.vertical_momentum_tendency_factor,
                                     td.vertical_pressure_tendency_factor,
                                     td.final_stage_vertical_pressure_tendency_factor,
-                                    td.apply_first_substep_pressure_gradient,
                                     td.damping,
                                     nothing,
                                     td.substep_distribution,
@@ -461,6 +460,31 @@ AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_st
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
 AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
+
+# Sedimentation drains the diagnosed total density but not the prognostic dry density (its
+# continuity has no sedimentation source), so every mass fraction renormalizes: the composition
+# moves toward the falling phase along q̂ˣ − q (see `sedimentation_composition_increment`).
+@inline function AtmosphereModels.sedimentation_composition_increment(::CompressibleDynamics, q, phase)
+    q̂ = AtmosphereModels.unit_composition(phase, q)
+    return MoistureMassFractions(q̂.vapor - q.vapor, q̂.liquid - q.liquid, q̂.ice - q.ice)
+end
+
+# Isolated sedimentation holds gas partial densities fixed: dp/p = dT/T and
+# ρ cᵛᵐ dT/dt = Q_h - Σ hˣ rˣ. With ĉᵖ Π θ = cᵖᵐ T − Hᶜ and Π = (p / pˢᵗ)^κ,
+# dθ/dT = cᵖᵐ [1 - κ(1 - Hᶜ / (cᵖᵐ T))] / (ĉᵖ Π).
+# Only phase enthalpy crosses a face; mixture subtraction belongs in the local χ.
+@inline function PotentialTemperatureFormulations.sedimentation_thermal_response(::CompressibleDynamics, κ̂,
+                                                                                q, constants, T, Π)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    κ = exner_exponent(κ̂, q, constants)
+    Hᶜ = condensate_latent_energy(q, constants)
+    hˡ = constants.liquid.heat_capacity * T - absolute_zero_latent_heat(constants, constants.liquid)
+    hⁱ = constants.ice.heat_capacity * T - absolute_zero_latent_heat(constants, constants.ice)
+    β = cᵖᵐ * (1 - κ * (1 - Hᶜ / (cᵖᵐ * T))) / (ĉᵖ * (cᵖᵐ - Rᵐ) * Π)
+    return (hˡ, hⁱ), β
+end
 
 #####
 ##### Prognostic fields
@@ -632,3 +656,10 @@ $(TYPEDSIGNATURES)
 Return the standard pressure for potential temperature diagnostics.
 """
 AtmosphereModels.Diagnostics.dynamics_standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
+
+# The compressible core closes the thermodynamics through `temperature_and_pressure`, which only
+# inverts liquid-ice potential temperature. Reject static energy at construction rather than with a
+# `MethodError` on the first state update.
+AtmosphereModels.materialize_formulation(::Val{:StaticEnergy}, ::CompressibleDynamics, grid, boundary_conditions) =
+    throw(ArgumentError("CompressibleDynamics does not yet support formulation=:StaticEnergy; " *
+                        "use formulation=:LiquidIcePotentialTemperature"))

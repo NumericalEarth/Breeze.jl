@@ -5,7 +5,9 @@ using Breeze
 using Breeze.AtmosphereModels: thermodynamic_density, base_pressure, standard_pressure
 using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities,
                                  wall_air_pressure, surface_layer_state
-using Breeze.Thermodynamics: potential_temperature_from_temperature
+using Breeze.Thermodynamics: potential_temperature_from_temperature,
+                             LiquidIcePotentialTemperatureState, exner_function
+using CloudMicrophysics: CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition, Bottom
@@ -13,6 +15,9 @@ using Oceananigans.Fields: location
 using Oceananigans.Grids: XDirection
 using Oceananigans.TimeSteppers: compute_flux_bc_tendencies!, update_state!
 using Test
+
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMicrophysics
 
 function setup_forcing_model(grid, forcing)
     model = AtmosphereModel(grid; tracers=:ρc, forcing)
@@ -119,6 +124,53 @@ end
     @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(; ρqᵗ=bcs, ρqᵛ=bcs))
     @test_throws ArgumentError AtmosphereModel(grid; microphysics=SaturationAdjustment(),
                                                      boundary_conditions=(; ρqᵗ=bcs, ρqᵉ=bcs))
+end
+
+@testset "Microphysical boundary conditions reach the prognostic fields [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    J = FT(1e-4)
+
+    # The function-valued condition is evaluated whenever the microphysical halos are filled
+    ρqʳ_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(J),
+                                      top = ValueBoundaryCondition(Returns(zero(FT))))
+
+    for microphysics in (OneMomentCloudMicrophysics(), TwoMomentCloudMicrophysics(),
+                         PredictedParticlePropertiesMicrophysics())
+        model = AtmosphereModel(grid; microphysics, boundary_conditions=(; ρqʳ=ρqʳ_bcs))
+        set!(model; θ=model.dynamics.reference_state.potential_temperature)
+
+        fill!(parent(model.timestepper.Gⁿ.ρqʳ), 0)
+        compute_flux_bc_tendencies!(model)
+        @test all(Array(interior(model.timestepper.Gⁿ.ρqʳ, :, :, 1)) .≈ J / FT(25))
+    end
+end
+
+# Boundary conditions must capture P3's lookup tables on the model architecture (issue #1051)
+@testset "Surface boundary conditions capture the model's microphysics [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    coefficient = PolynomialCoefficient()
+    Tˢ = FT(290)
+
+    ρE_bcs  = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100)))
+    ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(; coefficient, surface_temperature=Tˢ))
+    ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(; coefficient, surface_temperature=Tˢ))
+    boundary_conditions = (; ρE=ρE_bcs, ρu=ρu_bcs, ρqᵗ=ρqᵗ_bcs)
+
+    model = AtmosphereModel(grid; microphysics=PredictedParticlePropertiesMicrophysics(), boundary_conditions)
+
+    energy_flux = thermodynamic_density(model.formulation).boundary_conditions.bottom.condition
+    drag = model.momentum.ρu.boundary_conditions.bottom.condition
+    vapor_flux = model.moisture_density.boundary_conditions.bottom.condition
+
+    @test energy_flux.microphysics === model.microphysics
+    @test drag.coefficient.virtual_potential_temperature.microphysics === model.microphysics
+    @test vapor_flux.coefficient.virtual_potential_temperature.microphysics === model.microphysics
+
+    set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5), qᵗ=FT(0.01))
+    time_step!(model, 1e-6)
+    @test model.clock.iteration == 1
 end
 
 @testset "Water forcing under ρqᵗ reaches the moisture variable [$(FT)]" for FT in test_float_types()
@@ -843,25 +895,41 @@ end
         grid_1 = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
         𝒬 = FT(1000)
 
-        ρE_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
-        model = AtmosphereModel(grid_1; boundary_conditions=(; ρE=ρE_bcs))
+        # Two base pressures discriminate the conversions: 𝒬 / cᵖᵐ is identical for both, while
+        # Π is ≈1 at sea level and ≈0.90 at 700 hPa.
+        fluxes = FT[]
+        for p₀ in (FT(101325), FT(70000))
+            constants = ThermodynamicConstants(FT)
+            reference_state = ReferenceState(grid_1, constants; base_pressure=p₀, standard_pressure=FT(1e5))
+            ρE_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
+            model = AtmosphereModel(grid_1; dynamics=AnelasticDynamics(reference_state),
+                                    boundary_conditions=(; ρE=ρE_bcs))
 
-        θ₀_ref = model.dynamics.reference_state.potential_temperature
-        set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
+            θ₀_ref = model.dynamics.reference_state.potential_temperature
+            set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
 
-        q = MoistureMassFractions(qᵗ₀)
-        cᵖᵐ = mixture_heat_capacity(q, model.thermodynamic_constants)
+            q = MoistureMassFractions(qᵗ₀)
+            cᵖᵐ = mixture_heat_capacity(q, model.thermodynamic_constants)
 
-        # Read the condition the model will apply, rather than restating the arithmetic. The
-        # conversion divides by cᵖᵐ alone; whether it should also divide by Π, as the `ρE` forcing
-        # does, is issue #976.
-        Jᶿ = Field(BoundaryConditionOperation(thermodynamic_density(model.formulation), :bottom, model))
-        compute!(Jᶿ)
+            # Read the condition the model will apply, rather than restating the arithmetic.
+            Jᶿ = Field(BoundaryConditionOperation(thermodynamic_density(model.formulation), :bottom, model))
+            compute!(Jᶿ)
 
-        time_step!(model, FT(1e-6))
+            time_step!(model, FT(1e-6))
 
-        @test cᵖᵐ > 1000
-        @test all(interior(Jᶿ) .≈ 𝒬 / cᵖᵐ)
+            # Π in the boundary cell, from the same reference pressure the `ρE` forcing divides by.
+            pᵣ = @allowscalar dynamics_pressure(model.dynamics)[1, 1, 1]
+            𝒰 = LiquidIcePotentialTemperatureState(zero(FT), q, standard_pressure(model.dynamics), pᵣ)
+            Π = exner_function(𝒰, model.thermodynamic_constants)
+
+            @test cᵖᵐ > 1000
+            @test all(interior(Jᶿ) .≈ 𝒬 / (cᵖᵐ * Π))
+
+            push!(fluxes, @allowscalar interior(Jᶿ)[1, 1, 1])
+        end
+
+        # Dividing by cᵖᵐ alone would make these equal; dividing by cᵖᵐ Π separates them by ~1/Π.
+        @test fluxes[2] > 1.05 * fluxes[1]
     end
 
     @testset "Error when specifying both ρθ and ρE boundary conditions [$FT]" begin
@@ -995,11 +1063,12 @@ end
         @test :ρθ ∈ keys(result)
         @test :ρE ∉ keys(result)
 
-        # Static energy carries the energy flux itself, so `ρE` lands on `ρs` unconverted
+        # `ρE` lands on `ρs` wrapped to scale the energy flux by ρᵈ / ρ
         result = convert_energy_bcs(bcs, :StaticEnergy)
         @test :ρs ∈ keys(result)
         @test :ρE ∉ keys(result)
-        @test result.ρs.bottom.condition == FT(100)
+        @test result.ρs.bottom.condition isa Breeze.BoundaryConditions.StaticEnergyFluxBoundaryConditionFunction
+        @test result.ρs.bottom.condition.condition == FT(100)
     end
 
     @testset "theta_to_energy_bcs correctly converts BCs [$FT]" begin
@@ -1015,12 +1084,12 @@ end
     end
 
     @testset "EnergyFluxBoundaryConditionFunction summary [$FT]" begin
-        ef_number = EnergyFluxBoundaryConditionFunction(500, nothing, nothing, nothing, nothing)
+        ef_number = EnergyFluxBoundaryConditionFunction(500, nothing, nothing, nothing, nothing, nothing)
         s = summary(ef_number)
         @test occursin("500", s) || occursin("5", s)
 
         𝒬_func(x, y, t) = 100
-        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing, nothing, nothing)
+        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing, nothing, nothing, nothing)
         s_func = summary(ef_func)
         @test occursin("Function", s_func) || occursin("function", s_func)
     end
@@ -1050,7 +1119,7 @@ end
     𝒬 = FT(1000)
     θ₀ = FT(290)
     qᵗ₀ = FT(0.01)
-    Δt = FT(1e-6)
+    Δt = FT(1)   # 1e-6 puts the increment below eps(ρθ) in Float32
 
     # Test a representative subset of boundaries (bottom and west are sufficient for coverage)
     for ρE_bcs in [
@@ -1067,6 +1136,127 @@ end
 
         Δρθ = ρθ_after - ρθ_before
         @test Δρθ != 0
+    end
+end
+
+@testset "Energy flux converts at each face's own cell [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    using Oceananigans.Models: BoundaryConditionOperation
+
+    # The six `getbc` methods differ only in which boundary cell they hand the conversion. Before
+    # `Π` entered this path that index reached only `qᵛ` and density, where the wrong cell costs a
+    # percent. Over this column `Π` runs ≈0.97 at the lowest cell to ≈0.53 at the highest, so a
+    # misread cell now fails loudly instead of rounding away.
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 15000),
+                           topology=(Bounded, Bounded, Bounded))
+
+    𝒬ᵀ = FT(1000)
+    qᵗ₀ = FT(0.01)
+
+    ρE_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(𝒬ᵀ),
+                                     top    = FluxBoundaryCondition(𝒬ᵀ),
+                                     west   = FluxBoundaryCondition(𝒬ᵀ),
+                                     east   = FluxBoundaryCondition(𝒬ᵀ),
+                                     south  = FluxBoundaryCondition(𝒬ᵀ),
+                                     north  = FluxBoundaryCondition(𝒬ᵀ))
+
+    model = AtmosphereModel(grid; boundary_conditions=(; ρE=ρE_bcs))
+
+    # No θ: nothing the conversion reads depends on it. Density and pressure are the anelastic
+    # reference fields, built at construction, and `exner_function` ignores the state's θ. Moisture
+    # stays vapor-only because the default microphysics is `nothing`, so `grid_moisture_fractions`
+    # returns `MoistureMassFractions(qᵛ)` unpartitioned. Give this model a microphysics and θ does
+    # become load-bearing: `set!` would then split `qᵗ` into condensate using temperature.
+    set!(model; qᵗ=qᵗ₀)
+
+    q = MoistureMassFractions(qᵗ₀)
+    constants = model.thermodynamic_constants
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    pˢᵗ = standard_pressure(model.dynamics)
+    p = Array(interior(dynamics_pressure(model.dynamics)))
+    Nx, Ny, Nz = size(grid)
+
+    # The anelastic reference pressure is a column, so `Π` varies in `k` only. That is enough to
+    # catch any error in the vertical index, and any error that confuses a horizontal index with
+    # it; a pure i↔j or 1↔N mix-up between two horizontal faces would not show here.
+    p_cell(i, j, k) = FT(p[min(i, size(p, 1)), min(j, size(p, 2)), k])
+    Π_cell(i, j, k) = exner_function(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, p_cell(i, j, k)),
+                                     constants)
+
+    # Premise for everything below: `Π` must vary enough across the column that reading the wrong
+    # cell is visible. Without it the six assertions would pass under any index.
+    @test Π_cell(1, 1, 1) / Π_cell(1, 1, Nz) > 1.5
+
+    ρθ = thermodynamic_density(model.formulation)
+
+    # The cell each side's method must read, in the order `interior` returns it.
+    cells = (bottom = [(i, j, 1)  for i in 1:Nx, j in 1:Ny],
+             top    = [(i, j, Nz) for i in 1:Nx, j in 1:Ny],
+             west   = [(1, j, k)  for j in 1:Ny, k in 1:Nz],
+             east   = [(Nx, j, k) for j in 1:Ny, k in 1:Nz],
+             south  = [(i, 1, k)  for i in 1:Nx, k in 1:Nz],
+             north  = [(i, Ny, k) for i in 1:Nx, k in 1:Nz])
+
+    for side in (:bottom, :top, :west, :east, :south, :north)
+        Jᶿ = Array(interior(Field(BoundaryConditionOperation(ρθ, side, model))))
+        expected = [𝒬ᵀ / (cᵖᵐ * Π_cell(c...)) for c in getproperty(cells, side)]
+        @test vec(Jᶿ) ≈ vec(expected)
+    end
+
+end
+
+@testset "Compressible energy flux heats the dry-coupled ρθ like interior heating [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    using Oceananigans.Models: BoundaryConditionOperation
+    using Breeze.Thermodynamics: vapor_equivalent_heat_capacity
+
+    # An enthalpy flux changes h at -(1/ρ) ∇⋅𝒬ᵀ, so ρθ = ρᵈ θ gains (ρᵈ / ρ) 𝒬ᵀ / (ĉᵖ Π), the same
+    # ρᵈ / ρ the interior ρE forcing and radiative heating take. qᵛ = 0.2 makes ρᵈ / ρ = 0.8 visible.
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 1000),
+                           topology=(Periodic, Periodic, Bounded))
+
+    𝒬ᵀ = FT(1000)
+    qᵛ₀ = FT(0.2)
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); base_pressure=FT(1e5), standard_pressure=FT(1e5))
+    model = AtmosphereModel(grid; dynamics,
+                            boundary_conditions=(; ρE=FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬ᵀ))))
+    set!(model; ρ=FT(1.25), qᵛ=qᵛ₀, θ=FT(300))
+    update_state!(model)
+
+    q = MoistureMassFractions(qᵛ₀)
+    constants = model.thermodynamic_constants
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    pˢᵗ = standard_pressure(model.dynamics)
+    p = Array(interior(dynamics_pressure(model.dynamics)))[:, :, 1]
+    ρ = Array(interior(total_density(model.dynamics)))[:, :, 1]
+    ρᵈ = Array(interior(dynamics_density(model.dynamics)))[:, :, 1]
+    Π = [exner_function(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, pᵢⱼ), constants) for pᵢⱼ in p]
+
+    ρθ = thermodynamic_density(model.formulation)
+    Jᶿ = Array(interior(Field(BoundaryConditionOperation(ρθ, :bottom, model))))[:, :, 1]
+    @test all(ρᵈ ./ ρ .≈ FT(0.8))
+    @test Jᶿ ≈ @. ρᵈ / ρ * 𝒬ᵀ / (ĉᵖ * Π)
+end
+
+@testset "Energy flux on ρs scales by ρᵈ / ρ [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    using Breeze.BoundaryConditions: StaticEnergyFluxBoundaryConditionFunction
+    using Oceananigans.BoundaryConditions: getbc, Top
+
+    # ρs = ρᵈ s gains (ρᵈ / ρ) 𝒬ᵀ from an enthalpy flux, as for ρθ. StaticEnergyFormulation does not
+    # yet run on CompressibleDynamics, so the conversion is checked directly with ρᵈ / ρ = 0.8.
+    grid = RectilinearGrid(default_arch; size=(1, 1, 4), extent=(1, 1, 1))
+    𝒬ᵀ = FT(1000)
+    ρᵈ = fill(FT(1), 1, 1, 4)
+    ρ = fill(FT(1.25), 1, 1, 4)
+    clock = Clock(time=zero(FT))
+
+    for (side, k) in ((Bottom(), 1), (Top(), 4))
+        sf = StaticEnergyFluxBoundaryConditionFunction(𝒬ᵀ, side, ρᵈ)
+        @test getbc(sf, 1, 1, grid, clock, (;), (; ρ)) ≈ FT(0.8) * 𝒬ᵀ
+        # With no captured density (compressible) the dry density is read from the model fields
+        sf = StaticEnergyFluxBoundaryConditionFunction(𝒬ᵀ, side, nothing)
+        @test getbc(sf, 1, 1, grid, clock, (; ρᵈ), (; ρ)) ≈ FT(0.8) * 𝒬ᵀ
     end
 end
 

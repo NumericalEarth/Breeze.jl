@@ -1,8 +1,14 @@
 module TurbulenceClosures
 
 export TKEBasedTurbulenceClosure,
-       TKEMixingLength,
-       ConstantStabilityFunctions
+       AbstractMixingLength,
+       LocalMinimumMixingLength,
+       IntegralMixingLength,
+       GradientLimitedMixingLength,
+       ConstantStabilityFunctions,
+       RationalStabilityFunction,
+       DryStaticStability,
+       MoistStaticStability
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
@@ -27,7 +33,11 @@ using Oceananigans.Operators:
     Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ,
     # Interpolator functions used for ρᵣ at faces
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ,
-    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ
+    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ,
+    # Vertical derivative at faces, for the static stability
+    ∂zᶜᶜᶠ,
+    # Cell height, for the mixing-length sweeps
+    Δzᶜᶜᶜ
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
@@ -46,6 +56,12 @@ using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using ..AtmosphereModels: AtmosphereModels
 
+using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, standard_pressure, total_density, gas_phase_density,
+                              precipitating_mass_fraction
+using Breeze.AtmosphereModels.Diagnostics: microphysics_phase_equilibrium
+using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant, saturation_specific_humidity,
+                             equilibrated_surface, absolute_zero_latent_heat, specific_heat_difference
+
 #####
 ##### Fallbacks for closure = nothing
 #####
@@ -54,6 +70,39 @@ using ..AtmosphereModels: AtmosphereModels
 @inline AtmosphereModels.∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
 @inline AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
 @inline AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
+
+#####
+##### Density-weighted fluxes for tuples of closures
+#####
+
+@inline sum_closure_fluxes(i, j, k, grid, flux, ρ, ::Tuple{}, ::Tuple{}, args...) = zero(grid)
+
+@inline function sum_closure_fluxes(flux, i, j, k, grid, ρ,
+                                    closures::Tuple{C, Vararg}, closure_fields::Tuple{F, Vararg},
+                                    args...) where {C, F}
+    return flux(i, j, k, grid, ρ, first(closures), first(closure_fields), args...) +
+           sum_closure_fluxes(flux, i, j, k, grid, ρ, Base.tail(closures), Base.tail(closure_fields), args...)
+end
+
+@inline AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple,
+                                  id, c, clock, model_fields, buoyancy) =
+    sum_closure_fluxes(AtmosphereModels.∇_dot_Jᶜ, i, j, k, grid, ρ, closures, closure_fields,
+                       id, c, clock, model_fields, buoyancy)
+
+@inline AtmosphereModels.∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple,
+                                clock, model_fields, buoyancy) =
+    sum_closure_fluxes(AtmosphereModels.∂ⱼ_𝒯₁ⱼ, i, j, k, grid, ρ, closures, closure_fields,
+                       clock, model_fields, buoyancy)
+
+@inline AtmosphereModels.∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple,
+                                clock, model_fields, buoyancy) =
+    sum_closure_fluxes(AtmosphereModels.∂ⱼ_𝒯₂ⱼ, i, j, k, grid, ρ, closures, closure_fields,
+                       clock, model_fields, buoyancy)
+
+@inline AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple,
+                                clock, model_fields, buoyancy) =
+    sum_closure_fluxes(AtmosphereModels.∂ⱼ_𝒯₃ⱼ, i, j, k, grid, ρ, closures, closure_fields,
+                       clock, model_fields, buoyancy)
 
 #####
 ##### Scalar (tracer) dynamic fluxes: J = ρᵣ τ
@@ -119,6 +168,8 @@ end
         + δzᵃᵃᶠ(i, j, k, grid, Az_qᶜᶜᶜ, 𝒯_wz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
 end
 
+include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
+include("richardson_number_stability_functions.jl")
 
 end # module TurbulenceClosures

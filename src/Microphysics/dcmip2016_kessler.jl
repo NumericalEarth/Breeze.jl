@@ -1,20 +1,22 @@
 using ..Thermodynamics:
+    LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
     MoistureMixingRatio,
     PlanarLiquidSurface,
-    mixture_gas_constant,
-    mixture_heat_capacity,
+    density,
     saturation_specific_humidity,
     temperature,
     TetensFormulaThermodynamicConstants,
     total_mixing_ratio,
     total_specific_moisture,
-    with_moisture
+    with_moisture,
+    with_temperature
 
 using ..AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
     kernel_time_step,
+    liquid_ice_exner_exponent,
     standard_pressure,
     total_density
 
@@ -289,10 +291,6 @@ The Kessler scheme performs its own saturation adjustment internally via the ker
 
 AtmosphereModels.moisture_prognostic_name(::DCMIP2016KM) = :ρqᵛ
 
-# DCMIP2016 Kessler stores vapor as prognostic; subtract all condensate from total.
-@inline function AtmosphereModels.specific_prognostic_moisture_from_total(::DCMIP2016KM, qᵗ, ℳ::AtmosphereModels.WarmRainState)
-    return max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
-end
 AtmosphereModels.liquid_mass_fraction(::DCMIP2016KM, model) = model.microphysical_fields.qᶜˡ + model.microphysical_fields.qʳ
 
 # Grid model: prognostic stores true vapor; construct fractions directly from fields.
@@ -304,14 +302,10 @@ AtmosphereModels.liquid_mass_fraction(::DCMIP2016KM, model) = model.microphysica
 end
 AtmosphereModels.ice_mass_fraction(::DCMIP2016KM, model) = nothing
 
-"""
-$(TYPEDSIGNATURES)
+# Rain sedimentation is applied by the scheme's own column kernel, so no tracer
+# advertises a sedimentation velocity and the generic fallback (`nothing`) stands.
 
-Return `nothing`.
-
-Rain sedimentation is handled internally by the kernel rather than through the advection interface.
-"""
-@inline AtmosphereModels.microphysical_velocities(::DCMIP2016KM, μ, name) = nothing
+@inline AtmosphereModels.precipitating_mass_fraction(i, j, k, ::DCMIP2016KM, μ) = @inbounds μ.qʳ[i, j, k]
 
 """
 $(TYPEDSIGNATURES)
@@ -348,19 +342,19 @@ AtmosphereModels.precipitation_rate(model, ::DCMIP2016KM, ::Val{:ice}) = nothing
 """
 $(TYPEDSIGNATURES)
 
-Return the surface precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
+Return the bottom precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
 
-The surface precipitation flux is the substep-mean ``ρ^r v^t_{rain}`` at the surface.
+The bottom precipitation flux is the substep-mean ``ρ^r v^t_{rain}`` at the lowest face.
 The stored precipitation rate is normalized so multiplying it by the final total density
 recovers this mass flux exactly. Units are kg/m²/s.
 
-This implements the Breeze `surface_precipitation_flux(model)` interface.
+This implements the Breeze `bottom_precipitation_flux(model)` interface.
 """
-function AtmosphereModels.surface_precipitation_flux(model, ::DCMIP2016KM)
+function AtmosphereModels.bottom_precipitation_flux(model, ::DCMIP2016KM)
     grid = model.grid
     μ = model.microphysical_fields
     ρ = total_density(model.dynamics)
-    # surface_precipitation_flux = ρ × precipitation_rate (kg/m²/s)
+    # bottom_precipitation_flux = ρ × precipitation_rate (kg/m²/s)
     kernel = DCMIP2016KesslerSurfaceFluxKernel(μ.precipitation_rate, ρ)
     op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid)
     return Field(op)
@@ -376,7 +370,7 @@ Adapt.adapt_structure(to, k::DCMIP2016KesslerSurfaceFluxKernel) =
                                       adapt(to, k.density))
 
 @inline function (kernel::DCMIP2016KesslerSurfaceFluxKernel)(i, j, k_idx, grid)
-    # surface_precipitation_flux = ρ × precipitation_rate
+    # bottom_precipitation_flux = ρ × precipitation_rate
     @inbounds P = kernel.precipitation_rate[i, j]
     @inbounds ρ = kernel.density[i, j, 1]
     return ρ * P
@@ -466,8 +460,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     dry_air_coupled = ρ !== ρᵈ
     p = dynamics_pressure(model.dynamics)
 
-    # Standard pressure (reference pressure for the Exner function, pˢᵗ)
-    pˢᵗ = standard_pressure(model.dynamics)
+    # Standard pressure (reference pressure for the Exner function, pˢᵗ) and Exner exponent
+    pˢᵗ = convert(eltype(grid), standard_pressure(model.dynamics))
+    κ̂ = liquid_ice_exner_exponent(model.formulation)
 
     # Thermodynamic constants for liquid-ice potential temperature conversion
     constants = model.thermodynamic_constants
@@ -486,7 +481,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     launch!(arch, grid, :xy, _microphysical_update!,
             microphysics, grid, Nz, kernel_Δt, ρ, ρᵈ, dry_air_coupled,
-            p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+            p, pˢᵗ, κ̂, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
@@ -620,11 +615,13 @@ end
 # 3. Convert mixing ratios → mass fractions; update prognostic fields
 #
 # Note: Breeze uses liquid-ice potential temperature (θˡⁱ), related to T by:
-#   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
+#   ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ ,
+# with the Exner exponent of the formulation; the conversions go through the state's own
+# `temperature` and `with_temperature`.
 
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
                                         density, coupling_density, dry_air_coupled,
-                                        pressure, pˢᵗ, constants,
+                                        pressure, pˢᵗ, κ̂, constants,
                                         θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
@@ -729,13 +726,8 @@ end
 
                 # Compute temperature from θˡⁱ
                 rˡ = rᶜˡ + rʳ
-                r = MoistureMixingRatio(rᵛ, rˡ)
-                cᵖᵐ = mixture_heat_capacity(r, constants)
-                Rᵐ  = mixture_gas_constant(r, constants)
-                q = MoistureMassFractions(r)
-                qˡ = q.liquid
-                Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-                Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
+                q = MoistureMassFractions(MoistureMixingRatio(rᵛ, rˡ))
+                Tᵏ = temperature(LiquidIcePotentialTemperatureState(θˡⁱᵏ, q, pˢᵗ, p, κ̂), constants)
 
                 # Rain sedimentation flux (upstream differencing)
                 ρᵏ = Cᵨ * coupling_density[i, j, k]
@@ -761,13 +753,9 @@ end
                 T = Tᵏ + ΔT_phase
 
                 rˡ = rᶜˡ + rʳ
-                r = MoistureMixingRatio(rᵛ, rˡ)
-                cᵖᵐ = mixture_heat_capacity(r, constants)
-                Rᵐ  = mixture_gas_constant(r, constants)
-                q = MoistureMassFractions(r)
-                qˡ = q.liquid
-                Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-                θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
+                q = MoistureMassFractions(MoistureMixingRatio(rᵛ, rˡ))
+                𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, p, κ̂)
+                θˡⁱ_new = with_temperature(𝒰₀, T, constants).potential_temperature
 
                 θˡⁱ[i, j, k]  = θˡⁱ_new
                 ρᵈ = coupling_density[i, j, k]
@@ -787,13 +775,8 @@ end
 
             # Compute temperature from θˡⁱ
             rˡ = rᶜˡ + rʳ
-            r = MoistureMixingRatio(rᵛ, rˡ)
-            cᵖᵐ = mixture_heat_capacity(r, constants)
-            Rᵐ  = mixture_gas_constant(r, constants)
-            q = MoistureMassFractions(r)
-            qˡ = q.liquid
-            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-            Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
+            q = MoistureMassFractions(MoistureMixingRatio(rᵛ, rˡ))
+            Tᵏ = temperature(LiquidIcePotentialTemperatureState(θˡⁱᵏ, q, pˢᵗ, p, κ̂), constants)
 
             # Rain sedimentation flux at top boundary
             𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
@@ -815,13 +798,9 @@ end
             T = Tᵏ + ΔT_phase
 
             rˡ = rᶜˡ + rʳ
-            r = MoistureMixingRatio(rᵛ, rˡ)
-            cᵖᵐ = mixture_heat_capacity(r, constants)
-            Rᵐ  = mixture_gas_constant(r, constants)
-            q = MoistureMassFractions(r)
-            qˡ = q.liquid
-            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-            θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
+            q = MoistureMassFractions(MoistureMixingRatio(rᵛ, rˡ))
+            𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, p, κ̂)
+            θˡⁱ_new = with_temperature(𝒰₀, T, constants).potential_temperature
 
             θˡⁱ[i, j, k]  = θˡⁱ_new
             ρᵈ = coupling_density[i, j, k]
@@ -881,7 +860,7 @@ end
 #####
 #
 # DCMIP2016 has specific auxiliary fields (no qˡ total liquid field).
-# Rain sedimentation is handled by the internal kernel, not microphysical_velocities.
+# Rain sedimentation is handled by the internal kernel, not sedimentation_velocity.
 
 @inline function AtmosphereModels.update_microphysical_auxiliaries!(μ, i, j, k, grid, ::DCMIP2016KM, ℳ::AtmosphereModels.WarmRainState, ρ, 𝒰, constants)
     # State fields
@@ -892,7 +871,7 @@ end
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
 
     # Note: DCMIP2016 does NOT have a qˡ (total liquid) field
-    # Rain sedimentation is handled internally, not via microphysical_velocities
+    # Rain sedimentation is handled internally, not via sedimentation_velocity
 
     return nothing
 end
@@ -927,20 +906,22 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     state = model.dynamics.state
     constants = model.thermodynamic_constants
 
-    # Extract parcel state
-    ρ = state.ρ
+    # Extract parcel state. The stored prognostics are weighted by the environmental
+    # density `ρᵉ`; the microphysical rates use the parcel's own density `ρ`.
+    ρᵉ = state.ρ
     𝒰 = state.𝒰
     μ = state.μ
+    ρ = density(𝒰, constants)
 
     # Get pressure at parcel height (interpolate from environmental profile)
     p_parcel = interpolate(state.z, model.dynamics.pressure)
 
     # Convert mass fractions → mixing ratios (shared helper).
     # Parcel model stores total moisture in qᵗ; compute vapor by subtracting condensate.
-    qᶜˡ_s = max(0, μ.ρqᶜˡ / ρ)
-    qʳ_s = max(0, μ.ρqʳ / ρ)
+    qᶜˡ_s = max(0, μ.ρqᶜˡ / ρᵉ)
+    qʳ_s = max(0, μ.ρqʳ / ρᵉ)
     qᵛ_s = max(0, state.qᵗ - qᶜˡ_s - qʳ_s)
-    rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ_s, μ.ρqᶜˡ, μ.ρqʳ, ρ)
+    rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ_s, μ.ρqᶜˡ, μ.ρqʳ, ρᵉ)
 
     # Temperature from thermodynamic state
     T = temperature(𝒰, constants)
@@ -958,20 +939,16 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     _, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
     # Update parcel state (parcel model stores total moisture in qᵗ)
-    state.μ = (; ρqᶜˡ = ρ * qᶜˡ, ρqʳ = ρ * qʳ)
+    state.μ = (; ρqᶜˡ = ρᵉ * qᶜˡ, ρqʳ = ρᵉ * qʳ)
     state.qᵗ = qᵗ
-    state.ρqᵗ = ρ * qᵗ
+    state.ρqᵗ = ρᵉ * qᵗ
 
     # Update thermodynamic state with new moisture fractions.
-    # Parcel models conserve specific static energy; latent heating is implicit.
+    # The parcel's thermodynamic variable is conserved; latent heating is implicit.
     rˡ = rᶜˡ + rʳ
     r = MoistureMixingRatio(rᵛ, rˡ)
     q = MoistureMassFractions(r)
     state.𝒰 = with_moisture(𝒰, q)
-
-    # Keep static energy consistent with the thermodynamic state.
-    state.ℰ = state.𝒰.static_energy
-    state.ρℰ = ρ * state.ℰ
 
     return nothing
 end

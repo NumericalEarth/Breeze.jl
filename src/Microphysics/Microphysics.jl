@@ -22,6 +22,8 @@ export
     saturation_adjustment_coefficient,
     RelativeHumidity,
     RelativeHumidityField,
+    Supersaturation,
+    SupersaturationField,
     number_concentration,
     number_concentration_field
 
@@ -44,6 +46,8 @@ include("PredictedParticleProperties/PredictedParticleProperties.jl")
 using .PredictedParticleProperties
 
 # Re-export key P3 types
-export PredictedParticlePropertiesMicrophysics, P3Microphysics
+export PredictedParticlePropertiesMicrophysics, P3Microphysics,
+       DiagnosticVaporExcess, PrognosticVaporExcess,
+       PrognosticLiquidFraction, NoLiquidFraction
 
 end # module Microphysics

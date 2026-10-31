@@ -267,7 +267,6 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     moisture_given = !isempty(direct_moisture_input_names)
     specific_moisture_given = any(name -> name ∈ (:qᵗ, :qᵛ, :qᵉ), names)
     total_moisture_given = any(name -> name ∈ (:qᵗ, :ρqᵗ), names)
-    total_moisture_was_set = total_moisture_given
 
     settable_specific_names = settable_specific_microphysical_names(model.microphysics)
     specific_microphysical_names = Tuple(name for name in names if name ∈ settable_specific_names)
@@ -301,13 +300,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             c = getproperty(model.tracers, name)
             set!(c, value)
 
-        elseif name == :ρqᵗ
-            set!(model.moisture_density, value)
-            ρ = dynamics_density(model.dynamics)
-            qᵛᵉ = specific_prognostic_moisture(model)
-            set!(qᵛᵉ, model.moisture_density / ρ)
-
-        elseif name ∈ (:ρqᵛ, :ρqᵉ)
+        elseif name ∈ (:ρqᵗ, :ρqᵛ, :ρqᵉ)
             set!(model.moisture_density, value)
             ρ = dynamics_density(model.dynamics)
             qᵛᵉ = specific_prognostic_moisture(model)
@@ -325,13 +318,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             set!(ρμ, ρ * ρμ)
 
-        elseif name == :qᵗ
-            qᵛᵉ = specific_prognostic_moisture(model)
-            set!(qᵛᵉ, value)
-            ρ = dynamics_density(model.dynamics)
-            set!(model.moisture_density, ρ * qᵛᵉ)
-
-        elseif name ∈ (:qᵛ, :qᵉ)
+        elseif name ∈ (:qᵗ, :qᵛ, :qᵉ)
             qᵛᵉ = specific_prognostic_moisture(model)
             set!(qᵛᵉ, value)
             ρ = dynamics_density(model.dynamics)
@@ -409,25 +396,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
                          moisture_given, specific_moisture_given, total_moisture_given,
                          specific_microphysical_names)
 
-    if total_moisture_was_set
-        # The moisture and microphysical prognostics are total-air mass fractions.
-        # For compressible dynamics this differs from the dry coupling density ρᵈ.
-        total_density_field = total_density(model.dynamics)
-        total_moisture = model.moisture_density / total_density_field
-
-        if !isnothing(model.microphysics) &&
-           hasmethod(specific_prognostic_moisture_from_total,
-                     Tuple{typeof(model.microphysics), typeof(total_moisture),
-                           typeof(model.microphysical_fields), typeof(total_density_field)})
-            specific_moisture_field = specific_prognostic_moisture(model)
-            set!(specific_moisture_field,
-                 specific_prognostic_moisture_from_total(model.microphysics,
-                                                         total_moisture,
-                                                         model.microphysical_fields,
-                                                         total_density_field))
-            set!(model.moisture_density, total_density_field * specific_moisture_field)
-        end
-    end
+    total_moisture_given && convert_total_moisture!(model)
 
     # Phase 2: thermodynamic variable, ℋ, and kinematic fields. Relative humidity needs a
     # preliminary thermodynamic state to diagnose saturation, then a second density-reconciliation
@@ -467,7 +436,9 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     # Recompute the hydrostatic reference state from the just-set state, before the
     # mass-conservation correction so the pressure projection uses the new reference.
     # `reset_reference_state!` is itself a no-op when the dynamics carries no reference state.
-    compute_reference_state && reset_reference_state!(model)
+    # The inference barrier on the callee keeps the reductions behind this opt-in branch from
+    # being compiled on every `set!` when `compute_reference_state = false` (the default).
+    compute_reference_state && Base.inferencebarrier(reset_reference_state!)(model)
 
     # Set the density into discrete hydrostatic balance with the just-set thermodynamic state,
     # before the mass-conservation correction.
@@ -480,8 +451,12 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     initialize_closure_fields!(model.closure_fields, model.closure, model)
 
     # Optional adiabatic (FV3 na_init) spin-up of the nonhydrostatic state, in place.
+    # The balance builds and steps a whole adiabatic twin model, so the inference barrier on the
+    # callee keeps that twin from being compiled on every `set!` when `balancer = false` (the
+    # default). The barrier must be on the function, not on `balancer`: with only a few methods,
+    # inference union-splits an `::Any` argument and would still compile the twin.
     if balancer !== false
-        balance_adiabatically!(model, balancer)
+        Base.inferencebarrier(balance_adiabatically!)(model, balancer)
         enforce_mass_conservation && enforce_mass_conservation!(model)
     end
 

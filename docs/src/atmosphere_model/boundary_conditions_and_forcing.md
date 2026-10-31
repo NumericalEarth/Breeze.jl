@@ -47,7 +47,7 @@ microphysics scheme. Changing `cloud_formation` would then silently change which
 supposed to use — a detail of how condensation is parameterized, leaking into the specification
 of an evaporative flux.
 
-## Interface keys: `ρE` and `ρqᵗ`
+## [Interface keys: `ρE` and `ρqᵗ`](@id interface-keys)
 
 To avoid that, an energy or water input is supplied under a key that names the *physical
 input* rather than the variable that carries it:
@@ -77,10 +77,14 @@ nothing # hide
 
 Breeze converts the input as the receiving variable requires. Static energy is itself an energy
 per unit mass, so an energy flux reaches ``ρs`` unchanged; for ``ρθ`` it is divided by the local
-mixture heat capacity ``cᵖᵐ`` (and additionally by the Exner function ``Π`` for an interior
-forcing, which is applied to a potential temperature rather than a temperature). Water needs no
-conversion under either scheme: water added to the prognostic moisture is water added to
-``qᵗ``.
+vapor-equivalent heat capacity ``\hat{c}ᵖ`` and Exner function ``\hat{Π}``, because
+``\hat{c}ᵖ \hat{Π} θˡⁱ`` is the enthalpy ``H`` (see
+[Liquid-ice potential temperature](@ref liquid-ice-potential-temperature)), so that heating at
+fixed composition changes ``θˡⁱ`` by ``1 / (\hat{c}ᵖ \hat{Π})`` per joule. A flux and a forcing take
+the same conversion: at fixed moisture ``cᵖᵐ δT = \hat{c}ᵖ \hat{Π} δθ``, so with
+``𝒬 = ρ cᵖᵐ \overline{w'T'}`` the flux that reaches ``ρθ`` is ``𝒬 / (\hat{c}ᵖ \hat{Π})``.
+Water needs no conversion under either scheme: water
+added to the prognostic moisture is water added to ``qᵗ``.
 
 The interface key is *not* a field, and does not appear in the model:
 

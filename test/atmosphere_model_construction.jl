@@ -49,6 +49,11 @@ end
         shown_forced_model = sprint(show, forced_model)
 
         @test occursin("forcing: ρu=>SpecificForcing, ρv=>SpecificForcing", shown_forced_model)
+
+        @testset "kernel functions are inferred" begin
+            test_kernel_functions_inferred(model)
+            test_kernel_functions_inferred(forced_model)
+        end
     end
 
     @testset "Basic tests for set!" begin
@@ -128,6 +133,8 @@ end
 
     @test isfinite(qᵛ⁺k)
     @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
+
+    test_kernel_functions_inferred(model)
 end
 
 @testset "AtmosphereModel with TetensFormula [$(FT)]" for FT in test_float_types()

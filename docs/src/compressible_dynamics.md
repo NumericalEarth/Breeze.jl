@@ -15,7 +15,7 @@ thermodynamic variable ``χ`` (see [Governing equations](@ref Dycore-section)), 
 \begin{aligned}
 &\text{Mass:} && ∂_t ρ + ∇·(ρ \boldsymbol{u}) = 0 ,\\
 &\text{Momentum:} && ∂_t(ρ \boldsymbol{u}) + ∇·(ρ \boldsymbol{u} \boldsymbol{u}) + ∇ p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + ∇·\boldsymbol{\mathcal{T}} ,\\
-&\text{Thermodynamic:} && ∂_t χ + ∇·(χ \boldsymbol{u}) = Π \, ∇·\boldsymbol{u} + S_χ ,\\
+&\text{Thermodynamic:} && ∂_t ρᵡ + ∇·(ρᵡ \boldsymbol{u}) = ρᵈ \, \mathcal{E}_χ \frac{\mathrm{D} \ln p}{\mathrm{D} t} + S_χ ,\\
 &\text{Moisture:} && ∂_t(ρ q^t) + ∇·(ρ q^t \boldsymbol{u}) = S_q .
 \end{aligned}
 ```
@@ -26,9 +26,14 @@ Pressure is closed by the moist ideal gas law
 p = ρ R^m T ,
 ```
 
-where ``R^m`` is the mixture gas constant. For the potential-temperature thermodynamics the
-prognostic is ``χ = ρ θ`` and ``Π = 0``; for static-energy thermodynamics ``χ = ρ s`` and ``Π``
-encodes pressure work.
+where ``R^m`` is the mixture gas constant. The thermodynamic prognostic ``ρᵡ = ρᵈ χ`` is weighted
+by the dry-air density, and ``\mathcal{E}_χ = (∂χ / ∂\ln p)_{η, q}`` is the expansion coefficient
+of the state function ``χ`` (see [Governing equations](@ref Dycore-section)). For the liquid-ice
+potential temperature, ``χ = θˡⁱ``, the expansion source is proportional to the condensate and
+the pressure tendency is approximated hydrostatically, ``\mathrm{D} \ln p / \mathrm{D} t ≈ - g ρ w / p``;
+the exact tendency, and why its adiabatic part alone would not be a better estimate, are discussed
+in [The expansion source on the two dynamical cores](@ref "The expansion source on the two dynamical cores").
+For static energy, ``χ = s``, the source encodes the pressure work.
 
 ## Time integration options
 
@@ -343,24 +348,11 @@ Within each substep of size ``Δτ``, the perturbation update has two phases.
 \end{aligned}
 ```
 
-For the first substep of a multi-substep RK stage, Breeze follows the MPAS
-forward-backward sequence and omits only the *acoustic perturbation* pressure
-gradient:
-
-```math
-(ρu)'_{τ+Δτ} = (ρu)'_τ + Δτ \left[ G^s_{ρu} - ∂_x p^L \right], \qquad
-(ρv)'_{τ+Δτ} = (ρv)'_τ + Δτ \left[ G^s_{ρv} - ∂_y p^L \right].
-```
-
-The perturbation pressure-gradient term ``∇(C^L (ρθ)')`` is applied on subsequent
-substeps, after the mass and thermodynamic perturbations have been advanced
-once. If a stage has only one acoustic substep, the perturbation pressure
-gradient is applied immediately so the stage still includes the fast force.
-The frozen ``∇p^L`` term is applied on every substep because the slow tendency
-mode excludes pressure gradients. This matches MPAS's split: the first small
-step skips the perturbation pressure gradient inside `atm_advance_acoustic_step`,
-while the large-step pressure-gradient tendency is already present in
-`tend_u_euler`.
+Both the frozen ``∇p^L`` term and the perturbation pressure gradient ``∇(C^L (ρθ)')``
+are applied on every substep, including the first. The frozen term appears here because
+the slow tendency mode excludes pressure gradients. The perturbation pressure gradient is
+needed on the first substep because each stage's perturbations are initialized with the
+rewind term ``U^n - U^L``, which is nonzero in stages 2 and 3.
 
 **Vertical implicit solve — column tridiag in the acoustic vertical momentum.** The
 vertical-momentum, density, and ``ρθ`` perturbations are coupled through the vertical pressure gradient, the vertical

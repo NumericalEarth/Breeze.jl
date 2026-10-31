@@ -10,8 +10,11 @@ using ..AtmosphereModels:
     AtmosphereModels,
     dynamics_density,
     kernel_time_step,
+    liquid_ice_exner_exponent,
     total_density,
     standard_pressure
+
+using Breeze.Solvers: NewtonSolver
 
 using Oceananigans: Oceananigans, CenterField, Field, Integral
 using Oceananigans.Architectures: architecture
@@ -56,13 +59,16 @@ end
 
 const IP = InstantaneousPrecipitation
 
+@inline Diagnostics.microphysics_phase_equilibrium(μ::IP) = microphysics_phase_equilibrium(μ.saturation_adjustment)
+
 # Prognostic vapor density; no retained condensate fields.
 AtmosphereModels.moisture_prognostic_name(::IP) = :ρqᵛ
 AtmosphereModels.prognostic_field_names(::IP) = tuple()
 
 AtmosphereModels.liquid_mass_fraction(::IP, model) = nothing
 AtmosphereModels.ice_mass_fraction(::IP, model) = nothing
-@inline AtmosphereModels.microphysical_velocities(::IP, μ, name) = nothing
+# Condensate is removed instantly rather than transported, so nothing sediments and the
+# generic `microphysical_velocities`/`sedimentation_velocity` fallbacks stand.
 @inline AtmosphereModels.microphysical_tendency(::IP, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 # Diagnostic vapor + a precipitation-rate field (kg m⁻³ s⁻¹ of condensed/removed water).
@@ -91,12 +97,12 @@ AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:ice}) = nothing
 """
 $(TYPEDSIGNATURES)
 
-Return the surface precipitation flux for the instantaneous-precipitation scheme.
+Return the bottom precipitation flux for the instantaneous-precipitation scheme.
 
-The scheme removes condensed water immediately, so the surface flux is the column integral
+The scheme removes condensed water immediately, so the flux is the column integral
 of the volumetric precipitation rate. Units are kg/m²/s.
 """
-function AtmosphereModels.surface_precipitation_flux(model, ::IP)
+function AtmosphereModels.bottom_precipitation_flux(model, ::IP)
     P = model.microphysical_fields.precipitation_rate
     return Field(Integral(P, dims=3))
 end
@@ -130,8 +136,10 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
 
     kernel_Δt = kernel_time_step(arch, grid, Δt)
 
+    κ̂ = liquid_ice_exner_exponent(model.formulation)
+
     launch!(arch, grid, :xyz, _instantaneous_precipitation_update!,
-            model.dynamics, saturation_adjustment, constants, pˢᵗ, kernel_Δt, ρθˡⁱ, ρqᵛ, μ)
+            model.dynamics, saturation_adjustment, constants, pˢᵗ, κ̂, kernel_Δt, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior only; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
@@ -141,7 +149,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
 end
 
 @kernel function _instantaneous_precipitation_update!(dynamics, saturation_adjustment,
-                                                   constants, pˢᵗ, Δt, ρθˡⁱ, ρqᵛ, μ)
+                                                   constants, pˢᵗ, κ̂, Δt, ρθˡⁱ, ρqᵛ, μ)
     i, j, k = @index(Global, NTuple)
 
     ρ_field  = total_density(dynamics)     # total ρ: mass fractions, saturation, density-based inversion
@@ -158,7 +166,7 @@ end
         # the shared #765 secant, which saturates against the density-based qsat at the cell's own
         # ρ (true pressure p = ρRᵐT). Subsaturated cells short-circuit untouched, matching the
         # original large-scale-condensation behavior. See adjust_thermodynamic_state(::LiquidIceDensityState, ::SA).
-        𝒰₀  = LiquidIceDensityState(θ₀, MoistureMassFractions(qᵗ), pˢᵗ, ρ)
+        𝒰₀  = LiquidIceDensityState(θ₀, MoistureMassFractions(qᵗ), pˢᵗ, ρ, NewtonSolver(typeof(ρ)), κ̂)
         𝒰₁  = adjust_thermodynamic_state(𝒰₀, saturation_adjustment, constants)
         q   = 𝒰₁.moisture_mass_fractions
         T   = temperature(𝒰₁, constants)

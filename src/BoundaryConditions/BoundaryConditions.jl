@@ -30,15 +30,22 @@ using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_de
                           standard_pressure, default_drag_surface_temperature,
                           moisture_specific_name, thermodynamic_density_name,
                           total_energy_density_name, moisture_prognostic_name,
-                          total_moisture_density_name
+                          total_moisture_density_name, liquid_ice_exner_exponent
 using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
                                       virtual_potential_temperature
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
-                        mixture_heat_capacity, MoistureMassFractions,
-                        potential_temperature_from_temperature, surface_pressure_from_cell_center
+                        vapor_equivalent_heat_capacity, MoistureMassFractions,
+                        VaporEquivalentExponent,
+                        LiquidIcePotentialTemperatureState, StaticEnergyState,
+                        potential_temperature_from_temperature, surface_pressure_from_cell_center,
+                        with_temperature
+
+# Extended below with a grid-point method: `exner_function(i, j, k, grid, ef, q, dynamics_fields)`.
+import ..Thermodynamics: exner_function
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: Architectures
+using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        BoundaryCondition,
                                        DefaultBoundaryCondition,
@@ -240,8 +247,9 @@ function convert_energy_bcs(bcs, formulation)
                                       ρE_bcs -> energy_bcs_to_thermodynamic_bcs(ρE_bcs, ρᵡ))
 
     # `BulkSensibleHeatFlux` forms its surface difference in the prognostic variable itself,
-    # whether it arrived under `ρE` or under that variable's own key.
-    ρᵡ_bcs = set_sensible_heat_formulation_bcs(ρᵡ_bcs, sensible_heat_flux_formulation(ρᵡ))
+    # whether it arrived under `ρE` or under that variable's own key; an energy flux on ρθ is
+    # converted with the Exner exponent of the formulation.
+    ρᵡ_bcs = set_sensible_heat_formulation_bcs(ρᵡ_bcs, sensible_heat_flux_formulation(ρᵡ, formulation))
 
     return merge(bcs, NamedTuple{(ρᵡ_name,)}((ρᵡ_bcs,)))
 end
@@ -261,12 +269,13 @@ function convert_moisture_bcs(bcs, microphysics)
     return merge(bcs, NamedTuple{(ρq_name,)}((ρq_bcs,)))
 end
 
-# ρθ: an energy flux 𝒬 enters as the potential temperature flux Jᶿ = 𝒬 / cᵖᵐ, applied by
-# `EnergyFluxBoundaryCondition`.
+# ρθ: an energy flux 𝒬ᵀ enters as the potential temperature flux Jᶿ = (ρᵈ / ρ) 𝒬ᵀ / (ĉᵖ Π), applied by
+# `EnergyFluxBoundaryCondition` (the Exner exponent is set by `set_sensible_heat_formulation_bcs`).
 energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρθ}) = energy_to_theta_bcs(ρE_bcs)
 
-# ρs: static energy is an energy per unit mass, so an energy flux needs no conversion.
-energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρs}) = ρE_bcs
+# ρs = ρᵈ s: static energy is an energy per unit mass, so an energy flux 𝒬ᵀ enters as
+# Jˢ = (ρᵈ / ρ) 𝒬ᵀ, applied by `StaticEnergyFluxBoundaryCondition` (the identity on anelastic).
+energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{:ρs}) = energy_to_static_energy_bcs(ρE_bcs)
 
 # A new thermodynamic formulation must say how an energy flux enters its prognostic variable.
 energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{ρᵡ_name}) where ρᵡ_name =
@@ -274,8 +283,8 @@ energy_bcs_to_thermodynamic_bcs(ρE_bcs, ::Val{ρᵡ_name}) where ρᵡ_name =
                         "thermodynamic variable $ρᵡ_name. Set boundary conditions on $ρᵡ_name directly."))
 
 # The surface difference Δϕ that a bulk sensible-heat flux forms, per prognostic variable.
-sensible_heat_flux_formulation(::Val{:ρθ}) = PotentialTemperatureFlux()
-sensible_heat_flux_formulation(::Val{:ρs}) = StaticEnergyFlux()
+sensible_heat_flux_formulation(::Val{:ρθ}, formulation) = PotentialTemperatureFlux(liquid_ice_exner_exponent(formulation))
+sensible_heat_flux_formulation(::Val{:ρs}, formulation) = StaticEnergyFlux()
 
 # Materialize FieldBoundaryConditions by walking through each boundary
 function materialize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, dynam, micro, consts)
@@ -421,7 +430,7 @@ function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBound
     end
 
     new_bf = BulkSensibleHeatFluxFunction(side, coef, bf.gustiness, Tˢ, pˢᵗ, constants,
-                                          bf.formulation, bf.filtered_velocities, fs)
+                                          bf.formulation, bf.filtered_velocities, fs, microphysics)
     return BoundaryCondition(Flux(), new_bf)
 end
 
@@ -487,9 +496,9 @@ materialize_surface_field(f::Function, grid, side) = f
 BulkDragFunction(d, side, coef::NothingPolynomialCoefficient, g, t, fv, c) =
     BulkDragFunction(d, side, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t, fv, c)
 
-BulkSensibleHeatFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, s, c, f, fv, fs) =
+BulkSensibleHeatFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, s, c, f, fv, fs, microphysics) =
     BulkSensibleHeatFluxFunction(side, fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)),
-                                 g, t, s, c, f, fv, fs)
+                                 g, t, s, c, f, fv, fs, microphysics)
 
 BulkVaporFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, h, c, s, β, fv, fs) =
     BulkVaporFluxFunction(side, fill_polynomial(coef, default_neutral_latent_heat_polynomial, Val(:scalar)), g, t, h, c, s, β, fv, fs)

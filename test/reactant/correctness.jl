@@ -1,10 +1,11 @@
 include(joinpath(dirname(@__DIR__), "setup.jl"))
 
 #####
-##### Reactant correctness — compressible AtmosphereModel parity over one
-##### `time_step!`. Builds the same model on a vanilla architecture and on
-##### `ReactantState`, sets identical initial conditions, takes one full
-##### SSP-RK3 step on each, and checks per-field parity.
+##### Reactant correctness — compressible AtmosphereModel parity over a
+##### compiled `run!`. Builds the same model on a vanilla architecture and on
+##### `ReactantState`, sets identical initial conditions, runs a `Simulation`
+##### of a few SSP-RK3 steps eagerly on one and as one compiled program on
+##### the other (Oceananigans' `ReactantSimulation`), and checks per-field parity.
 #####
 ##### Tolerances differ by topology: XLA op-fusion in WENO-5 boundary
 ##### stencils raises the FP noise floor on bounded directions. The
@@ -17,7 +18,6 @@ using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Oceananigans.Grids: Periodic, Bounded
-using Oceananigans.TimeSteppers: first_time_step!
 using Reactant
 using Printf: @printf
 using Test
@@ -86,8 +86,9 @@ function build_model_pair(topology)
     return vmodel, rmodel
 end
 
-@testset "Reactant correctness — first_time_step! parity" begin
+@testset "Reactant correctness — compiled run! parity" begin
     Δt = 0.02
+    stop_iteration = 3
     atol = sqrt(eps(Float64))
 
     cases = [
@@ -98,12 +99,16 @@ end
     @testset "topology=$label" for (label, topology, rtol) in cases
         vmodel, rmodel = build_model_pair(topology)
 
-        @test report_state("topology=$label — before first_time_step!", vmodel, rmodel; rtol, atol)
+        @test report_state("topology=$label — before run!", vmodel, rmodel; rtol, atol)
 
-        time_step!(vmodel, Δt)
-        r_step! = Reactant.@compile raise=true sync=true first_time_step!(rmodel, Δt)
-        r_step!(rmodel, Δt)
+        vsimulation = Simulation(vmodel; Δt, stop_iteration, verbose=false)
+        run!(vsimulation)
 
-        @test report_state("topology=$label — after  first_time_step!", vmodel, rmodel; rtol, atol)
+        rsimulation = Simulation(rmodel; Δt, stop_iteration, verbose=false)
+        r_run! = Reactant.@compile raise=true sync=true run!(rsimulation)
+        r_run!(rsimulation)
+
+        @test iteration(rsimulation) == stop_iteration
+        @test report_state("topology=$label — after  run!", vmodel, rmodel; rtol, atol)
     end
 end

@@ -20,6 +20,9 @@ struct BenchmarkResult
     steps_per_second::Float64
     grid_points_per_second::Float64
     compile_time_seconds::Float64
+    compile_tracing_time_seconds::Float64
+    compile_mlir_time_seconds::Float64
+    compile_xla_time_seconds::Float64
     gpu_memory_used::Int64
     metadata::BenchmarkMetadata
 end
@@ -47,6 +50,11 @@ function Base.show(io::IO, ::MIME"text/plain", r::BenchmarkResult)
     println(io, "├── steps_per_second: ", @sprintf("%.6f/s", r.steps_per_second))
     println(io, "├── grid_points_per_second: ", @sprintf("%.2e", r.grid_points_per_second))
     println(io, "├── compile_time: ", @sprintf("%.3f s", r.compile_time_seconds))
+    if r.compile_tracing_time_seconds > 0
+        println(io, "│   ├── tracing: ", @sprintf("%.3f s", r.compile_tracing_time_seconds))
+        println(io, "│   ├── mlir: ", @sprintf("%.3f s", r.compile_mlir_time_seconds))
+        println(io, "│   └── xla: ", @sprintf("%.3f s", r.compile_xla_time_seconds))
+    end
     println(io, "├── gpu_memory_used: ", Base.format_bytes(r.gpu_memory_used))
     print(io,   "└── metadata: ", r.metadata.architecture, " @ ", r.metadata.timestamp)
 end
@@ -64,6 +72,11 @@ function log_benchmark_result(r::BenchmarkResult)
     @info "    Time per step: $(@sprintf("%.6f", r.time_per_step_seconds)) s"
     @info "    Grid points/s: $(@sprintf("%.2e", r.grid_points_per_second))"
     r.compile_time_seconds > 0 && @info "    Compile time: $(@sprintf("%.3f", r.compile_time_seconds)) s"
+    if r.compile_tracing_time_seconds > 0
+        @info "      Tracing: $(@sprintf("%.3f", r.compile_tracing_time_seconds)) s"
+        @info "      MLIR: $(@sprintf("%.3f", r.compile_mlir_time_seconds)) s"
+        @info "      XLA: $(@sprintf("%.3f", r.compile_xla_time_seconds)) s"
+    end
     r.gpu_memory_used > 0 && @info "    GPU memory usage: $(Base.format_bytes(r.gpu_memory_used))"
     return nothing
 end

@@ -13,6 +13,7 @@ using Breeze.Thermodynamics:
     hydrostatic_density,
     hydrostatic_pressure,
     moist_hydrostatic_pressure,
+    constant_moist_hydrostatic_pressure,
     surface_pressure_value,
     surface_temperature_value,
     vapor_gas_constant,
@@ -357,6 +358,30 @@ end
 ##### Mass fraction accessors and set_to_mean!
 #####
 
+# The datum reduction must use the Exner exponent of the column it anchors. For constant θ and qᵛ
+# the profile-integrating and closed-form reductions agree for either exponent, and the two
+# exponents give different anchors once there is vapor.
+@testset "Surface pressure reduction with Exner exponent [$(FT)]" for FT in test_float_types()
+    constants = ThermodynamicConstants(FT)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    g = constants.gravitational_acceleration
+    z, p₀, θ, qᵛ, pˢᵗ = FT(2000), FT(101325), FT(300), FT(0.015), FT(1e5)
+
+    anchors = map((VaporEquivalentExponent(), DryExponent())) do κ̂
+        integrated = moist_hydrostatic_pressure(z, p₀, θ, qᵛ, pˢᵗ, constants, κ̂)
+        closed_form = constant_moist_hydrostatic_pressure(z, p₀, θ, qᵛ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
+        @test integrated ≈ closed_form rtol=10sqrt(eps(FT))
+        closed_form
+    end
+
+    @test !isapprox(anchors[1], anchors[2]; rtol=1e-5)
+    # The exponent defaults to the vapor-equivalent one
+    @test moist_hydrostatic_pressure(z, p₀, θ, qᵛ, pˢᵗ, constants) ≈ first(anchors) rtol=10sqrt(eps(FT))
+end
+
 @testset "Mass fraction accessors and set_to_mean! [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 100), y=(0, 100), z=(0, 1000),
@@ -476,7 +501,7 @@ end
         q_prof(z) = FT(0.015) * exp(-z / FT(2500))
 
         # compute_reference_state! takes f(z); set!(model, ...) takes f(x, y, z)
-        compute_reference_state!(reference_state, T_prof, q_prof, constants)
+        compute_reference_state!(model, T_prof, q_prof)
         set!(model, T=(x, y, z) -> T_prof(z), qᵗ=(x, y, z) -> q_prof(z), u=FT(5), w=FT(0))
         time_step!(model, 1)  # populates diagnostic fields
 
@@ -526,6 +551,19 @@ end
         @test all(Array(interior(model.formulation.potential_temperature)) .≈ θ_new)
         @test all(Array(interior(specific_humidity(model))) .≈ q_new)
         @test all(Array(interior(model.velocities.u)) .≈ u_new)
+    end
+
+    # Periodic sides and rigid lids admit no horizontally uniform vertical mass flux.
+    @testset "set_to_mean! keeps the anelastic projection mass-conserving" begin
+        tall_grid = RectilinearGrid(default_arch; size=(4, 4, 16), x=(0, 100), y=(0, 100), z=(0, 15000),
+                                    topology=(Periodic, Periodic, Bounded))
+        model = AtmosphereModel(tall_grid; thermodynamic_constants=constants)
+        set!(model, T=(x, y, z) -> max(210, 300 - 6.5e-3 * z))
+        set_to_mean!(model.dynamics.reference_state, model; rescale_densities=true)
+        time_step!(model, 1)
+
+        ρw̄ = Field(Average(model.momentum.ρw, dims=(1, 2)))
+        @test maximum(abs, interior(ρw̄)) < sqrt(eps(FT))
     end
 
     #####
@@ -742,13 +780,12 @@ end
                                         reference_potential_temperature=θ, base_pressure=p₀)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
+        # The compressible core rejects static energy at construction
         static_energy_dynamics = CompressibleDynamics(ExplicitTimeStepping(); base_pressure=p₀)
-        static_energy_model = AtmosphereModel(grid;
-                                              thermodynamic_constants = constants,
-                                              dynamics = static_energy_dynamics,
-                                              formulation = :StaticEnergy)
-        @test_throws ArgumentError Breeze.AtmosphereModels.set_hydrostatically_balanced_density!(
-            static_energy_model, HydrostaticallyBalancedDensity(surface_pressure=p₀))
+        @test_throws ArgumentError AtmosphereModel(grid;
+                                                   thermodynamic_constants = constants,
+                                                   dynamics = static_energy_dynamics,
+                                                   formulation = :StaticEnergy)
 
         set!(model; θˡⁱ=θ, qᵗ=0, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀))
 
@@ -759,6 +796,44 @@ end
              enforce_mass_conservation=false)
 
         @test all(q -> q ≈ qᵗ, Array(interior(specific_humidity(model))))
+
+        # The column solve must use the formulation's Exner exponent, or the moist column is
+        # out of discrete balance under the EOS the model inverts θ with.
+        balance_grid = RectilinearGrid(default_arch; size=(2, 2, 40), x=(0, 100), y=(0, 100),
+                                       z=(0, 10000), topology=(Periodic, Periodic, Bounded))
+        g  = constants.gravitational_acceleration
+        Δz = 10000 / 40
+
+        for κ̂ in (VaporEquivalentExponent(), DryExponent())
+            balance_model = AtmosphereModel(balance_grid;
+                                            thermodynamic_constants = constants,
+                                            dynamics = CompressibleDynamics(ExplicitTimeStepping(); base_pressure=p₀),
+                                            formulation = LiquidIcePotentialTemperatureFormulation(exner_exponent=κ̂))
+            set!(balance_model; θˡⁱ=θ, qᵗ, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀),
+                 enforce_mass_conservation=false)
+
+            p = Array(interior(balance_model.dynamics.pressure))
+            ρ = Array(interior(total_density(balance_model.dynamics)))
+            residual = @. (p[:, :, 2:end] - p[:, :, 1:end-1]) / Δz + g * (ρ[:, :, 2:end] + ρ[:, :, 1:end-1]) / 2
+            @test maximum(abs, residual ./ (g .* ρ[:, :, 2:end])) < 1e-10
+        end
+
+        # set_to_mean! must also integrate with the formulation's Exner exponent, so the reference
+        # it recomputes from a balanced, horizontally uniform state reproduces that state.
+        for κ̂ in (VaporEquivalentExponent(), DryExponent())
+            mean_model = AtmosphereModel(balance_grid;
+                                         thermodynamic_constants = constants,
+                                         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                                                         reference_potential_temperature=θ),
+                                         formulation = LiquidIcePotentialTemperatureFormulation(exner_exponent=κ̂))
+            set!(mean_model; θˡⁱ=θ, qᵗ, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀),
+                 enforce_mass_conservation=false)
+
+            reference = Breeze.AtmosphereModels.dynamics_reference_state(mean_model.dynamics)
+            set_to_mean!(reference, mean_model)
+            @test reference.pressure ≈ mean_model.dynamics.pressure rtol=sqrt(eps(FT))
+            @test reference.density  ≈ total_density(mean_model.dynamics) rtol=sqrt(eps(FT))
+        end
 
         if default_arch isa CPU
             allocation_grid = RectilinearGrid(CPU();

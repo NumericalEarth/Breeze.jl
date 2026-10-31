@@ -33,7 +33,7 @@ using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpo
                                               TerrainFollowingGrid, ∂z∂x, ∂z∂y
 using Breeze.Thermodynamics: evaluate_profile, integrate_exner_column!,
                              newton_hydrostatic_pressure, moist_reference_constants,
-                             moist_hydrostatic_pressure
+                             moist_hydrostatic_pressure, VaporEquivalentExponent
 using Breeze.Solvers: FixedIterations
 
 #####
@@ -388,20 +388,15 @@ end
     return slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
 end
 
-# `slope_correction` (0 or 1) gates the horizontal slope correction slopeₓ·∂ₓ(Cᴸ(ρθ)′) +
-# slopeᵧ·∂ᵧ(Cᴸ(ρθ)′) in lockstep with the MPAS first-small-step gate applied to ρu's
-# perturbation PGF in `_explicit_horizontal_step!`. Because ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv,
-# the slope-projected correction must be skipped on exactly the substeps where ρu skips
-# its perturbation horizontal PGF; otherwise the two are out of phase on substep 1 of a
-# multi-substep stage. The vertical ∂z(Cᴸ(ρθ)′) part is always applied — the
-# vertical acoustic mode is solved implicitly every substep.
+# The vertical gradient minus the horizontal slope correction slopeₓ·∂ₓ(Cᴸ(ρθ)′) + slopeᵧ·∂ᵧ(Cᴸ(ρθ)′),
+# since ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv.
 @inline function ∇ᶻp′(i, j, k, grid,
                       dynamics::TerrainCompressibleDynamics,
-                      ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
+                      ρθ′, Πᴸ, γRᵐᴸ)
     ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
     correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
                                                                             dynamics, ρθ′, Πᴸ, γRᵐᴸ)
-    return ∂z_p′ - slope_correction * correction
+    return ∂z_p′ - correction
 end
 
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
@@ -925,7 +920,8 @@ terrain_surface_field(host_values, grid) =
         ρᵣ[i, j, 1] = ρ¹
     end
 
-    integrate_exner_column!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    κ̂ = VaporEquivalentExponent()
+    integrate_exner_column!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
 end
 
 """
