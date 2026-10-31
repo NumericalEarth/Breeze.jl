@@ -1485,7 +1485,7 @@ end
 ##### `BREEZE_FUSED_CARRIED_COLUMN_SOLVE=false` at load restores the three launches.
 #####
 
-const FUSED_CARRIED_COLUMN_SOLVE = Ref(true)
+const FUSED_CARRIED_COLUMN_SOLVE = Ref(false)
 
 # `BREEZE_FUSED_COLUMN_RECOVERY` (default false): also run the post-solve recovery in the column launch.
 # One thread per column serializes the recovery's Nz independent levels; as its own 3-D launch it is
