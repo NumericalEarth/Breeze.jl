@@ -6,7 +6,7 @@ using Breeze.Thermodynamics: Thermodynamics as TD, TetensFormula
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations as PTF, Dry, LiquidIce,
                                                 IsochoricPressureWork, IsobaricPressureWork
 using Breeze.CompressibleEquations: MomentumForceWeighting
-using Breeze.Microphysics: saturation_adjustment_step
+using Breeze.Microphysics: saturation_adjustment_step, DCMIP2016KesslerMicrophysics
 using Oceananigans
 using Test
 

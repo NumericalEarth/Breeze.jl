@@ -37,8 +37,7 @@ using Breeze.Solvers: materialize_solver
 using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, StaticEnergyState, with_temperature,
     mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, vapor_gas_constant,
     vapor_equivalent_heat_capacity, vapor_equivalent_gas_constant, condensate_latent_energy,
-    exner_exponent, AbstractExnerExponent, VaporEquivalentExponent, DryExponent, absolute_zero_latent_heat,
-    DryDensityState
+    exner_exponent, AbstractExnerExponent, VaporEquivalentExponent, DryExponent, absolute_zero_latent_heat
 
 # The lowercase c is a singleton instance of Center
 const c = Center()
