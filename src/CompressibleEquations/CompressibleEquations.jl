@@ -76,7 +76,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_
                                thermodynamic_density_name, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, PotentialTemperatureFormulation,
                                                 LiquidIcePotentialTemperatureFormulation, DryPotentialTemperatureFormulation,
-                                                Dry, IsochoricPressureWork, IsobaricPressureWork,
+                                                IsochoricPressureWork, IsobaricPressureWork,
                                                 divergence_expansion_coefficient
 using Breeze.MoistEntropyFormulations: MoistEntropyFormulations, MoistEntropyFormulation
 

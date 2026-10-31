@@ -154,7 +154,7 @@ end
     @test DryPotentialTemperatureFormulation().fixed_volume_phase_change isa AM.FixedVolumePhaseChange
     @test contains(sprint(show, DryPotentialTemperatureFormulation(pressure_work=IsobaricPressureWork())), "IsobaricPressureWork")
 
-    grid = RectilinearGrid(default_arch; size=(4, 4), halo=(5, 5), x=(0, 1e3), z=(0, 1e3), topology=(Periodic, Flat, Bounded))
+    grid = RectilinearGrid(default_arch; size=(8, 8), halo=(5, 5), x=(0, 1e3), z=(0, 1e3), topology=(Periodic, Flat, Bounded))
     dynamics() = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300.0)
     @test AtmosphereModel(grid; dynamics=dynamics(), formulation=:DryPotentialTemperature).formulation isa DryPotentialTemperatureFormulation
     @test AtmosphereModel(grid; dynamics=dynamics(), formulation=:DryPotentialTemperature).dynamics.momentum_force_weighting isa MomentumForceWeighting
