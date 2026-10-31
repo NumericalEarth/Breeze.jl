@@ -6,6 +6,7 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
+using Oceananigans.TimeSteppers: update_state!
 using Reactant
 using Reactant: @trace
 using Enzyme
@@ -39,6 +40,9 @@ kinetic_energy(model) = mean(interior(model.velocities.u) .^ 2) +
 
 function loss(model, θ_init, Δt, Ns)
     set!(model; θ=θ_init, u=0, v=0, w=0)
+    # `set!` leaves the tendencies of the previous state in place, and on ReactantState
+    # `time_step!` does not refresh them at iteration 0, so we recompute them here.
+    update_state!(model)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Ns
         time_step!(model, Δt)
     end
@@ -64,13 +68,15 @@ cpu_θ = CenterField(cpu_model.grid)
 function cpu_loss(θ)
     set!(cpu_θ, θ)
     set!(cpu_model; θ=cpu_θ, u=0, v=0, w=0)
+    update_state!(cpu_model)
     for _ in 1:Ns
         time_step!(cpu_model, Δt)
     end
     return kinetic_energy(cpu_model) / 2
 end
 J_cpu = cpu_loss(θ₀)
-stage(@sprintf("CPU J = %.12e", J_cpu))
+stage(@sprintf("CPU J = %.12e (iteration %d)", J_cpu, cpu_model.clock.iteration))
+stage(@sprintf("CPU J, second call = %.12e (iteration %d)", cpu_loss(θ₀), cpu_model.clock.iteration))
 
 model = anelastic_model(ReactantState())
 stage("Reactant model built")
@@ -82,6 +88,11 @@ dmodel = Enzyme.make_zero(model)
 compiled_loss = Reactant.@compile raise=true sync=true loss(model, θ_init, Δt, Ns)
 J_reactant = Float64(compiled_loss(model, θ_init, Δt, Ns))
 stage(@sprintf("Reactant forward J = %.12e (CPU %.12e, rel. diff %.2e)", J_reactant, J_cpu, abs(J_reactant - J_cpu) / J_cpu))
+J_reactant = Float64(compiled_loss(model, θ_init, Δt, Ns))
+stage(@sprintf("Reactant forward J, second call = %.12e (CPU %.12e, rel. diff %.2e)", J_reactant, J_cpu, abs(J_reactant - J_cpu) / J_cpu))
+if get(ENV, "FORWARD_ONLY", "0") == "1"
+    exit()
+end
 
 compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(model, dmodel, θ_init, dθ_init, Δt, Ns)
 stage("gradient compiled")
