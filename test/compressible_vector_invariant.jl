@@ -154,10 +154,10 @@ end
 # `core` is the order of the centered core; the two-point core (2) is exact next to closed walls too
 centered(core = 2) = CompressibleVectorInvariant(core_order = core)
 unsplit(core = 2) = CompressibleVectorInvariant(vertical_formulation = UnsplitVerticalAdvection(), core_order = core)
-weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9), core_order = core)
-full_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9), vorticity_pairing = UpwindVorticityPairing(self_part = false), core_order = core)
-averaged_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 7), vorticity_pairing = AveragedVorticityPairing(), core_order = core)
-corner_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 7), vorticity_pairing = CornerVorticityPairing(), core_order = core)
+weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 5), core_order = core)
+full_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 5), vorticity_pairing = UpwindVorticityPairing(self_part = false), core_order = core)
+averaged_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 5), vorticity_pairing = AveragedVorticityPairing(), core_order = core)
+corner_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 5), vorticity_pairing = CornerVorticityPairing(), core_order = core)
 averaged_centered_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 2), vorticity_pairing = AveragedVorticityPairing(), core_order = core)
 weno_divergence() = CompressibleVectorInvariant(divergence_scheme = WENO(order = 5))
 weno_kinetic_energy() = CompressibleVectorInvariant(kinetic_energy_gradient_scheme = WENO(order = 5))
@@ -165,7 +165,9 @@ weno_vertical() = CompressibleVectorInvariant(vertical_advection_scheme = WENO(o
 gradient_form_kinetic_energy() = CompressibleVectorInvariant(kinetic_energy_gradient_scheme = GradientFormUpwinding(WENO(order = 5)))
 flux_form() = Centered(order = 2)
 
-@testset "CompressibleVectorInvariant [$(FT)]" for FT in test_float_types()
+# One float type and low-order reconstructions: compiling these kernels takes about 10 GB
+# and is what limits this test file on the CI runners
+@testset "CompressibleVectorInvariant [$(FT)]" for FT in (Float64,)
     previous_float_type = Oceananigans.defaults.FloatType
     Oceananigans.defaults.FloatType = FT
     roundoff = 1000 * eps(FT)
