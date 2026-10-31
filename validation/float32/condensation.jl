@@ -98,8 +98,8 @@ dsd_counts(r) = [count(x -> round(Int, x / 1e-6) == b, r) for b in 0:dsd_bins-1]
 
 function cell_supersaturation(model, constants)
     p = model.dynamics.reference_state.frame.pressure
-    T = Array(interior(model.temperature))
-    qᵛ = Array(interior(model.microphysical_fields.qᵛ))
+    T = Array{Float64}(interior(model.temperature))
+    qᵛ = Array{Float64}(interior(model.microphysical_fields.qᵛ))
     return map(T, qᵛ) do T, qᵛ
         q = MoistureMassFractions(qᵛ)
         pᵛ = qᵛ * Thermodynamics.vapor_gas_constant(constants) * p / mixture_gas_constant(q, constants)
@@ -116,11 +116,14 @@ function record!(state, model)
     (; rows, dsd, pdfs, constants, L, M, ρᵃ) = state
     frame = model.dynamics.reference_state.frame
     droplets = model.microphysics.droplets.properties
-    r = Array(droplets.r)
-    x, y, z = Array(droplets.x), Array(droplets.y), Array(droplets.z)
+    # Statistics in Float64: a Float32 mean of 10⁵ values of T ≈ 281 K is in error by ~10⁻⁴ K, comparable to std T′
+    r = Array{Float64}(droplets.r)
+    x, y, z = Array{Float64}(droplets.x), Array{Float64}(droplets.y), Array{Float64}(droplets.z)
+    Tᶜ = Array{Float64}(interior(model.temperature))
+    qᶜ = Array{Float64}(interior(model.microphysical_fields.qᵛ))
 
-    T̄ = mean(model.temperature)
-    q̄ᵛ = mean(model.microphysical_fields.qᵛ)
+    T̄ = mean(Tᶜ)
+    q̄ᵛ = mean(qᶜ)
     p = frame.pressure
     rᵛ = q̄ᵛ / (1 - q̄ᵛ)
     S_parcel = rᵛ / ncar_saturation_mixing_ratio(T̄, p) - 1
@@ -142,14 +145,14 @@ function record!(state, model)
     push!(rows.mean_radius, mean(r))
     push!(rows.std_radius, std(r))
     push!(rows.mean_radius_cubed, mean(r .^ 3))
-    push!(rows.std_temperature, std(Array(interior(model.temperature))))
-    push!(rows.std_vapor, std(Array(interior(model.microphysical_fields.qᵛ))))
-    push!(rows.kinetic_energy, sum(mean(Array(interior(u)) .^ 2) for u in model.velocities) / 2)
+    push!(rows.std_temperature, std(Tᶜ))
+    push!(rows.std_vapor, std(qᶜ))
+    push!(rows.kinetic_energy, sum(mean(Array{Float64}(interior(u)) .^ 2) for u in model.velocities) / 2)
     push!(rows.droplets, length(r))
 
     # Per-step condensation increments of θ and qᵛ, relative to the spacing of the stored values
-    C = Array(interior(model.microphysical_fields.C))
-    Π = T̄ / mean(model.formulation.potential_temperature)
+    C = Array{Float64}(interior(model.microphysical_fields.C))
+    Π = T̄ / mean(Array{Float64}(interior(model.formulation.potential_temperature)))
     Δθ = ℒ_ncar .* abs.(C) ./ (ρᵃ * cᵖ_ncar * Π)
     Δq = abs.(C) ./ ρᵃ
     active = C .!= 0

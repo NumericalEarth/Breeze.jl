@@ -1067,7 +1067,10 @@ round(step.radius, sigdigits=4), round(step.condensed_mass, sigdigits=3)
     y = bracketed_newton_solve(residual, solver, yᴱ, y⁻, y⁺)
     y = max(y, yᵈ)
     ζ = expm1(y) # r⁺² / r⁰² - 1
-    r⁺ = max(r⁰ * exp(y / 2), rᵈ)
+    # The radius is incremented by r⁰ expm1(y/2) rather than multiplied by exp(y/2): the per-step growth
+    # factor of a droplet can be within a few single-precision epsilons of 1, where exp(y/2) would round
+    # the increment to a multiple of eps(1) systematically, step after step.
+    r⁺ = max(r⁰ + r⁰ * expm1(y / 2), rᵈ)
 
     # r⁺³ - r⁰³ = (r⁺² - r⁰²) (r⁺² + r⁺ r⁰ + r⁰²) / (r⁺ + r⁰)
     Δr³ = ζ * x⁰ * (r⁺^2 + r⁺ * r⁰ + x⁰) / (r⁺ + r⁰)
