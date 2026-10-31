@@ -154,7 +154,7 @@ function run_bubble(name, Δ)
     x = collect(xnodes(grid, Center()))
     z = collect(znodes(grid, Center()))
 
-    # The environment, on a fine column for the reference states and on the centers for the initial state
+    # The environment on the centers, for the reference states and the initial state
     p_center = discrete_column(z)
     states = environment.(p_center)
     θ_ref = interpolator(z, [s.T * (c.pst / s.p)^(c.Rd / c.cpd) for s in states])
@@ -170,6 +170,7 @@ function run_bubble(name, Δ)
         a = reference_column_values(reference_state, grid)
         @info @sprintf("%s default reference vs environment: max|Δp|/p %.2e, max|Δρ|/ρ %.2e", name,
                        maximum(abs, (a.p .- p_center) ./ p_center), maximum(abs, (a.ρ .- getfield.(states, :ρ)) ./ getfield.(states, :ρ)))
+        overwrite_reference_with_environment!(reference_state, grid, p_center, states)
         dynamics = AnelasticDynamics(reference_state)
     end
 
@@ -254,6 +255,28 @@ function run_bubble(name, Δ)
     θₑ′ = θₑ_field(s) .- background
     @info @sprintf("%s: θₑ′ ∈ [%.3f, %.3f] K, w ∈ [%.2f, %.2f] m/s, wall %.0f s", label, minimum(θₑ′), maximum(θₑ′),
                    minimum(s.w), maximum(s.w), wall_seconds(t₀))
+    return nothing
+end
+
+# `ReferenceState` integrates a dry column from θ(z), whatever moisture it is given, so it misses the
+# saturated environment's density by the vapor and condensate loading. The anelastic reference should be
+# the environment itself, so we write it in: p, ρ and T at the centers, and the surface values for the halos.
+function overwrite_reference_with_environment!(ref, grid, p, states)
+    ρ = getfield.(states, :ρ)
+    T = getfield.(states, :T)
+    Nz = length(p)
+    for (field, column) in ((ref.pressure, p), (ref.density, ρ), (ref.temperature, T))
+        interior(field) .= on_architecture(Oceananigans.Architectures.architecture(grid), reshape(column, 1, 1, Nz))
+    end
+    # Linear extrapolation to the surface for the bottom boundary values
+    z = collect(znodes(grid, Center()))
+    extrapolate(a) = a[1] - (a[2] - a[1]) / (z[2] - z[1]) * z[1]
+    set!(ref.surface_pressure, extrapolate(p))
+    set!(ref.surface_density, extrapolate(ρ))
+    set!(ref.surface_temperature, extrapolate(T))
+    Oceananigans.BoundaryConditions.fill_halo_regions!(ref.pressure)
+    Oceananigans.BoundaryConditions.fill_halo_regions!(ref.density)
+    Oceananigans.BoundaryConditions.fill_halo_regions!(ref.temperature)
     return nothing
 end
 
