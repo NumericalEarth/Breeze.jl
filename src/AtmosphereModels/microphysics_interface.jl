@@ -753,6 +753,26 @@ end
 # Fallback for Nothing microphysics (no fields to index)
 @inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵛ, μ) = MoistureMassFractions(qᵛ)
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the moisture mass fractions at `(i, j, k)` of a cell whose temperature is prescribed
+to be `T`. `set!(model; T = ...)` uses these fractions to convert `T` into the prognostic
+thermodynamic variable (for example `θˡⁱ` or `s`).
+
+The default returns [`grid_moisture_fractions`](@ref). This is correct for schemes whose
+condensate is prognostic, because prescribing the temperature does not change the condensate.
+
+Saturation adjustment schemes diagnose the condensate from the thermodynamic state, so they
+override this method to return the equilibrium partition of the moisture at temperature `T`.
+The conversion then includes the latent heat of that condensate, and the adjustment in
+`update_state!` returns `T`. Using the diagnostic fields instead would partition the moisture
+by the previous state (dry air on a freshly built model). The adjustment would then condense
+or evaporate the difference and shift the temperature by the latent heat.
+"""
+@inline prescribed_temperature_moisture_fractions(i, j, k, grid, microphysics, dynamics, ρ, qᵛᵉ, μ, T, constants) =
+    grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, μ)
+
 #####
 ##### Total condensate and total air density (diagnosed from dry density)
 #####

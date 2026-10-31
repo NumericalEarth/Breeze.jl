@@ -23,7 +23,7 @@ using Oceananigans.Utils: prettysummary, launch!
 using Breeze.AtmosphereModels: AtmosphereModels,
     dynamics_density, total_density, dynamics_pressure, standard_pressure, dynamics_prognostic_fields,
     pressure_from_density_temperature,
-    grid_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
+    grid_moisture_fractions, prescribed_temperature_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
     c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ,
     add_sedimentation_tendency!, sedimentation_composition_increment, enthalpy_increment,
     AtmosphereModelBuoyancy,

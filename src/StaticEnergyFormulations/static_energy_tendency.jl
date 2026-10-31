@@ -206,6 +206,10 @@ The temperature is converted to static energy ``s`` using the relation:
 ```math
 s = cᵖᵐ T + g z - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ .
 ```
+
+Under saturation adjustment, the moisture is partitioned at equilibrium at ``T`` (see
+[`prescribed_temperature_moisture_fractions`](@ref Breeze.AtmosphereModels.prescribed_temperature_moisture_fractions)),
+so that the adjustment applied by `update_state!` returns ``T``.
 """
 function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:T}, value)
     T_field = model.temperature # use temperature field as scratch/storage
@@ -248,8 +252,11 @@ end
         T = temperature_field[i, j, k]
     end
 
-    # Get moisture fractions (vapor only for unsaturated air)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    # Moisture fractions at temperature T. Under saturation adjustment this is the equilibrium
+    # partition at T, so that the latent heat of the condensate is included and the adjustment
+    # in update_state! returns T.
+    q = prescribed_temperature_moisture_fractions(i, j, k, grid, microphysics, dynamics, ρ, qᵛᵉ,
+                                                  microphysical_fields, T, constants)
     pᵣ = pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
 
     # Convert temperature to static energy

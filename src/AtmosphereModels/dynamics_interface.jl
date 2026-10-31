@@ -1,5 +1,5 @@
 using Breeze.Thermodynamics: MoistureMassFractions, dry_air_gas_constant, vapor_gas_constant, absolute_zero_latent_heat,
-                             VaporEquivalentExponent
+                             VaporEquivalentExponent, adjustment_saturation_specific_humidity
 
 #####
 ##### Dynamics Interface
@@ -153,6 +153,27 @@ composition was changed immediately before setting temperature.
 """
 @inline function pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
     return @inbounds dynamics_pressure(dynamics)[i, j, k]
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the saturation specific humidity that saturation adjustment imposes at temperature `T`
+on a cell with total density `ρ` and total specific moisture `qᵗ`, over the condensation
+surface selected by the phase `equilibrium`.
+
+This is the saturation constraint used to partition moisture when temperature is prescribed
+(see [`prescribed_temperature_moisture_fractions`](@ref)). It must match the constraint the
+saturation adjustment applies in `update_state!`, so that the adjustment returns the prescribed
+temperature. The default evaluates the saturation specific humidity at the fixed
+[`dynamics_pressure`](@ref), as the adjustment of reference-pressure states does (anelastic and
+kinematic models). Compressible dynamics, whose adjustment holds the density fixed, evaluates it
+at the density `ρ` instead.
+"""
+@inline function prescribed_temperature_saturation_specific_humidity(i, j, k, grid, dynamics, ρ, T, qᵗ,
+                                                                     constants, equilibrium)
+    pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
+    return adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
 end
 
 #####

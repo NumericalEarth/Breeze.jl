@@ -26,6 +26,7 @@ export
     number_concentration_field
 
 using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fractions,
+    prescribed_temperature_moisture_fractions, prescribed_temperature_saturation_specific_humidity,
     materialize_microphysical_fields, update_microphysical_fields!,
     NothingMicrophysicalState, WarmRainState, gas_phase_density,
     specific_prognostic_moisture, total_density
