@@ -117,7 +117,8 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     linearization_potential_temperature :: CF
 
     # γᵐRᵐᴸ: with Πᴸ, the slope ∂p/∂(ρθ) of the equation of state for the linearized PGF
-    # (`refresh_linearization_basic_state!`); per-stage, → γᵈRᵈ for dry runs.
+    # (`refresh_linearization_basic_state!`); per-stage. Named for its dry limit γᵈRᵈ; in moist air
+    # it is not the product γᵐ Rᵐ.
     linearization_gamma_R_mixture :: CF
 
     density_perturbation :: CF
@@ -339,9 +340,14 @@ outer_step_start_transport_velocities(model) = model.velocities
 #
 # Πᴸ is Π̂ at the stage-entry pressure and γᵐRᵐᴸ the remaining factor: the gas constant per unit
 # dry mass, (ρ / ρᵈ) Rᵐ = Rᵈ + rᵛ Rᵛ, times the effective heat-capacity ratio
-# ĉᵖ / [cᵖᵐ (1 − κ̂) + κ̂ Hᶜ / T], which is γᵐ = cᵖᵐ / cᵛᵐ in unsaturated air and γᵈ in dry air,
-# where the product reduces to γᵈ Rᵈ Π. The temperature and the moisture are those
-# `update_state!` diagnosed together with the pressure.
+# ĉᵖ / [cᵖᵐ (1 − κ̂) + κ̂ Hᶜ / T]. Without condensate that ratio is 1 / (1 − κ̂): γᵐ = cᵖᵐ / cᵛᵐ with
+# the vapor-equivalent exponent and γᵈ with the dry one. In dry air the product reduces to γᵈ Rᵈ Π.
+# γᵐRᵐᴸ is named for that dry limit; in moist air it is not the product γᵐ Rᵐ. The temperature and
+# the moisture are those `update_state!` diagnosed together with the pressure.
+#
+# Only this loop linearizes the equation of state. `ExplicitTimeStepping` diagnoses the full
+# pressure every stage, and anelastic dynamics hold the thermodynamic pressure at the reference
+# state, so neither forms Cᴸ.
 function refresh_linearization_basic_state!(substepper::AcousticSubstepper, model)
     grid = model.grid
     arch = architecture(grid)
@@ -584,8 +590,8 @@ end
 #   A[k,k]   = 1 + (ωΔτ)² θᴸ_face(k)(Cᴸ(k)rdz_c(k)+Cᴸ(k−1)rdz_c(k−1))/Δzᶠ(k) + (ωΔτ)² g(rdz_c(k)−rdz_c(k−1))/2
 #   A[k,k−1] = −(ωΔτ)² Cᴸ(k−1)θᴸ_face(k−1)rdz_c(k−1)/Δzᶠ(k) + (ωΔτ)² g rdz_c(k−1)/2
 #
-# γᵐRᵐᴸ (cell-centered γᵐRᵐ cached in `linearization_gamma_R_mixture`, refreshed per stage, interpolated to
-# faces in-kernel) collapses bit-identically to dry γᵈRᵈ for qᵛ=qˡ=qⁱ=0.
+# γᵐRᵐᴸ (cell-centered, cached in `linearization_gamma_R_mixture` and refreshed per stage) reduces to
+# dry γᵈRᵈ, to roundoff, for qᵛ=qˡ=qⁱ=0.
 #
 # Implicit vertical damping: for `ThermalDivergenceDamping(damp_vertical=true)`, the vertical divergence
 # damping folds into the same tridiag via a discrete vertical Laplacian on (ρw)′:

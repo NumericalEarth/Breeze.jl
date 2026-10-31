@@ -109,8 +109,14 @@ heat capacity and ``H^c = ℒ^l_0 q^l + ℒ^i_0 q^i`` the condensate latent ener
 C^L = \frac{ρ}{ρ^d} \, \frac{R^m \hat{c}^p Π^L}{c^p_m (1 - \hat κ) + \hat κ H^c / T} ,
 ```
 
-which is ``γ^d R^d Π^L`` in dry air and ``(ρ / ρ^d) γ^m R^m Π^L`` in unsaturated air, the gas
-constant per unit dry mass pairing with the dry-coupled prognostic ``ρθ = ρ^d θ``.
+which is ``γ^d R^d Π^L`` in dry air. In unsaturated air it is ``(ρ / ρ^d) R^m Π^L / (1 - \hat κ)``,
+the gas constant per unit dry mass pairing with the dry-coupled prognostic ``ρθ = ρ^d θ``: that is
+``(ρ / ρ^d) γ^m R^m Π^L`` with the vapor-equivalent exponent and ``(ρ / ρ^d) γ^d R^m Π^L`` with the
+dry one. The symbol ``γ^m R^m|_L`` is named for its dry limit; in moist air it is not the product
+``γ^m R^m``. Only the substep loop linearizes the equation of state:
+[`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping) diagnoses the full
+pressure from it every stage, and anelastic dynamics hold the thermodynamic pressure at the
+reference state.
 
 The outer-step-start state ``U^n`` is also stored. Stages 2 and 3 initialize perturbations
 with the rewind term ``U^n - U^L`` so that the full state at the beginning of every
