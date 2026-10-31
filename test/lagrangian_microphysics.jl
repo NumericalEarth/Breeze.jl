@@ -193,11 +193,11 @@ end
     # so that the warming of a single precision model is in error by a fraction of that spacing per step
     single = droplet_box_model(default_arch, Float32; thermodynamic_float_type = Float32)
     reference = droplet_box_model(default_arch, Float64)
-    θ₀ = mean(Float64, interior(single.formulation.potential_temperature))
+    θ₀ = mean(Float64.(Array(interior(single.formulation.potential_temperature))))
     θ₀ʳ = mean(reference.formulation.potential_temperature)
     time_step!(single, 1e-2)
     time_step!(reference, 1e-2)
-    Δθ = mean(Float64, interior(single.formulation.potential_temperature)) - θ₀
+    Δθ = mean(Float64.(Array(interior(single.formulation.potential_temperature)))) - θ₀
     Δθʳ = mean(reference.formulation.potential_temperature) - θ₀ʳ
     @test abs(Δθ - Δθʳ) < eps(281f0)
 end
