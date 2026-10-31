@@ -228,12 +228,13 @@ function AtmosphereModel(grid;
     field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize atmosphere-specific boundary conditions (fill in the surface-layer θᵥ
-    # diagnostic, thermodynamic constants, route the ρE and ρqᵗ interface keys onto the
-    # prognostic fields that carry them). Wall fluxes diagnose their pressure, density and θᵥ
+    # diagnostic, thermodynamic constants and the closure-dependent default gustiness, route the
+    # ρE and ρqᵗ interface keys onto the prognostic fields that carry them). Wall fluxes diagnose their pressure, density and θᵥ
     # from the live model fields at evaluation time, so nothing about the model state is
     # captured here.
     boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                           dynamics, microphysics, thermodynamic_constants)
+                                                                           dynamics, microphysics, thermodynamic_constants,
+                                                                           closure)
 
     # Re-regularize after materialization (materialization may modify boundary conditions)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)

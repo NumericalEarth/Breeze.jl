@@ -6,7 +6,8 @@
 
 """
     materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                    dynamics, microphysics, thermodynamic_constants)
+                                                    dynamics, microphysics, thermodynamic_constants,
+                                                    closure = nothing)
 
 Regularize boundary conditions for an `AtmosphereModel`. This function is extended
 by the `BoundaryConditions` module to provide atmosphere-specific boundary condition handling.
@@ -27,6 +28,9 @@ materialization time.
 
 The `microphysics` argument specifies the microphysics scheme used to compute moisture
 fractions for mixture heat capacity and virtual potential temperature calculations.
+
+The turbulence `closure` sets the gustiness that bulk fluxes constructed without one take:
+the subgrid turbulent kinetic energy under a `TKEBasedTurbulenceClosure`, a constant otherwise.
 
 Nothing about the model state is captured here: surface fluxes read the pressure, density,
 temperature and moisture they need from the model field tuple at evaluation time.

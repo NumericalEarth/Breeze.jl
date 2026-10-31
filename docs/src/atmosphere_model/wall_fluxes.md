@@ -30,7 +30,7 @@ vapor(T, ℋ) = BulkVaporFlux(coefficient=C, surface_temperature=T, surface_rela
 ρqᵛ_bcs.top
 
 # output
-FluxBoundaryCondition: BulkVaporFluxFunction(coefficient=0.006, gustiness=0)
+FluxBoundaryCondition: BulkVaporFluxFunction(coefficient=0.006, gustiness=DefaultGustiness)
 ```
 
 On every wall the fluxes carry heat and vapor into the domain when the wall is warmer or
@@ -45,6 +45,28 @@ Richardson number reversed under the ceiling) and is neutral on the vertical wal
 which buoyancy acts tangentially. The temporally filtered surface state of
 [`FilteredSurfaceVelocities`](@ref Breeze.BoundaryConditions.FilteredSurfaceVelocities) is
 supported on the bottom boundary only.
+
+## Gustiness
+
+In light wind the resolved wind no longer carries the turbulent exchange at the wall: the
+convective eddies and gusts the model does not resolve do. The bulk fluxes add a gustiness
+``Uᵍ`` to the resolved wind, ``Ũ = \sqrt{u² + v² + Uᵍ²}``, and the same ``Ũ`` enters the
+stability-dependent [`PolynomialCoefficient`](@ref Breeze.BoundaryConditions.PolynomialCoefficient),
+both its neutral value and its bulk Richardson number ``Riᴮ = g h Δθᵥ / (θᵥ Ũ²)``, so that the
+coefficient describes the surface layer the flux sees. The gustiness may be a constant speed or
+a [`TKEGustiness`](@ref Breeze.BoundaryConditions.TKEGustiness), which estimates it from the
+subgrid turbulent kinetic energy ``e`` next to the wall as ``Uᵍ = \max(c \sqrt{e}, Uᵍ_{min})``.
+A bulk flux constructed without a gustiness takes a `TKEGustiness` in a model with a
+`TKEBasedTurbulenceClosure`, and no gustiness otherwise:
+
+```jldoctest walls
+using Breeze.BoundaryConditions: DefaultGustiness, materialize_gustiness
+
+materialize_gustiness(DefaultGustiness(), TKEBasedTurbulenceClosure())
+
+# output
+TKEGustiness{Float64}(coefficient=0.816497, minimum=0.5)
+```
 
 ```@docs
 Breeze.BoundaryConditions.BulkDrag

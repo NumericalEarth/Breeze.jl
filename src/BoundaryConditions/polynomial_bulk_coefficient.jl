@@ -676,7 +676,8 @@ being evaluated, so it follows both terrain and the evolving state.
 # Arguments
 - `i`, `j`: Grid indices
 - `grid`: The grid
-- `U`: Wind speed (m/s)
+- `U`: Wind speed (m/s): the effective wind ``Ũ = \\sqrt{u² + v² + Uᵍ²}`` of the flux the
+  coefficient multiplies, gustiness ``Uᵍ`` included
 - `Tˢ`: Surface temperature (K) at location `(i, j)`
 - `h`: Measurement height (m) above the local surface; the short form uses half the first-cell
   thickness
@@ -810,13 +811,19 @@ end
 ##### evaluated with the tangential wind at the cell centre and the wall distance of the
 ##### cell centre.
 #####
+##### The coefficient sees the same effective wind as the flux it multiplies,
+##### Ũ = √(u² + v² + Uᵍ²), with `Uᵍ²` the squared gustiness: both in the neutral polynomial
+##### and in the bulk Richardson number Riᴮ = g h Δθᵥ / (θᵥ Ũ²) that sets the stability
+##### correction. With the bare wind instead, calm air over a warm surface would see an
+##### unbounded Riᴮ and a coefficient for a wind far lighter than the one the flux uses.
+#####
 
-@inline bulk_coefficient(i, j, k, grid, side, C::Number, fields, Tˢ, fv, pˢ) = C
+@inline bulk_coefficient(i, j, k, grid, side, C::Number, fields, Tˢ, fv, pˢ, Uᵍ²) = C
 
-@inline function bulk_coefficient(i, j, k, grid, side, C::PolynomialCoefficient, fields, Tˢ, ::Nothing, pˢ)
+@inline function bulk_coefficient(i, j, k, grid, side, C::PolynomialCoefficient, fields, Tˢ, ::Nothing, pˢ, Uᵍ²)
     U² = tangential_speed²(i, j, k, grid, side, nothing, fields)
-    U = sqrt(U²)
-    return C(i, j, k, grid, side, U, Tˢ, fields, pˢ)
+    Ũ = sqrt(U² + Uᵍ²)
+    return C(i, j, k, grid, side, Ũ, Tˢ, fields, pˢ)
 end
 
 #####
@@ -829,11 +836,11 @@ end
 #####
 
 @inline function bulk_coefficient(i, j, k, grid, side::Bottom, C::PolynomialCoefficient, fields, Tˢ,
-                                  fv::FilteredSurfaceVelocities, pˢ)
+                                  fv::FilteredSurfaceVelocities, pˢ, Uᵍ²)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv)
-    U = sqrt(U²)
+    Ũ = sqrt(U² + Uᵍ²)
     h = evaluation_height(i, j, grid, fv.height)
-    return C(i, j, k, grid, side, U, Tˢ, h, fv.Δθᵥ, fields, pˢ)
+    return C(i, j, k, grid, side, Ũ, Tˢ, h, fv.Δθᵥ, fields, pˢ)
 end
 
 #####

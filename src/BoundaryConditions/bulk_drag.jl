@@ -13,7 +13,7 @@ struct BulkDragFunction{D, S, C, G, T, FV, TC}
 end
 
 """
-    BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0,
+    BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=DefaultGustiness(),
                        surface_temperature=nothing, filtered_velocities=nothing)
 
 Create a bulk drag function for computing wall momentum fluxes using bulk aerodynamic
@@ -23,8 +23,8 @@ formulas. The momentum flux is computed in the same form as the scalar bulk flux
 Jᵘ = - ρˢ Cᴰ |U| u
 ```
 
-where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is the wind speed
-tangential to the wall (with gustiness to prevent singularities at low wind), `u` is the
+where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + Uᵍ²)` is the wind speed
+tangential to the wall together with the gustiness `Uᵍ`, `u` is the
 velocity component at the first cell face, and `ρˢ` is the surface density computed from
 the surface pressure and surface temperature. Monin–Obukhov similarity is a profile law
 for `u` (not `ρu`), so using `u` here keeps the formulation consistent with the similarity
@@ -68,7 +68,10 @@ for `CompressibleDynamics`, which has no equivalent reference profile — pass
                location during boundary condition regularization.
 - `coefficient`: The drag coefficient (default: `1e-3`). Can be a constant or a
   [`PolynomialCoefficient`](@ref) for wind and stability-dependent transfer coefficients.
-- `gustiness`: Minimum wind speed to prevent singularities when winds are calm (default: `0`)
+- `gustiness`: The gustiness `Uᵍ` added to the resolved wind, in the flux and in a
+  [`PolynomialCoefficient`](@ref) alike: a number, a [`TKEGustiness`](@ref), or the default
+  [`DefaultGustiness`](@ref), which the model replaces with a `TKEGustiness` under a
+  `TKEBasedTurbulenceClosure` and with `0` otherwise.
 - `surface_temperature`: Surface temperature, used to compute `ρˢ` and required when
   using `PolynomialCoefficient` with stability correction. Can be a `Field`,
   `Function`, or `Number`. A function takes the non-`Flat` coordinates of the wall followed
@@ -79,7 +82,7 @@ for `CompressibleDynamics`, which has no equivalent reference profile — pass
   wind speed, near-surface velocity, and `θᵥ` in the bulk formula. If `nothing`
   (default), instantaneous fields are used.
 """
-function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0,
+function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=DefaultGustiness(),
                             surface_temperature=nothing, filtered_velocities=nothing)
     if coefficient isa PolynomialCoefficient && isnothing(surface_temperature)
         throw(ArgumentError("surface_temperature keyword argument must be provided when configuring BulkDrag with a PolynomialCoefficient"))
@@ -105,7 +108,7 @@ Adapt.adapt_structure(to, df::BulkDragFunction) =
 function Base.summary(df::BulkDragFunction)
     s = string("BulkDragFunction(direction=", summary(df.direction),
                ", coefficient=", df.coefficient,
-               ", gustiness=", df.gustiness)
+               ", gustiness=", prettysummary(df.gustiness))
     if !isnothing(df.filtered_velocities)
         s *= string(", filtered_velocities=", summary(df.filtered_velocities))
     end
@@ -128,11 +131,12 @@ end
     Tˢ = wall_value(ℓ, m, grid, side, df.surface_temperature, clock)
     u  = near_wall_velocity(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
     U² = wall_wind_speed²(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
-    Ũ  = sqrt(U² + df.gustiness^2)
+    Uᵍ² = gustiness²(i, j, k, grid, df.gustiness, fields)
+    Ũ  = sqrt(U² + Uᵍ²)
     constants = df.thermodynamic_constants
     pˢ = wall_air_pressure(i, j, k, grid, side, df.direction, fields, constants)
     ρˢ = surface_density(pˢ, Tˢ, constants)
-    Cᴰ = bulk_coefficient(i, j, k, grid, side, df.coefficient, fields, Tˢ, df.filtered_velocities, pˢ)
+    Cᴰ = bulk_coefficient(i, j, k, grid, side, df.coefficient, fields, Tˢ, df.filtered_velocities, pˢ, Uᵍ²)
     return outward_flux_sign(side) * ρˢ * Cᴰ * Ũ * u
 end
 
@@ -143,7 +147,7 @@ const BulkDragBoundaryCondition = BoundaryCondition{<:Flux, <:BulkDragFunction}
 #####
 
 """
-    BulkDrag(; direction=nothing, coefficient=1e-3, gustiness=0, surface_temperature=nothing)
+    BulkDrag(; direction=nothing, coefficient=1e-3, gustiness=DefaultGustiness(), surface_temperature=nothing)
 
 Create a `FluxBoundaryCondition` for wall momentum drag, on any of the six boundaries.
 
@@ -174,7 +178,7 @@ Oceananigans.FieldBoundaryConditions, with boundary conditions
 ├── east: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ├── south: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ├── north: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
-├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=0)
+├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=DefaultGustiness)
 ├── top: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 └── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ```
@@ -188,12 +192,12 @@ drag = BulkDrag(coefficient=1e-3)
 
 # output
 Oceananigans.FieldBoundaryConditions, with boundary conditions
-├── west: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
-├── east: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
+├── west: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness)
+├── east: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness)
 ├── south: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ├── north: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
-├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
-├── top: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0)
+├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness)
+├── top: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness)
 └── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ```
 """
