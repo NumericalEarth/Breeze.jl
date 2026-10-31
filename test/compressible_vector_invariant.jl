@@ -190,7 +190,7 @@ flux_form() = Centered(order = 2)
             @test weno.centered_vorticity_scheme isa Centered{5}
             @test isnothing(scheme.centered_vorticity_scheme)
             @test Oceananigans.Grids.required_halo_size_x(weno) == 6
-            @test Oceananigans.Grids.required_halo_size_x(averaged_weno_vorticity(4)) == 6  # WENO(7) with the fourth-order core
+            @test Oceananigans.Grids.required_halo_size_x(averaged_weno_vorticity(4)) == 5  # WENO(5) with the fourth-order core
             @test Oceananigans.Grids.required_halo_size_x(CompressibleWENOVectorInvariant(vorticity_pairing = AveragedVorticityPairing())) == 7
             @test Oceananigans.Grids.required_halo_size_z(weno) == 4
 
