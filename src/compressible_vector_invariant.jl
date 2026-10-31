@@ -111,25 +111,27 @@ $(TYPEDEF)
 Pairing of a reconstructed vorticity in which each (u, v) pair takes the vorticity at the corner it
 shares plus the deviations of the reconstructions from their centered counterparts at its own two
 points, each weighted by the share of the corner's transport along the reconstruction,
-`ζ_q + wʸ_q (Rʸζ − Cʸζ)_u + wˣ_q (Rˣζ − Cˣζ)_v`, `wˣ = u²/(u² + v²)`. Symmetric, hence energy-neutral
-for any reconstruction; its linearization about a sheared flow is that of the corner vorticity, so
-it is free of the Hollingsworth instability; and, unlike `CornerVorticityPairing`, the deviations are
-not averaged back to the corner, so the upwind dissipation acts on grid-scale (2Δ) vorticity, where
-a two-point average would annihilate it. The default.
+`ζ_q + wʸ_q (Rʸζᵘ − Cʸζᵘ)_u + wˣ_q (Rˣζᵛ − Cˣζᵛ)_v`, `wˣ = u²/(u² + v²)`, with ζᵛ = ∂x v and ζᵘ = −∂y u
+the parts of the vorticity each equation advects itself (`self_part = true`, the default) or the
+full vorticity (`self_part = false`). Symmetric, hence energy-neutral for any reconstruction; its
+linearization about a sheared flow is that of the corner vorticity with, for the self parts, no
+residual at any wavenumber, so it is free of the Hollingsworth instability; and, unlike
+`CornerVorticityPairing`, the deviations are not averaged back to the corner, so the upwind
+dissipation acts on grid-scale (2Δ) vorticity, where a two-point average would annihilate it. The default.
 """
 struct UpwindVorticityPairing{S} end
 
 """
 $(TYPEDSIGNATURES)
 
-With `self_part = true` the deviation at each velocity point is that of the self part of the
+With `self_part = true` (the default) the deviation at each velocity point is that of the self part of the
 vorticity only — `∂x v` reconstructed along `x` at the `v` point, `−∂y u` along `y` at the `u` point — so
 that, linearized about a sheared flow, the pairing couples `u` and `v` exactly as the corner vorticity
 does (no residual of the Hollingsworth kind at any wavenumber: §7 of the derivation note). With
 `self_part = false` the deviation is that of the full vorticity, which leaves the odd part of the
 reconstruction as a wavenumber-dependent modification of the Coriolis coupling in the `v` equation.
 """
-UpwindVorticityPairing(; self_part = false) = UpwindVorticityPairing{self_part}()
+UpwindVorticityPairing(; self_part = true) = UpwindVorticityPairing{self_part}()
 
 Base.summary(::UpwindVorticityPairing{S}) where S = string("UpwindVorticityPairing(self_part=", S, ")")
 
@@ -370,7 +372,7 @@ julia> CompressibleWENOVectorInvariant()
 CompressibleWENOVectorInvariant{6, Float64}(vorticity_order=9, vertical_order=5)
 ├── vorticity_scheme: WENO{5, Float64, Nothing}(order=9)
 ├── vorticity_stencil: Oceananigans.Advection.VelocityStencil
-├── vorticity_pairing: UpwindVorticityPairing(self_part=false)
+├── vorticity_pairing: UpwindVorticityPairing(self_part=true)
 ├── vertical_advection_scheme: WENO{3, Float64, Nothing}(order=5)
 ├── kinetic_energy_gradient_scheme: EnergyConserving
 ├── divergence_scheme: WENO{3, Float64, Nothing}(order=5)

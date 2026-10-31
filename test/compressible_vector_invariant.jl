@@ -155,6 +155,7 @@ end
 centered(core = 2) = CompressibleVectorInvariant(core_order = core)
 unsplit(core = 2) = CompressibleVectorInvariant(vertical_formulation = UnsplitVerticalAdvection(), core_order = core)
 weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9), core_order = core)
+full_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 9), vorticity_pairing = UpwindVorticityPairing(self_part = false), core_order = core)
 averaged_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 7), vorticity_pairing = AveragedVorticityPairing(), core_order = core)
 corner_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 7), vorticity_pairing = CornerVorticityPairing(), core_order = core)
 averaged_centered_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 2), vorticity_pairing = AveragedVorticityPairing(), core_order = core)
@@ -183,7 +184,8 @@ flux_form() = Centered(order = 2)
             @test weno.divergence_scheme isa WENO{3}
             @test weno.kinetic_energy_gradient_scheme isa EnergyConserving
             @test CompressibleWENOVectorInvariant(kinetic_energy_gradient_order = 5).kinetic_energy_gradient_scheme isa WENO{3}
-            @test weno.vorticity_pairing isa UpwindVorticityPairing
+            @test weno.vorticity_pairing isa UpwindVorticityPairing{true}
+            @test CompressibleWENOVectorInvariant(vorticity_pairing = UpwindVorticityPairing(self_part = false)).vorticity_pairing isa UpwindVorticityPairing{false}
             @test weno.centered_vorticity_scheme isa Centered{5}
             @test isnothing(scheme.centered_vorticity_scheme)
             @test Oceananigans.Grids.required_halo_size_x(weno) == 6
@@ -211,7 +213,7 @@ flux_form() = Centered(order = 2)
                 # The fourth-order core relies on the transposition of its interpolations, which the
                 # reduced-order stencils next to closed walls break, so it is exact on the periodic grid only.
                 cores = name == "rectilinear" ? (2, 4) : (2,)
-                for core in cores, build in (centered, unsplit, weno_vorticity, corner_weno_vorticity, averaged_weno_vorticity, averaged_centered_vorticity)
+                for core in cores, build in (centered, unsplit, weno_vorticity, full_weno_vorticity, corner_weno_vorticity, averaged_weno_vorticity, averaged_centered_vorticity)
                     @test abs(kinetic_energy_production(model, build(core))) < roundoff
                 end
 
@@ -250,7 +252,7 @@ flux_form() = Centered(order = 2)
             grid = rectilinear_grid(default_arch, FT, (16, 12, 6))
             model = compressible_model(grid, centered())
             set_random_state!(model)
-            for pairing in (UpwindVorticityPairing(), CornerVorticityPairing()), core in (2, 4)
+            for pairing in (UpwindVorticityPairing(), UpwindVorticityPairing(self_part = false), CornerVorticityPairing()), core in (2, 4)
                 corner = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 4), vorticity_pairing = pairing, core_order = core)
                 @test relative_difference(model, corner, centered(core)) < roundoff
             end
