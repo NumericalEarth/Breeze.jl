@@ -256,10 +256,12 @@ and implicit, in two. Its substep loop forms the pressure perturbation from the 
 perturbation alone. The sensible heat the arriving mass brings is a real heating, so it joins the
 slow tendency the loop integrates. The composition content changes ``ρθˡⁱ`` at fixed temperature
 and so leaves the pressure alone; fed to the loop it would read as a spurious pressure
-perturbation. Each stage therefore collects it separately, takes it through the thermodynamic
-variable's post-loop solve, adds it after that solve (a first-order splitting difference from the
-loop's implicit thermodynamic transport), and takes exactly that increment back out of the
-stage-entry state of the next stage. Rain-out thus leaves latent warming aloft and pre-cools
+perturbation. Each stage therefore collects it separately and adds it to the variable after the
+loop, before the variable's post-loop implicit solve, which the content then takes too, in a solve
+of its own, both solves reading their coefficients from the variable frozen between the addition
+and the solves; the next stage takes exactly the solved increment back out of its stage-entry
+state. The loop's implicit thermodynamic transport, applied inside the loop, never sees the
+content: a first-order splitting difference. Rain-out thus leaves latent warming aloft and pre-cools
 the layer that later evaporates the arriving rain, the mechanism that builds cold pools.
 
 ### Bottom Precipitation Flux

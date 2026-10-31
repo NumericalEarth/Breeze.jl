@@ -3,6 +3,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: prognostic_fields, fields, architecture
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection, vertical_scheme,
                               implicit_vertical_velocityᶜᶜᶠ
+using Oceananigans.BoundaryConditions: needs_implicit_solver
 using Oceananigans.Fields: location
 using Oceananigans.Operators: Azᶜᶜᶠ, δzᵃᵃᶜ, V⁻¹ᶜᶜᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: solve!
@@ -113,6 +114,12 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     ρ = total_density(model.dynamics)
     velocities = tendency_transport_velocities(model)
 
+    # The coefficients of the solves (a state-dependent diffusivity, the split of an
+    # implicit-explicit boundary flux) read the thermodynamic variable from its stage-entry copy:
+    # the live field is without the content the stage adds after the loop
+    # (`frozen_thermodynamic_fields`).
+    coefficient_fields = frozen_thermodynamic_fields(model)
+
     for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
         name ∈ acoustic_names && continue
 
@@ -136,7 +143,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
                            model.closure_fields,
                            field_index,
                            model.clock,
-                           fields(model),
+                           coefficient_fields,
                            Δt_implicit,
                            implicit_step_scheme(advection),
                            implicit_advection_velocities(model.dynamics, velocities, name,
@@ -340,20 +347,36 @@ stage added to the variable just before (`apply_sedimentation_content!`), the co
 variable's operator too, so that the next stage can take out exactly what the variable received:
 both solves read their coefficients from the variable frozen between the addition and the solves
 (`freeze_thermodynamic_density!`), the variable's own through Oceananigans' solve and the
-content's through `sedimentation_content_implicit_step!`. Content without a frozen copy means the
-stepper's construction found nothing about the variable vertically implicit (see
-`AcousticRungeKutta3`): nothing to solve.
+content's through `sedimentation_content_implicit_step!`. Neither runs when nothing about the
+variable is vertically implicit (`thermodynamic_variable_implicit`).
 """
 thermodynamic_implicit_substep!(::Nothing, ::Nothing, model, implicit_solver, Δt_stage) =
     thermodynamic_implicit_step!(model, implicit_solver, Δt_stage, fields(model))
 
-thermodynamic_implicit_substep!(content, ::Nothing, model, implicit_solver, Δt_stage) = nothing
-
 function thermodynamic_implicit_substep!(content, frozen, model, implicit_solver, Δt_stage)
-    coefficient_fields = freeze_thermodynamic_density!(frozen, model)
+    thermodynamic_variable_implicit(model) || return nothing
+    freeze_thermodynamic_density!(frozen, model)
+    coefficient_fields = frozen_thermodynamic_fields(frozen, model)
     sedimentation_content_implicit_step!(content, model, implicit_solver, Δt_stage, coefficient_fields)
     thermodynamic_implicit_step!(model, implicit_solver, Δt_stage, coefficient_fields)
     return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Whether the thermodynamic variable has a post-loop vertically-implicit solve: vertically-implicit
+closure diffusion or an implicit part of its boundary fluxes, the condition Oceananigans'
+`implicit_step!` runs on. Its adaptive-implicit vertical advection, if any, was applied inside
+the substep loop (`postloop_thermodynamic_scheme`), and a solver that the moisture and tracers
+alone call for leaves the variable explicit.
+"""
+function thermodynamic_variable_implicit(model)
+    vi_closure, _ = vertically_implicit_closures(model.closure, model.closure_fields)
+    bcs = thermodynamic_density(model.formulation).boundary_conditions
+    return !(isnothing(vi_closure) || vi_closure === ()) ||
+           needs_implicit_solver(postloop_thermodynamic_scheme(model)) ||
+           needs_implicit_solver(bcs)
 end
 
 # The advective half of the variable's post-loop operator is weighted with the frozen stage-entry
@@ -374,16 +397,41 @@ end
 """
 $(TYPEDSIGNATURES)
 
-The fields the thermodynamic variable's post-loop solves read their coefficients from: the model
-fields with the variable replaced by its copy in `frozen`. Oceananigans' tridiagonal solve
+Copy the thermodynamic variable, halos included, into the stepper's `frozen_thermodynamic_density`
+(a no-op when no condensate sediments). Taken twice a stage. At stage entry, before the previous
+stage's sedimentation content comes out of the live field: the coefficients of the moisture and
+tracer solves and the wall value of the substep loop's open-boundary relaxation read the full
+variable from the copy (`frozen_thermodynamic_fields`, `apply_open_boundary_relaxation!`). After
+the stage's content is added and before the post-loop solves: Oceananigans' tridiagonal solve
 overwrites the field it solves for as it sweeps up each column, while a coefficient (a
 state-dependent diffusivity, the split of an implicit-explicit boundary flux) may read that field
 through the model fields: below its own row it would read swept values, and the variable's solve
 would not apply the operator the sedimentation content's solve does.
 """
+freeze_thermodynamic_density!(model) =
+    freeze_thermodynamic_density!(model.timestepper.frozen_thermodynamic_density, model)
+
+freeze_thermodynamic_density!(::Nothing, model) = nothing
+
 function freeze_thermodynamic_density!(frozen, model)
-    θ_name = thermodynamic_density_name(model.formulation)
     parent(frozen) .= parent(thermodynamic_density(model.formulation))
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+The model fields with the thermodynamic variable replaced by its frozen copy, for the
+coefficients of a solve to read (see `freeze_thermodynamic_density!`); the live model fields when
+no condensate sediments.
+"""
+frozen_thermodynamic_fields(model) =
+    frozen_thermodynamic_fields(model.timestepper.frozen_thermodynamic_density, model)
+
+frozen_thermodynamic_fields(::Nothing, model) = fields(model)
+
+function frozen_thermodynamic_fields(frozen, model)
+    θ_name = thermodynamic_density_name(model.formulation)
     return merge(fields(model), NamedTuple{(θ_name,)}((frozen,)))
 end
 

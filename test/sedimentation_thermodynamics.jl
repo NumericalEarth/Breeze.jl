@@ -264,7 +264,7 @@ end
         ρθ = AM.thermodynamic_density(model.formulation)
         content = model.timestepper.sedimentation_content
         interior(content) .= s .* interior(ρθ)
-        Breeze.TimeSteppers.apply_sedimentation_content!(model, FT(1))
+        Breeze.TimeSteppers.apply_sedimentation_content!(model)
         Breeze.TimeSteppers.implicit_substep!(model, FT(1))
 
         δ = Array(interior(content, 1, 1, :))
@@ -309,7 +309,7 @@ end
     ρθ = AM.thermodynamic_density(model.formulation)
     content = model.timestepper.sedimentation_content
     interior(content) .= -FT(0.1) .* interior(ρθ)
-    Breeze.TimeSteppers.apply_sedimentation_content!(model, FT(1))
+    Breeze.TimeSteppers.apply_sedimentation_content!(model)
     full = Array(interior(ρθ, 1, 1, :))
     full_with_halos = copy(parent(ρθ))
     Breeze.TimeSteppers.implicit_substep!(model, FT(1))
@@ -324,10 +324,10 @@ end
 end
 
 # The content comes out of the halos too, so that the reduced variable's halos are the full
-# variable's less the content: a wall value of the variable held against the reduced interior
-# would put the content back into the target the substep loop's open-boundary relaxation reads
-# from the halo, (ρθ[halo] − ρθ[cell]) / 2, and the loop would read it as pressure.
-@testset "Removing the sedimentation content keeps the wall target the open-boundary relaxation reads [$FT]" for FT in test_float_types()
+# variable's less the content: the vertical operators the stage applies to the reduced variable
+# see no step at the boundaries, and a wall value of the full variable is not held against the
+# reduced interior.
+@testset "Removing the sedimentation content takes it out of the halos too [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch, FT; size=(4, 4), x=(0, 4), z=(0, 4), topology=(Bounded, Flat, Bounded))
     constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
@@ -345,20 +345,74 @@ end
     interior(content) .= c
     @allowscalar begin
         ρθ_cell⁰ = ρθ[1, 1, 1]
-        target⁰ = (ρθ[0, 1, 1] - ρθ[1, 1, 1]) / 2
-        @test target⁰ == 360 - ρθ_cell⁰
+        step⁰ = ρθ[0, 1, 1] - ρθ[1, 1, 1]
+        @test step⁰ / 2 == 360 - ρθ_cell⁰
         Breeze.TimeSteppers.remove_sedimentation_content!(model, 2)
         @test ρθ[1, 1, 1] == ρθ_cell⁰ - c
-        @test (ρθ[0, 1, 1] - ρθ[1, 1, 1]) / 2 ≈ target⁰ rtol=10eps(FT)
+        @test ρθ[0, 1, 1] - ρθ[1, 1, 1] ≈ step⁰ rtol=10eps(FT)
     end
     @test all(iszero, Array(parent(content)))
 end
 
-# The copy of the variable that the post-loop solves read is allocated only when there is a
-# post-loop solve to read it: vertically-implicit closure diffusion or an implicit-explicit
-# boundary flux of the variable, not a solver the moisture and tracers alone call for. Without
-# it the stage runs no such solve, and the variable stays as the loop left it.
-@testset "The frozen thermodynamic copy exists only with a post-loop solve of the variable [$FT]" for FT in test_float_types()
+# The content is kept out of the substep loop and added after it, so the loop's open-boundary
+# relaxation must target the wall value for the full variable: the stage-entry variable's wall
+# value less the content the stage adds. Targeting the base it reads would end each stage at
+# the wall value plus this stage's content less the previous stage's.
+@testset "The open-boundary relaxation lands the full thermodynamic variable on the wall value [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size=(4, 2), x=(0, 4000), z=(0, 200), topology=(Bounded, Flat, Bounded))
+    constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(; open_boundary_relaxation=1);
+                                    reference_potential_temperature=290)
+    v = FT(360)
+    boundary_conditions = (; ρθ=FieldBoundaryConditions(west=ValueBoundaryCondition(v)),
+                             ρu=FieldBoundaryConditions(west=NormalFlowBoundaryCondition(FT(0)),
+                                                        east=NormalFlowBoundaryCondition(FT(0))))
+    model = AtmosphereModel(grid; dynamics, boundary_conditions, thermodynamic_constants=constants,
+                            microphysics=SedimentationOnly(Val(:liquid), FT(5), false),
+                            scalar_advection=(; ρqʳ=UpwindBiased(FT; order=1)))
+    set!(model; ρᵈ=1.2, T=290, qᵛ=0.005, qʳ=(x, z) -> ifelse(z > 100, FT(0.01), FT(0.001)))
+    time_step!(model, 1)
+    ρθ = AM.thermodynamic_density(model.formulation)
+    content = model.timestepper.sedimentation_content
+    @test all(!iszero, Array(interior(content, 1, 1, :)))
+    @test Array(interior(ρθ, 1, 1, :)) ≈ fill(v, 2) rtol=100eps(FT)
+end
+
+# The moisture and tracer solves run while the previous stage's content is out of the live
+# thermodynamic variable. Their coefficients read the variable from its stage-entry copy, so a
+# diffusivity that depends on it diffuses the rain as with the content in the variable, not as
+# from the reduced variable.
+@testset "The tracer solves' coefficients read the full thermodynamic variable [$FT]" for FT in test_float_types()
+    fixture = postloop_operator_fixture(FT)
+    c = FT(30)
+    rain = NamedTuple{(:full, :reduced, :stale)}(map((:full, :reduced, :stale)) do case
+        model = postloop_model(fixture; closure=fixture.closures[2], temperature = z -> 290 - z)
+        ρθ = AM.thermodynamic_density(model.formulation)
+        for (u⁰, u) in zip(model.timestepper.U⁰, Oceananigans.prognostic_fields(model))
+            parent(u⁰) .= parent(u)
+        end
+        foreach(G -> fill!(G, 0), model.timestepper.Gⁿ)
+        Breeze.TimeSteppers.freeze_thermodynamic_density!(model)
+        if case != :full
+            interior(model.timestepper.sedimentation_content) .= c
+            Breeze.TimeSteppers.remove_sedimentation_content!(model, 2)
+        end
+        case == :stale && (parent(model.timestepper.frozen_thermodynamic_density) .= parent(ρθ))
+        Breeze.TimeSteppers.scalar_rk3_substep!(model, FT(1))
+        Array(interior(model.microphysical_fields.ρqʳ, 1, 1, :))
+    end)
+    @test rain.reduced == rain.full
+    @test rain.stale != rain.full
+end
+
+# The post-loop solves of the variable and the content run only when something about the
+# variable is vertically implicit: closure diffusion or an implicit-explicit boundary flux, not a
+# solver the moisture and tracers alone call for; without it the variable stays as the loop left
+# it. When they run, the copy they read their coefficients from is taken after the content's
+# addition refilled the variable's halos, so a coefficient reading a neighboring cell sees the
+# full variable there too.
+@testset "The post-loop solves run only with something implicit about the variable, and read it with fresh halos [$FT]" for FT in test_float_types()
     fixture = postloop_operator_fixture(FT)
     explicit = ScalarDiffusivity(; κ=1)
     implicit = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ=1)
@@ -366,7 +420,8 @@ end
     tracers_only = postloop_model(fixture; closure=explicit, temperature = z -> 290 - z)
     @test !isnothing(tracers_only.timestepper.implicit_solver)
     @test !isnothing(tracers_only.timestepper.sedimentation_content)
-    @test isnothing(tracers_only.timestepper.frozen_thermodynamic_density)
+    @test !isnothing(tracers_only.timestepper.frozen_thermodynamic_density)
+    @test !Breeze.TimeSteppers.thermodynamic_variable_implicit(tracers_only)
     ρθ = AM.thermodynamic_density(tracers_only.formulation)
     ρθ⁰ = Array(interior(ρθ, 1, 1, :))
     Breeze.TimeSteppers.implicit_substep!(tracers_only, FT(1))
@@ -374,7 +429,15 @@ end
 
     for kwargs in ((; closure=implicit), (; closure=explicit, fixture.boundary_conditions))
         model = postloop_model(fixture; kwargs...)
-        @test !isnothing(model.timestepper.frozen_thermodynamic_density)
+        @test Breeze.TimeSteppers.thermodynamic_variable_implicit(model)
+        ρθ = AM.thermodynamic_density(model.formulation)
+        interior(model.timestepper.sedimentation_content) .= FT(3)
+        Breeze.TimeSteppers.apply_sedimentation_content!(model)
+        @allowscalar @test ρθ[1, 1, 0] == ρθ[1, 1, 1]
+        full_with_halos = Array(parent(ρθ))
+        Breeze.TimeSteppers.implicit_substep!(model, FT(1))
+        @test Array(parent(model.timestepper.frozen_thermodynamic_density)) == full_with_halos
+        @test Array(interior(ρθ, 1, 1, :)) != full_with_halos[1, 1, :][end-1:end]
     end
 end
 
