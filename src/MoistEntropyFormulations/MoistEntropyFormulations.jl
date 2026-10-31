@@ -24,7 +24,8 @@ using Oceananigans.Utils: prettysummary, launch!
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
     dynamics_density, total_density, standard_pressure, dynamics_prognostic_fields,
     grid_moisture_fractions, div_ρUc, c_div_ρU, ∇_dot_Jᶜ, AtmosphereModelBuoyancy,
-    add_sedimentation_tendency!, explicit_condensate_mass_fluxes, radiation_flux_divergence,
+    add_sedimentation_tendency!, explicit_condensate_mass_fluxes, implicit_condensate_mass_fluxes,
+    implicit_sedimentation, kernel_time_step, thermodynamic_density, radiation_flux_divergence,
     materialize_formulation, specific_prognostic_moisture, moisture_prognostic_name,
     prognostic_field_names, grid_microphysical_state, microphysical_tendencies,
     condensate_liquid_fraction

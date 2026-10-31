@@ -269,3 +269,167 @@ end
     @test maximum(abs, Δρu_η - Δρu_θ) < 0.02 * maximum(abs, Δρu_θ)
     @test maximum(abs, Δρu_E - Δρu_θ) < 0.02 * maximum(abs, Δρu_θ)
 end
+
+#####
+##### The acoustic loop's pressure against the equation of state
+#####
+
+# Advance S, ρᵈ and the water densities of a smooth moist column by the fluxes of one mass flux M(z)
+# and compare the true rate of change of pressure with what the acoustic loop assumes. The loop on the
+# adiabatic pressure variable has no reference to the entropy offset b; a loop on (S′, ρᵈ′) with frozen
+# water is off by −C Σₓ Eˣ M ∂z rˣ, nearly all of the rate at b = 0.
+@testset "The acoustic loop's pressure sees the water" begin
+    constants = ThermodynamicConstants(Float64)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    cˡ = constants.liquid.heat_capacity
+    pˢᵗ = 1e5
+
+    T̄(z) = 300 - 6.5e-3 * z
+    ρ̄ᵈ(z) = 1.15 * exp(-z / 9000)
+    r̄ᵛ(z) = 0.018 * exp(-z / 2500)
+    r̄ˡ(z) = 1e-3 * exp(-((z - 2000) / 800)^2)
+
+    function pressure(S, ρᵈ, ρᵛ, ρˡ, b)
+        ρ = ρᵈ + ρᵛ + ρˡ
+        q = MoistureMassFractions(ρᵛ / ρ, ρˡ / ρ, 0.0)
+        T = temperature_from_moist_entropy(S / ρ - b * (q.vapor + q.liquid), ρ, q, constants)
+        return T * (ρᵈ * Rᵈ + ρᵛ * Rᵛ)
+    end
+
+    function entropy(z, b)
+        ρᵈ, ρᵛ, ρˡ = ρ̄ᵈ(z), ρ̄ᵈ(z) * r̄ᵛ(z), ρ̄ᵈ(z) * r̄ˡ(z)
+        ρ = ρᵈ + ρᵛ + ρˡ
+        q = MoistureMassFractions(ρᵛ / ρ, ρˡ / ρ, 0.0)
+        return ρ * (moist_entropy(T̄(z), ρ, q, constants) + b * (q.vapor + q.liquid))
+    end
+
+    M(z) = 0.3 * (1 + 0.5 * sin(z / 700))
+    ∂(f, z) = (f(z + 1) - f(z - 1)) / 2
+
+    function true_rate(z, b)
+        δt = 1e-3
+        χ̂(z′) = entropy(z′, b) / ρ̄ᵈ(z′)
+        S, ρᵈ = entropy(z, b), ρ̄ᵈ(z)
+        ρᵛ, ρˡ = ρᵈ * r̄ᵛ(z), ρᵈ * r̄ˡ(z)
+        S⁺ = S - δt * ∂(z′ -> χ̂(z′) * M(z′), z)
+        ρᵈ⁺ = ρᵈ - δt * ∂(M, z)
+        ρᵛ⁺ = ρᵛ - δt * ∂(z′ -> r̄ᵛ(z′) * M(z′), z)
+        ρˡ⁺ = ρˡ - δt * ∂(z′ -> r̄ˡ(z′) * M(z′), z)
+        return (pressure(S⁺, ρᵈ⁺, ρᵛ⁺, ρˡ⁺, b) - pressure(S, ρᵈ, ρᵛ, ρˡ, b)) / δt
+    end
+
+    function adiabatic_loop_rate(z)
+        function variable(z′)
+            ρ = ρ̄ᵈ(z′) * (1 + r̄ᵛ(z′) + r̄ˡ(z′))
+            qᵛ, qˡ = ρ̄ᵈ(z′) * r̄ᵛ(z′) / ρ, ρ̄ᵈ(z′) * r̄ˡ(z′) / ρ
+            qᵈ = 1 - qᵛ - qˡ
+            Rᵐ = qᵈ * Rᵈ + qᵛ * Rᵛ
+            cᵖᵐ = qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cˡ
+            return Breeze.CompressibleEquations.adiabatic_pressure_variable(ρ * Rᵐ * T̄(z′), cᵖᵐ, cᵖᵐ - Rᵐ, pˢᵗ, Rᵈ)
+        end
+        Θ(z′) = first(variable(z′)) / ρ̄ᵈ(z′)
+        return - last(variable(z)) * ∂(z′ -> Θ(z′) * M(z′), z)
+    end
+
+    function frozen_water_rate(z, b)
+        δt = 1e-3
+        χ̂(z′) = entropy(z′, b) / ρ̄ᵈ(z′)
+        S, ρᵈ = entropy(z, b), ρ̄ᵈ(z)
+        r_v, r_l = r̄ᵛ(z), r̄ˡ(z)
+        # rˣ held fixed, as a loop on (S′, ρᵈ′) assumes
+        S⁺ = S - δt * ∂(z′ -> χ̂(z′) * M(z′), z)
+        ρᵈ⁺ = ρᵈ - δt * ∂(M, z)
+        return (pressure(S⁺, ρᵈ⁺, ρᵈ⁺ * r_v, ρᵈ⁺ * r_l, b) - pressure(S, ρᵈ, ρᵈ * r_v, ρᵈ * r_l, b)) / δt
+    end
+
+    for z in (300.0, 1000.0, 2000.0, 4000.0)
+        reference = true_rate(z, -7000.0)
+        @test true_rate(z, 0.0) ≈ reference rtol=1e-6  # b is a convention for the true pressure
+        @test adiabatic_loop_rate(z) ≈ reference rtol=0.01
+    end
+
+    # The frozen-water loop's error is the water term: large at b = 0, and much smaller for vapor at b = −7000
+    z = 1000.0
+    @test abs(frozen_water_rate(z, 0.0) - true_rate(z, 0.0)) > 0.1 * abs(true_rate(z, 0.0))
+    @test abs(frozen_water_rate(z, 0.0) - true_rate(z, 0.0)) > 5 * abs(frozen_water_rate(z, -7000.0) - true_rate(z, -7000.0))
+end
+
+#####
+##### Drag heating of the adaptive implicit part of sedimentation
+#####
+
+# A test-only scheme: rain with a prescribed fall speed and no phase changes.
+struct FallingRain{FT}
+    fall_speed :: FT
+end
+
+const AM = Breeze.AtmosphereModels
+
+AM.prognostic_field_names(::FallingRain) = (:ρqʳ,)
+AM.moisture_prognostic_name(::FallingRain) = :ρqᵛ
+AM.condensate_liquid_fraction(::FallingRain, ::Val{:ρqʳ}) = 1
+AM.sedimentation_velocity(::FallingRain, μ, ::Val{:ρqʳ}) = μ.wʳ
+AM.compute_microphysical_tendencies!(::FallingRain, model) = nothing
+AM.microphysics_model_update!(::FallingRain, model) = nothing
+@inline AM.maybe_adjust_thermodynamic_state(state, ::FallingRain, vapor, constants) = state
+@inline AM.microphysical_state(::FallingRain, ρ, μ::NamedTuple, state, velocities) = (; qʳ=μ.ρqʳ / ρ)
+@inline AM.moisture_fractions(::FallingRain, state::NamedTuple, vapor) = MoistureMassFractions(vapor, state.qʳ, oftype(vapor, 0))
+AM.liquid_mass_fraction(::FallingRain, model) = model.microphysical_fields.qʳ
+AM.ice_mass_fraction(::FallingRain, model) = nothing
+
+function AM.materialize_microphysical_fields(::FallingRain, grid, bcs)
+    return (; ρqʳ=CenterField(grid; boundary_conditions=bcs.ρqʳ),
+              qʳ=CenterField(grid), qᵛ=CenterField(grid), wʳ=AM.sedimentation_velocity_field(grid))
+end
+
+@inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, m::FallingRain, state, ρ, thermo, constants)
+    @inbounds μ.qʳ[i, j, k] = state.qʳ
+    @inbounds μ.qᵛ[i, j, k] = thermo.moisture_mass_fractions.vapor
+    @inbounds μ.wʳ[i, j, k] = - m.fall_speed
+    return nothing
+end
+
+# Over one step, the stored energy ∫ρ(𝓊 + g z) changes only by the enthalpy that leaves through the
+# bottom, for explicit sedimentation and when most of the fall is the adaptive implicit remainder.
+@testset "Drag heating of sedimenting rain closes the energy budget [$label]" for (label, rain_advection) in (
+        ("explicit", UpwindBiased(order=1)),
+        ("adaptive implicit", WENO(time_discretization=Oceananigans.Utils.AdaptiveVerticallyImplicitDiscretization(cfl=0.01))))
+
+    grid = RectilinearGrid(CPU(); size=8, halo=3, z=(0, 2000), topology=(Flat, Flat, Bounded))
+    constants = ThermodynamicConstants(Float64)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 290)
+    model = AtmosphereModel(grid; dynamics, formulation = :MoistEntropy, microphysics = FallingRain(8.0),
+                            thermodynamic_constants = constants,
+                            scalar_advection = (; ρqʳ = rain_advection))
+    rain(z) = ifelse((z > 600) & (z < 1600), 2e-3, 0.0)
+    set!(model; ρ = model.dynamics.reference_state.density, θ = 290, qᵛ = 0.005, qʳ = rain)
+
+    g = constants.gravitational_acceleration
+    zc = collect(znodes(grid, Center()))
+    Δz = 250.0
+    ρ_field(model) = vec(interior(total_density(model.dynamics)))
+    ρᵛ_field(model) = vec(interior(model.moisture_density))
+    function stored_energy(model)
+        T = vec(interior(model.temperature)); ρ = ρ_field(model)
+        ρʳ = vec(interior(model.microphysical_fields.ρqʳ))
+        ρᵛ = ρᵛ_field(model)
+        return sum(map(zc, T, ρ, ρʳ, ρᵛ) do z, T, ρ, ρʳ, ρᵛ
+            q = MoistureMassFractions(ρᵛ / ρ, ρʳ / ρ, 0.0)
+            ρ * (internal_energy(T, q, constants) + g * z)
+        end) * Δz
+    end
+    # The rain sits above the ground, so nothing leaves in this short step.
+    E₀ = stored_energy(model)
+    m₀ = copy(vec(interior(model.microphysical_fields.ρqʳ)))
+    Δt = 0.5
+    time_step!(model, Δt)
+    update_state!(model)
+    m₁ = vec(interior(model.microphysical_fields.ρqʳ))
+    released = - g * sum(zc .* (m₁ .- m₀)) * Δz
+    @test released > 0
+    # Energy changes by less than a few percent of the potential energy the rain released
+    @test abs(stored_energy(model) - E₀) < 0.05 * released
+end

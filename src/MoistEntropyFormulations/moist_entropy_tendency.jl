@@ -207,37 +207,51 @@ end
 # −Φ g (zᶠ − zᶜ) through its top face. The bottom cell takes the whole fall to the ground of the
 # condensate that leaves the domain. The heating enters the entropy at the local temperature.
 
-function add_precipitation_drag_heating!(G, model, tracer_transport_velocity)
+function add_precipitation_drag_heating!(G, model, tracer_transport_velocity,
+                                         mass_fluxes = explicit_condensate_mass_fluxes, Δt = 1)
     condensates = values(model.sedimentation)
     isempty(condensates) && return nothing
     grid = model.grid
     g = model.thermodynamic_constants.gravitational_acceleration
     launch!(grid.architecture, grid, :xyz, _add_precipitation_drag_heating!,
-            G, grid, condensates, tracer_transport_velocity, model.dynamics, model.temperature, g)
+            G, grid, condensates, tracer_transport_velocity, mass_fluxes, Δt,
+            model.dynamics, model.temperature, g)
     return nothing
 end
 
-@kernel function _add_precipitation_drag_heating!(G, grid, condensates, wᵗ, dynamics, temperature_field, g)
+@kernel function _add_precipitation_drag_heating!(G, grid, condensates, wᵗ, mass_fluxes, Δt, dynamics, temperature_field, g)
     i, j, k = @index(Global, NTuple)
     ρ = total_density(dynamics)
-    Φ⁻, Φ⁺ = sedimentation_mass_fluxes(i, j, k, grid, condensates, wᵗ, ρ)
+    Φ⁻, Φ⁺ = sedimentation_mass_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ)
     ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
     ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
     zᶜ = znode(i, j, k,     grid, c, c, c)
     z⁻ = znode(i, j, k,     grid, c, c, f)
     z⁺ = znode(i, j, k + 1, grid, c, c, f)
     ε = - g * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁻ * Φ⁻ * (zᶜ - z⁻) + ρᶠ⁺ * Φ⁺ * (z⁺ - zᶜ))
-    @inbounds G[i, j, k] += ε / temperature_field[i, j, k]
+    @inbounds G[i, j, k] += Δt * ε / temperature_field[i, j, k]
 end
 
 # The sedimentation parts F(wᵗ + wˣ) − F(wᵗ) of the condensates' volume fluxes through the lower and
-# upper faces of cell (i, j, k), summed over the condensates
-@inline sedimentation_mass_fluxes(i, j, k, grid, ::Tuple{}, wᵗ, ρ) = (zero(grid), zero(grid))
+# upper faces of cell (i, j, k), summed over the condensates; `mass_fluxes` selects the part the tracer
+# tendency applies or the remainder the adaptive implicit solve applied.
+@inline sedimentation_mass_fluxes(i, j, k, grid, ::Tuple{}, wᵗ, mass_fluxes, ρ) = (zero(grid), zero(grid))
 
-@inline function sedimentation_mass_fluxes(i, j, k, grid, condensates::Tuple, wᵗ, ρ)
-    F⁻, F⁺ = explicit_condensate_mass_fluxes(i, j, k, grid, first(condensates), wᵗ, ρ)
-    rest⁻, rest⁺ = sedimentation_mass_fluxes(i, j, k, grid, Base.tail(condensates), wᵗ, ρ)
+@inline function sedimentation_mass_fluxes(i, j, k, grid, condensates::Tuple, wᵗ, mass_fluxes, ρ)
+    F⁻, F⁺ = mass_fluxes(i, j, k, grid, first(condensates), wᵗ, ρ)
+    rest⁻, rest⁺ = sedimentation_mass_fluxes(i, j, k, grid, Base.tail(condensates), wᵗ, mass_fluxes, ρ)
     return F⁻[1] - F⁻[2] + rest⁻, F⁺[1] - F⁺[2] + rest⁺
+end
+
+# The mass the adaptive implicit solves sedimented heats the air by drag exactly as the explicit part does.
+function AtmosphereModels.implicit_sedimentation_step!(model, Δt, velocities, formulation::MoistEntropyFormulation)
+    condensates = values(model.sedimentation)
+    implicit_sedimentation(condensates) || return nothing
+    invoke(AtmosphereModels.implicit_sedimentation_step!, Tuple{Any, Any, Any, Any}, model, Δt, velocities, formulation)
+    arch = model.grid.architecture
+    add_precipitation_drag_heating!(thermodynamic_density(formulation), model, velocities.w,
+                                    implicit_condensate_mass_fluxes, kernel_time_step(arch, model.grid, Δt))
+    return nothing
 end
 
 #####
