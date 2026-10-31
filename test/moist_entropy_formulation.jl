@@ -373,6 +373,7 @@ AM.moisture_prognostic_name(::FallingRain) = :ρqᵛ
 AM.condensate_liquid_fraction(::FallingRain, ::Val{:ρqʳ}) = 1
 AM.sedimentation_velocity(::FallingRain, μ, ::Val{:ρqʳ}) = μ.wʳ
 AM.compute_microphysical_tendencies!(::FallingRain, model) = nothing
+@inline AM.microphysical_tendency(::FallingRain, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 AM.microphysics_model_update!(::FallingRain, model) = nothing
 @inline AM.maybe_adjust_thermodynamic_state(state, ::FallingRain, vapor, constants) = state
 @inline AM.microphysical_state(::FallingRain, ρ, μ::NamedTuple, state, velocities) = (; qʳ=μ.ρqʳ / ρ)
