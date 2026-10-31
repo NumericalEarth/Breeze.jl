@@ -71,6 +71,8 @@ jobs:
             topology: 'PBB'
             # Two Reactant compiles of the split-explicit step
             timeout: 60
+            # Profile the vanilla cases' kernels once every case is timed (--profile_kernels)
+            profile_kernels: true
             extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude'
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
@@ -159,14 +161,16 @@ jobs:
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
-          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
+          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }} ${{ matrix.profile_kernels && '--profile_kernels' || '' }}
       - name: Stop earlyoom
         cancel: earlyoom
       - name: "Upload benchmark results as artifacts"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
-          path: benchmarking/benchmark_results.*
+          path: |
+            benchmarking/benchmark_results.*
+            benchmarking/kernel_profile.*
           retention-days: 90
           overwrite: false
       - name: "Upload MLIR dumps as artifacts"
@@ -202,8 +206,9 @@ jobs:
           overwrite: false
       - name: Create job summary
         timeout-minutes: 1
-        run:
+        run: |
           cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
+          if [ -f "kernel_profile.md" ]; then cat "kernel_profile.md" >> "${GITHUB_STEP_SUMMARY}"; fi
 
   publish-benchmarks:
     name: "Publish benchmarks"
@@ -371,6 +376,29 @@ jobs:
           if compile_data:
               with open('github-action-benchmark-compile.json', 'w') as f:
                   json.dump(compile_data, f)
+
+          # Per-kernel GPU times from run_benchmarks.jl --profile_kernels: one figure per
+          # configuration, one panel per grid, one line per kernel, in ms per time step
+          kernel_data = []
+          for path in sorted(glob.glob('benchmarks-*/kernel_profile.json')):
+              with open(path) as f:
+                  for d in json.load(f):
+                      base_name = d['name'].split('_')[0]
+                      grid = d['grid_size']
+                      grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
+                      gpu = d['metadata']['gpu_name']
+                      level_1 = f"Kernel time; {base_name}; Dynamics: {d['dynamics']}; Microphysics: {d['microphysics']} [{d['float_type']}]"
+                      level_2 = f'Grid: {grid_str}'
+                      level_3 = f'{gpu}'
+                      for k in d['top_kernels']:
+                          kernel = k['name'].replace('/', '_')
+                          level_4 = kernel if len(kernel) <= 60 else kernel[:57] + '...'
+                          name = f"{level_1}/{level_2}/{level_3}/{level_4}"
+                          kernel_data.append({'name': name, 'unit': 'ms/step', 'value': 1e3 * k['total_time_seconds'] / d['time_steps']})
+
+          if kernel_data:
+              with open('github-action-benchmark-kernels.json', 'w') as f:
+                  json.dump(kernel_data, f)
       - name: "Generate token"
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         if: ${{ ! github.event.pull_request.head.repo.fork }}
@@ -432,6 +460,26 @@ jobs:
           comment-always: false
           summary-always: true
           # Compile times are noisier than run times
+          alert-threshold: "150%"
+          fail-on-alert: false
+          auto-push: ${{ github.event_name == 'push' }}
+          max-items-in-chart: 1000
+          comment-on-alert: false
+      - name: "Clean up benchmark data clone before kernel times"
+        if: ${{ hashFiles('github-action-benchmark-kernels.json') != '' }}
+        run: rm -rf benchmark-data-repository
+      - name: "Publish kernel times"
+        if: ${{ hashFiles('github-action-benchmark-kernels.json') != '' }}
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
+        with:
+          name: Breeze.jl Kernel Times
+          tool: "customSmallerIsBetter"
+          output-file-path: "github-action-benchmark-kernels.json"
+          benchmark-data-dir-path: "."
+          gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
+          github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
+          comment-always: false
+          summary-always: true
           alert-threshold: "150%"
           fail-on-alert: false
           auto-push: ${{ github.event_name == 'push' }}

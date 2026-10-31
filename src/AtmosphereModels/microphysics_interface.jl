@@ -26,9 +26,10 @@
 using Breeze.Thermodynamics: MoistureMassFractions
 using Breeze.Utils: sum_properties
 
+using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.BoundaryConditions: BoundaryCondition, NormalFlow
 using Oceananigans.Fields: set!, ZeroField, ZFaceField
-using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ, V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ
+using Oceananigans.Operators: Azᶜᶜᶠ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ, V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ
 
 #####
 ##### MicrophysicalState abstraction
@@ -307,10 +308,14 @@ function compute_microphysical_tendencies!(microphysics, model)
     G_tuple = map(n -> getproperty(G, n), all_names)
     name_tuple = map(Val, all_names)
 
+    # Microphysics responds to the physical velocity of the current state, so we pass
+    # `model.velocities` rather than `transport_velocities(model)`, which is the contravariant
+    # vertical velocity on terrain-following grids and the acoustic time average under
+    # `AcousticRungeKutta3`.
     launch!(arch, grid, :xyz, _default_microphysical_tendencies_kernel!,
             G_tuple, name_tuple, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, specific_prognostic_moisture(model),
-            model.microphysical_fields, transport_velocities(model))
+            model.microphysical_fields, model.velocities)
 
     return nothing
 end
@@ -1007,7 +1012,7 @@ end
 ##### Sedimentation of the condensate part of the thermodynamic variables
 #####
 #
-# The thermodynamic variables carry a condensate part — the deficit −(ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / (cᵖᵐ Π)
+# The thermodynamic variables carry a condensate part — the deficit −(ℒˡ(T) qˡ + ℒⁱ(T) qⁱ) / (ĉᵖ Π)
 # of θˡⁱ, the content qˡ (cˡ T − ℒˡ₀) + qⁱ (cⁱ T − ℒⁱ₀) of s — and when condensate falls, that
 # part must fall with it. Rain-out then leaves the latent warming from forming the rain aloft
 # and pre-cools the layer that later evaporates it, the mechanism that drives cold pools.
@@ -1057,7 +1062,7 @@ variable `φ` at fixed temperature along the dynamics' composition increment
 ([`sedimentation_composition_increment`](@ref)); per phase the enthalpy the falling mass
 carries (phase enthalpy `hˣ` on the compressible core, `hˣ − hᵈ` under the fixed-density
 convention); and `∂φ/∂h`, the local response of `φ` to heating: one for `s`, and for `θˡⁱ`
-`1 / (cᵖᵐ Π)` at prescribed pressure (the anelastic core) or the fixed-gas-density response
+`1 / (ĉᵖ Π)` at prescribed pressure (the anelastic core) or the fixed-gas-density response
 `β_cv` on the compressible core (see `sedimentation_thermal_response`). Each thermodynamic
 formulation extends this function for its `formulation` type. The remaining arguments are the model's
 `dynamics`, thermodynamic `constants`, `microphysics` and `microphysical_fields`, prognostic
@@ -1345,6 +1350,129 @@ The generic method is implemented in `Breeze.Advection`, which owns the flux ker
 loaded after this module.
 """
 bottom_precipitation_flux(model) = bottom_precipitation_flux(model, model.microphysics)
+
+#####
+##### Precipitation flux profile diagnostic
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a `KernelFunctionOperation` at `(Center, Center, Face)` for the downward mass flux of
+sedimenting condensate through every ``z``-face, in kg m⁻² s⁻¹ (positive downward).
+Multiply by `3600` to obtain a precipitation rate in mm h⁻¹ of liquid water equivalent.
+
+The flux is the sedimentation part of each condensate's advective mass flux,
+``-ρ (F(wᵗ + wˢ) - F(wᵗ)) / A_z``, formed with the same advection scheme and face
+reconstruction that transports the condensate ([`sedimentation_mass_fluxes`](@ref) plus the
+adaptive-implicit remainder [`implicit_sedimentation_mass_fluxes`](@ref)), so it matches the
+sedimentation the model applies. Here ``F(w)`` is the volume-weighted face flux of the
+condensate's specific humidity at velocity ``w``, ``wᵗ`` the transport velocity and ``wˢ``
+the condensate's (negative) sedimentation velocity. At the bottom face, where an impenetrable
+boundary makes ``wᵗ = 0``, it reduces to [`bottom_precipitation_flux`](@ref).
+
+The keyword argument `condensates` selects which sedimenting condensates contribute, by
+prognostic name (see `keys(model.sedimentation)`); by default all of them do, which for a
+scheme with sedimenting cloud condensate includes cloud droplet fallout. Use, for example,
+`condensates = (:ρqʳ,)` for the rain flux alone. Sedimentation velocities are those diagnosed
+during the most recent `update_state!`.
+
+# Example
+
+```jldoctest
+using Breeze
+grid = RectilinearGrid(size=(4, 4, 8), extent=(1e3, 1e3, 1e3))
+model = AtmosphereModel(grid; microphysics=P3Microphysics())
+set!(model, θ=290, qᵛ=0.01, qᶜˡ=1e-3)
+P = precipitation_flux(model, condensates=(:ρqʳ,))
+
+# output
+KernelFunctionOperation at (Center, Center, Face)
+├── grid: 4×4×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
+├── kernel_function: precipitation_flux_kernel (generic function with 1 method)
+└── arguments: ("Tuple", "Field", "Field")
+```
+"""
+function precipitation_flux(model; condensates = keys(model.sedimentation))
+    sedimenting = values(model.sedimentation[condensates])
+    return KernelFunctionOperation{Center, Center, Face}(precipitation_flux_kernel, model.grid,
+                                                         sedimenting,
+                                                         total_density(model.dynamics),
+                                                         transport_velocities(model).w)
+end
+
+# The flux through face k is formed from the fluxes of the cell below it, except at the top
+# face (k = Nz + 1), which is the upper face of cell Nz; this keeps every evaluation inside the
+# cells whose face reconstructions the tracer tendency uses.
+@inline function precipitation_flux_kernel(i, j, k, grid, condensates, ρ, wᵗ)
+    Nz = size(grid, 3)
+    kᶜ = min(k, Nz)
+    top = k > Nz
+    F = sedimentation_face_flux(i, j, kᶜ, top, grid, condensates, wᵗ, ρ)
+    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+    return -ρᶠ * F / Azᶜᶜᶠ(i, j, k, grid)
+end
+
+@inline sedimentation_face_flux(i, j, k, top, grid, ::Tuple{}, wᵗ, ρ) = zero(grid)
+
+@inline function sedimentation_face_flux(i, j, k, top, grid, condensates, wᵗ, ρ)
+    condensate = first(condensates)
+    Fᵉ⁻, Fᵉ⁺ = explicit_condensate_mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ)
+    Fⁱ⁻, Fⁱ⁺ = implicit_condensate_mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ)
+    # Each pair is (flux at wᵗ + wˢ, flux at wᵗ); their difference is the sedimentation part.
+    F⁻ = (Fᵉ⁻[1] - Fᵉ⁻[2]) + (Fⁱ⁻[1] - Fⁱ⁻[2])
+    F⁺ = (Fᵉ⁺[1] - Fᵉ⁺[2]) + (Fⁱ⁺[1] - Fⁱ⁺[2])
+    F = ifelse(top, F⁺, F⁻)
+    return F + sedimentation_face_flux(i, j, k, top, grid, Base.tail(condensates), wᵗ, ρ)
+end
+
+#####
+##### Microphysical process rate diagnostic
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a `KernelFunctionOperation` at `(Center, Center, Center)` that evaluates the
+microphysical process rate called `name` of `model.microphysics` (for example
+`:autoconversion`, `:accretion`, `:condensation`, or `:rain_evaporation`).
+
+Rates are *specific*: per unit mass of moist air, in kg kg⁻¹ s⁻¹ for mass transfers and
+kg⁻¹ s⁻¹ for number transfers. Multiply by the density (for example
+[`total_density`](@ref)`(model.dynamics)`) for a rate per unit volume, whose vertical
+`Integral` is a column-integrated rate in kg m⁻² s⁻¹.
+
+Each scheme documents which rates it provides and their sign conventions. Schemes that
+compute their rates jointly with sink limiters evaluate the limited rates, that is, exactly
+the rates that drive the model tendencies, at the current model state. The operation
+is lazy: wrap it in `Field` to compute and store it, slice it with `Field(op; indices)`, or
+reduce it with `Integral` and `Average`.
+
+Supported schemes: `PredictedParticlePropertiesMicrophysics`, for which every rate field
+of `P3ProcessRates` is available.
+
+# Example
+
+```jldoctest
+using Breeze
+grid = RectilinearGrid(size=(4, 4, 8), extent=(1e3, 1e3, 1e3))
+model = AtmosphereModel(grid; microphysics=P3Microphysics())
+set!(model, θ=290, qᵛ=0.01, qᶜˡ=1e-3)
+autoconversion = MicrophysicalProcessRate(model, :autoconversion)
+
+# output
+KernelFunctionOperation at (Center, Center, Center)
+├── grid: 4×4×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
+├── kernel_function: P3ProcessRateKernelFunction(:autoconversion,)
+└── arguments: ()
+```
+"""
+MicrophysicalProcessRate(model, name::Symbol) =
+    MicrophysicalProcessRate(model, model.microphysics, Val(name))
+
+MicrophysicalProcessRate(model, microphysics, ::Val{name}) where name =
+    throw(ArgumentError(string("MicrophysicalProcessRate is not implemented for :", name,
+                               " and microphysics of type ", summary(microphysics), ".")))
 
 #####
 ##### Cloud effective radius interface

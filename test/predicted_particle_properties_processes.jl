@@ -1319,6 +1319,35 @@ end
 
     end
 
+    @testset "ice_melting_number_rate with subnormal dry ice" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+
+        # nⁱ / qⁱ overflows Float32 for subnormal qⁱ; with no melting this used to give Inf × 0 = NaN
+        @test PPP.ice_melting_number_rate(1f-44, 1f0, 0f0) == 0
+        @test PPP.ice_melting_number_rate(1f-39, 1f3, 0f0) == 0
+        @test PPP.ice_melting_number_rate(0f0, 1f3, 0f0) == 0
+
+        # Melting at the sink limit removes the number at the same fractional rate as the mass
+        @test PPP.ice_melting_number_rate(1f-4, 1f4, 1f-5) ≈ 1f3
+        @test isfinite(PPP.ice_melting_number_rate(1f-39, 1f3, 1f-40))
+
+        # Full tendency bundle in a melting-layer remnant: subnormal dry ice, a liquid coating below
+        # the whole-particle clip, and leftover ice number. ρnʳ and ρnⁱ used to be NaN here.
+        FT = Float32
+        constants = ThermodynamicConstants(FT)
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        P = FT(6e4)
+        for T in (FT(265), FT(270), FT(274)), qⁱ in (FT(1e-39), FT(1e-44)), qʷⁱ in (FT(1e-16), FT(5e-15))
+            ρ = P / (dry_air_gas_constant(constants) * T)
+            qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+            q = MoistureMassFractions(qᵛ, qʷⁱ, qⁱ)
+            𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), P), T, constants)
+            ℳ = P3MicrophysicalState(FT(0), p3.cloud.number_concentration / ρ, FT(0), FT(0),
+                                     qⁱ, FT(1e3), FT(0), FT(0), qʷⁱ, FT(0), FT(0), FT(0))
+            @test all(isfinite, bundled_p3_tendencies(p3, ρ, ℳ, 𝒰, constants))
+        end
+    end
+
     @testset "ice_melting_rates partitioning" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
@@ -1798,6 +1827,53 @@ end
         ρ_no_cloud = rime_density(p3, qcl, FT(0), T, 𝕎ⁱ, ρ, constants,
                                   transport, μᶜˡ, λᶜˡ)
         @test ρ_no_cloud == 400
+    end
+
+    @testset "Configurable rime-density fit" begin
+        for FT in (Float32, Float64)
+            constants = ThermodynamicConstants(FT)
+            T, ρ = FT(263.15), FT(1)
+            transport = air_transport_properties(T, FT(90000), constants)
+            μ, λ = FT(2), FT(1e5)
+            for customized in (false, true)
+                parameters = customized ? ProcessRate(FT;
+                    rime_density_constant_coefficient = 60,
+                    rime_density_linear_coefficient = 90,
+                    rime_density_quadratic_coefficient = -4,
+                    rime_density_transition_impact = 6,
+                    maximum_rime_impact = 14,
+                    maximum_rime_density = 850) : ProcessRate(FT)
+                p3 = (; process_rates = parameters, minimum_mass_mixing_ratio = FT(1e-12))
+                @test isbitstype(typeof(parameters))
+                @test parameters.rime_density_constant_coefficient isa FT
+                # Choose ice speed to prescribe the impact parameter directly.
+                a = constants.gravitational_acceleration * parameters.liquid_water_density /
+                    (18 * transport.ν * ρ)
+                cloud_speed = a * (μ + 5) * (μ + 4) / λ^2
+                diameter = (μ + 4) / λ
+                transition = customized ? FT(6) : FT(8)
+                upper = customized ? FT(14) : FT(12)
+                polynomial(R) = customized ? 60 + 90R - 4R^2 :
+                    (FT(0.051) + FT(0.114) * R - FT(0.0055) * R^2) * FT(1000)
+                for R in (FT(0), FT(3), transition - FT(0.001), transition,
+                          transition + FT(0.001), (transition + upper) / 2, upper, upper + 1)
+                    speed = cloud_speed + R * (parameters.freezing_temperature - T) /
+                            (parameters.rime_impact_coefficient * diameter)
+                    result = @inferred rime_density(p3, FT(1e-3), FT(2e-7), T, speed,
+                                                   ρ, constants, transport, μ, λ)
+                    impact = clamp(R, FT(1), upper)
+                    expected = impact <= transition ? polynomial(impact) :
+                        polynomial(transition) + (parameters.maximum_rime_density - polynomial(transition)) *
+                        (impact - transition) / (upper - transition)
+                    @test result ≈ clamp(expected, 50, parameters.maximum_rime_density)
+                    if !customized && impact > transition
+                        @test result ≈ FT(611) + FT(72.25) * (impact - FT(8))
+                    end
+                end
+            end
+            @test_throws ArgumentError ProcessRate(FT; rime_density_transition_impact = 12)
+            @test_throws ArgumentError ProcessRate(FT; rime_density_transition_impact = 0)
+        end
     end
 
     @testset "Rime consistency enforcement" begin

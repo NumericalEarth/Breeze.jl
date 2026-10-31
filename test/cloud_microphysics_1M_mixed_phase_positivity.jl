@@ -24,7 +24,7 @@ function mixed_phase_state(FT, constants; T, qᵛ, qᶜˡ, qᶜⁱ, qʳ, qˢⁿ,
     q = MoistureMassFractions(FT(qᵛ), FT(qᶜˡ + qʳ), FT(qᶜⁱ + qˢⁿ))
     𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), FT(p)), FT(T), constants)
     ρ = density(𝒰, constants)
-    ℳ = MixedPhaseOneMomentState(FT(qᶜˡ), FT(qᶜⁱ), FT(qʳ), FT(qˢⁿ))
+    ℳ = MixedPhaseOneMomentState(FT(qᶜˡ), FT(qᶜⁱ), FT(qʳ), FT(qˢⁿ), zero(FT))
     return ρ, ℳ, 𝒰
 end
 
@@ -168,7 +168,8 @@ end
         parameters.cloud,
         parameters.precip,
         parameters.air_properties,
-        parameters.terminal_velocity)
+        parameters.terminal_velocity,
+        parameters.max_latent_heating_rate)
     categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
     no_formation = ConstantRateCondensateFormation(zero(FT))
     cloud_formations = (saturation_adjustment_1M(FT).cloud_formation,
