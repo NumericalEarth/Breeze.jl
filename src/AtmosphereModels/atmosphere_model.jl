@@ -304,7 +304,8 @@ function AtmosphereModel(grid;
                                                         prognostic_microphysical_fields,
                                                         tracers)
 
-    implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
+    closure_solver = implicit_diffusion_solver(time_discretization(closure), grid)
+    implicit_solver = closure_solver
 
     # Build a vertical tridiagonal solver for adaptive implicit vertical advection even when the
     # closure is explicit. When both are present, the diffusion and advection diagonals are summed
@@ -318,7 +319,8 @@ function AtmosphereModel(grid;
     # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
     if timestepper_uses_dynamics(timestepper)
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver,
-                                  cache_advecting_state = advection_needs_solver, timestepper_kwargs...)
+                                  cache_advecting_state = advection_needs_solver, sedimentation,
+                                  timestepper_kwargs...)
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
     end

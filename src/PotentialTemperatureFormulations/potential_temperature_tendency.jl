@@ -188,9 +188,10 @@ end
 # transported quantity. These are instantaneous responses; multiplying them by a finite mass
 # increment does not exactly reconstruct thermal energy.
 #
-# The explicit tendency is built in `update_state!` right after the temperature field was
-# diagnosed from the same θ and q, so the content reads that temperature and recovers the Exner
-# function from ĉᵖ Π θˡⁱ = H, rather than inverting θ for T again (a Newton iteration on the
+# The explicit tendency is built from the state `update_state!` just diagnosed, in
+# `update_state!` itself or at the start of an acoustic stage before anything moves θ or q, so
+# the temperature field matches θ and q: the content reads that temperature and recovers the
+# Exner function from ĉᵖ Π θˡⁱ = H, rather than inverting θ for T again (a Newton iteration on the
 # compressible core) in this cell and both of its neighbors. `implicit_sedimentation_step!` runs
 # after the tracers' solves have moved q, where the temperature field no longer matches the
 # state, so it passes `nothing` (see `content_temperature`) and T is rediagnosed from (θ, q).

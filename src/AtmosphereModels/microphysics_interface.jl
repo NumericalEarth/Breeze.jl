@@ -1048,11 +1048,10 @@ end
 # tridiagonal solve applies depends on the solved tracer state, so its content is moved by
 # `implicit_sedimentation_step!` between the tracers' solves and the thermodynamic variable's
 # own, from the fluxes the solves actually applied, and then takes the thermodynamic variable's
-# post-solve (its implicit transport and diffusion on the SSP path; diffusion only on the acoustic
-# path, whose implicit thermodynamic transport runs inside the substep loop). An estimate of that
-# remainder at the pre-solve state
-# would overstate a one-cell loss by the factor 1 + C at implicit Courant number C, precisely in
-# the regime the solve exists for.
+# implicit transport and diffusion. An estimate of that remainder at the pre-solve state would
+# overstate a one-cell loss by the factor 1 + C at implicit Courant number C, precisely in the
+# regime the solve exists for. That is the SSP path; the acoustic stepper splits both parts into
+# their sensible and composition contents and moves them itself (see `AcousticRungeKutta3`).
 
 """
 $(TYPEDSIGNATURES)
@@ -1111,6 +1110,12 @@ conservative thermodynamic face flux. Continuity advances `ρᵈ` without a sedi
 every core, so the content moved per unit total mass is the change of the specific variable, and
 the cell's ratio `ρᵈ / ρ` (one on the anelastic core, the dry mass fraction on the compressible
 core) turns it into the change of the coupling-weighted prognostic.
+
+The tendency has two parts, from `cᵢ = χᵢ + (∂φ/∂h) (hᵢ − h)`: the composition part, `χ` times the
+mass the cell gains, changes the composition at fixed temperature and so, on the compressible
+core, at fixed pressure; the sensible part, `∂φ/∂h` times the excess enthalpy the arriving mass
+brings, heats or cools the cell. `AcousticRungeKutta3` keeps them apart
+([`add_sedimentation_tendency_parts!`](@ref)).
 """
 @inline sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature) =
@@ -1121,11 +1126,16 @@ core) turns it into the change of the coupling-weighted prognostic.
 # The tendency from the part of each condensate's mass fluxes that `mass_fluxes` selects:
 # `explicit_condensate_mass_fluxes` for the part the tracer tendency applies,
 # `implicit_condensate_mass_fluxes` for the remainder the adaptive implicit solve applied.
-@inline sedimentation_content_tendency(i, j, k, grid, ::Tuple{}, args...) = zero(grid)
+@inline sedimentation_content_tendency(i, j, k, grid, condensates, args...) =
+    sum(sedimentation_content_tendency_parts(i, j, k, grid, condensates, args...))
 
-@inline function sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, formulation, dynamics,
-                                                constants, microphysics, microphysical_fields, specific_prognostic_moisture,
-                                                temperature)
+# The same tendency as `(composition, sensible)`: the content χ the mass fluxes carry, and the
+# conversion ∂φ/∂h of the excess enthalpy the arriving mass brings (see `sedimentation_tendency`).
+@inline sedimentation_content_tendency_parts(i, j, k, grid, ::Tuple{}, args...) = (zero(grid), zero(grid))
+
+@inline function sedimentation_content_tendency_parts(i, j, k, grid, condensates, wᵗ, mass_fluxes, formulation, dynamics,
+                                                      constants, microphysics, microphysical_fields,
+                                                      specific_prognostic_moisture, temperature)
     # Content of the cells below, at, and above k; each face draws on the two cells flanking it.
     # The clamps keep the bottom face (nothing enters through an impenetrable bottom) and the
     # top face (the fall speeds vanish there) from reading unfilled halos.
@@ -1137,16 +1147,20 @@ core) turns it into the change of the coupling-weighted prognostic.
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     ρ = total_density(dynamics)
     ρᵈ = dynamics_density(dynamics)
-    Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
+    (Φᶜ⁻, Φˢ⁻), (Φᶜ⁺, Φˢ⁺) = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
     ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
     ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
     @inbounds coupling_fraction = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
-    return -(coupling_fraction * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻))
+    weight = coupling_fraction * V⁻¹ᶜᶜᶜ(i, j, k, grid)
+    composition = -(weight * (ρᶠ⁺ * Φᶜ⁺ - ρᶠ⁻ * Φᶜ⁻))
+    sensible    = -(weight * (ρᶠ⁺ * Φˢ⁺ - ρᶠ⁻ * Φˢ⁻))
+    return composition, sensible
 end
 
 # Σᵢ [cᵢ(Wᵢ) Fᵢ(Wᵢ) − cᵢ(wᵗ) Fᵢ(wᵗ)] through the lower and upper faces of cell (i, j, k): the
 # sedimentation part of the advective flux of condensate content the cell receives through each
-# face, per unit density and integrated over the face area, summed over the condensates.
+# face, per unit density and integrated over the face area, summed over the condensates, as a
+# `(composition, sensible)` pair per face.
 # `mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ)` returns the condensate's `((F⁻(W), F⁻(wᵗ)),
 # (F⁺(W), F⁺(wᵗ)))`. `c⁻`, `c⁰` and `c⁺` are the `(; χ, h, ∂φ∂h)` of the cells below, at and
 # above k.
@@ -1160,7 +1174,8 @@ end
 # below). Constituents are binned by their liquid fraction, so P3's liquid on ice contributes
 # its ice-speed flux to the liquid content, and a fraction in between blends the two
 # (`liquid_fraction_content`).
-@inline condensate_content_fluxes(i, j, k, grid, ::Tuple{}, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺) = (zero(grid), zero(grid))
+@inline condensate_content_fluxes(i, j, k, grid, ::Tuple{}, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺) =
+    ((zero(grid), zero(grid)), (zero(grid), zero(grid)))
 
 @inline function condensate_content_fluxes(i, j, k, grid, condensates::Tuple, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
     condensate = first(condensates)
@@ -1174,25 +1189,25 @@ end
     Φ⁻ = condensate_content_flux(i, j, k,     wᵗ, w, F⁻, χ, c⁰.∂φ∂h, h⁰, h⁻, h⁰)
     Φ⁺ = condensate_content_flux(i, j, k + 1, wᵗ, w, F⁺, χ, c⁰.∂φ∂h, h⁰, h⁰, h⁺)
     rest⁻, rest⁺ = condensate_content_fluxes(i, j, k, grid, Base.tail(condensates), wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
-    return Φ⁻ + rest⁻, Φ⁺ + rest⁺
+    return map(+, Φ⁻, rest⁻), map(+, Φ⁺, rest⁺)
 end
 
 # Content flux of one condensate through face k from its mass fluxes `F = (F(W), F(wᵗ))`, each
 # delivering the cell's content χ plus its conversion ∂φ/∂h of the enthalpy brought from the cell
-# it drains — above the face for a downward velocity, below for an upward one — in excess of h.
+# it drains, in excess of h: returned as the composition part, χ times the net mass flux, and the
+# sensible part.
 @inline function condensate_content_flux(i, j, k, wᵗ, w, F, χ, ∂φ∂h, h, h_below, h_above)
     Fᵂ, Fᵗ = F
     @inbounds wᵗₖ = wᵗ[i, j, k]
     @inbounds Wₖ = wᵗₖ + w[i, j, k]
-    cᵂ = delivered_content(Wₖ, χ, ∂φ∂h, h, h_below, h_above)
-    cᵗ = delivered_content(wᵗₖ, χ, ∂φ∂h, h, h_below, h_above)
-    return cᵂ * Fᵂ - cᵗ * Fᵗ
+    composition = χ * (Fᵂ - Fᵗ)
+    sensible = ∂φ∂h * (excess_enthalpy(Wₖ, h, h_below, h_above) * Fᵂ - excess_enthalpy(wᵗₖ, h, h_below, h_above) * Fᵗ)
+    return composition, sensible
 end
 
-@inline function delivered_content(w, χ, ∂φ∂h, h, h_below, h_above)
-    h_upwind = ifelse(w > 0, h_below, h_above)
-    return χ + ∂φ∂h * (h_upwind - h)
-end
+# The enthalpy a flux at velocity w brings from the cell it drains, below the face for an upward
+# velocity and above it for a downward one, in excess of the receiving cell's own h.
+@inline excess_enthalpy(w, h, h_below, h_above) = ifelse(w > 0, h_below, h_above) - h
 
 # The content of a mass with liquid fraction f, from the formulation's (liquid, ice) pair. The
 # content is a directional derivative in composition space and the enthalpy is extensive, so both

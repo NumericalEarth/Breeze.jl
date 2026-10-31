@@ -546,13 +546,14 @@ end
     @test all(isfinite, interior(ρθ))
     @test all(isfinite, interior(ρqʳ))
 
-    # ... and on the compressible acoustic path. There the thermodynamic variable's implicit
-    # vertical transport is solved inside the acoustic substep loop, before the tracers' solves,
-    # so the content moved after them takes only the post-loop diffusion solve: a change of the
-    # finite-step splitting (first order in Δt), while the mass the content follows and the water
-    # budget are unchanged; no energy-conservation statement is implied. At the
-    # operator level the step moves χ times the mass the tracer's solve moved, weighted by the
-    # cell's dry mass fraction, with a nonzero implicit remainder.
+    # ... and on the compressible acoustic path. There the stage collects the content as a
+    # tendency and adds it after the acoustic substep loop, whose linearized pressure would read it
+    # as a pressure change (see `remove_sedimentation_content!`), so it takes only the post-loop
+    # diffusion solve, not the implicit vertical transport the loop applies to the rest of the
+    # thermodynamic variable: a change of the finite-step splitting (first order in Δt), while the
+    # mass the content follows and the water budget are unchanged; no energy-conservation
+    # statement is implied. At the operator level the step moves χ times the mass the tracer's
+    # solve moved, weighted by the cell's dry mass fraction, with a nonzero implicit remainder.
     acoustic_grid = RectilinearGrid(default_arch; size=Nz, z=(0, 800), topology=(Flat, Flat, Bounded))
     acoustic_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
     acoustic_advection = (; ρqʳ = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.05)))
@@ -691,8 +692,12 @@ end
         return falling .- suspended
     end
 
-    # The acoustic stage builds both tendencies in `update_state!`'s `compute_tendencies!`: ρθ's
-    # advected by the predictor velocity, its sedimentation term and ρqʳ's by the transport velocity.
+    # `update_state!`'s `compute_tendencies!` builds ρθ's slow tendency, advected by the predictor
+    # velocity, and ρqʳ's, advected by the transport velocity. On this stepper that tendency carries
+    # no sedimentation content: the stage forms the content at stage start from the tracers' frozen
+    # transport velocity and splits it, adding the sensible heat to the slow tendency and collecting
+    # the composition content, which the substep loop would read as a pressure change, in its own
+    # field to add after the loop (see `remove_sedimentation_content!`).
     function slow_ρθ_tendency()
         Breeze.AtmosphereModels.compute_tendencies!(model)
         return column(Gρθ)
@@ -703,9 +708,23 @@ end
         return column(Gρqʳ)
     end
 
-    Sθ = sedimentation_part(slow_ρθ_tendency)
+    stage_content_field = model.timestepper.sedimentation_content
+    function stage_content_parts()
+        Breeze.AtmosphereModels.compute_tendencies!(model)
+        slow = column(Gρθ)
+        fill!(stage_content_field, 0)
+        Breeze.TimeSteppers.add_explicit_sedimentation_content!(model)
+        return column(stage_content_field), column(Gρθ) .- slow
+    end
+    composition_content() = stage_content_parts()[1]
+    sensible_heat() = stage_content_parts()[2]
+
+    @test maximum(abs.(sedimentation_part(slow_ρθ_tendency))) == 0
+    Sᶜ = sedimentation_part(composition_content)
+    Sˢ = sedimentation_part(sensible_heat)
     Sq = sedimentation_part(rain_tendency)
-    @test maximum(abs.(Sθ)) > 0
+    @test maximum(abs.(Sᶜ)) > 0
+    @test maximum(abs.(Sˢ)) > 0
 
     # The sedimentation mass flux the rain tendency applies through each face, integrated down
     # from the top, through which nothing enters, ...
@@ -717,8 +736,8 @@ end
 
     # ... falls everywhere, so it carries the content of the cell above each face, and the
     # cell's dry mass fraction converts the change of θ into that of ρᵈ θ (see
-    # `expected_sedimentation_tendency`). The content ρθ's tendency moves is this, formed with
-    # the tracers' velocity, ...
+    # `expected_sedimentation_tendency`, which is linear in χ and β, so each part has its own
+    # reference). The content the stage moves is this, formed with the tracers' velocity, ...
     constants = model.thermodynamic_constants
     content(k) = @allowscalar Breeze.AtmosphereModels.condensate_content(
         1, 1, k, grid, model.formulation, model.dynamics, constants, model.microphysics, μ,
@@ -729,15 +748,19 @@ end
     β = [cₖ.∂φ∂h for cₖ in c]
     qᵈ = column(dynamics_density(model.dynamics)) ./ column(total_density(model.dynamics))
     Sθ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, χ, h, β; coupling = qᵈ)
+    Sᶜ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, χ, h, zero(β); coupling = qᵈ)
+    Sˢ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, zero(χ), h, β; coupling = qᵈ)
     tolerance = sqrt(eps(FT)) * maximum(abs.(Sθ_expected))
-    @test Sθ ≈ Sθ_expected
+    @test Sᶜ .+ Sˢ ≈ Sθ_expected
+    @test Sᶜ ≈ Sᶜ_expected
+    @test isapprox(Sˢ, Sˢ_expected; atol = tolerance)
 
     # ... and not with the predictor's, at which the explicit fractions of the combined and the
     # transport velocity are clipped to the same speed and the fluxes cancel, so a transport
     # velocity equal to the predictor moves no content at all.
     set!(w̄, model.velocities.w)
     Breeze.TimeSteppers.cache_transport_velocity!(model)
-    Sθ_predictor = sedimentation_part(slow_ρθ_tendency)
+    Sθ_predictor = sedimentation_part(composition_content) .+ sedimentation_part(sensible_heat)
     @test maximum(abs.(Sθ_predictor)) <= tolerance
 end
 

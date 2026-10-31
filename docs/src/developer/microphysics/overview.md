@@ -249,13 +249,21 @@ with: upwind selection and the adaptive implicit split are nonlinear in the velo
 formed at the predictor would not recombine into the mass flux the condensate takes. Under
 adaptive implicit vertical advection `sedimentation_tendency` carries the content of the explicit
 fraction of each mass flux only; between the tracers' implicit solves of a stage and the
-thermodynamic variable's own, the time steppers call `implicit_sedimentation_step!`, which moves
+thermodynamic variable's own, the SSP stepper calls `implicit_sedimentation_step!`, which moves
 the content of the remainder from the first-order fluxes the solves actually applied, at the
 solved state,
 so the heat follows the mass at any fall Courant number and then takes the thermodynamic
-variable's post-solve: its implicit transport and diffusion on the SSP path, diffusion only on the
-acoustic path, whose implicit thermodynamic transport runs inside the substep loop (a first-order
-splitting difference). Rain-out thus leaves latent warming aloft and pre-cools
+variable's implicit transport and diffusion. The acoustic stepper splits the content, explicit
+and implicit, in two. Its substep loop forms the pressure perturbation from the thermodynamic
+perturbation alone. The sensible heat the arriving mass brings is a real heating, so it joins the
+slow tendency the loop integrates. The composition content changes ``ρθˡⁱ`` at fixed temperature
+and so leaves the pressure alone; fed to the loop it would read as a spurious pressure
+perturbation. Each stage therefore collects it separately and adds it to the variable after the
+loop, before the variable's post-loop implicit solve, which the content then takes too, in a solve
+of its own, both solves reading their coefficients from the variable frozen between the addition
+and the solves; the next stage takes exactly the solved increment back out of its stage-entry
+state. The loop's implicit thermodynamic transport, applied inside the loop, never sees the
+content: a first-order splitting difference. Rain-out thus leaves latent warming aloft and pre-cools
 the layer that later evaporates the arriving rain, the mechanism that builds cold pools.
 
 ### Bottom Precipitation Flux
