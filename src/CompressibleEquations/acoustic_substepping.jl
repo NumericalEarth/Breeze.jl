@@ -1500,7 +1500,9 @@ end
 ##### `BREEZE_FUSED_CARRIED_COLUMN_SOLVE=false` at load restores the three launches.
 #####
 
-const FUSED_CARRIED_COLUMN_SOLVE = Ref(true)
+# Default OFF: bitwise, but at 3 km (job 6002) the fused launch took 8.72 ms per substep against 8.53 for the three
+# launches it replaces (rhs 3.72 + solve 1.72 + recovery 3.09): a single serial column thread at 128 registers.
+const FUSED_CARRIED_COLUMN_SOLVE = Ref(false)
 
 # `BREEZE_FUSED_COLUMN_RECOVERY` (default false): also run the post-solve recovery in the column launch.
 # One thread per column serializes the recovery's Nz independent levels; as its own 3-D launch it is
