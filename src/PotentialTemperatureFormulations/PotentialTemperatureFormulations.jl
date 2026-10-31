@@ -32,7 +32,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
     PrecipitationDragHeating, FixedVolumePhaseChange, SubgridDissipativeHeating,
     materialize_phase_change_source, subgrid_dissipation,
     moisture_prognostic_name, condensate_field_names, condensate_liquid_fraction,
-    phase_change_source_applies
+    phase_change_source_applies, specific_prognostic_moisture
 using Breeze.Solvers: materialize_solver
 using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, StaticEnergyState, with_temperature,
     mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, vapor_gas_constant,

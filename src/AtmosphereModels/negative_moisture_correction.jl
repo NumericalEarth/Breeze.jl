@@ -116,6 +116,14 @@ correction_moisture_fields(microphysics, microphysical_fields) = ()
 """
 $(TYPEDSIGNATURES)
 
+Return the liquid fraction of each field of [`correction_moisture_fields`](@ref), for a scheme
+whose borrowing a [`moisture_correction_heating`](@ref) must charge for its latent heat.
+"""
+correction_liquid_fractions(microphysics) = ()
+
+"""
+$(TYPEDSIGNATURES)
+
 Return a tuple of `(number_field, mass_field)` pairs for number concentration
 consistency. After species borrowing, any number field whose corresponding
 mass field is non-positive is zeroed to avoid unphysical states (e.g., finite
@@ -164,8 +172,9 @@ For microphysics with number concentrations (categories subtying
 orphaned number concentrations are zeroed and negatives are clamped after mass borrowing.
 
 The correction is mass-conserving at each level for species borrowing and
-column-integrated for vertical borrowing. No energy adjustment is needed because Breeze's thermodynamic
-prognostics are moist-conserved variables.
+column-integrated for vertical borrowing. No energy adjustment is needed for thermodynamic
+prognostics that are moist-conserved variables; a variable that is not invariant under phase change
+takes the latent heat of the borrowing through [`moisture_correction_heating`](@ref).
 
 The borrowing chain is defined by [`correction_moisture_fields`](@ref), which
 microphysics schemes extend to specify their prognostic mass fields.
@@ -175,6 +184,26 @@ fix_negative_moisture!(model) = fix_negative_moisture!(model.microphysics, model
 fix_negative_moisture!(::Nothing, model) = nothing
 
 negative_moisture_correction(microphysics) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Return an object that charges the thermodynamic variable for the phase changes that species
+borrowing implies, or `nothing` (the default) for a variable that is invariant under them. It is
+passed to [`apply_moisture_correction_heating!`](@ref).
+"""
+moisture_correction_heating(formulation, model) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply the latent heat of the change from the water densities `before` to the current ones at cell
+`(i, j, k)`. The `moisture_fields` are as for [`correction_moisture_fields`](@ref).
+"""
+apply_moisture_correction_heating!(::Nothing, i, j, k, before, moisture_fields, ρqᵛᵉ) = nothing
+
+@inline correction_water_densities(i, j, k, moisture_fields, ρqᵛᵉ) =
+    @inbounds (ρqᵛᵉ[i, j, k], map(f -> @inbounds(f[i, j, k]), moisture_fields)...)
 
 function fix_negative_moisture!(microphysics, model)
     correction = negative_moisture_correction(microphysics)
@@ -194,7 +223,8 @@ function fix_negative_moisture!(microphysics, model)
     launch!(arch, grid, :xy,
             _fix_negative_moisture_column!,
             correction,
-            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid,
+            moisture_correction_heating(model.formulation, model))
 
     return nothing
 end
@@ -203,14 +233,14 @@ end
 ##### Column-wise kernel
 #####
 
-@kernel function _fix_negative_moisture_column!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+@kernel function _fix_negative_moisture_column!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid, heating)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
     # Phase 1: Species borrowing at each level
     for k = 1:Nz
         @inbounds ρ = ρ₀[i, j, k]
-        apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, correction)
+        apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, correction, heating)
     end
 
     # Zero orphaned number concentrations (mass zeroed but number still positive)
@@ -227,10 +257,17 @@ end
     apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction, ρ₀)
 end
 
-@inline apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::VerticalBorrowing) = nothing
+@inline apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::VerticalBorrowing, heating) = nothing
 
-@inline function apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::SpeciesBorrowing)
+@inline function apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::SpeciesBorrowing, ::Nothing)
     same_level_borrow!(i, j, k, ρ, moisture_fields, ρqᵛᵉ)
+    return nothing
+end
+
+@inline function apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::SpeciesBorrowing, heating)
+    before = correction_water_densities(i, j, k, moisture_fields, ρqᵛᵉ)
+    same_level_borrow!(i, j, k, ρ, moisture_fields, ρqᵛᵉ)
+    apply_moisture_correction_heating!(heating, i, j, k, before, moisture_fields, ρqᵛᵉ)
     return nothing
 end
 

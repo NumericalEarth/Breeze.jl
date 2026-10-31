@@ -41,7 +41,9 @@ model's `TetensFormula`, and writes the temperature it reaches into the thermody
 It serves every potential temperature flavor and so isolates the choice of the variable from the
 microphysics. A [`Dry`](@ref Breeze.PotentialTemperatureFormulations.Dry) flavor with
 [`IsobaricPressureWork`](@ref Breeze.PotentialTemperatureFormulations.IsobaricPressureWork) adjusts
-at fixed pressure instead, with ``ℒˡ / cᵖᵐ``.
+at fixed pressure instead, with ``ℒˡ / cᵖᵐ``. The liquid-ice flavor adjusts at fixed ``θˡⁱ`` and
+density by default ([`PhaseInvariantAdjustment`](@ref)), which is what its hydrostatic expansion source pairs
+with; `liquid_ice_adjustment = IsochoricPressureWork()` adjusts at fixed internal energy instead.
 
 With `stage_estimate = true`, the default, the Runge-Kutta stages feel the increments of the previous
 adjustment as tendencies of the water and of `ρθ`, which are removed again before the next adjustment, so
@@ -59,13 +61,22 @@ OperatorSplitSaturationAdjustment()
 OperatorSplitSaturationAdjustment(tolerance = 0.0002, stage_estimate = true)
 ```
 """
-struct OperatorSplitSaturationAdjustment{FT, E}
+struct OperatorSplitSaturationAdjustment{FT, E, L}
     tolerance :: FT
     stage_estimate :: E # Val(true) or Val(false)
+    liquid_ice_adjustment :: L
 end
 
-OperatorSplitSaturationAdjustment(FT = Oceananigans.defaults.FloatType; tolerance = 2e-4, stage_estimate = true) =
-    OperatorSplitSaturationAdjustment(convert(FT, tolerance), Val(stage_estimate))
+"""
+$(TYPEDEF)
+
+Saturation adjustment at fixed ``θˡⁱ``, density and total water: only the partition of the water changes.
+"""
+struct PhaseInvariantAdjustment end
+
+OperatorSplitSaturationAdjustment(FT = Oceananigans.defaults.FloatType; tolerance = 2e-4, stage_estimate = true,
+                                  liquid_ice_adjustment = PhaseInvariantAdjustment()) =
+    OperatorSplitSaturationAdjustment(convert(FT, tolerance), Val(stage_estimate), liquid_ice_adjustment)
 
 const OSSA = OperatorSplitSaturationAdjustment
 
@@ -111,7 +122,7 @@ AtmosphereModels.liquid_mass_fraction(::OSSA, model) = model.microphysical_field
 AtmosphereModels.ice_mass_fraction(::OSSA, model) = nothing
 
 @inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::OSSA, ρ, qᵛ, μ)
-    qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
+    qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     return MoistureMassFractions(qᵛ, qᶜˡ)
 end
 
@@ -151,8 +162,8 @@ end
 ##### The adjustment
 #####
 
-adjustment_pressure_work(::PotentialTemperatureFormulation) = IsochoricPressureWork()
-adjustment_pressure_work(formulation::DryPotentialTemperatureFormulation) = formulation.flavor.pressure_work
+adjustment_pressure_work(microphysics, ::PotentialTemperatureFormulation) = microphysics.liquid_ice_adjustment
+adjustment_pressure_work(microphysics, formulation::DryPotentialTemperatureFormulation) = formulation.flavor.pressure_work
 
 function AtmosphereModels.microphysics_model_update!(microphysics::OSSA, model)
     grid = model.grid
@@ -167,7 +178,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::OSSA, model)
 
     formulation = model.formulation
     launch!(architecture(grid), grid, :xyz, _operator_split_saturation_adjustment!,
-            microphysics, adjustment_pressure_work(formulation), grid, kernel_time_step(architecture(grid), grid, Δt),
+            microphysics, adjustment_pressure_work(microphysics, formulation), grid, kernel_time_step(architecture(grid), grid, Δt),
             formulation, model.dynamics, thermodynamic_density(formulation), formulation.potential_temperature,
             model.moisture_density, model.microphysical_fields, ρ, ρᵈ, model.thermodynamic_constants)
 
@@ -197,7 +208,7 @@ end
     𝒰⁻ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q⁻)
     T⁻ = temperature(𝒰⁻, constants)
 
-    T⁺, rᵛ⁺, rᶜˡ⁺ = saturation_adjustment_step(pressure_work, T⁻, ρqᵛ⁻ / ρᵈ, ρqᶜˡ⁻ / ρᵈ, ρᵈ, microphysics.tolerance, constants)
+    T⁺, rᵛ⁺, rᶜˡ⁺ = adjust_water(pressure_work, 𝒰⁻, T⁻, ρqᵛ⁻ / ρᵈ, ρqᶜˡ⁻ / ρᵈ, ρᵈ, ρ, microphysics.tolerance, constants)
 
     q⁺ = MoistureMassFractions(rᵛ⁺ * ρᵈ / ρ, rᶜˡ⁺ * ρᵈ / ρ)
     θ⁺ = adjusted_potential_temperature(pressure_work, 𝒰⁻, q⁺, T⁺, ρ, standard_pressure(dynamics), constants)
@@ -227,6 +238,49 @@ end
 @inline function adjusted_potential_temperature(::IsobaricPressureWork, 𝒰⁻, q⁺, T⁺, ρ, pˢᵗ, constants)
     κᵈ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
     return T⁺ * (pˢᵗ / air_pressure(𝒰⁻, constants))^κᵈ
+end
+
+@inline adjusted_potential_temperature(::PhaseInvariantAdjustment, 𝒰⁻, q⁺, T⁺, ρ, pˢᵗ, constants) = 𝒰⁻.potential_temperature
+
+@inline adjust_water(pressure_work, 𝒰, T, rᵛ, rᶜˡ, ρᵈ, ρ, tolerance, constants) =
+    saturation_adjustment_step(pressure_work, T, rᵛ, rᶜˡ, ρᵈ, tolerance, constants)
+
+# Saturation of the state that fixed θˡⁱ implies: the temperature follows from the partition of the water.
+# The denominator is the fixed-pressure Newton slope, which is good enough to converge in a few passes.
+@inline function adjust_water(::PhaseInvariantAdjustment, 𝒰, T₀, rᵛ₀, rᶜˡ₀, ρᵈ, ρ, tolerance, constants::TetensFormulaThermodynamicConstants)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    tetens = constants.saturation_vapor_pressure
+    pᵣ, Tᵣ = tetens.reference_saturation_vapor_pressure, tetens.reference_temperature
+    a, δT = tetens.liquid_coefficient, tetens.liquid_temperature_offset
+    ε = Rᵈ / Rᵛ
+    p₀ = ρᵈ * (Rᵈ + Rᵛ * rᵛ₀) * T₀
+    c = constants.dry_air.heat_capacity + constants.vapor.heat_capacity * rᵛ₀ + constants.liquid.heat_capacity * max(0, rᶜˡ₀)
+    ℒ = absolute_zero_latent_heat(constants, constants.liquid) + (constants.vapor.heat_capacity - constants.liquid.heat_capacity) * T₀
+    t₁ = ℒ / c
+    d₁ = t₁ * a * (Tᵣ - δT)
+    pᵛ⁺ = min(pᵣ * exp(a * (T₀ - Tᵣ) / (T₀ - δT)), p₀ / 2)
+    rᵛ⁺ = ε * pᵛ⁺ / (p₀ - pᵛ⁺)
+    T = T₀
+    rᵛ = rᵛ₀
+    rᶜˡ = rᶜˡ₀
+    active = (rᶜˡ₀ > 1e-12) | (rᶜˡ₀ < 0) | (rᵛ₀ > rᵛ⁺)
+    iteration = 0
+    while active & (iteration < 100)
+        iteration += 1
+        Δrᵛ = (rᵛ⁺ - rᵛ) / (1 + d₁ * rᵛ⁺ / (T - δT)^2)
+        Δrᵛ = min(Δrᵛ, rᶜˡ)
+        Δrᵛ = max(Δrᵛ, 1e-20 - rᵛ)
+        rᵛ += Δrᵛ
+        rᶜˡ -= Δrᵛ
+        T⁻ = T
+        T = temperature(with_moisture(𝒰, MoistureMassFractions(rᵛ * ρᵈ / ρ, rᶜˡ * ρᵈ / ρ)), constants)
+        p = ρᵈ * (Rᵈ + Rᵛ * rᵛ) * T
+        pᵛ⁺ = min(pᵣ * exp(a * (T - Tᵣ) / (T - δT)), p₀ / 2)
+        rᵛ⁺ = ε * pᵛ⁺ / (p - pᵛ⁺)
+        active = abs(T - T⁻) > tolerance
+    end
+    return T, rᵛ, rᶜˡ
 end
 
 # The heat capacity that the condensation heats per unit dry air, the heat released per unit

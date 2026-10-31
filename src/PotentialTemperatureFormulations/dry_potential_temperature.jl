@@ -101,6 +101,66 @@ end
 end
 
 #####
+##### Negative moisture correction
+#####
+#
+# Borrowing between water species is a phase change that θˡⁱ does not notice but θ must pay for.
+
+struct DryMoistureCorrectionHeating{L, B, R, D, T, Θ, Q, M, F, MP, C}
+    flavor :: L
+    potential_temperature_density :: B
+    total_density :: R
+    dry_density :: D
+    temperature :: T
+    potential_temperature :: Θ
+    specific_moisture :: Q
+    microphysical_fields :: M
+    liquid_fractions :: F
+    microphysics :: MP
+    constants :: C
+end
+
+Adapt.adapt_structure(to, h::DryMoistureCorrectionHeating) =
+    DryMoistureCorrectionHeating(h.flavor, adapt(to, h.potential_temperature_density), adapt(to, h.total_density),
+                                 adapt(to, h.dry_density), adapt(to, h.temperature), adapt(to, h.potential_temperature),
+                                 adapt(to, h.specific_moisture), adapt(to, h.microphysical_fields), h.liquid_fractions,
+                                 adapt(to, h.microphysics), adapt(to, h.constants))
+
+AtmosphereModels.moisture_correction_heating(formulation::DryPotentialTemperatureFormulation, model) =
+    DryMoistureCorrectionHeating(formulation.flavor, formulation.potential_temperature_density,
+                                 total_density(model.dynamics), dynamics_density(model.dynamics), model.temperature,
+                                 formulation.potential_temperature, specific_prognostic_moisture(model),
+                                 model.microphysical_fields, AtmosphereModels.correction_liquid_fractions(model.microphysics),
+                                 model.microphysics, model.thermodynamic_constants)
+
+@inline correction_phase_heat(::Tuple{}, ::Tuple{}, ::Tuple{}, Wˡ, Wⁱ) = 0
+
+@inline function correction_phase_heat(before::Tuple, after::Tuple, fractions::Tuple, Wˡ, Wⁱ)
+    f = first(fractions)
+    heat = (f * Wˡ + (1 - f) * Wⁱ) * (first(after) - first(before))
+    return heat + correction_phase_heat(Base.tail(before), Base.tail(after), Base.tail(fractions), Wˡ, Wⁱ)
+end
+
+@inline function AtmosphereModels.apply_moisture_correction_heating!(h::DryMoistureCorrectionHeating, i, j, k, before,
+                                                                     moisture_fields, ρqᵛᵉ)
+    after = AtmosphereModels.correction_water_densities(i, j, k, moisture_fields, ρqᵛᵉ)
+    @inbounds begin
+        ρ = h.total_density[i, j, k]
+        ρᵈ = h.dry_density[i, j, k]
+        T = h.temperature[i, j, k]
+        θ = h.potential_temperature[i, j, k]
+        qᵛ = h.specific_moisture[i, j, k]
+    end
+    q = grid_moisture_fractions(i, j, k, nothing, h.microphysics, ρ, qᵛ, h.microphysical_fields)
+    Wᵛ, Wˡ, Wⁱ = phase_change_weights(h.flavor, T, q, ρ, ρᵈ / ρ * θ, nothing, nothing, h.constants)
+    ΔΘ = Wᵛ * (first(after) - first(before)) +
+         correction_phase_heat(Base.tail(before), Base.tail(after), h.liquid_fractions, Wˡ, Wⁱ)
+    # A state with no temperature yet (the first `update_state!` of `set!`) has no response.
+    @inbounds h.potential_temperature_density[i, j, k] += ifelse(T > 0, ΔΘ, zero(ΔΘ))
+    return nothing
+end
+
+#####
 ##### Sedimentation
 #####
 #

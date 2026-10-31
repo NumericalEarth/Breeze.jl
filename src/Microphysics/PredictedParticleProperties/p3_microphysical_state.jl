@@ -149,6 +149,7 @@ AM.negative_moisture_correction(p3::P3) = p3.negative_moisture_correction
 # Borrowing searches the whole lighter-species tail, so an empty immediate donor does
 # not prevent a deficit from reaching available water farther down the chain.
 @inline AM.correction_moisture_fields(::P3, μ) = (μ.ρqʷⁱ, μ.ρqⁱ, μ.ρqʳ, μ.ρqᶜˡ)
+@inline AM.correction_liquid_fractions(::P3) = (1, 0, 1, 1)
 
 # Fields that must vanish with the mass they describe. Ice number, rime mass, and rime
 # volume are all properties of the ice population, so zeroing them when `ρqⁱ` is gone
