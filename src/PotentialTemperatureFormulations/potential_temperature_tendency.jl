@@ -5,16 +5,23 @@ using Oceananigans.Fields: Field, set!
 using Breeze.Thermodynamics: temperature
 using Breeze.BoundaryConditions: theta_to_energy_bcs, materialize_atmosphere_field_bcs
 
-const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTemperatureFormulation}
+const PotentialTemperatureModel = AtmosphereModel{<:Any, <:PotentialTemperatureFormulation}
+const LiquidIcePotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTemperatureFormulation}
+const DryPotentialTemperatureModel = AtmosphereModel{<:Any, <:DryPotentialTemperatureFormulation}
 
-AtmosphereModels.specific_thermodynamic_field(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature
+AtmosphereModels.specific_thermodynamic_field(formulation::PotentialTemperatureFormulation) = formulation.potential_temperature
 
 #####
 ##### Helper accessors
 #####
 
-AtmosphereModels.liquid_ice_potential_temperature_density(model::PotentialTemperatureModel) = model.formulation.potential_temperature_density
-AtmosphereModels.liquid_ice_potential_temperature(model::PotentialTemperatureModel) = model.formulation.potential_temperature
+AtmosphereModels.liquid_ice_potential_temperature_density(model::LiquidIcePotentialTemperatureModel) = model.formulation.potential_temperature_density
+AtmosphereModels.liquid_ice_potential_temperature(model::LiquidIcePotentialTemperatureModel) = model.formulation.potential_temperature
+
+# A dry θ model does not carry θˡⁱ: it is diagnosed, never read off the prognostic field.
+AtmosphereModels.liquid_ice_potential_temperature_density(model::DryPotentialTemperatureModel) = Diagnostics.LiquidIcePotentialTemperature(model, :density)
+AtmosphereModels.liquid_ice_potential_temperature(model::DryPotentialTemperatureModel) = Diagnostics.LiquidIcePotentialTemperature(model, :specific)
+
 AtmosphereModels.static_energy(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :specific)
 
 """
@@ -75,7 +82,7 @@ end
                                                 advection,
                                                 radiation_flux_divergence_field,
                                                 dynamics,
-                                                formulation::LiquidIcePotentialTemperatureFormulation,
+                                                formulation::PotentialTemperatureFormulation,
                                                 constants,
                                                 specific_prognostic_moisture,
                                                 velocities,
@@ -100,19 +107,19 @@ end
     end
 
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
-    H = liquid_ice_enthalpy(T, q, constants)
-    ∂θ∂h = potential_temperature_heating_response(θ, H)
+    ∂θ∂h = heating_response(formulation.flavor, θ, T, q, constants)
 
     FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
     div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
-    Dt_ln_p = pressure_logarithm_tendency(i, j, k, grid, dynamics, constants, model_fields.w)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
              + ρᵈ / ρ * (FρE + div_ℐ) * ∂θ∂h # a volumetric heating Q changes h at Q / ρ, so ρᵈ θˡⁱ at (ρᵈ / ρ) Q ∂θˡⁱ/∂h
-             + ρᵈ * expansion_work_source(θ, T, q, formulation.exner_exponent, constants) * Dt_ln_p) # expansion work ρᵈ (Rᵐ T − κ ĉᵖ Π θˡⁱ) / (ĉᵖ Π) D ln p / Dt
+             # expansion work: for θˡⁱ, ρᵈ (Rᵐ T − κ ĉᵖ Π θˡⁱ) / (ĉᵖ Π) D ln p / Dt
+             + expansion_tendency(i, j, k, grid, formulation.flavor, dynamics, ρᵈ, θ, T, q,
+                                  formulation.exner_exponent, constants, velocities, model_fields))
 end
 
 # Thermodynamic state at cell (i, j, k) from the prognostic fields: the total density (mass
@@ -153,6 +160,14 @@ end
     Rᵐ = mixture_gas_constant(q, constants)
     return potential_temperature_heating_response(θ, H) * (Rᵐ * T - κ * H)
 end
+
+@inline function expansion_tendency(i, j, k, grid, ::LiquidIce, dynamics, ρᵈ, θ, T, q, exponent, constants, velocities, model_fields)
+    Dt_ln_p = pressure_logarithm_tendency(i, j, k, grid, dynamics, constants, model_fields.w)
+    return ρᵈ * expansion_work_source(θ, T, q, exponent, constants) * Dt_ln_p
+end
+
+@inline heating_response(::LiquidIce, θ, T, q, constants) =
+    potential_temperature_heating_response(θ, liquid_ice_enthalpy(T, q, constants))
 
 @inline function pressure_logarithm_tendency(i, j, k, grid, dynamics, constants, w)
     g = constants.gravitational_acceleration
@@ -215,7 +230,7 @@ turbulence `closure` dissipates: ``(ρᵈ / ρ) ρε / (ĉᵖ Π)`` with
         T = temperature[i, j, k]
     end
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
-    ∂θ∂h = potential_temperature_heating_response(θ, liquid_ice_enthalpy(T, q, constants))
+    ∂θ∂h = heating_response(formulation.flavor, θ, T, q, constants)
     ρε = subgrid_dissipation(i, j, k, grid, ρ_field, closure, closure_fields, clock, model_fields)
     return ρᵈ / ρ * ρε * ∂θ∂h
 end
@@ -253,10 +268,10 @@ end
 # microphysics adds its tendencies to the water tendencies G_q, and `finish_phase_change_source!`
 # adds it back after, so the two leave Σ_q W_q Ṡ_q.
 
-AtmosphereModels.begin_phase_change_source!(formulation::LiquidIcePotentialTemperatureFormulation, model) =
+AtmosphereModels.begin_phase_change_source!(formulation::PotentialTemperatureFormulation, model) =
     accumulate_phase_change_source!(formulation.fixed_volume_phase_change, model, -1)
 
-AtmosphereModels.finish_phase_change_source!(formulation::LiquidIcePotentialTemperatureFormulation, model) =
+AtmosphereModels.finish_phase_change_source!(formulation::PotentialTemperatureFormulation, model) =
     accumulate_phase_change_source!(formulation.fixed_volume_phase_change, model, +1)
 
 accumulate_phase_change_source!(::Nothing, model, sign) = nothing
@@ -264,6 +279,7 @@ accumulate_phase_change_source!(::Nothing, model, sign) = nothing
 function accumulate_phase_change_source!(::FixedVolumePhaseChange, model, sign)
     microphysics = model.microphysics
     isnothing(microphysics) && return nothing
+    phase_change_source_applies(microphysics) || return nothing
     moisture_prognostic_name(microphysics) === :ρqᵛ ||
         throw(ArgumentError("fixed_volume_phase_change needs a microphysics scheme whose prognostic moisture " *
                             "is the vapor density ρqᵛ (non-equilibrium cloud formation), got " *
@@ -314,8 +330,11 @@ end
     end
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     pˢᵗ = standard_pressure(dynamics)
-    return fixed_volume_phase_change_weights(T, q, ρ, ρᵈ / ρ * θ, pˢᵗ, formulation.exner_exponent, constants)
+    return phase_change_weights(formulation.flavor, T, q, ρ, ρᵈ / ρ * θ, pˢᵗ, formulation.exner_exponent, constants)
 end
+
+@inline phase_change_weights(::LiquidIce, T, q, ρ, Θ_ρ, pˢᵗ, exponent, constants) =
+    fixed_volume_phase_change_weights(T, q, ρ, Θ_ρ, pˢᵗ, exponent, constants)
 
 """
 $(TYPEDSIGNATURES)
@@ -471,10 +490,19 @@ end
 ##### Set thermodynamic variables
 #####
 
-AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Union{Val{:ρθ}, Val{:ρθˡⁱ}}, value) =
+AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:ρθ}, value) =
     set!(model.formulation.potential_temperature_density, value)
 
-function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Union{Val{:θ}, Val{:θˡⁱ}}, value)
+AtmosphereModels.set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureModel, ::Val{:ρθˡⁱ}, value) =
+    AtmosphereModels.set_thermodynamic_variable!(model, Val(:ρθ), value)
+
+AtmosphereModels.set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureModel, ::Val{:θˡⁱ}, value) =
+    AtmosphereModels.set_thermodynamic_variable!(model, Val(:θ), value)
+
+AtmosphereModels.set_thermodynamic_variable!(::DryPotentialTemperatureModel, name::Union{Val{:ρθˡⁱ}, Val{:θˡⁱ}}, value) =
+    throw(ArgumentError("A DryPotentialTemperatureFormulation does not evolve θˡⁱ; set θ or T instead of $name."))
+
+function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:θ}, value)
     set!(model.formulation.potential_temperature, value)
     ρ = dynamics_density(model.dynamics)
     θˡⁱ = model.formulation.potential_temperature
