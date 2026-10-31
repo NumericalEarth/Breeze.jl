@@ -37,7 +37,10 @@ using Oceananigans.Operators:
     # Vertical derivative at faces, for the static stability
     ∂zᶜᶜᶠ,
     # Cell height, for the mixing-length sweeps
-    Δzᶜᶜᶜ
+    Δzᶜᶜᶜ,
+    # Velocity gradients and interpolations at the stress locations, for the subgrid dissipation
+    ∂xᶜᶜᶜ, ∂yᶜᶜᶜ, ∂zᶜᶜᶜ, ∂xᶠᶠᶜ, ∂yᶠᶠᶜ, ∂xᶠᶜᶠ, ∂zᶠᶜᶠ, ∂yᶜᶠᶠ, ∂zᶜᶠᶠ,
+    ℑxyᶜᶜᵃ, ℑxzᶜᵃᶜ, ℑyzᵃᶜᶜ
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
@@ -167,6 +170,47 @@ end
         + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶠ, 𝒯_wy, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
         + δzᵃᵃᶠ(i, j, k, grid, Az_qᶜᶜᶜ, 𝒯_wz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
 end
+
+#####
+##### Subgrid dissipation: the resolved kinetic energy the viscous stresses remove
+#####
+#
+# The momentum equations lose kinetic energy to the closure at the rate − Σᵢ uᵢ ∂ⱼ𝒯ᵢⱼ, which by
+# summation by parts is ∫ 𝒯ᵢⱼ ∂ⱼuᵢ: each stress component times the velocity gradient at the
+# location where the stress is evaluated (ccc for the normal stresses, the edges ffc, fcf and cff
+# for the shear stresses). ρε = − 𝒯ᵢⱼ ∂ⱼuᵢ interpolates each edge product to the cell center,
+# which on a uniform periodic grid preserves the domain integral. The stresses are evaluated with
+# an explicit time discretization whatever the closure's own, so that the part a vertically
+# implicit closure applies in its tridiagonal solve is included (at the pre-solve velocities). The
+# work of the wall stresses applied by boundary conditions is not included.
+
+@inline function AtmosphereModels.subgrid_dissipation(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple,
+                                                      clock, model_fields)
+    return sum_closure_fluxes(AtmosphereModels.subgrid_dissipation, i, j, k, grid, ρ, closures, closure_fields,
+                              clock, model_fields)
+end
+
+@inline function AtmosphereModels.subgrid_dissipation(i, j, k, grid, ρ, closure::AbstractTurbulenceClosure,
+                                                      closure_fields, clock, model_fields)
+    U = model_fields
+    args = (ExplicitTimeDiscretization(), closure, closure_fields, clock, model_fields, nothing)
+    normal = 𝒯_ux(i, j, k, grid, ρ, args...) * ∂xᶜᶜᶜ(i, j, k, grid, U.u) +
+             𝒯_vy(i, j, k, grid, ρ, args...) * ∂yᶜᶜᶜ(i, j, k, grid, U.v) +
+             𝒯_wz(i, j, k, grid, ρ, args...) * ∂zᶜᶜᶜ(i, j, k, grid, U.w)
+    shear = ℑxyᶜᶜᵃ(i, j, k, grid, xy_stress_work, ρ, U, args) +
+            ℑxzᶜᵃᶜ(i, j, k, grid, xz_stress_work, ρ, U, args) +
+            ℑyzᵃᶜᶜ(i, j, k, grid, yz_stress_work, ρ, U, args)
+    return - (normal + shear)
+end
+
+@inline xy_stress_work(i, j, k, grid, ρ, U, args) = 𝒯_uy(i, j, k, grid, ρ, args...) * ∂yᶠᶠᶜ(i, j, k, grid, U.u) +
+                                                    𝒯_vx(i, j, k, grid, ρ, args...) * ∂xᶠᶠᶜ(i, j, k, grid, U.v)
+
+@inline xz_stress_work(i, j, k, grid, ρ, U, args) = 𝒯_uz(i, j, k, grid, ρ, args...) * ∂zᶠᶜᶠ(i, j, k, grid, U.u) +
+                                                    𝒯_wx(i, j, k, grid, ρ, args...) * ∂xᶠᶜᶠ(i, j, k, grid, U.w)
+
+@inline yz_stress_work(i, j, k, grid, ρ, U, args) = 𝒯_vz(i, j, k, grid, ρ, args...) * ∂zᶜᶠᶠ(i, j, k, grid, U.v) +
+                                                    𝒯_wy(i, j, k, grid, ρ, args...) * ∂yᶜᶠᶠ(i, j, k, grid, U.w)
 
 include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")

@@ -49,12 +49,31 @@ relation `cᵖᵐ T = ĉᵖ (ρRᵐT/pˢᵗ)^κ θ + ℒˡ₀ qˡ + ℒⁱ₀ q�
   which unrolls to straight-line code (required for Reactant tracing and cheap
   reverse-mode differentiation).
 * `nothing`: the non-iterated closed-form inversion.
+
+Three optional sources close the energy budget further (see
+[Optional energy-closing sources](@ref theta-li-energy-sources)). Each is off by default:
+
+* `precipitation_heating` ([`PrecipitationDragHeating`](@ref Breeze.AtmosphereModels.PrecipitationDragHeating)):
+  the potential energy that falling condensate loses, ``g Σₓ ρqˣ |wˣ|``, heats the air it falls
+  through, on either dynamical core.
+* `fixed_volume_phase_change` ([`FixedVolumePhaseChange`](@ref Breeze.AtmosphereModels.FixedVolumePhaseChange)):
+  on the compressible core, the source ``ρθ̇ = - Σ_q 𝒥_q Ṡ_q / 𝒥_Θ`` that makes the microphysical
+  phase changes conserve the internal energy at fixed volume. Ignored on the anelastic core, where
+  phase change at fixed ``θˡⁱ`` and reference pressure is exact.
+* `dissipative_heating` ([`SubgridDissipativeHeating`](@ref Breeze.AtmosphereModels.SubgridDissipativeHeating)):
+  the kinetic energy that the turbulence closure dissipates, ``ρ ε = - 𝒯ᵢⱼ ∂ⱼ uᵢ``, heats the air.
+
+Each enters the ``ρθ`` tendency as a heating ``Q`` does, ``(ρᵈ / ρ) Q / (ĉᵖ Π)``, except the
+phase-change source, which is formed from the fixed-volume Jacobians directly.
 """
-struct LiquidIcePotentialTemperatureFormulation{F, T, S, E}
+struct LiquidIcePotentialTemperatureFormulation{F, T, S, E, P, V, D}
     potential_temperature_density :: F  # ρθ (prognostic)
     potential_temperature :: T          # θ = ρθ / ρ (diagnostic)
     temperature_solver :: S             # solver for the θˡⁱ→T inversion (or Nothing when closed-form)
     exner_exponent :: E                       # Exner exponent (VaporEquivalentExponent or DryExponent)
+    precipitation_heating :: P          # PrecipitationDragHeating or Nothing
+    fixed_volume_phase_change :: V      # FixedVolumePhaseChange or Nothing
+    dissipative_heating :: D            # SubgridDissipativeHeating or Nothing
 end
 
 """
@@ -62,6 +81,9 @@ $(TYPEDSIGNATURES)
 
 Return a `LiquidIcePotentialTemperatureFormulation` with the given `temperature_solver` and
 Exner exponent `exner_exponent`, either `VaporEquivalentExponent()` (the default) or `DryExponent()`.
+`precipitation_heating`, `fixed_volume_phase_change` and `dissipative_heating` turn on the
+optional energy-closing sources (`true`, or the option's instance) or leave them off (`false`,
+the default, or `nothing`).
 The prognostic and diagnostic fields are materialized later in the model constructor.
 
 ```jldoctest
@@ -72,36 +94,63 @@ LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2)
 # output
 LiquidIcePotentialTemperatureFormulation
 ├── exner_exponent: VaporEquivalentExponent()
-└── temperature_solver: FixedIterations(2)
+├── temperature_solver: FixedIterations(2)
+├── precipitation_heating: false
+├── fixed_volume_phase_change: false
+└── dissipative_heating: false
 ```
 
 ```jldoctest
 using Breeze
 
-LiquidIcePotentialTemperatureFormulation(exner_exponent=DryExponent())
+LiquidIcePotentialTemperatureFormulation(exner_exponent = DryExponent(),
+                                         precipitation_heating = true,
+                                         fixed_volume_phase_change = true,
+                                         dissipative_heating = true)
 
 # output
 LiquidIcePotentialTemperatureFormulation
 ├── exner_exponent: DryExponent()
-└── temperature_solver: DefaultTemperatureSolver
+├── temperature_solver: DefaultTemperatureSolver
+├── precipitation_heating: PrecipitationDragHeating()
+├── fixed_volume_phase_change: FixedVolumePhaseChange()
+└── dissipative_heating: SubgridDissipativeHeating()
 ```
 """
 LiquidIcePotentialTemperatureFormulation(; temperature_solver = DefaultTemperatureSolver(),
-                                           exner_exponent = VaporEquivalentExponent()) =
-    LiquidIcePotentialTemperatureFormulation(nothing, nothing, temperature_solver, validate_exponent(exner_exponent))
+                                           exner_exponent = VaporEquivalentExponent(),
+                                           precipitation_heating = false,
+                                           fixed_volume_phase_change = false,
+                                           dissipative_heating = false) =
+    LiquidIcePotentialTemperatureFormulation(nothing, nothing, temperature_solver, validate_exponent(exner_exponent),
+                                             energy_source_option(precipitation_heating, PrecipitationDragHeating),
+                                             energy_source_option(fixed_volume_phase_change, FixedVolumePhaseChange),
+                                             energy_source_option(dissipative_heating, SubgridDissipativeHeating))
 
 validate_exponent(κ̂::AbstractExnerExponent) = κ̂
 
 validate_exponent(κ̂) =
     throw(ArgumentError("exner_exponent must be VaporEquivalentExponent() or DryExponent(), got $κ̂"))
 
+# An energy-closing source is selected by a Bool, its option instance, or `nothing`, and stored as
+# the instance or `nothing` so kernels dispatch on it rather than branch.
+energy_source_option(flag::Bool, Option) = flag ? Option() : nothing
+energy_source_option(::Nothing, Option) = nothing
+energy_source_option(option, Option) = option isa Option ? option :
+    throw(ArgumentError("expected a Bool, nothing or $(nameof(Option))(), got $option"))
+
 AtmosphereModels.liquid_ice_exner_exponent(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.exner_exponent
+
+AtmosphereModels.precipitation_heating(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.precipitation_heating
 
 Adapt.adapt_structure(to, formulation::LiquidIcePotentialTemperatureFormulation) =
     LiquidIcePotentialTemperatureFormulation(adapt(to, formulation.potential_temperature_density),
                                              adapt(to, formulation.potential_temperature),
                                              formulation.temperature_solver,
-                                             formulation.exner_exponent)
+                                             formulation.exner_exponent,
+                                             formulation.precipitation_heating,
+                                             formulation.fixed_volume_phase_change,
+                                             formulation.dissipative_heating)
 
 function BoundaryConditions.fill_halo_regions!(formulation::LiquidIcePotentialTemperatureFormulation)
     fill_halo_regions!(formulation.potential_temperature)
@@ -117,7 +166,9 @@ AtmosphereModels.additional_thermodynamic_field_names(::LiquidIcePotentialTemper
 AtmosphereModels.thermodynamic_density_name(::LiquidIcePotentialTemperatureFormulation) = :ρθ
 AtmosphereModels.thermodynamic_density(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature_density
 AtmosphereModels.with_thermodynamic_density(f::LiquidIcePotentialTemperatureFormulation, ρθ) =
-    LiquidIcePotentialTemperatureFormulation(ρθ, f.potential_temperature, f.temperature_solver, f.exner_exponent)
+    LiquidIcePotentialTemperatureFormulation(ρθ, f.potential_temperature, f.temperature_solver, f.exner_exponent,
+                                             f.precipitation_heating, f.fixed_volume_phase_change,
+                                             f.dissipative_heating)
 
 AtmosphereModels.set_hydrostatically_balanced_density!(
     formulation::LiquidIcePotentialTemperatureFormulation,
@@ -146,10 +197,14 @@ function AtmosphereModels.materialize_formulation(formulation::LiquidIcePotentia
     potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
     potential_temperature = CenterField(grid)  # θ = ρθ / ρ (diagnostic)
     temperature_solver = materialize_temperature_solver(formulation.temperature_solver, dynamics, grid)
+    fixed_volume_phase_change = materialize_phase_change_source(formulation.fixed_volume_phase_change, dynamics)
     return LiquidIcePotentialTemperatureFormulation(potential_temperature_density,
                                                     potential_temperature,
                                                     temperature_solver,
-                                                    formulation.exner_exponent)
+                                                    formulation.exner_exponent,
+                                                    formulation.precipitation_heating,
+                                                    fixed_volume_phase_change,
+                                                    formulation.dissipative_heating)
 end
 
 # `DefaultTemperatureSolver` defers the choice of solver to the dynamics: the need for an
@@ -233,5 +288,11 @@ function Base.show(io::IO, formulation::LiquidIcePotentialTemperatureFormulation
         print(io, '\n')
     end
     print(io, "├── exner_exponent: ", summary(formulation.exner_exponent), '\n')
-    print(io, "└── temperature_solver: ", summary(formulation.temperature_solver))
+    print(io, "├── temperature_solver: ", summary(formulation.temperature_solver), '\n')
+    print(io, "├── precipitation_heating: ", energy_source_summary(formulation.precipitation_heating), '\n')
+    print(io, "├── fixed_volume_phase_change: ", energy_source_summary(formulation.fixed_volume_phase_change), '\n')
+    print(io, "└── dissipative_heating: ", energy_source_summary(formulation.dissipative_heating))
 end
+
+energy_source_summary(::Nothing) = "false"
+energy_source_summary(option) = summary(option)

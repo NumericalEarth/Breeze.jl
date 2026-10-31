@@ -151,6 +151,7 @@ using Oceananigans.Utils: prettysummary, launch!
 ##### Interfaces (define the contract that dynamics implementations must fulfill)
 #####
 
+include("energy_closing_sources.jl")
 include("forcing_interface.jl")
 include("microphysics_interface.jl")
 include("dynamics_interface.jl")
