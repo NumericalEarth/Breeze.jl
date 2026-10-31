@@ -165,6 +165,10 @@ function record!(state, model)
     push!(rows.vapor_increment, any(active) ? mean(Δq[active]) : 0.0)
     push!(rows.theta_spacing, Float64(eps(ρθ_type(ρᵃ * θ̄))) / ρᵃ)
     push!(rows.vapor_spacing, Float64(eps(ρq_type(ρᵃ * q̄ᵛ))) / ρᵃ)
+    # Fractions of the condensing cells whose increment is below half the single-precision spacing of the stored
+    # value, so that it would be rounded away entirely
+    push!(rows.theta_subhalf_fraction, any(active) ? count(Δθ[active] .< eps(Float32(ρᵃ * θ̄)) / 2ρᵃ) / count(active) : 0.0)
+    push!(rows.vapor_subhalf_fraction, any(active) ? count(Δq[active] .< eps(Float32(ρᵃ * q̄ᵛ)) / 2ρᵃ) / count(active) : 0.0)
 
     push!(dsd.time, model.clock.time)
     push!(dsd.counts, dsd_counts(r))
@@ -243,6 +247,9 @@ function run_l3(ncar_dir, seed, M; arch, stop_time=10.0, cfl=0.3, max_Δt=1e-3, 
     ρᵃ = Thermodynamics.reference_value(dynamics.reference_state.density)
 
     droplets = (x = d.x, y = d.y, z = d.z, r = d.radius, rᵈ = d.dry_radius, κ = fill(κ_ncar, length(d.radius)))
+    if get(ENV, "NO_DROPLETS", "0") == "1" # the flow and scalar fields alone, to isolate rounding drift of θ and qᵛ
+        droplets = map(a -> a[1:0], droplets)
+    end
     microphysics = LagrangianMicrophysics(FT; physics=ncar_droplet_physics(FT), self_interaction, droplets)
 
     forcing = ConstantPowerBandForcing(grid; energy_injection_rate=0.05)
@@ -279,7 +286,7 @@ function run_l3(ncar_dir, seed, M; arch, stop_time=10.0, cfl=0.3, max_Δt=1e-3, 
                      mean_radius_cubed=Float64[], std_temperature=Float64[], std_vapor=Float64[],
                      kinetic_energy=Float64[], droplets=Int[], time_step=Float64[], condensing_cells=Float64[],
                      theta_increment=Float64[], vapor_increment=Float64[], theta_spacing=Float64[],
-                     vapor_spacing=Float64[]),
+                     vapor_spacing=Float64[], theta_subhalf_fraction=Float64[], vapor_subhalf_fraction=Float64[]),
              dsd = (time=Float64[], counts=Vector{Int}[]),
              pdfs = NamedTuple[], pdf_times = d.time .+ [0.0, 1.0, 2.0, 5.0, 10.0], pdf_index = Ref(1),
              constants, L, M, ρᵃ)
