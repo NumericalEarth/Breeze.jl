@@ -126,7 +126,7 @@ function nonequilibrium_microphysics()
     parameters = Microphysics1MParams(FT; rain_autoconversion = nothing)
     velocities = TerminalVelocityParams(FT)
     stokes = velocities.stokes
-    still = StokesRegimeVelType(FT; ρw = stokes.ρw, ν_air = stokes.ν_air, grav = zero(FT))
+    still = StokesRegimeVelType(; ρw = stokes.ρw, ν_air = stokes.ν_air, grav = zero(FT))
     hydrometeor_velocities = TerminalVelocityParams(; stokes = still, velocities.chen2022, velocities.blk1m)
     categories = one_moment_cloud_microphysics_categories(FT; parameters, hydrometeor_velocities)
     cloud_formation = NonEquilibriumCloudFormation(ConstantRateCondensateFormation(1 / τ_relax), nothing)
@@ -210,7 +210,7 @@ function run_bubble(name, Δ)
     checks = (T_error = maximum(abs, s₀.T .- T),
               ql_error = maximum(abs, s₀.ql .- ql),
               qv_error = maximum(abs, s₀.qv .- qv),
-              p_error = maximum(abs, (s₀.p .- pₑ) ./ pₑ),
+              p_error = maximum(abs, (s₀.p .- pₑ') ./ pₑ'),
               ρ_error = maximum(abs, (s₀.ρ .- ρ) ./ ρ),
               env_θₑ_min = minimum(background), env_θₑ_max = maximum(background),
               bubble_θₑ′_max = maximum(θₑ₀ .- background), bubble_T′_max = maximum(T .- T[1, :]'),
