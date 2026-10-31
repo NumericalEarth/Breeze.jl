@@ -115,8 +115,13 @@ diagnoses_total_density_in_auxiliary_pass(model) = false
 # `(momentum, tracers...)`, so pair each scheme with the specific field it reconstructs.
 function Oceananigans.Advection.update_advection!(advection::NamedTuple, model::AtmosphereModel)
     fields = reconstructed_fields(model, advection)
-    return update_each_advection!(values(advection), values(fields), model)
+    update_each_advection!(values(advection), values(fields), model)
+    return update_reconstruction_caches!(values(advection), values(fields), model.grid)
 end
+
+# Refresh, all in one pass, the reconstruction caches whose per-scheme refresh `update_advection!` deferred
+# (Breeze.Advection's batched edges pass); nothing by default.
+update_reconstruction_caches!(schemes, fields, grid) = nothing
 
 @inline update_each_advection!(::Tuple{}, ::Tuple{}, model) = nothing
 
@@ -487,7 +492,6 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
         common_args...)
 
     Gρqᵛᵉ = getproperty(model.timestepper.Gⁿ, moist_name)
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵛᵉ, grid, ρq_args)
 
     #####
     ##### Tracer density tendencies
@@ -499,19 +503,21 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
                                                  for name in prognostic_field_names(model.microphysics))
 
     scalars = merge(prognostic_microphysical_fields, model.tracers)
-    for (i, name) in enumerate(keys(scalars))
-        ρc = scalars[name]
+    names = keys(scalars)
+    scalar_argss = ntuple(length(names)) do i
+        name = names[i]
+        (scalars[name], Val(i + 2), Val(name), model.forcing[name], model.advection[name], common_args...)
+    end
+    Gρcs = map(name -> getproperty(model.timestepper.Gⁿ, name), names)
 
-        scalar_args = (
-            ρc,
-            Val(i + 2),
-            Val(name),
-            model.forcing[name],
-            model.advection[name],
-            common_args...)
-
-        Gρc = getproperty(model.timestepper.Gⁿ, name)
-        launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
+    if BATCHED_SCALAR_TENDENCIES[]
+        # T22 scalars: one launch; every tendency is the expression of `compute_scalar_tendency!`, unchanged.
+        launch!(arch, grid, :xyz, compute_scalar_tendencies!, (Gρqᵛᵉ, Gρcs...), grid, (ρq_args, scalar_argss...))
+    else
+        launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵛᵉ, grid, ρq_args)
+        for n in eachindex(scalar_argss)
+            launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρcs[n], grid, scalar_argss[n])
+        end
     end
 
     #####
@@ -537,6 +543,20 @@ end
 @kernel function compute_scalar_tendency!(Gc, grid, args)
     i, j, k = @index(Global, NTuple)
     @inbounds Gc[i, j, k] = scalar_tendency(i, j, k, grid, args...)
+end
+
+# Several scalar tendencies per thread: all evaluated before any store, so their common loads may be shared.
+@kernel function compute_scalar_tendencies!(Gs, grid, argss)
+    i, j, k = @index(Global, NTuple)
+    tendencies = map(args -> scalar_tendency(i, j, k, grid, args...), argss)
+    store_scalar_tendencies!(Gs, tendencies, i, j, k)
+end
+
+@inline store_scalar_tendencies!(::Tuple{}, ::Tuple{}, i, j, k) = nothing
+
+@inline function store_scalar_tendencies!(Gs, tendencies, i, j, k)
+    @inbounds first(Gs)[i, j, k] = first(tendencies)
+    return store_scalar_tendencies!(Base.tail(Gs), Base.tail(tendencies), i, j, k)
 end
 
 # Note: compute_static_energy_tendency! and compute_potential_temperature_tendency!

@@ -113,6 +113,7 @@ const k_tiled_kernel_names = (
     (Utils, :_compute_tendency!) => (32, 1, 4),
     (AtmosphereModels, :compute_z_momentum_tendency!) => (32, 1, 4),
     (AtmosphereModels, :compute_scalar_tendency!) => (32, 1, 4),
+    (AtmosphereModels, :compute_scalar_tendencies!) => (32, 1, 4),
     (Advection, :_x_momentum_bounded_face_fluxes!) => (32, 1, 4),
     (Advection, :_y_momentum_bounded_face_fluxes!) => (32, 1, 4),
     (Advection, :_z_momentum_bounded_face_fluxes!) => (32, 1, 4),
@@ -159,10 +160,12 @@ const static_shape_kernel_names = (
     (Advection, :_y_momentum_bounded_face_fluxes!),
     (Advection, :_z_momentum_bounded_face_fluxes!),
     (Advection, :_kfirst_bounds_preserving_edges!),
+    (Advection, :_kfirst_batched_bounds_preserving_edges!),
 )
 
 const grouped_static_shape_kernel_names = (
     (AtmosphereModels, :compute_scalar_tendency!) => :scalar_transports,
+    (AtmosphereModels, :compute_scalar_tendencies!) => :scalar_transports,
     (CompressibleEquations, :_build_predictors!) => :ktiled_gains,
     (TurbulenceClosures, :_compute_tke_closure_fields!) => :ktiled_gains,
     (AtmosphereModels, :_compute_velocities!) => :ktiled_gains,
