@@ -258,7 +258,9 @@ function run_l3(ncar_dir, seed, M; arch, stop_time=10.0, cfl=0.3, max_Δt=1e-3, 
     if get(ENV, "NO_DROPLETS", "0") == "1" # the flow and scalar fields alone, to isolate rounding drift of θ and qᵛ
         droplets = map(a -> a[1:0], droplets)
     end
-    microphysics = LagrangianMicrophysics(FT; physics=ncar_droplet_physics(FT), self_interaction, droplets)
+    # DROPLET_FLOAT=Float64 keeps the droplets and their physics in double precision on a single-precision grid
+    DT = get(ENV, "DROPLET_FLOAT", "") == "Float64" ? Float64 : FT
+    microphysics = LagrangianMicrophysics(DT; physics=ncar_droplet_physics(DT), self_interaction, droplets)
 
     forcing = ConstantPowerBandForcing(grid; energy_injection_rate=0.05)
     closure = ScalarDiffusivity(; ν, κ=(ρθ=2.22e-5, ρqᵛ=2.55e-5))
