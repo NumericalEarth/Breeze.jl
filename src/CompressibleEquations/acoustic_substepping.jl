@@ -1406,7 +1406,7 @@ end
 @inline function build_predictors!(i, j, k, ρ′★, ρθ′★, ρθ′ˢ⁻, ρ′, ρθ′, ρw′, ρu′, ρv′,
                                    grid, dynamics, Δτ, δτˢ⁻, Gˢρ, Gˢρᵡ, fθ, θᴸ)
     @inbounds begin
-        ρθ′ˢ⁻[i, j, k] = ρθ′[i, j, k] # stash old (ρθ)′ for the divergence damping
+        stash_perturbation!(ρθ′ˢ⁻, i, j, k, ρθ′) # stash old (ρθ)′ for the divergence damping
 
         V⁻¹ = V⁻¹ᶜᶜᶜ(i, j, k, grid)
         ∇ʰ_M  = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
@@ -1420,6 +1420,21 @@ end
     end
     return nothing
 end
+
+#####
+##### T22 acoustic D: no (ρθ)′ stash without a reader. Only `_thermal_divergence_damping!` reads ρθ′ˢ⁻, so on the split
+##### path with any other damping the predictors skip its store and its halo fill (the stage initialization still
+##### zeroes it). Nothing read changes (tier A). `BREEZE_UNREAD_STASH_SKIP=false` at load restores the store.
+#####
+
+const UNREAD_STASH_SKIP = Ref(true)
+
+predictor_stash(substepper) =
+    (UNREAD_STASH_SKIP[] & !(substepper.damping isa ThermalDivergenceDamping)) ? nothing :
+        substepper.previous_density_potential_temperature_perturbation
+
+@inline stash_perturbation!(::Nothing, i, j, k, ρθ′) = nothing
+@inline stash_perturbation!(ρθ′ˢ⁻, i, j, k, ρθ′) = @inbounds ρθ′ˢ⁻[i, j, k] = ρθ′[i, j, k]
 
 # The slow dry-density tendency the predictors read: the stored `Gⁿ.ρᵈ`, or (handoff 117fc4c7, stages with one
 # substep) its expression evaluated here on the same stage-entry operands (`FoldedDensityTendency`).
@@ -2634,7 +2649,7 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
     launch!(arch, grid, :xyz, _build_predictors!,
             substepper.density_predictor,
             substepper.density_potential_temperature_predictor,
-            substepper.previous_density_potential_temperature_perturbation,
+            predictor_stash(substepper),
             substepper.density_perturbation,
             substepper.density_potential_temperature_perturbation,
             substepper.momentum_perturbation.w,
@@ -2642,7 +2657,8 @@ function acoustic_column_substep!(::SplitAcousticColumn, model, substepper, stag
             grid, model.dynamics, Δτ, δτˢ⁻,
             stage.Gˢρ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
             substepper.linearization_potential_temperature)
-    fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
+    isnothing(predictor_stash(substepper)) ||
+        fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
     # Implicit half of the IMEX vertical-advection split for the thermodynamic
     # perturbation, applied to the predictor between Step B and Step C so the pressure

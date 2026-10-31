@@ -131,6 +131,8 @@ function __init__()
     FOLDED_DIVERGENCE_DAMPING[] = switch_from_env("BREEZE_FOLDED_DIVERGENCE_DAMPING", true)
     CARRIED_EXPLICIT_STEP[] = switch_from_env("BREEZE_CARRIED_EXPLICIT_STEP", true)
     CARRIED_EXPLICIT_STEP[] || @info "Carried explicit horizontal step off (environment)"
+    UNREAD_STASH_SKIP[] = switch_from_env("BREEZE_UNREAD_STASH_SKIP", true)
+    UNREAD_STASH_SKIP[] || @info "Unread (ρθ)′ stash skip off (environment)"
     FOLDED_DIVERGENCE_DAMPING[] || @info "Divergence damping folded into the next explicit step off (environment)"
     return nothing
 end
