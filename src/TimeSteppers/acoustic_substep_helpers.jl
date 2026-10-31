@@ -21,7 +21,8 @@ using Breeze.AtmosphereModels:
     implicit_advection_velocities,
     implicit_step_scheme,
     implicit_sedimentation_step!,
-    implicit_thermodynamic_solve!
+    implicit_thermodynamic_solve!,
+    implicit_diffusion_density
 
 using Breeze.CompressibleEquations: CompressibleDynamics
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
@@ -324,7 +325,8 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
 
     θ_name = thermodynamic_density_name(model.formulation)
     θ_advection = field_advection_scheme(model.advection, θ_name)
-    implicit_thermodynamic_solve!(model.formulation, model) do ρᵡ
+    θ_diffusion_density = implicit_diffusion_density(model.formulation, model)
+    implicit_thermodynamic_solve!(model.formulation, model, Δt_stage) do ρᵡ
         implicit_step!(ρᵡ,
                        implicit_solver,
                        model.closure,
@@ -333,7 +335,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                        model.clock,
                        fields(model),
                        Δt_stage,
-                       postloop_thermodynamic_scheme(θ_advection, diffusion_density),
+                       postloop_thermodynamic_scheme(θ_advection, θ_diffusion_density),
                        merge(slow_thermodynamic_velocities(model), (; w)),
                        ρᵈ)
     end

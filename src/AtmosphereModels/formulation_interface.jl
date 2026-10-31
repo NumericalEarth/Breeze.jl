@@ -225,15 +225,23 @@ reference_temperature(formulation::Symbol) = reference_temperature(Val(formulati
 #####
 
 """
-    implicit_thermodynamic_solve!(solve!, formulation, model)
+    implicit_thermodynamic_solve!(solve!, formulation, model, Δt)
 
-Apply the vertically implicit solve `solve!(field)` (closure diffusion and the implicit part of
-adaptive implicit vertical advection) to the thermodynamic variable of `formulation`. By default the
+Apply the vertically implicit solve `solve!(field)` over `Δt` (closure diffusion and the implicit part
+of adaptive implicit vertical advection) to the thermodynamic variable of `formulation`. By default the
 solve acts on the prognostic [`thermodynamic_density`](@ref) itself. A formulation whose prognostic
 variable is not the quantity its closure diffuses (total energy, which diffuses static energy)
 extends this to solve for that quantity and add the increment to its prognostic variable.
 """
-implicit_thermodynamic_solve!(solve!, formulation, model) = solve!(thermodynamic_density(formulation))
+implicit_thermodynamic_solve!(solve!, formulation, model, Δt) = solve!(thermodynamic_density(formulation))
+
+"""
+    implicit_diffusion_density(formulation, model)
+
+The density weighting the closure diffusion of the vertically implicit solve of `formulation`'s
+thermodynamic variable: the coupling density of `model.dynamics` by default.
+"""
+implicit_diffusion_density(formulation, model) = dynamics_density(model.dynamics)
 
 #####
 ##### Set thermodynamic variable interface

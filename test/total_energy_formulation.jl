@@ -74,11 +74,21 @@ end
     rtol = FT == Float64 ? 1e-10 : 1e-5
     @test maximum(abs, interior(T) .- interior(T_input)) / 300 < rtol
 
-    # Diagnostics are consistent: Ĥ = (ρE + p) / ρᵈ
-    ρE = model.formulation.energy_density
-    p = model.dynamics.pressure
-    ρᵈ = model.dynamics.dry_density
-    @test Array(interior(model.formulation.total_enthalpy)) ≈ Array((interior(ρE) .+ interior(p)) ./ interior(ρᵈ))
+    # Diagnostics are consistent: each constituent's enthalpy sums to ρE + p
+    formulation = model.formulation
+    constants = model.thermodynamic_constants
+    cᵖᵈ = constants.dry_air.heat_capacity
+    ρᵈ = Array(interior(model.dynamics.dry_density))
+    ρ = Array(interior(model.dynamics.total_density))
+    ĥᵈ = Array(interior(formulation.dry_enthalpy))
+    eᵛᵉ = Array(interior(formulation.moisture_enthalpy))
+    ρqᵛ = Array(interior(Oceananigans.prognostic_fields(model).ρqᵛ))
+    ρqˡ = Array(interior(model.microphysical_fields.ρqᶜˡ)) .+ Array(interior(model.microphysical_fields.ρqʳ))
+    Tₐ = Array(interior(T))
+    ℬ = ĥᵈ .- cᵖᵈ .* Tₐ # K + g z (T₀ = 0)
+    ρH = ρᵈ .* ĥᵈ .+ ρqᵛ .* (eᵛᵉ .+ ℬ) .+ ρqˡ .* (constants.liquid.heat_capacity .* Tₐ .+ ℬ)
+    ρE_plus_p = Array(interior(formulation.energy_density)) .+ Array(interior(model.dynamics.pressure))
+    @test maximum(abs, ρH .- ρE_plus_p) / maximum(abs, ρE_plus_p) < (FT == Float64 ? 1e-12 : 1e-4)
 end
 
 @testset "Acoustic linearization of the total energy [T₀ = $T₀]" for T₀ in (0, 273.16)
@@ -96,11 +106,10 @@ end
                                      model.microphysics, model.microphysical_fields,
                                      Breeze.specific_prognostic_moisture(model), model.velocities)
 
-    # Pressure as a function of (ρᵈ, ρE) at fixed momentum and water per unit dry mass
+    # Pressure as a function of (ρᵈ, ρE, ρqˣ) at fixed momentum
     ρ₀ = model.dynamics.total_density[i, j, k]
     ρᵈ₀ = model.dynamics.dry_density[i, j, k]
     ρE₀ = model.formulation.energy_density[i, j, k]
-    ρw = ρ₀ - ρᵈ₀
     q₀ = Breeze.AtmosphereModels.grid_moisture_fractions(i, j, k, grid, model.microphysics, ρ₀,
                                                          Breeze.specific_prognostic_moisture(model)[i, j, k],
                                                          model.microphysical_fields)
@@ -111,11 +120,10 @@ end
 
     cᵖᵈ = constants.dry_air.heat_capacity
     cˡ = constants.liquid.heat_capacity
-    function pressure(ρᵈ, ρE)
-        r = ρᵈ / ρᵈ₀ # the water moves with the dry air
-        ρ = ρᵈ + r * ρw
-        q = MoistureMassFractions(r * ρq[1] / ρ, r * ρq[2] / ρ, r * ρq[3] / ρ)
-        𝓊 = (ρE + T₀ * (ρᵈ * cᵖᵈ + r * ρw * cˡ)) / ρ - m² / (2ρᵈ^2) - gz
+    function pressure(ρᵈ, ρE, ρqᵛ=ρq[1], ρqˡ=ρq[2], ρqⁱ=ρq[3])
+        ρ = ρᵈ + ρqᵛ + ρqˡ + ρqⁱ
+        q = MoistureMassFractions(ρqᵛ / ρ, ρqˡ / ρ, ρqⁱ / ρ)
+        𝓊 = (ρE + T₀ * (ρᵈ * cᵖᵈ + (ρqᵛ + ρqˡ + ρqⁱ) * cˡ)) / ρ - ρᵈ^(-2) * m² / 2 - gz
         T = temperature(InternalEnergyDensityState(𝓊, q, ρ), constants)
         return ρ * mixture_gas_constant(q, constants) * T
     end
@@ -126,14 +134,26 @@ end
 
     @test pressure(ρᵈ₀, ρE₀) ≈ model.dynamics.pressure[i, j, k] rtol=1e-12
     @test C ≈ ∂p∂ρE rtol=1e-7
-    @test C * E ≈ ∂p∂ρᵈ rtol=1e-6
-    @test χ̂ ≈ (ρE₀ + model.dynamics.pressure[i, j, k]) / ρᵈ₀
+    @test C * E ≈ ∂p∂ρᵈ rtol=1e-6 # at fixed water densities: the water does not move in the loop
 
-    # C (Ĥ + E) is the squared sound speed per unit dry mass, whatever the origin
-    p₀ = model.dynamics.pressure[i, j, k]
     T = model.temperature[i, j, k]
-    γᵐRᵐT = C * mixture_heat_capacity(q₀, constants) * T # (Rᵐ / cᵛᵐ) cᵖᵐ T
-    @test C * (χ̂ + E) ≈ (γᵐRᵐT + 2C * K₀) * ρ₀ / ρᵈ₀ rtol=1e-12
+    ℬ = K₀ + gz
+    @test χ̂ ≈ cᵖᵈ * (T - T₀) + ℬ
+
+    # C (ĥᵈ + E) is the squared sound speed per unit dry mass of air compressed through motionless water,
+    # whatever the origin and the latent energy of the water
+    Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
+    @test C * (χ̂ + E) ≈ (1 + C) * Rᵈ * T + 2C * K₀ * ρ₀ / ρᵈ₀ rtol=1e-10
+
+    # Moving water with its own enthalpy changes the pressure only by the gas law: Rᵛ T (1 + C) per unit
+    # mass of vapor and nothing for condensate, whatever its latent energy or the origin
+    ĥᵛ = constants.vapor.heat_capacity * T + Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid) - cˡ * T₀ + ℬ
+    ĥˡ = cˡ * (T - T₀) + ℬ
+    δm = 1e-7
+    ∂ᵛ = (pressure(ρᵈ₀, ρE₀ + δm * ĥᵛ, ρq[1] + δm) - pressure(ρᵈ₀, ρE₀ - δm * ĥᵛ, ρq[1] - δm)) / 2δm
+    ∂ˡ = (pressure(ρᵈ₀, ρE₀ + δm * ĥˡ, ρq[1], ρq[2] + δm) - pressure(ρᵈ₀, ρE₀ - δm * ĥˡ, ρq[1], ρq[2] - δm)) / 2δm
+    @test ∂ᵛ ≈ Breeze.Thermodynamics.vapor_gas_constant(constants) * T * (1 + C) rtol=1e-5
+    @test abs(∂ˡ) < 1e-4 * Rᵈ * T
 end
 
 @testset "Closed box conserves energy, dry mass and water [$FT, T₀ = $T₀]" for FT in test_float_types(), T₀ in (0, 273.16)
@@ -191,11 +211,11 @@ end
 
     (T⁰₀, T₀), (T⁰₁, T₁) = temperatures
     @test maximum(abs, T⁰₀ .- T⁰₁) / 300 < 1e-12 # the initial state is identical
-    # WENO reconstructs the shifted Ĥ, and the water moves with its own velocity and density, so the
-    # solutions differ by the transport of the origin offset T₀ (qᵈ cᵖᵈ + qᵗ cˡ): small, not round-off
+    # The origin shifts each constituent's enthalpy by a constant carried with exactly its own mass flux,
+    # so the solutions agree to round-off, with mixing, phase changes and sedimentation
     difference = maximum(abs, T₀ .- T₁)
     @info "Energy origin: max |T(T₀ = 0) - T(T₀ = 273.16)| after 20 steps = $difference K"
-    @test difference < 0.1
+    @test difference < 1e-7
 end
 
 @testset "Wall fluxes carry the enthalpy of the evaporated water [T₀ = $T₀]" for T₀ in (0, 273.16)

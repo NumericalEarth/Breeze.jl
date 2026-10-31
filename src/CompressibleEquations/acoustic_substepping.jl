@@ -1259,7 +1259,7 @@ end
 # θᴸ by χ̂ᴸ + Eᴸ = c²/Cᴸ: the proxy is the pressure tendency over c²,
 #   D = Δ[(ρχ)′ + Eᴸρ′] / (χ̂ᴸ + Eᴸ) = −Δτ [∇·(ρ𝐮)′ + (ρ𝐮)′·∇χ̂ᴸ / (χ̂ᴸ + Eᴸ)] ,
 # which for dry air is the same D for ρθ and ρη, since dη = cᵖ dθ/θ, and for ρE in hydrostatic
-# balance, where dĤ = cᵖT dθ/θ.
+# balance, where dĥᵈ = cᵖT dθ/θ.
 # Dividing by χ̂ᴸ alone is wrong for ρη: χ̂ = ρη/ρᵈ is negative (entropy is referenced to the
 # triple point) and its magnitude falls with height, so the advective part of D,
 # (ρw)′ ∂z χ̂ᴸ / χ̂ᴸ, has the opposite sign to θ's (ρw)′ ∂z ln θᴸ. That turns the damping's
@@ -1446,6 +1446,25 @@ end
 #####
 ##### Section 12 — Substep loop driver
 #####
+
+"""
+$(TYPEDSIGNATURES)
+
+Prepare the acoustic loop of a formulation whose pressure depends on the water densities at fixed
+`ρχ` and `ρᵈ` by more than the loop's slow tendencies account for: the water is updated after the
+loop, while its share of the slow tendency of `ρχ` acts inside it. A no-op for `ρθ` and `ρη`, whose
+loops see only their own variable. Implementations add the stage's water pressure change to the
+loop's `(ρχ)′` and to the slow tendency it integrates over `Δt`, and remove it from the recovered
+`ρχ` in [`remove_water_pressure_perturbation!`](@ref).
+"""
+initialize_water_pressure_perturbation!(formulation, substepper, model, U⁰, Δt) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Undo [`initialize_water_pressure_perturbation!`](@ref) on the recovered prognostic `ρχ`.
+"""
+remove_water_pressure_perturbation!(formulation, substepper, model) = nothing
 
 # Per-substep open-boundary enforcement (Breeze.jl issue #738).
 # The perturbation scalars `ρ′,(ρθ)′` carry zero-gradient halos on `Bounded`
@@ -1732,6 +1751,12 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # effectively starts from U(t) = Uᴸ (the outer-step-start state).
     initialize_stage_perturbations!(substepper, model, Uᴸ)
 
+    # A formulation whose pressure depends strongly on the water densities tells the loop how the
+    # stage's water update will change the pressure (see `initialize_water_pressure_perturbation!`).
+    # The stage interval the loop integrates its slow tendency over is Nτ Δτ fθ.
+    initialize_water_pressure_perturbation!(model.formulation, substepper, model, Uᴸ,
+                                            Nτ * Δτ * substepper.thermodynamic_tendency_factor)
+
     Gⁿ = model.timestepper.Gⁿ
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
@@ -1766,6 +1791,8 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
             ρᵡ,
             grid, model.dynamics)
+
+    remove_water_pressure_perturbation!(model.formulation, substepper, model)
 
     # Thread clock + model fields so time-dependent Open BCs on the recovered
     # prognostic state dispatch correctly in `getbc` (see #717).

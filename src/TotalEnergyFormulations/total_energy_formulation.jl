@@ -20,11 +20,15 @@ formed at cell centers from the staggered velocities (see [`kinetic_energyᶜᶜ
 The energy equation is in conservation form,
 
 ```math
-∂ₜ(ρE) + ∇ ⋅ \\left[ ρᵈ 𝐮 Ĥ + ρᵈ 𝐉ˢ + \\sum_x (hˣ + g z) 𝐉ˣ \\right] = ρQ , \\qquad Ĥ = \\frac{ρE + p}{ρᵈ} ,
+∂ₜ(ρE) + ∇ ⋅ \\left[ ρᵈ 𝐮 ĥᵈ + \\sum_x ĥˣ 𝐅ˣ + ρᵈ 𝐉ˢ + \\sum_x (hˣ + g z) 𝐉ˣ \\right] = ρQ ,
+\\qquad ĥˣ = hˣ + K + g z ,
 ```
 
-with the dry-air momentum ``ρᵈ𝐮`` the carrier of the total enthalpy per unit dry mass ``Ĥ``
-(the pressure work is inside the flux), ``𝐉ˢ`` the subgrid flux of the static energy
+in which each constituent carries its own total enthalpy (the pressure work is inside the flux): the
+dry-air momentum ``ρᵈ𝐮`` carries ``ĥᵈ = cᵖᵈ (T - T₀) + K + g z``, and each water species' own advective
+mass flux ``𝐅ˣ`` carries its ``ĥˣ``, with ``hᵛ = cᵖᵛ T + ℒˡ₀ - cˡ T₀``, ``hˡ = cˡ (T - T₀)`` and
+``hⁱ = cⁱ T + ℒˡ₀ - ℒⁱ₀ - cˡ T₀``. So the latent energy and the origin of the water move with exactly the
+water they belong to, whatever scheme and velocity transport it. ``𝐉ˢ`` is the subgrid flux of the static energy
 ``ŝ = cᵖᵐ T + g z + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ``, ``𝐉ˣ`` the sedimentation flux of condensate ``x``
 carrying its enthalpy ``hˣ`` and potential energy, and ``Q`` the radiative and imposed heating.
 Phase changes, expansion and dissipation exchange energy within ``E`` and need no source:
@@ -59,13 +63,15 @@ TotalEnergyFormulation
 └── reference_temperature: 273.16
 ```
 """
-struct TotalEnergyFormulation{E, U, H, S, X, T}
-    energy_density :: E           # ρE (prognostic)
-    internal_energy :: U          # 𝓊 = ρE / ρ - K - g z + T₀ (qᵈ cᵖᵈ + qᵗ cˡ), from liquid water at 0 K (diagnostic)
-    total_enthalpy :: H           # Ĥ = (ρE + p) / ρᵈ (diagnostic, advected)
-    static_energy :: S            # ŝ - T₀ (qᵈ cᵖᵈ + qᵗ cˡ) (diagnostic, diffused)
-    diffusion_workspace :: X      # ρᵈ ŝ, the variable of the vertically implicit diffusion solve
-    reference_temperature :: T    # T₀, the energy origin
+struct TotalEnergyFormulation{E, U, H, Q, S, X, W, T}
+    energy_density :: E              # ρE (prognostic)
+    internal_energy :: U             # 𝓊 = ρE / ρ - K - g z + T₀ (qᵈ cᵖᵈ + qᵗ cˡ), from liquid water at 0 K (diagnostic)
+    dry_enthalpy :: H                # ĥᵈ = cᵖᵈ (T - T₀) + K + g z (diagnostic, advected with the dry air)
+    moisture_enthalpy :: Q           # eᵛᵉ, the enthalpy of the prognostic moisture less K + g z (diagnostic)
+    static_energy :: S               # ŝ - T₀ (qᵈ cᵖᵈ + qᵗ cˡ) (diagnostic, diffused)
+    diffusion_workspace :: X         # ρᵈ ŝ, the variable of the vertically implicit diffusion solve
+    water_pressure_perturbation :: W # Σₓ Ĉₓ (ρqˣ)′ at the end of an acoustic loop (see `total_energy_compressible.jl`)
+    reference_temperature :: T       # T₀, the energy origin
 end
 
 """
@@ -75,7 +81,7 @@ Return a `TotalEnergyFormulation` whose energy origin is `reference_temperature`
 water has zero internal energy and dry air zero enthalpy at ``T₀`` (default `0`).
 """
 TotalEnergyFormulation(; reference_temperature = 0) =
-    TotalEnergyFormulation(nothing, nothing, nothing, nothing, nothing, reference_temperature)
+    TotalEnergyFormulation(nothing, nothing, nothing, nothing, nothing, nothing, nothing, reference_temperature)
 
 """
 $(TYPEDSIGNATURES)
@@ -100,13 +106,16 @@ composition through the total water only, so a phase change leaves it unchanged.
 Adapt.adapt_structure(to, formulation::TotalEnergyFormulation) =
     TotalEnergyFormulation(adapt(to, formulation.energy_density),
                            adapt(to, formulation.internal_energy),
-                           adapt(to, formulation.total_enthalpy),
+                           adapt(to, formulation.dry_enthalpy),
+                           adapt(to, formulation.moisture_enthalpy),
                            adapt(to, formulation.static_energy),
                            adapt(to, formulation.diffusion_workspace),
+                           adapt(to, formulation.water_pressure_perturbation),
                            formulation.reference_temperature)
 
 function BoundaryConditions.fill_halo_regions!(formulation::TotalEnergyFormulation)
-    fill_halo_regions!(formulation.total_enthalpy)
+    fill_halo_regions!(formulation.dry_enthalpy)
+    fill_halo_regions!(formulation.moisture_enthalpy)
     fill_halo_regions!(formulation.static_energy)
     return nothing
 end
@@ -150,24 +159,25 @@ total energy ``E = 𝓊 + K + g z`` of `TotalEnergyFormulation` contains, everyw
 const TotalEnergyNames = Union{Val{:TotalEnergy}, Val{:E}, Val{:ρE}}
 
 AtmosphereModels.prognostic_thermodynamic_field_names(::TotalEnergyFormulation) = tuple(:ρE)
-AtmosphereModels.additional_thermodynamic_field_names(::TotalEnergyFormulation) = (:𝓊, :Ĥ, :ŝ)
+AtmosphereModels.additional_thermodynamic_field_names(::TotalEnergyFormulation) = (:𝓊, :ĥᵈ, :eᵛᵉ, :ŝ)
 AtmosphereModels.thermodynamic_density_name(::TotalEnergyFormulation) = :ρE
 AtmosphereModels.thermodynamic_density(formulation::TotalEnergyFormulation) = formulation.energy_density
 AtmosphereModels.with_thermodynamic_density(f::TotalEnergyFormulation, ρE) =
-    TotalEnergyFormulation(ρE, f.internal_energy, f.total_enthalpy, f.static_energy, f.diffusion_workspace,
-                           f.reference_temperature)
+    TotalEnergyFormulation(ρE, f.internal_energy, f.dry_enthalpy, f.moisture_enthalpy, f.static_energy,
+                           f.diffusion_workspace, f.water_pressure_perturbation, f.reference_temperature)
 
 AtmosphereModels.prognostic_thermodynamic_field_names(::TotalEnergyNames) = tuple(:ρE)
-AtmosphereModels.additional_thermodynamic_field_names(::TotalEnergyNames) = (:𝓊, :Ĥ, :ŝ)
+AtmosphereModels.additional_thermodynamic_field_names(::TotalEnergyNames) = (:𝓊, :ĥᵈ, :eᵛᵉ, :ŝ)
 AtmosphereModels.thermodynamic_density_name(::TotalEnergyNames) = :ρE
 
 Oceananigans.fields(formulation::TotalEnergyFormulation) =
-    (; 𝓊 = formulation.internal_energy, Ĥ = formulation.total_enthalpy, ŝ = formulation.static_energy)
+    (; 𝓊 = formulation.internal_energy, ĥᵈ = formulation.dry_enthalpy, eᵛᵉ = formulation.moisture_enthalpy,
+       ŝ = formulation.static_energy)
 
 Oceananigans.prognostic_fields(formulation::TotalEnergyFormulation) = (; ρE = formulation.energy_density)
 
-# The total enthalpy per unit dry mass is what the advection scheme reconstructs.
-AtmosphereModels.specific_thermodynamic_field(formulation::TotalEnergyFormulation) = formulation.total_enthalpy
+# The enthalpy of the dry air is what the advection scheme of ρE reconstructs.
+AtmosphereModels.specific_thermodynamic_field(formulation::TotalEnergyFormulation) = formulation.dry_enthalpy
 
 #####
 ##### Materialization
@@ -192,12 +202,14 @@ function AtmosphereModels.materialize_formulation(formulation::TotalEnergyFormul
                                                   grid, boundary_conditions)
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρE)
     internal_energy = CenterField(grid)
-    total_enthalpy = CenterField(grid)
+    dry_enthalpy = CenterField(grid)
+    moisture_enthalpy = CenterField(grid)
     static_energy = CenterField(grid)
     diffusion_workspace = CenterField(grid)
+    water_pressure_perturbation = CenterField(grid)
     T₀ = convert(eltype(grid), formulation.reference_temperature)
-    return TotalEnergyFormulation(energy_density, internal_energy, total_enthalpy, static_energy,
-                                  diffusion_workspace, T₀)
+    return TotalEnergyFormulation(energy_density, internal_energy, dry_enthalpy, moisture_enthalpy, static_energy,
+                                  diffusion_workspace, water_pressure_perturbation, T₀)
 end
 
 #####
@@ -290,7 +302,8 @@ function Base.show(io::IO, formulation::TotalEnergyFormulation)
     if formulation.energy_density !== nothing
         print(io, "├── energy_density: ", prettysummary(formulation.energy_density), '\n')
         print(io, "├── internal_energy: ", prettysummary(formulation.internal_energy), '\n')
-        print(io, "├── total_enthalpy: ", prettysummary(formulation.total_enthalpy), '\n')
+        print(io, "├── dry_enthalpy: ", prettysummary(formulation.dry_enthalpy), '\n')
+        print(io, "├── moisture_enthalpy: ", prettysummary(formulation.moisture_enthalpy), '\n')
         print(io, "├── static_energy: ", prettysummary(formulation.static_energy), '\n')
     end
     print(io, "└── reference_temperature: ", prettysummary(formulation.reference_temperature))

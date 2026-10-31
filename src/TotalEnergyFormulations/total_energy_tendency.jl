@@ -40,13 +40,15 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::TotalEnergyMode
 
     GρE = model.timestepper.Gⁿ.ρE
     launch!(arch, grid, :xyz, _compute_total_energy_tendency!, GρE, grid, ρE_args)
+    add_water_enthalpy_transport_tendency!(GρE, model)
+    add_closure_water_enthalpy_tendency!(GρE, model, model.closure, model.closure_fields)
     add_total_energy_sedimentation_tendency!(GρE, model, tracer_transport_velocity)
     return nothing
 end
 
 validate_total_energy_advection(advection) = nothing
 
-# The implicit half of the split would transport ρE / ρᵈ rather than Ĥ = (ρE + p) / ρᵈ.
+# The implicit half of the split would transport ρE / ρᵈ rather than the enthalpies.
 validate_total_energy_advection(::AdaptiveImplicitVerticalAdvection) =
     throw(ArgumentError("TotalEnergyFormulation does not support adaptive implicit vertical " *
                         "advection of ρE; use an explicit scheme such as WENO(order=5)."))
@@ -56,8 +58,9 @@ validate_total_energy_advection(::AdaptiveImplicitVerticalAdvection) =
     @inbounds GρE[i, j, k] = total_energy_tendency(i, j, k, grid, args...)
 end
 
-# ∂ₜ(ρE) = - ∇⋅(ρᵈ 𝐮 Ĥ) - ∇⋅(ρᵈ 𝐉ˢ) + Fᴱ + Q_rad. The advective flux carries the total enthalpy per
-# unit dry mass with the dry-air mass flux, and the closure flux is that of the static energy ŝ, so
+# ∂ₜ(ρE) = - ∇⋅(ρᵈ 𝐮 ĥᵈ) - Σₓ ∇⋅(𝐅ˣ ĥˣ) - ∇⋅(ρᵈ 𝐉ˢ) + Fᴱ + Q_rad. The advective flux carries each
+# constituent's total enthalpy with its own mass flux (the water's part is added by
+# `add_water_enthalpy_transport_tendency!`), and the closure flux is that of the static energy ŝ, so
 # that turbulent mixing at fixed composition and pressure conserves enthalpy. The vertical part of a
 # vertically implicit closure is applied by `implicit_thermodynamic_solve!`. There is no source for
 # phase change, expansion or dissipation: they exchange energy within E.
@@ -81,11 +84,101 @@ end
     ρᵈ = dynamics_density(dynamics)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
 
-    return ( - div_ρUc(i, j, k, grid, advection, ρᵈ, velocities, formulation.total_enthalpy)
-             - ∇_dot_Jᶜ(i, j, k, grid, ρᵈ, closure, closure_fields, id, formulation.static_energy,
+    return ( - div_ρUc(i, j, k, grid, advection, ρᵈ, velocities, formulation.dry_enthalpy)
+             - ∇_dot_Jᶜ(i, j, k, grid, total_density(dynamics), closure, closure_fields, id, formulation.static_energy,
                         clock, model_fields, closure_buoyancy)
              + ρE_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
+end
+
+#####
+##### Transport of the water's enthalpy
+#####
+#
+# The advective flux of each water species carries that species' total enthalpy per unit mass,
+#
+#   ĥˣ = hˣ + K + g z = ĥᵈ + (cˣ − cᵖᵈ) T + ℓˣ + T₀ (cᵖᵈ − cˡ),  hᵛ = cᵖᵛ T + ℒˡ₀ − cˡ T₀, hˡ = cˡ (T − T₀), ...
+#
+# with the mass flux 𝐅ˣ taken from exactly the flux the species' own tendency applies: its scheme, its
+# transport velocity and the total density. So the latent energy ℓˣ and the origin T₀ cˡ of the water
+# never move apart from its mass, however differently the species is reconstructed or however its
+# transport velocity differs from the dry air's. The solution is independent of T₀ for this reason:
+# T₀ (ρᵈ cᵖᵈ + ρqᵗ cˡ) is carried by the dry air's flux and the water's flux with the mass it counts.
+#
+# The enthalpy at a face is the mean of the two cells', since ĥˣ varies smoothly, like T and z, where
+# the mass flux varies sharply and its reconstruction is non-oscillatory. The term runs in kernels of
+# its own, one per species, for the same reason as the sedimentation term.
+
+# The part of a species' enthalpy per unit mass other than K + g z: a cell field for the prognostic
+# moisture (`moisture_enthalpy`), or cˣ T + ℓˣ for a condensate.
+struct CondensateEnthalpy{FT}
+    heat_capacity :: FT
+    latent_energy :: FT # ℓˣ − cˡ T₀
+end
+
+# A liquid fraction f of a mixed-phase mass; a condensate that declares none is liquid.
+@inline condensate_enthalpy(microphysics, name, T₀, constants) =
+    condensate_enthalpy(something(condensate_liquid_fraction(microphysics, name), 1), T₀, constants)
+
+@inline function condensate_enthalpy(f::Number, T₀, constants)
+    FT = typeof(T₀)
+    cˡ = constants.liquid.heat_capacity
+    cⁱ = constants.ice.heat_capacity
+    heat_capacity = f * cˡ + (1 - f) * cⁱ
+    latent_energy = (1 - f) * ice_latent_energy(constants) - cˡ * T₀
+    return CondensateEnthalpy{FT}(heat_capacity, latent_energy)
+end
+
+@inline carried_energyᶠᶜᶜ(i, j, k, grid, e, T) = ℑxᶠᵃᵃ(i, j, k, grid, e)
+@inline carried_energyᶜᶠᶜ(i, j, k, grid, e, T) = ℑyᵃᶠᵃ(i, j, k, grid, e)
+@inline carried_energyᶜᶜᶠ(i, j, k, grid, e, T) = ℑzᵃᵃᶠ(i, j, k, grid, e)
+@inline carried_energyᶠᶜᶜ(i, j, k, grid, e::CondensateEnthalpy, T) = e.heat_capacity * ℑxᶠᵃᵃ(i, j, k, grid, T) + e.latent_energy
+@inline carried_energyᶜᶠᶜ(i, j, k, grid, e::CondensateEnthalpy, T) = e.heat_capacity * ℑyᵃᶠᵃ(i, j, k, grid, T) + e.latent_energy
+@inline carried_energyᶜᶜᶠ(i, j, k, grid, e::CondensateEnthalpy, T) = e.heat_capacity * ℑzᵃᵃᶠ(i, j, k, grid, T) + e.latent_energy
+
+# ĥᵈ − cᵖᵈ T + cᵖᵈ T₀ = K + g z at a face
+@inline water_enthalpy_flux_x(i, j, k, grid, advection, ρ, U, q, e, ĥᵈ, T, cᵖᵈ, T₀) =
+    tracer_mass_flux_x(i, j, k, grid, ρ, advection, U.u, q) *
+    (ℑxᶠᵃᵃ(i, j, k, grid, ĥᵈ) - cᵖᵈ * (ℑxᶠᵃᵃ(i, j, k, grid, T) - T₀) + carried_energyᶠᶜᶜ(i, j, k, grid, e, T))
+
+@inline water_enthalpy_flux_y(i, j, k, grid, advection, ρ, U, q, e, ĥᵈ, T, cᵖᵈ, T₀) =
+    tracer_mass_flux_y(i, j, k, grid, ρ, advection, U.v, q) *
+    (ℑyᵃᶠᵃ(i, j, k, grid, ĥᵈ) - cᵖᵈ * (ℑyᵃᶠᵃ(i, j, k, grid, T) - T₀) + carried_energyᶜᶠᶜ(i, j, k, grid, e, T))
+
+@inline water_enthalpy_flux_z(i, j, k, grid, advection, ρ, U, q, e, ĥᵈ, T, cᵖᵈ, T₀) =
+    tracer_mass_flux_z(i, j, k, grid, ρ, advection, U.w, q) *
+    (ℑzᵃᵃᶠ(i, j, k, grid, ĥᵈ) - cᵖᵈ * (ℑzᵃᵃᶠ(i, j, k, grid, T) - T₀) + carried_energyᶜᶜᶠ(i, j, k, grid, e, T))
+
+@kernel function _add_water_enthalpy_transport_tendency!(GρE, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds GρE[i, j, k] -= V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, water_enthalpy_flux_x, args...) +
+                                                       δyᵃᶜᵃ(i, j, k, grid, water_enthalpy_flux_y, args...) +
+                                                       δzᵃᵃᶜ(i, j, k, grid, water_enthalpy_flux_z, args...))
+end
+
+function add_water_enthalpy_transport_tendency!(GρE, model)
+    grid = model.grid
+    formulation = model.formulation
+    T₀ = formulation.reference_temperature
+    constants = model.thermodynamic_constants
+    ρ = total_density(model.dynamics)
+    U = transport_velocities(model)
+    moisture_name = moisture_prognostic_name(model.microphysics)
+    common = (ρ, U)
+    closing = (formulation.dry_enthalpy, model.temperature, constants.dry_air.heat_capacity, T₀)
+
+    moisture_args = (field_advection_scheme(model.advection, moisture_name), common...,
+                     specific_prognostic_moisture(model), formulation.moisture_enthalpy, closing...)
+    launch!(grid.architecture, grid, :xyz, _add_water_enthalpy_transport_tendency!, GρE, grid, moisture_args)
+
+    foreach(condensate_field_names(model.microphysics)) do name
+        q = getproperty(model.microphysical_fields, specific_field_name(name))
+        e = condensate_enthalpy(model.microphysics, Val(name), T₀, constants)
+        args = (field_advection_scheme(model.advection, name), common..., q, e, closing...)
+        launch!(grid.architecture, grid, :xyz, _add_water_enthalpy_transport_tendency!, GρE, grid, args)
+    end
+
+    return nothing
 end
 
 #####
@@ -190,37 +283,157 @@ end
 end
 
 #####
+##### Closure transport of the static energy and of the water's dry-air-equivalent enthalpy
+#####
+#
+# The closure mixes each water species by a mass flux 𝐉ˣ = − ρ κ ∇qˣ, which moves water and no dry air
+# (the dry density has no closure flux), so the water's whole enthalpy has to move with it. The flux
+# of the static energy, − ρ κ ∇ŝ, with ŝ = qᵈ (ĥᵈ − K) + Σₓ qˣ (hˣ + g z), carries only
+#
+#   − ρ κ [ qᵈ ∇(ĥᵈ − K) + Σₓ qˣ ∇(hˣ + g z) ] + Σₓ (hˣ + g z − ĥᵈ + K) 𝐉ˣ ,
+#
+# a mixing of air and water at fixed mass and pressure: the water displaces an equal mass of dry
+# air. Since the dry air does not actually move, its enthalpy remains in the wrong cell, warming the
+# source of the water flux and cooling the sink by about cᵖᵈ (T − T₀) per unit mass, and making the
+# solution depend on T₀. The term Σₓ ĥᵈ 𝐉ˣ supplies the difference: it is the enthalpy of the dry air
+# the water was assumed to displace.
+
+function add_closure_water_enthalpy_tendency!(GρE, model, closure, closure_fields)
+    grid = model.grid
+    ρ = total_density(model.dynamics)
+    ĥᵈ = model.formulation.dry_enthalpy
+    disc = time_discretization(closure)
+    constants = model.thermodynamic_constants
+    buoyancy = AtmosphereModelBuoyancy(model.dynamics, model.formulation, constants, model.microphysics,
+                                       model.microphysical_fields)
+    foreach(water_species_fields(model)) do (name, q)
+        id = closure_scalar_index(model, name)
+        args = (ĥᵈ, ρ, disc, closure, closure_fields, id, q, model.clock, Oceananigans.fields(model), buoyancy)
+        launch!(grid.architecture, grid, :xyz, _add_closure_water_enthalpy_tendency!, GρE, grid, args)
+    end
+    return nothing
+end
+
+add_closure_water_enthalpy_tendency!(GρE, model, ::Nothing, closure_fields) = nothing
+
+function add_closure_water_enthalpy_tendency!(GρE, model, closures::Tuple, closure_fields)
+    foreach((closure, K) -> add_closure_water_enthalpy_tendency!(GρE, model, closure, K), closures, closure_fields)
+    return nothing
+end
+
+@inline water_species_fields(model) = (model_moisture_name_field(model), condensate_name_fields(model)...)
+@inline model_moisture_name_field(model) = (moisture_prognostic_name(model.microphysics), specific_prognostic_moisture(model))
+@inline condensate_name_fields(model) =
+    map(name -> (name, getproperty(model.microphysical_fields, specific_field_name(name))),
+        condensate_field_names(model.microphysics))
+
+@inline closure_water_enthalpy_flux_x(i, j, k, grid, ĥᵈ, ρ, args...) =
+    Axᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, ĥᵈ) * Jᶜx(i, j, k, grid, ρ, args...)
+@inline closure_water_enthalpy_flux_y(i, j, k, grid, ĥᵈ, ρ, args...) =
+    Ayᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, ĥᵈ) * Jᶜy(i, j, k, grid, ρ, args...)
+@inline closure_water_enthalpy_flux_z(i, j, k, grid, ĥᵈ, ρ, args...) =
+    Azᶜᶜᶠ(i, j, k, grid) * ℑzᵃᵃᶠ(i, j, k, grid, ĥᵈ) * Jᶜz(i, j, k, grid, ρ, args...)
+
+@kernel function _add_closure_water_enthalpy_tendency!(GρE, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds GρE[i, j, k] -= V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, closure_water_enthalpy_flux_x, args...) +
+                                                       δyᵃᶜᵃ(i, j, k, grid, closure_water_enthalpy_flux_y, args...) +
+                                                       δzᵃᵃᶜ(i, j, k, grid, closure_water_enthalpy_flux_z, args...))
+end
+
+#####
 ##### Vertically implicit diffusion of the static energy
 #####
 #
 # The closure diffuses the static energy ŝ, not the total energy: diffusing ρE would diffuse g z and
 # K too, a spurious downgradient flux of potential energy. The vertically implicit solve therefore acts
-# on X = ρᵈ ŝ (the `diffusion_workspace`), which is diffused as ∂ₜX = ∂z(ρᵈ κ ∂z(X / ρᵈ)) like every
-# other coupling-weighted scalar, and the increment X⁺ − X is added to ρE. The solve is in flux form
-# with no-flux walls (the wall fluxes of ρE enter its explicit tendency), so the increment sums to
-# zero over each column and ∫ρE is conserved exactly. ŝ is the value diagnosed at the start of the
-# stage; the solve uses the live dry density, as for ρθ.
+# on X = ρ ŝ (the `diffusion_workspace`), which is diffused as ∂ₜX = ∂z(ρ κ ∂z(X / ρ)) with the total
+# density ρ the water species' solves are weighted with, and the increment X⁺ − X is added to ρE. The
+# solve is in flux form with no-flux walls (the wall fluxes of ρE enter its explicit tendency), so
+# the increment sums to zero over each column and ∫ρE is conserved exactly. ŝ is the value diagnosed
+# at the start of the stage. The water's solves ran first, and the dry-air-equivalent enthalpy of
+# their mass fluxes (see above) is taken from the solved water, the flux they actually applied.
 
-function AtmosphereModels.implicit_thermodynamic_solve!(solve!, formulation::TotalEnergyFormulation, model)
+AtmosphereModels.implicit_diffusion_density(::TotalEnergyFormulation, model) = total_density(model.dynamics)
+
+AtmosphereModels.implicit_advection_density(dynamics, ::TotalEnergyFormulation, name::Symbol) =
+    name === :ρu || name === :ρv || name === :ρw ? dynamics_density(dynamics) : total_density(dynamics)
+
+function AtmosphereModels.implicit_thermodynamic_solve!(solve!, formulation::TotalEnergyFormulation, model, Δt)
     isnothing(model.timestepper.implicit_solver) && return nothing
     grid = model.grid
     arch = grid.architecture
     X = formulation.diffusion_workspace
-    ρᵈ = dynamics_density(model.dynamics)
-    launch!(arch, grid, :xyz, _set_diffusion_workspace!, X, ρᵈ, formulation.static_energy)
+    ρ = total_density(model.dynamics)
+    launch!(arch, grid, :xyz, _set_diffusion_workspace!, X, ρ, formulation.static_energy)
     solve!(X)
-    launch!(arch, grid, :xyz, _add_diffusion_increment!, formulation.energy_density, X, ρᵈ, formulation.static_energy)
+    launch!(arch, grid, :xyz, _add_diffusion_increment!, formulation.energy_density, X, ρ, formulation.static_energy)
+    add_implicit_water_enthalpy_flux!(model, model.closure, model.closure_fields, Δt)
     return nothing
 end
 
-@kernel function _set_diffusion_workspace!(X, ρᵈ, ŝ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds X[i, j, k] = ρᵈ[i, j, k] * ŝ[i, j, k]
+add_implicit_water_enthalpy_flux!(model, ::Nothing, closure_fields, Δt) = nothing
+
+function add_implicit_water_enthalpy_flux!(model, closures::Tuple, closure_fields, Δt)
+    foreach((closure, K) -> add_implicit_water_enthalpy_flux!(model, closure, K, Δt), closures, closure_fields)
+    return nothing
 end
 
-@kernel function _add_diffusion_increment!(ρE, X, ρᵈ, ŝ)
+add_implicit_water_enthalpy_flux!(model, closure, closure_fields, Δt) =
+    add_implicit_water_enthalpy_flux!(model, time_discretization(closure), closure, closure_fields, Δt)
+
+add_implicit_water_enthalpy_flux!(model, discretization, closure, closure_fields, Δt) = nothing
+
+function add_implicit_water_enthalpy_flux!(model, ::VerticallyImplicitTimeDiscretization, closure, closure_fields, Δt)
+    grid = model.grid
+    arch = grid.architecture
+    formulation = model.formulation
+    ρ = total_density(model.dynamics)
+    kernel_Δt = kernel_time_step(arch, grid, Δt)
+    constants = model.thermodynamic_constants
+    buoyancy = AtmosphereModelBuoyancy(model.dynamics, formulation, constants, model.microphysics,
+                                       model.microphysical_fields)
+    prognostic = prognostic_fields(model)
+    names = (moisture_prognostic_name(model.microphysics), condensate_field_names(model.microphysics)...)
+    foreach(names) do name
+        q = SolvedSpecificWater(getproperty(prognostic, name), ρ)
+        id = closure_scalar_index(model, name)
+        launch!(arch, grid, :xyz, _add_implicit_water_enthalpy_flux!, formulation.energy_density, grid, kernel_Δt,
+                formulation.dry_enthalpy, ρ, closure, closure_fields, id, q, model.clock, Oceananigans.fields(model), buoyancy)
+    end
+    return nothing
+end
+
+# The specific humidity of a species that the implicit solve weights with ρ: the solved density over ρ
+struct SolvedSpecificWater{Q, R}
+    density :: Q
+    total_density :: R
+end
+
+Adapt.adapt_structure(to, q::SolvedSpecificWater) = SolvedSpecificWater(adapt(to, q.density), adapt(to, q.total_density))
+
+@inline Base.getindex(q::SolvedSpecificWater, i, j, k) = @inbounds q.density[i, j, k] / q.total_density[i, j, k]
+
+@inline function implicit_water_enthalpy_flux(i, j, k, grid, ĥᵈ, ρ, closure, K, id, q, clock, model_fields, buoyancy)
+    J = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * _diffusive_flux_z(i, j, k, grid, ExplicitTimeDiscretization(), closure, K, id, q,
+                                                     clock, model_fields, buoyancy)
+    interior_face = (k > 1) & (k <= size(grid, 3))
+    return ifelse(interior_face, Azᶜᶜᶠ(i, j, k, grid) * ℑzᵃᵃᶠ(i, j, k, grid, ĥᵈ) * J, zero(J))
+end
+
+@kernel function _add_implicit_water_enthalpy_flux!(ρE, grid, Δt, ĥᵈ, ρ, args...)
     i, j, k = @index(Global, NTuple)
-    @inbounds ρE[i, j, k] += X[i, j, k] - ρᵈ[i, j, k] * ŝ[i, j, k]
+    @inbounds ρE[i, j, k] -= Δt * V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, implicit_water_enthalpy_flux, ĥᵈ, ρ, args...)
+end
+
+@kernel function _set_diffusion_workspace!(X, ρ, ŝ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds X[i, j, k] = ρ[i, j, k] * ŝ[i, j, k]
+end
+
+@kernel function _add_diffusion_increment!(ρE, X, ρ, ŝ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ρE[i, j, k] += X[i, j, k] - ρ[i, j, k] * ŝ[i, j, k]
 end
 
 #####
