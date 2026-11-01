@@ -59,11 +59,11 @@ end
         # Heating at fixed volume
         Q = 1e-3
         dθ_Q = (gas_potential_temperature(T + Q / cᵛᵐ, ρ, q, constants) - θ) / Q
-        isochoric = PTF.heating_response(Dry(), θ, T, q, constants)
+        isochoric = PTF.heating_response(Dry(), θ, T, q, DryExponent(), constants)
         @test dθ_Q ≈ isochoric rtol=1e-5
 
         # The pairs agree: 1/(cᵖᵐ Π) + θ (κᵐ − κᵈ) / (cᵛᵐ T) = (1 − κᵈ) / (cᵛᵐ Π)
-        isobaric = PTF.heating_response(Dry(pressure_work=IsobaricPressureWork()), θ, T, q, constants)
+        isobaric = PTF.heating_response(Dry(pressure_work=IsobaricPressureWork()), θ, T, q, DryExponent(), constants)
         @test isobaric + θ * (Rᵐ / cᵖᵐ - κᵈ) / (cᵛᵐ * T) ≈ isochoric rtol=1e-13
     end
 end
