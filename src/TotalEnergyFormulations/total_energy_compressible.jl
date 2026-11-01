@@ -109,8 +109,8 @@ end
 #   C (ĥᵈ + E) = (1 + C) Rᵈ T + 2 C K ρ/ρᵈ ,
 #
 # the squared sound speed per unit dry mass of air compressed through motionless water, independent
-# of the energy origin T₀ and of the water's latent energy. (Moving the water with the air would add
-# Rᵛ rᵛ (1 + C) T + c²_water, about 3%, to the squared sound speed of moist air at 20 g/kg.)
+# of the energy origin T₀ and of the water's latent energy (about 3% below moist air's at 20 g/kg, where
+# the water would also be compressed).
 #
 # Carrying Ĥ = (ρE + p) / ρᵈ in the loop instead, as the sum of all constituents' enthalpies, would
 # advect the water's energy through the loop without its water. The loop's stratification would then
