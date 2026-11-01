@@ -64,6 +64,12 @@ end
 column_state(model) = map(f -> Array(interior(f)), (model.temperature, model.moisture_density,
                                                     model.microphysical_fields.ρqᶜˡ))
 
+# TODO: on Julia 1.11, type inference of the traced window (Kessler microphysics, surface flux time series and
+# total-water relaxation) recurses through Reactant's interpreter until it overflows the stack (StackOverflowError
+# in Core.Compiler on the 1.11 GPU job). Julia ≥ 1.12 compiles it.
+compiles_flux_series_window() = VERSION ≥ v"1.12"
+
+compiles_flux_series_window() &&
 @testset "Surface flux time series and total-water relaxation under Reactant" begin
     Δt, steps = 75.0, 40 # 3000 s, across five records
     eager = flux_series_columns(CPU())
