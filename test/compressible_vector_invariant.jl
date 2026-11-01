@@ -341,3 +341,32 @@ flux_form() = Centered(order = 2)
         Oceananigans.defaults.FloatType = previous_float_type
     end
 end
+
+#####
+##### The stored vorticity deviations reproduce the recomputed ones
+#####
+
+@testset "Stored vorticity deviations [$FT]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (16, 16, 8), halo = (6, 6, 6), extent = (1e3, 1e3, 1e3),
+                           topology = (Periodic, Bounded, Bounded))
+    model = compressible_model(grid, CompressibleWENOVectorInvariant())
+    @test model.advection.momentum.vorticity_deviations isa NamedTuple
+
+    Random.seed!(11)
+    set!(model; ρ = 1, θ = 300, u = (x, y, z) -> sin(2π * x / 1e3) * cos(π * y / 1e3) + 1e-1 * rand(),
+                                v = (x, y, z) -> cos(2π * x / 1e3) * sin(π * y / 1e3) + 1e-1 * rand())
+
+    stored = model.advection.momentum
+    recomputed = materialize_advection(CompressibleWENOVectorInvariant(), grid)
+    @test isnothing(recomputed.vorticity_deviations)
+
+    Breeze.AtmosphereModels.update_advection_auxiliaries!(stored, grid, model.velocities)
+    args(scheme) = (scheme, model.momentum, model.velocities, model.dynamics)
+    Gs = KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, args(stored)...)
+    Gr = KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, args(recomputed)...)
+    Hs = KernelFunctionOperation{Center, Face, Center}(y_momentum_flux_divergence, grid, args(stored)...)
+    Hr = KernelFunctionOperation{Center, Face, Center}(y_momentum_flux_divergence, grid, args(recomputed)...)
+    @test Array(interior(compute!(Field(Gs)))) == Array(interior(compute!(Field(Gr))))
+    @test Array(interior(compute!(Field(Hs)))) == Array(interior(compute!(Field(Hr))))
+end

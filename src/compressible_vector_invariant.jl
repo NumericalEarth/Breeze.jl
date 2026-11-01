@@ -46,7 +46,12 @@ using Oceananigans.Advection:
     _symmetric_interpolate_yᵃᶜᵃ,
     _symmetric_interpolate_zᵃᵃᶠ
 
+using KernelAbstractions: @kernel, @index
+
 using Oceananigans.Architectures: Architectures, on_architecture
+using Oceananigans.Fields: Field
+using Oceananigans.Grids: Center, Face
+using Oceananigans.Utils: Utils, KernelParameters, launch!
 using Oceananigans.Grids: Grids, AbstractGrid, AbstractHorizontallyCurvilinearGrid, required_halo_size_x
 using Oceananigans.TimeSteppers: TimeSteppers, ExplicitTimeDiscretization
 
@@ -172,7 +177,7 @@ Oceananigans.Advection.materialize_advection(g::GradientFormUpwinding, grid) = G
 ##### The scheme
 #####
 
-struct CompressibleVectorInvariant{N, FT, Z, ZS, V, K, D, VF, P, C, CS} <: AbstractAdvectionScheme{N, FT, ExplicitTimeDiscretization}
+struct CompressibleVectorInvariant{N, FT, Z, ZS, V, K, D, VF, P, C, CS, VD} <: AbstractAdvectionScheme{N, FT, ExplicitTimeDiscretization}
     vorticity_scheme               :: Z
     vorticity_stencil              :: ZS
     vertical_advection_scheme      :: V
@@ -182,6 +187,7 @@ struct CompressibleVectorInvariant{N, FT, Z, ZS, V, K, D, VF, P, C, CS} <: Abstr
     vorticity_pairing              :: P
     centered_vorticity_scheme      :: C  # the centered counterpart of `vorticity_scheme` the pairings subtract
     core_scheme                    :: CS # the centered interpolation P of the non-dissipative core (and its transpose)
+    vorticity_deviations           :: VD # stored upwind-pairing deviations, or `nothing` to recompute them at every read
 
     function CompressibleVectorInvariant{N, FT}(vorticity_scheme::Z,
                                                 vorticity_stencil::ZS,
@@ -191,9 +197,10 @@ struct CompressibleVectorInvariant{N, FT, Z, ZS, V, K, D, VF, P, C, CS} <: Abstr
                                                 vertical_formulation::VF,
                                                 vorticity_pairing::P,
                                                 centered_vorticity_scheme::C,
-                                                core_scheme::CS) where {N, FT, Z, ZS, V, K, D, VF, P, C, CS}
+                                                core_scheme::CS,
+                                                vorticity_deviations::VD = nothing) where {N, FT, Z, ZS, V, K, D, VF, P, C, CS, VD}
 
-        return new{N, FT, Z, ZS, V, K, D, VF, P, C, CS}(vorticity_scheme,
+        return new{N, FT, Z, ZS, V, K, D, VF, P, C, CS, VD}(vorticity_scheme,
                                                         vorticity_stencil,
                                                         vertical_advection_scheme,
                                                         kinetic_energy_gradient_scheme,
@@ -201,7 +208,8 @@ struct CompressibleVectorInvariant{N, FT, Z, ZS, V, K, D, VF, P, C, CS} <: Abstr
                                                         vertical_formulation,
                                                         vorticity_pairing,
                                                         centered_vorticity_scheme,
-                                                        core_scheme)
+                                                        core_scheme,
+                                                        vorticity_deviations)
     end
 end
 
@@ -431,7 +439,8 @@ Adapt.adapt_structure(to, scheme::CVI{N, FT}) where {N, FT} =
                                        scheme.vertical_formulation,
                                        scheme.vorticity_pairing,
                                        scheme.centered_vorticity_scheme,
-                                       scheme.core_scheme)
+                                       scheme.core_scheme,
+                                       Adapt.adapt(to, scheme.vorticity_deviations))
 
 Architectures.on_architecture(to, scheme::CVI{N, FT}) where {N, FT} =
     CompressibleVectorInvariant{N, FT}(on_architecture(to, scheme.vorticity_scheme),
@@ -442,7 +451,8 @@ Architectures.on_architecture(to, scheme::CVI{N, FT}) where {N, FT} =
                                        scheme.vertical_formulation,
                                        scheme.vorticity_pairing,
                                        scheme.centered_vorticity_scheme,
-                                       scheme.core_scheme)
+                                       scheme.core_scheme,
+                                       on_architecture(to, scheme.vorticity_deviations))
 
 # The sub-schemes may defer settings (such as WENO weight computation) until the grid is known.
 Oceananigans.Advection.materialize_advection(scheme::CVI{N, FT}, grid) where {N, FT} =
@@ -454,7 +464,8 @@ Oceananigans.Advection.materialize_advection(scheme::CVI{N, FT}, grid) where {N,
                                        scheme.vertical_formulation,
                                        scheme.vorticity_pairing,
                                        scheme.centered_vorticity_scheme,
-                                       scheme.core_scheme)
+                                       scheme.core_scheme,
+                                       scheme.vorticity_deviations)
 
 # The scheme has no per-direction order to adapt to a small grid.
 Oceananigans.Advection.adapt_advection_order(scheme::CVI, grid::AbstractGrid) = scheme
@@ -660,8 +671,17 @@ end
 @inline ρwˣ_ℑy_Δy_uᶠᶠᶜ(i, j, k, grid, scheme, ρ, u, v) =
     ℑxyᶠᶠᵃ(i, j, k, grid, ρ) * x_deviation_weightᶠᶠᶜ(i, j, k, grid, u, v) * ℑyᵃᶠᵃ(i, j, k, grid, Δy_qᶠᶜᶜ, u)
 
-@inline Δx_v_devᶜᶠᶜ(i, j, k, grid, scheme, u, v) = Δx_qᶜᶠᶜ(i, j, k, grid, v) * x_vorticity_deviationᶜᶠᶜ(i, j, k, grid, scheme, u, v)
-@inline Δy_u_devᶠᶜᶜ(i, j, k, grid, scheme, u, v) = Δy_qᶠᶜᶜ(i, j, k, grid, u) * y_vorticity_deviationᶠᶜᶜ(i, j, k, grid, scheme, u, v)
+# Each deviation is read five times per tendency point, and each read is a WENO reconstruction, unless the
+# model stored them first (see `update_vorticity_deviations!`).
+@inline stored_x_deviationᶜᶠᶜ(i, j, k, grid, ::Nothing, scheme, u, v) = x_vorticity_deviationᶜᶠᶜ(i, j, k, grid, scheme, u, v)
+@inline stored_y_deviationᶠᶜᶜ(i, j, k, grid, ::Nothing, scheme, u, v) = y_vorticity_deviationᶠᶜᶜ(i, j, k, grid, scheme, u, v)
+@inline stored_x_deviationᶜᶠᶜ(i, j, k, grid, d, scheme, u, v) = @inbounds d.x[i, j, k]
+@inline stored_y_deviationᶠᶜᶜ(i, j, k, grid, d, scheme, u, v) = @inbounds d.y[i, j, k]
+
+@inline Δx_v_devᶜᶠᶜ(i, j, k, grid, scheme, u, v) =
+    Δx_qᶜᶠᶜ(i, j, k, grid, v) * stored_x_deviationᶜᶠᶜ(i, j, k, grid, scheme.vorticity_deviations, scheme, u, v)
+@inline Δy_u_devᶠᶜᶜ(i, j, k, grid, scheme, u, v) =
+    Δy_qᶠᶜᶜ(i, j, k, grid, u) * stored_y_deviationᶠᶜᶜ(i, j, k, grid, scheme.vorticity_deviations, scheme, u, v)
 
 @inline ρwˣ_ℑx_Δx_v_devᶠᶠᶜ(i, j, k, grid, scheme, ρ, u, v) =
     ℑxyᶠᶠᵃ(i, j, k, grid, ρ) * x_deviation_weightᶠᶠᶜ(i, j, k, grid, u, v) * ℑxᶠᵃᵃ(i, j, k, grid, Δx_v_devᶜᶠᶜ, scheme, u, v)
@@ -671,14 +691,14 @@ end
 
 @inline function x_lamb_term(i, j, k, grid, scheme::UpwindPairedVorticity, ρ, u, v)
     corner = ℑyᵃᶜᵃ(i, j, k, grid, ρζᵛ_Px_Δx_vᶠᶠᶜ, scheme, ρ, u, v) - Pyᵃᶜᵃ(i, j, k, grid, scheme, ρζᵘ_ℑx_Δx_vᶠᶠᶜ, scheme, ρ, u, v)
-    own = y_vorticity_deviationᶠᶜᶜ(i, j, k, grid, scheme, u, v) * ℑyᵃᶜᵃ(i, j, k, grid, ρwʸ_ℑx_Δx_vᶠᶠᶜ, scheme, ρ, u, v)
+    own = stored_y_deviationᶠᶜᶜ(i, j, k, grid, scheme.vorticity_deviations, scheme, u, v) * ℑyᵃᶜᵃ(i, j, k, grid, ρwʸ_ℑx_Δx_vᶠᶠᶜ, scheme, ρ, u, v)
     partners = ℑyᵃᶜᵃ(i, j, k, grid, ρwˣ_ℑx_Δx_v_devᶠᶠᶜ, scheme, ρ, u, v)
     return + Axᶠᶜᶜ(i, j, k, grid) * V⁻¹ᶠᶜᶜ(i, j, k, grid) * (corner + own + partners)
 end
 
 @inline function y_lamb_term(i, j, k, grid, scheme::UpwindPairedVorticity, ρ, u, v)
     corner = Pxᶜᵃᵃ(i, j, k, grid, scheme, ρζᵛ_ℑy_Δy_uᶠᶠᶜ, scheme, ρ, u, v) - ℑxᶜᵃᵃ(i, j, k, grid, ρζᵘ_Py_Δy_uᶠᶠᶜ, scheme, ρ, u, v)
-    own = x_vorticity_deviationᶜᶠᶜ(i, j, k, grid, scheme, u, v) * ℑxᶜᵃᵃ(i, j, k, grid, ρwˣ_ℑy_Δy_uᶠᶠᶜ, scheme, ρ, u, v)
+    own = stored_x_deviationᶜᶠᶜ(i, j, k, grid, scheme.vorticity_deviations, scheme, u, v) * ℑxᶜᵃᵃ(i, j, k, grid, ρwˣ_ℑy_Δy_uᶠᶠᶜ, scheme, ρ, u, v)
     partners = ℑxᶜᵃᵃ(i, j, k, grid, ρwʸ_ℑy_Δy_u_devᶠᶠᶜ, scheme, ρ, u, v)
     return - Ayᶜᶠᶜ(i, j, k, grid) * V⁻¹ᶜᶠᶜ(i, j, k, grid) * (corner + own + partners)
 end
@@ -947,6 +967,39 @@ const HCG = AbstractHorizontallyCurvilinearGrid
 #####
 ##### Momentum flux divergences: the negative of the advective tendencies, as the model subtracts them
 #####
+
+#####
+##### Stored vorticity deviations
+#####
+
+AtmosphereModels.validate_momentum_advection(scheme::CVI, grid) = scheme
+
+AtmosphereModels.validate_momentum_advection(scheme::UpwindPairedVorticity, grid) =
+    with_vorticity_deviations(scheme, (x = Field{Center, Face, Center}(grid), y = Field{Face, Center, Center}(grid)))
+
+with_vorticity_deviations(s::CVI{N, FT}, deviations) where {N, FT} =
+    CompressibleVectorInvariant{N, FT}(s.vorticity_scheme, s.vorticity_stencil, s.vertical_advection_scheme,
+                                       s.kinetic_energy_gradient_scheme, s.divergence_scheme, s.vertical_formulation,
+                                       s.vorticity_pairing, s.centered_vorticity_scheme, s.core_scheme, deviations)
+
+Utils.getregion(s::CVI, i) = with_vorticity_deviations(s, Utils.getregion(s.vorticity_deviations, i))
+Utils._getregion(s::CVI, i) = Utils.getregion(s, i)
+
+@kernel function _store_vorticity_deviations!(d, grid, scheme, u, v)
+    i, j, k = @index(Global, NTuple)
+    @inbounds d.x[i, j, k] = x_vorticity_deviationᶜᶠᶜ(i, j, k, grid, scheme, u, v)
+    @inbounds d.y[i, j, k] = y_vorticity_deviationᶠᶜᶜ(i, j, k, grid, scheme, u, v)
+end
+
+function AtmosphereModels.update_advection_auxiliaries!(scheme::UpwindPairedVorticity, grid, velocities)
+    isnothing(scheme.vorticity_deviations) && return nothing
+    Nx, Ny, Nz = size(grid)
+    # One point past the interior each way: the deviations of the neighboring velocity points of a pair
+    parameters = KernelParameters(0:Nx+1, 0:Ny+1, 1:Nz)
+    launch!(grid.architecture, grid, parameters, _store_vorticity_deviations!,
+            scheme.vorticity_deviations, grid, scheme, velocities.u, velocities.v)
+    return nothing
+end
 
 @inline function AtmosphereModels.x_momentum_flux_divergence(i, j, k, grid, scheme::CVI, momentum, velocities, dynamics)
     ρ = dynamics_density(dynamics)
