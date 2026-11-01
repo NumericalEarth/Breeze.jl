@@ -77,7 +77,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, PotentialTemperatureFormulation,
                                                 LiquidIcePotentialTemperatureFormulation, DryPotentialTemperatureFormulation,
                                                 IsochoricPressureWork, IsobaricPressureWork,
-                                                divergence_expansion_coefficient
+                                                post_loop_divergence_coefficient
 using Breeze.MoistEntropyFormulations: MoistEntropyFormulations, MoistEntropyFormulation
 
 using ReactantCore: @trace

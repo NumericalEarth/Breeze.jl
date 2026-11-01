@@ -107,7 +107,7 @@ end
     end
 
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
-    ∂θ∂h = heating_response(formulation.flavor, θ, T, q, constants)
+    ∂θ∂h = heating_response(formulation.flavor, θ, T, q, formulation.exner_exponent, constants)
 
     FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
     div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
@@ -161,12 +161,12 @@ end
     return potential_temperature_heating_response(θ, H) * (Rᵐ * T - κ * H)
 end
 
-@inline function expansion_tendency(i, j, k, grid, ::LiquidIce, dynamics, ρᵈ, θ, T, q, exponent, constants, velocities, model_fields)
+@inline function expansion_tendency(i, j, k, grid, ::LiquidIce{<:IsobaricPressureWork}, dynamics, ρᵈ, θ, T, q, exponent, constants, velocities, model_fields)
     Dt_ln_p = pressure_logarithm_tendency(i, j, k, grid, dynamics, constants, model_fields.w)
     return ρᵈ * expansion_work_source(θ, T, q, exponent, constants) * Dt_ln_p
 end
 
-@inline heating_response(::LiquidIce, θ, T, q, constants) =
+@inline heating_response(::LiquidIce{<:IsobaricPressureWork}, θ, T, q, exponent, constants) =
     potential_temperature_heating_response(θ, liquid_ice_enthalpy(T, q, constants))
 
 @inline function pressure_logarithm_tendency(i, j, k, grid, dynamics, constants, w)
@@ -230,7 +230,7 @@ turbulence `closure` dissipates: ``(ρᵈ / ρ) ρε / (ĉᵖ Π)`` with
         T = temperature[i, j, k]
     end
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
-    ∂θ∂h = heating_response(formulation.flavor, θ, T, q, constants)
+    ∂θ∂h = heating_response(formulation.flavor, θ, T, q, formulation.exner_exponent, constants)
     ρε = subgrid_dissipation(i, j, k, grid, ρ_field, closure, closure_fields, clock, model_fields)
     return ρᵈ / ρ * ρε * ∂θ∂h
 end

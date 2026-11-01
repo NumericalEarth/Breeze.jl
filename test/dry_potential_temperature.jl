@@ -68,6 +68,29 @@ end
     end
 end
 
+@testset "Isochoric closure of θˡⁱ against the first law [$κ̂]" for κ̂ in (VaporEquivalentExponent(), DryExponent())
+    T, ρ, pˢᵗ = 285.0, 1.0, 1e5
+    ϵ = 1e-7
+    θˡⁱ(T, ρ, q) = TD.with_temperature(TD.LiquidIceDensityState(0.0, q, pˢᵗ, ρ, nothing, κ̂), T, constants).potential_temperature
+    flavor = LiquidIce(pressure_work=IsochoricPressureWork())
+    for q in test_compositions
+        Rᵐ = TD.mixture_gas_constant(q, constants)
+        cᵛᵐ = TD.mixture_heat_capacity(q, constants) - Rᵐ
+        θ = θˡⁱ(T, ρ, q)
+        S = PTF.post_loop_divergence_coefficient(flavor, θ, T, q, κ̂, constants)
+        dθ = (θˡⁱ(T - Rᵐ * T * ϵ / cᵛᵐ, ρ * (1 - ϵ), q) - θ) / ϵ
+        @test dθ ≈ -S rtol=1e-5 atol=1e-6 * θ
+        Q = 1e-3
+        dθ_Q = (θˡⁱ(T + Q / cᵛᵐ, ρ, q) - θ) / Q
+        @test dθ_Q ≈ PTF.heating_response(flavor, θ, T, q, κ̂, constants) rtol=1e-5
+    end
+    # Unsaturated air with the dry exponent: the same S as dry θ
+    q = TD.MoistureMassFractions(0.015, 0.0, 0.0)
+    θ = θˡⁱ(T, ρ, q)
+    κ̂ isa DryExponent && @test PTF.post_loop_divergence_coefficient(flavor, θ, T, q, κ̂, constants) ≈
+                               PTF.divergence_expansion_coefficient(θ, q, constants) rtol=1e-12
+end
+
 @testset "Phase-change weights against conservation of internal energy" begin
     T, ρ, pˢᵗ = 285.0, 1.0, 1e5
     c = constants
@@ -170,6 +193,13 @@ end
 
     anelastic = AnelasticDynamics(ReferenceState(grid, ThermodynamicConstants(eltype(grid))))
     @test_throws ArgumentError AtmosphereModel(grid; dynamics=anelastic, formulation=DryPotentialTemperatureFormulation())
+
+    isochoric = LiquidIcePotentialTemperatureFormulation(pressure_work=IsochoricPressureWork())
+    @test isochoric.fixed_volume_phase_change isa AM.FixedVolumePhaseChange
+    @test LiquidIcePotentialTemperatureFormulation().flavor.pressure_work isa IsobaricPressureWork
+    @test contains(sprint(show, isochoric), "pressure_work: IsochoricPressureWork()")
+    @test AtmosphereModel(grid; dynamics=dynamics(), formulation=isochoric).formulation isa LiquidIcePotentialTemperatureFormulation
+    @test_throws ArgumentError AtmosphereModel(grid; dynamics=anelastic, formulation=isochoric)
 
     model = AtmosphereModel(grid; dynamics=dynamics(), formulation=DryPotentialTemperatureFormulation())
     @test_throws ArgumentError set!(model; θˡⁱ=300)

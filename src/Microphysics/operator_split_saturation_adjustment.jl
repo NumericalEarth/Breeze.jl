@@ -161,7 +161,12 @@ end
 ##### The adjustment
 #####
 
-adjustment_pressure_work(microphysics, ::PotentialTemperatureFormulation) = microphysics.liquid_ice_adjustment
+adjustment_pressure_work(microphysics, formulation::PotentialTemperatureFormulation) =
+    liquid_ice_adjustment(microphysics, formulation.flavor.pressure_work)
+
+# The isochoric closure of θˡⁱ adjusts at fixed internal energy, the isobaric one as the scheme says
+liquid_ice_adjustment(microphysics, ::IsobaricPressureWork) = microphysics.liquid_ice_adjustment
+liquid_ice_adjustment(microphysics, ::IsochoricPressureWork) = IsochoricPressureWork()
 adjustment_pressure_work(microphysics, formulation::DryPotentialTemperatureFormulation) = formulation.flavor.pressure_work
 
 function AtmosphereModels.microphysics_model_update!(microphysics::OSSA, model)

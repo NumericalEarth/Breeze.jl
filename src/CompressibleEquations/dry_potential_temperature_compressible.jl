@@ -70,7 +70,7 @@ end
 
 add_post_acoustic_loop_source!(formulation, substepper, model, Δt) = nothing
 
-add_post_acoustic_loop_source!(formulation::DryPotentialTemperatureFormulation, substepper, model, Δt) =
+add_post_acoustic_loop_source!(formulation::PotentialTemperatureFormulation, substepper, model, Δt) =
     add_post_acoustic_loop_source!(formulation.flavor.pressure_work, formulation, substepper, model, Δt)
 
 add_post_acoustic_loop_source!(::IsobaricPressureWork, formulation, substepper, model, Δt) = nothing
@@ -85,7 +85,9 @@ function add_post_acoustic_loop_source!(::IsochoricPressureWork, formulation, su
             substepper.density_potential_temperature_perturbation,
             grid, convert(eltype(grid), Δt),
             substepper.time_averaged_velocities,
+            formulation.flavor, formulation.exner_exponent,
             formulation.potential_temperature,
+            model.temperature,
             model.dynamics.dry_density,
             model.dynamics.total_density,
             model.microphysics,
@@ -95,12 +97,12 @@ function add_post_acoustic_loop_source!(::IsochoricPressureWork, formulation, su
     return nothing
 end
 
-@kernel function _add_divergence_expansion!(ρθ′, grid, Δt, ū, θ, ρᵈ, ρ, microphysics, qᵛᵉ, μ, constants)
+@kernel function _add_divergence_expansion!(ρθ′, grid, Δt, ū, flavor, exponent, θ, T, ρᵈ, ρ, microphysics, qᵛᵉ, μ, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         ρₖ = ρ[i, j, k]
         q = grid_moisture_fractions(i, j, k, grid, microphysics, ρₖ, qᵛᵉ[i, j, k], μ)
-        S = divergence_expansion_coefficient(θ[i, j, k], q, constants)
+        S = post_loop_divergence_coefficient(flavor, θ[i, j, k], T[i, j, k], q, exponent, constants)
         ρθ′[i, j, k] -= Δt * ρᵈ[i, j, k] * S * divᶜᶜᶜ(i, j, k, grid, ū.u, ū.v, ū.w)
     end
 end

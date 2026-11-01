@@ -9,13 +9,6 @@ Which potential temperature a [`PotentialTemperatureFormulation`](@ref) evolves.
 """
 abstract type AbstractPotentialTemperatureFlavor end
 
-"""
-$(TYPEDEF)
-
-The liquid-ice potential temperature ``θˡⁱ = H / (ĉᵖ Π)``, which is invariant under phase change at
-fixed pressure. See [`LiquidIcePotentialTemperatureFormulation`](@ref).
-"""
-struct LiquidIce <: AbstractPotentialTemperatureFlavor end
 
 """
 $(TYPEDEF)
@@ -39,6 +32,21 @@ struct IsobaricPressureWork end
 """
 $(TYPEDEF)
 
+The liquid-ice potential temperature ``θˡⁱ = H / (ĉᵖ Π)``, which is invariant under phase change at
+fixed pressure. See [`LiquidIcePotentialTemperatureFormulation`](@ref). `pressure_work` selects the
+closure: [`IsobaricPressureWork`](@ref) (the default: heating at fixed pressure and the hydrostatic
+expansion source) or [`IsochoricPressureWork`](@ref) (CM1's `eqtset = 2` pairing: heating and phase change
+at fixed volume and the expansion source written with the velocity divergence, compressible core only).
+"""
+struct LiquidIce{W} <: AbstractPotentialTemperatureFlavor
+    pressure_work :: W
+end
+
+LiquidIce(; pressure_work = IsobaricPressureWork()) = LiquidIce(pressure_work)
+
+"""
+$(TYPEDEF)
+
 The potential temperature ``θ = T / Π`` with ``Π = (p / pˢᵗ)^{κᵈ}``, ``κᵈ = Rᵈ / cᵖᵈ``, that CM1 and
 most cloud models evolve. It is not invariant under phase change, so the latent heating is an
 explicit source. `pressure_work` selects the closure, [`IsochoricPressureWork`](@ref) or
@@ -53,7 +61,7 @@ end
 Dry(; pressure_work = IsochoricPressureWork(), condensate_enthalpy_flux = true) =
     Dry(pressure_work, Val(condensate_enthalpy_flux))
 
-Base.summary(::LiquidIce) = "LiquidIce()"
+Base.summary(f::LiquidIce) = string("LiquidIce(pressure_work = ", summary(f.pressure_work), ")")
 Base.summary(::IsochoricPressureWork) = "IsochoricPressureWork()"
 Base.summary(::IsobaricPressureWork) = "IsobaricPressureWork()"
 Base.summary(f::Dry{<:Any, Val{C}}) where C =
@@ -144,7 +152,7 @@ struct PotentialTemperatureFormulation{L, F, T, S, E, P, V, D}
     dissipative_heating :: D            # SubgridDissipativeHeating or Nothing
 end
 
-const LiquidIcePotentialTemperatureFormulation = PotentialTemperatureFormulation{LiquidIce}
+const LiquidIcePotentialTemperatureFormulation = PotentialTemperatureFormulation{<:LiquidIce}
 const DryPotentialTemperatureFormulation = PotentialTemperatureFormulation{<:Dry}
 
 LiquidIcePotentialTemperatureFormulation(ρθ, θ, temperature_solver, exner_exponent, precipitation_heating,
@@ -157,6 +165,10 @@ $(TYPEDSIGNATURES)
 
 Return a `LiquidIcePotentialTemperatureFormulation` with the given `temperature_solver` and
 Exner exponent `exner_exponent`, either `VaporEquivalentExponent()` (the default) or `DryExponent()`.
+`pressure_work = IsochoricPressureWork()` selects CM1's fixed-volume closure (compressible core only): the
+expansion source is the velocity divergence applied after the acoustic loop, heating responds at fixed
+volume, and the fixed-volume phase-change source is always on. The default, `IsobaricPressureWork()`, is the
+hydrostatic closure.
 `precipitation_heating`, `fixed_volume_phase_change` and `dissipative_heating` turn on the
 optional energy-closing sources (`true`, or the option's instance) or leave them off (`false`,
 the default, or `nothing`).
@@ -197,11 +209,17 @@ LiquidIcePotentialTemperatureFormulation(; temperature_solver = DefaultTemperatu
                                            exner_exponent = VaporEquivalentExponent(),
                                            precipitation_heating = false,
                                            fixed_volume_phase_change = false,
-                                           dissipative_heating = false) =
-    LiquidIcePotentialTemperatureFormulation(nothing, nothing, temperature_solver, validate_exponent(exner_exponent),
-                                             energy_source_option(precipitation_heating, PrecipitationDragHeating),
-                                             energy_source_option(fixed_volume_phase_change, FixedVolumePhaseChange),
-                                             energy_source_option(dissipative_heating, SubgridDissipativeHeating))
+                                           dissipative_heating = false,
+                                           pressure_work = IsobaricPressureWork()) =
+    PotentialTemperatureFormulation(LiquidIce(pressure_work), nothing, nothing, temperature_solver, validate_exponent(exner_exponent),
+                                    energy_source_option(precipitation_heating, PrecipitationDragHeating),
+                                    liquid_ice_phase_change_option(pressure_work, fixed_volume_phase_change),
+                                    energy_source_option(dissipative_heating, SubgridDissipativeHeating))
+
+# The isochoric closure needs the fixed-volume phase change: it is the part of the fixed-volume
+# expansion that phase change drives, which the divergence form leaves out.
+liquid_ice_phase_change_option(::IsobaricPressureWork, flag) = energy_source_option(flag, FixedVolumePhaseChange)
+liquid_ice_phase_change_option(::IsochoricPressureWork, flag) = FixedVolumePhaseChange()
 
 """
 $(TYPEDSIGNATURES)
@@ -344,7 +362,9 @@ function AtmosphereModels.materialize_formulation(formulation::LiquidIcePotentia
     potential_temperature = CenterField(grid)  # θ = ρθ / ρ (diagnostic)
     temperature_solver = materialize_temperature_solver(formulation.temperature_solver, dynamics, grid)
     fixed_volume_phase_change = materialize_phase_change_source(formulation.fixed_volume_phase_change, dynamics)
-    return LiquidIcePotentialTemperatureFormulation(potential_temperature_density,
+    formulation.flavor.pressure_work isa IsochoricPressureWork && fixed_volume_phase_change === nothing &&
+        throw(ArgumentError("The isochoric closure of LiquidIcePotentialTemperatureFormulation needs CompressibleDynamics"))
+    return PotentialTemperatureFormulation(formulation.flavor, potential_temperature_density,
                                                     potential_temperature,
                                                     temperature_solver,
                                                     formulation.exner_exponent,
@@ -455,12 +475,16 @@ function Base.show(io::IO, formulation::LiquidIcePotentialTemperatureFormulation
     else
         print(io, '\n')
     end
+    print_pressure_work(io, formulation.flavor.pressure_work)
     print(io, "├── exner_exponent: ", summary(formulation.exner_exponent), '\n')
     print(io, "├── temperature_solver: ", summary(formulation.temperature_solver), '\n')
     print(io, "├── precipitation_heating: ", energy_source_summary(formulation.precipitation_heating), '\n')
     print(io, "├── fixed_volume_phase_change: ", energy_source_summary(formulation.fixed_volume_phase_change), '\n')
     print(io, "└── dissipative_heating: ", energy_source_summary(formulation.dissipative_heating))
 end
+
+print_pressure_work(io, ::IsobaricPressureWork) = nothing
+print_pressure_work(io, w) = print(io, "├── pressure_work: ", summary(w), '\n')
 
 energy_source_summary(::Nothing) = "false"
 energy_source_summary(option) = summary(option)

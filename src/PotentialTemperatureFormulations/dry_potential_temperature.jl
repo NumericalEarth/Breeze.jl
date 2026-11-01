@@ -20,10 +20,10 @@
 @inline dry_kappa(constants) = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
 
 # A state at absolute zero (before `set!`) has no response.
-@inline heating_response(::Dry{<:IsochoricPressureWork}, θ, T, q, constants) =
+@inline heating_response(::Dry{<:IsochoricPressureWork}, θ, T, q, exponent, constants) =
     (1 - dry_kappa(constants)) * θ / ((mixture_heat_capacity(q, constants) - mixture_gas_constant(q, constants)) * ifelse(T == 0, one(T), T))
 
-@inline heating_response(::Dry{<:IsobaricPressureWork}, θ, T, q, constants) =
+@inline heating_response(::Dry{<:IsobaricPressureWork}, θ, T, q, exponent, constants) =
     θ / (mixture_heat_capacity(q, constants) * ifelse(T == 0, one(T), T))
 
 """
@@ -180,7 +180,7 @@ end
 
 @inline function dry_condensate_content(flavor, θ, T, q, constants)
     h = transported_condensate_enthalpies(flavor.condensate_enthalpy_flux, T, constants)
-    return (; χ = (zero(T), zero(T)), h, ∂φ∂h = heating_response(flavor, θ, T, q, constants))
+    return (; χ = (zero(T), zero(T)), h, ∂φ∂h = heating_response(flavor, θ, T, q, DryExponent(), constants))
 end
 
 @inline function AtmosphereModels.condensate_content(i, j, k, grid, formulation::DryPotentialTemperatureFormulation,
@@ -219,3 +219,45 @@ AtmosphereModels.content_temperature(::DryPotentialTemperatureFormulation, tempe
 AtmosphereModels.wall_potential_temperature_counts_condensate(::DryPotentialTemperatureFormulation) = false
 AtmosphereModels.wall_potential_temperature_counts_condensate(::Val{:DryPotentialTemperature}) = false
 AtmosphereModels.liquid_ice_exner_exponent(::Val{:DryPotentialTemperature}) = DryExponent()
+
+#####
+##### The isochoric closure of θˡⁱ
+#####
+#
+# At fixed composition θˡⁱ changes only through its expansion source, Dθˡⁱ/Dt = ℰ D ln p/Dt with
+# ℰ = (θˡⁱ / H)(Rᵐ T − κ H), and adiabatic compression gives D ln p/Dt = −(cᵖᵐ / cᵛᵐ) ∇⋅𝐮, so
+#
+#   Dθˡⁱ/Dt = − S ∇⋅𝐮 ,   S = ℰ cᵖᵐ / cᵛᵐ ,
+#
+# which reduces to the dry S = θ (Rᵐ − κᵈ cᵖᵐ) / cᵛᵐ for the dry exponent in unsaturated air (where H = cᵖᵐ T,
+# θ = T / Π). Heating at fixed volume adds the expansion it drives: the response is ∂θˡⁱ/∂h + ℰ / (cᵛᵐ T),
+# and phase change at fixed volume is the fixed-volume phase-change source (ℰ times the phase-change
+# part of D ln p / Dt, which is otherwise zero for θˡⁱ).
+
+@inline function liquid_ice_divergence_coefficient(θ, T, q, exponent, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    return expansion_work_source(θ, T, q, exponent, constants) * cᵖᵐ / (cᵖᵐ - Rᵐ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the coefficient ``S`` of the velocity divergence, ``Dθ/Dt ∋ - S ∇ ⋅ 𝐮``, for the isochoric closure of `flavor`.
+"""
+@inline post_loop_divergence_coefficient(::Dry, θ, T, q, exponent, constants) = divergence_expansion_coefficient(θ, q, constants)
+@inline post_loop_divergence_coefficient(::LiquidIce, θ, T, q, exponent, constants) =
+    liquid_ice_divergence_coefficient(θ, T, q, exponent, constants)
+
+@inline heating_response(flavor::LiquidIce{<:IsochoricPressureWork}, θ, T, q, exponent, constants) =
+    potential_temperature_heating_response(θ, liquid_ice_enthalpy(T, q, constants)) +
+    isochoric_heating_correction(θ, T, q, exponent, constants)
+
+@inline function isochoric_heating_correction(θ, T, q, exponent, constants)
+    T̂ = ifelse(T == 0, one(T), T)
+    cᵛᵐ = mixture_heat_capacity(q, constants) - mixture_gas_constant(q, constants)
+    return expansion_work_source(θ, T, q, exponent, constants) / (cᵛᵐ * T̂)
+end
+
+@inline expansion_tendency(i, j, k, grid, flavor::LiquidIce{<:IsochoricPressureWork}, dynamics, ρᵈ, θ, T, q, exponent, constants, velocities, model_fields) =
+    - ρᵈ * liquid_ice_divergence_coefficient(θ, T, q, exponent, constants) * explicit_velocity_divergence(i, j, k, grid, dynamics, velocities)
