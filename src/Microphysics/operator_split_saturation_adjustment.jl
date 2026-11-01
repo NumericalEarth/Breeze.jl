@@ -4,7 +4,6 @@
 
 using ..AtmosphereModels:
     AtmosphereModels,
-    compute_microphysical_tendencies!,
     dynamics_density,
     dynamics_pressure,
     diagnose_thermodynamic_state,
