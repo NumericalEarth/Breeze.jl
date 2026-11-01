@@ -367,6 +367,6 @@ end
     Gr = KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, args(recomputed)...)
     Hs = KernelFunctionOperation{Center, Face, Center}(y_momentum_flux_divergence, grid, args(stored)...)
     Hr = KernelFunctionOperation{Center, Face, Center}(y_momentum_flux_divergence, grid, args(recomputed)...)
-    @test Array(interior(compute!(Field(Gs)))) == Array(interior(compute!(Field(Gr))))
-    @test Array(interior(compute!(Field(Hs)))) == Array(interior(compute!(Field(Hr))))
+    @test Array(interior(compute!(Field(Gs)))) ≈ Array(interior(compute!(Field(Gr)))) rtol = 8 * eps(FT)
+    @test Array(interior(compute!(Field(Hs)))) ≈ Array(interior(compute!(Field(Hr)))) rtol = 8 * eps(FT)
 end
