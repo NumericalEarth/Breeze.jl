@@ -27,8 +27,8 @@ function air_state(FT, constants, equilibrium; T, qᵛ, qᶜˡ, qʳ)
     return one_moment_state(equilibrium, FT(qᶜˡ), FT(qʳ)), 𝒰
 end
 
-one_moment_state(::WarmPhaseEquilibrium, qᶜˡ, qʳ) = WarmPhaseOneMomentState(qᶜˡ, qʳ)
-one_moment_state(::MixedPhaseEquilibrium, qᶜˡ, qʳ) = MixedPhaseOneMomentState(qᶜˡ, zero(qᶜˡ), qʳ, zero(qᶜˡ))
+one_moment_state(::WarmPhaseEquilibrium, qᶜˡ, qʳ) = WarmPhaseOneMomentState(qᶜˡ, qʳ, zero(qᶜˡ))
+one_moment_state(::MixedPhaseEquilibrium, qᶜˡ, qʳ) = MixedPhaseOneMomentState(qᶜˡ, zero(qᶜˡ), qʳ, zero(qᶜˡ), zero(qᶜˡ))
 
 @testset "One-moment rates do not depend on the density that weights the tendencies [$FT]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
