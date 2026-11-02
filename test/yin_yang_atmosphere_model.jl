@@ -203,6 +203,22 @@ end
             @test all(x -> x ≈ 1, interior(getregion(model.velocities.u, 2)))
         end
 
+        @testset "Subsidence of the horizontal mean" begin
+            forcing = (; θ = SubsidenceForcing(z -> -FT(0.01)))
+            model = AtmosphereModel(grid; forcing, dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization()))
+            θᵇ(λ, φ, z) = 300 + 3z / 1000
+            set!(model, θ = (λ, φ, z) -> θᵇ(λ, φ, z) + 2cosd(φ), ρ = 1)
+
+            # The mean over the sphere counts every point once: the area mean of cos φ is π / 4
+            θ̄ = model.forcing.ρθ.forcing.averaged_field
+            compute!(θ̄)
+            zᶜ = znodes(grid, Center())
+            @test Array(interior(θ̄, 1, 1, :)) ≈ θᵇ.(0, 0, zᶜ) .+ 2 * π / 4 rtol=1e-3
+
+            time_step!(model, 1)
+            @test all(isfinite, interior(getregion(model.velocities.w, 1)))
+        end
+
         # The flows stay balanced to a fraction of a percent after a few hours. The triads weight the Coriolis
         # parameter isotropically, so the geostrophic balance holds on the rotated Yang panel too.
         @testset "Balanced solid-body rotation [$(name)]" for (name, s, coriolis, Nsteps, rtol) in

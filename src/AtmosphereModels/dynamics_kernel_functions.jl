@@ -8,6 +8,7 @@ using Oceananigans.Utils: sum_of_velocities
 @inline ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline div_ρUc(i, j, k, grid, args...) = zero(grid)
+@inline horizontal_div_ρUc(i, j, k, grid, args...) = zero(grid)
 @inline c_div_ρU(i, j, k, grid, args...) = zero(grid)
 
 # Split-explicit substepping zeros the vertical PGF and buoyancy from the explicit
@@ -27,6 +28,7 @@ Similar to Oceananigans' `∇_dot_qᶜ` signature with the additional density fa
 Oceananigans `qᶜ` is the kinematic tracer flux.
 """
 @inline ∇_dot_Jᶜ(i, j, k, grid, args...) = zero(grid)
+@inline horizontal_∇_dot_Jᶜ(i, j, k, grid, args...) = zero(grid)
 
 #####
 ##### Buoyancy force interpolation and products

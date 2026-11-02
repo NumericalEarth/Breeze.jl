@@ -127,7 +127,7 @@ export
     compute_z_momentum_tendency!,
 
     # Multi-region grids
-    fill_vector_halo_regions!,
+    fill_horizontal_velocity_halos!,
     fill_prognostic_halo_regions!,
     copy_parent!,
 

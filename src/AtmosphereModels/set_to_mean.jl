@@ -334,14 +334,16 @@ HydrostaticallyBalancedDensity(; surface_pressure = nothing) = HydrostaticallyBa
 
 default_hydrostatic_surface_pressure(model, θ, qᵛ, ref::ExnerReferenceState, κ̂) = ref.surface_pressure
 
-# The surface pressure as the column kernel receives it: a number in the grid's float type, or a field on
-# `grid` read per column. The one value of a single-column field (the reference column of a multi-region
-# grid) is passed as a number, because the field cannot be indexed with the columns of the regions.
-surface_pressure_argument(pˢ::Number, grid) = convert(eltype(grid), pˢ)
-surface_pressure_argument(pˢ, grid) = pˢ
+# What the column kernel reads as the surface pressure of column (i, j), which is either one number or a field:
+#   - a number is converted to the grid's float type, so that a `Float64` literal does not reach a `Float32` kernel;
+#   - a field on `grid` passes through, and is read at each column;
+#   - a single-column field, which is how a multi-region grid stores its reference state, becomes its one value,
+#     because a single column cannot be indexed at (i, j).
+column_surface_pressure(pˢ::Number, grid) = convert(eltype(grid), pˢ)
+column_surface_pressure(pˢ, grid) = pˢ
 
 const SingleColumnField = AbstractField{<:Any, <:Any, <:Any, <:AbstractGrid{<:Any, <:Flat, <:Flat}}
-surface_pressure_argument(pˢ::SingleColumnField, grid) = convert(eltype(grid), @allowscalar pˢ[1, 1, 1])
+column_surface_pressure(pˢ::SingleColumnField, grid) = convert(eltype(grid), @allowscalar pˢ[1, 1, 1])
 
 # Without a reference state there is no callable profile to integrate below the domain bottom, so
 # the datum is reduced along the constant-θ layer implied by each column's own lowest cell. That is
@@ -441,12 +443,11 @@ function set_potential_temperature_hydrostatically_balanced_density!(
     ρ_old    = total_density(dynamics)
 
     reference_state = dynamics_reference_state(dynamics)
-    anchor_pressure = isnothing(spec.surface_pressure) ?
-                      default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state, κ̂) :
-                      spec.surface_pressure
+    surface_pressure = isnothing(spec.surface_pressure) ?
+                       default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state, κ̂) :
+                       spec.surface_pressure
 
-    # A scalar in the grid's float type, so that a `Float64` literal does not reach a `Float32` kernel
-    pˢ = surface_pressure_argument(anchor_pressure, grid)
+    pˢ = column_surface_pressure(surface_pressure, grid)
 
     # Per-column hydrostatic integration → balanced total density.
     @apply_regionally launch_exner_reference_columns!(π, pressure, ρ, θ, qᵛ, grid,

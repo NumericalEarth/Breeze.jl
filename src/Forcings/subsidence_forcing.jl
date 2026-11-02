@@ -19,6 +19,8 @@ struct SubsidenceForcing{W, A, S, B}
     inflow_lower_bound :: B
 end
 
+@regional SubsidenceForcing
+
 Adapt.adapt_structure(to, sf::SubsidenceForcing) =
     SubsidenceForcing(Adapt.adapt(to, sf.subsidence_vertical_velocity),
                       Adapt.adapt(to, sf.averaged_field),
@@ -213,10 +215,12 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
 end
 
 validate_subsidence_grid(grid) = nothing
+validate_subsidence_grid(::YinYangGridOfSomeKind) = nothing
 
-# TODO: Oceananigans cannot yet halo-fill the horizontal average of a multi-region field
+# TODO: the halo exchange of a partitioned MultiRegionGrid in Oceananigans indexes the partitioned
+# direction of a field reduced over it, which throws a BoundsError in `fill_halo_regions!`
 validate_subsidence_grid(::MultiRegionGrids) =
-    throw(ArgumentError("SubsidenceForcing needs a horizontal average, which a MultiRegionGrid does not support."))
+    throw(ArgumentError("SubsidenceForcing needs a horizontal average, whose halos a partitioned MultiRegionGrid cannot fill."))
 
 #####
 ##### compute_forcing! for subsidence forcing

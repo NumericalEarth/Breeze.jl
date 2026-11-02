@@ -800,7 +800,7 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
 
     fill_halo_regions!(substepper.density_perturbation)
     fill_halo_regions!(substepper.density_potential_temperature_perturbation)
-    fill_vector_halo_regions!(substepper.momentum_perturbation)
+    fill_horizontal_velocity_halos!(substepper.momentum_perturbation)
 
     return nothing
 end
@@ -1264,7 +1264,7 @@ function finalize_time_averaged_velocity!(substepper, model, Nτ)
                               model.dynamics.dry_density,
                               grid, model.dynamics, inv_Nτ)
 
-    fill_vector_halo_regions!(substepper.time_averaged_velocities)
+    fill_horizontal_velocity_halos!(substepper.time_averaged_velocities)
 
     return nothing
 end
@@ -1684,7 +1684,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # prognostic state dispatch correctly in `getbc` (see #717).
     fill_halo_regions!(model.dynamics.dry_density, boundary_condition_args(model)...)
     fill_halo_regions!(ρᵡ, boundary_condition_args(model)...)
-    fill_vector_halo_regions!(model.momentum, boundary_condition_args(model)...)
+    fill_horizontal_velocity_halos!(model.momentum, boundary_condition_args(model)...)
     AtmosphereModels.compute_velocities!(model)
 
     return nothing

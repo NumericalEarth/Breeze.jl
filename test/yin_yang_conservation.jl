@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.YinYangConservation: MassFixer
+using Breeze.AtmosphereModels: MassFixer
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans: prognostic_fields

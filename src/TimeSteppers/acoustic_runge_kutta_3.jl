@@ -1,5 +1,8 @@
 using KernelAbstractions: @kernel, @index
 
+using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Grids: Center
+using Oceananigans.Operators: div_xyᶜᶜᶜ
 using Oceananigans.Utils: time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -12,7 +15,7 @@ using Oceananigans.TimeSteppers:
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, microphysics_model_update!,
-                                compute_closure_tendencies!
+                                compute_closure_tendencies!, dynamics_density, thermodynamic_density
 
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
@@ -23,7 +26,8 @@ using Breeze.CompressibleEquations:
     acoustic_rk3_substep_loop!,
     prepare_acoustic_cache!,
     freeze_linearization_state!,
-    seed_time_averaged_velocities!
+    seed_time_averaged_velocities!,
+    horizontal_theta_flux_divergence
 
 """
 $(TYPEDEF)
@@ -369,6 +373,27 @@ end
 # the RK predictor velocity rather than the time-averaged transport velocity.
 AtmosphereModels.slow_dynamics(::AcousticRungeKutta3, dynamics) = SlowDynamics(dynamics)
 AtmosphereModels.thermodynamic_transport_velocities(model::CompressibleAcousticModel) = slow_thermodynamic_velocities(model)
+
+# The acoustic loop moves the dry density with the momentum perturbation (ρu)′ of its substeps and the
+# thermodynamic density with θᴸ (ρu)′, where θᴸ is θ at the entry of the stage. Its transport velocity
+# ⟨u⟩ = (ρuᴸ + ⟨(ρu)′⟩) / ℑ(ρᴸ) averages the perturbation over the stage, so the seam budget of the
+# loop's fluxes is that of the flux of the mean momentum ⟨u⟩ ℑ(ρᴸ), with ρᴸ = ρᵈ − ρ′ the density the
+# stage started from, less that of the flux of the momentum ρuᴸ at the entry of the stage.
+function AtmosphereModels.acoustic_divergences(model::CompressibleAcousticModel)
+    substepper = model.timestepper.substepper
+    ρᵈ = dynamics_density(model.dynamics)
+    ρθ = thermodynamic_density(model.formulation)
+    ρᴸ = ρᵈ - substepper.density_perturbation
+    mean_ρu = substepper.time_averaged_velocities.u * ρᴸ
+    mean_ρv = substepper.time_averaged_velocities.v * ρᴸ
+    entry = acoustic_flux_divergences(model.grid, ρθ / ρᵈ, model.momentum.ρu, model.momentum.ρv)
+    mean = acoustic_flux_divergences(model.grid, substepper.linearization_potential_temperature, mean_ρu, mean_ρv)
+    return (; entry, mean)
+end
+
+acoustic_flux_divergences(grid, θ, ρu, ρv) =
+    (KernelFunctionOperation{Center, Center, Center}(div_xyᶜᶜᶜ, grid, ρu, ρv),
+     KernelFunctionOperation{Center, Center, Center}(horizontal_theta_flux_divergence, grid, θ, ρu, ρv))
 
 Oceananigans.prognostic_state(timestepper::AcousticRungeKutta3) =
     (substepper = Oceananigans.prognostic_state(timestepper.substepper),)

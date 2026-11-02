@@ -127,17 +127,17 @@ end
 end
 
 # The horizontal part of `∇_dot_Jᶜ`, from the same face fluxes
-@inline function horizontal_∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, id, c, clock, model_fields, buoyancy)
+@inline function AtmosphereModels.horizontal_∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, id, c, clock, model_fields, buoyancy)
     disc = time_discretization(closure)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (
           δxᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶜ, Jᶜx, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy)
         + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶜ, Jᶜy, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy))
 end
 
-@inline horizontal_∇_dot_Jᶜ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
+@inline AtmosphereModels.horizontal_∇_dot_Jᶜ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
 
-@inline horizontal_∇_dot_Jᶜ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple, args...) =
-    sum_closure_fluxes(horizontal_∇_dot_Jᶜ, i, j, k, grid, ρ, closures, closure_fields, args...)
+@inline AtmosphereModels.horizontal_∇_dot_Jᶜ(i, j, k, grid, ρ, closures::Tuple, closure_fields::Tuple, args...) =
+    sum_closure_fluxes(AtmosphereModels.horizontal_∇_dot_Jᶜ, i, j, k, grid, ρ, closures, closure_fields, args...)
 
 #####
 ##### Momentum dynamic stresses: 𝒯 = ρᵣ τ

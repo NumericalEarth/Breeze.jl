@@ -106,6 +106,11 @@ end
 
             # The anelastic pressure solve is global and refused up front
             @test_throws ArgumentError AtmosphereModel(xpartitioned_grid)
+
+            # The halos of a horizontal average cannot be filled across the regions of a partitioned grid
+            subsidence_forcing = (; θ = SubsidenceForcing(z -> -0.01))
+            @test_throws ArgumentError AtmosphereModel(xpartitioned_grid; forcing = subsidence_forcing,
+                                                       dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization()))
         end
 
         @testset "Dry explicit SSPRK3 vs single grid [$(P)]" for P in (XPartition, YPartition)

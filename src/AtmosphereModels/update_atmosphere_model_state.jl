@@ -162,11 +162,11 @@ function compute_velocities!(model::AtmosphereModel)
     # would see last-stage values.
     density = dynamics_density(model.dynamics)
     fill_halo_regions!(density, boundary_condition_args(model)...)
-    fill_vector_halo_regions!(model.momentum, boundary_condition_args(model)...)
+    fill_horizontal_velocity_halos!(model.momentum, boundary_condition_args(model)...)
 
     @apply_regionally launch_compute_velocities!(model)
 
-    fill_vector_halo_regions!(model.velocities)
+    fill_horizontal_velocity_halos!(model.velocities)
 
     return nothing
 end

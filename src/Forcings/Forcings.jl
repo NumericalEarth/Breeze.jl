@@ -12,9 +12,9 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.Grids: Center, Face
 using Oceananigans.Forcings: materialize_forcing, MultipleForcings
-using Oceananigans.MultiRegion: MultiRegionGrids
 
 using Breeze.Utils: @regional
+using Oceananigans.MultiRegion: MultiRegionGrids, YinYangGridOfSomeKind
 
 using ..AtmosphereModels: AtmosphereModels, materialize_atmosphere_model_forcing,
                           compute_forcing!, is_density_tendency_forcing, wrap_specific_forcing
