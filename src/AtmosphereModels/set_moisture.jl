@@ -11,15 +11,17 @@ from the established total air density. The subtraction involves no density, so 
 supplied water budget is preserved exactly.
 
 Reject condensate exceeding total water beyond local round-off tolerance. Retain
-round-off-sized residuals so the conversion preserves the supplied water budget.
+round-off-sized residuals so the conversion preserves the supplied water budget. Inside a
+compiled program, where the rejection cannot raise, an invalid state's moisture is NaN instead.
 """
 convert_total_moisture!(model) = convert_total_moisture!(model, condensate_field_names(model.microphysics))
 
 # Without independent condensates the staged total water is already the prognostic moisture.
 function convert_total_moisture!(model, ::Tuple{})
     ρqᵗ = model.moisture_density
-    validate_total_moisture(minimum(ρqᵗ) ≥ 0)
+    valid = minimum(ρqᵗ) ≥ 0
     set!(specific_prognostic_moisture(model), ρqᵗ / total_density(model.dynamics))
+    reject_invalid_moisture!(model, valid)
     return nothing
 end
 
@@ -28,9 +30,10 @@ function convert_total_moisture!(model, condensate_names::Tuple{Symbol, Vararg})
     ρqᶜ = sum_properties(model.microphysical_fields, condensate_names)
     moisture = specific_prognostic_moisture(model)
 
-    validate_total_moisture(ρqᵗ, ρqᶜ, moisture)
+    valid = total_moisture_covers_condensates(ρqᵗ, ρqᶜ, moisture)
     set!(ρqᵗ, ρqᵗ - ρqᶜ)
     set!(moisture, ρqᵗ / total_density(model.dynamics))
+    reject_invalid_moisture!(model, valid)
     return nothing
 end
 
@@ -45,19 +48,19 @@ end
     return ρqᵗ - ρqᶜ + tolerance
 end
 
-function validate_total_moisture(total_moisture_density, condensate_density, validation_field)
+function total_moisture_covers_condensates(total_moisture_density, condensate_density, validation_field)
     margin = KernelFunctionOperation{Center, Center, Center}(total_moisture_validation_margin,
                                                             validation_field.grid,
                                                             total_moisture_density, condensate_density)
     # Reactant reductions need a stored field. The specific moisture field is free until
     # the conversion overwrites it, and the margin does not read it.
     set!(validation_field, margin)
-    validate_total_moisture(minimum(validation_field) ≥ 0)
-    return nothing
+    return minimum(validation_field) ≥ 0
 end
 
-# Traced backends specialize this scalar check to run at execution time.
-function validate_total_moisture(valid)
+# Traced backends, where `valid` is known only at execution time, specialize this
+# to mark the invalid state's moisture as NaN instead of raising.
+function reject_invalid_moisture!(model, valid)
     Bool(valid) || throw(ArgumentError("set! received a total moisture qᵗ smaller than the supplied \
                                        condensates, or a non-finite moisture state. Increase qᵗ or \
                                        reduce the condensate inputs."))

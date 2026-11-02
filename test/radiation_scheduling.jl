@@ -7,12 +7,18 @@ using Oceananigans
 using Oceananigans.Units
 using Test
 
-# Load RRTMGP to trigger the extension
+# Load RRTMGP and NumericalRadiation to trigger the extensions
 using ClimaComms
 using RRTMGP
+using NCDatasets
+using NumericalRadiation: NumericalRadiation
+
+# The gray RRTMGP optics and the ecCKD optics of the NumericalRadiation extension share the
+# scheduling machinery of `RadiativeTransferModel`
+const OPTICS = (GrayOptics(), EcCKDOptics())
 
 @testset "Radiation scheduling" begin
-    @testset "IterationInterval schedule [$(FT)]" for FT in test_float_types()
+    @testset "IterationInterval schedule [$(FT), $(summary(optics))]" for FT in test_float_types(), optics in OPTICS
         Oceananigans.defaults.FloatType = FT
         Nz = 8
         grid = RectilinearGrid(default_arch; size=Nz, x=FT(0), y=FT(45), z=(0, 10kilometers),
@@ -25,7 +31,7 @@ using RRTMGP
         dynamics = AnelasticDynamics(reference_state)
 
         # Update radiation every 3 iterations
-        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+        radiation = RadiativeTransferModel(grid, optics, constants;
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
@@ -78,7 +84,7 @@ using RRTMGP
         @test any(Array(interior(flux_div)) .!= 0)
     end
 
-    @testset "TimeInterval schedule [$(FT)]" for FT in test_float_types()
+    @testset "TimeInterval schedule [$(FT), $(summary(optics))]" for FT in test_float_types(), optics in OPTICS
         Oceananigans.defaults.FloatType = FT
         Nz = 8
         grid = RectilinearGrid(default_arch; size=Nz, x=FT(0), y=FT(45), z=(0, 10kilometers),
@@ -91,7 +97,7 @@ using RRTMGP
         dynamics = AnelasticDynamics(reference_state)
 
         # Update radiation every 10 seconds (use numeric clock for TimeInterval compatibility)
-        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+        radiation = RadiativeTransferModel(grid, optics, constants;
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
@@ -156,7 +162,7 @@ using RRTMGP
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100  # Radiation fired
     end
 
-    @testset "Multi-column grid [$(FT)]" for FT in test_float_types()
+    @testset "Multi-column grid [$(FT), $(summary(optics))]" for FT in test_float_types(), optics in OPTICS
         Oceananigans.defaults.FloatType = FT
         Nx, Ny, Nz = 4, 4, 8
         grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz),
@@ -169,7 +175,7 @@ using RRTMGP
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
-        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+        radiation = RadiativeTransferModel(grid, optics, constants;
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,

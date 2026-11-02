@@ -188,6 +188,8 @@ const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories}
 const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories}
 const WPNE2M = WarmPhaseNonEquilibrium2M
 
+@inline AtmosphereModels.precipitating_mass_fraction(i, j, k, ::WPNE2M, μ) = @inbounds μ.qʳ[i, j, k]
+
 
 #####
 ##### Initial aerosol number from aerosol distribution
@@ -939,7 +941,7 @@ function AtmosphereModels.compute_microphysical_tendencies!(microphysics::WPNE2M
             G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ,
             grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AtmosphereModels.specific_prognostic_moisture(model),
-            model.microphysical_fields, AtmosphereModels.transport_velocities(model))
+            model.microphysical_fields, model.velocities)
 
     return nothing
 end

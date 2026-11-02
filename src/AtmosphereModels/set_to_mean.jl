@@ -149,11 +149,11 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
 end
 
 @kernel function _compute_surface_pressure_from_base!(pˢ, grid, θ, qᵛ, p₀, pˢᵗ,
-                                                      Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+                                                      Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
     i, j = @index(Global, NTuple)
     zˢ = znode(i, j, 1, grid, Center(), Center(), Face())
     @inbounds pˢ[i, j, 1] = constant_moist_hydrostatic_pressure(zˢ, p₀, θ[i, j, 1], qᵛ[i, j, 1],
-                                                                pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+                                                                pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
 end
 
 """
@@ -168,7 +168,7 @@ state. `set_to_mean!` is only reached on a height-coordinate grid, whose bottom 
 level, so a horizontally uniform reduction is exact; terrain-following resets go through
 `reset_reference_state!`, which reduces the datum per column along the terrain.
 """
-function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, constants)
+function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, constants, κ̂)
     FT  = eltype(ref)
     Rᵈ  = dry_air_gas_constant(constants)
     Rᵛ  = vapor_gas_constant(constants)
@@ -178,18 +178,18 @@ function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, c
     θˢ, qᵛˢ = @allowscalar (θ[1, 1, 1], qᵛ[1, 1, 1])
     zˢ = bottom_face_height(grid)
     pˢ = convert(FT, moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
-                                                ref.standard_pressure, constants))
+                                                ref.standard_pressure, constants, κ̂))
 
     set_surface_state!(ref.surface_pressure, pˢ)
-    update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, κ̂)
     return nothing
 end
 
-function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, κ̂)
     # The 3D and terrain-following forms carry no bottom boundary value on `density`, so there is
     # nothing to keep in sync.
     isnothing(ref.surface_density) && return nothing
-    ρˢ = surface_reference_density(pˢ, θˢ, qᵛˢ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    ρˢ = surface_reference_density(pˢ, θˢ, qᵛˢ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, κ̂)
     set_surface_state!(ref.surface_density, convert(eltype(ref), ρˢ))
     return nothing
 end
@@ -228,7 +228,10 @@ function set_to_mean!(ref::ExnerReferenceState, model)
     cᵖᵛ = constants.vapor.heat_capacity
     g   = constants.gravitational_acceleration
 
-    update_exner_surface_state!(ref, θ̄, q̄ᵛ, grid, constants)
+    # Integrate with the Exner exponent the model inverts θˡⁱ with, so the reset reference
+    # matches the mean state for `DryExponent` as well.
+    κ̂ = liquid_ice_exner_exponent(model.formulation)
+    update_exner_surface_state!(ref, θ̄, q̄ᵛ, grid, constants, κ̂)
 
     # A 3D reference on a height-coordinate grid has a horizontally uniform mean profile but
     # per-column fields, so each column is integrated from the (uniform) bottom-face anchor.
@@ -237,7 +240,7 @@ function set_to_mean!(ref::ExnerReferenceState, model)
 
     launch!(arch, grid, worksize, kernel!,
             ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
-            ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+            ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
 
     fill_halo_regions!(ref.exner_function)
     fill_halo_regions!(ref.pressure)
@@ -326,13 +329,13 @@ end
 
 HydrostaticallyBalancedDensity(; surface_pressure = nothing) = HydrostaticallyBalancedDensity(surface_pressure)
 
-default_hydrostatic_surface_pressure(model, θ, qᵛ, ref::ExnerReferenceState) = ref.surface_pressure
+default_hydrostatic_surface_pressure(model, θ, qᵛ, ref::ExnerReferenceState, κ̂) = ref.surface_pressure
 
 # Without a reference state there is no callable profile to integrate below the domain bottom, so
 # the datum is reduced along the constant-θ layer implied by each column's own lowest cell. That is
 # the only reduction the model state supports here, and it agrees with the profile-integrating
 # `moist_hydrostatic_pressure` used elsewhere whenever θ really is constant.
-function default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state)
+function default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state, κ̂)
     grid = model.grid
     arch = architecture(grid)
     dynamics = model.dynamics
@@ -346,7 +349,7 @@ function default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state)
 
     launch!(arch, grid, :xy, _compute_surface_pressure_from_base!,
             pˢ, grid, θ, qᵛ, base_pressure(dynamics), standard_pressure(dynamics),
-            Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+            Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
     fill_halo_regions!(pˢ)
     return pˢ
 end
@@ -395,7 +398,7 @@ function set_hydrostatically_balanced_density!(formulation, model, spec::Hydrost
 end
 
 function set_potential_temperature_hydrostatically_balanced_density!(
-    model, spec::HydrostaticallyBalancedDensity, θ)
+    model, spec::HydrostaticallyBalancedDensity, θ, κ̂)
 
     has_condensate(model) &&
         throw(ArgumentError("HydrostaticallyBalancedDensity does not support nonzero " *
@@ -428,12 +431,12 @@ function set_potential_temperature_hydrostatically_balanced_density!(
 
     reference_state = dynamics_reference_state(dynamics)
     pˢ = isnothing(spec.surface_pressure) ?
-         default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state) :
+         default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state, κ̂) :
          spec.surface_pressure
 
     # Per-column hydrostatic integration → balanced total density.
     launch!(arch, grid, :xy, _compute_exner_reference_3d!,
-            π, pressure, ρ, θ, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+            π, pressure, ρ, θ, qᵛ, grid, Nz, pˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
     fill_halo_regions!(ρ)
 
     # The diagnosed θ field is no longer needed after the column solve, so use it to retain the old

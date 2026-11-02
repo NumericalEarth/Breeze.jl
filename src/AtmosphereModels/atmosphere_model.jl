@@ -172,6 +172,9 @@ function AtmosphereModel(grid;
     # Validate that the microphysics scheme is compatible with the thermodynamic constants
     validate_microphysics(microphysics, thermodynamic_constants)
 
+    # Validate that the radiation's solar position can read the clock
+    validate_radiation(radiation, clock)
+
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
         scalar_advection = momentum_advection = advection
@@ -236,7 +239,7 @@ function AtmosphereModel(grid;
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize dynamics and formulation
-    dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics)
+    dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics, formulation)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
     # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3
@@ -639,7 +642,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     # `ρE` (total energy) is the formulation-agnostic energy key: a forcing supplied under it
     # targets the prognostic thermodynamic density, and the tendency that reads it applies
-    # whatever conversion that variable needs (a division by cᵖᵐ Π for `ρθ`; none for `ρs`).
+    # whatever conversion that variable needs (a division by ĉᵖ Π for `ρθ`; none for `ρs`).
     ρᵡ_name = thermodynamic_density_name(formulation)
     energy_key_aliases_thermodynamic_density(Val(ρᵡ_name)) &&
         validate_interface_forcing(user_forcings, total_energy_density_name, ρᵡ_name)
@@ -673,12 +676,12 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     # Momentum, the dynamics mass variable, and thermodynamic density are weighted by the
     # coupling density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and
-    # user tracers are total-air mass fractions and therefore use total density. The extra
-    # :ρE entry is the energy-forcing key, which targets the thermodynamic density.
+    # user tracers are total-air mass fractions and therefore use total density. So does the
+    # :ρE energy-forcing key: a specific heating Ė becomes the volumetric ρ Ė, the same units as
+    # a ρE forcing and the radiative flux divergence, which the formulations then convert.
     coupling_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
                                    prognostic_momentum_field_names(dynamics)...,
-                                   ρᵡ_name,
-                                   total_energy_density_name)
+                                   ρᵡ_name)
 
     # Keep `density` as the coupling-density compatibility entry for other forcing
     # materializers; SpecificForcing selects between the two explicit carriers by target.

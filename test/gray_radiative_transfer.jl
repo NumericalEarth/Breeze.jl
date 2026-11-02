@@ -1,6 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
+using Breeze.AtmosphereModels: update_cos_zenith!
 using Dates
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -227,7 +228,7 @@ end
         dynamics = AnelasticDynamics(reference_state)
 
         # The motivating case: a numeric clock with a fixed cos(θ_z).
-        # Used to crash because `update_solar_zenith_angle!` had no path for
+        # Used to crash because `update_cos_zenith!` had no path for
         # numeric clock + epoch=nothing. Now this works via FixedCosineZenith.
         cos_θz = convert(FT, 0.5)
         radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
@@ -358,13 +359,13 @@ end
         # Step clock to midnight (t = day/2) and re-update — cos(θ_z) clamped to 0
         model.clock.time = 43200.0  # 12 h
         model.clock.iteration = 1
-        ext = Base.get_extension(Breeze, :BreezeRRTMGPExt)
-        ext.update_solar_zenith_angle!(radiation.shortwave_solver, sp, grid, model.clock)
-        @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] == 0
+        cos_zenith = radiation.shortwave_solver.bcs.cos_zenith
+        update_cos_zenith!(cos_zenith, sp, grid, model.clock)
+        @allowscalar @test cos_zenith[1] == 0
 
         # Step to t = day (back to noon) — should match the initial value
         model.clock.time = 86400.0
-        ext.update_solar_zenith_angle!(radiation.shortwave_solver, sp, grid, model.clock)
+        update_cos_zenith!(cos_zenith, sp, grid, model.clock)
         @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] ≈ cos(deg2rad(latitude))
     end
 
@@ -416,13 +417,11 @@ end
                                            surface_albedo = 0.1,
                                            solar_position = DiurnalSolarPosition(latitude = 30))
 
-        # DateTime clock is incompatible with the idealized diurnal cycle.
+        # DateTime clock is incompatible with the idealized diurnal cycle, which the model
+        # checks once, at construction
         clock = Clock(time = DateTime(2024, 6, 21, 12, 0, 0))
-        @test_throws ArgumentError begin
-            model = AtmosphereModel(grid; clock, dynamics,
-                                    formulation = :LiquidIcePotentialTemperature, radiation)
-            set!(model; θ = 300, qᵗ = 0)
-        end
+        @test_throws ArgumentError AtmosphereModel(grid; clock, dynamics,
+                                                   formulation = :LiquidIcePotentialTemperature, radiation)
     end
 
     @testset "ApparentSolarPosition + numeric clock without epoch → ArgumentError" begin
@@ -437,8 +436,8 @@ end
         dynamics = AnelasticDynamics(reference_state)
 
         # The combination that previously crashed silently: ApparentSolarPosition
-        # (default epoch=nothing) combined with a floating-point clock. We now
-        # raise an actionable ArgumentError on the first radiation update.
+        # (default epoch=nothing) combined with a floating-point clock. The model
+        # raises an actionable ArgumentError at construction.
         radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                            surface_temperature = 300,
                                            surface_albedo = 0.1,
@@ -446,13 +445,7 @@ end
 
         clock = Clock(time = 0.0)  # numeric, no epoch
 
-        # The first radiation update fires during AtmosphereModel construction
-        # (iteration 0 always triggers an update), so the throw lands there
-        # rather than inside `set!`. Wrap both calls so whichever raises is caught.
-        @test_throws ArgumentError begin
-            model = AtmosphereModel(grid; clock, dynamics,
-                                    formulation = :LiquidIcePotentialTemperature, radiation)
-            set!(model; θ = 300, qᵗ = 0)
-        end
+        @test_throws ArgumentError AtmosphereModel(grid; clock, dynamics,
+                                                   formulation = :LiquidIcePotentialTemperature, radiation)
     end
 end

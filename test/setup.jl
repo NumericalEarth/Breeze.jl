@@ -24,6 +24,11 @@ end
 # Returns both Float32 and Float64 for tests that need both precision levels
 all_float_types() = (Float32, Float64)
 
+# The single column of the radiation tests, at 45°N on the prime meridian
+radiation_column_grid(FT, Nz, top) =
+    Oceananigans.RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, top),
+                                 topology = (Oceananigans.Flat, Oceananigans.Flat, Oceananigans.Bounded))
+
 # Work around for <https://github.com/JuliaLang/julia/issues/54998>, often seen
 # with Reactant code (and often only on the CI machine).
 macro with_stack_size(stack_size, expr)

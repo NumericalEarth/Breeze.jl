@@ -150,9 +150,13 @@ jobs:
               # and keep memory usage at bay.
               echo "JULIA_TEST_MAXRSS_MB=3500" | tee -a "${GITHUB_ENV}"
               # On the GPU runners we sometimes run out-of-memory because we have several
-              # concurrent jobs, some of them reaching a large memory usage.  We reduce the
-              # number of jobs to avoid memory issues.
-              TEST_ARGS+=(--jobs=$(($(nproc) - 2)))
+              # concurrent jobs, some of them reaching a large memory usage (the Reactant
+              # compilations reach 8 GiB, beyond the recycling threshold above, which only
+              # applies between test files).  We reduce the number of jobs to avoid memory
+              # issues: two cores are left free, and every job gets about 5 GiB of memory.
+              CPU_JOBS=$(($(nproc) - 2))
+              MEMORY_JOBS=$(($(awk '/MemTotal/ {print int($2 / 2^20)}' /proc/meminfo) / 5))
+              TEST_ARGS+=(--jobs=$((MEMORY_JOBS < CPU_JOBS ? MEMORY_JOBS : CPU_JOBS)))
           elif [[ ${{ matrix.os }} == ubuntu-* ]] && [[ ${{ matrix.version }} == 'min' ]]; then
               # With Julia v1.11 we have observed somewhat frequent OOM's in `turbulence_closures`
               # tests, reduce number of jobs to reduce resources contention.
