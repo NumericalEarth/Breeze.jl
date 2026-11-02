@@ -10,6 +10,9 @@ using Breeze.Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
     mixture_gas_constant,
+    vapor_equivalent_heat_capacity,
+    vapor_equivalent_gas_constant,
+    absolute_zero_latent_heat,
     saturation_specific_humidity,
     PlanarLiquidSurface,
     TetensFormula
@@ -17,6 +20,20 @@ using Breeze.Thermodynamics:
 #####
 ##### Helper functions
 #####
+
+# θˡⁱ = (cᵖᵐ T - ℒˡ₀ qˡ) / (ĉᵖ Π̂) with Π̂ = (p / p₀)^(R̂ / ĉᵖ), and its inverse
+function liquid_ice_ĉᵖΠ(p, p₀, q, constants)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    return ĉᵖ * (p / p₀)^(vapor_equivalent_gas_constant(q, constants) / ĉᵖ)
+end
+
+liquid_ice_potential_temperature(T, p, p₀, q, constants) =
+    (mixture_heat_capacity(q, constants) * T - absolute_zero_latent_heat(constants, constants.liquid) * q.liquid) /
+    liquid_ice_ĉᵖΠ(p, p₀, q, constants)
+
+liquid_ice_temperature(θ, p, p₀, q, constants) =
+    (liquid_ice_ĉᵖΠ(p, p₀, q, constants) * θ + absolute_zero_latent_heat(constants, constants.liquid) * q.liquid) /
+    mixture_heat_capacity(q, constants)
 
 mass_fraction_to_mixing_ratio(q, qᵗ) = q / (1 - qᵗ)
 mixing_ratio_to_mass_fraction(r, rᵗ) = r / (1 + rᵗ)
@@ -74,10 +91,7 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
     for k = 1:Nz
         qˡ = qᶜˡ[k] + qʳ[k]
         q = MoistureMassFractions(qᵛ[k], qˡ)
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
-        θˡⁱ[k] = (T[k] - ℒˡᵣ * qˡ / cᵖᵐ) / Π
+        θˡⁱ[k] = liquid_ice_potential_temperature(T[k], p[k], p₀, q, constants)
     end
 
     # Convert mass fractions to mixing ratios and compute terminal velocities
@@ -124,10 +138,7 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
             qˡ_local = (rᶜˡ[k] + rʳ[k]) / (1 + rᵗ)
 
             q = MoistureMassFractions(qᵛ_local, qˡ_local)
-            cᵖᵐ = mixture_heat_capacity(q, constants)
-            Rᵐ = mixture_gas_constant(q, constants)
-            Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
-            T[k] = Π * θˡⁱ[k] + ℒˡᵣ * qˡ_local / cᵖᵐ
+            T[k] = liquid_ice_temperature(θˡⁱ[k], p[k], p₀, q, constants)
 
             # Rain sedimentation (upstream differencing)
             if k < Nz
@@ -182,10 +193,7 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
             qˡ_new = (rᶜˡ_final + rʳ_final) / (1 + rᵗ_new)
 
             q_new = MoistureMassFractions(qᵛ_new, qˡ_new)
-            cᵖᵐ_new = mixture_heat_capacity(q_new, constants)
-            Rᵐ_new = mixture_gas_constant(q_new, constants)
-            Π_new = (p[k] / p₀)^(Rᵐ_new / cᵖᵐ_new)
-            θˡⁱ[k] = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
+            θˡⁱ[k] = liquid_ice_potential_temperature(T_new, p[k], p₀, q_new, constants)
 
             rᵛ[k] = rᵛ_new
             rᶜˡ[k] = rᶜˡ_final
@@ -208,10 +216,7 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
         qʳ[k] = rʳ[k] / (1 + rᵗ)
 
         q = MoistureMassFractions(qᵛ[k], qᶜˡ[k] + qʳ[k])
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
-        T[k] = Π * θˡⁱ[k] + ℒˡᵣ * (qᶜˡ[k] + qʳ[k]) / cᵖᵐ
+        T[k] = liquid_ice_temperature(θˡⁱ[k], p[k], p₀, q, constants)
     end
 
     return surface_mass_flux / Ns
@@ -367,14 +372,10 @@ end
     set!(model.microphysical_fields.ρqʳ, reshape(ρ_prof .* qʳ_init, 1, 1, Nz))
 
     # Compute initial θˡⁱ
-    ℒˡᵣ = constants.liquid.reference_latent_heat
     θˡⁱ_init = zeros(FT, Nz)
     for k in 1:Nz
         q = MoistureMassFractions(qᵛ_init[k], qᶜˡ_init[k] + qʳ_init[k])
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p_prof[k] / p₀)^(Rᵐ / cᵖᵐ)
-        θˡⁱ_init[k] = (T_prof[k] - ℒˡᵣ * (qᶜˡ_init[k] + qʳ_init[k]) / cᵖᵐ) / Π
+        θˡⁱ_init[k] = liquid_ice_potential_temperature(T_prof[k], p_prof[k], p₀, q, constants)
     end
 
     set!(model.formulation.potential_temperature_density, reshape(ρ_prof .* θˡⁱ_init, 1, 1, Nz))
@@ -403,10 +404,7 @@ end
 
         θˡⁱ_val = ρθˡⁱ_result[k] / ρ
         q = MoistureMassFractions(qᵛ_breeze[k], qᶜˡ_breeze[k] + qʳ_breeze[k])
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p_prof[k] / p₀)^(Rᵐ / cᵖᵐ)
-        T_breeze[k] = Π * θˡⁱ_val + ℒˡᵣ * (qᶜˡ_breeze[k] + qʳ_breeze[k]) / cᵖᵐ
+        T_breeze[k] = liquid_ice_temperature(θˡⁱ_val, p_prof[k], p₀, q, constants)
     end
 
     @test T_breeze ≈ T_ref rtol=1e-12
@@ -474,14 +472,10 @@ end
     rᶜˡ_ref = qᶜˡ_ref ./ (1 .- qᵗ_ref)
     rʳ_ref = qʳ_ref ./ (1 .- qᵗ_ref)
 
-    ℒˡᵣ = constants.liquid.reference_latent_heat
     θˡⁱ_ref = similar(T_ref)
     for k in eachindex(T_ref)
         q = MoistureMassFractions(qᵛ_ref[k], qᶜˡ_ref[k] + qʳ_ref[k])
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p[k] / FT(1e5))^(Rᵐ / cᵖᵐ)
-        θˡⁱ_ref[k] = (T_ref[k] - ℒˡᵣ * (qᶜˡ_ref[k] + qʳ_ref[k]) / cᵖᵐ) / Π
+        θˡⁱ_ref[k] = liquid_ice_potential_temperature(T_ref[k], p[k], FT(1e5), q, constants)
     end
 
     model.clock.last_Δt = Δt

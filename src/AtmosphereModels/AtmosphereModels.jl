@@ -34,6 +34,8 @@ export
     liquid_ice_potential_temperature,
     precipitation_rate,
     bottom_precipitation_flux,
+    precipitation_flux,
+    MicrophysicalProcessRate,
     specific_humidity,
     moisture_prognostic_name,
     total_moisture_density_name,
