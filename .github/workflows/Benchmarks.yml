@@ -47,8 +47,9 @@ jobs:
           # keeps the registered Reactant and Reactant_jll. Both sides are force-pushed
           # often, so `enzyme_jax_run` pins the build to the one `reactant_rev` was
           # written against (without it, the latest build of the branch is used):
-          # Reactant.jl pb/kernel-ad 2099aba1 with Enzyme-JAX 9f77412c, the first build
-          # of that kernel AD that registers the NVVM passes the CUDA pipeline needs.
+          # Reactant.jl pb/kernel-ad eafe23fb (upstream main at 025e4a59, Reactant 0.2.304,
+          # with the kernel AD commits) on Enzyme-JAX 110d87f1, whose build compiled
+          # libReactantExtra from that same Reactant.jl main. Its artifacts expire 2026-11-04.
           # `mode` keeps its artifact names apart from the AD job's, and while kernel AD is
           # experimental its failure does not fail the workflow or block publishing.
           # The Reactant.jl branch now needs Enzyme-JAX options the registered
@@ -61,8 +62,8 @@ jobs:
             topology: 'PBB'
             mode: 'kernelad'
             enzyme_jax_branch: 'pb/kernel-ad'
-            enzyme_jax_run: '40917264751'
-            reactant_rev: '2099aba10460a94962cfa1fd8a7ca4c717140c2b'
+            enzyme_jax_run: '41440058022'
+            reactant_rev: 'eafe23fb91b1166d53e651296fb465b1cdd9c50a'
             # TEMPORARY: dump every MLIR pass pipeline to find where the compile corrupts the heap
             dump_mlir: 'mlir_dumps'
             timeout: 60
