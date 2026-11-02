@@ -8,7 +8,9 @@ using Test
 
 Reactant.set_default_backend(default_arch isa GPU ? "gpu" : "cpu")
 
-warm_and_rebalance!(model) = set!(model; θ = 302, compute_reference_state = true)
+# A compressible model's density is zero until set, and θ is diagnosed from ρθ / ρ; without `ρ` the
+# mean state, and so the whole reset reference, would be NaN on every architecture.
+warm_and_rebalance!(model) = set!(model; ρ = 1, θ = 302, compute_reference_state = true)
 
 @testset "Reactant reference state reset [$FT]" for FT in test_float_types()
     reference_model(arch) = AtmosphereModel(
@@ -24,6 +26,7 @@ warm_and_rebalance!(model) = set!(model; θ = 302, compute_reference_state = tru
     compiled_reset!(r_model)
 
     reference(m) = m.dynamics.reference_state
+    @test all(isfinite, interior(reference(model).pressure))
     @test Array(interior(reference(r_model).pressure)) ≈ Array(interior(reference(model).pressure))
     @test Array(interior(reference(r_model).density)) ≈ Array(interior(reference(model).density))
 end
