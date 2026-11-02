@@ -19,6 +19,15 @@ of condensation and deposition extrapolated to zero kelvin. Pairing the referenc
 ``ℒᵣ`` with ``cᵖᵐ T`` would give incorrect phase-change heating.
 
 The energy density equation includes a buoyancy flux term following [Pauluis2008](@citet).
+Since a parcel on the anelastic core changes its static energy by ``- b̃ w``, with
+``b̃ = g (α / αᵣ - 1)`` relative to the reference state, the subgrid flux of a closure with
+diffusivity ``K`` is ``- ρᵣ K (∂z s + b̃)``. The ``b̃`` part is required for consistency: without it
+mixing relaxes the column to ``N² = g b̃ / (cᵖ T)``, which is negative wherever ``T < Tᵣ``.
+
+Keeping the reference state close to the horizontal mean, for example by calling `set_to_mean!`
+periodically, makes ``b̃`` small and improves the accuracy of the anelastic approximation, but it
+does not replace the ``b̃`` flux. Note that `set_to_mean!` with `rescale_densities = true` keeps the
+specific variables, so it changes ``∫ ρᵣ s`` and the total water by the change of ``ρᵣ``.
 """
 struct StaticEnergyFormulation{E, S}
     energy_density :: E    # ρs (prognostic)
