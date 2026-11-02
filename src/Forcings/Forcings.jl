@@ -42,6 +42,13 @@ function AtmosphereModels.compute_forcing!(mf::MultipleForcings)
     return nothing
 end
 
+function AtmosphereModels.compute_forcing!(mf::MultipleForcings, model)
+    for forcing in mf.forcings
+        compute_forcing!(forcing, model)
+    end
+    return nothing
+end
+
 #####
 ##### Specific-key wrapping: build a SpecificForcing for a user value supplied under a
 ##### specific name (`θ`, `u`, ...). Tuples recurse; user-defined density-tendency

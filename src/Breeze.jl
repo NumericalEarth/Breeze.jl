@@ -11,11 +11,14 @@ export
     ThermodynamicConstants,
     ReferenceState,
     ExnerReferenceState,
+    BoussinesqReferenceState,
     compute_reference_state!,
     set_to_mean!,
     surface_density,
     AnelasticDynamics,
     AnelasticModel,
+    BoussinesqDynamics,
+    AdiabaticExpansion,
     CompressibleDynamics,
     CompressibleModel,
     SplitExplicitTimeDiscretization,
@@ -289,7 +292,7 @@ using .TerrainFollowingDiscretization
 
 # Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("AnelasticEquations/AnelasticEquations.jl")
-using .AnelasticEquations: AnelasticDynamics, AnelasticModel
+using .AnelasticEquations: AnelasticDynamics, AnelasticModel, BoussinesqDynamics, AdiabaticExpansion
 
 include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,

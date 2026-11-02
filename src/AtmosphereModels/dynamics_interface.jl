@@ -34,6 +34,16 @@ materialize_dynamics(d, grid, bcs, constants, microphysics) = materialize_dynami
 materialize_dynamics(d, grid, bcs, constants, microphysics, formulation) = materialize_dynamics(d, grid, bcs, constants, microphysics)
 
 """
+    dynamics_forcing(dynamics, thermodynamic_name, moisture_name)
+
+Return a `NamedTuple` of forcings that `dynamics` contributes to the specific fields named
+`thermodynamic_name` and `moisture_name`, such as the [`AdiabaticExpansion`](@ref) of
+[`BoussinesqDynamics`](@ref) with a moving frame. These are combined with the user's forcing
+on the same fields. The default contributes nothing.
+"""
+dynamics_forcing(dynamics, thermodynamic_name, moisture_name) = NamedTuple()
+
+"""
     materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
 
 Create momentum and velocity fields for the given dynamics.
@@ -592,3 +602,28 @@ p = ρ R^m T
 where ``R^m`` is the mixture gas constant.
 """
 compute_auxiliary_dynamics_variables!(model) = nothing  # default: no-op
+
+"""
+$(TYPEDSIGNATURES)
+
+Advance time-dependent dynamics state, such as the pressure of a moving reference frame,
+to the current time of `model`. Called before auxiliary thermodynamic variables are computed.
+"""
+advance_dynamics_state!(dynamics, model) = nothing  # default: no-op
+
+"""
+$(TYPEDSIGNATURES)
+
+Declare the time-dependent dynamics state, such as the pressure of a moving reference frame,
+to hold at the current time of `model` without advancing it. Called when the model state is set
+and when a simulation starts, so that the state advances only when the model is time stepped,
+and not when the clock is changed by hand.
+"""
+synchronize_dynamics_state!(dynamics, model) = nothing  # default: no-op
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the reference frame of `dynamics`, or `nothing` if the dynamics has no moving reference frame.
+"""
+reference_frame(dynamics) = nothing

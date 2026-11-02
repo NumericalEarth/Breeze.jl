@@ -112,6 +112,7 @@ end
 #####
 
 AtmosphereModels.compute_forcing!(sf::SpecificForcing) = AtmosphereModels.compute_forcing!(sf.forcing)
+AtmosphereModels.compute_forcing!(sf::SpecificForcing, model) = AtmosphereModels.compute_forcing!(sf.forcing, model)
 
 #####
 ##### Show
