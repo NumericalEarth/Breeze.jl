@@ -7,7 +7,7 @@ using Oceananigans.TimeSteppers:
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
-    step_lagrangian_particles!
+    substep_lagrangian_particles!
 
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -270,6 +270,8 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     freeze_linearization_state!(ts.substepper, model)
 
     # Stage 1: U* = Uⁿ + (Δt/3) R(Uⁿ)
+    # Particles are advanced with the velocity at the beginning of each stage
+    substep_lagrangian_particles!(model, Δt, 1)
     acoustic_rk3_substep!(model, Δt, β₁)
 
     tick_stage!(model.clock, β₁ * Δt)
@@ -279,6 +281,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     cache_transport_velocity!(model)
 
     # Stage 2: U** = Uⁿ + (Δt/2) R(U*)
+    substep_lagrangian_particles!(model, Δt, 2)
     acoustic_rk3_substep!(model, Δt, β₂)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
@@ -286,6 +289,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     cache_transport_velocity!(model)
 
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**)
+    substep_lagrangian_particles!(model, Δt, 3)
     acoustic_rk3_substep!(model, Δt, β₃)
 
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
@@ -301,14 +305,6 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
-
-    # Advect particles once per step, over the full Δt, with the velocity of the state
-    # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,
-    # and so lower order than the dycore. A stage-wise update is possible in principle
-    # (X obeys dX/dt = u like any prognostic), but would need Xⁿ stored alongside the
-    # current position, since every Wicker–Skamarock stage restarts from Uⁿ. Pushing
-    # with the stage fractions alone would be wrong: β₁ + β₂ + β₃ = 11/6, not 1.
-    step_lagrangian_particles!(model, Δt)
 
     return nothing
 end
