@@ -18,7 +18,7 @@ $(TYPEDSIGNATURES)
 The scalar gas amounts (mol m⁻²) of `layer` (a [`layer_state`](@ref)) as a `NamedTuple` keyed by
 `ECCKD_GAS_NAMES`: its dry air, water vapor and ozone, and the well-mixed gases as
 `mole_fractions` times the dry air. The keys are the gas names of the ecCKD tables, which
-NumericalRadiation looks the gases up by; this is the one place Breeze's names are translated to them.
+NumericalRadiation looks the gases up by.
 """
 @inline function layer_gas_amounts(layer, mole_fractions)
     n = layer.dry_air
