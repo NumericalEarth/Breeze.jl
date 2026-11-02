@@ -63,10 +63,10 @@ function column_atmosphere(rtm::EcCKDRadiativeTransferModel, model, i, j)
     constants = physical_constants(eltype(workspace), model.thermodynamic_constants,
                                    rtm.longwave_solver.gas_model, rtm.solar_constant)
 
-    return ColumnAtmosphere(; pressure_layers = [layer.pressure for layer in layers],
-                              pressure_interfaces = interface_pressures,
-                              temperature_layers = [layer.temperature for layer in layers],
-                              temperature_interfaces = interface_temperatures,
+    return ColumnAtmosphere(; layer_pressures = [layer.pressure for layer in layers],
+                              interface_pressures,
+                              layer_temperatures = [layer.temperature for layer in layers],
+                              interface_temperatures,
                               gases, surface,
                               geometry = (cos_zenith = cos_zenith,),
                               constants)
