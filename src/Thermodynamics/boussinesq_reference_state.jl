@@ -41,6 +41,10 @@ The reference `pressure` evolves hydrostatically according to ``∂_t pᵣ = - �
 where ``W`` is the `vertical_velocity` of the frame and ``ρ̄ = pᵣ / (R^m T̄)``
 is the domain-mean density. The `temperature` and moisture mass fractions are the domain means,
 and `time` is the time at which `pressure` was last advanced.
+
+The frame state is always stored in `Float64`, also on single-precision grids: the per-step change
+of the reference pressure, ``ρ̄ g W Δt / pᵣ ∼ 10⁻⁷`` for ``W = 2`` m s⁻¹ and ``Δt = 1`` ms, is
+comparable to the `Float32` machine epsilon and would be rounded away.
 """
 mutable struct MovingFrame{FT}
     vertical_velocity :: FT
@@ -59,14 +63,15 @@ end
 A spatially uniform field whose value is the property `N` of a [`MovingFrame`](@ref).
 Converted to a `ConstantField` with the current value of the property when passed to a GPU kernel.
 """
-struct MovingFrameField{N, F}
+struct MovingFrameField{N, FT, F}
     frame :: F
 end
 
-MovingFrameField{N}(frame::F) where {N, F} = MovingFrameField{N, F}(frame)
+MovingFrameField{N}(FT, frame::F) where {N, F} = MovingFrameField{N, FT, F}(frame)
 
-@inline Base.getindex(field::MovingFrameField{N}, i...) where N = getfield(field.frame, N)
-Adapt.adapt_structure(to, field::MovingFrameField{N}) where N = ConstantField(getfield(field.frame, N))
+# The Float64 frame state is converted to the float type FT of the grid
+@inline Base.getindex(field::MovingFrameField{N, FT}, i...) where {N, FT} = convert(FT, getfield(field.frame, N))
+Adapt.adapt_structure(to, field::MovingFrameField{N, FT}) where {N, FT} = ConstantField(convert(FT, getfield(field.frame, N)))
 
 reference_value(field::ConstantField) = field.constant
 reference_value(field::MovingFrameField{N}) where N = getfield(field.frame, N)
@@ -155,27 +160,27 @@ function BoussinesqReferenceState(grid, constants=ThermodynamicConstants(eltype(
     ρˢ = surface_state_field(grid, ρᵣ)
     Tˢ = surface_state_field(grid, Tᵣ)
 
-    frame = moving_frame(frame_vertical_velocity, constants, pᵣ, Tᵣ, qᵣ)
+    frame = moving_frame(frame_vertical_velocity, constants, pressure, temperature,
+                         vapor_mass_fraction, liquid_mass_fraction, ice_mass_fraction)
     p, T, qᵛ, qˡ, qⁱ = reference_fields(frame, pᵣ, Tᵣ, qᵣ)
 
     return BoussinesqReferenceState(pᵣ, pˢ, ρˢ, Tˢ, θᵣ, pˢᵗ, p, ConstantField(ρᵣ), T, qᵛ, qˡ, qⁱ, frame)
 end
 
-moving_frame(::Nothing, constants, pᵣ, Tᵣ, qᵣ) = nothing
+moving_frame(::Nothing, constants, p, T, qᵛ, qˡ, qⁱ) = nothing
 
-function moving_frame(W, constants, pᵣ::FT, Tᵣ, qᵣ) where FT
-    g = convert(FT, constants.gravitational_acceleration)
-    # The time is set when the frame is first advanced
-    return MovingFrame(convert(FT, W), g, convert(FT, NaN), pᵣ, Tᵣ, qᵣ.vapor, qᵣ.liquid, qᵣ.ice)
-end
+# The time is set when the frame is first advanced
+moving_frame(W, constants, p, T, qᵛ, qˡ, qⁱ) =
+    MovingFrame(Float64(W), Float64(constants.gravitational_acceleration), NaN,
+                Float64(p), Float64(T), Float64(qᵛ), Float64(qˡ), Float64(qⁱ))
 
 reference_fields(::Nothing, pᵣ, Tᵣ, qᵣ) =
     ConstantField(pᵣ), ConstantField(Tᵣ), ConstantField(qᵣ.vapor), ConstantField(qᵣ.liquid), ConstantField(qᵣ.ice)
 
-reference_fields(frame::MovingFrame, pᵣ, Tᵣ, qᵣ) =
-    MovingFrameField{:pressure}(frame), MovingFrameField{:temperature}(frame),
-    MovingFrameField{:vapor_mass_fraction}(frame), MovingFrameField{:liquid_mass_fraction}(frame),
-    MovingFrameField{:ice_mass_fraction}(frame)
+reference_fields(frame::MovingFrame, pᵣ::FT, Tᵣ, qᵣ) where FT =
+    MovingFrameField{:pressure}(FT, frame), MovingFrameField{:temperature}(FT, frame),
+    MovingFrameField{:vapor_mass_fraction}(FT, frame), MovingFrameField{:liquid_mass_fraction}(FT, frame),
+    MovingFrameField{:ice_mass_fraction}(FT, frame)
 
 frame_summary(::Nothing) = ""
 frame_summary(frame::MovingFrame) = string(", frame_vertical_velocity=", prettysummary(frame.vertical_velocity))
