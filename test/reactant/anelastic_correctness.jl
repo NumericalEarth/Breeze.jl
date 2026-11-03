@@ -2,9 +2,9 @@ include(joinpath(dirname(@__DIR__), "setup.jl"))
 
 #####
 ##### Reactant correctness — anelastic AtmosphereModel parity over a compiled
-##### `run!`. Construction and `set!` solve for the anelastic pressure eagerly
+##### `run!`. Construction solves for the anelastic pressure eagerly
 ##### (`enforce_mass_conservation!`), which exercises Reactant's FFT plans on
-##### concrete arrays; the compiled `run!` exercises them on traced arrays.
+##### concrete arrays; the compiled `set!` and `run!` exercise them on traced arrays.
 #####
 
 using Breeze
@@ -54,6 +54,8 @@ function anelastic_model(arch)
     return AtmosphereModel(grid; dynamics, advection=WENO(order=5))
 end
 
+set_initial_state!(model, u, v, θ) = set!(model; u, v, θ)
+
 @testset "Reactant anelastic correctness" begin
     Δt = 1.0
     stop_iteration = 3
@@ -69,9 +71,11 @@ end
     v_init = randn(size(vmodel.velocities.v)...)
     θ_init = 300 .+ 0.1 .* randn(Nx, Ny, Nz)
 
-    # `set!` projects the velocity onto the anelastic constraint with a pressure solve
+    # `set!` projects the velocity onto the anelastic constraint with a pressure solve.
+    # The ReactantState model compiles it, which is cheaper than evaluating `set!` eagerly.
     set!(vmodel; u=u_init, v=v_init, θ=θ_init)
-    set!(rmodel; u=u_init, v=v_init, θ=θ_init)
+    u_r, v_r, θ_r = map(Reactant.to_rarray, (u_init, v_init, θ_init))
+    Reactant.@jit set_initial_state!(rmodel, u_r, v_r, θ_r)
     @test compare_models(vmodel, rmodel; rtol, atol)
 
     vsimulation = Simulation(vmodel; Δt, stop_iteration, verbose=false)
