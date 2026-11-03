@@ -120,7 +120,7 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     AS = typeof(substepper)
 
     return AcousticRungeKutta3{FT, U0, TG, TI, AS, R}(β₁, β₂, β₃, U⁰, Gⁿ,
-                                                       implicit_solver, substepper, rounding)
+                                                      implicit_solver, substepper, rounding)
 end
 
 #####
