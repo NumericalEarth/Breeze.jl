@@ -6,14 +6,12 @@ using ..Thermodynamics:
     StaticEnergyState,
     density,
     liquid_latent_heat,
-    mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity,
     temperature,
     TetensFormulaThermodynamicConstants,
     total_mixing_ratio,
     total_specific_moisture,
-    vapor_gas_constant,
     with_moisture,
     with_temperature
 
@@ -21,6 +19,7 @@ using ..AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
     kernel_time_step,
+    liquid_ice_exner_exponent,
     standard_pressure,
     thermodynamic_density_name,
     total_density
@@ -74,6 +73,7 @@ struct DCMIP2016KesslerMicrophysics{FT}
 
     # Numerical
     substep_cfl :: FT
+    maximum_sedimentation_substeps :: Int
 end
 
 """
@@ -145,10 +145,10 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
   ([`phase_change_temperature_slope`](@ref Breeze.Microphysics.phase_change_temperature_slope)), and
   the invariant is what is written back, so the post-step temperature follows from `θˡⁱ` and the new
   partition. This differs from the DCMIP2016 Fortran, which increments `T` by `ℒˡᵣ Δrˡ / cᵖᵈ`; that
-  increment is not consistent with `θˡⁱ` (moist heat capacity, composition dependence of the Exner
-  function) and acts as a spurious net `θˡⁱ` source. Conserving `θˡⁱ` is consistency with the
-  prognostic invariant of the formulation; it is not exact conservation of the physical mixture
-  enthalpy, which the formulation's constant-latent-heat `θˡⁱ` does not represent either.
+  increment is not consistent with `θˡⁱ` (moist heat capacity, temperature dependence of the
+  latent heat) and acts as a spurious net `θˡⁱ` source. Because `θˡⁱ` is defined from the
+  enthalpy with coefficients that depend on the total water only, a phase change at fixed `θˡⁱ`,
+  pressure and total water also conserves the mixture enthalpy exactly.
 
 # Keyword Arguments
 
@@ -192,6 +192,12 @@ Ventilation: `(Cᵉᵛ₁ + Cᵉᵛ₂ × (ρ rʳ)^βᵉᵛ₁) × (ρ rʳ)^β�
 
 ## Numerical
 - `substep_cfl`: CFL safety factor for sedimentation subcycling (default: 0.8)
+- `maximum_sedimentation_substeps`: Static bound on the number of sedimentation substeps, for
+  architectures whose kernels cannot loop a data-dependent number of times (Reactant reverse mode;
+  required there, see `sedimentation_substep_limit`). A step that needs more substeps is not
+  truncated: its update is NaN. Choose it from eager control runs, in which
+  `microphysical_fields.sedimentation_substeps` records the most substeps each column has needed.
+  Ignored by eager architectures (default: 0, no bound).
 """
 function DCMIP2016KesslerMicrophysics(FT = Oceananigans.defaults.FloatType;
                                       dcmip_temperature_scale               = 237.3,
@@ -208,7 +214,8 @@ function DCMIP2016KesslerMicrophysics(FT = Oceananigans.defaults.FloatType;
                                       evaporation_ventilation_exponent_2    = 0.525,
                                       diffusivity_coefficient               = 2.55e8,
                                       thermal_conductivity_coefficient      = 5.4e5,
-                                      substep_cfl                           = 0.8)
+                                      substep_cfl                           = 0.8,
+                                      maximum_sedimentation_substeps        = 0)
 
     return DCMIP2016KesslerMicrophysics{FT}(convert(FT, dcmip_temperature_scale),
                                             convert(FT, terminal_velocity_coefficient),
@@ -224,7 +231,8 @@ function DCMIP2016KesslerMicrophysics(FT = Oceananigans.defaults.FloatType;
                                             convert(FT, evaporation_ventilation_exponent_2),
                                             convert(FT, diffusivity_coefficient),
                                             convert(FT, thermal_conductivity_coefficient),
-                                            convert(FT, substep_cfl))
+                                            convert(FT, substep_cfl),
+                                            Int(maximum_sedimentation_substeps))
 end
 
 const DCMIP2016KM = DCMIP2016KesslerMicrophysics
@@ -293,6 +301,8 @@ Create and return the microphysical fields for the Kessler scheme.
 - `precipitation_rate`: Surface precipitation rate (m/s), obtained by normalizing the
   substep-mean rain mass flux by the final surface air density.
 - `𝕎ʳ`: Rain terminal velocity (m/s).
+- `sedimentation_substeps`: The largest number of sedimentation substeps each column has needed
+  since the model was built (see `maximum_sedimentation_substeps`).
 """
 function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, boundary_conditions)
     # Prognostic fields (density-weighted)
@@ -307,8 +317,9 @@ function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, 
     # Precipitation and velocity diagnostics
     precipitation_rate = Field{Center, Center, Nothing}(grid)
     𝕎ʳ = CenterField(grid)
+    sedimentation_substeps = Field{Center, Center, Nothing}(grid)
 
-    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, 𝕎ʳ)
+    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, 𝕎ʳ, sedimentation_substeps)
 end
 
 #####
@@ -488,7 +499,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # Skip microphysics update if timestep is zero, infinite, or invalid
     # (e.g., during model construction before any time step has been taken)
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    invalid_time_step(Δt) && return nothing
 
     # The kernel carries θˡⁱ through sedimentation and phase change (see the constructor
     # docstring); it has no static-energy counterpart yet.
@@ -506,8 +517,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     dry_air_coupled = ρ !== ρᵈ
     p = dynamics_pressure(model.dynamics)
 
-    # Standard pressure (reference pressure for the Exner function, pˢᵗ)
-    pˢᵗ = standard_pressure(model.dynamics)
+    # Standard pressure (reference pressure for the Exner function, pˢᵗ) and Exner exponent
+    pˢᵗ = convert(eltype(grid), standard_pressure(model.dynamics))
+    κ̂ = liquid_ice_exner_exponent(model.formulation)
 
     # Thermodynamic constants for liquid-ice potential temperature conversion
     constants = model.thermodynamic_constants
@@ -523,10 +535,11 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     μ = model.microphysical_fields
 
     kernel_Δt = kernel_time_step(arch, grid, Δt)
+    substep_limit = sedimentation_substep_limit(arch, microphysics)
 
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, kernel_Δt, ρ, ρᵈ, dry_air_coupled,
-            p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+            microphysics, grid, Nz, kernel_Δt, substep_limit, ρ, ρᵈ, dry_air_coupled,
+            p, pˢᵗ, κ̂, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
@@ -584,13 +597,13 @@ is what remains once the water is removed, `ρᵈ = ρᵣ - ρᵗ`. Sedimentatio
 @inline dry_air_density(ϱ, ρᵗ, dry_air_coupled) = ifelse(dry_air_coupled, ϱ, ϱ - ρᵗ)
 
 # The pressure-based liquid-ice potential temperature state of a Kessler cell, from the
-# prognostic θˡⁱ and the dry-air mixing ratios of vapor and (cloud plus rain) liquid. This is
-# the state Breeze diagnoses for the anelastic θˡⁱ formulation, so `temperature` and
-# `with_temperature` on it are Breeze's own θˡⁱ ↔ T relations.
-@inline function kessler_thermodynamic_state(θˡⁱ, rᵛ, rˡ, p, pˢᵗ)
+# prognostic θˡⁱ, the dry-air mixing ratios of vapor and (cloud plus rain) liquid, and the Exner
+# exponent κ̂ of the formulation. This is the state Breeze diagnoses for the anelastic θˡⁱ
+# formulation, so `temperature` and `with_temperature` on it are Breeze's own θˡⁱ ↔ T relations.
+@inline function kessler_thermodynamic_state(θˡⁱ, rᵛ, rˡ, p, pˢᵗ, κ̂)
     r = MoistureMixingRatio(rᵛ, rˡ)
     q = MoistureMassFractions(r)
-    return LiquidIcePotentialTemperatureState(θˡⁱ, q, pˢᵗ, p)
+    return LiquidIcePotentialTemperatureState(θˡⁱ, q, pˢᵗ, p, κ̂)
 end
 
 """
@@ -599,43 +612,22 @@ $(TYPEDSIGNATURES)
 Return ``∂T/∂rˡ``, the temperature change per unit of vapor mixing ratio converted to liquid at
 fixed total moisture, holding the prognostic invariant of the thermodynamic state `𝒰` fixed.
 
-For a `LiquidIcePotentialTemperatureState`,
-``T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ`` with ``Π = (p / pˢᵗ)^{Rᵐ / cᵖᵐ}``, so at fixed ``θˡⁱ``, ``p`` and ``qᵗ``
-(``δqᵛ = -δqˡ``),
+Both invariants are affine in the enthalpy-like quantity ``cᵖᵐ T - ℒˡ₀ qˡ``, with the latent-heat
+intercept ``ℒˡ₀`` at zero kelvin, through coefficients that do not depend on how the water is
+split between vapor and liquid: ``ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ`` for a
+`LiquidIcePotentialTemperatureState`, where ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ`` and the Exner function ``Π``
+(with either [`VaporEquivalentExponent`](@ref) or [`DryExponent`](@ref)) depend only on ``qᵗ`` and
+``p``; and ``s - g z = cᵖᵐ T - ℒˡ₀ qˡ`` for a `StaticEnergyState`. So at fixed invariant, ``p`` and
+``qᵗ`` (``δqᵛ = -δqˡ``), ``cᵖᵐ δT + T (cˡ - cᵖᵛ) δqˡ = ℒˡ₀ δqˡ``, that is
 
 ```math
-\\frac{∂T}{∂qˡ} = θˡⁱ Π \\ln\\frac{p}{pˢᵗ} \\frac{∂κ}{∂qˡ} + \\frac{ℒˡᵣ}{cᵖᵐ} - \\frac{ℒˡᵣ qˡ (cˡ - cᵖᵛ)}{(cᵖᵐ)^2} ,
-\\qquad
-\\frac{∂κ}{∂qˡ} = -\\frac{Rᵛ cᵖᵐ + Rᵐ (cˡ - cᵖᵛ)}{(cᵖᵐ)^2} ,
+\\frac{∂T}{∂qˡ} = \\frac{ℒˡ₀ - T (cˡ - cᵖᵛ)}{cᵖᵐ} = \\frac{ℒˡ(T)}{cᵖᵐ} ,
 ```
 
-and ``∂T/∂rˡ = (1 - qᵗ) ∂T/∂qˡ``. The leading term is ``ℒˡᵣ / cᵖᵐ``; the DCMIP2016 Fortran uses
-``ℒˡᵣ / cᵖᵈ``, which differs by the moist heat capacity and neglects the composition dependence of
-the Exner function. For a `StaticEnergyState`,
-``T = (s - g z + ℒˡ₀ qˡ) / cᵖᵐ``, with the latent-heat intercept ``ℒˡ₀`` at zero kelvin, gives
-``∂T/∂qˡ = (ℒˡ₀ - T (cˡ - cᵖᵛ)) / cᵖᵐ = ℒˡ(T) / cᵖᵐ``.
+the latent heat at the state's temperature over the moist heat capacity, and
+``∂T/∂rˡ = (1 - qᵗ) ∂T/∂qˡ``. The DCMIP2016 Fortran uses ``ℒˡᵣ / cᵖᵈ`` instead.
 """
-@inline function phase_change_temperature_slope(𝒰::LiquidIcePotentialTemperatureState, constants)
-    q = 𝒰.moisture_mass_fractions
-    θ = 𝒰.potential_temperature
-    p = 𝒰.reference_pressure
-    pˢᵗ = 𝒰.standard_pressure
-    Rᵐ = mixture_gas_constant(q, constants)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    Rᵛ = vapor_gas_constant(constants)
-    cᵖᵛ = constants.vapor.heat_capacity
-    cˡ = constants.liquid.heat_capacity
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    qˡ = q.liquid
-    qᵗ = total_specific_moisture(q)
-    Δc = cˡ - cᵖᵛ
-    Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-    ∂κ∂qˡ = -(Rᵛ * cᵖᵐ + Rᵐ * Δc) / cᵖᵐ^2
-    ∂T∂qˡ = θ * Π * log(p / pˢᵗ) * ∂κ∂qˡ + ℒˡᵣ / cᵖᵐ - ℒˡᵣ * qˡ * Δc / cᵖᵐ^2
-    return ∂T∂qˡ * (1 - qᵗ)
-end
-
-@inline function phase_change_temperature_slope(𝒰::StaticEnergyState, constants)
+@inline function phase_change_temperature_slope(𝒰::Union{LiquidIcePotentialTemperatureState, StaticEnergyState}, constants)
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
     T = temperature(𝒰, constants)
@@ -774,10 +766,18 @@ end
 #
 # The prognostic fields ρqᵛ, ρqᶜˡ, ρqʳ hold the water partial densities throughout; the
 # mixing ratios are formed per cell from the dry-air density (see `dry_air_density`).
+#
+# Breeze's liquid-ice potential temperature is defined exactly from the enthalpy,
+#   ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ ,
+# with the Exner exponent κ̂ of the formulation; the conversions go through the state's own
+# `temperature` and `with_temperature` (see `kessler_thermodynamic_state`).
+#
+# A substep with `active = false` (beyond the substeps the step needs, under a static substep
+# bound) computes but does not write: every store is masked with `ifelse`.
 
-@inline function kessler_column_cell!(i, j, k, grid, Fᵗᵒᵖ, Δt, microphysics,
+@inline function kessler_column_cell!(i, j, k, grid, Fᵗᵒᵖ, Δt, active, microphysics,
                                       density, coupling_density, dry_air_coupled,
-                                      pressure, pˢᵗ, constants, δT,
+                                      pressure, pˢᵗ, κ̂, constants, δT,
                                       θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     FT = eltype(grid)
 
@@ -786,6 +786,7 @@ end
         ϱ   = coupling_density[i, j, k]
         p   = pressure[i, j, k]
         θ₀  = θˡⁱ[i, j, k]
+        ρθ₀ = ρθˡⁱ[i, j, k]
         ρᵛ  = ρqᵛ[i, j, k]
         ρᶜˡ = μ.ρqᶜˡ[i, j, k]
         ρʳ  = μ.ρqʳ[i, j, k]
@@ -794,21 +795,21 @@ end
 
     # Temperature of the incoming state from the prognostic invariant
     ρᵈ₀ = dry_air_density(ϱ, ρᵛ + ρᶜˡ + ρʳ, dry_air_coupled)
-    𝒰₀ = kessler_thermodynamic_state(θ₀, ρᵛ / ρᵈ₀, (ρᶜˡ + ρʳ) / ρᵈ₀, p, pˢᵗ)
+    𝒰₀ = kessler_thermodynamic_state(θ₀, ρᵛ / ρᵈ₀, (ρᶜˡ + ρʳ) / ρᵈ₀, p, pˢᵗ, κ̂)
     T = temperature(𝒰₀, constants)
 
     # Rain sedimentation: upwind fluxes ρqʳ 𝕎ʳ through the top (from the cell above) and
     # bottom faces, divided by the thickness of this cell. The same products are used on
     # both sides of every face, so the column budget telescopes to the surface flux.
     Fᵇᵒᵗ = ρʳ * 𝕎ʳ
-    ρʳ = max(0, ρʳ + Δt * (Fᵗᵒᵖ - Fᵇᵒᵗ) / Δzᶜᶜᶜ(i, j, k, grid))
+    ρʳ⁺ = max(0, ρʳ + Δt * (Fᵗᵒᵖ - Fᵇᵒᵗ) / Δzᶜᶜᶜ(i, j, k, grid))
 
     # Sedimentation at fixed temperature: the invariant absorbs the change of liquid loading
-    ρᵈ = dry_air_density(ϱ, ρᵛ + ρᶜˡ + ρʳ, dry_air_coupled)
+    ρᵈ = dry_air_density(ϱ, ρᵛ + ρᶜˡ + ρʳ⁺, dry_air_coupled)
     rᵛ  = ρᵛ / ρᵈ
     rᶜˡ = ρᶜˡ / ρᵈ
-    rʳ  = ρʳ / ρᵈ
-    𝒰₁ = with_temperature(kessler_thermodynamic_state(θ₀, rᵛ, rᶜˡ + rʳ, p, pˢᵗ), T, constants)
+    rʳ  = ρʳ⁺ / ρᵈ
+    𝒰₁ = with_temperature(kessler_thermodynamic_state(θ₀, rᵛ, rᶜˡ + rʳ, p, pˢᵗ, κ̂), T, constants)
     θ₁ = 𝒰₁.potential_temperature
 
     # Local Kessler physics at fixed θ₁ (the temperature after the step is implied by θ₁ and
@@ -818,11 +819,11 @@ end
                                                microphysics, constants, δT, FT)
 
     @inbounds begin
-        ρqᵛ[i, j, k]    = ρᵈ * rᵛ
-        μ.ρqᶜˡ[i, j, k] = ρᵈ * rᶜˡ
-        μ.ρqʳ[i, j, k]  = ρᵈ * rʳ
-        θˡⁱ[i, j, k]    = θ₁
-        ρθˡⁱ[i, j, k]   = ϱ * θ₁
+        ρqᵛ[i, j, k]    = ifelse(active, ρᵈ * rᵛ, ρᵛ)
+        μ.ρqᶜˡ[i, j, k] = ifelse(active, ρᵈ * rᶜˡ, ρᶜˡ)
+        μ.ρqʳ[i, j, k]  = ifelse(active, ρᵈ * rʳ, ρʳ)
+        θˡⁱ[i, j, k]    = ifelse(active, θ₁, θ₀)
+        ρθˡⁱ[i, j, k]   = ifelse(active, ϱ * θ₁, ρθ₀)
     end
 
     return nothing
@@ -840,9 +841,46 @@ end
     return kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
 end
 
-@kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
+# The number of sedimentation substeps is data dependent. Differentiating a loop with a data-dependent
+# trip count needs a cache of dynamic size, which Reactant cannot compile, so an architecture may
+# return a static bound `Val(N)` (BreezeReactantExt returns `maximum_sedimentation_substeps`): the
+# loop then always runs `N` substeps, those after the needed `Ns` leaving every field as they find
+# it. A step that needs more than `N`, or whose count is not finite, is not truncated: its substep is
+# NaN, so its whole update is, and `sedimentation_substeps` records the count needed (`Inf` if not
+# finite). Without a bound the loop runs `Ns` substeps.
+sedimentation_substep_limit(arch, microphysics) = nothing
+
+@inline substep_loop_length(Ns, ::Nothing) = Ns
+@inline substep_loop_length(Ns, ::Val{N}) where N = N
+
+# Without a static bound, counts above this are rejected as well: they cannot be looped
+const maximum_representable_substeps = 2^24
+
+@inline substep_bound(::Nothing) = maximum_representable_substeps
+@inline substep_bound(::Val{N}) where N = N
+
+"""
+    sedimentation_substeps(Δt, max_Δt, substep_limit)
+
+The sedimentation substeps for a step `Δt` whose rain CFL limit is `max_Δt`, validated before the
+count becomes an integer. The ratio `Δt / max_Δt` must be finite and positive, and the count needed,
+`max(1, ceil(Δt / max_Δt))`, at most the bound (`substep_limit`'s, or
+`maximum_representable_substeps`). Return `(Nₛ, valid, needed)`: `Nₛ` is the count as a float when
+valid and `1` otherwise, so it is always a safe loop operand; `needed` is the count needed, `Inf` if
+the ratio is not finite and positive. An invalid step is not clipped: the kernel makes its update NaN.
+"""
+@inline function sedimentation_substeps(Δt, max_Δt, substep_limit)
+    ratio = Δt / max_Δt
+    representable = isfinite(ratio) & (ratio > 0)
+    needed = ifelse(representable, max(one(ratio), ceil(ratio)), oftype(ratio, Inf))
+    valid = needed ≤ substep_bound(substep_limit)
+    Nₛ = ifelse(valid, needed, one(ratio))
+    return Nₛ, valid, needed
+end
+
+@kernel function _microphysical_update!(microphysics, grid, Nz, Δt, substep_limit,
                                         density, coupling_density, dry_air_coupled,
-                                        pressure, pˢᵗ, constants,
+                                        pressure, pˢᵗ, κ̂, constants,
                                         θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
@@ -859,7 +897,8 @@ end
     ##### PHASE 1: clip inputs, terminal velocities, and the sedimentation CFL limit
     #####
 
-    max_Δt = Δt
+    # Δt may be a traced scalar (Reactant), which must not seed a loop-carried float
+    max_Δt = convert(FT, Δt)
 
     for k = 1:Nz
         @inbounds begin
@@ -878,9 +917,15 @@ end
     end
 
     # Subcycling for CFL constraint on rain sedimentation
-    Ns = max(1, ceil(Int, Δt / max_Δt))
-    inv_Ns = inv(FT(Ns))
+    # The count is validated as a float (`sedimentation_substeps`) and becomes an integer only for the
+    # loop bound, through unsafe_trunc of a value known to be a representable integer: no error path
+    # in the kernel, and no integer-to-float conversion, which Reactant cannot export to XLA.
+    Nₛ, valid, needed = sedimentation_substeps(Δt, max_Δt, substep_limit)
+    Ns = unsafe_trunc(Int, Nₛ) # 1 ≤ Nₛ ≤ the bound, an integer
+    inv_Ns = inv(Nₛ)
     Δtₛ = Δt * inv_Ns
+    Δtₛ = ifelse(valid, Δtₛ, oftype(Δtₛ, NaN)) # an invalid step's update is NaN
+    @inbounds μ.sedimentation_substeps[i, j, 1] = max(μ.sedimentation_substeps[i, j, 1], needed)
     # Fˢᵘʳᶠ: accumulated surface rain mass flux over subcycles.
     Fˢᵘʳᶠ = zero(FT)
 
@@ -888,22 +933,24 @@ end
     ##### PHASE 2: Subcycle sedimentation and microphysics (in partial-density space)
     #####
 
-    for m = 1:Ns
+    for m = 1:substep_loop_length(Ns, substep_limit)
+        active = m ≤ Ns
+
         # The bottom-face flux of cell 1, with the same product cell 1 uses for its outflow
-        @inbounds Fˢᵘʳᶠ += μ.ρqʳ[i, j, 1] * μ.𝕎ʳ[i, j, 1]
+        @inbounds Fˢᵘʳᶠ += ifelse(active, μ.ρqʳ[i, j, 1] * μ.𝕎ʳ[i, j, 1], zero(FT))
 
         for k = 1:(Nz-1)
             # Inflow through the top face: the cell above has not been updated yet this substep
             @inbounds Fᵗᵒᵖ = μ.ρqʳ[i, j, k+1] * μ.𝕎ʳ[i, j, k+1]
-            kessler_column_cell!(i, j, k, grid, Fᵗᵒᵖ, Δtₛ, microphysics,
+            kessler_column_cell!(i, j, k, grid, Fᵗᵒᵖ, Δtₛ, active, microphysics,
                                  density, coupling_density, dry_air_coupled,
-                                 pressure, pˢᵗ, constants, δT, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+                                 pressure, pˢᵗ, κ̂, constants, δT, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
         end
 
         # k = Nz: no rain enters through the model top
-        kessler_column_cell!(i, j, Nz, grid, zero(FT), Δtₛ, microphysics,
+        kessler_column_cell!(i, j, Nz, grid, zero(FT), Δtₛ, active, microphysics,
                              density, coupling_density, dry_air_coupled,
-                             pressure, pˢᵗ, constants, δT, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+                             pressure, pˢᵗ, κ̂, constants, δT, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
         # Update terminal velocities for next subcycle
         if m < Ns
@@ -986,7 +1033,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     Δt = model.clock.last_Δt
 
     # Skip microphysics update if timestep is zero, infinite, or invalid
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    invalid_time_step(Δt) && return nothing
 
     state = model.dynamics.state
     constants = model.thermodynamic_constants

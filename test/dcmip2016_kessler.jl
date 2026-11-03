@@ -5,11 +5,14 @@ using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
 using Breeze.AtmosphereModels: microphysics_model_update!, bottom_precipitation_flux
-using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient, step_kessler_microphysics
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient,
+    step_kessler_microphysics, sedimentation_substeps
 using Breeze.Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
-    mixture_gas_constant,
+    vapor_equivalent_heat_capacity,
+    vapor_equivalent_gas_constant,
+    absolute_zero_latent_heat,
     saturation_specific_humidity,
     PlanarLiquidSurface,
     TetensFormula
@@ -17,6 +20,20 @@ using Breeze.Thermodynamics:
 #####
 ##### Helper functions
 #####
+
+# θˡⁱ = (cᵖᵐ T - ℒˡ₀ qˡ) / (ĉᵖ Π̂) with Π̂ = (p / p₀)^(R̂ / ĉᵖ), and its inverse
+function liquid_ice_ĉᵖΠ(p, p₀, q, constants)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    return ĉᵖ * (p / p₀)^(vapor_equivalent_gas_constant(q, constants) / ĉᵖ)
+end
+
+liquid_ice_potential_temperature(T, p, p₀, q, constants) =
+    (mixture_heat_capacity(q, constants) * T - absolute_zero_latent_heat(constants, constants.liquid) * q.liquid) /
+    liquid_ice_ĉᵖΠ(p, p₀, q, constants)
+
+liquid_ice_temperature(θ, p, p₀, q, constants) =
+    (liquid_ice_ĉᵖΠ(p, p₀, q, constants) * θ + absolute_zero_latent_heat(constants, constants.liquid) * q.liquid) /
+    mixture_heat_capacity(q, constants)
 
 mass_fraction_to_mixing_ratio(q, qᵗ) = q / (1 - qᵗ)
 mixing_ratio_to_mass_fraction(r, rᵗ) = r / (1 + rᵗ)
@@ -52,12 +69,13 @@ function kessler_column_reference!(θ, ρᵛ, ρᶜˡ, ρʳ, ρ, ϱ, p, Δz, Δt
     FT = eltype(θ)
 
     # Thermodynamic constants
-    ℒ   = constants.liquid.reference_latent_heat
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
     cˡ  = constants.liquid.heat_capacity
     Rᵈ  = constants.molar_gas_constant / constants.dry_air.molar_mass
     Rᵛ  = constants.molar_gas_constant / constants.vapor.molar_mass
+    # Latent heat of vaporization extrapolated to absolute zero, ℒ(T) = ℒ₀ + (cᵖᵛ - cˡ) T
+    ℒ₀  = constants.liquid.reference_latent_heat - (cᵖᵛ - cˡ) * constants.energy_reference_temperature
     a   = constants.saturation_vapor_pressure.liquid_coefficient
     δT  = constants.saturation_vapor_pressure.liquid_temperature_offset
     T_DCMIP2016 = microphysics.dcmip_temperature_scale
@@ -78,38 +96,41 @@ function kessler_column_reference!(θ, ρᵛ, ρᶜˡ, ρʳ, ρ, ϱ, p, Δz, Δt
 
     dry_density(k, ρᵗ) = dry_air_coupled ? ϱ[k] : ϱ[k] - ρᵗ
 
-    # Mixture properties from dry-air mixing ratios (rᵗ = rᵛ + rˡ)
+    # Mixture properties from dry-air mixing ratios (rᵗ = rᵛ + rˡ): the moist heat capacity cᵖᵐ,
+    # and the vapor-equivalent ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ and R̂ = qᵈ Rᵈ + qᵗ Rᵛ (all water as vapor),
+    # which depend on the total water only
     function mixture(rᵛ, rˡ)
         rᵗ = rᵛ + rˡ
         qᵛ = rᵛ / (1 + rᵗ)
         qˡ = rˡ / (1 + rᵗ)
-        qᵈ = 1 - qᵛ - qˡ
-        Rᵐ = qᵈ * Rᵈ + qᵛ * Rᵛ
+        qᵗ = qᵛ + qˡ
+        qᵈ = 1 - qᵗ
         cᵖᵐ = qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cˡ
-        return qᵛ, qˡ, Rᵐ, cᵖᵐ
+        ĉᵖ = qᵈ * cᵖᵈ + qᵗ * cᵖᵛ
+        R̂ = qᵈ * Rᵈ + qᵗ * Rᵛ
+        return qᵗ, qˡ, cᵖᵐ, ĉᵖ, R̂
     end
 
-    # T = Π θˡⁱ + ℒ qˡ / cᵖᵐ, Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ), and its inverse
+    # ĉᵖ Π̂ θˡⁱ = cᵖᵐ T - ℒ₀ qˡ with Π̂ = (p / pˢᵗ)^(R̂ / ĉᵖ) (the vapor-equivalent Exner exponent,
+    # the default of the models checked against this reference), and its inverse
     function temperature_of(θᵏ, rᵛ, rˡ, pᵏ)
-        _, qˡ, Rᵐ, cᵖᵐ = mixture(rᵛ, rˡ)
-        Π = (pᵏ / pˢᵗ)^(Rᵐ / cᵖᵐ)
-        return Π * θᵏ + ℒ * qˡ / cᵖᵐ
+        _, qˡ, cᵖᵐ, ĉᵖ, R̂ = mixture(rᵛ, rˡ)
+        Π̂ = (pᵏ / pˢᵗ)^(R̂ / ĉᵖ)
+        return (ĉᵖ * Π̂ * θᵏ + ℒ₀ * qˡ) / cᵖᵐ
     end
 
     function potential_temperature_of(T, rᵛ, rˡ, pᵏ)
-        _, qˡ, Rᵐ, cᵖᵐ = mixture(rᵛ, rˡ)
-        Π = (pᵏ / pˢᵗ)^(Rᵐ / cᵖᵐ)
-        return (T - ℒ * qˡ / cᵖᵐ) / Π
+        _, qˡ, cᵖᵐ, ĉᵖ, R̂ = mixture(rᵛ, rˡ)
+        Π̂ = (pᵏ / pˢᵗ)^(R̂ / ĉᵖ)
+        return (cᵖᵐ * T - ℒ₀ * qˡ) / (ĉᵖ * Π̂)
     end
 
-    # ∂T/∂rˡ at fixed θˡⁱ, p and rᵗ (vapor → liquid)
+    # ∂T/∂rˡ at fixed θˡⁱ, p and rᵗ (vapor → liquid): ĉᵖ Π̂ is fixed, so cᵖᵐ T - ℒ₀ qˡ is, and
+    # ∂T/∂qˡ = (ℒ₀ - (cˡ - cᵖᵛ) T) / cᵖᵐ = ℒ(T) / cᵖᵐ
     function temperature_slope(θᵏ, rᵛ, rˡ, pᵏ)
-        qᵛ, qˡ, Rᵐ, cᵖᵐ = mixture(rᵛ, rˡ)
-        qᵗ = qᵛ + qˡ
-        Π = (pᵏ / pˢᵗ)^(Rᵐ / cᵖᵐ)
-        Δc = cˡ - cᵖᵛ
-        ∂κ∂qˡ = -(Rᵛ * cᵖᵐ + Rᵐ * Δc) / cᵖᵐ^2
-        ∂T∂qˡ = θᵏ * Π * log(pᵏ / pˢᵗ) * ∂κ∂qˡ + ℒ / cᵖᵐ - ℒ * qˡ * Δc / cᵖᵐ^2
+        qᵗ, _, cᵖᵐ, _, _ = mixture(rᵛ, rˡ)
+        T = temperature_of(θᵏ, rᵛ, rˡ, pᵏ)
+        ∂T∂qˡ = (ℒ₀ - (cˡ - cᵖᵛ) * T) / cᵖᵐ
         return ∂T∂qˡ * (1 - qᵗ)
     end
 
@@ -256,10 +277,7 @@ function dcmip2016_fortran_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constan
     for k = 1:Nz
         qˡ = qᶜˡ[k] + qʳ[k]
         q = MoistureMassFractions(qᵛ[k], qˡ)
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
-        θˡⁱ[k] = (T[k] - ℒˡᵣ * qˡ / cᵖᵐ) / Π
+        θˡⁱ[k] = liquid_ice_potential_temperature(T[k], p[k], p₀, q, constants)
     end
 
     # Convert mass fractions to mixing ratios and compute terminal velocities
@@ -306,10 +324,7 @@ function dcmip2016_fortran_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constan
             qˡ_local = (rᶜˡ[k] + rʳ[k]) / (1 + rᵗ)
 
             q = MoistureMassFractions(qᵛ_local, qˡ_local)
-            cᵖᵐ = mixture_heat_capacity(q, constants)
-            Rᵐ = mixture_gas_constant(q, constants)
-            Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
-            T[k] = Π * θˡⁱ[k] + ℒˡᵣ * qˡ_local / cᵖᵐ
+            T[k] = liquid_ice_temperature(θˡⁱ[k], p[k], p₀, q, constants)
 
             # Rain sedimentation (upstream differencing)
             if k < Nz
@@ -364,10 +379,7 @@ function dcmip2016_fortran_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constan
             qˡ_new = (rᶜˡ_final + rʳ_final) / (1 + rᵗ_new)
 
             q_new = MoistureMassFractions(qᵛ_new, qˡ_new)
-            cᵖᵐ_new = mixture_heat_capacity(q_new, constants)
-            Rᵐ_new = mixture_gas_constant(q_new, constants)
-            Π_new = (p[k] / p₀)^(Rᵐ_new / cᵖᵐ_new)
-            θˡⁱ[k] = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
+            θˡⁱ[k] = liquid_ice_potential_temperature(T_new, p[k], p₀, q_new, constants)
 
             rᵛ[k] = rᵛ_new
             rᶜˡ[k] = rᶜˡ_final
@@ -390,10 +402,7 @@ function dcmip2016_fortran_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constan
         qʳ[k] = rʳ[k] / (1 + rᵗ)
 
         q = MoistureMassFractions(qᵛ[k], qᶜˡ[k] + qʳ[k])
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
-        T[k] = Π * θˡⁱ[k] + ℒˡᵣ * (qᶜˡ[k] + qʳ[k]) / cᵖᵐ
+        T[k] = liquid_ice_temperature(θˡⁱ[k], p[k], p₀, q, constants)
     end
 
     return surface_mass_flux / Ns
@@ -496,6 +505,64 @@ end
         @test qᵛ_back ≈ qᵛ rtol=1e-10
         @test qˡ_back ≈ qˡ rtol=1e-10
     end
+
+    # `sedimentation_substeps(Δt, max_Δt, substep_limit)` validates the substep count as a float
+    # before the kernel truncates it to an integer: a count that is not finite, not positive or
+    # above the bound is rejected (`valid = false`, `Nₛ = 1`), never clipped.
+    @testset "Sedimentation substep guard [$FT]" for FT in (Float64, Float32)
+        bound = Breeze.Microphysics.maximum_representable_substeps
+        @test bound == 2^24
+
+        # The eager count `max(1, ceil(Int, Δt / max_Δt))` it replaces, for valid ratios
+        eager_count(Δt, max_Δt) = max(1, ceil(Int, Δt / max_Δt))
+
+        function check_valid(Δt, max_Δt, limit, expected)
+            Nₛ, valid, needed = sedimentation_substeps(FT(Δt), FT(max_Δt), limit)
+            @test valid
+            @test Nₛ isa FT
+            @test Nₛ == needed == expected
+            @test unsafe_trunc(Int, Nₛ) == expected
+        end
+
+        function check_rejected(Δt, max_Δt, limit, expected_needed)
+            Nₛ, valid, needed = sedimentation_substeps(FT(Δt), FT(max_Δt), limit)
+            @test !valid
+            @test Nₛ == 1 # always a safe loop operand
+            @test needed == expected_needed
+        end
+
+        # Eager equivalence below the bound, without and with a static bound
+        for (Δt, max_Δt) in ((30, 40), (30, 30), (30, 29), (30, 7.5), (30, 7.4), (1, 1e-3), (1e-3, 1e3), (10, 3))
+            expected = eager_count(FT(Δt), FT(max_Δt))
+            check_valid(Δt, max_Δt, nothing, expected)
+            check_valid(Δt, max_Δt, Val(expected), expected)
+            check_valid(Δt, max_Δt, Val(expected + 1), expected)
+        end
+
+        # Ratios that are not finite or not positive need `Inf` substeps and are rejected
+        for (Δt, max_Δt) in ((NaN, 1), (1, NaN), (0, 0), (Inf, Inf), (1, 0), (Inf, 1), (-1, 0), (0, 1), (-30, 10), (30, -10))
+            check_rejected(Δt, max_Δt, nothing, FT(Inf))
+            check_rejected(Δt, max_Δt, Val(4), FT(Inf))
+        end
+
+        # Without a static bound: exactly at the representable bound, one below and one above
+        check_valid(bound, 1, nothing, bound)
+        check_valid(bound - 1, 1, nothing, bound - 1)
+        above = nextfloat(FT(bound)) # bound + 1 for Float64; Float32 cannot represent it
+        check_rejected(above, 1, nothing, ceil(above))
+        check_rejected(1e30, 1, nothing, FT(1e30))
+        check_rejected(floatmax(FT), 1, nothing, floatmax(FT))
+        @test sedimentation_substeps(FT(bound) + 1, FT(1), nothing)[2] == (FT == Float32) # bound + 1 rounds to bound in Float32
+
+        # With a static bound N: N and N - 1 run, N + 1 and a fraction above N are rejected
+        N = 8
+        check_valid(N, 1, Val(N), N)
+        check_valid(N - 1, 1, Val(N), N - 1)
+        check_valid(N - 0.5, 1, Val(N), N)
+        check_rejected(N + 1, 1, Val(N), FT(N + 1))
+        check_rejected(N + 0.5, 1, Val(N), FT(N + 1))
+        check_rejected(bound + 4, 1, Val(N), FT(bound + 4))
+    end
 end
 
 #####
@@ -589,14 +656,10 @@ end
     qʳ_init = rʳ_init ./ (1 .+ rᵗ_init)
 
     # Initial θˡⁱ from T
-    ℒˡᵣ = constants.liquid.reference_latent_heat
     θˡⁱ_init = zeros(FT, Nz)
     for k in 1:Nz
         q = MoistureMassFractions(qᵛ_init[k], qᶜˡ_init[k] + qʳ_init[k])
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p_prof[k] / p₀)^(Rᵐ / cᵖᵐ)
-        θˡⁱ_init[k] = (T_prof[k] - ℒˡᵣ * (qᶜˡ_init[k] + qʳ_init[k]) / cᵖᵐ) / Π
+        θˡⁱ_init[k] = liquid_ice_potential_temperature(T_prof[k], p_prof[k], p₀, q, constants)
     end
 
     # Run the column reference on the partial densities (anelastic: ϱ = ρ, fixed total density)
@@ -812,14 +875,10 @@ end
         qᵗ_ref = qᵛ_ref .+ qᶜˡ_ref .+ qʳ_ref
         rʳ_ref = qʳ_ref ./ (1 .- qᵗ_ref)
 
-        ℒˡᵣ = constants.liquid.reference_latent_heat
         θˡⁱ_ref = similar(T_ref)
         for k in eachindex(T_ref)
             q = MoistureMassFractions(qᵛ_ref[k], qᶜˡ_ref[k] + qʳ_ref[k])
-            cᵖᵐ = mixture_heat_capacity(q, constants)
-            Rᵐ = mixture_gas_constant(q, constants)
-            Π = (p[k] / FT(1e5))^(Rᵐ / cᵖᵐ)
-            θˡⁱ_ref[k] = (T_ref[k] - ℒˡᵣ * (qᶜˡ_ref[k] + qʳ_ref[k]) / cᵖᵐ) / Π
+            θˡⁱ_ref[k] = liquid_ice_potential_temperature(T_ref[k], p[k], FT(1e5), q, constants)
         end
 
         model.clock.last_Δt = Δt
@@ -876,12 +935,7 @@ end
     microphysics = DCMIP2016KesslerMicrophysics(FT)
     ℒˡᵣ = constants.liquid.reference_latent_heat
 
-    θ_of(T, qᵛ, qˡ, p) = begin
-        q = MoistureMassFractions(qᵛ, qˡ)
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        (T - ℒˡᵣ * qˡ / cᵖᵐ) / (p / p₀)^(Rᵐ / cᵖᵐ)
-    end
+    θ_of(T, qᵛ, qˡ, p) = liquid_ice_potential_temperature(T, p, p₀, MoistureMassFractions(qᵛ, qˡ), constants)
     θ_init = [θ_of(T_prof[k], qᵛ_init[k], qᶜˡ_init[k] + qʳ_init[k], p_prof[k]) for k in 1:Nz]
 
     # Legacy algorithm, in the old port's anelastic convention (sedimentation on the total density)

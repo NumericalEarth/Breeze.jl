@@ -140,7 +140,7 @@ sedimentation_only_microphysics(FT) =
             𝒰 = LiquidIcePotentialTemperatureState(FT(300), q, FT(1e5), p)
             @test phase_change_temperature_slope(𝒰, constants) ≈ finite_difference_slope(𝒰, rᵛ, rˡ) rtol=rtol
             # The slope is close to, but not, the DCMIP2016 Fortran value ℒ/cᵖᵈ (the moist heat
-            # capacity and the composition dependence of the Exner function are percent-level)
+            # capacity and the temperature dependence of the latent heat are percent-level)
             ℒ_over_cᵖᵈ = constants.liquid.reference_latent_heat / constants.dry_air.heat_capacity
             @test 0 < abs(phase_change_temperature_slope(𝒰, constants) / ℒ_over_cᵖᵈ - 1) < 0.1
         end

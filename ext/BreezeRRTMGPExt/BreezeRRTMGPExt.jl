@@ -7,7 +7,7 @@ using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, Constan
                                column_index, compute_radiation_flux_divergence!,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
                                assert_bound_surface_temperature, maybe_infer_solar_position,
-                               initialize_cos_zenith!, update_cos_zenith!
+                               initialize_cos_zenith!, update_cos_zenith!, fill_columns!
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 
@@ -75,6 +75,7 @@ using Oceananigans.Utils: IterationInterval
 include("gray_radiative_transfer_model.jl")
 include("rrtmgp_shared_utilities.jl")
 include("rrtmgp_column_batching.jl")
+include("full_spectrum_radiative_transfer_model.jl")
 include("clear_sky_radiative_transfer_model.jl")
 include("all_sky_radiative_transfer_model.jl")
 
