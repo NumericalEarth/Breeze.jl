@@ -46,8 +46,9 @@ function fill_prognostic_halo_regions!(model::AtmosphereModel, args::Vararg{Any,
     return nothing
 end
 
-# TODO: a multi-region field has no single parent array. Oceananigans should support `copyto!` between
-# multi-region fields, halos included.
+# Copy `src` into `dst`, halos included. `set!` would not do: under Reactant it copies interiors only.
+# TODO: replace with `copyto!(dst, src)` once CliMA/Oceananigans.jl#6439 is released, which copies
+# multi-region fields region by region.
 copy_parent!(dst, src) = @apply_regionally copyto!(parent(dst), parent(src))
 
 #####
