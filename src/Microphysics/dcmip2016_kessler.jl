@@ -127,7 +127,9 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
   to the surface flux on any vertical grid (uniform, stretched, or piecewise), including the top
   cell, which only loses rain through its bottom face. Vapor and cloud partial densities are not
   touched by sedimentation. The update is subcycled to satisfy `substep_cfl` on every cell's
-  thickness (the DCMIP2016 Fortran uses the distance between levels and a half cell at the top).
+  thickness (the DCMIP2016 Fortran uses the distance between levels and a half cell at the top),
+  and each cell's outflow is limited to the rain it holds, so a cell that gains rain during the
+  step cannot drain more than its content.
 - **Surface precipitation.** `bottom_precipitation_flux` is the substep-mean bottom-face flux
   `(ρqʳ 𝕎ʳ)₁`, exactly the water removed from the column; `precipitation_rate` is that flux per
   unit of the final surface density.
@@ -243,6 +245,18 @@ const DCMIP2016KM = DCMIP2016KesslerMicrophysics
 # other formulations (e.g. the default `ClausiusClapeyron`) those fields are absent and the
 # scheme would fail inside the kernel — an opaque `getproperty` error on the CPU and a GPU
 # compilation failure. Validate at model construction to give a clear, early error instead.
+# The kernel carries θˡⁱ through sedimentation and phase change (see the constructor docstring);
+# it has no static-energy counterpart yet. Parcel models, built without `AtmosphereModel`, may use
+# static energy: their update goes through the state, not the column kernel.
+function AtmosphereModels.validate_microphysics_formulation(::DCMIP2016KM, formulation)
+    name = thermodynamic_density_name(formulation)
+    name === :ρθ ||
+        throw(ArgumentError(string("DCMIP2016KesslerMicrophysics requires the ",
+                                   "LiquidIcePotentialTemperatureFormulation (prognostic ρθ), but the model's ",
+                                   "formulation evolves ", name, ".")))
+    return nothing
+end
+
 function AtmosphereModels.validate_microphysics(::DCMIP2016KM, thermodynamic_constants)
     if !(thermodynamic_constants isa TetensFormulaThermodynamicConstants)
         svp = thermodynamic_constants.saturation_vapor_pressure
@@ -500,13 +514,6 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # Skip microphysics update if timestep is zero, infinite, or invalid
     # (e.g., during model construction before any time step has been taken)
     invalid_time_step(Δt) && return nothing
-
-    # The kernel carries θˡⁱ through sedimentation and phase change (see the constructor
-    # docstring); it has no static-energy counterpart yet.
-    thermodynamic_density_name(model.formulation) === :ρθ ||
-        throw(ArgumentError(string("DCMIP2016KesslerMicrophysics requires the ",
-                                   "LiquidIcePotentialTemperatureFormulation (prognostic ρθ), but the model's ",
-                                   "formulation evolves ", thermodynamic_density_name(model.formulation), ".")))
 
     # Total density weights water mass fractions and enters the Kessler air-density corrections.
     # The coupling density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
@@ -775,6 +782,11 @@ end
 # A substep with `active = false` (beyond the substeps the step needs, under a static substep
 # bound) computes but does not write: every store is masked with `ifelse`.
 
+# The upwind rain flux ρʳ 𝕎ʳ out of a cell of thickness Δz, limited so that a substep Δt removes
+# at most the cell's rain. The substep count is fixed from the step-start velocities, so a cell that
+# gains rain during the step (from above, or by autoconversion) can fall faster than its CFL bound.
+@inline rain_outflow(ρʳ, 𝕎ʳ, Δz, Δt) = ρʳ * min(𝕎ʳ, Δz / Δt)
+
 @inline function kessler_column_cell!(i, j, k, grid, Fᵗᵒᵖ, Δt, active, microphysics,
                                       density, coupling_density, dry_air_coupled,
                                       pressure, pˢᵗ, κ̂, constants, δT,
@@ -798,11 +810,12 @@ end
     𝒰₀ = kessler_thermodynamic_state(θ₀, ρᵛ / ρᵈ₀, (ρᶜˡ + ρʳ) / ρᵈ₀, p, pˢᵗ, κ̂)
     T = temperature(𝒰₀, constants)
 
-    # Rain sedimentation: upwind fluxes ρqʳ 𝕎ʳ through the top (from the cell above) and
-    # bottom faces, divided by the thickness of this cell. The same products are used on
-    # both sides of every face, so the column budget telescopes to the surface flux.
-    Fᵇᵒᵗ = ρʳ * 𝕎ʳ
-    ρʳ⁺ = max(0, ρʳ + Δt * (Fᵗᵒᵖ - Fᵇᵒᵗ) / Δzᶜᶜᶜ(i, j, k, grid))
+    # Rain sedimentation: upwind fluxes through the top (from the cell above) and bottom faces,
+    # divided by the thickness of this cell. The same flux is used on both sides of every face,
+    # so the column budget telescopes to the surface flux. The outflow never exceeds the cell's
+    # rain, so the update stays non-negative without a clip.
+    Fᵇᵒᵗ = rain_outflow(ρʳ, 𝕎ʳ, Δzᶜᶜᶜ(i, j, k, grid), Δt)
+    ρʳ⁺ = max(0, ρʳ + Δt * (Fᵗᵒᵖ - Fᵇᵒᵗ) / Δzᶜᶜᶜ(i, j, k, grid)) # max only guards against round-off
 
     # Sedimentation at fixed temperature: the invariant absorbs the change of liquid loading
     ρᵈ = dry_air_density(ϱ, ρᵛ + ρᶜˡ + ρʳ⁺, dry_air_coupled)
@@ -937,11 +950,11 @@ end
         active = m ≤ Ns
 
         # The bottom-face flux of cell 1, with the same product cell 1 uses for its outflow
-        @inbounds Fˢᵘʳᶠ += ifelse(active, μ.ρqʳ[i, j, 1] * μ.𝕎ʳ[i, j, 1], zero(FT))
+        @inbounds Fˢᵘʳᶠ += ifelse(active, rain_outflow(μ.ρqʳ[i, j, 1], μ.𝕎ʳ[i, j, 1], Δzᶜᶜᶜ(i, j, 1, grid), Δtₛ), zero(FT))
 
         for k = 1:(Nz-1)
             # Inflow through the top face: the cell above has not been updated yet this substep
-            @inbounds Fᵗᵒᵖ = μ.ρqʳ[i, j, k+1] * μ.𝕎ʳ[i, j, k+1]
+            @inbounds Fᵗᵒᵖ = rain_outflow(μ.ρqʳ[i, j, k+1], μ.𝕎ʳ[i, j, k+1], Δzᶜᶜᶜ(i, j, k+1, grid), Δtₛ)
             kessler_column_cell!(i, j, k, grid, Fᵗᵒᵖ, Δtₛ, active, microphysics,
                                  density, coupling_density, dry_air_coupled,
                                  pressure, pˢᵗ, κ̂, constants, δT, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)

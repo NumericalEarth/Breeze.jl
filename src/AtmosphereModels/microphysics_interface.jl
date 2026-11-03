@@ -1269,6 +1269,14 @@ validate_microphysics(microphysics, thermodynamic_constants) = nothing
 """
 $(TYPEDSIGNATURES)
 
+Validate that `microphysics` supports the model's thermodynamic `formulation` (a `Symbol` or a
+formulation), at model construction. Defaults to a no-op.
+"""
+validate_microphysics_formulation(microphysics, formulation) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Validate that `microphysics` can run on architecture `arch`; a no-op by default. Extensions throw
 an `ArgumentError` at model construction for schemes that need settings an architecture requires
 (for example a static sedimentation substep bound under Reactant).

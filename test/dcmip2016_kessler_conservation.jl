@@ -234,6 +234,24 @@ end
     @test sum(after) + surface_flux(model) * FT(200) ≈ sum(before) rtol=budget_rtol(FT)
 end
 
+# The substep count is fixed from the step-start velocities. A thin cell that starts dry does not
+# limit it, but fills with rain falling from above; its outflow must not drain more than it holds.
+@testset "Kessler cells that gain rain during the step stay within budget [$FT]" for FT in all_float_types()
+    faces = FT[0, 10, 1010, 2010]
+    Δz = diff(faces)
+    microphysics = sedimentation_only_microphysics(FT)
+    model = column_model(FT, faces, microphysics)
+    set_water!(model; qᵛ = zeros(FT, 3), qᶜˡ = zeros(FT, 3), qʳ = FT[0, 0.002, 0.002])
+
+    Δt = FT(300)
+    before = sum(column(model.microphysical_fields.ρqʳ) .* Δz)
+    kessler_step!(model, Δt)
+    after = column(model.microphysical_fields.ρqʳ) .* Δz
+    @test all(after .≥ 0)
+    @test surface_flux(model) > 0
+    @test sum(after) + surface_flux(model) * Δt ≈ before rtol=budget_rtol(FT)
+end
+
 #####
 ##### All processes: prognostic water budget closes to the surface flux
 #####
@@ -387,9 +405,7 @@ end
     FT = Float64
     faces = collect(FT, 0:500:2000)
     grid = column_grid(FT, faces)
-    model = AtmosphereModel(grid; formulation = :StaticEnergy,
-                            microphysics = DCMIP2016KesslerMicrophysics(FT),
-                            thermodynamic_constants = kessler_constants(FT))
-    model.clock.last_Δt = FT(10)
-    @test_throws ArgumentError microphysics_model_update!(model.microphysics, model)
+    @test_throws ArgumentError AtmosphereModel(grid; formulation = :StaticEnergy,
+                                               microphysics = DCMIP2016KesslerMicrophysics(FT),
+                                               thermodynamic_constants = kessler_constants(FT))
 end
