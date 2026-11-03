@@ -50,7 +50,8 @@ The options for `equilibrium` are:
 
 The options for `solver` are [`SecantSolver`](@ref) (default:
 `SecantSolver(abstol=1e-4, maxiter=20)`, an absolute tolerance on the temperature-like
-residual in Kelvin) and [`FixedIterations`](@ref Breeze.Solvers.FixedIterations), which performs a fixed number of secant
+residual in Kelvin, floored at the residual's rounding noise, about 1e-3 K in `Float32`)
+and [`FixedIterations`](@ref Breeze.Solvers.FixedIterations), which performs a fixed number of secant
 steps with no convergence test (the form required for Reactant tracing and cheap
 reverse-mode differentiation).
 """
