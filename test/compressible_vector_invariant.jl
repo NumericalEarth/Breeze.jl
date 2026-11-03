@@ -361,7 +361,7 @@ end
     recomputed = materialize_advection(CompressibleWENOVectorInvariant(), grid)
     @test isnothing(recomputed.vorticity_deviations)
 
-    Breeze.AtmosphereModels.update_advection_auxiliaries!(stored, grid, model.velocities)
+    Breeze.AtmosphereModels.update_advection_auxiliaries!(stored, grid, model.velocities, model.momentum)
     args(scheme) = (scheme, model.momentum, model.velocities, model.dynamics)
     Gs = KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, args(stored)...)
     Gr = KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, args(recomputed)...)

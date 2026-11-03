@@ -613,6 +613,47 @@ y_reconstructed_vorticity(scheme) = ζ₃ᶠᶠᶜ
 x_reconstructed_vorticity(::CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, UpwindVorticityPairing{true}}) = ζᵛᶠᶠᶜ
 y_reconstructed_vorticity(::CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, UpwindVorticityPairing{true}}) = negative_ζᵘᶠᶠᶜ
 
+"""
+$(TYPEDEF)
+
+Smoothness stencil of a `WENO` vorticity reconstruction that measures the smoothness of the horizontal
+momentum (ρu, ρv), as `VelocityStencil` measures that of the velocities. Requires the stored deviations of
+`UpwindVorticityPairing` (the model supplies the momentum when it stores them).
+"""
+struct MomentumStencil end
+
+Base.summary(::MomentumStencil) = "MomentumStencil"
+
+# The reconstructed vorticity as a function of (ρu, ρv, u, v), for the momentum smoothness stencil
+@inline ζ₃_momentum_argsᶠᶠᶜ(i, j, k, grid, ρu, ρv, u, v) = ζ₃ᶠᶠᶜ(i, j, k, grid, u, v)
+@inline ζᵛ_momentum_argsᶠᶠᶜ(i, j, k, grid, ρu, ρv, u, v) = ζᵛᶠᶠᶜ(i, j, k, grid, u, v)
+@inline negative_ζᵘ_momentum_argsᶠᶠᶜ(i, j, k, grid, ρu, ρv, u, v) = negative_ζᵘᶠᶠᶜ(i, j, k, grid, u, v)
+
+@inline with_momentum_args(::typeof(ζ₃ᶠᶠᶜ)) = ζ₃_momentum_argsᶠᶠᶜ
+@inline with_momentum_args(::typeof(ζᵛᶠᶠᶜ)) = ζᵛ_momentum_argsᶠᶠᶜ
+@inline with_momentum_args(::typeof(negative_ζᵘᶠᶠᶜ)) = negative_ζᵘ_momentum_argsᶠᶠᶜ
+
+@inline reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, u, v, momentum) =
+    stencil_reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, scheme.vorticity_stencil, u, v, momentum)
+
+@inline reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, u, v, momentum) =
+    stencil_reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, scheme.vorticity_stencil, u, v, momentum)
+
+@inline stencil_reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, stencil, u, v, momentum) = reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, u, v)
+@inline stencil_reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, stencil, u, v, momentum) = reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, u, v)
+
+@inline function stencil_reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, ::MomentumStencil, u, v, momentum)
+    v̂ = ℑxy_Δx_vᶠᶜᶜ(i, j, k, grid, v)
+    ψ = with_momentum_args(y_reconstructed_vorticity(scheme))
+    return _biased_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(v̂), ψ, VelocityStencil(), momentum.ρu, momentum.ρv, u, v)
+end
+
+@inline function stencil_reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, ::MomentumStencil, u, v, momentum)
+    û = ℑxy_Δy_uᶜᶠᶜ(i, j, k, grid, u)
+    ψ = with_momentum_args(x_reconstructed_vorticity(scheme))
+    return _biased_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(û), ψ, VelocityStencil(), momentum.ρu, momentum.ρv, u, v)
+end
+
 @inline function reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, u, v)
     v̂ = ℑxy_Δx_vᶠᶜᶜ(i, j, k, grid, v)
     return _biased_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(v̂), y_reconstructed_vorticity(scheme), scheme.vorticity_stencil, u, v)
@@ -653,6 +694,14 @@ end
 
 @inline x_vorticity_deviationᶜᶠᶜ(i, j, k, grid, scheme, u, v) =
     reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, u, v) -
+    _symmetric_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme.centered_vorticity_scheme, x_reconstructed_vorticity(scheme), u, v)
+
+@inline y_vorticity_deviationᶠᶜᶜ(i, j, k, grid, scheme, u, v, momentum) =
+    reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, u, v, momentum) -
+    _symmetric_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme.centered_vorticity_scheme, y_reconstructed_vorticity(scheme), u, v)
+
+@inline x_vorticity_deviationᶜᶠᶜ(i, j, k, grid, scheme, u, v, momentum) =
+    reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, u, v, momentum) -
     _symmetric_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme.centered_vorticity_scheme, x_reconstructed_vorticity(scheme), u, v)
 
 @inline corner_correctionᶠᶠᶜ(i, j, k, grid, scheme::CornerPairedVorticity, u, v) =
@@ -985,19 +1034,19 @@ with_vorticity_deviations(s::CVI{N, FT}, deviations) where {N, FT} =
 Utils.getregion(s::CVI, i) = with_vorticity_deviations(s, Utils.getregion(s.vorticity_deviations, i))
 Utils._getregion(s::CVI, i) = Utils.getregion(s, i)
 
-@kernel function _store_vorticity_deviations!(d, grid, scheme, u, v)
+@kernel function _store_vorticity_deviations!(d, grid, scheme, u, v, momentum)
     i, j, k = @index(Global, NTuple)
-    @inbounds d.x[i, j, k] = x_vorticity_deviationᶜᶠᶜ(i, j, k, grid, scheme, u, v)
-    @inbounds d.y[i, j, k] = y_vorticity_deviationᶠᶜᶜ(i, j, k, grid, scheme, u, v)
+    @inbounds d.x[i, j, k] = x_vorticity_deviationᶜᶠᶜ(i, j, k, grid, scheme, u, v, momentum)
+    @inbounds d.y[i, j, k] = y_vorticity_deviationᶠᶜᶜ(i, j, k, grid, scheme, u, v, momentum)
 end
 
-function AtmosphereModels.update_advection_auxiliaries!(scheme::UpwindPairedVorticity, grid, velocities)
+function AtmosphereModels.update_advection_auxiliaries!(scheme::UpwindPairedVorticity, grid, velocities, momentum)
     isnothing(scheme.vorticity_deviations) && return nothing
     Nx, Ny, Nz = size(grid)
     # One point past the interior each way: the deviations of the neighboring velocity points of a pair
     parameters = KernelParameters(0:Nx+1, 0:Ny+1, 1:Nz)
     launch!(grid.architecture, grid, parameters, _store_vorticity_deviations!,
-            scheme.vorticity_deviations, grid, scheme, velocities.u, velocities.v)
+            scheme.vorticity_deviations, grid, scheme, velocities.u, velocities.v, (; ρu = momentum.ρu, ρv = momentum.ρv))
     return nothing
 end
 
