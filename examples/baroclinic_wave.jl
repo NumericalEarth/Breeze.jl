@@ -68,7 +68,6 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Units
-using Oceananigans.Coriolis: TriadScheme
 using Oceananigans.Fields: location
 using Oceananigans.MultiRegion: remapped_field, latitude_longitude_grid
 using Oceananigans.Operators: ζ₃ᶠᶠᶜ
@@ -231,18 +230,14 @@ end
 # both the traditional ``f = 2Ω \sin φ`` and the non-traditional
 # ``2Ω \cos φ`` cross-terms that couple horizontal momentum to ``w``. Breeze
 # evolves prognostic ``ρw`` so the non-traditional terms are physically
-# required for self-consistent dynamics on the sphere. The axes of the Yang
-# panel are rotated from east and north, so the Coriolis parameter varies
-# along both of its grid directions; the triad scheme of
-# [Arakawa and Lamb (1981)](@cite ArakawaLamb1981) weights it isotropically,
-# so that the balanced jet is discretized alike on both panels.
+# required for self-consistent dynamics on the sphere.
 #
 # Tracer and momentum advection uses fifth-order `WENO` reconstruction. No
 # explicit closure is applied: WENO's implicit dissipation suffices on this
 # near-surface-stretched grid. On a Yin-Yang grid, the `AtmosphereModel`
 # also removes the mass that the interpolation between the panels adds.
 
-coriolis = SphericalCoriolis(rotation_rate=Ω, scheme=TriadScheme())
+coriolis = SphericalCoriolis(rotation_rate=Ω)
 
 T₀ᵣ = 250
 θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))

@@ -22,7 +22,6 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Units
-using Oceananigans.Coriolis: TriadScheme
 using Oceananigans.MultiRegion: remapped_field
 using Printf
 using CairoMakie
@@ -46,11 +45,6 @@ grid = YinYangGrid(GPU(); size=(135, 45, Nz), halo=(5, 5, 5), z)
 # The Held–Suarez forcing depends only on latitude and pressure, and every node of either panel knows
 # its geographic latitude, so the forcing works unchanged on the Yin-Yang grid.
 #
-# The Coriolis force uses the triad scheme of [Arakawa and Lamb (1981)](@cite ArakawaLamb1981).
-# The axes of the Yang panel are rotated from east and north, so the Coriolis parameter varies
-# along both of its grid directions. The triads weight it isotropically, whereas the default
-# 4-point averaging averages it along one direction only, and so treats the two panels differently.
-#
 # The interpolation between the panels does not conserve mass: each panel steps the cells it owns
 # with its own estimate of the flux through the curve that divides the sphere between the panels,
 # and the two estimates differ. Below, `add_conservation_fixer!` adds the callback that evaluates
@@ -65,7 +59,7 @@ T₀ = 250
 θᵣ(z) = T₀ * exp(g * z / (cᵖᵈ * T₀))
 
 dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=θᵣ)
-coriolis = SphericalCoriolis(scheme=TriadScheme())
+coriolis = SphericalCoriolis()
 forcing = held_suarez_forcings()
 
 model = AtmosphereModel(grid; dynamics, coriolis, forcing,

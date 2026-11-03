@@ -12,7 +12,6 @@ using Oceananigans
 using Oceananigans: instantiated_location
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Coriolis: TriadScheme
 using Oceananigans.Grids: λnode, φnode, halo_size
 using Oceananigans.MultiRegion: YinYangGrid
 using Oceananigans.OrthogonalSphericalShellGrids: rotated_basis_angle
@@ -228,12 +227,11 @@ end
             @test all(isfinite, interior(getregion(model.closure_fields.νₑ, 2)))
         end
 
-        # The flows stay balanced to a fraction of a percent after a few hours. The triads weight the Coriolis
-        # parameter isotropically, so the geostrophic balance holds on the rotated Yang panel too.
+        # The flows stay balanced to a fraction of a percent after a few hours, on the rotated Yang panel too
         @testset "Balanced solid-body rotation [$(name)]" for (name, s, coriolis, Nsteps, rtol) in
                 (("tilted axis", solid_body_rotation(grid, constants; α = π / 4), nothing, 18, 1e-3),
-                 ("rotating zonal flow with the triad Coriolis scheme", solid_body_rotation(grid, constants; α = 0, rotating = true),
-                  HydrostaticSphericalCoriolis(scheme = TriadScheme()), 12, 5e-3))
+                 ("rotating zonal flow", solid_body_rotation(grid, constants; α = 0, rotating = true),
+                  HydrostaticSphericalCoriolis(), 12, 5e-3))
 
             model = balanced_flow_model(grid, s; coriolis)
             for _ in 1:Nsteps
