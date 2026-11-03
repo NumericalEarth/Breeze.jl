@@ -236,7 +236,10 @@ end
 
 # `batch_rows` and `j_offset` name the slab of latitude rows just solved. The presentation
 # buffers are batch-width, so the kernel reads them batch-locally and writes the global row.
-function copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset)
+# The longwave fluxes go to `ℐ_lw_up` and `ℐ_lw_dn`, the radiation model's own by default.
+function copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset,
+                                       ℐ_lw_up = rtm.upwelling_longwave_flux,
+                                       ℐ_lw_dn = rtm.downwelling_longwave_flux)
     arch = architecture(grid)
 
     # (Nz+1, Nc) presentation views, refreshed by update_lw_fluxes!/update_sw_fluxes!
@@ -245,8 +248,6 @@ function copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset)
     sw_flux_up = RRTMGP.sw_flux_up(solver)
     sw_flux_dn = RRTMGP.sw_flux_dn(solver)  # Total SW (direct + diffuse)
 
-    ℐ_lw_up = rtm.upwelling_longwave_flux
-    ℐ_lw_dn = rtm.downwelling_longwave_flux
     ℐ_sw_up = rtm.upwelling_shortwave_flux
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
 

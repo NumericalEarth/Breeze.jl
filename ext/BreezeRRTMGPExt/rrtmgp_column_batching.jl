@@ -186,5 +186,24 @@ function solve_radiation_batch!(rtm, solver, grid, as, lws, sws, scaling, batch_
 
     copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset)
 
+    solves_longwave_response(rtm) &&
+        solve_warmer_surface_longwave!(rtm, solver, grid, as, lws, scaling, batch_rows, j_offset)
+
+    return nothing
+end
+
+# Solve the batch's longwave fluxes again with the surface `surface_temperature_increment` warmer,
+# into the longwave responses of `rtm.approximate_updates`; its shortwave fluxes are copied unchanged.
+function solve_warmer_surface_longwave!(rtm, solver, grid, as, lws, scaling, batch_rows, j_offset)
+    updates = rtm.approximate_updates
+
+    as.t_sfc .+= surface_temperature_increment
+    solve_lw!(lws, as, longwave_lookups(solver.lookups, solver.radiation_method)..., scaling)
+    as.t_sfc .-= surface_temperature_increment
+    update_presentation!(solver.presented_flux_lw, solver.lws.flux)
+
+    copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset,
+                                  updates.upwelling_longwave_response, updates.downwelling_longwave_response)
+
     return nothing
 end

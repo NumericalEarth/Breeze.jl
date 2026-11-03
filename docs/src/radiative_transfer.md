@@ -480,6 +480,28 @@ tendency, with the vapor-equivalent heat capacity ``\hat{c}ᵖ`` and Exner funct
 (see [Liquid-ice potential temperature](@ref liquid-ice-potential-temperature)). Omitting the upwelling shortwave would bias either tendency wherever
 shortwave radiation scatters or reflects.
 
+## Radiation between solves
+
+A `schedule` other than every iteration solves the radiative transfer equations only now and then.
+Between two solves the surface warms or cools and the sun moves, and every time step updates the
+fluxes for both, following [HoganBozzo2015](@citet):
+
+- **Longwave.** Each solve repeats the longwave solve with the surface 1 K warmer, which gives the
+  response of the fluxes on every face to the fourth power of the surface temperature ``T₀``. Each
+  time step then shifts the longwave fluxes by that response times the change in ``T₀⁴``. The
+  column absorbs its share of a change in surface emission, and the surface and the atmosphere
+  exchange the same longwave flux at every step. With a constant `surface_temperature` there is no
+  second solve.
+- **Shortwave.** Each solve computes the slant path of the direct beam with ``\bar{μ}₀``, the
+  cosine of the solar zenith angle averaged over the sunlit part of the coming radiation interval
+  ([HoganHirahara2015](@citet)). Each time step then scales the solved shortwave fluxes by
+  ``μ₀ / \bar{μ}₀``, which keeps the column's transmittance and reflectance and brings the flux
+  entering the top of the atmosphere to the current sun, including a sun that rises between solves.
+
+The radiation interval is the `interval` of a `TimeInterval` schedule, or the `interval` of an
+`IterationInterval` times the time step. For any other schedule ``\bar{μ}₀`` is the cosine of the
+solar zenith angle at the solve. Under Reactant the fluxes are not updated between solves.
+
 ## Architecture Support
 
 The radiative transfer implementation supports both CPU and GPU architectures. The column-based RRTMGP solver is called from Oceananigans' field data arrays with appropriate data layout conversions. The ecCKD backend runs on the grid's architecture without leaving the device. It can solve the columns in batches of whole grid rows (`column_batches`, as for RRTMGP; one solve of the whole grid by default): per batch, a layer pass reads the model's fields directly and stores each layer's gas-optics stencil, gas amounts, cloud water paths and interface temperatures, one work item per layer, and a column kernel streams the g points through them and accumulates the fluxes directly into the radiation model's flux fields. Only one batch of per-column storage is allocated, so setting `column_batches` caps the radiation's memory on large grids, at some cost in speed on a GPU.

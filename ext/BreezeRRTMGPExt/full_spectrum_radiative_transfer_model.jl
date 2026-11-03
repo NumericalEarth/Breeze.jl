@@ -160,7 +160,8 @@ function full_spectrum_radiative_transfer_model(grid, radiation_method, constant
                                   liquid_effective_radius,
                                   ice_effective_radius,
                                   column_batches,
-                                  schedule)
+                                  schedule,
+                                  ApproximateRadiationUpdates(grid, schedule, solar_position))
 end
 
 # Mapping from RRTMGP's internal gas names to BackgroundAtmosphere field names
@@ -276,14 +277,13 @@ function AtmosphereModels._update_radiation!(rtm::FullSpectrumRadiativeTransferM
                                rtm.ice_effective_radius)
 
     # Update solar zenith angle from the solar_position specification
-    update_cos_zenith!(solver.sws.bcs.cos_zenith, rtm.solar_position, grid, clock)
+    update_cos_zenith!(solver.sws.bcs.cos_zenith, rtm, grid, clock)
 
     # Longwave and shortwave, one batch of columns at a time; night columns (`cos_zenith ≤ 0`)
     # get zero fluxes, which RRTMGP handles internally.
     solve_radiation_batches!(rtm, solver, grid)
 
-    # Compute radiation flux divergence
-    compute_radiation_flux_divergence!(rtm, grid)
+    complete_radiation_solve!(rtm, model)
 
     return nothing
 end

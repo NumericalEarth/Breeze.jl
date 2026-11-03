@@ -270,7 +270,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   liquid_effective_radius,
                                   ice_effective_radius,
                                   column_batches,
-                                  schedule)
+                                  schedule,
+                                  ApproximateRadiationUpdates(grid, schedule, solar_position))
 end
 
 number_of_longwave_g_points(rtm::EcCKDRadiativeTransferModel) = length(rtm.longwave_solver.weights)

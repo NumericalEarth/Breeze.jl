@@ -4,10 +4,11 @@ using Breeze
 
 using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles, materialize_surface_property,
                                dynamics_pressure, total_density, resolve_column_batch_rows,
-                               column_index, compute_radiation_flux_divergence!,
+                               column_index, complete_radiation_solve!,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
                                assert_bound_surface_temperature, maybe_infer_solar_position,
-                               initialize_cos_zenith!, update_cos_zenith!, fill_columns!
+                               initialize_cos_zenith!, update_cos_zenith!, fill_columns!,
+                               ApproximateRadiationUpdates, solves_longwave_response, surface_temperature_increment
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 

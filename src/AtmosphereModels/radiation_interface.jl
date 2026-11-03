@@ -29,10 +29,15 @@ operator-split update such as Kessler microphysics. Radiation is updated
 With `schedule = IterationInterval(80)` and `Δt = 7.5` s, the fluxes are computed from the initial
 state and then every 600 s, in the steps that begin at iterations 80, 160, …
 
+In the first-stage `update_state!` of every other step, a radiation with
+[`ApproximateRadiationUpdates`](@ref) updates its fluxes for the current surface temperature and
+sun instead (see [`update_radiation_between_solves!`](@ref)).
+
 Under Reactant the iteration is traced: `BreezeReactantExt` applies the scheduled update with a
 traced conditional, which requires a stateless schedule such as `IterationInterval`, and computes
 the initial fluxes in `Breeze.TimeSteppers.prepare_first_time_step!`
 (also called by `first_time_step!`), which a traced window calls before its loop of `time_step!`.
+It does not update the fluxes between solves.
 """
 function update_radiation!(rtm, model)
     isnothing(rtm) && return nothing
@@ -47,7 +52,11 @@ function radiation_update_due(schedule, clock, model)
 end
 
 function conditionally_update_radiation!(due::Bool, rtm, model)
-    due && _update_radiation!(rtm, model)
+    if due
+        _update_radiation!(rtm, model)
+    elseif model.clock.stage == 2
+        update_radiation_between_solves!(rtm, model)
+    end
     return nothing
 end
 
@@ -75,7 +84,7 @@ radiation_flux_divergence(radiation) = radiation.flux_divergence
 @inline radiation_flux_divergence(i, j, k, grid, ::Nothing) = zero(eltype(grid))
 @inline radiation_flux_divergence(i, j, k, grid, flux_divergence) = @inbounds flux_divergence[i, j, k]
 
-struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, CB, S}
+struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, CB, S, U}
     solar_constant :: SC # a scalar or an (Nx, Ny) array of per-column values
     solar_position :: SOP # AbstractSolarPosition: how to obtain cos(θ_z) on each update
     surface_radiation :: SP
@@ -92,6 +101,7 @@ struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS,
     ice_effective_radius :: IER    # Model for cloud ice effective radius (Nothing for gray/clear-sky)
     column_batches :: CB  # Number of column batches for the RRTMGP solve (Nothing for one unbatched solve)
     schedule :: S  # Update schedule (default: IterationInterval(1) = every step)
+    approximate_updates :: U # ApproximateRadiationUpdates between solves, or Nothing when solving every step
 end
 
 """
