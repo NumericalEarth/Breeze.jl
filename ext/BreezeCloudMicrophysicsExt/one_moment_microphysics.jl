@@ -585,6 +585,11 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
     return (; zip(center_names, center_fields)..., wʳ)
 end
 
+# Diagnostic liquid (cloud liquid + rain) and ice (cloud ice + snow), used e.g. by `set_to_mean!`
+AM.liquid_mass_fraction(::OneMomentLiquidRain, model) = model.microphysical_fields.qˡ
+AM.ice_mass_fraction(::WarmPhase1M, model) = nothing
+AM.ice_mass_fraction(::MixedPhase1M, model) = model.microphysical_fields.qⁱ
+
 #####
 ##### update_microphysical_auxiliaries! for one-moment schemes
 #####
