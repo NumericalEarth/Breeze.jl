@@ -165,6 +165,7 @@ export
     SubsidenceForcing,
     SpecificForcing,
     held_suarez_forcings,
+    TemperatureForcing,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
