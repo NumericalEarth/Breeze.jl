@@ -158,9 +158,11 @@ The round-off treatment of the stage updates is selectable through `timestepper_
 - [`RoundToNearest`](@ref) (default): IEEE rounding, bitwise identical to the original stage
   update and free.
 - [`StochasticRounding`](@ref): each stage is evaluated in increment form,
-  ``u^{(m)} = u^{(0)} + α \left[(u^{(m-1)} - u^{(0)}) + Δt \, G\right]``, the exact rounding
-  error ``e`` of the final sum is computed with TwoSum, and the sum is moved to the neighboring
-  float in the direction of ``e`` with probability ``|e| / \text{gap}``. Every stage is then exact
+  ``u^{(m)} = u^{(0)} + α \left[(u^{(m-1)} - u^{(0)}) + Δt \, G\right]``, and the final sum is
+  rounded to one of its two neighboring floats, choosing each with probability proportional to
+  its closeness to the exact sum. In `Float32` the sum is computed in `Float64`, random bits are
+  added below the `Float32` significand and the result is truncated; in `Float64` the rounding
+  error is computed with TwoSum. Every stage is then exact
   in expectation, at the cost of an ulp-sized random walk. The random numbers are a counter-based
   hash of the seed, the iteration, the stage, the field and the grid indices, so there is no
   random state: runs are bitwise reproducible and restart reproducibly from checkpoints.

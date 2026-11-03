@@ -84,7 +84,7 @@ end
         @test all(s -> s == a || s == prevfloat(a), sums)
         @test mean(Float64.(sums) .- Float64(a)) ≈ -Float64(δ) rtol=0.05
 
-        # TwoSum also handles increments larger than the state (momentum crossing zero)
+        # Increments larger than the state (momentum crossing zero) are handled too
         sums = [rounded_add(rounding, FT(1e-3), FT(-1) + eps(FT(1)) / 3, i, 1, 1, key) for i in 1:10000]
         exact = big(FT(1e-3)) + big(FT(-1) + eps(FT(1)) / 3)
         @test all(s -> abs(big(s) - exact) < eps(FT(1)), sums)

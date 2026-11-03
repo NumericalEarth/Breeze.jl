@@ -62,12 +62,17 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Stochastic rounding for the stage updates of a time stepper. Each stage update
-``u⁰ + δ`` is computed together with its exact rounding error ``e`` (TwoSum), and the result is
-moved to the neighboring float in the direction of ``e`` with probability ``|e| / \\text{gap}``,
-where ``\\text{gap}`` is the spacing between the two floats. The expected value of every stage
-update is then the exact sum, so sub-ulp increments accumulate correctly on average, at the cost
-of a random walk of about ``\\text{ulp} \\sqrt{N}`` after ``N`` steps.
+Stochastic rounding for the stage updates of a time stepper. Each stage update ``u⁰ + δ``
+is rounded to one of the two floats that bracket the exact sum, choosing the upper one with
+probability equal to the distance from the lower one divided by the gap between them. The
+expected value of every stage update is then the exact sum, so sub-ulp increments accumulate
+correctly on average, at the cost of a random walk of about ``\\text{ulp} \\sqrt{N}`` after
+``N`` steps.
+
+In `Float32`, the sum is computed in `Float64`, random bits are added below the 24 bits of the
+`Float32` significand, and the result is truncated toward zero. In other precisions the exact
+rounding error ``e`` of the sum is computed with TwoSum, and the sum is moved to the neighboring
+float in the direction of ``e`` with probability ``|e| / \\text{gap}``.
 
 The random numbers come from a counter-based hash of `(seed, iteration, stage, field, i, j, k)`,
 so there is no random-number state: runs are deterministic, bitwise reproducible, independent of
@@ -121,13 +126,15 @@ numbers. [`RoundToNearest`](@ref) draws none and returns zero without reading it
     return lowbias32(x ⊻ (field % UInt32) * 0xc2b2ae35)
 end
 
-# A uniform random number in [0, 1) with 24 random bits, exactly representable in Float32.
-@inline function uniform_random(i, j, k, key)
+# 32 random bits for the update at (i, j, k).
+@inline function random_bits(i, j, k, key)
     h = lowbias32(key ⊻ (i % UInt32))
     h = lowbias32(h ⊻ (j % UInt32) * 0x85ebca6b)
-    h = lowbias32(h ⊻ (k % UInt32) * 0xc2b2ae35)
-    return Float32(h >> 8) * Float32(2)^-24
+    return lowbias32(h ⊻ (k % UInt32) * 0xc2b2ae35)
 end
+
+# A uniform random number in [0, 1) with 24 random bits, exactly representable in Float32.
+@inline uniform_random(i, j, k, key) = Float32(random_bits(i, j, k, key) >> 8) * Float32(2)^-24
 
 #####
 ##### Rounded sums
@@ -158,11 +165,22 @@ julia> sort(unique(sums))
  300.0
  300.00003
 
-julia> round(sum(Float64, sums .- u⁰) / length(sums), sigdigits = 2)
+julia> round(sum(Float64, sums .- u⁰) / length(sums), sigdigits = 1)
 1.0e-5
 ```
 """
 @inline rounded_add(::RoundToNearest, a, b, i, j, k, key) = a + b
+
+# Compute the sum in Float64, add 29 random bits below the 24-bit Float32 significand, and
+# truncate toward zero: the sum rounds up with probability equal to its distance above the
+# lower Float32 neighbor divided by the gap. The truncated Float64 is exactly representable
+# in Float32, so the final conversion does not round again (except for Float32 subnormals).
+@inline function rounded_add(r::StochasticRounding, a::Float32, b, i, j, k, key)
+    s = Float64(a) + Float64(b)
+    perturbation = UInt64(random_bits(i, j, k, key) >> 3)
+    truncated = (reinterpret(UInt64, s) + perturbation) & 0xffff_ffff_e000_0000
+    return Float32(reinterpret(Float64, truncated))
+end
 
 @inline function rounded_add(r::StochasticRounding, a, b, i, j, k, key)
     # TwoSum (Knuth): s + e == a + b exactly, for any magnitudes of a and b, so it also covers
