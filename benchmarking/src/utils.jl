@@ -14,8 +14,7 @@ end
 
 reactant_compile_options() = Reactant.CompileOptions(raise = true,
                                                      raise_first = true,
-                                                     sync = true,
-                                                     excluded_passes = ["while_elementwise_reduction_to_reduce"])
+                                                     sync = true)
 
 """
     benchmark_time_stepping(model;
