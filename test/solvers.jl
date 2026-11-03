@@ -1,4 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
+include(joinpath(@__DIR__, "supposition_setup.jl"))
 
 using Breeze
 using Test
@@ -94,5 +95,23 @@ using Breeze.Thermodynamics: newton_hydrostatic_pressure
 
         @test materialize_solver(FixedIterations(2), FT) === FixedIterations(2)
         @test materialize_solver(nothing, FT) === nothing
+    end
+
+    @testset "square roots from arbitrary positive starting points" begin
+        rtol = spstn_rounding_rtol(FT)
+        # Both drivers find the positive root of x² − c from positive initial guesses: Newton on
+        # a convex residual converges monotonically, and every secant chord through two positive
+        # points crosses zero at the positive abscissa (x₁x₂ + c)/(x₁ + x₂).
+        @breeze_check function iterative_solvers_find_square_root(c = spstn_floats(FT; lo=0.25, hi=100),
+                                                                  x₀ = spstn_floats(FT; lo=0.5, hi=20),
+                                                                  Δ = spstn_floats(FT; lo=0.1, hi=5))
+            residual_and_derivative(x) = (x^2 - c, 2x)
+            residual(x) = x^2 - c
+            x★ = sqrt(c)
+            newton = newton_solve(residual_and_derivative, NewtonSolver(FT; reltol=rtol, abstol=0, maxiter=100), x₀)
+            fixed = newton_solve(residual_and_derivative, FixedIterations(30), x₀)
+            secant = secant_solve(residual, SecantSolver(FT; reltol=rtol, abstol=0, maxiter=100), x₀, x₀ + Δ, c)
+            return isapprox(newton, x★; rtol) && isapprox(fixed, x★; rtol) && isapprox(secant, x★; rtol)
+        end
     end
 end

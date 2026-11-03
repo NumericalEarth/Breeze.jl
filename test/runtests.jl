@@ -15,6 +15,7 @@ const REACTANT_COMPAT = VERSION < v"1.14-" && Base.JLOptions().check_bounds != 1
 delete!(testsuite, "setup")
 delete!(testsuite, "reactant/weno_compilation_setup")
 delete!(testsuite, "reactant/microphysics_compilation_setup")
+delete!(testsuite, "supposition_setup")
 
 # MPI worker scripts are launched on several ranks by the drivers in `distributed/`, never run directly.
 filter!(((name, _),) -> !startswith(name, "mpi/"), testsuite)
