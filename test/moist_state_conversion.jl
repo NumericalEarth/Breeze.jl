@@ -7,7 +7,8 @@ using Breeze.Thermodynamics: MoistureMassFractions, LiquidIceDensityState, Liqui
                              StaticEnergyState, TetensFormula, with_temperature, with_moisture, equilibrated_surface,
                              dry_air_gas_constant, vapor_gas_constant,
                              density, temperature, saturation_specific_humidity, total_specific_moisture,
-                             potential_temperature_from_temperature, temperature_from_potential_temperature
+                             potential_temperature_from_temperature, temperature_from_potential_temperature,
+                             vapor_equivalent_gas_constant, vapor_equivalent_heat_capacity, absolute_zero_latent_heat
 using CloudMicrophysics
 using Oceananigans
 using Test
@@ -19,8 +20,8 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     constants = ThermodynamicConstants(FT)
     T = FT(283.15)
     pˢᵗ = FT(95000)
-    ℒˡ = constants.liquid.reference_latent_heat
-    ℒⁱ = constants.ice.reference_latent_heat
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
     moistures = (MoistureMassFractions(FT(0)),
                  MoistureMassFractions(FT(0.008)),
                  MoistureMassFractions(FT(0.008), FT(0.001)),
@@ -29,13 +30,19 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     for p in FT.((95000, 90000, 50000)), q in moistures
         θ = potential_temperature_from_temperature(T, p, pˢᵗ, constants, q)
 
-        # Pin θˡⁱ against its definition θ = (T - (ℒˡqˡ + ℒⁱqⁱ)/cᵖᵐ) / Π rather than only
+        # Pin θˡⁱ against its definition θ = (cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ) / (ĉᵖ Π̂) rather than only
         # round-tripping, which shares Π and cᵖᵐ with the inverse and so cannot detect a
         # latent-heat term dropped from both directions.
-        Rᵐ = mixture_gas_constant(q, constants)
         cᵖᵐ = mixture_heat_capacity(q, constants)
-        Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
-        @test θ ≈ (T - (ℒˡ * q.liquid + ℒⁱ * q.ice) / cᵖᵐ) / Π
+        ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+        Π̂ = (p / pˢᵗ)^(vapor_equivalent_gas_constant(q, constants) / ĉᵖ)
+        @test θ ≈ (cᵖᵐ * T - ℒˡ₀ * q.liquid - ℒⁱ₀ * q.ice) / (ĉᵖ * Π̂)
+
+        # The dry exponent: Π = (p / pˢᵗ)^(Rᵈ / cᵖᵈ)
+        Πᵈ = (p / pˢᵗ)^(dry_air_gas_constant(constants) / constants.dry_air.heat_capacity)
+        θᵈ = potential_temperature_from_temperature(T, p, pˢᵗ, constants, q, DryExponent())
+        @test θᵈ ≈ (cᵖᵐ * T - ℒˡ₀ * q.liquid - ℒⁱ₀ * q.ice) / (ĉᵖ * Πᵈ)
+        @test temperature_from_potential_temperature(θᵈ, p, pˢᵗ, constants, q, DryExponent()) ≈ T
 
         @test temperature_from_potential_temperature(θ, p, pˢᵗ, constants, q) ≈ T
         ρ = density(T, p, q, constants)

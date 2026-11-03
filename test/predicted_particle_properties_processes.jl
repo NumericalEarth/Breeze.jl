@@ -1829,6 +1829,53 @@ end
         @test ρ_no_cloud == 400
     end
 
+    @testset "Configurable rime-density fit" begin
+        for FT in (Float32, Float64)
+            constants = ThermodynamicConstants(FT)
+            T, ρ = FT(263.15), FT(1)
+            transport = air_transport_properties(T, FT(90000), constants)
+            μ, λ = FT(2), FT(1e5)
+            for customized in (false, true)
+                parameters = customized ? ProcessRate(FT;
+                    rime_density_constant_coefficient = 60,
+                    rime_density_linear_coefficient = 90,
+                    rime_density_quadratic_coefficient = -4,
+                    rime_density_transition_impact = 6,
+                    maximum_rime_impact = 14,
+                    maximum_rime_density = 850) : ProcessRate(FT)
+                p3 = (; process_rates = parameters, minimum_mass_mixing_ratio = FT(1e-12))
+                @test isbitstype(typeof(parameters))
+                @test parameters.rime_density_constant_coefficient isa FT
+                # Choose ice speed to prescribe the impact parameter directly.
+                a = constants.gravitational_acceleration * parameters.liquid_water_density /
+                    (18 * transport.ν * ρ)
+                cloud_speed = a * (μ + 5) * (μ + 4) / λ^2
+                diameter = (μ + 4) / λ
+                transition = customized ? FT(6) : FT(8)
+                upper = customized ? FT(14) : FT(12)
+                polynomial(R) = customized ? 60 + 90R - 4R^2 :
+                    (FT(0.051) + FT(0.114) * R - FT(0.0055) * R^2) * FT(1000)
+                for R in (FT(0), FT(3), transition - FT(0.001), transition,
+                          transition + FT(0.001), (transition + upper) / 2, upper, upper + 1)
+                    speed = cloud_speed + R * (parameters.freezing_temperature - T) /
+                            (parameters.rime_impact_coefficient * diameter)
+                    result = @inferred rime_density(p3, FT(1e-3), FT(2e-7), T, speed,
+                                                   ρ, constants, transport, μ, λ)
+                    impact = clamp(R, FT(1), upper)
+                    expected = impact <= transition ? polynomial(impact) :
+                        polynomial(transition) + (parameters.maximum_rime_density - polynomial(transition)) *
+                        (impact - transition) / (upper - transition)
+                    @test result ≈ clamp(expected, 50, parameters.maximum_rime_density)
+                    if !customized && impact > transition
+                        @test result ≈ FT(611) + FT(72.25) * (impact - FT(8))
+                    end
+                end
+            end
+            @test_throws ArgumentError ProcessRate(FT; rime_density_transition_impact = 12)
+            @test_throws ArgumentError ProcessRate(FT; rime_density_transition_impact = 0)
+        end
+    end
+
     @testset "Rime consistency enforcement" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
