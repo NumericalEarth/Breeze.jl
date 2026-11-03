@@ -403,10 +403,14 @@ using GPUArraysCore: @allowscalar
     @testset "FilteredSurfaceVelocities construction" begin
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
 
-        # Default: no height, infinite timescale
-        fv = FilteredSurfaceVelocities(grid)
+        # The timescale has no default and must be positive and finite
+        @test_throws UndefKeywordError FilteredSurfaceVelocities(grid)
+        @test_throws ArgumentError FilteredSurfaceVelocities(grid; filter_timescale=0)
+        @test_throws ArgumentError FilteredSurfaceVelocities(grid; filter_timescale=Inf)
+        @test_throws ArgumentError FilteredSurfaceVelocities(grid; filter_timescale=NaN)
+
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
         @test fv.height === nothing
-        @test fv.filter_timescale == Inf
         @test size(fv.u) == (4, 4, 1)
         @test size(fv.v) == (4, 4, 1)
         @test size(fv.Δθᵥ) == (4, 4, 1)
@@ -428,10 +432,12 @@ using GPUArraysCore: @allowscalar
         @test size(fs.field) == (4, 4, 1)
         @test fs.last_update[] == (0, 0)
 
-        # Default
-        fs0 = FilteredSurfaceScalar(grid)
+        @test_throws UndefKeywordError FilteredSurfaceScalar(grid)
+        @test_throws ArgumentError FilteredSurfaceScalar(grid; filter_timescale=-1)
+        @test_throws ArgumentError FilteredSurfaceScalar(grid; filter_timescale=Inf)
+
+        fs0 = FilteredSurfaceScalar(grid; filter_timescale=120.0)
         @test fs0.height === nothing
-        @test fs0.filter_timescale == Inf
     end
 
     @testset "FilteredSurfaceVelocities update!" begin
@@ -460,21 +466,12 @@ using GPUArraysCore: @allowscalar
         @test fv.u[1, 1, 1] ≈ expected_u2 atol=1e-10
         @test fv.v[1, 1, 1] ≈ expected_v2 atol=1e-10
 
-        # The default infinite timescale disables temporal averaging.
-        unfiltered = FilteredSurfaceVelocities(grid)
-        set!(unfiltered.u, NaN)
-        set!(unfiltered.v, NaN)
-        Breeze.BoundaryConditions.initialize!(unfiltered, velocities, grid)
-        @test unfiltered.u[1, 1, 1] == 5
-        @test unfiltered.v[1, 1, 1] == 3
-        set!(u, 2.0)
-        set!(v, 4.0)
-        # Direct sampling must discard old data, including NaNs.
-        set!(unfiltered.u, NaN)
-        set!(unfiltered.v, NaN)
-        Breeze.BoundaryConditions.update!(unfiltered, velocities, grid, 1.0)
-        @test unfiltered.u[1, 1, 1] == 2
-        @test unfiltered.v[1, 1, 1] == 4
+        # Initialization samples the current state directly, discarding old data including NaNs
+        set!(fv.u, NaN)
+        set!(fv.v, NaN)
+        Breeze.BoundaryConditions.initialize!(fv, velocities, grid)
+        @test fv.u[1, 1, 1] == 5
+        @test fv.v[1, 1, 1] == 3
     end
 
     @testset "FilteredSurfaceScalar update!" begin
@@ -489,14 +486,9 @@ using GPUArraysCore: @allowscalar
         expected = (0.0 + ε * 300.0) / (1 + ε)
         @test fs.field[1, 1, 1] ≈ expected atol=1e-10
 
-        unfiltered = FilteredSurfaceScalar(grid)
-        set!(unfiltered.field, NaN)
-        Breeze.BoundaryConditions.initialize!(unfiltered, θ, grid)
-        @test unfiltered.field[1, 1, 1] == 300
-        set!(θ, 290.0)
-        set!(unfiltered.field, NaN)
-        Breeze.BoundaryConditions.update!(unfiltered, θ, grid, 2.0)
-        @test unfiltered.field[1, 1, 1] == 290
+        set!(fs.field, NaN)
+        Breeze.BoundaryConditions.initialize!(fs, θ, grid)
+        @test fs.field[1, 1, 1] == 300
     end
 
     @testset "FilteredSurfaceVelocities Δθᵥ update!" begin
@@ -539,15 +531,9 @@ using GPUArraysCore: @allowscalar
         Breeze.BoundaryConditions.initialize_Δθᵥ!(fv, coef, Tˢ, grid, clock, fields)
         @test fv.Δθᵥ[1, 1, 1] ≈ Δθᵥ atol=1e-10
 
-        unfiltered = FilteredSurfaceVelocities(grid)
-        set!(unfiltered.Δθᵥ, NaN)
-        Breeze.BoundaryConditions.initialize_Δθᵥ!(unfiltered, coef, Tˢ, grid, clock, fields)
-        @test unfiltered.Δθᵥ[1, 1, 1] ≈ Δθᵥ
-        T₁ = 290.0
-        set!(unfiltered.Δθᵥ, NaN)
-        Breeze.BoundaryConditions.update_Δθᵥ!(unfiltered, coef, T₁, grid, clock, 2.0, fields)
-        θᵥ₁ = wall_virtual_potential_temperature(T₁, pˢ, pˢᵗ, constants, surface, 0.5, 1e-3)
-        @test unfiltered.Δθᵥ[1, 1, 1] ≈ 305.0 - θᵥ₁
+        set!(fv.Δθᵥ, NaN)
+        Breeze.BoundaryConditions.initialize_Δθᵥ!(fv, coef, Tˢ, grid, clock, fields)
+        @test fv.Δθᵥ[1, 1, 1] ≈ Δθᵥ
     end
 
     # `materialize_coefficient` always installs a `NearWallVirtualPotentialTemperature`, which

@@ -9,6 +9,8 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        MoistureMassFractions, MoistureMixingRatio,
        vapor_gas_constant, dry_air_gas_constant,
        mixture_gas_constant, mixture_heat_capacity,
+       vapor_equivalent_gas_constant, vapor_equivalent_heat_capacity,
+       VaporEquivalentExponent, DryExponent,
        total_mixing_ratio, total_specific_moisture,
        liquid_latent_heat, ice_latent_heat,
        saturation_vapor_pressure, saturation_specific_humidity, supersaturation,

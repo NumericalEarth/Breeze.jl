@@ -33,6 +33,7 @@ The following table also uses a few conventions that suffuse the source code and
 * `constants` refers to an instance of `ThermodynamicConstants()`
 * `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
 * "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
+* A subscript plus marks the *clamped* form of a quantity, ``x₊``: either ``\max(0, x)`` or ``x`` floored at the scheme's minimum (e.g. ``nⁱ₊``, ``qʳ₊`` in P3). The superscript ``⁺`` is reserved for saturation (``qᵛ⁺``).
 * Phase or mixture identifiers (``d``, ``v``, ``m``, and ``t`` for *total*) appear as superscripts (e.g., ``Rᵈ``, ``cᵖᵐ``, ``qᵗ``, ``ρᵗ``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
 * The superscript ``s`` is reserved for *surface* (e.g. ``pˢ``, ``θˢ``, ``ρˢ``: values at a column's bottom face). Snow therefore takes ``sn`` (e.g. ``qˢⁿ``, ``ρqˢⁿ``, ``𝕎ˢⁿ``). Other multi-letter superscripts keep their own spellings: ``st`` for *standard* (``pˢᵗ``) and ``sw`` for *shortwave* (``τˢʷ``).
 * Momentum and the thermodynamic variable are stored *coupling-density-weighted* (``ρu = ρᵈ u``, and the thermodynamic density ``ρᵡ = ρᵈ χ`` — i.e. ``ρθ = ρᵈ θ`` or ``ρs``). The coupling density is `dynamics_density(dynamics)`: the reference density ``ρᵣ`` for [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), and the prognostic dry-air density ``ρᵈ`` for [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics). Velocity and ``θ`` are recovered by dividing by the coupling density.
@@ -49,7 +50,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\tilde{w}``                  | `w̃`    | `AM.dynamics.contravariant_vertical_velocity` | Contravariant vertical velocity (grid-relative, normal to ``r``-surfaces) |
 | ``\rho \tilde{w}``             | `ρw̃`   | `AM.dynamics.contravariant_vertical_momentum` | Contravariant vertical momentum                                          |
 | ``r``                          | `r`    | `rnode(i, j, k, grid, ℓz)`          | Reference (computational) vertical coordinate of a terrain-following grid; the physical height is ``z(x, y, r)`` (`znode`), matching Oceananigans' `r`/`z` convention |
-| ``s``                               | `s`    | `static_energy(model)`              | (Liquid-ice) moist static energy, ``s = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ``; ``e`` is reserved for turbulent kinetic energy |
+| ``s``                               | `s`    | `static_energy(model)`              | (Liquid-ice) moist static energy, ``s = cᵖᵐ T + g z - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ``; ``e`` is reserved for turbulent kinetic energy |
 | ``ρ s``                             | `ρs`   | `static_energy_density(model)`      | Static energy density, the prognostic thermodynamic variable of `StaticEnergyFormulation` |
 | ``E``                               | `E`    | `total_energy(model)`               | Total energy, ``E = s + (u^2 + v^2 + w^2)/2``. `E` is also the formulation-agnostic *energy* key: a flux or forcing supplied under `E` (or `ρE`) is applied to whichever thermodynamic variable the formulation evolves |
 | ``ρ E``                             | `ρE`   |                                     | Total energy density; the `boundary_conditions` and `forcing` key for an energy input, routed onto ``ρᵡ`` |
@@ -64,6 +65,10 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρ qᵛ``                            | `ρqᵛ`  | `AM.moisture_density`               | Vapor density (non-equilibrium schemes)                                        |
 | ``ρ qᵗ``                            | `ρqᵗ`  |                                     | Total moisture density; the `boundary_conditions` and `forcing` key for a water input (specific alias `qᵗ` for forcings), routed onto ``ρqᵛᵉ`` whatever the microphysics calls it |
 | ``qᵛ``                              | `qᵛ`   | `AM.microphysical_fields.qᵛ`        | Vapor mass fraction, a.k.a "specific humidity"                                 |
+| ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation vapor mass fraction over liquid water (kg/kg)                       |
+| ``δqᵛ⁺ˡ``                           | `δqᵛ⁺ˡ` | `AM.microphysical_fields.δqᵛ⁺ˡ`     | Vapor excess over liquid, ``δqᵛ⁺ˡ = qᵛ − qᵛ⁺ˡ`` (kg/kg); P3's optional prognostic |
+| ``δqᵛ⁺ⁱ``                           | `δqᵛ⁺ⁱ` |                                     | Vapor excess over ice, ``δqᵛ⁺ⁱ = qᵛ − qᵛ⁺ⁱ`` (kg/kg)                           |
+| ``ρδqᵛ⁺ˡ``                          | `ρδqᵛ⁺ˡ` | `AM.microphysical_fields.ρδqᵛ⁺ˡ`    | Density-weighted vapor excess over liquid (kg/m³); may be negative             |
 | ``qˡ``                              | `qˡ`   | `AM.microphysical_fields.qˡ`        | Liquid mass fraction                                                           |
 | ``qⁱ``                              | `qⁱ`   | `AM.microphysical_fields.qⁱ`        | Ice mass fraction                                                              |
 | ``qᶜˡ``                             | `qᶜˡ`  | `AM.microphysical_fields.qᶜˡ`       | Cloud liquid mass fraction                                                     |
@@ -107,7 +112,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``pᵛ``                              | `pᵛ`   |                                     | Vapor pressure (partial pressure of water vapor), ``pᵛ = ρ qᵛ Rᵛ T``           |
 | ``pᵛ⁺``                             | `pᵛ⁺`  |                                     | Saturation vapor pressure                                                      |
 | ``\mathscr{H}``                     | `ℋ`    | `RelativeHumidity(model)`           | Relative humidity, ``ℋ = pᵛ / pᵛ⁺``                                            |
-| ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``                                          |
+| ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)`, `Supersaturation(model)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``            |
 | ``ξ``                               | `ξ`    | `psychrometric_correction`           | Psychrometric correction, ``ξ = 1 + ℒ² qᵛ⁺ / (cᵖ Rᵛ T²)``; ``ξˡ`` and ``ξⁱ`` name the liquid and ice phase |
 | ``δqˡ``, ``δqⁱ``                    | `δqˡ`, `δqⁱ` |                               | Saturation-adjustment increments, ``δq = (qᵛ - qᵛ⁺) / ξ`` for the liquid and ice phase |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
@@ -128,11 +133,17 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\rho^L``                          | `ρᴸ`   | `TC.liquid.density`                 | Intrinsic density of liquid water                                                        |
 | ``\rho^I``                          | `ρᴵ`   | `TC.ice.density`                    | Intrinsic density of ice                                                                 |
 | ``cᵖᵐ``                             | `cᵖᵐ`  | `mixture_heat_capacity(q, constants)` | Mixture heat capacity at constant pressure                                   |
+| ``\hat{c}ᵖ``                        | `ĉᵖ`   | `vapor_equivalent_heat_capacity(q, constants)` | Vapor-equivalent heat capacity, ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ``: the heat capacity if all water were vapor; unchanged by phase change |
+| ``\hat{R}``                         | `R̂`    | `vapor_equivalent_gas_constant(q, constants)` | Vapor-equivalent gas constant, ``R̂ = qᵈ Rᵈ + qᵗ Rᵛ``; equals ``Rᵐ`` in unsaturated air |
+| ``\hat{κ}``                         | `κ̂`    | `exner_exponent(VaporEquivalentExponent(), q, constants)` | Vapor-equivalent Exner exponent, ``κ̂ = R̂ / ĉᵖ`` (the default exponent of ``θˡⁱ``); ``κᵈ = Rᵈ / cᵖᵈ`` is the `DryExponent`. In code, `κ̂` also names the exponent choice (`VaporEquivalentExponent()` or `DryExponent()`) passed to functions. Distinct from the von Kármán constant ``κ`` |
 | ``Tᵣ``                              | `Tᵣ`   | `TC.energy_reference_temperature`   | Reference temperature for internal energy relations and latent heat            |
 | ``\mathcal{L}^l_r``                 | `ℒˡᵣ`  | `TC.liquid.reference_latent_heat`   | Latent heat of condensation at the energy reference temperature                |
 | ``\mathcal{L}^i_r``                 | `ℒⁱᵣ`  | `TC.ice.reference_latent_heat`      | Latent heat of deposition at the energy reference temperature                  |
+| ``ℒˡ₀, ℒⁱ₀``                       | `ℒˡ₀`, `ℒⁱ₀` | `absolute_zero_latent_heat(TC, phase)` | Latent-heat intercepts at zero kelvin, used with absolute-temperature sensible energy |
+| ``H^c``                             | `Hᶜ`   | `condensate_latent_energy(q, TC)`   | Latent energy of the condensate, ``Hᶜ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ``, so that ``H = cᵖᵐ T - Hᶜ`` |
 | ``\mathcal{L}^l(T)``                | `ℒˡ`   | `liquid_latent_heat(T, constants)`  | Temperature-dependent latent heat of condensation                              |
 | ``\mathcal{L}^i(T)``                | `ℒⁱ`   | `ice_latent_heat(T, constants)`     | Temperature-dependent latent heat of deposition                                |
+| ``\mathcal{L}^{fr}(T)``              | `ℒᶠʳ`  | `fusion_latent_heat(constants, T)`  | Temperature-dependent latent heat of fusion (freezing), ``ℒᶠʳ = ℒⁱ - ℒˡ``; the superscript `fr` abbreviates freezing, since `f` labels rime (`qᶠ`, `bᶠ`) |
 | ``θ₀``                              | `θ₀`   | `RS.potential_temperature`          | (Constant) reference potential temperature for the anelastic formulation       |
 | ``p₀``                              | `p₀`   | `RS.base_pressure`                  | Reference pressure at ``z = 0``: the datum the reference profiles are anchored to |
 | ``pˢ``                              | `pˢ`   | `RS.surface_pressure`               | Reference pressure at a column's bottom face (the terrain surface over terrain), ``p₀`` reduced to that height |
@@ -140,10 +151,12 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρᵣ``                              | `ρᵣ`   | `RS.density`                        | Density of a dry reference state for the anelastic formulation                 |
 | ``αᵣ``                              | `αᵣ`   |                                     | Specific volume of a dry reference state, ``αᵣ = Rᵈ θ₀ / pᵣ``                  |
 | ``pᵣ``                              | `pᵣ`   | `RS.pressure`                       | Pressure of a dry adiabatic reference pressure for the anelastic formulation   |
-| ``\Pi``                             | `Π`    |                                     | Exner function, ``Π = (pᵣ / pˢᵗ)^{Rᵐ / cᵖᵐ}``                                  |
+| ``\Pi``                             | `Π`    | `exner_function(𝒰, constants)`      | Exner function of the liquid-ice potential temperature, ``Π = (p / pˢᵗ)^κ``, with ``κ = κ̂`` (`VaporEquivalentExponent`, default) or ``κᵈ`` (`DryExponent`); ``p = pᵣ`` on the anelastic core |
+| ``\hat{Π}``                         | `Π̂`    |                                     | Vapor-equivalent Exner function, ``Π̂ = (p / pˢᵗ)^{κ̂}`` |
 | ``θᵛ``                              | `θᵛ`   |                                     | Virtual potential temperature                                                  |
 | ``θᵉ``                              | `θᵉ`   |                                     | Equivalent potential temperature                                               |
-| ``θˡⁱ``                             | `θˡⁱ`  |                                     | Liquid-ice potential temperature                                               |
+| ``θˡⁱ``                             | `θˡⁱ`  | `LiquidIcePotentialTemperature(model)` | Liquid-ice potential temperature, ``θˡⁱ = H / (ĉᵖ Π)``; ``θˡⁱ = T / Π`` in unsaturated air |
+| ``H``                               | `H`    |                                     | Liquid-ice enthalpy, ``H = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ = ĉᵖ Π θˡⁱ``; invariant under phase change at fixed ``p`` and ``qᵗ`` |
 | ``θᵇ``                              | `θᵇ`   |                                     | Stability-equivalent potential temperature (for moist Brunt-Väisälä)           |
 | ``θ``                               | `θ`    |                                     | Shorthand for liquid-ice potential temperature (used in `set!`) |
 | ``\Delta t``                        | `Δt`   | `Simulation.Δt`                     | Time step.                                                                     |
@@ -155,15 +168,15 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{Q}^T``                   | `𝒬ᵀ`   |                                     | Surface sensible heat flux, ``\mathcal{Q}^T = cᵖᵐ Jᵀ``                         |
 | ``\mathcal{Q}^v``                   | `𝒬ᵛ`   |                                     | Surface latent heat flux, ``\mathcal{Q}^v = \mathcal{L}^l Jᵛ``                 |
 | ``Jᵀ``                              | `Jᵀ`   |                                     | Surface temperature flux, kg K/m²s                                             |
-| ``Jᶿ``                              | `Jᶿ`   |                                     | Surface potential-temperature flux, ``Jᶿ = Jᵀ / Π``, kg K/m²s                  |
+| ``Jᶿ``                              | `Jᶿ`   |                                     | Surface potential-temperature flux, ``Jᶿ = 𝒬ᵀ / (ĉᵖ Π)``, kg K/m²s            |
 | ``Jᵛ``                              | `Jᵛ`   |                                     | Surface moisture flux, kg/m²s                                                  |
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
 | ``\ell``                            | `ℓ`    |                                     | A **length scale**, m; the superscript says which one. Bare ``ℓ`` is used locally where only one length scale is in play (the primary mixing length in `TKEBasedTurbulenceClosure`, the divergence-damping scale in `CompressibleEquations`) |
-| ``\ell^N``                          | `ℓᴺ`   |                                     | Stratification length of the mixing length, ``ℓᴺ = Cᴺ \sqrt{e} / N``; the primary length is ``ℓ = \min(z, ℓᴺ)`` |
+| ``\ell^b``                          | `ℓᵇ`   |                                     | Buoyancy penetration depth, ``ℓᵇ = \sqrt{e} / N``, how far an eddy with kinetic energy ``e`` penetrates air of buoyancy frequency ``N``; infinite where ``N² ≤ 0``. Every mixing-length formulation is built from it and the wall length ``ℂˢ z``: the local minimum ``\min(ℂˢ z, ℓᵇ)``, its interior envelope with slope ``ℂⁱ``, capped separately by ``ℂˢ z`` (the default), or the Bougeault–Lacarrère parcel lengths |
 | ``\ell^u, \ell^c, \ell^e, \ell^D``  | `ℓᵘ`, `ℓᶜ`, `ℓᵉ`, `ℓᴰ` |                    | Mixing lengths for momentum, scalars, TKE and dissipation: ``ℓᵘ = Sᵘ ℓ``, ``ℓᶜ = Sᶜ ℓ``, ``ℓᵉ = Sᵉ ℓ``, ``ℓᴰ = ℓ / Sᴰ`` |
-| ``S^u, S^c, S^e, S^D``              | `Sᵘ`, `Sᶜ`, `Sᵉ`, `Sᴰ` |                    | Stability functions of `TKEBasedTurbulenceClosure`; constants ``Cᵘ, Cᶜ, Cᵉ, Cᴰ`` in `ConstantStabilityFunctions` |
+| ``S^u, S^c, S^e, S^D``              | `Sᵘ`, `Sᶜ`, `Sᵉ`, `Sᴰ` |                    | Stability functions of `TKEBasedTurbulenceClosure`; constants ``ℂᵘ, ℂᶜ, ℂᵉ, ℂᴰ`` in `ConstantStabilityFunctions` |
 | ``\ell^r``                          | `ℓʳ`   | `roughness_length`                  | Surface roughness length for momentum, m. Superscript ``r`` elsewhere denotes *rain* (``qʳ``); the two never appear together |
 | ``\ell^{rh}``                       | `ℓʳʰ`  | `scalar_roughness_length`           | Surface roughness length for heat and moisture; defaults to ``ℓʳ/7.3`` |
 | ``\kappa``                          | `κ`    |                                     | von Kármán constant. Never used for a diffusivity in Breeze's own code — the Oceananigans accessors literally named `κᶠᶜᶜ`, `κᶜᶠᶜ`, `κᶜᶜᶠ` are the one exception, and they are thin one-liners |
@@ -171,9 +184,16 @@ The following table also uses a few conventions that suffuse the source code and
 | ``K^c``                             | `Kᶜ`   |                                     | Eddy diffusivity for scalars, ``K^c = ℓ^c \sqrt{e}``, m² s⁻¹                    |
 | ``K^e``                             | `Kᵉ`   |                                     | Eddy diffusivity for TKE, ``K^e = ℓ^e \sqrt{e}``, m² s⁻¹                        |
 | ``e``                               | `e`    |                                     | Subgrid turbulent kinetic energy, m² s⁻²                                       |
+| ``eᵐⁱⁿ`` | `eᵐⁱⁿ` | `minimum_tke` | Floor on ``e`` inside ``\sqrt{e}`` of the diffusivities and length scales, and of the buoyancy sink rate ``ωᴮ = -B⁻ / \max(e, eᵐⁱⁿ)``, m² s⁻² |
+| ``ωᴮ`` | `ωᴮ` | | Implicit buoyancy sink rate of the TKE equation, ``-B⁻ / \max(e, eᵐⁱⁿ)`` with ``B⁻`` the negative part of the buoyancy flux, s⁻¹ |
 | ``\rho e``                          | `ρe`   |                                     | Prognostic TKE density, the tracer `TKEBasedTurbulenceClosure` adds to the model |
 | ``\mathrm{Pr}``                     | `Pr`   |                                     | Turbulent Prandtl number, ``\mathrm{Pr} = K^u/K^c = S^u/S^c``                 |
-| ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``                                      |
+| ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``; the rational stability functions use ``N² / (S² + S²ᵐⁱⁿ)`` |
+| ``ℂˢ, ℂⁱ`` | `ℂˢ`, `ℂⁱ` | | Wall-length coefficient and independent interior envelope slope. Coefficients of `TKEBasedTurbulenceClosure` are written ``ℂ``, reserving ``C`` for bulk transfer coefficients such as the surface drag ``Cᴰ`` |
+| ``ℓᵐ`` | `ℓᵐ` | | Stored turbulence mixing length (`closure_fields.ℓᵐ`) |
+| ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before capping at the surface length |
+| ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
+| ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
 | ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
 | ``h^{bl}``                          | `hᵇˡ`  |                                     | Boundary-layer depth, m; a diagnostic (the height of the capping inversion in convective conditions) |

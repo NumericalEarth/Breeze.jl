@@ -34,7 +34,7 @@ struct FilteredSurfaceVelocities{U, V, Θ, H, FT, R, RΘ}
 end
 
 """
-    FilteredSurfaceVelocities(grid; height=nothing, filter_timescale=Inf)
+    FilteredSurfaceVelocities(grid; filter_timescale, height=nothing)
 
 Two-dimensional fields storing temporally filtered near-surface velocities and the
 surface-layer virtual potential temperature difference for use in bulk flux boundary
@@ -51,8 +51,10 @@ an exponential (first-order) filter:
 
     ū ← (ū + ϵ u_new) / (1 + ϵ),     ϵ = Δt / τ
 
-where `τ` is a finite `filter_timescale`. The default `filter_timescale=Inf` disables
-temporal averaging: each update samples the current surface state directly.
+where `τ` is the `filter_timescale`. There is no default: `τ` sets how much of the
+near-surface variability the wall model sees, so it must be chosen for the flow at hand.
+For a wall model driven by the instantaneous near-surface state, omit `filtered_velocities`
+from the bulk boundary condition instead.
 
 `Δθ̄ᵥ` filters the *result* the stability correction needs, ``Δθᵥ = θᵥ(z₁) - θᵥˢ``,
 formed at every update by the attached `PolynomialCoefficient` from the instantaneous
@@ -64,13 +66,14 @@ field is allocated but unused.
 
 # Keyword Arguments
 
+- `filter_timescale` (required): Filter time scale `τ` in seconds; must be positive and finite.
 - `height`: Reference height (m) for velocity evaluation. If `nothing` (default),
   the first grid cell center value is used. If a number, velocity is linearly
   interpolated to that height. (`Δθ̄ᵥ` is always formed at the first cell center,
   matching the height at which `bulk_coefficient` evaluates stability.)
-- `filter_timescale`: Filter time scale `τ` in seconds (default: `Inf`, no filtering).
 """
-function FilteredSurfaceVelocities(grid; height=nothing, filter_timescale=Inf)
+function FilteredSurfaceVelocities(grid; filter_timescale, height=nothing)
+    validate_filter_timescale(filter_timescale)
     u  = Field{Face, Center, Nothing}(grid)
     v  = Field{Center, Face, Nothing}(grid)
     Δθᵥ = Field{Center, Center, Nothing}(grid)
@@ -78,6 +81,10 @@ function FilteredSurfaceVelocities(grid; height=nothing, filter_timescale=Inf)
     return FilteredSurfaceVelocities(u, v, Δθᵥ, height, FT(filter_timescale),
                                      Ref((0, 0)), Ref((0, 0)))
 end
+
+# `τ = Inf` gives `ϵ = Δt / τ = 0`, which freezes the filtered state at its initial value.
+validate_filter_timescale(τ) = 0 < τ < Inf ||
+    throw(ArgumentError("filter_timescale must be positive and finite, got $τ"))
 
 _deref(r::Ref) = r[]
 _deref(t::Tuple) = t
@@ -118,7 +125,7 @@ struct FilteredSurfaceScalar{F, H, FT, R}
 end
 
 """
-    FilteredSurfaceScalar(grid; height=nothing, filter_timescale=Inf)
+    FilteredSurfaceScalar(grid; filter_timescale, height=nothing)
 
 A two-dimensional field storing a temporally filtered near-surface scalar
 for use in bulk flux boundary conditions. The bulk scalar fluxes store the complete
@@ -126,15 +133,15 @@ near-wall difference of their scalar (``Δθ``, ``Δs``, or ``Δqᵛ``), so the 
 is filtered together with the atmospheric value.
 
 The filter update is the same exponential form as `FilteredSurfaceVelocities`.
-The default `filter_timescale=Inf` samples the current scalar directly without temporal averaging.
 
 # Keyword Arguments
 
+- `filter_timescale` (required): Filter time scale `τ` in seconds; must be positive and finite.
 - `height`: Reference height (m) for scalar evaluation. If `nothing`, the
   first grid cell center value is used.
-- `filter_timescale`: Filter time scale `τ` in seconds (default: `Inf`).
 """
-function FilteredSurfaceScalar(grid; height=nothing, filter_timescale=Inf)
+function FilteredSurfaceScalar(grid; filter_timescale, height=nothing)
+    validate_filter_timescale(filter_timescale)
     field = Field{Center, Center, Nothing}(grid)
     FT = typeof(filter_timescale)
     return FilteredSurfaceScalar(field, height, FT(filter_timescale), Ref((0, 0)))
@@ -190,8 +197,7 @@ end
 ##### Update kernels
 #####
 
-# `nothing` selects direct sampling, both at initialization and when temporal
-# filtering is disabled. Keeping this separate avoids arithmetic with Inf or stale NaNs.
+# `nothing` selects direct sampling at initialization, which also discards stale NaNs.
 @inline filter_surface_value(previous, current, ::Nothing) = current
 @inline filter_surface_value(previous, current, ϵ) = (previous + ϵ * current) / (1 + ϵ)
 
@@ -260,7 +266,6 @@ with time step `Δt`. `velocities` should be a `NamedTuple` with
 fields `u` and `v`.
 """
 function update!(fv::FilteredSurfaceVelocities, velocities, grid, Δt)
-    isinf(fv.filter_timescale) && return initialize!(fv, velocities, grid)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     ϵ = Δt / fv.filter_timescale
@@ -276,7 +281,6 @@ Update the filtered surface scalar using the exponential filter
 with time step `Δt`.
 """
 function update!(fs::FilteredSurfaceScalar, field_3d, grid, Δt)
-    isinf(fs.filter_timescale) && return initialize!(fs, field_3d, grid)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     ϵ = Δt / fs.filter_timescale
@@ -312,7 +316,6 @@ with the surface temperature `Tˢ` evaluated at `clock.time`. `fields` carries t
 requirement as [`initialize_Δθᵥ!`](@ref).
 """
 function update_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, Tˢ, grid, clock, Δt, fields)
-    isinf(fv.filter_timescale) && return initialize_Δθᵥ!(fv, coef, Tˢ, grid, clock, fields)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     ϵ = Δt / fv.filter_timescale

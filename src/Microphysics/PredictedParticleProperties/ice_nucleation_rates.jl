@@ -123,31 +123,31 @@ gamma PSD the mass (6th moment) rate carries the correction
     FT = typeof(q)
     parameters = p3.process_rates
 
-    q_eff = max(0, q)
+    q₊ = max(0, q)
     psd_correction = psd_correction_spherical_volume(μ)
     ℂⁱᵐᵐᶠ₁ = parameters.maximum_immersion_freezing_temperature
     ℂⁱᵐᵐᶠ₂ = parameters.immersion_freezing_coefficient
     ℂⁱᵐᵐᶠ₃ = parameters.immersion_freezing_nucleation_coefficient
 
     freezing_active = (T <= ℂⁱᵐᵐᶠ₁) &
-                      (q_eff >= p3.minimum_mass_mixing_ratio)
+                      (q₊ >= p3.minimum_mass_mixing_ratio)
 
     supercooling = max(parameters.freezing_temperature - T, zero(FT))
 
     # Individual drop mass and volume (monodisperse assumption)
-    droplet_volume = q_eff / n_for_mass / FT(parameters.liquid_water_density)
+    droplet_volume = q₊ / n_for_mass / FT(parameters.liquid_water_density)
 
     # The per-drop freezing coefficient (NO psd_correction) is a linear per-second
     # rate. Any numerical cap is applied equally before the two moment products so
     # their ratio is unchanged. The species-level budget in
     # `compute_p3_process_rates` applies one limiting factor to the mass and number
     # rates together, after condensation and competing sinks are included.
-    maximum_multiplier = max(q_eff * psd_correction, n_for_rate)
+    maximum_multiplier = max(q₊ * psd_correction, n_for_rate)
     freezing_rate = immersion_freezing_rate_coefficient(
         ℂⁱᵐᵐᶠ₃, droplet_volume, ℂⁱᵐᵐᶠ₂, supercooling,
         maximum_multiplier, parameters.floors.divisor)
 
-    return (ifelse(freezing_active, q_eff * psd_correction * freezing_rate, zero(FT)),
+    return (ifelse(freezing_active, q₊ * psd_correction * freezing_rate, zero(FT)),
             ifelse(freezing_active, n_for_rate * freezing_rate, zero(FT)))
 end
 
@@ -212,9 +212,9 @@ is computed from the actual rain shape parameter ``\\mu_r``, not from a fixed va
 @inline function immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μʳ)
     # nʳ is already per-mass. The drop mass needs a floored number to stay finite,
     # but the number rate scales with the unfloored one.
-    nʳ_eff = max(0, nʳ)
-    return stochastic_immersion_freezing(p3, qʳ, max(nʳ_eff, p3.minimum_number_mixing_ratio),
-                                         nʳ_eff, μʳ, T)
+    nʳ₊ = max(0, nʳ)
+    return stochastic_immersion_freezing(p3, qʳ, max(nʳ₊, p3.minimum_number_mixing_ratio),
+                                         nʳ₊, μʳ, T)
 end
 
 #####
@@ -236,11 +236,11 @@ number per unit mass [1/kg].
     ℂʰᵒᵐᶠ₁ = FT(parameters.homogeneous_freezing_temperature)
     ℂʰᵒᵐᶠ₂ = FT(parameters.homogeneous_freezing_timescale)
 
-    q_eff = max(0, q)
+    q₊ = max(0, q)
     freezing_active = (T < ℂʰᵒᵐᶠ₁) &
-                      (q_eff >= p3.minimum_mass_mixing_ratio)
+                      (q₊ >= p3.minimum_mass_mixing_ratio)
 
-    return (ifelse(freezing_active, q_eff / ℂʰᵒᵐᶠ₂, zero(FT)),
+    return (ifelse(freezing_active, q₊ / ℂʰᵒᵐᶠ₂, zero(FT)),
             ifelse(freezing_active, n / ℂʰᵒᵐᶠ₂, zero(FT)))
 end
 
@@ -368,16 +368,16 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
 
     # Cloud-riming splintering applies only with a single ice category; with more
     # than one, splintering_cloud_riming_scale = 0 disables it.
-    cloud_riming_eff = max(0, cloud_riming) * FT(parameters.splintering_cloud_riming_scale)
-    rain_riming_eff = max(0, rain_riming)
+    scaled_cloud_riming = max(0, cloud_riming) * FT(parameters.splintering_cloud_riming_scale)
+    nonnegative_rain_riming = max(0, rain_riming)
     has_rime = qᶠ >= p3.minimum_mass_mixing_ratio
     active = (D_ice ≥ ℂᴴᴹ₆) &
              has_rime &
              (Fˡ < ℂᴴᴹ₇) &
              (surface_T < ℂᴴᴹ₈)
 
-    nᶜˡ_splintering_rate = ifelse(active, efficiency * ℂᴴᴹ₄ * cloud_riming_eff, zero(FT))
-    nʳ_splintering_rate = ifelse(active, efficiency * ℂᴴᴹ₄ * rain_riming_eff, zero(FT))
+    nᶜˡ_splintering_rate = ifelse(active, efficiency * ℂᴴᴹ₄ * scaled_cloud_riming, zero(FT))
+    nʳ_splintering_rate = ifelse(active, efficiency * ℂᴴᴹ₄ * nonnegative_rain_riming, zero(FT))
     n_splintering_rate = nᶜˡ_splintering_rate + nʳ_splintering_rate
 
     qᶜˡ_splintering_rate = nᶜˡ_splintering_rate * ℂᴴᴹ₅

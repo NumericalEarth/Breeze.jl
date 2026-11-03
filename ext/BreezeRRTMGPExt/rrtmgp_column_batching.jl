@@ -7,7 +7,7 @@
 # in Float64); the state and boundary conditions stay full-size (~13 nlay), so only the workspace
 # shrinks.
 #
-# A batch is a contiguous run of whole j-rows: `rrtmgp_column_index` is `i + (j - 1) * Nx`, so a
+# A batch is a contiguous run of whole j-rows: `column_index` is `i + (j - 1) * Nx`, so a
 # j-slab is a unit-stride `view`. On the GPU such a view of a `CuArray` is itself a `CuArray`, so
 # the solver kernels see what they would see unbatched.
 

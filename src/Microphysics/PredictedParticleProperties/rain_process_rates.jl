@@ -49,13 +49,13 @@ Available schemes:
     ℂᵃᵘᵗᵒ₃ = parameters.autoconversion_exponent_droplet
     ℂᵃᵘᵗᵒ₄ = parameters.autoconversion_threshold
 
-    qᶜˡ_eff = ifelse(qᶜˡ >= ℂᵃᵘᵗᵒ₄, max(0, qᶜˡ), zero(FT))
+    qᶜˡ₊ = ifelse(qᶜˡ >= ℂᵃᵘᵗᵒ₄, max(0, qᶜˡ), zero(FT))
 
     # KK2000 scales with droplet number per volume, so no reference-density
     # normalization is needed — Nᶜˡ is already per-volume [1/m³].
     scaled_cloud_number = Nᶜˡ / parameters.autoconversion_reference_concentration
 
-    return ℂᵃᵘᵗᵒ₁ * qᶜˡ_eff^ℂᵃᵘᵗᵒ₂ * scaled_cloud_number^ℂᵃᵘᵗᵒ₃
+    return ℂᵃᵘᵗᵒ₁ * qᶜˡ₊^ℂᵃᵘᵗᵒ₂ * scaled_cloud_number^ℂᵃᵘᵗᵒ₃
 end
 
 """
@@ -86,15 +86,15 @@ Falling rain drops collect cloud droplets via gravitational sweep-out. See
 @inline function rain_accretion_rate(::KhairoutdinovKogan2000, p3, qᶜˡ, qʳ, ρ)
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
-    qᶜˡ_eff = max(0, qᶜˡ)
-    qʳ_eff = max(0, qʳ)
-    active = (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
-             (qʳ_eff >= p3.minimum_mass_mixing_ratio)
+    qᶜˡ₊ = max(0, qᶜˡ)
+    qʳ₊ = max(0, qʳ)
+    active = (qᶜˡ₊ >= p3.minimum_mass_mixing_ratio) &
+             (qʳ₊ >= p3.minimum_mass_mixing_ratio)
 
     ℂᵃᶜᶜʳ₁ = parameters.accretion_coefficient
     ℂᵃᶜᶜʳ₂ = parameters.accretion_exponent
 
-    rate = ℂᵃᶜᶜʳ₁ * (qᶜˡ_eff * qʳ_eff)^ℂᵃᶜᶜʳ₂
+    rate = ℂᵃᶜᶜʳ₁ * (qᶜˡ₊ * qʳ₊)^ℂᵃᶜᶜʳ₂
     return ifelse(active, rate, zero(FT))
 end
 
@@ -123,12 +123,12 @@ with ``\\mathbb{C}_{\\mathrm{self},1} = 5.78`` m³ kg⁻¹ s⁻¹ by default.
 @inline function rain_self_collection_rate(::KhairoutdinovKogan2000, p3, qʳ, nʳ, ρ)
     FT = typeof(qʳ)
     parameters = p3.process_rates
-    qʳ_eff = max(0, qʳ)
-    nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, parameters)
-    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+    qʳ₊ = max(0, qʳ)
+    nʳ₊ = bounded_rain_number(nʳ, qʳ₊, parameters)
+    active = qʳ₊ >= p3.minimum_mass_mixing_ratio
 
     ℂˢᵉˡᶠ₁ = parameters.rain_self_collection_coefficient
-    rate = ℂˢᵉˡᶠ₁ * ρ * qʳ_eff * nʳ_eff
+    rate = ℂˢᵉˡᶠ₁ * ρ * qʳ₊ * nʳ₊
     return ifelse(active, rate, zero(FT))
 end
 
@@ -165,12 +165,12 @@ net rain-number tendency changes sign only when ``f_{brkp} = 0``, at
     FT = typeof(qʳ)
     parameters = p3.process_rates
 
-    qʳ_eff = max(0, qʳ)
-    nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, parameters)
+    qʳ₊ = max(0, qʳ)
+    nʳ₊ = bounded_rain_number(nʳ, qʳ₊, parameters)
 
     # Dʳ = 1/λʳ, evaluated after the rain lambda limiter has been applied and the
     # DSD-consistent number recomputed.
-    λʳ = rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
+    λʳ = rain_slope_parameter(qʳ₊, nʳ₊, parameters)
     mean_rain_diameter = 1 / λʳ
 
     ℂᵇʳᵏᵖ₁ = parameters.rain_breakup_diameter_threshold
@@ -189,7 +189,7 @@ net rain-number tendency changes sign only when ``f_{brkp} = 0``, at
     # When Dʳ ≥ Dᵗʰ: modifier < 1 → breakup > 0 (number source)
     # self_collection is a positive magnitude; breakup is positive (number source).
     rate = (FT(1) - breakup_modifier) * self_collection
-    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+    active = qʳ₊ >= p3.minimum_mass_mixing_ratio
     return ifelse(active, rate, zero(FT))
 end
 
@@ -257,8 +257,8 @@ table read plus the runtime `1/√ν`, `ℂᵛᵉⁿᵗ` and Schmidt contributio
     FT = typeof(qʳ)
     parameters = p3.process_rates
 
-    qʳ_eff = max(0, qʳ)
-    nʳ_eff = max(0, nʳ)
+    qʳ₊ = max(0, qʳ)
+    nʳ₊ = max(0, nʳ)
 
     # Only evaporate in subsaturated conditions
     S = qᵛ / max(qᵛ⁺ˡ, FT(parameters.floors.saturation_mass_fraction))
@@ -272,12 +272,12 @@ table read plus the runtime `1/√ν`, `ℂᵛᵉⁿᵗ` and Schmidt contributio
 
     # Internal helpers return negative (S - 1 < 0 when subsaturated).
     # Negate to get positive magnitude.
-    evap_rate = -rain_evaporation_rate(p3.rain.evaporation, p3.rain.ventilation, qʳ_eff, nʳ_eff, S,
+    evap_rate = -rain_evaporation_rate(p3.rain.evaporation, p3.rain.ventilation, qʳ₊, nʳ₊, S,
                                        thermodynamic_factor, parameters, ν, Dᵛ, FT)
 
     # Cannot evaporate more than available
     τ_evap = parameters.rain_evaporation_timescale
-    max_evap = qʳ_eff / τ_evap
+    max_evap = qʳ₊ / τ_evap
     evap_rate = min(evap_rate, max_evap)
 
     return ifelse(is_subsaturated, evap_rate, zero(FT))
@@ -372,7 +372,7 @@ proportion to the cloud mass lost.
 
 @inline function cloud_number_loss_from_autoconversion(::KhairoutdinovKogan2000,
                                                        p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
-    return autoconversion * cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ)
+    return autoconversion * cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, p3.minimum_mass_mixing_ratio)
 end
 
 """

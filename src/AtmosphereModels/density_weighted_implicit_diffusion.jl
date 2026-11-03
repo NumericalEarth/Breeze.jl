@@ -230,11 +230,11 @@ end
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionDiagonal, p, ::ZDirection,
                                          clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
                                          operator::DensityWeightedImplicitOperator, w, ρ,
-                                         top_bc, bottom_bc, immersed_bc, args...)
+                                         top_bc, bottom_bc, immersed_bc, ϕ, args...)
     ρ_diff = weighting_density(operator.density, ρ)
     d_diff = density_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ_diff)
     d_adv  = density_weighted_advection_diagonal(i, j, k, grid, operator.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
-    d_bc   = boundary_flux_diagonal(i, j, k, grid, ℓx, ℓy, ℓz, Δt, clk, fields, top_bc, bottom_bc, immersed_bc)
+    d_bc   = boundary_flux_diagonal(i, j, k, grid, ℓx, ℓy, ℓz, Δt, clk, fields, top_bc, bottom_bc, immersed_bc, ϕ)
     return d_diff + d_adv + d_bc
 end
 

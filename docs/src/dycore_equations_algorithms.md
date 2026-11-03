@@ -24,19 +24,19 @@ Notation ``\boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u})`` abov
 
 ## Thermodynamic equation
 
-In addition to mass and momentum, Breeze advances a thermodynamic prognostic variable ``χ`` in conservative (flux) form:
+In addition to mass and momentum, Breeze advances a thermodynamic prognostic variable ``ρᵡ`` — the density-weighted form of a thermodynamic state function ``χ(T, p, q)`` — in conservative (flux) form:
 
 ```math
-\partial_t χ + \boldsymbol{\nabla \cdot}\, (χ \boldsymbol{u}) = Π(ρ, χ, \ldots) \, \boldsymbol{\nabla \cdot \, u} + S_χ ,
+\partial_t (ρ χ) + \boldsymbol{\nabla \cdot}\, (ρ χ \boldsymbol{u}) = ρ \, \mathcal{E}_χ \frac{\mathrm{D} \ln p}{\mathrm{D} t} + S_χ ,
 ```
 
-where ``Π`` is a formulation-specific compression source and ``S_χ`` represents diabatic and diffusive sources.
+where the first term on the right is the expansion source — ``\mathcal{E}_χ = (∂χ / ∂\ln p)_{η, q}`` is the change of ``χ`` along an adiabat at fixed composition, derived for a general ``χ`` in the section on [the prognostic equation of a thermodynamic state function](@ref "The prognostic equation of a thermodynamic state function") — and ``S_χ`` collects the diabatic and diffusive sources: heating, sedimentation and subgrid fluxes. No choice of ``χ`` makes both the expansion source and the phase-change source vanish. Breeze's formulations put the explicit source on expansion, so that every phase change is exact and microphysics schemes act on the temperature alone.
 
 Breeze supports two concrete choices for ``χ``:
 
-- **Liquid-ice potential temperature density** (``χ = ρ θ^{li}``): The potential temperature is materially conserved under adiabatic motion, so ``Π = 0``. This is the simplest thermodynamic formulation.
+- **Liquid-ice potential temperature** (``ρᵡ = ρ θˡⁱ``, the default): ``θˡⁱ = H / (\hat{c}ᵖ \hat{Π})`` is the enthalpy ``H = c^{pm} T - \mathscr{L}^l_0 q^l - \mathscr{L}^i_0 q^i`` in temperature units, referred to the standard pressure with the vapor-equivalent Exner function ``\hat{Π} = (p / pˢᵗ)^{\hat{κ}}``; see [Liquid-ice potential temperature](@ref liquid-ice-potential-temperature). It is exactly invariant under phase change, and its expansion source ``\mathcal{E}_θ = (R^m T - \hat{R} \hat{Π} θˡⁱ) / (\hat{c}ᵖ \hat{Π})`` is proportional to the condensate, so that ``θˡⁱ`` is materially conserved under adiabatic motion in clear air.
 
-- **Static energy density** (``χ = ρ s``): The moist static energy ``s = c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i`` includes gravitational potential energy and latent heat. In this case ``Π \neq 0`` and encodes the pressure work term.
+- **Static energy** (``ρᵡ = ρ s``): The moist static energy ``s = H + g z`` adds the gravitational potential energy, with ``\mathscr{L}^l_0`` and ``\mathscr{L}^i_0`` the latent heats of condensation and deposition extrapolated to absolute zero. Its source is the pressure work ``\mathrm{D} p / \mathrm{D} t`` plus the geopotential change ``ρ g w``, which on the anelastic core combine into the buoyancy flux ``- ρᵣ w b``; see [Anelastic dynamics](@ref Anelastic-section).
 
 The thermodynamic equation couples to the momentum equation through the equation of state (below) and buoyancy.
 
@@ -70,8 +70,8 @@ Thermodynamic relations (mixture gas constant ``R^m``, heat capacity ``c^{pm}``,
 - ``\boldsymbol{m} = ρ \boldsymbol{u}``: Momentum
 - ``p``: Pressure
 - ``T``: Temperature
-- ``θ``: Potential temperature
-- ``χ``: Thermodynamic prognostic variable (``ρθ`` or ``ρs``)
+- ``θ``: Liquid-ice potential temperature, shorthand for ``θˡⁱ``
+- ``χ``: Thermodynamic state function (``θˡⁱ`` or ``s``); ``ρᵡ`` is its density-weighted prognostic (``ρθ`` or ``ρs``)
 
 ### Moisture
 - ``q^t``: Total specific humidity (vapor + condensates)
@@ -85,8 +85,10 @@ Thermodynamic relations (mixture gas constant ``R^m``, heat capacity ``c^{pm}``,
 - ``\boldsymbol{f}``: Non-pressure body forces (Coriolis)
 
 ### Thermodynamic closures
-- ``Π = (p / p_0)^{R^m / c^{pm}}``: Exner function
+- ``\hat{c}ᵖ = q^d c^{pd} + q^t c^{pv}``, ``\hat{R} = q^d R^d + q^t R^v``: Vapor-equivalent heat capacity and gas constant, the values the mixture would have if all of its water were vapor
+- ``\hat{Π} = (p / pˢᵗ)^{\hat{κ}}``, ``\hat{κ} = \hat{R} / \hat{c}ᵖ``: Vapor-equivalent Exner function and its exponent
+- ``\mathcal{E}_χ``: Expansion coefficient of the thermodynamic variable, ``(∂χ / ∂\ln p)_{η, q}``
 - ``c^{ac} = \sqrt{γ^m R^m T}``: Acoustic sound speed, where ``γ^m = c^{pm} / c^{vm}``
 - ``b``: Buoyancy
 
-See [Thermodynamics](@ref Thermodynamics-section) for full definitions of ``R^m(q)``, ``c^{pm}(q)``, and ``Π``.
+See [Thermodynamics](@ref Thermodynamics-section) for full definitions of ``R^m(q)``, ``c^{pm}(q)``, and ``\hat{Π}``.

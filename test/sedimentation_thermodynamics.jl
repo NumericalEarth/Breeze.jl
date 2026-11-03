@@ -79,7 +79,7 @@ function sedimentation_temperature_rates(model, phase, compressible)
     T = column(model.temperature)
     mass_rate, theta_rate = column(model.timestepper.Gⁿ.ρqʳ), column(model.timestepper.Gⁿ.ρθ)
     properties = phase === :liquid ? constants.liquid : constants.ice
-    cx, L = properties.heat_capacity, properties.reference_latent_heat
+    cx, L = properties.heat_capacity, TH.absolute_zero_latent_heat(constants, properties)
     cd, cv = constants.dry_air.heat_capacity, constants.vapor.heat_capacity
     gas = (ρ .- ρv .- ρx) .* TH.dry_air_gas_constant(constants) .+ ρv .* TH.vapor_gas_constant(constants)
     capacity = (ρ .- ρv .- ρx) .* cd .+ ρv .* cv .+ ρx .* cx .- (compressible ? gas : zero(gas))

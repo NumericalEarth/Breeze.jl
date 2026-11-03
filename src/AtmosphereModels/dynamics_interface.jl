@@ -1,4 +1,5 @@
-using ..Thermodynamics: MoistureMassFractions, dry_air_gas_constant, vapor_gas_constant
+using Breeze.Thermodynamics: MoistureMassFractions, dry_air_gas_constant, vapor_gas_constant, absolute_zero_latent_heat,
+                             VaporEquivalentExponent
 
 #####
 ##### Dynamics Interface
@@ -20,17 +21,17 @@ Return the default dynamics for the given grid and thermodynamic constants.
 function default_dynamics end
 
 """
-    materialize_dynamics(dynamics_stub, grid, boundary_conditions, thermodynamic_constants, microphysics=nothing)
+    materialize_dynamics(dynamics_stub, grid, boundary_conditions, thermodynamic_constants, microphysics, formulation)
 
 Materialize a dynamics stub into a complete dynamics object with all required fields.
 
-The `microphysics` argument is optional and used by dynamics types that need to know
-the microphysics scheme to create appropriate prognostic state (e.g., `ParcelDynamics`).
+The `microphysics` and `formulation` arguments select the parcel's prognostic state.
 """
 function materialize_dynamics end
 
 # Default: ignore microphysics argument (for backward compatibility)
 materialize_dynamics(d, grid, bcs, constants, microphysics) = materialize_dynamics(d, grid, bcs, constants)
+materialize_dynamics(d, grid, bcs, constants, microphysics, formulation) = materialize_dynamics(d, grid, bcs, constants, microphysics)
 
 """
     materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
@@ -220,16 +221,13 @@ keeps its temperature.
     dry_air_increment(Δq) * constants.dry_air.heat_capacity + Δq.vapor * constants.vapor.heat_capacity +
     Δq.liquid * constants.liquid.heat_capacity + Δq.ice * constants.ice.heat_capacity
 
-@inline gas_constant_increment(Δq, constants) =
-    dry_air_increment(Δq) * dry_air_gas_constant(constants) + Δq.vapor * vapor_gas_constant(constants)
-
-@inline latent_heat_increment(Δq, constants) =
-    Δq.liquid * constants.liquid.reference_latent_heat + Δq.ice * constants.ice.reference_latent_heat
-
 # The enthalpy of the mixture per unit mass changes along Δq at fixed temperature by
-# Δcᵖ T − ΔΛ: the enthalpy of the condensate relative to what its mass gives way to
+# Δcᵖ T − ΔHᶜ, using zero-kelvin latent offsets: the enthalpy of the condensate
+# relative to what its mass gives way to
 @inline enthalpy_increment(Δq, constants, T) =
-    heat_capacity_increment(Δq, constants) * T - latent_heat_increment(Δq, constants)
+    heat_capacity_increment(Δq, constants) * T -
+    Δq.liquid * absolute_zero_latent_heat(constants, constants.liquid) -
+    Δq.ice * absolute_zero_latent_heat(constants, constants.ice)
 
 """
 $(TYPEDSIGNATURES)
