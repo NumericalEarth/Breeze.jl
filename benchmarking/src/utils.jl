@@ -12,13 +12,9 @@ function memory_reclaim(arch)
     end
 end
 
-reactant_compile_options(; raise = true, optimize = true) =
-    Reactant.CompileOptions(raise = raise,
-                            raise_first = raise,
-                            optimization_passes = optimize,
-                            sync = true,
-                            excluded_passes = ["greedy_while_loop_batch_fission",
-                                               "while_elementwise_reduction_to_reduce"])
+reactant_compile_options() = Reactant.CompileOptions(raise = true,
+                                                     raise_first = true,
+                                                     sync = true)
 
 """
     benchmark_time_stepping(model;
