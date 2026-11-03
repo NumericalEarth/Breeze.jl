@@ -417,17 +417,18 @@ end
     # Local copy of CM2.cloud_terminal_velocity with 2//3 → FT(2/3)
     # so that Rational literals don't appear inside Reactant-traced code.
     FT = eltype(q_liq)
-    ϵN = CloudMicrophysics.Utilities.ϵ_numerics_2M_N(FT)
-    ϵM = CloudMicrophysics.Utilities.ϵ_numerics_2M_M(FT)
+    # CloudMicrophysics 0.47 uses one smallness threshold, `cbrt(floatmin(FT))`,
+    # for both the mass and number variables of the 2-moment scheme.
+    ϵ = CloudMicrophysics.Utilities.ϵ_numerics(FT)
 
     (; νc, μc) = pdf_c
     (; Bc) = CM2.pdf_cloud_parameters_mass(pdf_c, q_liq, ρₐ, N_liq)
 
     prefactor = FT(1 / 18) * (6 / ρw / π)^FT(2 / 3) * (ρw / ρₐ - 1) * grav / ν_air
 
-    vt0 = ifelse(N_liq < ϵN, FT(0),
+    vt0 = ifelse(N_liq < ϵ, FT(0),
         prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(2 / 3)) / N_liq)
-    vt1 = ifelse(q_liq < ϵM, FT(0),
+    vt1 = ifelse(q_liq < ϵ, FT(0),
         prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(5 / 3)) / ρₐ / q_liq)
 
     return (vt0, vt1)
