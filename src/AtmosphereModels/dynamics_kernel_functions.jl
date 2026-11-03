@@ -28,7 +28,7 @@ Similar to Oceananigans' `∇_dot_qᶜ` signature with the additional density fa
 Oceananigans `qᶜ` is the kinematic tracer flux.
 """
 @inline ∇_dot_Jᶜ(i, j, k, grid, args...) = zero(grid)
-@inline horizontal_∇_dot_Jᶜ(i, j, k, grid, args...) = zero(grid)
+@inline ∇ʰ_dot_Jᶜ(i, j, k, grid, args...) = zero(grid)
 
 #####
 ##### Buoyancy force interpolation and products

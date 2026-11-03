@@ -150,7 +150,7 @@ end
 
 @inline horizontal_flux_divergence(i, j, k, grid, advection, ρ, U, c, closure, closure_fields, id, clock, model_fields, buoyancy) =
     horizontal_div_ρUc(i, j, k, grid, advection, ρ, U, c) +
-    horizontal_∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, c, clock, model_fields, buoyancy)
+    ∇ʰ_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, c, clock, model_fields, buoyancy)
 
 # The flux divergences of the acoustic loop, for dynamics that have one
 acoustic_divergences(model) = nothing
