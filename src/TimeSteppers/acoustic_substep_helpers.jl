@@ -70,7 +70,7 @@ computation the stepper issues, once per stage.
 """
 function cache_transport_velocity!(model)
     w_cache = model.timestepper.substepper.time_averaged_vertical_velocity_cache
-    copy_parent!(w_cache, transport_velocities(model).w)
+    set!(w_cache, transport_velocities(model).w)
     return nothing
 end
 

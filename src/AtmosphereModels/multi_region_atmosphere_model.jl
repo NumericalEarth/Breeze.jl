@@ -46,9 +46,6 @@ function fill_prognostic_halo_regions!(model::AtmosphereModel, args::Vararg{Any,
     return nothing
 end
 
-# TODO: a multi-region field has no single parent array. Oceananigans should support `copyto!` between
-# multi-region fields, halos included.
-copy_parent!(dst, src) = @apply_regionally copyto!(parent(dst), parent(src))
 
 #####
 ##### The conservation of mass on a Yin-Yang grid

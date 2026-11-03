@@ -129,7 +129,6 @@ export
     # Multi-region grids
     fill_horizontal_velocity_halos!,
     fill_prognostic_halo_regions!,
-    copy_parent!,
 
     # Architecture-dispatched helpers for safely converting Δt to a kernel arg,
     # and for skipping operator-split updates before the first step
