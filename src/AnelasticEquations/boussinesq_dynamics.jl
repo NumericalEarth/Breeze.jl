@@ -36,8 +36,8 @@ constructed from `constants`, `frame_vertical_velocity`, and `reference_state_kw
 that is, when `frame_vertical_velocity` is set (including to zero), and to `nothing` otherwise.
 Set `adiabatic_expansion = nothing` to disable it.
 
-`pressure_solver_float_type` is the floating-point type of the pressure solve on grids that are bounded
-in the vertical (see [`AnelasticDynamics`](@ref)). Default: `Float64`.
+`pressure_solver_float_type` is the floating-point type of the pressure solve (see [`AnelasticDynamics`](@ref)).
+Default: `Float64`.
 
 Examples
 ========
@@ -137,9 +137,13 @@ fft_poisson_solver_grid(grid) = grid
 fft_poisson_solver_grid(grid::ImmersedBoundaryGrid) = grid.underlying_grid
 
 # With a uniform reference density the pressure equation is a Poisson equation with constant coefficients,
-# which is solved with FFTs in vertically-periodic domains.
-AtmosphereModels.dynamics_pressure_solver(::BoussinesqDynamics, grid::ZPeriodicGrid) =
-    FFTBasedPoissonSolver(fft_poisson_solver_grid(grid))
+# which is solved with FFTs in vertically-periodic domains, in `pressure_solver_float_type` like the
+# Fourier-tridiagonal solve.
+AtmosphereModels.dynamics_pressure_solver(dynamics::BoussinesqDynamics, grid::ZPeriodicGrid) =
+    fft_poisson_solver(dynamics.pressure_solver_float_type, fft_poisson_solver_grid(grid))
+
+fft_poisson_solver(::Type{FT}, grid::AbstractGrid{FT}) where FT = FFTBasedPoissonSolver(grid)
+fft_poisson_solver(FT, grid) = FFTBasedPoissonSolver(with_number_type(FT, grid))
 
 # The kinematic pressure ϕ = p′ / ρᵣ satisfies ∇²ϕ = ∇⋅(ρŨ) / (ρᵣ Δt) when ρᵣ is uniform.
 # The FFT-based solver stores the source term in `solver.storage`.

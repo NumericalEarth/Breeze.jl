@@ -194,6 +194,8 @@ export
     # Forcing utilities
     geostrophic_forcings,
     SubsidenceForcing,
+    ConstantPowerBandForcing,
+    StochasticBandForcing,
     SpecificForcing,
 
     # Grid utilities

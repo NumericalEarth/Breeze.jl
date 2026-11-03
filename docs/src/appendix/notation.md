@@ -257,3 +257,7 @@ terrain-following coordinate), and ``z`` a volume ratio (not height).
 | ``τ``                               | `τ`    | `droplet_response_time`                          | Drag response time ``τ = τᵖ / fᴰ``, s                                          |
 | ``\mathbb{W}``                      | `𝕎`    | `droplet_terminal_velocity`                      | Terminal fall speed of a droplet (positive downward), m s⁻¹                    |
 | ``v^∞``                             | `v∞`   |                                                  | Velocity the drag integrator relaxes to, ``v^∞ = u + a τ``                     |
+| ``ε``                               | `ε`    | `energy_injection_rate`             | Energy injection rate of a band forcing of homogeneous turbulence, m² s⁻³; equals the mean dissipation rate in statistically steady turbulence |
+| ``k_f``                             | `k_f`  | `maximum_wavenumber`                | Largest wavenumber of the band of forced Fourier modes, m⁻¹                   |
+| ``E_f``                             | `E_f`  |                                     | Kinetic energy of the forced band, ``E_f = ⟨\vert\boldsymbol{u}_f\vert²⟩ / 2``, m² s⁻² |
+| ``T_f``                             | `T_f`  | `correlation_time`                  | Correlation time of the stochastic band forcing, s                            |
