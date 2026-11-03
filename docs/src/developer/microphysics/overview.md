@@ -268,6 +268,19 @@ that transports that tracer, so the diagnostic agrees with the boundary flux the
 operator applies. Schemes that move precipitation by their own internal means (such as
 `DCMIP2016KM`) override `bottom_precipitation_flux` directly instead.
 
+`precipitation_flux(model; condensates)` is the same flux at every ``z``-face, returned as a
+lazy `KernelFunctionOperation` at `(Center, Center, Face)`, so it can be sliced, averaged, and
+written to output. It is the sedimentation part of each selected condensate's advective mass
+flux and reduces to `bottom_precipitation_flux` at an impenetrable bottom.
+
+### Process Rates
+
+`MicrophysicalProcessRate(model, name)` returns a lazy `KernelFunctionOperation` for the
+process rate `name` (for example `:autoconversion` or `:condensation`) in kg kg⁻¹ s⁻¹.
+Schemes implement `MicrophysicalProcessRate(model, microphysics, ::Val{name})`;
+for P3 every field of `P3ProcessRates` is available, evaluated from the same per-cell inputs
+as the tendency kernel so the diagnostic shows exactly the rates that drive the model.
+
 ### Specific Humidity
 
 | Function | Arguments | Description |

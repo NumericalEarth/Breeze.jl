@@ -47,6 +47,7 @@ using Breeze.Thermodynamics:
     MoistureMassFractions,
     with_moisture,
     temperature,
+    density,
     air_pressure,
     density,
     PlanarLiquidSurface,
@@ -80,6 +81,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 using Oceananigans: Center, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Operators: ℑzᵃᵃᶜ
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
