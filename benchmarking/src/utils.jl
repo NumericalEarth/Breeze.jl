@@ -12,9 +12,11 @@ function memory_reclaim(arch)
     end
 end
 
-reactant_compile_options() = Reactant.CompileOptions(raise = true,
-                                                     raise_first = true,
-                                                     sync = true)
+reactant_compile_options(; raise = true, optimize = true) =
+    Reactant.CompileOptions(raise = raise,
+                            raise_first = raise,
+                            optimization_passes = optimize,
+                            sync = true)
 
 """
     benchmark_time_stepping(model;
@@ -37,9 +39,8 @@ Run a benchmark by executing `time_steps` time steps of the given model.
 
 If the model lives on a `ReactantState` architecture, the whole stepping loop
 is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
-program with `Reactant.@compile` using `reactant_compile_options()` (with
-while-loop batch fission and while elementwise-reduction-to-reduce disabled) —
-compile time is recorded separately. `kernels` chooses how the model's kernels
+program with `Reactant.@compile` using `reactant_compile_options()`; compile
+time is recorded separately. `kernels` chooses how the model's kernels
 are compiled: `"raise"` raises them to StableHLO (`raise=true`), `"noraise"`
 keeps them as kernel calls (`raise=false`), and `"kernelad"` keeps them as kernel
 calls through Reactant's kernel AD pipeline (`raise=false`, `optimize=:kernelad`,
