@@ -124,7 +124,7 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
 
     if rescale_densities
         ρᵣ_old = similar(dynamics_density(model.dynamics))
-        set!(ρᵣ_old, dynamics_density(model.dynamics))
+        copy_parent!(ρᵣ_old, dynamics_density(model.dynamics))
     end
 
     # Update reference temperature and moisture from horizontal means
@@ -457,7 +457,7 @@ function set_potential_temperature_hydrostatically_balanced_density!(
     # The diagnosed θ field is no longer needed after the column solve, so use it to retain the old
     # dry density while the prognostic dry-density-weighted fields are rescaled below.
     ρᵈ_old = θ
-    set!(ρᵈ_old, ρᵈ)
+    copy_parent!(ρᵈ_old, ρᵈ)
 
     # Scale total-density-weighted constituents by ρ / ρ_old, set dry density as the residual,
     # then scale dry-density-weighted prognostics by ρᵈ_new / ρᵈ_old.

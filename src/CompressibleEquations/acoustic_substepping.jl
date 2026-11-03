@@ -315,9 +315,10 @@ constructor's zeros.
 function seed_time_averaged_velocities!(substepper::AcousticSubstepper, model)
     velocities = outer_step_start_transport_velocities(model)
 
-    # Halos included: `set!` copies the parent arrays of fields of the same shape
+    # Full parent arrays, halos included. The three staggered components have different array
+    # sizes, so each is copied over its own bounds.
     for (avg, src) in zip(substepper.time_averaged_velocities, velocities)
-        set!(avg, src)
+        copy_parent!(avg, src)
     end
 
     return nothing
