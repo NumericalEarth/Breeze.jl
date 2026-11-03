@@ -396,3 +396,10 @@ Colorbar(fig_sens[1, 2], hm; label = "∂J / ∂uᵢ")
 
 save("acoustic_wave_wind_sensitivity.png", fig_sens; px_per_unit = 2) #src
 fig_sens
+
+# ## References
+#
+# ```@bibliography
+# Pages = ["acoustic_wave.md"]
+# Canonical = false
+# ```
