@@ -219,6 +219,15 @@ end
             @test all(isfinite, interior(getregion(model.velocities.w, 1)))
         end
 
+        @testset "set! from temperature and an Oceananigans closure" begin
+            model = AtmosphereModel(grid; dynamics, closure = SmagorinskyLilly())
+            set!(model; T = 300, ρ = 1)
+            @test all(x -> x ≈ 300, interior(getregion(model.temperature, 2)))
+
+            time_step!(model, 1)
+            @test all(isfinite, interior(getregion(model.closure_fields.νₑ, 2)))
+        end
+
         # The flows stay balanced to a fraction of a percent after a few hours. The triads weight the Coriolis
         # parameter isotropically, so the geostrophic balance holds on the rotated Yang panel too.
         @testset "Balanced solid-body rotation [$(name)]" for (name, s, coriolis, Nsteps, rtol) in

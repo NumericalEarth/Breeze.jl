@@ -266,7 +266,8 @@ function compute_auxiliary_variables!(model)
     # `closure_fields === nothing`); there is nothing to compute or fill, so skip it. Field-carrying
     # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
     if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
-        compute_closure_fields!(model.closure_fields, model.closure, model)
+        # Oceananigans closures launch on `model.grid`, so a multi-region model computes them region by region
+        @apply_regionally compute_closure_fields!(model.closure_fields, model.closure, model)
         fill_halo_regions!(model.closure_fields; only_local_halos=true)
     end
 

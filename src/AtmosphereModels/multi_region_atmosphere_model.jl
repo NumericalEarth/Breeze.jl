@@ -57,7 +57,7 @@ copy_parent!(dst, src) = @apply_regionally copyto!(parent(dst), parent(src))
 #####
 
 """
-    YinYangConservationFixer(model::AtmosphereModel)
+$(TYPEDSIGNATURES)
 
 The callback that conserves the dry mass and the content of every other density of `model` on a
 `YinYangGrid`, which `add_conservation_fixer!` adds to a simulation at the `TracerTendencyCallsite`.
@@ -80,12 +80,12 @@ julia> grid = YinYangGrid(size=(48, 16, 4), z=(0, 10e3), halo=(3, 3, 3));
 julia> model = AtmosphereModel(grid; dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization()), tracers=:c);
 
 julia> YinYangConservationFixer(model)
-YinYangConservationFixer of ρᵈ, ρθ, ρqᵛ and c
+ConservationFixer of ρᵈ, ρθ, ρqᵛ and c
 ```
 """
-MultiRegion.YinYangConservationFixer(model::AtmosphereModel) = MassFixer(model)
+MultiRegion.YinYangConservationFixer(model::AtmosphereModel) = ConservationFixer(model)
 
-struct MassFixer{D, E, C, A, I}
+struct ConservationFixer{D, E, C, A, I}
     densities :: D            # name => the density ρc of each prognostic scalar at the callsite, the tracers as total density × mass fraction
     seam_budgets :: E         # name => ∫ ∇ʰ·F dV, the seam budget E of the horizontal fluxes F of the tendency of ρc
     positive_contents :: C    # name => ∫ max(0, ρc) dV, the content C⁺
@@ -97,15 +97,15 @@ end
 owned_integral(f) = Field(Integral(f))
 owned_integral_value(∫f) = @allowscalar ∫f[1, 1, 1]
 
-Base.summary(fixer::MassFixer) = string("YinYangConservationFixer of ", join(keys(fixer.densities), ", ", " and "))
-Base.show(io::IO, fixer::MassFixer) = print(io, summary(fixer))
+Base.summary(fixer::ConservationFixer) = string("ConservationFixer of ", join(keys(fixer.densities), ", ", " and "))
+Base.show(io::IO, fixer::ConservationFixer) = print(io, summary(fixer))
 
 # The fixed name makes a second call replace the first fixer, so that the budget is returned once
 Simulations.add_conservation_fixer!(simulation::Simulation{<:AtmosphereModel}, ::YinYangGridOfSomeKind) =
     add_callback!(simulation, Callback(YinYangConservationFixer(simulation.model); callsite=TracerTendencyCallsite());
                   name=:conservation_fixer)
 
-function MassFixer(model::AtmosphereModel)
+function ConservationFixer(model::AtmosphereModel)
     grid = model.grid
     names = (:ρᵈ, closure_scalar_names(model)...)
     densities = NamedTuple{names}(map(name -> density(model, name), names))
@@ -113,7 +113,7 @@ function MassFixer(model::AtmosphereModel)
     positive_parts = map(ρc -> KernelFunctionOperation{Center, Center, Center}(positive_part, grid, ρc), densities)
     positive_contents = map(owned_integral, positive_parts)
     acoustic_budgets = acoustic_seam_budgets(acoustic_divergences(model))
-    return MassFixer(densities, seam_budgets, positive_contents, acoustic_budgets, Ref(0))
+    return ConservationFixer(densities, seam_budgets, positive_contents, acoustic_budgets, Ref(0))
 end
 
 acoustic_seam_budgets(::Nothing) = nothing
@@ -185,7 +185,7 @@ end
 # from the current state, so the fixer evaluates their fluxes from the same state and corrects them. The state
 # of the acoustic loop is corrected afterwards, from the budget of the uncorrected state, and the entry
 # divergences of its third stage are recorded last, from the state that stage starts from.
-function (fixer::MassFixer)(model)
+function (fixer::ConservationFixer)(model)
     grid = model.grid
     arch = architecture(grid)
     foreach(compute!, fixer.seam_budgets)
@@ -223,6 +223,8 @@ function correct_acoustic_state!(fixer, model, contents, budgets)
             C⁺ = contents[name]
             a = Δt * (removal_rate(budgets.mean[n], C⁺) - removal_rate(budgets.entry[n], C⁺))
             @apply_regionally launch!(arch, grid, :xyz, _correct_density!, fixer.densities[name], a)
+            # The rest of the step reads these densities across the region boundaries
+            fill_halo_regions!(fixer.densities[name])
         end
     end
 

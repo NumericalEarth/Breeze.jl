@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.AtmosphereModels: MassFixer
+using Breeze.AtmosphereModels: ConservationFixer
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans: prognostic_fields
@@ -52,7 +52,7 @@ grid = YinYangGrid(default_arch, Float64; size = (48, 16, 4), z = (0, 10kilomete
     model = crossing_flow_model(grid, td)
     M₀ = contents(model)
     simulation = run_steps!(model, Δt, true)
-    @test simulation.callbacks[:conservation_fixer].func isa MassFixer
+    @test simulation.callbacks[:conservation_fixer].func isa ConservationFixer
     @test all(isapprox.(contents(model), M₀; rtol=1e-13))
 
     # Without the fixer the contents drift by far more than rounding error
