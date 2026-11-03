@@ -531,7 +531,8 @@ rain evaporation, and condensation.
 `Δr𝕎` is the sedimentation flux divergence (zero for parcel models).
 
 `ρ` is the total density, which weights the rain in the evaporation rate (KW eq. 2.14); `ρᵗʰ` is
-the thermodynamic state density, at which the saturation specific humidity is evaluated. They coincide on the compressible core; on the anelastic core `ρ` is the
+the thermodynamic state density, at which the saturation specific humidity is evaluated. They
+coincide on the compressible core and in parcel models; on the anelastic core `ρ` is the
 reference density ``ρᵣ`` and `ρᵗʰ = pᵣ / (Rᵐ T)`.
 
 Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
@@ -998,12 +999,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
     FT = typeof(ρ)
 
-    # The parcel saturates at its thermodynamic state density, p / (Rᵐ T); ρ is the
-    # environmental density that weights the parcel's prognostics.
-    ρᵗʰ = density(𝒰, constants)
-
-    # Core microphysics step (no sedimentation for parcel: Δr𝕎 = 0)
-    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, ρᵗʰ, p_parcel, Δt,
+    # Core microphysics step (no sedimentation for parcel: Δr𝕎 = 0). The parcel's own density ρ is
+    # its thermodynamic state density, so it serves for both the rain rates and the saturation.
+    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, ρ, p_parcel, Δt,
                                                microphysics, constants, f₅, δT, FT)
 
     # Convert mixing ratios → mass fractions (shared helper)
