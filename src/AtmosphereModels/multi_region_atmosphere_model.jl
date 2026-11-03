@@ -3,15 +3,13 @@
 #####
 
 using Breeze.Utils: @regional
-using GPUArraysCore: @allowscalar
-using Oceananigans: TracerTendencyCallsite, prognostic_fields
+using Oceananigans: prognostic_fields
 using Oceananigans.AbstractOperations: Integral
 using Oceananigans.Fields: compute!
-using Oceananigans.MultiRegion: MultiRegion, ImmersedMultiRegionGrid, MultiRegionGrids, YinYangConservationFixer,
-                                YinYangGridOfSomeKind
+using Oceananigans.MultiRegion: MultiRegion, ImmersedMultiRegionGrid, MultiRegionGrids
 using Oceananigans.Operators: div_xyᶜᶜᶜ
-using Oceananigans.Simulations: Simulations, Simulation, Callback, add_callback!
 using Oceananigans.Utils: Utils, @apply_regionally, regions
+using GPUArraysCore: @allowscalar
 
 const MultiRegionAtmosphereModel = AtmosphereModel{<:Any, <:Any, <:Any, <:Any, <:MultiRegionGrids}
 
@@ -56,6 +54,24 @@ copy_parent!(dst, src) = @apply_regionally copyto!(parent(dst), parent(src))
 ##### The conservation of mass on a Yin-Yang grid
 #####
 
+# Oceananigans' `add_conservation_fixer!` builds the fixer of a Yin-Yang grid through `YinYangConservationFixer`
+MultiRegion.YinYangConservationFixer(model::AtmosphereModel) = ConservationFixer(model)
+
+struct ConservationFixer{D, E, C, A, I}
+    densities :: D            # name => the density ρc of each prognostic scalar at the callsite, the tracers as total density × mass fraction
+    seam_budgets :: E         # name => ∫ ∇ʰ·F dV, the seam budget E of the horizontal fluxes F of the tendency of ρc
+    positive_contents :: C    # name => ∫ max(0, ρc) dV, the content C⁺
+    acoustic_budgets :: A     # (; entry, mean) seam budgets of the acoustic loop (see `acoustic_divergences`), `nothing` without one
+    corrected_iteration :: I  # the iteration whose third stage the acoustic correction last completed
+end
+
+# Over the panels of a Yin-Yang grid, `Integral` weights every cell by the fraction of it that its panel owns
+owned_integral(f) = Field(Integral(f))
+owned_integral_value(∫f) = @allowscalar ∫f[1, 1, 1]
+
+Base.summary(fixer::ConservationFixer) = string("ConservationFixer of ", join(keys(fixer.densities), ", ", " and "))
+Base.show(io::IO, fixer::ConservationFixer) = print(io, summary(fixer))
+
 """
 $(TYPEDSIGNATURES)
 
@@ -79,32 +95,10 @@ julia> grid = YinYangGrid(size=(48, 16, 4), z=(0, 10e3), halo=(3, 3, 3));
 
 julia> model = AtmosphereModel(grid; dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization()), tracers=:c);
 
-julia> YinYangConservationFixer(model)
+julia> Breeze.AtmosphereModels.ConservationFixer(model)
 ConservationFixer of ρᵈ, ρθ, ρqᵛ and c
 ```
 """
-MultiRegion.YinYangConservationFixer(model::AtmosphereModel) = ConservationFixer(model)
-
-struct ConservationFixer{D, E, C, A, I}
-    densities :: D            # name => the density ρc of each prognostic scalar at the callsite, the tracers as total density × mass fraction
-    seam_budgets :: E         # name => ∫ ∇ʰ·F dV, the seam budget E of the horizontal fluxes F of the tendency of ρc
-    positive_contents :: C    # name => ∫ max(0, ρc) dV, the content C⁺
-    acoustic_budgets :: A     # (; entry, mean) seam budgets of the acoustic loop (see `acoustic_divergences`), `nothing` without one
-    corrected_iteration :: I  # the iteration whose third stage the acoustic correction last completed
-end
-
-# Over the panels of a Yin-Yang grid, `Integral` weights every cell by the fraction of it that its panel owns
-owned_integral(f) = Field(Integral(f))
-owned_integral_value(∫f) = @allowscalar ∫f[1, 1, 1]
-
-Base.summary(fixer::ConservationFixer) = string("ConservationFixer of ", join(keys(fixer.densities), ", ", " and "))
-Base.show(io::IO, fixer::ConservationFixer) = print(io, summary(fixer))
-
-# The fixed name makes a second call replace the first fixer, so that the budget is returned once
-Simulations.add_conservation_fixer!(simulation::Simulation{<:AtmosphereModel}, ::YinYangGridOfSomeKind) =
-    add_callback!(simulation, Callback(YinYangConservationFixer(simulation.model); callsite=TracerTendencyCallsite());
-                  name=:conservation_fixer)
-
 function ConservationFixer(model::AtmosphereModel)
     grid = model.grid
     names = (:ρᵈ, closure_scalar_names(model)...)

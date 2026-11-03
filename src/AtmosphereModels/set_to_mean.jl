@@ -339,11 +339,11 @@ default_hydrostatic_surface_pressure(model, θ, qᵛ, ref::ExnerReferenceState, 
 #   - a field on `grid` passes through, and is read at each column;
 #   - a single-column field, which is how a multi-region grid stores its reference state, becomes its one value,
 #     because a single column cannot be indexed at (i, j).
-column_surface_pressure(pˢ::Number, grid) = convert(eltype(grid), pˢ)
-column_surface_pressure(pˢ, grid) = pˢ
+kernel_surface_pressure(pˢ::Number, grid) = convert(eltype(grid), pˢ)
+kernel_surface_pressure(pˢ, grid) = pˢ
 
 const SingleColumnField = AbstractField{<:Any, <:Any, <:Any, <:AbstractGrid{<:Any, <:Flat, <:Flat}}
-column_surface_pressure(pˢ::SingleColumnField, grid) = convert(eltype(grid), @allowscalar pˢ[1, 1, 1])
+kernel_surface_pressure(pˢ::SingleColumnField, grid) = convert(eltype(grid), @allowscalar pˢ[1, 1, 1])
 
 # Without a reference state there is no callable profile to integrate below the domain bottom, so
 # the datum is reduced along the constant-θ layer implied by each column's own lowest cell. That is
@@ -447,7 +447,7 @@ function set_potential_temperature_hydrostatically_balanced_density!(
                        default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state, κ̂) :
                        spec.surface_pressure
 
-    pˢ = column_surface_pressure(surface_pressure, grid)
+    pˢ = kernel_surface_pressure(surface_pressure, grid)
 
     # Per-column hydrostatic integration → balanced total density.
     @apply_regionally launch_exner_reference_columns!(π, pressure, ρ, θ, qᵛ, grid,

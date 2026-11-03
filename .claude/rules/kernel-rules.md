@@ -63,7 +63,7 @@ fills everywhere in `src/`:
 - Never fill halos inside a regional helper: `fill_halo_regions!` acts on the whole
   multi-region field.
 - Fill horizontal vector components as a pair, `fill_halo_regions!((u, v))`, through
-  `fill_vector_halo_regions!` and `fill_prognostic_halo_regions!`.
+  `fill_horizontal_velocity_halos!` and `fill_prognostic_halo_regions!`.
 - A multi-region field has no single parent array: use `copy_parent!(a, b)` or a kernel instead
   of `parent(a) .= ...`.
 - A struct that holds fields and reaches a regional launch (model wrappers, forcings, the kernel
