@@ -4,14 +4,15 @@
 # https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 version: 2
 
-# To be able to managet the Julia ecosystem for the time being
+# To be able to manage the Julia ecosystem for the time being
 enable-beta-ecosystems: true
 
 updates:
   - package-ecosystem: "github-actions"
     directory: "/" # Location of package manifests
     schedule:
-      interval: "monthly"
+      interval: "cron"
+      cronjob: "0 9 * * 1,3,5" # Monday, Wednesday and Friday at 09:00 UTC
     labels:
       - "dependencies 🖇️"
     cooldown:
@@ -24,8 +25,13 @@ updates:
       - "/docs"
       - "/examples"
       - "/test"
+      - "/utils/p3-artifacts"
+      - "/validation"
+      - "/validation/DCMIP2016_TC"
+      - "/validation/cloud_les_library"
     schedule:
-      interval: "weekly"
+      interval: "cron"
+      cronjob: "0 9 * * 1,3,5" # Monday, Wednesday and Friday at 09:00 UTC
     ignore:
       # Ignore package itself
       - dependency-name: "Breeze"
