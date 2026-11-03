@@ -35,6 +35,12 @@ The choice between `reltol` and `abstol` follows the *natural scale* of the resi
   residual (Pa), which spans roughly two decades over the atmospheric temperature range, so
   it uses `reltol = 1e-4` against the vapor pressure; an absolute Pa tolerance would be
   meaningless across that range.
+* No tolerance is taken below the rounding noise of the residual. A residual such as
+  `θ(T) - θ₀` is a difference of numbers of size `scale`, so it is computed only to within a
+  few units in the last place of `scale`: in `Float32` near 300 K that is ~1e-4 K, the default
+  `abstol` itself. [`secant_solve`](@ref) therefore stops once `|r| ≤ 30 eps(scale)`
+  whatever the solver's tolerances, because a secant slope formed from residuals at the noise
+  level is noise and can throw the iterate arbitrarily far.
 
 Iteration caps reflect each method's convergence order and role: the quadratically-convergent
 Newton inversion caps at `maxiter = 8`, the superlinear secant temperature solves cap at
@@ -86,8 +92,9 @@ NewtonSolver(FT::DataType=Oceananigans.defaults.FloatType; reltol=0, abstol=1e-4
 $(TYPEDEF)
 
 A secant iteration that terminates when the residual `r` satisfies
-`|r| ≤ max(abstol, reltol * |scale|)` — where `scale` is an algorithm-supplied
-magnitude for the residual — or after `maxiter` iterations.
+`|r| ≤ max(abstol, reltol * |scale|, 30 eps(scale))` — where `scale` is an algorithm-supplied
+magnitude for the residual and `30 eps(scale)` is a floor at the residual's rounding noise —
+or after `maxiter` iterations.
 """
 struct SecantSolver{FT}
     reltol :: FT
@@ -213,12 +220,18 @@ end
 ##### Secant iteration driver
 #####
 
+# The magnitude below which a residual made of terms of size `scale` is rounding noise. In Float32
+# near 300 K this is 1e-3 K: below it, consecutive residuals can differ by an ulp, and the secant
+# slope (x₂ - x₁) / (r₂ - r₁) is then ~1e6, sending the iterate hundreds of kelvin away.
+@inline rounding_noise(scale) = 30 * eps(abs(scale))
+
 """
 $(TYPEDSIGNATURES)
 
 Solve `r(x) = 0` by secant iteration from the initial guesses `x₁` and `x₂`, where
 `residual(x)` returns `r(x)`. The convergence criterion compares the residual against
-`scale`: iteration stops when `|r| ≤ max(abstol, reltol * |scale|)`.
+`scale`: iteration stops when `|r| ≤ max(abstol, reltol * |scale|, 30 eps(scale))`, where the
+last term is the residual's rounding noise (see the tolerance conventions in [`Solvers`](@ref Breeze.Solvers)).
 
 The iteration is controlled by `solver`:
 
@@ -243,8 +256,9 @@ round(x, digits=10)
 @inline function secant_solve(residual, solver::SecantSolver, x₁, x₂, scale)
     r₁ = residual(x₁)
     r₂ = residual(x₂)
+    tolerance = max(solver.abstol, solver.reltol * abs(scale), rounding_noise(scale))
     iter = 0
-    while abs(r₂) > max(solver.abstol, solver.reltol * abs(scale)) && iter < solver.maxiter
+    while abs(r₂) > tolerance && iter < solver.maxiter
         # Compute slope; guard against stagnation (r₂ = r₁ → division by zero).
         ΔxΔr = (x₂ - x₁) / (r₂ - r₁)
         valid_step = isfinite(ΔxΔr)
