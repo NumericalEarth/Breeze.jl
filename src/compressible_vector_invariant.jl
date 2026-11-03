@@ -616,6 +616,27 @@ y_reconstructed_vorticity(::CVI{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any,
 """
 $(TYPEDEF)
 
+Smoothness stencil of a `WENO` vorticity reconstruction that measures the smoothness of the reconstructed
+vorticity itself times the grid length √Az, a velocity jump. Scaling by the grid length leaves the weights of
+`DefaultStencil` unchanged where the regularization ϵ of the smoothness indicators is negligible, but brings
+the indicators of vorticities of order 10⁻⁴ s⁻¹, whose squared differences fall below ϵ, back above it.
+"""
+struct ScaledSelfStencil end
+
+Base.summary(::ScaledSelfStencil) = "ScaledSelfStencil"
+
+@inline scaled_ζ₃ᶠᶠᶜ(i, j, k, grid, u, v) = ζ₃ᶠᶠᶜ(i, j, k, grid, u, v) * sqrt(1 / Az⁻¹ᶠᶠᶜ(i, j, k, grid))
+@inline scaled_ζᵛᶠᶠᶜ(i, j, k, grid, u, v) = ζᵛᶠᶠᶜ(i, j, k, grid, u, v) * sqrt(1 / Az⁻¹ᶠᶠᶜ(i, j, k, grid))
+@inline scaled_negative_ζᵘᶠᶠᶜ(i, j, k, grid, u, v) = negative_ζᵘᶠᶠᶜ(i, j, k, grid, u, v) * sqrt(1 / Az⁻¹ᶠᶠᶜ(i, j, k, grid))
+
+@inline smoothness_stencil(stencil, ψ) = stencil
+@inline smoothness_stencil(::ScaledSelfStencil, ::typeof(ζ₃ᶠᶠᶜ)) = FunctionStencil(scaled_ζ₃ᶠᶠᶜ)
+@inline smoothness_stencil(::ScaledSelfStencil, ::typeof(ζᵛᶠᶠᶜ)) = FunctionStencil(scaled_ζᵛᶠᶠᶜ)
+@inline smoothness_stencil(::ScaledSelfStencil, ::typeof(negative_ζᵘᶠᶠᶜ)) = FunctionStencil(scaled_negative_ζᵘᶠᶠᶜ)
+
+"""
+$(TYPEDEF)
+
 Smoothness stencil of a `WENO` vorticity reconstruction that measures the smoothness of the horizontal
 momentum (ρu, ρv), as `VelocityStencil` measures that of the velocities. Requires the stored deviations of
 `UpwindVorticityPairing` (the model supplies the momentum when it stores them).
@@ -656,12 +677,14 @@ end
 
 @inline function reconstructed_vorticityᶠᶜᶜ(i, j, k, grid, scheme, u, v)
     v̂ = ℑxy_Δx_vᶠᶜᶜ(i, j, k, grid, v)
-    return _biased_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(v̂), y_reconstructed_vorticity(scheme), scheme.vorticity_stencil, u, v)
+    ψ = y_reconstructed_vorticity(scheme)
+    return _biased_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(v̂), ψ, smoothness_stencil(scheme.vorticity_stencil, ψ), u, v)
 end
 
 @inline function reconstructed_vorticityᶜᶠᶜ(i, j, k, grid, scheme, u, v)
     û = ℑxy_Δy_uᶜᶠᶜ(i, j, k, grid, u)
-    return _biased_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(û), x_reconstructed_vorticity(scheme), scheme.vorticity_stencil, u, v)
+    ψ = x_reconstructed_vorticity(scheme)
+    return _biased_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme.vorticity_scheme, bias(û), ψ, smoothness_stencil(scheme.vorticity_stencil, ψ), u, v)
 end
 
 @inline ρ_ℑx_Δx_vᶠᶠᶜ(i, j, k, grid, scheme, ρ, v) = ℑxyᶠᶠᵃ(i, j, k, grid, ρ) * Pxᶠᵃᵃ(i, j, k, grid, scheme, Δx_qᶜᶠᶜ, v)

@@ -9,6 +9,7 @@ export div_ρUc,
        CornerVorticityPairing,
        UpwindVorticityPairing,
        MomentumStencil,
+       ScaledSelfStencil,
        GradientFormUpwinding,
        AveragedVorticityPairing
 
