@@ -97,9 +97,11 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                              cache_advecting_state = false,
                              Gⁿ::TG = map(similar, prognostic_fields),
                              U⁰::U0 = map(similar, prognostic_fields),
-                             rounding::R = RoundToNearest()) where {TI, TG, U0, R}
+                             rounding = RoundToNearest()) where {TI, TG, U0}
 
     FT = eltype(grid)
+    rounding = materialize_rounding(rounding, grid.architecture)
+    R = typeof(rounding)
 
     # Stage fractions come from the outer-scheme interface. Today the only
     # supported subtype is WickerSkamarock3 with canonical (1/3, 1/2, 1);

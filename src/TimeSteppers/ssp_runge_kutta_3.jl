@@ -92,7 +92,7 @@ model = AtmosphereModel(grid; timestepper_kwargs = (; rounding = StochasticRound
 model.timestepper.rounding
 
 # output
-StochasticRounding(seed=42)
+StochasticRounding(seed=42, summation=WidenedSum())
 ```
 
 References
@@ -107,9 +107,11 @@ function SSPRungeKutta3(grid, prognostic_fields;
                         cache_advecting_state = false,   # accepted for TimeStepper-call uniformity; unused
                         Gⁿ::TG = map(similar, prognostic_fields),
                         U⁰::U0 = map(similar, prognostic_fields),
-                        rounding::R = RoundToNearest()) where {TI, TG, U0, R}
+                        rounding = RoundToNearest()) where {TI, TG, U0}
 
     FT = eltype(grid)
+    rounding = materialize_rounding(rounding, grid.architecture)
+    R = typeof(rounding)
 
     # SSP RK3 stage coefficients
     α¹ = FT(1)

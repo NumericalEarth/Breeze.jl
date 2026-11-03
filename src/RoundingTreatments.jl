@@ -21,6 +21,7 @@ module RoundingTreatments
 export RoundToNearest, StochasticRounding
 
 using DocStringExtensions: TYPEDEF, TYPEDSIGNATURES
+using Oceananigans.Architectures: CPU, child_architecture
 
 """
 $(TYPEDEF)
@@ -53,11 +54,32 @@ struct RoundToNearest <: AbstractRoundingTreatment end
 $(TYPEDEF)
 
 Stochastic rounding of the stage updates of a time stepper; see the keyword constructor
-`StochasticRounding(; seed = 0)`.
+`StochasticRounding(; seed = 0)`. `summation` is `nothing` until the time stepper chooses
+[`WidenedSum`](@ref) or [`TwoSum`](@ref) for its architecture with
+[`materialize_rounding`](@ref).
 """
-struct StochasticRounding <: AbstractRoundingTreatment
+struct StochasticRounding{S} <: AbstractRoundingTreatment
     seed :: UInt32
+    summation :: S
 end
+
+"""
+$(TYPEDEF)
+
+Stochastic rounding of a `Float32` sum by computing it in `Float64`, adding random bits below
+the 24 bits of the `Float32` significand, and truncating toward zero. Other precisions fall back
+to [`TwoSum`](@ref). The default on CPUs.
+"""
+struct WidenedSum end
+
+"""
+$(TYPEDEF)
+
+Stochastic rounding of a sum in its own precision: TwoSum gives the exact rounding error ``e``,
+and the sum moves to the neighboring float in the direction of ``e`` with probability
+``|e| / \\text{gap}``. The default on GPUs, where `Float64` arithmetic is slow or unavailable.
+"""
+struct TwoSum end
 
 """
 $(TYPEDSIGNATURES)
@@ -69,10 +91,10 @@ expected value of every stage update is then the exact sum, so sub-ulp increment
 correctly on average, at the cost of a random walk of about ``\\text{ulp} \\sqrt{N}`` after
 ``N`` steps.
 
-In `Float32`, the sum is computed in `Float64`, random bits are added below the 24 bits of the
-`Float32` significand, and the result is truncated toward zero. In other precisions the exact
-rounding error ``e`` of the sum is computed with TwoSum, and the sum is moved to the neighboring
-float in the direction of ``e`` with probability ``|e| / \\text{gap}``.
+How the sum is rounded depends on the architecture: on CPUs a `Float32` sum is computed in
+`Float64` and truncated after adding random bits ([`WidenedSum`](@ref)); on GPUs, and for
+`Float64`, its rounding error is computed with TwoSum ([`TwoSum`](@ref)). Both give the same
+statistics; they differ only in speed.
 
 The random numbers come from a counter-based hash of `(seed, iteration, stage, field, i, j, k)`,
 so there is no random-number state: runs are deterministic, bitwise reproducible, independent of
@@ -91,10 +113,25 @@ StochasticRounding(seed = 42)
 StochasticRounding(seed=42)
 ```
 """
-StochasticRounding(; seed = 0) = StochasticRounding(seed % UInt32)
+StochasticRounding(; seed = 0) = StochasticRounding(seed % UInt32, nothing)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `rounding` with the summation it uses on `arch`: [`WidenedSum`](@ref) on CPUs and
+[`TwoSum`](@ref) on GPUs. Treatments without a choice of summation are returned unchanged.
+"""
+materialize_rounding(rounding, arch) = rounding
+materialize_rounding(r::StochasticRounding{Nothing}, arch) =
+    StochasticRounding(r.seed, default_summation(child_architecture(arch)))
+
+default_summation(::CPU) = WidenedSum()
+default_summation(arch) = TwoSum()
 
 Base.show(io::IO, ::RoundToNearest) = print(io, "RoundToNearest()")
-Base.show(io::IO, r::StochasticRounding) = print(io, "StochasticRounding(seed=", Int(r.seed), ")")
+Base.show(io::IO, r::StochasticRounding{Nothing}) = print(io, "StochasticRounding(seed=", Int(r.seed), ")")
+Base.show(io::IO, r::StochasticRounding) =
+    print(io, "StochasticRounding(seed=", Int(r.seed), ", summation=", nameof(typeof(r.summation)), "())")
 
 #####
 ##### Counter-based hash
@@ -175,7 +212,7 @@ julia> round(sum(Float64, sums .- u⁰) / length(sums), sigdigits = 1)
 # truncate toward zero: the sum rounds up with probability equal to its distance above the
 # lower Float32 neighbor divided by the gap. The truncated Float64 is exactly representable
 # in Float32, so the final conversion does not round again (except for Float32 subnormals).
-@inline function rounded_add(r::StochasticRounding, a::Float32, b, i, j, k, key)
+@inline function rounded_add(r::StochasticRounding{WidenedSum}, a::Float32, b, i, j, k, key)
     s = Float64(a) + Float64(b)
     perturbation = UInt64(random_bits(i, j, k, key) >> 3)
     truncated = (reinterpret(UInt64, s) + perturbation) & 0xffff_ffff_e000_0000

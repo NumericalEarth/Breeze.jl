@@ -1,9 +1,10 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.RoundingTreatments: rounded_add, rounding_key
+using Breeze.RoundingTreatments: TwoSum, WidenedSum, materialize_rounding, rounded_add, rounding_key
 using Oceananigans
 using Oceananigans: prognostic_fields
+using Oceananigans.Architectures: GPU
 using Oceananigans.TimeSteppers: time_step!
 using Statistics: mean
 using Test
@@ -65,9 +66,9 @@ ssp_stage(rounding, u, u⁰, G, Δt, α, key) = rounded_add(rounding, u⁰, α *
 end
 
 @testset "rounded_add" begin
-    for FT in (Float32, Float64)
+    for FT in (Float32, Float64), summation in (TwoSum(), WidenedSum())
         a = FT(300)
-        rounding = StochasticRounding(seed = 7)
+        rounding = StochasticRounding(UInt32(7), summation)
         key = rounding_key(rounding, 3, 2, 1)
 
         # Exactly representable sums are not perturbed, whatever the random number
@@ -101,6 +102,13 @@ end
     @test StochasticRounding().seed === UInt32(0)
     @test StochasticRounding(seed = -1).seed === typemax(UInt32)
     @test sprint(show, StochasticRounding(seed = 3)) == "StochasticRounding(seed=3)"
+    @test sprint(show, StochasticRounding(UInt32(3), TwoSum())) == "StochasticRounding(seed=3, summation=TwoSum())"
+
+    # The summation is chosen by architecture: WidenedSum on CPUs, TwoSum elsewhere
+    @test materialize_rounding(StochasticRounding(seed = 3), CPU()) === StochasticRounding(UInt32(3), WidenedSum())
+    @test materialize_rounding(StochasticRounding(seed = 3), GPU(nothing)) === StochasticRounding(UInt32(3), TwoSum())
+    @test materialize_rounding(StochasticRounding(UInt32(3), TwoSum()), CPU()) === StochasticRounding(UInt32(3), TwoSum())
+    @test materialize_rounding(RoundToNearest(), CPU()) === RoundToNearest()
     @test sprint(show, RoundToNearest()) == "RoundToNearest()"
 end
 
@@ -154,7 +162,7 @@ default_FT = Oceananigans.defaults.FloatType
     @test model.timestepper.rounding isa RoundToNearest
 
     model = rounding_test_model(FT, dynamics_kind; rounding = StochasticRounding(seed = 3))
-    @test model.timestepper.rounding === StochasticRounding(seed = 3)
+    @test model.timestepper.rounding === materialize_rounding(StochasticRounding(seed = 3), default_arch)
 
     default = run_and_snapshot(FT, dynamics_kind)
     nearest = run_and_snapshot(FT, dynamics_kind; rounding = RoundToNearest())

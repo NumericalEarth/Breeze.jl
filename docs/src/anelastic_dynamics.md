@@ -160,10 +160,10 @@ The round-off treatment of the stage updates is selectable through `timestepper_
 - [`StochasticRounding`](@ref): each stage is evaluated in increment form,
   ``u^{(m)} = u^{(0)} + α \left[(u^{(m-1)} - u^{(0)}) + Δt \, G\right]``, and the final sum is
   rounded to one of its two neighboring floats, choosing each with probability proportional to
-  its closeness to the exact sum. In `Float32` the sum is computed in `Float64`, random bits are
-  added below the `Float32` significand and the result is truncated; in `Float64` the rounding
-  error is computed with TwoSum. Every stage is then exact
-  in expectation, at the cost of an ulp-sized random walk. The random numbers are a counter-based
+  its closeness to the exact sum. On CPUs a `Float32` sum is computed in `Float64`, random bits
+  are added below the `Float32` significand and the result is truncated (`WidenedSum`); on GPUs,
+  where `Float64` arithmetic is slow or unavailable, and for `Float64`, the rounding error is
+  computed with TwoSum (`TwoSum`). Every stage is then exact in expectation, at the cost of an ulp-sized random walk. The random numbers are a counter-based
   hash of the seed, the iteration, the stage, the field and the grid indices, so there is no
   random state: runs are bitwise reproducible and restart reproducibly from checkpoints.
   It needs no extra memory.
@@ -176,7 +176,7 @@ model = AtmosphereModel(grid; timestepper_kwargs = (; rounding = StochasticRound
 model.timestepper.rounding
 
 # output
-StochasticRounding(seed=1)
+StochasticRounding(seed=1, summation=WidenedSum())
 ```
 
 The compressible [`AcousticRungeKutta3`](@ref) stepper takes the same keyword. Its

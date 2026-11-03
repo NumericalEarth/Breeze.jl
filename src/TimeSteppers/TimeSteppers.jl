@@ -18,7 +18,7 @@ using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  update_state!, maybe_prepare_first_time_step!, reconcile_state!
 using Breeze.AtmosphereModels: kernel_time_step
-using Breeze.RoundingTreatments: RoundToNearest, rounded_add, rounding_key
+using Breeze.RoundingTreatments: RoundToNearest, materialize_rounding, rounded_add, rounding_key
 
 include("ssp_runge_kutta_3.jl")
 include("acoustic_substep_helpers.jl")
