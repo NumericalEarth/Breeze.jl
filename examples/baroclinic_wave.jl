@@ -344,18 +344,8 @@ w_ts = FieldTimeSeries("baroclinic_wave.jld2", "w")
 times = θ_ts.times
 Nt = length(times)
 
-# Each field is drawn as a surface on the unit sphere at the nodes of its own
-# location, seen from above the developing wave.
-
-function sphere(f)
-    LX, LY, _ = location(f)
-    λ = λnodes(f.grid, LX())
-    φ = φnodes(f.grid, LY())
-    x = [cosd(φ) * cosd(λ) for λ in λ, φ in φ]
-    y = [cosd(φ) * sind(λ) for λ in λ, φ in φ]
-    z = [sind(φ) for λ in λ, φ in φ]
-    return x, y, z
-end
+# Oceananigans' Makie extension draws a field on a `LatitudeLongitudeGrid` as a surface on the unit
+# sphere when it is plotted with `surface!` into an `Axis3`, seen here from above the developing wave.
 
 sphere_kw = (elevation = π/6, azimuth = π/2, aspect = :data)
 ζlim = 1e-4
@@ -368,9 +358,9 @@ w_kw = (colormap = :balance, colorrange = (-wlim, wlim))
 # ### Animation
 
 n = Observable(1)
-θn = @lift interior(θ_ts[$n], :, :, 1)
-ζn = @lift interior(ζ_ts[$n], :, :, 1)
-wn = @lift interior(w_ts[$n], :, :, 1)
+θn = @lift θ_ts[$n]
+ζn = @lift ζ_ts[$n]
+wn = @lift w_ts[$n]
 
 fig = Figure(size = (1800, 700))
 
@@ -378,15 +368,15 @@ title = @lift "t = $(prettytime(times[$n]))"
 fig[0, 1:6] = Label(fig, title, fontsize=22, tellwidth=false)
 
 ax1 = Axis3(fig[1, 1]; title = "θ at surface", sphere_kw...)
-hm1 = surface!(ax1, sphere(θ_ts[1])...; color = θn, shading = NoShading, θ_kw...)
+hm1 = surface!(ax1, θn; θ_kw...)
 Colorbar(fig[1, 2], hm1; label = "θ (K)", height=Relative(0.5))
 
 ax2 = Axis3(fig[1, 3]; title = "ζ at surface", sphere_kw...)
-hm2 = surface!(ax2, sphere(ζ_ts[1])...; color = ζn, shading = NoShading, ζ_kw...)
+hm2 = surface!(ax2, ζn; ζ_kw...)
 Colorbar(fig[1, 4], hm2; label = "ζ (1/s)", height=Relative(0.5))
 
 ax3 = Axis3(fig[1, 5]; title = "w at 2.9 km", sphere_kw...)
-hm3 = surface!(ax3, sphere(w_ts[1])...; color = wn, shading = NoShading, w_kw...)
+hm3 = surface!(ax3, wn; w_kw...)
 Colorbar(fig[1, 6], hm3; label = "w (m/s)", height=Relative(0.5))
 
 for ax in (ax1, ax2, ax3)
