@@ -1270,9 +1270,9 @@ validate_microphysics(microphysics, thermodynamic_constants) = nothing
 $(TYPEDSIGNATURES)
 
 Validate that `microphysics` supports the model's thermodynamic `formulation` (a `Symbol` or a
-formulation), at model construction. Defaults to a no-op.
+formulation) on `dynamics`, at model construction. Defaults to a no-op.
 """
-validate_microphysics_formulation(microphysics, formulation) = nothing
+validate_microphysics_formulation(microphysics, formulation, dynamics) = nothing
 
 """
 $(TYPEDSIGNATURES)

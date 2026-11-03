@@ -24,7 +24,7 @@ using ..AtmosphereModels:
     thermodynamic_density_name,
     total_density
 
-using ..ParcelModels: ParcelModel
+using ..ParcelModels: ParcelModel, ParcelDynamics
 
 using Oceananigans: Oceananigans, CenterField, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
@@ -246,9 +246,11 @@ const DCMIP2016KM = DCMIP2016KesslerMicrophysics
 # scheme would fail inside the kernel — an opaque `getproperty` error on the CPU and a GPU
 # compilation failure. Validate at model construction to give a clear, early error instead.
 # The kernel carries θˡⁱ through sedimentation and phase change (see the constructor docstring);
-# it has no static-energy counterpart yet. Parcel models, built without `AtmosphereModel`, may use
-# static energy: their update goes through the state, not the column kernel.
-function AtmosphereModels.validate_microphysics_formulation(::DCMIP2016KM, formulation)
+# it has no static-energy counterpart yet. Parcel models may use static energy: their update goes
+# through the parcel's state, not the column kernel.
+AtmosphereModels.validate_microphysics_formulation(::DCMIP2016KM, formulation, ::ParcelDynamics) = nothing
+
+function AtmosphereModels.validate_microphysics_formulation(::DCMIP2016KM, formulation, dynamics)
     name = thermodynamic_density_name(formulation)
     name === :ρθ ||
         throw(ArgumentError(string("DCMIP2016KesslerMicrophysics requires the ",
