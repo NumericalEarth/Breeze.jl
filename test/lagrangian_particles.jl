@@ -317,7 +317,8 @@ end
     x₀ = 100
     T = 75
     errors = map((15, 30, 60)) do Nt
-        particles = particles_at(FT, x₀, 500, 500)
+        # The grid spans z ∈ (-1000, 0); a particle outside the grid would interpolate out of bounds
+        particles = particles_at(FT, x₀, 500, -500)
         model = AtmosphereModel(grid; dynamics=BoussinesqDynamics(grid), advection=nothing,
                                 forcing=(; ρu=ρu_forcing), particles)
         set!(model, u=U)
