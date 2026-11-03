@@ -124,17 +124,19 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # The non-scattering shortwave solver only ever writes the direct beam
     # (`flux_dn_dir`), leaving `flux_up` and `flux_dn` as allocated-but-unwritten
     # memory. Zero them once so that every shortwave array in the solver agrees
-    # with the physics: no diffuse and no upwelling shortwave.
+    # with the physics: no diffuse shortwave, and no upwelling shortwave within the solver.
+    # The optical depth is written only for sunlit columns; zeroing it keeps the
+    # (vanishing) reflected beam of a column that has never been sunlit finite.
     shortwave_flux = shortwave_solver.flux
-    for flux_array in (shortwave_flux.flux_up, shortwave_flux.flux_dn,
-                       shortwave_flux.flux_net, shortwave_flux.flux_dn_dir)
-        fill!(flux_array, 0)
+    for array in (shortwave_flux.flux_up, shortwave_flux.flux_dn,
+                  shortwave_flux.flux_net, shortwave_flux.flux_dn_dir, shortwave_solver.op.τ)
+        fill!(array, 0)
     end
 
     # Create Oceananigans fields to store fluxes for output/plotting
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
-    upwelling_shortwave_flux = ZFaceField(grid)    # Zero for non-scattering gray optics
+    upwelling_shortwave_flux = ZFaceField(grid)    # Direct beam reflected by the surface
     downwelling_shortwave_flux = ZFaceField(grid)  # Direct beam only
     flux_divergence = CenterField(grid)
 
@@ -424,7 +426,10 @@ Applies sign convention:
 * positive = upward
 * negative = downward.
 
-For the non-scattering shortwave solver, only the direct beam flux is computed.
+The non-scattering shortwave solver computes the direct beam only. The surface reflects the
+fraction `α` (the direct surface albedo) of it diffusely, and the reflected beam climbs the column
+attenuated by `exp(-D τ)` across each layer of shortwave optical depth `τ`, with `D` the
+diffusivity of the gray longwave solver.
 """
 function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     arch = architecture(grid)
@@ -442,13 +447,18 @@ function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
 
     Nx, Ny, Nz = size(grid)
     launch!(arch, grid, (Nx, Ny, Nz+1), _copy_gray_fluxes!,
-            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
+            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
             lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
+
+    launch!(arch, grid, :xy, _reflect_direct_beam!, ℐ_sw_up, ℐ_sw_dn,
+            rtm.shortwave_solver.bcs.sfc_alb_direct,
+            rtm.shortwave_solver.op.τ,
+            rtm.longwave_solver.angle_disc.gauss_Ds, grid)
 
     return nothing
 end
 
-@kernel function _copy_gray_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
+@kernel function _copy_gray_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
                                     lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
@@ -459,8 +469,23 @@ end
     @inbounds begin
         ℐ_lw_up[i, j, k] = lw_flux_up[c, k]
         ℐ_lw_dn[i, j, k] = -lw_flux_dn[c, k]  # Negate for downward
-        ℐ_sw_up[i, j, k] = 0                   # Non-scattering gray optics has no upward SW
         ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[c, k]  # Negate for downward
+    end
+end
+
+@kernel function _reflect_direct_beam!(ℐ_sw_up, ℐ_sw_dn, α, τ, D, grid)
+    i, j = @index(Global, NTuple)
+    c = column_index(i, j, grid.Nx)
+    Nz = size(grid, 3)
+
+    @inbounds begin
+        ℐ = - α[1, c] * ℐ_sw_dn[i, j, 1]
+        ℐ_sw_up[i, j, 1] = ℐ
+
+        for k in 1:Nz
+            ℐ = ℐ * exp(- D[1] * τ[c, k])
+            ℐ_sw_up[i, j, k+1] = ℐ
+        end
     end
 end
 

@@ -99,18 +99,14 @@ fraction reflected by the surface.
 
 !!! note "Shortwave radiation in the gray atmosphere"
     The gray atmosphere uses RRTMGP's non-scattering shortwave solver, so
-    `downwelling_shortwave_flux` is the direct beam alone (no diffuse component)
-    and `upwelling_shortwave_flux` is identically zero. The field still exists so
-    that the four flux components, the net flux, and output writers have the same
-    shape for every optics flavor.
-
-!!! warning "Gray optics ignores the surface albedo in the shortwave"
-    Because the gray shortwave solver only propagates the direct beam downward, it
-    never reflects it: `surface_albedo` (and `direct_surface_albedo` /
-    `diffuse_surface_albedo`) has no effect on the gray shortwave fluxes, and the
-    surface absorbs all of the direct beam that reaches it. The albedo is still
-    used for the clear-sky and all-sky solvers. Use [`ClearSkyOptics`](@ref) or
-    [`AllSkyOptics`](@ref) if the shortwave albedo matters for your study.
+    `downwelling_shortwave_flux` is the direct beam alone (no diffuse component).
+    The surface reflects the fraction `direct_surface_albedo` of the direct beam
+    diffusely, and `upwelling_shortwave_flux` is that reflected beam, attenuated by
+    ``\exp(-D τ_{sw})`` across each layer on its way up, where ``D`` is the
+    diffusivity of the gray longwave solver. The atmosphere absorbs what the
+    reflected beam loses, and the rest leaves through the top of the atmosphere.
+    The `diffuse_surface_albedo` has no effect, since no diffuse shortwave reaches
+    the surface.
 
 ## Solar zenith angle
 

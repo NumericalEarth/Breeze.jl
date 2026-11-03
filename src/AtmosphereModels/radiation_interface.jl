@@ -85,7 +85,7 @@ struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS,
     shortwave_solver :: SW
     upwelling_longwave_flux :: F
     downwelling_longwave_flux :: F
-    upwelling_shortwave_flux :: F # Zero for non-scattering gray optics
+    upwelling_shortwave_flux :: F
     downwelling_shortwave_flux :: F
     flux_divergence :: H # Center field: -dF_net/dz in W/m³
     liquid_effective_radius :: LER # Model for cloud liquid effective radius (Nothing for gray/clear-sky)
