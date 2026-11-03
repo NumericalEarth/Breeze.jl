@@ -207,6 +207,47 @@ function AtmosphereModels.materialize_formulation(formulation::LiquidIcePotentia
                                                     formulation.dissipative_heating)
 end
 
+# An energy-closing source that cannot act with the microphysics would otherwise be silently zero
+function AtmosphereModels.validate_energy_closing_sources(formulation::LiquidIcePotentialTemperatureFormulation,
+                                                          microphysics)
+    validate_precipitation_heating(formulation.precipitation_heating, microphysics)
+    validate_phase_change_source(formulation.fixed_volume_phase_change, microphysics)
+    return nothing
+end
+
+validate_precipitation_heating(option, microphysics) = nothing
+validate_precipitation_heating(::PrecipitationDragHeating, ::Nothing) = nothing
+
+function validate_precipitation_heating(::PrecipitationDragHeating, microphysics)
+    sediments_through_model(microphysics) ||
+        throw(ArgumentError(string("precipitation_heating needs a microphysics scheme whose precipitation falls ",
+                                   "through the model's sedimentation, but ", nameof(typeof(microphysics)),
+                                   " moves its precipitation in its own update")))
+    return nothing
+end
+
+validate_phase_change_source(option, microphysics) = nothing
+validate_phase_change_source(::FixedVolumePhaseChange, ::Nothing) = nothing
+
+function validate_phase_change_source(::FixedVolumePhaseChange, microphysics)
+    moisture_prognostic_name(microphysics) === :ρqᵛ ||
+        throw(ArgumentError(string("fixed_volume_phase_change needs a microphysics scheme whose prognostic ",
+                                   "moisture is the vapor density ρqᵛ (non-equilibrium cloud formation), got ",
+                                   moisture_prognostic_name(microphysics))))
+
+    tendency_phase_change(microphysics) ||
+        throw(ArgumentError(string("fixed_volume_phase_change needs a microphysics scheme that converts water ",
+                                   "through its microphysical tendencies, but ", nameof(typeof(microphysics)),
+                                   " converts it in its own update")))
+
+    for name in condensate_field_names(microphysics)
+        isnothing(condensate_liquid_fraction(microphysics, Val(name))) &&
+            throw(ArgumentError("fixed_volume_phase_change: condensate $name declares no condensate_liquid_fraction"))
+    end
+
+    return nothing
+end
+
 # `DefaultTemperatureSolver` defers the choice of solver to the dynamics: the need for an
 # iterative θˡⁱ→T inversion is dictated by the intersection of the formulation and the
 # dynamics (anelastic: closed-form, no solver; compressible: implicit, Newton by default).

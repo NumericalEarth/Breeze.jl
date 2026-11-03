@@ -73,13 +73,23 @@ end
     compressible = AtmosphereModel(grid; dynamics, formulation = all_on)
     @test compressible.formulation.fixed_volume_phase_change isa AM.FixedVolumePhaseChange
 
-    # Saturation adjustment has no vapor-density tendency to correct
+    # An option that cannot act with the microphysics is rejected when the model is built.
+    # Saturation adjustment has no vapor-density tendency to correct.
+    phase_change = LiquidIcePotentialTemperatureFormulation(fixed_volume_phase_change = true)
+    drag_heating = LiquidIcePotentialTemperatureFormulation(precipitation_heating = true)
     equilibrium = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
-    model = AtmosphereModel(grid; dynamics, formulation = all_on, microphysics = equilibrium)
-    @test_throws ArgumentError begin
-        set!(model; ρ = model.dynamics.reference_state.density, θ = 300, qᵗ = 0.01)
-        AM.compute_tendencies!(model)
+    @test_throws ArgumentError AtmosphereModel(grid; dynamics, formulation = phase_change, microphysics = equilibrium)
+
+    # Operator-split schemes convert water and drop precipitation in their own update
+    tetens = ThermodynamicConstants(saturation_vapor_pressure = TD.TetensFormula())
+    for microphysics in (Breeze.Microphysics.DCMIP2016KesslerMicrophysics(), InstantaneousPrecipitation())
+        @test !AM.tendency_phase_change(microphysics)
+        @test !AM.sediments_through_model(microphysics)
+        @test_throws ArgumentError AtmosphereModel(grid; dynamics, formulation = drag_heating, microphysics,
+                                                   thermodynamic_constants = tetens)
     end
+    @test_throws ArgumentError AtmosphereModel(grid; dynamics, formulation = phase_change,
+                                               microphysics = InstantaneousPrecipitation())
 end
 
 #####

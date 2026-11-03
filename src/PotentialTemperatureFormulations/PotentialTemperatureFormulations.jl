@@ -30,6 +30,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
     DefaultTemperatureSolver, default_temperature_solver,
     PrecipitationDragHeating, FixedVolumePhaseChange, SubgridDissipativeHeating,
     materialize_phase_change_source, subgrid_dissipation,
+    tendency_phase_change, sediments_through_model,
     moisture_prognostic_name, condensate_field_names, condensate_liquid_fraction
 using Breeze.Solvers: materialize_solver
 using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, StaticEnergyState, with_temperature,

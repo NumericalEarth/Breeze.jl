@@ -241,6 +241,7 @@ function AtmosphereModel(grid;
     # Materialize dynamics and formulation
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics, formulation)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
+    validate_energy_closing_sources(formulation, microphysics)
 
     # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3
     # (per-substep solve) and with AcousticRungeKutta3 (moisture and tracers via the generic

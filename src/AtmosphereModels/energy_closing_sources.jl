@@ -66,6 +66,33 @@ materialize_phase_change_source(option, dynamics) = nothing
 """
 $(TYPEDSIGNATURES)
 
+Whether `microphysics` converts water between phases through its microphysical tendencies
+(`compute_microphysical_tendencies!`), where the fixed-volume phase-change source is formed.
+`true` by default; operator-split schemes that convert water in `microphysics_model_update!`
+return `false`.
+"""
+tendency_phase_change(microphysics) = true
+
+"""
+$(TYPEDSIGNATURES)
+
+Whether the precipitation of `microphysics` falls through the model's sedimentation tendencies,
+where the drag heating of falling condensate is credited. `true` by default; schemes that move
+or remove precipitation in their own update return `false`.
+"""
+sediments_through_model(microphysics) = true
+
+"""
+$(TYPEDSIGNATURES)
+
+Throw an `ArgumentError` when an energy-closing source requested by `formulation` cannot act with
+`microphysics`. Called when the model is built, after the formulation is materialized.
+"""
+validate_energy_closing_sources(formulation, microphysics) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Hooks around `compute_microphysical_tendencies!` through which a formulation forms a source from
 the microphysical tendencies of the water densities: `compute_tendencies!` calls
 `begin_phase_change_source!` before the microphysics adds its tendencies to `Gⁿ`, and

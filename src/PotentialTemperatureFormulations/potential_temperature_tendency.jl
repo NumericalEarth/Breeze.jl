@@ -261,21 +261,14 @@ AtmosphereModels.finish_phase_change_source!(formulation::LiquidIcePotentialTemp
 
 accumulate_phase_change_source!(::Nothing, model, sign) = nothing
 
+# The scheme was checked when the model was built (see `validate_energy_closing_sources`)
 function accumulate_phase_change_source!(::FixedVolumePhaseChange, model, sign)
     microphysics = model.microphysics
     isnothing(microphysics) && return nothing
-    moisture_prognostic_name(microphysics) === :ρqᵛ ||
-        throw(ArgumentError("fixed_volume_phase_change needs a microphysics scheme whose prognostic moisture " *
-                            "is the vapor density ρqᵛ (non-equilibrium cloud formation), got " *
-                            "$(moisture_prognostic_name(microphysics))"))
 
     G = model.timestepper.Gⁿ
-    condensates = map(condensate_field_names(microphysics)) do name
-        f = condensate_liquid_fraction(microphysics, Val(name))
-        isnothing(f) && throw(ArgumentError("fixed_volume_phase_change: condensate $name declares no " *
-                                            "condensate_liquid_fraction"))
-        (getproperty(G, name), f)
-    end
+    condensates = map(name -> (getproperty(G, name), condensate_liquid_fraction(microphysics, Val(name))),
+                      condensate_field_names(microphysics))
 
     grid = model.grid
     launch!(grid.architecture, grid, :xyz, _accumulate_phase_change_source!, G.ρθ, sign, grid, G.ρqᵛ,

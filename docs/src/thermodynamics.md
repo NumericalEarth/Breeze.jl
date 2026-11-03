@@ -1250,7 +1250,9 @@ turned on with
   potential energy between the face and the center of the cell it enters or leaves. A cell
   the condensate falls through therefore gains ``g Δz`` per unit mass, and the heating summed over
   a column equals the potential energy that the falling condensate loses. It applies on both
-  dynamical cores, to explicit and to adaptive implicit sedimentation.
+  dynamical cores, to explicit and to adaptive implicit sedimentation, for schemes whose
+  precipitation falls through the model's sedimentation; `DCMIP2016KesslerMicrophysics` and
+  `InstantaneousPrecipitation`, which move or remove it in their own update, are rejected.
 
 - **Fixed-volume phase change** (`fixed_volume_phase_change`, compressible core only). The
   microphysics converts water between its phases at fixed density. Holding ``θˡⁱ`` fixed
@@ -1270,7 +1272,7 @@ turned on with
   microphysical conversion conserve ``ρ𝓊`` exactly in the limit of small time steps. The
   Jacobians are evaluated analytically per cell; the source needs no fluxes and no extra fields.
   It applies to tendency-based microphysics whose prognostic moisture is the vapor density
-  (non-equilibrium cloud formation). On the anelastic core the thermodynamic pressure is the
+  (non-equilibrium cloud formation); other schemes are rejected when the model is built. On the anelastic core the thermodynamic pressure is the
   reference pressure ``pᵣ(z)``, phase change at fixed ``θˡⁱ`` is already exact, and the option is
   ignored.
 
