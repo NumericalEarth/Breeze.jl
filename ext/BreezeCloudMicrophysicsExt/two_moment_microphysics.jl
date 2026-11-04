@@ -822,7 +822,7 @@ Mass tendency for cloud liquid [kg/kg/s]
     # Compute radius: rᵃᶜᵗ = 2A / (3𝒮), capped at 1 μm (1e-6 m)
     # Use rⁿᵘᶜ as fallback when 𝒮 is negligible (no supersaturation) or no activation
     is_activating = (dNᶜˡ_act > eps(FT)) & (𝒮 > eps(FT))
-    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(𝒮, eps(FT)))), rⁿᵘᶜ)
+    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(𝒮, eps(FT)))), FT(rⁿᵘᶜ))
 
     # Mass of a single activated droplet [kg]
     # m = (4π/3) * r³ * ρᴸ
