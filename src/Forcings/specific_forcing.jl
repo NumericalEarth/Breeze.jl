@@ -82,7 +82,7 @@ end
 
 function specific_forcing_density(name, context)
     if name ∈ context.continuity_density_names
-        return context.continuity_density_field
+        return context.continuity_density
     else
         return context.total_density
     end

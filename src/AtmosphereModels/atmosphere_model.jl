@@ -699,7 +699,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # fractions as the tendency kernels.
     forcing_context = (; coriolis,
                          density=continuity_density_field,
-                         continuity_density_field,
+                         continuity_density=continuity_density_field,
                          total_density=mass_density,
                          continuity_density_names,
                          specific_fields,

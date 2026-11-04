@@ -120,7 +120,7 @@ $(TYPEDSIGNATURES)
 
 Return the reference density field for `AnelasticDynamics`.
 
-For anelastic models, the dynamics density is the time-independent
+For anelastic models, the continuity density is the time-independent
 reference state density ``ρᵣ(z)``.
 """
 AtmosphereModels.continuity_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density

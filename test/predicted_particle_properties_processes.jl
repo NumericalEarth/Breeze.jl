@@ -1316,19 +1316,19 @@ end
         ρ = FT(1.0)
         # Above freezing: positive melting
         T_warm = FT(275.15)    # +2C
-        rate_warm = ice_melting_rate(p3, qi, ni, FT(0), T_warm, qv, Ff, ρf, ρ,
+        rate_warm = ice_melting_rate(p3, qi, ni, FT(0), T_warm, qv, Ff, ρf, ρ, ρ,
                                      constants, air_transport_properties(T_warm, P, constants))
         @test rate_warm > 0
 
         # Below freezing: zero melting
         T_cold = FT(263.15)    # -10C
-        rate_cold = ice_melting_rate(p3, qi, ni, FT(0), T_cold, qv, Ff, ρf, ρ,
+        rate_cold = ice_melting_rate(p3, qi, ni, FT(0), T_cold, qv, Ff, ρf, ρ, ρ,
                                      constants, air_transport_properties(T_cold, P, constants))
         @test rate_cold == 0
 
         # Exactly at freezing: zero (no ΔT to drive melting)
         T_freeze = FT(273.15)
-        rate_freeze = ice_melting_rate(p3, qi, ni, FT(0), T_freeze, qv, Ff, ρf, ρ,
+        rate_freeze = ice_melting_rate(p3, qi, ni, FT(0), T_freeze, qv, Ff, ρf, ρ, ρ,
                                        constants, air_transport_properties(T_freeze, P, constants))
         @test rate_freeze == 0
 
@@ -1379,7 +1379,7 @@ end
 
         # No liquid on ice: all melting is partial (goes to coating)
         qwi_zero = FT(0)
-        rates_dry = ice_melting_rates(p3, qi, ni, qwi_zero, T, qv, Ff, ρf, ρ,
+        rates_dry = ice_melting_rates(p3, qi, ni, qwi_zero, T, qv, Ff, ρf, ρ, ρ,
                                       constants, air_transport_properties(T, P, constants))
         total = rates_dry.partial_melting + rates_dry.complete_melting
         @test total > 0
@@ -1393,7 +1393,7 @@ end
 
         # Saturated liquid coating: more complete melting (or approximately equal)
         qwi_high = FT(0.5 * qi)   # 50% liquid fraction
-        rates_wet = ice_melting_rates(p3, qi, ni, qwi_high, T, qv, Ff, ρf, ρ,
+        rates_wet = ice_melting_rates(p3, qi, ni, qwi_high, T, qv, Ff, ρf, ρ, ρ,
                                       constants, air_transport_properties(T, P, constants))
         @test rates_wet.complete_melting >= 0
     end

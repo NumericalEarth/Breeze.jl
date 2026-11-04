@@ -645,14 +645,6 @@ AtmosphereModels.Diagnostics.dynamics_pressure_for_potential_temperature(dynamic
 """
 $(TYPEDSIGNATURES)
 
-Return the density field for potential temperature diagnostics.
-For compressible dynamics, uses the diagnosed total air density (the moisture fractions need total ρ).
-"""
-AtmosphereModels.Diagnostics.dynamics_density_for_potential_temperature(dynamics::CompressibleDynamics) = dynamics.total_density
-
-"""
-$(TYPEDSIGNATURES)
-
 Return the standard pressure for potential temperature diagnostics.
 """
 AtmosphereModels.Diagnostics.dynamics_standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure

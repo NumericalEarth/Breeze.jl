@@ -1045,7 +1045,7 @@ end
 # reconstructions per cell, and at the velocity that tendency transports the tracer with),
 # weighted like it by the total density; the enthalpy each brings is that of the cell it drains
 # (`condensate_content_fluxes`), the cell above the face when the condensate falls, the cell
-# below when an updraft outruns its fall speed; and the cell's coupling-to-total density ratio
+# below when an updraft outruns its fall speed; and the cell's continuity-to-total density ratio
 # turns the resulting change of the specific variable into that of the continuity-density-weighted
 # prognostic.
 #
@@ -1147,8 +1147,8 @@ core) turns it into the change of the continuity-density-weighted prognostic.
     Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
     ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
     ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
-    @inbounds coupling_fraction = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
-    return -(coupling_fraction * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻))
+    @inbounds density_ratio = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
+    return -(density_ratio * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻))
 end
 
 # Σᵢ [cᵢ(Wᵢ) Fᵢ(Wᵢ) − cᵢ(wᵗ) Fᵢ(wᵗ)] through the lower and upper faces of cell (i, j, k): the
