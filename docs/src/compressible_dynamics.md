@@ -145,7 +145,8 @@ unsaturated air this exceeds the mixture value ``\sqrt{γ^m R^m T}`` by the fact
 the stage-entry pressure gradient and
 [`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping), which both use
 the exact equation of state. Weighting the pressure gradient and gravity by ``ρ^d / ρ``, as
-WRF-ARW does, would give ``γ^m R^m T`` exactly with the same ``C^L``.
+WRF-ARW does, would give ``γ^m R^m T`` exactly with the same ``C^L``
+([#1210](https://github.com/NumericalEarth/Breeze.jl/issues/1210)).
 
 Only the substep loop linearizes the equation of state:
 [`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping) diagnoses the full

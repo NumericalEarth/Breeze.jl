@@ -368,7 +368,8 @@ outer_step_start_transport_velocities(model) = model.velocities
 # the exact equation of state. The former γᵐRᵐ coefficient was low by about ρᵈ / ρ in unsaturated
 # air, which offset the inertia, but only for the part of the pressure the loop advances.
 # TODO: weight the pressure gradient and gravity on ρᵈu by ρᵈ / ρ throughout the compressible core
-# (as WRF-ARW does; v4 technical note, §2.2). With that weighting, Cᴸ gives γᵐ Rᵐ T exactly.
+# (as WRF-ARW does; v4 technical note, §2.2), NumericalEarth/Breeze.jl#1210. With that weighting,
+# Cᴸ gives γᵐ Rᵐ T exactly.
 #
 # Only this loop linearizes the equation of state. `ExplicitTimeStepping` diagnoses the full
 # pressure every stage, and anelastic dynamics hold the thermodynamic pressure at the reference
