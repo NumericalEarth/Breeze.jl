@@ -264,15 +264,24 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
+                                           solar_position = ApparentSolarPosition(coordinate = (0, 45),
+                                                                                  epoch      = DateTime(2024, 6, 21, 16, 0, 0)),
                                            schedule = IterationInterval(3))
         model_dynamics = dynamics == :anelastic ?
             AnelasticDynamics(ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)) :
-            CompressibleDynamics()
-        clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
-        model = AtmosphereModel(grid; clock, dynamics=model_dynamics, thermodynamic_constants=constants,
+            CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 101500,
+                                 reference_potential_temperature = z -> 299)
+        timestepper = dynamics == :anelastic ? :SSPRungeKutta3 : :AcousticRungeKutta3
+        clock = Clock(time=0.0)
+        model = AtmosphereModel(grid; clock, dynamics=model_dynamics, thermodynamic_constants=constants, timestepper,
                                 microphysics=DCMIP2016KesslerMicrophysics(), advection=nothing, radiation)
-        set!(model; θ = z -> 299 + 3e-3 * z, qᵛ = z -> 0.016 * exp(-z / 2000),
-                    qᶜˡ = z -> 6e-4 * exp(-((z - 1200) / 200)^2), qʳ = z -> 2e-3 * exp(-((z - 900) / 300)^2))
+        initial_state = (; θ = z -> 299 + 3e-3 * z, qᵛ = z -> 0.016 * exp(-z / 2000),
+                           qᶜˡ = z -> 6e-4 * exp(-((z - 1200) / 200)^2), qʳ = z -> 2e-3 * exp(-((z - 900) / 300)^2))
+        if dynamics == :anelastic
+            set!(model; initial_state...)
+        else
+            set!(model; ρ = z -> 1.17 * exp(-z / 9000), initial_state..., enforce_mass_conservation = false)
+        end
 
         flux_divergence = radiation.flux_divergence
         for n in 1:6
