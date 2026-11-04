@@ -131,7 +131,7 @@ end
     Tˢ = wall_value(ℓ, m, grid, side, df.surface_temperature, clock)
     u  = near_wall_velocity(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
     U² = wall_wind_speed²(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
-    Uᵍ² = gustiness²(i, j, k, grid, df.gustiness, fields)
+    Uᵍ² = gustiness_squared(i, j, k, grid, df.gustiness, fields)
     Ũ  = sqrt(U² + Uᵍ²)
     constants = df.thermodynamic_constants
     pˢ = wall_air_pressure(i, j, k, grid, side, df.direction, fields, constants)
@@ -178,7 +178,7 @@ Oceananigans.FieldBoundaryConditions, with boundary conditions
 ├── east: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ├── south: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ├── north: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
-├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=DefaultGustiness)
+├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=DefaultGustiness())
 ├── top: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 └── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ```
@@ -192,12 +192,12 @@ drag = BulkDrag(coefficient=1e-3)
 
 # output
 Oceananigans.FieldBoundaryConditions, with boundary conditions
-├── west: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness)
-├── east: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness)
+├── west: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness())
+├── east: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness())
 ├── south: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ├── north: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
-├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness)
-├── top: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness)
+├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness())
+├── top: FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=DefaultGustiness())
 └── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: nothing)
 ```
 """

@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.BoundaryConditions: BulkDrag, DefaultGustiness, TKEGustiness, materialize_gustiness, gustiness²,
+using Breeze.BoundaryConditions: BulkDrag, DefaultGustiness, TKEGustiness, materialize_gustiness, gustiness_squared,
                                   surface_layer_state
 using Breeze.AtmosphereModels: total_density
 using Oceananigans
@@ -142,7 +142,7 @@ end
     constant = surface_flux_model(grid; closure, e, gustiness=sqrt(2e/3))
     gustiness = bottom_gustiness(tke.moisture_density)
     @test gustiness isa TKEGustiness
-    @test @allowscalar(gustiness²(1, 1, 1, grid, gustiness, surface_layer_state(tke))) ≈ 1
+    @test @allowscalar(gustiness_squared(1, 1, 1, grid, gustiness, surface_layer_state(tke))) ≈ 1
     @test all(surface_fluxes(tke) .≈ surface_fluxes(constant))
 
     # Calm air: fluxes are nonzero and of free-convection size

@@ -30,7 +30,7 @@ vapor(T, ℋ) = BulkVaporFlux(coefficient=C, surface_temperature=T, surface_rela
 ρqᵛ_bcs.top
 
 # output
-FluxBoundaryCondition: BulkVaporFluxFunction(coefficient=0.006, gustiness=DefaultGustiness)
+FluxBoundaryCondition: BulkVaporFluxFunction(coefficient=0.006, gustiness=DefaultGustiness())
 ```
 
 On every wall the fluxes carry heat and vapor into the domain when the wall is warmer or

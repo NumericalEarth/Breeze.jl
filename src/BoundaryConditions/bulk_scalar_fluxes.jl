@@ -148,7 +148,7 @@ end
     Tˢ = wall_value(ℓ, m, grid, side, bf.surface_temperature, clock)
 
     U² = wall_wind_speed²(i, j, k, grid, side, nothing, fields, bf.filtered_velocities)
-    Uᵍ² = gustiness²(i, j, k, grid, bf.gustiness, fields)
+    Uᵍ² = gustiness_squared(i, j, k, grid, bf.gustiness, fields)
     Ũ = sqrt(U² + Uᵍ²)
 
     constants = bf.thermodynamic_constants
@@ -279,7 +279,7 @@ end
     Δq = bulk_vapor_difference(i, j, k, fields, bf.filtered_scalar, qᵛˢ)
 
     U² = wall_wind_speed²(i, j, k, grid, side, nothing, fields, bf.filtered_velocities)
-    Uᵍ² = gustiness²(i, j, k, grid, bf.gustiness, fields)
+    Uᵍ² = gustiness_squared(i, j, k, grid, bf.gustiness, fields)
     Ũ = sqrt(U² + Uᵍ²)
 
     Cᵛ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, Tˢ, bf.filtered_velocities, pˢ, Uᵍ²)

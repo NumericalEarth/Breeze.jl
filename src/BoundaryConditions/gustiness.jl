@@ -81,7 +81,7 @@ function TKEGustiness(FT = Oceananigans.defaults.FloatType; coefficient = sqrt(2
     return TKEGustiness(convert(FT, coefficient), convert(FT, minimum))
 end
 
-Base.summary(::DefaultGustiness) = "DefaultGustiness"
+Base.summary(::DefaultGustiness) = "DefaultGustiness()"
 Base.show(io::IO, ::DefaultGustiness) = print(io, "DefaultGustiness()")
 
 Base.summary(g::TKEGustiness{FT}) where FT =
@@ -138,12 +138,12 @@ end
 ##### Gustiness in the kernels: the squared gustiness Uᵍ² next to the wall
 #####
 
-@inline gustiness²(i, j, k, grid, Uᵍ::Number, fields) = Uᵍ^2
+@inline gustiness_squared(i, j, k, grid, Uᵍ::Number, fields) = Uᵍ^2
 
 # The TKE of the near-wall cell, e = ρe / ρ, with `fields.ρ` the total density from
 # `dynamics_thermodynamic_fields`. The bulk fluxes are evaluated outside `update_state!`, while the
 # tracers hold their densities.
-@inline function gustiness²(i, j, k, grid, gustiness::TKEGustiness, fields)
+@inline function gustiness_squared(i, j, k, grid, gustiness::TKEGustiness, fields)
     ρe = @inbounds getproperty(fields, TKE_density_name)[i, j, k]
     ρ = @inbounds fields.ρ[i, j, k]
     e = max(0, ρe / ρ)
