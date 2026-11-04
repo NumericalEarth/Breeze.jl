@@ -232,6 +232,7 @@ export
     Centered, UpwindBiased, WENO, FluxFormAdvection,
     CompressibleVectorInvariant, CompressibleWENOVectorInvariant, SplitVerticalAdvection, UnsplitVerticalAdvection,
     CornerVorticityPairing, UpwindVorticityPairing, AveragedVorticityPairing, GradientFormUpwinding,
+    MomentumStencil, ScaledSelfStencil,
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
     NormalFlowBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     BoundaryConditionOperation,

@@ -158,6 +158,8 @@ weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(o
 full_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 5), vorticity_pairing = UpwindVorticityPairing(self_part = false), core_order = core)
 averaged_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 5), vorticity_pairing = AveragedVorticityPairing(), core_order = core)
 corner_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 5), vorticity_pairing = CornerVorticityPairing(), core_order = core)
+scaled_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 5), vorticity_stencil = ScaledSelfStencil(), core_order = core)
+momentum_weno_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = WENO(order = 5), vorticity_stencil = MomentumStencil(), core_order = core)
 averaged_centered_vorticity(core = 2) = CompressibleVectorInvariant(vorticity_scheme = Centered(order = 2), vorticity_pairing = AveragedVorticityPairing(), core_order = core)
 weno_divergence() = CompressibleVectorInvariant(divergence_scheme = WENO(order = 5))
 weno_kinetic_energy() = CompressibleVectorInvariant(kinetic_energy_gradient_scheme = WENO(order = 5))
@@ -214,7 +216,8 @@ flux_form() = Centered(order = 2)
                 # The fourth-order core relies on the transposition of its interpolations, which the
                 # reduced-order stencils next to closed walls break, so it is exact on the periodic grid only.
                 cores = name == "rectilinear" ? (2, 4) : (2,)
-                for core in cores, build in (centered, unsplit, weno_vorticity, full_weno_vorticity, corner_weno_vorticity, averaged_weno_vorticity, averaged_centered_vorticity)
+                for core in cores, build in (centered, unsplit, weno_vorticity, full_weno_vorticity, corner_weno_vorticity, averaged_weno_vorticity, averaged_centered_vorticity,
+                                                 scaled_weno_vorticity, momentum_weno_vorticity)
                     @test abs(kinetic_energy_production(model, build(core))) < roundoff
                 end
 
@@ -346,11 +349,12 @@ end
 ##### The stored vorticity deviations reproduce the recomputed ones
 #####
 
-@testset "Stored vorticity deviations [$FT]" for FT in (Float32, Float64)
+@testset "Stored vorticity deviations [$FT, $(summary(stencil))]" for FT in (Float32, Float64),
+                                                                       stencil in (Oceananigans.Advection.VelocityStencil(), ScaledSelfStencil())
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size = (16, 16, 8), halo = (6, 6, 6), extent = (1e3, 1e3, 1e3),
                            topology = (Periodic, Bounded, Bounded))
-    model = compressible_model(grid, CompressibleWENOVectorInvariant())
+    model = compressible_model(grid, CompressibleWENOVectorInvariant(vorticity_stencil = stencil))
     @test model.advection.momentum.vorticity_deviations isa NamedTuple
 
     Random.seed!(11)
@@ -358,7 +362,7 @@ end
                                 v = (x, y, z) -> cos(2π * x / 1e3) * sin(π * y / 1e3) + 1e-1 * rand())
 
     stored = model.advection.momentum
-    recomputed = materialize_advection(CompressibleWENOVectorInvariant(), grid)
+    recomputed = materialize_advection(CompressibleWENOVectorInvariant(vorticity_stencil = stencil), grid)
     @test isnothing(recomputed.vorticity_deviations)
 
     Breeze.AtmosphereModels.update_advection_auxiliaries!(stored, grid, model.velocities, model.momentum)

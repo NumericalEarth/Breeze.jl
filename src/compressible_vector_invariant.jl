@@ -269,6 +269,8 @@ Keyword arguments
   scheme (e.g. `WENO(order=9)`) reconstructs it along the direction of transport, paired symmetrically.
 
 - `vorticity_stencil`: Smoothness stencil of a `WENO` vorticity reconstruction. Default: `VelocityStencil()`.
+  `ScaledSelfStencil()` measures the reconstructed vorticity times √Az, and `MomentumStencil()` the
+  horizontal momentum.
 
 - `vertical_advection_scheme`: Reconstruction of the vertical flux of horizontal momentum and of the
   horizontal fluxes of vertical momentum. Default: `EnergyConserving()` (centered).
@@ -638,12 +640,16 @@ Base.summary(::ScaledSelfStencil) = "ScaledSelfStencil"
 $(TYPEDEF)
 
 Smoothness stencil of a `WENO` vorticity reconstruction that measures the smoothness of the horizontal
-momentum (ρu, ρv), as `VelocityStencil` measures that of the velocities. Requires the stored deviations of
-`UpwindVorticityPairing` (the model supplies the momentum when it stores them).
+momentum (ρu, ρv), as `VelocityStencil` measures that of the velocities. It needs the stored deviations of
+`UpwindVorticityPairing` (the model supplies the momentum when it stores them); without them, as in a scheme
+materialized outside a model, it falls back to `VelocityStencil()`.
 """
 struct MomentumStencil end
 
 Base.summary(::MomentumStencil) = "MomentumStencil"
+
+# Without the stored deviations the momentum is not at hand, and the velocity smoothness is used instead
+@inline smoothness_stencil(::MomentumStencil, ψ) = VelocityStencil()
 
 # The reconstructed vorticity as a function of (ρu, ρv, u, v), for the momentum smoothness stencil
 @inline ζ₃_momentum_argsᶠᶠᶜ(i, j, k, grid, ρu, ρv, u, v) = ζ₃ᶠᶠᶜ(i, j, k, grid, u, v)
