@@ -101,7 +101,7 @@ refreshed before every RK stage:
 
 ``Π^L`` uses the formulation's Exner exponent ``\hat κ``, and ``γ^m R^m|_L`` is defined so that
 ``C^L = γ^m R^m|_L Π^L`` is the slope ``∂p/∂(ρθ)`` of the compressible core's equation of state at
-``U^L``, at fixed dry and water partial densities. With ``p = ρ R^m T`` and the temperature
+``U^L``, at fixed dry density and composition. With ``p = ρ R^m T`` and the temperature
 inverted from ``c^p_m T = \hat{c}^p Π^L θ^{li} + H^c``, where ``\hat{c}^p`` is the vapor-equivalent
 heat capacity and ``H^c = ℒ^l_0 q^l + ℒ^i_0 q^i`` the condensate latent energy, the slope is the
 dry-air ``γ p / (ρθ)`` with an effective heat-capacity ratio ``γ^e``:
@@ -122,8 +122,32 @@ sensitivity through the selected inversion's actual iterations. Thus zero iterat
 Without condensate all give ``γ^e = 1 / (1 - \hat κ)``, which is
 ``γ^m = c^p_m / c^v_m`` with the vapor-equivalent exponent and ``γ^d`` with the dry one; condensate
 lowers it. In dry air ``C^L = γ^d R^d Π^L``. The symbol ``γ^m R^m|_L = C^L / Π^L`` is named for that
-dry limit; in moist air it is not the product ``γ^m R^m``. Only the substep loop linearizes the
-equation of state:
+dry limit; in moist air it is not the product ``γ^m R^m``.
+
+The substep loop also moves the dry density. It leaves the water densities alone, but the stage
+then advects them with the loop's time-averaged velocity, so an acoustic compression keeps the
+composition. At fixed composition and ``ρθ``, the pressure depends on the dry density only through
+the condensate latent energy:
+
+```math
+\frac{∂p}{∂ρ^d} = C^L θ^L \frac{H^c}{c^p_m T - H^c}
+```
+
+at the converged root. Without condensate this vanishes for every inversion, so
+``p' = C^L (ρθ)'`` is the complete linearization. In cloud the loop omits it; for 5 g/kg of cloud
+liquid it is about 5% of ``C^L θ^L``.
+
+The momentum is the dry-mass momentum ``ρ^d \boldsymbol{u}``, and the compressible core applies
+the full pressure gradient and gravity ``-∇p - g ρ \hat{\boldsymbol{z}}`` to it. Its acoustic
+inertia is therefore ``ρ^d`` rather than ``ρ``. Thus the sound speed is ``\sqrt{γ^e p / ρ^d}``. In
+unsaturated air this exceeds the mixture value ``\sqrt{γ^m R^m T}`` by the factor
+``\sqrt{ρ / ρ^d}``, about 1% for 20 g/kg of vapor. ``C^L`` gives the substep loop the same speed as
+the stage-entry pressure gradient and
+[`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping), which both use
+the exact equation of state. Weighting the pressure gradient and gravity by ``ρ^d / ρ``, as
+WRF-ARW does, would give ``γ^m R^m T`` exactly with the same ``C^L``.
+
+Only the substep loop linearizes the equation of state:
 [`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping) diagnoses the full
 pressure from it every stage, and anelastic dynamics hold the thermodynamic pressure at the
 reference state.

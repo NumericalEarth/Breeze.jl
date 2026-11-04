@@ -32,7 +32,7 @@ using Breeze.AtmosphereModels: SlowDynamics,
                                buoyancy_forceᶜᶜᶜ, dynamics_density, standard_pressure
 using Breeze.Thermodynamics: ExnerReferenceState, surface_density, LiquidIceDensityState, MoistureMassFractions,
                              VaporEquivalentExponent, DryExponent, temperature, mixture_gas_constant,
-                             mixture_heat_capacity, dry_air_gas_constant
+                             mixture_heat_capacity, dry_air_gas_constant, condensate_latent_energy
 using Oceananigans.TimeSteppers: update_state!
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -682,13 +682,14 @@ end
 #####
 
 # The loop's p′ = Cᴸ (ρθ)′ must use the slope ∂p/∂(ρθ) of the equation of state the compressible core
-# closes the thermodynamics with, at fixed dry and water partial densities and for the formulation's
+# closes the thermodynamics with, at fixed dry density and composition and for the formulation's
 # Exner exponent: finite differences of the core's own inversion θ → T → p = ρ Rᵐ T, in cells that
 # are dry, moist and cloudy, for converged, stopped and non-iterated inversions, whose slopes
 # differ in cloud. The mixture γᵐ Rᵐ with the dry exponent, which the cache held before, is low by
 # the vapor mass fraction in unsaturated air; in cloud the condensate terms of the definition of
 # θˡⁱ enter with the opposite sign and leave a smaller mismatch, still far outside the tolerance
-# of the slope.
+# of the slope. The loop also moves ρᵈ; the stage carries the water along, so an acoustic
+# compression keeps the composition, and without condensate it changes p by Cᴸ (ρθ)′ alone.
 @testset "Linearized pressure coefficient is the slope of the equation of state [$FT, $(nameof(typeof(κ̂))), $(summary(temperature_solver))]" for FT in test_float_types(),
         κ̂ in (VaporEquivalentExponent(), DryExponent()),
         temperature_solver in (NewtonSolver(), nothing, FixedIterations(0), FixedIterations(1),
@@ -739,6 +740,20 @@ end
         pressure(θ′) = ρ[I] * Rᵐ * temperature(LiquidIceDensityState(θ′, q, pˢᵗ, ρ[I], solver, κ̂), constants)
         slope = (pressure(θ * (1 + ε)) - pressure(θ * (1 - ε))) / (2ε * θ * ρᵈ[I])
         @test Πᴸ[I] * γRᵐᴸ[I] ≈ slope rtol = rtol
+
+        # Compress every partial density and ρθ by the same factor, at fixed θ and composition.
+        compressed_pressure(s) = s * ρ[I] * Rᵐ * temperature(LiquidIceDensityState(θ, q, pˢᵗ, s * ρ[I], solver, κ̂), constants)
+        compression_slope = (compressed_pressure(1 + ε) - compressed_pressure(1 - ε)) / (2ε * ρᵈ[I])
+        if qˡ[I] == 0
+            @test Πᴸ[I] * γRᵐᴸ[I] * θ ≈ compression_slope rtol = rtol
+        elseif temperature_solver === NewtonSolver()
+            # In cloud the loop omits ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ) at the converged root.
+            T  = temperature(LiquidIceDensityState(θ, q, pˢᵗ, ρ[I], solver, κ̂), constants)
+            Hᶜ = condensate_latent_energy(q, constants)
+            omitted = Hᶜ / (mixture_heat_capacity(q, constants) * T - Hᶜ)
+            @test omitted > FT(0.01)
+            @test Πᴸ[I] * γRᵐᴸ[I] * θ * (1 + omitted) ≈ compression_slope rtol = rtol
+        end
 
         if qᵛ[I] == 0
             @test Πᴸ[I] * γRᵐᴸ[I] ≈ cᵖᵈ * Rᵈ / (cᵖᵈ - Rᵈ) * (p[I] / pˢᵗ)^κᵈ rtol = 100eps(FT)

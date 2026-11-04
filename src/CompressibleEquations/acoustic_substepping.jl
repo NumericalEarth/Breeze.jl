@@ -333,9 +333,9 @@ outer_step_start_transport_velocities(model) = model.velocities
 # slope ∂p/∂(ρθ) of the equation of state the compressible core closes the thermodynamics with
 # (`temperature_and_pressure`): p = ρ Rᵐ T, with T inverted from cᵖᵐ T = ĉᵖ Π̂ θˡⁱ + Hᶜ, where
 # Π̂ = (p / pˢᵗ)^κ̂ with the formulation's Exner exponent κ̂ (`liquid_ice_exner_exponent`), ĉᵖ is the
-# vapor-equivalent heat capacity and Hᶜ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ the condensate latent energy. The loop
-# holds the dry and water partial densities fixed while it moves ρθ, so at fixed composition the
-# slope is the dry-air γ p / (ρθ) with an effective heat-capacity ratio γᵉ:
+# vapor-equivalent heat capacity and Hᶜ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ the condensate latent energy. At fixed
+# dry density and composition the slope is the dry-air γ p / (ρθ) with an effective heat-capacity
+# ratio γᵉ:
 #
 #   ∂p/∂(ρᵈθ) = γᵉ p / (ρᵈθ) ,    1 / γᵉ = 1 − κ̂ + Hᶜ / (ĉᵖ Π̂ θ) ,
 #
@@ -346,6 +346,28 @@ outer_step_start_transport_velocities(model) = model.velocities
 # stage-entry pressure and γᵐRᵐᴸ = Cᴸ / Πᴸ, which is γᵈRᵈ in dry air. γᵐRᵐᴸ is named for that dry
 # limit; in moist air it is not the product γᵐ Rᵐ. The moisture is the one `update_state!`
 # diagnosed together with the pressure.
+#
+# The loop also moves the dry density, through ρ′. It leaves the water densities alone, but the
+# stage then advects them with the loop's time-averaged velocity (`transport_velocities`), so an
+# acoustic compression keeps the composition, and the pressure re-diagnosed at the next stage
+# includes the compressed water. At fixed composition and ρᵈθ, p depends on ρᵈ only through the
+# condensate latent energy, ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ) at the converged root. This term is zero
+# without condensate for every inversion, so there p′ = Cᴸ (ρθ)′ is the complete linearization.
+# In cloud the loop drops it, as the former γᵐRᵐ coefficient did; it is 5.5% of Cᴸ θ for 5 g/kg of
+# cloud liquid. Linearizing at fixed water partial densities instead would add −γᵉ Rᵛ T ρᵛ / ρᵈ in
+# unsaturated air, which removes the stiffness of vapor that the stage does compress.
+# TODO: carry Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ) ρ′ in p′ (cached per stage next to Cᴸ, differentiated through
+# the selected inversion). It enters the horizontal pressure gradient and the vertical Schur
+# complement next to Cᴸ θᴸ.
+#
+# The momentum is dry-mass momentum ρᵈu. The whole compressible core applies the full −∇p − g ρ to
+# it, so its acoustic inertia is ρᵈ, not ρ: the sound speed is (Cᴸ θ)^½ = (γᵉ p / ρᵈ)^½, which is
+# (ρ / ρᵈ)^½ times the mixture value (γᵐ Rᵐ T)^½ in unsaturated air, 1% fast for 20 g/kg. With Cᴸ
+# the loop agrees with the stage-entry ∇pᴸ and with `ExplicitTimeStepping`, both re-diagnosed from
+# the exact equation of state. The former γᵐRᵐ coefficient was low by about ρᵈ / ρ in unsaturated
+# air, which offset the inertia, but only for the part of the pressure the loop advances.
+# TODO: weight the pressure gradient and gravity on ρᵈu by ρᵈ / ρ throughout the compressible core
+# (as WRF-ARW does; v4 technical note, §2.2). With that weighting, Cᴸ gives γᵐ Rᵐ T exactly.
 #
 # Only this loop linearizes the equation of state. `ExplicitTimeStepping` diagnoses the full
 # pressure every stage, and anelastic dynamics hold the thermodynamic pressure at the reference
