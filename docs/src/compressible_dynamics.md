@@ -103,17 +103,19 @@ refreshed before every RK stage:
 ``C^L = γ^m R^m|_L Π^L`` is the slope ``∂p/∂(ρθ)`` of the compressible core's equation of state at
 ``U^L``, at fixed dry and water partial densities. With ``p = ρ R^m T`` and the temperature
 inverted from ``c^p_m T = \hat{c}^p Π^L θ^{li} + H^c``, where ``\hat{c}^p`` is the vapor-equivalent
-heat capacity and ``H^c = ℒ^l_0 q^l + ℒ^i_0 q^i`` the condensate latent energy,
+heat capacity and ``H^c = ℒ^l_0 q^l + ℒ^i_0 q^i`` the condensate latent energy, the slope is the
+dry-air ``γ p / (ρθ)`` with an effective heat-capacity ratio ``γ^e``:
 
 ```math
-C^L = \frac{ρ}{ρ^d} \, \frac{R^m \hat{c}^p Π^L}{c^p_m (1 - \hat κ) + \hat κ H^c / T} ,
+C^L = \frac{γ^e p^L}{(ρθ)^L} , \qquad
+\frac{1}{γ^e} = 1 - \hat κ + \frac{H^c}{\hat{c}^p Π^L θ^L} ,
 ```
 
-which is ``γ^d R^d Π^L`` in dry air. In unsaturated air it is ``(ρ / ρ^d) R^m Π^L / (1 - \hat κ)``,
-the gas constant per unit dry mass pairing with the dry-coupled prognostic ``ρθ = ρ^d θ``: that is
-``(ρ / ρ^d) γ^m R^m Π^L`` with the vapor-equivalent exponent and ``(ρ / ρ^d) γ^d R^m Π^L`` with the
-dry one. The symbol ``γ^m R^m|_L`` is named for its dry limit; in moist air it is not the product
-``γ^m R^m``. Only the substep loop linearizes the equation of state:
+where ``\hat{c}^p Π^L θ^L = c^p_m T - H^c``. Without condensate ``γ^e = 1 / (1 - \hat κ)``, which is
+``γ^m = c^p_m / c^v_m`` with the vapor-equivalent exponent and ``γ^d`` with the dry one; condensate
+lowers it. In dry air ``C^L = γ^d R^d Π^L``. The symbol ``γ^m R^m|_L = C^L / Π^L`` is named for that
+dry limit; in moist air it is not the product ``γ^m R^m``. Only the substep loop linearizes the
+equation of state:
 [`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping) diagnoses the full
 pressure from it every stage, and anelastic dynamics hold the thermodynamic pressure at the
 reference state.

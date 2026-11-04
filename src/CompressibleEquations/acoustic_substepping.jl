@@ -216,7 +216,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     linearization_potential_temperature = CenterField(grid, substep_floattype)
 
     # γᵐRᵐᴸ — the only cached moisture quantity. Recomputed once per stage
-    # refresh from the live moisture and temperature.
+    # refresh from the live moisture and pressure.
     linearization_gamma_R_mixture = CenterField(grid, substep_floattype)
 
     density_perturbation = CenterField(grid, substep_floattype)
@@ -334,16 +334,16 @@ outer_step_start_transport_velocities(model) = model.velocities
 # (`temperature_and_pressure`): p = ρ Rᵐ T, with T inverted from cᵖᵐ T = ĉᵖ Π̂ θˡⁱ + Hᶜ, where
 # Π̂ = (p / pˢᵗ)^κ̂ with the formulation's Exner exponent κ̂ (`liquid_ice_exner_exponent`), ĉᵖ is the
 # vapor-equivalent heat capacity and Hᶜ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ the condensate latent energy. The loop
-# holds the dry and water partial densities fixed while it moves ρθ, so at fixed composition
+# holds the dry and water partial densities fixed while it moves ρθ, so at fixed composition the
+# slope is the dry-air γ p / (ρθ) with an effective heat-capacity ratio γᵉ:
 #
-#   ∂p/∂(ρᵈθ) = (ρ / ρᵈ) Rᵐ ĉᵖ Π̂ / [cᵖᵐ (1 − κ̂) + κ̂ Hᶜ / T] .
+#   ∂p/∂(ρᵈθ) = γᵉ p / (ρᵈθ) ,    1 / γᵉ = 1 − κ̂ + Hᶜ / (ĉᵖ Π̂ θ) ,
 #
-# Πᴸ is Π̂ at the stage-entry pressure and γᵐRᵐᴸ the remaining factor: the gas constant per unit
-# dry mass, (ρ / ρᵈ) Rᵐ = Rᵈ + rᵛ Rᵛ, times the effective heat-capacity ratio
-# ĉᵖ / [cᵖᵐ (1 − κ̂) + κ̂ Hᶜ / T]. Without condensate that ratio is 1 / (1 − κ̂): γᵐ = cᵖᵐ / cᵛᵐ with
-# the vapor-equivalent exponent and γᵈ with the dry one. In dry air the product reduces to γᵈ Rᵈ Π.
-# γᵐRᵐᴸ is named for that dry limit; in moist air it is not the product γᵐ Rᵐ. The temperature and
-# the moisture are those `update_state!` diagnosed together with the pressure.
+# where ĉᵖ Π̂ θ = cᵖᵐ T − Hᶜ. Without condensate γᵉ = 1 / (1 − κ̂): γᵐ = cᵖᵐ / cᵛᵐ with the
+# vapor-equivalent exponent and γᵈ with the dry one; condensate lowers it. Πᴸ is Π̂ at the
+# stage-entry pressure and γᵐRᵐᴸ = Cᴸ / Πᴸ, which is γᵈRᵈ in dry air. γᵐRᵐᴸ is named for that dry
+# limit; in moist air it is not the product γᵐ Rᵐ. The moisture is the one `update_state!`
+# diagnosed together with the pressure.
 #
 # Only this loop linearizes the equation of state. `ExplicitTimeStepping` diagnoses the full
 # pressure every stage, and anelastic dynamics hold the thermodynamic pressure at the reference
@@ -370,7 +370,6 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
             model.dynamics.dry_density,
             model.dynamics.total_density,
             thermodynamic_density(model.formulation),
-            model.temperature,
             specific_prognostic_moisture(model),
             model.microphysical_fields,
             pˢᵗ, κ̂, constants)
@@ -391,32 +390,33 @@ end
 
 # Πᴸ, θᴸ and γᵐRᵐᴸ per cell (see `refresh_linearization_basic_state!`). `grid_moisture_fractions`
 # dispatches on the microphysics scheme to extract (qᵛ, qˡ, qⁱ) at this cell; for dry runs the
-# returned fractions are vapor-only with qᵛ = 0 (the qᵛ field is zeroed), so Rᵐ = Rᵈ, cᵖᵐ = ĉᵖ = cᵖᵈ
-# and Hᶜ = 0. The guards keep the cache finite before `set!`, when the fields are zero.
-@kernel function _compute_linearization_basic_state!(Π, θ, γRᵐ, grid, microphysics, p, ρᵈ, ρ, ρθ, T, qᵛ, μ,
+# returned fractions are vapor-only with qᵛ = 0 (the qᵛ field is zeroed), so ĉᵖ = cᵖᵈ and Hᶜ = 0.
+# γᵐRᵐᴸ = γᵉ p / (ρᵈθ Πᴸ), with ĉᵖ Π̂ θ written as ĉᵖ Πᴸ ρᵈθ / ρᵈ. The divisors are zero only
+# before `set!`, when the fields are; there they are replaced by one to keep the cache finite.
+@kernel function _compute_linearization_basic_state!(Π, θ, γRᵐ, grid, microphysics, p, ρᵈ, ρ, ρθ, qᵛ, μ,
                                                      pˢᵗ, κ̂, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         pᵢ  = p[i, j, k]
         ρᵈᵢ = ρᵈ[i, j, k]
         ρᵢ  = ρ[i, j, k]
-        Tᵢ  = T[i, j, k]
+        ρθᵢ = ρθ[i, j, k]
         qᵛᵢ = qᵛ[i, j, k]
     end
-    ρ̂ᵈ = ifelse(ρᵈᵢ == 0, one(ρᵈᵢ), ρᵈᵢ)
-    T̂  = ifelse(Tᵢ == 0, one(Tᵢ), Tᵢ)
 
-    q   = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵢ, qᵛᵢ, μ)
-    κ   = exner_exponent(κ̂, q, constants)
-    Rᵐ  = mixture_gas_constant(q, constants)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    ĉᵖ  = vapor_equivalent_heat_capacity(q, constants)
-    Hᶜ  = condensate_latent_energy(q, constants)
+    q  = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵢ, qᵛᵢ, μ)
+    κ  = exner_exponent(κ̂, q, constants)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    Hᶜ = condensate_latent_energy(q, constants)
+
+    Πᵢ  = (pᵢ / pˢᵗ)^κ
+    ρθΠ = ifelse(ρθᵢ * Πᵢ == 0, one(ρθᵢ), ρθᵢ * Πᵢ)
+    γᵉ  = 1 / (1 - κ + ρᵈᵢ * Hᶜ / (ĉᵖ * ρθΠ))
 
     @inbounds begin
-        Π[i, j, k]   = (pᵢ / pˢᵗ)^κ
-        θ[i, j, k]   = ρθ[i, j, k] / ρ̂ᵈ
-        γRᵐ[i, j, k] = (ρᵢ / ρ̂ᵈ) * Rᵐ * ĉᵖ / (cᵖᵐ * (1 - κ) + κ * Hᶜ / T̂)
+        Π[i, j, k]   = Πᵢ
+        θ[i, j, k]   = ρθᵢ / ifelse(ρᵈᵢ == 0, one(ρᵈᵢ), ρᵈᵢ)
+        γRᵐ[i, j, k] = γᵉ * pᵢ / ρθΠ
     end
 end
 

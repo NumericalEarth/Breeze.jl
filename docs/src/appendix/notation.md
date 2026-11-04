@@ -208,8 +208,9 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
 | ``Π^L``                             | `Πᴸ`   | `AcousticSubstepper.linearization_exner` | Stage-entry Exner function, ``Π^L = (p^L / p^{st})^{\hat κ}`` with the formulation's exponent                  |
 | ``θ^L``                             | `θᴸ`   | `AcousticSubstepper.linearization_potential_temperature` | Stage-entry potential temperature, ``θ^L = (ρθ)^L / ρ^L`` |
-| ``γ^m R^m\vert_L``                  | `γRᵐᴸ` | `AcousticSubstepper.linearization_gamma_R_mixture` | Stage-entry equation-of-state coefficient in ``p' = γ^m R^m\vert_L Π^L (ρθ)'``: ``(ρ / ρ^d) R^m \hat{c}^p / [c^p_m (1 - \hat κ) + \hat κ H^c / T]``, named for its dry limit ``γ^d R^d`` (not the moist product ``γ^m R^m``) |
+| ``γ^m R^m\vert_L``                  | `γRᵐᴸ` | `AcousticSubstepper.linearization_gamma_R_mixture` | Stage-entry equation-of-state coefficient in ``p' = γ^m R^m\vert_L Π^L (ρθ)'``: ``γ^e p^L / ((ρθ)^L Π^L)``, named for its dry limit ``γ^d R^d`` (not the moist product ``γ^m R^m``) |
 | ``C^L``                             | `Cᴸ`   |                                     | Linearized pressure coefficient, ``C^L = γ^m R^m\vert_L Π^L``                 |
+| ``γ^e``                             | `γᵉ`   |                                     | Effective heat-capacity ratio of the linearized equation of state, ``1/γ^e = 1 - \hat κ + H^c / (\hat{c}^p Π θ)``; ``1/(1 - \hat κ)`` without condensate |
 | ``G^n``                             | `Gⁿ`   |                                     | Tendency fields at time step ``n``                                             |
 | ``G^s``                             | `Gˢ`   |                                     | Slow tendencies (excludes fast pressure gradient and buoyancy)                 |
 | ``N``                               | `N`    | `AcousticSubstepper.substeps`       | Acoustic substeps per outer time step, or adaptive substep count before stage partitioning |
