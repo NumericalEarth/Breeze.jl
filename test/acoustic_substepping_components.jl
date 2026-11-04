@@ -684,11 +684,16 @@ end
 # The loop's p′ = Cᴸ (ρθ)′ must use the slope ∂p/∂(ρθ) of the equation of state the compressible core
 # closes the thermodynamics with, at fixed dry and water partial densities and for the formulation's
 # Exner exponent: finite differences of the core's own inversion θ → T → p = ρ Rᵐ T, in cells that
-# are dry, moist and cloudy. The mixture γᵐ Rᵐ with the dry exponent, which the cache held before,
-# is low by the vapor mass fraction in unsaturated air; in cloud the condensate terms of the
-# definition of θˡⁱ enter with the opposite sign and leave a smaller mismatch, still far outside
-# the tolerance of the slope.
-@testset "Linearized pressure coefficient is the slope of the equation of state [$FT, $(nameof(typeof(κ̂)))]" for FT in test_float_types(), κ̂ in (VaporEquivalentExponent(), DryExponent())
+# are dry, moist and cloudy, for converged, stopped and non-iterated inversions, whose slopes
+# differ in cloud. The mixture γᵐ Rᵐ with the dry exponent, which the cache held before, is low by
+# the vapor mass fraction in unsaturated air; in cloud the condensate terms of the definition of
+# θˡⁱ enter with the opposite sign and leave a smaller mismatch, still far outside the tolerance
+# of the slope.
+@testset "Linearized pressure coefficient is the slope of the equation of state [$FT, $(nameof(typeof(κ̂))), $(summary(temperature_solver))]" for FT in test_float_types(),
+        κ̂ in (VaporEquivalentExponent(), DryExponent()),
+        temperature_solver in (NewtonSolver(), nothing, FixedIterations(0), FixedIterations(1),
+                               FixedIterations(2), NewtonSolver(maxiter=0), NewtonSolver(maxiter=1),
+                               NewtonSolver(abstol=1e3))
     old_FT = Oceananigans.defaults.FloatType
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch, FT; size = (6, 6, 6), halo = (5, 5, 5),
@@ -698,7 +703,7 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                     base_pressure = 1e5, standard_pressure = 1e5,
                                     reference_potential_temperature = z -> 300)
-    formulation = LiquidIcePotentialTemperatureFormulation(; exner_exponent = κ̂)
+    formulation = LiquidIcePotentialTemperatureFormulation(; exner_exponent = κ̂, temperature_solver)
     model = AtmosphereModel(grid; dynamics, formulation, thermodynamic_constants = constants,
                             microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()))
 

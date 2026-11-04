@@ -111,7 +111,15 @@ C^L = \frac{γ^e p^L}{(ρθ)^L} , \qquad
 \frac{1}{γ^e} = 1 - \hat κ + \frac{H^c}{\hat{c}^p Π^L θ^L} ,
 ```
 
-where ``\hat{c}^p Π^L θ^L = c^p_m T - H^c``. Without condensate ``γ^e = 1 / (1 - \hat κ)``, which is
+where ``\hat{c}^p Π^L θ^L = c^p_m T - H^c``. This is the slope at the root that an iterating
+`temperature_solver` converges to. With `temperature_solver = nothing`, the core closes with the
+non-iterated inversion ``T = \tilde{T} + \hat γ H^c / c^p_m`` instead, where ``\tilde{T}`` is the
+condensate-free root and ``\hat γ = 1 / (1 - \hat κ)``, so that the latent shift is the heating at
+fixed density. Its slope has ``γ^e = \hat γ (1 - \hat γ H^c / (c^p_m T))``.
+The implementation evaluates ``C^L = ρ R^m θ ∂T/∂θ / (ρθ)^L`` by propagating the temperature
+sensitivity through the selected inversion's actual iterations. Thus zero iterations agree with
+`nothing`, and a solve stopped before convergence uses the slope of its returned temperature.
+Without condensate all give ``γ^e = 1 / (1 - \hat κ)``, which is
 ``γ^m = c^p_m / c^v_m`` with the vapor-equivalent exponent and ``γ^d`` with the dry one; condensate
 lowers it. In dry air ``C^L = γ^d R^d Π^L``. The symbol ``γ^m R^m|_L = C^L / Π^L`` is named for that
 dry limit; in moist air it is not the product ``γ^m R^m``. Only the substep loop linearizes the
@@ -119,6 +127,14 @@ equation of state:
 [`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping) diagnoses the full
 pressure from it every stage, and anelastic dynamics hold the thermodynamic pressure at the
 reference state.
+
+Saturation adjustment also evaluates its residual with the selected temperature inversion.
+This keeps the adjusted vapor and condensate in equilibrium at the temperature that the
+dynamics diagnose, including with non-iterated or stopped temperature solves. Any error of the
+inversion therefore moves into the condensate. The non-iterated inversion overshoots the root by
+about ``\hat κ (\hat γ H^c / c^p_m)^2 / (2 \tilde{T})``, a few tenths of a kelvin for 5 g/kg of cloud
+liquid, which leaves about 1% less condensate than the converged equilibrium. One Newton step
+removes nearly all of it.
 
 The outer-step-start state ``U^n`` is also stored. Stages 2 and 3 initialize perturbations
 with the rewind term ``U^n - U^L`` so that the full state at the beginning of every

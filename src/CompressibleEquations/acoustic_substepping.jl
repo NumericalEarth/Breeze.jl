@@ -339,7 +339,9 @@ outer_step_start_transport_velocities(model) = model.velocities
 #
 #   ∂p/∂(ρᵈθ) = γᵉ p / (ρᵈθ) ,    1 / γᵉ = 1 − κ̂ + Hᶜ / (ĉᵖ Π̂ θ) ,
 #
-# where ĉᵖ Π̂ θ = cᵖᵐ T − Hᶜ. Without condensate γᵉ = 1 / (1 − κ̂): γᵐ = cᵖᵐ / cᵛᵐ with the
+# where ĉᵖ Π̂ θ = cᵖᵐ T − Hᶜ, at the converged root. The non-iterated inversion (`nothing`) has
+# γᵉ = γ̂ (1 − γ̂ Hᶜ / (cᵖᵐ T)), γ̂ = 1 / (1 − κ̂). The kernel uses neither formula; it differentiates
+# the actual inversion. Without condensate γᵉ = 1 / (1 − κ̂): γᵐ = cᵖᵐ / cᵛᵐ with the
 # vapor-equivalent exponent and γᵈ with the dry one; condensate lowers it. Πᴸ is Π̂ at the
 # stage-entry pressure and γᵐRᵐᴸ = Cᴸ / Πᴸ, which is γᵈRᵈ in dry air. γᵐRᵐᴸ is named for that dry
 # limit; in moist air it is not the product γᵐ Rᵐ. The moisture is the one `update_state!`
@@ -366,6 +368,7 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
             substepper.linearization_gamma_R_mixture,
             grid,
             model.microphysics,
+            model.formulation.temperature_solver,
             model.dynamics.pressure,
             model.dynamics.dry_density,
             model.dynamics.total_density,
@@ -391,10 +394,11 @@ end
 # Πᴸ, θᴸ and γᵐRᵐᴸ per cell (see `refresh_linearization_basic_state!`). `grid_moisture_fractions`
 # dispatches on the microphysics scheme to extract (qᵛ, qˡ, qⁱ) at this cell; for dry runs the
 # returned fractions are vapor-only with qᵛ = 0 (the qᵛ field is zeroed), so ĉᵖ = cᵖᵈ and Hᶜ = 0.
-# γᵐRᵐᴸ = γᵉ p / (ρᵈθ Πᴸ), with ĉᵖ Π̂ θ written as ĉᵖ Πᴸ ρᵈθ / ρᵈ. The divisors are zero only
-# before `set!`, when the fields are; there they are replaced by one to keep the cache finite.
-@kernel function _compute_linearization_basic_state!(Π, θ, γRᵐ, grid, microphysics, p, ρᵈ, ρ, ρθ, qᵛ, μ,
-                                                     pˢᵗ, κ̂, constants)
+# γᵐRᵐᴸ = ρ Rᵐ (θ ∂T/∂θ) / (ρᵈθ Πᴸ), differentiating the same inversion as `temperature`, so
+# stopped and non-iterated solves use their own slope. The divisors are zero only before `set!`;
+# there they are replaced by one, and θ = 0 has zero sensitivity.
+@kernel function _compute_linearization_basic_state!(Π, θ, γRᵐ, grid, microphysics, temperature_solver,
+                                                     p, ρᵈ, ρ, ρθ, qᵛ, μ, pˢᵗ, κ̂, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         pᵢ  = p[i, j, k]
@@ -406,17 +410,18 @@ end
 
     q  = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵢ, qᵛᵢ, μ)
     κ  = exner_exponent(κ̂, q, constants)
-    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
-    Hᶜ = condensate_latent_energy(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
 
     Πᵢ  = (pᵢ / pˢᵗ)^κ
     ρθΠ = ifelse(ρθᵢ * Πᵢ == 0, one(ρθᵢ), ρθᵢ * Πᵢ)
-    γᵉ  = 1 / (1 - κ + ρᵈᵢ * Hᶜ / (ĉᵖ * ρθΠ))
+    θᵢ  = ρθᵢ / ifelse(ρᵈᵢ == 0, one(ρᵈᵢ), ρᵈᵢ)
+    𝒰   = LiquidIceDensityState(θᵢ, q, pˢᵗ, ρᵢ, temperature_solver, κ̂)
+    _, θ∂T∂θ = temperature_and_sensitivity(𝒰, constants)
 
     @inbounds begin
         Π[i, j, k]   = Πᵢ
-        θ[i, j, k]   = ρθᵢ / ifelse(ρᵈᵢ == 0, one(ρᵈᵢ), ρᵈᵢ)
-        γRᵐ[i, j, k] = γᵉ * pᵢ / ρθΠ
+        θ[i, j, k]   = θᵢ
+        γRᵐ[i, j, k] = ρᵢ * Rᵐ * θ∂T∂θ / ρθΠ
     end
 end
 
