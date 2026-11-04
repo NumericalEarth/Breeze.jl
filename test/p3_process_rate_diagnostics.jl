@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Test
 using Breeze
-using Breeze.AtmosphereModels: total_density
+using Breeze.AtmosphereModels: prognostic_field_names, total_density
 using Breeze.Microphysics.PredictedParticleProperties: CloudDroplets, P3ProcessRates,
                                                        compute_p3_process_rates,
                                                        p3_grid_process_inputs
@@ -39,6 +39,14 @@ end
     for op in (autoconversion, accretion, condensation, rain_evaporation)
         @test op isa Oceananigans.AbstractOperations.KernelFunctionOperation
         @test location(op) == (Center, Center, Center)
+    end
+
+    @testset "Kernel function holds only the fields it reads" begin
+        kernel = autoconversion.kernel_function
+        names = (prognostic_field_names(model.microphysics)..., :qᵛ, :surface_temperature)
+        @test keys(kernel.microphysical_fields) == names
+        @test all(name -> kernel.microphysical_fields[name] === model.microphysical_fields[name], names)
+        @test kernel.velocities === (; w = model.velocities.w)
     end
 
     @test_throws ArgumentError MicrophysicalProcessRate(model, :not_a_process)
