@@ -347,10 +347,11 @@ outer_step_start_transport_velocities(model) = model.velocities
 # limit; in moist air it is not the product γᵐ Rᵐ. The moisture is the one `update_state!`
 # diagnosed together with the pressure.
 #
-# The loop also moves the dry density, through ρ′. It leaves the water densities alone, but the
-# stage then advects them with the loop's time-averaged velocity (`transport_velocities`), so an
-# acoustic compression keeps the composition, and the pressure re-diagnosed at the next stage
-# includes the compressed water. At fixed composition and ρᵈθ, p depends on ρᵈ only through the
+# The loop also moves the dry density, through ρ′. It leaves the water densities alone, but scalar
+# transport advects them with an acoustic-mean velocity (`transport_velocities`, the preceding
+# loop's average; see NumericalEarth/Breeze.jl#1089), so an acoustic compression carries the water
+# with the air and keeps the composition, and the re-diagnosed pressure includes the compressed
+# water. At fixed composition and ρᵈθ, p depends on ρᵈ only through the
 # condensate latent energy, ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ) at the converged root. This term is zero
 # without condensate for every inversion, so there p′ = Cᴸ (ρθ)′ is the complete linearization.
 # In cloud the loop drops it, as the former γᵐRᵐ coefficient did; it is 5.5% of Cᴸ θ for 5 g/kg of

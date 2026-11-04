@@ -688,7 +688,7 @@ end
 # differ in cloud. The mixture γᵐ Rᵐ with the dry exponent, which the cache held before, is low by
 # the vapor mass fraction in unsaturated air; in cloud the condensate terms of the definition of
 # θˡⁱ enter with the opposite sign and leave a smaller mismatch, still far outside the tolerance
-# of the slope. The loop also moves ρᵈ; the stage carries the water along, so an acoustic
+# of the slope. The loop also moves ρᵈ; scalar transport carries the water along, so an acoustic
 # compression keeps the composition, and without condensate it changes p by Cᴸ (ρθ)′ alone.
 @testset "Linearized pressure coefficient is the slope of the equation of state [$FT, $(nameof(typeof(κ̂))), $(summary(temperature_solver))]" for FT in test_float_types(),
         κ̂ in (VaporEquivalentExponent(), DryExponent()),

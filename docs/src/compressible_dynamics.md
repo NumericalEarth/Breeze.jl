@@ -124,9 +124,9 @@ Without condensate all give ``γ^e = 1 / (1 - \hat κ)``, which is
 lowers it. In dry air ``C^L = γ^d R^d Π^L``. The symbol ``γ^m R^m|_L = C^L / Π^L`` is named for that
 dry limit; in moist air it is not the product ``γ^m R^m``.
 
-The substep loop also moves the dry density. It leaves the water densities alone, but the stage
-then advects them with the loop's time-averaged velocity, so an acoustic compression keeps the
-composition. At fixed composition and ``ρθ``, the pressure depends on the dry density only through
+The substep loop also moves the dry density. It leaves the water densities alone, but scalar
+transport advects them with an acoustic-mean velocity, so an acoustic compression carries the
+water with the air and keeps the composition. At fixed composition and ``ρθ``, the pressure depends on the dry density only through
 the condensate latent energy:
 
 ```math
