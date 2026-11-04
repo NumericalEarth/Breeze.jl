@@ -1,10 +1,15 @@
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
-
-using ..Thermodynamics:
+using Breeze.Thermodynamics:
+    AbstractReferencePressureState,
+    LiquidIceDensityState,
     liquid_latent_heat,
     ice_latent_heat,
     vapor_gas_constant,
-    mixture_heat_capacity
+    mixture_gas_constant,
+    mixture_heat_capacity,
+    condensate_latent_energy,
+    exner_exponent
+
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
 """
 $(TYPEDEF)
@@ -108,25 +113,49 @@ Base.summary(::ConstantRateCondensateFormation) = "ConstantRateCondensateFormati
 ##### Shared helpers for relaxation-to-saturation phase change (liquid + ice)
 #####
 
-# `Γ` below and `Thermodynamics.psychrometric_correction` are the same latent-heat
-# feedback factor in two conventions: `Γ` uses the mixture heat capacity and keeps the
-# ideal-gas `-1/T` term of `dqᵛ⁺/dT`, while `psychrometric_correction` takes the heat
-# capacity as an argument and drops that term. Keep any change to one in step with the
-# other.
+# Latent-heat feedback (dT/dqᶜ) (dqᵛ⁺/dT) of forming condensate qᶜ at the constraint the
+# thermodynamic state is closed on, with qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) and d ln pᵛ⁺ / dT = ℒ / (Rᵛ T²)
+# at fixed composition.
+#
+# Fixed pressure: the enthalpy is conserved, so condensate heats by dT = ℒ dqᶜ / cᵖᵐ, and
+# ρ ∝ 1/T cancels the explicit 1/T of qᵛ⁺.
+@inline function latent_heating_feedback(𝒰::AbstractReferencePressureState, qᵛ⁺, T, ℒ, constants)
+    cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    return ℒ / cᵖᵐ * qᵛ⁺ * ℒ / (Rᵛ * T^2)
+end
+
+# Fixed θ and ρ: H = ĉᵖ Π θ with Π = (ρ Rᵐ T / pˢᵗ)^κ. Phase exchange holds total water,
+# ĉᵖ, and κ fixed, with dH = cᵖᵐ dT - ℒ dqᶜ and dRᵐ = -Rᵛ dqᶜ. Differentiating gives
+# (cᵖᵐ - κ H / T) dT = (ℒ - κ H Rᵛ / Rᵐ) dqᶜ. This agrees with the constant-internal-energy
+# response only when κ H = Rᵐ T, as in condensate-free air with VaporEquivalentExponent.
+@inline function latent_heating_feedback(𝒰::LiquidIceDensityState, qᵛ⁺, T, ℒ, constants)
+    q = 𝒰.moisture_mass_fractions
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    κ = exner_exponent(𝒰.exner_exponent, q, constants)
+    H = cᵖᵐ * T - condensate_latent_energy(q, constants)
+    return (ℒ - κ * H * Rᵛ / Rᵐ) / (cᵖᵐ - κ * H / T) *
+           qᵛ⁺ * (ℒ / (Rᵛ * T^2) - 1 / T)
+end
 
 """
 $(TYPEDSIGNATURES)
 
-Compute the thermodynamic adjustment factor `Γ` used in relaxation-to-saturation
-condensation/evaporation tendencies.
+Compute the thermodynamic adjustment factor `Γ = 1 + (dT/dqᶜ) (dqᵛ⁺/dT)` used in
+relaxation-to-saturation condensation/evaporation tendencies.
+
+The heating response `dT/dqᶜ` follows the conserved variables of `𝒰` at fixed total water:
+enthalpy at fixed pressure for reference-pressure states, and `θ` at fixed density for
+`LiquidIceDensityState`, using its chosen Exner exponent. The saturation derivative
+`dqᵛ⁺/dT` holds composition fixed and follows the state's pressure or density constraint.
 """
-@inline function thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
-    ℒˡ = liquid_latent_heat(T, constants)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    Rᵛ = vapor_gas_constant(constants)
-    dqᵛ⁺_dT = qᵛ⁺ * (ℒˡ / (Rᵛ * T^2) - 1 / T)
-    return 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
-end
+@inline thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, constants) =
+    thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, liquid_latent_heat(T, constants), constants)
+
+@inline thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, ℒ, constants) =
+    1 + latent_heating_feedback(𝒰, qᵛ⁺, T, ℒ, constants)
 
 """
 $(TYPEDSIGNATURES)
@@ -134,13 +163,8 @@ $(TYPEDSIGNATURES)
 Compute the thermodynamic adjustment factor `Γ` used in relaxation-to-saturation
 deposition/sublimation tendencies (ice analogue of `thermodynamic_adjustment_factor`).
 """
-@inline function ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
-    ℒⁱ = ice_latent_heat(T, constants)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    Rᵛ = vapor_gas_constant(constants)
-    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * (ℒⁱ / (Rᵛ * T^2) - 1 / T)
-    return 1 + (ℒⁱ / cᵖᵐ) * dqᵛ⁺ⁱ_dT
-end
+@inline ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, 𝒰, constants) =
+    thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, 𝒰, ice_latent_heat(T, constants), constants)
 
 """
 $(TYPEDSIGNATURES)
@@ -150,8 +174,8 @@ Compute the condensation/evaporation rate for cloud liquid water in a relaxation
 This returns the rate of change of cloud liquid mass fraction (kg/kg/s). Positive values indicate
 condensation; negative values indicate evaporation. Evaporation is limited by the available cloud liquid.
 """
-@inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
-    Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
+@inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, 𝒰, τᶜˡ, constants)
+    Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, constants)
     timescale = Γˡ * τᶜˡ
     Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / timescale
 
@@ -168,8 +192,8 @@ Compute the deposition/sublimation rate for cloud ice in a relaxation-to-saturat
 This returns the rate of change of cloud ice mass fraction (kg/kg/s). Positive values indicate
 deposition; negative values indicate sublimation. Sublimation is limited by the available cloud ice.
 """
-@inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
-    Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
+@inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, 𝒰, τᶜⁱ, constants)
+    Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, 𝒰, constants)
     timescale = Γⁱ * τᶜⁱ
     Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / timescale
 

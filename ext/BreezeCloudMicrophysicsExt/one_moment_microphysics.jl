@@ -834,15 +834,20 @@ end
 # where qᵛ⁺ is the saturation specific humidity, τˡ is the relaxation timescale,
 # and Γˡ is a thermodynamic adjustment factor that accounts for latent heating:
 #
-#   Γˡ = 1 + (ℒˡ / cᵖᵐ) ⋅ dqᵛ⁺/dT
+#   Γˡ = 1 + (dT/dqᶜˡ) ⋅ dqᵛ⁺/dT
 #
 # This factor arises because condensation releases latent heat, which increases
 # temperature and hence increases the saturation specific humidity, creating a
 # negative feedback that slows the approach to equilibrium.
 #
-# The derivative dqᵛ*/dT follows from the Clausius-Clapeyron equation:
+# The saturation derivative follows the Clausius-Clapeyron equation at fixed composition.
+# With qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T),
 #
-#   dqᵛ⁺/dT = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T)
+#   fixed pressure (anelastic, parcel): dqᵛ⁺/dT = qᵛ⁺ ⋅ ℒˡ / (Rᵛ T²)
+#   fixed density (compressible):       dqᵛ⁺/dT = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T)
+#
+# The heating response dT/dqᶜˡ follows the state's conserved enthalpy at fixed pressure,
+# or its θ–density relation at fixed density; see `Microphysics.latent_heating_feedback`.
 #
 # See Morrison and Grabowski (2008, JAS), Appendix A, especially Eq. (A3).
 #####
@@ -985,7 +990,7 @@ end
 
     # Condensation: vapor ↔ cloud liquid
     qᵛ⁺ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, 𝒰, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
@@ -1153,14 +1158,14 @@ end
 
     # Condensation: vapor ↔ cloud liquid
     qᵛ⁺ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, 𝒰, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Deposition: vapor ↔ cloud ice
     # Suppress warm cloud-ice growth, matching CloudMicrophysics' INP limiter.
     qᵛ⁺ⁱ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarIceSurface())
     τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories, qᶜⁱ, T, qᵛ, qᵛ⁺ⁱ)
-    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
+    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, 𝒰, τᶜⁱ, constants)
     Sᵈᵉᵖ = ifelse(isnan(Sᵈᵉᵖ), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
     Sᵈᵉᵖ = ifelse((T > Tᶠ) & (Sᵈᵉᵖ > 0), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
 

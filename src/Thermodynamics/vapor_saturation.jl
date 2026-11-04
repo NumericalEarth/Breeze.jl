@@ -137,9 +137,11 @@ against it, and `cᵖ` the heat capacity the caller's energy budget is written w
 effective relaxation timescale is `ξ τ`, and an effective supersaturation excess is
 `(qᵛ - qᵛ⁺) / ξ`.
 
-`Microphysics.thermodynamic_adjustment_factor` is the same correction written with the
-mixture heat capacity and with the ideal-gas ``-1/T`` term of ``dqᵛ⁺/dT`` retained; the
-form here drops that term, matching the convention of the P3 scheme.
+`Microphysics.thermodynamic_adjustment_factor` follows the constraint the thermodynamic
+state is closed on. At fixed pressure it matches this form with ``cᵖ = cᵖᵐ``. At fixed
+density it differentiates the state's θ–density relation for the heating response and
+keeps the ideal-gas ``-1/T`` term of ``dqᵛ⁺/dT``. The form here matches the convention of
+the P3 scheme.
 """
 @inline psychrometric_correction(ℒ, qᵛ⁺, cᵖ, Rᵛ, T) = 1 + ℒ^2 * qᵛ⁺ / (cᵖ * Rᵛ * T^2)
 
