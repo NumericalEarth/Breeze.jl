@@ -55,6 +55,7 @@ using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using ..AtmosphereModels: AtmosphereModels
+using ..BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions, DefaultGustiness, TKEGustiness
 
 using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, standard_pressure, total_density, gas_phase_density,
                               precipitating_mass_fraction
