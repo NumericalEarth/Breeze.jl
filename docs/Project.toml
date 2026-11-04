@@ -14,6 +14,7 @@ Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
 GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+KernelDensity = "5ab0869b-81aa-558d-bb23-cbf5423bbe9b" # TODO: remove together with the [sources] entry
 Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
 NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
 NumericalRadiation = "cd8119b0-1744-44d6-9ede-6ad1ad750b26"
@@ -22,9 +23,13 @@ RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
+TiffImages = "731e570b-9d59-4bfa-96dc-6df516fadf69" # TODO: remove together with the [sources] entry
 
 [sources]
 Breeze = {path = ".."}
+KernelDensity = {url = "https://github.com/JuliaStats/KernelDensity.jl", rev = "compathelper/new_version/2026-10-15-03-08-32-785-04205431680"} # TODO: remove once KernelDensity.jl#152 is merged and released
+Documenter = {url = "https://github.com/JuliaDocs/Documenter.jl", rev = "master"} # TODO: remove once a new Documenter release is tagged
+TiffImages = {url = "https://github.com/tlnagy/TiffImages.jl", rev = "master"} # TODO: remove once TiffImages v0.11.10 is registered
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
