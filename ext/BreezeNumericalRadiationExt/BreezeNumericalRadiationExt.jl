@@ -20,6 +20,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, Surface
                                initialize_cos_zenith!, update_cos_zenith!,
                                column_index, complete_radiation_solve!, show_radiation_summary,
                                ApproximateRadiationUpdates, solves_longwave_response, surface_temperature_increment,
+                               radiation_cache_validity,
                                bottom_face_pressure, top_face_pressure,
                                overlying_atmosphere_faces,
                                dynamics_pressure, total_density, specific_prognostic_moisture,

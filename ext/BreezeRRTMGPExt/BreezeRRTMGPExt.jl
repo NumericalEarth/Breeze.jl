@@ -8,7 +8,8 @@ using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, Constan
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
                                assert_bound_surface_temperature, maybe_infer_solar_position,
                                initialize_cos_zenith!, update_cos_zenith!, fill_columns!,
-                               ApproximateRadiationUpdates, solves_longwave_response, surface_temperature_increment
+                               ApproximateRadiationUpdates, solves_longwave_response, surface_temperature_increment,
+                               radiation_cache_validity
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 

@@ -161,7 +161,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   nothing,  # ice_effective_radius = nothing for gray
                                   nothing,  # column_batches = nothing: gray is never batched
                                   schedule,
-                                  ApproximateRadiationUpdates(grid, schedule, solar_position))
+                                  ApproximateRadiationUpdates(grid, schedule, solar_position),
+                                  radiation_cache_validity(grid))
 end
 
 #####

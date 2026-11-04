@@ -7,6 +7,8 @@
 
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Fields: ConstantField
+using Oceananigans.Architectures: ReactantState
+using GPUArraysCore: @allowscalar
 using InteractiveUtils: subtypes
 
 """
@@ -16,7 +18,7 @@ Update the radiative fluxes of `rtm` from the current model state when they are 
 computation itself is `_update_radiation!(rtm, model)`.
 
 `update_state!` runs several times per time step: after each Runge-Kutta stage, and again after an
-operator-split update such as Kessler microphysics. Radiation is updated
+operator-split update such as Kessler microphysics. Full radiation solves run
 
 - at initialization: by every `update_state!` between steps at iteration 0 (`clock.stage == 1`),
   that is model construction, `set!` and the preparation of the first step, which all see the
@@ -24,14 +26,15 @@ operator-split update such as Kessler microphysics. Radiation is updated
 - during time stepping: once per iteration `n > 0` at which `rtm.schedule` actuates, by the
   first-stage `update_state!` of the step that begins at `n` (the clock is then at stage 2 in
   Breeze's Runge-Kutta steppers). The new fluxes enter from the second stage of that step. Later
-  stages, the end of the step and operator-split updates do not update radiation.
+  stages, the end of the step and operator-split updates do not run scheduled solves.
 
 With `schedule = IterationInterval(80)` and `Δt = 7.5` s, the fluxes are computed from the initial
 state and then every 600 s, in the steps that begin at iterations 80, 160, …
 
-In the first-stage `update_state!` of every other step, a radiation with
-[`ApproximateRadiationUpdates`](@ref) updates its fluxes for the current surface temperature and
-sun instead (see [`update_radiation_between_solves!`](@ref)).
+At every other `update_state!`, a radiation with [`ApproximateRadiationUpdates`](@ref) updates
+its fluxes for the current surface temperature and sun instead, including the later Runge–Kutta
+stages and the completed step (see [`update_radiation_between_solves!`](@ref)). On every schedule,
+restoring a checkpoint without the radiation cache triggers a full solve at the next state update.
 
 Under Reactant the iteration is traced: `BreezeReactantExt` applies the scheduled update with a
 traced conditional, which requires a stateless schedule such as `IterationInterval`, and computes
@@ -41,7 +44,7 @@ It does not update the fluxes between solves.
 """
 function update_radiation!(rtm, model)
     isnothing(rtm) && return nothing
-    due = radiation_update_due(rtm.schedule, model.clock, model)
+    due = radiation_update_due(rtm.schedule, model.clock, model) | !radiation_cache_is_valid(rtm)
     conditionally_update_radiation!(due, rtm, model)
     return nothing
 end
@@ -54,7 +57,7 @@ end
 function conditionally_update_radiation!(due::Bool, rtm, model)
     if due
         _update_radiation!(rtm, model)
-    elseif model.clock.stage == 2
+    else
         update_radiation_between_solves!(rtm, model)
     end
     return nothing
@@ -84,7 +87,7 @@ radiation_flux_divergence(radiation) = radiation.flux_divergence
 @inline radiation_flux_divergence(i, j, k, grid, ::Nothing) = zero(eltype(grid))
 @inline radiation_flux_divergence(i, j, k, grid, flux_divergence) = @inbounds flux_divergence[i, j, k]
 
-struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, CB, S, U}
+struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, CB, S, U, V}
     solar_constant :: SC # a scalar or an (Nx, Ny) array of per-column values
     solar_position :: SOP # AbstractSolarPosition: how to obtain cos(θ_z) on each update
     surface_radiation :: SP
@@ -102,6 +105,28 @@ struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS,
     column_batches :: CB  # Number of column batches for the RRTMGP solve (Nothing for one unbatched solve)
     schedule :: S  # Update schedule (default: IterationInterval(1) = every step)
     approximate_updates :: U # ApproximateRadiationUpdates between solves, or Nothing when solving every step
+    cache_valid :: V # Independent of approximate updates, so every schedule can recover missing restart fluxes
+end
+
+# Native validity lives on the host; Reactant needs a traced array so compiled updates can change it.
+radiation_cache_validity(grid::AbstractGrid) = radiation_cache_validity(architecture(grid))
+radiation_cache_validity(arch) = Ref(false)
+radiation_cache_validity(arch::ReactantState) = on_architecture(arch, [false])
+
+radiation_cache_is_valid(radiation) = true
+radiation_cache_is_valid(rtm::RadiativeTransferModel) = radiation_cache_is_valid(rtm.cache_valid)
+radiation_cache_is_valid(valid::Bool) = valid
+radiation_cache_is_valid(valid::Ref) = valid[]
+radiation_cache_is_valid(valid::AbstractArray) = @allowscalar only(valid)
+
+function set_radiation_cache_validity!(valid::Ref, value)
+    valid[] = value
+    return nothing
+end
+
+function set_radiation_cache_validity!(valid::AbstractArray, value)
+    fill!(valid, value)
+    return nothing
 end
 
 """

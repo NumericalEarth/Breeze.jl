@@ -179,6 +179,7 @@ include("atmosphere_model.jl")
 
 include("atmosphere_model_buoyancy.jl")
 include("solar_position.jl")
+include("mean_solar_zenith_angle.jl")
 include("radiation_interface.jl")
 include("approximate_radiation_updates.jl")
 include("dynamics_kernel_functions.jl")

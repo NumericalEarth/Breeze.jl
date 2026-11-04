@@ -14,8 +14,8 @@ function Oceananigans.restore_prognostic_state!(restored::AtmosphereModel, from)
     restore_prognostic_state!(restored.particles, from.particles)
     restore_prognostic_state!(prognostic_fields(restored), from.fields)
     restore_prognostic_state!(restored.closure_fields, from.closure_fields)
-    # Older checkpoints have no `radiation` entry
-    hasproperty(from, :radiation) && restore_prognostic_state!(restored.radiation, from.radiation)
+    # Older checkpoints can lack radiation or its approximate-update cache.
+    restore_prognostic_state!(restored.radiation, get(from, :radiation, nothing))
     restore_prognostic_state!(restored.timestepper, from.timestepper)
     return restored
 end
@@ -28,16 +28,38 @@ Oceananigans.restore_prognostic_state!(::AtmosphereModel, ::Nothing) = nothing
 radiation_restart_state(rtm) = (; rtm.schedule,
                                   rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux,
                                   rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
-                                  rtm.flux_divergence,
+                                  rtm.flux_divergence, rtm.cache_valid,
                                   approximate_updates = approximate_updates_restart_state(rtm.approximate_updates))
 
 approximate_updates_restart_state(::Nothing) = nothing
 
-# The per-column cosine of the solar zenith angle and sunlit-sample count are rewritten before they are read
+# The current solar cosine and daylight workspace are rewritten before they are read.
 approximate_updates_restart_state(updates) = (; updates.upwelling_longwave_response, updates.downwelling_longwave_response,
                                                 updates.solved_upwelling_shortwave_flux, updates.solved_downwelling_shortwave_flux,
                                                 updates.solved_cos_zenith, updates.surface_temperature)
 
 Oceananigans.prognostic_state(rtm::RadiativeTransferModel) = prognostic_state(radiation_restart_state(rtm))
-Oceananigans.restore_prognostic_state!(rtm::RadiativeTransferModel, from) = restore_prognostic_state!(radiation_restart_state(rtm), from)
-Oceananigans.restore_prognostic_state!(rtm::RadiativeTransferModel, ::Nothing) = rtm
+
+function Oceananigans.restore_prognostic_state!(rtm::RadiativeTransferModel, from)
+    # Restore validity separately: native checkpoints store a Bool, Reactant checkpoints an array.
+    restore_prognostic_state!(merge(radiation_restart_state(rtm), (; cache_valid=nothing)), from)
+    # Earlier checkpoints have no flag. Their fluxes are usable if the required cache exists.
+    set_radiation_cache_validity!(rtm.cache_valid, radiation_cache_is_valid(get(from, :cache_valid, true)))
+    previous_updates = get(from, :approximate_updates, nothing)
+    missing_cache = !isnothing(rtm.approximate_updates) && isnothing(previous_updates)
+    legacy_invalid_cache = !isnothing(previous_updates) && any(isnan, previous_updates.solved_cos_zenith)
+    (missing_cache || legacy_invalid_cache) && invalidate_radiation_cache!(rtm)
+    return rtm
+end
+
+function Oceananigans.restore_prognostic_state!(rtm::RadiativeTransferModel, ::Nothing)
+    invalidate_radiation_cache!(rtm)
+    return rtm
+end
+
+# Defer the fresh solve until update_state! has restored the atmosphere's diagnostics and the
+# coupled surface is ready. Save validity too, in case another restart intervenes before that solve.
+function invalidate_radiation_cache!(rtm)
+    set_radiation_cache_validity!(rtm.cache_valid, false)
+    return nothing
+end

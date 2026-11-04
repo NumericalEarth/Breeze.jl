@@ -483,24 +483,35 @@ shortwave radiation scatters or reflects.
 ## Radiation between solves
 
 A `schedule` other than every iteration solves the radiative transfer equations only now and then.
-Between two solves the surface warms or cools and the sun moves, and every time step updates the
+Between two solves the surface warms or cools and the sun moves, and every state update corrects the
 fluxes for both, following [HoganBozzo2015](@citet):
 
 - **Longwave.** Each solve repeats the longwave solve with the surface 1 K warmer, which gives the
   response of the fluxes on every face to the fourth power of the surface temperature ``T₀``. Each
-  time step then shifts the longwave fluxes by that response times the change in ``T₀⁴``. The
+  Runge–Kutta stage then shifts the longwave fluxes by that response times the change in ``T₀⁴``. The
   column absorbs its share of a change in surface emission, and the surface and the atmosphere
   exchange the same longwave flux at every step. With a constant `surface_temperature` there is no
   second solve.
 - **Shortwave.** Each solve computes the slant path of the direct beam with ``\bar{μ}₀``, the
-  cosine of the solar zenith angle averaged over the sunlit part of the coming radiation interval
-  ([HoganHirahara2015](@citet)). Each time step then scales the solved shortwave fluxes by
-  ``μ₀ / \bar{μ}₀``, which keeps the column's transmittance and reflectance and brings the flux
-  entering the top of the atmosphere to the current sun, including a sun that rises between solves.
+  cosine of the solar zenith angle averaged over the sunlit part of the radiation interval
+  ([HoganHirahara2015](@citet)). For `DiurnalSolarPosition` and `ApparentSolarPosition`, this is a
+  time integral clipped at sunrise and sunset, divided by the actual sunlit duration. The apparent
+  solar position is integrated separately on each calendar day. Each state update
+  then scales the solved shortwave fluxes by ``μ₀ / \bar{μ}₀``, which keeps the column's
+  transmittance and reflectance and brings the flux entering the top of the atmosphere to the
+  current sun, including a sun that rises between solves.
 
-The radiation interval is the `interval` of a `TimeInterval` schedule, or the `interval` of an
-`IterationInterval` times the time step. For any other schedule ``\bar{μ}₀`` is the cosine of the
-solar zenith angle at the solve. Under Reactant the fluxes are not updated between solves.
+Corrections also run at the end of the step, so the fluxes match the completed model clock.
+Restoring an older checkpoint without radiation fluxes or a required approximate-update cache
+triggers a fresh solve at the next state update, including with the default every-iteration schedule.
+
+The radiation interval runs to the next actuation of a `TimeInterval` or `SpecifiedTimes` schedule, or to the next
+actuating iteration of an `IterationInterval` at the last time step. When it is not known, past
+the last explicit time, for an infinite interval, or for other schedules, each solve uses the
+current sun to compute the slant path. Shortwave fluxes still scale with the current solar cosine,
+so they vanish at night. If daylight arrives after a solve with no sunlit transmittance, a fresh
+solve supplies it without advancing the schedule. Custom solar-position types also use the current
+angle unless they implement interval averaging. Under Reactant the fluxes are not updated between solves.
 
 ## Architecture Support
 

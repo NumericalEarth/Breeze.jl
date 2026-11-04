@@ -161,7 +161,8 @@ function full_spectrum_radiative_transfer_model(grid, radiation_method, constant
                                   ice_effective_radius,
                                   column_batches,
                                   schedule,
-                                  ApproximateRadiationUpdates(grid, schedule, solar_position))
+                                  ApproximateRadiationUpdates(grid, schedule, solar_position),
+                                  radiation_cache_validity(grid))
 end
 
 # Mapping from RRTMGP's internal gas names to BackgroundAtmosphere field names

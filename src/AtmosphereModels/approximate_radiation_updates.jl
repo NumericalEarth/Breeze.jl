@@ -2,20 +2,20 @@
 ##### Approximate radiation updates between solves
 #####
 ##### Between two solves of the radiative transfer equations the surface temperature changes and the
-##### sun moves. Following Hogan and Bozzo (2015), each time step between solves updates the fluxes
+##### sun moves. Following Hogan and Bozzo (2015), each state update between solves updates the fluxes
 ##### for both, so that the surface and the atmosphere exchange the same radiative fluxes at every
 ##### step. The solve uses the cosine of the solar zenith angle averaged over the sunlit part of the
 ##### radiation interval (Hogan and Hirahara, 2015), so that a sun rising between solves gets a
 ##### shortwave transmittance.
 #####
 
-using Oceananigans.Utils: IterationInterval, TimeInterval
+using Oceananigans.Utils: IterationInterval, TimeInterval, SpecifiedTimes, next_actuation_time, time_difference_seconds
 
 """
 $(TYPEDEF)
 
 The state of the approximate updates of a [`RadiativeTransferModel`](@ref)'s fluxes between solves
-([Hogan and Bozzo, 2015](@cite HoganBozzo2015)). Each time step between solves
+([Hogan and Bozzo, 2015](@cite HoganBozzo2015)). Each state update between solves
 
 - shifts the longwave fluxes by the change in the fourth power of the surface temperature `T₀`
   times their response to `T₀⁴`, computed at each solve by repeating the longwave solve with a
@@ -23,7 +23,8 @@ The state of the approximate updates of a [`RadiativeTransferModel`](@ref)'s flu
 - scales the shortwave fluxes of the last solve by `μ₀ / μ̄₀`, where `μ₀` is the current cosine of
   the solar zenith angle and `μ̄₀` its mean over the sunlit part of the radiation interval, with
   which the solve computed the slant path of the direct beam
-  ([Hogan and Hirahara, 2015](@cite HoganHirahara2015)).
+  ([Hogan and Hirahara, 2015](@cite HoganHirahara2015)). When the radiation interval is unknown,
+  the solve uses the current solar angle and the fluxes still follow the moving sun.
 
 # Fields
 $(TYPEDFIELDS)
@@ -37,12 +38,12 @@ struct ApproximateRadiationUpdates{F, C}
     solved_upwelling_shortwave_flux :: F
     "Downwelling shortwave flux of the last solve, at `μ̄₀`"
     solved_downwelling_shortwave_flux :: F
-    "Per-column `μ̄₀` of the last solve"
+    "Per-column cosine of the solar zenith angle used by the last solve"
     solved_cos_zenith :: C
     "Per-column cosine of the solar zenith angle"
     cos_zenith :: C
-    "Per-column count of sunlit samples of the radiation interval"
-    sunlit_samples :: C
+    "Per-column sunlit duration, reused between solves to detect columns needing a daylight solve"
+    sunlit_duration :: C
     "Per-column surface temperature of the last update of the longwave fluxes"
     surface_temperature :: C
 end
@@ -51,10 +52,12 @@ end
 $(TYPEDSIGNATURES)
 
 The [`ApproximateRadiationUpdates`](@ref) of a radiative transfer model on `grid` solved on
-`schedule`, or `nothing` when the model solves every iteration and so has no steps between solves.
+`schedule`, or `nothing` when the model solves every iteration, and so has no steps between solves,
+or runs on `ReactantState`.
 """
 function ApproximateRadiationUpdates(grid, schedule, solar_position)
     schedule isa IterationInterval && schedule.interval == 1 && return nothing
+    architecture(grid) isa ReactantState && return nothing
 
     Nx, Ny, _ = size(grid)
     column_array() = on_architecture(architecture(grid), zeros(eltype(grid), Nx * Ny))
@@ -72,18 +75,22 @@ end
 """
 $(TYPEDSIGNATURES)
 
-The length of the interval between solves on `schedule`, or zero when the schedule does not fix it
-(or, before the first time step, the time step is not yet known).
+The time in seconds from `clock` to the next solve on `schedule`, or zero when it is not known:
+past the last explicit time, for an infinite interval, before the first time step of an
+`IterationInterval`, and for other schedules.
 """
-radiation_interval(schedule::TimeInterval, clock) = schedule.interval
-radiation_interval(schedule::IterationInterval, clock) = ifelse(isfinite(clock.last_Δt), schedule.interval * clock.last_Δt, zero(clock.last_Δt))
+function radiation_interval(schedule::Union{TimeInterval, SpecifiedTimes}, clock)
+    t★ = next_actuation_time(schedule)
+    (t★ === Inf || t★ <= clock.time) && return 0 # a schedule counting from before the clock actuates at the next step
+    return finite_radiation_interval(time_difference_seconds(t★, clock.time))
+end
+
+radiation_interval(schedule::IterationInterval, clock) =
+    finite_radiation_interval((schedule.interval - mod(clock.iteration - schedule.offset, schedule.interval)) * clock.last_Δt)
+
 radiation_interval(schedule, clock) = 0
 
-time_after(t::Number, seconds) = t + seconds
-time_after(t::AbstractDateTime, seconds) = t + Millisecond(round(Int, 1000seconds))
-
-# Samples of the radiation interval in the mean cosine of the solar zenith angle
-const sunlit_samples_per_interval = 8
+finite_radiation_interval(interval) = ifelse(isfinite(interval), max(0, interval), zero(interval))
 
 """
 $(TYPEDSIGNATURES)
@@ -100,20 +107,12 @@ update_solve_cos_zenith!(cos_zenith, ::Nothing, rtm, grid, clock) =
 
 function update_solve_cos_zenith!(μ̄₀, updates::ApproximateRadiationUpdates, rtm, grid, clock)
     μ₀ = updates.cos_zenith
-    sunlit_samples = updates.sunlit_samples
-    Δt = radiation_interval(rtm.schedule, clock) / sunlit_samples_per_interval
-
-    fill!(μ̄₀, 0)
-    fill!(sunlit_samples, 0)
-
-    for m in 1:sunlit_samples_per_interval
-        sample_clock = (; time = time_after(clock.time, (m - 1/2) * Δt))
-        update_cos_zenith!(μ₀, rtm.solar_position, grid, sample_clock)
-        μ̄₀ .+= μ₀
-        sunlit_samples .+= μ₀ .> 0
+    interval = radiation_interval(rtm.schedule, clock)
+    update_cos_zenith!(μ₀, rtm.solar_position, grid, clock)
+    copyto!(μ̄₀, μ₀)
+    if interval > 0
+        average_solve_cos_zenith!(μ̄₀, updates.sunlit_duration, rtm.solar_position, grid, clock, interval)
     end
-
-    μ̄₀ ./= max.(sunlit_samples, 1)
     copyto!(updates.solved_cos_zenith, μ̄₀)
 
     return nothing
@@ -143,7 +142,11 @@ solves, record the shortwave fluxes of the solve and turn the longwave fluxes of
 longwave solve, which the solve left in the longwave responses, into the responses to `T₀⁴`; then
 bring the shortwave fluxes to the current sun.
 """
-complete_radiation_solve!(rtm, model) = complete_radiation_solve!(rtm.approximate_updates, rtm, model)
+function complete_radiation_solve!(rtm, model)
+    complete_radiation_solve!(rtm.approximate_updates, rtm, model)
+    set_radiation_cache_validity!(rtm.cache_valid, true)
+    return nothing
+end
 complete_radiation_solve!(::Nothing, rtm, model) = compute_radiation_flux_divergence!(rtm, model.grid)
 
 function complete_radiation_solve!(updates::ApproximateRadiationUpdates, rtm, model)
@@ -157,7 +160,7 @@ function complete_radiation_solve!(updates::ApproximateRadiationUpdates, rtm, mo
             rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
             T₀, solves_longwave_response(rtm), grid)
 
-    update_radiation_between_solves!(rtm, model)
+    apply_radiation_updates!(updates, rtm, model)
 
     return nothing
 end
@@ -186,17 +189,37 @@ end
 $(TYPEDSIGNATURES)
 
 Update the fluxes of `radiation` for the current surface temperature and sun, between two solves,
-and recompute its flux divergence. A no-op for a radiation that does not update between solves.
+and recompute its flux divergence. Solve again when a restored checkpoint lacked the radiation
+cache, or when daylight arrives without a sunlit shortwave solve to scale. With a valid cache,
+a no-op for radiation without approximate updates.
 """
 update_radiation_between_solves!(radiation, model) = nothing
-update_radiation_between_solves!(rtm::RadiativeTransferModel, model) =
-    update_radiation_between_solves!(rtm.approximate_updates, rtm, model)
+function update_radiation_between_solves!(rtm::RadiativeTransferModel, model)
+    if radiation_cache_is_valid(rtm)
+        update_radiation_between_solves!(rtm.approximate_updates, rtm, model)
+    else
+        _update_radiation!(rtm, model)
+    end
+    return nothing
+end
 update_radiation_between_solves!(::Nothing, rtm, model) = nothing
 
 function update_radiation_between_solves!(updates::ApproximateRadiationUpdates, rtm, model)
-    grid = model.grid
-    update_cos_zenith!(updates.cos_zenith, rtm.solar_position, grid, model.clock)
+    update_cos_zenith!(updates.cos_zenith, rtm.solar_position, model.grid, model.clock)
+    # A night-time solve with no daylight in its interval has no shortwave transmittance to scale.
+    # This also covers unknown intervals and a changed time step for an iteration-based schedule.
+    updates.sunlit_duration .= (updates.solved_cos_zenith .<= 0) .& (updates.cos_zenith .> 0)
+    if any(>(0), updates.sunlit_duration)
+        _update_radiation!(rtm, model)
+    else
+        apply_radiation_updates!(updates, rtm, model)
+    end
 
+    return nothing
+end
+
+function apply_radiation_updates!(updates, rtm, model)
+    grid = model.grid
     launch!(architecture(grid), grid, :xy, _update_radiation_between_solves!,
             rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux,
             rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
@@ -222,8 +245,8 @@ end
         ΔT⁴ = T^4 - T₀_updated[c]^4
         T₀_updated[c] = T
 
-        # μ̄₀ vanishes only when the whole radiation interval is night, and with it the solved fluxes
-        μ₀_ratio = ifelse(μ̄₀[c] > 0, μ₀[c] / μ̄₀[c], zero(T))
+        # A wholly nocturnal interval has zero shortwave flux; sunrise triggers a fresh solve.
+        μ₀_ratio = ifelse(μ̄₀[c] > 0, μ₀[c] / μ̄₀[c], zero(μ₀[c]))
 
         for k in 1:Nz+1
             ℐ_lw_up[i, j, k] += R_lw_up[i, j, k] * ΔT⁴
