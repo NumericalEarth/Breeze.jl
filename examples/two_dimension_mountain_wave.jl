@@ -133,7 +133,7 @@ hill(x) = h₀ * exp(-(x / a)^2) * cos(pi * x / λ)^2
 
 # ## Grid setup
 #
-# The domain spans 200 km horizontally (±100 km) and 20 km vertically. We use a
+# The domain spans 100 km horizontally (±50 km) and 20 km vertically. We use a
 # `TerrainFollowingVerticalDiscretization` with uniform spacing in the computational
 # coordinate; the terrain-following transformation deforms these surfaces to follow
 # the mountain, so no vertical grid stretching near the surface is needed. The
@@ -224,6 +224,13 @@ potential_temperature_profile(x, z) = potential_temperature_profile(z)
 # A sponge layer near the domain top absorbs upward-propagating waves and prevents
 # spurious reflections from the rigid lid. The split-explicit acoustic substepper
 # applies this sponge as part of the acoustic update.
+#
+# Absorbing well matters a lot here: the wave reaches the lid after about an hour, and
+# whatever is not absorbed reflects, descends carrying the mirror-image phase tilt, and
+# partially cancels the tilt of the upgoing wave. We reach for [`GaussianRamp`](@ref) rather
+# than the default [`CubicRamp`](@ref) because its weak tail below the nominal layer leaves a
+# visibly quieter far field downstream of the ridge, at a shallower `depth`. Compare against
+# `w_linear` below to see it.
 
 const sponge_depth = domain_height / 4
 const sponge_damping_rate = 0.1
@@ -241,7 +248,8 @@ const sponge_damping_rate = 0.1
 
 time_discretization = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5,
                                                       sponge = UpperSponge(damping_rate = sponge_damping_rate,
-                                                                           depth = sponge_depth))
+                                                                           depth = sponge_depth,
+                                                                           ramp = GaussianRamp()))
 
 dynamics = CompressibleDynamics(time_discretization;
                                 slope_stencil = SlopeInsideInterpolation(),
