@@ -47,9 +47,10 @@ jobs:
           # keeps the registered Reactant and Reactant_jll. Both sides are force-pushed
           # often, so `enzyme_jax_run` pins the build to the one `reactant_rev` was
           # written against (without it, the latest build of the branch is used):
-          # Reactant.jl pb/kernel-ad eafe23fb (upstream main at 025e4a59, Reactant 0.2.304,
-          # with the kernel AD commits) on Enzyme-JAX 110d87f1, whose build compiled
-          # libReactantExtra from that same Reactant.jl main. Its artifacts expire 2026-11-04.
+          # Reactant.jl pb/kernel-ad f439eef3 (upstream main at 025e4a59, Reactant 0.2.304,
+          # with the kernel AD commits and lower-kernel-to-polygeist) on Enzyme-JAX df8d0cf8,
+          # whose build (2026-11-04) compiled libReactantExtra from that day's Reactant.jl main (0.2.305).
+          # Its artifacts expire 2026-11-06.
           # `mode` keeps its artifact names apart from the AD job's, and while kernel AD is
           # experimental its failure does not fail the workflow or block publishing.
           # The Reactant.jl branch now needs Enzyme-JAX options the registered
@@ -62,8 +63,8 @@ jobs:
             topology: 'PBB'
             mode: 'kernelad'
             enzyme_jax_branch: 'pb/kernel-ad'
-            enzyme_jax_run: '41440058022'
-            reactant_rev: 'eafe23fb91b1166d53e651296fb465b1cdd9c50a'
+            enzyme_jax_run: '41838506164'
+            reactant_rev: 'f439eef39171e3225908be5722367aee6f24a29d'
             # TEMPORARY: dump every MLIR pass pipeline to find where the compile corrupts the heap
             dump_mlir: 'mlir_dumps'
             timeout: 60
