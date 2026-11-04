@@ -242,7 +242,9 @@ neither allocates nor advects it.
   ``q^v - q^{v+l}`` matches the advected ``δq^{v+l}``. The M&G semi-analytic
   rates then run on this post-G&M state — the "diagnostic vapor excess"
   they see is ``q^v_{\text{post-GM}} - q^{v+l}(T_{\text{post-GM}})``, not the
-  host's ``δq^{v+l}`` field. The G&M adjustment and the end-of-step
+  host's ``δq^{v+l}`` field. Like the end-of-step ``δq^{v+l}`` reset, the
+  post-G&M state keeps pressure fixed on the anelastic core and in parcels,
+  and density fixed on the compressible core. The G&M adjustment and the end-of-step
   ``δq^{v+l}`` reset both relax over `sink_limiting_timescale`, so they land
   exactly when the host integrates with
   ``\Delta t = \text{sink\_limiting\_timescale}``. The ``δq^{v+l}`` tendency
