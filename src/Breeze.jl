@@ -197,6 +197,7 @@ export
     ConstantPowerBandForcing,
     StochasticBandForcing,
     SpecificForcing,
+    TemperatureForcing,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,

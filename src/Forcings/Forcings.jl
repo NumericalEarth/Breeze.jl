@@ -5,6 +5,7 @@ export
     SubsidenceForcing,
     GeostrophicForcing,
     SpecificForcing,
+    TemperatureForcing,
     ConstantPowerBandForcing,
     StochasticBandForcing
 
@@ -20,6 +21,7 @@ using ..AtmosphereModels: AtmosphereModels, materialize_atmosphere_model_forcing
 include("geostrophic_forcings.jl")
 include("subsidence_forcing.jl")
 include("specific_forcing.jl")
+include("temperature_forcing.jl")
 include("band_forcings.jl")
 
 #####
