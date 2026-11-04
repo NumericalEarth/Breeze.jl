@@ -14,9 +14,9 @@
 ##### is a net ~7 × 10⁵ m³ s⁻¹.
 #####
 ##### The imbalance is removed by correcting the boundary data — a uniform offset subtracted from the
-##### outward normal momentum on all four lateral faces — after the halo fill that applied the boundary
-##### conditions. An Oceananigans `Callback` cannot interleave there, so `AtmosphereModels` calls this
-##### directly at each fill site.
+##### outward normal momentum on every lateral face that is not an impenetrable wall — after the halo
+##### fill that applied the boundary conditions. An Oceananigans `Callback` cannot interleave there, so
+##### `AtmosphereModels` calls this directly at each fill site.
 #####
 ##### It must run after EVERY momentum halo fill, not once per Runge-Kutta stage. A fill rewrites the
 ##### boundary faces from the prescribed data, so it silently reverts an earlier correction. Correcting
@@ -32,6 +32,20 @@
 ##### subtraction: repeated application moves a wall by at most a few ulp of the data.
 
 const LaterallyBoundedGrid = AbstractGrid{<:Any, Bounded, Bounded}
+
+# An impenetrable wall carries no flux and must stay closed: only the other lateral faces absorb
+# the imbalance. TODO: replace this file with Oceananigans' `enforce_net_zero_transport!` once it
+# is public, masks immersed boundary faces, and lets imposed normal flow join the correction.
+const ImpenetrableBC = BoundaryCondition{<:NormalFlow{Nothing}, Nothing}
+open_face(bc) = true
+open_face(::ImpenetrableBC) = false
+
+# Which of the four lateral faces absorb the imbalance, as (west, east, south, north)
+function open_lateral_faces(ρu, ρv)
+    ubcs = ρu.boundary_conditions
+    vbcs = ρv.boundary_conditions
+    return open_face(ubcs.west), open_face(ubcs.east), open_face(vbcs.south), open_face(vbcs.north)
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -53,13 +67,16 @@ function AtmosphereModels.enforce_lateral_mass_balance!(::AnelasticDynamics, mom
     ρu, ρv = momentum.ρu, momentum.ρv
     Nx, Ny, Nz = size(grid)
 
-    imbalance, area = lateral_mass_imbalance(ρu, ρv, grid)
+    open_faces = open_lateral_faces(ρu, ρv)
+    imbalance, zonal_area, meridional_area = lateral_mass_imbalance(ρu, ρv, grid)
+    west, east, south, north = open_faces
+    area = (west + east) * zonal_area + (south + north) * meridional_area
     area > 0 || return nothing
     offset = imbalance / area
 
     arch = architecture(grid)
-    launch!(arch, grid, KernelParameters(1:Ny, 1:Nz), _correct_zonal_faces!, ρu, Nx, offset)
-    launch!(arch, grid, KernelParameters(1:Nx, 1:Nz), _correct_meridional_faces!, ρv, Ny, offset)
+    launch!(arch, grid, KernelParameters(1:Ny, 1:Nz), _correct_zonal_faces!, ρu, Nx, west * offset, east * offset)
+    launch!(arch, grid, KernelParameters(1:Nx, 1:Nz), _correct_meridional_faces!, ρv, Ny, south * offset, north * offset)
 
     return nothing
 end
@@ -94,7 +111,8 @@ host_grid(grid) = on_architecture(CPU(), grid)
 """
 $(TYPEDSIGNATURES)
 
-Net outward mass flux through the four lateral faces, and their total area.
+Net outward mass flux through the four lateral faces, and the area of one zonal (west or east)
+and one meridional (south or north) face.
 
 This method weights every boundary face by its own area, so it is exact for a grid stretched in any
 direction. It pays for that with the four plane copies and a host loop over all of them: `2(Nx + Ny)Nz`
@@ -123,23 +141,24 @@ function lateral_mass_imbalance(ρu, ρv, grid)
     north = Array(device_north)::Matrix{FT}
 
     flux = zero(FT)
-    area = zero(FT)
+    zonal_area = zero(FT)
+    meridional_area = zero(FT)
 
     for k in 1:Nz
         Δzᵏ = zspacing(k, cpu_grid, Center())
         for j in 1:Ny
             ΔA = yspacing(j, cpu_grid, Center()) * Δzᵏ
             flux += (east[j, k] - west[j, k]) * ΔA
-            area += 2ΔA
+            zonal_area += ΔA
         end
         for i in 1:Nx
             ΔA = xspacing(i, cpu_grid, Center()) * Δzᵏ
             flux += (north[i, k] - south[i, k]) * ΔA
-            area += 2ΔA
+            meridional_area += ΔA
         end
     end
 
-    return flux, area
+    return flux, zonal_area, meridional_area
 end
 
 """
@@ -173,15 +192,17 @@ function lateral_mass_imbalance(ρu, ρv, grid::XYRegularRG)
     meridional = Array(sum(north .- south, dims = 1))::Matrix{FT}
 
     flux = zero(FT)
-    area = zero(FT)
+    zonal_area = zero(FT)
+    meridional_area = zero(FT)
 
     for k in 1:Nz
         Δzᵏ = zspacing(k, cpu_grid, Center())
         flux += (Δy * zonal[1, k] + Δx * meridional[1, k]) * Δzᵏ
-        area += 2 * (Ny * Δy + Nx * Δx) * Δzᵏ
+        zonal_area += Ny * Δy * Δzᵏ
+        meridional_area += Nx * Δx * Δzᵏ
     end
 
-    return flux, area
+    return flux, zonal_area, meridional_area
 end
 
 # An `ImmersedBoundaryGrid` over a laterally-bounded grid is laterally bounded, but it is not an
@@ -200,14 +221,14 @@ lateral_mass_imbalance(ρu, ρv, grid::ImmersedBoundaryGrid) =
 # uniform in momentum, not in velocity: the velocity increment therefore scales as 1/ρᵣ(z), which is
 # what keeps the flux integral algebraically exact.
 
-@kernel function _correct_zonal_faces!(ρu, Nx, offset)
+@kernel function _correct_zonal_faces!(ρu, Nx, west_offset, east_offset)
     j, k = @index(Global, NTuple)
-    @inbounds ρu[1, j, k] += offset
-    @inbounds ρu[Nx + 1, j, k] -= offset
+    @inbounds ρu[1, j, k] += west_offset
+    @inbounds ρu[Nx + 1, j, k] -= east_offset
 end
 
-@kernel function _correct_meridional_faces!(ρv, Ny, offset)
+@kernel function _correct_meridional_faces!(ρv, Ny, south_offset, north_offset)
     i, k = @index(Global, NTuple)
-    @inbounds ρv[i, 1, k] += offset
-    @inbounds ρv[i, Ny + 1, k] -= offset
+    @inbounds ρv[i, 1, k] += south_offset
+    @inbounds ρv[i, Ny + 1, k] -= north_offset
 end

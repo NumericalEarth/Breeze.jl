@@ -24,7 +24,7 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Architectures: CPU, architecture, on_architecture
-using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.BoundaryConditions: BoundaryCondition, NormalFlow, fill_halo_regions!
 using Oceananigans.Fields: interior, set!
 using Oceananigans.Grids: AbstractGrid, Bounded, Center, XYRegularRG, ZDirection, inactive_cell,
                           with_number_type

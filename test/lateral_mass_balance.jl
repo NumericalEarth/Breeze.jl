@@ -14,9 +14,21 @@ bounded_grid(FT = Float64; size = (16, 16, 12)) =
     RectilinearGrid(default_arch, FT; size, x = (0, 160), y = (0, 160), z = (0, 120),
                     topology = (Bounded, Bounded, Bounded))
 
-anelastic_model(grid) = AtmosphereModel(grid;
+# Open lateral faces: an imposed zero normal flow, which the correction may shift. The default
+# impenetrable walls stay closed, so tests that write the boundary planes by hand need these.
+open_x() = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0), east = NormalFlowBoundaryCondition(0))
+open_y() = FieldBoundaryConditions(south = NormalFlowBoundaryCondition(0), north = NormalFlowBoundaryCondition(0))
+
+anelastic_model(grid; boundary_conditions = (; ρu = open_x(), ρv = open_y())) = AtmosphereModel(grid;
     dynamics = AnelasticDynamics(ReferenceState(grid, ThermodynamicConstants(eltype(grid));
-                                                base_pressure = 1e5, potential_temperature = 300)))
+                                                base_pressure = 1e5, potential_temperature = 300)),
+    boundary_conditions)
+
+# The net imbalance and the total area of the four lateral faces
+function imbalance_and_area(ρu, ρv, grid)
+    imbalance, zonal_area, meridional_area = lateral_mass_imbalance(ρu, ρv, grid)
+    return imbalance, 2zonal_area + 2meridional_area
+end
 
 @testset "lateral_mass_imbalance" begin
     grid = bounded_grid()
@@ -26,7 +38,7 @@ anelastic_model(grid) = AtmosphereModel(grid;
     # A uniform through-flow is already balanced: what enters the west face leaves the east.
     set!(ρu, 1)
     set!(ρv, 0)
-    imbalance, area = lateral_mass_imbalance(ρu, ρv, grid)
+    imbalance, area = imbalance_and_area(ρu, ρv, grid)
     @test imbalance ≈ 0 atol=1e-10
     # Four faces of 160 m × 120 m.
     @test area ≈ 4 * 160 * 120
@@ -34,7 +46,7 @@ anelastic_model(grid) = AtmosphereModel(grid;
     # Inflow with no matching outflow is a net convergence, reported negative (outward normal).
     fill!(parent(ρu), 0)
     view(interior(ρu), 1, :, :) .= 2
-    imbalance, area = lateral_mass_imbalance(ρu, ρv, grid)
+    imbalance, area = imbalance_and_area(ρu, ρv, grid)
     @test imbalance ≈ -2 * 160 * 120
     @test imbalance / area ≈ -0.5
 
@@ -42,7 +54,7 @@ anelastic_model(grid) = AtmosphereModel(grid;
     fill!(parent(ρu), 0)
     fill!(parent(ρv), 0)
     view(interior(ρv), :, size(grid, 2) + 1, :) .= 3
-    imbalance, _ = lateral_mass_imbalance(ρu, ρv, grid)
+    imbalance, _ = imbalance_and_area(ρu, ρv, grid)
     @test imbalance ≈ 3 * 160 * 120
 end
 
@@ -63,11 +75,11 @@ end
     fill!(parent(ρu), 0)
     fill!(parent(ρv), 0)
     view(interior(ρu), 1, :, :) .= 2
-    imbalance, area = lateral_mass_imbalance(ρu, ρv, grid)
+    imbalance, area = imbalance_and_area(ρu, ρv, grid)
     offset = imbalance / area
     enforce_lateral_mass_balance!(model.dynamics, model.momentum, grid)
 
-    corrected, _ = lateral_mass_imbalance(ρu, ρv, grid)
+    corrected, _ = imbalance_and_area(ρu, ρv, grid)
     @test corrected ≈ 0 atol=1e-9
 
     u = Array(interior(ρu))
@@ -91,7 +103,7 @@ end
                      (Bounded, Periodic, Bounded))
         grid = RectilinearGrid(default_arch; size = (8, 8, 8), x = (0, 80), y = (0, 80), z = (0, 80),
                                topology = topology)
-        model = anelastic_model(grid)
+        model = anelastic_model(grid; boundary_conditions = NamedTuple())
         set!(model.momentum.ρu, 3)
         set!(model.momentum.ρv, -1)
         before_u = copy(Array(interior(model.momentum.ρu)))
@@ -117,13 +129,13 @@ end
     fill!(parent(ρv), 0)
     view(interior(ρu), 1, :, :) .= 1
 
-    imbalance, area = lateral_mass_imbalance(ρu, ρv, grid)
+    imbalance, area = imbalance_and_area(ρu, ρv, grid)
     # One face of 120 m × 240 m carrying unit momentum.
     @test imbalance ≈ -120 * 240
     @test area ≈ 4 * 120 * 240
 
     enforce_lateral_mass_balance!(model.dynamics, model.momentum, grid)
-    corrected, _ = lateral_mass_imbalance(ρu, ρv, grid)
+    corrected, _ = imbalance_and_area(ρu, ρv, grid)
     @test corrected ≈ 0 atol=1e-8
 end
 
@@ -143,7 +155,7 @@ end
 
     # Unit outflow through the north face: flux = Σᵢ Δxᵢ × Lz = 100 × 40.
     view(interior(ρv), :, size(grid, 2) + 1, :) .= 1
-    imbalance, area = lateral_mass_imbalance(ρu, ρv, grid)
+    imbalance, area = imbalance_and_area(ρu, ρv, grid)
     @test imbalance ≈ 100 * 40
     @test area ≈ 2 * (100 * 40) + 2 * (80 * 40)
 
@@ -158,7 +170,7 @@ end
             fill!(parent(ρu), 0)
             fill!(parent(ρv), 0)
             selectdim(interior(momentum), dim, index) .= 1
-            wall, _ = lateral_mass_imbalance(ρu, ρv, grid)
+            wall, _ = imbalance_and_area(ρu, ρv, grid)
             @test wall ≈ direction * face_area
         end
     end
@@ -171,7 +183,7 @@ end
     # weighting would call every column 25 m wide and report 25 × 40.
     fill!(parent(ρv), 0)
     view(interior(ρv), 4, size(grid, 2) + 1, :) .= 1     # Δx = 40 there, of 100 total
-    weighted, _ = lateral_mass_imbalance(ρu, ρv, grid)
+    weighted, _ = imbalance_and_area(ρu, ρv, grid)
     @test weighted ≈ 40 * 40
     @test !isapprox(weighted, 25 * 40)
 end
@@ -193,7 +205,7 @@ end
 
     for grid in (uniform, stretched)
         FT = eltype(grid)
-        @test only(Base.return_types(lateral_mass_imbalance, signature(grid))) == Tuple{FT, FT}
+        @test only(Base.return_types(lateral_mass_imbalance, signature(grid))) == Tuple{FT, FT, FT}
     end
 
     # An anelastic model always has uniform horizontals, so it must select the device reduction.
@@ -225,10 +237,10 @@ end
         # The wall values, not just the integral: a reverted correction leaves the raw 2 and 1 here.
         Nx, _, _ = size(grid)
         u = Array(interior(model.momentum.ρu))
-        @test all(u[1, :, :]      .≈ convert(FT, 1.75))
-        @test all(u[Nx + 1, :, :] .≈ convert(FT, 1.25))
+        @test all(u[1, :, :]      .≈ convert(FT, 1.5))
+        @test all(u[Nx + 1, :, :] .≈ convert(FT, 1.5))
 
-        imbalance, area = lateral_mass_imbalance(model.momentum.ρu, model.momentum.ρv, grid)
+        imbalance, area = imbalance_and_area(model.momentum.ρu, model.momentum.ρv, grid)
         @test abs(imbalance) / area < (FT === Float32 ? 1e-4 : 1e-6)
     finally
         # Restore in a `finally`: a failure above would otherwise leak `Float32` into every later testset
@@ -263,19 +275,19 @@ end
     set!(model, θ = 300)
     time_step!(model, 0.5)
 
-    # Net outward flux of the raw data is (−2 + 1)A over four faces of equal area A, so each face sheds
-    # offset = −A/4A = −0.25: west 2 → 1.75, east 1 → 1.25, and the two ρv faces ∓0.25 from zero. Testing
-    # the values, not just the integral, is what distinguishes "the correction survived the halo fill"
-    # from "the walls happened to balance".
+    # Net outward flux of the raw data is (−2 + 1)A. The south and north faces are impenetrable walls
+    # and stay closed, so the two open faces of area A each shed offset = −A/2A = −0.5: west 2 → 1.5,
+    # east 1 → 1.5. Testing the values, not just the integral, is what distinguishes "the correction
+    # survived the halo fill" from "the walls happened to balance".
     Nx, Ny, _ = size(grid)
     u = Array(interior(model.momentum.ρu))
     v = Array(interior(model.momentum.ρv))
-    @test all(u[1, :, :]      .≈ 1.75)
-    @test all(u[Nx + 1, :, :] .≈ 1.25)
-    @test all(v[:, 1, :]      .≈ -0.25)
-    @test all(v[:, Ny + 1, :] .≈  0.25)
+    @test all(u[1, :, :]      .≈ 1.5)
+    @test all(u[Nx + 1, :, :] .≈ 1.5)
+    @test all(iszero, v[:, 1, :])
+    @test all(iszero, v[:, Ny + 1, :])
 
-    balanced, area = lateral_mass_imbalance(model.momentum.ρu, model.momentum.ρv, grid)
+    balanced, area = imbalance_and_area(model.momentum.ρu, model.momentum.ρv, grid)
     @test abs(balanced) / area < 1e-6
     @test all(isfinite, Array(interior(model.velocities.w)))
 end
@@ -301,7 +313,7 @@ end
     fill!(parent(ρv), 0)
     view(interior(ρu), 1, :, :) .= 2
 
-    imbalance, area = lateral_mass_imbalance(ρu, ρv, grid)
+    imbalance, area = imbalance_and_area(ρu, ρv, grid)
     offset = imbalance / area
     enforce_lateral_mass_balance!(model.dynamics, model.momentum, grid)
 
@@ -315,7 +327,7 @@ end
           maximum(ρᵣ) / minimum(ρᵣ)
 
     # And the flux is removed to round-off despite that variation.
-    corrected, _ = lateral_mass_imbalance(ρu, ρv, grid)
+    corrected, _ = imbalance_and_area(ρu, ρv, grid)
     @test abs(corrected) / area < 1e-12
 end
 
@@ -335,7 +347,7 @@ end
 
     signature(g) = typeof.((XFaceField(g), YFaceField(g), g))
     FT = eltype(grid)
-    @test only(Base.return_types(lateral_mass_imbalance, signature(grid))) == Tuple{FT, FT}
+    @test only(Base.return_types(lateral_mass_imbalance, signature(grid))) == Tuple{FT, FT, FT}
 
     # The assertion that fails without a method for the immersed grid: it must NOT land on the general
     # host loop that a stretched horizontal takes. Checking only that the two answers agree would pass
@@ -347,7 +359,11 @@ end
 
     # The immersed boundary does not enter the solvability condition: every cell is active in the solve,
     # so the same wall data must give the same imbalance with or without the terrain.
-    immersed_u, immersed_v = XFaceField(grid), YFaceField(grid)
+    open_u = FieldBoundaryConditions(grid, (Face(), Center(), Center());
+                                     west = NormalFlowBoundaryCondition(0), east = NormalFlowBoundaryCondition(0))
+    open_v = FieldBoundaryConditions(grid, (Center(), Face(), Center());
+                                     south = NormalFlowBoundaryCondition(0), north = NormalFlowBoundaryCondition(0))
+    immersed_u, immersed_v = XFaceField(grid; boundary_conditions = open_u), YFaceField(grid; boundary_conditions = open_v)
     plain_u, plain_v = XFaceField(underlying), YFaceField(underlying)
     for (u, v) in ((immersed_u, immersed_v), (plain_u, plain_v))
         view(interior(u), 1, :, :) .= 2
@@ -361,6 +377,6 @@ end
                                       ThermodynamicConstants(FT); base_pressure = 1e5,
                                       potential_temperature = 300)),
                                   (; ρu = immersed_u, ρv = immersed_v), grid)
-    corrected, area = lateral_mass_imbalance(immersed_u, immersed_v, grid)
+    corrected, area = imbalance_and_area(immersed_u, immersed_v, grid)
     @test abs(corrected) / area < 1e-12
 end
