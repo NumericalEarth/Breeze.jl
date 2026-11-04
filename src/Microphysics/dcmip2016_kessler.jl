@@ -625,7 +625,7 @@ Both invariants are affine in the enthalpy-like quantity ``cᵖᵐ T - ℒˡ₀ 
 intercept ``ℒˡ₀`` at zero kelvin, through coefficients that do not depend on how the water is
 split between vapor and liquid: ``ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ`` for a
 `LiquidIcePotentialTemperatureState`, where ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ`` and the Exner function ``Π``
-(with either [`VaporEquivalentExponent`](@ref) or [`DryExponent`](@ref)) depend only on ``qᵗ`` and
+(with either [`VaporEquivalentExponent`](@ref Breeze.Thermodynamics.VaporEquivalentExponent) or [`DryExponent`](@ref Breeze.Thermodynamics.DryExponent)) depend only on ``qᵗ`` and
 ``p``; and ``s - g z = cᵖᵐ T - ℒˡ₀ qˡ`` for a `StaticEnergyState`. So at fixed invariant, ``p`` and
 ``qᵗ`` (``δqᵛ = -δqˡ``), ``cᵖᵐ δT + T (cˡ - cᵖᵛ) δqˡ = ℒˡ₀ δqˡ``, that is
 
