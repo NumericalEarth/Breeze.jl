@@ -667,22 +667,27 @@ for arch in arches
     @testset "UpperSponge is stable for rate × Δt ≫ 1 [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 16), halo=(5, 5, 5),
-                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
+                               x=(0, 80kilometers), y=(0, 80kilometers), z=(0, 8kilometers),
                                topology=(Periodic, Periodic, Bounded))
-        everywhere(x, y, z) = one(x)
-        sponge = UpperSponge(; damping_rate=1, depth=1kilometers, mask=everywhere)
-        td = SplitExplicitTimeDiscretization(; substeps=6, sponge)
-        model = AtmosphereModel(grid; dynamics=CompressibleDynamics(td; reference_potential_temperature=300))
-        set!(model; θ=300, qᵗ=0, ρ=model.dynamics.reference_state.density,
-             w=(x, y, z) -> sin(π * z / 8000) * sin(2π * x / 8000))
-        w₀ = maximum(abs, interior(model.velocities.w))
-        Δt = 20 # rate × Δt = 20, eight times the explicit limit
-        for _ in 1:5
-            time_step!(model, Δt)
+
+        function maximum_w_after(sponge; Δt = 20, steps = 5)
+            td = SplitExplicitTimeDiscretization(; sponge)
+            model = AtmosphereModel(grid; dynamics=CompressibleDynamics(td; reference_potential_temperature=300))
+            set!(model; θ=300, qᵗ=0, ρ=model.dynamics.reference_state.density,
+                 w=(x, y, z) -> sin(π * z / 8000) * sin(2π * x / 80000))
+            for _ in 1:steps
+                time_step!(model, Δt)
+            end
+            return maximum(abs, interior(model.velocities.w))
         end
-        w₁ = maximum(abs, interior(model.velocities.w))
-        @test isfinite(w₁)
-        @test w₁ < w₀ / 10
+
+        everywhere(x, y, z) = one(x)
+        # rate × Δt = 20, eight times the explicit RK3 limit of ≈2.5
+        w_sponge = maximum_w_after(UpperSponge(; damping_rate=1, depth=1kilometers, mask=everywhere))
+        w_free = maximum_w_after(nothing)
+        @test isfinite(w_sponge)
+        @test w_sponge < FT(0.05)       # from max|w| ≈ 0.92
+        @test w_sponge < w_free / 5
     end
 
     #####
