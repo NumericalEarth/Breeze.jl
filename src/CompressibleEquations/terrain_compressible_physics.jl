@@ -173,7 +173,7 @@ end
 
         contributes = z★ ≥ lowest_center
         @inbounds begin
-            φ̂[i, j, k] = ifelse(contributes, φ★, 0)
+            φ̂[i, j, k] = ifelse(contributes, φ★, zero(φ★))
             contributions[i, j, k] = ifelse(contributes, 1, 0)
         end
     end

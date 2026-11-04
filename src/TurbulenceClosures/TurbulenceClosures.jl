@@ -56,6 +56,7 @@ using Oceananigans.Utils: Utils, @apply_regionally, launch!, prettysummary
 
 using Breeze.Utils: @regional
 using ..AtmosphereModels: AtmosphereModels
+using ..BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions, DefaultGustiness, TKEGustiness
 
 using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, standard_pressure, total_density, gas_phase_density,
                               precipitating_mass_fraction
