@@ -1,6 +1,7 @@
 using ..Thermodynamics:
     MoistureMassFractions,
     LiquidIceDensityState,
+    LiquidIcePotentialTemperatureState,
     temperature,
     with_moisture,
     with_temperature,
@@ -9,11 +10,13 @@ using ..Thermodynamics:
 using ..AtmosphereModels:
     AtmosphereModels,
     continuity_density,
+    dynamics_pressure,
     kernel_time_step,
     liquid_ice_exner_exponent,
     total_density,
     standard_pressure
 
+using Breeze.CompressibleEquations: CompressibleDynamics
 using Breeze.Solvers: NewtonSolver
 
 using Oceananigans: Oceananigans, CenterField, Field, Integral
@@ -148,11 +151,26 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
     return nothing
 end
 
+# The condensation holds fixed what the dynamics holds fixed, and the state type carries that
+# constraint into `adjust_thermodynamic_state` and the θˡⁱ inversion. The compressible core evolves
+# its density, so the adjustment is isochoric at the cell's total density ρ. The anelastic core, like
+# the other cores closed on a pressure (kinematic, parcel), holds the reference or prescribed
+# pressure fixed, so the adjustment is isobaric there: temperature and saturation are evaluated at
+# that pressure, at the thermodynamic state density p / (Rᵐ T), not at the total density ρ = ρᵣ that
+# weights the anelastic prognostics. This is the split `diagnose_thermodynamic_state` makes.
+@inline function instantaneous_precipitation_state(i, j, k, dynamics, θ, q, ρ, pˢᵗ, κ̂)
+    p = @inbounds dynamics_pressure(dynamics)[i, j, k]
+    return LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, p, κ̂)
+end
+
+@inline instantaneous_precipitation_state(i, j, k, ::CompressibleDynamics, θ, q, ρ, pˢᵗ, κ̂) =
+    LiquidIceDensityState(θ, q, pˢᵗ, ρ, NewtonSolver(typeof(ρ)), κ̂)
+
 @kernel function _instantaneous_precipitation_update!(dynamics, saturation_adjustment,
                                                    constants, pˢᵗ, κ̂, Δt, ρθˡⁱ, ρqᵛ, μ)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field  = total_density(dynamics)     # total ρ: mass fractions, saturation, density-based inversion
+    ρ_field  = total_density(dynamics)       # total ρ: mass fractions and the density weighting them
     ρᵈ_field = continuity_density(dynamics)  # ρᵈ: ρθ = ρᵈθ is dry-coupled
 
     @inbounds begin
@@ -162,19 +180,20 @@ end
         qᵗ = ρqᵛ₀ / ρ              # total water mass fraction (÷ total ρ); prognostic vapor, no retained condensate
         θ₀ = ρθˡⁱ[i, j, k] / ρᵈ     # θˡⁱ = ρθˡⁱ/ρᵈ (dry-coupled), conserved by the reversible condensation
 
-        # Condensation — constant-density saturation adjustment with θˡⁱ held fixed. Delegated to
-        # the shared #765 secant, which saturates against the density-based qsat at the cell's own
-        # ρ (true pressure p = ρRᵐT). Subsaturated cells short-circuit untouched, matching the
-        # original large-scale-condensation behavior. See adjust_thermodynamic_state(::LiquidIceDensityState, ::SA).
-        𝒰₀  = LiquidIceDensityState(θ₀, MoistureMassFractions(qᵗ), pˢᵗ, ρ, NewtonSolver(typeof(ρ)), κ̂)
+        # Condensation: saturation adjustment with θˡⁱ held fixed, at the cell's density on the
+        # compressible core and at its pressure otherwise (see `instantaneous_precipitation_state`).
+        # Delegated to the shared #765 secant. Subsaturated cells short-circuit untouched, matching
+        # the original large-scale-condensation behavior.
+        𝒰₀  = instantaneous_precipitation_state(i, j, k, dynamics, θ₀, MoistureMassFractions(qᵗ), ρ, pˢᵗ, κ̂)
         𝒰₁  = adjust_thermodynamic_state(𝒰₀, saturation_adjustment, constants)
         q   = 𝒰₁.moisture_mass_fractions
         T   = temperature(𝒰₁, constants)
         qᵛ⁺ = q.vapor
 
-        # Rain-out — remove all condensate but RETAIN the latent warming: the vapor-only parcel
-        # keeps T, so its θˡⁱ is the condensate-free (L = 0) inversion. with_temperature on the
-        # vapor-only state is exactly the old closed form θᶠ = T^(1/γ)(ρRᵐ/pˢᵗ)^((1-γ)/γ).
+        # Rain-out: remove all condensate but RETAIN the latent warming. The vapor-only parcel
+        # keeps T, so its θˡⁱ is the condensate-free (L = 0) inversion under the same constraint.
+        # At fixed density this is the closed form θᶠ = T^(1/γ)(ρRᵐ/pˢᵗ)^((1-γ)/γ); at fixed
+        # pressure it is θᶠ = T / Π(p).
         𝒰ᵥ = with_moisture(𝒰₁, MoistureMassFractions(qᵛ⁺))
         θᶠ = with_temperature(𝒰ᵥ, T, constants).potential_temperature
         ρqᵛ⁺ = ρ * qᵛ⁺
