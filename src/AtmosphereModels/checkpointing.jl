@@ -45,10 +45,8 @@ function Oceananigans.restore_prognostic_state!(rtm::RadiativeTransferModel, fro
     restore_prognostic_state!(merge(radiation_restart_state(rtm), (; cache_valid=nothing)), from)
     # Earlier checkpoints have no flag. Their fluxes are usable if the required cache exists.
     set_radiation_cache_validity!(rtm.cache_valid, radiation_cache_is_valid(get(from, :cache_valid, true)))
-    previous_updates = get(from, :approximate_updates, nothing)
-    missing_cache = !isnothing(rtm.approximate_updates) && isnothing(previous_updates)
-    legacy_invalid_cache = !isnothing(previous_updates) && any(isnan, previous_updates.solved_cos_zenith)
-    (missing_cache || legacy_invalid_cache) && invalidate_radiation_cache!(rtm)
+    missing_cache = !isnothing(rtm.approximate_updates) && isnothing(get(from, :approximate_updates, nothing))
+    missing_cache && invalidate_radiation_cache!(rtm)
     return rtm
 end
 

@@ -58,6 +58,12 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     return nothing
 end
 
+# RRTMGP Planck/source lookup tables are defined over a finite temperature range. Atmospheric and
+# surface temperatures are clamped into it to avoid extrapolation that can yield tiny negative
+# source values and trigger DomainErrors in geometric means.
+# TODO: This clamping should ideally be done internally in RRTMGP.jl.
+const rrtmgp_temperature_bounds = (160, 355)
+
 @kernel function _update_rrtmgp_gas_state!(as, grid, p, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     i, j, k = @index(Global, NTuple)
 
@@ -90,12 +96,7 @@ end
         # mismatches at the grid Nyquist frequency.
         Tᶜ = (Tᶠₖ + Tᶠₖ₊₁) / 2
 
-        # RRTMGP Planck/source lookup tables are defined over a finite temperature range.
-        # Clamp temperatures to avoid extrapolation that can yield tiny negative source values
-        # and trigger DomainErrors in geometric means.
-        # TODO: This clamping should ideally be done internally in RRTMGP.jl.
-        Tmin = 160
-        Tmax = 355
+        Tmin, Tmax = rrtmgp_temperature_bounds
         Tᶜ = clamp(Tᶜ, Tmin, Tmax)
         Tᶠₖ = clamp(Tᶠₖ, Tmin, Tmax)
 
@@ -108,7 +109,7 @@ end
             pᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, p)
             Tᴺ⁺¹ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
             Tᶠ[Nz+1, c] = clamp(Tᴺ⁺¹, Tmin, Tmax)
-            T₀[c] = clamp(surface_temperature[i, j, 1], Tmin, Tmax)
+            T₀[c] = solved_surface_temperature(surface_temperature[i, j, 1], rrtmgp_temperature_bounds)
         end
 
         # Column dry air mass: molecules / cm² of dry air

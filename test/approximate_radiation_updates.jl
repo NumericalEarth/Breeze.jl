@@ -25,11 +25,13 @@ function radiating_column(grid; epoch = nothing,
                           solar_position = ApparentSolarPosition(; epoch),
                           schedule = TimeInterval(1hours),
                           clock = Clock(time=zero(eltype(grid))),
-                          dynamics = nothing)
+                          dynamics = nothing,
+                          θ = z -> 300 + 5e-6 * z,
+                          qᵗ = z -> 0.020 * exp(-z / 3000))
     constants = ThermodynamicConstants()
-    if isnothing(dynamics)
+    if isnothing(dynamics) || dynamics === PrescribedDynamics
         reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
-        dynamics = AnelasticDynamics(reference_state)
+        dynamics = isnothing(dynamics) ? AnelasticDynamics(reference_state) : PrescribedDynamics(reference_state)
     end
     radiation = RadiativeTransferModel(grid, optics, constants;
                                        surface_temperature, surface_emissivity = 0.98, surface_albedo = 0.1,
@@ -38,9 +40,11 @@ function radiating_column(grid; epoch = nothing,
     microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
     model = AtmosphereModel(grid; dynamics, microphysics, radiation, clock)
     Oceananigans.initialize!(schedule, model) # count the schedule's time from the clock
-    set!(model; θ = z -> 300 + 5e-6 * z, qᵗ = z -> 0.020 * exp(-z / 3000))
+    set!(model; θ, qᵗ)
     return model
 end
+
+solved_cosine(model) = Array(model.radiation.approximate_updates.solved_cos_zenith)
 
 column(field) = vec(Array(interior(field)))
 longwave_columns(radiation) = column.((radiation.upwelling_longwave_flux, radiation.downwelling_longwave_flux))
@@ -71,6 +75,29 @@ top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwa
         rtol = optics isa GrayOptics ? sqrt(eps(FT)) : FT(0.02)
         @test updated[1] .- before[1] ≈ solved[1] .- before[1] rtol = rtol
         @test updated[2] .- before[2] ≈ solved[2] .- before[2] rtol = rtol
+    end
+
+    @testset "Longwave fluxes follow the surface temperature RRTMGP solves at" begin
+        # RRTMGP's Planck tables end at 355 K, into which the solve clamps the surface temperature.
+        # Near the top the response comes from a cooler surface, and above it the fluxes stay put.
+        grid = radiation_column_grid(FT, 16, 10kilometers)
+        T₀ = Field{Center, Center, Nothing}(grid)
+        for (solved_temperature, updated_temperature) in ((354.6, 354.9), (354.6, 356), (358, 360))
+            set!(T₀, solved_temperature)
+            model = radiating_column(grid; epoch = DateTime(2024, 6, 21, 12), optics = ClearSkyOptics(), surface_temperature = T₀)
+            radiation = model.radiation
+            before = longwave_columns(radiation)
+
+            set!(T₀, updated_temperature)
+            update_radiation_between_solves!(radiation, model)
+            updated = longwave_columns(radiation)
+
+            _update_radiation!(radiation, model)
+            solved = longwave_columns(radiation)
+
+            @test updated[1] .- before[1] ≈ solved[1] .- before[1] rtol = FT(0.02)
+            @test updated[2] .- before[2] ≈ solved[2] .- before[2] rtol = FT(0.02)
+        end
     end
 
     @testset "Shortwave fluxes follow the sun" begin
@@ -107,11 +134,14 @@ top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwa
         radiation = model.radiation
         solved = top_downwelling_shortwave(radiation)
 
-        for _ in 1:3
+        time_step!(model, 60) # the first step solves again with its time step known
+        solved_window_mean = solved_cosine(model)
+        for _ in 1:2
             time_step!(model, 60)
         end
 
-        # The morning sun climbs between solves, and the column absorbs the net flux into it
+        # The morning sun climbs between solves without solving again, and the column absorbs the net flux into it
+        @test solved_cosine(model) == solved_window_mean
         @test top_downwelling_shortwave(radiation) < solved
         ℐ_net = column(radiation.upwelling_longwave_flux) .+ column(radiation.downwelling_longwave_flux) .+
                 column(radiation.upwelling_shortwave_flux) .+ column(radiation.downwelling_shortwave_flux)
@@ -122,7 +152,6 @@ top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwa
     @testset "Calendar and explicit-time schedules" begin
         grid = radiation_column_grid(FT, 8, 10kilometers)
         epoch = DateTime(2024, 6, 21, 10)
-        solved_cosine(model) = Array(model.radiation.approximate_updates.solved_cos_zenith)
         first_half_hour = solved_cosine(radiating_column(grid; epoch, schedule=TimeInterval(30minutes)))
         second_half_hour = solved_cosine(radiating_column(grid; epoch=epoch + Minute(30), schedule=TimeInterval(30minutes)))
 
@@ -216,6 +245,105 @@ top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwa
         end
     end
 
+    @testset "A sun climbing far above the slant path of the last solve solves again" begin
+        grid = radiation_column_grid(FT, 8, 10kilometers)
+        solar_position = DiurnalSolarPosition(FT; latitude=0)
+        sun(time) = cos(2π * time / solar_position.day_length)
+
+        # With no known interval each solve takes the current sun, here a minute above the horizon.
+        # Once the sun is four times higher, that slant path would put the beam far too high in the
+        # column, and the update solves again.
+        model = radiating_column(grid; solar_position, schedule=TimeInterval(Inf), clock=Clock(time=FT(-6hours - 1minutes)))
+        model.clock.iteration = 1
+        for (time, solved_time) in ((-6hours + 1minutes, -6hours + 1minutes),
+                                    (-6hours + 3minutes, -6hours + 1minutes),
+                                    (-3hours, -3hours))
+            model.clock.time = FT(time)
+            update_state!(model; compute_tendencies=false)
+            @test only(solved_cosine(model)) ≈ sun(solved_time) rtol = sqrt(eps(FT))
+            @test top_downwelling_shortwave(model.radiation) ≈ -model.radiation.solar_constant * sun(time) rtol = sqrt(eps(FT))
+        end
+        @test model.radiation.schedule.actuations == 0
+
+        reference = radiating_column(grid; solar_position=FixedCosineZenith(FT(sun(-3hours))))
+        for name in (:upwelling_shortwave_flux, :downwelling_shortwave_flux)
+            flux = column(getproperty(model.radiation, name)) / top_downwelling_shortwave(model.radiation)
+            expected = column(getproperty(reference.radiation, name)) / top_downwelling_shortwave(reference.radiation)
+            @test flux ≈ expected rtol = sqrt(eps(FT))
+        end
+    end
+
+    @testset "Sunlight past an underestimated radiation interval solves again" begin
+        grid = radiation_column_grid(FT, 8, 10kilometers)
+        solar_position = DiurnalSolarPosition(FT; latitude=0)
+        ω = 2π / solar_position.day_length
+        window_mean(start, duration) = (sin(ω * (start + duration)) - sin(ω * start)) / (ω * duration)
+
+        # An iteration schedule takes its interval from the last time step: here four steps of 10 s,
+        # the last 10 s of them sunlit. Should the steps grow, the next solve comes long after sunrise.
+        clock = Clock(time=FT(-6hours - 30), last_Δt=FT(10))
+        model = radiating_column(grid; solar_position, schedule=IterationInterval(4), clock)
+        @test only(solved_cosine(model)) ≈ window_mean(-6hours, 10) rtol = 1e-3
+
+        model.clock.time = FT(-5hours)
+        model.clock.iteration = 2
+        update_state!(model; compute_tendencies=false)
+        @test only(solved_cosine(model)) ≈ window_mean(-5hours, 20) rtol = 1e-3
+    end
+
+    @testset "A solve in the time step of sunset averages from the start of the step" for dynamics in
+            (nothing, CompressibleDynamics(SplitExplicitTimeDiscretization()))
+        grid = radiation_column_grid(FT, 8, 10kilometers)
+        solar_position = DiurnalSolarPosition(FT; latitude=0)
+        ω = 2π / solar_position.day_length
+        Δt = 10
+
+        # The sun sets at 6 h, 7 s into the third time step, which solves. SSP RK3 evaluates the
+        # first stage of that step after sunset, and the second before it.
+        model = radiating_column(grid; dynamics, solar_position, schedule=IterationInterval(2),
+                                 clock=Clock(time=FT(6hours - 2Δt - 7)))
+        for _ in 1:2
+            time_step!(model, Δt)
+        end
+
+        solved = FT[]
+        record_solved_cosine(model) = push!(solved, only(solved_cosine(model)))
+        callback = Callback(record_solved_cosine, IterationInterval(1); callsite=UpdateStateCallsite())
+        time_step!(model, Δt; callbacks=[callback])
+
+        # One solve, averaged over the 7 sunlit seconds of its window from the start of the step,
+        # and no daylight solve at the stage that returns to before sunset
+        @test length(solved) == 3
+        @test all(==(first(solved)), solved)
+        @test first(solved) ≈ (1 - cos(7ω)) / 7ω rtol = 1e-3
+    end
+
+    @testset "Columns around the globe solve only on schedule" begin
+        grid = LatitudeLongitudeGrid(default_arch, FT; size=(24, 12, 4), longitude=(-180, 180), latitude=(-84, 84),
+                                     z=(0, 10kilometers))
+        θ(λ, φ, z) = 300 + 5e-6 * z
+        qᵗ(λ, φ, z) = 0.020 * exp(-z / 3000)
+        model = radiating_column(grid; epoch=DateTime(2024, 6, 21), dynamics=PrescribedDynamics, θ, qᵗ)
+
+        # Every solve changes the solved cosine of the columns it lights
+        solves = Ref(0)
+        last_solved = Ref(solved_cosine(model))
+        function count_solves(model)
+            current = solved_cosine(model)
+            solves[] += current != last_solved[]
+            last_solved[] = current
+        end
+        callback = Callback(count_solves, IterationInterval(1); callsite=UpdateStateCallsite())
+        for _ in 1:12
+            time_step!(model, 10minutes; callbacks=[callback])
+        end
+
+        # The first step solves again with its time step known, and the hourly schedule twice more.
+        # Along the terminator no stage finds sunlight its solve did not average over.
+        @test solves[] == 3
+        @test model.radiation.schedule.actuations == 2
+    end
+
     @testset "Fluxes follow every stage and the completed step" for dynamics in
             (nothing, CompressibleDynamics(SplitExplicitTimeDiscretization()))
         grid = radiation_column_grid(FT, 8, 10kilometers)
@@ -252,15 +380,7 @@ top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwa
                                                          if name !== :cache_valid)...)))
         array_validity = merge(saved, (; radiation=merge(saved.radiation, (; cache_valid=[true]))))
 
-        # An old checkpoint can mark an invalid cache with NaN, even if the new schedule needs no cache.
-        night = radiating_column(grid; solar_position, schedule=TimeInterval(1hours))
-        night_radiation = prognostic_state(night).radiation
-        invalid_updates = merge(night_radiation.approximate_updates, (; solved_cos_zenith=FT[NaN]))
-        invalid_radiation = (; (name => value for (name, value) in pairs(night_radiation)
-                               if name ∉ (:approximate_updates, :cache_valid))..., approximate_updates=invalid_updates)
-        legacy_invalid = merge(saved, (; radiation=invalid_radiation))
-
-        for checkpoint in (without_cache, without_radiation, without_validity, array_validity, legacy_invalid)
+        for checkpoint in (without_cache, without_radiation, without_validity, array_validity)
             restored = radiating_column(grid; solar_position, schedule=make_schedule())
             @test iszero(top_downwelling_shortwave(restored.radiation))
             restore_prognostic_state!(restored, checkpoint)

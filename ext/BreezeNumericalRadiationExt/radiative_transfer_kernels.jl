@@ -66,14 +66,14 @@ function solve_columns!(rtm::EcCKDRadiativeTransferModel, state, batch_size)
             surface.direct_surface_albedo, surface.diffuse_surface_albedo,
             rtm.liquid_effective_radius.radius, rtm.ice_effective_radius.radius)
 
-    # The longwave fluxes again with the surface `surface_temperature_increment` warmer, into the
-    # longwave responses of the approximate updates
+    # The longwave fluxes again at the perturbed surface temperature, into the longwave responses
+    # of the approximate updates
     if solves_longwave_response(rtm)
         updates = rtm.approximate_updates
-        launch!(architecture(grid), grid, batch_size, _column_warmer_surface_longwave_fluxes!,
+        launch!(architecture(grid), grid, batch_size, _column_perturbed_surface_longwave_fluxes!,
                 updates.upwelling_longwave_response, updates.downwelling_longwave_response,
                 rtm.atmospheric_state, state, longwave.gas_model, longwave.cloud, longwave.mole_fractions,
-                surface.surface_temperature, surface.surface_emissivity,
+                surface.surface_temperature, surface_temperature_bounds(rtm), surface.surface_emissivity,
                 rtm.liquid_effective_radius.radius, rtm.ice_effective_radius.radius)
     end
 
@@ -141,10 +141,10 @@ end
                                 shortwave_scratch(c, workspace))
 end
 
-@kernel function _column_warmer_surface_longwave_fluxes!(upwelling_longwave, downwelling_longwave,
-                                                         workspace, state, gas_model, longwave_cloud, mole_fractions,
-                                                         surface_temperature, surface_emissivity,
-                                                         liquid_radius, ice_radius)
+@kernel function _column_perturbed_surface_longwave_fluxes!(upwelling_longwave, downwelling_longwave,
+                                                            workspace, state, gas_model, longwave_cloud, mole_fractions,
+                                                            surface_temperature, T₀_bounds, surface_emissivity,
+                                                            liquid_radius, ice_radius)
     i, jᵇ = @index(Global, NTuple)
 
     j = jᵇ + state.row_offset
@@ -153,7 +153,7 @@ end
     Nₑ = number_of_extension_layers(state.extension)
 
     @inbounds begin
-        T₀ = surface_temperature[i, j, 1] + surface_temperature_increment
+        T₀ = perturbed_surface_temperature(surface_temperature[i, j, 1], T₀_bounds)
         ε = surface_emissivity[i, j, 1]
     end
 

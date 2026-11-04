@@ -25,6 +25,9 @@ using RRTMGP.BCs: LwBCs, SwBCs
 # Dispatch on background_atmosphere = BackgroundAtmosphere for full-spectrum (clear-sky or all-sky) radiation
 const FullSpectrumRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere}
 
+# The solve clamps the surface temperature into RRTMGP's Planck tables (`_update_rrtmgp_gas_state!`)
+AtmosphereModels.surface_temperature_bounds(::FullSpectrumRadiativeTransferModel) = rrtmgp_temperature_bounds
+
 # Shared by the clear-sky and all-sky `RadiativeTransferModel` docstrings.
 const full_spectrum_keywords_docstring = """
 - `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere()`).

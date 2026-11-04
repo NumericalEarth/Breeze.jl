@@ -18,13 +18,19 @@ The state of the approximate updates of a [`RadiativeTransferModel`](@ref)'s flu
 ([Hogan and Bozzo, 2015](@cite HoganBozzo2015)). Each state update between solves
 
 - shifts the longwave fluxes by the change in the fourth power of the surface temperature `T₀`
-  times their response to `T₀⁴`, computed at each solve by repeating the longwave solve with a
-  warmer surface;
+  times their response to `T₀⁴`, computed at each solve by repeating the longwave solve with the
+  surface 1 K warmer (1 K cooler at the top of a solver's surface temperature range);
 - scales the shortwave fluxes of the last solve by `μ₀ / μ̄₀`, where `μ₀` is the current cosine of
-  the solar zenith angle and `μ̄₀` its mean over the sunlit part of the radiation interval, with
+  the solar zenith angle and `μ̄₀` its mean over the sunlit part of the radiation window, with
   which the solve computed the slant path of the direct beam
-  ([Hogan and Hirahara, 2015](@cite HoganHirahara2015)). When the radiation interval is unknown,
-  the solve uses the current solar angle and the fluxes still follow the moving sun.
+  ([Hogan and Hirahara, 2015](@cite HoganHirahara2015)). The window runs from the start of the
+  time step of the solve to the start of the time step that solves next. When the radiation
+  interval is unknown, the solve uses the current solar angle and the fluxes still follow the
+  moving sun.
+
+Over its window the sun stays within four times `μ̄₀`. A state update that finds `μ₀` beyond that,
+sunlight the last solve did not average over, solves again instead: after a solve at night, or with
+an unknown or underestimated radiation interval.
 
 # Fields
 $(TYPEDFIELDS)
@@ -42,7 +48,7 @@ struct ApproximateRadiationUpdates{F, C}
     solved_cos_zenith :: C
     "Per-column cosine of the solar zenith angle"
     cos_zenith :: C
-    "Per-column sunlit duration, reused between solves to detect columns needing a daylight solve"
+    "Per-column sunlit duration of the radiation window (s), a workspace of the solve"
     sunlit_duration :: C
     "Per-column surface temperature of the last update of the longwave fluxes"
     surface_temperature :: C
@@ -75,20 +81,42 @@ end
 """
 $(TYPEDSIGNATURES)
 
-The time in seconds from `clock` to the next solve on `schedule`, or zero when it is not known:
-past the last explicit time, for an infinite interval, before the first time step of an
-`IterationInterval`, and for other schedules.
+The time in seconds by which the radiation window of a solve at `clock` begins before `clock`: the
+first stage of the time step at the first state update of a step (`clock.stage == 2`), so that the
+window begins with the step, and zero at other state updates. Later stages can return to earlier
+times than the first: SSP RK3 evaluates its third stage at `tⁿ + Δt / 2`, after its second at
+`tⁿ + Δt`.
 """
-function radiation_interval(schedule::Union{TimeInterval, SpecifiedTimes}, clock)
-    t★ = next_actuation_time(schedule)
-    (t★ === Inf || t★ <= clock.time) && return 0 # a schedule counting from before the clock actuates at the next step
-    return finite_radiation_interval(time_difference_seconds(t★, clock.time))
+function radiation_window_lead(clock)
+    lead = clock.last_stage_Δt
+    return ifelse((clock.stage == 2) & isfinite(lead), max(0, lead), zero(lead))
 end
 
-radiation_interval(schedule::IterationInterval, clock) =
+"""
+$(TYPEDSIGNATURES)
+
+The length in seconds of the radiation window of a solve at `clock` on `schedule`, which begins
+`lead` seconds before `clock` and ends at the start of the time step that solves next. Zero when
+the next solve is not known: past the last explicit time, for an infinite interval, before the
+first time step of an `IterationInterval`, and for other schedules.
+
+A `TimeInterval` or `SpecifiedTimes` schedule solves in the first time step whose first stage
+reaches its next time `t★`. That step starts less than `Δt - lead` after `t★`, with `lead` the
+first stage of a step, or a whole `Δt` after it when the solve is not at a first stage. An
+`IterationInterval` solves in the time step of its next actuating iteration.
+"""
+function radiation_interval(schedule::Union{TimeInterval, SpecifiedTimes}, clock, lead)
+    t★ = next_actuation_time(schedule)
+    (t★ === Inf || t★ <= clock.time) && return zero(lead) # a schedule counting from before the clock actuates at the next step
+    Δt = clock.last_Δt
+    solving_step_lag = ifelse(isfinite(Δt), max(0, Δt - lead), zero(lead))
+    return finite_radiation_interval(time_difference_seconds(t★, clock.time) + lead + solving_step_lag)
+end
+
+radiation_interval(schedule::IterationInterval, clock, lead) =
     finite_radiation_interval((schedule.interval - mod(clock.iteration - schedule.offset, schedule.interval)) * clock.last_Δt)
 
-radiation_interval(schedule, clock) = 0
+radiation_interval(schedule, clock, lead) = zero(lead)
 
 finite_radiation_interval(interval) = ifelse(isfinite(interval), max(0, interval), zero(interval))
 
@@ -96,7 +124,7 @@ finite_radiation_interval(interval) = ifelse(isfinite(interval), max(0, interval
 $(TYPEDSIGNATURES)
 
 Fill the per-column `cos_zenith` with the cosine of the solar zenith angle with which `rtm` solves
-at the time of `clock`: its mean over the sunlit part of the radiation interval when `rtm` updates
+at the time of `clock`: its mean over the sunlit part of the radiation window when `rtm` updates
 its fluxes between solves, and its current value otherwise.
 """
 update_cos_zenith!(cos_zenith, rtm::RadiativeTransferModel, grid, clock) =
@@ -107,11 +135,12 @@ update_solve_cos_zenith!(cos_zenith, ::Nothing, rtm, grid, clock) =
 
 function update_solve_cos_zenith!(μ̄₀, updates::ApproximateRadiationUpdates, rtm, grid, clock)
     μ₀ = updates.cos_zenith
-    interval = radiation_interval(rtm.schedule, clock)
+    lead = radiation_window_lead(clock)
+    interval = radiation_interval(rtm.schedule, clock, lead)
     update_cos_zenith!(μ₀, rtm.solar_position, grid, clock)
     copyto!(μ̄₀, μ₀)
     if interval > 0
-        average_solve_cos_zenith!(μ̄₀, updates.sunlit_duration, rtm.solar_position, grid, clock, interval)
+        average_solve_cos_zenith!(μ̄₀, updates.sunlit_duration, rtm.solar_position, grid, clock, interval, lead)
     end
     copyto!(updates.solved_cos_zenith, μ̄₀)
 
@@ -131,8 +160,30 @@ only when `rtm` updates its fluxes between solves and its surface temperature ca
 solves_longwave_response(rtm) = !isnothing(rtm.approximate_updates) &&
                                 !(rtm.surface_radiation.surface_temperature isa ConstantField)
 
-# The warming of the surface in the second longwave solve, from which the response follows
+"""
+$(TYPEDSIGNATURES)
+
+The range `(Tmin, Tmax)` into which the solver of `rtm` clamps the surface temperature, or
+`nothing` when it evaluates any surface temperature.
+"""
+surface_temperature_bounds(rtm) = nothing
+
+# The surface temperature `T₀` as a solve sees it
+@inline solved_surface_temperature(T₀, ::Nothing) = T₀
+@inline solved_surface_temperature(T₀, bounds) = clamp(T₀, bounds...)
+
+# The change of the surface temperature in the second longwave solve, from which the response follows
 const surface_temperature_increment = 1
+
+# The surface temperature of the second longwave solve: 1 K warmer than the solve's, or 1 K cooler
+# where warming would leave the solver's range, which would hold the surface emission fixed
+@inline perturbed_surface_temperature(T₀, ::Nothing) = T₀ + surface_temperature_increment
+
+@inline function perturbed_surface_temperature(T₀, bounds)
+    T = solved_surface_temperature(T₀, bounds)
+    warmer = T + surface_temperature_increment
+    return ifelse(warmer > last(bounds), T - surface_temperature_increment, warmer)
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -158,7 +209,7 @@ function complete_radiation_solve!(updates::ApproximateRadiationUpdates, rtm, mo
             updates.surface_temperature,
             rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux,
             rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
-            T₀, solves_longwave_response(rtm), grid)
+            T₀, surface_temperature_bounds(rtm), solves_longwave_response(rtm), grid)
 
     apply_radiation_updates!(updates, rtm, model)
 
@@ -166,15 +217,15 @@ function complete_radiation_solve!(updates::ApproximateRadiationUpdates, rtm, mo
 end
 
 @kernel function _record_radiation_solve!(R_lw_up, R_lw_dn, ℐ_sw_up_solved, ℐ_sw_dn_solved, T₀_updated,
-                                          ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, T₀, solves_response, grid)
+                                          ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, T₀, T₀_bounds, solves_response, grid)
     i, j = @index(Global, NTuple)
     c = column_index(i, j, grid.Nx)
     Nz = size(grid, 3)
 
     @inbounds begin
-        T = T₀[i, j, 1]
+        T = solved_surface_temperature(T₀[i, j, 1], T₀_bounds)
         T₀_updated[c] = T
-        ΔT⁴ = (T + surface_temperature_increment)^4 - T^4
+        ΔT⁴ = perturbed_surface_temperature(T, T₀_bounds)^4 - T^4
 
         for k in 1:Nz+1
             R_lw_up[i, j, k] = ifelse(solves_response, (R_lw_up[i, j, k] - ℐ_lw_up[i, j, k]) / ΔT⁴, R_lw_up[i, j, k])
@@ -190,7 +241,7 @@ $(TYPEDSIGNATURES)
 
 Update the fluxes of `radiation` for the current surface temperature and sun, between two solves,
 and recompute its flux divergence. Solve again when a restored checkpoint lacked the radiation
-cache, or when daylight arrives without a sunlit shortwave solve to scale. With a valid cache,
+cache, or when sunlight arrives that the last solve did not average over. With a valid cache,
 a no-op for radiation without approximate updates.
 """
 update_radiation_between_solves!(radiation, model) = nothing
@@ -204,12 +255,23 @@ function update_radiation_between_solves!(rtm::RadiativeTransferModel, model)
 end
 update_radiation_between_solves!(::Nothing, rtm, model) = nothing
 
+# Over its radiation window, the sun stays within four times the sunlit mean `μ̄₀` of the window:
+# the bound is approached only by a sun skimming the horizon on both sides of a short night. A
+# larger `μ₀` is sunlight the solve did not average over (after a solve at night, or with an
+# unknown or underestimated radiation interval), and `μ̄₀` would give it a slant path many times
+# too long, depositing the beam high in the column.
+const maximum_solar_cosine_ratio = 4
+
+@inline needs_daylight_solve(μ₀, μ̄₀) = μ₀ > maximum_solar_cosine_ratio * μ̄₀
+
 function update_radiation_between_solves!(updates::ApproximateRadiationUpdates, rtm, model)
     update_cos_zenith!(updates.cos_zenith, rtm.solar_position, model.grid, model.clock)
-    # A night-time solve with no daylight in its interval has no shortwave transmittance to scale.
-    # This also covers unknown intervals and a changed time step for an iteration-based schedule.
-    updates.sunlit_duration .= (updates.solved_cos_zenith .<= 0) .& (updates.cos_zenith .> 0)
-    if any(>(0), updates.sunlit_duration)
+
+    # One fused reduction; the decision to solve is taken on the host, which waits for it
+    daylight_solves = Broadcast.instantiate(Broadcast.broadcasted(needs_daylight_solve,
+                                                                  updates.cos_zenith, updates.solved_cos_zenith))
+
+    if mapreduce(identity, |, daylight_solves; init=false)
         _update_radiation!(rtm, model)
     else
         apply_radiation_updates!(updates, rtm, model)
@@ -226,7 +288,7 @@ function apply_radiation_updates!(updates, rtm, model)
             updates.upwelling_longwave_response, updates.downwelling_longwave_response,
             updates.solved_upwelling_shortwave_flux, updates.solved_downwelling_shortwave_flux,
             updates.solved_cos_zenith, updates.cos_zenith, updates.surface_temperature,
-            rtm.surface_radiation.surface_temperature, grid)
+            rtm.surface_radiation.surface_temperature, surface_temperature_bounds(rtm), grid)
 
     compute_radiation_flux_divergence!(rtm, grid)
 
@@ -235,17 +297,18 @@ end
 
 @kernel function _update_radiation_between_solves!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
                                                    R_lw_up, R_lw_dn, ℐ_sw_up_solved, ℐ_sw_dn_solved,
-                                                   μ̄₀, μ₀, T₀_updated, T₀, grid)
+                                                   μ̄₀, μ₀, T₀_updated, T₀, T₀_bounds, grid)
     i, j = @index(Global, NTuple)
     c = column_index(i, j, grid.Nx)
     Nz = size(grid, 3)
 
     @inbounds begin
-        T = T₀[i, j, 1]
+        # The fluxes follow the surface temperature the solver sees
+        T = solved_surface_temperature(T₀[i, j, 1], T₀_bounds)
         ΔT⁴ = T^4 - T₀_updated[c]^4
         T₀_updated[c] = T
 
-        # A wholly nocturnal interval has zero shortwave flux; sunrise triggers a fresh solve.
+        # A wholly nocturnal window has zero shortwave flux; sunlight after it triggers a fresh solve.
         μ₀_ratio = ifelse(μ̄₀[c] > 0, μ₀[c] / μ̄₀[c], zero(μ₀[c]))
 
         for k in 1:Nz+1

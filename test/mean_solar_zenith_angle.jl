@@ -66,6 +66,17 @@ end
         @test only(Array(cosine)) ≈ expected rtol = 1e-3 atol = 1e-6
     end
 
+    @testset "Windows that begin before the clock" for solar_position in
+            (DiurnalSolarPosition(FT; latitude=30), ApparentSolarPosition(; coordinate=(10, 45), epoch=DateTime(2024, 6, 21, 4)))
+        # A window that begins 20 minutes before the clock is the window that begins at that time
+        average_solve_cos_zenith!(cosine, duration, solar_position, grid, (; time=FT(1hours)), 2hours, FT(20minutes))
+        leading_cosine, leading_duration = only(Array(cosine)), only(Array(duration))
+        average_solve_cos_zenith!(cosine, duration, solar_position, grid, (; time=FT(40minutes)), 2hours)
+        @test leading_cosine ≈ only(Array(cosine)) rtol = rtol
+        @test leading_duration ≈ only(Array(duration)) rtol = rtol
+        @test leading_duration > 0
+    end
+
     @testset "Per-column apparent sun" begin
         grid = LatitudeLongitudeGrid(default_arch, FT; size=(4, 3, 2),
                                      longitude=(-180, 180), latitude=(-75, 75), z=(0, 1kilometers))

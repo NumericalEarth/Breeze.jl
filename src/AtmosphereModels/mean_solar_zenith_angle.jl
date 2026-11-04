@@ -1,5 +1,5 @@
 using Breeze.CelestialMechanics: day_of_year, solar_declination, hour_angle
-using Dates: Date, DateTime, Day
+using Dates: Date, DateTime, Day, Millisecond
 
 # Integrate a + b cos(ω) only while the sun is above the horizon. Clipping to sunrise and sunset
 # weights a partially sunlit interval by its actual duration, even when daylight is very brief.
@@ -36,12 +36,13 @@ end
     return integral, duration
 end
 
+# Each method averages over the `interval` seconds that begin `lead` seconds before `clock`.
 # Fixed and user-defined solar positions retain the instantaneous angle unless they provide an average.
-average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position, grid, clock, interval) = nothing
+average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position, grid, clock, interval, lead=0) = nothing
 
-function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::DiurnalSolarPosition, grid, clock, interval)
+function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::DiurnalSolarPosition, grid, clock, interval, lead=0)
     angular_speed = 2π / solar_position.day_length
-    first_angle = angular_speed * (clock.time - solar_position.noon_offset)
+    first_angle = angular_speed * (clock.time - lead - solar_position.noon_offset)
     cosine_offset = sind(solar_position.latitude) * sind(solar_position.declination)
     cosine_amplitude = cosd(solar_position.latitude) * cosd(solar_position.declination)
     integral, duration = sunlit_cosine_integral(cosine_offset, cosine_amplitude, first_angle, angular_speed * interval)
@@ -51,8 +52,8 @@ function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::
     return nothing
 end
 
-function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::ApparentSolarPosition, grid, clock, interval)
-    datetime = compute_datetime(clock.time, solar_position.epoch)
+function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::ApparentSolarPosition, grid, clock, interval, lead=0)
+    datetime = compute_datetime(clock.time, solar_position.epoch) - Millisecond(round(Int, 1000lead))
     remaining = interval
     fill!(cos_zenith, 0)
     fill!(sunlit_duration, 0)

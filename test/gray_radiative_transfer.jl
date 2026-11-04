@@ -213,7 +213,7 @@ end
         ℐ_sw_up_column = vec(Array(interior(ℐ_sw_up)))
         ℐ_sw_dn_column = vec(Array(interior(ℐ_sw_dn)))
         μ₀ = @allowscalar radiation.shortwave_solver.bcs.cos_zenith[1]
-        D = @allowscalar radiation.longwave_solver.angle_disc.gauss_Ds[1]
+        D = Base.get_extension(Breeze, :BreezeRRTMGPExt).reflected_beam_diffusivity
         @test ℐ_sw_up_column[1] ≈ -0.1 * ℐ_sw_dn_column[1]
         @test ℐ_sw_up_column[end] / ℐ_sw_up_column[1] ≈ (ℐ_sw_dn_column[1] / ℐ_sw_dn_column[end])^(D * μ₀) rtol = sqrt(eps(FT))
 
