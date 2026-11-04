@@ -5,6 +5,9 @@ using Dates: DateTime, Second
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Units
+using Breeze.AtmosphereModels: update_radiation_at_end_of_step!, _update_radiation!
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
+using Breeze.Thermodynamics: TetensFormula
 using Test
 
 # Load RRTMGP and NumericalRadiation to trigger the extensions
@@ -71,37 +74,35 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         interior(ℐ_lw_up) .= 0
         interior(flux_div) .= 0
 
-        # During time stepping radiation updates only in the first-stage update_state! of a step,
-        # when the clock is at stage 2; emulate those calls
-        model.clock.stage = 2
+        # During time stepping radiation updates only at the end of a step, on the end-of-step
+        # clock (stage 1); emulate those calls
 
         # Advance to iteration 1 → should NOT update (next update at iteration 3)
         model.clock.iteration = 1
         model.clock.time = DateTime(2024, 6, 21, 16, 0, 1)
-        Oceananigans.TimeSteppers.update_state!(model; compute_tendencies=false)
+        update_radiation_at_end_of_step!(model)
 
         @allowscalar @test ℐ_lw_up[1, 1, 1] == 0  # Radiation was skipped
 
         # Advance to iteration 2 → should NOT update
         model.clock.iteration = 2
         model.clock.time = DateTime(2024, 6, 21, 16, 0, 2)
-        Oceananigans.TimeSteppers.update_state!(model; compute_tendencies=false)
+        update_radiation_at_end_of_step!(model)
 
         @allowscalar @test ℐ_lw_up[1, 1, 1] == 0  # Still skipped
 
         # Advance to iteration 3 → SHOULD update (multiple of 3)
         model.clock.iteration = 3
         model.clock.time = DateTime(2024, 6, 21, 16, 0, 3)
-        Oceananigans.TimeSteppers.update_state!(model; compute_tendencies=false)
+        update_radiation_at_end_of_step!(model)
 
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100  # Radiation fired
 
         # Verify the flux divergence was also recomputed
         @test any(Array(interior(flux_div)) .!= 0)
 
-        # The other update_state! calls at iteration 3 (later stages, the end of the step, after
-        # an operator-split update) do not update again: once per scheduled iteration
-        for stage in (3, 1)
+        # update_state! never updates radiation during time stepping, at any stage
+        for stage in (1, 2, 3)
             interior(ℐ_lw_up) .= 0
             model.clock.stage = stage
             Oceananigans.TimeSteppers.update_state!(model; compute_tendencies=false)
@@ -151,20 +152,19 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         interior(ℐ_lw_up) .= 0
         interior(flux_div) .= 0
 
-        # Emulate the first-stage update_state! of each step, where scheduled updates happen
-        model.clock.stage = 2
+        # Emulate the end of each step, where scheduled updates happen
 
         # Advance by 5 seconds → should NOT update (interval is 10s)
         model.clock.iteration = 1
         model.clock.time = FT(5)
-        Oceananigans.TimeSteppers.update_state!(model; compute_tendencies=false)
+        update_radiation_at_end_of_step!(model)
 
         @allowscalar @test ℐ_lw_up[1, 1, 1] == 0  # Radiation was skipped
 
         # Advance to 10 seconds → SHOULD update
         model.clock.iteration = 2
         model.clock.time = FT(10)
-        Oceananigans.TimeSteppers.update_state!(model; compute_tendencies=false)
+        update_radiation_at_end_of_step!(model)
 
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100  # Radiation fired
 
@@ -178,14 +178,14 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         # Advance to 15 seconds → should NOT update (next at 20s)
         model.clock.iteration = 3
         model.clock.time = FT(15)
-        Oceananigans.TimeSteppers.update_state!(model; compute_tendencies=false)
+        update_radiation_at_end_of_step!(model)
 
         @allowscalar @test ℐ_lw_up[1, 1, 1] == 0  # Skipped
 
         # Advance to 20 seconds → SHOULD update
         model.clock.iteration = 4
         model.clock.time = FT(20)
-        Oceananigans.TimeSteppers.update_state!(model; compute_tendencies=false)
+        update_radiation_at_end_of_step!(model)
 
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100  # Radiation fired
     end
@@ -231,8 +231,8 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         @test all(lw_array[:, :, 1] .== lw_array[1, 1, 1])
     end
 
-    # Under real time stepping, scheduled updates happen once per firing iteration, in the
-    # first-stage update_state! of the step (clock at stage 2), with both Breeze time steppers
+    # Under real time stepping, scheduled updates happen once per firing iteration, at the end of
+    # the step that reaches it (clock at stage 1), with both Breeze time steppers
     @testset "Updates per firing iteration, $dynamics dynamics" for dynamics in (:anelastic, :compressible)
         grid = RectilinearGrid(default_arch; size=8, z=(0, 1000), topology=(Flat, Flat, Bounded))
         constants = ThermodynamicConstants()
@@ -251,6 +251,50 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         end
 
         scheduled = filter(update -> first(update) > 0, radiation.updates)
-        @test scheduled == [(3, 2), (6, 2)]
+        @test scheduled == [(3, 1), (6, 1)]
+    end
+
+    # The fluxes change only on scheduled steps and then equal a fresh computation from the
+    # end-of-step state, after the operator-split Kessler update; the tendencies the next step's
+    # first stage uses are built with them
+    @testset "End-of-step fluxes with Kessler, $dynamics dynamics" for dynamics in (:anelastic, :compressible)
+        grid = RectilinearGrid(default_arch; size=16, x=0, y=45, z=(0, 2400), topology=(Flat, Flat, Bounded))
+        constants = ThermodynamicConstants(saturation_vapor_pressure=TetensFormula())
+        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+                                           surface_temperature = 300,
+                                           surface_emissivity = 0.98,
+                                           surface_albedo = 0.1,
+                                           schedule = IterationInterval(3))
+        model_dynamics = dynamics == :anelastic ?
+            AnelasticDynamics(ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)) :
+            CompressibleDynamics()
+        clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
+        model = AtmosphereModel(grid; clock, dynamics=model_dynamics, thermodynamic_constants=constants,
+                                microphysics=DCMIP2016KesslerMicrophysics(), advection=nothing, radiation)
+        set!(model; θ = z -> 299 + 3e-3 * z, qᵛ = z -> 0.016 * exp(-z / 2000),
+                    qᶜˡ = z -> 6e-4 * exp(-((z - 1200) / 200)^2), qʳ = z -> 2e-3 * exp(-((z - 900) / 300)^2))
+
+        flux_divergence = radiation.flux_divergence
+        for n in 1:6
+            before = Array(interior(flux_divergence))
+            time_step!(model, 1)
+            after = Array(interior(flux_divergence))
+            if n % 3 == 0
+                @test after != before
+                tendencies = map(G -> Array(interior(G)), model.timestepper.Gⁿ)
+
+                # A fresh computation from the end-of-step (post-Kessler) state is identical
+                _update_radiation!(radiation, model)
+                @test Array(interior(flux_divergence)) == after
+
+                # ... and the next step's first-stage tendencies already use these fluxes
+                Oceananigans.TimeSteppers.update_state!(model)
+                for (G, expected) in zip(model.timestepper.Gⁿ, tendencies)
+                    @test Array(interior(G)) == expected
+                end
+            else
+                @test after == before
+            end
+        end
     end
 end

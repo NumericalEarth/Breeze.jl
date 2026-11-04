@@ -12,6 +12,7 @@ using Oceananigans.TimeSteppers:
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, microphysics_model_update!,
+                                update_radiation_at_end_of_step!,
                                 compute_closure_tendencies!
 
 using Breeze.CompressibleEquations:
@@ -301,6 +302,10 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
+
+    # Update scheduled radiation once, from the end-of-step state the next step starts from,
+    # and rebuild the next step's first-stage tendencies with the new fluxes.
+    update_radiation_at_end_of_step!(model, callbacks)
 
     # Advect particles once per step, over the full Δt, with the velocity of the state
     # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,
