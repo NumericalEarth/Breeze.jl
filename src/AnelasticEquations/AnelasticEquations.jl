@@ -23,15 +23,17 @@ using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
-using Oceananigans.Architectures: architecture
+using Oceananigans.Architectures: CPU, architecture, on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Fields: set!
-using Oceananigans.Grids: AbstractGrid, ZDirection, inactive_cell, with_number_type
+using Oceananigans.Fields: interior, set!
+using Oceananigans.Grids: AbstractGrid, Bounded, Center, XYRegularRG, ZDirection, inactive_cell,
+                          with_number_type
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
-using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
+using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
+                              xspacing, yspacing, zspacing
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
-using Oceananigans.Utils: prettysummary, launch!
+using Oceananigans.Utils: KernelParameters, prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant,
                              surface_temperature_value, density
@@ -39,11 +41,12 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_press
                                 kernel_time_step
 
 # Import microphysics interface for buoyancy computation
-using Breeze.AtmosphereModels: grid_moisture_fractions
+using Breeze.AtmosphereModels: grid_moisture_fractions, enforce_lateral_mass_balance!
 
 include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")
 include("anelastic_buoyancy.jl")
+include("lateral_mass_balance.jl")
 
 # Define type alias after AnelasticDynamics is defined
 const AnelasticModel = AtmosphereModel{<:AnelasticDynamics}
