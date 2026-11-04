@@ -7,7 +7,8 @@ using Breeze.Thermodynamics:
     mixture_gas_constant,
     mixture_heat_capacity,
     condensate_latent_energy,
-    exner_exponent
+    exner_exponent,
+    specific_heat_difference
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
@@ -113,49 +114,73 @@ Base.summary(::ConstantRateCondensateFormation) = "ConstantRateCondensateFormati
 ##### Shared helpers for relaxation-to-saturation phase change (liquid + ice)
 #####
 
-# Latent-heat feedback (dT/dqᶜ) (dqᵛ⁺/dT) of forming condensate qᶜ at the constraint the
-# thermodynamic state is closed on, with qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) and d ln pᵛ⁺ / dT = ℒ / (Rᵛ T²)
-# at fixed composition.
+# Response dqᵛ⁺/dqᶜ of the saturation specific humidity to forming condensate qᶜ from vapor at
+# fixed total water and at the constraint the thermodynamic state is closed on, with
+# qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) and d ln pᵛ⁺ / dT = ℒ / (Rᵛ T²). Forming condensate changes Rᵐ by
+# −Rᵛ dqᶜ and cᵖᵐ by −Δcᵖ dqᶜ, where Δcᵖ = cᵖᵛ − cᶜ is the phase's `specific_heat_difference`.
 #
-# Fixed pressure: the enthalpy is conserved, so condensate heats by dT = ℒ dqᶜ / cᵖᵐ, and
-# ρ ∝ 1/T cancels the explicit 1/T of qᵛ⁺.
-@inline function latent_heating_feedback(𝒰::AbstractReferencePressureState, qᵛ⁺, T, ℒ, constants)
-    cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
+# Fixed pressure: the enthalpy is conserved, so condensate heats by dT = ℒ dqᶜ / cᵖᵐ, and with
+# ρ = p / (Rᵐ T) the saturation specific humidity is qᵛ⁺ = pᵛ⁺ Rᵐ / (p Rᵛ): the heating raises
+# it at qᵛ⁺ ℒ / (Rᵛ T²) per kelvin, and the vapor lost lowers it at qᵛ⁺ Rᵛ / Rᵐ per unit qᶜ.
+@inline function saturation_response(𝒰::AbstractReferencePressureState, qᵛ⁺, T, ℒ, Δcᵖ, constants)
+    q = 𝒰.moisture_mass_fractions
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
     Rᵛ = vapor_gas_constant(constants)
-    return ℒ / cᵖᵐ * qᵛ⁺ * ℒ / (Rᵛ * T^2)
+    return qᵛ⁺ * (ℒ^2 / (cᵖᵐ * Rᵛ * T^2) - Rᵛ / Rᵐ)
 end
 
 # Fixed θ and ρ: H = ĉᵖ Π θ with Π = (ρ Rᵐ T / pˢᵗ)^κ. Phase exchange holds total water,
 # ĉᵖ, and κ fixed, with dH = cᵖᵐ dT - ℒ dqᶜ and dRᵐ = -Rᵛ dqᶜ. Differentiating gives
 # (cᵖᵐ - κ H / T) dT = (ℒ - κ H Rᵛ / Rᵐ) dqᶜ. This agrees with the constant-internal-energy
 # response only when κ H = Rᵐ T, as in condensate-free air with VaporEquivalentExponent.
-@inline function latent_heating_feedback(𝒰::LiquidIceDensityState, qᵛ⁺, T, ℒ, constants)
+# At fixed ρ, qᵛ⁺ does not depend on the composition. This is the response of the converged
+# inversion, which `NewtonSolver` and `FixedIterations` approach.
+@inline function saturation_response(𝒰::LiquidIceDensityState, qᵛ⁺, T, ℒ, Δcᵖ, constants)
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵛ = vapor_gas_constant(constants)
     κ = exner_exponent(𝒰.exner_exponent, q, constants)
     H = cᵖᵐ * T - condensate_latent_energy(q, constants)
-    return (ℒ - κ * H * Rᵛ / Rᵐ) / (cᵖᵐ - κ * H / T) *
-           qᵛ⁺ * (ℒ / (Rᵛ * T^2) - 1 / T)
+    dT_dqᶜ = (ℒ - κ * H * Rᵛ / Rᵐ) / (cᵖᵐ - κ * H / T)
+    return dT_dqᶜ * qᵛ⁺ * (ℒ / (Rᵛ * T^2) - 1 / T)
+end
+
+# Fixed θ and ρ with the non-iterated inversion (`temperature_solver = nothing`), whose
+# temperature is the dry closed form plus the latent shift, T = T̃ + Hᶜ / cᵖᵐ with
+# T̃ = θ̃^γ (ρ Rᵐ / pˢᵗ)^(γ - 1), θ̃ = ĉᵖ θ / cᵖᵐ, and γ = 1 / (1 - κ), so that cᵖᵐ T̃ = H.
+# Differentiating gives cᵖᵐ dT = [ℒ - κ / (1 - κ) H (Rᵛ / Rᵐ - Δcᵖ / cᵖᵐ)] dqᶜ: the latent
+# shift is not amplified by the Exner feedback the converged inversion has.
+@inline function saturation_response(𝒰::LiquidIceDensityState{<:Any, Nothing}, qᵛ⁺, T, ℒ, Δcᵖ, constants)
+    q = 𝒰.moisture_mass_fractions
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    κ = exner_exponent(𝒰.exner_exponent, q, constants)
+    H = cᵖᵐ * T - condensate_latent_energy(q, constants)
+    dT_dqᶜ = (ℒ - κ / (1 - κ) * H * (Rᵛ / Rᵐ - Δcᵖ / cᵖᵐ)) / cᵖᵐ
+    return dT_dqᶜ * qᵛ⁺ * (ℒ / (Rᵛ * T^2) - 1 / T)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Compute the thermodynamic adjustment factor `Γ = 1 + (dT/dqᶜ) (dqᵛ⁺/dT)` used in
-relaxation-to-saturation condensation/evaporation tendencies.
+Compute the thermodynamic adjustment factor `Γ = 1 + dqᵛ⁺/dqᶜ` used in
+relaxation-to-saturation condensation/evaporation tendencies, so that condensation alone relaxes
+the supersaturation excess `qᵛ - qᵛ⁺` over the relaxation timescale.
 
-The heating response `dT/dqᶜ` follows the conserved variables of `𝒰` at fixed total water:
-enthalpy at fixed pressure for reference-pressure states, and `θ` at fixed density for
-`LiquidIceDensityState`, using its chosen Exner exponent. The saturation derivative
-`dqᵛ⁺/dT` holds composition fixed and follows the state's pressure or density constraint.
+The response `dqᵛ⁺/dqᶜ` to forming condensate from vapor follows the conserved variables of `𝒰` at
+fixed total water: enthalpy at fixed pressure for reference-pressure states, where `qᵛ⁺` also
+falls with the mixture gas constant, and `θ` at fixed density for `LiquidIceDensityState`, using
+its chosen Exner exponent and the temperature its `temperature_solver` returns.
 """
 @inline thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, constants) =
-    thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, liquid_latent_heat(T, constants), constants)
+    thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, liquid_latent_heat(T, constants),
+                                    specific_heat_difference(constants, constants.liquid), constants)
 
-@inline thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, ℒ, constants) =
-    1 + latent_heating_feedback(𝒰, qᵛ⁺, T, ℒ, constants)
+@inline thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, ℒ, Δcᵖ, constants) =
+    1 + saturation_response(𝒰, qᵛ⁺, T, ℒ, Δcᵖ, constants)
 
 """
 $(TYPEDSIGNATURES)
@@ -164,7 +189,8 @@ Compute the thermodynamic adjustment factor `Γ` used in relaxation-to-saturatio
 deposition/sublimation tendencies (ice analogue of `thermodynamic_adjustment_factor`).
 """
 @inline ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, 𝒰, constants) =
-    thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, 𝒰, ice_latent_heat(T, constants), constants)
+    thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, 𝒰, ice_latent_heat(T, constants),
+                                    specific_heat_difference(constants, constants.ice), constants)
 
 """
 $(TYPEDSIGNATURES)

@@ -834,7 +834,7 @@ end
 # where qᵛ⁺ is the saturation specific humidity, τˡ is the relaxation timescale,
 # and Γˡ is a thermodynamic adjustment factor that accounts for latent heating:
 #
-#   Γˡ = 1 + (dT/dqᶜˡ) ⋅ dqᵛ⁺/dT
+#   Γˡ = 1 + dqᵛ⁺/dqᶜˡ = 1 + (dT/dqᶜˡ) ⋅ ∂qᵛ⁺/∂T + ∂qᵛ⁺/∂qᶜˡ
 #
 # This factor arises because condensation releases latent heat, which increases
 # temperature and hence increases the saturation specific humidity, creating a
@@ -843,11 +843,12 @@ end
 # The saturation derivative follows the Clausius-Clapeyron equation at fixed composition.
 # With qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T),
 #
-#   fixed pressure (anelastic, parcel): dqᵛ⁺/dT = qᵛ⁺ ⋅ ℒˡ / (Rᵛ T²)
-#   fixed density (compressible):       dqᵛ⁺/dT = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T)
+#   fixed pressure (anelastic, parcel): ∂qᵛ⁺/∂T = qᵛ⁺ ⋅ ℒˡ / (Rᵛ T²),  ∂qᵛ⁺/∂qᶜˡ = -qᵛ⁺ Rᵛ / Rᵐ
+#   fixed density (compressible):       ∂qᵛ⁺/∂T = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T),  ∂qᵛ⁺/∂qᶜˡ = 0
 #
 # The heating response dT/dqᶜˡ follows the state's conserved enthalpy at fixed pressure,
-# or its θ–density relation at fixed density; see `Microphysics.latent_heating_feedback`.
+# or its θ–density relation and temperature solver at fixed density; see
+# `Microphysics.saturation_response`.
 #
 # See Morrison and Grabowski (2008, JAS), Appendix A, especially Eq. (A3).
 #####

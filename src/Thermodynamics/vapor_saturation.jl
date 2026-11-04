@@ -138,7 +138,8 @@ effective relaxation timescale is `ξ τ`, and an effective supersaturation exce
 `(qᵛ - qᵛ⁺) / ξ`.
 
 `Microphysics.thermodynamic_adjustment_factor` follows the constraint the thermodynamic
-state is closed on. At fixed pressure it matches this form with ``cᵖ = cᵖᵐ``. At fixed
+state is closed on. At fixed pressure it is this form with ``cᵖ = cᵖᵐ``, less the
+``qᵛ⁺ Rᵛ / Rᵐ`` by which the vapor lost to condensate lowers ``qᵛ⁺``. At fixed
 density it differentiates the state's θ–density relation for the heating response and
 keeps the ideal-gas ``-1/T`` term of ``dqᵛ⁺/dT``. The form here matches the convention of
 the P3 scheme.

@@ -52,28 +52,17 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
         𝒰ᵈ = with_temperature(LiquidIceDensityState(zero(FT), q, FT(1e5), density(𝒰ᵖ, constants)), T, constants)
 
         @testset "$name / $(nameof(typeof(𝒰)))" for (name, microphysics, ℳ) in cases, 𝒰 in (𝒰ᵖ, 𝒰ˢ, 𝒰ᵈ)
-            T₀ = temperature(𝒰, constants)
             qᵛ⁺ = saturation_specific_humidity(𝒰, constants, surface)
 
-            # Γ = 1 + (dT/dqᶜ) (dqᵛ⁺/dT), with both factors differentiated in the actual state, which
-            # independently selects fixed pressure or fixed density: dT/dqᶜ by forming condensate at
-            # the state's conserved variables, dqᵛ⁺/dT by perturbing T at fixed composition.
-            h = FT === Float64 ? FT(1e-3) : FT(0.25)
-            δ = FT === Float64 ? FT(1e-5) : FT(5e-4)
-            𝒰⁺ = with_temperature(𝒰, T₀ + h, constants)
-            𝒰⁻ = with_temperature(𝒰, T₀ - h, constants)
-            dqᵛ⁺_dT = (saturation_specific_humidity(𝒰⁺, constants, surface) -
-                       saturation_specific_humidity(𝒰⁻, constants, surface)) / 2h
+            # Γ = 1 + dqᵛ⁺/dqᶜ relaxes the supersaturation over τ. Forming condensate at the actual
+            # state's conserved variables selects fixed pressure or fixed density, and includes
+            # the latent heating and, at fixed pressure, the drop in the mixture gas constant.
+            δ = FT === Float64 ? FT(1e-6) : FT(5e-4)
             𝒰ᶜ⁺ = with_moisture(𝒰, formed(δ))
             𝒰ᶜ⁻ = with_moisture(𝒰, formed(-δ))
-            dT_dqᶜ = (temperature(𝒰ᶜ⁺, constants) - temperature(𝒰ᶜ⁻, constants)) / 2δ
-            Γ = 1 + dT_dqᶜ * dqᵛ⁺_dT
-
-            # Γ relaxes the supersaturation over τ: it is the full response 1 + dqᵛ⁺/dqᶜ of forming
-            # condensate, up to the composition dependence of Rᵐ and cᵖᵐ.
             dqᵛ⁺_dqᶜ = (saturation_specific_humidity(𝒰ᶜ⁺, constants, surface) -
                         saturation_specific_humidity(𝒰ᶜ⁻, constants, surface)) / 2δ
-            @test Γ ≈ 1 + dqᵛ⁺_dqᶜ rtol=2e-2
+            Γ = 1 + dqᵛ⁺_dqᶜ
 
             expected = (qᵛ - qᵛ⁺) / (Γ * τ)
             ρ = density(𝒰, constants)
@@ -87,7 +76,7 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     end
 end
 
-@testset "Compressible relaxation with existing condensate [$FT]" for FT in all_float_types()
+@testset "Relaxation with existing condensate [$FT]" for FT in all_float_types()
     constants = ThermodynamicConstants(FT)
     δ = FT === Float64 ? FT(1e-6) : FT(1e-4)
     tolerance = FT === Float64 ? 1e-7 : 5e-4
@@ -96,18 +85,24 @@ end
         ((PlanarLiquidSurface(), thermodynamic_adjustment_factor, (1, 0), FT(300), FT(0.025)),
          (PlanarIceSurface(), ice_thermodynamic_adjustment_factor, (0, 1), FT(260), FT(0.003)))
 
-        @testset "$(typeof(surface)), $(typeof(κ̂)), qˡ=$qˡ, qⁱ=$qⁱ" for
-            κ̂ in (VaporEquivalentExponent(), DryExponent()),
-            (qˡ, qⁱ) in ((FT(0), FT(0)), (FT(0.01), FT(0)), (FT(0), FT(0.01)), (FT(0.005), FT(0.005)))
+        # The density state with the converged and the non-iterated temperature inversion, and the
+        # reference-pressure state.
+        states(q, κ̂) = (("Newton density", LiquidIceDensityState(FT(0), q, FT(1e5), FT(1.2), NewtonSolver(FT), κ̂)),
+                        ("closed-form density", LiquidIceDensityState(FT(0), q, FT(1e5), FT(1.2), nothing, κ̂)),
+                        ("reference pressure", LiquidIcePotentialTemperatureState(FT(0), q, FT(1e5), FT(1e5), κ̂)))
 
-            q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
-            𝒰₀ = LiquidIceDensityState(FT(0), q, FT(1e5), FT(1.2), NewtonSolver(FT), κ̂)
+        @testset "$(typeof(surface)), $(typeof(κ̂)), $label, qˡ=$qˡ, qⁱ=$qⁱ" for
+            κ̂ in (VaporEquivalentExponent(), DryExponent()),
+            (qˡ, qⁱ) in ((FT(0), FT(0)), (FT(0.01), FT(0)), (FT(0), FT(0.01)), (FT(0.005), FT(0.005))),
+            (label, 𝒰₀) in states(MoistureMassFractions(qᵛ, qˡ, qⁱ), κ̂)
+
             𝒰 = with_temperature(𝒰₀, T, constants)
             T₀ = temperature(𝒰, constants)
             qᵛ⁺ = saturation_specific_humidity(𝒰, constants, surface)
 
-            # Form condensate at fixed θ, density, and total water. At fixed density this
-            # differentiates the full saturation response, including the latent heating.
+            # Form condensate at the state's conserved variables and fixed total water. This
+            # differentiates the full saturation response, including the latent heating, the
+            # temperature solver, and the drop in the mixture gas constant at fixed pressure.
             q⁺ = MoistureMassFractions(qᵛ - δ, qˡ + wˡ * δ, qⁱ + wⁱ * δ)
             q⁻ = MoistureMassFractions(qᵛ + δ, qˡ - wˡ * δ, qⁱ - wⁱ * δ)
             𝒰⁺ = with_moisture(𝒰, q⁺)
