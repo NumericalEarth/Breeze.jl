@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, dissipationᶜᶜᶜ,
+using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, absorb_stratification_coefficient, dissipationᶜᶜᶜ,
                                  tke_sink_rate
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!, time_discretization
@@ -132,10 +132,12 @@ column(field) = Array(interior(field, 1, 1, :))
     @test adapt(identity, closure.mixing_length) === closure.mixing_length
     @test adapt(identity, sf) === sf
     @test sf isa RationalStabilityFunction{FT}
-    @test closure.mixing_length.ℂˢ === FT(0.6565692899592015)
-    @test closure.mixing_length.ℂⁱ === FT(1.5609936948461662)
+    @test closure.mixing_length.ℂˢ === FT(0.7877315198717979)
+    @test closure.mixing_length.ℂⁱ === FT(1.777871783491512)
     @test closure.mixing_length.ℂˢ * (sf.ℂᵘ⁰^3 / sf.ℂᴰ⁰)^(1/4) ≈ 0.4 rtol=1e-6
-    @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.8001428358397753
+    @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.7999974525668859
+    @test GradientLimitedMixingLength(2).ℂⁱ == 2
+    @test GradientLimitedMixingLength{FT}(2).ℂⁱ === FT(2)
     @test GradientLimitedMixingLength(ℂˢ=2, ℂⁱ=0.5).ℂⁱ === 0.5
 
     # Independent O(Nz²) face-envelope reference, including unequal slopes in BOTH directions.
@@ -267,6 +269,53 @@ end
         N²_direct = column(Field(KernelFunctionOperation{Center, Center, Face}(∂z_b, grid, buoyancy_force(model), buoyancy_tracers(model))))
         @test all(N²_stored[2:Nz] .== N²_direct[2:Nz])
         @test all(N²_stored[2:Nz] .> 0)
+    end
+
+    @testset "equivalence with the ℓ = min(z, Cᴺ √e / N) normalization" begin
+        # The parameters of the earlier normalization — Nakanishi & Niino's coefficients with
+        # Deardorff's Cᴺ on the stratification length — mapped through the one named conversion
+        # must reproduce that closure exactly: Kᵘ = ℂᵘ ℓ √e and ω = ℂᴰ √e / ℓ with
+        # ℓ = min(z, Cᴺ √e / N), here written out at the faces and centers.
+        Cᴺ = FT(0.76)
+        legacy = ConstantStabilityFunctions(ℂᵘ = 0.196, ℂᶜ = 0.265, ℂᵉ = 0.392, ℂᴰ = 0.295)
+        mixing_length, stability_functions = absorb_stratification_coefficient(Cᴺ, legacy)
+        mapped = TKEBasedTurbulenceClosure(; mixing_length, stability_functions)
+        @test mapped.mixing_length.ℂˢ ≈ 1 / Cᴺ
+        @test mapped.stability_functions.ℂᵘ * mapped.mixing_length.ℂˢ ≈ legacy.ℂᵘ
+        @test mapped.stability_functions.ℂᴰ / mapped.mixing_length.ℂˢ ≈ legacy.ℂᴰ
+
+        model = AtmosphereModel(grid; closure = mapped, advection = nothing)
+        e₀ = FT(0.5)
+        Γ = FT(0.005)
+        set!(model; θ = z -> 300 + Γ * z)
+        set_tke!(model, e₀)
+
+        θ = column(model.formulation.potential_temperature)
+        g = model.thermodynamic_constants.gravitational_acceleration
+        Δz = Lz / Nz
+        # This checks the length normalization, not the separately tested stability diagnosis.
+        N² = column(model.closure_fields.N²)[2:Nz]
+        ℓᶠ = [min(zf[k], Cᴺ * sqrt(e₀) / sqrt(N²[k-1])) for k in 2:Nz]
+
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        Kᶜ = column(model.closure_fields.Kᶜ)
+        Kᵉ = column(model.closure_fields.Kᵉ)
+        @test all(isapprox.(Kᵘ[2:Nz], legacy.ℂᵘ .* ℓᶠ .* sqrt(e₀); rtol = 1e-5))
+        @test all(isapprox.(Kᶜ[2:Nz], legacy.ℂᶜ .* ℓᶠ .* sqrt(e₀); rtol = 1e-5))
+        @test all(isapprox.(Kᵉ[2:Nz], legacy.ℂᵉ .* ℓᶠ .* sqrt(e₀); rtol = 1e-5))
+
+        # The mapped closure is the local minimum, so its sink rate at the interior centers is the
+        # legacy formula with N² and B = -Kᶜ N² reconstructed from the two adjacent faces, plus the
+        # negative buoyancy flux divided by e
+        @test mapped.mixing_length isa LocalMinimumMixingLength
+        Lᵉ = column(model.closure_fields.Lᵉ)
+        zc = znodes(grid, Center())
+        for k in 2:Nz-1
+            N²ᶜ = (N²[k-1] + N²[k]) / 2
+            ℓᶜ = min(zc[k], Cᴺ * sqrt(e₀) / sqrt(N²ᶜ))
+            B = -(Kᶜ[k] * N²[k-1] + Kᶜ[k+1] * N²[k]) / 2
+            @test Lᵉ[k] ≈ -(legacy.ℂᴰ * sqrt(e₀) / ℓᶜ - B / e₀) rtol=1e-5
+        end
     end
 
 
@@ -703,16 +752,57 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
                                                                            model.velocities,
                                                                            model.closure_fields.N²)))
 
+    @testset "a windless column with stable and unstable layers stays finite" begin
+        # No shear, so Ri = N² / S²ᵐⁱⁿ at every interface, large and finite, and the sign changes
+        # at mid-depth. At the cell center there Ri is formed from the reconstructed N² and S².
+        closure = TKEBasedTurbulenceClosure()
+        sf = closure.stability_functions
+        model = AtmosphereModel(grid; closure, advection = nothing)
+        θᵢ(z) = 300 - 0.005 * min(z, Lz / 2) + 0.01 * max(0, z - Lz / 2)
+        set!(model; θ = θᵢ)
+        set_tke!(model, FT(0.5))
+
+        Ri = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.closure, model.velocities, model.closure_fields.N²)))
+        @test all(isfinite, Ri[interior_faces])
+        @test all(abs.(Ri[interior_faces]) .> 1e4 * max(sf.Ri⁻, sf.Ri⁺))
+        @test any(Ri[interior_faces] .< 0) && any(Ri[interior_faces] .> 0)
+
+        Lᵉ = column(model.closure_fields.Lᵉ)
+        Kᵘ = column(model.closure_fields.Kᵘ)
+        @test all(isfinite, Lᵉ)
+        @test all(Lᵉ .< 0)
+        @test all(isfinite, Kᵘ)
+
+        for _ in 1:10
+            time_step!(model, 10)
+        end
+        ρe = column(model.tracers.ρe)
+        @test all(isfinite, ρe)
+        @test all(ρe .≥ 0)
+    end
+
+    @testset "with the moist static stability" begin
+        closure = TKEBasedTurbulenceClosure(; static_stability = MoistStaticStability())
+        microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+        model = AtmosphereModel(grid; closure, microphysics, advection = nothing)
+        set!(model; θ = 288, qᵗ = z -> ifelse(z < Lz / 2, 4e-3, 13e-3), u = z -> 0.005 * z)
+        set_tke!(model, FT(0.1))
+        for _ in 1:5
+            time_step!(model, 10)
+        end
+        @test all(isfinite, column(model.tracers.ρe))
+        @test all(isfinite, column(model.closure_fields.Kᶜ))
+    end
     @testset "construction, defaults and validation" begin
         sf = Breeze.TurbulenceClosures.convert_eltype(FT, RationalStabilityFunction())
         @test isbits(sf) # a GPU kernel can only carry an isbits closure
         @test sf isa RationalStabilityFunction{FT}
 
-        # Frozen selected P60 member, not the older CATKE endpoints.
-        @test sf.ℂᵘ⁰ === FT(0.15900569445804447)
-        @test sf.ℂᶜ⁰ === FT(0.19872163735761372)
-        @test sf.Ri⁻ === FT(12.669701017862883)
-        @test sf.Ri⁺ === FT(0.0501147186437052)
+        # Calibrated to the Shen et al. (2022) LES library
+        @test sf.ℂᵘ⁰ === FT(0.15439310625401925)
+        @test sf.ℂᶜ⁰ === FT(0.1929919973602801)
+        @test sf.Ri⁻ === FT(6.562979157594204)
+        @test sf.Ri⁺ === FT(15.12797320010583)
         # Twelve endpoints and two transition scales
         @test length(fieldnames(RationalStabilityFunction)) == 14
 
@@ -720,7 +810,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         mixed = Breeze.TurbulenceClosures.convert_eltype(FT, RationalStabilityFunction(ℂᵘ⁻ = 1, Ri⁺ = 2))
         @test mixed.ℂᵘ⁻ === FT(1)
         @test mixed.Ri⁺ === FT(2)
-        @test mixed.ℂᵘ⁰ === FT(0.15900569445804447)
+        @test mixed.ℂᵘ⁰ === FT(0.15439310625401925)
 
         closure = TKEBasedTurbulenceClosure(stability_functions = RationalStabilityFunction())
         @test closure.stability_functions isa RationalStabilityFunction{FT}
@@ -874,8 +964,10 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         perturbed = closure_fields(true)
         @test all(neutral.N²[interior_faces] .== 0)
         @test any(perturbed.N²[interior_faces] .> 0) && any(perturbed.N²[interior_faces] .< 0)
+        # The residual change grows with the endpoint ratios over Ri±: about 2e-3 in Kᵘ with the
+        # calibrated defaults, against O(1) were an interface sent to a limit
         for name in (:Kᵘ, :Kᶜ, :Kᵉ, :Lᵉ)
-            @test isapprox(perturbed[name], neutral[name]; rtol = 1e-4)
+            @test isapprox(perturbed[name], neutral[name]; rtol = 1e-2)
         end
     end
 
@@ -951,8 +1043,9 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test all(Ri[interior_faces] .> 0)
         expected = [tracer_stability_function(sf, r) / momentum_stability_function(sf, r) for r in Ri[interior_faces]]
         @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ expected)
-        # The calibrated ratio increases on the stable branch and stays between its endpoints.
-        @test all(sf.ℂᶜ⁰ / sf.ℂᵘ⁰ .< expected .< sf.ℂᶜ⁺ / sf.ℂᵘ⁺)
+        # The ratio stays strictly between its neutral and stable endpoints
+        lo, hi = minmax(sf.ℂᶜ⁰ / sf.ℂᵘ⁰, sf.ℂᶜ⁺ / sf.ℂᵘ⁺)
+        @test all(lo .< expected .< hi)
 
         # Unstable stratification with shear: the unstable branch, again pointwise, and again
         # short of its asymptote at a finite Ri
@@ -965,7 +1058,9 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test all(isfinite, Ri[interior_faces])
         expected = [tracer_stability_function(sf, r) / momentum_stability_function(sf, r) for r in Ri[interior_faces]]
         @test all(Kᶜ[interior_faces] ./ Kᵘ[interior_faces] .≈ expected)
-        @test all(sf.ℂᶜ⁻ / sf.ℂᵘ⁻ .< expected .< sf.ℂᶜ⁰ / sf.ℂᵘ⁰)
+        # and again strictly between its unstable and neutral endpoints
+        lo, hi = minmax(sf.ℂᶜ⁻ / sf.ℂᵘ⁻, sf.ℂᶜ⁰ / sf.ℂᵘ⁰)
+        @test all(lo .< expected .< hi)
     end
 
     @testset "a windless column with stable and unstable layers stays finite" begin

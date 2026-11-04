@@ -4,7 +4,7 @@
 
 ## Anelastic approximation
 
-To filter acoustic waves while retaining compressibility effects in buoyancy and thermodynamics, we linearize about a hydrostatic, horizontally uniform reference state ``(pᵣ(z), ρᵣ(z))`` with constant reference potential temperature ``θᵣ``. The key assumptions are
+To filter acoustic waves while retaining compressibility effects in buoyancy and thermodynamics, we linearize about a hydrostatic, horizontally uniform reference state ``(pᵣ(z), ρᵣ(z))`` with constant reference potential temperature ``θ₀``. The key assumptions are
 
 - Small Mach number and small relative density perturbations except in buoyancy.
 - Hydrostatic reference balance: ``\partial_z pᵣ = -ρᵣ g``.
@@ -13,7 +13,7 @@ To filter acoustic waves while retaining compressibility effects in buoyancy and
 Define the specific volume of moist air and its reference value as
 
 ```math
-α = \frac{R^m T}{pᵣ} , \qquad αᵣ = \frac{R^d θᵣ}{pᵣ} ,
+α = \frac{R^m T}{pᵣ} , \qquad αᵣ = \frac{R^d θ₀}{pᵣ} ,
 ```
 
 where ``R^m`` is the mixture gas constant and ``R^{d}`` is the dry-air gas constant. The buoyancy appearing in the vertical momentum is
@@ -85,14 +85,42 @@ that replaces it, taken in the cell each flux drains. The cell the condensate le
 keeps its temperature, the cell it arrives in gains the sensible heat carried from another
 level, and rain-out leaves the latent heat of formation behind, pre-cooling the layer that
 later evaporates the falling rain. The liquid-ice potential temperature formulation carries the
-same enthalpy but converts it locally through ``1 / (c^{pm} Π)``, losing ``∂θ^{li}/∂q^x`` per
-unit departing mass (to leading order ``-\mathscr{L}^x_r / (c^{pm} Π)``); transporting that
-Jacobian between pressure levels would instead conserve ``∫ρθ^{li}``, which precipitation does
+same enthalpy but converts it locally through ``1 / (\hat{c}ᵖ \hat{Π})``, losing ``∂θˡⁱ/∂q^x`` per
+unit departing mass (to leading order ``-\mathscr{L}^x(T) / (\hat{c}ᵖ \hat{Π})``; the exact content
+is given in the [Thermodynamics](@ref liquid-ice-potential-temperature) section); transporting that
+Jacobian between pressure levels would instead conserve ``∫ρθˡⁱ``, which precipitation does
 not. (On the compressible core the total density falls with the sedimenting condensate, so the
 local mixture rather than dry air takes up the departed mass and the content becomes the
 enthalpy of the condensate relative to that of the mixture; see `sedimentation_composition_increment`.)
 
-Thermodynamic closures needed for ``R^m``, ``c^{pm}`` and the Exner function ``Π = (pᵣ / p_0)^{R^m / c^{pm}}`` are given in [Thermodynamics](@ref Thermodynamics-section) section.
+Thermodynamic closures for ``R^m``, ``c^{pm}`` and the vapor-equivalent Exner function ``\hat{Π} = (pᵣ / pˢᵗ)^{\hat{κ}}`` are given in the [Thermodynamics](@ref Thermodynamics-section) section.
+
+## Liquid-ice potential temperature
+
+The default formulation advances the liquid-ice potential temperature density ``ρᵣ θˡⁱ``, with
+``θˡⁱ = H / (\hat{c}ᵖ \hat{Π})`` defined exactly from the enthalpy ``H = s - g z`` and the
+vapor-equivalent heat capacity ``\hat{c}ᵖ`` and Exner function ``\hat{Π}``, as derived in
+[Liquid-ice potential temperature](@ref liquid-ice-potential-temperature). Because the
+thermodynamic pressure is the reference pressure ``pᵣ(z)``, the material derivative of the
+pressure that drives expansion is exact and local,
+``\mathrm{D} \ln pᵣ / \mathrm{D} t = w \, \partial_z \ln pᵣ = - g ρᵣ w / pᵣ``, and the prognostic
+equation is
+
+```math
+\partial_t(ρᵣ θˡⁱ) + \boldsymbol{\nabla \cdot}\, (ρᵣ θˡⁱ \boldsymbol{u}) =
+- ρᵣ \, \frac{R^m T - \hat{R} \hat{Π} θˡⁱ}{\hat{c}ᵖ \hat{Π}} \, \frac{g ρᵣ w}{pᵣ} + S_θ ,
+```
+
+where ``R^m T - \hat{R} \hat{Π} θˡⁱ = \hat{κ} (\mathscr{L}^l qˡ + \mathscr{L}^i qⁱ) - R^v (qˡ + qⁱ) T``
+vanishes in clear air, so that ``θˡⁱ`` is materially conserved there, and in cloud supplies the
+expansion work that the condensate's share of the enthalpy would otherwise miss — between one and
+two percent of the adiabatic cooling for 2 g kg⁻¹ of condensate. Phase change contributes no
+source at all. ``S_θ`` holds the heating ``(Q_{\mathscr{I}} + F_{ρE}) / (\hat{c}ᵖ \hat{Π})``, where
+``Q_{\mathscr{I}}`` is the radiative heating and ``F_{ρE}`` an interior energy forcing, the subgrid
+flux divergence, and the sedimentation content tendency described above. With the dry-exponent
+option, ``\hat{Π}`` is replaced by ``Πᵈ(z) = (pᵣ / pˢᵗ)^{R^d / c^{pd}}``, computed once per level,
+and the source acquires a small clear-air part; see
+[Choosing the Exner exponent](@ref "Choosing the Exner exponent").
 
 ## Time discretization and pressure correction
 
@@ -116,8 +144,8 @@ In Breeze this projection is implemented as a Fourier-tridiagonal solve in the v
 
 ## Symbols
 
-- ``ρᵣ(z)``, ``pᵣ(z)``: Reference density and pressure satisfying hydrostatic balance for a constant ``θᵣ``.
-- ``α = R^m T / pᵣ``, ``αᵣ = R^d θᵣ / pᵣ``: Specific volume and its reference value.
+- ``ρᵣ(z)``, ``pᵣ(z)``: Reference density and pressure satisfying hydrostatic balance for a constant ``θ₀``.
+- ``α = R^m T / pᵣ``, ``αᵣ = R^d θ₀ / pᵣ``: Specific volume and its reference value.
 - ``b = g (α - αᵣ) / αᵣ``: Buoyancy.
 - ``s``: Moist static energy.
 - ``q^t``: Total specific humidity (vapor + condensates).

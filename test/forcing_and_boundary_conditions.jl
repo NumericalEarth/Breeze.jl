@@ -1063,11 +1063,12 @@ end
         @test :ρθ ∈ keys(result)
         @test :ρE ∉ keys(result)
 
-        # Static energy carries the energy flux itself, so `ρE` lands on `ρs` unconverted
+        # `ρE` lands on `ρs` wrapped to scale the energy flux by ρᵈ / ρ
         result = convert_energy_bcs(bcs, :StaticEnergy)
         @test :ρs ∈ keys(result)
         @test :ρE ∉ keys(result)
-        @test result.ρs.bottom.condition == FT(100)
+        @test result.ρs.bottom.condition isa Breeze.BoundaryConditions.StaticEnergyFluxBoundaryConditionFunction
+        @test result.ρs.bottom.condition.condition == FT(100)
     end
 
     @testset "theta_to_energy_bcs correctly converts BCs [$FT]" begin
@@ -1202,6 +1203,61 @@ end
         @test vec(Jᶿ) ≈ vec(expected)
     end
 
+end
+
+@testset "Compressible energy flux heats the dry-coupled ρθ like interior heating [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    using Oceananigans.Models: BoundaryConditionOperation
+    using Breeze.Thermodynamics: vapor_equivalent_heat_capacity
+
+    # An enthalpy flux changes h at -(1/ρ) ∇⋅𝒬ᵀ, so ρθ = ρᵈ θ gains (ρᵈ / ρ) 𝒬ᵀ / (ĉᵖ Π), the same
+    # ρᵈ / ρ the interior ρE forcing and radiative heating take. qᵛ = 0.2 makes ρᵈ / ρ = 0.8 visible.
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 1000),
+                           topology=(Periodic, Periodic, Bounded))
+
+    𝒬ᵀ = FT(1000)
+    qᵛ₀ = FT(0.2)
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); base_pressure=FT(1e5), standard_pressure=FT(1e5))
+    model = AtmosphereModel(grid; dynamics,
+                            boundary_conditions=(; ρE=FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬ᵀ))))
+    set!(model; ρ=FT(1.25), qᵛ=qᵛ₀, θ=FT(300))
+    update_state!(model)
+
+    q = MoistureMassFractions(qᵛ₀)
+    constants = model.thermodynamic_constants
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    pˢᵗ = standard_pressure(model.dynamics)
+    p = Array(interior(dynamics_pressure(model.dynamics)))[:, :, 1]
+    ρ = Array(interior(total_density(model.dynamics)))[:, :, 1]
+    ρᵈ = Array(interior(dynamics_density(model.dynamics)))[:, :, 1]
+    Π = [exner_function(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, pᵢⱼ), constants) for pᵢⱼ in p]
+
+    ρθ = thermodynamic_density(model.formulation)
+    Jᶿ = Array(interior(Field(BoundaryConditionOperation(ρθ, :bottom, model))))[:, :, 1]
+    @test all(ρᵈ ./ ρ .≈ FT(0.8))
+    @test Jᶿ ≈ @. ρᵈ / ρ * 𝒬ᵀ / (ĉᵖ * Π)
+end
+
+@testset "Energy flux on ρs scales by ρᵈ / ρ [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    using Breeze.BoundaryConditions: StaticEnergyFluxBoundaryConditionFunction
+    using Oceananigans.BoundaryConditions: getbc, Top
+
+    # ρs = ρᵈ s gains (ρᵈ / ρ) 𝒬ᵀ from an enthalpy flux, as for ρθ. StaticEnergyFormulation does not
+    # yet run on CompressibleDynamics, so the conversion is checked directly with ρᵈ / ρ = 0.8.
+    grid = RectilinearGrid(default_arch; size=(1, 1, 4), extent=(1, 1, 1))
+    𝒬ᵀ = FT(1000)
+    ρᵈ = fill(FT(1), 1, 1, 4)
+    ρ = fill(FT(1.25), 1, 1, 4)
+    clock = Clock(time=zero(FT))
+
+    for (side, k) in ((Bottom(), 1), (Top(), 4))
+        sf = StaticEnergyFluxBoundaryConditionFunction(𝒬ᵀ, side, ρᵈ)
+        @test getbc(sf, 1, 1, grid, clock, (;), (; ρ)) ≈ FT(0.8) * 𝒬ᵀ
+        # With no captured density (compressible) the dry density is read from the model fields
+        sf = StaticEnergyFluxBoundaryConditionFunction(𝒬ᵀ, side, nothing)
+        @test getbc(sf, 1, 1, grid, clock, (; ρᵈ), (; ρ)) ≈ FT(0.8) * 𝒬ᵀ
+    end
 end
 
 @testset "ThetaFluxBC getbc coverage [$FT]" for FT in test_float_types()

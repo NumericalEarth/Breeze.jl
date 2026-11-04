@@ -73,7 +73,7 @@ stratification; they differ elsewhere:
 
 The mixing length is stored in `closure_fields.ℓᵐ`. The standalone constructors default to
 ``ℂˢ = 1.316`` (`GradientLimitedMixingLength(ℂˢ=c)` also sets ``ℂⁱ = c``); the default closure uses the
-calibrated ``ℂˢ ≈ 0.657`` and ``ℂⁱ ≈ 1.56``.
+calibrated ``ℂˢ ≈ 0.788`` and ``ℂⁱ ≈ 1.78``.
 
 ### Static stability
 
@@ -109,14 +109,14 @@ Its calibrated coefficients (rounded) are
 
 | Function | Unstable limit | Neutral | Stable limit |
 |:--|--:|--:|--:|
-| momentum | 0.361 | 0.159 | 0.0110 |
-| scalars | 0.0817 | 0.199 | 0.533 |
-| TKE | 1.92 | 0.00731 | 0.0230 |
-| dissipation | 0.00541 | 0.0292 | 0.802 |
+| momentum | 1.20 | 0.154 | 1.01 |
+| scalars | 2.08 | 0.193 | 0.277 |
+| TKE | 312 | 0.0735 | 16.4 |
+| dissipation | 2.59 | 0.0554 | 0.0507 |
 
-with ``Ri⁻ ≈ 12.7`` and ``Ri⁺ ≈ 0.0501``. The wall coefficient follows from
-``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4}``. These come from an unconverged calibration fit
-and are not independently validated.
+with ``Ri⁻ ≈ 6.56`` and ``Ri⁺ ≈ 15.1``. The wall coefficient follows from
+``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4}``. The coefficients, with ``ℂⁱ``, are calibrated to the
+[Shen et al. (2022)](@cite Shen2022) LES library of low clouds using stochastic gradient descent.
 
 [`ConstantStabilityFunctions`](@ref) give ``Pr = ℂᵘ / ℂᶜ``, a log layer with
 ``κ = ℂˢ (ℂᵘ³ / ℂᴰ)^{1/4}`` and ``e / u_\star² = 1 / \sqrt{ℂᵘ ℂᴰ}``, and a critical Richardson
