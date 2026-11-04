@@ -41,6 +41,10 @@ and validated. The distinction is irreversibility: the condensate is purged from
 the prognostic vapor every step and cannot re-evaporate.
 
 The prognostic moisture is the vapor density `ρqᵛ` (no condensate is retained).
+On the compressible core, rain-out leaves dry-air density unchanged and reduces
+total density by the removed condensate. The remaining vapor mass fraction and
+potential temperature are recomputed at that density, preserving the temperature
+reached during condensation.
 """
 struct InstantaneousPrecipitation{S}
     saturation_adjustment :: S
@@ -166,6 +170,18 @@ end
 @inline instantaneous_precipitation_state(i, j, k, ::CompressibleDynamics, θ, q, ρ, pˢᵗ, κ̂) =
     LiquidIceDensityState(θ, q, pˢᵗ, ρ, NewtonSolver(typeof(ρ)), κ̂)
 
+# Pressure-closed cores keep their density weighting fixed when condensate leaves.
+@inline rainout_state(𝒰, qᵛ, ρqᵛ, ρᵈ) = with_moisture(𝒰, MoistureMassFractions(qᵛ))
+
+# The compressible cell loses condensate mass at fixed volume, leaving only dry air
+# and vapor: ρ = ρᵈ + ρqᵛ. Renormalize the vapor before inverting θ at the retained T.
+@inline function rainout_state(𝒰::LiquidIceDensityState, qᵛ, ρqᵛ, ρᵈ)
+    ρ = ρᵈ + ρqᵛ
+    q = MoistureMassFractions(ρqᵛ / ρ)
+    return LiquidIceDensityState(𝒰.potential_temperature, q, 𝒰.standard_pressure, ρ,
+                                𝒰.temperature_solver, 𝒰.exner_exponent)
+end
+
 @kernel function _instantaneous_precipitation_update!(dynamics, saturation_adjustment,
                                                    constants, pˢᵗ, κ̂, Δt, ρθˡⁱ, ρqᵛ, μ)
     i, j, k = @index(Global, NTuple)
@@ -190,13 +206,12 @@ end
         T   = temperature(𝒰₁, constants)
         qᵛ⁺ = q.vapor
 
-        # Rain-out: remove all condensate but RETAIN the latent warming. The vapor-only parcel
-        # keeps T, so its θˡⁱ is the condensate-free (L = 0) inversion under the same constraint.
-        # At fixed density this is the closed form θᶠ = T^(1/γ)(ρRᵐ/pˢᵗ)^((1-γ)/γ); at fixed
-        # pressure it is θᶠ = T / Π(p).
-        𝒰ᵥ = with_moisture(𝒰₁, MoistureMassFractions(qᵛ⁺))
-        θᶠ = with_temperature(𝒰ᵥ, T, constants).potential_temperature
+        # Rain-out keeps T while removing condensate. On the compressible core, recover θ
+        # using the reduced total density and renormalized vapor mass fraction that
+        # update_state! will diagnose; pressure-closed cores retain their prescribed pressure.
         ρqᵛ⁺ = ρ * qᵛ⁺
+        𝒰ᵥ = rainout_state(𝒰₁, qᵛ⁺, ρqᵛ⁺, ρᵈ)
+        θᶠ = with_temperature(𝒰ᵥ, T, constants).potential_temperature
         # Mass-fraction form (≡ ρqᵛ₀ - ρqᵛ⁺, since qᵗ = ρqᵛ₀/ρ) but exactly 0 when subsaturated
         # (qᵛ⁺ = qᵗ), avoiding a round-trip ρ·(ρqᵛ₀/ρ) that would leave a spurious tiny precip rate.
         condensed_water_density = ρ * max(0, qᵗ - qᵛ⁺)
@@ -204,7 +219,7 @@ end
 
         ρqᵛ[i, j, k]  = ρqᵛ⁺
         ρθˡⁱ[i, j, k] = ρᵈ * θᶠ    # ρθ = ρᵈθ (dry-coupled)
-        μ.qᵛ[i, j, k] = qᵛ⁺
+        μ.qᵛ[i, j, k] = 𝒰ᵥ.moisture_mass_fractions.vapor
         μ.precipitation_rate[i, j, k] = ifelse(condensed_water_density > 0,
                                                precipitation_rate,
                                                μ.precipitation_rate[i, j, k])
