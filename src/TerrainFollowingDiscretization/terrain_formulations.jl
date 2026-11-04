@@ -160,7 +160,7 @@ Oceananigans.Architectures.on_architecture(arch, f::TwoLevelDecay) =
 ##### read instead of a transcendental.
 #####
 
-# Center and Face arrays may have different types (e.g. Oceananigans ≥ 0.117 encodes
+# Center and Face arrays may have different types (Oceananigans encodes
 # the array size in the type), hence the two type parameters.
 struct TwoLevelBasis{C, F}
     b₁ᶜ :: C; b₁ᶠ :: F     # b₁(r) at Center, Face   (large scale, s₁)

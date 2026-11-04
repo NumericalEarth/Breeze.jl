@@ -45,18 +45,6 @@ The terrain components inside `formulation` are filled later by
 TerrainFollowingVerticalDiscretization(r_faces; formulation = LinearDecay()) =
     TerrainFollowingVerticalDiscretization(r_faces, nothing, nothing, nothing, nothing, nothing, formulation)
 
-# Reciprocal reference spacings, stored alongside the spacings because Oceananigans
-# (≥ 0.117) reads the one-dimensional reciprocals `Δr⁻¹ᵃᵃᶜ`, `Δr⁻¹ᵃᵃᶠ` from
-# `grid.z.Δ⁻¹ᵃᵃᶜ`, `grid.z.Δ⁻¹ᵃᵃᶠ`.
-# TODO: use `Oceananigans.Grids.reciprocal_metric` once Breeze requires Oceananigans ≥ 0.117.
-reciprocal_spacing(Δ::Number) = 1 / Δ
-
-function reciprocal_spacing(Δ::AbstractArray)
-    Δ⁻¹ = copy(Δ)
-    parent(Δ⁻¹) .= 1 ./ parent(Δ)
-    return Δ⁻¹
-end
-
 const TFVD = TerrainFollowingVerticalDiscretization
 const RegularTerrainFollowingVerticalDiscretization = TerrainFollowingVerticalDiscretization{<:Any, <:Any, <:Any, <:Number}
 
@@ -112,8 +100,13 @@ function Oceananigans.Grids.generate_coordinate(FT, topo, size, halo, coordinate
     # bottom of the domain is taken as z = 0, so z_top = Lz). Filled later by
     # `materialize_terrain!`.
     formulation = allocate_formulation(coordinate.formulation, FT, arch, size, halo, topo, Lz)
-    Δr⁻¹ᵃᵃᶠ = reciprocal_spacing(Δrᵃᵃᶠ)
-    Δr⁻¹ᵃᵃᶜ = reciprocal_spacing(Δrᵃᵃᶜ)
+    # Oceananigans reads the one-dimensional reciprocal reference spacings
+    # `Δr⁻¹ᵃᵃᶜ`, `Δr⁻¹ᵃᵃᶠ` from `grid.z.Δ⁻¹ᵃᵃᶜ`, `grid.z.Δ⁻¹ᵃᵃᶠ`; compute them as
+    # Oceananigans does for its own vertical discretizations.
+    Δr⁻¹ᵃᵃᶠ, Δr⁻¹ᵃᵃᶜ = map((Δrᵃᵃᶠ, Δrᵃᵃᶜ)) do Δ
+        Δ_cpu = Oceananigans.Architectures.on_architecture(Oceananigans.Architectures.CPU(), Δ)
+        Oceananigans.Architectures.on_architecture(arch, Oceananigans.Grids.reciprocal_metric(Δ_cpu))
+    end
     z = TerrainFollowingVerticalDiscretization(rᵃᵃᶠ, rᵃᵃᶜ, Δrᵃᵃᶠ, Δrᵃᵃᶜ, Δr⁻¹ᵃᵃᶠ, Δr⁻¹ᵃᵃᶜ, formulation)
     return Lz, z
 end
@@ -204,7 +197,7 @@ const TerrainFollowingGrid = AbstractUnderlyingGrid{<:Any, <:Any, <:Any, <:Ocean
 
 # Vertical spacing = reference spacing × Jacobian, mirroring the mutable-grid
 # operators but dispatching on the terrain-following grid type. The reciprocal
-# spacing must be overridden too: Oceananigans (≥ 0.117) otherwise reads the
+# spacing must be overridden too: Oceananigans otherwise reads the
 # reciprocal *reference* spacing, which ignores the Jacobian.
 for LX in (:ᶠ, :ᶜ), LY in (:ᶠ, :ᶜ), LZ in (:ᶠ, :ᶜ)
     zspacing = Symbol(:Δz, LX, LY, LZ)
