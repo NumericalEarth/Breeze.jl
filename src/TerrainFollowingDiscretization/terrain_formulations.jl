@@ -135,8 +135,18 @@ Oceananigans.Architectures.on_architecture(arch, f::TwoLevelDecay) =
           Oceananigans.Architectures.on_architecture(arch, f.∂y_h₂),
           Oceananigans.Architectures.on_architecture(arch, f.basis))
 
-@inline b_two_level(r, z_top, s)  = sinh((z_top - r) / s) / sinh(z_top / s)
-@inline b′_two_level(r, z_top, s) = -cosh((z_top - r) / s) / (s * sinh(z_top / s))
+# The normalization sinh(z_top / s) depends only on the static formulation
+# parameters. The four-argument forms accept it precomputed so a caller that
+# evaluates the basis repeatedly at the same s — the Newton inversion in
+# `lagrangian_particles.jl` — can hoist it out of its loop. The three-argument
+# forms below are defined in terms of them, so there is one source of truth.
+@inline b_two_level_normalization(z_top, s) = sinh(z_top / s)
+
+@inline b_two_level(r, z_top, s, normalization)  = sinh((z_top - r) / s) / normalization
+@inline b′_two_level(r, z_top, s, normalization) = -cosh((z_top - r) / s) / (s * normalization)
+
+@inline b_two_level(r, z_top, s)  = b_two_level(r, z_top, s, b_two_level_normalization(z_top, s))
+@inline b′_two_level(r, z_top, s) = b′_two_level(r, z_top, s, b_two_level_normalization(z_top, s))
 
 #####
 ##### Precomputed SLEVE decay bases.

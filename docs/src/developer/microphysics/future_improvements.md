@@ -6,7 +6,8 @@ for future development.
 ## 1. Consolidate Redundant State Types
 
 **Issue**: `WarmRainState` (in `microphysics_interface.jl`) and `WarmPhaseOneMomentState`
-(in the CloudMicrophysics extension) are nearly identical structs.
+(in the CloudMicrophysics extension) are nearly identical structs: both hold `qᶜˡ` and `qʳ`, and
+`WarmPhaseOneMomentState` also holds the vertical velocity `w` used by the rain autoconversion.
 
 **Impact**: Code duplication, potential for inconsistency.
 
@@ -115,7 +116,7 @@ Analysis of parcel models (`pyrcel`, `PySDM`) reveals that:
    are stored with predictable names based on tracer names?
 
 3. **Multi-moment schemes**: How should schemes handle different velocities for mass vs.
-   number concentration (e.g., `wʳ` for rain mass, `wʳₙ` for rain number concentration)?
+   number concentration (e.g., `wʳ` for rain mass, `wⁿʳ` for rain number concentration)?
 
 4. **Advection coupling**: How does the velocity field connect to the advection machinery
    in `AtmosphereModel`?

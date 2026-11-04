@@ -12,6 +12,7 @@ using Breeze.ParcelModels:
     ParcelDynamics,
     ParcelModel,
     ParcelState,
+    ParcelInitialState,
     PrescribedVerticalVelocity,
     PrognosticVerticalVelocity,
     adjust_adiabatically,
@@ -39,6 +40,35 @@ end
 
 using Test
 
+@testset "Parcel default formulation" begin
+    grid = RectilinearGrid(size=4, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics())
+    @test model.dynamics.state.𝒰 isa Breeze.Thermodynamics.LiquidIcePotentialTemperatureState
+    set!(model; T=280, p=1e5, ρ=1.2, qᵗ=0.01, z=250)
+    @test model.dynamics.state.𝒰 isa Breeze.Thermodynamics.LiquidIcePotentialTemperatureState
+    @test temperature(model.dynamics.state.𝒰, model.thermodynamic_constants) ≈ 280
+end
+
+@testset "Parcel thermodynamic formulation: $formulation" for formulation in (:StaticEnergy, :LiquidIcePotentialTemperature)
+    grid = RectilinearGrid(size=4, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), formulation)
+    constants = model.thermodynamic_constants
+    set!(model; T=280, p=z -> 1e5 - 10z, ρ=1.2, qᵗ=0, z=250, w=1)
+    state = model.dynamics.state
+    initial_variable = state.ℰ
+    @test temperature(state.𝒰, constants) ≈ 280
+
+    time_step!(model, 100)
+    if formulation === :StaticEnergy
+        expected_temperature = 280 - constants.gravitational_acceleration * 100 / constants.dry_air.heat_capacity
+    else
+        κ = Breeze.Thermodynamics.dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+        expected_temperature = 280 * ((1e5 - 10 * 350) / (1e5 - 10 * 250))^κ
+    end
+    @test temperature(state.𝒰, constants) ≈ expected_temperature
+    @test state.ℰ ≈ initial_variable
+end
+
 #####
 ##### ParcelState tests
 #####
@@ -54,15 +84,15 @@ using Test
     qᵗ = FT(0.015)
     q = MoistureMassFractions(qᵗ)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    e_init = cᵖᵐ * T_init + g * z_init
+    s_init = cᵖᵐ * T_init + g * z_init
 
-    𝒰 = StaticEnergyState(e_init, q, z_init, p_init)
+    𝒰 = StaticEnergyState(s_init, q, z_init, p_init)
     μ = NothingMicrophysicalState(FT)
 
     ρ = FT(1.2)
     ρqᵗ = ρ * qᵗ
-    ρℰ = ρ * e_init
-    parcel = ParcelState(FT(0), FT(0), z_init, FT(0), ρ, qᵗ, ρqᵗ, e_init, ρℰ, 𝒰, μ)
+    ρℰ = ρ * s_init
+    parcel = ParcelState(FT(0), FT(0), z_init, FT(0), ρ, qᵗ, ρqᵗ, s_init, ρℰ, 𝒰, μ)
 
     @test parcel.x == 0
     @test parcel.y == 0
@@ -71,10 +101,17 @@ using Test
     @test parcel.ρ == ρ
     @test parcel.qᵗ == qᵗ
     @test parcel.ρqᵗ == ρqᵗ
-    @test parcel.ℰ == e_init
+    @test parcel.ℰ == s_init
     @test parcel.ρℰ == ρℰ
     @test parcel.𝒰 === 𝒰
     @test parcel.μ === μ
+
+    initial = ParcelInitialState(FT(0), FT(0), z_init, FT(0), qᵗ, s_init, μ)
+    @test initial.x == 0
+    @test initial.z == z_init
+    @test initial.qᵗ == qᵗ
+    @test initial.ℰ == s_init
+    @test initial.μ === μ
 end
 
 #####
@@ -88,13 +125,13 @@ end
     @test dynamics.density === nothing
     @test dynamics.pressure === nothing
     @test dynamics.vertical_velocity_formulation isa PrescribedVerticalVelocity
-    @test dynamics.surface_pressure == 101325.0
+    @test dynamics.base_pressure == 101325.0
     @test dynamics.standard_pressure == 1e5
 
     # PrognosticVerticalVelocity construction
     dynamics_b = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
     @test dynamics_b.vertical_velocity_formulation isa PrognosticVerticalVelocity
-    @test dynamics_b.surface_pressure == 101325.0
+    @test dynamics_b.base_pressure == 101325.0
 end
 
 #####
@@ -170,9 +207,9 @@ end
         qᵗ = FT(0.010)
         q = MoistureMassFractions(qᵗ)
         cᵖᵐ = mixture_heat_capacity(q, constants)
-        e_init = cᵖᵐ * T_init + g * z_init
+        s_init = cᵖᵐ * T_init + g * z_init
 
-        𝒰_init = StaticEnergyState(e_init, q, z_init, p_init)
+        𝒰_init = StaticEnergyState(s_init, q, z_init, p_init)
 
         # Adjust to new height
         z_new = FT(1000.0)
@@ -180,7 +217,7 @@ end
         𝒰_new = adjust_adiabatically(𝒰_init, z_new, p_new, constants)
 
         # Static energy should be conserved
-        @test 𝒰_new.static_energy ≈ e_init
+        @test 𝒰_new.static_energy ≈ s_init
         @test 𝒰_new.height == z_new
         @test 𝒰_new.reference_pressure == p_new
 
@@ -230,9 +267,9 @@ end
     # Check tendencies are computed
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
-    # With specific quantity evolution, tendencies for e and qᵗ are zero
+    # With specific quantity evolution, tendencies for s and qᵗ are zero
     # (no microphysical sources) giving exact conservation
-    @test tendencies.Ge ≈ 0.0
+    @test tendencies.Gℰ ≈ 0.0
     @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
@@ -260,9 +297,9 @@ end
 
     # This tests that the state-based interface exists for SaturationAdjustment
     # Microphysical sources are zero (SaturationAdjustment operates via state adjustment)
-    tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
+    tendency_s = microphysical_tendency(microphysics, Val(:ρs), ρ_val, ℳ, 𝒰, constants)
     tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵛ), ρ_val, ℳ, 𝒰, constants)
-    @test tendency_e == 0.0
+    @test tendency_s == 0.0
     @test tendency_qt == 0.0
 
     # Compute tendencies (this calls microphysical_tendency internally)
@@ -271,7 +308,7 @@ end
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
     # Tendencies are zero (SaturationAdjustment operates via state adjustment, not tendencies)
-    @test tendencies.Ge ≈ 0.0
+    @test tendencies.Gℰ ≈ 0.0
     @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
@@ -279,11 +316,11 @@ end
     @test model.dynamics.state.z ≈ 10.0
 end
 
-@testset "ParcelModel with DCMIP2016KesslerMicrophysics" begin
+@testset "ParcelModel with DCMIP2016KesslerMicrophysics: $formulation" for formulation in (:StaticEnergy, :LiquidIcePotentialTemperature)
     grid = RectilinearGrid(size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
     microphysics = DCMIP2016KesslerMicrophysics()
     constants = kessler_thermodynamic_constants()
-    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics, thermodynamic_constants=constants)
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics, formulation, thermodynamic_constants=constants)
 
     T(z) = 288.0 - 0.0065 * z
     p(z) = 101325.0 * exp(-z / 8500)
@@ -300,9 +337,9 @@ end
 
     # This tests that the state-based interface exists for DCMIP2016Kessler
     # Microphysical sources are zero (operates via microphysics_model_update!)
-    tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
+    tendency_s = microphysical_tendency(microphysics, Val(:ρs), ρ_val, ℳ, 𝒰, constants)
     tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵛ), ρ_val, ℳ, 𝒰, constants)
-    @test tendency_e == 0.0
+    @test tendency_s == 0.0
     @test tendency_qt == 0.0
 
     # Compute tendencies (this calls microphysical_tendency internally)
@@ -311,7 +348,7 @@ end
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
     # Tendencies are zero (DCMIP2016Kessler operates via microphysics_model_update!, not tendencies)
-    @test tendencies.Ge ≈ 0.0
+    @test tendencies.Gℰ ≈ 0.0
     @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
@@ -336,7 +373,7 @@ using Oceananigans: interpolate
 
     # Create an isentropic reference state (constant θ = 300 K)
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     # Set environmental profiles from the isentropic reference state
@@ -354,7 +391,7 @@ using Oceananigans: interpolate
     T_initial = temperature(model.dynamics.state.𝒰, constants)
     z_initial = model.dynamics.state.z
     qᵗ_initial = model.dynamics.state.qᵗ
-    e_initial = model.dynamics.state.ℰ
+    s_initial = model.dynamics.state.ℰ
 
     # Run simulation for 20 minutes (parcel rises 1200 m at 1 m/s)
     simulation = Simulation(model; Δt=1.0, stop_time=20minutes, verbose=false)
@@ -362,7 +399,7 @@ using Oceananigans: interpolate
 
     z_final = model.dynamics.state.z
     qᵗ_final = model.dynamics.state.qᵗ
-    e_final = model.dynamics.state.ℰ
+    s_final = model.dynamics.state.ℰ
 
     # Get parcel and environmental temperatures at final height
     T_parcel = temperature(model.dynamics.state.𝒰, constants)
@@ -373,7 +410,7 @@ using Oceananigans: interpolate
     @test abs(T_parcel - T_environment) < 1.0
 
     # Specific static energy should be EXACTLY conserved (specific quantity evolution)
-    @test e_final == e_initial
+    @test s_final == s_initial
 
     # Parcel should have risen to expected height
     @test z_final ≈ 1200.0 atol=1.0
@@ -387,7 +424,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics=nothing)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     # Environmental moisture profile (not used by parcel, but needed for initialization)
@@ -402,18 +439,18 @@ end
          w = 1)
 
     qᵗ_initial = model.dynamics.state.qᵗ
-    e_initial = model.dynamics.state.ℰ
+    s_initial = model.dynamics.state.ℰ
 
     # Run simulation for 15 minutes
     simulation = Simulation(model; Δt=1.0, stop_time=15minutes, verbose=false)
     run!(simulation)
 
     qᵗ_final = model.dynamics.state.qᵗ
-    e_final = model.dynamics.state.ℰ
+    s_final = model.dynamics.state.ℰ
 
     # Specific quantities should be EXACTLY conserved (specific quantity evolution)
     # Static energy is exactly conserved
-    @test e_final == e_initial
+    @test s_final == s_initial
 
     # Moisture conserved to floating-point precision (minor rounding in RK3)
     @test isapprox(qᵗ_final, qᵗ_initial, rtol=1e-14)
@@ -433,9 +470,10 @@ OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysi
 
     @test model isa ParcelModel
     @test model.dynamics isa ParcelDynamics
+    @test isempty(model.sedimentation)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     qᵗ₀ = 0.015
@@ -472,7 +510,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     # High initial moisture to ensure supersaturation during ascent
@@ -508,7 +546,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     qᵗ₀ = 0.015
@@ -560,7 +598,7 @@ TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysi
     @test model.dynamics isa ParcelDynamics
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     qᵗ₀ = 0.015
@@ -599,7 +637,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     # High initial moisture to ensure supersaturation during ascent
@@ -615,7 +653,7 @@ end
 
     # Initialize with some droplet number (CCN activation)
     nᶜˡ₀ = 100e6  # 100 million droplets per kg
-    Nᵃ₀ = initial_aerosol_number(microphysics)
+    Nᵃ₀ = initial_aerosol_number_density(microphysics, model.dynamics.state.ρ)
     model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0, ρnᵃ= Nᵃ₀)
 
     # Run long enough for condensation to occur (above LCL)
@@ -638,7 +676,7 @@ end
     model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     qᵗ₀ = 0.015
@@ -653,7 +691,7 @@ end
 
     # Initialize with droplet number for 2M scheme
     nᶜˡ₀ = 100e6
-    Nᵃ₀ = initial_aerosol_number(microphysics)
+    Nᵃ₀ = initial_aerosol_number_density(microphysics, model.dynamics.state.ρ)
     model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0, ρnᵃ= Nᵃ₀)
 
     # Run long enough for cloud formation and autoconversion
@@ -709,7 +747,7 @@ end
     model = AtmosphereModel(grid; dynamics, microphysics=nothing)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     set!(model,
@@ -738,10 +776,10 @@ end
     # A parcel warmer than its environment should have positive buoyancy and accelerate.
     grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
     dynamics = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
-    model = AtmosphereModel(grid; dynamics, microphysics=nothing)
+    model = AtmosphereModel(grid; dynamics, microphysics=nothing, formulation=:StaticEnergy)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     set!(model,
@@ -787,7 +825,7 @@ end
     @test model.dynamics.vertical_velocity_formulation isa PrognosticVerticalVelocity
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
-                                     surface_pressure = 101325,
+                                     base_pressure = 101325,
                                      potential_temperature = 300)
 
     qᵗ₀ = 0.015

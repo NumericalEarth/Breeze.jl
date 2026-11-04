@@ -41,7 +41,7 @@ function _build_production(arch; microphysics = nothing, Nx = 8, Ny = 8, Nz = 16
     constants = ThermodynamicConstants(eltype(grid))
     td  = SplitExplicitTimeDiscretization(sponge = UpperSponge(damping_rate = 1/5, depth = 2000.0))
     dyn = CompressibleDynamics(td; reference_potential_temperature = θ_iso_bs,
-                               surface_pressure = 1e5, standard_pressure = 1e5)
+                               base_pressure = 1e5, standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn, thermodynamic_constants = constants,
                            microphysics, coriolis = nothing, timestepper = :AcousticRungeKutta3)
 end
@@ -194,7 +194,7 @@ end
         # ExplicitTimeStepping (matching the default twin), balanced via the low-level routine.
         grid = model.grid
         dyn  = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature = θ_iso_bs,
-                                    surface_pressure = 1e5, standard_pressure = 1e5)
+                                    base_pressure = 1e5, standard_pressure = 1e5)
         ref  = AtmosphereModel(grid; dynamics = dyn,
                                thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
                                microphysics = nothing, coriolis = nothing)
@@ -228,7 +228,7 @@ end
                                x = (0, 1e4), y = (0, 1e4), z = (0, 4e3),
                                topology = (Periodic, Periodic, Bounded))
         constants = ThermodynamicConstants(eltype(grid))
-        reference_state = ReferenceState(grid, constants; surface_pressure = 1e5,
+        reference_state = ReferenceState(grid, constants; base_pressure = 1e5,
                                          potential_temperature = 300, vapor_mass_fraction = 0)
         model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), microphysics = nothing)
 
@@ -254,7 +254,7 @@ end
                                x = (0, 1e4), y = (0, 1e4), z = (0, 4e3),
                                topology = (Periodic, Periodic, Bounded))
         constants = ThermodynamicConstants(eltype(grid))
-        reference_state = ReferenceState(grid, constants; surface_pressure = 1e5,
+        reference_state = ReferenceState(grid, constants; base_pressure = 1e5,
                                          potential_temperature = 300, vapor_mass_fraction = 0)
         model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), microphysics = nothing)
 

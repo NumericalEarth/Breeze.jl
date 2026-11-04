@@ -11,6 +11,7 @@ export
     benchmark_time_stepping,
     benchmark_tendency,
     run_benchmark_simulation,
+    checkpointing_label,
     BenchmarkResult,
     SimulationResult,
     BenchmarkMetadata
@@ -25,7 +26,7 @@ using Oceananigans.Architectures: GPU, ReactantState
 using Oceananigans.Units
 using Oceananigans.TimeSteppers: time_step!
 using Oceananigans.OutputWriters: JLD2Writer, IterationInterval, TimeInterval, write_output!
-using Oceananigans.Simulations: SpecifiedTimes
+using Oceananigans.Utils: SpecifiedTimes
 
 using Breeze
 

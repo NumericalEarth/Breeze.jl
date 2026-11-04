@@ -6,8 +6,9 @@ function AtmosphereModels.precipitation_rate(model, microphysics::OneMomentLiqui
     grid = model.grid
     qᶜˡ = model.microphysical_fields.qᶜˡ
     ρqʳ = model.microphysical_fields.ρqʳ
-    ρ = model.dynamics.reference_state.density
-    kernel = OneMomentPrecipitationRateKernel(microphysics.categories, qᶜˡ, ρqʳ, ρ)
+    ρ = total_density(model.dynamics)
+    w = model.velocities.w
+    kernel = OneMomentPrecipitationRateKernel(microphysics.categories, qᶜˡ, ρqʳ, ρ, w)
     op = KernelFunctionOperation{Center, Center, Center}(kernel, grid)
     return Field(op)
 end
@@ -19,34 +20,37 @@ AtmosphereModels.precipitation_rate(model, ::OneMomentCloudMicrophysics, ::Val{:
 ##### Precipitation rate kernel (shared by all 1M schemes)
 #####
 
-struct OneMomentPrecipitationRateKernel{C, QL, RR, RS}
+struct OneMomentPrecipitationRateKernel{C, QL, RR, RS, W}
     categories :: C
     cloud_liquid :: QL
     rain_density :: RR
-    reference_density :: RS
+    density :: RS
+    vertical_velocity :: W
 end
 
 Adapt.adapt_structure(to, k::OneMomentPrecipitationRateKernel) =
     OneMomentPrecipitationRateKernel(adapt(to, k.categories),
                                       adapt(to, k.cloud_liquid),
                                       adapt(to, k.rain_density),
-                                      adapt(to, k.reference_density))
+                                      adapt(to, k.density),
+                                      adapt(to, k.vertical_velocity))
 
 @inline function (k::OneMomentPrecipitationRateKernel)(i, j, k_idx, grid)
     categories = k.categories
     @inbounds qᶜˡ = k.cloud_liquid[i, j, k_idx]
     @inbounds ρqʳ = k.rain_density[i, j, k_idx]
-    @inbounds ρ = k.reference_density[i, j, k_idx]
+    @inbounds ρ = k.density[i, j, k_idx]
+    w = ℑzᵃᵃᶜ(i, j, k_idx, grid, k.vertical_velocity)
 
     qʳ = ρqʳ / ρ
     parameters = categories.parameters
 
     # Autoconversion: cloud liquid → rain
-    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
+    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ, w)
 
     # Accretion: cloud liquid captured by falling rain
     Sᵃᶜᶜ = cloud_precipitation_accretion(
-        parameters.options.cloud_liquid_rain_accretion,
+        parameters.process_params.cloud_liquid_rain_accretion,
         parameters.cloud.liquid,
         parameters.precip.rain,
         parameters.terminal_velocity.rain,
@@ -57,52 +61,6 @@ Adapt.adapt_structure(to, k::OneMomentPrecipitationRateKernel) =
 
     # Total precipitation production rate (kg/kg/s)
     return Sᵃᶜⁿᵛ + Sᵃᶜᶜ
-end
-
-#####
-##### Surface precipitation flux (flux out of bottom boundary)
-#####
-
-"""
-$(TYPEDSIGNATURES)
-
-Return a 2D `Field` representing the precipitation flux at the bottom boundary.
-
-The surface precipitation flux is ``wʳ ρqʳ`` at `k = 1` (bottom face), representing
-the rate at which rain mass leaves the domain through the bottom boundary.
-
-Units: kg/m²/s (positive = downward, out of domain)
-
-!!! note "Sign convention"
-    The returned value is positive when rain is falling out of the domain
-    (the terminal velocity ``wʳ`` is negative, and we flip the sign).
-"""
-function AtmosphereModels.surface_precipitation_flux(model, microphysics::OneMomentCloudMicrophysics)
-    grid = model.grid
-    wʳ = model.microphysical_fields.wʳ
-    ρqʳ = model.microphysical_fields.ρqʳ
-    kernel = SurfacePrecipitationFluxKernel(wʳ, ρqʳ)
-    op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid)
-    return Field(op)
-end
-
-struct SurfacePrecipitationFluxKernel{W, R}
-    terminal_velocity :: W
-    rain_density :: R
-end
-
-Adapt.adapt_structure(to, k::SurfacePrecipitationFluxKernel) =
-    SurfacePrecipitationFluxKernel(adapt(to, k.terminal_velocity),
-                                    adapt(to, k.rain_density))
-
-@inline function (kernel::SurfacePrecipitationFluxKernel)(i, j, k_idx, grid)
-    # Flux at bottom face (k=1), ignore k_idx since this is a 2D field
-    # wʳ < 0 (downward), so -wʳ * ρqʳ > 0 represents flux out of domain
-    @inbounds wʳ = kernel.terminal_velocity[i, j, 1]
-    @inbounds ρqʳ = kernel.rain_density[i, j, 1]
-
-    # Return positive flux for rain leaving domain (downward)
-    return -wʳ * ρqʳ
 end
 
 #####
@@ -124,10 +82,10 @@ function Microphysics.number_concentration(model, microphysics::OneMomentLiquidR
 end
 
 function Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val{:snow})
-    haskey(model.microphysical_fields, :ρqˢ) || return nothing
+    haskey(model.microphysical_fields, :ρqˢⁿ) || return nothing
     pdf = microphysics.categories.parameters.precip.snow.pdf
     mass = microphysics.categories.parameters.precip.snow.mass
-    ρq = model.microphysical_fields.ρqˢ
+    ρq = model.microphysical_fields.ρqˢⁿ
     return build_number_concentration_op(model, pdf, mass, ρq)
 end
 
@@ -196,6 +154,16 @@ function Utils.prettysummary(acnv::CloudMicrophysics.Parameters.Acnv1M)
                   "k=", prettysummary(acnv.k), ")")
 end
 
+function Utils.prettysummary(acnv::KesslerAcnv)
+    return string("KesslerAcnv(",
+                  "τ_slow=", prettysummary(acnv.τ_slow), ", ",
+                  "τ_fast=", prettysummary(acnv.τ_fast), ", ",
+                  "q_threshold_slow=", prettysummary(acnv.q_threshold_slow), ", ",
+                  "q_threshold_fast=", prettysummary(acnv.q_threshold_fast), ", ",
+                  "w_0=", prettysummary(acnv.w_0), ", ",
+                  "k=", prettysummary(acnv.k), ")")
+end
+
 function Utils.prettysummary(area::CloudMicrophysics.Parameters.ParticleArea)
     return string("ParticleArea(",
                   "a0=", prettysummary(area.a0), ", ",
@@ -229,22 +197,23 @@ end
 
 function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
     parameters = bμp.categories.parameters
-    options = parameters.options
+    processes = parameters.processes
+    process_params = parameters.process_params
     rain = parameters.precip.rain
     snow = parameters.precip.snow
 
     print(io, summary(bμp), ":\n",
           "├── cloud_formation: ", prettysummary(bμp.cloud_formation), '\n',
-          "├── options: ", summary(options), '\n',
+          "├── processes: ", summary(processes), '\n',
           "├── cloud_liquid: ", prettysummary(parameters.cloud.liquid), '\n',
           "├── cloud_ice: ", prettysummary(parameters.cloud.ice), '\n',
           "├── rain: ", prettysummary(rain), '\n',
-          "│   ├── autoconversion: ", prettysummary(options.rain_autoconversion), '\n',
+          "│   ├── autoconversion: ", prettysummary(process_params.rain_autoconversion), '\n',
           "│   ├── area:   ", prettysummary(rain.area), '\n',
           "│   ├── vent:   ", prettysummary(rain.vent), '\n',
           "│   └── pdf:    ", prettysummary(rain.pdf), '\n',
           "├── snow: ", prettysummary(snow), "\n",
-          "│   ├── autoconversion: ", prettysummary(options.snow_autoconversion), '\n',
+          "│   ├── autoconversion: ", prettysummary(process_params.snow_autoconversion), '\n',
           "│   ├── area:   ", prettysummary(snow.area), '\n',
           "│   ├── mass:   ", prettysummary(snow.mass), '\n',
           "│   ├── ρᵢ:     ", prettysummary(snow.ρᵢ), '\n',

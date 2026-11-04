@@ -1,6 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
+using Breeze.AtmosphereModels: update_cos_zenith!
 using Dates
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -15,6 +16,25 @@ using RRTMGP
 ##### Unit tests
 #####
 
+@testset "Per-column solar constant and fixed zenith [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    # A column ensemble whose columns are different places: each gets its own sun
+    grid = RectilinearGrid(default_arch; size=(3, 2, 8), x=(0, 3), y=(0, 2), z=(0, 10kilometers), topology=(Periodic, Periodic, Bounded))
+    cos_zenith = FT[0.2 0.3; 0.4 0.5; 0.6 0.7]
+    solar_constant = FT[1000 1100; 1200 1300; 1400 1500]
+    radiation = RadiativeTransferModel(grid, GrayOptics(), ThermodynamicConstants();
+                                       surface_temperature = 300, surface_albedo = 0.1,
+                                       solar_position = FixedCosineZenith(cos_zenith),
+                                       solar_constant)
+    # RRTMGP column c = i + (j - 1) Nx, i.e. column-major over (i, j)
+    @test Array(radiation.shortwave_solver.bcs.cos_zenith) == vec(cos_zenith)
+    @test Array(radiation.shortwave_solver.bcs.toa_flux) == vec(solar_constant)
+    @test radiation.solar_constant === solar_constant
+    @test_throws ArgumentError RadiativeTransferModel(grid, GrayOptics(), ThermodynamicConstants();
+                                                      surface_temperature = 300, surface_albedo = 0.1,
+                                                      solar_position = FixedCosineZenith(FT[0.1, 0.2]))
+end
+
 @testset "GrayRadiativeTransferModel construction" begin
     @testset "Single column grid [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
@@ -24,6 +44,7 @@ using RRTMGP
 
         constants = ThermodynamicConstants()
 
+        @test_throws ArgumentError RadiativeTransferModel(grid, nothing)
         @test_throws ArgumentError RadiativeTransferModel(grid, nothing, constants)
 
         @testset "Number-based surface properties" begin
@@ -34,15 +55,16 @@ using RRTMGP
                                                solar_constant = 1361)
 
             @test radiation !== nothing
-            @test radiation.surface_properties.surface_temperature.constant == FT(300)
-            @test radiation.surface_properties.surface_emissivity.constant == FT(0.98)
-            @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.1)
-            @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.1)
+            @test radiation.surface_radiation.surface_temperature.constant == FT(300)
+            @test radiation.surface_radiation.surface_emissivity.constant == FT(0.98)
+            @test radiation.surface_radiation.direct_surface_albedo.constant == FT(0.1)
+            @test radiation.surface_radiation.diffuse_surface_albedo.constant == FT(0.1)
             @test radiation.solar_constant == FT(1361)
 
             # Check flux fields are created
             @test radiation.upwelling_longwave_flux !== nothing
             @test radiation.downwelling_longwave_flux !== nothing
+            @test radiation.upwelling_shortwave_flux !== nothing
             @test radiation.downwelling_shortwave_flux !== nothing
 
             # Check flux divergence field
@@ -55,6 +77,7 @@ using RRTMGP
             # Check flux fields have correct size (Nz+1 levels)
             @test size(radiation.upwelling_longwave_flux) == (1, 1, Nz + 1)
             @test size(radiation.downwelling_longwave_flux) == (1, 1, Nz + 1)
+            @test size(radiation.upwelling_shortwave_flux) == (1, 1, Nz + 1)
             @test size(radiation.downwelling_shortwave_flux) == (1, 1, Nz + 1)
 
             radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
@@ -62,8 +85,8 @@ using RRTMGP
                                                direct_surface_albedo = 0.15,
                                                diffuse_surface_albedo = 0.2)
 
-            @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.15)
-            @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.2)
+            @test radiation.surface_radiation.direct_surface_albedo.constant == FT(0.15)
+            @test radiation.surface_radiation.diffuse_surface_albedo.constant == FT(0.2)
         end
 
         @testset "Field-based surface properties" begin
@@ -79,10 +102,10 @@ using RRTMGP
             @test radiation !== nothing
 
             @allowscalar begin
-                @test first(radiation.surface_properties.surface_temperature) == FT(300)
-                @test first(radiation.surface_properties.surface_emissivity) == FT(0.98)
-                @test first(radiation.surface_properties.direct_surface_albedo) == FT(0.1)
-                @test first(radiation.surface_properties.diffuse_surface_albedo) == FT(0.1)
+                @test first(radiation.surface_radiation.surface_temperature) == FT(300)
+                @test first(radiation.surface_radiation.surface_emissivity) == FT(0.98)
+                @test first(radiation.surface_radiation.direct_surface_albedo) == FT(0.1)
+                @test first(radiation.surface_radiation.diffuse_surface_albedo) == FT(0.1)
                 @test radiation.solar_constant == FT(1361)
             end
         end
@@ -112,7 +135,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -137,7 +160,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -160,6 +183,7 @@ end
         # Sign convention: positive = upward, negative = downward
         ℐ_lw_up = radiation.upwelling_longwave_flux
         ℐ_lw_dn = radiation.downwelling_longwave_flux
+        ℐ_sw_up = radiation.upwelling_shortwave_flux
         ℐ_sw_dn = radiation.downwelling_shortwave_flux
 
         @allowscalar begin
@@ -181,7 +205,19 @@ end
 
         @test all(interior(ℐ_lw_up) .≥ 0)  # Upwelling should be positive
         @test all(interior(ℐ_lw_dn) .≤ 0)  # Downwelling should be negative
+        @test all(iszero, interior(ℐ_sw_up))  # Non-scattering gray optics has no upward shortwave
         @test all(interior(ℐ_sw_dn) .≤ 0)  # Downwelling should be negative
+
+        # Integrating -∂ℐ_net/∂z over the column must recover the boundary-flux
+        # difference, where ℐ_net sums all four streams (positive upward).
+        ℐ_net = vec(Array(interior(ℐ_lw_up))) .+
+                vec(Array(interior(ℐ_lw_dn))) .+
+                vec(Array(interior(ℐ_sw_up))) .+
+                vec(Array(interior(ℐ_sw_dn)))
+
+        Δz = 10kilometers / Nz  # the grid is uniform in z
+        column_heating = Δz * sum(Array(interior(radiation.flux_divergence)))
+        @test column_heating ≈ ℐ_net[1] - ℐ_net[end] rtol = sqrt(eps(FT))
     end
 end
 
@@ -207,12 +243,12 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
         # The motivating case: a numeric clock with a fixed cos(θ_z).
-        # Used to crash because `update_solar_zenith_angle!` had no path for
+        # Used to crash because `update_cos_zenith!` had no path for
         # numeric clock + epoch=nothing. Now this works via FixedCosineZenith.
         cos_θz = convert(FT, 0.5)
         radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
@@ -252,7 +288,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -320,7 +356,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -343,13 +379,13 @@ end
         # Step clock to midnight (t = day/2) and re-update — cos(θ_z) clamped to 0
         model.clock.time = 43200.0  # 12 h
         model.clock.iteration = 1
-        ext = Base.get_extension(Breeze, :BreezeRRTMGPExt)
-        ext.update_solar_zenith_angle!(radiation.shortwave_solver, sp, grid, model.clock)
-        @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] == 0
+        cos_zenith = radiation.shortwave_solver.bcs.cos_zenith
+        update_cos_zenith!(cos_zenith, sp, grid, model.clock)
+        @allowscalar @test cos_zenith[1] == 0
 
         # Step to t = day (back to noon) — should match the initial value
         model.clock.time = 86400.0
-        ext.update_solar_zenith_angle!(radiation.shortwave_solver, sp, grid, model.clock)
+        update_cos_zenith!(cos_zenith, sp, grid, model.clock)
         @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] ≈ cos(deg2rad(latitude))
     end
 
@@ -360,7 +396,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -392,7 +428,7 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -401,13 +437,11 @@ end
                                            surface_albedo = 0.1,
                                            solar_position = DiurnalSolarPosition(latitude = 30))
 
-        # DateTime clock is incompatible with the idealized diurnal cycle.
+        # DateTime clock is incompatible with the idealized diurnal cycle, which the model
+        # checks once, at construction
         clock = Clock(time = DateTime(2024, 6, 21, 12, 0, 0))
-        @test_throws ArgumentError begin
-            model = AtmosphereModel(grid; clock, dynamics,
-                                    formulation = :LiquidIcePotentialTemperature, radiation)
-            set!(model; θ = 300, qᵗ = 0)
-        end
+        @test_throws ArgumentError AtmosphereModel(grid; clock, dynamics,
+                                                   formulation = :LiquidIcePotentialTemperature, radiation)
     end
 
     @testset "ApparentSolarPosition + numeric clock without epoch → ArgumentError" begin
@@ -417,13 +451,13 @@ end
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
         # The combination that previously crashed silently: ApparentSolarPosition
-        # (default epoch=nothing) combined with a floating-point clock. We now
-        # raise an actionable ArgumentError on the first radiation update.
+        # (default epoch=nothing) combined with a floating-point clock. The model
+        # raises an actionable ArgumentError at construction.
         radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                            surface_temperature = 300,
                                            surface_albedo = 0.1,
@@ -431,13 +465,7 @@ end
 
         clock = Clock(time = 0.0)  # numeric, no epoch
 
-        # The first radiation update fires during AtmosphereModel construction
-        # (iteration 0 always triggers an update), so the throw lands there
-        # rather than inside `set!`. Wrap both calls so whichever raises is caught.
-        @test_throws ArgumentError begin
-            model = AtmosphereModel(grid; clock, dynamics,
-                                    formulation = :LiquidIcePotentialTemperature, radiation)
-            set!(model; θ = 300, qᵗ = 0)
-        end
+        @test_throws ArgumentError AtmosphereModel(grid; clock, dynamics,
+                                                   formulation = :LiquidIcePotentialTemperature, radiation)
     end
 end

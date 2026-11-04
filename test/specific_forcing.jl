@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze: SpecificForcing
-using Breeze.AtmosphereModels: is_density_tendency_forcing
+using Breeze.AtmosphereModels: dynamics_density, is_density_tendency_forcing, total_density
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Forcings: MultipleForcings, Relaxation
 using Oceananigans.Fields: interior
@@ -126,8 +126,7 @@ end
     F_specific_profile(z) = FT(-1e-5) * (1 + z / 100)
 
     # Path A: manual ρᵣ multiply, supplied under :ρθ (the pre-change idiom)
-    model_A = AtmosphereModel(grid; forcing = (; ρθ = (x, y, z, t) -> 0))  # placeholder
-    ρᵣ = model_A.dynamics.reference_state.density
+    ρᵣ = ReferenceState(grid).density
     F_density_field = Field{Nothing, Nothing, Center}(grid)
     set!(F_density_field, z -> F_specific_profile(z))
     set!(F_density_field, ρᵣ * F_density_field)
@@ -224,7 +223,7 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
                                                                     damping = NoDivergenceDamping());
                                     reference_potential_temperature = FT(300),
-                                    surface_pressure = FT(1e5),
+                                    base_pressure = FT(1e5),
                                     standard_pressure = FT(1e5))
 
     F_θ = FT(-1e-5)
@@ -239,6 +238,71 @@ end
     ρ = interior(Breeze.AtmosphereModels.dynamics_density(model.dynamics)) |> Array
     expected = ρ .* F_θ
     @test maximum(abs.(Gρθ .- expected)) < eps(FT) * 100
+end
+
+@testset "Specific forcing selects the compressible density carrier [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch;
+                           size = (8, 8, 8), halo = (5, 5, 5),
+                           x = (0, 100), y = (0, 100), z = (0, 100),
+                           topology = (Periodic, Periodic, Bounded))
+
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
+                                                                    damping = NoDivergenceDamping());
+                                    reference_potential_temperature = FT(300),
+                                    base_pressure = FT(1e5),
+                                    standard_pressure = FT(1e5))
+
+    F = FT(1e-5)
+    model = AtmosphereModel(grid;
+                            dynamics,
+                            tracers = :c,
+                            forcing = (; u=Returns(F),
+                                         θ=Returns(F),
+                                         E=Returns(zero(FT)),
+                                         qᵛ=Returns(F),
+                                         c=Returns(F)))
+
+    ρᵈ = dynamics_density(model.dynamics)
+    ρ = total_density(model.dynamics)
+    @test ρ !== ρᵈ
+
+    # Momentum and the thermodynamic variable are dry-air-coupled conserved variables; moisture,
+    # passive tracers, and the specific energy forcing E (a heating per unit total mass) carry
+    # total-air fractions.
+    @test model.forcing.ρu.density === ρᵈ
+    @test model.forcing.ρθ.density === ρᵈ
+    @test model.forcing.ρE.density === ρ
+    @test model.forcing.ρqᵛ.density === ρ
+    @test model.forcing.c.density === ρ
+
+    # Make the two carriers observably different and verify the total-density
+    # multiplier reaches the scalar tendency kernels.
+    set!(model, ρ=FT(1.25), qᵛ=FT(0.2), θ=FT(300))
+    update_state!(model)
+
+    ρ_values = interior(ρ) |> Array
+    ρᵈ_values = interior(ρᵈ) |> Array
+    @test all(≈(FT(1.25)), ρ_values)
+    @test all(≈(FT(1.0)), ρᵈ_values)
+
+    Gρqᵛ = interior(model.timestepper.Gⁿ.ρqᵛ) |> Array
+    Gρc = interior(model.timestepper.Gⁿ.c) |> Array
+    @test maximum(abs.(Gρqᵛ .- ρ_values .* F)) < eps(FT) * 100
+    @test maximum(abs.(Gρc .- ρ_values .* F)) < eps(FT) * 100
+
+    # A specific heating Ė under E must heat exactly like the volumetric ρ Ė under ρE.
+    Ė = FT(1e-2)
+    heated_models = map(((; E=Returns(Ė)), (; ρE=Returns(FT(1.25) * Ė)))) do energy_forcing
+        heated_model = AtmosphereModel(grid; dynamics, forcing=energy_forcing)
+        set!(heated_model, ρ=FT(1.25), qᵛ=FT(0.2), θ=FT(300))
+        update_state!(heated_model)
+        interior(heated_model.timestepper.Gⁿ.ρθ) |> Array
+    end
+
+    Gρθ_specific, Gρθ_volumetric = heated_models
+    @test maximum(abs, Gρθ_volumetric) > 0
+    @test maximum(abs.(Gρθ_specific .- Gρθ_volumetric)) < eps(FT) * 100 * maximum(abs, Gρθ_volumetric)
 end
 
 #####

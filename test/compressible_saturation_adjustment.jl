@@ -7,15 +7,32 @@ using Test
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
     MoistureMassFractions,
+    AbstractReferencePressureState,
     LiquidIceDensityState,
+    LiquidIcePotentialTemperatureState,
+    StaticEnergyState,
     temperature,
     with_temperature,
     mixture_gas_constant,
     mixture_heat_capacity,
+    vapor_equivalent_gas_constant,
+    vapor_equivalent_heat_capacity,
+    absolute_zero_latent_heat,
     saturation_specific_humidity
 
-using Breeze.Microphysics: SaturationAdjustment, adjust_thermodynamic_state, WarmPhaseEquilibrium
+using Breeze.Microphysics: SaturationAdjustment, adjust_state, adjust_thermodynamic_state, WarmPhaseEquilibrium,
+                           saturation_adjustment_specific_humidity
 using Oceananigans.TimeSteppers: update_state!
+
+@testset "Compressible density reconciliation modes" begin
+    CE = Breeze.CompressibleEquations
+
+    @test CE.density_reconciliation_mode(true, false, false, ()) isa Val{:total_density}
+    @test CE.density_reconciliation_mode(false, true, false, ()) isa Val{:dry_density}
+    @test CE.density_reconciliation_mode(false, false, true, ()) isa Val{:dry_density}
+    @test CE.density_reconciliation_mode(false, false, false, (:qᶜˡ,)) isa Val{:dry_density}
+    @test CE.density_reconciliation_mode(false, false, false, ()) isa Val{:diagnose_total_density}
+end
 
 # Regression tests for the compressible θˡⁱ density-based thermodynamic state
 # (NumericalEarth/Breeze.jl#765): the temperature inversion and the saturation adjustment must be
@@ -25,9 +42,18 @@ using Oceananigans.TimeSteppers: update_state!
 @testset "Density-based θˡⁱ state (LiquidIceDensityState) [$FT]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
     pˢᵗ = FT(1e5)
-    ℒˡ = constants.liquid.reference_latent_heat
-    ℒⁱ = constants.ice.reference_latent_heat
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
     rtol = FT == Float64 ? FT(1e-9) : FT(1e-4)
+
+    # ĉᵖ (ρ Rᵐ T / pˢᵗ)^κ̂ θˡⁱ = cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ is T = (ρ Rᵐ T / pˢᵗ)^κ̂ θ̃ + L with
+    # κ̂ = R̂ / ĉᵖ, θ̃ = ĉᵖ θˡⁱ / cᵖᵐ and L = (ℒˡ₀ qˡ + ℒⁱ₀ qⁱ) / cᵖᵐ
+    function inversion_coefficients(θ, q)
+        cᵖᵐ = mixture_heat_capacity(q, constants)
+        ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+        κ = vapor_equivalent_gas_constant(q, constants) / ĉᵖ
+        return κ, ĉᵖ * θ / cᵖᵐ, (ℒˡ₀ * q.liquid + ℒⁱ₀ * q.ice) / cᵖᵐ
+    end
     qtol = FT == Float64 ? FT(1e-5) : FT(1e-3)
 
     moistures = (MoistureMassFractions(FT(0.020)),                          # vapor only
@@ -40,11 +66,9 @@ using Oceananigans.TimeSteppers: update_state!
             𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ)
             T = temperature(𝒰, constants)
             Rᵐ = mixture_gas_constant(q, constants)
-            cᵖᵐ = mixture_heat_capacity(q, constants)
-            κ = Rᵐ / cᵖᵐ
-            L = (ℒˡ * q.liquid + ℒⁱ * q.ice) / cᵖᵐ
-            # self-consistent fixed point: T = (ρRᵐT/pˢᵗ)^κ θ + L  (and p = ρRᵐT)
-            @test T ≈ (ρ * Rᵐ * T / pˢᵗ)^κ * θ + L  rtol=rtol
+            κ, θ̃, L = inversion_coefficients(θ, q)
+            # self-consistent fixed point: T = (ρRᵐT/pˢᵗ)^κ̂ θ̃ + L  (and p = ρRᵐT)
+            @test T ≈ (ρ * Rᵐ * T / pˢᵗ)^κ * θ̃ + L  rtol=rtol
             # θˡⁱ round-trips: θ → T → θ
             @test with_temperature(𝒰, T, constants).potential_temperature ≈ θ  rtol=rtol
         end
@@ -73,16 +97,27 @@ using Oceananigans.TimeSteppers: update_state!
         @test 𝒰dry.moisture_mass_fractions.liquid == 0
     end
 
+    # NumericalEarth/Breeze.jl#859: `adjust_state` serves every state, so the only method that
+    # reads `reference_pressure` is the saturation specific humidity of reference-pressure states.
+    # The density-closed state, which has no `reference_pressure`, must select its own method.
+    @testset "the reference-pressure saturation path excludes the density state" begin
+        argument_types(𝒮) = Tuple{FT, 𝒮, typeof(constants), WarmPhaseEquilibrium}
+        state_type(𝒮) = which(saturation_adjustment_specific_humidity, argument_types(𝒮)).sig.parameters[3]
+        @test state_type(LiquidIceDensityState) === LiquidIceDensityState
+        @test state_type(LiquidIcePotentialTemperatureState) === AbstractReferencePressureState
+        @test state_type(StaticEnergyState) === AbstractReferencePressureState
+        @test hasmethod(adjust_state, Tuple{LiquidIceDensityState, FT, typeof(constants), WarmPhaseEquilibrium})
+    end
+
     @testset "fixes the κ·ΔL temperature inconsistency" begin
         θ = FT(300); ρ = FT(1)
         q = MoistureMassFractions(FT(0.018), FT(0.005), FT(0))
         Rᵐ = mixture_gas_constant(q, constants)
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        κ = Rᵐ / cᵖᵐ; γ = cᵖᵐ / (cᵖᵐ - Rᵐ)
-        L = (ℒˡ * q.liquid + ℒⁱ * q.ice) / cᵖᵐ
+        κ, θ̃, L = inversion_coefficients(θ, q)
+        γ = 1 / (1 - κ)
 
         T★ = temperature(LiquidIceDensityState(θ, q, pˢᵗ, ρ), constants)
-        T_noniter = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L   # the old non-iterated inversion
+        T_noniter = θ̃^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L   # the old non-iterated inversion
         @test T★ > T_noniter                            # the non-iterated inversion is biased cold
         @test isapprox(T★ - T_noniter, FT(1.39) * κ * L; rtol=FT(0.15))   # gap ≈ 1.39 κΔL (leading order)
 
@@ -120,7 +155,7 @@ end
     constants = ThermodynamicConstants(Float64)
     θref(z) = 300.0 * exp(9.80616 * z / (1005 * 300.0))
     dyn = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                               surface_pressure = 1e5, standard_pressure = 1e5,
+                               base_pressure = 1e5, standard_pressure = 1e5,
                                reference_potential_temperature = θref)
     model = AtmosphereModel(grid; dynamics = dyn,
                             microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
@@ -144,6 +179,8 @@ end
         @test qᵛ[I] ≈ saturation_specific_humidity(T[I], ρ[I], constants, eq)  atol = 1e-4
     end
 
+    test_kernel_functions_inferred(model)
+
     time_step!(model, 1e-3)
     @test all(isfinite, interior(model.temperature))
 end
@@ -163,7 +200,7 @@ end
 
     make_model() = AtmosphereModel(grid;
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        surface_pressure = 1e5, standard_pressure = 1e5,
+                                        base_pressure = 1e5, standard_pressure = 1e5,
                                         reference_potential_temperature = z -> 300.0),
         microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
         thermodynamic_constants = constants,

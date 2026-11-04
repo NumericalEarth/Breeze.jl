@@ -26,25 +26,25 @@ const StaticEnergy = KernelFunctionOperation{Center, Center, Center, <:Any, <:An
 """
     StaticEnergy(model, flavor=:specific)
 
-Return a `KernelFunctionOperation` representing moist static energy ``e``.
+Return a `KernelFunctionOperation` representing moist static energy ``s``.
 
 Moist static energy is a conserved quantity in adiabatic, frictionless flow that
 combines sensible heat, gravitational potential energy, and latent heat:
 
 ```math
-e = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ
+s = cᵖᵐ T + g z - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ
 ```
 
 where ``cᵖᵐ`` is the moist air heat capacity, ``T`` is temperature,
 ``g`` is gravitational acceleration, ``z`` is height, and
-``ℒˡᵣ qˡ + ℒⁱᵣ qⁱ`` is the latent heat content of condensate.
+``ℒˡ₀ qˡ + ℒⁱ₀ qⁱ`` uses latent-heat offsets extrapolated to zero kelvin.
 
 This is the prognostic thermodynamic variable used in `StaticEnergyThermodynamics`.
 
 # Arguments
 
 - `model`: An `AtmosphereModel` instance.
-- `flavor`: Either `:specific` (default) to return ``e``, or `:density` to return ``ρ e``.
+- `flavor`: Either `:specific` (default) to return ``s``, or `:density` to return ``ρ s``.
 
 # Examples
 
@@ -55,8 +55,8 @@ grid = RectilinearGrid(size=(1, 1, 8), extent=(1, 1, 1e3))
 model = AtmosphereModel(grid)
 set!(model, θ=300)
 
-e = StaticEnergy(model)
-Field(e)
+s = StaticEnergy(model)
+Field(s)
 
 # output
 1×1×8 Field{Center, Center, Center} on RectilinearGrid on CPU
@@ -104,17 +104,17 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     g = d.thermodynamic_constants.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
 
-    ℒˡᵣ = d.thermodynamic_constants.liquid.reference_latent_heat
-    ℒⁱᵣ = d.thermodynamic_constants.ice.reference_latent_heat
+    ℒˡ₀ = Thermodynamics.absolute_zero_latent_heat(d.thermodynamic_constants, d.thermodynamic_constants.liquid)
+    ℒⁱ₀ = Thermodynamics.absolute_zero_latent_heat(d.thermodynamic_constants, d.thermodynamic_constants.ice)
     qˡ = q.liquid
     qⁱ = q.ice
 
     # Moist static energy
-    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ - ℒⁱ₀ * qⁱ
 
     if d.flavor isa Specific
-        return e
+        return s
     elseif d.flavor isa Density
-        return ρᵣ * e
+        return ρᵣ * s
     end
 end

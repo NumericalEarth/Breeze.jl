@@ -11,16 +11,19 @@ export
     # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,
+    total_density,
+    sedimentation_composition_increment,
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
-    SlowTendencyMode,
-    HorizontalSlowMode,
+    SlowDynamics,
     compute_pressure_correction!,
     make_pressure_correction!,
     # Thermodynamic formulation interface (formulation types exported by their respective modules)
+    specific_thermodynamic_field,
     thermodynamic_density_name,
     thermodynamic_density,
+    total_energy_density_name,
     DefaultTemperatureSolver,
     default_temperature_solver,
     # Helpers
@@ -30,9 +33,12 @@ export
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
-    surface_precipitation_flux,
+    bottom_precipitation_flux,
+    precipitation_flux,
+    MicrophysicalProcessRate,
     specific_humidity,
     moisture_prognostic_name,
+    total_moisture_density_name,
     moisture_specific_name,
     specific_prognostic_moisture,
 
@@ -48,13 +54,20 @@ export
     WarmRainState,
     microphysical_state,
     microphysical_tendency,
+    microphysical_tendencies,
     compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
-    specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
+    aerosol_field_names,
     initial_aerosol_number,
+    initial_aerosol_number_density,
+    sedimentation_velocity,
+    condensate_liquid_fraction,
+    sedimentation_velocity_field,
+    write_sedimentation_velocity!,
+    microphysical_velocities,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     materialize_atmosphere_model_boundary_conditions,
@@ -68,9 +81,14 @@ export
     standard_ozone_profile,
     materialize_background_atmosphere,
     materialize_surface_property,
+    resolve_column_batch_rows,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
+    EcCKDOptics,
+    CloudScatteringTables,
+    OverlyingAtmosphereColumn,
+    standard_atmosphere_temperature,
 
     # Solar position specifications
     AbstractSolarPosition,
@@ -80,6 +98,9 @@ export
 
     # Cloud effective radius
     ConstantRadiusParticles,
+
+    # Microphysics interface
+    prognostic_field_names,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
@@ -105,17 +126,22 @@ export
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
 
-    # Architecture-dispatched helper for safely converting Δt to a kernel arg
-    kernel_time_step
+    # Architecture-dispatched helpers for safely converting Δt to a kernel arg,
+    # and for skipping operator-split updates before the first step
+    kernel_time_step,
+    invalid_time_step,
+
+    # Radiation schedules that the architecture can evaluate
+    validate_schedule
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, fields
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
+using Oceananigans: Oceananigans, Center, Face, CenterField, fields
+using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
+using Oceananigans.Operators: Δzᶜᶜᶜ, ∂zᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
@@ -126,6 +152,11 @@ using Oceananigans.Utils: prettysummary, launch!
 # kernel — BreezeReactantExt overrides this for `ReactantState` archs to pass
 # Δt through unchanged.
 @inline kernel_time_step(arch, grid, Δt) = convert(eltype(grid), Δt)
+
+# Whether `Δt` is not yet a valid time step (NaN, infinite or non-positive, as during model
+# construction), so that operator-split updates skip themselves. BreezeReactantExt overrides it
+# for traced Δt, on which the guard cannot branch; traced time stepping sets `last_Δt` first.
+@inline invalid_time_step(Δt) = isnan(Δt) || isinf(Δt) || Δt ≤ 0
 
 #####
 ##### Interfaces (define the contract that dynamics implementations must fulfill)
@@ -151,9 +182,11 @@ include("solar_position.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("implicit_vertical_advection.jl")
+include("density_weighted_implicit_diffusion.jl")
 include("cell_advection_timescale.jl")
 include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
+include("checkpointing.jl")
 include("compute_hydrostatic_pressure.jl")
 
 #####
@@ -164,6 +197,7 @@ include("Diagnostics/Diagnostics.jl")
 using .Diagnostics
 
 # set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
+include("set_moisture.jl")
 include("set_atmosphere_model.jl")
 include("set_to_mean.jl")
 

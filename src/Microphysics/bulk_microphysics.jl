@@ -91,7 +91,7 @@ AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, mode
 abstract type AbstractCondensateFormation end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDEF)
 
 Return a condensate formation model that applies a **constant** phase-change rate.
 
@@ -107,6 +107,12 @@ Base.summary(::ConstantRateCondensateFormation) = "ConstantRateCondensateFormati
 #####
 ##### Shared helpers for relaxation-to-saturation phase change (liquid + ice)
 #####
+
+# `Γ` below and `Thermodynamics.psychrometric_correction` are the same latent-heat
+# feedback factor in two conventions: `Γ` uses the mixture heat capacity and keeps the
+# ideal-gas `-1/T` term of `dqᵛ⁺/dT`, while `psychrometric_correction` takes the heat
+# capacity as an argument and drops that term. Keep any change to one in step with the
+# other.
 
 """
 $(TYPEDSIGNATURES)
@@ -179,7 +185,7 @@ struct FourCategories{L, I, R, S, C, V, A}
     snow :: S
     collisions :: C
     hydrometeor_velocities :: V
-    air_properties :: A
+    air :: A
 end
 
 FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities) =
@@ -224,8 +230,14 @@ AtmosphereModels.moisture_prognostic_name(::NonEquilibriumCloudFormation) = :ρq
 const NCBM = BulkMicrophysics{<:Any, Nothing}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
-maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵛ, constants) =
-    AtmosphereModels.adjust_thermodynamic_state(𝒰₀, bμp.cloud_formation, constants)
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵛ, constants) =
+    AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp.cloud_formation, qᵛ, constants)
+
+@inline AtmosphereModels.microphysical_velocities(bμp::NCBM, μ, name) =
+    AtmosphereModels.microphysical_velocities(bμp.cloud_formation, μ, name)
+
+@inline AtmosphereModels.microphysical_tendency(bμp::NCBM, name, ρ, ℳ, 𝒰, constants) =
+    AtmosphereModels.microphysical_tendency(bμp.cloud_formation, name, ρ, ℳ, 𝒰, constants)
 
 AtmosphereModels.prognostic_field_names(::NPBM) = tuple()
 AtmosphereModels.materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)

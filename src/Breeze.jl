@@ -42,14 +42,21 @@ export
     PrescribedDynamics,
     KinematicModel,
     AtmosphereModel,
+    SingleColumnGrid,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
+    VaporEquivalentExponent,
+    DryExponent,
     RadiativeTransferModel,
     BackgroundAtmosphere,
     standard_ozone_profile,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
+    EcCKDOptics,
+    CloudScatteringTables,
+    OverlyingAtmosphereColumn,
+    standard_atmosphere_temperature,
     AbstractSolarPosition,
     ApparentSolarPosition,
     DiurnalSolarPosition,
@@ -62,6 +69,7 @@ export
     mixture_heat_capacity,
     dynamics_density,
     dynamics_pressure,
+    total_density,
 
     # Advective timescale control for the time-step wizard
     CellAdvectionTimescale,
@@ -81,13 +89,17 @@ export
     static_energy_density,
     static_energy,
     total_energy,
+    total_energy_density_name,
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
-    surface_precipitation_flux,
+    bottom_precipitation_flux,
+    precipitation_flux,
+    MicrophysicalProcessRate,
     total_pressure,
     specific_humidity,
     moisture_prognostic_name,
+    total_moisture_density_name,
     moisture_specific_name,
     specific_prognostic_moisture,
 
@@ -107,6 +119,8 @@ export
     PlanarIceSurface,
 
     # Microphysics
+    aerosol_field_names,
+    prognostic_field_names,
     SaturationAdjustment,
     InstantaneousPrecipitation,
     MixedPhaseEquilibrium,
@@ -118,13 +132,22 @@ export
     equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
+    Supersaturation,
+    SupersaturationField,
     number_concentration,
     number_concentration_field,
     BulkMicrophysics,
     initial_aerosol_number,
+    initial_aerosol_number_density,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
     ConstantRateCondensateFormation,
+    P3Microphysics,
+    PredictedParticlePropertiesMicrophysics,
+    DiagnosticVaporExcess,
+    PrognosticVaporExcess,
+    PrognosticLiquidFraction,
+    NoLiquidFraction,
 
     # BoundaryConditions
     BulkDrag,
@@ -134,6 +157,7 @@ export
     FittedStabilityFunction,
     FilteredSurfaceVelocities,
     FilteredSurfaceScalar,
+    TKEGustiness,
     default_neutral_drag_polynomial,
     default_neutral_sensible_heat_polynomial,
     default_neutral_latent_heat_polynomial,
@@ -142,6 +166,7 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
     SpecificForcing,
+    TemperatureForcing,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
@@ -218,6 +243,10 @@ export
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
+    TKEBasedTurbulenceClosure, AbstractMixingLength, LocalMinimumMixingLength, IntegralMixingLength,
+    GradientLimitedMixingLength, ConstantStabilityFunctions,
+    RationalStabilityFunction,
+    DryStaticStability, MoistStaticStability,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
@@ -227,6 +256,9 @@ export
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
 
+include("Utils.jl")
+using .Utils
+
 include("Solvers.jl")
 using .Solvers
 
@@ -235,6 +267,10 @@ using .Thermodynamics
 
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
+
+# Solar geometry, needed by the radiation interface in AtmosphereModels
+include("CelestialMechanics/CelestialMechanics.jl")
+using .CelestialMechanics
 
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
@@ -286,13 +322,14 @@ using .TurbulenceClosures
 include("Advection.jl")
 using .Advection
 
-include("CelestialMechanics/CelestialMechanics.jl")
-using .CelestialMechanics
-
 include("Forcings/Forcings.jl")
 using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
+
+# Loaded last: single-column / column-ensemble mode extends the dynamics, closure, and model modules.
+include("single_column_mode.jl")
+using .SingleColumnMode: SingleColumnMode, SingleColumnGrid
 
 end # module Breeze

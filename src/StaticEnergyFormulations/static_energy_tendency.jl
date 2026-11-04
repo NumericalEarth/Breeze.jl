@@ -13,32 +13,37 @@ const StaticEnergyModel = AtmosphereModel{<:Any, <:StaticEnergyFormulation}
 AtmosphereModels.liquid_ice_potential_temperature(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :specific)
 AtmosphereModels.liquid_ice_potential_temperature_density(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :density)
 AtmosphereModels.static_energy(model::StaticEnergyModel) = model.formulation.specific_energy
+
+AtmosphereModels.specific_thermodynamic_field(formulation::StaticEnergyFormulation) = formulation.specific_energy
 AtmosphereModels.static_energy_density(model::StaticEnergyModel) = model.formulation.energy_density
 
 #####
 ##### Tendency computation
 #####
 
-function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args)
+function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args, tracer_transport_velocity)
     grid = model.grid
     arch = grid.architecture
 
-    ρe_args = (
+    ρs_args = (
         Val(1),
-        model.forcing.ρe,
-        model.advection.ρe,
+        model.forcing.ρs,
+        model.forcing.ρE,
+        model.advection.ρs,
         radiation_flux_divergence(model.radiation),
         common_args...,
         model.temperature)
 
-    Gρe = model.timestepper.Gⁿ.ρe
-    launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρe, grid, ρe_args)
+    Gρs = model.timestepper.Gⁿ.ρs
+    launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρs, grid, ρs_args)
+    add_sedimentation_tendency!(Gρs, model, tracer_transport_velocity)
     return nothing
 end
 
 @inline function static_energy_tendency(i, j, k, grid,
                                         id,
-                                        ρe_forcing,
+                                        ρs_forcing,
+                                        ρE_forcing,
                                         advection,
                                         radiation_flux_divergence_field,
                                         dynamics,
@@ -62,27 +67,67 @@ end
                           velocities.w, dynamics, temperature_field, specific_prognostic_moisture,
                           microphysics, microphysical_fields, constants)
 
-    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
+
+    @inbounds begin
+        ρᵈ = ρ_field[i, j, k]
+        ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
+    end
+
+    FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
+    div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
+
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             + ρe_forcing(i, j, k, grid, clock, model_fields)
-             + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
+             + ρs_forcing(i, j, k, grid, clock, model_fields)
+             + ρᵈ / ρ * (FρE + div_ℐ)) # a volumetric heating Q changes s at Q / ρ, so ρᵈ s at (ρᵈ / ρ) Q (ρs and ρE forcings are mutually exclusive)
+end
+
+#####
+##### Condensate content of ρs for its sedimentation tendency
+#####
+#
+# The content per unit falling mass of phase x is χˣ = ∇_q s · Δqˣ at fixed T along the
+# composition increment Δqˣ of `sedimentation_composition_increment`: q̂ˣ − q̂ᵈ on the anelastic
+# core, whose total density is fixed, q̂ˣ − q on the compressible core, whose total density falls
+# with the condensate. Losing condensate at this content leaves the temperature unchanged on
+# either core. From s = cᵖᵐ T + g z − Hᶜ, Hᶜ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ with the latent heats extrapolated
+# to zero kelvin (`absolute_zero_latent_heat`), and Δcᵖ and ΔHᶜ the changes of cᵖᵐ and Hᶜ along Δqˣ,
+#
+#   χˣ = Δcᵖ T − ΔHᶜ ,
+#
+# the enthalpy of the condensate relative to what its mass gives way to: hˣ − hᵈ against dry
+# air, hˣ − (s − g z) against the mixture. The geopotential is independent of the composition and
+# drops out. The frictional heating from the fall (g wˣ qˣ) is neglected. The content is the
+# enthalpy the falling mass carries and ∂s/∂h = 1, so the shared `sedimentation_tendency`
+# reduces here to the flux form: each flux carries the enthalpy of the cell it drains, and ∫ρs
+# is conserved.
+@inline function AtmosphereModels.condensate_content(i, j, k, grid, ::StaticEnergyFormulation, dynamics, constants,
+                                                     microphysics, microphysical_fields, specific_prognostic_moisture,
+                                                     temperature_field)
+    @inbounds T = temperature_field[i, j, k]
+    @inbounds ρ = total_density(dynamics)[i, j, k]
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    χˡ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:liquid)), constants, T)
+    χⁱ = enthalpy_increment(sedimentation_composition_increment(dynamics, q, Val(:ice)), constants, T)
+    return (; χ = (χˡ, χⁱ), h = (χˡ, χⁱ), ∂φ∂h = one(T))
 end
 
 #####
 ##### Set thermodynamic variables
 #####
 
-AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:ρe}, value) =
+AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:ρs}, value) =
     set!(model.formulation.energy_density, value)
 
-function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:e}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:s}, value)
     set!(model.formulation.specific_energy, value)
     ρ = dynamics_density(model.dynamics)
-    e = model.formulation.specific_energy
-    set!(model.formulation.energy_density, ρ * e)
+    s = model.formulation.specific_energy
+    set!(model.formulation.energy_density, ρ * s)
     return nothing
 end
 
@@ -125,7 +170,7 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρe = ρᵈe)
+        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρs = ρᵈs)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
     end
@@ -133,17 +178,18 @@ end
     pˢᵗ = standard_pressure(dynamics)
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
-    𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, qᵛᵉ, constants)
+    μ = AtmosphereModels.extract_microphysical_prognostics(i, j, k, microphysics, microphysical_fields)
+    𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, qᵛᵉ, constants, μ, ρ)
     T = temperature(𝒰θ₁, constants)
 
     z = znode(i, j, k, grid, c, c, c)
     q₁ = 𝒰θ₁.moisture_mass_fractions
-    𝒰e₀ = StaticEnergyState(zero(T), q₁, z, pᵣ)
-    𝒰e₁ = with_temperature(𝒰e₀, T, constants)
-    e = 𝒰e₁.static_energy
+    𝒰s₀ = StaticEnergyState(zero(T), q₁, z, pᵣ)
+    𝒰s₁ = with_temperature(𝒰s₀, T, constants)
+    s = 𝒰s₁.static_energy
 
-    @inbounds specific_energy[i, j, k] = e
-    @inbounds energy_density[i, j, k] = ρᵈ * e
+    @inbounds specific_energy[i, j, k] = s
+    @inbounds energy_density[i, j, k] = ρᵈ * s
 end
 
 #####
@@ -155,10 +201,10 @@ end
 
 Set the thermodynamic state from temperature ``T``.
 
-The temperature is converted to static energy ``e`` using the relation:
+The temperature is converted to static energy ``s`` using the relation:
 
 ```math
-e = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ .
+s = cᵖᵐ T + g z - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ .
 ```
 """
 function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:T}, value)
@@ -196,22 +242,22 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρe = ρᵈe)
+        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρs = ρᵈs)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end
 
     # Get moisture fractions (vapor only for unsaturated air)
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    pᵣ = pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
 
     # Convert temperature to static energy
     z = znode(i, j, k, grid, c, c, c)
     𝒰₀ = StaticEnergyState(zero(T), q, z, pᵣ)
     𝒰₁ = with_temperature(𝒰₀, T, constants)
 
-    e = 𝒰₁.static_energy
-    @inbounds specific_energy[i, j, k] = e
-    @inbounds energy_density[i, j, k] = ρᵈ * e
+    s = 𝒰₁.static_energy
+    @inbounds specific_energy[i, j, k] = s
+    @inbounds energy_density[i, j, k] = ρᵈ * s
 end

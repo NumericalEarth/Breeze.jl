@@ -51,19 +51,22 @@ end
 struct CondensedPhase{FT}
     reference_latent_heat :: FT
     heat_capacity :: FT
+    density :: FT
 end
 
 function Base.summary(ph::CondensedPhase{FT}) where FT
     return string("CondensedPhase{", FT, "}(",
                   "reference_latent_heat=", prettysummary(ph.reference_latent_heat), ", ",
-                  "heat_capacity=", prettysummary(ph.heat_capacity), ")")
+                  "heat_capacity=", prettysummary(ph.heat_capacity), ", ",
+                  "density=", prettysummary(ph.density), ")")
 end
 
 Base.show(io::IO, ph::CondensedPhase) = print(io, summary(ph))
 
 Adapt.adapt_structure(to, pt::CondensedPhase) =
     CondensedPhase(adapt(to, pt.reference_latent_heat),
-                   adapt(to, pt.heat_capacity))
+                   adapt(to, pt.heat_capacity),
+                   adapt(to, pt.density))
 
 """
 $(TYPEDSIGNATURES)
@@ -83,14 +86,24 @@ Arguments
 - `reference_latent_heat`: Difference between the internal energy of the gaseous phase at
   the `energy_reference_temperature`.
 - `heat_capacity`: Heat capacity of the phase of matter.
+- `density`: Reference mass density of the phase of matter [kg/m³].
 """
-function CondensedPhase(FT = Oceananigans.defaults.FloatType; reference_latent_heat, heat_capacity)
+function CondensedPhase(FT = Oceananigans.defaults.FloatType;
+                        reference_latent_heat,
+                        heat_capacity,
+                        density)
     return CondensedPhase{FT}(convert(FT, reference_latent_heat),
-                              convert(FT, heat_capacity))
+                              convert(FT, heat_capacity),
+                              convert(FT, density))
 end
 
-liquid_water(FT) = CondensedPhase(FT; reference_latent_heat=2500800, heat_capacity=4181)
-water_ice(FT)    = CondensedPhase(FT; reference_latent_heat=2834000, heat_capacity=2108)
+liquid_water(FT) = CondensedPhase(FT; reference_latent_heat=2500800,
+                                      heat_capacity=4181,
+                                      density=1000)
+
+water_ice(FT) = CondensedPhase(FT; reference_latent_heat=2834000,
+                                   heat_capacity=2108,
+                                   density=917)
 
 """
 $(TYPEDEF)
@@ -178,6 +191,8 @@ internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
 The `gravitational_acceleration` parameter is included to compute [`ReferenceState`](@ref)
 quantities associated with hydrostatic balance.
+The `liquid` and `ice` phases contain their respective reference densities for use by
+microphysical parameterizations.
 """
 function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 molar_gas_constant = 8.314462618,
@@ -297,6 +312,9 @@ end
 @inline MoistureMassFractions(vapor::FT) where FT = MoistureMassFractions(vapor, zero(vapor), zero(vapor))
 @inline MoistureMassFractions(vapor::FT, liquid::FT) where FT = MoistureMassFractions(vapor, liquid, zero(vapor))
 
+@inline MoistureMassFractions{FT}(q::MoistureMassFractions) where FT =
+    MoistureMassFractions(convert(FT, q.vapor), convert(FT, q.liquid), convert(FT, q.ice))
+
 const MMF = MoistureMassFractions
 Base.zero(::Type{MMF{FT}}) where FT = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
 
@@ -375,6 +393,34 @@ The liquid and ice phases are assumed to be incompressible.
     cⁱ = constants.ice.heat_capacity
     return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cˡ + qⁱ * cⁱ
 end
+
+# The vapor-equivalent heat capacity ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ, with qᵈ = 1 - qᵗ: the heat capacity at constant
+# pressure a parcel would have if all of its water were vapor. Unlike `mixture_heat_capacity`, ĉᵖ does
+# not change when water changes phase. It normalizes the liquid-ice potential temperature θˡⁱ.
+@inline function vapor_equivalent_heat_capacity(q::MMF, constants::TC)
+    qᵗ = total_specific_moisture(q)
+    qᵈ = 1 - qᵗ
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    return qᵈ * cᵖᵈ + qᵗ * cᵖᵛ
+end
+
+# The vapor-equivalent gas constant R̂ = qᵈ Rᵈ + qᵗ Rᵛ: the gas constant a parcel would have if all of its
+# water were vapor. It equals `mixture_gas_constant` in unsaturated air, and κ̂ = R̂ / ĉᵖ is the exponent
+# of the `VaporEquivalentExponent` Exner function.
+@inline function vapor_equivalent_gas_constant(q::MMF, constants::TC)
+    qᵗ = total_specific_moisture(q)
+    qᵈ = 1 - qᵗ
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    return qᵈ * Rᵈ + qᵗ * Rᵛ
+end
+
+# The latent energy ℒˡ₀ qˡ + ℒⁱ₀ qⁱ of the condensate, with the latent heats extrapolated to absolute
+# zero (`absolute_zero_latent_heat`). The enthalpy relative to all-vapor water is cᵖᵐ T minus this.
+@inline condensate_latent_energy(q::MMF, constants) =
+    absolute_zero_latent_heat(constants, constants.liquid) * q.liquid +
+    absolute_zero_latent_heat(constants, constants.ice) * q.ice
 
 #####
 ##### Equation of state

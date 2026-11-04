@@ -4,12 +4,16 @@ using Breeze
 using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
-using Breeze.AtmosphereModels: microphysics_model_update!
-using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient
+using Breeze.AtmosphereModels: microphysics_model_update!, bottom_precipitation_flux
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient,
+    sedimentation_substeps
 using Breeze.Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
     mixture_gas_constant,
+    vapor_equivalent_heat_capacity,
+    vapor_equivalent_gas_constant,
+    absolute_zero_latent_heat,
     saturation_specific_humidity,
     PlanarLiquidSurface,
     TetensFormula
@@ -17,6 +21,20 @@ using Breeze.Thermodynamics:
 #####
 ##### Helper functions
 #####
+
+# θˡⁱ = (cᵖᵐ T - ℒˡ₀ qˡ) / (ĉᵖ Π̂) with Π̂ = (p / p₀)^(R̂ / ĉᵖ), and its inverse
+function liquid_ice_ĉᵖΠ(p, p₀, q, constants)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    return ĉᵖ * (p / p₀)^(vapor_equivalent_gas_constant(q, constants) / ĉᵖ)
+end
+
+liquid_ice_potential_temperature(T, p, p₀, q, constants) =
+    (mixture_heat_capacity(q, constants) * T - absolute_zero_latent_heat(constants, constants.liquid) * q.liquid) /
+    liquid_ice_ĉᵖΠ(p, p₀, q, constants)
+
+liquid_ice_temperature(θ, p, p₀, q, constants) =
+    (liquid_ice_ĉᵖΠ(p, p₀, q, constants) * θ + absolute_zero_latent_heat(constants, constants.liquid) * q.liquid) /
+    mixture_heat_capacity(q, constants)
 
 mass_fraction_to_mixing_ratio(q, qᵗ) = q / (1 - qᵗ)
 mixing_ratio_to_mass_fraction(r, rᵗ) = r / (1 + rᵗ)
@@ -37,7 +55,9 @@ for rain sedimentation CFL constraints.
 References: DCMIP2016 Fortran implementation (`kessler.f90` in [DOI: 10.5281/zenodo.1298671](https://doi.org/10.5281/zenodo.1298671))
 
 """
-function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constants, microphysics)
+function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constants, microphysics;
+                                             sedimentation_density = ρ,
+                                             dry_air_coupled = false)
     Nz = length(T)
     FT = eltype(T)
 
@@ -72,10 +92,7 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
     for k = 1:Nz
         qˡ = qᶜˡ[k] + qʳ[k]
         q = MoistureMassFractions(qᵛ[k], qˡ)
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
-        θˡⁱ[k] = (T[k] - ℒˡᵣ * qˡ / cᵖᵐ) / Π
+        θˡⁱ[k] = liquid_ice_potential_temperature(T[k], p[k], p₀, q, constants)
     end
 
     # Convert mass fractions to mixing ratios and compute terminal velocities
@@ -103,8 +120,16 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
     # Subcycling
     Ns = max(1, ceil(Int, Δt / max_Δt))
     Δtₛ = Δt / Ns
+    surface_mass_flux = zero(FT)
 
     for s = 1:Ns
+        rᵗ₁ = rᵛ[1] + rᶜˡ[1] + rʳ[1]
+        qʳ₁ = rʳ[1] / (1 + rᵗ₁)
+        ρqʳ₁ = ifelse(dry_air_coupled,
+                      sedimentation_density[1] * rʳ[1],
+                      ρ[1] * qʳ₁)
+        surface_mass_flux += ρqʳ₁ * 𝕎ʳ[1]
+
         zᵏ = z[1]
 
         for k = 1:Nz
@@ -114,18 +139,15 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
             qˡ_local = (rᶜˡ[k] + rʳ[k]) / (1 + rᵗ)
 
             q = MoistureMassFractions(qᵛ_local, qˡ_local)
-            cᵖᵐ = mixture_heat_capacity(q, constants)
-            Rᵐ = mixture_gas_constant(q, constants)
-            Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
-            T[k] = Π * θˡⁱ[k] + ℒˡᵣ * qˡ_local / cᵖᵐ
+            T[k] = liquid_ice_temperature(θˡⁱ[k], p[k], p₀, q, constants)
 
             # Rain sedimentation (upstream differencing)
             if k < Nz
                 zᵏ⁺¹ = z[k+1]
                 Δz = zᵏ⁺¹ - zᵏ
-                flux_out = ρ[k+1] * rʳ[k+1] * 𝕎ʳ[k+1]
-                flux_in = ρ[k] * rʳ[k] * 𝕎ʳ[k]
-                Δr𝕎 = Δtₛ * (flux_out - flux_in) / (ρ[k] * Δz)
+                flux_out = sedimentation_density[k+1] * rʳ[k+1] * 𝕎ʳ[k+1]
+                flux_in = sedimentation_density[k] * rʳ[k] * 𝕎ʳ[k]
+                Δr𝕎 = Δtₛ * (flux_out - flux_in) / (sedimentation_density[k] * Δz)
                 zᵏ = zᵏ⁺¹
             else
                 Δz_half = 0.5 * (z[k] - z[k-1])
@@ -172,10 +194,7 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
             qˡ_new = (rᶜˡ_final + rʳ_final) / (1 + rᵗ_new)
 
             q_new = MoistureMassFractions(qᵛ_new, qˡ_new)
-            cᵖᵐ_new = mixture_heat_capacity(q_new, constants)
-            Rᵐ_new = mixture_gas_constant(q_new, constants)
-            Π_new = (p[k] / p₀)^(Rᵐ_new / cᵖᵐ_new)
-            θˡⁱ[k] = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
+            θˡⁱ[k] = liquid_ice_potential_temperature(T_new, p[k], p₀, q_new, constants)
 
             rᵛ[k] = rᵛ_new
             rᶜˡ[k] = rᶜˡ_final
@@ -198,11 +217,10 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
         qʳ[k] = rʳ[k] / (1 + rᵗ)
 
         q = MoistureMassFractions(qᵛ[k], qᶜˡ[k] + qʳ[k])
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
-        T[k] = Π * θˡⁱ[k] + ℒˡᵣ * (qᶜˡ[k] + qʳ[k]) / cᵖᵐ
+        T[k] = liquid_ice_temperature(θˡⁱ[k], p[k], p₀, q, constants)
     end
+
+    return surface_mass_flux / Ns
 end
 
 #####
@@ -252,6 +270,64 @@ end
 
         @test qᵛ_back ≈ qᵛ rtol=1e-10
         @test qˡ_back ≈ qˡ rtol=1e-10
+    end
+
+    # `sedimentation_substeps(Δt, max_Δt, substep_limit)` validates the substep count as a float
+    # before the kernel truncates it to an integer: a count that is not finite, not positive or
+    # above the bound is rejected (`valid = false`, `Nₛ = 1`), never clipped.
+    @testset "Sedimentation substep guard [$FT]" for FT in (Float64, Float32)
+        bound = Breeze.Microphysics.maximum_representable_substeps
+        @test bound == 2^24
+
+        # The eager count `max(1, ceil(Int, Δt / max_Δt))` it replaces, for valid ratios
+        eager_count(Δt, max_Δt) = max(1, ceil(Int, Δt / max_Δt))
+
+        function check_valid(Δt, max_Δt, limit, expected)
+            Nₛ, valid, needed = sedimentation_substeps(FT(Δt), FT(max_Δt), limit)
+            @test valid
+            @test Nₛ isa FT
+            @test Nₛ == needed == expected
+            @test unsafe_trunc(Int, Nₛ) == expected
+        end
+
+        function check_rejected(Δt, max_Δt, limit, expected_needed)
+            Nₛ, valid, needed = sedimentation_substeps(FT(Δt), FT(max_Δt), limit)
+            @test !valid
+            @test Nₛ == 1 # always a safe loop operand
+            @test needed == expected_needed
+        end
+
+        # Eager equivalence below the bound, without and with a static bound
+        for (Δt, max_Δt) in ((30, 40), (30, 30), (30, 29), (30, 7.5), (30, 7.4), (1, 1e-3), (1e-3, 1e3), (10, 3))
+            expected = eager_count(FT(Δt), FT(max_Δt))
+            check_valid(Δt, max_Δt, nothing, expected)
+            check_valid(Δt, max_Δt, Val(expected), expected)
+            check_valid(Δt, max_Δt, Val(expected + 1), expected)
+        end
+
+        # Ratios that are not finite or not positive need `Inf` substeps and are rejected
+        for (Δt, max_Δt) in ((NaN, 1), (1, NaN), (0, 0), (Inf, Inf), (1, 0), (Inf, 1), (-1, 0), (0, 1), (-30, 10), (30, -10))
+            check_rejected(Δt, max_Δt, nothing, FT(Inf))
+            check_rejected(Δt, max_Δt, Val(4), FT(Inf))
+        end
+
+        # Without a static bound: exactly at the representable bound, one below and one above
+        check_valid(bound, 1, nothing, bound)
+        check_valid(bound - 1, 1, nothing, bound - 1)
+        above = nextfloat(FT(bound)) # bound + 1 for Float64; Float32 cannot represent it
+        check_rejected(above, 1, nothing, ceil(above))
+        check_rejected(1e30, 1, nothing, FT(1e30))
+        check_rejected(floatmax(FT), 1, nothing, floatmax(FT))
+        @test sedimentation_substeps(FT(bound) + 1, FT(1), nothing)[2] == (FT == Float32) # bound + 1 rounds to bound in Float32
+
+        # With a static bound N: N and N - 1 run, N + 1 and a fraction above N are rejected
+        N = 8
+        check_valid(N, 1, Val(N), N)
+        check_valid(N - 1, 1, Val(N), N - 1)
+        check_valid(N - 0.5, 1, Val(N), N)
+        check_rejected(N + 1, 1, Val(N), FT(N + 1))
+        check_rejected(N + 0.5, 1, Val(N), FT(N + 1))
+        check_rejected(bound + 4, 1, Val(N), FT(bound + 4))
     end
 end
 
@@ -319,10 +395,12 @@ end
         saturation_vapor_pressure = DCMIP2016_tetens_formula,
         liquid = Breeze.Thermodynamics.CondensedPhase(FT;
             reference_latent_heat = 2500000.0,
-            heat_capacity = cᵖ),
+            heat_capacity = cᵖ,
+            density = 1000),
         ice = Breeze.Thermodynamics.CondensedPhase(FT;
             reference_latent_heat = 2834000.0,
-            heat_capacity = cᵖ))
+            heat_capacity = cᵖ,
+            density = 917))
 
     microphysics = DCMIP2016KesslerMicrophysics(FT)
 
@@ -342,7 +420,7 @@ end
     dcmip2016_klemp_wilhelmson_kessler!(T_ref, qᵛ_ref, qᶜˡ_ref, qʳ_ref, ρ_prof, p_prof, Δt, z_centers, constants, microphysics)
 
     # Run Breeze implementation
-    ref_state = ReferenceState(grid, constants; surface_pressure=p₀)
+    ref_state = ReferenceState(grid, constants; base_pressure=p₀)
     dynamics = AnelasticDynamics(ref_state)
     model = AtmosphereModel(grid; dynamics, microphysics, thermodynamic_constants=constants)
 
@@ -353,14 +431,10 @@ end
     set!(model.microphysical_fields.ρqʳ, reshape(ρ_prof .* qʳ_init, 1, 1, Nz))
 
     # Compute initial θˡⁱ
-    ℒˡᵣ = constants.liquid.reference_latent_heat
     θˡⁱ_init = zeros(FT, Nz)
     for k in 1:Nz
         q = MoistureMassFractions(qᵛ_init[k], qᶜˡ_init[k] + qʳ_init[k])
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p_prof[k] / p₀)^(Rᵐ / cᵖᵐ)
-        θˡⁱ_init[k] = (T_prof[k] - ℒˡᵣ * (qᶜˡ_init[k] + qʳ_init[k]) / cᵖᵐ) / Π
+        θˡⁱ_init[k] = liquid_ice_potential_temperature(T_prof[k], p_prof[k], p₀, q, constants)
     end
 
     set!(model.formulation.potential_temperature_density, reshape(ρ_prof .* θˡⁱ_init, 1, 1, Nz))
@@ -389,16 +463,111 @@ end
 
         θˡⁱ_val = ρθˡⁱ_result[k] / ρ
         q = MoistureMassFractions(qᵛ_breeze[k], qᶜˡ_breeze[k] + qʳ_breeze[k])
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        Rᵐ = mixture_gas_constant(q, constants)
-        Π = (p_prof[k] / p₀)^(Rᵐ / cᵖᵐ)
-        T_breeze[k] = Π * θˡⁱ_val + ℒˡᵣ * (qᶜˡ_breeze[k] + qʳ_breeze[k]) / cᵖᵐ
+        T_breeze[k] = liquid_ice_temperature(θˡⁱ_val, p_prof[k], p₀, q, constants)
     end
 
     @test T_breeze ≈ T_ref rtol=1e-12
     @test qᵛ_breeze ≈ qᵛ_ref rtol=1e-12
     @test qᶜˡ_breeze ≈ qᶜˡ_ref rtol=1e-12
     @test qʳ_breeze ≈ qʳ_ref rtol=1e-12
+end
+
+@testset "Compressible Kessler density roles" begin
+    FT = Float64
+    Nx = 5
+    Nz = 8
+    grid = RectilinearGrid(default_arch, FT;
+                           size = (Nx, Nx, Nz),
+                           halo = (5, 5, 5),
+                           x = (0, 500),
+                           y = (0, 500),
+                           z = (0, 800),
+                           topology = (Periodic, Periodic, Bounded))
+
+    constants = ThermodynamicConstants(FT; saturation_vapor_pressure = TetensFormula(FT))
+    microphysics = DCMIP2016KesslerMicrophysics(FT)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    base_pressure = FT(1e5),
+                                    standard_pressure = FT(1e5),
+                                    reference_potential_temperature = z -> FT(285))
+    model = AtmosphereModel(grid; dynamics, microphysics,
+                            thermodynamic_constants = constants,
+                            timestepper = :AcousticRungeKutta3)
+
+    # A deliberately moist state keeps total and dry density measurably distinct. Cloud and rain
+    # activate phase conversion and sedimentation, so using the wrong density changes the result.
+    qʳ_profile(x, y, z) = FT(0.003) * exp(-z / FT(250))
+    set!(model; ρ = FT(1.1), T = FT(285), qᵛ = FT(0.016),
+         qᶜˡ = FT(0.004), qʳ = qʳ_profile, enforce_mass_conservation = false)
+    update_state!(model)
+
+    column(field) = vec(Array(interior(field, 1, 1, :)))
+    ρ = column(model.dynamics.total_density)
+    ρᵈ = column(model.dynamics.dry_density)
+    p = column(model.dynamics.pressure)
+    T = column(model.temperature)
+    qᵛ = column(model.moisture_density) ./ ρ
+    qᶜˡ = column(model.microphysical_fields.ρqᶜˡ) ./ ρ
+    qʳ = column(model.microphysical_fields.ρqʳ) ./ ρ
+    z = collect(znodes(grid, Center()))
+
+    @test all(ρ .> ρᵈ)
+
+    # Advance an independent column reference from the exact diagnosed pre-update state. The
+    # Kessler physics consumes total air density; its thermodynamic prognostic remains ρᵈθˡⁱ.
+    Δt = FT(20)
+    T_ref = copy(T)
+    qᵛ_ref = copy(qᵛ)
+    qᶜˡ_ref = copy(qᶜˡ)
+    qʳ_ref = copy(qʳ)
+    surface_mass_flux_ref =
+        dcmip2016_klemp_wilhelmson_kessler!(T_ref, qᵛ_ref, qᶜˡ_ref, qʳ_ref,
+                                            ρ, p, Δt, z, constants, microphysics;
+                                            sedimentation_density = ρᵈ,
+                                            dry_air_coupled = true)
+
+    qᵗ_ref = qᵛ_ref .+ qᶜˡ_ref .+ qʳ_ref
+    rᵛ_ref = qᵛ_ref ./ (1 .- qᵗ_ref)
+    rᶜˡ_ref = qᶜˡ_ref ./ (1 .- qᵗ_ref)
+    rʳ_ref = qʳ_ref ./ (1 .- qᵗ_ref)
+
+    θˡⁱ_ref = similar(T_ref)
+    for k in eachindex(T_ref)
+        q = MoistureMassFractions(qᵛ_ref[k], qᶜˡ_ref[k] + qʳ_ref[k])
+        θˡⁱ_ref[k] = liquid_ice_potential_temperature(T_ref[k], p[k], FT(1e5), q, constants)
+    end
+
+    model.clock.last_Δt = Δt
+    microphysics_model_update!(model.microphysics, model)
+
+    rtol = 1e-10
+    for i in 1:Nx, j in 1:Nx
+        @test vec(Array(interior(model.moisture_density, i, j, :))) ≈ ρᵈ .* rᵛ_ref rtol=rtol
+        @test vec(Array(interior(model.microphysical_fields.ρqᶜˡ, i, j, :))) ≈ ρᵈ .* rᶜˡ_ref rtol=rtol
+        @test vec(Array(interior(model.microphysical_fields.ρqʳ, i, j, :))) ≈ ρᵈ .* rʳ_ref rtol=rtol
+        @test vec(Array(interior(model.formulation.potential_temperature_density, i, j, :))) ≈
+              ρᵈ .* θˡⁱ_ref rtol=rtol
+    end
+
+    # Re-diagnosing total density after writeback must recover the same q/r state, rather than
+    # silently changing it because old total density was used after sedimentation.
+    ρ_new = column(model.dynamics.total_density)
+    @test ρ_new[1] < ρ[1] # net rain outflow makes old and final surface density distinct
+    @test column(model.moisture_density) ./ ρ_new ≈ qᵛ_ref rtol=rtol
+    @test column(model.microphysical_fields.ρqᶜˡ) ./ ρ_new ≈ qᶜˡ_ref rtol=rtol
+    @test column(model.microphysical_fields.ρqʳ) ./ ρ_new ≈ qʳ_ref rtol=rtol
+
+    # The public surface flux must use the compressible model's total surface density, not its
+    # dry density (nor a reference-state density).
+    precipitation_rate = Array(interior(model.microphysical_fields.precipitation_rate))
+    precipitation_flux = Array(interior(compute!(bottom_precipitation_flux(model))))
+    surface_ρ = Array(interior(model.dynamics.total_density, :, :, 1))
+    surface_ρᵈ = Array(interior(model.dynamics.dry_density, :, :, 1))
+
+    @test all(precipitation_rate .> 0)
+    @test precipitation_flux ≈ surface_ρ .* precipitation_rate rtol=rtol
+    @test all(≈(surface_mass_flux_ref; rtol), precipitation_flux)
+    @test maximum(abs.(precipitation_flux .- surface_ρᵈ .* precipitation_rate)) > 1e-8
 end
 
 @testset "Thermodynamic constants validation" begin

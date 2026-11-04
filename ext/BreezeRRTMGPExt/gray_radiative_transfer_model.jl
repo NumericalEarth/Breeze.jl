@@ -7,40 +7,17 @@
 
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
-using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
-using Oceananigans.Grids: AbstractGrid, RectilinearGrid, Center, Face, Flat, Bounded
-using Oceananigans.Fields: ConstantField
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, RadiativeTransferModel,
+using Oceananigans.Grids: ynode, znodes
+using Oceananigans.Grids: AbstractGrid, Center, Face, Flat
+using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel,
                                AbstractSolarPosition, ApparentSolarPosition,
                                DiurnalSolarPosition, FixedCosineZenith
 
 using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
 using KernelAbstractions: @kernel, @index
-using Dates: AbstractDateTime, Millisecond
 
 # Dispatch on background_atmosphere = Nothing for gray radiation
 const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, Nothing}
-
-
-#####
-##### Solar position handling: resolve user-facing input into a concrete
-##### `AbstractSolarPosition`, then dispatch latitude/longitude initialization
-##### and per-update zenith calculation on it.
-#####
-
-# Single-column grids: infer (λ, φ) from the grid when the user didn't pass one
-maybe_infer_solar_position(sp::ApparentSolarPosition{Nothing}, grid::SingleColumnGrid) =
-    ApparentSolarPosition(_grid_inferred_coordinate(grid), sp.epoch)
-
-function _grid_inferred_coordinate(grid::SingleColumnGrid)
-    λ = xnode(1, 1, 1, grid, Center(), Center(), Center())
-    φ = ynode(1, 1, 1, grid, Center(), Center(), Center())
-    return (λ, φ)
-end
-
-# Otherwise (3D grid or explicit coordinate): leave as-is — per-column kernels
-# will read λ/φ from the grid as needed.
-maybe_infer_solar_position(sp::AbstractSolarPosition, grid) = sp
 
 """
 $(TYPEDSIGNATURES)
@@ -55,12 +32,12 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 - `solar_position`: Specification of the solar zenith angle. See [`AbstractSolarPosition`](@ref) and its subtypes:
   - [`ApparentSolarPosition`](@ref) (default) — time-varying, computed from the model clock and grid (or explicit) longitude/latitude.
   - [`FixedCosineZenith`](@ref) — constant cos(θ_z), independent of the clock.
-- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
+- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Can be scalar or 2D field.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
-- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
+- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361), a scalar or an `(Nx, Ny)` array of per-column values
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::GrayOptics,
@@ -78,26 +55,11 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)
 
-    error_msg = "Must either provide surface_albedo or *both* of
-                 direct_surface_albedo and diffuse_surface_albedo"
-
     solar_position = maybe_infer_solar_position(solar_position, grid)
 
-    if !isnothing(surface_albedo)
-        if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)
-            throw(ArgumentError(error_msg))
-        end
-
-        surface_albedo = materialize_surface_property(surface_albedo, grid, solar_position)
-        diffuse_surface_albedo = surface_albedo
-        direct_surface_albedo = surface_albedo
-
-    elseif !isnothing(diffuse_surface_albedo) && !isnothing(direct_surface_albedo)
-        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid, solar_position)
-        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid, solar_position)
-    else
-        throw(ArgumentError(error_msg))
-    end
+    surface_radiation = materialize_surface_radiation(grid, solar_position;
+                                                      surface_temperature, surface_emissivity, surface_albedo,
+                                                      direct_surface_albedo, diffuse_surface_albedo)
 
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -141,70 +103,63 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     rrtmgp_αb₀ = ArrayType{FT}(undef, 1, Nc)
     rrtmgp_αw₀ = ArrayType{FT}(undef, 1, Nc)
 
-    rrtmgp_ℐ₀ .= convert(FT, solar_constant)  # Top-of-atmosphere solar flux
+    fill_columns!(rrtmgp_ℐ₀, solar_constant)  # Top-of-atmosphere solar flux, a scalar or per column
 
-    if surface_emissivity isa Number
-        surface_emissivity = ConstantField(convert(FT, surface_emissivity))
-        rrtmgp_ε₀ .= surface_emissivity.constant
-    end
+    initialize_surface_temperature!(rrtmgp_T₀, surface_radiation.surface_temperature)
 
-    if surface_temperature isa Number
-        surface_temperature = ConstantField(convert(FT, surface_temperature))
-        rrtmgp_T₀ .= surface_temperature.constant
-    end
+    rrtmgp_grid = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
 
-    if direct_surface_albedo isa Number
-        direct_surface_albedo = ConstantField(convert(FT, direct_surface_albedo))
-        rrtmgp_αb₀ .= direct_surface_albedo.constant
-    end
-
-    if diffuse_surface_albedo isa Number
-        diffuse_surface_albedo = ConstantField(convert(FT, diffuse_surface_albedo))
-        rrtmgp_αw₀ .= diffuse_surface_albedo.constant
-    end
-
-    grid_parameters = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
-
-    longwave_solver = NoScatLWRTE(grid_parameters;
+    longwave_solver = NoScatLWRTE(rrtmgp_grid;
                                   params = parameters,
                                   sfc_emis = rrtmgp_ε₀,
                                   inc_flux = nothing)
 
-    shortwave_solver = NoScatSWRTE(grid_parameters;
+    shortwave_solver = NoScatSWRTE(rrtmgp_grid;
                                    cos_zenith = cos_zenith,
                                    toa_flux = rrtmgp_ℐ₀,
                                    sfc_alb_direct = rrtmgp_αb₀,
                                    sfc_alb_diffuse = rrtmgp_αw₀,
                                    inc_flux_diffuse = nothing)
 
+    # The non-scattering shortwave solver only ever writes the direct beam
+    # (`flux_dn_dir`), leaving `flux_up` and `flux_dn` as allocated-but-unwritten
+    # memory. Zero them once so that every shortwave array in the solver agrees
+    # with the physics: no diffuse and no upwelling shortwave.
+    shortwave_flux = shortwave_solver.flux
+    for flux_array in (shortwave_flux.flux_up, shortwave_flux.flux_dn,
+                       shortwave_flux.flux_net, shortwave_flux.flux_dn_dir)
+        fill!(flux_array, 0)
+    end
+
     # Create Oceananigans fields to store fluxes for output/plotting
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
+    upwelling_shortwave_flux = ZFaceField(grid)    # Zero for non-scattering gray optics
     downwelling_shortwave_flux = ZFaceField(grid)  # Direct beam only
     flux_divergence = CenterField(grid)
 
-    surface_properties = SurfaceRadiativeProperties(surface_temperature,
-                                                    surface_emissivity,
-                                                    direct_surface_albedo,
-                                                    diffuse_surface_albedo)
+    update_rrtmgp_surface_boundary_conditions!(longwave_solver.bcs.sfc_emis,
+                                               shortwave_solver.bcs.sfc_alb_direct,
+                                               shortwave_solver.bcs.sfc_alb_diffuse,
+                                               surface_radiation, grid)
 
-    return RadiativeTransferModel(convert(FT, solar_constant),
+    return RadiativeTransferModel(materialize_solar_constant(solar_constant, FT),
                                   solar_position,
-                                  surface_properties,
+                                  surface_radiation,
                                   nothing,  # background_atmosphere = nothing for gray
                                   atmospheric_state,
                                   longwave_solver,
                                   shortwave_solver,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
+                                  upwelling_shortwave_flux,
                                   downwelling_shortwave_flux,
                                   flux_divergence,
                                   nothing,  # liquid_effective_radius = nothing for gray
                                   nothing,  # ice_effective_radius = nothing for gray
+                                  nothing,  # column_batches = nothing: gray is never batched
                                   schedule)
 end
-
-@inline rrtmgp_column_index(i, j, Nx) = i + (j - 1) * Nx
 
 #####
 ##### Latitude initialization for the gray-optics latitude-dependent τ
@@ -240,28 +195,23 @@ function _set_latitude_from_grid!(rrtmgp_latitude, grid)
     return nothing
 end
 
+# A grid that is Flat in y has no latitude (see `_set_longitude_from_grid!`)
+_set_latitude_from_grid!(rrtmgp_latitude, ::AbstractGrid{<:Any, <:Any, <:Flat}) = (fill!(rrtmgp_latitude, 0); nothing)
+
 @kernel function _set_latitude_from_grid_kernel!(rrtmgp_latitude, grid)
     i, j = @index(Global, NTuple)
     φ = ynode(i, j, 1, grid, Center(), Center(), Center())
-    c = rrtmgp_column_index(i, j, grid.Nx)
+    c = column_index(i, j, grid.Nx)
     @inbounds rrtmgp_latitude[c] = φ
 end
 
 #####
-##### cos(θ_z) BC initialization at construction
+##### Solar constant materialization
 #####
 
-# Apparent sun and diurnal cycle: no need to pre-fill — `update_solar_zenith_angle!`
-# populates the array on the first radiation update (iteration 0 always triggers).
-initialize_cos_zenith!(cos_zenith_array, ::ApparentSolarPosition) = nothing
-initialize_cos_zenith!(cos_zenith_array, ::DiurnalSolarPosition) = nothing
-
-# Fixed zenith: write the user-supplied value once. After this the array is
-# never touched, since `update_solar_zenith_angle!` is a no-op for this case.
-function initialize_cos_zenith!(cos_zenith_array, sp::FixedCosineZenith)
-    cos_zenith_array .= convert(eltype(cos_zenith_array), sp.cos_zenith)
-    return nothing
-end
+# The solar constant as stored: a grid-eltype scalar, or the user's (Nx, Ny) array as is
+materialize_solar_constant(solar_constant::Number, FT) = convert(FT, solar_constant)
+materialize_solar_constant(solar_constant::AbstractArray, FT) = solar_constant
 
 #####
 ##### Update radiation fluxes from model state
@@ -275,7 +225,6 @@ end
 #
 #   Breeze types (internal, can modify):
 #     - RadiativeTransferModel: wrapper containing RRTMGP solvers and Oceananigans flux fields
-#     - SingleColumnGrid type alias
 #
 
 """
@@ -297,21 +246,19 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
     clock = model.clock
 
     rrtmgp_state = rtm.atmospheric_state
-    surface_temperature = rtm.surface_properties.surface_temperature
+    surface_temperature = rtm.surface_radiation.surface_temperature
 
     # Update RRTMGP atmospheric state from model fields
     update_rrtmgp_state!(rrtmgp_state, model, surface_temperature)
 
-    rrtmgp_surface_properties = (;
-        rrtmgp_ε₀ = rtm.longwave_solver.bcs.sfc_emis,
-        rrtmgp_αb₀ = rtm.shortwave_solver.bcs.sfc_alb_direct,
-        rrtmgp_αw₀ = rtm.shortwave_solver.bcs.sfc_alb_diffuse,
-    )
-
-    update_rrtmgp_surface_properties!(rrtmgp_surface_properties, rtm.surface_properties)
+    # Gray optics keeps the two RTE solvers side by side rather than inside one `RRTMGPSolver`.
+    update_rrtmgp_surface_boundary_conditions!(rtm.longwave_solver.bcs.sfc_emis,
+                                               rtm.shortwave_solver.bcs.sfc_alb_direct,
+                                               rtm.shortwave_solver.bcs.sfc_alb_diffuse,
+                                               rtm.surface_radiation, grid)
 
     # Update solar zenith angle from the solar_position specification
-    update_solar_zenith_angle!(rtm.shortwave_solver, rtm.solar_position, grid, clock)
+    update_cos_zenith!(rtm.shortwave_solver.bcs.cos_zenith, rtm.solar_position, grid, clock)
 
     # Solve longwave RTE (RRTMGP external call)
     solve_lw!(rtm.longwave_solver, rrtmgp_state)
@@ -327,11 +274,6 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
     # Compute radiation flux divergence
     compute_radiation_flux_divergence!(rtm, grid)
 
-    return nothing
-end
-
-# TODO: This function will launch a kernel that will update the boundary conditions of RRTMGP.
-function update_rrtmgp_surface_properties!(rrtmgp_surface_properties, surface_properties)
     return nothing
 end
 
@@ -351,10 +293,10 @@ This matches the finite-volume staggering used in Oceananigans:
 
 ```
                         ┌─────────────────────────────────────────────────┐
-    z_lev[Nz+1] ━━━━━━━ │  level Nz+1 (TOA):  p_lev, t_lev, z_lev         │ ← extrapolated
+    z_lev[Nz+1] ━━━━━━━ │  level Nz+1 (TOA):  p_lev, t_lev, z_lev         │ ← from halo
                         └─────────────────────────────────────────────────┘
                         ┌─────────────────────────────────────────────────┐
-                        │  layer Nz:  T[Nz], p_lay[Nz] = pᵣ[Nz]           │ ← from model
+                        │  layer Nz:  T[Nz], p_lay[Nz] = p[Nz]            │ ← from model
                         └─────────────────────────────────────────────────┘
     z_lev[Nz]   ━━━━━━━   level Nz:   p_lev, t_lev, z_lev                   ← interpolated
                         ┌─────────────────────────────────────────────────┐
@@ -366,9 +308,9 @@ This matches the finite-volume staggering used in Oceananigans:
                         └─────────────────────────────────────────────────┘
     z_lev[2]    ━━━━━━━   level 2:    p_lev, t_lev, z_lev                   ← interpolated
                         ┌─────────────────────────────────────────────────┐
-                        │  layer 1:   T[1], p_lay[1] = pᵣ[1]              │ ← from model
+                        │  layer 1:   T[1], p_lay[1] = p[1]               │ ← from model
                         └─────────────────────────────────────────────────┘
-    z_lev[1]    ━━━━━━━   level 1 (surface, z=0):  p_lev = p₀, t_lev      │ ← from reference state
+    z_lev[1]    ━━━━━━━   level 1 (surface, bottom face):  p_lev, t_lev   │ ← from halo
                         ══════════════════════════════════════════════════
                                         GROUND (t_sfc)
 ```
@@ -378,40 +320,52 @@ This matches the finite-volume staggering used in Oceananigans:
 RRTMGP is a general-purpose radiative transfer solver that operates on columns of
 atmospheric data. It does not interpolate from layers to levels internally because:
 
-1. **Boundary conditions**: The surface (level 1) and TOA (level Nz+1) require
-   boundary values that only the atmospheric model knows. For pressure, we use
-   the reference state's `surface_pressure` at z=0. For the top, we extrapolate
-   using the adiabatic hydrostatic formula.
+1. **Boundary conditions**: The surface (level 1) and TOA (level Nz+1) require boundary values
+   that only the atmospheric model knows. Breeze applies the same interior average there, so each
+   boundary level takes whatever that field's halo carries. A `Value` bottom boundary condition
+   (carried by the anelastic and 1D-column Exner reference pressures) reproduces the prescribed
+   surface pressure exactly; a default `NoFlux` halo mirrors the interior (`p[0] = p[1]`), which
+   collapses the level value onto the adjacent layer value.
 
-2. **Physics-appropriate interpolation**: Different quantities need different
-   interpolation methods. Pressure uses geometric mean (log-linear interpolation)
-   because it varies exponentially with height. Temperature uses arithmetic mean.
+   That prescribed value is `surface_pressure`, the pressure at the column's bottom face, and not
+   the `base_pressure` datum at z = 0. The two coincide only on a domain whose bottom is the
+   ground; on a raised or terrain-following domain they differ by the hydrostatic reduction from
+   the datum to that face, which is the level 1 pressure radiation must see.
 
-3. **Model consistency**: The pressure profile must be consistent with the
-   atmospheric model's reference state. RRTMGP has no knowledge of the anelastic
-   approximation or the reference potential temperature θ₀.
+   TODO: extrapolate to the boundary faces explicitly rather than inheriting the halo. Wherever
+   the halo mirrors, `p_lev` equals `p_lay` at that end, so the layer spans only half a cell in
+   pressure while `_compute_radiation_flux_divergence!` still divides its flux difference by the
+   full `Δzᶜᶜᶜ`, roughly halving that cell's heating rate. This affects the top cell always, and
+   the bottom cell whenever `dynamics_pressure` carries no `Value` bottom boundary condition
+   (compressible dynamics, and every terrain reference state).
+
+2. **Interpolation to levels**: Interior levels use `ℑzᵃᵃᶠ`, the arithmetic average of the two
+   adjacent cell centers, for both pressure and temperature. That is second-order on a uniform
+   column and first-order wherever `Δz` varies (stretched or terrain-following grids), since the
+   face is then not the midpoint of its neighbouring centers.
+
+3. **Model consistency**: The pressure profile must be consistent with the atmospheric model's
+   thermodynamic state. RRTMGP has no knowledge of the anelastic approximation or of which
+   dynamical pressure contributions affect thermodynamics.
 
 # Physics notes
 
 **Temperature**: We use the actual temperature field `T` from the model state.
 This is the temperature that matters for thermal emission and absorption.
 
-**Pressure**: In the anelastic approximation, pressure perturbations are negligible
-compared to the hydrostatic reference pressure. We use `reference_state.pressure`
-at cell centers, computed via `adiabatic_hydrostatic_pressure(z, p₀, θ₀)`.
+**Pressure**: We use `dynamics_pressure(model.dynamics)` at cell centers — the anelastic
+hydrostatic reference pressure (in that approximation pressure perturbations are negligible), or
+the compressible diagnosed pressure. Never the dynamics' pressure-gradient reference state.
 
 # RRTMGP array layout
 - Layer arrays `(Nz, Nc)`: values at cell centers, layer 1 at bottom
-- Level arrays `(Nz+1, Nc)`: values at cell faces, level 1 at surface (z=0)
+- Level arrays `(Nz+1, Nc)`: values at cell faces, level 1 at the surface (the bottom face)
 """
 function update_rrtmgp_state!(rrtmgp_state::GrayAtmosphericState, model, surface_temperature)
     grid = model.grid
     arch = architecture(grid)
 
-    # Temperature field (actual temperature from model state)
-    # Reference state provides the hydrostatic pressure profile
-    # In the anelastic approximation, pressure ≈ reference pressure
-    p = model.dynamics.reference_state.pressure
+    p = dynamics_pressure(model.dynamics)
     T = model.temperature
     T₀ = surface_temperature
 
@@ -435,7 +389,7 @@ end
     pᶠ = rrtmgp_state.p_lev  # Pressure at cell faces
     T₀ = rrtmgp_state.t_sfc  # Surface temperature
 
-    c = rrtmgp_column_index(i, j, grid.Nx)
+    c = column_index(i, j, grid.Nx)
 
     @inbounds begin
         # Face values at k and k+1
@@ -458,88 +412,6 @@ end
 end
 
 #####
-##### Update solar zenith angle
-#####
-
-"""
-$(TYPEDSIGNATURES)
-
-Update the cosine of the solar zenith angle in the shortwave solver's boundary
-condition array, dispatched on the solar-position specification:
-
-- [`ApparentSolarPosition`](@ref): recompute cos(θ_z) from the model clock and
-  observer (λ, φ) — either an explicit coordinate or the grid's λ/φ per column.
-- [`FixedCosineZenith`](@ref): no-op. The BC array was set once at construction
-  by `initialize_cos_zenith!`.
-"""
-update_solar_zenith_angle!(sw_solver, ::FixedCosineZenith, grid, clock) = nothing
-
-function update_solar_zenith_angle!(sw_solver, sp::ApparentSolarPosition, grid, clock)
-    datetime = compute_datetime(clock.time, sp.epoch)
-    _validate_datetime(sp, datetime)
-    _update_apparent_zenith!(sw_solver, sp.coordinate, grid, datetime)
-    return nothing
-end
-
-# Idealized diurnal cycle: pure analytical hour angle, no calendar / orbit.
-# Requires a numeric clock (seconds since the start of the simulation).
-function update_solar_zenith_angle!(sw_solver, sp::DiurnalSolarPosition, grid, clock)
-    _validate_diurnal_clock(sp, clock.time)
-    t = clock.time
-    # cos is periodic, so no `mod` is required — the math handles wrapping itself.
-    ω = (2π / sp.day_length) * (t - sp.noon_offset)
-    φ = deg2rad(sp.latitude)
-    δ = deg2rad(sp.declination)
-    cos_θz = sin(φ) * sin(δ) + cos(φ) * cos(δ) * cos(ω)
-    sw_solver.bcs.cos_zenith .= max(cos_θz, 0)
-    return nothing
-end
-
-@noinline _validate_diurnal_clock(::DiurnalSolarPosition, ::Number) = nothing
-@noinline function _validate_diurnal_clock(::DiurnalSolarPosition, t)
-    throw(ArgumentError(
-        "DiurnalSolarPosition requires a numeric model clock (seconds since the start " *
-        "of the simulation), but `model.clock.time` is a $(typeof(t)). For an idealized " *
-        "diurnal cycle there is no calendar — construct the model with " *
-        "`Clock(time = 0.0)` (or another numeric Clock) instead of a DateTime clock."))
-end
-
-# Helpful actionable error when the user uses a numeric clock without an epoch.
-@noinline _validate_datetime(::ApparentSolarPosition, ::AbstractDateTime) = nothing
-@noinline function _validate_datetime(::ApparentSolarPosition, ::Nothing)
-    throw(ArgumentError(
-        "Cannot compute apparent solar position: the model clock holds a numeric " *
-        "time and `ApparentSolarPosition.epoch` is `nothing`. Either:\n" *
-        "  • use a `DateTime` clock, e.g. `Clock(time=DateTime(2024,1,1,12,0,0))`,\n" *
-        "  • supply an epoch, e.g. `ApparentSolarPosition(epoch=DateTime(2024,1,1))`, or\n" *
-        "  • use `FixedCosineZenith(cos_zenith)` for an idealized fixed sun."))
-end
-
-# Explicit (λ, φ): one cos(θ_z) value broadcast to every column
-function _update_apparent_zenith!(sw_solver, coordinate::Tuple, grid, datetime)
-    cos_θz = cos_solar_zenith_angle(datetime, coordinate...)
-    sw_solver.bcs.cos_zenith .= max.(cos_θz, 0)
-    return nothing
-end
-
-# Per-column (λ, φ) from the grid: launch a 2D kernel
-function _update_apparent_zenith!(sw_solver, ::Nothing, grid, datetime)
-    arch = architecture(grid)
-    launch!(arch, grid, :xy, _update_apparent_zenith_kernel!,
-            sw_solver.bcs.cos_zenith, grid, datetime)
-    return nothing
-end
-
-@kernel function _update_apparent_zenith_kernel!(rrtmgp_cos_θz, grid, datetime)
-    i, j = @index(Global, NTuple)
-    λ = λnode(i, j, 1, grid, Center(), Center(), Center())
-    φ = φnode(i, j, 1, grid, Center(), Center(), Center())
-    cos_θz = cos_solar_zenith_angle(datetime, λ, φ)
-    c = rrtmgp_column_index(i, j, grid.Nx)
-    rrtmgp_cos_θz[c] = max(cos_θz, 0)  # Clamp to positive (sun above horizon)
-end
-
-#####
 ##### Copy RRTMGP fluxes to Oceananigans fields
 #####
 
@@ -556,7 +428,6 @@ For the non-scattering shortwave solver, only the direct beam flux is computed.
 """
 function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     arch = architecture(grid)
-    Nz = size(grid, 3)
 
     # Unpack flux arrays from RRTMGP solvers
     lw_flux_up = rtm.longwave_solver.flux.flux_up
@@ -566,27 +437,30 @@ function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     # Unpack Oceananigans output fields
     ℐ_lw_up = rtm.upwelling_longwave_flux
     ℐ_lw_dn = rtm.downwelling_longwave_flux
+    ℐ_sw_up = rtm.upwelling_shortwave_flux
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
 
     Nx, Ny, Nz = size(grid)
     launch!(arch, grid, (Nx, Ny, Nz+1), _copy_gray_fluxes!,
-            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
+            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
+            lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
 
     return nothing
 end
 
-@kernel function _copy_gray_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
+@kernel function _copy_gray_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
                                     lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
-    # RRTMGP uses (Nz+1, Nc), we use (i, j, k) for ZFaceField
+    # RRTMGP compute buffers are indexed (Nc, Nz+1), we use (i, j, k) for ZFaceField
     # Sign convention: upwelling positive, downwelling negative
-    c = rrtmgp_column_index(i, j, grid.Nx)
+    c = column_index(i, j, grid.Nx)
 
     @inbounds begin
-        ℐ_lw_up[i, j, k] = lw_flux_up[k, c]
-        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, c]  # Negate for downward
-        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[k, c]  # Negate for downward
+        ℐ_lw_up[i, j, k] = lw_flux_up[c, k]
+        ℐ_lw_dn[i, j, k] = -lw_flux_dn[c, k]  # Negate for downward
+        ℐ_sw_up[i, j, k] = 0                   # Non-scattering gray optics has no upward SW
+        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[c, k]  # Negate for downward
     end
 end
 

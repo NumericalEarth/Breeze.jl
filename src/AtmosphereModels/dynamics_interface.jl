@@ -1,3 +1,6 @@
+using Breeze.Thermodynamics: MoistureMassFractions, dry_air_gas_constant, vapor_gas_constant, absolute_zero_latent_heat,
+                             VaporEquivalentExponent
+
 #####
 ##### Dynamics Interface
 #####
@@ -18,17 +21,17 @@ Return the default dynamics for the given grid and thermodynamic constants.
 function default_dynamics end
 
 """
-    materialize_dynamics(dynamics_stub, grid, boundary_conditions, thermodynamic_constants, microphysics=nothing)
+    materialize_dynamics(dynamics_stub, grid, boundary_conditions, thermodynamic_constants, microphysics, formulation)
 
 Materialize a dynamics stub into a complete dynamics object with all required fields.
 
-The `microphysics` argument is optional and used by dynamics types that need to know
-the microphysics scheme to create appropriate prognostic state (e.g., `ParcelDynamics`).
+The `microphysics` and `formulation` arguments select the parcel's prognostic state.
 """
 function materialize_dynamics end
 
 # Default: ignore microphysics argument (for backward compatibility)
 materialize_dynamics(d, grid, bcs, constants, microphysics) = materialize_dynamics(d, grid, bcs, constants)
+materialize_dynamics(d, grid, bcs, constants, microphysics, formulation) = materialize_dynamics(d, grid, bcs, constants, microphysics)
 
 """
     materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
@@ -59,6 +62,14 @@ Create the pressure solver for the given dynamics.
 Returns `nothing` for dynamics that do not require a pressure solver (e.g., compressible).
 """
 function dynamics_pressure_solver end
+
+"""
+    update_pressure_solver!(solver, dynamics)
+
+Recompute the parts of `solver` that depend on the state of `dynamics`, such as its reference density.
+Default is a no-op.
+"""
+update_pressure_solver!(solver, dynamics) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -100,9 +111,19 @@ make_pressure_correction!(model, Δt) = nothing
 Return the pressure field appropriate to the dynamical formulation, in Pa — the pressure
 entering the equation of state, buoyancy, and the thermodynamic tendencies.
 
-For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``.
-For compressible dynamics, this is the prognostic pressure field. The anomaly and total-pressure
-counterparts are [`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
+For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``,
+excluding the non-hydrostatic pressure anomaly that enforces the divergence constraint but does
+not perturb the thermodynamic state. For compressible dynamics, this is the diagnosed
+equation-of-state pressure. The anomaly and total-pressure counterparts are
+[`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
+
+This is the pressure every physics parameterization should read, including radiation. Call the
+accessor rather than reaching into `dynamics.reference_state` directly: which of the two the
+reference state *is* varies by formulation. On the anelastic core it is the thermodynamic
+pressure, and `dynamics_pressure` returns it. On the compressible core (flat or terrain) it is a
+pressure-gradient device built once from a fixed profile, it does not track the thermodynamic
+state, and several dynamics types carry none at all. [`total_density`](@ref) is the density
+counterpart.
 """
 function dynamics_pressure end
 
@@ -119,6 +140,20 @@ function pressure_anomaly end
 Return the total pressure (mean + anomaly) in Pa.
 """
 function total_pressure end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return pressure consistent with a prescribed temperature during thermodynamic initialization.
+
+The default retains [`dynamics_pressure`](@ref) (appropriate for anelastic/reference-pressure
+models, where pressure is not a function of the state being set). Compressible dynamics overrides
+this with the equation of state `p = ρ Rᵐ T`, avoiding a fixed-point error when density or
+composition was changed immediately before setting temperature.
+"""
+@inline function pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
+    return @inbounds dynamics_pressure(dynamics)[i, j, k]
+end
 
 #####
 ##### Density and pressure access interface
@@ -152,6 +187,68 @@ formulations with a single density (e.g. the anelastic reference density). `Comp
 overrides it with a diagnosed total-density field, distinct from the coupling density ρᵈ.
 """
 total_density(dynamics) = dynamics_density(dynamics)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the change of the moisture mass fractions per unit mass of condensate `phase` that
+sediments out of a cell whose mass fractions are `q`, as a `MoistureMassFractions` difference
+vector (the dry-air change is implied by `Σq = 1`). Continuity advances the coupling density
+([`dynamics_density`](@ref)) without a sedimentation source on every core, so the increment
+depends on what the total density does:
+
+- fixed (the default; `AnelasticDynamics`): the total density the mass fractions are referenced
+  to does not respond, so the dry mass fraction `qᵈ = 1 − qᵛ − qˡ − qⁱ` makes up the departed mass
+  and the increment is `q̂ˣ − q̂ᵈ`, with `q̂ˣ` the composition with all mass in `x`;
+- diagnosed and falling with the condensate (`CompressibleDynamics`: prognostic dry density
+  `ρᵈ`, `ρ = ρᵈ + Σρˣ`): every mass fraction renormalizes and the increment is `q̂ˣ − q`.
+
+[`condensate_content`](@ref) differentiates the thermodynamic variable along this increment,
+`∂φ/∂qˣ = ∇_q φ · Δq`: the content per unit falling mass at which the cell the condensate leaves
+keeps its temperature.
+"""
+@inline sedimentation_composition_increment(dynamics, q, phase) = unit_composition(phase, q)
+
+# The composition with all mass in one phase, q̂ˣ, typed like `q`
+@inline unit_composition(::Val{:liquid}, q) = MoistureMassFractions(zero(q.vapor), one(q.vapor), zero(q.vapor))
+@inline unit_composition(::Val{:ice}, q) = MoistureMassFractions(zero(q.vapor), zero(q.vapor), one(q.vapor))
+
+# Changes of the mixture properties along a composition increment Δq, whose dry-air entry is
+# Δqᵈ = −(Δqᵛ + Δqˡ + Δqⁱ)
+@inline dry_air_increment(Δq) = -(Δq.vapor + Δq.liquid + Δq.ice)
+
+@inline heat_capacity_increment(Δq, constants) =
+    dry_air_increment(Δq) * constants.dry_air.heat_capacity + Δq.vapor * constants.vapor.heat_capacity +
+    Δq.liquid * constants.liquid.heat_capacity + Δq.ice * constants.ice.heat_capacity
+
+# The enthalpy of the mixture per unit mass changes along Δq at fixed temperature by
+# Δcᵖ T − ΔHᶜ, using zero-kelvin latent offsets: the enthalpy of the condensate
+# relative to what its mass gives way to
+@inline enthalpy_increment(Δq, constants, T) =
+    heat_capacity_increment(Δq, constants) * T -
+    Δq.liquid * absolute_zero_latent_heat(constants, constants.liquid) -
+    Δq.ice * absolute_zero_latent_heat(constants, constants.ice)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the density ``ρ`` at `(i, j, k)` that mass fractions are referenced to, so that ``qˣ`` and
+``ρ`` give a partial pressure — the vapor pressure is ``pᵛ = ρ qᵛ Rᵛ T``.
+
+This is the *total* density, condensate loading included, not the gas-phase density ``ρᵈ + ρᵛ``:
+``Rᵐ(q) = qᵈ Rᵈ + qᵛ Rᵛ`` uses ``qᵈ = 1 - qᵛ - qˡ - qⁱ``, so ``p / (Rᵐ(q) T)`` returns the total
+and the two differ by ``1 - qˡ - qⁱ``. Total is required for consistency with
+`saturation_specific_humidity(T, ρ, …) = pᵛ⁺ / (ρ Rᵛ T)`, which references ``qᵛ⁺`` to the same
+``ρ``; mixing the two would break ``qᵛ / qᵛ⁺`` as the saturation ratio. The name is inherited and
+does not describe this.
+
+The default returns `total_density(dynamics)`. `AnelasticDynamics` overrides it because its
+`dynamics_density` is the *dry* reference profile ``ρᵣ(z)``, so the override rediagnoses the local
+moist total density at the reference pressure.
+"""
+@inline function gas_phase_density(i, j, k, dynamics, T, q, constants)
+    return @inbounds total_density(dynamics)[i, j, k]
+end
 
 """
     advecting_vertical_velocity(dynamics, velocities)
@@ -213,27 +310,38 @@ function validate_velocity_boundary_conditions(dynamics, user_boundary_condition
 end
 
 """
+    base_pressure(dynamics)
+
+Return the pressure of the reference atmosphere at ``z = 0``: the datum its hydrostatic profiles
+are anchored to, and a property of that atmosphere rather than of the grid. Always a scalar.
+
+This is not the pressure at the ground. On a domain whose bottom does not sit at ``z = 0`` — a
+raised height-coordinate domain, or any terrain-following grid — the two differ by ``O(ρgh)``.
+For the pressure at the ground, which is what a column integration is anchored at, use
+[`surface_pressure`](@ref).
+"""
+function base_pressure end
+
+"""
     surface_pressure(dynamics)
 
-Return the surface pressure used for boundary condition regularization.
-For anelastic dynamics, this is the reference state surface pressure.
-For compressible dynamics, this may be a constant or computed value.
+Return the pressure of the reference atmosphere at the bottom face of each column — the ground —
+obtained by reducing the [`base_pressure`](@ref) datum to that height along the reference profile,
+as a 2D ``(Center, Center, Nothing)`` field. Horizontally uniform for a single-column reference on
+a height-coordinate grid; genuinely column-dependent when the reference thermodynamics varies
+horizontally or on a terrain-following grid, where the bottom face is the terrain surface.
+
+This is the anchor for a hydrostatic column integration, and what every consumer of "the pressure
+at the surface" over terrain wants. Reading it keeps a consumer consistent with the reference
+state; reading the datum instead disagrees with it by ``O(ρgh)`` per column.
+
+Equal to the datum, exactly, for the usual domain whose bottom sits at ``z = 0``. Extended by each
+dynamics that carries a materialized reference state; dynamics without one have no reference
+surface pressure to report. When the pressure should follow the live model state instead,
+extrapolate it from the first cell center with `Thermodynamics.surface_pressure_from_cell_center`,
+as the surface fluxes and the diagnostic hydrostatic pressure do.
 """
 function surface_pressure end
-
-"""
-    boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants)
-
-Return a reference state with `pressure`, `density`, and `standard_pressure` fields
-suitable for constructing boundary-condition diagnostics (e.g. virtual potential
-temperature for stability-dependent bulk fluxes).
-
-Boundary conditions are materialized before `materialize_dynamics` runs, so this
-hook lets each dynamics type decide what to expose at that point. The default
-returns `dynamics.reference_state`, which works for dynamics where the user
-constructs a fully-built reference state up front (e.g. `AnelasticDynamics`).
-"""
-boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants) = dynamics.reference_state
 
 """
     dynamics_reference_state(dynamics)
@@ -369,7 +477,7 @@ For compressible dynamics, returns `-∂p/∂z`.
 @inline z_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 #####
-##### Slow tendency mode for split-explicit time-stepping
+##### Slow dynamics for split-explicit time-stepping
 #####
 
 """
@@ -377,61 +485,28 @@ $(TYPEDEF)
 
 Wrapper type indicating that only "slow" tendencies should be computed.
 
-When computing momentum tendencies with a `SlowTendencyMode`-wrapped dynamics,
+When computing momentum tendencies with a `SlowDynamics`-wrapped dynamics,
 the "fast" terms (pressure gradient and buoyancy) return zero. This is used
 for split-explicit time-stepping where fast terms are handled separately
 in an acoustic substep loop.
 
 See also [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization).
 """
-struct SlowTendencyMode{D}
+struct SlowDynamics{D}
     dynamics :: D
 end
 
-Adapt.adapt_structure(to, s::SlowTendencyMode) = SlowTendencyMode(adapt(to, s.dynamics))
+Adapt.adapt_structure(to, s::SlowDynamics) = SlowDynamics(adapt(to, s.dynamics))
 
 # Forward dynamics_density to the wrapped dynamics
-@inline dynamics_density(s::SlowTendencyMode) = dynamics_density(s.dynamics)
+@inline dynamics_density(s::SlowDynamics) = dynamics_density(s.dynamics)
 
-# Fast terms return zero in slow tendency mode
-@inline x_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
-@inline y_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
-@inline z_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+# Fast terms return zero for slow dynamics
+@inline x_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
+@inline y_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
+@inline z_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
 
-@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowTendencyMode, args...) = zero(grid)
-
-"""
-$(TYPEDEF)
-
-Wrapper type indicating that vertical "fast" terms should be excluded from tendencies.
-
-When computing momentum tendencies with a `HorizontalSlowMode`-wrapped dynamics,
-the horizontal pressure gradient is computed normally, but the vertical pressure
-gradient and buoyancy return zero. These vertical fast terms are handled by the
-acoustic substep loop through perturbation variables ``-ψ ∂ρ''/∂z - g ρ''``.
-
-Including the full vertical PG and buoyancy in the slow tendency introduces a
-hydrostatic truncation error ``O(Δz^2)`` that drives spurious acoustic modes.
-The horizontal PG does not suffer from this issue and can safely be included.
-"""
-struct HorizontalSlowMode{D}
-    dynamics :: D
-end
-
-Adapt.adapt_structure(to, s::HorizontalSlowMode) = HorizontalSlowMode(adapt(to, s.dynamics))
-
-# Forward dynamics_density to the wrapped dynamics
-@inline dynamics_density(s::HorizontalSlowMode) = dynamics_density(s.dynamics)
-
-# Horizontal PG: forward to the wrapped dynamics
-@inline x_pressure_gradient(i, j, k, grid, s::HorizontalSlowMode) =
-    x_pressure_gradient(i, j, k, grid, s.dynamics)
-@inline y_pressure_gradient(i, j, k, grid, s::HorizontalSlowMode) =
-    y_pressure_gradient(i, j, k, grid, s.dynamics)
-
-# Vertical PG and buoyancy return zero (handled by acoustic loop)
-@inline z_pressure_gradient(i, j, k, grid, ::HorizontalSlowMode) = zero(grid)
-@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::HorizontalSlowMode, args...) = zero(grid)
+@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowDynamics, args...) = zero(grid)
 
 #####
 ##### Tendency computation interface
@@ -477,6 +552,24 @@ For terrain-following coordinates, the vertical component `ρw` is
 replaced by the contravariant vertical momentum ``\\rho \\tilde{w}``.
 """
 advecting_momentum(model) = model.momentum
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the part of `dynamics` that `timestepper` integrates through its tendencies: all of it,
+unless the time stepper integrates the pressure-gradient force and buoyancy separately, in which
+case it returns `SlowDynamics(dynamics)`.
+"""
+slow_dynamics(timestepper, dynamics) = dynamics
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the velocity tuple used for thermodynamic-variable advection: `transport_velocities(model)`,
+unless the time stepper advects the thermodynamic variable with a different velocity than
+moisture and tracers.
+"""
+thermodynamic_transport_velocities(model) = transport_velocities(model)
 
 #####
 ##### Auxiliary dynamics variables interface

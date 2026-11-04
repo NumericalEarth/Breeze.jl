@@ -17,7 +17,7 @@ complete formulation with all required fields.
 
 Valid symbols:
 - `:LiquidIcePotentialTemperature`, `:θ`, `:ρθ`, `:PotentialTemperature` → `LiquidIcePotentialTemperatureFormulation`
-- `:StaticEnergy`, `:e`, `:ρe` → `StaticEnergyFormulation`
+- `:StaticEnergy`, `:s`, `:ρs` → `StaticEnergyFormulation`
 """
 function materialize_formulation end
 
@@ -40,7 +40,7 @@ struct DefaultTemperatureSolver end
 Base.summary(::DefaultTemperatureSolver) = "DefaultTemperatureSolver"
 
 """
-    default_temperature_solver(dynamics)
+$(TYPEDSIGNATURES)
 
 Return the default solver for a formulation's temperature inversion given `dynamics`.
 
@@ -48,9 +48,24 @@ The need for an iterative inversion is dictated by the intersection of the dynam
 the thermodynamic formulation: the fallback returns `nothing` (closed-form, no iteration),
 and dynamics whose prognostic closure makes the inversion implicit (e.g.
 `CompressibleDynamics` with `LiquidIcePotentialTemperatureFormulation`, where temperature
-solves `T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ`) extend this function to return an iterative solver.
+solves `cᵖᵐ T = ĉᵖ (ρ Rᵐ T / pˢᵗ)^κ θ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ`) extend this function to return an iterative solver.
 """
 default_temperature_solver(dynamics) = nothing
+
+#####
+##### Exner exponent interface
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the Exner exponent ([`VaporEquivalentExponent`](@ref Breeze.Thermodynamics.VaporEquivalentExponent)
+or [`DryExponent`](@ref Breeze.Thermodynamics.DryExponent)) that defines the liquid-ice potential
+temperature ``θˡⁱ`` of `formulation`. A formulation that does not evolve ``θˡⁱ``, and the symbol
+`:LiquidIcePotentialTemperature`, return the default `VaporEquivalentExponent()`, so diagnostics
+and boundary-flux conversions of ``θˡⁱ`` agree with the definition the formulation evolves.
+"""
+liquid_ice_exner_exponent(formulation) = VaporEquivalentExponent()
 
 #####
 ##### Field naming interface
@@ -81,19 +96,46 @@ additional_thermodynamic_field_names(formulation_name::Symbol) =
 """
     thermodynamic_density_name(formulation)
 
-Return the name of the thermodynamic density field (e.g., `:ρθ`, `:ρe`, `:ρE`).
+Return the name of the thermodynamic density field (e.g., `:ρθ`, `:ρs`, `:ρE`).
 Accepts a `Symbol`, `Val(Symbol)`, or formulation struct.
 """
 function thermodynamic_density_name end
 
-thermodynamic_density_name(formulation::Symbol) =
-    thermodynamic_density_name(Val(formulation))
+"""
+    specific_thermodynamic_field(formulation)
+
+Return the specific (per unit mass) thermodynamic field the `formulation` evolves — what its
+advection operator reconstructs, as opposed to the density-weighted prognostic named by
+[`thermodynamic_density_name`](@ref).
+"""
+function specific_thermodynamic_field end
+
+thermodynamic_density_name(formulation::Symbol) = thermodynamic_density_name(Val(formulation))
+
+"""
+    total_energy_density_name
+
+The key under which an *energy* input — a surface heat flux, a diabatic heating rate — is
+supplied to `AtmosphereModel`, `:ρE`, along with its specific alias `:E` for forcings.
+
+``E`` denotes total energy (`total_energy`), so the key names the physical input without
+committing to the variable that carries it: a `boundary_conditions` or `forcing` entry keyed
+`ρE` is routed onto whichever thermodynamic density the formulation evolves (see
+[`thermodynamic_density_name`](@ref)), converted as that variable requires — divided by
+``ĉᵖ Π`` for ``ρθ``, whether it arrives as a flux or as a forcing, and passed through
+unconverted for ``ρs``, which is itself an energy per unit mass.
+
+``s`` names static energy specifically and ``e`` is reserved for turbulent kinetic energy, so
+neither doubles as the energy key: `ρs` is a valid key only when static energy *is* the
+prognostic thermodynamic variable.
+"""
+const total_energy_density_name = :ρE
 
 """
     thermodynamic_density(formulation)
 
 Return the thermodynamic density field for the given formulation — the prognostic
-thermodynamic variable in coupling-density-weighted ("flux") form (`ρθ`, `ρe`, `ρE`).
+thermodynamic variable in coupling-density-weighted ("flux") form (`ρθ`, `ρs`, `ρE`).
 
 The weighting density is the dynamics' coupling density (see [`dynamics_density`](@ref)):
 the reference density `ρᵣ` on the anelastic core and the prognostic dry-air density `ρᵈ` on the
@@ -151,9 +193,14 @@ function diagnose_thermodynamic_state end
 #####
 
 """
-    compute_thermodynamic_tendency!(model, common_args)
+    compute_thermodynamic_tendency!(model, common_args, tracer_transport_velocity)
 
 Compute the thermodynamic tendency. Dispatches on the thermodynamic formulation type.
+`common_args` are the arguments the scalar tendencies share, and `tracer_transport_velocity` the
+vertical velocity the moisture and tracer tendencies were built with, which the condensate
+sedimentation term pairs its content fluxes with (see
+[`sedimentation_tendency`](@ref)). The two need not agree: a time stepper may advect
+the thermodynamic variable with a velocity its tracers do not share.
 """
 function compute_thermodynamic_tendency! end
 
@@ -164,7 +211,7 @@ function compute_thermodynamic_tendency! end
 """
     set_thermodynamic_variable!(model, variable_name, value)
 
-Set a thermodynamic variable (e.g., `:θ`, `:T`, `:e`, `:ρθ`, `:ρe`) from the given value.
+Set a thermodynamic variable (e.g., `:θ`, `:T`, `:s`, `:ρθ`, `:ρs`) from the given value.
 Dispatches on the thermodynamic formulation type and variable name.
 """
 function set_thermodynamic_variable! end

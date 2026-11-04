@@ -24,8 +24,6 @@ using Breeze.CompressibleEquations: AcousticSubstepper,
                                     AcousticTridiagUpper,
                                     freeze_linearization_state!,
                                     assemble_slow_vertical_momentum_tendency!
-using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
-                           compute_slow_scalar_tendencies!
 
 using Oceananigans
 using Oceananigans.Grids: ZDirection
@@ -54,7 +52,7 @@ function _build_str_model(arch; ω = 0.55)
                                            damping = NoDivergenceDamping())
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = θ_iso_str,
-                               surface_pressure = 1e5,
+                               base_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
                                   thermodynamic_constants = constants)
@@ -307,7 +305,7 @@ end
                                          damping = NoDivergenceDamping())
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = z -> 300,
-                               surface_pressure = 1e5,
+                               base_pressure = 1e5,
                                standard_pressure = 1e5)
 
     ρu_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.0))
@@ -362,8 +360,6 @@ end
         update_state!(model)
 
         freeze_linearization_state!(sub, model)
-        compute_slow_momentum_tendencies!(model)
-        compute_slow_scalar_tendencies!(model)
         assemble_slow_vertical_momentum_tendency!(sub, model)
 
         Gˢρw = Array(interior(sub.slow_vertical_momentum_tendency))
@@ -411,8 +407,6 @@ end
         update_state!(model)
 
         freeze_linearization_state!(sub, model)
-        compute_slow_momentum_tendencies!(model)
-        compute_slow_scalar_tendencies!(model)
         assemble_slow_vertical_momentum_tendency!(sub, model)
 
         Gˢρw = Array(interior(sub.slow_vertical_momentum_tendency))

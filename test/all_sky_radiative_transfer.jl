@@ -45,19 +45,19 @@ using RRTMGP
 
         # Legal to construct without one (a coupled model binds it later)...
         radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants; surface_albedo = 0.1)
-        @test isnothing(radiation.surface_properties.surface_temperature)
+        @test isnothing(radiation.surface_radiation.surface_temperature)
 
         # ...but solving before anything is bound fails loudly.
         @test_throws ArgumentError Breeze.AtmosphereModels._update_radiation!(radiation, nothing)
     end
 
-    @testset "Single column grid with clouds [$(FT)]" for FT in test_float_types()
+    @testset "Single column grid with clouds [$(FT)]" begin
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
         grid = RectilinearGrid(default_arch; size=16, x=0, y=45, z=(0, 10kilometers), topology)
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -101,22 +101,34 @@ using RRTMGP
         # Get fluxes
         ℐ_lw_up_clear = clear_sky_radiation.upwelling_longwave_flux
         ℐ_lw_dn_clear = clear_sky_radiation.downwelling_longwave_flux
+        ℐ_sw_up_clear = clear_sky_radiation.upwelling_shortwave_flux
         ℐ_sw_dn_clear = clear_sky_radiation.downwelling_shortwave_flux
 
         ℐ_lw_up_allsky = all_sky_radiation.upwelling_longwave_flux
         ℐ_lw_dn_allsky = all_sky_radiation.downwelling_longwave_flux
+        ℐ_sw_up_allsky = all_sky_radiation.upwelling_shortwave_flux
         ℐ_sw_dn_allsky = all_sky_radiation.downwelling_shortwave_flux
 
         # Basic sanity: sign convention and finite values for all-sky
         @test all(isfinite, interior(ℐ_lw_up_allsky))
         @test all(isfinite, interior(ℐ_lw_dn_allsky))
+        @test all(isfinite, interior(ℐ_sw_up_allsky))
         @test all(isfinite, interior(ℐ_sw_dn_allsky))
 
         # Allow small numerical tolerance (wider for Float32)
         ε = FT == Float32 ? FT(1e-2) : FT(1e-6)
         @test all(interior(ℐ_lw_up_allsky) .≥ -ε)
         @test all(interior(ℐ_lw_dn_allsky) .≤ ε)
+        @test all(interior(ℐ_sw_up_allsky) .≥ -ε)
         @test all(interior(ℐ_sw_dn_allsky) .≤ ε)
+
+        # The Oceananigans output field must retain RRTMGP's upward shortwave flux.
+        # (`longwave_solver` holds the combined RRTMGP solver for full-spectrum optics.)
+        rrtmgp_sw_up_allsky = Array(RRTMGP.sw_flux_up(all_sky_radiation.longwave_solver))
+        @test vec(Array(interior(ℐ_sw_up_allsky))) == vec(rrtmgp_sw_up_allsky)
+
+        # Atmospheric scattering and surface reflection must send shortwave back up.
+        @allowscalar @test ℐ_sw_up_allsky[1, 1, size(grid, 3) + 1] > 0
 
         # Surface upwelling LW should be significant
         @allowscalar @test ℐ_lw_up_allsky[1, 1, 1] > 100
@@ -129,20 +141,21 @@ using RRTMGP
         # All-sky should differ from clear-sky when clouds are present
         # The difference should be noticeable in at least one flux component
         lw_up_diff = sum(abs, interior(ℐ_lw_up_allsky) .- interior(ℐ_lw_up_clear))
+        sw_up_diff = sum(abs, interior(ℐ_sw_up_allsky) .- interior(ℐ_sw_up_clear))
         sw_dn_diff = sum(abs, interior(ℐ_sw_dn_allsky) .- interior(ℐ_sw_dn_clear))
 
         # At least one of LW or SW should show a difference due to clouds
         # (The magnitude depends on cloud amount, but should be non-zero)
-        @test (lw_up_diff > 0) || (sw_dn_diff > 0)
+        @test (lw_up_diff > 0) || (sw_up_diff > 0) || (sw_dn_diff > 0)
     end
 
-    @testset "Custom effective radius models [$FT]" for FT in test_float_types()
+    @testset "Custom effective radius models [$FT]" begin
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
         grid = RectilinearGrid(default_arch; size=8, x=0, y=45, z=(0, 10kilometers), topology)
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = 101325,
+                                         base_pressure = 101325,
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
@@ -170,5 +183,69 @@ using RRTMGP
 
         # Should run without error
         @test all(isfinite, interior(radiation.upwelling_longwave_flux))
+    end
+
+    # Breeze's cloud fraction is binary, so McICA's random draws cannot change the sampled cloud
+    # mask (`rand() ≥ 1 - 1` always, `rand() ≥ 1 - 0` never). All-sky radiation with clouds is then
+    # deterministic and column-local, and batching must reproduce the unbatched fluxes exactly.
+    @testset "Column batching reproduces the unbatched cloudy solve [$(FT)]" begin
+        Oceananigans.defaults.FloatType = FT
+
+        Nx, Ny, Nz = 4, 7, 8
+        grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz),
+                               x=(0, 1kilometers), y=(0, 1kilometers), z=(0, 10kilometers),
+                               topology=(Periodic, Periodic, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         base_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+        microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+        solar_position = ApparentSolarPosition(coordinate = (0, 45), epoch = DateTime(2024, 6, 21, 12))
+
+        # Moisture varies in y, so some columns are cloudy and others are not
+        L = 1kilometers
+        θ(x, y, z) = 300 + 0.005 * z / 1000 + 2 * sin(2π * x / L)
+        qᵗ(x, y, z) = 0.020 * (y / L)^2 * exp(-z / 3000)
+
+        function solve_all_sky(column_batches)
+            radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
+                                               solar_position,
+                                               surface_temperature = 300,
+                                               surface_albedo = 0.1,
+                                               column_batches)
+
+            model = AtmosphereModel(grid; dynamics, microphysics, radiation,
+                                    clock = Clock(time=DateTime(2024, 6, 21, 12)),
+                                    formulation = :LiquidIcePotentialTemperature)
+            set!(model; θ, qᵗ)
+
+            return radiation, model
+        end
+
+        unbatched, model = solve_all_sky(nothing)
+
+        # Clouds in some columns but not all
+        column_liquid = sum(Array(interior(model.microphysical_fields.qˡ)), dims=3)
+        @test any(column_liquid .> 0)
+        @test any(column_liquid .== 0)
+
+        # Two batches of four rows that overlap on row 4, then seven disjoint batches of one row
+        for (column_batches, batch_rows) in ((2, 4), (7, 1))
+            batched, _ = solve_all_sky(column_batches)
+            @test batched.longwave_solver.grid_params.ncol == batch_rows * Nx
+
+            for name in (:upwelling_longwave_flux, :downwelling_longwave_flux,
+                         :upwelling_shortwave_flux, :downwelling_shortwave_flux,
+                         :flux_divergence)
+
+                ℐ = Array(interior(getproperty(unbatched, name)))
+                ℐᵇ = Array(interior(getproperty(batched, name)))
+
+                @test all(isfinite, ℐ)
+                @test ℐᵇ == ℐ
+            end
+        end
     end
 end

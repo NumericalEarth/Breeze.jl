@@ -1,0 +1,380 @@
+#####
+##### Density weighting of the vertically-implicit diffusion coefficients
+#####
+##### The prognostic is `q = ρ c`, but the flux the explicit path forms is `ρ κ ∂z c`
+##### (`Jᶜz`/`𝒯_uz` in src/TurbulenceClosures/TurbulenceClosures.jl weight the kinematic flux by
+##### `ℑz(ρ)`). Backward Euler on `∂t q = ∂z(ρ κ ∂z (q/ρ))` gives row k
+#####
+#####   du(k)  = - Δt κₖ₊₁ (ρᶠₖ₊₁ / ρᶜₖ₊₁) Δz⁻¹ᶜₖ Δz⁻¹ᶠₖ₊₁
+#####   dl(k′) = - Δt κₖ   (ρᶠₖ   / ρᶜₖ₋₁) Δz⁻¹ᶜₖ Δz⁻¹ᶠₖ,          k = k′ + 1
+#####   d(k)   =   1 + Δt Δz⁻¹ᶜₖ [κₖ₊₁ ρᶠₖ₊₁ Δz⁻¹ᶠₖ₊₁ + κₖ ρᶠₖ Δz⁻¹ᶠₖ] / ρᶜₖ
+#####
+##### The density ratio is the *only* difference from upstream, and it multiplies the whole
+##### κ-sum — so each coefficient is the upstream one times a ratio, and closure tuples (whose
+##### κ-sum happens inside `_ivd_*_diagonal`, see Oceananigans' closure_tuples.jl) and
+##### `closure === nothing` keep working unchanged.
+#####
+##### The `ρᶜ` factor belongs to the *column*, not the row: `du(k)` divides by `ρᶜₖ₊₁` while the
+##### diagonal divides by `ρᶜₖ`. So the diagonal must be written out explicitly rather than as
+##### `1 - du - dl`, which is only conservative when the off-diagonals carry no location-dependent
+##### prefactor.
+#####
+##### `ρw` (z-Face) takes the same rule with the locations exchanged. Its specific variable is
+##### `w = ρw / ρᶠ`, reconstructed at faces, and its stress `ρ ν ∂z w` lives at centers — the
+##### opposite of a tracer — so where the z-Center rows carry `ρᶠ / ρᶜ`, the z-Face rows carry
+##### `ρᶜ / ρᶠ`. Backward Euler on `∂t q = ∂z(ρ ν ∂z (q/ρ))` at face k gives
+#####
+#####   du(k)  = - Δt νₖ (ρᶜₖ   / ρᶠₖ₊₁) Δz⁻¹ᶜₖ Δz⁻¹ᶠₖ
+#####   dl(m)  = - Δt νₘ (ρᶜₘ   / ρᶠₘ)   Δz⁻¹ᶜₘ Δz⁻¹ᶠₘ₊₁,        k = m + 1
+#####   d(k)   =   1 + Δt Δz⁻¹ᶠₖ [νₖ ρᶜₖ Δz⁻¹ᶜₖ + νₖ₋₁ ρᶜₖ₋₁ Δz⁻¹ᶜₖ₋₁] / ρᶠₖ
+#####
+##### which is the same `ρᶜ / ρᶠ` placement upstream's z-Face *advection* coefficients already use.
+##### The diagonal is written out for the same reason as at z-Centers, with `ρᶠ` in place of `ρᶜ`.
+#####
+##### The row also carries the implicit-advection contribution for adaptive-implicit schemes, so
+##### this file is included after `implicit_vertical_advection.jl`, whose `AIVA` alias it uses.
+#####
+
+using Oceananigans.Advection:
+    densityᶜᶜᶜ,
+    densityᶜᶜᶠ,
+    implicit_vertical_velocity,
+    implicit_vertical_velocityᶜᶜᶠ,
+    implicit_advection_upper_diagonal,
+    implicit_advection_lower_diagonal,
+    implicit_advection_diagonal
+
+using Oceananigans.Grids: Center, Face, ZDirection
+using Oceananigans.Operators: Az, Azᶜᶜᶠ, volume
+using Oceananigans.Utils: SumOfArrays
+using Oceananigans.TurbulenceClosures:
+    VerticallyImplicitDiffusionLowerDiagonal,
+    VerticallyImplicitDiffusionDiagonal,
+    VerticallyImplicitDiffusionUpperDiagonal,
+    _implicit_linear_coefficient,
+    _ivd_lower_diagonal,
+    _ivd_upper_diagonal,
+    boundary_flux_diagonal
+
+# Breeze-owned wrapper routing a prognostic's implicit solve to the density-weighted
+# coefficients below. Wrapping the scheme puts a Breeze-owned type in the `get_coefficient`
+# signature, so these methods are neither type piracy nor ambiguous with Oceananigans' own.
+#
+# `density` weights the diffusion half of the row, leaving the density the solve is
+# called with to the advection half. The two are the same field everywhere except in
+# `implicit_substep!`, which freezes the stage-entry `(w, ρᵈ)` so that the explicit and implicit
+# halves of the *advective* flux partition one transport (see `cache_advecting_state!`). The
+# diffusion half has no such pairing to keep: it reconstructs the specific variable as `q / ρᵈ`
+# from the field it is solving for, which the acoustic loop has already advanced, so it needs the
+# live `ρᵈ`. `nothing` means "use the density the solve was called with".
+struct DensityWeightedImplicitOperator{A, D}
+    scheme :: A
+    density :: D
+end
+
+DensityWeightedImplicitOperator(scheme) = DensityWeightedImplicitOperator(scheme, nothing)
+
+Adapt.adapt_structure(to, a::DensityWeightedImplicitOperator) =
+    DensityWeightedImplicitOperator(adapt(to, a.scheme), adapt(to, a.density))
+
+# `implicit_step!` sees the wrapper, not the scheme, when it decides whether to solve at all.
+BoundaryConditions.needs_implicit_solver(a::DensityWeightedImplicitOperator) =
+    BoundaryConditions.needs_implicit_solver(a.scheme)
+
+# Dispatch rather than a branch: `nothing` defers to the density the solve was called with.
+@inline weighting_density(::Nothing, ρ) = ρ
+@inline weighting_density(ρ_diff, ρ) = ρ_diff
+
+# The implicit-advection contribution, which is present only for adaptive-implicit schemes.
+@inline density_weighted_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ) = zero(grid)
+@inline density_weighted_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ) = zero(grid)
+@inline density_weighted_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ) = zero(grid)
+
+@inline density_weighted_advection_upper_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ℓz, ρ) =
+    implicit_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+@inline density_weighted_advection_lower_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ℓz, ρ) =
+    implicit_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+@inline density_weighted_advection_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ℓz, ρ) =
+    implicit_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+
+# Oceananigans masks peripheral faces out of the AIVA diagonal, assuming impermeable boundaries.
+# A sedimenting tracer (velocity wrapped in `OutflowEnabledVelocity` by
+# `implicit_advection_velocities`) leaves through the open bottom instead, so its diagonal is the
+# upstream one without the peripheral masks: keeping the outflow term makes the implicit
+# first-order flux conservative and positivity-preserving. The off-diagonals couple interior
+# faces only and need no change.
+#
+# The masks are dropped at immersed faces too. Harmless at an immersed upper face, where the
+# inflow term `max(wⁱ⁺, 0)` vanishes for a negative sedimentation velocity, and intended at an
+# immersed bottom, where precipitation leaves the lowest fluid cell onto the terrain. Untested.
+#
+# TODO: upstream as a predicate `active_implicit_face(i, j, k, grid, w, ℓx, ℓy)`, defaulting to
+# `!peripheral_node(...)` and `true` for a velocity that permits outflow. Until then this body
+# duplicates `Oceananigans.Advection.implicit_advection_diagonal` and must track it (the `ρᶠ/ρᶜ`
+# weighting in particular).
+@inline function density_weighted_advection_diagonal(i, j, k, grid, advection::AIVA, w::OutflowEnabledVelocity, Δt, ℓx, ℓy, ℓz::Center, ρ)
+    scheme = vertical_scheme(advection)
+    td = time_discretization(scheme)
+    wⁱ⁺ = implicit_vertical_velocity(ℓx, ℓy, i, j, k+1, grid, scheme, td, w)
+    wⁱ⁻ = implicit_vertical_velocity(ℓx, ℓy, i, j, k,   grid, scheme, td, w)
+
+    Az⁺ = Az(i, j, k+1, grid, ℓx, ℓy, Face())
+    Az⁻ = Az(i, j, k,   grid, ℓx, ℓy, Face())
+    ρᶠ⁺ = densityᶜᶜᶠ(i, j, k+1, grid, ρ)
+    ρᶠ⁻ = densityᶜᶜᶠ(i, j, k,   grid, ρ)
+    ρᶜ = densityᶜᶜᶜ(i, j, k, grid, ρ)
+    V⁻¹ = 1 / volume(i, j, k, grid, ℓx, ℓy, Center())
+
+    return Δt * V⁻¹ / ρᶜ * (Az⁺ * ρᶠ⁺ * max(wⁱ⁺, 0) - Az⁻ * ρᶠ⁻ * min(wⁱ⁻, 0))
+end
+
+# As with the advection coefficients, `ρ` is interpolated in z only, so these are exact for
+# a horizontally-uniform density (the anelastic reference state) at all three z-Center locations.
+# The batched solver evaluates the off-diagonals only for k = 1 … Nz-1, so the divisions below
+# never reach a halo value of `ρ`; the diagonal's `ρᶠ⁺` at k = Nz+1 does, but it only multiplies
+# a `du` that the peripheral-node mask has already zeroed.
+@inline function density_weighted_ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz::Center, Δt, clk, fields, ρ)
+    du = _ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    ρᶠ = densityᶜᶜᶠ(i, j, k+1, grid, ρ)   # where κₖ₊₁ weights the flux
+    ρᶜ = densityᶜᶜᶜ(i, j, k+1, grid, ρ)   # where qₖ₊₁ is reconstructed as cₖ₊₁ = qₖ₊₁/ρᶜₖ₊₁
+    return du * ρᶠ / ρᶜ
+end
+
+# `k′ = k - 1` (LinearAlgebra.Tridiagonal convention): the coefficient of `q(k′)` in row `k′ + 1`.
+@inline function density_weighted_ivd_lower_diagonal(i, j, k′, grid, clo, K, id, ℓx, ℓy, ℓz::Center, Δt, clk, fields, ρ)
+    dl = _ivd_lower_diagonal(i, j, k′, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    ρᶠ = densityᶜᶜᶠ(i, j, k′+1, grid, ρ)
+    ρᶜ = densityᶜᶜᶜ(i, j, k′,   grid, ρ)
+    return dl * ρᶠ / ρᶜ
+end
+
+@inline function density_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz::Center, Δt, clk, fields, ρ)
+    du  = _ivd_upper_diagonal(i, j, k,   grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    dl  = _ivd_lower_diagonal(i, j, k-1, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    lin = _implicit_linear_coefficient(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+
+    ρᶜ  = densityᶜᶜᶜ(i, j, k,   grid, ρ)
+    ρᶠ⁺ = densityᶜᶜᶠ(i, j, k+1, grid, ρ)
+    ρᶠ⁻ = densityᶜᶜᶠ(i, j, k,   grid, ρ)
+
+    # Both off-diagonal fluxes act on qₖ here, so both divide by ρᶜₖ — not by the neighbors'
+    # ρᶜ, which is why this is not `1 - du - dl`. A linear coefficient damps q and c at the
+    # same rate, so it is unweighted.
+    return one(grid) - Δt * lin - (du * ρᶠ⁺ + dl * ρᶠ⁻) / ρᶜ
+end
+
+#####
+##### z-Face mirrors (`ρw`). Locations exchange: `ρᶜ` where the stress lives, `ρᶠ` where `w` is
+##### reconstructed. Row 1's `ρᶜ` at k-1 = 0 multiplies a `dl` the peripheral-node mask has already
+##### zeroed, but its `ρᶠ₁` divides, so that row reads `ρ`'s bottom halo unmasked — as upstream's
+##### z-Face advection diagonal already does.
+#####
+
+@inline function density_weighted_ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz::Face, Δt, clk, fields, ρ)
+    du = _ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    ρᶜ = densityᶜᶜᶜ(i, j, k,   grid, ρ)   # where νₖ weights the stress
+    ρᶠ = densityᶜᶜᶠ(i, j, k+1, grid, ρ)   # where qₖ₊₁ is reconstructed as wₖ₊₁ = qₖ₊₁/ρᶠₖ₊₁
+    return du * ρᶜ / ρᶠ
+end
+
+# `m = k - 1` (LinearAlgebra.Tridiagonal convention): the stress between faces `m` and `m + 1`
+# sits at center `m`, which is also where `qₘ`'s reconstruction divides by `ρᶠₘ`.
+@inline function density_weighted_ivd_lower_diagonal(i, j, m, grid, clo, K, id, ℓx, ℓy, ℓz::Face, Δt, clk, fields, ρ)
+    dl = _ivd_lower_diagonal(i, j, m, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    ρᶜ = densityᶜᶜᶜ(i, j, m, grid, ρ)
+    ρᶠ = densityᶜᶜᶠ(i, j, m, grid, ρ)
+    return dl * ρᶜ / ρᶠ
+end
+
+@inline function density_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz::Face, Δt, clk, fields, ρ)
+    du  = _ivd_upper_diagonal(i, j, k,   grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    dl  = _ivd_lower_diagonal(i, j, k-1, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    lin = _implicit_linear_coefficient(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+
+    ρᶠ  = densityᶜᶜᶠ(i, j, k,   grid, ρ)
+    ρᶜ⁺ = densityᶜᶜᶜ(i, j, k,   grid, ρ)
+    ρᶜ⁻ = densityᶜᶜᶜ(i, j, k-1, grid, ρ)
+
+    # Both stresses act on qₖ here, so both divide by this row's ρᶠₖ — not by the neighbors'.
+    return one(grid) - Δt * lin - (du * ρᶜ⁺ + dl * ρᶜ⁻) / ρᶠ
+end
+
+#####
+##### get_coefficient seam: density-weighted diffusion + implicit advection, at both z-locations
+#####
+##### Oceananigans ≥ 0.110.20 appends the field's top, bottom and immersed boundary conditions after
+##### `(advection, w, density)`, and its own fallbacks absorb them with `args...`. A method that
+##### fixes the trailing count at three stops matching, and the solve silently falls through to the
+##### *unweighted* diffusion-only fallback — the weighting vanishes with no error. These signatures
+##### mirror upstream's AIVA methods, including the implicit-explicit boundary-flux diagonal.
+#####
+
+@inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionUpperDiagonal, p, ::ZDirection,
+                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
+                                         operator::DensityWeightedImplicitOperator, w, ρ, args...)
+    ρ_diff = weighting_density(operator.density, ρ)
+    du_diff = density_weighted_ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ_diff)
+    du_adv  = density_weighted_advection_upper_diagonal(i, j, k, grid, operator.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+    return du_diff + du_adv
+end
+
+@inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionLowerDiagonal, p, ::ZDirection,
+                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
+                                         operator::DensityWeightedImplicitOperator, w, ρ, args...)
+    ρ_diff = weighting_density(operator.density, ρ)
+    dl_diff = density_weighted_ivd_lower_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ_diff)
+    dl_adv  = density_weighted_advection_lower_diagonal(i, j, k, grid, operator.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+    return dl_diff + dl_adv
+end
+
+@inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionDiagonal, p, ::ZDirection,
+                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
+                                         operator::DensityWeightedImplicitOperator, w, ρ,
+                                         top_bc, bottom_bc, immersed_bc, ϕ, args...)
+    ρ_diff = weighting_density(operator.density, ρ)
+    d_diff = density_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ_diff)
+    d_adv  = density_weighted_advection_diagonal(i, j, k, grid, operator.scheme, w, Δt, ℓx, ℓy, ℓz, ρ)
+    d_bc   = boundary_flux_diagonal(i, j, k, grid, ℓx, ℓy, ℓz, Δt, clk, fields, top_bc, bottom_bc, immersed_bc, ϕ)
+    return d_diff + d_adv + d_bc
+end
+
+#####
+##### Sedimentation of condensate content by the implicit remainder
+#####
+##### The thermodynamic tendencies move the condensate part of ρθ / ρs with the explicit fraction
+##### of each condensate's sedimentation mass flux. The remainder the tridiagonal solve applies to
+##### the tracer depends on the solved state, so its content is moved here, after the tracers'
+##### solves of a stage, from the fluxes the solve actually applied: the first-order upwind fluxes
+##### of the implicit velocity at the solved humidity ρq / ρ, mirroring
+##### `density_weighted_advection_diagonal` above (outflow through the bottom face kept, no inflow
+##### through the top or bottom face). Estimating the remainder at the pre-solve state instead
+##### overstates a one-cell loss by the factor 1 + C at implicit Courant number C, the regime the
+##### solve exists for.
+#####
+##### The content is added before the thermodynamic variable's own solve. With Lᵠ its implicit
+##### operator (upwind remainder at the transport velocity plus implicit diffusion) and Lq the
+##### tracer's (the same at the transport-plus-fall velocity), the tracer's solve reads
+#####
+#####   (I + Δt Lᵠ) q = q* − Δt (Lq − Lᵠ) q ,
+#####
+##### whose last term is the implicit sedimentation divergence at the solved state. Adding its
+##### content to φ* and solving (I + Δt Lᵠ) φ = φ* keeps φ = χ q exactly for a uniform content χ;
+##### adding it after the solve would exempt it from the transport and diffusion that acted on the
+##### rest of φ. The SSP stepper therefore orders a stage: the tracers' solves, this step, the
+##### thermodynamic variable's solve. The acoustic stepper solves the thermodynamic variable's
+##### implicit vertical transport inside its substep loop, before the tracers' solves, so there
+##### the content added here takes only the post-loop diffusion solve — a first-order splitting
+##### difference; the mass the content follows is still the mass the tracers' solves moved.
+#####
+
+@inline function implicit_sedimentation_mass_fluxes(i, j, k, grid, advection::AIVA, wᵗ, wˢ, ρq, ρ)
+    w = SumOfArrays{2}(wᵗ, wˢ)
+    F⁻ = (implicit_sedimentation_mass_flux(i, j, k,   grid, advection, w,  ρq, ρ),
+          implicit_sedimentation_mass_flux(i, j, k,   grid, advection, wᵗ, ρq, ρ))
+    F⁺ = (implicit_sedimentation_mass_flux(i, j, k+1, grid, advection, w,  ρq, ρ),
+          implicit_sedimentation_mass_flux(i, j, k+1, grid, advection, wᵗ, ρq, ρ))
+    return F⁻, F⁺
+end
+
+# The solve's flux through face k per unit face density, `Az [max(wⁱ, 0) qₖ₋₁ + min(wⁱ, 0) qₖ]`
+# with q = ρq / ρ: the row of cell k couples the cell below only when there is one (k > 1) and
+# the row of cell k − 1 couples the cell above only when there is one (k ≤ Nz), while outflow
+# through either boundary face is kept (see `density_weighted_advection_diagonal`). The clamped
+# indices keep the boundary faces from reading halos; the clamped value is multiplied by zero.
+@inline function implicit_sedimentation_mass_flux(i, j, k, grid, advection, w, ρq, ρ)
+    scheme = vertical_scheme(advection)
+    td = time_discretization(scheme)
+    wⁱ = implicit_vertical_velocityᶜᶜᶠ(i, j, k, grid, scheme, td, w)
+    k⁻ = max(k - 1, 1)
+    k⁺ = min(k, grid.Nz)
+    @inbounds q⁻ = ρq[i, j, k⁻] / densityᶜᶜᶜ(i, j, k⁻, grid, ρ)
+    @inbounds q⁺ = ρq[i, j, k⁺] / densityᶜᶜᶜ(i, j, k⁺, grid, ρ)
+    upward   = max(wⁱ, 0) * q⁻ * (k > 1)
+    downward = min(wⁱ, 0) * q⁺ * (k <= grid.Nz)
+    return Azᶜᶜᶠ(i, j, k, grid) * (upward + downward)
+end
+
+# Whether the implicit solve advances any condensate's mass at all.
+implicit_sedimentation(condensates) = any(c -> c.advection isa AIVA, condensates)
+
+"""
+$(TYPEDSIGNATURES)
+
+Move the condensate content of the thermodynamic variable with the sedimentation mass that the
+adaptive implicit vertical solve has just applied to the tracers: add `Δt` times the
+sedimentation tendency of the first-order remainder the solves applied, at the solved state, to
+the [`thermodynamic_density`](@ref) (the tendency of [`sedimentation_tendency`](@ref) formed
+from [`implicit_sedimentation_mass_fluxes`](@ref)). `velocities` are the transport velocities
+whose vertical component the tracers' solves split, `Δt` the interval they solved over, and
+`formulation` selects the [`condensate_content`](@ref) methods, defaulting to the model's.
+The time steppers call this between the tracers' solves of a stage and the thermodynamic
+variable's post-loop solve, so the moved content takes the same implicit diffusion as the rest of
+the field, and on the SSP path its implicit vertical transport too; the acoustic stepper applies
+that transport inside its substep loop, before this step (see the note above). A no-op when no
+condensate is advected adaptively implicitly.
+
+For potential temperature this is a derivative-times-increment update, not an exact finite
+thermal-energy reconstruction. Matching the implicit mass flux alone does not remove that
+finite-step error.
+"""
+function implicit_sedimentation_step!(model, Δt, velocities, formulation = model.formulation)
+    condensates = values(model.sedimentation)
+    implicit_sedimentation(condensates) || return nothing
+    grid = model.grid
+    arch = grid.architecture
+    φ = thermodynamic_density(model.formulation)
+    launch!(arch, grid, :xyz, _implicit_sedimentation_step!,
+            φ, grid, kernel_time_step(arch, grid, Δt), condensates, velocities.w,
+            formulation, model.dynamics, model.thermodynamic_constants, model.microphysics,
+            model.microphysical_fields, specific_prognostic_moisture(model),
+            content_temperature(formulation, model.temperature))
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Add the explicit condensate [`sedimentation_tendency`](@ref) of the thermodynamic variable to its
+tendency `G`, with `tracer_transport_velocity` the vertical velocity the moisture and tracer
+tendencies advect with. The term runs in a kernel of its own rather than inside the thermodynamic
+tendency kernel: fused, its per-constituent flux reconstructions and condensate contents raise that
+kernel's register use and cut its occupancy for every cell, whether or not anything sediments
+there. A no-op when no condensate sediments.
+"""
+function add_sedimentation_tendency!(G, model, tracer_transport_velocity)
+    condensates = values(model.sedimentation)
+    isempty(condensates) && return nothing
+    grid = model.grid
+    launch!(grid.architecture, grid, :xyz, _add_sedimentation_tendency!,
+            G, grid, condensates, tracer_transport_velocity, model.formulation, model.dynamics,
+            model.thermodynamic_constants, model.microphysics, model.microphysical_fields,
+            specific_prognostic_moisture(model), model.temperature)
+    return nothing
+end
+
+@kernel function _add_sedimentation_tendency!(G, grid, condensates, wᵗ, formulation, dynamics, constants,
+                                              microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
+    i, j, k = @index(Global, NTuple)
+    @inbounds G[i, j, k] += sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
+                                                   microphysics, microphysical_fields, specific_prognostic_moisture,
+                                                   temperature)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the temperature argument `implicit_sedimentation_step!` passes to
+[`condensate_content`](@ref) for `formulation`: the model's `temperature_field` by default, or
+`nothing` for a formulation whose content rediagnoses the temperature from the post-solve state,
+which the tracers' solves have moved away from the one the temperature field was diagnosed from.
+"""
+content_temperature(formulation, temperature_field) = temperature_field
+
+@kernel function _implicit_sedimentation_step!(φ, grid, Δt, condensates, wᵗ, formulation, dynamics, constants,
+                                               microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
+    i, j, k = @index(Global, NTuple)
+    tendency = sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, implicit_condensate_mass_fluxes,
+                                              formulation, dynamics, constants, microphysics, microphysical_fields,
+                                              specific_prognostic_moisture, temperature)
+    @inbounds φ[i, j, k] += Δt * tendency
+end

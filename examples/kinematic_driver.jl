@@ -1,108 +1,43 @@
-# # Kinematic driver: cloud formation in an idealized updraft
+# # Kinematic driver: cloud and precipitation with P3
 #
-# In atmospheric modeling, we sometimes want to isolate microphysics and thermodynamics
-# from dynamics. **Kinematic models** prescribe the velocity field rather than solving
-# momentum equations, letting us focus purely on tracer transport and phase changes.
+# This example uses [`PrescribedDynamics`](@ref) to lift moist air through a
+# vertical column at 2 m/s.
+# [`P3Microphysics`](@ref PredictedParticlePropertiesMicrophysics) predicts
+# cloud droplets, rain, ice, and liquid water carried on ice, with a
+# **prognostic vapor excess over liquid** and aerosol activation. Velocity is
+# prescribed while transport, thermodynamics, and microphysics evolve. We use liquid–ice potential temperature, the default
+# thermodynamic formulation, explicitly selected below for clarity.
 #
-# This example demonstrates Breeze's [`PrescribedDynamics`](@ref) formulation by simulating
-# cloud formation in an idealized updraft. A uniform vertical velocity lifts moist air
-# through a realistic temperature profile. As air rises and cools, water vapor
-# condenses to form clouds — a fundamental process driving all precipitation on Earth.
-#
-# ## Physical setup
-#
-# We simulate a 1D column representing a rising air parcel with:
-# - A realistic potential temperature profile (troposphere + stratosphere)
-# - Uniform upward velocity `W₀ = 2 m/s` (a gentle cumulus updraft)
-# - Moist boundary layer air entering from below
-#
-# The **divergence correction** option compensates for the non-zero mass flux divergence
-# ``\boldsymbol{\nabla} \boldsymbol{\cdot} (ρ \boldsymbol{u})`` that arises when velocity doesn't vary with the reference density profile.
-# This is essential for physically consistent tracer advection in kinematic models.
+# This is an open column: moist air enters at the bottom, air leaves at the top,
+# and hydrometeors can sediment out. The rising-parcel example instead retains
+# all water in a closed moving parcel. This setup demonstrates the ingredients
+# of a kinematic microphysics comparison; it is not a reproduction of the
+# upstream P3 `kin1d` benchmark.
 
+using Oceananigans
+using Oceananigans.Units
 using Breeze
+using Breeze.Microphysics.PredictedParticleProperties: AerosolActivation, AerosolMode
 using CairoMakie
 using Printf
-using Oceananigans: Oceananigans
 
-# ## Grid and reference state
+# ## Grid and background atmosphere
 #
-# We construct a 20 km tall column extending from the surface through the tropopause
-# into the lower stratosphere. The reference state establishes the background
-# pressure and density profile based on a hydrostatically-balanced atmosphere.
+# The column extends through the troposphere into the lower stratosphere.
+# We construct hydrostatic pressure and density using the same potential
+# temperature profile used to initialize the model. The atmosphere starts at
+# 80% relative humidity over liquid water, with no condensate.
 
 Nz = 100
-Lz = 20000 # 20 km domain height
-grid = RectilinearGrid(CPU(); size=Nz, x=0, y=0, z=(0, Lz),
-                       topology=(Flat, Flat, Bounded))
-
+Lz = 20kilometers
+grid = RectilinearGrid(CPU(); size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
 constants = ThermodynamicConstants()
-θ₀ = 300   # Surface potential temperature (K)
-p₀ = 1e5   # Surface pressure (Pa)
-reference_state = ReferenceState(grid, constants;
-                                 surface_pressure=p₀,
-                                 potential_temperature=θ₀)
-
-# ## Prescribing dynamics with divergence correction
-#
-# The key feature of kinematic models is [`PrescribedDynamics`](@ref), which fixes
-# the density and pressure fields from a reference state. We enable
-# `divergence_correction=true` because our constant vertical velocity doesn't
-# satisfy the anelastic continuity constraint ``\boldsymbol{\nabla} \boldsymbol{\cdot} (ρ \boldsymbol{u}) = 0``.
-#
-# Without this correction, the tracer equation would see spurious sources/sinks
-# from the non-zero velocity divergence. The correction adds a term
-# ``c \boldsymbol{\nabla} \boldsymbol{\cdot} (ρ \boldsymbol{u})`` that compensates for the prescribed
-# velocity field's divergence.
-
-W₀ = 2 # Vertical velocity (m/s) — a gentle updraft
-dynamics = PrescribedDynamics(reference_state; divergence_correction=true)
-
-# ## Boundary conditions
-#
-# The key boundary condition is at the surface: we prescribe incoming moist air
-# with constant potential temperature and specific humidity. This represents
-# the boundary layer air being lifted into the updraft.
-
-ρ₀ = surface_density(reference_state)
-
-# Surface boundary conditions for tracers
-qᵗ₀ = 0.018 # Incoming specific humidity (18 g/kg) — typical tropical boundary layer
-ρθ_bcs = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * θ₀))
-ρqᵉ_bcs = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * qᵗ₀))
-w_bcs = FieldBoundaryConditions(bottom=NormalFlowBoundaryCondition(W₀), top=NormalFlowBoundaryCondition(W₀))
-
-# ## Microphysics: warm-phase saturation adjustment
-#
-# We use [`SaturationAdjustment`](@ref) with [`WarmPhaseEquilibrium`](@ref), which
-# instantaneously partitions total water between vapor and liquid based on
-# saturation. When air becomes supersaturated, excess vapor condenses to cloud
-# liquid, releasing latent heat. This captures the essence of cloud formation
-# without explicit condensation timescales.
-
-microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-
-# ## Building the atmosphere model
-#
-# We assemble all components into an [`AtmosphereModel`](@ref). The combination
-# of `PrescribedDynamics` with microphysics creates a powerful tool for
-# understanding cloud processes in isolation from dynamics.
-
-model = AtmosphereModel(grid; dynamics, microphysics,
-                        advection = WENO(order=5),
-                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵉ=ρqᵉ_bcs, w=w_bcs),
-                        thermodynamic_constants = constants)
-
-# ## Initial conditions
-#
-# We initialize with a realistic tropospheric potential temperature profile
-# that increases with height (stable stratification). Above the tropopause
-# at 12 km, we switch to a stratospheric profile. The initial moisture
-# decreases with height, typical of a real atmosphere.
-
-zᵗʳ = 12000 # Tropopause height (m)
-θᵗʳ = 343   # Potential temperature at tropopause (K)
-Tᵗʳ = 213   # Temperature at tropopause (K)
+θ₀ = 300
+p₀ = 1e5
+ℋ₀ = 0.8
+zᵗʳ = 12kilometers
+θᵗʳ = 343
+Tᵗʳ = 213
 g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
 
@@ -112,115 +47,175 @@ function θ_initial(z)
     return ifelse(z ≤ zᵗʳ, θ_troposphere, θ_stratosphere)
 end
 
-# Moisture profile: high in the boundary layer, decreasing with height
-function qᵗ_initial(z)
-    z_scale = 3000 # Scale height for moisture (m)
-    return qᵗ₀ * exp(-z / z_scale)
-end
+reference_state = ReferenceState(grid, constants;
+                                 base_pressure = p₀,
+                                 potential_temperature = θ_initial)
 
-set!(model; θ=θ_initial, qᵗ=qᵗ_initial, w=W₀)
-
-# ## Running the simulation
+# ## Prescribed ascent and P3
 #
-# We run for 60 minutes, enough time for air parcels to rise several kilometers
-# and for a quasi-steady cloud layer to develop.
+# Uniform vertical velocity does not satisfy ∂z(ρw) = 0 for a stratified density
+# profile. `divergence_correction=true` compensates for that mass-flux divergence
+# in the transported specific quantities. The flow remains prescribed even as
+# latent heating changes the temperature.
+#
+# P3's `vapor_excess=PrognosticVaporExcess()` adds `ρδqᵛ⁺ˡ`, the density-weighted
+# vapor excess over liquid. Aerosol activation also predicts cloud droplet
+# number and the remaining aerosol reservoir. Number mixing ratios are in kg⁻¹.
 
-simulation = Simulation(model; Δt=1, stop_time=60*60, verbose=false)
+W₀ = 2
+nᵃ₀ = 3e8
+dynamics = PrescribedDynamics(reference_state; divergence_correction=true)
+aerosol = AerosolActivation(AerosolMode(number_mixing_ratio=nᵃ₀); prognostic=true)
+microphysics = P3Microphysics(; aerosol, vapor_excess=PrognosticVaporExcess())
+
+# ## Incoming air and precipitation boundaries
+#
+# At the surface, pressure equals the standard potential-temperature reference
+# pressure, so the condensate-free inflow has T = θ₀. Its moisture and
+# vapor excess are calculated from the same relative humidity. Fresh aerosol
+# enters with the air; all incoming hydrometeor mass and number are zero.
+# P3's default open precipitation boundary allows sedimentation out of the column.
+
+ρ₀ = surface_density(reference_state)
+qᵛ⁺ˡ₀ = saturation_specific_humidity(θ₀, ρ₀, constants, PlanarLiquidSurface())
+qᵗ₀ = ℋ₀ * qᵛ⁺ˡ₀
+δqᵛ⁺ˡ₀ = qᵗ₀ - qᵛ⁺ˡ₀
+
+microphysical_bcs = NamedTuple(name => FieldBoundaryConditions(bottom=ValueBoundaryCondition(0))
+                              for name in prognostic_field_names(microphysics))
+boundary_conditions = merge(microphysical_bcs,
+    (; ρθ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * θ₀)),
+       ρqᵗ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * qᵗ₀)),
+       ρδqᵛ⁺ˡ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * δqᵛ⁺ˡ₀)),
+       ρnᵃ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * nᵃ₀)),
+       w = FieldBoundaryConditions(bottom=NormalFlowBoundaryCondition(W₀),
+                                   top=NormalFlowBoundaryCondition(W₀))))
+
+model = AtmosphereModel(grid; dynamics, microphysics, boundary_conditions,
+                        formulation = :LiquidIcePotentialTemperature,
+                        advection = WENO(order=5),
+                        thermodynamic_constants = constants)
+
+# ## Initializing the vapor excess
+#
+# First initialize the thermodynamic state. Then initialize the density-weighted
+# vapor excess from that state, so the prognostic starts with the actual vapor deficit.
+# This second `set!` depends on the temperature and moisture established by the first.
+
+set!(model; θ=θ_initial, ℋ=ℋ₀, w=W₀)
+μ = model.microphysical_fields
+ρ = reference_state.density
+qᵛ⁺ˡ = SaturationSpecificHumidity(model)
+set!(model; ρδqᵛ⁺ˡ=ρ * (μ.qᵛ - qᵛ⁺ˡ))
+
+# ## Simulation and output
+#
+# Run for 3600 s, saving profiles every 30 s. The output retains both the prognostic
+# and diagnosed vapor excess, along with mass and number concentrations, for
+# subsequent comparisons. The vapor excess δqᵛ⁺ˡ has units of kg/kg; it is not the
+# dimensionless supersaturation 𝒮.
+
+simulation = Simulation(model; Δt=1, stop_time=60minutes)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
-θ = model.formulation.potential_temperature
-qˡ = model.microphysical_fields.qˡ
-qᵛ = model.microphysical_fields.qᵛ
-
-times = Float64[]
-θ_data, qˡ_data, qᵛ_data = [], [], []
-
-function record_profiles(sim)
-    push!(times, time(sim))
-    push!(θ_data, Array(interior(θ, 1, 1, :)))
-    push!(qˡ_data, Array(interior(qˡ, 1, 1, :)))
-    push!(qᵛ_data, Array(interior(qᵛ, 1, 1, :)))
-end
-
-add_callback!(simulation, record_profiles, TimeInterval(10*60))
+diagnosed_δqᵛ⁺ˡ = Field(μ.qᵛ - qᵛ⁺ˡ)
+outputs = (; T = model.temperature,
+             μ.qᵛ, μ.qᶜˡ, μ.qʳ, μ.qⁱ, μ.qʷⁱ,
+             μ.nᶜˡ, μ.nʳ, μ.nⁱ, μ.nᵃ, μ.δqᵛ⁺ˡ, diagnosed_δqᵛ⁺ˡ)
+filename = "kinematic_driver_p3.jld2"
+simulation.output_writers[:profiles] = JLD2Writer(model, outputs;
+                                                 filename,
+                                                 schedule = TimeInterval(30),
+                                                 overwrite_files = true)
 
 function progress(sim)
-    qˡ_max = maximum(qˡ)
-    θ_surf = θ[1, 1, 1]
-    @info @sprintf("t = %s, θ_surface = %.1f K, max(qˡ) = %.2e kg/kg",
-                   prettytime(sim), θ_surf, qˡ_max)
+    μ = sim.model.microphysical_fields
+    @info @sprintf("t = %s, max cloud = %.2e, rain = %.2e, ice = %.2e kg/kg",
+                   prettytime(sim), maximum(μ.qᶜˡ), maximum(μ.qʳ), maximum(μ.qⁱ))
+    return nothing
 end
 
-add_callback!(simulation, progress, TimeInterval(10*60))
-
-@info "Running kinematic updraft simulation with cloud microphysics..."
+add_callback!(simulation, progress, TimeInterval(10minutes))
 run!(simulation)
+nothing #hide
 
-# ## Visualization
+# ## Cloud and precipitation through time
 #
-# The results reveal the physics of adiabatic cloud formation. The left panel
-# shows how potential temperature evolves — influenced by latent heat release
-# where clouds form. The center panel shows cloud liquid mixing ratio,
-# clearly revealing the cloud base and cloud layer. The right panel shows
-# water vapor, which decreases sharply above the cloud base where condensation occurs.
+# Each panel shows the full time history of one condensate. Color scales are
+# labeled separately because cloud, rain, ice, and liquid coating can have very
+# different abundances. All mass fractions retain their model units of kg/kg.
+# Figures are saved as high-resolution PNGs and zoomable SVGs.
 
-z_km = znodes(grid, Center()) ./ 1000
-fig = Figure(size=(1000, 450))
+qᶜˡts = FieldTimeSeries(filename, "qᶜˡ")
+qʳts = FieldTimeSeries(filename, "qʳ")
+qⁱts = FieldTimeSeries(filename, "qⁱ")
+qʷⁱts = FieldTimeSeries(filename, "qʷⁱ")
+Tts = FieldTimeSeries(filename, "T")
+qᵛts = FieldTimeSeries(filename, "qᵛ")
+δqᵛ⁺ˡts = FieldTimeSeries(filename, "δqᵛ⁺ˡ")
+diagnosed_δqᵛ⁺ˡts = FieldTimeSeries(filename, "diagnosed_δqᵛ⁺ˡ")
+nothing #hide
 
-ax_θ = Axis(fig[1, 1]; xlabel="θ (K)", ylabel="z (km)",
-            title="Potential temperature")
-ax_qˡ = Axis(fig[1, 2]; xlabel="qˡ (g/kg)", ylabel="z (km)",
-             title="Cloud liquid", yticklabelsvisible=false)
-ax_qᵛ = Axis(fig[1, 3]; xlabel="qᵛ (g/kg)", ylabel="z (km)",
-             title="Water vapor", yticklabelsvisible=false)
+# The time series is indexed over the physical column cells, excluding halos.
 
-colors = cgrad(:viridis, length(times), categorical=true)
-
-for (n, t) in enumerate(times)
-    t_min = Int(t / 60)
-    lines!(ax_θ, θ_data[n], z_km; color=colors[n], linewidth=2, label="t = $t_min min")
-    lines!(ax_qˡ, qˡ_data[n] .* 1000, z_km; color=colors[n], linewidth=2)
-    lines!(ax_qᵛ, qᵛ_data[n] .* 1000, z_km; color=colors[n], linewidth=2)
+function plot_time_height!(layout, field_ts; title, label, colormap,
+                           colorbar_ticks=Makie.automatic, kwargs...)
+    z = znodes(field_ts.grid, Center()) / kilometers
+    data = permutedims(Array(field_ts[1, 1, 1:Nz, :]))
+    ax = Axis(layout[1, 1]; xlabel="Time (s)", ylabel="Height (km)", title)
+    plot = heatmap!(ax, field_ts.times, z, data; colormap, rasterize=2, kwargs...)
+    Colorbar(layout[1, 2], plot; label, ticks=colorbar_ticks)
+    return ax
 end
+nothing #hide
 
-# Add tropopause marker
-for ax in [ax_θ, ax_qˡ, ax_qᵛ]
-    hlines!(ax, [zᵗʳ/1000]; color=:gray, linestyle=:dash, linewidth=1.5, label="Tropopause")
-end
+set_theme!(fontsize=20, linewidth=3)
+condensate_figure = Figure(size=(1200, 1000))
+Label(condensate_figure[0, 1:2], "P3 cloud and precipitation · prescribed ascent at 2 m/s"; fontsize=24)
+plot_time_height!(condensate_figure[1, 1], qᶜˡts;
+                  title = "Cloud liquid", label = "qᶜˡ (kg/kg)", colormap = :Greens)
+plot_time_height!(condensate_figure[1, 2], qʳts;
+                  title = "Rain", label = "qʳ (kg/kg)", colormap = :Oranges)
+plot_time_height!(condensate_figure[2, 1], qⁱts;
+                  title = "Ice", label = "qⁱ (kg/kg)", colormap = :Blues)
+plot_time_height!(condensate_figure[2, 2], qʷⁱts;
+                  title = "Liquid on ice", label = "qʷⁱ (kg/kg)", colormap = :Purples)
+save("kinematic_driver_p3_condensate.png", condensate_figure; px_per_unit=2)
+save("kinematic_driver_p3_condensate.svg", condensate_figure)
+condensate_figure
 
-Legend(fig[1, 4], ax_θ; framevisible=false)
+# [Download the condensate figure as SVG](kinematic_driver_p3_condensate.svg).
+#
+# ## Temperature, vapor, and vapor excess
+#
+# The two vapor-excess panels share a symmetric logarithmic color scale,
+# linear within ±10⁻⁵ kg/kg. This resolves small vapor excesses and larger deficits
+# on the same scale. The prognostic and diagnosed values can differ while
+# transport, cooling, and microphysical relaxation act.
 
-Label(fig[0, :], "Kinematic updraft (W₀ = $W₀ m/s) with warm-phase saturation adjustment";
-      fontsize=18, tellwidth=false)
+vapor_excess_limit = max(maximum(abs, δqᵛ⁺ˡts[1, 1, 1:Nz, :]),
+                            maximum(abs, diagnosed_δqᵛ⁺ˡts[1, 1, 1:Nz, :]))
+vapor_excess_colors = (; colormap = :balance,
+                            colorscale = Makie.Symlog10(1e-5),
+                            colorrange = (-vapor_excess_limit, vapor_excess_limit),
+                            colorbar_ticks = ([-1e-3, -1e-4, 0, 1e-4, 1e-3],
+                                              ["−10⁻³", "−10⁻⁴", "0", "10⁻⁴", "10⁻³"]))
+thermodynamics_figure = Figure(size=(1200, 1000))
+plot_time_height!(thermodynamics_figure[1, 1], Tts;
+                  title = "Temperature", label = "T (K)", colormap = :thermal)
+plot_time_height!(thermodynamics_figure[1, 2], qᵛts;
+                  title = "Water vapor", label = "qᵛ (kg/kg)", colormap = :Blues)
+plot_time_height!(thermodynamics_figure[2, 1], δqᵛ⁺ˡts;
+                  title = "Prognostic vapor excess", label = "δqᵛ⁺ˡ (kg/kg)", vapor_excess_colors...)
+plot_time_height!(thermodynamics_figure[2, 2], diagnosed_δqᵛ⁺ˡts;
+                  title = "Diagnosed vapor excess", label = "qᵛ − qᵛ⁺ˡ (kg/kg)", vapor_excess_colors...)
+save("kinematic_driver_p3_thermodynamics.png", thermodynamics_figure; px_per_unit=2)
+save("kinematic_driver_p3_thermodynamics.svg", thermodynamics_figure)
+thermodynamics_figure
 
-save("kinematic_driver.png", fig)
-fig
-
-# ![](kinematic_driver.png)
-
-# ## Discussion
+# [Download the thermodynamics figure as SVG](kinematic_driver_p3_thermodynamics.svg).
 #
-# The kinematic driver framework enables focused study of cloud microphysics by
-# decoupling them from dynamical feedbacks. Key observations from this simulation:
-#
-# 1. **Cloud base formation**: Moist boundary layer air rises and cools adiabatically.
-#    When it reaches its Lifting Condensation Level (LCL), condensation begins
-#    and cloud liquid appears. The sharp transition in qˡ marks the cloud base.
-#
-# 2. **Moisture partitioning**: Above the cloud base, total water is partitioned
-#    between vapor (at saturation) and liquid (the excess). Water vapor decreases
-#    with height because saturation vapor pressure decreases with temperature.
-#
-# 3. **Potential temperature**: Initially, θ increases with height. As the simulation
-#    progresses, latent heat release from condensation modifies the temperature
-#    profile within the cloud layer.
-#
-# 4. **Divergence correction**: Without `divergence_correction=true`, the constant
-#    velocity field would create spurious tracer sources because ``\boldsymbol{\nabla} \cdot (ρ \boldsymbol{u}) ≠ 0``.
-#    The correction adds a compensating term to the tracer equations.
-#
-# This setup is analogous to classic parcel theory experiments in cloud physics,
-# but resolved on a grid. It's particularly useful for:
-# - Testing and validating microphysics schemes in isolation
-# - Understanding sensitivities to initial moisture and temperature
-# - Pedagogical demonstrations of cloud formation physics
+# Unlike a closed parcel, the column's water inventory changes through inflow,
+# outflow, sedimentation, and the prescribed divergence correction. A quantitative
+# comparison with another kinematic driver must match those terms as well as the
+# sounding, velocity profile, P3 options, and numerical resolution.

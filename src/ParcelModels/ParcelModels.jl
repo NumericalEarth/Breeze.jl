@@ -29,6 +29,7 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Breeze.AtmosphereModels: AtmosphereModels,
                                microphysical_state,
                                microphysical_tendency,
+                               microphysical_tendencies,
                                microphysics_model_update!,
                                moisture_fractions
 

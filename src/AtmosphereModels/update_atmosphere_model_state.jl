@@ -1,7 +1,7 @@
 using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
-using Oceananigans.Advection: update_advection_timestep!
+using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
 using Oceananigans.Fields: flattened_unique_values
@@ -55,10 +55,9 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
         callback.callsite isa UpdateStateCallsite && callback(model)
     end
 
-    # Refresh the adaptive-implicit-vertical-advection time step before computing tendencies, so the
-    # explicit (CFL-scaled) velocity baked into Gⁿ matches the implicit velocity used by the
-    # following solve. A no-op unless some advection scheme uses an adaptive-implicit discretization.
-    update_advection_timestep!(model.advection, model.timestepper, model.clock)
+    # Refresh per-scheme advection state — the adaptive-implicit split time step and any
+    # bounds-preserving limiter — before the tendencies that consume it.
+    update_advection!(model.advection, model)
 
     compute_tendencies && compute_tendencies!(model, callbacks)
 
@@ -94,10 +93,37 @@ tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, 
 # total-density field (CompressibleDynamics overrides this); anelastic aliases dynamics_density.
 compute_total_density!(model) = nothing
 
+# Breeze's advection container is keyed by prognostic name rather than Oceananigans'
+# `(momentum, tracers...)`, so pair each scheme with the specific field it reconstructs.
+function Oceananigans.Advection.update_advection!(advection::NamedTuple, model::AtmosphereModel)
+    fields = reconstructed_fields(model, advection)
+    return update_each_advection!(values(advection), values(fields), model)
+end
+
+@inline update_each_advection!(::Tuple{}, ::Tuple{}, model) = nothing
+
+@inline function update_each_advection!(schemes::Tuple, fields::Tuple, model)
+    Oceananigans.Advection.update_advection!(first(schemes), model, first(fields))
+    return update_each_advection!(Base.tail(schemes), Base.tail(fields), model)
+end
+
+# The specific field each scheme reconstructs, keyed like `advection`. `momentum` limits
+# nothing; the rest name a scalar Breeze advects as a mass fraction.
+@inline function reconstructed_fields(model, advection::NamedTuple{names}) where names
+    θ = NamedTuple{(thermodynamic_density_name(model.formulation),)}((specific_thermodynamic_field(model.formulation),))
+    q = NamedTuple{(moisture_prognostic_name(model.microphysics),)}((specific_prognostic_moisture(model),))
+    micro = NamedTuple{prognostic_field_names(model.microphysics)}(
+        map(name -> model.microphysical_fields[specific_field_name(name)],
+            prognostic_field_names(model.microphysics)))
+    everything = merge((; momentum = nothing), θ, q, micro, model.tracers)
+    return NamedTuple{names}(everything)
+end
+
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
+    ρ = parent(density)
     for ρc in tracers
-        parent(ρc) ./= parent(density)
+        parent(ρc) .= ifelse.(ρ .== 0, zero(eltype(ρ)), parent(ρc) ./ ρ)
     end
     return nothing
 end
@@ -172,12 +198,13 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
         model.clock,
         model_fields)
 
-    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
-    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
+    dynamics = slow_dynamics(model.timestepper, model.dynamics)
+    u_args = tuple(momentum_args..., model.forcing.ρu, dynamics)
+    v_args = tuple(momentum_args..., model.forcing.ρv, dynamics)
 
     # Extra arguments for vertical velocity are required to compute buoyancy
     w_args = tuple(momentum_args..., model.forcing.ρw,
-                   model.dynamics,
+                   dynamics,
                    model.formulation,
                    model.temperature,
                    specific_prognostic_moisture(model),
@@ -187,8 +214,17 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
-    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
+    compute_vertical_momentum_tendency!(model, Gρw, w_args)
 
+    return nothing
+end
+
+# Compute the vertical-momentum tendency `Gρw`. Extendable so that dynamics can omit vertical-velocity
+# stepping — the anelastic single-column mode overrides this to hold `Gρw ≡ 0` (`w ≡ 0`), since the
+# anelastic mass constraint with rigid boundaries forces no resolved vertical velocity in a column.
+function compute_vertical_momentum_tendency!(model::AtmosphereModel, Gρw, w_args)
+    grid = model.grid
+    launch!(grid.architecture, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
     return nothing
 end
 
@@ -201,7 +237,7 @@ Compute auxiliary model variables:
 
 - thermodynamic variables from the prognostic thermodynamic state,
     * temperature ``T``, possibly involving saturation adjustment
-    * specific thermodynamic variable (``e = ρe / ρ`` or ``θ = ρθ / ρ``)
+    * specific thermodynamic variable (``s = ρs / ρ`` or ``θ = ρθ / ρ``)
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
 """
 function compute_auxiliary_variables!(model)
@@ -214,8 +250,14 @@ function compute_auxiliary_variables!(model)
     # Dispatch on dynamics type (computes pressure for compressible dynamics)
     compute_auxiliary_dynamics_variables!(model)
 
-    # Compute diffusivities
-    compute_closure_fields!(model.closure_fields, model.closure, model)
+    # Compute diffusivities. Oceananigans has no `compute_closure_fields!` for a bare array of
+    # field-less closures (a per-column ensemble of e.g. `VerticalScalarDiffusivity`, for which
+    # `closure_fields === nothing`); there is nothing to compute or fill, so skip it. Field-carrying
+    # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
+    if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
+        compute_closure_fields!(model.closure_fields, model.closure, model)
+        fill_halo_regions!(model.closure_fields; only_local_halos=true)
+    end
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
@@ -239,7 +281,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.microphysical_fields)
+    fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
     fill_halo_regions!(model.formulation)
 
     return nothing
@@ -282,7 +324,8 @@ end
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛᵉ, constants)
+    μ = extract_microphysical_prognostics(i, j, k, microphysics, microphysical_fields)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛᵉ, constants, μ, ρ)
 
     update_microphysical_fields!(microphysical_fields, i, j, k, grid,
                                  microphysics, ρ, 𝒰₁, constants)
@@ -297,17 +340,20 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     model_fields = fields(model)
 
+    # The sedimentation velocities the scalar kernels below read are established by
+    # `update_microphysical_auxiliaries!` in `compute_auxiliary_variables!`, so they are
+    # already current for this stage — and, unlike a tendency-time refresh, they stay
+    # current after an `update_state!` that skips tendency computation.
+
     #####
     ##### Momentum tendencies (skip for kinematic dynamics)
     #####
 
     compute_momentum_tendencies!(model, model_fields)
 
-    # Use transport velocities (contravariant for terrain-following grids)
-    advecting_velocities = transport_velocities(model)
-
-    # Arguments common to energy density, moisture density, and tracer density tendencies:
-    common_args = (
+    # Arguments common to energy density, moisture density, and tracer density tendencies,
+    # given the advecting velocities (contravariant for terrain-following grids):
+    tendency_args(advecting_velocities) = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
@@ -320,11 +366,17 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
         model.clock,
         model_fields)
 
+    advecting_velocities = transport_velocities(model)
+    common_args = tendency_args(advecting_velocities)
+
     #####
     ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
     #####
 
-    compute_thermodynamic_tendency!(model, common_args)
+    # The thermodynamic variable may advect with its own velocities, but its condensate
+    # sedimentation term pairs with the moisture and tracer tendencies below, so it reads theirs.
+    compute_thermodynamic_tendency!(model, tendency_args(thermodynamic_transport_velocities(model)),
+                                    advecting_velocities.w)
 
     #####
     ##### Moisture density tendency
@@ -421,7 +473,7 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
 
     # Compute boundary flux contributions
     prognostic_model_fields = prognostic_fields(model)
-    args = (arch, model.clock, fields(model))
+    args = (arch, boundary_condition_args(model)...)
     field_indices = 1:length(prognostic_model_fields)
     Gⁿ = model.timestepper.Gⁿ
 
@@ -432,3 +484,32 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
 
     return nothing
 end
+
+#####
+##### Closure tendencies
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Add a turbulence closure's own tendencies — the local sources of a prognostic the closure carries,
+such as the shear and buoyancy production of turbulent kinetic energy — to the model's tendencies
+`Gⁿ`. The time steppers call this at the start of every stage, after `compute_flux_bc_tendencies!`.
+A no-op for closures that carry no prognostic.
+"""
+compute_closure_tendencies!(model) =
+    compute_closure_tendencies!(model.timestepper.Gⁿ, model.closure_fields, model.closure, model)
+
+compute_closure_tendencies!(Gⁿ, closure_fields, closure, model) = nothing
+
+compute_closure_tendencies!(Gⁿ, ::Tuple{}, ::Tuple{}, model) = nothing
+
+function compute_closure_tendencies!(Gⁿ, closure_fields::Tuple{F, Vararg},
+                                     closures::Tuple{C, Vararg}, model) where {F, C}
+    compute_closure_tendencies!(Gⁿ, first(closure_fields), first(closures), model)
+    compute_closure_tendencies!(Gⁿ, Base.tail(closure_fields), Base.tail(closures), model)
+    return nothing
+end
+
+compute_closure_tendencies!(Gⁿ, closure_fields::Tuple, closures::Tuple, model) =
+    throw(ArgumentError("The numbers of closures and closure fields must match."))

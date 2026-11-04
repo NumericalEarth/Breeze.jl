@@ -42,7 +42,7 @@ u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 p₀ = 101500 # Pa
 θ₀ = 299.1 # K
-buoyancy = Breeze.MoistAirBuoyancy(grid, surface_pressure=p₀, reference_potential_temperature=θ₀)
+buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θ₀)
 
 # Simple precipitation scheme from CloudMicrophysics
 FT = eltype(grid)
@@ -271,14 +271,14 @@ averages_filename = string("bomex_averages_", Nx, "_", Ny, "_", Nz, ".jld2")
 
 ow = JLD2Writer(model, outputs; filename,
                 schedule = TimeInterval(1minutes),
-                overwrite_existing = true)
+                overwrite_files = true)
 
 simulation.output_writers[:jld2] = ow
 
 averages_ow = JLD2Writer(model, averaged_outputs;
                          filename = averages_filename,
                          schedule = TimeInterval(1minutes),
-                         overwrite_existing = true)
+                         overwrite_files = true)
 
 simulation.output_writers[:avg] = averages_ow
 

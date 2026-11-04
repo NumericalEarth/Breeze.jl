@@ -6,6 +6,44 @@ using Test
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
+@testset "Tuple closure fluxes [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 100), y=(0, 100), z=(0, 100))
+    first_closure = ScalarDiffusivity(ν=FT(2), κ=FT(3))
+    second_closure = ScalarDiffusivity(ν=FT(5), κ=FT(7))
+    third_closure = ScalarDiffusivity(ν=FT(11), κ=FT(13))
+
+    closures = (
+        (first_closure,),
+        (first_closure, second_closure),
+        (second_closure, first_closure),
+        (first_closure, second_closure, third_closure),
+    )
+
+    for tuple in closures
+        total = ScalarDiffusivity(ν=sum(c -> c.ν, tuple), κ=sum(c -> c.κ, tuple))
+        tuple_model = AtmosphereModel(grid; closure=tuple, advection=nothing, tracers=:ρc)
+        total_model = AtmosphereModel(grid; closure=total, advection=nothing, tracers=:ρc)
+
+        for model in (tuple_model, total_model)
+            set!(model;
+                 ρu=(x, y, z) -> sin(2π * y / 100) + cos(2π * z / 100),
+                 ρv=(x, y, z) -> sin(2π * x / 100) + cos(2π * z / 100),
+                 ρw=(x, y, z) -> sin(2π * x / 100) + cos(2π * y / 100),
+                 ρc=(x, y, z) -> sin(2π * x / 100) + cos(2π * y / 100) + sin(2π * z / 100))
+            Breeze.AtmosphereModels.compute_tendencies!(model)
+        end
+
+        for name in (:ρu, :ρv, :ρw, :ρc)
+            tuple_tendency = Array(interior(tuple_model.timestepper.Gⁿ[name]))
+            total_tendency = Array(interior(total_model.timestepper.Gⁿ[name]))
+            @test tuple_tendency ≈ total_tendency
+        end
+
+        time_step!(tuple_model, FT(0.1))
+    end
+end
+
 @testset "Time stepping with TurbulenceClosures [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 100), y=(0, 100), z=(0, 100))
@@ -41,12 +79,12 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             # Set uniform specific energy for no diffusion
             θ₀ = model.dynamics.reference_state.potential_temperature
             cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
-            e₀ = cᵖᵈ * θ₀
-            set!(model; e=e₀)
-            ρe₀ = deepcopy(static_energy_density(model))
+            s₀ = cᵖᵈ * θ₀
+            set!(model; s=s₀)
+            ρs₀ = deepcopy(static_energy_density(model))
             time_step!(model, 1)
             # Use rtol for implicit solver which may have small numerical effects
-            @test isapprox(static_energy_density(model), ρe₀, rtol=1e-5)
+            @test isapprox(static_energy_density(model), ρs₀, rtol=1e-5)
         end
 
         @testset "Closure flux affects momentum tendency [$formulation, $(FT)]" begin
@@ -64,6 +102,40 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             set!(model; θ=θ₀, ρu = (x, y, z) -> z / 100)
             Breeze.AtmosphereModels.update_state!(model)
             @test maximum(abs, model.closure_fields.νₑ) > 0
+        end
+
+        @testset "Closure-field halos are filled [$formulation, $(FT)]" begin
+            # `compute_closure_fields!` writes only the interior, so without the
+            # `fill_halo_regions!` in `compute_auxiliary_variables!` every closure-field halo
+            # stays at its initial zero. The stress in the outermost column of each direction
+            # then interpolates that zero and comes out halved (Smagorinsky/AMD included).
+            model = AtmosphereModel(grid; dynamics, formulation, closure=SmagorinskyLilly())
+            θ₀ = model.dynamics.reference_state.potential_temperature
+            # Mean shear plus a horizontal wave, so νₑ varies along the halo faces and the
+            # comparisons below cannot pass by νₑ being horizontally uniform.
+            ρuᵢ(x, y, z) = z / 100 + 0.1 * sin(2π * x / 100) * cos(2π * y / 100)
+            set!(model; θ=θ₀, ρu=ρuᵢ)
+            Breeze.AtmosphereModels.update_state!(model)
+
+            Nx, Ny, Nz = size(grid)
+            Hx, Hy, Hz = Oceananigans.Grids.halo_size(grid)
+            # One bulk copy: `parent` indices are offset by the halo, so interior (i, j, k) sits
+            # at (i + Hx, j + Hy, k + Hz) and no scalar GPU read is needed.
+            νₑ = Array(parent(model.closure_fields.νₑ))
+            ii, jj, kk = Hx+1:Hx+Nx, Hy+1:Hy+Ny, Hz+1:Hz+Nz
+
+            @test maximum(νₑ[ii, jj, kk]) > 0
+            @test maximum(νₑ[ii, jj, kk]) > minimum(νₑ[ii, jj, kk])
+
+            # x and y are Periodic: the first halo holds the opposite interior face
+            @test νₑ[Hx,      jj, kk] == νₑ[Hx+Nx, jj, kk]
+            @test νₑ[Hx+Nx+1, jj, kk] == νₑ[Hx+1,  jj, kk]
+            @test νₑ[ii, Hy,      kk] == νₑ[ii, Hy+Ny, kk]
+            @test νₑ[ii, Hy+Ny+1, kk] == νₑ[ii, Hy+1,  kk]
+
+            # z is Bounded: the default zero-flux condition mirrors the adjacent interior cell
+            @test νₑ[ii, jj, Hz]      == νₑ[ii, jj, Hz+1]
+            @test νₑ[ii, jj, Hz+Nz+1] == νₑ[ii, jj, Hz+Nz]
         end
 
         @testset "DynamicSmagorinsky with velocity gradients [$formulation, $(FT)]" begin
@@ -115,22 +187,84 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             set!(model; θ = θᵢ, ρqᵗ = qᵗᵢ, ρc = ρcᵢ, ρu = Ξ, ρv = Ξ, ρw = Ξ)
 
             # Store initial scalar fields (using copy of data to avoid reference issues)
-            ρe₀ = static_energy_density(model) |> Field |> interior |> Array
+            ρs₀ = static_energy_density(model) |> Field |> interior |> Array
             ρqᵛ₀ = model.moisture_density |> interior |> Array
             ρc₀ = model.tracers.ρc |> interior |> Array
 
             # Take a time step
             time_step!(model, 1)
 
-            ρe₁ = static_energy_density(model) |> Field |> interior |> Array
+            ρs₁ = static_energy_density(model) |> Field |> interior |> Array
             ρqᵛ₁ = model.moisture_density |> interior |> Array
             ρc₁ = model.tracers.ρc |> interior |> Array
 
             # Scalars should change due to diffusion (not advection since advection=nothing)
             # Use explicit maximum difference check instead of ≈ to handle Float32
-            @test maximum(abs, ρe₁ - ρe₀) > 0
+            @test maximum(abs, ρs₁ - ρs₀) > 0
             @test maximum(abs, ρqᵛ₁ - ρqᵛ₀) > 0
             @test maximum(abs, ρc₁ - ρc₀) > 0
         end
     end
+end
+
+#####
+##### The buoyancy gradient seen by the closures
+#####
+
+using Oceananigans.TurbulenceClosures: buoyancy_force, buoyancy_tracers
+using Oceananigans.BuoyancyFormulations: ∂z_b
+using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
+
+@testset "∂z_b is the gradient of the condensate-loaded buoyancy [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 16
+    Lz = 800
+    grid = RectilinearGrid(default_arch; size = Nz, z = (0, Lz), topology = (Flat, Flat, Bounded))
+    microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+    model = AtmosphereModel(grid; microphysics)
+    column(field) = Array(interior(field, 1, 1, :))
+
+    @test buoyancy_force(model).microphysics === model.microphysics
+    @test buoyancy_force(model).microphysical_fields === model.microphysical_fields
+
+    # Uniform potential temperature, and a step in total water at mid-depth that saturates the
+    # upper half of the column, so that there is liquid to load the air above the step
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    qᵗ(z) = ifelse(z < Lz / 2, 4e-3, 20e-3)
+    set!(model; θ = θ₀, qᵗ)
+
+    qˡ = column(model.microphysical_fields.qˡ)
+    qᵛ = column(model.microphysical_fields.qᵛ)
+    T = column(model.temperature)
+    @test qˡ[1] == 0
+    @test qˡ[Nz] > 1e-3
+
+    N² = Field(KernelFunctionOperation{Center, Center, Face}(∂z_b, grid, buoyancy_force(model), buoyancy_tracers(model)))
+    N² = column(N²)
+
+    # θᵨ = (Rᵐ / Rᵈ) T (pˢᵗ / p)^{Rᵈ / cᵖᵈ} with Rᵐ = (1 - qᵛ - qˡ) Rᵈ + qᵛ Rᵛ, from the model's own
+    # temperature and moisture; and the same without the liquid, for the size of the loading
+    constants = model.thermodynamic_constants
+    g = constants.gravitational_acceleration
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    pˢᵗ = model.dynamics.reference_state.standard_pressure
+    p = column(model.dynamics.reference_state.pressure)
+    θᵨ = @. ((1 - qᵛ - qˡ) * Rᵈ + qᵛ * Rᵛ) / Rᵈ * T * (pˢᵗ / p)^(Rᵈ / cᵖᵈ)
+    θᵛ = @. ((1 - qᵛ) * Rᵈ + qᵛ * Rᵛ) / Rᵈ * T * (pˢᵗ / p)^(Rᵈ / cᵖᵈ)
+    Δz = Lz / Nz
+
+    for k in 2:Nz
+        @test isapprox(N²[k], g * (log(θᵨ[k]) - log(θᵨ[k-1])) / Δz; atol = 1e-6, rtol = 1e-4)
+    end
+
+    # Across the step the liquid loads the air above by ≈ g Δqˡ / Δz relative to the vapor-only
+    # (virtual potential temperature) gradient
+    k★ = Nz ÷ 2 + 1
+    @test qˡ[k★] > 0
+    @test qˡ[k★-1] == 0
+    N²ᵛ = g * (log(θᵛ[k★]) - log(θᵛ[k★-1])) / Δz
+    @test N²[k★] < N²ᵛ
+    @test isapprox(N²[k★] - N²ᵛ, -g * (qˡ[k★] - qˡ[k★-1]) / Δz; rtol = 0.02)
 end

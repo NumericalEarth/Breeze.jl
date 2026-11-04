@@ -288,10 +288,7 @@ fractions ``β = (1/3, 1/2, 1)``. Within each stage, an inner substep loop
 evolves linearized acoustic perturbations about each RK stage-entry
 state. The vertically implicit solve uses an off-centered Crank-Nicolson
 scheme with off-centering parameter ``\\omega`` (default 0.65; ``\\omega = 0.5``
-is classic centered CN). In multi-substep stages, the first acoustic
-substep includes the frozen stage-entry horizontal pressure gradient but
-skips the acoustic perturbation pressure gradient, which is applied on
-subsequent substeps following the MPAS forward-backward sequencing.
+is classic centered CN).
 
 The substep distribution across stages is selectable via the
 [`AcousticSubstepDistribution`](@ref) interface.
@@ -304,7 +301,7 @@ Fields
   step (see `acoustic_cfl`).
 - `acoustic_cfl`: Target horizontal acoustic Courant number used by the
   adaptive substep count when `substeps === nothing`. The substep count
-  is ``N \\approx \\lceil \\Delta t \\, \\mathbb{C}^{ac} /
+  is ``N \\approx \\lceil \\Delta t \\, c^{ac} /
   (\\mathrm{acoustic\\_cfl} \\cdot \\Delta x_\\min) \\rceil``, so smaller
   values give more substeps. Default `0.5` (the ERF/WRF target —
   equivalent to the conventional safety factor of `2`). Ignored when
@@ -379,6 +376,8 @@ convert_acoustic_parameter(::Type{FT}, damping::DirectDivergenceDamping) where F
     DirectDivergenceDamping{FT}(convert(FT, damping.coefficient))
 
 """
+$(TYPEDEF)
+
 Abstract supertype for upper-sponge ramp shapes. A concrete `AbstractRamp`
 is callable as `(ramp)(z, sponge_top, depth)` and returns a value in
 ``[0, 1]``, rising monotonically to one at the lid ``z = z_{\\rm sponge\\_top}``.
@@ -535,7 +534,17 @@ MPAS-Atmosphere. The profile shape is controlled by `ramp`; use
   supported by subtyping `AbstractRamp` and defining
   `(::MyRamp)(z, sponge_top, depth)`.
 
-The ramp depends only on the reference vertical coordinate (no horizontal
+- `mask`: optional extra damping region, a function `mask(x, y, z)` of the
+  face node coordinates (`λ, φ, z` on a `LatitudeLongitudeGrid`) returning a
+  value in ``[0, 1]``. The damping rate becomes
+  ``γ = \\text{rate} × \\max(\\text{ramp}(z), \\text{mask}(x, y, z))``, so the
+  same implicit Rayleigh treatment covers, for example, the lateral relaxation
+  zone of a nested limited-area model. Default `nothing` (lid layer only).
+  Because the damping is implicit, it removes the `rate × Δt ≲ 2.5` stability
+  limit that an explicit [`Relaxation`](@ref Oceananigans.Forcings.Relaxation)
+  forcing on `ρw` imposes on the outer time step.
+
+Without a `mask`, the ramp depends only on the reference vertical coordinate (no horizontal
 variation), so the sponge does not break zonal symmetry and remains uniform
 over terrain-following grids. That is also what makes the damping rate
 ``γ(z) = \\text{rate} × \\text{ramp}(z)`` a 1D profile over z-faces:
@@ -545,24 +554,28 @@ and [`materialize_sponge`](@ref) evaluates `ramp` once per face at
 then read `γ` with a single load instead of re-evaluating the shape twice per
 face per acoustic substep.
 """
-struct UpperSponge{FT, R <: AbstractRamp, P}
+struct UpperSponge{FT, R <: AbstractRamp, M, P}
     damping_rate :: FT
     depth :: FT
     ramp :: R
+    mask :: M
     damping_profile :: P
 end
 
-function UpperSponge(; damping_rate = 0.2, depth = 5e3, ramp = CubicRamp())
+function UpperSponge(; damping_rate = 0.2, depth = 5e3, ramp = CubicRamp(), mask = nothing)
     ramp isa AbstractRamp ||
         throw(ArgumentError("`ramp` must be an `<:AbstractRamp` (e.g. `CubicRamp()`, `Sin2Ramp()`, `GaussianRamp()`, `LinearRamp()`)"))
     FT = Oceananigans.defaults.FloatType
-    return UpperSponge(convert(FT, damping_rate), convert(FT, depth), ramp, nothing)
+    return UpperSponge(convert(FT, damping_rate), convert(FT, depth), ramp, mask, nothing)
 end
 
+# The substep kernels read only the precomputed `damping_profile`; `ramp` and `mask` were
+# evaluated into it at construction, so the (possibly closure-valued) mask stays on the host.
 Adapt.adapt_structure(to, sponge::UpperSponge) =
     UpperSponge(sponge.damping_rate,
                 sponge.depth,
                 sponge.ramp,
+                nothing,
                 adapt(to, sponge.damping_profile))
 
 convert_acoustic_parameter(::Type{FT}, ::Nothing) where FT = nothing
@@ -571,7 +584,7 @@ convert_acoustic_parameter(::Type{FT}, ::Nothing) where FT = nothing
 # `materialize_sponge` rebuilds both them and `damping_profile` at the grid's float type.
 convert_acoustic_parameter(::Type{FT}, sponge::UpperSponge) where FT =
     UpperSponge(convert(FT, sponge.damping_rate), convert(FT, sponge.depth),
-                sponge.ramp, sponge.damping_profile)
+                sponge.ramp, sponge.mask, sponge.damping_profile)
 
 """
 $(TYPEDEF)
@@ -600,7 +613,6 @@ struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistri
     vertical_momentum_tendency_factor :: FT
     vertical_pressure_tendency_factor :: FT
     final_stage_vertical_pressure_tendency_factor :: FT
-    apply_first_substep_pressure_gradient :: Bool
     damping :: D
     sponge :: US
     substep_distribution :: AD
@@ -615,7 +627,6 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          vertical_momentum_tendency_factor = FT(1),
                                          vertical_pressure_tendency_factor = FT(1),
                                          final_stage_vertical_pressure_tendency_factor = FT(1),
-                                         apply_first_substep_pressure_gradient = false,
                                          damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
                                          substep_distribution = ProportionalSubsteps(),
@@ -641,7 +652,6 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
         convert(FT, vertical_momentum_tendency_factor),
         convert(FT, vertical_pressure_tendency_factor),
         convert(FT, final_stage_vertical_pressure_tendency_factor),
-        Bool(apply_first_substep_pressure_gradient),
         convert_acoustic_parameter(FT, damping),
         convert_acoustic_parameter(FT, sponge),
         substep_distribution,

@@ -68,7 +68,7 @@ end
 In the per-name walkthrough each prognostic gets its own `microphysical_tendency`
 method. The liquid and ice methods each call `saturation_specific_humidity`
 independently, and the vapor method delegates back into the liquid and ice methods —
-so a given ``saturation_specific_humidity`` is computed twice and the vapor method
+so a given `saturation_specific_humidity` is computed twice and the vapor method
 re-invokes both other dispatches. The structure scales poorly: each new prognostic adds
 another redundant pass.
 
