@@ -466,8 +466,29 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
 
 @regional TKEClosureFields
 
-BoundaryConditions.fill_halo_regions!(fields::TKEClosureFields, args...; kw...) =
-    fill_halo_regions!((fields.Kᵘ, fields.Kᶜ, fields.Kᵉ), args...; kw...)
+function BoundaryConditions.fill_halo_regions!(fields::TKEClosureFields, args...; kw...)
+    diffusivities = (fields.Kᵘ, fields.Kᶜ, fields.Kᵉ)
+    fill_halo_regions!(diffusivities, args...; kw...)
+    clip_negative_halo_diffusivities!(diffusivities, fields.Kᵘ.grid)
+    return nothing
+end
+
+# The halos of a Yin-Yang panel are interpolated from the other panel with 4 × 4 Lagrange stencils,
+# which overshoot: next to a sharp jump in the diffusivity, such as the edge of a turbulent layer,
+# they produce negative diffusivities in the halo. A negative `Kᵘ` beside the panel edge makes the
+# vertical viscosity of the edge velocity anti-diffusive and the shear production there negative,
+# which grows a two-grid-point oscillation in u and negative TKE until the model blows up. The
+# interior diffusivities are nonnegative, so clipping the whole panel removes only the overshoots.
+clip_negative_halo_diffusivities!(diffusivities, grid) = nothing
+
+function clip_negative_halo_diffusivities!(diffusivities, ::YinYangGridOfSomeKind)
+    for K in diffusivities
+        @apply_regionally clip_negative!(K)
+    end
+    return nothing
+end
+
+clip_negative!(K) = (parent(K) .= max.(parent(K), 0); nothing)
 
 function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, tracer_names, bcs, closure::FlavorOfTKEClosure)
     face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()))

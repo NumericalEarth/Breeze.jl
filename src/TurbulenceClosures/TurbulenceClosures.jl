@@ -20,6 +20,7 @@ using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditio
 using Oceananigans.BuoyancyFormulations: ∂z_b
 using Oceananigans.Fields: CenterField, ZFaceField, ZeroField
 using Oceananigans.Grids: Center, Face, inactive_cell
+using Oceananigans.MultiRegion: YinYangGridOfSomeKind
 
 using Oceananigans.Operators:
     # Face-centered difference operators with area metrics
