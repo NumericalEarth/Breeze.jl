@@ -67,6 +67,16 @@ end
 @inline sum_process_rates(rates, names::Tuple) =
     getfield(rates, first(names)) + sum_process_rates(rates, Base.tail(names))
 
+# Only the microphysical fields `p3_grid_process_inputs` reads at a cell: the prognostic
+# densities, the vapor mass fraction, and the column surface temperature. Each `Field`
+# carries its grid inline, so the kernel function holds this subset rather than all of
+# `model.microphysical_fields` (diagnostic mass fractions, sedimentation velocities, ...)
+# to stay small.
+function p3_process_rate_fields(p3, microphysical_fields)
+    names = (prognostic_field_names(p3)..., :qᵛ, :surface_temperature)
+    return NamedTuple{names}(map(name -> microphysical_fields[name], names))
+end
+
 function P3ProcessRate(model, p3, names)
     for name in names
         name ∈ fieldnames(P3ProcessRates) ||
@@ -74,11 +84,12 @@ function P3ProcessRate(model, p3, names)
                                        join(fieldnames(P3ProcessRates), ", :"), ".")))
     end
 
-    kernel = P3ProcessRateKernelFunction{names}(p3, model.microphysical_fields,
+    # The P3 microphysical state reads only the vertical velocity
+    kernel = P3ProcessRateKernelFunction{names}(p3, p3_process_rate_fields(p3, model.microphysical_fields),
                                                 model.formulation, model.dynamics,
                                                 model.thermodynamic_constants,
                                                 AM.total_density(model.dynamics),
-                                                model.velocities)
+                                                (; w = model.velocities.w))
 
     return KernelFunctionOperation{Center, Center, Center}(kernel, model.grid)
 end
