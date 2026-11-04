@@ -13,13 +13,6 @@
 # following [Schär et al. (2002)](@cite Schar2002). The acoustic modes are
 # integrated with the split-explicit substepper.
 #
-# ## References
-#
-# ```@bibliography
-# Pages = ["two_dimension_mountain_wave.md"]
-# Canonical = false
-# ```
-#
 # ## Physical setup
 #
 # The simulation initializes an atmosphere with constant Brunt–Väisälä frequency ``N`` and
@@ -417,3 +410,10 @@ for ax in (ax1, ax2)
     ax.limits = ((-30e3, 30e3), (0, 10e3))
 end
 fig
+
+# ## References
+#
+# ```@bibliography
+# Pages = ["two_dimension_mountain_wave.md"]
+# Canonical = false
+# ```
