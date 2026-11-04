@@ -647,7 +647,7 @@ for arch in arches
 
     @testset "Masked UpperSponge damping profile [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         Oceananigans.defaults.FloatType = FT
-        grid = RectilinearGrid(arch; size=(8, 4, 8), halo=(5, 5, 5),
+        grid = RectilinearGrid(arch; size=(8, 6, 8), halo=(5, 5, 5),
                                x=(0, 8kilometers), y=(0, 4kilometers), z=(0, 8kilometers),
                                topology=(Bounded, Periodic, Bounded))
         damping_rate = FT(0.2)
@@ -655,7 +655,7 @@ for arch in arches
         wall_mask(x, y, z) = x < 2000 ? one(x) : zero(x)
         sponge = materialize_sponge(grid, UpperSponge(; damping_rate, depth, ramp=LinearRamp(), mask=wall_mask))
         γ = Array(interior(sponge.damping_profile))
-        @test size(γ) == (8, 4, 9)
+        @test size(γ) == (8, 6, 9)
         @test all(γ[1:2, :, 1] .≈ damping_rate)             # inside the mask, all the way down
         @test all(γ[3:8, :, 1] .== 0)                       # outside the mask and below the lid layer
         @test all(γ[3:8, :, 9] .≈ damping_rate)             # the lid layer is unchanged

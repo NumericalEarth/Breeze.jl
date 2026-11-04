@@ -755,6 +755,8 @@ The user-facing [`UpperSponge`](@ref) constructor has no grid, so it produces a 
 `damping_profile = nothing` — this is the matching materialization step.
 """
 function materialize_sponge(grid, sponge::UpperSponge)
+    isnothing(sponge.mask) || return materialize_masked_sponge(grid, sponge)
+
     # Converting to the *grid* float type is what keeps γ out of the tridiag's promotion path: a
     # Float64 γ on a Float32 grid would widen the whole Thomas recurrence, per column per substep.
     FT = eltype(grid)
@@ -773,7 +775,7 @@ end
 
 # With a `mask` the damping rate varies horizontally, so it is evaluated into a full z-face field:
 # γ = rate × max(ramp(r), mask(x, y, z)), read at the same (i, j, k) as the 1D profile.
-function materialize_sponge(grid, sponge::UpperSponge{<:Any, <:Any, <:Function})
+function materialize_masked_sponge(grid, sponge::UpperSponge)
     FT = eltype(grid)
     damping_rate = convert(FT, sponge.damping_rate)
     depth = convert(FT, sponge.depth)
