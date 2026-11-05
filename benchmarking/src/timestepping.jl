@@ -76,6 +76,11 @@ function grad_loss!(model, dmodel, θ_init, dθ_init, Δt, Nsteps, checkpointing
     return loss_value
 end
 
+# TEMPORARY: kernel AD names the GPU modules and kernels it outlines after the compiled
+# function (`grad_loss!_jit_region_0_kernel`), and NVPTX rejects `!` in a symbol name
+# ("Symbol name with unsupported characters"), so the kernel AD compile goes through this
+grad_loss(args...) = grad_loss!(args...)
+
 """
     checkpointing_label(checkpointing)
 

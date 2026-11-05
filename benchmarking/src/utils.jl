@@ -130,8 +130,9 @@ function benchmark_time_stepping(model;
             if verbose
                 @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing), mincut=$mincut) with Reactant (raise=$raise, optimize=$optimize)..."
             end
+            grad! = kernels == "kernelad" ? grad_loss : grad_loss!
             compiled_grad!, compile_timings = timed_reactant_compile(; profile) do
-                Reactant.@compile compile_options=reactant_compile_options(; raise, optimize) grad_loss!(
+                Reactant.@compile compile_options=reactant_compile_options(; raise, optimize) grad!(
                     model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing, mincut)
             end
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing, mincut)
