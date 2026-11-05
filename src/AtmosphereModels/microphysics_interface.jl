@@ -308,19 +308,57 @@ function compute_microphysical_tendencies!(microphysics, model)
     G_tuple = map(n -> getproperty(G, n), all_names)
     name_tuple = map(Val, all_names)
 
+    # The mass each species' microphysical sinks may draw on over the coming stage (see
+    # `stage_sink_fraction`): the state the stage update starts from plus every other tendency.
+    prognostic = prognostic_fields(model)
+    from_initial_state = outflow_budget_from_initial_state(model.timestepper, model.clock)
+    initial_tuple = map(n -> getproperty(model.timestepper.U⁰, n), all_names)
+    current_tuple = map(n -> getproperty(prognostic, n), all_names)
+    Δt = stage_time_step(model.timestepper, model.clock)
+
     # Microphysics responds to the physical velocity of the current state, so we pass
     # `model.velocities` rather than `transport_velocities(model)`, which is the contravariant
     # vertical velocity on terrain-following grids and the acoustic time average under
     # `AcousticRungeKutta3`.
     launch!(arch, grid, :xyz, _default_microphysical_tendencies_kernel!,
-            G_tuple, name_tuple, grid, microphysics, model.dynamics, model.formulation,
+            G_tuple, initial_tuple, current_tuple, from_initial_state, Δt, name_tuple, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, specific_prognostic_moisture(model),
             model.microphysical_fields, model.velocities)
 
     return nothing
 end
 
-@kernel function _default_microphysical_tendencies_kernel!(G_tuple, name_tuple, grid,
+"""
+$(TYPEDSIGNATURES)
+
+The interval over which the coming stage applies the tendencies being built, or `Inf` (no sink
+limiting) when it is not known, for example before the first time step.
+"""
+function stage_time_step(timestepper, clock)
+    Δt = Oceananigans.Advection.adaptive_advection_timestep(timestepper, clock)
+    return ifelse(isfinite(Δt) & (Δt > 0), Δt, convert(typeof(Δt), Inf))
+end
+
+# Fraction of a cell's microphysical tendencies the coming stage can apply without driving a
+# species negative. The stage update is `q = q⁰ + Δt (Gᵒ + Gᵐ)` with `Gᵒ` every other tendency
+# and `Gᵐ` the microphysical one. The schemes' own donor limiters bound their sinks by the
+# content the rates were evaluated at, over a fixed timescale; under Wicker–Skamarock RK3 that
+# content is the previous stage's, not `q⁰`, and the stage interval can exceed the timescale.
+# Scaling the whole microphysical tendency of the cell by one factor keeps the exchanges
+# between species (and so water and the thermodynamic variable) conserved.
+@inline stage_sink_fraction(::Tuple{}, ::Tuple{}, ::Tuple{}, ::Tuple{}, from_initial_state, Δt, i, j, k) = 1
+
+@inline function stage_sink_fraction(Gᵐ::Tuple, G_tuple::Tuple, initial_tuple::Tuple, current_tuple::Tuple, from_initial_state, Δt, i, j, k)
+    Gᵐ₁ = first(Gᵐ)
+    @inbounds q⁰ = ifelse(from_initial_state, first(initial_tuple)[i, j, k], first(current_tuple)[i, j, k])
+    @inbounds available = max(0, q⁰ + Δt * first(G_tuple)[i, j, k])
+    demand = - Δt * Gᵐ₁
+    f₁ = ifelse(demand > available, available / ifelse(demand > 0, demand, one(demand)), one(demand))
+    return min(f₁, stage_sink_fraction(Base.tail(Gᵐ), Base.tail(G_tuple), Base.tail(initial_tuple), Base.tail(current_tuple),
+                                       from_initial_state, Δt, i, j, k))
+end
+
+@kernel function _default_microphysical_tendencies_kernel!(G_tuple, initial_tuple, current_tuple, from_initial_state, Δt, name_tuple, grid,
                                                             microphysics, dynamics, formulation,
                                                             constants, specific_prognostic_moisture,
                                                             microphysical_fields, velocities)
@@ -334,20 +372,19 @@ end
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, microphysical_fields, ρ, 𝒰, velocities)
 
-    _accumulate_microphysical_tendencies!(G_tuple, name_tuple, microphysics, i, j, k, ρ, ℳ, 𝒰, constants)
+    Gᵐ = map(name -> microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants), name_tuple)
+    f = stage_sink_fraction(Gᵐ, G_tuple, initial_tuple, current_tuple, from_initial_state, Δt, i, j, k)
+    _accumulate_microphysical_tendencies!(G_tuple, Gᵐ, f, i, j, k)
 end
 
 # Recursive Tuple iteration: type-stable and statically unrolled because the
 # tuples carry their length and element types in their Tuple{...} type.
-@inline _accumulate_microphysical_tendencies!(::Tuple{}, ::Tuple{}, microphysics, i, j, k, ρ, ℳ, 𝒰, constants) = nothing
+@inline _accumulate_microphysical_tendencies!(::Tuple{}, ::Tuple{}, f, i, j, k) = nothing
 
-@inline function _accumulate_microphysical_tendencies!(G_tuple::Tuple, name_tuple::Tuple,
-                                                       microphysics, i, j, k, ρ, ℳ, 𝒰, constants)
+@inline function _accumulate_microphysical_tendencies!(G_tuple::Tuple, Gᵐ::Tuple, f, i, j, k)
     G = first(G_tuple)
-    name = first(name_tuple)
-    @inbounds G[i, j, k] += microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
-    return _accumulate_microphysical_tendencies!(Base.tail(G_tuple), Base.tail(name_tuple),
-                                                 microphysics, i, j, k, ρ, ℳ, 𝒰, constants)
+    @inbounds G[i, j, k] += f * first(Gᵐ)
+    return _accumulate_microphysical_tendencies!(Base.tail(G_tuple), Base.tail(Gᵐ), f, i, j, k)
 end
 
 #####
