@@ -10,7 +10,7 @@ module PotentialTemperatureFormulations
 
 export LiquidIcePotentialTemperatureFormulation
 
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using DocStringExtensions: TYPEDEF
 using Adapt: Adapt, adapt

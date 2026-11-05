@@ -73,7 +73,7 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS} <: AbstractTimeStepper
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
 
@@ -123,7 +123,7 @@ const CompressibleAcousticModel{Arc} = AtmosphereModel{<:CompressibleDynamics, <
 @inline stage_increment(ts, stage) = ifelse(stage == 1, ts.β₁, ifelse(stage == 2, ts.β₂ - ts.β₁, 1 - ts.β₂))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The adaptive-implicit split time step for the *next* Wicker–Skamarock stage, so the explicit
 velocity fraction frozen into `Gⁿ` pairs with the implicit fraction the next stage applies.
@@ -145,7 +145,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Run one Wicker–Skamarock RK3 stage: complete the slow tendencies built by
 `update_state!`, then execute the linearized-acoustic substep loop, then
@@ -214,7 +214,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Seed `clock.last_stage_Δt` before the first step (or for a clock carrying a non-finite value)
 with the increment a completed third stage leaves, ``(1 - β₂) Δt`` — what
@@ -243,7 +243,7 @@ function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::Compress
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Step forward `model` one time step `Δt` with Wicker–Skamarock RK3 and
 linearized acoustic substepping.

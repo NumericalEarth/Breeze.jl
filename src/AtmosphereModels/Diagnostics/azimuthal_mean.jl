@@ -1,7 +1,7 @@
 # Imports are provided by the Diagnostics module.
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Azimuthally average `field` into radial rings about `center = (xc, yc)`, returning a
 `Field` on a one-dimensional-in-radius grid — `Bounded` in radius, `Flat` in azimuth, and
@@ -44,7 +44,7 @@ function azimuthal_mean(field; radius, Nr, center = (0, 0), m = 4)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Remap `field` (on an ``(x, y, z)`` grid) onto the radial rings of `profile` (on an
 ``(r, z)`` grid) about `center`, in place, by area-weighted binning of `m × m` sub-cells

@@ -47,9 +47,9 @@ and interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 
 ### Docstrings
 
-- Use `$(TYPEDSIGNATURES)` from DocStringExtensions.jl (never write explicit signatures)
-- Import it with `using Breeze.Utils: TYPEDSIGNATURES`, not from DocStringExtensions: Breeze's
-  version shows default values of positional and keyword arguments
+- Use `$(TYPEDSIGNATURES_WITH_DEFAULTS)` (never write explicit signatures)
+- Import it with `using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS`. It is DocStringExtensions'
+  `TYPEDSIGNATURES` with default values of positional and keyword arguments shown
 - **ALWAYS `jldoctest` blocks, NEVER plain `julia` blocks** — doctests are tested; plain blocks rot
 - Include expected output after `# output`; prefer `show` methods over boolean comparisons
 - **Citations**: Use inline `[Author (year)](@cite Key)` syntax woven into prose

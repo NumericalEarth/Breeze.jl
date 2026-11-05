@@ -17,7 +17,7 @@ export
     # Interface functions extended by Microphysics
     microphysics_phase_equilibrium
 
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using Breeze.Solvers: SecantSolver
 

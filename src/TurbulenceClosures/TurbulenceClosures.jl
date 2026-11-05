@@ -11,7 +11,7 @@ export TKEBasedTurbulenceClosure,
        MoistStaticStability
 
 using Adapt: Adapt, adapt
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using KernelAbstractions: @kernel, @index
 

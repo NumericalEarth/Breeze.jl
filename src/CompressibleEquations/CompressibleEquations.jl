@@ -51,7 +51,7 @@ export
     freeze_linearization_state!,
     acoustic_rk3_substep_loop!
 
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using DocStringExtensions: TYPEDEF
 using Adapt: Adapt, adapt

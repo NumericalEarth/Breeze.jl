@@ -113,7 +113,7 @@ export
     sum_aerosol_number,
     aerosol_activation_rate
 
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using DocStringExtensions: TYPEDFIELDS, TYPEDEF
 using SpecialFunctions: erf

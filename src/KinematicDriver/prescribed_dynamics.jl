@@ -3,7 +3,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Wrapper indicating that density is fixed (not prognostic).
 """
@@ -50,7 +50,7 @@ function PrescribedDynamics{Div}(density::D,
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `PrescribedDynamics` from a [`ReferenceState`](@ref).
 Wraps density in `PrescribedDensity` (fixed in time).
@@ -87,7 +87,7 @@ function PrescribedDynamics(reference_state::ReferenceState; divergence_correcti
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `PrescribedDynamics` from a density field or `PrescribedDensity`.
 If `pressure=nothing`, hydrostatic pressure is computed during materialization. `base_pressure`

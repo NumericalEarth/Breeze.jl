@@ -7,7 +7,7 @@ export cos_solar_zenith_angle,
        day_of_year
 
 using Dates: AbstractDateTime, Dates
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using Oceananigans.Grids: RectilinearGrid, Flat, Bounded, Center, xnode, ynode
 
 include("solar_zenith_angle.jl")

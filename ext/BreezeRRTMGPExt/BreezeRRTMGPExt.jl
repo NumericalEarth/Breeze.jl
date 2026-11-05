@@ -11,7 +11,7 @@ using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, Constan
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU, GPU, ReactantState
@@ -32,7 +32,7 @@ using RRTMGP.RTESolver: solve_lw!, solve_sw!
 using ClimaComms: ClimaComms
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `RRTMGPParameters` from Breeze's `ThermodynamicConstants`.
 """
@@ -54,7 +54,7 @@ function Parameters.RRTMGPParameters(constants::ThermodynamicConstants{FT};
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create an RRTMGP-compatible ClimaComms context from an Oceananigans architecture.
 """

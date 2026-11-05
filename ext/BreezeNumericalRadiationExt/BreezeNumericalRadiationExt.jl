@@ -46,7 +46,7 @@ using Oceananigans.Utils: launch!, IterationInterval, prettysummary
 using Adapt: Adapt, adapt
 using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using DocStringExtensions: TYPEDEF
 
 include("overlying_atmosphere.jl")

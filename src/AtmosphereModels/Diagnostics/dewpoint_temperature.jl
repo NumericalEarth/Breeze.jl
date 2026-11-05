@@ -24,7 +24,7 @@ Adapt.adapt_structure(to, k::DewpointTemperatureKernelFunction) =
 const DewpointTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:DewpointTemperatureKernelFunction}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `KernelFunctionOperation` representing the dewpoint temperature ``T⁺``.
 

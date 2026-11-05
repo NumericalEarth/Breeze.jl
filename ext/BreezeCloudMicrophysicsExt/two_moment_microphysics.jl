@@ -51,7 +51,7 @@ using CloudMicrophysics.Parameters:
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create a default `AerosolActivation` representing a typical continental aerosol population.
 
@@ -760,7 +760,7 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the cloud liquid mass tendency from aerosol activation.
 
@@ -834,7 +834,7 @@ Mass tendency for cloud liquid [kg/kg/s]
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the fraction of aerosol that activates given current thermodynamic conditions.
 Uses the maximum supersaturation to determine which aerosol modes activate.

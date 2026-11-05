@@ -170,7 +170,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `AcousticSubstepper`. The perturbation face fields ``(ρu)′, (ρv)′, (ρw)′`` and the
 scalar-transport velocities use topology-derived BCs (periodic wrap / impenetrability), **not** the
@@ -270,7 +270,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the background quantities used by the substepper as the first
 linearization point of an outer step. Subsequent RK stages call
@@ -289,7 +289,7 @@ function freeze_linearization_state!(substepper::AcousticSubstepper, model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Seed the time-averaged transport velocity with the outer-step-start velocities: stage 1 has no
 prior acoustic loop in this outer step to average over. Called at outer-step start by
@@ -385,7 +385,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Stage-start cache preparation. Refreshes the cached linearization
 quantities (θᴸ, Cᴸ) to the **stage-entry state** ``Uᴸ_\\mathrm{stage}``
@@ -403,7 +403,7 @@ prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the number of acoustic substeps ``N`` from the horizontal
 acoustic CFL:
@@ -435,7 +435,7 @@ compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_cfl) =
     compute_acoustic_substeps(minimum_horizontal_spacing(grid), Δt, thermodynamic_constants, acoustic_cfl)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The smallest horizontal spacing of `grid`, in the grid's float type: the length the acoustic
 Courant number of [`compute_acoustic_substeps`](@ref) is measured against. A `Flat` direction
@@ -862,7 +862,7 @@ end
 @inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Run the `Nτ` acoustic substeps of one RK3 stage by calling [`acoustic_substep!`](@ref) for each.
 
@@ -1379,7 +1379,7 @@ function enforce_wall_impenetrability!(substepper, model, grid, arch)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance the implicit half of the IMEX split for the thermodynamic perturbation over one
 substep: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★`, solved on the θ predictor between Step B and Step C so
@@ -1399,7 +1399,7 @@ function implicit_advection_substep!(model, substepper, advection::AdaptiveImpli
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance the acoustic perturbation fields of `substepper` by one substep of size `stage.Δτ`.
 `stage` holds the loop-invariant quantities of the current RK3 stage: the substep size `Δτ`,
@@ -1525,7 +1525,7 @@ function acoustic_substep!(model, substepper, stage, advection)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on

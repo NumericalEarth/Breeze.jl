@@ -14,7 +14,7 @@
 const TKE_density_name = :ρe
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The placeholder gustiness of a bulk-flux boundary condition constructed without one. When the
 `AtmosphereModel` materializes its boundary conditions it is replaced by
@@ -38,7 +38,7 @@ struct TKEGustiness{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 A gustiness ``Uᵍ`` estimated from the subgrid turbulent kinetic energy ``e`` of a
 `TKEBasedTurbulenceClosure` in the cell next to the wall,
@@ -91,7 +91,7 @@ Base.summary(g::TKEGustiness{FT}) where FT =
 Base.show(io::IO, g::TKEGustiness) = print(io, summary(g))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the gustiness a bulk-flux boundary condition uses in a model with turbulence `closure`.
 A [`DefaultGustiness`](@ref) placeholder becomes a [`TKEGustiness`](@ref) under a

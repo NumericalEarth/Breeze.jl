@@ -34,7 +34,7 @@ struct FilteredSurfaceVelocities{U, V, Θ, H, FT, R, RΘ}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Two-dimensional fields storing temporally filtered near-surface velocities and the
 surface-layer virtual potential temperature difference for use in bulk flux boundary
@@ -125,7 +125,7 @@ struct FilteredSurfaceScalar{F, H, FT, R}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 A two-dimensional field storing a temporally filtered near-surface scalar
 for use in bulk flux boundary conditions. The bulk scalar fluxes store the complete
@@ -233,7 +233,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set filtered surface velocities to the current near-surface values.
 """
@@ -246,7 +246,7 @@ function initialize!(fv::FilteredSurfaceVelocities, velocities, grid)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set filtered surface scalar to the current near-surface value.
 """
@@ -259,7 +259,7 @@ function initialize!(fs::FilteredSurfaceScalar, field_3d, grid)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the filtered surface velocities using the exponential filter
 with time step `Δt`. `velocities` should be a `NamedTuple` with
@@ -275,7 +275,7 @@ function update!(fv::FilteredSurfaceVelocities, velocities, grid, Δt)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the filtered surface scalar using the exponential filter
 with time step `Δt`.
@@ -290,7 +290,7 @@ function update!(fs::FilteredSurfaceScalar, field_3d, grid, Δt)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the filtered surface-layer virtual potential temperature difference to its current
 value, formed by the bulk coefficient `coef` from the first-cell state and the surface
@@ -309,7 +309,7 @@ function initialize_Δθᵥ!(fv::FilteredSurfaceVelocities, coef, Tˢ, grid, clo
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply the exponential filter to the surface-layer virtual potential temperature difference,
 with the surface temperature `Tˢ` evaluated at `clock.time`. `fields` carries the same

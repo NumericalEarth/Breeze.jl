@@ -48,7 +48,7 @@ Adapt.adapt_structure(to, state::ColumnState) =
                 adapt(to, state.constants))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The [`ColumnState`](@ref) of `model` with the ozone of `rtm`'s background atmosphere and the
 extension and extension pressures of `rtm`'s workspace, for the batch of columns that follows
@@ -77,7 +77,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Pressure, temperature, molar amounts (mol m⁻²) of dry air, water vapor and ozone, and liquid and
 ice water paths (kg m⁻²) of grid cell `k` of column `(i, j)`.
@@ -111,7 +111,7 @@ downwelling longwave by -0.2 W m⁻².
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The state of extension layer `m` of column `(i, j)`, in the form of [`grid_layer_state`](@ref):
 the anchored temperature, the log-mean of the hydrostatic pressures on its faces, the dry-air
@@ -142,7 +142,7 @@ amount `Δp / (g mᵈ)`, the water vapor and ozone as their mole fractions times
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The state of column layer `k` (top-down) of column `(i, j)`: a grid cell or, above the grid top,
 an extension layer.
@@ -208,7 +208,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The temperature on column interface `k` (top-down) of column `(i, j)`: on the grid's faces the
 interpolated temperature, above it the interpolated temperature of the anchored extension layers.
@@ -231,7 +231,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Integrate the extension layers' hydrostatic pressures of the `batch_size = (Nx, rows)` columns of
 the batch of `state` upward from the grid's top face, with the virtual temperature of the

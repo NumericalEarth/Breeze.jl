@@ -14,7 +14,7 @@ using GPUArraysCore: @allowscalar
 using Statistics: mean!
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rescale all density-weighted prognostic fields so that specific quantities
 (velocity, potential temperature, moisture, etc.) are preserved after a change
@@ -108,7 +108,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the reference pressure and density profiles from horizontally-averaged
 temperature and moisture mass fractions of the current model state.
@@ -157,7 +157,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rewrite the bottom-face pressure and density of an `ExnerReferenceState` from the horizontal-mean
 near-surface state `(θˢ, qᵛˢ)`, in place.
@@ -195,7 +195,7 @@ function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛ
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Exner analogue of the `ReferenceState` method, for split-explicit `CompressibleDynamics`. Recompute
 the base `exner_function`/`pressure`/`density` by re-running the same discrete Exner column
@@ -252,7 +252,7 @@ function set_to_mean!(ref::ExnerReferenceState, model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the reference state of `model`'s dynamics from the temperature `T̄` and the vapor, liquid and
 ice mass fractions `q̄ᵛ`, `q̄ˡ`, `q̄ⁱ` (`Number`s, `Function(z)`s, or `Field`s), and update the pressure
@@ -266,7 +266,7 @@ function Thermodynamics.compute_reference_state!(model::AtmosphereModel, T̄, q�
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the dynamics' reference state from the horizontal means of the model's current state via
 [`set_to_mean!`](@ref) — works for both the anelastic `ReferenceState` and the split-explicit
@@ -380,7 +380,7 @@ function has_condensate(model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the prognostic density of a `CompressibleDynamics` model into discrete hydrostatic balance with
 the current `θˡⁱ`/`qᵛ`, per [`HydrostaticallyBalancedDensity`](@ref). Runs the same per-column

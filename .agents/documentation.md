@@ -40,7 +40,7 @@ When testing documentation changes locally, temporarily modify `docs/make.jl`:
 
 ~~~~
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Example:
 

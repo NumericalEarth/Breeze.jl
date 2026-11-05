@@ -27,7 +27,7 @@ struct DefaultValue end
 const ParticlesOrNothing = Union{Nothing, AbstractLagrangianParticles}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `particles` unchanged. Extended for grids on which Lagrangian particle
 tracking is not supported, so that the combination is rejected at construction
@@ -83,7 +83,7 @@ materialize_closure(closure, scalar_names, arch) = with_tracers(scalar_names, cl
 materialize_coriolis(coriolis, arch) = coriolis
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return an `AtmosphereModel` that uses the anelastic approximation following
 [Pauluis (2008)](@cite Pauluis2008).
@@ -489,7 +489,7 @@ closure_scalar_names(model::AtmosphereModel) =
     closure_scalar_names(model.formulation, model.microphysics, keys(model.tracers))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The index under which the prognostic field `name` enters the vertically-implicit solve: `nothing`
 for momentum, which is diffused with the closure's viscosity, and `Val(i)` for the `i`th closure
@@ -501,7 +501,7 @@ function closure_scalar_index(model::AtmosphereModel, name::Symbol)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether the prognostic field `name` sits out the vertically-implicit solve. The dynamics-specific
 prognostics — the compressible dry density, the kinematic driver's density — are advanced explicitly
@@ -545,7 +545,7 @@ function invalid_key_hint(name)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Check that every key of the user-supplied `boundary_conditions` names something that can
 carry them: a prognostic field, a velocity component of dynamics whose velocities are
@@ -593,7 +593,7 @@ function validate_interface_forcing(user_forcings, interface_name, target_name)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Re-key a forcing supplied under the moisture key `ρqᵗ` (see
 [`total_moisture_density_name`](@ref)), or its specific alias `qᵗ`, onto the moisture density
@@ -789,7 +789,7 @@ combine_forcing_values(a, b::Tuple) = (a, b...)
 combine_forcing_values(a, b) = (a, b)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The non-prognostic fields exposed alongside the prognostic ones by `Oceananigans.fields(model)`,
 which is the temperature and nothing else. Forcings and boundary functions resolve their
@@ -807,7 +807,7 @@ every kernel that performs one. Boundary conditions receive them as a second tup
 auxiliary_model_fields(temperature) = (; T=temperature)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The pressure and density the model's own thermodynamics is evaluated with, which surface-flux
 boundary conditions read to diagnose the surface state below `(i, j)`. `boundary_condition_args`

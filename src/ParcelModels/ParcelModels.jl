@@ -24,7 +24,7 @@ export
     ssp_rk3_parcel_substep!,
     store_initial_parcel_state!
 
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 

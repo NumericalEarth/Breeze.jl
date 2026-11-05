@@ -50,7 +50,7 @@ module Solvers
 
 export NewtonSolver, SecantSolver, FixedIterations
 
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using DocStringExtensions: TYPEDEF
 using Oceananigans: Oceananigans
@@ -73,7 +73,7 @@ struct NewtonSolver{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`NewtonSolver`](@ref) with relative tolerance `reltol`, absolute tolerance
 `abstol`, and iteration cap `maxiter`.
@@ -105,7 +105,7 @@ struct SecantSolver{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`SecantSolver`](@ref) with relative tolerance `reltol`, absolute tolerance
 `abstol`, and iteration cap `maxiter`.
@@ -149,7 +149,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `solver` with its tolerances converted to float type `FT`, so that
 solver parameters stored on `Float32` models do not promote kernel arithmetic.
@@ -173,7 +173,7 @@ materialize_solver(::Nothing, FT) = nothing
 # code (required for Reactant tracing and cheap reverse-mode differentiation).
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve `r(x) = 0` by Newton iteration from initial guess `x`, where
 `residual_and_derivative(x)` returns the tuple `(r(x), r′(x))`.
@@ -228,7 +228,7 @@ end
 @inline rounding_noise(scale) = 30 * eps(abs(scale))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve `r(x) = 0` by secant iteration from the initial guesses `x₁` and `x₂`, where
 `residual(x)` returns `r(x)`. The convergence criterion compares the residual against

@@ -18,7 +18,7 @@ export
     AnelasticModel,
     solve_for_anelastic_pressure!
 
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 

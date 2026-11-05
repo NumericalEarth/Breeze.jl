@@ -76,7 +76,7 @@ using Breeze.Microphysics:
     adjust_thermodynamic_state
 
 using Oceananigans: Oceananigans
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using Oceananigans: Center, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation

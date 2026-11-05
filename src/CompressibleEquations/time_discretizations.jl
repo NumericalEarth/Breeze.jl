@@ -45,7 +45,7 @@ linearized perturbations about each RK stage-entry state.
 struct WickerSkamarock3 <: AcousticOuterScheme end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the stage-fraction tuple ``(β_1, β_2, β_3)`` for the outer Runge–Kutta
 scheme. For [`WickerSkamarock3`](@ref) this is the canonical

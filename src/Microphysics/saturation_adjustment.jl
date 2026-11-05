@@ -20,7 +20,7 @@ using Breeze.Thermodynamics:
 using Breeze.Solvers: SecantSolver, secant_solve, materialize_solver
 
 using Oceananigans: Oceananigans, CenterField
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 struct SaturationAdjustment{E, S}
     equilibrium :: E
@@ -30,7 +30,7 @@ end
 const SA = SaturationAdjustment
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `SaturationAdjustment` microphysics representing an instantaneous adjustment
 to `equilibrium` between condensates and water vapor, computed by a secant iteration
@@ -215,7 +215,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 
@@ -271,7 +271,7 @@ the state's total water, heat capacity, gas constant, and latent energy.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Perform saturation adjustment and return the temperature
 associated with the adjusted state.

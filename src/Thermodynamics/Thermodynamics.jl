@@ -27,7 +27,7 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        AbstractPhaseEquilibrium, WarmPhaseEquilibrium, MixedPhaseEquilibrium,
        equilibrated_surface
 
-using Breeze.Utils: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using DocStringExtensions: TYPEDEF
 using Oceananigans: Oceananigans

@@ -27,7 +27,7 @@ struct StabilityFunction{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Parameters for the integrated Monin-Obukhov stability functions ``Ψ^D(ζ)``
 and ``Ψ^T(ζ)``.
@@ -94,7 +94,7 @@ struct RichardsonNumberMapping{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Regression coefficients for the non-iterative mapping from bulk Richardson number
 ``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L``, following
@@ -144,7 +144,7 @@ struct FittedStabilityFunction{FT, RM, SP}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Stability correction based on Monin-Obukhov similarity theory using the
 [Li et al. (2010)](@cite Li2010) analytical mapping from bulk Richardson
@@ -212,7 +212,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Map bulk Richardson number ``Riᴮ`` to the Monin-Obukhov stability parameter
 ``ζ = z/L`` using the regression equations of Li et al. (2010).
@@ -263,7 +263,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Integrated stability function for momentum ``Ψᴰ(ζ)``.
 
@@ -277,7 +277,7 @@ Note: ``Ψᴰ`` corresponds to ``Ψ_m`` in the literature.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Integrated stability function for scalars (heat, moisture) ``Ψᵀ(ζ)``.
 
@@ -343,7 +343,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The virtual potential temperature a stability-dependent bulk boundary condition compares against
 its surface value, evaluated from the model field tuple the boundary-condition kernel is handed
@@ -408,7 +408,7 @@ struct PolynomialCoefficient{FT, C, SF, S, θᵛ, SP, TC, TT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 A bulk transfer coefficient that depends on wind speed and atmospheric stability,
 following [Large and Yeager (2009)](@cite LargeYeager2009).
@@ -563,7 +563,7 @@ Base.summary(coef::PolynomialCoefficient) =
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute neutral transfer coefficient at 10 m using the
 [Large and Yeager (2009)](@cite LargeYeager2009) form:
@@ -590,7 +590,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute bulk Richardson number:
 ```math
@@ -619,7 +619,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the virtual potential temperature of a planar `surface` with surface temperature `Tˢ`,
 surface pressure `pˢ`, standard pressure `pˢᵗ`, moisture availability `β` and first-cell specific
@@ -651,7 +651,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Evaluate the bulk transfer coefficient for given conditions.
 
@@ -740,7 +740,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The virtual potential temperature of the wall next to the cell `(i, j, k)`, from the wall
 temperature `Tˢ`, the air pressure `pˢ` at the wall, and the coefficient's standard pressure,
@@ -755,7 +755,7 @@ in the near-wall cell.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The surface-layer virtual potential temperature difference ``Δθᵥ = θᵥ(z₁) - θᵥˢ`` between the
 near-wall cell `(i, j, k)` and the wall at temperature `Tˢ`, from the instantaneous state: the
