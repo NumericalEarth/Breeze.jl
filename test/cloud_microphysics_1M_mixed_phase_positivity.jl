@@ -24,7 +24,7 @@ function mixed_phase_state(FT, constants; T, qᵛ, qᶜˡ, qᶜⁱ, qʳ, qˢⁿ,
     q = MoistureMassFractions(FT(qᵛ), FT(qᶜˡ + qʳ), FT(qᶜⁱ + qˢⁿ))
     𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), FT(p)), FT(T), constants)
     ρ = density(𝒰, constants)
-    ℳ = MixedPhaseOneMomentState(FT(qᶜˡ), FT(qᶜⁱ), FT(qʳ), FT(qˢⁿ))
+    ℳ = MixedPhaseOneMomentState(FT(qᶜˡ), FT(qᶜⁱ), FT(qʳ), FT(qˢⁿ), zero(FT))
     return ρ, ℳ, 𝒰
 end
 

@@ -38,7 +38,7 @@ using Breeze.Thermodynamics:
     equilibrated_surface
 
 using Breeze.AtmosphereModels: AtmosphereModel, dynamics_pressure, gas_phase_density, total_density,
-                               grid_moisture_fractions, specific_prognostic_moisture
+                               grid_moisture_fractions, specific_prognostic_moisture, liquid_ice_exner_exponent
 
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
