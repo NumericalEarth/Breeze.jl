@@ -61,10 +61,9 @@ BoundaryConditions.fill_halo_regions!(l::OutflowLimiter, args...; kwargs...) =
 Base.summary(l::OutflowLimiter) = "OutflowLimiter"
 
 const AVID = Oceananigans.Utils.AdaptiveVerticallyImplicitDiscretization
-const BoundsPreservation = Oceananigans.Advection.BoundsPreservation
 
 "A bounds-preserving WENO whose vertical time discretization is adaptive-implicit and whose outflow is limited."
-const OutflowLimitedWENO = Oceananigans.Advection.WENO{<:Any, <:Any, <:Any, <:AVID, <:BoundsPreservation{<:Any, <:OutflowLimiter}}
+const OutflowLimitedWENO = Oceananigans.Advection.WENO{<:Any, <:Any, <:Any, <:AVID, <:Oceananigans.Advection.BoundsPreservation{<:Any, <:OutflowLimiter}}
 
 """
 $(TYPEDSIGNATURES)
@@ -75,13 +74,13 @@ unchanged.
 """
 with_outflow_limiter(scheme, grid) = scheme
 
-function with_outflow_limiter(scheme::Oceananigans.Advection.WENO{N, FT, WCT, <:AVID, <:BoundsPreservation}, grid) where {N, FT, WCT}
+function with_outflow_limiter(scheme::Oceananigans.Advection.WENO{N, FT, WCT, <:AVID, <:Oceananigans.Advection.BoundsPreservation}, grid) where {N, FT, WCT}
     bounds = scheme.bounds
     bounds.limiter isa OutflowLimiter && return scheme
     r = CenterField(grid)
     fill!(r, 1)
     limiter = OutflowLimiter(bounds.limiter, r)
-    limited_bounds = BoundsPreservation(bounds.minimum_value, bounds.maximum_value, bounds.maximum_courant_number, limiter)
+    limited_bounds = Oceananigans.Advection.BoundsPreservation(bounds.minimum_value, bounds.maximum_value, bounds.maximum_courant_number, limiter)
     return Oceananigans.Advection.WENO{N, FT, WCT}(limited_bounds, scheme.buffer_scheme,
                                                    scheme.advecting_velocity_scheme,
                                                    scheme.time_discretization)

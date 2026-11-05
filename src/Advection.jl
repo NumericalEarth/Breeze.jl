@@ -17,12 +17,9 @@ using Oceananigans.Advection:
     RightBias,
     upwind_biased_product,
     rescaled_reconstruction,
-    implicit_vertical_velocityᶜᶜᶠ,
     bounded_tracer_flux_divergence_x,
     bounded_tracer_flux_divergence_y,
     bounded_tracer_flux_divergence_z,
-    explicit_velocity_scaleᶜᶜᶠ,
-    vertical_scheme,
     WENO
 
 using Oceananigans: Oceananigans
@@ -37,7 +34,6 @@ using Oceananigans.Grids: AbstractGrid, Flat
 using Oceananigans.Utils: launch!, sum_of_velocities
 using KernelAbstractions: @kernel, @index
 using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
-using Oceananigans.TimeSteppers: time_discretization
 using DocStringExtensions: TYPEDSIGNATURES
 
 using ..AtmosphereModels:
