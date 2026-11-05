@@ -201,11 +201,34 @@ end
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * outflow
 end
 
-@kernel function _compute_outflow_fraction!(r, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt)
+# Mass the explicit fluxes of the coming stage bring into cell (i, j, k), per unit volume, with
+# each inflowing face flux scaled by the fraction `r` of the cell it leaves.
+@inline function limited_explicit_inflow(i, j, k, grid, advection, ρ, U, wᵉ, c, r)
+    Fx⁻ = bounded_face_flux_x(i,   j, k, grid, advection, ρ, U.u, c)
+    Fx⁺ = bounded_face_flux_x(i+1, j, k, grid, advection, ρ, U.u, c)
+    Fy⁻ = bounded_face_flux_y(i, j,   k, grid, advection, ρ, U.v, c)
+    Fy⁺ = bounded_face_flux_y(i, j+1, k, grid, advection, ρ, U.v, c)
+    Fz⁻ = bounded_face_flux_z(i, j, k,   grid, advection, ρ, wᵉ, c)
+    Fz⁺ = bounded_face_flux_z(i, j, k+1, grid, advection, ρ, wᵉ, c)
+    @inbounds inflow = max(0, Fx⁻) * r[i-1, j, k] - min(0, Fx⁺) * r[i+1, j, k] +
+                       max(0, Fy⁻) * r[i, j-1, k] - min(0, Fy⁺) * r[i, j+1, k] +
+                       max(0, Fz⁻) * r[i, j, k-1] - min(0, Fz⁺) * r[i, j, k+1]
+    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * inflow
+end
+
+# Iterated passes. The first fraction budgets the outflow against the stage's starting content
+# alone. Each later pass credits the inflow scaled by the previous pass's fractions of the upwind
+# cells; the fractions only grow from pass to pass, so the credited inflow never exceeds what the
+# stage delivers and positivity holds after any number of passes. Crediting the inflow keeps the
+# limiter inert where the net change is within budget — at the front of a falling layer, say,
+# where the outflow alone exceeds the step-start content but the inflow replaces it.
+@kernel function _compute_outflow_fraction!(r, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, second_pass)
     i, j, k = @index(Global, NTuple)
     wᵉ = ExplicitVerticalVelocity(grid, advection, U.w, ρ)
     removed = Δt * explicit_outflow(i, j, k, grid, advection, ρ, U, wᵉ, c)
-    @inbounds budget = max(0, ifelse(from_initial_state, q⁰[i, j, k], ρ[i, j, k] * c[i, j, k]))
+    @inbounds content = max(0, ifelse(from_initial_state, q⁰[i, j, k], ρ[i, j, k] * c[i, j, k]))
+    inflow = ifelse(second_pass, Δt * limited_explicit_inflow(i, j, k, grid, advection, ρ, U, wᵉ, c, r₀), zero(content))
+    budget = content + ifelse(isfinite(inflow), inflow, zero(inflow))
     @inbounds r[i, j, k] = ifelse(isfinite(removed) & (removed > budget), budget / removed, one(budget))
 end
 
@@ -235,7 +258,17 @@ function AtmosphereModels.update_outflow_limiter!(advection::OutflowLimitedWENO,
     q⁰ = getproperty(model.timestepper.U⁰, name)
     from_initial_state = outflow_budget_from_initial_state(model.timestepper, model.clock)
     Δt = stage_time_step(model.timestepper, model.clock)
-    launch!(architecture(grid), grid, :xyz, _compute_outflow_fraction!, r, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt)
+    r₀ = advection.bounds.limiter.provisional_fraction
+    arch = architecture(grid)
+    launch!(arch, grid, :xyz, _compute_outflow_fraction!, r₀, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, false)
+    fill_halo_regions!(r₀)
+    launch!(arch, grid, :xyz, _compute_outflow_fraction!, r, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, true)
+    fill_halo_regions!(r)
+    # Two more passes: each credits the inflow at the previous, larger fractions, so the fractions
+    # increase monotonically toward the least limiting that keeps every cell non-negative.
+    launch!(arch, grid, :xyz, _compute_outflow_fraction!, r₀, r, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, true)
+    fill_halo_regions!(r₀)
+    launch!(arch, grid, :xyz, _compute_outflow_fraction!, r, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, true)
     fill_halo_regions!(r)
     return nothing
 end

@@ -43,17 +43,20 @@ struct OutflowLimiter{Θ, R}
     rescaling :: Θ
     "fraction of each cell's explicit outflow the coming stage may apply"
     outflow_fraction :: R
+    "first-pass fraction from the outflow alone, a lower bound on `outflow_fraction` that bounds the inflow"
+    provisional_fraction :: R
 end
 
 @inline Base.getindex(l::OutflowLimiter, i, j, k) = @inbounds l.rescaling[i, j, k]
 @inline Base.setindex!(l::OutflowLimiter, v, i, j, k) = @inbounds l.rescaling[i, j, k] = v
 
 Adapt.adapt_structure(to, l::OutflowLimiter) =
-    OutflowLimiter(adapt(to, l.rescaling), adapt(to, l.outflow_fraction))
+    OutflowLimiter(adapt(to, l.rescaling), adapt(to, l.outflow_fraction), adapt(to, l.provisional_fraction))
 
 Oceananigans.Architectures.on_architecture(to, l::OutflowLimiter) =
     OutflowLimiter(Oceananigans.Architectures.on_architecture(to, l.rescaling),
-                   Oceananigans.Architectures.on_architecture(to, l.outflow_fraction))
+                   Oceananigans.Architectures.on_architecture(to, l.outflow_fraction),
+                   Oceananigans.Architectures.on_architecture(to, l.provisional_fraction))
 
 BoundaryConditions.fill_halo_regions!(l::OutflowLimiter, args...; kwargs...) =
     fill_halo_regions!(l.rescaling, args...; kwargs...)
@@ -78,8 +81,10 @@ function with_outflow_limiter(scheme::Oceananigans.Advection.WENO{N, FT, WCT, <:
     bounds = scheme.bounds
     bounds.limiter isa OutflowLimiter && return scheme
     r = CenterField(grid)
+    r₀ = CenterField(grid)
     fill!(r, 1)
-    limiter = OutflowLimiter(bounds.limiter, r)
+    fill!(r₀, 1)
+    limiter = OutflowLimiter(bounds.limiter, r, r₀)
     limited_bounds = Oceananigans.Advection.BoundsPreservation(bounds.minimum_value, bounds.maximum_value, bounds.maximum_courant_number, limiter)
     return Oceananigans.Advection.WENO{N, FT, WCT}(limited_bounds, scheme.buffer_scheme,
                                                    scheme.advecting_velocity_scheme,
