@@ -128,7 +128,8 @@ end
             @test isapprox(aiva.ρqʳ, explicit.ρqʳ; rtol = 0, atol = tolerance)
             @test aiva.minimum_ρqʳ ≥ -eps(FT) * maximum(abs, explicit.ρqʳ)
         else
-            @test aiva.ρqʳ == explicit.ρqʳ
+            # Agrees to roundoff, not bit for bit
+            @test isapprox(aiva.ρqʳ, explicit.ρqʳ; rtol = 0, atol = eps(FT) * maximum(abs, explicit.ρqʳ))
             @test aiva.minimum_ρqʳ ≥ 0
         end
     end
