@@ -85,8 +85,10 @@ $(TYPEDEF)
 
 A Gaussian subgrid distribution of the conserved variables (Sommeria and Deardorff 1977;
 Mellor 1977). Closures that do not prognose second moments supply them with the down-gradient
-mixing-length form ⟨φ'ψ'⟩ = `variance_coefficient` ℓ² ∂zφ ∂zψ (Bechtold et al. 1995), with ℓ the
-closure's mixing length. The microphysics floors the saturation-deficit spread smoothly,
+form ⟨φ'ψ'⟩ = (`variance_coefficient` ℓ² + `grid_variance_coefficient` Δz²) ∂zφ ∂zψ: the
+mixing-length variance of Bechtold et al. (1995), with ℓ the closure's mixing length, plus the
+variance of the resolved gradient within the cell (Δz²/12 for a linear profile), which matters
+where ℓ collapses, as at an inversion, and vanishes as Δz → 0. The microphysics floors the saturation-deficit spread smoothly,
 σₛ = √(σₛ² + `minimum_saturation_deficit_spread`²), which keeps the distribution non-degenerate
 in the absence of turbulence.
 
@@ -97,12 +99,14 @@ $(TYPEDFIELDS)
 julia> using Breeze.AtmosphereModels: GaussianSubgridCorrelation
 
 julia> GaussianSubgridCorrelation(Float64)
-GaussianSubgridCorrelation{Float64}(1.0, 0.0001)
+GaussianSubgridCorrelation{Float64}(1.0, 0.08333333333333333, 0.0001)
 ```
 """
 struct GaussianSubgridCorrelation{FT} <: AbstractSubgridCorrelation
     "coefficient of the mixing-length (co)variances ℓ² ∂zφ ∂zψ"
     variance_coefficient :: FT
+    "coefficient of the within-cell gradient (co)variances Δz² ∂zφ ∂zψ"
+    grid_variance_coefficient :: FT
     "background saturation-deficit spread σₛ [kg kg⁻¹]"
     minimum_saturation_deficit_spread :: FT
 end
@@ -114,8 +118,10 @@ Return a [`GaussianSubgridCorrelation`](@ref) with float type `FT`.
 """
 GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatType;
                            variance_coefficient = 1,
+                           grid_variance_coefficient = 1/12,
                            minimum_saturation_deficit_spread = 1e-4) =
-    GaussianSubgridCorrelation(convert(FT, variance_coefficient), convert(FT, minimum_saturation_deficit_spread))
+    GaussianSubgridCorrelation(convert(FT, variance_coefficient), convert(FT, grid_variance_coefficient),
+                               convert(FT, minimum_saturation_deficit_spread))
 
 """
     subgrid_correlation(microphysics)
