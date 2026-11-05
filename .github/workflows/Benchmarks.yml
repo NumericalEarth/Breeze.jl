@@ -169,7 +169,9 @@ jobs:
           using Pkg
           # `reactant_rev` fixes Reactant here, and the branch's version can lag the project's
           # exact Reactant compat, so drop the bound for this entry. `Pkg.compat` checks the
-          # manifest against `[sources]`, so resolve first: the manifest is gitignored
+          # manifest against `[sources]`, so resolve first: the manifest is gitignored.
+          # The image rebuilt on 2026-11-05 has no registry, which `resolve` does not install
+          isempty(Pkg.Registry.reachable_registries()) && Pkg.Registry.add("General")
           Pkg.resolve()
           Pkg.compat("Reactant", nothing)
           Pkg.add(url = "https://github.com/EnzymeAD/Reactant.jl", rev = "${{ matrix.reactant_rev }}")
