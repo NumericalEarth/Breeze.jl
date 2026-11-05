@@ -104,23 +104,11 @@ end
 #####
 ##### The explicit/implicit split of a bounds-preserving tracer
 #####
-##### Bounds-preserving WENO keeps a tracer within its bounds only while the Courant number of
-##### the outflow through each face of a donor cell is at most `maximum_courant_number`
-##### (ω̂₁ = 5/18 at fifth order): the limited cell average decomposes as
-##### cₖ = ω̂₁ c⁻ + ω̂₁ c⁺ + (1 - 2ω̂₁) p̃ with every part within bounds, and an outflow face can
-##### only remove its own share. The adaptive split caps the explicit Courant number at the
-##### scheme's `cfl` instead, typically 0.5, so wherever the vertical (or sedimentation) Courant
-##### number exceeds ω̂₁ the explicit stage overdrafts the donor cell and the implicit solve,
-##### which is monotone, carries the negative value on.
-#####
-##### For a bounds-preserving scheme the explicit fraction is therefore also capped so that the
-##### mass-weighted outflow Courant number of the donor cell,
-#####
-#####   λ = |w| Δt ρᶠ / (ρᶜ Δzᶜ)   (donor cell below the face for w > 0, above it for w < 0),
-#####
-##### is at most ω̂₁, and the implicit remainder takes the rest: wᵉ + wⁱ = w exactly, so mass is
-##### conserved, and the implicit first-order operator (an M-matrix) cannot create a negative.
-##### Elsewhere, and for every scheme without bounds, the split is the upstream one.
+##### Bounds-preserving WENO stays in bounds only while each donor cell's outflow Courant number
+##### is at most `maximum_courant_number` (ω̂₁ = 5/18 at fifth order), but the adaptive split caps
+##### it at `cfl` (typically 0.5). For these schemes the explicit fraction is also capped so that
+##### λ = |w| Δt ρᶠ / (ρᶜ Δzᶜ) ≤ ω̂₁ in the donor cell; the implicit remainder, an M-matrix, takes
+##### the rest.
 #####
 
 const BoundsPreservingAIVA = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:BoundsPreservation}

@@ -144,13 +144,11 @@ the cost is confined to CFL targeting on one stage when ``Δt`` changes (see
     return ifelse(isfinite(Δt_stage), Δt_stage, Δt_last)
 end
 
-# Every Wicker–Skamarock stage restarts from Uⁿ, so stages 2 and 3 subtract their explicit outflow
-# from U⁰. Stage 1's tendencies are built by the `update_state!` that closes the previous step
-# (`clock.stage == 1`), when the current state *is* the coming Uⁿ.
-@inline AtmosphereModels.outflow_budget_from_initial_state(::AcousticRungeKutta3, clock) = clock.stage > 1
+# Stages 2 and 3 update from U⁰. Stage 1's tendencies are built at the end of the previous step,
+# when the current state is the coming Uⁿ.
+@inline AtmosphereModels.stage_starts_from_initial_state(::AcousticRungeKutta3, clock) = clock.stage > 1
 
-# Stage 1's tendencies are built before `Δtₙ` is known, from `β₁ Δtₙ₋₁`; the positivity limiters
-# budget for `Δtₙ` up to twice `Δtₙ₋₁`, so a growing adaptive time step cannot outrun them.
+# Stage 1's tendencies are built before `Δtₙ` is known, so the limiters allow for `Δtₙ ≤ 2Δtₙ₋₁`.
 @inline AtmosphereModels.stage_time_step(timestepper::AcousticRungeKutta3, clock) =
     AtmosphereModels.finite_stage_time_step(timestepper, clock) * ifelse(clock.stage == 1, 2, 1)
 

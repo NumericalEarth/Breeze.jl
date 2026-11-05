@@ -288,10 +288,8 @@ function add_implicit_advection_tendency!(model, advection::AdaptiveImplicitVert
     return nothing
 end
 
-# The base-state part of the momentum split's implicit half: `Lⁱ (ρu)ᴸ` at the location
-# `(ℓx, ℓy, ℓz)` of the momentum component, built from the same tridiagonal coefficients the
-# per-substep solve uses (evaluated with unit Δt), so base plus perturbation sum exactly to the
-# operator the solve inverts. Boundary rows vanish through the coefficients' peripheral masks.
+# `Lⁱ (ρu)ᴸ` from the coefficients the per-substep solve uses (at unit Δt), so base plus
+# perturbation sum to the operator the solve inverts.
 @kernel function _implicit_momentum_advection_base_tendency!(G, grid, scheme, W, ρu, ρᵈ, ℓx, ℓy, ℓz)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
@@ -305,9 +303,8 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Fold the base-state part of the momentum IMEX split's implicit half into `Gⁿ`, so the acoustic
-loop sees the implicit vertical transport of momentum (the perturbation part is solved per
-substep by `implicit_momentum_advection_substep!`). A no-op for explicit momentum advection.
+Add the base-state part of the implicit vertical momentum transport to `Gⁿ`; the perturbation
+part is solved per substep by `implicit_momentum_advection_substep!`. A no-op for explicit advection.
 """
 add_implicit_momentum_advection_tendency!(model) =
     add_implicit_momentum_advection_tendency!(model, model.advection.momentum)
@@ -327,10 +324,8 @@ function add_implicit_momentum_advection_tendency!(model, advection::AdaptiveImp
     return nothing
 end
 
-# The implicit halves of the IMEX vertical-advection splits of momentum and the thermodynamic
-# variable are applied inside the acoustic loop (`implicit_momentum_advection_substep!`,
-# `implicit_advection_substep!`), so post-loop they keep only density-weighted closure
-# diffusion under an adaptive-implicit scheme.
+# Under adaptive implicit advection the advection half was applied inside the acoustic loop,
+# so the post-loop solve keeps only the closure diffusion.
 postloop_scheme(advection, ρ) = implicit_step_scheme(advection, ρ)
 postloop_scheme(::AdaptiveImplicitVerticalAdvection, ρ) = implicit_step_scheme(nothing, ρ)
 

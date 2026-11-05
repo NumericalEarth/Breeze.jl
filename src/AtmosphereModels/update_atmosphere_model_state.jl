@@ -438,10 +438,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     ##### Fused microphysics tendencies (no-op by default; schemes opt in)
     #####
 
-    # Last, after the tendency callbacks (for example lateral boundary relaxation): the
-    # microphysical sinks are limited to what the coming stage leaves of each species once every
-    # other tendency is applied (see `accumulate_stage_limited!`), so every other tendency must
-    # already be in `Gⁿ`.
+    # Last, because the `SinkLimiter` reads every other tendency, including the callbacks'.
     compute_microphysical_tendencies!(model)
 
     return nothing

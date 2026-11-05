@@ -225,10 +225,9 @@ end
     end
 end
 
-@testset "Mixed-phase 1M sinks respect the stage budget when Δt > τⁿᵘᵐ [$FT]" for FT in test_float_types()
+@testset "Mixed-phase 1M sinks are limited to what the stage leaves when Δt > τⁿᵘᵐ [$FT]" for FT in test_float_types()
     # Snow melting in warm air. The donor limiter caps sinks at the content over τⁿᵘᵐ = 10 s, so at
-    # Δt = 40 s a stage could remove four times the snow (min ρqˢⁿ ≈ -6e-7 without the stage
-    # budget); `accumulate_stage_limited!` caps each cell's sinks at what the stage can draw on.
+    # Δt = 40 s a stage could remove four times the snow without the `SinkLimiter`.
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size = (4, 4, 4), halo = (4, 4, 4), x = (0, 1_000), y = (0, 1_000), z = (0, 1_000))
     constants = ThermodynamicConstants()
@@ -250,7 +249,7 @@ end
     @test minimum(ρqʳ) ≥ 0
 end
 
-@testset "Microphysical sinks share the stage budget with tendency callbacks [$FT]" for FT in test_float_types()
+@testset "Microphysical sinks are limited after tendency callbacks [$FT]" for FT in test_float_types()
     # A tendency callback (like a lateral boundary relaxation) that removes 90% of the snow over a
     # step, on top of melting at Δt > τⁿᵘᵐ. The microphysics runs after the callbacks, so its sinks
     # see what the callback leaves.

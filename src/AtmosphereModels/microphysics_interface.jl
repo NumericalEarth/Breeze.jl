@@ -313,7 +313,7 @@ function compute_microphysical_tendencies!(microphysics, model)
     # vertical velocity on terrain-following grids and the acoustic time average under
     # `AcousticRungeKutta3`.
     launch!(arch, grid, :xyz, _default_microphysical_tendencies_kernel!,
-            G_tuple, stage_sink_budget(model, all_names), name_tuple, grid, microphysics,
+            G_tuple, SinkLimiter(model, all_names), name_tuple, grid, microphysics,
             model.dynamics, model.formulation, model.thermodynamic_constants,
             specific_prognostic_moisture(model), model.microphysical_fields, model.velocities)
 
@@ -323,8 +323,8 @@ end
 """
 $(TYPEDSIGNATURES)
 
-The interval over which the coming stage applies the tendencies being built, or `Inf` (no
-limiting) when it is not known, for example before the first time step.
+The interval over which the coming stage applies the tendencies being built, or `Inf`
+(no limiting) when it is not known, for example before the first time step.
 """
 stage_time_step(timestepper, clock) = finite_stage_time_step(timestepper, clock)
 
@@ -336,78 +336,54 @@ end
 """
 $(TYPEDEF)
 
-What the microphysical sinks of the species `names` may draw on over the coming stage: the state
-the stage update starts from (`initial`, the step-start state, when `from_initial_state`, else
-`current`) plus every other tendency, over the stage interval `Δt`. See [`stage_sink_budget`](@ref).
-
-$(TYPEDFIELDS)
+Limits the microphysical sinks of a set of species to what the coming stage leaves of each,
+`q⁰ + Δt Gᵒ`, with `q⁰` the state the stage starts from and `Gᵒ` every other tendency.
+See [`sink_fraction`](@ref).
 """
-struct StageSinkBudget{I, C, B, T}
-    "step-start densities of the species"
-    initial :: I
-    "current densities of the species"
-    current :: C
-    "whether the stage starts from the step-start state"
-    from_initial_state :: B
-    "stage interval"
-    Δt :: T
+struct SinkLimiter{I, C, B, T}
+    initial :: I             # step-start densities of the species
+    current :: C             # current densities of the species
+    from_initial_state :: B  # whether the stage starts from `initial` (else `current`)
+    Δt :: T                  # stage interval; `Inf` disables the limiter
 end
 
-Adapt.adapt_structure(to, b::StageSinkBudget) =
-    StageSinkBudget(adapt(to, b.initial), adapt(to, b.current), b.from_initial_state, b.Δt)
+Adapt.adapt_structure(to, l::SinkLimiter) =
+    SinkLimiter(adapt(to, l.initial), adapt(to, l.current), l.from_initial_state, l.Δt)
 
 """
 $(TYPEDSIGNATURES)
 
-The [`StageSinkBudget`](@ref) of the prognostic species `names` of `model`, for fused
-microphysics kernels that add their tendencies with [`accumulate_stage_limited!`](@ref).
+The [`SinkLimiter`](@ref) of the prognostic species `names` of `model`.
 """
-function stage_sink_budget(model, names)
+function SinkLimiter(model, names)
     prognostic = prognostic_fields(model)
     initial = map(n -> getproperty(model.timestepper.U⁰, n), names)
     current = map(n -> getproperty(prognostic, n), names)
-    from_initial_state = outflow_budget_from_initial_state(model.timestepper, model.clock)
-    return StageSinkBudget(initial, current, from_initial_state, stage_time_step(model.timestepper, model.clock))
-end
-
-# Fraction of a cell's microphysical tendencies the coming stage can apply without driving a
-# species negative. The stage update is `q = q⁰ + Δt (Gᵒ + Gᵐ)` with `Gᵒ` every other tendency
-# and `Gᵐ` the microphysical one. The schemes' own donor limiters bound their sinks by the
-# content the rates were evaluated at, over a fixed timescale; under Wicker–Skamarock RK3 that
-# content is the previous stage's, not `q⁰`, and the stage interval can exceed the timescale.
-# Scaling the whole microphysical tendency of the cell by one factor keeps the exchanges
-# between species (and so water and the thermodynamic variable) conserved.
-@inline stage_sink_fraction(::Tuple{}, ::Tuple{}, ::Tuple{}, ::Tuple{}, from_initial_state, Δt, i, j, k) = 1
-
-@inline function stage_sink_fraction(Gᵐ::Tuple, G_tuple::Tuple, initial::Tuple, current::Tuple, from_initial_state, Δt, i, j, k)
-    @inbounds q⁰ = ifelse(from_initial_state, first(initial)[i, j, k], first(current)[i, j, k])
-    @inbounds available = max(0, q⁰ + Δt * first(G_tuple)[i, j, k])
-    demand = - Δt * first(Gᵐ)
-    f₁ = ifelse(demand > available, available / ifelse(demand > 0, demand, one(demand)), one(demand))
-    f = stage_sink_fraction(Base.tail(Gᵐ), Base.tail(G_tuple), Base.tail(initial), Base.tail(current),
-                            from_initial_state, Δt, i, j, k)
-    return min(f₁, f)
+    from_initial_state = stage_starts_from_initial_state(model.timestepper, model.clock)
+    return SinkLimiter(initial, current, from_initial_state, stage_time_step(model.timestepper, model.clock))
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Add the microphysical tendencies `Gᵐ` of one cell to `G_tuple`, all scaled by the largest fraction
-that keeps every species within its [`StageSinkBudget`](@ref) `budget`.
+The largest fraction `f ∈ [0, 1]` of the microphysical tendencies `Gᵐ` of cell `(i, j, k)` that
+the coming stage can apply without driving a species negative, given the other tendencies `G`
+already accumulated. One fraction for every species keeps the exchanges between them conserved.
 """
-@inline function accumulate_stage_limited!(G_tuple, Gᵐ, budget, i, j, k)
-    f = stage_sink_fraction(Gᵐ, G_tuple, budget.initial, budget.current, budget.from_initial_state, budget.Δt, i, j, k)
-    return accumulate_scaled_tendencies!(G_tuple, Gᵐ, f, i, j, k)
+@inline function sink_fraction(limiter, G, Gᵐ, i, j, k)
+    Δt = limiter.Δt
+    fractions = map(limiter.initial, limiter.current, G, Gᵐ) do q⁰, qᶜ, Gᵒ, gᵐ
+        @inbounds q = ifelse(limiter.from_initial_state, q⁰[i, j, k], qᶜ[i, j, k])
+        @inbounds available = max(0, q + Δt * Gᵒ[i, j, k])
+        demand = - Δt * gᵐ
+        ifelse(demand > available, available / demand, one(demand))
+    end
+    f = min(fractions...)
+    # With `Δt = Inf`, `available` is zero wherever `Gᵒ ≤ 0`
+    return ifelse(isfinite(Δt), f, one(f))
 end
 
-@inline accumulate_scaled_tendencies!(::Tuple{}, ::Tuple{}, f, i, j, k) = nothing
-
-@inline function accumulate_scaled_tendencies!(G_tuple::Tuple, Gᵐ::Tuple, f, i, j, k)
-    @inbounds first(G_tuple)[i, j, k] += f * first(Gᵐ)
-    return accumulate_scaled_tendencies!(Base.tail(G_tuple), Base.tail(Gᵐ), f, i, j, k)
-end
-
-@kernel function _default_microphysical_tendencies_kernel!(G_tuple, budget, name_tuple, grid,
+@kernel function _default_microphysical_tendencies_kernel!(G_tuple, limiter, name_tuple, grid,
                                                             microphysics, dynamics, formulation,
                                                             constants, specific_prognostic_moisture,
                                                             microphysical_fields, velocities)
@@ -422,7 +398,8 @@ end
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, microphysical_fields, ρ, 𝒰, velocities)
 
     Gᵐ = map(name -> microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants), name_tuple)
-    accumulate_stage_limited!(G_tuple, Gᵐ, budget, i, j, k)
+    f = sink_fraction(limiter, G_tuple, Gᵐ, i, j, k)
+    map((G, g) -> @inbounds(G[i, j, k] += f * g), G_tuple, Gᵐ)
 end
 
 #####

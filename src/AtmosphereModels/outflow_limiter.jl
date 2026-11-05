@@ -2,49 +2,23 @@
 ##### Outflow limiting for bounds-preserving WENO under adaptive implicit vertical advection
 #####
 #
-# A bounds-preserving WENO (`WENO(; bounds)`) keeps a tracer in its bounds only for a forward-Euler
-# update *from the state its fluxes are built on*, at Courant number ≤ `maximum_courant_number`
-# (5/18 by default). Breeze's scalar stages break both conditions:
-#
-#   1. Wicker–Skamarock RK3 updates every stage from the step-start state,
-#      `qₖ = qⁿ + βₖ Δt G(qₖ₋₁)`, so the explicit outflow of a cell is built on `qₖ₋₁` but drawn
-#      from `qⁿ`. Under adaptive implicit vertical advection the implicit solve of the previous
-#      stage can carry mass into a cell that was empty at `tⁿ`; the explicit outflow of that mass
-#      is then subtracted from `qⁿ ≈ 0` and the cell goes negative. This happens at any explicit
-#      CFL target, and grows with the vertical Courant number.
-#   2. The adaptive split caps the explicit vertical Courant number at `cfl` (0.5 by default),
-#      not at `maximum_courant_number`.
-#
-# The fix is a flux-corrected (zero-th order FCT) outflow limiter: before the tendencies are
-# built, each cell's total explicit outflow over the coming stage, `βΔt V⁻¹ Σ max(F_out, 0)`, is
-# compared with the mass the stage update will subtract it from, and every outgoing face flux is
-# scaled by `r = min(1, budget / outflow)` of its upwind cell. Each face flux leaves exactly one
-# cell, so the scaling is conservative, and since the limited reconstructions are themselves
-# non-negative the inflows are too: the stage update stays non-negative for any Courant number.
-# The implicit remainder (first-order upwind backward Euler, an M-matrix) then keeps it so.
-#
-# The fractions `r` are cached next to the bounds-preserving rescaling `θ` in the scheme's
-# `BoundsPreservation.limiter` slot, so the tendency kernels, which receive the scheme, read them
-# without new kernel arguments.
+# Bounds-preserving WENO stays in bounds only for a forward-Euler update from the state its fluxes
+# are built on. Wicker–Skamarock stages update from the step-start state `qⁿ` with fluxes built on
+# the previous stage, so a cell filled by the previous implicit solve can export more than `qⁿ`
+# holds. Each cell's outgoing face fluxes are therefore scaled by `r = min(1, available / outflow)`,
+# a conservative zeroth-order flux-corrected transport limiter.
 
 """
 $(TYPEDEF)
 
-The `limiter` of a `BoundsPreservation` carried by a bounds-preserving WENO under adaptive implicit
-vertical advection. It holds Oceananigans' cell-wise reconstruction rescaling `θ` (`rescaling`,
-which it forwards indexing to, so Oceananigans' bounded reconstructions read it unchanged) and the
-cell-wise fraction `outflow_fraction` ``∈ [0, 1]`` by which the explicit outgoing face fluxes of
-each cell are scaled so that a Runge–Kutta stage cannot remove more mass than the cell holds.
-
-$(TYPEDFIELDS)
+The `limiter` of a `BoundsPreservation` for bounds-preserving WENO under adaptive implicit vertical
+advection: Oceananigans' reconstruction rescaling `θ`, which indexing forwards to, and the fraction
+`r ∈ [0, 1]` of each cell's explicit outflow the coming stage may apply.
 """
 struct OutflowLimiter{Θ, R}
-    "Oceananigans' bounds-preserving reconstruction rescaling ``θ``"
-    rescaling :: Θ
-    "fraction of each cell's explicit outflow the coming stage may apply"
-    outflow_fraction :: R
-    "first-pass fraction from the outflow alone, a lower bound on `outflow_fraction` that bounds the inflow"
-    provisional_fraction :: R
+    rescaling :: Θ             # Oceananigans' bounds-preserving reconstruction rescaling θ
+    outflow_fraction :: R      # r, the fraction of each cell's explicit outflow the stage applies
+    provisional_fraction :: R  # r from the previous pass, which scales the credited inflow
 end
 
 @inline Base.getindex(l::OutflowLimiter, i, j, k) = @inbounds l.rescaling[i, j, k]
@@ -102,8 +76,7 @@ update_outflow_limiter!(scheme, model, name) = nothing
 """
 $(TYPEDSIGNATURES)
 
-Whether the coming stage of `timestepper` subtracts the scalar tendencies from the step-start state
-`timestepper.U⁰` (`true`) or from the current state (`false`, the forward-Euler default). This
-selects the mass budget of the outflow limiter.
+Whether the coming stage of `timestepper` updates from the step-start state `timestepper.U⁰`
+(`true`) or from the current state (`false`, the forward-Euler default).
 """
-outflow_budget_from_initial_state(timestepper, clock) = false
+stage_starts_from_initial_state(timestepper, clock) = false

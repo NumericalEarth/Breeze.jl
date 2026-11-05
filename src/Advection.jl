@@ -46,7 +46,7 @@ using ..AtmosphereModels:
     microphysical_velocities,
     reconstructed_fields,
     OutflowLimitedWENO,
-    outflow_budget_from_initial_state,
+    stage_starts_from_initial_state,
     stage_time_step
 
 const AIVA = AdaptiveImplicitVerticalAdvection
@@ -84,10 +84,8 @@ end
 # A bounds-preserving WENO whose vertical time discretization is adaptive-implicit.
 const BoundsPreservingAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:BoundsPreservation}
 
-# Indexing yields wᵉ = s·w, the explicit fraction of the IMEX split, so the bounded flux
-# functions consume it without duplicating their reconstruction (issue #913). The fraction also
-# keeps the donor cell's outflow Courant number within the limiter's bound (see
-# `explicit_vertical_fraction`), which depends on the density `ρ` the flux is weighted with.
+# Indexing yields wᵉ = s w, the explicit fraction of the IMEX split (issue #913), with `s` from
+# `explicit_vertical_fraction`, which depends on the density `ρ`.
 struct ExplicitVerticalVelocity{G, S, W, R}
     grid :: G
     advection_scheme :: S
@@ -128,9 +126,8 @@ end
 ##### Outflow-limited bounded fluxes (see `AtmosphereModels.OutflowLimiter`)
 #####
 #
-# Face fluxes formed exactly as `bounded_tracer_flux_divergence_{x,y,z}` form theirs (each
-# reconstruction rescaled by θ of the cell it draws on), so with every outflow fraction equal
-# to one the divergence below is the bounded divergence above, term by term.
+# Face fluxes formed as `bounded_tracer_flux_divergence_{x,y,z}` form theirs, so with every
+# outflow fraction equal to one the divergence below is the bounded divergence above.
 
 @inline bounded_face_flux_x(i, j, k, ::AbstractGrid{FT, Flat}, advection, ρ, u, c) where FT = zero(FT)
 @inline bounded_face_flux_y(i, j, k, ::AbstractGrid{FT, <:Any, Flat}, advection, ρ, v, c) where FT = zero(FT)
@@ -159,8 +156,7 @@ end
     return ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Azᶜᶜᶠ(i, j, k, grid) * upwind_biased_product(w̃, cᴸ, cᴿ)
 end
 
-# Scale a face flux by the outflow fraction of its upwind cell: the one below/west/south of
-# the face for a non-negative velocity, the one above/east/north otherwise.
+# Each face flux is scaled by the outflow fraction of its upwind cell.
 @inline function limited_face_flux_x(i, j, k, grid, advection, ρ, u, c)
     r = advection.bounds.limiter.outflow_fraction
     @inbounds rᵘ = ifelse(u[i, j, k] ≥ 0, r[i-1, j, k], r[i, j, k])
@@ -201,8 +197,8 @@ end
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * outflow
 end
 
-# Mass the explicit fluxes of the coming stage bring into cell (i, j, k), per unit volume, with
-# each inflowing face flux scaled by the fraction `r` of the cell it leaves.
+# Mass the explicit fluxes of the coming stage bring into cell (i, j, k), per unit volume, each
+# scaled by the fraction `r` of the cell it leaves.
 @inline function limited_explicit_inflow(i, j, k, grid, advection, ρ, U, wᵉ, c, r)
     Fx⁻ = bounded_face_flux_x(i,   j, k, grid, advection, ρ, U.u, c)
     Fx⁺ = bounded_face_flux_x(i+1, j, k, grid, advection, ρ, U.u, c)
@@ -216,20 +212,16 @@ end
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * inflow
 end
 
-# Iterated passes. The first fraction budgets the outflow against the stage's starting content
-# alone. Each later pass credits the inflow scaled by the previous pass's fractions of the upwind
-# cells; the fractions only grow from pass to pass, so the credited inflow never exceeds what the
-# stage delivers and positivity holds after any number of passes. Crediting the inflow keeps the
-# limiter inert where the net change is within budget — at the front of a falling layer, say,
-# where the outflow alone exceeds the step-start content but the inflow replaces it.
-@kernel function _compute_outflow_fraction!(r, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, second_pass)
+# `r = min(1, available / removed)`. With `credit_inflow`, `available` includes the inflow scaled by
+# the previous pass's fractions `r₀`, which never exceed the final ones, so positivity holds.
+@kernel function _compute_outflow_fraction!(r, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, credit_inflow)
     i, j, k = @index(Global, NTuple)
     wᵉ = ExplicitVerticalVelocity(grid, advection, U.w, ρ)
     removed = Δt * explicit_outflow(i, j, k, grid, advection, ρ, U, wᵉ, c)
     @inbounds content = max(0, ifelse(from_initial_state, q⁰[i, j, k], ρ[i, j, k] * c[i, j, k]))
-    inflow = ifelse(second_pass, Δt * limited_explicit_inflow(i, j, k, grid, advection, ρ, U, wᵉ, c, r₀), zero(content))
-    budget = content + ifelse(isfinite(inflow), inflow, zero(inflow))
-    @inbounds r[i, j, k] = ifelse(isfinite(removed) & (removed > budget), budget / removed, one(budget))
+    inflow = ifelse(credit_inflow, Δt * limited_explicit_inflow(i, j, k, grid, advection, ρ, U, wᵉ, c, r₀), zero(content))
+    available = content + ifelse(isfinite(inflow), inflow, zero(inflow))
+    @inbounds r[i, j, k] = ifelse(isfinite(removed) & (removed > available), available / removed, one(available))
 end
 
 # The velocity the scalar tendency of `name` advects with (see `scalar_tendency`).
@@ -237,8 +229,7 @@ end
     sum_of_velocities(transport_velocities(model),
                       microphysical_velocities(model.microphysics, model.microphysical_fields, Val(name)))
 
-# Oceananigans fills θ through the `Field` interface, so refresh it on a twin of the scheme that
-# carries the bare rescaling field.
+# Oceananigans fills θ through the `Field` interface, so refresh it on a twin of the scheme.
 function Oceananigans.Advection.update_bounds_preserving_limiter!(scheme::OutflowLimitedWENO, grid, c)
     bounds = scheme.bounds
     rescaling_bounds = BoundsPreservation(bounds.minimum_value, bounds.maximum_value,
@@ -256,20 +247,20 @@ function AtmosphereModels.update_outflow_limiter!(advection::OutflowLimitedWENO,
     ρ = total_density(model.dynamics)
     U = scalar_transport_velocities(model, name)
     q⁰ = getproperty(model.timestepper.U⁰, name)
-    from_initial_state = outflow_budget_from_initial_state(model.timestepper, model.clock)
+    from_initial_state = stage_starts_from_initial_state(model.timestepper, model.clock)
     Δt = stage_time_step(model.timestepper, model.clock)
     r₀ = advection.bounds.limiter.provisional_fraction
     arch = architecture(grid)
+
+    # The first pass limits by the content alone; each later pass credits the inflow at the
+    # previous pass's fractions, which grow from pass to pass. The last pass writes `r`.
     launch!(arch, grid, :xyz, _compute_outflow_fraction!, r₀, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, false)
     fill_halo_regions!(r₀)
-    launch!(arch, grid, :xyz, _compute_outflow_fraction!, r, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, true)
-    fill_halo_regions!(r)
-    # Two more passes: each credits the inflow at the previous, larger fractions, so the fractions
-    # increase monotonically toward the least limiting that keeps every cell non-negative.
-    launch!(arch, grid, :xyz, _compute_outflow_fraction!, r₀, r, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, true)
-    fill_halo_regions!(r₀)
-    launch!(arch, grid, :xyz, _compute_outflow_fraction!, r, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, true)
-    fill_halo_regions!(r)
+    for (rⁿ, rᵖ) in ((r, r₀), (r₀, r), (r, r₀))
+        launch!(arch, grid, :xyz, _compute_outflow_fraction!, rⁿ, rᵖ, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, true)
+        fill_halo_regions!(rⁿ)
+    end
+
     return nothing
 end
 
@@ -317,9 +308,8 @@ end
     return F⁻, F⁺
 end
 
-# Outflow-limited bounded WENO: the tracer tendency moves each face flux scaled by the outflow
-# fraction of the upwind cell of the combined velocity, so both fluxes of a face take that
-# factor and their difference, the sedimentation flux, stays the part the tendency moves.
+# Both fluxes of a face take the outflow fraction the tracer tendency applies to it, so their
+# difference stays the sedimentation flux the tendency moves.
 @inline function AtmosphereModels.sedimentation_mass_fluxes(i, j, k, grid, advection::OutflowLimitedWENO, wᵗ, wˢ, q, ρ)
     w = SumOfArrays{2}(wᵗ, wˢ)
     F⁻, F⁺ = bounded_sedimentation_mass_fluxes(i, j, k, grid, advection, wᵗ, wˢ, q, ρ)

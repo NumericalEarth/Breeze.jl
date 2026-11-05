@@ -128,11 +128,8 @@ BoundaryConditions.needs_implicit_solver(a::DensityWeightedImplicitOperator) =
     return Δt * V⁻¹ / ρᶜ * (Az⁺ * ρᶠ⁺ * max(wⁱ⁺, 0) - Az⁻ * ρᶠ⁻ * min(wⁱ⁻, 0))
 end
 
-# Bounds-preserving tracers split with the bounded explicit fraction (see
-# `explicit_vertical_fraction`), so their rows are upstream's z-Center coefficients evaluated
-# at that split's implicit remainder. The row is an M-matrix (positive diagonal, non-positive
-# off-diagonals, column sums that telescope to the boundary outflow), so it maps a non-negative
-# right-hand side to a non-negative solution at any implicit Courant number.
+# Bounds-preserving tracers: upstream's z-Center coefficients at the implicit remainder of
+# `explicit_vertical_fraction`. The rows form an M-matrix, so the solve preserves non-negativity.
 @inline function density_weighted_advection_upper_diagonal(i, j, k, grid, scheme::BoundsPreservingAIVA, w, Δt, ℓx, ℓy, ℓz::Center, ρ)
     wⁱ  = split_implicit_vertical_velocity(i, j, k+1, grid, scheme, w, ρ)
     Azᵢ = Az(i, j, k+1, grid, ℓx, ℓy, Face())
@@ -152,8 +149,7 @@ end
     return - Δt * V⁻¹ * Azᵢ * ρᶠ / ρᶜ * max(wⁱ, zero(wⁱ)) * !peripheral_node(i, j, k′, grid, ℓx, ℓy, Center())
 end
 
-# Impermeable boundaries mask the boundary faces out of the diagonal; a sedimenting tracer
-# leaves through them (see the `OutflowEnabledVelocity` method above).
+# A sedimenting tracer (`OutflowEnabledVelocity`) leaves through the boundary faces.
 @inline active_boundary_face(i, j, k, grid, ℓx, ℓy, w) = !peripheral_node(i, j, k, grid, ℓx, ℓy, Face())
 @inline active_boundary_face(i, j, k, grid, ℓx, ℓy, ::OutflowEnabledVelocity) = true
 

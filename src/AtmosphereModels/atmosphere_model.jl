@@ -282,9 +282,8 @@ function AtmosphereModel(grid;
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
 
-    # Bounded scalars (water, microphysics, tracers) under adaptive implicit vertical advection
-    # limit their explicit outflow to the mass a stage can draw on (see `OutflowLimiter`). The
-    # thermodynamic variable is advanced by the acoustic loop and is not limited.
+    # Bounded scalars under adaptive implicit vertical advection get an `OutflowLimiter`; the
+    # thermodynamic variable, advanced by the acoustic loop, does not.
     thermodynamic_name = thermodynamic_density_name(formulation)
     materialized_advection = NamedTuple(name => (name ∈ (:momentum, thermodynamic_name) ? scheme : with_outflow_limiter(scheme, grid))
                                         for (name, scheme) in pairs(materialized_advection))
