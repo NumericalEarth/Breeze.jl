@@ -203,7 +203,6 @@ end
 
 @kernel function _compute_outflow_fraction!(r, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt)
     i, j, k = @index(Global, NTuple)
-    td = time_discretization(advection)
     wᵉ = ExplicitVerticalVelocity(grid, advection, U.w, ρ)
     removed = Δt * explicit_outflow(i, j, k, grid, advection, ρ, U, wᵉ, c)
     @inbounds budget = max(0, ifelse(from_initial_state, q⁰[i, j, k], ρ[i, j, k] * c[i, j, k]))
