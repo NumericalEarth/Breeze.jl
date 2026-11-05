@@ -144,6 +144,23 @@ the cost is confined to CFL targeting on one stage when ``Δt`` changes (see
     return ifelse(isfinite(Δt_stage), Δt_stage, Δt_last)
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+The full outer step ``Δt`` that the microphysical tendencies being built will be applied over,
+recovered from the increment of the stage just completed (as in `adaptive_advection_timestep`).
+Every Wicker–Skamarock stage restarts from ``Uⁿ`` and applies at most the full ``Δt``, so the
+full step (not the stage fraction) bounds each stage's drain. Tendencies built for stages 2 and 3
+see the current step's ``Δt`` exactly; those built at the end of a step for stage 1 of the next
+see the step just taken, which stage 1 applies only over ``β₁ Δtₙ₊₁``.
+"""
+@inline function AtmosphereModels.sink_limiting_time_step(timestepper::AcousticRungeKutta3, clock)
+    stage = clock.stage
+    completed = ifelse(stage == 1, 3, stage - 1)
+    Δt = clock.last_stage_Δt / stage_increment(timestepper, completed)
+    return ifelse(isfinite(Δt), Δt, clock.last_Δt)
+end
+
 #####
 ##### Per-stage substep wrapper
 #####
