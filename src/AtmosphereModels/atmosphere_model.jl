@@ -9,7 +9,8 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Fields: TracerFields
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
-using Oceananigans.TimeSteppers: TimeSteppers, TimeStepper, AbstractLagrangianParticles, step_lagrangian_particles!
+using Oceananigans.TimeSteppers: TimeSteppers, TimeStepper, AbstractLagrangianParticles, step_lagrangian_particles!,
+                                 substep_lagrangian_particles!, materialize_lagrangian_particles
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields,
                                        closure_required_tracers, VerticallyImplicitTimeDiscretization
 using Oceananigans.TimeSteppers: time_discretization
@@ -23,6 +24,29 @@ using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 validate_momentum_advection(momentum_advection, grid) = momentum_advection
 
 struct DefaultValue end
+
+# Replace the field `name` of the named tuple `fields` with a field of float type FT, if it has another float type
+function with_float_type(fields, name, FT)
+    field = fields[name]
+    eltype(field) == FT && return fields
+    replacement = CenterField(field.grid, FT; boundary_conditions=field.boundary_conditions)
+    return merge(fields, NamedTuple{(name,)}((replacement,)))
+end
+
+# The float type of the thermodynamic and moisture variables, warning when single-precision storage
+# would round away small increments of their large mean values
+function default_thermodynamic_float_type(grid, ::Nothing)
+    FT = eltype(grid)
+    if FT == Float32
+        @warn string("The thermodynamic and moisture variables (such as θ and qᵛ) of this AtmosphereModel are ",
+                     "stored in Float32, whose spacing near θ ≈ 300 K is 3 × 10⁻⁵ K, so small per-step ",
+                     "increments such as latent heating may be rounded away. Set `thermodynamic_float_type = Float64` ",
+                     "to store them in double precision, or `thermodynamic_float_type = Float32` to silence this warning.") maxlog=1
+    end
+    return FT
+end
+
+default_thermodynamic_float_type(grid, FT) = FT
 
 const ParticlesOrNothing = Union{Nothing, AbstractLagrangianParticles}
 
@@ -105,9 +129,16 @@ Arguments
 
    * `particles` are Lagrangian particles to be advected with the flow,
      constructed with `Oceananigans.LagrangianParticles`. Particles are advected
-     with the Cartesian velocities `model.velocities` once per time step, over the
-     full `Δt`. Default: `nothing`. See the "Lagrangian particles" section of the
-     documentation for details, including the treatment on terrain-following grids.
+     with the Cartesian velocities `model.velocities` using the time-stepping scheme
+     of the model, stage by stage. Default: `nothing`. See the "Lagrangian particles"
+     section of the documentation for details, including the treatment on terrain-following grids.
+
+   * `thermodynamic_float_type` is the float type of the thermodynamic and moisture variables:
+     the prognostic densities (`ρθ` or `ρe`, and `ρqᵛ`) and their specific values (`θ` or `e`, and `qᵛ`).
+     Default: `eltype(grid)`, with a warning on a `Float32` grid. Setting `thermodynamic_float_type = Float64`
+     on a `Float32` grid stores only these four fields in double precision. This avoids rounding away small
+     per-step increments relative to the large mean values of these variables, such as a latent heating of
+     10⁻⁵ K per step of θ ≈ 300 K, whose single-precision spacing is 3 × 10⁻⁵ K.
 
 Example
 =======
@@ -158,7 +189,10 @@ function AtmosphereModel(grid;
                          timestepper = nothing,
                          timestepper_kwargs = NamedTuple(),
                          radiation = nothing,
-                         particles::ParticlesOrNothing = nothing)
+                         particles::ParticlesOrNothing = nothing,
+                         thermodynamic_float_type = nothing)
+
+    thermodynamic_float_type = default_thermodynamic_float_type(grid, thermodynamic_float_type)
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
@@ -243,7 +277,8 @@ function AtmosphereModel(grid;
 
     # Materialize dynamics and formulation
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics, formulation)
-    formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
+    formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions;
+                                          float_type=thermodynamic_float_type)
 
     # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3
     # (per-substep solve) and with AcousticRungeKutta3 (moisture and tracers via the generic
@@ -288,6 +323,8 @@ function AtmosphereModel(grid;
     # The sedimenting condensates carry each tracer's materialized advection scheme, so the
     # advection schemes must exist first.
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
+    microphysical_fields = with_float_type(microphysical_fields, moisture_specific_name(microphysics),
+                                           thermodynamic_float_type)
     prognostic_microphysical_fields = NamedTuple{prognostic_field_names(microphysics)}(microphysical_fields)
     prognostic_microphysical_fields = TracerFields(prognostic_microphysical_fields, grid, regularized_boundary_conditions)
     microphysical_fields = merge(microphysical_fields, prognostic_microphysical_fields)
@@ -296,7 +333,8 @@ function AtmosphereModel(grid;
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
     if moisture_density isa DefaultValue
-        moisture_density = CenterField(grid, boundary_conditions=regularized_boundary_conditions[moisture_name])
+        moisture_density = CenterField(grid, thermodynamic_float_type;
+                                       boundary_conditions=regularized_boundary_conditions[moisture_name])
     end
 
     prognostic_model_fields = collect_prognostic_fields(formulation,
@@ -325,6 +363,10 @@ function AtmosphereModel(grid;
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
     end
+
+    # Allocate the per-particle storage that the time stepper needs to advance particles
+    particles = materialize_lagrangian_particles(particles, timestepper)
+    microphysics = materialize_microphysics(microphysics, grid, timestepper)
     pressure_solver = dynamics_pressure_solver(dynamics, grid)
 
     moisture_specific = moisture_specific_name(microphysics)
@@ -634,7 +676,18 @@ function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
     return NamedTuple{names}(Returns(zero(eltype(prognostic_fields[name]))) for name in names)
 end
 
-function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
+# Combine the forcings contributed by the dynamics with the user's forcings on the same keys
+function add_dynamics_forcing(user_forcings, dynamics, formulation, microphysics)
+    thermodynamic_name = specific_name_of(thermodynamic_density_name(formulation))
+    moisture_name = moisture_specific_name(microphysics)
+    extra_forcings = dynamics_forcing(dynamics, thermodynamic_name, moisture_name)
+    names = Tuple(unique((keys(user_forcings)..., keys(extra_forcings)...)))
+    combined = Tuple(combine_forcing_values(get(user_forcings, name, nothing), get(extra_forcings, name, nothing))
+                     for name in names)
+    return NamedTuple{names}(combined)
+end
+
+function atmosphere_model_forcing(supplied_forcings::NamedTuple, prognostic_fields, model_fields,
                                   grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture, microphysical_fields,
@@ -644,7 +697,9 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # prognostic moisture density unconverted whatever the scheme calls it, so — unlike `ρE`,
     # which the tendency kernels read separately in order to convert it — routing it is a pure
     # re-key onto that name, done before anything else looks at the forcing keys.
-    user_forcings = route_moisture_forcing(user_forcings, microphysics)
+    # Forcings contributed by the dynamics (such as `AdiabaticExpansion`) are then combined with the user's.
+    routed_forcings = route_moisture_forcing(supplied_forcings, microphysics)
+    user_forcings = add_dynamics_forcing(routed_forcings, dynamics, formulation, microphysics)
     user_forcing_names = keys(user_forcings)
 
     # `ρE` (total energy) is the formulation-agnostic energy key: a forcing supplied under it
@@ -848,11 +903,21 @@ Models.boundary_condition_args(model::AtmosphereModel) =
 #####
 
 # Velocities are diagnostic (u = ρu/ρ) and refreshed by `update_state!`, so they are
-# current when the time steppers advect particles at the end of each step.
+# current when the time steppers advect particles at the beginning of each stage.
 @inline Models.total_velocities(model::AtmosphereModel) = model.velocities
 
-TimeSteppers.step_lagrangian_particles!(model::AtmosphereModel, Δt) =
+# Particles of particle-based microphysics are advanced together with `model.particles`
+function TimeSteppers.step_lagrangian_particles!(model::AtmosphereModel, Δt)
     step_lagrangian_particles!(model.particles, model, Δt)
+    step_lagrangian_particles!(microphysics_particles(model.microphysics), model, Δt)
+    return nothing
+end
+
+function TimeSteppers.substep_lagrangian_particles!(model::AtmosphereModel, Δt, stage)
+    substep_lagrangian_particles!(model.particles, model, Δt, stage)
+    substep_lagrangian_particles!(microphysics_particles(model.microphysics), model, Δt, stage)
+    return nothing
+end
 
 function total_energy(model)
     u, v, w = model.velocities

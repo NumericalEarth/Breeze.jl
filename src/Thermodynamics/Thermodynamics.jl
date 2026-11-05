@@ -1,6 +1,7 @@
 module Thermodynamics
 
-export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_reference_state!, compute_hydrostatic_reference!,
+export ThermodynamicConstants, ReferenceState, ExnerReferenceState, BoussinesqReferenceState,
+       compute_reference_state!, compute_hydrostatic_reference!,
        evaluate_profile, IdealGas,
        CondensedPhase,
        ClausiusClapeyron, ClausiusClapeyronThermodynamicConstants,
@@ -38,6 +39,7 @@ include("clausius_clapeyron.jl")
 include("tetens_formula.jl")
 include("flatau_polynomial.jl")
 include("reference_states.jl")
+include("boussinesq_reference_state.jl")
 include("dynamic_states.jl")
 
 end # module

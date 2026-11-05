@@ -11,11 +11,14 @@ export
     ThermodynamicConstants,
     ReferenceState,
     ExnerReferenceState,
+    BoussinesqReferenceState,
     compute_reference_state!,
     set_to_mean!,
     surface_density,
     AnelasticDynamics,
     AnelasticModel,
+    BoussinesqDynamics,
+    AdiabaticExpansion,
     CompressibleDynamics,
     CompressibleModel,
     SplitExplicitTimeDiscretization,
@@ -148,6 +151,34 @@ export
     PrognosticLiquidFraction,
     NoLiquidFraction,
 
+    # ParticleMicrophysics
+    LagrangianMicrophysics,
+    DiffusiveSelfInteraction,
+    Droplet,
+    DropletPhysicsParameters,
+    PowerLawVaporDiffusivity,
+    LinearThermalConductivity,
+    SutherlandViscosity,
+    LinearViscosity,
+    KineticCorrection,
+    NoKineticCorrection,
+    BeardPruppacherVentilation,
+    NoVentilation,
+    KappaKoehlerActivity,
+    DiluteSolutionActivity,
+    BeardTerminalVelocity,
+    RogersYauTerminalVelocity,
+    StokesTerminalVelocity,
+    equilibrium_supersaturation,
+    critical_radius,
+    critical_supersaturation,
+    equilibrium_radius,
+    diffusional_growth_rate,
+    condensational_growth_step,
+    droplet_response_time,
+    exponential_drag_step,
+    droplet_terminal_velocity,
+
     # BoundaryConditions
     BulkDrag,
     BulkSensibleHeatFlux,
@@ -164,6 +195,8 @@ export
     # Forcing utilities
     geostrophic_forcings,
     SubsidenceForcing,
+    ConstantPowerBandForcing,
+    StochasticBandForcing,
     SpecificForcing,
     TemperatureForcing,
 
@@ -291,7 +324,7 @@ using .TerrainFollowingDiscretization
 
 # Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("AnelasticEquations/AnelasticEquations.jl")
-using .AnelasticEquations: AnelasticDynamics, AnelasticModel
+using .AnelasticEquations: AnelasticDynamics, AnelasticModel, BoussinesqDynamics, AdiabaticExpansion
 
 include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
@@ -314,6 +347,9 @@ using .ParcelModels
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics
+
+include("ParticleMicrophysics/ParticleMicrophysics.jl")
+using .ParticleMicrophysics
 
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures

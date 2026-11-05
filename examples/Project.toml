@@ -13,6 +13,9 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 
 [sources]
+# TEMPORARY: track CliMA/Oceananigans.jl#6440 (substep_lagrangian_particles!) until it is released.
+# MUST be removed before merging NumericalEarth/Breeze.jl#1203.
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "glw/particle-rk3-stages"}
 Breeze = {path = ".."}
 
 [compat]
@@ -22,7 +25,7 @@ CairoMakie = "0.15.8"
 CloudMicrophysics = "0.47, 0.48"
 NCDatasets = "0.14"
 NumericalRadiation = "0.2"
-Oceananigans = "0.116"
+Oceananigans = "0.116, 0.117"
 Pkg = "1.11"
 Printf = "< 0.0.1, 1"
 RRTMGP = "1.0.1"

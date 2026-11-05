@@ -160,6 +160,15 @@ end
 @inline LiquidIcePotentialTemperatureState(θ::FT, q::MoistureMassFractions{FT}, pˢᵗ::FT, pᵣ::FT) where FT =
     LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ, VaporEquivalentExponent())
 
+# Promote mixed float types, for example double-precision potential temperature and moisture on a
+# single-precision grid (see the `thermodynamic_float_type` keyword argument of `AtmosphereModel`)
+@inline function LiquidIcePotentialTemperatureState(θ, q::MoistureMassFractions, pˢᵗ, pᵣ,
+                                                    exner_exponent = VaporEquivalentExponent())
+    FT = promote_type(typeof(θ), typeof(q.vapor), typeof(pˢᵗ), typeof(pᵣ))
+    return LiquidIcePotentialTemperatureState(convert(FT, θ), MoistureMassFractions{FT}(q),
+                                              convert(FT, pˢᵗ), convert(FT, pᵣ), exner_exponent)
+end
+
 @inline is_absolute_zero(𝒰::LiquidIcePotentialTemperatureState) = 𝒰.potential_temperature == 0
 
 @inline function exner_function(𝒰::LiquidIcePotentialTemperatureState, constants::ThermodynamicConstants)
@@ -408,6 +417,13 @@ struct StaticEnergyState{FT} <: AbstractReferencePressureState{FT}
     moisture_mass_fractions :: MoistureMassFractions{FT}
     height :: FT
     reference_pressure :: FT
+end
+
+# Promote mixed float types, for example double-precision static energy and moisture on a
+# single-precision grid (see the `thermodynamic_float_type` keyword argument of `AtmosphereModel`)
+@inline function StaticEnergyState(s, q::MoistureMassFractions, z, pᵣ)
+    FT = promote_type(typeof(s), typeof(q.vapor), typeof(z), typeof(pᵣ))
+    return StaticEnergyState{FT}(convert(FT, s), MoistureMassFractions{FT}(q), convert(FT, z), convert(FT, pᵣ))
 end
 
 @inline total_specific_moisture(state::StaticEnergyState) = total_specific_moisture(state.moisture_mass_fractions)
