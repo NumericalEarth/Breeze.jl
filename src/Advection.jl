@@ -32,7 +32,7 @@ using Oceananigans.Fields: Field, ZeroField
 using Oceananigans.Grids: Center
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ
 using Oceananigans.Architectures: architecture
-using Oceananigans.BoundaryConditions: fill_halo_regions!, _unwrap_for_gpu
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: AbstractGrid, Flat
 using Oceananigans.Utils: launch!, sum_of_velocities
 using KernelAbstractions: @kernel, @index
@@ -50,7 +50,8 @@ using ..AtmosphereModels:
     microphysical_velocities,
     reconstructed_fields,
     OutflowLimitedWENO,
-    outflow_budget_from_initial_state
+    outflow_budget_from_initial_state,
+    stage_time_step
 
 const AIVA = AdaptiveImplicitVerticalAdvection
 
@@ -204,14 +205,12 @@ end
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * outflow
 end
 
-@kernel function _compute_outflow_fraction!(r, grid, advection, ρ, U, c, q⁰, from_initial_state)
+@kernel function _compute_outflow_fraction!(r, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt)
     i, j, k = @index(Global, NTuple)
-    td = time_discretization(advection)
-    Δt = _unwrap_for_gpu(td.Δt)
     wᵉ = ExplicitVerticalVelocity(grid, advection, U.w, ρ)
     removed = Δt * explicit_outflow(i, j, k, grid, advection, ρ, U, wᵉ, c)
     @inbounds budget = max(0, ifelse(from_initial_state, q⁰[i, j, k], ρ[i, j, k] * c[i, j, k]))
-    @inbounds r[i, j, k] = ifelse(removed > budget, budget / removed, one(budget))
+    @inbounds r[i, j, k] = ifelse(isfinite(removed) & (removed > budget), budget / removed, one(budget))
 end
 
 # The velocity the scalar tendency of `name` advects with (see `scalar_tendency`).
@@ -239,7 +238,8 @@ function AtmosphereModels.update_outflow_limiter!(advection::OutflowLimitedWENO,
     U = scalar_transport_velocities(model, name)
     q⁰ = getproperty(model.timestepper.U⁰, name)
     from_initial_state = outflow_budget_from_initial_state(model.timestepper, model.clock)
-    launch!(architecture(grid), grid, :xyz, _compute_outflow_fraction!, r, grid, advection, ρ, U, c, q⁰, from_initial_state)
+    Δt = stage_time_step(model.timestepper, model.clock)
+    launch!(architecture(grid), grid, :xyz, _compute_outflow_fraction!, r, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt)
     fill_halo_regions!(r)
     return nothing
 end

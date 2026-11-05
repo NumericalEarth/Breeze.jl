@@ -393,7 +393,9 @@ $(TYPEDSIGNATURES)
 The interval over which the coming stage applies the tendencies being built, or `Inf` (no sink
 limiting) when it is not known, for example before the first time step.
 """
-function stage_time_step(timestepper, clock)
+stage_time_step(timestepper, clock) = finite_stage_time_step(timestepper, clock)
+
+function finite_stage_time_step(timestepper, clock)
     Δt = Oceananigans.Advection.adaptive_advection_timestep(timestepper, clock)
     return ifelse(isfinite(Δt) & (Δt > 0), Δt, convert(typeof(Δt), Inf))
 end
