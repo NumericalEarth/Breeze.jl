@@ -541,7 +541,7 @@ MPAS-Atmosphere. The profile shape is controlled by `ramp`; use
   same implicit Rayleigh treatment covers, for example, the lateral relaxation
   zone of a nested limited-area model. Default `nothing` (lid layer only).
   Because the damping is implicit, it removes the `rate × Δt ≲ 2.5` stability
-  limit that an explicit [`Relaxation`](@ref Oceananigans.Forcings.Relaxation)
+  limit that an explicit `Relaxation`
   forcing on `ρw` imposes on the outer time step.
 
 Without a `mask`, the ramp depends only on the reference vertical coordinate (no horizontal
