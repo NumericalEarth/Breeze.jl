@@ -184,7 +184,7 @@ function dynamics_density end
 Rebalance the lateral boundary momentum so the dynamics' pressure problem stays solvable.
 
 A no-op for every formulation whose pressure is not obtained from an elliptic solve with homogeneous
-Neumann conditions; [`AnelasticDynamics`](@ref) on a laterally-`Bounded` grid overrides it.
+Neumann conditions; [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics) on a laterally-`Bounded` grid overrides it.
 
 **This must be called after EVERY `fill_halo_regions!(model.momentum, …)`, not once per stage.** The
 halo fill writes the prescribed boundary data, so it overwrites any earlier rebalancing: correcting only
