@@ -31,7 +31,7 @@ using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: implicit_step!
-using Oceananigans.Grids: ZDirection, rnode, znode, xnode, ynode
+using Oceananigans.Grids: ZDirection, rnode, znode, node
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
@@ -677,10 +677,9 @@ end
 @kernel function _compute_masked_sponge_damping!(γ, grid, damping_rate, depth, ramp, mask)
     i, j, k = @index(Global, NTuple)
     r = rnode(i, j, k, grid, Center(), Center(), Face())
-    x = xnode(i, j, k, grid, Center(), Center(), Face())
-    y = ynode(i, j, k, grid, Center(), Center(), Face())
-    z = znode(i, j, k, grid, Center(), Center(), Face())
-    m = convert(eltype(grid), mask(x, y, z))
+    # `node` gives the coordinates `set!` passes to functions: (λ, φ, z) on a LatitudeLongitudeGrid
+    # (`xnode`/`ynode` would give distances in metres there), (x, y, z) on a RectilinearGrid.
+    m = convert(eltype(grid), mask(node(i, j, k, grid, Center(), Center(), Face())...))
     @inbounds γ[i, j, k] = damping_rate * max(ramp(r, grid.Lz, depth), m)
 end
 

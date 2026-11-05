@@ -657,6 +657,19 @@ for arch in arches
         @test all(γ[3:8, :, 1] .== 0)                       # outside the mask and below the lid layer
         @test all(γ[3:8, :, 9] .≈ damping_rate)             # the lid layer is unchanged
         @test sponge.mask === nothing                       # the closure stays on the host
+
+        # On a terrain-following LatitudeLongitudeGrid the mask sees (λ, φ, z) in degrees.
+        z_faces = Breeze.TerrainFollowingDiscretization.TerrainFollowingVerticalDiscretization(
+            collect(range(0, 8kilometers, length=9)); formulation=Breeze.TerrainFollowingDiscretization.LinearDecay())
+        ll = LatitudeLongitudeGrid(arch; size=(16, 16, 8), halo=(5, 5, 5), longitude=(-1, 1), latitude=(-1, 1),
+                                   z=z_faces, topology=(Bounded, Bounded, Bounded))
+        Breeze.TerrainFollowingDiscretization.materialize_terrain!(ll, (λ, φ) -> 200 * exp(-(λ^2 + φ^2) / 0.1))
+        west_wall(λ, φ, z) = λ < -0.75 ? one(λ) : zero(λ)
+        ll_sponge = materialize_sponge(ll, UpperSponge(; damping_rate, depth, ramp=LinearRamp(), mask=west_wall))
+        γˡˡ = Array(interior(ll_sponge.damping_profile))
+        @test all(γˡˡ[1:2, :, 1] .≈ damping_rate)
+        @test all(γˡˡ[3:16, :, 1] .== 0)
+        @test all(γˡˡ[:, :, 9] .≈ damping_rate)
     end
 
     #####
