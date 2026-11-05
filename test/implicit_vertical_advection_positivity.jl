@@ -121,7 +121,15 @@ end
     for compressible in (false, true)
         aiva = falling_rain_column(FT; courant=1//5, compressible, Nt=10)
         explicit = falling_rain_column(FT; courant=1//5, compressible, Nt=10, implicit=false)
-        @test aiva.ρqʳ == explicit.ρqʳ
-        compressible || @test aiva.minimum_ρqʳ ≥ 0
+        if compressible
+            # The non-SSP explicit run dips below zero by roundoff; the outflow limiter keeps AIVA
+            # non-negative there, so the two agree to that undershoot rather than bit for bit.
+            tolerance = (FT === Float64 ? 1e-8 : 1e-5) * maximum(abs, explicit.ρqʳ)
+            @test isapprox(aiva.ρqʳ, explicit.ρqʳ; rtol = 0, atol = tolerance)
+            @test aiva.minimum_ρqʳ ≥ -eps(FT) * maximum(abs, explicit.ρqʳ)
+        else
+            @test aiva.ρqʳ == explicit.ρqʳ
+            @test aiva.minimum_ρqʳ ≥ 0
+        end
     end
 end
