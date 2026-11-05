@@ -63,7 +63,7 @@ end
         # The model adds per-particle storage for its time stepper, and shares the particle properties
         model = AtmosphereModel(grid; particles)
         @test model.particles.properties === particles.properties
-        @test keys(model.particles.stage_storage.state) == (:x⁰, :y⁰, :z⁰, :Dx, :Dy, :Dz)
+        @test keys(model.particles.tendencies.state) == (:x⁰, :y⁰, :z⁰, :Dx, :Dy, :Dz)
         @test occursin("particles: 1 LagrangianParticles", sprint(show, model))
 
         twin = adiabatic_balance_twin(model)
