@@ -23,15 +23,19 @@ export
     RelativeHumidity,
     RelativeHumidityField,
     number_concentration,
-    number_concentration_field
+    number_concentration_field,
+    gaussian_cloud_fraction,
+    gaussian_equilibrium_condensate
 
 using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fractions,
     materialize_microphysical_fields, update_microphysical_fields!,
     NothingMicrophysicalState, WarmRainState, thermodynamic_state_density,
-    specific_prognostic_moisture, total_density, invalid_time_step
+    specific_prognostic_moisture, total_density, invalid_time_step,
+    DiracStatistics, GaussianStatistics, NoSubgridCorrelation
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")
+include("subgrid_correlations.jl")
 include("microphysics_diagnostics.jl")
 include("dcmip2016_kessler.jl")
 include("instantaneous_precipitation.jl")

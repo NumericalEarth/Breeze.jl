@@ -22,13 +22,23 @@ Bulk microphysics scheme with cloud formation and precipitation categories.
     - `VerticalBorrowing()`: Vertical redistribution of the moisture prognostic only
   - `SpeciesBorrowing()`: Same-level species borrowing only
   - `SpeciesBorrowing(vertical_borrowing=VerticalBorrowing())`: Species borrowing with vertical redistribution
+- `subgrid`: Subgrid distribution over which the rates are averaged.
+  - `NoSubgridCorrelation()` (default): grid-mean rates
+  - `GaussianSubgridCorrelation(FT)`: Gaussian saturation deficit (partial cloud cover; non-equilibrium 1M condensation)
 """
-struct BulkMicrophysics{N, C, B, NMC}
+struct BulkMicrophysics{N, C, B, NMC, SG}
     cloud_formation :: N
     categories :: C
     precipitation_boundary_condition :: B
     negative_moisture_correction :: NMC
+    subgrid :: SG
 end
+
+BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction) =
+    BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction,
+                     NoSubgridCorrelation())
+
+AtmosphereModels.subgrid_correlation(bμp::BulkMicrophysics) = bμp.subgrid
 
 # Bulk microphysics schemes (including those from extensions like CloudMicrophysics)
 # use the standard tendency interface, so the model-wide microphysics update is a no-op.

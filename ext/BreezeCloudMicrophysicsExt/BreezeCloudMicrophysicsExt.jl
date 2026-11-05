@@ -41,7 +41,9 @@ using CloudMicrophysics: MicrophysicsNonEq as CMNonEq
 using Breeze.AtmosphereModels: AtmosphereModels,
     AbstractNumberConcentrationCategories,
     total_density,
-    write_sedimentation_velocity!
+    write_sedimentation_velocity!,
+    DiracStatistics,
+    NoSubgridCorrelation
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,

@@ -167,7 +167,8 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
                                     cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
                                     categories = one_moment_cloud_microphysics_categories(FT),
                                     precipitation_boundary_condition = nothing,
-                                    negative_moisture_correction = nothing)
+                                    negative_moisture_correction = nothing,
+                                    subgrid = NoSubgridCorrelation())
 
     # For non-equilibrium schemes, materialize Breeze condensate-formation
     # models from the CloudMicrophysics process options.
@@ -205,7 +206,8 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
 
     validate_rain_autoconversion(categories.parameters.process_params.rain_autoconversion)
 
-    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction)
+    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction,
+                            subgrid)
 end
 
 # Materialize a condensate-formation model from a placeholder, the process option,
@@ -1135,7 +1137,11 @@ end
 #   ρqˢⁿ: +Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ − Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢⁿ, Sʳˢⁿ, Sˢⁿʳ, α)
 #####
 
-@inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+# Without subgrid statistics (the gridless interface), the rates are the grid-mean rates.
+@inline mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants) =
+    mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants, DiracStatistics{typeof(ρ)}())
+
+@inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants, 𝒮)
     categories = bμp.categories
     τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
@@ -1159,7 +1165,7 @@ end
 
     # Condensation: vapor ↔ cloud liquid
     qᵛ⁺ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants, 𝒰, 𝒮, bμp.subgrid)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Deposition: vapor ↔ cloud ice
@@ -1283,7 +1289,7 @@ end
 @kernel function _compute_mpne1m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢⁿ,
                                              grid, microphysics, dynamics, formulation,
                                              constants, specific_prognostic_moisture,
-                                             microphysical_fields)
+                                             microphysical_fields, closure, closure_fields, subgrid_state)
     i, j, k = @index(Global, NTuple)
 
     ρ_field = AM.total_density(dynamics)
@@ -1301,8 +1307,9 @@ end
     @inbounds qʳ  = microphysical_fields.ρqʳ[i, j, k]  / ρ
     @inbounds qˢⁿ = microphysical_fields.ρqˢⁿ[i, j, k] / ρ
     ℳ = MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
+    𝒮 = AM.subgrid_statisticsᶜᶜᶜ(i, j, k, grid, microphysics.subgrid, closure, closure_fields, subgrid_state)
 
-    G = mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
+    G = mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants, 𝒮)
 
     @inbounds Gρqᵛ[i, j, k]  += G.ρqᵛ
     @inbounds Gρqᶜˡ[i, j, k] += G.ρqᶜˡ
@@ -1320,10 +1327,27 @@ function AM.compute_microphysical_tendencies!(microphysics::MPNE1M, model)
             G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢⁿ,
             grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
-            model.microphysical_fields)
+            model.microphysical_fields, model.closure, model.closure_fields,
+            mpne1m_subgrid_state(microphysics.subgrid, model))
 
     return nothing
 end
+
+# The conserved variables the closure's subgrid statistics are built from: θˡⁱ and the total
+# cloud water qᵗ = qᵛ + qᶜˡ + qᶜⁱ (precipitation excluded). Not needed without a subgrid distribution.
+mpne1m_subgrid_state(::NoSubgridCorrelation, model) = nothing
+
+function mpne1m_subgrid_state(subgrid, model)
+    grid = model.grid
+    qᵗ = KernelFunctionOperation{Center, Center, Center}(mpne1m_cloud_water, grid,
+                                                         AM.total_density(model.dynamics),
+                                                         AM.specific_prognostic_moisture(model),
+                                                         model.microphysical_fields)
+    return (; θ = AM.liquid_ice_potential_temperature(model), qᵗ)
+end
+
+@inline mpne1m_cloud_water(i, j, k, grid, ρ, qᵛ, μ) =
+    @inbounds qᵛ[i, j, k] + (μ.ρqᶜˡ[i, j, k] + μ.ρqᶜⁱ[i, j, k]) / ρ[i, j, k]
 
 #####
 ##### Microphysical tendencies for mixed-phase saturation-adjustment 1M (MP1M)
