@@ -81,6 +81,31 @@ end
     end
 end
 
+@testset "MPNE1M donors give up only what the other tendencies leave [$FT]" for FT in test_float_types()
+    constants = ThermodynamicConstants(FT)
+    ne = non_equilibrium_1M(FT)
+    Δt = FT(τⁿᵘᵐ)
+    names = (:ρqᵛ, :ρqᶜˡ, :ρqᶜⁱ, :ρqʳ, :ρqˢⁿ)
+
+    for T in 250:6:286, qᶜˡ in (0, 1e-3), qᶜⁱ in (0, 1e-3), qʳ in (1e-6, 1e-4), qˢⁿ in (0, 1e-4, 8e-3), qᵛ in (2e-3, 6e-3)
+        ρ, ℳ, 𝒰 = mixed_phase_state(FT, constants; T, qᵛ, qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
+        contents = (qᵛ, qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
+
+        # No other tendencies: the stand-alone limiter
+        Gᵒ = NamedTuple{names}(map(_ -> zero(FT), names))
+        @test mpne1m_tendencies(ne, ρ, ℳ, 𝒰, constants, Gᵒ) == mpne1m_tendencies(ne, ρ, ℳ, 𝒰, constants)
+
+        # Other tendencies (e.g. sedimentation) that take 70% of every reservoir over Δt
+        Gᵒ = NamedTuple{names}(map(q -> -FT(0.7) * ρ * FT(q) / Δt, contents))
+        G = mpne1m_tendencies(ne, ρ, ℳ, 𝒰, constants, Gᵒ)
+        total = ρ * FT(sum(contents))
+        @test abs(sum(values(G))) ≤ 10eps(FT) * max(maximum(abs, values(G)), floatmin(FT))
+        for (name, q) in zip(names, contents)
+            @test ρ * FT(q) + Δt * (Gᵒ[name] + G[name]) ≥ -10eps(FT) * total
+        end
+    end
+end
+
 @testset "Donor limiter caps rain–snow collection [$FT]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
     Δt = FT(τⁿᵘᵐ)

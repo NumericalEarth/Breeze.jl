@@ -889,6 +889,13 @@ end
     return ifelse(demand > q⁺, q⁺ / denominator, one(demand))
 end
 
+# The content a donor can give up over τⁿᵘᵐ: its own, or, given the reservoir's other tendencies `G`
+# (density rates of transport, closures and forcing, assembled before the microphysics), its content
+# after them, q + τⁿᵘᵐ G / ρ. Limiting against the latter keeps u + Δt (G + S) ≥ 0 for τⁿᵘᵐ ≥ Δt:
+# the microphysics then takes no more than the other tendencies leave, rather than all of q on top of them.
+@inline donor_content(q, ::Nothing, ρ, τⁿᵘᵐ) = q
+@inline donor_content(q, G, ρ, τⁿᵘᵐ) = q + oftype(q, τⁿᵘᵐ) * G / ρ
+
 # State-based rain tendency for WP1M
 @inline function AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
@@ -1135,7 +1142,8 @@ end
 #   ρqˢⁿ: +Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ − Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢⁿ, Sʳˢⁿ, Sˢⁿʳ, α)
 #####
 
-@inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+@inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants,
+                                   Gᵒ = (ρqᵛ = nothing, ρqᶜˡ = nothing, ρqᶜⁱ = nothing, ρqʳ = nothing, ρqˢⁿ = nothing))
     categories = bμp.categories
     τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
@@ -1196,16 +1204,17 @@ end
     Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
     Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)                       # cold: rain → snow
 
-    fᵛ  = donor_limiter(qᵛ,  Sᶜᵒⁿᵈ⁺ + Sᵈᵉᵖ⁺ + Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺, τⁿᵘᵐ)
-    fᶜˡ = donor_limiter(qᶜˡ, -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ, τⁿᵘᵐ)
-    fᶜⁱ = donor_limiter(qᶜⁱ, -Sᵈᵉᵖ⁻ + Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵐᵉˡᵗᶜⁱ, τⁿᵘᵐ)
-    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ, τⁿᵘᵐ)
+    # Each donor's content is what its other tendencies Gᵒ leave (see `donor_content`).
+    fᵛ  = donor_limiter(donor_content(qᵛ, Gᵒ.ρqᵛ, ρ, τⁿᵘᵐ),  Sᶜᵒⁿᵈ⁺ + Sᵈᵉᵖ⁺ + Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺, τⁿᵘᵐ)
+    fᶜˡ = donor_limiter(donor_content(qᶜˡ, Gᵒ.ρqᶜˡ, ρ, τⁿᵘᵐ), -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ, τⁿᵘᵐ)
+    fᶜⁱ = donor_limiter(donor_content(qᶜⁱ, Gᵒ.ρqᶜⁱ, ρ, τⁿᵘᵐ), -Sᵈᵉᵖ⁻ + Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵐᵉˡᵗᶜⁱ, τⁿᵘᵐ)
+    fʳ  = donor_limiter(donor_content(qʳ, Gᵒ.ρqʳ, ρ, τⁿᵘᵐ),  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ, τⁿᵘᵐ)
 
     # Collected liquid supplies heat for the melt rate α Sᵃᶜᶜˡˢⁿ. Limit collection before
     # computing this melt demand, then cap all snow sinks against the available snow.
     Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
     Sˢⁿʷ = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
-    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ, τⁿᵘᵐ)
+    fˢⁿ = donor_limiter(donor_content(qˢⁿ, Gᵒ.ρqˢⁿ, ρ, τⁿᵘᵐ), -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ, τⁿᵘᵐ)
 
     Sᶜᵒⁿᵈ = fᵛ * Sᶜᵒⁿᵈ⁺ + fᶜˡ * Sᶜᵒⁿᵈ⁻
     Sᵈᵉᵖ  = fᵛ * Sᵈᵉᵖ⁺  + fᶜⁱ * Sᵈᵉᵖ⁻
@@ -1302,7 +1311,10 @@ end
     @inbounds qˢⁿ = microphysical_fields.ρqˢⁿ[i, j, k] / ρ
     ℳ = MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
 
-    G = mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
+    # The tendencies assembled so far (transport, closures, forcing): the donors give up only what they leave
+    @inbounds Gᵒ = (ρqᵛ = Gρqᵛ[i, j, k], ρqᶜˡ = Gρqᶜˡ[i, j, k], ρqᶜⁱ = Gρqᶜⁱ[i, j, k], ρqʳ = Gρqʳ[i, j, k], ρqˢⁿ = Gρqˢⁿ[i, j, k])
+
+    G = mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants, Gᵒ)
 
     @inbounds Gρqᵛ[i, j, k]  += G.ρqᵛ
     @inbounds Gρqᶜˡ[i, j, k] += G.ρqᶜˡ
