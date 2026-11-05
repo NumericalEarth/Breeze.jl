@@ -876,6 +876,16 @@ const τⁿᵘᵐ = 10  # seconds
     return ifelse(demand > q⁺, q⁺ / denominator, one(demand))
 end
 
+#####
+##### The two densities of the one-moment tendencies
+#####
+#
+# `ρ` is the density that weights the prognostic mass fractions, so it converts specific rates S into
+# the density tendencies ρ S. Saturation and every process rate depend on the air's own density ρᵐ
+# = density(𝒰, constants): qᵛ⁺ = pᵛ⁺ / (ρᵐ Rᵛ T). On the compressible core the two coincide. On the
+# anelastic core ρ is the reference density ρᵣ(z), a dry profile about 1% heavier than moist air at
+# qᵛ = 16 g/kg, so saturating on ρ places qᵛ⁺ about 1% too low and condenses water in subsaturated air.
+
 # State-based rain tendency for WP1M
 @inline function AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
@@ -887,6 +897,7 @@ end
     rain_velocity = parameters.terminal_velocity.rain
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
+    ρᵐ = density(𝒰, constants)  # the air's own density; `ρ` only weights the tendencies
 
     # Autoconversion: cloud liquid → rain
     Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ, ℳ.w)
@@ -899,7 +910,7 @@ end
         rain_velocity,
         qᶜˡ,
         qʳ,
-        ρ,
+        ρᵐ,
     )
 
     # Rain evaporation in subsaturated air
@@ -912,7 +923,7 @@ end
         parameters.air_properties,
         q,
         qʳ,
-        ρ,
+        ρᵐ,
         T,
         constants,
     )
@@ -964,10 +975,11 @@ end
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
+    ρᵐ = density(𝒰, constants)  # the air's own density; `ρ` only weights the tendencies
 
     # Condensation: vapor ↔ cloud liquid
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    qᵛ⁺ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρᵐ, q, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
@@ -978,7 +990,7 @@ end
         parameters.air_properties,
         q,
         qʳ,
-        ρ,
+        ρᵐ,
         T,
         constants,
     )
@@ -993,7 +1005,7 @@ end
         rain_velocity,
         qᶜˡ,
         qʳ,
-        ρ,
+        ρᵐ,
     )
 
     # Physics tendencies — conserved by construction: ρqᵛ_phys + ρqᶜˡ_phys + ρqʳ_phys = 0
@@ -1127,29 +1139,30 @@ end
     Tᶠ = categories.freezing_temperature
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
+    ρᵐ = density(𝒰, constants)  # the air's own density; `ρ` only weights the tendencies
 
     # Condensation: vapor ↔ cloud liquid
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    qᵛ⁺ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρᵐ, q, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Deposition: vapor ↔ cloud ice
     # Suppress warm cloud-ice growth, matching CloudMicrophysics' INP limiter.
-    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρᵐ, constants, PlanarIceSurface())
     τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories, qᶜⁱ, T, qᵛ, qᵛ⁺ⁱ)
-    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
+    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρᵐ, q, τᶜⁱ, constants)
     Sᵈᵉᵖ = ifelse(isnan(Sᵈᵉᵖ), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
     Sᵈᵉᵖ = ifelse((T > Tᶠ) & (Sᵈᵉᵖ > 0), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
 
     (; Sᵉᵛᵃᵖ, Sˢᵘᵇˡ, Sᵐᵉˡᵗ, Sᵃᶜⁿᵛ, Sᵃᶜᶜ, Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜˡˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵃᶜᶜʳⁱ, Sʳˢⁿ, Sˢⁿʳ) =
-        mixed_phase_precipitation_rates(bμp, ρ, ℳ, q, T, Tᶠ, constants)
+        mixed_phase_precipitation_rates(bμp, ρᵐ, ℳ, q, T, Tᶠ, constants)
 
     Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
     Sˢᵘᵇˡ = max(Sˢᵘᵇˡ, -max(0, qˢⁿ) / τⁿᵘᵐ)
     Sᵐᵉˡᵗ = min(Sᵐᵉˡᵗ, max(0, qˢⁿ) / τⁿᵘᵐ)
 
     # Cloud ice melting: cloud ice → cloud liquid
-    Sᵐᵉˡᵗᶜⁱ = cloud_ice_melt_rate(processes.cloud_ice_melt, cloud_ice, air, qᶜⁱ, ρ, T, Tᶠ, constants)
+    Sᵐᵉˡᵗᶜⁱ = cloud_ice_melt_rate(processes.cloud_ice_melt, cloud_ice, air, qᶜⁱ, ρᵐ, T, Tᶠ, constants)
     Sᵐᵉˡᵗᶜⁱ = min(Sᵐᵉˡᵗᶜⁱ, max(0, qᶜⁱ) / τⁿᵘᵐ)
 
     # Thermal melt factor for warm accretion
@@ -1324,9 +1337,10 @@ end
     Tᶠ = categories.freezing_temperature
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
+    ρᵐ = density(𝒰, constants)  # the air's own density; `ρ` only weights the tendencies
 
     (; Sᵉᵛᵃᵖ, Sˢᵘᵇˡ, Sᵐᵉˡᵗ, Sᵃᶜⁿᵛ, Sᵃᶜᶜ, Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜˡˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵃᶜᶜʳⁱ, Sʳˢⁿ, Sˢⁿʳ) =
-        mixed_phase_precipitation_rates(bμp, ρ, ℳ, q, T, Tᶠ, constants)
+        mixed_phase_precipitation_rates(bμp, ρᵐ, ℳ, q, T, Tᶠ, constants)
 
     α = warm_accretion_melt_factor(T, Tᶠ, constants)
     is_warm = T ≥ Tᶠ

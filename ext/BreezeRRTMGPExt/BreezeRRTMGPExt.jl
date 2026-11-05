@@ -7,14 +7,14 @@ using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, Constan
                                column_index, compute_radiation_flux_divergence!,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
                                assert_bound_surface_temperature, maybe_infer_solar_position,
-                               initialize_cos_zenith!, update_cos_zenith!
+                               initialize_cos_zenith!, update_cos_zenith!, fill_columns!
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 
 using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
-using Oceananigans.Architectures: architecture, CPU, GPU
+using Oceananigans.Architectures: architecture, CPU, GPU, ReactantState
 using Oceananigans.DistributedComputations: Distributed, child_architecture
 using Oceananigans.Fields: ZFaceField, CenterField
 
@@ -69,6 +69,11 @@ end
 
 # Radiation is column-local: each rank solves its own columns on its child architecture
 rrtmgp_context(arch::Distributed) = rrtmgp_context(child_architecture(arch))
+
+# RRTMGP allocates its lookup tables and workspace through ClimaComms, which has no device for Reactant's arrays
+rrtmgp_context(::ReactantState) =
+    throw(ArgumentError("RRTMGP radiation does not support ReactantState yet: RRTMGP allocates its lookup tables " *
+                        "and workspace through ClimaComms, which has no device for Reactant's arrays."))
 
 using Oceananigans.Utils: IterationInterval
 
