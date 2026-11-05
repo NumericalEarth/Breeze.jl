@@ -105,15 +105,18 @@ end
         global_field = reconstruct_global_field(local_field)
 
         if rank == 0
-            @test !any(isnan, parent(global_field))
-            serial_field = getproperty(serial_model.momentum, name)
-            @test global_field ≈ serial_field rtol=rtol
+            # Compare on the host: in GPU runs the reconstructed field is on the GPU and the
+            # serial reference on the CPU (Breeze issue #1193).
+            distributed_data = Array(interior(global_field))
+            serial_data = Array(interior(getproperty(serial_model.momentum, name)))
+            @test !any(isnan, distributed_data)
+            @test distributed_data ≈ serial_data rtol=rtol
         end
     end
 
     global_ρᵈ = reconstruct_global_field(model.dynamics.dry_density)
     if rank == 0
-        @test global_ρᵈ ≈ serial_model.dynamics.dry_density rtol=rtol
+        @test Array(interior(global_ρᵈ)) ≈ Array(interior(serial_model.dynamics.dry_density)) rtol=rtol
     end
 end
 
