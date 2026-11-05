@@ -287,24 +287,25 @@ function add_implicit_advection_tendency!(model, advection::AdaptiveImplicitVert
     return nothing
 end
 
-# The base-state part of the vertical-momentum split's implicit half: `Lⁱ (ρw)ᴸ`, built from the
-# same tridiagonal coefficients the per-substep solve uses (evaluated with unit Δt), so base plus
-# perturbation sum exactly to the operator the solve inverts.
-@kernel function _implicit_momentum_advection_base_tendency!(Gρw, grid, scheme, W, ρw, ρᵈ)
+# The base-state part of the momentum split's implicit half: `Lⁱ (ρu)ᴸ` at the location
+# `(ℓx, ℓy, ℓz)` of the momentum component, built from the same tridiagonal coefficients the
+# per-substep solve uses (evaluated with unit Δt), so base plus perturbation sum exactly to the
+# operator the solve inverts. Boundary rows vanish through the coefficients' peripheral masks.
+@kernel function _implicit_momentum_advection_base_tendency!(G, grid, scheme, W, ρu, ρᵈ, ℓx, ℓy, ℓz)
     i, j, k = @index(Global, NTuple)
-    c, f = Center(), Face()
-    Lρw = implicit_advection_lower_diagonal(i, j, k-1, grid, scheme, W, 1, c, c, f, ρᵈ) * ρw[i, j, k-1] +
-          implicit_advection_diagonal(i, j, k, grid, scheme, W, 1, c, c, f, ρᵈ) * ρw[i, j, k] +
-          implicit_advection_upper_diagonal(i, j, k, grid, scheme, W, 1, c, c, f, ρᵈ) * ρw[i, j, k+1]
-    # The solver applies (1 + d) to the diagonal; `implicit_advection_diagonal` is `d` alone.
-    @inbounds Gρw[i, j, k] -= Lρw
+    @inbounds begin
+        Lρu = implicit_advection_lower_diagonal(i, j, k-1, grid, scheme, W, 1, ℓx, ℓy, ℓz, ρᵈ) * ρu[i, j, k-1] +
+              implicit_advection_diagonal(i, j, k, grid, scheme, W, 1, ℓx, ℓy, ℓz, ρᵈ) * ρu[i, j, k] +
+              implicit_advection_upper_diagonal(i, j, k, grid, scheme, W, 1, ℓx, ℓy, ℓz, ρᵈ) * ρu[i, j, k+1]
+        G[i, j, k] -= Lρu
+    end
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Fold the base-state part of the vertical-momentum IMEX split's implicit half into `Gⁿρw`, so the
-acoustic loop sees the implicit vertical transport of `ρw` (the perturbation part is solved per
+Fold the base-state part of the momentum IMEX split's implicit half into `Gⁿ`, so the acoustic
+loop sees the implicit vertical transport of momentum (the perturbation part is solved per
 substep by `implicit_momentum_advection_substep!`). A no-op for explicit momentum advection.
 """
 add_implicit_momentum_advection_tendency!(model) =
@@ -315,17 +316,20 @@ add_implicit_momentum_advection_tendency!(model, advection) = nothing
 function add_implicit_momentum_advection_tendency!(model, advection::AdaptiveImplicitVerticalAdvection)
     fold_implicit_momentum_advection[] || return nothing
     grid = model.grid
+    arch = architecture(grid)
     w, ρᵈ = advecting_state(model)
-    Nx, Ny, Nz = size(grid)
-    launch!(architecture(grid), grid, KernelParameters(1:Nx, 1:Ny, 2:Nz),
-            _implicit_momentum_advection_base_tendency!,
-            model.timestepper.Gⁿ.ρw, grid, advection, w, model.momentum.ρw, ρᵈ)
+    Gⁿ = model.timestepper.Gⁿ
+    ρu, ρv, ρw = model.momentum.ρu, model.momentum.ρv, model.momentum.ρw
+    c, f = Center(), Face()
+    launch!(arch, grid, :xyz, _implicit_momentum_advection_base_tendency!, Gⁿ.ρu, grid, advection, w, ρu, ρᵈ, f, c, c)
+    launch!(arch, grid, :xyz, _implicit_momentum_advection_base_tendency!, Gⁿ.ρv, grid, advection, w, ρv, ρᵈ, c, f, c)
+    launch!(arch, grid, :xyz, _implicit_momentum_advection_base_tendency!, Gⁿ.ρw, grid, advection, w, ρw, ρᵈ, c, c, f)
     return nothing
 end
 
 postloop_momentum_scheme(advection, ρ, name) = implicit_step_scheme(advection, ρ)
 postloop_momentum_scheme(advection::AdaptiveImplicitVerticalAdvection, ρ, name) =
-    (name === :ρw && fold_implicit_momentum_advection[]) ? implicit_step_scheme(nothing, ρ) : implicit_step_scheme(advection, ρ)
+    fold_implicit_momentum_advection[] ? implicit_step_scheme(nothing, ρ) : implicit_step_scheme(advection, ρ)
 
 # The implicit half of the IMEX thermodynamic split is applied inside the acoustic loop
 # (`implicit_advection_substep!`), so post-loop the thermodynamic variable keeps only

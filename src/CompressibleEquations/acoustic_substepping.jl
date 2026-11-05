@@ -1565,15 +1565,17 @@ wⁱ = (1 - s) w, with coefficients read from the frozen stage-entry state; the 
 `Lⁱ (ρw)ᴸ` rides the slow tendency (see `add_implicit_momentum_advection_tendency!`), so the
 sum over the stage is the full implicit operator. A no-op for explicit momentum advection.
 """
-implicit_momentum_advection_substep!(model, substepper, advection, Δτ) = nothing
+implicit_momentum_advection_substep!(model, substepper, advection, Δτ, components) = nothing
 
-function implicit_momentum_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ)
+function implicit_momentum_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ, components)
     fold_implicit_momentum_advection[] || return nothing
     w = substepper.vertical_velocity_cache
     ρᵈ = substepper.density_cache
-    implicit_step!(substepper.momentum_perturbation.w,
-                   model.timestepper.implicit_solver, nothing, nothing, nothing,
-                   model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    for name in components
+        implicit_step!(getproperty(substepper.momentum_perturbation, name),
+                       model.timestepper.implicit_solver, nothing, nothing, nothing,
+                       model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    end
     return nothing
 end
 
@@ -1608,6 +1610,10 @@ function acoustic_substep!(model, substepper, stage, advection)
             substepper.density_potential_temperature_perturbation,
             substepper.linearization_exner,
             Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture)
+
+    # Implicit vertical transport of the horizontal momentum perturbations, before the
+    # predictors take their divergence (see `implicit_momentum_advection_substep!`).
+    implicit_momentum_advection_substep!(model, substepper, model.advection.momentum, Δτ, (:u, :v))
 
     fill_halo_regions!(substepper.momentum_perturbation.u)
     fill_halo_regions!(substepper.momentum_perturbation.v)
@@ -1675,7 +1681,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     # perturbation, applied between the acoustic solve and the recovery so that continuity
     # and the thermodynamic recovery (and the next substep's pressure) see a (ρw)′ that has
     # already been transported (the momentum analogue of the ρθ fold-in above).
-    implicit_momentum_advection_substep!(model, substepper, model.advection.momentum, Δτ)
+    implicit_momentum_advection_substep!(model, substepper, model.advection.momentum, Δτ, (:w,))
 
     # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′
     launch!(arch, grid, :xyz, _post_solve_recovery!,
