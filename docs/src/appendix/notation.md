@@ -173,6 +173,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
+| ``Uᵍ``                              | `Uᵍ`   | `gustiness`                         | Gustiness: the unresolved wind added to the resolved wind in the bulk surface fluxes, m/s; ``Uᵍ = \max(c \sqrt{e}, Uᵍ_{min})`` for `TKEGustiness` |
+| ``Ũ``                               | `Ũ`    |                                     | Effective wind speed of the bulk surface fluxes and their transfer coefficients, ``Ũ = \sqrt{u² + v² + Uᵍ²}``, m/s |
 | ``\ell``                            | `ℓ`    |                                     | A **length scale**, m; the superscript says which one. Bare ``ℓ`` is used locally where only one length scale is in play (the primary mixing length in `TKEBasedTurbulenceClosure`, the divergence-damping scale in `CompressibleEquations`) |
 | ``\ell^b``                          | `ℓᵇ`   |                                     | Buoyancy penetration depth, ``ℓᵇ = \sqrt{e} / N``, how far an eddy with kinetic energy ``e`` penetrates air of buoyancy frequency ``N``; infinite where ``N² ≤ 0``. Every mixing-length formulation is built from it and the wall length ``ℂˢ z``: the local minimum ``\min(ℂˢ z, ℓᵇ)``, its interior envelope with slope ``ℂⁱ``, capped separately by ``ℂˢ z`` (the default), or the Bougeault–Lacarrère parcel lengths |
 | ``\ell^u, \ell^c, \ell^e, \ell^D``  | `ℓᵘ`, `ℓᶜ`, `ℓᵉ`, `ℓᴰ` |                    | Mixing lengths for momentum, scalars, TKE and dissipation: ``ℓᵘ = Sᵘ ℓ``, ``ℓᶜ = Sᶜ ℓ``, ``ℓᵉ = Sᵉ ℓ``, ``ℓᴰ = ℓ / Sᴰ`` |
@@ -206,10 +208,11 @@ The following table also uses a few conventions that suffuse the source code and
 | ``N_A``                             | `ℕᴬ`   |                                     | Avogadro's number, molecules per mole                                          |
 | ``\mathcal{U}``                     | `𝒰`    |                                     | Thermodynamic state struct (e.g., `StaticEnergyState`)                         |
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
-| ``Π^L``                             | `Πᴸ`   | `AcousticSubstepper.linearization_exner` | Stage-entry Exner function, ``Π^L = (p^L / p^{st})^κ``                  |
 | ``θ^L``                             | `θᴸ`   | `AcousticSubstepper.linearization_potential_temperature` | Stage-entry potential temperature, ``θ^L = (ρθ)^L / ρ^L`` |
-| ``γ^m R^m\vert_L``                  | `γRᵐᴸ` | `AcousticSubstepper.linearization_gamma_R_mixture` | Stage-entry equation-of-state coefficient in ``p' = γ^m R^m\vert_L Π^L (ρθ)'`` |
-| ``C^L``                             | `Cᴸ`   |                                     | Linearized pressure coefficient, ``C^L = γ^m R^m\vert_L Π^L``                 |
+| ``C^L``                             | `Cᴸ`   | `AcousticSubstepper.linearization_pressure_coefficient` | Linearized pressure coefficient, the slope ``∂p/∂(ρθ)`` of the equation of state at the stage-entry state, ``C^L = γ^e p^L / (ρθ)^L`` |
+| ``γ^e``                             | `γᵉ`   |                                     | Effective heat-capacity ratio of the linearized equation of state, ``γ^e = (θ / T) ∂T/∂θ`` |
+| ``θ ∂T/∂θ``                         | `θ∂T∂θ` | `temperature_and_sensitivity(𝒰, constants)` | Temperature sensitivity at fixed density and composition, propagated through the selected inversion |
+| ``\tilde{T}``                       | `T̃`    |                                     | Condensate-free root of the density-based inversion of ``θˡⁱ`` (the root with ``H^c = 0``) |
 | ``G^n``                             | `Gⁿ`   |                                     | Tendency fields at time step ``n``                                             |
 | ``G^s``                             | `Gˢ`   |                                     | Slow tendencies (excludes fast pressure gradient and buoyancy)                 |
 | ``N``                               | `N`    | `AcousticSubstepper.substeps`       | Acoustic substeps per outer time step, or adaptive substep count before stage partitioning |
