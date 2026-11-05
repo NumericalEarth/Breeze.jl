@@ -211,11 +211,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``θ^L``                             | `θᴸ`   | `AcousticSubstepper.linearization_potential_temperature` | Stage-entry potential temperature, ``θ^L = (ρθ)^L / ρ^L`` |
 | ``C^L``                             | `Cᴸ`   | `AcousticSubstepper.linearization_pressure_coefficient` | Linearized pressure coefficient, the slope ``∂p/∂(ρθ)`` of the equation of state at the stage-entry state, ``C^L = γ^e p^L / (ρθ)^L`` |
 | ``γ^e``                             | `γᵉ`   |                                     | Effective heat-capacity ratio of the linearized equation of state, ``γ^e = (θ / T) ∂T/∂θ`` |
-| ``θ ∂T/∂θ``                         | `θ∂T∂θ` |                                    | Temperature sensitivity at fixed density and composition, propagated through the selected inversion (returned by `temperature_and_sensitivity`) |
-| ``\tilde{θ}``                       | `θ̃`    |                                     | Scaled liquid-ice potential temperature of the density-based inversion, ``θ̃ = \hat{c}^p θˡⁱ / c^p_m`` |
-| ``\tilde{T}``                       | `T̃`    |                                     | Condensate-free root of the density-based inversion, ``T̃ = θ̃^γ (ρ R^m / p^{st})^{γ - 1}`` with ``γ = 1 / (1 - κ)`` |
-| ``L``                               | `L`    |                                     | Latent shift of the density-based inversion, ``L = H^c / c^p_m`` (a temperature) |
-| ``Φ``                               | `Φ`    |                                     | Temperature-dependent term in the inversion residual ``r(T) = T - Φ - L``, with ``Φ = (ρ R^m T / p^{st})^κ θ̃`` |
+| ``θ ∂T/∂θ``                         | `θ∂T∂θ` | `temperature_and_sensitivity(𝒰, constants)` | Temperature sensitivity at fixed density and composition, propagated through the selected inversion |
+| ``\tilde{T}``                       | `T̃`    |                                     | Condensate-free root of the density-based inversion of ``θˡⁱ`` (the root with ``H^c = 0``) |
 | ``G^n``                             | `Gⁿ`   |                                     | Tendency fields at time step ``n``                                             |
 | ``G^s``                             | `Gˢ`   |                                     | Slow tendencies (excludes fast pressure gradient and buoyancy)                 |
 | ``N``                               | `N`    | `AcousticSubstepper.substeps`       | Acoustic substeps per outer time step, or adaptive substep count before stage partitioning |
