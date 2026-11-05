@@ -367,7 +367,7 @@ end
             coefficient(marker, k, advection) = @allowscalar Oceananigans.Solvers.get_coefficient(
                 1, 1, k, grid, marker, nothing, ZDirection(),
                 model.closure, model.closure_fields, nothing, Center(), Center(), Face(),
-                Δt, model.clock, Oceananigans.fields(model), advection, nothing, ρ, bcs...)
+                Δt, model.clock, Oceananigans.fields(model), advection, nothing, ρ, bcs..., ρw)
 
             du(k, advection=scheme) = coefficient(VerticallyImplicitDiffusionUpperDiagonal(), k, advection)
             dl(k, advection=scheme) = coefficient(VerticallyImplicitDiffusionLowerDiagonal(), k, advection)
@@ -467,10 +467,10 @@ end
     c, f = Center(), Face()
 
     ρc, ρw = model.tracers.ρc, model.momentum.ρw
-    field_bcs(q) = (q.boundary_conditions.top, q.boundary_conditions.bottom, q.boundary_conditions.immersed)
+    field_bcs(q) = (q.boundary_conditions.top, q.boundary_conditions.bottom, q.boundary_conditions.immersed, q)
 
     # The argument list `implicit_step!` calls the solver with, `(advection, w, density)` and the
-    # field's three boundary conditions last.
+    # field's three boundary conditions, then the field itself, last.
     coefficient_arguments(marker, ℓz, id, bcs) =
         (1, 1, 8, grid, marker, nothing, ZDirection(),
          model.closure, model.closure_fields, id, c, c, ℓz, 1.0, clock, mf, scheme, w, ρ, bcs...)

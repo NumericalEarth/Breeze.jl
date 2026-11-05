@@ -34,7 +34,7 @@ features:
     details: Saturation adjustment, Kessler, one- and two-moment bulk schemes via [`CloudMicrophysics.jl`](https://github.com/CliMA/CloudMicrophysics.jl), and Predicted Particle Properties (P3) mixed-phase microphysics
   - icon: ☀️
     title: Radiative transfer
-    details: Gray, clear-sky, and all-sky solvers via [`RRTMGP.jl`](https://github.com/CliMA/RRTMGP.jl)
+    details: Gray, clear-sky, and all-sky solvers via [`RRTMGP.jl`](https://github.com/CliMA/RRTMGP.jl) and ecCKD gas optics via [`NumericalRadiation.jl`](https://github.com/NumericalEarth/NumericalRadiation.jl)
   - icon: 🦾
     title: High-order advection
     details: Including bounds-preserving WENO schemes
@@ -112,7 +112,7 @@ Lz = 4 * 1024
 grid = RectilinearGrid(size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
 p₀, θ₀ = 1e5, 288 # reference state parameters
-reference_state = ReferenceState(grid, surface_pressure=p₀, potential_temperature=θ₀)
+reference_state = ReferenceState(grid, base_pressure=p₀, potential_temperature=θ₀)
 dynamics = AnelasticDynamics(reference_state)
 
 Q₀ = 1000 # heat flux in W / m²

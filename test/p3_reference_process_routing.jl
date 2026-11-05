@@ -7,6 +7,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     P3MicrophysicalState,
     PredictedParticlePropertiesMicrophysics,
     ProcessRate,
+    NoLiquidFraction,
     compute_p3_process_rates,
     immersion_freezing_cloud_rate,
     immersion_freezing_rain_rate,
@@ -188,11 +189,12 @@ end
         properties = PPP.p3_process_properties(
             p3, air_density, microphysical_state)
 
+        # Condensation heating outweighs conduction, so nothing refreezes.
         @test rates.post_process_clipping == 1
-        @test rates.refreezing ≈ FT(9.89e-10)
-        @test rates.clipping_dry_mass ≈ FT(1e-9)
-        @test rates.clipping_rime_mass ≈ FT(9.945e-10)
-        @test rates.clipping_rime_volume ≈ FT(1.112638888888889e-12)
+        @test rates.refreezing == 0
+        @test rates.clipping_dry_mass ≈ dry_ice / τ
+        @test rates.clipping_rime_mass ≈ rime_mass / τ
+        @test rates.clipping_rime_volume ≈ rime_volume / τ
 
         dry_ice_after = dry_ice +
             τ * tendency_ρqⁱ(rates, air_density) / air_density
@@ -343,7 +345,7 @@ end
 
     @testset "non-liquid-fraction mode uses the fast routing" begin
         FT = Float64
-        process_rates = ProcessRate(FT; liquid_fraction_active = false)
+        process_rates = ProcessRate(FT; liquid_fraction = NoLiquidFraction())
         p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates)
         constants = ThermodynamicConstants(FT)
         τ = process_rates.sink_limiting_timescale
@@ -354,18 +356,20 @@ end
         overridden_qsmall = FT(3e-9)
         p3_overridden = PredictedParticlePropertiesMicrophysics(
             FT; process_rates = ProcessRate(
-                FT; liquid_fraction_active = false,
+                FT; liquid_fraction = NoLiquidFraction(),
                 tiny_ice_to_rain_threshold = overridden_qsmall))
         @test p3_overridden.process_rates.tiny_ice_to_rain_threshold == overridden_qsmall
 
         mixed_precision = PredictedParticlePropertiesMicrophysics(
             Float64; process_rates = ProcessRate(
-                Float32; liquid_fraction_active = false))
+                Float32; liquid_fraction = NoLiquidFraction()))
         @test mixed_precision.process_rates.tiny_ice_to_rain_threshold isa Float32
         @test mixed_precision.process_rates.tiny_ice_to_rain_threshold == Float32(1e-12)
 
-        wet_growth_temperature = process_rates.freezing_temperature - FT(1e-3)
-        wet_growth_vapor = FT(0.02)
+        # Partial wet growth: part of the collection freezes, the rest sheds.
+        wet_growth_temperature = process_rates.freezing_temperature - FT(1)
+        wet_growth_vapor = saturation_specific_humidity(
+            wet_growth_temperature, air_density, constants, PlanarLiquidSurface())
         wet_growth_cloud = FT(1e-3)
         wet_growth_cloud_number = FT(3e8)
         wet_growth_rain = FT(1e-3)
@@ -425,8 +429,8 @@ end
 
         @test coated_wet_growth_props.qⁱ_total == wet_growth_props.qⁱ_total
         @test coated_wet_growth_props.Fˡ == wet_growth_props.Fˡ == 0
-        @test coated_wet_growth_fall_speeds.wⁱ == wet_growth_fall_speeds.wⁱ
-        @test coated_wet_growth_fall_speeds.wⁱₙ == wet_growth_fall_speeds.wⁱₙ
+        @test coated_wet_growth_fall_speeds.𝕎ⁱ == wet_growth_fall_speeds.𝕎ⁱ
+        @test coated_wet_growth_fall_speeds.𝕎ⁿⁱ == wet_growth_fall_speeds.𝕎ⁿⁱ
         @test coated_wet_growth_rates.cloud_riming ≈ wet_growth_rates.cloud_riming
         @test coated_wet_growth_rates.rain_riming ≈ wet_growth_rates.rain_riming
         @test coated_wet_growth_rates.shedding ≈ inactive_coating / τ

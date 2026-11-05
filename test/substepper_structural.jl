@@ -24,8 +24,6 @@ using Breeze.CompressibleEquations: AcousticSubstepper,
                                     AcousticTridiagUpper,
                                     freeze_linearization_state!,
                                     assemble_slow_vertical_momentum_tendency!
-using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
-                           compute_slow_scalar_tendencies!
 
 using Oceananigans
 using Oceananigans.Grids: ZDirection
@@ -54,7 +52,7 @@ function _build_str_model(arch; ω = 0.55)
                                            damping = NoDivergenceDamping())
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = θ_iso_str,
-                               surface_pressure = 1e5,
+                               base_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
                                   thermodynamic_constants = constants)
@@ -93,18 +91,17 @@ end
     grid = model.grid
     g    = model.thermodynamic_constants.gravitational_acceleration
 
-    Π⁰ = sub.linearization_exner
     θ⁰ = sub.linearization_potential_temperature
-    γRᵐ⁰ = sub.linearization_gamma_R_mixture
+    C⁰ = sub.linearization_pressure_coefficient
     δτ_new = 0.5  # arbitrary
 
     dᵐ⁺ = 0.0   # implicit-vertical-damping factor; zero for this test
     b₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagDiagonal(),
                                        nothing, ZDirection(),
-                                       Π⁰, θ⁰, γRᵐ⁰, g, δτ_new, dᵐ⁺, nothing, model.dynamics)
+                                       θ⁰, C⁰, g, δτ_new, dᵐ⁺, nothing, model.dynamics)
     c₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagUpper(),
                                        nothing, ZDirection(),
-                                       Π⁰, θ⁰, γRᵐ⁰, g, δτ_new, dᵐ⁺, nothing, model.dynamics)
+                                       θ⁰, C⁰, g, δτ_new, dᵐ⁺, nothing, model.dynamics)
 
     @test b₁ == 1.0
     @test c₁ == 0.0
@@ -307,7 +304,7 @@ end
                                          damping = NoDivergenceDamping())
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = z -> 300,
-                               surface_pressure = 1e5,
+                               base_pressure = 1e5,
                                standard_pressure = 1e5)
 
     ρu_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.0))
@@ -362,8 +359,6 @@ end
         update_state!(model)
 
         freeze_linearization_state!(sub, model)
-        compute_slow_momentum_tendencies!(model)
-        compute_slow_scalar_tendencies!(model)
         assemble_slow_vertical_momentum_tendency!(sub, model)
 
         Gˢρw = Array(interior(sub.slow_vertical_momentum_tendency))
@@ -411,8 +406,6 @@ end
         update_state!(model)
 
         freeze_linearization_state!(sub, model)
-        compute_slow_momentum_tendencies!(model)
-        compute_slow_scalar_tendencies!(model)
         assemble_slow_vertical_momentum_tendency!(sub, model)
 
         Gˢρw = Array(interior(sub.slow_vertical_momentum_tendency))

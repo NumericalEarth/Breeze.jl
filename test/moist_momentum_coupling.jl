@@ -8,7 +8,6 @@ using GPUArraysCore: @allowscalar
 using Oceananigans.TimeSteppers: update_state!
 using Breeze.AtmosphereModels: dynamics_mass_fractionᶠᶜᶜ, dynamics_mass_fractionᶜᶜᶠ
 using Breeze.CompressibleEquations: assemble_slow_vertical_momentum_tendency!
-using Breeze.TimeSteppers: compute_slow_momentum_tendencies!
 
 #####
 ##### The mixture momentum balance carries -∇p and -g ρ with total ρ = ρᵈ + Σρˣ, but momentum is
@@ -35,12 +34,12 @@ end
 
 # The tendency that actually reaches ρw: the ordinary one under explicit stepping, the assembled
 # slow tendency (where split-explicit puts the PGF and buoyancy) under acoustic substepping.
+# `update_state!` has already built `Gⁿ`, without the PGF and buoyancy under split-explicit.
 vertical_momentum_tendency(model, ::ExplicitTimeStepping) =
     Array(interior(model.timestepper.Gⁿ.ρw))
 
 function vertical_momentum_tendency(model, ::SplitExplicitTimeDiscretization)
     substepper = model.timestepper.substepper
-    compute_slow_momentum_tendencies!(model)
     assemble_slow_vertical_momentum_tendency!(substepper, model)
     return Array(interior(substepper.slow_vertical_momentum_tendency))
 end

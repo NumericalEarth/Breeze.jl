@@ -76,13 +76,18 @@ using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
 using Breeze.Solvers: NewtonSolver
 using Breeze.Utils: safe_divide
-using Breeze.Thermodynamics: mixture_gas_constant, dry_air_gas_constant,
-                             vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState
+using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, MoistureMassFractions,
+                             vapor_equivalent_heat_capacity, condensate_latent_energy, exner_exponent,
+                             reject_renamed_surface_pressure,
+                             vapor_gas_constant, ExnerReferenceState, temperature, temperature_and_sensitivity,
+                             LiquidIceDensityState
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
-                               surface_pressure, standard_pressure, thermodynamic_density,
+                               base_pressure, standard_pressure, thermodynamic_density,
                                thermodynamic_density_name, specific_prognostic_moisture
-using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
+
+using ReactantCore: @trace
 
 include("time_discretizations.jl")
 include("compressible_dynamics.jl")

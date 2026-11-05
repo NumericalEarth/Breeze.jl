@@ -24,7 +24,7 @@ grid = RectilinearGrid(CPU();
                        topology = (Bounded, Flat, Bounded))
 
 thermodynamic_constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermodynamic_constants, surface_pressure=1e5, potential_temperature=300)
+reference_state = ReferenceState(grid, thermodynamic_constants, base_pressure=1e5, potential_temperature=300)
 dynamics = AnelasticDynamics(reference_state)
 advection = WENO(order=9)
 model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection)
@@ -85,7 +85,7 @@ outputs = (; θ, w)
 filename = "dry_thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
                     schedule = TimeInterval(10seconds),
-                    overwrite_existing = true)
+                    overwrite_files = true)
 
 simulation.output_writers[:jld2] = writer
 
@@ -218,7 +218,7 @@ moist_outputs = (; θ, w, qˡ′)
 moist_filename = "cloudy_thermal_bubble.jld2"
 moist_writer = JLD2Writer(moist_model, moist_outputs; filename=moist_filename,
                           schedule = TimeInterval(10seconds),
-                          overwrite_existing = true)
+                          overwrite_files = true)
 
 moist_simulation.output_writers[:jld2] = moist_writer
 
@@ -321,7 +321,7 @@ precip_outputs = (; θ=θ_precip, w=w_precip, qᶜˡ=qᶜˡ_precip, qʳ=qʳ_prec
 precip_filename = "precipitating_thermal_bubble.jld2"
 precip_writer = JLD2Writer(precip_model, precip_outputs; filename=precip_filename,
                            schedule = TimeInterval(30seconds),
-                           overwrite_existing = true)
+                           overwrite_files = true)
 
 precip_simulation.output_writers[:jld2] = precip_writer
 

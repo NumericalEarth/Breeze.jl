@@ -1,8 +1,11 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
+using ClimaComms
 using CloudMicrophysics
+using Dates: DateTime
 using Oceananigans
+using RRTMGP
 using Test
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
@@ -22,12 +25,21 @@ end
 θᵢ(x, y, z) = 300 + 2 * sin(2π * x / 1_000) * cos(2π * y / 1_000) * exp(-z / 500)
 uᵢ(x, y, z) = 0.5 * cos(2π * x / 1_000) * sin(2π * z / 1_000)
 
-function anelastic_model(FT; microphysics=nothing, closure=nothing)
+function anelastic_model(FT; microphysics=nothing, closure=nothing, optics=nothing)
     grid = test_grid(FT)
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, microphysics, closure)
+
+    # Every 0.9 s is iterations 3, 5, 7 and 10, so the checkpoint at iteration 6 falls between two solves
+    radiation = isnothing(optics) ? nothing :
+        RadiativeTransferModel(grid, optics, constants;
+                               surface_temperature = 300, surface_emissivity = 0.98, surface_albedo = 0.1,
+                               solar_position = ApparentSolarPosition(coordinate = (0, 45),
+                                                                      epoch = DateTime(2024, 6, 21, 16)),
+                               schedule = TimeInterval(0.9))
+
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, microphysics, closure, radiation)
     set!(model; θ=θᵢ, qᵗ=0.015, u=uᵢ)
     return model
 end
@@ -61,7 +73,7 @@ function run_with_restart(build, dir)
 
     model = build()
     simulation = Simulation(model; Δt, stop_iteration=NSPIN + NRESTART, verbose=false)
-    run!(simulation, pickup=checkpoint)
+    @test_logs (:info, r"Picking up simulation from checkpoint file") run!(simulation; pickup=checkpoint)
     return snapshot(model)
 end
 
@@ -105,6 +117,10 @@ end
 
         @testset "prognostic TKE closure" begin
             test_bitwise_restart(() -> anelastic_model(FT; closure=TKEBasedTurbulenceClosure()))
+        end
+
+        @testset "gray radiation" begin
+            test_bitwise_restart(() -> anelastic_model(FT; optics=GrayOptics()))
         end
     end
 

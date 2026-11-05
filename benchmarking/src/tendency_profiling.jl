@@ -25,7 +25,8 @@ Time `tendency!(args...)` on the architecture of `grid`. `args` is the argument
 tuple for `tendency!` — e.g. `(Gc, grid, advection, U, c)` from
 `scalar_tendency_problem`, or `(model,)` from `model_tendency_problem`. On a
 `ReactantState` grid the call is compiled with `Reactant.@compile raise=raise
-raise_first=raise sync=true` (compile time recorded separately) and profiled via
+raise_first=raise sync=true` (compile time recorded separately, broken down into
+tracing / MLIR / XLA stages by `timed_reactant_compile`) and profiled via
 `Reactant.Profiler.@timed`. On a vanilla grid it is run eagerly and timed over
 `nrepeat` calls with device synchronization (no Reactant compile). When
 `profile_dir` is set, the Reactant profiler writes its xprof trace files there.
@@ -65,9 +66,9 @@ function benchmark_tendency(tendency!, args, grid;
         # directly (it special-cases `::Reactant.Compiler.Thunk`). `runtime_ns`
         # is the mean over `nrepeat`.
         verbose && @info "  Compiling tendency with Reactant (raise=$raise)..."
-        compile_start = time_ns()
-        compiled! = Reactant.@compile raise=raise raise_first=raise sync=true tendency!(args...)
-        compile_time_seconds = (time_ns() - compile_start) / 1e9
+        compiled!, compile_timings = timed_reactant_compile() do
+            Reactant.@compile raise=raise raise_first=raise sync=true tendency!(args...)
+        end
         # `profile_dir` (when set) directs the xprof trace files there; when
         # `nothing`, the profiler uses its default scratch directory.
         prof = Reactant.Profiler.@timed nrepeat=nrepeat profile_dir=profile_dir compiled!(args...)
@@ -75,7 +76,7 @@ function benchmark_tendency(tendency!, args, grid;
     else
         # Vanilla backend: launch the kernel eagerly (no Reactant compile). Warm
         # up once, then time `nrepeat` launches with device synchronization.
-        compile_time_seconds = 0.0
+        compile_timings = (total=0.0, tracing=0.0, mlir=0.0, xla=0.0)
         tendency!(args...)
         synchronize_device(arch)
         start_time = time_ns()
@@ -104,6 +105,7 @@ function benchmark_tendency(tendency!, args, grid;
         "none",      # microphysics
         String(backend),
         String(mode),
+        "",          # checkpointing — only meaningful for AD time stepping
         (Nx, Ny, Nz),
         nrepeat,
         0.0,         # Δt — not applicable to a single tendency evaluation
@@ -111,7 +113,10 @@ function benchmark_tendency(tendency!, args, grid;
         time_per_step_seconds,
         steps_per_second,
         grid_points_per_second,
-        compile_time_seconds,
+        compile_timings.total,
+        compile_timings.tracing,
+        compile_timings.mlir,
+        compile_timings.xla,
         gpu_memory_used,
         metadata,
     )

@@ -3,17 +3,21 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Test
 
 using Breeze
-using Breeze.AtmosphereModels: AtmosphereModels
+using Breeze.AtmosphereModels: AtmosphereModels, condensate_liquid_fraction, microphysical_velocities,
+                               sedimentation_velocity
+using Breeze.Thermodynamics: MoistureMassFractions, LiquidIcePotentialTemperatureState
 using Breeze.Microphysics.PredictedParticleProperties: AerosolActivation,
                                                        AerosolMode,
                                                        PredictedParticlePropertiesMicrophysics
 using Breeze.ParcelModels: step_parcel_state!
+using GPUArraysCore: @allowscalar
 
 using Oceananigans: Bounded, CPU, Center, CenterField, Face, Field, Flat, GridFittedBottom,
                      ImmersedBoundaryGrid, RectilinearGrid, compute!, set!, time_step!
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Oceananigans.Fields: interior, location
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: update_state!
 
 @testset "P3 atmosphere integration" begin
@@ -92,7 +96,7 @@ using Oceananigans.TimeSteppers: update_state!
                                extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
         p3 = PredictedParticlePropertiesMicrophysics(FT)
@@ -148,7 +152,7 @@ using Oceananigans.TimeSteppers: update_state!
                                extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
 
@@ -184,8 +188,7 @@ using Oceananigans.TimeSteppers: update_state!
         # The rates still see the prescribed parameter, so cloud processes are active.
         @test any(Array(interior(μ.ρqʳ)) .> 0)
 
-        # The aerosol-activation path does carry both, and there `μ.nᶜˡ` is the specific
-        # counterpart that `compute_tendencies!` advects, so it must equal `ρnᶜˡ / ρ`.
+        # With aerosol activation, the advected diagnostic must satisfy nᶜˡ = ρnᶜˡ / ρ.
         prognostic = PredictedParticlePropertiesMicrophysics(FT;
             aerosol = AerosolActivation(AerosolMode(FT)))
         @test :ρnᶜˡ ∈ AtmosphereModels.prognostic_field_names(prognostic)
@@ -276,7 +279,7 @@ using Oceananigans.TimeSteppers: update_state!
                                extent = (100, 100, 200))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
@@ -285,7 +288,7 @@ using Oceananigans.TimeSteppers: update_state!
 
         # `div_ρUc` reads these as advecting velocities via `Az_qᶜᶜᶠ`, so they must be
         # located at (Center, Center, Face) like the resolved `w`.
-        velocity_names = (:wᶜˡ, :wᶜˡₙ, :wʳ, :wʳₙ, :wⁱ, :wⁱₙ)
+        velocity_names = (:wᶜˡ, :wⁿᶜˡ, :wʳ, :wⁿʳ, :wⁱ, :wⁿⁱ)
         for name in velocity_names
             @test location(μ[name]) === (Center, Center, Face)
             @test location(μ[name]) === location(model.velocities.w)
@@ -301,7 +304,7 @@ using Oceananigans.TimeSteppers: update_state!
                                    extent = (100, 100, 200))
             constants = ThermodynamicConstants(FT)
             reference_state = ReferenceState(grid, constants;
-                                             surface_pressure = FT(101325),
+                                             base_pressure = FT(101325),
                                              potential_temperature = FT(285))
             dynamics = AnelasticDynamics(reference_state)
             p3 = PredictedParticlePropertiesMicrophysics(FT; precipitation_boundary_condition)
@@ -354,7 +357,7 @@ using Oceananigans.TimeSteppers: update_state!
                                extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
         p3 = PredictedParticlePropertiesMicrophysics(FT)
@@ -426,20 +429,20 @@ using Oceananigans.TimeSteppers: update_state!
         @test only_value(μ.ρbᶠ) == 0
         @test only_value(μ.ρnʳ) == 0
 
-        # The predicted supersaturation is left alone: subsaturation is legitimately negative.
+        # The prognostic vapor excess is left alone: subsaturation is legitimately negative.
         # The field exists only when the switch is on, so check it on such a model.
         supersaturation_p3 =
-            PredictedParticlePropertiesMicrophysics(FT; predict_supersaturation = true)
+            PredictedParticlePropertiesMicrophysics(FT; vapor_excess = PrognosticVaporExcess())
         supersaturation_model = AtmosphereModel(
             grid; dynamics, thermodynamic_constants = constants,
             microphysics = supersaturation_p3)
-        supersaturation_fields = supersaturation_model.microphysical_fields
-        @test !any(field === supersaturation_fields.ρsᵛ⁺ˡ for field in
+        vapor_excess_fields = supersaturation_model.microphysical_fields
+        @test !any(field === vapor_excess_fields.ρδqᵛ⁺ˡ for field in
                    AtmosphereModels.correction_number_fields(
-                       supersaturation_p3, supersaturation_fields))
-        set!(supersaturation_fields.ρsᵛ⁺ˡ, FT(-1e-5))
+                       supersaturation_p3, vapor_excess_fields))
+        set!(vapor_excess_fields.ρδqᵛ⁺ˡ, FT(-1e-5))
         AtmosphereModels.fix_negative_moisture!(supersaturation_model)
-        @test only_value(supersaturation_fields.ρsᵛ⁺ˡ) ≈ FT(-1e-5)
+        @test only_value(vapor_excess_fields.ρδqᵛ⁺ˡ) ≈ FT(-1e-5)
     end
 
     @testset "P3 initialization is consistent for total and dry density inputs" begin
@@ -450,7 +453,7 @@ using Oceananigans.TimeSteppers: update_state!
 
         function make_model()
             dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                            surface_pressure = FT(1e5),
+                                            base_pressure = FT(1e5),
                                             standard_pressure = FT(1e5),
                                             reference_potential_temperature = z -> FT(280))
             return AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
@@ -587,7 +590,7 @@ using Oceananigans.TimeSteppers: update_state!
         # automatic standard-atmosphere reference so this exercises the no-reference path.
         dynamics_without_reference =
             CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                 surface_pressure = FT(1e5),
+                                 base_pressure = FT(1e5),
                                  standard_pressure = FT(1e5),
                                  reference_state = nothing)
         model_without_reference =
@@ -640,7 +643,7 @@ using Oceananigans.TimeSteppers: update_state!
                                extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure = FT(101325),
+                                         base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
         # The point of the budget check below is that the cloud -> rain conversion conserves
@@ -682,7 +685,7 @@ using Oceananigans.TimeSteppers: update_state!
             extent = (100, 100, 100))
         dynamics = CompressibleDynamics(
             SplitExplicitTimeDiscretization();
-            surface_pressure = FT(1e5),
+            base_pressure = FT(1e5),
             standard_pressure = FT(1e5),
             reference_potential_temperature = z -> FT(280))
         model = AtmosphereModel(
@@ -699,5 +702,153 @@ using Oceananigans.TimeSteppers: update_state!
 
         @test all(isfinite, Array(interior(μ.ρqᶜˡ)))
         @test all(isfinite, Array(interior(model.moisture_density)))
+    end
+
+    @testset "P3 sedimentation velocity interface" begin
+        FT = Float64
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4), extent = (100, 100, 100))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants;
+                                         base_pressure = FT(101325),
+                                         potential_temperature = FT(250))
+        dynamics = AnelasticDynamics(reference_state)
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                microphysics = p3)
+        μ = model.microphysical_fields
+
+        # Every additive condensate mass declares the phase of the enthalpy it carries. Liquid
+        # on ice falls with the ice (below) but is liquid: no fusion enthalpy has been released
+        # for it. Rime mass `ρqᶠ` lives inside the dry ice mass `ρqⁱ` and rime volume `ρbᶠ` is
+        # an ice property, so neither is a condensate mass and neither carries a phase.
+        @test condensate_liquid_fraction(p3, Val(:ρqᶜˡ)) == 1
+        @test condensate_liquid_fraction(p3, Val(:ρqʳ)) == 1
+        @test condensate_liquid_fraction(p3, Val(:ρqʷⁱ)) == 1
+        @test condensate_liquid_fraction(p3, Val(:ρqⁱ)) == 0
+        @test isnothing(condensate_liquid_fraction(p3, Val(:ρqᶠ)))
+        @test isnothing(condensate_liquid_fraction(p3, Val(:ρbᶠ)))
+        @test isnothing(condensate_liquid_fraction(p3, Val(:ρnʳ)))
+
+        # Every sedimenting prognostic reaches the advection operator through the generic
+        # `microphysical_velocities` wrapper, which reads `sedimentation_velocity`.
+        for (name, speed) in ((:ρqᶜˡ, :wᶜˡ), (:ρqʳ, :wʳ), (:ρnʳ, :wⁿʳ),
+                              (:ρqⁱ, :wⁱ), (:ρnⁱ, :wⁿⁱ), (:ρqᶠ, :wⁱ),
+                              (:ρbᶠ, :wⁱ), (:ρqʷⁱ, :wⁱ))
+            @test sedimentation_velocity(p3, μ, Val(name)) === getproperty(μ, speed)
+            @test microphysical_velocities(p3, μ, Val(name)).w === getproperty(μ, speed)
+        end
+
+        # Non-sedimenting prognostics stay stationary.
+        @test isnothing(sedimentation_velocity(p3, μ, Val(:ρnᵃ)))
+        @test isnothing(microphysical_velocities(p3, μ, Val(:ρnᵃ)))
+
+        # The four condensate masses sediment: rime mass, rime volume and the number moments
+        # fall too, but are not masses and carry no latent heat.
+        sedimentation = model.sedimentation
+        @test keys(sedimentation) == (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqʷⁱ)
+        @test sedimentation.ρqᶜˡ.velocity === μ.wᶜˡ && sedimentation.ρqᶜˡ.specific_humidity === μ.qᶜˡ
+        @test sedimentation.ρqᶜˡ.liquid_fraction == 1
+        @test sedimentation.ρqʳ.velocity === μ.wʳ && sedimentation.ρqʳ.specific_humidity === μ.qʳ
+        @test sedimentation.ρqʳ.liquid_fraction == 1
+        @test sedimentation.ρqⁱ.velocity === μ.wⁱ && sedimentation.ρqⁱ.specific_humidity === μ.qⁱ
+        @test sedimentation.ρqⁱ.liquid_fraction == 0
+        @test sedimentation.ρqʷⁱ.velocity === μ.wⁱ && sedimentation.ρqʷⁱ.specific_humidity === μ.qʷⁱ
+        @test sedimentation.ρqʷⁱ.liquid_fraction == 1
+    end
+
+    @testset "Sedimentation heat transport bins liquid on ice by phase" begin
+        FT = Float64
+        Nz = 6
+        grid = RectilinearGrid(default_arch, FT; size = (1, 1, Nz), x = (0, 100), y = (0, 100), z = (0, 600))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants;
+                                         base_pressure = FT(101325),
+                                         potential_temperature = FT(250))
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                microphysics = PredictedParticlePropertiesMicrophysics(FT))
+
+        # Wet ice aloft: cloud liquid, dry ice, and liquid carried on the ice. With no
+        # winds, no closure, and no forcing, the only ρθ tendency is the sedimentation
+        # transport of the condensate content.
+        blob(x, y, z) = ifelse(200 < z < 400, FT(0.001), FT(0))
+        set!(model; θ = FT(250), qᵛ = FT(0.0005),
+             qᶜˡ = blob, qʷⁱ = blob, qⁱ = (x, y, z) -> 2 * blob(x, y, z),
+             nⁱ = (x, y, z) -> 1e5 * (blob(x, y, z) > 0),
+             enforce_mass_conservation = false)
+        update_state!(model)
+
+        μ = model.microphysical_fields
+        column(f) = Array(interior(f, 1, 1, :))
+        qᶜˡ = column(μ.qᶜˡ)
+        qʳ = column(μ.qʳ)
+        qʷⁱ = column(μ.qʷⁱ)
+        qⁱ = column(μ.qⁱ)
+        qᵛ = column(μ.qᵛ)
+        wᶜˡ = column(μ.wᶜˡ)
+        wʳ = column(μ.wʳ)
+        wⁱ = column(μ.wⁱ)
+        θ = column(model.formulation.potential_temperature)
+        G = column(model.timestepper.Gⁿ.ρθ)
+        pᵣ = column(model.dynamics.reference_state.pressure)
+        pˢᵗ = reference_state.standard_pressure
+        ρᵣ = model.dynamics.reference_state.density
+        ρᵣᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρᵣ)) for k in 1:Nz+1]
+
+        # The content per unit falling mass of each phase is ∂θˡⁱ/∂qˣ at fixed temperature, the
+        # enthalpy it carries the static-energy content hˣ − hᵈ, and the heating response ∂θˡⁱ/∂h
+        # (see `condensate_content` and `heating_response` in setup.jl), at the temperature the
+        # kernel diagnoses from θ and q; the thermodynamic liquid includes the liquid on ice.
+        q = [MoistureMassFractions(qᵛ[k], qᶜˡ[k] + qʳ[k] + qʷⁱ[k], qⁱ[k]) for k in 1:Nz]
+        T = [Breeze.Thermodynamics.temperature(LiquidIcePotentialTemperatureState(θ[k], q[k], pˢᵗ, pᵣ[k]), constants)
+             for k in 1:Nz]
+        content(phase) = [condensate_content(:LiquidIcePotentialTemperature, phase, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+        enthalpy(phase) = [condensate_content(:StaticEnergy, phase, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+        χˡ, χⁱ, hˡ, hⁱ = content(:liquid), content(:ice), enthalpy(:liquid), enthalpy(:ice)
+        β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], pᵣ[k], pˢᵗ) for k in 1:Nz]
+
+        # Phase-resolved advective sedimentation mass fluxes: with zero resolved velocity
+        # and the default Centered(order=2) scheme, each condensate's flux at face k is
+        # its fall speed times its face-interpolated humidity. qʷⁱ contributes its
+        # ice-speed flux to Φˡ; with no transport velocity every flux is downward, so the
+        # flux through a cell's upper face brings the enthalpy of the cell above.
+        face(q_field) = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, q_field)) for k in 1:Nz+1]
+        qᶜˡᶠ, qʳᶠ, qʷⁱᶠ, qⁱᶠ = face(μ.qᶜˡ), face(μ.qʳ), face(μ.qʷⁱ), face(μ.qⁱ)
+        Φˡ = @. wᶜˡ * qᶜˡᶠ + wʳ * qʳᶠ + wⁱ * qʷⁱᶠ
+        Φⁱ = @. wⁱ * qⁱᶠ
+
+        Δz = FT(100)
+        G_expected = expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φˡ, χˡ, hˡ, β) .+
+                     expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φⁱ, χⁱ, hⁱ, β)
+
+        @test maximum(abs.(G)) > 0
+        @test G ≈ G_expected
+
+        # Binning qʷⁱ as ice instead (the ice content at wⁱ) must not reproduce the model:
+        # the difference is the fusion enthalpy of the liquid-on-ice flux.
+        Φʷ = @. wⁱ * qʷⁱᶠ
+        G_as_ice = G_expected .+ expected_sedimentation_tendency(Nz, Δz, ρᵣᶠ, Φʷ, χⁱ .- χˡ, hⁱ .- hˡ, β)
+        @test !(G ≈ G_as_ice)
+    end
+
+    @testset "P3 bottom precipitation flux" begin
+        FT = Float64
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4), extent = (100, 100, 100))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants;
+                                         base_pressure = FT(101325),
+                                         potential_temperature = FT(285))
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                microphysics = PredictedParticlePropertiesMicrophysics(FT))
+
+        set!(model; θ = FT(285), qᵛ = FT(0.01), qᶜˡ = FT(0.003), qʳ = FT(0.001),
+             enforce_mass_conservation = false)
+
+        flux = bottom_precipitation_flux(model)
+        @test flux isa Field
+        compute!(flux)
+        @test @allowscalar(flux[1, 1]) > 0
+        @test all(isfinite, Array(interior(flux)))
     end
 end

@@ -13,13 +13,6 @@
 # following [Schär et al. (2002)](@cite Schar2002). The acoustic modes are
 # integrated with the split-explicit substepper.
 #
-# ## References
-#
-# ```@bibliography
-# Pages = ["two_dimension_mountain_wave.md"]
-# Canonical = false
-# ```
-#
 # ## Physical setup
 #
 # The simulation initializes an atmosphere with constant Brunt–Väisälä frequency ``N`` and
@@ -245,7 +238,7 @@ time_discretization = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5,
 
 dynamics = CompressibleDynamics(time_discretization;
                                 slope_stencil = SlopeInsideInterpolation(),
-                                surface_pressure = p₀,
+                                base_pressure = p₀,
                                 reference_potential_temperature = potential_temperature_profile)
 
 model = AtmosphereModel(grid; dynamics, advection = WENO(order=9))
@@ -322,7 +315,7 @@ outputs = (; w, contravariant_w)
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
                                               filename,
                                               schedule = TimeInterval(2minutes),
-                                              overwrite_existing = true)
+                                              overwrite_files = true)
 
 run!(simulation)
 
@@ -417,3 +410,10 @@ for ax in (ax1, ax2)
     ax.limits = ((-30e3, 30e3), (0, 10e3))
 end
 fig
+
+# ## References
+#
+# ```@bibliography
+# Pages = ["two_dimension_mountain_wave.md"]
+# Canonical = false
+# ```

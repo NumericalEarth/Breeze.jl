@@ -312,6 +312,9 @@ end
 @inline MoistureMassFractions(vapor::FT) where FT = MoistureMassFractions(vapor, zero(vapor), zero(vapor))
 @inline MoistureMassFractions(vapor::FT, liquid::FT) where FT = MoistureMassFractions(vapor, liquid, zero(vapor))
 
+@inline MoistureMassFractions{FT}(q::MoistureMassFractions) where FT =
+    MoistureMassFractions(convert(FT, q.vapor), convert(FT, q.liquid), convert(FT, q.ice))
+
 const MMF = MoistureMassFractions
 Base.zero(::Type{MMF{FT}}) where FT = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
 
@@ -390,6 +393,34 @@ The liquid and ice phases are assumed to be incompressible.
     cⁱ = constants.ice.heat_capacity
     return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cˡ + qⁱ * cⁱ
 end
+
+# The vapor-equivalent heat capacity ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ, with qᵈ = 1 - qᵗ: the heat capacity at constant
+# pressure a parcel would have if all of its water were vapor. Unlike `mixture_heat_capacity`, ĉᵖ does
+# not change when water changes phase. It normalizes the liquid-ice potential temperature θˡⁱ.
+@inline function vapor_equivalent_heat_capacity(q::MMF, constants::TC)
+    qᵗ = total_specific_moisture(q)
+    qᵈ = 1 - qᵗ
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    return qᵈ * cᵖᵈ + qᵗ * cᵖᵛ
+end
+
+# The vapor-equivalent gas constant R̂ = qᵈ Rᵈ + qᵗ Rᵛ: the gas constant a parcel would have if all of its
+# water were vapor. It equals `mixture_gas_constant` in unsaturated air, and κ̂ = R̂ / ĉᵖ is the exponent
+# of the `VaporEquivalentExponent` Exner function.
+@inline function vapor_equivalent_gas_constant(q::MMF, constants::TC)
+    qᵗ = total_specific_moisture(q)
+    qᵈ = 1 - qᵗ
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    return qᵈ * Rᵈ + qᵗ * Rᵛ
+end
+
+# The latent energy ℒˡ₀ qˡ + ℒⁱ₀ qⁱ of the condensate, with the latent heats extrapolated to absolute
+# zero (`absolute_zero_latent_heat`). The enthalpy relative to all-vapor water is cᵖᵐ T minus this.
+@inline condensate_latent_energy(q::MMF, constants) =
+    absolute_zero_latent_heat(constants, constants.liquid) * q.liquid +
+    absolute_zero_latent_heat(constants, constants.ice) * q.ice
 
 #####
 ##### Equation of state

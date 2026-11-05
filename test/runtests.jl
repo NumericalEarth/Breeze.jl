@@ -1,5 +1,6 @@
 import Breeze
-using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests, available_memory
+using NumericalRadiation: NumericalRadiation
+using ParallelTestRunner: default_njobs, find_tests, parse_args, filter_tests!, runtests, available_memory
 using Pkg.Artifacts: ensure_artifact_installed
 
 # Start with autodiscovered tests
@@ -8,20 +9,22 @@ testsuite = find_tests(@__DIR__)
 # Parse arguments
 args = parse_args(ARGS)
 
-const REACTANT_COMPAT = VERSION < v"1.13-" && Base.JLOptions().check_bounds != 1
+const REACTANT_COMPAT = VERSION < v"1.14-" && Base.JLOptions().check_bounds != 1
 
 # These aren't test files, they are only used as setup for other tests.
 delete!(testsuite, "setup")
 delete!(testsuite, "reactant/weno_compilation_setup")
+delete!(testsuite, "reactant/microphysics_compilation_setup")
+
+# MPI worker scripts are launched on several ranks by the drivers in `distributed/`, never run directly.
+filter!(((name, _),) -> !startswith(name, "mpi/"), testsuite)
 
 if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
     # limitation).
-    if !REACTANT_COMPAT
-        for key in keys(testsuite)
-            if startswith(key, "reactant/") && !REACTANT_COMPAT
-                delete!(testsuite, key)
-            end
+    for key in keys(testsuite)
+        if startswith(key, "reactant/") && !REACTANT_COMPAT
+            delete!(testsuite, key)
         end
     end
 end
@@ -30,14 +33,17 @@ end
 # concurrent downloads, or doctests not liking the extra messages printed to
 # screen during the download.
 ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
+ensure_artifact_installed("ecrad_data", joinpath(pkgdir(NumericalRadiation), "Artifacts.toml"))
 
 if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     GC.gc(true); GC.gc(false); GC.gc(true)
+    njobs = something(args.jobs, default_njobs())
     # macOS runners have little memory compared to the other runners, let's set a more
     # conservative limit to memory usage before reciclying a worker, to avoid trashing
     # memory or out-of-memory errors.  We set the memory limit dynamically, based on the
-    # currently available memory (with a ~20% margin), with a lower bound of 1700 MiB.
-    max_rss_memory = max(1_700, round(Int, available_memory() / 2 ^ 20 / 2  * 0.8))
+    # currently available memory (with a ~20% margin), with a lower bound of 1700 MiB, and
+    # an upper bound of 2800 MiB.
+    max_rss_memory = clamp(round(Int, available_memory() / 2 ^ 20 / njobs  * 0.8), 1_700, 2_800)
     ENV["JULIA_TEST_MAXRSS_MB"] = string(max_rss_memory)
 elseif Sys.islinux() && get(ENV, "GITHUB_ACTIONS", "false") == "true" && available_memory() < 20 * 2^30
     # The small (~13 GiB) ubuntu runners run earlyoom, which SIGTERMs workers nearing the
@@ -45,4 +51,6 @@ elseif Sys.islinux() && get(ENV, "GITHUB_ACTIONS", "false") == "true" && availab
     ENV["JULIA_TEST_MAXRSS_MB"] = "2500"
 end
 
-runtests(Breeze, args; testsuite)
+serial = collect(filter(startswith("distributed/"), keys(testsuite)))
+
+runtests(Breeze, args; testsuite, serial)

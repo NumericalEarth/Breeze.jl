@@ -17,7 +17,7 @@ end
 # For SplitExplicitTimeDiscretization's explicit pressure-gradient interface,
 # zero only the vertical PGF and buoyancy. The horizontal pressure gradient
 # remains available to ordinary explicit-tendency paths. Acoustic RK stages
-# use `SlowTendencyMode`, which zeros all momentum PGF components and then
+# use `SlowDynamics`, which zeros all momentum PGF components and then
 # reinstates the stage-entry horizontal PGF plus linearized perturbation PGF
 # inside the acoustic substep loop.
 @inline AtmosphereModels.explicit_z_pressure_gradient(i, j, k, grid,

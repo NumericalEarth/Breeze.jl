@@ -15,8 +15,8 @@
 ##### Phase 1 processes: autoconversion, accretion, evaporation, deposition, melting
 ##### Phase 2 processes: aggregation, riming, shedding, refreezing
 #####
-##### Sign convention (M7):
-##### ─────────────────────
+##### Sign convention:
+##### ────────────────
 ##### All ONE-DIRECTIONAL rate functions return POSITIVE MAGNITUDES.
 ##### Signs are applied here in the tendency assembly as explicit gain − loss.
 #####
@@ -31,7 +31,7 @@
 #####
 
 @inline liquid_fraction_routing_active(::Nothing) = true
-@inline liquid_fraction_routing_active(parameters::ProcessRate) = parameters.liquid_fraction_active
+@inline liquid_fraction_routing_active(parameters::ProcessRate) = tracks_liquid_on_ice(parameters)
 
 """
 $(TYPEDSIGNATURES)
@@ -74,7 +74,7 @@ Rain gains from:
 - Accretion (Phase 1)
 - Complete melting (Phase 1) - meltwater that sheds from ice
 - Shedding (Phase 2) - liquid coating shed from ice (D ≥ 9 mm)
-- Wet growth shedding (D8) - excess collection beyond freezing capacity
+- Wet growth shedding - excess collection beyond freezing capacity
 
 Rain loses from:
 - Evaporation (Phase 1)
@@ -126,7 +126,7 @@ Rain number loses from:
 - Riming (Phase 2)
 - Immersion freezing (Phase 2)
 - Homogeneous freezing (Phase 2, T < -40°C)
-- Rain warm collection number (M9)
+- Rain warm collection number
 """
 @inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, p3)
     FT = typeof(ρ)
@@ -159,14 +159,14 @@ Rain number loses from:
     #      with them for any non-default drop mass. Only in the non-liquid-fraction
     #      path; when liquid fraction is active, collected mass goes to qʷⁱ, not rain.
     # wet_growth_shedding_number → rain drops from excess wet growth
-    cloud_warm_rain_n = ifelse(parameters.liquid_fraction_active, zero(FT),
+    cloud_warm_rain_n = ifelse(tracks_liquid_on_ice(parameters), zero(FT),
                                rates.cloud_warm_collection / parameters.shed_drop_mass)
     n_gain = n_from_autoconv + n_from_melt +
              rates.rain_breakup +
              rates.shedding_number +
              cloud_warm_rain_n +
              rates.wet_growth_shedding_number
-    # Losses (all positive magnitudes, M7)
+    # Losses (all positive magnitudes)
     # rain_warm_collection_number → rain number sink from above-freezing rain
     #      collection
     n_loss = n_from_evap +
@@ -209,8 +209,9 @@ Ice loses from:
     # active, `wet_growth_cloud`/`wet_growth_rain` raise the total ice mass and the
     # coating mass qʷⁱ by the same amount, so the dry ice mass qⁱ is unchanged.
     # Without liquid fraction the collection retained against the wet-growth capacity
-    # is already carried by the reduced `cloud_riming`/`rain_riming`
-    # (process_rates.jl:466-469), so adding it again would double count.
+    # is already carried by the reduced `cloud_riming`/`rain_riming` (where
+    # `p3_phase2_rates` reassigns `cloud_rim`/`rain_rim` to the retained
+    # collection), so adding it again would double count.
     gain = rates.deposition + rates.cloud_riming + rates.rain_riming + rates.refreezing +
            rates.nucleation_mass + rates.cloud_freezing_mass + rates.rain_freezing_mass +
            rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass
@@ -232,18 +233,21 @@ Ice number gains from:
 
 Ice number loses from:
 - Melting (Phase 1)
+- Sublimation and coating evaporation (Phase 1)
 - Aggregation (Phase 2)
-- Global number limiter (C3)
-- Ice λ-limiter correction (the tabulated nⁱ bounds write-back)
+- Global number limiter
+
+The λ-limiter write-back `ice_number_correction` is added separately and is signed: it
+raises `nⁱ` where the tabulated lower bound binds and lowers it where the upper bound does.
 """
 @inline function tendency_ρnⁱ(rates::P3ProcessRates, ρ)
     # Gains from nucleation, freezing, splintering, homogeneous freezing
     gain = rates.nucleation_number + rates.cloud_freezing_number +
            rates.rain_freezing_number + rates.splintering_number +
            rates.cloud_homogeneous_number + rates.rain_homogeneous_number
-    # Losses (all positive magnitudes, M7)
+    # Losses (all positive magnitudes)
     # sublimation_number — ice number loss from sublimation
-    # ni_limit: C3 global Nⁱ cap; relaxation sink above Nⁱ_max/ρ.
+    # ni_limit: global Nⁱ cap; relaxation sink above Nⁱ_max/ρ.
     loss = rates.melting_number + rates.sublimation_number + rates.aggregation + rates.ni_limit
     return ρ * (gain - loss + rates.ice_number_correction)
 end
@@ -296,7 +300,7 @@ $(TYPEDSIGNATURES)
 Compute rime volume tendency from P3 process rates.
 
 Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime.
-Includes sublimation loss (M8): sublimation removes rime volume proportionally.
+Includes sublimation loss: sublimation removes rime volume proportionally.
 Includes melt-densification: during melting, low-density rime portions melt
 preferentially, driving the remaining rime toward the configured solid-ice density.
 """
@@ -350,7 +354,7 @@ preferentially, driving the remaining rime toward the configured solid-ice densi
     densification = bᶠ * (ρ_solid_ice - ρᶠ_safe) * ordinary_total_melting /
                     (ρᶠ_safe * qⁱ_safe)
     # Apply only below the solid-ice density when liquid fraction is not active.
-    apply_densification = (ρᶠ_safe < ρ_solid_ice) & !parameters.liquid_fraction_active
+    apply_densification = (ρᶠ_safe < ρ_solid_ice) & !tracks_liquid_on_ice(parameters)
     densification = ifelse(apply_densification, densification, zero(FT))
 
     return ρ * (volume_gain - volume_loss - densification)
@@ -368,7 +372,7 @@ to the cloud mass they consume.
 @inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜˡ, qᶜˡ, p3)
     FT = typeof(ρ)
     parameters = p3.process_rates
-    number_per_mass = cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ)
+    number_per_mass = cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, p3.minimum_mass_mixing_ratio)
     seed_drop_mass = activated_droplet_mass(parameters, FT)
     activation_number = ifelse(iszero(rates.ccn_activation_number),
                                rates.ccn_activation_mass / seed_drop_mass,
@@ -401,7 +405,7 @@ full budget is:
 
 ```math
 \\frac{dq^{wi}}{dt} = q_{melt,partial} + q_{ccoll} + q_{rcoll} + q_{wgrth1c} + q_{wgrth1r}
-                    - q_{lshd} - q_{ifrz}
+                    + q_{cond,coat} - q_{lshd} - q_{ifrz} - q_{evap,coat} - q_{wgrth,shd}
 ```
 
 Gains from:
@@ -410,10 +414,13 @@ Gains from:
 - Above-freezing rain collection (qrcoll: T > T₀, rain → qʷⁱ)
 - Wet growth cloud rerouting (qwgrth1c: excess collection → qʷⁱ)
 - Wet growth rain rerouting (qwgrth1r: excess collection → qʷⁱ)
+- Condensation onto the liquid coating (qcond,coat)
 
 Loses from:
 - Shedding (liquid sheds to rain from D ≥ 9 mm particles)
 - Refreezing (liquid refreezes to rime)
+- Evaporation from the liquid coating (qevap,coat)
+- Wet growth shedding (qwgrth,shd: excess wet-growth mass diverted to rain)
 """
 @inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ)
     return tendency_ρqʷⁱ(rates, ρ, nothing)
@@ -425,12 +432,12 @@ end
     # Note: rain_warm_collection is zeroed at rate-assembly time in the non-liquid-
     # fraction branch, which transfers no rain mass to qʷⁱ, so it can safely be
     # added here unconditionally.
-    liquid_fraction_active = liquid_fraction_routing_active(parameters)
-    cloud_warm_gain = ifelse(liquid_fraction_active, rates.cloud_warm_collection, zero(typeof(ρ)))
-    rain_warm_gain = ifelse(liquid_fraction_active, rates.rain_warm_collection, zero(typeof(ρ)))
-    wet_growth_cloud_gain = ifelse(liquid_fraction_active, rates.wet_growth_cloud, zero(typeof(ρ)))
-    wet_growth_rain_gain = ifelse(liquid_fraction_active, rates.wet_growth_rain, zero(typeof(ρ)))
-    wet_growth_shedding_loss = ifelse(liquid_fraction_active, rates.wet_growth_shedding, zero(typeof(ρ)))
+    liquid_on_ice = liquid_fraction_routing_active(parameters)
+    cloud_warm_gain = ifelse(liquid_on_ice, rates.cloud_warm_collection, zero(typeof(ρ)))
+    rain_warm_gain = ifelse(liquid_on_ice, rates.rain_warm_collection, zero(typeof(ρ)))
+    wet_growth_cloud_gain = ifelse(liquid_on_ice, rates.wet_growth_cloud, zero(typeof(ρ)))
+    wet_growth_rain_gain = ifelse(liquid_on_ice, rates.wet_growth_rain, zero(typeof(ρ)))
+    wet_growth_shedding_loss = ifelse(liquid_on_ice, rates.wet_growth_shedding, zero(typeof(ρ)))
     gain = rates.partial_melting +
         cloud_warm_gain +
         rain_warm_gain +
@@ -457,17 +464,17 @@ Vapor is produced by:
 - Rain evaporation
 - Sublimation (negative deposition)
 
-When `predict_supersaturation = true`, the G&M one-shot alignment is
+When `vapor_excess = PrognosticVaporExcess()`, the G&M one-shot alignment is
 folded into `rates.condensation` (the M&G condensation rate plus the G&M
-contribution, which `rates.predicted_supersaturation_adjustment` also carries
+contribution, which `rates.prognostic_vapor_excess_adjustment` also carries
 separately so it stays inspectable), so vapor and cloud tendencies pick it up
 automatically when integrated with `dt = sink_limiting_timescale`. See
-`predicted_supersaturation_adjustment`.
+`prognostic_vapor_excess_adjustment`.
 """
 @inline function tendency_ρqᵛ(rates::P3ProcessRates, ρ)
     # Condensation: positive = vapor loss (cond), negative = vapor gain (cloud evap)
     # Deposition:   positive = vapor loss (dep),  negative = vapor gain (sublimation)
-    # Rain evaporation: positive magnitude (M7) = vapor gain
+    # Rain evaporation: positive magnitude = vapor gain
     # Nucleation: always positive = vapor loss
     # CCN activation, rain condensation, and coating condensation are all vapor sinks;
     #      coating evaporation is a vapor source.
@@ -480,27 +487,27 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the liquid supersaturation tendency from Grabowski & Morrison (2008).
+Compute the tendency of the vapor excess over liquid from Grabowski & Morrison (2008).
 
-When `predict_supersaturation = true`, the liquid supersaturation ``sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ``
-is a prognostic variable advected by the dynamical core. The microphysical
-tendency reproduces the post-step diagnosis ``sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T)``.
-`compute_p3_process_rates` precomputes that diagnostic tendency from the final
-local ``qᵛ`` and ``T`` implied by the ordered process rates.
+When `vapor_excess = PrognosticVaporExcess()`, the vapor excess over liquid ``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ``
+is a prognostic variable advected by the dynamical core. Its microphysical tendency
+has two parts. The phase-change part reproduces the post-step diagnosis
+``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T)`` from the final local ``qᵛ`` and ``T`` implied by the ordered
+process rates. The external part, ``-∂ₜqᵛ⁺ˡ`` from adiabatic cooling and expansion
+(see `external_vapor_excess_forcing`), keeps the prognostic consistent with the host
+state, so the G&M alignment only corrects transport and other unrepresented forcing.
 
-When `predict_supersaturation = false`, returns zero tendency.
+When `vapor_excess = DiagnosticVaporExcess()`, returns zero tendency.
 """
-@inline function tendency_ρsᵛ⁺ˡ(rates::P3ProcessRates, ρ, parameters)
-    raw = ρ * rates.predicted_supersaturation_tendency
-    return gate_predicted_supersaturation(parameters, raw)
+@inline function tendency_ρδqᵛ⁺ˡ(rates::P3ProcessRates, ρ, parameters)
+    raw = ρ * rates.prognostic_vapor_excess_tendency
+    return gate_prognostic_vapor_excess(parameters, raw)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Aerosol-pool tendency: each activated cloud droplet removes one unit from the
-unactivated reservoir, so ``∂ρn^a/∂t = -ρ \\, n_{\\text{nuc}}`` with
-``n_{\\text{nuc}}`` the same activation rate that sources ``ρn^{cl}``. In the
-prescribed-Nᶜˡ path `rates.ccn_activation_number` is zero, so this returns 0.
+Return the aerosol number density tendency ``∂ρn^a/∂t = -ρ \\, n_{\\text{nuc}}``.
+Each activated droplet consumes one aerosol. Applied only to a prognostic reservoir.
 """
 @inline tendency_ρnᵃ(rates::P3ProcessRates, ρ) = -ρ * rates.ccn_activation_number

@@ -8,10 +8,12 @@ using Test
 using Breeze.Thermodynamics:
     MoistureMassFractions,
     LiquidIcePotentialTemperatureState,
+    LiquidIceDensityState,
     StaticEnergyState,
     exner_function,
     density,
     with_moisture,
+    with_temperature,
     saturation_specific_humidity,
     mixture_heat_capacity,
     PlanarMixedPhaseSurface
@@ -28,11 +30,83 @@ test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
+@testset "Density-based saturation uses the selected temperature inversion [$FT]" for FT in test_float_types()
+    constants = ThermodynamicConstants(FT)
+    pˢᵗ = FT(1e5)
+    rtol = FT === Float32 ? FT(3e-4) : FT(1e-5)
+    solvers = temperature_solver_variants(FT)
+    cases = ((WarmPhaseEquilibrium(), 300, 1, 0.03),
+             (WarmPhaseEquilibrium(), 300, 0.23, 0.039),
+             (MixedPhaseEquilibrium(FT), 290, 0.8, 0.006),
+             (MixedPhaseEquilibrium(FT), 250, 0.8, 0.003),
+             (WarmPhaseEquilibrium(), 320, 1, 0.001))
+
+    # The cold, liquid-rich case is the hardest: with a converged inversion the θ residual reaches
+    # equilibrium in six secant steps, where a temperature residual leaves it 0.6% undersaturated;
+    # the non-iterated inversion needs eight.
+    for κ̂ in (VaporEquivalentExponent(), DryExponent()), solver in solvers,
+        adjustment_solver in (SecantSolver(FT), FixedIterations(8)),
+        (equilibrium, θ, ρ, qᵗ) in cases
+        adjustment = SaturationAdjustment(FT; equilibrium, solver=adjustment_solver)
+        𝒰₀ = LiquidIceDensityState(FT(θ), MoistureMassFractions(FT(qᵗ)), pˢᵗ, FT(ρ), solver, κ̂)
+        𝒰₁ = @inferred adjust_thermodynamic_state(𝒰₀, adjustment, constants)
+        T = Breeze.Thermodynamics.temperature(𝒰₁, constants)
+        q = 𝒰₁.moisture_mass_fractions
+        qᵛ⁺ = saturation_specific_humidity(T, FT(ρ), constants, equilibrium)
+
+        @test 𝒰₁.potential_temperature == 𝒰₀.potential_temperature
+        @test 𝒰₁.density == 𝒰₀.density
+        @test q.vapor + q.liquid + q.ice ≈ FT(qᵗ) rtol=5eps(FT)
+        @test q.vapor ≈ min(FT(qᵗ), qᵛ⁺) rtol=rtol
+        if qᵗ > 0.001
+            @test q.liquid + q.ice > 0
+        else
+            @test q.liquid + q.ice == 0
+        end
+    end
+end
+
+# Self-consistency holds for any inversion, so also bound the distance to the converged
+# equilibrium. Stopped inversions overshoot the root at second order and leave slightly less
+# condensate, about 1% for 5 g/kg; the former isobaric shift L left 20-45% more.
+@testset "Density-based saturation with stopped inversions stays near the converged equilibrium [$FT]" for FT in test_float_types()
+    constants = ThermodynamicConstants(FT)
+    pˢᵗ = FT(1e5)
+    θtol = FT === Float32 ? FT(3e-5) : FT(1e-6)
+    δT = FT === Float32 ? FT(3e-3) : FT(1e-3)
+    δq = FT(1e-5)
+    solvers = (nothing, FixedIterations(0), FixedIterations(1), NewtonSolver(FT; maxiter=1))
+    cases = ((WarmPhaseEquilibrium(), 300, 1, 0.03),
+             (WarmPhaseEquilibrium(), 300, 1.1, 0.025),
+             (WarmPhaseEquilibrium(), 290, 0.8, 0.012),
+             (MixedPhaseEquilibrium(FT), 290, 0.8, 0.006),
+             (MixedPhaseEquilibrium(FT), 250, 0.8, 0.003))
+
+    for κ̂ in (VaporEquivalentExponent(), DryExponent()), (equilibrium, θ, ρ, qᵗ) in cases
+        adjustment = SaturationAdjustment(FT; equilibrium)
+        state(solver) = LiquidIceDensityState(FT(θ), MoistureMassFractions(FT(qᵗ)), pˢᵗ, FT(ρ), solver, κ̂)
+        condensate(𝒰) = 𝒰.moisture_mass_fractions.liquid + 𝒰.moisture_mass_fractions.ice
+
+        # The converged equilibrium satisfies the definition of θˡⁱ at its temperature.
+        𝒰★ = adjust_thermodynamic_state(state(NewtonSolver(FT)), adjustment, constants)
+        T★ = Breeze.Thermodynamics.temperature(𝒰★, constants)
+        @test with_temperature(𝒰★, T★, constants).potential_temperature ≈ FT(θ) rtol=θtol
+        @test condensate(𝒰★) > 0
+
+        for solver in solvers
+            𝒰 = adjust_thermodynamic_state(state(solver), adjustment, constants)
+            T = Breeze.Thermodynamics.temperature(𝒰, constants)
+            @test -δT < T - T★ < FT(0.3)
+            @test FT(0.98) * condensate(𝒰★) - δq < condensate(𝒰) < condensate(𝒰★) + δq
+        end
+    end
+end
+
 @testset "Warm-phase saturation adjustment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
 
     atol = test_tol(FT)
     microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=solver_tol(FT)), equilibrium=WarmPhaseEquilibrium())
@@ -77,8 +151,8 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
                     qˡ₂ = qᵗ₂ - qᵛ⁺₂
                     q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₂)
                     cᵖᵐ = mixture_heat_capacity(q₂, constants)
-                    ℒˡᵣ = constants.liquid.reference_latent_heat
-                    s₂ = cᵖᵐ * T₂ + g * z - ℒˡᵣ * qˡ₂
+                    ℒˡ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid)
+                    s₂ = cᵖᵐ * T₂ + g * z - ℒˡ₀ * qˡ₂
 
                     𝒰₂ = StaticEnergyState(s₂, q₂, z, pᵣ)
                     T★ = compute_temperature(𝒰₂, microphysics, constants)
@@ -108,12 +182,12 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
 
     constants = ThermodynamicConstants(FT)
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
+    ℒˡ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.ice)
     g = constants.gravitational_acceleration
     z = zero(FT)
 
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
     pᵣ = @allowscalar first(reference_state.pressure)
     ρᵣ = @allowscalar first(reference_state.density)
 
@@ -156,7 +230,7 @@ end
             qˡ = qᵗ - qᵛ⁺
             q = MoistureMassFractions(qᵛ⁺, qˡ)
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            s = cᵖᵐ * T_warm + g * z - ℒˡᵣ * qˡ
+            s = cᵖᵐ * T_warm + g * z - ℒˡ₀ * qˡ
 
             𝒰 = StaticEnergyState(s, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, constants)
@@ -184,7 +258,7 @@ end
             qⁱ = qᵗ - qᵛ⁺
             q = MoistureMassFractions(qᵛ⁺, zero(FT), qⁱ)
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            s = cᵖᵐ * T_cold + g * z - ℒⁱᵣ * qⁱ
+            s = cᵖᵐ * T_cold + g * z - ℒⁱ₀ * qⁱ
 
             𝒰 = StaticEnergyState(s, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, constants)
@@ -219,7 +293,7 @@ end
             @test q.vapor + q.liquid + q.ice ≈ qᵗ
 
             cᵖᵐ = mixture_heat_capacity(q, constants)
-            s = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+            s = cᵖᵐ * T + g * z - ℒˡ₀ * qˡ - ℒⁱ₀ * qⁱ
 
             𝒰_unadjusted = StaticEnergyState(s, MoistureMassFractions(qᵗ), z, pᵣ)
             T★ = compute_temperature(𝒰_unadjusted, microphysics, constants)
@@ -239,6 +313,24 @@ end
     end
 end
 
+@testset "Non-precipitating BulkMicrophysics time-stepping [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 1), y=(0, 1), z=(0, 1000))
+    reference_state = ReferenceState(grid, ThermodynamicConstants(FT); base_pressure=101325, potential_temperature=300)
+
+    models = map((BulkMicrophysics(FT), SaturationAdjustment(FT))) do microphysics
+        model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics)
+        set!(model; θ=300, qᵗ=0.025)
+        time_step!(model, 1)
+        model
+    end
+
+    qˡ = Array(interior(models[1].microphysical_fields.qˡ))
+    @test maximum(qˡ) > 0
+    @test qˡ == Array(interior(models[2].microphysical_fields.qˡ))
+    @test Array(interior(models[1].temperature)) == Array(interior(models[2].temperature))
+end
+
 @testset "Saturation adjustment NaN robustness [$(FT)]" for FT in test_float_types()
     # Regression test: adjust_thermodynamic_state must never return NaN.
     # The secant iteration can stagnate (r₂ ≈ r₁) in Float32, producing ΔTΔr = Inf,
@@ -250,7 +342,7 @@ end
     z = zero(FT)
 
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
     pᵣ = @allowscalar first(reference_state.pressure)
 
     equilibrium = WarmPhaseEquilibrium()
@@ -276,11 +368,11 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
     atol = test_tol(FT)
 
     pᵣ = @allowscalar reference_state.pressure[1, 1, 1]
-    p₀ = reference_state.surface_pressure
+    p₀ = reference_state.base_pressure
     z = FT(0.5)
 
     # Case 0: Absolute zero potential temperature
@@ -332,8 +424,9 @@ end
     𝒰₃ = with_moisture(𝒰, q₃)
     Π₃ = exner_function(𝒰₃, constants)
     cᵖᵐ = mixture_heat_capacity(q₃, constants)
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    θ₃ = (T₃ - ℒˡᵣ / cᵖᵐ * qˡ) / Π₃
+    ĉᵖ = Breeze.Thermodynamics.vapor_equivalent_heat_capacity(q₃, constants)
+    ℒˡ₀ = Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid)
+    θ₃ = (cᵖᵐ * T₃ - ℒˡ₀ * qˡ) / (ĉᵖ * Π₃)
     𝒰₃ = LiquidIcePotentialTemperatureState(θ₃, q₃, p₀, pᵣ)
 
     T₃_solve = compute_boussinesq_adjustment_temperature(𝒰₃, constants)

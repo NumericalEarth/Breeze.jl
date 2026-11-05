@@ -280,7 +280,7 @@ end
 
         diagnosed_total = (dry + vapor_density + preserved_condensate_density) / (1 - specific_condensate)
         new_total = ifelse(total_density_given, old_total, diagnosed_total)
-        ratio = ifelse(total_density_given, 1, new_total / old_total)
+        ratio = ifelse(total_density_given, one(new_total), new_total / old_total)
         fixed_total_dry = new_total - vapor_density - specific_condensate_density -
                           preserved_condensate_density
 
@@ -311,8 +311,13 @@ end
         moisture_specific = qᵛᵉ[i, j, k]
         moisture_partial_density = moisture_density[i, j, k]
 
-        specific_water = ifelse(specific_moisture_given, moisture_specific, 0)
-        preserved_water_density = ifelse(specific_moisture_given, 0, moisture_partial_density)
+        specific_water = ifelse(specific_moisture_given,
+                                moisture_specific,
+                                zero(moisture_specific))
+
+        preserved_water_density = ifelse(specific_moisture_given,
+                                         zero(moisture_partial_density),
+                                         moisture_partial_density)
 
         specific_condensate = sum_field_tuple(i, j, k, specific_condensate_fields) / ρᵈ_ijk
         preserved_condensate_density =
@@ -428,23 +433,28 @@ end
 @inline function temperature_and_pressure(i, j, k, grid,
                                           formulation::LiquidIcePotentialTemperatureFormulation,
                                           dynamics, ρᵈ, ρ, Rᵐ, q, constants)
-    # Note: potential_temperature_density is ρθ = ρᵈθ (prognostic, dry-coupled);
-    # θ is recovered with the coupling density ρᵈ, while the inversion and EOS below use total ρ.
-    ρθ = @inbounds formulation.potential_temperature_density[i, j, k]
-    θ = ρθ / ρᵈ
-    pˢᵗ = standard_pressure(dynamics)
-
     # Invert θˡⁱ at constant density via LiquidIceDensityState.temperature, which iterates the
-    # implicit relation T = (ρRᵐT/pˢᵗ)^κ θ + (ℒˡqˡ+ℒⁱqⁱ)/cᵖᵐ to convergence. This is the same
+    # implicit relation cᵖᵐ T = ĉᵖ (ρRᵐT/pˢᵗ)^κ θ + ℒˡ₀qˡ + ℒⁱ₀qⁱ to convergence. This is the same
     # inversion used by the saturation adjustment on the compressible core, so the dynamics and the
     # microphysics carry one self-consistent T (fixes the κ·ΔL split — NumericalEarth/Breeze.jl#765).
-    𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ, formulation.temperature_solver)
+    𝒰 = compressible_density_state(i, j, k, formulation, dynamics, ρᵈ, ρ, q)
     T = temperature(𝒰, constants)
 
     # Ideal gas law: p = ρ Rᵐ T
     p = ρ * Rᵐ * T
 
     return T, p
+end
+
+# The density-based state the compressible core closes the thermodynamics with. ρθ = ρᵈθ is
+# dry-coupled, so θ is recovered with the coupling density ρᵈ, while the inversion and the equation
+# of state use the total density ρ. The acoustic substepper differentiates this same state
+# (`_compute_linearization_basic_state!`).
+@inline function compressible_density_state(i, j, k, formulation::LiquidIcePotentialTemperatureFormulation,
+                                            dynamics, ρᵈ, ρ, q)
+    ρθ = @inbounds formulation.potential_temperature_density[i, j, k]
+    return LiquidIceDensityState(ρθ / ρᵈ, q, standard_pressure(dynamics), ρ,
+                                 formulation.temperature_solver, formulation.exner_exponent)
 end
 
 # Build the density-based thermodynamic state for the compressible core, so that the
@@ -457,5 +467,5 @@ end
     θ = @inbounds formulation.potential_temperature[i, j, k]
     ρ = @inbounds dynamics.total_density[i, j, k]  # total ρ: density-based inversion / true pressure
     pˢᵗ = standard_pressure(dynamics)
-    return LiquidIceDensityState(θ, q, pˢᵗ, ρ, formulation.temperature_solver)
+    return LiquidIceDensityState(θ, q, pˢᵗ, ρ, formulation.temperature_solver, formulation.exner_exponent)
 end

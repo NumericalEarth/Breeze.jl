@@ -81,7 +81,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
         constants = ThermodynamicConstants(FT)
         reference_state = Breeze.ReferenceState(grid, constants;
-                                                surface_pressure = FT(101325),
+                                                base_pressure = FT(101325),
                                                 potential_temperature = FT(300))
         dynamics = Breeze.AnelasticDynamics(reference_state)
         model = Breeze.AtmosphereModel(grid; dynamics,
@@ -132,7 +132,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         dep = IceDeposition()
 
         @test isnothing(dep.ventilation)
-        @test isnothing(dep.ventilation_enhanced)
+        @test isnothing(dep.enhanced_ventilation)
         @test isnothing(dep.small_ice_ventilation_constant)
         @test isnothing(dep.small_ice_ventilation_reynolds)
         @test isnothing(dep.large_ice_ventilation_constant)
@@ -257,8 +257,8 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         p3 = PredictedParticlePropertiesMicrophysics()
         names = prognostic_field_names(p3)
 
-        @test p3.process_rates.predict_supersaturation === false
-        @test p3.process_rates isa ProcessRate{Float64, false}
+        @test p3.process_rates.vapor_excess isa DiagnosticVaporExcess
+        @test p3.process_rates isa ProcessRate{Float64, DiagnosticVaporExcess}
         @test :ρqᶜˡ ∈ names
         @test :ρnᶜˡ ∉ names
         @test :ρnᵃ ∉ names
@@ -269,17 +269,24 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test :ρqᶠ ∈ names
         @test :ρbᶠ ∈ names
         @test :ρqʷⁱ ∈ names
-        @test :ρsᵛ⁺ˡ ∉ names
+        @test :ρδqᵛ⁺ˡ ∉ names
 
-        p3_supersaturation =
-            PredictedParticlePropertiesMicrophysics(; predict_supersaturation = true)
-        @test p3_supersaturation.process_rates.predict_supersaturation === true
-        @test p3_supersaturation.process_rates isa ProcessRate{Float64, true}
-        @test :ρsᵛ⁺ˡ ∈ prognostic_field_names(p3_supersaturation)
+        p3_vapor_excess =
+            PredictedParticlePropertiesMicrophysics(; vapor_excess = PrognosticVaporExcess())
+        @test p3_vapor_excess.process_rates.vapor_excess isa PrognosticVaporExcess
+        @test p3_vapor_excess.process_rates isa ProcessRate{Float64, PrognosticVaporExcess}
+        @test :ρδqᵛ⁺ˡ ∈ prognostic_field_names(p3_vapor_excess)
 
-        # Aerosol activation adds the droplet-number and aerosol prognostics together.
+        @test p3.process_rates.liquid_fraction isa PrognosticLiquidFraction
+        @test PPP.tracks_liquid_on_ice(p3.process_rates)
+        p3_no_liquid_fraction =
+            PredictedParticlePropertiesMicrophysics(; liquid_fraction = NoLiquidFraction())
+        @test p3_no_liquid_fraction.process_rates isa ProcessRate{Float64, DiagnosticVaporExcess, NoLiquidFraction}
+        @test !PPP.tracks_liquid_on_ice(p3_no_liquid_fraction.process_rates)
+
+        # Aerosol activation adds the droplet number, and `prognostic` the reservoir.
         p3_aerosol = PredictedParticlePropertiesMicrophysics(;
-            aerosol = AerosolActivation(AerosolMode(Float64)))
+            aerosol = AerosolActivation(AerosolMode(Float64); prognostic = true))
         names_aerosol = prognostic_field_names(p3_aerosol)
         @test :ρnᶜˡ ∈ names_aerosol
         @test :ρnᵃ ∈ names_aerosol

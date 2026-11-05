@@ -16,6 +16,7 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, Center, znode
 using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
+using Oceananigans.Operators: ℑzᵃᵃᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
@@ -23,10 +24,15 @@ using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
     pressure_from_density_temperature,
     dynamics_prognostic_fields, grid_moisture_fractions, maybe_adjust_thermodynamic_state,
     div_ρUc, c_div_ρU, ∇_dot_Jᶜ, AtmosphereModelBuoyancy,
+    add_sedimentation_tendency!, sedimentation_composition_increment,
+    dry_air_increment, enthalpy_increment,
     radiation_flux_divergence, materialize_formulation,
     DefaultTemperatureSolver, default_temperature_solver
 using Breeze.Solvers: materialize_solver
-using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, StaticEnergyState, with_temperature, exner_function, mixture_heat_capacity
+using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, StaticEnergyState, with_temperature,
+    mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, vapor_gas_constant,
+    vapor_equivalent_heat_capacity, vapor_equivalent_gas_constant, condensate_latent_energy,
+    exner_exponent, AbstractExnerExponent, VaporEquivalentExponent, DryExponent
 
 # The lowercase c is a singleton instance of Center
 const c = Center()

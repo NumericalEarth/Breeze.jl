@@ -100,7 +100,7 @@ per-column values are given as arrays, not coordinate functions.)
   θ_forcing = Forcing(column_heating, discrete_form=true, parameters=Q)  # Q is an (N₁, N₂) array
   ```
 
-- **Reference state.** Array-valued `surface_pressure` and/or `potential_temperature` give each
+- **Reference state.** Array-valued `base_pressure` and/or `potential_temperature` give each
   column its own adiabatic background profile:
 
   ```julia

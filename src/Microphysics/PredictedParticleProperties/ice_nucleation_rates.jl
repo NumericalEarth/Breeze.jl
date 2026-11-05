@@ -31,14 +31,14 @@ than a grid-mean vapor state.
     FT = typeof(T)
     parameters = p3.process_rates
 
-    nucleation_temperature_threshold = parameters.ice_nucleation_temperature_threshold
-    supersaturation_threshold = parameters.ice_nucleation_supersaturation_threshold
-    maximum_concentration = parameters.maximum_ice_nucleation_concentration
-    nucleation_timescale = parameters.ice_nucleation_timescale
+    ℂⁿᵘᶜˡ₁ = parameters.ice_nucleation_temperature_threshold
+    ℂⁿᵘᶜˡ₂ = parameters.ice_nucleation_supersaturation_threshold
+    ℂⁿᵘᶜˡ₃ = parameters.maximum_ice_nucleation_concentration
+    ℂⁿᵘᶜˡ₄ = parameters.ice_nucleation_timescale
+    ℂⁿᵘᶜˡ₅ = parameters.ice_nucleation_coefficient
+    ℂⁿᵘᶜˡ₆ = parameters.ice_nucleation_temperature_coefficient
+    ℂᶠᵒʳᵐ₁ = parameters.nucleated_ice_mass
     freezing_temperature = parameters.freezing_temperature
-    nucleated_ice_mass = parameters.nucleated_ice_mass
-    nucleation_coefficient = parameters.ice_nucleation_coefficient
-    temperature_coefficient = parameters.ice_nucleation_temperature_coefficient
     floors = parameters.floors
 
     # Ice supersaturation, evaluated cloud-side; in the `SCF = 1` limit `qᵛ` is
@@ -46,24 +46,22 @@ than a grid-mean vapor state.
     Sⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, floors.saturation_mass_fraction)
 
     # Conditions for nucleation
-    # m6: the supersaturation threshold is inclusive
-    nucleation_active = (T < nucleation_temperature_threshold) &
-                        (Sⁱ >= supersaturation_threshold)
+    # The supersaturation threshold is inclusive
+    nucleation_active = (T < ℂⁿᵘᶜˡ₁) & (Sⁱ >= ℂⁿᵘᶜˡ₂)
 
     # Cooper (1986): N_ice = c_nuc × exp(b_nuc × (T₀ - T)) [1/m³]
     # Default c_nuc = 5.0 /m³ = 0.005 /L from Cooper (1986), divided by ρ for [1/kg]
     supercooling = freezing_temperature - T
-    cooper_number = nucleation_coefficient *
-                    exp(temperature_coefficient * supercooling) / ρ
+    cooper_number = ℂⁿᵘᶜˡ₅ * exp(ℂⁿᵘᶜˡ₆ * supercooling) / ρ
 
     # Limit to maximum and subtract existing ice
-    equilibrium_number = min(cooper_number, maximum_concentration / ρ)
+    equilibrium_number = min(cooper_number, ℂⁿᵘᶜˡ₃ / ρ)
 
     # Nucleation rate: relaxation toward equilibrium
-    nucleated_number_rate = max(0, equilibrium_number - nⁱ) / nucleation_timescale
+    nucleated_number_rate = max(0, equilibrium_number - nⁱ) / ℂⁿᵘᶜˡ₄
 
     # Mass nucleation rate
-    nucleated_mass_rate = nucleated_number_rate * nucleated_ice_mass
+    nucleated_mass_rate = nucleated_number_rate * ℂᶠᵒʳᵐ₁
 
     # Use one threshold on the number rate for both moments.
     active = nucleation_active & (nucleated_number_rate >= floors.rate_scale)
@@ -125,29 +123,31 @@ gamma PSD the mass (6th moment) rate carries the correction
     FT = typeof(q)
     parameters = p3.process_rates
 
-    q_eff = max(0, q)
+    q₊ = max(0, q)
     psd_correction = psd_correction_spherical_volume(μ)
+    ℂⁱᵐᵐᶠ₁ = parameters.maximum_immersion_freezing_temperature
+    ℂⁱᵐᵐᶠ₂ = parameters.immersion_freezing_coefficient
+    ℂⁱᵐᵐᶠ₃ = parameters.immersion_freezing_nucleation_coefficient
 
-    freezing_active = (T <= parameters.maximum_immersion_freezing_temperature) &
-                      (q_eff >= p3.minimum_mass_mixing_ratio)
+    freezing_active = (T <= ℂⁱᵐᵐᶠ₁) &
+                      (q₊ >= p3.minimum_mass_mixing_ratio)
 
     supercooling = max(parameters.freezing_temperature - T, zero(FT))
 
     # Individual drop mass and volume (monodisperse assumption)
-    droplet_volume = q_eff / n_for_mass / FT(parameters.liquid_water_density)
+    droplet_volume = q₊ / n_for_mass / FT(parameters.liquid_water_density)
 
     # The per-drop freezing coefficient (NO psd_correction) is a linear per-second
     # rate. Any numerical cap is applied equally before the two moment products so
     # their ratio is unchanged. The species-level budget in
     # `compute_p3_process_rates` applies one limiting factor to the mass and number
     # rates together, after condensation and competing sinks are included.
-    maximum_multiplier = max(q_eff * psd_correction, n_for_rate)
+    maximum_multiplier = max(q₊ * psd_correction, n_for_rate)
     freezing_rate = immersion_freezing_rate_coefficient(
-        parameters.immersion_freezing_nucleation_coefficient, droplet_volume,
-        parameters.immersion_freezing_coefficient, supercooling,
+        ℂⁱᵐᵐᶠ₃, droplet_volume, ℂⁱᵐᵐᶠ₂, supercooling,
         maximum_multiplier, parameters.floors.divisor)
 
-    return (ifelse(freezing_active, q_eff * psd_correction * freezing_rate, zero(FT)),
+    return (ifelse(freezing_active, q₊ * psd_correction * freezing_rate, zero(FT)),
             ifelse(freezing_active, n_for_rate * freezing_rate, zero(FT)))
 end
 
@@ -212,9 +212,9 @@ is computed from the actual rain shape parameter ``\\mu_r``, not from a fixed va
 @inline function immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μʳ)
     # nʳ is already per-mass. The drop mass needs a floored number to stay finite,
     # but the number rate scales with the unfloored one.
-    nʳ_eff = max(0, nʳ)
-    return stochastic_immersion_freezing(p3, qʳ, max(nʳ_eff, p3.minimum_number_mixing_ratio),
-                                         nʳ_eff, μʳ, T)
+    nʳ₊ = max(0, nʳ)
+    return stochastic_immersion_freezing(p3, qʳ, max(nʳ₊, p3.minimum_number_mixing_ratio),
+                                         nʳ₊, μʳ, T)
 end
 
 #####
@@ -233,15 +233,15 @@ number per unit mass [1/kg].
     FT = typeof(q)
     parameters = p3.process_rates
 
-    freezing_temperature = FT(parameters.homogeneous_freezing_temperature)
-    freezing_timescale = FT(parameters.homogeneous_freezing_timescale)
+    ℂʰᵒᵐᶠ₁ = FT(parameters.homogeneous_freezing_temperature)
+    ℂʰᵒᵐᶠ₂ = FT(parameters.homogeneous_freezing_timescale)
 
-    q_eff = max(0, q)
-    freezing_active = (T < freezing_temperature) &
-                      (q_eff >= p3.minimum_mass_mixing_ratio)
+    q₊ = max(0, q)
+    freezing_active = (T < ℂʰᵒᵐᶠ₁) &
+                      (q₊ >= p3.minimum_mass_mixing_ratio)
 
-    return (ifelse(freezing_active, q_eff / freezing_timescale, zero(FT)),
-            ifelse(freezing_active, n / freezing_timescale, zero(FT)))
+    return (ifelse(freezing_active, q₊ / ℂʰᵒᵐᶠ₂, zero(FT)),
+            ifelse(freezing_active, n / ℂʰᵒᵐᶠ₂, zero(FT)))
 end
 
 """
@@ -351,34 +351,37 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
     FT = typeof(T)
     parameters = p3.process_rates
 
-    minimum_temperature = parameters.minimum_splintering_temperature
-    maximum_temperature = parameters.maximum_splintering_temperature
-    T_peak = parameters.splintering_temperature_peak
-    c_splinter = parameters.splintering_rate
+    ℂᴴᴹ₁ = parameters.minimum_splintering_temperature
+    ℂᴴᴹ₂ = parameters.maximum_splintering_temperature
+    ℂᴴᴹ₃ = parameters.splintering_temperature_peak
+    ℂᴴᴹ₄ = parameters.splintering_rate
+    ℂᴴᴹ₅ = parameters.splintering_crystal_mass
+    ℂᴴᴹ₆ = parameters.splintering_diameter_threshold
+    ℂᴴᴹ₇ = parameters.maximum_splintering_liquid_fraction
+    ℂᴴᴹ₈ = parameters.maximum_splintering_surface_temperature
     # Use the Hallett-Mossop splinter crystal mass (D = 10 μm), NOT the nucleated
     # ice mass (D = 2 μm). Splinters are 125× heavier.
-    mᵢ₀ = parameters.splintering_crystal_mass
 
-    warm_branch = clamp((T - minimum_temperature) / (T_peak - minimum_temperature), zero(FT), one(FT))
-    cold_branch = clamp((maximum_temperature - T) / (maximum_temperature - T_peak), zero(FT), one(FT))
-    efficiency = ifelse(T <= T_peak, warm_branch, cold_branch)
+    warm_branch = clamp((T - ℂᴴᴹ₁) / (ℂᴴᴹ₃ - ℂᴴᴹ₁), zero(FT), one(FT))
+    cold_branch = clamp((ℂᴴᴹ₂ - T) / (ℂᴴᴹ₂ - ℂᴴᴹ₃), zero(FT), one(FT))
+    efficiency = ifelse(T <= ℂᴴᴹ₃, warm_branch, cold_branch)
 
     # Cloud-riming splintering applies only with a single ice category; with more
     # than one, splintering_cloud_riming_scale = 0 disables it.
-    cloud_riming_eff = max(0, cloud_riming) * FT(parameters.splintering_cloud_riming_scale)
-    rain_riming_eff = max(0, rain_riming)
+    scaled_cloud_riming = max(0, cloud_riming) * FT(parameters.splintering_cloud_riming_scale)
+    nonnegative_rain_riming = max(0, rain_riming)
     has_rime = qᶠ >= p3.minimum_mass_mixing_ratio
-    active = (D_ice ≥ parameters.splintering_diameter_threshold) &
+    active = (D_ice ≥ ℂᴴᴹ₆) &
              has_rime &
-             (Fˡ < parameters.maximum_splintering_liquid_fraction) &
-             (surface_T < parameters.maximum_splintering_surface_temperature)
+             (Fˡ < ℂᴴᴹ₇) &
+             (surface_T < ℂᴴᴹ₈)
 
-    nᶜˡ_splintering_rate = ifelse(active, efficiency * c_splinter * cloud_riming_eff, zero(FT))
-    nʳ_splintering_rate = ifelse(active, efficiency * c_splinter * rain_riming_eff, zero(FT))
+    nᶜˡ_splintering_rate = ifelse(active, efficiency * ℂᴴᴹ₄ * scaled_cloud_riming, zero(FT))
+    nʳ_splintering_rate = ifelse(active, efficiency * ℂᴴᴹ₄ * nonnegative_rain_riming, zero(FT))
     n_splintering_rate = nᶜˡ_splintering_rate + nʳ_splintering_rate
 
-    qᶜˡ_splintering_rate = nᶜˡ_splintering_rate * mᵢ₀
-    qʳ_splintering_rate = nʳ_splintering_rate * mᵢ₀
+    qᶜˡ_splintering_rate = nᶜˡ_splintering_rate * ℂᴴᴹ₅
+    qʳ_splintering_rate = nʳ_splintering_rate * ℂᴴᴹ₅
 
     return qᶜˡ_splintering_rate, qʳ_splintering_rate, n_splintering_rate
 end

@@ -58,7 +58,7 @@ grid = RectilinearGrid(GPU(); x, y, z,
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants,
-                                 surface_pressure = 101500,
+                                 base_pressure = 101500,
                                  potential_temperature = 299.1)
 
 dynamics = AnelasticDynamics(reference_state)
@@ -78,7 +78,7 @@ w′θ′ = 8e-3     # K m/s (sensible heat flux)
 w′qᵗ′ = 5.2e-5  # m/s (moisture flux)
 
 FT = eltype(grid)
-p₀ = reference_state.surface_pressure
+p₀ = reference_state.base_pressure
 θ₀ = reference_state.potential_temperature
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
@@ -281,7 +281,7 @@ avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in
 filename = "bomex.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs; filename,
                                                   schedule = AveragedTimeInterval(1hour),
-                                                  overwrite_existing = true)
+                                                  overwrite_files = true)
 
 # Output horizontal slices at z = 600 m for animation
 # Find the k-index closest to z = 600 m
@@ -301,7 +301,7 @@ slice_outputs = (
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = "bomex_slices.jld2",
                                                 schedule = TimeInterval(30seconds),
-                                                overwrite_existing = true)
+                                                overwrite_files = true)
 
 @info "Running BOMEX simulation..."
 run!(simulation)
