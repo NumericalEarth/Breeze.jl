@@ -149,6 +149,11 @@ end
 # (`clock.stage == 1`), when the current state *is* the coming Uⁿ.
 @inline AtmosphereModels.outflow_budget_from_initial_state(::AcousticRungeKutta3, clock) = clock.stage > 1
 
+# Stage 1's tendencies are built before `Δtₙ` is known, from `β₁ Δtₙ₋₁`; the positivity limiters
+# budget for `Δtₙ` up to twice `Δtₙ₋₁`, so a growing adaptive time step cannot outrun them.
+@inline AtmosphereModels.stage_time_step(timestepper::AcousticRungeKutta3, clock) =
+    AtmosphereModels.finite_stage_time_step(timestepper, clock) * ifelse(clock.stage == 1, 2, 1)
+
 #####
 ##### Per-stage substep wrapper
 #####
