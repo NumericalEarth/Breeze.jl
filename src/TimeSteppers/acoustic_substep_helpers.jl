@@ -22,7 +22,11 @@ using Breeze.AtmosphereModels:
     implicit_step_scheme,
     implicit_sedimentation_step!
 
-using Breeze.CompressibleEquations: CompressibleDynamics
+using Breeze.CompressibleEquations: CompressibleDynamics, fold_implicit_momentum_advection
+
+using Oceananigans.Advection: implicit_advection_lower_diagonal, implicit_advection_diagonal,
+                              implicit_advection_upper_diagonal
+using Oceananigans.Grids: Center, Face
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
 const TerrainCompressibleAcousticModel =
@@ -283,6 +287,46 @@ function add_implicit_advection_tendency!(model, advection::AdaptiveImplicitVert
     return nothing
 end
 
+# The base-state part of the vertical-momentum split's implicit half: `Lⁱ (ρw)ᴸ`, built from the
+# same tridiagonal coefficients the per-substep solve uses (evaluated with unit Δt), so base plus
+# perturbation sum exactly to the operator the solve inverts.
+@kernel function _implicit_momentum_advection_base_tendency!(Gρw, grid, scheme, W, ρw, ρᵈ)
+    i, j, k = @index(Global, NTuple)
+    c, f = Center(), Face()
+    Lρw = implicit_advection_lower_diagonal(i, j, k-1, grid, scheme, W, 1, c, c, f, ρᵈ) * ρw[i, j, k-1] +
+          implicit_advection_diagonal(i, j, k, grid, scheme, W, 1, c, c, f, ρᵈ) * ρw[i, j, k] +
+          implicit_advection_upper_diagonal(i, j, k, grid, scheme, W, 1, c, c, f, ρᵈ) * ρw[i, j, k+1]
+    # The solver applies (1 + d) to the diagonal; `implicit_advection_diagonal` is `d` alone.
+    @inbounds Gρw[i, j, k] -= Lρw
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Fold the base-state part of the vertical-momentum IMEX split's implicit half into `Gⁿρw`, so the
+acoustic loop sees the implicit vertical transport of `ρw` (the perturbation part is solved per
+substep by `implicit_momentum_advection_substep!`). A no-op for explicit momentum advection.
+"""
+add_implicit_momentum_advection_tendency!(model) =
+    add_implicit_momentum_advection_tendency!(model, model.advection.momentum)
+
+add_implicit_momentum_advection_tendency!(model, advection) = nothing
+
+function add_implicit_momentum_advection_tendency!(model, advection::AdaptiveImplicitVerticalAdvection)
+    fold_implicit_momentum_advection[] || return nothing
+    grid = model.grid
+    w, ρᵈ = advecting_state(model)
+    Nx, Ny, Nz = size(grid)
+    launch!(architecture(grid), grid, KernelParameters(1:Nx, 1:Ny, 2:Nz),
+            _implicit_momentum_advection_base_tendency!,
+            model.timestepper.Gⁿ.ρw, grid, advection, w, model.momentum.ρw, ρᵈ)
+    return nothing
+end
+
+postloop_momentum_scheme(advection, ρ, name) = implicit_step_scheme(advection, ρ)
+postloop_momentum_scheme(advection::AdaptiveImplicitVerticalAdvection, ρ, name) =
+    (name === :ρw && fold_implicit_momentum_advection[]) ? implicit_step_scheme(nothing, ρ) : implicit_step_scheme(advection, ρ)
+
 # The implicit half of the IMEX thermodynamic split is applied inside the acoustic loop
 # (`implicit_advection_substep!`), so post-loop the thermodynamic variable keeps only
 # density-weighted closure diffusion under an adaptive-implicit scheme.
@@ -316,7 +360,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                        model.clock,
                        fields(model),
                        Δt_stage,
-                       implicit_step_scheme(momentum_advection, diffusion_density),
+                       postloop_momentum_scheme(momentum_advection, diffusion_density, name),
                        (; w),
                        ρᵈ)
     end
