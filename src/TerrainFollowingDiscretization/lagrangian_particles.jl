@@ -243,8 +243,8 @@ end
     y_right = ηnode(i, j_right, k, grid, Face(), Face(), Face())
 
     bcs = boundary_conditions
-    x, absorbed_x = LagrangianParticleTracking.enforce_boundary_conditions(tx, x, x_left, x_right, bcs.west, bcs.east)
-    y, absorbed_y = LagrangianParticleTracking.enforce_boundary_conditions(ty, y, y_left, y_right, bcs.south, bcs.north)
+    x, absorbed_x = LagrangianParticleTracking.enforce_boundary_conditions(bcs.west, bcs.east, tx, x, x_left, x_right)
+    y, absorbed_y = LagrangianParticleTracking.enforce_boundary_conditions(bcs.south, bcs.north, ty, y, y_left, y_right)
 
     # The walls are evaluated at the *new* horizontal position, so the particle
     # bounces off the terrain it has actually moved over (and, on a Periodic grid,
@@ -256,7 +256,7 @@ end
     # for the flat lid and for `ReflectingBoundary(0)` (the particle settles onto the
     # ground), and approximate for an elastic bounce off a steep slope.
     z_bottom, z_top = terrain_wall_heights(x, y, grid)
-    z, absorbed_z = LagrangianParticleTracking.enforce_boundary_conditions(tz, z, z_bottom, z_top, bcs.bottom, bcs.top)
+    z, absorbed_z = LagrangianParticleTracking.enforce_boundary_conditions(bcs.bottom, bcs.top, tz, z, z_bottom, z_top)
 
     return (x, y, z), absorbed_x | absorbed_y | absorbed_z
 end
