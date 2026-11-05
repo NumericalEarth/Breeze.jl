@@ -18,7 +18,7 @@ using Oceananigans: Oceananigans
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  update_state!, maybe_prepare_first_time_step!, reconcile_state!
-using Breeze.AtmosphereModels: kernel_time_step
+using Breeze.AtmosphereModels: AtmosphereModels, kernel_time_step
 
 """
 $(TYPEDSIGNATURES)
