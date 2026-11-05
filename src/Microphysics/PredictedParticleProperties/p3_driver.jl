@@ -207,3 +207,11 @@ Microphysics.number_concentration(model, ::P3, ::Val{:ice}) =
     get(model.microphysical_fields, :ρnⁱ, nothing)
 
 Microphysics.number_concentration(model, ::P3, ::Val) = nothing
+
+# Raise the sink-limiting timescale to the step that applies the tendencies: max(τ, Δt).
+function AM.with_sink_limiting_time_step(p3::P3, Δt)
+    process_rates = p3.process_rates
+    τ = AM.sink_limiting_timescale_for(process_rates.sink_limiting_timescale, Δt)
+    new_process_rates = AM.replace_property(process_rates, Val(:sink_limiting_timescale), τ)
+    return AM.replace_property(p3, Val(:process_rates), new_process_rates)
+end
