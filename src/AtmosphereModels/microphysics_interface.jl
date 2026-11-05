@@ -290,7 +290,66 @@ mixed-phase non-equilibrium 1M, where ~14 process rates feed 5 prognostic tenden
 override this method directly to compute the bundle once per cell.
 """
 compute_microphysical_tendencies!(model) =
-    compute_microphysical_tendencies!(model.microphysics, model)
+    compute_microphysical_tendencies!(tendency_microphysics(model), model)
+
+#####
+##### Time-step-aware sink limiting
+#####
+#
+# Schemes that cap each reservoir's sinks so they drain at most its content over a numerical
+# timescale τ (1M `donor_limiter`, 2M `τⁿᵘᵐ`, P3 `sink_limiting_timescale`) overdraw the
+# reservoir whenever the step that applies the tendency exceeds τ. The tendency launch therefore
+# rebuilds the scheme with the timescale max(τ, Δt), where Δt is the step the tendencies are
+# applied over. Results with Δt ≤ τ are unchanged.
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `microphysics` with its sink-limiting timescale raised to at least `Δt`, so sinks
+evaluated by `microphysical_tendency` never drain more than a reservoir's content over a step
+of length `Δt`. Schemes keep their own configured timescale as a floor: the effective timescale
+is `max(τ, Δt)`, and a non-finite `Δt` (no step taken yet) leaves `τ` unchanged.
+
+The default returns `microphysics` unchanged. `Δt` may be a traced number under Reactant;
+implementations must not branch on it.
+"""
+@inline with_sink_limiting_time_step(microphysics, Δt) = microphysics
+
+# Effective timescale max(τ, Δt) without branching on a possibly traced `Δt`.
+@inline function sink_limiting_timescale_for(τ, Δt)
+    Δtᶠ = time_step_like(τ, Δt)
+    return ifelse(isfinite(Δtᶠ), max(τ, Δtᶠ), τ)
+end
+
+# Keep a plain float timescale in its own precision; a traced `Δt` (Reactant) passes through.
+@inline time_step_like(τ::T, Δt::AbstractFloat) where T<:AbstractFloat = convert(T, Δt)
+@inline time_step_like(τ::AbstractFloat, Δt::Integer) = convert(typeof(τ), Δt)
+@inline time_step_like(τ, Δt) = Δt
+
+# Rebuild the immutable `x` with field `name` replaced by `value`, through the default
+# constructor of `x`'s type so type parameters are re-inferred (e.g. a traced `value`).
+@inline function replace_property(x, ::Val{name}, value) where name
+    T = typeof(x)
+    values = ntuple(n -> fieldname(T, n) === name ? value : getfield(x, n), Val(fieldcount(T)))
+    return Base.typename(T).wrapper(values...)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+The time step over which the microphysical tendencies currently being built will be applied.
+The default is `clock.last_Δt`; time steppers that know the current step's `Δt` during the
+stages (e.g. `AcousticRungeKutta3`) extend this.
+"""
+@inline sink_limiting_time_step(timestepper, clock) = clock.last_Δt
+
+"""
+$(TYPEDSIGNATURES)
+
+`model.microphysics` with its sink-limiting timescale adapted to the current time step.
+"""
+tendency_microphysics(model) =
+    with_sink_limiting_time_step(model.microphysics, sink_limiting_time_step(model.timestepper, model.clock))
 
 # No microphysics: nothing to add.
 compute_microphysical_tendencies!(::Nothing, model) = nothing
