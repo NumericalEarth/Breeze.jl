@@ -162,13 +162,9 @@ Return the equilibrium moisture mass fractions of a cell at `(i, j, k)` with tem
 total density `ρ`, and total specific moisture `qᵗ`, which includes the fixed
 `precipitation = (qʳ, qˢⁿ)`.
 
-The saturation specific humidity is evaluated under the constraint that `dynamics` imposes on
-the saturation adjustment: the reference pressure for anelastic dynamics, and the density for
-compressible dynamics (see
-[`prescribed_temperature_saturation_specific_humidity`](@ref Breeze.AtmosphereModels.prescribed_temperature_saturation_specific_humidity)).
-A state with
-temperature `T` and these moisture fractions is therefore a fixed point of
-[`adjust_thermodynamic_state`](@ref). In unsaturated air all the non-precipitating moisture is vapor.
+The saturation constraint is the one `dynamics` imposes on the adjustment (see
+[`prescribed_temperature_saturation_specific_humidity`](@ref Breeze.AtmosphereModels.prescribed_temperature_saturation_specific_humidity)),
+so the result is a fixed point of [`adjust_thermodynamic_state`](@ref).
 """
 @inline function equilibrated_moisture_mass_fractions(i, j, k, grid, dynamics, ρ, T, qᵗ, constants,
                                                       equilibrium, precipitation=(0, 0))
@@ -176,9 +172,6 @@ temperature `T` and these moisture fractions is therefore a fixed point of
     return equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium, precipitation)
 end
 
-# `set!(model; T)` converts T to the prognostic thermodynamic variable with the moisture partitioned
-# at equilibrium at T, so that the adjustment in `update_state!` returns T. The diagnostic fields read by
-# `grid_moisture_fractions` hold the partition of the previous state instead.
 @inline AtmosphereModels.prescribed_temperature_moisture_fractions(i, j, k, grid, microphysics::SA, dynamics,
                                                                    ρ, qᵉ, μ, T, constants) =
     equilibrated_moisture_mass_fractions(i, j, k, grid, dynamics, ρ, T, qᵉ, constants, microphysics.equilibrium)

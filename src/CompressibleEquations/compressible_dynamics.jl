@@ -389,10 +389,7 @@ AtmosphereModels.total_pressure(dynamics::CompressibleDynamics) = dynamics.press
                                                             ρ, T, q, constants) =
     ρ * mixture_gas_constant(q, constants) * T
 
-# The compressible saturation adjustment holds the density fixed (`LiquidIceDensityState`), so the
-# saturation constraint for a prescribed temperature is evaluated at the density, not at a pressure.
-# This needs no iteration: with ρ and T given, qᵛ⁺ = pᵛ⁺(T) / (ρ Rᵛ T) is explicit, and the pressure
-# p = ρ Rᵐ T follows from the resulting moisture fractions.
+# Compressible adjustment holds the density fixed, so with ρ and T given qᵛ⁺ is explicit.
 @inline AtmosphereModels.prescribed_temperature_saturation_specific_humidity(i, j, k, grid,
                                                                              ::CompressibleDynamics,
                                                                              ρ, T, qᵗ, constants, equilibrium) =
