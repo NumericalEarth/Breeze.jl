@@ -26,11 +26,13 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
-                                    implicit_damping_factors
+                                    implicit_damping_factors, prepare_acoustic_cache!
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
-                               buoyancy_forceᶜᶜᶜ, dynamics_density
-using Breeze.Thermodynamics: ExnerReferenceState, surface_density
+                               buoyancy_forceᶜᶜᶜ, dynamics_density, standard_pressure
+using Breeze.Thermodynamics: ExnerReferenceState, surface_density, LiquidIceDensityState, MoistureMassFractions,
+                             VaporEquivalentExponent, DryExponent, temperature, air_pressure,
+                             mixture_heat_capacity, dry_air_gas_constant, condensate_latent_energy
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Architectures: architecture
@@ -60,15 +62,13 @@ as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float
     ρu′ = XFaceField(grid)
     ρv′ = YFaceField(grid)
     ρθ′ = CenterField(grid)
-    Πᴸ = CenterField(grid)
     model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
     pᴸ = model.dynamics.pressure
     Gρu = XFaceField(grid)
     Gρv = YFaceField(grid)
-    γRᵐᴸ = CenterField(grid)
+    Cᴸ = CenterField(grid)
 
-    set!(Πᴸ, 1)
-    set!(γRᵐᴸ, 1)
+    set!(Cᴸ, 1)
     set!(pᴸ, (x, y, z) -> 2x + 3y)
     set!(ρθ′, (x, y, z) -> x + y)
     fill!(Gρu, 0)
@@ -77,9 +77,9 @@ as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float
     fill!(ρv′, 0)
 
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
-            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ)
+            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Cᴸ, Gρu, Gρv)
 
-    # −Δτ (∂x pᴸ + ∂x(Cᴸ (ρθ)′)) with Cᴸ = γRᵐᴸ Πᴸ = 1
+    # −Δτ (∂x pᴸ + ∂x(Cᴸ (ρθ)′)) with Cᴸ = 1
     @test @allowscalar(ρu′[2, 2, 2]) == -0.5 * (2 + 1)
     @test @allowscalar(ρv′[2, 2, 2]) == -0.5 * (3 + 1)
 end
@@ -97,26 +97,24 @@ end
                            z = (0, Lz),
                            topology = (Periodic, Periodic, Bounded))
 
-    Πᴸ = CenterField(grid)
     θᴸ = CenterField(grid)
-    γRᵐᴸ = CenterField(grid)
+    Cᴸ = CenterField(grid)
 
     @allowscalar begin
         for k in 1:Nz
-            Πᴸ[2, 2, k] = FT(0.90 + 0.02k)
             θᴸ[2, 2, k] = FT(280 + 3k)
-            γRᵐᴸ[2, 2, k] = FT(390 + 5k)
+            Cᴸ[2, 2, k] = FT(350 + 8k)
         end
     end
 
-    fill_halo_regions!(Πᴸ, θᴸ, γRᵐᴸ)
+    fill_halo_regions!(θᴸ, Cᴸ)
 
     δτᵐ⁺ = FT(0.7)
     dᵐ⁺ = FT(0.03)
     g = FT(9.81)
     Δz = Lz / Nz
 
-    C(k) = @allowscalar γRᵐᴸ[2, 2, k] * Πᴸ[2, 2, k]
+    C(k) = @allowscalar Cᴸ[2, 2, k]
     θ_face(k) = ifelse(k == 1,
                        @allowscalar(θᴸ[2, 2, 1]),
                        ifelse(k == Nz + 1,
@@ -126,13 +124,13 @@ end
     direction = ZDirection()
 
     code_diag(k) = get_coefficient(2, 2, k, grid, AcousticTridiagDiagonal(), nothing, direction,
-                                   Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+                                   θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
     code_upper(k) = get_coefficient(2, 2, k, grid, AcousticTridiagUpper(), nothing, direction,
-                                    Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+                                    θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
     # Oceananigans' Press-indexed tridiagonal solver asks the lower
     # diagonal for row k as `a[k - 1]`.
     code_lower_for_row(k) = get_coefficient(2, 2, k - 1, grid, AcousticTridiagLower(), nothing, direction,
-                                            Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+                                            θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
 
     expected_lower(k) = - δτᵐ⁺^2 * C(k - 1) * θ_face(k - 1) / Δz^2 +
                          δτᵐ⁺^2 * g / (2Δz) -
@@ -453,7 +451,7 @@ for arch in arches
                 substepper.density_potential_temperature_perturbation,
                 substepper.momentum_perturbation.w,
                 grid, model.dynamics, Δτ, ω * Δτ, (1 - ω) * Δτ,
-                substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
+                substepper.linearization_pressure_coefficient,
                 FT(model.thermodynamic_constants.gravitational_acceleration), dˢ⁻,
                 substepper.vertical_momentum_tendency_factor,
                 substepper.slow_vertical_momentum_tendency,
@@ -672,4 +670,80 @@ for arch in arches
         Oceananigans.defaults.FloatType = old_FT
     end
 
+end
+
+#####
+##### The linearized pressure coefficient is the slope of the equation of state
+#####
+
+# Cᴸ must be the slope ∂p/∂(ρθ), at fixed dry density and composition, of the equation of state the
+# core closes with: finite differences of p = ρ Rᵐ T through the core's own inversion, in dry, moist
+# and cloudy cells, for every temperature solver. Compressing every partial density and ρθ together
+# changes p by Cᴸ (ρθ)′ alone without condensate; in cloud the loop omits ∂p/∂ρᵈ.
+@testset "Linearized pressure coefficient is the slope of the equation of state [$FT, $(nameof(typeof(κ̂))), $(summary(temperature_solver))]" for FT in test_float_types(),
+        κ̂ in (VaporEquivalentExponent(), DryExponent()),
+        temperature_solver in temperature_solver_variants(FT)
+    old_FT = Oceananigans.defaults.FloatType
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size = (6, 6, 6), halo = (5, 5, 5),
+                           x = (0, 2e3), y = (0, 2e3), z = (0, 3e3),
+                           topology = (Periodic, Periodic, Bounded))
+    constants = ThermodynamicConstants(FT)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = z -> 300)
+    formulation = LiquidIcePotentialTemperatureFormulation(; exner_exponent = κ̂, temperature_solver)
+    model = AtmosphereModel(grid; dynamics, formulation, thermodynamic_constants = constants,
+                            microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()))
+
+    # Dry below 1 km, unsaturated vapor to 2 km, and enough water to condense above.
+    qᵗ(x, y, z) = ifelse(z < 1e3, 0.0, ifelse(z < 2e3, 0.005, 0.03))
+    set!(model; ρ = model.dynamics.reference_state.density, θ = 300, qᵗ)
+    prepare_acoustic_cache!(model.timestepper.substepper, model)
+
+    Cᴸ = Array(interior(model.timestepper.substepper.linearization_pressure_coefficient))
+    ρᵈ = Array(interior(model.dynamics.dry_density))
+    ρ  = Array(interior(model.dynamics.total_density))
+    ρθ = Array(interior(model.formulation.potential_temperature_density))
+    p  = Array(interior(model.dynamics.pressure))
+    qᵛ = Array(interior(model.microphysical_fields.qᵛ))
+    qˡ = Array(interior(model.microphysical_fields.qˡ))
+    @test maximum(qˡ) > 1e-4  # the top layer condensed
+    @test minimum(qᵛ) == 0    # the bottom layer is dry
+
+    pˢᵗ = FT(standard_pressure(model.dynamics))
+    Rᵈ  = dry_air_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    κᵈ  = Rᵈ / cᵖᵈ
+    ε    = FT == Float64 ? FT(1e-4) : FT(1e-2)
+    rtol = FT == Float64 ? FT(1e-5) : FT(3e-3)
+    solver = model.formulation.temperature_solver
+
+    for I in CartesianIndices(ρθ)
+        q = MoistureMassFractions(qᵛ[I], qˡ[I], zero(FT))
+        θ = ρθ[I] / ρᵈ[I]
+        state(θ′, s = 1) = LiquidIceDensityState(θ′, q, pˢᵗ, s * ρ[I], solver, κ̂)
+        slope = (air_pressure(state(θ * (1 + ε)), constants) -
+                 air_pressure(state(θ * (1 - ε)), constants)) / (2ε * θ * ρᵈ[I])
+        @test Cᴸ[I] ≈ slope rtol = rtol
+
+        # Compress every partial density and ρθ by the same factor, at fixed θ and composition.
+        compression_slope = (air_pressure(state(θ, 1 + ε), constants) -
+                             air_pressure(state(θ, 1 - ε), constants)) / (2ε * ρᵈ[I])
+        if qˡ[I] == 0
+            @test Cᴸ[I] * θ ≈ compression_slope rtol = rtol
+        elseif temperature_solver === NewtonSolver(FT)
+            # In cloud the loop omits ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ) at the converged root.
+            T  = temperature(state(θ), constants)
+            Hᶜ = condensate_latent_energy(q, constants)
+            omitted = Hᶜ / (mixture_heat_capacity(q, constants) * T - Hᶜ)
+            @test omitted > FT(0.01)
+            @test Cᴸ[I] * θ * (1 + omitted) ≈ compression_slope rtol = rtol
+        end
+
+        if qᵛ[I] == 0
+            @test Cᴸ[I] ≈ cᵖᵈ * Rᵈ / (cᵖᵈ - Rᵈ) * (p[I] / pˢᵗ)^κᵈ rtol = 100eps(FT)
+        end
+    end
+    Oceananigans.defaults.FloatType = old_FT
 end
