@@ -18,7 +18,9 @@ using Oceananigans: Oceananigans
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  update_state!, maybe_prepare_first_time_step!, reconcile_state!
-using Breeze.AtmosphereModels: kernel_time_step
+using Oceananigans.Utils: @apply_regionally
+using Breeze.Utils: @regional
+using Breeze.AtmosphereModels: kernel_time_step, copy_parent!
 
 """
 $(TYPEDSIGNATURES)

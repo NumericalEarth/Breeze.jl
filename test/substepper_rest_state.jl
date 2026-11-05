@@ -419,8 +419,7 @@ end
     fill!(parent(ρu′), 1)
     fill!(parent(ρv′), 1)
 
-    arch = Oceananigans.architecture(grid)
-    enforce_wall_impenetrability!(sub, model, grid, arch)
+    enforce_wall_impenetrability!(sub, model)
 
     # x-wall faces: ρu′[1, :, :] and ρu′[Nx+1, :, :] must be zero.
     ρu_arr = Array(interior(ρu′, :, :, :))

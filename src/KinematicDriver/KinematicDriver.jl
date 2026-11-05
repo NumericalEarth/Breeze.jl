@@ -24,6 +24,7 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCon
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.Fields: AbstractField, FunctionField, ZeroField, field, set!
 using Oceananigans.Grids: Face, Center, znode
+using Oceananigans.MultiRegion: MultiRegionGrids
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.TimeSteppers: Clock, TimeSteppers
 using Oceananigans.Utils: launch!, prettysummary

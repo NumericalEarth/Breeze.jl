@@ -36,6 +36,9 @@ rather than producing wrong trajectories at run time (see
 """
 validate_particles(particles, grid) = particles
 
+# Extended for the grids on which `AtmosphereModel` is not supported
+validate_grid(grid) = nothing
+
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
 
@@ -160,11 +163,14 @@ function AtmosphereModel(grid;
                          radiation = nothing,
                          particles::ParticlesOrNothing = nothing)
 
+    validate_grid(grid)
+
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
 
     # Use default timestepper for the dynamics if not specified
     isnothing(timestepper) && (timestepper = default_timestepper(dynamics))
+    validate_timestepper(timestepper, dynamics)
 
     # Validate that velocity boundary conditions are only provided for dynamics that support them
     validate_velocity_boundary_conditions(dynamics, boundary_conditions)
@@ -396,6 +402,10 @@ function AtmosphereModel(grid;
 
     return model
 end
+
+# Extended, on `Val`s of the time stepper name, by dynamics that only one time stepper integrates
+validate_timestepper(timestepper, dynamics) = nothing
+validate_timestepper(name::Symbol, dynamics) = validate_timestepper(Val(name), dynamics)
 
 # Breeze's acoustic and SSP time steppers accept a `dynamics` keyword;
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
@@ -694,6 +704,8 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     # Keep `density` as the coupling-density compatibility entry for other forcing
     # materializers; SpecificForcing selects between the two explicit carriers by target.
+    # `pressure` is the pressure of the model's thermodynamics: diagnosed under `CompressibleDynamics`,
+    # the reference pressure under `AnelasticDynamics`.
     # The moisture state and thermodynamic constants let forcings that convert between
     # thermodynamic variables (e.g. `TemperatureForcing`) form the same local moisture mass
     # fractions as the tendency kernels.
@@ -701,6 +713,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
                          density=coupling_density,
                          coupling_density,
                          total_density=mass_density,
+                         pressure=dynamics_pressure(dynamics),
                          coupling_density_names,
                          specific_fields,
                          microphysics,

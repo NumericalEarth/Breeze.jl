@@ -20,6 +20,7 @@ export
 using DocStringExtensions: TYPEDSIGNATURES
 
 using Breeze.Solvers: SecantSolver
+using Breeze.Utils: @regional
 
 using Breeze.Thermodynamics:
     Thermodynamics,

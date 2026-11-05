@@ -165,6 +165,9 @@ function AtmosphereModels.materialize_dynamics(d::PrescribedDynamics{Div}, grid,
     return PrescribedDynamics{Div}(density, pressure, surface_pressure, p₀, pˢᵗ)
 end
 
+AtmosphereModels.materialize_dynamics(::PrescribedDynamics, ::MultiRegionGrids, bcs, constants) =
+    throw(ArgumentError("PrescribedDynamics is not supported on a MultiRegionGrid."))
+
 materialize_density(density::AbstractField, grid, bcs) = density
 
 function materialize_density(density::PrescribedDensity, grid, bcs)

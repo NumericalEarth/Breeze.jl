@@ -70,7 +70,7 @@ computation the stepper issues, once per stage.
 """
 function cache_transport_velocity!(model)
     w_cache = model.timestepper.substepper.time_averaged_vertical_velocity_cache
-    copyto!(parent(w_cache), parent(transport_velocities(model).w))
+    copy_parent!(w_cache, transport_velocities(model).w)
     return nothing
 end
 
@@ -177,8 +177,8 @@ wᴸ = wᵉ + wⁱ). The full wᴸ is cached, not the clipped wᵉ, which loses 
 saturated cells. A no-op when the substepper carries no cache.
 """
 cache_advecting_state!(model) =
-    cache_advecting_state!(model.timestepper.substepper.vertical_velocity_cache,
-                           model.timestepper.substepper.density_cache, model)
+    @apply_regionally cache_advecting_state!(model.timestepper.substepper.vertical_velocity_cache,
+                                             model.timestepper.substepper.density_cache, model)
 
 cache_advecting_state!(::Nothing, ::Nothing, model) = nothing
 
@@ -278,8 +278,8 @@ function add_implicit_advection_tendency!(model, advection::AdaptiveImplicitVert
     w, ρᵈ = advecting_state(model)
     θ_name = thermodynamic_density_name(model.formulation)
     ρθ = prognostic_fields(model)[θ_name]
-    launch!(architecture(grid), grid, :xyz, _implicit_advection_base_tendency!,
-            model.timestepper.Gⁿ[θ_name], grid, scheme, td, w, ρθ, ρᵈ)
+    @apply_regionally launch!(architecture(grid), grid, :xyz, _implicit_advection_base_tendency!,
+                              model.timestepper.Gⁿ[θ_name], grid, scheme, td, w, ρθ, ρᵈ)
     return nothing
 end
 
@@ -290,7 +290,7 @@ postloop_thermodynamic_scheme(advection, ρ) = implicit_step_scheme(advection, �
 postloop_thermodynamic_scheme(::AdaptiveImplicitVerticalAdvection, ρ) = implicit_step_scheme(nothing, ρ)
 
 implicit_substep!(model, Δt_stage) =
-    implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage)
+    @apply_regionally implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage)
 
 # No implicit solver ⇒ nothing in the model is vertically implicit.
 implicit_substep!(model, ::Nothing, Δt_stage) = nothing

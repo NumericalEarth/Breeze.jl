@@ -165,6 +165,7 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
     SpecificForcing,
+    held_suarez_forcings,
     TemperatureForcing,
 
     # Grid utilities
