@@ -67,16 +67,22 @@ end
                           velocities.w, dynamics, temperature_field, specific_prognostic_moisture,
                           microphysics, microphysical_fields, constants)
 
-    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
+
+    @inbounds begin
+        ρᵈ = ρ_field[i, j, k]
+        ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
+    end
+
+    FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
+    div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
+
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             # An energy forcing (note: ρs and ρE are mutually exclusive) is an energy per unit mass
-             # and needs no conversion
              + ρs_forcing(i, j, k, grid, clock, model_fields)
-             + ρE_forcing(i, j, k, grid, clock, model_fields)
-             + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
+             + ρᵈ / ρ * (FρE + div_ℐ)) # a volumetric heating Q changes s at Q / ρ, so ρᵈ s at (ρᵈ / ρ) Q (ρs and ρE forcings are mutually exclusive)
 end
 
 #####
@@ -87,10 +93,10 @@ end
 # composition increment Δqˣ of `sedimentation_composition_increment`: q̂ˣ − q̂ᵈ on the anelastic
 # core, whose total density is fixed, q̂ˣ − q on the compressible core, whose total density falls
 # with the condensate. Losing condensate at this content leaves the temperature unchanged on
-# either core. From s = cᵖᵐ T + g z − Λ₀, Λ₀ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ with the latent heats extrapolated
-# to zero kelvin (`absolute_zero_latent_heat`), and Δcᵖ and ΔΛ₀ the changes of cᵖᵐ and Λ₀ along Δqˣ,
+# either core. From s = cᵖᵐ T + g z − Hᶜ, Hᶜ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ with the latent heats extrapolated
+# to zero kelvin (`absolute_zero_latent_heat`), and Δcᵖ and ΔHᶜ the changes of cᵖᵐ and Hᶜ along Δqˣ,
 #
-#   χˣ = Δcᵖ T − ΔΛ₀ ,
+#   χˣ = Δcᵖ T − ΔHᶜ ,
 #
 # the enthalpy of the condensate relative to what its mass gives way to: hˣ − hᵈ against dry
 # air, hˣ − (s − g z) against the mixture. The geopotential is independent of the composition and

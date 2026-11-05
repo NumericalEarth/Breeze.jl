@@ -1,16 +1,17 @@
 #####
-##### Shared utilities for clear-sky and all-sky RRTMGP radiation
+##### Shared utilities for gray, clear-sky and all-sky RRTMGP radiation
 #####
 
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Architectures: architecture
+using Oceananigans.Fields: ConstantField
 using Oceananigans.Utils: launch!
+
+using Breeze.AtmosphereModels: SurfaceRadiation, BackgroundAtmosphere, specific_humidity
 
 using RRTMGP: RRTMGPSolver
 using RRTMGP.AtmosphericStates: AtmosphericState
 using RRTMGP.VolumeMixingRatios: VmrGM
-
-using Breeze.AtmosphereModels: BackgroundAtmosphere, specific_humidity
 
 #####
 ##### Volume mixing ratio initialization (shared by clear-sky and all-sky)
@@ -135,6 +136,45 @@ end
 #####
 ##### Surface boundary conditions (shared by gray, clear-sky and all-sky)
 #####
+
+"""
+$(TYPEDSIGNATURES)
+
+Validate and materialize the user's surface properties into a `SurfaceRadiation`.
+
+Albedo is given either as `surface_albedo`, used for both the direct and diffuse albedo, or as
+*both* `direct_surface_albedo` and `diffuse_surface_albedo`. Scalar emissivity, albedos and surface
+temperature become `ConstantField`s of the grid's float type; `surface_temperature = nothing` stays
+`nothing` until a coupled model binds one.
+"""
+function materialize_surface_radiation(grid, solar_position; surface_temperature, surface_emissivity,
+                                       surface_albedo, direct_surface_albedo, diffuse_surface_albedo)
+
+    validate_surface_fractions(; surface_emissivity, surface_albedo,
+                                 direct_surface_albedo, diffuse_surface_albedo)
+
+    direct_surface_albedo, diffuse_surface_albedo =
+        resolve_surface_albedos(surface_albedo, direct_surface_albedo, diffuse_surface_albedo, grid, solar_position)
+
+    surface_emissivity = materialize_surface_property(surface_emissivity, grid, solar_position)
+
+    FT = eltype(grid)
+    surface_temperature = constant_field_property(surface_temperature, FT)
+    surface_emissivity = constant_field_property(surface_emissivity, FT)
+    direct_surface_albedo = constant_field_property(direct_surface_albedo, FT)
+    diffuse_surface_albedo = constant_field_property(diffuse_surface_albedo, FT)
+
+    return SurfaceRadiation(surface_temperature, surface_emissivity,
+                            direct_surface_albedo, diffuse_surface_albedo)
+end
+
+# Seed RRTMGP's surface temperature from a constant one; any other is written at each radiation update.
+function initialize_surface_temperature!(T₀, surface_temperature::ConstantField)
+    T₀ .= surface_temperature.constant
+    return nothing
+end
+
+initialize_surface_temperature!(T₀, surface_temperature) = nothing
 
 """
 $(TYPEDSIGNATURES)

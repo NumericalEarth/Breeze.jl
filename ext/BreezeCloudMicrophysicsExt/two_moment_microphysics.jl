@@ -188,6 +188,8 @@ const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories}
 const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories}
 const WPNE2M = WarmPhaseNonEquilibrium2M
 
+@inline AtmosphereModels.precipitating_mass_fraction(i, j, k, ::WPNE2M, μ) = @inbounds μ.qʳ[i, j, k]
+
 
 #####
 ##### Initial aerosol number from aerosol distribution
@@ -415,17 +417,18 @@ end
     # Local copy of CM2.cloud_terminal_velocity with 2//3 → FT(2/3)
     # so that Rational literals don't appear inside Reactant-traced code.
     FT = eltype(q_liq)
-    ϵN = CloudMicrophysics.Utilities.ϵ_numerics_2M_N(FT)
-    ϵM = CloudMicrophysics.Utilities.ϵ_numerics_2M_M(FT)
+    # CloudMicrophysics 0.47 uses one smallness threshold, `cbrt(floatmin(FT))`,
+    # for both the mass and number variables of the 2-moment scheme.
+    ϵ = CloudMicrophysics.Utilities.ϵ_numerics(FT)
 
     (; νc, μc) = pdf_c
     (; Bc) = CM2.pdf_cloud_parameters_mass(pdf_c, q_liq, ρₐ, N_liq)
 
     prefactor = FT(1 / 18) * (6 / ρw / π)^FT(2 / 3) * (ρw / ρₐ - 1) * grav / ν_air
 
-    vt0 = ifelse(N_liq < ϵN, FT(0),
+    vt0 = ifelse(N_liq < ϵ, FT(0),
         prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(2 / 3)) / N_liq)
-    vt1 = ifelse(q_liq < ϵM, FT(0),
+    vt1 = ifelse(q_liq < ϵ, FT(0),
         prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(5 / 3)) / ρₐ / q_liq)
 
     return (vt0, vt1)
@@ -815,7 +818,7 @@ Mass tendency for cloud liquid [kg/kg/s]
     # Compute radius: rᵃᶜᵗ = 2A / (3S), capped at 1 μm (1e-6 m)
     # Use rⁿᵘᶜ as fallback when S is negligible (no supersaturation) or no activation
     is_activating = (dNᶜˡ_act > eps(FT)) & (S > eps(FT))
-    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(S, eps(FT)))), rⁿᵘᶜ)
+    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(S, eps(FT)))), FT(rⁿᵘᶜ))
 
     # Mass of a single activated droplet [kg]
     # m = (4π/3) * r³ * ρᴸ
@@ -939,7 +942,7 @@ function AtmosphereModels.compute_microphysical_tendencies!(microphysics::WPNE2M
             G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ,
             grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AtmosphereModels.specific_prognostic_moisture(model),
-            model.microphysical_fields, AtmosphereModels.transport_velocities(model))
+            model.microphysical_fields, model.velocities)
 
     return nothing
 end

@@ -10,6 +10,11 @@ using Breeze: Microphysics
 
 const P3 = PredictedParticlePropertiesMicrophysics
 
+# Rain and the prognostic ice particles (including their liquid coating) are not
+# equilibrating cloud liquid in the saturated displacement used by the closure.
+@inline AM.precipitating_mass_fraction(i, j, k, ::P3, μ) =
+    @inbounds μ.qʳ[i, j, k] + μ.qⁱ[i, j, k] + μ.qʷⁱ[i, j, k]
+
 #####
 ##### P3MicrophysicalState
 #####

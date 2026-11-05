@@ -4,7 +4,6 @@ using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
 using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Fields: flattened_unique_values
 using Oceananigans.Grids: topology
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
@@ -24,7 +23,6 @@ function Oceananigans.Models.update_model_field_time_series!(model::AtmosphereMo
     time = Time(clock.time)
     possible_fts = (fields(model), model.forcing)
     time_series_tuple = extract_field_time_series(possible_fts)
-    time_series_tuple = flattened_unique_values(time_series_tuple)
     for fts in time_series_tuple
         update_field_time_series!(fts, time)
     end
@@ -123,7 +121,7 @@ function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
     ρ = parent(density)
     for ρc in tracers
-        parent(ρc) .= ifelse.(ρ .== 0, 0, parent(ρc) ./ ρ)
+        parent(ρc) .= ifelse.(ρ .== 0, zero(eltype(ρ)), parent(ρc) ./ ρ)
     end
     return nothing
 end

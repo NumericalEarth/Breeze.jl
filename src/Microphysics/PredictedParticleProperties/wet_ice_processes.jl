@@ -35,6 +35,10 @@ is used.
     ℂʳⁱᵐᵉ₆ = parameters.minimum_rime_impact
     ℂʳⁱᵐᵉ₇ = parameters.maximum_rime_impact
     ℂʳⁱᵐᵉ₈ = parameters.unrimed_rime_density
+    ℂʳⁱᵐᵉ₉ = parameters.rime_density_constant_coefficient
+    ℂʳⁱᵐᵉ₁₀ = parameters.rime_density_linear_coefficient
+    ℂʳⁱᵐᵉ₁₁ = parameters.rime_density_quadratic_coefficient
+    ℂʳⁱᵐᵉ₁₂ = parameters.rime_density_transition_impact
     T₀ = parameters.freezing_temperature
     ρᴸ = parameters.liquid_water_density
 
@@ -57,17 +61,15 @@ is used.
                abs(𝕎ⁱ - 𝕎ᶜˡ) * inverse_supercooling,
                ℂʳⁱᵐᵉ₆, ℂʳⁱᵐᵉ₇)
 
-    # Cober-List rime-density fit (see the docstring for the citation): a quadratic
-    # in g/cm³ (hence the ×10³) below Ri = 8, a linear extension above it.
-    #   Ri ≤ 8:  ρᶠ = (0.051 + 0.114 Ri - 0.0055 Ri²) × 10³
-    #   Ri > 8:  ρᶠ = 611 + 72.25 (Ri - 8)
-    # These are the coefficients of a published fit, not independently tunable
-    # parameters, so they stay inline with the formula they belong to. What *is*
-    # settable is the range of Ri over which the fit is trusted, clamped above.
+    # Calibratable Cober–List polynomial in kg/m³. Derive the linear extension
+    # to preserve continuity and reach the configured maximum density at the
+    # maximum impact parameter. Defaults recover 611 + 72.25 (Ri - 8).
+    transition_density = ℂʳⁱᵐᵉ₉ + ℂʳⁱᵐᵉ₁₀ * ℂʳⁱᵐᵉ₁₂ + ℂʳⁱᵐᵉ₁₁ * ℂʳⁱᵐᵉ₁₂^2
+    slope = (ℂʳⁱᵐᵉ₄ - transition_density) / (ℂʳⁱᵐᵉ₇ - ℂʳⁱᵐᵉ₁₂)
     ρ_rime_Ri = ifelse(
-        Ri <= FT(8),
-        (FT(0.051) + FT(0.114) * Ri - FT(0.0055) * Ri^2) * FT(1000),
-        FT(611) + FT(72.25) * (Ri - FT(8))
+        Ri <= ℂʳⁱᵐᵉ₁₂,
+        ℂʳⁱᵐᵉ₉ + ℂʳⁱᵐᵉ₁₀ * Ri + ℂʳⁱᵐᵉ₁₁ * Ri^2,
+        transition_density + slope * (Ri - ℂʳⁱᵐᵉ₁₂)
     )
 
     active_cloud_riming = (cloud_rim >= qsmall) & (qᶜˡ >= qsmall) & (T < T₀)

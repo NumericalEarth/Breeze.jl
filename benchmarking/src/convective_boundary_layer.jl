@@ -128,7 +128,8 @@ function convective_boundary_layer(arch = CPU();
             base_pressure = p₀,
             potential_temperature = θ₀
         )
-        dynamics = AnelasticDynamics(reference_state)
+        # TODO: drop pressure_solver_float_type once a Float64 solve fits on the benchmark GPU
+        dynamics = AnelasticDynamics(reference_state; pressure_solver_float_type = float_type)
     elseif dynamics isa CompressibleDynamics
         # CompressibleDynamics is passed in pre-constructed. Rebuild it on a hydrostatic
         # reference state of the background profile, which also supplies the initial density.

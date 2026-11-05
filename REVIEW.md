@@ -1,10 +1,10 @@
 # Code review principles
 
-Review the proposed change for correctness, coherent interfaces, understandable implementation, and justified cost. Explain findings in clear, original language; do not copy or imitate the historical reviewers' wording or persona.
+Review the change as the maintainers whose reviews this guide distills would review it: report every defect, and raise the design, naming, and necessity points they would raise, such as whether the code reuses the right mechanism, says what it means, and needs to exist. Post nothing they would let pass. The number of comments follows from the change and can be zero. Use your own words; apply their judgment, not their persona.
 
 ## Repository rules
 
-Before reviewing, read the repository-root `AGENTS.md` and the `AGENTS.md` and `CLAUDE.md` instructions that apply to the changed paths. Applicable repository and component instructions take precedence over this guide's generic examples and formatting suggestions. Respect each rule's scope and explicit human authorizations; restrictions on what an agent may edit are not blanket prohibitions on human-authored changes.
+Before reviewing, read the repository-root `AGENTS.md` and the `AGENTS.md` and `CLAUDE.md` instructions that apply to the changed paths. These files tell agents how to write code here. Use them to learn the project's conventions, not as a review checklist. Report a departure when it costs something a maintainer cares about: it misleads a reader about what the code does or which types it supports, will go stale when the code changes (a hand-written signature, a duplicated definition), adds code that does nothing, breaks documented usage, documentation, or tests, or adds avoidable run-time work. Rules about how agents themselves work or write, such as which files they may edit or how they punctuate prose, are not review criteria. This guide decides what to post and how to word it; where another instruction file prescribes a different comment style, such as leading with impact or always including a code fix, follow this guide.
 
 Use this guide alongside the task and repository requirements. It is not an exhaustive catalogue of defects. Select checks by the changed behavior and its consumers, not by matching historical keywords.
 
@@ -379,13 +379,15 @@ This is schematic, not proof of every backend's behavior. [Breeze #529](https://
 
 These operating rules make the review process explicit for an automated reviewer. Use the output format required by the calling tool and the applicable repository comment conventions. The action names below are reasoning categories, not labels to copy into comments.
 
-If a component requires review comments to lead with impact, include a code fix, or omit category labels, follow those requirements. Supply a concrete correction supported by the inspected code when a fix is required; never invent a patch to satisfy the format. If the evidence does not yet support a correction, state the material uncertainty in a permitted summary or clarification channel rather than posting a comment that violates the required format.
+Every action in the table below is in scope, not only defects. Design, naming, and necessity findings need evidence as concrete as a bug's: the existing mechanism the change duplicates or should use, with its location; the established name or notation it departs from, with where that is defined; or a search showing that nothing uses the code in question. A question is a valid finding when its answer would change the code. Never invent a patch.
 
-Respect the requested review scope. If the calling tool accepts only actionable defects, omit optional suggestions and unresolved design questions from its findings; do not relabel them as bugs. State a material verification limit in the summary when the output contract permits it.
+Report a failure only for inputs and configurations that existing code, configurations, examples, or documented usage can produce. Do not ask for guards, validation, or error messages for states nothing reaches; the maintainers count those as cost, not safety.
+
+Write one comment per concern. When several failure paths or locations share a cause or a fix, post one comment and name the others inside it. Open with the code, as the maintainers do: the change you are asking for, or the question, in one or two sentences, then the reason in a clause. Keep traces and verification in the details. In the review summary, list every finding in one line, most important first, so the whole review reads in one place, and state any material verification limit.
 
 | Action | Required support | How to phrase it |
 |---|---|---|
-| Report a bug | A reachable or supported triggering case, the violated contract, and a trace or check connecting the changed code to the consequence | State the case and consequence, cite a precise location, then propose the smallest useful correction. |
+| Report a bug | A reachable or supported triggering case, the violated contract, and a trace or check connecting the changed code to the consequence | Name the location and the smallest correction, then the triggering case and its consequence in one sentence. |
 | Request a design change | A concrete conflict with an established interface, duplicated responsibility, compatibility cost, or maintenance obligation | Explain that cost and the existing mechanism to reuse. Do not label it a runtime failure without evidence. |
 | Ask a question | A material uncertainty whose answer changes the judgment | State what was inspected and ask for the missing fact. Do not disguise an accusation as a question. |
 | Suggest optionally | A useful, low-cost improvement that is not necessary for the change to satisfy its contract | Make its optional status clear in ordinary wording, without adding a category label where repository conventions prohibit one. Avoid multiplying cosmetic comments. |
@@ -393,10 +395,10 @@ Respect the requested review scope. If the calling tool accepts only actionable 
 
 **Worked wording, illustrative rather than quotations:** These illustrate reasoning, not ready-to-post comments. Adapt them to the required comment format and add a verified code fix where required; the bold action names are explanatory headings, not comment labels.
 
-- **Bug, after tracing both paths:** “The write path updates the records but leaves this cached total unchanged. The next read returns the old total until restart. Invalidate it here or update it in the shared write path.”
-- **Design:** “Both this wrapper and the runner now own retry timing. Changes to retry policy would need to update both. Can this wrapper delegate scheduling to the existing runner?”
+- **Bug, after tracing both paths:** “Invalidate this cached total in the shared write path: writes don't update it, so reads return the old total until restart.”
+- **Design:** “Can this wrapper delegate retry timing to the existing runner? Both own it now, so a policy change needs two edits.”
 - **Question:** “Is this value already normalized by the caller? The two callers I found use different conventions; that determines whether this division is needed.”
-- **Defer:** “This helper could be simplified, but the current version satisfies this change's contract. That cleanup can be separate.” Usually no separate inline comment is needed for this disposition.
+- **Defer:** “This helper predates the PR and the change doesn't touch it; simplifying it can be a separate PR.” Usually no separate inline comment is needed for this disposition.
 
 ### Verification and stopping rules
 
