@@ -269,7 +269,9 @@ end
 
         Δt = 0.25 * 2π / N
         spin_up_time = 20
-        averaging_time = 30
+        # The stochastic forcing's isotropy converges slowly: over 6 seeds, the largest deviation of a velocity
+        # variance from the mean is 28% after 30 time units of averaging and 13% after 90
+        averaging_time = forcing isa StochasticBandForcing ? 90 : 30
         simulation = Simulation(model; Δt, stop_time=spin_up_time, verbose=false)
         run!(simulation)
 
