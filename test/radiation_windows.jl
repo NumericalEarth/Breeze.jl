@@ -42,35 +42,36 @@ end
         stage_Δt = (1 - second_stage, first_stage, second_stage - first_stage)[stage] * Δt
         clock = Clock(time=advance_window_time(step_start, offset), last_Δt=Δt,
                       last_stage_Δt=stage_Δt, iteration=6, stage=stage)
+        lead = radiation_window_lead(clock)
+        window_start = advance_window_time(clock.time, -lead)
+
+        # The window must end at the start of the step whose first stage the schedule actuates
+        function test_window(schedule)
+            duration = radiation_interval(schedule, clock, lead, timestepper)
+            next_start = next_radiation_step_start(schedule, clock, step_start, first_stage, Δt)
+            @test duration ≈ time_difference_seconds(next_start, window_start) rtol=8eps(FT)
+        end
+
         # Include exact first-stage boundaries for both steppers, where rounding up must
         # not accidentally add an entire time step, including with calendar clocks.
         for interval in (900, 3600, 3700, 3800, 4200)
             next_time = advance_window_time(step_start, interval)
             period = step_start isa DateTime ? Second(interval) : FT(interval)
-            schedules = (TimeInterval(period), SpecifiedTimes([next_time]))
-            for schedule in schedules
+            for schedule in (TimeInterval(period), SpecifiedTimes([next_time]))
                 Oceananigans.initialize!(schedule, (; clock=Clock(time=step_start)))
                 before = prognostic_state(schedule)
-                lead = radiation_window_lead(clock)
-                duration = radiation_interval(schedule, clock, lead, timestepper)
-                window_start = advance_window_time(clock.time, -lead)
-                next_start = next_radiation_step_start(schedule, clock, step_start, first_stage, Δt)
-                @test duration ≈ time_difference_seconds(next_start, window_start) rtol=8eps(FT)
+                test_window(schedule)
                 @test prognostic_state(schedule) == before
             end
         end
 
         for schedule in (IterationInterval(3), IterationInterval(4), IterationInterval(6, offset=1))
-            lead = radiation_window_lead(clock)
-            duration = radiation_interval(schedule, clock, lead, timestepper)
-            window_start = advance_window_time(clock.time, -lead)
-            next_start = next_radiation_step_start(schedule, clock, step_start, first_stage, Δt)
-            @test duration ≈ time_difference_seconds(next_start, window_start) rtol=8eps(FT)
+            test_window(schedule)
         end
     end
 
     @testset "Equivalent hourly schedules use the same solar window" begin
-        for (timestepper, (first_stage, second_stage)) in steppers
+        for (timestepper, (first_stage, _)) in steppers
             clock = Clock(time=first_stage * Δt, last_Δt=Δt, last_stage_Δt=first_stage * Δt, iteration=6, stage=2)
             schedule = TimeInterval(FT(3600))
             Oceananigans.initialize!(schedule, (; clock))
@@ -82,7 +83,7 @@ end
     end
 
     @testset "Initialization and unknown timing" begin
-        for (timestepper, (first_stage, second_stage)) in steppers, iteration in (0, 6)
+        for (timestepper, (first_stage, _)) in steppers, iteration in (0, 6)
             clock = Clock(time=FT(0), last_Δt=Δt, iteration=iteration)
             schedule = TimeInterval(FT(100))
             lead = radiation_window_lead(clock)

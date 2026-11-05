@@ -4,11 +4,10 @@ using Breeze
 
 using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles, materialize_surface_property,
                                dynamics_pressure, total_density, resolve_column_batch_rows,
-                               column_index, complete_radiation_solve!,
+                               column_index,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
-                               assert_bound_surface_temperature, maybe_infer_solar_position,
-                               initialize_cos_zenith!, update_cos_zenith!, fill_columns!,
-                               ApproximateRadiationUpdates, solves_longwave_response, surface_temperature_bounds,
+                               maybe_infer_solar_position, initialize_cos_zenith!, fill_columns!,
+                               approximate_radiation_updates, solves_longwave_response, surface_temperature_bounds,
                                solved_surface_temperature, perturbed_surface_temperature,
                                radiation_cache_validity
 using Breeze.Thermodynamics: ThermodynamicConstants

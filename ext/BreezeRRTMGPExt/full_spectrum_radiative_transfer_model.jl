@@ -164,7 +164,7 @@ function full_spectrum_radiative_transfer_model(grid, radiation_method, constant
                                   ice_effective_radius,
                                   column_batches,
                                   schedule,
-                                  ApproximateRadiationUpdates(grid, schedule, solar_position),
+                                  approximate_radiation_updates(grid, schedule, solar_position),
                                   radiation_cache_validity(grid))
 end
 
@@ -256,16 +256,16 @@ end
 ##### Update radiation
 #####
 
+AtmosphereModels.solver_cos_zenith(rtm::FullSpectrumRadiativeTransferModel) = rtm.longwave_solver.sws.bcs.cos_zenith
+
 """
 $(TYPEDSIGNATURES)
 
-Update the full-spectrum radiative fluxes from the current model state, including the cloud
-state for all-sky radiation.
+Solve the full-spectrum radiative fluxes for the current model state, including the cloud
+state for all-sky radiation, at the solar zenith angle that `_update_radiation!` has set.
 """
-function AtmosphereModels._update_radiation!(rtm::FullSpectrumRadiativeTransferModel, model)
-    assert_bound_surface_temperature(rtm)
+function AtmosphereModels.solve_radiative_transfer!(rtm::FullSpectrumRadiativeTransferModel, model)
     grid = model.grid
-    clock = model.clock
     solver = rtm.longwave_solver
 
     # Surface emissivity and albedos, re-read in case they evolve
@@ -280,14 +280,9 @@ function AtmosphereModels._update_radiation!(rtm::FullSpectrumRadiativeTransferM
                                rtm.liquid_effective_radius,
                                rtm.ice_effective_radius)
 
-    # Update solar zenith angle from the solar_position specification
-    update_cos_zenith!(solver.sws.bcs.cos_zenith, rtm, grid, clock, model.timestepper)
-
     # Longwave and shortwave, one batch of columns at a time; night columns (`cos_zenith ≤ 0`)
     # get zero fluxes, which RRTMGP handles internally.
     solve_radiation_batches!(rtm, solver, grid)
-
-    complete_radiation_solve!(rtm, model)
 
     return nothing
 end

@@ -236,41 +236,39 @@ end
 #####
 
 # `batch_rows` and `j_offset` name the slab of latitude rows just solved. The presentation
-# buffers are batch-width, so the kernel reads them batch-locally and writes the global row.
-# The longwave fluxes go to `ℐ_lw_up` and `ℐ_lw_dn`, the radiation model's own by default.
-function copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset,
-                                       ℐ_lw_up = rtm.upwelling_longwave_flux,
-                                       ℐ_lw_dn = rtm.downwelling_longwave_flux)
-    arch = architecture(grid)
+# buffers, (Nz+1, Nc) views refreshed by update_lw_fluxes!/update_sw_fluxes!, are batch-width,
+# so the kernel reads them batch-locally and writes the global row.
+function copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset)
+    copy_rrtmgp_longwave_fluxes!(rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux,
+                                 solver, grid, batch_rows, j_offset)
 
-    # (Nz+1, Nc) presentation views, refreshed by update_lw_fluxes!/update_sw_fluxes!
-    lw_flux_up = RRTMGP.lw_flux_up(solver)
-    lw_flux_dn = RRTMGP.lw_flux_dn(solver)
-    sw_flux_up = RRTMGP.sw_flux_up(solver)
-    sw_flux_dn = RRTMGP.sw_flux_dn(solver)  # Total SW (direct + diffuse)
-
-    ℐ_sw_up = rtm.upwelling_shortwave_flux
-    ℐ_sw_dn = rtm.downwelling_shortwave_flux
-
-    Nx, _, Nz = size(grid)
-    launch!(arch, grid, (Nx, batch_rows, Nz+1), _copy_rrtmgp_fluxes!,
-            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
-            lw_flux_up, lw_flux_dn, sw_flux_up, sw_flux_dn, grid, j_offset)
+    # Total SW (direct + diffuse)
+    copy_rrtmgp_flux_pair!(rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
+                           RRTMGP.sw_flux_up(solver), RRTMGP.sw_flux_dn(solver), grid, batch_rows, j_offset)
 
     return nothing
 end
 
-@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
-                                      lw_flux_up, lw_flux_dn, sw_flux_up, sw_flux_dn, grid, j_offset)
+# The longwave fluxes of the last longwave solve, into `ℐ_lw_up` and `ℐ_lw_dn`
+copy_rrtmgp_longwave_fluxes!(ℐ_lw_up, ℐ_lw_dn, solver, grid, batch_rows, j_offset) =
+    copy_rrtmgp_flux_pair!(ℐ_lw_up, ℐ_lw_dn, RRTMGP.lw_flux_up(solver), RRTMGP.lw_flux_dn(solver),
+                           grid, batch_rows, j_offset)
+
+function copy_rrtmgp_flux_pair!(ℐ_up, ℐ_dn, flux_up, flux_dn, grid, batch_rows, j_offset)
+    Nx, _, Nz = size(grid)
+    launch!(architecture(grid), grid, (Nx, batch_rows, Nz+1), _copy_rrtmgp_flux_pair!,
+            ℐ_up, ℐ_dn, flux_up, flux_dn, grid, j_offset)
+    return nothing
+end
+
+@kernel function _copy_rrtmgp_flux_pair!(ℐ_up, ℐ_dn, flux_up, flux_dn, grid, j_offset)
     i, j, k = @index(Global, NTuple)
 
     c = column_index(i, j, grid.Nx)  # batch-local column
     jᵍ = j + j_offset                # global latitude row
 
     @inbounds begin
-        ℐ_lw_up[i, jᵍ, k] = lw_flux_up[k, c]
-        ℐ_lw_dn[i, jᵍ, k] = -lw_flux_dn[k, c]
-        ℐ_sw_up[i, jᵍ, k] = sw_flux_up[k, c]
-        ℐ_sw_dn[i, jᵍ, k] = -sw_flux_dn[k, c]
+        ℐ_up[i, jᵍ, k] = flux_up[k, c]
+        ℐ_dn[i, jᵍ, k] = -flux_dn[k, c]
     end
 end

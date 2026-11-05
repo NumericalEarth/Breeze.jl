@@ -7,7 +7,6 @@
 
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Fields: ConstantField
-using Oceananigans.Architectures: ReactantState
 using GPUArraysCore: @allowscalar
 using InteractiveUtils: subtypes
 
@@ -76,7 +75,7 @@ validate_schedule(schedule, arch) = schedule
 # Fallback: no radiation
 update_radiation!(::Nothing, model) = nothing
 
-# Internal function that actually computes radiation (implemented by extensions)
+# Internal function that actually computes radiation (see the `RadiativeTransferModel` method below)
 _update_radiation!(::Nothing, model) = nothing
 
 # Extract the radiation flux divergence field from radiation (nothing-safe)
@@ -108,10 +107,10 @@ struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS,
     cache_valid :: V # Independent of approximate updates, so every schedule can recover missing restart fluxes
 end
 
-# Native validity lives on the host; Reactant needs a traced array so compiled updates can change it.
+# Native validity lives on the host; `BreezeReactantExt` keeps it in a traced array so that
+# compiled updates can change it.
 radiation_cache_validity(grid::AbstractGrid) = radiation_cache_validity(architecture(grid))
 radiation_cache_validity(arch) = Ref(false)
-radiation_cache_validity(arch::ReactantState) = on_architecture(arch, [false])
 
 radiation_cache_is_valid(radiation) = true
 radiation_cache_is_valid(rtm::RadiativeTransferModel) = radiation_cache_is_valid(rtm.cache_valid)
@@ -128,6 +127,42 @@ function set_radiation_cache_validity!(valid::AbstractArray, value)
     fill!(valid, value)
     return nothing
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Solve the radiative transfer equations of `rtm` for the current state of `model`, which every
+backend shares: set the cosine of the solar zenith angle of the solve in the backend's
+[`solver_cos_zenith`](@ref) (see [`update_solve_cos_zenith!`](@ref)), solve with the backend's
+[`solve_radiative_transfer!`](@ref), then record the solve for the updates between solves and
+compute the flux divergence (see [`complete_radiation_solve!`](@ref)).
+"""
+function _update_radiation!(rtm::RadiativeTransferModel, model)
+    assert_bound_surface_temperature(rtm)
+    update_solve_cos_zenith!(solver_cos_zenith(rtm), rtm, model)
+    solve_radiative_transfer!(rtm, model)
+    complete_radiation_solve!(rtm, model)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+The per-column cosine of the solar zenith angle that the solver of `rtm` reads, implemented by
+each radiation backend.
+"""
+function solver_cos_zenith end
+
+"""
+$(TYPEDSIGNATURES)
+
+Solve the longwave and shortwave fluxes of `rtm` for the current state of `model` into its four
+flux fields, and, when [`solves_longwave_response`](@ref), the longwave fluxes at the perturbed
+surface temperature into the longwave responses of its approximate updates. Implemented by each
+radiation backend; [`_update_radiation!`](@ref) sets the solar zenith angle before and completes
+the solve after.
+"""
+function solve_radiative_transfer! end
 
 """
 $(TYPEDSIGNATURES)

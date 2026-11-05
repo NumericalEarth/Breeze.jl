@@ -50,6 +50,40 @@ column(field) = vec(Array(interior(field)))
 longwave_columns(radiation) = column.((radiation.upwelling_longwave_flux, radiation.downwelling_longwave_flux))
 top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwave_flux))
 
+# The shortwave fluxes per unit incoming sunlight, which isolate the optical path and absorption profile
+normalized_shortwave(radiation) = map(flux -> column(flux) / top_downwelling_shortwave(radiation),
+                                      (radiation.upwelling_shortwave_flux, radiation.downwelling_shortwave_flux))
+
+# A state update at `time`, between the steps of a run
+function update_at!(model, time; iteration=1)
+    model.clock.time = time
+    model.clock.iteration = iteration
+    update_state!(model; compute_tendencies=false)
+    return model
+end
+
+# The longwave fluxes of a column solved at `solved_temperature`, then updated between solves to
+# `updated_temperature`, then solved there
+function longwave_update_and_solve(grid, optics, solved_temperature, updated_temperature)
+    T₀ = Field{Center, Center, Nothing}(grid)
+    set!(T₀, solved_temperature)
+    model = radiating_column(grid; epoch=DateTime(2024, 6, 21, 12), optics, surface_temperature=T₀)
+    radiation = model.radiation
+    before = longwave_columns(radiation)
+
+    set!(T₀, updated_temperature)
+    update_radiation_between_solves!(radiation, model)
+    updated = longwave_columns(radiation)
+
+    _update_radiation!(radiation, model)
+    solved = longwave_columns(radiation)
+
+    return radiation, before, updated, solved
+end
+
+# `nt` without the entries `names`
+drop(nt, names...) = (; (name => value for (name, value) in pairs(nt) if name ∉ names)...)
+
 @testset "Small Float32 temperature changes accumulate between solves" begin
     FT = Float32
     Oceananigans.defaults.FloatType = FT
@@ -91,20 +125,9 @@ end
             (GrayOptics(), ClearSkyOptics(), AllSkyOptics(), EcCKDOptics())
 
         grid = radiation_column_grid(FT, 16, 10kilometers)
-        T₀ = Field{Center, Center, Nothing}(grid)
-        set!(T₀, 300)
-        model = radiating_column(grid; epoch = DateTime(2024, 6, 21, 12), optics, surface_temperature = T₀)
-        radiation = model.radiation
+        radiation, before, updated, solved = longwave_update_and_solve(grid, optics, 300, 305)
         expected_bounds = optics isa Union{ClearSkyOptics, AllSkyOptics} ? (160, 355) : nothing
         @test surface_temperature_bounds(radiation) === expected_bounds
-        before = longwave_columns(radiation)
-
-        set!(T₀, 305)
-        update_radiation_between_solves!(radiation, model)
-        updated = longwave_columns(radiation)
-
-        _update_radiation!(radiation, model)
-        solved = longwave_columns(radiation)
 
         # Gray longwave fluxes are linear in the surface emission, so the update matches a solve;
         # spectral ones nearly, since the spectrum of the emission shifts with the temperature
@@ -115,20 +138,9 @@ end
 
     @testset "ecCKD retains its surface emission outside RRTMGP's bounds" begin
         grid = radiation_column_grid(FT, 16, 10kilometers)
-        T₀ = Field{Center, Center, Nothing}(grid)
         for (solved_temperature, updated_temperature) in ((354.6, 354.9), (358, 360), (158, 159))
-            set!(T₀, solved_temperature)
-            model = radiating_column(grid; epoch=DateTime(2024, 6, 21, 12), optics=EcCKDOptics(), surface_temperature=T₀)
-            radiation = model.radiation
+            radiation, before, updated, solved = longwave_update_and_solve(grid, EcCKDOptics(), solved_temperature, updated_temperature)
             @test isnothing(surface_temperature_bounds(radiation))
-            before = longwave_columns(radiation)
-
-            set!(T₀, updated_temperature)
-            update_radiation_between_solves!(radiation, model)
-            updated = longwave_columns(radiation)
-            _update_radiation!(radiation, model)
-            solved = longwave_columns(radiation)
-
             @test updated[1][1] > before[1][1]
             @test updated[1] .- before[1] ≈ solved[1] .- before[1] rtol=FT(0.02)
             @test updated[2] .- before[2] ≈ solved[2] .- before[2] rtol=FT(0.02)
@@ -139,20 +151,8 @@ end
         # RRTMGP's Planck tables end at 355 K, into which the solve clamps the surface temperature.
         # Near the top the response comes from a cooler surface, and above it the fluxes stay put.
         grid = radiation_column_grid(FT, 16, 10kilometers)
-        T₀ = Field{Center, Center, Nothing}(grid)
         for (solved_temperature, updated_temperature) in ((354.6, 354.9), (354.6, 356), (358, 360))
-            set!(T₀, solved_temperature)
-            model = radiating_column(grid; epoch = DateTime(2024, 6, 21, 12), optics = ClearSkyOptics(), surface_temperature = T₀)
-            radiation = model.radiation
-            before = longwave_columns(radiation)
-
-            set!(T₀, updated_temperature)
-            update_radiation_between_solves!(radiation, model)
-            updated = longwave_columns(radiation)
-
-            _update_radiation!(radiation, model)
-            solved = longwave_columns(radiation)
-
+            _, before, updated, solved = longwave_update_and_solve(grid, ClearSkyOptics(), solved_temperature, updated_temperature)
             @test updated[1] .- before[1] ≈ solved[1] .- before[1] rtol = FT(0.02)
             @test updated[2] .- before[2] ≈ solved[2] .- before[2] rtol = FT(0.02)
         end
@@ -239,13 +239,10 @@ end
         model = radiating_column(grid; epoch, schedule=TimeInterval(Inf))
         solved = top_downwelling_shortwave(model.radiation)
         @test solved ≈ -model.radiation.solar_constant * cos_solar_zenith_angle(epoch, 0, 45) rtol = sqrt(eps(FT))
-        model.clock.time += 1hours
-        model.clock.iteration = 1
-        update_state!(model; compute_tendencies=false)
+        update_at!(model, model.clock.time + 1hours)
         expected = -model.radiation.solar_constant * cos_solar_zenith_angle(epoch + Hour(1), 0, 45)
         @test top_downwelling_shortwave(model.radiation) ≈ expected rtol = sqrt(eps(FT))
-        model.clock.time = 14hours
-        update_state!(model; compute_tendencies=false)
+        update_at!(model, 14hours)
         @test all(iszero, column(model.radiation.downwelling_shortwave_flux))
         @test all(iszero, column(model.radiation.upwelling_shortwave_flux))
         @test model.radiation.schedule.actuations == 0
@@ -263,16 +260,12 @@ end
         # The sun rises a minute before the next solve.
         model = radiating_column(grid; solar_position, clock=Clock(time=FT(-7hours + 1minutes)))
         @test iszero(top_downwelling_shortwave(model.radiation))
-        model.clock.time = FT(-6hours + 30)
-        model.clock.iteration = 1
-        update_state!(model; compute_tendencies=false)
+        update_at!(model, FT(-6hours + 30))
         @test top_downwelling_shortwave(model.radiation) ≈ current_sun(model) rtol = sqrt(eps(FT))
 
         # A night-time solve with no known interval must acquire a transmittance at sunrise.
         model = radiating_column(grid; solar_position, schedule=TimeInterval(Inf), clock=Clock(time=FT(-6hours - 1minutes)))
-        model.clock.time = FT(-5hours)
-        model.clock.iteration = 1
-        update_state!(model; compute_tendencies=false)
+        update_at!(model, FT(-5hours))
         @test top_downwelling_shortwave(model.radiation) ≈ current_sun(model) rtol = sqrt(eps(FT))
         @test any(>(0), column(model.radiation.upwelling_shortwave_flux))
         @test model.radiation.schedule.actuations == 0
@@ -289,15 +282,9 @@ end
         # Only 24 minutes of a three-hour interval are sunlit, at either end of the interval.
         for start_time in (-9hours + sunlit_time, 6hours - sunlit_time)
             model = radiating_column(grid; solar_position, schedule=TimeInterval(3hours), clock=Clock(time=FT(start_time)))
-            @test only(Array(model.radiation.approximate_updates.solved_cos_zenith)) ≈ mean_cosine rtol = sqrt(eps(FT))
-            model.clock.time = FT(ifelse(start_time < 0, -6hours + sunlit_time / 2, 6hours - sunlit_time / 2))
-            model.clock.iteration = 1
-            update_state!(model; compute_tendencies=false)
-
-            # Normalizing by incoming sunlight isolates the optical path and absorption profile.
-            for name in (:upwelling_shortwave_flux, :downwelling_shortwave_flux)
-                flux = column(getproperty(model.radiation, name)) / top_downwelling_shortwave(model.radiation)
-                expected = column(getproperty(reference.radiation, name)) / top_downwelling_shortwave(reference.radiation)
+            @test only(solved_cosine(model)) ≈ mean_cosine rtol = sqrt(eps(FT))
+            update_at!(model, FT(ifelse(start_time < 0, -6hours + sunlit_time / 2, 6hours - sunlit_time / 2)))
+            for (flux, expected) in zip(normalized_shortwave(model.radiation), normalized_shortwave(reference.radiation))
                 @test flux ≈ expected rtol = sqrt(eps(FT))
             end
         end
@@ -312,21 +299,17 @@ end
         # Once the sun is four times higher, that slant path would put the beam far too high in the
         # column, and the update solves again.
         model = radiating_column(grid; solar_position, schedule=TimeInterval(Inf), clock=Clock(time=FT(-6hours - 1minutes)))
-        model.clock.iteration = 1
         for (time, solved_time) in ((-6hours + 1minutes, -6hours + 1minutes),
                                     (-6hours + 3minutes, -6hours + 1minutes),
                                     (-3hours, -3hours))
-            model.clock.time = FT(time)
-            update_state!(model; compute_tendencies=false)
+            update_at!(model, FT(time))
             @test only(solved_cosine(model)) ≈ sun(solved_time) rtol = sqrt(eps(FT))
             @test top_downwelling_shortwave(model.radiation) ≈ -model.radiation.solar_constant * sun(time) rtol = sqrt(eps(FT))
         end
         @test model.radiation.schedule.actuations == 0
 
         reference = radiating_column(grid; solar_position=FixedCosineZenith(FT(sun(-3hours))))
-        for name in (:upwelling_shortwave_flux, :downwelling_shortwave_flux)
-            flux = column(getproperty(model.radiation, name)) / top_downwelling_shortwave(model.radiation)
-            expected = column(getproperty(reference.radiation, name)) / top_downwelling_shortwave(reference.radiation)
+        for (flux, expected) in zip(normalized_shortwave(model.radiation), normalized_shortwave(reference.radiation))
             @test flux ≈ expected rtol = sqrt(eps(FT))
         end
     end
@@ -343,9 +326,7 @@ end
         model = radiating_column(grid; solar_position, schedule=IterationInterval(4), clock)
         @test only(solved_cosine(model)) ≈ window_mean(-6hours, 10) rtol = 1e-3
 
-        model.clock.time = FT(-5hours)
-        model.clock.iteration = 2
-        update_state!(model; compute_tendencies=false)
+        update_at!(model, FT(-5hours); iteration=2)
         @test only(solved_cosine(model)) ≈ window_mean(-5hours, 20) rtol = 1e-3
     end
 
@@ -430,16 +411,12 @@ end
         update_state!(model; compute_tendencies=false)
         model.clock.stage = 1
         saved = prognostic_state(model)
-        legacy_radiation = (; (name => value for (name, value) in pairs(saved.radiation)
-                              if name ∉ (:approximate_updates, :cache_valid))...)
-        without_cache = merge(saved, (; radiation=legacy_radiation))
-        without_radiation = (; (name => value for (name, value) in pairs(saved) if name !== :radiation)...)
-        without_validity = merge(saved, (; radiation=(; (name => value for (name, value) in pairs(saved.radiation)
-                                                         if name !== :cache_valid)...)))
+        without_cache = merge(saved, (; radiation=drop(saved.radiation, :approximate_updates, :cache_valid)))
+        without_radiation = drop(saved, :radiation)
+        without_validity = merge(saved, (; radiation=drop(saved.radiation, :cache_valid)))
         array_validity = merge(saved, (; radiation=merge(saved.radiation, (; cache_valid=[true]))))
         incremental_updates = isnothing(saved.radiation.approximate_updates) ? nothing :
-            (; (name => value for (name, value) in pairs(saved.radiation.approximate_updates)
-                if name ∉ (:solved_upwelling_longwave_flux, :solved_downwelling_longwave_flux))...)
+            drop(saved.radiation.approximate_updates, :solved_upwelling_longwave_flux, :solved_downwelling_longwave_flux)
         without_reference_fluxes = merge(saved, (; radiation=merge(saved.radiation, (; approximate_updates=incremental_updates))))
 
         for checkpoint in (without_cache, without_radiation, without_validity, array_validity, without_reference_fluxes)

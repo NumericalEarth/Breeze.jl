@@ -41,30 +41,25 @@ approximate_updates_restart_state(updates) = (; updates.upwelling_longwave_respo
 
 Oceananigans.prognostic_state(rtm::RadiativeTransferModel) = prognostic_state(radiation_restart_state(rtm))
 
+# A checkpoint whose radiation fluxes cannot be used invalidates the cache, which defers a fresh
+# solve until `update_state!` has restored the atmosphere's diagnostics and the coupled surface is
+# ready. Validity is checkpointed too, in case another restart intervenes before that solve.
 function Oceananigans.restore_prognostic_state!(rtm::RadiativeTransferModel, from)
     # Restore validity separately: native checkpoints store a Bool, Reactant checkpoints an array.
     restore_prognostic_state!(merge(radiation_restart_state(rtm), (; cache_valid=nothing)), from)
     # Earlier checkpoints have no flag. Their fluxes are usable if the required cache exists.
-    set_radiation_cache_validity!(rtm.cache_valid, radiation_cache_is_valid(get(from, :cache_valid, true)))
-    saved_updates = get(from, :approximate_updates, nothing)
-    # Incremental-update checkpoints lack the reference fluxes, and their saved temperature
-    # belongs to the last update rather than the solve. Refresh them together with a new solve.
-    missing_cache = !isnothing(rtm.approximate_updates) &&
-                    (isnothing(saved_updates) ||
-                     !hasproperty(saved_updates, :solved_upwelling_longwave_flux) ||
-                     !hasproperty(saved_updates, :solved_downwelling_longwave_flux))
-    missing_cache && invalidate_radiation_cache!(rtm)
+    valid = radiation_cache_is_valid(get(from, :cache_valid, true)) &&
+            (isnothing(rtm.approximate_updates) || has_reference_fluxes(get(from, :approximate_updates, nothing)))
+    set_radiation_cache_validity!(rtm.cache_valid, valid)
     return rtm
 end
 
 function Oceananigans.restore_prognostic_state!(rtm::RadiativeTransferModel, ::Nothing)
-    invalidate_radiation_cache!(rtm)
+    set_radiation_cache_validity!(rtm.cache_valid, false)
     return rtm
 end
 
-# Defer the fresh solve until update_state! has restored the atmosphere's diagnostics and the
-# coupled surface is ready. Save validity too, in case another restart intervenes before that solve.
-function invalidate_radiation_cache!(rtm)
-    set_radiation_cache_validity!(rtm.cache_valid, false)
-    return nothing
-end
+# Incremental-update checkpoints lack the reference fluxes, and their saved temperature belongs to
+# the last update rather than the solve. Refresh them together with a new solve.
+has_reference_fluxes(::Nothing) = false
+has_reference_fluxes(saved_updates) = hasproperty(saved_updates, :solved_upwelling_longwave_flux)

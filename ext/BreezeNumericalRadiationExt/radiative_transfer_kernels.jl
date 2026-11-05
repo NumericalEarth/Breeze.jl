@@ -162,20 +162,19 @@ end
                             liquid_radius, ice_radius, T₀, ε)
 end
 
+AtmosphereModels.solver_cos_zenith(rtm::EcCKDRadiativeTransferModel) = rtm.atmospheric_state.cos_zenith
+
 """
 $(TYPEDSIGNATURES)
 
-Update the ecCKD radiative fluxes of `rtm` from the current state of `model`. Batch by batch:
-integrate the extension pressures above the columns' tops, store the per-layer state, and solve
-the columns into the flux fields. Then compute the flux divergence.
+Solve the ecCKD radiative fluxes of `rtm` for the current state of `model`, at the solar zenith
+angle that `_update_radiation!` has set. Batch by batch: integrate the extension pressures above
+the columns' tops, store the per-layer state, and solve the columns into the flux fields.
 """
-function AtmosphereModels._update_radiation!(rtm::EcCKDRadiativeTransferModel, model)
-    assert_bound_surface_temperature(rtm)
+function AtmosphereModels.solve_radiative_transfer!(rtm::EcCKDRadiativeTransferModel, model)
     grid = model.grid
     workspace = rtm.atmospheric_state
     gas_model = rtm.longwave_solver.gas_model
-
-    update_cos_zenith!(workspace.cos_zenith, rtm, grid, model.clock, model.timestepper)
 
     for (row_offset, batch_size) in column_batches(workspace, grid)
         state = ColumnState(rtm, model, row_offset)
@@ -183,8 +182,6 @@ function AtmosphereModels._update_radiation!(rtm::EcCKDRadiativeTransferModel, m
         compute_layer_state!(workspace, state, gas_model, batch_size)
         solve_columns!(rtm, state, batch_size)
     end
-
-    complete_radiation_solve!(rtm, model)
 
     return nothing
 end

@@ -270,7 +270,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   ice_effective_radius,
                                   column_batches,
                                   schedule,
-                                  ApproximateRadiationUpdates(grid, schedule, solar_position),
+                                  approximate_radiation_updates(grid, schedule, solar_position),
                                   radiation_cache_validity(grid))
 end
 

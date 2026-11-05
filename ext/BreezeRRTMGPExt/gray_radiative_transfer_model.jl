@@ -161,7 +161,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   nothing,  # ice_effective_radius = nothing for gray
                                   nothing,  # column_batches = nothing: gray is never batched
                                   schedule,
-                                  ApproximateRadiationUpdates(grid, schedule, solar_position),
+                                  approximate_radiation_updates(grid, schedule, solar_position),
                                   radiation_cache_validity(grid))
 end
 
@@ -231,23 +231,24 @@ materialize_solar_constant(solar_constant::AbstractArray, FT) = solar_constant
 #     - RadiativeTransferModel: wrapper containing RRTMGP solvers and Oceananigans flux fields
 #
 
+AtmosphereModels.solver_cos_zenith(rtm::GrayRadiativeTransferModel) = rtm.shortwave_solver.bcs.cos_zenith
+
 """
 $(TYPEDSIGNATURES)
 
-Update the radiative fluxes from the current model state.
+Solve the gray radiative fluxes for the current model state, at the solar zenith angle that
+`_update_radiation!` has set:
 
-This function:
 1. Updates the RRTMGP atmospheric state from model fields (T, p)
-2. Computes the solar zenith angle from the model clock and grid location
-3. Solves the longwave and shortwave RTE
-4. Copies the fluxes to Oceananigans fields for output
+2. Solves the longwave and shortwave RTE
+3. Copies the fluxes to Oceananigans fields for output
+4. Solves the longwave RTE again at the perturbed surface temperature, when the fluxes are updated
+   between solves for a changing surface temperature
 
 Sign convention: positive flux = upward, negative flux = downward.
 """
-function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, model)
-    assert_bound_surface_temperature(rtm)
+function AtmosphereModels.solve_radiative_transfer!(rtm::GrayRadiativeTransferModel, model)
     grid = model.grid
-    clock = model.clock
 
     rrtmgp_state = rtm.atmospheric_state
     surface_temperature = rtm.surface_radiation.surface_temperature
@@ -261,9 +262,6 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
                                                rtm.shortwave_solver.bcs.sfc_alb_diffuse,
                                                rtm.surface_radiation, grid)
 
-    # Update solar zenith angle from the solar_position specification
-    update_cos_zenith!(rtm.shortwave_solver.bcs.cos_zenith, rtm, grid, clock, model.timestepper)
-
     # Solve longwave RTE (RRTMGP external call)
     solve_lw!(rtm.longwave_solver, rrtmgp_state)
 
@@ -276,8 +274,6 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
     copy_fluxes_to_fields!(rtm, grid)
 
     solves_longwave_response(rtm) && solve_perturbed_surface_longwave!(rtm, grid)
-
-    complete_radiation_solve!(rtm, model)
 
     return nothing
 end
@@ -293,12 +289,11 @@ function solve_perturbed_surface_longwave!(rtm::GrayRadiativeTransferModel, grid
     updates = rtm.approximate_updates
     Ny = size(grid, 2)
 
-    set_batch_surface_temperature!(rrtmgp_state.t_sfc, rtm, grid, Ny, 0, true)
+    set_batch_surface_temperature!(rrtmgp_state.t_sfc, rtm, grid, Ny, 0, perturbed_surface_temperature)
     solve_lw!(rtm.longwave_solver, rrtmgp_state)
-    set_batch_surface_temperature!(rrtmgp_state.t_sfc, rtm, grid, Ny, 0, false)
+    set_batch_surface_temperature!(rrtmgp_state.t_sfc, rtm, grid, Ny, 0, solved_surface_temperature)
 
-    # The shortwave solver is untouched, so the shortwave fluxes are copied unchanged
-    copy_fluxes_to_fields!(rtm, grid, updates.upwelling_longwave_response, updates.downwelling_longwave_response)
+    copy_longwave_fluxes!(updates.upwelling_longwave_response, updates.downwelling_longwave_response, rtm, grid)
 
     return nothing
 end
@@ -454,34 +449,27 @@ The non-scattering shortwave solver computes the direct beam only. The surface r
 fraction `α` (the direct surface albedo) of it diffusely, and the reflected beam climbs the column
 attenuated by `exp(-D τ)` across each layer of shortwave optical depth `τ`, with `D` the
 `reflected_beam_diffusivity`.
-
-The longwave fluxes go to `ℐ_lw_up` and `ℐ_lw_dn`, the radiation model's own by default.
 """
-function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid,
-                                ℐ_lw_up = rtm.upwelling_longwave_flux,
-                                ℐ_lw_dn = rtm.downwelling_longwave_flux)
-    arch = architecture(grid)
-    FT = eltype(grid)
+function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
+    copy_longwave_fluxes!(rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux, rtm, grid)
 
-    # Unpack flux arrays from RRTMGP solvers
-    lw_flux_up = rtm.longwave_solver.flux.flux_up
-    lw_flux_dn = rtm.longwave_solver.flux.flux_dn
-    sw_flux_dn_dir = rtm.shortwave_solver.flux.flux_dn_dir
+    shortwave_solver = rtm.shortwave_solver
+    launch!(architecture(grid), grid, :xy, _copy_gray_shortwave_fluxes!,
+            rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
+            shortwave_solver.flux.flux_dn_dir,
+            shortwave_solver.bcs.sfc_alb_direct,
+            shortwave_solver.op.τ,
+            convert(eltype(grid), reflected_beam_diffusivity), grid)
 
-    # Unpack Oceananigans output fields
-    ℐ_sw_up = rtm.upwelling_shortwave_flux
-    ℐ_sw_dn = rtm.downwelling_shortwave_flux
+    return nothing
+end
 
+# The longwave fluxes of the last longwave solve, into `ℐ_lw_up` and `ℐ_lw_dn`
+function copy_longwave_fluxes!(ℐ_lw_up, ℐ_lw_dn, rtm::GrayRadiativeTransferModel, grid)
+    flux = rtm.longwave_solver.flux
     Nx, Ny, Nz = size(grid)
-    launch!(arch, grid, (Nx, Ny, Nz+1), _copy_gray_fluxes!,
-            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
-            lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
-
-    launch!(arch, grid, :xy, _reflect_direct_beam!, ℐ_sw_up, ℐ_sw_dn,
-            rtm.shortwave_solver.bcs.sfc_alb_direct,
-            rtm.shortwave_solver.op.τ,
-            convert(FT, reflected_beam_diffusivity), grid)
-
+    launch!(architecture(grid), grid, (Nx, Ny, Nz+1), _copy_gray_longwave_fluxes!,
+            ℐ_lw_up, ℐ_lw_dn, flux.flux_up, flux.flux_dn, grid)
     return nothing
 end
 
@@ -493,27 +481,29 @@ diffusivity when the longwave solver is given more angles, whose secants are not
 """
 const reflected_beam_diffusivity = 1 / 0.6096748751
 
-@kernel function _copy_gray_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
-                                    lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
+# RRTMGP compute buffers are indexed (Nc, Nz+1), we use (i, j, k) for ZFaceField
+# Sign convention: upwelling positive, downwelling negative
+@kernel function _copy_gray_longwave_fluxes!(ℐ_lw_up, ℐ_lw_dn, lw_flux_up, lw_flux_dn, grid)
     i, j, k = @index(Global, NTuple)
-
-    # RRTMGP compute buffers are indexed (Nc, Nz+1), we use (i, j, k) for ZFaceField
-    # Sign convention: upwelling positive, downwelling negative
     c = column_index(i, j, grid.Nx)
 
     @inbounds begin
         ℐ_lw_up[i, j, k] = lw_flux_up[c, k]
         ℐ_lw_dn[i, j, k] = -lw_flux_dn[c, k]  # Negate for downward
-        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[c, k]  # Negate for downward
     end
 end
 
-@kernel function _reflect_direct_beam!(ℐ_sw_up, ℐ_sw_dn, α, τ, D, grid)
+# The direct beam, and its reflection by the surface climbing the column
+@kernel function _copy_gray_shortwave_fluxes!(ℐ_sw_up, ℐ_sw_dn, sw_flux_dn_dir, α, τ, D, grid)
     i, j = @index(Global, NTuple)
     c = column_index(i, j, grid.Nx)
     Nz = size(grid, 3)
 
     @inbounds begin
+        for k in 1:Nz+1
+            ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[c, k]  # Negate for downward
+        end
+
         ℐ = - α[1, c] * ℐ_sw_dn[i, j, 1]
         ℐ_sw_up[i, j, 1] = ℐ
 

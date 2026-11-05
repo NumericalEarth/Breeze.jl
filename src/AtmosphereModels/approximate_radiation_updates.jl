@@ -62,15 +62,18 @@ end
 $(TYPEDSIGNATURES)
 
 The [`ApproximateRadiationUpdates`](@ref) of a radiative transfer model on `grid` solved on
-`schedule`, or `nothing` when the model solves every iteration, and so has no steps between solves,
-or runs on `ReactantState`.
+`schedule`, or `nothing` when the model solves every iteration, and so has no steps between solves.
+`BreezeReactantExt` returns `nothing` on `ReactantState`, whose traced time steps do not update
+the fluxes between solves.
 """
-function ApproximateRadiationUpdates(grid, schedule, solar_position)
+approximate_radiation_updates(grid, schedule, solar_position) =
+    approximate_radiation_updates(architecture(grid), grid, schedule, solar_position)
+
+function approximate_radiation_updates(arch, grid, schedule, solar_position)
     schedule isa IterationInterval && schedule.interval == 1 && return nothing
-    architecture(grid) isa ReactantState && return nothing
 
     Nx, Ny, _ = size(grid)
-    column_array() = on_architecture(architecture(grid), zeros(eltype(grid), Nx * Ny))
+    column_array() = on_architecture(arch, zeros(eltype(grid), Nx * Ny))
     cos_zenith = column_array()
     initialize_cos_zenith!(cos_zenith, solar_position)
 
@@ -98,19 +101,32 @@ function radiation_window_lead(clock)
     return ifelse((clock.stage == 2) & isfinite(lead), max(0, lead), zero(lead))
 end
 
-# The first two stage abscissae, supplied by time steppers that know their stage timing.
-# For other steppers, the first-stage clock still gives the solve's offset within the step.
-radiation_stage_abscissae(timestepper) = nothing
+# The first two stage abscissae of `timestepper`, supplied by the time steppers that know their
+# stage timing. Declared here because `TimeSteppers` loads after `AtmosphereModels`.
+stage_abscissae(timestepper) = nothing
 
-radiation_step_offsets(::Nothing, clock, lead) = clock.stage == 2 ? (lead, lead) : nothing
+# The offsets from the start of the time step of `clock` to its first stage and to `clock`, or
+# `nothing` when the step timing is unknown: before a positive time step, and for time steppers
+# without stage abscissae at any but the first-stage clock, which still gives its own offset.
+function radiation_step_offsets(timestepper, clock, lead)
+    Δt = clock.last_Δt
+    isfinite(Δt) && Δt > 0 || return nothing
+    offsets = stage_offsets(stage_abscissae(timestepper), clock, lead)
+    (isnothing(offsets) || !isfinite(last(offsets))) && return nothing
+    return offsets
+end
 
-function radiation_step_offsets(abscissae, clock, lead)
-    first_stage, second_stage = abscissae
+stage_offsets(::Nothing, clock, lead) = clock.stage == 2 ? (lead, lead) : nothing
+
+function stage_offsets((first_stage, second_stage), clock, lead)
     current_offset = ifelse(clock.stage == 1, zero(lead),
                            ifelse(clock.stage == 2, clock.last_stage_Δt,
                                   second_stage * (clock.last_stage_Δt / (second_stage - first_stage))))
     return first_stage * clock.last_Δt, current_offset
 end
+
+# Between the steps of a run, the first stage of the step that begins at `clock` can still solve
+awaiting_first_stage(clock) = clock.stage == 1 && clock.iteration > 0
 
 """
 $(TYPEDSIGNATURES)
@@ -130,29 +146,28 @@ function radiation_interval(schedule::Union{TimeInterval, SpecifiedTimes}, clock
     t★ = next_actuation_time(schedule)
     (t★ === Inf || t★ <= clock.time) && return zero(lead) # a schedule counting from before the clock actuates at the next step
     remaining = time_difference_seconds(t★, clock.time)
-    isfinite(remaining) || return zero(lead)
-    Δt = clock.last_Δt
-    isfinite(Δt) && Δt > 0 || return finite_radiation_interval(remaining + lead)
-    offsets = radiation_step_offsets(radiation_stage_abscissae(timestepper), clock, lead)
+    offsets = radiation_step_offsets(timestepper, clock, lead)
     isnothing(offsets) && return finite_radiation_interval(remaining + lead)
     first_stage_offset, current_offset = offsets
-    isfinite(current_offset) || return finite_radiation_interval(remaining + lead)
 
     # The next solve's first stage must reach t★, but its window begins at the step's start.
     # A first stage already visited cannot solve again; iteration zero never actuates a schedule.
-    earliest_step = ifelse(clock.stage == 1 && clock.iteration > 0, 0, 1)
+    Δt = clock.last_Δt
+    earliest_step = ifelse(awaiting_first_stage(clock), 0, 1)
     steps = max(earliest_step, ceil((remaining + current_offset - first_stage_offset) / Δt))
     return finite_radiation_interval(steps * Δt - current_offset + lead)
 end
 
+# TODO: Oceananigans could provide the number of iterations until a schedule next actuates
+# (Oceananigans.Utils offers only `actuates_next_iteration(::IterationInterval)`, and
+# `next_actuation_time(::IterationInterval) = Inf`), which would replace the modular arithmetic here.
 function radiation_interval(schedule::IterationInterval, clock, lead, timestepper=nothing)
     steps = mod(schedule.offset - clock.iteration, schedule.interval)
-    waiting_for_first_stage = clock.stage == 1 && clock.iteration > 0
-    steps = ifelse(steps == 0 && !waiting_for_first_stage, schedule.interval, steps)
+    steps = ifelse(steps == 0 && !awaiting_first_stage(clock), schedule.interval, steps)
     interval = steps * clock.last_Δt
-    offsets = radiation_step_offsets(radiation_stage_abscissae(timestepper), clock, lead)
-    if !isnothing(offsets) && isfinite(offsets[2])
-        interval += lead - offsets[2]
+    offsets = radiation_step_offsets(timestepper, clock, lead)
+    if !isnothing(offsets)
+        interval += lead - last(offsets)
     end
     return finite_radiation_interval(interval)
 end
@@ -165,19 +180,21 @@ finite_radiation_interval(interval) = ifelse(isfinite(interval), max(0, interval
 $(TYPEDSIGNATURES)
 
 Fill the per-column `cos_zenith` with the cosine of the solar zenith angle with which `rtm` solves
-at the time of `clock`: its mean over the sunlit part of the radiation window when `rtm` updates
-its fluxes between solves, and its current value otherwise.
+at the time of `model.clock`: its mean over the sunlit part of the radiation window when `rtm`
+updates its fluxes between solves, and its current value otherwise.
 """
-update_cos_zenith!(cos_zenith, rtm::RadiativeTransferModel, grid, clock, timestepper=nothing) =
-    update_solve_cos_zenith!(cos_zenith, rtm.approximate_updates, rtm, grid, clock, timestepper)
+update_solve_cos_zenith!(cos_zenith, rtm, model) =
+    update_solve_cos_zenith!(cos_zenith, rtm.approximate_updates, rtm, model)
 
-update_solve_cos_zenith!(cos_zenith, ::Nothing, rtm, grid, clock, timestepper) =
-    update_cos_zenith!(cos_zenith, rtm.solar_position, grid, clock)
+update_solve_cos_zenith!(cos_zenith, ::Nothing, rtm, model) =
+    update_cos_zenith!(cos_zenith, rtm.solar_position, model.grid, model.clock)
 
-function update_solve_cos_zenith!(μ̄₀, updates::ApproximateRadiationUpdates, rtm, grid, clock, timestepper)
+function update_solve_cos_zenith!(μ̄₀, updates::ApproximateRadiationUpdates, rtm, model)
+    grid = model.grid
+    clock = model.clock
     μ₀ = updates.cos_zenith
     lead = radiation_window_lead(clock)
-    interval = radiation_interval(rtm.schedule, clock, lead, timestepper)
+    interval = radiation_interval(rtm.schedule, clock, lead, model.timestepper)
     update_cos_zenith!(μ₀, rtm.solar_position, grid, clock)
     copyto!(μ̄₀, μ₀)
     if interval > 0
@@ -239,6 +256,7 @@ function complete_radiation_solve!(rtm, model)
     set_radiation_cache_validity!(rtm.cache_valid, true)
     return nothing
 end
+
 complete_radiation_solve!(::Nothing, rtm, model) = compute_radiation_flux_divergence!(rtm, model.grid)
 
 function complete_radiation_solve!(updates::ApproximateRadiationUpdates, rtm, model)
@@ -253,7 +271,7 @@ function complete_radiation_solve!(updates::ApproximateRadiationUpdates, rtm, mo
             rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
             T₀, surface_temperature_bounds(rtm), solves_longwave_response(rtm), grid)
 
-    apply_radiation_updates!(updates, rtm, model)
+    apply_radiation_updates!(rtm, model)
 
     return nothing
 end
@@ -285,19 +303,15 @@ end
 $(TYPEDSIGNATURES)
 
 Update the fluxes of `radiation` for the current surface temperature and sun, between two solves,
-and recompute its flux divergence. Solve again when a restored checkpoint lacked the radiation
-cache, or when sunlight arrives that the last solve did not average over. With a valid cache,
-a no-op for radiation without approximate updates.
+and recompute its flux divergence; solve again instead when sunlight arrives that the last solve
+did not average over. A no-op for radiation without approximate updates. A missing radiation
+cache is refreshed by [`update_radiation!`](@ref), which solves instead of calling this.
 """
 update_radiation_between_solves!(radiation, model) = nothing
-function update_radiation_between_solves!(rtm::RadiativeTransferModel, model)
-    if radiation_cache_is_valid(rtm)
-        update_radiation_between_solves!(rtm.approximate_updates, rtm, model)
-    else
-        _update_radiation!(rtm, model)
-    end
-    return nothing
-end
+
+update_radiation_between_solves!(rtm::RadiativeTransferModel, model) =
+    update_radiation_between_solves!(rtm.approximate_updates, rtm, model)
+
 update_radiation_between_solves!(::Nothing, rtm, model) = nothing
 
 # Over its radiation window, the sun stays within four times the sunlit mean `μ̄₀` of the window:
@@ -319,14 +333,15 @@ function update_radiation_between_solves!(updates::ApproximateRadiationUpdates, 
     if mapreduce(identity, |, daylight_solves; init=false)
         _update_radiation!(rtm, model)
     else
-        apply_radiation_updates!(updates, rtm, model)
+        apply_radiation_updates!(rtm, model)
     end
 
     return nothing
 end
 
-function apply_radiation_updates!(updates, rtm, model)
+function apply_radiation_updates!(rtm, model)
     grid = model.grid
+    updates = rtm.approximate_updates
     launch!(architecture(grid), grid, :xy, _update_radiation_between_solves!,
             rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux,
             rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,

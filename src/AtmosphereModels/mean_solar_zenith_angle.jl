@@ -47,14 +47,16 @@ function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::
     cosine_amplitude = cosd(solar_position.latitude) * cosd(solar_position.declination)
     integral, duration = sunlit_cosine_integral(cosine_offset, cosine_amplitude, first_angle, angular_speed * interval)
     mean_cosine = integral / ifelse(duration > 0, duration, one(duration))
-    fill!(cos_zenith, convert(eltype(grid), mean_cosine))
-    fill!(sunlit_duration, convert(eltype(grid), duration / angular_speed))
+    fill_columns!(cos_zenith, mean_cosine)
+    fill_columns!(sunlit_duration, duration / angular_speed)
     return nothing
 end
 
 function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::ApparentSolarPosition, grid, clock, interval, lead=0)
     datetime = compute_datetime(clock.time, solar_position.epoch) - Millisecond(round(Int, 1000lead))
     remaining = interval
+    FT = eltype(grid)
+    coordinate = convert_solar_coordinate(FT, solar_position.coordinate)
     fill!(cos_zenith, 0)
     fill!(sunlit_duration, 0)
 
@@ -65,8 +67,6 @@ function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::
         duration = min(remaining, time_difference_seconds(midnight, datetime))
         declination = solar_declination(day_of_year(datetime))
         first_angle = hour_angle(datetime, 0)
-        FT = eltype(grid)
-        coordinate = convert_solar_coordinate(FT, solar_position.coordinate)
         launch!(architecture(grid), grid, :xy, _integrate_apparent_zenith!,
                 cos_zenith, sunlit_duration, grid, coordinate, FT(declination), FT(first_angle), FT(duration))
         remaining -= duration
@@ -79,10 +79,6 @@ end
 
 convert_solar_coordinate(FT, ::Nothing) = nothing
 convert_solar_coordinate(FT, coordinate::Tuple) = FT.(coordinate)
-
-@inline solar_coordinate(i, j, grid, coordinate::Tuple) = coordinate
-@inline solar_coordinate(i, j, grid, ::Nothing) = (λnode(i, j, 1, grid, Center(), Center(), Center()),
-                                                  φnode(i, j, 1, grid, Center(), Center(), Center()))
 
 @kernel function _integrate_apparent_zenith!(cos_zenith, sunlit_duration, grid, coordinate, declination, first_angle, duration)
     i, j = @index(Global, NTuple)
