@@ -75,11 +75,16 @@ function conditionally_update_radiation_and_tendencies!(due::Bool, rtm, model, c
 end
 
 # The last `update_state!` of the step built the next step's first-stage tendencies with the
-# previous fluxes; rebuild them with the new ones. `update_state!` is idempotent and does not
-# update radiation between steps at iteration n > 0.
+# previous fluxes; rebuild them with the new ones. The rest of that `update_state!` (halos,
+# auxiliary variables, boundary conditions, advection state) does not depend on the fluxes and
+# is still current, so only the forcings and tendencies are recomputed. As in `update_state!`,
+# the tendencies see the tracers as specific quantities.
 function update_radiation_and_tendencies!(rtm, model, callbacks)
     _update_radiation!(rtm, model)
-    TimeSteppers.update_state!(model, callbacks; compute_tendencies = true)
+    compute_forcings!(model)
+    tracer_density_to_specific!(model)
+    compute_tendencies!(model, callbacks)
+    tracer_specific_to_density!(model)
     return nothing
 end
 
