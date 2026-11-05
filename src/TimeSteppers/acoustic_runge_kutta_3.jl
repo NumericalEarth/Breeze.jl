@@ -161,6 +161,11 @@ see the step just taken, which stage 1 applies only over ``β₁ Δtₙ₊₁``.
     return ifelse(isfinite(Δt), Δt, clock.last_Δt)
 end
 
+# Every Wicker–Skamarock stage restarts from Uⁿ, so stages 2 and 3 subtract their explicit outflow
+# from U⁰. Stage 1's tendencies are built by the `update_state!` that closes the previous step
+# (`clock.stage == 1`), when the current state *is* the coming Uⁿ.
+@inline AtmosphereModels.outflow_budget_from_initial_state(::AcousticRungeKutta3, clock) = clock.stage > 1
+
 #####
 ##### Per-stage substep wrapper
 #####

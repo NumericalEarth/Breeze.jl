@@ -171,6 +171,7 @@ include("formulation_interface.jl")
 ##### AtmosphereModel core
 #####
 
+include("outflow_limiter.jl")
 include("atmosphere_model.jl")
 
 #####
