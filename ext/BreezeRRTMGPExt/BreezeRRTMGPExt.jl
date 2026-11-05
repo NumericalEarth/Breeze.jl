@@ -32,7 +32,7 @@ using RRTMGP.RTESolver: solve_lw!, solve_sw!
 using ClimaComms: ClimaComms
 
 """
-    RRTMGPParameters(constants::ThermodynamicConstants)
+$(TYPEDSIGNATURES)
 
 Construct `RRTMGPParameters` from Breeze's `ThermodynamicConstants`.
 """

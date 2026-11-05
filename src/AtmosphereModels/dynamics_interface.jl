@@ -48,7 +48,7 @@ Create velocity fields from a velocity specification (e.g., `PrescribedVelocityF
 function materialize_velocities end
 
 """
-    update_dynamics_with_velocities(dynamics, velocities)
+$(TYPEDSIGNATURES)
 
 Update dynamics with velocity specification. Default is a no-op.
 For `PrescribedDynamics`, stores the `PrescribedVelocityFields` for dispatch.
@@ -64,7 +64,7 @@ Returns `nothing` for dynamics that do not require a pressure solver (e.g., comp
 function dynamics_pressure_solver end
 
 """
-    update_pressure_solver!(solver, dynamics)
+$(TYPEDSIGNATURES)
 
 Recompute the parts of `solver` that depend on the state of `dynamics`, such as its reference density.
 Default is a no-op.
@@ -179,7 +179,7 @@ the two densities coincide (`total_density === dynamics_density`).
 function dynamics_density end
 
 """
-    total_density(dynamics)
+$(TYPEDSIGNATURES)
 
 Return the total air density ρ = ρᵈ + Σρˣ used by the thermodynamics, scalar advection,
 equation of state, and buoyancy. Defaults to [`dynamics_density`](@ref) — correct for
@@ -251,7 +251,7 @@ moist total density at the reference pressure.
 end
 
 """
-    advecting_vertical_velocity(dynamics, velocities)
+$(TYPEDSIGNATURES)
 
 Return the vertical velocity that advects momentum through the grid's coordinate surfaces:
 the Cartesian `velocities.w` on height-coordinate grids, and the contravariant vertical
@@ -283,7 +283,7 @@ function buoyancy_forceᶜᶜᶜ end
 #####
 
 """
-    validate_velocity_boundary_conditions(dynamics, user_boundary_conditions)
+$(TYPEDSIGNATURES)
 
 Validate that velocity boundary conditions are only provided for dynamics that support them.
 
@@ -344,7 +344,7 @@ as the surface fluxes and the diagnostic hydrostatic pressure do.
 function surface_pressure end
 
 """
-    dynamics_reference_state(dynamics)
+$(TYPEDSIGNATURES)
 
 Return the dynamics' reference state (an anelastic `ReferenceState` or a split-explicit
 `ExnerReferenceState`), or `nothing` if the dynamics carries none. Dispatched so that
@@ -361,7 +361,7 @@ Default is 100000 Pa (1000 hPa).
 function standard_pressure end
 
 """
-    default_drag_surface_temperature(dynamics, grid, thermodynamic_constants)
+$(TYPEDSIGNATURES)
 
 Return a default surface temperature for `BulkDrag` when the user has not supplied
 one. Dispatched on the dynamics type because the notion of a "default" surface
@@ -380,7 +380,7 @@ default_drag_surface_temperature(dynamics, grid, thermodynamic_constants) =
         "`surface_temperature` explicitly when constructing `BulkDrag`."))
 
 """
-    initialize_model_thermodynamics!(model)
+$(TYPEDSIGNATURES)
 
 Initialize the thermodynamic state for a newly constructed model.
 For anelastic dynamics, sets initial θ to the reference potential temperature.
@@ -393,7 +393,7 @@ initialize_model_thermodynamics!(model) = nothing  # default: do nothing
 #####
 
 """
-    prognostic_momentum_field_names(dynamics)
+$(TYPEDSIGNATURES)
 
 Return a tuple of prognostic momentum field names.
 
@@ -403,7 +403,7 @@ For kinematic dynamics (prescribed velocities), returns an empty tuple.
 prognostic_momentum_field_names(::Any) = (:ρu, :ρv, :ρw)
 
 """
-    prognostic_dynamics_field_names(dynamics)
+$(TYPEDSIGNATURES)
 
 Return a tuple of prognostic field names specific to the dynamics formulation.
 
@@ -413,14 +413,14 @@ For compressible dynamics, returns `(:ρᵈ,)` for prognostic density.
 prognostic_dynamics_field_names(::Any) = ()
 
 """
-    additional_dynamics_field_names(dynamics)
+$(TYPEDSIGNATURES)
 
 Return a tuple of additional (diagnostic) field names for the dynamics.
 """
 additional_dynamics_field_names(::Any) = ()
 
 """
-    velocity_boundary_condition_names(dynamics)
+$(TYPEDSIGNATURES)
 
 Return a tuple of velocity field names that need default boundary conditions.
 
@@ -433,7 +433,7 @@ boundary conditions, so this returns `(:u, :v, :w)`.
 velocity_boundary_condition_names(::Any) = ()
 
 """
-    dynamics_prognostic_fields(dynamics)
+$(TYPEDSIGNATURES)
 
 Return a NamedTuple of prognostic fields specific to the dynamics formulation.
 
@@ -447,7 +447,7 @@ dynamics_prognostic_fields(dynamics) = NamedTuple()
 #####
 
 """
-    x_pressure_gradient(i, j, k, grid, dynamics)
+$(TYPEDSIGNATURES)
 
 Return the x-component of the pressure gradient force at (Face, Center, Center).
 
@@ -457,7 +457,7 @@ For compressible dynamics, returns `-∂p/∂x`.
 @inline x_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 """
-    y_pressure_gradient(i, j, k, grid, dynamics)
+$(TYPEDSIGNATURES)
 
 Return the y-component of the pressure gradient force at (Center, Face, Center).
 
@@ -467,7 +467,7 @@ For compressible dynamics, returns `-∂p/∂y`.
 @inline y_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 """
-    z_pressure_gradient(i, j, k, grid, dynamics)
+$(TYPEDSIGNATURES)
 
 Return the z-component of the pressure gradient force at (Center, Center, Face).
 

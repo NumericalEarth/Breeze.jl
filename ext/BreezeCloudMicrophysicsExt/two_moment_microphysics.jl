@@ -51,7 +51,7 @@ using CloudMicrophysics.Parameters:
 #####
 
 """
-    default_aerosol_activation(FT = Float64; τⁿᵘᶜ = 1)
+$(TYPEDSIGNATURES)
 
 Create a default `AerosolActivation` representing a typical continental aerosol population.
 
@@ -141,12 +141,7 @@ end
 Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
 
 """
-    two_moment_cloud_microphysics_categories(FT = Oceananigans.defaults.FloatType;
-                                             warm_processes = SB2006(FT),
-                                             air = AirProperties(FT),
-                                             cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
-                                             rain_fall_velocity = SB2006VelType(FT),
-                                             aerosol_activation = default_aerosol_activation(FT))
+$(TYPEDSIGNATURES)
 
 Construct `TwoMomentCategories` with default [Seifert-Beheng 2006](@cite SeifertBeheng2006)
 parameters and aerosol activation.
@@ -222,10 +217,7 @@ end
 end
 
 """
-    TwoMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
-                               cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
-                               categories = two_moment_cloud_microphysics_categories(FT),
-                               precipitation_boundary_condition = nothing)
+$(TYPEDSIGNATURES)
 
 Return a `TwoMomentCloudMicrophysics` microphysics scheme for warm-rain precipitation
 using the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) two-moment parameterization.
@@ -758,7 +750,7 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
 end
 
 """
-    aerosol_activation_mass_tendency(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
+$(TYPEDSIGNATURES)
 
 Compute the cloud liquid mass tendency from aerosol activation.
 
@@ -832,7 +824,7 @@ Mass tendency for cloud liquid [kg/kg/s]
 end
 
 """
-    aerosol_activated_fraction(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
+$(TYPEDSIGNATURES)
 
 Compute the fraction of aerosol that activates given current thermodynamic conditions.
 Uses the maximum supersaturation to determine which aerosol modes activate.

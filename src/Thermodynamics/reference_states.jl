@@ -60,7 +60,7 @@ Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
 #####
 
 """
-    surface_density(reference_state)
+$(TYPEDSIGNATURES)
 
 Return the density at the bottom face of the domain by interpolating the reference density field.
 """
@@ -71,7 +71,7 @@ function surface_density(ref::ReferenceState)
 end
 
 """
-    surface_density(p₀, T₀, constants)
+$(TYPEDSIGNATURES)
 
 Compute the surface air density from surface pressure `p₀`, surface temperature `T₀`,
 and thermodynamic `constants` using the ideal gas law for dry air.
@@ -82,7 +82,7 @@ and thermodynamic `constants` using the ideal gas law for dry air.
 end
 
 """
-    surface_density(p₀, θ₀, pˢᵗ, constants)
+$(TYPEDSIGNATURES)
 
 Compute the surface air density from surface pressure `p₀`, potential temperature `θ₀`,
 standard pressure `pˢᵗ`, and thermodynamic `constants` using the ideal gas law for dry air.
@@ -457,7 +457,7 @@ converged_hydrostatic_integral(z, Π₀, dΠdz;
                               Π₀, z, tolerance, initial_steps, max_steps)
 
 """
-    numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
+$(TYPEDSIGNATURES)
 
 Compute the dry hydrostatic pressure at height ``z`` by numerically integrating
 ``∂p/∂z = -g ρ`` from ``z=0``, where ``ρ = p/(Rᵈ T)`` and ``T = θ(z) (p/pˢᵗ)^κ``.
@@ -479,7 +479,7 @@ function numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, c
 end
 
 """
-    numerically_integrated_hydrostatic_density(z, p₀, θ_func, pˢᵗ, constants)
+$(TYPEDSIGNATURES)
 
 Compute the dry hydrostatic density at height `z` from the numerically integrated pressure
 and the given potential temperature profile `θ_func(z)`.
@@ -537,7 +537,7 @@ end
 # Evaluate a profile (Number or Function) at a given height.
 # Used both here and in terrain_compressible_physics.jl for reference state construction.
 """
-    evaluate_profile(profile, z)
+$(TYPEDSIGNATURES)
 
 Evaluate a vertical profile at height `z`. If `profile` is a `Number`, returns it unchanged.
 If `profile` is a `Function`, calls `profile(z)`.
@@ -1425,7 +1425,7 @@ end
 end
 
 """
-    enforce_discrete_hydrostatic_balance!(pᵣ, ρᵣ, grid, g)
+$(TYPEDSIGNATURES)
 
 Recompute the reference pressure `pᵣ` from the reference density `ρᵣ` by discrete
 upward integration, ensuring that the discrete hydrostatic balance

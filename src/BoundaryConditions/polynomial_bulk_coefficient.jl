@@ -27,8 +27,7 @@ struct StabilityFunction{FT}
 end
 
 """
-    StabilityFunction(FT = Oceananigans.defaults.FloatType;
-                      γᴰ = 19.3, γᵀ = 11.6, a = 1, b = 2/3, c = 5, d = 0.35)
+$(TYPEDSIGNATURES)
 
 Parameters for the integrated Monin-Obukhov stability functions ``Ψ^D(ζ)``
 and ``Ψ^T(ζ)``.
@@ -95,18 +94,7 @@ struct RichardsonNumberMapping{FT}
 end
 
 """
-    RichardsonNumberMapping(FT = Oceananigans.defaults.FloatType;
-                            stable_unstable_transition = 0,
-                            strongly_stable_transition = 0.2,
-                            aᵘ₁₁ =  0.0450, bᵘ₁₁ =  0.0030, bᵘ₁₂ =  0.0059,
-                            aᵘ₂₁ = -0.0828, aᵘ₂₂ =  0.8845,
-                            bᵘ₃₁ =  0.1739, bᵘ₃₂ = -0.9213, bᵘ₃₃ = -0.1057,
-                            aʷ₁₁ =  0.5738, aʷ₁₂ = -0.4399,
-                            aʷ₂₁ = -4.901,  aʷ₂₂ = 52.50,
-                            bʷ₁₁ = -0.0539, bʷ₁₂ =  1.540,
-                            bʷ₂₁ = -0.6690, bʷ₂₂ = -3.282,
-                            aˢ₁₁ =  0.7529, aˢ₂₁ = 14.94,
-                            bˢ₁₁ =  0.1569, bˢ₂₁ = -0.3091, bˢ₂₂ = -1.303)
+$(TYPEDSIGNATURES)
 
 Regression coefficients for the non-iterative mapping from bulk Richardson number
 ``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L``, following
@@ -156,9 +144,7 @@ struct FittedStabilityFunction{FT, RM, SP}
 end
 
 """
-    FittedStabilityFunction(scalar_roughness_length;
-                            richardson_number_mapping = RichardsonNumberMapping(typeof(scalar_roughness_length)),
-                            stability_function = StabilityFunction(typeof(scalar_roughness_length)))
+$(TYPEDSIGNATURES)
 
 Stability correction based on Monin-Obukhov similarity theory using the
 [Li et al. (2010)](@cite Li2010) analytical mapping from bulk Richardson

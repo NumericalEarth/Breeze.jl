@@ -32,7 +32,7 @@ function set_thermodynamic_variable! end
 #####
 
 """
-    set_velocity!(model, name, value)
+$(TYPEDSIGNATURES)
 
 Set the velocity component `name` (`:u`, `:v`, or `:w`) to `value`.
 Also updates the corresponding momentum field.
@@ -47,7 +47,7 @@ function set_velocity!(model::AtmosphereModel, name::Symbol, value)
 end
 
 """
-    set_momentum!(model, name, value)
+$(TYPEDSIGNATURES)
 
 Set the momentum component `name` (`:ρu`, `:ρv`, or `:ρw`) to `value`.
 """
@@ -150,7 +150,7 @@ function enforce_mass_conservation!(model::AtmosphereModel)
 end
 
 """
-    set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
+$(TYPEDSIGNATURES)
 
 Set variables in an [`AtmosphereModel`](@ref).
 

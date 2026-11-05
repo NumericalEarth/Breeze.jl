@@ -132,7 +132,7 @@ end
 #####
 
 """
-    microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
+$(TYPEDSIGNATURES)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) from density-weighted prognostic
 microphysical variables `μ`, density `ρ`, and thermodynamic state `𝒰`.
@@ -176,7 +176,7 @@ constraints may extend this hook to return a corrected value.
 @inline postprocess_microphysical_prognostics(microphysics, prognostics, ρ) = prognostics
 
 """
-    grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, velocities)
+$(TYPEDSIGNATURES)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) at grid point `(i, j, k)`.
 
@@ -215,7 +215,7 @@ end
     NothingMicrophysicalState(eltype(grid))
 
 """
-    microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+$(TYPEDSIGNATURES)
 
 Compute the tendency for microphysical variable `name` from the microphysical
 state `ℳ` and thermodynamic state `𝒰`.
@@ -1292,7 +1292,7 @@ If a scheme is non-adjusting, we just return `state`.
 #####
 
 """
-    precipitation_rate(model, phase=:liquid)
+$(TYPEDSIGNATURES)
 
 Return a `KernelFunctionOperation` representing the precipitation rate for the given `phase`.
 

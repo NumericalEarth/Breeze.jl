@@ -34,7 +34,7 @@ struct FilteredSurfaceVelocities{U, V, Θ, H, FT, R, RΘ}
 end
 
 """
-    FilteredSurfaceVelocities(grid; filter_timescale, height=nothing)
+$(TYPEDSIGNATURES)
 
 Two-dimensional fields storing temporally filtered near-surface velocities and the
 surface-layer virtual potential temperature difference for use in bulk flux boundary
@@ -125,7 +125,7 @@ struct FilteredSurfaceScalar{F, H, FT, R}
 end
 
 """
-    FilteredSurfaceScalar(grid; filter_timescale, height=nothing)
+$(TYPEDSIGNATURES)
 
 A two-dimensional field storing a temporally filtered near-surface scalar
 for use in bulk flux boundary conditions. The bulk scalar fluxes store the complete

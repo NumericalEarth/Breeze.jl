@@ -150,7 +150,7 @@ form here drops that term, matching the convention of the P3 scheme.
 abstract type AbstractPhaseEquilibrium end
 
 """
-    WarmPhaseEquilibrium()
+$(TYPEDSIGNATURES)
 
 Represents a warm-phase equilibrium where only liquid water condensate is considered.
 The equilibrated surface is always a planar liquid surface.
@@ -168,7 +168,7 @@ function equilibrated_surface end
 @inline equilibrated_surface(::WarmPhaseEquilibrium, T) = PlanarLiquidSurface()
 
 """
-    MixedPhaseEquilibrium(; freezing_temperature=273.15, homogeneous_ice_nucleation_temperature=233.15)
+$(TYPEDSIGNATURES)
 
 Represents a mixed-phase equilibrium where both liquid and ice condensates are considered.
 The liquid fraction varies linearly with temperature between the freezing temperature

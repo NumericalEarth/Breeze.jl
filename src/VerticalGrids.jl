@@ -2,8 +2,10 @@ module VerticalGrids
 
 export PiecewiseStretchedDiscretization
 
+using Breeze.Utils: TYPEDSIGNATURES
+
 """
-    PiecewiseStretchedDiscretization(; z, Δz)
+$(TYPEDSIGNATURES)
 
 Construct a stretched vertical grid where the spacing varies piecewise-linearly
 between breakpoints. The grid spacing is specified at breakpoint heights `z`,

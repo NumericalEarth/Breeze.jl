@@ -368,7 +368,7 @@ function RadiativeTransferModel(grid::AbstractGrid, optics::EcCKDOptics, args...
 end
 
 """
-    materialize_surface_property(x, grid [, solar_position])
+$(TYPEDSIGNATURES)
 
 Convert a surface property (albedo, emissivity) to the form the radiative-transfer
 solver stores: a `Number` becomes a grid-eltype scalar and a `Field` passes through.

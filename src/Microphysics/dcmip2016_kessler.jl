@@ -409,7 +409,7 @@ and ``β^𝕎`` is the `terminal_velocity_exponent`.
 end
 
 """
-    cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
+$(TYPEDSIGNATURES)
 
 Compute cloud-to-rain production rate from autoconversion and accretion
 ([Klemp and Wilhelmson 1978](@cite Klemp1978), eq. 2.13).
@@ -651,7 +651,7 @@ const maximum_representable_substeps = 2^24
 @inline substep_bound(::Val{N}) where N = N
 
 """
-    sedimentation_substeps(Δt, max_Δt, substep_limit)
+$(TYPEDSIGNATURES)
 
 The sedimentation substeps for a step `Δt` whose rain CFL limit is `max_Δt`, validated before the
 count becomes an integer. The ratio `Δt / max_Δt` must be finite and positive, and the count needed,

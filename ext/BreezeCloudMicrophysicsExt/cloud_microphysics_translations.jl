@@ -404,7 +404,7 @@ end
 using CloudMicrophysics.Microphysics2M: pdf_rain_parameters, Γ_incl
 
 """
-    rain_evaporation_2m(sb, aps, q, qʳ, ρ, Nʳ, T, constants)
+$(TYPEDSIGNATURES)
 
 Compute the two-moment rain evaporation rate returning both number and mass tendencies.
 
@@ -566,7 +566,7 @@ Base.summary(::AerosolActivation) = "AerosolActivation"
 #####
 
 """
-    max_supersaturation_breeze(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
+$(TYPEDSIGNATURES)
 
 Compute the maximum supersaturation using the [Abdul-Razzak and Ghan (2000)](@cite AbdulRazzakGhan2000)
 parameterization.

@@ -181,9 +181,7 @@ struct BulkVaporFluxFunction{S, C, G, T, H, TC, SF, M, FV, FS}
 end
 
 """
-    BulkVaporFluxFunction(; coefficient, gustiness=DefaultGustiness(), surface_temperature,
-                            surface_relative_humidity=1, moisture_availability=nothing,
-                            filtered_velocities=nothing)
+$(TYPEDSIGNATURES)
 
 Create a bulk vapor flux function for computing wall moisture fluxes.
 The flux is computed as:
@@ -315,7 +313,7 @@ const BulkVaporFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkVaporFlux
 #####
 
 """
-    BulkSensibleHeatFlux(; coefficient, gustiness=DefaultGustiness(), surface_temperature)
+$(TYPEDSIGNATURES)
 
 Create a `FluxBoundaryCondition` for wall sensible heat flux, on any of the six boundaries.
 
@@ -350,8 +348,7 @@ function BulkSensibleHeatFlux(; kwargs...)
 end
 
 """
-    BulkVaporFlux(; coefficient, surface_temperature, surface_relative_humidity=1,
-                    moisture_availability=nothing, gustiness=DefaultGustiness())
+$(TYPEDSIGNATURES)
 
 Create a `FluxBoundaryCondition` for wall moisture flux, on any of the six boundaries.
 

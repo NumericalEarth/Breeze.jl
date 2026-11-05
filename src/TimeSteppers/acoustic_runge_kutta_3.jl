@@ -73,11 +73,7 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS} <: AbstractTimeStepper
 end
 
 """
-    AcousticRungeKutta3(grid, prognostic_fields;
-                        dynamics,
-                        implicit_solver = nothing,
-                        Gⁿ = map(similar, prognostic_fields),
-                        U⁰ = map(similar, prognostic_fields))
+$(TYPEDSIGNATURES)
 
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
 

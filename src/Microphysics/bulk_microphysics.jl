@@ -43,7 +43,7 @@ AtmosphereModels.negative_moisture_correction(bμp::BulkMicrophysics) = bμp.neg
 Base.summary(::BulkMicrophysics) = "BulkMicrophysics"
 
 """
-    NonEquilibriumCloudFormation(liquid, ice=nothing)
+$(TYPEDSIGNATURES)
 
 A cloud formation scheme where cloud liquid and ice are prognostic variables
 that evolve via condensation/evaporation and deposition/sublimation tendencies,

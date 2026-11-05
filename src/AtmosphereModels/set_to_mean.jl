@@ -14,7 +14,7 @@ using GPUArraysCore: @allowscalar
 using Statistics: mean!
 
 """
-    rescale_density_weighted_fields!(model, ρ⁻)
+$(TYPEDSIGNATURES)
 
 Rescale all density-weighted prognostic fields so that specific quantities
 (velocity, potential temperature, moisture, etc.) are preserved after a change
@@ -108,7 +108,7 @@ end
 end
 
 """
-    set_to_mean!(reference_state, model; rescale_densities=false)
+$(TYPEDSIGNATURES)
 
 Recompute the reference pressure and density profiles from horizontally-averaged
 temperature and moisture mass fractions of the current model state.
@@ -195,7 +195,7 @@ function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛ
 end
 
 """
-    set_to_mean!(ref::ExnerReferenceState, model)
+$(TYPEDSIGNATURES)
 
 Exner analogue of the `ReferenceState` method, for split-explicit `CompressibleDynamics`. Recompute
 the base `exner_function`/`pressure`/`density` by re-running the same discrete Exner column
@@ -266,7 +266,7 @@ function Thermodynamics.compute_reference_state!(model::AtmosphereModel, T̄, q�
 end
 
 """
-    reset_reference_state!(model)
+$(TYPEDSIGNATURES)
 
 Recompute the dynamics' reference state from the horizontal means of the model's current state via
 [`set_to_mean!`](@ref) — works for both the anelastic `ReferenceState` and the split-explicit
@@ -297,7 +297,7 @@ function mean_mass_fraction!(ref_field, ::Nothing)
 end
 
 """
-    HydrostaticallyBalancedDensity(; surface_pressure = nothing)
+$(TYPEDSIGNATURES)
 
 Marker passed as the `ρ` value to [`set!`](@ref) to set the density in discrete moist hydrostatic
 balance with the just-set `θˡⁱ`/`qᵛ`, by per-column integration of the hydrostatic equation upward

@@ -18,7 +18,7 @@ AtmosphereModels.liquid_ice_potential_temperature(model::PotentialTemperatureMod
 AtmosphereModels.static_energy(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :specific)
 
 """
-    static_energy_density(model::PotentialTemperatureModel)
+$(TYPEDSIGNATURES)
 
 Return the static energy density as a `Field` with boundary conditions that return
 energy fluxes when used with `BoundaryConditionOperation`.

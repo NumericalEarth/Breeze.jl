@@ -31,7 +31,7 @@ struct TerrainFollowingVerticalDiscretization{C, D, E, F, FM} <: AbstractVertica
 end
 
 """
-    TerrainFollowingVerticalDiscretization(r_faces; formulation=LinearDecay())
+$(TYPEDSIGNATURES)
 
 Skeleton constructor. `r_faces` is the reference (computational) r face
 specification — a range, vector, or function — exactly as for a static z grid.

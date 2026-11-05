@@ -14,7 +14,7 @@
 const TKE_density_name = :ρe
 
 """
-    DefaultGustiness()
+$(TYPEDSIGNATURES)
 
 The placeholder gustiness of a bulk-flux boundary condition constructed without one. When the
 `AtmosphereModel` materializes its boundary conditions it is replaced by
