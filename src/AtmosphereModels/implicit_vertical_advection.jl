@@ -13,10 +13,14 @@
 
 using Oceananigans.Advection:
     AdaptiveImplicitVerticalAdvection,
+    BoundsPreservation,
+    WENO,
+    implicit_vertical_velocityᶜᶜᶠ,
     vertical_scheme,
     explicit_velocity_scaleᶠᶜᶠ,
     explicit_velocity_scaleᶜᶠᶠ,
     explicit_velocity_scaleᶜᶜᶜ,
+    explicit_velocity_scaleᶜᶜᶠ,
     advective_momentum_flux_Wu,
     advective_momentum_flux_Wv,
     advective_momentum_flux_Ww,
@@ -30,6 +34,8 @@ using Oceananigans.Advection:
 using Oceananigans.Operators: V⁻¹ᶠᶜᶜ, V⁻¹ᶜᶠᶜ, V⁻¹ᶜᶜᶠ,
                               δxᶠᵃᵃ, δxᶜᵃᵃ, δyᵃᶜᵃ, δyᵃᶠᵃ, δzᵃᵃᶜ, δzᵃᵃᶠ
 using Oceananigans.TimeSteppers: ExplicitTimeDiscretization, time_discretization
+using Oceananigans.Utils: AdaptiveVerticallyImplicitDiscretization
+using Oceananigans.BoundaryConditions: _unwrap_for_gpu
 
 const AIVA = AdaptiveImplicitVerticalAdvection
 
@@ -94,6 +100,72 @@ function implicit_advection_velocities(dynamics, velocities, name::Symbol, micro
     total = sum_of_velocities(velocities, sedimentation)
     return merge(total, (; w = OutflowEnabledVelocity(total.w)))
 end
+
+#####
+##### The explicit/implicit split of a bounds-preserving tracer
+#####
+##### Bounds-preserving WENO keeps a tracer within its bounds only while the Courant number of
+##### the outflow through each face of a donor cell is at most `maximum_courant_number`
+##### (ω̂₁ = 5/18 at fifth order): the limited cell average decomposes as
+##### cₖ = ω̂₁ c⁻ + ω̂₁ c⁺ + (1 - 2ω̂₁) p̃ with every part within bounds, and an outflow face can
+##### only remove its own share. The adaptive split caps the explicit Courant number at the
+##### scheme's `cfl` instead, typically 0.5, so wherever the vertical (or sedimentation) Courant
+##### number exceeds ω̂₁ the explicit stage overdrafts the donor cell and the implicit solve,
+##### which is monotone, carries the negative value on.
+#####
+##### For a bounds-preserving scheme the explicit fraction is therefore also capped so that the
+##### mass-weighted outflow Courant number of the donor cell,
+#####
+#####   λ = |w| Δt ρᶠ / (ρᶜ Δzᶜ)   (donor cell below the face for w > 0, above it for w < 0),
+#####
+##### is at most ω̂₁, and the implicit remainder takes the rest: wᵉ + wⁱ = w exactly, so mass is
+##### conserved, and the implicit first-order operator (an M-matrix) cannot create a negative.
+##### Elsewhere, and for every scheme without bounds, the split is the upstream one.
+#####
+
+const BoundsPreservingAIVA = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:BoundsPreservation}
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the fraction `s ∈ [0, 1]` of the vertical velocity `w` at the z-face `(i, j, k)` of a
+tracer that `advection` transports explicitly; the implicit solve carries `(1 - s) w`. For a
+bounds-preserving WENO scheme with an adaptive implicit vertical discretization the fraction
+also keeps the outflow Courant number of the donor cell, weighted by the density `ρ`, within the
+scheme's `maximum_courant_number`, so the explicit stage preserves the bounds.
+"""
+@inline function explicit_vertical_fraction(i, j, k, grid, advection, w, ρ)
+    scheme = vertical_scheme(advection)
+    return explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, scheme, time_discretization(scheme), w)
+end
+
+@inline function explicit_vertical_fraction(i, j, k, grid, scheme::BoundsPreservingAIVA, w, ρ)
+    td = time_discretization(scheme)
+    s = explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, scheme, td, w)
+    Δt = _unwrap_for_gpu(td.Δt)
+    wₖ = @inbounds w[i, j, k]
+    kᵈ = ifelse(wₖ > 0, k - 1, k) # donor cell
+    mᵈ = densityᶜᶜᶜ(i, j, kᵈ, grid, ρ) * Δzᶜᶜᶜ(i, j, kᵈ, grid)
+    λ = abs(wₖ) * Δt * densityᶜᶜᶠ(i, j, k, grid, ρ) / mᵈ
+    ω̂ = scheme.bounds.maximum_courant_number
+    sᵇ = ifelse(λ > ω̂, ω̂ / λ, one(λ))
+    return min(s, sᵇ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the implicit remainder `(1 - s) w` of the vertical velocity `w` at the z-face
+`(i, j, k)` of a tracer, with `s` the [`explicit_vertical_fraction`](@ref).
+"""
+# Upstream's remainder for the unbounded schemes, which keeps their coefficients bit for bit.
+@inline function split_implicit_vertical_velocity(i, j, k, grid, advection::AIVA, w, ρ)
+    scheme = vertical_scheme(advection)
+    return implicit_vertical_velocityᶜᶜᶠ(i, j, k, grid, scheme, time_discretization(scheme), w)
+end
+
+@inline split_implicit_vertical_velocity(i, j, k, grid, scheme::BoundsPreservingAIVA, w, ρ) =
+    @inbounds w[i, j, k] * (1 - explicit_vertical_fraction(i, j, k, grid, scheme, w, ρ))
 
 #####
 ##### Explicit vertical momentum fluxes scaled by the velocity CFL

@@ -44,7 +44,7 @@ using Oceananigans.Advection:
     implicit_advection_lower_diagonal,
     implicit_advection_diagonal
 
-using Oceananigans.Grids: Center, Face, ZDirection
+using Oceananigans.Grids: Center, Face, ZDirection, peripheral_node
 using Oceananigans.Operators: Az, Azᶜᶜᶠ, volume
 using Oceananigans.Utils: SumOfArrays
 using Oceananigans.TurbulenceClosures:
@@ -127,6 +127,56 @@ BoundaryConditions.needs_implicit_solver(a::DensityWeightedImplicitOperator) =
 
     return Δt * V⁻¹ / ρᶜ * (Az⁺ * ρᶠ⁺ * max(wⁱ⁺, 0) - Az⁻ * ρᶠ⁻ * min(wⁱ⁻, 0))
 end
+
+# Bounds-preserving tracers split with the bounded explicit fraction (see
+# `explicit_vertical_fraction`), so their rows are upstream's z-Center coefficients evaluated
+# at that split's implicit remainder. The row is an M-matrix (positive diagonal, non-positive
+# off-diagonals, column sums that telescope to the boundary outflow), so it maps a non-negative
+# right-hand side to a non-negative solution at any implicit Courant number.
+@inline function density_weighted_advection_upper_diagonal(i, j, k, grid, scheme::BoundsPreservingAIVA, w, Δt, ℓx, ℓy, ℓz::Center, ρ)
+    wⁱ  = split_implicit_vertical_velocity(i, j, k+1, grid, scheme, w, ρ)
+    Azᵢ = Az(i, j, k+1, grid, ℓx, ℓy, Face())
+    ρᶠ  = densityᶜᶜᶠ(i, j, k+1, grid, ρ)
+    ρᶜ  = densityᶜᶜᶜ(i, j, k+1, grid, ρ)
+    V⁻¹ = 1 / volume(i, j, k, grid, ℓx, ℓy, Center())
+    return Δt * V⁻¹ * Azᵢ * ρᶠ / ρᶜ * min(wⁱ, zero(wⁱ)) * !peripheral_node(i, j, k+1, grid, ℓx, ℓy, Face())
+end
+
+@inline function density_weighted_advection_lower_diagonal(i, j, k′, grid, scheme::BoundsPreservingAIVA, w, Δt, ℓx, ℓy, ℓz::Center, ρ)
+    k   = k′ + 1
+    wⁱ  = split_implicit_vertical_velocity(i, j, k, grid, scheme, w, ρ)
+    Azᵢ = Az(i, j, k, grid, ℓx, ℓy, Face())
+    ρᶠ  = densityᶜᶜᶠ(i, j, k, grid, ρ)
+    ρᶜ  = densityᶜᶜᶜ(i, j, k′, grid, ρ)
+    V⁻¹ = 1 / volume(i, j, k, grid, ℓx, ℓy, Center())
+    return - Δt * V⁻¹ * Azᵢ * ρᶠ / ρᶜ * max(wⁱ, zero(wⁱ)) * !peripheral_node(i, j, k′, grid, ℓx, ℓy, Center())
+end
+
+# Impermeable boundaries mask the boundary faces out of the diagonal; a sedimenting tracer
+# leaves through them (see the `OutflowEnabledVelocity` method above).
+@inline active_boundary_face(i, j, k, grid, ℓx, ℓy, w) = !peripheral_node(i, j, k, grid, ℓx, ℓy, Face())
+@inline active_boundary_face(i, j, k, grid, ℓx, ℓy, ::OutflowEnabledVelocity) = true
+
+@inline function bounded_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ)
+    wⁱ⁺ = split_implicit_vertical_velocity(i, j, k+1, grid, scheme, w, ρ)
+    wⁱ⁻ = split_implicit_vertical_velocity(i, j, k,   grid, scheme, w, ρ)
+    Az⁺ = Az(i, j, k+1, grid, ℓx, ℓy, Face())
+    Az⁻ = Az(i, j, k,   grid, ℓx, ℓy, Face())
+    ρᶠ⁺ = densityᶜᶜᶠ(i, j, k+1, grid, ρ)
+    ρᶠ⁻ = densityᶜᶜᶠ(i, j, k,   grid, ρ)
+    ρᶜ  = densityᶜᶜᶜ(i, j, k,   grid, ρ)
+    active⁺ = active_boundary_face(i, j, k+1, grid, ℓx, ℓy, w)
+    active⁻ = active_boundary_face(i, j, k,   grid, ℓx, ℓy, w)
+    V⁻¹ = 1 / volume(i, j, k, grid, ℓx, ℓy, Center())
+    return Δt * V⁻¹ / ρᶜ * (Az⁺ * ρᶠ⁺ * max(wⁱ⁺, zero(wⁱ⁺)) * active⁺ -
+                            Az⁻ * ρᶠ⁻ * min(wⁱ⁻, zero(wⁱ⁻)) * active⁻)
+end
+
+@inline density_weighted_advection_diagonal(i, j, k, grid, scheme::BoundsPreservingAIVA, w, Δt, ℓx, ℓy, ℓz::Center, ρ) =
+    bounded_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ)
+
+@inline density_weighted_advection_diagonal(i, j, k, grid, scheme::BoundsPreservingAIVA, w::OutflowEnabledVelocity, Δt, ℓx, ℓy, ℓz::Center, ρ) =
+    bounded_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ)
 
 # As with the advection coefficients, `ρ` is interpolated in z only, so these are exact for
 # a horizontally-uniform density (the anelastic reference state) at all three z-Center locations.
@@ -282,9 +332,7 @@ end
 # through either boundary face is kept (see `density_weighted_advection_diagonal`). The clamped
 # indices keep the boundary faces from reading halos; the clamped value is multiplied by zero.
 @inline function implicit_sedimentation_mass_flux(i, j, k, grid, advection, w, ρq, ρ)
-    scheme = vertical_scheme(advection)
-    td = time_discretization(scheme)
-    wⁱ = implicit_vertical_velocityᶜᶜᶠ(i, j, k, grid, scheme, td, w)
+    wⁱ = split_implicit_vertical_velocity(i, j, k, grid, advection, w, ρ)
     k⁻ = max(k - 1, 1)
     k⁺ = min(k, grid.Nz)
     @inbounds q⁻ = ρq[i, j, k⁻] / densityᶜᶜᶜ(i, j, k⁻, grid, ρ)
