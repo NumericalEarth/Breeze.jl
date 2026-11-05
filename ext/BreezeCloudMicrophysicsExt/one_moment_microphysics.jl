@@ -851,7 +851,7 @@ end
 #####
 
 # Numerical timescale for limiting negative-value relaxation
-const τⁿᵘᵐ = 200  # seconds (DIAGNOSTIC: ≥ max Δt)
+const τⁿᵘᵐ = 1000  # seconds (DIAGNOSTIC: ≥ max Δt)
 
 # Fraction of a donor's process rates that can be honoured without draining more than
 # its content `q` over τⁿᵘᵐ: 1 when the summed sink rate `ΣS` fits, `q⁺ / (τⁿᵘᵐ ΣS)` otherwise.
