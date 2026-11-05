@@ -146,7 +146,7 @@ const BulkDragBoundaryCondition = BoundaryCondition{<:Flux, <:BulkDragFunction}
 #####
 
 """
-$(TYPEDSIGNATURES)
+    BulkDrag(; direction=nothing, coefficient=1e-3, gustiness=DefaultGustiness(), surface_temperature=nothing)
 
 Create a `FluxBoundaryCondition` for wall momentum drag, on any of the six boundaries.
 

@@ -132,7 +132,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+    microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) from density-weighted prognostic
 microphysical variables `μ`, density `ρ`, and thermodynamic state `𝒰`.
@@ -215,7 +215,7 @@ end
     NothingMicrophysicalState(eltype(grid))
 
 """
-$(TYPEDSIGNATURES)
+    microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 
 Compute the tendency for microphysical variable `name` from the microphysical
 state `ℳ` and thermodynamic state `𝒰`.

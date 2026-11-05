@@ -313,7 +313,7 @@ const BulkVaporFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkVaporFlux
 #####
 
 """
-$(TYPEDSIGNATURES)
+    BulkSensibleHeatFlux(; coefficient, gustiness=DefaultGustiness(), surface_temperature)
 
 Create a `FluxBoundaryCondition` for wall sensible heat flux, on any of the six boundaries.
 
@@ -348,7 +348,8 @@ function BulkSensibleHeatFlux(; kwargs...)
 end
 
 """
-$(TYPEDSIGNATURES)
+    BulkVaporFlux(; coefficient, surface_temperature, surface_relative_humidity=1,
+                    moisture_availability=nothing, gustiness=DefaultGustiness())
 
 Create a `FluxBoundaryCondition` for wall moisture flux, on any of the six boundaries.
 

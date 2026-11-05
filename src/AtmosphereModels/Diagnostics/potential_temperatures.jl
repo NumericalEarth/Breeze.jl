@@ -152,7 +152,7 @@ dynamics_standard_pressure(dynamics) = dynamics.reference_state.standard_pressur
 # since CompressibleEquations is loaded after AtmosphereModels
 
 """
-$(TYPEDSIGNATURES)
+    PotentialTemperature(model, flavor=:specific)
 
 Return a `KernelFunctionOperation` representing the (mixture) potential temperature ``θ``.
 
@@ -221,7 +221,7 @@ function PotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
 end
 
 """
-$(TYPEDSIGNATURES)
+    VirtualPotentialTemperature(model, flavor=:specific)
 
 Return a `KernelFunctionOperation` representing virtual potential temperature ``θᵛ``.
 
@@ -299,7 +299,7 @@ function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:spec
 end
 
 """
-$(TYPEDSIGNATURES)
+    LiquidIcePotentialTemperature(model, flavor=:specific)
 
 Return a `KernelFunctionOperation` representing liquid-ice potential temperature ``θˡⁱ``.
 
@@ -373,7 +373,7 @@ function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:sp
 end
 
 """
-$(TYPEDSIGNATURES)
+    EquivalentPotentialTemperature(model, flavor=:specific)
 
 Return a `KernelFunctionOperation` representing equivalent potential temperature ``θᵉ``.
 
@@ -447,7 +447,7 @@ function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:s
 end
 
 """
-$(TYPEDSIGNATURES)
+    StabilityEquivalentPotentialTemperature(model, flavor=:specific)
 
 Return a `KernelFunctionOperation` representing stability-equivalent potential temperature ``θᵇ``.
 

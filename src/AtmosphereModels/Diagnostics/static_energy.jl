@@ -24,7 +24,7 @@ Adapt.adapt_structure(to, k::StaticEnergyKernelFunction) =
 const StaticEnergy = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:StaticEnergyKernelFunction}
 
 """
-$(TYPEDSIGNATURES)
+    StaticEnergy(model, flavor=:specific)
 
 Return a `KernelFunctionOperation` representing moist static energy ``s``.
 

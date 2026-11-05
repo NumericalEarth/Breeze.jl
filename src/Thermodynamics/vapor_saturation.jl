@@ -168,7 +168,7 @@ function equilibrated_surface end
 @inline equilibrated_surface(::WarmPhaseEquilibrium, T) = PlanarLiquidSurface()
 
 """
-$(TYPEDSIGNATURES)
+    MixedPhaseEquilibrium(; freezing_temperature=273.15, homogeneous_ice_nucleation_temperature=233.15)
 
 Represents a mixed-phase equilibrium where both liquid and ice condensates are considered.
 The liquid fraction varies linearly with temperature between the freezing temperature

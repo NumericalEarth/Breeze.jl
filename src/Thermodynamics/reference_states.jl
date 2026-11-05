@@ -537,7 +537,7 @@ end
 # Evaluate a profile (Number or Function) at a given height.
 # Used both here and in terrain_compressible_physics.jl for reference state construction.
 """
-$(TYPEDSIGNATURES)
+    evaluate_profile(profile, z)
 
 Evaluate a vertical profile at height `z`. If `profile` is a `Number`, returns it unchanged.
 If `profile` is a `Function`, calls `profile(z)`.

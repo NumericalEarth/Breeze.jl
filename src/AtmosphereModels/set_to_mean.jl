@@ -297,7 +297,7 @@ function mean_mass_fraction!(ref_field, ::Nothing)
 end
 
 """
-$(TYPEDSIGNATURES)
+    HydrostaticallyBalancedDensity(; surface_pressure = nothing)
 
 Marker passed as the `ρ` value to [`set!`](@ref) to set the density in discrete moist hydrostatic
 balance with the just-set `θˡⁱ`/`qᵛ`, by per-column integration of the hydrostatic equation upward
