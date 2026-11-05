@@ -2,8 +2,8 @@
 ##### MPI worker script, launched on several ranks by `test/distributed/acoustic_wave.jl`.
 #####
 ##### Runs the acoustic wave setup of `examples/acoustic_wave.jl` (a Gaussian density pulse in a
-##### log-layer wind shear, with `CompressibleDynamics`), extended to three dimensions so it can be
-##### partitioned in both x and y, on a `Distributed` grid. The reconstructed global solution is
+##### log-layer wind shear, with `CompressibleDynamics`, explicit and split-explicit), extended to three
+##### dimensions so it can be partitioned in both x and y, on a `Distributed` grid. The reconstructed global solution is
 ##### compared against the same simulation run on a single (serial) grid.
 #####
 ##### Stand-alone usage:
@@ -47,7 +47,7 @@ function partition_for(name, nranks)
     error("Unknown partition $(repr(name))")
 end
 
-function acoustic_wave_simulation(arch; stop_iteration=10)
+function acoustic_wave_simulation(arch, time_discretization; stop_iteration=10)
     Nx, Ny, Nz = 32, 32, 16
     Lx, Ly, Lz = 500, 500, 200  # (m)
 
@@ -55,7 +55,7 @@ function acoustic_wave_simulation(arch; stop_iteration=10)
                            x = (-Lx/2, Lx/2), y = (-Ly/2, Ly/2), z = (0, Lz),
                            topology = (Periodic, Periodic, Bounded))
 
-    model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state = nothing))
+    model = AtmosphereModel(grid; dynamics = CompressibleDynamics(time_discretization; reference_state = nothing))
     constants = model.thermodynamic_constants
 
     θ₀ = 300      # Reference potential temperature (K)
@@ -90,33 +90,35 @@ function acoustic_wave_simulation(arch; stop_iteration=10)
     return model
 end
 
-@testset "Acoustic wave on Distributed($(partition_name)) [$(nranks) ranks, $(use_gpu ? "GPU" : "CPU")]" begin
-    arch = Distributed(child_architecture; partition=partition_for(partition_name, nranks))
-    model = acoustic_wave_simulation(arch; stop_iteration=10)
-    @test model.clock.iteration == 10
-    @test model.grid.architecture isa Distributed
-
-    if rank == 0
-        serial_model = acoustic_wave_simulation(CPU())
-    end
-
-    for name in (:ρu, :ρv, :ρw)
-        local_field = getproperty(model.momentum, name)
-        global_field = reconstruct_global_field(local_field)
+for time_discretization in (ExplicitTimeStepping(), SplitExplicitTimeDiscretization())
+    @testset "Acoustic wave on Distributed($(partition_name)) with $(nameof(typeof(time_discretization))) [$(nranks) ranks, $(use_gpu ? "GPU" : "CPU")]" begin
+        arch = Distributed(child_architecture; partition=partition_for(partition_name, nranks))
+        model = acoustic_wave_simulation(arch, time_discretization; stop_iteration=10)
+        @test model.clock.iteration == 10
+        @test model.grid.architecture isa Distributed
 
         if rank == 0
-            # Compare on the host: in GPU runs the reconstructed field is on the GPU and the
-            # serial reference on the CPU (Breeze issue #1193).
-            distributed_data = Array(interior(global_field))
-            serial_data = Array(interior(getproperty(serial_model.momentum, name)))
-            @test !any(isnan, distributed_data)
-            @test distributed_data ≈ serial_data rtol=rtol
+            serial_model = acoustic_wave_simulation(CPU(), time_discretization)
         end
-    end
 
-    global_ρᵈ = reconstruct_global_field(model.dynamics.dry_density)
-    if rank == 0
-        @test Array(interior(global_ρᵈ)) ≈ Array(interior(serial_model.dynamics.dry_density)) rtol=rtol
+        for name in (:ρu, :ρv, :ρw)
+            local_field = getproperty(model.momentum, name)
+            global_field = reconstruct_global_field(local_field)
+
+            if rank == 0
+                # Compare on the host: in GPU runs the reconstructed field is on the GPU and the
+                # serial reference on the CPU (Breeze issue #1193).
+                distributed_data = Array(interior(global_field))
+                serial_data = Array(interior(getproperty(serial_model.momentum, name)))
+                @test !any(isnan, distributed_data)
+                @test distributed_data ≈ serial_data rtol=rtol
+            end
+        end
+
+        global_ρᵈ = reconstruct_global_field(model.dynamics.dry_density)
+        if rank == 0
+            @test Array(interior(global_ρᵈ)) ≈ Array(interior(serial_model.dynamics.dry_density)) rtol=rtol
+        end
     end
 end
 
