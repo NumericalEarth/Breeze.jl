@@ -46,11 +46,11 @@ end
     end
 end
 
-
-# Measure allocations inside a function: with `@allocated` at testset scope, Julia 1.11 counts boxing of the result
-function allocations(f, args...)
-    f(args...)
-    return @allocated f(args...)
+# Measure allocations inside a function with fixed arguments: on Julia 1.11, `@allocated` at testset
+# scope or through a varargs wrapper counts allocations that the call itself does not make
+function growth_step_allocations(r, rᵈ, κ, 𝒮, fᵛ, T, p, Δt, constants, parameters)
+    condensational_growth_step(r, rᵈ, κ, 𝒮, fᵛ, T, p, Δt, constants, parameters)
+    return @allocated condensational_growth_step(r, rᵈ, κ, 𝒮, fᵛ, T, p, Δt, constants, parameters)
 end
 
 @testset "Droplet physics" begin
@@ -73,7 +73,7 @@ end
             @test @inferred(droplet_response_time(r, FT(0.1), T, p, constants, parameters)) isa FT
             @test @inferred(ventilation_factor(r, FT(0.1), T, p, constants, parameters)) isa FT
             @test @inferred(exponential_drag_step(FT(0), FT(1), FT(-9.81), FT(1e-3), FT(1))) isa Tuple{FT, FT}
-            @test allocations(condensational_growth_step, r, rᵈ, κ, 𝒮, one(FT), T, p, FT(1), constants, parameters) == 0
+            @test growth_step_allocations(r, rᵈ, κ, 𝒮, one(FT), T, p, FT(1), constants, parameters) == 0
         end
 
         @testset "Analytic r² ∝ t growth without curvature or solute [$FT]" begin
