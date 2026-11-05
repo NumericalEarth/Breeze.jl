@@ -46,9 +46,7 @@ pressure_state(θ, q, p, κ̂) = TD.LiquidIcePotentialTemperatureState(θ, q, of
         θ = FT(300)
         ε = FT === Float32 ? FT(5e-3) : FT(1e-5)
         rtol = FT === Float32 ? FT(1e-3) : FT(1e-6)
-        solvers = (nothing, FixedIterations(0), FixedIterations(1), FixedIterations(2),
-                   NewtonSolver(FT; maxiter=0), NewtonSolver(FT; maxiter=1),
-                   NewtonSolver(FT; abstol=1e3), NewtonSolver(FT))
+        solvers = temperature_solver_variants(FT)
 
         for solver in solvers, fractions in ((0, 0, 0), (0.01, 0.01, 0),
                                              (0.002, 0, 0.01), (0.005, 0.005, 0.005))

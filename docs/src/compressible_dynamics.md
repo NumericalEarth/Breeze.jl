@@ -95,23 +95,22 @@ dynamics about the **RK stage-entry state** ``U^L``. The cached background field
 refreshed before every RK stage:
 
 ```math
-ρ^L, \quad (ρθ)^L, \quad p^L, \quad
-Π^L = (p^L / p^{st})^{\hat κ}, \quad θ^L = (ρθ)^L/ρ^L, \quad γ^m R^m\big|_L .
+ρ^L, \quad (ρθ)^L, \quad p^L, \quad θ^L = (ρθ)^L/ρ^L, \quad C^L .
 ```
 
-``Π^L`` uses the formulation's Exner exponent ``\hat κ``, and ``γ^m R^m|_L`` is defined so that
-``C^L = γ^m R^m|_L Π^L`` is the slope ``∂p/∂(ρθ)`` of the compressible core's equation of state at
-``U^L``, at fixed dry density and composition. With ``p = ρ R^m T`` and the temperature
-inverted from ``c^p_m T = \hat{c}^p Π^L θ^{li} + H^c``, where ``\hat{c}^p`` is the vapor-equivalent
-heat capacity and ``H^c = ℒ^l_0 q^l + ℒ^i_0 q^i`` the condensate latent energy, the slope is the
-dry-air ``γ p / (ρθ)`` with an effective heat-capacity ratio ``γ^e``:
+``C^L`` is the slope ``∂p/∂(ρθ)`` of the compressible core's equation of state at ``U^L``, at
+fixed dry density and composition. With ``p = ρ R^m T`` and the temperature inverted from
+``c^p_m T = \hat{c}^p Π θ^{li} + H^c``, where ``Π = (p / p^{st})^{\hat κ}`` with the formulation's
+Exner exponent ``\hat κ``, ``\hat{c}^p`` is the vapor-equivalent heat capacity and
+``H^c = ℒ^l_0 q^l + ℒ^i_0 q^i`` the condensate latent energy, the slope is the dry-air
+``γ p / (ρθ)`` with an effective heat-capacity ratio ``γ^e``:
 
 ```math
 C^L = \frac{γ^e p^L}{(ρθ)^L} , \qquad
-\frac{1}{γ^e} = 1 - \hat κ + \frac{H^c}{\hat{c}^p Π^L θ^L} ,
+\frac{1}{γ^e} = 1 - \hat κ + \frac{H^c}{\hat{c}^p Π θ} ,
 ```
 
-where ``\hat{c}^p Π^L θ^L = c^p_m T - H^c``. This is the slope at the root that an iterating
+where ``\hat{c}^p Π θ = c^p_m T - H^c``. This is the slope at the root that an iterating
 `temperature_solver` converges to. With `temperature_solver = nothing`, the core closes with the
 non-iterated inversion ``T = \tilde{T} + \hat γ H^c / c^p_m`` instead, where ``\tilde{T}`` is the
 condensate-free root and ``\hat γ = 1 / (1 - \hat κ)``, so that the latent shift is the heating at
@@ -121,12 +120,13 @@ sensitivity through the selected inversion's actual iterations. Thus zero iterat
 `nothing`, and a solve stopped before convergence uses the slope of its returned temperature.
 Without condensate all give ``γ^e = 1 / (1 - \hat κ)``, which is
 ``γ^m = c^p_m / c^v_m`` with the vapor-equivalent exponent and ``γ^d`` with the dry one; condensate
-lowers it. In dry air ``C^L = γ^d R^d Π^L``. The symbol ``γ^m R^m|_L = C^L / Π^L`` is named for that
-dry limit; in moist air it is not the product ``γ^m R^m``.
+lowers it. In dry air ``C^L = γ^d R^d (p^L / p^{st})^{κ^d}``.
 
 The substep loop also moves the dry density and holds the water densities fixed. Scalar
 transport then advects the water with the preceding loop's mean velocity (the
-outer-step-start velocity in stage 1), so the water follows the loop-mean compression of the
+outer-step-start velocity in stage 1;
+[#1089](https://github.com/NumericalEarth/Breeze.jl/issues/1089)), so the water follows the
+loop-mean compression of the
 air, one stage late, but not the acoustic oscillation within a loop. The loop linearizes at
 fixed composition. This is exact for the slow, loop-mean compression, where it keeps the loop
 consistent with the re-diagnosed pressure in balanced flow, and it gives the moist adiabatic
@@ -240,10 +240,9 @@ inside the substep loop is
 Each ``G^s`` is the slow tendency for that variable, held constant across the ``N_τ``
 substeps of a given RK stage. For vertical momentum, ``G^s_{ρw}`` is assembled by adding the
 stage-entry vertical pressure-gradient and buoyancy imbalance,
-``-∂_z(p^L - p_r) - g(ρ^L - ρ_r)``, to the slow non-pressure tendency. The acoustic
-linearized pressure coefficient
-``C^L = γ^m R^m\big|_L Π^L`` and the temperature-flux factor ``θ^L`` are cached for the
-stage, which is what makes each stage's substep system linear.
+``-∂_z(p^L - p_r) - g(ρ^L - ρ_r)``, to the slow non-pressure tendency. The linearized pressure
+coefficient ``C^L`` and the temperature-flux factor ``θ^L`` are cached for the stage, which is
+what makes each stage's substep system linear.
 
 ### Terrain-following fast acoustic system
 
@@ -453,7 +452,7 @@ The horizontal divergence in the mass and ``ρθ`` equations is taken from the j
 horizontal momenta ``(ρu)'_{τ+Δτ}, (ρv)'_{τ+Δτ}`` (forward–backward coupling). Substituting
 the discrete updates of ``ρ'`` and ``(ρθ)'`` into the vertical-momentum equation yields a
 tridiagonal Schur system at z-faces, with diagonals proportional to
-``ω^2 Δτ^2`` and the local ``C^L = γ R^m Π^L`` and ``g`` coefficients. Importantly, the
+``ω^2 Δτ^2`` and the local ``C^L`` and ``g`` coefficients. Importantly, the
 pressure perturbation is ``p' = C^L (ρθ)'`` at cell centers, so the discrete pressure
 gradient is the gradient of this product, not ``C^L`` interpolated to a face times
 ``∂(ρθ)'``. After the tridiag is solved the perturbations of ``ρ'`` and ``(ρθ)'`` are

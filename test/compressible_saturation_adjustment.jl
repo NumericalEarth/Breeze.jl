@@ -127,7 +127,6 @@ end
         T_noniter = T̃ + γ * L
         𝒰_noniter = LiquidIceDensityState(θ, q, pˢᵗ, ρ, nothing)
         @test temperature(𝒰_noniter, constants) ≈ T_noniter  rtol=rtol
-        @test T_noniter > T★
         @test isapprox(T_noniter - T★, κ * (γ * L)^2 / (2T̃); rtol=FT(0.15))
         @test T_noniter - T★ < (T★ - T_isobaric) / 10
 

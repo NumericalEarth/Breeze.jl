@@ -224,8 +224,6 @@ density with pressure `p = ρ Rᵐ T` for `LiquidIceDensityState`. The conserved
 thermodynamic variable, initial temperature guesses, and solver are retained in either case.
 The residual uses the state's selected temperature inversion, including non-iterated and
 fixed-iteration inversions, so equilibrium is evaluated at the returned temperature.
-For density states, both trial and diagnosed temperatures are mapped to potential temperature
-before differencing, retaining the conditioning of the potential-temperature residual.
 
 `precipitation = (qʳ, qˢⁿ)` specifies fixed rain and snow mass fractions, included in
 the state's total water, heat capacity, gas constant, and latent energy.

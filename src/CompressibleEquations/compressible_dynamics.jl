@@ -473,9 +473,6 @@ end
 # ρ cᵛᵐ dT/dt = Q_h - Σ hˣ rˣ. With ĉᵖ Π θ = cᵖᵐ T − Hᶜ and Π = (p / pˢᵗ)^κ,
 # dθ/dT = cᵖᵐ [1 - κ(1 - Hᶜ / (cᵖᵐ T))] / (ĉᵖ Π).
 # Only phase enthalpy crosses a face; mixture subtraction belongs in the local χ.
-# This is the slope of the θˡⁱ definition (a converged inversion). The non-iterated inversion
-# departs from it at second order: 0.15% in dθ/dT and 0.06% in the recovered Π for 5 g/kg of
-# cloud liquid, below 10⁻⁶ after one Newton step.
 @inline function PotentialTemperatureFormulations.sedimentation_thermal_response(::CompressibleDynamics, κ̂,
                                                                                 q, constants, T, Π)
     cᵖᵐ = mixture_heat_capacity(q, constants)

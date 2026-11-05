@@ -72,8 +72,7 @@ using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, m
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                base_pressure, standard_pressure, thermodynamic_density,
-                               thermodynamic_density_name, specific_prognostic_moisture,
-                               liquid_ice_exner_exponent
+                               thermodynamic_density_name, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 
 using ReactantCore: @trace

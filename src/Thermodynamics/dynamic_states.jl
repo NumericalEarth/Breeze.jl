@@ -342,8 +342,8 @@ end
 @inline temperature(𝒰::LiquidIceDensityState, constants::ThermodynamicConstants) =
     first(temperature_solution(𝒰, constants, nothing))
 
-# (T, θ ∂T/∂θ) at fixed density and composition, for the acoustic slope ρ Rᵐ (θ ∂T/∂θ) / (ρᵈθ).
-# Scaling by θ keeps the uninitialized θ = 0 finite, with zero sensitivity.
+# (T, θ ∂T/∂θ) at fixed density and composition, the sensitivity of the returned T. Scaling by θ
+# keeps the uninitialized θ = 0 finite, with zero sensitivity.
 @inline temperature_and_sensitivity(𝒰::LiquidIceDensityState, constants) =
     temperature_solution(𝒰, constants, Val(true))
 
@@ -363,7 +363,7 @@ end
     θ̃   = θ * (vapor_equivalent_heat_capacity(q, constants) / cᵖᵐ)
     L   = condensate_latent_energy(q, constants) / cᵖᵐ
 
-    T̃  = θ̃^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1)         # condensate-free root
+    T̃  = θ̃ * (θ̃ * ρ * Rᵐ / pˢᵗ)^(γ - 1)       # condensate-free root θ̃^γ (ρ Rᵐ / pˢᵗ)^(γ − 1), one power
     T₁ = T̃ + γ * L                            # plus the latent shift at fixed density (the non-iterated closed form)
     θ∂T∂θ = initial_temperature_sensitivity(sensitivity, T̃, γ)
 

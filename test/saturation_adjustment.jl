@@ -34,9 +34,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
     constants = ThermodynamicConstants(FT)
     pˢᵗ = FT(1e5)
     rtol = FT === Float32 ? FT(3e-4) : FT(1e-5)
-    solvers = (nothing, FixedIterations(0), FixedIterations(1), FixedIterations(2),
-               NewtonSolver(FT; maxiter=0), NewtonSolver(FT; maxiter=1),
-               NewtonSolver(FT; abstol=1e3), NewtonSolver(FT))
+    solvers = temperature_solver_variants(FT)
     cases = ((WarmPhaseEquilibrium(), 300, 1, 0.03),
              (WarmPhaseEquilibrium(), 300, 0.23, 0.039),
              (MixedPhaseEquilibrium(FT), 290, 0.8, 0.006),
