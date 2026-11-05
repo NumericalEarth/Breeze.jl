@@ -65,7 +65,13 @@ jobs:
             enzyme_jax_branch: 'pb/kernel-ad'
             enzyme_jax_run: '41838506164'
             reactant_rev: 'f439eef39171e3225908be5722367aee6f24a29d'
-            # TEMPORARY: dump every MLIR pass pipeline to find where the compile corrupts the heap
+            # TEMPORARY: the kernel AD pipeline's convert-parallel-to-gpu1{emit_single_alternative=true}
+            # rebuilds each launch from its original shape, which lower-kernel-to-polygeist does not
+            # record: every kernel got one thread per block, and a kernel whose loop was delinearized
+            # into 4 dimensions failed with "no block size splits this kernel". Without the option,
+            # POLYGEIST_GPU_KERNEL_BLOCK_SIZE picks each kernel's block from its loop bounds instead.
+            kernelad_block_size: '256'
+            # TEMPORARY: dump every MLIR pass pipeline to check the launch shapes of the compiled kernels
             dump_mlir: 'mlir_dumps'
             timeout: 60
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial --kernels kernelad'
@@ -167,6 +173,27 @@ jobs:
           Pkg.resolve()
           Pkg.compat("Reactant", nothing)
           Pkg.add(url = "https://github.com/EnzymeAD/Reactant.jl", rev = "${{ matrix.reactant_rev }}")
+      - name: Choose the kernel AD block size by loop bounds
+        # Develop a copy of the Reactant.jl branch whose kernel AD pipeline runs
+        # convert-parallel-to-gpu1 without emit_single_alternative, so that the
+        # POLYGEIST_GPU_KERNEL_BLOCK_SIZE set for the run below takes effect
+        if: ${{ matrix.kernelad_block_size }}
+        shell: julia --color=yes --project {0}
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: |
+          using Pkg
+          installed = only(p for p in values(Pkg.dependencies()) if p.name == "Reactant").source
+          reactant = joinpath(ENV["GITHUB_WORKSPACE"], "Reactant.jl")
+          cp(installed, reactant; force = true)
+          chmod(reactant, 0o755; recursive = true)
+          compiler = joinpath(reactant, "src", "compiler", "Compiler.jl")
+          old = "convert-parallel-to-gpu1{emit_single_alternative=true}"
+          source = read(compiler, String)
+          count(old, source) == 1 || error("expected one $old in $compiler")
+          write(compiler, replace(source, old => "convert-parallel-to-gpu1"))
+          Pkg.develop(path = reactant)
+          run(`grep -n convert-parallel-to-gpu1 $compiler`)
       - name: Instantiate benchmarking environment
         shell: julia --color=yes --project {0}
         run: |
@@ -183,6 +210,10 @@ jobs:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
           BREEZE_DUMP_MLIR: ${{ matrix.dump_mlir }}
         run: |
+          # An empty POLYGEIST_GPU_KERNEL_BLOCK_SIZE would still be read, as a block size of 0
+          if [[ -n "${{ matrix.kernelad_block_size }}" ]]; then
+              export POLYGEIST_GPU_KERNEL_BLOCK_SIZE="${{ matrix.kernelad_block_size }}"
+          fi
           julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }} ${{ matrix.profile_kernels && '--profile_kernels' || '' }}
       - name: Stop earlyoom
         cancel: earlyoom
