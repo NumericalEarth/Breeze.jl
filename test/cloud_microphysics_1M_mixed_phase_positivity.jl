@@ -4,6 +4,7 @@ using Breeze
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudIce, CloudLiquid, Microphysics1MParams
 using Oceananigans
+using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization
 using Test
 
 using Breeze.Thermodynamics:
@@ -221,4 +222,29 @@ end
         @test maximum(ρqˢⁿ) > 0
         @test minimum(ρqʳ) ≥ -sqrt(eps(FT))
     end
+end
+
+@testset "Mixed-phase 1M sinks respect the stage budget when Δt > τⁿᵘᵐ [$FT]" for FT in test_float_types()
+    # Snow melting in warm air. The donor limiter caps sinks at the content over τⁿᵘᵐ = 10 s, so at
+    # Δt = 40 s a stage could remove four times the snow (min ρqˢⁿ ≈ -6e-7 without the stage
+    # budget); `accumulate_stage_limited!` caps each cell's sinks at what the stage can draw on.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (4, 4, 4), halo = (4, 4, 4), x = (0, 1_000), y = (0, 1_000), z = (0, 1_000))
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure = 101325, potential_temperature = 285)
+    dynamics = AnelasticDynamics(reference_state)
+    bounded() = WENO(FT; bounds = (0, 1), time_discretization = AdaptiveVerticallyImplicitDiscretization(FT; cfl = FT(1//2)))
+
+    model = AtmosphereModel(grid; dynamics, microphysics = saturation_adjustment_1M(FT),
+                            scalar_advection = (; ρqᵉ = bounded(), ρqʳ = bounded(), ρqˢⁿ = bounded()))
+    set!(model; θ = 285, qᵗ = 0.002)
+    set!(model; ρqˢⁿ = FT(1.2e-3))
+    for _ in 1:10
+        time_step!(model, 40)
+    end
+    ρqˢⁿ = Array(interior(model.microphysical_fields.ρqˢⁿ))
+    ρqʳ = Array(interior(model.microphysical_fields.ρqʳ))
+    @test all(isfinite, ρqˢⁿ)
+    @test minimum(ρqˢⁿ) ≥ 0
+    @test minimum(ρqʳ) ≥ 0
 end

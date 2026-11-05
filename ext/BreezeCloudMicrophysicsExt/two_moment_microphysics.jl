@@ -914,7 +914,7 @@ end
 # `compute_microphysical_tendencies!` to compute the bundle once per cell and
 # write to all 6 G fields in a single kernel.
 
-@kernel function _compute_wpne2m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ,
+@kernel function _compute_wpne2m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ, budget,
                                              grid, microphysics, dynamics, formulation,
                                              constants, specific_prognostic_moisture,
                                              microphysical_fields, velocities)
@@ -934,12 +934,8 @@ end
 
     G = wpne2m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
-    @inbounds Gρqᵛ[i, j, k]  += G.ρqᵛ
-    @inbounds Gρqᶜˡ[i, j, k] += G.ρqᶜˡ
-    @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
-    @inbounds Gρnᶜˡ[i, j, k] += G.ρnᶜˡ
-    @inbounds Gρnʳ[i, j, k]  += G.ρnʳ
-    @inbounds Gρnᵃ[i, j, k]  += G.ρnᵃ
+    AtmosphereModels.accumulate_stage_limited!((Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ),
+                                               (G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ), budget, i, j, k)
 end
 
 function AtmosphereModels.compute_microphysical_tendencies!(microphysics::WPNE2M, model)
@@ -949,6 +945,7 @@ function AtmosphereModels.compute_microphysical_tendencies!(microphysics::WPNE2M
 
     launch!(arch, grid, :xyz, _compute_wpne2m_tendencies!,
             G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ,
+            AtmosphereModels.stage_sink_budget(model, (:ρqᵛ, :ρqᶜˡ, :ρqʳ, :ρnᶜˡ, :ρnʳ, :ρnᵃ)),
             grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AtmosphereModels.specific_prognostic_moisture(model),
             model.microphysical_fields, model.velocities)
