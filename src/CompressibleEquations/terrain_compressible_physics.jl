@@ -173,7 +173,7 @@ end
 
         contributes = z★ ≥ lowest_center
         @inbounds begin
-            φ̂[i, j, k] = ifelse(contributes, φ★, 0)
+            φ̂[i, j, k] = ifelse(contributes, φ★, zero(φ★))
             contributions[i, j, k] = ifelse(contributes, 1, 0)
         end
     end
@@ -303,18 +303,18 @@ end
 
 @inline function ∇ˣp′(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,
-                                                ρθ′, Πᴸ, γRᵐᴸ)
+                                                ρθ′, Cᴸ)
     stencil = dynamics.terrain_metrics.pressure_gradient_stencil
     return terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
-                                                  stencil, ρθ′, Πᴸ, γRᵐᴸ)
+                                                  stencil, ρθ′, Cᴸ)
 end
 
 @inline function ∇ʸp′(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,
-                                                ρθ′, Πᴸ, γRᵐᴸ)
+                                                ρθ′, Cᴸ)
     stencil = dynamics.terrain_metrics.pressure_gradient_stencil
     return terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
-                                                  stencil, ρθ′, Πᴸ, γRᵐᴸ)
+                                                  stencil, ρθ′, Cᴸ)
 end
 
 # On a TerrainFollowingVerticalDiscretization grid the coordinate owns the
@@ -378,13 +378,13 @@ terrain_ρw_boundary_conditions(::TerrainFollowingGrid, ρw_bcs) =
 end
 
 @inline function terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
-                                                                            dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+                                                                            dynamics, ρθ′, Cᴸ)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
     ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ∇ˣp′,
-                       dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+                       dynamics, ρθ′, Cᴸ)
     ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ∇ʸp′,
-                       dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+                       dynamics, ρθ′, Cᴸ)
     return slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
 end
 
@@ -392,54 +392,54 @@ end
 # since ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv.
 @inline function ∇ᶻp′(i, j, k, grid,
                       dynamics::TerrainCompressibleDynamics,
-                      ρθ′, Πᴸ, γRᵐᴸ)
-    ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+                      ρθ′, Cᴸ)
+    ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
     correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
-                                                                            dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+                                                                            dynamics, ρθ′, Cᴸ)
     return ∂z_p′ - correction
 end
 
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeOutsideInterpolation,
-                                                        ρθ′, Πᴸ, γRᵐᴸ)
-    return ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+                                                        ρθ′, Cᴸ)
+    return ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 end
 
 @inline function terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeOutsideInterpolation,
-                                                        ρθ′, Πᴸ, γRᵐᴸ)
-    return ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+                                                        ρθ′, Cᴸ)
+    return ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 end
 
-@inline function slope_x_times_∂z_linearized_pressure(i, j, k, grid::TerrainFollowingGrid, ρθ′, Πᴸ, γRᵐᴸ)
+@inline function slope_x_times_∂z_linearized_pressure(i, j, k, grid::TerrainFollowingGrid, ρθ′, Cᴸ)
     slope = terrain_slope_x_ccf(i, j, k, grid)
-    return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 end
 
-@inline function slope_y_times_∂z_linearized_pressure(i, j, k, grid::TerrainFollowingGrid, ρθ′, Πᴸ, γRᵐᴸ)
+@inline function slope_y_times_∂z_linearized_pressure(i, j, k, grid::TerrainFollowingGrid, ρθ′, Cᴸ)
     slope = terrain_slope_y_ccf(i, j, k, grid)
-    return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 end
 
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeInsideInterpolation,
-                                                        ρθ′, Πᴸ, γRᵐᴸ)
-    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ) *
+                                                        ρθ′, Cᴸ)
+    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) *
             Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
                        slope_x_times_∂z_linearized_pressure,
-                       ρθ′, Πᴸ, γRᵐᴸ)
+                       ρθ′, Cᴸ)
     return ∂x_p′ - correction
 end
 
 @inline function terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeInsideInterpolation,
-                                                        ρθ′, Πᴸ, γRᵐᴸ)
-    ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ) *
+                                                        ρθ′, Cᴸ)
+    ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) *
             Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
                        slope_y_times_∂z_linearized_pressure,
-                       ρθ′, Πᴸ, γRᵐᴸ)
+                       ρθ′, Cᴸ)
     return ∂y_p′ - correction
 end
 

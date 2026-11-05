@@ -15,11 +15,8 @@
 # velocity.  Wavefronts tilt toward regions of lower effective propagation
 # speed, "ducting" sound energy along the surface — which is why distant
 # sounds are often heard more clearly downwind. For more on this topic, see
-#
-# ```@bibliography
-# ostashev2015acoustics
-# pierce2019acoustics
-# ```
+# [Ostashev and Wilson (2015)](@cite ostashev2015acoustics) and
+# [Pierce (2019)](@cite pierce2019acoustics).
 #
 # **Second**, we use this setup as a minimal introduction to *differentiable*
 # atmospheric simulation in Breeze.  After running the forward problem, we
@@ -399,3 +396,10 @@ Colorbar(fig_sens[1, 2], hm; label = "∂J / ∂uᵢ")
 
 save("acoustic_wave_wind_sensitivity.png", fig_sens; px_per_unit = 2) #src
 fig_sens
+
+# ## References
+#
+# ```@bibliography
+# Pages = ["acoustic_wave.md"]
+# Canonical = false
+# ```
