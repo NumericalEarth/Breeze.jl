@@ -96,11 +96,12 @@ deficit. With [`DiracStatistics`](@ref) this is the grid-mean [`condensation_rat
 With [`GaussianStatistics`](@ref) the cloud liquid relaxes toward the distribution's mean
 condensate (Tompkins 2002),
 
-    ⟨Sᶜᵒⁿᵈ⟩ = (σₛ G(s̄ / σₛ) − qᶜˡ) / τ,    s̄ = (qᵛ − qᵛ⁺) / Γ + qᶜˡ,
+    ⟨Sᶜᵒⁿᵈ⟩ = (σₛ G(Q) − qᶜˡ) / (τ [C + (1 − C) Γ]),    Q = s̄ / σₛ,    C = Φ(Q),
+    s̄ = (qᵛ − qᵛ⁺) / Γ + qᶜˡ.
 
-where s̄ already carries the latent-heat factor Γ, so that for σₛ → 0 in a saturated cell this
-is the grid-mean rate (qᵛ − qᵛ⁺) / (Γ τ). (Where the grid-mean scheme evaporates liquid at its
-limiter −qᶜˡ / (Γ τ), the Gaussian relaxes at −qᶜˡ / τ toward a vanishing equilibrium.) The Exner function Π comes from the
+s̄ already carries the latent-heat factor Γ, and the timescale blends, with the cloud fraction C,
+between τ in the cloudy part and Γ τ in the clear part, so both σₛ → 0 limits are the grid-mean
+rates: (qᵛ − qᵛ⁺) / (Γ τ) where saturated and −qᶜˡ / (Γ τ) where subsaturated. The Exner function Π comes from the
 thermodynamic state `𝒰`, and `correlation` supplies the background spread.
 """
 @inline condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants, 𝒰, ::DiracStatistics, correlation) =
@@ -114,6 +115,8 @@ thermodynamic state `𝒰`, and `correlation` supplies the background spread.
     Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
     σₛ = saturation_deficit_spread(𝒮, Π * dqᵛ⁺_dT, Γˡ, correlation.minimum_saturation_deficit_spread)
     s̄ = (qᵛ - qᵛ⁺) / Γˡ + qᶜˡ
-    qˡ⁺ = gaussian_equilibrium_condensate(s̄, σₛ)
-    return (qˡ⁺ - qᶜˡ) / τᶜˡ
+    Q = s̄ / σₛ
+    C = normal_cumulative_distribution(Q)
+    qˡ⁺ = σₛ * (Q * C + normal_density(Q))
+    return (qˡ⁺ - qᶜˡ) / (τᶜˡ * (C + (1 - C) * Γˡ))
 end

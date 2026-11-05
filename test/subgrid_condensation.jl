@@ -78,6 +78,12 @@ non_equilibrium_1M(FT; subgrid = NoSubgridCorrelation()) =
     Gᴳ = mpne1m_tendencies(gaussian, ρ, ℳ, 𝒰, constants, GaussianStatistics{FT}())
     @test isapprox(Gᴳ.ρqᶜˡ, Gᴰ.ρqᶜˡ; rtol = FT == Float64 ? 1e-3 : 1e-2)
 
+    # ... and the grid-mean evaporation rate where subsaturated
+    ρ, ℳ, 𝒰 = warm_state(FT, constants; T = 285, relative_humidity = 0.95, qᶜˡ = 1e-4)
+    Gᴰ = mpne1m_tendencies(dirac, ρ, ℳ, 𝒰, constants)
+    Gᴳ = mpne1m_tendencies(gaussian, ρ, ℳ, 𝒰, constants, GaussianStatistics{FT}())
+    @test isapprox(Gᴳ.ρqᶜˡ, Gᴰ.ρqᶜˡ; rtol = FT == Float64 ? 1e-3 : 1e-2)
+
     # Subsaturated cell (RH 0.92) holding cloud liquid: the grid-mean rate evaporates it all,
     # a Gaussian spread σₛ ≈ 1 g/kg holds an equilibrium liquid
     ρ, ℳ, 𝒰 = warm_state(FT, constants; T = 285, relative_humidity = 0.92, qᶜˡ = 5e-5)
@@ -94,7 +100,8 @@ non_equilibrium_1M(FT; subgrid = NoSubgridCorrelation()) =
     s̄ = (q.vapor - qᵛ⁺) / Γ + ℳ.qᶜˡ
     qˡ⁺ = gaussian_equilibrium_condensate(s̄, FT(1e-3) / Γ)
     @test qˡ⁺ > 0
-    @test Sᴳ ≈ (qˡ⁺ - ℳ.qᶜˡ) / τ
+    C = gaussian_cloud_fraction(s̄, FT(1e-3) / Γ)
+    @test Sᴳ ≈ (qˡ⁺ - ℳ.qᶜˡ) / (τ * (C + (1 - C) * Γ))
 
     # At its equilibrium liquid (same s̄: the extra liquid taken from the vapor, times Γ) the Gaussian
     # rate vanishes, while the grid-mean rate still evaporates
