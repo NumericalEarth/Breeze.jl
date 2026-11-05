@@ -30,7 +30,7 @@ Breeze = {path = ".."}
 
 [compat]
 Adapt = "4.3.0"
-Aqua = "0.8 - 0.8.16, 0.8.18"
+Aqua = "0.8 - 0.8.16"
 CUDA = "5, ~6.0, 6.2"
 ClimaComms = "0.6"
 CloudMicrophysics = "0.47, 0.48"
