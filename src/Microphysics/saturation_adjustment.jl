@@ -18,9 +18,9 @@ using Breeze.Thermodynamics:
     equilibrated_surface
 
 using Breeze.Solvers: SecantSolver, secant_solve, materialize_solver
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using Oceananigans: Oceananigans, CenterField
-using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 struct SaturationAdjustment{E, S}
     equilibrium :: E

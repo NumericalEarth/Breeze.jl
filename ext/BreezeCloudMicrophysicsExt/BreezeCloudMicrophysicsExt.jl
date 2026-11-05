@@ -75,10 +75,9 @@ using Breeze.Microphysics:
     deposition_rate,
     adjust_thermodynamic_state
 
-using Oceananigans: Oceananigans
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
-using Oceananigans: Center, Field
+using Oceananigans: Oceananigans, Center, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Operators: ℑzᵃᵃᶜ
 using Oceananigans.Utils: launch!

@@ -1,7 +1,6 @@
 module BreezeRRTMGPExt
 
 using Breeze
-
 using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles, materialize_surface_property,
                                dynamics_pressure, total_density, resolve_column_batch_rows,
                                column_index, compute_radiation_flux_divergence!,
@@ -9,11 +8,8 @@ using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, Constan
                                assert_bound_surface_temperature, maybe_infer_solar_position,
                                initialize_cos_zenith!, update_cos_zenith!, fill_columns!
 using Breeze.Thermodynamics: ThermodynamicConstants
-using RRTMGP: RRTMGP
-
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
-# Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU, GPU, ReactantState
 using Oceananigans.DistributedComputations: Distributed, child_architecture
 using Oceananigans.Fields: ZFaceField, CenterField
@@ -24,7 +20,7 @@ using Oceananigans.Fields: ZFaceField, CenterField
 #   FluxLW, FluxSW: flux storage (flux_up, flux_dn, flux_net, flux_dn_dir)
 #   RRTMGPParameters: physical constants for RRTMGP
 
-using RRTMGP: RRTMGPGridParams
+using RRTMGP: RRTMGP, RRTMGPGridParams
 using RRTMGP.Parameters: Parameters, RRTMGPParameters
 using RRTMGP.RTE: NoScatLWRTE, NoScatSWRTE
 using RRTMGP.RTESolver: solve_lw!, solve_sw!

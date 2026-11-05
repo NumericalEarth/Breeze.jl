@@ -24,8 +24,6 @@ export
     ssp_rk3_parcel_substep!,
     store_initial_parcel_state!
 
-using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
-
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 
 using Breeze.AtmosphereModels: AtmosphereModels,
@@ -34,6 +32,7 @@ using Breeze.AtmosphereModels: AtmosphereModels,
                                microphysical_tendencies,
                                microphysics_model_update!,
                                moisture_fractions
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 include("parcel_dynamics.jl")
 

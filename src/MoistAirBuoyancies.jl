@@ -14,12 +14,10 @@ using ..Thermodynamics:
     density,
     exner_function
 
-using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
-
 using Oceananigans: Oceananigans, Center, Field, KernelFunctionOperation
 using Oceananigans.BuoyancyFormulations: BuoyancyFormulations,
-    AbstractBuoyancyFormulation,
-    buoyancy_perturbationᶜᶜᶜ
+                                         AbstractBuoyancyFormulation,
+                                         buoyancy_perturbationᶜᶜᶜ
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 
@@ -36,6 +34,7 @@ using ..Thermodynamics:
     adjustment_saturation_specific_humidity
 
 using Breeze.Solvers: SecantSolver, secant_solve
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 struct MoistAirBuoyancy{RS, AT} <: AbstractBuoyancyFormulation{Nothing}
     reference_state :: RS
