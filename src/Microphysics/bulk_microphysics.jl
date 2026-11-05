@@ -1,4 +1,5 @@
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDEF
 
 using ..Thermodynamics:
     liquid_latent_heat,

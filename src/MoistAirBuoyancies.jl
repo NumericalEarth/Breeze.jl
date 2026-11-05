@@ -14,7 +14,7 @@ using ..Thermodynamics:
     density,
     exner_function
 
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES
 
 using Oceananigans: Oceananigans, Center, Field, KernelFunctionOperation
 using Oceananigans.BuoyancyFormulations: BuoyancyFormulations,

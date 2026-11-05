@@ -61,7 +61,7 @@ using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑ
                               ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
 
 using Adapt: Adapt
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES
 
 #####
 ##### The surface-layer field tuple

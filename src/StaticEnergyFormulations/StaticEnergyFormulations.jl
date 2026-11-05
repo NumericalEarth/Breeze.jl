@@ -11,7 +11,9 @@ module StaticEnergyFormulations
 
 export StaticEnergyFormulation
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES
+
+using DocStringExtensions: TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 

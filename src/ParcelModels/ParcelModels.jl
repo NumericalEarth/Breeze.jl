@@ -24,7 +24,9 @@ export
     ssp_rk3_parcel_substep!,
     store_initial_parcel_state!
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
+using Breeze.Utils: TYPEDSIGNATURES
+
+using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 
 using Breeze.AtmosphereModels: AtmosphereModels,
                                microphysical_state,

@@ -20,7 +20,7 @@ using Breeze.Thermodynamics:
 using Breeze.Solvers: SecantSolver, secant_solve, materialize_solver
 
 using Oceananigans: Oceananigans, CenterField
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES
 
 struct SaturationAdjustment{E, S}
     equilibrium :: E

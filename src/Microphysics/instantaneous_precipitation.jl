@@ -21,7 +21,7 @@ using Oceananigans.Architectures: architecture
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @index, @kernel
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES
 
 """
     struct InstantaneousPrecipitation{S}

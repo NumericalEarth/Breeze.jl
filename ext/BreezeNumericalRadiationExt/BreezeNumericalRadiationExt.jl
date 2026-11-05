@@ -46,7 +46,8 @@ using Oceananigans.Utils: launch!, IterationInterval, prettysummary
 using Adapt: Adapt, adapt
 using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDEF
 
 include("overlying_atmosphere.jl")
 include("column_workspace.jl")

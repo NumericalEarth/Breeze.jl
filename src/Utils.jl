@@ -14,9 +14,18 @@ export sum_properties,
        @adapt_architecture
 
 using Adapt: Adapt
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: DocStringExtensions
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: on_architecture
+
+#####
+##### Docstring signatures
+#####
+
+# Breeze's `TYPEDSIGNATURES`: `DocStringExtensions.TYPEDSIGNATURES` with the default values of
+# positional and keyword arguments shown, as in `f(x, n::Int64=3; Δt=0.001)`. Every Breeze
+# module imports `TYPEDSIGNATURES` from here rather than from DocStringExtensions.
+const TYPEDSIGNATURES = DocStringExtensions.TypedMethodSignatures(defaults = true)
 
 #####
 ##### Sums of selected properties

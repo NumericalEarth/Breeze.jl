@@ -8,6 +8,8 @@ paths:
 ## Use DocStringExtensions.jl
 
 - Use `$(TYPEDSIGNATURES)` — never write explicit signatures
+- Import it with `using Breeze.Utils: TYPEDSIGNATURES`, not from DocStringExtensions: Breeze's
+  version shows default values of positional and keyword arguments
 - **Citations**: Use inline `[Author (year)](@cite Key)` syntax woven into prose
 
 ## CRITICAL: Always use `jldoctest`, NEVER plain `julia` blocks

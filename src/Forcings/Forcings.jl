@@ -7,7 +7,7 @@ export
     SpecificForcing,
     TemperatureForcing
 
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES
 
 using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.Grids: Center, Face

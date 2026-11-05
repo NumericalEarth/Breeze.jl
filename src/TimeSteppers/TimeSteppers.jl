@@ -13,7 +13,9 @@ export SSPRungeKutta3, AcousticRungeKutta3,
        maybe_prepare_first_time_step!,
        prepare_first_time_step!
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES
+
+using DocStringExtensions: TYPEDEF
 using Oceananigans: Oceananigans
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,

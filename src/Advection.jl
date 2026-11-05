@@ -30,7 +30,7 @@ using Oceananigans.Grids: Center
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
 using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.TimeSteppers: time_discretization
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES
 
 using ..AtmosphereModels:
     AtmosphereModels,

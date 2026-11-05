@@ -16,7 +16,9 @@ export
     PrescribedDynamics,
     KinematicModel
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES
+
+using DocStringExtensions: TYPEDEF
 using Adapt: Adapt, adapt
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, Field

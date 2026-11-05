@@ -11,7 +11,7 @@ using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, Constan
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU, GPU, ReactantState

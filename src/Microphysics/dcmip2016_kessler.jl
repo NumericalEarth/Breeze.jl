@@ -31,7 +31,7 @@ using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 
 using Adapt: Adapt, adapt
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES
 using KernelAbstractions: @index, @kernel
 
 """

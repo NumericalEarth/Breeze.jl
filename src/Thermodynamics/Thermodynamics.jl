@@ -27,7 +27,9 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        AbstractPhaseEquilibrium, WarmPhaseEquilibrium, MixedPhaseEquilibrium,
        equilibrated_surface
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES
+
+using DocStringExtensions: TYPEDEF
 using Oceananigans: Oceananigans
 
 using Breeze.Solvers: NewtonSolver, SecantSolver, FixedIterations, newton_solve, secant_solve

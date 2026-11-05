@@ -50,7 +50,9 @@ module Solvers
 
 export NewtonSolver, SecantSolver, FixedIterations
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES
+
+using DocStringExtensions: TYPEDEF
 using Oceananigans: Oceananigans
 using Oceananigans.Utils: prettysummary
 
