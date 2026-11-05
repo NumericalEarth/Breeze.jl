@@ -347,29 +347,37 @@ outer_step_start_transport_velocities(model) = model.velocities
 # limit; in moist air it is not the product γᵐ Rᵐ. The moisture is the one `update_state!`
 # diagnosed together with the pressure.
 #
-# The loop also moves the dry density, through ρ′. It leaves the water densities alone, but scalar
-# transport advects them with an acoustic-mean velocity (`transport_velocities`, the preceding
-# loop's average; see NumericalEarth/Breeze.jl#1089), so an acoustic compression carries the water
-# with the air and keeps the composition, and the re-diagnosed pressure includes the compressed
-# water. At fixed composition and ρᵈθ, p depends on ρᵈ only through the
-# condensate latent energy, ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ) at the converged root. This term is zero
-# without condensate for every inversion, so there p′ = Cᴸ (ρθ)′ is the complete linearization.
-# In cloud the loop drops it, as the former γᵐRᵐ coefficient did; it is 5.5% of Cᴸ θ for 5 g/kg of
-# cloud liquid. Linearizing at fixed water partial densities instead would add −γᵉ Rᵛ T ρᵛ / ρᵈ in
-# unsaturated air, which removes the stiffness of vapor that the stage does compress.
+# The loop also moves the dry density, through ρ′, and holds the water densities fixed. Scalar
+# transport then advects the water with the preceding loop's mean velocity (`transport_velocities`;
+# the outer-step-start velocity in stage 1; see NumericalEarth/Breeze.jl#1089). So the water follows
+# the loop-mean compression of the air, one stage late, but not the acoustic oscillation within a
+# loop. The loop linearizes at fixed composition, which is exact for that slow, loop-mean
+# compression: it is what keeps the loop consistent with the re-diagnosed pressure in balanced
+# flow, and it gives the moist adiabatic compressibility. For the oscillation itself the
+# re-diagnosed state is closer to fixed water densities, which would add −γᵉ Rᵛ T ρᵛ / ρᵈ to
+# ∂p/∂ρᵈ in unsaturated air; Cᴸ is stiffer than that limit by ρᵛ Rᵛ / (ρᵈ Rᵈ) in c², 3% for 20 g/kg.
+# At fixed composition and ρᵈθ, p depends on ρᵈ only through the condensate latent energy,
+# ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ) at the converged root. This term is zero without condensate for
+# every inversion, so there p′ = Cᴸ (ρθ)′ is the complete linearization. In cloud the loop drops
+# it, as the former γᵐRᵐ coefficient did; it is 5.5% of Cᴸ θ for 5 g/kg of cloud liquid.
 # TODO: carry Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ) ρ′ in p′ (cached per stage next to Cᴸ, differentiated through
 # the selected inversion). It enters the horizontal pressure gradient and the vertical Schur
 # complement next to Cᴸ θᴸ.
 #
 # The momentum is dry-mass momentum ρᵈu. The whole compressible core applies the full −∇p − g ρ to
-# it, so its acoustic inertia is ρᵈ, not ρ: the sound speed is (Cᴸ θ)^½ = (γᵉ p / ρᵈ)^½, which is
-# (ρ / ρᵈ)^½ times the mixture value (γᵐ Rᵐ T)^½ in unsaturated air, 1% fast for 20 g/kg. With Cᴸ
-# the loop agrees with the stage-entry ∇pᴸ and with `ExplicitTimeStepping`, both re-diagnosed from
-# the exact equation of state. The former γᵐRᵐ coefficient was low by about ρᵈ / ρ in unsaturated
-# air, which offset the inertia, but only for the part of the pressure the loop advances.
+# it, so its acoustic inertia is ρᵈ, not ρ: the sound speed is (Cᴸ θ)^½ = (γᵉ p / ρᵈ)^½. In
+# unsaturated air γᵉ is γᵐ with the vapor-equivalent exponent, so the speed is (ρ / ρᵈ)^½ times the
+# mixture value (γᵐ Rᵐ T)^½, 1% fast for 20 g/kg. With the dry exponent, γᵉ = γᵈ; it exceeds γᵐ by
+# a further 0.2% for 20 g/kg because that formulation's adiabat uses κᵈ. In unsaturated air
+# the loop thus has the speed of the stage-entry ∇pᴸ and of `ExplicitTimeStepping`, both
+# re-diagnosed from the exact equation of state. In cloud they differ: the loop drops the ∂p/∂ρᵈ
+# term above, which lowers its c² by Hᶜ / (cᵖᵐ T − Hᶜ), and holds the composition fixed, while
+# saturation adjustment re-equilibrates the condensate at every stage. The former γᵐRᵐ coefficient
+# was low by about ρᵈ / ρ in unsaturated air, which offset the inertia, but only for the part of
+# the pressure the loop advances.
 # TODO: weight the pressure gradient and gravity on ρᵈu by ρᵈ / ρ throughout the compressible core
 # (as WRF-ARW does; v4 technical note, §2.2), NumericalEarth/Breeze.jl#1210. With that weighting,
-# Cᴸ gives γᵐ Rᵐ T exactly.
+# Cᴸ gives c² = γᵉ Rᵐ T, which is γᵐ Rᵐ T in unsaturated air with the vapor-equivalent exponent.
 #
 # Only this loop linearizes the equation of state. `ExplicitTimeStepping` diagnoses the full
 # pressure every stage, and anelastic dynamics hold the thermodynamic pressure at the reference
