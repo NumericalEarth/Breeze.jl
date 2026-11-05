@@ -1428,11 +1428,59 @@ implicit_advection_substep!(model, substepper, advection, Δτ) = nothing
 function implicit_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ)
     w = substepper.vertical_velocity_cache
     ρᵈ = substepper.density_cache
-    implicit_step!(substepper.density_potential_temperature_predictor,
-                   model.timestepper.implicit_solver, nothing, nothing, nothing,
+    ρθ′★ = substepper.density_potential_temperature_predictor
+    ρ′★ = substepper.density_predictor
+    θᴸ = substepper.linearization_potential_temperature
+    grid = model.grid
+    arch = architecture(grid)
+
+    # The withheld transport acts on the potential-temperature perturbation only. The mass part
+    # θᴸ ρ′ of (ρθ)′ is already carried by the acoustic mass flux (ρw)′ through `θFᶻ`, and the
+    # density perturbation takes no implicit transport, so solving for the whole (ρθ)′ would
+    # move θᴸ ρ′ a second time and spoil θ = ρθ / ρᵈ even in a uniform-θ atmosphere, by an
+    # amount that grows with the implicit Courant number.
+    launch!(arch, grid, :xyz, _add_scaled_density!, ρθ′★, θᴸ, ρ′★, -1)
+    implicit_step!(ρθ′★, model.timestepper.implicit_solver, nothing, nothing, nothing,
                    model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    launch!(arch, grid, :xyz, _add_scaled_density!, ρθ′★, θᴸ, ρ′★, +1)
     return nothing
 end
+
+@kernel function _add_scaled_density!(ρθ′★, θᴸ, ρ′★, sign)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ρθ′★[i, j, k] += sign * θᴸ[i, j, k] * ρ′★[i, j, k]
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Advance the implicit half of the IMEX vertical-advection split for the momentum perturbation
+`components` over one substep: `(I + Δτ Lⁱ) (ρu)′ⁿᵉʷ = (ρu)′`. `(ρu)′` and `(ρv)′` are solved
+after the explicit horizontal step and `(ρw)′` after the acoustic tridiagonal solve, so in both
+cases continuity, the thermodynamic recovery and the next substep's pressure see momentum that
+has already been transported. `Lⁱ` is the first-order upwind operator of the withheld velocity
+wⁱ = (1 - s) w, with coefficients read from the frozen stage-entry state; the base-state part
+`Lⁱ (ρu)ᴸ` rides the slow tendency (see `add_implicit_momentum_advection_tendency!`), so the
+sum over the stage is the full implicit operator.
+
+Applying this remainder once after the loop instead, outside the acoustic balance, left the
+momentum the pressure and continuity saw differing from the momentum carried forward by the
+withheld transport; at implicit Courant numbers of a few tens near a stretched surface layer
+the difference grew into a lone updraft. A no-op for explicit momentum advection.
+"""
+implicit_momentum_advection_substep!(model, substepper, advection, Δτ, components) = nothing
+
+function implicit_momentum_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ, components)
+    w = substepper.vertical_velocity_cache
+    ρᵈ = substepper.density_cache
+    for name in components
+        implicit_step!(getproperty(substepper.momentum_perturbation, name),
+                       model.timestepper.implicit_solver, nothing, nothing, nothing,
+                       model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    end
+    return nothing
+end
+
 
 """
 $(TYPEDSIGNATURES)
@@ -1461,6 +1509,10 @@ function acoustic_substep!(model, substepper, stage, advection)
             substepper.density_potential_temperature_perturbation,
             substepper.linearization_exner,
             Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture)
+
+    # Implicit vertical transport of the horizontal momentum perturbations, before the
+    # predictors take their divergence (see `implicit_momentum_advection_substep!`).
+    implicit_momentum_advection_substep!(model, substepper, model.advection.momentum, Δτ, (:u, :v))
 
     fill_halo_regions!(substepper.momentum_perturbation.u)
     fill_halo_regions!(substepper.momentum_perturbation.v)
@@ -1523,6 +1575,12 @@ function acoustic_substep!(model, substepper, stage, advection)
            substepper.linearization_exner, substepper.linearization_potential_temperature,
            substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺,
            substepper.sponge)
+
+    # Implicit half of the IMEX vertical-advection split for the vertical momentum
+    # perturbation, applied between the acoustic solve and the recovery so that continuity
+    # and the thermodynamic recovery (and the next substep's pressure) see a (ρw)′ that has
+    # already been transported (the momentum analogue of the ρθ fold-in above).
+    implicit_momentum_advection_substep!(model, substepper, model.advection.momentum, Δτ, (:w,))
 
     # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′
     launch!(arch, grid, :xyz, _post_solve_recovery!,

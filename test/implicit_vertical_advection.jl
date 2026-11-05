@@ -712,6 +712,38 @@ import Breeze.AtmosphereModels as AM
     end
 
     #####
+    ##### Uniform θ stays uniform to round-off under the engaged compressible ρθ split. The
+    ##### per-substep implicit solve transports only the θ part of (ρθ)′, (ρθ)′ − θᴸ ρ′: the mass
+    ##### part θᴸ ρ′ already moves with the acoustic mass flux, and ρ′ takes no implicit transport.
+    ##### Solving for the whole (ρθ)′ moved θᴸ ρ′ twice, and the resulting θ error grew with the
+    ##### implicit Courant number until the run lost positivity of ρᵈ (Harvey/GATE at large Δt).
+    #####
+    @testset "Engaged compressible ρθ-AIVA preserves uniform θ" begin
+        uniform_aiva() = WENO(FT; time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=FT(1//100)))
+        uniform_grid = RectilinearGrid(default_arch; size=(16, 16), halo=(5, 5),
+                                       x=(-8kilometers, 8kilometers), z=(0, 8kilometers),
+                                       topology=(Periodic, Flat, Bounded))
+        uniform_model = AtmosphereModel(uniform_grid;
+                                        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                                                        reference_potential_temperature=300),
+                                        timestepper = :AcousticRungeKutta3,
+                                        momentum_advection = uniform_aiva(),
+                                        scalar_advection = (; ρθ=uniform_aiva()))
+        ρᵘ(x, z) = adiabatic_hydrostatic_density(z, 101325.0, 300.0, 100000.0, constants)
+        # A strong, compact updraft: vertical Courant number ≈ 1 at Δt = 30 s, so with cfl = 1/100
+        # nearly all of the vertical transport goes through the implicit remainder.
+        wᵘ(x, z) = 10 * exp(-x^2 / 2000^2) * sinpi(z / 8kilometers)
+        set!(uniform_model; ρ=ρᵘ, θ=300, w=wᵘ)
+        for _ in 1:10
+            time_step!(uniform_model, 30)
+        end
+        ρᵈ = Array(interior(uniform_model.dynamics.dry_density))
+        ρθ = Array(interior(uniform_model.formulation.potential_temperature_density))
+        # Pre-fix this was O(0.1 K) after 10 steps.
+        @test maximum(abs, ρθ ./ ρᵈ .- 300) < 1000 * eps(FT) * 300
+    end
+
+    #####
     ##### Bounds-preserving WENO under AVID splits the vertical flux exactly once: the bounded
     ##### path routes through the s-scaled explicit velocity (issue #913), so a bounded tracer
     ##### tracks its unbounded twin wherever the limiter is inactive. Pre-fix it transported
