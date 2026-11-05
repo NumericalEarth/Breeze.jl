@@ -624,9 +624,7 @@ end
 # face per acoustic substep: from the tridiag diagonal, inside the serial-in-k Thomas sweep, and
 # from `_build_vertical_rhs!`.
 @inline sponge_damping(i, j, k, grid, ::Nothing) = zero(grid)
-
-@inline sponge_damping(i, j, k, grid, sponge::UpperSponge) =
-    @inbounds sponge.damping_profile[i, j, k]
+@inline sponge_damping(i, j, k, grid, sponge::UpperSponge) = @inbounds sponge.damping_profile[i, j, k]
 
 materialize_sponge(grid, ::Nothing) = nothing
 
