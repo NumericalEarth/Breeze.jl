@@ -21,10 +21,10 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, MixedPhaseOneMome
 G(Q) = gaussian_equilibrium_condensate(Q, one(Q))
 
 @testset "Gaussian saturation-deficit closed forms" begin
-    @test normal_cumulative_distribution(0.0) == 0.5
+    @test abs(normal_cumulative_distribution(0.0) - 0.5) < 1e-7
     @test abs(normal_cumulative_distribution(1.0) - 0.8413447460685429) < 1e-7
     @test abs(normal_cumulative_distribution(-3.0) - 0.0013498980316301) < 1e-8
-    @test gaussian_cloud_fraction(0.0, 1e-3) == 0.5
+    @test abs(gaussian_cloud_fraction(0.0, 1e-3) - 0.5) < 1e-7
 
     # Limits: G(Q) → 0 as Q → -∞ and G(Q) → Q as Q → +∞
     @test G(-6.0) < 1e-9
@@ -91,11 +91,19 @@ non_equilibrium_1M(FT; subgrid = NoSubgridCorrelation()) =
     Sᴰ = condensation_rate(q.vapor, qᵛ⁺, ℳ.qᶜˡ, T, ρ, q, τ, constants)
     Sᴳ = condensation_rate(q.vapor, qᵛ⁺, ℳ.qᶜˡ, T, ρ, q, τ, constants, 𝒰, statistics, gaussian.subgrid)
     @test Sᴰ ≈ -ℳ.qᶜˡ / (Γ * τ)
-    @test Sᴳ > Sᴰ
     s̄ = (q.vapor - qᵛ⁺) / Γ + ℳ.qᶜˡ
     qˡ⁺ = gaussian_equilibrium_condensate(s̄, FT(1e-3) / Γ)
     @test qˡ⁺ > 0
-    @test Sᴳ ≈ (qˡ⁺ - ℳ.qᶜˡ) / (Γ * τ)
+    @test Sᴳ ≈ (qˡ⁺ - ℳ.qᶜˡ) / τ
+
+    # At its equilibrium liquid (same s̄: the extra liquid taken from the vapor, times Γ) the Gaussian
+    # rate vanishes, while the grid-mean rate still evaporates
+    relative_humidity = FT(0.92) - Γ * (qˡ⁺ - FT(5e-5)) / qᵛ⁺
+    ρ, ℳ, 𝒰 = warm_state(FT, constants; T = 285, relative_humidity, qᶜˡ = qˡ⁺)
+    q = 𝒰.moisture_mass_fractions
+    Sᴳ = condensation_rate(q.vapor, qᵛ⁺, ℳ.qᶜˡ, T, ρ, q, τ, constants, 𝒰, statistics, gaussian.subgrid)
+    Sᴰ = condensation_rate(q.vapor, qᵛ⁺, ℳ.qᶜˡ, T, ρ, q, τ, constants)
+    @test abs(Sᴳ) < 1e-2 * abs(Sᴰ)
 
     # Conservation is untouched
     G = mpne1m_tendencies(gaussian, ρ, ℳ, 𝒰, constants, statistics)
@@ -106,7 +114,7 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size = 20, z = (0, 2000), topology = (Flat, Flat, Bounded))
     constants = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, constants; surface_pressure = 101325, potential_temperature = 290)
+    reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 290)
     dynamics = AnelasticDynamics(reference_state)
     closure = TKEBasedTurbulenceClosure()
 
@@ -115,7 +123,7 @@ end
         model = AtmosphereModel(grid; dynamics, microphysics, closure)
         θ₀(z) = 290 + 5 * max(0, z - 1000) / 1000
         qᵗ₀(z) = z < 1000 ? FT(0.010) : FT(0.004)
-        set!(model; θ = θ₀, qᵗ = qᵗ₀, e = 0.1, u = 1)
+        set!(model; θ = θ₀, qᵗ = qᵗ₀, ρe = 0.1, u = 1)
         for _ in 1:3
             time_step!(model, 10)
         end

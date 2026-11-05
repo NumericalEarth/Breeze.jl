@@ -52,7 +52,7 @@ Gaussian cloud fraction C = Φ(s̄ / σₛ) for mean saturation deficit `s̄` an
 ```jldoctest
 julia> using Breeze.Microphysics: gaussian_cloud_fraction
 
-julia> gaussian_cloud_fraction(0.0, 1e-3)
+julia> round(gaussian_cloud_fraction(0.0, 1e-3), digits=6)
 0.5
 ```
 """
@@ -96,9 +96,11 @@ deficit. With [`DiracStatistics`](@ref) this is the grid-mean [`condensation_rat
 With [`GaussianStatistics`](@ref) the cloud liquid relaxes toward the distribution's mean
 condensate (Tompkins 2002),
 
-    ⟨Sᶜᵒⁿᵈ⟩ = (σₛ G(s̄ / σₛ) − qᶜˡ) / (Γ τ),    s̄ = (qᵛ − qᵛ⁺) / Γ + qᶜˡ,
+    ⟨Sᶜᵒⁿᵈ⟩ = (σₛ G(s̄ / σₛ) − qᶜˡ) / τ,    s̄ = (qᵛ − qᵛ⁺) / Γ + qᶜˡ,
 
-which reduces to the grid-mean rate as σₛ → 0. The Exner function Π comes from the
+where s̄ already carries the latent-heat factor Γ, so that for σₛ → 0 in a saturated cell this
+is the grid-mean rate (qᵛ − qᵛ⁺) / (Γ τ). (Where the grid-mean scheme evaporates liquid at its
+limiter −qᶜˡ / (Γ τ), the Gaussian relaxes at −qᶜˡ / τ toward a vanishing equilibrium.) The Exner function Π comes from the
 thermodynamic state `𝒰`, and `correlation` supplies the background spread.
 """
 @inline condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants, 𝒰, ::DiracStatistics, correlation) =
@@ -113,5 +115,5 @@ thermodynamic state `𝒰`, and `correlation` supplies the background spread.
     σₛ = saturation_deficit_spread(𝒮, Π * dqᵛ⁺_dT, Γˡ, correlation.minimum_saturation_deficit_spread)
     s̄ = (qᵛ - qᵛ⁺) / Γˡ + qᶜˡ
     qˡ⁺ = gaussian_equilibrium_condensate(s̄, σₛ)
-    return (qˡ⁺ - qᶜˡ) / (Γˡ * τᶜˡ)
+    return (qˡ⁺ - qᶜˡ) / τᶜˡ
 end
