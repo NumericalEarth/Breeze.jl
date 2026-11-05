@@ -152,6 +152,8 @@ export
 
     # BoundaryConditions
     BulkDrag,
+    ImmersedWallDrag,
+    ImmersedWallHeatFlux,
     BulkSensibleHeatFlux,
     BulkVaporFlux,
     PolynomialCoefficient,

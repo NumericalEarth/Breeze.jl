@@ -1,6 +1,8 @@
 module BoundaryConditions
 
 export BulkDragFunction,
+       ImmersedWallDrag,
+       ImmersedWallHeatFlux,
        XDirectionBulkDragFunction,
        YDirectionBulkDragFunction,
        BulkDrag,
@@ -53,8 +55,10 @@ using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        DefaultBoundaryCondition,
                                        Flux,
                                        FieldBoundaryConditions,
+                                       FluxBoundaryCondition,
                                        Bottom, Top, West, East, South, North
 using Oceananigans.Fields: Field
+using Oceananigans.ImmersedBoundaries: ImmersedBoundaryCondition
 using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, node, znode
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑyzᵃᶠᶜ, ℑyzᵃᶜᶠ, ℑxzᶠᵃᶜ, ℑxzᶜᵃᶠ,
                               ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
@@ -99,6 +103,7 @@ include("polynomial_bulk_coefficient.jl")
 include("gustiness.jl")
 include("bulk_drag.jl")
 include("bulk_scalar_fluxes.jl")
+include("immersed_wall_fluxes.jl")
 include("thermodynamic_variable_bcs.jl")
 include("update_boundary_conditions.jl")
 

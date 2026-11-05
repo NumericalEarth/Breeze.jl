@@ -140,9 +140,10 @@ using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, Center, Face, CenterField, fields
+using Oceananigans: Oceananigans, Center, Face, CenterField, fields, instantiated_location
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
-using Oceananigans.ImmersedBoundaries: mask_immersed_field!
+using Oceananigans.ImmersedBoundaries: mask_immersed_field!, ImmersedBoundaryGrid, ImmersedBoundaryCondition
+using Oceananigans.TurbulenceClosures: immersed_flux_divergence
 using Oceananigans.Operators: Δzᶜᶜᶜ, ∂zᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
 using Oceananigans.TimeSteppers: TimeSteppers
