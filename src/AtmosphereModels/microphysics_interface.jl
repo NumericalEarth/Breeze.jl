@@ -1206,7 +1206,9 @@ $(TYPEDSIGNATURES)
 Return the vertical advective mass fluxes of humidity `q` through the lower and upper faces of
 cell `(i, j, k)`, as `((F⁻(wᵗ + wˢ), F⁻(wᵗ)), (F⁺(wᵗ + wˢ), F⁺(wᵗ)))`: at each face, the flux at
 the combined velocity and at the resolved transport velocity `wᵗ` alone, both with the tracer's
-own `advection` scheme, integrated over the face area and per unit density [m³ s⁻¹]. Their
+own `advection` scheme, integrated over the face area and per unit density [m³ s⁻¹]. `ρ` is the
+density the tracer's mass flux is weighted with; it sets the explicit fraction of a
+bounds-preserving adaptive-implicit scheme (see [`explicit_vertical_fraction`](@ref)). Their
 difference is the sedimentation part of the mass flux the tracer tendency applies to the cell;
 [`sedimentation_tendency`](@ref) weights each with the content it delivers to the cell. The
 fluxes belong to the cell rather than to a face because bounds-preserving WENO limits its
@@ -1234,7 +1236,7 @@ mirrors the solve's coefficients (see `density_weighted_implicit_diffusion.jl`).
 # A condensate's mass fluxes through the faces of cell (i, j, k): the part the tracer tendency
 # applies, and the first-order remainder the adaptive implicit solve applied at the solved state.
 @inline explicit_condensate_mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ) =
-    sedimentation_mass_fluxes(i, j, k, grid, condensate.advection, wᵗ, condensate.velocity, condensate.specific_humidity)
+    sedimentation_mass_fluxes(i, j, k, grid, condensate.advection, wᵗ, condensate.velocity, condensate.specific_humidity, ρ)
 
 @inline implicit_condensate_mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ) =
     implicit_sedimentation_mass_fluxes(i, j, k, grid, condensate.advection, wᵗ, condensate.velocity, condensate.density, ρ)
