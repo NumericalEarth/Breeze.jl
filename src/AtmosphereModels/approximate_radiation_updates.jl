@@ -17,8 +17,8 @@ $(TYPEDEF)
 The state of the approximate updates of a [`RadiativeTransferModel`](@ref)'s fluxes between solves
 ([Hogan and Bozzo, 2015](@cite HoganBozzo2015)). Each state update between solves
 
-- shifts the longwave fluxes by the change in the fourth power of the surface temperature `T₀`
-  times their response to `T₀⁴`, computed at each solve by repeating the longwave solve with the
+- shifts the solved longwave fluxes by the change in the fourth power of the surface temperature `T₀`
+  since that solve, times their response to `T₀⁴`, computed by repeating the longwave solve with the
   surface 1 K warmer (1 K cooler at the top of a solver's surface temperature range);
 - scales the shortwave fluxes of the last solve by `μ₀ / μ̄₀`, where `μ₀` is the current cosine of
   the solar zenith angle and `μ̄₀` its mean over the sunlit part of the radiation window, with
@@ -40,6 +40,10 @@ struct ApproximateRadiationUpdates{F, C}
     upwelling_longwave_response :: F
     "Response of the downwelling longwave flux to `T₀⁴` (W m⁻² K⁻⁴, signed like the flux)"
     downwelling_longwave_response :: F
+    "Upwelling longwave flux of the last solve"
+    solved_upwelling_longwave_flux :: F
+    "Downwelling longwave flux of the last solve"
+    solved_downwelling_longwave_flux :: F
     "Upwelling shortwave flux of the last solve, at `μ̄₀`"
     solved_upwelling_shortwave_flux :: F
     "Downwelling shortwave flux of the last solve, at `μ̄₀`"
@@ -50,7 +54,7 @@ struct ApproximateRadiationUpdates{F, C}
     cos_zenith :: C
     "Per-column sunlit duration of the radiation window (s), a workspace of the solve"
     sunlit_duration :: C
-    "Per-column surface temperature of the last update of the longwave fluxes"
+    "Per-column surface temperature of the last solve"
     surface_temperature :: C
 end
 
@@ -70,7 +74,9 @@ function ApproximateRadiationUpdates(grid, schedule, solar_position)
     cos_zenith = column_array()
     initialize_cos_zenith!(cos_zenith, solar_position)
 
-    return ApproximateRadiationUpdates(ZFaceField(grid), ZFaceField(grid), ZFaceField(grid), ZFaceField(grid),
+    return ApproximateRadiationUpdates(ZFaceField(grid), ZFaceField(grid),
+                                       ZFaceField(grid), ZFaceField(grid),
+                                       ZFaceField(grid), ZFaceField(grid),
                                        column_array(), cos_zenith, column_array(), column_array())
 end
 
@@ -92,6 +98,20 @@ function radiation_window_lead(clock)
     return ifelse((clock.stage == 2) & isfinite(lead), max(0, lead), zero(lead))
 end
 
+# The first two stage abscissae, supplied by time steppers that know their stage timing.
+# For other steppers, the first-stage clock still gives the solve's offset within the step.
+radiation_stage_abscissae(timestepper) = nothing
+
+radiation_step_offsets(::Nothing, clock, lead) = clock.stage == 2 ? (lead, lead) : nothing
+
+function radiation_step_offsets(abscissae, clock, lead)
+    first_stage, second_stage = abscissae
+    current_offset = ifelse(clock.stage == 1, zero(lead),
+                           ifelse(clock.stage == 2, clock.last_stage_Δt,
+                                  second_stage * (clock.last_stage_Δt / (second_stage - first_stage))))
+    return first_stage * clock.last_Δt, current_offset
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -101,22 +121,43 @@ the next solve is not known: past the last explicit time, for an infinite interv
 first time step of an `IterationInterval`, and for other schedules.
 
 A `TimeInterval` or `SpecifiedTimes` schedule solves in the first time step whose first stage
-reaches its next time `t★`. That step starts less than `Δt - lead` after `t★`, with `lead` the
-first stage of a step, or a whole `Δt` after it when the solve is not at a first stage. An
-`IterationInterval` solves in the time step of its next actuating iteration.
+reaches its next time `t★`. Estimate that step's start using the last time step and the stage
+abscissae of `timestepper`, or the first-stage clock when those abscissae are unknown. Without
+known step timing, average up to `t★`. An `IterationInterval` solves in the time step of its
+next actuating iteration. Neither calculation advances the schedule.
 """
-function radiation_interval(schedule::Union{TimeInterval, SpecifiedTimes}, clock, lead)
+function radiation_interval(schedule::Union{TimeInterval, SpecifiedTimes}, clock, lead, timestepper=nothing)
     t★ = next_actuation_time(schedule)
     (t★ === Inf || t★ <= clock.time) && return zero(lead) # a schedule counting from before the clock actuates at the next step
+    remaining = time_difference_seconds(t★, clock.time)
+    isfinite(remaining) || return zero(lead)
     Δt = clock.last_Δt
-    solving_step_lag = ifelse(isfinite(Δt), max(0, Δt - lead), zero(lead))
-    return finite_radiation_interval(time_difference_seconds(t★, clock.time) + lead + solving_step_lag)
+    isfinite(Δt) && Δt > 0 || return finite_radiation_interval(remaining + lead)
+    offsets = radiation_step_offsets(radiation_stage_abscissae(timestepper), clock, lead)
+    isnothing(offsets) && return finite_radiation_interval(remaining + lead)
+    first_stage_offset, current_offset = offsets
+    isfinite(current_offset) || return finite_radiation_interval(remaining + lead)
+
+    # The next solve's first stage must reach t★, but its window begins at the step's start.
+    # A first stage already visited cannot solve again; iteration zero never actuates a schedule.
+    earliest_step = ifelse(clock.stage == 1 && clock.iteration > 0, 0, 1)
+    steps = max(earliest_step, ceil((remaining + current_offset - first_stage_offset) / Δt))
+    return finite_radiation_interval(steps * Δt - current_offset + lead)
 end
 
-radiation_interval(schedule::IterationInterval, clock, lead) =
-    finite_radiation_interval((schedule.interval - mod(clock.iteration - schedule.offset, schedule.interval)) * clock.last_Δt)
+function radiation_interval(schedule::IterationInterval, clock, lead, timestepper=nothing)
+    steps = mod(schedule.offset - clock.iteration, schedule.interval)
+    waiting_for_first_stage = clock.stage == 1 && clock.iteration > 0
+    steps = ifelse(steps == 0 && !waiting_for_first_stage, schedule.interval, steps)
+    interval = steps * clock.last_Δt
+    offsets = radiation_step_offsets(radiation_stage_abscissae(timestepper), clock, lead)
+    if !isnothing(offsets) && isfinite(offsets[2])
+        interval += lead - offsets[2]
+    end
+    return finite_radiation_interval(interval)
+end
 
-radiation_interval(schedule, clock, lead) = zero(lead)
+radiation_interval(schedule, clock, lead, timestepper=nothing) = zero(lead)
 
 finite_radiation_interval(interval) = ifelse(isfinite(interval), max(0, interval), zero(interval))
 
@@ -127,16 +168,16 @@ Fill the per-column `cos_zenith` with the cosine of the solar zenith angle with 
 at the time of `clock`: its mean over the sunlit part of the radiation window when `rtm` updates
 its fluxes between solves, and its current value otherwise.
 """
-update_cos_zenith!(cos_zenith, rtm::RadiativeTransferModel, grid, clock) =
-    update_solve_cos_zenith!(cos_zenith, rtm.approximate_updates, rtm, grid, clock)
+update_cos_zenith!(cos_zenith, rtm::RadiativeTransferModel, grid, clock, timestepper=nothing) =
+    update_solve_cos_zenith!(cos_zenith, rtm.approximate_updates, rtm, grid, clock, timestepper)
 
-update_solve_cos_zenith!(cos_zenith, ::Nothing, rtm, grid, clock) =
+update_solve_cos_zenith!(cos_zenith, ::Nothing, rtm, grid, clock, timestepper) =
     update_cos_zenith!(cos_zenith, rtm.solar_position, grid, clock)
 
-function update_solve_cos_zenith!(μ̄₀, updates::ApproximateRadiationUpdates, rtm, grid, clock)
+function update_solve_cos_zenith!(μ̄₀, updates::ApproximateRadiationUpdates, rtm, grid, clock, timestepper)
     μ₀ = updates.cos_zenith
     lead = radiation_window_lead(clock)
-    interval = radiation_interval(rtm.schedule, clock, lead)
+    interval = radiation_interval(rtm.schedule, clock, lead, timestepper)
     update_cos_zenith!(μ₀, rtm.solar_position, grid, clock)
     copyto!(μ̄₀, μ₀)
     if interval > 0
@@ -189,8 +230,8 @@ end
 $(TYPEDSIGNATURES)
 
 Complete a solve of `rtm` and compute its flux divergence. When `rtm` updates its fluxes between
-solves, record the shortwave fluxes of the solve and turn the longwave fluxes of the second
-longwave solve, which the solve left in the longwave responses, into the responses to `T₀⁴`; then
+solves, record the fluxes and surface temperature of the solve. Turn the fluxes of the second
+longwave solve, which the solve left in the longwave responses, into the responses to `T₀⁴`, then
 bring the shortwave fluxes to the current sun.
 """
 function complete_radiation_solve!(rtm, model)
@@ -205,6 +246,7 @@ function complete_radiation_solve!(updates::ApproximateRadiationUpdates, rtm, mo
     T₀ = rtm.surface_radiation.surface_temperature
     launch!(architecture(grid), grid, :xy, _record_radiation_solve!,
             updates.upwelling_longwave_response, updates.downwelling_longwave_response,
+            updates.solved_upwelling_longwave_flux, updates.solved_downwelling_longwave_flux,
             updates.solved_upwelling_shortwave_flux, updates.solved_downwelling_shortwave_flux,
             updates.surface_temperature,
             rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux,
@@ -216,7 +258,8 @@ function complete_radiation_solve!(updates::ApproximateRadiationUpdates, rtm, mo
     return nothing
 end
 
-@kernel function _record_radiation_solve!(R_lw_up, R_lw_dn, ℐ_sw_up_solved, ℐ_sw_dn_solved, T₀_updated,
+@kernel function _record_radiation_solve!(R_lw_up, R_lw_dn, ℐ_lw_up_solved, ℐ_lw_dn_solved,
+                                          ℐ_sw_up_solved, ℐ_sw_dn_solved, T₀_solved,
                                           ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, T₀, T₀_bounds, solves_response, grid)
     i, j = @index(Global, NTuple)
     c = column_index(i, j, grid.Nx)
@@ -224,12 +267,14 @@ end
 
     @inbounds begin
         T = solved_surface_temperature(T₀[i, j, 1], T₀_bounds)
-        T₀_updated[c] = T
+        T₀_solved[c] = T
         ΔT⁴ = perturbed_surface_temperature(T, T₀_bounds)^4 - T^4
 
         for k in 1:Nz+1
             R_lw_up[i, j, k] = ifelse(solves_response, (R_lw_up[i, j, k] - ℐ_lw_up[i, j, k]) / ΔT⁴, R_lw_up[i, j, k])
             R_lw_dn[i, j, k] = ifelse(solves_response, (R_lw_dn[i, j, k] - ℐ_lw_dn[i, j, k]) / ΔT⁴, R_lw_dn[i, j, k])
+            ℐ_lw_up_solved[i, j, k] = ℐ_lw_up[i, j, k]
+            ℐ_lw_dn_solved[i, j, k] = ℐ_lw_dn[i, j, k]
             ℐ_sw_up_solved[i, j, k] = ℐ_sw_up[i, j, k]
             ℐ_sw_dn_solved[i, j, k] = ℐ_sw_dn[i, j, k]
         end
@@ -286,6 +331,7 @@ function apply_radiation_updates!(updates, rtm, model)
             rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux,
             rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
             updates.upwelling_longwave_response, updates.downwelling_longwave_response,
+            updates.solved_upwelling_longwave_flux, updates.solved_downwelling_longwave_flux,
             updates.solved_upwelling_shortwave_flux, updates.solved_downwelling_shortwave_flux,
             updates.solved_cos_zenith, updates.cos_zenith, updates.surface_temperature,
             rtm.surface_radiation.surface_temperature, surface_temperature_bounds(rtm), grid)
@@ -296,24 +342,25 @@ function apply_radiation_updates!(updates, rtm, model)
 end
 
 @kernel function _update_radiation_between_solves!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
-                                                   R_lw_up, R_lw_dn, ℐ_sw_up_solved, ℐ_sw_dn_solved,
-                                                   μ̄₀, μ₀, T₀_updated, T₀, T₀_bounds, grid)
+                                                   R_lw_up, R_lw_dn, ℐ_lw_up_solved, ℐ_lw_dn_solved,
+                                                   ℐ_sw_up_solved, ℐ_sw_dn_solved,
+                                                   μ̄₀, μ₀, T₀_solved, T₀, T₀_bounds, grid)
     i, j = @index(Global, NTuple)
     c = column_index(i, j, grid.Nx)
     Nz = size(grid, 3)
 
     @inbounds begin
-        # The fluxes follow the surface temperature the solver sees
+        # Anchor to the full solve: small Float32 increments must accumulate before rounding
+        # the flux, rather than being lost independently at every state update.
         T = solved_surface_temperature(T₀[i, j, 1], T₀_bounds)
-        ΔT⁴ = T^4 - T₀_updated[c]^4
-        T₀_updated[c] = T
+        ΔT⁴ = T^4 - T₀_solved[c]^4
 
         # A wholly nocturnal window has zero shortwave flux; sunlight after it triggers a fresh solve.
         μ₀_ratio = ifelse(μ̄₀[c] > 0, μ₀[c] / μ̄₀[c], zero(μ₀[c]))
 
         for k in 1:Nz+1
-            ℐ_lw_up[i, j, k] += R_lw_up[i, j, k] * ΔT⁴
-            ℐ_lw_dn[i, j, k] += R_lw_dn[i, j, k] * ΔT⁴
+            ℐ_lw_up[i, j, k] = ℐ_lw_up_solved[i, j, k] + R_lw_up[i, j, k] * ΔT⁴
+            ℐ_lw_dn[i, j, k] = ℐ_lw_dn_solved[i, j, k] + R_lw_dn[i, j, k] * ΔT⁴
             ℐ_sw_up[i, j, k] = μ₀_ratio * ℐ_sw_up_solved[i, j, k]
             ℐ_sw_dn[i, j, k] = μ₀_ratio * ℐ_sw_dn_solved[i, j, k]
         end

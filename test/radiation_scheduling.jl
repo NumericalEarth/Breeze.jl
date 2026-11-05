@@ -51,14 +51,15 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
 
         clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
         model = AtmosphereModel(grid; clock, dynamics,
-                                formulation = :LiquidIcePotentialTemperature, radiation)
+                                formulation = :LiquidIcePotentialTemperature, radiation, advection = nothing)
 
         # set! triggers update_state! at iteration 0 → radiation always fires
         θ(z) = 300 + FT(0.01) * z / 1000
         qᵗ(z) = FT(0.015) * exp(-z / 2500)
         set!(model; θ=θ, qᵗ=qᵗ)
 
-        ℐ_lw_up = radiation.upwelling_longwave_flux
+        # Only a full solve rewrites this reference; between-solve updates rewrite the output fluxes.
+        ℐ_lw_up = radiation.approximate_updates.solved_upwelling_longwave_flux
         flux_div = radiation.flux_divergence
 
         # Radiation should have been computed at iteration 0
@@ -67,7 +68,7 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
             @test any(interior(flux_div) .!= 0)
         end
 
-        # Zero out the fluxes to detect whether radiation fires
+        # Zero the saved flux to detect whether a full solve fires
         interior(ℐ_lw_up) .= 0
         interior(flux_div) .= 0
 
@@ -132,13 +133,13 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
 
         clock = Clock(time=FT(0))
         model = AtmosphereModel(grid; clock, dynamics,
-                                formulation = :LiquidIcePotentialTemperature, radiation)
+                                formulation = :LiquidIcePotentialTemperature, radiation, advection = nothing)
 
         θ(z) = 300 + FT(0.01) * z / 1000
         qᵗ(z) = FT(0.015) * exp(-z / 2500)
         set!(model; θ=θ, qᵗ=qᵗ)
 
-        ℐ_lw_up = radiation.upwelling_longwave_flux
+        ℐ_lw_up = radiation.approximate_updates.solved_upwelling_longwave_flux
         flux_div = radiation.flux_divergence
 
         # Radiation should have been computed at iteration 0
@@ -147,7 +148,7 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         # Initialize the schedule so it tracks time from t=0
         Oceananigans.initialize!(radiation.schedule, model)
 
-        # Zero out fluxes to detect updates
+        # Zero the saved flux to detect full solves
         interior(ℐ_lw_up) .= 0
         interior(flux_div) .= 0
 
@@ -211,7 +212,7 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
 
         clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
         model = AtmosphereModel(grid; clock, dynamics,
-                                formulation = :LiquidIcePotentialTemperature, radiation)
+                                formulation = :LiquidIcePotentialTemperature, radiation, advection = nothing)
 
         θ(x, y, z) = 300 + FT(0.01) * z / 1000
         qᵗ(x, y, z) = FT(0.015) * exp(-z / 2500)

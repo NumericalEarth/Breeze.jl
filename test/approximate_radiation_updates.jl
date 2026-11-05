@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.AtmosphereModels: update_radiation_between_solves!, _update_radiation!
+using Breeze.AtmosphereModels: update_radiation_between_solves!, _update_radiation!, surface_temperature_bounds
 using Breeze.CelestialMechanics: cos_solar_zenith_angle
 using Dates
 using GPUArraysCore: @allowscalar
@@ -38,7 +38,7 @@ function radiating_column(grid; epoch = nothing,
                                        solar_position, schedule)
 
     microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
-    model = AtmosphereModel(grid; dynamics, microphysics, radiation, clock)
+    model = AtmosphereModel(grid; dynamics, microphysics, radiation, clock, advection=nothing)
     Oceananigans.initialize!(schedule, model) # count the schedule's time from the clock
     set!(model; θ, qᵗ)
     return model
@@ -49,6 +49,40 @@ solved_cosine(model) = Array(model.radiation.approximate_updates.solved_cos_zeni
 column(field) = vec(Array(interior(field)))
 longwave_columns(radiation) = column.((radiation.upwelling_longwave_flux, radiation.downwelling_longwave_flux))
 top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwave_flux))
+
+@testset "Small Float32 temperature changes accumulate between solves" begin
+    FT = Float32
+    Oceananigans.defaults.FloatType = FT
+    grid = radiation_column_grid(FT, 16, 10kilometers)
+    T₀ = Field{Center, Center, Nothing}(grid)
+    set!(T₀, 300)
+    model = radiating_column(grid; epoch=DateTime(2024, 6, 21, 12), surface_temperature=T₀)
+    radiation = model.radiation
+    before = longwave_columns(radiation)
+    heating_before = column(radiation.flux_divergence)
+
+    # The same final temperature must give the same fluxes, regardless of how many state
+    # updates reach it. In Float32, the individual upper-column increments round to zero.
+    set!(T₀, 301)
+    update_radiation_between_solves!(radiation, model)
+    single_update = longwave_columns(radiation)
+    single_heating = column(radiation.flux_divergence)
+    set!(T₀, 300)
+    update_radiation_between_solves!(radiation, model)
+    @test longwave_columns(radiation) == before
+
+    for n in 1:10000
+        set!(T₀, FT(300) + FT(n) / FT(10000))
+        update_radiation_between_solves!(radiation, model)
+    end
+    @test longwave_columns(radiation) == single_update
+    @test column(radiation.flux_divergence) == single_heating
+
+    _update_radiation!(radiation, model)
+    solved = longwave_columns(radiation)
+    @test single_update[1] .- before[1] ≈ solved[1] .- before[1] rtol=sqrt(eps(FT))
+    @test single_heating .- heating_before ≈ column(radiation.flux_divergence) .- heating_before rtol=sqrt(eps(FT))
+end
 
 @testset "Approximate radiation updates between solves [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -61,6 +95,8 @@ top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwa
         set!(T₀, 300)
         model = radiating_column(grid; epoch = DateTime(2024, 6, 21, 12), optics, surface_temperature = T₀)
         radiation = model.radiation
+        expected_bounds = optics isa Union{ClearSkyOptics, AllSkyOptics} ? (160, 355) : nothing
+        @test surface_temperature_bounds(radiation) === expected_bounds
         before = longwave_columns(radiation)
 
         set!(T₀, 305)
@@ -75,6 +111,28 @@ top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwa
         rtol = optics isa GrayOptics ? sqrt(eps(FT)) : FT(0.02)
         @test updated[1] .- before[1] ≈ solved[1] .- before[1] rtol = rtol
         @test updated[2] .- before[2] ≈ solved[2] .- before[2] rtol = rtol
+    end
+
+    @testset "ecCKD retains its surface emission outside RRTMGP's bounds" begin
+        grid = radiation_column_grid(FT, 16, 10kilometers)
+        T₀ = Field{Center, Center, Nothing}(grid)
+        for (solved_temperature, updated_temperature) in ((354.6, 354.9), (358, 360), (158, 159))
+            set!(T₀, solved_temperature)
+            model = radiating_column(grid; epoch=DateTime(2024, 6, 21, 12), optics=EcCKDOptics(), surface_temperature=T₀)
+            radiation = model.radiation
+            @test isnothing(surface_temperature_bounds(radiation))
+            before = longwave_columns(radiation)
+
+            set!(T₀, updated_temperature)
+            update_radiation_between_solves!(radiation, model)
+            updated = longwave_columns(radiation)
+            _update_radiation!(radiation, model)
+            solved = longwave_columns(radiation)
+
+            @test updated[1][1] > before[1][1]
+            @test updated[1] .- before[1] ≈ solved[1] .- before[1] rtol=FT(0.02)
+            @test updated[2] .- before[2] ≈ solved[2] .- before[2] rtol=FT(0.02)
+        end
     end
 
     @testset "Longwave fluxes follow the surface temperature RRTMGP solves at" begin
@@ -379,8 +437,12 @@ top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwa
         without_validity = merge(saved, (; radiation=(; (name => value for (name, value) in pairs(saved.radiation)
                                                          if name !== :cache_valid)...)))
         array_validity = merge(saved, (; radiation=merge(saved.radiation, (; cache_valid=[true]))))
+        incremental_updates = isnothing(saved.radiation.approximate_updates) ? nothing :
+            (; (name => value for (name, value) in pairs(saved.radiation.approximate_updates)
+                if name ∉ (:solved_upwelling_longwave_flux, :solved_downwelling_longwave_flux))...)
+        without_reference_fluxes = merge(saved, (; radiation=merge(saved.radiation, (; approximate_updates=incremental_updates))))
 
-        for checkpoint in (without_cache, without_radiation, without_validity, array_validity)
+        for checkpoint in (without_cache, without_radiation, without_validity, array_validity, without_reference_fluxes)
             restored = radiating_column(grid; solar_position, schedule=make_schedule())
             @test iszero(top_downwelling_shortwave(restored.radiation))
             restore_prognostic_state!(restored, checkpoint)

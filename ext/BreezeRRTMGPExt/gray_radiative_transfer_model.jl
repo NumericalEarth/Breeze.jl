@@ -262,7 +262,7 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
                                                rtm.surface_radiation, grid)
 
     # Update solar zenith angle from the solar_position specification
-    update_cos_zenith!(rtm.shortwave_solver.bcs.cos_zenith, rtm, grid, clock)
+    update_cos_zenith!(rtm.shortwave_solver.bcs.cos_zenith, rtm, grid, clock, model.timestepper)
 
     # Solve longwave RTE (RRTMGP external call)
     solve_lw!(rtm.longwave_solver, rrtmgp_state)

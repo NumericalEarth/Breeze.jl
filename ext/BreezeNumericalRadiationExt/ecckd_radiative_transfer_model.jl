@@ -38,8 +38,7 @@ struct EcCKDShortwave{M, C, W, S}
     solar_constant :: S
 end
 
-# Dispatch on `atmospheric_state::ColumnWorkspace`: strictly more specific than the RRTMGP
-# clear-sky model (slot 4 `BackgroundAtmosphere`) and disjoint from its all-sky model.
+# Dispatch on `atmospheric_state::ColumnWorkspace`, disjoint from RRTMGP's `AtmosphericState`.
 const EcCKDRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:ColumnWorkspace}
 
 # The gases of the column optics, in the order of the ecCKD tables: dry air (N₂, O₂ and the trace

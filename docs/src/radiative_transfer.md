@@ -488,12 +488,15 @@ fluxes for both, following [HoganBozzo2015](@citet):
 
 - **Longwave.** Each solve repeats the longwave solve with the surface 1 K warmer, which gives the
   response of the fluxes on every face to the fourth power of the surface temperature ``T₀``. Each
-  Runge–Kutta stage then shifts the longwave fluxes by that response times the change in ``T₀⁴``. The
-  column absorbs its share of a change in surface emission, and the surface and the atmosphere
+  Runge–Kutta stage then shifts the saved fluxes of that solve by the response times the change
+  in ``T₀⁴`` since the solve. Using this fixed reference lets small Float32 corrections accumulate
+  without being rounded away at each stage. The column absorbs its share of a change in surface
+  emission, and the surface and the atmosphere
   exchange the same longwave flux at every step. With a constant `surface_temperature` there is no
   second solve. The full-spectrum RRTMGP solve clamps the surface temperature into its Planck
   tables, 160 K to 355 K: within 1 K of the top the second solve cools the surface by 1 K instead,
   and above 355 K the longwave fluxes no longer follow the surface temperature, as in a solve.
+  This clamp applies only to RRTMGP; ecCKD retains its own extrapolation of surface emission.
 - **Shortwave.** Each solve computes the slant path of the direct beam with ``\bar{μ}₀``, the
   cosine of the solar zenith angle averaged over the sunlit part of the radiation window
   ([HoganHirahara2015](@citet)). For `DiurnalSolarPosition` and `ApparentSolarPosition`, this is a
@@ -510,13 +513,19 @@ triggers a fresh solve at the next state update, including with the default ever
 The radiation window covers every model time at which a state update scales the fluxes of a solve:
 from the start of the time step that solves, since later Runge–Kutta stages can return to times
 before the first (SSP RK3 evaluates its third stage at ``tⁿ + Δt/2``, after its second at
-``tⁿ + Δt``), to the start of the time step that solves next. That is the next actuation of a
-`TimeInterval` or `SpecifiedTimes` schedule, plus the part of a time step by which the solve can
-follow it, or the next actuating iteration of an `IterationInterval` at the last time step. When
-it is not known, past the last explicit time, for an infinite interval, or for other schedules,
+``tⁿ + Δt``), to the start of the time step that solves next. For a `TimeInterval` or
+`SpecifiedTimes` schedule, this is the first step whose first stage reaches the next scheduled
+time, estimated using the last time step and the time stepper's stage abscissae. The interval
+ends at that step's start, before its first-stage solve. With unknown stage timing it ends at
+the scheduled time. An `IterationInterval` uses its next actuating iteration and the last time step.
+When the interval is not known, past the last explicit time, for an infinite interval, or for other schedules,
 each solve uses the current sun to compute the slant path. Shortwave fluxes still scale with the
 current solar cosine, so they vanish at night. Custom solar-position types also use the current
 angle unless they implement interval averaging.
+
+The update cache stores six extra face fields: the two longwave responses and the four fluxes
+of the last solve. These reference fluxes and the solved surface temperature are checkpointed;
+checkpoints from the earlier incremental-update format trigger a fresh solve on restore.
 
 Over its window the sun stays within four times ``\bar{μ}₀``, a bound approached only by a sun
 skimming the horizon on both sides of a short night. A state update that finds ``μ₀ > 4 \bar{μ}₀``,

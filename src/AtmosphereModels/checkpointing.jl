@@ -35,6 +35,7 @@ approximate_updates_restart_state(::Nothing) = nothing
 
 # The current solar cosine and daylight workspace are rewritten before they are read.
 approximate_updates_restart_state(updates) = (; updates.upwelling_longwave_response, updates.downwelling_longwave_response,
+                                                updates.solved_upwelling_longwave_flux, updates.solved_downwelling_longwave_flux,
                                                 updates.solved_upwelling_shortwave_flux, updates.solved_downwelling_shortwave_flux,
                                                 updates.solved_cos_zenith, updates.surface_temperature)
 
@@ -45,7 +46,13 @@ function Oceananigans.restore_prognostic_state!(rtm::RadiativeTransferModel, fro
     restore_prognostic_state!(merge(radiation_restart_state(rtm), (; cache_valid=nothing)), from)
     # Earlier checkpoints have no flag. Their fluxes are usable if the required cache exists.
     set_radiation_cache_validity!(rtm.cache_valid, radiation_cache_is_valid(get(from, :cache_valid, true)))
-    missing_cache = !isnothing(rtm.approximate_updates) && isnothing(get(from, :approximate_updates, nothing))
+    saved_updates = get(from, :approximate_updates, nothing)
+    # Incremental-update checkpoints lack the reference fluxes, and their saved temperature
+    # belongs to the last update rather than the solve. Refresh them together with a new solve.
+    missing_cache = !isnothing(rtm.approximate_updates) &&
+                    (isnothing(saved_updates) ||
+                     !hasproperty(saved_updates, :solved_upwelling_longwave_flux) ||
+                     !hasproperty(saved_updates, :solved_downwelling_longwave_flux))
     missing_cache && invalidate_radiation_cache!(rtm)
     return rtm
 end

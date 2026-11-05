@@ -22,8 +22,8 @@ using RRTMGP: RRTMGPSolver, lookup_tables
 using RRTMGP.AtmosphericStates: AtmosphericState
 using RRTMGP.BCs: LwBCs, SwBCs
 
-# Dispatch on background_atmosphere = BackgroundAtmosphere for full-spectrum (clear-sky or all-sky) radiation
-const FullSpectrumRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere}
+# RRTMGP's state distinguishes its full-spectrum solvers from other spectral backends.
+const FullSpectrumRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:AtmosphericState}
 
 # The solve clamps the surface temperature into RRTMGP's Planck tables (`_update_rrtmgp_gas_state!`)
 AtmosphereModels.surface_temperature_bounds(::FullSpectrumRadiativeTransferModel) = rrtmgp_temperature_bounds
@@ -281,7 +281,7 @@ function AtmosphereModels._update_radiation!(rtm::FullSpectrumRadiativeTransferM
                                rtm.ice_effective_radius)
 
     # Update solar zenith angle from the solar_position specification
-    update_cos_zenith!(solver.sws.bcs.cos_zenith, rtm, grid, clock)
+    update_cos_zenith!(solver.sws.bcs.cos_zenith, rtm, grid, clock, model.timestepper)
 
     # Longwave and shortwave, one batch of columns at a time; night columns (`cos_zenith ≤ 0`)
     # get zero fluxes, which RRTMGP handles internally.

@@ -9,7 +9,7 @@ using Oceananigans.TimeSteppers:
     step_lagrangian_particles!,
     implicit_step!
 
-using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
                                 microphysics_model_update!, field_advection_scheme,
                                 compute_closure_tendencies!,
                                 closure_scalar_index, skip_vertical_diffusion,
@@ -60,6 +60,8 @@ struct SSPRungeKutta3{FT, U0, TG, TI} <: AbstractTimeStepper
     Gⁿ :: TG
     implicit_solver :: TI
 end
+
+AtmosphereModels.radiation_stage_abscissae(ts::SSPRungeKutta3) = (ts.α¹, ts.α² * (ts.α¹ + 1))
 
 """
 $(TYPEDSIGNATURES)

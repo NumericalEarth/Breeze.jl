@@ -175,7 +175,7 @@ function AtmosphereModels._update_radiation!(rtm::EcCKDRadiativeTransferModel, m
     workspace = rtm.atmospheric_state
     gas_model = rtm.longwave_solver.gas_model
 
-    update_cos_zenith!(workspace.cos_zenith, rtm, grid, model.clock)
+    update_cos_zenith!(workspace.cos_zenith, rtm, grid, model.clock, model.timestepper)
 
     for (row_offset, batch_size) in column_batches(workspace, grid)
         state = ColumnState(rtm, model, row_offset)
