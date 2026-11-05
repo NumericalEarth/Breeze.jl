@@ -1,0 +1,74 @@
+name: Kernel AD launch shape
+
+# TEMPORARY: reproduces, without a GPU, why the kernel AD benchmark needs `kernelad_block_size`
+# (see Benchmarks.yml): Enzyme-JAX's convert-parallel-to-gpu1{emit_single_alternative=true} gives
+# kernels one thread per block, and drops a kernel whose loop was delinearized into 4 dimensions
+
+permissions:
+  actions: read
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/KernelADLaunchShape.yml'
+      - 'benchmarking/kernelad_launch_shape/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The kernel AD entry of Benchmarks.yml's `enzyme_jax_run` and `reactant_rev`. The run's
+  # artifacts expire 2026-11-06; the pass is target independent, so its macOS CPU build will do
+  ENZYME_JAX_RUN: '41838506164'
+  REACTANT_REV: 'f439eef39171e3225908be5722367aee6f24a29d'
+
+jobs:
+  launch-shape:
+    name: convert-parallel-to-gpu1 on a delinearized KernelAbstractions launch
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the Enzyme-JAX Reactant_jll build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: 'products-aarch64-apple-darwin-gpu_version+none-gpu+none-mode+opt'
+          repository: EnzymeAD/Enzyme-JAX
+          run-id: ${{ env.ENZYME_JAX_RUN }}
+          github-token: ${{ github.token }}
+          path: reactant_jll_products
+      - name: Unpack the Enzyme-JAX libReactantExtra
+        run: |
+          mkdir -p reactant_jll
+          tar -xJf reactant_jll_products/Reactant.v*.tar.* -C reactant_jll
+          ls -l reactant_jll/lib/libReactantExtra.dylib
+      - uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
+        with:
+          version: '1.11.9'
+      - uses: julia-actions/cache@9353db09a0f2bbbdec6f41791918c75d37391b36 # v3.5.0
+      - name: Make an environment with Reactant.jl's kernel AD branch
+        # The preference goes in before anything precompiles, so Reactant compiles against it;
+        # Reactant_jll is a direct dependency so that the project's preferences reach it
+        shell: julia --color=yes --project=launch_shape_env {0}
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: |
+          using Pkg, TOML
+          lib = joinpath(ENV["GITHUB_WORKSPACE"], "reactant_jll", "lib", "libReactantExtra.dylib")
+          mkpath("launch_shape_env")
+          open(io -> TOML.print(io, Dict("Reactant_jll" => Dict("libReactantExtra_path" => lib))),
+               joinpath("launch_shape_env", "LocalPreferences.toml"), "w")
+          Pkg.add([PackageSpec(url = "https://github.com/EnzymeAD/Reactant.jl", rev = ENV["REACTANT_REV"]),
+                   PackageSpec(name = "Reactant_jll"), PackageSpec(name = "Test")])
+          Pkg.precompile()
+          Pkg.status()
+      - name: Run convert-parallel-to-gpu1
+        run: |
+          julia --color=yes --project=launch_shape_env \
+              benchmarking/kernelad_launch_shape/launch_shape.jl \
+              benchmarking/kernelad_launch_shape/launch_shape.mlir
