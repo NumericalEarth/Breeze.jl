@@ -75,11 +75,11 @@ struct MixedPhaseOneMomentState{FT} <: AbstractMicrophysicalState{FT}
     w   :: FT  # vertical velocity
 end
 
-struct OneMomentCloudMicrophysicsCategories{P, V, FT}
+struct OneMomentCloudMicrophysicsCategories{P, V, FT, TS}
     parameters :: P
     hydrometeor_velocities :: V
     freezing_temperature :: FT
-    τⁿᵘᵐ :: FT
+    τⁿᵘᵐ :: TS
 end
 
 struct TemperatureDependentIceFormation{FT, F} <: AbstractCondensateFormation
@@ -100,9 +100,9 @@ Return one-moment categories backed by CloudMicrophysics' unified
   so the two containers cannot diverge.
 - `freezing_temperature`: Temperature used to route melting and freezing
   processes. Defaults to CloudMicrophysics' standard value, 273.15 K.
-- `τⁿᵘᵐ`: Timescale [s] for limiting sinks and relaxing negative values: a donor
-  reservoir loses at most its content over `τⁿᵘᵐ`. Must satisfy `τⁿᵘᵐ ≥ Δt` to
-  prevent reservoir overdraw within one time step. Default: 10 seconds.
+- `τⁿᵘᵐ`: Floor [s] on the timescale for limiting sinks and relaxing negative values: a donor
+  reservoir loses at most its content over `τⁿᵘᵐ`. During time stepping the effective
+  timescale is `max(τⁿᵘᵐ, Δt)`, so no step overdraws a reservoir. Default: 10 seconds.
 """
 function one_moment_cloud_microphysics_categories(
     FT::DataType = Oceananigans.defaults.FloatType;
@@ -408,6 +408,14 @@ end
 #####
 
 const OMCM = OneMomentCloudMicrophysics
+
+# Raise the sink-limiting timescale to the step that applies the tendencies: max(τ, Δt).
+function AM.with_sink_limiting_time_step(bμp::OMCM, Δt)
+    categories = bμp.categories
+    τ = AM.sink_limiting_timescale_for(categories.τⁿᵘᵐ, Δt)
+    new_categories = AM.replace_property(categories, Val(:τⁿᵘᵐ), τ)
+    return AM.replace_property(bμp, Val(:categories), new_categories)
+end
 
 # Default fallback for OneMomentCloudMicrophysics tendencies (state-based)
 @inline AM.microphysical_tendency(bμp::OMCM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)

@@ -160,7 +160,8 @@ parameters and aerosol activation.
 - `aerosol_activation`: Aerosol activation parameters (default: continental aerosol).
   Set to `nothing` to disable activation (not recommended for physical simulations).
 - `τⁿᵘᵐ`: Timescale [s] for per-reservoir tendency limiting.
-  Must satisfy `τⁿᵘᵐ ≥ Δt` to prevent reservoir overdraw.
+  Acts as a floor: during time stepping the effective timescale is `max(τⁿᵘᵐ, Δt)`,
+  so no step overdraws a reservoir.
   Default: 10 seconds.
 
 # References
@@ -188,6 +189,14 @@ const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories}
 # Warm-phase non-equilibrium with 2M precipitation
 const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories}
 const WPNE2M = WarmPhaseNonEquilibrium2M
+
+# Raise the per-reservoir limiting timescale to the step that applies the tendencies: max(τⁿᵘᵐ, Δt).
+function AtmosphereModels.with_sink_limiting_time_step(bμp::TwoMomentCloudMicrophysics, Δt)
+    categories = bμp.categories
+    τ = AtmosphereModels.sink_limiting_timescale_for(categories.τⁿᵘᵐ, Δt)
+    new_categories = AtmosphereModels.replace_property(categories, Val(:τⁿᵘᵐ), τ)
+    return AtmosphereModels.replace_property(bμp, Val(:categories), new_categories)
+end
 
 @inline AtmosphereModels.precipitating_mass_fraction(i, j, k, ::WPNE2M, μ) = @inbounds μ.qʳ[i, j, k]
 

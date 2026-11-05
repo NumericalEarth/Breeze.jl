@@ -133,7 +133,7 @@ struct NoLiquidFraction end
 Base.summary(::PrognosticLiquidFraction) = "PrognosticLiquidFraction"
 Base.summary(::NoLiquidFraction) = "NoLiquidFraction"
 
-struct ProcessRate{FT, VE, LF}
+struct ProcessRate{FT, VE, LF, TS}
     # Properties cached from `ThermodynamicConstants`. These are not independent
     # parameters: each is copied from the constants at construction and cannot be set
     # separately, so the two can never disagree.
@@ -272,7 +272,7 @@ struct ProcessRate{FT, VE, LF}
     # Sink-limiting safety timescale [s]
     # If total sinks for any species × dt_safety exceed available mass,
     # all sink rates for that species are rescaled proportionally.
-    sink_limiting_timescale :: FT            # dt_safety [s]
+    sink_limiting_timescale :: TS            # dt_safety [s]; raised to max(τ, Δt) while stepping
 
     # Coupled donor-budget limiter
     # Fixed re-projection passes for the coupled dry-ice, rain, total-ice,
@@ -388,7 +388,7 @@ params = ProcessRate(Float64)
 typeof(params)
 
 # output
-ProcessRate{Float64, DiagnosticVaporExcess, PrognosticLiquidFraction}
+ProcessRate{Float64, DiagnosticVaporExcess, PrognosticLiquidFraction, Float64}
 ```
 
 All parameters are keyword arguments with physically-based defaults. The coupled
@@ -598,7 +598,7 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
     FT(minimum_rime_impact) <= FT(rime_density_transition_impact) < FT(maximum_rime_impact) ||
         throw(ArgumentError("rime impact bounds must satisfy minimum_rime_impact ≤ rime_density_transition_impact < maximum_rime_impact"))
 
-    return ProcessRate{FT, typeof(vapor_excess), typeof(liquid_fraction)}(
+    return ProcessRate{FT, typeof(vapor_excess), typeof(liquid_fraction), FT}(
         FT(thermodynamic_constants.liquid.density),
         FT(thermodynamic_constants.ice.density),
         FT(freezing_temperature),
