@@ -22,7 +22,7 @@ using Breeze.AtmosphereModels:
     implicit_step_scheme,
     implicit_sedimentation_step!
 
-using Breeze.CompressibleEquations: CompressibleDynamics, fold_implicit_momentum_advection
+using Breeze.CompressibleEquations: CompressibleDynamics
 
 using Oceananigans.Advection: implicit_advection_lower_diagonal, implicit_advection_diagonal,
                               implicit_advection_upper_diagonal
@@ -230,8 +230,9 @@ closures no diffusion coefficients, so each combination reduces to the right sys
 runs once per RK stage after the substep loop and after the scalar update, whose
 `implicit_sedimentation_step!` adds to the thermodynamic variable content that takes this
 solve's diffusion too, over the stage interval — the operator split WRF and CM1 use for their
-implicit vertical pieces. Under an adaptive-implicit thermodynamic scheme the advection half of
-this solve is empty (`postloop_thermodynamic_scheme`): it was applied inside the loop. Continuity takes no implicit solve: the coupling-density tendency is the
+implicit vertical pieces. Under an adaptive-implicit scheme the advection half of
+each solve is empty (`postloop_scheme`): it was applied inside the loop. Continuity takes no
+implicit solve: the coupling-density tendency is the
 acoustic mass-flux divergence itself, not scalar advection.
 
 The advecting velocity passed to each solve must be the one its slow tendency was built with,
@@ -314,7 +315,6 @@ add_implicit_momentum_advection_tendency!(model) =
 add_implicit_momentum_advection_tendency!(model, advection) = nothing
 
 function add_implicit_momentum_advection_tendency!(model, advection::AdaptiveImplicitVerticalAdvection)
-    fold_implicit_momentum_advection[] || return nothing
     grid = model.grid
     arch = architecture(grid)
     w, ρᵈ = advecting_state(model)
@@ -327,15 +327,12 @@ function add_implicit_momentum_advection_tendency!(model, advection::AdaptiveImp
     return nothing
 end
 
-postloop_momentum_scheme(advection, ρ, name) = implicit_step_scheme(advection, ρ)
-postloop_momentum_scheme(advection::AdaptiveImplicitVerticalAdvection, ρ, name) =
-    fold_implicit_momentum_advection[] ? implicit_step_scheme(nothing, ρ) : implicit_step_scheme(advection, ρ)
-
-# The implicit half of the IMEX thermodynamic split is applied inside the acoustic loop
-# (`implicit_advection_substep!`), so post-loop the thermodynamic variable keeps only
-# density-weighted closure diffusion under an adaptive-implicit scheme.
-postloop_thermodynamic_scheme(advection, ρ) = implicit_step_scheme(advection, ρ)
-postloop_thermodynamic_scheme(::AdaptiveImplicitVerticalAdvection, ρ) = implicit_step_scheme(nothing, ρ)
+# The implicit halves of the IMEX vertical-advection splits of momentum and the thermodynamic
+# variable are applied inside the acoustic loop (`implicit_momentum_advection_substep!`,
+# `implicit_advection_substep!`), so post-loop they keep only density-weighted closure
+# diffusion under an adaptive-implicit scheme.
+postloop_scheme(advection, ρ) = implicit_step_scheme(advection, ρ)
+postloop_scheme(::AdaptiveImplicitVerticalAdvection, ρ) = implicit_step_scheme(nothing, ρ)
 
 implicit_substep!(model, Δt_stage) =
     implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage)
@@ -364,7 +361,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                        model.clock,
                        fields(model),
                        Δt_stage,
-                       postloop_momentum_scheme(momentum_advection, diffusion_density, name),
+                       postloop_scheme(momentum_advection, diffusion_density),
                        (; w),
                        ρᵈ)
     end
@@ -379,7 +376,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                    model.clock,
                    fields(model),
                    Δt_stage,
-                   postloop_thermodynamic_scheme(θ_advection, diffusion_density),
+                   postloop_scheme(θ_advection, diffusion_density),
                    merge(slow_thermodynamic_velocities(model), (; w)),
                    ρᵈ)
 

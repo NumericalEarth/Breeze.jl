@@ -1543,10 +1543,10 @@ function implicit_advection_substep!(model, substepper, advection::AdaptiveImpli
     # density perturbation takes no implicit transport, so solving for the whole (ρθ)′ would
     # move θᴸ ρ′ a second time and spoil θ = ρθ / ρᵈ even in a uniform-θ atmosphere, by an
     # amount that grows with the implicit Courant number.
-    consistent_theta_split[] && launch!(arch, grid, :xyz, _add_scaled_density!, ρθ′★, θᴸ, ρ′★, -1)
+    launch!(arch, grid, :xyz, _add_scaled_density!, ρθ′★, θᴸ, ρ′★, -1)
     implicit_step!(ρθ′★, model.timestepper.implicit_solver, nothing, nothing, nothing,
                    model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
-    consistent_theta_split[] && launch!(arch, grid, :xyz, _add_scaled_density!, ρθ′★, θᴸ, ρ′★, +1)
+    launch!(arch, grid, :xyz, _add_scaled_density!, ρθ′★, θᴸ, ρ′★, +1)
     return nothing
 end
 
@@ -1558,17 +1558,23 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Advance the implicit half of the IMEX split for the vertical momentum perturbation over one
-substep: `(I + Δτ Lⁱ) (ρw)′ⁿᵉʷ = (ρw)′`, between the acoustic tridiagonal solve and the
-post-solve recovery. `Lⁱ` is the first-order upwind operator of the withheld velocity
+Advance the implicit half of the IMEX vertical-advection split for the momentum perturbation
+`components` over one substep: `(I + Δτ Lⁱ) (ρu)′ⁿᵉʷ = (ρu)′`. `(ρu)′` and `(ρv)′` are solved
+after the explicit horizontal step and `(ρw)′` after the acoustic tridiagonal solve, so in both
+cases continuity, the thermodynamic recovery and the next substep's pressure see momentum that
+has already been transported. `Lⁱ` is the first-order upwind operator of the withheld velocity
 wⁱ = (1 - s) w, with coefficients read from the frozen stage-entry state; the base-state part
-`Lⁱ (ρw)ᴸ` rides the slow tendency (see `add_implicit_momentum_advection_tendency!`), so the
-sum over the stage is the full implicit operator. A no-op for explicit momentum advection.
+`Lⁱ (ρu)ᴸ` rides the slow tendency (see `add_implicit_momentum_advection_tendency!`), so the
+sum over the stage is the full implicit operator.
+
+Applying this remainder once after the loop instead, outside the acoustic balance, left the
+momentum the pressure and continuity saw differing from the momentum carried forward by the
+withheld transport; at implicit Courant numbers of a few tens near a stretched surface layer
+the difference grew into a lone updraft. A no-op for explicit momentum advection.
 """
 implicit_momentum_advection_substep!(model, substepper, advection, Δτ, components) = nothing
 
 function implicit_momentum_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ, components)
-    fold_implicit_momentum_advection[] || return nothing
     w = substepper.vertical_velocity_cache
     ρᵈ = substepper.density_cache
     for name in components
@@ -1579,9 +1585,6 @@ function implicit_momentum_advection_substep!(model, substepper, advection::Adap
     return nothing
 end
 
-# Temporary switch for A/B testing the momentum fold-in.
-const fold_implicit_momentum_advection = Ref(true)
-const consistent_theta_split = Ref(true)
 
 """
 $(TYPEDSIGNATURES)
