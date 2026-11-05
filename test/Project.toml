@@ -10,7 +10,6 @@ Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
 ExplicitImports = "7d51a73a-1435-4ff3-83d9-f097790105c7"
 GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
-KernelDensity = "5ab0869b-81aa-558d-bb23-cbf5423bbe9b" # TODO: remove together with the [sources] entry
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
 Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
@@ -29,7 +28,6 @@ TiffImages = "731e570b-9d59-4bfa-96dc-6df516fadf69" # TODO: remove together with
 
 [sources]
 Breeze = {path = ".."}
-KernelDensity = {url = "https://github.com/JuliaStats/KernelDensity.jl", rev = "compathelper/new_version/2026-10-15-03-08-32-785-04205431680"} # TODO: remove once KernelDensity.jl#152 is merged and released
 Documenter = {url = "https://github.com/JuliaDocs/Documenter.jl", rev = "master"} # TODO: remove once a new Documenter release is tagged
 TiffImages = {url = "https://github.com/tlnagy/TiffImages.jl", rev = "master"} # TODO: remove once TiffImages v0.11.10 is registered
 
