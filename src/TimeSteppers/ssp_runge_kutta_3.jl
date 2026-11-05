@@ -113,7 +113,32 @@ u^{(m)} = (1 - α) u^{(0)} + α \\left[ u^{(m-1)} + Δt \\, G \\right]
 where ``u^{(0)}`` is stored in the time stepper, ``u^{(m-1)}`` is the current field value,
 and ``G`` is the current tendency.
 """
+# DIAGNOSTIC (throwaway branch): with BREEZE_IMPLICIT_ONCE_PER_STEP=true the stages carry only the explicit
+# tendencies and the vertically implicit solves run once per step, over Δt, after the third stage.
+implicit_once_per_step() = get(ENV, "BREEZE_IMPLICIT_ONCE_PER_STEP", "false") == "true"
+
+function implicit_solves!(model, Δt)
+    prognostic = prognostic_fields(model)
+    thermodynamic_name = thermodynamic_density_name(model.formulation)
+    for (name, u) in zip(keys(prognostic), prognostic)
+        skip_vertical_diffusion(model, name) && continue
+        name === thermodynamic_name && continue
+        implicit_stage_step!(model, name, u, Δt)
+    end
+    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, Δt, model.velocities)
+    implicit_stage_step!(model, thermodynamic_name, prognostic[thermodynamic_name], Δt)
+    return nothing
+end
+
 function ssp_rk3_substep!(model, Δt, α)
+    if implicit_once_per_step()
+        grid = model.grid
+        kernel_Δt = kernel_time_step(grid.architecture, grid, Δt)
+        for (u, u⁰, G) in zip(prognostic_fields(model), model.timestepper.U⁰, model.timestepper.Gⁿ)
+            launch!(grid.architecture, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, kernel_Δt, α)
+        end
+        return nothing
+    end
     grid = model.grid
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
@@ -299,6 +324,8 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     # Adjust final time-step to reduce floating point error accumulation
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
+
+    implicit_once_per_step() && (update_state!(model, callbacks; compute_tendencies = false); implicit_solves!(model, Δt))
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
