@@ -243,8 +243,12 @@ neither allocates nor advects it.
   rates then run on this post-G&M state — the "diagnostic vapor excess"
   they see is ``q^v_{\text{post-GM}} - q^{v+l}(T_{\text{post-GM}})``, not the
   host's ``δq^{v+l}`` field. Like the end-of-step ``δq^{v+l}`` reset, the
-  post-G&M state keeps pressure fixed on the anelastic core and in parcels,
-  and density fixed on the compressible core. The G&M adjustment and the end-of-step
+  post-G&M state is the host's own state at the new composition: it keeps the host's
+  conserved thermodynamic variable, at fixed pressure on the anelastic core and in
+  parcels and at fixed density on the compressible core. The increment is sized by the
+  saturation response under that same constraint (the bulk schemes'
+  `thermodynamic_adjustment_factor`), not by the dry-air ``c^{pd}`` psychrometric
+  factor of the M&G rates. The G&M adjustment and the end-of-step
   ``δq^{v+l}`` reset both relax over `sink_limiting_timescale`, so they land
   exactly when the host integrates with
   ``\Delta t = \text{sink\_limiting\_timescale}``. The ``δq^{v+l}`` tendency

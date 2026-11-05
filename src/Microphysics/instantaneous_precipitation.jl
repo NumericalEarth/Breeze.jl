@@ -1,7 +1,6 @@
 using ..Thermodynamics:
     MoistureMassFractions,
     LiquidIceDensityState,
-    LiquidIcePotentialTemperatureState,
     temperature,
     with_moisture,
     with_temperature,
@@ -10,14 +9,9 @@ using ..Thermodynamics:
 using ..AtmosphereModels:
     AtmosphereModels,
     continuity_density,
-    dynamics_pressure,
+    diagnose_thermodynamic_state,
     kernel_time_step,
-    liquid_ice_exner_exponent,
-    total_density,
-    standard_pressure
-
-using Breeze.CompressibleEquations: CompressibleDynamics
-using Breeze.Solvers: NewtonSolver
+    total_density
 
 using Oceananigans: Oceananigans, CenterField, Field, Integral
 using Oceananigans.Architectures: architecture
@@ -133,9 +127,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
     # Skip before the first step (Δt invalid during construction).
     invalid_time_step(Δt) && return nothing
 
-    pˢᵗ = standard_pressure(model.dynamics)
     constants = model.thermodynamic_constants
-    ρθˡⁱ = model.formulation.potential_temperature_density
+    formulation = model.formulation
+    ρθˡⁱ = formulation.potential_temperature_density
     ρqᵛ = model.moisture_density
     μ = model.microphysical_fields
 
@@ -143,10 +137,8 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
 
     kernel_Δt = kernel_time_step(arch, grid, Δt)
 
-    κ̂ = liquid_ice_exner_exponent(model.formulation)
-
     launch!(arch, grid, :xyz, _instantaneous_precipitation_update!,
-            model.dynamics, saturation_adjustment, constants, pˢᵗ, κ̂, kernel_Δt, ρθˡⁱ, ρqᵛ, μ)
+            grid, formulation, model.dynamics, saturation_adjustment, constants, kernel_Δt, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior only; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
@@ -154,21 +146,6 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
 
     return nothing
 end
-
-# The condensation holds fixed what the dynamics holds fixed, and the state type carries that
-# constraint into `adjust_thermodynamic_state` and the θˡⁱ inversion. The compressible core evolves
-# its density, so the adjustment is isochoric at the cell's total density ρ. The anelastic core, like
-# the other cores closed on a pressure (kinematic, parcel), holds the reference or prescribed
-# pressure fixed, so the adjustment is isobaric there: temperature and saturation are evaluated at
-# that pressure, at the thermodynamic state density p / (Rᵐ T), not at the total density ρ = ρᵣ that
-# weights the anelastic prognostics. This is the split `diagnose_thermodynamic_state` makes.
-@inline function instantaneous_precipitation_state(i, j, k, dynamics, θ, q, ρ, pˢᵗ, κ̂)
-    p = @inbounds dynamics_pressure(dynamics)[i, j, k]
-    return LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, p, κ̂)
-end
-
-@inline instantaneous_precipitation_state(i, j, k, ::CompressibleDynamics, θ, q, ρ, pˢᵗ, κ̂) =
-    LiquidIceDensityState(θ, q, pˢᵗ, ρ, NewtonSolver(typeof(ρ)), κ̂)
 
 # Pressure-closed cores keep their density weighting fixed when condensate leaves.
 @inline rainout_state(𝒰, qᵛ, ρqᵛ, ρᵈ) = with_moisture(𝒰, MoistureMassFractions(qᵛ))
@@ -182,8 +159,16 @@ end
                                 𝒰.temperature_solver, 𝒰.exner_exponent)
 end
 
-@kernel function _instantaneous_precipitation_update!(dynamics, saturation_adjustment,
-                                                   constants, pˢᵗ, κ̂, Δt, ρθˡⁱ, ρqᵛ, μ)
+# The condensation holds fixed what the dynamics holds fixed. `diagnose_thermodynamic_state` builds
+# the state the dynamics is closed on, and its type carries that constraint into
+# `adjust_thermodynamic_state` and the θˡⁱ inversion. The compressible core evolves its density, so
+# the adjustment is isochoric at the cell's total density ρ. The anelastic core, like the kinematic
+# core, holds the reference or prescribed pressure fixed, so the adjustment is isobaric there:
+# temperature and saturation are evaluated at that pressure, at the thermodynamic state density
+# p / (Rᵐ T), not at the total density ρ = ρᵣ that weights the anelastic prognostics. The state takes
+# the formulation's temperature solver and Exner exponent.
+@kernel function _instantaneous_precipitation_update!(grid, formulation, dynamics, saturation_adjustment,
+                                                   constants, Δt, ρθˡⁱ, ρqᵛ, μ)
     i, j, k = @index(Global, NTuple)
 
     ρ_field  = total_density(dynamics)       # total ρ: mass fractions and the density weighting them
@@ -194,13 +179,13 @@ end
         ρᵈ = ρᵈ_field[i, j, k]
         ρqᵛ₀ = ρqᵛ[i, j, k]
         qᵗ = ρqᵛ₀ / ρ              # total water mass fraction (÷ total ρ); prognostic vapor, no retained condensate
-        θ₀ = ρθˡⁱ[i, j, k] / ρᵈ     # θˡⁱ = ρθˡⁱ/ρᵈ (dry-coupled), conserved by the reversible condensation
 
         # Condensation: saturation adjustment with θˡⁱ held fixed, at the cell's density on the
-        # compressible core and at its pressure otherwise (see `instantaneous_precipitation_state`).
-        # Delegated to the shared #765 secant. Subsaturated cells short-circuit untouched, matching
-        # the original large-scale-condensation behavior.
-        𝒰₀  = instantaneous_precipitation_state(i, j, k, dynamics, θ₀, MoistureMassFractions(qᵗ), ρ, pˢᵗ, κ̂)
+        # compressible core and at its pressure otherwise. The state reads θˡⁱ = ρθˡⁱ/ρᵈ from the
+        # formulation's diagnostic field, which `update_state!` refreshes just before this
+        # operator-split update. Delegated to the shared #765 secant. Subsaturated cells
+        # short-circuit untouched, matching the original large-scale-condensation behavior.
+        𝒰₀  = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, MoistureMassFractions(qᵗ))
         𝒰₁  = adjust_thermodynamic_state(𝒰₀, saturation_adjustment, constants)
         q   = 𝒰₁.moisture_mass_fractions
         T   = temperature(𝒰₁, constants)

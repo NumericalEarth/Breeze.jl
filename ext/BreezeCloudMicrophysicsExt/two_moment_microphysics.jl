@@ -88,15 +88,16 @@ microphysics = TwoMomentCloudMicrophysics(aerosol_activation = nothing)
 ```
 """
 function default_aerosol_activation(FT::DataType = Float64; τⁿᵘᶜ = 1)
-    # Default continental aerosol mode using κ-Köhler theory
+    # Default continental aerosol mode using κ-Köhler theory, in the float type FT so that
+    # the activated fraction does not promote Float32 tendencies to Float64
     # Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
-    r_dry = 0.05e-6           # 50 nm dry radius
-    stdev = 2.0               # geometric standard deviation
-    Nᵃ₀ = 100e6               # 100 cm⁻³
-    vol_mix_ratio = (1.0,)    # single component
-    mass_mix_ratio = (1.0,)
-    molar_mass = (0.132,)     # ammonium sulfate ~132 g/mol
-    kappa = (0.5,)            # hygroscopicity
+    r_dry = FT(0.05e-6)          # 50 nm dry radius
+    stdev = FT(2)                # geometric standard deviation
+    Nᵃ₀ = FT(100e6)              # 100 cm⁻³
+    vol_mix_ratio = (FT(1),)     # single component
+    mass_mix_ratio = (FT(1),)
+    molar_mass = (FT(0.132),)    # ammonium sulfate ~132 g/mol
+    kappa = (FT(0.5),)           # hygroscopicity
 
     mode = CMAM.Mode_κ(r_dry, stdev, Nᵃ₀, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
     aerosol_distribution = CMAM.AerosolDistribution((mode,))
@@ -822,7 +823,7 @@ Mass tendency for cloud liquid [kg/kg/s]
     # Compute radius: rᵃᶜᵗ = 2A / (3𝒮), capped at 1 μm (1e-6 m)
     # Use rⁿᵘᶜ as fallback when 𝒮 is negligible (no supersaturation) or no activation
     is_activating = (dNᶜˡ_act > eps(FT)) & (𝒮 > eps(FT))
-    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(𝒮, eps(FT)))), rⁿᵘᶜ)
+    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(𝒮, eps(FT)))), FT(rⁿᵘᶜ))
 
     # Mass of a single activated droplet [kg]
     # m = (4π/3) * r³ * ρᴸ
@@ -878,7 +879,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         # Guard against log(0) or log(negative): when Sᵐᵃˣ ≈ 0, no activation occurs
         Sᵐᵃˣ_safe = max(eps(FT), Sᵐᵃˣ)
         Sᶜʳⁱᵗ_safe = max(eps(FT), Sᶜʳⁱᵗ)
-        ϕ = 2 * log(Sᶜʳⁱᵗ_safe / Sᵐᵃˣ_safe) / 3 / sqrt(2) / log(mode.stdev)
+        ϕ = 2 * log(Sᶜʳⁱᵗ_safe / Sᵐᵃˣ_safe) / 3 / sqrt(FT(2)) / log(mode.stdev)
         fᵃᶜᵗ = (1 - erf(ϕ)) / 2
 
         Nᵃᶜᵗ += fᵃᶜᵗ * Nᵐᵒᵈᵉ

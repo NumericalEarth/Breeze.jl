@@ -120,6 +120,7 @@ using Adapt: Adapt
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU, on_architecture
 using Breeze.AtmosphereModels: prognostic_field_names
+using Breeze.Microphysics: thermodynamic_adjustment_factor
 using Breeze.Thermodynamics: MoistureMassFractions,
                              PlanarIceSurface,
                              PlanarLiquidSurface,
@@ -137,8 +138,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
                              saturation_vapor_pressure,
                              temperature,
                              vapor_gas_constant,
-                             with_moisture,
-                             with_temperature
+                             with_moisture
 using Breeze.Utils: @adapt_architecture,
                     chebyshev_gauss_nodes_weights,
                     jacobian_diameter_transform,

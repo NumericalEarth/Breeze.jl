@@ -60,11 +60,14 @@ using Breeze.Thermodynamics:
     saturation_specific_humidity,
     density,
     temperature,
+    with_moisture,
     with_temperature,
     mixture_gas_constant,
     mixture_heat_capacity,
     PlanarLiquidSurface,
     PlanarIceSurface
+
+using Breeze.Microphysics: thermodynamic_adjustment_factor
 
 using Oceananigans: CPU, RectilinearGrid
 using Oceananigans.Fields: interior, ZeroField
@@ -254,7 +257,8 @@ function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, q�
                           supersaturation_departure * coating_relaxation / total_relaxation * transient) /
                          liquid_psychrometric_correction
 
-    condensation = ifelse(raw_cloud_growth < 0, zero(FT), min(raw_cloud_growth, qᵛ / τ))
+    # Signed: subsaturated air evaporates cloud, limited by the cloud available over τ
+    condensation = clamp(raw_cloud_growth, -max(0, qᶜˡ) / τ, max(0, qᵛ) / τ)
     rain_condensation = ifelse(raw_rain_growth < 0, zero(FT), min(raw_rain_growth, qᵛ / τ))
     rain_evaporation = ifelse(raw_rain_growth < 0,
                               min(-raw_rain_growth, max(0, qʳ) / τ), zero(FT))
@@ -275,15 +279,15 @@ function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, q�
             coating_condensation, coating_evaporation)
 end
 
-function expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, constants)
+# The G&M increment, sized by the saturation response Γˡ = 1 + dqᵛ⁺ˡ/dqᶜˡ under the constraint
+# the state `𝒰` is closed on (`thermodynamic_adjustment_factor`, checked against finite
+# differences in `microphysics_relaxation.jl`).
+function expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, 𝒰, constants)
     FT = typeof(qᶜˡ)
     τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
-    Rᵛ = FT(Breeze.Thermodynamics.vapor_gas_constant(constants))
-    ℒˡ = PPP.vaporization_latent_heat(constants, T)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
-    ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
-    ε = (qᵛ - qᵛ⁺ˡ - δqᵛ⁺ˡ) / ξˡ
+    qᵛ = 𝒰.moisture_mass_fractions.vapor
+    Γˡ = thermodynamic_adjustment_factor(qᵛ⁺ˡ, T, 𝒰, constants)
+    ε = (qᵛ - qᵛ⁺ˡ - δqᵛ⁺ˡ) / Γˡ
     ε = max(ε, -qᶜˡ)
     ε = ifelse(δqᵛ⁺ˡ < 0, min(0, ε), ε)
     ε = ifelse(abs(ε) < 100 * eps(FT) * max(qᵛ⁺ˡ, qᵛ), zero(FT), ε)
@@ -2385,21 +2389,23 @@ end
             ρᵗʰ = density(𝒰, constants)
             ρ = ifelse(𝒰 isa LiquidIceDensityState, ρᵗʰ, FT(1))
             qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
-            gm = expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
-                                                               δqᵛ⁺ˡ, T, constants)
-            Tᴳᴹ = T + gm.ε * PPP.vaporization_latent_heat(constants, T) / constants.dry_air.heat_capacity
+            gm = expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, 𝒰, constants)
             qᵛᴳᴹ = qᵛ - gm.ε
             qᶜˡᴳᴹ = qᶜˡ + gm.ε
             qᴳᴹ = MoistureMassFractions(qᵛᴳᴹ, qᶜˡᴳᴹ, qⁱ)
 
-            # Post-G&M pressure at fixed density, or density at fixed pressure
+            # The host's own state at the post-G&M composition: its conserved variable at fixed
+            # density (pressure rises) or at fixed pressure (density falls)
+            𝒰ᴳᴹ = with_moisture(𝒰, qᴳᴹ)
+            Tᴳᴹ = temperature(𝒰ᴳᴹ, constants)
+            ρᴳᴹ = density(𝒰ᴳᴹ, constants)
+            Pᴳᴹ = ρᴳᴹ * mixture_gas_constant(qᴳᴹ, constants) * Tᴳᴹ
             if 𝒰 isa LiquidIceDensityState
-                ρᴳᴹ = ρᵗʰ
-                Pᴳᴹ = ρᴳᴹ * mixture_gas_constant(qᴳᴹ, constants) * Tᴳᴹ
+                @test ρᴳᴹ == ρᵗʰ
                 @test Pᴳᴹ > P
             else
-                ρᴳᴹ = density(Tᴳᴹ, P, qᴳᴹ, constants)
-                Pᴳᴹ = P
+                @test ρᴳᴹ < ρᵗʰ
+                @test Pᴳᴹ ≈ P
             end
 
             qᵛ⁺ˡᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρᴳᴹ, constants, PlanarLiquidSurface())
@@ -2445,6 +2451,13 @@ end
             @test aligned.cloud_water_adjustment > 0
             @test aligned.T > T
             @test aligned.q.vapor + aligned.q.liquid ≈ q.vapor + q.liquid
+
+            # The aligned state is the host's: it keeps the conserved thermodynamic variable
+            @test aligned.T ≈ temperature(with_moisture(𝒰, aligned.q), constants)
+
+            # It lands on the target δqᵛ⁺ˡ = 0 up to second order in ε. An increment sized at the
+            # wrong constraint misses by the relative error of its Γ, about 10% at fixed density.
+            @test abs(aligned.qᵛ - aligned.qᵛ⁺ˡ) < (qᵛ - qᵛ⁺ˡ) / 100
 
             if 𝒰 isa LiquidIceDensityState
                 @test aligned.ρᵗʰ == ρᵗʰ
