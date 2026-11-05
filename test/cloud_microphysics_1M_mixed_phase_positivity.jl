@@ -5,6 +5,7 @@ using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudIce, CloudLiquid, Microphysics1MParams
 using Oceananigans
 using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization
+using Oceananigans: TendencyCallsite
 using Test
 
 using Breeze.Thermodynamics:
@@ -247,4 +248,30 @@ end
     @test all(isfinite, ρqˢⁿ)
     @test minimum(ρqˢⁿ) ≥ 0
     @test minimum(ρqʳ) ≥ 0
+end
+
+@testset "Microphysical sinks share the stage budget with tendency callbacks [$FT]" for FT in test_float_types()
+    # A tendency callback (like a lateral boundary relaxation) that removes 90% of the snow over a
+    # step, on top of melting at Δt > τⁿᵘᵐ. The microphysics runs after the callbacks, so its sinks
+    # see what the callback leaves.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (4, 4, 4), halo = (4, 4, 4), x = (0, 1_000), y = (0, 1_000), z = (0, 1_000))
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure = 101325, potential_temperature = 285)
+    dynamics = AnelasticDynamics(reference_state)
+    bounded() = WENO(FT; bounds = (0, 1), time_discretization = AdaptiveVerticallyImplicitDiscretization(FT; cfl = FT(1//2)))
+
+    model = AtmosphereModel(grid; dynamics, microphysics = saturation_adjustment_1M(FT),
+                            scalar_advection = (; ρqᵉ = bounded(), ρqʳ = bounded(), ρqˢⁿ = bounded()))
+    set!(model; θ = 285, qᵗ = 0.002)
+    set!(model; ρqˢⁿ = FT(1.2e-3))
+
+    Δt = 40
+    drain(model) = parent(model.timestepper.Gⁿ.ρqˢⁿ) .-= FT(0.9 / Δt) .* parent(model.microphysical_fields.ρqˢⁿ)
+    simulation = Simulation(model; Δt, stop_iteration = 10, verbose = false)
+    add_callback!(simulation, drain; callsite = TendencyCallsite())
+    run!(simulation)
+
+    @test minimum(Array(interior(model.microphysical_fields.ρqˢⁿ))) ≥ 0
+    @test minimum(Array(interior(model.microphysical_fields.ρqʳ))) ≥ 0
 end
