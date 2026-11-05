@@ -747,6 +747,42 @@ import Breeze.AtmosphereModels as AM
         @test minimum(interior(b_model.tracers.ρb)) > -1e-3
     end
 
+    @testset "Bounded WENO + AVID stays non-negative at large vertical Courant numbers" begin
+        # A moist-like layer (sharp top, zero above) lifted by a warm bubble at vertical Courant
+        # number ≈ 1.5. Every Wicker–Skamarock stage subtracts its explicit outflow from Uⁿ, so
+        # without the outflow limiter mass the previous stage's implicit solve carried into an
+        # empty cell leaves it again and the cell goes negative (≈ -1e-8 here, -1e-2 at Courant 16).
+        p_grid = RectilinearGrid(default_arch; size=(32, 64), halo=(5, 5),
+                                 x=(-8kilometers, 8kilometers), z=(0, 4kilometers),
+                                 topology=(Periodic, Flat, Bounded))
+        td() = AdaptiveVerticallyImplicitDiscretization(FT; cfl=FT(1//2))
+        p_model = AtmosphereModel(p_grid;
+                                  dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                                                  reference_potential_temperature=300),
+                                  timestepper = :AcousticRungeKutta3,
+                                  tracers = :ρc,
+                                  momentum_advection = WENO(FT; time_discretization=td()),
+                                  scalar_advection = (; ρθ=WENO(FT), ρc=WENO(FT; bounds=(0, 1), time_discretization=td())))
+        @test p_model.advection.ρc.bounds.limiter isa AM.OutflowLimiter
+        @test !(p_model.advection.ρθ isa AM.OutflowLimitedWENO)
+
+        ρ₀(x, z) = adiabatic_hydrostatic_density(z, 101325.0, 300.0, 100000.0, constants)
+        set!(p_model; ρ=ρ₀, θ=(x, z) -> 300 + 6 * exp(-(x^2 + (z - 800)^2) / (2 * 600^2)),
+                      ρc=(x, z) -> ρ₀(x, z) * 0.015 * (z < 1500))
+        total(q) = sum(Array(interior(q)))
+        mass₀ = total(p_model.tracers.ρc)
+        Δt = 6
+        smallest = Inf
+        for _ in 1:40
+            time_step!(p_model, Δt)
+            smallest = min(smallest, minimum(Array(interior(p_model.tracers.ρc))))
+        end
+        Δz = 4kilometers / 64
+        @test maximum(abs, Array(interior(p_model.velocities.w))) * Δt / Δz > 1
+        @test smallest ≥ -eps(FT) * FT(0.015)
+        @test isapprox(total(p_model.tracers.ρc), mass₀; rtol=sqrt(eps(FT)))
+    end
+
     @testset "Advective timescale drops the vertical term under AIVA" begin
         Δx = 100 / 4
         Δz = 1000 / 16

@@ -97,7 +97,14 @@ compute_total_density!(model) = nothing
 # `(momentum, tracers...)`, so pair each scheme with the specific field it reconstructs.
 function Oceananigans.Advection.update_advection!(advection::NamedTuple, model::AtmosphereModel)
     fields = reconstructed_fields(model, advection)
-    return update_each_advection!(values(advection), values(fields), model)
+    update_each_advection!(values(advection), values(fields), model)
+
+    # After the bounds-preserving rescaling θ, which the outflow fractions are built from.
+    for name in keys(advection)
+        update_outflow_limiter!(advection[name], model, name)
+    end
+
+    return nothing
 end
 
 @inline update_each_advection!(::Tuple{}, ::Tuple{}, model) = nothing
