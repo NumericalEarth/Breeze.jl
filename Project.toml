@@ -33,6 +33,11 @@ BreezeNumericalRadiationExt = "NumericalRadiation"
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 BreezeReactantExt = "Reactant"
 
+[sources]
+# TEMPORARY: track CliMA/Oceananigans.jl#6440 (substep_lagrangian_particles!) until it is released.
+# MUST be removed before merging NumericalEarth/Breeze.jl#1203.
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "glw/particle-rk3-stages"}
+
 [compat]
 Adapt = "4.3.0"
 Artifacts = "<0.0.1, 1"
@@ -46,7 +51,7 @@ JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"
 LazyArtifacts = "<0.0.1, 1"
 NumericalRadiation = "0.2"
-Oceananigans = "0.116"
+Oceananigans = "0.116, 0.117"
 OffsetArrays = "1.4"
 Printf = "1"
 RRTMGP = "0.22, 0.23, 1"
