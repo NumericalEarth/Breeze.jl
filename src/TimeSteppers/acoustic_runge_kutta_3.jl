@@ -177,6 +177,7 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
     # substep inside the loop, dispatched on the scheme type.
     add_implicit_advection_tendency!(model)
+    add_implicit_momentum_advection_tendency!(model)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
