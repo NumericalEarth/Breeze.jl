@@ -651,8 +651,8 @@ function materialize_sponge(grid, sponge::UpperSponge)
     # is launched over 1:Nz+1), so the halo values are left at the field's initial zero.
     damping_profile = Field{Nothing, Nothing, Face}(grid)
 
-    launch!(architecture(grid), grid, tuple(1), _compute_sponge_damping_profile!,
-            damping_profile, grid, damping_rate, depth, sponge.ramp, size(grid, 3))
+    launch!(architecture(grid), grid, tuple(size(grid, 3) + 1), _compute_sponge_damping_profile!,
+            damping_profile, grid, damping_rate, depth, sponge.ramp)
 
     return UpperSponge(damping_rate, depth, sponge.ramp, nothing, damping_profile)
 end
@@ -677,19 +677,16 @@ end
     r = rnode(i, j, k, grid, Center(), Center(), Face())
     # `node` gives the coordinates `set!` passes to functions: (λ, φ, z) on a LatitudeLongitudeGrid
     # (`xnode`/`ynode` would give distances in metres there), (x, y, z) on a RectilinearGrid.
-    m = convert(eltype(grid), mask(node(i, j, k, grid, Center(), Center(), Face())...))
+    m = mask(node(i, j, k, grid, Center(), Center(), Face())...)
     @inbounds γ[i, j, k] = damping_rate * max(ramp(r, grid.Lz, depth), m)
 end
 
-# One thread walking the column: `ramp` is an arbitrary user-supplied callable, so this is the
-# only place it is evaluated, once per face at construction rather than per substep.
-@kernel function _compute_sponge_damping_profile!(γ, grid, damping_rate, depth, ramp, Nz)
-    _ = @index(Global)
-
-    for k in 1:(Nz + 1)
-        z = rnode(1, 1, k, grid, Center(), Center(), Face())
-        @inbounds γ[1, 1, k] = damping_rate * ramp(z, grid.Lz, depth)
-    end
+# `ramp` is an arbitrary user-supplied callable, so this is the only place it is evaluated,
+# once per face at construction rather than per substep.
+@kernel function _compute_sponge_damping_profile!(γ, grid, damping_rate, depth, ramp)
+    k = @index(Global)
+    z = rnode(1, 1, k, grid, Center(), Center(), Face())
+    @inbounds γ[1, 1, k] = damping_rate * ramp(z, grid.Lz, depth)
 end
 
 @inline sponge_term_diag(i, j, k, grid, sponge, δτᵐ⁺) =
