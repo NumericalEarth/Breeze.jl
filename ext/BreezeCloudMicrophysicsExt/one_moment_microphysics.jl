@@ -1310,7 +1310,9 @@ end
 
     G = mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
-    f = AM.sink_fraction(limiter, (Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢⁿ), (G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢⁿ), i, j, k)
+    G_species = (Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢⁿ)
+    Gᵐ = (G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢⁿ)
+    f = AM.positivity_preserving_fraction(i, j, k, grid, limiter, G_species, Gᵐ)
 
     @inbounds Gρqᵛ[i, j, k]  += f * G.ρqᵛ
     @inbounds Gρqᶜˡ[i, j, k] += f * G.ρqᶜˡ
@@ -1441,7 +1443,9 @@ end
 
     G = mp1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
-    f = AM.sink_fraction(limiter, (Gρqᵉ, Gρqʳ, Gρqˢⁿ), (G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ), i, j, k)
+    G_species = (Gρqᵉ, Gρqʳ, Gρqˢⁿ)
+    Gᵐ = (G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ)
+    f = AM.positivity_preserving_fraction(i, j, k, grid, limiter, G_species, Gᵐ)
 
     @inbounds Gρqᵉ[i, j, k]  += f * G.ρqᵉ
     @inbounds Gρqʳ[i, j, k]  += f * G.ρqʳ

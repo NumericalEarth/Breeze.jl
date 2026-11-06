@@ -934,8 +934,9 @@ end
 
     G = wpne2m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
-    f = AtmosphereModels.sink_fraction(limiter, (Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ),
-                                       (G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ), i, j, k)
+    G_species = (Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ)
+    Gᵐ = (G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ)
+    f = AtmosphereModels.positivity_preserving_fraction(i, j, k, grid, limiter, G_species, Gᵐ)
 
     @inbounds Gρqᵛ[i, j, k]  += f * G.ρqᵛ
     @inbounds Gρqᶜˡ[i, j, k] += f * G.ρqᶜˡ

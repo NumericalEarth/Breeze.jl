@@ -345,44 +345,43 @@ $(TYPEDEF)
 
 Limits the microphysical sinks of a set of species to what the coming stage leaves of each,
 `q⁰ + Δt Gᵒ`, with `q⁰` the state the stage starts from and `Gᵒ` every other tendency.
-See [`sink_fraction`](@ref).
+See [`positivity_preserving_fraction`](@ref).
 """
-struct SinkLimiter{I, C, B, T}
-    initial :: I             # step-start densities of the species
-    current :: C             # current densities of the species
-    from_initial_state :: B  # whether the stage starts from `initial` (else `current`)
-    Δt :: T                  # stage interval; `Inf` disables the limiter
+struct SinkLimiter{S, T}
+    stage_start :: S  # densities of the species at the state the coming stage starts from
+    Δt :: T           # stage interval; `Inf` disables the limiter
 end
 
 # `Δt` is adapted too: under Reactant it is a traced number that the kernel adaptor must convert.
-Adapt.adapt_structure(to, l::SinkLimiter) =
-    SinkLimiter(adapt(to, l.initial), adapt(to, l.current), l.from_initial_state, adapt(to, l.Δt))
+Adapt.adapt_structure(to, l::SinkLimiter) = SinkLimiter(adapt(to, l.stage_start), adapt(to, l.Δt))
 
 """
 $(TYPEDSIGNATURES)
 
-The [`SinkLimiter`](@ref) of the prognostic species `names` of `model`.
+The [`SinkLimiter`](@ref) of the prognostic species `names` of `model`. Which state the coming
+stage starts from, the step-start `U⁰` or the current prognostic fields, is resolved here on the
+host, so the kernel reads one array per species.
 """
-function SinkLimiter(model, names)
-    prognostic = prognostic_fields(model)
-    initial = map(n -> getproperty(model.timestepper.U⁰, n), names)
-    current = map(n -> getproperty(prognostic, n), names)
+function SinkLimiter(model, names::Tuple{Vararg{Symbol}})
     from_initial_state = stage_starts_from_initial_state(model.timestepper, model.clock)
-    return SinkLimiter(initial, current, from_initial_state, stage_time_step(model.timestepper, model.clock))
+    fields = from_initial_state ? model.timestepper.U⁰ : prognostic_fields(model)
+    stage_start = map(n -> getproperty(fields, n), names)
+    return SinkLimiter(stage_start, stage_time_step(model.timestepper, model.clock))
 end
 
 """
 $(TYPEDSIGNATURES)
 
-The largest fraction `f ∈ [0, 1]` of the microphysical tendencies `Gᵐ` of cell `(i, j, k)` that
-the coming stage can apply without driving a species negative, given the other tendencies `G`
-already accumulated. One fraction for every species keeps the exchanges between them conserved.
+The largest common scale factor `f ∈ [0, 1]` on the microphysical tendencies `Gᵐ` of cell
+`(i, j, k)` such that no species goes negative over the coming stage of length `Δt`:
+`qₛₜₐᵣₜ + Δt (Gᵒ + f Gᵐ) ≥ 0` for every species, where `qₛₜₐᵣₜ` is its density at the state the
+stage starts from and `Gᵒ` the other tendencies already accumulated in `G`. One factor for
+every species keeps the exchanges between them conserved. `f = 1` when `Δt = Inf`.
 """
-@inline function sink_fraction(limiter, G, Gᵐ, i, j, k)
+@inline function positivity_preserving_fraction(i, j, k, grid, limiter, G, Gᵐ)
     Δt = limiter.Δt
-    fractions = map(limiter.initial, limiter.current, G, Gᵐ) do q⁰, qᶜ, Gᵒ, gᵐ
-        @inbounds q = ifelse(limiter.from_initial_state, q⁰[i, j, k], qᶜ[i, j, k])
-        @inbounds available = max(0, q + Δt * Gᵒ[i, j, k])
+    fractions = map(limiter.stage_start, G, Gᵐ) do q, Gᵒ, gᵐ
+        @inbounds available = max(0, q[i, j, k] + Δt * Gᵒ[i, j, k])
         demand = - Δt * gᵐ
         ifelse(demand > available, available / demand, one(demand))
     end
@@ -406,7 +405,7 @@ end
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, microphysical_fields, ρ, 𝒰, velocities)
 
     Gᵐ = map(name -> microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants), name_tuple)
-    f = sink_fraction(limiter, G_tuple, Gᵐ, i, j, k)
+    f = positivity_preserving_fraction(i, j, k, grid, limiter, G_tuple, Gᵐ)
     map((G, g) -> @inbounds(G[i, j, k] += f * g), G_tuple, Gᵐ)
 end
 
