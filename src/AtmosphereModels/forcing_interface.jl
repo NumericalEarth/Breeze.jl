@@ -72,7 +72,7 @@ $(TYPEDSIGNATURES)
 
 Compute any fields or quantities needed by `forcing` before it is applied, given the `model`.
 This is the method called by `compute_forcings!` at every Runge-Kutta stage. Forcings that
-need the model state or clock, such as [`AdiabaticExpansion`](@ref), extend
+need the model state or clock, such as [`AdiabaticExpansion`](@ref Breeze.AnelasticEquations.AdiabaticExpansion), extend
 this method; the fallback calls `compute_forcing!(forcing)`.
 """
 compute_forcing!(forcing, model) = compute_forcing!(forcing)

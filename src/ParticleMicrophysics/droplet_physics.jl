@@ -483,7 +483,7 @@ gas-kinetic corrections, ventilation, solution activity, the terminal velocity l
 and the scalar solver used by the implicit condensational growth step.
 
 Liquid density, gas constants, heat capacities, the latent heat ``ℒˡ(T)`` and the saturation
-vapor pressure ``pᵛ⁺(T)`` are taken from Breeze's [`ThermodynamicConstants`](@ref),
+vapor pressure ``pᵛ⁺(T)`` are taken from Breeze's [`ThermodynamicConstants`](@ref Breeze.Thermodynamics.ThermodynamicConstants),
 which every function receives alongside the parameters.
 """
 struct DropletPhysicsParameters{FT, D, K, M, C, V, A, W, S}

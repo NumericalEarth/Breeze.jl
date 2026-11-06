@@ -37,8 +37,8 @@ materialize_dynamics(d, grid, bcs, constants, microphysics, formulation) = mater
     dynamics_forcing(dynamics, thermodynamic_name, moisture_name)
 
 Return a `NamedTuple` of forcings that `dynamics` contributes to the specific fields named
-`thermodynamic_name` and `moisture_name`, such as the [`AdiabaticExpansion`](@ref) of
-[`BoussinesqDynamics`](@ref) with a moving frame. These are combined with the user's forcing
+`thermodynamic_name` and `moisture_name`, such as the [`AdiabaticExpansion`](@ref Breeze.AnelasticEquations.AdiabaticExpansion) of
+[`BoussinesqDynamics`](@ref Breeze.AnelasticEquations.BoussinesqDynamics) with a moving frame. These are combined with the user's forcing
 on the same fields. The default contributes nothing.
 """
 dynamics_forcing(dynamics, thermodynamic_name, moisture_name) = NamedTuple()
