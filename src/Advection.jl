@@ -197,18 +197,36 @@ end
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * outflow
 end
 
+# Mass the explicit fluxes of the coming stage bring into cell (i, j, k) through its two faces
+# in one direction, each scaled by the fraction `r` of the cell it leaves. A `Flat` direction has
+# no neighbors (and no halo to index), so it contributes nothing.
+@inline limited_inflow_x(i, j, k, ::AbstractGrid{FT, Flat}, advection, ρ, u, c, r) where FT = zero(FT)
+@inline limited_inflow_y(i, j, k, ::AbstractGrid{FT, <:Any, Flat}, advection, ρ, v, c, r) where FT = zero(FT)
+
+@inline function limited_inflow_x(i, j, k, grid, advection, ρ, u, c, r)
+    F⁻ = bounded_face_flux_x(i,   j, k, grid, advection, ρ, u, c)
+    F⁺ = bounded_face_flux_x(i+1, j, k, grid, advection, ρ, u, c)
+    return @inbounds max(0, F⁻) * r[i-1, j, k] - min(0, F⁺) * r[i+1, j, k]
+end
+
+@inline function limited_inflow_y(i, j, k, grid, advection, ρ, v, c, r)
+    F⁻ = bounded_face_flux_y(i, j,   k, grid, advection, ρ, v, c)
+    F⁺ = bounded_face_flux_y(i, j+1, k, grid, advection, ρ, v, c)
+    return @inbounds max(0, F⁻) * r[i, j-1, k] - min(0, F⁺) * r[i, j+1, k]
+end
+
+@inline function limited_inflow_z(i, j, k, grid, advection, ρ, w, c, r)
+    F⁻ = bounded_face_flux_z(i, j, k,   grid, advection, ρ, w, c)
+    F⁺ = bounded_face_flux_z(i, j, k+1, grid, advection, ρ, w, c)
+    return @inbounds max(0, F⁻) * r[i, j, k-1] - min(0, F⁺) * r[i, j, k+1]
+end
+
 # Mass the explicit fluxes of the coming stage bring into cell (i, j, k), per unit volume, each
 # scaled by the fraction `r` of the cell it leaves.
 @inline function limited_explicit_inflow(i, j, k, grid, advection, ρ, U, wᵉ, c, r)
-    Fx⁻ = bounded_face_flux_x(i,   j, k, grid, advection, ρ, U.u, c)
-    Fx⁺ = bounded_face_flux_x(i+1, j, k, grid, advection, ρ, U.u, c)
-    Fy⁻ = bounded_face_flux_y(i, j,   k, grid, advection, ρ, U.v, c)
-    Fy⁺ = bounded_face_flux_y(i, j+1, k, grid, advection, ρ, U.v, c)
-    Fz⁻ = bounded_face_flux_z(i, j, k,   grid, advection, ρ, wᵉ, c)
-    Fz⁺ = bounded_face_flux_z(i, j, k+1, grid, advection, ρ, wᵉ, c)
-    @inbounds inflow = max(0, Fx⁻) * r[i-1, j, k] - min(0, Fx⁺) * r[i+1, j, k] +
-                       max(0, Fy⁻) * r[i, j-1, k] - min(0, Fy⁺) * r[i, j+1, k] +
-                       max(0, Fz⁻) * r[i, j, k-1] - min(0, Fz⁺) * r[i, j, k+1]
+    inflow = limited_inflow_x(i, j, k, grid, advection, ρ, U.u, c, r) +
+             limited_inflow_y(i, j, k, grid, advection, ρ, U.v, c, r) +
+             limited_inflow_z(i, j, k, grid, advection, ρ, wᵉ, c, r)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * inflow
 end
 

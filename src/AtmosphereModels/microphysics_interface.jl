@@ -347,8 +347,9 @@ struct SinkLimiter{I, C, B, T}
     Δt :: T                  # stage interval; `Inf` disables the limiter
 end
 
+# `Δt` is adapted too: under Reactant it is a traced number that the kernel adaptor must convert.
 Adapt.adapt_structure(to, l::SinkLimiter) =
-    SinkLimiter(adapt(to, l.initial), adapt(to, l.current), l.from_initial_state, l.Δt)
+    SinkLimiter(adapt(to, l.initial), adapt(to, l.current), l.from_initial_state, adapt(to, l.Δt))
 
 """
 $(TYPEDSIGNATURES)
