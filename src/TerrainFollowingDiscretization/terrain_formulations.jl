@@ -160,11 +160,13 @@ Oceananigans.Architectures.on_architecture(arch, f::TwoLevelDecay) =
 ##### read instead of a transcendental.
 #####
 
-struct TwoLevelBasis{A}
-    b₁ᶜ :: A; b₁ᶠ :: A     # b₁(r) at Center, Face   (large scale, s₁)
-    b₂ᶜ :: A; b₂ᶠ :: A     # b₂(r) at Center, Face   (small scale, s₂)
-    ∂b₁ᶜ :: A; ∂b₁ᶠ :: A   # b₁′(r) at Center, Face
-    ∂b₂ᶜ :: A; ∂b₂ᶠ :: A   # b₂′(r) at Center, Face
+# Center and Face arrays may have different types (Oceananigans encodes
+# the array size in the type), hence the two type parameters.
+struct TwoLevelBasis{C, F}
+    b₁ᶜ :: C; b₁ᶠ :: F     # b₁(r) at Center, Face   (large scale, s₁)
+    b₂ᶜ :: C; b₂ᶠ :: F     # b₂(r) at Center, Face   (small scale, s₂)
+    ∂b₁ᶜ :: C; ∂b₁ᶠ :: F   # b₁′(r) at Center, Face
+    ∂b₂ᶜ :: C; ∂b₂ᶠ :: F   # b₂′(r) at Center, Face
 end
 
 Adapt.adapt_structure(to, c::TwoLevelBasis) =
