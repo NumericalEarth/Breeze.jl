@@ -138,7 +138,7 @@ Mellor 1977). Closures that do not prognose second moments supply them with the 
 form ⟨φ'ψ'⟩ = (`variance_coefficient` ℓ² + `grid_variance_coefficient` Δz²) ∂zφ ∂zψ: the
 mixing-length variance of Bechtold et al. (1995), with ℓ the closure's mixing length, plus the
 variance of the resolved gradient within the cell (Δz²/12 for a linear profile). The microphysics
-floors the saturation-deficit spread in quadrature, σₛ² + `minimum_saturation_deficit_spread`².
+floors the saturation-deficit spread in quadrature, σₛ² + σ₀², with σ₀ = `minimum_saturation_deficit_spread` (P3 caps it at qᵛ⁺/10 and applies the distribution to warm cells only).
 
 Cloud liquid relaxes toward the distribution's equilibrium condensate over the relaxation
 timescale τ of the condensate-formation model `condensation` (for example an

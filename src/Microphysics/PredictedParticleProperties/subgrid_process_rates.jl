@@ -19,7 +19,9 @@
 # * activation sees the supersaturated tail, with in-cloud vapor excess Γ (q⁺ - qᶜˡ) / C,
 #   weighted by C.
 #
-# Ice processes keep their grid-mean form. `DiracStatistics` returns the grid-mean rates unchanged.
+# The distribution applies to warm cells (T ≥ T₀); colder cells, and every ice process, keep the
+# grid-mean form. The spread floor is capped at a tenth of qᵛ⁺ so that it cannot condense the
+# vapor of dry, cold air. `DiracStatistics` returns the grid-mean rates unchanged.
 
 @inline p3_subgrid_phase1_rates(::DiracStatistics, phase1, p3, ρ, ℳ, 𝒰, constants, state) =
     (; phase1, cloud = nothing)
@@ -49,7 +51,8 @@
     b = a * Π * qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
     s̄ = (qᵛ - qᵛ⁺ˡ) / Γ + qᶜˡ
 
-    cloud = subgrid_cloud(𝒮, s̄, a, b, correlation.minimum_saturation_deficit_spread)
+    σ₀ = min(correlation.minimum_saturation_deficit_spread, qᵛ⁺ˡ / 10)
+    cloud = subgrid_cloud(𝒮, s̄, a, b, σ₀)
     C = cloud.C
     q⁺ = min(cloud.q⁺, max(0, qᵛ) + qᶜˡ)
     Cᶠ = max(C, correlation.minimum_cloud_fraction)
@@ -78,15 +81,22 @@
     rain_evaporation = min(clear_deficit * exponential_rate_factor(Λʳ, window),
                            max(0, qʳ) / window)
 
-    phase1_subgrid = P3Phase1Rates{FT}(condensation, activation.mass * C, activation.number * C,
-                                       autoconversion, accretion, phase1.cloud_self_collection,
-                                       rain_evaporation, zero(FT),
+    warm = T ≥ parameters.freezing_temperature
+    warm_rate(subgrid, grid_mean) = ifelse(warm, subgrid, grid_mean)
+    phase1_subgrid = P3Phase1Rates{FT}(warm_rate(condensation, phase1.condensation),
+                                       warm_rate(activation.mass * C, phase1.ccn_activation_mass),
+                                       warm_rate(activation.number * C, phase1.ccn_activation_number),
+                                       warm_rate(autoconversion, phase1.autoconversion),
+                                       warm_rate(accretion, phase1.accretion),
+                                       phase1.cloud_self_collection,
+                                       warm_rate(rain_evaporation, phase1.rain_evaporation),
+                                       warm_rate(zero(FT), phase1.rain_condensation),
                                        phase1.rain_self_collection, phase1.rain_breakup,
                                        phase1.deposition, phase1.coating_condensation,
                                        phase1.coating_evaporation, phase1.partial_melting,
                                        phase1.complete_melting, phase1.melting_number)
 
-    return (; phase1 = phase1_subgrid, cloud = (; q⁺, qᶜˡ, window))
+    return (; phase1 = phase1_subgrid, cloud = (; q⁺, qᶜˡ, window, warm))
 end
 
 #####
@@ -98,12 +108,18 @@ end
 
 # Subgrid: condensation is already bounded by its exponential approach to q⁺, so the grid-mean
 # liquid threshold is dropped. The other liquid sources share the room left below q⁺; the
-# ice-phase caps are unchanged.
+# ice-phase caps are unchanged. Cells below freezing take the grid-mean caps.
 @inline function limit_vapor_rates(cloud::NamedTuple, cond, ccn_activation_mass, ccn_activation_number,
                                    rain_cond, rain_evap, dep, coat_cond, coat_evap,
                                    nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
                                    dt_safety, freezing_temperature,
                                    temperature_tendency, pressure_tendency)
+    grid_mean = limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                  rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                                  nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
+                                  dt_safety, freezing_temperature,
+                                  temperature_tendency, pressure_tendency)
+
     room = max(0, (cloud.q⁺ - cloud.qᶜˡ) / cloud.window - max(0, cond))
     f_source = sink_limiting_factor(ccn_activation_mass + rain_cond + coat_cond, room * dt_safety, dt_safety)
     ccn_activation_mass = ccn_activation_mass * f_source
@@ -111,9 +127,11 @@ end
     rain_cond = rain_cond * f_source
     coat_cond = coat_cond * f_source
 
-    return limit_ice_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
-                                 rain_cond, rain_evap, dep, coat_cond, coat_evap,
-                                 nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
-                                 dt_safety, freezing_temperature,
-                                 temperature_tendency, pressure_tendency)
+    subgrid = limit_ice_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                    rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                                    nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
+                                    dt_safety, freezing_temperature,
+                                    temperature_tendency, pressure_tendency)
+
+    return map((s, g) -> ifelse(cloud.warm, s, g), subgrid, grid_mean)
 end
