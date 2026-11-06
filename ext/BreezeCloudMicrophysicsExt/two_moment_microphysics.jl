@@ -382,6 +382,10 @@ function AtmosphereModels.materialize_microphysical_fields(bμp::WPNE2M, grid, b
     return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ)
 end
 
+# Diagnostic liquid (cloud liquid + rain), used e.g. by `set_to_mean!`
+AtmosphereModels.liquid_mass_fraction(::WPNE2M, model) = model.microphysical_fields.qˡ
+AtmosphereModels.ice_mass_fraction(::WPNE2M, model) = nothing
+
 #####
 ##### Update microphysical fields (diagnostics + terminal velocities)
 #####
