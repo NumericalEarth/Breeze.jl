@@ -404,7 +404,7 @@ $(TYPEDSIGNATURES)
 
 Return the prognostic density field for `CompressibleDynamics`.
 """
-AtmosphereModels.dynamics_density(dynamics::CompressibleDynamics) = dynamics.dry_density
+AtmosphereModels.continuity_density(dynamics::CompressibleDynamics) = dynamics.dry_density
 
 """
 $(TYPEDSIGNATURES)
@@ -464,7 +464,7 @@ AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_st
 
 # Total air density ρ = ρᵈ + Σρˣ (diagnosed once per update into `total_density`); this is the
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
-# coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
+# continuity density `continuity_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
 AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
 
 # Sedimentation drains the diagnosed total density but not the prognostic dry density (its
@@ -647,14 +647,6 @@ Return the pressure field for potential temperature diagnostics.
 For compressible dynamics, uses the actual pressure field.
 """
 AtmosphereModels.Diagnostics.dynamics_pressure_for_potential_temperature(dynamics::CompressibleDynamics) = dynamics.pressure
-
-"""
-$(TYPEDSIGNATURES)
-
-Return the density field for potential temperature diagnostics.
-For compressible dynamics, uses the diagnosed total air density (the moisture fractions need total ρ).
-"""
-AtmosphereModels.Diagnostics.dynamics_density_for_potential_temperature(dynamics::CompressibleDynamics) = dynamics.total_density
 
 """
 $(TYPEDSIGNATURES)
