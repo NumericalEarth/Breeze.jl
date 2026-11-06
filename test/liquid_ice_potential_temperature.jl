@@ -39,6 +39,34 @@ pressure_state(θ, q, p, κ̂) = TD.LiquidIcePotentialTemperatureState(θ, q, of
         end
     end
 
+    @testset "Density inversion sensitivity [$κ̂, $FT]" for κ̂ in exponents, FT in (Float32, Float64)
+        constants = ThermodynamicConstants(FT)
+        pˢᵗ = FT(1e5)
+        ρ = FT(1)
+        θ = FT(300)
+        ε = FT === Float32 ? FT(5e-3) : FT(1e-5)
+        rtol = FT === Float32 ? FT(1e-3) : FT(1e-6)
+        solvers = temperature_solver_variants(FT)
+
+        for solver in solvers, fractions in ((0, 0, 0), (0.01, 0.01, 0),
+                                             (0.002, 0, 0.01), (0.005, 0.005, 0.005))
+            q = TD.MoistureMassFractions(FT.(fractions)...)
+            𝒰 = TD.LiquidIceDensityState(θ, q, pˢᵗ, ρ, solver, κ̂)
+            T, θ∂T∂θ = @inferred TD.temperature_and_sensitivity(𝒰, constants)
+            T⁺ = TD.temperature(TD.LiquidIceDensityState(θ * (1 + ε), q, pˢᵗ, ρ, solver, κ̂), constants)
+            T⁻ = TD.temperature(TD.LiquidIceDensityState(θ * (1 - ε), q, pˢᵗ, ρ, solver, κ̂), constants)
+            @test T == TD.temperature(𝒰, constants)
+            @test θ∂T∂θ ≈ (T⁺ - T⁻) / 2ε rtol=rtol
+        end
+
+        # A fixed iteration count must preserve the finite, uninitialized dry state too.
+        q = zero(TD.MoistureMassFractions{FT})
+        for solver in solvers
+            𝒰 = TD.LiquidIceDensityState(zero(FT), q, pˢᵗ, ρ, solver, κ̂)
+            @test TD.temperature_and_sensitivity(𝒰, constants) == (zero(FT), zero(FT))
+        end
+    end
+
     @testset "Phase change at fixed θˡⁱ, p and qᵗ conserves enthalpy [$κ̂]" for κ̂ in exponents
         constants = ThermodynamicConstants(Float64)
         q₀ = TD.MoistureMassFractions(0.01, 0.001, 0.0005)
