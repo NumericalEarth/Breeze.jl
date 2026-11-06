@@ -15,7 +15,7 @@ using LazyArtifacts: LazyArtifacts
 The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
-struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS}
+struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS, SG}
     # Top-level thresholds
     minimum_mass_mixing_ratio :: FT
     minimum_number_mixing_ratio :: FT
@@ -33,6 +33,8 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NM
     aerosol :: AERO
     # Warm-rain (autoconversion/accretion/self-collection) scheme selector
     warm_rain_scheme :: WRS
+    # Subgrid distribution over which the warm-phase rates are averaged
+    subgrid :: SG
 end
 
 """
@@ -126,6 +128,15 @@ Pass `aerosol = AerosolActivation(AerosolMode())` to predict droplet number from
 aerosol activation. Set `prognostic=true` in [`AerosolActivation`](@ref) to also
 track depletion of the unactivated aerosol reservoir.
 
+# Subgrid condensation
+
+`subgrid = GaussianSubgridCorrelation(FT)` averages the warm-phase rates over a Gaussian
+distribution of the saturation deficit whose spread the turbulence closure supplies through
+`subgrid_statisticsᶜᶜᶜ`: cloud liquid relaxes toward the partial-cloud equilibrium σₛ G(Q)
+instead of grid-mean saturation, autoconversion and accretion act on the cloudy fraction, rain
+evaporates in the clear fraction, and activation sees the supersaturated tail. Ice processes are
+unchanged. The default `NoSubgridCorrelation()` is the grid-mean scheme.
+
 # Configuring the empirical warm-phase parameters
 
 The cloud-width, rain fall-speed, and rain-ventilation fits are each owned by a small
@@ -197,7 +208,8 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  process_rates = nothing,
                                                  vapor_excess = DiagnosticVaporExcess(),
                                                  liquid_fraction = PrognosticLiquidFraction(),
-                                                 warm_rain_scheme = KhairoutdinovKogan2000())
+                                                 warm_rain_scheme = KhairoutdinovKogan2000(),
+                                                 subgrid = NoSubgridCorrelation())
     if isnothing(process_rates)
         process_rates = ProcessRate(FT; thermodynamic_constants,
                                     vapor_excess, liquid_fraction)
@@ -207,7 +219,7 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                               minimum_mass_mixing_ratio, minimum_number_mixing_ratio,
                               precipitation_boundary_condition,
                               negative_moisture_correction,
-                              aerosol, cloud, rain, process_rates, warm_rain_scheme)
+                              aerosol, cloud, rain, process_rates, warm_rain_scheme, subgrid)
 end
 
 # Shorthand alias

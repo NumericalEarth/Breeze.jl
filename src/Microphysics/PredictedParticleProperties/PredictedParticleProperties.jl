@@ -119,7 +119,14 @@ using SpecialFunctions: erf
 using Adapt: Adapt
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU, on_architecture
-using Breeze.AtmosphereModels: prognostic_field_names
+using Breeze.AtmosphereModels: prognostic_field_names,
+                                DiracStatistics,
+                                NoSubgridCorrelation
+using Breeze.Microphysics: subgrid_cloud,
+                           scaled_relaxation_timescale,
+                           relaxation_window,
+                           exponential_rate_factor
+using Breeze.Thermodynamics: exner_function
 using Breeze.Thermodynamics: MoistureMassFractions,
                              PlanarIceSurface,
                              PlanarLiquidSurface,
@@ -245,6 +252,7 @@ include("coupled_saturation_adjustment.jl")
 
 include("process_rates.jl")
 include("rain_process_rates.jl")
+include("subgrid_process_rates.jl")
 include("melting_rates.jl")
 include("ice_nucleation_rates.jl")
 include("ice_aggregation_rates.jl")

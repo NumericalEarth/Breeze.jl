@@ -86,7 +86,8 @@ end
 ##### whichever bracket matches the population it belongs to.
 #####
 
-@kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
+@kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities,
+                                            closure, closure_fields, subgrid_state)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -106,10 +107,13 @@ end
         surface_temperature = μ.surface_temperature[i, j, 1]
     end
 
+    # Subgrid statistics from the closure; `DiracStatistics` without a subgrid distribution.
+    𝒮 = AM.subgrid_statisticsᶜᶜᶜ(i, j, k, grid, p3.subgrid, closure, closure_fields, subgrid_state)
+
     properties = p3_process_properties(p3, ρ, ℳ)
     result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
                                  surface_temperature, temperature_tendency,
-                                 pressure_tendency)
+                                 pressure_tendency, 𝒮)
     add_p3_tendencies!(G, i, j, k, grid, p3, result)
 end
 
@@ -151,10 +155,26 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
             p3_tendency_fields(model.timestepper.Gⁿ, p3),
             μ, model.formulation, model.dynamics, grid,
             model.thermodynamic_constants, p3, ρ_field,
-            model.velocities)
+            model.velocities, model.closure, model.closure_fields,
+            p3_subgrid_state(p3.subgrid, model))
 
     return nothing
 end
+
+AM.subgrid_correlation(p3::P3) = p3.subgrid
+
+# The conserved variables the closure's subgrid statistics are built from: θˡⁱ and the
+# non-precipitating total water qᵗ = qᵛ + qᶜˡ. Not needed without a subgrid distribution.
+p3_subgrid_state(::NoSubgridCorrelation, model) = nothing
+
+function p3_subgrid_state(subgrid, model)
+    qᵗ = KernelFunctionOperation{Center, Center, Center}(p3_cloud_water, model.grid,
+                                                         AM.total_density(model.dynamics),
+                                                         model.microphysical_fields)
+    return (; θ = AM.liquid_ice_potential_temperature(model), qᵗ)
+end
+
+@inline p3_cloud_water(i, j, k, grid, ρ, μ) = @inbounds μ.qᵛ[i, j, k] + μ.ρqᶜˡ[i, j, k] / ρ[i, j, k]
 
 #####
 ##### Number concentration diagnostic

@@ -129,6 +129,24 @@ Returns a NamedTuple of the possibly-rescaled rates.
     rain_evap = rain_evap * f_evp
     coat_evap = coat_evap * f_evp
 
+    return limit_ice_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                 rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                                 nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
+                                 dt_safety, freezing_temperature,
+                                 temperature_tendency, pressure_tendency)
+end
+
+# The ice-phase caps of `limit_vapor_rates`, applied after the liquid-phase rates are final.
+@inline function limit_ice_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                       rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                                       nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
+                                       dt_safety, freezing_temperature,
+                                       temperature_tendency, pressure_tendency)
+    FT = typeof(qᵛ)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)
+    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
+
     # Ice-phase cap, after netting the rescaled liquid tendencies into qᵛ and T.
     net_liquid = max(0, cond) + ccn_activation_mass + rain_cond + coat_cond -
                  rain_evap - coat_evap - max(0, -cond)

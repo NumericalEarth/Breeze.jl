@@ -36,8 +36,8 @@ using Oceananigans.Operators:
     ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ,
     # Vertical derivative at faces, for the static stability
     ∂zᶜᶜᶠ,
-    # Cell height, for the mixing-length sweeps
-    Δzᶜᶜᶜ
+    # Cell heights, for the mixing-length sweeps and the subgrid statistics
+    Δzᶜᶜᶜ, Δzᶜᶜᶠ
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
@@ -55,6 +55,7 @@ using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using ..AtmosphereModels: AtmosphereModels
+using Breeze.AtmosphereModels: GaussianSubgridCorrelation, GaussianStatistics
 
 using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, standard_pressure, total_density, thermodynamic_state_density,
                               precipitating_mass_fraction
@@ -171,5 +172,6 @@ end
 include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
 include("richardson_number_stability_functions.jl")
+include("subgrid_statistics.jl")
 
 end # module TurbulenceClosures

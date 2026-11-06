@@ -679,14 +679,14 @@ end
 @inline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
                                      constants, properties::P3ProcessProps,
                                      surface_temperature, temperature_tendency,
-                                     pressure_tendency)
+                                     pressure_tendency, 𝒮 = DiracStatistics{typeof(ρ)}())
     Fᶠ = properties.Fᶠ
     ρᶠ = properties.ρᶠ
     # Passing `properties` lets compute_p3_process_rates skip the redundant
     # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                      surface_temperature, temperature_tendency,
-                                     pressure_tendency)
+                                     pressure_tendency, 𝒮)
 
     # Tendency extraction
     cloud_mass_tendency = tendency_ρqᶜˡ(rates, ρ)

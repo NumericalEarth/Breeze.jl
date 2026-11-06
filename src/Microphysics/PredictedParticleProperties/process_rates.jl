@@ -560,10 +560,16 @@ end
 # Everything from here down is `@inline`. A `@noinline` device function would receive `p3`
 # (several KB of table handles), `ℳ`, `𝒰`, and `constants` as local-memory copies, and
 # ptxas allocates registers over the whole call graph anyway.
+@inline compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                                  surface_temperature, temperature_tendency, pressure_tendency) =
+    compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                             surface_temperature, temperature_tendency, pressure_tendency,
+                             DiracStatistics{typeof(ρ)}())
+
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
-                                          pressure_tendency)
+                                          pressure_tendency, 𝒮)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -656,8 +662,11 @@ end
                                                            lookups)
 
     # === PHASE 1 & 2 RATES ===
-    phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
-                             temperature_tendency, pressure_tendency)
+    phase1_grid_mean = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
+                                       temperature_tendency, pressure_tendency)
+    # Subgrid (PDF) averaging of the warm-phase rates; the identity for `DiracStatistics`.
+    subgrid = p3_subgrid_phase1_rates(𝒮, phase1_grid_mean, p3, ρ, ℳ_adjusted, 𝒰, constants, state)
+    phase1 = subgrid.phase1
     phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===
@@ -755,7 +764,7 @@ end
     # budgets, so the cloud/rain/ice budgets below must see the final vapor-limited
     # rates.
     qᵗ = q.vapor + q.liquid + q.ice
-    vapor_rates = limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+    vapor_rates = limit_vapor_rates(subgrid.cloud, cond, ccn_activation_mass, ccn_activation_number,
                                     rain_cond, rain_evap, dep, coat_cond, coat_evap,
                                     nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
                                     dt_safety, T₀, temperature_tendency, pressure_tendency)

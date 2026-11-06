@@ -46,6 +46,17 @@ export
     SpeciesBorrowing,
     AbstractNumberConcentrationCategories,
 
+    # Subgrid statistics (closure → microphysics)
+    AbstractSubgridStatistics,
+    DiracStatistics,
+    GaussianStatistics,
+    DoubleGaussianStatistics,
+    AbstractSubgridCorrelation,
+    NoSubgridCorrelation,
+    GaussianSubgridCorrelation,
+    subgrid_correlation,
+    subgrid_statisticsᶜᶜᶜ,
+
     # Microphysics interface
     AbstractMicrophysicalState,
     NothingMicrophysicalState,
@@ -144,6 +155,8 @@ using Oceananigans.Solvers: Solvers
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
+using SpecialFunctions: gamma
+
 # Convert Δt to the kernel-compatible time type for `grid`'s architecture.
 # Metal cannot load Float64 kernel arguments, so we must convert at the launch
 # site for Float32 grids. Reactant tracing breaks if we convert outside the
@@ -161,6 +174,7 @@ using Oceananigans.Utils: prettysummary, launch!
 #####
 
 include("forcing_interface.jl")
+include("subgrid_statistics.jl")
 include("microphysics_interface.jl")
 include("dynamics_interface.jl")
 include("formulation_interface.jl")
