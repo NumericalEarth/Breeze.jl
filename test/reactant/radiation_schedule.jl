@@ -4,7 +4,7 @@ include(joinpath(dirname(@__DIR__), "setup.jl"))
 ##### Reactant: scheduled radiation inside traced time stepping, and Kessler microphysics
 #####
 #
-# `update_radiation!` is a traced conditional under Reactant (BreezeReactantExt), which needs a
+# The end-of-step radiation update (`update_radiation_at_end_of_step!`) is a traced conditional under Reactant (BreezeReactantExt), which needs a
 # stateless `IterationInterval`; `validate_schedule` rejects other schedules when the model is
 # built. A stub radiation model, whose update depends on the temperature and counts itself, checks
 # that a traced window updates radiation as often and with the same result as an eager one, with
@@ -98,7 +98,13 @@ column_state(model) = map(f -> Array(interior(f)), (model.temperature, model.mic
             time_step!(eager, Δt)
         end
         eager_updates = radiation_updates(eager) - before
-        @test eager_updates == 1 + count(n -> n % 4 == 0, 1:steps-1) # initialization, then once per scheduled iteration
+        @test eager_updates == 1 + count(n -> n % 4 == 0, 1:steps) # initialization, then at the end of each step reaching a scheduled iteration
+
+        # The fluxes come from the end-of-step (post-Kessler) state of the last scheduled step
+        if steps % 4 == 0
+            T = Array(interior(eager.temperature))
+            @test Array(interior(eager.radiation.flux_divergence)) ≈ 1e-2 .* (T .- 285)
+        end
 
         for window! in (prepared_window!, first_step_window!)
             model = scheduled_radiation_column(ReactantState(), schedule)
