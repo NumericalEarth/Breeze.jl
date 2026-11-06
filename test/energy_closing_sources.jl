@@ -9,6 +9,7 @@ using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using Oceananigans
 using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.Grids: ColumnEnsembleSize
 using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization
 using Oceananigans.TimeSteppers: update_state!
 using Test
@@ -361,4 +362,38 @@ end
     none = shear_flow_rates(nothing)
     reference = shear_flow_rates(nothing; dissipative_heating = false)
     @test Array(interior(none.timestepper.Gⁿ.ρθ)) == Array(interior(reference.timestepper.Gⁿ.ρθ))
+end
+
+# A single column, or a forest of them, of the shear flow above on the anelastic core
+function shear_flow_column(closure; ensemble = nothing, dissipative_heating = true)
+    Nz = 32
+    size = isnothing(ensemble) ? Nz : ColumnEnsembleSize(; Nz, ensemble, Hz=3)
+    grid = RectilinearGrid(default_arch; size, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    reference_state = ReferenceState(grid, ThermodynamicConstants(); potential_temperature = 300)
+    formulation = LiquidIcePotentialTemperatureFormulation(; dissipative_heating)
+    model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), formulation, closure)
+    set!(model; θ = 300, u = z -> 5 * cos(π * z / 1000))
+    update_state!(model)
+    AM.compute_tendencies!(model)
+    return model
+end
+
+@testset "Dissipative heating with a TKE closure and a per-column closure array" begin
+    # The kinetic energy a TKE closure removes feeds the subgrid TKE, so the option adds nothing
+    tke_on = shear_flow_rates(TKEBasedTurbulenceClosure())
+    tke_off = shear_flow_rates(TKEBasedTurbulenceClosure(); dissipative_heating = false)
+    @test Array(interior(tke_on.timestepper.Gⁿ.ρθ)) == Array(interior(tke_off.timestepper.Gⁿ.ρθ))
+
+    # Each column of a forest with its own closure heats like a standalone column with that closure
+    N₁, N₂ = 2, 1
+    ν(i, j) = 10.0 * (i + N₁ * (j - 1))
+    closures = [VerticalScalarDiffusivity(ν = ν(i, j)) for i in 1:N₁, j in 1:N₂]
+    forest = shear_flow_column(closures; ensemble = (N₁, N₂))
+    forest_off = shear_flow_column(closures; ensemble = (N₁, N₂), dissipative_heating = false)
+    Gρθ = Array(interior(forest.timestepper.Gⁿ.ρθ))
+    @test any(!=(0), Gρθ .- Array(interior(forest_off.timestepper.Gⁿ.ρθ)))
+    for j in 1:N₂, i in 1:N₁
+        column = shear_flow_column(VerticalScalarDiffusivity(ν = ν(i, j)))
+        @test Gρθ[i, j, :] == Array(interior(column.timestepper.Gⁿ.ρθ))[1, 1, :]
+    end
 end
