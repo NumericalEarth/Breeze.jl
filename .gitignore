@@ -71,4 +71,5 @@ examples/atsc-jas-d-18-0357*
 
 # Benchmarking output
 *.json
+!.github/renovate.json
 benchmark_results.md
