@@ -98,7 +98,7 @@ As with other diagnostics, `RelativeHumidity` may be wrapped in `Field` to store
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×134 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
+└── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
     └── max=0.214949, min=0.137169, mean=0.172626
 ```
 
@@ -114,7 +114,7 @@ We also provide a convenience constructor for the Field:
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×134 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
+└── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
     └── max=0.214949, min=0.137169, mean=0.172626
 ```
 """
@@ -147,7 +147,7 @@ function (d::RelativeHumidityKernelFunction)(i, j, k, grid)
     # Vapor specific humidity
     qᵛ = q.vapor
 
-    ρ = thermodynamic_state_density(i, j, k, d.dynamics, T, q, constants)
+    ρ = gas_phase_density(i, j, k, d.dynamics, T, q, constants)
 
     # Vapor pressure from ideal gas law: pᵛ = ρᵛ Rᵛ T = ρ qᵛ Rᵛ T
     Rᵛ = vapor_gas_constant(constants)

@@ -120,7 +120,6 @@ using Adapt: Adapt
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU, on_architecture
 using Breeze.AtmosphereModels: prognostic_field_names
-using Breeze.Microphysics: thermodynamic_adjustment_factor
 using Breeze.Thermodynamics: MoistureMassFractions,
                              PlanarIceSurface,
                              PlanarLiquidSurface,
@@ -131,7 +130,6 @@ using Breeze.Thermodynamics: MoistureMassFractions,
                              dry_air_gas_constant,
                              ice_latent_heat,
                              liquid_latent_heat,
-                             mixture_gas_constant,
                              mixture_heat_capacity,
                              psychrometric_correction,
                              saturation_specific_humidity,

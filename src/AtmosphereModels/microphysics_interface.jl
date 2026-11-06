@@ -226,17 +226,10 @@ without grid indexing. It works identically for grid-based LES and parcel models
 # Arguments
 - `microphysics`: The microphysics scheme
 - `name`: Variable name as `Val(:name)` (e.g., `Val(:ρqᶜˡ)`)
-- `ρ`: Total density, [`total_density`](@ref), which weights the density-weighted prognostics
-  and their tendencies (scalar). Because the prognostic condensate content is ``ρ q``, it also sets
-  the precipitation size distributions. On the anelastic core this is the reference density ``ρᵣ``.
+- `ρ`: Local density (scalar)
 - `ℳ`: Microphysical state (e.g., `WarmPhaseOneMomentState`)
 - `𝒰`: Thermodynamic state
 - `constants`: Thermodynamic constants
-
-Saturation must not use `ρ`. The saturation specific humidity ``qᵛ⁺ = pᵛ⁺ / (ρᵗʰ Rᵛ T)`` and the
-supersaturation use the thermodynamic state density `density(𝒰, constants)`, which
-[`thermodynamic_state_density`](@ref) also returns: ``ρᵗʰ = pᵣ / (Rᵐ T)`` on the anelastic core and
-the total density on the compressible core.
 
 # Returns
 The tendency value (scalar, units depend on variable).
@@ -345,43 +338,43 @@ $(TYPEDEF)
 
 Limits the microphysical sinks of a set of species to what the coming stage leaves of each,
 `q⁰ + Δt Gᵒ`, with `q⁰` the state the stage starts from and `Gᵒ` every other tendency.
-See [`positivity_preserving_fraction`](@ref).
+See [`sink_fraction`](@ref).
 """
-struct SinkLimiter{S, T}
-    stage_start :: S  # densities of the species at the state the coming stage starts from
-    Δt :: T           # stage interval; `Inf` disables the limiter
+struct SinkLimiter{I, C, B, T}
+    initial :: I             # step-start densities of the species
+    current :: C             # current densities of the species
+    from_initial_state :: B  # whether the stage starts from `initial` (else `current`)
+    Δt :: T                  # stage interval; `Inf` disables the limiter
 end
 
-# `Δt` is adapted too: under Reactant it is a traced number that the kernel adaptor must convert.
-Adapt.adapt_structure(to, l::SinkLimiter) = SinkLimiter(adapt(to, l.stage_start), adapt(to, l.Δt))
+Adapt.adapt_structure(to, l::SinkLimiter) =
+    SinkLimiter(adapt(to, l.initial), adapt(to, l.current), l.from_initial_state, l.Δt)
 
 """
 $(TYPEDSIGNATURES)
 
-The [`SinkLimiter`](@ref) of the prognostic species `names` of `model`. Which state the coming
-stage starts from, the step-start `U⁰` or the current prognostic fields, is resolved here on the
-host, so the kernel reads one array per species.
+The [`SinkLimiter`](@ref) of the prognostic species `names` of `model`.
 """
-function SinkLimiter(model, names::Tuple{Vararg{Symbol}})
+function SinkLimiter(model, names)
+    prognostic = prognostic_fields(model)
+    initial = map(n -> getproperty(model.timestepper.U⁰, n), names)
+    current = map(n -> getproperty(prognostic, n), names)
     from_initial_state = stage_starts_from_initial_state(model.timestepper, model.clock)
-    fields = from_initial_state ? model.timestepper.U⁰ : prognostic_fields(model)
-    stage_start = map(n -> getproperty(fields, n), names)
-    return SinkLimiter(stage_start, stage_time_step(model.timestepper, model.clock))
+    return SinkLimiter(initial, current, from_initial_state, stage_time_step(model.timestepper, model.clock))
 end
 
 """
 $(TYPEDSIGNATURES)
 
-The largest common scale factor `f ∈ [0, 1]` on the microphysical tendencies `Gᵐ` of cell
-`(i, j, k)` such that no species goes negative over the coming stage of length `Δt`:
-`qₛₜₐᵣₜ + Δt (Gᵒ + f Gᵐ) ≥ 0` for every species, where `qₛₜₐᵣₜ` is its density at the state the
-stage starts from and `Gᵒ` the other tendencies already accumulated in `G`. One factor for
-every species keeps the exchanges between them conserved. `f = 1` when `Δt = Inf`.
+The largest fraction `f ∈ [0, 1]` of the microphysical tendencies `Gᵐ` of cell `(i, j, k)` that
+the coming stage can apply without driving a species negative, given the other tendencies `G`
+already accumulated. One fraction for every species keeps the exchanges between them conserved.
 """
-@inline function positivity_preserving_fraction(i, j, k, grid, limiter, G, Gᵐ)
+@inline function sink_fraction(limiter, G, Gᵐ, i, j, k)
     Δt = limiter.Δt
-    fractions = map(limiter.stage_start, G, Gᵐ) do q, Gᵒ, gᵐ
-        @inbounds available = max(0, q[i, j, k] + Δt * Gᵒ[i, j, k])
+    fractions = map(limiter.initial, limiter.current, G, Gᵐ) do q⁰, qᶜ, Gᵒ, gᵐ
+        @inbounds q = ifelse(limiter.from_initial_state, q⁰[i, j, k], qᶜ[i, j, k])
+        @inbounds available = max(0, q + Δt * Gᵒ[i, j, k])
         demand = - Δt * gᵐ
         ifelse(demand > available, available / demand, one(demand))
     end
@@ -405,7 +398,7 @@ end
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, microphysical_fields, ρ, 𝒰, velocities)
 
     Gᵐ = map(name -> microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants), name_tuple)
-    f = positivity_preserving_fraction(i, j, k, grid, limiter, G_tuple, Gᵐ)
+    f = sink_fraction(limiter, G_tuple, Gᵐ, i, j, k)
     map((G, g) -> @inbounds(G[i, j, k] += f * g), G_tuple, Gᵐ)
 end
 
@@ -1097,8 +1090,8 @@ end
 # reconstructions per cell, and at the velocity that tendency transports the tracer with),
 # weighted like it by the total density; the enthalpy each brings is that of the cell it drains
 # (`condensate_content_fluxes`), the cell above the face when the condensate falls, the cell
-# below when an updraft outruns its fall speed; and the cell's continuity-to-total density ratio
-# turns the resulting change of the specific variable into that of the continuity-density-weighted
+# below when an updraft outruns its fall speed; and the cell's coupling-to-total density ratio
+# turns the resulting change of the specific variable into that of the coupling-weighted
 # prognostic.
 #
 # The content moves in the same two parts as the mass. `sedimentation_tendency` carries the part
@@ -1134,7 +1127,7 @@ function condensate_content end
 """
 $(TYPEDSIGNATURES)
 
-Return the tendency of the continuity-density-weighted thermodynamic variable (`ρθ = ρᵈ θ` or `ρs = ρᵈ s`)
+Return the tendency of the coupling-weighted thermodynamic variable (`ρθ = ρᵈ θ` or `ρs = ρᵈ s`)
 at cell `(i, j, k)` from the sedimentation of the condensate the `condensates` describe (see
 [`materialize_sedimentation`](@ref)): the part the tracer tendencies apply, which
 is the whole transport of an explicit scheme and the CFL-limited explicit fraction under adaptive
@@ -1151,7 +1144,7 @@ the tendency is
 where `Fᵢ(w)` is the vertical advective flux of condensate `i`'s humidity at velocity `w`
 through the face with the scheme that transports the tracer ([`sedimentation_mass_fluxes`](@ref)),
 `Wᵢ = wᵗ + wᵢ` its total velocity, `ρ` the [`total_density`](@ref) that weights the tracer's
-mass flux, `ρᵈ` the [`continuity_density`](@ref) that carries the thermodynamic variable, and
+mass flux, `ρᵈ` the [`dynamics_density`](@ref) that carries the thermodynamic variable, and
 `cᵢ(w) = χᵢ + (∂φ/∂h) (hᵢ(w) − hᵢ)` the content the flux delivers to the cell: the cell's own
 `χ` of the condensate's phase, plus its `∂φ/∂h` times the enthalpy in the upwind cell of `w` in
 excess of its own. A flux out drains the cell itself and delivers `χ` alone, changing the
@@ -1169,7 +1162,7 @@ does not. The `θˡⁱ` tendency is a cell-local response, not the divergence of
 conservative thermodynamic face flux. Continuity advances `ρᵈ` without a sedimentation source on
 every core, so the content moved per unit total mass is the change of the specific variable, and
 the cell's ratio `ρᵈ / ρ` (one on the anelastic core, the dry mass fraction on the compressible
-core) turns it into the change of the continuity-density-weighted prognostic.
+core) turns it into the change of the coupling-weighted prognostic.
 """
 @inline sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature) =
@@ -1195,12 +1188,12 @@ core) turns it into the change of the continuity-density-weighted prognostic.
     c⁺ = condensate_content(i, j, min(k + 1, grid.Nz), grid, formulation, dynamics, constants,
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     ρ = total_density(dynamics)
-    ρᵈ = continuity_density(dynamics)
+    ρᵈ = dynamics_density(dynamics)
     Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
     ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
     ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
-    @inbounds density_ratio = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
-    return -(density_ratio * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻))
+    @inbounds coupling_fraction = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
+    return -(coupling_fraction * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻))
 end
 
 # Σᵢ [cᵢ(Wᵢ) Fᵢ(Wᵢ) − cᵢ(wᵗ) Fᵢ(wᵗ)] through the lower and upper faces of cell (i, j, k): the
@@ -1314,16 +1307,6 @@ diagnostics, and tendencies) before returning — e.g. by calling `update_state!
 Defaults to a no-op; specific microphysics schemes extend this function.
 """
 microphysics_model_update!(microphysics::Nothing, model) = nothing
-
-"""
-$(TYPEDSIGNATURES)
-
-Whether an operator-split microphysics update refreshes halos, diagnostics, and all
-tendencies before returning for a finite positive time step. Such schemes must not
-read the incoming tendencies. The time stepper may omit the preceding tendency pass
-only when no tendency callbacks would be lost. Defaults to `false`.
-"""
-refreshes_state_after_update(microphysics) = false
 
 """
 $(TYPEDSIGNATURES)

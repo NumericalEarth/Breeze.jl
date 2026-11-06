@@ -342,14 +342,14 @@ function AtmosphereModel(grid;
     # is the single definition both sites go through.
     model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
                          auxiliary_model_fields(temperature), microphysical_fields)
-    continuity_density_field = continuity_density(dynamics)
+    coupling_density = dynamics_density(dynamics)
     mass_density = total_density(dynamics)
 
     # A per-column `coriolis` (an array of rotations) is moved to the grid architecture; a scalar
     # coriolis passes through. See `materialize_coriolis` (extended for arrays in `SingleColumnMode`).
     coriolis = materialize_coriolis(coriolis, arch)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
-                                       grid, coriolis, continuity_density_field, mass_density,
+                                       grid, coriolis, coupling_density, mass_density,
                                        velocities, dynamics, formulation, microphysics,
                                        specific_prognostic_moisture, microphysical_fields,
                                        thermodynamic_constants)
@@ -621,7 +621,7 @@ function route_moisture_forcing(user_forcings, microphysics)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
-                                  grid, coriolis, continuity_density_field, mass_density,
+                                  grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture, microphysical_fields,
                                   thermodynamic_constants)
@@ -632,7 +632,7 @@ function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields
 end
 
 function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
-                                  grid, coriolis, continuity_density_field, mass_density,
+                                  grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture, microphysical_fields,
                                   thermodynamic_constants)
@@ -641,7 +641,7 @@ function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
 end
 
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
-                                  grid, coriolis, continuity_density_field, mass_density,
+                                  grid, coriolis, coupling_density, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture, microphysical_fields,
                                   thermodynamic_constants)
@@ -690,24 +690,24 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
                             NamedTuple{specific_names}(map(n -> model_fields[n], specific_names)))
 
     # Momentum, the dynamics mass variable, and thermodynamic density are weighted by the
-    # continuity density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and
+    # coupling density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and
     # user tracers are total-air mass fractions and therefore use total density. So does the
     # :ρE energy-forcing key: a specific heating Ė becomes the volumetric ρ Ė, the same units as
     # a ρE forcing and the radiative flux divergence, which the formulations then convert.
-    continuity_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
+    coupling_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
                                    prognostic_momentum_field_names(dynamics)...,
                                    ρᵡ_name)
 
-    # Keep `density` as the continuity-density compatibility entry for other forcing
-    # materializers; SpecificForcing selects between the two explicit densities by target.
+    # Keep `density` as the coupling-density compatibility entry for other forcing
+    # materializers; SpecificForcing selects between the two explicit carriers by target.
     # The moisture state and thermodynamic constants let forcings that convert between
     # thermodynamic variables (e.g. `TemperatureForcing`) form the same local moisture mass
     # fractions as the tendency kernels.
     forcing_context = (; coriolis,
-                         density=continuity_density_field,
-                         continuity_density=continuity_density_field,
+                         density=coupling_density,
+                         coupling_density,
                          total_density=mass_density,
-                         continuity_density_names,
+                         coupling_density_names,
                          specific_fields,
                          microphysics,
                          microphysical_fields,

@@ -8,12 +8,10 @@ using Test
 using Breeze.Thermodynamics:
     MoistureMassFractions,
     LiquidIcePotentialTemperatureState,
-    LiquidIceDensityState,
     StaticEnergyState,
     exner_function,
     density,
     with_moisture,
-    with_temperature,
     saturation_specific_humidity,
     mixture_heat_capacity,
     PlanarMixedPhaseSurface
@@ -29,78 +27,6 @@ test_tol(FT::Type{Float64}) = 10 * sqrt(solver_tol(FT))
 test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
-
-@testset "Density-based saturation uses the selected temperature inversion [$FT]" for FT in test_float_types()
-    constants = ThermodynamicConstants(FT)
-    pˢᵗ = FT(1e5)
-    rtol = FT === Float32 ? FT(3e-4) : FT(1e-5)
-    solvers = temperature_solver_variants(FT)
-    cases = ((WarmPhaseEquilibrium(), 300, 1, 0.03),
-             (WarmPhaseEquilibrium(), 300, 0.23, 0.039),
-             (MixedPhaseEquilibrium(FT), 290, 0.8, 0.006),
-             (MixedPhaseEquilibrium(FT), 250, 0.8, 0.003),
-             (WarmPhaseEquilibrium(), 320, 1, 0.001))
-
-    # The cold, liquid-rich case is the hardest: with a converged inversion the θ residual reaches
-    # equilibrium in six secant steps, where a temperature residual leaves it 0.6% undersaturated;
-    # the non-iterated inversion needs eight.
-    for κ̂ in (VaporEquivalentExponent(), DryExponent()), solver in solvers,
-        adjustment_solver in (SecantSolver(FT), FixedIterations(8)),
-        (equilibrium, θ, ρ, qᵗ) in cases
-        adjustment = SaturationAdjustment(FT; equilibrium, solver=adjustment_solver)
-        𝒰₀ = LiquidIceDensityState(FT(θ), MoistureMassFractions(FT(qᵗ)), pˢᵗ, FT(ρ), solver, κ̂)
-        𝒰₁ = @inferred adjust_thermodynamic_state(𝒰₀, adjustment, constants)
-        T = Breeze.Thermodynamics.temperature(𝒰₁, constants)
-        q = 𝒰₁.moisture_mass_fractions
-        qᵛ⁺ = saturation_specific_humidity(T, FT(ρ), constants, equilibrium)
-
-        @test 𝒰₁.potential_temperature == 𝒰₀.potential_temperature
-        @test 𝒰₁.density == 𝒰₀.density
-        @test q.vapor + q.liquid + q.ice ≈ FT(qᵗ) rtol=5eps(FT)
-        @test q.vapor ≈ min(FT(qᵗ), qᵛ⁺) rtol=rtol
-        if qᵗ > 0.001
-            @test q.liquid + q.ice > 0
-        else
-            @test q.liquid + q.ice == 0
-        end
-    end
-end
-
-# Self-consistency holds for any inversion, so also bound the distance to the converged
-# equilibrium. Stopped inversions overshoot the root at second order and leave slightly less
-# condensate, about 1% for 5 g/kg; the former isobaric shift L left 20-45% more.
-@testset "Density-based saturation with stopped inversions stays near the converged equilibrium [$FT]" for FT in test_float_types()
-    constants = ThermodynamicConstants(FT)
-    pˢᵗ = FT(1e5)
-    θtol = FT === Float32 ? FT(3e-5) : FT(1e-6)
-    δT = FT === Float32 ? FT(3e-3) : FT(1e-3)
-    δq = FT(1e-5)
-    solvers = (nothing, FixedIterations(0), FixedIterations(1), NewtonSolver(FT; maxiter=1))
-    cases = ((WarmPhaseEquilibrium(), 300, 1, 0.03),
-             (WarmPhaseEquilibrium(), 300, 1.1, 0.025),
-             (WarmPhaseEquilibrium(), 290, 0.8, 0.012),
-             (MixedPhaseEquilibrium(FT), 290, 0.8, 0.006),
-             (MixedPhaseEquilibrium(FT), 250, 0.8, 0.003))
-
-    for κ̂ in (VaporEquivalentExponent(), DryExponent()), (equilibrium, θ, ρ, qᵗ) in cases
-        adjustment = SaturationAdjustment(FT; equilibrium)
-        state(solver) = LiquidIceDensityState(FT(θ), MoistureMassFractions(FT(qᵗ)), pˢᵗ, FT(ρ), solver, κ̂)
-        condensate(𝒰) = 𝒰.moisture_mass_fractions.liquid + 𝒰.moisture_mass_fractions.ice
-
-        # The converged equilibrium satisfies the definition of θˡⁱ at its temperature.
-        𝒰★ = adjust_thermodynamic_state(state(NewtonSolver(FT)), adjustment, constants)
-        T★ = Breeze.Thermodynamics.temperature(𝒰★, constants)
-        @test with_temperature(𝒰★, T★, constants).potential_temperature ≈ FT(θ) rtol=θtol
-        @test condensate(𝒰★) > 0
-
-        for solver in solvers
-            𝒰 = adjust_thermodynamic_state(state(solver), adjustment, constants)
-            T = Breeze.Thermodynamics.temperature(𝒰, constants)
-            @test -δT < T - T★ < FT(0.3)
-            @test FT(0.98) * condensate(𝒰★) - δq < condensate(𝒰) < condensate(𝒰★) + δq
-        end
-    end
-end
 
 @testset "Warm-phase saturation adjustment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT

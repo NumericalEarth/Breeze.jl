@@ -211,7 +211,7 @@ const ParcelModel = AtmosphereModel{<:ParcelDynamics}
 ##### Dynamics interface implementation
 #####
 
-AtmosphereModels.continuity_density(d::ParcelDynamics) = d.density
+AtmosphereModels.dynamics_density(d::ParcelDynamics) = d.density
 
 AtmosphereModels.prognostic_momentum_field_names(::ParcelDynamics) = ()
 AtmosphereModels.prognostic_dynamics_field_names(::ParcelDynamics) = ()

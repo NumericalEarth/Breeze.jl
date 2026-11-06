@@ -33,7 +33,6 @@ export
     LinearRamp,
     CubicRamp,
     Sin2Ramp,
-    GaussianRamp,
     ExplicitTimeStepping,
     balance_adiabatically!,
     AdiabaticBalancer,
@@ -67,7 +66,7 @@ export
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
-    continuity_density,
+    dynamics_density,
     dynamics_pressure,
     total_density,
 
@@ -183,8 +182,6 @@ export
     SSPRungeKutta3,
     AcousticRungeKutta3,
     AcousticSubstepper,
-    RoundToNearest,
-    StochasticRounding,
 
     # ParcelDynamics
     ParcelDynamics,
@@ -264,9 +261,6 @@ using .Utils
 include("Solvers.jl")
 using .Solvers
 
-include("RoundingTreatments.jl")
-using .RoundingTreatments
-
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
 
@@ -306,7 +300,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping,
                               UpperSponge,
-                              AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp, GaussianRamp,
+                              AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
                               ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")

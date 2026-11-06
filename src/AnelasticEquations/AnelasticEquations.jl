@@ -34,9 +34,8 @@ using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, Ab
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant,
-                             surface_temperature_value
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_pressure, fixed_pressure_state_density,
-                                pressure_anomaly,
+                             surface_temperature_value, density
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_pressure, pressure_anomaly,
                                 kernel_time_step
 
 # Import microphysics interface for buoyancy computation

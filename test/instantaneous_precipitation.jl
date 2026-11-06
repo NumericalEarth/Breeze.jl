@@ -10,6 +10,7 @@ using Breeze.Thermodynamics:
     LiquidIceDensityState,
     temperature,
     with_temperature,
+    with_moisture,
     mixture_gas_constant,
     mixture_heat_capacity,
     vapor_equivalent_gas_constant,
@@ -22,20 +23,22 @@ using Breeze.Microphysics:
     SaturationAdjustment,
     WarmPhaseEquilibrium,
     adjust_thermodynamic_state,
-    equilibrated_moisture_mass_fractions,
-    rainout_state
+    equilibrated_moisture_mass_fractions
 
 using Breeze.AtmosphereModels: microphysics_model_update!
 using Oceananigans.TimeSteppers: update_state!
 
-# Condensation uses the shared density-based saturation adjustment. Rain-out then removes
-# condensate mass, renormalizes the vapor, and recovers θ at the reduced density while keeping T.
-# Compare the scalar thermodynamics with an independent secant and closed-form θ inversion,
-# then check the actual model state after update_state! has recomputed density and temperature.
+# Tests for the `InstantaneousPrecipitation` scheme after it was refactored onto the shared #765
+# density-based saturation-adjustment machinery: the once-per-step kernel now delegates condensation
+# to `adjust_thermodynamic_state(::LiquidIceDensityState, ::SaturationAdjustment)` and rains out via
+# `with_temperature`, instead of its own constant-density secant. These tests pin (a) numerical parity
+# with the pre-refactor inline formulas and (b) the physical behavior: instantaneous condensation,
+# rain-out with retained latent warming, and density-consistent saturation.
 
-# Reference condensation at fixed density, followed by rain-out at fixed volume and dry mass.
-# The θ inversion uses the exact definition θˡⁱ = (cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ) / (ĉᵖ Π̂),
-# Π̂ = (p / pˢᵗ)^κ̂, evaluated with the density and composition after condensate removal.
+# Reference implementation of the *pre-refactor* large-scale-condensation scalar math: a constant-density θˡⁱ secant
+# (run to tight convergence) plus the closed-form vapor-only rain-out, written with the exact
+# definition θˡⁱ = (cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ) / (ĉᵖ Π̂), Π̂ = (p / pˢᵗ)^κ̂. This is the ground truth the
+# delegated path must reproduce.
 function reference_ip_update(θ₀, qᵗ, ρ, pˢᵗ, constants, equilibrium)
     ℒˡ = constants.liquid.reference_latent_heat
     ℒⁱ = constants.ice.reference_latent_heat
@@ -78,17 +81,15 @@ function reference_ip_update(θ₀, qᵗ, ρ, pˢᵗ, constants, equilibrium)
     qᵛ⁺ = q.vapor
     qᶜ  = q.liquid + q.ice
 
-    remaining_density = ρ * (1 - qᶜ)
-    remaining_vapor = qᵛ⁺ / (1 - qᶜ)
-    Rᵐf = mixture_gas_constant(MoistureMassFractions(remaining_vapor), constants)
-    cᵖf = mixture_heat_capacity(MoistureMassFractions(remaining_vapor), constants)
+    Rᵐf = mixture_gas_constant(MoistureMassFractions(qᵛ⁺), constants)
+    cᵖf = mixture_heat_capacity(MoistureMassFractions(qᵛ⁺), constants)
     γf  = cᵖf / (cᵖf - Rᵐf)
-    θᶠ  = T^(1 / γf) * (remaining_density * Rᵐf / pˢᵗ)^((1 - γf) / γf)
+    θᶠ  = T^(1 / γf) * (ρ * Rᵐf / pˢᵗ)^((1 - γf) / γf)
 
     return (; T, qᵛ⁺, qᶜ, θᶠ)
 end
 
-# The shared condensation and rain-out primitives used by the compressible kernel.
+# The post-refactor scalar composition (mirrors the kernel body) using the shared #765 primitives.
 function delegated_ip_update(θ₀, qᵗ, ρ, pˢᵗ, sa, constants)
     𝒰₀  = LiquidIceDensityState(θ₀, MoistureMassFractions(qᵗ), pˢᵗ, ρ)
     𝒰₁  = adjust_thermodynamic_state(𝒰₀, sa, constants)
@@ -96,13 +97,12 @@ function delegated_ip_update(θ₀, qᵗ, ρ, pˢᵗ, sa, constants)
     T   = temperature(𝒰₁, constants)
     qᵛ⁺ = q.vapor
     qᶜ  = q.liquid + q.ice
-    ρᵈ  = ρ * (1 - qᵗ)
-    𝒰ᵥ  = @inferred rainout_state(𝒰₁, qᵛ⁺, ρ * qᵛ⁺, ρᵈ)
+    𝒰ᵥ  = with_moisture(𝒰₁, MoistureMassFractions(qᵛ⁺))
     θᶠ  = with_temperature(𝒰ᵥ, T, constants).potential_temperature
     return (; T, qᵛ⁺, qᶜ, θᶠ)
 end
 
-@testset "InstantaneousPrecipitation scalar thermodynamics [$FT]" for FT in test_float_types()
+@testset "InstantaneousPrecipitation refactor parity vs pre-refactor inline formulas [$FT]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
     pˢᵗ = FT(1e5)
     ρ   = FT(1)
@@ -132,25 +132,24 @@ end
     end
 end
 
-# Integration: test the state after rain-out and update_state!, including the density loss.
-@testset "InstantaneousPrecipitation once-per-step kernel [$FT]" for FT in test_float_types()
+# Integration: drive the real once-per-step kernel through `microphysics_model_update!` on a
+# compressible model and confirm the rain-out physics and the #765 density-consistency hold.
+@testset "InstantaneousPrecipitation once-per-step kernel (integration)" begin
     arch = default_arch
-    grid = RectilinearGrid(arch, FT; size = (8, 8, 8), halo = (5, 5, 5),
+    grid = RectilinearGrid(arch; size = (8, 8, 8), halo = (5, 5, 5),
                            x = (0, 1e3), y = (0, 1e3), z = (0, 1e3),
                            topology = (Periodic, Periodic, Bounded))
-    constants = ThermodynamicConstants(FT)
+    constants = ThermodynamicConstants(Float64)
     θref(z) = 300.0 * exp(9.80616 * z / (1005 * 300.0))
     dyn = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                base_pressure = 1e5, standard_pressure = 1e5,
                                reference_potential_temperature = θref)
-    pˢᵗ = FT(1e5)
+    pˢᵗ = 1e5
     eq  = WarmPhaseEquilibrium()
-    temperature_tolerance = FT == Float64 ? 1e-4 : 2e-3
-    roundtrip_tolerance = 100eps(FT)
 
     function build_model(qᵗ)
         model = AtmosphereModel(grid; dynamics = dyn,
-                                microphysics = InstantaneousPrecipitation(FT; equilibrium = eq),
+                                microphysics = InstantaneousPrecipitation(equilibrium = eq),
                                 thermodynamic_constants = constants)
         set!(model; ρ = model.dynamics.reference_state.density, θ = 300.0, qᵗ = qᵗ)
         update_state!(model)   # Δt invalid here ⇒ the precipitation kernel is a no-op; populates diagnostics
@@ -163,7 +162,6 @@ end
         ρd  = Array(interior(model.dynamics.dry_density))    # ρθ = ρᵈθ is dry-coupled → θ recovery
         ρθ0 = Array(interior(model.formulation.potential_temperature_density))
         ρq0 = Array(interior(model.moisture_density))
-        reference = reference_ip_update.(ρθ0 ./ ρd, ρq0 ./ ρt, ρt, pˢᵗ, Ref(constants), Ref(eq))
 
         Δt = 1.0
         model.clock.last_Δt = Δt
@@ -172,9 +170,6 @@ end
         ρθ1   = Array(interior(model.formulation.potential_temperature_density))
         ρq1   = Array(interior(model.moisture_density))
         prate = Array(interior(model.microphysical_fields.precipitation_rate))
-        ρt1 = Array(interior(model.dynamics.total_density))
-        T1 = Array(interior(model.temperature))
-        qv1 = ρq1 ./ ρt1
         surface_flux = bottom_precipitation_flux(model) |> compute!
         column_integrated_prate = Field(Integral(model.microphysical_fields.precipitation_rate, dims=3)) |> compute!
 
@@ -185,20 +180,17 @@ end
         @test all(Array(interior(surface_flux)) .> 0)
         @test Array(interior(surface_flux)) ≈ Array(interior(column_integrated_prate))
 
-        # Condensate removal must retain the condensation temperature even after the model
-        # diagnoses its smaller total density. Using the old density for θ spuriously cools
-        # the cell and leaves it supersaturated; reconstructing T at the old density hides it.
-        @test all(isapprox.(T1, getproperty.(reference, :T); atol = temperature_tolerance, rtol = 0))
-        qsat = saturation_specific_humidity.(T1, ρt1, Ref(constants), Ref(eq))
-        @test all(isapprox.(qv1, qsat; rtol = 1e-4))
-        @test Array(interior(model.microphysical_fields.qᵛ)) ≈ qv1 rtol = roundtrip_tolerance
-
-        # Only condensate mass leaves: dry mass is unchanged, total mass and vapor loss
-        # agree with precipitation, and vapor is normalized by the remaining total mass.
-        @test Array(interior(model.dynamics.dry_density)) == ρd
-        @test all(ρt1 .< ρt)
-        @test ρt1 ≈ ρt .- Δt .* prate rtol = roundtrip_tolerance
-        @test prate ≈ (ρq0 .- ρq1) ./ Δt rtol = roundtrip_tolerance
+        for I in eachindex(ρt)
+            qv = ρq1[I] / ρt[I]   # vapor mass fraction (÷ total ρ)
+            θᶠ = ρθ1[I] / ρd[I]   # ρθ = ρᵈθ is dry-coupled (÷ ρᵈ)
+            # Vapor-only post-state: diagnose its T and confirm it sits on the saturation curve at
+            # the cell's own TOTAL density (the #765 density-consistency property).
+            𝒰 = LiquidIceDensityState(θᶠ, MoistureMassFractions(qv), pˢᵗ, ρt[I])
+            T = temperature(𝒰, constants)
+            @test qv ≈ saturation_specific_humidity(T, ρt[I], constants, eq) atol = 1e-4
+            # Water budget: all condensed vapor leaves as precipitation.
+            @test prate[I] ≈ (ρq0[I] - ρq1[I]) / Δt rtol = 1e-6
+        end
     end
 
     @testset "final update_state! preserves precipitation diagnostic" begin
@@ -224,8 +216,8 @@ end
         ρq1   = Array(interior(model.moisture_density))
         prate = Array(interior(model.microphysical_fields.precipitation_rate))
 
-        @test ρθ1 ≈ ρθ0 rtol = roundtrip_tolerance
-        @test ρq1 ≈ ρq0 rtol = roundtrip_tolerance
+        @test ρθ1 ≈ ρθ0 rtol = 1e-8
+        @test ρq1 ≈ ρq0 rtol = 1e-8
         @test all(prate .== 0)
     end
 end

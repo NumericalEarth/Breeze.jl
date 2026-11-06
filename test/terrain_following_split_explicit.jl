@@ -516,23 +516,26 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         # Linearization coefficients and a non-constant ρθ′ perturbation (varies in x
         # so the horizontal slope correction is genuinely nonzero over the mountain).
-        ρθ′ = CenterField(grid)
-        Cᴸ  = CenterField(grid)
+        ρθ′  = CenterField(grid)
+        Πᴸ   = CenterField(grid)
+        γRᵐᴸ = CenterField(grid)
         for i in 1:Nx, k in 1:Nz
             x = xnode(i, grid, Center())
             z = znode(i, 1, k, grid, Center(), Center(), Center())
-            ρθ′[i, 1, k] = sin(2π * x / Lx) * (1 + z / Lz)
-            Cᴸ[i, 1, k]  = 287.0 * 1.4
+            ρθ′[i, 1, k]  = sin(2π * x / Lx) * (1 + z / Lz)
+            Πᴸ[i, 1, k]   = 1.0
+            γRᵐᴸ[i, 1, k] = 287.0 * 1.4
         end
         fill_halo_regions!(ρθ′)
-        fill_halo_regions!(Cᴸ)
+        fill_halo_regions!(Πᴸ)
+        fill_halo_regions!(γRᵐᴸ)
 
         correction_seen = false
         for i in 3:Nx-2, k in 2:Nz-1
-            ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, δpᴸ, ρθ′, Cᴸ)
-            correction = terrain_horizontal_linearized_pressure_gradient_correction(i, 1, k, grid, d, ρθ′, Cᴸ)
+            ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+            correction = terrain_horizontal_linearized_pressure_gradient_correction(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ)
 
-            @test ∇ᶻp′(i, 1, k, grid, d, ρθ′, Cᴸ) == ∂z_p′ - correction
+            @test ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ) == ∂z_p′ - correction
 
             correction_seen = correction_seen || (abs(correction) > 1e-10)
         end

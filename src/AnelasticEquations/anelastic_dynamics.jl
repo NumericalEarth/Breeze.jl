@@ -120,16 +120,18 @@ $(TYPEDSIGNATURES)
 
 Return the reference density field for `AnelasticDynamics`.
 
-For anelastic models, the continuity density is the time-independent
+For anelastic models, the dynamics density is the time-independent
 reference state density ``ρᵣ(z)``.
 """
-AtmosphereModels.continuity_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
+AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
-# The total density ρᵣ(z) is the reference state's, not the local state's, so evaluate the
-# equation of state at the reference pressure with the local temperature and moisture:
-# ρ = pᵣ(z) / (Rᵐ(q) T). This is also the density in the anelastic buoyancy.
-@inline AtmosphereModels.thermodynamic_state_density(i, j, k, dynamics::AnelasticDynamics, T, q, constants) =
-    fixed_pressure_state_density(i, j, k, dynamics, T, q, constants)
+# The anelastic reference density ρᵣ(z) is a dry reference state evaluated at the reference
+# temperature, so it is not the local moist density that mass fractions are referenced to.
+# Rediagnose that at the reference pressure: ρ = pᵣ(z) / (Rᵐ(q) T).
+@inline function AtmosphereModels.gas_phase_density(i, j, k, dynamics::AnelasticDynamics, T, q, constants)
+    @inbounds p = dynamics.reference_state.pressure[i, j, k]
+    return density(T, p, q, constants)
+end
 
 #####
 ##### Prognostic fields

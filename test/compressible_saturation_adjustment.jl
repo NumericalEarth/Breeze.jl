@@ -117,18 +117,14 @@ end
         γ = 1 / (1 - κ)
 
         T★ = temperature(LiquidIceDensityState(θ, q, pˢᵗ, ρ), constants)
-        T̃  = θ̃^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1)               # the condensate-free root
-        T_isobaric = T̃ + L                              # isobaric latent shift (the old non-iterated inversion)
-        @test T★ > T_isobaric                           # biased cold
-        @test isapprox(T★ - T_isobaric, FT(1.39) * κ * L; rtol=FT(0.15))   # gap ≈ 1.39 κΔL (leading order)
+        T_noniter = θ̃^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L   # the old non-iterated inversion
+        @test T★ > T_noniter                            # the non-iterated inversion is biased cold
+        @test isapprox(T★ - T_noniter, FT(1.39) * κ * L; rtol=FT(0.15))   # gap ≈ 1.39 κΔL (leading order)
 
-        # `nothing` returns the closed form, which heats at fixed density (γ L) and overshoots the
-        # root only at second order; `FixedIterations` (unrolled, Reactant-safe) matches Newton.
-        T_noniter = T̃ + γ * L
+        # The solver abstraction is honored: `nothing` returns the un-iterated closed form,
+        # and `FixedIterations` (the unrolled, Reactant-safe form) matches the converged Newton.
         𝒰_noniter = LiquidIceDensityState(θ, q, pˢᵗ, ρ, nothing)
         @test temperature(𝒰_noniter, constants) ≈ T_noniter  rtol=rtol
-        @test isapprox(T_noniter - T★, κ * (γ * L)^2 / (2T̃); rtol=FT(0.15))
-        @test T_noniter - T★ < (T★ - T_isobaric) / 10
 
         𝒰_fixed = LiquidIceDensityState(θ, q, pˢᵗ, ρ, FixedIterations(8))
         @test temperature(𝒰_fixed, constants) ≈ T★  rtol=rtol

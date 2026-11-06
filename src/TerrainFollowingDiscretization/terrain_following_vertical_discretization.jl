@@ -26,10 +26,6 @@ struct TerrainFollowingVerticalDiscretization{C, D, E, F, FM} <: AbstractVertica
     Δᵃᵃᶠ :: E
     "Cell-centered reference spacing Δr"
     Δᵃᵃᶜ :: F
-    "Reciprocal of the face-centered reference spacing, 1 / Δr"
-    Δ⁻¹ᵃᵃᶠ :: E
-    "Reciprocal of the cell-centered reference spacing, 1 / Δr"
-    Δ⁻¹ᵃᵃᶜ :: F
     "Terrain-decay formulation (LinearDecay | TwoLevelDecay) — the generator of σ and the slopes"
     formulation :: FM
 end
@@ -43,7 +39,7 @@ The terrain components inside `formulation` are filled later by
 [`materialize_terrain!`](@ref) once the horizontal grid exists.
 """
 TerrainFollowingVerticalDiscretization(r_faces; formulation = LinearDecay()) =
-    TerrainFollowingVerticalDiscretization(r_faces, nothing, nothing, nothing, nothing, nothing, formulation)
+    TerrainFollowingVerticalDiscretization(r_faces, nothing, nothing, nothing, formulation)
 
 const TFVD = TerrainFollowingVerticalDiscretization
 const RegularTerrainFollowingVerticalDiscretization = TerrainFollowingVerticalDiscretization{<:Any, <:Any, <:Any, <:Number}
@@ -64,7 +60,7 @@ Oceananigans.Grids.coordinate_summary(::Oceananigans.Grids.Bounded, z::TFVD, nam
 # reference coordinate arrays are built later by `generate_coordinate`.
 function Oceananigans.Grids.validate_dimension_specification(T, ξ::TFVD, dir, N, FT)
     cᶠ = Oceananigans.Grids.validate_dimension_specification(T, ξ.cᵃᵃᶠ, dir, N, FT)
-    return TerrainFollowingVerticalDiscretization(cᶠ, ξ.cᵃᵃᶜ, ξ.Δᵃᵃᶠ, ξ.Δᵃᵃᶜ, ξ.Δ⁻¹ᵃᵃᶠ, ξ.Δ⁻¹ᵃᵃᶜ, ξ.formulation)
+    return TerrainFollowingVerticalDiscretization(cᶠ, ξ.cᵃᵃᶜ, ξ.Δᵃᵃᶠ, ξ.Δᵃᵃᶜ, ξ.formulation)
 end
 
 Adapt.adapt_structure(to, z::TFVD) =
@@ -72,8 +68,6 @@ Adapt.adapt_structure(to, z::TFVD) =
                                            Adapt.adapt(to, z.cᵃᵃᶜ),
                                            Adapt.adapt(to, z.Δᵃᵃᶠ),
                                            Adapt.adapt(to, z.Δᵃᵃᶜ),
-                                           Adapt.adapt(to, z.Δ⁻¹ᵃᵃᶠ),
-                                           Adapt.adapt(to, z.Δ⁻¹ᵃᵃᶜ),
                                            Adapt.adapt(to, z.formulation))
 
 Oceananigans.Architectures.on_architecture(arch, z::TFVD) =
@@ -81,8 +75,6 @@ Oceananigans.Architectures.on_architecture(arch, z::TFVD) =
                                            Oceananigans.Architectures.on_architecture(arch, z.cᵃᵃᶜ),
                                            Oceananigans.Architectures.on_architecture(arch, z.Δᵃᵃᶠ),
                                            Oceananigans.Architectures.on_architecture(arch, z.Δᵃᵃᶜ),
-                                           Oceananigans.Architectures.on_architecture(arch, z.Δ⁻¹ᵃᵃᶠ),
-                                           Oceananigans.Architectures.on_architecture(arch, z.Δ⁻¹ᵃᵃᶜ),
                                            Oceananigans.Architectures.on_architecture(arch, z.formulation))
 
 # Build the reference (r) coordinate arrays exactly like a static z grid; the
@@ -100,14 +92,7 @@ function Oceananigans.Grids.generate_coordinate(FT, topo, size, halo, coordinate
     # bottom of the domain is taken as z = 0, so z_top = Lz). Filled later by
     # `materialize_terrain!`.
     formulation = allocate_formulation(coordinate.formulation, FT, arch, size, halo, topo, Lz)
-    # Oceananigans reads the one-dimensional reciprocal reference spacings
-    # `Δr⁻¹ᵃᵃᶜ`, `Δr⁻¹ᵃᵃᶠ` from `grid.z.Δ⁻¹ᵃᵃᶜ`, `grid.z.Δ⁻¹ᵃᵃᶠ`; compute them as
-    # Oceananigans does for its own vertical discretizations.
-    Δr⁻¹ᵃᵃᶠ, Δr⁻¹ᵃᵃᶜ = map((Δrᵃᵃᶠ, Δrᵃᵃᶜ)) do Δ
-        Δ_cpu = Oceananigans.Architectures.on_architecture(Oceananigans.Architectures.CPU(), Δ)
-        Oceananigans.Architectures.on_architecture(arch, Oceananigans.Grids.reciprocal_metric(Δ_cpu))
-    end
-    z = TerrainFollowingVerticalDiscretization(rᵃᵃᶠ, rᵃᵃᶜ, Δrᵃᵃᶠ, Δrᵃᵃᶜ, Δr⁻¹ᵃᵃᶠ, Δr⁻¹ᵃᵃᶜ, formulation)
+    z = TerrainFollowingVerticalDiscretization(rᵃᵃᶠ, rᵃᵃᶜ, Δrᵃᵃᶠ, Δrᵃᵃᶜ, formulation)
     return Lz, z
 end
 
@@ -196,23 +181,15 @@ const TerrainFollowingGrid = AbstractUnderlyingGrid{<:Any, <:Any, <:Any, <:Ocean
     tuple()
 
 # Vertical spacing = reference spacing × Jacobian, mirroring the mutable-grid
-# operators but dispatching on the terrain-following grid type. The reciprocal
-# spacing must be overridden too: Oceananigans otherwise reads the
-# reciprocal *reference* spacing, which ignores the Jacobian.
+# operators but dispatching on the terrain-following grid type.
 for LX in (:ᶠ, :ᶜ), LY in (:ᶠ, :ᶜ), LZ in (:ᶠ, :ᶜ)
     zspacing = Symbol(:Δz, LX, LY, LZ)
     rspacing = Symbol(:Δr, LX, LY, LZ)
-    rcp_zspacing = Symbol(:Δz⁻¹, LX, LY, LZ)
     ℓx = LX == :ᶜ ? :Center : :Face
     ℓy = LY == :ᶜ ? :Center : :Face
     ℓz = LZ == :ᶜ ? :Center : :Face
-    @eval begin
-        @inline Oceananigans.Operators.$zspacing(i, j, k, grid::TerrainFollowingGrid) =
-            Oceananigans.Operators.$rspacing(i, j, k, grid) * Oceananigans.Operators.σⁿ(i, j, k, grid, $ℓx(), $ℓy(), $ℓz())
-
-        @inline Oceananigans.Operators.$rcp_zspacing(i, j, k, grid::TerrainFollowingGrid) =
-            1 / Oceananigans.Operators.$zspacing(i, j, k, grid)
-    end
+    @eval @inline Oceananigans.Operators.$zspacing(i, j, k, grid::TerrainFollowingGrid) =
+        Oceananigans.Operators.$rspacing(i, j, k, grid) * Oceananigans.Operators.σⁿ(i, j, k, grid, $ℓx(), $ℓy(), $ℓz())
 end
 
 # Horizontal slope of the coordinate surfaces, (∂z/∂x)_r and (∂z/∂y)_r, at the
