@@ -33,6 +33,7 @@ export
     LinearRamp,
     CubicRamp,
     Sin2Ramp,
+    GaussianRamp,
     ExplicitTimeStepping,
     balance_adiabatically!,
     AdiabaticBalancer,
@@ -156,6 +157,7 @@ export
     FittedStabilityFunction,
     FilteredSurfaceVelocities,
     FilteredSurfaceScalar,
+    TKEGustiness,
     default_neutral_drag_polynomial,
     default_neutral_sensible_heat_polynomial,
     default_neutral_latent_heat_polynomial,
@@ -299,7 +301,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping,
                               UpperSponge,
-                              AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
+                              AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp, GaussianRamp,
                               ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")

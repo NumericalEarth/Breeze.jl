@@ -14,16 +14,15 @@ RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 
 [sources]
 Breeze = {path = ".."}
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "pb/distributed-fix"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
 CUDA = "5.9.7, 6.0"
 CairoMakie = "0.15.8"
-CloudMicrophysics = "0.47"
+CloudMicrophysics = "0.47, 0.48"
 NCDatasets = "0.14"
 NumericalRadiation = "0.2"
-Oceananigans = "0.116"
+Oceananigans = "0.117"
 Pkg = "1.11"
 Printf = "< 0.0.1, 1"
 RRTMGP = "1.0.1"

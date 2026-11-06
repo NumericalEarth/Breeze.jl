@@ -33,14 +33,11 @@ BreezeNumericalRadiationExt = "NumericalRadiation"
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 BreezeReactantExt = "Reactant"
 
-[sources]
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "pb/distributed-fix"}
-
 [compat]
 Adapt = "4.3.0"
 Artifacts = "<0.0.1, 1"
 ClimaComms = "0.6"
-CloudMicrophysics = "0.47"
+CloudMicrophysics = "0.47, 0.48"
 Dates = "<0.0.1, 1"
 DocStringExtensions = "0.9.5, 0.10"
 GPUArraysCore = "0.2"
@@ -49,7 +46,7 @@ JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"
 LazyArtifacts = "<0.0.1, 1"
 NumericalRadiation = "0.2"
-Oceananigans = "0.116"
+Oceananigans = "0.117"
 OffsetArrays = "1.4"
 Printf = "1"
 RRTMGP = "0.22, 0.23, 1"

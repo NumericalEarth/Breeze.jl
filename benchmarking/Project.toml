@@ -23,22 +23,21 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [sources]
 Breeze = {path = ".."}
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "pb/distributed-fix"}
 
 [compat]
 AMDGPU = "2.3.0"
 ArgParse = "1"
 BFloat16s = "0.6"
 CUDA = "5, 6.0"
-CloudMicrophysics = "0.47"
+CloudMicrophysics = "0.47, 0.48"
 Dates = "<0.0.1, 1"
 Enzyme = "0.13.118"
 JLD2 = "0.5, 0.6"
 JSON = "1.4.0"
 KernelAbstractions = "0.9"
 Metal = "1.10"
-Oceananigans = "0.116"
+Oceananigans = "0.117"
 Printf = "1"
-Reactant = "=0.2.304"
+Reactant = "=0.2.307"
 Statistics = "<0.0.1, 1"
 julia = "1.10"
