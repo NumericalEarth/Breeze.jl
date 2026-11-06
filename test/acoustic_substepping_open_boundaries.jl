@@ -391,4 +391,39 @@ for arch in arches
         Oceananigans.defaults.FloatType = old_FT
     end
 
+    @testset "Open-boundary relaxation holds (ρθ)′ without a thermodynamic value condition [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
+        Oceananigans.defaults.FloatType = FT
+
+        # The substep loop's pressure perturbation is formed from (ρθ)′ alone, so the relaxation
+        # of (ρθ)′ is what enforces the open boundary acoustically, whatever condition ρθ itself
+        # carries. With ρθ's default condition the halo extrapolates the interior and the
+        # target perturbation is zero: at α = 1 the outermost cell keeps its stage-entry value
+        # every stage. Uniform outflow through a θ gradient gives the east cell a nonzero
+        # advective tendency that the relaxation must hold back.
+        grid = RectilinearGrid(arch; size=(8, 8, 4), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
+                               topology=(Bounded, Periodic, Bounded))
+        td = SplitExplicitTimeDiscretization(; open_boundary_relaxation = FT(1))
+        dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
+        ref = ExnerReferenceState(grid; potential_temperature=FT(300))
+        ρ₀ = @allowscalar interior(ref.density)[1, 1, 1]
+        U = FT(5)
+        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(FT(ρ₀ * U)),
+                                         east = NormalFlowBoundaryCondition(FT(ρ₀ * U)))
+        model = AtmosphereModel(grid; advection=WENO(), dynamics,
+                                boundary_conditions = (; ρu = ρu_bcs))
+        set!(model; θ=(x, y, z) -> 300 + 2x / 8kilometers, u=U, qᵗ=0, ρ=ρ₀)
+
+        ρθ = thermodynamic_density(model.formulation)
+        ρθ⁰ = Array(interior(ρθ))
+        run!(Simulation(model; Δt=1, stop_iteration=1, verbose=false))
+        Δρθ = Array(interior(ρθ)) .- ρθ⁰
+
+        Nx = size(grid, 1)
+        @test maximum(abs, Δρθ[Nx - 1, :, :]) > 1e-3
+        @test maximum(abs, Δρθ[Nx, :, :]) < maximum(abs, Δρθ[Nx - 1, :, :]) / 100
+        Oceananigans.defaults.FloatType = old_FT
+    end
+
 end

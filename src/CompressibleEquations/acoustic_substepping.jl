@@ -45,7 +45,7 @@ using Oceananigans.Operators:
     Axᶠᶜᶜ, Ayᶜᶠᶜ, V⁻¹ᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
-using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
+using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow, Value
 
 using Oceananigans.Grids: Flat, Bounded, Center, Face, peripheral_node,
                           topology,
@@ -1407,6 +1407,22 @@ end
 # prognostic `ValueBoundaryCondition` to the base at stage entry, so
 # `ρᴸ[halo] = 2v − ρᴸ[cell]` and the target perturbation is
 # `v − ρᴸ[cell] = (ρᴸ[halo] − ρᴸ[cell]) / 2`, read straight from the base field.
+# The thermodynamic base may be the stage-entry variable less the condensate
+# sedimentation content the stage adds back after the loop (`AcousticRungeKutta3`).
+# The wall value then comes from the stage-entry variable `ρθⁿ` as `update_state!`
+# left it. A `ValueBoundaryCondition` on the thermodynamic variable prescribes the
+# full variable at the wall, so the content `C` the stage will add comes off the
+# target, `(ρθⁿ[halo] + ρθⁿ[cell]) / 2 − ρθᴸ[cell] − C[cell]`, and the full variable,
+# content included, lands on the wall value. Any other condition (the default flux
+# or a gradient condition) prescribes no thermodynamic wall value: its halo
+# extrapolates the interior, and the target is the base's own extrapolation,
+# `(ρθᴸ[halo] − ρθᴸ[cell]) / 2`, as without sedimentation. The base is the
+# stage-entry variable less the previous stage's content, halos included, so it holds
+# back only the pressure-changing part of the variable and the content added after
+# the loop reaches the boundary cell as it does the interior. The stage-entry
+# variable would not do: it carries the previous stage's content, and every stage
+# rewinds to the outer-step start, so holding it would accumulate each stage's
+# content on top of the last.
 # Relaxation factor `α ∈ (0, 1]` (default 0.5, via
 # `SplitExplicitTimeDiscretization(; open_boundary_relaxation = α)`). No-op on any
 # side without an active `NormalFlowBoundaryCondition` (periodic/walls/`nothing`
@@ -1414,26 +1430,44 @@ end
 
 @inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:NormalFlow}) && !(bc.condition isa Nothing)
 
-# Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the prescribed
-# wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2.
-# `iᴮ` is the outermost interior cell index, `iᴴ` the adjacent halo cell index.
-@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, iᴮ, iᴴ, α)
+# The target perturbation at the outermost open-boundary cell `Iᴮ`, with `Iᴴ` the adjacent halo
+# cell: v − cᴸ[Iᴮ] = (cᴸ[Iᴴ] − cᴸ[Iᴮ]) / 2 off the base `cᴸ` itself, or, for a base that is the
+# stage-entry variable `cⁿ` less the sedimentation content `C` the stage adds after the loop,
+# v − cᴸ[Iᴮ] − C[Iᴮ] with v = (cⁿ[Iᴴ] + cⁿ[Iᴮ]) / 2.
+@inline relaxation_target(cᴸ, ::Nothing, ::Nothing, Iᴴ, Iᴮ) = @inbounds (cᴸ[Iᴴ...] - cᴸ[Iᴮ...]) / 2
+@inline relaxation_target(cᴸ, cⁿ, C, Iᴴ, Iᴮ) = @inbounds (cⁿ[Iᴴ...] + cⁿ[Iᴮ...]) / 2 - cᴸ[Iᴮ...] - C[Iᴮ...]
+
+# The stage-entry variable and sedimentation content the thermodynamic target reads on one side:
+# both where a value condition prescribes the full variable at the wall, neither otherwise, so
+# that the target is the base's own extrapolation.
+wall_thermodynamic_state(::BoundaryCondition{<:Value}, ρθⁿ, C) = (ρθⁿ, C)
+wall_thermodynamic_state(bc, ρθⁿ, C) = (nothing, nothing)
+
+# Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the wall value in a single
+# kernel. `iᴮ` is the outermost interior cell index, `iᴴ` the adjacent halo cell index.
+@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, iᴮ, iᴴ, α)
     j, k = @index(Global, NTuple)
+    Iᴮ = (iᴮ, j, k)
+    Iᴴ = (iᴴ, j, k)
     @inbounds begin
-        ρ′[iᴮ, j, k]  += α * ((ρᴸ[iᴴ, j, k]  - ρᴸ[iᴮ, j, k])  / 2 - ρ′[iᴮ, j, k])
-        ρθ′[iᴮ, j, k] += α * ((ρθᴸ[iᴴ, j, k] - ρθᴸ[iᴮ, j, k]) / 2 - ρθ′[iᴮ, j, k])
+        ρ′[iᴮ, j, k]  += α * (relaxation_target(ρᴸ, nothing, nothing, Iᴴ, Iᴮ) - ρ′[iᴮ, j, k])
+        ρθ′[iᴮ, j, k] += α * (relaxation_target(ρθᴸ, ρθⁿ, C, Iᴴ, Iᴮ) - ρθ′[iᴮ, j, k])
     end
 end
 
-@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, jᴮ, jᴴ, α)
+@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, jᴮ, jᴴ, α)
     i, k = @index(Global, NTuple)
+    Iᴮ = (i, jᴮ, k)
+    Iᴴ = (i, jᴴ, k)
     @inbounds begin
-        ρ′[i, jᴮ, k]  += α * ((ρᴸ[i, jᴴ, k]  - ρᴸ[i, jᴮ, k])  / 2 - ρ′[i, jᴮ, k])
-        ρθ′[i, jᴮ, k] += α * ((ρθᴸ[i, jᴴ, k] - ρθᴸ[i, jᴮ, k]) / 2 - ρθ′[i, jᴮ, k])
+        ρ′[i, jᴮ, k]  += α * (relaxation_target(ρᴸ, nothing, nothing, Iᴴ, Iᴮ) - ρ′[i, jᴮ, k])
+        ρθ′[i, jᴮ, k] += α * (relaxation_target(ρθᴸ, ρθⁿ, C, Iᴴ, Iᴮ) - ρθ′[i, jᴮ, k])
     end
 end
 
-function apply_open_boundary_relaxation!(substepper, model, grid, arch)
+# `ρθⁿ` and `C` are the stage-entry thermodynamic variable and the stage's sedimentation content
+# increment when the base is the variable without that content, `nothing` otherwise.
+function apply_open_boundary_relaxation!(substepper, model, grid, arch, ρθⁿ, C)
     bcs_u = model.momentum.ρu.boundary_conditions
     bcs_v = model.momentum.ρv.boundary_conditions
     Nx, Ny, _ = size(grid)
@@ -1442,17 +1476,22 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch)
     ρθ′ = substepper.density_potential_temperature_perturbation
     ρᴸ  = model.dynamics.dry_density
     ρθᴸ = thermodynamic_density(model.formulation)
+    bcs_θ = ρθᴸ.boundary_conditions
     if is_active_open_bc(bcs_u.west)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
+        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.west, ρθⁿ, C)..., 1, 0, α)
     end
     if is_active_open_bc(bcs_u.east)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, Nx, Nx + 1, α)
+        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.east, ρθⁿ, C)..., Nx, Nx + 1, α)
     end
     if is_active_open_bc(bcs_v.south)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
+        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.south, ρθⁿ, C)..., 1, 0, α)
     end
     if is_active_open_bc(bcs_v.north)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, Ny, Ny + 1, α)
+        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.north, ρθⁿ, C)..., Ny, Ny + 1, α)
     end
     return nothing
 end
@@ -1528,7 +1567,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     g = convert(FT, constants.gravitational_acceleration)
     ω = FT(substepper.forward_weight)
     Gⁿ = model.timestepper.Gⁿ
-    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
+    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, entry_thermodynamic_density, sedimentation_content) = stage
 
     # Step A: explicit horizontal forward of (ρu)′, (ρv)′.
     launch!(arch, grid, :xyz, _explicit_horizontal_step!,
@@ -1617,7 +1656,8 @@ function acoustic_substep!(model, substepper, stage, advection)
     # Per-substep open-boundary enforcement (issue #738): relax the outermost
     # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
     # the halo fill, so the boundary cell tracks the prescribed inflow state.
-    apply_open_boundary_relaxation!(substepper, model, grid, arch)
+    apply_open_boundary_relaxation!(substepper, model, grid, arch,
+                                    entry_thermodynamic_density, sedimentation_content)
 
     fill_halo_regions!(substepper.density_perturbation)
     fill_halo_regions!(substepper.density_potential_temperature_perturbation)
@@ -1644,9 +1684,15 @@ Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on
 `substepper.substep_distribution`. The recovery of the full state from the stage-entry state and
 the accumulated perturbations is rounded with the round-off treatment `rounding`.
+
+When the thermodynamic base is the stage-entry variable less a condensate `sedimentation_content`
+increment that the caller adds after the loop (`AcousticRungeKutta3`), the open-boundary
+relaxation reads the wall value from `entry_thermodynamic_density`, the stage-entry variable, and
+takes the increment off its target (see `apply_open_boundary_relaxation!`).
 """
 function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection = nothing;
-                                    rounding = RoundToNearest())
+                                    rounding = RoundToNearest(),
+                                    entry_thermodynamic_density = nothing, sedimentation_content = nothing)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -1683,7 +1729,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
-    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
+    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, entry_thermodynamic_density, sedimentation_content)
     acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a
