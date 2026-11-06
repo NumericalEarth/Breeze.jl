@@ -196,8 +196,12 @@ Return ``qᵈ = ρᵈ/ρ`` at an x-face: [`dynamics_density`](@ref) over [`total
 
 For compressible dynamics, the mixture pressure and gravitational forces ``-∇p`` and ``-ρ g ẑ``
 are rescaled by ``qᵈ`` for the prognostic dry-air momentum ``ρu = ρᵈ u``. Advection and Coriolis
-already use coupling-weighted momentum. The stress flux already uses the coupling density,
-so its divergence needs no additional factor.
+already use coupling-weighted momentum, so they are exact without a factor. The stress is
+*modeled* with the coupling density, ``𝒯 = ρᵈ ν S``, so its divergence is already a force on
+``ρᵈ u``; this is a closure choice (the one WRF-ARW makes) rather than an identity, since the
+rescaled mixture stress ``qᵈ ∇·(ρ ν S)`` differs from it by ``ρ ν S·∇qᵈ``, a term proportional
+to the moisture gradient. The same weight converts the bulk drag and the energy fluxes at the
+walls (see `BoundaryConditions`).
 
 Defaults to `1`, exact wherever `total_density === dynamics_density` (e.g. anelastic);
 `CompressibleDynamics` overrides it with ``qᵈ = 1 - qᵗ``. Derivation:

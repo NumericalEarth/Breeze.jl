@@ -49,7 +49,13 @@ q^d = ρ^d / ρ = 1 - q^t .
 The pressure and gravitational terms are the height-coordinate form of the ``μ^d α`` and
 ``-g μ^d`` factors in the dry-mass-coordinate equations of
 [Skamarock & Klemp (2008)](@cite SkamarockKlemp2008); without them a parcel at ``q^t = 0.02`` falls
-2% too fast. Advection, Coriolis and the stress divergence need no weight. In the code the weight is
+2% too fast. Advection and Coriolis already carry ``ρ^d \boldsymbol{u}``, so they are exact without
+a weight. The stress is modeled with the dry-air density, ``\boldsymbol{\mathcal{T}} = ρ^d ν \boldsymbol{S}``,
+so its divergence acts on ``ρ^d \boldsymbol{u}`` directly; this is a closure choice shared with
+WRF-ARW rather than an identity, since the rescaled mixture stress ``q^d ∇·(ρ ν \boldsymbol{S})``
+differs from it by ``ρ ν \boldsymbol{S}·∇q^d``, a term proportional to the moisture gradient. The
+same weight converts the bulk surface drag and the energy fluxes at the walls, and the
+buoyancy-flux source of the static energy equation below. In the code the weight is
 `dynamics_mass_fractionᶠᶜᶜ` and its ``ᶜᶠᶜ``/``ᶜᶜᶠ`` counterparts, a ratio of face-interpolated
 densities so the discrete gravitational force is exactly ``-g \, ℑ^z(ρ^d)``.
 
@@ -67,7 +73,10 @@ prognostic ``ρᵡ = ρᵈ χ`` is weighted by the dry-air density, and
 approximated hydrostatically, ``\mathrm{D} \ln p / \mathrm{D} t ≈ - g ρ w / p``; the exact
 tendency, and why its adiabatic part alone would not be a better estimate, are discussed in
 [The expansion source on the two dynamical cores](@ref "The expansion source on the two dynamical cores").
-For static energy, ``χ = s``, the source encodes the pressure work.
+For static energy, ``χ = s``, the source encodes the pressure work and the geopotential change,
+``ρ \, \mathrm{D}s/\mathrm{D}t ∋ \mathrm{D}p/\mathrm{D}t + ρ g w``, evaluated as the mixture buoyancy
+flux of the [anelastic core](@ref Anelastic-section) and applied to ``ρ^d s`` with the factor
+``q^d``, like the forces on the dry-air momentum.
 
 ## Time integration options
 
