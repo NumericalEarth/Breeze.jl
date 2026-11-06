@@ -594,7 +594,7 @@ end
 materialize_sponge(grid, ::Nothing) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build the grid-dependent form of `sponge` by evaluating its ramp into a 1D profile of the damping
 rate ``γ(z) = \\text{rate} × \\text{ramp}(z)`` over z-faces. Called by the
