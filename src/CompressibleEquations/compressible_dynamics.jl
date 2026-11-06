@@ -389,6 +389,12 @@ AtmosphereModels.total_pressure(dynamics::CompressibleDynamics) = dynamics.press
                                                             ρ, T, q, constants) =
     ρ * mixture_gas_constant(q, constants) * T
 
+# Compressible adjustment holds the density fixed, so with ρ and T given qᵛ⁺ is explicit.
+@inline AtmosphereModels.prescribed_temperature_saturation_specific_humidity(i, j, k, grid,
+                                                                             ::CompressibleDynamics,
+                                                                             ρ, T, qᵗ, constants, equilibrium) =
+    saturation_specific_humidity(T, ρ, constants, equilibrium)
+
 #####
 ##### Density and pressure access interface
 #####

@@ -144,10 +144,10 @@ end
     # Set T with subsaturated moisture (no condensate expected)
     set!(model_moist, T=T_profile, qᵗ=FT(0.001))  # low moisture
 
-    # Temperature should still be close to input for subsaturated air
+    # Subsaturated air holds all its moisture as vapor, so T is recovered exactly
     T_actual = @allowscalar model_moist.temperature[1, 1, 1]
     T_expected = T_profile(0, 0, z_nodes[1])
-    @test T_actual ≈ T_expected rtol=FT(0.02)  # allow 2% tolerance due to moisture effects
+    @test T_actual ≈ T_expected rtol=sqrt(eps(FT))
 end
 
 #####

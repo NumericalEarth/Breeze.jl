@@ -413,8 +413,9 @@ end
         T = temperature_field[i, j, k]
     end
 
-    # Get moisture fractions (vapor only for unsaturated air)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    # Equilibrium partition at T under saturation adjustment (see `prescribed_temperature_moisture_fractions`)
+    q = prescribed_temperature_moisture_fractions(i, j, k, grid, microphysics, dynamics, ρ, qᵛᵉ,
+                                                  microphysical_fields, T, constants)
     pᵣ = pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
 
     # Convert temperature to potential temperature using the inverse of the T(θ) relation
