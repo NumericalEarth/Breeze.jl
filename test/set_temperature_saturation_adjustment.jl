@@ -81,6 +81,26 @@ anelastic_dynamics(grid, constants) =
     end
 end
 
+# Non-precipitating BulkMicrophysics forwards the conversion to its cloud formation scheme
+@testset "set!(model; T, qᵗ) under BulkMicrophysics saturation adjustment" begin
+    Oceananigans.defaults.FloatType = Float64
+    grid = RectilinearGrid(default_arch; size = (2, 2, 20), x = (0, 1e3), y = (0, 1e3), z = (0, 5e3))
+    constants = ThermodynamicConstants()
+    cloud_formation = SaturationAdjustment(; equilibrium = MixedPhaseEquilibrium())
+
+    adjustment, bulk = map((cloud_formation, BulkMicrophysics(; cloud_formation))) do microphysics
+        dynamics = anelastic_dynamics(grid, constants)
+        model = AtmosphereModel(grid; dynamics, microphysics, thermodynamic_constants = constants)
+        set!(model; T = (x, y, z) -> T_profile(z), qᵗ = columns.saturated)
+        model
+    end
+
+    check_recovered_state(bulk, :saturated, columns.saturated, cloud_formation.equilibrium, Float64)
+    @test host(bulk.temperature) == host(adjustment.temperature)
+    @test host(bulk.microphysical_fields.qˡ) == host(adjustment.microphysical_fields.qˡ)
+    @test host(bulk.microphysical_fields.qⁱ) == host(adjustment.microphysical_fields.qⁱ)
+end
+
 # One-moment microphysics with saturation adjustment holds the rain fixed during the adjustment
 @testset "set!(model; T, qᵗ, qʳ) under one-moment saturation adjustment [$(summary(equilibrium))]" for equilibrium in (WarmPhaseEquilibrium(), MixedPhaseEquilibrium())
     Oceananigans.defaults.FloatType = Float64
