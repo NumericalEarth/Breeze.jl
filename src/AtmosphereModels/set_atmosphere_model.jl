@@ -460,5 +460,12 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         enforce_mass_conservation && enforce_mass_conservation!(model)
     end
 
+    # Refresh the diagnostic state *and the tendencies* from the final state, following
+    # Oceananigans' `set!` convention. Time steppers reuse the tendencies computed at the end
+    # of the previous step, so stale tendencies would otherwise leak into a `time_step!` taken
+    # after `set!` at iteration > 0 (and at iteration 0 on Reactant, where
+    # `maybe_prepare_first_time_step!` is a no-op).
+    update_state!(model)
+
     return nothing
 end

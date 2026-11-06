@@ -209,3 +209,37 @@ end
         @test @allowscalar all(x -> x ≤ 1.01, interior(ℋ_field))
     end
 end
+
+#####
+##### set! refreshes tendencies
+#####
+
+@testset "set! at iteration > 0 followed by time_step! matches a fresh model [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+
+    θᵢ(x, y, z) = 300 + z / 1000 + sin(2π * x / 1000) / 10
+    uᵢ(x, y, z) = cos(2π * y / 1000)
+    Δt = FT(1)
+
+    # Step a model away from its initial state, then reset it
+    stepped_model = AtmosphereModel(grid)
+    set!(stepped_model; θ=θᵢ, u=uᵢ, v=0, w=0)
+    for _ in 1:3
+        time_step!(stepped_model, Δt)
+    end
+    set!(stepped_model; θ=θᵢ, u=uᵢ, v=0, w=0)
+    @test stepped_model.clock.iteration == 3
+
+    fresh_model = AtmosphereModel(grid)
+    set!(fresh_model; θ=θᵢ, u=uᵢ, v=0, w=0)
+
+    for _ in 1:2
+        time_step!(stepped_model, Δt)
+        time_step!(fresh_model, Δt)
+    end
+
+    for name in keys(Oceananigans.prognostic_fields(fresh_model))
+        @test interior(Oceananigans.prognostic_fields(stepped_model)[name]) == interior(Oceananigans.prognostic_fields(fresh_model)[name])
+    end
+end
