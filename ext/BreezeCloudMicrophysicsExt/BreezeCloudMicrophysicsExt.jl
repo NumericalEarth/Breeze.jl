@@ -69,6 +69,7 @@ using Breeze.Microphysics:
     MixedPhaseSaturationAdjustment,
     AbstractCondensateFormation,
     ConstantRateCondensateFormation,
+    relaxation_timescale,
     NonEquilibriumCloudFormation,
     NumberConcentrationKernelFunction,
     condensation_rate,

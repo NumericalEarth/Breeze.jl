@@ -528,12 +528,13 @@ end
 ##### Relaxation timescales for non-equilibrium schemes
 #####
 #
-# The `ConstantRateCondensateFormation.rate` field stores `1/τ_relax`, so we invert it.
+# The formations' `rate` field stores `1/τ_relax`; `relaxation_timescale` inverts it, or for
+# `ExponentialRateCondensateFormation` returns the effective timescale Δt / (1 - exp(-Δt/τ)).
 
-@inline liquid_relaxation_timescale(cloud_formation, categories) = 1 / cloud_formation.liquid.rate
+@inline liquid_relaxation_timescale(cloud_formation, categories) = relaxation_timescale(cloud_formation.liquid)
 
 @inline function ice_relaxation_timescale(cloud_formation, categories, qᶜⁱ, T, qᵛ, qᵛ⁺ⁱ)
-    return inv(cloud_formation.ice.rate)
+    return relaxation_timescale(cloud_formation.ice)
 end
 
 @inline function ice_relaxation_timescale(

@@ -104,6 +104,52 @@ end
 
 Base.summary(::ConstantRateCondensateFormation) = "ConstantRateCondensateFormation"
 
+"""
+$(TYPEDEF)
+
+Return a condensate formation model that applies a constant phase-change `rate = 1/τ` whose
+explicit tendency, over a model time step `Δt`, produces the exact (exponential) relaxation
+increment. The relaxation then uses the effective timescale
+
+    τₑ = Δt / (1 - exp(-Δt / τ)),
+
+so one step relaxes toward saturation by the factor `1 - exp(-Δt / τ)` rather than `Δt / τ`.
+`τₑ → τ` as `Δt / τ → 0` and `τₑ → Δt` as `Δt / τ → ∞`, so the stage rate `Δt / (Γ τₑ) ≤ 1`
+(with `Γ ≥ 1` the latent-heat factor) stays inside the stability region of the SSP-RK3 stepper
+for any `Δt / τ`, whereas [`ConstantRateCondensateFormation`](@ref) is stable only for
+`Δt / (Γ τ) ≲ 2.5`. `Δt` must match the model's time step.
+
+```jldoctest
+julia> using Breeze
+
+julia> using Breeze.Microphysics: relaxation_timescale
+
+julia> formation = ExponentialRateCondensateFormation(1 / 120, 900)
+ExponentialRateCondensateFormation{Float64}(0.008333333333333333, 900.0)
+
+julia> round(relaxation_timescale(formation), digits=1)
+900.5
+```
+"""
+struct ExponentialRateCondensateFormation{FT} <: AbstractCondensateFormation
+    rate :: FT
+    Δt :: FT
+end
+
+ExponentialRateCondensateFormation(rate, Δt) = ExponentialRateCondensateFormation(promote(float(rate), float(Δt))...)
+
+Base.summary(::ExponentialRateCondensateFormation) = "ExponentialRateCondensateFormation"
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the relaxation timescale of a condensate formation model: `1 / rate` for a constant-rate
+formation and `Δt / (1 - exp(-Δt rate))` for an [`ExponentialRateCondensateFormation`](@ref).
+"""
+@inline relaxation_timescale(formation) = inv(formation.rate)
+@inline relaxation_timescale(formation::ExponentialRateCondensateFormation) =
+    formation.Δt / -expm1(-formation.Δt * formation.rate)
+
 #####
 ##### Shared helpers for relaxation-to-saturation phase change (liquid + ice)
 #####

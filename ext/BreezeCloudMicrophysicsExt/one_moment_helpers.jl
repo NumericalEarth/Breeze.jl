@@ -186,8 +186,8 @@ Utils.prettysummary(vel::Blk1MVelTypeRain) = "Blk1MVelTypeRain(...)"
 Utils.prettysummary(vel::Blk1MVelTypeSnow) = "Blk1MVelTypeSnow(...)"
 
 function Utils.prettysummary(ne::NonEquilibriumCloudFormation)
-    liquid_str = isnothing(ne.liquid) ? "nothing" : "liquid(τ=$(prettysummary(1/ne.liquid.rate)))"
-    ice_str = isnothing(ne.ice) ? "nothing" : "ice(τ=$(prettysummary(1/ne.ice.rate)))"
+    liquid_str = isnothing(ne.liquid) ? "nothing" : "liquid(τ=$(prettysummary(relaxation_timescale(ne.liquid))))"
+    ice_str = isnothing(ne.ice) ? "nothing" : "ice(τ=$(prettysummary(relaxation_timescale(ne.ice))))"
     return "NonEquilibriumCloudFormation($liquid_str, $ice_str)"
 end
 

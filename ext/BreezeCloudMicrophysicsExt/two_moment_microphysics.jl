@@ -342,7 +342,7 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 ##### Relaxation timescale for non-equilibrium cloud formation
 #####
 
-@inline liquid_relaxation_timescale(cloud_formation, categories::TwoMomentCategories) = 1 / cloud_formation.liquid.rate
+@inline liquid_relaxation_timescale(cloud_formation, categories::TwoMomentCategories) = relaxation_timescale(cloud_formation.liquid)
 
 #####
 ##### Prognostic field names

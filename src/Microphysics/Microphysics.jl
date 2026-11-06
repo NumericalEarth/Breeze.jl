@@ -9,6 +9,7 @@ export
     WarmPhaseEquilibrium,
     AbstractCondensateFormation,
     ConstantRateCondensateFormation,
+    ExponentialRateCondensateFormation,
     NonEquilibriumCloudFormation,
     BulkMicrophysics,
     FourCategories,

@@ -137,6 +137,7 @@ export
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
     ConstantRateCondensateFormation,
+    ExponentialRateCondensateFormation,
     P3Microphysics,
     PredictedParticlePropertiesMicrophysics,
     DiagnosticVaporExcess,
