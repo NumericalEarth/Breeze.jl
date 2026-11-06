@@ -5,7 +5,6 @@ using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
 using Oceananigans
 using Oceananigans: UpdateStateCallsite, TendencyCallsite, TimeStepCallsite
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, NormalFlowBoundaryCondition
-using Oceananigans.Fields: flattened_unique_values
 using Oceananigans.Models: update_model_field_time_series!
 using Oceananigans.OutputReaders: extract_field_time_series, InMemory
 using Oceananigans.TimeSteppers: Clock
@@ -132,7 +131,7 @@ end
         times = collect(FT(0):FT(1):FT(3))
         fts = FieldTimeSeries{Nothing, Center, Center}(grid, times)
         model = AtmosphereModel(grid)
-        walked = flattened_unique_values(extract_field_time_series((fields(model), model.forcing, fts)))
+        walked = extract_field_time_series((fields(model), model.forcing, fts))
         @test any(x -> x === fts, walked)
     end
 

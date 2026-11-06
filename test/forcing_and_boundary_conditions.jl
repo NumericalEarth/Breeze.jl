@@ -373,10 +373,12 @@ end
 
 # The same positional lookup, under `AnelasticDynamics`, whose pressure and density are
 # dimension-reduced reference profiles rather than the compressible case's three-dimensional
-# prognostics. `Adapt.adapt` unwraps a three-dimensional `Field` to its `OffsetArray` but keeps a
-# reduced one wrapped, so admitting either to `fields(model)` makes the lookup a non-concrete
-# `Union`, and the GPU compiler then rejects every kernel that performs one. Adapting with
-# `nothing` reproduces those device-side types on CPU CI as well.
+# prognostics. `Adapt.adapt` unwraps a three-dimensional `Field` to its data array but keeps a
+# reduced one wrapped, so admitting either to `fields(model)` would leave a `Field` among the
+# device-side arrays, and the GPU compiler then rejects every kernel that looks one up. Adapting
+# with `nothing` reproduces those device-side types on CPU CI as well. The lookup itself is not
+# concrete: Oceananigans encodes the array size in its type, so face-located fields in a `Bounded`
+# direction differ from centred ones; it is resolved at compile time through `Val` indices.
 @testset "Model field tuple stays positionally inferable [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch;
@@ -392,7 +394,7 @@ end
 
     model_fields = adapt(nothing, Oceananigans.fields(model))
     lookup = Base.infer_return_type(getindex, Tuple{typeof(model_fields), Int})
-    @test isconcretetype(lookup)
+    @test all(T -> T <: AbstractArray && !(T <: Oceananigans.Fields.AbstractField), Base.uniontypes(lookup))
 
     # The thermodynamic pressure and density surface fluxes read reach them through the second
     # field tuple instead, which is where they have to live for the lookup above to compile.
