@@ -9,14 +9,8 @@
   "packageRules": [
     {
       "matchManagers": ["julia"],
-      "matchDepNames": ["Reactant"],
-      "enabled": false
-    },
-    {
-      "matchManagers": ["julia"],
       "matchFileNames": ["benchmarking/Project.toml"],
       "matchDepNames": ["Reactant"],
-      "enabled": true,
       "rangeStrategy": "pin"
     },
     {
