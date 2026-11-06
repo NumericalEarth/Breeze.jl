@@ -136,3 +136,59 @@ end
         @test aiva.minimum_ρqʳ ≥ -roundoff
     end
 end
+
+# The limited tendency reads the face fluxes `update_outflow_limiter!` stored for the stage; it must
+# equal the divergence of the outflow-limited fluxes rebuilt from the reconstructions.
+const BA = Breeze.Advection
+
+@inline function rebuilt_limited_flux_x(i, j, k, grid, advection, ρ, u, c)
+    r = advection.bounds.limiter.outflow_fraction
+    @inbounds rᵘ = ifelse(u[i, j, k] ≥ 0, r[i-1, j, k], r[i, j, k])
+    return rᵘ * BA.bounded_face_flux_x(i, j, k, grid, advection, ρ, u, c)
+end
+
+@inline function rebuilt_limited_flux_y(i, j, k, grid, advection, ρ, v, c)
+    r = advection.bounds.limiter.outflow_fraction
+    @inbounds rᵘ = ifelse(v[i, j, k] ≥ 0, r[i, j-1, k], r[i, j, k])
+    return rᵘ * BA.bounded_face_flux_y(i, j, k, grid, advection, ρ, v, c)
+end
+
+@inline function rebuilt_limited_divergence(i, j, k, grid, advection, ρ, U, c)
+    wᵉ = BA.ExplicitVerticalVelocity(grid, advection, U.w, ρ)
+    return Oceananigans.Operators.V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+        (Oceananigans.Operators.δxᶜᵃᵃ(i, j, k, grid, rebuilt_limited_flux_x, advection, ρ, U.u, c) +
+         Oceananigans.Operators.δyᵃᶜᵃ(i, j, k, grid, rebuilt_limited_flux_y, advection, ρ, U.v, c) +
+         Oceananigans.Operators.δzᵃᵃᶜ(i, j, k, grid, BA.limited_face_flux_z, advection, ρ, wᵉ, c))
+end
+
+@testset "Outflow-limited tendency reads the stage's stored face fluxes [$(FT)]" for FT in all_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size=(8, 8, 16), halo=(6, 6, 6), x=(0, 800), y=(0, 800), z=(0, 800))
+    constants = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
+    advection = WENO(FT; order=5, bounds=(0, 1), time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=1//2))
+    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants,
+                            microphysics=FallingRain(FT(fall_speed), false), scalar_advection=(; ρqʳ=advection))
+    blob(x, y, z) = ifelse((200 < x < 400) & (300 < y < 500) & (300 < z < 600), FT(1e-3), zero(FT))
+    set!(model; θ=300, qᵛ=FT(5e-3), qʳ=blob, u=(x, y, z) -> 20 * sinpi(2y / 800), v=(x, y, z) -> 15 * cospi(2x / 800))
+    for _ in 1:3
+        time_step!(model, 20)
+    end
+    Oceananigans.TimeSteppers.update_state!(model)
+
+    scheme = model.advection.ρqʳ
+    r = scheme.bounds.limiter.outflow_fraction
+    @test minimum(interior(r)) < 1 # the limiter acts somewhere
+
+    ρ = AM.total_density(model.dynamics)
+    U = BA.scalar_transport_velocities(model, :ρqʳ)
+    c = model.microphysical_fields.qʳ
+    stored = Field(KernelFunctionOperation{Center, Center, Center}(AM.div_ρUc, grid, scheme, ρ, U, c))
+    rebuilt = Field(KernelFunctionOperation{Center, Center, Center}(rebuilt_limited_divergence, grid, scheme, ρ, U, c))
+    compute!(stored)
+    compute!(rebuilt)
+    # Roundoff only: on GPUs the two may contract multiply-adds differently.
+    stored, rebuilt = Array(interior(stored)), Array(interior(rebuilt))
+    @test maximum(abs, rebuilt) > 0
+    @test isapprox(stored, rebuilt; rtol=0, atol=8 * eps(FT) * maximum(abs, rebuilt))
+end

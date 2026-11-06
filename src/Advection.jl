@@ -157,18 +157,6 @@ end
 end
 
 # Each face flux is scaled by the outflow fraction of its upwind cell.
-@inline function limited_face_flux_x(i, j, k, grid, advection, ρ, u, c)
-    r = advection.bounds.limiter.outflow_fraction
-    @inbounds rᵘ = ifelse(u[i, j, k] ≥ 0, r[i-1, j, k], r[i, j, k])
-    return rᵘ * bounded_face_flux_x(i, j, k, grid, advection, ρ, u, c)
-end
-
-@inline function limited_face_flux_y(i, j, k, grid, advection, ρ, v, c)
-    r = advection.bounds.limiter.outflow_fraction
-    @inbounds rᵘ = ifelse(v[i, j, k] ≥ 0, r[i, j-1, k], r[i, j, k])
-    return rᵘ * bounded_face_flux_y(i, j, k, grid, advection, ρ, v, c)
-end
-
 @inline upwind_outflow_fraction_z(i, j, k, advection, w) =
     @inbounds ifelse(w[i, j, k] ≥ 0, advection.bounds.limiter.outflow_fraction[i, j, k-1],
                                      advection.bounds.limiter.outflow_fraction[i, j, k])
@@ -178,21 +166,84 @@ end
 
 @inline AtmosphereModels.div_ρUc(i, j, k, grid, ::OutflowLimitedWENO, ρ, U, ::ZeroField) = zero(grid)
 
+# The face fluxes are those `update_outflow_limiter!` stored for this stage, built from the same
+# `ρ`, `U` and `c` (the tendencies follow `update_advection!` directly).
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::OutflowLimitedWENO, ρ, U, c)
     wᵉ = ExplicitVerticalVelocity(grid, advection, U.w, ρ)
-    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, limited_face_flux_x, advection, ρ, U.u, c) +
-                                    δyᵃᶜᵃ(i, j, k, grid, limited_face_flux_y, advection, ρ, U.v, c) +
-                                    δzᵃᵃᶜ(i, j, k, grid, limited_face_flux_z, advection, ρ, wᵉ, c))
+    F = advection.bounds.limiter.face_fluxes
+    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, stored_limited_face_flux_x, advection, U.u, F) +
+                                    δyᵃᶜᵃ(i, j, k, grid, stored_limited_face_flux_y, advection, U.v, F) +
+                                    δzᵃᵃᶜ(i, j, k, grid, stored_limited_face_flux_z, advection, wᵉ, F))
 end
 
+@inline stored_limited_face_flux_x(i, j, k, grid::AbstractGrid{FT, Flat}, advection, u, F) where FT = zero(FT)
+@inline stored_limited_face_flux_y(i, j, k, grid::AbstractGrid{FT, <:Any, Flat}, advection, v, F) where FT = zero(FT)
+
+@inline function stored_limited_face_flux_x(i, j, k, grid, advection, u, F)
+    r = advection.bounds.limiter.outflow_fraction
+    @inbounds rᵘ = ifelse(u[i, j, k] ≥ 0, r[i-1, j, k], r[i, j, k])
+    return rᵘ * stored_face_flux_x(i, j, k, grid, F)
+end
+
+@inline function stored_limited_face_flux_y(i, j, k, grid, advection, v, F)
+    r = advection.bounds.limiter.outflow_fraction
+    @inbounds rᵘ = ifelse(v[i, j, k] ≥ 0, r[i, j-1, k], r[i, j, k])
+    return rᵘ * stored_face_flux_y(i, j, k, grid, F)
+end
+
+@inline stored_limited_face_flux_z(i, j, k, grid, advection, w, F) =
+    upwind_outflow_fraction_z(i, j, k, advection, w) * stored_face_flux_z(i, j, k, grid, F)
+
+# The face fluxes of the coming stage, `bounded_face_flux_{x,y,z}` at every face of the interior
+# cells, built once per scalar and stage for the limiter's passes and the scalar's tendency.
+@kernel function _compute_outflow_limiter_face_fluxes!(F, grid, advection, ρ, U, c)
+    i, j, k = @index(Global, NTuple)
+    wᵉ = ExplicitVerticalVelocity(grid, advection, U.w, ρ)
+    Nx, Ny, Nz = size(grid)
+    store_face_flux_x!(F.x, i, j, k, grid, advection, ρ, U.u, c, (j ≤ Ny) & (k ≤ Nz))
+    store_face_flux_y!(F.y, i, j, k, grid, advection, ρ, U.v, c, (i ≤ Nx) & (k ≤ Nz))
+    store_face_flux_z!(F.z, i, j, k, grid, advection, ρ, wᵉ, c, (i ≤ Nx) & (j ≤ Ny))
+end
+
+# Flat directions carry no flux and their face fields have no second face to hold one.
+@inline store_face_flux_x!(Fx, i, j, k, ::AbstractGrid{<:Any, Flat}, args...) = nothing
+@inline store_face_flux_y!(Fy, i, j, k, ::AbstractGrid{<:Any, <:Any, Flat}, args...) = nothing
+
+@inline function store_face_flux_x!(Fx, i, j, k, grid, advection, ρ, u, c, active)
+    @inbounds if active
+        Fx[i, j, k] = bounded_face_flux_x(i, j, k, grid, advection, ρ, u, c)
+    end
+    return nothing
+end
+
+@inline function store_face_flux_y!(Fy, i, j, k, grid, advection, ρ, v, c, active)
+    @inbounds if active
+        Fy[i, j, k] = bounded_face_flux_y(i, j, k, grid, advection, ρ, v, c)
+    end
+    return nothing
+end
+
+@inline function store_face_flux_z!(Fz, i, j, k, grid, advection, ρ, w, c, active)
+    @inbounds if active
+        Fz[i, j, k] = bounded_face_flux_z(i, j, k, grid, advection, ρ, w, c)
+    end
+    return nothing
+end
+
+@inline stored_face_flux_x(i, j, k, ::AbstractGrid{FT, Flat}, F) where FT = zero(FT)
+@inline stored_face_flux_y(i, j, k, ::AbstractGrid{FT, <:Any, Flat}, F) where FT = zero(FT)
+@inline stored_face_flux_x(i, j, k, grid, F) = @inbounds F.x[i, j, k]
+@inline stored_face_flux_y(i, j, k, grid, F) = @inbounds F.y[i, j, k]
+@inline stored_face_flux_z(i, j, k, grid, F) = @inbounds F.z[i, j, k]
+
 # Mass the explicit fluxes of the coming stage remove from cell (i, j, k), per unit volume.
-@inline function explicit_outflow(i, j, k, grid, advection, ρ, U, wᵉ, c)
-    Fx⁻ = bounded_face_flux_x(i,   j, k, grid, advection, ρ, U.u, c)
-    Fx⁺ = bounded_face_flux_x(i+1, j, k, grid, advection, ρ, U.u, c)
-    Fy⁻ = bounded_face_flux_y(i, j,   k, grid, advection, ρ, U.v, c)
-    Fy⁺ = bounded_face_flux_y(i, j+1, k, grid, advection, ρ, U.v, c)
-    Fz⁻ = bounded_face_flux_z(i, j, k,   grid, advection, ρ, wᵉ, c)
-    Fz⁺ = bounded_face_flux_z(i, j, k+1, grid, advection, ρ, wᵉ, c)
+@inline function explicit_outflow(i, j, k, grid, F)
+    Fx⁻ = stored_face_flux_x(i,   j, k, grid, F)
+    Fx⁺ = stored_face_flux_x(i+1, j, k, grid, F)
+    Fy⁻ = stored_face_flux_y(i, j,   k, grid, F)
+    Fy⁺ = stored_face_flux_y(i, j+1, k, grid, F)
+    Fz⁻ = stored_face_flux_z(i, j, k,   grid, F)
+    Fz⁺ = stored_face_flux_z(i, j, k+1, grid, F)
     outflow = max(0, Fx⁺) - min(0, Fx⁻) + max(0, Fy⁺) - min(0, Fy⁻) + max(0, Fz⁺) - min(0, Fz⁻)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * outflow
 end
@@ -200,46 +251,53 @@ end
 # Mass the explicit fluxes of the coming stage bring into cell (i, j, k) through its two faces
 # in one direction, each scaled by the fraction `r` of the cell it leaves. A `Flat` direction has
 # no neighbors (and no halo to index), so it contributes nothing.
-@inline limited_inflow_x(i, j, k, ::AbstractGrid{FT, Flat}, advection, ρ, u, c, r) where FT = zero(FT)
-@inline limited_inflow_y(i, j, k, ::AbstractGrid{FT, <:Any, Flat}, advection, ρ, v, c, r) where FT = zero(FT)
+@inline limited_inflow_x(i, j, k, ::AbstractGrid{FT, Flat}, F, r) where FT = zero(FT)
+@inline limited_inflow_y(i, j, k, ::AbstractGrid{FT, <:Any, Flat}, F, r) where FT = zero(FT)
 
-@inline function limited_inflow_x(i, j, k, grid, advection, ρ, u, c, r)
-    F⁻ = bounded_face_flux_x(i,   j, k, grid, advection, ρ, u, c)
-    F⁺ = bounded_face_flux_x(i+1, j, k, grid, advection, ρ, u, c)
+@inline function limited_inflow_x(i, j, k, grid, F, r)
+    F⁻ = stored_face_flux_x(i,   j, k, grid, F)
+    F⁺ = stored_face_flux_x(i+1, j, k, grid, F)
     return @inbounds max(0, F⁻) * r[i-1, j, k] - min(0, F⁺) * r[i+1, j, k]
 end
 
-@inline function limited_inflow_y(i, j, k, grid, advection, ρ, v, c, r)
-    F⁻ = bounded_face_flux_y(i, j,   k, grid, advection, ρ, v, c)
-    F⁺ = bounded_face_flux_y(i, j+1, k, grid, advection, ρ, v, c)
+@inline function limited_inflow_y(i, j, k, grid, F, r)
+    F⁻ = stored_face_flux_y(i, j,   k, grid, F)
+    F⁺ = stored_face_flux_y(i, j+1, k, grid, F)
     return @inbounds max(0, F⁻) * r[i, j-1, k] - min(0, F⁺) * r[i, j+1, k]
 end
 
-@inline function limited_inflow_z(i, j, k, grid, advection, ρ, w, c, r)
-    F⁻ = bounded_face_flux_z(i, j, k,   grid, advection, ρ, w, c)
-    F⁺ = bounded_face_flux_z(i, j, k+1, grid, advection, ρ, w, c)
+@inline function limited_inflow_z(i, j, k, grid, F, r)
+    F⁻ = stored_face_flux_z(i, j, k,   grid, F)
+    F⁺ = stored_face_flux_z(i, j, k+1, grid, F)
     return @inbounds max(0, F⁻) * r[i, j, k-1] - min(0, F⁺) * r[i, j, k+1]
 end
 
 # Mass the explicit fluxes of the coming stage bring into cell (i, j, k), per unit volume, each
 # scaled by the fraction `r` of the cell it leaves.
-@inline function limited_explicit_inflow(i, j, k, grid, advection, ρ, U, wᵉ, c, r)
-    inflow = limited_inflow_x(i, j, k, grid, advection, ρ, U.u, c, r) +
-             limited_inflow_y(i, j, k, grid, advection, ρ, U.v, c, r) +
-             limited_inflow_z(i, j, k, grid, advection, ρ, wᵉ, c, r)
+@inline function limited_explicit_inflow(i, j, k, grid, F, r)
+    inflow = limited_inflow_x(i, j, k, grid, F, r) +
+             limited_inflow_y(i, j, k, grid, F, r) +
+             limited_inflow_z(i, j, k, grid, F, r)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * inflow
 end
 
 # `r = min(1, available / removed)`. With `credit_inflow`, `available` includes the inflow scaled by
 # the previous pass's fractions `r₀`, which never exceed the final ones, so positivity holds.
-@kernel function _compute_outflow_fraction!(r, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, credit_inflow)
+# Later passes skip the cells the previous pass left at `r = 1`, which stay there.
+@kernel function _compute_outflow_fraction!(r, r₀, grid, F, ρ, c, q⁰, from_initial_state, Δt, credit_inflow)
     i, j, k = @index(Global, NTuple)
-    wᵉ = ExplicitVerticalVelocity(grid, advection, U.w, ρ)
-    removed = Δt * explicit_outflow(i, j, k, grid, advection, ρ, U, wᵉ, c)
     @inbounds content = max(0, ifelse(from_initial_state, q⁰[i, j, k], ρ[i, j, k] * c[i, j, k]))
-    inflow = ifelse(credit_inflow, Δt * limited_explicit_inflow(i, j, k, grid, advection, ρ, U, wᵉ, c, r₀), zero(content))
-    available = content + ifelse(isfinite(inflow), inflow, zero(inflow))
-    @inbounds r[i, j, k] = ifelse(isfinite(removed) & (removed > available), available / removed, one(available))
+    FT = typeof(content)
+    @inbounds settled = credit_inflow & (r₀[i, j, k] == 1)
+
+    if settled
+        @inbounds r[i, j, k] = one(FT)
+    else
+        removed = Δt * explicit_outflow(i, j, k, grid, F)
+        inflow = ifelse(credit_inflow, Δt * limited_explicit_inflow(i, j, k, grid, F, r₀), zero(content))
+        available = content + ifelse(isfinite(inflow), inflow, zero(inflow))
+        @inbounds r[i, j, k] = ifelse(isfinite(removed) & (removed > available), available / removed, one(available))
+    end
 end
 
 # The velocity the scalar tendency of `name` advects with (see `scalar_tendency`).
@@ -272,10 +330,14 @@ function AtmosphereModels.update_outflow_limiter!(advection::OutflowLimitedWENO,
 
     # The first pass limits by the content alone; each later pass credits the inflow at the
     # previous pass's fractions, which grow from pass to pass. The last pass writes `r`.
-    launch!(arch, grid, :xyz, _compute_outflow_fraction!, r₀, r₀, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, false)
+    F = advection.bounds.limiter.face_fluxes
+    Nx, Ny, Nz = size(grid)
+    launch!(arch, grid, (Nx+1, Ny+1, Nz+1), _compute_outflow_limiter_face_fluxes!, F, grid, advection, ρ, U, c)
+
+    launch!(arch, grid, :xyz, _compute_outflow_fraction!, r₀, r₀, grid, F, ρ, c, q⁰, from_initial_state, Δt, false)
     fill_halo_regions!(r₀)
     for (rⁿ, rᵖ) in ((r, r₀), (r₀, r), (r, r₀))
-        launch!(arch, grid, :xyz, _compute_outflow_fraction!, rⁿ, rᵖ, grid, advection, ρ, U, c, q⁰, from_initial_state, Δt, true)
+        launch!(arch, grid, :xyz, _compute_outflow_fraction!, rⁿ, rᵖ, grid, F, ρ, c, q⁰, from_initial_state, Δt, true)
         fill_halo_regions!(rⁿ)
     end
 
