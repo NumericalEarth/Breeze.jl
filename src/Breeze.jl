@@ -192,7 +192,8 @@ export
     PrognosticVerticalVelocity
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
-                    AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
+                    AveragedTimeInterval, BackgroundField, BalancedTransport, BetaPlane, Bounded,
+                    BoundaryConditionOperation,
                     CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
                     ConstantCartesianCoriolis, Distributed, DynamicSmagorinsky,
                     ExponentialDiscretization, FPlane, Face, Field, FieldBoundaryConditions,
@@ -234,7 +235,7 @@ export
     Distributed, Partition,
     Centered, UpwindBiased, WENO, FluxFormAdvection,
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
-    NormalFlowBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
+    NormalFlowBoundaryCondition, PerturbationAdvection, BalancedTransport, FieldBoundaryConditions,
     BoundaryConditionOperation,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
     Average, Integral,

@@ -159,13 +159,8 @@ function compute_velocities!(model::AtmosphereModel)
     fill_halo_regions!(density, boundary_condition_args(model)...)
     fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
 
-    # The fill above rewrote the boundary faces from the prescribed data, reverting any rebalancing
-    # `compute_pressure_correction!` applied. Rebalance before the velocities are diagnosed, so the
-    # state this leaves — momentum and velocity alike — satisfies the lateral constraint the pressure
-    # solve assumed. Without this the interior is corrected for balanced walls while the walls are not,
-    # which puts a flux discontinuity on every boundary face and two on each corner cell. A no-op for
-    # any dynamics without an elliptic Neumann pressure problem.
-    enforce_lateral_mass_balance!(model.dynamics, model.momentum, model.grid)
+    # The fill above rewrote the boundary faces, so rebalance before the velocities are diagnosed.
+    enforce_lateral_mass_balance!(model.dynamics, model.momentum)
 
     # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
     # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by

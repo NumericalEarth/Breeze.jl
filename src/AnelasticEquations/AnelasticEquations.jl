@@ -23,17 +23,16 @@ using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
-using Oceananigans.Architectures: CPU, architecture, on_architecture
-using Oceananigans.BoundaryConditions: BoundaryCondition, NormalFlow, fill_halo_regions!
-using Oceananigans.Fields: interior, set!
-using Oceananigans.Grids: AbstractGrid, Bounded, Center, XYRegularRG, ZDirection, inactive_cell,
-                          with_number_type
+using Oceananigans.Architectures: architecture
+using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.Fields: set!
+using Oceananigans.Grids: AbstractGrid, ZDirection, inactive_cell, with_number_type
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, mask_immersed_field!
-using Oceananigans.Models: boundary_condition_args
-using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
-                              xspacing, yspacing, zspacing
+using Oceananigans.Models: boundary_condition_args, enforce_net_zero_transport!,
+                           initialize_boundary_transport
+using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
-using Oceananigans.Utils: KernelParameters, prettysummary, launch!
+using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant,
                              surface_temperature_value, density
