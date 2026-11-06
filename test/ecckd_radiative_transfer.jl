@@ -510,7 +510,8 @@ previous_float_type = Oceananigans.defaults.FloatType
                                            solar_position = FixedCosineZenith(0.5),
                                            schedule = IterationInterval(3))
         model = column_model(grid, radiation)
-        ℐ_lw_up = radiation.upwelling_longwave_flux
+        # Only a full solve rewrites this reference; between-solve updates rewrite the output fluxes.
+        ℐ_lw_up = radiation.approximate_updates.solved_upwelling_longwave_flux
 
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100
         interior(ℐ_lw_up) .= 0

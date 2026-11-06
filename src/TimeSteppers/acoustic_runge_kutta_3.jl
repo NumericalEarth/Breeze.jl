@@ -72,6 +72,8 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS} <: AbstractTimeStepper
     substepper :: AS
 end
 
+AtmosphereModels.stage_abscissae(ts::AcousticRungeKutta3) = (ts.β₁, ts.β₂)
+
 """
     AcousticRungeKutta3(grid, prognostic_fields;
                         dynamics,
