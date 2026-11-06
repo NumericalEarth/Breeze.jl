@@ -15,7 +15,7 @@ using Oceananigans.TimeSteppers: implicit_step!
 using Breeze.AtmosphereModels:
     AtmosphereModel,
     advecting_vertical_velocity,
-    dynamics_density,
+    continuity_density,
     total_density,
     thermodynamic_density_name,
     transport_velocities,
@@ -92,11 +92,13 @@ tendency_transport_velocities(model) =
 """
 $(TYPEDSIGNATURES)
 
-Update non-acoustic scalar fields (moisture, microphysics, tracers) using the given kernel.
-Iterates over prognostic fields, skipping the ones the acoustic substep loop advances
-(see `acoustic_prognostic_names`).
+Update non-acoustic scalar fields (moisture, microphysics, tracers) with the
+Wicker–Skamarock stage update ``u = u⁰ + Δt G``, rounded with the round-off
+treatment `rounding`, followed by their implicit solves over `Δt_stage`. Iterates over prognostic
+fields, skipping the ones the acoustic substep loop advances (see `acoustic_prognostic_names`).
+`kernel_Δt` is `Δt_stage` as the kernels take it (see `kernel_time_step`).
 """
-function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
+function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     grid = model.grid
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
@@ -120,10 +122,11 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     # (`frozen_thermodynamic_fields`).
     coefficient_fields = frozen_thermodynamic_fields(model)
 
-    for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
+    for (field_number, (name, u, u⁰, G)) in enumerate(zip(names, prognostic, U⁰, Gⁿ))
         name ∈ acoustic_names && continue
 
-        launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
+        key = rounding_key(rounding, model.clock.iteration, model.clock.stage, field_number)
+        launch_rk3_substep!(rounding, arch, grid, u, u⁰, G, kernel_Δt, key)
 
         field_index = closure_scalar_index(model, name)
         advection = field_advection_scheme(model.advection, name)
@@ -144,7 +147,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
                            field_index,
                            model.clock,
                            coefficient_fields,
-                           Δt_implicit,
+                           Δt_stage,
                            implicit_step_scheme(advection),
                            implicit_advection_velocities(model.dynamics, velocities, name,
                                                          model.microphysics, model.microphysical_fields),
@@ -178,7 +181,7 @@ acoustic_prognostic_names(model) = tuple(keys(dynamics_prognostic_fields(model.d
 """
 $(TYPEDSIGNATURES)
 
-Freeze the stage-entry advecting velocity and carrier density so `implicit_substep!` sizes
+Freeze the stage-entry advecting velocity and the density that weights it so `implicit_substep!` sizes
 the withheld remainder from the state whose fluxes the slow tendencies split (invariant:
 wᴸ = wᵉ + wⁱ). The full wᴸ is cached, not the clipped wᵉ, which loses the remainder in
 saturated cells. A no-op when the substepper carries no cache.
@@ -200,7 +203,7 @@ end
 
 function cache_advecting_state!(w_cache, ρ_cache, model)
     w = advecting_vertical_velocity(model.dynamics, model.velocities)
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
     params = KernelParameters(size(parent(w_cache)), (0, 0, 0))
     launch!(architecture(model.grid), model.grid, params, _cache_advecting_state!,
             parent(w_cache), parent(ρ_cache), parent(w), parent(ρ))
@@ -213,7 +216,7 @@ advecting_state(model) =
     advecting_state(model.timestepper.substepper.vertical_velocity_cache,
                     model.timestepper.substepper.density_cache, model)
 
-advecting_state(::Nothing, ::Nothing, model) = (advecting_vertical_velocity(model.dynamics, model.velocities), dynamics_density(model.dynamics))
+advecting_state(::Nothing, ::Nothing, model) = (advecting_vertical_velocity(model.dynamics, model.velocities), continuity_density(model.dynamics))
 
 advecting_state(w_cache, ρ_cache, model) = (w_cache, ρ_cache)
 
@@ -305,14 +308,14 @@ implicit_substep!(model, Δt_stage) =
 implicit_substep!(model, ::Nothing, Δt_stage) = nothing
 
 function implicit_substep!(model, implicit_solver, Δt_stage)
-    # Momentum and the thermodynamic variable are coupling-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
+    # Momentum and the thermodynamic variable are continuity-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
     # Frozen stage-entry (w, ρᵈ), so the explicit and implicit halves partition one transport.
     w, ρᵈ = advecting_state(model)
 
-    # The diffusion half of each row is weighted with the *live* coupling density instead: it
+    # The diffusion half of each row is weighted with the *live* continuity density instead: it
     # reconstructs u and θ from the prognostic the acoustic loop has just advanced, and unlike the
     # advective split it has no explicit fraction to pair with the frozen state.
-    diffusion_density = dynamics_density(model.dynamics)
+    diffusion_density = continuity_density(model.dynamics)
 
     prognostic = prognostic_fields(model)
     momentum_advection = model.advection.momentum
@@ -380,10 +383,10 @@ function thermodynamic_variable_implicit(model)
 end
 
 # The advective half of the variable's post-loop operator is weighted with the frozen stage-entry
-# (w, ρᵈ) and the diffusive half with the live coupling density (see `implicit_substep!`).
+# (w, ρᵈ) and the diffusive half with the live continuity density (see `implicit_substep!`).
 postloop_thermodynamic_scheme(model) =
     postloop_thermodynamic_scheme(field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation)),
-                                  dynamics_density(model.dynamics))
+                                  continuity_density(model.dynamics))
 
 function thermodynamic_implicit_step!(model, implicit_solver, Δt_stage, coefficient_fields)
     w, ρᵈ = advecting_state(model)

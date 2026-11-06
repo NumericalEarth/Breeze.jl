@@ -1,5 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
+using Oceananigans: TendencyCallsite
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.Fields: CenterField
@@ -15,7 +16,8 @@ using Oceananigans.TimeSteppers:
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, microphysics_model_update!,
-                                compute_closure_tendencies!, thermodynamic_density, add_sedimentation_tendency_parts!,
+                                compute_closure_tendencies!, refreshes_state_after_update, invalid_time_step,
+                                thermodynamic_density, add_sedimentation_tendency_parts!,
                                 add_implicit_sedimentation_tendency_parts!
 
 using Breeze.CompressibleEquations:
@@ -75,6 +77,8 @@ Fields
   stage's content is added, for the post-loop solves of the variable and the content to read
   their coefficients from (see `freeze_thermodynamic_density!`); `nothing` when no condensate
   sediments.
+- `rounding`: Round-off treatment of the final stage's update, [`RoundToNearest`](@ref)
+  or [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding).
 
 References
 ==========
@@ -82,7 +86,7 @@ References
 Wicker, L. J. & Skamarock, W. C. (2002). *Time-splitting methods for
 elastic models using forward time schemes.* MWR 130, 2088–2097.
 """
-struct AcousticRungeKutta3{FT, U0, TG, TI, AS, SC, FD} <: AbstractTimeStepper
+struct AcousticRungeKutta3{FT, U0, TG, TI, AS, SC, FD, R} <: AbstractTimeStepper
     β₁ :: FT
     β₂ :: FT
     β₃ :: FT
@@ -92,15 +96,11 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS, SC, FD} <: AbstractTimeStepper
     substepper :: AS
     sedimentation_content :: SC
     frozen_thermodynamic_density :: FD
+    rounding :: R
 end
 
 """
-    AcousticRungeKutta3(grid, prognostic_fields;
-                        dynamics,
-                        implicit_solver = nothing,
-                        sedimentation = NamedTuple(),
-                        Gⁿ = map(similar, prognostic_fields),
-                        U⁰ = map(similar, prognostic_fields))
+$(TYPEDSIGNATURES)
 
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
 
@@ -111,6 +111,14 @@ the live field, and that the post-loop solves read their coefficients from
 (see `freeze_thermodynamic_density!`).
 `Gⁿ` and `U⁰` may be supplied to alias another stepper's tendency storage instead of
 allocating fresh fields (used by the native-stepper adiabatic-balance twin).
+
+`rounding` sets the round-off treatment of the step's final update (default:
+[`RoundToNearest`](@ref)). Every Wicker–Skamarock stage restarts from ``Uⁿ``, so only the third
+stage's rounding reaches ``Uⁿ⁺¹``: with [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding), the recovery of the acoustic
+prognostics from their stage-entry values plus the accumulated perturbations, and the update
+``u⁰ + Δt G`` of the other scalars, are rounded stochastically in the third stage. The
+perturbations themselves, the first two stages, and the vertically-implicit solves stay
+round-to-nearest.
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
                              dynamics,
@@ -118,9 +126,12 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                              cache_advecting_state = false,
                              sedimentation = NamedTuple(),
                              Gⁿ::TG = map(similar, prognostic_fields),
-                             U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
+                             U⁰::U0 = map(similar, prognostic_fields),
+                             rounding = RoundToNearest()) where {TI, TG, U0}
 
     FT = eltype(grid)
+    rounding = materialize_rounding(rounding, grid.architecture)
+    R = typeof(rounding)
 
     # Stage fractions come from the outer-scheme interface. Today the only
     # supported subtype is WickerSkamarock3 with canonical (1/3, 1/2, 1);
@@ -144,10 +155,11 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     frozen_thermodynamic_density = isempty(sedimentation) ? nothing : CenterField(grid)
     FD = typeof(frozen_thermodynamic_density)
 
-    return AcousticRungeKutta3{FT, U0, TG, TI, AS, SC, FD}(β₁, β₂, β₃, U⁰, Gⁿ,
-                                                            implicit_solver, substepper,
-                                                            sedimentation_content,
-                                                            frozen_thermodynamic_density)
+    return AcousticRungeKutta3{FT, U0, TG, TI, AS, SC, FD, R}(β₁, β₂, β₃, U⁰, Gⁿ,
+                                                               implicit_solver, substepper,
+                                                               sedimentation_content,
+                                                               frozen_thermodynamic_density,
+                                                               rounding)
 end
 
 #####
@@ -191,9 +203,10 @@ $(TYPEDSIGNATURES)
 Run Wicker–Skamarock RK3 `stage` (1, 2 or 3) with stage fraction `β`: complete the slow
 tendencies built by `update_state!`, update the remaining scalars, execute the linearized-acoustic
 substep loop, add the stage's condensate sedimentation composition content to the thermodynamic
-variable, then run the post-loop implicit solves.
+variable, then run the post-loop implicit solves. The stage's updates are rounded with the
+round-off treatment `rounding`.
 """
-function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, stage)
+function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, stage, rounding = RoundToNearest())
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
@@ -240,7 +253,7 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, stage)
     # They follow the removal and the cache prep because the linearization's mixture coefficients
     # read the stage-entry moisture, which they change; their solves' coefficients read the
     # thermodynamic variable from its stage-entry copy (`frozen_thermodynamic_fields`).
-    scalar_rk3_substep!(model, β * Δt)
+    scalar_rk3_substep!(model, β * Δt, rounding)
 
     # The content is complete: scale it to the stage's increment, which the loop's open-boundary
     # relaxation takes off its target and `apply_sedimentation_content!` adds after the loop.
@@ -248,7 +261,7 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, stage)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
-    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection;
+    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection; rounding,
                                entry_thermodynamic_density = ts.frozen_thermodynamic_density,
                                sedimentation_content = ts.sedimentation_content)
 
@@ -272,28 +285,40 @@ end
 ##### Scalar update with time-averaged velocities
 #####
 
-function scalar_rk3_substep!(model::AtmosphereModel, Δt_stage)
+function scalar_rk3_substep!(model::AtmosphereModel, Δt_stage, rounding = RoundToNearest())
     grid = model.grid
     kernel_Δt = kernel_time_step(grid.architecture, grid, Δt_stage)
-    return scalar_substep!(model, _rk3_substep!, Δt_stage, kernel_Δt)
+    return scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
 end
+
+# Round-to-nearest keeps the original kernel, so the default is bitwise unchanged.
+launch_rk3_substep!(::RoundToNearest, arch, grid, u, u⁰, G, Δt_stage, key) =
+    launch!(arch, grid, :xyz, _rk3_substep!, u, u⁰, G, Δt_stage)
+
+launch_rk3_substep!(rounding, arch, grid, u, u⁰, G, Δt_stage, key) =
+    launch!(arch, grid, :xyz, _rounded_rk3_substep!, u, u⁰, G, Δt_stage, rounding, key)
 
 @kernel function _rk3_substep!(u, u⁰, G, Δt_stage)
     i, j, k = @index(Global, NTuple)
     @inbounds u[i, j, k] = u⁰[i, j, k] + Δt_stage * G[i, j, k]
 end
 
+@kernel function _rounded_rk3_substep!(u, u⁰, G, Δt_stage, rounding, key)
+    i, j, k = @index(Global, NTuple)
+    @inbounds u[i, j, k] = rounded_add(rounding, u⁰[i, j, k], Δt_stage * G[i, j, k], i, j, k, key)
+end
+
 #####
 ##### Condensate sedimentation content, kept out of the acoustic substep loop
 #####
 ##### The loop forms its pressure perturbation from the thermodynamic perturbation alone,
-##### p′ = γᵐ Rᵐ Πᴸ (ρθ)′, so it reads any change of ρθ as a change of pressure. The content of
+##### p′ = Cᴸ (ρθ)′, so it reads any change of ρθ as a change of pressure. The content of
 ##### ρθˡⁱ that sedimenting condensate moves has two parts (see `sedimentation_tendency`). The
 ##### sensible heat the arriving mass brings changes the temperature and the pressure, like any
 ##### heating, so it joins the slow tendency the loop integrates. The composition content (mostly
 ##### the latent deficit −ℒ q / (cᵖᵐ Π); see `condensate_content`) changes ρθ at fixed
 ##### temperature, and the gas pressure (ρᵈ Rᵈ + ρᵛ Rᵛ) T does not change. Fed to the loop, it
-##### reads as a pressure perturbation of about γᵐ Rᵐ ℒ / cᵖᵐ per unit condensate density. Every
+##### reads as a pressure perturbation of about Cᴸ ℒ / (cᵖᵐ Π) per unit condensate density. Every
 ##### stage after the first starts its perturbations from the rewind Uⁿ − Uᴸ_stage, which carries
 ##### the previous stage's content with the opposite sign: with explicit sedimentation a stage
 ##### opens at −β_{s−1} Δt times the content tendency and its own slow tendency brings that to
@@ -306,10 +331,10 @@ end
 ##### So the composition content bypasses the loop. Each stage:
 #####   - keeps a copy of the full stage-entry variable, then takes out the composition content the
 #####     previous stage added, halos included, so the rewind and the linearization base θᴸ measure
-#####     only pressure-changing differences from Uⁿ. The base is thus a hybrid: Πᴸ, pᴸ, γᵐRᵐᴸ and
-#####     the total density are those of the full state `update_state!` diagnosed, while θᴸ is the
-#####     pressure-relevant ρθ over ρ. The content is O(Δt), so the Θ-flux the loop forms from θᴸ
-#####     differs by a second-order term. What must see the full variable meanwhile reads the copy:
+#####     only pressure-changing differences from Uⁿ. The base is thus a hybrid: pᴸ and the total
+#####     density are those of the full state `update_state!` diagnosed, while θᴸ is the
+#####     pressure-relevant ρθ over ρᵈ and the slope Cᴸ is evaluated there. The content is O(Δt), so
+#####     the Θ-flux the loop forms from θᴸ and the slope Cᴸ differ by second-order terms. What must see the full variable meanwhile reads the copy:
 #####     the coefficients of the moisture and tracer solves, and the loop's open-boundary
 #####     relaxation, which targets the copy's wall value less the increment below;
 #####   - collects its own, explicit and implicit, as a tendency, and scales it to the stage's
@@ -508,15 +533,25 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     update_state!(model, callbacks; compute_tendencies = true)
     cache_transport_velocity!(model)
 
-    # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**)
-    acoustic_rk3_substep!(model, Δt, β₃, 3)
+    # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**). Every stage restarts from Uⁿ, so only this stage's
+    # rounding reaches Uⁿ⁺¹, and only this stage takes the time stepper's round-off treatment.
+    acoustic_rk3_substep!(model, Δt, β₃, 3, ts.rounding)
 
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    update_state!(model, callbacks; compute_tendencies = true)
+    # Kessler reads diagnostics, then rebuilds tendencies after updating its prognostics.
+    # Keep the preceding pass when Kessler will return early (the same `invalid_time_step`
+    # test it applies), or when a tendency callback is present, so that the callback still runs
+    # once per stage.
+    # TODO: Kessler's internal update_state! does not forward the time stepper's callbacks, so
+    # whatever a tendency callback adds to Gⁿ here is overwritten before stage 1 of the next step.
+    # Forwarding the callbacks through microphysics_model_update! would fix this and let the pass
+    # always be skipped.
+    skip_tendencies = skip_pre_microphysics_tendencies(model.microphysics, Δt, callbacks)
+    update_state!(model, callbacks; compute_tendencies = !skip_tendencies)
     # These tendencies are consumed by stage 1 of the next step, after
     # `freeze_linearization_state!` has reseeded the live field.
     cache_transport_velocity!(model)
@@ -535,6 +570,10 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
 
     return nothing
 end
+
+skip_pre_microphysics_tendencies(microphysics, Δt, callbacks) =
+    refreshes_state_after_update(microphysics) && !invalid_time_step(Δt) &&
+    !any(callback -> callback.callsite isa TendencyCallsite, callbacks)
 
 #####
 ##### Time-averaged velocity for scalar transport (WRF/MPAS dynamics-transport split)
