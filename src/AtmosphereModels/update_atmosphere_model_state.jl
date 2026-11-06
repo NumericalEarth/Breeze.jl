@@ -178,6 +178,9 @@ function compute_velocities!(model::AtmosphereModel)
     return nothing
 end
 
+# Fields an advection scheme stores once per tendency evaluation rather than recomputing at every read
+update_advection_auxiliaries!(scheme, grid, velocities, momentum) = nothing
+
 function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
     grid = model.grid
     arch = grid.architecture
@@ -209,6 +212,8 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
                    model.microphysics,
                    model.microphysical_fields,
                    model.thermodynamic_constants)
+
+    update_advection_auxiliaries!(model.advection.momentum, grid, model.velocities, model.momentum)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)

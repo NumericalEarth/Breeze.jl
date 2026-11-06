@@ -11,4 +11,4 @@ Breeze = {path = "../.."}
 [compat]
 CUDA = "5.9.7, 6.0"
 CairoMakie = "0.15.8"
-Oceananigans = "0.110"
+Oceananigans = "0.116"
