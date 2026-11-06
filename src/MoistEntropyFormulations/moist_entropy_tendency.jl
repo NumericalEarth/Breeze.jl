@@ -184,7 +184,7 @@ end
                                                      specific_prognostic_moisture, temperature_field)
     @inbounds begin
         T = temperature_field[i, j, k]
-        r = total_density(dynamics)[i, j, k] / dynamics_density(dynamics)[i, j, k]
+        r = total_density(dynamics)[i, j, k] / continuity_density(dynamics)[i, j, k]
     end
     b = formulation.water_entropy_offset
     χˡ = r * (liquid_entropy(T, constants) + b)

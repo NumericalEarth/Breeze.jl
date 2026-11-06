@@ -136,12 +136,12 @@ const total_energy_density_name = :ρE
     thermodynamic_density(formulation)
 
 Return the thermodynamic density field for the given formulation — the prognostic
-thermodynamic variable in coupling-density-weighted ("flux") form (`ρθ`, `ρs`, `ρE`).
+thermodynamic variable in continuity-density-weighted ("flux") form (`ρθ`, `ρs`, `ρE`).
 
-The weighting density is the dynamics' coupling density (see [`dynamics_density`](@ref)):
+The weighting density is the dynamics' continuity density (see [`continuity_density`](@ref)):
 the reference density `ρᵣ` on the anelastic core and the prognostic dry-air density `ρᵈ` on the
 compressible core. The generic name (`ρθ`) is therefore `ρᵈθ` on `CompressibleDynamics`; the
-intensive variable is recovered as `θ = ρθ / dynamics_density(dynamics)`.
+intensive variable is recovered as `θ = ρθ / continuity_density(dynamics)`.
 """
 function thermodynamic_density end
 
@@ -241,7 +241,7 @@ implicit_thermodynamic_solve!(solve!, formulation, model, Δt) = solve!(thermody
 The density weighting the closure diffusion of the vertically implicit solve of `formulation`'s
 thermodynamic variable: the coupling density of `model.dynamics` by default.
 """
-implicit_diffusion_density(formulation, model) = dynamics_density(model.dynamics)
+implicit_diffusion_density(formulation, model) = continuity_density(model.dynamics)
 
 #####
 ##### Set thermodynamic variable interface

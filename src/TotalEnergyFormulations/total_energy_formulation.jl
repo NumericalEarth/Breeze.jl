@@ -227,7 +227,7 @@ function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(model::Tota
     formulation = model.formulation
     launch!(grid.architecture, grid, :xyz, _compute_internal_energy!,
             formulation.internal_energy, grid, formulation.energy_density, total_density(model.dynamics),
-            dynamics_density(model.dynamics), model.velocities, formulation.reference_temperature,
+            continuity_density(model.dynamics), model.velocities, formulation.reference_temperature,
             model.thermodynamic_constants)
 
     # Then diagnose the temperature (with any saturation adjustment) as for every formulation

@@ -170,7 +170,7 @@ function CompressibleEquations.initialize_water_pressure_perturbation!(formulati
     W = formulation.water_pressure_perturbation
     fill!(parent(W), 0)
     ρE′ = substepper.density_potential_temperature_perturbation
-    C = substepper.linearization_exner
+    C = substepper.linearization_pressure_coefficient
     Gⁿ = model.timestepper.Gⁿ
     constants = model.thermodynamic_constants
     FT = eltype(grid)

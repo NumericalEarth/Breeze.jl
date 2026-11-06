@@ -231,6 +231,7 @@ makedocs(
             "Governing equations" => "dycore_equations_algorithms.md",
             "Anelastic dynamics" => "anelastic_dynamics.md",
             "Compressible dynamics" => "compressible_dynamics.md",
+            "Round-off in reduced precision" => "round_off.md",
             "Single column mode" => "single_column_mode.md",
             "Terrain-following coordinates" => "terrain_following_coordinates.md",
         ],

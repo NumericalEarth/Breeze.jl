@@ -81,7 +81,7 @@ end
                                        clock,
                                        model_fields)
 
-    ρᵈ = dynamics_density(dynamics)
+    ρᵈ = continuity_density(dynamics)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρᵈ, velocities, formulation.dry_enthalpy)
@@ -357,7 +357,7 @@ end
 AtmosphereModels.implicit_diffusion_density(::TotalEnergyFormulation, model) = total_density(model.dynamics)
 
 AtmosphereModels.implicit_advection_density(dynamics, ::TotalEnergyFormulation, name::Symbol) =
-    name === :ρu || name === :ρv || name === :ρw ? dynamics_density(dynamics) : total_density(dynamics)
+    name === :ρu || name === :ρv || name === :ρw ? continuity_density(dynamics) : total_density(dynamics)
 
 function AtmosphereModels.implicit_thermodynamic_solve!(solve!, formulation::TotalEnergyFormulation, model, Δt)
     isnothing(model.timestepper.implicit_solver) && return nothing
@@ -517,6 +517,6 @@ end
     K = kinetic_energyᶜᶜᶜ(i, j, k, grid, velocities)
     g = constants.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
-    @inbounds ρᵈ = dynamics_density(dynamics)[i, j, k]
+    @inbounds ρᵈ = continuity_density(dynamics)[i, j, k]
     @inbounds ρE[i, j, k] = ρ * (𝒰.internal_energy + K + g * z) - energy_origin_offset(T₀, ρᵈ, ρ, constants)
 end
