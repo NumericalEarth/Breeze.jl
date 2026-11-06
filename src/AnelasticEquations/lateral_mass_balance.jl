@@ -101,12 +101,30 @@ end
 # a CPU grid; on a GPU grid it copies the coordinates once, which is the largest single piece of the
 # call below.
 #
+# That copy is opaque to inference on a GPU grid: `on_architecture` rebuilds the grid from a `Dict` of
+# constructor arguments, so the host grid is `Any` to the compiler and so is every spacing read off it,
+# which made `lateral_mass_imbalance` infer as `Tuple{Any, Any, Any}` on a GPU. (On a CPU grid
+# `on_architecture` folds to the identity, so the problem never showed there.) Collecting the spacings
+# into typed vectors here is the function barrier that keeps the callers concrete: a typed comprehension
+# returns `Vector{FT}` whatever its element calls infer as, and the per-point dynamic dispatch it pays on
+# a GPU grid is nothing next to the grid copy itself.
+#
 # `xspacing`/`yspacing`/`zspacing` (singular) are the eager `Oceananigans.Operators` accessors that the
 # lazy `xspacings`/`yspacings`/`zspacings` operations wrap, so the arithmetic is identical. The eager
 # spelling is used because constructing one of those operations allocates a small struct that embeds the
 # grid by value, so the lazy spelling adds one allocation per lookup on a GPU grid. On a CPU grid neither
 # allocates.
-host_grid(grid) = on_architecture(CPU(), grid)
+function host_spacings(grid)
+    Nx, Ny, Nz = size(grid)
+    FT = eltype(grid)
+    cpu_grid = on_architecture(CPU(), grid)
+
+    Δx = FT[xspacing(i, cpu_grid, Center()) for i in 1:Nx]
+    Δy = FT[yspacing(j, cpu_grid, Center()) for j in 1:Ny]
+    Δz = FT[zspacing(k, cpu_grid, Center()) for k in 1:Nz]
+
+    return Δx, Δy, Δz
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -129,7 +147,7 @@ function lateral_mass_imbalance(ρu, ρv, grid)
     Nx, Ny, Nz = size(grid)
     FT = eltype(grid)
 
-    cpu_grid = host_grid(grid)
+    Δx, Δy, Δz = host_spacings(grid)
     device_west, device_east, device_south, device_north = lateral_boundary_planes(ρu, ρv, grid)
 
     # `interior` builds its view indices at run time, so inference gives up and hands back `Any`, which
@@ -145,14 +163,14 @@ function lateral_mass_imbalance(ρu, ρv, grid)
     meridional_area = zero(FT)
 
     for k in 1:Nz
-        Δzᵏ = zspacing(k, cpu_grid, Center())
+        Δzᵏ = Δz[k]
         for j in 1:Ny
-            ΔA = yspacing(j, cpu_grid, Center()) * Δzᵏ
+            ΔA = Δy[j] * Δzᵏ
             flux += (east[j, k] - west[j, k]) * ΔA
             zonal_area += ΔA
         end
         for i in 1:Nx
-            ΔA = xspacing(i, cpu_grid, Center()) * Δzᵏ
+            ΔA = Δx[i] * Δzᵏ
             flux += (north[i, k] - south[i, k]) * ΔA
             meridional_area += ΔA
         end
@@ -180,11 +198,13 @@ function lateral_mass_imbalance(ρu, ρv, grid::XYRegularRG)
     Nx, Ny, Nz = size(grid)
     FT = eltype(grid)
 
-    cpu_grid = host_grid(grid)
     west, east, south, north = lateral_boundary_planes(ρu, ρv, grid)
 
-    Δx = xspacing(1, cpu_grid, Center())
-    Δy = yspacing(1, cpu_grid, Center())
+    # On an `XYRegularRG` the horizontal spacings are numbers held by the grid itself, so reading them
+    # off the device grid is a plain field access; only `z` may be stretched and need the host copy.
+    Δx = xspacing(1, grid, Center())
+    Δy = yspacing(1, grid, Center())
+    _, _, Δz = host_spacings(grid)
 
     # Sum over the wall-parallel index on the device; only 2Nz values come back. The assertion sees past
     # `interior`, which inference cannot resolve.
@@ -196,7 +216,7 @@ function lateral_mass_imbalance(ρu, ρv, grid::XYRegularRG)
     meridional_area = zero(FT)
 
     for k in 1:Nz
-        Δzᵏ = zspacing(k, cpu_grid, Center())
+        Δzᵏ = Δz[k]
         flux += (Δy * zonal[1, k] + Δx * meridional[1, k]) * Δzᵏ
         zonal_area += Ny * Δy * Δzᵏ
         meridional_area += Nx * Δx * Δzᵏ
