@@ -78,7 +78,7 @@ bomex_wˢ(z)  = piecewise_linear(z, (0, 1500, 2100), (0, -6.5e-3, 0))
 bomex_dqᵗdt(z) = piecewise_linear(z, (0, 300, 500), (-1.2e-8, -1.2e-8, 0))
 bomex_dTdt(z)  = piecewise_linear(z, (0, 1500, 2500), (-2 / 86400, -2 / 86400, 0))
 
-function bomex_simulation(arch; stop_iteration=20)
+function bomex_simulation(arch, advection; stop_iteration=20)
     Nx, Ny, Nz = 32, 32, 20
     Lx, Ly, Lz = 3200, 3200, 3000  # (m)
 
@@ -131,7 +131,7 @@ function bomex_simulation(arch; stop_iteration=20)
 
     microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
-    model = AtmosphereModel(grid; dynamics, coriolis, microphysics, forcing, advection = WENO(order=5),
+    model = AtmosphereModel(grid; dynamics, coriolis, microphysics, forcing, advection,
                             boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
     # A smooth, deterministic perturbation below zδ, in place of the random noise of the example,
@@ -152,33 +152,44 @@ function bomex_simulation(arch; stop_iteration=20)
     return model
 end
 
-@testset "BOMEX on Distributed($(partition_name)) [$(nranks) ranks, $(use_gpu ? "GPU" : "CPU")]" begin
-    arch = Distributed(child_architecture; partition=partition_for(partition_name, nranks))
-    model = bomex_simulation(arch; stop_iteration=20)
-    @test model.clock.iteration == 20
-    @test model.grid.architecture isa Distributed
-    @test model.pressure_solver isa DistributedFourierTridiagonalPoissonSolver
+# Explicit WENO, and WENO with adaptive implicit vertical advection (AIVA), whose implicit
+# column solve and adaptive explicit/implicit split must also be partition-independent.
+advection_schemes = (explicit = () -> WENO(order=5),
+                     AIVA = () -> WENO(order=5; time_discretization=AdaptiveVerticallyImplicitDiscretization(cfl=0.5)))
 
-    # Recomputing the tridiagonal coefficients reproduces those built by the solver's constructor.
-    tridiagonal_solver = model.pressure_solver.batched_tridiagonal_solver
-    main_diagonal = copy(tridiagonal_solver.b)
-    lower_diagonal = copy(tridiagonal_solver.a)
-    Breeze.AtmosphereModels.update_pressure_solver!(model.pressure_solver, model.dynamics)
-    @test tridiagonal_solver.b ≈ main_diagonal
-    @test tridiagonal_solver.a ≈ lower_diagonal
+for (advection_name, make_advection) in pairs(advection_schemes)
+    advection = make_advection()
+    @testset "BOMEX on Distributed($(partition_name)) with $(advection_name) advection [$(nranks) ranks, $(use_gpu ? "GPU" : "CPU")]" begin
+        arch = Distributed(child_architecture; partition=partition_for(partition_name, nranks))
+        model = bomex_simulation(arch, advection; stop_iteration=20)
+        @test model.clock.iteration == 20
+        @test model.grid.architecture isa Distributed
+        @test model.pressure_solver isa DistributedFourierTridiagonalPoissonSolver
 
-    if rank == 0
-        serial_model = bomex_simulation(CPU())
-    end
-
-    for (name, local_field) in pairs(Oceananigans.prognostic_fields(model))
-        global_field = reconstruct_global_field(local_field)
+        # Recomputing the tridiagonal coefficients reproduces those built by the solver's constructor.
+        tridiagonal_solver = model.pressure_solver.batched_tridiagonal_solver
+        main_diagonal = copy(tridiagonal_solver.b)
+        lower_diagonal = copy(tridiagonal_solver.a)
+        Breeze.AtmosphereModels.update_pressure_solver!(model.pressure_solver, model.dynamics)
+        @test tridiagonal_solver.b ≈ main_diagonal
+        @test tridiagonal_solver.a ≈ lower_diagonal
 
         if rank == 0
-            @testset "$name" begin
-                @test !any(isnan, parent(global_field))
-                serial_field = Oceananigans.prognostic_fields(serial_model)[name]
-                @test global_field ≈ serial_field rtol=rtol
+            serial_model = bomex_simulation(CPU(), advection)
+        end
+
+        for (name, local_field) in pairs(Oceananigans.prognostic_fields(model))
+            global_field = reconstruct_global_field(local_field)
+
+            if rank == 0
+                @testset "$name" begin
+                    # Compare on the host: the reconstructed field lives on the GPU in GPU runs,
+                    # while the serial reference is on the CPU (see Breeze issue #1193).
+                    distributed_data = Array(interior(global_field))
+                    serial_data = Array(interior(Oceananigans.prognostic_fields(serial_model)[name]))
+                    @test !any(isnan, distributed_data)
+                    @test distributed_data ≈ serial_data rtol=rtol
+                end
             end
         end
     end
