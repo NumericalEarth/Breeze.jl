@@ -1,5 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
+using Oceananigans: TendencyCallsite
 using Oceananigans.Utils: time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -12,7 +13,7 @@ using Oceananigans.TimeSteppers:
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, microphysics_model_update!,
-                                compute_closure_tendencies!
+                                compute_closure_tendencies!, refreshes_state_after_update, invalid_time_step
 
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
@@ -316,7 +317,16 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    update_state!(model, callbacks; compute_tendencies = true)
+    # Kessler reads diagnostics, then rebuilds tendencies after updating its prognostics.
+    # Keep the preceding pass when Kessler will return early (the same `invalid_time_step`
+    # test it applies), or when a tendency callback is present, so that the callback still runs
+    # once per stage.
+    # TODO: Kessler's internal update_state! does not forward the time stepper's callbacks, so
+    # whatever a tendency callback adds to Gⁿ here is overwritten before stage 1 of the next step.
+    # Forwarding the callbacks through microphysics_model_update! would fix this and let the pass
+    # always be skipped.
+    skip_tendencies = skip_pre_microphysics_tendencies(model.microphysics, Δt, callbacks)
+    update_state!(model, callbacks; compute_tendencies = !skip_tendencies)
     # These tendencies are consumed by stage 1 of the next step, after
     # `freeze_linearization_state!` has reseeded the live field.
     cache_transport_velocity!(model)
@@ -335,6 +345,10 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
 
     return nothing
 end
+
+skip_pre_microphysics_tendencies(microphysics, Δt, callbacks) =
+    refreshes_state_after_update(microphysics) && !invalid_time_step(Δt) &&
+    !any(callback -> callback.callsite isa TendencyCallsite, callbacks)
 
 #####
 ##### Time-averaged velocity for scalar transport (WRF/MPAS dynamics-transport split)
