@@ -179,6 +179,23 @@ volume), not per unit of the continuity density. On the anelastic core the two d
 function continuity_density end
 
 """
+    enforce_lateral_mass_balance!(dynamics, momentum, grid)
+
+Rebalance the lateral boundary momentum so the dynamics' pressure problem stays solvable.
+
+A no-op for every formulation whose pressure is not obtained from an elliptic solve with homogeneous
+Neumann conditions; [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics) on a laterally-`Bounded` grid overrides it.
+
+**This must be called after EVERY `fill_halo_regions!(model.momentum, …)`, not once per stage.** The
+halo fill writes the prescribed boundary data, so it overwrites any earlier rebalancing: correcting only
+inside `compute_pressure_correction!` leaves the interior consistent with balanced walls while the walls
+themselves are unbalanced, which puts a permanent flux discontinuity on every boundary face — doubled at
+the corner cells, where two normal components are prescribed at once. The correction is a pure function
+of the freshly-filled boundary data, so reapplying it after each fill is idempotent, not cumulative.
+"""
+enforce_lateral_mass_balance!(dynamics, momentum, grid) = nothing
+
+"""
     total_density(dynamics)
 
 Return the model's total air density ρ = ρᵈ + Σρˣ: the density of the model's mass, which
