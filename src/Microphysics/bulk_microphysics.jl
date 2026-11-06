@@ -148,18 +148,22 @@ end
 end
 
 # Fixed θ and ρ with the non-iterated inversion (`temperature_solver = nothing`), whose
-# temperature is the dry closed form plus the latent shift, T = T̃ + Hᶜ / cᵖᵐ with
-# T̃ = θ̃^γ (ρ Rᵐ / pˢᵗ)^(γ - 1), θ̃ = ĉᵖ θ / cᵖᵐ, and γ = 1 / (1 - κ), so that cᵖᵐ T̃ = H.
-# Differentiating gives cᵖᵐ dT = [ℒ - κ / (1 - κ) H (Rᵛ / Rᵐ - Δcᵖ / cᵖᵐ)] dqᶜ: the latent
-# shift is not amplified by the Exner feedback the converged inversion has.
+# temperature is the condensate-free root plus the latent shift at fixed density,
+# T = T̃ + γ Hᶜ / cᵖᵐ with T̃ = θ̃^γ (ρ Rᵐ / pˢᵗ)^(γ - 1), θ̃ = ĉᵖ θ / cᵖᵐ, and γ = 1 / (1 - κ).
+# Phase exchange holds θ̃ cᵖᵐ, ρ, and κ fixed while cᵖᵐ falls by Δcᵖ dqᶜ and Rᵐ by Rᵛ dqᶜ, so
+# cᵖᵐ dT̃ = γ (Δcᵖ - κ cᵖᵐ Rᵛ / Rᵐ) T̃ dqᶜ and cᵖᵐ d(γ Hᶜ / cᵖᵐ) = γ (ℒ₀ + Δcᵖ Hᶜ / cᵖᵐ) dqᶜ. With
+# ℒ = ℒ₀ + Δcᵖ T, (1 - κ) cᵖᵐ dT = [ℒ - κ (cᵖᵐ T̃ Rᵛ / Rᵐ + γ Δcᵖ Hᶜ / cᵖᵐ)] dqᶜ: the Exner
+# feedback of the converged inversion, cᵖᵐ - κ H / T, is replaced by its condensate-free value.
 @inline function saturation_response(𝒰::LiquidIceDensityState{<:Any, Nothing}, qᵛ⁺, T, ℒ, Δcᵖ, constants)
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵛ = vapor_gas_constant(constants)
     κ = exner_exponent(𝒰.exner_exponent, q, constants)
-    H = cᵖᵐ * T - condensate_latent_energy(q, constants)
-    dT_dqᶜ = (ℒ - κ / (1 - κ) * H * (Rᵛ / Rᵐ - Δcᵖ / cᵖᵐ)) / cᵖᵐ
+    γ = 1 / (1 - κ)
+    Hᶜ = condensate_latent_energy(q, constants)
+    T̃ = T - γ * Hᶜ / cᵖᵐ
+    dT_dqᶜ = γ * (ℒ - κ * (cᵖᵐ * T̃ * Rᵛ / Rᵐ + γ * Δcᵖ * Hᶜ / cᵖᵐ)) / cᵖᵐ
     return dT_dqᶜ * qᵛ⁺ * (ℒ / (Rᵛ * T^2) - 1 / T)
 end
 
