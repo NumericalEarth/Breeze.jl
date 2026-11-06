@@ -39,6 +39,26 @@ using Oceananigans.Architectures: ReactantState
 using CUDA: CUDABackend
 using AMDGPU: ROCBackend
 
+# TEMPORARY, for the kernel AD heap corruption: remove before merging. BREEZE_DUMP_MLIR=<dir> dumps
+# the input and output of every MLIR pass pipeline there. Reactant's kernel AD pipeline also
+# serializes the GPU kernels to binaries, where NVPTX aborts the process on an invalid symbol name,
+# so it is split just before `enzymexla-gpu-module-to-binary`: the module handed to it is dumped
+# (as `post_<key>_before_binary_pm`) before the abort.
+if !isempty(get(ENV, "BREEZE_DUMP_MLIR", ""))
+    Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(ENV["BREEZE_DUMP_MLIR"])
+    Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+
+    function Reactant.Compiler.run_pass_pipeline!(mod::Reactant.MLIR.IR.Module, pipeline::String, key::String;
+                                                  enable_verifier=true)
+        run!(p, k) = invoke(Reactant.Compiler.run_pass_pipeline!, Tuple{Any, Any, Any}, mod, p, k; enable_verifier)
+        split_at = findfirst(",enzymexla-gpu-module-to-binary", pipeline)
+        isnothing(split_at) && return run!(pipeline, key)
+        @info "Splitting the $key pass pipeline before enzymexla-gpu-module-to-binary"
+        run!(pipeline[1:first(split_at)-1], key * "_before_binary")
+        return run!(pipeline[first(split_at)+1:end], key * "_binary")
+    end
+end
+
 # `--profile_kernels`: per-kernel GPU times of the vanilla cases, after every case is timed
 include(joinpath(@__DIR__, "kernel_profiling", "kernel_profiling.jl"))
 using Metal: MetalBackend
@@ -165,6 +185,14 @@ function parse_commandline()
                    "Multiple values can be specified as comma-separated list; each is a separate compile."
             arg_type = String
             default = "auto"
+
+        "--kernels"
+            help = "How the Reactant backend compiles the model's kernels: 'raise' (raise them to StableHLO, " *
+                   "the default), 'noraise' (forward only: keep them as kernel calls) or 'kernelad' (keep them as " *
+                   "kernel calls through Reactant's optimize=:kernelad pipeline, from EnzymeAD/Reactant.jl#3472; " *
+                   "with --ad it differentiates the kernel bodies themselves). Comma-separated for multiple; each is a separate compile."
+            arg_type = String
+            default = "raise"
 
         "--profile_kernels"
             help = "After every case is timed and saved, profile the GPU kernels of each vanilla " *
@@ -420,6 +448,15 @@ function run_benchmarks(args; kernel_cases = [])
         [true]
     end
 
+    # Kernel modes only apply to the Reactant time-stepping benchmark; Enzyme differentiates
+    # unraised kernels only through kernelad, so noraise is forward only. kernelad runs in both.
+    kernel_modes = parse_list(args["kernels"])
+    for kernels in kernel_modes
+        kernels in ("raise", "noraise", "kernelad") ||
+            error("Unknown --kernels value: $kernels. Use 'raise', 'noraise' or 'kernelad'.")
+        args["ad"] && kernels == "noraise" && error("--kernels noraise is forward only; use kernelad with --ad")
+    end
+
     results = []
 
     println("=" ^ 95)
@@ -439,6 +476,7 @@ function run_benchmarks(args; kernel_cases = [])
     if mode == "benchmark"
         println("Time steps: ", time_steps, " (warmup: ", warmup_steps, ")")
         args["ad"] && println("AD checkpointing: ", args["checkpoints"], " (", args["checkpointing_mode"], ")")
+        println("Kernels (Reactant): ", kernel_modes)
     else
         println("Stop time: ", args["stop_time"], " hours")
         println("Output interval: ", args["output_interval"], " minutes")
@@ -448,8 +486,13 @@ function run_benchmarks(args; kernel_cases = [])
     println()
 
     # Loop over all combinations using Iterators.product
-    for (backend_name, topo_name, (Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name, checkpointing) in
-            Iterators.product(backends, topologies, sizes, float_types, dynamics_names, advections, closures, microphysics_schemes, checkpointings)
+    for (backend_name, topo_name, (Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name, checkpointing, kernels) in
+            Iterators.product(backends, topologies, sizes, float_types, dynamics_names, advections, closures, microphysics_schemes, checkpointings, kernel_modes)
+
+        # Vanilla, the simulation and the tendency modes (which sweep raise themselves) run once,
+        # not per kernel mode
+        reactant_stepping = backend_name == "reactant" && mode == "benchmark"
+        !reactant_stepping && kernels != first(kernel_modes) && continue
 
         # Set floating point precision so constructors pick up the right default
         Oceananigans.defaults.FloatType = FT
@@ -458,6 +501,11 @@ function run_benchmarks(args; kernel_cases = [])
         size_str = "$(Nx)x$(Ny)x$(Nz)"
         ft_str = FT == Float32 ? "F32" : FT == Float64 ? "F64" : "BF16"
         mode_suffix = args["ad"] ? "_AD_$(checkpointing_label(checkpointing))" : ""
+        # Only non-raising kernel modes show in the name and the backend label, so the existing
+        # raising names stay as they are
+        raising = !reactant_stepping || kernels == "raise"
+        kernels_suffix = raising ? "" : "_$(kernels)"
+        backend_label = raising ? backend_name : kernels == "noraise" ? "reactant raise=false" : "reactant $kernels"
 
         # Tendency modes time a tendency evaluation with no Simulation.
         # "scalar_tendency" uses the bare scalar WENO kernel (no model);
@@ -525,7 +573,7 @@ function run_benchmarks(args; kernel_cases = [])
         # Only non-default grids and substep counts show in the name, so the existing names stay as they are
         grid_suffix = grid_type == "rectilinear" ? "" : "_LatLon"
         substeps_suffix = dyn_name == "compressible_splitexplicit" && args["substeps"] != 12 ? "_N$(args["substeps"])" : ""
-        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)$(substeps_suffix)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)$(grid_suffix)_$(backend_name)$(mode_suffix)"
+        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)$(substeps_suffix)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)$(grid_suffix)_$(backend_name)$(mode_suffix)$(kernels_suffix)"
 
         println("\n", "-" ^ 70)
         println("Running: $name")
@@ -567,8 +615,9 @@ function run_benchmarks(args; kernel_cases = [])
                                     closure=cls_name,
                                     dynamics=dyn_name,
                                     microphysics=micro_name,
-                                    backend=backend_name,
+                                    backend=backend_label,
                                     ad=args["ad"],
+                                    kernels,
                                     checkpointing,
                                     )
         elseif mode == "simulate"
