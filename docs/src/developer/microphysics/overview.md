@@ -240,9 +240,9 @@ released at one pressure and absorbed at another). The `ρθ` tendency is theref
 response, not the divergence of a unique conservative thermodynamic face flux, and both tendencies
 are instantaneous responses rather than exact finite-step thermal reconstructions. The content
 fluxes ride the total-density-weighted mass flux the tracer tendency
-applies, and the cell's coupling-to-total density ratio (one on the anelastic core,
+applies, and the cell's continuity-to-total density ratio (one on the anelastic core,
 ``qᵈ = ρᵈ / ρ`` on the compressible core) converts the change of the specific variable into that
-of the coupling-weighted prognostic. They are formed at the velocity the tracer tendency
+of the continuity-density-weighted prognostic. They are formed at the velocity the tracer tendency
 transports the condensates with, which on the compressible core is the substepper's
 acoustic-mean velocity rather than the RK predictor the thermodynamic variable itself advects
 with: upwind selection and the adaptive implicit split are nonlinear in the velocity, so fluxes
@@ -267,6 +267,19 @@ bottom-face flux of every sedimenting condensate, evaluating each with the advec
 that transports that tracer, so the diagnostic agrees with the boundary flux the tendency
 operator applies. Schemes that move precipitation by their own internal means (such as
 `DCMIP2016KM`) override `bottom_precipitation_flux` directly instead.
+
+`precipitation_flux(model; condensates)` is the same flux at every ``z``-face, returned as a
+lazy `KernelFunctionOperation` at `(Center, Center, Face)`, so it can be sliced, averaged, and
+written to output. It is the sedimentation part of each selected condensate's advective mass
+flux and reduces to `bottom_precipitation_flux` at an impenetrable bottom.
+
+### Process Rates
+
+`MicrophysicalProcessRate(model, name)` returns a lazy `KernelFunctionOperation` for the
+process rate `name` (for example `:autoconversion` or `:condensation`) in kg kg⁻¹ s⁻¹.
+Schemes implement `MicrophysicalProcessRate(model, microphysics, ::Val{name})`;
+for P3 every field of `P3ProcessRates` is available, evaluated from the same per-cell inputs
+as the tendency kernel so the diagnostic shows exactly the rates that drive the model.
 
 ### Specific Humidity
 

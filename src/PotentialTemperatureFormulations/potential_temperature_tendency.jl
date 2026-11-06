@@ -44,7 +44,7 @@ function AtmosphereModels.static_energy_density(model::PotentialTemperatureModel
     # Regularize the converted BCs (populate microphysics, constants, side)
     loc = (Center(), Center(), Center())
     ρs_bcs = materialize_atmosphere_field_bcs(ρs_bcs, loc, model.grid, model.dynamics, model.microphysics,
-                                              model.thermodynamic_constants)
+                                              model.thermodynamic_constants, model.closure)
 
     # Create the energy density operation and wrap in a Field with proper BCs
     ρs_op = Diagnostics.StaticEnergy(model, :density)
@@ -95,7 +95,7 @@ end
                                                 temperature_field)
 
     potential_temperature = formulation.potential_temperature
-    ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (advection/diffusion carrier)
+    ρ_field = continuity_density(dynamics)                # continuity density ρᵈ (weights advection/diffusion of ρθ)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
 
     @inbounds begin
@@ -221,7 +221,7 @@ turbulence `closure` dissipates: ``(ρᵈ / ρ) ρε / (ĉᵖ Π)`` with
 @inline function dissipative_heating_tendency(i, j, k, grid, formulation, dynamics, constants,
                                               microphysics, microphysical_fields, specific_prognostic_moisture,
                                               temperature, closure, closure_fields, clock, model_fields)
-    ρ_field = dynamics_density(dynamics)
+    ρ_field = continuity_density(dynamics)
     @inbounds begin
         ρᵈ = ρ_field[i, j, k]
         ρ = total_density(dynamics)[i, j, k]
@@ -323,7 +323,7 @@ end
                                            microphysical_fields, specific_prognostic_moisture, temperature)
     @inbounds begin
         ρ = total_density(dynamics)[i, j, k]
-        ρᵈ = dynamics_density(dynamics)[i, j, k]
+        ρᵈ = continuity_density(dynamics)[i, j, k]
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         θ = formulation.potential_temperature[i, j, k]
         T = temperature[i, j, k]
@@ -510,7 +510,7 @@ AtmosphereModels.set_thermodynamic_variable!(::DryPotentialTemperatureModel, nam
 
 function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:θ}, value)
     set!(model.formulation.potential_temperature, value)
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
     θˡⁱ = model.formulation.potential_temperature
     set!(model.formulation.potential_temperature_density, ρ * θˡⁱ)
     return nothing
@@ -544,7 +544,7 @@ end
 function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:ρs}, value)
     ρs = model.temperature # scratch space
     set!(ρs, value)
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
     return set_thermodynamic_variable!(model, Val(:s), ρs / ρ)
 end
 
@@ -564,7 +564,7 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρθ = ρᵈθ)
+        ρᵈ = continuity_density(dynamics)[i, j, k]  # continuity density ρᵈ (ρθ = ρᵈθ)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         s = specific_energy[i, j, k]
     end
@@ -638,7 +638,7 @@ end
 
     @inbounds begin
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρθ = ρᵈθ)
+        ρᵈ = continuity_density(dynamics)[i, j, k]  # continuity density ρᵈ (ρθ = ρᵈθ)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end

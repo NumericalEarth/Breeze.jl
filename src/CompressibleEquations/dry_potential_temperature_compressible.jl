@@ -119,18 +119,33 @@ end
 # θ + θ (Rᵐ − κᵈ cᵖᵐ) / cᵛᵐ = θ γᵐ / γᵈ.
 #
 # Without the source in the loop's accounting (`IsobaricPressureWork`) the coefficient is the
-# derivative of the equation of state itself.
-function compute_linearization_pressure_coefficient!(formulation::DryPotentialTemperatureFormulation, substepper, model)
-    launch!(architecture(model.grid), model.grid, :xyz, _compute_dry_theta_pressure_coefficient!,
-            substepper.linearization_gamma_R_mixture,
-            model.grid,
-            formulation.flavor.pressure_work,
+# derivative of the equation of state itself. The liquid-ice potential temperature with
+# `IsobaricPressureWork` differentiates its own temperature inversion instead (see
+# `refresh_linearization_basic_state!`); every other potential temperature closure uses this kernel,
+# which also fills θᴸ = ρθᴸ / ρᵈᴸ.
+function refresh_potential_temperature_linearization!(formulation, pressure_work, substepper, model)
+    grid = model.grid
+    constants = model.thermodynamic_constants
+    κᵈ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    pˢᵗ = convert(eltype(grid), standard_pressure(model.dynamics))
+
+    launch!(architecture(grid), grid, :xyz, _compute_isochoric_closure_linearization!,
+            substepper.linearization_potential_temperature,
+            substepper.linearization_pressure_coefficient,
+            grid,
+            pressure_work,
             model.microphysics,
+            model.dynamics.pressure,
             model.dynamics.total_density,
             model.dynamics.dry_density,
+            thermodynamic_density(formulation),
             specific_prognostic_moisture(model),
             model.microphysical_fields,
-            model.thermodynamic_constants)
+            constants, pˢᵗ, κᵈ)
+
+    fill_halo_regions!(substepper.linearization_potential_temperature)
+    fill_halo_regions!(substepper.linearization_pressure_coefficient)
+
     return nothing
 end
 
@@ -141,7 +156,8 @@ end
     return cᵖᵈ / (cᵖᵈ - dry_air_gas_constant(constants))
 end
 
-@kernel function _compute_dry_theta_pressure_coefficient!(γRᵐ, grid, pressure_work, microphysics, ρ, ρᵈ, qᵛ, μ, constants)
+@kernel function _compute_isochoric_closure_linearization!(θᴸ, Cᴸ, grid, pressure_work, microphysics, p, ρ, ρᵈ, ρθ,
+                                                           qᵛ, μ, constants, pˢᵗ, κᵈ)
     i, j, k = @index(Global, NTuple)
     @inbounds ρᵢ = ρ[i, j, k]
     @inbounds ρᵈᵢ = ρᵈ[i, j, k]
@@ -149,6 +165,11 @@ end
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     γ = acoustic_heat_capacity_ratio(pressure_work, cᵖᵐ, cᵖᵐ - Rᵐ, constants)
-    # Divide rather than multiply by qᵈ, so that dry air (ρ = ρᵈ) is exact; a state before `set!` has ρᵈ = 0
-    @inbounds γRᵐ[i, j, k] = γ * Rᵐ * (ρᵢ / ifelse(ρᵈᵢ == 0, one(ρᵈᵢ), ρᵈᵢ))
+    # A state before `set!` has ρᵈ = 0. Divide rather than multiply by qᵈ, so that dry air (ρ = ρᵈ) is exact
+    ρ̂ᵈ = ifelse(ρᵈᵢ == 0, one(ρᵈᵢ), ρᵈᵢ)
+    @inbounds begin
+        Π = (p[i, j, k] / pˢᵗ)^κᵈ
+        θᴸ[i, j, k] = ρθ[i, j, k] / ρ̂ᵈ
+        Cᴸ[i, j, k] = γ * Rᵐ * (ρᵢ / ρ̂ᵈ) * Π
+    end
 end

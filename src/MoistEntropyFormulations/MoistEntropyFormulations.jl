@@ -22,7 +22,7 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ, V⁻¹ᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
-    dynamics_density, total_density, standard_pressure, dynamics_prognostic_fields,
+    continuity_density, total_density, standard_pressure, dynamics_prognostic_fields,
     grid_moisture_fractions, div_ρUc, c_div_ρU, ∇_dot_Jᶜ, AtmosphereModelBuoyancy,
     add_sedimentation_tendency!, explicit_condensate_mass_fluxes, radiation_flux_divergence,
     materialize_formulation, specific_prognostic_moisture, moisture_prognostic_name,

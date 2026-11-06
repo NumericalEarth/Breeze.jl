@@ -138,12 +138,12 @@ const total_energy_density_name = :ρE
     thermodynamic_density(formulation)
 
 Return the thermodynamic density field for the given formulation — the prognostic
-thermodynamic variable in coupling-density-weighted ("flux") form (`ρθ`, `ρs`, `ρE`).
+thermodynamic variable in continuity-density-weighted ("flux") form (`ρθ`, `ρs`, `ρE`).
 
-The weighting density is the dynamics' coupling density (see [`dynamics_density`](@ref)):
+The weighting density is the dynamics' continuity density (see [`continuity_density`](@ref)):
 the reference density `ρᵣ` on the anelastic core and the prognostic dry-air density `ρᵈ` on the
 compressible core. The generic name (`ρθ`) is therefore `ρᵈθ` on `CompressibleDynamics`; the
-intensive variable is recovered as `θ = ρθ / dynamics_density(dynamics)`.
+intensive variable is recovered as `θ = ρθ / continuity_density(dynamics)`.
 """
 function thermodynamic_density end
 
@@ -227,15 +227,23 @@ reference_temperature(formulation::Symbol) = reference_temperature(Val(formulati
 #####
 
 """
-    implicit_thermodynamic_solve!(solve!, formulation, model)
+    implicit_thermodynamic_solve!(solve!, formulation, model, Δt)
 
-Apply the vertically implicit solve `solve!(field)` (closure diffusion and the implicit part of
-adaptive implicit vertical advection) to the thermodynamic variable of `formulation`. By default the
+Apply the vertically implicit solve `solve!(field)` over `Δt` (closure diffusion and the implicit part
+of adaptive implicit vertical advection) to the thermodynamic variable of `formulation`. By default the
 solve acts on the prognostic [`thermodynamic_density`](@ref) itself. A formulation whose prognostic
 variable is not the quantity its closure diffuses (total energy, which diffuses static energy)
 extends this to solve for that quantity and add the increment to its prognostic variable.
 """
-implicit_thermodynamic_solve!(solve!, formulation, model) = solve!(thermodynamic_density(formulation))
+implicit_thermodynamic_solve!(solve!, formulation, model, Δt) = solve!(thermodynamic_density(formulation))
+
+"""
+    implicit_diffusion_density(formulation, model)
+
+The density weighting the closure diffusion of the vertically implicit solve of `formulation`'s
+thermodynamic variable: the continuity density of `model.dynamics` by default.
+"""
+implicit_diffusion_density(formulation, model) = continuity_density(model.dynamics)
 
 #####
 ##### Set thermodynamic variable interface

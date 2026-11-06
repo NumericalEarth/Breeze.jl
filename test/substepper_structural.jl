@@ -91,18 +91,17 @@ end
     grid = model.grid
     g    = model.thermodynamic_constants.gravitational_acceleration
 
-    Π⁰ = sub.linearization_exner
     θ⁰ = sub.linearization_potential_temperature
-    γRᵐ⁰ = sub.linearization_gamma_R_mixture
+    C⁰ = sub.linearization_pressure_coefficient
     δτ_new = 0.5  # arbitrary
 
     dᵐ⁺ = 0.0   # implicit-vertical-damping factor; zero for this test
     b₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagDiagonal(),
                                        nothing, ZDirection(),
-                                       Π⁰, θ⁰, γRᵐ⁰, sub.linearization_density_weight, g, δτ_new, dᵐ⁺, nothing, model.dynamics)
+                                       θ⁰, C⁰, sub.linearization_density_weight, g, δτ_new, dᵐ⁺, nothing, model.dynamics)
     c₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagUpper(),
                                        nothing, ZDirection(),
-                                       Π⁰, θ⁰, γRᵐ⁰, sub.linearization_density_weight, g, δτ_new, dᵐ⁺, nothing, model.dynamics)
+                                       θ⁰, C⁰, sub.linearization_density_weight, g, δτ_new, dᵐ⁺, nothing, model.dynamics)
 
     @test b₁ == 1.0
     @test c₁ == 0.0
@@ -537,7 +536,7 @@ end
     function residual_max(model)
         ref = model.dynamics.reference_state
         p   = Array(interior(model.dynamics.pressure))
-        ρ   = Array(interior(Breeze.AtmosphereModels.dynamics_density(model.dynamics)))
+        ρ   = Array(interior(Breeze.AtmosphereModels.continuity_density(model.dynamics)))
         p_r = Array(interior(ref.pressure))[1, 1, :]
         ρ_r = Array(interior(ref.density))[1, 1, :]
         Nx, Ny, Nz = size(p)

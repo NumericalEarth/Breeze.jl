@@ -128,7 +128,7 @@ Adapt.adapt_structure(to, h::DryMoistureCorrectionHeating) =
 
 AtmosphereModels.moisture_correction_heating(formulation::DryPotentialTemperatureFormulation, model) =
     DryMoistureCorrectionHeating(formulation.flavor, formulation.potential_temperature_density,
-                                 total_density(model.dynamics), dynamics_density(model.dynamics), model.temperature,
+                                 total_density(model.dynamics), continuity_density(model.dynamics), model.temperature,
                                  formulation.potential_temperature, specific_prognostic_moisture(model),
                                  model.microphysical_fields, AtmosphereModels.correction_liquid_fractions(model.microphysics),
                                  model.microphysics, model.thermodynamic_constants)

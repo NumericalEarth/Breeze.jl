@@ -41,7 +41,7 @@ of the mixture, and the individual phases of water are not.
 
 !!! note "Carrier densities in Breeze"
     Breeze's dynamical cores weight the prognostic momentum and thermodynamic variable by a
-    *coupling density* — the reference density ``ρᵣ`` on the anelastic core, the dry-air density
+    *continuity density* — the reference density ``ρᵣ`` on the anelastic core, the dry-air density
     ``ρᵈ`` on the compressible core — rather than by ``ρ``; see the
     [notation](@ref "Notation and conventions"). The derivations below are written for the
     barycentric form, which is the physics; the weighting is bookkeeping that does not change
@@ -342,8 +342,17 @@ Every process that is a source for a state function is an exchange inside ``E`` 
 through its boundary:
 
 - **Expansion**: the pressure work is the ``p \boldsymbol{u}`` inside the flux; nothing is
-  evaluated. The total enthalpy per unit mass, ``E + p / ρ = h + K + g z``, is what the advection
-  scheme transports.
+  evaluated. The flux is that of the total enthalpy, ``E + p / ρ = h + K + g z``, and each
+  constituent carries its own share with its own mass flux: the dry air's
+  ``ĥᵈ = cᵖᵈ (T - T₀) + K + g z`` is reconstructed by the scheme of ``ρE``, and each water species'
+  ``hˣ + K + g z`` moves with the mass flux that species' own tendency applies. The latent energy and
+  the energy origin therefore never separate from the water they belong to, and the solution does
+  not depend on ``T₀``. In the acoustic loop only ``ĥᵈ`` moves with the mass flux, the water being
+  fixed: moving a mass of water with its own enthalpy changes the pressure by ``Rᵛ T (1 + Rᵐ / cᵛᵐ)``
+  per unit vapor and not at all for condensate, so the loop has the stratification of the dry static
+  energy rather than the moist static energy's, which decreases with height through the moist
+  troposphere and would make the loop unstable. It is told the stage's water update through
+  the prescribed pressure change ``∂p/∂ρqˣ`` times the water's tendency.
 - **Phase change**: ``𝓊`` already contains the latent energy, so condensation at fixed ``𝓊``
   and ``ρ`` warms the air by ``(ℒˡ(T) - Rᵛ T) / cᵛᵐ`` per unit mass condensed, through the change
   of ``cᵛᵐ T`` alone. Microphysics schemes act on the temperature at fixed ``𝓊``, as they act at
@@ -358,7 +367,8 @@ through its boundary:
   ``hᵛ = cᵖᵛ T₁ + ℒˡ₀`` at the temperature ``T₁`` of the lowest cell.
 - **Mixing**, resolved, subgrid, or numerical, conserves ``∫ ρ E`` because ``E`` is the conserved
   quantity. The subgrid flux is written for the moist static energy ``h + g z`` so that mixing at
-  fixed pressure also conserves enthalpy, as physical mixing does.
+  fixed pressure also conserves enthalpy, as physical mixing does, plus the dry air's enthalpy
+  ``ĥᵈ`` on each water flux, because the closure moves water without moving an opposing dry-air mass.
 
 Energy conservation is structural: the budget closes to round-off without any source being right,
 because there are none. The costs are numerical.

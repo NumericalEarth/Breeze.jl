@@ -29,23 +29,23 @@ Fields:
 - `gas_model`: ecCKD gas optics model
 - `cloud`: Shortwave cloud optics, or `nothing` for clear sky
 - `weights`: Shortwave spectral weights
-- `solar_constant`: Solar constant [W m⁻²]
+- `solar_constant`: Solar constant [W m⁻²], a number or an `(Nx, Ny)` array of per-column values
 """
-struct EcCKDShortwave{M, C, W, FT}
+struct EcCKDShortwave{M, C, W, S}
     gas_model :: M
     cloud :: C
     weights :: W
-    solar_constant :: FT
+    solar_constant :: S
 end
 
 # Dispatch on `atmospheric_state::ColumnWorkspace`: strictly more specific than the RRTMGP
 # clear-sky model (slot 4 `BackgroundAtmosphere`) and disjoint from its all-sky model.
 const EcCKDRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:ColumnWorkspace}
 
-# The gases of the column optics, in the order of the ecCKD tables: dry air (the
-# `composite` of N₂, O₂ and the trace gases the tables fold into it), the two spatially varying
-# gases, and the well-mixed gases of `BackgroundAtmosphere` the reference models tabulate.
-const ECCKD_GAS_NAMES = (:composite, :h2o, :o3, :co2, :ch4, :n2o, :cfc11, :cfc12)
+# The gases of the column optics, in the order of the ecCKD tables: dry air (N₂, O₂ and the trace
+# gases the tables fold into it), the two spatially varying gases, and the well-mixed gases of
+# `BackgroundAtmosphere` the reference models tabulate.
+const ECCKD_GAS_NAMES = (:dry_air, :H₂O, :O₃, :CO₂, :CH₄, :N₂O, :CFC₁₁, :CFC₁₂)
 
 # `BackgroundAtmosphere` gases the reference ecCKD models do not tabulate: rejecting a nonzero
 # value is better than silently ignoring it.
@@ -56,7 +56,7 @@ function validate_background_gases(background::BackgroundAtmosphere)
         value = getproperty(background, name)
         value == 0 || throw(ArgumentError("`BackgroundAtmosphere.$name = $value` is not supported by the ecCKD " *
                                           "gas optics, which tabulate $(join(ECCKD_GAS_NAMES[2:end], ", ")) " *
-                                          "(N₂ and O₂ form the composite gas); set it to zero."))
+                                          "(N₂ and O₂ form the dry air); set it to zero."))
     end
     return nothing
 end
@@ -77,14 +77,23 @@ function read_ecckd_tables(load)
 end
 
 # The tables are read in the grid's float type; a preloaded model is converted to it (and to
-# the grid's architecture) by `adapt` below.
-load_gas_optics_model(FT, selector::Union{Symbol, AbstractString}) =
-    read_ecckd_tables(() -> read_reference_ecckd_gas_optics(FT, selector; names = ECCKD_GAS_NAMES))
+# the grid's architecture) by `adapt` below. `lookup_search = nothing` keeps NumericalRadiation's default.
+lookup_keywords(::Nothing) = NamedTuple()
+lookup_keywords(lookup_search) = (; lookup_search)
 
-load_gas_optics_model(FT, paths::NamedTuple) =
-    read_ecckd_tables(() -> read_ecckd_tabulated_gas_optics(FT, paths.longwave, paths.shortwave; names = ECCKD_GAS_NAMES))
+load_gas_optics_model(FT, selector::Union{Symbol, AbstractString}, lookup_search) =
+    read_ecckd_tables(() -> read_reference_ecckd_gas_optics(FT, selector; names = ECCKD_GAS_NAMES,
+                                                                lookup_keywords(lookup_search)...))
 
-load_gas_optics_model(FT, model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}) = model
+load_gas_optics_model(FT, paths::NamedTuple, lookup_search) =
+    read_ecckd_tables(() -> read_ecckd_tabulated_gas_optics(FT, paths.longwave, paths.shortwave; names = ECCKD_GAS_NAMES,
+                                                            lookup_keywords(lookup_search)...))
+
+load_gas_optics_model(FT, model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}, ::Nothing) = model
+
+load_gas_optics_model(FT, model::Union{EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel}, lookup_search) =
+    throw(ArgumentError("EcCKDOptics(lookup_search = $lookup_search) applies to gas optics read from files; " *
+                        "a preloaded $(summary(model)) carries its own lookup search."))
 
 # Warn once at construction when the extension's temperatures leave the Planck source table, where
 # the interpolation holds the table edge (a gray `σT⁴` model has no table and no edge). The
@@ -100,6 +109,15 @@ function warn_source_table_range(gas_model::EcCKDTabulatedGasOpticsModel, extens
 end
 
 warn_source_table_range(gas_model, extension) = nothing
+
+# A number becomes a number of the grid's float type; per-column values become an `(Nx, Ny)` array on the grid's architecture
+materialize_solar_constant(solar_constant::Number, grid) = convert(eltype(grid), solar_constant)
+
+function materialize_solar_constant(solar_constant::AbstractArray, grid)
+    size(solar_constant) == size(grid)[1:2] ||
+        throw(ArgumentError("expected an (Nx, Ny) = $(size(grid)[1:2]) array of per-column solar constants, got size $(size(solar_constant))"))
+    return on_architecture(architecture(grid), convert(Array{eltype(grid)}, solar_constant))
+end
 
 effective_radius_model(FT, model::ConstantRadiusParticles) = ConstantRadiusParticles(convert(FT, model.radius))
 effective_radius_model(FT, model) =
@@ -143,7 +161,7 @@ table) is carried by the gas optics model.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
-- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
+- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361), a scalar or an `(Nx, Ny)` array of per-column values
 - `schedule`: When to recompute the fluxes (default: `IterationInterval(1)`, every iteration)
 - `liquid_effective_radius`: Model for cloud liquid effective radius in meters (default: `ConstantRadiusParticles(10e-6)`);
   only `ConstantRadiusParticles` for now
@@ -179,6 +197,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     arch = architecture(grid)
 
     solar_position = maybe_infer_solar_position(solar_position, grid)
+    solar_constant = materialize_solar_constant(solar_constant, grid)
 
     validate_surface_fractions(; surface_emissivity, surface_albedo,
                                  direct_surface_albedo, diffuse_surface_albedo)
@@ -195,7 +214,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     # Gas optics tables, then the extension sampled on the host (it needs the background's O₃
     # as a profile, before materialization turns it into a field on the grid)
-    host_gas_model = load_gas_optics_model(FT, optics.gas_model)
+    host_gas_model = load_gas_optics_model(FT, optics.gas_model, optics.lookup_search)
     extension = materialize_overlying_atmosphere(overlying_atmosphere, grid, background_atmosphere)
     warn_source_table_range(host_gas_model, extension)
     gas_model = adapt(array_type(arch){FT}, host_gas_model)
@@ -228,7 +247,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                       CFC₁₂ = convert(FT, background_atmosphere.CFC₁₂))
 
     longwave = EcCKDLongwave(gas_model, longwave_cloud, gas_model.longwave_weights, mole_fractions)
-    shortwave = EcCKDShortwave(gas_model, shortwave_cloud, gas_model.shortwave_weights, convert(FT, solar_constant))
+    shortwave = EcCKDShortwave(gas_model, shortwave_cloud, gas_model.shortwave_weights, solar_constant)
 
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
@@ -236,7 +255,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     downwelling_shortwave_flux = ZFaceField(grid)
     flux_divergence = CenterField(grid)
 
-    return RadiativeTransferModel(convert(FT, solar_constant),
+    return RadiativeTransferModel(solar_constant,
                                   solar_position,
                                   surface_radiation,
                                   background_atmosphere,

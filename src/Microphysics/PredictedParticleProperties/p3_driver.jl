@@ -86,12 +86,16 @@ end
 ##### whichever bracket matches the population it belongs to.
 #####
 
-@kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
-    i, j, k = @index(Global, NTuple)
-
+# Everything `compute_p3_process_rates` needs at cell (i, j, k), assembled exactly as the
+# tendency kernel assembles it, so that the process-rate diagnostics
+# (`MicrophysicalProcessRate`) evaluate the very rates that drive the model.
+@inline function p3_grid_process_inputs(i, j, k, grid, p3, μ, formulation, dynamics,
+                                        constants, ρ_field, velocities)
     @inbounds begin
         ρ = ρ_field[i, j, k]
         qᵛᵉ = μ.qᵛ[i, j, k]
+        surface_temperature = μ.surface_temperature[i, j, 1]
+
         ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, nothing, velocities)
         q = AM.moisture_fractions(p3, ℳ, qᵛᵉ)
         𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
@@ -102,14 +106,23 @@ end
         # intentionally neglected.
         temperature_tendency = p3_adiabatic_temperature_tendency(ℳ, 𝒰, constants)
         pressure_tendency = p3_adiabatic_pressure_tendency(ρ, ℳ, constants)
-
-        surface_temperature = μ.surface_temperature[i, j, 1]
     end
 
     properties = p3_process_properties(p3, ρ, ℳ)
-    result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
-                                 surface_temperature, temperature_tendency,
-                                 pressure_tendency)
+
+    return (; ρ, ℳ, 𝒰, properties, surface_temperature, temperature_tendency, pressure_tendency)
+end
+
+@kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
+    i, j, k = @index(Global, NTuple)
+
+    inputs = p3_grid_process_inputs(i, j, k, grid, p3, μ, formulation, dynamics,
+                                    constants, ρ_field, velocities)
+
+    result = p3_tendency_compute(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants, inputs.properties,
+                                 inputs.surface_temperature, inputs.temperature_tendency,
+                                 inputs.pressure_tendency)
+
     add_p3_tendencies!(G, i, j, k, grid, p3, result)
 end
 

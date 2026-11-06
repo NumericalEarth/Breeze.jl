@@ -175,7 +175,7 @@ end
 # taking in the enthalpy hˣ(T′) at fixed volume. Precipitation leaving through the bottom carries
 # ηˣ(T₁) with its enthalpy hˣ(T₁).
 #
-# `sedimentation_content_tendency` returns the change of a coupling-weighted (ρᵈ-weighted) variable
+# `sedimentation_content_tendency` returns the change of a continuity-density-weighted (ρᵈ-weighted) variable
 # and so multiplies the content flux by the cell's ρᵈ / ρ; the prognostic ρη is the entropy
 # density itself, so the content is returned multiplied by ρ / ρᵈ, which cancels that factor.
 
@@ -184,7 +184,7 @@ end
                                                      specific_prognostic_moisture, temperature_field)
     @inbounds begin
         T = temperature_field[i, j, k]
-        r = total_density(dynamics)[i, j, k] / dynamics_density(dynamics)[i, j, k]
+        r = total_density(dynamics)[i, j, k] / continuity_density(dynamics)[i, j, k]
     end
     b = formulation.water_entropy_offset
     χˡ = r * (liquid_entropy(T, constants) + b)

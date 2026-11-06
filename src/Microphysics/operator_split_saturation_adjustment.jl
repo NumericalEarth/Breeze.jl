@@ -4,7 +4,7 @@
 
 using ..AtmosphereModels:
     AtmosphereModels,
-    dynamics_density,
+    continuity_density,
     dynamics_pressure,
     diagnose_thermodynamic_state,
     kernel_time_step,
@@ -177,7 +177,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::OSSA, model)
     (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
 
     ρ = total_density(model.dynamics)
-    ρᵈ = dynamics_density(model.dynamics)
+    ρᵈ = continuity_density(model.dynamics)
     ρ === ρᵈ && throw(ArgumentError("OperatorSplitSaturationAdjustment needs CompressibleDynamics"))
 
     formulation = model.formulation

@@ -32,7 +32,7 @@ function heating_from_theta(model, ΔΘ)
     constants = model.thermodynamic_constants
     values(f) = Float64.(Array(interior(f)))  # reference fields are reduced in x and y; broadcast them
     ρ = values(AM.total_density(model.dynamics))
-    ρᵈ = values(AM.dynamics_density(model.dynamics))
+    ρᵈ = values(AM.continuity_density(model.dynamics))
     θ = values(model.formulation.potential_temperature)
     T = values(model.temperature)
     qᵛ = values(AM.specific_humidity(model))
@@ -235,7 +235,7 @@ function column_energy_rates(model)
     AM.compute_tendencies!(model)
     constants = model.thermodynamic_constants
     g = constants.gravitational_acceleration
-    ρᵈ = column_values(AM.dynamics_density(model.dynamics))
+    ρᵈ = column_values(AM.continuity_density(model.dynamics))
     ρqᵛ = column_values(model.moisture_density)
     ρqʳ = column_values(model.microphysical_fields.ρqʳ)
     T = column_values(model.temperature)
