@@ -239,7 +239,7 @@ implicit_thermodynamic_solve!(solve!, formulation, model, Δt) = solve!(thermody
     implicit_diffusion_density(formulation, model)
 
 The density weighting the closure diffusion of the vertically implicit solve of `formulation`'s
-thermodynamic variable: the coupling density of `model.dynamics` by default.
+thermodynamic variable: the continuity density of `model.dynamics` by default.
 """
 implicit_diffusion_density(formulation, model) = continuity_density(model.dynamics)
 

@@ -41,7 +41,7 @@ of the mixture, and the individual phases of water are not.
 
 !!! note "Carrier densities in Breeze"
     Breeze's dynamical cores weight the prognostic momentum and thermodynamic variable by a
-    *coupling density* — the reference density ``ρᵣ`` on the anelastic core, the dry-air density
+    *continuity density* — the reference density ``ρᵣ`` on the anelastic core, the dry-air density
     ``ρᵈ`` on the compressible core — rather than by ``ρ``; see the
     [notation](@ref "Notation and conventions"). The derivations below are written for the
     barycentric form, which is the physics; the weighting is bookkeeping that does not change
