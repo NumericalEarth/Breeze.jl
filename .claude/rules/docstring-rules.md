@@ -10,6 +10,8 @@ paths:
 - Use `$(TYPEDSIGNATURES_WITH_DEFAULTS)` — never write explicit signatures
 - Import it with `using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS`. It is DocStringExtensions'
   `TYPEDSIGNATURES` with default values of positional and keyword arguments shown
+- Use `$(TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN)` (also from `Breeze.Utils`) when the inferred
+  return type is too long to be worth printing
 - **Citations**: Use inline `[Author (year)](@cite Key)` syntax woven into prose
 
 ## CRITICAL: Always use `jldoctest`, NEVER plain `julia` blocks

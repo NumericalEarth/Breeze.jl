@@ -27,6 +27,10 @@ using Oceananigans.Architectures: on_architecture
 # `TYPEDSIGNATURES`.
 const TYPEDSIGNATURES_WITH_DEFAULTS = DocStringExtensions.TypedMethodSignatures(defaults = true)
 
+# `TYPEDSIGNATURES_WITH_DEFAULTS` without the inferred return type, for methods whose return
+# type is too long to be worth printing, such as a `Union` of deeply parametrized types.
+const TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN = DocStringExtensions.TypedMethodSignatures(defaults = true, returns = false)
+
 #####
 ##### Sums of selected properties
 #####

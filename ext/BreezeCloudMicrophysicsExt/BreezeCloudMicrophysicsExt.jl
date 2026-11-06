@@ -75,7 +75,7 @@ using Breeze.Microphysics:
     deposition_rate,
     adjust_thermodynamic_state
 
-using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN
 
 using Oceananigans: Oceananigans, Center, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
