@@ -23,6 +23,10 @@ using Breeze.AtmosphereModels:
     implicit_sedimentation_step!
 
 using Breeze.CompressibleEquations: CompressibleDynamics
+
+using Oceananigans.Advection: implicit_advection_lower_diagonal, implicit_advection_diagonal,
+                              implicit_advection_upper_diagonal
+using Oceananigans.Grids: Center, Face
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
 const TerrainCompressibleAcousticModel =
@@ -229,8 +233,9 @@ closures no diffusion coefficients, so each combination reduces to the right sys
 runs once per RK stage after the substep loop and after the scalar update, whose
 `implicit_sedimentation_step!` adds to the thermodynamic variable content that takes this
 solve's diffusion too, over the stage interval — the operator split WRF and CM1 use for their
-implicit vertical pieces. Under an adaptive-implicit thermodynamic scheme the advection half of
-this solve is empty (`postloop_thermodynamic_scheme`): it was applied inside the loop. Continuity takes no implicit solve: the continuity-density tendency is the
+implicit vertical pieces. Under an adaptive-implicit scheme the advection half of
+each solve is empty (`postloop_scheme`): it was applied inside the loop. Continuity takes no
+implicit solve: the continuity-density tendency is the
 acoustic mass-flux divergence itself, not scalar advection.
 
 The advecting velocity passed to each solve must be the one its slow tendency was built with,
@@ -286,11 +291,46 @@ function add_implicit_advection_tendency!(model, advection::AdaptiveImplicitVert
     return nothing
 end
 
-# The implicit half of the IMEX thermodynamic split is applied inside the acoustic loop
-# (`implicit_advection_substep!`), so post-loop the thermodynamic variable keeps only
-# density-weighted closure diffusion under an adaptive-implicit scheme.
-postloop_thermodynamic_scheme(advection, ρ) = implicit_step_scheme(advection, ρ)
-postloop_thermodynamic_scheme(::AdaptiveImplicitVerticalAdvection, ρ) = implicit_step_scheme(nothing, ρ)
+# `Lⁱ (ρu)ᴸ` from the coefficients the per-substep solve uses (at unit Δt), so base plus
+# perturbation sum to the operator the solve inverts.
+@kernel function _implicit_momentum_advection_base_tendency!(G, grid, scheme, W, ρu, ρᵈ, ℓx, ℓy, ℓz)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        Lρu = implicit_advection_lower_diagonal(i, j, k-1, grid, scheme, W, 1, ℓx, ℓy, ℓz, ρᵈ) * ρu[i, j, k-1] +
+              implicit_advection_diagonal(i, j, k, grid, scheme, W, 1, ℓx, ℓy, ℓz, ρᵈ) * ρu[i, j, k] +
+              implicit_advection_upper_diagonal(i, j, k, grid, scheme, W, 1, ℓx, ℓy, ℓz, ρᵈ) * ρu[i, j, k+1]
+        G[i, j, k] -= Lρu
+    end
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Add the base-state part of the implicit vertical momentum transport to `Gⁿ`; the perturbation
+part is solved per substep by `implicit_momentum_advection_substep!`. A no-op for explicit advection.
+"""
+add_implicit_momentum_advection_tendency!(model) =
+    add_implicit_momentum_advection_tendency!(model, model.advection.momentum)
+
+add_implicit_momentum_advection_tendency!(model, advection) = nothing
+
+function add_implicit_momentum_advection_tendency!(model, advection::AdaptiveImplicitVerticalAdvection)
+    grid = model.grid
+    arch = architecture(grid)
+    w, ρᵈ = advecting_state(model)
+    Gⁿ = model.timestepper.Gⁿ
+    ρu, ρv, ρw = model.momentum.ρu, model.momentum.ρv, model.momentum.ρw
+    c, f = Center(), Face()
+    launch!(arch, grid, :xyz, _implicit_momentum_advection_base_tendency!, Gⁿ.ρu, grid, advection, w, ρu, ρᵈ, f, c, c)
+    launch!(arch, grid, :xyz, _implicit_momentum_advection_base_tendency!, Gⁿ.ρv, grid, advection, w, ρv, ρᵈ, c, f, c)
+    launch!(arch, grid, :xyz, _implicit_momentum_advection_base_tendency!, Gⁿ.ρw, grid, advection, w, ρw, ρᵈ, c, c, f)
+    return nothing
+end
+
+# Under adaptive implicit advection the advection half was applied inside the acoustic loop,
+# so the post-loop solve keeps only the closure diffusion.
+postloop_scheme(advection, ρ) = implicit_step_scheme(advection, ρ)
+postloop_scheme(::AdaptiveImplicitVerticalAdvection, ρ) = implicit_step_scheme(nothing, ρ)
 
 implicit_substep!(model, Δt_stage) =
     implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage)
@@ -319,7 +359,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                        model.clock,
                        fields(model),
                        Δt_stage,
-                       implicit_step_scheme(momentum_advection, diffusion_density),
+                       postloop_scheme(momentum_advection, diffusion_density),
                        (; w),
                        ρᵈ)
     end
@@ -334,7 +374,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                    model.clock,
                    fields(model),
                    Δt_stage,
-                   postloop_thermodynamic_scheme(θ_advection, diffusion_density),
+                   postloop_scheme(θ_advection, diffusion_density),
                    merge(slow_thermodynamic_velocities(model), (; w)),
                    ρᵈ)
 

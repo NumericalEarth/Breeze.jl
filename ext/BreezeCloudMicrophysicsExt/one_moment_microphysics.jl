@@ -1285,7 +1285,7 @@ end
 # `compute_microphysical_tendencies!` to compute the bundle once per cell and
 # write to all 5 G fields in a single kernel.
 
-@kernel function _compute_mpne1m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢⁿ,
+@kernel function _compute_mpne1m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢⁿ, limiter,
                                              grid, microphysics, dynamics, formulation,
                                              constants, specific_prognostic_moisture,
                                              microphysical_fields, velocities)
@@ -1310,11 +1310,15 @@ end
 
     G = mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
-    @inbounds Gρqᵛ[i, j, k]  += G.ρqᵛ
-    @inbounds Gρqᶜˡ[i, j, k] += G.ρqᶜˡ
-    @inbounds Gρqᶜⁱ[i, j, k] += G.ρqᶜⁱ
-    @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
-    @inbounds Gρqˢⁿ[i, j, k]  += G.ρqˢⁿ
+    G_species = (Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢⁿ)
+    Gᵐ = (G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢⁿ)
+    f = AM.positivity_preserving_fraction(i, j, k, grid, limiter, G_species, Gᵐ)
+
+    @inbounds Gρqᵛ[i, j, k]  += f * G.ρqᵛ
+    @inbounds Gρqᶜˡ[i, j, k] += f * G.ρqᶜˡ
+    @inbounds Gρqᶜⁱ[i, j, k] += f * G.ρqᶜⁱ
+    @inbounds Gρqʳ[i, j, k]  += f * G.ρqʳ
+    @inbounds Gρqˢⁿ[i, j, k] += f * G.ρqˢⁿ
 end
 
 function AM.compute_microphysical_tendencies!(microphysics::MPNE1M, model)
@@ -1323,7 +1327,7 @@ function AM.compute_microphysical_tendencies!(microphysics::MPNE1M, model)
     G = model.timestepper.Gⁿ
 
     launch!(arch, grid, :xyz, _compute_mpne1m_tendencies!,
-            G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢⁿ,
+            G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢⁿ, AM.SinkLimiter(model, (:ρqᵛ, :ρqᶜˡ, :ρqᶜⁱ, :ρqʳ, :ρqˢⁿ)),
             grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
             model.microphysical_fields, model.velocities)
@@ -1424,7 +1428,7 @@ end
 end
 
 # Fused kernel: evaluate the MP1M bundle once per cell and write all three tendencies.
-@kernel function _compute_mp1m_tendencies!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, grid, microphysics, dynamics, formulation,
+@kernel function _compute_mp1m_tendencies!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, limiter, grid, microphysics, dynamics, formulation,
                                            constants, specific_prognostic_moisture, microphysical_fields, velocities)
     i, j, k = @index(Global, NTuple)
 
@@ -1439,9 +1443,13 @@ end
 
     G = mp1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
-    @inbounds Gρqᵉ[i, j, k]  += G.ρqᵉ
-    @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
-    @inbounds Gρqˢⁿ[i, j, k] += G.ρqˢⁿ
+    G_species = (Gρqᵉ, Gρqʳ, Gρqˢⁿ)
+    Gᵐ = (G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ)
+    f = AM.positivity_preserving_fraction(i, j, k, grid, limiter, G_species, Gᵐ)
+
+    @inbounds Gρqᵉ[i, j, k]  += f * G.ρqᵉ
+    @inbounds Gρqʳ[i, j, k]  += f * G.ρqʳ
+    @inbounds Gρqˢⁿ[i, j, k] += f * G.ρqˢⁿ
 end
 
 @inline microphysical_fields_at(μ, i, j, k) = @inbounds (; ρqʳ = μ.ρqʳ[i, j, k], ρqˢⁿ = μ.ρqˢⁿ[i, j, k])
@@ -1450,7 +1458,7 @@ function AM.compute_microphysical_tendencies!(microphysics::MP1M, model)
     grid = model.grid
     G = model.timestepper.Gⁿ
     launch!(grid.architecture, grid, :xyz, _compute_mp1m_tendencies!,
-            G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ, grid, microphysics, model.dynamics, model.formulation,
+            G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ, AM.SinkLimiter(model, (:ρqᵉ, :ρqʳ, :ρqˢⁿ)), grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
             model.microphysical_fields, model.velocities)
     return nothing

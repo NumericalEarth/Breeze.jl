@@ -320,14 +320,77 @@ function compute_microphysical_tendencies!(microphysics, model)
     # vertical velocity on terrain-following grids and the acoustic time average under
     # `AcousticRungeKutta3`.
     launch!(arch, grid, :xyz, _default_microphysical_tendencies_kernel!,
-            G_tuple, name_tuple, grid, microphysics, model.dynamics, model.formulation,
-            model.thermodynamic_constants, specific_prognostic_moisture(model),
-            model.microphysical_fields, model.velocities)
+            G_tuple, SinkLimiter(model, all_names), name_tuple, grid, microphysics,
+            model.dynamics, model.formulation, model.thermodynamic_constants,
+            specific_prognostic_moisture(model), model.microphysical_fields, model.velocities)
 
     return nothing
 end
 
-@kernel function _default_microphysical_tendencies_kernel!(G_tuple, name_tuple, grid,
+"""
+$(TYPEDSIGNATURES)
+
+The interval over which the coming stage applies the tendencies being built, or `Inf`
+(no limiting) when it is not known, for example before the first time step.
+"""
+stage_time_step(timestepper, clock) = finite_stage_time_step(timestepper, clock)
+
+function finite_stage_time_step(timestepper, clock)
+    Δt = Oceananigans.Advection.adaptive_advection_timestep(timestepper, clock)
+    return ifelse(isfinite(Δt) & (Δt > 0), Δt, convert(typeof(Δt), Inf))
+end
+
+"""
+$(TYPEDEF)
+
+Limits the microphysical sinks of a set of species to what the coming stage leaves of each,
+`q⁰ + Δt Gᵒ`, with `q⁰` the state the stage starts from and `Gᵒ` every other tendency.
+See [`positivity_preserving_fraction`](@ref).
+"""
+struct SinkLimiter{S, T}
+    stage_start :: S  # densities of the species at the state the coming stage starts from
+    Δt :: T           # stage interval; `Inf` disables the limiter
+end
+
+# `Δt` is adapted too: under Reactant it is a traced number that the kernel adaptor must convert.
+Adapt.adapt_structure(to, l::SinkLimiter) = SinkLimiter(adapt(to, l.stage_start), adapt(to, l.Δt))
+
+"""
+$(TYPEDSIGNATURES)
+
+The [`SinkLimiter`](@ref) of the prognostic species `names` of `model`. Which state the coming
+stage starts from, the step-start `U⁰` or the current prognostic fields, is resolved here on the
+host, so the kernel reads one array per species.
+"""
+function SinkLimiter(model, names::Tuple{Vararg{Symbol}})
+    from_initial_state = stage_starts_from_initial_state(model.timestepper, model.clock)
+    fields = from_initial_state ? model.timestepper.U⁰ : prognostic_fields(model)
+    stage_start = map(n -> getproperty(fields, n), names)
+    return SinkLimiter(stage_start, stage_time_step(model.timestepper, model.clock))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+The largest common scale factor `f ∈ [0, 1]` on the microphysical tendencies `Gᵐ` of cell
+`(i, j, k)` such that no species goes negative over the coming stage of length `Δt`:
+`qₛₜₐᵣₜ + Δt (Gᵒ + f Gᵐ) ≥ 0` for every species, where `qₛₜₐᵣₜ` is its density at the state the
+stage starts from and `Gᵒ` the other tendencies already accumulated in `G`. One factor for
+every species keeps the exchanges between them conserved. `f = 1` when `Δt = Inf`.
+"""
+@inline function positivity_preserving_fraction(i, j, k, grid, limiter, G, Gᵐ)
+    Δt = limiter.Δt
+    fractions = map(limiter.stage_start, G, Gᵐ) do q, Gᵒ, gᵐ
+        @inbounds available = max(0, q[i, j, k] + Δt * Gᵒ[i, j, k])
+        demand = - Δt * gᵐ
+        ifelse(demand > available, available / demand, one(demand))
+    end
+    f = min(fractions...)
+    # With `Δt = Inf`, `available` is zero wherever `Gᵒ ≤ 0`
+    return ifelse(isfinite(Δt), f, one(f))
+end
+
+@kernel function _default_microphysical_tendencies_kernel!(G_tuple, limiter, name_tuple, grid,
                                                             microphysics, dynamics, formulation,
                                                             constants, specific_prognostic_moisture,
                                                             microphysical_fields, velocities)
@@ -341,20 +404,9 @@ end
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, microphysical_fields, ρ, 𝒰, velocities)
 
-    _accumulate_microphysical_tendencies!(G_tuple, name_tuple, microphysics, i, j, k, ρ, ℳ, 𝒰, constants)
-end
-
-# Recursive Tuple iteration: type-stable and statically unrolled because the
-# tuples carry their length and element types in their Tuple{...} type.
-@inline _accumulate_microphysical_tendencies!(::Tuple{}, ::Tuple{}, microphysics, i, j, k, ρ, ℳ, 𝒰, constants) = nothing
-
-@inline function _accumulate_microphysical_tendencies!(G_tuple::Tuple, name_tuple::Tuple,
-                                                       microphysics, i, j, k, ρ, ℳ, 𝒰, constants)
-    G = first(G_tuple)
-    name = first(name_tuple)
-    @inbounds G[i, j, k] += microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
-    return _accumulate_microphysical_tendencies!(Base.tail(G_tuple), Base.tail(name_tuple),
-                                                 microphysics, i, j, k, ρ, ℳ, 𝒰, constants)
+    Gᵐ = map(name -> microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants), name_tuple)
+    f = positivity_preserving_fraction(i, j, k, grid, limiter, G_tuple, Gᵐ)
+    map((G, g) -> @inbounds(G[i, j, k] += f * g), G_tuple, Gᵐ)
 end
 
 #####
@@ -1213,7 +1265,9 @@ $(TYPEDSIGNATURES)
 Return the vertical advective mass fluxes of humidity `q` through the lower and upper faces of
 cell `(i, j, k)`, as `((F⁻(wᵗ + wˢ), F⁻(wᵗ)), (F⁺(wᵗ + wˢ), F⁺(wᵗ)))`: at each face, the flux at
 the combined velocity and at the resolved transport velocity `wᵗ` alone, both with the tracer's
-own `advection` scheme, integrated over the face area and per unit density [m³ s⁻¹]. Their
+own `advection` scheme, integrated over the face area and per unit density [m³ s⁻¹]. `ρ` is the
+density the tracer's mass flux is weighted with; it sets the explicit fraction of a
+bounds-preserving adaptive-implicit scheme (see [`explicit_vertical_fraction`](@ref)). Their
 difference is the sedimentation part of the mass flux the tracer tendency applies to the cell;
 [`sedimentation_tendency`](@ref) weights each with the content it delivers to the cell. The
 fluxes belong to the cell rather than to a face because bounds-preserving WENO limits its
@@ -1241,7 +1295,7 @@ mirrors the solve's coefficients (see `density_weighted_implicit_diffusion.jl`).
 # A condensate's mass fluxes through the faces of cell (i, j, k): the part the tracer tendency
 # applies, and the first-order remainder the adaptive implicit solve applied at the solved state.
 @inline explicit_condensate_mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ) =
-    sedimentation_mass_fluxes(i, j, k, grid, condensate.advection, wᵗ, condensate.velocity, condensate.specific_humidity)
+    sedimentation_mass_fluxes(i, j, k, grid, condensate.advection, wᵗ, condensate.velocity, condensate.specific_humidity, ρ)
 
 @inline implicit_condensate_mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ) =
     implicit_sedimentation_mass_fluxes(i, j, k, grid, condensate.advection, wᵗ, condensate.velocity, condensate.density, ρ)

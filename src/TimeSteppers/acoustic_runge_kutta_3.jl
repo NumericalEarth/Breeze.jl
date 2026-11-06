@@ -155,6 +155,14 @@ the cost is confined to CFL targeting on one stage when ``Δt`` changes (see
     return ifelse(isfinite(Δt_stage), Δt_stage, Δt_last)
 end
 
+# Stages 2 and 3 update from U⁰. Stage 1's tendencies are built at the end of the previous step,
+# when the current state is the coming Uⁿ.
+@inline AtmosphereModels.stage_starts_from_initial_state(::AcousticRungeKutta3, clock) = clock.stage > 1
+
+# Stage 1's tendencies are built before `Δtₙ` is known, so the limiters allow for `Δtₙ ≤ 2Δtₙ₋₁`.
+@inline AtmosphereModels.stage_time_step(timestepper::AcousticRungeKutta3, clock) =
+    AtmosphereModels.finite_stage_time_step(timestepper, clock) * ifelse(clock.stage == 1, 2, 1)
+
 #####
 ##### Per-stage substep wrapper
 #####
@@ -188,6 +196,7 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = Round
     # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
     # substep inside the loop, dispatched on the scheme type.
     add_implicit_advection_tendency!(model)
+    add_implicit_momentum_advection_tendency!(model)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
