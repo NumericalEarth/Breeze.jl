@@ -67,7 +67,7 @@ export
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
-    dynamics_density,
+    continuity_density,
     dynamics_pressure,
     total_density,
 
