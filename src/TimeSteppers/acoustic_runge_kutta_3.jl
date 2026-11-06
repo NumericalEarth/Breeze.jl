@@ -256,7 +256,8 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, stage, rounding 
     scalar_rk3_substep!(model, β * Δt, rounding)
 
     # The content is complete: scale it to the stage's increment, which the loop's open-boundary
-    # relaxation takes off its target and `apply_sedimentation_content!` adds after the loop.
+    # relaxation takes off its target where a value condition prescribes the wall value, and
+    # `apply_sedimentation_content!` adds after the loop.
     scale_sedimentation_content!(model, β * Δt)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
@@ -336,7 +337,8 @@ end
 #####     pressure-relevant ρθ over ρᵈ and the slope Cᴸ is evaluated there. The content is O(Δt), so
 #####     the Θ-flux the loop forms from θᴸ and the slope Cᴸ differ by second-order terms. What must see the full variable meanwhile reads the copy:
 #####     the coefficients of the moisture and tracer solves, and the loop's open-boundary
-#####     relaxation, which targets the copy's wall value less the increment below;
+#####     relaxation where a value condition prescribes the full variable at the wall, which
+#####     targets the copy's wall value less the increment below;
 #####   - collects its own, explicit and implicit, as a tendency, and scales it to the stage's
 #####     increment once complete;
 #####   - after the loop, adds the increment to the variable, refills the variable's halos, and
@@ -367,8 +369,9 @@ The content comes out of the halos too, extended into them with no gradient at a
 periodically, so that the reduced variable's halos are the full variable's less the content and
 the vertical operators the stage applies to the reduced variable see no step at the boundaries.
 The variable's own boundary conditions hold for the full variable, which the stage keeps a copy
-of (`freeze_thermodynamic_density!`): the substep loop's open-boundary relaxation reads the wall
-value from that copy (see `apply_open_boundary_relaxation!`).
+of (`freeze_thermodynamic_density!`): where a value condition prescribes the wall value, the
+substep loop's open-boundary relaxation reads it from that copy (see
+`apply_open_boundary_relaxation!`).
 """
 remove_sedimentation_content!(model, stage) =
     remove_sedimentation_content!(model.timestepper.sedimentation_content, model, stage)
@@ -404,9 +407,9 @@ end
 $(TYPEDSIGNATURES)
 
 The implicit counterpart of [`add_explicit_sedimentation_content!`](@ref): the content of the mass
-that the tracers' adaptive implicit solves have just sedimented, from the state those solves
-produced and the `velocities` they split, in the same two parts
-(see [`add_implicit_sedimentation_tendency_parts!`](@ref)).
+that the tracers' adaptive implicit solves have just sedimented, from the solved mass fluxes and
+the `velocities` they split. The same two parts use thermal coefficients from the consistent
+stage-entry state (see [`add_implicit_sedimentation_tendency_parts!`](@ref)).
 """
 function add_implicit_sedimentation_content!(model, velocities)
     ts = model.timestepper
@@ -419,9 +422,9 @@ $(TYPEDSIGNATURES)
 
 Turn the sedimentation composition content tendency the stage collected into its increment over
 the stage interval `Δt_stage`, once its explicit and implicit parts are both in. The substep
-loop's open-boundary relaxation takes the increment off its target (see
-`apply_open_boundary_relaxation!`), and [`apply_sedimentation_content!`](@ref) adds it to the
-thermodynamic variable after the loop.
+loop's open-boundary relaxation takes the increment off its target where a value condition
+prescribes the thermodynamic wall value (see `apply_open_boundary_relaxation!`), and
+[`apply_sedimentation_content!`](@ref) adds it to the thermodynamic variable after the loop.
 """
 scale_sedimentation_content!(model::AtmosphereModel, Δt_stage) =
     scale_sedimentation_content!(model.timestepper.sedimentation_content, Δt_stage)

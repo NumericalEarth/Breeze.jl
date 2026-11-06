@@ -114,16 +114,6 @@ end
              + ρᵈ * expansion_work_source(θ, T, q, formulation.exner_exponent, constants) * Dt_ln_p) # expansion work ρᵈ (Rᵐ T − κ ĉᵖ Π θˡⁱ) / (ĉᵖ Π) D ln p / Dt
 end
 
-# Thermodynamic state at cell (i, j, k) from the prognostic fields: the total density (mass
-# fractions), the prognostic moisture, and the microphysical state.
-@inline function grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
-                                          microphysics, microphysical_fields, specific_prognostic_moisture)
-    @inbounds ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
-    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
-    return diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
-end
-
 # The enthalpy H = cᵖᵐ T − ℒˡ₀ qˡ − ℒⁱ₀ qⁱ = ĉᵖ Π θˡⁱ that defines θˡⁱ
 @inline liquid_ice_enthalpy(T, q, constants) = mixture_heat_capacity(q, constants) * T - condensate_latent_energy(q, constants)
 
@@ -188,13 +178,14 @@ end
 # transported quantity. These are instantaneous responses; multiplying them by a finite mass
 # increment does not exactly reconstruct thermal energy.
 #
-# The explicit tendency is built from the state `update_state!` just diagnosed, in
-# `update_state!` itself or at the start of an acoustic stage before anything moves θ or q, so
-# the temperature field matches θ and q: the content reads that temperature and recovers the
-# Exner function from ĉᵖ Π θˡⁱ = H, rather than inverting θ for T again (a Newton iteration on the
-# compressible core) in this cell and both of its neighbors. `implicit_sedimentation_step!` runs
-# after the tracers' solves have moved q, where the temperature field no longer matches the
-# state, so it passes `nothing` (see `content_temperature`) and T is rediagnosed from (θ, q).
+# The content is always read from the state `update_state!` diagnosed, so the temperature field
+# matches θ and q: the content reads that temperature and recovers the Exner function from
+# ĉᵖ Π θˡⁱ = H, rather than inverting θ for T again (a Newton iteration on the compressible core)
+# in this cell and both of its neighbors. The explicit tendency is built before anything moves θ
+# or q. The implicit remainder's content is formed after the tracers' solves have moved the
+# prognostic densities, so both steppers pass the stage-entry composition reconstructed from the
+# diagnosed specific fields (`diagnosed_microphysical_fields`): the solved q with the stage-entry
+# θ is not a consistent state, since θ has not yet received the content of the moved mass.
 @inline function AtmosphereModels.condensate_content(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
                                                      dynamics, constants, microphysics, microphysical_fields,
                                                      specific_prognostic_moisture, temperature_field)
@@ -204,16 +195,6 @@ end
     @inbounds T = temperature_field[i, j, k]
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     return potential_temperature_condensate_content(dynamics, formulation.exner_exponent, constants, q, θ, T)
-end
-
-@inline function AtmosphereModels.condensate_content(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
-                                                     dynamics, constants, microphysics, microphysical_fields,
-                                                     specific_prognostic_moisture, ::Nothing)
-    𝒰 = grid_thermodynamic_state(i, j, k, grid, formulation, dynamics,
-                                 microphysics, microphysical_fields, specific_prognostic_moisture)
-    T = temperature(𝒰, constants)
-    return potential_temperature_condensate_content(dynamics, formulation.exner_exponent, constants,
-                                                    𝒰.moisture_mass_fractions, 𝒰.potential_temperature, T)
 end
 
 # The content, transported enthalpies and thermal response of a cell with mass fractions `q`,
@@ -231,9 +212,6 @@ end
     h, ∂θ∂h = sedimentation_thermal_response(dynamics, κ̂, q, constants, T, Π)
     return (; χ = (χˡ, χⁱ), h, ∂φ∂h = ∂θ∂h)
 end
-
-# `implicit_sedimentation_step!` rediagnoses T from the post-solve state (see above).
-AtmosphereModels.content_temperature(::LiquidIcePotentialTemperatureFormulation, temperature_field) = nothing
 
 # The derivative of θˡⁱ = H / (ĉᵖ Π) along one composition increment at fixed T and p
 @inline function potential_temperature_content(Δq, κ̂, q, constants, T, θ, ĉᵖ, Π)

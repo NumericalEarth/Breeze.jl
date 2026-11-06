@@ -251,6 +251,15 @@ end
 ##### overstates a one-cell loss by the factor 1 + C at implicit Courant number C, the regime the
 ##### solve exists for.
 #####
+##### Only the mass fluxes read the solved state. The content each unit of mass carries (χ, h and
+##### ∂φ/∂h of `condensate_content`) is read from the stage-entry state `update_state!` diagnosed,
+##### the one the explicit fraction's content was formed from (`diagnosed_microphysical_fields`).
+##### The solved state is not a consistent thermodynamic state: the solves have moved q while the
+##### thermodynamic variable has not yet received the content of that mass. A temperature
+##### diagnosed from the stage-entry θˡⁱ and the solved q is off by about ℒ Δq / cᵖ (some 20 K for
+##### Δqˡ = 0.009), and the sensible part would convert that fictitious contrast into heating
+##### even in an isothermal column.
+#####
 ##### The content is added before the thermodynamic variable's own solve. With Lᵠ its implicit
 ##### operator (upwind remainder at the transport velocity plus implicit diffusion) and Lq the
 ##### tracer's (the same at the transport-plus-fall velocity), the tracer's solve reads
@@ -304,9 +313,11 @@ $(TYPEDSIGNATURES)
 
 Move the condensate content of the thermodynamic variable with the sedimentation mass that the
 adaptive implicit vertical solve has just applied to the tracers: add `Δt` times the
-sedimentation tendency of the first-order remainder the solves applied, at the solved state, to
-the [`thermodynamic_density`](@ref) (the tendency of [`sedimentation_tendency`](@ref) formed
-from [`implicit_sedimentation_mass_fluxes`](@ref)). `velocities` are the transport velocities
+sedimentation tendency of the first-order remainder the solves applied to the
+[`thermodynamic_density`](@ref) (the tendency of [`sedimentation_tendency`](@ref) formed from
+[`implicit_sedimentation_mass_fluxes`](@ref)). The mass fluxes are those of the solved state;
+the content per unit mass is that of the stage-entry state
+([`diagnosed_microphysical_fields`](@ref)), as for the explicit fraction. `velocities` are the transport velocities
 whose vertical component the tracers' solves split, `Δt` the interval they solved over, and
 `formulation` selects the [`condensate_content`](@ref) methods, defaulting to the model's.
 The SSP stepper calls this between the tracers' solves of a stage and the thermodynamic
@@ -325,7 +336,7 @@ function implicit_sedimentation_step!(model, Δt, velocities, formulation = mode
     φ = thermodynamic_density(model.formulation)
     return add_sedimentation_tendency_parts!(φ, φ, model, velocities.w;
                                              mass_fluxes = implicit_condensate_mass_fluxes, formulation,
-                                             temperature = content_temperature(formulation, model.temperature),
+                                             microphysical_fields = diagnosed_microphysical_fields(model),
                                              factor = kernel_time_step(grid.architecture, grid, Δt))
 end
 
@@ -355,13 +366,16 @@ and the composition content, the change at fixed temperature, to `C`, which may 
 The tendency is formed from the part of each condensate's mass fluxes that `mass_fluxes` selects
 (`explicit_condensate_mass_fluxes` for the part the tracer tendencies apply with the vertical
 velocity `wᵗ`, `implicit_condensate_mass_fluxes` for the remainder the adaptive implicit solves
-applied), with the [`condensate_content`](@ref) methods of `formulation` and the `temperature`
-argument they take (see [`content_temperature`](@ref)). `AcousticRungeKutta3` integrates `G` in
-its substep loop and moves `C` outside it. A no-op when no condensate sediments.
+applied), with the [`condensate_content`](@ref) methods of `formulation`, which read the
+`temperature` field and the `microphysical_fields`. `AcousticRungeKutta3` integrates `G` in
+its substep loop and moves `C` outside it. `microphysical_fields` selects the state the content
+coefficients are read from; the mass fluxes read the densities held by `model.sedimentation`
+independently. A no-op when no condensate sediments.
 """
 function add_sedimentation_tendency_parts!(G, C, model, wᵗ;
                                            mass_fluxes = explicit_condensate_mass_fluxes,
                                            formulation = model.formulation,
+                                           microphysical_fields = model.microphysical_fields,
                                            temperature = model.temperature,
                                            factor = 1)
     condensates = values(model.sedimentation)
@@ -369,7 +383,7 @@ function add_sedimentation_tendency_parts!(G, C, model, wᵗ;
     grid = model.grid
     launch!(grid.architecture, grid, :xyz, _add_sedimentation_tendency_parts!,
             G, C, factor, grid, condensates, wᵗ, mass_fluxes, formulation, model.dynamics,
-            model.thermodynamic_constants, model.microphysics, model.microphysical_fields,
+            model.thermodynamic_constants, model.microphysics, microphysical_fields,
             specific_prognostic_moisture(model), temperature)
     return nothing
 end
@@ -378,16 +392,38 @@ end
 $(TYPEDSIGNATURES)
 
 Like [`add_sedimentation_tendency_parts!`](@ref), for the first-order remainder that the adaptive
-implicit vertical solves have just applied to the tracers, at the solved state (the tendency
-[`implicit_sedimentation_step!`](@ref) integrates). `velocities` are the transport velocities whose
-vertical component the solves split. A no-op when no condensate is advected adaptively
-implicitly.
+implicit vertical solves have just applied to the tracers, as [`implicit_sedimentation_step!`](@ref)
+forms it: the mass fluxes from the solved densities, the content per unit mass from the
+stage-entry state ([`diagnosed_microphysical_fields`](@ref)). `velocities` are the transport
+velocities whose vertical component the solves split. A no-op when no condensate is advected
+adaptively implicitly.
 """
 function add_implicit_sedimentation_tendency_parts!(G, C, model, velocities)
     implicit_sedimentation(values(model.sedimentation)) || return nothing
     return add_sedimentation_tendency_parts!(G, C, model, velocities.w;
                                              mass_fluxes = implicit_condensate_mass_fluxes,
-                                             temperature = content_temperature(model.formulation, model.temperature))
+                                             microphysical_fields = diagnosed_microphysical_fields(model))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the microphysical fields with each prognostic density replaced by the product of the
+total density and its specific field, the stage-entry density as the last `update_state!`
+diagnosed it. A stage's explicit update and tracer solves change the prognostic densities but
+leave the specific fields, the temperature, the specific thermodynamic variable and the total
+density at stage entry, so together these describe one consistent thermodynamic state, without
+a copy of the prognostics. This relies on `update_state!` storing each specific field as its
+density over the total density, as every scheme with framework sedimentation does (DCMIP2016
+Kessler, which rewrites them as mixing ratios, sediments its rain itself). The sedimentation mass
+fluxes still read the solved densities held by `model.sedimentation`.
+"""
+function diagnosed_microphysical_fields(model)
+    μ = model.microphysical_fields
+    ρ = total_density(model.dynamics)
+    names = prognostic_field_names(model.microphysics)
+    densities = map(name -> ρ * μ[specific_field_name(name)], names)
+    return merge(μ, NamedTuple{names}(densities))
 end
 
 @kernel function _add_sedimentation_tendency_parts!(G, C, factor, grid, condensates, wᵗ, mass_fluxes, formulation,
@@ -401,13 +437,3 @@ end
     @inbounds G[i, j, k] += factor * sensible
     @inbounds C[i, j, k] += factor * composition
 end
-
-"""
-$(TYPEDSIGNATURES)
-
-Return the temperature argument `implicit_sedimentation_step!` passes to
-[`condensate_content`](@ref) for `formulation`: the model's `temperature_field` by default, or
-`nothing` for a formulation whose content rediagnoses the temperature from the post-solve state,
-which the tracers' solves have moved away from the one the temperature field was diagnosed from.
-"""
-content_temperature(formulation, temperature_field) = temperature_field

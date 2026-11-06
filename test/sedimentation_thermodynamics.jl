@@ -45,16 +45,19 @@ end
 
 # No resolved flow, phase changes, or gravity. The only scalar/thermal tendencies are
 # sedimentation. Both open and closed bottoms distinguish inflow from net mass gain.
-function sedimentation_column(FT, phase, donor_temperature, closed, speed; compressible=true)
+function sedimentation_column(FT, phase, donor_temperature, closed, speed;
+                               compressible = true,
+                               time_discretization = ExplicitTimeStepping(),
+                               advection = UpwindBiased(FT; order=1))
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch, FT; size=(1, 1, 2), x=(0, 1), y=(0, 1), z=(0, 200))
     constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
     reference = ReferenceState(grid, constants; base_pressure=1e5, potential_temperature=280)
-    dynamics = compressible ? CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=280) :
+    dynamics = compressible ? CompressibleDynamics(time_discretization; reference_potential_temperature=280) :
                              AnelasticDynamics(reference)
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants,
                             microphysics=SedimentationOnly(Val(phase), FT(speed), closed),
-                            scalar_advection=(; ρqʳ=UpwindBiased(FT; order=1)))
+                            scalar_advection=(; ρqʳ=advection))
     condensate(x, y, z) = ifelse(z > 100, FT(0.01), FT(0.001))
     temperature(x, y, z) = ifelse(z > 100, FT(donor_temperature), FT(280))
     if compressible
@@ -103,7 +106,8 @@ function sedimentation_temperature_rates(model, phase, compressible)
     enthalpy = heat_capacity .* T .- L
     energy_rate = capacity .* rate .+ enthalpy .* mass_rate
     boundary_energy_rate = enthalpy[1] * sum(mass_rate) * 100
-    return (; rate, reference_rate, mass_rate, energy_rate, boundary_energy_rate, capacity)
+    return (; rate, reference_rate, mass_rate, energy_rate, boundary_energy_rate, capacity,
+              derivative_T, derivative_mass)
 end
 
 @testset "Isolated sedimentation temperature and thermal budget [$FT]" for FT in test_float_types()
@@ -122,6 +126,51 @@ end
         end
         if speed == 0
             @test maximum(abs, data.rate) < tolerance
+        end
+    end
+end
+
+# The implicit mass flux must use the solved rain/ice density, but its thermal coefficients
+# must come from one consistent state. Compare the split against independent derivatives of
+# the stage-entry thermodynamic definition and the mass the solve actually moved. In particular,
+# equal donor and receiver temperatures give exactly zero sensible heat at large fall CFL.
+@testset "Implicit acoustic sedimentation uses consistent thermal coefficients [$FT]" for FT in test_float_types()
+    TS = Breeze.TimeSteppers
+    column = sedimentation_column_values
+    adaptive = UpwindBiased(FT; order=1, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+
+    for phase in (:liquid, :ice), donor_temperature in (275, 280, 285), Δt in FT.((5, 20))
+        model = sedimentation_column(FT, phase, donor_temperature, true, 80;
+                                     time_discretization=SplitExplicitTimeDiscretization(), advection=adaptive)
+        Oceananigans.TimeSteppers.maybe_prepare_first_time_step!(model, Δt, [])
+        TS.store_initial_state!(model)
+        TS.freeze_thermodynamic_density!(model)
+        TS.cache_advecting_state!(model)
+        reference = sedimentation_temperature_rates(model, phase, true)
+        Δt_stage = model.timestepper.β₁ * Δt
+        predicted_mass = column(model.timestepper.U⁰.ρqʳ) .+ Δt_stage .* column(model.timestepper.Gⁿ.ρqʳ)
+
+        TS.add_explicit_sedimentation_content!(model)
+        sensible_before = column(model.timestepper.Gⁿ.ρθ)
+        composition_before = column(model.timestepper.sedimentation_content)
+        TS.scalar_rk3_substep!(model, Δt_stage)
+
+        implicit_mass_rate = (column(model.microphysical_fields.ρqʳ) .- predicted_mass) ./ Δt_stage
+        sensible = column(model.timestepper.Gⁿ.ρθ) .- sensible_before
+        composition = column(model.timestepper.sedimentation_content) .- composition_before
+        properties = phase === :liquid ? model.thermodynamic_constants.liquid : model.thermodynamic_constants.ice
+        temperature_rate = properties.heat_capacity * (donor_temperature - 280) * implicit_mass_rate[1] / reference.capacity[1]
+        expected_sensible = reference.derivative_T .* [temperature_rate, 0]
+        tolerance = FT === Float32 ? 3e-5 : 3e-8
+
+        @test implicit_mass_rate[1] > 0
+        @test implicit_mass_rate[1] ≈ -implicit_mass_rate[2] rtol=tolerance
+        @test composition ≈ reference.derivative_mass .* implicit_mass_rate rtol=tolerance
+        @test isapprox(sensible, expected_sensible; rtol=tolerance, atol=100eps(FT))
+        if donor_temperature == 280
+            @test maximum(abs, sensible) < 100eps(FT)
+        else
+            @test sign(sensible[1]) == sign(donor_temperature - 280)
         end
     end
 end
@@ -377,6 +426,49 @@ end
     content = model.timestepper.sedimentation_content
     @test all(!iszero, Array(interior(content, 1, 1, :)))
     @test Array(interior(ρθ, 1, 1, :)) ≈ fill(v, 2) rtol=100eps(FT)
+end
+
+# Open velocity boundaries do not prescribe a thermodynamic value when ρθ has a flux or
+# gradient boundary condition. A horizontally uniform rain column must not develop boundary
+# hot/cold spots as its composition changes. Exercise both horizontal relaxation kernels and
+# the default as well as full relaxation strength; the value-boundary test above still applies.
+# The relaxation still holds the pressure-changing part of ρθ in the boundary cells at its
+# stage-entry value, so the small pressure-changing heating the interior takes over the step
+# leaves a contrast of a few mK and winds of a few cm/s. Targeting the stage-entry variable with
+# its content (or taking the content off a target without a wall value) gives contrasts of tens
+# of K and winds of tens of m/s.
+@testset "Open boundaries allow sedimentation content without a prescribed thermodynamic value [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size=(3, 3, 2), x=(0, 3000), y=(0, 3000), z=(0, 20),
+                           topology=(Bounded, Bounded, Bounded))
+    constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
+    adaptive = UpwindBiased(FT; order=1, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
+    rain(x, y, z) = ifelse(z > 10, FT(0.01), FT(0.001))
+    ε = FT(0.005)
+
+    for (relaxation, bc) in ((FT(0.5), nothing), (FT(1), GradientBoundaryCondition(FT(0))), (FT(1), FluxBoundaryCondition(FT(0))))
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(; open_boundary_relaxation=relaxation);
+                                        reference_potential_temperature=290)
+        thermodynamic_bcs = isnothing(bc) ? (;) : (; ρθ=FieldBoundaryConditions(west=bc, east=bc, south=bc, north=bc))
+        boundary_conditions = (; ρu=FieldBoundaryConditions(west=NormalFlowBoundaryCondition(FT(0)),
+                                                            east=NormalFlowBoundaryCondition(FT(0))),
+                                 ρv=FieldBoundaryConditions(south=NormalFlowBoundaryCondition(FT(0)),
+                                                            north=NormalFlowBoundaryCondition(FT(0))),
+                                 thermodynamic_bcs...)
+        model = AtmosphereModel(grid; dynamics, boundary_conditions, thermodynamic_constants=constants,
+                                microphysics=SedimentationOnly(Val(:liquid), FT(8), true), scalar_advection=(; ρqʳ=adaptive))
+        set!(model; ρᵈ=FT(1.2), T=FT(290), qʳ=rain, qᵛ=(x, y, z) -> ε * (1 - rain(x, y, z)) / (1 + ε))
+        initial_ρθ = Array(interior(AM.thermodynamic_density(model.formulation)))
+        time_step!(model, FT(5))
+
+        T = Array(interior(model.temperature))
+        horizontal_spread = maximum(T; dims=(1, 2)) .- minimum(T; dims=(1, 2))
+        change = Array(interior(AM.thermodynamic_density(model.formulation))) .- initial_ρθ
+        @test maximum(horizontal_spread) < 0.02
+        @test maximum(abs, Array(interior(model.velocities.u))) < 0.1
+        @test maximum(abs, Array(interior(model.velocities.v))) < 0.1
+        @test minimum(abs, change) > 1 # the content reaches every column, including all four sides
+    end
 end
 
 # The moisture and tracer solves run while the previous stage's content is out of the live

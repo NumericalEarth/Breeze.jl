@@ -156,8 +156,9 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     end
 
     # The tracers' solves have just moved sedimenting condensate implicitly. Move the content of
-    # that mass, from the state the solves produced and with the same frozen velocity, in its two
-    # parts (see `remove_sedimentation_content!`).
+    # that mass in its two parts (see `remove_sedimentation_content!`): the mass fluxes from the
+    # solved densities and the same frozen velocity, the content per unit mass from the
+    # stage-entry state (see `add_implicit_sedimentation_tendency_parts!`).
     isnothing(model.timestepper.implicit_solver) || add_implicit_sedimentation_content!(model, velocities)
 
     return nothing

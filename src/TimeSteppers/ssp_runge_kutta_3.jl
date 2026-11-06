@@ -166,9 +166,10 @@ function ssp_rk3_substep!(model, Δt, α)
     end
 
     # The tracers' solves have just moved sedimenting condensate implicitly. Move its content
-    # with it, from the state the solves produced, and only then solve the thermodynamic
-    # variable, so the moved content takes the same transport and diffusion as the rest of the
-    # field (see `implicit_sedimentation_step!`).
+    # with it, from the mass fluxes the solves applied and the content per unit mass of the
+    # stage-entry state, and only then solve the thermodynamic variable, so the moved content
+    # takes the same transport and diffusion as the rest of the field
+    # (see `implicit_sedimentation_step!`).
     isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, α * Δt, model.velocities)
     implicit_stage_step!(model, thermodynamic_name, prognostic[thermodynamic_name], α * Δt)
 

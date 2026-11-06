@@ -45,7 +45,7 @@ using Oceananigans.Operators:
     Axᶠᶜᶜ, Ayᶜᶠᶜ, V⁻¹ᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
-using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
+using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow, Value
 
 using Oceananigans.Grids: Flat, Bounded, Center, Face, peripheral_node,
                           topology,
@@ -1410,9 +1410,19 @@ end
 # The thermodynamic base may be the stage-entry variable less the condensate
 # sedimentation content the stage adds back after the loop (`AcousticRungeKutta3`).
 # The wall value then comes from the stage-entry variable `ρθⁿ` as `update_state!`
-# left it, and the content `C` the stage will add comes off the target,
-# `(ρθⁿ[halo] + ρθⁿ[cell]) / 2 − ρθᴸ[cell] − C[cell]`, so that the full variable,
-# content included, lands on the wall value.
+# left it. A `ValueBoundaryCondition` on the thermodynamic variable prescribes the
+# full variable at the wall, so the content `C` the stage will add comes off the
+# target, `(ρθⁿ[halo] + ρθⁿ[cell]) / 2 − ρθᴸ[cell] − C[cell]`, and the full variable,
+# content included, lands on the wall value. Any other condition (the default flux
+# or a gradient condition) prescribes no thermodynamic wall value: its halo
+# extrapolates the interior, and the target is the base's own extrapolation,
+# `(ρθᴸ[halo] − ρθᴸ[cell]) / 2`, as without sedimentation. The base is the
+# stage-entry variable less the previous stage's content, halos included, so it holds
+# back only the pressure-changing part of the variable and the content added after
+# the loop reaches the boundary cell as it does the interior. The stage-entry
+# variable would not do: it carries the previous stage's content, and every stage
+# rewinds to the outer-step start, so holding it would accumulate each stage's
+# content on top of the last.
 # Relaxation factor `α ∈ (0, 1]` (default 0.5, via
 # `SplitExplicitTimeDiscretization(; open_boundary_relaxation = α)`). No-op on any
 # side without an active `NormalFlowBoundaryCondition` (periodic/walls/`nothing`
@@ -1427,8 +1437,14 @@ end
 @inline relaxation_target(cᴸ, ::Nothing, ::Nothing, Iᴴ, Iᴮ) = @inbounds (cᴸ[Iᴴ...] - cᴸ[Iᴮ...]) / 2
 @inline relaxation_target(cᴸ, cⁿ, C, Iᴴ, Iᴮ) = @inbounds (cⁿ[Iᴴ...] + cⁿ[Iᴮ...]) / 2 - cᴸ[Iᴮ...] - C[Iᴮ...]
 
-# Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the prescribed wall value in a
-# single kernel. `iᴮ` is the outermost interior cell index, `iᴴ` the adjacent halo cell index.
+# The stage-entry variable and sedimentation content the thermodynamic target reads on one side:
+# both where a value condition prescribes the full variable at the wall, neither otherwise, so
+# that the target is the base's own extrapolation.
+wall_thermodynamic_state(::BoundaryCondition{<:Value}, ρθⁿ, C) = (ρθⁿ, C)
+wall_thermodynamic_state(bc, ρθⁿ, C) = (nothing, nothing)
+
+# Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the wall value in a single
+# kernel. `iᴮ` is the outermost interior cell index, `iᴴ` the adjacent halo cell index.
 @kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, iᴮ, iᴴ, α)
     j, k = @index(Global, NTuple)
     Iᴮ = (iᴮ, j, k)
@@ -1460,17 +1476,22 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch, ρθⁿ,
     ρθ′ = substepper.density_potential_temperature_perturbation
     ρᴸ  = model.dynamics.dry_density
     ρθᴸ = thermodynamic_density(model.formulation)
+    bcs_θ = ρθᴸ.boundary_conditions
     if is_active_open_bc(bcs_u.west)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, 1, 0, α)
+        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.west, ρθⁿ, C)..., 1, 0, α)
     end
     if is_active_open_bc(bcs_u.east)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, Nx, Nx + 1, α)
+        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.east, ρθⁿ, C)..., Nx, Nx + 1, α)
     end
     if is_active_open_bc(bcs_v.south)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, 1, 0, α)
+        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.south, ρθⁿ, C)..., 1, 0, α)
     end
     if is_active_open_bc(bcs_v.north)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, Ny, Ny + 1, α)
+        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.north, ρθⁿ, C)..., Ny, Ny + 1, α)
     end
     return nothing
 end

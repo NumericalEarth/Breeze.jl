@@ -125,7 +125,7 @@ end
 #
 # Under adaptive implicit vertical advection these are the CFL-scaled explicit fluxes only,
 # the part of the transport the tendency applies; the first-order remainder the implicit solve
-# applies is moved with its content after the solve, from the solved state
+# applies is moved with its content after the solve, from the mass fluxes of the solved state
 # (`AtmosphereModels.implicit_sedimentation_mass_fluxes`).
 
 @inline function AtmosphereModels.sedimentation_mass_fluxes(i, j, k, grid, advection, wᵗ, wˢ, q)
