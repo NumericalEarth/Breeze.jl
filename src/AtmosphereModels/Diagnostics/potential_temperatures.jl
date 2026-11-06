@@ -60,7 +60,7 @@ const PotentialTemperatureDensityType = Union{
 #####
 ##### The kernel function stores the three fields needed for computing potential temperature:
 ##### - pressure: the pressure field used in the Exner function
-##### - density: the density field used for moisture fractions and density-weighted outputs
+##### - density: the total density, used for moisture fractions and density-weighted outputs
 ##### - standard_pressure: the reference pressure for potential temperature (typically 10⁵ Pa)
 #####
 ##### For anelastic dynamics, these come from the reference state (pᵣ, ρᵣ, pˢᵗ).
@@ -136,14 +136,6 @@ dynamics_pressure_for_potential_temperature(dynamics) = dynamics.reference_state
 """
 $(TYPEDSIGNATURES)
 
-Return the density field used for computing potential temperature.
-For anelastic dynamics, this is the reference density.
-"""
-dynamics_density_for_potential_temperature(dynamics) = dynamics.reference_state.density
-
-"""
-$(TYPEDSIGNATURES)
-
 Return the standard pressure for potential temperature calculations.
 """
 dynamics_standard_pressure(dynamics) = dynamics.reference_state.standard_pressure
@@ -190,7 +182,7 @@ Field(θ)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=300.0, min=300.0, mean=300.0
 ```
 """
@@ -206,7 +198,7 @@ function PotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
     end
 
     p = dynamics_pressure_for_potential_temperature(model.dynamics)
-    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    ρ = total_density(model.dynamics)
     pˢᵗ = dynamics_standard_pressure(model.dynamics)
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -268,7 +260,7 @@ Field(θᵛ)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=301.82, min=301.8, mean=301.81
 ```
 """
@@ -284,7 +276,7 @@ function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:spec
     end
 
     p = dynamics_pressure_for_potential_temperature(model.dynamics)
-    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    ρ = total_density(model.dynamics)
     pˢᵗ = dynamics_standard_pressure(model.dynamics)
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -340,7 +332,7 @@ Field(θˡⁱ)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=300.0, min=300.0, mean=300.0
 ```
 """
@@ -358,7 +350,7 @@ function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:sp
     end
 
     p = dynamics_pressure_for_potential_temperature(model.dynamics)
-    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    ρ = total_density(model.dynamics)
     pˢᵗ = dynamics_standard_pressure(model.dynamics)
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -412,7 +404,7 @@ Field(θᵉ)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=326.162, min=325.851, mean=326.006
 ```
 
@@ -432,7 +424,7 @@ function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:s
     end
 
     p = dynamics_pressure_for_potential_temperature(model.dynamics)
-    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    ρ = total_density(model.dynamics)
     pˢᵗ = dynamics_standard_pressure(model.dynamics)
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -494,7 +486,7 @@ Field(θᵇ)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=326.162, min=325.851, mean=326.006
 ```
 
@@ -515,7 +507,7 @@ function StabilityEquivalentPotentialTemperature(model::AtmosphereModel, flavor_
     end
 
     p = dynamics_pressure_for_potential_temperature(model.dynamics)
-    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    ρ = total_density(model.dynamics)
     pˢᵗ = dynamics_standard_pressure(model.dynamics)
 
     func = MoistPotentialTemperatureKernelFunction(flavor,

@@ -15,26 +15,22 @@ The `limiter` of a `BoundsPreservation` for bounds-preserving WENO under adaptiv
 advection: Oceananigans' reconstruction rescaling `θ`, which indexing forwards to, and the fraction
 `r ∈ [0, 1]` of each cell's explicit outflow the coming stage may apply.
 """
-struct OutflowLimiter{Θ, R, F}
+struct OutflowLimiter{Θ, R}
     rescaling :: Θ             # Oceananigans' bounds-preserving reconstruction rescaling θ
     outflow_fraction :: R      # r, the fraction of each cell's explicit outflow the stage applies
     provisional_fraction :: R  # r from the previous pass, which scales the credited inflow
-    face_fluxes :: F           # the stage's face fluxes `(; x, y, z)`, before the fractions scale them
 end
-
-OutflowLimiter(rescaling, r, r₀) = OutflowLimiter(rescaling, r, r₀, nothing)
 
 @inline Base.getindex(l::OutflowLimiter, i, j, k) = @inbounds l.rescaling[i, j, k]
 @inline Base.setindex!(l::OutflowLimiter, v, i, j, k) = @inbounds l.rescaling[i, j, k] = v
 
 Adapt.adapt_structure(to, l::OutflowLimiter) =
-    OutflowLimiter(adapt(to, l.rescaling), adapt(to, l.outflow_fraction), adapt(to, l.provisional_fraction), adapt(to, l.face_fluxes))
+    OutflowLimiter(adapt(to, l.rescaling), adapt(to, l.outflow_fraction), adapt(to, l.provisional_fraction))
 
 Oceananigans.Architectures.on_architecture(to, l::OutflowLimiter) =
     OutflowLimiter(Oceananigans.Architectures.on_architecture(to, l.rescaling),
                    Oceananigans.Architectures.on_architecture(to, l.outflow_fraction),
-                   Oceananigans.Architectures.on_architecture(to, l.provisional_fraction),
-                   Oceananigans.Architectures.on_architecture(to, l.face_fluxes))
+                   Oceananigans.Architectures.on_architecture(to, l.provisional_fraction))
 
 BoundaryConditions.fill_halo_regions!(l::OutflowLimiter, args...; kwargs...) =
     fill_halo_regions!(l.rescaling, args...; kwargs...)
@@ -55,15 +51,6 @@ unchanged.
 """
 with_outflow_limiter(scheme, grid) = scheme
 
-
-"""
-$(TYPEDSIGNATURES)
-
-Face fields `(; x, y, z)` in which `update_outflow_limiter!` stores a scalar's face fluxes once per
-stage, for its passes and for the scalar's tendency to read instead of rebuilding them.
-"""
-outflow_limiter_face_fluxes(grid) = (; x = XFaceField(grid), y = YFaceField(grid), z = ZFaceField(grid))
-
 function with_outflow_limiter(scheme::Oceananigans.Advection.WENO{N, FT, WCT, <:AVID, <:Oceananigans.Advection.BoundsPreservation}, grid) where {N, FT, WCT}
     bounds = scheme.bounds
     bounds.limiter isa OutflowLimiter && return scheme
@@ -71,7 +58,7 @@ function with_outflow_limiter(scheme::Oceananigans.Advection.WENO{N, FT, WCT, <:
     r₀ = CenterField(grid)
     fill!(r, 1)
     fill!(r₀, 1)
-    limiter = OutflowLimiter(bounds.limiter, r, r₀, outflow_limiter_face_fluxes(grid))
+    limiter = OutflowLimiter(bounds.limiter, r, r₀)
     limited_bounds = Oceananigans.Advection.BoundsPreservation(bounds.minimum_value, bounds.maximum_value, bounds.maximum_courant_number, limiter)
     return Oceananigans.Advection.WENO{N, FT, WCT}(limited_bounds, scheme.buffer_scheme,
                                                    scheme.advecting_velocity_scheme,
