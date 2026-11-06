@@ -11,9 +11,11 @@ NumericalRadiation = "cd8119b0-1744-44d6-9ede-6ad1ad750b26"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
+TiffImages = "731e570b-9d59-4bfa-96dc-6df516fadf69" # TODO: remove together with the [sources] entry
 
 [sources]
 Breeze = {path = ".."}
+TiffImages = {url = "https://github.com/tlnagy/TiffImages.jl", rev = "master"} # TODO: remove once TiffImages v0.11.10 is registered
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"

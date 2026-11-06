@@ -134,7 +134,9 @@ export
     # Radiation schedules that the architecture can evaluate
     validate_schedule
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+
+using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 

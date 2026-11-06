@@ -24,9 +24,12 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TiffImages = "731e570b-9d59-4bfa-96dc-6df516fadf69" # TODO: remove together with the [sources] entry
 
 [sources]
 Breeze = {path = ".."}
+Documenter = {url = "https://github.com/JuliaDocs/Documenter.jl", rev = "master"} # TODO: remove once a new Documenter release is tagged
+TiffImages = {url = "https://github.com/tlnagy/TiffImages.jl", rev = "master"} # TODO: remove once TiffImages v0.11.10 is registered
 
 [compat]
 Adapt = "4.3.0"

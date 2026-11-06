@@ -87,7 +87,7 @@ struct TemperatureDependentIceFormation{FT, F} <: AbstractCondensateFormation
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return one-moment categories backed by CloudMicrophysics' unified
 `Microphysics1MParams` container.
@@ -122,7 +122,7 @@ const CM1MCategories = OneMomentCloudMicrophysicsCategories{<:Microphysics1MPara
 const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `OneMomentCloudMicrophysics` microphysics scheme for warm-rain and mixed-phase precipitation.
 

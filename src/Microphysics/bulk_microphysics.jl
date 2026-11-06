@@ -1,4 +1,5 @@
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using DocStringExtensions: TYPEDEF
 
 using ..Thermodynamics:
     liquid_latent_heat,
@@ -115,7 +116,7 @@ Base.summary(::ConstantRateCondensateFormation) = "ConstantRateCondensateFormati
 # other.
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the thermodynamic adjustment factor `Γ` used in relaxation-to-saturation
 condensation/evaporation tendencies.
@@ -129,7 +130,7 @@ condensation/evaporation tendencies.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the thermodynamic adjustment factor `Γ` used in relaxation-to-saturation
 deposition/sublimation tendencies (ice analogue of `thermodynamic_adjustment_factor`).
@@ -143,7 +144,7 @@ deposition/sublimation tendencies (ice analogue of `thermodynamic_adjustment_fac
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the condensation/evaporation rate for cloud liquid water in a relaxation-to-saturation model.
 
@@ -161,7 +162,7 @@ condensation; negative values indicate evaporation. Evaporation is limited by th
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the deposition/sublimation rate for cloud ice in a relaxation-to-saturation model.
 
@@ -195,7 +196,7 @@ const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories}
 Base.summary(::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `BulkMicrophysics` microphysics scheme.
 

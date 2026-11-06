@@ -10,7 +10,7 @@ using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: ClearSkyRadiation
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a clear-sky (gas-only) full-spectrum `RadiativeTransferModel` for the given grid.
 

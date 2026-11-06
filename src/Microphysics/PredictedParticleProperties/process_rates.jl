@@ -523,7 +523,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute all P3 process rates (Phase 1 and Phase 2) from a microphysical state.
 
