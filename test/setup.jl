@@ -24,6 +24,12 @@ end
 # Returns both Float32 and Float64 for tests that need both precision levels
 all_float_types() = (Float32, Float64)
 
+# Temperature inversions of the density-based state: non-iterated, fixed-count, stopped and converged
+temperature_solver_variants(FT) = (nothing, Breeze.FixedIterations(0), Breeze.FixedIterations(1),
+                                   Breeze.FixedIterations(2), Breeze.NewtonSolver(FT; maxiter=0),
+                                   Breeze.NewtonSolver(FT; maxiter=1), Breeze.NewtonSolver(FT; abstol=1e3),
+                                   Breeze.NewtonSolver(FT))
+
 # The single column of the radiation tests, at 45°N on the prime meridian
 radiation_column_grid(FT, Nz, top) =
     Oceananigans.RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, top),
