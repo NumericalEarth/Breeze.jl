@@ -82,7 +82,8 @@ function p3_with_process_rates(p3, process_rates)
         p3.precipitation_boundary_condition,
         p3.negative_moisture_correction,
         p3.aerosol,
-        p3.warm_rain_scheme)
+        p3.warm_rain_scheme,
+        p3.subgrid)
 end
 
 function p3_process_rates_with(FT; kwargs...)
