@@ -582,9 +582,9 @@ end
 
     @testset "coupled sink limiter iterations are configurable" begin
         FT = Float32
-        @test ProcessRate(FT).coupled_sink_limiting_iterations == 4
+        @test PPP.coupled_sink_limiting_iterations(ProcessRate(FT)) == 4
         configured = ProcessRate(FT; coupled_sink_limiting_iterations = 3)
-        @test configured.coupled_sink_limiting_iterations == 3
+        @test PPP.coupled_sink_limiting_iterations(configured) == 3
         @test_throws ArgumentError ProcessRate(FT;
                                                coupled_sink_limiting_iterations = 0)
     end

@@ -180,6 +180,15 @@ struct GaussianSubgridCorrelation{FT, CF} <: AbstractSubgridCorrelation
     minimum_cloud_fraction :: FT
 end
 
+# Walk the fields so that traced numbers (`Reactant.to_rarray`) are converted for the kernel.
+Adapt.adapt_structure(to, c::GaussianSubgridCorrelation) =
+    GaussianSubgridCorrelation(adapt(to, c.variance_coefficient),
+                               adapt(to, c.grid_variance_coefficient),
+                               adapt(to, c.minimum_saturation_deficit_spread),
+                               adapt(to, c.condensation),
+                               adapt(to, c.autoconversion_enhancement),
+                               adapt(to, c.minimum_cloud_fraction))
+
 """
 $(TYPEDSIGNATURES)
 

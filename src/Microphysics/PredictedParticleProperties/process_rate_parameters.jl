@@ -133,7 +133,7 @@ struct NoLiquidFraction end
 Base.summary(::PrognosticLiquidFraction) = "PrognosticLiquidFraction"
 Base.summary(::NoLiquidFraction) = "NoLiquidFraction"
 
-struct ProcessRate{FT, VE, LF}
+struct ProcessRate{FT, VE, LF, N}
     # Properties cached from `ThermodynamicConstants`. These are not independent
     # parameters: each is copied from the constants at construction and cannot be set
     # separately, so the two can never disagree.
@@ -272,8 +272,11 @@ struct ProcessRate{FT, VE, LF}
 
     # Coupled donor-budget limiter
     # Fixed re-projection passes for the coupled dry-ice, rain, total-ice,
-    # and coating-water sink budgets. Must be positive.
-    coupled_sink_limiting_iterations :: Int
+    # and coating-water sink budgets. Must be positive. The count is the type
+    # parameter `N`, so it is a compile-time constant that tracing never sees as a
+    # number (`Reactant.to_rarray(...; track_numbers=Number)`); read it with
+    # `coupled_sink_limiting_iterations(parameters)`.
+    coupled_sink_limiting_iterations :: Val{N}
 
     # Global ice number limiter.
     # Applied as a relaxation sink whenever nⁱ × ρ exceeds the maximum.
@@ -366,7 +369,7 @@ path uses ``μ_r = 0``. None are duplicated in this rate-parameter container.
 # Example
 
 The second and third type parameters are the types of `vapor_excess` and
-`liquid_fraction`. The default `DiagnosticVaporExcess()` drops `ρδqᵛ⁺ˡ` from the
+`liquid_fraction`; the fourth is `coupled_sink_limiting_iterations`. The default `DiagnosticVaporExcess()` drops `ρδqᵛ⁺ˡ` from the
 prognostic set entirely.
 
 ```jldoctest
@@ -376,7 +379,7 @@ params = ProcessRate(Float64)
 typeof(params)
 
 # output
-ProcessRate{Float64, DiagnosticVaporExcess, PrognosticLiquidFraction}
+ProcessRate{Float64, DiagnosticVaporExcess, PrognosticLiquidFraction, 4}
 ```
 
 All parameters are keyword arguments with physically-based defaults. The coupled
@@ -577,7 +580,9 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
     coupled_sink_limiting_iterations > 0 ||
         throw(ArgumentError("coupled_sink_limiting_iterations must be positive"))
 
-    return ProcessRate{FT, typeof(vapor_excess), typeof(liquid_fraction)}(
+    N = Int(coupled_sink_limiting_iterations)
+
+    return ProcessRate{FT, typeof(vapor_excess), typeof(liquid_fraction), N}(
         FT(thermodynamic_constants.liquid.density),
         FT(thermodynamic_constants.ice.density),
         FT(freezing_temperature),
@@ -645,7 +650,7 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         FT(minimum_rain_slope),
         FT(maximum_rain_slope),
         FT(sink_limiting_timescale),
-        Int(coupled_sink_limiting_iterations),
+        Val(N),
         FT(maximum_ice_number_density),
         FT(liquid_fraction_clipping_threshold),
         FT(complete_melting_liquid_fraction),
@@ -659,6 +664,9 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         NumericalFloors{FT}(floors)
     )
 end
+
+# The coupled donor-budget limiter's pass count, a compile-time constant.
+@inline coupled_sink_limiting_iterations(::ProcessRate{FT, VE, LF, N}) where {FT, VE, LF, N} = N
 
 # Gate a rate on the vapor excess treatment. Dispatching on the type folds the branch
 # at compile time.

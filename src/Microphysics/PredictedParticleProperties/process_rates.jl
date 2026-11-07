@@ -831,7 +831,7 @@ end
     # `f_dry_ice` to 1 there reproduces that exactly — multiplying by one is
     # exact — while keeping every budget written once, so a new rate cannot be
     # added to the first pass and forgotten in the re-projections.
-    for iteration in 0:parameters.coupled_sink_limiting_iterations
+    for iteration in 0:coupled_sink_limiting_iterations(parameters)
         dry_ice_source_total = max(0, dep) + cloud_rim + rain_rim + refrz +
                                nuc_q + cloud_frz_q + rain_frz_q
         dry_ice_available = max(0, qⁱ) + dry_ice_source_total * dt_safety

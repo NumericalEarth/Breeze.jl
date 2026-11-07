@@ -234,6 +234,10 @@ include("rain_quadrature.jl")
 @adapt_architecture IceRainCollection
 @adapt_architecture IceParticles
 @adapt_architecture RainDrops
+# The process-rate parameters hold only numbers, but they must still be walked: when they
+# are traced (`Reactant.to_rarray`), adaptation converts each traced number for the kernel.
+@adapt_architecture NumericalFloors
+@adapt_architecture ProcessRate
 @adapt_architecture PredictedParticlePropertiesMicrophysics
 
 #####

@@ -1,3 +1,4 @@
+using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
 using ..Thermodynamics:
@@ -104,6 +105,9 @@ end
 
 Base.summary(::ConstantRateCondensateFormation) = "ConstantRateCondensateFormation"
 
+Adapt.adapt_structure(to, f::ConstantRateCondensateFormation) =
+    ConstantRateCondensateFormation(adapt(to, f.rate))
+
 """
 $(TYPEDEF)
 
@@ -139,6 +143,9 @@ end
 ExponentialRateCondensateFormation(rate, Δt) = ExponentialRateCondensateFormation(promote(float(rate), float(Δt))...)
 
 Base.summary(::ExponentialRateCondensateFormation) = "ExponentialRateCondensateFormation"
+
+Adapt.adapt_structure(to, f::ExponentialRateCondensateFormation) =
+    ExponentialRateCondensateFormation(adapt(to, f.rate), adapt(to, f.Δt))
 
 """
 $(TYPEDSIGNATURES)
