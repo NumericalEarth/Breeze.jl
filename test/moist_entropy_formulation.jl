@@ -11,7 +11,7 @@ using Breeze.Thermodynamics: MoistureMassFractions, MoistEntropyState, moist_ent
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using Oceananigans
-using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition, fill_halo_regions!
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition, fill_halo_regions!, Bottom
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.TimeSteppers: update_state!
 using Test
@@ -112,6 +112,27 @@ end
 
     equilibrium = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
     @test_throws ArgumentError AtmosphereModel(grid; dynamics, formulation = :MoistEntropy, microphysics = equilibrium)
+end
+
+@testset "Bulk surface fluxes on ρη are materialized" begin
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1e3), y=(0, 1e3), z=(0, 1e3))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = z -> 300.0)
+    ρE = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=1e-3, surface_temperature=301))
+    ρqᵗ = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=1e-3, surface_temperature=301))
+    model = AtmosphereModel(grid; dynamics, formulation = :MoistEntropy, boundary_conditions = (; ρE, ρqᵗ))
+
+    # The bulk flux inside the entropy flux must be materialized with its wall, like a bulk flux alone
+    ρη = Oceananigans.prognostic_fields(model).ρη
+    ef = ρη.boundary_conditions.bottom.condition
+    @test ef.energy_flux.side isa Bottom
+    @test ef.vapor_flux.side isa Bottom
+
+    ρ̄ = Array(interior(model.dynamics.reference_state.density))
+    zᶜ = znodes(grid, Center())
+    ρᵢ(x, y, z) = ρ̄[1, 1, clamp(searchsortedfirst(zᶜ, z - 1e-6), 1, grid.Nz)]
+    set!(model; θ = 300, qᵗ = 0.01, u = 1, ρ = ρᵢ)
+    time_step!(model, 1)
+    @test all(isfinite, interior(ρη))
 end
 
 @testset "Microphysics alone conserves internal energy" begin
