@@ -167,8 +167,10 @@ Return the *continuity density*: the density whose continuity equation the model
 Momentum and the thermodynamic variable are stored per unit of it (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`), so it
 is also the divisor for diagnosing velocity (`u = ρu/ρᵈ`) and potential temperature (`θ = ρθ/ρᵈ`).
 
-- `AnelasticDynamics`: the time-independent reference density `ρᵣ`.
-- `CompressibleDynamics`: the prognostic dry-air density `ρᵈ`.
+- `AnelasticDynamics`: the time-independent reference density `ρᵣ`, giving `ρu = ρᵣ u`
+  and `ρθ = ρᵣ θ`.
+- `CompressibleDynamics`: the prognostic dry-air density `ρᵈ`, giving dry-air momentum
+  `ρu = ρᵈ u` and `ρθ = ρᵈ θ`. This density is advanced by continuity.
 
 The *total* air density `ρ = ρᵈ + Σ ρˣ` (dry air plus every water species) is a separate quantity,
 [`total_density`](@ref): it recovers the moisture mass fractions (`qˣ = ρˣ/ρ`) and weights scalar and
@@ -233,6 +235,20 @@ keeps its temperature.
     heat_capacity_increment(Δq, constants) * T -
     Δq.liquid * absolute_zero_latent_heat(constants, constants.liquid) -
     Δq.ice * absolute_zero_latent_heat(constants, constants.ice)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return ``qᵈ = ρᵈ/ρ`` at an x-face if the forces on the momentum are weighted by it. The mixture
+pressure and gravitational forces ``-∇p`` and ``-ρ g ẑ`` act on the total mass, so they are
+rescaled by ``qᵈ`` for the prognostic dry-air momentum ``ρu = ρᵈ u``. Defaults to `1`.
+`CompressibleDynamics` returns ``qᵈ`` when its formulation asks for it (see
+`DryPotentialTemperatureFormulation`). `dynamics_mass_fractionᶜᶠᶜ` and `dynamics_mass_fractionᶜᶜᶠ`
+are the same at y- and z-faces.
+"""
+@inline dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) = 1
+@inline dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) = 1
+@inline dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) = 1
 
 """
 $(TYPEDSIGNATURES)
@@ -526,6 +542,11 @@ Adapt.adapt_structure(to, s::SlowDynamics) = SlowDynamics(adapt(to, s.dynamics))
 @inline z_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
 
 @inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowDynamics, args...) = zero(grid)
+
+# Whichever forces the wrappers let through still act on the wrapped formulation's momentum.
+@inline dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, s::SlowDynamics) = dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, s.dynamics)
+@inline dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, s::SlowDynamics) = dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, s.dynamics)
+@inline dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, s::SlowDynamics) = dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, s.dynamics)
 
 #####
 ##### Tendency computation interface

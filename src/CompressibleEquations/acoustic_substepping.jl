@@ -329,19 +329,26 @@ outer_step_start_transport_velocities(model) = model.velocities
 refresh_linearization_basic_state!(substepper::AcousticSubstepper, model) =
     refresh_linearization_basic_state!(model.formulation, substepper, model)
 
+refresh_linearization_basic_state!(formulation::PotentialTemperatureFormulation, substepper, model) =
+    refresh_potential_temperature_linearization!(formulation, formulation.flavor.pressure_work, substepper, model)
+
 # For ρθ the loop's pressure perturbation is p′ = Cᴸ (ρθ)′, so Cᴸ is the slope ∂p/∂(ρθ), at fixed dry
 # density and composition, of the equation of state p = ρ Rᵐ T that the core closes with
 # `compressible_density_state`. The kernel differentiates the selected temperature inversion, so
 # stopped and non-iterated solves use the slope of the temperature they return. Derivation, closed
 # forms and the limits of this linearization: docs/src/compressible_dynamics.md.
+# The isochoric closures (CM1's, `IsochoricPressureWork`, and the dry θ formulation) set Cᴸ
+# themselves, see `dry_potential_temperature_compressible.jl`.
 # TODO: carry ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ), which the loop omits in cloud, as a ρ′ term of p′
 # (cached per stage next to Cᴸ, differentiated through the selected inversion). It enters the
 # horizontal pressure gradient and the vertical Schur complement next to Cᴸ θᴸ, exactly as the
 # density weight Eᴸ of the general linearization below does.
 # TODO: weight the pressure gradient and gravity on ρᵈu by ρᵈ / ρ throughout the compressible core
-# (as WRF-ARW does; v4 technical note, §2.2), NumericalEarth/Breeze.jl#1210. The acoustic inertia
-# is ρᵈ today, so the loop's sound speed is (Cᴸ θ)^½ = (γᵉ p / ρᵈ)^½ rather than (γᵉ Rᵐ T)^½.
-function refresh_linearization_basic_state!(::LiquidIcePotentialTemperatureFormulation, substepper, model)
+# (as WRF-ARW does; v4 technical note, §2.2), NumericalEarth/Breeze.jl#1210. `MomentumForceWeighting`
+# does this, but only the dry θ formulation selects it by default. Without it the acoustic inertia
+# is ρᵈ, so the loop's sound speed is (Cᴸ θ)^½ = (γᵉ p / ρᵈ)^½ rather than (γᵉ Rᵐ T)^½.
+function refresh_potential_temperature_linearization!(::LiquidIcePotentialTemperatureFormulation, ::IsobaricPressureWork,
+                                                      substepper, model)
     grid = model.grid
     arch = architecture(grid)
 
@@ -640,11 +647,13 @@ end
 #   ρ′ₙ(k)    = ρ′★(k)  − δτᵐ⁺((ρw)′ₙ(k+1) − (ρw)′ₙ(k))/Δz_c(k)
 #   (ρθ)′ₙ(k) = ρθ′★(k) − δτᵐ⁺(θᴸ_face(k+1)(ρw)′ₙ(k+1) − θᴸ_face(k)(ρw)′ₙ(k))/Δz_c(k)
 #
-# yields the tridiag coefficients (ω≡ωᵐ⁺):
+# yields the tridiag coefficients (ω≡ωᵐ⁺). Every PGF and buoyancy entry carries the face force weight
+# qᵈ(k) (`dynamics_mass_fractionᶜᶜᶠ`, one unless the formulation asks for it), matching the explicit halves in
+# `_build_vertical_rhs!`. Damping and sponge act on (ρw)′ itself and take no factor:
 #
-#   A[k,k+1] = −(ωΔτ)² Cᴸ(k)  θᴸ_face(k+1) rdz_c(k)   /Δzᶠ(k) − (ωΔτ)² g rdz_c(k)/2
-#   A[k,k]   = 1 + (ωΔτ)² θᴸ_face(k)(Cᴸ(k)rdz_c(k)+Cᴸ(k−1)rdz_c(k−1))/Δzᶠ(k) + (ωΔτ)² g(rdz_c(k)−rdz_c(k−1))/2
-#   A[k,k−1] = −(ωΔτ)² Cᴸ(k−1)θᴸ_face(k−1)rdz_c(k−1)/Δzᶠ(k) + (ωΔτ)² g rdz_c(k−1)/2
+#   A[k,k+1] = qᵈ(k)[−(ωΔτ)² Cᴸ(k)  θᴸ_face(k+1) rdz_c(k)   /Δzᶠ(k) − (ωΔτ)² g rdz_c(k)/2]
+#   A[k,k]   = 1 + qᵈ(k)[(ωΔτ)² θᴸ_face(k)(Cᴸ(k)rdz_c(k)+Cᴸ(k−1)rdz_c(k−1))/Δzᶠ(k) + (ωΔτ)² g(rdz_c(k)−rdz_c(k−1))/2]
+#   A[k,k−1] = qᵈ(k)[−(ωΔτ)² Cᴸ(k−1)θᴸ_face(k−1)rdz_c(k−1)/Δzᶠ(k) + (ωΔτ)² g rdz_c(k−1)/2]
 #
 # Implicit vertical damping: for `ThermalDivergenceDamping(damp_vertical=true)`, the vertical divergence
 # damping folds into the same tridiag via a discrete vertical Laplacian on (ρw)′:
@@ -766,7 +775,7 @@ end
     @inbounds -direction * sponge_damping(i, j, k, grid, sponge) * ρwᴸ[i, j, k]
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagLower, p, ::ZDirection,
-                                 θᴸ, Cᴸ, Eᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+                                 θᴸ, Cᴸ, Eᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, dynamics)
     kᶠ     = k + 1
     Δz⁻¹ᶠ  = Δz⁻¹ᶜᶜᶠ(i, j, kᶠ, grid)
     Δz⁻¹ᵏ⁻ = Δz⁻¹ᶜᶜᶜ(i, j, kᶠ - 1, grid)
@@ -774,16 +783,19 @@ end
     @inbounds Cᵏ⁻ = Cᴸ[i, j, kᶠ - 1]
     θᵏ⁻ = ℑbzᵃᵃᶠ(i, j, kᶠ - 1, grid, θᴸ) + density_weight(i, j, kᶠ - 1, Eᴸ)
 
+    # Solver index k is the lower-diagonal entry of row (face) kᶠ = k + 1.
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, kᶠ, grid, dynamics)
+
     pgf_term  = - δτᵐ⁺^2 * Cᵏ⁻ * θᵏ⁻ * Δz⁻¹ᵏ⁻ * Δz⁻¹ᶠ
     buoy_term = + δτᵐ⁺^2 * g * Δz⁻¹ᵏ⁻ / 2
     damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁻ * Δz⁻¹ᶠ
 
     # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
-    return pgf_term + buoy_term + damp_term
+    return qᵈ * (pgf_term + buoy_term) + damp_term
 end
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagDiagonal, p, ::ZDirection,
-                                 θᴸ, Cᴸ, Eᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+                                 θᴸ, Cᴸ, Eᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, dynamics)
 
     Δz⁻¹ᶠ  = Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
     Δz⁻¹ᵏ⁺ = Δz⁻¹ᶜᶜᶜ(i, j, k,     grid)
@@ -795,13 +807,14 @@ end
     end
 
     θᶜᶜᶠ = ℑbzᵃᵃᶠ(i, j, k, grid, θᴸ)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     pgf_diag   = δτᵐ⁺^2 * pgf_diagonal_weight(i, j, k, θᶜᶜᶠ, Cᵏ⁺ * Δz⁻¹ᵏ⁺, Cᵏ⁻ * Δz⁻¹ᵏ⁻, Eᴸ) * Δz⁻¹ᶠ
     buoy_diag  = δτᵐ⁺^2 * g * (Δz⁻¹ᵏ⁺ - Δz⁻¹ᵏ⁻) / 2
     damp_diag  = dᵐ⁺ * (Δz⁻¹ᵏ⁺ + Δz⁻¹ᵏ⁻) * Δz⁻¹ᶠ
     spnge_diag = sponge_term_diag(i, j, k, grid, sponge, δτᵐ⁺)
 
-    return 1 + (pgf_diag + buoy_diag + damp_diag + spnge_diag) * (k > 1)
+    return 1 + (qᵈ * (pgf_diag + buoy_diag) + damp_diag + spnge_diag) * (k > 1)
 end
 
 # θᴸ_face(k)(Cᴸ(k)rdz_c(k) + Cᴸ(k−1)rdz_c(k−1)), with Eᴸ of each cell added to θᴸ_face(k) in its own term
@@ -810,20 +823,21 @@ end
     @inbounds (θᶜᶜᶠ + Eᴸ[i, j, k]) * C⁺ + (θᶜᶜᶠ + Eᴸ[i, j, k - 1]) * C⁻
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagUpper, p, ::ZDirection,
-                                 θᴸ, Cᴸ, Eᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+                                 θᴸ, Cᴸ, Eᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, dynamics)
 
     Δz⁻¹ᶠ  = Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
     Δz⁻¹ᵏ⁺ = Δz⁻¹ᶜᶜᶜ(i, j, k, grid)
 
     @inbounds Cᵏ⁺ = Cᴸ[i, j, k]
     θᵏ⁺ = ℑbzᵃᵃᶠ(i, j, k + 1, grid, θᴸ) + density_weight(i, j, k, Eᴸ)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     pgf_term  = - δτᵐ⁺^2 * Cᵏ⁺ * θᵏ⁺ * Δz⁻¹ᵏ⁺ * Δz⁻¹ᶠ
     buoy_term = - δτᵐ⁺^2 * g * Δz⁻¹ᵏ⁺ / 2
     damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁺ * Δz⁻¹ᶠ
 
     # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
-    return (pgf_term + buoy_term + damp_term) * (k > 1)
+    return (qᵈ * (pgf_term + buoy_term) + damp_term) * (k > 1)
 end
 
 #####
@@ -872,7 +886,7 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
                 model.dynamics.pressure,
                 model.dynamics.total_density,
                 model.momentum.ρw,
-                grid, g, substepper.sponge, direction)
+                grid, model.dynamics, g, substepper.sponge, direction)
     else
         launch!(arch, grid, :xyz, _assemble_slow_vertical_momentum_tendency!,
                 substepper.slow_vertical_momentum_tendency,
@@ -881,22 +895,28 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
                 model.dynamics.total_density,
                 ref.pressure, ref.density,
                 model.momentum.ρw,
-                grid, g, substepper.sponge, direction)
+                grid, model.dynamics, g, substepper.sponge, direction)
     end
 
     return nothing
 end
 
 # Slow-tendency assembly with reference state. Buoyancy uses the diagnosed TOTAL density
-# `ρ = ρᵈ + Σρˣ` as `ρᴸ` (no virtual-density factor): in conservation-form momentum
-# `∂t(ρw) = -∂z p - g ρ`, gravity acts on the total mass of all species. The prognostic mass
-# variable is the dry density ρᵈ (its continuity has no sedimentation source); total ρ is
-# reconstructed each update. Across the acoustic substeps the water densities are frozen, so the
-# evolving density perturbation `ρ′ = ρᵈ′` is also the total-density perturbation, and the
-# moisture loading enters exactly once — here, through the stage-entry total `ρᴸ`.
+# `ρ = ρᵈ + Σρˣ` as `ρᴸ` (no virtual-density factor): the mixture gravitational force is `-g ρ`,
+# summed over all species. The prognostic mass variable is the dry density ρᵈ (its continuity has
+# no sedimentation source); total ρ is reconstructed each update.
+# Across the acoustic substeps the water densities are frozen, so the evolving density perturbation
+# `ρ′ = ρᵈ′` is also the total-density perturbation, and the moisture loading enters exactly once —
+# here, through the stage-entry total `ρᴸ`.
+#
+# `qᵈ` (one unless the formulation weights the forces, see `MomentumForceWeighting`) converts the
+# mixture force `-∂z p - g ρ` onto the dry-coupled ρw, reducing the buoyancy term to `-g ℑᶻ(ρᵈ)`.
+# The sponge acts on ρw itself and takes no factor.
 @kernel function _assemble_slow_vertical_momentum_tendency!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, pᵣ, ρᵣ, ρwᴸ,
-                                                            grid, g, sponge, direction)
+                                                            grid, dynamics, g, sponge, direction)
     i, j, k = @index(Global, NTuple)
+
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     @inbounds begin
         # Reference-subtracted PGF and buoyancy: at Uᴸ = reference state
@@ -905,7 +925,7 @@ end
         ρ′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, δϕ, ρᴸ, ρᵣ)
         Gˢρwˢᵖ = sponge_slow_tendency(i, j, k, grid, sponge, ρwᴸ, direction)
 
-        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - ∂z_p′ - g * ρ′ᶜᶜᶠ + Gˢρwˢᵖ) * (k > 1)
+        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - qᵈ * ∂z_p′ - qᵈ * g * ρ′ᶜᶜᶠ + Gˢρwˢᵖ) * (k > 1)
     end
 end
 
@@ -913,14 +933,16 @@ end
 @inline δϕ(i, j, k, grid, ϕᴸ, ϕᵣ) = @inbounds ϕᴸ[i, j, k] - ϕᵣ[i, j, k]
 
 @kernel function _assemble_slow_vertical_momentum_tendency_no_ref!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, ρwᴸ,
-                                                                   grid, g, sponge, direction)
+                                                                   grid, dynamics, g, sponge, direction)
     i, j, k = @index(Global, NTuple)
+
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     @inbounds begin
         ∂z_pᴸ  = ∂zᶜᶜᶠ(i, j, k, grid, pᴸ)
         ρᴸᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρᴸ)
         Gˢρwˢᵖ = sponge_slow_tendency(i, j, k, grid, sponge, ρwᴸ, direction)
-        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - ∂z_pᴸ - g * ρᴸᶜᶜᶠ + Gˢρwˢᵖ) * (k > 1)
+        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - qᵈ * ∂z_pᴸ - qᵈ * g * ρᴸᶜᶜᶠ + Gˢρwˢᵖ) * (k > 1)
     end
 end
 
@@ -1027,8 +1049,8 @@ end
 # perturbation force. `ExnerReferenceState` depends only on z, so ∂x pᵣ ≡ 0
 # and no horizontal pressure-perturbation field is needed.
 #
-#   (ρu)′^{τ+Δτ} = (ρu)′^τ + Δτ (Gⁿρu − ∂x pᴸ − ∂x(Cᴸ (ρθ)′))
-#   (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ (Gⁿρv − ∂y pᴸ − ∂y(Cᴸ (ρθ)′))
+#   (ρu)′^{τ+Δτ} = (ρu)′^τ + Δτ (Gⁿρu − qᵈ [∂x pᴸ + ∂x(Cᴸ (ρθ)′)])
+#   (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ (Gⁿρv − qᵈ [∂y pᴸ + ∂y(Cᴸ (ρθ)′)])
 #
 # `Gⁿρu` (SlowDynamics) carries non-pressure slow terms with PGF zeroed;
 # we reinstate the frozen large-step PGF here (MPAS keeps it in `tend_u_euler`).
@@ -1036,9 +1058,9 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ∂x_pᴸ  = AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
+        ∂x_pᴸ  = weighted_x_pressure_gradient(i, j, k, grid, dynamics)
         ∂x_p′  = ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ)
-        ∂y_pᴸ  = AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
+        ∂y_pᴸ  = weighted_y_pressure_gradient(i, j, k, grid, dynamics)
         ∂y_p′  = ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ)
 
         ∂x_p = ∂x_pᴸ + ∂x_p′
@@ -1051,9 +1073,25 @@ end
 
 @inline δpᴸ(i, j, k, grid, ρθ′, Cᴸ) = @inbounds Cᴸ[i, j, k] * ρθ′[i, j, k]
 
-@inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
-@inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
-@inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+# The frozen (Uᴸ) and perturbation gradients below return the *force on the momentum*: each carries
+# `qᵈ` at its own face (one unless the formulation weights the forces, see `MomentumForceWeighting`),
+# so callers that interpolate them stay consistent with the (ρu)′,(ρv)′ updates.
+@inline weighted_x_pressure_gradient(i, j, k, grid, dynamics) =
+    AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
+    AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
+
+@inline weighted_y_pressure_gradient(i, j, k, grid, dynamics) =
+    AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
+    AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
+
+@inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) =
+    AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) * ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+
+@inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) =
+    AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) * ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+
+@inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) =
+    AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 
 """
 $(TYPEDSIGNATURES)
@@ -1119,9 +1157,11 @@ end
         ∂r_p′ˢ⁻ = ∇ᶻp′(i, j, k, grid, dynamics, p′ˢ⁻, Cᴸ)
         Gρwᵖ = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★ # pressure gradient
 
+        # `∇ᶻp′` is already weighted; the buoyancy is not.
+        qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
         ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
         ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
-        Gρwᵇ = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★) # buoyancy
+        Gρwᵇ = qᵈ * g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★) # buoyancy
 
         ∂z²_ρw′ˢ⁻ = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, ρw′)
         Gρwᵈ = - dˢ⁻ * ∂z²_ρw′ˢ⁻ # damping
@@ -1414,7 +1454,26 @@ end
 #####
 
 
-function finalize_time_averaged_velocity!(substepper, model, Nτ)
+# ρ′ sees the off-centered vertical flux (1 − ω)(ρw)′(n−1) + ω(ρw)′(n), so the transport mean
+# ⟨ρw⟩ must too. Since the sum of that flux over n = 1…Nτ telescopes onto the raw accumulation,
+#
+#   ∑ₙ [(1 − ω)(ρw)′(n−1) + ω(ρw)′(n)] = ∑ₙ (ρw)′(n) − (1 − ω)[(ρw)′(Nτ) − (ρw)′(0)]
+#
+# The rewind (ρw)′(0) is zero in stage 1 but not in stages 2–3, so it is recomputed from Uᴸ_outer.
+# (NumericalEarth/Breeze.jl#1104.) Applied together with the momentum force weighting, which
+# `DryPotentialTemperatureFormulation` selects because it takes the divergence of the mean velocity;
+# otherwise ωˢ⁻ = nothing and the mean is unchanged.
+transport_off_centering(::Nothing, substepper) = nothing
+transport_off_centering(::MomentumForceWeighting, substepper) = 1 - substepper.forward_weight
+
+@inline off_centering_correction(i, j, k, grid, dynamics, ::Nothing, args...) = 0
+
+@inline function off_centering_correction(i, j, k, grid, dynamics, ωˢ⁻, ρwᴸ, ρw′, ρu_outer, ρv_outer, ρw_outer)
+    ρw′⁰ = transport_ρw(i, j, k, grid, dynamics, ρu_outer, ρv_outer, ρw_outer) - ρwᴸ
+    return ωˢ⁻ * (ρw′[i, j, k] - ρw′⁰)
+end
+
+function finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ_outer)
     grid = model.grid
     arch = architecture(grid)
     FT   = eltype(grid)
@@ -1429,7 +1488,10 @@ function finalize_time_averaged_velocity!(substepper, model, Nτ)
             substepper.time_averaged_velocities.w,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
             model.dynamics.dry_density,
-            grid, model.dynamics, inv_Nτ)
+            substepper.momentum_perturbation.w,
+            Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
+            grid, model.dynamics, inv_Nτ,
+            transport_off_centering(model.dynamics.momentum_force_weighting, substepper))
 
     map(fill_halo_regions!, substepper.time_averaged_velocities)
 
@@ -1438,15 +1500,16 @@ end
 
 @kernel function _finalize_time_averaged_velocity!(u_avg, v_avg, w_avg,
                                                    ρu_stage, ρv_stage, ρw_stage,
-                                                   ρᴸ, grid, dynamics, inv_Nτ)
+                                                   ρᴸ, ρw′, ρu_outer, ρv_outer, ρw_outer,
+                                                   grid, dynamics, inv_Nτ, ωˢ⁻)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ρu_total = ρu_stage[i, j, k] + u_avg[i, j, k] * inv_Nτ
         ρv_total = ρv_stage[i, j, k] + v_avg[i, j, k] * inv_Nτ
-        ρw_total = transport_ρw(i, j, k, grid, dynamics,
-                                                              ρu_stage, ρv_stage, ρw_stage) +
-                   w_avg[i, j, k] * inv_Nτ
+        ρwᴸ = transport_ρw(i, j, k, grid, dynamics, ρu_stage, ρv_stage, ρw_stage)
+        ρw_total = ρwᴸ + (w_avg[i, j, k] - off_centering_correction(i, j, k, grid, dynamics, ωˢ⁻, ρwᴸ, ρw′,
+                                                                    ρu_outer, ρv_outer, ρw_outer)) * inv_Nτ
 
         ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρᴸ)
         ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρᴸ)
@@ -1749,7 +1812,7 @@ function acoustic_substep!(model, substepper, stage, advection)
            substepper.linearization_potential_temperature,
            substepper.linearization_pressure_coefficient,
            substepper.linearization_density_weight,
-           g, δτᵐ⁺, dᵐ⁺, substepper.sponge)
+           g, δτᵐ⁺, dᵐ⁺, substepper.sponge, model.dynamics)
 
     # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′
     launch!(arch, grid, :xyz, _post_solve_recovery!,
@@ -1848,7 +1911,11 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Done BEFORE `_recover_full_state!` so we read the stage-entry
     # `model.momentum.*` (substep loop hasn't touched it) and stage-entry
     # `model.dynamics.dry_density` as the Uᴸ_stage reference.
-    finalize_time_averaged_velocity!(substepper, model, Nτ)
+    finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ)
+
+    # A source that needs the velocity divergence of this stage's substeps (dry θ's expansion
+    # term) is applied now, as CM1 does, so that it enters the recovery below.
+    add_post_acoustic_loop_source!(model.formulation, substepper, model, β_stage * Δt_FT)
 
     # Stage-end: recover the full prognostic state in-place. `model.dynamics.dry_density`,
     # `ρᵡ`, and `model.momentum.*` are still the stage-entry Uᴸ values here

@@ -171,8 +171,16 @@ The following table also uses a few conventions that suffuse the source code and
 | ``θᵛ``                              | `θᵛ`   |                                     | Virtual potential temperature                                                  |
 | ``θᵉ``                              | `θᵉ`   |                                     | Equivalent potential temperature                                               |
 | ``θˡⁱ``                             | `θˡⁱ`  | `LiquidIcePotentialTemperature(model)` | Liquid-ice potential temperature, ``θˡⁱ = H / (ĉᵖ Π)``; ``θˡⁱ = T / Π`` in unsaturated air |
+| ``θ``                               | `θ`    | `specific_thermodynamic_field(formulation)` | Prognostic potential temperature of a `PotentialTemperatureFormulation`: ``θˡⁱ``, or for `DryPotentialTemperatureFormulation` ``θ = T / Π`` with ``Π = (p / pˢᵗ)^{κᵈ}`` |
+| ``S``                               | `S`    | `divergence_expansion_coefficient(θ, q, constants)` | Coefficient of the velocity divergence in the dry potential temperature equation, ``S = θ (Rᵐ - κᵈ cᵖᵐ) / cᵛᵐ`` (`thterm` in CM1) |
+| ``W^β``                             | `Wᵛ`, `Wˡ`, `Wⁱ` | `phase_change_weights(flavor, …)` | Weights of the phase-change source of ``ρθ``, ``ρθ̇ = Σ_β W^β \dot{S}^β`` |
 | ``H``                               | `H`    |                                     | Liquid-ice enthalpy, ``H = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ = ĉᵖ Π θˡⁱ``; invariant under phase change at fixed ``p`` and ``qᵗ`` |
 | ``θᵇ``                              | `θᵇ`   |                                     | Stability-equivalent potential temperature (for moist Brunt-Väisälä)           |
+| ``𝓊``                               | `𝓊`    |                                     | Specific internal energy, ``𝓊 = cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ``, with ``cᵛᵐ = cᵖᵐ - Rᵐ`` the mixture heat capacity at constant volume |
+| ``Θ``                               | `Θ`    | `thermodynamic_density(formulation)` | The prognostic ``ρθ = ρᵈ θˡⁱ`` as an argument of the internal energy density ``ρ𝓊(ρᵈ, Θ, ρqᵛ, ρqˡ, ρqⁱ)`` |
+| ``\mathcal{J}_ψ``                   | `𝒥ψ`   |                                     | Fixed-volume Jacobian of the internal energy density, ``𝒥_ψ = ∂(ρ𝓊)/∂ψ`` with the other prognostic densities held fixed (``𝒥_Θ``, ``𝒥_{qᵛ}``, …) |
+| ``\dot{S}_q``                       | `Ṡ`    |                                     | Microphysical tendency of the water density ``ρq`` (phase change), the input of the fixed-volume phase-change source ``ρθ̇ = - Σ_q 𝒥_q Ṡ_q / 𝒥_Θ`` |
+| ``ε``                               | `ε`    | `subgrid_dissipation`               | Rate of dissipation of resolved kinetic energy per unit mass by the closure, ``ρε = - 𝒯ᵢⱼ ∂ⱼ uᵢ`` (W/kg); for the TKE closure, the dissipation of ``e`` |
 | ``θ``                               | `θ`    |                                     | Shorthand for liquid-ice potential temperature (used in `set!`) |
 | ``\Delta t``                        | `Δt`   | `Simulation.Δt`                     | Time step.                                                                     |
 | ``\boldsymbol{\tau}``               | `τ`    |                                     | Kinematic subgrid/viscous stress tensor (per unit mass)                        |

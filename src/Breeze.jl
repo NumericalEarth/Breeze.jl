@@ -44,7 +44,9 @@ export
     AtmosphereModel,
     SingleColumnGrid,
     StaticEnergyFormulation,
+    PotentialTemperatureFormulation,
     LiquidIcePotentialTemperatureFormulation,
+    DryPotentialTemperatureFormulation,
     TotalEnergyFormulation,
     MoistEntropyFormulation,
     VaporEquivalentExponent,
@@ -126,6 +128,7 @@ export
     prognostic_field_names,
     SaturationAdjustment,
     InstantaneousPrecipitation,
+    OperatorSplitSaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
@@ -292,7 +295,8 @@ include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
 using .StaticEnergyFormulations: StaticEnergyFormulation
 
 include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
-using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+using .PotentialTemperatureFormulations: PotentialTemperatureFormulation, LiquidIcePotentialTemperatureFormulation,
+                                         DryPotentialTemperatureFormulation
 
 include("MoistEntropyFormulations/MoistEntropyFormulations.jl")
 using .MoistEntropyFormulations: MoistEntropyFormulation
