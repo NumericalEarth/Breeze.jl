@@ -273,5 +273,6 @@ include("prognostic_tendencies.jl")
 include("p3_microphysical_state.jl")
 include("p3_microphysical_tendencies.jl")
 include("p3_driver.jl")
+include("p3_cloud_fraction.jl")
 
 end # module PredictedParticleProperties

@@ -23,6 +23,27 @@
 # grid-mean form. The spread floor is capped at a tenth of qᵛ⁺ so that it cannot condense the
 # vapor of dry, cold air. `DiracStatistics` returns the grid-mean rates unchanged.
 
+# Mean saturation deficit s̄ of the Mellor linearisation, s' = a qᵗ' - b θˡⁱ', with Γ the
+# psychrometric correction that the grid-mean caps use, so σₛ → 0 recovers their increment
+# (qᵛ - qᵛ⁺ˡ) / Γ. The spread floor σ₀ is capped at a tenth of qᵛ⁺ˡ; it is zero without a
+# subgrid distribution. Shared by the subgrid rates and the `cloud_fraction` diagnostic.
+@inline function p3_saturation_deficit(correlation, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, 𝒰, constants)
+    FT = typeof(T)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)
+    Γ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+    Π = exner_function(𝒰, constants)
+    a = 1 / Γ
+    b = a * Π * qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
+    s̄ = (qᵛ - qᵛ⁺ˡ) / Γ + qᶜˡ
+    σ₀ = saturation_deficit_spread_floor(correlation, qᵛ⁺ˡ)
+    return (; s̄, a, b, Γ, σ₀)
+end
+
+@inline saturation_deficit_spread_floor(::NoSubgridCorrelation, qᵛ⁺ˡ) = zero(qᵛ⁺ˡ)
+@inline saturation_deficit_spread_floor(correlation, qᵛ⁺ˡ) =
+    min(correlation.minimum_saturation_deficit_spread, qᵛ⁺ˡ / 10)
+
 @inline p3_subgrid_phase1_rates(::DiracStatistics, phase1, p3, ρ, ℳ, 𝒰, constants, state) =
     (; phase1, cloud = nothing)
 
@@ -41,18 +62,10 @@
     qᶜˡ = max(0, ℳ.qᶜˡ)
     qʳ = ℳ.qʳ
 
-    # Mellor linearisation, s' = a qᵗ' - b θˡⁱ', with Γ the psychrometric correction that the
-    # grid-mean caps use, so σₛ → 0 recovers their increment (qᵛ - qᵛ⁺ˡ) / Γ.
-    Rᵛ = FT(vapor_gas_constant(constants))
-    ℒˡ = vaporization_latent_heat(constants, T)
-    Γ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
-    Π = exner_function(𝒰, constants)
-    a = 1 / Γ
-    b = a * Π * qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
-    s̄ = (qᵛ - qᵛ⁺ˡ) / Γ + qᶜˡ
-
-    σ₀ = min(correlation.minimum_saturation_deficit_spread, qᵛ⁺ˡ / 10)
-    cloud = subgrid_cloud(𝒮, s̄, a, b, σ₀)
+    deficit = p3_saturation_deficit(correlation, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, 𝒰, constants)
+    Γ = deficit.Γ
+    s̄ = deficit.s̄
+    cloud = subgrid_cloud(𝒮, s̄, deficit.a, deficit.b, deficit.σ₀)
     C = cloud.C
     q⁺ = min(cloud.q⁺, max(0, qᵛ) + qᶜˡ)
     Cᶠ = max(C, correlation.minimum_cloud_fraction)

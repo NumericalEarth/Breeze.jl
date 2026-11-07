@@ -131,6 +131,7 @@ export
     RelativeHumidityField,
     number_concentration,
     number_concentration_field,
+    cloud_fraction,
     BulkMicrophysics,
     initial_aerosol_number,
     initial_aerosol_number_density,

@@ -253,3 +253,42 @@ function number_concentration_field(model, species::Symbol)
     result isa Field && return result
     return Field(result)
 end
+
+#####
+##### Cloud fraction
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Lazy diagnostic of the cloud fraction ``C`` of `model`, as a `KernelFunctionOperation`.
+
+For `PredictedParticlePropertiesMicrophysics`, ``C = Φ(Q₁)`` with ``Q₁ = s̄ / σₛ`` the
+normalised mean saturation deficit of the subgrid (PDF) condensation: the same ``s̄``, ``σₛ``
+and closure-supplied subgrid statistics the condensation rate uses (see
+`GaussianSubgridCorrelation`). Without a subgrid distribution, or whenever ``σₛ = 0``,
+``C`` is 1 in saturated cells and 0 in unsaturated ones. The cloud fraction is diagnostic
+only; it adds no prognostic field. Wrap it in a `Field` and `compute!` it to store it.
+
+```jldoctest cloud_fraction
+using Breeze
+using Oceananigans
+using Breeze.AtmosphereModels: GaussianSubgridCorrelation
+
+grid = RectilinearGrid(size=16, z=(0, 1600), topology=(Flat, Flat, Bounded))
+microphysics = PredictedParticlePropertiesMicrophysics(; subgrid=GaussianSubgridCorrelation(Float64))
+model = AtmosphereModel(grid; microphysics)
+set!(model; θ=290, qᵗ=z -> ifelse(z < 800, 1.2e-2, 4e-3))
+
+C = Field(cloud_fraction(model))
+round.(extrema(C), digits=3)
+
+# output
+(0.0, 1.0)
+```
+"""
+cloud_fraction(model) = cloud_fraction(model, model.microphysics)
+
+cloud_fraction(model, microphysics) =
+    error("cloud_fraction is not defined for microphysics scheme of type ", typeof(microphysics),
+          ". Supported schemes: PredictedParticlePropertiesMicrophysics.")

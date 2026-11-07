@@ -151,3 +151,40 @@ end
         @test all(isfinite, values) && minimum(values) ≥ -1e-12
     end
 end
+
+@testset "Cloud fraction diagnostic C = Φ(Q₁)" begin
+    PPP = Breeze.Microphysics.PredictedParticleProperties
+    Δt = 900
+    condensation = ExponentialRateCondensateFormation(1 / 120, Δt)
+    subgrid = GaussianSubgridCorrelation(Float64; condensation)
+    model = initialize!(p3_column_model(subgrid; sink_limiting_timescale=Δt, scalar_advection=implicit_transport()))
+    time_step!(model, Δt)
+
+    operation = cloud_fraction(model)
+    C = Array(interior(compute!(Field(operation))))[:]
+    @test all(isfinite, C)
+    @test all(0 .≤ C .≤ 1)
+    @test 0 < maximum(C) && minimum(C) < 1
+
+    # Recompute Q₁ = s̄ / σₛ from the state and the closure statistics, cell by cell
+    kernel = operation.kernel_function
+    Nz = size(model.grid, 3)
+    for k in 1:Nz
+        cell = @allowscalar PPP.p3_cell_saturation_deficit(1, 1, k, model.grid, kernel)
+        σₛ = Breeze.Microphysics.saturation_deficit_spread(cell.𝒮, cell.a, cell.b, cell.σ₀)
+        @test σₛ > 0
+        @test C[k] ≈ normal_cumulative_distribution(cell.s̄ / σₛ)
+        @test C[k] == PPP.subgrid_cloud(cell.𝒮, cell.s̄, cell.a, cell.b, cell.σ₀).C
+    end
+
+    # σₛ = 0: saturated cells are cloudy, unsaturated cells clear
+    @test PPP.subgrid_cloud_fraction(GaussianStatistics(0.0, 0.0, 0.0), 1e-4, 1.0, 1.0, 0.0) == 1
+    @test PPP.subgrid_cloud_fraction(GaussianStatistics(0.0, 0.0, 0.0), -1e-4, 1.0, 1.0, 0.0) == 0
+    @test PPP.subgrid_cloud_fraction(GaussianStatistics(0.0, 0.0, 0.0), 0.0, 1.0, 1.0, 0.0) == 0
+
+    # Without a subgrid distribution C is the 0/1 saturation indicator
+    grid_mean = initialize!(p3_column_model(NoSubgridCorrelation(); closure=nothing))
+    time_step!(grid_mean, 1)
+    C₀ = Array(interior(compute!(Field(cloud_fraction(grid_mean)))))[:]
+    @test all(c -> c == 0 || c == 1, C₀)
+end
