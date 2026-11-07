@@ -2,10 +2,11 @@
 ##### AnelasticDynamics definition
 #####
 
-struct AnelasticDynamics{R, P, FT}
+struct AnelasticDynamics{R, P, FT, B}
     reference_state :: R
     pressure_anomaly :: P
     pressure_solver_float_type :: FT
+    boundary_transport :: B
 end
 
 """
@@ -23,12 +24,14 @@ Keyword arguments
   this type, and the pressure is returned in the model's precision.
 """
 AnelasticDynamics(reference_state; pressure_solver_float_type=Float64) =
-    AnelasticDynamics(reference_state, nothing, pressure_solver_float_type)
+    AnelasticDynamics(reference_state, nothing, pressure_solver_float_type, nothing)
 
-# Kernels never need the solver's float type, and a `DataType` is not a valid GPU kernel argument.
+# Kernels need neither the solver's float type nor the boundary transports, and a `DataType` is not a
+# valid GPU kernel argument.
 Adapt.adapt_structure(to, dynamics::AnelasticDynamics) =
     AnelasticDynamics(adapt(to, dynamics.reference_state),
                       adapt(to, dynamics.pressure_anomaly),
+                      nothing,
                       nothing)
 
 #####
@@ -53,7 +56,8 @@ Materialize a stub `AnelasticDynamics` into a full dynamics object with the pres
 """
 function AtmosphereModels.materialize_dynamics(dynamics::AnelasticDynamics, grid, boundary_conditions, thermodynamic_constants)
     pressure_anomaly = CenterField(grid)
-    return AnelasticDynamics(dynamics.reference_state, pressure_anomaly, dynamics.pressure_solver_float_type)
+    return AnelasticDynamics(dynamics.reference_state, pressure_anomaly,
+                             dynamics.pressure_solver_float_type, dynamics.boundary_transport)
 end
 
 #####

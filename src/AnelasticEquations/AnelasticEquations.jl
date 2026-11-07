@@ -31,7 +31,8 @@ using Oceananigans.DistributedComputations: Distributed, DistributedFourierTridi
 using Oceananigans.Grids: AbstractGrid, Bounded, Center, XYRegularRG, ZDirection, inactive_cell, topology,
                           with_number_type
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, mask_immersed_field!
-using Oceananigans.Models: boundary_condition_args
+using Oceananigans.Models: boundary_condition_args, enforce_net_zero_transport!,
+                           initialize_boundary_transport
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
                               xspacing, yspacing, zspacing
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation,

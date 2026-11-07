@@ -28,12 +28,8 @@ function AtmosphereModels.compute_pressure_correction!(model::AnelasticModel, Δ
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
 
-    # The DCT the Bounded transform uses imposes homogeneous Neumann pressure, whose Poisson problem
-    # is solvable only if the lateral boundaries balance. Correct the boundary data after the halo
-    # fill that applied it and before the solve that requires it — nothing else can interleave here.
-    # `compute_velocities!` corrects again after its own fill; both are required, and reapplying is
-    # idempotent because the correction is a pure function of the freshly-filled boundary data.
-    enforce_lateral_mass_balance!(model.dynamics, model.momentum, model.grid)
+    # After the fill that wrote the raw boundary data, before the solve that needs it balanced.
+    enforce_lateral_mass_balance!(model.dynamics, model.momentum)
 
     dynamics = model.dynamics
     ρŨ = model.momentum
