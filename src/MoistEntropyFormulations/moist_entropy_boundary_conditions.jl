@@ -156,9 +156,9 @@ end
 # Materialize the energy and vapor fluxes inside the entropy flux as they would be materialized alone
 function AtmosphereBoundaryConditions.materialize_atmosphere_boundary_condition(bc::EntropyFluxBoundaryCondition,
                                                                                 side, loc, grid, dynamics,
-                                                                                microphysics, constants)
+                                                                                microphysics, constants, closure)
     ef = bc.condition
-    args = (side, loc, grid, dynamics, microphysics, constants)
+    args = (side, loc, grid, dynamics, microphysics, constants, closure)
     energy_flux = materialize_wall_flux(ef.energy_flux, args...)
     vapor_flux = materialize_wall_flux(ef.vapor_flux, args...)
     b = convert(eltype(grid), ef.water_entropy_offset)
