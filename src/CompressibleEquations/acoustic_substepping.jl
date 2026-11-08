@@ -26,11 +26,10 @@
 
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture
+using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture, location
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
-using Oceananigans.TimeSteppers: implicit_step!
 using Oceananigans.Grids: ZDirection, rnode, znode
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
 using Oceananigans.Operators:
@@ -92,7 +91,7 @@ Fields:
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
   tendency's condensate sedimentation term (see `cache_transport_velocity!`).
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC, IF}
     substeps :: N
     acoustic_cfl :: FT
     minimum_horizontal_spacing :: FT
@@ -135,6 +134,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
     density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
     time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w the moisture and tracer tendencies were built with
+    implicit_advection_factors :: IF              # per-stage Thomas factors of the (ρθ)′ implicit-advection system; `nothing` without AIVA
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -165,7 +165,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.vertical_solver),
                        adapt(to, a.vertical_velocity_cache),
                        adapt(to, a.density_cache),
-                       adapt(to, a.time_averaged_vertical_velocity_cache))
+                       adapt(to, a.time_averaged_vertical_velocity_cache),
+                       adapt(to, a.implicit_advection_factors))
 
 #####
 ##### Section 2 — Constructor
@@ -247,6 +248,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
     density_cache = cache_advecting_state ? CenterField(grid) : nothing
     time_averaged_vertical_velocity_cache = ZFaceField(grid)
+    implicit_advection_factors = cache_advecting_state ? StoredTridiagonalFactors(grid) : nothing
 
     return AcousticSubstepper(Ns, acoustic_cfl, Δx_min, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
@@ -269,7 +271,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               vertical_solver,
                               vertical_velocity_cache,
                               density_cache,
-                              time_averaged_vertical_velocity_cache)
+                              time_averaged_vertical_velocity_cache,
+                              implicit_advection_factors)
 end
 
 #####
@@ -1425,12 +1428,35 @@ frozen stage-entry state; the base-state part rides `Gˢρθ`
 implicit_advection_substep!(model, substepper, advection, Δτ) = nothing
 
 function implicit_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ)
-    w = substepper.vertical_velocity_cache
-    ρᵈ = substepper.density_cache
-    implicit_step!(substepper.density_potential_temperature_predictor,
-                   model.timestepper.implicit_solver, nothing, nothing, nothing,
-                   model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    substitute_tridiagonal!(substepper.density_potential_temperature_predictor,
+                            substepper.implicit_advection_factors, model.grid)
     return nothing
+end
+
+# The (ρθ)′ implicit-advection system is the same on every substep of a stage — its coefficients depend only on
+# the frozen stage-entry w and ρᵈ caches and on Δτ — so it is factored once per stage (`factor_implicit_advection!`)
+# and each substep only substitutes. The factorization reproduces `implicit_step!` bitwise: it evaluates the
+# implicit solver's own coefficients with the arguments `implicit_step!` passes.
+factor_implicit_advection!(model, substepper, advection, Δτ) = nothing
+
+function factor_implicit_advection!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ)
+    field = substepper.density_potential_temperature_predictor
+    args = implicit_step_solver_arguments(field, nothing, nothing, nothing, model.clock, fields(model),
+                                          Δτ, advection, substepper.vertical_velocity_cache, substepper.density_cache)
+    factor_tridiagonal!(substepper.implicit_advection_factors, model.timestepper.implicit_solver, args)
+    return nothing
+end
+
+# The coefficient arguments `Oceananigans.TimeSteppers.implicit_step!` passes to `solve!` for an advection-only solve
+# (no vertically implicit closure: the substep integrates advection alone).
+# TODO: this mirrors `implicit_step!`; an Oceananigans `factor!`/`substitute!` split of `BatchedTridiagonalSolver`
+# would let Breeze reuse a per-stage factorization without duplicating the argument assembly.
+function implicit_step_solver_arguments(field, closure, closure_fields, tracer_index, clock, model_fields, Δt,
+                                        advection, w, density)
+    LX, LY, LZ = location(field)
+    bcs = field.boundary_conditions
+    return (nothing, nothing, tracer_index, LX(), LY(), LZ(), Δt, clock, model_fields,
+            advection, w, density, bcs.top, bcs.bottom, bcs.immersed)
 end
 
 """
@@ -1604,6 +1630,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
     stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
+    factor_implicit_advection!(model, substepper, advection, Δτ)
     acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a

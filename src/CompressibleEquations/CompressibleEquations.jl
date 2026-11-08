@@ -84,6 +84,7 @@ const CompressibleModel = AtmosphereModel{<:CompressibleDynamics}
 
 include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
+include("stored_tridiagonal_factors.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
 
