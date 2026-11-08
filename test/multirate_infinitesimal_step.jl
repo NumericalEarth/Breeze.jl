@@ -102,3 +102,23 @@ end
     @test maximum(w) > 0.1
     @test model.clock.time ≈ 100
 end
+
+@testset "MIS with adaptive-implicit vertical advection" begin
+    using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, adaptive_advection_timestep
+    grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
+                           topology = (Bounded, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = 300)
+    advection = WENO(order = 5, time_discretization = AdaptiveVerticallyImplicitDiscretization(; cfl = 0.5))
+    model = AtmosphereModel(grid; dynamics, advection, timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients = :MIS3C))
+    set!(model; ρ = model.dynamics.reference_state.density,
+         θ = (x, z) -> 300 + 2 * cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2)
+    for _ in 1:10
+        time_step!(model, 20)
+    end
+    ts = model.timestepper
+    @test all(isfinite, Array(interior(model.velocities.w)))
+    # The split is sized for the stage the next tendencies feed: stage 1 of the next step, d₁ Δt.
+    @test adaptive_advection_timestep(ts, model.clock) ≈ ts.tableau.d[1] * 20
+end

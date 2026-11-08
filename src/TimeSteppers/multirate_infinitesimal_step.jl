@@ -37,6 +37,8 @@ Fields
   consumes them, stage 3's pair holds the raw ``S₁`` and ``ΔY₁``.
 - `fast_thermodynamic_tendency`: scratch for the stage-entry fast thermodynamic tendency.
 - `stage`: the stage being integrated.
+- `next_stage`, `current_Δt`: the stage the next tendency evaluation feeds and the current outer step, which
+  size the adaptive-implicit vertical-advection split (see `adaptive_advection_timestep`).
 - `relinearize_stages`: re-linearize the fast operator at every stage entry (as `AcousticRungeKutta3` does)
   instead of once per step. Off by default: it makes the fast operator stage-dependent, which costs an
   order of accuracy; it exists to diagnose robustness in strongly nonlinear flows.
@@ -52,6 +54,8 @@ struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC} <: AcousticTim
     accumulators :: AC
     fast_thermodynamic_tendency :: FC
     stage :: Base.RefValue{Int}
+    next_stage :: Base.RefValue{Int}
+    current_Δt :: Base.RefValue{Float64}
 end
 
 """
@@ -87,7 +91,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
 
     return MultirateInfinitesimalStep(relinearize_stages, tableau, U⁰, Gⁿ, implicit_solver, substepper,
                                       Uⁿ, accumulators,
-                                      fast_thermodynamic_tendency, Ref(1))
+                                      fast_thermodynamic_tendency, Ref(1), Ref(1), Ref(NaN))
 end
 
 # MIS assumes one fast operator for the whole step: the linearization coefficients (θᴸ, the
@@ -96,6 +100,21 @@ end
 # accuracy because MIS stages start away from the stage-entry state.
 refresh_stage_linearization!(ts::MultirateInfinitesimalStep, substepper, model) =
     ts.relinearize_stages ? prepare_acoustic_cache!(substepper, model) : nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+The adaptive-implicit split time step for the MIS stage that the tendencies about to be built will
+drive: its fast interval ``dᵢ Δt``, so the explicit fraction frozen into those tendencies pairs with the
+implicit remainder that stage applies (`implicit_substep!` over ``dᵢ Δt``). Tendencies built at the end of
+a step feed stage 1 of the next, whose ``Δt`` is not yet known; the current one is used, as
+`AcousticRungeKutta3` does. Stage ``i``'s forcing also recombines earlier stages' explicit tendencies
+with weights ``βᵢⱼ/dᵢ``, so the explicit/implicit pairing is exact only for the diagonal term.
+"""
+@inline function Oceananigans.Advection.adaptive_advection_timestep(ts::MultirateInfinitesimalStep, clock)
+    Δt = ifelse(isfinite(ts.current_Δt[]), ts.current_Δt[], clock.last_Δt)
+    return ts.tableau.d[ts.next_stage[]] * Δt
+end
 
 const MultirateAcousticModel = AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep}
 
@@ -309,9 +328,11 @@ linearized acoustic substepping.
 """
 function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt; callbacks=[])
 
+    ts = model.timestepper
+    ts.current_Δt[] = Δt
+    ts.next_stage[] = 1
     maybe_prepare_first_time_step!(model, Δt, callbacks)
 
-    ts = model.timestepper
     (; c, d) = ts.tableau
     s = length(d)
     tⁿ⁺¹ = model.clock.time + Δt
@@ -325,6 +346,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
 
         if i < s
             store_stage_increment!(ts, model, i, Δt)
+            ts.next_stage[] = i + 1
             Δc = i == 1 ? c[1] : c[i] - c[i-1]
             tick_stage!(model.clock, Δc * Δt)
             update_state!(model, callbacks; compute_tendencies = true)
@@ -332,6 +354,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
         end
     end
 
+    ts.next_stage[] = 1
     complete_acoustic_time_step!(model, Δt, tⁿ⁺¹, callbacks)
 
     return nothing
